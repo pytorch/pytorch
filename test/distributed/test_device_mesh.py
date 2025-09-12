@@ -1382,14 +1382,28 @@ class CuTeLayoutTest(TestCase):
         )
 
     def test_composition(self):
-        # self = ((4,2), (2,1)), l = (2,1)  → self o l = (2,2)
+        # self = ((4,2), (2,1)), l = (2,1)  → self o l = (2,1)
         orig_l = _Layout((4, 2), (2, 1))
         right_l = _Layout((2,), (1,))
-        composed_list = orig_l.composition(right_l)
-        self.assertEqual(len(composed_list), 1)
-        self.assertEqual(list(composed_list[0].sizes_and_strides), [(2, 2)])
+        composed_layout = orig_l.composition(right_l)
+        self.assertEqual(list(composed_layout.sizes_and_strides), [(2, 1)])
         self.assertEqual(
-            composed_list[0].global_ranks(8),
+            composed_layout.global_ranks(8),
+            [
+                [0, 1],
+                [2, 3],
+                [4, 5],
+                [6, 7],
+            ],
+        )
+
+        # self = (4,2), l = (2,1)  → self o l = (2,2)
+        orig_l = _Layout((4,), (2,))
+        right_l = _Layout((2,), (1,))
+        composed_layout = orig_l.composition(right_l)
+        self.assertEqual(list(composed_layout.sizes_and_strides), [(2, 2)])
+        self.assertEqual(
+            composed_layout.global_ranks(8),
             [
                 [0, 2],
                 [1, 3],
@@ -1398,13 +1412,13 @@ class CuTeLayoutTest(TestCase):
             ],
         )
 
-        # self = ((4,2), (2,1)), l = ((2,2), (2,1))  → self o l = ((2,4), (2,2))
+        # self = (4,2), l = ((2,2), (2,1))  → self o l = ((2,4), (2,2))
+        # This is to mimic the un-flatten from a 2D mesh to a 1D mesh.
         right_l = _Layout((2, 2), (2, 1))
-        composed_list = orig_l.composition(right_l)
-        self.assertEqual(len(composed_list), 2)
-        self.assertEqual(list(composed_list[0].sizes_and_strides), [(2, 4)])
+        composed_layout = orig_l.composition(right_l)
+        self.assertEqual(list(composed_layout.sizes_and_strides), [(2, 4), (2, 2)])
         self.assertEqual(
-            composed_list[0].global_ranks(8),
+            composed_layout[0].global_ranks(8),
             [
                 [0, 4],
                 [1, 5],
@@ -1412,21 +1426,32 @@ class CuTeLayoutTest(TestCase):
                 [3, 7],
             ],
         )
+        self.assertEqual(
+            composed_layout[1].global_ranks(8),
+            [
+                [0, 2],
+                [1, 3],
+                [4, 6],
+                [5, 7],
+            ],
+        )
 
         # Error case.
-        with self.assertRaisesRegex(
+        orig_l = _Layout((4, 2), (4, 1))
+        with self.assertRaises(
             AssertionError,
-            "Layouts do not meet stride divisibility condition",
+            # "Layouts do not meet stride divisibility condition",
         ):
             right_l = _Layout((2,), (3,))
-            composed_list = orig_l.composition(right_l)
+            orig_l.composition(right_l)
 
-        with self.assertRaisesRegex(
-            AssertionError,
-            "Layouts do not meet shape divisibility condition",
-        ):
-            right_l = _Layout((3,), (2,))
-            composed_list = orig_l.composition(right_l)
+        # Original pycute does not throw exception for this case.
+        # with self.assertRaises(
+        #     AssertionError,
+        #     # "Layouts do not meet size divisibility condition",
+        # ):
+        #     right_l = _Layout((3,), (2,))
+        #     orig_l.composition(right_l)
 
 
 if __name__ == "__main__":

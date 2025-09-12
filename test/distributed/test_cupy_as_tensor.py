@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 import torch
 from torch.multiprocessing.reductions import reduce_tensor
-from torch.testing._internal.common_distributed import MultiProcContinousTest
+from torch.testing._internal.common_distributed import MultiProcContinuousTest
 from torch.testing._internal.common_utils import (
     requires_cuda_p2p_access,
     run_tests,
@@ -46,7 +46,7 @@ def from_buffer(
 
 
 @requires_cuda_p2p_access()
-class CupyAsTensorTest(MultiProcContinousTest):
+class CupyAsTensorTest(MultiProcContinuousTest):
     @classmethod
     def backend_str(cls):
         return "gloo"
