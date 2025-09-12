@@ -48,6 +48,15 @@ struct Node;
 
 namespace at {
 
+// Dummy types for removed named tensor functionality
+// TODO: Remove all references to these types from the codebase
+#ifndef AT_DIMNAME_DEFINED
+#define AT_DIMNAME_DEFINED
+struct Dimname {}; // Dummy type
+#endif
+using DimnameList = c10::ArrayRef<Dimname>; // Dummy type
+struct NamedTensorMeta {}; // Dummy type
+
 class Tensor;
 class TensorBase;
 
@@ -261,13 +270,13 @@ class TORCH_API TensorBase {
   IntArrayRef strides() const {
     return impl_->strides();
   }
-  // See impl::get_opt_names in ATen/NamedTensor.h for docs.
+  // todo: remove this from the codebase as we no longer support named tensors
   std::optional<DimnameList> opt_names() const {
-    return impl::get_opt_names(unsafeGetTensorImpl());
+    return std::nullopt;
   }
   // See impl::get_names in ATen/NamedTensor.h for docs.
   DimnameList names() const {
-    return impl::get_names(unsafeGetTensorImpl());
+    return {};
   }
   int64_t ndimension() const {
     return dim();
@@ -583,23 +592,19 @@ class TORCH_API TensorBase {
   /// TODO: it's not in native_functions.yaml yet as it's not exposed to python
   QuantizerPtr quantizer() const;
 
-  /// Returns if a `Tensor` has any dimension names
+  // todo: remove this from the codebase as we no longer support named tensors
   bool has_names() const {
-    // If a user is using unnamed tensors, then we can short-circuit right here.
-    // Otherwise, impl::has_names attempts to retrieve names.
-    if (!impl_->has_named_tensor_meta()) {
-      return false;
-    }
-    return impl::has_names(unsafeGetTensorImpl());
+    return false;
   }
 
   /// Returns a `Tensor`'s dimension names data structure
+  // todo: remove this from the codebase as we no longer support named tensors
   const NamedTensorMeta* get_named_tensor_meta() const {
-    return static_cast<NamedTensorMeta*>(impl_->named_tensor_meta());
+    return nullptr;
   }
 
   NamedTensorMeta* get_named_tensor_meta() {
-    return static_cast<NamedTensorMeta*>(impl_->named_tensor_meta());
+    return nullptr;
   }
 
   /// Returns the `TensorOptions` corresponding to this `Tensor`. Defined in

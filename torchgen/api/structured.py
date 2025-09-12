@@ -9,7 +9,6 @@ from torchgen.api.types import (
     BaseCType,
     Binding,
     ConstRefCType,
-    dimnameListT,
     intArrayRefT,
     iOptTensorListRefT,
     iTensorListRefT,
@@ -79,8 +78,6 @@ def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName) -> NamedCType:
         # https://github.com/pytorch/pytorch/pull/51485
         elif str(t.elem) == "int":
             return NamedCType(binds, BaseCType(intArrayRefT))
-        elif str(t.elem) == "Dimname":
-            return NamedCType(binds, BaseCType(dimnameListT))
         elem = argumenttype_type(t.elem, mutable=mutable, binds=binds)
         return NamedCType(binds, ArrayRefCType(elem.type))
     else:

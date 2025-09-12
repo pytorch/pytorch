@@ -760,24 +760,6 @@ TORCH_IMPL_FUNC(cat_out_cpu)
   }
 }
 
-Tensor& cat_out(TensorList tensors, Dimname dim, Tensor& result) {
-  TORCH_CHECK_VALUE(!tensors.empty(), "expected a non-empty list of Tensors");
-  return at::cat_out(result, tensors, dimname_to_position(tensors[0], dim));
-}
-
-Tensor cat(TensorList tensors, Dimname dim) {
-  TORCH_CHECK_VALUE(!tensors.empty(), "expected a non-empty list of Tensors");
-  return at::cat(tensors, dimname_to_position(tensors[0], dim));
-}
-
-// torch.concat, alias for torch.cat
-Tensor& concat_out(TensorList tensors, Dimname dim, Tensor& result) {
-  return cat_out(tensors, dim, result);
-}
-
-Tensor concat(TensorList tensors, Dimname dim) {
-  return at::cat(tensors, dim);
-}
 
 Tensor& concat_out(TensorList tensors, int64_t dim, Tensor& result) {
   return at::cat_out(result, tensors, dim);
@@ -787,14 +769,6 @@ Tensor concat(TensorList tensors, int64_t dim) {
   return at::cat(tensors, dim);
 }
 
-// torch.concatenate, alias for torch.cat
-Tensor& concatenate_out(TensorList tensors, Dimname dim, Tensor& result) {
-  return cat_out(tensors, dim, result);
-}
-
-Tensor concatenate(TensorList tensors, Dimname dim) {
-  return at::cat(tensors, dim);
-}
 
 Tensor& concatenate_out(TensorList tensors, int64_t dim, Tensor& result) {
   return at::cat_out(result, tensors, dim);
@@ -1293,24 +1267,6 @@ Tensor diagonal(
   return result;
 }
 
-Tensor diagonal(
-    const Tensor& self,
-    Dimname outdim,
-    Dimname dim1,
-    Dimname dim2,
-    int64_t offset) {
-  auto result = at::diagonal(
-      self,
-      offset,
-      dimname_to_position(self, dim1),
-      dimname_to_position(self, dim2));
-  // This is slower than it needs to be because there is no way to modify
-  // the names of a tensor in-place right now. In the future we should consider
-  // offering that functionality.
-  std::vector<Dimname> new_names = result.names().vec();
-  new_names[new_names.size() - 1] = outdim;
-  return result.refine_names(new_names);
-}
 
 Tensor diag_embed(
     const Tensor& self,
@@ -2218,10 +2174,6 @@ Tensor select(const Tensor& self, int64_t dim, int64_t index) {
   return at::select_symint(self, dim, c10::SymInt{index});
 }
 
-Tensor select(const Tensor& self, Dimname dim, int64_t index) {
-  return at::select_symint(
-      self, dimname_to_position(self, dim), c10::SymInt{index});
-}
 
 Tensor select_symint(const Tensor& self, int64_t dim, c10::SymInt index) {
   int64_t ndim = self.dim();
@@ -3579,10 +3531,6 @@ static Tensor& propagate_transposed_names(
   return result;
 }
 
-Tensor transpose(const Tensor& self, Dimname dim0, Dimname dim1) {
-  return at::transpose(
-      self, dimname_to_position(self, dim0), dimname_to_position(self, dim1));
-}
 
 Tensor& transpose_(Tensor& self, int64_t dim0, int64_t dim1) {
   TORCH_CHECK(
@@ -4143,58 +4091,8 @@ Tensor flatten(const Tensor& self, int64_t start_dim, int64_t end_dim) {
   return native::reshape_symint(self, shape);
 }
 
-Tensor flatten(
-    const Tensor& self,
-    int64_t start_dim,
-    int64_t end_dim,
-    Dimname out_dim) {
-  start_dim = maybe_wrap_dim(start_dim, self.dim());
-  end_dim = maybe_wrap_dim(end_dim, self.dim());
-  TORCH_CHECK(
-      start_dim <= end_dim,
-      "flatten() has invalid args: start_dim cannot come after end_dim");
 
-  auto outnames = self.names().vec();
-  outnames.erase(outnames.begin() + start_dim, outnames.begin() + end_dim + 1);
-  outnames.insert(outnames.begin() + start_dim, out_dim);
 
-  Tensor result;
-  {
-    NoNamesGuard guard;
-    result = native::flatten(self, start_dim, end_dim);
-  }
-  internal_set_names_inplace(result, outnames);
-  return result;
-}
-
-Tensor flatten(
-    const Tensor& self,
-    Dimname start_dim,
-    Dimname end_dim,
-    Dimname out_dim) {
-  auto start_pos = dimname_to_position(self, start_dim);
-  auto end_pos = dimname_to_position(self, end_dim);
-  return native::flatten(self, start_pos, end_pos, out_dim);
-}
-
-Tensor flatten(const Tensor& self, DimnameList dims, Dimname out_dim) {
-  auto positions = dimnames_to_positions(self, dims);
-  TORCH_CHECK(
-      !positions.empty(),
-      "flatten(tensor, dims, out_dim): dims cannot be empty");
-  for (const auto i : c10::irange(positions.size() - 1)) {
-    if (positions[i] + 1 == positions[i + 1])
-      continue;
-    TORCH_CHECK(
-        positions[i] + 1 == positions[i + 1],
-        "flatten(tensor, dims, out_dim): dims ",
-        dims,
-        " must be consecutive ",
-        "in Tensor",
-        self.names());
-  }
-  return native::flatten(self, *dims.begin(), *(dims.end() - 1), out_dim);
-}
 
 Tensor ravel(const Tensor& self) {
   return self.contiguous().view(-1);
@@ -4285,14 +4183,6 @@ Tensor unflatten_symint(const Tensor& self, int64_t dim, SymIntArrayRef sizes) {
   return native::unflatten_impl(self, dim, sizes, std::nullopt);
 }
 
-Tensor unflatten_dimname_symint(
-    const Tensor& self,
-    Dimname dim,
-    SymIntArrayRef sizes,
-    DimnameList names) {
-  return native::unflatten_impl(
-      self, dimname_to_position(self, dim), sizes, names);
-}
 
 Tensor view_as(const Tensor& self, const Tensor& other) {
   return self.view_symint(other.sym_sizes());
@@ -4308,9 +4198,6 @@ std::vector<Tensor> unbind(const Tensor& self, int64_t dim) {
   return tensors;
 }
 
-std::vector<Tensor> unbind(const Tensor& self, Dimname dim) {
-  return at::unbind(self, dimname_to_position(self, dim));
-}
 
 std::vector<Tensor> meshgrid(TensorList tensors) {
   TORCH_WARN_ONCE(

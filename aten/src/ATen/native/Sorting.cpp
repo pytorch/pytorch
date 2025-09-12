@@ -792,16 +792,6 @@ std::tuple<Tensor&, Tensor&> kthvalue_out_cpu(
   return result;
 }
 
-std::tuple<Tensor&, Tensor&> kthvalue_out(
-    const Tensor& self,
-    int64_t k,
-    Dimname dim,
-    bool keepdim,
-    Tensor& values,
-    Tensor& indices) {
-  return at::kthvalue_out(
-      values, indices, self, k, dimname_to_position(self, dim), keepdim);
-}
 
 std::tuple<Tensor, Tensor> kthvalue(
     const Tensor& self,
@@ -814,13 +804,6 @@ std::tuple<Tensor, Tensor> kthvalue(
   return std::make_tuple(values, indices);
 }
 
-std::tuple<Tensor, Tensor> kthvalue(
-    const Tensor& self,
-    int64_t k,
-    Dimname dim,
-    bool keepdim) {
-  return at::kthvalue(self, k, dimname_to_position(self, dim), keepdim);
-}
 
 TORCH_IMPL_FUNC(topk_out_cpu)
    (const Tensor& self,
@@ -859,15 +842,6 @@ std::tuple<Tensor&, Tensor&> median_out_cpu(
   return result;
 }
 
-std::tuple<Tensor&, Tensor&> median_out(
-    const Tensor& self,
-    Dimname dim,
-    bool keepdim,
-    Tensor& values,
-    Tensor& indices) {
-  return at::median_out(
-      values, indices, self, dimname_to_position(self, dim), keepdim);
-}
 
 std::tuple<Tensor, Tensor> median(
     const Tensor& self,
@@ -879,12 +853,6 @@ std::tuple<Tensor, Tensor> median(
   return std::make_tuple(values, indices);
 }
 
-std::tuple<Tensor, Tensor> median(
-    const Tensor& self,
-    Dimname dim,
-    bool keepdim) {
-  return at::median(self, dimname_to_position(self, dim), keepdim);
-}
 
 Tensor median_cpu(const Tensor& self) {
   return median_impl(self, /*ignore_nan=*/false);
@@ -906,15 +874,6 @@ std::tuple<Tensor&, Tensor&> nanmedian_out_cpu(
   return result;
 }
 
-std::tuple<Tensor&, Tensor&> nanmedian_out(
-    const Tensor& self,
-    Dimname dim,
-    bool keepdim,
-    Tensor& values,
-    Tensor& indices) {
-  return at::nanmedian_out(
-      values, indices, self, dimname_to_position(self, dim), keepdim);
-}
 
 std::tuple<Tensor, Tensor> nanmedian(
     const Tensor& self,
@@ -926,12 +885,6 @@ std::tuple<Tensor, Tensor> nanmedian(
   return std::make_tuple(values, indices);
 }
 
-std::tuple<Tensor, Tensor> nanmedian(
-    const Tensor& self,
-    Dimname dim,
-    bool keepdim) {
-  return at::nanmedian(self, dimname_to_position(self, dim), keepdim);
-}
 
 Tensor nanmedian_cpu(const Tensor& self) {
   return median_impl(self, /*ignore_nan=*/true);

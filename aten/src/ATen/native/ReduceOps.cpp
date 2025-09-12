@@ -1249,14 +1249,6 @@ Tensor sum(const Tensor &self, std::optional<ScalarType> dtype) {
   return at::sum(self, IntArrayRef{}, false, dtype);
 }
 
-Tensor sum(const Tensor& self, DimnameList dim, bool keepdim, std::optional<ScalarType> dtype) {
-  return at::sum(self, dimnames_to_positions(self, dim), keepdim, dtype);
-}
-
-Tensor& sum_out(const Tensor& self, DimnameList dim,
-                bool keepdim, std::optional<ScalarType> opt_dtype, Tensor& result) {
-  return at::sum_out(result, self, dimnames_to_positions(self, dim), keepdim, opt_dtype);
-}
 
 Tensor& nansum_out(const Tensor& self, at::OptionalIntArrayRef dim,
                        bool keepdim, std::optional<ScalarType> opt_dtype, Tensor& result) {
@@ -1361,14 +1353,6 @@ Tensor prod(const Tensor &self, std::optional<ScalarType> opt_dtype) {
   return result;
 }
 
-Tensor prod(const Tensor& self, Dimname dim, bool keepdim, std::optional<ScalarType> dtype) {
-  return at::prod(self, dimname_to_position(self, dim), keepdim, dtype);
-}
-
-Tensor& prod_out(const Tensor& self, Dimname dim,
-                 bool keepdim, std::optional<ScalarType> opt_dtype, Tensor& result) {
-  return at::prod_out(result, self, dimname_to_position(self, dim), keepdim, opt_dtype);
-}
 
 TORCH_IMPL_FUNC(mean_out)
 (const Tensor& self,
@@ -1434,14 +1418,6 @@ Tensor mean(const Tensor &self, std::optional<ScalarType> dtype) {
   return at::mean(self, IntArrayRef{}, false, dtype);
 }
 
-Tensor mean(const Tensor& self, DimnameList dim, bool keepdim, std::optional<ScalarType> dtype) {
-  return at::mean(self, dimnames_to_positions(self, dim), keepdim, dtype);
-}
-
-Tensor& mean_out(const Tensor& self, DimnameList dim,
-                 bool keepdim, std::optional<ScalarType> opt_dtype, Tensor& result) {
-  return at::mean_out(result, self, dimnames_to_positions(self, dim), keepdim, opt_dtype);
-}
 
 Tensor& mean_dtype_out(const Tensor &self, std::optional<ScalarType> dtype, Tensor& result) {
   TORCH_CHECK(
@@ -1535,13 +1511,6 @@ Tensor logsumexp(const Tensor& self, IntArrayRef dims, bool keepdim) {
   return at::logsumexp_outf(self, dims, keepdim, result);
 }
 
-Tensor logsumexp(const Tensor& self, DimnameList dims, bool keepdim) {
-  return at::logsumexp(self, dimnames_to_positions(self, dims), keepdim);
-}
-
-Tensor& logsumexp_out(const Tensor& self, DimnameList dims, bool keepdim, Tensor& result) {
-  return at::logsumexp_out(result, self, dimnames_to_positions(self, dims), keepdim);
-}
 
 // special_logsumexp, alias for logsumexp
 Tensor special_logsumexp(const Tensor& self, IntArrayRef dims, bool keepdim) {
@@ -2119,88 +2088,7 @@ Tensor var(
   return std_var_out("var", result, self, dim, correction, keepdim, false);
 }
 
-Tensor std(const Tensor& self, DimnameList dim, bool unbiased, bool keepdim) {
-  return at::std(self, dimnames_to_positions(self, dim), unbiased, keepdim);
-}
 
-Tensor& std_out(const Tensor& self, DimnameList dim, bool unbiased, bool keepdim, Tensor& result) {
-  return at::std_out(result, self, dimnames_to_positions(self, dim), unbiased, keepdim);
-}
-
-Tensor var(const Tensor& self, DimnameList dim, bool unbiased, bool keepdim) {
-  return at::var(self, dimnames_to_positions(self, dim), unbiased, keepdim);
-}
-
-Tensor& var_out(const Tensor& self, DimnameList dim, bool unbiased, bool keepdim, Tensor& result) {
-  return at::var_out(
-      result, self, dimnames_to_positions(self, dim), unbiased, keepdim);
-}
-
-std::tuple<Tensor,Tensor> var_mean(const Tensor& self, DimnameList dim, bool unbiased, bool keepdim) {
-  return at::var_mean(self, dimnames_to_positions(self, dim), unbiased, keepdim);
-}
-
-std::tuple<Tensor,Tensor> std_mean(const Tensor& self, DimnameList dim, bool unbiased, bool keepdim) {
-  return at::std_mean(self, dimnames_to_positions(self, dim), unbiased, keepdim);
-}
-
-Tensor std(const Tensor& self, DimnameList dim, const std::optional<Scalar>& correction, bool keepdim) {
-  return at::std(self, dimnames_to_positions(self, dim), correction, keepdim);
-}
-
-Tensor& std_out(const Tensor& self, DimnameList dim, const std::optional<Scalar>& correction,
-                bool keepdim, Tensor& result) {
-  return at::std_out(result, self, dimnames_to_positions(self, dim), correction, keepdim);
-}
-
-Tensor var(const Tensor& self, DimnameList dim, const std::optional<Scalar>& correction, bool keepdim) {
-  return at::var(self, dimnames_to_positions(self, dim), correction, keepdim);
-}
-
-Tensor& var_out(const Tensor& self, DimnameList dim, const std::optional<Scalar>& correction,
-                bool keepdim, Tensor& result) {
-  return at::var_out(
-      result, self, dimnames_to_positions(self, dim), correction, keepdim);
-}
-
-std::tuple<Tensor,Tensor> var_mean(const Tensor& self, DimnameList dim,
-                                   const std::optional<Scalar>& correction, bool keepdim) {
-  return at::var_mean(self, dimnames_to_positions(self, dim), correction, keepdim);
-}
-
-std::tuple<Tensor,Tensor> std_mean(const Tensor& self, DimnameList dim,
-                                   const std::optional<Scalar>& correction, bool keepdim) {
-  return at::std_mean(self, dimnames_to_positions(self, dim), correction, keepdim);
-}
-
-Tensor& norm_out(const Tensor& self, const std::optional<Scalar>& p, DimnameList dim, bool keepdim, ScalarType dtype, Tensor& result) {
-  return at::norm_out(result, self, p, dimnames_to_positions(self, dim), keepdim, dtype);
-}
-
-Tensor& norm_out(const Tensor& self, const std::optional<Scalar>& p, DimnameList dim, bool keepdim, Tensor& result) {
-  return at::norm_out(result, self, p, dimnames_to_positions(self, dim), keepdim);
-}
-
-Tensor norm(const Tensor& self, const std::optional<Scalar>& p, DimnameList dim, bool keepdim, ScalarType dtype) {
-  return at::norm(self, p, dimnames_to_positions(self, dim), keepdim, dtype);
-}
-
-Tensor norm(const Tensor& self, const std::optional<Scalar>& p, DimnameList dim, bool keepdim) {
-  return at::norm(self, p, dimnames_to_positions(self, dim), keepdim);
-}
-
-Tensor any(const Tensor& self, Dimname dim, bool keepdim) {
-  reportNYIDimnameOverload("any");
-}
-Tensor& any_out(const Tensor &self, Dimname dim, bool keepdim, Tensor& result) {
-  reportNYIDimnameOverload("any");
-}
-Tensor all(const Tensor& self, Dimname dim, bool keepdim) {
-  reportNYIDimnameOverload("all");
-}
-Tensor& all_out(const Tensor &self, Dimname dim, bool keepdim, Tensor& result) {
-  reportNYIDimnameOverload("all");
-}
 Tensor _is_all_true(const Tensor& self) {
   TORCH_INTERNAL_ASSERT(self.scalar_type() == at::kBool);
   return self.all();
@@ -2208,42 +2096,6 @@ Tensor _is_all_true(const Tensor& self) {
 Tensor _is_any_true(const Tensor& self) {
   TORCH_INTERNAL_ASSERT(self.scalar_type() == at::kBool);
   return self.any();
-}
-Tensor logcumsumexp(const Tensor& self, Dimname dim) {
-  return at::logcumsumexp(self, dimname_to_position(self, dim));
-}
-Tensor& logcumsumexp_out(const Tensor& self, Dimname dim, Tensor& result) {
-  return at::logcumsumexp_out(result, self, dimname_to_position(self, dim));
-}
-Tensor cumsum(const Tensor& self, Dimname dim, std::optional<ScalarType> dtype) {
-  return at::cumsum(self, dimname_to_position(self, dim), dtype);
-}
-Tensor& cumsum_(Tensor& self, Dimname dim, std::optional<ScalarType> dtype) {
-  return at::cumsum_out(self, self, dimname_to_position(self, dim), dtype);
-}
-Tensor& cumsum_out(const Tensor& self, Dimname dim, std::optional<ScalarType> dtype, Tensor& result) {
-  return at::cumsum_out(result, self, dimname_to_position(self, dim), dtype);
-}
-Tensor cumprod(const Tensor& self, Dimname dim, std::optional<ScalarType> dtype) {
-  return at::cumprod(self, dimname_to_position(self, dim), dtype);
-}
-Tensor& cumprod_(Tensor& self, Dimname dim, std::optional<ScalarType> dtype) {
-  return at::cumprod_out(self, self, dimname_to_position(self, dim), dtype);
-}
-Tensor& cumprod_out(const Tensor& self, Dimname dim, std::optional<ScalarType> dtype, Tensor& result) {
-  return at::cumprod_out(result, self, dimname_to_position(self, dim), dtype);
-}
-std::tuple<Tensor, Tensor> cummax(const Tensor& self, Dimname dim) {
-  return at::cummax(self, dimname_to_position(self, dim));
-}
-std::tuple<Tensor&, Tensor&> cummax_out(const Tensor& self, Dimname dim, Tensor& values, Tensor& indices) {
-  return at::cummax_out(values, indices, self, dimname_to_position(self, dim));
-}
-std::tuple<Tensor, Tensor> cummin(const Tensor& self, Dimname dim) {
-  return at::cummin(self, dimname_to_position(self, dim));
-}
-std::tuple<Tensor&, Tensor&> cummin_out(const Tensor& self, Dimname dim, Tensor& values, Tensor& indices) {
-  return at::cummin_out(values, indices, self, dimname_to_position(self, dim));
 }
 
 Tensor dist(const Tensor &self, const Tensor& other, const Scalar& p){

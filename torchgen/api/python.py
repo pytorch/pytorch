@@ -696,7 +696,6 @@ def argument_type_str(
             BaseTy.Device,
             BaseTy.DeviceIndex,
             BaseTy.MemoryFormat,
-            BaseTy.Dimname,
             BaseTy.Stream,
             BaseTy.SymInt,
         ]:
@@ -961,8 +960,6 @@ def argument_type_str_pyi(t: Type) -> str:
             ret = "DeviceLikeType | None"
         elif t.name == BaseTy.MemoryFormat:
             ret = "memory_format"
-        elif t.name == BaseTy.Dimname:
-            ret = "str | EllipsisType | None"
         elif t.name == BaseTy.Storage:
             ret = "Storage | UntypedStorage"
         elif t.name in [BaseTy.Tensor, BaseTy.Generator, BaseTy.Stream]:
@@ -1011,8 +1008,6 @@ def return_type_str_pyi(t: Type) -> str:
     if isinstance(t, BaseType):
         if t.name == BaseTy.Device:
             return "_device"
-        elif t.name == BaseTy.Dimname:
-            return "str | None"
         else:
             return argument_type_str_pyi(t)
 
@@ -1312,7 +1307,6 @@ def arg_parser_unpack_method(
             BaseTy.Stream,
             BaseTy.Storage,
             BaseTy.Scalar,
-            BaseTy.Dimname,
         ]:
             # These unpack methods line up with their schema names
             return t.name.name.lower()

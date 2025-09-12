@@ -6,9 +6,7 @@ endif(MSVC)
 
 list(APPEND ATen_CPU_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/Dict_test.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/Dimname_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/MaybeOwned_test.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/NamedTensor_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/apply_utils_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/atest.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/basic.cpp

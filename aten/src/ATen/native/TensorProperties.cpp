@@ -75,15 +75,6 @@ c10::SymInt sym_storage_offset(const Tensor& self) {
   return self.sym_storage_offset();
 }
 
-int64_t size(const Tensor& self, Dimname dim) {
-  size_t pos_dim = dimname_to_position(self, dim);
-  return self.sizes()[pos_dim];
-}
-
-int64_t stride(const Tensor& self, Dimname dim) {
-  size_t pos_dim = dimname_to_position(self, dim);
-  return self.strides()[pos_dim];
-}
 
 bool cudnn_is_acceptable(const TensorBase& self) {
   if (!globalContext().userEnabledCuDNN())
