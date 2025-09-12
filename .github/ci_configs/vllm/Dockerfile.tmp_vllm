@@ -215,10 +215,15 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,source=.git,target=.git \
     if [ "$USE_SCCACHE" = "1" ]; then \
         echo "Installing sccache..." \
-        && curl -L -o sccache.tar.gz https://github.com/mozilla/sccache/releases/download/v0.8.1/sccache-v0.8.1-x86_64-unknown-linux-musl.tar.gz \
+        if [ "$TARGETPLATFORM" = "linux/arm64" ]; then \
+            SCCACHE_ARCHIVE="sccache-v0.8.1-aarch64-unknown-linux-musl"; \
+        else \
+            SCCACHE_ARCHIVE="sccache-v0.8.1-x86_64-unknown-linux-musl"; \
+        fi; \
+        && curl -L -o sccache.tar.gz "https://github.com/mozilla/sccache/releases/download/v0.8.1/${SCCACHE_ARCHIVE}.tar.gz" \
         && tar -xzf sccache.tar.gz \
-        && sudo mv sccache-v0.8.1-x86_64-unknown-linux-musl/sccache /usr/bin/sccache \
-        && rm -rf sccache.tar.gz sccache-v0.8.1-x86_64-unknown-linux-musl \
+        && sudo mv "${SCCACHE_ARCHIVE}"/sccache /usr/bin/sccache \
+        && rm -rf sccache.tar.gz "${SCCACHE_ARCHIVE}" \
         && export SCCACHE_BUCKET=${SCCACHE_BUCKET_NAME} \
         && export SCCACHE_REGION=${SCCACHE_REGION_NAME} \
         && export SCCACHE_S3_NO_CREDENTIALS=${SCCACHE_S3_NO_CREDENTIALS} \
