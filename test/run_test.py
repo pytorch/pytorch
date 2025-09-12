@@ -177,6 +177,7 @@ ROCM_BLOCKLIST = [
     "test_jit_legacy",
     "test_cuda_nvml_based_avail",
     "test_jit_cuda_fuser",
+    "test_openreg",
 ]
 
 S390X_BLOCKLIST = [
@@ -242,6 +243,7 @@ S390X_BLOCKLIST = [
     # depend on z3-solver
     "fx/test_z3_gradual_types",
     "test_proxy_tensor",
+    "test_openreg",
 ]
 
 XPU_BLOCKLIST = [
