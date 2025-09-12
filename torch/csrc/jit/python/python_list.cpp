@@ -100,7 +100,7 @@ void initScriptListBindings(PyObject* module) {
           })
       .def(
           "__contains__",
-          [](const std::shared_ptr<ScriptList>& self, const py::object& elem) {
+          [](const std::shared_ptr<ScriptList>& self, py::object elem) {
             try {
               return toPyObject(self->contains(
                   toIValue(std::move(elem), self->type()->getElementType())));
