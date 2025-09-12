@@ -541,7 +541,7 @@ class SizeVarAllocator:
         self,
         expr: Union[Expr, int],
         hint_override: Optional[int] = None,
-        use_user_provided_hint_override=False,
+        use_user_provided_hint_override: bool = False,
     ) -> Union[Expr, int]:
         if isinstance(expr, int):
             return expr
