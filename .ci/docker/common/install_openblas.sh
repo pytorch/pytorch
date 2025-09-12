@@ -4,7 +4,7 @@
 set -ex
 
 cd /
-git clone https://github.com/Mousius/OpenBLAS.git -b "bgemm-optimisation" --depth 1 --shallow-submodules
+git clone https://github.com/OpenMathLib/OpenBLAS.git -b "${OPENBLAS_VERSION:-v0.3.30}" --depth 1 --shallow-submodules
 
 OPENBLAS_CHECKOUT_DIR="OpenBLAS"
 OPENBLAS_BUILD_FLAGS="
