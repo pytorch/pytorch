@@ -26,6 +26,7 @@ import sympy
 
 import torch
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
+import torch.utils._pytree as pytree
 from torch._dynamo.utils import counters, dynamo_timed
 from torch._inductor.codecache import LambdaFuture, PyCodeCache
 from torch._inductor.ir import TritonTemplateCallerBase
@@ -35,10 +36,13 @@ from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
 from torch.utils._triton import has_triton
 
-from . import comms, config, dependencies, ir, metrics
+from . import comms, config, config_comms, dependencies, ir, metrics
 from .analyze_preserves_zero_mask import can_codegen_without_upcasts
 from .codegen.common import BackendFeature, get_scheduling_for_device, Kernel
-from .comm_analysis import estimate_nccl_collective_runtime
+from .comm_analysis import (
+    estimate_nccl_collective_runtime,
+    estimate_nccl_collective_runtime_nccl_estimator,
+)
 from .dependencies import Dep, MemoryDep, StarDep, WeakDep
 from .exc import GPUTooOldForTriton, TritonMissing
 from .fx_utils import count_flops_fx
@@ -212,6 +216,7 @@ class BaseSchedulerNode:
     min_order: int
     max_order: int
     mpi_node: MemoryPlanningInfoForNode
+    override_estimated_runtime: Optional[float] = None
 
     def __init__(self, scheduler: Scheduler) -> None:
         self.scheduler: Scheduler = scheduler
@@ -304,8 +309,8 @@ class BaseSchedulerNode:
 
     def reorder_loops_by_dep_pair(
         self, self_dep: MemoryDep, other_dep: MemoryDep
-    ) -> None:
-        return
+    ) -> bool:
+        return False
 
     def update_mutated_names(self, renames: dict[str, str]) -> None:
         self.mutation_renames = {
@@ -823,10 +828,16 @@ class BaseSchedulerNode:
         counters["inductor"]["flop_count"] += resolved_flops
         return resolved_flops
 
-    @cache_on_self
     def get_estimated_runtime(self) -> float:
+        if self.override_estimated_runtime is not None:
+            return self.override_estimated_runtime
+
+        return self._get_estimated_runtime()
+
+    @cache_on_self
+    def _get_estimated_runtime(self) -> float:
         """
-        Returns estimated op runtime in nanoseconds (ns)
+        Returns estimated op runtime in milliseconds (ms)
         """
         buf = self.get_nodes()[0].get_outputs()[0]
         layout = buf.node.get_output_spec()
@@ -838,6 +849,21 @@ class BaseSchedulerNode:
         if is_collective(self.node):
             assert isinstance(self.node, ir.IRNode)
             try:
+                if config_comms.runtime_estimations_use_nccl_lib_estimations:
+                    cache_key = get_estimate_runtime_cache_key_from_snode(self)
+                    cache = get_estimate_runtime_cache()
+                    cache_val = cache.lookup(cache_key)
+                    if cache_val is not None:
+                        assert isinstance(cache_val, float)
+                        return cache_val
+
+                    ms = estimate_nccl_collective_runtime_nccl_estimator(self)
+                    if ms is None:
+                        # NCCL estimations fail: fallback to in-tree algorithmic estimation.
+                        ms = estimate_nccl_collective_runtime(self.node)
+
+                    cache.set_value(cache_key, value=ms)
+                    return ms
                 return estimate_nccl_collective_runtime(self.node)
             except ValueError as e:
                 # We don't know how to estimate runtime for this collective,
@@ -855,6 +881,10 @@ class BaseSchedulerNode:
             # when we are processing the collective op IR node, so ir.Wait takes 0 time
             # since it doesn't take extra time to get the result after the collective is completed.
             return 0
+
+        ret = maybe_estimate_runtime_benchmark(self)
+        if ret is not None:
+            return ret
 
         dtype = buf.node.maybe_get_dtype()
         try:
@@ -876,7 +906,9 @@ class BaseSchedulerNode:
 
         if flops_est == 0 or flops_est is None:
             # no flops estimate, so fall back to memory estimate
-            return self.get_read_write_buffers_sizes() / gpu_memory_bandwidth
+            ns = self.get_read_write_buffers_sizes() / gpu_memory_bandwidth
+            ms = ns / 1e6
+            return ms
 
         # TODO(xmfan): find a better heuristic to model FLOPS/latency relationship
         factor = 1.0
@@ -885,8 +917,10 @@ class BaseSchedulerNode:
         compute_time = (factor * flops_est / gpu_flops) * 1e9
         transfer_time = counted_bytes / gpu_memory_bandwidth
 
-        # Return estimated runtime in nanoseconds
-        return max(compute_time, transfer_time)
+        # Return estimated runtime in milliseconds
+        ns = max(compute_time, transfer_time)
+        ms = ns / 1e6
+        return ms
 
     def get_template_node(self) -> Optional[ir.TemplateBuffer]:
         return None
@@ -909,6 +943,77 @@ class BaseSchedulerNode:
         template_node = nodes[template_index]
         epilogue = nodes[template_index + 1 :]
         return prologue, template_node, epilogue
+
+
+@functools.cache
+def get_estimate_runtime_cache() -> torch._inductor.codecache.LocalCache:
+    return torch._inductor.codecache.LocalCache()
+
+
+def get_estimate_runtime_cache_key_from_snode(snode: BaseSchedulerNode) -> str:
+    python_kernel_name = getattr(snode.node, "python_kernel_name", "")
+    args = snode.node.inputs  # type: ignore[union-attr]
+    args = snode.node.fill_non_provided_args(  # type: ignore[union-attr]
+        [*args, *snode.node.constant_args],  # type: ignore[union-attr]
+        snode.node.kwargs,  # type: ignore[union-attr]
+    )
+    kwargs = snode.node.kwargs  # type: ignore[union-attr]
+    flat_args, flat_args_pytree_spec = pytree.tree_flatten((args, kwargs))
+
+    def _is_tensor_ir(x) -> bool:  # type: ignore[no-untyped-def]
+        return isinstance(x, ir.IRNode) and not isinstance(x, ir.GeneratorState)
+
+    cache_key = str(
+        (python_kernel_name,)
+        + tuple(tuple(a.get_size()) if _is_tensor_ir(a) else None for a in flat_args)
+    )
+    return cache_key
+
+
+def _get_mm_like_fn(snode: BaseSchedulerNode) -> Optional[Callable[[Any], Any]]:
+    if not isinstance(snode, ExternKernelSchedulerNode):
+        return None
+    mms_fns = {
+        "extern_kernels.mm": torch.ops.aten.mm,
+        "extern_kernels.bmm": torch.ops.aten.bmm,
+        "extern_kernels.addmm": torch.ops.aten.addmm,
+    }
+    python_kernel_name = getattr(snode.node, "python_kernel_name", "")
+    if python_kernel_name not in mms_fns:
+        return None
+    if not isinstance(snode.node, ir.ExternKernel):
+        return None
+    return mms_fns[python_kernel_name]
+
+
+def maybe_estimate_runtime_benchmark(snode: BaseSchedulerNode) -> Optional[float]:
+    bench_fn = None
+    args_kwargs_fn = None
+    if config.runtime_estimations_mms_benchmark:
+        mm_fn = _get_mm_like_fn(snode)
+        if mm_fn is None:
+            return None
+        bench_fn = mm_fn
+        args_kwargs_fn = lambda: snode_args_kwargs(snode)  # noqa: E731
+    else:
+        return None
+
+    cache_key = get_estimate_runtime_cache_key_from_snode(snode)
+    cache = get_estimate_runtime_cache()
+    cache_val = cache.lookup(cache_key)
+    if cache_val is not None:
+        assert isinstance(cache_val, float)
+        return cache_val
+
+    from .utils import snode_args_kwargs
+
+    args, kwargs = args_kwargs_fn()
+    from triton.testing import do_bench
+
+    ms = do_bench(lambda: bench_fn(*args, **kwargs))
+
+    cache.set_value(cache_key, value=ms)
+    return ms
 
 
 class WhyNoFuse:
@@ -1025,6 +1130,11 @@ class NopKernelSchedulerNode(BaseSchedulerNode):
 
 
 class SchedulerNode(BaseSchedulerNode):
+    """
+    A SchedulerNode is a node for scheduling that encapsulates either
+    a ComputedBuffer or a TemplateBuffer.
+    """
+
     _sizes: tuple[Sequence[sympy.Expr], ...]
     _body: LoopBody
 
@@ -1149,7 +1259,7 @@ class SchedulerNode(BaseSchedulerNode):
 
     def reorder_loops_by_dep_pair(
         self, self_dep: MemoryDep, other_dep: MemoryDep
-    ) -> None:
+    ) -> bool:
         new_order = None
         self_sizes = self._sizes[0]
         if len(self_sizes) == self_dep.num_vars == other_dep.num_vars:
@@ -1161,11 +1271,13 @@ class SchedulerNode(BaseSchedulerNode):
                 "Reorder loops for %s with order %s", self.get_name(), new_order
             )
             self.apply_new_loop_order(new_order)
+            return True
         else:
             loop_ordering_log.debug(
                 "Don't reordering %s because we can not decide the suitable loop order",
                 self.get_name(),
             )
+            return False
 
     def debug_str_extra(self) -> str:
         name = self.get_name()
@@ -1422,10 +1534,13 @@ class FusedSchedulerNode(BaseSchedulerNode):
 
     def reorder_loops_by_dep_pair(
         self, self_dep: MemoryDep, other_dep: MemoryDep
-    ) -> None:
+    ) -> bool:
+        """
+        Return true if a loop reordering is performed.
+        """
         if self.is_template():
             # We can not really reorder loops for a triton template
-            return
+            return False
         self_sizes = None
         for snode in self.snodes:
             assert isinstance(snode, SchedulerNode)
@@ -1433,7 +1548,7 @@ class FusedSchedulerNode(BaseSchedulerNode):
                 loop_ordering_log.debug(
                     "Can not reorder fused node due to different sizes"
                 )
-                return
+                return False
             self_sizes = snode._sizes[0]
         new_order = None
 
@@ -1446,7 +1561,7 @@ class FusedSchedulerNode(BaseSchedulerNode):
                 "Dont reordering fused node %s because we can not decide the suitable loop order",
                 self.get_name(),
             )
-            return
+            return False
         metrics.num_loop_reordering += 1
         loop_ordering_log.debug(
             "Reorder loops for fused node %s with order %s", self.get_name(), new_order
@@ -1456,6 +1571,7 @@ class FusedSchedulerNode(BaseSchedulerNode):
             snode.apply_new_loop_order(new_order)
 
         refresh_group_node_dependencies(self)
+        return True
 
     def __init__(self, scheduler: Scheduler, snodes: list[BaseSchedulerNode]) -> None:
         super().__init__(scheduler)
@@ -2094,6 +2210,10 @@ class NodeUser:
 _post_grad_graph_counter = itertools.count()
 
 
+def used_non_deterministic_runtime_estimations() -> bool:
+    return config.runtime_estimations_mms_benchmark
+
+
 class Scheduler:
     """
     A Scheduler is a graph of BaseSchedulerNodes. It is responsible for
@@ -2214,6 +2334,17 @@ class Scheduler:
                 assign_memory_planning_info_for_scheduler_buffers(
                     self.nodes, self.name_to_buf
                 )
+
+            if (
+                used_non_deterministic_runtime_estimations()
+                and config_comms.runtime_estimations_align_across_all_distributed_ranks
+            ):
+                from .comms import (
+                    align_runtime_estimations_across_all_distributed_ranks,
+                )
+
+                align_runtime_estimations_across_all_distributed_ranks(self.nodes)
+
             from torch._logging import trace_structured
 
             trace_structured(
@@ -3780,6 +3911,11 @@ class Scheduler:
         Right now just greedily reorder the loop of node1 to be compatible with node2,
         but ideally we should have some heuristics to reorder the loop for node2
         to be compatible with node1 if that's more efficient.
+
+        Return the amount of shared data re-computed in this method.
+        If no such recomputation happens, return -1 (not return 0 since 0 is a valid
+        amount of shared data).
+
         """
 
         # TODO Don't do loop reordering for CPU for now.
@@ -3787,14 +3923,14 @@ class Scheduler:
         if not config.loop_ordering_after_fusion or any(
             n.is_cpu() for n in [node1, node2]
         ):
-            return 0
+            return -1
 
         node1_buffer_names = node1.read_writes.buffer_names()
         node2_buffer_names = node2.read_writes.buffer_names()
         # Fast path: no common buffers.
         common_buffer_names = node1_buffer_names & node2_buffer_names
         if not common_buffer_names:
-            return 0
+            return -1
 
         node1_name2dep = {dep.name: dep for dep in node1.read_writes.reads_and_writes()}
         node2_name2dep = {dep.name: dep for dep in node2.read_writes.reads_and_writes()}
@@ -3817,13 +3953,13 @@ class Scheduler:
                 )
 
         if len(candidates) == 0:
-            return 0
+            return -1
 
         # Pick the largest buffer to guide the loop reordering
         _numel, lhs_dep, rhs_dep = max(candidates, key=operator.itemgetter(0))
 
         if not isinstance(lhs_dep, MemoryDep) or not isinstance(rhs_dep, MemoryDep):
-            return 0
+            return -1
 
         if lhs_dep.num_vars != rhs_dep.num_vars:
             # this can happen due to we don't merge loops.
@@ -3832,13 +3968,14 @@ class Scheduler:
             # normalization (merging loops)
             if lhs_dep.normalize() == rhs_dep.normalize():
                 return self.dep_size_hint(lhs_dep)
-            return 0
+            return -1
 
+        reordered = False
         # Only reorder loops for pointwise for now
         if not node1.is_reduction():
-            node1.reorder_loops_by_dep_pair(lhs_dep, rhs_dep)
+            reordered = node1.reorder_loops_by_dep_pair(lhs_dep, rhs_dep)
         elif not node2.is_reduction():
-            node2.reorder_loops_by_dep_pair(rhs_dep, lhs_dep)
+            reordered = node2.reorder_loops_by_dep_pair(rhs_dep, lhs_dep)
         else:
             loop_ordering_log.debug(
                 "Don't reorder loops since both nodes are reductions: %s v.s. %s",
@@ -3846,7 +3983,7 @@ class Scheduler:
                 node2.get_name(),
             )
 
-        return self.score_fusion_memory(node1, node2)
+        return self.score_fusion_memory(node1, node2) if reordered else -1
 
     def unfusable_node(self, node: BaseSchedulerNode) -> bool:
         """
@@ -4135,7 +4272,9 @@ class Scheduler:
             shared_data_score < config.score_fusion_memory_threshold
             and config.loop_ordering_after_fusion
         ):
-            shared_data_score = self.shared_data_after_reordering_loop(node1, node2)
+            new_shared_data_score = self.shared_data_after_reordering_loop(node1, node2)
+            if new_shared_data_score >= 0:
+                shared_data_score = new_shared_data_score
 
         if config.expand_dimension_for_pointwise_nodes and (
             expand_analysis := self.get_expand_dim_for_pointwise_nodes(node1, node2)

@@ -1767,6 +1767,52 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         out = f(MyTuple(a, b))
         self.assertTrue(same(a + 1, out))
 
+    def test_namedtuple_source_dynamic_attributes(self):
+        class MyNamedTuple(typing.NamedTuple):
+            a: torch.Tensor
+            b: torch.Tensor
+
+        class MyNamedTupleSubclass(MyNamedTuple):
+            pass
+
+        @torch.compile(fullgraph=True, backend="eager")
+        def f(tup):
+            c = torch.tensor(3.0)
+            tup.c = c  # Add dynamic attribute
+            return tup
+
+        extended_tup = MyNamedTupleSubclass(a=torch.tensor([1.0]), b=torch.tensor(2.0))
+        result = f(extended_tup)
+        # Verify the tuple has the expected structure
+        self.assertEqual(result.a, torch.tensor([1.0]))
+        self.assertEqual(result.b, torch.tensor(2.0))
+        self.assertTrue(hasattr(result, "c"))
+        self.assertEqual(result.c, torch.tensor(3.0))
+
+    def test_namedtuple_sourceless_dynamic_attributes(self):
+        class MyNamedTuple(typing.NamedTuple):
+            a: torch.Tensor
+            b: torch.Tensor
+
+        class MyNamedTupleSubclass(MyNamedTuple):
+            pass
+
+        @torch.compile(backend="eager")
+        def f():
+            # Create namedtuple inside function (sourceless)
+            tup = MyNamedTupleSubclass(a=torch.tensor([1.0]), b=torch.tensor(2.0))
+            # Add dynamic attribute
+            tup.c = torch.tensor(3.0)
+            return tup
+
+        result = f()
+        # Verify the tuple has the expected structure
+        self.assertEqual(result.a, torch.tensor([1.0]))
+        self.assertEqual(result.b, torch.tensor(2.0))
+        # Verify the dynamic attribute is preserved
+        self.assertTrue(hasattr(result, "c"))
+        self.assertEqual(result.c, torch.tensor(3.0))
+
     def test_structseq1(self):
         def fn(x, y):
             return torch.return_types.max((x, y))
@@ -7161,7 +7207,9 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
             return x + 1
 
         guard_manager = torch._dynamo.guards.RootGuardManager()
-        guard_manager.add_lambda_guard(lambda L: isinstance(L["x"], int), [])
+        guard_manager.add_lambda_guard(
+            lambda L: isinstance(L["x"], int), {"x": 0}, True, []
+        )
 
         def injected(x):
             return x + 42
@@ -7186,27 +7234,33 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
             return x + 1
 
         guard_manager_bool = torch._dynamo.guards.RootGuardManager()
-        guard_manager_bool.add_lambda_guard(lambda L: isinstance(L["x"], bool), [])
+        guard_manager_bool.add_lambda_guard(
+            lambda L: isinstance(L["x"], bool), {"x": 0}, True, []
+        )
 
         def injected_bool(x: bool):
             return x + 102
 
         guard_manager_int = torch._dynamo.guards.RootGuardManager()
-        guard_manager_int.add_lambda_guard(lambda L: isinstance(L["x"], int), [])
+        guard_manager_int.add_lambda_guard(
+            lambda L: isinstance(L["x"], int), {"x": 0}, True, []
+        )
 
         def injected_int(x: int):
             return x + 42
 
         guard_manager_tensor = torch._dynamo.guards.RootGuardManager()
         guard_manager_tensor.add_lambda_guard(
-            lambda L: isinstance(L["x"], torch.Tensor), []
+            lambda L: isinstance(L["x"], torch.Tensor), {"x": 0}, True, []
         )
 
         def injected_tensor(x: torch.Tensor):
             return x + 100
 
         guard_manager_str = torch._dynamo.guards.RootGuardManager()
-        guard_manager_str.add_lambda_guard(lambda L: isinstance(L["x"], str), [])
+        guard_manager_str.add_lambda_guard(
+            lambda L: isinstance(L["x"], str), {"x": 0}, True, []
+        )
 
         def injected_str(x: str):
             return x + "1"
@@ -7283,7 +7337,10 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
 
         guard_manager_bool = torch._dynamo.guards.RootGuardManager()
         guard_manager_bool.add_lambda_guard(
-            lambda L: isinstance(L["x"], bool), ["isinstance(L['x'], bool)"]
+            lambda L: isinstance(L["x"], bool),
+            {"x": 0},
+            True,
+            ["isinstance(L['x'], bool)"],
         )
 
         def injected_bool(x: bool):
@@ -9546,6 +9603,69 @@ def ___make_guard_fn():
                 return torch.ops.mylib.foo(x0, x1)
 
             f(torch.randn(9, requires_grad=True), torch.tensor([3, 6]))
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_dim_order(self):
+        @torch.compile(dynamic=False, fullgraph=True, backend="eager")
+        def f(x):
+            x = x.permute(3, 0, 2, 1)
+            return x, x.dim_order()
+
+        @torch.compile(dynamic=False, fullgraph=True, backend="eager")
+        def g(x):
+            return x.dim_order()
+
+        @torch.compile(dynamic=False, fullgraph=True, backend="eager")
+        def h0(xs, ambiguity_check=False):
+            u0, u1, u2 = xs.tolist()
+            torch._check(u2 >= u0)
+            torch._check(u1 >= u0)
+            # stride ordering still isn't unique here, should raise
+            y = torch.empty_strided([4, 4, 4], [u0, u1, u2])
+            return y.dim_order(ambiguity_check=ambiguity_check)
+
+        @torch.compile(dynamic=False, fullgraph=True, backend="eager")
+        def h1(xs, ambiguity_check=False):
+            u0, u1, u2 = xs.tolist()
+            y = torch.empty_strided([4, 4, 4], [u0, u0, u0])  # no ordering
+            return y.dim_order(ambiguity_check=ambiguity_check)
+
+        # check that for functions permuting contiguous input, the original stride is recovered with dim_order.
+        def test(x):
+            stride_inp = tuple(x.stride())
+            f_out, f_order = f(x)
+            self.assertEqual(stride_inp, tuple(f_out.stride(i) for i in f_order))
+
+        # shape: [4, u0, 5, u1]
+        x0 = torch.randn(4, 1, 5, 2)
+        torch._dynamo.decorators.mark_unbacked(x0, 1)
+        torch._dynamo.decorators.mark_unbacked(x0, 3)
+        test(x0)
+
+        # shape: [u0, u1, u2, u3]
+        x1 = torch.randn(4, 1, 5, 2)
+        for i in range(x1.ndim):
+            torch._dynamo.decorators.mark_unbacked(x1, i)
+        test(x1)
+
+        # custom strides (all integers)
+        x2 = torch.randn(10000)
+        x2 = x2.as_strided([4, 4, 4, 4], [1, 2, 4, 8])
+        assert g(x2) == (3, 2, 1, 0)
+
+        # custom unbacked strides with no ordering: ambiguity check should raise
+        xs = torch.tensor([2, 3, 4])
+        h0(xs)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.TorchRuntimeError,
+            r"The tensor does not have unique dim order.",
+        ):
+            h0(xs, ambiguity_check=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.TorchRuntimeError,
+            r"The tensor does not have unique dim order.",
+        ):
+            h1(xs, ambiguity_check=True)
 
     def test_str_format_assert1(self):
         @torch.compile(backend="eager", fullgraph=True)
@@ -12637,6 +12757,22 @@ fn
         self.assertRaises(Unsupported, f, fake_arg=1)
         self.assertRaises(Unsupported, f, [])
         self.assertRaises(Unsupported, f, "1 + j")
+
+    def test_compiled_class_graph_break(self):
+        counter = CompileCounter()
+
+        @torch.compile(backend=counter, fullgraph=False)
+        def f(x):
+            x += 1
+
+            class C:
+                pass
+
+            return x.sin()
+
+        x = torch.randn(3)
+        f(x)
+        self.assertEqual(counter.frame_count, 2)
 
 
 class MiscTestsPyTree(torch._inductor.test_case.TestCase):

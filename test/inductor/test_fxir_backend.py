@@ -693,7 +693,7 @@ class AOTFxirTestCase(InductorTestCase):
                 model, inp, dynamic_shapes=dynamic_shapes, strict=strict
             )
             gm = torch._inductor.aot_compile(
-                ep.module(), inp, options={"fx_wrapper": True}
+                ep.module(), inp, options={"fx_wrapper": True, "compile_threads": 1}
             )
             self.assertTrue(torch.allclose(model(*inp), gm(*inp)))
 

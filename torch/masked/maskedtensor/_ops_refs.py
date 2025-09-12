@@ -285,7 +285,9 @@ def layout(func, *args, **kwargs):
     return _get_data(args[0]).layout
 
 
-@register_dispatch_func([torch.ops.aten.is_contiguous])
+@register_dispatch_func(
+    [torch.ops.aten.is_contiguous, torch.ops.aten.sym_is_contiguous]
+)
 def is_contiguous(func, *args, **kwargs):
     data = _get_data(args[0])
     if data.is_sparse:

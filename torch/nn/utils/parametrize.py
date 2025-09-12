@@ -185,6 +185,14 @@ class ParametrizationList(ModuleList):
                     f"original.dtype: {original.dtype}\n"
                     f"right_inverse(original).dtype: {new.dtype}"
                 )
+
+            if original.device != new.device:
+                raise ValueError(
+                    "When `right_inverse` outputs one tensor, it may not change the device.\n"
+                    f"original.device: {original.device}\n"
+                    f"right_inverse(original).device: {new.device}"
+                )
+
             # Set the original to original so that the user does not need to re-register the parameter
             # manually in the optimiser
             with torch.no_grad():

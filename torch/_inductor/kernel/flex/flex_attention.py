@@ -10,7 +10,6 @@ from typing import Any, Optional, Union
 import sympy
 
 import torch
-from torch._inductor.utils import can_use_tma
 from torch._inductor.virtualized import V
 
 from ...ir import ComputedBuffer, ExternKernel, FixedLayout, TensorBox
@@ -253,6 +252,12 @@ def flex_attention(
         dtype=torch.float32,  # The logsumexp is always stored in fp32 regardless of the input dtype
         device=query.get_device(),
     )
+    max_scores = empty_strided(
+        logsumexp_shape,  # Same shape as logsumexp
+        None,
+        dtype=torch.float32,  # The max scores are always stored in fp32 regardless of the input dtype
+        device=query.get_device(),
+    )
     kernel_options.setdefault("SM_SCALE", scale)
 
     # Determine GQA broadcast factor.
@@ -311,9 +316,6 @@ def flex_attention(
         # USE TMA = false by default
         cur_kernel_options.setdefault("USE_TMA", False)
 
-        if cur_kernel_options["USE_TMA"] and can_use_tma(query, key, value):
-            cur_kernel_options["USE_TMA"] = True
-
         cur_kernel_options.setdefault("BLOCK_M", conf.block_m)
         cur_kernel_options.setdefault("BLOCK_N", conf.block_n)
         # Blocksparse options
@@ -346,6 +348,7 @@ def flex_attention(
                 key,
                 value,
                 logsumexp,
+                max_scores,
                 kv_num_blocks,
                 kv_indices,
                 full_kv_num_blocks,
@@ -358,6 +361,7 @@ def flex_attention(
             ],
             mutated_inputs=[
                 logsumexp,
+                max_scores,
             ],
             call_sizes=query.get_size(),
             **cur_kernel_options,
@@ -370,6 +374,7 @@ def flex_attention(
             key,
             value,
             logsumexp,
+            max_scores,
             kv_num_blocks,
             kv_indices,
             full_kv_num_blocks,
@@ -379,10 +384,10 @@ def flex_attention(
         + list(mask_mod_other_buffers)
     )
     input_gen_fns = {
-        4: create_num_blocks_fake_generator(kv_indices),
-        5: create_indices_fake,
-        6: create_num_blocks_fake_generator(full_kv_indices),
-        7: create_indices_fake,
+        5: create_num_blocks_fake_generator(kv_indices),
+        6: create_indices_fake,
+        7: create_num_blocks_fake_generator(full_kv_indices),
+        8: create_indices_fake,
     }
 
     out = autotune_select_algorithm(
@@ -403,7 +408,7 @@ def flex_attention(
         subgraph_buffer, mask_graph_buffer
     )
 
-    return (out, logsumexp)
+    return (out, logsumexp, max_scores)
 
 
 # ---------------------------- Backward HOP Implementation ----------------------------

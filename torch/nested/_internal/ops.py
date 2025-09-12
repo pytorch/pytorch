@@ -517,6 +517,29 @@ register_jagged_func(
 
 
 @register_jagged_func(
+    torch.ops.aten.sym_is_contiguous.default, "self: jt_all, memory_format: any?"
+)
+def sym_is_contiguous_general(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(  # type: ignore[misc]
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+    inp = new_kwargs.pop("input")
+
+    # If created from narrow() check for lengths
+    if inp.lengths() is not None:
+        return False
+
+    new_kwargs["memory_format"] = new_kwargs.get(
+        "memory_format", torch.contiguous_format
+    )
+
+    if new_kwargs["memory_format"] == torch.preserve_format:
+        return True
+
+    return torch.ops.aten.sym_is_contiguous.default(inp._values, **new_kwargs)
+
+
+@register_jagged_func(
     torch.ops.aten.clone.default, "input: jt_all, memory_format: any?"
 )
 def clone_default(func, *args, **kwargs):
@@ -2660,7 +2683,7 @@ def flex_njt(
     kernel_options: Dict[str, Any],
     score_mod_other_buffers: Tuple = (),
     mask_mod_other_buffers: Tuple = (),
-) -> Tuple[torch.Tensor, torch.Tensor]:
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     assert query.dim() == 4 and key.dim() == 4 and value.dim() == 4
 
     # TODO: Support this if needed; determine if NJT buffers need be unwrapped as dense.
@@ -2672,6 +2695,9 @@ def flex_njt(
             "flex_attention(): Nested tensor score_mod / mask_mod buffers are not "
             "currently supported. Please file an issue if this is important to you."
         )
+
+    # Always set them since 0 sized elements are not handled gracefully
+    kernel_options = {**kernel_options, "OUTPUT_MAX": True, "OUTPUT_LOGSUMEXP": True}
 
     # need to pass dense tensor of shape (B, n_heads, sum(seq_len), D)
     output = flex_attention_hop(
@@ -2703,7 +2729,15 @@ def flex_njt(
         max_seqlen=query._maybe_max_seqlen,  # type: ignore[attr-defined]
     ).transpose(1, 2)
 
-    return (output_njt, logsumexp_njt)
+    max_scores_njt = torch.nested.nested_tensor_from_jagged(
+        output[2].transpose(1, 2).squeeze(0),
+        query._offsets,  # type: ignore[attr-defined]
+        query._lengths,  # type: ignore[attr-defined]
+        min_seqlen=query._maybe_min_seqlen,  # type: ignore[attr-defined]
+        max_seqlen=query._maybe_max_seqlen,  # type: ignore[attr-defined]
+    ).transpose(1, 2)
+
+    return (output_njt, logsumexp_njt, max_scores_njt)
 
 
 @flex_attention_backward_hop.py_impl(NestedTensor)  # type: ignore[misc]

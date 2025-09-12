@@ -258,11 +258,19 @@ function install_torchrec_and_fbgemm() {
       git clone --recursive https://github.com/pytorch/fbgemm
       pushd fbgemm/fbgemm_gpu
       git checkout "${fbgemm_commit}" --recurse-submodules
-      python setup.py bdist_wheel \
-        --build-variant=rocm \
-        -DHIP_ROOT_DIR="${ROCM_PATH}" \
-        -DCMAKE_C_FLAGS="-DTORCH_USE_HIP_DSA" \
-        -DCMAKE_CXX_FLAGS="-DTORCH_USE_HIP_DSA"
+      # until the fbgemm_commit includes the tbb patch
+      patch <<'EOF'
+--- a/FbgemmGpu.cmake
++++ b/FbgemmGpu.cmake
+@@ -184,5 +184,6 @@ gpu_cpp_library(
+     fbgemm_gpu_tbe_cache
+     fbgemm_gpu_tbe_optimizers
+     fbgemm_gpu_tbe_utils
++    tbb
+   DESTINATION
+     fbgemm_gpu)
+EOF
+      python setup.py bdist_wheel --build-variant=rocm
       popd
 
       # Save the wheel before cleaning up

@@ -29,5 +29,5 @@ class LoweredBackendModule(torch.nn.Module):
     def original_module(self) -> ExportedProgram:
         return self._original_exported_program
 
-    def forward(self, *args):  # type: ignore[no-untyped-def]
-        return torch._higher_order_ops.executorch_call_delegate(self, *args)
+    def forward(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+        return torch._higher_order_ops.executorch_call_delegate(self, *args, **kwargs)

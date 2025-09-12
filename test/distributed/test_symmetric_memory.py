@@ -558,7 +558,7 @@ class AsyncTPTest(MultiProcContinuousTest):
                 )
 
         assert outputs[0].stride() == outputs[1].stride()
-        assert torch.allclose(outputs[0], outputs[1]), (outputs[0], outputs[1])
+        self.assertEqual(outputs[0], outputs[1])
 
     @runOnRocmArch(MI300_ARCH)
     @parametrize("dim", [0, 1, 2])
@@ -644,7 +644,7 @@ class SymmMemEmptySetDeviceTest(MultiProcessTestCase):
 
         symm_mem_hdl.barrier()
 
-    @runOnRocmArch(MI300_ARCH)
+    @skipIfRocm
     @skip_if_lt_x_gpu(2)
     @parametrize("set_device", [True, False])
     def test_empty_strided_p2p(self, set_device: bool) -> None:

@@ -1677,6 +1677,10 @@ class FakeTensorMode(TorchDispatchMode):
         )
         from torch._higher_order_ops.utils import FunctionalizeCtxWrapper
 
+        if isinstance(args, (list, tuple, dict)):
+            result.append(type(args))
+            result.append(f"length_{len(args)}")
+
         if isinstance(args, dict):
             self._prep_args_for_hash(result, args.keys(), state, id_hashed_objects)
             self._prep_args_for_hash(result, args.values(), state, id_hashed_objects)

@@ -26,7 +26,11 @@ import torch
 import torch.fx
 
 from .. import graph_break_hints, polyfills, variables
-from ..bytecode_transformation import create_call_function, create_instruction
+from ..bytecode_transformation import (
+    create_call_function,
+    create_instruction,
+    create_rot_n,
+)
 from ..exc import raise_observed_exception, unimplemented_v2
 from ..source import AttrSource, NamedTupleFieldsSource
 from ..utils import (
@@ -1173,9 +1177,24 @@ class NamedTupleVariable(TupleVariable):
     def as_python_constant(self):
         if self.is_structseq():
             # StructSequenceType(iterable)
-            return self.python_type()([x.as_python_constant() for x in self.items])
-        # NamedTupleType(*iterable)
-        return self.python_type()(*[x.as_python_constant() for x in self.items])
+            result = self.python_type()([x.as_python_constant() for x in self.items])
+        else:
+            # NamedTupleType(*iterable)
+            result = self.python_type()(*[x.as_python_constant() for x in self.items])
+
+        # Apply dynamic attributes if any were set
+        if self.dynamic_attributes:
+            for attr_name, attr_value in self.dynamic_attributes.items():
+                # Convert VariableTracker to Python constant if needed
+                if hasattr(attr_value, "as_python_constant"):
+                    python_value = attr_value.as_python_constant()
+                else:
+                    raise NotImplementedError(
+                        "Can not convert dynamic attribute without python constant value to python constant."
+                    )
+                setattr(result, attr_name, python_value)
+
+        return result
 
     def as_proxy(self):
         assert self.python_type() is not SizeVariable
@@ -1186,6 +1205,7 @@ class NamedTupleVariable(TupleVariable):
         return self.python_type()(*self._as_proxy())
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
+        # Always reconstruct the NamedTuple normally first
         # Constructors:
         #   StructSequenceType(iterable)
         #   NamedTupleType(*iterable)
@@ -1203,6 +1223,12 @@ class NamedTupleVariable(TupleVariable):
             ]
             + create_call_function(1, False)
         )
+
+        for name, value in self.dynamic_attributes.items():
+            codegen.dup_top()
+            codegen(value)
+            codegen.extend_output(create_rot_n(2))
+            codegen.store_attr(name)
 
     def call_method(
         self,
@@ -1227,6 +1253,8 @@ class NamedTupleVariable(TupleVariable):
                 raise_observed_exception(AttributeError, tx)
             # Subclass of namedtuple type can have dynamic attributes
             tx.output.side_effects.mutation(self)
+            if self.source:
+                tx.output.side_effects.store_attr(self, attr, value)
             self.dynamic_attributes[attr] = value
             return ConstantVariable.create(None)
         return super().call_method(tx, name, args, kwargs)

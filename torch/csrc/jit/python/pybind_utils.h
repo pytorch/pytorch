@@ -13,6 +13,8 @@
 #include <torch/csrc/Layout.h>
 #include <torch/csrc/QScheme.h>
 #include <torch/csrc/Stream.h>
+#include <torch/csrc/distributed/rpc/py_rref.h>
+#include <torch/csrc/distributed/rpc/rref_impl.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/frontend/schema_matching.h>
 #include <torch/csrc/jit/frontend/tracer.h>
@@ -24,10 +26,6 @@
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/six.h>
-#ifdef USE_DISTRIBUTED
-#include <torch/csrc/distributed/rpc/py_rref.h>
-#include <torch/csrc/distributed/rpc/rref_impl.h>
-#endif
 
 #include <ATen/core/function_schema.h>
 #include <c10/core/Stream.h>
@@ -1277,8 +1275,23 @@ TORCH_PYTHON_API std::pair<std::shared_ptr<Operator>, Stack> getOpWithStack(
     const py::args& args,
     const py::kwargs& kwargs);
 
+// Efficient overload (does not require vector allocation) of the
+// above for use from C++ code.
+std::pair<std::shared_ptr<Operator>, Stack> getOpWithStack(
+    c10::ArrayRef<std::shared_ptr<Operator>> operations,
+    const py::args& args,
+    const py::kwargs& kwargs);
+
 TORCH_PYTHON_API py::object invokeOperatorFromPython(
     const std::vector<std::shared_ptr<Operator>>& operations,
+    const py::args& args,
+    const py::kwargs& kwargs,
+    std::optional<c10::DispatchKey> dk = std::nullopt);
+
+// Efficient overload (does not require vector allocation) of the
+// above for use from C++ code.
+py::object invokeOperatorFromPython(
+    c10::ArrayRef<std::shared_ptr<Operator>> operations,
     const py::args& args,
     const py::kwargs& kwargs,
     std::optional<c10::DispatchKey> dk = std::nullopt);
@@ -1298,6 +1311,16 @@ TORCH_PYTHON_API bool checkSchemaAllowFakeScriptObject(
 
 TORCH_PYTHON_API py::object _get_operation_for_overload_or_packet(
     const std::vector<std::shared_ptr<Operator>>& operations,
+    Symbol symbol,
+    const py::args& args,
+    const py::kwargs& kwargs,
+    bool is_overload,
+    std::optional<c10::DispatchKey> dk = std::nullopt);
+
+// Efficient overload (does not require vector allocation) of the
+// above for use from C++ code.
+py::object _get_operation_for_overload_or_packet(
+    c10::ArrayRef<std::shared_ptr<Operator>> operations,
     Symbol symbol,
     const py::args& args,
     const py::kwargs& kwargs,

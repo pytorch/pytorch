@@ -1129,6 +1129,14 @@ def is_storage(obj: _Any, /) -> _TypeIs[_Union["TypedStorage", "UntypedStorage"]
 
     Args:
         obj (Object): Object to test
+    Example::
+
+        >>> x = torch.tensor([1, 2, 3])
+        >>> torch.is_storage(x)
+        False
+        >>> torch.is_storage(x.untyped_storage())
+        True
+
     """
     return type(obj) in _storage_classes
 

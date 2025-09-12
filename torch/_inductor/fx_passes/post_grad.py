@@ -204,13 +204,14 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
         p = (
             bucket_fsdp_reduce_scatter
-            if config.bucket_reduce_scatters_fx == "fsdp"
+            if "fsdp" in config.bucket_reduce_scatters_fx
             else bucket_reduce_scatter
         )
         GraphTransformObserver(gm, "bucket_reduce_scatters").apply_graph_pass(
             lambda graph: p(
                 graph.owning_module,
                 config.bucket_reduce_scatters_fx_bucket_size_determinator,
+                config.bucket_reduce_scatters_fx,
             )
         )
         collectives_bucketing = True
@@ -223,13 +224,14 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
         p = (
             bucket_fsdp_all_gather  # type: ignore[assignment]
-            if config.bucket_all_gathers_fx == "fsdp"
+            if "fsdp" in config.bucket_all_gathers_fx
             else bucket_all_gather
         )
         GraphTransformObserver(gm, "bucket_all_gathers").apply_graph_pass(
             lambda graph: p(
                 graph.owning_module,
                 config.bucket_all_gathers_fx_bucket_size_determinator,
+                config.bucket_all_gathers_fx,
             )
         )
         collectives_bucketing = True

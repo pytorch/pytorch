@@ -416,6 +416,8 @@ bucket_reduce_scatters_fx_bucket_size_determinator: Optional[Callable[[int], int
 # for built-in estimation function, pass in "default"; for user-defined estimation function, pass in the function handle
 estimate_op_runtime = "default"
 
+runtime_estimations_mms_benchmark: bool = False
+
 # unit: GB/s, uni-directional P2P bandwidth per card
 # default value is NVLink
 intra_node_bw = 300

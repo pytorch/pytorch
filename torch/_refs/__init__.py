@@ -19,7 +19,6 @@ import torch.utils._pytree as pytree
 from torch import sym_float, sym_int
 from torch._prims_common import (
     BoolLike,
-    contiguous_for_memory_format_or_false,
     DeviceLikeType,
     Dim,
     DimsSequenceType,
@@ -29,6 +28,7 @@ from torch._prims_common import (
     FloatLike,
     FloatWithoutSymFloat,
     IntLike,
+    is_contiguous_for_memory_format_or_false,
     is_contiguous_or_false,
     is_weakly_lesser_type,
     Number,
@@ -449,6 +449,38 @@ def _maybe_broadcast(*args, preserve_cpu_scalar_tensors=True):
         *(t.shape if isinstance(t, TensorLike) else None for t in args)
     )
 
+    def should_expand(a: ShapeType, b: ShapeType) -> bool:
+        from torch.fx.experimental.symbolic_shapes import (
+            guard_or_false,
+            sym_and,
+            sym_or,
+        )
+
+        if len(a) != len(b):
+            return True
+
+        for x, y in zip(a, b):
+            if guard_or_false(x != y):
+                # We know they are not the same.
+                return True
+
+            # They are the same or we do not know if they are the same or not.
+            # 1==1 no-broadcast
+            # u0==1 and 1==u0 cases. We broadcast!
+            if guard_or_false(sym_and(x == 1, y == 1)):
+                pass
+            elif guard_or_false(sym_or(x == 1, y == 1)):
+                # assume broadcasting.
+                return True
+
+            # u0==u1 assume the same, no broadcasting!
+            torch._check(
+                x == y,
+                "sizes assumed to be the same due to unbacked broadcasting semantics",
+            )
+
+        return False
+
     def __maybe_broadcast(x, shape):
         if x is None:
             return None
@@ -458,7 +490,7 @@ def _maybe_broadcast(*args, preserve_cpu_scalar_tensors=True):
             if preserve_cpu_scalar_tensors and utils.is_cpu_scalar_tensor(x):
                 return x
 
-            if not utils.same_shape(x.shape, common_shape):
+            if should_expand(x.shape, common_shape):
                 return x.expand(common_shape)
 
             return x
@@ -3000,7 +3032,7 @@ def contiguous(
     )
 
     # TODO: make logic consistent with aten contiguous
-    if contiguous_for_memory_format_or_false(a, memory_format=memory_format):
+    if is_contiguous_for_memory_format_or_false(a, memory_format=memory_format):
         return a
 
     return torch.clone(a, memory_format=memory_format)
@@ -3100,7 +3132,10 @@ def flatten(a: TensorLikeType, start_dim: int = 0, end_dim: int = -1) -> TensorL
 
     # Tries to take a view
     # TODO: we could look at directing collapse_view to skip its meta function here (unsafe_collapse_view)
-    new_shape, _new_strides = prims._collapse_view_helper(a, start_dim, end_dim)
+    # Unbacked semnatics: if validty of in-place flattening is undecided we copy.
+    new_shape, _new_strides = prims._collapse_view_helper(
+        a, start_dim, end_dim, must_be_valid=None
+    )
     if new_shape is not None:
         return prims.collapse_view(a, start_dim, end_dim)
 
@@ -3808,7 +3843,9 @@ def _reshape_view_helper_core_alg(
             # may return a view of a copy
 
             # Checks if collapse can be a view and short-circuits to copying reshape if it can't
-            new_shape, _new_strides = prims._collapse_view_helper(a_, idx, end)
+            new_shape, _new_strides = prims._collapse_view_helper(
+                a_, idx, end, must_be_valid=None
+            )
             if new_shape is None:
                 if allow_copy:
                     return prims.reshape(a, shape)
@@ -5074,7 +5111,7 @@ def empty_like(
         )
 
     # memory_format == torch.preserve_format
-    logical_to_physical_perm = (
+    logical_to_physical_perm, _ = (
         utils.compute_elementwise_output_logical_to_physical_perm(a)
     )
     # identity perm is [2, 1, 0]

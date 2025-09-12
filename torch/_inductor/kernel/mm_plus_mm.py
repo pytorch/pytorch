@@ -51,7 +51,7 @@ mm_plus_mm_template = TritonTemplate(
     stride_dn = {{stride("D", 1)}}
 
     # based on triton.ops.matmul
-    pid = tl.program_id(0)
+    pid = tl.program_id(0).to(INDEX_DTYPE)
     grid_m = (M + BLOCK_M - 1) // BLOCK_M
     grid_n = (N + BLOCK_N - 1) // BLOCK_N
 
@@ -117,7 +117,7 @@ mm_plus_mm_template = TritonTemplate(
     mask = (idx_m < M) & (idx_n < N)
 
     # inductor generates a suffix
-    {{store_output(("idx_m", "idx_n"), "acc", "mask")}}
+    {{store_output(("idx_m", "idx_n"), "acc", "mask", val_shape=("BLOCK_M", "BLOCK_N"))}}
 """,
     cache_codegen_enabled_for_template=True,
 )
@@ -157,17 +157,13 @@ def tuned_mm_plus_mm(mat1, mat2, mat3, mat4, *, layout=None):
     choices: list[ChoiceCaller] = []
     if use_aten_gemm_kernels():
         choices.extend(
-            V.choices.get_mm_configs(
-                kernel_inputs, layout1, [aten_mm_plus_mm], "mm_plus_mm"
-            )
+            V.choices.get_mm_configs(kernel_inputs, [aten_mm_plus_mm], "mm_plus_mm")
         )
 
     if use_triton_template(layout1, check_max_autotune=False):
         # Get template choices using the new unified function
         choices.extend(
-            V.choices.get_mm_configs(
-                kernel_inputs, layout1, [mm_plus_mm_template], "mm_plus_mm"
-            )
+            V.choices.get_mm_configs(kernel_inputs, [mm_plus_mm_template], "mm_plus_mm")
         )
 
     return autotune_select_algorithm(

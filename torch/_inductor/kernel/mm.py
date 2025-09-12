@@ -77,7 +77,7 @@ mm_template = TritonTemplate(
     stride_bn = {{stride("B", 1)}}
 
     # based on triton.ops.matmul
-    pid = tl.program_id(0)
+    pid = tl.program_id(0).to(INDEX_DTYPE)
     grid_m = (M + BLOCK_M - 1) // BLOCK_M
     grid_n = (N + BLOCK_N - 1) // BLOCK_N
 
@@ -113,11 +113,13 @@ mm_template = TritonTemplate(
 
         idx_m = offs_a_m[:, None]
         idx_n = a_k_idx_vals
-        {{load_input("A", "a", ("idx_m", "idx_n"), mask=None if EVEN_K else "a_mask", indent_width=8)}}
+        {{load_input("A", "a", ("idx_m", "idx_n"), mask=None if EVEN_K else "a_mask",
+                     indent_width=8, index_shape=("BLOCK_M", "BLOCK_K"))}}
 
         idx_m = b_k_idx_vals
         idx_n = offs_b_n[None, :]
-        {{load_input("B", "b", ("idx_m", "idx_n"), mask=None if EVEN_K else "b_mask", indent_width=8)}}
+        {{load_input("B", "b", ("idx_m", "idx_n"), mask=None if EVEN_K else "b_mask",
+                     indent_width=8, index_shape=("BLOCK_K", "BLOCK_N"))}}
 
         {% if USE_FAST_ACCUM %}
         acc = tl.dot(a, b, acc, allow_tf32=ALLOW_TF32, out_dtype=ACC_TYPE)
@@ -133,7 +135,7 @@ mm_template = TritonTemplate(
     mask = (idx_m < M) & (idx_n < N)
 
     # inductor generates a suffix
-    {{store_output(("idx_m", "idx_n"), "acc", "mask")}}
+    {{store_output(("idx_m", "idx_n"), "acc", "mask", val_shape=("BLOCK_M", "BLOCK_N"))}}
 """
         if (torch.version.hip is None) or triton_version >= "3.3.0"
         # FIXME: To get around rocm failures like https://github.com/pytorch/pytorch/actions/runs/13123783322/job/36617154943
@@ -153,7 +155,7 @@ mm_template = TritonTemplate(
     stride_bn = {{stride("B", 1)}}
 
     # based on triton.ops.matmul
-    pid = tl.program_id(0)
+    pid = tl.program_id(0).to(INDEX_DTYPE)
     grid_m = (M + BLOCK_M - 1) // BLOCK_M
     grid_n = (N + BLOCK_N - 1) // BLOCK_N
 
@@ -189,11 +191,13 @@ mm_template = TritonTemplate(
 
         idx_m = offs_a_m[:, None]
         idx_n = a_k_idx_vals
-        {{load_input("A", "a", ("idx_m", "idx_n"), mask=None if EVEN_K else "a_mask", indent_width=8)}}
+        {{load_input("A", "a", ("idx_m", "idx_n"), mask=None if EVEN_K else "a_mask",
+                     indent_width=8, index_shape=("BLOCK_M", "BLOCK_K"))}}
 
         idx_m = b_k_idx_vals
         idx_n = offs_b_n[None, :]
-        {{load_input("B", "b", ("idx_m", "idx_n"), mask=None if EVEN_K else "b_mask", indent_width=8)}}
+        {{load_input("B", "b", ("idx_m", "idx_n"), mask=None if EVEN_K else "b_mask",
+                     indent_width=8, index_shape=("BLOCK_K", "BLOCK_N"))}}
         {% if USE_FAST_ACCUM %}
         acc = tl.dot(a, b, acc, allow_tf32=ALLOW_TF32, out_dtype=ACC_TYPE)
         {% else %}
@@ -208,7 +212,7 @@ mm_template = TritonTemplate(
     mask = (idx_m < M) & (idx_n < N)
 
     # inductor generates a suffix
-    {{store_output(("idx_m", "idx_n"), "acc", "mask")}}
+    {{store_output(("idx_m", "idx_n"), "acc", "mask", val_shape=("BLOCK_M", "BLOCK_N"))}}
 """
     ),
     cache_codegen_enabled_for_template=True,
@@ -227,7 +231,7 @@ persistent_tma_mm_template = TritonTemplate(
         # early exit due to zero-size input(s)
         return
 
-    start_pid = tl.program_id(0)
+    start_pid = tl.program_id(0).to(INDEX_DTYPE)
     grid_m = tl.cdiv(M, BLOCK_M)
     grid_n = tl.cdiv(N, BLOCK_N)
     k_tiles = tl.cdiv(K, BLOCK_K)
@@ -343,7 +347,7 @@ persistent_tma_mm_template = TritonTemplate(
             mask = (idx_m < M) & (idx_n < N)
 
             # inductor generates a suffix
-            {{store_output(("idx_m", "idx_n"), "acc", "mask", indent_width=12)}}
+            {{store_output(("idx_m", "idx_n"), "acc", "mask", indent_width=12, val_shape=("BLOCK_M", "BLOCK_N"))}}
             acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=ACC_TYPE)
 
 """,
@@ -419,7 +423,7 @@ device_tma = r"""
         stride_a_scale_m = 0
         stride_b_scale_n = 0
 
-    start_pid = tl.program_id(axis=0)
+    start_pid = tl.program_id(axis=0).to(INDEX_DTYPE)
     num_pid_m = tl.cdiv(M, BLOCK_M)
     num_pid_n = tl.cdiv(N, BLOCK_N)
     k_tiles = tl.cdiv(K, BLOCK_K)
@@ -534,7 +538,7 @@ device_tma = r"""
             idx_n = offs_cn[None, :]
             mask = (idx_m < M) & (idx_n < N)
             # inductor generates a suffix
-            {{store_output(("idx_m", "idx_n"), "accumulator", "mask", indent_width=12)}}
+            {{store_output(("idx_m", "idx_n"), "accumulator", "mask", indent_width=12, val_shape=("BLOCK_M", "BLOCK_N"))}}
             accumulator = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
 """
 
@@ -753,32 +757,30 @@ def tuned_mm(mat1, mat2, *, layout=None):
     choices: list[ChoiceCaller] = []
     if use_aten_gemm_kernels():
         choices.extend(
-            V.choices.get_mm_configs(kernel_inputs, aten_layout, [aten_mm], "mm")
+            V.choices.get_mm_configs(kernel_inputs, [aten_mm], "mm", aten_layout)
         )
     static_shape, is_nonzero = _is_static_problem(layout)
 
     if is_nonzero and use_triton_template(layout, check_max_autotune=False):
         # Get template choices using the new unified function
-        choices.extend(
-            V.choices.get_mm_configs(kernel_inputs, layout, [mm_template], "mm")
-        )
+        choices.extend(V.choices.get_mm_configs(kernel_inputs, [mm_template], "mm"))
         if use_triton_tma_template(mat1, mat2):
             # Get TMA template choices using the new unified function
             choices.extend(
                 V.choices.get_mm_configs(
-                    kernel_inputs, layout, [persistent_tma_mm_template], "mm"
+                    kernel_inputs, [persistent_tma_mm_template], "mm"
                 )
             )
 
         if use_decompose_k_choice(m, n, k):
             choices.extend(
                 V.choices.get_mm_configs(
-                    kernel_inputs, layout, [decompose_k_subgraph_template], "mm"
+                    kernel_inputs, [decompose_k_subgraph_template], "mm"
                 )
             )
         choices.extend(
             V.choices.get_mm_configs(
-                kernel_inputs, layout, [mm_contiguous_subgraph_template], "mm"
+                kernel_inputs, [mm_contiguous_subgraph_template], "mm"
             )
         )
 
@@ -820,7 +822,6 @@ def tuned_mm(mat1, mat2, *, layout=None):
                 # mm-extra is a hack to keep the ah functionality alive
                 # while we transition to the unified kwargs retrieval
                 kernel_inputs,
-                layout,
                 [mm_template],
                 "mm-ah",
             )
@@ -896,12 +897,11 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
     choices: list[ChoiceCaller] = []
 
     # Create MMKernelInputs for Int MM
-    kernel_inputs = MMKernelInputs([mat1, mat2])
+    kernel_inputs = MMKernelInputs([mat1, mat2], out_dtype=torch.int32)
     if use_aten_gemm_kernels():
         choices.extend(
             V.choices.get_mm_configs(
                 kernel_inputs,
-                layout,
                 [aten__int_mm],
                 name,
             )
@@ -915,9 +915,7 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
     if is_nonzero and use_triton_template(
         layout, enable_int32=True, check_max_autotune=False
     ):
-        choices.extend(
-            V.choices.get_mm_configs(kernel_inputs, layout, [mm_template], name)
-        )
+        choices.extend(V.choices.get_mm_configs(kernel_inputs, [mm_template], name))
 
     return autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout)
 
@@ -969,9 +967,9 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         choices.extend(
             V.choices.get_mm_configs(
                 kernel_inputs,
-                aten_layout,
                 [aten_addmm],
                 name,
+                aten_layout,
             )
         )
         return autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout)
@@ -980,7 +978,6 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         choices.extend(
             V.choices.get_mm_configs(
                 kernel_inputs,
-                aten_layout,
                 [aten_bias_addmm],
                 name,
             )
@@ -988,7 +985,6 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         choices.extend(
             V.choices.get_mm_configs(
                 kernel_inputs,
-                aten_layout,
                 [aten_addmm],
                 name,
             )
@@ -1000,7 +996,6 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         choices.extend(
             V.choices.get_mm_configs(
                 kernel_inputs,
-                layout,
                 [mm_template],
                 name,
             )
@@ -1011,7 +1006,6 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
             choices.extend(
                 V.choices.get_mm_configs(
                     kernel_inputs,
-                    layout,
                     [persistent_tma_mm_template],
                     name,
                 )
@@ -1020,7 +1014,6 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         choices.extend(
             V.choices.get_mm_configs(
                 kernel_inputs,
-                layout,
                 [addmm_contiguous_subgraph_template],
                 "addmm",
             )
@@ -1174,14 +1167,15 @@ def tuned_scaled_mm(
         input_nodes = [mat_a, mat_b, scale_a_real, scale_b_real, bias_real]
 
     # Create MMKernelInputs for Scaled MM (matrices are at indices 0, 1)
-    kernel_inputs = MMKernelInputs(input_nodes, mat1_idx=0, mat2_idx=1)
+    kernel_inputs = MMKernelInputs(
+        input_nodes, mat1_idx=0, mat2_idx=1, out_dtype=out_dtype
+    )
 
     choices: list[ChoiceCaller] = []
     if use_aten_gemm_kernels():
         choices.extend(
             V.choices.get_mm_configs(
                 kernel_inputs,
-                layout,
                 [aten__fp8_mm],
                 name,
                 kwarg_overrides={
@@ -1209,7 +1203,6 @@ def tuned_scaled_mm(
             choices.extend(
                 V.choices.get_mm_configs(
                     kernel_inputs,
-                    layout,
                     [scaled_mm_device_tma_template],
                     name,
                     kwarg_overrides={scaled_mm_device_tma_template.uid: overriders},
@@ -1220,7 +1213,6 @@ def tuned_scaled_mm(
         choices.extend(
             V.choices.get_mm_configs(
                 kernel_inputs,
-                layout,
                 [mm_template],
                 name,
                 kwarg_overrides={mm_template.uid: overriders},

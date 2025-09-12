@@ -116,6 +116,11 @@ class ModIndex(torch.autograd.Function):
             None,
         )
 
+    @classmethod
+    @torch._export.wrappers.allow_in_pre_dispatch_graph
+    def apply(cls, *args, **kwargs):  # type: ignore[no-untyped-def]
+        return super().apply(*args, **kwargs)
+
 
 mod_index = ModIndex.apply
 

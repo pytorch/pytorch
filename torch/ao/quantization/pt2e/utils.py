@@ -356,12 +356,12 @@ def _get_aten_graph_module_for_pattern(
             [x.cuda() if isinstance(x, torch.Tensor) else x for x in example_inputs]
         )
 
-    aten_pattern = torch.export.export_for_training(
+    aten_pattern = torch.export.export(
         pattern,  # type: ignore[arg-type]
         example_inputs,
         kwargs,
         strict=True,
-    ).module()
+    ).module(check_guards=False)
 
     aten_pattern.graph.eliminate_dead_code()  # type: ignore[operator, union-attr]
     aten_pattern.recompile()  # type: ignore[operator]

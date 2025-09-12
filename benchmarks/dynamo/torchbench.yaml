@@ -219,7 +219,9 @@ skip:
       - timm_regnet
       - timm_nfnet
 
-    cuda: []
+    cuda:
+      # Temporary until https://github.com/pytorch/pytorch/issues/162282 is fixed
+      - sam_fast
 
   test:
     training:

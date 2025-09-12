@@ -370,3 +370,27 @@ def expand_to_full_mesh_op_strategy(
         )
         all_strategies.append(strategy)
     return OpStrategy(all_strategies)
+
+
+def shift_shard_dims_after_insert(
+    placements: Sequence[Placement], insert_dim: int = 0
+) -> Sequence[Placement]:
+    normalized_placements: list[Placement] = []
+    for placement in placements:
+        if isinstance(placement, Shard) and placement.dim >= insert_dim:
+            normalized_placements.append(Shard(placement.dim + 1))
+        else:
+            normalized_placements.append(placement)
+    return normalized_placements
+
+
+def shift_shard_dims_after_remove(
+    placements: Sequence[Placement], remove_dim: int = 0
+) -> Sequence[Placement]:
+    normalized_placements: list[Placement] = []
+    for placement in placements:
+        if isinstance(placement, Shard) and placement.dim > remove_dim:
+            normalized_placements.append(Shard(placement.dim - 1))
+        else:
+            normalized_placements.append(placement)
+    return normalized_placements

@@ -1360,7 +1360,8 @@ Tensor outer(const Tensor& self, const Tensor& vec2) {
 #endif
 
 
-#if defined(__aarch64__) && AT_MKLDNN_ACL_ENABLED()
+#if !defined(__aarch64__) || AT_MKLDNN_ACL_ENABLED()
+// Used by default on x86 platforms and on AArch64+ACL
 static inline int64_t get_mkldnn_matmul_min_dim() {
   static auto value = [&] {
     const int64_t default_min_dim = [&] {
@@ -1395,8 +1396,6 @@ static inline bool apply_mkldnn_matmul_heur(int64_t m, int64_t k, int64_t n) {
   return at::globalContext().userEnabledMkldnn() && m > min_dim && k > min_dim && n > min_dim && m * k * n > min_size;
 }
 #endif
-
-
 static void addmm_impl_cpu_(
     Tensor &result, const Tensor &self, Tensor m1, Tensor m2, const Scalar& beta, const Scalar& alpha) {
   TORCH_INTERNAL_ASSERT(self.dim() == 2 && m1.dim() == 2 && m2.dim() == 2);
@@ -1772,8 +1771,8 @@ static inline void bmm_out_or_baddbmm_(const Tensor& self_or_result_, const Tens
     return (strides[2] == 1 && (sizes[1] == 1 || strides[1] >= sizes[2])) ||
         (strides[1] == 1 && (sizes[2] == 1 || strides[2] >= sizes[1]));
   };
-
-#if defined(__aarch64__) && AT_MKLDNN_ACL_ENABLED()
+#if !defined(__aarch64__) || AT_MKLDNN_ACL_ENABLED()
+  // Always apply mkldnn heuristic on x86 platform, but on ARM only if compiled with ACL
   bool apply_heur = apply_mkldnn_matmul_heur(batch1.sizes()[1], batch1.sizes()[2], batch2.sizes()[2]);
   if (apply_heur && use_mkldnn_matmul(batch1, batch2, self_or_result)) {
     try {
@@ -1785,7 +1784,6 @@ static inline void bmm_out_or_baddbmm_(const Tensor& self_or_result_, const Tens
     }
   }
 #endif
-
   if (contraction_size * res_rows * res_cols < 400) {
     if (is_bmm_out) {
       AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf, batch1.scalar_type(), "bmm", [&] {
