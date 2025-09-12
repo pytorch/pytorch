@@ -46,9 +46,13 @@
 #include <fmt/format.h>
 #include <pybind11/chrono.h>
 #include <torch/csrc/distributed/c10d/PrefixStore.hpp>
+
 #include <torch/csrc/distributed/c10d/symm_mem/DMAConnectivity.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
+
+#ifdef USE_NVSHMEM
 #include <torch/csrc/distributed/c10d/symm_mem/nvshmem_extension.cuh>
+#endif
 
 #include <torch/csrc/distributed/c10d/comm.hpp>
 #include <torch/csrc/distributed/c10d/debug.h>
@@ -1202,6 +1206,12 @@ This class does not support ``__members__`` property.)");
           py::arg("src_rank"),
           py::arg("channel") = 0,
           py::arg("timeout_ms") = 0)
+      .def(
+          "get_remote_tensor",
+          &SymmetricMemory::get_remote_tensor,
+          py::arg("peer"),
+          py::arg("sizes"),
+          py::arg("dtype"))
       // Util functions that are often used together with symmetric memory but
       // not necessarily directly on symmetric memory.
       .def_static(
@@ -3097,8 +3107,6 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
           .def_readwrite("group_name", &::c10d::Backend::Options::group_name);
 
 #ifdef USE_C10D_GLOO
-  static const std::string GLOO_SOCKET_IFNAME_ENV = "GLOO_SOCKET_IFNAME";
-
   auto processGroupGloo =
       intrusive_ptr_no_gil_destructor_class_<::c10d::ProcessGroupGloo>(
           module, "ProcessGroupGloo", backend);
@@ -3175,31 +3183,11 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
             // https://github.com/pybind/pybind11/issues/5473
             py::gil_scoped_release nogil{};
 
-            auto options = ::c10d::ProcessGroupGloo::Options::create();
-            bool lazyInit = ::c10d::getDefaultGlooLazyInit();
-
-            // Use interfaces listed in "GLOO_SOCKET_IFNAME", if set.
-            auto ifnameEnv =
-                c10::utils::get_env(GLOO_SOCKET_IFNAME_ENV.c_str());
-            if (ifnameEnv && ifnameEnv->size() > 1) {
-              for (const auto& iface : ::c10d::split(',', ifnameEnv->c_str())) {
-                options->devices.push_back(
-                    ::c10d::ProcessGroupGloo::createDeviceForInterface(
-                        iface, lazyInit));
-              }
-            } else {
-              // If no hostname is specified, this function looks up
-              // the machine's hostname and returns a device instance
-              // associated with the address that the hostname resolves to.
-              options->devices.push_back(
-                  ::c10d::ProcessGroupGloo::createDefaultDevice(lazyInit));
-            }
-
-            options->timeout = timeout;
-            // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
-            options->threads = options->devices.size() * 2;
             return c10::make_intrusive<::c10d::ProcessGroupGloo>(
-                store, rank, size, options);
+                store,
+                rank,
+                size,
+                ::c10d::ProcessGroupGloo::Options::create_default(timeout));
           }),
           py::arg("store"),
           py::arg("rank"),

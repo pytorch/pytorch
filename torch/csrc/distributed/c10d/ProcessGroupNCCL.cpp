@@ -68,23 +68,6 @@ inline bool isUnsupportedFloat8(at::ScalarType t) {
   );
 }
 
-bool complexViewAsRealAllowed(const ReduceOp& reduceOp) {
-  switch (reduceOp) {
-    // NOLINTNEXTLINE(bugprone-branch-clone)
-    case ReduceOp::SUM:
-      return true;
-    case ReduceOp::AVG:
-      return true;
-    case ReduceOp::PREMUL_SUM:
-      return true;
-    case ReduceOp::UNUSED:
-      return true;
-    default:
-      return false;
-  }
-  return false;
-}
-
 #ifdef ENABLE_NCCL_PREMUL_SUM_SUPPORT
 template <typename T, ncclDataType_t dataType>
 ncclRedOpRAII unpackPreMulSum(
@@ -2641,7 +2624,7 @@ void ProcessGroupNCCL::runHookLoop() {
         // Hook might grab GIL, unlock first to prevent deadlock
         lock.unlock();
 
-        auto timeFinished = std::chrono::system_clock::now();
+        auto timeFinished = std::chrono::steady_clock::now();
         auto timeStarted =
             timeFinished +
             std::chrono::duration_cast<std::chrono::steady_clock::duration>(
@@ -4403,7 +4386,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce(
   auto tensor = tensors.back();
   if (tensor.is_complex()) {
     TORCH_CHECK(
-        complexViewAsRealAllowed(opts.reduceOp),
+        c10d::isComplexViewAsRealAllowed(opts.reduceOp),
         "all_reduce does not support",
         opts.reduceOp,
         "on complex tensors");
@@ -4597,7 +4580,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce(
   auto tensor = tensors.back();
   if (tensor.is_complex()) {
     TORCH_CHECK(
-        complexViewAsRealAllowed(opts.reduceOp),
+        c10d::isComplexViewAsRealAllowed(opts.reduceOp),
         "reduce does not support",
         opts.reduceOp,
         "on complex tensors");
@@ -5075,14 +5058,12 @@ c10::DeviceIndex ProcessGroupNCCL::guessDeviceId() const {
   // offset wrt the device id if intra-node GPUs are sharded into multiple
   // dimensions.
   int devIdx = globalRank() % localDeviceCount_;
-  LOG(WARNING)
-      << logPrefix()
-      << c10::str(
-             " using GPU ",
-             devIdx,
-             " as device used by this process is currently unknown. ",
-             "This can potentially cause a hang if this rank to GPU mapping is incorrect. ",
-             "You can specify device_id in init_process_group() to force use of a particular device.");
+  if (devIdx == 0) { // only log on first rank of each node
+    LOG(WARNING) << c10::str(
+        "Guessing device ID based on global rank. ",
+        "This can cause a hang if rank to GPU mapping is heterogeneous. ",
+        "You can specify device_id in init_process_group()");
+  }
   return static_cast<c10::DeviceIndex>(devIdx);
 }
 
