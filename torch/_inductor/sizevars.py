@@ -541,6 +541,9 @@ class SizeVarAllocator:
         self,
         expr: Union[Expr, int],
         hint_override: Optional[int] = None,
+        # Only flip this flag if you don't plan on guarding/adding runtime
+        # asserts based on this value and promise to only use this value
+        # in a heuristic nature.
         use_user_provided_hint_override: bool = False,
     ) -> Union[Expr, int]:
         if isinstance(expr, int):
