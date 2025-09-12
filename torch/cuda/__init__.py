@@ -1735,28 +1735,40 @@ def _compile_kernel(
     header_code: str = "",
     cuda_include_dirs: Optional[list] = None,
     nvcc_options: Optional[list] = None,
+    # Template support parameters
+    is_template: bool = False,
+    template_types: Optional[list[str]] = None,
+    wrapper_signature: Optional[str] = None,
+    wrapper_body: Optional[str] = None,
+    wrapper_name: Optional[str] = None,
 ):
     """
     Compiles a CUDA kernel using NVRTC and returns a callable function.
 
     This function is a wrapper for NVRTC that enables runtime compilation of CUDA kernels.
+    Supports C++ templates for CUTLASS and other templated CUDA libraries.
     Note that this returns a raw CUDA kernel that operates on raw memory pointers.
     To use this kernel as a proper PyTorch operator, you should wrap it following the guide at:
     pytorch.org/tutorials/advanced/python_custom_ops.html
 
     Args:
-        kernel_source (str): The CUDA kernel source code as a string
+        kernel_source (str): The CUDA kernel source code as a string (can be templated)
         kernel_name (str): The name of the kernel function to compile
         compute_capability (str, optional): The compute capability to target (e.g., "86").
                                            If None, will detect from current device.
         header_code (str, optional): Additional header code to prepend to the kernel source
         cuda_include_dirs (list, optional): List of directories containing CUDA headers
         nvcc_options (list, optional): Additional options to pass to NVRTC
+        is_template (bool): Whether the kernel is a C++ template
+        template_types (list[str], optional): Types to instantiate the template with
+        wrapper_signature (str, optional): Parameter signature for the wrapper function
+        wrapper_body (str, optional): Body of the wrapper function that calls the template
+        wrapper_name (str, optional): Name of the extern "C" wrapper function
 
     Returns:
         callable: A Python function that can be called with PyTorch tensor arguments to execute the kernel
 
-    Example:
+    Example for regular kernel:
         >>> # xdoctest: +SKIP
         >>> kernel_code = '''
         extern "C"
@@ -1766,15 +1778,58 @@ def _compile_kernel(
                 c[i] = a[i] + b[i];
         }
         '''
-        >>> add_kernel = torch.cuda.compile_kernel(kernel_code, "add_tensors")
+        >>> add_kernel = torch.cuda._compile_kernel(kernel_code, "add_tensors")
         >>> a = torch.randn(1024, device="cuda")
         >>> b = torch.randn(1024, device="cuda")
         >>> c = torch.empty_like(a)
         >>> add_kernel(grid=(4, 1, 1), block=(256, 1, 1), args=[a, b, c, a.numel()])
+    
+    Example for templated kernel:
+        >>> # xdoctest: +SKIP
+        >>> template_code = '''
+        template<typename T>
+        __global__ void add_template(T* a, T* b, T* c, int n) {
+            int i = blockIdx.x * blockDim.x + threadIdx.x;
+            if (i < n) c[i] = a[i] + b[i];
+        }
+        '''
+        >>> add_kernel = torch.cuda._compile_kernel(
+        ...     template_code, "add_template",
+        ...     is_template=True,
+        ...     template_types=["float"],
+        ...     wrapper_signature="float* a, float* b, float* c, int n",
+        ...     wrapper_body="    add_template<float>(a, b, c, n);"
+        ... )
     """
     import ctypes
 
     from torch.cuda._utils import _cuda_load_module, _nvrtc_compile
+    
+    # Handle template instantiation if needed
+    if is_template:
+        if not template_types:
+            raise ValueError("template_types must be provided for template kernels")
+        if not wrapper_signature:
+            raise ValueError("wrapper_signature must be provided for template kernels")
+        if not wrapper_body:
+            raise ValueError("wrapper_body must be provided for template kernels")
+        
+        # Import template utilities
+        from torch.cuda._template_utils import wrap_template_kernel
+        
+        # Wrap the template with explicit instantiation and extern "C" wrapper
+        wrapped_code, actual_kernel_name = wrap_template_kernel(
+            kernel_source,
+            kernel_name,
+            template_types,
+            wrapper_signature,
+            wrapper_body,
+            wrapper_name
+        )
+        
+        # Use the wrapped code for compilation
+        kernel_source = wrapped_code
+        kernel_name = actual_kernel_name
 
     # Compile the kernel to PTX
     ptx = _nvrtc_compile(
