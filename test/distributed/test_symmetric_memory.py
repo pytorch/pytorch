@@ -29,8 +29,8 @@ from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     requires_multicast_support,
     skip_if_lt_x_gpu,
-    skip_if_rocm_multiprocess,
     skip_if_rocm_arch_multiprocess,
+    skip_if_rocm_multiprocess,
     skip_if_rocm_ver_lessthan_multiprocess,
 )
 from torch.testing._internal.common_utils import (
@@ -50,6 +50,7 @@ test_contexts = [nullcontext, _test_mode]
 # So that tests are written in device-agnostic way
 device_type = "cuda"
 device_module = torch.get_device_module(device_type)
+
 
 @skip_if_rocm_arch_multiprocess(MI200_ARCH)
 @instantiate_parametrized_tests
@@ -654,7 +655,7 @@ class SymmMemEmptySetDeviceTest(MultiProcessTestCase):
         del t
         self._verify_symmetric_memory(symm_mem_hdl)
 
-    @skip_if_rocm_ver_lessthan_multiprocess((7,0))
+    @skip_if_rocm_ver_lessthan_multiprocess((7, 0))
     @skip_if_lt_x_gpu(2)
     @parametrize("set_device", [True, False])
     def test_empty_strided_p2p_persistent(self, set_device: bool) -> None:
