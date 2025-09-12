@@ -20,7 +20,6 @@ class TestCudaKernelTemplates(TestCase):
             _compile_kernel_with_templates,
         )
 
-        # Define a simple template kernel
         template_code = """
         template<typename T>
         __global__ void add_template(T* a, T* b, T* c, int n) {
@@ -31,7 +30,6 @@ class TestCudaKernelTemplates(TestCase):
         }
         """
 
-        # Compile for float
         add_float = _compile_kernel_with_templates(
             template_code,
             "add_template",
@@ -71,7 +69,6 @@ class TestCudaKernelTemplates(TestCase):
         }
         """
 
-        # Compile for double
         scale_double = _compile_kernel_with_templates(
             template_code,
             "scale_template",
@@ -121,7 +118,6 @@ class TestCudaKernelTemplates(TestCase):
             wrapper_body="    mixed_types<float, double, float>(a, b, c, n);",
         )
 
-        # Test mixed precision
         n = 256
         a = torch.rand(n, device="cuda", dtype=torch.float32)
         b = torch.rand(n, device="cuda", dtype=torch.float64)
@@ -132,7 +128,6 @@ class TestCudaKernelTemplates(TestCase):
 
         mixed_kernel(grid=(blocks, 1, 1), block=(threads, 1, 1), args=[a, b, c, n])
 
-        # Verify result (b will be cast to float)
         expected = a + b.float()
         self.assertTrue(torch.allclose(c, expected, rtol=1e-5))
 
@@ -142,7 +137,6 @@ class TestCudaKernelTemplates(TestCase):
             _compile_kernel_with_templates,
         )
 
-        # Simple CUTLASS-style template (multiple type parameters)
         cutlass_template = """
         template<typename ElementA, typename ElementB, typename ElementC>
         __global__ void cutlass_add_kernel(
@@ -158,7 +152,6 @@ class TestCudaKernelTemplates(TestCase):
         }
         """
 
-        # Compile CUTLASS-style kernel
         cutlass_kernel = _compile_kernel_with_templates(
             cutlass_template,
             "cutlass_add_kernel",
@@ -168,13 +161,11 @@ class TestCudaKernelTemplates(TestCase):
             wrapper_body="    cutlass_add_kernel<float, float, float>(A, B, C, n);",
         )
 
-        # Test data
         n = 1024
         A = torch.rand(n, device="cuda", dtype=torch.float32)
         B = torch.rand(n, device="cuda", dtype=torch.float32)
         C = torch.zeros(n, device="cuda", dtype=torch.float32)
 
-        # Launch kernel
         threads = 256
         blocks = (n + threads - 1) // threads
 
