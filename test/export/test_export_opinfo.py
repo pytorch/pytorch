@@ -3,6 +3,7 @@
 # flake8: noqa
 
 import itertools
+import unittest
 
 import torch
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
@@ -50,17 +51,11 @@ fake_export_failures = {
     xfail("masked.std"),
     xfail("masked.sum"),
     xfail("masked.var"),
-    xfail("nn.functional.grid_sample"),
     xfail("to_sparse"),
     # cannot xfail as it is passing for cpu-only build
+    skip("nn.functional.grid_sample"),
     skip("nn.functional.conv2d"),
     skip("nn.functional.scaled_dot_product_attention"),
-    # following are failing due to OptionalDeviceGuard
-    xfail("__getitem__"),
-    xfail("nn.functional.batch_norm"),
-    xfail("nn.functional.instance_norm"),
-    xfail("nn.functional.multi_margin_loss"),
-    xfail("nonzero"),
 }
 
 fake_decomposition_failures = {
@@ -128,9 +123,52 @@ class TestExportOpInfo(TestCase):
     def test_fake_export(self, device, dtype, op):
         _test_export_helper(self, dtype, op)
 
+    @unittest.skipIf(not torch.backends.cuda.is_built(), "requires CUDA build")
+    def test_preserve_original_behavior(self):
+        def cuda_calls_behavior_unchanged():
+            cpu_x = torch.randn(2)
+            with self.assertRaisesRegex(
+                RuntimeError, "Found no NVIDIA driver on your system."
+            ):
+                cuda_x = cpu_x.to("cuda")
 
-only_for = "cpu"
-instantiate_device_type_tests(TestExportOpInfo, globals(), only_for=only_for)
+            with self.assertRaisesRegex(
+                RuntimeError, "Found no NVIDIA driver on your system."
+            ):
+                torch.randn(2, device="cuda")
+
+            with self.assertRaisesRegex(
+                RuntimeError, "Found no NVIDIA driver on your system."
+            ):
+                torch.cuda.get_device_capability()
+
+            with self.assertRaisesRegex(
+                RuntimeError, "Found no NVIDIA driver on your system."
+            ):
+                torch.cuda.set_device(1)
+
+            with self.assertRaisesRegex(
+                RuntimeError, "Found no NVIDIA driver on your system."
+            ):
+                torch.cuda.current_device()
+
+            self.assertEqual(torch.cuda.is_available(), False)
+            self.assertEqual(torch.cuda.device_count(), 0)
+
+        cuda_calls_behavior_unchanged()
+
+        cpu_x = torch.randn(2)
+        with FakeTensorMode(allow_non_fake_inputs=True) as mode:
+            cuda_x = mode.from_tensor(cpu_x)
+            cuda_x.fake_device = torch.device("cuda")
+            cuda_y = cuda_x + cuda_x
+            self.assertEqual(cuda_y.device.type, "cuda")
+
+        # should fail again after exiting the fake mode, with the identical error message
+        cuda_calls_behavior_unchanged()
+
+
+instantiate_device_type_tests(TestExportOpInfo, globals(), only_for="cpu")
 
 
 if __name__ == "__main__":
