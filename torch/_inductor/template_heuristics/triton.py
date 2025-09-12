@@ -1887,6 +1887,26 @@ class CUDAPersistentTMATemplateConfigHeuristic(
         # Override mm_configs to use persistent_mm_configs
         self.mm_configs = self.persistent_mm_configs
 
+    def _get_template_configs_impl(
+        self,
+        kernel_inputs: KernelInputs,
+        op_name: str,
+    ) -> Generator[dict[str, Any], None, None]:
+        """
+        Generate scaled TMA template configs with both scaled MM and TMA-specific options.
+        """
+        # Get base scaled MM template configs from superclass
+        for template_kwargs in super()._get_template_configs_impl(
+            kernel_inputs,
+            op_name,
+        ):
+            # Add TMA-specific options for device TMA scaled MM
+            template_kwargs["tma_store"] = (
+                not template_kwargs["TMA_EXPERIMENTAL_API"]
+                and config.triton.enable_template_tma_store
+            )
+            yield template_kwargs
+
 
 @register_template_heuristic(
     persistent_tma_mm_template.uid,
@@ -1898,6 +1918,26 @@ class CUDAAddmmPersistentTMATemplateConfigHeuristic(
     AddMMConfigMixin, CUDAPersistentTMATemplateConfigHeuristic
 ):
     """Addmm specific mixin for CUDA"""
+
+    def _get_template_configs_impl(
+        self,
+        kernel_inputs: KernelInputs,
+        op_name: str,
+    ) -> Generator[dict[str, Any], None, None]:
+        """
+        Generate scaled TMA template configs with both scaled MM and TMA-specific options.
+        """
+        # Get base scaled MM template configs from superclass
+        for template_kwargs in super()._get_template_configs_impl(
+            kernel_inputs,
+            op_name,
+        ):
+            # Add TMA-specific options for device TMA scaled MM
+            template_kwargs["tma_store"] = (
+                not template_kwargs["TMA_EXPERIMENTAL_API"]
+                and config.triton.enable_template_tma_store
+            )
+            yield template_kwargs
 
 
 @register_template_heuristic(
@@ -1928,6 +1968,26 @@ class CUDAScaledTMATemplateConfigHeuristic(ScaledTMAConfigMixin, CUDAConfigHeuri
         super().__init__()
         # Override mm_configs to use scaled_persistent_mm_configs for TMA
         self.mm_configs = self.scaled_persistent_mm_configs
+
+    def _get_template_configs_impl(
+        self,
+        kernel_inputs: KernelInputs,
+        op_name: str,
+    ) -> Generator[dict[str, Any], None, None]:
+        """
+        Generate scaled TMA template configs with both scaled MM and TMA-specific options.
+        """
+        # Get base scaled MM template configs from superclass
+        for template_kwargs in super()._get_template_configs_impl(
+            kernel_inputs,
+            op_name,
+        ):
+            # Add TMA-specific options for device TMA scaled MM
+            template_kwargs["tma_store"] = (
+                not template_kwargs["TMA_EXPERIMENTAL_API"]
+                and config.triton.enable_template_tma_store
+            )
+            yield template_kwargs
 
 
 @register_template_heuristic(
