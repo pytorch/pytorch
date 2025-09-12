@@ -253,6 +253,11 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
   // correctly when this variable is passed to another function.
   uint32_t output_nr_;
 
+  // The dtype of the grad field; this is populated with the dtype of the
+  // tensor upon constructon. When set to nullopt, indicates that the grad
+  // field can be of any dtype.
+  std::optional<at::ScalarType> grad_dtype_;
+
   // Mutex to ensure that concurrent read operations that modify internal
   // state are still thread-safe. Used by grad_fn(), grad_accumulator(),
   // fw_grad() and set_fw_grad()
@@ -293,21 +298,36 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
       uint64_t level,
       bool is_inplace_op) override;
 
+  const std::optional<at::ScalarType>& grad_dtype() const {
+    return grad_dtype_;
+  }
+
+  void set_grad_dtype(const std::optional<at::ScalarType>& grad_dtype) {
+    grad_dtype_ = grad_dtype;
+  }
+
+  // Default construction is banned so that we always have access
+  // to TensorImpl to initialize grad_dtype_.
+  AutogradMeta() = delete;
+
   AutogradMeta(
-      at::TensorImpl* self_impl = nullptr,
+      at::TensorImpl* self_impl,
       bool requires_grad = false,
       Edge gradient_edge = Edge())
       : grad_fn_(std::move(gradient_edge.function)),
-
         output_nr_(gradient_edge.input_nr) {
+    TORCH_INTERNAL_ASSERT(self_impl);
+
     // set_requires_grad also checks error conditions.
     if (requires_grad) {
-      TORCH_INTERNAL_ASSERT(self_impl);
       set_requires_grad(requires_grad, self_impl);
     }
     TORCH_CHECK(
         !grad_fn_ || !requires_grad_,
         "requires_grad should be false if grad_fn is set");
+
+    // Initialize grad_dtype_ with the dtype of the tensor
+    grad_dtype_ = at::typeMetaToScalarType(self_impl->dtype());
   }
 
   ~AutogradMeta() override {
@@ -940,6 +960,8 @@ struct VariableHooks final : at::impl::VariableHooksInterface {
       const c10::OperatorHandle& op,
       c10::DispatchKeySet dispatch_keys,
       torch::jit::Stack* stack) const override;
+  std::optional<c10::ScalarType> grad_dtype(const at::TensorBase&) const override;
+  void set_grad_dtype(const at::TensorBase&, const std::optional<c10::ScalarType>&) const override;
 };
 
 namespace utils {

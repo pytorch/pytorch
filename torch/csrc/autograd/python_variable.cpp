@@ -958,13 +958,18 @@ static int THPVariable_set_grad(
       self != (THPVariable*)py_grad, "can't assign Variable as its own grad");
 
   const auto& grad = THPVariable_Unpack(py_grad);
-  TORCH_CHECK(
-      var.dtype() == grad.dtype(),
-      "attempting to assign a gradient with dtype '",
-      grad.dtype(),
-      "' to a tensor with dtype '",
-      var.dtype(),
-      "'. Please ensure that the gradient and the tensor have the same dtype");
+  auto tensor_grad_dtype = var.grad_dtype();
+  if (tensor_grad_dtype.has_value()) {
+    TORCH_CHECK(
+        grad.dtype() == *tensor_grad_dtype,
+        "attempting to assign a gradient with dtype '",
+        grad.dtype(),
+        "' to a tensor with grad_dtype '",
+        *tensor_grad_dtype,
+        "'. The gradient must match the tensor's grad_dtype (by default the tensor's dtype). "
+        "You can set grad_dtype with tensor.grad_dtype = desired_dtype, or None if you wish "
+        "to allow any dtype. CAUTION! Only do this if you know what you're doing!");
+  }
   TORCH_CHECK(
       var.device().type() == grad.device().type(),
       "attempting to assign a gradient with device type '",
@@ -973,8 +978,10 @@ static int THPVariable_set_grad(
       var.device().type(),
       "'. Please ensure that the gradient and the tensor are on the same device");
   if (grad.layout() != kSparse) {
+    auto expected_options = var.options().dtype(
+        tensor_grad_dtype.has_value() ? tensor_grad_dtype.value() : grad.scalar_type());
     TORCH_CHECK(
-        grad.options().type_equal(var.options()),
+        grad.options().type_equal(expected_options),
         "attempting to assign a gradient to a tensor that has data of a different type");
   }
   TORCH_CHECK(
@@ -1481,6 +1488,47 @@ static PyObject* THPVariable_get_nbytes(THPVariable* self, void* unused) {
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THPVariable_get_grad_dtype(THPVariable* self, void* unused) {
+  HANDLE_TH_ERRORS
+  if (check_has_torch_function((PyObject*)self)) {
+    return handle_torch_function_getter(self, "grad_dtype");
+  }
+  const auto& var = THPVariable_Unpack(self);
+  TORCH_CHECK(!var.grad_fn(), "grad_dtype can only be accessed on leaf tensors.");
+  auto grad_dtype = var.grad_dtype();
+  if (grad_dtype.has_value()) {
+    PyObject* raw_obj = (PyObject*)torch::getTHPDtype(grad_dtype.value());
+    return py::reinterpret_borrow<py::object>(raw_obj).release().ptr();
+  }
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static int THPVariable_set_grad_dtype(
+    THPVariable* self,
+    PyObject* obj,
+    void* unused) {
+  HANDLE_TH_ERRORS
+  if (check_has_torch_function((PyObject*)self)) {
+    return handle_torch_function_setter(self, "grad_dtype", obj);
+  }
+  const auto& var = THPVariable_Unpack(self);
+  TORCH_CHECK(!var.grad_fn(), "grad_dtype can only be set on leaf tensors.");
+  if (obj == Py_None) {
+    var.set_grad_dtype(std::nullopt);
+    return 0;
+  }
+  TORCH_CHECK_TYPE(
+      THPDtype_Check(obj),
+      "grad_dtype must be a torch.dtype or None, but got ",
+      Py_TYPE(obj)->tp_name);
+
+  auto dtype = reinterpret_cast<THPDtype*>(obj);
+  var.set_grad_dtype(dtype->scalar_type);
+  return 0;
+  END_HANDLE_TH_ERRORS_RET(-1)
+}
+
 static PyObject* THPVariable_get_itemsize(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
   if (check_has_torch_function((PyObject*)self)) {
@@ -1637,6 +1685,11 @@ static struct PyGetSetDef THPVariable_properties[] = {
     {"imag",
      (getter)PropertyImag::getter,
      (setter)THPVariable_set_imag,
+     nullptr,
+     nullptr},
+    {"grad_dtype",
+     (getter)THPVariable_get_grad_dtype,
+     (setter)THPVariable_set_grad_dtype,
      nullptr,
      nullptr},
     {nullptr}};

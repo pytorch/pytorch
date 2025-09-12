@@ -34,7 +34,8 @@ InputMetadata::InputMetadata(
       shape_{std::move(input_shape)},
       is_tensor_subclass_{is_tensor_subclass},
       is_nested_{is_nested},
-      was_default_constructed_{false} {
+      was_default_constructed_{false},
+      grad_dtype_{at::typeMetaToScalarType(options.dtype())} {
   auto device_ = options.device();
   stream_ = c10::impl::getDeviceGuardImpl(device_.type())->getStream(device_);
 }

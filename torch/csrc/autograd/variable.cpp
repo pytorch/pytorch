@@ -150,8 +150,8 @@ namespace {
 at::Tensor singleton_undefined_tensor;
 
 struct ConcreteAutogradMetaFactory : public c10::impl::AutogradMetaFactory {
-  std::unique_ptr<c10::AutogradMetaInterface> make() const override {
-    return std::make_unique<AutogradMeta>();
+  std::unique_ptr<c10::AutogradMetaInterface> make(at::TensorImpl* self_impl) const override {
+    return std::make_unique<AutogradMeta>(self_impl);
   }
   const at::Tensor& undefined_tensor() const override {
     return singleton_undefined_tensor;
@@ -173,7 +173,7 @@ AutogradMeta* materialize_autograd_meta(const at::TensorBase& self) {
       "cannot call materialize_autograd_meta() on undefined tensor");
   auto p = self.unsafeGetTensorImpl();
   if (!p->autograd_meta()) {
-    p->set_autograd_meta(std::make_unique<AutogradMeta>());
+    p->set_autograd_meta(std::make_unique<AutogradMeta>(p));
   }
   return get_autograd_meta(self);
 }
@@ -908,6 +908,18 @@ std::unique_ptr<ViewFunc> ChainedViewFunc::clone_and_set(
   return std::make_unique<ChainedViewFunc>(
       first->clone_and_set(first_symints, first_tensors),
       second->clone_and_set(second_symints, second_tensors));
+  }
+
+std::optional<c10::ScalarType> VariableHooks::grad_dtype(const at::TensorBase& self) const {
+  if (auto* meta = impl::get_autograd_meta(self)) {
+    return meta->grad_dtype();
+  }
+  return std::nullopt;
+}
+
+void VariableHooks::set_grad_dtype(const at::TensorBase& self, const std::optional<c10::ScalarType>& grad_dtype) const {
+  auto* meta = impl::materialize_autograd_meta(self);
+  meta->set_grad_dtype(grad_dtype);
 }
 
 } // namespace torch::autograd

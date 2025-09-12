@@ -930,6 +930,10 @@ public:
 
   const TensorBase& requires_grad_(bool _requires_grad=true) const;
 
+  std::optional<ScalarType> grad_dtype() const;
+
+  void set_grad_dtype(const std::optional<ScalarType>& grad_dtype) const;
+
   // View Variables
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 

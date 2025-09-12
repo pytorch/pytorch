@@ -39,7 +39,7 @@ const char* const TensorImpl::err_msg_tensor_metadata_change_not_allowed =
 
 at::Tensor& TensorImpl::mutable_grad() {
   if (!autograd_meta_)
-    autograd_meta_ = impl::GetAutogradMetaFactory()->make();
+    autograd_meta_ = impl::GetAutogradMetaFactory()->make(this);
   return autograd_meta_->mutable_grad();
 }
 
@@ -70,7 +70,7 @@ void TensorImpl::_set_fw_grad(
     uint64_t level,
     bool is_inplace_op) {
   if (!autograd_meta_)
-    autograd_meta_ = impl::GetAutogradMetaFactory()->make();
+    autograd_meta_ = impl::GetAutogradMetaFactory()->make(this);
   autograd_meta_->set_fw_grad(new_grad, self, level, is_inplace_op);
 }
 
@@ -455,7 +455,7 @@ void TensorImpl::set_requires_grad(bool requires_grad) {
   if (!requires_grad && !autograd_meta_)
     return;
   if (!autograd_meta_)
-    autograd_meta_ = impl::GetAutogradMetaFactory()->make();
+    autograd_meta_ = impl::GetAutogradMetaFactory()->make(this);
   // NB: In principle, setting requires_grad to false could result in
   // the AutogradMeta becoming equal to a default constructed state,
   // in which case we could apply the nullptr AutogradMeta optimization

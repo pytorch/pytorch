@@ -97,6 +97,14 @@ struct TORCH_API InputMetadata {
   // Danger: not thread safe, caller must protect with lock
   SymIntSmallVec& mutable_shape_as_dim_vector();
 
+  const std::optional<at::ScalarType>& grad_dtype() const {
+    return grad_dtype_;
+  }
+
+  void set_grad_dtype(const std::optional<at::ScalarType>& grad_dtype) {
+    grad_dtype_ = grad_dtype;
+  }
+
  private:
   at::Tensor shape_as_tensor() const;
   bool is_nestedness_same(const at::Tensor& grad) const;
@@ -109,5 +117,11 @@ struct TORCH_API InputMetadata {
   bool is_tensor_subclass_ = false;
   bool is_nested_ = false;
   bool was_default_constructed_ = true;
+  // grad_dtype_ being nullopt could mean two different things:
+  // 1) either we were default constructed, in which case we should defer
+  //    to the value of dtype in options_
+  // 2) or we were explicitly set to have grad_dtype = nullopt, in which
+  //    case we should allow arbitrary grad dtype
+  std::optional<at::ScalarType> grad_dtype_;
 };
 } // namespace torch::autograd

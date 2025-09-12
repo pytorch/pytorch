@@ -89,7 +89,11 @@ variable_list AccumulateGrad_apply_functional_no_hooks_ivalue(
 // ASAP during backwards.
 AccumulateGrad::AccumulateGrad(Variable variable_)
     : Node(/*sequence_nr=*/UINT64_MAX), variable(std::move(variable_)) {
-  add_input_metadata(variable);
+  if (auto* meta = torch::autograd::impl::get_autograd_meta(variable)) {
+    add_input_metadata(variable, meta->grad_dtype());
+  } else {
+    add_input_metadata(variable);
+  }
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)

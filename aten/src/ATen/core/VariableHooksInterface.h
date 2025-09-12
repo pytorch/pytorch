@@ -68,6 +68,8 @@ struct TORCH_API VariableHooksInterface {
       const c10::OperatorHandle& op,
       c10::DispatchKeySet dispatch_keys,
       torch::jit::Stack* stack) const = 0;
+  virtual std::optional<c10::ScalarType> grad_dtype(const TensorBase&) const = 0;
+  virtual void set_grad_dtype(const TensorBase&, const std::optional<c10::ScalarType>&) const = 0;
 };
 
 TORCH_API void SetVariableHooks(VariableHooksInterface* hooks);
