@@ -1998,7 +1998,21 @@ def define_buck_targets(
                     third_party("sleef_arm"),
                 ],
             }),
-            compiler_flags = get_aten_compiler_flags(),
+            compiler_flags = get_aten_compiler_flags() + select({
+                "DEFAULT": [],
+                "ovr_config//os:android-arm32": [
+                    "-mfpu=vfpv3-d16",
+                    "-march=armv7-a",
+                    "-mthumb",
+                    "-mfpu=neon",
+                ],
+                "ovr_config//os:android-x86_32": [
+                    "-mssse3",
+                ],
+                "ovr_config//os:android-x86_64": [
+                    "-mssse3",
+                ],
+            }),
             exported_preprocessor_flags = get_aten_preprocessor_flags(),
             exported_deps = [
                 ":aten_header",
