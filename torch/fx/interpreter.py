@@ -5,6 +5,7 @@ from typing import Any, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch.fx.traceback as fx_traceback
+from torch._logging import trace_structured
 from torch.hub import tqdm
 
 from . import config
@@ -169,7 +170,36 @@ class Interpreter:
                 # values for a subset of the program.
                 continue
 
-            self.env[node] = self.run_node(node)
+            try:
+                self.env[node] = self.run_node(node)
+            except Exception as e:
+                if self.extra_traceback:
+                    msg = f"While executing {node.format_node()}"
+                    msg = f"{e.args[0]}\n\n{msg}" if e.args else str(msg)
+                    msg += f"\nOriginal traceback:\n{node.stack_trace}"
+                    if (
+                        isinstance(self.module, GraphModule)
+                        and self.module.graph is not None
+                        and isinstance(self.module.graph, torch.fx.Graph)
+                    ):
+                        trace_structured(
+                            "artifact",
+                            metadata_fn=lambda: {
+                                "name": "fx_interpreter_error",
+                                "encoding": "string",
+                            },
+                            payload_fn=lambda: (
+                                f"{msg}\nGraphModule: "
+                                f"{self.module.print_readable(print_output=False, include_stride=True)}"  # type: ignore[operator]
+                            ),
+                        )
+
+                    msg += "\nUse tlparse to see full graph. "
+                    msg += "(https://github.com/pytorch/tlparse?tab=readme-ov-file#tlparse-parse-structured-pt2-logs)"
+                    e.args = (msg,) + e.args[1:]
+                    if isinstance(e, KeyError):
+                        raise RuntimeError(*e.args) from e
+                raise
 
             if self.garbage_collect_values:
                 for to_delete in self.user_to_last_uses.get(node, []):

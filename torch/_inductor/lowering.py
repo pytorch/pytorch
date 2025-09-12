@@ -7075,7 +7075,9 @@ def while_loop(cond_fn, body_fn, carried_inputs, additional_inputs, stack_output
             msg = f"{msg} Found from : \n {stack_trace}"
         V.graph.disable_cudagraphs_reason = msg
 
-    result = ir.WhileLoop.create(cond_fn, body_fn, carried_inputs, additional_inputs, stack_output)
+    result = ir.WhileLoop.create(
+        cond_fn, body_fn, carried_inputs, additional_inputs, stack_output
+    )
     assert isinstance(result, Sequence)
     return list(map(ir.WhileLoop._maybe_wrap_as_tensor_box, result))
 

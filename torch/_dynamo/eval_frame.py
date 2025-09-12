@@ -794,7 +794,6 @@ class _TorchDynamoContext:
             try:
                 if is_fx_symbolic_tracing():
                     if config.error_on_nested_fx_trace:
-                        breakpoint()
                         raise RuntimeError(
                             "Detected that you are using FX to symbolically trace "
                             "a dynamo-optimized function. This is not supported at the moment."

@@ -293,7 +293,6 @@ def _maybe_fake_tracing(fn, inputs: list[Any], pre_dispatch):
 
 def potential_input_alias_or_mutation(gm, inputs, pre_dispatch=False):
     try:
-        torch._dynamo.config.error_on_nested_fx_trace = False
         gm = _maybe_fake_tracing(gm, inputs, pre_dispatch)
     except UnsupportedAliasMutationException:
         # this can happen when nested cond_op is

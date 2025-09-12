@@ -432,40 +432,6 @@ def scan_op_dense(combine_fn, init, xs, additional_inputs):
     return generic_scan(combine_fn, init, xs, additional_inputs=additional_inputs)
 
 
-def _partition(li, fn):
-    true_list = []
-    true_pos = []
-    false_list = []
-    false_pos = []
-    for i, val in enumerate(li):
-        pred: bool = fn(val)
-        if pred:
-            true_pos.append(i)
-            true_list.append(val)
-        else:
-            false_pos.append(i)
-            false_list.append(val)
-    return true_list, true_pos, false_list, false_pos
-
-
-def _merge(true_list, true_pos, false_list, false_pos):
-    assert len(true_list) == len(true_pos) and len(false_list) == len(false_pos)
-    if len(true_pos) == 0:
-        return false_list
-
-    if len(false_pos) == 0:
-        return true_list
-
-    l = max(true_pos[-1], false_pos[-1]) + 1
-    res = [None] * l
-    for pos, val in zip(true_pos, true_list):
-        res[pos] = val
-    for pos, val in zip(false_pos, false_list):
-        res[pos] = val
-    assert all(val is not None for val in res)
-    return res
-
-
 class ScanAutogradOp(torch.autograd.Function):
     """
     NOTE: [scan partial grad handling]
