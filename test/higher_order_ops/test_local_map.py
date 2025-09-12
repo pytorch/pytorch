@@ -2,6 +2,8 @@
 # flake8: noqa: B950
 
 
+import unittest
+
 import torch
 import torch._dynamo
 import torch._functorch
@@ -10,8 +12,12 @@ import torch._inductor.decomposition
 import torch.nn.functional as F
 from torch import nn
 from torch._dynamo.variables.higher_order_ops import LocalMapWrappedHigherOrderVariable
-from torch.distributed._tensor.experimental import local_map
-from torch.distributed.tensor.placement_types import Replicate, Shard
+
+
+if torch.distributed.is_available():
+    from torch.distributed._tensor.experimental import local_map
+    from torch.distributed.tensor.placement_types import Replicate, Shard
+
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_CROSSREF, TestCase
 from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
@@ -34,35 +40,6 @@ def context_parallel_attention(query, key, value):
         query=query, key=key, value=value, is_causal=False
     )
     return out
-
-
-@local_map(
-    out_placements=((Shard(0), Shard(1), Shard(2)),),
-    in_placements=(
-        (Shard(0), Shard(1), Shard(2)),  # query
-        (Shard(0), Shard(1), Replicate()),  # key
-        (Shard(0), Shard(1), Replicate()),  # value
-    ),
-    redistribute_inputs=True,
-    in_grad_placements=None,
-    device_mesh=None,
-)
-def cp_decorated(query, key, value):
-    return context_parallel_attention(query, key, value)
-
-
-cp_function = local_map(
-    context_parallel_attention,
-    out_placements=(Shard(0), Shard(1), Shard(2)),
-    in_placements=(
-        (Shard(0), Shard(1), Shard(2)),  # query
-        (Shard(0), Shard(1), Replicate()),  # key
-        (Shard(0), Shard(1), Replicate()),  # value
-    ),
-    redistribute_inputs=True,
-    in_grad_placements=None,
-    device_mesh=None,
-)
 
 
 def create_model(attention_fn, nheads, dim1, dim2):
@@ -106,7 +83,36 @@ def create_model(attention_fn, nheads, dim1, dim2):
 
 class TestLocalMap(TestCase):
     @requires_cuda_and_triton
+    @unittest.skipIf(
+        not torch.distributed.is_available(), "Torch distributed not available."
+    )
     def test_simple(self):
+        @local_map(
+            out_placements=((Shard(0), Shard(1), Shard(2)),),
+            in_placements=(
+                (Shard(0), Shard(1), Shard(2)),  # query
+                (Shard(0), Shard(1), Replicate()),  # key
+                (Shard(0), Shard(1), Replicate()),  # value
+            ),
+            redistribute_inputs=True,
+            in_grad_placements=None,
+            device_mesh=None,
+        )
+        def cp_decorated(query, key, value):
+            return context_parallel_attention(query, key, value)
+
+        cp_function = local_map(
+            context_parallel_attention,
+            out_placements=(Shard(0), Shard(1), Shard(2)),
+            in_placements=(
+                (Shard(0), Shard(1), Shard(2)),  # query
+                (Shard(0), Shard(1), Replicate()),  # key
+                (Shard(0), Shard(1), Replicate()),  # value
+            ),
+            redistribute_inputs=True,
+            in_grad_placements=None,
+            device_mesh=None,
+        )
         bs = 8 * 32
         dim1 = 6144
         dim2 = dim1 * 4
