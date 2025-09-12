@@ -239,6 +239,8 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
+      # More memory is needed to build torchao
+      runner: linux.2xlarge.memory
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-jammy-py3.9-gcc11
       docker-image-name: ci-image:pytorch-linux-jammy-py3-gcc11-inductor-benchmarks
