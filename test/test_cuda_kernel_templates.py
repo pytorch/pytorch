@@ -155,8 +155,8 @@ class TestCudaKernelTemplates(TestCase):
             
             if (row < M && col < N) {
                 T sum = 0;
-                for (int k = 0; k < K; ++k) {
-                    sum += A[row * K + k] * B[k * N + col];
+                for (int i = 0; i < K; ++i) {
+                    sum += A[row * K + i] * B[i * N + col];
                 }
                 C[row * N + col] = alpha * sum + beta * C[row * N + col];
             }
