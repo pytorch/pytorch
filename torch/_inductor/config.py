@@ -391,6 +391,14 @@ reorder_prefetch_limit: Optional[int] = None
 
 # enable operator reordering for peak memory optimization
 reorder_for_peak_memory = True
+reorder_for_peak_memory_debug = False
+
+# In some cases, when all the nodes that can be scheduled are quite large,
+# it is beneficial to switch the scheduling strategy. So instead of using
+# size as the criterion, we choose a node that can unlock more nodes to
+# become schedulable by analyzing their successor nodes. The default value
+# is zero, which turns off this optimization.
+size_threshold_for_succ_based_strategy: int = 0
 
 reorder_iterative_debug_memory_recompute: bool = False
 reorder_iterative_debug_limit_to_reorder: Optional[int] = (
