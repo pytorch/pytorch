@@ -1783,7 +1783,7 @@ def _compile_kernel(
         >>> b = torch.randn(1024, device="cuda")
         >>> c = torch.empty_like(a)
         >>> add_kernel(grid=(4, 1, 1), block=(256, 1, 1), args=[a, b, c, a.numel()])
-    
+
     Example for templated kernel:
         >>> # xdoctest: +SKIP
         >>> template_code = '''
@@ -1794,11 +1794,12 @@ def _compile_kernel(
         }
         '''
         >>> add_kernel = torch.cuda._compile_kernel(
-        ...     template_code, "add_template",
+        ...     template_code,
+        ...     "add_template",
         ...     is_template=True,
         ...     template_types=["float"],
         ...     wrapper_signature="float* a, float* b, float* c, int n",
-        ...     wrapper_body="    add_template<float>(a, b, c, n);"
+        ...     wrapper_body="    add_template<float>(a, b, c, n);",
         ... )
     """
     import ctypes
@@ -1824,7 +1825,7 @@ def _compile_kernel(
             template_types,
             wrapper_signature,
             wrapper_body,
-            wrapper_name
+            wrapper_name,
         )
 
         # Use the wrapped code for compilation
