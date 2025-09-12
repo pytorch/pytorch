@@ -49,6 +49,8 @@ runs:
         set +e
         set -x
 
+        ${CONDA_INSTALL} -y python=3.10
+
         PYTHON3=$(${CONDA_RUN} which python3)
         EXIT_CODE=$?
 
