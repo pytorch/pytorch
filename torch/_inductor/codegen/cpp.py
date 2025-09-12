@@ -3086,19 +3086,16 @@ class CppVecKernel(CppKernel):
                 if self.ranges[self.tiling_idx] % self.tiling_factor
                 else sympy.Integer(0)
             )
-            # scalar helper for scalar sum is also needed when vec kernel is included
-            # Note: is it different from welford reduction as welford reduction of scalar version
-            # does not need helper, and the helper needs the information of reduction size to initialize
-            if reduction_type == "sum":
-                scalar_helper_val = f"scalar_{helper_val}"
-                self._use_acc_helper(
-                    reduction_type,
-                    acc,
-                    scalar_helper_val,
-                    reduction_size,
-                    dtype,
-                    use_scalar=True,
-                )
+            # scalar helper for scalar welford_reduce/sum is also needed when vec kernel is included
+            scalar_helper_val = f"scalar_{helper_val}"
+            self._use_acc_helper(
+                reduction_type,
+                acc,
+                scalar_helper_val,
+                reduction_size,
+                dtype,
+                use_scalar=True,
+            )
             self._use_acc_helper(
                 reduction_type, acc, helper_val, helper_vec_range, dtype
             )
