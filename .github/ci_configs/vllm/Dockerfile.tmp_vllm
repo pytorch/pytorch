@@ -220,7 +220,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
         else \
             SCCACHE_ARCHIVE="sccache-v0.8.1-x86_64-unknown-linux-musl"; \
         fi; \
-        && curl -L -o sccache.tar.gz "https://github.com/mozilla/sccache/releases/download/v0.8.1/${SCCACHE_ARCHIVE}.tar.gz" \
+        curl -L -o sccache.tar.gz "https://github.com/mozilla/sccache/releases/download/v0.8.1/${SCCACHE_ARCHIVE}.tar.gz" \
         && tar -xzf sccache.tar.gz \
         && sudo mv "${SCCACHE_ARCHIVE}"/sccache /usr/bin/sccache \
         && rm -rf sccache.tar.gz "${SCCACHE_ARCHIVE}" \
