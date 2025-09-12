@@ -295,3 +295,15 @@ def my_new_empty_dtype_variant(t) -> Tensor:
     Returns: New empty tensor with shape [2, 5] and dtype bfloat16
     """
     return torch.ops.libtorch_agnostic.my_new_empty_dtype_variant.default(t)
+
+
+def my_new_zeros_dtype_variant(t) -> Tensor:
+    """
+    Returns a new tensor filled with 0s with shape [2, 5] and dtype Float
+
+    Args:
+        t: Input tensor used as a reference for device and other properties
+
+    Returns: New zeros tensor
+    """
+    return torch.ops.libtorch_agnostic.my_new_zeros_dtype_variant.default(t)

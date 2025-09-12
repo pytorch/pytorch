@@ -2684,8 +2684,6 @@ if HAS_CUDA_AND_TRITON:
                 for batch_size in range(10, 200, 10):
                     iter(batch_size, mod)
 
-            print(captured_output)
-
             FileCheck().check_count(
                 "CUDAGraph supports dynamic shapes by recording a new graph for each "
                 "distinct input size. Recording too many CUDAGraphs may lead to "
@@ -3936,6 +3934,17 @@ if HAS_CUDA_AND_TRITON:
                         run(i, j, k)
 
             self.assertEqual(self.get_manager().new_graph_id().id, 4)
+
+        @torch._inductor.config.patch("triton.cudagraph_or_error", True)
+        def test_cudagraph_or_error(self):
+            def f(x):
+                x.add_(1)
+                return x
+
+            f = torch.compile(f, mode="reduce-overhead")
+
+            with self.assertRaises(RuntimeError):
+                f(torch.tensor(1, device="cuda"))
 
     class TestSAC(TestCase):
         def _make_observer_mode(self):

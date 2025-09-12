@@ -10,7 +10,6 @@ from unittest.mock import patch
 
 import numpy as np
 import psutil
-import torch_openreg  # noqa: F401
 
 import torch
 from torch.serialization import safe_globals
