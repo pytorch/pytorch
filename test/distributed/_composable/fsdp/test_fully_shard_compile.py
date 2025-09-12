@@ -133,7 +133,7 @@ class TestFullyShardCompile(FSDPTest):
             device_type.type,
             self.rank % torch.get_device_module(device_type).device_count(),
         )
-        if device_type.type == "cuda" and not sm_is_or_higher_than(device, 8, 0):
+        if not sm_is_or_higher_than(device, 8, 0):
             self.skipTest("bf16 requires sm >= 8.0")
 
     def test_dynamo_trace_use_training_state(self):
