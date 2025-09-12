@@ -679,6 +679,7 @@ class TestReplicateTrainingCompose(FSDPTest):
                 "reshard_after_forward": [True, False],
                 "checkpoint_impl": ["composable", "utils", "wrapper"],
                 "module_grouping": ["block", "mem_eff", "mem_eff_weight_tied"],
+                "test_device_type": [device_type.type],
             },
             self._test_train_parity_with_activation_checkpointing,
         )
@@ -688,6 +689,7 @@ class TestReplicateTrainingCompose(FSDPTest):
         reshard_after_forward: Union[bool, int],
         checkpoint_impl: str,
         module_grouping: str,
+        test_device_type: str,
     ):
         assert checkpoint_impl in ("composable", "utils", "wrapper")
         testing_compile = replicate != torch.distributed._composable.replicate_with_fsdp
@@ -725,7 +727,15 @@ class TestReplicateTrainingCompose(FSDPTest):
                     checkpoint(module)
 
         # Apply Replicate
-        fsdp_kwargs = {"reshard_after_forward": reshard_after_forward}
+        device_mesh = init_device_mesh(
+            test_device_type,
+            (self.world_size, 1),
+            mesh_dim_names=("replicate", "shard"),
+        )
+        fsdp_kwargs = {
+            "reshard_after_forward": reshard_after_forward,
+            "device_mesh": device_mesh,
+        }
         if module_grouping == "mem_eff":
             assert model_args.n_layers == 3
             replicate(model.layers[0], **fsdp_kwargs)
