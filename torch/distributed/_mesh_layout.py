@@ -6,26 +6,24 @@ import math
 from collections.abc import Iterator
 from dataclasses import dataclass
 from itertools import product
-from typing import TypeAlias
 
 from torch.distributed._pycute import (
     coalesce,
     complement,
     composition,
     flatten,
+    IntTuple,
+    is_int,
     is_tuple,
     Layout,
 )
 
 
-NestedIntTuple: TypeAlias = tuple["int | NestedIntTuple", ...]
-
-
 @dataclass(frozen=True, init=True)
-class _Layout(Layout):
+class _MeshLayout(Layout):
     """
     Utility class for representing an integer layout by borrowing ideas from CuTe Layout Algebra.
-    See https://docs.nvidia.com/cutlass/media/docs/cpp/cute/02_layout_algebra.html for more details.
+    See https://docs.nvidia.com/cutlass/media/docs/cpp/cute/02_MeshLayout_algebra.html for more details.
 
     Each layout is represented as a list of sizes and strides. We use it as a way for mechanical bookkeeping
     of the integers such as ranks in a SPMD mesh, and the transformation on top of it.
@@ -38,47 +36,45 @@ class _Layout(Layout):
     different from that of PyCute's.
     """
 
-    shape: NestedIntTuple
-    stride: NestedIntTuple
+    shape: IntTuple
+    stride: IntTuple
 
     def __post_init__(self) -> None:
-        if not is_tuple(self.shape):
-            raise ValueError(f"shape must be a tuple, got {type(self.shape)}")
-        if not is_tuple(self.stride):
-            raise ValueError(f"stride must be a tuple, got {type(self.stride)}")
-        if len(flatten(self.shape)) != len(flatten(self.stride)):
+        if not is_tuple(self.shape) and not is_int(self.shape):
+            raise TypeError(f"shape must be a tuple or int, got {type(self.shape)}")
+        if not is_tuple(self.stride) and not is_int(self.stride):
+            raise TypeError(f"stride must be a tuple or int, got {type(self.stride)}")
+        if (
+            is_tuple(self.shape)
+            and is_tuple(self.stride)
+            and len(flatten(self.shape)) != len(flatten(self.stride))
+        ):
             raise ValueError(
                 f"sizes {len(flatten(self.shape))} and "
                 f"strides {len(flatten(self.stride))} must have the same length"
             )
 
     @property
-    def sizes(self) -> NestedIntTuple:
+    def sizes(self) -> IntTuple:
         return self.shape
 
     @property
-    def strides(self) -> NestedIntTuple:
+    def strides(self) -> IntTuple:
         return self.stride
 
     @property
     def sizes_and_strides(self) -> Iterator[tuple[int, int]]:
-        return zip(flatten(self.shape), flatten(self.stride))  # type: ignore[arg-type]
+        return zip(flatten(self.shape), flatten(self.stride))
 
     def numel(self) -> int:
         return math.prod(flatten(self.shape))
 
-    # operator []    (get-i like tuples)
-    def __getitem__(self, i: int) -> "_Layout":
-        size = self.sizes[i]
-        stride = self.strides[i]
-        if is_tuple(size) and is_tuple(stride):
-            return _Layout(size, stride)  # type: ignore[arg-type]
-        elif isinstance(size, int) and isinstance(stride, int):
-            return _Layout((size,), (stride,))
-        else:
-            raise ValueError("size and stride must be either int or tuple")
+    # # operator []    (get-i like tuples)
+    def __getitem__(self, i: int) -> "_MeshLayout":
+        layout = super().__getitem__(i)
+        return _MeshLayout(layout.shape, layout.stride)
 
-    def coalesce(self) -> "_Layout":
+    def coalesce(self) -> "_MeshLayout":
         """
         A layout is represented by (sizes):(strides), e.g. (3,2):(4,2).
         Two consecutive dimensions can be "merged" into one if their
@@ -96,11 +92,9 @@ class _Layout(Layout):
         → cannot merge; result stays (3,2):(4,1)
         """
         layout = coalesce(self)
-        shape = layout.shape if is_tuple(layout.shape) else (layout.shape,)  # type: ignore[union-attr]
-        stride = layout.stride if is_tuple(layout.stride) else (layout.stride,)  # type: ignore[union-attr]
-        return _Layout(shape, stride)  # type: ignore[arg-type]
+        return _MeshLayout(layout.shape, layout.stride)
 
-    def composition(self, layout: "_Layout") -> "_Layout":
+    def composition(self, layout: "_MeshLayout") -> "_MeshLayout":
         """
         Perform a by-dimension composition between this layout (self) and another layout (layout).
 
@@ -121,11 +115,9 @@ class _Layout(Layout):
           A list of composed layouts.
         """
         result = composition(self, layout)
-        shape = result.shape if is_tuple(result.shape) else (result.shape,)  # type: ignore[union-attr]
-        stride = result.stride if is_tuple(result.stride) else (result.stride,)  # type: ignore[union-attr]
-        return _Layout(shape, stride)  # type: ignore[arg-type]
+        return _MeshLayout(result.shape, result.stride)
 
-    def complement(self, world_size: int) -> "_Layout":
+    def complement(self, world_size: int) -> "_MeshLayout":
         """
         Compute the "complement layout" relative to a given world_size.
         A complement layout fills in the "missing" factor so that: self repeat a layout of complement(self, world_size)
@@ -148,13 +140,11 @@ class _Layout(Layout):
         For a visualized explanation, see https://x.com/ezyang/status/1962364978393981433/
         """
         layout = complement(self, world_size)
-        shape = layout.shape if is_tuple(layout.shape) else (layout.shape,)  # type: ignore[union-attr]
-        stride = layout.stride if is_tuple(layout.stride) else (layout.stride,)  # type: ignore[union-attr]
-        return _Layout(shape, stride)  # type: ignore[arg-type]
+        return _MeshLayout(layout.shape, layout.stride)
 
-    def local_ranks(self) -> list[int]:
+    def member_ranks(self) -> list[int]:
         """
-        This function computes the local rank specified by the layout.
+        This function computes the all ranks specified by the layout.
 
         How it works:
         1. we enumerates every possible coordinate (like a nested for-loop).
@@ -162,7 +152,7 @@ class _Layout(Layout):
             (0,0), (0,1), (0,2), (1,0), (1,1), (1,2)
 
         2. For each coordinate, we compute a linear rank index as:
-            local_ranks = sum(coord[i] * strides[i] for i in range(ndim))
+            member_ranks = sum(coord[i] * strides[i] for i in range(ndim))
 
         Example A:
         sizes = (2, 3)        # 2 rows, 3 cols
@@ -214,48 +204,6 @@ class _Layout(Layout):
         ]
         """
         return [
-            [group_offset + group_rank for group_rank in self.local_ranks()]
-            for group_offset in self.complement(world_size).local_ranks()
+            [group_offset + group_rank for group_rank in self.member_ranks()]
+            for group_offset in self.complement(world_size).member_ranks()
         ]
-
-
-MeshLayoutType = tuple["_Layout", ...]
-
-
-@dataclass(frozen=True)
-class _MeshLayout:
-    _layouts: MeshLayoutType
-
-    @property
-    def layouts(self) -> MeshLayoutType:
-        return self._layouts
-
-    # @staticmethod
-    # def to_single_depth_layouts(
-    #     mesh_size: IntTuple, mesh_stride: IntTuple
-    # ) -> "_MeshLayout":
-    #     """
-    #     Convert a contiguous PyTorch mesh tensor's metadata (size, stride) into a list of layouts.
-    #     If there are no transformation is being made to a device mesh, each dim of mesh is represented
-    #     by a layout but this is not the case once the mesh has been transformed, unflatten for example.
-
-    #     For each dimension of the input tensor, we extract its size (mesh.size(i)) and stride (mesh.stride(i)),
-    #     and then wrap that (size, stride) pair into a 1D layout.
-
-    #     The result is a list of independent layout, one per dimension.
-    #     Each layout describes how indices in that dimension map to backend ranks.
-
-    #     Example:
-    #         Suppose mesh.shape = (3, 4), mesh.stride = (4, 1).
-    #         Then:
-    #         layouts[0] = (3:4)   # first dimension: size=3, stride=4
-    #         layouts[1] = (4:1)   # second dimension: size=4, stride=1
-    #     """
-    #     if len(mesh_size) != len(mesh_stride):
-    #         raise ValueError("mesh_size and mesh_stride must have the same length")
-    #     return _MeshLayout(
-    #         tuple(
-    #             _Layout((size,), (stride,))
-    #             for size, stride in zip(mesh_size, mesh_stride)
-    #         )
-    #     )
