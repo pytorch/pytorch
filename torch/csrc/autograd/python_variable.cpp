@@ -1514,6 +1514,22 @@ static int THPVariable_set_grad_dtype(
   }
   const auto& var = THPVariable_Unpack(self);
   TORCH_CHECK(!var.grad_fn(), "grad_dtype can only be set on leaf tensors.");
+  // Check if there's already a gradient
+  if (var.grad().defined() && obj != Py_None) {
+    TORCH_CHECK_TYPE(
+        THPDtype_Check(obj),
+        "grad_dtype must be a torch.dtype or None, but got ",
+        Py_TYPE(obj)->tp_name);
+    auto new_dtype = reinterpret_cast<THPDtype*>(obj);
+    TORCH_CHECK(
+        var.grad().dtype() == new_dtype->scalar_type,
+        "Cannot set grad_dtype to '",
+        new_dtype->scalar_type,
+        "' because there is already a gradient with dtype '",
+        var.grad().dtype(),
+        "'. Please clear the gradient (.grad = None) before changing grad_dtype, "
+        "or ensure the new grad_dtype matches the existing gradient's dtype.");
+  }
   if (obj == Py_None) {
     var.set_grad_dtype(std::nullopt);
     return 0;

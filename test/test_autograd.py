@@ -3696,6 +3696,90 @@ class TestAutograd(TestCase):
     def test_sparse_gather_both_scalar(self):
         self._test_sparse_gather((), (), 0)
 
+    def test_grad_dtype(self):
+        leaf = torch.tensor([1.0, 2.0], requires_grad=True)
+        # Default to tensor's dtype
+        self.assertEqual(leaf.grad_dtype, torch.float32)
+        leaf.grad_dtype = torch.float16
+        self.assertEqual(leaf.grad_dtype, torch.float16)
+        leaf.grad_dtype = None  # Allow any dtype
+        self.assertIsNone(leaf.grad_dtype)
+
+        # get/set grad_dtype is only allowed on leaf tensors
+        non_leaf = leaf * 2
+        self.assertFalse(non_leaf.is_leaf)
+        with self.assertRaisesRegex(RuntimeError, "grad_dtype can only be accessed on leaf tensors"):
+            _ = non_leaf.grad_dtype
+        with self.assertRaisesRegex(RuntimeError, "grad_dtype can only be set on leaf tensors"):
+            non_leaf.grad_dtype = torch.float16
+
+        # Manual setting
+        x = torch.tensor([1.0, 2.0], requires_grad=True, dtype=torch.float32)
+        grad_match = torch.tensor([1.0, 1.0], dtype=torch.float32)
+        x.grad = grad_match
+        self.assertEqual(x.grad.dtype, torch.float32)
+
+        x.grad = None
+        x.grad_dtype = torch.float16
+        grad_mismatch = torch.tensor([1.0, 1.0], dtype=torch.float32)
+        with self.assertRaisesRegex(RuntimeError, "attempting to assign a gradient with dtype.*float.*to a tensor with grad_dtype.*Half"):
+            x.grad = grad_mismatch
+
+        # When grad_dtype is None, any dtype is allowed
+        x.grad = None
+        x.grad_dtype = None
+        grad_any = torch.tensor([1.0, 1.0], dtype=torch.float64)
+        x.grad = grad_any
+        self.assertEqual(x.grad.dtype, torch.float64)
+
+        # Incoming gradient case
+        class MismatchedGradientFunction(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, inp):
+                return inp * 2
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output.to(torch.float64)
+
+        d = torch.tensor([1.0, 2.0], requires_grad=True, dtype=torch.float32)
+        output = MismatchedGradientFunction.apply(d)
+        loss = output.sum()
+        loss.backward()
+        # Default behavior is to cast to tensor dtype
+        self.assertEqual(d.grad.dtype, torch.float32)
+        self.assertTrue(torch.allclose(d.grad, torch.tensor([1.0, 1.0])))
+
+        e = torch.tensor([3.0, 4.0], requires_grad=True, dtype=torch.float32)
+        e.grad_dtype = None
+        output_e = MismatchedGradientFunction.apply(e)
+        loss_e = output_e.sum()
+        loss_e.backward()
+        # No casting is done if set to None.
+        self.assertEqual(e.grad.dtype, torch.float64)
+        self.assertTrue(torch.allclose(e.grad, torch.tensor([1.0, 1.0], dtype=torch.float64)))
+
+        f = torch.tensor([5.0, 6.0], requires_grad=True, dtype=torch.float32)
+        f.grad_dtype = torch.float16  # Expect float16 gradients
+        output_f = MismatchedGradientFunction.apply(f)
+        loss_f = output_f.sum()
+        loss_f.backward()
+        self.assertEqual(f.grad.dtype, torch.float16)
+        self.assertTrue(torch.allclose(f.grad, torch.tensor([1.0, 1.0], dtype=torch.float16)))
+
+        # Setting grad_dtype when gradient already exists
+        g = torch.tensor([1.0, 2.0], requires_grad=True, dtype=torch.float32)
+        g.grad = torch.tensor([1.0, 1.0], dtype=torch.float32)
+        g.grad_dtype = torch.float32
+        self.assertEqual(g.grad_dtype, torch.float32)
+        with self.assertRaisesRegex(RuntimeError, "Cannot set grad_dtype.*because there is already a gradient"):
+            g.grad_dtype = torch.float16
+        g.grad_dtype = None
+        self.assertIsNone(g.grad_dtype)
+        g.grad = None
+        g.grad_dtype = torch.float16
+        self.assertEqual(g.grad_dtype, torch.float16)
+
     def test_gc_in_destructor(self):
         """
         Previously, if a Function destructor triggered a garbage collection,

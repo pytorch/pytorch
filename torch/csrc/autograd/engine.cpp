@@ -957,12 +957,14 @@ static void validate_outputs_impl(
       if (grad.scalar_type() != grad_dtype) {
         grad = grad.to(grad_dtype);
       }
-    }
-    if (grad.dtype() != metadata.dtype()) {
-      std::stringstream ss;
-      ss << "invalid gradient at index " << i << " - expected dtype ";
-      ss << metadata.dtype() << " but got " << grad.dtype();
-      TORCH_CHECK(false, format_error(ss.str()));
+      // This check is kind of pointless except for the case where a subclass
+      // or mode decides to override .to() and forgets to actually update dtype
+      if (grad.dtype() != grad_dtype) {
+        std::stringstream ss;
+        ss << "invalid gradient at index " << i << " - expected dtype ";
+        ss << grad_dtype << " but got " << grad.dtype();
+        TORCH_CHECK(false, format_error(ss.str()));
+      }
     }
     if (grad.layout() != metadata.layout()) {
       // TODO: Currently we only support (*, Sparse) combination for
