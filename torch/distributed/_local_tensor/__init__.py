@@ -55,6 +55,7 @@ import functools
 import operator
 from collections.abc import Sequence
 from itertools import product
+from typing import Union
 
 import torch
 from torch import Tensor
@@ -63,6 +64,7 @@ from torch.distributed._distributed_c10d import FakeWork
 from torch.distributed.distributed_c10d import ProcessGroup, ReduceOp, Work
 from torch.utils import _pytree as pytree
 from torch.utils._python_dispatch import TorchDispatchMode
+from torch.utils.checkpoint import get_device_states, set_device_states
 
 
 not_implemented_log = torch._logging.getArtifactLogger(__name__, "not_implemented")
@@ -70,6 +72,8 @@ not_implemented_log = torch._logging.getArtifactLogger(__name__, "not_implemente
 
 from pycute.int_tuple import flatten, is_int, is_tuple
 from pycute.layout import complement, Layout
+
+from . import _collectives
 
 
 # TODO: this claude code implementation sucks, redo it
@@ -156,157 +160,6 @@ def layout_to_indices(layout):
         sum(c * s for c, s in zip(coord, flatten(layout.stride)))
         for coord in product(*(range(s) for s in flatten(layout.shape)))
     ]
-
-
-def _prepare_collective_groups(process_group_so):
-    """
-    Common helper function to prepare process group information for collective operations.
-
-    Returns:
-        tuple: (ranks, layout, global_pg, group_offsets, offset)
-    """
-    process_group = ProcessGroup.unbox(process_group_so)
-
-    ranks = torch.distributed.get_process_group_ranks(process_group)
-    assert ranks
-    # TODO: We can handle permutations but the layout inference algorithm will
-    # lose the permutation so we will have to reapply it
-    assert ranks == sorted(ranks), ranks
-    offset = ranks[0]
-    ranks = [r - offset for r in ranks]
-    layout = indices_to_layout(ranks)
-
-    global_pg = torch.distributed.distributed_c10d._get_default_group()
-    group_offsets = layout_to_indices(complement(layout, global_pg.size()))
-
-    return ranks, layout, global_pg, group_offsets, offset
-
-
-def _local_all_reduce_(
-    tensors, process_group_so, reduce_op_so, sparse_indices, async_op=True, timeout=-1
-):
-    # "allreduce_(Tensor[] tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, __torch__.torch.classes.c10d.ReduceOp reduce_op, Tensor? sparse_indices, bool async_op=True, int timeout=-1) -> (Tensor[], __torch__.torch.classes.c10d.Work)");
-
-    assert len(tensors) == 1
-    tensor = tensors[0]
-
-    reduce_op = ReduceOp.unbox(reduce_op_so)
-    ranks, layout, global_pg, group_offsets, _offset = _prepare_collective_groups(
-        process_group_so
-    )
-
-    if not isinstance(tensor, LocalTensor):
-        raise ValueError(f"Expected LocalTensor for local all_reduce, got {tensor}")
-
-    for group_offset in group_offsets:
-        # For the tensors in this group [group_offset + r for r in ranks]
-        # perform the allreduce on them
-        group_ranks = [group_offset + r for r in ranks]
-
-        # Collect tensors from the specified ranks in this group
-        group_tensors = []
-        for rank in group_ranks:
-            assert rank in tensor._local_tensors
-            group_tensors.append(tensor._local_tensors[rank])
-
-        # Perform the reduction operation
-        if reduce_op == ReduceOp.SUM:
-            op = operator.add
-        elif reduce_op == ReduceOp.PRODUCT:
-            op = operator.mul
-        elif reduce_op == ReduceOp.MIN:
-            op = torch.minimum
-        elif reduce_op == ReduceOp.MAX:
-            op = torch.maximum
-        else:
-            raise NotImplementedError(f"ReduceOp {reduce_op} not implemented")
-
-        reduced_tensor = functools.reduce(op, group_tensors)
-
-        # Update all tensors in the group with the reduced result
-        for rank in group_ranks:
-            if rank in tensor._local_tensors:
-                tensor._local_tensors[rank].copy_(reduced_tensor)
-
-    work = FakeWork()
-    work_so = Work.boxed(work)
-    return (tensors, work_so)
-
-
-def _local_broadcast_(
-    tensors, process_group_so, root_rank, root_tensor, async_op=True, timeout=-1
-):
-    # "broadcast_(Tensor[] tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, int root_rank, int root_tensor, bool async_op=True, int timeout=-1) -> (Tensor[], __torch__.torch.classes.c10d.Work)");
-
-    assert len(tensors) == 1
-    tensor = tensors[0]
-    assert root_tensor == 0
-
-    ranks, layout, global_pg, group_offsets, offset = _prepare_collective_groups(
-        process_group_so
-    )
-
-    # We're going to assume SPMD where for every rank group the root_rank is
-    # the same relative to others
-    relative_root_rank = root_rank - offset
-
-    if not isinstance(tensor, LocalTensor):
-        raise ValueError(f"Expected LocalTensor for local broadcast, got {tensor}")
-
-    for group_offset in group_offsets:
-        # For the tensors in this group [group_offset + r for r in ranks]
-        # perform the broadcast on them
-        group_ranks = [group_offset + r for r in ranks]
-
-        source_rank = group_offset + relative_root_rank
-
-        source_tensor = tensor._local_tensors[source_rank]
-
-        # Broadcast the source tensor to all ranks in this group
-        for rank in group_ranks:
-            if source_rank != rank:
-                tensor._local_tensors[rank].copy_(source_tensor)
-
-    work = FakeWork()
-    work_so = Work.boxed(work)
-    return (tensors, work_so)
-
-
-def _local_all_gather_(
-    output_tensorss, input_tensors, process_group_so, async_op=True, timeout=-1
-):
-    # "allgather_(Tensor[][] output_tensors, Tensor[] input_tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, bool async_op=True, int timeout=-1) -> (Tensor[][], __torch__.torch.classes.c10d.Work)");
-
-    assert len(output_tensorss) == 1
-    assert len(input_tensors) == 1
-    output_tensors = output_tensorss[0]
-    input_tensor = input_tensors[0]
-
-    ranks, layout, global_pg, group_offsets, _offset = _prepare_collective_groups(
-        process_group_so
-    )
-
-    if not isinstance(input_tensor, LocalTensor):
-        raise ValueError(
-            f"Expected LocalTensor for local all_gather, got {input_tensor}"
-        )
-
-    for t in output_tensors:
-        assert isinstance(t, LocalTensor)
-
-    assert len(ranks) == len(output_tensors), (ranks, output_tensors)
-    for group_offset in group_offsets:
-        # For the tensors in this group [group_offset + r for r in ranks]
-        # perform the all_gather on them
-        group_ranks = [group_offset + r for r in ranks]
-
-        # For each rank in the group, gather from their input tensor
-        for i, rank_i in enumerate(group_ranks):
-            output_tensors[i].copy_(input_tensor._local_tensors[rank_i])
-
-    work = FakeWork()
-    work_so = Work.boxed(work)
-    return (output_tensorss, work_so)
 
 
 class LocalTensor(torch.Tensor):
@@ -449,9 +302,16 @@ def _check_for_subclass_arg(x: object) -> bool:
 
 
 class LocalTensorMode(TorchDispatchMode):
+    _disable: bool
+
     # What ranks this local tensor mode is operating over
-    def __init__(self, ranks: frozenset[int]):
-        self.ranks = ranks
+    def __init__(self, ranks: Union[int, frozenset[int]]):
+        if isinstance(ranks, int):
+            self.ranks = frozenset(range(ranks))  # assume is world size
+        else:
+            assert isinstance(ranks, frozenset)
+            self.ranks = ranks
+        self._disable = False
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         if kwargs is None:
@@ -462,8 +322,7 @@ class LocalTensorMode(TorchDispatchMode):
         # Find all LocalTensor arguments to determine ranks
         local_tensors = [a for a in flat_args if isinstance(a, LocalTensor)]
 
-        if not local_tensors:
-            # No LocalTensors involved, pass through to regular dispatch
+        if not local_tensors and self._disable:
             return func(*args, **kwargs)
 
         # Check for unrecognized tensor subclasses (but allow regular tensors and scalars)
@@ -484,15 +343,35 @@ class LocalTensorMode(TorchDispatchMode):
 
         if func.namespace == "c10d":
             if func is torch.ops.c10d.allreduce_.default:
-                return _local_all_reduce_(*args, **kwargs)
+                return _collectives._local_all_reduce_(*args, **kwargs)
             elif func is torch.ops.c10d.broadcast_.default:
-                return _local_broadcast_(*args, **kwargs)
+                return _collectives._local_broadcast_(*args, **kwargs)
             elif func is torch.ops.c10d.allgather_.default:
-                return _local_all_gather_(*args, **kwargs)
+                return _collectives._local_all_gather_(*args, **kwargs)
+            elif func is torch.ops.c10d.scatter_.default:
+                return _collectives._local_scatter_(*args, **kwargs)
+            raise NotImplementedError(f"{func} not implemented")
+
+        if func.namespace == "_c10d_functional":
+            raise NotImplementedError(f"{func} not implemented")
+
+        if func.namespace == "_c10d_functional_autograd":
+            raise NotImplementedError(f"{func} not implemented")
+
+        if func.namespace == "_dtensor":
+            raise NotImplementedError(f"{func} not implemented")
+
+        if func.namespace == "symm_mem":
             raise NotImplementedError(f"{func} not implemented")
 
         flat_rank_rets = {}
+        # Handle RNG
+
+        cpu_state = torch.get_rng_state()
+        devices, states = get_device_states((args, kwargs))
         for r in sorted(self.ranks):
+            torch.set_rng_state(cpu_state)
+            set_device_states(devices, states)
             rank_flat_args = [
                 a._local_tensors[r] if isinstance(a, LocalTensor) else a
                 for a in flat_args

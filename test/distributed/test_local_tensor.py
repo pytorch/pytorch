@@ -4,6 +4,13 @@
 import torch
 import torch.distributed as dist
 from torch.distributed._local_tensor import LocalTensor, LocalTensorMode
+from torch.distributed.tensor import (
+    DeviceMesh,
+    distribute_tensor,
+    init_device_mesh,
+    Replicate,
+    Shard,
+)
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.distributed.fake_pg import FakeStore
 
@@ -11,6 +18,7 @@ from torch.testing._internal.distributed.fake_pg import FakeStore
 class TestLocalTensor(TestCase):
     def setUp(self):
         """Set up test fixtures before each test method."""
+        self.mode = None
         self.device = torch.device("cpu")
         self.shape = (2, 3)
         self.dtype = torch.float32
@@ -31,11 +39,32 @@ class TestLocalTensor(TestCase):
         }
 
     def tearDown(self):
+        self.mode = None
         super().tearDown()
         try:
             dist.destroy_process_group()
         except AssertionError:
             pass
+
+    def assertEqual(self, lhs, rhs, **kwargs):
+        if self.mode is not None:
+            old = self.mode._disable
+            self.mode._disable = True
+        try:
+            if isinstance(lhs, LocalTensor) and isinstance(rhs, LocalTensor):
+                assert isinstance(lhs, LocalTensor) and isinstance(rhs, LocalTensor)
+                super().assertEqual(lhs._ranks, rhs._ranks)
+                for r in lhs._ranks:
+                    super().assertEqual(lhs._local_tensors[r], rhs._local_tensors[r], lambda m: f"rank {r}: {m}")
+            elif isinstance(lhs, LocalTensor) or isinstance(rhs, LocalTensor):
+                lhs, rhs = (lhs, rhs) if isinstance(lhs, LocalTensor) else (rhs, lhs)
+                for r in lhs._ranks:
+                    super().assertEqual(lhs._local_tensors[r], rhs, lambda m: f"rank {r}: {m}")
+            else:
+                return super().assertEqual(lhs, rhs, **kwargs)
+        finally:
+            if self.mode is not None:
+                self.mode._disable = old
 
     def test_local_tensor_creation(self):
         """Test basic LocalTensor creation."""
@@ -179,15 +208,13 @@ class TestLocalTensor(TestCase):
         lt = LocalTensor(self.identical_local_tensors)
 
         with LocalTensorMode(lt._ranks):
-            # Operations within the mode should work the same
             result = lt + 1.0
             self.assertIsInstance(result, LocalTensor)
 
-            # Regular tensor operations should still work
             regular = torch.ones(2, 2)
             regular_result = regular + 1.0
-            self.assertIsInstance(regular_result, torch.Tensor)
-            self.assertNotIsInstance(regular_result, LocalTensor)
+            self.assertIsInstance(regular, LocalTensor)
+            self.assertIsInstance(regular_result, LocalTensor)
 
     def test_empty_local_tensors(self):
         """Test behavior with empty local tensors dict."""
@@ -387,6 +414,50 @@ class TestLocalTensor(TestCase):
             self.assertIsInstance(result2, LocalTensor)
             self.assertIsInstance(result3, LocalTensor)
             self.assertIsInstance(result4, LocalTensor)
+
+    world_size = 2
+
+    def build_device_mesh(self) -> DeviceMesh:
+        return init_device_mesh("cpu", (self.world_size,))
+
+    def test_dtensor_addmm(self):
+        fake_store = FakeStore()
+        torch.distributed.init_process_group(
+            # TODO: test other ranks too
+            "fake",
+            store=fake_store,
+            rank=0,
+            world_size=self.world_size,
+        )
+        fake_pg = torch.distributed.distributed_c10d._get_default_group()
+        device_mesh = self.build_device_mesh()
+
+        with LocalTensorMode(self.world_size) as mode:
+            self.mode = mode
+
+            shard_spec = [Shard(0)]
+            replica_spec = [Replicate()]
+
+            tensor_to_shard = torch.randn(12, 8)
+            mat1 = distribute_tensor(tensor_to_shard, device_mesh, shard_spec)
+            tensor_to_replicate = torch.randn(8, 4)
+            mat2 = distribute_tensor(tensor_to_replicate, device_mesh, replica_spec)
+            input_tensor = torch.randn(4)
+            input = distribute_tensor(input_tensor, device_mesh, replica_spec)
+            print(tensor_to_shard)
+            print(mat1)
+            print(tensor_to_replicate)
+            print(mat2)
+            print(input_tensor)
+            print(input)
+
+            dist_res = torch.addmm(input, mat1, mat2)
+            local_res = torch.addmm(input_tensor, tensor_to_shard, tensor_to_replicate)
+            print(dist_res)
+            print(local_res)
+            full_tensor = dist_res.full_tensor()
+            print(full_tensor)
+            self.assertEqual(full_tensor, local_res)
 
 
 if __name__ == "__main__":
