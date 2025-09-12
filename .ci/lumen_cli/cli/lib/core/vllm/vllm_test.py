@@ -96,11 +96,13 @@ class VllmTestRunner(BaseRunner):
         self._set_envs(params)
 
         clone_vllm(dst=self.work_directory)
+        self.cp_torch_cleaning_script(params)
         with working_directory(self.work_directory):
             remove_dir(Path("vllm"))
             self._install_wheels(params)
             self._install_dependencies()
         # verify the torches are not overridden by test dependencies
+
         check_versions()
 
     def run(self):
