@@ -553,6 +553,11 @@ if(USE_CUDA OR USE_ROCM)
 endif()
 
 if(USE_CUDA)
+  # eventually do rocm
+  append_filelist("libtorch_nativert_cuda_sources" Caffe2_GPU_SRCS)
+endif()
+
+if(USE_CUDA)
   list(APPEND Caffe2_GPU_CU_SRCS ${Caffe2_GPU_HIP_JIT_FUSERS_SRCS})
   add_library(caffe2_nvrtc SHARED ${ATen_NVRTC_STUB_SRCS})
   if(MSVC)
