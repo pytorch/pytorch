@@ -1499,8 +1499,7 @@ static PyObject* THPVariable_get_grad_dtype(THPVariable* self, void* unused) {
       !var.grad_fn(), "grad_dtype can only be accessed on leaf tensors.");
   auto grad_dtype = var.grad_dtype();
   if (grad_dtype.has_value()) {
-    PyObject* raw_obj = (PyObject*)torch::getTHPDtype(grad_dtype.value());
-    return py::reinterpret_borrow<py::object>(raw_obj).release().ptr();
+    return torch::autograd::utils::wrap(grad_dtype.value());
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
