@@ -21,7 +21,7 @@ from torch.distributed._functional_collectives import (
     reduce_scatter_tensor,
     reduce_scatter_tensor_coalesced,
 )
-from torch.testing._internal.common_cuda import SM90OrLater
+from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
 from torch.testing._internal.common_device_type import e4m3_type
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
@@ -30,7 +30,6 @@ from torch.testing._internal.common_distributed import (
 )
 from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     run_tests,
-    skipIfRocmArch,
     TestCase,
 )
 from torch.testing._internal.distributed.fake_pg import FakeStore
@@ -502,10 +501,9 @@ class TestWithNCCL(MultiProcessTestCase):
         t.start()
         t.join()
 
-    @skipIfRocmArch(("gfx90a"))
     @unittest.skipIf(
-        not SM90OrLater,
-        "_scaled_mm currently only supports sm>=90",
+        not PLATFORM_SUPPORTS_FP8,
+        "_scaled_mm currently only supports sm>=90 on cuda and gfx94/95 on ROCm",
     )
     @skip_if_lt_x_gpu(2)
     @fresh_cache()
@@ -514,8 +512,7 @@ class TestWithNCCL(MultiProcessTestCase):
 
         def scale(t):
             scale = (
-                torch.finfo(e4m3_type).max
-                / t.abs().amax(dim=-1, keepdim=True).float()
+                torch.finfo(e4m3_type).max / t.abs().amax(dim=-1, keepdim=True).float()
             )
             t = t.mul(scale).to(e4m3_type)
             return t, scale
