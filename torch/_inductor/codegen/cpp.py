@@ -3134,7 +3134,7 @@ class CppVecKernel(CppKernel):
                 "src_dtype": src_dtype,
             }
             # use masked acc_vec for tail vec kernel
-            acc_vec_ = masked_acc_vec if self.tail_size else acc_vec
+            acc_vec_ = masked_acc_vec if self.tail_size and reduction_type == "welford_reduce" else acc_vec
             self.stores.writeline(
                 f"{acc_vec_} = {self.reduction_combine_vec(reduction_type, acc_vec_, **kwargs)};"
             )
