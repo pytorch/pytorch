@@ -481,7 +481,7 @@ class TestPoolingNN(NNTestCase):
 
     def test_max_unpool3d_input_check(self):
         x = torch.ones(1, 3, 1, 1, 1)
-        with self.assertRaises(AssertionError):
+        with self.assertRaises(RuntimeError):
             F.max_unpool3d(x, torch.zeros(x.shape, dtype=int), [1, 1])
 
     def test_quantized_max_pool1d_empty_kernel(self):
