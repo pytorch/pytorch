@@ -12,11 +12,13 @@ import os
 import sys
 import logging
 
-# Setup logging 
+# Setup logging - force torch.utils.cpp_extension to DEBUG level
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=logging.WARNING,  # General level
     format=f'[rank{os.environ.get("RANK", "?")}] [%(levelname)s] %(name)s: %(message)s'
 )
+# Force DEBUG for cpp_extension to see the message
+logging.getLogger('torch.utils.cpp_extension').setLevel(logging.DEBUG)
 
 # Ensure TORCH_CUDA_ARCH_LIST is not set
 os.environ.pop('TORCH_CUDA_ARCH_LIST', None)
