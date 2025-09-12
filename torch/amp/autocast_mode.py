@@ -231,9 +231,8 @@ class autocast:
                 f"Expected `device_type` of type `str`, got: `{type(device_type)}`"
             )
         if dtype is None:
-            self.fast_dtype = torch.get_autocast_dtype(device_type)
-        else:
-            self.fast_dtype = dtype
+            dtype = torch.get_autocast_dtype(device_type)
+        self.fast_dtype = dtype
         if torch._jit_internal.is_scripting():
             self._enabled = enabled
             self.device = device_type
