@@ -237,7 +237,8 @@ def aot_compile_fullgraph(
                 closure=fn.__closure__ or (),  # type: ignore[arg-type]
             )
         )
-        dynamo_output = capture_output.dynamo_output
+        graph_capture_output = capture_output.graph_capture_output
+        assert graph_capture_output.output_graph is not None
 
         if not hooks.guard_filter_fn:
             from torch._dynamo.types import GuardFilterEntry
@@ -258,7 +259,7 @@ def aot_compile_fullgraph(
 
             hooks.guard_filter_fn = new_guard_filter_fn
 
-        check_fn = dynamo_output.build_guards(
+        check_fn = graph_capture_output.build_guards(
             fn.__code__, hooks=hooks, save=True, strict_error=True
         )
 
@@ -267,11 +268,8 @@ def aot_compile_fullgraph(
     backend_input = capture_output.backend_input
     assert backend_input is not None
     backend_input.graph_module._backend_id = backend_input.backend_id  # type: ignore[assignment]
-    output_graph = dynamo_output.tracer_output.output_graph
-    assert output_graph is not None
-    use_cuda = _graph_uses_non_cpu(output_graph.current_tracer.graph)
+    use_cuda = _graph_uses_non_cpu(backend_input.graph_module.graph)
 
-    import_sources = output_graph.import_sources
     with (
         torch._guards.tracing(TracingContext(backend_input.fake_mode)),
         torch._functorch.config.patch("bundled_autograd_cache", True),
@@ -297,10 +295,10 @@ def aot_compile_fullgraph(
 
     artifacts = CompileArtifacts(
         signature=signature,
-        bytecode=dynamo_output.bytecode,
+        bytecode=graph_capture_output.bytecode,
         guard_manager=check_fn.guard_manager,
         guards_state=check_fn.guards_state,
-        import_sources=import_sources,
+        import_sources=graph_capture_output.import_sources,
         backend_id=backend_input.backend_id,
         compiled_fn=compiled_fn,
         original_code=fn.__code__,
