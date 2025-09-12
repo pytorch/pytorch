@@ -29,19 +29,19 @@ jobs:
       docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11
       test-matrix: |
         { include: [
-          { "config": "operator_microbenchmark_test",
-            "shard": 1,
-            "num_shards": 1,
-            "runner": "linux.aws.h100",
-            "op_benchmark_tests": ["matmul", "mm", "add", "bmm"],
-            "extra_flags": ["--use-compile", ""]
+          { config: "operator_microbenchmark_test",
+            shard: 1,
+            num_shards: 1,
+            runner: "linux.aws.h100",
+            op_benchmark_tests: [matmul, mm, add, bmm],
+            extra_flags: ["--use-compile", ""]
           },
-          { "config": "operator_microbenchmark_test",
-            "shard": 1,
-            "num_shards": 1,
-            "runner": "linux.aws.a100",
-            "op_benchmark_tests": ["matmul", "mm", "add", "bmm"],
-            "extra_flags": ["--use-compile", ""]
+          { config: "operator_microbenchmark_test",
+            shard: 1,
+            num_shards: 1,
+            runner: "linux.aws.a100",
+            op_benchmark_tests: [matmul, mm, add, bmm],
+            extra_flags: ["--use-compile", ""]
           }
         ]}
     secrets: inherit
