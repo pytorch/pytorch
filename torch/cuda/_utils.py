@@ -153,7 +153,8 @@ def _nvrtc_compile(
             raise RuntimeError(f"CUDA error: {error_message}")
 
     # Add 'extern "C"' if not already present to ensure C linkage
-    if not kernel_source.strip().startswith('extern "C"'):
+    # But skip this if the code already contains extern "C" blocks (template case)
+    if not kernel_source.strip().startswith('extern "C"') and 'extern "C"' not in kernel_source:
         kernel_source = f'extern "C" {kernel_source}'
 
     # Combine header code and kernel source
