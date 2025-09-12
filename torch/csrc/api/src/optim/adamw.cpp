@@ -47,6 +47,27 @@ void AdamWOptions::set_lr(const double lr) {
   this->lr(lr);
 }
 
+void AdamWOptions::overwrite_from(const OptimizerOptions& source) {
+  const auto& source_adamw = static_cast<const AdamWOptions&>(source);
+  const AdamWOptions default_ctor_opts;
+
+  if (source_adamw.lr() != default_ctor_opts.lr()) {
+    this->lr(source_adamw.lr());
+  }
+  if (source_adamw.betas() != default_ctor_opts.betas()) {
+    this->betas(source_adamw.betas());
+  }
+  if (source_adamw.eps() != default_ctor_opts.eps()) {
+    this->eps(source_adamw.eps());
+  }
+  if (source_adamw.weight_decay() != default_ctor_opts.weight_decay()) {
+    this->weight_decay(source_adamw.weight_decay());
+  }
+  if (source_adamw.amsgrad() != default_ctor_opts.amsgrad()) {
+    this->amsgrad(source_adamw.amsgrad());
+  }
+}
+
 bool operator==(const AdamWParamState& lhs, const AdamWParamState& rhs) {
   return (lhs.step() == rhs.step()) &&
       torch::equal(lhs.exp_avg(), rhs.exp_avg()) &&

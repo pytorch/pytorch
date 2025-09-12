@@ -48,6 +48,29 @@ void AdamOptions::set_lr(const double lr) {
   this->lr(lr);
 }
 
+void AdamOptions::overwrite_from(const OptimizerOptions& source) {
+  const auto& source_adam = static_cast<const AdamOptions&>(source);
+  // Create a temporary object to identify user-set values
+  const AdamOptions default_ctor_opts;
+
+  // Only overwrite with values that differ from constructor defaults
+  if (source_adam.lr() != default_ctor_opts.lr()) {
+    this->lr(source_adam.lr());
+  }
+  if (source_adam.betas() != default_ctor_opts.betas()) {
+    this->betas(source_adam.betas());
+  }
+  if (source_adam.eps() != default_ctor_opts.eps()) {
+    this->eps(source_adam.eps());
+  }
+  if (source_adam.weight_decay() != default_ctor_opts.weight_decay()) {
+    this->weight_decay(source_adam.weight_decay());
+  }
+  if (source_adam.amsgrad() != default_ctor_opts.amsgrad()) {
+    this->amsgrad(source_adam.amsgrad());
+  }
+}
+
 bool operator==(const AdamParamState& lhs, const AdamParamState& rhs) {
   return (lhs.step() == rhs.step()) &&
       torch::equal(lhs.exp_avg(), rhs.exp_avg()) &&

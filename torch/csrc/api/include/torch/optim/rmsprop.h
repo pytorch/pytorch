@@ -37,6 +37,7 @@ struct TORCH_API RMSpropOptions
       const RMSpropOptions& rhs);
   double get_lr() const override;
   void set_lr(const double lr) override;
+  void overwrite_from(const OptimizerOptions& source) override;
 };
 
 struct TORCH_API RMSpropParamState

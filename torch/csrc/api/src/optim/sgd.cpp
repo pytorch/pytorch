@@ -46,6 +46,30 @@ void SGDOptions::set_lr(const double lr) {
   this->lr(lr);
 }
 
+void SGDOptions::overwrite_from(const OptimizerOptions& source) {
+  const auto& source_sgd = static_cast<const SGDOptions&>(source);
+  // For SGD, lr is required in constructor, so compare against a reasonable
+  // default
+  const SGDOptions default_ctor_opts(1e-2); // Standard default lr
+
+  // For SGD, lr is always required and explicitly set, so always preserve it
+  this->lr(source_sgd.lr());
+
+  // Only overwrite other values that differ from constructor defaults
+  if (source_sgd.momentum() != default_ctor_opts.momentum()) {
+    this->momentum(source_sgd.momentum());
+  }
+  if (source_sgd.dampening() != default_ctor_opts.dampening()) {
+    this->dampening(source_sgd.dampening());
+  }
+  if (source_sgd.weight_decay() != default_ctor_opts.weight_decay()) {
+    this->weight_decay(source_sgd.weight_decay());
+  }
+  if (source_sgd.nesterov() != default_ctor_opts.nesterov()) {
+    this->nesterov(source_sgd.nesterov());
+  }
+}
+
 bool operator==(const SGDParamState& lhs, const SGDParamState& rhs) {
   return torch::equal(lhs.momentum_buffer(), rhs.momentum_buffer());
 }
