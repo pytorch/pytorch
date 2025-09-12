@@ -9,7 +9,6 @@ import unittest
 import numpy
 
 import torch
-import torch_openreg  # noqa: F401
 from torch.serialization import safe_globals
 from torch.testing._internal.common_utils import (
     run_tests,
