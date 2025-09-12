@@ -28,7 +28,7 @@ def custom_op(
     mutates_args: Union[str, Iterable[str]],
     device_types: device_types_t = None,
     schema: Optional[str] = None,
-    tags: Sequence[_C.Tag] | None = None,
+    tags: Optional[Sequence[_C.Tag]] = None,
 ) -> Callable[[Callable[..., object]], "CustomOpDef"]: ...
 
 
@@ -41,7 +41,7 @@ def custom_op(
     mutates_args: Union[str, Iterable[str]],
     device_types: device_types_t = None,
     schema: Optional[str] = None,
-    tags: Sequence[_C.Tag] | None = None,
+    tags: Optional[Sequence[_C.Tag]] = None,
 ) -> "CustomOpDef": ...
 
 
