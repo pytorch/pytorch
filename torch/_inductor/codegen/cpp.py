@@ -236,7 +236,10 @@ def reduction_combine(
     if reduction_type in ("min", "max"):
         return f"{reduction_type}_propagate_nan({var}, {next_value})"
     if reduction_type == "welford_reduce":
-        return f"welford_combine({var}, {next_value})"
+        if helper_val:
+            return f"welford_combine({var}, {next_value}, &{helper_val})"
+        else:
+            return f"welford_combine({var}, {next_value})"
     if reduction_type == "welford_combine":
         if isinstance(next_value, tuple):
             mean, m2, weight = next_value
@@ -2177,10 +2180,8 @@ class CppKernel(Kernel):
         # sum and welford
         # Note: using helper has non-negligible impact on performance
 
-        # keep the original behavior for welford_reduce
-        # acc helper is not used for scalar welford_reduce
         if reduction_type == "welford_reduce":
-            return not use_scalar
+            return True
 
         # TODO add supports for more data types when needed
         if reduction_type == "sum" and dtype == torch.float:
@@ -2241,12 +2242,13 @@ class CppKernel(Kernel):
                 if hasattr(self, "_get_vec_type")
                 else DTYPE_TO_CPP[dtype]
             )
+        s_type = DTYPE_TO_CPP[dtype]
         helper_init_line = (
-            f"{helper_type}<{h_type}, {chunk_size}> {helper_val}"
-            f"("
-            f"{num_range_thread_expr}"
-            f");"
+            f"{helper_type}<{h_type}, {s_type}, {chunk_size}> {helper_val}"
+            if reduction_type == "welford_reduce"
+            else f"{helper_type}<{h_type}, {chunk_size}> {helper_val}"
         )
+        helper_init_line += f"({num_range_thread_expr});"
         if reduction_type == "sum":
             return helper_init_line
         if isinstance(num_chunks, sympy.Integer) and num_chunks <= 1:
@@ -2312,9 +2314,15 @@ class CppKernel(Kernel):
             reduction_size = functools.reduce(
                 operator.mul, self.ranges[self.reduction_depth :]
             )
-            helper_val = self.cascade_helper_cse.generate(
-                self.compute, f"reduction {reduction_key}", write=False
-            )
+            # use welford_helper/cascade_helper for vec kernel
+            if reduction_type == "welford_reduce":
+                helper_val = self.welford_helper_cse.generate(
+                    self.compute, f"reduction {reduction_key}", write=False
+                )
+            else:
+                helper_val = self.cascade_helper_cse.generate(
+                    self.compute, f"reduction {reduction_key}", write=False
+                )
             # rename the helper variable to distinguish it from vectorized version
             scalar_helper_val = f"scalar_{helper_val}"
             self._use_acc_helper(
@@ -3078,19 +3086,16 @@ class CppVecKernel(CppKernel):
                 if self.ranges[self.tiling_idx] % self.tiling_factor
                 else sympy.Integer(0)
             )
-            # scalar helper for scalar sum is also needed when vec kernel is included
-            # Note: is it different from welford reduction as welford reduction of scalar version
-            # does not need helper, and the helper needs the information of reduction size to initialize
-            if reduction_type == "sum":
-                scalar_helper_val = f"scalar_{helper_val}"
-                self._use_acc_helper(
-                    reduction_type,
-                    acc,
-                    scalar_helper_val,
-                    reduction_size,
-                    dtype,
-                    use_scalar=True,
-                )
+            # scalar helper for scalar welford_reduce/sum is also needed when vec kernel is included
+            scalar_helper_val = f"scalar_{helper_val}"
+            self._use_acc_helper(
+                reduction_type,
+                acc,
+                scalar_helper_val,
+                reduction_size,
+                dtype,
+                use_scalar=True,
+            )
             self._use_acc_helper(
                 reduction_type, acc, helper_val, helper_vec_range, dtype
             )
