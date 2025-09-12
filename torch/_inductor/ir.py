@@ -7115,19 +7115,7 @@ class IndexPutFallback(ExternKernel):
     """
 
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
-        assert is_node_sequence(self.inputs)
-        (x, values, *valid_indices) = (t.codegen_reference() for t in self.inputs)
-        indices = []
-        iter_valid_indices = iter(valid_indices)
-        for i, _ in enumerate(self.indices):
-            if self.indices[i] is not None:
-                indices.append(next(iter_valid_indices))
-            else:
-                indices.append(V.graph.wrapper_code.none_str)
-
-        wrapper.generate_index_put_fallback(
-            self.get_kernel_name(), x, indices, values, *self.codegen_const_args()
-        )
+        wrapper.generate_index_put_fallback(self)
 
     def should_allocate(self) -> bool:
         return False

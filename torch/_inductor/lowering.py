@@ -3717,8 +3717,8 @@ def index_put_as_masked_fill(self, indices, value, accumulate):
 
 
 def index_put_fallback(self, indices, values, accumulate):
-    assert isinstance(V.graph.current_node.target, torch._ops.OpOverload)
-    ir.IndexPutFallback(V.graph.current_node.target, self, indices, values, accumulate)
+    op_overload = getattr(aten.index_put_, V.graph.current_node.target._overloadname)  # type: ignore[union-attr]
+    ir.IndexPutFallback(op_overload, self, indices, values, accumulate)
     return self
 
 
