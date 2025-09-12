@@ -59,6 +59,7 @@ from typing import Union
 
 import torch
 from torch import Tensor
+from torch._C import DispatchKey
 from torch._export.wrappers import mark_subclass_constructor_exportable_experimental
 from torch.distributed._distributed_c10d import FakeWork
 from torch.distributed.distributed_c10d import ProcessGroup, ReduceOp, Work
@@ -73,7 +74,7 @@ not_implemented_log = torch._logging.getArtifactLogger(__name__, "not_implemente
 from pycute.int_tuple import flatten, is_int, is_tuple
 from pycute.layout import complement, Layout
 
-from . import _collectives
+from . import _c10d
 
 
 # TODO: this claude code implementation sucks, redo it
@@ -253,6 +254,14 @@ class LocalTensor(torch.Tensor):
         tensors_str = ",\n".join(parts)
         return f"LocalTensor(\n{tensors_str}\n)"
 
+    def tolist(self):
+        # Force result to be SPMD
+        it = iter(self._local_tensors.items())
+        rank, t = next(it)
+        for rank2, t2 in it:
+            assert torch.equal(t, t2)
+        return t.tolist()
+
     def __tensor_flatten__(self):
         """
         protocol to inform how to flatten a DTensor to local tensor
@@ -322,8 +331,14 @@ class LocalTensorMode(TorchDispatchMode):
         # Find all LocalTensor arguments to determine ranks
         local_tensors = [a for a in flat_args if isinstance(a, LocalTensor)]
 
-        if not local_tensors and self._disable:
-            return func(*args, **kwargs)
+        # Factory functions convert into LocalTensor, so we don't have to
+        # transmute a Tensor into a LocalTensor if mutation happens...
+        # But if you do an operation on a Tensor, do NOT wrap it into a
+        # LocalTensor.  This helps prevent accidents when you're doing Tensor
+        # operations on the inner non-wrapped tensors.
+        if not local_tensors:
+            if self._disable or any(isinstance(a, Tensor) for a in flat_args):
+                return func(*args, **kwargs)
 
         # Check for unrecognized tensor subclasses (but allow regular tensors and scalars)
         has_unrecognized_types = _check_for_subclass(flat_args)
@@ -343,17 +358,41 @@ class LocalTensorMode(TorchDispatchMode):
 
         if func.namespace == "c10d":
             if func is torch.ops.c10d.allreduce_.default:
-                return _collectives._local_all_reduce_(*args, **kwargs)
+                return _c10d._local_all_reduce_(*args, **kwargs)
             elif func is torch.ops.c10d.broadcast_.default:
-                return _collectives._local_broadcast_(*args, **kwargs)
+                return _c10d._local_broadcast_(*args, **kwargs)
             elif func is torch.ops.c10d.allgather_.default:
-                return _collectives._local_all_gather_(*args, **kwargs)
+                return _c10d._local_all_gather_(*args, **kwargs)
             elif func is torch.ops.c10d.scatter_.default:
-                return _collectives._local_scatter_(*args, **kwargs)
+                return _c10d._local_scatter_(*args, **kwargs)
+            elif func is torch.ops.c10d.allgather_into_tensor_coalesced_.default:
+                return _c10d._local_allgather_into_tensor_coalesced_(*args, **kwargs)
+            elif func is torch.ops.c10d.allreduce_coalesced_.default:
+                return _c10d._local_allreduce_coalesced_(*args, **kwargs)
+            elif func is torch.ops.c10d.gather_.default:
+                return _c10d._local_gather_(*args, **kwargs)
+            elif func is torch.ops.c10d.alltoall_.default:
+                return _c10d._local_alltoall_(*args, **kwargs)
+            elif func is torch.ops.c10d.alltoall_base_.default:
+                return _c10d._local_alltoall_base_(*args, **kwargs)
+            elif func is torch.ops.c10d.barrier.default:
+                return _c10d._local_barrier(*args, **kwargs)
+            elif func is torch.ops.c10d.monitored_barrier_.default:
+                return _c10d._local_monitored_barrier_(*args, **kwargs)
+            elif func is torch.ops.c10d.send.default:
+                return _c10d._local_send(*args, **kwargs)
+            elif func is torch.ops.c10d.recv_.default:
+                return _c10d._local_recv_(*args, **kwargs)
+            elif func is torch.ops.c10d.recv_any_source_.default:
+                return _c10d._local_recv_any_source_(*args, **kwargs)
             raise NotImplementedError(f"{func} not implemented")
 
         if func.namespace == "_c10d_functional":
-            raise NotImplementedError(f"{func} not implemented")
+            with self:
+                # la la la
+                return func._op_dk(
+                    DispatchKey.CompositeExplicitAutograd, *args, **kwargs
+                )
 
         if func.namespace == "_c10d_functional_autograd":
             raise NotImplementedError(f"{func} not implemented")

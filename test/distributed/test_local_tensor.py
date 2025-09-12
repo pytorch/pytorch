@@ -55,11 +55,17 @@ class TestLocalTensor(TestCase):
                 assert isinstance(lhs, LocalTensor) and isinstance(rhs, LocalTensor)
                 super().assertEqual(lhs._ranks, rhs._ranks)
                 for r in lhs._ranks:
-                    super().assertEqual(lhs._local_tensors[r], rhs._local_tensors[r], lambda m: f"rank {r}: {m}")
+                    super().assertEqual(
+                        lhs._local_tensors[r],
+                        rhs._local_tensors[r],
+                        lambda m: f"rank {r}: {m}",
+                    )
             elif isinstance(lhs, LocalTensor) or isinstance(rhs, LocalTensor):
                 lhs, rhs = (lhs, rhs) if isinstance(lhs, LocalTensor) else (rhs, lhs)
                 for r in lhs._ranks:
-                    super().assertEqual(lhs._local_tensors[r], rhs, lambda m: f"rank {r}: {m}")
+                    super().assertEqual(
+                        lhs._local_tensors[r], rhs, lambda m: f"rank {r}: {m}"
+                    )
             else:
                 return super().assertEqual(lhs, rhs, **kwargs)
         finally:
@@ -430,10 +436,10 @@ class TestLocalTensor(TestCase):
             world_size=self.world_size,
         )
         fake_pg = torch.distributed.distributed_c10d._get_default_group()
-        device_mesh = self.build_device_mesh()
-
         with LocalTensorMode(self.world_size) as mode:
             self.mode = mode
+
+            device_mesh = self.build_device_mesh()
 
             shard_spec = [Shard(0)]
             replica_spec = [Replicate()]
@@ -444,19 +450,10 @@ class TestLocalTensor(TestCase):
             mat2 = distribute_tensor(tensor_to_replicate, device_mesh, replica_spec)
             input_tensor = torch.randn(4)
             input = distribute_tensor(input_tensor, device_mesh, replica_spec)
-            print(tensor_to_shard)
-            print(mat1)
-            print(tensor_to_replicate)
-            print(mat2)
-            print(input_tensor)
-            print(input)
 
             dist_res = torch.addmm(input, mat1, mat2)
             local_res = torch.addmm(input_tensor, tensor_to_shard, tensor_to_replicate)
-            print(dist_res)
-            print(local_res)
             full_tensor = dist_res.full_tensor()
-            print(full_tensor)
             self.assertEqual(full_tensor, local_res)
 
 
