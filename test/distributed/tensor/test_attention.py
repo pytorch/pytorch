@@ -17,6 +17,7 @@ from torch.distributed.tensor.experimental._attention import (
     _CausalBehavior,
     _cp_options,
     _DispatchMode,
+    _flex_attention_wrapper,
     _is_causal_behavior,
     _RotateMethod,
     context_parallel,
@@ -362,7 +363,13 @@ class CPFlexAttentionTest(DTensorTestBase):
         return 2
 
     def _test_cp_flex_attention(
-        self, qkv_size, B=1, mask_func=causal_mask, atol=1e-6, rtol=1e-2
+        self,
+        qkv_size,
+        dispatch_mode: _DispatchMode = _DispatchMode.TORCH_FUNCTION,
+        B=1,
+        mask_func=causal_mask,
+        atol=1e-6,
+        rtol=1e-2,
     ) -> None:
         torch.cuda.manual_seed(10)
         dtype = torch.float32
@@ -415,9 +422,7 @@ class CPFlexAttentionTest(DTensorTestBase):
         _cp_options.enable_load_balance = False
 
         # set CP context dispatch mode to use TORCH_FUNCTION for flex_attention
-        torch.distributed.tensor.experimental._attention._dispatch_mode = (
-            _DispatchMode.TORCH_FUNCTION
-        )
+        torch.distributed.tensor.experimental._attention._dispatch_mode = dispatch_mode
 
         # prepare input buffer
         cp_q = q.detach().clone()
@@ -451,13 +456,22 @@ class CPFlexAttentionTest(DTensorTestBase):
             cp_k.requires_grad = True
             cp_v.requires_grad = True
 
-            cp_out, cp_aux = compiled_flex_attention(
-                cp_q,
-                cp_k,
-                cp_v,
-                block_mask=cp_block_mask,
-                return_aux=AuxRequest(lse=True),
-            )
+            if dispatch_mode == _DispatchMode.TORCH_FUNCTION:
+                cp_out, cp_aux = compiled_flex_attention(
+                    cp_q,
+                    cp_k,
+                    cp_v,
+                    block_mask=cp_block_mask,
+                    return_aux=AuxRequest(lse=True),
+                )
+            elif dispatch_mode == _DispatchMode.MODULE_WRAPPER:
+                cp_out, cp_aux = _flex_attention_wrapper(
+                    cp_q,
+                    cp_k,
+                    cp_v,
+                    block_mask=cp_block_mask,
+                    return_aux=AuxRequest(lse=True),
+                )
 
             # check block_mask rewrite doesn't escape to the outside
             assert cp_block_mask.seq_lengths == (
@@ -501,14 +515,26 @@ class CPFlexAttentionTest(DTensorTestBase):
     )
     def test_cp_flex_attention(self) -> None:
         self.run_subtests(
-            {"qkv_size": [128 * self.world_size, 2048]},
+            {
+                "qkv_size": [128 * self.world_size, 2048],
+                "dispatch_mode": [
+                    _DispatchMode.TORCH_FUNCTION,
+                    _DispatchMode.MODULE_WRAPPER,
+                ],
+            },
             self._test_cp_flex_attention,
         )
 
         # NOTE: Context Parallel should not be used for small attentions (block_size < 128)
         with self.assertRaisesRegex(AssertionError, "Tensor-likes are not close"):
             self.run_subtests(
-                {"qkv_size": [64 * self.world_size]},
+                {
+                    "qkv_size": [64 * self.world_size],
+                    "dispatch_mode": [
+                        _DispatchMode.TORCH_FUNCTION,
+                        _DispatchMode.MODULE_WRAPPER,
+                    ],
+                },
                 self._test_cp_flex_attention,
             )
 
