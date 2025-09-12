@@ -231,12 +231,13 @@ class autocast:
                 f"Expected `device_type` of type `str`, got: `{type(device_type)}`"
             )
         if dtype is None:
-            dtype = torch.get_autocast_dtype(device_type)
+            self.fast_dtype = torch.get_autocast_dtype(device_type)
+        else:
+            self.fast_dtype = dtype
         if torch._jit_internal.is_scripting():
             self._enabled = enabled
             self.device = device_type
-            self.fast_dtype = dtype
-            assert dtype is not None
+            assert self.fast_dtype is not None
             return
         self.device = device_type
         if not is_autocast_available(self.device):
@@ -271,8 +272,6 @@ class autocast:
                 "User provided device_type of 'cuda', but CUDA is not available. Disabling"
             )
             enabled = False
-        if dtype is not None:
-            self.fast_dtype = dtype
         if cache_enabled is not None:
             self._cache_enabled = cache_enabled
 
