@@ -2989,7 +2989,11 @@ class Scheduler:
                     break
 
             if config.loop_ordering_after_fusion:
+                old_len = len(nodes)
                 nodes = self.fuse_nodes_once(nodes, is_reorder_round=True)
+                print(
+                    f"The bonus round of fuse_nodes_once fused {old_len} nodes into {len(nodes)} nodes"
+                )
             return nodes
 
     def process_grouped_nodes(self) -> None:

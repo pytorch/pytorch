@@ -163,6 +163,28 @@ if TYPE_CHECKING:
         GraphSignature,
     )
 
+if os.getenv("PATCH_SYMPY_MIN_MAX", "1") == "1":
+
+    def _patch_sympy_min_max() -> None:
+        from sympy.functions.elementary.miscellaneous import MinMaxBase
+
+        original = MinMaxBase._find_localzeros.__func__
+
+        def new_find_localzeros(cls: Any, values: Any, **options: Any) -> Any:
+            if not isinstance(values, (tuple, list)):
+                values = tuple(values)
+            if len(values) == 2 and any(bool(x.free_symbols) for x in values):
+                # skip the simplification below
+                # This may miss some simplification opportunities like
+                #   Min(x + 1, x + 2)
+                # but it may worth it by reducing compilation time
+                return values
+            return original(cls, values, **options)
+
+        MinMaxBase._find_localzeros = classmethod(new_find_localzeros)
+
+    _patch_sympy_min_max()
+
 
 class FxCompileMode(enum.Enum):
     NORMAL = 0
