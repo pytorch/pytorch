@@ -5,8 +5,6 @@ import functools
 import unittest
 
 import torch
-
-import torch_openreg  # noqa: F401
 from torch.nn.attention import SDPBackend
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import (
