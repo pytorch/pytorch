@@ -32,6 +32,7 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_MX_GEMM,
     PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM,
     IS_SM90,
+    with_tf32_off,
 )
 from torch.testing._internal.common_device_type import (
     dtypes,
@@ -211,7 +212,6 @@ class TestMatmulCuda(TestCase):
             self.cublas_addmm(size, dtype, False, True)
 
     @onlyCUDA
-    @skipIfRocm
     def test_cublas_and_lt_reduced_precision_fp16_accumulate(self):
         orig_fp16_accumulate = torch.backends.cuda.matmul.allow_fp16_accumulation
         torch.backends.cuda.matmul.allow_fp16_accumulation = True
@@ -316,7 +316,6 @@ class TestMatmulCuda(TestCase):
                 self.assertEqual(agrad, a.grad)
                 self.assertEqual(bgrad, b.grad)
 
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
     @xfailIfSM120OrLater
     @unittest.skipIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
     @parametrize("strided", [False, True])
@@ -355,7 +354,6 @@ class TestMatmulCuda(TestCase):
             start = offs_cpu[i]
         self.grouped_mm_helper(alist, blist, gO, agradlist, bgradlist, out)
 
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
     @xfailIfSM120OrLater
     @unittest.skipIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
     @parametrize("strided", [False, True])
@@ -412,7 +410,6 @@ class TestMatmulCuda(TestCase):
             self.grouped_mm_helper(alist, b, gOlist, agradlist, bgradlist, outlist)
 
 
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
     @xfailIfSM120OrLater
     @unittest.skipIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
     @parametrize("strided", [False, True])
@@ -447,7 +444,6 @@ class TestMatmulCuda(TestCase):
         out.backward(gO)
         self.grouped_mm_helper(a, b, gO, a.grad, b.grad, out)
 
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
     @xfailIfSM120OrLater
     @unittest.skipIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
     @parametrize("strided", [False, True])
@@ -455,6 +451,8 @@ class TestMatmulCuda(TestCase):
     @parametrize("b_row_major", [False, True])
     @dtypes(torch.bfloat16, torch.float32, torch.float16)
     def test_grouped_gemm_3d_2d(self, strided, a_row_major, b_row_major, dtype):
+        if TEST_WITH_ROCM and a_row_major and b_row_major and dtype in [torch.bfloat16, torch.float16]:
+            self.skipTest("failed using hipblaslt on rocm 6.4.2")
         device = "cuda"
         s_int = int(strided)
         m, n, k, n_groups = 16, 32, 64, 4
@@ -626,8 +624,7 @@ class TestMatmulCuda(TestCase):
     @parametrize("N", [1, 32, 64])
     @parametrize("K", [1, 32, 64])
     @parametrize("batch_size", [None, 1, 16])
-    # TODO: enable rocblas path on ROCm
-    @parametrize("backend", ["cublaslt"] if torch.version.hip else ["cublas", "cublaslt"])
+    @parametrize("backend", ["cublas", "cublaslt"])
     def test_mm_bmm_dtype_overload(self, input_dtype, M, N, K, batch_size, backend):
         device = "cuda"
         dtype = input_dtype
@@ -681,8 +678,7 @@ class TestMatmulCuda(TestCase):
     @parametrize("N", [1, 32, 64])
     @parametrize("K", [1, 32, 64])
     @parametrize("batch_size", [None, 1, 32])
-    # TODO: enable rocblas path on ROCm
-    @parametrize("backend", ["cublaslt"] if torch.version.hip else ["cublas", "cublaslt"])
+    @parametrize("backend", ["cublas", "cublaslt"])
     def test_addmm_baddmm_dtype_overload(self, input_dtype, M, N, K, batch_size, backend):
         device = "cuda"
         dtype = input_dtype
@@ -739,7 +735,6 @@ class TestMatmulCuda(TestCase):
 
 
     @onlyCUDA
-    @skipIfRocm
     @parametrize("batch_size", [1, 32])
     @parametrize("backend", ["cublas", "cublaslt"])
     def test_fp16_accum_and_fp32_out_failure(self, batch_size, backend):
@@ -1512,6 +1507,7 @@ class TestFP8Matmul(TestCase):
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
     @unittest.skipIf(not SM89OrLater, "rowwise implementation is currently sm89-sm100 specific")
     @parametrize("base_dtype", [torch.bfloat16, torch.float32])
+    @with_tf32_off
     def test_scaled_mm_vs_emulated_row_wise(self, base_dtype):
         # Fp32 out_dtype is only supported by cuBLAS, which however only started
         # shipping row-wise kernels in CUDA 12.9, and only for sm90+.
