@@ -1070,10 +1070,39 @@ def _fused_matmul_reduce_scatter_impl(
         reduce_fn = partial(torch.mean, dim=0)
     else:
         raise ValueError("reduce_op must be sum or avg")
-
     group = c10d._resolve_process_group(group_name)
     out_shape = [*A.shape[:-1], B.shape[1]]
     out_shape[scatter_dim] //= group.size()
+
+    chunk_producer = None
+    if scatter_dim == A.ndim - 1:
+        Bt = B.t()
+        Bt_shards = Bt.chunk(group.size())
+        x = A.flatten(0, -2)
+
+        def chunk_producer(rank: int, out: torch.Tensor) -> None:
+            mm_out_op(A, Bt_shards[rank].t(), **kwargs, out=out)
+
+        leading_dims = [group.size()] + list(x.shape[:-1])
+
+        stacked_partials = x.new_empty(
+            x.shape[0], B.shape[1], dtype=out_dtype or A.dtype
+        )
+
+        _pipelined_produce_and_all2all(
+            chunk_producer,
+            stacked_partials,
+            group_name,
+        )
+
+        # Ensures that the transpose and reduction produce contiguous result
+        # in a single reduction kernel.
+        stacked_partials_view = stacked_partials.view(*leading_dims, -1)
+        stacked_partials_view = stacked_partials_view.movedim(0, scatter_dim)
+        return reduce_fn(
+            stacked_partials_view,
+            dim=scatter_dim,
+        )
 
     # Move the scatter_dim to the front and flatten the tensor into a 2D matrix
     x = A.movedim(scatter_dim, 0)
