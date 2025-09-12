@@ -167,16 +167,15 @@ def aot_stage1_graph_capture(
                 )
             )
     else:
-        with dynamo_timed("aot_trace_inference_graph", log_pt2_compile_event=True):
-            graph, updated_flat_args, updated_flat_args_descs, maybe_subclass_meta = (
-                aot_dispatch_base_graph(  # type: ignore[assignment]
-                    flat_fn,
-                    aot_state.flat_args,
-                    aot_state.flat_args_descs,
-                    aot_config,
-                    fw_metadata=aot_state.fw_metadata,
-                )
+        graph, updated_flat_args, updated_flat_args_descs, maybe_subclass_meta = (
+            aot_dispatch_base_graph(  # type: ignore[assignment]
+                flat_fn,
+                aot_state.flat_args,
+                aot_state.flat_args_descs,
+                aot_config,
+                fw_metadata=aot_state.fw_metadata,
             )
+        )
 
     return AOTGraphCapture(
         wrappers=wrappers,

@@ -2648,7 +2648,9 @@ class GuardAccessor {
   // subtree on immutable dict getitems.
   virtual bool check_nopybind(PyObject* obj, bool matches_dict_tag = false) = 0;
   virtual bool check_nopybind(FrameLocalsMapping* map, bool matches_dict_tag) {
-    throw std::runtime_error("fallback to python");
+    // throw std::runtime_error("fallback to python");
+    // Could fallback to running check on the Python dict (lazily constructed)
+    return check_nopybind((PyObject*)map->to_dict(), matches_dict_tag);
   }
   virtual GuardDebugInfo check_verbose_nopybind(PyObject* obj) = 0;
   virtual std::string repr() const = 0;
@@ -5670,11 +5672,6 @@ class GlobalsGuardAccessor : public GuardAccessor {
 
   std::string repr() const override {
     return "GlobalsGuardAccessor";
-  }
-
-  bool check_nopybind(FrameLocalsMapping* map, bool matches_dict_tag) override {
-    // Ensure that we don't construct the framelocals to dict here.
-    return _guard_manager->check_nopybind(_globals_dict);
   }
 
  public: // cloning functions
