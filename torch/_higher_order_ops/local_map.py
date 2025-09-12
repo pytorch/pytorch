@@ -6,6 +6,7 @@
 # NOTE: this file may be removed once we move to a dynamo frontend
 
 import functools
+from collections.abc import Generator
 from contextlib import contextmanager
 from typing import Any, Callable, Optional
 
@@ -28,7 +29,7 @@ _DEFER_INLINING = False
 
 
 @contextmanager
-def defer_inlining():
+def defer_inlining() -> Generator[None, None, None]:
     global _DEFER_INLINING
     prior = _DEFER_INLINING
     try:
