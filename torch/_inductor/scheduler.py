@@ -4092,8 +4092,6 @@ class Scheduler:
     ) -> bool:
         if weak_dep.name not in node1.get_buffer_names():
             return False
-        if isinstance(node1, ForeachKernelSchedulerNode):
-            return False
 
         # A weak dep can be fused if and only if the fused operation acts inplace
         # on the buffer being mutated. i.e. the same index is being read then mutated
@@ -4113,16 +4111,25 @@ class Scheduler:
             return False
 
         real_name = self.mutation_real_name[weak_dep.mutating_buf]
-        relevant_reads = [
-            read for read in node1.read_writes.reads if read.name == real_name
-        ]
-        return all(
-            isinstance(read, MemoryDep)
-            and not free_symbol_is_type(read.index, SymT.TMP)
-            and read.index == write.index
-            and read.size == write.size
-            for read in relevant_reads
-        )
+        relevant_reading_nodes = [node1]
+        if isinstance(node1, ForeachKernelSchedulerNode):
+            relevant_reading_nodes = node1.snodes
+        num_concurrent_reads = 0
+        for reading_node in relevant_reading_nodes:
+            relevant_reads = [
+                read for read in reading_node.read_writes.reads if read.name == real_name
+            ]
+            if not relevant_reads: continue
+            num_concurrent_reads += 1
+            if not all(
+                isinstance(read, MemoryDep)
+                and not free_symbol_is_type(read.index, SymT.TMP)
+                and read.index == write.index
+                and read.size == write.size
+                for read in relevant_reads
+                ):
+                return False
+        return num_concurrent_reads <= 1
 
     # StarDep doesn't match MemoryDep, different indices don't match
     # However, broadcasting sometimes strips dimensions, and if that's the case
