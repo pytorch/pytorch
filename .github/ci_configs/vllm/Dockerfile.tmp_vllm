@@ -82,15 +82,9 @@ RUN if command -v apt-get >/dev/null; then \
         apt-get update -y \
         && apt-get install -y ccache software-properties-common git curl wget sudo vim; \
     else \
-        dnf install -y git curl wget sudo; \
+        dnf install -y git curl wget sudo vim; \
     fi \
     && python3 --version && python3 -m pip --version
-
-# Workaround for https://github.com/openai/triton/issues/2507 and
-# https://github.com/pytorch/pytorch/issues/107960 -- hopefully
-# this won't be needed for future versions of this docker image
-# or future versions of triton.
-RUN ldconfig /usr/local/cuda-$(echo $CUDA_VERSION | cut -d. -f1,2)/compat/
 
 # Install uv for faster pip installs if not existed
 RUN --mount=type=cache,target=/root/.cache/uv \
@@ -285,7 +279,7 @@ RUN if command -v apt-get >/dev/null; then \
         && ln -sf /usr/bin/python${PYTHON_VERSION}-config /usr/bin/python3-config \
         && curl -sS ${GET_PIP_URL} | python${PYTHON_VERSION}; \
     else \
-        dnf install -y git curl wget sudo; \
+        dnf install -y git curl wget sudo vim; \
     fi \
     && python3 --version && python3 -m pip --version
 
@@ -297,12 +291,6 @@ RUN echo "[INFO] Listing current directory before torch install step:" && \
     ls -al && \
     echo "[INFO] Showing torch_build_versions.txt content:" && \
     cat torch_build_versions.txt
-
-# Workaround for https://github.com/openai/triton/issues/2507 and
-# https://github.com/pytorch/pytorch/issues/107960 -- hopefully
-# this won't be needed for future versions of this docker image
-# or future versions of triton.
-RUN ldconfig /usr/local/cuda-$(echo $CUDA_VERSION | cut -d. -f1,2)/compat/
 
 # Install uv for faster pip installs if not existed
 RUN --mount=type=cache,target=/root/.cache/uv \
