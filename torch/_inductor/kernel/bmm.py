@@ -56,7 +56,7 @@ bmm_template = TritonTemplate(
     stride_bn = {{stride("B", 2)}}
 
     # based on triton.ops.matmul
-    pid = tl.program_id(0)
+    pid = tl.program_id(0).to(INDEX_DTYPE)
     grid_m = (M + BLOCK_M - 1) // BLOCK_M
     grid_n = (N + BLOCK_N - 1) // BLOCK_N
 
@@ -82,7 +82,7 @@ bmm_template = TritonTemplate(
 
     rk = tl.arange(0, BLOCK_K)
 
-    idx_q = tl.program_id(1)  # batch dimension for BMM
+    idx_q = tl.program_id(1).to(INDEX_DTYPE)  # batch dimension for BMM
     A = A + (ram[:, None] * stride_am + rk[None, :] * stride_ak + idx_q*stride_aq)
     B = B + (rk[:, None] * stride_bk + rbn[None, :] * stride_bn + idx_q*stride_bq)
 
@@ -101,13 +101,13 @@ bmm_template = TritonTemplate(
     # rematerialize rm and rn to save registers
     rm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
     rn = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
-    idx_q = tl.program_id(1)  # batch dimension for BMM
+    idx_q = tl.program_id(1).to(INDEX_DTYPE)  # batch dimension for BMM
     idx_m = rm[:, None]
     idx_n = rn[None, :]
     mask = (idx_m < M) & (idx_n < N)
 
     # inductor generates a suffix
-    {{store_output(("idx_q", "idx_m", "idx_n"), "acc", "mask")}}
+    {{store_output(("idx_q", "idx_m", "idx_n"), "acc", "mask", val_shape=("BLOCK_M", "BLOCK_N"))}}
 """,
     cache_codegen_enabled_for_template=True,
 )
@@ -173,7 +173,7 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
     name = "bmm"
 
     # Create MMKernelInputs for BMM at the top
-    kernel_inputs = MMKernelInputs([mat1, mat2])
+    kernel_inputs = MMKernelInputs([mat1, mat2], out_dtype=out_dtype)
 
     # below is for getting an overview logging info of inductor mms
     batch_size = mat1.get_size()[0]  # Extract batch dimension
@@ -189,29 +189,29 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
         layout,
     )
 
+    aten_handler: ExternKernelChoice = aten_bmm
+    aten_extra_kwargs = {}
     if out_dtype:
         assert mat1.get_device().type == "cuda", "out_dtype is only supported for CUDA"
-        aten_func = aten_bmm_dtype.bind(
-            kernel_inputs.nodes(), layout, out_dtype=out_dtype
+        aten_handler = aten_bmm_dtype
+        aten_extra_kwargs = {"out_dtype": out_dtype}
+
+    choices: list[ChoiceCaller] = []
+    if use_aten_gemm_kernels():
+        choices.extend(
+            V.choices.get_mm_configs(
+                kernel_inputs,
+                [aten_handler],
+                name,
+                kwarg_overrides={aten_handler.uid: aten_extra_kwargs},
+            )
         )
-    else:
-        aten_func = aten_bmm.bind(kernel_inputs.nodes(), layout)
 
-    # options to tune from
-    choices = [aten_func] if use_aten_gemm_kernels() else []
-
-    if use_triton_template(layout):
+    if use_triton_template(layout, check_max_autotune=False):
         # TODO: add out_dtype support for Triton Template
         assert out_dtype is None, "out_dtype is not supported for Triton"
 
-        for kwargs, extra_kwargs in V.choices.get_mm_configs(
-            kernel_inputs, layout, bmm_template.name, name
-        ):
-            bmm_template.maybe_append_choice(
-                choices,
-                **kwargs,
-                **extra_kwargs,
-            )
+        choices.extend(V.choices.get_mm_configs(kernel_inputs, [bmm_template], name))
     _, is_nonzero = _is_static_problem(layout)
     batch_stride_largest_or_zero = is_batch_stride_largest_or_zero(mat1, mat2, layout)
     if (
@@ -272,25 +272,15 @@ def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     # options to tune from
     choices: list[ChoiceCaller] = []
     if use_aten_gemm_kernels():
-        aten_baddbmm.maybe_append_choice(
-            choices,
-            input_nodes=kernel_inputs.nodes(),
-            layout=layout,
-            alpha=alpha,
-            beta=beta,
-        )
+        choices.extend(V.choices.get_mm_configs(kernel_inputs, [aten_baddbmm], name))
 
-    if use_triton_template(layout):
-        for kwargs, extra_kwargs in V.choices.get_mm_configs(
-            kernel_inputs,
-            layout,
-            bmm_template.name,
-            name,
-        ):
-            bmm_template.maybe_append_choice(
-                choices,
-                **kwargs,
-                **extra_kwargs,
+    if use_triton_template(layout, check_max_autotune=False):
+        choices.extend(
+            V.choices.get_mm_configs(
+                kernel_inputs,
+                [bmm_template],
+                name,
             )
+        )
 
     return autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout)
