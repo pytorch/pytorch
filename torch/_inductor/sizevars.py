@@ -538,7 +538,10 @@ class SizeVarAllocator:
         return expr
 
     def symbolic_hint(
-        self, expr: Union[Expr, int], hint_override: Optional[int] = None
+        self,
+        expr: Union[Expr, int],
+        hint_override: Optional[int] = None,
+        use_user_provided_hint_override=False,
     ) -> Union[Expr, int]:
         if isinstance(expr, int):
             return expr
@@ -558,7 +561,11 @@ class SizeVarAllocator:
             return hint_override
 
         expr = self.remove_precomputed_replacements(expr)
-        return sympy_subs(sympy_subs(expr, self.var_to_hint_override), self.var_to_val)
+
+        if use_user_provided_hint_override:
+            expr = sympy_subs(expr, self.var_to_hint_override)
+
+        return sympy_subs(expr, self.var_to_val)
 
     def size_hint(
         self,
@@ -566,8 +573,13 @@ class SizeVarAllocator:
         *,
         fallback: Optional[int] = None,
         hint_override: Optional[int] = None,
+        use_user_provided_hint_override=False,
     ) -> int:
-        out = self.symbolic_hint(expr, hint_override=hint_override)
+        out = self.symbolic_hint(
+            expr,
+            hint_override=hint_override,
+            use_user_provided_hint_override=use_user_provided_hint_override,
+        )
         if not isinstance(out, (int, sympy.Integer)) and fallback is not None:
             # Use the provided heuristic fallback hint
             unbacked_sym_vrs = {
@@ -602,9 +614,15 @@ class SizeVarAllocator:
         *,
         fallback: Optional[int] = None,
         hint_override: Optional[int] = None,
+        use_user_provided_hint_override: bool = False,
     ) -> tuple[int, ...]:
         return tuple(
-            self.size_hint(x, fallback=fallback, hint_override=hint_override)
+            self.size_hint(
+                x,
+                fallback=fallback,
+                hint_override=hint_override,
+                use_user_provided_hint_override=use_user_provided_hint_override,
+            )
             for x in exprs
         )
 
@@ -748,7 +766,9 @@ class SizeVarAllocator:
         assert isinstance(expr, Expr), type(expr)
         free_symbols = expr.free_symbols
         size_dict = {
-            symbol: V.graph.sizevars.size_hint(symbol, fallback=fallback)
+            symbol: V.graph.sizevars.size_hint(
+                symbol, fallback=fallback, use_user_provided_hint_override=True
+            )
             for symbol in free_symbols
         }
         return expr.subs(size_dict)

@@ -557,7 +557,9 @@ class TritonTemplateKernel(TritonKernel):
         ninplace_args = len(unique(self.args.inplace_buffers.values()))
         num_bytes = []
         for i, inp in enumerate(itertools.chain(self.input_nodes, (self.output_node,))):
-            size = V.graph.sizevars.size_hints(inp.get_size(), fallback=0)
+            size = V.graph.sizevars.size_hints(
+                inp.get_size(), fallback=0, use_user_provided_hint_override=True
+            )
             numel = functools.reduce(operator.mul, size, 1)
             dtype_size = get_dtype_size(inp.get_dtype())
             num_bytes.append(numel * dtype_size * (1 + int(i < ninplace_args)))
@@ -568,7 +570,9 @@ class TritonTemplateKernel(TritonKernel):
             for fx_node in node._current_origins:
                 f = count_flops_fx(fx_node)
                 if f is not None:
-                    return V.graph.sizevars.size_hint(f, fallback=0)
+                    return V.graph.sizevars.size_hint(
+                        f, fallback=0, use_user_provided_hint_override=True
+                    )
         return 0
 
     def jit_lines(self):
@@ -1749,6 +1753,7 @@ class TritonTemplate(KernelTemplate):
             map(sympy.expand, result.kernel_args_sizevars_keys),
             fallback=config.unbacked_symint_fallback,
             hint_override=hint_override,
+            use_user_provided_hint_override=True,
         )
 
         kernel_hash_name = f"triton_{self.name}_{next(self.index_counter)}"
@@ -1796,6 +1801,7 @@ class TritonTemplate(KernelTemplate):
                 call_sizes,
                 fallback=config.unbacked_symint_fallback,
                 hint_override=hint_override,
+                use_user_provided_hint_override=True,
             ),
             kwargs,
         )
@@ -2845,16 +2851,19 @@ class AlgorithmSelectorCache(PersistentCache):
                         input_node.get_size(),
                         fallback=config.unbacked_symint_fallback,
                         hint_override=hint_override,
+                        use_user_provided_hint_override=True,
                     ),
                     V.graph.sizevars.size_hints(
                         input_node.get_stride(),
                         fallback=config.unbacked_symint_fallback,
                         hint_override=hint_override,
+                        use_user_provided_hint_override=True,
                     ),
                     V.graph.sizevars.size_hint(
                         input_node.get_layout().offset,
                         fallback=config.unbacked_symint_fallback,
                         hint_override=hint_override,
+                        use_user_provided_hint_override=True,
                     ),
                 )
             )
@@ -3199,6 +3208,7 @@ class AlgorithmSelectorCache(PersistentCache):
                             n.get_size(),
                             fallback=config.unbacked_symint_fallback,  # type: ignore[arg-type]
                             hint_override=hint_override,
+                            use_user_provided_hint_override=True,
                         ),
                     )
                 )
@@ -3306,11 +3316,13 @@ class AlgorithmSelectorCache(PersistentCache):
                 node.get_size(),
                 fallback=config.unbacked_symint_fallback,
                 hint_override=hint_override,
+                use_user_provided_hint_override=True,
             ),
             V.graph.sizevars.size_hints(
                 node.get_stride(),
                 fallback=config.unbacked_symint_fallback,
                 hint_override=hint_override,
+                use_user_provided_hint_override=True,
             ),
             node.get_device(),
             node.get_dtype(),
@@ -3319,6 +3331,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 V.graph.get_allocation_size(node),
                 fallback=config.unbacked_symint_fallback,
                 hint_override=hint_override,
+                use_user_provided_hint_override=True,
             ),
         )
 
@@ -3359,13 +3372,16 @@ class AlgorithmSelectorCache(PersistentCache):
             *sizevars.size_hints(
                 node.get_size(),
                 fallback=config.unbacked_symint_fallback,
+                use_user_provided_hint_override=True,
             ),
             *sizevars.size_hints(
                 node.get_stride(),
                 fallback=config.unbacked_symint_fallback,
+                use_user_provided_hint_override=True,
             ),
             sizevars.size_hint(
                 node.get_layout().offset,
+                use_user_provided_hint_override=True,
                 fallback=config.unbacked_symint_fallback,
             ),
         )
@@ -3517,6 +3533,7 @@ def _autotune_metadata(input_nodes):
                     V.graph.sizevars.size_hints(
                         n.get_stride(),
                         fallback=config.unbacked_symint_fallback,
+                        use_user_provided_hint_override=True,
                     )
                 )
                 for n in input_nodes
@@ -3530,6 +3547,7 @@ def _autotune_metadata(input_nodes):
                         V.graph.sizevars.size_hints(
                             n.get_size(),
                             fallback=config.unbacked_symint_fallback,
+                            use_user_provided_hint_override=True,
                         ),
                     )
                 )
