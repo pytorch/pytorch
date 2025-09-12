@@ -4854,6 +4854,47 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         exported = export(model, inputs).module()
         self.assertEqual(model(*inputs), exported(*inputs))
 
+    def test_dynamic_shapes_wrapped_with_shape_guards(self):
+        class Neuron(torch.nn.Module):
+            def __init__(self, n_dims: int = 5, n_targets: int = 3):
+                super().__init__()
+                self.linear = torch.nn.Linear(n_dims, n_targets)
+
+            def forward(self, x, y):
+                return torch.sigmoid(self.linear(x + y))
+
+        args = (torch.randn(2, 5), torch.randn(2, 5))
+        batch = torch.export.Dim.DYNAMIC
+
+        n = Neuron()
+        compiled = export(n, args, dynamic_shapes=({0: batch}, {0: batch}))
+        expected = n(*args)
+        mod = compiled.module()
+        got = mod(*args)
+        self.assertTrue(torch.allclose(expected, got))
+
+        class Wrapped(Neuron):
+            def forward(self, *args):
+                return super().forward(*args)
+
+        w = Wrapped()
+
+        if is_retracebility_test(self._testMethodName):
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.UserError,
+                "Detected mismatch between the structure of `inputs` and `dynamic_shapes`"
+                ": `inputs` has 2 elements, but `dynamic_shapes` has 1 elements",
+            ):
+                export(w, args, dynamic_shapes={"args": ({0: batch}, {0: batch})})
+        else:
+            compiled = export(
+                w, args, dynamic_shapes={"args": ({0: batch}, {0: batch})}
+            )
+            expected = w(*args)
+            mod = compiled.module()
+            got = mod(*args)
+            self.assertTrue(torch.allclose(expected, got))
+
     def test_dynamic_shapes_builder_basic(self):
         class M(torch.nn.Module):
             def forward(self, x, y, z):
