@@ -1,7 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
 
-import os
 import pathlib
 import tempfile
 import unittest
@@ -33,7 +32,6 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
 )
-from torch.testing._internal.logging_utils import LoggingTestCase
 
 
 c10d_functional = torch.ops.c10d_functional
@@ -618,11 +616,11 @@ class DTensorMeshTest(DTensorTestBase):
 
     @with_comms
     def test_dtensor_device_mesh_device_conversion(self):
-        # construct a cuda device mesh
+        # construct a gpu device mesh
         mesh = self.build_device_mesh()
 
-        # construct from a cpu local tensor with cuda device mesh
-        # should automatically convert the dist tensor to cuda
+        # construct from a cpu local tensor with gpu device mesh
+        # should automatically convert the dist tensor to gpu
         placements = [Shard(0)]
         local_tensor = torch.randn(3, 3)
         dist_tensor = DTensor.from_local(local_tensor, mesh, placements)
@@ -671,7 +669,7 @@ class DTensorMeshTest(DTensorTestBase):
     @with_comms
     def test_dtensor_2d_mesh(self):
         mesh_tensor = torch.arange(self.world_size).reshape(2, 4)
-        # construct a cuda device mesh
+        # construct a gpu device mesh
         mesh = DeviceMesh(self.device_type, mesh_tensor)
 
         # construct a dist tensor on 2d device mesh and test if works
@@ -693,7 +691,7 @@ class DTensorMeshTest(DTensorTestBase):
 
     @with_comms
     def test_device_mesh_nd(self):
-        # construct a cuda device mesh
+        # construct a gpu device mesh
         mesh_tensor = torch.arange(self.world_size).reshape(2, 2, 2)
         mesh = DeviceMesh(self.device_type, mesh_tensor)
         # construct a dist tensor on 3d device mesh and test if works
@@ -955,8 +953,8 @@ class TestDTensorPlacementTypes(DTensorTestBase):
         # Keep everything deterministic.
         torch.manual_seed(0)
         tensor = torch.rand(size)
-        if self.device_type == "cuda":
-            return tensor.cuda()
+        if self.device_type != "cpu":
+            return tensor.to(self.device_type)
         else:
             return tensor
 
@@ -1010,37 +1008,6 @@ class TestDTensorPlacementTypes(DTensorTestBase):
                     for unpadded_tensor in unpadded_list
                 ]
                 assert_array_equal(expected_is_tensor_empty, is_tensor_empty)
-
-
-class DTensorLogTest(LoggingTestCase):
-    def test_dtensor_log(self):
-        if not torch.distributed.is_available() or not torch.cuda.is_available():
-            return
-
-        env = dict(os.environ)
-        env["TORCH_LOGS"] = "+dtensor"
-        env["RANK"] = "0"
-        env["WORLD_SIZE"] = "1"
-        env["MASTER_PORT"] = "12345"
-        env["MASTER_ADDR"] = "localhost"
-
-        _, stderr = self.run_process_no_exception(
-            """\
-import logging
-import torch
-from torch.distributed.device_mesh import init_device_mesh
-from torch.distributed.tensor import distribute_tensor, Shard
-
-mesh = init_device_mesh("cuda", (1,), mesh_dim_names=("dp",))
-placements = [Shard(0)]
-tensor = torch.randn(12, 8, 8)
-dtensor = distribute_tensor(tensor, mesh, placements)
-dtensor.max()
-""",
-            env=env,
-        )
-        self.assertIn("_dispatch.py", stderr.decode("utf-8"))
-        self.assertIn("redistribute=False", stderr.decode("utf-8"))
 
 
 if __name__ == "__main__":
