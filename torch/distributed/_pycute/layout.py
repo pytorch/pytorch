@@ -248,11 +248,6 @@ def composition(layoutA: Layout, layoutB: LayoutInput) -> Layout:
         rest_shape = layoutB.shape
         rest_stride = layoutB.stride
         flat_A = coalesce(layoutA)
-
-        # Process from right to left for lexicographic ordering
-        flat_A_shapes = flatten(flat_A.shape)
-        flat_A_strides = flatten(flat_A.stride)
-
         # when left layout is multi-dimensional sublayout, aka, self = (a,b,...,c):(x,y,...,z), layout = s:d,
         # for integral s and d means that we want:
         # (1) “remove” the first d elements from left, starting from rightmost. (This will increase the stride.)
@@ -261,10 +256,9 @@ def composition(layoutA: Layout, layoutB: LayoutInput) -> Layout:
         # Step 1: remove the first 2 elements from self with stride increase, i.e., (6,2):(2,1) -> (6,1):(2,2)
         # Step 2: keep the first 3 of those strided elements, i.e., (6,1):(2,2) -> (3,1):(2,2)
         # Because we are going lexicographically, we go through left layout from right to left.
-        for i in range(len(flat_A_shapes) - 1, 0, -1):
-            curr_shape = flat_A_shapes[i]
-            curr_stride = flat_A_strides[i]
-
+        for curr_shape, curr_stride in zip(
+            reversed(flatten(flat_A.shape)[1:]), reversed(flatten(flat_A.stride)[1:])
+        ):
             assert curr_shape % rest_stride == 0 or rest_stride % curr_shape == 0  # type: ignore[operator]
             new_shape = min(max(1, curr_shape // rest_stride), rest_shape)  # type: ignore[operator]
 
@@ -282,7 +276,7 @@ def composition(layoutA: Layout, layoutB: LayoutInput) -> Layout:
         # For example, if self = (6:2), layout = (3:2), the result is (3:(2*2)) = (3:4).
         if rest_shape != 1 or len(result_shape) == 0:
             result_shape.append(rest_shape)  # Append to end, will reverse later
-            result_stride.append(rest_stride * flat_A_strides[0])
+            result_stride.append(rest_stride * flatten(flat_A.stride)[0])
 
         # Reverse the lists because we build lists in reverse order (append to end), this way it is more efficient.
         result_shape.reverse()
