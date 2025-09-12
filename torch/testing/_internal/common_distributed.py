@@ -45,8 +45,6 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_TSAN,
     TEST_XPU,
     TestCase,
-    MI300_ARCH,
-    MI200_ARCH
 )
 from torch.testing._internal.distributed.multi_threaded_pg import (
     _install_threaded_pg,
@@ -427,6 +425,7 @@ def skip_if_rocm_multiprocess(func):
     """Skips a test for ROCm"""
     return unittest.skipIf(TEST_WITH_ROCM, TEST_SKIPS["skipIfRocm"].message)(func)
 
+
 def skip_if_rocm_arch_multiprocess(arch: tuple[str, ...]):
     """Skips a test for ROCm"""
     prop = torch.cuda.get_device_properties(0)
@@ -437,13 +436,18 @@ def skip_if_rocm_arch_multiprocess(arch: tuple[str, ...]):
 
     return unittest.skipIf(reason is not None, reason)
 
+
 def skip_if_rocm_ver_lessthan_multiprocess(version=None):
     reason = None
     if TEST_WITH_ROCM:
         rocm_version = str(torch.version.hip)
-        rocm_version = rocm_version.split("-", maxsplit=1)[0]    # ignore git sha
+        rocm_version = rocm_version.split("-", maxsplit=1)[0]  # ignore git sha
         rocm_version_tuple = tuple(int(x) for x in rocm_version.split("."))
-        if rocm_version_tuple is None or version is None or rocm_version_tuple < tuple(version):
+        if (
+            rocm_version_tuple is None
+            or version is None
+            or rocm_version_tuple < tuple(version)
+        ):
             reason = f"skip_if_rocm_ver_lessthan_multiprocess: ROCm {rocm_version_tuple} is available but {version} required"
 
         return unittest.skipIf(reason is not None, reason)
