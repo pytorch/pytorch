@@ -715,6 +715,17 @@ void PyTorchStreamWriter::setup(const string& file_name) {
   if (archive_name_.size() == 0) {
     CAFFE_THROW("invalid file name: ", file_name);
   }
+
+  const std::string dir_name = parentdir(file_name);
+  if (!dir_name.empty()) {
+    struct stat st;
+    bool dir_exists =
+        (stat(dir_name.c_str(), &st) == 0 && (st.st_mode & S_IFDIR));
+    TORCH_CHECK(
+        dir_exists, "Parent directory ", dir_name, " does not exist.");
+  }
+  TORCH_CHECK(file_stream_, "File ", file_name, " cannot be opened.");
+
   if (!writer_func_) {
     valid("opening archive ", file_name.c_str());
     try {
@@ -733,15 +744,6 @@ void PyTorchStreamWriter::setup(const string& file_name) {
 #endif // _WIN32
     }
 
-    const std::string dir_name = parentdir(file_name);
-    if (!dir_name.empty()) {
-      struct stat st;
-      bool dir_exists =
-          (stat(dir_name.c_str(), &st) == 0 && (st.st_mode & S_IFDIR));
-      TORCH_CHECK(
-          dir_exists, "Parent directory ", dir_name, " does not exist.");
-    }
-    TORCH_CHECK(file_stream_, "File ", file_name, " cannot be opened.");
     writer_func_ = [this](const void* buf, size_t nbytes) -> size_t {
       if (!buf) {
         // See [Note: write_record_metadata]
