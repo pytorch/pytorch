@@ -7160,6 +7160,151 @@ class TestCompileKernel(TestCase):
         expected = torch.full((n,), test_value, device="cuda", dtype=torch.float16)
         torch.testing.assert_close(output, expected, rtol=1e-3, atol=1e-3)
 
+    @unittest.skipIf(not TEST_CUDA, "No CUDA")
+    def test_compile_kernel_template_simple(self):
+        """Test compilation of a simple templated kernel."""
+        template_code = """
+        template<typename T>
+        __global__ void add_template(T* a, T* b, T* c, int n) {
+            int i = blockIdx.x * blockDim.x + threadIdx.x;
+            if (i < n) {
+                c[i] = a[i] + b[i];
+            }
+        }
+        """
+
+        add_float = torch.cuda._compile_kernel(
+            template_code,
+            "add_template",
+            is_template=True,
+            template_types=["float"],
+            wrapper_signature="float* a, float* b, float* c, int n",
+            wrapper_body="    add_template<float>(a, b, c, n);",
+        )
+
+        n = 1024
+        a = torch.rand(n, device="cuda", dtype=torch.float32)
+        b = torch.rand(n, device="cuda", dtype=torch.float32)
+        c = torch.empty_like(a)
+
+        threads = 256
+        blocks = (n + threads - 1) // threads
+
+        add_float(grid=(blocks, 1, 1), block=(threads, 1, 1), args=[a, b, c, n])
+
+        expected = a + b
+        self.assertTrue(torch.allclose(c, expected))
+
+    @unittest.skipIf(not TEST_CUDA, "No CUDA")
+    def test_compile_kernel_template_multiple_types(self):
+        """Test template instantiation with different types."""
+        template_code = """
+        template<typename T>
+        __global__ void scale_template(T* data, T scalar, int n) {
+            int i = blockIdx.x * blockDim.x + threadIdx.x;
+            if (i < n) {
+                data[i] *= scalar;
+            }
+        }
+        """
+
+        scale_double = torch.cuda._compile_kernel(
+            template_code,
+            "scale_template",
+            is_template=True,
+            template_types=["double"],
+            wrapper_signature="double* data, double scalar, int n",
+            wrapper_body="    scale_template<double>(data, scalar, n);",
+        )
+
+        n = 512
+        data = torch.rand(n, device="cuda", dtype=torch.float64)
+        original = data.clone()
+        scalar = 2.5
+
+        threads = 256
+        blocks = (n + threads - 1) // threads
+
+        scale_double(grid=(blocks, 1, 1), block=(threads, 1, 1), args=[data, scalar, n])
+
+        expected = original * scalar
+        self.assertTrue(torch.allclose(data, expected))
+
+    @unittest.skipIf(not TEST_CUDA, "No CUDA")
+    def test_compile_kernel_template_multiple_parameters(self):
+        """Test templates with multiple type parameters."""
+        template_code = """
+        template<typename T1, typename T2, typename TOut>
+        __global__ void mixed_types(T1* a, T2* b, TOut* c, int n) {
+            int i = blockIdx.x * blockDim.x + threadIdx.x;
+            if (i < n) {
+                c[i] = static_cast<TOut>(a[i]) + static_cast<TOut>(b[i]);
+            }
+        }
+        """
+
+        mixed_kernel = torch.cuda._compile_kernel(
+            template_code,
+            "mixed_types",
+            is_template=True,
+            template_types=["float", "double", "float"],
+            wrapper_signature="float* a, double* b, float* c, int n",
+            wrapper_body="    mixed_types<float, double, float>(a, b, c, n);",
+        )
+
+        n = 256
+        a = torch.rand(n, device="cuda", dtype=torch.float32)
+        b = torch.rand(n, device="cuda", dtype=torch.float64)
+        c = torch.empty(n, device="cuda", dtype=torch.float32)
+
+        threads = 128
+        blocks = (n + threads - 1) // threads
+
+        mixed_kernel(grid=(blocks, 1, 1), block=(threads, 1, 1), args=[a, b, c, n])
+
+        expected = a + b.float()
+        self.assertTrue(torch.allclose(c, expected, rtol=1e-5))
+
+    @unittest.skipIf(not TEST_CUDA, "No CUDA")
+    def test_compile_kernel_template_cutlass_style(self):
+        """Test CUTLASS-style template kernel compilation."""
+        cutlass_template = """
+        template<typename ElementA, typename ElementB, typename ElementC>
+        __global__ void cutlass_add_kernel(
+            ElementA const* A,
+            ElementB const* B,
+            ElementC* C,
+            int n
+        ) {
+            int i = blockIdx.x * blockDim.x + threadIdx.x;
+            if (i < n) {
+                C[i] = static_cast<ElementC>(A[i]) + static_cast<ElementC>(B[i]);
+            }
+        }
+        """
+
+        cutlass_kernel = torch.cuda._compile_kernel(
+            cutlass_template,
+            "cutlass_add_kernel",
+            is_template=True,
+            template_types=["float", "float", "float"],
+            wrapper_signature="float const* A, float const* B, float* C, int n",
+            wrapper_body="    cutlass_add_kernel<float, float, float>(A, B, C, n);",
+        )
+
+        n = 1024
+        A = torch.rand(n, device="cuda", dtype=torch.float32)
+        B = torch.rand(n, device="cuda", dtype=torch.float32)
+        C = torch.zeros(n, device="cuda", dtype=torch.float32)
+
+        threads = 256
+        blocks = (n + threads - 1) // threads
+
+        cutlass_kernel(grid=(blocks, 1, 1), block=(threads, 1, 1), args=[A, B, C, n])
+
+        expected = A + B
+        self.assertTrue(torch.allclose(C, expected))
+
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
 class TestCudaDeviceParametrized(TestCase):
