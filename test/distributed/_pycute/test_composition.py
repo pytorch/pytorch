@@ -208,9 +208,24 @@ class TestComposition(TestCase):
         layoutB = Layout((6), (1))
         self.helper_test_composition(layoutA, layoutB)
 
+        # Pre-coalesced RHS
+        layoutA = Layout((8, 6, 4), (7, 4, 1))
+        layoutB = Layout((6), (1))
+        self.helper_test_composition(layoutA, layoutB)
+
+        # Case when not meet stride divisibility condition
+        with self.assertRaises(AssertionError):
+            layoutA = Layout((4, 6, 8, 10), (2, 3, 5, 7))
+            layoutB = Layout(6, 12)
+            self.helper_test_composition(layoutA, layoutB)
+
         # Mid-layout truncation
-        layoutA = Layout((4, 6, 8, 10), (2, 3, 5, 7))
+        layoutA = Layout((10, 8, 6, 4), (7, 5, 3, 2))
         layoutB = Layout(6, 12)
+        self.helper_test_composition(layoutA, layoutB)
+
+        layoutA = Layout((4,), (3,))
+        layoutB = Layout((6,), (2,))
         self.helper_test_composition(layoutA, layoutB)
 
 
