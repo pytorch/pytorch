@@ -4972,6 +4972,7 @@ class ChoiceCaller:
         # An additional description used to describe the choice (useful for
         # knowing what autotuning is choosing)
         self.description = description
+        self.failed: bool = False
 
     def benchmark(self, *args: Any, out: torch.Tensor) -> float:
         algo = self.to_callable()
@@ -5008,6 +5009,14 @@ class ChoiceCaller:
 
     def autoheuristic_id(self) -> str:
         return "unsupported_choice"
+
+    def mark_failed(self) -> None:
+        """
+        Mark the choice as failed so that it can be
+        removed later. Useful for when we decouple
+        compilation and tuning.
+        """
+        self.failed = True
 
 
 class TritonTemplateCallerBase(ChoiceCaller):
