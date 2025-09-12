@@ -1464,7 +1464,6 @@ class FakeTensorOperatorInvariants(TestCase):
 
             self.assertEqual(ref.size(), meta_out.size())
 
-    @skipIfRocm
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION,
         "Does not support SDPA or pre-SM80 hardware",
@@ -1526,7 +1525,6 @@ class FakeTensorOperatorInvariants(TestCase):
             torch.tensor(3.14, device=GPU_TYPE)
             torch.tensor([[3.14, 2], [1, 2]], device=GPU_TYPE)
 
-    @skipIfRocm
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_conv_c1_backward(self):
         class Repro(torch.nn.Module):
@@ -1942,6 +1940,16 @@ class FakeTensorDispatchCache(TestCase):
             # cache key calculation differentiates them.
             self._test_cache_key(fm, 1.0, 1.0, 1)
             self._test_cache_key(fm, 0.0, 0.0, 0)
+
+    def test_empty_list(self):
+        with FakeTensorMode() as fm:
+            func = aten.any.dims
+            state = _CacheKeyState()
+            x = torch.ones((2, 3))
+            key_x = fm._cache_key(state, func, [x, []], {})
+            key_y = fm._cache_key(state, func, [x], {})
+
+        self.assertNotEqual(key_x, key_y)
 
     def assertHitsMisses(self, hits, misses):
         """
