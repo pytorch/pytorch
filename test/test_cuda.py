@@ -6734,7 +6734,6 @@ class TestCudaAutocast(TestAutocast):
     os.environ.get("USE_LEGACY_DRIVER", None) == "1", "Doesn't work with older driver"
 )
 class TestCompileKernel(TestCase):
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCM does not support nvrtc")
     @unittest.skipIf(not TEST_CUDA, "No CUDA")
     def test_compile_kernel(self):
         # Simple vector addition kernel
@@ -6844,7 +6843,6 @@ class TestCompileKernel(TestCase):
         with self.assertRaises(RuntimeError):
             _compile_kernel(invalid_kernel_source, "invalid_kernel")
 
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCM does not support nvrtc")
     @unittest.skipIf(not TEST_CUDA, "No CUDA")
     def test_compile_kernel_large_shared_memory(self):
         kernel_source = """
@@ -6902,14 +6900,20 @@ class TestCompileKernel(TestCase):
         self.assertEqual(output_data.cpu(), expected)
 
         # Test error handling with more than supported shared memory size
-        max_smem = get_device_properties().shared_memory_per_block_optin
+        if torch.version.hip:
+            max_smem = (
+                65536
+                if get_device_properties().gcnArchName not in ["gfx950"]
+                else 160 * 1024
+            )
+        else:
+            max_smem = get_device_properties().shared_memory_per_block_optin
         excessive_shared_mem = max_smem * 2
 
         with self.assertRaises(RuntimeError):
             kernel.set_shared_memory_config(excessive_shared_mem)
 
     @tf32_on_and_off(0.005)
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCM does not support nvrtc")
     @unittest.skipIf(not TEST_CUDA, "No CUDA")
     def test_compile_kernel_advanced(self):
         # Test matrix multiplication
@@ -6960,7 +6964,10 @@ class TestCompileKernel(TestCase):
 
         # Test with different compute capability if specified
         device_props = torch.cuda.get_device_properties(torch.cuda.current_device())
-        compute_cap = f"{device_props.major}{device_props.minor}"
+        if not torch.version.hip:
+            compute_cap = f"{device_props.major}{device_props.minor}"
+        else:
+            compute_cap = f"{device_props.gcnArchName}"
 
         # Recompile with explicit compute capability
         matmul_kernel_explicit = _compile_kernel(
@@ -6979,7 +6986,6 @@ class TestCompileKernel(TestCase):
         # Verify results
         self.assertEqual(C_explicit, expected)
 
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCM does not support nvrtc")
     @unittest.skipIf(not TEST_CUDA, "No CUDA")
     def test_compile_kernel_as_custom_op(self):
         # Define a simple vector addition kernel
@@ -7039,7 +7045,6 @@ class TestCompileKernel(TestCase):
         expected = a + b
         torch.testing.assert_close(result, expected, rtol=1e-5, atol=1e-5)
 
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCM does not support nvrtc")
     @unittest.skipIf(not TEST_CUDA, "No CUDA")
     def test_compile_kernel_custom_op_validation(self):
         kernel_source = """
@@ -7087,7 +7092,6 @@ class TestCompileKernel(TestCase):
         expected = input_data + scalar_val
         torch.testing.assert_close(result, expected, rtol=1e-5, atol=1e-5)
 
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCM does not support nvrtc")
     @unittest.skipIf(not TEST_CUDA, "No CUDA")
     def test_compile_kernel_double_precision(self):
         """Test that Python floats are correctly handled as doubles in kernels."""
@@ -7122,12 +7126,13 @@ class TestCompileKernel(TestCase):
         )
         torch.testing.assert_close(output, expected, rtol=1e-14, atol=1e-14)
 
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCM does not support nvrtc")
     @unittest.skipIf(not TEST_CUDA, "No CUDA")
     def test_compile_kernel_cuda_headers(self):
         """Test that kernels can include and use CUDA headers like cuda_fp16.h."""
         kernel_source = """
+        #ifndef __HIPCC__
         #include <cuda_fp16.h>
+        #endif
 
         extern "C"
         __global__ void half_precision_kernel(__half* output, double input_value, int n) {
