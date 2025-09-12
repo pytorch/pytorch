@@ -1107,29 +1107,6 @@ def expand(x, sizes):
     return TensorBox(ExpandView.create(x.data, tuple(sizes)))
 
 
-def compress(x):
-    """undo expansion (from above) by removing any stride 0 dimensions"""
-    assert ir.is_storage_and_layout(x), "compresx requires a storage & layout"
-    x, old_layout = ir.as_storage_and_layout(x)
-    # remove any dimensions where the stride is 0
-    filtered_data = [
-        (old_layout.size[idx], old_layout.stride[idx])
-        for idx, s in enumerate(old_layout.stride)
-        if s != 0
-    ]
-    new_size, new_stride = zip(*filtered_data) if filtered_data else ([], [])
-    new_size, new_stride = list(new_size), list(new_stride)
-    layout = type(old_layout)(
-        old_layout.device,
-        old_layout.dtype,
-        new_size,
-        new_stride,
-        old_layout.offset,
-        old_layout.is_pinned,
-    )
-    return ir.ReinterpretView(data=x, layout=layout)
-
-
 @register_lowering(prims.broadcast_in_dim, type_promotion_kind=None)
 def broadcast_in_dim(a, shape, broadcast_dimensions):
     s = list(shape)
