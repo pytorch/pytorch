@@ -246,6 +246,7 @@ jobs:
         { include: [
           { config: "verify_cachebench", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
         ]}
+      build-additional-packages: "vision audio torchao"
     secrets: inherit
 
   verify-cachebench-cpu-test:

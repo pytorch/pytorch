@@ -43,6 +43,7 @@ jobs:
         { include: [
           { config: "inductor-micro-benchmark", shard: 1, num_shards: 1, runner: "linux.aws.a100", owners: ["oncall:pt2"] },
         ]}
+      build-additional-packages: "vision audio fbgemm torchao"
     secrets: inherit
 
   test:
