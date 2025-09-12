@@ -254,7 +254,7 @@ class PartialRender:
 class SubgraphInfo:
     body: IndentedBuffer
     template_mask: Optional[str] = None
-    template_out: Optional[str] = None
+    template_out_shape: Optional[Union[str, tuple[str]]] = None
     compute: IndentedBuffer = dataclasses.field(default_factory=IndentedBuffer)
     indexing_code: IndentedBuffer = dataclasses.field(default_factory=IndentedBuffer)
     loads: IndentedBuffer = dataclasses.field(default_factory=IndentedBuffer)
@@ -366,7 +366,7 @@ class TritonTemplateKernel(TritonKernel):
     def __init__(
         self,
         kernel_name,
-        input_nodes,
+        input_nodes: tuple[ir.IRNode],
         output_node,
         defines,
         num_stages,
@@ -445,7 +445,7 @@ class TritonTemplateKernel(TritonKernel):
         self.loads: IndentedBuffer = FakeIndentedBuffer()
         self.stores: IndentedBuffer = FakeIndentedBuffer()
         self.template_mask: Optional[str] = None
-        self.template_out: Optional[str] = None
+        self.template_out_shape: Optional[Union[str, tuple[str]]] = None
         self.ops_handler: Optional[V.WrapperHandler] = None  # type: ignore[name-defined]
 
         # When caching is enabled, the generated code is not dependent on the input nodes names, or
@@ -612,6 +612,8 @@ class TritonTemplateKernel(TritonKernel):
         if config.benchmark_kernel:
             flops = self.estimate_flops()
             inductor_meta["kernel_flop"] = flops
+
+        inductor_meta["config_args"] = self.meta
 
         template_args = f"""
             num_stages={self.num_stages},
@@ -839,6 +841,7 @@ class TritonTemplateKernel(TritonKernel):
         mask: Optional[str] = None,
         other: Optional[Union[float, int]] = 0.0,
         indent_width: int = 4,
+        index_shape: Optional[tuple[str]] = None,
     ):
         """Loads an input and applies any necessary preprocessing or masking.
 
@@ -916,7 +919,7 @@ class TritonTemplateKernel(TritonKernel):
             # We are using "None" for clarity in output code, but
             # we could alternatively emit `xmask = tl.full([xindex.shape], True, tl.int1)`
             self.template_mask = mask if mask is not None else "None"
-            self.template_out = "xindex"
+            self.template_out_shape = index_shape if index_shape else "xindex"
             self.template_indices = indices
             self.named_input_nodes[input_name].data.freeze_layout()
             self.cse.invalidate(OrderedSet())
@@ -979,7 +982,7 @@ class TritonTemplateKernel(TritonKernel):
             else:
                 out_indexing = self.indexing(
                     output_index,
-                    copy_shape=self.template_out,
+                    copy_shape=self.template_out_shape,
                     override_mask=self.template_mask,
                 )
                 from .codegen.triton import IndexingOptions
@@ -1018,7 +1021,7 @@ class TritonTemplateKernel(TritonKernel):
         val: str,
         mask: Optional[str] = None,
         indent_width: int = 4,
-        val_shape: Optional[list[str]] = None,
+        val_shape: Optional[tuple[str]] = None,
     ):
         """Stores the final output and appends any epilogue fusions if the buffer hasn't been optimized away.
 
@@ -1057,7 +1060,7 @@ class TritonTemplateKernel(TritonKernel):
                 "xindex"
             )
             self.template_mask = mask
-            self.template_out = val
+            self.template_out_shape = val_shape if val_shape else val
             self.template_indices = indices
             output_index = self.output_node.get_layout().make_indexer()(index_symbols)
             output_index = self.rename_indexing(output_index)
@@ -1077,7 +1080,13 @@ class TritonTemplateKernel(TritonKernel):
                 self.input_nodes[len(self.input_nodes) - self.suffix_args :],
             ):
                 input_node.freeze_layout()
-                epilogue_args.append(input_node.make_loader()(index_symbols))
+                epilogue_arg = V.kernel.cse.generate(
+                    self.compute,
+                    input_node.make_loader()(index_symbols),
+                    dtype=acc_dtype,
+                    shape=input_node.get_size(),
+                )
+                epilogue_args.append(epilogue_arg)
                 # We update frozen_layouts_cnt in order to replay this function on a cache hit.
                 self.frozen_layouts_cnt += 1
 
@@ -1201,7 +1210,7 @@ class TritonTemplateKernel(TritonKernel):
             dense_indexing=False,
             # We pass template_out as the shape to broadcast the indexing to as
             # the mask might be broadcast to the output shape
-            copy_shape=self.template_out,
+            copy_shape=self.template_out_shape,
             override_mask=self.template_mask,
             block_ptr=block_ptr,
             tma_compatibility_checker=tma_compatibility_checker,
@@ -1440,6 +1449,11 @@ class TritonTemplate(KernelTemplate):
     # When this flag is on, we ensure that the cached results and the generated result if cache
     # was not used are the same.
     test_cache = False
+
+    @property
+    def uid(self) -> str:
+        # unique by prefixing with triton
+        return f"triton::{self.name}"
 
     def maybe_append_choice(
         self, choices: list[Any], **kwargs: Any
@@ -1906,6 +1920,36 @@ class ExternKernelChoice:
         return ExternKernelCaller(
             self, input_nodes, layout, kwargs, has_out_variant=self.has_out_variant
         )
+
+    @property
+    def uid(self) -> str:
+        # unique by prefixing with aten
+        return f"aten::{self.name}"
+
+    def choice_or_none(self, **kwargs: Any) -> Optional[ChoiceCaller]:
+        """
+        Maybe generates a new ChoiceCaller and returns it, or None if generation fails.
+
+        kwargs: Additional kwargs to be passed to generate a new ChoiceCaller.
+        """
+        temp_choices: list[Any] = []
+        result = self.maybe_append_choice(temp_choices, **kwargs)
+        if result is None and len(temp_choices) == 1:
+            return temp_choices[0]
+        return None
+
+    def maybe_append_choice(
+        self, choices: list[Any], **kwargs: Any
+    ) -> Optional[NotImplementedError]:
+        # convenience function to match the Template interface, so that
+        # templates and ExternKernelChoice can be treated the same when
+        # generating choice callers
+        assert "input_nodes" in kwargs, "input_nodes argument required"
+        assert "layout" in kwargs, "layout argument required"
+        input_nodes = kwargs.pop("input_nodes")
+        layout = kwargs.pop("layout")
+        choices.append(self.bind(input_nodes=input_nodes, layout=layout, **kwargs))
+        return None
 
 
 class TritonTemplateCaller(ir.TritonTemplateCallerBase):
@@ -2377,16 +2421,19 @@ class AlgorithmSelectorCache(PersistentCache):
             N = input_nodes[-1].get_size()[-1]
             append_to_log(mm_file_name, {"invoke": str((M, K, N))})
 
-        if len(choices) == 0:
+        def create_no_valid_choices() -> NoValidChoicesError:
             backend_config = (
                 "max_autotune_gemm_backends"
                 if name != "convolution"
                 else "max_autotune_conv_backends"
             )
-            raise NoValidChoicesError(
+            return NoValidChoicesError(
                 f"No choices to select, please consider adding ATEN into {backend_config} "
                 "config (defined in torch/_inductor/config.py) to allow at least one choice. "
             )
+
+        if len(choices) == 0:
+            raise create_no_valid_choices()
         log.debug("Max autotune selects from %s choices.", str(len(choices)))
 
         if len(choices) == 1:
@@ -2443,6 +2490,10 @@ class AlgorithmSelectorCache(PersistentCache):
                 precompile_fn()
             precompile_elapse = time.time() - precompile_start_ts
             log.debug("Precompilation elapsed time: %.02fs", precompile_elapse)
+            # Prune anything that failed to compile
+            choices = [c for c in choices if not c.failed]
+            if len(choices) == 0:
+                raise create_no_valid_choices()
 
             candidates = self.prescreen_choices(
                 choices, name, inputs_key, self.prescreening_cache
@@ -2762,6 +2813,9 @@ class AlgorithmSelectorCache(PersistentCache):
                 timeout=precompilation_timeout_seconds,
             ):
                 if e := future.exception():
+                    counters["inductor"][
+                        "select_algorithm_num_precompilation_exceptions"
+                    ] += 1
                     exceptions.append((futures[future], e))
                     from torch._inductor.codegen.cuda.cuda_kernel import (
                         CUDATemplateCaller,
@@ -2776,6 +2830,7 @@ class AlgorithmSelectorCache(PersistentCache):
                             futures[future],
                             exc_info=e,
                         )
+                        futures[future].mark_failed()
                     else:
                         log.exception(  # noqa: G202
                             "Exception %s for benchmark choice %s",
@@ -2783,6 +2838,7 @@ class AlgorithmSelectorCache(PersistentCache):
                             futures[future],
                             exc_info=e,
                         )
+                        futures[future].mark_failed()
                 else:
                     counters["inductor"]["select_algorithm_num_precompiles"] += 1
                     log.info(
@@ -2976,8 +3032,13 @@ class AlgorithmSelectorCache(PersistentCache):
 
         # only benchmark triton kernel in sub process for now.
         # ATen/Extern kernel are still benchmarked in the current process.
-        extern = [c for c in choices if isinstance(c, ExternKernelCaller)]
-        triton = [c for c in choices if not isinstance(c, ExternKernelCaller)]
+        extern = []
+        triton = []
+        for c in choices:
+            if isinstance(c, TritonTemplateCaller):
+                triton.append(c)
+            else:
+                extern.append(c)
 
         timings = cls.benchmark_in_current_process(
             extern, input_nodes, layout, input_gen_fns, hint_override=hint_override

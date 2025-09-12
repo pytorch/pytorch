@@ -228,11 +228,18 @@ def user_defined_kernel_grid_fn_code(
                 key=lambda x: len(x[1].kwargs),
                 reverse=True,
             ):
+                guardslist = []
                 if c.kwargs:
-                    guards = [
-                        f"meta['{name}'] == {val}" for name, val in c.kwargs.items()
-                    ]
-                    guards = " and ".join(guards)
+                    # Remove AMD specific kwargs.
+                    for kwarg in c.kwargs:
+                        if kwarg not in [
+                            "matrix_instr_nonkdim",
+                            "waves_per_eu",
+                            "kpack",
+                        ]:
+                            guardslist.append(f"meta['{kwarg}'] == {c.kwargs[kwarg]}")
+                if guardslist:
+                    guards = " and ".join(guardslist)
                 else:
                     guards = "True"  # for configs with empty kwargs
                 grid, example_grid = determine_grid(grid, example_grid)
@@ -254,6 +261,7 @@ def user_defined_triton_kernel_transitive_closure_source_code(kernel) -> str:
     compile_wrapper.splice(kernel.src, strip=True)
 
     # Also include any possible kernel being called indirectly
+    import triton
     from triton import JITFunction  # type: ignore[name-defined, attr-defined]
     from triton.language import constexpr  # type: ignore[name-defined]
 
@@ -279,6 +287,14 @@ def user_defined_triton_kernel_transitive_closure_source_code(kernel) -> str:
                 if isinstance(symbol, JITFunction):
                     compile_wrapper.newline()
                     compile_wrapper.writeline("@triton.jit")
+                    compile_wrapper.splice(symbol.src, strip=True)
+                    symbols_included.add(symbol_name)
+                    traverse(symbol)
+                elif hasattr(triton, "constexpr_function") and isinstance(
+                    symbol, triton.runtime.jit.ConstexprFunction
+                ):
+                    compile_wrapper.newline()
+                    compile_wrapper.writeline("@triton.constexpr_function")
                     compile_wrapper.splice(symbol.src, strip=True)
                     symbols_included.add(symbol_name)
                     traverse(symbol)
@@ -893,6 +909,33 @@ class MultiOutputLine(WrapperLine):
 
 
 @dataclasses.dataclass
+class ScatterFallbackLine(WrapperLine):
+    wrapper: PythonWrapperCodegen
+    node: ir.ScatterFallback
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        node = self.node
+        assert ir.is_node_sequence(node.inputs)
+        if node.src_is_tensor:
+            (x, index, src) = (t.codegen_reference() for t in node.inputs)
+        else:
+            (x, index) = (t.codegen_reference() for t in node.inputs)
+            src = node.constant_args[1]
+        self.wrapper._generate_scatter_fallback(
+            x,
+            [x, node.constant_args[0], index, src],
+            node.cpp_kernel_name,
+            node.python_kernel_name,
+            node.src_is_tensor,
+            node.kwargs["reduce"],
+            node.codegen_kwargs(),
+        )
+
+    def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
+        return converter._generate_scatter_fallback
+
+
+@dataclasses.dataclass
 class SymbolicCallArgLine(WrapperLine):
     wrapper: PythonWrapperCodegen
     arg: SymbolicCallArg
@@ -1495,7 +1538,10 @@ class PythonWrapperCodegen(CodeGen):
         line = f"{desc.name} = {call}{self.ending}"
         self.writeline(line)
 
-    def generate_scatter_fallback(
+    def generate_scatter_fallback(self, node: ir.ScatterFallback):
+        self.writeline(ScatterFallbackLine(self, node))
+
+    def _generate_scatter_fallback(
         self,
         output,
         inputs,
@@ -1720,7 +1766,8 @@ class PythonWrapperCodegen(CodeGen):
         if is_inference and config.memory_planning:
             self.memory_plan()
         else:
-            self.estimate_peak = EfficientPeakEstimate()
+            if config.allow_buffer_reuse:
+                self.estimate_peak = EfficientPeakEstimate()
             self.memory_plan_reuse()
 
     def codegen_input_symbol_assignment(
@@ -2283,6 +2330,7 @@ class PythonWrapperCodegen(CodeGen):
                         "config": config_to_dict(cfg),
                         "python": [*map(pexpr, grid)],
                         "cpp": [*map(cexpr, grid)],
+                        "python_slow": [*map(pexpr, grid)],
                     }
                 )
             inductor_meta = {
@@ -2367,7 +2415,10 @@ class PythonWrapperCodegen(CodeGen):
         # constant now, need type info. I agree, this needs type info, and while this is not true type info
         # it suffices as a type hint for the purposes of producing the correct code for this type.
         arg = SymbolicCallArg(sym, tree.numel)
-        self.writeline(SymbolicCallArgLine(self, arg, V.graph))
+
+        is_benchmark_kernel = kernel_name == ""
+        if not is_benchmark_kernel:
+            self.writeline(SymbolicCallArgLine(self, arg, V.graph))
 
         return arg
 
@@ -3352,7 +3403,9 @@ class PythonWrapperCodegen(CodeGen):
             self.codegen_subgraph(conditional.false_subgraph, outer_inputs, name)
         self.writeline(ExitSubgraphLine(self))
 
-    def codegen_while_loop(self, while_loop):
+    def codegen_while_loop(self, while_loop, stack_output):
+        """while_loop is codegened as a host side while_loop"""
+
         def codegen_subgraph(subgraph, outer_inputs, outer_outputs):
             """Helper method to deduplicate subgraph codegen logic"""
             if V.graph.aot_mode:
@@ -3370,7 +3423,13 @@ class PythonWrapperCodegen(CodeGen):
             buf.codegen_reference() for buf in while_loop.additional_inputs
         ]
 
+        ckp_offset = len(outer_carried_inputs)
         self.writeline(f"{name} = [None] * {len(outer_carried_inputs)}")
+        if stack_output:
+            self.writeline(
+                f"{name}.extend([[] for _ in range({len(outer_carried_inputs)})])"
+            )
+
         for i, inp in enumerate(outer_carried_inputs):
             # set the initial state before the loop
             self.writeline(f"{name}[{i}] = {inp}")
@@ -3393,10 +3452,21 @@ class PythonWrapperCodegen(CodeGen):
         )
         self.writeline(f"should_loop = {cond_outer_outputs[0]}")
         self.writeline("if not should_loop:")
-        for i, (carried_input, carried_buf) in enumerate(
-            zip(outer_carried_inputs, while_loop.carried_inputs)
-        ):
-            self.writeline(f"    {name}[{i}] = {carried_input}.clone()")
+        if stack_output:
+            # Handle the case when loop never executes
+            for i, (carried_input, carried_buf) in enumerate(
+                zip(outer_carried_inputs, while_loop.carried_inputs)
+            ):
+                self.writeline(EnterSubgraphLine(self, while_loop.body_subgraph.graph))
+                self.writeline(f"{name}[{i}] = {carried_input}.unsqueeze(0).clone()")
+                self.writeline(ExitSubgraphLine(self))
+        else:
+            for i, (carried_input, carried_buf) in enumerate(
+                zip(outer_carried_inputs, while_loop.carried_inputs)
+            ):
+                self.writeline(EnterSubgraphLine(self, while_loop.body_subgraph.graph))
+                self.writeline(f"{name}[{i}] = {carried_input}.clone()")
+                self.writeline(ExitSubgraphLine(self))
 
         self.writeline("while should_loop:")
         # Body execution
@@ -3406,6 +3476,13 @@ class PythonWrapperCodegen(CodeGen):
         )
         self.writeline(ExitSubgraphLine(self))
 
+        # Collect outputs if enabled
+        if stack_output:
+            self.writeline(EnterSubgraphLine(self, while_loop.body_subgraph.graph))
+            for i in range(len(outer_carried_inputs)):
+                self.writeline(f"{name}[{i + ckp_offset}].append({name}[{i}])")
+            self.writeline(ExitSubgraphLine(self))
+
         # Condition check at end of loop
         self.writeline(EnterSubgraphLine(self, while_loop.cond_subgraph.graph))
         codegen_subgraph(
@@ -3413,6 +3490,17 @@ class PythonWrapperCodegen(CodeGen):
         )
         self.writeline(ExitSubgraphLine(self))
         self.writeline(f"    should_loop = {cond_outer_outputs[0]}")
+
+        # Stack outputs after loop completion
+        if stack_output:
+            self.writeline("# Stack outputs after loop completion")
+            for i in range(len(outer_carried_inputs)):
+                self.writeline(f"if len({name}[{i + ckp_offset}]) > 0:")
+                self.writeline(EnterSubgraphLine(self, while_loop.body_subgraph.graph))
+                self.writeline(
+                    f"{name}[{i}] = torch.stack({name}[{i + ckp_offset}], dim=0)"
+                )
+                self.writeline(ExitSubgraphLine(self))
 
     @staticmethod
     def statically_known_int_or_none(x):
