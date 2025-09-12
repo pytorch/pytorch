@@ -909,6 +909,33 @@ class MultiOutputLine(WrapperLine):
 
 
 @dataclasses.dataclass
+class ScatterFallbackLine(WrapperLine):
+    wrapper: PythonWrapperCodegen
+    node: ir.ScatterFallback
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        node = self.node
+        assert ir.is_node_sequence(node.inputs)
+        if node.src_is_tensor:
+            (x, index, src) = (t.codegen_reference() for t in node.inputs)
+        else:
+            (x, index) = (t.codegen_reference() for t in node.inputs)
+            src = node.constant_args[1]
+        self.wrapper._generate_scatter_fallback(
+            x,
+            [x, node.constant_args[0], index, src],
+            node.cpp_kernel_name,
+            node.python_kernel_name,
+            node.src_is_tensor,
+            node.kwargs["reduce"],
+            node.codegen_kwargs(),
+        )
+
+    def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
+        return converter._generate_scatter_fallback
+
+
+@dataclasses.dataclass
 class SymbolicCallArgLine(WrapperLine):
     wrapper: PythonWrapperCodegen
     arg: SymbolicCallArg
@@ -1511,7 +1538,10 @@ class PythonWrapperCodegen(CodeGen):
         line = f"{desc.name} = {call}{self.ending}"
         self.writeline(line)
 
-    def generate_scatter_fallback(
+    def generate_scatter_fallback(self, node: ir.ScatterFallback):
+        self.writeline(ScatterFallbackLine(self, node))
+
+    def _generate_scatter_fallback(
         self,
         output,
         inputs,
@@ -2385,7 +2415,10 @@ class PythonWrapperCodegen(CodeGen):
         # constant now, need type info. I agree, this needs type info, and while this is not true type info
         # it suffices as a type hint for the purposes of producing the correct code for this type.
         arg = SymbolicCallArg(sym, tree.numel)
-        self.writeline(SymbolicCallArgLine(self, arg, V.graph))
+
+        is_benchmark_kernel = kernel_name == ""
+        if not is_benchmark_kernel:
+            self.writeline(SymbolicCallArgLine(self, arg, V.graph))
 
         return arg
 

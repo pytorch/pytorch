@@ -38,6 +38,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
     TEST_WITH_SLOW_GRADCHECK,
+    TEST_XPU,
 )
 
 
@@ -171,6 +172,7 @@ ROCM_BLOCKLIST = [
     "distributed/rpc/test_tensorpipe_agent",
     "distributed/rpc/test_share_memory",
     "distributed/rpc/cuda/test_tensorpipe_agent",
+    "inductor/test_max_autotune",  # taking excessive time, many tests >30 min
     "test_determination",
     "test_jit_legacy",
     "test_cuda_nvml_based_avail",
@@ -840,8 +842,9 @@ def _test_cpp_extensions_aot(test_directory, options, use_ninja):
         exts_to_build = [
             (install_cmd, "no_python_abi_suffix_test"),
         ]
-        if TEST_CUDA:
+        if TEST_CUDA or TEST_XPU:
             exts_to_build.append((wheel_cmd, "python_agnostic_extension"))
+        if TEST_CUDA:
             exts_to_build.append((install_cmd, "libtorch_agnostic_extension"))
         for cmd, extension_dir in exts_to_build:
             return_code = shell(
