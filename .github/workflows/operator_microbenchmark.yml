@@ -23,8 +23,10 @@ jobs:
     name: opmicrobenchmark-build
     uses: ./.github/workflows/_linux-build.yml
     with:
+      allow-reuse-old-whl: false
+      cuda-arch-list: '8.0,9.0'
       build-environment: linux-jammy-cuda12.8-py3.10-gcc9-sm80
-      docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc9-inductor-benchmarks
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11
       test-matrix: |
         {
           "config": ["operator_microbenchmark_test"],
