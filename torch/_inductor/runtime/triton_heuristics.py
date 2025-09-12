@@ -2531,7 +2531,7 @@ def pointwise(
             ]
     if len(size_hints) == 2:
         if (
-            disable_pointwise_autotuning(inductor_meta) or tile_hint == TileHint.SQUARE
+            disable_pointwise_autotuning(inductor_meta) # or tile_hint == TileHint.SQUARE
         ) and not (
             inductor_meta.get("max_autotune")
             or inductor_meta.get("max_autotune_pointwise")
