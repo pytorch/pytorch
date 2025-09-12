@@ -442,6 +442,11 @@ class Graph {
 
   void applyDevicePlacement(const Placement& placement);
 
+  // Override all weights in the graph if matching name is found in the map.
+  void overrideWeightsDevice(
+      const std::unordered_map<std::string, std::optional<c10::Device>>&
+          submodNameToDevice);
+
   std::string getUniqueValueName();
 
   ValueId getNextValueId() {
