@@ -214,7 +214,7 @@ ARG SCCACHE_S3_NO_CREDENTIALS=0
 RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,source=.git,target=.git \
     if [ "$USE_SCCACHE" = "1" ]; then \
-        echo "Installing sccache..." \
+        echo "Installing sccache..."; \
         if [ "$TARGETPLATFORM" = "linux/arm64" ]; then \
             SCCACHE_ARCHIVE="sccache-v0.8.1-aarch64-unknown-linux-musl"; \
         else \
