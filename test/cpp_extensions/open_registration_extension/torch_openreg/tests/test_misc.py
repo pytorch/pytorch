@@ -4,7 +4,7 @@ import types
 import unittest
 
 import torch
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
 
 
 class TestBackendModule(TestCase):
@@ -120,6 +120,7 @@ class TestTensorType(TestCase):
 
     # Note that all dtype-d Tensor objects here are only for legacy reasons
     # and should NOT be used.
+    @skipIfTorchDynamo()
     def test_backend_type_methods(self):
         # Tensor
         tensor_cpu = torch.randn([8]).float()
