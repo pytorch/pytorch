@@ -587,12 +587,7 @@ if True:  # just to temporarily avoid reindentation
                 has_split_group = False
                 if (
                     default_group is not None
-                    and (
-                        bound_device_id := getattr(
-                            default_group, "bound_device_id", None
-                        )
-                    )
-                    is not None
+                    and (getattr(default_group, "bound_device_id", None)) is not None
                     and torch.cuda.is_available()
                     and (
                         backend is None
@@ -618,7 +613,7 @@ if True:  # just to temporarily avoid reindentation
                     # We temporarily revert the reuse subgroup, since it breaks two internal tests.
                     # Temporarily reverting to resolve test timeout while root-causing.
                     # TODO: Add two tests to cover internal tests scenarios and re-enable reuse subgroup if exists.
-                    if bound_device_id is None or not has_split_group:
+                    if not has_split_group:
                         backend = backend or get_default_backend_for_device(
                             self.device_type
                         )
