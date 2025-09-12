@@ -1074,7 +1074,6 @@ def _fused_matmul_reduce_scatter_impl(
     out_shape = [*A.shape[:-1], B.shape[1]]
     out_shape[scatter_dim] //= group.size()
 
-    chunk_producer = None
     if scatter_dim == A.ndim - 1:
         Bt = B.t()
         Bt_shards = Bt.chunk(group.size())
