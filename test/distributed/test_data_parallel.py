@@ -64,9 +64,6 @@ class TestDataParallel(TestCase):
         gradcheck(fn, (m.t_rg,))
 
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "multi-GPU not supported")
-    @skip_but_pass_in_sandcastle_if(
-        True, "https://github.com/pytorch/pytorch/issues/162745"
-    )
     def test_data_parallel_rnn(self):
         class TestModule(torch.nn.Module):
             def __init__(self) -> None:

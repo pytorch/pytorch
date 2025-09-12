@@ -54,7 +54,7 @@ jobs:
     needs:
       - linux-jammy-cuda12_8-py3_10-gcc11-build-distributed-b200
     with:
-      timeout-minutes: 360
+      timeout-minutes: 600
       build-environment: linux-jammy-cuda12.8-py3.10-gcc11-distributed-b200
       docker-image: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc11-build-distributed-b200.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc11-build-distributed-b200.outputs.test-matrix }}
