@@ -380,9 +380,12 @@ static Tensor mps_convolution_backward_input(IntArrayRef input_size,
   TensorArg grad_output{grad_output_t, "grad_output", 1}, weight{weight_t, "weight", 2};
   checkAllSameType(c, {grad_output, weight});
   checkAllSameGPU(c, {grad_output, weight});
-  auto memory_format = grad_output_t.suggest_memory_format();
-  bool is_channels_last = (memory_format == at::MemoryFormat::ChannelsLast) && !is3DConv;
-  auto grad_input_t = at::empty(input_size, grad_output_t.options(), std::nullopt);
+  constexpr auto kChannelsLast = at::MemoryFormat::ChannelsLast;
+  bool is_channels_last =
+      (grad_output_t.suggest_memory_format() == kChannelsLast || weight_t.suggest_memory_format() == kChannelsLast) &&
+      !is3DConv;
+  auto grad_input_t =
+      at::empty(input_size, grad_output_t.options(), is_channels_last ? std::optional(kChannelsLast) : std::nullopt);
 
   // Avoid "grad_input" when this is being used as transposed convolution
   TensorArg grad_input{grad_input_t, "result", 0};
@@ -400,17 +403,7 @@ static Tensor mps_convolution_backward_input(IntArrayRef input_size,
   @autoreleasepool {
     MPSStream* stream = getCurrentMPSStream();
 
-    std::string mem_format_key;
-    switch (memory_format) {
-      case at::MemoryFormat::Contiguous:
-        mem_format_key = "Contiguous";
-        break;
-      case at::MemoryFormat::ChannelsLast:
-        mem_format_key = "ChannelsLast";
-        break;
-      default:
-        assert(0 && "Check should have been done earlier\n");
-    }
+    const auto mem_format_key = is_channels_last ? "ChannelsLast" : "Contiguous";
 
     MPSShape* mps_input_shape = getMPSShape(input_size);
     std::string key;
@@ -524,6 +517,10 @@ static Tensor mps_convolution_backward_weights(IntArrayRef weight_size,
   bool is3DConv = input_t.dim() == 5;
   TORCH_CHECK(isFloatingType(grad_output_t.scalar_type()), "Convolution is supported only for Floating types");
   CheckedFrom c = "mps_convolution_backward_weights";
+  constexpr auto kChannelsLast = at::MemoryFormat::ChannelsLast;
+  bool is_channels_last =
+      (input_t.suggest_memory_format() == kChannelsLast || grad_output_t.suggest_memory_format() == kChannelsLast) &&
+      !is3DConv;
 
   // For uniformity with everything else, although it seems grad_weight
   // would be unambiguous too.
@@ -534,7 +531,7 @@ static Tensor mps_convolution_backward_weights(IntArrayRef weight_size,
   checkAllSameGPU(c, {grad_output, input});
 
   auto grad_weight_t =
-      at::empty(weight_size, grad_output_t.scalar_type(), std::nullopt, kMPS, std::nullopt, std::nullopt);
+      at::empty(weight_size, grad_output_t.options(), is_channels_last ? std::optional(kChannelsLast) : std::nullopt);
   TensorArg grad_weight{grad_weight_t, "result", 0};
 
   convolution_shape_check(c, input, grad_weight, grad_output, padding, stride, dilation, groups);
@@ -551,17 +548,18 @@ static Tensor mps_convolution_backward_weights(IntArrayRef weight_size,
     MPSStream* stream = getCurrentMPSStream();
 
     MPSShape* mps_weight_shape = getMPSShape(weight_size);
+    const auto mem_format_key = is_channels_last ? "ChannelsLast" : "Contiguous";
     std::string key;
     if (is3DConv) {
       key = "mps_3d_convolution_backward_weights:" + std::to_string(stride[0]) + ":" + std::to_string(stride[1]) + ":" +
           std::to_string(stride[2]) + ":" + std::to_string(dilation[0]) + ":" + std::to_string(dilation[1]) + ":" +
           std::to_string(dilation[2]) + ":" + std::to_string(padding[0]) + ":" + std::to_string(padding[1]) + ":" +
-          std::to_string(padding[2]) + ":" + std::to_string(groups) + ":" +
+          std::to_string(padding[2]) + ":" + std::to_string(groups) + ":" + mem_format_key +
           getTensorsStringKey({grad_output_t, input_t, grad_weight_t});
     } else {
       key = "mps_convolution_backward_weights:" + std::to_string(stride[0]) + ":" + std::to_string(stride[1]) + ":" +
           std::to_string(dilation[0]) + ":" + std::to_string(dilation[1]) + ":" + std::to_string(padding[0]) + ":" +
-          std::to_string(padding[1]) + ":" + std::to_string(groups) + ":" +
+          std::to_string(padding[1]) + ":" + std::to_string(groups) + ":" + mem_format_key +
           getTensorsStringKey({grad_output_t, input_t, grad_weight_t});
     }
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
