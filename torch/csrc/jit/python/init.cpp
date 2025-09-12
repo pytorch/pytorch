@@ -817,7 +817,6 @@ void initJITBindings(PyObject* module) {
           })
       .def(
           "_jit_nvfuser_set_comparison_callback",
-          // NOLINTNEXTLINE(performance-unnecessary-value-param)
           [](bool, py::function) {
             TORCH_WARN(
                 "nvfuser is no longer supported in torch script, use _jit_nvfuser_set_comparison_callback is deprecated and a no-op");
