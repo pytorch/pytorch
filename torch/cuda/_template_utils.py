@@ -1,7 +1,7 @@
 """
 Utilities for handling C++ templates in CUDA kernel compilation.
 """
-from typing import Any, Optional, Union
+from typing import Any, Optional
 
 
 def generate_template_instantiation(
@@ -24,7 +24,7 @@ def generate_template_instantiation(
     """
     if wrapper_name is None:
         wrapper_name = f"{template_name}_wrapper"
-    
+
     template_args = ", ".join(str(v) for v in template_params.values())
     instantiation_code = f"""
 {template_code}
@@ -36,7 +36,7 @@ extern "C" __global__ void {wrapper_name}() {{
     {template_name}<{template_args}>();
 }}
 """
-    
+
     return instantiation_code, wrapper_name
 
 
@@ -64,7 +64,7 @@ def prepare_cutlass_kernel(
     """
     if wrapper_name is None:
         wrapper_name = "cutlass_kernel_wrapper"
-    
+
     prepared_code = f"""
 #include <cutlass/cutlass.h>
 #include <cutlass/gemm/device/gemm.h>
@@ -91,7 +91,7 @@ extern "C" __global__ void {wrapper_name}(
     using LayoutC = {layout};
 }}
 """
-    
+
     return prepared_code, wrapper_name
 
 
@@ -119,9 +119,9 @@ def wrap_template_kernel(
     """
     if wrapper_name is None:
         wrapper_name = f"{template_name}_wrapper"
-    
+
     template_spec = ", ".join(template_types)
-    
+
     complete_code = f"""
 {template_code}
 
@@ -131,5 +131,5 @@ extern "C" __global__ void {wrapper_name}({function_signature}) {{
 {function_body}
 }}
 """
-    
+
     return complete_code, wrapper_name

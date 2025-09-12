@@ -1804,7 +1804,7 @@ def _compile_kernel(
     import ctypes
 
     from torch.cuda._utils import _cuda_load_module, _nvrtc_compile
-    
+
     # Handle template instantiation if needed
     if is_template:
         if not template_types:
@@ -1813,10 +1813,10 @@ def _compile_kernel(
             raise ValueError("wrapper_signature must be provided for template kernels")
         if not wrapper_body:
             raise ValueError("wrapper_body must be provided for template kernels")
-        
+
         # Import template utilities
         from torch.cuda._template_utils import wrap_template_kernel
-        
+
         # Wrap the template with explicit instantiation and extern "C" wrapper
         wrapped_code, actual_kernel_name = wrap_template_kernel(
             kernel_source,
@@ -1826,7 +1826,7 @@ def _compile_kernel(
             wrapper_body,
             wrapper_name
         )
-        
+
         # Use the wrapped code for compilation
         kernel_source = wrapped_code
         kernel_name = actual_kernel_name

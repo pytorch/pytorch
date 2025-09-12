@@ -32,7 +32,7 @@ add_kernel = torch.cuda._compile_kernel(
 ```python
 cutlass_gemm = '''
 template<typename T>
-__global__ void gemm_kernel(T const* A, T const* B, T* C, 
+__global__ void gemm_kernel(T const* A, T const* B, T* C,
                             int M, int N, int K, T alpha, T beta) {
     int row = blockIdx.y * blockDim.y + threadIdx.y;
     int col = blockIdx.x * blockDim.x + threadIdx.x;

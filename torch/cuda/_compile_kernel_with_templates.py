@@ -1,9 +1,8 @@
 """
 Enhanced kernel compilation with C++ template support for CUTLASS and other templated CUDA libraries.
 """
-from typing import Any, Optional, Union
+from typing import Any, Optional
 
-import torch
 from torch.cuda._template_utils import wrap_template_kernel
 from torch.cuda._utils import _cuda_load_module, _nvrtc_compile
 
@@ -70,7 +69,7 @@ def _compile_kernel_with_templates(
         ...     wrapper_body="    add_template<float>(a, b, c, n);"
         ... )
     """
-    
+
     # Handle template instantiation
     if is_template:
         if not template_types:
@@ -79,7 +78,7 @@ def _compile_kernel_with_templates(
             raise ValueError("wrapper_signature must be provided for template kernels")
         if not wrapper_body:
             raise ValueError("wrapper_body must be provided for template kernels")
-            
+
         # Wrap the template with explicit instantiation and extern "C" wrapper
         wrapped_code, actual_kernel_name = wrap_template_kernel(
             kernel_source,
@@ -89,11 +88,11 @@ def _compile_kernel_with_templates(
             wrapper_body,
             wrapper_name
         )
-        
+
         # Use the wrapped code for compilation
         kernel_source = wrapped_code
         kernel_name = actual_kernel_name
-    
+
     # Compile using the standard path
     ptx = _nvrtc_compile(
         kernel_source,
@@ -103,7 +102,7 @@ def _compile_kernel_with_templates(
         cuda_include_dirs,
         nvcc_options,
     )
-    
+
     # Load the module and get the kernel
     result = _cuda_load_module(ptx, [kernel_name])
     if isinstance(result, dict):
@@ -133,8 +132,8 @@ def compile_cutlass_gemm(
     Returns:
         callable: Compiled CUTLASS GEMM kernel
     """
-    
-    cutlass_template = f"""
+
+    cutlass_template = """
 #include <cutlass/cutlass.h>
 #include <cutlass/numeric_types.h>
 #include <cutlass/core_io.h>
@@ -148,26 +147,26 @@ __global__ void cutlass_gemm_kernel(
     int M, int N, int K,
     ElementType alpha,
     ElementType beta
-) {{
+) {
     int row = blockIdx.y * blockDim.y + threadIdx.y;
     int col = blockIdx.x * blockDim.x + threadIdx.x;
     
-    if (row < M && col < N) {{
+    if (row < M && col < N) {
         ElementType sum = 0;
-        for (int i = 0; i < K; ++i) {{
+        for (int i = 0; i < K; ++i) {
             sum += A[row * K + i] * B[i * N + col];
-        }}
+        }
         C[row * N + col] = alpha * sum + beta * C[row * N + col];
-    }}
-}}
+    }
+}
 """
-    
+
     type_map = {
         "float": "float",
-        "double": "double", 
+        "double": "double",
         "half": "__half",
     }
-    
+
     cpp_type = type_map.get(element_type, "float")
     wrapper_sig = f"""
 {cpp_type} const* A,
@@ -177,7 +176,7 @@ int M, int N, int K,
 {cpp_type} alpha,
 {cpp_type} beta
 """.strip()
-    
+
     wrapper_body = f"    cutlass_gemm_kernel<{cpp_type}>(A, B, C, M, N, K, alpha, beta);"
     return _compile_kernel_with_templates(
         cutlass_template,
