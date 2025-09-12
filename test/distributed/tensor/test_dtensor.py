@@ -670,8 +670,6 @@ class DTensorMeshTest(DTensorTestBase):
         self.assertEqual(dist_tensor.to_local().device.type, self.device_type)
 
     @with_comms
-    @skip_if_lt_x_gpu(8)
-    @skipXPUIf(True, "Skip it due to XPU CI machine limitation")
     def test_dtensor_api_device_mesh_context_manager(self):
         with self.build_device_mesh() as mesh:
             placements = [Shard(0)]
@@ -734,8 +732,6 @@ class DTensorMeshTest(DTensorTestBase):
         self.assertEqual(dist_tensor.size(), torch.Size([3 * self.world_size, 3]))
 
     @with_comms
-    @skip_if_lt_x_gpu(8)
-    @skipXPUIf(True, "Skip it due to XPU CI machine limitation")
     def test_device_mesh_nd(self):
         # construct a gpu device mesh
         mesh_tensor = torch.arange(self.world_size).reshape(2, 2, 2)
@@ -757,8 +753,6 @@ class DTensorMeshTest(DTensorTestBase):
         self.assertEqual(dist_tensor.to_local().device.type, self.device_type)
 
     @with_comms
-    @skip_if_lt_x_gpu(8)
-    @skipXPUIf(True, "Skip it due to XPU CI machine limitation")
     def test_dtensor_spec_local_shard_offset(self):
         device_mesh = DeviceMesh(
             self.device_type, torch.arange(self.world_size).reshape(2, 4)
