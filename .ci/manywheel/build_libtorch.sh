@@ -20,24 +20,6 @@ retry () {
     $*  || (sleep 1 && $*) || (sleep 2 && $*) || (sleep 4 && $*) || (sleep 8 && $*)
 }
 
-# TODO move this into the Docker images
-OS_NAME=`awk -F= '/^NAME/{print $2}' /etc/os-release`
-if [[ "$OS_NAME" == *"AlmaLinux"* ]]; then
-    retry yum install -q -y zip openssl
-elif [[ "$OS_NAME" == *"Red Hat Enterprise Linux"* ]]; then
-    retry dnf install -q -y zip openssl
-elif [[ "$OS_NAME" == *"Ubuntu"* ]]; then
-    # TODO: Remove this once nvidia package repos are back online
-    # Comment out nvidia repositories to prevent them from getting apt-get updated, see https://github.com/pytorch/pytorch/issues/74968
-    # shellcheck disable=SC2046
-    sed -i 's/.*nvidia.*/# &/' $(find /etc/apt/ -type f -name "*.list")
-    retry apt-get update
-    retry apt-get -y install zip openssl
-else
-    echo "Unknown OS: '$OS_NAME'"
-    exit 1
-fi
-
 # Version: setup.py uses $PYTORCH_BUILD_VERSION.post$PYTORCH_BUILD_NUMBER if
 # PYTORCH_BUILD_NUMBER > 1
 build_version="$PYTORCH_BUILD_VERSION"
@@ -63,6 +45,20 @@ export CMAKE_INCLUDE_PATH="/opt/intel/include:$CMAKE_INCLUDE_PATH"
 if [[ -e /opt/openssl ]]; then
     export OPENSSL_ROOT_DIR=/opt/openssl
     export CMAKE_INCLUDE_PATH="/opt/openssl/include":$CMAKE_INCLUDE_PATH
+fi
+
+# Set AArch64 variables
+if [[ $GPU_ARCH_TYPE == *"aarch64"* ]]; then
+    export USE_MKLDNN=ON
+    export USE_MKLDNN_ACL=ON
+    export ACL_ROOT_DIR="/acl"
+    if [[ $GPU_ARCH_TYPE == "cuda-aarch64" ]]; then
+        export MAX_JOBS=5
+        export BLAS="NVPL"
+    else
+        export BLAS="OpenBLAS"
+        export OpenBLAS_HOME="/opt/OpenBLAS"
+    fi
 fi
 
 # If given a python version like 3.6m or 2.7mu, convert this to the format we

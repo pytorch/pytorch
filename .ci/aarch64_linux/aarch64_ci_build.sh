@@ -31,8 +31,7 @@ pip install -r /pytorch/requirements.txt
 pip install auditwheel==6.2.0 wheel
 if [ "$DESIRED_CUDA" = "cpu" ]; then
     echo "BASE_CUDA_VERSION is not set. Building cpu wheel."
-    #USE_PRIORITIZED_TEXT_FOR_LD for enable linker script optimization https://github.com/pytorch/pytorch/pull/121975/files
-    USE_PRIORITIZED_TEXT_FOR_LD=1 python /pytorch/.ci/aarch64_linux/aarch64_wheel_ci_build.py --enable-mkldnn
+    python /pytorch/.ci/aarch64_linux/aarch64_wheel_ci_build.py --enable-mkldnn
 else
     echo "BASE_CUDA_VERSION is set to: $DESIRED_CUDA"
     export USE_SYSTEM_NCCL=1
@@ -46,6 +45,5 @@ else
         export USE_NVIDIA_PYPI_LIBS=1
     fi
 
-    #USE_PRIORITIZED_TEXT_FOR_LD for enable linker script optimization https://github.com/pytorch/pytorch/pull/121975/files
-    USE_PRIORITIZED_TEXT_FOR_LD=1 python /pytorch/.ci/aarch64_linux/aarch64_wheel_ci_build.py --enable-mkldnn --enable-cuda
+    python /pytorch/.ci/aarch64_linux/aarch64_wheel_ci_build.py --enable-mkldnn --enable-cuda
 fi
