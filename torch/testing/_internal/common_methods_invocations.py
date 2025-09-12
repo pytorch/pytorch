@@ -8468,7 +8468,8 @@ def sample_inputs_nll_loss(op_info, device, dtype, requires_grad, **kwargs):
             yield make_input(s), make_target(s), dict(reduction=reduction)
             yield make_input(s), make_target(s), dict(weight=make_weight(), reduction=reduction)
             yield make_input(s), make_target(s), dict(weight=make_weight(low=0), reduction=reduction)
-            yield make_input(s), make_target(s), dict(weight=make_weight(high=0), reduction=reduction)
+            if dtype.is_floating_point or dtype.is_complex:
+                yield make_input(s), make_target(s), dict(weight=make_weight(high=0), reduction=reduction)
             t = make_target(s)
             ignore = num_classes // 2
             # If "mean", nll returns NaN, so it's not differentiable at those points
