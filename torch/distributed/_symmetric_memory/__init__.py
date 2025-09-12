@@ -1079,7 +1079,7 @@ def _fused_matmul_reduce_scatter_impl(
         Bt_shards = Bt.chunk(group.size())
         x = A.flatten(0, -2)
 
-        def chunk_producer(rank: int, out: torch.Tensor) -> None:
+        def _chunk_producer(rank: int, out: torch.Tensor) -> None:
             mm_out_op(A, Bt_shards[rank].t(), **kwargs, out=out)
 
         leading_dims = [group.size()] + list(x.shape[:-1])
@@ -1089,7 +1089,7 @@ def _fused_matmul_reduce_scatter_impl(
         )
 
         _pipelined_produce_and_all2all(
-            chunk_producer,
+            _chunk_producer,
             stacked_partials,
             group_name,
         )
