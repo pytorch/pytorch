@@ -19,7 +19,12 @@ from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     apply_activation_checkpointing,
 )
 from torch.distributed.device_mesh import DeviceMesh
-from torch.distributed.fsdp import CPUOffloadPolicy, FSDPModule, OffloadPolicy
+from torch.distributed.fsdp import (
+    CPUOffloadPolicy,
+    FSDPModule,
+    OffloadPolicy,
+    register_fsdp_forward_method,
+)
 from torch.distributed.tensor import DTensor, init_device_mesh
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
@@ -1075,6 +1080,54 @@ class TestReplicateGradientAccumulation(FSDPTest):
             self.assertEqual(loss, ref_loss)
         optim.step()
         ref_optim.step()
+        check_sharded_parity(self, ref_model, model)
+
+
+class TestReplicateCustomForwardMethod(FSDPTest):
+    @property
+    def world_size(self) -> int:
+        return min(torch.get_device_module(device_type).device_count(), 2)
+
+    @skip_if_lt_x_gpu(2)
+    def test_register_fsdp_forward_method(self):
+        class VisionTransformer(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.patch_proj = nn.Conv2d(3, 1024, kernel_size=14, stride=14)
+
+            def forward_features(self, imgs: torch.Tensor) -> torch.Tensor:
+                return self.patch_proj(imgs).flatten(2).transpose(1, 2)
+
+            def forward(self, imgs: torch.Tensor) -> torch.Tensor:
+                return self.forward_features(imgs).sum(dim=1)
+
+        class Model(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.vit, self.projector = VisionTransformer(), nn.Linear(1024, 256)
+
+            def forward(self, imgs: torch.Tensor) -> torch.Tensor:
+                # Run `vit.forward_features`, which is not `forward`!
+                patch_embeddings = self.vit.forward_features(imgs)
+                return self.projector(patch_embeddings)
+
+        torch.manual_seed(42)
+        model = Model()
+        ref_model = copy.deepcopy(model).to(device_type)
+        replicate(model.vit)
+        replicate(model.projector)
+        replicate(model)
+        register_fsdp_forward_method(model.vit, "forward_features")
+
+        torch.manual_seed(42 + self.rank + 1)
+        inp = torch.randn(4, 3, 224, 224, device=device_type.type)
+        ref_loss = ref_model(inp).sum()
+        loss = model(inp).sum()
+        self.assertEqual(ref_loss, loss)
+        ref_loss.backward()
+        loss.backward()
+        for param in ref_model.parameters():
+            dist.all_reduce(param.grad, op=dist.ReduceOp.AVG)
         check_sharded_parity(self, ref_model, model)
 
 
