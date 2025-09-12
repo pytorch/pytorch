@@ -9,6 +9,30 @@ def get_blas_gomp_arch_deps():
         ]),
     ]
 
+def get_build_args_for_generate_cuda_config(is_x86=False):
+    base = [
+            "--input-file",
+            "aten/src/ATen/cuda/CUDAConfig.h.in",
+            "--output-file",
+            "CUDAConfig.h",
+            "--replace",
+            "@AT_CUDNN_ENABLED@",
+            "1",
+            "--replace",
+            "@AT_HIPSPARSELT_ENABLED@",
+            "0",
+            "--replace",
+            "@AT_ROCM_ENABLED@",
+            "0",
+            "--replace",
+            "@AT_MAGMA_ENABLED@",
+            "1",
+        ]
+    if is_x86:
+        return base + ["--replace", "@AT_CUSPARSELT_ENABLED@", "1"]
+    else: 
+        return base + ["--replace", "@AT_CUSPARSELT_ENABLED@", "0"] 
+
 default_compiler_flags = [
     "-Wall",
     "-Wextra",
