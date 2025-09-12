@@ -29,16 +29,14 @@ from torch.testing._internal.common_utils import (
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
     sys.exit(0)
-
 device_type = (
     acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
 )
-
 # bfloat16 is only supported by CUDA 11+ or XPU
-BFLOAT16_AVAILABLE = (
+BFLOAT16_AVAILABLE = torch.xpu.is_available() or (
     torch.cuda.is_available()
     and (torch.version.cuda is not None or torch.version.hip is not None)
-) or torch.xpu.is_available()
+)
 
 
 class Net(nn.Module):
