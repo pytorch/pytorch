@@ -1,4 +1,3 @@
-#include <ATen/NamedTensorUtils.h>
 #include <c10/core/DeviceType.h>
 #include <c10/core/impl/GPUTrace.h>
 #include <c10/core/impl/HermeticPyObjectTLS.h>
@@ -1157,64 +1156,7 @@ static PyObject* THPVariable_get_ndim(THPVariable* self, void* unused) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPVariable_get_names(PyObject* self, void* unused) {
-  HANDLE_TH_ERRORS
-  if (check_has_torch_function(self)) {
-    return handle_torch_function_getter((THPVariable*)self, "names");
-  }
-  // The long-term plan is to return a list of (python) torch.Dimname.
-  // However, for now, return a list of string.
-  const auto& tensor = THPVariable_Unpack(self);
-  auto size = tensor.dim();
-  THPObjectPtr tuple(PyTuple_New(size));
-  if (!tuple)
-    throw python_error();
 
-  const auto dimnames = tensor.names();
-  for (const auto i : c10::irange(size)) {
-    PyObject* str = nullptr;
-    if (dimnames[i].type() == at::NameType::WILDCARD) {
-      // PyTuple_SET_ITEM steals a reference to the object. When the tuple is
-      // deallocated, it'll decrement the refcount on Py_None, which is bad.
-      // To avoid this, we "create" a new reference to Py_None by increasing
-      // the refcount.
-      // Sources:
-      // - https://docs.python.org/3/c-api/tuple.html#c.PyTuple_SetItem
-      // -
-      // https://stackoverflow.com/questions/16400600/how-to-return-a-tuple-containing-a-none-value-from-the-c-api
-      Py_INCREF(Py_None);
-      str = Py_None;
-    } else {
-      str = THPUtils_packString(dimnames[i].symbol().toUnqualString());
-      if (!str)
-        throw python_error();
-    }
-    PyTuple_SET_ITEM(tuple.get(), i, str);
-  }
-  return tuple.release();
-  END_HANDLE_TH_ERRORS
-}
-
-static int THPVariable_set_names(
-    PyObject* self,
-    PyObject* names,
-    void* unused) {
-  HANDLE_TH_ERRORS
-  if (check_has_torch_function(self)) {
-    return handle_torch_function_setter((THPVariable*)self, "names", names);
-  }
-  const auto& var = THPVariable_Unpack(self);
-  if (names == Py_None) {
-    at::internal_set_names_inplace(var, std::nullopt);
-  } else {
-    TORCH_CHECK(
-        THPUtils_checkDimnameList(names),
-        "names must either be None or a tuple of dim names");
-    at::internal_set_names_inplace(var, torch::parseDimnameList(names));
-  }
-  return 0;
-  END_HANDLE_TH_ERRORS_RET(-1)
-}
 
 static int THPVariable_set_requires_grad(
     THPVariable* self,
@@ -1708,11 +1650,6 @@ static struct PyGetSetDef THPVariable_properties[] = {
     {"ndim", (getter)THPVariable_get_ndim, nullptr, nullptr, nullptr},
     {"nbytes", (getter)THPVariable_get_nbytes, nullptr, nullptr, nullptr},
     {"itemsize", (getter)THPVariable_get_itemsize, nullptr, nullptr, nullptr},
-    {"names",
-     (getter)THPVariable_get_names,
-     (setter)THPVariable_set_names,
-     nullptr,
-     nullptr},
     {"real",
      (getter)PropertyReal::getter,
      (setter)THPVariable_set_real,

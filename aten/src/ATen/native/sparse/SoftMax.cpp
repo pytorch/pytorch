@@ -3,7 +3,6 @@
 #include <ATen/Config.h>
 #include <ATen/Dispatch.h>
 #include <ATen/AccumulateType.h>
-#include <ATen/NamedTensorUtils.h>
 #include <ATen/native/sparse/ParamUtils.h>
 #include <ATen/native/SparseTensorUtils.h>
 #include <ATen/Parallel.h>

@@ -7,7 +7,6 @@ from multiprocessing.util import register_after_fork
 from typing import Union
 
 import torch
-from torch._namedtensor_internals import check_serializing_named_tensor
 
 
 try:
@@ -229,7 +228,6 @@ def reduce_tensor(tensor):
             "before serializing (e.g., putting it on the queue)."
         )
 
-    check_serializing_named_tensor(tensor)
     torch.utils.hooks.warn_if_has_hooks(tensor)
 
     # Note [CUDA IPC and the caching allocator]

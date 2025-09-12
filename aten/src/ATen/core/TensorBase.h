@@ -32,7 +32,6 @@
 #include <optional>
 #include <c10/util/intrusive_ptr.h>
 
-#include <ATen/core/NamedTensor.h>
 #include <ATen/core/QuantizerBase.h>
 #include <ATen/core/TensorAccessor.h>
 #include <ATen/StorageUtils.h>
