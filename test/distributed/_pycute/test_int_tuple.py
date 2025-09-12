@@ -67,17 +67,17 @@ class TestIntTuple(TestCase):
 
         self.assertEqual(shape_div((6, (3, 4)), 36), (1, (1, 2)))
 
-    def test_prefix_product(self):
-        self.assertEqual(prefix_product(2), 1)
+    def test_suffix_product(self):
+        self.assertEqual(suffix_product(2), 1)
 
-        self.assertEqual(prefix_product((3, 2)), (2, 1))
+        self.assertEqual(suffix_product((3, 2)), (2, 1))
 
-        self.assertEqual(prefix_product((3, 2, 4)), (8, 4, 1))
+        self.assertEqual(suffix_product((3, 2, 4)), (8, 4, 1))
 
-        self.assertEqual(prefix_product(((2, 3), 4)), ((12, 4), 1))
+        self.assertEqual(suffix_product(((2, 3), 4)), ((12, 4), 1))
 
         self.assertEqual(
-            prefix_product(((2, 3), (2, 1, 2), (5, 2, 1))),
+            suffix_product(((2, 3), (2, 1, 2), (5, 2, 1))),
             ((120, 40), (20, 20, 10), (2, 1, 1)),
         )
 
