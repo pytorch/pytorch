@@ -75,6 +75,16 @@ def use_deterministic_algorithims(mode: bool, warn_only: bool):
         torch.use_deterministic_algorithms(previous_mode, warn_only=previous_warn_only)
 
 
+@contextlib.contextmanager
+def math_sdp_allow_fp16_bf16_reduction(enabled: bool):
+    orig_status = torch._C._get_math_sdp_allow_fp16_bf16_reduction()
+    try:
+        torch._C._set_math_sdp_allow_fp16_bf16_reduction(enabled)
+        yield {}
+    finally:
+        torch._C._set_math_sdp_allow_fp16_bf16_reduction(orig_status)
+
+
 # Found in torch/testing/_comparison.py
 default_atol = {torch.float16: 1e-3, torch.bfloat16: 1e-3, torch.float32: 1e-5}
 default_rtol = {torch.float16: 1e-3, torch.bfloat16: 1.6e-2, torch.float32: 1.3e-6}
@@ -1251,17 +1261,14 @@ class TestTransformers(NNTestCase):
 
     @parametrize("kernel", [SDPBackend.MATH, SDPBackend.EFFICIENT_ATTENTION, SDPBackend.CUDNN_ATTENTION])
     def test_scaled_dot_product_attention_matmul_inconsistent_dtypes(self, device, kernel):
-        orig_status = torch._C._get_math_sdp_allow_fp16_bf16_reduction()
-        # Set math_sdp to allow lower precision q/k/v
-        torch._C._set_math_sdp_allow_fp16_bf16_reduction(True)
-
         dtypes = [torch.bfloat16, torch.float16]
-
         def fn(query, key, value, mask):
-            with sdpa_kernel(backends=[kernel]):
-                return torch.nn.functional.scaled_dot_product_attention(
-                    query, key, value, mask, 0.0, False
-                )
+            # Set math_sdp to allow lower precision q/k/v
+            with math_sdp_allow_fp16_bf16_reduction(True):
+                with sdpa_kernel(backends=[kernel]):
+                    return torch.nn.functional.scaled_dot_product_attention(
+                        query, key, value, mask, 0.0, False
+                    )
 
         for dtype in dtypes:
 
@@ -1285,8 +1292,6 @@ class TestTransformers(NNTestCase):
             elif kernel == SDPBackend.MATH or str(device) != "cpu":
                 # There should be no inconsistent dtypes error
                 compiled_fn(query, key, value, mask)
-
-        torch._C._set_math_sdp_allow_fp16_bf16_reduction(orig_status)
 
     @unittest.skipIf(TEST_WITH_CROSSREF, 'Fastpath not available with crossref')
     @torch.no_grad()
