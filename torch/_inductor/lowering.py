@@ -12,9 +12,9 @@ import os
 import textwrap
 import warnings
 from collections import defaultdict
-from collections.abc import Iterable, Sequence
+from collections.abc import Collection, Iterable, Sequence
 from typing import Any, Callable, cast, Optional, TYPE_CHECKING, TypeVar, Union
-from typing_extensions import ParamSpec, Collection
+from typing_extensions import ParamSpec
 from unittest.mock import patch
 
 import sympy
