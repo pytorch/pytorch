@@ -85,6 +85,7 @@ ModelRunner::ModelRunner(
   weights->validateAllWeightsLoaded();
 
   torch::nativert::ExecutorConfig config;
+  config.modelName = modelName;
 
   executor_ = std::make_unique<Executor>(
       config, graph_, std::move(weights), pytorchStreamReader);
