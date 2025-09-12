@@ -774,13 +774,7 @@ def tuned_mm(mat1, mat2, *, layout=None):
     if is_nonzero and use_triton_template(layout, check_max_autotune=True):
         templates_to_use.append(mm_template)
 
-        if use_triton_tma_template(
-            mat1,
-            mat2,
-            output_layout=layout
-            if inductor_config.triton.enable_template_tma_store
-            else None,
-        ):
+        if use_triton_tma_template(mat1, mat2, output_layout=layout):
             templates_to_use.append(persistent_tma_mm_template)
 
         if use_decompose_k_choice(m, n, k):
@@ -983,13 +977,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     if is_nonzero and use_triton_template(layout, check_max_autotune=False):
         templates_to_use.append(mm_template)
 
-        if use_triton_tma_template(
-            mat1,
-            mat2,
-            output_layout=layout
-            if inductor_config.triton.enable_template_tma_store
-            else None,
-        ):
+        if use_triton_tma_template(mat1, mat2, output_layout=layout):
             templates_to_use.append(persistent_tma_mm_template)
 
         templates_to_use.append(addmm_contiguous_subgraph_template)
@@ -1176,13 +1164,7 @@ def tuned_scaled_mm(
         # TODO (paulzhan): There is no template that exists for bias and TMA
         # Don't run tma template currently if bias exist
         if (
-            use_triton_tma_template(
-                mat_a,
-                mat_b,
-                output_layout=layout
-                if inductor_config.triton.enable_template_tma_store
-                else None,
-            )
+            use_triton_tma_template(mat_a, mat_b, output_layout=layout)
             and not bias
         ):
             templates_to_use.append(scaled_mm_device_tma_template)

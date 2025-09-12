@@ -1779,11 +1779,12 @@ def can_use_tma(
 
 
 def use_triton_tma_template(
-    *matrices: IRNode, output_layout: Optional[Layout], add_guards: bool = False
+    *matrices: IRNode, output_layout: Layout, add_guards: bool = False
 ) -> bool:
+    layout = output_layout if config.triton.enable_template_tma_store else None
     return (
         all(len(m.get_size()) == 2 for m in matrices)
-        and can_use_tma(*matrices, output_layout=output_layout, add_guards=add_guards)
+        and can_use_tma(*matrices, output_layout=layout, add_guards=add_guards)
         and config.triton.enable_persistent_tma_matmul
     )
 
