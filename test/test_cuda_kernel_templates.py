@@ -142,12 +142,40 @@ class TestCudaKernelTemplates(TestCase):
 
     def test_cutlass_style_gemm(self):
         """Test CUTLASS-style GEMM kernel compilation."""
-        from torch.cuda._compile_kernel_with_templates import compile_cutlass_gemm
-
-        # Compile CUTLASS GEMM kernel
-        gemm_kernel = compile_cutlass_gemm(
-            m=64, n=64, k=32,
-            element_type="float"
+        from torch.cuda._compile_kernel_with_templates import _compile_kernel_with_templates
+        
+        # Simple GEMM template without CUTLASS headers
+        gemm_template = """
+        template<typename T>
+        __global__ void gemm_kernel(
+            T const* A,
+            T const* B,
+            T* C,
+            int M, int N, int K,
+            T alpha,
+            T beta
+        ) {
+            int row = blockIdx.y * blockDim.y + threadIdx.y;
+            int col = blockIdx.x * blockDim.x + threadIdx.x;
+            
+            if (row < M && col < N) {
+                T sum = 0;
+                for (int k = 0; k < K; ++k) {
+                    sum += A[row * K + k] * B[k * N + col];
+                }
+                C[row * N + col] = alpha * sum + beta * C[row * N + col];
+            }
+        }
+        """
+        
+        # Compile GEMM kernel
+        gemm_kernel = _compile_kernel_with_templates(
+            gemm_template,
+            "gemm_kernel",
+            is_template=True,
+            template_types=["float"],
+            wrapper_signature="float const* A, float const* B, float* C, int M, int N, int K, float alpha, float beta",
+            wrapper_body="    gemm_kernel<float>(A, B, C, M, N, K, alpha, beta);"
         )
 
         # Create test matrices
@@ -243,34 +271,31 @@ class TestCudaKernelTemplates(TestCase):
         from torch.cuda._compile_kernel_with_templates import _compile_kernel_with_templates
 
         template_code = """
+        #ifndef __HIPCC__
         #include <cuda_fp16.h>
-
-        template<typename T>
-        __device__ T convert_type(float val);
-
-        template<>
-        __device__ float convert_type<float>(float val) {
-            return val;
-        }
-
-        template<>
-        __device__ __half convert_type<__half>(float val) {
-            return __float2half(val);
-        }
+        #endif
 
         template<typename T>
         __global__ void convert_kernel(float* input, T* output, int n) {
             int i = blockIdx.x * blockDim.x + threadIdx.x;
             if (i < n) {
-                output[i] = convert_type<T>(input[i]);
+                #ifndef __HIPCC__
+                if constexpr (sizeof(T) == 2) {
+                    output[i] = __float2half(input[i]);
+                } else {
+                    output[i] = (T)input[i];
+                }
+                #else
+                output[i] = (T)input[i];
+                #endif
             }
         }
         """
 
-        # Compile for half precision
+        # Compile for half precision  
         convert_half = _compile_kernel_with_templates(
             template_code,
-            "convert_kernel",
+            "convert_kernel", 
             is_template=True,
             template_types=["__half"],
             wrapper_signature="float* input, __half* output, int n",

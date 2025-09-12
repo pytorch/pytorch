@@ -32,8 +32,10 @@ def generate_template_instantiation(
 // Explicit instantiation
 template __global__ void {template_name}<{template_args}>();
 
-extern "C" __global__ void {wrapper_name}() {{
+extern "C" {{
+__global__ void {wrapper_name}() {{
     {template_name}<{template_args}>();
+}}
 }}
 """
 
@@ -73,7 +75,8 @@ def prepare_cutlass_kernel(
 
 {cutlass_template}
 
-extern "C" __global__ void {wrapper_name}(
+extern "C" {{
+__global__ void {wrapper_name}(
     {element_type} const* A,
     {element_type} const* B, 
     {element_type}* C,
@@ -89,6 +92,7 @@ extern "C" __global__ void {wrapper_name}(
     using LayoutA = {layout};
     using LayoutB = {layout};
     using LayoutC = {layout};
+}}
 }}
 """
 
@@ -127,8 +131,10 @@ def wrap_template_kernel(
 
 template __global__ void {template_name}<{template_spec}>({function_signature});
 
-extern "C" __global__ void {wrapper_name}({function_signature}) {{
+extern "C" {{
+__global__ void {wrapper_name}({function_signature}) {{
 {function_body}
+}}
 }}
 """
 
