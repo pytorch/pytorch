@@ -231,7 +231,7 @@ Welford<T> welford_combine(
   return result;
 }
 
-template <typename T, typename S = float, uint64_t kChunkSize = 0>
+template <typename T, typename S, uint64_t kChunkSize>
 Welford<T> welford_combine(
     Welford<T>& acc,
     WelfordHelper<T, S, kChunkSize>* w) {
@@ -250,7 +250,7 @@ struct IndexValue {
 };
 
 #if INDUCTOR_USE_VECTOR_TYPES()
-template <typename T, typename S = float, uint64_t kChunkSize>
+template <typename T, typename S = float, uint64_t kChunkSize = 0>
 Welford<T> welford_combine(
     Welford<T>& acc,
     T& data,
