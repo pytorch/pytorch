@@ -182,6 +182,7 @@ def aten_scaled_dot_product_attention_23(
         query, key, value, attn_mask, scale, dropout_p, op23
     )
 
+
 def _attention_repeat_kv_for_group_query(
     query: TFloat, key: TFloat, value: TFloat, op: Opset
 ) -> tuple[TFloat, TFloat]:
@@ -201,7 +202,8 @@ def _attention_repeat_kv_for_group_query(
     """
 
     assert (
-        query.shape[1] > key.shape[1] == value.shape[1] and query.shape[1] % key.shape[1] == 0
+        query.shape[1] > key.shape[1] == value.shape[1]
+        and query.shape[1] % key.shape[1] == 0
     ), (
         "SDPA (GQA or MQA) requires q_num_heads > kv_num_heads & q_num_heads % kv_num_heads == 0"
     )
@@ -232,12 +234,15 @@ def _attention_repeat_kv_for_group_query(
     k_attention_shape = op.Concat(
         batch_size, q_num_heads, new_kv_seq_len, qk_head_size, axis=0
     )
-    v_attention_shape = op.Concat(batch_size, q_num_heads, new_kv_seq_len, v_head_size, axis=0)
+    v_attention_shape = op.Concat(
+        batch_size, q_num_heads, new_kv_seq_len, v_head_size, axis=0
+    )
 
     expanded_key = op.Reshape(k_expand, k_attention_shape)
     expanded_value = op.Reshape(v_expand, v_attention_shape)
 
     return expanded_key, expanded_value
+
 
 def _attention_scale(query: TFloat, op: Opset) -> TFloat:
     """Calculate the scale factor for the attention result.

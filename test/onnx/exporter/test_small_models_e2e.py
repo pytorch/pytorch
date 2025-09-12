@@ -810,11 +810,7 @@ class DynamoExporterNewOpsetsTest(common_utils.TestCase, _WithExport):
         class Model(torch.nn.Module):
             def forward(self, q, k, v):
                 return torch.nn.functional.scaled_dot_product_attention(  # pylint: disable=not-callable
-                    q,
-                    k,
-                    v,
-                    enable_gqa=True,
-                    dropout_p = 0.1
+                    q, k, v, enable_gqa=True, dropout_p=0.1
                 )
 
         model = Model()
@@ -839,6 +835,7 @@ class DynamoExporterNewOpsetsTest(common_utils.TestCase, _WithExport):
         self.assertIn("Unsqueeze", all_ops)
         self.assertIn("Expand", all_ops)
         self.assertIn("Reshape", all_ops)
+
 
 if __name__ == "__main__":
     common_utils.run_tests()
