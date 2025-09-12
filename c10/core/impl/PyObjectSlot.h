@@ -62,7 +62,7 @@ struct C10_API PyObjectSlot {
   // it but it's worthwhile making sure
   std::optional<PyObject*> check_pyobj() const {
     impl::PyInterpreter* interpreter = getGlobalPyInterpreter();
-    auto pyobj = pyobj_..load(std::memory_order_acquire);
+    auto pyobj = pyobj_.load(std::memory_order_acquire);
     if (interpreter == nullptr || pyobj == nullptr) {
       return std::nullopt;
     }
