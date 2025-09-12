@@ -23,8 +23,9 @@ jobs:
     name: opmicrobenchmark-build
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-jammy-py3.9-gcc11-build
-      docker-image-name: ci-image:pytorch-linux-jammy-py3-gcc11-inductor-benchmarks
+      build-environment: linux-jammy-cuda12.8-py3.10-gcc11-sm90
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11
+      cuda-arch-list: '9.0'
       test-matrix: |
         {
           "config": ["operator_microbenchmark"],
@@ -41,7 +42,7 @@ jobs:
     uses: ./.github/workflows/_linux-test.yml
     needs: opmicrobenchmark-build
     with:
-      build-environment: linux-jammy-py3.9-gcc11-build
+      build-environment: linux-jammy-cuda12.8-py3.10-gcc11-sm90
       docker-image: ${{ needs.opmicrobenchmark-build.outputs.docker-image }}
       test-matrix: ${{ needs.opmicrobenchmark-build.outputs.test-matrix }}
     secrets: inherit
