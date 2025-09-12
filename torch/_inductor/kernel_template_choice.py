@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any, Optional, TYPE_CHECKING, Union
 
+from .template_heuristics.params import DictKernelTemplateParams
+
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -76,8 +78,6 @@ def make_ktc_generator(
     Yields:
         KernelTemplateChoice objects
     """
-    from .template_heuristics.params import DictKernelTemplateParams
-
     for params in cs:
         # Apply overrides to params
         base_kwargs = params.to_kwargs()
