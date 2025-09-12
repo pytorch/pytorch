@@ -27,6 +27,10 @@
 #include "caffe2/serialize/versions.h"
 #include "miniz.h"
 
+#ifdef _WIN32
+#include <Windows.h>
+#endif // _WIN32
+
 namespace caffe2 {
 namespace serialize {
 constexpr std::string_view kDebugPklSuffix(".debug_pkl");
@@ -717,9 +721,16 @@ void PyTorchStreamWriter::setup(const string& file_name) {
       file_stream_.exceptions(std::ios_base::failbit | std::ios_base::badbit);
       file_stream_.open(
           file_name,
-          std::ofstream::out | std::ofstream::trunc | std::ofstream::binary);
+          std::ofstream::out | std::ofstream::trunc | std::ofstream::binary
+        );
     } catch (const std::ios_base::failure& e) {
-        CAFFE_THROW("open file failed with: ", strerror(errno));
+#ifdef _WIN32
+      // Windows have verbose error code, we prefer to use it than std errno.
+      uint32_t error_code = GetLastError();
+      CAFFE_THROW("open file failed with error code: ", error_code);
+#else // !_WIN32
+      CAFFE_THROW("open file failed with strerror: ", strerror(errno));
+#endif // _WIN32
     }
 
     const std::string dir_name = parentdir(file_name);
