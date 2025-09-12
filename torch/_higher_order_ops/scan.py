@@ -462,7 +462,7 @@ class ScanAutogradOp(torch.autograd.Function):
             hop_partitioned_graph, init, xs, additional_inputs
         )
         with torch._C._AutoDispatchBelowAutograd():
-            return ctx._scan_impl.call_forward(ctx, init, xs, additional_inputs)
+            return ctx._scan_impl.call_forward()
 
     @staticmethod
     def backward(ctx, *grad_fw_outputs):
@@ -471,7 +471,7 @@ class ScanAutogradOp(torch.autograd.Function):
             None,
             None,
             None,
-            *ctx._scan_impl.call_backward(ctx, *grad_fw_outputs),
+            *ctx._scan_impl.call_backward(*grad_fw_outputs),
         )
 
 
@@ -521,6 +521,7 @@ class ScanAutogradImpl:
         ] = []
         self.saved_fw_xs: list[Any] = []
         self.saved_fw_additional_inputs: list[Any] = []
+        self.saved_intermediates: list[Any] = []
         self.fw_spec = pytree.tree_flatten((init, xs, additional_inputs))[1]
         self._optimize_forward_intermediates()
 
@@ -625,9 +626,9 @@ class ScanAutogradImpl:
                 "after removing aliasing:\n%s", fw_gm.print_readable(print_output=False)
             )
 
-    def call_forward(self, ctx, init, xs, additional_inputs):
+    def call_forward(self):
         fw_outputs_and_intermediates: tuple[Any] = scan_op(
-            self.hop_partitioned_graph.fw_gm, init, xs, additional_inputs
+            self.hop_partitioned_graph.fw_gm, self.init, self.xs, self.additional_inputs
         )  # type: ignore[return-type]
         fw_outs = fw_outputs_and_intermediates[
             : self.hop_partitioned_graph.n_fw_outputs
@@ -635,11 +636,11 @@ class ScanAutogradImpl:
         saved_intermediates = fw_outputs_and_intermediates[
             self.hop_partitioned_graph.n_fw_outputs :
         ]
-        ctx._fw_policy = self.forward_intermediates_handling_policies
-        ctx._saved_intermediates = saved_intermediates
+        assert len(self.saved_intermediates) == 0
+        self.saved_intermediates.extend(saved_intermediates)
         return tuple(fw_outs)
 
-    def call_backward(self, ctx, *grad_fw_outputs):
+    def call_backward(self, *grad_fw_outputs):
         """
         Recall that fw_outputs = (*carry, *ys), bw_gm takes in (*fw_intermediates, *grad_carry, *grad_ys)
         and returns (*grad_init, *grad_xs, *grad_additional_inputs)
@@ -665,8 +666,8 @@ class ScanAutogradImpl:
           Note that grad_additional_inputs is accumulated with add, grad_carry is carried over to next iteration and
           grad_x is the ys output, which will be stacked together after the loop and will have the same shape as xs.
         """
-        fw_policy = ctx._fw_policy
-        saved_carries = ctx._saved_intermediates
+        fw_policy = self.forward_intermediates_handling_policies
+        saved_carries = self.saved_intermediates
         saved_fw_xs = self.saved_fw_xs
         saved_fw_additional_inputs = self.saved_fw_additional_inputs
 
