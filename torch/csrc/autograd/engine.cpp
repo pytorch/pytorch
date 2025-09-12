@@ -949,11 +949,12 @@ static void validate_outputs_impl(
     TORCH_CHECK(
         isFloatingType(grad.scalar_type()) ||
         (input_is_complex == grad_is_complex));
-    if (metadata.grad_dtype().has_value() || metadata.was_default_constructed()) {
+    if (metadata.grad_dtype().has_value() ||
+        metadata.was_default_constructed()) {
       // If metadata was default constructed, default to the input dtype
-      at::ScalarType grad_dtype = metadata.grad_dtype().has_value() ?
-          metadata.grad_dtype().value() :
-          c10::typeMetaToScalarType(metadata.options().dtype());
+      at::ScalarType grad_dtype = metadata.grad_dtype().has_value()
+          ? metadata.grad_dtype().value()
+          : c10::typeMetaToScalarType(metadata.options().dtype());
       if (grad.scalar_type() != grad_dtype) {
         grad = grad.to(grad_dtype);
       }

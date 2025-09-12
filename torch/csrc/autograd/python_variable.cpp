@@ -979,7 +979,8 @@ static int THPVariable_set_grad(
       "'. Please ensure that the gradient and the tensor are on the same device");
   if (grad.layout() != kSparse) {
     auto expected_options = var.options().dtype(
-        tensor_grad_dtype.has_value() ? tensor_grad_dtype.value() : grad.scalar_type());
+        tensor_grad_dtype.has_value() ? tensor_grad_dtype.value()
+                                      : grad.scalar_type());
     TORCH_CHECK(
         grad.options().type_equal(expected_options),
         "attempting to assign a gradient to a tensor that has data of a different type");
@@ -1494,7 +1495,8 @@ static PyObject* THPVariable_get_grad_dtype(THPVariable* self, void* unused) {
     return handle_torch_function_getter(self, "grad_dtype");
   }
   const auto& var = THPVariable_Unpack(self);
-  TORCH_CHECK(!var.grad_fn(), "grad_dtype can only be accessed on leaf tensors.");
+  TORCH_CHECK(
+      !var.grad_fn(), "grad_dtype can only be accessed on leaf tensors.");
   auto grad_dtype = var.grad_dtype();
   if (grad_dtype.has_value()) {
     PyObject* raw_obj = (PyObject*)torch::getTHPDtype(grad_dtype.value());
@@ -1514,12 +1516,11 @@ static int THPVariable_set_grad_dtype(
   }
   const auto& var = THPVariable_Unpack(self);
   TORCH_CHECK(!var.grad_fn(), "grad_dtype can only be set on leaf tensors.");
-  // Check if there's already a gradient
+  TORCH_CHECK(
+      THPDtype_Check(obj) || obj == Py_None,
+      "grad_dtype must be a torch.dtype or None, but got ",
+      Py_TYPE(obj)->tp_name);
   if (var.grad().defined() && obj != Py_None) {
-    TORCH_CHECK_TYPE(
-        THPDtype_Check(obj),
-        "grad_dtype must be a torch.dtype or None, but got ",
-        Py_TYPE(obj)->tp_name);
     auto new_dtype = reinterpret_cast<THPDtype*>(obj);
     TORCH_CHECK(
         var.grad().dtype() == new_dtype->scalar_type,
@@ -1530,17 +1531,21 @@ static int THPVariable_set_grad_dtype(
         "'. Please clear the gradient (.grad = None) before changing grad_dtype, "
         "or ensure the new grad_dtype matches the existing gradient's dtype.");
   }
+  std::optional<at::ScalarType> new_dtype;
   if (obj == Py_None) {
-    var.set_grad_dtype(std::nullopt);
-    return 0;
+    new_dtype = std::nullopt;
+  } else {
+    auto* dtype = reinterpret_cast<THPDtype*>(obj);
+    new_dtype = dtype->scalar_type;
   }
-  TORCH_CHECK_TYPE(
-      THPDtype_Check(obj),
-      "grad_dtype must be a torch.dtype or None, but got ",
-      Py_TYPE(obj)->tp_name);
-
-  auto dtype = reinterpret_cast<THPDtype*>(obj);
-  var.set_grad_dtype(dtype->scalar_type);
+  // There are two grad_acc cases to handle:
+  // 1) If there's already a grad_acc, update its InputMetadata now.
+  if (auto grad_acc = torch::autograd::impl::try_get_grad_accumulator(var)) {
+    grad_acc->mutable_input_metadata(0).set_grad_dtype(new_dtype);
+  }
+  // 2) Always set grad_dtype in the tensor, so that we can set
+  //    InputMetadata appropriately when grad_acc is (re)constructed
+  var.set_grad_dtype(new_dtype);
   return 0;
   END_HANDLE_TH_ERRORS_RET(-1)
 }

@@ -960,8 +960,11 @@ struct VariableHooks final : at::impl::VariableHooksInterface {
       const c10::OperatorHandle& op,
       c10::DispatchKeySet dispatch_keys,
       torch::jit::Stack* stack) const override;
-  std::optional<c10::ScalarType> grad_dtype(const at::TensorBase&) const override;
-  void set_grad_dtype(const at::TensorBase&, const std::optional<c10::ScalarType>&) const override;
+  std::optional<c10::ScalarType> grad_dtype(
+      const at::TensorBase&) const override;
+  void set_grad_dtype(
+      const at::TensorBase&,
+      const std::optional<c10::ScalarType>&) const override;
 };
 
 namespace utils {
