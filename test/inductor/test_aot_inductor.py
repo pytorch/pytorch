@@ -34,7 +34,7 @@ from torch._library import capture_triton
 from torch._utils_internal import full_aoti_runtime_assert
 from torch.ao.quantization.quantize_pt2e import convert_pt2e, prepare_pt2e
 from torch.ao.quantization.quantizer.x86_inductor_quantizer import X86InductorQuantizer
-from torch.export import Dim, export, export_for_training
+from torch.export import Dim, export
 from torch.export.pt2_archive._package import load_pt2
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
@@ -2172,8 +2172,19 @@ class AOTInductorTestsTemplate:
             dynamic_shapes=dynamic_shapes,
         )
 
+    # mps doesn't support float64
+    @skipIfMPS
     def test_while_loop_with_parameters(self):
-        inputs = (torch.randn((10, 20), device=self.device),)
+        inputs = (
+            torch.randn(
+                (
+                    10,
+                    20,
+                ),
+                dtype=torch.float64,
+                device=self.device,
+            ),
+        )
         dim0_a = Dim("s0", min=2, max=1024)
         dynamic_shapes = {
             "c": {},
@@ -2514,9 +2525,7 @@ class AOTInductorTestsTemplate:
             config.patch({"freezing": True, "aot_inductor.force_mmap_weights": True}),
             torch.no_grad(),
         ):
-            exported_model = export_for_training(
-                model, example_inputs, strict=True
-            ).module()
+            exported_model = export(model, example_inputs, strict=True).module()
             quantizer = X86InductorQuantizer()
             quantizer.set_global(
                 xiq.get_default_x86_inductor_quantization_config(reduce_range=True)
