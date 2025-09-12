@@ -75,7 +75,8 @@ fi
 
 # Environment initialization
 retry pip install -qUr requirements-build.txt
-if [[ "$(uname)" == Darwin ]]; then
+# AArch64 requires newer numpy version
+if [[ "$(uname)" == Darwin || "$(uname -m)" == aarch64 ]]; then
     # Install the testing dependencies
     retry pip install -q future hypothesis ${NUMPY_PACKAGE} ${PROTOBUF_PACKAGE} pytest
 else
@@ -101,12 +102,17 @@ pushd /
 echo "Smoke testing imports"
 python -c 'import torch'
 
-# Test that MKL is there
-if [[ "$(uname)" == 'Darwin' && "$package_type" == *wheel ]]; then
-    echo 'Not checking for MKL on Darwin wheel packages'
+# Check for MKL and MKLDNN (AArch64)
+if [[ "$(uname)" != 'Darwin' || "$PACKAGE_TYPE" != *wheel ]]; then
+    if [[ "$(uname -m)" == "aarch64" ]]; then
+        echo "Checking that MKLDNN is available on AArch64"
+        python -c 'import torch; exit(0 if torch.backends.mkldnn.is_available() else 1)'
+    else
+        echo "Checking that MKL is available"
+        python -c 'import torch; exit(0 if torch.backends.mkl.is_available() else 1)'
+    fi
 else
-    echo "Checking that MKL is available"
-    python -c 'import torch; exit(0 if torch.backends.mkl.is_available() else 1)'
+    echo 'Not checking for MKL on Darwin wheel packages'
 fi
 
 if [[ "$OSTYPE" == "msys" ]]; then
