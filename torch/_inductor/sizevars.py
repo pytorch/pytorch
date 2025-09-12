@@ -573,7 +573,7 @@ class SizeVarAllocator:
         *,
         fallback: Optional[int] = None,
         hint_override: Optional[int] = None,
-        use_user_provided_hint_override=False,
+        use_user_provided_hint_override: bool = False,
     ) -> int:
         out = self.symbolic_hint(
             expr,
