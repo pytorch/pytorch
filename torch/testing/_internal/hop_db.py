@@ -237,22 +237,6 @@ def simple_local_map_hop(inp1, inp2):
 
     return torch._higher_order_ops.local_map_hop(gm, inp1, inp2)
 
-def simple_local_map_hop_backward(inp1, inp2):
-    def body_gm(inp1, inp2):
-        return inp1.cos() + inp2.sin()
-    gm = torch.fx.symbolic_trace(body_gm)
-
-    assert torch.distributed.is_available()
-
-    from torch.distributed.tensor.placement_types import Replicate
-    gm.meta["local_map_kwargs"] = {
-        "in_placements": (Replicate(), Replicate(), Replicate()),
-        "out_placements": ((Replicate(), Replicate(), Replicate()),)
-    }
-
-    return torch._higher_order_ops.local_map_hop_backward(gm, inp1, inp2)
-
-
 def sample_inputs_scan(opinfo, device, dtype, requires_grad, **kwargs):
     make_arg = functools.partial(
         make_tensor, device=device, dtype=dtype, requires_grad=requires_grad
@@ -496,19 +480,6 @@ hop_db = [
         name="local_map_hop",
         variant_test_name="simple",
         op=simple_local_map_hop,
-        sample_inputs_func=sample_inputs_local_map_hop,
-        dtypes=custom_types(torch.float16, torch.float32),
-        supports_out=False,
-        check_batched_grad=False,
-        check_batched_gradgrad=False,
-        check_batched_forward_grad=False,
-        check_inplace_batched_forward_grad=False,
-        decorators=[onlyCUDA, unittest.skipIf(not torch.distributed.is_available(), "requires distributed build")],
-    ),
-    OpInfo(
-        name="local_map_hop_backward",
-        variant_test_name="simple",
-        op=simple_local_map_hop_backward,
         sample_inputs_func=sample_inputs_local_map_hop,
         dtypes=custom_types(torch.float16, torch.float32),
         supports_out=False,
