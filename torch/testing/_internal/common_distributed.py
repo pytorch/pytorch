@@ -36,6 +36,7 @@ from torch.testing._internal.common_utils import (
     FILE_SCHEMA,
     find_free_port,
     IS_SANDCASTLE,
+    LazyVal,
     retry_on_connect_failures,
     skip_but_pass_in_sandcastle,
     skip_but_pass_in_sandcastle_if,
@@ -419,6 +420,23 @@ def requires_multicast_support():
         not has_multicast_support,
         "multicast support is not available",
     )
+
+
+def evaluate_platform_supports_symm_mem():
+    if TEST_WITH_ROCM:
+        arch_list = ["gfx942", "gfx950"]
+        for arch in arch_list:
+            if arch in torch.cuda.get_device_properties(0).gcnArchName:
+                return True
+    if TEST_CUDA:
+        return True
+
+    return False
+
+
+PLATFORM_SUPPORTS_SYMM_MEM: bool = LazyVal(
+    lambda: evaluate_platform_supports_symm_mem()
+)
 
 
 def skip_if_rocm_multiprocess(func):
