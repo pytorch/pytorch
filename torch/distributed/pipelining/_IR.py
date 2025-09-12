@@ -1002,9 +1002,7 @@ class Pipe(torch.nn.Module):
     ) -> ExportedProgram:
         logger.info("Tracing model ...")
         try:
-            ep = torch.export.export_for_training(
-                mod, example_args, example_kwargs, strict=True
-            )
+            ep = torch.export.export(mod, example_args, example_kwargs, strict=True)
         except Exception as e:
             raise RuntimeError(
                 "It seems that we cannot capture your model as a full graph. "

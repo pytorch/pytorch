@@ -2684,8 +2684,6 @@ if HAS_CUDA_AND_TRITON:
                 for batch_size in range(10, 200, 10):
                     iter(batch_size, mod)
 
-            print(captured_output)
-
             FileCheck().check_count(
                 "CUDAGraph supports dynamic shapes by recording a new graph for each "
                 "distinct input size. Recording too many CUDAGraphs may lead to "
