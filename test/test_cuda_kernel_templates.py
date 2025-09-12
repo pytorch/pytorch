@@ -1,3 +1,4 @@
+# Owner(s): ["module: cuda"]
 """
 Tests for CUDA kernel compilation with C++ template support.
 """
@@ -137,8 +138,10 @@ class TestCudaKernelTemplates(TestCase):
 
     def test_cutlass_style_gemm(self):
         """Test CUTLASS-style GEMM kernel compilation."""
-        from torch.cuda._compile_kernel_with_templates import _compile_kernel_with_templates
-        
+        from torch.cuda._compile_kernel_with_templates import (
+            _compile_kernel_with_templates,
+        )
+
         # Simple CUTLASS-style template (multiple type parameters)
         cutlass_template = """
         template<typename ElementA, typename ElementB, typename ElementC>
@@ -154,7 +157,7 @@ class TestCudaKernelTemplates(TestCase):
             }
         }
         """
-        
+
         # Compile CUTLASS-style kernel
         cutlass_kernel = _compile_kernel_with_templates(
             cutlass_template,
@@ -162,7 +165,7 @@ class TestCudaKernelTemplates(TestCase):
             is_template=True,
             template_types=["float", "float", "float"],
             wrapper_signature="float const* A, float const* B, float* C, int n",
-            wrapper_body="    cutlass_add_kernel<float, float, float>(A, B, C, n);"
+            wrapper_body="    cutlass_add_kernel<float, float, float>(A, B, C, n);",
         )
 
         # Test data
@@ -175,9 +178,7 @@ class TestCudaKernelTemplates(TestCase):
         threads = 256
         blocks = (n + threads - 1) // threads
 
-        cutlass_kernel(
-            grid=(blocks, 1, 1), block=(threads, 1, 1), args=[A, B, C, n]
-        )
+        cutlass_kernel(grid=(blocks, 1, 1), block=(threads, 1, 1), args=[A, B, C, n])
 
         # Verify CUTLASS-style template works correctly
         expected = A + B
@@ -274,10 +275,10 @@ class TestCudaKernelTemplates(TestCase):
         }
         """
 
-        # Compile for half precision  
+        # Compile for half precision
         convert_half = _compile_kernel_with_templates(
             template_code,
-            "convert_kernel", 
+            "convert_kernel",
             is_template=True,
             template_types=["__half"],
             wrapper_signature="float* input, __half* output, int n",
