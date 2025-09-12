@@ -694,10 +694,7 @@ def _clone_meta(
         )
 
     # memory_format == torch.preserve_format
-    if torch._prims_common.is_non_overlapping_and_dense(input):
-        strides = input.stride()
-    else:
-        strides = input.contiguous().stride()
+    strides = utils.compute_elementwise_output_strides(input)
     return torch.empty_strided(
         input.shape,
         strides,

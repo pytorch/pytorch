@@ -670,6 +670,12 @@ def compute_elementwise_output_strides(*tensors) -> tuple[int, ...]:
     if len(tensors) == 0:
         return ()
 
+    if len(tensors) == 1:
+        if torch._prims_common.is_non_overlapping_and_dense(tensors[0]):
+            return tensors[0].stride()
+        else:
+            return tensors[0].contiguous().stride()
+
     ndim = tensors[0].ndim
     shape = tensors[0].shape
 
@@ -687,7 +693,6 @@ def compute_elementwise_output_strides(*tensors) -> tuple[int, ...]:
     permuted_strides = apply_perm(
         new_strides, invert_perm(logical_to_physical_perm)
     )  # to logical
-
     return tuple(permuted_strides)
 
 
