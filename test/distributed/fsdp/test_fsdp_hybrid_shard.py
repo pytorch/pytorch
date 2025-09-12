@@ -49,7 +49,8 @@ if TEST_WITH_DEV_DBG_ASAN:
     )
     sys.exit(0)
 
-device_type = torch.accelerator.current_accelerator().type
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+
 
 @contextlib.contextmanager
 def patch_allreduce(new_allreduce):
@@ -106,7 +107,7 @@ class TestFSDPHybridShard(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     def test_raises_manual_wrap_hybrid_shard_when_none_policy(self):
-        model = MyModel().to(device=device_type)
+        model = MyModel().to(device_type)
         err_ctx = self.assertRaisesRegex(
             ValueError,
             "requires explicit specification of process group or device_mesh.",
@@ -120,7 +121,7 @@ class TestFSDPHybridShard(FSDPTest):
 
     @skip_if_lt_x_gpu(4)
     def test_hsdp_save_load_state_dict(self):
-        model = MyModel().to(device=device_type)
+        model = MyModel().to(device_type)
         num_node_devices = torch.accelerator.device_count()
         shard_rank_lists = (
             list(range(0, num_node_devices // 2)),
@@ -162,7 +163,7 @@ class TestFSDPHybridShard(FSDPTest):
             msd = model.state_dict()
             osd = FSDP.optim_state_dict(model, optim)
 
-        load_model = fsdp_ctor(MyModel().to(device=device_type))
+        load_model = fsdp_ctor(MyModel().to(device_type))
         load_optim = torch.optim.AdamW(load_model.parameters())
         with FSDP.state_dict_type(load_model, StateDictType.SHARDED_STATE_DICT):
             load_model.load_state_dict(msd)
@@ -171,7 +172,7 @@ class TestFSDPHybridShard(FSDPTest):
 
     @skip_if_lt_x_gpu(4)
     def test_hsdp_sync_module_state(self):
-        model = MyModel().to(device=device_type)
+        model = MyModel().to(device_type)
         num_node_devices = torch.accelerator.device_count()
         shard_rank_lists = (
             list(range(0, num_node_devices // 2)),
@@ -215,7 +216,7 @@ class TestFSDPHybridShard(FSDPTest):
     @skip_if_lt_x_gpu(2)
     def test_invalid_pg_specification_raises(self):
         pol = ModuleWrapPolicy({nn.Linear})
-        model = MyModel().to(device=device_type)
+        model = MyModel().to(device_type)
         with self.assertRaisesRegex(
             ValueError, "Expected process_group to be passed in"
         ):

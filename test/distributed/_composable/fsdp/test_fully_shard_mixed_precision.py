@@ -33,8 +33,6 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skipIfRocmVersionLessThan,
     TEST_HPU,
-    TEST_XPU,
-    xfailIf,
 )
 
 
@@ -618,7 +616,7 @@ class TestFullyShardMixedPrecisionCasts(FSDPTestMultiThread):
             torch.bfloat16, torch.bfloat16, torch.bfloat16, True
         )
         model = Model()
-        inp = Input(torch.randn(2, 10).to(device_type))
+        inp = Input(torch.randn(2, 10).cuda())
 
         fully_shard(model, mp_policy=mp_policy)
         loss = model(inp).sum()

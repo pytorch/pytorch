@@ -53,7 +53,8 @@ if TEST_WITH_DEV_DBG_ASAN:
     )
     sys.exit(0)
 
-device_type = torch.accelerator.current_accelerator().type
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+
 
 class SimpleModel(torch.nn.Module):
     def __init__(self) -> None:
@@ -171,7 +172,7 @@ class TestTPFSDPIntegration(FSDPTest):
                 self.rank // tp_world_size
             ]
             grad_device = flat_param.grad.device
-            grad = flat_param.grad.detach().clone().to(torch.device(self.rank))
+            grad = flat_param.grad.detach().clone().to(self.rank)
             dist.all_reduce(grad, op=dist.ReduceOp.SUM, group=tp_pg)
             grad = grad.to(grad_device)
             flat_param.grad[~sharded_mask] = grad[~sharded_mask]
@@ -204,7 +205,7 @@ class TestTPFSDPIntegration(FSDPTest):
                 ]
             )
             .contiguous()
-            .to(torch.device(self.rank))
+            .to(self.rank)
         )
         all_grads_as_flattened = torch.cat(
             [torch.empty_like(local_grads_as_flattened) for _ in range(fsdp_pg.size())]
@@ -258,7 +259,7 @@ class TestTPFSDPIntegration(FSDPTest):
         tensor_parallel_size = 2
         LR = 3e-5
         torch.manual_seed(0)
-        model = SimpleModel().to(torch.device(self.rank))
+        model = SimpleModel().to(self.rank)
         tp_fsdp_model = copy.deepcopy(model)
         sharded_param_names = SimpleModel.get_sharded_param_names()
         non_sharded_param_names = SimpleModel.get_non_sharded_param_names()
@@ -274,7 +275,7 @@ class TestTPFSDPIntegration(FSDPTest):
         input_seed = self.rank
         torch.manual_seed(input_seed + 1)
         inp_size = [2, 3, 5]
-        inp = torch.rand(*inp_size).to(torch.device(self.rank))
+        inp = torch.rand(*inp_size).to(self.rank)
         self.assertEqual(model(inp), tp_fsdp_model(inp))  # sanity check
 
         mesh_1d = init_device_mesh(device_type, (self.world_size,))
@@ -352,7 +353,7 @@ class TestTPFSDPIntegration(FSDPTest):
         fsdp_optim.step()
         tp_fsdp_optim.step()
         torch.manual_seed(input_seed + 16)
-        inp = torch.rand(*inp_size).to(torch.device(self.rank))
+        inp = torch.rand(*inp_size).to(self.rank)
         fsdp_out = fsdp_model(inp)
         tp_fsdp_out = tp_fsdp_model(inp)
         self.assertEqual(fsdp_out, tp_fsdp_out)
@@ -375,7 +376,7 @@ class TestTPFSDPIntegration(FSDPTest):
             def forward(self, x):
                 return self.mlp(self.mlp_norm(x))
 
-        model = TestModel().to(torch.device(self.rank))
+        model = TestModel().to(self.rank)
 
         # Shard with TP and test gradient
         tp_mesh = mesh_2d["tp"]
@@ -393,7 +394,7 @@ class TestTPFSDPIntegration(FSDPTest):
         comm_mode = CommDebugMode()
 
         with comm_mode:
-            fsdp_2d_model(torch.rand(2, 10).to(torch.device(self.rank))).sum().backward()
+            fsdp_2d_model(torch.rand(2, 10).to(self.rank)).sum().backward()
 
         funcol = torch.ops.c10d_functional
         c10d_ops = torch.ops.c10d

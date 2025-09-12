@@ -43,7 +43,8 @@ if TEST_WITH_DEV_DBG_ASAN:
     )
     sys.exit(0)
 
-device_type = torch.accelerator.current_accelerator().type
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+
 
 def _reset_params_if_meta(is_meta: bool, model: nn.Module):
     # For torchdistX init, we don't need to call reset_params, as

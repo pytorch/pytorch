@@ -8,8 +8,7 @@ from unittest.mock import patch
 
 import torch
 import torch.nn as nn
-from torch import distributed as dist
-
+from torch import distributed as dist, Event
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
@@ -19,6 +18,8 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TEST_HPU,
     TEST_WITH_DEV_DBG_ASAN,
+    TEST_XPU,
+    xfailIf,
 )
 
 
@@ -33,11 +34,8 @@ if TEST_WITH_DEV_DBG_ASAN:
     )
     sys.exit(0)
 
-device_type = torch.accelerator.current_accelerator().type
-if device_type == "xpu":
-    from torch.xpu import Event
-else:
-    from torch.cuda import Event
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+
 
 class Layer(nn.Module):
     def __init__(self, compute_cycles, has_params: bool):
@@ -78,7 +76,7 @@ def _create_model(compute_cycles, has_params: bool):
             FSDP(Layer(compute_cycles, has_params), limit_all_gathers=False),
         ),
         limit_all_gathers=False,
-    ).to(device=device_type)
+    ).to(device_type)
     return model
 
 
@@ -116,7 +114,7 @@ class TestForwardOverlapWorldSizeOne(FSDPTest):
 
             # Get the input and sets the input's requires_grad to True because
             # we have a fake compute in the forward pass.
-            batch = torch.rand(1).to(device=device_type)
+            batch = torch.rand(1).to(device_type)
             batch.requires_grad = True
 
             # Run one dummy iteration to trigger the execution order validation
@@ -144,7 +142,7 @@ class TestForwardOverlapWorldSizeOne(FSDPTest):
                     nonlocal all_gather_called
                     all_gather_called = True
                     if torch.cuda.is_available():
-                       torch.cuda._sleep(all_gather_cycles)
+                        torch.cuda._sleep(all_gather_cycles)
                     assert orig_all_gather
                     return orig_all_gather(*args, **kwargs)
 
@@ -252,6 +250,7 @@ class TestForwardOverlapWorldSizeOne(FSDPTest):
             self.assertTrue(compute_only + all_gather_only > 1.1 * both)
 
     @unittest.skipIf(TEST_HPU, "HPU doesn't has HW sleep API support, skipping")
+    @xfailIf(TEST_XPU)  # https://github.com/intel/torch-xpu-ops/issues/1504
     @skip_if_lt_x_gpu(2)
     def test_forward_overlap(self):
         self._dist_train()

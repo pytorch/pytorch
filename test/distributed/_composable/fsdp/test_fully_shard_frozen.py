@@ -24,7 +24,7 @@ from torch.testing._internal.common_fsdp import (
     patch_register_post_backward_hook_backward,
     reduce_scatter_with_assert,
 )
-from torch.testing._internal.common_utils import run_tests, TEST_XPU, xfailIf
+from torch.testing._internal.common_utils import run_tests
 
 device_type = torch.accelerator.current_accelerator().type
 
