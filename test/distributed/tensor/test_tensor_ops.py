@@ -1,6 +1,8 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
 
+import itertools
+
 import torch
 from torch.distributed.tensor import (
     DeviceMesh,
@@ -293,8 +295,8 @@ class DistTensorOpsTest(DTensorTestBase):
         self.assertEqual(dist_tensor.dtype, torch.float32)
         self.assertEqual(zeros_like_dt.dtype, torch.bfloat16)
 
-    @with_comms
     @skip_if_lt_x_gpu(4)
+    @with_comms
     def test_stack(self):
         mesh_2d = DeviceMesh(
             self.device_type, torch.arange(self.world_size).reshape(2, 2)
@@ -788,6 +790,36 @@ class DistTensorOpsTest(DTensorTestBase):
             split_size,
             dim=split_dim,
         )
+
+    @with_comms
+    def test_unbind(self):
+        device_mesh = self.build_device_mesh()
+        shard_dims = [0, 1]
+        unbind_dims = [0, 1]
+        local_tensor = torch.randn(4, 8, requires_grad=True)
+        for shard_dim, unbind_dim in itertools.product(shard_dims, unbind_dims):
+            dist_tensor = distribute_tensor(
+                local_tensor, device_mesh, (Shard(shard_dim),)
+            )
+
+            if shard_dim == unbind_dim:
+                with self.assertRaisesRegex(
+                    RuntimeError, "Sharding propagation failed"
+                ):
+                    dist_tensor.unbind(dim=unbind_dim)
+            else:
+                unbinded_dist_tensors = dist_tensor.unbind(dim=unbind_dim)
+                new_shard_dim = shard_dim if shard_dim < unbind_dim else shard_dim - 1
+                self.assertTrue(
+                    all(
+                        elem.placements[0].is_shard(dim=new_shard_dim)
+                        for elem in unbinded_dist_tensors
+                    )
+                )
+                for x, y in zip(
+                    unbinded_dist_tensors, local_tensor.unbind(dim=unbind_dim)
+                ):
+                    self.assertEqual(x.full_tensor(), y)
 
 
 if __name__ == "__main__":

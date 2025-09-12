@@ -6,7 +6,7 @@ from torch.export import ExportedProgram
 from torch.export.pt2_archive._package import AOTI_FILES, package_pt2
 from torch.types import FileLike
 
-from .lowered_aoti_module import LoweredBackendModule
+from ._lowered_aoti_module import LoweredBackendModule
 
 
 def get_new_ep_with_flat_inputs_outputs(ep: ExportedProgram) -> ExportedProgram:

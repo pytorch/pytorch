@@ -4972,6 +4972,7 @@ class ChoiceCaller:
         # An additional description used to describe the choice (useful for
         # knowing what autotuning is choosing)
         self.description = description
+        self.failed: bool = False
 
     def benchmark(self, *args: Any, out: torch.Tensor) -> float:
         algo = self.to_callable()
@@ -5008,6 +5009,14 @@ class ChoiceCaller:
 
     def autoheuristic_id(self) -> str:
         return "unsupported_choice"
+
+    def mark_failed(self) -> None:
+        """
+        Mark the choice as failed so that it can be
+        removed later. Useful for when we decouple
+        compilation and tuning.
+        """
+        self.failed = True
 
 
 class TritonTemplateCallerBase(ChoiceCaller):
@@ -7051,28 +7060,7 @@ class ScatterFallback(ExternKernel):
     """
 
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
-        reduce = self.kwargs["reduce"]
-        if V.graph.cpp_wrapper:
-            # Follow aten/src/ATen/native/ReductionType.h:get_operator_enum
-            get_operator_enum = {"add": "sum", "multiply": "prod"}
-            if reduce in get_operator_enum:
-                reduce = get_operator_enum[reduce]
-
-        assert is_node_sequence(self.inputs)
-        if self.src_is_tensor:
-            (x, index, src) = (t.codegen_reference() for t in self.inputs)
-        else:
-            (x, index) = (t.codegen_reference() for t in self.inputs)
-            src = self.constant_args[1]
-        wrapper.generate_scatter_fallback(
-            x,
-            [x, self.constant_args[0], index, src],
-            self.cpp_kernel_name,
-            self.python_kernel_name,
-            self.src_is_tensor,
-            reduce,
-            self.codegen_kwargs(),
-        )
+        wrapper.generate_scatter_fallback(self)
 
     def should_allocate(self) -> bool:
         return False
