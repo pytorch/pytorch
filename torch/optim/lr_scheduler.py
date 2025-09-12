@@ -887,7 +887,10 @@ class SequentialLR(LRScheduler):
 
         # Reset learning rates back to initial values
         for group in self.optimizer.param_groups:
-            group["lr"] = group["initial_lr"]
+            if isinstance(group["lr"], Tensor):
+                group["lr"].fill_(_to_scalar(group["initial_lr"]))
+            else:
+                group["lr"] = group["initial_lr"]
 
         # "Undo" the step performed by other schedulers
         self.recursive_undo()
