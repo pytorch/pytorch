@@ -9,7 +9,7 @@ import torch.distributed as dist
 import torch.distributed._functional_collectives as funcol
 import torch.nn as nn
 from torch.distributed._composable.replicate_with_fsdp import replicate
-from torch.distributed.fsdp import fully_shard, MixedPrecisionPolicy
+from torch.distributed.fsdp import MixedPrecisionPolicy
 from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
     _get_gradient_divide_factors,
 )
@@ -314,10 +314,10 @@ class TestReplicateMixedPrecisionTraining(FSDPTest):
         ref_model_compute = copy.deepcopy(ref_model).to(param_dtype)
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
         for mlp in model:
-            fully_shard(
+            replicate(
                 mlp, reshard_after_forward=reshard_after_forward, mp_policy=mp_policy
             )
-        fully_shard(
+        replicate(
             model, reshard_after_forward=reshard_after_forward, mp_policy=mp_policy
         )
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
