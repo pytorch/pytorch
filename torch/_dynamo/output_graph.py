@@ -220,6 +220,68 @@ class VariableTrackerCache:
         self.cache.clear()
 
 
+def experiments(gm, real_inputs, self):
+    import time
+
+    from functorch import make_fx
+    from torch._dispatch.python import enable_python_dispatcher
+    from torch._inductor.decomposition import select_decomp_table
+
+    t0 = time.perf_counter()
+    with (
+        torch._C.DisableTorchFunction(),
+        torch._C.DisableTorchFunctionSubclass(),
+        enable_python_dispatcher(),
+    ):
+        new_gm = make_fx(gm, decomposition_table=select_decomp_table())(*real_inputs)
+    t1 = time.perf_counter()
+    print("make_fx = ", t1 - t0)
+
+    real_times = []
+    with torch._C.DisableTorchFunction(), torch._C.DisableTorchFunctionSubclass():
+        for _ in range(10):
+            t0 = time.perf_counter()
+            new_gm(*real_inputs)
+            torch.cuda.synchronize()
+            t1 = time.perf_counter()
+            real_times.append(t1 - t0)
+
+    fake_times = []
+    for _ in range(10):
+        fake_mode = torch._subclasses.FakeTensorMode(allow_non_fake_inputs=False)
+        fake_inputs = []
+        for inp in real_inputs:
+            fake_inputs.append(fake_mode.from_tensor(inp))
+
+        # make_fx with decomp table, python dispatcher on - another set of decompositions
+
+        # Decompositions in there should be more accurate
+        t0 = time.perf_counter()
+        with fake_mode:
+            new_gm(*fake_inputs)
+        torch.cuda.synchronize()
+        t1 = time.perf_counter()
+        fake_times.append(t1 - t0)
+
+    fake_cached_times = []
+    fake_mode = torch._subclasses.FakeTensorMode(allow_non_fake_inputs=False)
+    fake_inputs = []
+    for inp in real_inputs:
+        fake_inputs.append(fake_mode.from_tensor(inp))
+
+    for _ in range(10):
+        t0 = time.perf_counter()
+        with fake_mode:
+            new_gm(*fake_inputs)
+        torch.cuda.synchronize()
+        t1 = time.perf_counter()
+        fake_cached_times.append(t1 - t0)
+
+    print("Real", real_times)
+    print("Fake", fake_times)
+    print("Fake cached times", fake_cached_times)
+
+
 @functools.cache
 def _step_logger() -> Any:
     return torchdynamo_logging.get_step_logger(log)
@@ -2008,6 +2070,9 @@ class OutputGraph(OutputGraphGuardsState):
                 # restore back to old_fake_mode, but doing so currently violates
                 # a lot of fake_tensor ownership assumptions and runs afoul of detect_fake_mode
                 self.tracing_context.fake_mode = backend_fake_mode
+
+            ### Timing experiments stats
+            experiments(gm, self.example_inputs(), self)
 
             with self.restore_global_state():
                 compiled_fn = self.call_user_compiler(gm, self.example_inputs())
