@@ -713,13 +713,13 @@ void PyTorchStreamWriter::setup(const string& file_name) {
   }
   if (!writer_func_) {
     valid("opening archive ", file_name.c_str());
-    file_stream_.exceptions(std::ios_base::failbit | std::ios_base::badbit);
     try {
+      file_stream_.exceptions(std::ios_base::failbit | std::ios_base::badbit);
       file_stream_.open(
           file_name,
           std::ofstream::out | std::ofstream::trunc | std::ofstream::binary);
     } catch (const std::ios_base::failure& e) {
-        CAFFE_THROW("open file failed with: ", e.what());
+        CAFFE_THROW("open file failed with: ", strerror(errno));
     }
 
     const std::string dir_name = parentdir(file_name);
