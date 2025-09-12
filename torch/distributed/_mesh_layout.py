@@ -23,7 +23,7 @@ from torch.distributed._pycute import (
 class _MeshLayout(Layout):
     """
     Utility class for representing an integer layout by borrowing ideas from CuTe Layout Algebra.
-    See https://docs.nvidia.com/cutlass/media/docs/cpp/cute/02_MeshLayout_algebra.html for more details.
+    See https://docs.nvidia.com/cutlass/media/docs/cpp/cute/02_layout_algebra.html for more details.
 
     Each layout is represented as a list of sizes and strides. We use it as a way for mechanical bookkeeping
     of the integers such as ranks in a SPMD mesh, and the transformation on top of it.
