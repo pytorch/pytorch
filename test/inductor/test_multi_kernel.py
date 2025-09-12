@@ -112,6 +112,7 @@ class MultiKernelTest(TestCase):
                 "max_autotune": True,
                 "max_autotune_gemm_backends": "TRITON",
             },
+            dynamic=True,
         )
         x = torch.randn(4096, 4096, device=GPU_TYPE)
         y = torch.randn(4096, 4096, device=GPU_TYPE)
@@ -124,6 +125,16 @@ class MultiKernelTest(TestCase):
         wrapper_code = wrapper_code[-1]
         self.assertEqual(ref, act)
         self.assertTrue(_contains_multi_kernel_code(wrapper_code))
+
+        def inps(n, k, m):
+            return [
+                torch.randn(n, k, device=GPU_TYPE),
+                torch.randn(k, m, device=GPU_TYPE),
+            ]
+
+        compiled_fn(*inps(256, 256, 4096))
+        compiled_fn(*inps(384, 384, 4096))
+        compiled_fn(*inps(64, 64, 64))
 
     @requires_triton()
     # TODO: bobrenjc93 to fix multi-kernel for ROCM

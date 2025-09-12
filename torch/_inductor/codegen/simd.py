@@ -1692,15 +1692,23 @@ class SIMDScheduling(BaseScheduling):
 
             return kernel
 
+    def _get_multikernel_shapes(self, node: MultiTemplateBuffer) -> tuple[tuple[int, ...], ...]:
+        out = []
+        for arg in list(node.inputs) + [node]:
+            if (size := arg.maybe_get_size()) is not None:
+                out.append(tuple(s for s in size))
+        return tuple(out)
+
+    def _kernel_has_dynamic_shapes(self, node: MultiTemplateBuffer) -> bool:
+        shapes = self._get_multikernel_shapes(node)
+        return any(any(isinstance(s, sympy.Expr) and not isinstance(s, sympy.Integer) for s in shape) for shape in shapes)
+
     def _make_shape_cache_key(self, node: MultiTemplateBuffer, hint: int) -> tuple[tuple[int, ...], ...]:
         """
         Returns cache key for hint-based multi-graph; key is tuple of shapes with hint filled in.
         """
-        out = []
-        for arg in list(node.inputs) + [node]:
-            if (size := arg.maybe_get_size()) is not None:
-                out.append(tuple(hint if isinstance(s, sympy.Symbol) else s for s in size))
-        return tuple(out)
+        shapes = self._get_multikernel_shapes(node)
+        return tuple(tuple(hint if isinstance(s, sympy.Expr) and not isinstance(s, sympy.Integer) else s for s in shape) for shape in shapes)
 
     def codegen_template(
         self,
@@ -1724,6 +1732,8 @@ class SIMDScheduling(BaseScheduling):
         if (
             isinstance(template_node.node, MultiTemplateBuffer)
             and template_node.node._make_kernel_renders
+            and len(template_node.node._make_kernel_renders) > 1
+            and self._kernel_has_dynamic_shapes(template_node.node)
         ):
             kernels = {}
             src_codes = []
