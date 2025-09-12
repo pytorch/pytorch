@@ -4973,6 +4973,10 @@ class ChoiceCaller:
         # knowing what autotuning is choosing)
         self.description = description
         self.failed: bool = False
+        # A place to store annotations that can be read post benchmarking
+        # Use this to shuttle information between ChoieCaller generation
+        # and the end of benchmarking
+        self.annotations: dict[Any, Any] = {}
 
     def benchmark(self, *args: Any, out: torch.Tensor) -> float:
         algo = self.to_callable()
