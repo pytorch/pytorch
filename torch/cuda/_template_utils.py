@@ -1,6 +1,7 @@
 """
 Utilities for handling C++ templates in CUDA kernel compilation.
 """
+
 from typing import Any, Optional
 
 
@@ -12,13 +13,13 @@ def generate_template_instantiation(
 ) -> tuple[str, str]:
     """
     Generate C++ template instantiation and C-linkage wrapper for NVRTC compilation.
-    
+
     Args:
         template_code: The C++ template code
         template_name: Name of the template function/class
         template_params: Dictionary of template parameters and their values
         wrapper_name: Name for the extern "C" wrapper function
-    
+
     Returns:
         tuple: (instantiation_code, wrapper_function_name)
     """
@@ -50,15 +51,15 @@ def prepare_cutlass_kernel(
 ) -> tuple[str, str]:
     """
     Prepare a CUTLASS template kernel for NVRTC compilation.
-    
+
     Args:
         cutlass_template: The CUTLASS template code
         element_type: Data type for the computation
-        layout: Matrix layout 
+        layout: Matrix layout
         opcode_class: CUTLASS operation class
         arch: Target architecture
         wrapper_name: Name for the wrapper function
-        
+
     Returns:
         tuple: (prepared_code, wrapper_name)
     """
@@ -75,7 +76,7 @@ def prepare_cutlass_kernel(
 
 extern "C" __global__ void {wrapper_name}(
     {element_type} const* A,
-    {element_type} const* B, 
+    {element_type} const* B,
     {element_type}* C,
     int M, int N, int K,
     {element_type} alpha,
@@ -85,7 +86,7 @@ extern "C" __global__ void {wrapper_name}(
     using ElementB = {element_type};
     using ElementC = {element_type};
     using ElementAccumulator = {element_type};
-    
+
     using LayoutA = {layout};
     using LayoutB = {layout};
     using LayoutC = {layout};
@@ -105,7 +106,7 @@ def wrap_template_kernel(
 ) -> tuple[str, str]:
     """
     Wrap a templated kernel function with explicit instantiation and extern "C" wrapper.
-    
+
     Args:
         template_code: The template definition code
         template_name: Name of the template function
@@ -113,7 +114,7 @@ def wrap_template_kernel(
         function_signature: Signature of the wrapper function (parameters)
         function_body: Body of the wrapper function that calls the template
         wrapper_name: Name for the extern "C" wrapper
-        
+
     Returns:
         tuple: (complete_code, wrapper_name)
     """

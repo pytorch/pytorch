@@ -1,6 +1,7 @@
 """
 Enhanced kernel compilation with C++ template support for CUTLASS and other templated CUDA libraries.
 """
+
 from typing import Any, Optional
 
 from torch.cuda._template_utils import wrap_template_kernel
@@ -23,15 +24,15 @@ def _compile_kernel_with_templates(
 ):
     """
     Enhanced version of _compile_kernel that supports C++ templates.
-    
+
     This function extends the basic _compile_kernel to handle C++ templates,
     which is essential for using CUTLASS device API and other templated CUDA libraries.
-    
+
     Args:
         kernel_source (str): The CUDA kernel source code (can be templated)
         kernel_name (str): The name of the kernel function
         compute_capability (str, optional): Target compute capability (e.g., "86")
-        header_code (str, optional): Additional header code 
+        header_code (str, optional): Additional header code
         cuda_include_dirs (list, optional): List of CUDA include directories
         nvcc_options (list, optional): Additional NVRTC options
         is_template (bool): Whether the kernel is a C++ template
@@ -39,10 +40,10 @@ def _compile_kernel_with_templates(
         wrapper_signature (str, optional): Parameter signature for the wrapper
         wrapper_body (str, optional): Body of the wrapper function
         wrapper_name (str, optional): Name of the extern "C" wrapper
-        
+
     Returns:
         callable: A Python function that can execute the kernel
-        
+
     Example for regular kernel:
         >>> kernel_code = '''
         extern "C" __global__ void add(float* a, float* b, float* c, int n) {
@@ -51,7 +52,7 @@ def _compile_kernel_with_templates(
         }
         '''
         >>> add_kernel = _compile_kernel_with_templates(kernel_code, "add")
-        
+
     Example for templated kernel:
         >>> template_code = '''
         template<typename T>
@@ -61,12 +62,12 @@ def _compile_kernel_with_templates(
         }
         '''
         >>> add_kernel = _compile_kernel_with_templates(
-        ...     template_code, 
+        ...     template_code,
         ...     "add_template",
         ...     is_template=True,
         ...     template_types=["float"],
         ...     wrapper_signature="float* a, float* b, float* c, int n",
-        ...     wrapper_body="    add_template<float>(a, b, c, n);"
+        ...     wrapper_body="    add_template<float>(a, b, c, n);",
         ... )
     """
 
@@ -86,7 +87,7 @@ def _compile_kernel_with_templates(
             template_types,
             wrapper_signature,
             wrapper_body,
-            wrapper_name
+            wrapper_name,
         )
 
         # Use the wrapped code for compilation
@@ -112,7 +113,9 @@ def _compile_kernel_with_templates(
 
 
 def compile_cutlass_gemm(
-    m: int, n: int, k: int,
+    m: int,
+    n: int,
+    k: int,
     element_type: str = "float",
     compute_capability: Optional[str] = None,
     alpha: float = 1.0,
@@ -120,15 +123,15 @@ def compile_cutlass_gemm(
 ) -> Any:
     """
     Compile a CUTLASS GEMM kernel with specific parameters.
-    
+
     This is a convenience function specifically for CUTLASS GEMM operations.
-    
+
     Args:
         m, n, k: Matrix dimensions
         element_type: Data type ("float", "double", "half")
         compute_capability: Target GPU architecture
         alpha, beta: GEMM parameters (C = alpha * A * B + beta * C)
-        
+
     Returns:
         callable: Compiled CUTLASS GEMM kernel
     """
@@ -150,7 +153,7 @@ __global__ void cutlass_gemm_kernel(
 ) {
     int row = blockIdx.y * blockDim.y + threadIdx.y;
     int col = blockIdx.x * blockDim.x + threadIdx.x;
-    
+
     if (row < M && col < N) {
         ElementType sum = 0;
         for (int i = 0; i < K; ++i) {
@@ -177,7 +180,9 @@ int M, int N, int K,
 {cpp_type} beta
 """.strip()
 
-    wrapper_body = f"    cutlass_gemm_kernel<{cpp_type}>(A, B, C, M, N, K, alpha, beta);"
+    wrapper_body = (
+        f"    cutlass_gemm_kernel<{cpp_type}>(A, B, C, M, N, K, alpha, beta);"
+    )
     return _compile_kernel_with_templates(
         cutlass_template,
         "cutlass_gemm_kernel",
@@ -186,7 +191,7 @@ int M, int N, int K,
         template_types=[cpp_type],
         wrapper_signature=wrapper_sig,
         wrapper_body=wrapper_body,
-        wrapper_name="cutlass_gemm_wrapper"
+        wrapper_name="cutlass_gemm_wrapper",
     )
 
 
