@@ -13,7 +13,7 @@ exclude_patterns = [
     '**/fb/**',
     'functorch/docs/**',
     'functorch/examples/**',
-    'functorch/notebooks/**',
+    'functorch/docs/source/tutorials/**',
     'torch/_inductor/fx_passes/serialized_patterns/**',
     'torch/_inductor/autoheuristic/artifacts/**',
     'scripts/**',
@@ -583,7 +583,7 @@ exclude_patterns = [
 command = [
     'python3',
     'tools/linter/adapters/grep_linter.py',
-    '--pattern=#include <pybind11\/(^|[^(gil\.h)])',
+    '--pattern=#include <pybind11\/(^|[^(gil_simple\.h)])',
     '--allowlist-pattern=#include <torch\/csrc\/utils\/pybind.h>',
     '--linter-name=PYBIND11_INCLUDE',
     '--match-first-only',
@@ -1568,7 +1568,6 @@ include_patterns = [
 exclude_patterns = [
     'caffe2/**',
     'functorch/docs/**',
-    'functorch/notebooks/**',
     'torch/_inductor/fx_passes/serialized_patterns/**',
     'torch/_inductor/autoheuristic/artifacts/**',
     'test/dynamo/cpython/**',
