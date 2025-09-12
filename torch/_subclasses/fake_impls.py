@@ -594,18 +594,21 @@ def _view_unbacked_meta(a, shape, size_oblivious_enabled=True):
 
 @register_op_impl(aten.view.default)
 @register_op_impl(aten._unsafe_view.default)
-def _view_meta(fake_mode, func, a, *shape):
+def _view_meta(fake_mode, func, a, *shape, allow_copy=False):
     if torch.fx.experimental._config.backed_size_oblivious or _view_has_unbacked_input(
         a, shape
     ):
         return _view_unbacked_meta(a, shape)
     else:
-        return torch._refs._reshape_view_helper(a, *shape, allow_copy=False)
+        return torch._refs._reshape_view_helper(a, *shape, allow_copy=allow_copy)
 
 
 @register_op_impl(aten.view_copy.default)
 def _view_meta_copy(fake_mode, func, a, *shape, out=None):
-    result = _view_meta(fake_mode, func, a, *shape)
+    # view_copy is the non-aliasing counterpart of view. Eager may succeed on
+    # cases where a pure view is impossible (e.g. expand -> flatten) by
+    # materializing the result. Match eager by allowing copy-if-needed in meta.
+    result = _view_meta(fake_mode, func, a, *shape, allow_copy=True)
     if out is not None:
         return result
 
