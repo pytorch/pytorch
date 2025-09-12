@@ -7,7 +7,7 @@ import torch.distributed as dist
 import torch.distributed._functional_collectives as funcol
 from torch._C._distributed_c10d import Backend as C10dBackend
 from torch._subclasses.fake_tensor import FakeTensorMode
-from torch.distributed._mesh_layout import _Layout
+from torch.distributed._mesh_layout import _MeshLayout as _Layout
 from torch.distributed.device_mesh import _mesh_resources, DeviceMesh, init_device_mesh
 from torch.distributed.distributed_c10d import (
     _get_default_group,
@@ -1276,10 +1276,12 @@ class CuTeLayoutTest(TestCase):
         outer = pg_layout.complement(world_size=8)
         self.assertEqual(list(outer.sizes_and_strides), [(2, 1)])
         self.assertEqual(
-            pg_layout.local_ranks(),
+            pg_layout.member_ranks(),
             [0, 2, 4, 6],
         )
-        groups = [[o + i for i in pg_layout.local_ranks()] for o in outer.local_ranks()]
+        groups = [
+            [o + i for i in pg_layout.member_ranks()] for o in outer.member_ranks()
+        ]
         self.assertEqual(
             groups,
             [
@@ -1298,7 +1300,7 @@ class CuTeLayoutTest(TestCase):
         outer = pg_layout.complement(world_size=16)
         self.assertEqual(list(outer.sizes_and_strides), [(2, 8), (2, 1)])
         self.assertEqual(
-            outer.local_ranks(),
+            outer.member_ranks(),
             [0, 1, 8, 9],
         )
         self.assertEqual(
@@ -1314,13 +1316,13 @@ class CuTeLayoutTest(TestCase):
         # Complement ((2,4), (2,1)) under world_size=16 → complement ((2,8), (2,2))
         pg_layout = _Layout((2, 2), (4, 1))
         self.assertEqual(
-            pg_layout.local_ranks(),
+            pg_layout.member_ranks(),
             [0, 1, 4, 5],
         )
         outer = pg_layout.complement(world_size=16)
         self.assertEqual(list(outer.sizes_and_strides), [(2, 8), (2, 2)])
         self.assertEqual(
-            outer.local_ranks(),
+            outer.member_ranks(),
             [0, 2, 8, 10],
         )
         self.assertEqual(
@@ -1333,10 +1335,10 @@ class CuTeLayoutTest(TestCase):
             ],
         )
 
-        # Test layout_to_global_ranks and layout_to_group_ranks
+        # Test layout_to_global_ranks and layout_to_member_ranks
         pg_layout = _Layout((2, 2), (4, 2))
         self.assertEqual(
-            pg_layout.local_ranks(),
+            pg_layout.member_ranks(),
             [0, 2, 4, 6],
         )
         self.assertEqual(
@@ -1365,10 +1367,10 @@ class CuTeLayoutTest(TestCase):
             ],
         )
 
-        # Test just local_ranks and global_ranks.
+        # Test just member_ranks and global_ranks.
         pg_layout = _Layout((4,), (2,))
         self.assertEqual(
-            pg_layout.local_ranks(),
+            pg_layout.member_ranks(),
             [0, 2, 4, 6],
         )
         self.assertEqual(
@@ -1440,18 +1442,9 @@ class CuTeLayoutTest(TestCase):
         orig_l = _Layout((4, 2), (4, 1))
         with self.assertRaises(
             AssertionError,
-            # "Layouts do not meet stride divisibility condition",
         ):
             right_l = _Layout((2,), (3,))
             orig_l.composition(right_l)
-
-        # Original pycute does not throw exception for this case.
-        # with self.assertRaises(
-        #     AssertionError,
-        #     # "Layouts do not meet size divisibility condition",
-        # ):
-        #     right_l = _Layout((3,), (2,))
-        #     orig_l.composition(right_l)
 
 
 if __name__ == "__main__":
