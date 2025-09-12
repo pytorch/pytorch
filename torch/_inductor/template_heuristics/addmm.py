@@ -20,15 +20,16 @@ class AddMMBiasExpansionConfigMixin(TemplateConfigHeuristics):
         kernel_inputs: KernelInputs,
         op_name: str,
     ) -> KernelInputs:
-        from ..ir import StorageBox, TensorBox
+        from ..ir import ExternKernel, StorageBox, TensorBox
         from ..lowering import expand
 
         assert isinstance(kernel_inputs, MMKernelInputs)
         output_size = kernel_inputs.output_layout(flexible=False).size
         nodes = kernel_inputs.nodes()
         bias = nodes[0]
-        assert isinstance(bias, StorageBox)
-        bias = expand(TensorBox(bias), output_size)
+        if not ExternKernel.is_realized_node(bias):
+            assert isinstance(bias, StorageBox)
+            bias = expand(TensorBox(bias), output_size)
         return MMKernelInputs(
             input_nodes=[bias, *nodes[1:]],
             scalars=kernel_inputs.scalars(),

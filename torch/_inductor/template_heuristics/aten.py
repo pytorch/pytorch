@@ -64,10 +64,10 @@ class BaseATenAddMMConfigHeuristics(ATenConfigHeuristics):
 # None here indicates that this is valid for all device types on that op
 # Note (None, op) takes precedence over (device_type, None)
 @register_template_heuristic(aten_baddbmm.uid, None, op_name="baddbmm")
-class ATenBaddbmmConfigHeuristics(
-    BaseATenAddMMConfigHeuristics, AddMMBiasExpansionConfigMixin
-):
-    """baddbmm heuristic needs bias expansion and the alpha/beta kwargs"""
+class ATenBaddbmmConfigHeuristics(BaseATenAddMMConfigHeuristics):
+    """baddbmm heuristic only needs the alpha/beta kwargs"""
+
+    # NOTE: baddbmm handles bias expansion in the tuned_baddbmm call
 
 
 @register_template_heuristic(aten_addmm.uid, None, op_name="addmm")
