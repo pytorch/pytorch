@@ -406,6 +406,33 @@ void gemm_transa_(
   });
 }
 
+template <>
+void gemm_transa_(
+    TransposeType transa,
+    int64_t m, int64_t n, int64_t k,
+    float alpha,
+    const at::Half *a, int64_t lda,
+    const at::Half *b, int64_t ldb,
+    float beta,
+    float *c, int64_t ldc) {
+  parallel_for(0, m, 1, [&](int64_t begin, int64_t end) {
+    const auto *a_ = a + begin * lda;
+    for (const auto i : c10::irange(begin, end)) {
+      const auto *b_ = b;
+      for (const auto j : c10::irange(n)) {
+        const auto dot = compute_dot(a_, b_, k);
+        b_ += ldb;
+        if (beta == 0) {
+          c[j*ldc+i] = alpha*dot;
+        } else {
+          c[j*ldc+i] = beta*c[j*ldc+i]+alpha*dot;
+        }
+      }
+      a_ += lda;
+    }
+  });
+}
+
 static float compute_dot(const at::BFloat16* a, const at::BFloat16* b, int64_t len) {
   return at::native::CPU_CAPABILITY::bf16_dot_with_fp32_arith(a, b, len);
 }
@@ -419,6 +446,34 @@ void gemm_transa_(
     const at::BFloat16 *b, int64_t ldb,
     float beta,
     at::BFloat16 *c, int64_t ldc) {
+  // c = alpha * (a.T @ b) + beta * c
+  parallel_for(0, m, 1, [&](int64_t begin, int64_t end) {
+    const auto *a_ = a + begin * lda;
+    for (const auto i : c10::irange(begin, end)) {
+      const auto *b_ = b;
+      for (const auto j : c10::irange(n)) {
+        const auto dot = compute_dot(a_, b_, k);
+        b_ += ldb;
+        if (beta == 0) {
+          c[j*ldc+i] = alpha*dot;
+        } else {
+          c[j*ldc+i] = beta*c[j*ldc+i]+alpha*dot;
+        }
+      }
+      a_ += lda;
+    }
+  });
+}
+
+template <>
+void gemm_transa_(
+    TransposeType transa,
+    int64_t m, int64_t n, int64_t k,
+    float alpha,
+    const at::BFloat16 *a, int64_t lda,
+    const at::BFloat16 *b, int64_t ldb,
+    float beta,
+    float *c, int64_t ldc) {
   // c = alpha * (a.T @ b) + beta * c
   parallel_for(0, m, 1, [&](int64_t begin, int64_t end) {
     const auto *a_ = a + begin * lda;
