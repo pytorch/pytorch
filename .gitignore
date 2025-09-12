@@ -259,9 +259,6 @@ gen
 .pytest_cache
 aten/build/*
 
-# Linker scripts for prioritized text optimization
-cmake/linker_script.ld
-
 # Bram
 plsdontbreak
 
