@@ -10,7 +10,7 @@ on:
     - cron: 0 6 * * 0
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
   cancel-in-progress: true
 
 permissions:
@@ -24,7 +24,7 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     with:
       allow-reuse-old-whl: false
-      cuda-arch-list: '8.0,9.0'
+      cuda-arch-list: '8.0 9.0'
       build-environment: linux-jammy-cuda12.8-py3.10-gcc9-sm80
       docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11
       test-matrix: |
