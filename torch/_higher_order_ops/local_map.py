@@ -6,10 +6,12 @@
 # NOTE: this file may be removed once we move to a dynamo frontend
 
 import functools
+from contextlib import contextmanager
 from typing import Any, Callable, Optional
 
 import torch
 import torch.utils._pytree as pytree
+from torch._C import DispatchKey
 from torch._higher_order_ops.utils import (
     clone_outputs_aliasing_inputs,
     save_tensors_and_symints_for_backward,
@@ -25,6 +27,17 @@ from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_ten
 _DEFER_INLINING = False
 
 
+@contextmanager
+def defer_inlining():
+    global _DEFER_INLINING
+    prior = _DEFER_INLINING
+    try:
+        _DEFER_INLINING = True
+        yield
+    finally:
+        _DEFER_INLINING = prior
+
+
 class LocalMapHOP(HigherOrderOperator):
     def __init__(self) -> None:
         super().__init__("local_map_hop")
@@ -34,17 +47,6 @@ class LocalMapHOP(HigherOrderOperator):
 
 
 local_map_hop = LocalMapHOP()
-
-
-class LocalMapBackwardHOP(HigherOrderOperator):
-    def __init__(self) -> None:
-        super().__init__("local_map_hop_backward")
-
-    def __call__(self, bw_gm: GraphModule, *args: Any, **kwargs: Any) -> Any:
-        return super().__call__(bw_gm, *args, **kwargs)
-
-
-local_map_hop_backward = LocalMapBackwardHOP()
 
 
 def create_hop_fw_bw(
@@ -222,7 +224,7 @@ class LocalMapAutogradOp(torch.autograd.Function):
             # Filter out grads that are None or do not require_grad.
             # The AOTAutograd utils we rely on force this assumption.
             grads = [_grads[i] for i in ctx.filtered_grads_idx]
-            grad_ins = local_map_hop_backward(ctx.bw_gm, *saved_activations, *grads)
+            grad_ins = local_map_hop(ctx.bw_gm, *saved_activations, *grads)
             if len(grad_ins) != ctx.num_fw_ins:
                 raise RuntimeError(
                     f"Expected {ctx.num_fw_ins} grad_ins, got {len(grad_ins)}"
@@ -314,77 +316,11 @@ def proxy_mode_key(
     return proxy_mode_key_common(call_local_map, proxy_mode, fw_gm, *args, **kwargs)
 
 
-@local_map_hop_backward.py_impl(torch._C.DispatchKey.Autograd)
-def bw_autograd_key(
-    bw_gm: GraphModule,
-    *args: Any,
-    **kwargs: Any,
-) -> tuple[torch.Tensor]:
-    assert not _DEFER_INLINING, "Not supported yet"
-    # NOTE: no double backward support
-    return bw_gm(*args, **kwargs)
-
-
-@local_map_hop_backward.py_functionalize_impl
-def bw_functional_mode_key(
-    ctx: Any, bw_gm: GraphModule, *args: Any, **kwargs: Any
-) -> tuple[torch.Tensor]:
-    assert not kwargs
-
-    unwrapped_inputs = ctx.unwrap_tensors(args)
-    with ctx.redispatch_to_next():
-        out = local_map_hop_backward(bw_gm, *unwrapped_inputs)
-        return ctx.wrap_tensors(out)
-
-
-@local_map_hop_backward.py_impl(FakeTensorMode)
-def bw_fake_mode_key(
-    mode: FakeTensorMode,
-    bw_gm: GraphModule,
-    *args: Any,
-    **kwargs: Any,
-) -> tuple[torch.Tensor]:
-    with mode:
-        return bw_gm(*args, **kwargs)
-
-
-@local_map_hop_backward.py_impl(ProxyTorchDispatchMode)
-def bw_proxy_mode_key(
-    proxy_mode: ProxyTorchDispatchMode,
-    bw_gm: GraphModule,
-    *args: Any,
-    **kwargs: Any,
-) -> tuple[torch.Tensor]:
-    # TODO: get rid of this when we can install as a subgraph
-    def call_local_map_backward(*_args: Any, **_kwargs: Any) -> Any:
-        return functools.partial(local_map_hop_backward, bw_gm)(*_args, **_kwargs)
-
-    return proxy_mode_key_common(
-        call_local_map_backward,
-        proxy_mode,
-        bw_gm,
-        *args,
-        **kwargs,
-    )
-
-
 # Running HOP in eager with real tensors
-@local_map_hop.py_impl(torch._C.DispatchKey.CPU)
-@local_map_hop.py_impl(torch._C.DispatchKey.CUDA)
+@local_map_hop.py_impl(DispatchKey.CompositeExplicitAutograd)
 def real_impl(
     fw_gm: GraphModule,
     *args: Any,
     **kwargs: Any,
 ) -> tuple[torch.Tensor]:
     return fw_gm(*args, **kwargs)
-
-
-# Running HOP in eager with real tensors
-@local_map_hop_backward.py_impl(torch._C.DispatchKey.CPU)
-@local_map_hop_backward.py_impl(torch._C.DispatchKey.CUDA)
-def bw_real_impl(
-    bw_gm: GraphModule,
-    *args: Any,
-    **kwargs: Any,
-) -> tuple[torch.Tensor]:
-    return bw_gm(*args, **kwargs)
