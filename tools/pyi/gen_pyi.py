@@ -610,6 +610,59 @@ def gen_nn_functional(fm: FileManager) -> None:
                     "Tensor",
                 )
             ],
+            "cross_entropy_loss": [
+                defs(
+                    "cross_entropy_loss",
+                    [
+                        INPUT,
+                        "target: Tensor",
+                        "weight: Tensor | None = None",
+                        "reduction: str = ...",
+                        "ignore_index: int = -100",
+                        "label_smoothing: float = 0.0",
+                    ],
+                    "Tensor",
+                )
+            ],
+            "hardsigmoid_": [
+                defs(
+                    "hardsigmoid_",
+                    [
+                        INPUT,
+                    ],
+                    "Tensor",
+                )
+            ],
+            "hardswish": [
+                defs(
+                    "hardswish",
+                    [
+                        INPUT,
+                    ],
+                    "Tensor",
+                )
+            ],
+            "hardswish_": [
+                defs(
+                    "hardswish_",
+                    [
+                        INPUT,
+                    ],
+                    "Tensor",
+                )
+            ],
+            "huber_loss": [
+                defs(
+                    "huber_loss",
+                    [
+                        INPUT,
+                        "target: Tensor",
+                        "reduction: str = ...",
+                        "delta: float = 1.0",
+                    ],
+                    "Tensor",
+                )
+            ],
         }
     )
 
@@ -1373,6 +1426,20 @@ def gen_pyi(
                         "dispatch_layout: _bool = False",
                         "_extra_dispatch_keys: torch.DispatchKeySet | None = None",
                         "storage_size: _int | SymInt | None = None",
+                    ],
+                    "S",
+                )
+            ],
+            "_make_dtensor": [
+                "@staticmethod\n"
+                + defs(
+                    "_make_dtensor",
+                    [
+                        "cls: type[S]",
+                        "size: Sequence[_int | SymInt]",
+                        "strides: Sequence[_int | SymInt]",
+                        "local_tensor: Tensor",
+                        "requires_grad: _bool",
                     ],
                     "S",
                 )
