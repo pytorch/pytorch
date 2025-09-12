@@ -82,7 +82,7 @@ RUN if command -v apt-get >/dev/null; then \
         apt-get update -y \
         && apt-get install -y ccache software-properties-common git curl wget sudo vim; \
     else \
-        dnf install -y git curl wget sudo vim; \
+        dnf install -y git curl wget sudo; \
     fi \
     && python3 --version && python3 -m pip --version
 
@@ -279,7 +279,7 @@ RUN if command -v apt-get >/dev/null; then \
         && ln -sf /usr/bin/python${PYTHON_VERSION}-config /usr/bin/python3-config \
         && curl -sS ${GET_PIP_URL} | python${PYTHON_VERSION}; \
     else \
-        dnf install -y git curl wget sudo vim; \
+        dnf install -y git curl wget sudo; \
     fi \
     && python3 --version && python3 -m pip --version
 
