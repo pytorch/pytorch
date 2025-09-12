@@ -46,9 +46,9 @@ from .int_tuple import (
     IntTuple,
     is_int,
     is_tuple,
-    prefix_product,
     product,
     slice_,
+    suffix_product,
 )
 
 
@@ -73,7 +73,7 @@ class Layout(LayoutBase):
     def __init__(self, _shape: IntTuple, _stride: Optional[IntTuple] = None) -> None:
         self.shape = _shape
         if _stride is None:
-            self.stride = prefix_product(self.shape)
+            self.stride = suffix_product(self.shape)
         else:
             self.stride = _stride
 
@@ -167,29 +167,33 @@ def coalesce(layout: Layout, profile: LayoutProfile = None) -> Layout:
             )
         )
 
-    result_shape: list[int] = []
-    result_stride: list[int] = []
-    for shape, stride in zip(flatten(layout.shape), flatten(layout.stride)):
+    result_shape = [1]
+    result_stride = [0]
+    # Since we now follow lexicographic order, we need to process from right to left.
+    # And to make implementation more efficient, we append to the end of list and reverse it in the end.
+    for shape, stride in zip(
+        reversed(flatten(layout.shape)), reversed(flatten(layout.stride))
+    ):
         # skip their shape-1s
         if shape == 1:
             continue
+        # replace our shape-1 with anything
+        elif result_shape[-1] == 1:
+            result_shape[-1] = shape
+            result_stride[-1] = stride
         # merge modes if the shape*stride match
-        elif result_stride and result_stride[-1] == shape * stride:
-            result_stride.pop()
-            prev_shape = result_shape.pop()
-            result_shape.append(shape * prev_shape)
-            result_stride.append(stride)
+        elif result_shape[-1] * result_stride[-1] == stride:
+            result_shape[-1] = result_shape[-1] * shape
         # append a new mode
         else:
             result_shape.append(shape)
             result_stride.append(stride)
 
-    # Handle empty result (all modes were shape-1)
-    if len(result_shape) == 0:
-        return Layout(1, 0)
-    elif len(result_shape) == 1:
+    if len(result_shape) == 1:
         return Layout(result_shape[0], result_stride[0])
     else:
+        result_shape.reverse()
+        result_stride.reverse()
         return Layout(tuple(result_shape), tuple(result_stride))
 
 
@@ -233,7 +237,7 @@ def composition(layoutA: Layout, layoutB: LayoutInput) -> Layout:
                 (layoutA[i] for i in range(len(layoutB), len(layoutA))),
             )
         )
-    elif is_tuple(layoutB.shape) and len(layoutB.shape) > 1:
+    elif is_tuple(layoutB.shape):
         return make_layout(composition(layoutA, layoutB_i) for layoutB_i in layoutB)  # type: ignore[arg-type, attr-defined]
 
     if layoutB.stride == 0:
@@ -241,14 +245,9 @@ def composition(layoutA: Layout, layoutB: LayoutInput) -> Layout:
     else:
         result_shape = []
         result_stride = []
-        rest_shape = layoutB.shape if is_int(layoutB.shape) else layoutB.shape[0]  # type: ignore[union-attr,index]
-        rest_stride = layoutB.stride if is_int(layoutB.stride) else layoutB.stride[0]  # type: ignore[union-attr,index]
+        rest_shape = layoutB.shape
+        rest_stride = layoutB.stride
         flat_A = coalesce(layoutA)
-
-        # Process from right to left for lexicographic ordering
-        flat_A_shapes = flatten(flat_A.shape)
-        flat_A_strides = flatten(flat_A.stride)
-
         # when left layout is multi-dimensional sublayout, aka, self = (a,b,...,c):(x,y,...,z), layout = s:d,
         # for integral s and d means that we want:
         # (1) “remove” the first d elements from left, starting from rightmost. (This will increase the stride.)
@@ -257,10 +256,9 @@ def composition(layoutA: Layout, layoutB: LayoutInput) -> Layout:
         # Step 1: remove the first 2 elements from self with stride increase, i.e., (6,2):(2,1) -> (6,1):(2,2)
         # Step 2: keep the first 3 of those strided elements, i.e., (6,1):(2,2) -> (3,1):(2,2)
         # Because we are going lexicographically, we go through left layout from right to left.
-        for i in range(len(flat_A_shapes) - 1, 0, -1):
-            curr_shape = flat_A_shapes[i]
-            curr_stride = flat_A_strides[i]
-
+        for curr_shape, curr_stride in zip(
+            reversed(flatten(flat_A.shape)[1:]), reversed(flatten(flat_A.stride)[1:])
+        ):
             assert curr_shape % rest_stride == 0 or rest_stride % curr_shape == 0  # type: ignore[operator]
             new_shape = min(max(1, curr_shape // rest_stride), rest_shape)  # type: ignore[operator]
 
@@ -278,7 +276,7 @@ def composition(layoutA: Layout, layoutB: LayoutInput) -> Layout:
         # For example, if self = (6:2), layout = (3:2), the result is (3:(2*2)) = (3:4).
         if rest_shape != 1 or len(result_shape) == 0:
             result_shape.append(rest_shape)  # Append to end, will reverse later
-            result_stride.append(rest_stride * flat_A_strides[0])
+            result_stride.append(rest_stride * flatten(flat_A.stride)[0])
 
         # Reverse the lists because we build lists in reverse order (append to end), this way it is more efficient.
         result_shape.reverse()
@@ -335,7 +333,7 @@ def right_inverse(layout: Optional[LayoutOrIntTuple]) -> Optional[Layout]:
 
     flat_shape = flatten(layout.shape)  # type: ignore[union-attr]
     flat_stride = flatten(layout.stride)  # type: ignore[union-attr]
-    sorted_DSA = sorted(zip(flat_stride, flat_shape, prefix_product(flat_shape)))  # type: ignore[arg-type]
+    sorted_DSA = sorted(zip(flat_stride, flat_shape, suffix_product(flat_shape)))  # type: ignore[arg-type]
     for stride, shape, rstride in sorted_DSA:
         if shape == 1:
             continue
