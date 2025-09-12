@@ -1387,6 +1387,12 @@ class FakeTensorMode(TorchDispatchMode):
             # See NOTE: [torch.tensor, lift_fresh, and device movement]
             prev_only_lift_cpu_tensors = torch._C._only_lift_cpu_tensors()
             torch._C._set_only_lift_cpu_tensors(True)
+
+            # In the case of CPU-only build or cuda device unavailable,
+            # we patch the cuda device guard to use NoOpDeviceGuardImpl.
+            # This enables us to trace over cuda kernels under FakeTensorMode.
+            torch._C._ensureCUDADeviceGuardSet()
+
         maybe_prev_fake_mode = torch._C._unset_dispatch_mode(self._mode_key)
         if self is not maybe_prev_fake_mode:
             self.enter_stack.append(
@@ -1397,6 +1403,7 @@ class FakeTensorMode(TorchDispatchMode):
             # no-op (still need to re-set the fake mode though since we unset it)
             torch._C._set_dispatch_mode(self)
             self.enter_stack.append((False, None, prev_only_lift_cpu_tensors))
+
         return self
 
     def __exit__(
