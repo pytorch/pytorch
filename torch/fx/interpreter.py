@@ -5,7 +5,6 @@ from typing import Any, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch.fx.traceback as fx_traceback
-from torch._logging import trace_structured
 from torch.hub import tqdm
 
 from . import config
@@ -221,11 +220,10 @@ class Interpreter:
             Any: The result of executing ``n``
         """
         with self._set_current_node(n):
-                args, kwargs = self.fetch_args_kwargs_from_env(n)
-                assert isinstance(args, tuple)
-                assert isinstance(kwargs, dict)
-                return getattr(self, n.op)(n.target, args, kwargs)
-
+            args, kwargs = self.fetch_args_kwargs_from_env(n)
+            assert isinstance(args, tuple)
+            assert isinstance(kwargs, dict)
+            return getattr(self, n.op)(n.target, args, kwargs)
 
     # Main Node running APIs
     @compatibility(is_backward_compatible=True)
