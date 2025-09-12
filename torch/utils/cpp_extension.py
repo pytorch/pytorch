@@ -2420,11 +2420,7 @@ def _get_cuda_arch_flags(cflags: Optional[list[str]] = None) -> list[str]:
     if not _arch_list or _arch_list == "native":
         if not _arch_list:
             # Only log on rank 0 in distributed settings to avoid spam
-            should_log = True
-            if torch.distributed.is_available() and torch.distributed.is_initialized():
-                should_log = torch.distributed.get_rank() == 0
-            
-            if should_log:
+            if not torch.distributed.is_available() or not torch.distributed.is_initialized() or torch.distributed.get_rank() == 0:
                 logger.debug(
                     "TORCH_CUDA_ARCH_LIST is not set, all archs for visible cards are included for compilation. "
                     "If this is not desired, please set os.environ['TORCH_CUDA_ARCH_LIST'] to specific architectures.")
