@@ -1228,11 +1228,14 @@ ExprPtr combineMinMaxTerms(
   auto combine_opterms = [&](const NodePtr<OpTerm>& m1,
                              const NodePtr<OpTerm>& m2) {
     ExprPtr scalar = combine_scalars(m1->scalar(), m2->scalar());
+    auto const& m1_variables = m1->variables();
+    auto const& m2_variables = m2->variables();
     std::vector<ExprPtr> variables;
-    for (const auto& v : m1->variables()) {
+    variables.reserve(m1_variables.size() + m2_variables.size());
+    for (const auto& v : m1_variables) {
       variables.push_back(v);
     }
-    for (const auto& v : m2->variables()) {
+    for (const auto& v : m2_variables) {
       variables.push_back(v);
     }
     return alloc<OpTerm>(hasher, scalar, propagate_nans, std::move(variables));
