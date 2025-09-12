@@ -909,7 +909,7 @@ def check_input_alias_and_mutation(
         inp_out_alias_map,
         out_out_alias_map,
         mutated_inputs,
-    ) = check_input_alias_and_mutation_return_outputs(gm, fake_args)[:-1]
+    ) = check_input_alias_and_mutation_return_outputs(gm)[:-1]
     return inp_inp_alias_map, inp_out_alias_map, out_out_alias_map, mutated_inputs
 
 
@@ -919,7 +919,6 @@ def _tensor_storage(t) -> StorageWeakRef:
 
 def check_input_alias_and_mutation_return_outputs(
     gm: torch.fx.GraphModule,
-    fake_args: Union[list[FakeTensor], tuple[FakeTensor, ...]],
 ) -> tuple[
     dict[int, int],
     dict[int, int],
@@ -927,137 +926,68 @@ def check_input_alias_and_mutation_return_outputs(
     list[int],
     Union[tuple[Any, ...], list[Any]],
 ]:
-    # This function can be called under autograd, functional, proxy and fake tensor mode.
-    # We need to return either a fake tensor or a real tensor depending on the mode.
-    # to detect the input mutation/aliasing.
-    with (
-        disable_proxy_modes_tracing(),
-        disable_functional_mode(),
-        suspend_functionalization(),
-    ):
+    def _get_example_value(n):
+        if not isinstance(n, torch.fx.Node):
+            return n
+        else:
+            return n.meta["val"] if "val" in n.meta else n.meta["example_value"]
 
-        def _from_functional_tensor(t: torch.Tensor) -> torch.Tensor:
-            if isinstance(t, FunctionalTensor) or torch._is_functional_tensor(t):
-                return torch.empty_strided(
-                    t.size(),
-                    t.stride(),
-                    dtype=t.dtype,
-                    requires_grad=t.requires_grad,
-                    device=t.device,
-                )
-            return t
+    fake_args = [
+        _get_example_value(n)
+        for n in gm.graph.find_nodes(op="placeholder")
+        if isinstance(n, torch.fx.Node) and "val" in n.meta
+    ]
+    outputs = [
+        _get_example_value(n)
+        for n in pytree.tree_flatten(gm.graph.find_nodes(op="output")[0].args[0])[0]
+    ]
 
-        fake_args = pytree.tree_map_only(
-            torch.Tensor, _from_functional_tensor, fake_args
-        )
-    # We want to disable active functional, proxy and fake modes if any.
-    # to create a encapsulated environment for fake tensor prop
-    with torch.utils._python_dispatch._disable_current_modes():
-        """This function returns mutated inputs, inp-inp alias, inp-out alias, out-out alias
-        in the graph module gm. It checks whether input tensor versions have
-        changed after run gm once to detect mutation and checks tensor storage
-        to detect alias.
-        """
+    # We need to analyze the original fake_args to detect
+    # inp-inp alias.
+    inp_storage_map = {
+        _tensor_storage(inp): i
+        for i, inp in enumerate(fake_args)
+        if isinstance(inp, torch.Tensor)
+    }
+    out_storage_map = {
+        _tensor_storage(out): i
+        for i, out in enumerate(outputs)
+        if isinstance(out, torch.Tensor)
+    }
+    inp_inp_alias_map = {
+        i: inp_storage_map[_tensor_storage(inp)]
+        for i, inp in enumerate(fake_args)
+        if isinstance(inp, torch.Tensor) and inp_storage_map[_tensor_storage(inp)] != i
+    }
+    out_out_alias_map = {
+        i: out_storage_map[_tensor_storage(out)]
+        for i, out in enumerate(outputs)
+        if isinstance(out, torch.Tensor) and out_storage_map[_tensor_storage(out)] != i
+    }
+    inp_out_alias_map = {
+        i: out_storage_map[_tensor_storage(inp)]
+        for i, inp in enumerate(fake_args)
+        if isinstance(inp, torch.Tensor) and _tensor_storage(inp) in out_storage_map
+    }
+    mutated_inputs = []
+    for node in gm.graph.nodes:
+        if node.op == "call_function" and isinstance(
+            node.target, torch._ops.OpOverload
+        ):
+            for arg_node, arg_schema in zip(node.args, node.target._schema.arguments):
+                if arg_schema.is_write:
+                    arg_val = _get_example_value(arg_node)
+                    assert isinstance(arg_val, torch.Tensor)
+                    if _tensor_storage(arg_val) in inp_storage_map:
+                        mutated_inputs.append(inp_storage_map[_tensor_storage(arg_val)])
 
-        def _tensor_version(t) -> Optional[int]:
-            if isinstance(t, torch.Tensor):
-                if not isinstance(t, FakeTensor):
-                    raise RuntimeError("Only fake tensor is allowed")
-                return t._version
-            return None
-
-        def _get_shape_env(
-            fake_args,
-        ) -> torch.fx.experimental.symbolic_shapes.ShapeEnv:
-            # detect_fake_mode requires there could be only one active fake mode. This
-            # restricts the usage of this function because the global TracingContext
-            # has a persistent fake mode but fake tensors can be created
-            # outside of the tracing context (e.g. in testing).
-            # Instead, we just look at fake_args fake tensor mode
-            for arg in fake_args:
-                if isinstance(arg, FakeTensor) and arg.fake_mode.shape_env is not None:
-                    return arg.fake_mode.shape_env
-            return torch.fx.experimental.symbolic_shapes.ShapeEnv()
-
-        # Clone the fake args to avoid mutating the original fake args
-        with ExitStack() as ctx_stack:
-            # We need to reuse prev_fake_mode's shape env to resolve
-            # the runtime assertions for unbacked symbols.
-            new_fake_mode = torch._subclasses.FakeTensorMode(
-                shape_env=_get_shape_env(fake_args),
-                # In executorch, there's an scalar_to_tensor pass that turns scalar inputs into a tensor constant
-                # e.g. add(a, 1) 1 is turned into a tensor, which becomes a constant tensor attribute in the graph.
-                # We allow non fake inputs for this purpose. This is fine for mutation detection purpose:
-                # inputs are all fake and all mutations/aliasing are still detected.
-                allow_non_fake_inputs=True,
-            )
-            # We need to temporarily turn inference_mode off because
-            # under inference mode, tensor version counter is not tracked.
-            no_inference_mode_ctx = torch.inference_mode(False)
-            ctx_stack.enter_context(new_fake_mode)
-            ctx_stack.enter_context(no_inference_mode_ctx)
-            if new_fake_mode.shape_env is not None:
-                ctx_stack.enter_context(
-                    new_fake_mode.shape_env.ignore_fresh_unbacked_symbols()
-                )
-
-            # create new fake tensors in new fake mode to avoid mutating original tensors
-            cloned = [
-                torch.empty_strided(
-                    arg.size(),
-                    arg.stride(),
-                    dtype=arg.dtype,
-                    device=arg.device,
-                    requires_grad=arg.requires_grad,
-                    layout=arg.layout,
-                )
-                if isinstance(arg, torch.Tensor)
-                else arg
-                for arg in fake_args
-            ]
-            before = [_tensor_version(arg) for arg in cloned]
-            outputs = gm(*cloned)
-            outputs = [outputs] if not isinstance(outputs, (list, tuple)) else outputs
-            after = [_tensor_version(arg) for arg in cloned]
-            mutated_inputs = [
-                i for i, (v1, v2) in enumerate(zip(before, after)) if v1 != v2
-            ]
-        # We need to analyze the original fake_args to detect
-        # inp-inp alias.
-        inp_storage_map = {
-            _tensor_storage(inp): i
-            for i, inp in enumerate(fake_args)
-            if isinstance(inp, torch.Tensor)
-        }
-        inp_inp_alias_map = {
-            i: inp_storage_map[_tensor_storage(inp)]
-            for i, inp in enumerate(fake_args)
-            if isinstance(inp, torch.Tensor)
-            and inp_storage_map[_tensor_storage(inp)] != i
-        }
-        out_storage_map = {
-            _tensor_storage(out): i
-            for i, out in enumerate(outputs)
-            if isinstance(out, torch.Tensor)
-        }
-        out_out_alias_map = {
-            i: out_storage_map[_tensor_storage(out)]
-            for i, out in enumerate(outputs)
-            if isinstance(out, torch.Tensor)
-            and out_storage_map[_tensor_storage(out)] != i
-        }
-        inp_out_alias_map = {
-            i: out_storage_map[_tensor_storage(inp)]
-            for i, inp in enumerate(cloned)
-            if isinstance(inp, torch.Tensor) and _tensor_storage(inp) in out_storage_map
-        }
-        return (
-            inp_inp_alias_map,
-            inp_out_alias_map,
-            out_out_alias_map,
-            mutated_inputs,
-            outputs,
-        )
+    return (
+        inp_inp_alias_map,
+        inp_out_alias_map,
+        out_out_alias_map,
+        mutated_inputs,
+        outputs,
+    )
 
 
 registered_hop_fake_fns: dict[torch._ops.OpOverload, Callable] = {}

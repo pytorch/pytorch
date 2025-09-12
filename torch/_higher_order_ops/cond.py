@@ -61,34 +61,22 @@ class CondOp(HigherOrderOperator):
         from torch._higher_order_ops.schema import HopSchemaGenerator
         from torch._higher_order_ops.utils import materialize_as_graph
 
-        then_gm: torch.fx.GraphModule = (
-            true_fn
-            if isinstance(true_fn, torch.fx.GraphModule)
-            else materialize_as_graph(true_fn, operands)
-        )
-        else_gm: torch.fx.GraphModule = (
-            false_fn
-            if isinstance(false_fn, torch.fx.GraphModule)
-            else materialize_as_graph(false_fn, operands)
-        )
-        example_inputs = [
-            n.meta["val"] if "val" in n.meta else n.meta["example_value"]
-            for n in then_gm.graph.find_nodes(op="placeholder")
-        ]
+        then_gm: torch.fx.GraphModule = materialize_as_graph(true_fn, operands)
+        else_gm: torch.fx.GraphModule = materialize_as_graph(false_fn, operands)
         (
             _,
             _,
             _,
             then_mutated_inputs,
             then_outputs,
-        ) = check_input_alias_and_mutation_return_outputs(then_gm, example_inputs)
+        ) = check_input_alias_and_mutation_return_outputs(then_gm)
         (
             _,
             _,
             _,
             else_mutated_inputs,
             else_outputs,
-        ) = check_input_alias_and_mutation_return_outputs(else_gm, example_inputs)
+        ) = check_input_alias_and_mutation_return_outputs(else_gm)
         mutated_inputs = set(then_mutated_inputs) | set(else_mutated_inputs)
 
         schema_gen = HopSchemaGenerator(self)
