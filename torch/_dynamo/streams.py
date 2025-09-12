@@ -5,21 +5,25 @@ from torch._library.custom_ops import custom_op
 Tensor = torch.Tensor
 
 
-@custom_op("streams::fork", mutates_args=())
-def fork_stream(index: int, args: list[Tensor]) -> list[Tensor]:
-    return [arg.clone() for arg in args]
+@custom_op("streams::fork", mutates_args={"args"})
+def fork_stream_(
+    index: int, device: torch.device, device_index: int, args: list[Tensor]
+) -> None:
+    pass
 
 
-@fork_stream.register_fake
-def _(index: int, args: list[Tensor]) -> list[Tensor]:
-    return [arg.clone() for arg in args]
+@fork_stream_.register_fake
+def _(index: int, device: torch.device, device_index: int, args: list[Tensor]) -> None:
+    pass
 
 
-@custom_op("streams::join", mutates_args=())
-def join_stream(index: int, args: list[Tensor]) -> list[Tensor]:
-    return [arg.clone() for arg in args]
+@custom_op("streams::join", mutates_args={"args"})
+def join_stream_(
+    index: int, device: torch.device, device_index: int, args: list[Tensor]
+) -> None:
+    pass
 
 
-@join_stream.register_fake
-def _(index: int, args: list[Tensor]) -> list[Tensor]:
-    return [arg.clone() for arg in args]
+@join_stream_.register_fake
+def _(index: int, device: torch.device, device_index: int, args: list[Tensor]) -> None:
+    pass
