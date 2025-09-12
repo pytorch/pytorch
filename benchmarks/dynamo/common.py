@@ -3590,7 +3590,7 @@ def process_entry(rank, runner, original_dir, args):
 
 
 def maybe_fresh_cache(args):
-    if os.getenv("CLEAR_CACHE", "1") == "1":
+    if os.getenv("CLEAR_CACHE", "0") == "1":
         return fresh_cache()
     cache_dir_assigned = "TORCHINDUCTOR_CACHE_DIR" in os.environ
     if not cache_dir_assigned and (
