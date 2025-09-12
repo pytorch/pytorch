@@ -1627,7 +1627,7 @@ test_operator_microbenchmark() {
   for t in $tests; do
     $TASKSET python -m "pt.${t}_test" --tag-filter long \
       --output-json-for-dashboard "${TEST_REPORTS_DIR}/operator_microbenchmark.json" \
-      --benchmark-name "PyTorch operator microbenchmark" $EXTRA_FLAGS
+      --benchmark-name "PyTorch operator microbenchmark" $EXTRA_FLAGS \
   done
 }
 
