@@ -24,12 +24,14 @@ class HopPartitionedGraph:
         fw_gm: torch.fx.GraphModule,
         bw_gm: torch.fx.GraphModule,
         n_fw_outputs: int,
-        n_checkpoints: int,
+        n_intermediates: int,
+        no_complex_exprs_at_boundary: bool,
     ):
         self.fw_gm = fw_gm
         self.bw_gm = bw_gm
         self.n_fw_outputs = n_fw_outputs
-        self.n_checkpoints = n_checkpoints
+        self.n_intermediates = n_intermediates
+        self.no_complex_exprs_at_boundary = no_complex_exprs_at_boundary
         self._reorder_fw_output()
         self._check_partition_boundary()
 
@@ -45,23 +47,27 @@ class HopPartitionedGraph:
                     f"fw_gm output[{i}] is of type {type(out.meta['val'])} but only SymInt or Tensor are allowed."
                 )
 
-            elif isinstance(out.meta["val"], torch.SymInt) and is_complex_expr(
-                out.meta["val"].node.expr
+            elif (
+                isinstance(out.meta["val"], torch.SymInt)
+                and is_complex_expr(out.meta["val"].node.expr)
+                and self.no_complex_exprs_at_boundary
             ):
                 invalid_reasons.append(
-                    f"fw_gm output[{i}] must be of type SymInt or Tensor but got {type(out.meta['val'])}"
+                    f"fw_gm output[{i}] must be of type SymInt with basic symbols or"
+                    f"Tensor but got {type(out.meta['val'])} {out.meta['val']}"
                 )
 
-        if len(fw_outputs) != self.n_fw_outputs + self.n_checkpoints:
+        if len(fw_outputs) != self.n_fw_outputs + self.n_intermediates:
             invalid_reasons.append(
-                f"len(fw_outputs) ({len(fw_outputs)}) != n_fw_outputs ({self.n_fw_outputs}) + n_checkpoints ({self.n_checkpoints})"
+                f"len(fw_outputs) ({len(fw_outputs)}) != n_fw_outputs ({self.n_fw_outputs}) + n_intermediates ({self.n_intermediates})"  # noqa: B950
             )
 
         bw_phs = list(self.bw_gm.graph.find_nodes(op="placeholder"))
 
         if len(fw_outputs) != len(bw_phs):
             invalid_reasons.append(
-                f"fw_gm's have {len(fw_outputs)} but backward takes {len(bw_phs)} inputs."
+                f"Expect number of fw_gm's output to be the same as bw_gm's input but "
+                f"fw_gm has {len(fw_outputs)} outputs, bw_gm takes {len(bw_phs)} inputs."
             )
 
         original_forward_outputs = fw_outputs[: self.n_fw_outputs]
@@ -92,7 +98,7 @@ class HopPartitionedGraph:
 
         for fw_out, bw_grad in zip(original_forward_outputs, bw_grads):
             if not _match_size_or_expr(fw_out.meta["val"], bw_grad.meta["val"]):
-                invalid_reasons.append("fw output don't match bw gradients")
+                invalid_reasons.append("fw outputs don't match bw gradients")
 
         if len(invalid_reasons) > 0:
             newline = "\n"
@@ -133,19 +139,17 @@ class HopPartitionedGraph:
         def bw_gm(f_tmp, g_tmp, k_tmp, grad_a, grad_b, grac):
           return grad_x, grad_y, grad_z
         """
-        # Initially the intermediates are the latter part of the fw outputs
         fw_gm_output_nodes = _find_hop_subgraph_outputs(self.fw_gm)
         fw_outputs_nodes = fw_gm_output_nodes[: self.n_fw_outputs]
         fw_intermediates_nodes = fw_gm_output_nodes[self.n_fw_outputs :]
-        n_intermediates = len(fw_intermediates_nodes)
-        if n_intermediates > 0:
+        if len(fw_intermediates_nodes) > 0:
             fw_intermediates_name_to_node = {n.name: n for n in fw_intermediates_nodes}
 
             # First n_intermediates placeholders
             bw_names: list[str] = [
                 ph.name
                 for ph in list(self.bw_gm.graph.find_nodes(op="placeholder"))[
-                    :n_intermediates
+                    : self.n_intermediates
                 ]
             ]
             new_fw_outputs = list(fw_outputs_nodes) + [
@@ -161,16 +165,26 @@ class HopPartitionedGraph:
 
 class HopJointGraph:
     def __init__(
-        self, joint_gm: torch.fx.GraphModule, n_primals: int, n_fw_outputs: int
+        self,
+        joint_gm: torch.fx.GraphModule,
+        n_primals: int,
+        n_fw_outputs: int,
+        *,
+        functionalized: bool,
     ):
         self.joint_gm = joint_gm
         self.n_primals = n_primals
         self.n_fw_outputs = n_fw_outputs
+        self.functionalized = functionalized
+
         self._rename_phs()
         self._remove_redundant_sym_size_ops()
-        self._mark_complex_exprs_as_must_recompute()
 
     def _rename_phs(self) -> None:
+        """
+        Rename the placeholders for joint_gm so that the partitioner
+        could recognize which inputs are primals and which are tangents.
+        """
         self.n_tangents = 0
         for i, ph in enumerate(self.joint_gm.graph.find_nodes(op="placeholder")):
             if i < self.n_primals:
@@ -186,9 +200,11 @@ class HopJointGraph:
 
     def _remove_redundant_sym_size_ops(self) -> None:
         """
-        Graph pass that deletes torch.ops.sym_size.int operators whose output is a
-        corresponding placeholder that holds the same symbol, and replace all uses
-        of their output to be directly accessing the placeholders.
+        Deletes torch.ops.sym_size.int operators whose output is a
+        corresponding placeholder that holds the same symbol, and replace all usage
+        of the sym_size node to be directly using the placeholders.
+
+        This is to make sure all basic symbols come from inputs.
         """
         placeholder_exprs = {}
         for node in self.joint_gm.graph.nodes:
@@ -222,9 +238,19 @@ class HopJointGraph:
 
     def _mark_complex_exprs_as_must_recompute(self) -> None:
         """
-        Graph pass that marks the recompute policy for nodes that have complex sympy expressions
-        so that the graph boundary only contains tensors or basic symbols.
+        For control flow operators such as scan, we don't want to
+        have symint in the partitioning boundaries because otherwise we would need to support stacking
+        the symints up, which causes more entropy in the stack.
+
+        By marking the recompute polify for complex nodes as MUST_RECOMPUTE, the partitioning boundary
+        no longer contains complex expressions.
+
+        Note that this pass doesn't exclude basic symbols from partitioning boundary
+        and it's up to the downstream to decide whether to return the basic symbol
+        or have a separate graph pass to remove them.
         """
+
+        from torch._functorch.partitioners import CheckpointPolicy
 
         for n in (
             node for node in self.joint_gm.graph.nodes if node.op == "call_function"
@@ -234,20 +260,23 @@ class HopJointGraph:
             val = n.meta["val"]
             if isinstance(val, torch.SymInt) and is_complex_expr(val.node.expr):
                 assert n.meta.get("recompute", None) is None
-                from torch._functorch.partitioners import CheckpointPolicy
 
                 n.meta["recompute"] = CheckpointPolicy.MUST_RECOMPUTE
 
-        # Clean up and recompile
         self.joint_gm.graph.lint()
         self.joint_gm.recompile()
 
-    def partition(self, partition_fn: Callable) -> HopPartitionedGraph:
+    def partition(
+        self, partition_fn: Callable, always_recompute_complex_exprs: bool
+    ) -> HopPartitionedGraph:
         if logger.isEnabledFor(logging.DEBUG):
             logger.debug(
                 "before min_cut_partition:\n%s",
                 self.joint_gm.print_readable(print_output=False),
             )
+
+        if always_recompute_complex_exprs:
+            self._mark_complex_exprs_as_must_recompute()
 
         fw_gm, bw_gm = partition_fn(
             self.joint_gm, None, num_fwd_outputs=self.n_fw_outputs
@@ -258,56 +287,76 @@ class HopJointGraph:
             logger.debug("fw_gm:\n%s", fw_gm.print_readable(print_output=False))
             logger.debug("bw_gm:\n%s", bw_gm.print_readable(print_output=False))
 
-        n_checkpoints = len(_find_hop_subgraph_outputs(fw_gm)) - self.n_fw_outputs
+        n_intermediates = len(_find_hop_subgraph_outputs(fw_gm)) - self.n_fw_outputs
 
         return HopPartitionedGraph(
             fw_gm,
             bw_gm,
             self.n_fw_outputs,
-            n_checkpoints,
+            n_intermediates,
+            always_recompute_complex_exprs,
         )
 
 
-class HopGraphMinCutPartitioner:
-    @staticmethod
-    def _create_joint_graph(
-        fw_fn: Callable, fw_args: tuple[Union[torch.Tensor, torch.SymInt], ...]
-    ) -> HopJointGraph:
-        fw_gm = materialize_as_graph(fw_fn, fw_args, force_enable_grad=True)
-        fw_gm_output_nodes = _find_hop_subgraph_outputs(fw_gm)
+def create_hop_joint_graph(
+    fw_fn: Callable,
+    fw_args: tuple[Union[torch.Tensor, torch.SymInt], ...],
+    functionalize: bool,
+) -> HopJointGraph:
+    fw_gm = materialize_as_graph(fw_fn, fw_args, force_enable_grad=True)
+    fw_gm_output_nodes = _find_hop_subgraph_outputs(fw_gm)
 
-        assert all(
-            isinstance(n, torch.fx.Node) and "val" in n.meta for n in fw_gm_output_nodes
-        )
-        fw_gm_output_vals = tuple(n.meta["val"] for n in fw_gm_output_nodes)  # type: ignore[arg-type]
+    assert all(
+        isinstance(n, torch.fx.Node) and "val" in n.meta for n in fw_gm_output_nodes
+    )
+    fw_gm_output_vals = tuple(n.meta["val"] for n in fw_gm_output_nodes)  # type: ignore[arg-type]
 
-        assert all(isinstance(val, torch.Tensor) for val in fw_gm_output_vals)
-        example_grads = tuple(torch.zeros_like(val) for val in fw_gm_output_vals)
+    assert all(isinstance(val, torch.Tensor) for val in fw_gm_output_vals)
+    example_grads = tuple(torch.zeros_like(val) for val in fw_gm_output_vals)
 
-        joint_fn = create_bw_fn(fw_fn, fw_args, return_fw_outputs=True)
+    joint_fn = create_bw_fn(fw_fn, fw_args, return_fw_outputs=True)
+    joint_gm = materialize_as_graph(
+        joint_fn, fw_args + example_grads, force_enable_grad=True
+    )
+    if functionalize:
         # Need to first trace out the joint_fn with autograd info on
-        # then functionalize the graph otherwise the grad information is lost for functional tensor
+        # then functionalize the graph otherwise the grad information is lost
         joint_gm = materialize_as_graph(
-            joint_fn, fw_args + example_grads, force_enable_grad=True
-        )
-        joint_gm_functionalized = materialize_as_graph(
             torch.func.functionalize(joint_gm, remove="mutations_and_views"),
             fw_args + example_grads,
         )
 
-        return HopJointGraph(
-            joint_gm_functionalized,
-            len(fw_args),
-            len(fw_gm_output_nodes),
-        )
+    return HopJointGraph(
+        joint_gm,
+        len(fw_args),
+        len(fw_gm_output_nodes),
+        functionalized=functionalize,
+    )
 
+
+class HopGraphMinCutPartitioner:
     @staticmethod
-    def create(
-        fw_fn: Callable, fw_args: tuple[Union[torch.Tensor, torch.SymInt], ...]
+    def create_partitioned_graph(
+        fw_fn: Callable,
+        fw_args: tuple[Union[torch.Tensor, torch.SymInt], ...],
+        *,
+        always_recompute_complex_exprs: bool = False,
     ) -> HopPartitionedGraph:
+        """
+        Inputs:
+            - fw_fn: the forward function that we'll use to create a joint graph and partition
+            - fw_args: the flat_args to fw_fn
+            - always_recompute_complex_exprs: when set to True, the bw_gm will do a re-compute
+              for inputs that are complex expressions such that the partitioning boundary
+              only consists of basic symbols and tensors.
+
+        Returns a HopPartitionedGraph
+        """
         from torch._functorch.partitioners import min_cut_rematerialization_partition
 
-        joint_graph: HopJointGraph = HopGraphMinCutPartitioner._create_joint_graph(
-            fw_fn, fw_args
+        joint_graph: HopJointGraph = create_hop_joint_graph(
+            fw_fn, fw_args, functionalize=True
         )
-        return joint_graph.partition(min_cut_rematerialization_partition)
+        return joint_graph.partition(
+            min_cut_rematerialization_partition, always_recompute_complex_exprs
+        )
