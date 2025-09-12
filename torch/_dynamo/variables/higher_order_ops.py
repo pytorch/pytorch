@@ -3510,7 +3510,8 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
     @contextlib.contextmanager
     def enable(cls):
         """Context manager to temporarily enable local map wrapping.
-        Will be removed when speculate_subgraph supports subclass inputs.
+        Will be removed when speculate_subgraph supports subclass inputs:
+        https://github.com/pytorch/pytorch/issues/161456.
 
         Usage:
             with LocalMapWrappedHigherOrderVariable.enable_wrapping():
