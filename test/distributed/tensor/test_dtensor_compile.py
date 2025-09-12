@@ -96,6 +96,7 @@ aot_eager_graph = aot_autograd(
 
 device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 
+
 def _apply_sharding(mod: nn.Module, shard_dim: int, device_mesh: DeviceMesh):
     """
     Shards on the given dimension if possible, else replicate
