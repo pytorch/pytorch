@@ -48,7 +48,7 @@ set(NATIVERT_TEST_SRCS
   ${TORCH_ROOT}/torch/csrc/inductor/aoti_torch/oss_proxy_executor.cpp
 )
 
-if(USE_CUDA)
+if(USE_CUDA OR USE_ROCM)
   list(APPEND NATIVERT_TEST_SRCS ${TORCH_ROOT}/torch/nativert/executor/triton/CudaTritonKernelManager.cpp)
   list(APPEND NATIVERT_TEST_SRCS ${TORCH_ROOT}/torch/nativert/executor/AOTInductorModelContainerCudaShim.cpp)
 endif()

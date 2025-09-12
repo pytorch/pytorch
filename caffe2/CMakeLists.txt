@@ -551,8 +551,10 @@ if(USE_CUDA OR USE_ROCM)
 endif()
 
 if(USE_CUDA)
-  # eventually do rocm
   append_filelist("libtorch_nativert_cuda_sources" Caffe2_GPU_SRCS)
+endif()
+if(USE_ROCM)
+  append_filelist("libtorch_nativert_cuda_sources" Caffe2_HIP_SRCS)
 endif()
 
 if(USE_CUDA)
