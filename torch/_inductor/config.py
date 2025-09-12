@@ -1580,6 +1580,17 @@ class aot_inductor:
     # Whether to enable link-time-optimization
     enable_lto = os.environ.get("AOT_INDUCTOR_ENABLE_LTO", "0") == "1"
 
+    # Whether the compiled .so should link to libtorch
+    # TODO: should consolidate this flag with compile_standalone
+    link_libtorch: bool = True
+
+    # If None, the default torch headers such as torch/include
+    # will be used. Otherwise, the provided path will be used instead.
+    # This is needed for torchnative to load libtorch-free .so.
+    # Such as [f"{torchnative_dir}/standalone",f"{torchnative_dir}/",].
+    # TODO: should consolidate this flag with compile_standalone
+    libtorch_free_headers: Optional[list[str]] = None
+
 
 class cuda:
     """Settings for cuda backend, today this consists of cutlass"""
