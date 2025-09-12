@@ -75,7 +75,7 @@ Tensor TensorMaker::make_tensor() {
    }
    auto storage_size = size * itemsize;
    if (storage_offset_) {
-     storage_size += storage_offset_.value();
+     storage_size += storage_offset_.value() * itemsize;
    }
    return storage_size;
  }

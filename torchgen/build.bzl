@@ -4,7 +4,7 @@ def define_targets(rules):
         srcs = rules.glob(["**/*.py"]),
         visibility = ["//visibility:public"],
         deps = [
-            rules.requirement("pyyaml"),
+            rules.requirement("PyYAML"),
             rules.requirement("typing-extensions"),
         ],
     )
@@ -14,7 +14,7 @@ def define_targets(rules):
         srcs = [":torchgen"],
         visibility = ["//visibility:public"],
         deps = [
-            rules.requirement("pyyaml"),
+            rules.requirement("PyYAML"),
             rules.requirement("typing-extensions"),
         ],
     )

@@ -6369,7 +6369,7 @@ class TestLazyLogitsInitialization(DistributionsTestCase):
             except NotImplementedError:
                 pass
             self.assertNotIn("probs", dist.__dict__, msg=message)
-            dist.batch_shape, dist.event_shape
+            _ = (dist.batch_shape, dist.event_shape)
             self.assertNotIn("probs", dist.__dict__, msg=message)
 
     def test_lazy_probs_initialization(self):
@@ -6386,7 +6386,7 @@ class TestLazyLogitsInitialization(DistributionsTestCase):
             except NotImplementedError:
                 pass
             self.assertNotIn("logits", dist.__dict__, msg=message)
-            dist.batch_shape, dist.event_shape
+            _ = (dist.batch_shape, dist.event_shape)
             self.assertNotIn("logits", dist.__dict__, msg=message)
 
 

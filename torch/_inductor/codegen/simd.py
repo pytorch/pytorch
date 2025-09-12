@@ -408,6 +408,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
             else self.should_use_cooperative_reduction()
         )
         self.tiling_scores: Optional[dict[str, sympy.Expr]] = tiling_scores
+        self.tiling: dict[str, sympy.Expr] = tiling
         self.persistent_reduction: bool = (
             override_persistent_reduction
             if override_persistent_reduction is not None
@@ -1009,7 +1010,10 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         # for the "cat". However, I think it might be a bit overwhelming that
         # we add such complexity only for handling some particular cases for
         # benchmarking.
-        out_numel = V.graph.sizevars.size_hint(sympy_product(self.numels.values()))
+        out_numel = V.graph.sizevars.size_hint(
+            sympy_product(self.numels.values()),
+            fallback=config.unbacked_symint_fallback,
+        )
         for i, arg in enumerate(call_args):
             # "buf" may be narrowed. In this case, the number of memory accesses
             # should be estimated based on the reinterpreted layout.
@@ -1020,7 +1024,9 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                 nbytes.append(0)
                 continue
             arg_numel = V.graph.get_numel(arg)
-            buf_size = V.graph.sizevars.size_hint(arg_numel)
+            buf_size = V.graph.sizevars.size_hint(
+                arg_numel, fallback=config.unbacked_symint_fallback
+            )
             if buf_size > out_numel:
                 # This arg points to a buf that has been sliced.
                 # We need to count each individual slice to have
@@ -1422,6 +1428,15 @@ class SIMDScheduling(BaseScheduling):
             if buf.has_tensor_output()
         ]
 
+        for buf in buffers:
+            if not buf.has_tensor_output() and isinstance(buf, ir.MutationOutput):
+                mutated_bufs = buf.get_mutation_buffers()
+                buf_sizes += [
+                    buf.get_layout().storage_size()
+                    for buf in mutated_bufs
+                    if buf.has_tensor_output()
+                ]
+
         if not all(expr_fits_within_32bit(size) for size in buf_sizes):
             return False
 
@@ -1449,15 +1464,17 @@ class SIMDScheduling(BaseScheduling):
         for kernel in kernels:
             self.codegen_node_schedule_with_kernel(node_schedule, kernel)
         MultiKernel.merge_workspaces_inplace(kernels)
+        debug_handles: list[tuple[str, Optional[int]]] = []
         for kernel in kernels:
             with V.set_kernel_handler(kernel):
                 src_code = kernel.codegen_kernel()
             kernel_name = self.define_kernel(src_code, node_schedule, kernel)
-            if config.trace.provenance_tracking:
-                set_kernel_post_grad_provenance_tracing(
+            if config.trace.provenance_tracking_level != 0:
+                debug_handle = set_kernel_post_grad_provenance_tracing(
                     node_schedule,  # type: ignore[arg-type]
                     kernel_name,
                 )
+                debug_handles.append((kernel_name, debug_handle))
             log.debug("Generating kernel code with kernel_name: %s", kernel_name)
             kernel.kernel_name = kernel_name
             kernel.code_hash = code_hash(src_code)
@@ -1474,6 +1491,10 @@ class SIMDScheduling(BaseScheduling):
                 node.mark_run()
 
         self.codegen_comment(node_schedule)
+        for kernel_name, debug_handle in debug_handles:
+            V.graph.wrapper_code.write_provenance_debug_handle(
+                kernel_name, debug_handle
+            )
         final_kernel.call_kernel(final_kernel.kernel_name)
 
         if config.nan_asserts:
@@ -1664,7 +1685,7 @@ class SIMDScheduling(BaseScheduling):
 
             kernel.kernel_name = self.define_kernel(src_code, node_schedule, kernel)
 
-            if config.trace.provenance_tracking:
+            if config.trace.provenance_tracking_level != 0:
                 set_kernel_post_grad_provenance_tracing(
                     node_schedule, kernel.kernel_name
                 )
@@ -1849,7 +1870,7 @@ class SIMDScheduling(BaseScheduling):
         for src_code, kernel, _ in kernel_code_list:
             kernel_name = self.define_kernel(src_code, [combo_kernel_node], kernel)
             # dump provenance node info for ComboKernelNode/ForeachKernel type
-            if config.trace.provenance_tracking:
+            if config.trace.provenance_tracking_level != 0:
                 set_kernel_post_grad_provenance_tracing(
                     combo_kernel_node.snodes, kernel_name
                 )
@@ -1991,7 +2012,7 @@ class SIMDScheduling(BaseScheduling):
     @classmethod
     def create_tiling(
         cls, pw_tiling: Sequence[sympy.Expr], reduction_tiling: Sequence[sympy.Expr]
-    ) -> dict[str, sympy.Expr]:
+    ) -> immutable_dict[str, sympy.Expr]:
         """
         Create a tiling dict from pointwise and reduction splits.
         """
@@ -2006,7 +2027,7 @@ class SIMDScheduling(BaseScheduling):
         cls,
         tiling: Sequence[sympy.Expr],
         is_pointwise: bool,
-    ) -> dict[str, sympy.Expr]:
+    ) -> immutable_dict[str, sympy.Expr]:
         return cls.create_tiling(
             tiling if is_pointwise else [],
             tiling if not is_pointwise else [],
@@ -2018,7 +2039,7 @@ class SIMDScheduling(BaseScheduling):
         tiling: dict[str, sympy.Expr],
         numel: sympy.Expr,
         reduction_numel: sympy.Expr,
-    ) -> dict[str, sympy.Expr]:
+    ) -> immutable_dict[str, sympy.Expr]:
         """
         Given a tiling for only pointwise or reduction dimensions, adds the missing one.
         """
@@ -2039,7 +2060,7 @@ class SIMDScheduling(BaseScheduling):
         node_schedule,
         pointwise_numel,
         reduction_numel,
-    ) -> list[dict[str, tuple[sympy.Expr]]]:
+    ) -> list[immutable_dict[str, sympy.Expr]]:
         """
         Creates N-dimensional tiling candidates, attempting to simplify loads/stores
         by tiling the kernel into higher dimensions.
@@ -2047,7 +2068,7 @@ class SIMDScheduling(BaseScheduling):
         Returns a list of tilings ranked by dimensionality.
         """
         is_pointwise = reduction_numel == 1
-        tilings = OrderedSet[dict[str, sympy.Expr]]()
+        tilings = OrderedSet[immutable_dict[str, sympy.Expr]]()
         for node in EnableReduction.filter(node_schedule):
             if not isinstance(node, scheduler.SchedulerNode):
                 continue
@@ -2312,7 +2333,7 @@ class SIMDScheduling(BaseScheduling):
                     )
                 )
 
-        tilings: list[tuple[CandidateTiling, dict[str, sympy.Expr]]] = []
+        tilings: list[tuple[CandidateTiling, immutable_dict[str, sympy.Expr]]] = []
         for (pw_split, pw_score), (red_split, red_score) in score_split:
             candidate = CandidateTiling(
                 cls.create_tiling(pw_split, red_split),

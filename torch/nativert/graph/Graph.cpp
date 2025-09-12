@@ -661,9 +661,25 @@ void Graph::replaceAllUsesAfterNode(
 }
 
 void Graph::applyDevicePlacement(const Placement& placement) {
-  // TODO: consolidate device info in weight loading here as well.
+  TORCH_CHECK(
+      !placementApplied_,
+      "placement has been applied to the graph! placement must be applied once and once only.");
+
+  placementApplied_ = true;
+
+  // inplace override node's device-typed attributes according to placement
   for (auto& node : nodes_) {
     node.applyDevicePlacement(placement);
+  }
+
+  // inplace override weightMeta_'s device according to placement
+  for (auto& [_, weightMeta] : weightsMeta_) {
+    weightMeta.applyDevicePlacement(placement);
+  }
+
+  // inplace override tensorValuesMeta_'s device according to placement
+  for (auto& [_, tensorMeta] : tensorValuesMeta_) {
+    tensorMeta.applyDevicePlacement(placement);
   }
 }
 

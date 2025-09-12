@@ -27,7 +27,14 @@ import torch
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.testing import rand_strided
-from torch._dynamo.utils import counters, dynamo_timed, identity, preserve_rng_state
+from torch._dynamo.utils import (
+    counters,
+    dynamo_timed,
+    get_chromium_event_logger,
+    identity,
+    preserve_rng_state,
+)
+from torch._inductor.await_utils import await_sync
 from torch._inductor.utils import clear_on_fresh_cache
 from torch.utils._filelock import FileLock
 from torch.utils._ordered_set import OrderedSet
@@ -167,26 +174,39 @@ class PartialRender:
     of replacements after the initial render.
     """
 
-    FINALIZED_HOOK: object = object()
+    HookFn = Callable[[], str]
 
-    def __init__(self, code, replacement_hooks) -> None:
+    def __init__(
+        self, code: str, replacement_hooks: dict[str, Optional[HookFn]]
+    ) -> None:
         super().__init__()
-        self._code = code
-        self.replacement_hooks = replacement_hooks
+        self._code: str = code
+        self.replacement_hooks: dict[str, Optional[PartialRender.HookFn]] = (
+            replacement_hooks
+        )
 
     @property
-    def code(self):
+    def code(self) -> str:
+        """
+        The fully rendered code. Will **error** if any hooks have yet to be
+        finalized.
+        """
         remaining_active_hooks = [
-            key
-            for key, fn in self.replacement_hooks.items()
-            if fn is not self.FINALIZED_HOOK
+            key for key, fn in self.replacement_hooks.items() if fn is not None
         ]
         assert len(remaining_active_hooks) == 0, (
             f"The following hooks have not yet been finalized:\n {remaining_active_hooks=}"
         )
         return self._code
 
-    def finalize_hook(self, hook_key: str, strict=True) -> None:
+    def finalize_hook(self, hook_key: str, strict: bool = True) -> None:
+        """
+        Finalize a hook by name.
+
+        :param strict: If ``True``, raise an error if the hook wasn't found.
+
+        NOTE: Will **error** if the hook has already been finalized.
+        """
         if hook_key not in self.replacement_hooks:
             if strict:
                 raise RuntimeError(
@@ -194,11 +214,12 @@ class PartialRender:
                 )
             else:
                 return
-        assert self.replacement_hooks[hook_key] is not self.FINALIZED_HOOK, (
-            "hook_key can only be called once"
-        )
-        self._code = self._code.replace(hook_key, self.replacement_hooks[hook_key]())
-        self.replacement_hooks[hook_key] = self.FINALIZED_HOOK
+
+        hook = self.replacement_hooks[hook_key]
+        assert hook is not None, f"Hook key {hook_key} can only be called once"
+        self._code = self._code.replace(hook_key, hook())
+
+        self.replacement_hooks[hook_key] = None
 
     def finalize_remaining(self) -> str:
         """
@@ -209,11 +230,17 @@ class PartialRender:
         finalize active hooks.
         """
         for key, fn in self.replacement_hooks.items():
-            if fn is not self.FINALIZED_HOOK:
+            if fn is not None:
                 self.finalize_hook(key)
         return self.code
 
     def finalize_all(self) -> str:
+        """
+        Finalize all active hooks.
+
+        NOTE: unlike ``finalize_remaining``, this method will **error** if any
+        hook has already been finalized.
+        """
         for key in self.replacement_hooks:
             self.finalize_hook(key)
         return self.code
@@ -227,7 +254,7 @@ class PartialRender:
 class SubgraphInfo:
     body: IndentedBuffer
     template_mask: Optional[str] = None
-    template_out: Optional[str] = None
+    template_out_shape: Optional[Union[str, tuple[str]]] = None
     compute: IndentedBuffer = dataclasses.field(default_factory=IndentedBuffer)
     indexing_code: IndentedBuffer = dataclasses.field(default_factory=IndentedBuffer)
     loads: IndentedBuffer = dataclasses.field(default_factory=IndentedBuffer)
@@ -236,7 +263,7 @@ class SubgraphInfo:
 
     # only copied over if not None
     range_trees: Optional[list["IterationRangesRoot"]] = None
-    numels = None  # type: ignore[var-annotated]
+    numels: Optional[dict[str, sympy.Expr]] = None
 
     def __post_init__(self):
         self.only_copy_if_non_none_fields = ("range_trees", "numels")
@@ -268,7 +295,8 @@ class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
         if name not in self.fixed_inputs:
             index_str = self._process_indexing(index)
             var = self._add_kernel_input(name)
-            var_dtype = V.graph.get_buffer(name).dtype
+            buffer = V.graph.get_buffer(name)
+            var_dtype = buffer.dtype
             line = f"tl.load({var} + {index_str})"
 
             if (
@@ -278,11 +306,16 @@ class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
                 line += ".to(tl.float32)"
                 var_dtype = torch.float32
 
-            out = self.kernel.cse.generate(self.kernel.compute, line, dtype=var_dtype)
+            out = self.kernel.cse.generate(
+                self.kernel.compute, line, dtype=var_dtype, shape=()
+            )
             return out
 
         return self.kernel.cse.generate(
-            self.kernel.compute, f"({self.fixed_inputs[name]})", dtype=torch.float32
+            self.kernel.compute,
+            f"({self.fixed_inputs[name]})",
+            dtype=torch.float32,
+            shape=(),
         )
 
     def indirect_indexing(self, index_var: str, size, check, wrap_neg=True):
@@ -333,7 +366,7 @@ class TritonTemplateKernel(TritonKernel):
     def __init__(
         self,
         kernel_name,
-        input_nodes,
+        input_nodes: tuple[ir.IRNode],
         output_node,
         defines,
         num_stages,
@@ -412,7 +445,7 @@ class TritonTemplateKernel(TritonKernel):
         self.loads: IndentedBuffer = FakeIndentedBuffer()
         self.stores: IndentedBuffer = FakeIndentedBuffer()
         self.template_mask: Optional[str] = None
-        self.template_out: Optional[str] = None
+        self.template_out_shape: Optional[Union[str, tuple[str]]] = None
         self.ops_handler: Optional[V.WrapperHandler] = None  # type: ignore[name-defined]
 
         # When caching is enabled, the generated code is not dependent on the input nodes names, or
@@ -431,6 +464,9 @@ class TritonTemplateKernel(TritonKernel):
         # When prologue_loads_all_inputs is true, prologue_supported_inputs is populated during def_kernel
         # by adding all inputs.
         self.prologue_loads_all_inputs = prologue_loads_all_inputs
+
+        # Extra functions to be exposed during partial template rendering.
+        self.extra_template_env_fns: list[Callable[..., Any]] = []
 
     def input_dependent_preserved_state(self) -> str:
         # Not adding self.args.output_buffers on purpose. But we do not need to reproduce it on a cache hit.
@@ -567,7 +603,7 @@ class TritonTemplateKernel(TritonKernel):
 
         inductor_meta = {
             "kernel_name": str(Placeholder.DESCRIPTIVE_NAME),
-            **TritonKernel.inductor_meta_common(),
+            **self.inductor_meta_common(),
             **FixedGrid.setup_grid_as_args(),
         }
         if config.profile_bandwidth or config.benchmark_kernel:
@@ -576,6 +612,8 @@ class TritonTemplateKernel(TritonKernel):
         if config.benchmark_kernel:
             flops = self.estimate_flops()
             inductor_meta["kernel_flop"] = flops
+
+        inductor_meta["config_args"] = self.meta
 
         template_args = f"""
             num_stages={self.num_stages},
@@ -603,8 +641,7 @@ class TritonTemplateKernel(TritonKernel):
             arg_defs, *_ = self.args.python_argdefs()
             return f"{', '.join(x.full_name() for x in arg_defs)}"
 
-        self.render_hooks["<ARGDEFS>"] = hook
-        return "<ARGDEFS>"
+        return self._register_hook("<ARGDEFS>", hook, allow_overwriting=True)
 
     def gen_defines(self):
         return self.defines
@@ -682,9 +719,7 @@ class TritonTemplateKernel(TritonKernel):
                 code.splice(renames.getvalue())
             return code.getvalue()
 
-        assert "<DEF_KERNEL>" not in self.render_hooks
-        self.render_hooks["<DEF_KERNEL>"] = hook
-        return "<DEF_KERNEL>"
+        return self._register_hook("<DEF_KERNEL>", hook)
 
     def size(self, name: str, index: int):
         """
@@ -806,6 +841,7 @@ class TritonTemplateKernel(TritonKernel):
         mask: Optional[str] = None,
         other: Optional[Union[float, int]] = 0.0,
         indent_width: int = 4,
+        index_shape: Optional[tuple[str]] = None,
     ):
         """Loads an input and applies any necessary preprocessing or masking.
 
@@ -883,7 +919,7 @@ class TritonTemplateKernel(TritonKernel):
             # We are using "None" for clarity in output code, but
             # we could alternatively emit `xmask = tl.full([xindex.shape], True, tl.int1)`
             self.template_mask = mask if mask is not None else "None"
-            self.template_out = "xindex"
+            self.template_out_shape = index_shape if index_shape else "xindex"
             self.template_indices = indices
             self.named_input_nodes[input_name].data.freeze_layout()
             self.cse.invalidate(OrderedSet())
@@ -946,7 +982,7 @@ class TritonTemplateKernel(TritonKernel):
             else:
                 out_indexing = self.indexing(
                     output_index,
-                    copy_shape=self.template_out,
+                    copy_shape=self.template_out_shape,
                     override_mask=self.template_mask,
                 )
                 from .codegen.triton import IndexingOptions
@@ -977,9 +1013,7 @@ class TritonTemplateKernel(TritonKernel):
 
                 return textwrap.indent(self.body.getvalue(), " " * indent_width).strip()
 
-        assert hook_key not in self.render_hooks
-        self.render_hooks[hook_key] = hook
-        return hook_key
+        return self._register_hook(hook_key, hook)
 
     def store_output(
         self,
@@ -987,6 +1021,7 @@ class TritonTemplateKernel(TritonKernel):
         val: str,
         mask: Optional[str] = None,
         indent_width: int = 4,
+        val_shape: Optional[tuple[str]] = None,
     ):
         """Stores the final output and appends any epilogue fusions if the buffer hasn't been optimized away.
 
@@ -1025,7 +1060,7 @@ class TritonTemplateKernel(TritonKernel):
                 "xindex"
             )
             self.template_mask = mask
-            self.template_out = val
+            self.template_out_shape = val_shape if val_shape else val
             self.template_indices = indices
             output_index = self.output_node.get_layout().make_indexer()(index_symbols)
             output_index = self.rename_indexing(output_index)
@@ -1037,13 +1072,21 @@ class TritonTemplateKernel(TritonKernel):
                 if "ACC_TYPE" in self.meta
                 else torch.float32
             )
-            epilogue_args = [V.kernel.cse.namedvar(val, dtype=acc_dtype)]
+            epilogue_args = [
+                V.kernel.cse.namedvar(val, dtype=acc_dtype, shape=val_shape)
+            ]
             for input_node in itertools.chain(
                 self.input_nodes[: self.prefix_args],
                 self.input_nodes[len(self.input_nodes) - self.suffix_args :],
             ):
                 input_node.freeze_layout()
-                epilogue_args.append(input_node.make_loader()(index_symbols))
+                epilogue_arg = V.kernel.cse.generate(
+                    self.compute,
+                    input_node.make_loader()(index_symbols),
+                    dtype=acc_dtype,
+                    shape=input_node.get_size(),
+                )
+                epilogue_args.append(epilogue_arg)
                 # We update frozen_layouts_cnt in order to replay this function on a cache hit.
                 self.frozen_layouts_cnt += 1
 
@@ -1061,9 +1104,50 @@ class TritonTemplateKernel(TritonKernel):
 
             return textwrap.indent(self.body.getvalue(), " " * indent_width).strip()
 
-        assert "<STORE_OUTPUT>" not in self.render_hooks
-        self.render_hooks["<STORE_OUTPUT>"] = hook
-        return "<STORE_OUTPUT>"
+        return self._register_hook("<STORE_OUTPUT>", hook)
+
+    def _register_hook(
+        self,
+        hook_name: str,
+        hook_fn: PartialRender.HookFn,
+        *,
+        allow_overwriting: bool = False,
+    ) -> str:
+        """
+        Register a hook function with a name.
+
+        ``hook_name`` should match the string that will be replaced via
+        ``hook_fn``, and should not already be in use for a hook.
+
+        If ``allow_overwriting`` is ``False``, will assert that there isn't
+        currently a registered hook of the same name before registering the new
+        one.
+        """
+
+        if not allow_overwriting:
+            assert hook_name not in self.render_hooks, (
+                f"Tried to register the hook {hook_name} multiple times. If "
+                "desired, pass allow_overwriting=True to _register_hook"
+            )
+        self.render_hooks[hook_name] = hook_fn
+        return hook_name
+
+    def _register_extra_template_env_fns(self, *fns: Callable[..., Any]):
+        """
+        Register some extra functions to expose when performing the initial
+        template render, so that they're in scope to by used by jinja
+        expressions.
+
+        These can be used to, for example, implement extra replacement hooks,
+        if the given function:
+
+        * Returns the name of their hook, which should also be the string to
+          replace via the hook function. The convention is to use the format
+          <HOOK_NAME>.
+        * Assigns the corresponding entry in ``self.render_hooks`` to a hook
+          function.
+        """
+        self.extra_template_env_fns.extend(fns)
 
     def render(self, template, kwargs, record_input_dependent_tracked_event=False):
         if record_input_dependent_tracked_event:
@@ -1083,6 +1167,7 @@ class TritonTemplateKernel(TritonKernel):
                 self.modification,
                 self.gen_argdefs,
                 self.gen_defines,
+                *self.extra_template_env_fns,
             ]
         }
         return PartialRender(
@@ -1125,7 +1210,7 @@ class TritonTemplateKernel(TritonKernel):
             dense_indexing=False,
             # We pass template_out as the shape to broadcast the indexing to as
             # the mask might be broadcast to the output shape
-            copy_shape=self.template_out,
+            copy_shape=self.template_out_shape,
             override_mask=self.template_mask,
             block_ptr=block_ptr,
             tma_compatibility_checker=tma_compatibility_checker,
@@ -1365,6 +1450,11 @@ class TritonTemplate(KernelTemplate):
     # was not used are the same.
     test_cache = False
 
+    @property
+    def uid(self) -> str:
+        # unique by prefixing with triton
+        return f"triton::{self.name}"
+
     def maybe_append_choice(
         self, choices: list[Any], **kwargs: Any
     ) -> Optional[NotImplementedError]:
@@ -1377,7 +1467,9 @@ class TritonTemplate(KernelTemplate):
         """
 
         try:
-            choices.append(self.generate(generate_with_caching=True, **kwargs))
+            choice = self.generate(generate_with_caching=True, **kwargs)
+            if choice is not None:
+                choices.append(choice)
             return None
         except NotImplementedError as e:
             log.info(
@@ -1438,17 +1530,21 @@ class TritonTemplate(KernelTemplate):
 
         for name, val in kwargs.items():
             defines.write(f"{name} : tl.constexpr = {val}\n")
-        defines = defines.getvalue()
 
         fake_out = ir.Buffer(name="buf_out", layout=layout)
         kernel_name = f"triton_{self.name}"
 
         numel = sympy_product(layout.size)
         buffers = itertools.chain(input_nodes, (fake_out,))
-        if not TritonScheduling.can_use_32bit_indexing(numel, buffers):
-            raise NotImplementedError(
-                "64-bit indexing is not yet implemented for triton templates"
-            )
+
+        if TritonScheduling.can_use_32bit_indexing(numel, buffers):
+            index_dtype = "tl.int32"
+        else:
+            index_dtype = "tl.int64"
+
+        # Add index dtype to defines so it's available in the template
+        defines.write(f"INDEX_DTYPE : tl.constexpr = {index_dtype}\n")
+        defines = defines.getvalue()
 
         kernel_options = {
             "input_nodes": input_nodes,
@@ -1824,6 +1920,36 @@ class ExternKernelChoice:
         return ExternKernelCaller(
             self, input_nodes, layout, kwargs, has_out_variant=self.has_out_variant
         )
+
+    @property
+    def uid(self) -> str:
+        # unique by prefixing with aten
+        return f"aten::{self.name}"
+
+    def choice_or_none(self, **kwargs: Any) -> Optional[ChoiceCaller]:
+        """
+        Maybe generates a new ChoiceCaller and returns it, or None if generation fails.
+
+        kwargs: Additional kwargs to be passed to generate a new ChoiceCaller.
+        """
+        temp_choices: list[Any] = []
+        result = self.maybe_append_choice(temp_choices, **kwargs)
+        if result is None and len(temp_choices) == 1:
+            return temp_choices[0]
+        return None
+
+    def maybe_append_choice(
+        self, choices: list[Any], **kwargs: Any
+    ) -> Optional[NotImplementedError]:
+        # convenience function to match the Template interface, so that
+        # templates and ExternKernelChoice can be treated the same when
+        # generating choice callers
+        assert "input_nodes" in kwargs, "input_nodes argument required"
+        assert "layout" in kwargs, "layout argument required"
+        input_nodes = kwargs.pop("input_nodes")
+        layout = kwargs.pop("layout")
+        choices.append(self.bind(input_nodes=input_nodes, layout=layout, **kwargs))
+        return None
 
 
 class TritonTemplateCaller(ir.TritonTemplateCallerBase):
@@ -2274,6 +2400,7 @@ class AlgorithmSelectorCache(PersistentCache):
         input_gen_fns: Optional[dict[int, Callable[[ir.Buffer], torch.Tensor]]] = None,
         precompilation_timeout_seconds: int = 60 * 60,
         return_multi_template=False,
+        best_config_future=None,
     ):
         from .codegen.cuda.cuda_kernel import CUDATemplateCaller
 
@@ -2294,16 +2421,19 @@ class AlgorithmSelectorCache(PersistentCache):
             N = input_nodes[-1].get_size()[-1]
             append_to_log(mm_file_name, {"invoke": str((M, K, N))})
 
-        if len(choices) == 0:
+        def create_no_valid_choices() -> NoValidChoicesError:
             backend_config = (
                 "max_autotune_gemm_backends"
                 if name != "convolution"
                 else "max_autotune_conv_backends"
             )
-            raise NoValidChoicesError(
+            return NoValidChoicesError(
                 f"No choices to select, please consider adding ATEN into {backend_config} "
                 "config (defined in torch/_inductor/config.py) to allow at least one choice. "
             )
+
+        if len(choices) == 0:
+            raise create_no_valid_choices()
         log.debug("Max autotune selects from %s choices.", str(len(choices)))
 
         if len(choices) == 1:
@@ -2337,22 +2467,14 @@ class AlgorithmSelectorCache(PersistentCache):
                 f"{name}_template_autotuning",
                 log_pt2_compile_event=True,
                 dynamo_compile_column_us="compile_time_autotune_time_us",
-                metadata={
-                    "autotune_strides": ", ".join(
-                        [str(n.get_stride()) for n in input_nodes]
-                    ),
-                    "autotune_dtypes": ", ".join(
-                        [str(n.get_dtype()) for n in input_nodes]
-                    ),
-                    "autotune_shape": ", ".join(
-                        ["x".join(map(str, n.get_size())) for n in input_nodes]
-                    ),
-                    "autotune_offset": ", ".join(
-                        [str(n.get_layout().offset) for n in input_nodes]
-                    ),
-                },
+                metadata=_autotune_metadata(input_nodes),
             ):
-                return benchmark(choices, hint_override=hint_override)
+                benchmark_results = benchmark(choices, hint_override=hint_override)
+                if config.max_autotune_report_choices_stats:
+                    _log_autotune_choices_stats(
+                        f"{name}_template_autotuning", benchmark_results
+                    )
+                return benchmark_results
 
         if config.autotune_in_subproc:
             # Initialize the suprocess pool so it will warmup early.
@@ -2368,6 +2490,10 @@ class AlgorithmSelectorCache(PersistentCache):
                 precompile_fn()
             precompile_elapse = time.time() - precompile_start_ts
             log.debug("Precompilation elapsed time: %.02fs", precompile_elapse)
+            # Prune anything that failed to compile
+            choices = [c for c in choices if not c.failed]
+            if len(choices) == 0:
+                raise create_no_valid_choices()
 
             candidates = self.prescreen_choices(
                 choices, name, inputs_key, self.prescreening_cache
@@ -2389,6 +2515,35 @@ class AlgorithmSelectorCache(PersistentCache):
                 log.debug("Prescreening elapsed time: %.02fs", prescreening_elapse)
 
             autotune_start_ts = time.time()
+
+            if best_config_future is not None:
+                best_config = await_sync(best_config_future)
+
+                important_keys = [
+                    "ACC_TYPE",
+                    "ALLOW_TF32",
+                    "BLOCK_K",
+                    "BLOCK_M",
+                    "BLOCK_N",
+                    "EVEN_K",
+                    "GROUP_M",
+                    "USE_FAST_ACCUM",
+                    "num_stages",
+                    "num_warps",
+                    "num_consumer_groups",
+                    "num_buffers_warp_spec",
+                ]
+                choices = [
+                    choice
+                    for choice in choices
+                    if all(
+                        f"{k}={best_config[k]}" in choice.description
+                        for k in important_keys
+                    )
+                    for k in important_keys
+                ]
+                log.info("Filtered to %d choices based on best_config", len(choices))
+
             timings = self.lookup(
                 choices,
                 name,
@@ -2652,11 +2807,16 @@ class AlgorithmSelectorCache(PersistentCache):
         def wait_on_futures():
             log.debug("Waiting on futures")
             counters["inductor"]["select_algorithm_precompile"] += 1
+            exceptions: list[tuple[ChoiceCaller, BaseException]] = []
             for future in as_completed(
                 futures,
                 timeout=precompilation_timeout_seconds,
             ):
                 if e := future.exception():
+                    counters["inductor"][
+                        "select_algorithm_num_precompilation_exceptions"
+                    ] += 1
+                    exceptions.append((futures[future], e))
                     from torch._inductor.codegen.cuda.cuda_kernel import (
                         CUDATemplateCaller,
                     )
@@ -2670,6 +2830,7 @@ class AlgorithmSelectorCache(PersistentCache):
                             futures[future],
                             exc_info=e,
                         )
+                        futures[future].mark_failed()
                     else:
                         log.exception(  # noqa: G202
                             "Exception %s for benchmark choice %s",
@@ -2677,6 +2838,7 @@ class AlgorithmSelectorCache(PersistentCache):
                             futures[future],
                             exc_info=e,
                         )
+                        futures[future].mark_failed()
                 else:
                     counters["inductor"]["select_algorithm_num_precompiles"] += 1
                     log.info(
@@ -2684,6 +2846,8 @@ class AlgorithmSelectorCache(PersistentCache):
                         futures.get(future),
                         elapsed_times.get(future),
                     )
+            if exceptions:
+                _log_autotune_exceptions(exceptions)
 
             executor.shutdown(wait=True)
 
@@ -2868,8 +3032,13 @@ class AlgorithmSelectorCache(PersistentCache):
 
         # only benchmark triton kernel in sub process for now.
         # ATen/Extern kernel are still benchmarked in the current process.
-        extern = [c for c in choices if isinstance(c, ExternKernelCaller)]
-        triton = [c for c in choices if not isinstance(c, ExternKernelCaller)]
+        extern = []
+        triton = []
+        for c in choices:
+            if isinstance(c, TritonTemplateCaller):
+                triton.append(c)
+            else:
+                extern.append(c)
 
         timings = cls.benchmark_in_current_process(
             extern, input_nodes, layout, input_gen_fns, hint_override=hint_override
@@ -3252,6 +3421,9 @@ class AlgorithmSelectorCache(PersistentCache):
     def add_feedback_saver(self, fn: FeedbackFunction):
         self.feedback_saver_fns.append(fn)
 
+    def clear_feedback_savers(self):
+        self.feedback_saver_fns = []
+
     def add_preprocessing_fn(self, fn: PreprocessingFunction):
         self.preprocessing_fns.append(fn)
 
@@ -3297,6 +3469,12 @@ def add_feedback_saver(
 ):
     cache = get_algorithm_selector_cache()
     cache.add_feedback_saver(fn)
+
+
+def clear_feedback_savers():
+    """Clear all feedback saver functions."""
+    cache = get_algorithm_selector_cache()
+    cache.clear_feedback_savers()
 
 
 def add_preprocessing_fn(
@@ -3368,6 +3546,146 @@ class SymbolicGridFn:
 
     def sympy_call(self, *args, **kwargs):
         return self.fn(*args, **kwargs, **self.kwargs_sym)
+
+
+def _autotune_metadata(input_nodes):
+    """Helper function to extract autotune metadata from input nodes."""
+    return {
+        "autotune_strides": ", ".join([str(n.get_stride()) for n in input_nodes]),
+        "autotune_dtypes": ", ".join([str(n.get_dtype()) for n in input_nodes]),
+        "autotune_shape": ", ".join(
+            ["x".join(map(str, n.get_size())) for n in input_nodes]
+        ),
+        "autotune_offset": ", ".join([str(n.get_layout().offset) for n in input_nodes]),
+        # TODO(coconutruben): replace this with taking KernelInputs as the
+        # argument, and extracting those out there directly
+        "autotune_strides_hinted": ", ".join(
+            [
+                str(
+                    V.graph.sizevars.size_hints(
+                        n.get_stride(),
+                        fallback=config.unbacked_symint_fallback,
+                    )
+                )
+                for n in input_nodes
+            ]
+        ),
+        "autotune_shape_hinted": ", ".join(
+            [
+                "x".join(
+                    map(
+                        str,
+                        V.graph.sizevars.size_hints(
+                            n.get_size(),
+                            fallback=config.unbacked_symint_fallback,
+                        ),
+                    )
+                )
+                for n in input_nodes
+            ]
+        ),
+    }
+
+
+def _log_autotune_choices_stats(
+    event_name: str, timings: dict[ChoiceCaller, float]
+) -> None:
+    """Helper function to extract autotune metadata from benchmark results."""
+    if not timings:
+        return None
+
+    metadata: dict[str, Union[int, float, str]] = {
+        "num_choices": len(timings),
+        "num_triton_choices": len(
+            [c for c in timings if isinstance(c, TritonTemplateCaller)]
+        ),
+    }
+
+    sorted_choices = sorted(timings, key=timings.__getitem__)
+    best_choice = sorted_choices[0]
+    metadata["best_kernel"] = best_choice.name
+    if best_choice.description:
+        metadata["best_kernel_desc"] = best_choice.description
+    metadata["best_time"] = timings[best_choice]
+
+    best_triton_pos = next(
+        (
+            i
+            for i, choice in enumerate(sorted_choices)
+            if isinstance(choice, TritonTemplateCaller)
+        ),
+        None,
+    )
+    if best_triton_pos is not None:
+        metadata["best_triton_pos"] = best_triton_pos
+        best_triton_kernel = sorted_choices[best_triton_pos]
+        if best_triton_pos != 0:
+            metadata["best_triton_time"] = timings[best_triton_kernel]
+            metadata["best_triton_kernel"] = best_triton_kernel.name
+            if best_triton_kernel.description:
+                metadata["best_triton_kernel_desc"] = best_triton_kernel.description
+
+    payload = json.dumps(metadata)
+    get_chromium_event_logger().add_event_data(
+        event_name, autotune_choices_stats=payload
+    )
+    sys.stderr.write(f"Autotune Choices Stats:\n{payload}\n")
+
+
+def _log_autotune_exceptions(
+    exceptions: list[tuple[ChoiceCaller, BaseException]],
+) -> None:
+    """Log autotune exceptions to chromium event logger."""
+    if not exceptions:
+        return
+
+    try:
+        pt2_compile_substack = get_chromium_event_logger().get_pt2_compile_substack()
+        if not pt2_compile_substack:
+            return
+
+        current_event = pt2_compile_substack[-1]
+        if not current_event.endswith("_template_precompiling"):
+            return
+
+        exception_details = []
+        for choice, exc in exceptions:
+            try:
+                choice_type = (
+                    "triton" if isinstance(choice, TritonTemplateCaller) else "other"
+                )
+                data = {
+                    "choice_type": choice_type,
+                    "choice": choice.description,
+                    "exception_message": str(exc),
+                }
+
+                exc_type_match = re.search(r"(\w+):", str(exc))
+                if exc_type_match:
+                    data["exception"] = exc_type_match.group(1)
+
+                if "OutOfMemoryError" in str(exc):
+                    required_match = re.search(r"Required: (\d+)", str(exc))
+                    if required_match:
+                        data["required_memory"] = required_match.group(1)
+
+                    limit_match = re.search(r"Hardware limit:\s*(\d+)", str(exc))
+                    if limit_match:
+                        data["hardware_limit"] = limit_match.group(1)
+
+                exception_details.append(data)
+            except Exception:
+                # Don't let logging errors break the main flow
+                continue
+
+        if exception_details:
+            metadata = json.dumps({"exceptions": exception_details})
+            get_chromium_event_logger().try_add_event_data(
+                current_event, metadata=metadata
+            )
+    except Exception:
+        # Silently ignore logging errors to avoid breaking autotune
+        pass
 
 
 # ensure lowering is imported so that `extern_kernels.*` is populated

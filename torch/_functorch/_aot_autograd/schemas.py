@@ -25,9 +25,10 @@ from typing import (
 
 import torch
 import torch.utils._pytree as pytree
-from torch import Tensor
+from torch import SymInt, Tensor
 from torch._subclasses import FakeTensor
 from torch._subclasses.fake_tensor import is_fake
+from torch.fx.experimental._backward_state import BackwardState
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from .. import config
@@ -46,6 +47,9 @@ if TYPE_CHECKING:
     from torch._inductor.output_code import OutputCode
     from torch._inductor.utils import InputType
     from torch._ops import OpOverload
+
+    from .descriptors import AOTInput, AOTOutput
+    from .graph_capture_wrappers import JointFnHandle
 
 
 zip = strict_zip
@@ -405,6 +409,9 @@ class ViewAndMutationMeta:
     # Stashing them as part of our "metadata" makes it simpler if we want to run our analysis
     # pass once, and reuse the output throughout AOTAutograd
     traced_tangents: list[Any]
+
+    # TODO doc
+    traced_tangents_descs: list[AOTInput]
 
     # Each of these is a list telling us about subclasses for the inputs/outputs/grad_outs
     # They are used throughout AOTDispatch to tell us how to generate a list of subclass tensors,
@@ -822,6 +829,7 @@ class GraphSignature:
     # "graph outputs that correspond to updated buffers"
     # to the FQN names of those mutated buffers.
     buffers_to_mutate: dict[GraphOutputName, FQN]
+    parameters_to_mutate: dict[GraphOutputName, FQN]
     user_inputs_to_mutate: dict[GraphOutputName, GraphInputName]
 
     in_spec: pytree.TreeSpec
@@ -845,6 +853,7 @@ class GraphSignature:
         named_buffers: list[str],
         num_user_inputs: int,
         num_user_outputs: int,
+        trace_joint: bool,
         loss_index: Optional[int],
         backward_signature: Optional[BackwardSignature],
     ) -> GraphSignature:
@@ -890,8 +899,9 @@ class GraphSignature:
         mutations = []
         for idx, input_info in enumerate(view_mutation_metadata.input_info):
             if input_info.mutates_data:
-                # Only buffers can be mutated, not parameters
-                assert idx >= len(parameters)
+                if trace_joint:
+                    # Only buffers can be mutated, not parameters
+                    assert idx >= len(parameters)
                 mutations.append(names[idx + num_tokens])
 
         assert len(mutations) == view_mutation_metadata.num_mutated_inp_runtime_indices
@@ -904,12 +914,16 @@ class GraphSignature:
 
         user_inputs_to_mutate = {}
         buffers_to_mutate = {}
+        parameters_to_mutate = {}
         for output_name, mutation_name in outputs_to_mutations.items():
             if mutation_name in user_inputs:
                 user_inputs_to_mutate[output_name] = mutation_name
             else:
-                assert mutation_name in buffers
-                buffers_to_mutate[output_name] = mutation_name
+                assert mutation_name in buffers or mutation_name in parameters
+                if mutation_name in buffers:
+                    buffers_to_mutate[output_name] = mutation_name
+                else:
+                    parameters_to_mutate[output_name] = mutation_name
 
         start, stop = stop, stop + num_user_outputs
         user_outputs = graph_outputs[start:stop]
@@ -930,6 +944,7 @@ class GraphSignature:
             inputs_to_parameters=inputs_to_parameters,  # type: ignore[arg-type]
             user_inputs_to_mutate=user_inputs_to_mutate,
             buffers_to_mutate=buffers_to_mutate,  # type: ignore[arg-type]
+            parameters_to_mutate=parameters_to_mutate,  # type: ignore[arg-type]
             in_spec=in_spec,
             out_spec=out_spec,
             backward_signature=backward_signature,
@@ -975,15 +990,28 @@ class AOTConfig:
     # Used only by standalone_compile.
     ignore_shape_env: bool = False
     precompile_backend_id: Optional[str] = None
+    force_non_lazy_backward_lowering: bool = False
+    # This config makes sure to check certain things like
+    # mutating input with req_grad in export joint tracing.
+    export_trace_joint: bool = False
 
     def __post_init__(self):
         if self.pre_dispatch:
             assert self.is_export, "Can only have pre_dispatch IR for export."
 
 
+# TODO: types here
+# plain_tensor_trace_fn, when it is joint, has tuple structure on the trace
+# info too!
+# TODO: this needs to be generic, parameterized on AOTDescriptor
 SubclassTracingInfo = collections.namedtuple(
     "SubclassTracingInfo",
-    ["plain_tensor_trace_fn", "plain_tensor_args", "maybe_subclass_meta"],
+    [
+        "plain_tensor_trace_fn",
+        "plain_tensor_args",
+        "plain_tensor_args_descs",
+        "maybe_subclass_meta",
+    ],
 )
 
 
@@ -1015,7 +1043,10 @@ class AOTState:
     #
     # (By the way, this is NEVER the joint inputs!  Those only ever go in
     # AOTGraphCapture)
-    flat_args: list[Any]
+    flat_args: list[FxValue]
+
+    # The descriptor for each argument in flat_args.
+    flat_args_descs: list[AOTInput]
 
     # This contains view and mutation information about the function, which we
     # detected by doing an initial trace when we created this state.
@@ -1040,26 +1071,45 @@ class AOTState:
     stack: contextlib.ExitStack
 
 
+FxValue = Union[Tensor, int, SymInt, BackwardState]
+
+
 class CompilerWrapper:
     """
-    A wrapper around the inputs and outputs to the compiler_fn. We separate these into two parts:
+    AOTAutograd needs to do many transformations to the calling convention of the user function
+    it is tracing, e.g., deduplicating inputs, unpacking subclasses, etc.  CompilerWrapper lets
+    us factor these into compositional stages so we can handle each transformation incrementally
+    instead of having to do it all at once.
 
-    1. The prologue, which edits the input to the compiler_fn(flat_fn, flat_args, etc)
-    2. The epilogue, which edits the outputs of the compiler_fn (compiled_fn, real arguments)
+    Since there is a calling convention change, there are two parts to the wrpaper:
 
-    Each wrapper below should be implemented as a CompilerWrapper, so that we can facilitate
-    caching on the compiled output, and re-wrapping the output via epilogues.
+    1. The prologue, which is about compile-time behavior: given this original function, what
+       is the new function with modified calling convention that we should trace with AOTAutograd
+       to get the FX graph we will do joint passes, partitioning and ultimate Inductor compilation on?
+       We get (flat_fn, flat_args), the original function under trace and inputs we were
+       going to feed it, and produce a new function and new inputs to feed it.
+
+    2. The epilogue, which is about run-time behavior: we have now compiled the modified calling
+       convention function, we need to wrap it so that we have a new function that has the
+       original calling convention of the original function, so that our users can call it
+       at the old signature they expected.  We get (compiled_fn, real arguments), the newly
+       compiled function we need to wrap.
+
+    Note about caching: we do NOT directly serialize the runtime wrappers; instead, they
+    are reapplied to compiled_fn after we have finished deserializing the compiled_fn.
+
     Extra metadata that is needed to compute pre or post compile can be passed in via attributes.
     """
 
     def pre_compile(
         self,
         flat_fn,
-        flat_args: list[Tensor],
+        flat_args: list[FxValue],
+        flat_args_descs: list[AOTInput],
         aot_config: AOTConfig,
         *,
         fw_metadata: ViewAndMutationMeta,
-    ) -> tuple[Callable, list[Tensor], ViewAndMutationMeta]:
+    ) -> tuple[Callable, list[FxValue], list[AOTInput], ViewAndMutationMeta]:
         """
         Process the inputs to the compiler_fn. You can pass in extra metadata via kwargs.
         Args:
@@ -1068,7 +1118,62 @@ class CompilerWrapper:
         aot_config: AOTConfig passed in at compile time
         fw_metadata: ViewAndMutationMeta generated from flat_fn and flat_args
         """
-        return flat_fn, flat_args, fw_metadata
+        return flat_fn, flat_args, flat_args_descs, fw_metadata
+
+    def post_compile(self, compiled_fn, aot_config, *, runtime_metadata) -> Callable:
+        """
+        Given an output of the compiler, wrap it with information received from prologue.
+        Args:
+        compiled_fn: Callable after calling compiler_fn
+        aot_config: AOTConfig after calling prologue
+        runtime_metadata: ViewAndMutationMeta after calling all wrappers's pre_compile steps.
+        Example:
+
+        def wrapped_compiled_fn(args):
+            # do something with args, aot_config, fw_metadata
+            return compiled_fn(args)
+
+        return wrapped_compiled_fn
+        """
+        return compiled_fn
+
+
+class InductorWrapper:
+    """
+    This is sort of like CompilerWrapper, but it happens at a different part of the lifecycle:
+    it talks about transformations we do to the traced and partitioned FX graph before we
+    send it to the Inductor compiler.
+
+    Once again, there are two parts:
+
+    1. The prologue, which "modifies" the FX graph before we send it to
+       Inductor.  I say "modifies" because... we don't really actually do
+       anything nontrivial in either of our two implementations.
+    2. The epilogue, which modifies the compiled function produced by Inductor
+
+    Although hypothetically these wrappers could be used compositionally in a centralized
+    wrappers list, in practice they seem to just be invoked manually when needed.
+
+    NB: The flat_args input is sometimes mutated.  This is probably naughty but whatever.
+    """
+
+    def pre_compile(
+        self,
+        fw_module: torch.fx.GraphModule,
+        flat_args: list[Tensor],
+        aot_config: AOTConfig,
+        *,
+        fw_metadata: ViewAndMutationMeta,
+    ) -> None:
+        """
+        Process the inputs to the compiler_fn. You can pass in extra metadata via kwargs.
+        Args:
+        flat_fn: The function to compile
+        flat_args: Metadata from example inputs of the function to compile
+        aot_config: AOTConfig passed in at compile time
+        fw_metadata: ViewAndMutationMeta generated from flat_fn and flat_args
+        """
+        return
 
     def post_compile(self, compiled_fn, aot_config, *, runtime_metadata) -> Callable:
         """
@@ -1099,17 +1204,21 @@ class AOTGraphCapture:  # Produced by aot_stage1_graph_capture
     # graph, among other things!
     wrappers: list[CompilerWrapper]
 
-    # The actual captured graph.  In some circumstances (export) this graph
-    # has a specific calling convention that can be relied upon by external
-    # callers.  In other situations, the calling convention is unspecified and
-    # only aot_stage2_compile knows how to deal with them.
-    graph: torch.fx.GraphModule
+    # The actual captured graph module.  In some circumstances (export) this
+    # graph has a specific calling convention that can be relied upon by
+    # external callers.  In other situations, the calling convention is
+    # unspecified and only aot_stage2_compile knows how to deal with them.
+    graph_module: torch.fx.GraphModule
 
     # When compiling with autograd support, this is the joint_inputs, which is
     # larger than the original flat_args as all tangents get inputs.  The
     # tuple organizes into primals and tangents.  When not autograd it's just
     # a plain list.
     updated_flat_args: Union[list[Any], tuple[list[Any], list[Any]]]
+
+    updated_flat_args_descs: Union[
+        list[AOTInput], tuple[list[AOTInput], list[AOTInput]]
+    ]
 
     # Metadata about subclass inputs/outputs in the graph trace.
     maybe_subclass_meta: Any
@@ -1156,3 +1265,51 @@ class SerializableAOTDispatchCompiler(AOTDispatchCompiler):
         example_inputs: Sequence[InputType],
     ) -> OutputCode:
         return self.compiler_fn(gm, example_inputs)
+
+
+class FlatFn(Protocol):
+    def __call__(self, *args: FxValue) -> list[FxValue]: ...
+
+
+class TraceFn(Protocol):
+    def __call__(self, *args: FxValue) -> tuple[list[FxValue], list[AOTOutput]]: ...
+
+
+class PreppedForAutogradTraceFn(Protocol):
+    def __call__(
+        self,
+        *args: FxValue,
+    ) -> tuple[tuple[list[FxValue], list[bool]], list[AOTOutput]]: ...
+
+
+class JointTraceFn(Protocol):
+    handle: JointFnHandle
+
+    def __call__(
+        self, primals: list[FxValue], tangents: list[FxValue]
+    ) -> tuple[
+        tuple[list[FxValue], list[Optional[Tensor]]],
+        tuple[list[AOTOutput], list[Optional[AOTOutput]]],
+    ]: ...
+
+
+@dataclass
+class JointWithDescriptors:
+    _aot_state: AOTState
+    _aot_graph_capture: AOTGraphCapture
+
+    # The exact order parameters and buffers are expected to be passed into
+    # the final compiled function.  Parameters before buffers.
+    params_spec: list[str]
+    buffers_spec: list[str]
+
+    in_spec: pytree.TreeSpec
+    out_spec: pytree.TreeSpec
+
+    @property
+    def graph_module(self):
+        return self._aot_graph_capture.graph_module
+
+    @graph_module.setter
+    def graph_module(self, value):
+        self._aot_graph_capture.graph_module = value

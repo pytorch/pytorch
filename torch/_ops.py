@@ -267,6 +267,7 @@ _HIGHER_ORDER_OP_DEFAULT_FALLTHROUGH_DISPATCH_KEYS = [
     DispatchKey.BackendSelect,
     DispatchKey.AutocastCPU,  # type: ignore[attr-defined]
     DispatchKey.AutocastCUDA,  # type: ignore[attr-defined]
+    DispatchKey.AutocastXPU,  # type: ignore[attr-defined]
 ]
 
 
@@ -1483,7 +1484,10 @@ class _Ops(types.ModuleType):
             # Import the shared library into the process, thus running its
             # static (global) initialization code in order to register custom
             # operators with the JIT.
-            ctypes.CDLL(path)
+            try:
+                ctypes.CDLL(path)
+            except Exception as e:
+                raise OSError(f"Could not load this library: {path}") from e
         self.loaded_libraries.add(path)
 
 

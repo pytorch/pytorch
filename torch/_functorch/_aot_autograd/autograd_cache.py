@@ -44,6 +44,7 @@ from torch._inductor.codecache import (
     sha256_hash,
     write_atomic,
 )
+from torch._inductor.cudagraph_utils import BoxedDeviceIndex
 from torch._inductor.output_code import (
     CompiledFxGraph,
     CompiledFxGraphConstants,
@@ -77,7 +78,6 @@ from .schemas import AOTAutogradCacheInfo, AOTConfig, ViewAndMutationMeta  # noq
 
 if TYPE_CHECKING:
     from torch._inductor.compile_fx import _CompileFxKwargs
-    from torch._inductor.cudagraph_utils import BoxedDeviceIndex
     from torch._inductor.remote_cache import JsonDataTy, RemoteCache
     from torch._inductor.utils import BoxedBool
     from torch.fx.node import Node
@@ -95,7 +95,7 @@ class FXGraphCacheMiss(BypassAOTAutogradCache):
 
 
 def should_use_remote_autograd_cache():
-    if torch._inductor.config.force_disable_caches:
+    if torch.compiler.config.force_disable_caches:
         return False
     if config.enable_remote_autograd_cache is not None:
         return config.enable_remote_autograd_cache
@@ -116,7 +116,7 @@ def should_use_remote_autograd_cache():
 
 
 def should_use_local_autograd_cache():
-    if torch._inductor.config.force_disable_caches:
+    if torch.compiler.config.force_disable_caches:
         return False
     return config.enable_autograd_cache
 
@@ -302,6 +302,42 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
     a safe and stable cache key for AOTAutograd.
     """
 
+    def get_triton_source_codes_from_gm(
+        self,
+        gm: torch.fx.GraphModule,
+    ):
+        triton_kernels = []
+        for module in gm.modules():
+            if not isinstance(module, torch.fx.GraphModule):
+                continue
+            for node in module.graph.nodes:
+                if isinstance(node.target, torch._ops.OpOverloadPacket):
+                    attrs = node.target._dir
+                    for attr in attrs:
+                        if custom_op := getattr(node.target, attr, None):
+                            kernels = torch._library.triton.get_triton_kernels_for_op(
+                                custom_op._name
+                            )
+                            triton_kernels.extend(kernels)
+                elif isinstance(node.target, torch._ops.OpOverload):
+                    kernels = torch._library.triton.get_triton_kernels_for_op(
+                        node.target._name
+                    )
+                    triton_kernels.extend(kernels)
+
+        triton_kernel_source_codes = []
+        from torch._inductor.codegen.wrapper import (
+            user_defined_triton_kernel_transitive_closure_source_code,
+        )
+
+        for kernel in triton_kernels:
+            source_codes = user_defined_triton_kernel_transitive_closure_source_code(
+                kernel
+            )
+            triton_kernel_source_codes.append(source_codes)
+
+        return triton_kernel_source_codes
+
     def __init__(
         self,
         gm: torch.fx.GraphModule,
@@ -319,6 +355,7 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
             [],
             [],
         )
+        self.triton_kernel_source_codes = self.get_triton_source_codes_from_gm(gm)
 
         if hasattr(gm, "saved_tensors_hooks_pack_0"):
 
@@ -1023,8 +1060,14 @@ class BundledAOTAutogradCacheArtifact(PrecompileCacheArtifact[Callable]):
         # which is set by compile_fx. But in precompile, we never actually call compile_fx
         # so we don't have a place to track cudagraphs here.
         cudagraphs = torch._inductor.config.triton.cudagraphs
+        boxed_forward_device_index = BoxedDeviceIndex(None)
         compiled_fn = entry.wrap_post_compile(
-            [], entry.sanitized_aot_config, {"cudagraphs": cudagraphs}
+            [],
+            entry.sanitized_aot_config,
+            {
+                "cudagraphs": cudagraphs,
+                "boxed_forward_device_index": boxed_forward_device_index,
+            },
         )
 
         # TODO: this ignores flat_params, which can exist
@@ -1350,7 +1393,10 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
                 # useful, remove it from the entry.
                 entry.sanitized_aot_config.precompile_backend_id = None
                 PrecompileContext.record_artifact(
-                    BundledAOTAutogradCacheArtifact.type(), precompile_key, content
+                    BundledAOTAutogradCacheArtifact.type(),
+                    precompile_key,
+                    entry,
+                    editable=True,
                 )
             AOTAutogradCache._write_to_local_cache(key, content)
             counters["aot_autograd"]["autograd_cache_saved"] += 1
