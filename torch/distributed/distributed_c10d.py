@@ -5158,7 +5158,11 @@ def split_group(
             my_group = split_group
             break
 
-    group_name = _process_group_name(my_group, use_hashed_name=False)
+    # use_hashed_name is True to ensure that subgroups have unique names.
+    # This is needed as some backends (e.g. Gloo) use the group name as a
+    # PrefixStore prefix for initialization of splits. Thus, names have to be
+    # unique to avoid key collisions.
+    group_name = _process_group_name(my_group, use_hashed_name=True)
     split_pg = parent_pg.split_group(
         my_group,
         timeout=timeout,

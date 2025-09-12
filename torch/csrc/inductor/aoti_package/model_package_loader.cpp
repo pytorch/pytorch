@@ -721,15 +721,8 @@ void AOTIModelPackageLoader::load_constants(
   for (const auto& it : constants_map) {
     if (fqn_to_constant_name.find(it.first) != fqn_to_constant_name.end()) {
       updated_constants_map.emplace(fqn_to_constant_name[it.first], it.second);
-    } else if (check_full_update) {
-      std::string constant_fqns = "";
-      for (const auto& it2 : fqn_to_constant_name) {
-        constant_fqns += it2.first + ", ";
-      }
-      throw std::runtime_error(
-          "The constant with FQN " + it.first +
-          " was not found in the model. The available constants are: " +
-          constant_fqns);
+    } else {
+      throw std::runtime_error("Constant not found: " + it.first);
     }
   }
 
