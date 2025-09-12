@@ -1360,6 +1360,7 @@ bool LoopNest::optimizeConditionals() {
     // Remove all the if-then-else expressions from this store and create
     // one loop per sub-expression.
     std::vector<StmtPtr> split_loops;
+    split_loops.reserve(sub_exprs.size());
     const auto& cond_to_replace = ifthenelse_exprs.front();
     for (size_t i = 0; i < sub_exprs.size(); ++i) {
       IfThenElseReplacer ifthenelseReplacer(cond_to_replace, sub_exprs[i]);
