@@ -2664,7 +2664,7 @@ if HAS_CUDA_AND_TRITON:
             ).run(captured_output[0])
 
         @torch._inductor.config.patch("triton.cudagraph_dynamic_shape_warn_limit", 1)
-        def test_warn_many_times_if_dynamic_shape_limit_reached(self):
+        def test_warn_once_if_dynamic_shape_limit_reached(self):
             class Mod(torch.nn.Module):
                 def __init__(self) -> None:
                     super().__init__()
@@ -2681,19 +2681,19 @@ if HAS_CUDA_AND_TRITON:
             mod = torch.compile(Mod(), mode="reduce-overhead")
 
             with capture_stderr() as captured_output:
-                for batch_size in range(1, 21):
+                for batch_size in range(10, 200, 10):
                     iter(batch_size, mod)
-
-            # 20 total shapes but 1) first shape is not dynamic yet
-            # and 2) cudagraph_dynamic_shape_warn_limit=1 avoids
-            # warning for the first dynamic shape.
-            expected_num_warns = 18
 
             FileCheck().check_count(
                 "CUDAGraph supports dynamic shapes by recording a new graph for each "
                 "distinct input size. Recording too many CUDAGraphs may lead to "
-                "extra overhead.",
-                expected_num_warns,
+                "extra overhead. We have observed 2 distinct sizes. "
+                "Please consider the following options for better performance: "
+                "a) padding inputs to a few fixed number of shapes; or b) set "
+                "torch._inductor.config.triton.cudagraph_skip_dynamic_graphs=True. "
+                "Set torch._inductor.config.triton.cudagraph_dynamic_shape_warn_limit=None "
+                "to silence this warning.",
+                1,
                 exactly=True,
             ).run("\n".join(captured_output))
 
