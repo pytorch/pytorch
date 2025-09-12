@@ -4117,9 +4117,12 @@ class Scheduler:
         num_concurrent_reads = 0
         for reading_node in relevant_reading_nodes:
             relevant_reads = [
-                read for read in reading_node.read_writes.reads if read.name == real_name
+                read
+                for read in reading_node.read_writes.reads
+                if read.name == real_name
             ]
-            if not relevant_reads: continue
+            if not relevant_reads:
+                continue
             num_concurrent_reads += 1
             if not all(
                 isinstance(read, MemoryDep)
@@ -4127,7 +4130,7 @@ class Scheduler:
                 and read.index == write.index
                 and read.size == write.size
                 for read in relevant_reads
-                ):
+            ):
                 return False
         return num_concurrent_reads <= 1
 
