@@ -14,6 +14,10 @@ on:
   schedule:
     # Run at 07:00 UTC every Sunday
     - cron: 0 7 * * 0
+  pull_request:
+    paths:
+      - benchmarks/operator_benchmark/**
+      - .github/workflows/operator_benchmark.yml
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
