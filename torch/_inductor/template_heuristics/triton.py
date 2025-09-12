@@ -357,6 +357,10 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             GemmConfig(32, 64, 64, 6, 2),
             GemmConfig(32, 128, 64, 6, 4),
             GemmConfig(32, 256, 64, 6, 4),
+            GemmConfig(64, 16, 256, 5, 4),
+            GemmConfig(64, 32, 256, 5, 4),
+            GemmConfig(64, 128, 128, 3, 4),
+            GemmConfig(128, 256, 128, 4, 8),
         ]
 
         self.scaled_persistent_mm_configs: list[BaseConfig] = [
@@ -369,6 +373,10 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             GemmConfig(128, 128, 128, 5, 8),
             GemmConfig(128, 128, 128, 6, 8),
             GemmConfig(128, 128, 64, 4, 8),
+            GemmConfig(64, 32, 256, 5, 4),
+            GemmConfig(128, 256, 128, 3, 8),
+            GemmConfig(64, 128, 256, 4, 4),
+            GemmConfig(64, 256, 128, 4, 4),
         ]
 
         # TODO: Unify with other gemm patterns, mm_plus_mm currently follows
@@ -1139,6 +1147,13 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             for mfma in [0, 16]
             for wpeu in [0, int(8 // num_warps)]
         ]
+
+    def _prune_exhaustive_configs(
+        self,
+        configs: list[BaseConfig],
+        dtype_size: int,
+    ) -> list[BaseConfig]:
+        return configs
 
     def _filter_configs(self, configs: list[BaseConfig]) -> list[BaseConfig]:
         """
