@@ -1575,7 +1575,17 @@ class aot_inductor:
     # custom op libs that have implemented C shim wrappers
     custom_op_libs: Optional[list[str]] = None
 
+    # If True, will compile cpp-only project files that don't depend on libtorch
     compile_standalone: bool = False
+
+    # If set to "windows", we will compile from WSL and generate a C++ project file for
+    # further Windows native compilation
+    # Only works with package_cpp_only=True
+    cross_target_platform: Optional[str] = None
+
+    # If package_cpp_only is True, whether cpp files will be compiled to a
+    # dynamically linked library or static linked library
+    dynamic_linkage: bool = True
 
     # Whether to enable link-time-optimization
     enable_lto = os.environ.get("AOT_INDUCTOR_ENABLE_LTO", "0") == "1"
