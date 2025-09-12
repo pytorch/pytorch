@@ -154,7 +154,10 @@ def _nvrtc_compile(
 
     # Add 'extern "C"' if not already present to ensure C linkage
     # But skip this if the code already contains extern "C" blocks (template case)
-    if not kernel_source.strip().startswith('extern "C"') and 'extern "C"' not in kernel_source:
+    if (
+        not kernel_source.strip().startswith('extern "C"')
+        and 'extern "C"' not in kernel_source
+    ):
         kernel_source = f'extern "C" {kernel_source}'
 
     # Combine header code and kernel source
