@@ -490,7 +490,7 @@ class ScanForwardIntermediatesHandlingPolicy(enum.Enum):
 
     REMOVE_ADDITIONAL_INPUTS: we remove the intermediate from output when it is part of additinonal_inputs. additional_inputs
         are also read-only in each step, we can directly save them for bacwkard to use. We differentiate XS and ADDITIONAL_INPUTS
-        so that we could have different treatment for them in backward. In backward, we need to put xs checkpoints in carry but
+        so that we could have different treatment for them in backward. In backward, we need to put xs intermediates in carry but
         put additional_inputs as backward scan's additional_inputs.
 
     KEEP: this corresponds to a real intermediate tensor operations' output. It varies at each forward step, we could just keep
@@ -557,7 +557,6 @@ class ScanAutogradImpl:
         fw_outputs = fw_all_outputs[: self.hop_partitioned_graph.n_fw_outputs]
         fw_intermediates = fw_all_outputs[self.hop_partitioned_graph.n_fw_outputs :]
 
-        # create a handling policy for each checkpoints
         init_phs, xs_phs, additional_inputs_phs = pytree.tree_unflatten(
             phs, self.fw_spec
         )
@@ -667,7 +666,7 @@ class ScanAutogradImpl:
           grad_x is the ys output, which will be stacked together after the loop and will have the same shape as xs.
         """
         fw_policy = self.forward_intermediates_handling_policies
-        saved_carries = self.saved_intermediates
+        saved_intermediates = self.saved_intermediates
         saved_fw_xs = self.saved_fw_xs
         saved_fw_additional_inputs = self.saved_fw_additional_inputs
 
@@ -689,7 +688,7 @@ class ScanAutogradImpl:
         bw_xs = [
             grad_ys,
             saved_fw_xs,
-            saved_carries,
+            saved_intermediates,
         ]
         bw_additional_inputs = saved_fw_additional_inputs
 
@@ -702,12 +701,12 @@ class ScanAutogradImpl:
                 args, flat_spec
             )
             grad_carry, grad_additional_inputs = bw_init
-            grad_y, xs_checkpoint, carry_checkpoint = bw_xs
+            grad_y, saved_fw_xs, saved_intermediates = bw_xs
             saved_fw_additional_inputs = bw_additional_inputs
 
             fw_intermediates = []
-            xs_it = iter(xs_checkpoint)
-            carry_it = iter(carry_checkpoint)
+            xs_it = iter(saved_fw_xs)
+            carry_it = iter(saved_intermediates)
             addi_it = iter(saved_fw_additional_inputs)
             for policy in fw_policy:
                 if policy in (
@@ -768,7 +767,7 @@ class ScanAutogradImpl:
         flat_grads = scan_op(
             bw_single_step_gm,
             pytree.tree_flatten(bw_init)[0],
-            # TODO: torch.flip copies the checkpoints, we should optimize it away
+            # TODO: torch.flip copies the tensor, we should optimize it away
             [torch.flip(x, (0,)) for x in pytree.tree_flatten(bw_xs)[0]],
             pytree.tree_flatten(bw_additional_inputs)[0],
         )
