@@ -11,6 +11,9 @@ if [ -n "$CLANG_VERSION" ]; then
     if [[ $CLANG_VERSION == 18 ]]; then
       apt-add-repository "deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-18 main"
     fi
+    if [[ $CLANG_VERSION == 20 ]]; then
+      apt-add-repository "deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-20 main"
+    fi
   fi
 
   sudo apt-get update
