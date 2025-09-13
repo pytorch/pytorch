@@ -749,7 +749,7 @@ def to_dtype(
 
 
 @register_lowering(torch._higher_order_ops._foreach_map, type_promotion_kind=None)
-def _foreach_map(subgraph, *args, **kwargs):
+def _foreach_map(subgraph, *args, _debug_assert_fused=False, **kwargs):
     """
     This lowers an invocation of foreach_map
     The way this works is that an arbitrary N-arg func is provided by the user, looped over by the
@@ -790,6 +790,12 @@ def _foreach_map(subgraph, *args, **kwargs):
             V.graph.register_operation_list(operation_list)
 
     assert all(x is not None for x in outputs)
+
+    if _debug_assert_fused:
+        for (_, use_foreach), group in groups.items():
+            if use_foreach and len(group) != 1:
+                raise RuntimeError("foreach_map was not fully fused")
+
     return outputs
 
 
