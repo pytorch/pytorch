@@ -1277,26 +1277,39 @@ class skipPRIVATEUSE1If(skipIf):
 
 
 def _has_sufficient_memory(device, size):
-    if torch.device(device).type == "cuda":
-        if not torch.cuda.is_available():
+    device_ = torch.device(device)
+    device_type = device_.type
+    if device_type in ["cuda", "xpu"]:
+        acc = torch.accelerator.current_accelerator()
+        # Case 1: no accelerator found
+        if not acc:
             return False
+        # Case 2: accelerator found but not matching device type
+        if acc.type != device_type:
+            return True
+        # Case 3: accelerator found and matching device type but not available
+        if not torch.accelerator.is_available():
+            return False
+        # Case 4: accelerator found and matching device type and available
         gc.collect()
-        torch.cuda.empty_cache()
-        # torch.cuda.mem_get_info, aka cudaMemGetInfo, returns a tuple of (free memory, total memory) of a GPU
-        if device == "cuda":
-            device = "cuda:0"
-        return (
-            torch.cuda.memory.mem_get_info(device)[0]
-            * torch.cuda.memory.get_per_process_memory_fraction(device)
-        ) >= size
+        torch.accelerator.empty_cache()
 
-    if device == "xla":
+        if device_.index is None:
+            device_ = torch.device(device_type, 0)
+
+        if device_type == "cuda":
+            return (
+                torch.cuda.memory.mem_get_info(device_)[0]
+                * torch.cuda.memory.get_per_process_memory_fraction(device_)
+            ) >= size
+
+        if device_type == "xpu":
+            return torch.xpu.memory.mem_get_info(device_)[0] >= size
+
+    if device_type == "xla":
         raise unittest.SkipTest("TODO: Memory availability checks for XLA?")
 
-    if device == "xpu":
-        raise unittest.SkipTest("TODO: Memory availability checks for Intel GPU?")
-
-    if device != "cpu":
+    if device_type != "cpu":
         raise unittest.SkipTest("Unknown device type")
 
     # CPU
@@ -1342,7 +1355,6 @@ def largeTensorTest(size, device=None, inductor=TEST_WITH_TORCHINDUCTOR):
             # an additional array of the same size as the input.
             if inductor and torch._inductor.config.cpp_wrapper and _device != "cpu":
                 size_bytes *= 2
-
             if not _has_sufficient_memory(_device, size_bytes):
                 raise unittest.SkipTest(f"Insufficient {_device} memory")
 
@@ -1575,6 +1587,12 @@ class dtypesIfCPU(dtypes):
 class dtypesIfCUDA(dtypes):
     def __init__(self, *args):
         super().__init__(*args, device_type="cuda")
+
+
+# Overrides specified dtypes on Intel GPU.
+class dtypesIfXPU(dtypes):
+    def __init__(self, *args):
+        super().__init__(*args, device_type="xpu")
 
 
 class dtypesIfMPS(dtypes):
@@ -1960,14 +1978,18 @@ IS_FLEX_ATTENTION_CPU_PLATFORM_SUPPORTED = (
     and torch.cpu._is_avx2_supported()
     and os.getenv("ATEN_CPU_CAPABILITY") != "default"
 )
+IS_FLEX_ATTENTION_XPU_PLATFORM_SUPPORTED = (
+    torch.xpu.is_available() and torch.utils._triton.has_triton()
+)
 flex_attention_supported_platform = unittest.skipUnless(
-    IS_FLEX_ATTENTION_CPU_PLATFORM_SUPPORTED
+    IS_FLEX_ATTENTION_XPU_PLATFORM_SUPPORTED
+    or IS_FLEX_ATTENTION_CPU_PLATFORM_SUPPORTED
     or (
         torch.cuda.is_available()
         and torch.utils._triton.has_triton()
         and torch.cuda.get_device_capability() >= (8, 0)
     ),
-    "Requires CUDA and Triton, or CPU with avx2 and later",
+    "Requires CUDA and Triton, Intel GPU and triton, or CPU with avx2 and later",
 )
 if torch.version.hip and "gfx94" in torch.cuda.get_device_properties(0).gcnArchName:
     e4m3_type = torch.float8_e4m3fnuz
