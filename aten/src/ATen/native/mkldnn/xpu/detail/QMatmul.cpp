@@ -327,4 +327,90 @@ void quantized_matmul(
     result.copy_(dst);
 }
 
+sycl::event matmul_w8(
+    Tensor& result, // [M, N], dtype: fp16,bf16
+    const Tensor& mat1, // [M, K], Activation. dtype: fp16,bf16
+    const Tensor& mat2, // [K, N], Weight. dtype: fp8_e4m3, fp8_e5m2
+    const Tensor& scale_b, // [1, N] or [1],, dtype: fp32
+    const std::vector<sycl::event>& deps = {}) {
+  auto& engine = GpuEngineManager::Instance().get_engine();
+  auto& stream = GpuStreamManager::Instance().get_stream();
+
+  int64_t M = mat1.size(0);
+  int64_t K = mat1.size(1);
+  int64_t N = mat2.size(1);
+
+  dnnl::memory::dims src_dims = {M, K};
+  dnnl::memory::dims weight_dims = {K, N};
+  dnnl::memory::dims dst_dims = {M, N};
+
+  // Create memory
+  dnnl::memory src = at::native::onednn::make_onednn_memory(
+      {src_dims,
+       at::native::onednn::get_onednn_dtype(mat1),
+       mat1.strides().vec()},
+      engine,
+      mat1.data_ptr());
+  dnnl::memory weight = at::native::onednn::make_onednn_memory(
+      {weight_dims,
+       at::native::onednn::get_onednn_dtype(mat2),
+       mat2.strides().vec()},
+      engine,
+      mat2.data_ptr());
+  dnnl::memory dst = at::native::onednn::make_onednn_memory(
+      {dst_dims,
+       at::native::onednn::get_onednn_dtype(result),
+       result.strides().vec()},
+      engine,
+      result.data_ptr());
+
+  dnnl::primitive_attr op_attr = dnnl::primitive_attr();
+  // The following masks are supported by the primitive DNNL_ARG_WEIGHTS:
+  // 0, which applies one scale / zero point value to an entire tensor, and
+  // 2, which applies a scale value per column along the n dimension for
+  // DNNL_ARG_WEIGHTS.
+  op_attr.set_scales_mask(DNNL_ARG_WEIGHTS, scale_b.numel() == 1 ? 0 : 1 << 1);
+
+  op_attr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
+  dnnl::matmul::primitive_desc primitive_desc;
+
+  try {
+    primitive_desc = dnnl::matmul::primitive_desc(
+        engine, src.get_desc(), weight.get_desc(), dst.get_desc(), op_attr);
+  } catch (dnnl::error& e) {
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        false, "Onednn cannot create primitive due to: ", e.what());
+  }
+
+  // Prepare args and execute primitive
+  int scratchpad_size = primitive_desc.scratchpad_desc().get_size();
+  Tensor scratchpad_tensor = at::empty(
+      {scratchpad_size}, mat1.options().dtype(at::kByte), std::nullopt);
+  dnnl::memory scratchpad = at::native::onednn::make_onednn_memory(
+      primitive_desc.scratchpad_desc(), engine, scratchpad_tensor.data_ptr());
+  std::unordered_map<int, dnnl::memory> args;
+  args.insert({DNNL_ARG_SRC, src});
+  args.insert({DNNL_ARG_WEIGHTS, weight});
+  args.insert({DNNL_ARG_DST, dst});
+  args.insert({DNNL_ARG_SCRATCHPAD, scratchpad});
+
+  dnnl::memory wei_scales_t = (scale_b.numel() == 1)
+      ? at::native::onednn::make_onednn_memory(
+            {{1}, at::native::onednn::get_onednn_dtype(scale_b), {1}},
+            engine,
+            scale_b.data_ptr())
+      : at::native::onednn::make_onednn_memory(
+            {{scale_b.numel(), 1},
+             at::native::onednn::get_onednn_dtype(scale_b),
+             dnnl::memory::format_tag::ab},
+            engine,
+            scale_b.data_ptr());
+
+  args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_WEIGHTS, wei_scales_t});
+  auto matmul_forward = dnnl::matmul(primitive_desc);
+  sycl::event matmul_fwd_event =
+      dnnl::sycl_interop::execute(matmul_forward, stream, args);
+  return matmul_fwd_event;
+}
+
 } // namespace at::native::onednn
