@@ -49,6 +49,7 @@ runs:
         set +e
         set -x
 
+        # TODO: Removeme after https://github.com/pytorch/test-infra/issues/7160 is fixed
         ${CONDA_INSTALL} -y python=3.10
 
         PYTHON3=$(${CONDA_RUN} which python3)
