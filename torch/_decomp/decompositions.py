@@ -721,11 +721,6 @@ def slice_forward(
     end: Optional[int] = None,
     step: int = 1,
 ):
-    from torch.fx.experimental.symbolic_shapes import (
-        guard_size_oblivious,
-        statically_known_true,
-    )
-
     ndim = self.dim()
     if ndim == 0:
         raise RuntimeError("slice() cannot be applied to a 0-dim tensor.")
@@ -736,32 +731,9 @@ def slice_forward(
     if step <= 0:
         raise RuntimeError("slice step must be positive")
 
-    start_val = start if start is not None else 0
-    end_val = end if end is not None else sys.maxsize  # 2^63 - 1
-
-    if guard_size_oblivious(start_val < 0):
-        start_val += sizes[dim]
-
-    if guard_size_oblivious(end_val < 0):
-        end_val += sizes[dim]
-
-    if guard_size_oblivious(start_val < 0):
-        start_val = 0
-    elif guard_size_oblivious(start_val > sizes[dim]):
-        start_val = sizes[dim]
-
-    if statically_known_true(end_val == sys.maxsize):
-        end_val = sizes[dim]
-    elif guard_size_oblivious(end_val < start_val):
-        end_val = start_val
-    elif guard_size_oblivious(end_val > sizes[dim]):
-        end_val = sizes[dim]
-
-    storage_offset = self.storage_offset() + start_val * strides[dim]
-    len = end_val - start_val
-    sizes[dim] = (len + step - 1) // step
-    strides[dim] *= step
-
+    sizes[dim], strides[dim], storage_offset = utils.slice_shapes(
+        sizes[dim], strides[dim], self.storage_offset(), start, end, step
+    )
     if self.is_quantized:
         raise NotImplementedError(
             "Slice decomposition for quantized tensors aren't implemented"
