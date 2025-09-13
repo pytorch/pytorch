@@ -120,12 +120,10 @@
 #endif
 #endif
 
-#ifdef USE_C10D
 #include <torch/csrc/distributed/autograd/python_autograd.h>
 #include <torch/csrc/distributed/c10d/c10d.h>
 #include <torch/csrc/distributed/rpc/rpc.h>
 #include <torch/csrc/distributed/rpc/testing/testing.h>
-#endif
 
 #if defined(USE_VALGRIND)
 #include <callgrind.h>
@@ -1987,7 +1985,6 @@ PyObject* initModule() {
 #ifdef USE_XPU
   THPUtils_addPyMethodDefs(methods, THXPModule_methods());
 #endif
-#ifdef USE_C10D
   THPUtils_addPyMethodDefs(
       methods, torch::distributed::c10d::python_functions());
 #ifndef _WIN32
@@ -1997,7 +1994,6 @@ PyObject* initModule() {
       methods, torch::distributed::autograd::python_functions());
   THPUtils_addPyMethodDefs(
       methods, torch::distributed::rpc::testing::python_functions());
-#endif
 #endif
 
   static struct PyModuleDef torchmodule = {
