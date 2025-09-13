@@ -87,7 +87,8 @@ def get_with_pytest_shard(
         duration = get_duration(test, test_file_times, test_class_times or {})
 
         if duration and duration > THRESHOLD:
-            num_shards = math.ceil(duration / THRESHOLD)
+            # num_shards = math.ceil(duration / THRESHOLD)
+            num_shards = 1
             for i in range(num_shards):
                 sharded_tests.append(
                     ShardedTest(test, i + 1, num_shards, duration / num_shards)
