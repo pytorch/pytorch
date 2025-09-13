@@ -226,8 +226,7 @@ double MPSEventPool::elapsedTime(id_t start_event_id, id_t end_event_id) {
   std::lock_guard<std::recursive_mutex> lock(m_mutex);
   MPSEvent* start_event = getInUseEvent(start_event_id, false);
   MPSEvent* end_event = getInUseEvent(end_event_id, false);
-  // the notify is called on a separate thread, so this waits for that
-  end_event->waitForCpuSync();
+
   const uint64_t start_time = start_event->getCompletionTime();
   const uint64_t end_time = end_event->getCompletionTime();
 
