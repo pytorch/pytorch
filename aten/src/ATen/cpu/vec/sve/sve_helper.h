@@ -1,8 +1,18 @@
 #pragma once
 
+#include <cstdint>
+#include <c10/macros/Macros.h>
 #include <ATen/cpu/vec/intrinsics.h>
 
 #include <ATen/cpu/vec/vec_base.h>
+
+#if defined(__aarch64__) && (defined(AT_BUILD_ARM_VEC256_WITH_SLEEF) || defined(AT_BUILD_ARM_VECSVE_WITH_SLEEF))
+#define SLEEF_STATIC_LIBS
+#include <sleef.h>
+#define USE_SLEEF(sleef_code, non_sleef_code) sleef_code
+#else
+#define USE_SLEEF(sleef_code, non_sleef_code) non_sleef_code
+#endif
 
 #if defined(CPU_CAPABILITY_SVE)
 
