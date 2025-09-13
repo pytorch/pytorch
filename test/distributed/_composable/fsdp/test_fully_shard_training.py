@@ -934,7 +934,6 @@ class TestFullyShardGradientAccumulation(FSDPTest):
         return min(4, torch.get_device_module(device_type).device_count())
 
     @skip_if_lt_x_gpu(2)
-    @xfailIf(TEST_XPU)  # https://github.com/pytorch/pytorch/issues/156782
     def test_gradient_accumulation(self):
         """
         Tests gradient accumulation with/without gradient reduction and
@@ -1116,7 +1115,6 @@ class TestFullyShardGradientAccumulation(FSDPTest):
                 _optim.zero_grad(set_to_none=(iter_idx % 2))
 
     @skip_if_lt_x_gpu(2)
-    @xfailIf(TEST_XPU)  # https://github.com/pytorch/pytorch/issues/156782
     def test_1f1b_microbatching(self):
         self.run_subtests(
             {

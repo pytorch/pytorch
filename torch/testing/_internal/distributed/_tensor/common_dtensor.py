@@ -367,7 +367,7 @@ class DTensorTestBase(MultiProcessTestCase):
 
     @property
     def backend(self) -> str:
-        backend = dist.get_default_backend_for_device(DEVICE_TYPE)
+        backend = dist.get_default_backend_for_device(self.device_type)
         return backend
 
     def build_device_mesh(self) -> DeviceMesh:
