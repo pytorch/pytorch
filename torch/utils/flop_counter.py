@@ -54,6 +54,60 @@ def register_flop_formula(targets, get_raw=False) -> Callable[[Callable[_P, _T]]
 
     return register_fun
 
+
+triton_flop_registry: dict[Any, Any] = {}
+def _register_flop_formula_for_triton_kernel(targets, get_raw=False) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
+    """
+    This experimental API is used to register flop formula for triton kernel in `targets`
+
+    This is separate from `register_flop_formula` because triton kernel
+    currently gets decomposed into `triton_kernel_wrapper_functional(kernel)`
+    in aot autograd; so this function requires
+    1) The user to write decomposition of the custom operator with mode:
+        `
+            op_decompose(mode, ...):
+                with mode:
+                    <op implementation>
+                    kernel
+                    <...>
+        `
+    2) The decomposition registered with the operator's flop counter mode
+    torch dispatch
+        `
+            torch.library.register_torch_dispatch(
+                "mylib::op", _FlopCounterMode, op_decompose
+            )
+        `
+    3) The user to register the flop formula for the triton kernel in this API
+        `
+            @register_flop_formula_for_triton_kernel(kernel)
+            def compute_fn(*args, **kwargs) -> int:
+                <impl>
+        `
+
+    We then use the `triton_flop_registry` to get the flop formula for the kernel name
+    when we encounter `triton_kernel_wrapper_functional(kernel)` in the graph.
+
+    NOTE: This API is unstable and subject to change.  We expect to streamline
+    steps 1) and 2) in the future, as well as default support for this
+    registration in the case of 1:1 op to kernel mapping.
+    """
+    def register_fun(flop_formula: Callable[_P, _T]) -> Callable[_P, _T]:
+        if not get_raw:
+            flop_formula = shape_wrapper(flop_formula)
+
+        def register(target):
+            if target in triton_flop_registry:
+                raise RuntimeError(f"duplicate registrations for {target}")
+            triton_flop_registry[target] = flop_formula
+
+        # To handle allowing multiple aten_ops at once
+        torch.utils._pytree.tree_map_(register, targets)
+
+        return flop_formula
+
+    return register_fun
+
 @register_flop_formula(aten.mm)
 def mm_flop(a_shape, b_shape, *args, out_shape=None, **kwargs) -> int:
     """Count flops for matmul."""
@@ -652,6 +706,7 @@ class FlopCounterMode:
             **flop_registry,
             **{k: v if getattr(v, "_get_raw", False) else shape_wrapper(v) for k, v in custom_mapping.items()}
         }
+        self.triton_flop_registry = {**triton_flop_registry}
         self.mod_tracker = ModuleTracker()
 
     def get_total_flops(self) -> int:
@@ -752,7 +807,11 @@ class FlopCounterMode:
             flop_count = flop_count_func(*args, **kwargs, out_val=out)  # type: ignore[operator]
             for par in set(self.mod_tracker.parents):
                 self.flop_counts[par][func_packet] += flop_count
-
+        elif func_packet in self.triton_flop_registry:
+            flop_count_func = self.triton_flop_registry[func_packet]
+            flop_count = flop_count_func(*args, **kwargs, out_val=out)  # type: ignore[operator]
+            for par in set(self.mod_tracker.parents):
+                self.flop_counts[par][func_packet] += flop_count
         return out
 
 class _FlopCounterMode(TorchDispatchMode):
@@ -782,15 +841,18 @@ class _FlopCounterMode(TorchDispatchMode):
         return result, flop_counts
 
     def _handle_higher_order_ops(self, func, types, args, kwargs):
-        if func not in {torch.ops.higher_order.cond, }:
-            return NotImplemented
-
-        # The flop counter for cond counts the upper bound of flops.
-        # For example, if a matmul is executed 2 times in true branch
-        # but only 1 time in the false branch, the flop counter will
-        # record the larger number of flops, i.e. 2 times.
-        if func is torch.ops.higher_order.cond:
-
+        is_triton = func in {torch.ops.higher_order.triton_kernel_wrapper_mutation,
+                             torch.ops.higher_order.triton_kernel_wrapper_functional}
+        if is_triton:
+            from torch._higher_order_ops.triton_kernel_wrap import get_kernel
+            # Special case - look in the triton flop registry for the kernel
+            kernel_name = get_kernel(kwargs["kernel_idx"])
+            return self.counter._count_flops(kernel_name, None, args, kwargs)
+        elif func is torch.ops.higher_order.cond:
+            # The flop counter for cond counts the upper bound of flops.
+            # For example, if a matmul is executed 2 times in true branch
+            # but only 1 time in the false branch, the flop counter will
+            # record the larger number of flops, i.e. 2 times.
             pred, true_branch, false_branch, operands = args
             # Step 1: Count flops for true branch and false branch separately
             true_out, true_flop_counts = self._execute_with_isolated_flop_counting(
@@ -829,6 +891,8 @@ class _FlopCounterMode(TorchDispatchMode):
             # It doesn't matter which one we return since true_fn and false_fn return
             # output with the same structure.
             return true_out
+        else:
+            return NotImplemented
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         kwargs = kwargs if kwargs else {}
