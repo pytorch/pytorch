@@ -1270,6 +1270,50 @@ class TestOptimRenewed(TestCase):
             else:
                 self.assertLess(loss.item(), initial_value)
 
+    @parametrize("zero_grad", ["to_zero", "to_none", None, "expect_error"])
+    @optims(optim_db, dtypes=[torch.float32])
+    def test_step_zero_grad(self, device, dtype, optim_info, zero_grad):
+        optim_cls = optim_info.optim_cls
+        all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(
+            device,
+            dtype,
+            optim_info,
+        )
+        for optim_input in all_optim_inputs:
+            weight_kwargs = optim_input.kwargs
+            weight = Parameter(torch.randn((10, 5), device=device, dtype=dtype))
+            input = torch.randn(5, device=device, dtype=dtype)
+            optimizer = optim_cls(
+                [
+                    dict(params=[weight], **weight_kwargs),
+                ]
+            )
+            loss = (weight.mv(input)).pow(2).sum()
+            loss.backward()
+            if optim_info.only_supports_sparse_grads:
+                # For this test, we naively convert the Tensor layout, which we know does
+                # NOT represent the expected use case for optims like SparseAdam!
+                weight.grad = weight.grad.to_sparse()
+
+            def closure():
+                return torch.tensor([1], device=device, dtype=dtype)
+
+            if zero_grad == "expect_error":
+                with self.assertRaisesRegex(
+                    ValueError, "Expect `zero_grad` to be one of"
+                ):
+                    optimizer.step(closure=closure, zero_grad=zero_grad)
+                continue
+
+            optimizer.step(closure=closure, zero_grad=zero_grad)
+
+            if zero_grad == "to_zero":
+                self.assertEqual(weight.grad, torch.zeros_like(weight.grad))
+            elif zero_grad == "to_none":
+                self.assertTrue(weight.grad is None)
+            else:
+                self.assertTrue(weight.grad is not None)
+
     @optims(optim_db, dtypes=[torch.float32])
     def test_param_groups_lr(self, device, dtype, optim_info):
         optim_cls = optim_info.optim_cls
