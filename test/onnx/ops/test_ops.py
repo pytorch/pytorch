@@ -526,6 +526,39 @@ class NativeOnnxOpsTest(common_utils.TestCase):
         self.assertEqual(onnx_program.model.opset_imports[""], 23)
         self.assertEqual("RotaryEmbedding", onnx_program.model.graph.node(0).op_type)
 
+    def test_rotary_embedding_3d(self):
+        num_heads = 2
+        input_data = torch.rand(2, 3, 6)
+        sin_cache_data = torch.rand(2, 3, 4)
+        cos_cache_data = torch.rand(2, 3, 4)
+
+        class Model(torch.nn.Module):
+            def forward(self, input_data, cos_cache_data, sin_cache_data):
+                return torch.onnx.ops.rotary_embedding(
+                    input_data,
+                    cos_cache_data,
+                    sin_cache_data,
+                    num_heads=num_heads,
+                )
+
+        model = Model()
+
+        # Dynamic shapes are supported
+        dynamic_shapes = {
+            "input_data": {0: torch.export.Dim.DYNAMIC},
+            "cos_cache_data": {0: torch.export.Dim.DYNAMIC},
+            "sin_cache_data": {0: torch.export.Dim.DYNAMIC},
+        }
+
+        onnx_program = self.export(
+            model,
+            (input_data, cos_cache_data, sin_cache_data),
+            dynamic_shapes=dynamic_shapes,
+            opset_version=23,
+        )
+        self.assertEqual(onnx_program.model.opset_imports[""], 23)
+        self.assertEqual("RotaryEmbedding", onnx_program.model.graph.node(0).op_type)
+
     def test_attention_basic(self):
         """Test basic attention functionality."""
         batch_size, q_seq_len, kv_seq_len = 2, 4, 6
