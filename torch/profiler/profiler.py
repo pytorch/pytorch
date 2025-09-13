@@ -1121,7 +1121,8 @@ class ExecutionTraceObserver(_ITraceObserver):
             and torch.distributed.is_available()
             and torch.distributed.is_initialized()
         ):
-            pg_config_info = torch.distributed.distributed_c10d._world.pg_config_info
+            world = torch.distributed.distributed_c10d._World.get()
+            pg_config_info = world.pg_config_info
             torch.autograd._record_function_with_args_enter(
                 "## process_group:init ##",
                 json.dumps(pg_config_info, cls=_NumpyEncoder),
