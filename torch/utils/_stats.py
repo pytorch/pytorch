@@ -5,6 +5,7 @@ import collections
 import functools
 from collections import OrderedDict
 from typing import Callable, TypeVar
+
 from typing_extensions import ParamSpec
 
 
@@ -28,3 +29,7 @@ def count(fn: Callable[_P, _R]) -> Callable[_P, _R]:
         return fn(*args, **kwargs)
 
     return wrapper
+
+
+simple_func_counter: OrderedDict[str, int] = collections.defaultdict(lambda: 0)
+simple_functionalize_counter: OrderedDict[str, int] = collections.defaultdict(lambda: 0)
