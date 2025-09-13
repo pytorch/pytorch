@@ -6,7 +6,6 @@
 #include <ATen/EmptyTensor.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/MapAllocator.h>
-#include <ATen/NamedTensorUtils.h>
 #include <ATen/Parallel.h>
 #include <ATen/SparseCsrTensorUtils.h>
 #include <ATen/TensorOperators.h>

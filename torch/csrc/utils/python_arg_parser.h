@@ -57,7 +57,6 @@
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/dynamo/eval_frame.h>
 #include <torch/csrc/jit/frontend/tracer.h>
-#include <torch/csrc/python_dimname.h>
 #include <torch/csrc/tensor/python_tensor.h>
 #include <torch/csrc/utils/disable_torch_function.h>
 #include <torch/csrc/utils/object_ptr.h>
@@ -116,8 +115,6 @@ enum class ParameterType {
   DEVICE,
   STREAM,
   STRING,
-  DIMNAME,
-  DIMNAME_LIST,
   QSCHEME,
   FLOAT_LIST,
   SCALAR_LIST,
@@ -273,9 +270,6 @@ struct TORCH_PYTHON_API PythonArgs {
   inline at::Device device(int i);
   inline at::Device deviceWithDefault(int i, const at::Device& default_device);
   inline std::optional<at::Device> deviceOptional(int i);
-  inline at::Dimname dimname(int i);
-  inline std::vector<at::Dimname> dimnamelist(int i);
-  inline std::optional<std::vector<at::Dimname>> toDimnameListOptional(int i);
   inline at::MemoryFormat memoryformat(int i);
   inline std::optional<at::MemoryFormat> memoryformatOptional(int i);
   inline at::QScheme toQScheme(int i);
@@ -871,42 +865,6 @@ inline std::optional<at::Device> PythonArgs::deviceOptional(int i) {
   return device(i);
 }
 
-inline at::Dimname PythonArgs::dimname(int i) {
-  TORCH_INTERNAL_ASSERT(args[i] != nullptr);
-  return THPDimname_parse(args[i]);
-}
-
-inline std::vector<at::Dimname> parseDimnameList(PyObject* arg) {
-  auto tuple = PyTuple_Check(arg);
-  // NOLINTNEXTLINE(bugprone-branch-clone)
-  auto size = tuple ? PyTuple_GET_SIZE(arg) : PyList_GET_SIZE(arg);
-  std::vector<at::Dimname> res;
-  res.reserve(size);
-  for (const auto idx : c10::irange(size)) {
-    PyObject* obj =
-        tuple ? PyTuple_GET_ITEM(arg, idx) : PyList_GET_ITEM(arg, idx);
-    res.push_back(THPDimname_parse(obj));
-  }
-  return res;
-}
-
-inline std::optional<std::vector<at::Dimname>> PythonArgs::
-    toDimnameListOptional(int i) {
-  if (!args[i])
-    return std::nullopt;
-  return parseDimnameList(args[i]);
-}
-
-inline std::vector<at::Dimname> PythonArgs::dimnamelist(int i) {
-  TORCH_INTERNAL_ASSERT(args[i]);
-  PyObject* arg = args[i];
-  auto size = signature.params[i].size;
-  TORCH_INTERNAL_ASSERT(size == 0 || size == 1);
-  if (size == 1 && THPUtils_checkDimname(arg)) {
-    return {THPDimname_parse(arg)};
-  }
-  return parseDimnameList(arg);
-}
 
 inline at::MemoryFormat PythonArgs::memoryformat(int i) {
   if (!args[i])

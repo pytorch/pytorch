@@ -144,18 +144,6 @@
   dispatch:
     CompositeExplicitAutograd: _has_same_storage_numel
 
-- func: rename_(Tensor(a!) self, Dimname[]? names) -> Tensor(a!)
-  variants: method
-  tags: inplace_view
-
-- func: rename(Tensor(a) self, Dimname[]? names) -> Tensor(a)
-  variants: method
-
-- func: align_to(Tensor(a) self, Dimname[] names) -> Tensor(a)
-  variants: method
-
-- func: align_to.ellipsis_idx(Tensor(a) self, Dimname[] order, int ellipsis_idx) -> Tensor(a)
-  variants: method
 
 - func: align_as(Tensor self, Tensor other) -> Tensor
   variants: method
@@ -216,8 +204,6 @@
   dispatch:
     CPU: _make_dep_token_cpu
 
-- func: refine_names(Tensor(a) self, Dimname[] names) -> Tensor(a)
-  variants: method
 
 - func: _use_cudnn_ctc_loss(Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, int blank) -> bool
   device_check: NoCheck  # Tensor arguments allowed to be on different devices, see also _cudnn_ctc_loss
@@ -732,12 +718,6 @@
     CompositeExplicitAutograd: all_dims_out_default
   cpp_no_default_args: ['dim']
 
-- func: all.dimname(Tensor self, Dimname dim, bool keepdim=False) -> Tensor
-  device_check: NoCheck   # TensorIterator
-  variants: function, method
-
-- func: all.dimname_out(Tensor self, Dimname dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
-  device_check: NoCheck   # TensorIterator
 
 - func: allclose(Tensor self, Tensor other, float rtol=1e-05, float atol=1e-08, bool equal_nan=False) -> bool
   variants: function, method
@@ -775,12 +755,6 @@
     CompositeExplicitAutograd: any_dims_out_default
   cpp_no_default_args: ['dim']
 
-- func: any.dimname(Tensor self, Dimname dim, bool keepdim=False) -> Tensor
-  device_check: NoCheck   # TensorIterator
-  variants: function, method
-
-- func: any.dimname_out(Tensor self, Dimname dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
-  device_check: NoCheck   # TensorIterator
 
 - func: arange(Scalar end, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
@@ -1429,27 +1403,18 @@
     MPS: cat_out_mps
     QuantizedCPU: cat_out_quantized_cpu
 
-- func: cat.names(Tensor[] tensors, Dimname dim) -> Tensor
-
-- func: cat.names_out(Tensor[] tensors, Dimname dim, *, Tensor(a!) out) -> Tensor(a!)
 
 # alias for torch.cat
 - func: concat(Tensor[] tensors, int dim=0) -> Tensor
 
 - func: concat.out(Tensor[] tensors, int dim=0, *, Tensor(a!) out) -> Tensor(a!)
 
-- func: concat.names(Tensor[] tensors, Dimname dim) -> Tensor
-
-- func: concat.names_out(Tensor[] tensors, Dimname dim, *, Tensor(a!) out) -> Tensor(a!)
 
 # alias for torch.cat
 - func: concatenate(Tensor[] tensors, int dim=0) -> Tensor
 
 - func: concatenate.out(Tensor[] tensors, int dim=0, *, Tensor(a!) out) -> Tensor(a!)
 
-- func: concatenate.names(Tensor[] tensors, Dimname dim) -> Tensor
-
-- func: concatenate.names_out(Tensor[] tensors, Dimname dim, *, Tensor(a!) out) -> Tensor(a!)
 
 - func: block_diag(Tensor[] tensors) -> Tensor
   variants: function
@@ -1960,12 +1925,6 @@
   dispatch:
     CompositeExplicitAutograd: cummax_out
 
-- func: cummax.dimname(Tensor self, Dimname dim) -> (Tensor values, Tensor indices)
-  device_check: NoCheck   # TensorIterator
-  variants: function, method
-
-- func: cummax.dimname_out(Tensor self, Dimname dim, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
-  device_check: NoCheck   # TensorIterator
 
 - func: _cummax_helper(Tensor self, Tensor(a!) values, Tensor(b!) indices, int dim) -> ()
   variants: function
@@ -1985,12 +1944,6 @@
   dispatch:
     CompositeExplicitAutograd: cummin_out
 
-- func: cummin.dimname(Tensor self, Dimname dim) -> (Tensor values, Tensor indices)
-  device_check: NoCheck   # TensorIterator
-  variants: function, method
-
-- func: cummin.dimname_out(Tensor self, Dimname dim, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
-  device_check: NoCheck   # TensorIterator
 
 - func: _cummin_helper(Tensor self, Tensor(a!) values, Tensor(b!) indices, int dim) -> ()
   variants: function
@@ -2020,15 +1973,6 @@
     CPU, CUDA: cumprod_out
     MPS: cumprod_out_mps
 
-- func: cumprod.dimname(Tensor self, Dimname dim, *, ScalarType? dtype=None) -> Tensor
-  device_check: NoCheck   # TensorIterator
-  variants: function, method
-
-- func: cumprod_.dimname(Tensor(a!) self, Dimname dim, *, ScalarType? dtype=None) -> Tensor(a!)
-  variants: method
-
-- func: cumprod.dimname_out(Tensor self, Dimname dim, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
-  device_check: NoCheck   # TensorIterator
 
 - func: cumprod_backward(Tensor grad, Tensor input, int dim, Tensor output) -> Tensor
   variants: function
@@ -2052,15 +1996,6 @@
     CPU, CUDA: cumsum_out
     MPS: cumsum_out_mps
 
-- func: cumsum.dimname(Tensor self, Dimname dim, *, ScalarType? dtype=None) -> Tensor
-  device_check: NoCheck   # TensorIterator
-  variants: function, method
-
-- func: cumsum_.dimname(Tensor(a!) self, Dimname dim, *, ScalarType? dtype=None) -> Tensor(a!)
-  variants: method
-
-- func: cumsum.dimname_out(Tensor self, Dimname dim, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
-  device_check: NoCheck   # TensorIterator
 
 - func: cumulative_trapezoid.x(Tensor y, Tensor x, *, int dim=-1) -> Tensor
 
@@ -2114,8 +2049,6 @@
   python_module: linalg
   variants: function
 
-- func: diagonal.Dimname(Tensor(a) self, *, Dimname outdim, Dimname dim1, Dimname dim2, int offset=0) -> Tensor(a)
-  variants: function, method
 
 - func: diagonal_backward(Tensor grad_output, SymInt[] input_sizes, int offset, int dim1, int dim2) -> Tensor
   variants: function
@@ -2395,12 +2328,6 @@
     CUDA: _embedding_bag_per_sample_weights_backward_cuda
   autogen: _embedding_bag_per_sample_weights_backward.out
 
-- func: empty.names(int[] size, *, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
-  device_check: NoCheck
-  device_guard: False
-  dispatch:
-    CompositeExplicitAutograd: empty_names
-  autogen: empty.names_out
 
 - func: empty.memory_format(SymInt[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
   dispatch:
@@ -2682,24 +2609,12 @@
 - func: flatten.using_ints(Tensor(a) self, int start_dim=0, int end_dim=-1) -> Tensor(a)
   variants: function, method
 
-- func: flatten.named_out_dim(Tensor(a) self, int start_dim, int end_dim, Dimname out_dim) -> Tensor(a)
-  variants: function, method
-
-- func: flatten.using_names(Tensor(a) self, Dimname start_dim, Dimname end_dim, Dimname out_dim) -> Tensor(a)
-  variants: function, method
-
-- func: flatten.DimnameList(Tensor(a) self, Dimname[] dims, Dimname out_dim) -> Tensor(a)
-  variants: function, method
 
 - func: unflatten.int(Tensor(a) self, int dim, SymInt[] sizes) -> Tensor(a)
   variants: function, method
   dispatch:
     CompositeImplicitAutograd: unflatten_symint
 
-- func: unflatten.Dimname(Tensor(a) self, Dimname dim, SymInt[] sizes, Dimname[] names) -> Tensor(a)
-  variants: function, method
-  dispatch:
-    CompositeImplicitAutograd: unflatten_dimname_symint
 
 - func: fill.Scalar(Tensor self, Scalar value) -> Tensor
   variants: function
@@ -2825,12 +2740,6 @@
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: frac_sparse_csr_out
   tags: pointwise
 
-- func: full.names(int[] size, Scalar fill_value, *, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  device_check: NoCheck
-  device_guard: False
-  dispatch:
-    CompositeExplicitAutograd: full
-  autogen: full.names_out
 
 - func: full(SymInt[] size, Scalar fill_value, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
@@ -3126,11 +3035,6 @@
   variants: function, method
   structured_delegate: index_copy.out
 
-- func: index_copy_.dimname(Tensor(a!) self, Dimname dim, Tensor index, Tensor source) -> Tensor(a!)
-  variants: method
-
-- func: index_copy.dimname(Tensor self, Dimname dim, Tensor index, Tensor source) -> Tensor
-  variants: function, method
 
 - func: index_put_(Tensor(a!) self, Tensor?[] indices, Tensor values, bool accumulate=False) -> Tensor(a!)
   device_check: NoCheck   # delegate to _index_put_impl_, which leverages TensorIterator
@@ -3294,10 +3198,6 @@
     CUDA: kthvalue_out_cuda
     MPS: kthvalue_out_mps
 
-- func: kthvalue.dimname(Tensor self, SymInt k, Dimname dim, bool keepdim=False) -> (Tensor values, Tensor indices)
-  variants: function, method
-
-- func: kthvalue.dimname_out(Tensor self, SymInt k, Dimname dim, bool keepdim=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
 
 - func: layer_norm(Tensor input, SymInt[] normalized_shape, Tensor? weight=None, Tensor? bias=None, float eps=1e-05, bool cudnn_enable=True) -> Tensor
   dispatch:
@@ -3732,8 +3632,6 @@
   dispatch:
     CompositeExplicitAutograd: log_softmax_out
 
-- func: log_softmax.Dimname(Tensor self, Dimname dim, *, ScalarType? dtype=None) -> Tensor
-  variants: function, method
 
 - func: _log_softmax(Tensor self, int dim, bool half_to_float) -> Tensor
   structured_delegate: _log_softmax.out
@@ -3779,10 +3677,6 @@
   dispatch:
     CompositeExplicitAutograd: logcumsumexp_out
 
-- func: logcumsumexp.dimname(Tensor self, Dimname dim) -> Tensor
-  variants: function, method
-
-- func: logcumsumexp.dimname_out(Tensor self, Dimname dim, *, Tensor(a!) out) -> Tensor(a!)
 
 - func: logsumexp(Tensor self, int[1] dim, bool keepdim=False) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -3796,12 +3690,6 @@
     # calls squeeze
     CompositeExplicitAutogradNonFunctional: logsumexp_out
 
-- func: logsumexp.names(Tensor self, Dimname[1] dim, bool keepdim=False) -> Tensor
-  device_check: NoCheck   # TensorIterator
-  variants: function, method
-
-- func: logsumexp.names_out(Tensor self, Dimname[1] dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
-  device_check: NoCheck   # TensorIterator
 
 - func: margin_ranking_loss(Tensor input1, Tensor input2, Tensor target, float margin=0.0, int reduction=Mean) -> Tensor
 
@@ -3884,12 +3772,6 @@
     CPU, CUDA, MTIA: max_out
     MPS: max_out_mps
 
-- func: max.names_dim(Tensor self, Dimname dim, bool keepdim=False) -> (Tensor values, Tensor indices)
-  device_check: NoCheck   # TensorIterator
-  variants: function, method
-
-- func: max.names_dim_max(Tensor self, Dimname dim, bool keepdim=False, *, Tensor(a!) max, Tensor(b!) max_values) -> (Tensor(a!) values, Tensor(b!) indices)
-  device_check: NoCheck   # TensorIterator
 
 - func: value_selecting_reduction_backward(Tensor grad, int dim, Tensor indices, SymInt[] sizes, bool keepdim) -> Tensor
   variants: function
@@ -3994,12 +3876,6 @@
     MPS: mean_out_mps
     QuantizedCPU: mean_out_quantized_cpu
 
-- func: mean.names_dim(Tensor self, Dimname[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
-  device_check: NoCheck   # TensorIterator
-  variants: function, method
-
-- func: mean.names_out(Tensor self, Dimname[1] dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
-  device_check: NoCheck   # TensorIterator
 
 - func: nanmean(Tensor self, int[1]? dim=None, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   device_check: NoCheck   # Composite
@@ -4027,11 +3903,6 @@
     CUDA: median_out_cuda
     MPS: median_out_mps
 
-- func: median.names_dim(Tensor self, Dimname dim, bool keepdim=False) -> (Tensor values, Tensor indices)
-  variants: function, method
-
-- func: median.names_dim_values(Tensor self, Dimname dim, bool keepdim=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
-
 - func: nanmedian(Tensor self) -> Tensor
   variants: function, method
   dispatch:
@@ -4051,11 +3922,6 @@
     CUDA: nanmedian_out_cuda
     MPS: nanmedian_out_mps
 
-- func: nanmedian.names_dim(Tensor self, Dimname dim, bool keepdim=False) -> (Tensor values, Tensor indices)
-  variants: function, method
-
-- func: nanmedian.names_dim_values(Tensor self, Dimname dim, bool keepdim=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
-
 - func: min.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)
   device_check: NoCheck   # TensorIterator
   structured_delegate: min.dim_min
@@ -4072,13 +3938,6 @@
   dispatch:
     CPU, CUDA, MTIA: min_out
     MPS: min_out_mps
-
-- func: min.names_dim(Tensor self, Dimname dim, bool keepdim=False) -> (Tensor values, Tensor indices)
-  device_check: NoCheck   # TensorIterator
-  variants: function, method
-
-- func: min.names_dim_min(Tensor self, Dimname dim, bool keepdim=False, *, Tensor(a!) min, Tensor(b!) min_indices) -> (Tensor(a!) values, Tensor(b!) indices)
-  device_check: NoCheck   # TensorIterator
 
 - func: amin(Tensor self, int[1] dim=[], bool keepdim=False) -> Tensor
   variants: function, method
@@ -4262,11 +4121,6 @@
 - func: mode.values(Tensor self, int dim=-1, bool keepdim=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
   dispatch:
     CompositeExplicitAutograd: mode_out
-
-- func: mode.dimname(Tensor self, Dimname dim, bool keepdim=False) -> (Tensor values, Tensor indices)
-  variants: function, method
-
-- func: mode.dimname_out(Tensor self, Dimname dim, bool keepdim=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
 
 - func: mul.Tensor(Tensor self, Tensor other) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -4505,13 +4359,6 @@
     CompositeExplicitAutograd: _nnpack_spatial_convolution
   autogen: _nnpack_spatial_convolution.out
 
-- func: ones.names(int[] size, *, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  device_check: NoCheck
-  device_guard: False
-  dispatch:
-    CompositeExplicitAutograd: ones
-  autogen: ones.names_out
-
 - func: ones(SymInt[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
     CompositeExplicitAutograd: ones
@@ -4717,22 +4564,6 @@
   autogen: scalar_tensor.out
   tags: core
 
-- func: rand.names(SymInt[] size, *, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  device_check: NoCheck
-  device_guard: False
-  dispatch:
-    CompositeExplicitAutograd: rand
-  autogen: rand.names_out
-  tags: nondeterministic_seeded
-
-- func: rand.generator_with_names(SymInt[] size, *, Generator? generator, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  device_check: NoCheck
-  device_guard: False
-  tags: nondeterministic_seeded
-  dispatch:
-    CompositeExplicitAutograd: rand
-  autogen: rand.generator_with_names_out
-
 - func: rand(SymInt[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   tags: [core, nondeterministic_seeded]
   dispatch:
@@ -4832,22 +4663,6 @@
   tags: nondeterministic_seeded
   dispatch:
     CompositeExplicitAutograd: randn
-
-- func: randn.names(SymInt[] size, *, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  tags: nondeterministic_seeded
-  device_check: NoCheck
-  device_guard: False
-  dispatch:
-    CompositeExplicitAutograd: randn
-  autogen: randn.names_out
-
-- func: randn.generator_with_names(SymInt[] size, *, Generator? generator, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  tags: nondeterministic_seeded
-  device_check: NoCheck
-  device_guard: False
-  dispatch:
-    CompositeExplicitAutograd: randn
-  autogen: randn.generator_with_names_out
 
 - func: randn.out(SymInt[] size, *, Tensor(a!) out) -> Tensor(a!)
   tags: nondeterministic_seeded
@@ -5239,11 +5054,6 @@
     CPU, CUDA, MPS, MTIA: rsqrt_out
   tags: pointwise
 
-- func: select.Dimname(Tensor(a) self, Dimname dim, int index) -> Tensor(a)
-  variants: function, method
-  device_check: NoCheck
-  device_guard: False
-
 - func: select.int(Tensor(a) self, int dim, SymInt index) -> Tensor(a)
   variants: function, method
   device_check: NoCheck
@@ -5502,11 +5312,6 @@
   device_guard: False
   manual_cpp_binding: True
 
-- func: size.Dimname(Tensor self, Dimname dim) -> int
-  variants: function, method
-  device_check: NoCheck
-  device_guard: False
-
 - func: sym_size.int(Tensor self, int dim) -> SymInt
   variants: function
   device_check: NoCheck
@@ -5615,9 +5420,6 @@
   dispatch:
     CompositeExplicitAutograd: softmax_out
 
-- func: softmax.Dimname(Tensor self, Dimname dim, *, ScalarType? dtype=None) -> Tensor
-  variants: function, method
-
 - func: _softmax(Tensor self, int dim, bool half_to_float) -> Tensor
   structured_delegate: _softmax.out
   dispatch:
@@ -5719,12 +5521,6 @@
     NestedTensorCPU, NestedTensorHPU, NestedTensorCUDA: squeeze_dim_nested
   tags: core
 
-- func: squeeze.dimname(Tensor(a) self, Dimname dim) -> Tensor(a)
-  variants: function, method
-  device_check: NoCheck
-  device_guard: False
-
-
 - func: squeeze.dims(Tensor(a) self, int[] dim) -> Tensor(a)
   variants: function, method
   device_check: NoCheck
@@ -5758,12 +5554,6 @@
   tags: inplace_view
   dispatch:
     CompositeExplicitAutograd: squeeze_
-
-- func: squeeze_.dimname(Tensor(a!) self, Dimname dim) -> Tensor(a!)
-  variants: method
-  device_check: NoCheck
-  device_guard: False
-  tags: inplace_view
 
 - func: sspaddmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   variants: function, method
@@ -5832,11 +5622,6 @@
   device_guard: False
   manual_cpp_binding: True
 
-- func: stride.Dimname(Tensor self, Dimname dim) -> int
-  variants: function, method
-  device_check: NoCheck
-  device_guard: False
-
 - func: sym_stride.int(Tensor self, int dim) -> SymInt
   variants: function
   device_check: NoCheck
@@ -5864,19 +5649,12 @@
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: sum_sparse_compressed
   tags: core
 
-- func: sum.dim_DimnameList(Tensor self, Dimname[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
-  device_check: NoCheck   # TensorIterator
-  variants: function, method
-
 - func: sum.IntList_out(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
   structured: True
   device_check: NoCheck   # TensorIterator
   dispatch:
     CPU, CUDA: sum_out
     MPS: sum_out_mps
-
-- func: sum.DimnameList_out(Tensor self, Dimname[1] dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
-  device_check: NoCheck   # TensorIterator
 
 # TODO: this function will be replaced once nested expand semantics have been settled on
 - func: _nested_sum_backward(Tensor grad, Tensor self, int[1]? dim, bool keepdim=False) -> Tensor
@@ -5988,15 +5766,6 @@
     MPS: std_mean_mps
   autogen: std_mean.correction_out
 
-- func: std_mean.names_dim(Tensor self, Dimname[1] dim, bool unbiased=True, bool keepdim=False) -> (Tensor, Tensor)
-  device_check: NoCheck   # TensorIterator
-  variants: function
-  cpp_no_default_args: ["unbiased"]
-
-- func: std_mean.correction_names(Tensor self, Dimname[1] dim, *, Scalar? correction=None, bool keepdim=False) -> (Tensor, Tensor)
-  device_check: NoCheck   # TensorIterator
-  variants: function
-
 - func: std.out(Tensor self, int[1]? dim, bool unbiased=True, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   cpp_no_default_args: ["unbiased"]
@@ -6006,23 +5775,6 @@
   dispatch:
     CPU, CUDA: std_out
     QuantizedCPU: std_out_quantized_cpu
-
-- func: std.names_dim(Tensor self, Dimname[1] dim, bool unbiased=True, bool keepdim=False) -> Tensor
-  device_check: NoCheck   # TensorIterator
-  variants: function, method
-  cpp_no_default_args: ["unbiased"]
-
-- func: std.names_out(Tensor self, Dimname[1] dim, bool unbiased=True, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
-  device_check: NoCheck   # TensorIterator
-  cpp_no_default_args: ["unbiased"]
-
-- func: std.correction_names(Tensor self, Dimname[1] dim, *, Scalar? correction=None, bool keepdim=False) -> Tensor
-  device_check: NoCheck   # TensorIterator
-  variants: function, method
-
-- func: std.correction_names_out(Tensor self, Dimname[1] dim, *, Scalar? correction=None, bool keepdim=False, Tensor(a!) out) -> Tensor(a!)
-  device_check: NoCheck   # TensorIterator
-  variants: function
 
 - func: prod(Tensor self, *, ScalarType? dtype=None) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -6045,13 +5797,6 @@
   dispatch:
     CPU, CUDA: prod_out
     MPS: prod_out_mps
-
-- func: prod.dim_Dimname(Tensor self, Dimname dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
-  device_check: NoCheck   # TensorIterator
-  variants: function, method
-
-- func: prod.Dimname_out(Tensor self, Dimname dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
-  device_check: NoCheck   # TensorIterator
 
 - func: t(Tensor(a) self) -> Tensor(a)
   device_check: NoCheck
@@ -6188,11 +5933,6 @@
   dispatch:
     CompositeExplicitAutograd: transpose
     NestedTensorCPU, NestedTensorHPU, NestedTensorCUDA: transpose_nested
-
-- func: transpose.Dimname(Tensor(a) self, Dimname dim0, Dimname dim1) -> Tensor(a)
-  variants: function, method
-  device_check: NoCheck
-  device_guard: False
 
 - func: _mkldnn_transpose(Tensor self, int dim0, int dim1) -> Tensor
   device_check: NoCheck
@@ -6535,23 +6275,6 @@
   dispatch:
     CPU, CUDA: var_out
 
-- func: var.names_dim(Tensor self, Dimname[1] dim, bool unbiased=True, bool keepdim=False) -> Tensor
-  device_check: NoCheck   # TensorIterator
-  variants: function, method
-  cpp_no_default_args: ["unbiased"]
-
-- func: var.names_out(Tensor self, Dimname[1] dim, bool unbiased=True, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
-  device_check: NoCheck   # TensorIterator
-  cpp_no_default_args: ["unbiased"]
-
-- func: var.correction_names(Tensor self, Dimname[1] dim, *, Scalar? correction=None, bool keepdim=False) -> Tensor
-  device_check: NoCheck   # TensorIterator
-  variants: function, method
-
-- func: var.correction_names_out(Tensor self, Dimname[1] dim, *, Scalar? correction=None, bool keepdim=False, Tensor(a!) out) -> Tensor(a!)
-  device_check: NoCheck   # TensorIterator
-  variants: function
-
 - func: var_mean(Tensor self, bool unbiased=True) -> (Tensor, Tensor)
   device_check: NoCheck   # TensorIterator
   variants: function
@@ -6569,15 +6292,6 @@
     CPU, CUDA: var_mean
     MPS: var_mean_mps
   autogen: var_mean.correction_out
-
-- func: var_mean.names_dim(Tensor self, Dimname[1] dim, bool unbiased=True, bool keepdim=False) -> (Tensor, Tensor)
-  device_check: NoCheck   # TensorIterator
-  variants: function
-  cpp_no_default_args: ["unbiased"]
-
-- func: var_mean.correction_names(Tensor self, Dimname[1] dim, *, Scalar? correction=None, bool keepdim=False) -> (Tensor, Tensor)
-  device_check: NoCheck   # TensorIterator
-  variants: function
 
 - func: view_as(Tensor(a) self, Tensor other) -> Tensor(a)
   variants: method
@@ -6637,13 +6351,6 @@
 
 - func: _weight_norm_differentiable_backward(Tensor grad_w, Tensor saved_v, Tensor saved_g, Tensor saved_norms, int dim) -> (Tensor, Tensor)
   variants: function
-
-- func: zeros.names(int[] size, *, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  device_check: NoCheck
-  device_guard: False
-  dispatch:
-    CompositeExplicitAutograd: zeros
-  autogen: zeros.names_out
 
 - func: _efficientzerotensor(SymInt[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
@@ -6787,10 +6494,6 @@
   python_module: sparse
   variants: function
 
-- func: _sparse_softmax.Dimname(Tensor self, Dimname dim, *, ScalarType? dtype=None) -> Tensor
-  python_module: sparse
-  variants: function
-
 - func: _sparse_softmax(Tensor self, int dim, bool half_to_float) -> Tensor
   python_module: sparse
   dispatch:
@@ -6808,9 +6511,6 @@
   python_module: sparse
   variants: function
 
-- func: _sparse_log_softmax.Dimname(Tensor self, Dimname dim, *, ScalarType? dtype=None) -> Tensor
-  python_module: sparse
-  variants: function
 
 - func: _sparse_log_softmax(Tensor self, int dim, bool half_to_float) -> Tensor
   python_module: sparse
@@ -6874,20 +6574,6 @@
     MPS: norm_out_mps
 
 # These four redispatch in their implementation, so OK to be CompositeImplicitAutograd
-- func: norm.names_ScalarOpt_dim_dtype(Tensor self, Scalar? p, Dimname[1] dim, bool keepdim, *, ScalarType dtype) -> Tensor
-  device_check: NoCheck   # TensorIterator
-  variants: function, method
-
-- func: norm.names_ScalarOpt_dim(Tensor self, Scalar? p, Dimname[1] dim, bool keepdim=False) -> Tensor
-  device_check: NoCheck   # TensorIterator
-  variants: function, method
-
-- func: norm.names_dtype_out(Tensor self, Scalar? p, Dimname[1] dim, bool keepdim, *, ScalarType dtype, Tensor(a!) out) -> Tensor(a!)
-  device_check: NoCheck   # TensorIterator
-
-- func: norm.names_out(Tensor self, Scalar? p, Dimname[1] dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
-  device_check: NoCheck   # TensorIterator
-
 - func: frexp.Tensor(Tensor self) -> (Tensor mantissa, Tensor exponent)
   variants: method, function
   dispatch:
@@ -7550,9 +7236,6 @@
   dispatch:
     CompositeExplicitAutograd: unbind
     NestedTensorCPU, NestedTensorHPU, NestedTensorCUDA: NestedTensor_unbind
-
-- func: unbind.Dimname(Tensor(a -> *) self, Dimname dim) -> Tensor(a)[]
-  variants: function, method
 
 - func: to_sparse.sparse_dim(Tensor self, int sparse_dim) -> Tensor
   variants: method
@@ -8225,9 +7908,6 @@
   structured_delegate: index_add.out
   variants: function, method
 
-- func: index_add.dimname(Tensor self, Dimname dim, Tensor index, Tensor source, *, Scalar alpha=1) -> Tensor
-  variants: function, method
-
 - func: index_reduce.out(Tensor self, int dim, Tensor index, Tensor source, str reduce, *, bool include_self=True, Tensor(a!) out) -> Tensor(a!)
   structured: True
   variants: function
@@ -8273,22 +7953,6 @@
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: index_fill
-
-- func: index_fill_.Dimname_Scalar(Tensor(a!) self, Dimname dim, Tensor index, Scalar value) -> Tensor(a!)
-  device_check: NoCheck   # TensorIterator
-  variants: method
-
-- func: index_fill_.Dimname_Tensor(Tensor(a!) self, Dimname dim, Tensor index, Tensor value) -> Tensor(a!)
-  device_check: NoCheck   # TensorIterator
-  variants: method
-
-- func: index_fill.Dimname_Scalar(Tensor self, Dimname dim, Tensor index, Scalar value) -> Tensor
-  device_check: NoCheck   # TensorIterator
-  variants: function, method
-
-- func: index_fill.Dimname_Tensor(Tensor self, Dimname dim, Tensor index, Tensor value) -> Tensor
-  device_check: NoCheck   # TensorIterator
-  variants: function, method
 
 - func: scatter.src(Tensor self, int dim, Tensor index, Tensor src) -> Tensor
   structured_delegate: scatter.src_out
@@ -8352,12 +8016,6 @@
     CPU, CUDA: scatter_value_reduce_out
     MPS: scatter_value_reduce_out_mps
 
-- func: scatter.dimname_src(Tensor self, Dimname dim, Tensor index, Tensor src) -> Tensor
-  variants: function, method
-
-- func: scatter.dimname_value(Tensor self, Dimname dim, Tensor index, Scalar value) -> Tensor
-  variants: function, method
-
 - func: scatter_add(Tensor self, int dim, Tensor index, Tensor src) -> Tensor
   structured_delegate: scatter_add.out
   variants: function, method
@@ -8373,9 +8031,6 @@
   dispatch:
     CPU, CUDA: scatter_add
     MPS: scatter_add_mps_out
-
-- func: scatter_add.dimname(Tensor self, Dimname dim, Tensor index, Tensor src) -> Tensor
-  variants: function, method
 
 - func: scatter_reduce.two(Tensor self, int dim, Tensor index, Tensor src, str reduce, *, bool include_self=True) -> Tensor
   structured_delegate: scatter_reduce.two_out
@@ -9329,11 +8984,6 @@
     MPS: index_select_mps
   tags: core
 
-- func: index_select.dimname_out(Tensor self, Dimname dim, Tensor index, *, Tensor(a!) out) -> Tensor(a!)
-
-- func: index_select.dimname(Tensor self, Dimname dim, Tensor index) -> Tensor
-  variants: method, function
-
 - func: index_select_backward(Tensor grad, SymInt[] self_sizes, int dim, Tensor index) -> Tensor
   variants: function
   device_check: NoCheck
@@ -9409,11 +9059,6 @@
   variants: function
   device_check: NoCheck
   device_guard: False
-
-- func: gather.dimname_out(Tensor self, Dimname dim, Tensor index, *, bool sparse_grad=False, Tensor(a!) out) -> Tensor(a!)
-
-- func: gather.dimname(Tensor self, Dimname dim, Tensor index, *, bool sparse_grad=False) -> Tensor
-  variants: method, function
 
 - func: _gather_sparse_backward(Tensor self, int dim, Tensor index, Tensor grad) -> Tensor
 
@@ -10198,16 +9843,6 @@
   dispatch:
     QuantizedCPU: sort_quantized_cpu_stable
 
-- func: sort.dimname_values(Tensor self, Dimname dim, bool descending=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
-
-- func: sort.dimname_values_stable(Tensor self, *, bool? stable, Dimname dim, bool descending=False, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
-
-- func: sort.dimname(Tensor self, Dimname dim, bool descending=False) -> (Tensor values, Tensor indices)
-  variants: method, function
-
-- func: sort.dimname_stable(Tensor self, *, bool? stable, Dimname dim, bool descending=False) -> (Tensor values, Tensor indices)
-  variants: method, function
-
 - func: msort.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
 
 - func: msort(Tensor self) -> Tensor
@@ -10224,9 +9859,6 @@
 - func: argsort.stable_out(Tensor self, *, bool stable, int dim=-1, bool descending=False, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   variants: function
-
-- func: argsort.dimname(Tensor self, Dimname dim, bool descending=False) -> Tensor
-  variants: method, function
 
 - func: topk.values(Tensor self, SymInt k, int dim=-1, bool largest=True, bool sorted=True, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
   structured: True
