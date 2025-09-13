@@ -995,7 +995,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
             has_bias=True,
         )
 
-    return autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout)
+    return autotune_select_algorithm(name, choices, [inp_expanded, mat1, mat2], layout)
 
 
 @register_lowering(aten._sparse_semi_structured_mm, type_promotion_kind=None)
