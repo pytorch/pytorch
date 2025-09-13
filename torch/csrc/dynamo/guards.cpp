@@ -834,6 +834,7 @@ static PyObject* check_obj_id(PyObject* dummy, PyObject* args) {
 
 static std::unordered_map<PyObject*, uint64_t> dict_version_map;
 static int dict_version_watcher_id;
+static int dict_recursive_tag_watcher_id;
 static uint64_t global_dict_version_id = 1;
 static int dict_version_watch_callback(
     PyDict_WatchEvent event,
@@ -1042,7 +1043,8 @@ static void _parse_empty_strided_args(
 static PyObject* _empty_strided_device(
     PyObject* dummy,
     PyObject* args,
-    c10::DeviceType device_type) {
+    c10::DeviceType device_type,
+    bool is_pinned = false) {
   HANDLE_TH_ERRORS;
   at::SmallVector<int64_t, 8> sizes;
   at::SmallVector<int64_t, 8> strides;
@@ -1050,7 +1052,7 @@ static PyObject* _empty_strided_device(
   _parse_empty_strided_args(args, sizes, strides, dtype);
   if (device_type == c10::DeviceType::CPU) {
     return THPVariable_Wrap(
-        at::detail::empty_strided_cpu(sizes, strides, dtype));
+        at::detail::empty_strided_cpu(sizes, strides, dtype, is_pinned));
   }
 #ifdef USE_CUDA
   else if (device_type == c10::DeviceType::CUDA) {
@@ -1082,6 +1084,13 @@ static PyObject* _empty_strided_cpu(PyObject* dummy, PyObject* args) {
   // at::empty_strided is surprising slow.  This is a lower-overhead
   // version that saves ~2us on every allocation.
   return _empty_strided_device(dummy, args, c10::DeviceType::CPU);
+}
+
+static PyObject* _empty_strided_cpu_pinned(PyObject* dummy, PyObject* args) {
+  // at::empty_strided is surprising slow.  This is a lower-overhead
+  // version that saves ~2us on every allocation.
+  return _empty_strided_device(
+      dummy, args, c10::DeviceType::CPU, /*is_pinned=*/true);
 }
 
 static PyObject* _empty_strided_cuda(PyObject* dummy, PyObject* args) {
@@ -1127,6 +1136,10 @@ static PyMethodDef _methods[] = {
     {"assert_alignment", assert_alignment, METH_VARARGS, nullptr},
     {"dict_version", dict_version, METH_VARARGS, nullptr},
     {"_empty_strided_cpu", _empty_strided_cpu, METH_VARARGS, nullptr},
+    {"_empty_strided_cpu_pinned",
+     _empty_strided_cpu_pinned,
+     METH_VARARGS,
+     nullptr},
     {"_empty_strided_cuda", _empty_strided_cuda, METH_VARARGS, nullptr},
     {"_empty_strided_xpu", _empty_strided_xpu, METH_VARARGS, nullptr},
     {"_empty_strided_mtia", _empty_strided_mtia, METH_VARARGS, nullptr},
@@ -1545,6 +1558,37 @@ class GuardManager;
 class RootGuardManager;
 class DictGuardManager;
 
+// Global registry used by the *recursive-dict-tag* optimisation.
+//
+// Key   : `PyObject*` pointing to a watched `dict`
+// Value : list of `GuardManager*` instances that have recorded that dict
+//
+// Why is this global?
+// -------------------
+// * CPython allows only a small, fixed number of dict-watcher IDs (≈64).
+//   All `GuardManager`s therefore share a single watcher callback.
+// * Different guard managers (possibly across different frames) can end up
+//   watching the same dictionary pointer. Therefore, we have a list of guard
+//   managers for each dict pointer.
+//
+// When is watch registered?
+//  * During the recording phase of recursive dict tag matching in GuardManager.
+//
+// When are they watched?
+//  * In the dict_recursive_tag_watch_callback function.
+//
+// When are the dict pointers unwatched?
+//  * If a dict is mutated or the guard manager deallocates.
+//  * Read `unwatch_all_saved_dict_pointers` docstring for more details.
+//
+// Expected size
+// -------------
+// Every compilation frame contributes its tag-safe dicts to this registry, so
+// the container can grow large over the lifetime of the process.  That’s
+// acceptable: lookup is by pointer (hash/equals = identity) and each entry
+// stores only lightweight pointers.
+std::unordered_map<PyObject*, std::list<GuardManager*>> dict_to_guard_managers;
+
 /**
  * Base class for the leaf guard in the GuardManager hierarchy.
  */
@@ -1581,9 +1625,7 @@ class LeafGuard {
   // is not exposed to Python and can only be called from C++.
   virtual bool check_nopybind(PyObject* value) = 0;
   virtual bool check_nopybind(FrameLocalsMapping* map) {
-    // throw std::runtime_error("fallback to python");
-    // Could fallback to running check on the Python dict (lazily constructed)
-    return check_nopybind((PyObject*)map->to_dict());
+    throw std::runtime_error("fallback to python");
   }
 
   virtual ~LeafGuard() = default;
@@ -1614,8 +1656,13 @@ class LAMBDA_GUARD : public LeafGuard {
   LAMBDA_GUARD(
       RootGuardManager* root_guard_manager,
       py::object guard_check_fn,
+      py::object required_locals,
+      bool construct_partial_framelocals_dict,
       py::object verbose_code_parts)
-      : LeafGuard(root_guard_manager, std::move(verbose_code_parts)) {
+      : LeafGuard(root_guard_manager, std::move(verbose_code_parts)),
+        _required_locals(py::cast<py::dict>(required_locals)),
+        _construct_partial_framelocals_dict(
+            construct_partial_framelocals_dict) {
     if (py::isinstance<py::function>(guard_check_fn)) {
       _guard_check_fn = py::cast<py::function>(std::move(guard_check_fn));
     } else {
@@ -1652,9 +1699,124 @@ class LAMBDA_GUARD : public LeafGuard {
     return GuardDebugInfo(false, verbose_code_parts(), 0);
   }
 
+  bool check_nopybind(FrameLocalsMapping* map) override {
+    // TODO (anijain2305) - Get rid of the _construct_partial_framelocals_dict
+    // once its stable.
+    if (_construct_partial_framelocals_dict) {
+      py::dict partial_dict;
+
+      for (auto item : _required_locals) {
+        partial_dict[item.first] = map->get(item.second.cast<int>());
+      }
+
+      return check_nopybind(partial_dict.ptr());
+    }
+    return check_nopybind((PyObject*)map->to_dict());
+  }
+
+ private:
+  // Dict of (local_name, framelocal_idx) representing the minimum number of
+  // framelocals needed to construct the dictionary for the lambda guard.
+  py::dict _required_locals;
+
+  // Temporary flag to allow a fallback behavior. With stability, we can remove
+  // this member.
+  bool _construct_partial_framelocals_dict;
+
+  // The user provided lambda function for check_fn.
+  py::function _guard_check_fn;
+};
+
+/*
+Similar to LAMBDA_GUARD but where lambda does not take any arguments. This
+ensures that we don't need to construct a dictionary from framelocals even if
+the guard is at the root. These guards are for root guards like GlobalState.
+*/
+class LAMBDA_GUARD_NO_ARGS : public LeafGuard {
+ public:
+  LAMBDA_GUARD_NO_ARGS(
+      RootGuardManager* root_guard_manager,
+      py::object guard_check_fn,
+      py::object verbose_code_parts)
+      : LeafGuard(root_guard_manager, std::move(verbose_code_parts)) {
+    if (py::isinstance<py::function>(guard_check_fn)) {
+      _guard_check_fn = py::cast<py::function>(std::move(guard_check_fn));
+    } else {
+      throw py::type_error("LAMBDA_GUARD_NO_ARGS expects (callable, str)");
+    }
+  }
+
+  bool _check() {
+    PyObject* x = PyObject_CallNoArgs(_guard_check_fn.ptr()); // new ref
+    if (x == nullptr) {
+      // An exception is caught in the lambda function.
+      PyErr_Clear();
+      return false;
+    }
+    bool result = PyObject_IsTrue(x);
+    Py_DECREF(x);
+    return result;
+  }
+
+  bool check_nopybind(PyObject* value) override { // borrowed ref
+    return _check();
+  }
+
+  GuardDebugInfo check_verbose_nopybind(PyObject* value) override {
+    PyObject* x = PyObject_CallNoArgs(_guard_check_fn.ptr()); // new ref
+    if (x == nullptr) {
+      // An exception is caught in the lambda function.
+      std::string exc_message = get_exception_message();
+      PyErr_Clear();
+      return GuardDebugInfo(false, exc_message, 0);
+    }
+    bool result = PyObject_IsTrue(x);
+    Py_DECREF(x);
+    if (result) {
+      return GuardDebugInfo(true, 0);
+    }
+    return GuardDebugInfo(false, verbose_code_parts(), 0);
+  }
+
+  // Ensure that framelocals dict is not constructed.
+  bool check_nopybind(FrameLocalsMapping* map) override {
+    return _check();
+  }
+
  private:
   // The user provided lambda function for check_fn.
   py::function _guard_check_fn;
+};
+
+/*
+Similar to LAMBDA_GUARD but disallows running on a FrameLocalsMapping input.
+These guards are at trunk or leaf, and not at the root.
+*/
+class LAMBDA_GUARD_NO_FRAMELOCALS : public LAMBDA_GUARD {
+ public:
+  LAMBDA_GUARD_NO_FRAMELOCALS(
+      RootGuardManager* root_guard_manager,
+      py::object guard_check_fn,
+      py::object verbose_code_parts)
+      : LAMBDA_GUARD(
+            root_guard_manager,
+            guard_check_fn,
+            py::dict(),
+            false,
+            verbose_code_parts) {}
+
+  bool check_nopybind(PyObject* value) override { // borrowed ref
+    return LAMBDA_GUARD::check_nopybind(value);
+  }
+
+  GuardDebugInfo check_verbose_nopybind(PyObject* value) override {
+    return LAMBDA_GUARD::check_verbose_nopybind(value);
+  }
+
+  bool check_nopybind(FrameLocalsMapping* map) override {
+    throw std::runtime_error(
+        "FramelocalsMapping input to LAMBDA_GUARD_NO_FRAMELOCALS, use LAMBDA_GUARD instead");
+  }
 };
 
 class TYPE_MATCH : public LeafGuard {
@@ -2092,6 +2254,84 @@ class SET_CONTAINS : public LeafGuard {
   py::object _item;
 };
 
+// Check if the float is nan
+class FLOAT_IS_NAN : public LeafGuard {
+ public:
+  FLOAT_IS_NAN(
+      RootGuardManager* root_guard_manager,
+      py::object verbose_code_parts)
+      : LeafGuard(root_guard_manager, std::move(verbose_code_parts)) {}
+
+  bool check_nopybind(PyObject* value) override { // borrowed ref
+    if (!PyFloat_CheckExact(value)) {
+      return false;
+    }
+    return std::isnan(PyFloat_AsDouble(value));
+  }
+};
+
+// Check if the float is nan
+class COMPLEX_IS_NAN : public LeafGuard {
+ public:
+  COMPLEX_IS_NAN(
+      RootGuardManager* root_guard_manager,
+      py::object verbose_code_parts)
+      : LeafGuard(root_guard_manager, std::move(verbose_code_parts)) {}
+
+  bool check_nopybind(PyObject* value) override { // borrowed ref
+    if (!PyComplex_CheckExact(value)) {
+      return false;
+    }
+    Py_complex c_value = PyComplex_AsCComplex(value);
+    return std::isnan(c_value.real) || std::isnan(c_value.imag);
+  }
+};
+
+// Check if the dual level is the same as the one in fx graph
+class DUAL_LEVEL_MATCH : public LeafGuard {
+ public:
+  DUAL_LEVEL_MATCH(
+      RootGuardManager* root_guard_manager,
+      int64_t level,
+      py::object verbose_code_parts)
+      : LeafGuard(root_guard_manager, std::move(verbose_code_parts)),
+        _level(level) {
+    forward_ad_module = py::module_::import("torch.autograd.forward_ad");
+  }
+
+  bool check_nopybind(PyObject* value) override { // borrowed ref
+    // Ignore value arg, this is just to satisfy the interface.
+    return _check();
+  }
+
+  bool check_nopybind(FrameLocalsMapping* value) override {
+    // Ignore value arg, this is just to satisfy the interface.
+    return _check();
+  }
+
+  bool _check() {
+    PyObject* current_level = PyObject_GetAttrString(
+        forward_ad_module.ptr(), "_current_level"); // new ref
+    if (current_level == nullptr) {
+      // Attribute absent, clear the exception and return false.
+      PyErr_Clear();
+      return false;
+    }
+    if (!PyLong_CheckExact(current_level)) {
+      Py_DECREF(current_level);
+      return false;
+    } else {
+      int64_t current_level_int = PyLong_AsLongLong(current_level);
+      Py_DECREF(current_level);
+      return current_level_int == _level;
+    }
+  }
+
+ private:
+  int64_t _level;
+  py::object forward_ad_module;
+};
+
 /**
  * Relational guards compare more than one value. We implement Relational
  * guards by capturing some state in the guard object. For example for tensor
@@ -2486,9 +2726,7 @@ class GuardAccessor {
   // subtree on immutable dict getitems.
   virtual bool check_nopybind(PyObject* obj, bool matches_dict_tag = false) = 0;
   virtual bool check_nopybind(FrameLocalsMapping* map, bool matches_dict_tag) {
-    // throw std::runtime_error("fallback to python");
-    // Could fallback to running check on the Python dict (lazily constructed)
-    return check_nopybind((PyObject*)map->to_dict(), matches_dict_tag);
+    throw std::runtime_error("fallback to python");
   }
   virtual GuardDebugInfo check_verbose_nopybind(PyObject* obj) = 0;
   virtual std::string repr() const = 0;
@@ -2613,6 +2851,7 @@ class GuardManager {
 
   virtual ~GuardManager() {
     cleanup_tag_safe_entries();
+    disable_recursive_dict_tag_optimization();
   }
 
   void cleanup_tag_safe_entries() {
@@ -2713,6 +2952,11 @@ class GuardManager {
       PyObject* value,
       std::vector<PyObject*> tensor_pointers) {
     _tensor_pointers[value] = tensor_pointers;
+  }
+
+  void disable_recursive_dict_tag_optimization() {
+    unwatch_all_saved_dict_pointers();
+    _disable_dict_tag_matching = true;
   }
 
  public:
@@ -2821,6 +3065,10 @@ class GuardManager {
   }
 
   bool check_dict_pointer_tags(PyObject* value) {
+    if (_dict_callback_installed) {
+      // This means that for 3.12+, there are callbacks watching dict pointers.
+      return true;
+    }
     for (auto& kv : _dict_pointers[value]) {
       PyObject* dict_pointer = kv.first;
       uint64_t old_tag = kv.second;
@@ -2951,6 +3199,11 @@ class GuardManager {
           throw std::runtime_error(
               "Could not register a callback for recursive dict tag optimization");
         }
+#if IS_PYTHON_3_12_PLUS
+        // Ideally we don't need to even register a weakref callback for value.
+        // But it does not hurt to be more cautious
+        _dict_callback_installed = watch_dict_pointers(value);
+#endif
       }
     }
     if (!result) {
@@ -2967,8 +3220,9 @@ class GuardManager {
     }
     GuardManager* guard_manager = static_cast<GuardManager*>(
         PyCapsule_GetPointer(self_capsule, "GuardManager*"));
-    if (guard_manager)
-      guard_manager->_disable_dict_tag_matching = true;
+    if (guard_manager) {
+      guard_manager->disable_recursive_dict_tag_optimization();
+    }
     Py_RETURN_NONE;
   }
 
@@ -3017,6 +3271,81 @@ class GuardManager {
     // These will be decrefed in destructor
     _tag_safe_entries.push_back({wr, capsule});
     return true;
+  }
+
+  bool watch_dict_pointers(PyObject* value) {
+#if IS_PYTHON_3_12_PLUS
+    // -----------------------------------------------------------------------------
+    // CPython 3.12 dict-watcher integration
+    // -----------------------------------------------------------------------------
+    //
+    // We register a single watcher on all every dictionary pointer recorded by
+    // a tag-safe root.  The watcher callback fires *once* for any structural
+    // change to those dictionaries
+    //
+    // Fast-path benefit
+    // -----------------
+    // In steady state we no longer need to iterate over the recorded
+    // dictionaries and compare their `ma_version_tag`s (the
+    // “are-tags-unchanged” loop that used to dominate the fast-path guard
+    // evaluation).  The presence of an *active watcher* is itself a guarantee
+    // that none of the dicts has mutated; if one **does** mutate, the callback
+    // simply flips `_disable_dict_tag_matching = true`, causing the next guard
+    // evaluation to skip the recursive-dict-tag optimisation entirely.
+    for (auto& kv : _dict_pointers[value]) {
+      PyObject* dict_pointer = kv.first;
+      int rc = PyDict_Watch(dict_recursive_tag_watcher_id, dict_pointer);
+      if (rc != 0) {
+        PyErr_Clear();
+        return false;
+      }
+      dict_to_guard_managers[dict_pointer].push_back(this);
+    }
+#endif
+    return true;
+  }
+
+  void unwatch_all_saved_dict_pointers() {
+    /*
+    We may have recorded hundreds/thousands of dict pointers for the recursive
+    dict-tag optimisation. If any of those dicts mutates, we want to disable the
+    optimisation and then unwatch as many dict pointers as we can.
+
+    Be careful: the same dict pointer can be recorded by multiple GuardManagers.
+    So the flow is:
+
+      1) Remove *this* GuardManager from dict_to_guard_managers[dict_pointer].
+      2) If the list for that dict becomes empty, then:
+          - PyDict_Unwatch(dict_recursive_tag_watcher_id, dict_pointer)
+          - erase the dict_pointer entry from dict_to_guard_managers.
+    */
+#if IS_PYTHON_3_12_PLUS
+    if (!_disable_dict_tag_matching) {
+      for (auto& value_stashed_pointers : _dict_pointers) {
+        auto stashed_pointers = value_stashed_pointers.second;
+
+        for (auto& stashed_pointer : stashed_pointers) {
+          PyObject* dict_pointer = stashed_pointer.first;
+
+          // Delete the guard manager from the dict_to_guard_managers
+          auto it = std::find(
+              dict_to_guard_managers[dict_pointer].begin(),
+              dict_to_guard_managers[dict_pointer].end(),
+              this);
+          if (it != dict_to_guard_managers[dict_pointer].end()) {
+            dict_to_guard_managers[dict_pointer].erase(it);
+          }
+
+          // Unwatch the dict pointer if this was the last guard manager
+          // watching it.
+          if (dict_to_guard_managers[dict_pointer].empty()) {
+            PyDict_Unwatch(dict_recursive_tag_watcher_id, dict_pointer);
+            dict_to_guard_managers.erase(dict_pointer);
+          }
+        }
+      }
+    }
+#endif
   }
 
   virtual bool check_nopybind(FrameLocalsMapping* value) {
@@ -3257,6 +3586,9 @@ class GuardManager {
       _dict_pointers;
   std::unordered_map<PyObject*, std::vector<PyObject*>> _tensor_pointers;
   std::vector<WeakEntry> _tag_safe_entries;
+
+  // 3.12+ related helper
+  bool _dict_callback_installed = false;
 
  protected:
   // weakref to the type of guarded value
@@ -3944,6 +4276,27 @@ void add_relational_guard_resetter_to_cloned_root(
     std::shared_ptr<RelationalGuard> guard) {
   root->add_relational_guard_resetter(std::move(guard));
 }
+
+#if IS_PYTHON_3_12_PLUS
+static int dict_recursive_tag_watch_callback(
+    PyDict_WatchEvent event,
+    PyObject* dict,
+    PyObject* key,
+    PyObject* new_value) noexcept {
+  if (event != PyDict_EVENT_CLONED) {
+    auto it = dict_to_guard_managers.find(dict);
+    if (it != dict_to_guard_managers.end()) {
+      auto guard_managers = it->second;
+      for (auto& guard_manager : guard_managers) {
+        if (guard_manager) {
+          guard_manager->disable_recursive_dict_tag_optimization();
+        }
+      }
+    }
+  }
+  return 0; // keep watching
+}
+#endif
 
 std::unique_ptr<GuardManager> make_guard_manager(
     RootGuardManager* root,
@@ -5397,6 +5750,11 @@ class GlobalsGuardAccessor : public GuardAccessor {
     return "GlobalsGuardAccessor";
   }
 
+  bool check_nopybind(FrameLocalsMapping* map, bool matches_dict_tag) override {
+    // Ensure that we don't construct the framelocals to dict here.
+    return _guard_manager->check_nopybind(_globals_dict);
+  }
+
  public: // cloning functions
   GlobalsGuardAccessor(GuardManager* guard_manager, GlobalsGuardAccessor* from)
       : GuardAccessor(guard_manager, from) {
@@ -6444,8 +6802,22 @@ PyObject* torch_c_dynamo_guards_init() {
       .def("verbose_code_parts", &LeafGuard::verbose_code_parts);
   py::class_<LAMBDA_GUARD, LeafGuard, std::shared_ptr<LAMBDA_GUARD>>(
       py_m, "LAMBDA_GUARD")
-      .def(py::init<RootGuardManager*, py::function, py::list>())
+      .def(
+          py::init<RootGuardManager*, py::function, py::dict, bool, py::list>())
       .def("__call__", &LAMBDA_GUARD::check);
+  py::class_<
+      LAMBDA_GUARD_NO_ARGS,
+      LeafGuard,
+      std::shared_ptr<LAMBDA_GUARD_NO_ARGS>>(py_m, "LAMBDA_GUARD_NO_ARGS")
+      .def(py::init<RootGuardManager*, py::function, py::list>())
+      .def("__call__", &LAMBDA_GUARD_NO_ARGS::check);
+  py::class_<
+      LAMBDA_GUARD_NO_FRAMELOCALS,
+      LeafGuard,
+      std::shared_ptr<LAMBDA_GUARD_NO_FRAMELOCALS>>(
+      py_m, "LAMBDA_GUARD_NO_FRAMELOCALS")
+      .def(py::init<RootGuardManager*, py::function, py::list>())
+      .def("__call__", &LAMBDA_GUARD_NO_FRAMELOCALS::check);
   py::class_<TYPE_MATCH, LeafGuard, std::shared_ptr<TYPE_MATCH>>(
       py_m, "TYPE_MATCH")
       .def(py::init<RootGuardManager*, py::object, py::list>())
@@ -6532,6 +6904,18 @@ PyObject* torch_c_dynamo_guards_init() {
       py_m, "SET_CONTAINS")
       .def(py::init<RootGuardManager*, bool, py::object, py::list>())
       .def("__call__", &SET_CONTAINS::check);
+  py::class_<DUAL_LEVEL_MATCH, LeafGuard, std::shared_ptr<DUAL_LEVEL_MATCH>>(
+      py_m, "DUAL_LEVEL_MATCH")
+      .def(py::init<RootGuardManager*, int64_t, py::list>())
+      .def("__call__", &DUAL_LEVEL_MATCH::check);
+  py::class_<FLOAT_IS_NAN, LeafGuard, std::shared_ptr<FLOAT_IS_NAN>>(
+      py_m, "FLOAT_IS_NAN")
+      .def(py::init<RootGuardManager*, py::list>())
+      .def("__call__", &FLOAT_IS_NAN::check);
+  py::class_<COMPLEX_IS_NAN, LeafGuard, std::shared_ptr<COMPLEX_IS_NAN>>(
+      py_m, "COMPLEX_IS_NAN")
+      .def(py::init<RootGuardManager*, py::list>())
+      .def("__call__", &COMPLEX_IS_NAN::check);
   py::class_<DYNAMIC_INDICES, LeafGuard, std::shared_ptr<DYNAMIC_INDICES>>(
       py_m, "DYNAMIC_INDICES")
       .def(py::init<RootGuardManager*, py::set, py::list>())
@@ -6742,8 +7126,32 @@ PyObject* torch_c_dynamo_guards_init() {
           "add_lambda_guard",
           [](GuardManager& self,
              py::object lambda,
+             py::object required_locals,
+             bool construct_partial_framelocals_dict,
              py::object verbose_code_parts) -> void {
             self.add_leaf_guard(std::make_shared<LAMBDA_GUARD>(
+                self.get_root(),
+                std::move(lambda),
+                std::move(required_locals),
+                construct_partial_framelocals_dict,
+                std::move(verbose_code_parts)));
+          })
+      .def(
+          "add_lambda_guard_no_args",
+          [](GuardManager& self,
+             py::object lambda,
+             py::object verbose_code_parts) -> void {
+            self.add_leaf_guard(std::make_shared<LAMBDA_GUARD_NO_ARGS>(
+                self.get_root(),
+                std::move(lambda),
+                std::move(verbose_code_parts)));
+          })
+      .def(
+          "add_lambda_guard_no_framelocals",
+          [](GuardManager& self,
+             py::object lambda,
+             py::object verbose_code_parts) -> void {
+            self.add_leaf_guard(std::make_shared<LAMBDA_GUARD_NO_FRAMELOCALS>(
                 self.get_root(),
                 std::move(lambda),
                 std::move(verbose_code_parts)));
@@ -6940,6 +7348,26 @@ PyObject* torch_c_dynamo_guards_init() {
                 contains,
                 std::move(item),
                 std::move(verbose_code_parts)));
+          })
+      .def(
+          "add_dual_level_match_guard",
+          [](GuardManager& self,
+             int64_t level,
+             py::object verbose_code_parts) -> void {
+            self.add_leaf_guard(std::make_shared<DUAL_LEVEL_MATCH>(
+                self.get_root(), level, std::move(verbose_code_parts)));
+          })
+      .def(
+          "add_float_is_nan_guard",
+          [](GuardManager& self, py::object verbose_code_parts) -> void {
+            self.add_leaf_guard(std::make_shared<FLOAT_IS_NAN>(
+                self.get_root(), std::move(verbose_code_parts)));
+          })
+      .def(
+          "add_complex_is_nan_guard",
+          [](GuardManager& self, py::object verbose_code_parts) -> void {
+            self.add_leaf_guard(std::make_shared<COMPLEX_IS_NAN>(
+                self.get_root(), std::move(verbose_code_parts)));
           })
       .def(
           "add_dynamic_indices_guard",
@@ -7388,9 +7816,15 @@ PyObject* torch_c_dynamo_guards_init() {
           "add_epilogue_lambda_guard",
           [](RootGuardManager& self,
              py::object lambda,
+             py::object required_locals,
+             bool construct_partial_framelocals_dict,
              py::object verbose_code_parts) -> void {
             self.add_epilogue_lambda_guard(std::make_unique<LAMBDA_GUARD>(
-                &self, std::move(lambda), std::move(verbose_code_parts)));
+                &self,
+                std::move(lambda),
+                std::move(required_locals),
+                construct_partial_framelocals_dict,
+                std::move(verbose_code_parts)));
           });
 
   // Dict Guard Manager
@@ -7544,6 +7978,13 @@ PyObject* torch_c_dynamo_guards_init() {
   dict_version_watcher_id = PyDict_AddWatcher(dict_version_watch_callback);
   if (dict_version_watcher_id == -1) {
     throw std::runtime_error("Failed to install dict_version_watch_callback");
+  }
+
+  dict_recursive_tag_watcher_id =
+      PyDict_AddWatcher(dict_recursive_tag_watch_callback);
+  if (dict_recursive_tag_watcher_id == -1) {
+    throw std::runtime_error(
+        "Failed to install dict_recursive_tag_watch_callback");
   }
 
 #endif

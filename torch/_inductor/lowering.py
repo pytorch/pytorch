@@ -314,6 +314,26 @@ def in_namespace(op, namespace):
     return False
 
 
+def maybe_copy_cpu_scalar(x: TensorBox, device: torch.device) -> TensorBox:
+    """
+    Copy cpu scalar if doesn't not match with given `device`
+    """
+    if not isinstance(x.data, ir.ReinterpretView) or has_free_unbacked_symbols(
+        x.get_size()
+    ):
+        return x
+    size = [V.graph.sizevars.size_hint_or_throw(s) for s in x.get_size()]
+    cur_device = x.get_device()
+    if (
+        cur_device is not None
+        and cur_device.type == "cpu"
+        and cur_device != device
+        and (len(size) == 0 or (len(size) == 1 and size[0] == 1))
+    ):
+        return TensorBox(ir.StorageBox(ir.DeviceCopy.create(x, cur_device, False)))
+    return x
+
+
 def transform_args(
     args: list[Any],
     kwargs: dict[str, Any],
@@ -321,6 +341,10 @@ def transform_args(
     type_promotion_kind: Optional[ELEMENTWISE_TYPE_PROMOTION_KIND],
     convert_input_to_bool: bool,
 ) -> tuple[list[Any], dict[str, Any]]:
+    """
+    Transforms arguments for broadcasting and type promotion
+    """
+
     args_indices = [i for i, x in enumerate(args) if isinstance(x, TensorBox)]
     kwargs_indices = [k for k, v in kwargs.items() if isinstance(v, TensorBox)]
     # check that there's something to transform
@@ -347,6 +371,12 @@ def transform_args(
         device = (
             args[args_indices[0]] if args_indices else kwargs[kwargs_indices[0]]
         ).get_device()
+
+        for i in args_indices:
+            args[i] = maybe_copy_cpu_scalar(args[i], device)
+
+        for k in kwargs_indices:
+            kwargs[k] = maybe_copy_cpu_scalar(kwargs[k], device)
 
         # sometimes args are an immutable list so we can't mutate them
         def promote(arg):
@@ -497,13 +527,9 @@ def broadcast_symbolic_shapes(a, b):
     """
     output = []
     for x, y in itertools.zip_longest(reversed(a), reversed(b), fillvalue=sympy.S.One):
-        if V.graph.sizevars.shape_env.evaluate_expr(
-            sympy.Eq(y, 1), fallback_value=False
-        ):
+        if V.graph.sizevars.is_size_one_or_false(y):
             output.append(x)
-        elif V.graph.sizevars.shape_env.evaluate_expr(
-            sympy.Eq(x, 1), fallback_value=False
-        ):
+        elif V.graph.sizevars.is_size_one_or_false(x):
             output.append(y)
         else:
             V.graph.sizevars.check_equals(x, y)
@@ -949,13 +975,10 @@ def broadcast_tensors(*inputs):
     for x in inputs:
         sizes = x.get_size()
 
-        def is_length_one(size: sympy.Expr):
-            return V.graph.sizevars.shape_env.evaluate_expr(
-                sympy.Eq(size, 1), fallback_value=False
-            )
-
         if len(sizes) != len(target) or any(
-            is_length_one(a) != is_length_one(b) for a, b in zip(sizes, target)
+            V.graph.sizevars.is_size_one_or_false(a)
+            != V.graph.sizevars.is_size_one_or_false(b)
+            for a, b in zip(sizes, target)
         ):
             x = expand(x, target)
         outputs.append(x)
@@ -1327,6 +1350,34 @@ def quantized_decomposed_quantize_per_channel(
         inner_fn=inner_fn,
         ranges=input.get_size(),
     )
+
+
+def _assert_async(cond, msg):
+    cond.realize()
+    cond = to_dtype(cond, torch.bool)
+
+    def inner_fn(index):
+        with ir.ComputedBuffer.force_realize():
+            return ops.device_assert_async(cond.make_loader()(index), msg)
+
+    assertion_op = Pointwise.create(
+        device=cond.get_device(),
+        dtype=cond.get_dtype(),
+        inner_fn=inner_fn,
+        ranges=list(cond.get_size()),
+    )
+    assertion_op.realize()
+    return assertion_op
+
+
+@register_lowering(aten._assert_async.msg)
+def lower_assert_async(cond, msg):
+    return _assert_async(cond, msg)
+
+
+@register_lowering(aten._functional_assert_async.msg)
+def lower_assert_functional_async(cond, msg):
+    return _assert_async(cond, msg)
 
 
 @register_lowering(
@@ -2986,7 +3037,7 @@ def select_scatter(x, src, dim: int, index: int):
 
 @register_lowering(aten.slice_scatter, type_promotion_kind=None)
 def slice_scatter(x, src, dim=0, start=None, end=None, step=1):
-    assert x.get_dtype() == src.get_dtype()
+    src = to_dtype(src, x.get_dtype())
     x_loader = x.make_loader()
     dim = _validate_dim(x, dim, 0)
     dim_size = x.get_size()[dim]
@@ -6841,7 +6892,9 @@ def sym_size(a, dim):
     # int, but you KNOW that int must always be a constant,
     # then you do not need trace that call at all (and just
     # constant propagate the integer as is.)
-    assert isinstance(val, torch.SymInt)
+    assert isinstance(val, torch.SymInt), (
+        f"Expect val to be torch.SymInt but got val={val}"
+    )
     return val.node.expr
 
 
@@ -6849,7 +6902,9 @@ def sym_size(a, dim):
 def sym_stride(a, dim):
     val = V.graph.current_node.meta["val"]
     # See Note [Can val be an int?]
-    assert isinstance(val, torch.SymInt)
+    assert isinstance(val, torch.SymInt), (
+        f"Expect val to be torch.SymInt but got val={val}"
+    )
     return val.node.expr
 
 
@@ -6932,17 +6987,17 @@ def resize(x, size, *, memory_format=None):
         and torch.utils.deterministic.fill_uninitialized_memory  # type: ignore[attr-defined]
     ):
         if is_float_dtype(dtype):
-            uninitalized_val = float("nan")
+            uninitialized_val = float("nan")
         elif is_integer_dtype(dtype):
-            uninitalized_val = torch.iinfo(dtype).max
+            uninitialized_val = torch.iinfo(dtype).max
         else:
-            uninitalized_val = True
+            uninitialized_val = True
     else:
         # using zero as that is what empty does
-        uninitalized_val = 0.0
+        uninitialized_val = 0.0
 
     if V.graph.sizevars.statically_known_equals(old_numel, 0):  # type: ignore[arg-type]
-        return full(size, uninitalized_val, dtype=dtype, device=device)
+        return full(size, uninitialized_val, dtype=dtype, device=device)
 
     x_flat = as_strided(
         x,
@@ -6962,7 +7017,7 @@ def resize(x, size, *, memory_format=None):
         flat_index_expr = ops.index_expr(flat_index, torch.int64)
         limit = ops.index_expr(old_numel, torch.int64)
         mask = ops.lt(flat_index_expr, limit)
-        return ops.masked(mask, lambda: flat_loader([flat_index]), uninitalized_val)
+        return ops.masked(mask, lambda: flat_loader([flat_index]), uninitialized_val)
 
     out = Pointwise.create(
         device=device, dtype=dtype, inner_fn=inner_fn, ranges=list(size)
@@ -7010,7 +7065,7 @@ def cond(pred, true_fn, false_fn, operands):
 
 
 @register_lowering(torch.ops.higher_order.while_loop, type_promotion_kind=None)
-def while_loop(cond_fn, body_fn, carried_inputs, additional_inputs):
+def while_loop(cond_fn, body_fn, carried_inputs, additional_inputs, stack_output=False):
     if any(
         isinstance(x, IRNode) and is_triton(x)
         for x in carried_inputs + additional_inputs
@@ -7030,9 +7085,16 @@ def while_loop(cond_fn, body_fn, carried_inputs, additional_inputs):
         else:
             raise RuntimeError(f"NYI unsupported output type: {type(out)}")
 
-    result = ir.WhileLoop.create(cond_fn, body_fn, carried_inputs, additional_inputs)
+    result = ir.WhileLoop.create(
+        cond_fn, body_fn, carried_inputs, additional_inputs, stack_output
+    )
     assert isinstance(result, Sequence)
     return list(map(_map_output, result))
+
+
+register_lowering(
+    torch.ops.higher_order.while_loop_stack_output, type_promotion_kind=None
+)(functools.partial(while_loop, stack_output=True))
 
 
 @register_lowering(torch.ops.higher_order.invoke_subgraph, type_promotion_kind=None)

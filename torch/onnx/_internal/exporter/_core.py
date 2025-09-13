@@ -79,7 +79,7 @@ _STEP_ONE_ERROR_MESSAGE = textwrap.dedent(
     f"""\
     Failed to export the model with torch.export. {_BLUE}This is step 1/3{_END} of exporting the model to ONNX. Next steps:
     - Modify the model code for `torch.export.export` to succeed. Refer to https://pytorch.org/docs/stable/generated/exportdb/index.html for more information.
-    - Debug `torch.export.export` and summit a PR to PyTorch.
+    - Debug `torch.export.export` and submit a PR to PyTorch.
     - Create an issue in the PyTorch GitHub repository against the {_BLUE}*torch.export*{_END} component and attach the full error stack as well as reproduction scripts."""
 )
 
@@ -94,7 +94,7 @@ _STEP_THREE_ERROR_MESSAGE = textwrap.dedent(
     f"""\
     Failed to convert the exported program to an ONNX model. {_BLUE}This is step 3/3{_END} of exporting the model to ONNX. Next steps:
     - If there is a missing ONNX function, implement it and register it to the registry.
-    - If there is an internal error during ONNX conversion, debug the error and summit a PR to PyTorch.
+    - If there is an internal error during ONNX conversion, debug the error and submit a PR to PyTorch.
     - Create an error report with `torch.onnx.export(..., report=True)`, and save the ExportedProgram as a pt2 file. Create an issue in the PyTorch GitHub repository against the {_BLUE}*onnx*{_END} component. Attach the error report and the pt2 model."""
 )
 
@@ -726,6 +726,12 @@ def _handle_output_node(
     # node.args[0] can be a tuple with more than one elements. This happens when,
     # for example, a subgraph has multiple outputs. We flatten them all as ONNX graph outputs
     for output in node.args[0]:  # type: ignore[index,union-attr]
+        if output is None:
+            logger.warning(
+                "Output node %s has None output. The output is ignored in the exported graph. Please ensure the graph output order is expected",
+                node.name,
+            )
+            continue
         output_value_name = output.name  # type: ignore[union-attr]
         assert isinstance(output_value_name, str), (
             f"Bug: Expected {output_value_name!r} to be a string"

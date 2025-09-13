@@ -30,6 +30,7 @@ from ctypes import c_void_p, CDLL, cdll
 from datetime import timedelta
 from functools import lru_cache, partial
 from pathlib import Path
+from tempfile import _TemporaryFileWrapper
 from time import time, time_ns
 from types import ModuleType
 from typing import (
@@ -82,6 +83,8 @@ from torch._inductor.custom_graph_pass import (
     CustomGraphModulePass,
     CustomGraphPass,
     CustomGraphPassType,
+    CustomPartitionerFn,
+    CustomPartitionerFnType,
 )
 from torch._inductor.freezing_utils import has_frozen_params, is_frozen_param
 from torch._inductor.runtime.compile_tasks import _reload_python_module
@@ -143,6 +146,7 @@ _IS_WINDOWS = sys.platform == "win32"
 LOCK_TIMEOUT = 600
 
 output_code_log = torch._logging.getArtifactLogger(__name__, "output_code")
+autotuning_log = torch._logging.getArtifactLogger(__name__, "autotuning")
 log = logging.getLogger(__name__)
 
 
@@ -357,6 +361,43 @@ def get_hash(
     if hash_type in {"cubin", "hsaco", "spv"}:
         return code_hash(repr(content))
     raise AssertionError(f"Unknown hash type {hash_type}")
+
+
+class WritableTempFile:
+    """
+    Avoid "Permission denied error" on Windows:
+      with tempfile.NamedTemporaryFile("w", suffix=".gv") as temp_file:
+        # Not writable on Windows:
+        # https://docs.python.org/3/library/tempfile.html#tempfile.NamedTemporaryFile
+
+    Example:
+        with WritableTempFile("w", suffix=".gv") as temp_file:
+            tree.to_dotfile(temp_file.name)
+    """
+
+    def __init__(
+        self, mode: str = "w", *, encoding: Any = None, suffix: Any = None
+    ) -> None:
+        self.mode = mode
+        self.encoding = encoding
+        self.suffix = suffix
+
+    def __enter__(self) -> _TemporaryFileWrapper[Any]:
+        self.temp_file = tempfile.NamedTemporaryFile(
+            self.mode, encoding=self.encoding, suffix=self.suffix, delete=False
+        )
+        return self.temp_file
+
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        self.temp_file.close()
+        try:
+            os.unlink(self.temp_file.name)
+        except OSError as e:
+            if _IS_WINDOWS:
+                # On Windows, some case temp file is opened and fail to unlink. Need to ignore it.
+                pass
+            else:
+                raise e
 
 
 def write(
@@ -863,6 +904,11 @@ class FxGraphHashDetails:
             if custom_config is not None
         }
 
+        # Register the custom partitioner function
+        self._custom_partitioner_fn = self._get_custom_partitioner_fn_detail(
+            config.custom_partitioner_fn
+        )
+
     # This is mainly added to handle these two inductor configs, which are (unfortunately)
     # sometimes cache safe:
     # - _pre_fusion_custom_pass
@@ -894,6 +940,14 @@ class FxGraphHashDetails:
             return None
         assert isinstance(custom_pass, (CustomGraphPass, CustomGraphModulePass))
         return custom_pass.uuid()
+
+    def _get_custom_partitioner_fn_detail(
+        self, custom_partitioner_fn: CustomPartitionerFnType
+    ) -> Optional[Any]:
+        if not custom_partitioner_fn:
+            return None
+        assert isinstance(custom_partitioner_fn, CustomPartitionerFn)
+        return custom_partitioner_fn.uuid()
 
 
 def compiled_fx_graph_hash(
@@ -1200,6 +1254,22 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
             "inductor_output_code",
             lambda: {"filename": artifact_path},
             payload_fn=lambda: code,
+        )
+        trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "inductor_provenance_tracking_node_mappings",
+                "encoding": "json",
+            },
+            payload_fn=lambda: graph.inductor_provenance_mapping_str,
+        )
+        trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "inductor_provenance_tracking_kernel_stack_traces",
+                "encoding": "json",
+            },
+            payload_fn=lambda: graph.inductor_provenance_stack_traces_str,
         )
         return graph, cache_info
 
@@ -1539,8 +1609,14 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
 
 @functools.cache
 def split_aot_inductor_output_path(path: str) -> tuple[str, str]:
+    def get_module_ext_type() -> str:
+        if _IS_WINDOWS:
+            return ".pyd"
+        else:
+            return ".so"
+
     """Returns the path where the AOT Inductor compiled kernels are stored."""
-    if path.endswith(".so"):
+    if path.endswith(get_module_ext_type()):
         return os.path.split(path)
     elif path.endswith(".pt2"):
         return os.path.split(path)
@@ -1622,36 +1698,6 @@ class CudaKernelParamCache:
         return cls.cache.keys()
 
 
-class WritableTempFile:
-    """
-    Avoid "Permission denied error" on Windows:
-      with tempfile.NamedTemporaryFile("w", suffix=".gv") as temp_file:
-        # Not writable on Windows:
-        # https://docs.python.org/3/library/tempfile.html#tempfile.NamedTemporaryFile
-
-    Example:
-        with WritableTempFile("w", suffix=".gv") as temp_file:
-            tree.to_dotfile(temp_file.name)
-    """
-
-    def __init__(
-        self, mode: str = "w", *, encoding: Any = None, suffix: Any = None
-    ) -> None:
-        self.mode = mode
-        self.encoding = encoding
-        self.suffix = suffix
-
-    def __enter__(self) -> Any:
-        self.temp_file = tempfile.NamedTemporaryFile(
-            self.mode, encoding=self.encoding, suffix=self.suffix, delete=False
-        )
-        return self.temp_file
-
-    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
-        self.temp_file.close()
-        os.unlink(self.temp_file.name)
-
-
 class AotCodeCompiler:
     """
     Compile AOT Inductor generated code.
@@ -1710,12 +1756,6 @@ class AotCodeCompiler:
             wrapper_code = "\n".join((wrapper_code, kernel_code))
             kernel_code = ""
 
-        from .utils import aoti_model_name_from_config
-
-        model_class_name = ""
-        if config.aot_inductor.compile_standalone:
-            model_class_name = aoti_model_name_from_config()
-
         wrapper_key, wrapper_path = write(
             wrapper_code,
             "wrapper.cpp",
@@ -1748,6 +1788,8 @@ class AotCodeCompiler:
                     "model.h",
                 )
             ) as f:
+                # model_name_for_generated_files is guaranteed to be non-empty when compile_standalone
+                model_class_name = config.aot_inductor.model_name_for_generated_files
                 class_name = f"AOTInductorModel{model_class_name}"
                 header_code = f.read()
 
@@ -1762,7 +1804,7 @@ class AotCodeCompiler:
                     header_code,
                     "h",
                     specified_dir=specified_output_path,
-                    key=f"{model_class_name}",
+                    key=model_class_name,
                 )
 
         # Log the AOTInductor wrapper and kernel code, if needed.
@@ -1887,7 +1929,7 @@ class AotCodeCompiler:
                     consts_asm += f"\t.space {len(consts) - 8}\n"
                 consts_asm += f".globl\t{symbol_prefix}_binary_constants_bin_end\n"
                 consts_asm += f"{symbol_prefix}_binary_constants_bin_end:\n"
-                return consts_asm, "S"
+                return consts_asm, "weights.S"
 
             # Use c++ to convert consts to object file can support more compilers, such as msvc and icx.
             def format_consts_to_cpp(
@@ -1912,7 +1954,7 @@ ATTRIBUTE_NO_SANITIZE_ADDRESS\t\n"""
                         const_cpp += "\t\n"
                 const_cpp += "};\t\n"
                 const_cpp += f"alignas({align_bytes}) extern unsigned char * {symbol_prefix}_binary_constants_bin_end;\t\n"
-                return const_cpp, "cpp"
+                return const_cpp, "weights.cpp"
 
             def get_zero_consts_asm_code(
                 align_bytes: int,
@@ -1978,6 +2020,7 @@ end
                 consts_code,
                 code_ext,
                 specified_dir=str(specified_sub_dir),
+                key=config.aot_inductor.model_name_for_generated_files,
             )
             consts_s = Path(consts_s)
             object_build_options = CppTorchDeviceOptions(
@@ -2278,7 +2321,13 @@ end
             asm_files = []
             if not _IS_WINDOWS:
                 ld, objcopy = get_ld_and_objcopy(use_relative_path)
+                kernels = getattr(V.graph.wrapper_code, "_kernel_name_to_body", {})
                 for kernel_name, value in CudaKernelParamCache.cache.items():
+                    if kernel_name not in kernels:
+                        # It is possible that CudaKernelParamCache contains more Triton kernels
+                        # than what the current graph uses
+                        continue
+
                     if asm_file := value["asm"]:
                         asm_files.append(asm_file)
 
@@ -2393,9 +2442,44 @@ end
                     os.remove(o_file)
 
                 if use_mmap_weights:
-                    import resource
 
-                    page_size_ = resource.getpagesize()
+                    def get_page_size() -> int:
+                        # Don't use resource.getpagesize() on Windows, as it is a Unix specific package
+                        # as seen in https://docs.python.org/2/library/resource.html
+                        if _IS_WINDOWS:
+                            from ctypes import (  # type: ignore[attr-defined]
+                                byref,
+                                Structure,
+                                windll,
+                            )
+                            from ctypes.wintypes import DWORD, LPVOID, WORD
+
+                            class SYSTEM_INFO(Structure):
+                                _fields_ = [
+                                    ("wProcessorArchitecture", WORD),
+                                    ("wReserved", WORD),
+                                    ("dwPageSize", DWORD),
+                                    ("lpMinimumApplicationAddress", LPVOID),
+                                    ("lpMaximumApplicationAddress", LPVOID),
+                                    ("dwActiveProcessorMask", DWORD),
+                                    ("dwNumberOfProcessors", DWORD),
+                                    ("dwProcessorType", DWORD),
+                                    ("dwAllocationGranularity", DWORD),
+                                    ("wProcessorLevel", WORD),
+                                    ("wProcessorRevision", WORD),
+                                ]
+
+                            si = SYSTEM_INFO()
+                            windll.kernel32.GetSystemInfo(byref(si))
+                            sys_page_size = si.dwPageSize
+                        else:
+                            import resource
+
+                            sys_page_size = resource.getpagesize()
+
+                        return sys_page_size
+
+                    page_size_ = get_page_size()
                     page_size = max(16384, page_size_)
 
                     with open(output_so, "a+b") as f_so:
@@ -2409,6 +2493,15 @@ end
                     generated_files.append(output_so)
 
         if config.aot_inductor.package:
+            if config.trace.provenance_tracking_level != 0:
+                kernel_info = torch._inductor.debug.create_kernel_information_json()
+                kernel_info_json = os.path.join(
+                    wrapper_path_operator.parent, "kernel_information.json"
+                )
+                with open(kernel_info_json, "w") as f:
+                    f.write(json.dumps(kernel_info, indent=4))
+                generated_files.append(kernel_info_json)
+
             # We want to return the directory that contains all the AOTI
             # generated files, not just the so
             # return os.path.split(output_so)[0]
@@ -2548,7 +2641,7 @@ def _get_cpp_prefix_header(device: str) -> Optional[str]:
 def _get_cpp_wrapper_header(device: str, aot_mode: bool = False) -> str:
     """Given a device type (and optionally whether we're in AOT Inductor mode), returns
     the path to the cpp_wrapper header file to be precompiled."""
-    base_device = device.split(":")[0]
+    base_device = device.split(":", maxsplit=1)[0]
     is_array_ref = config.aot_inductor.allow_stack_allocation and base_device == "cpu"
     return (
         "torch/csrc/inductor/"
@@ -3618,9 +3711,12 @@ def _cuda_lib_options() -> list[str]:
             if "torch/lib" in path:
                 # don't want to depend on pytorch
                 continue
+            extra_ldflags.append(f"-L{path}")
             # -rpath ensures the DLL can find its dependencies when loaded, even
             # if the library path is non-standard.
-            extra_ldflags.extend([f"-L{path}", "-Xlinker", f"-rpath={path}"])
+            # But do not add the stubs folder to rpath as the driver is expected to be found at runtime
+            if os.path.basename(path) != "stubs":
+                extra_ldflags.extend(["-Xlinker", f"-rpath={path}"])
         extra_ldflags.append("-lcuda")
         extra_ldflags.append("-lcudart")
     else:
@@ -3729,7 +3825,10 @@ def cuda_compile_command(
         res = f"{_cuda_compiler()} {' '.join(options)} -o {dst_file} {src_file}"
     else:
         raise NotImplementedError(f"Unsupported output file suffix {dst_file_ext}!")
-    log.debug("CUDA command: %s", res)
+    if log.isEnabledFor(logging.DEBUG):
+        log.debug("CUDA command: %s", res)
+    else:
+        autotuning_log.debug("CUDA command: %s", res)
     return res
 
 

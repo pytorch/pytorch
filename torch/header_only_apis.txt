@@ -3,6 +3,9 @@
 # to guarantee that compiling these symbols do not require linking libtorch
 # to ensure header-only-ness.
 
+# torch/headeronly/util/shim_utils.h
+TORCH_ERROR_CODE_CHECK
+
 # c10/util/TypeCast.h
 convert
 

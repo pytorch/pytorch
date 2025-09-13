@@ -29,7 +29,13 @@ if not c10d.is_available() or not c10d.is_nccl_available():
 
 
 import test_c10d_common
-from test_c10d_common import ConvNet, DoubleGpuNet, gpus_for_rank, ModuleForDdpCommHook
+from test_c10d_common import (
+    ConvNet,
+    DoubleGpuNet,
+    FFTModel,
+    gpus_for_rank,
+    ModuleForDdpCommHook,
+)
 
 import torch.distributed as dist
 import torch.distributed.algorithms.ddp_comm_hooks.default_hooks as default
@@ -1074,6 +1080,62 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         if dist.get_rank(ng1) >= 0:
             dist.broadcast(tensor, dist.get_global_rank(ng1, 0), group=ng1)
             self.assertEqual(tensor, torch.full((1,), 0))
+
+        ng2 = c10d.split_group(pg, [subg_ranks])
+        self.assertEqual(ng2.group_desc, "default_pg:split:1")
+        self.assertEqual(backend.comm_split_count(), 2)
+
+        dist.destroy_process_group()
+
+    @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    def test_comm_split_group_mixed_backend(self):
+        # Test `ncclCommSplit` for smaller subgroups of the world when
+        # we've passed a specific device_id to init_process_group.
+        store = c10d.FileStore(self.file_name, self.world_size)
+        device = torch.device(f"cuda:{self.rank}")
+        # pg = self._create_process_group_nccl(store, self.opts(), device_id=device)
+        # create nccl processgroup with opts
+        c10d.init_process_group(
+            "cpu:gloo,cuda:nccl",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+            pg_options=self.opts(),
+            device_id=device,
+        )
+        pg = c10d.distributed_c10d._get_default_group()
+        backend = pg._get_backend(torch.device(device))
+
+        cuda_tensor = torch.full((1,), self.rank).cuda(device)
+        cpu_tensor = torch.full((1,), self.rank)
+        # Create subgroup between ranks 0, 1
+        subg_ranks = [0, 1]
+        ng1 = c10d.split_group(pg, [subg_ranks])
+        backend1 = ng1._get_backend(torch.device(device))
+
+        # check basic options are the same between parent and child
+        self.assertEqual(backend.options._timeout, backend1.options._timeout)
+        self.assertEqual(
+            backend.options.is_high_priority_stream,
+            backend1.options.is_high_priority_stream,
+        )
+        self.assertEqual(ng1.group_desc, "default_pg:split:0")
+
+        # comm split happens eagerly since device_id is passed to init_process_group.
+        self.assertEqual(backend.comm_split_count(), 1)
+        # dist.get_process_group_ranks returns the global ranks in the subgroup.
+        self.assertEqual(
+            dist.get_process_group_ranks(ng1),
+            subg_ranks if self.rank in subg_ranks else [],
+        )
+
+        # is part of ng1; otherwise, -1
+        if dist.get_rank(ng1) >= 0:
+            dist.broadcast(cuda_tensor, dist.get_global_rank(ng1, 0), group=ng1)
+            self.assertEqual(cuda_tensor, torch.full((1,), 0))
+            dist.broadcast(cpu_tensor, dist.get_global_rank(ng1, 0), group=ng1)
+            self.assertEqual(cpu_tensor, torch.full((1,), 0))
 
         ng2 = c10d.split_group(pg, [subg_ranks])
         self.assertEqual(ng2.group_desc, "default_pg:split:1")
@@ -2552,25 +2614,6 @@ class DistributedDataParallelTest(
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_ddp_complex_params(self):
-        class FFTModel(nn.Module):
-            def __init__(self, hin, win, n_features):
-                super().__init__()
-                self.hin = hin
-                self.win = win
-                self.weight = nn.Parameter(
-                    torch.ones(
-                        (n_features, n_features, hin, win // 2 + 1), dtype=torch.cfloat
-                    )
-                )
-
-            def forward(self, x):
-                xc = torch.fft.rfft2(
-                    x, s=(self.hin, self.win), dim=(-2, -1), norm="ortho"
-                )
-                xcw = torch.einsum("nchw,cohw->nohw", xc, self.weight)
-                x = torch.fft.irfft2(xcw, dim=(-2, -1), norm="ortho")
-                return x
-
         process_group = self._get_process_group()
         device_id = gpus_for_rank(self.world_size)[self.rank][0]
         N, C, H, W = 1, 16, 64, 64
@@ -3099,7 +3142,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
         self._run_invalid_nccl_blocking_wait_env("4294967295")
 
 
-class NcclRegistrationTest(MultiProcessTestCase):
+class NcclUserBufferRegistrationTest(MultiProcessTestCase):
     def setUp(self):
         super().setUp()
         # TORCH_NCCL_BLOCKING_WAIT overrides TORCH_NCCL_ASYNC_ERROR_HANDLING hence tests
@@ -3127,10 +3170,14 @@ class NcclRegistrationTest(MultiProcessTestCase):
     @requires_multicast_support()
     def test_nccl_user_buffer_registration(self):
         store = c10d.FileStore(self.file_name, self.world_size)
-        c10d.init_process_group(
-            backend="nccl", rank=self.rank, world_size=self.world_size, store=store
-        )
         device = torch.device(f"cuda:{self.rank}")
+        c10d.init_process_group(
+            backend="nccl",
+            rank=self.rank,
+            world_size=self.world_size,
+            store=store,
+            device_id=device,
+        )
         torch.cuda.set_device(self.rank)
         pg = c10d.distributed_c10d._get_default_group()
         backend = pg._get_backend(torch.device(device))
@@ -3172,41 +3219,54 @@ class NcclRegistrationTest(MultiProcessTestCase):
     @requires_multicast_support()
     def test_nccl_window_registration(self):
         store = c10d.FileStore(self.file_name, self.world_size)
-        c10d.init_process_group(
-            backend="nccl", rank=self.rank, world_size=self.world_size, store=store
-        )
         device = torch.device(f"cuda:{self.rank}")
-        torch.cuda.set_device(self.rank)
-        pg = c10d.distributed_c10d._get_default_group()
-        backend = pg._get_backend(torch.device(device))
+        with torch.cuda.device(device):
+            # Eager init the nccl comm so that we don't implicitly create one during register_mem_pool
+            c10d.init_process_group(
+                backend="nccl",
+                rank=self.rank,
+                world_size=self.world_size,
+                store=store,
+                device_id=device,
+            )
+            pg = c10d.distributed_c10d._get_default_group()
+            backend = pg._get_backend(torch.device(device))
 
-        # Use NCCL memory allocator
-        # enable symmetric memory usage in NCCL
-        pool = torch.cuda.MemPool(backend.mem_allocator, symmetric=True)
+            # Use NCCL memory allocator
+            # enable symmetric memory usage in NCCL
+            pool = torch.cuda.MemPool(backend.mem_allocator)
 
-        # allocate memory with ncclMemAlloc
-        # note: symmetric kernels are not available for dtypes like torch.int64
-        with torch.cuda.use_mem_pool(pool):
-            tensor = torch.arange(1024 * 1024 * 2, device=device, dtype=torch.float32)
+            # allocate memory with ncclMemAlloc
+            # note: symmetric kernels are not available for dtypes like torch.int64
+            with torch.cuda.use_mem_pool(pool):
+                tensor = torch.arange(
+                    1024 * 1024 * 2, device=device, dtype=torch.float32
+                )
 
-        # register buffers to NCCL
-        backend.register_mem_pool(pool)
+            # register buffers to NCCL
+            backend.register_mem_pool(pool, symm=True)
 
-        # allreduce now should use NVIDIA Switches
-        pg.allreduce(tensor).wait()
-        torch.cuda.synchronize(device=device)
+            # allreduce now should use NVIDIA Switches
+            pg.allreduce(tensor).wait()
+            # check that further allocations are also registered
+            with torch.cuda.use_mem_pool(pool):
+                tensor = torch.arange(
+                    1024 * 1024 * 2, device=device, dtype=torch.float32
+                )
+            pg.allreduce(tensor).wait()
+            torch.cuda.synchronize(device=device)
 
-        # de-register buffers from NCCL
-        backend.deregister_mem_pool(pool)
+            # de-register buffers from NCCL
+            backend.deregister_mem_pool(pool)
 
-        # clean up memory
-        del tensor, pool
+            # clean up memory
+            del tensor, pool
 
         with open(os.environ["NCCL_DEBUG_FILE"]) as f:
             nccl_debug_file_content = f.read()
             # if buffers were registered and symmetric kernels ran, NCCL_DEBUG
             # should show successful registration in debug output
-            self.assertRegex(nccl_debug_file_content, "[Symmetric]")
+            self.assertRegex(nccl_debug_file_content, "Symmetric")
 
 
 class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
@@ -4280,11 +4340,10 @@ class NCCLTraceTestBase(MultiProcessTestCase):
         test_name: str,
         file_name: str,
         parent_pipe,
-        seed: int,
         **kwargs,
     ) -> None:
         cls.parent = parent_conn
-        super()._run(rank, test_name, file_name, parent_pipe, seed)
+        super()._run(rank, test_name, file_name, parent_pipe)
 
     @property
     def local_device(self):
@@ -4351,10 +4410,12 @@ class NCCLTraceTestBase(MultiProcessTestCase):
 class NCCLTraceTest(NCCLTraceTestBase):
     def _verify_trace(self, t, include_collectives, timing_enabled, is_json):
         ver = t["version"]
-        self.assertEqual(ver, "2.9")
-        nccl_version = t["nccl_version"]
-        torch_nccl_version = torch.cuda.nccl.version()
-        self.assertEqual(nccl_version, ".".join(str(v) for v in torch_nccl_version))
+        self.assertEqual(ver, "2.10")
+        comm_lib_version = t["comm_lib_version"]
+        torch_comm_lib_version = torch.cuda.nccl.version()
+        self.assertEqual(
+            comm_lib_version, ".".join(str(v) for v in torch_comm_lib_version)
+        )
         pg_config = t["pg_config"]
         self.assertEqual(len(pg_config), 1)
         default_pg_info = pg_config["0"]
