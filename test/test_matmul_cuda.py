@@ -1314,6 +1314,24 @@ class TestFP8Matmul(TestCase):
 
         torch.testing.assert_close(out_scaled_mm, out_emulated, atol=atol, rtol=rtol)
 
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @parametrize("base_dtype", [torch.float8_e4m3fn, torch.float8_e5m2])
+    def test_scaled_mm_fp8_missing_out_dtype_error(self, base_dtype):
+        """Test that torch._scaled_mm gives helpful error when out_dtype is missing with FP8 inputs."""
+        torch.manual_seed(42)
+
+        A = torch.randn(64, 32, device="cuda", dtype=torch.float16).to(base_dtype)
+        B = torch.randn(32, 16, device="cuda", dtype=torch.float16).to(base_dtype)
+
+        scale_a = torch.tensor(1.0, device="cuda")
+        scale_b = torch.tensor(1.0, device="cuda")
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"torch\._scaled_mm: when using FP8 inputs please pass out_dtype"
+        ):
+            torch._scaled_mm(A, B, scale_a=scale_a, scale_b=scale_b)
+
     @onlyCUDA
     def test_float8_bias(self, device) -> None:
         if device != "cpu" and torch.cuda.is_available() and not PLATFORM_SUPPORTS_FP8:
