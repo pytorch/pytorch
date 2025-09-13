@@ -4,8 +4,8 @@
 from __future__ import annotations
 
 import onnx_ir.passes.common as common_passes
-import onnxruntime
 from onnxscript import ir
+import onnxruntime
 from packaging import version
 
 import torch
@@ -540,7 +540,7 @@ class NativeOnnxOpsTest(common_utils.TestCase):
 
     def test_rotary_embedding_3d(self):
         num_heads = 2
-        input_data = torch.rand(2, 3, 6)
+        input_data = torch.rand(2, 3, 8)
         sin_cache_data = torch.rand(2, 3, 4)
         cos_cache_data = torch.rand(2, 3, 4)
 
