@@ -1,6 +1,6 @@
 import ctypes
 import sys
-from typing import Any, Optional, Union, Tuple
+from typing import Any, Optional, Union
 
 import torch
 
@@ -115,7 +115,7 @@ def _nvrtc_compile(
     header_code: str = "",
     cuda_include_dirs: Optional[list] = None,
     nvcc_options: Optional[list] = None,
-) -> Tuple[bytes, str]:
+) -> tuple[bytes, str]:
     """
     Compiles a CUDA kernel using NVRTC and returns the PTX code.
 
@@ -151,10 +151,6 @@ def _nvrtc_compile(
                 else "Unknown CUDA error"
             )
             raise RuntimeError(f"CUDA error: {error_message}")
-
-    # Add 'extern "C"' if not already present to ensure C linkage
-    # if not kernel_source.strip().startswith('extern "C"'):
-    #     kernel_source = f'extern "C" {kernel_source}'
 
     # Combine header code and kernel source
     if header_code:
