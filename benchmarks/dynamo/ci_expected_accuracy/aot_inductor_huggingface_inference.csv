@@ -182,7 +182,7 @@ google/gemma-3-4b-it,fail_accuracy,0
 
 
 
-openai/whisper-tiny,fail_accuracy,0
+openai/whisper-tiny,fail_to_run,0
 
 
 
