@@ -692,6 +692,10 @@ class BCELoss(_WeightedLoss):
             elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
             and :attr:`reduce` are in the process of being deprecated, and in the meantime,
             specifying either of those two args will override :attr:`reduction`. Default: ``'mean'``
+        label_smoothing (float, optional): A float in [0.0, 1.0]. Specifies the amount
+            of smoothing when computing the loss, where 0.0 means no smoothing. The targets
+            become a mixture of the original ground truth and a uniform distribution as described in
+            `Rethinking the Inception Architecture for Computer Vision <https://arxiv.org/abs/1512.00567>`__. Default: :math:`0.0`.
 
     Shape:
         - Input: :math:`(*)`, where :math:`*` means any number of dimensions.
@@ -717,15 +721,21 @@ class BCELoss(_WeightedLoss):
         size_average=None,
         reduce=None,
         reduction: str = "mean",
+        label_smoothing: float = 0.0,
     ) -> None:
         super().__init__(weight, size_average, reduce, reduction)
+        self.label_smoothing = label_smoothing
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
         """
         Runs the forward pass.
         """
         return F.binary_cross_entropy(
-            input, target, weight=self.weight, reduction=self.reduction
+            input,
+            target,
+            weight=self.weight,
+            reduction=self.reduction,
+            label_smoothing=self.label_smoothing,
         )
 
 
@@ -815,6 +825,10 @@ class BCEWithLogitsLoss(_Loss):
             [C, H, W] the same pos_weights across the batch. To apply the same positive weight
             along all spatial dimensions for a 2D multi-class target [C, H, W] use: [C, 1, 1].
             Default: ``None``
+        label_smoothing (float, optional): A float in [0.0, 1.0]. Specifies the amount
+            of smoothing when computing the loss, where 0.0 means no smoothing. The targets
+            become a mixture of the original ground truth and a uniform distribution as described in
+            `Rethinking the Inception Architecture for Computer Vision <https://arxiv.org/abs/1512.00567>`__. Default: :math:`0.0`.
 
     Shape:
         - Input: :math:`(*)`, where :math:`*` means any number of dimensions.
@@ -838,12 +852,14 @@ class BCEWithLogitsLoss(_Loss):
         reduce=None,
         reduction: str = "mean",
         pos_weight: Optional[Tensor] = None,
+        label_smoothing: float = 0.0,
     ) -> None:
         super().__init__(size_average, reduce, reduction)
         self.register_buffer("weight", weight)
         self.register_buffer("pos_weight", pos_weight)
         self.weight: Optional[Tensor]
         self.pos_weight: Optional[Tensor]
+        self.label_smoothing = label_smoothing
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
         """Runs the forward pass."""
@@ -853,6 +869,7 @@ class BCEWithLogitsLoss(_Loss):
             self.weight,
             pos_weight=self.pos_weight,
             reduction=self.reduction,
+            label_smoothing=self.label_smoothing,
         )
 
 
