@@ -1950,7 +1950,7 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
                 else dict
             )
             self._dict_vt = variables.ConstDictVariable(
-                {}, type(value), mutation_type=ValueMutationNew()
+                {}, user_cls, mutation_type=ValueMutationNew()
             )
         self._dict_methods = dict_methods
 
