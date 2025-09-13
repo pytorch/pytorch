@@ -193,6 +193,8 @@ def mem_get_info(device: _device_t = None) -> tuple[int, int]:
     device = _get_device_index(device, optional=True)
     return torch._C._xpu_getMemoryInfo(device)
 
+def _set_allocator_settings(env: str):
+    return torch._C._xpu_xpuCachingAllocator_set_allocator_settings(env)
 
 __all__ = [
     "empty_cache",
@@ -205,4 +207,5 @@ __all__ = [
     "memory_stats_as_nested_dict",
     "reset_accumulated_memory_stats",
     "reset_peak_memory_stats",
+    "_set_allocator_settings",
 ]
