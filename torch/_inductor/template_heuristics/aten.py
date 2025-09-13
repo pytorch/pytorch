@@ -7,6 +7,7 @@ from torch._inductor import config as inductor_config
 from ..kernel.bmm import aten_baddbmm, aten_bmm, aten_bmm_dtype
 from ..kernel.mm import aten__fp8_mm, aten__int_mm, aten_addmm, aten_bias_addmm, aten_mm
 from ..kernel.mm_plus_mm import aten_mm_plus_mm
+from .addmm import AddMMBiasExpansionConfigMixin
 from .base import TemplateConfigHeuristics
 from .gemm import GemmMaxAutotuneTemplateConfigHeuristics
 from .registry import register_template_heuristic
@@ -44,11 +45,7 @@ class ATenConfigHeuristics(TemplateConfigHeuristics):
         yield dict()
 
 
-# None here indicates that this is valid for all device types on that op
-# Note (None, op) takes precedence over (device_type, None)
-@register_template_heuristic(aten_addmm.uid, None, op_name="addmm")
-@register_template_heuristic(aten_baddbmm.uid, None, op_name="baddbmm")
-class ATenAddMMConfigHeuristics(ATenConfigHeuristics):
+class BaseATenAddMMConfigHeuristics(ATenConfigHeuristics):
     def get_extra_kwargs(
         self,
         kernel_inputs: KernelInputs,
@@ -64,9 +61,45 @@ class ATenAddMMConfigHeuristics(ATenConfigHeuristics):
         }
 
 
+# None here indicates that this is valid for all device types on that op
+# Note (None, op) takes precedence over (device_type, None)
+@register_template_heuristic(aten_baddbmm.uid, None, op_name="baddbmm")
+class ATenBaddbmmConfigHeuristics(BaseATenAddMMConfigHeuristics):
+    """baddbmm heuristic only needs the alpha/beta kwargs"""
+
+    # NOTE: baddbmm handles bias expansion in the tuned_baddbmm call
+
+
+@register_template_heuristic(aten_addmm.uid, None, op_name="addmm")
+class ATenAddMMConfigHeuristics(
+    BaseATenAddMMConfigHeuristics, AddMMBiasExpansionConfigMixin
+):
+    """Regular addmm does not need bias expansion in some cases"""
+
+    def adjust_kernel_inputs(
+        self,
+        kernel_inputs: KernelInputs,
+        op_name: str,
+    ) -> KernelInputs:
+        # This is a compatibility layer, as the previous implementation relied on this
+        # and it yields sometimes slightly different numerics
+        # In the original implementation, addmm, when running in not max-autotune mode,
+        # would take unexpanded bias
+        # TODO: figure out if this can be handled cleaner e.g. through a subgraph or
+        # through a different decomposition
+        max_autotune = inductor_config.max_autotune or inductor_config.max_autotune_gemm
+        if not max_autotune:
+            # return the unexpanded inputs
+            return kernel_inputs
+        # do the regular bias expansion
+        return super().adjust_kernel_inputs(kernel_inputs, op_name)
+
+
 @register_template_heuristic(aten_bias_addmm.uid, None, op_name="addmm")
 class ATenBiasAddMMConfigHeuristics(
-    ATenAddMMConfigHeuristics, GemmMaxAutotuneTemplateConfigHeuristics
+    BaseATenAddMMConfigHeuristics,
+    AddMMBiasExpansionConfigMixin,
+    GemmMaxAutotuneTemplateConfigHeuristics,
 ):
     def _get_template_configs_impl(
         self,

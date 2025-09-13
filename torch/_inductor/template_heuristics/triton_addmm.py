@@ -3,14 +3,14 @@ from __future__ import annotations
 from typing import Any, TYPE_CHECKING
 
 from ..kernel.mm_common import addmm_epilogue
-from .base import TemplateConfigHeuristics
+from .addmm import AddMMBiasExpansionConfigMixin
 
 
 if TYPE_CHECKING:
     from ..kernel_inputs import KernelInputs
 
 
-class AddMMConfigMixin(TemplateConfigHeuristics):
+class AddMMConfigMixin(AddMMBiasExpansionConfigMixin):
     """
     Simple mixin to handle scalars for addmm like operators (addmm, baddbmm)
     """
