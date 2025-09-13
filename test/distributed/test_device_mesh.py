@@ -30,6 +30,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    skip_but_pass_in_sandcastle,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
@@ -784,6 +785,9 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         shard_mesh = hsdp_mesh_2["Shard"]
         self.assertEqual(shard_mesh.mesh.tolist(), shard_group[shard_group_idx])
 
+    @skip_but_pass_in_sandcastle(
+        "Invalid test, should not import _world and access its states"
+    )
     @with_comms
     def test_cache_and_reuse_submesh_slice_result(self):
         mesh = init_device_mesh(self.device_type, (2, 4), mesh_dim_names=("dp", "tp"))
