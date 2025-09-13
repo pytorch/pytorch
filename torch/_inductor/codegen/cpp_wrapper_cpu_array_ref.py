@@ -297,7 +297,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                         # Weights are promoted in the JIT mode
                         num_args = len(V.graph.graph_inputs) + len(V.graph.constants)
                         # release GIL to support multiple instances inference (in different threads of the same process)
-                        self.prefix.splice("py::gil_scoped_release release;")
+                        self.prefix.splice("py::gil_scoped_release_simple release;")
 
                     self.prefix.splice(
                         f"""
@@ -694,7 +694,12 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             kernel, wrapped_args, device, debug_args=args
         )
 
-    def generate_scatter_fallback(
+    def generate_scatter_fallback(self, node: ir.ScatterFallback):
+        # No stack allocation when there is a fallback op
+        self.allow_stack_allocation = False
+        super().generate_scatter_fallback(node)
+
+    def _generate_scatter_fallback(
         self,
         output,
         inputs,
@@ -704,8 +709,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         reduce,
         kwargs,
     ):
-        # No stack allocation when there is a fallback op
-        self.allow_stack_allocation = False
+        reduce = self._get_scatter_reduce_enum(reduce)
 
         # call the ABI shim function instead of the ATen one
         cpp_kernel_name = self.get_c_shim_func_name(cpp_kernel_name, self.device)
