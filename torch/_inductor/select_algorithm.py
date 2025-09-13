@@ -1108,7 +1108,7 @@ class TritonTemplateKernel(TritonKernel):
         val: str,
         mask: Optional[str] = None,
         indent_width: int = 4,
-        val_shape: Optional[tuple[str]] = None,
+        val_shape: Optional[Union[tuple[str], list[str]]] = None,
         block_indexing: bool = False,
     ):
         """Stores the final output and appends any epilogue fusions if the buffer hasn't been optimized away.
@@ -1128,7 +1128,7 @@ class TritonTemplateKernel(TritonKernel):
             assert isinstance(indices, (list, tuple))
             assert isinstance(val, str)
             assert isinstance(mask, (str, type(None)))
-            assert isinstance(val_shape, (type(None), tuple))
+            assert isinstance(val_shape, (type(None), tuple, list))
             assert isinstance(block_indexing, bool)
             assert self.template_mask is None
             indices = list(map(OpOverrides.paren, indices))
