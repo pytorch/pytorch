@@ -28,6 +28,11 @@ from torch.torch_version import TorchVersion, Version
 
 from setuptools.command.build_ext import build_ext
 
+if torch.version.hip:
+    from .hipify import hipify_python
+    from .hipify.hipify_python import GeneratedFileCleaner
+
+
 IS_WINDOWS = sys.platform == 'win32'
 IS_MACOS = sys.platform.startswith('darwin')
 IS_LINUX = sys.platform.startswith('linux')
