@@ -99,6 +99,17 @@ struct WrapMethod<R (CurrClass::*)(Args...) const> {
   R (CurrClass::*m)(Args...) const;
 };
 
+template <typename R, typename CurrClass, typename... Args>
+struct WrapMethod<R (CurrClass::*)(Args...) const noexcept> {
+  WrapMethod(R (CurrClass::*m)(Args...) const noexcept) : m(std::move(m)) {}
+
+  R operator()(c10::intrusive_ptr<CurrClass> cur, Args... args) {
+    return std::invoke(m, *cur, args...);
+  }
+
+  R (CurrClass::*m)(Args...) const;
+};
+
 // Adapter for different callable types
 template <
     typename CurClass,
