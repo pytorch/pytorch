@@ -17,6 +17,8 @@ from typing import (
     NamedTuple,
     overload,
     SupportsIndex,
+    Union,
+    TypeAlias,
     TypeVar,
 )
 from typing_extensions import ParamSpec, Protocol, runtime_checkable, Self, TypeAlias
