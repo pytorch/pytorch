@@ -171,3 +171,23 @@ XLNetLMHeadModel,pass,0
 
 
 YituTechConvBert,pass,0
+
+
+
+meta-llama/Llama-3.2-1B,pass,5
+
+
+
+google/gemma-2-2b,pass,5
+
+
+
+google/gemma-3-4b-it,pass,0
+
+
+
+openai/whisper-tiny,pass,6
+
+
+
+Qwen/Qwen3-0.6B,pass,5
