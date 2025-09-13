@@ -66,8 +66,8 @@ def rotary_embedding_23(
     # First ensure x has shape [batch_size, num_heads, seq_len, head_size]
     # So that the rotation logic can be shared with reshaped 3D inputs
     if input_rank == 4:
-        # Reshape from (batch_size, num_heads, sequence_length, head_size)
-        # to [batch_size, num_heads, seq_len, head_size]
+        # Reshape from (batch_size, num_heads, seq_len, head_size)
+        # to [batch_size, seq_len, num_heads, head_size]
         x = torch.permute(x, (0, 2, 1, 3))
     elif input_rank == 3:
         torch._check(
