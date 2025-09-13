@@ -35,6 +35,8 @@ static inline Tensor repeat_interleave_common(
     total = cumsum[-1].item<int64_t>();
     TORCH_CHECK(
         (repeats >= 0).all().item<uint8_t>(), "repeats can not be negative");
+    TORCH_CHECK(
+        (cumsum >= 0).all().item<uint8_t>(), "cumulative sum values overflowed. check the repeats tensor values");
   }
 
   Tensor result = at::empty({total}, repeats.options());
