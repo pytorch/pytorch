@@ -2507,10 +2507,12 @@ class TestHessian(TestCase):
         def f(x, y):
             return (x.sin() * (x + y)).sum()
 
+        def foo(inputs):
+            return f(*inputs)
+
         x = torch.randn(10, 2, device=device)
         y = torch.randn(1, 2, device=device)
         inputs = (x, y)
-        foo = lambda inputs: f(*inputs)
 
         for chunk_size in (1, 2, 3, 4, 7, 10, 1000):
             expected = torch.autograd.functional.hessian(f, inputs)
@@ -2523,8 +2525,6 @@ class TestHessian(TestCase):
 
         with self.assertRaisesRegex(ValueError, err_msg):
             hessian(foo, chunk_size=-2)(inputs)
-
-
 
 @markDynamoStrictTest
 class TestJvp(TestCase):
