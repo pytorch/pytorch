@@ -2910,6 +2910,37 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         with verify(u.dtype) as (atol, rtol):
             self.common(mod, (u, v))
 
+    @unittest.skipIf(
+        not torch._C._cpu._is_amx_tile_supported(), "AMX ISA support is required"
+    )
+    @inductor_config.patch({"freezing": True})
+    @patches
+    @torch.no_grad
+    @parametrize("batch_size", (1024,))
+    @parametrize("in_features", (1024,))
+    @parametrize("out_features", (2048,))
+    @dtypes(torch.bfloat16)
+    def test_linear_reuse_kernels(self, batch_size, in_features, out_features, dtype):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear_x = torch.nn.Linear(in_features, out_features)
+                self.linear_y = torch.nn.Linear(out_features, in_features)
+                self.linear_z = torch.nn.Linear(in_features, out_features)
+
+            def forward(self, x):
+                out = self.linear_x(x)
+                out = self.linear_y(out)
+                out = self.linear_z(out)
+                return out
+
+        x = torch.randn(batch_size, in_features).to(dtype=dtype)
+        mod = M().to(dtype=dtype).eval()
+        self.common(mod, (x))
+        _, code = run_and_get_cpp_code(mod, x)
+        # Check that only 2 kernels are in the generated code
+        assert code.count("AMXState amx_state") == 2
+
 
 @dynamo_config.patch({"dynamic_shapes": True, "assume_static_by_default": False})
 class _DynamicShapesTestBase(BaseTestSelectAlgorithm):
