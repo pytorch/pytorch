@@ -1149,13 +1149,14 @@ def spawn_threads_and_init_comms(
         )
 
     def _run_test_method_with_multi_threads(world_size, callback):
-        world = _install_threaded_pg()
         global_store = c10d.HashStore()
+        world = _install_threaded_pg(world_size, global_store)
 
         def world_is_valid():
             return world == c10d.distributed_c10d._world
 
         def worker(rank, world_pg, store):
+            c10d.distributed_c10d._world.rank = rank
             c10d.init_process_group(
                 backend="threaded", rank=rank, world_size=world_size, store=store
             )
@@ -1276,8 +1277,9 @@ class MultiThreadedTestCase(TestCase):
         torch._C._distributed_c10d._set_thread_isolation_mode(True)
         test_name = self._current_test_name
         # for each test case, we need to create thread local world, and a global store
-        world = _install_threaded_pg()
-        self.__class__.global_store = c10d.HashStore()
+        global_store = c10d.HashStore()
+        world = _install_threaded_pg(self.world_size, global_store)
+        self.__class__.global_store = global_store
 
         def world_is_valid():
             return world == c10d.distributed_c10d._world
@@ -1312,6 +1314,7 @@ class MultiThreadedTestCase(TestCase):
         """
         Run the current test associated with `test_name` using the threaded process group.
         """
+        c10d.distributed_c10d._world.rank = rank
         c10d.init_process_group(
             backend="threaded",
             rank=rank,
