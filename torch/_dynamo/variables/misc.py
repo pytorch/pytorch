@@ -1180,6 +1180,12 @@ class GetAttrVariable(VariableTracker):
                 # This matches how `setattr` is handled for NNModuleVariable
                 self.obj.convert_to_unspecialized(tx)
 
+        elif name == "__len__" and isinstance(
+            self.obj, variables.misc.LoggingLoggerVariable
+        ):
+            # Logging should be ignored in trace, so stop it here.
+            return variables.ConstantVariable(None)
+
         return super().call_method(tx, name, args, kwargs)
 
     def get_forwarded_dict(self, tx):
