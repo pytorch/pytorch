@@ -616,6 +616,10 @@ Available options:
   reaches joined frontiers. Note: Enabling this option can significantly increase the time spent
   capturing the graph.
 
+* ``per_process_memory_fraction`` option limits the amount of memory that can be allocated
+  on all the CUDA devices to a specified fraction of the available memory. This is a value
+  between 0 and 1. Attempting to allocate more memory will raise an out of memory error.
+
 .. note::
 
     Some stats reported by the

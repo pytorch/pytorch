@@ -25,6 +25,9 @@ class C10_CUDA_API CUDAAllocatorConfig {
   static size_t max_split_size() {
     return instance().m_max_split_size;
   }
+  static double per_process_memory_fraction() {
+    return instance().m_per_process_memory_fraction;
+  }
   static double garbage_collection_threshold() {
     return instance().m_garbage_collection_threshold;
   }
@@ -127,6 +130,9 @@ class C10_CUDA_API CUDAAllocatorConfig {
   size_t parseMaxNonSplitRoundingSize(
       const std::vector<std::string>& config,
       size_t i);
+  size_t parsePerProcessMemoryFraction(
+      const std::vector<std::string>& config,
+      size_t i);
   size_t parseGarbageCollectionThreshold(
       const std::vector<std::string>& config,
       size_t i);
@@ -153,6 +159,7 @@ class C10_CUDA_API CUDAAllocatorConfig {
   std::atomic<size_t> m_max_split_size;
   std::atomic<size_t> m_max_non_split_rounding_size;
   std::vector<size_t> m_roundup_power2_divisions;
+  std::atomic<double> m_per_process_memory_fraction;
   std::atomic<double> m_garbage_collection_threshold;
   std::atomic<size_t> m_pinned_num_register_threads;
   std::atomic<bool> m_expandable_segments;
