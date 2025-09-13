@@ -2367,7 +2367,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     can_lift = tma_compatibility_checker.can_lift()
                     # Only try transpose if we know the output shape
                     # in case we need to transpose the data.
-                    transpose_contiguous = copy_shape is not None
+                    transpose_contiguous = can_lift and copy_shape is not None
 
                 options = options_class.create(
                     params=block_params,
