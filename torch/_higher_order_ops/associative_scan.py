@@ -543,12 +543,12 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
           = gl_ys1 + (gl_ys2  + g_ys3 * bw(ys3, ys2)) * bw(ys2, ys1)
           = gl_ys1 + gl_ys2 * bw(ys2, ys1) + g_ys3 * bw(ys3, ys2) * bw(y2, y1)
           = gl_ys1 + gl_ys2 * bw(ys2, ys1) + gl_ys3 * bw(ys3, ys2) * bw(y2, y1) \
-                   + g_ys4 * bw(ys4, ys3) * bw(ys3, ys2) * bw(ys2, ys1)
-          = gl_ys1 + gl_ys2 * bw(ys2, ys1) + gl_ys3 * bw(ys3, ys2) * bw(y2, y1) \
+                   + gl_ys4 * bw(ys4, ys3) * bw(ys3, ys2) * bw(ys2, ys1)
+    g_ys1 = gl_ys1 + gl_ys2 * bw(ys2, ys1) + gl_ys3 * bw(ys3, ys2) * bw(y2, y1) \
                    + gl_ys4 * bw(ys4, ys3) * bw(ys3, ys2) * bw(ys2, ys1)
 
     Let's do the same for all the g_ys:
-    g_ys2 = gl_ys2 + gl_ys3 * bw(ys3, ys2) + gl_y4 * bw(ys4, ys3) * bw(ys3, ys2)
+    g_ys2 = gl_ys2 + gl_ys3 * bw(ys3, ys2) + gl_ys4 * bw(ys4, ys3) * bw(ys3, ys2)
     g_ys3 = gl_ys3 + gl_ys4 * bw(ys4, ys3)
     g_ys4 = gl_ys4
 
@@ -790,22 +790,109 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
 
             return y_mat
 
-        def compute_grad(bwxs, bwys, gl_ys):
-            # Set the first gradient component of bwxs to 1.0, per definition.
-            torch.select(bwxs, dim, 0).fill_(1.0)
+        # def compute_grad(bwxs, bwys, gl_ys):
+        #     # Set the first gradient component of bwxs to 1.0, per definition.
+        #     torch.select(bwxs, dim, 0).fill_(1.0)
 
+        #     # 5.) Compute the gradient transition matrix
+        #     y_mat = compute_y_mat(bwys)
+
+        #     # 6.) scale the y_mat with the upstream gradients gl_ys
+        #     scaled_y_mat = y_mat * gl_ys
+
+        #     # 7.) Reduce the y_mat with sum along the columns to get the total contributions for xs_t
+        #     summed_y_mat = scaled_y_mat.sum(dim + 1)
+
+        #     # 8.) Scale with the bwxs to obtain the final gradients g_xs
+        #     g_xs = summed_y_mat * bwxs
+
+        #     return g_xs
+        
+        def scan_backward_gys(gl_ys: torch.Tensor, bwys: torch.Tensor, dim: int) -> torch.Tensor:
+            """
+            Computes the gradient of ys via a right-to-left associative scan:
+                g_ys[t] = gl_ys[t] + g_ys[t+1] * bwys[t]
+            """            
+            rev_gl_ys = gl_ys.flip(dims=(dim,))
+            rev_bwys = bwys.flip(dims=(dim,))
+            
+            # import pdb
+            # pdb.set_trace()
+            rev_gl_ys = torch.cat([torch.zeros_like(rev_gl_ys[0:1]), rev_gl_ys[:]], 0)
+            rev_bwys = torch.cat([torch.ones_like(rev_bwys[0:1]), torch.ones_like(rev_bwys[0:1]), rev_bwys[:-1]], 0)
+
+            # def combine_fn(g_next, gl_and_bwys):
+            #     gl, bw = gl_and_bwys
+            #     return gl + g_next[0] * bw, bw + 0.
+            # def combine_fn_assoc(bw, gl, bw_next, gl_next):
+            #     bw_tmp = bw * bw_next
+            #     return bw_tmp, bw * gl + gl_next
+            
+            def combine_fn_assoc(bw, gl, bw_next, gl_next):
+                bw_prod = bw * bw_next
+                gl_acc = gl_next + bw_next * gl
+                return bw_prod, gl_acc
+            
+            def combine_fn_scan(bw_gl, bw_next_gl_next):
+                bw, gl = bw_gl
+                bw_next, gl_next = bw_next_gl_next
+                tmp = gl * bw
+                return [tmp + gl_next, bw_next+0.], tmp
+
+            # zipped = list(zip(torch.unbind(rev_bwys, dim=dim), torch.unbind(rev_gl_ys, dim=dim)))
+            # import pdb
+            # pdb.set_trace()
+            # rev_bwys = torch.cat([torch.ones_like(rev_bwys[0:1]), rev_bwys[:-1]], 0)
+            # rev_bwys = torch.cat([torch.zeros_like(rev_bwys[0:1]), rev_bwys[:-1]], 0)
+            zipped = (rev_bwys, rev_gl_ys)
+            # rev_g_ys = associative_scan(combine_fn, zipped, dim, combine_mode="generic")[0]
+            with torch._C._AutoDispatchBelowAutograd():
+                # rev_g_ys = associative_scan_op(combine_fn, zipped, ())[0]
+                # import pdb
+                # pdb.set_trace()
+                rev_g_ys = associative_scan_op(combine_fn_assoc, zipped, ())[1][1:]
+                # rev_g_ys *= rev_gl_ys
+                # rev_g_ys = torch.cumsum(rev_g_ys, 0)
+                # from torch._higher_order_ops.scan import scan
+                # # import pdb
+                # # pdb.set_trace()
+                # rev_g_ys_scan = scan(combine_fn_scan, [z[0] for z in zipped], [z[1:] for z in zipped])[0]
+                # # import pdb
+                # # pdb.set_trace()
+            
+            # rev_g_ys[0] -= 1
+
+            # import pdb
+            # pdb.set_trace()
+
+            g_ys = rev_g_ys.flip(dims=(dim,))
+            
+            # import pdb
+            # pdb.set_trace()
+            
+            return g_ys
+        
+        def compute_grad(bwxs: torch.Tensor, bwys: torch.Tensor, gl_ys: torch.Tensor) -> torch.Tensor:
+            # Set the first gradient component of bwxs to 1.0, per definition.
+            # Set ∂ys0 / ∂xs0 = 1
+            torch.select(bwxs, dim, 0).fill_(1.0)
+        
             # 5.) Compute the gradient transition matrix
             y_mat = compute_y_mat(bwys)
 
             # 6.) scale the y_mat with the upstream gradients gl_ys
             scaled_y_mat = y_mat * gl_ys
 
+            # import pdb
+            # pdb.set_trace()
             # 7.) Reduce the y_mat with sum along the columns to get the total contributions for xs_t
-            summed_y_mat = scaled_y_mat.sum(dim + 1)
-
-            # 8.) Scale with the bwxs to obtain the final gradients g_xs
-            g_xs = summed_y_mat * bwxs
-
+            g_ys_mat = scaled_y_mat.sum(dim + 1)
+            
+            g_ys_scan = scan_backward_gys(gl_ys, bwys, dim)
+            # import pdb
+            # pdb.set_trace()
+            
+            g_xs = g_ys_scan * bwxs
             return g_xs
 
         # Stack all leaves of the gradients along the first dimension.
@@ -814,14 +901,18 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
         bwys_stacked_leaves = torch.stack(bwys)
         gl_ys_stacked_leaves = torch.stack(gl_ys)
 
+        # import pdb
+        # pdb.set_trace()
+
         # The compute_grad function is parallelized across all individual leaves of xs
         # as these gradients can be computed independently from each other
         # TODO: torch.vmap may create composability issues
-        compute_grad_mapped = torch.vmap(compute_grad, 0, 0)
+        # compute_grad_mapped = torch.vmap(compute_grad, 0, 0)
 
-        g_xs = compute_grad_mapped(
-            bwxs_stacked_leaves, bwys_stacked_leaves, gl_ys_stacked_leaves
-        )
+        # g_xs = compute_grad_mapped(bwxs_stacked_leaves, bwys_stacked_leaves, gl_ys_stacked_leaves)
+
+        compute_grad_mapped = compute_grad
+        g_xs = [compute_grad_mapped(bwxs[ind], bwys[ind], gl_ys[ind]) for ind in range(len(gl_ys))]
 
         # TODO: Currently the gradients for the additional_inputs are not computed properly
         return *[None] * 3, *g_xs, *[None] * num_additional_inputs
