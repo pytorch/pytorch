@@ -6,6 +6,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/OpMathType.h>
 #include <ATen/core/Tensor.h>
+#include <ATen/native/DispatchStub.h>
 #include <ATen/native/ForeachUtils.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
