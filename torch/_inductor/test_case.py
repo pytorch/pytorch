@@ -1,6 +1,9 @@
 import contextlib
+import logging
 import os
 from typing import Union
+
+log = logging.getLogger(__name__)
 
 from torch._dynamo.test_case import (
     run_tests as dynamo_run_tests,
@@ -44,5 +47,14 @@ class TestCase(DynamoTestCase):
             self._inductor_test_stack.enter_context(fresh_cache())
 
     def tearDown(self) -> None:
+        # super().tearDown()
+        # self._inductor_test_stack.close()
+        from torch._dynamo import utils
+        if (
+            os.getenv("INDUCTOR_COUNTER_LOGS")      # explicit env flag
+            or log.isEnabledFor(logging.DEBUG)      # module logger set to DEBUG
+        ):
+            for k, v in utils.counters.items():
+                log.debug("%s %s", k, v.most_common())
         super().tearDown()
         self._inductor_test_stack.close()
