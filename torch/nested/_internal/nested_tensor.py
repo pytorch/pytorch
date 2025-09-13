@@ -160,8 +160,10 @@ class NestedTensor(torch.Tensor):
     def offsets(self):
         return self._offsets
 
-    def lengths(self):
-        return self._lengths
+    def lengths(self) -> torch.Tensor:
+        if self._lengths is not None:
+            return self._lengths
+        return self._offsets.diff()
 
     # Private accessor functions for min / max sequence length. They're
     # purposefully not @properties because those don't work with PT2 (yet).
@@ -173,10 +175,7 @@ class NestedTensor(torch.Tensor):
         max_seqlen_tensor = self._max_seqlen_tensor
         if max_seqlen_tensor is None:
             # compute & cache
-            max_val = _get_sdpa_extreme_seqlen(
-                torch.max,
-                self._offsets.diff() if self._lengths is None else self._lengths,
-            )
+            max_val = _get_sdpa_extreme_seqlen(torch.max, self.lengths())
             max_seqlen_tensor = _store_val_in_tensor(max_val)
             self._metadata_cache["max_seqlen"] = max_seqlen_tensor
         return _load_val_from_tensor(max_seqlen_tensor)
@@ -185,10 +184,7 @@ class NestedTensor(torch.Tensor):
         min_seqlen_tensor = self._min_seqlen_tensor
         if min_seqlen_tensor is None:
             # compute & cache
-            min_val = _get_sdpa_extreme_seqlen(
-                torch.min,
-                self._offsets.diff() if self._lengths is None else self._lengths,
-            )
+            min_val = _get_sdpa_extreme_seqlen(torch.min, self.lengths())
             min_seqlen_tensor = _store_val_in_tensor(min_val)
             self._metadata_cache["min_seqlen"] = min_seqlen_tensor
         return _load_val_from_tensor(min_seqlen_tensor)
