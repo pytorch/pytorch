@@ -32,6 +32,7 @@ from torch._C._functorch import (
 )
 from torch._functorch.utils import argnums_t, exposed_in
 from torch._subclasses.functional_tensor import FunctionalTensor
+from torch.func import grad
 from torch.fx.experimental import const_fold
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.utils import _pytree as pytree
@@ -1308,7 +1309,7 @@ def jacfwd(
 
 
 @exposed_in("torch.func")
-def hessian(func, argnums=0):
+def hessian(func, argnums=0, *, is_scalar=False):
     """
     Computes the Hessian of ``func`` with respect to the arg(s) at index
     ``argnum`` via a forward-over-reverse strategy.
@@ -1347,6 +1348,9 @@ def hessian(func, argnums=0):
         >>> assert torch.allclose(hess, torch.diag(-x.sin()))
 
     """
+    if is_scalar:
+        return jacfwd(grad(func, argnums), argnums)
+
     return jacfwd(jacrev(func, argnums), argnums)
 
 
