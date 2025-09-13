@@ -106,7 +106,7 @@ struct CUDACachingHostAllocatorImpl
     // Update the statistics on the time spent on cudaHostAlloc/hostRegister
     {
       std::lock_guard<std::mutex> g(stats_.timing_mutex_);
-      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(use_host_register.count(*ptr) == 0);
+      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!use_host_register.contains(*ptr));
       use_host_register[*ptr] = use_register;
       stats_.host_alloc_time.increase(duration.count());
     }
@@ -121,7 +121,7 @@ struct CUDACachingHostAllocatorImpl
     bool use_register = false;
     {
       std::lock_guard<std::mutex> g(stats_.timing_mutex_);
-      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(use_host_register.count(ptr) == 1);
+      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(use_host_register.contains(ptr));
       use_register = use_host_register[ptr];
     }
     if (use_register) {
