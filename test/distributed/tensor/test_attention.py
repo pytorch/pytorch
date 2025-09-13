@@ -77,6 +77,10 @@ class RingAttentionTest(DTensorTestBase):
         not PLATFORM_SUPPORTS_FUSED_ATTENTION,
         "Does not support flash nor efficient attention",
     )
+    @unittest.skipIf(
+        True,
+        "https://github.com/pytorch/pytorch/issues/162743",
+    )
     @with_comms
     def test_ring_attention_sdpa(self) -> None:
         self.run_subtests(
@@ -681,6 +685,10 @@ class RingFlexAttentionTest(DTensorTestBase):
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support flash attention"
     )
+    @unittest.skipIf(
+        True,
+        "https://github.com/pytorch/pytorch/issues/162820",
+    )
     def test_ring_flex_attention(self) -> None:
         self.run_subtests(
             {"qkv_size": [128 * self.world_size, 2048]},
@@ -699,6 +707,10 @@ class RingFlexAttentionTest(DTensorTestBase):
     @with_comms
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support flash attention"
+    )
+    @unittest.skipIf(
+        True,
+        "https://github.com/pytorch/pytorch/issues/162820",
     )
     def test_ring_flex_attention_document_mask(self) -> None:
         random.seed(10)
