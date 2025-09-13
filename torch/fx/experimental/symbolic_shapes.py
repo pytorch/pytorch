@@ -6395,7 +6395,10 @@ class ShapeEnv:
                 if isinstance(atom.args[0], IntTrueDiv):
                     base, divisor = atom.args[0].args
                     if base % divisor == 0:
-                        trunc_replacements[atom] = base // divisor
+                        trunc_replacements[atom] = CleanDiv(base, divisor)
+                    else:
+                        # TruncToInt(IntTrueDiv(a,b)) == FloorDiv(a, b)
+                        trunc_replacements[atom] = FloorDiv(base, divisor)
             if trunc_replacements:
                 expr = expr.xreplace(trunc_replacements)
 
