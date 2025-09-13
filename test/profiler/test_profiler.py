@@ -1764,25 +1764,27 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
             with open(fname) as f:
                 j = json.load(f)
                 op_events = [
-                    e for e in j["traceEvents"] if e.get("cat", "") == "cpu_op"
+                    e
+                    for e in j["traceEvents"]
+                    if e.get("name", "") == "add_test_kwinputs"
                 ]
+                self.assertTrue(len(op_events) > 0)
                 for e in op_events:
-                    if e["name"] == "add_test_kwinputs":
-                        # print(e["args"])
-                        args = e["args"]
-                        self.assertTrue("stream" in args)
-                        self.assertTrue("grid" in args)
-                        self.assertTrue("boolean" in args)
-                        self.assertTrue(args["stream"] == 0)
-                        self.assertTrue(args["grid"] == "lambda x : x + 1")
-                        self.assertTrue(args["debug"] == "None")
-                        self.assertTrue(args["boolean"])
+                    args = e["args"]
+                    self.assertTrue("stream" in args)
+                    self.assertTrue("grid" in args)
+                    self.assertTrue("boolean" in args)
+                    self.assertTrue(args["stream"] == 0)
+                    self.assertTrue(args["grid"] == "lambda x : x + 1")
+                    self.assertTrue(args["debug"] == "None")
+                    self.assertTrue(args["boolean"])
+                    self.assertTrue(e["cat"] == "cpu_op")
 
         with profile(record_shapes=True) as p1:
             cm = torch._C._profiler._RecordFunctionFast(
                 "add_test_kwinputs",
                 [x, y],
-                {"stream": "test", "grid": [1, 2]},
+                {"stream": "test", "grid": [1, 2], "scope": "user_scope"},
             )
             for _ in range(4):
                 with cm:
@@ -1792,14 +1794,16 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
             with open(fname1) as f1:
                 j = json.load(f1)
                 op_events = [
-                    e for e in j["traceEvents"] if e.get("cat", "") == "cpu_op"
+                    e
+                    for e in j["traceEvents"]
+                    if e.get("name", "") == "add_test_kwinputs"
                 ]
+                self.assertTrue(len(op_events) > 0)
                 for e in op_events:
-                    if e["name"] == "add_test_kwinputs":
-                        # print(e["args"])
-                        args = e["args"]
-                        self.assertTrue("stream" not in args)
-                        self.assertTrue("grid" not in args)
+                    args = e["args"]
+                    self.assertTrue("stream" not in args)
+                    self.assertTrue("grid" not in args)
+                    self.assertTrue(e["cat"] == "user_annotation")
 
     def test_is_profiler_enabled(self):
         self.assertFalse(torch.autograd.profiler._is_profiler_enabled)
