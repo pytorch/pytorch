@@ -35,11 +35,11 @@ fi
 
 print_cmake_info
 if [[ ${BUILD_ENVIRONMENT} == *"distributed"* ]]; then
-  USE_OPENMP=1 WERROR=1 python setup.py bdist_wheel
+  USE_OPENMP=1 WERROR=1 python -m build --wheel --no-isolation
 else
   # NB: we always build with distributed; USE_DISTRIBUTED turns off all
   # backends (specifically the gloo backend), so test that this case works too
-  USE_DISTRIBUTED=0 USE_OPENMP=1 MACOSX_DEPLOYMENT_TARGET=11.0 WERROR=1 BUILD_TEST=OFF USE_PYTORCH_METAL=1 python setup.py bdist_wheel --plat-name macosx_11_0_arm64
+  USE_DISTRIBUTED=0 USE_OPENMP=1 MACOSX_DEPLOYMENT_TARGET=11.0 WERROR=1 BUILD_TEST=OFF USE_PYTORCH_METAL=1 python -m build --wheel --no-isolation -C--build-option=--plat-name=macosx_11_0_arm64
 fi
 if which sccache > /dev/null; then
   print_sccache_stats
