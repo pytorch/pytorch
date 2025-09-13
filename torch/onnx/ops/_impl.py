@@ -56,18 +56,29 @@ def rotary_embedding_23(
     rotary_embedding_dim: int = 0,
 ) -> torch.Tensor:
     """RotaryEmbedding-23 https://onnx.ai/onnx/operators/onnx__RotaryEmbedding.html#rotaryembedding-23"""
+    # x has shape (batch_size, num_heads, sequence_length, head_size)
+    # or (batch_size, sequence_length, hidden_size)
+    input_shape = x.shape
+    input_rank = len(input_shape)
+    batch_size = input_shape[0]
+    sequence_length = input_shape[-2]
+
     # First ensure x has shape [batch_size, num_heads, seq_len, head_size]
-    batch_size = x.shape[0]
-    sequence_length = x.shape[1]
-    if len(x.shape) == 3:
-        hidden_size = x.shape[2]
+    # So that the rotation logic can be shared with reshaped 3D inputs
+    if input_rank == 4:
+        # Reshape from (batch_size, num_heads, sequence_length, head_size)
+        # to [batch_size, num_heads, seq_len, head_size]
+        x = torch.permute(x, (0, 2, 1, 3))
+    elif input_rank == 3:
         torch._check(
             num_heads != 0,
-            lambda: f"num_heads must be provided for 3D inputs. Received input tensor with shape {x.shape}",
+            lambda: f"num_heads must be provided for 3D inputs. Received input tensor with shape {input_shape}",
         )
+        hidden_size = input_shape[2]
         head_size = hidden_size // num_heads
         new_shape = [batch_size, sequence_length, num_heads, head_size]
         x = torch.reshape(x, new_shape)
+
     torch._check(len(x.shape) == 4, lambda: "x should be a 4D tensor by now")
     head_size = x.shape[3]
 
@@ -125,9 +136,11 @@ def rotary_embedding_23(
     else:
         x_rotate = torch.cat((real, imag), dim=-1)
     output = torch.cat((x_rotate, x_not_rotate), dim=-1)
-    if len(x.shape) == 3:
-        output = torch.reshape(output, x.shape)
-    return output
+    if input_rank == 3:
+        return torch.reshape(output, input_shape)
+
+    # Return the dimensions to the original order
+    return torch.permute(output, (0, 2, 1, 3))
 
 
 def _get_scale_factor(scale: Optional[float], head_size: int) -> float:
