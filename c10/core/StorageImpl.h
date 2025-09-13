@@ -91,10 +91,12 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   StorageImpl() = delete;
   StorageImpl(StorageImpl&& other) = delete;
   StorageImpl(const StorageImpl&) = delete;
-  ~StorageImpl() override = default;
+  ~StorageImpl() override {
+    release_resources();
+  }
 
   void reset() {
-    data_ptr_.clear();
+    release_resources();
     size_bytes_ = 0;
     size_bytes_is_heap_allocated_ = false;
   }
@@ -103,6 +105,10 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   // unnecessary; don't forget to change that if needed!
   void release_resources() override {
     data_ptr_.clear();
+    for (auto& hook : delete_hooks_) {
+      hook(data_ptr_, size_bytes_);
+    }
+    delete_hooks_.clear();
   }
 
   size_t nbytes() const {
@@ -171,6 +177,8 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   }
 
   void set_data_ptr_noswap(at::DataPtr&& data_ptr) {
+    release_resources();
+
     data_ptr_ = std::move(data_ptr);
     refresh_has_data_ptr_check();
   }
@@ -230,6 +238,11 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
     resizable_ = resizable;
   }
 
+  void add_delete_hook(
+      std::function<void(const DataPtr&, const SymInt&)> hook) {
+    delete_hooks_.push_back(std::move(hook));
+  }
+
   /**
    * Can only be called when use_count is 1
    */
@@ -247,6 +260,8 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   void UniqueStorageShareExternalPointer(
       at::DataPtr&& data_ptr,
       size_t size_bytes) {
+    release_resources();
+
     data_ptr_ = std::move(data_ptr);
     size_bytes_ = static_cast<int64_t>(size_bytes);
     size_bytes_is_heap_allocated_ = false;
@@ -348,6 +363,9 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   Allocator* allocator_;
   impl::PyObjectSlot pyobj_slot_;
   std::unique_ptr<StorageExtraMeta> extra_meta_ = nullptr;
+
+  std::vector<std::function<void(const DataPtr&, const SymInt&)>>
+      delete_hooks_{};
 };
 
 // Declare StorageImpl create function pointer types.
