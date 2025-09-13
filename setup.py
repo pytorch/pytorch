@@ -326,6 +326,9 @@ from tools.setup_helpers.env import (
 from tools.setup_helpers.generate_linker_script import gen_linker_script
 
 
+_IS_X8664 = platform.machine() == "x86_64"
+
+
 def str2bool(value: str | None) -> bool:
     """Convert environment variables to boolean values."""
     if not value:
@@ -1493,6 +1496,11 @@ def configure_extension_build() -> tuple[
         extra_install_requires.extend(
             map(str.strip, pytorch_extra_install_requires.split("|"))
         )
+
+    # for Windows inductor
+    skip_iomp = os.getenv("FORCE_SKIP_INTEL_OPENMP_DEPENDENCY")
+    if IS_WINDOWS and _IS_X8664 and not skip_iomp:
+        extra_install_requires.extend(["intel-openmp==2025.1.1"])
 
     # Cross-compile for M1
     if IS_DARWIN:
