@@ -1048,7 +1048,7 @@ class BytecodeDistpatchTableMeta(type):
         cls.dispatch_table = [dispatch_table.get(i) for i in range(2**8)]
 
 
-class Stack(list[Optional[VariableTracker]]):
+class Stack(collections.UserList[Optional[VariableTracker]]):
     """A fixed length stack of VariableTracker objects with fast append and pop.
     The stack is initialized with a fixed capacity, and holds a pointer to the
     next free slot. This allows O(1) append/pop operations without resizing the
