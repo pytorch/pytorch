@@ -58,8 +58,8 @@
 #   USE_FBGEMM=0
 #     disables the FBGEMM build
 #
-#   USE_FBGEMM_GENAI=1
-#     enables the FBGEMM GenAI kernels to build
+#   USE_FBGEMM_GENAI=0
+#     disables the FBGEMM GenAI build
 #
 #   USE_KINETO=0
 #     disables usage of libkineto library for profiling
@@ -420,6 +420,41 @@ for i, arg in enumerate(sys.argv):
     if arg == "rebuild" or arg == "build":
         arg = "build"  # rebuild is gone, make it build
         EMIT_BUILD_WARNING = True
+    if arg == "develop":
+        print(
+            (
+                "WARNING: Redirecting 'python setup.py develop' to 'pip install -e . -v --no-build-isolation',"
+                " for more info see https://github.com/pytorch/pytorch/issues/152276"
+            ),
+            file=sys.stderr,
+        )
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "pip",
+                "install",
+                "-e",
+                ".",
+                "-v",
+                "--no-build-isolation",
+            ],
+            env={**os.environ},
+        )
+        sys.exit(result.returncode)
+    if arg == "install":
+        print(
+            (
+                "WARNING: Redirecting 'python setup.py install' to 'pip install . -v --no-build-isolation',"
+                " for more info see https://github.com/pytorch/pytorch/issues/152276"
+            ),
+            file=sys.stderr,
+        )
+        result = subprocess.run(
+            [sys.executable, "-m", "pip", "install", ".", "-v", "--no-build-isolation"],
+            env={**os.environ},
+        )
+        sys.exit(result.returncode)
     if arg == "--":
         filtered_args += sys.argv[i:]
         break

@@ -1182,6 +1182,15 @@ class GetAttrVariable(VariableTracker):
 
         return super().call_method(tx, name, args, kwargs)
 
+    def get_forwarded_dict(self, tx):
+        assert (
+            self.name == "__dict__"
+            and isinstance(self.obj, variables.UserDefinedClassVariable)
+            and not tx.output.side_effects.has_pending_mutation(self.obj)
+        )
+        self.obj.ban_mutation = True
+        return VariableTracker.build(tx, self.obj.value.__dict__, self.source)
+
 
 class MethodWrapperVariable(VariableTracker):
     def __init__(self, method_wrapper, **kwargs) -> None:
