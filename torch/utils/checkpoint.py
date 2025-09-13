@@ -347,6 +347,7 @@ def checkpoint(
     context_fn: Callable[[], Tuple[ContextManager, ContextManager]] = noop_context_fn,
     determinism_check: str = _DEFAULT_DETERMINISM_MODE,
     debug: bool = False,
+    early_stop: bool = True,
     **kwargs
 ):
     r"""Checkpoint a model or part of the model.
@@ -425,6 +426,9 @@ def checkpoint(
             passed as the tuple. For example, in LSTM, if user passes
             ``(activation, hidden)``, :attr:`function` should correctly use the
             first input as ``activation`` and the second input as ``hidden``
+        args: tuple containing inputs to the :attr:`function`
+
+    Keyword args:
         preserve_rng_state(bool, optional):  Omit stashing and restoring
             the RNG state during each checkpoint. Note that under torch.compile,
             this flag doesn't take effect and we always preserve RNG state.
@@ -455,7 +459,11 @@ def checkpoint(
             a trace of the operators ran during the original forward computation
             as well as the recomputation. This argument is only supported if
             ``use_reentrant=False``.
-        args: tuple containing inputs to the :attr:`function`
+        early_stop(bool, optional): If ``True``, non-reentrant checkpoint stops
+            recomputation as soon as it has computed all needed Tensors. This
+            argument is ignored if ``use_reentrant=True``. Can be overridden
+            globally using :func:`set_checkpoint_early_stop` context manager.
+            Default: ``True``.
 
     Returns:
         Output of running :attr:`function` on :attr:`*args`
@@ -488,7 +496,7 @@ def checkpoint(
         return CheckpointFunction.apply(function, preserve, *args)
     else:
         gen = _checkpoint_without_reentrant_generator(
-            function, preserve, context_fn, determinism_check, debug, *args, **kwargs
+            function, preserve, context_fn, determinism_check, debug, early_stop, *args, **kwargs
         )
         # Runs pre-forward logic
         next(gen)
@@ -731,7 +739,7 @@ def _internal_assert(cond):
 #    by holder=None. We skip over them. We still save x at (4) (since its holder
 #    is still alive.)
 
-_enable_checkpoint_early_stop = True
+_enable_checkpoint_early_stop: Optional[bool] = None
 
 
 @contextlib.contextmanager
@@ -1448,6 +1456,7 @@ def _checkpoint_without_reentrant_generator(
     context_fn: Callable[[], Tuple[ContextManager, ContextManager]] = noop_context_fn,
     determinism_check: str = _DEFAULT_DETERMINISM_MODE,
     debug: bool = False,
+    early_stop: bool = True,
     *args,
     **kwargs
 ):
@@ -1475,6 +1484,10 @@ def _checkpoint_without_reentrant_generator(
         debug(bool, optional): If ``True``, error messages will also include
             a trace of the operators ran during the original forward computation
             as well as the recomputation.
+        early_stop(bool, optional): If ``True``, non-reentrant checkpoint stops
+            recomputation as soon as it has computed all needed Tensors. Can be
+            overridden globally using :func:`set_checkpoint_early_stop` context
+            manager. Default: ``True``.
         *args: Arguments to pass in to the given ``function``.
         **kwargs: Keyword arguments to pass into the given ``function``.
     """
@@ -1543,7 +1556,7 @@ def _checkpoint_without_reentrant_generator(
 
     new_frame = _CheckpointFrame(
         recompute_fn,
-        _enable_checkpoint_early_stop,
+        _enable_checkpoint_early_stop if _enable_checkpoint_early_stop is not None else early_stop,
         unpack_error_cb,
         metadata_fn
     )
