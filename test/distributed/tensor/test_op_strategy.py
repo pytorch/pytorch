@@ -536,7 +536,7 @@ class DistTensorReplicateStrategyRegistrationTest(DTensorTestBase):
     def test_replicate_strategy_placement(self, mock_select_strategy):
         costs_from__select_strategy = []
 
-        def mock_select_func(strategy):
+        def mock_select_func(strategy, op_schema=None):
             """function copied from _select_strategy but with cost capturing"""
             nonlocal costs_from__select_strategy
             if len(strategy.strategies) == 1:
