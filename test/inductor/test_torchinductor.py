@@ -15497,6 +15497,43 @@ if RUN_GPU:
 
             fn()
 
+        @config.patch(implicit_fallbacks=True)
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_default_device_context(self):
+            @torch.library.custom_op(
+                "mylib::cg_unsafe_op",
+                mutates_args=[],
+                schema="(Tensor x) -> Tensor",
+                device_types=GPU_TYPE,
+                tags=(torch._C.Tag.cudagraph_unsafe,),
+            )
+            def cg_unsafe_op(x) -> torch.Tensor:
+                return x + 1
+
+            @cg_unsafe_op.register_fake
+            def _(x) -> torch.Tensor:
+                return torch.empty_like(x)
+
+            def f(x):
+                x += 1
+                y = cg_unsafe_op(x)
+                y += 1
+                return y
+
+            f = torch.compile(f, mode="reduce-overhead")
+
+            inp = torch.randn(2, device=GPU_TYPE)
+            _, (code,) = run_and_get_code(f, inp)
+
+            if config.cpp_wrapper:
+                FileCheck().check_count(
+                    "AOTICudaGuard device_guard(0)", 1, exactly=True
+                ).run(code)
+            else:
+                FileCheck().check_count(
+                    "with torch.cuda._DeviceGuard(0)", 1, exactly=True
+                ).run(code)
+
     class RNNTest(TestCase):
         device_type = GPU_TYPE
 
