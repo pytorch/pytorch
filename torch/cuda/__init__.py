@@ -500,6 +500,7 @@ class CudaError(RuntimeError):
 
 
 def check_error(res: int) -> None:
+    r"""Raise an error if the result of a CUDA runtime API call is not success."""
     if res != _cudart.cudaError.success:
         raise CudaError(res)
 
