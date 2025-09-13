@@ -4,11 +4,18 @@
 from __future__ import annotations
 
 import onnx_ir.passes.common as common_passes
+import onnxruntime
 from onnxscript import ir
+from packaging import version
 
 import torch
+from torch.onnx._internal.exporter import _testing as onnx_testing
 from torch.onnx.ops import _impl, _symbolic_impl
 from torch.testing._internal import common_utils
+
+
+def has_onnxruntime_opset_23() -> bool:
+    return version.parse(onnxruntime.__version__) >= version.parse("1.23")
 
 
 class SchemaTest(common_utils.TestCase):
@@ -525,6 +532,11 @@ class NativeOnnxOpsTest(common_utils.TestCase):
         )
         self.assertEqual(onnx_program.model.opset_imports[""], 23)
         self.assertEqual("RotaryEmbedding", onnx_program.model.graph.node(0).op_type)
+        if has_onnxruntime_opset_23():
+            onnx_testing.assert_onnx_program(onnx_program)
+        else:
+            # Test with reference evaluator because ORT does not support the op as of version 1.22
+            onnx_testing.assert_onnx_program(onnx_program, backend="reference")
 
     def test_rotary_embedding_3d(self):
         num_heads = 2
@@ -558,6 +570,11 @@ class NativeOnnxOpsTest(common_utils.TestCase):
         )
         self.assertEqual(onnx_program.model.opset_imports[""], 23)
         self.assertEqual("RotaryEmbedding", onnx_program.model.graph.node(0).op_type)
+        if has_onnxruntime_opset_23():
+            onnx_testing.assert_onnx_program(onnx_program)
+        else:
+            # Test with reference evaluator because ORT does not support the op as of version 1.22
+            onnx_testing.assert_onnx_program(onnx_program, backend="reference")
 
     def test_attention_basic(self):
         """Test basic attention functionality."""
