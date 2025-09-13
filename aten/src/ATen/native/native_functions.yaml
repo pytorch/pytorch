@@ -10259,7 +10259,7 @@
   structured_delegate: any.all_out
   variants: method, function
   dispatch:
-    SparseCPU, SparseCUDA: any_sparse
+    SparseCPU, SparseCUDA, SparseMPS: any_sparse
   tags: core
 
 - func: any.all_out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)

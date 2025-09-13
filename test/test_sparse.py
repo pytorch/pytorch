@@ -3310,7 +3310,6 @@ class TestSparse(TestSparseBase):
             sp_tensor_loaded = pickle.loads(serialized)
             self.assertEqual(sp_tensor, sp_tensor_loaded)
 
-    @expectedFailureMPS
     def test_any(self, device):
         t = torch.sparse_coo_tensor(torch.tensor(([0, 0], [2, 0])), torch.tensor([False, False]), device=device)
         t_any = torch.tensor(False)
