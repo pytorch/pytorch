@@ -2,6 +2,7 @@
 import contextlib
 import dataclasses
 import functools
+import hashlib
 import inspect
 import itertools
 import json
@@ -1433,7 +1434,7 @@ class TritonTemplate(KernelTemplate):
         cache_codegen_enabled_for_template=False,
         prologue_loads_all_inputs=False,
     ) -> None:
-        super().__init__(name)
+        super().__init__(name, hash=hashlib.sha256(source.encode("utf-8")).hexdigest())
         self.grid = grid
         self.template = self._template_from_string(source)
         assert name not in self.all_templates, "duplicate template name"
@@ -1888,6 +1889,10 @@ class ExternKernelChoice:
         self.op_overload = op_overload
         self.use_fallback_kernel = use_fallback_kernel
         self.kernel_creator = kernel_creator
+        # match the API for KernelTemplate as they can be treated the same
+        # There is no src hash for ExternKernelChoice in the traditional sense
+        # so we indicate this by returning None
+        self.src_hash = None
 
     def to_callable(self):
         return getattr(extern_kernels, self.name)
@@ -2421,19 +2426,20 @@ class AlgorithmSelectorCache(PersistentCache):
             N = input_nodes[-1].get_size()[-1]
             append_to_log(mm_file_name, {"invoke": str((M, K, N))})
 
-        def create_no_valid_choices() -> NoValidChoicesError:
+        def create_no_valid_choices(reason: str) -> NoValidChoicesError:
             backend_config = (
                 "max_autotune_gemm_backends"
                 if name != "convolution"
                 else "max_autotune_conv_backends"
             )
             return NoValidChoicesError(
-                f"No choices to select, please consider adding ATEN into {backend_config} "
+                f"No choices to select. Provided reason: {reason} "
+                f"please consider adding ATEN into {backend_config} "
                 "config (defined in torch/_inductor/config.py) to allow at least one choice. "
             )
 
         if len(choices) == 0:
-            raise create_no_valid_choices()
+            raise create_no_valid_choices("No choices exist for backend.")
         log.debug("Max autotune selects from %s choices.", str(len(choices)))
 
         if len(choices) == 1:
@@ -2493,7 +2499,9 @@ class AlgorithmSelectorCache(PersistentCache):
             # Prune anything that failed to compile
             choices = [c for c in choices if not c.failed]
             if len(choices) == 0:
-                raise create_no_valid_choices()
+                raise create_no_valid_choices(
+                    "All choices failed to compile for backend."
+                )
 
             candidates = self.prescreen_choices(
                 choices, name, inputs_key, self.prescreening_cache

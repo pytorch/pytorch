@@ -90,6 +90,7 @@ if TYPE_CHECKING:
 
     from .codegen.common import WorkspaceArg
     from .codegen.wrapper import PythonWrapperCodegen
+    from .dependencies import Dep
     from .graph import GraphLowering
     from .ir import Buffer, ExternKernel, IRNode, Layout, Operation, ReinterpretView
     from .output_code import CompiledFxGraph
@@ -3695,3 +3696,14 @@ def snode_args_kwargs(snode: BaseSchedulerNode) -> tuple[list[Any], dict[str, An
     flat_args = [to_real_tensor(a) for a in flat_args]
     args, kwargs = pytree.tree_unflatten(flat_args, flat_args_pytree_spec)
     return args, kwargs
+
+
+def is_nonfreeable_buffers(dep: Dep) -> bool:
+    from .virtualized import V
+
+    dep_name = dep.name
+    # Subgraphs have a prefix for the name, cleanup the prefix
+    # before checking for known strings.
+    if V.graph.name:
+        dep_name = dep_name.removeprefix(V.graph.name + "_")
+    return dep_name.startswith(("primals_", "arg", "fwd_rng_state", "bwd_rng_state"))
