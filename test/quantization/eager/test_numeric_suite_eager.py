@@ -1,7 +1,6 @@
 # Owner(s): ["oncall: quantization"]
 # ruff: noqa: F841
 
-import unittest
 
 import torch
 import torch.ao.nn.quantized as nnq
@@ -38,7 +37,7 @@ from torch.testing._internal.common_quantization import (
     test_only_eval_fn,
 )
 from torch.testing._internal.common_quantized import override_qengines
-from torch.testing._internal.common_utils import IS_ARM64, raise_on_run_directly
+from torch.testing._internal.common_utils import raise_on_run_directly
 
 
 class SubModule(torch.nn.Module):
@@ -600,14 +599,12 @@ class TestNumericSuiteEager(QuantizationTestCase):
         act_compare_dict = get_matching_activations(float_model, qmodel)
 
     @skip_if_no_torchvision
-    @unittest.skipIf(IS_ARM64, "Not working on arm right now")
     def test_mobilenet_v2(self):
         from torchvision.models.quantization import mobilenet_v2
 
         self._test_vision_model(mobilenet_v2(pretrained=True, quantize=False))
 
     @skip_if_no_torchvision
-    @unittest.skipIf(IS_ARM64, "Not working on arm right now")
     def test_mobilenet_v3(self):
         from torchvision.models.quantization import mobilenet_v3_large
 
