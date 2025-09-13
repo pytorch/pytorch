@@ -4,8 +4,8 @@
 from __future__ import annotations
 
 import onnx_ir.passes.common as common_passes
-from onnxscript import ir
 import onnxruntime
+from onnxscript import ir
 from packaging import version
 
 import torch
@@ -480,7 +480,7 @@ class NativeOnnxOpsTest(common_utils.TestCase):
 
     def test_rotary_embedding_opcheck(self):
         input_data = torch.rand(2, 3, 4, 8)
-        position_ids_data = torch.randint(0, 50, (2, 3)).long()
+        position_ids_data = torch.randint(0, 50, (2, 4)).long()
         sin_cache_data = torch.rand(50, 4)
         cos_cache_data = torch.rand(50, 4)
 
@@ -491,7 +491,7 @@ class NativeOnnxOpsTest(common_utils.TestCase):
 
     def test_rotary_embedding(self):
         input_data = torch.rand(2, 3, 4, 8)
-        position_ids_data = torch.randint(0, 50, (2, 3)).long()
+        position_ids_data = torch.randint(0, 50, (2, 4)).long()
         sin_cache_data = torch.rand(50, 4)
         cos_cache_data = torch.rand(50, 4)
 
