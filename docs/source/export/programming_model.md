@@ -132,7 +132,7 @@ Whether a value is static or dynamic depends on its type:
     sequence for `dict` and `namedtuple` values) is static.
   - The contained elements have these rules applied to them recursively
     (basically the
-    [PyTree](https://jax.readthedocs.io/en/latest/pytrees.html) scheme)
+    {ref}`PyTree <pytree>` scheme)
     with leaves that are either Tensor or primitive types.
 
 - Other *classes* (including data classes) can be registered with PyTree
@@ -158,7 +158,7 @@ By default, the types of inputs you can use for your program are:
 ### Custom Input Types (PyTree)
 
 In addition, you can also define your own (custom) class and use it as an
-input type, but you will need to register such a class as a PyTree.
+input type, but you will need to register such a class as a {ref}`PyTree <pytree>`.
 
 Here's an example of using an utility to register a dataclass that is used as
 an input type.
