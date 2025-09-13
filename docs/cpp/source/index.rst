@@ -5,7 +5,7 @@ These pages provide the documentation for the public portions of the PyTorch C++
 API.  This API can roughly be divided into five parts:
 
 - **ATen**: The foundational tensor and mathematical operation library on which all else is built.
-- **Autograd**: Augments ATen with automatic differentiation.
+- **Autograd**: Augments :term:`ATen` with automatic differentiation.
 - **C++ Frontend**: High level constructs for training and evaluation of machine learning models.
 - **TorchScript**: An interface to the TorchScript JIT compiler and interpreter.
 - **C++ Extensions**: A means of extending the Python API with custom C++ and CUDA routines.
@@ -23,14 +23,14 @@ production; we are looking forward to welcome more users of the PyTorch C++ API.
   or in service of providing the Python interface to PyTorch, which is our
   most stable and best supported interface.
 
-ATen
+:term:`ATen`
 ----
 
-ATen is fundamentally a tensor library, on top of which almost all other Python
+:term:`ATen` is fundamentally a tensor library, on top of which almost all other Python
 and C++ interfaces in PyTorch are built. It provides a core ``Tensor`` class,
 on which many hundreds of operations are defined. Most of these operations have
 both CPU and GPU implementations, to which the ``Tensor`` class will
-dynamically dispatch based on its type. A small example of using ATen could
+dynamically dispatch based on its type. A small example of using :term:`ATen` could
 look as follows:
 
 .. code-block:: cpp
@@ -41,7 +41,7 @@ look as follows:
   at::Tensor b = at::randn({2, 2});
   auto c = a + b.to(at::kInt);
 
-This ``Tensor`` class and all other symbols in ATen are found in the ``at::``
+This ``Tensor`` class and all other symbols in :term:`ATen` are found in the ``at::``
 namespace, documented
 `here <https://pytorch.org/cppdocs/api/namespace_at.html#namespace-at>`_.
 
@@ -49,7 +49,7 @@ Autograd
 --------
 
 What we term *autograd* are the portions of PyTorch's C++ API that augment the
-ATen ``Tensor`` class with capabilities concerning automatic differentiation.
+:term:`ATen` ``Tensor`` class with capabilities concerning automatic differentiation.
 The autograd system records operations on tensors to form an *autograd graph*.
 Calling ``backwards()`` on a leaf variable in this graph performs reverse mode
 differentiation through the network of functions and tensors spanning the
@@ -66,7 +66,7 @@ a taste of this interface:
   auto c = a + b;
   c.backward(); // a.grad() will now hold the gradient of c w.r.t. a.
 
-The ``at::Tensor`` class in ATen is not differentiable by default. To add the
+The ``at::Tensor`` class in :term:`ATen` is not differentiable by default. To add the
 differentiability of tensors the autograd API provides, you must use tensor
 factory functions from the `torch::` namespace instead of the `at::` namespace.
 For example, while a tensor created with `at::ones` will not be differentiable,
@@ -88,7 +88,7 @@ frontend includes the following:
 - Automatic parallelization of models onto multiple GPUs (like ``torch.nn.parallel.DataParallel``);
 - Support code to easily bind C++ models into Python using pybind11;
 - Entry points to the TorchScript JIT compiler;
-- Helpful utilities to facilitate interfacing with the ATen and Autograd APIs.
+- Helpful utilities to facilitate interfacing with the :term:`ATen` and Autograd APIs.
 
 See `this document <https://pytorch.org/cppdocs/frontend.html>`_ for a more
 detailed description of the C++ frontend. Relevant sections of the `torch::`
@@ -114,7 +114,7 @@ expanded on a continuous and active basis.
   or the Autograd API, the C++ frontend is the recommended entry point to the
   PyTorch C++ ecosystem. While it is still in beta as we collect user feedback
   (from you!), it provides both more functionality and better stability
-  guarantees than the ATen and Autograd APIs.
+  guarantees than the :term:`ATen` and Autograd APIs.
 
 TorchScript
 -----------
@@ -149,7 +149,7 @@ C++ extensions are most commonly used to implement custom operators in C++ or
 CUDA to accelerate research in vanilla PyTorch setups. The C++ extension API
 does not add any new functionality to the PyTorch C++ API. Instead, it
 provides integration with Python setuptools as well as JIT compilation
-mechanisms that allow access to ATen, the autograd and other C++ APIs from
+mechanisms that allow access to :term:`ATen`, the autograd and other C++ APIs from
 Python. To learn more about the C++ extension API, go through
 `this tutorial <https://pytorch.org/tutorials/advanced/cpp_extension.html>`_.
 
