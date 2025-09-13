@@ -1614,6 +1614,9 @@ def mutate_cat_node(match: Match, split_sections: list[int], dim: int):
         return
     graph = match.graph
     split_node = next(node for node in match.nodes if node.target == torch.split)
+    if free_symbols(split_node.args[1]):
+        log.debug("dynamic shape not supported: %s", split_node)
+        return
     _split_input, _split_size, split_dim = _get_split_args_default(split_node)
     # if the cat and split have different dims, return
     # Find the next users (i.e. users after the getitem)
