@@ -136,6 +136,7 @@ from .source import (
     DefaultsSource,
     DictGetItemSource,
     DictSubclassGetItemSource,
+    DynamicScalarSource,
     FlattenScriptObjectSource,
     FloatTensorSource,
     FSDPNNModuleSource,
@@ -1715,6 +1716,14 @@ class GuardBuilder(GuardBuilderBase):
         elif istype(source, ClosureSource):
             assert base_guard_manager  # to make mypy happy
             out = base_guard_manager.closure_manager(
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
+        elif istype(source, DynamicScalarSource):
+            assert base_guard_manager
+            out = base_guard_manager.lambda_manager(
+                python_lambda=lambda x: int(x),
                 source=source_name,
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,

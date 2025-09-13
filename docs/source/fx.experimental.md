@@ -8,6 +8,24 @@
 These APIs are experimental and subject to change without notice.
 :::
 
+## torch.fx.experimental.sym_node
+
+```{eval-rst}
+.. currentmodule:: torch.fx.experimental.sym_node
+```
+
+```{eval-rst}
+.. automodule:: torch.fx.experimental.sym_node
+```
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    DynamicInt
+```
+
 ## torch.fx.experimental.symbolic_shapes
 
 ```{eval-rst}
