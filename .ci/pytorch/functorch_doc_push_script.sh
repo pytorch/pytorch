@@ -12,6 +12,7 @@ echo "version: $version"
 
 # Build functorch docs
 pushd $pt_checkout/functorch/docs
+pip install -e git+https://github.com/pytorch/pytorch_sphinx_theme.git@pytorch_sphinx_theme2#egg=pytorch_sphinx_theme2
 make html
 popd
 
