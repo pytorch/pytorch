@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Optional, Union
+from typing import ClassVar, Optional, Union
 
 from torch import Tensor
 from torch.distributions import constraints
@@ -32,7 +32,7 @@ class LogNormal(TransformedDistribution):
     """
 
     arg_constraints = {"loc": constraints.real, "scale": constraints.positive}
-    support = constraints.positive
+    support: ClassVar[constraints.Positive] = constraints.positive  # type: ignore[assignment]
     has_rsample = True
     base_dist: Normal
 
