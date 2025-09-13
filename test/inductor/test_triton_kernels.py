@@ -4,6 +4,7 @@
 # Skip do not assign a lambda expression, use a def
 import functools
 import logging
+import os
 
 import torch
 import torch._dynamo.testing
@@ -82,6 +83,12 @@ if HAS_GPU:
     STRING_CONSTANT_C: tl.constexpr = tl.constexpr("CONSTANT_C")
     BOOL_CONSTANT_C: tl.constexpr = tl.constexpr(True)
     FLOAT_CONSTANT_C = tl.constexpr(3.14)  # intentionally un-annotated
+
+    if hasattr(triton, "constexpr_function"):
+
+        @triton.constexpr_function
+        def log2(n):
+            return len(bin(n)) - 3
 
 
 class KernelTests(torch._inductor.test_case.TestCase):
@@ -1274,8 +1281,11 @@ def forward(self, x_1, output_1):
         self.assertEqual(compiled_out, eager_out)
 
     @requires_gpu
+    @common_utils.parametrize("dump_launch_params", ["0", "1"])
     @common_utils.parametrize("dynamic", [False, True])
-    def test_triton_kernel_equal_to_1_arg(self, dynamic):
+    def test_triton_kernel_equal_to_1_arg(self, dynamic, dump_launch_params):
+        os.environ["TORCHINDUCTOR_DUMP_LAUNCH_PARAMS"] = dump_launch_params
+
         @triton.jit
         def add_kernel_half_n_elements(
             in_ptr0,
@@ -1381,6 +1391,39 @@ def forward(self, x_1, output_1):
         eager_out = f(x)
         compiled_out = torch.compile(f)(x)
 
+        self.assertEqual(compiled_out, eager_out)
+
+    @unittest.skipIf(
+        not HAS_GPU or not hasattr(triton, "constexpr_function"),
+        "newer triton version required",
+    )
+    def test_triton_kernel_with_constexpr_function(self):
+        @triton.jit
+        def kernel(x_ptr, output_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
+            pid = tl.program_id(axis=0)  # We use a 1D launch grid so axis is 0.
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(x_ptr + offsets, mask=mask)
+
+            FIRST_DIM: tl.constexpr = x.shape[0]
+            output = x + log2(FIRST_DIM)
+            tl.store(output_ptr + offsets, output, mask=mask)
+
+        def f(x):
+            out = torch.zeros_like(x)
+            n_elements = x.numel()
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            kernel[grid](x, out, n_elements, BLOCK_SIZE=16)
+            return out
+
+        x = torch.randn(16, device=GPU_TYPE)
+        eager_out = f(x)
+        compiled_out, (triton_code,) = run_and_get_code(
+            torch.compile(f, fullgraph=True), x
+        )
+
+        self.assertIn("@triton.constexpr_function", triton_code)
         self.assertEqual(compiled_out, eager_out)
 
     @requires_gpu
