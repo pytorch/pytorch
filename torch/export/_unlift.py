@@ -51,7 +51,11 @@ def eq_spec(self: pytree.TreeSpec, other: pytree.TreeSpec) -> bool:
             return True
         if _normalize_type(a.type) != _normalize_type(b.type):
             return False
-        if a.context != b.context:
+        if a.type is dict and b.type is dict:
+            # in the case of dict, the context is list of keys and we allow the keys to be in any order
+            if set(a.context) != set(b.context):
+                return False
+        elif a.context != b.context:
             return False
         if len(a.children_specs) != len(b.children_specs):
             return False
@@ -80,6 +84,64 @@ def _check_inputs_match(args, kwargs, in_spec: pytree.TreeSpec) -> list:
         )
 
     return flat_args_with_path
+
+
+def _force_ep_signature_match(ep_guards_code: list[str], input_paths):
+    # TODO (tmanlaibaatar)
+    # This is band-aid solution to export new tracer replacing
+    # shape env sources to flat_args. The real fix should be replacing
+    # shape env sources to original user sources but this is quite
+    # involved because you need to carefully construct new sources using
+    # dynamo and replace all instances of it inside shape env. But it is
+    # lot easier to manipulate after we turn them into strings and only
+    # time we use these guards is during retracing or running exported program,
+    # so it is probably ok to have "not useful" guards on ep for now.
+    name_mapping = {}
+    for idx, path in enumerate(input_paths):
+        name_mapping[f"L['flat_args'][{idx}]"] = f"L{pytree.keystr(path)}"
+
+    new_guards_code = []
+    for guard in ep_guards_code:
+        for old_name, new_name in name_mapping.items():
+            guard = guard.replace(old_name, new_name)
+        new_guards_code.append(guard)
+
+    return new_guards_code
+
+
+def _force_gm_signature_match(ep_guards_code: list[str], signature):
+    """
+    The signature of the originally exported module may not match
+    the signature of the unlifted graph module extracted from the
+    exported program. The guards code extracted from the exported
+    program is based on the former, but the generated guards fn is
+    based on the latter; thus we need to reconcile any such diff.
+    """
+
+    import re
+
+    # Handle case where signatures may differ in var args.
+    orig_arg_names = set()
+    for g in ep_guards_code:
+        # match substrings of the form L['<name>'][<number>]
+        orig_arg_names.update(re.findall(r"L\[\'([^\']+)\'\]\[([0-9]+)\]", g))
+
+    sig_arg_names = set()
+    for n in signature.parameters:
+        # match substrings of the form <name>_<number>
+        sig_arg_names.update(re.findall(r"(.+)_([0-9]+)", n))
+
+    # replace L['<name>'][<number>] with L['<name>_<number>']
+    new_guards_code = ep_guards_code
+    for match in orig_arg_names:
+        if match in sig_arg_names:
+            base, idx = match
+            new_guards_code = [
+                g.replace(f"L['{base}'][{idx}]", f"L['{base}_{idx}']")
+                for g in new_guards_code
+            ]
+
+    return new_guards_code
 
 
 def _convert_guards_code_to_fn(
@@ -640,19 +702,30 @@ def _get_input_guards_for_graph(
     return new_guards_code
 
 
+def _ok_to_generate_guards_fn():
+    patterns = [
+        "executorch",
+        "modai",
+        "on_device_ai",
+        "torchao",
+    ]
+    # force check_guards=False for files matching `patterns`
+    # because they have too many calls to .module() and
+    # do not like any call modules in the graph
+    # TODO: fix these files to handle guard fns
+    frame = inspect.currentframe()
+    while frame is not None:
+        if any(path in frame.f_code.co_filename for path in patterns):
+            return False
+        frame = frame.f_back
+
+    return True
+
+
 def _unlift_exported_program_lifted_states(
     ep: ExportedProgram, check_guards=True
 ) -> torch.fx.GraphModule:
-    # force check_guards=False for executorch because
-    # its pass infra has too many calls to .module()
-    # and but does not like call modules in the graph
-    # TODO: update executorch to check_guards=False
-    frame = inspect.currentframe()
-    while frame is not None:
-        if "executorch" in frame.f_code.co_filename:
-            check_guards = False
-            break
-        frame = frame.f_back
+    check_guards = check_guards and _ok_to_generate_guards_fn()
 
     # TODO T206340015
     if ep.verifiers[0].dialect != "TRAINING":
@@ -729,14 +802,15 @@ def _unlift_exported_program_lifted_states(
     graph = unlift_gm.graph
     placeholders = graph.find_nodes(op="placeholder")
     if check_guards and placeholders and ep.example_inputs:
-        input_paths = _get_input_paths(
-            ep.example_inputs,
-            inspect.signature(unlift_gm.forward),
-        )
+        gm_sig = inspect.signature(unlift_gm.forward)
+        input_paths = _get_input_paths(ep.example_inputs, gm_sig)
         guards_code = _get_input_guards_for_graph(
             placeholders, ep.range_constraints, input_paths
         )
-        guards_code.extend(ep._guards_code)
+
+        ep_guards_code = _force_ep_signature_match(ep._guards_code, input_paths)
+        ep_guards_code = _force_gm_signature_match(ep_guards_code, gm_sig)
+        guards_code.extend(ep_guards_code)
         unlift_gm._guards_fn = _convert_guards_code_to_fn(guards_code, input_paths)
 
         root_nn_module_stack = torch.fx._utils.first_call_function_nn_module_stack(

@@ -240,7 +240,7 @@ jobs:
     needs: get-label-type
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-jammy-py3.9-gcc11
+      build-environment: linux-jammy-py3.10-gcc11
       docker-image-name: ci-image:pytorch-linux-jammy-py3-gcc11-inductor-benchmarks
       test-matrix: |
         { include: [
@@ -255,7 +255,7 @@ jobs:
       - verify-cachebench-cpu-build
       - target-determination
     with:
-      build-environment: linux-jammy-py3.9-gcc11
+      build-environment: linux-jammy-py3.10-gcc11
       docker-image: ${{ needs.verify-cachebench-cpu-build.outputs.docker-image }}
       test-matrix: ${{ needs.verify-cachebench-cpu-build.outputs.test-matrix }}
     secrets: inherit

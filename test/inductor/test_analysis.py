@@ -289,14 +289,12 @@ class TestAnalysis(TestCase):
         om = _test_model(device, dtype)
         REPEAT = 5
         trace1, trace2 = trace_files()
-        print(f"first trace {trace1}")
         torch._dynamo.reset()  # reset the cache
         with fresh_inductor_cache():
             with torch.profiler.profile(record_shapes=True) as p:
                 om()
         p.export_chrome_trace(trace1)
 
-        print(f"second trace {trace2}")
         torch._dynamo.reset()  # reset the cache
         with fresh_inductor_cache():
             with torch.profiler.profile(record_shapes=True) as p:
@@ -304,7 +302,6 @@ class TestAnalysis(TestCase):
                     om()
         p.export_chrome_trace(trace2)
 
-        print("diffing...")
         with patch(
             "sys.argv",
             [
