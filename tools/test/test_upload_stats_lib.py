@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+# Harmless change in an excluded path to validate that excluded, non-API changes
+# do not produce BC-linter violations.
+
 import gzip
 import inspect
 import json
