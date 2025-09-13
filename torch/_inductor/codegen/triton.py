@@ -16,11 +16,11 @@ from functools import lru_cache
 from typing import Any, Callable, cast, Optional, TYPE_CHECKING, Union
 
 import sympy
+from sympy.printing.precedence import PRECEDENCE
 
 import torch
 import torch._logging
 import torch.utils._pytree as pytree
-from sympy.printing.precedence import PRECEDENCE
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.utils import identity, preserve_rng_state
 from torch._prims_common import is_integer_dtype
@@ -2517,9 +2517,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                         continue
 
                     advancements = self.pointer_advancements[symt]
-                    assert (
-                        block_descriptor not in advancements
-                    ), f"duplicate advancement for pointer '{block_descriptor}' at type '{symt}'"
+                    assert block_descriptor not in advancements, (
+                        f"duplicate advancement for pointer '{block_descriptor}' at type '{symt}'"
+                    )
                     advancements[block_descriptor] = advance_offsets
         else:
             block_descriptor = indexing.format(var)
@@ -3809,9 +3809,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self.filter_masks(masks)
         masks = sorted(masks)
         assert not self._load_mask, "ops.sort not supported inside ops.masked"
-        assert (
-            self.persistent_reduction
-        ), "ops.sort is only supported in persistent reductions"
+        assert self.persistent_reduction, (
+            "ops.sort is only supported in persistent reductions"
+        )
 
         cse_compute = functools.partial(self.cse.generate, self.compute)
         dim = self.triton_tensor_ndim() - self.num_reduction_dims
@@ -4126,9 +4126,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             from torch._dynamo.testing import rand_strided
             {}
             import torch
-        """.format(
-                V.graph.device_ops.import_get_raw_stream_as("get_raw_stream")
-            )
+        """.format(V.graph.device_ops.import_get_raw_stream_as("get_raw_stream"))
         )
 
     def _get_heuristic(self):
@@ -5227,9 +5225,9 @@ def debug_triton_code(node: BaseSchedulerNode) -> list[str]:
         device = node.get_device()
         assert device is not None
         backend = node.scheduler.get_backend(device)
-        assert isinstance(
-            backend, (SIMDScheduling, CUDACombinedScheduling)
-        ), f"Scheduling backend should be SIMD or CUDACombined when generating debug Triton strings, got: {type(backend)}"
+        assert isinstance(backend, (SIMDScheduling, CUDACombinedScheduling)), (
+            f"Scheduling backend should be SIMD or CUDACombined when generating debug Triton strings, got: {type(backend)}"
+        )
 
         with V.graph.set_current_device(device):
             # Don't increment kernel count when generating debug string.
