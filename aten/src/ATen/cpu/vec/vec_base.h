@@ -57,7 +57,10 @@ Windows llvm will not have this definition.
 #endif
 
 // These macros helped us unify vec_base.h
-#ifdef CPU_CAPABILITY_AVX512
+#if defined(__aarch64__) && !defined(CPU_CAPABILITY_SVE256) // NEON
+#define VECTOR_WIDTH 16
+#define __at_align__ __attribute__((aligned(16)))
+#elif defined(CPU_CAPABILITY_AVX512)
 #if defined(__GNUC__)
 #define __at_align__ __attribute__((aligned(64)))
 #elif defined(_WIN32)
