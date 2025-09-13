@@ -1163,10 +1163,7 @@ def tuned_scaled_mm(
 
         # TODO (paulzhan): There is no template that exists for bias and TMA
         # Don't run tma template currently if bias exist
-        if (
-            use_triton_tma_template(mat_a, mat_b, output_layout=layout)
-            and not bias
-        ):
+        if use_triton_tma_template(mat_a, mat_b, output_layout=layout) and not bias:
             templates_to_use.append(scaled_mm_device_tma_template)
             kwarg_overrides[scaled_mm_device_tma_template.uid] = overriders
 
