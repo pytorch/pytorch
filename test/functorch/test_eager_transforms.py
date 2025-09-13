@@ -2503,6 +2503,28 @@ class TestHessian(TestCase):
         hess2 = vmap(hessian(loss))(A, x1, x2)
         self.assertEqual(hess2, hess1)
 
+    def test_chunk_hessian(self, device):
+        def f(x, y):
+            return (x.sin() * (x + y)).sum()
+
+        x = torch.randn(10, 2, device=device)
+        y = torch.randn(1, 2, device=device)
+        inputs = (x, y)
+        foo = lambda inputs: f(*inputs)
+
+        for chunk_size in (1, 2, 3, 4, 7, 10, 1000):
+            expected = torch.autograd.functional.hessian(f, inputs)
+            actual = hessian(foo, chunk_size=chunk_size)(inputs)
+            self.assertEqual(actual, expected)
+
+        err_msg = "jacrev: `chunk_size` should be greater than 0."
+        with self.assertRaisesRegex(ValueError, err_msg):
+            hessian(foo, chunk_size=0)(inputs)
+
+        with self.assertRaisesRegex(ValueError, err_msg):
+            hessian(foo, chunk_size=-2)(inputs)
+
+
 
 @markDynamoStrictTest
 class TestJvp(TestCase):
