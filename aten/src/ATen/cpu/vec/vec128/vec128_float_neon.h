@@ -301,6 +301,9 @@ class Vectorized<float> {
   DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC_WITH_SLEEF_NAME(
       erfc,
       Sleef_erfcf4_u15)
+  Vectorized<float> erf_u20() const {
+    return erf();
+  }
   Vectorized<float> erfinv() const {
     return map(calc_erfinv);
   }

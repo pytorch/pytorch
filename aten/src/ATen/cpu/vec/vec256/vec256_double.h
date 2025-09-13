@@ -179,6 +179,9 @@ class Vectorized<double> {
   Vectorized<double> copysign(const Vectorized<double>& sign) const {
     return Vectorized<double>(Sleef_copysignd4(values, sign));
   }
+  Vectorized<double> erf_u20() const {
+    return erf();
+  }
   Vectorized<double> erf() const {
     return Vectorized<double>(Sleef_erfd4_u10(values));
   }

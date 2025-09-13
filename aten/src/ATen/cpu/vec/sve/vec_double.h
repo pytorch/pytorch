@@ -202,7 +202,8 @@ class Vectorized<double> {
     return USE_SLEEF(
         Vectorized<double>(Sleef_atanhdx_u10sve(values)), map(std::atanh));
   }
-  Vectorized<double> atan2(const Vectorized<double>& b) const {USE_SLEEF(
+  Vectorized<double> atan2(const Vectorized<double>& b) const {
+    USE_SLEEF(
       { return Vectorized<double>(Sleef_atan2dx_u10sve(values, b)); },
       {
         __at_align__ double tmp[size()];
@@ -213,19 +214,26 @@ class Vectorized<double> {
           tmp[i] = std::atan2(tmp[i], tmp_b[i]);
         }
         return loadu(tmp);
-      })} Vectorized<double> copysign(const Vectorized<double>& sign) const {
-      USE_SLEEF(
-          { return Vectorized<double>(Sleef_copysigndx_sve(values, sign)); },
-          {
-            __at_align__ double tmp[size()];
-            __at_align__ double tmp_sign[size()];
-            store(tmp);
-            sign.store(tmp_sign);
-            for (int64_t i = 0; i < size(); i++) {
-              tmp[i] = std::copysign(tmp[i], tmp_sign[i]);
-            }
-            return loadu(tmp);
-          })} Vectorized<double> erf() const {
+      })
+  }
+  Vectorized<double> copysign(const Vectorized<double>& sign) const {
+    USE_SLEEF(
+      { return Vectorized<double>(Sleef_copysigndx_sve(values, sign)); },
+      {
+        __at_align__ double tmp[size()];
+        __at_align__ double tmp_sign[size()];
+        store(tmp);
+        sign.store(tmp_sign);
+        for (int64_t i = 0; i < size(); i++) {
+          tmp[i] = std::copysign(tmp[i], tmp_sign[i]);
+        }
+        return loadu(tmp);
+      })
+  }
+  Vectorized<double> erf_u20() const{
+    return erf();
+  }
+  Vectorized<double> erf() const {
     return USE_SLEEF(
         Vectorized<double>(Sleef_erfdx_u10sve(values)), map(std::erf));
   }
