@@ -1,13 +1,18 @@
-import json
 import logging
 import math
+import os
+import shutil
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import Any, Callable, Optional, Union
 
 import torch
-from torch._inductor.analysis.device_info import DeviceSpec, lookup_device_info
-from torch._inductor.utils import tabulate_2d, zip_dicts
+from torch._inductor.analysis.device_info import DeviceSpec
+from torch._inductor.analysis.json_profile import JsonProfile
+from torch._inductor.analysis.utils import (
+    create_multi_trace_visualization,
+    get_cache_dir,
+)
 from torch.utils import _pytree as pytree
 from torch.utils._ordered_set import OrderedSet
 from torch.utils.flop_counter import flop_registry
@@ -392,334 +397,6 @@ DeviceMap = dict[int, Device]
 Table = tuple[list[str], dict[str, list[str]]]
 
 
-class JsonProfile:
-    _devices: DeviceMap
-
-    def __init__(
-        self,
-        path: str,
-        benchmark_name: Optional[str] = None,
-        dtype: Optional[Union[torch.dtype, str]] = None,
-    ):
-        """
-        Convenience class for running common operations on chrome/perfetto json traces.
-        """
-        self.path = path
-        with open(path) as f:
-            self.data = json.load(f)
-            self.events = self.data["traceEvents"]
-        self.benchmark_name = benchmark_name
-        if dtype is None:
-            self.dtype = None
-        elif isinstance(dtype, torch.dtype):
-            self.dtype = dtype
-        else:
-            if dtype in _dtype_map:
-                self.dtype = _dtype_map[dtype]
-            else:
-                self.dtype = None
-        self._create_devices()
-
-    def convert_dtype(self, event: dict[str, Any]) -> Optional[torch.dtype]:
-        """
-        Each op has a list of dtypes for each input arg. We need to convert these into a single dtype for flop estimation.
-        Issues:
-         - converting the strings to concrete torch.dtypes
-         - What if we have float32, float, float16 all in the inputs? Our choice is to use the largest buffer dtype.
-        """
-
-        if (
-            "Input Dims" not in event["args"]
-            or "Input type" not in event["args"]
-            or "Concrete Inputs" not in event["args"]
-        ):
-            if "bfloat16" in event["name"]:
-                return torch.bfloat16
-            elif "float16" in event["name"]:
-                return torch.float16
-            else:
-                return None
-
-        input_sizes = event["args"]["Input Dims"]
-        input_types = event["args"]["Input type"]
-        concrete_inputs = event["args"]["Concrete Inputs"]
-        assert len(input_sizes) == len(input_types)
-        assert len(input_types) == len(concrete_inputs)
-
-        if len(input_sizes) == 0:
-            raise RuntimeError("Empty input_sizes and input_types")
-
-        biggest_size = 0
-        biggest_index = 0
-        for i in range(len(input_sizes)):
-            if concrete_inputs[i] != "":
-                # concrete inputs are usually small tensors, so we can just skip
-                continue
-            my_size = input_sizes[i]
-            total_size = sum(parse_list(my_size))
-            if total_size > biggest_size:
-                biggest_size = total_size
-                biggest_index = i
-        ret_type = input_types[biggest_index]
-        if ret_type in _dtype_map:
-            return _dtype_map[ret_type]
-        raise RuntimeError(f"Unknown type: {ret_type}. Please add to _dtype_map.")
-
-    def _create_devices(self) -> None:
-        self._devices = {}
-        for dev in self.data["deviceProperties"]:
-            name = dev["name"]
-            device_info = lookup_device_info(name)
-
-            if device_info is None:
-                log.info(
-                    "Unsupported device in profile: %s, please consider contributing to _device_mapping.",
-                    name,
-                )
-            self._devices[dev["id"]] = Device(
-                name, dev["id"], device_info, defaultdict(OrderedSet)
-            )
-
-    def calculate_flops(self, event: dict[str, Any]) -> int:
-        return _calculate_flops(event)
-
-    def estimate_gb(self, event: dict[str, Any]) -> float:
-        return _estimate_gb(event)
-
-    def augment_trace(self) -> None:
-        self.data = _augment_trace_helper(self.data)
-
-    def _compute_stats(self) -> None:
-        """populates the name -> stats map"""
-        for event in self.events:
-            if "cat" not in event or "args" not in event or event["cat"] != "kernel":
-                continue
-            if "device" not in event["args"]:
-                continue
-            dev_tmp = event["args"]["device"]
-            if dev_tmp not in self._devices:
-                continue
-            dev = self._devices[event["args"]["device"]]
-
-            dur = event["dur"]  # us
-            if "kernel_flop" in event["args"]:
-                assert dur != 0
-                # 1,000,000us/s * flop / us
-                op_flops = event["args"]["kernel_flop"] / (dur / 1e6)
-            else:
-                op_flops = 0
-
-            if "kernel_num_gb" in event["args"]:
-                assert dur != 0
-                # 1,000,000us/s * gb  = gb/s
-                op_gbps = event["args"]["kernel_num_gb"] / (dur / 1e6)
-            else:
-                op_gbps = 0
-
-            if dev.info is not None:
-                dtype = self.convert_dtype(event) or self.dtype
-                if dtype is None:
-                    raise RuntimeError(
-                        "dtype is not found on tensor and default dtype is not set"
-                    )
-                achieved_flops = 100 * op_flops / (1e12 * dev.info.tops[dtype])
-                achieved_bandwidth = 100 * op_gbps / dev.info.dram_bw_gbs
-            else:
-                achieved_flops = 0
-                achieved_bandwidth = 0
-
-            if "name" not in event["args"]:
-                continue
-            dev.stats[event["name"]].add(
-                KernelStats(
-                    flops=op_flops,
-                    bw=op_gbps,
-                    latency=dur,
-                    achieved_bandwidth=achieved_bandwidth,
-                    achieved_flops=achieved_flops,
-                )
-            )
-
-    def _create_single_table(self, dev: Device) -> Table:
-        """Create a table with the devices mapped to indices."""
-        headers = [
-            "Kernel Name",
-            "Kernel Count",
-            "FLOPS",
-            "Kernel Reads (GB)",
-            "Dur (us)",
-            "Achieved FLOPS %",
-            "Achieved Bandwidth %",
-        ]
-        rows: dict[str, list[str]] = {}
-
-        def safe_div_format(x: float, y: float) -> str:
-            if y == 0:
-                return "0.0"
-            return f"{x / y:.4f}"
-
-        for kernel_name, stats_set in dev.stats.items():
-            ker_count = 0
-            flops = 0
-            flops_count = 0
-            achieved_flops = 0.0
-            bw = 0.0
-            bw_count = 0
-            achieved_bandwidth = 0.0
-            latency = 0.0
-            for stats in stats_set:
-                if stats.flops != 0:
-                    flops += stats.flops
-                    achieved_flops += stats.achieved_flops
-                    flops_count += 1
-                if stats.bw != 0:
-                    bw += stats.bw
-                    achieved_bandwidth += stats.achieved_bandwidth
-                    bw_count += 1
-                latency += stats.latency
-                ker_count += 1
-            assert ker_count != 0
-            rows[kernel_name] = [
-                str(ker_count),
-                safe_div_format(flops, flops_count),
-                safe_div_format(bw, bw_count),
-                safe_div_format(latency, ker_count),
-                safe_div_format(achieved_flops, flops_count),
-                safe_div_format(achieved_bandwidth, bw_count),
-            ]
-
-        return headers, rows
-
-    def _create_tables(self, devs: DeviceMap) -> dict[int, Table]:
-        return {idx: self._create_single_table(dev) for idx, dev in devs.items()}
-
-    def _combine_tables(
-        self, table1: Table, table1_name: str, table2: Table, table2_name: str
-    ) -> Table:
-        new_headers = (
-            ["Kernel Name"]
-            + [f"{table1_name} {head}" for head in table1[0][1:]]
-            + [f"{table2_name} {head}" for head in table2[0][1:]]
-        )
-        t1_length = len(table1[0][1:])
-        t2_length = len(table2[0][1:])
-        new_rows = {}
-
-        for key, row1, row2 in zip_dicts(
-            table1[1],
-            table2[1],
-            d1_default=["Empty"] * t1_length,
-            d2_default=["Empty"] * t2_length,
-        ):
-            assert row1 is not None
-            assert row2 is not None
-            new_rows[key] = row1 + row2
-        return new_headers, new_rows
-
-    def report(
-        self, other: Optional["JsonProfile"] = None, name_limit: int = 40
-    ) -> str:
-        def create_ret(
-            table_headers: list[str], table_rows: dict[str, list[str]]
-        ) -> str:
-            table_flattened = [
-                [kernel_name[:name_limit], *kernel_vals]
-                for kernel_name, kernel_vals in table_rows.items()
-            ]
-            return tabulate_2d(table_flattened, headers=table_headers)
-
-        if other is not None:
-            self._compute_stats()
-            other._compute_stats()
-
-            self_tables = self._create_tables(self._devices)
-            other_tables = self._create_tables(other._devices)
-
-            self_name = (
-                self.benchmark_name if self.benchmark_name is not None else "Table 1"
-            )
-            other_name = (
-                other.benchmark_name if other.benchmark_name is not None else "Table 2"
-            )
-
-            ret = []
-            assert self._devices.keys() == other._devices.keys()
-            for device_idx, t1, t2 in zip_dicts(
-                self_tables, other_tables, d1_default=None, d2_default=None
-            ):
-                assert t1 is not None
-                assert t2 is not None
-                table_headers, table_rows = self._combine_tables(
-                    t1, self_name, t2, other_name
-                )
-                tab_string = create_ret(table_headers, table_rows)
-                ret.append(f"{self._devices[device_idx]}:\n{tab_string}")
-            return "\n".join(ret)
-        self._compute_stats()
-
-        self_tables = self._create_tables(self._devices)
-
-        ret = []
-        for idx, table in self_tables.items():
-            table_headers, table_rows = table
-            tab_string = create_ret(table_headers, table_rows)
-            ret.append(f"{self._devices[idx]}:\n{tab_string}")
-        return "\n".join(ret)
-
-    def dump(self, out: str) -> None:
-        with open(out, "w") as f:
-            json.dump(self.data, f)
-
-    def combine_with(self, other: "JsonProfile") -> "JsonProfile":
-        """
-        Combine this profile with another profile by merging their trace events.
-        Returns a new JsonProfile object with combined data.
-        """
-        # Create a new combined data structure
-        combined_data = {
-            "traceEvents": self.data["traceEvents"] + other.data["traceEvents"],
-            "deviceProperties": self.data.get("deviceProperties", []),
-        }
-
-        # Merge device properties, avoiding duplicates
-        other_device_props = other.data.get("deviceProperties", [])
-        existing_device_ids = OrderedSet(
-            [dev["id"] for dev in combined_data["deviceProperties"]]
-        )
-
-        for device_prop in other_device_props:
-            if device_prop["id"] not in existing_device_ids:
-                combined_data["deviceProperties"].append(device_prop)
-
-        # Copy any other top-level properties from the first profile
-        for key, value in self.data.items():
-            if key not in combined_data:
-                combined_data[key] = value
-
-        import os
-
-        # Create a temporary file to write the combined data
-        import tempfile
-
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".json", delete=False
-        ) as tmp_file:
-            json.dump(combined_data, tmp_file)
-            tmp_path = tmp_file.name
-
-        try:
-            # Create new JsonProfile from the combined data
-            combined_profile = JsonProfile(
-                tmp_path,
-                benchmark_name=f"{self.benchmark_name or 'Profile1'}_+_{other.benchmark_name or 'Profile2'}",
-                dtype=self.dtype or other.dtype,
-            )
-            return combined_profile
-        finally:
-            # Clean up temporary file
-            os.unlink(tmp_path)
-
-
 class ParseException(RuntimeError):
     pass
 
@@ -769,7 +446,101 @@ def main() -> None:
 <input_file2> [input_file3 ...] <output_file>. The last argument is the output file, all preceding arguments are \
 input files to combine.",
     )
+    parser.add_argument(
+        "--visualize",
+        nargs="+",
+        metavar=("input_file", "args"),
+        help="Create a DAG visualization of multiple traces showing operation flow from ops to kernels. \
+Specify as <input_file1> [input_file2 ...] <dtype> <output_file>. At least 3 arguments required (1 input, dtype, output)",
+    )
+    parser.add_argument(
+        "--format",
+        choices=["png", "svg"],
+        default="png",
+        help="Output format for visualization (default: png)",
+    )
+    parser.add_argument(
+        "--parallel",
+        action="store_true",
+        help="Enable parallel processing for trace analysis and DAG building (default: True for multiple traces)",
+    )
+    parser.add_argument(
+        "--no-parallel",
+        action="store_true",
+        help="Disable parallel processing and use single-threaded mode",
+    )
+    parser.add_argument(
+        "--max-workers",
+        type=int,
+        help="Maximum number of worker processes for parallel processing (default: number of CPU cores)",
+    )
+    parser.add_argument(
+        "--no-cache",
+        action="store_true",
+        help="Disable DAG caching to disk (default: caching enabled)",
+    )
+    parser.add_argument(
+        "--clear-cache",
+        action="store_true",
+        help="Clear the DAG cache directory before processing",
+    )
+    parser.add_argument(
+        "--color",
+        choices=["time", "diff", "mem-utilization", "compute-utilization", "roofline"],
+        default="time",
+        help="Coloring mode for kernel nodes: 'time' colors by kernel runtime percentage (default), 'diff' colors by duration difference between profiles, 'mem-utilization' colors by memory bandwidth utilization %, 'compute-utilization' colors by compute utilization %, 'roofline' colors by roofline analysis (darker = lower utilization)",
+    )
+    parser.add_argument(
+        "--diff-baseline",
+        help="Path to baseline profile for diff coloring. Required when --color=diff is used.",
+    )
+    parser.add_argument(
+        "--height",
+        type=int,
+        help="Limit the height of the visualization to only show this many levels of non-kernel nodes above kernels. For example, height=1 shows only direct parents of kernels. Default: no height limit.",
+    )
+    parser.add_argument(
+        "--compact",
+        action="store_true",
+        default=True,
+        help="Make kernel names compact without line wrapping.",
+    )
+    parser.add_argument(
+        "--split",
+        nargs=3,
+        metavar=("input_file", "n", "output_prefix"),
+        help="Split a JSON profile into n equal parts by number of events. Specify as <input_file> <n> <output_prefix>",
+    )
     args = parser.parse_args()
+
+    compact_mode = args.compact
+
+    # Validate color/diff-baseline arguments
+    if args.color == "diff" and not args.diff_baseline:
+        print("Error: --diff-baseline is required when --color=diff is used")
+        return
+    if args.diff_baseline and args.color != "diff":
+        print(
+            "Warning: --diff-baseline specified but --color is not 'diff'. Ignoring --diff-baseline."
+        )
+
+    # Handle cache clearing
+    if args.clear_cache:
+        cache_dir = get_cache_dir()
+        if os.path.exists(cache_dir):
+            shutil.rmtree(cache_dir)
+            print(f"Cleared cache directory: {cache_dir}")
+        else:
+            print(f"Cache directory does not exist: {cache_dir}")
+
+    # Determine parallelization settings
+    use_parallel = (
+        not args.no_parallel
+    )  # Default is True unless --no-parallel is specified
+    if args.parallel:
+        use_parallel = True
+
+    use_cache = not args.no_cache  # Default is True unless --no-cache is specified
 
     if args.diff:
         p1 = JsonProfile(args.diff[0], args.diff[1], dtype=args.diff[4])
@@ -812,6 +583,199 @@ input files to combine.",
 
         combined.dump(output_file)
         print(f"Successfully combined {', '.join(input_files)} into {output_file}")
+    if args.visualize:
+        if len(args.visualize) < 3:
+            print(
+                "Error: --visualize requires at least 3 arguments: <input_file1> <dtype> <output_file>"
+            )
+            return
+
+        input_files = args.visualize[:-2]  # All but last 2 arguments
+        dtype = args.visualize[-2]  # Second to last argument
+        output_file = args.visualize[-1]  # Last argument
+
+        print(
+            f"Creating multi-trace DAG visualization from {len(input_files)} traces..."
+        )
+        print(f"Using parallel processing: {use_parallel}")
+        print(f"Using caching: {use_cache}")
+        print(f"Output format: {args.format}")
+        if args.max_workers:
+            print(f"Max workers: {args.max_workers}")
+
+        if len(input_files) == 1:
+            # Single trace visualization (backward compatibility)
+            profile = JsonProfile(input_files[0], dtype=dtype)
+
+            # Check if trace needs augmentation and augment if needed
+            if not profile._is_trace_augmented():
+                print("Augmenting trace to add performance statistics...")
+                profile.augment_trace()
+                print("Trace augmentation completed.")
+
+            # Handle baseline profile for diff coloring
+            baseline_profile = None
+            if args.color == "diff" and args.diff_baseline:
+                baseline_profile = JsonProfile(args.diff_baseline, dtype=dtype)
+                # Also check and augment baseline profile if needed
+                if not baseline_profile._is_trace_augmented():
+                    print("Augmenting baseline trace to add performance statistics...")
+                    baseline_profile.augment_trace()
+                    print("Baseline trace augmentation completed.")
+
+            dag = profile.create_trace_dag_visualization(
+                output_file,
+                format=args.format,
+                color_mode=args.color,
+                baseline_profile=baseline_profile,
+                height=args.height,
+                compact=compact_mode,
+            )
+            print(f"DAG visualization completed and saved to {output_file}")
+            print(
+                f"Found {len(dag.nodes)} nodes and {len(dag.edges)} edges in the trace DAG"
+            )
+        else:
+            # Handle baseline profile for diff coloring
+            baseline_profile = None
+            if args.color == "diff" and args.diff_baseline:
+                baseline_profile = JsonProfile(args.diff_baseline, dtype=dtype)
+                # Check and augment baseline profile if needed
+                if not baseline_profile._is_trace_augmented():
+                    print("Augmenting baseline trace to add performance statistics...")
+                    baseline_profile.augment_trace()
+                    print("Baseline trace augmentation completed.")
+
+            multi_dag = create_multi_trace_visualization(
+                input_files,
+                output_file,
+                dtype,
+                use_cache=use_cache,
+                use_parallel=use_parallel,
+                max_workers=args.max_workers,
+                format=args.format,
+                height=args.height,
+                color_mode=args.color,
+                baseline_profile=baseline_profile,
+                compact=compact_mode,
+            )
+            print(f"Multi-trace DAG visualization completed and saved to {output_file}")
+            print(
+                f"Combined {len(input_files)} traces with {len(multi_dag.nodes)} unique nodes"
+            )
+
+    if args.split:
+        input_file = args.split[0]
+        n = int(args.split[1])
+        output_prefix = args.split[2]
+
+        if n <= 0:
+            print("Error: n must be a positive integer")
+            return
+
+        print(
+            f"Splitting profile {input_file} into {n} parts with prefix {output_prefix}..."
+        )
+        split_profile(input_file, n, output_prefix)
+        print(f"Successfully split profile into {n} parts")
+
+
+def split_profile(input_file: str, n: int, output_prefix: str) -> None:
+    """
+    Split a JSON profile into n equal parts by number of events.
+
+    The function sorts events by timestamp, splits them into n equal parts,
+    and cleans up dangling event ID references.
+    """
+    import copy
+    import json
+
+    # Load the original profile
+    with open(input_file, "r") as f:
+        data = json.load(f)
+
+    events = data.get("traceEvents", [])
+    if not events:
+        print("Warning: No trace events found in the profile")
+        return
+
+    # Sort events by timestamp to maintain temporal ordering
+    events.sort(key=lambda e: e.get("ts", 0))
+
+    # Calculate the number of events per split
+    events_per_split = len(events) // n
+    remainder = len(events) % n
+
+    print(f"Total events: {len(events)}")
+    print(
+        f"Events per split: {events_per_split} (with {remainder} extra events distributed)"
+    )
+
+    start_idx = 0
+    for i in range(n):
+        # Calculate end index for this split
+        current_split_size = events_per_split + (1 if i < remainder else 0)
+        end_idx = start_idx + current_split_size
+
+        # Extract events for this split
+        split_events = events[start_idx:end_idx]
+
+        # Build a mapping of event ID -> event for this split
+        eid_to_event = {}
+        split_event_ids = set()
+
+        # First pass: collect all event IDs that exist in this split
+        for event in split_events:
+            if "id" in event:
+                event_id = event["id"]
+                eid_to_event[event_id] = event
+                split_event_ids.add(event_id)
+
+            # Also collect External IDs which are references to other events
+            if "args" in event and "External id" in event["args"]:
+                ext_id = event["args"]["External id"]
+                split_event_ids.add(ext_id)
+
+        # Second pass: clean up events, removing those with dangling references
+        cleaned_events = []
+        removed_count = 0
+
+        for event in split_events:
+            should_keep = True
+            cleaned_event = copy.deepcopy(event)
+
+            # Check if this event references external IDs not in this split
+            if "args" in cleaned_event and "External id" in cleaned_event["args"]:
+                ext_id = cleaned_event["args"]["External id"]
+                # If the external ID is not in our split's event IDs, remove this event
+                if ext_id not in eid_to_event:
+                    should_keep = False
+                    removed_count += 1
+
+            # Also check for other potential ID references (pid, tid, etc. are usually fine)
+            # but we might want to validate other fields that could reference events
+
+            if should_keep:
+                cleaned_events.append(cleaned_event)
+
+        # Create the split profile data
+        split_data = copy.deepcopy(data)
+        split_data["traceEvents"] = cleaned_events
+
+        # Save the split profile
+        output_file = f"{output_prefix}_{i+1}_of_{n}.json"
+        with open(output_file, "w") as f:
+            json.dump(split_data, f, indent=2)
+
+        print(
+            f"Created split {i+1}/{n}: {output_file} with {len(cleaned_events)} events"
+        )
+        if removed_count > 0:
+            print(
+                f"  Removed {removed_count} events with dangling external ID references"
+            )
+
+        start_idx = end_idx
 
 
 if __name__ == "__main__":

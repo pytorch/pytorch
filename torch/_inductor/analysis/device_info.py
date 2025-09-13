@@ -359,6 +359,29 @@ _device_mapping: dict[str, DeviceSpec] = {
     # @lint-ignore https://www.nvidia.com/en-us/data-center/h100/
     # These are from H100 SXM.
     #
+    "NVIDIA B200": DeviceSpec(
+        tops={
+            torch.float64: 40.0,
+            torch.float32: 80.0,
+            "torch.tf32": 2200.0,
+            torch.bfloat16: 4500.0,
+            torch.float16: 1979.0,
+            torch.float8_e8m0fnu: 9000.0,
+            torch.float8_e8m0fnu: 9000.0,
+            torch.float8_e4m3fnuz: 9000.0,
+            torch.float8_e5m2: 9000.0,
+            torch.float8_e5m2fnuz: 9000.0,
+            torch.float8_e8m0fnu: 9000.0,
+            # torch.fp4: 18000.0,
+            torch.int8: 9000.0,
+        },
+        dram_bw_gbs=8000,
+        dram_gb=183.359,
+        sm_count=132,
+        # boost clock
+        clock_hz=1.98e9,
+        memory_clock_hz=2e9,
+    ),
     "NVIDIA H100": DeviceSpec(
         tops={
             torch.float64: 34.0,
@@ -546,3 +569,32 @@ def datasheet_tops(dtype: torch.dtype, is_tf32: bool = False) -> Optional[float]
     return device_info.tops[
         "torch.tf32" if dtype == torch.float32 and is_tf32 else dtype
     ]
+
+
+def compute_device_ridgepoint(
+    device_name: str, dtype: torch.dtype, is_tf32: bool = False
+) -> Optional[float]:
+    """
+    Compute the device ridgepoint B = FLOPS / bandwidth.
+    This is the threshold ratio of FLOPS to B/s that determines whether a kernel
+    is compute-bound (FLOPS/BW >= B) or memory-bound (FLOPS/BW < B).
+
+    Args:
+        device_name: Name of the device (e.g., "NVIDIA H100")
+        dtype: Data type being used
+        is_tf32: Whether TF32 mode is enabled for float32
+
+    Returns:
+        Ridgepoint B in FLOPS/B/s (operations per byte), or None if device info is not available
+    """
+    flops = DeviceInfo.lookup_tops(device_name, dtype, is_tf32)
+    if flops is None:
+        return None
+
+    bw_gbs = DeviceInfo.lookup_dram_bw_gbs(device_name)
+    if bw_gbs is None or bw_gbs == 0:
+        return None
+
+    bw_bs = bw_gbs * 1e9
+
+    return flops / bw_bs
