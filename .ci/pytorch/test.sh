@@ -1543,7 +1543,7 @@ test_executorch() {
   pushd /executorch
 
   export PYTHON_EXECUTABLE=python
-  export CMAKE_ARGS="-DEXECUTORCH_BUILD_PYBIND=ON -DEXECUTORCH_BUILD_XNNPACK=ON -DEXECUTORCH_BUILD_KERNELS_QUANTIZED=ON"
+  export CMAKE_ARGS="-DEXECUTORCH_BUILD_PYBIND=ON -DEXECUTORCH_BUILD_XNNPACK=ON -DEXECUTORCH_BUILD_KERNELS_QUANTIZED=ON -DEXECUTORCH_BUILD_TESTS=ON"
 
   # NB: We need to rebuild ExecuTorch runner here because it depends on PyTorch
   # from the PR
@@ -1560,10 +1560,6 @@ test_executorch() {
   source .ci/scripts/test_model.sh mv3 cmake xnnpack-quantization-delegation ''
 
   popd
-
-  # Test torchgen generated code for Executorch.
-  echo "Testing ExecuTorch op registration"
-  "$BUILD_BIN_DIR"/test_edge_op_registration
 
   assert_git_not_dirty
 }
