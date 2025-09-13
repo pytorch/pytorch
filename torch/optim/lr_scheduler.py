@@ -106,8 +106,10 @@ class LRScheduler:
             for i, group in enumerate(optimizer.param_groups):
                 if "initial_lr" not in group:
                     raise KeyError(
-                        "param 'initial_lr' is not specified "
-                        f"in param_groups[{i}] when resuming an optimizer"
+                        f"param 'initial_lr' is not specified in param_groups[{i}] when resuming scheduler with last_epoch >= 0.\n"
+                        "This typically happens when:\n"
+                        "1. You're trying to resume training from a checkpoint but haven't properly loaded the optimizer state\n"
+                        "2. You're using last_epoch >= 0 for a fresh training run (not recommended)"
                     )
         self.base_lrs: list[float] = [
             group["initial_lr"] for group in optimizer.param_groups
