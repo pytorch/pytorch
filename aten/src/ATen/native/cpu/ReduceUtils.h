@@ -154,8 +154,8 @@ inline void map_acc(
   using Vec = vec::Vectorized<scalar_t>;
   using aVec = vec::Vectorized<accumut>;
   int64_t d = 0;
-  constexpr int64_t kVecSize = Vec::size();
-  constexpr int64_t kaVecSize = aVec::size();
+  const int64_t kVecSize = Vec::size();
+  const int64_t kaVecSize = aVec::size();
   for (d = 0; d < size - (size % kVecSize); d += kVecSize) {
     Vec data2_vec = Vec::loadu(input_data2 + d);
     auto [data2_avec0, data2_avec1] = convert_to_float<scalar_t>(data2_vec);

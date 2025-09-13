@@ -46,7 +46,7 @@ namespace at::vec {
 // accessed as `at::vec`.
 inline namespace CPU_CAPABILITY {
 
-#if defined(CPU_CAPABILITY_SVE)
+#if defined(CPU_CAPABILITY_SVE256) || defined(CPU_CAPABILITY_SVE)
 
 // NOTE: These are low-performance implementations that we fall back on
 // if we are not building with SVE. This may not be an issue, because
@@ -100,12 +100,12 @@ struct VectorizedQuantizedConverter {
       Vectorized<float> zero_point,
       Vectorized<float> scale_zp_premul) const {
     float_vec_return_type rv;
-    float tmp_scale[Vectorized<float>::size()];
-    float tmp_zero_point[Vectorized<float>::size()];
+    float * tmp_scale = new float[Vectorized<float>::size()];
+    float * tmp_zero_point = new float[Vectorized<float>::size()];
     scale.store(tmp_scale);
     zero_point.store(tmp_zero_point);
     for (int i = 0; i < float_num_vecs(); ++i) {
-      float tmp_vals[Vectorized<float>::size()];
+      float * tmp_vals = new float[Vectorized<float>::size()];
       for (int j = 0; j < Vectorized<float>::size(); ++j) {
         tmp_vals[j] = at::native::dequantize_val<T>(
             tmp_scale[j],
@@ -113,7 +113,11 @@ struct VectorizedQuantizedConverter {
             T(vals[Vectorized<float>::size() * i + j]));
       }
       rv[i] = Vectorized<float>::loadu(tmp_vals);
+
+      delete[] tmp_vals;
     }
+    delete[] tmp_scale;
+    delete[] tmp_zero_point;
     return rv;
   }
 
@@ -121,12 +125,12 @@ struct VectorizedQuantizedConverter {
       Vectorized<float> scale,
       Vectorized<float> zero_point) const {
     float_vec_return_type rv;
-    float tmp_scale[Vectorized<float>::size()];
-    float tmp_zero_point[Vectorized<float>::size()];
+    float * tmp_scale = new float[Vectorized<float>::size()];
+    float * tmp_zero_point = new float[Vectorized<float>::size()];
     scale.store(tmp_scale);
     zero_point.store(tmp_zero_point);
     for (int i = 0; i < float_num_vecs(); ++i) {
-      float tmp_vals[Vectorized<float>::size()];
+      float * tmp_vals = new float[Vectorized<float>::size()];
       for (int j = 0; j < Vectorized<float>::size(); ++j) {
         tmp_vals[j] = at::native::dequantize_val<T>(
             tmp_scale[j],
@@ -134,7 +138,10 @@ struct VectorizedQuantizedConverter {
             T(vals[Vectorized<float>::size() * i + j]));
       }
       rv[i] = Vectorized<float>::loadu(tmp_vals);
+      delete[] tmp_vals;
     }
+    delete[] tmp_scale;
+    delete[] tmp_zero_point;
     return rv;
   }
 
@@ -205,7 +212,7 @@ struct Vectorized<c10::qint32> : public VectorizedQuantizedConverter<
       int32_t zero_point,
       float inverse_scale) {
     std::array<value_type, size()> qvals;
-    std::array<float, float_num_vecs() * Vectorized<float>::size()> float_vals;
+    float * float_vals = new float[float_num_vecs() * Vectorized<float>::size()];
 
     for (int i = 0; i < float_num_vecs(); ++i) {
       rhs[i].store(
@@ -216,10 +223,11 @@ struct Vectorized<c10::qint32> : public VectorizedQuantizedConverter<
     at::native::quantize_vec<c10::qint32, /*precision=*/32>(
         scale,
         zero_point,
-        float_vals.data(),
+        float_vals,
         (c10::qint32*)qvals.data(),
         Vectorized<float>::size() * float_num_vecs());
 
+    delete[] float_vals;
     return Vectorized<c10::qint32>::loadu(qvals.data());
   }
 
@@ -359,7 +367,7 @@ struct Vectorized<c10::qint8> : public VectorizedQuantizedConverter<
       int32_t zero_point,
       float inverse_scale) {
     std::array<value_type, size()> qvals;
-    std::array<float, float_num_vecs() * Vectorized<float>::size()> float_vals;
+    float * float_vals = new float[float_num_vecs() * Vectorized<float>::size()];
 
     for (int i = 0; i < float_num_vecs(); ++i) {
       rhs[i].store(
@@ -370,10 +378,11 @@ struct Vectorized<c10::qint8> : public VectorizedQuantizedConverter<
     at::native::quantize_vec<c10::qint8>(
         scale,
         zero_point,
-        float_vals.data(),
+        float_vals,
         (c10::qint8*)qvals.data(),
         Vectorized<float>::size() * float_num_vecs());
 
+    delete[] float_vals;
     return Vectorized<c10::qint8>::loadu(qvals.data());
   }
 
@@ -511,7 +520,7 @@ struct Vectorized<c10::quint8> : public VectorizedQuantizedConverter<
       int32_t zero_point,
       float inverse_scale) {
     std::array<value_type, size()> qvals;
-    std::array<float, float_num_vecs() * Vectorized<float>::size()> float_vals;
+    float * float_vals = new float[float_num_vecs() * Vectorized<float>::size()];
 
     for (int i = 0; i < float_num_vecs(); ++i) {
       rhs[i].store(
@@ -522,10 +531,11 @@ struct Vectorized<c10::quint8> : public VectorizedQuantizedConverter<
     at::native::quantize_vec<c10::quint8>(
         scale,
         zero_point,
-        float_vals.data(),
+        float_vals,
         (c10::quint8*)qvals.data(),
         Vectorized<float>::size() * float_num_vecs());
 
+    delete[] float_vals;
     return Vectorized<c10::quint8>::loadu(qvals.data());
   }
 
@@ -600,7 +610,7 @@ Vectorized<c10::quint8> inline maximum(
   return a.maximum(b);
 }
 
-#endif // defined(CPU_CAPABILITY_SVE)
+#endif // defined(CPU_CAPABILITY_SVE256)
 
 } // namespace CPU_CAPABILITY
 } // namespace at::vec

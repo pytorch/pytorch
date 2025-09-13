@@ -142,7 +142,7 @@ Tensor qcat_nhwc_kernel(
             continue;
           }
 
-          constexpr auto VLEN = Vec::size();
+          const auto VLEN = Vec::size();
           int64_t c = 0;
 
           // Vectorized loop
@@ -170,16 +170,16 @@ Tensor qcat_nhwc_kernel(
           }
 
           // Vectorized loop for channel between 8 and 32 (avx2)
-          constexpr auto kVLEN = Vectorized<float>::size();
+          const auto kVLEN = Vectorized<float>::size();
           int64_t elem_size = curr_C - c;
           if ((VLEN == 4 * kVLEN) && elem_size >= kVLEN) {
             auto curr_scale_vec = Vectorized<float>(curr_scale);
             auto curr_zero_pt_vec = Vectorized<float>((float)curr_zero_pt);
             auto scale_neg_zp_premul = curr_scale_vec * curr_zero_pt_vec.neg();
             int64_t vec_num = elem_size / kVLEN;
-            std::array<typename scalar_t::underlying, VLEN> buf_in{};
-            memcpy(buf_in.data(), iptr + c, vec_num * kVLEN);
-            auto inp_vec = Vec::loadu(buf_in.data());
+            typename scalar_t::underlying buf_in[VLEN] = {};
+            memcpy(buf_in, iptr + c, vec_num * kVLEN);
+            auto inp_vec = Vec::loadu(buf_in);
             auto float_values = inp_vec.dequantize(
                 curr_scale_vec, curr_zero_pt_vec, scale_neg_zp_premul);
             Vec::float_vec_return_type retvals;
@@ -1487,7 +1487,7 @@ void _qmaxpool_2d_nhwc_kernel(
         int64_t c = 0;
 
         // Interleaved vector loop 4x
-        constexpr auto vec_width = Vectorized<scalar_t>::size();
+        const auto vec_width = Vectorized<scalar_t>::size();
         for (; c + 4 * vec_width <= iC; c += 4 * vec_width) {
           Vectorized<scalar_t> acc{
               scalar_t(std::numeric_limits<scalar_t_underlying>::lowest())};
@@ -1623,7 +1623,7 @@ void qmaxpool_3d_nthwc_kernel(
           w_start += dW;
 
         int64_t c = 0;
-        constexpr auto vec_width = Vectorized<scalar_t>::size();
+        const auto vec_width = Vectorized<scalar_t>::size();
         // Vector loop
         for (; c + vec_width <= iC; c += vec_width) {
           Vectorized<scalar_t> acc{
@@ -2449,7 +2449,7 @@ void q_batch_norm_kernel(
         reinterpret_cast<scalar_t::underlying*>(input.data_ptr());
     scalar_t::underlying* Y = reinterpret_cast<scalar_t::underlying*>(output.data_ptr());
 
-    constexpr int kVLen = Vectorized<float>::size();
+    const int kVLen = Vectorized<float>::size();
     const int64_t outer_size = N * HxW;
     using Vec = Vectorized<scalar_t>;
     // Hoisted variables
@@ -2975,7 +2975,7 @@ void quantized_normalize_kernel(
     float y_scale = Y->q_scale();
     float y_inv_scale = 1.0f / y_scale;
 
-    constexpr int kFloatVLen = fVec::size();
+    const int kFloatVLen = fVec::size();
     int64_t kIntVLen = kFloatVLen * qVec::float_num_vecs();
     int64_t kNumIntVecInLayer = N / kIntVLen;
     int64_t kNonVecRemInLayer = N % kIntVLen;
@@ -3263,7 +3263,7 @@ void quantized_groupnorm_nhwc_kernel(
     float y_scale = Y->q_scale();
     float y_inv_scale = 1.0f / y_scale;
 
-    constexpr int kFloatVLen = fVec::size();
+    const int kFloatVLen = fVec::size();
     int64_t kIntVLen = kFloatVLen * qVec::float_num_vecs();
     int64_t channels_per_group = C / G;
     int64_t HxW = N / channels_per_group;

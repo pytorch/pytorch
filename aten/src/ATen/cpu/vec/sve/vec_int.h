@@ -15,7 +15,7 @@ namespace at::vec {
 // accessed as `at::vec`.
 inline namespace CPU_CAPABILITY {
 
-#if defined(CPU_CAPABILITY_SVE)
+#if defined(CPU_CAPABILITY_SVE256) || defined(CPU_CAPABILITY_SVE)
 
 #define VEC_INT_SVE_TEMPLATE(vl, bit)                                         \
   template <>                                                                 \
@@ -49,10 +49,11 @@ inline namespace CPU_CAPABILITY {
     operator svint##bit##_t() const {                                         \
       return values;                                                          \
     }                                                                         \
-    template <uint64_t mask>                                                  \
     static Vectorized<int##bit##_t> blend(                                    \
         const Vectorized<int##bit##_t>& a,                                    \
-        const Vectorized<int##bit##_t>& b) {                                  \
+        const Vectorized<int##bit##_t>& b, \
+        uint64_t mask                      \
+      ) {                                  \
       __at_align__ int##bit##_t flag_arr[size()];                             \
       for (int i = 0; i < size(); ++i) {                                      \
         flag_arr[i] = (i < 64 && (mask & (1ULL << i))) ? 1 : 0;               \
@@ -493,7 +494,7 @@ Vectorized<int8_t> inline operator>>(
   return svasr_s8_x(ptrue, a, svreinterpret_u8_s8(b));
 }
 
-#endif // defined(CPU_CAPABILITY_SVE)
+#endif // defined(CPU_CAPABILITY_SVE256)
 
 } // namespace CPU_CAPABILITY
 } // namespace at::vec

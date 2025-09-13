@@ -10,6 +10,10 @@
 #include <ideep.hpp>
 #endif
 
+#if !defined(__s390x__) && !defined(__powerpc__)
+#include <cpuinfo.h>
+#endif
+
 #include <caffe2/core/common.h>
 
 #include <ATen/native/DispatchStub.h>
@@ -103,7 +107,9 @@ std::string get_cpu_capability() {
 #elif defined(HAVE_ZVECTOR_CPU_DEFINITION)
     case native::CPUCapability::ZVECTOR:
       return "Z VECTOR";
-#elif defined(HAVE_SVE256_CPU_DEFINITION) && defined(HAVE_ARM_BF16_CPU_DEFINITION)
+#elif defined(HAVE_SVE_CPU_DEFINITION) && defined(HAVE_ARM_BF16_CPU_DEFINITION)
+    case native::CPUCapability::SVE:
+      return "SVE";
     case native::CPUCapability::SVE256:
       return "SVE256";
 #else
@@ -116,6 +122,12 @@ std::string get_cpu_capability() {
       break;
   }
   return "";
+}
+
+int get_sve_len() {
+  // It is possible that we override the cpu_capability with
+  // environment variable
+  return cpuinfo_get_max_arm_sve_length();
 }
 
 static std::string used_cpu_capability() {

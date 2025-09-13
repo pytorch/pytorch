@@ -462,6 +462,10 @@ RegisterOperators reg({
         "aten::_get_cpu_capability() -> str",
         [](Stack& stack) { push(stack, at::get_cpu_capability()); },
         aliasAnalysisConservative()),
+    Operator(
+        "aten::_get_sve_len() -> int",
+        [](Stack& stack) { push(stack, at::get_sve_len()); },
+        aliasAnalysisConservative()),
 });
 } // namespace
 } // namespace torch::jit
