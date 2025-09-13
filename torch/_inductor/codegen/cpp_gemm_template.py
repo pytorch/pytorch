@@ -809,13 +809,27 @@ class CppGemmTemplate(CppTemplate):
             if (
                 config.cpp.use_small_dequant_buffer
                 and dtype_A is torch.bfloat16
-                and dtype_B is torch.uint8
                 and Mt_blocks == 1
             ):
-                # Make a small dequant_B buffer for woq int4 [q_group_size, Nr]
-                # Since when Mt_blocks == 1, L1-reside B block can't be reused by A.
-                if Kc_blocks * Kr >= self.q_group_size():
-                    Kc_blocks = self.q_group_size() // Kr
+                if dtype_B is torch.uint8:
+                    # A16W4
+                    # Make a small dequant_B buffer for woq int4 [q_group_size, Nr]
+                    # Since when Mt_blocks == 1, L1-reside B block can't be reused by A.
+                    if Kc_blocks * Kr >= self.q_group_size():
+                        Kc_blocks = self.q_group_size() // Kr
+
+                elif dtype_B is torch.int8:
+                    # A16W8
+                    # Make A, B, C buffer in L1
+                    A_buf_size_div_K = self.m * num_byte_A
+                    B_buf_size_div_K = Nr * num_byte_B
+                    # assume acc in float32/int32 and Mc_blocks = Nc_blocks = 1
+                    C_buf_size = Mr * Nr * 4
+                    K_block_size = (L1 - C_buf_size) // (
+                        A_buf_size_div_K + B_buf_size_div_K
+                    )
+                    if Kc_blocks * Kr >= K_block_size:
+                        Kc_blocks = (K_block_size + Kr - 1) // Kr
 
             # Step 2: Decide Mc assuming A block is L2-reside.
             min_Mc_ratio = 2  # TODO(jgong5): something to tune?
