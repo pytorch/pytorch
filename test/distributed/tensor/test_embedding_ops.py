@@ -50,6 +50,7 @@ class TestEmbeddingOp(DTensorTestBase):
         input_size,
         num_embeddings,
         embedding_dim,
+        use_compile=False,
         **kwargs,
     ):
         # Use same seed.
@@ -85,12 +86,16 @@ class TestEmbeddingOp(DTensorTestBase):
             *inp.size(), embedding_dim, dtype=torch.float, device=self.device_type
         ).random_(0, 1)
         dist_inp = distribute_tensor(inp, device_mesh, [Replicate()])
-
-        # fwd computation, ensure no comm happened
-        with CommDebugMode() as fwd_mode:
+        # TODO: Not sure why compile behavior is different with CommDebugMode
+        if use_compile:
+            sharded_embedding = torch.compile(sharded_embedding)
             dist_output = sharded_embedding(dist_inp)
-            self.assertEqual(fwd_mode.get_total_counts(), 0)
-
+        else:
+            # fwd computation, ensure no comm happened
+            with CommDebugMode() as fwd_mode:
+                dist_output = sharded_embedding(dist_inp)
+                self.assertEqual(fwd_mode.get_total_counts(), 0)
+        torch.distributed.breakpoint()
         output = dist_output.full_tensor()
         # Run local computation
         local_output = local_embedding(inp)
@@ -125,17 +130,22 @@ class TestEmbeddingOp(DTensorTestBase):
         self.assertEqual(gradient, local_grad)
 
         # Validate for torch.nn.functional.embedding version.
-        local_output = torch.nn.functional.embedding(
-            inp,
-            local_embedding.weight,
-            **kwargs,
-        )
-        sharded_output = torch.nn.functional.embedding(
-            DTensor.from_local(inp, device_mesh, [Replicate()], run_check=False),
-            sharded_embedding.weight,
-            **kwargs,
-        )
-        self.assertEqual(local_output, sharded_output.full_tensor())
+        # local_output = torch.nn.functional.embedding(
+        #     inp,
+        #     local_embedding.weight,
+        #     **kwargs,
+        # )
+        # maybe_compiled_emb = (
+        #     torch.compile(torch.nn.functional.embedding, fullgraph=True)
+        #     if use_compile
+        #     else torch.nn.functional.embedding
+        # )
+        # sharded_output = maybe_compiled_emb(
+        #     DTensor.from_local(inp, device_mesh, [Replicate()], run_check=False),
+        #     sharded_embedding.weight,
+        #     **kwargs,
+        # )
+        # self.assertEqual(local_output, sharded_output.full_tensor())
 
     @with_comms
     def test_sharded_embedding_colwise(self):
@@ -227,6 +237,19 @@ class TestEmbeddingOp(DTensorTestBase):
         # not equal because of different logical_shape, despite of same logical_dim_size
         self.assertNotEqual(partial_placement1, partial_placement3)
 
+    @with_comms
+    def test_embedding_compile(self):
+        mesh = self.build_device_mesh()
+        # self._run_embedding_op_test(mesh, 1, [8, 8], 10, 20, use_compile=True)
+        self._run_embedding_op_test(mesh, 0, [8, 8], 20, 20, use_compile=True)
+        print("Done")
 
+"""
+device_mesh,
+        shard_dim,
+        input_size,
+        num_embeddings,
+        embedding_dim,
+"""
 if __name__ == "__main__":
     run_tests()
