@@ -174,20 +174,20 @@ YituTechConvBert,pass,0
 
 
 
-meta-llama/Llama-3.2-1B,eager_fail_to_run,0
+meta-llama/Llama-3.2-1B,pass,5
 
 
 
-google/gemma-2-2b,eager_fail_to_run,0
+google/gemma-2-2b,pass,5
 
 
 
-google/gemma-3-4b-it,eager_fail_to_run,0
+google/gemma-3-4b-it,pass_due_to_skip,0
 
 
 
-openai/whisper-tiny,eager_fail_to_run,0
+openai/whisper-tiny,pass,6
 
 
 
-Qwen/Qwen3-0.6B,eager_fail_to_run,0
+Qwen/Qwen3-0.6B,pass,5
