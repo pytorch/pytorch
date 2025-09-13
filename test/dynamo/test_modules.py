@@ -1929,6 +1929,24 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         opt_mod(x)
         self.assertEqual(cnt.frame_count, 3)
 
+    def test_module_to_called_in_forward_constant_fold(self):
+        class Mod(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.fc = torch.nn.Linear(16, 16)
+
+            def forward(self, x):
+                y = self.fc(x)
+                self.to("cpu")
+                return y
+
+        mod = Mod()
+        x = torch.rand(1, 1024)
+        ref = mod(x)
+        mod.compile(fullgraph=False)
+        res = mod(x)
+        self.assertTrue(torch.allclose(ref, res))
+
     @torch._dynamo.config.patch(guard_nn_modules=True)
     def test_param_order(self):
         class MyModule(torch.nn.Module):
