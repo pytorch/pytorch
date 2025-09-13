@@ -1798,6 +1798,15 @@ class ScaledTMAConfigMixin(TMAWorkspaceMixin, BaseScaledMMConfigMixin):
     This inherits from BaseScaledMMConfigMixin and adds TMA-specific options.
     """
 
+    def _filter_configs(self, configs: list[BaseConfig]) -> list[BaseConfig]:
+        """
+        TMA specific filtering:
+        - num_warps=2 not safe for TMA
+        - block_k >= 32 required for TMA (requires inner-most dimension >= 32)
+        """
+        configs = [c for c in configs if c.num_warps != 2 and c.block_k >= 32]
+        return super()._filter_configs(configs)
+
     def _get_template_configs_impl(
         self,
         kernel_inputs: KernelInputs,
@@ -1901,11 +1910,10 @@ class CUDAScaledMMTemplateConfigHeuristic(ScaledMMConfigMixin, CUDAConfigHeurist
         super().__init__()
         # Override mm_configs to use scaled_mm_configs
         self.mm_configs = self.scaled_mm_configs
-        # NOTE: overriding exhaustive configs here to be the same as mm_configs
-        # as we haven't validated exhaustive support here yet
-        # TODO(coconutruben): remove this once we have validated exhaustive support
-        # for scaled_mm
-        self.exhaustive_configs = self.scaled_mm_configs
+
+    def _filter_configs(self, configs: list[BaseConfig]) -> list[BaseConfig]:
+        configs = [c for c in configs if c.block_k >= 32]
+        return super()._filter_configs(configs)
 
 
 @register_template_heuristic(
@@ -1920,11 +1928,6 @@ class CUDAScaledTMATemplateConfigHeuristic(ScaledTMAConfigMixin, CUDAConfigHeuri
         super().__init__()
         # Override mm_configs to use scaled_persistent_mm_configs for TMA
         self.mm_configs = self.scaled_persistent_mm_configs
-        # NOTE: overriding exhaustive configs here to be the same as mm_configs
-        # as we haven't validated exhaustive support here yet
-        # TODO(coconutruben): remove this once we have validated exhaustive support
-        # for scaled_mm
-        self.exhaustive_configs = self.scaled_persistent_mm_configs
 
 
 @register_template_heuristic(
