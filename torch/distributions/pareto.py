@@ -66,7 +66,7 @@ class Pareto(TransformedDistribution):
         return self.scale.pow(2) * a / ((a - 1).pow(2) * (a - 2))
 
     @constraints.dependent_property(is_discrete=False, event_dim=0)
-    def support(self) -> constraints.Constraint:
+    def support(self) -> constraints.GreaterThanEq:
         return constraints.greater_than_eq(self.scale)
 
     def entropy(self) -> Tensor:

@@ -587,8 +587,217 @@
 
 ```{eval-rst}
 .. automodule:: torch.distributions.constraints
+.. currentmodule:: torch.distributions.constraints
+```
+
+### Value Constraints
+
+```{eval-rst}
+.. autoclass:: Boolean
     :members:
-    :member-order: bysource
+    :undoc-members:
+    :show-inheritance:
+.. autoclass:: Real
+    :members:
+    :undoc-members:
+    :show-inheritance:
+```
+
+### Continuous Interval Constraints
+
+```{eval-rst}
+.. autoclass:: Interval
+    :members:
+    :undoc-members:
+    :show-inheritance:
+.. autoclass:: UnitInterval
+    :members:
+    :undoc-members:
+    :show-inheritance:
+.. autoclass:: HalfOpenInterval
+    :members:
+    :undoc-members:
+    :show-inheritance:
+.. autoclass:: GreaterThan
+    :members:
+    :undoc-members:
+    :show-inheritance:
+.. autoclass:: GreaterThanEq
+    :members:
+    :undoc-members:
+    :show-inheritance:
+.. autoclass:: LessThan
+    :members:
+    :undoc-members:
+    :show-inheritance:
+.. autoclass:: Positive
+    :members:
+    :undoc-members:
+    :show-inheritance:
+.. autoclass:: NonNegative
+    :members:
+    :undoc-members:
+    :show-inheritance:
+.. autoclass:: Negative
+    :members:
+    :undoc-members:
+    :show-inheritance:
+```
+
+### Discrete Interval Constraints
+
+```{eval-rst}
+.. autoclass:: IntegerInterval
+    :members:
+    :undoc-members:
+    :show-inheritance:
+.. autoclass:: IntegerGreaterThan
+    :members:
+    :undoc-members:
+    :show-inheritance:
+.. autoclass:: IntegerLessThan
+    :members:
+    :undoc-members:
+    :show-inheritance:
+.. autoclass:: PositiveInteger
+    :members:
+    :undoc-members:
+    :show-inheritance:
+.. autoclass:: NonNegativeInteger
+    :members:
+    :undoc-members:
+    :show-inheritance:
+```
+
+### Vector Constraints
+
+```{eval-rst}
+.. autoclass:: RealVector
+    :members:
+    :undoc-members:
+    :show-inheritance:
+.. autoclass:: Simplex
+    :members:
+    :undoc-members:
+    :show-inheritance:
+.. autoclass:: OneHot
+    :members:
+    :undoc-members:
+    :show-inheritance:
+.. autoclass:: Multinomial
+    :members:
+    :undoc-members:
+    :show-inheritance:
+```
+
+### Matrix Constraints
+
+```{eval-rst}
+.. autoclass:: Square
+    :members:
+    :undoc-members:
+    :show-inheritance:
+.. autoclass:: Symmetric
+    :members:
+    :undoc-members:
+    :show-inheritance:
+.. autoclass:: PositiveDefinite
+    :members:
+    :undoc-members:
+    :show-inheritance:
+.. autoclass:: PositiveSemidefinite
+    :members:
+    :undoc-members:
+    :show-inheritance:
+.. autoclass:: CorrCholesky
+    :members:
+    :undoc-members:
+    :show-inheritance:
+.. autoclass:: LowerCholesky
+    :members:
+    :undoc-members:
+    :show-inheritance:
+.. autoclass:: LowerTriangular
+    :members:
+    :undoc-members:
+    :show-inheritance:
+```
+
+### Generic Constraints
+
+```{eval-rst}
+.. autoclass:: Independent
+    :members:
+    :undoc-members:
+    :show-inheritance:
+.. autoclass:: MixtureSameFamilyConstraint
+    :members:
+    :undoc-members:
+    :show-inheritance:
+.. autoclass:: Cat
+    :members:
+    :undoc-members:
+    :show-inheritance:
+.. autoclass:: Stack
+    :members:
+    :undoc-members:
+    :show-inheritance:
+```
+
+### Dependent Constraints
+
+```{eval-rst}
+.. autoclass:: Dependent
+    :members:
+    :undoc-members:
+    :show-inheritance:
+.. autofunction:: is_dependent
+.. autoclass:: DependentProperty
+    :members:
+    :undoc-members:
+    :show-inheritance:
+```
+
+### Canonical Instances
+
+For parameter-free constraints, the following canonical instances are available:
+
+```{eval-rst}
+.. autoattribute:: torch.distributions.constraints.boolean
+.. autoattribute:: torch.distributions.constraints.corr_cholesky
+.. autoattribute:: torch.distributions.constraints.dependent
+.. autoattribute:: torch.distributions.constraints.lower_cholesky
+.. autoattribute:: torch.distributions.constraints.lower_triangular
+.. autoattribute:: torch.distributions.constraints.nonnegative
+.. autoattribute:: torch.distributions.constraints.nonnegative_integer
+.. autoattribute:: torch.distributions.constraints.one_hot
+.. autoattribute:: torch.distributions.constraints.positive
+.. autoattribute:: torch.distributions.constraints.positive_definite
+.. autoattribute:: torch.distributions.constraints.positive_integer
+.. autoattribute:: torch.distributions.constraints.positive_semidefinite
+.. autoattribute:: torch.distributions.constraints.real
+.. autoattribute:: torch.distributions.constraints.real_vector
+.. autoattribute:: torch.distributions.constraints.simplex
+.. autoattribute:: torch.distributions.constraints.square
+.. autoattribute:: torch.distributions.constraints.symmetric
+.. autoattribute:: torch.distributions.constraints.unit_interval
+```
+
+### Aliases
+
+```{eval-rst}
+.. autoattribute:: torch.distributions.constraints.cat
+.. autoattribute:: torch.distributions.constraints.dependent_property
+.. autoattribute:: torch.distributions.constraints.greater_than
+.. autoattribute:: torch.distributions.constraints.greater_than_eq
+.. autoattribute:: torch.distributions.constraints.half_open_interval
+.. autoattribute:: torch.distributions.constraints.independent
+.. autoattribute:: torch.distributions.constraints.integer_interval
+.. autoattribute:: torch.distributions.constraints.interval
+.. autoattribute:: torch.distributions.constraints.less_than
+.. autoattribute:: torch.distributions.constraints.mixture_same_family
+.. autoattribute:: torch.distributions.constraints.multinomial
+.. autoattribute:: torch.distributions.constraints.stack
 ```
 
 ## `Constraint Registry`
