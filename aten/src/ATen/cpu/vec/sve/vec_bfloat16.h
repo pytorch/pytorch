@@ -4,6 +4,7 @@
 #include <ATen/cpu/vec/sve/sve_helper.h>
 #include <ATen/cpu/vec/sve/vec_common_sve.h>
 #include <ATen/cpu/vec/sve/vec_float.h>
+#include <ATen/cpu/vec/intrinsics.h>
 #include <ATen/cpu/vec/vec_base.h>
 #include <c10/util/bit_cast.h>
 #include <cmath>
@@ -19,7 +20,43 @@ namespace vec {
 // accessed as `at::vec`.
 inline namespace CPU_CAPABILITY {
 
-#if defined(CPU_CAPABILITY_SVE256) && defined(__ARM_FEATURE_BF16)
+#define CONVERT_NON_VECTORIZED_INIT(type, name) \
+inline std::tuple<Vectorized<float>, Vectorized<float>> convert_##name##_float(const Vectorized<type>& a) { \
+  constexpr int64_t K = Vectorized<type>::size(); \
+  __at_align__ float arr[K]; \
+  __at_align__ type arr2[K]; \
+  a.store(arr2); \
+  convert(arr2, arr, K); \
+  return std::make_tuple( \
+      Vectorized<float>::loadu(arr), \
+      Vectorized<float>::loadu(arr + Vectorized<float>::size())); \
+} \
+inline Vectorized<type> convert_float_##name(const Vectorized<float>& a, const Vectorized<float>& b) { \
+  constexpr int64_t K = Vectorized<type>::size(); \
+  __at_align__ float arr[K]; \
+  __at_align__ type arr2[K]; \
+  a.store(arr); \
+  b.store(arr + Vectorized<float>::size()); \
+  convert(arr, arr2, K); \
+  return Vectorized<type>::loadu(arr2); \
+}
+
+#define LOAD_FP32_NON_VECTORIZED_INIT(type, name) \
+inline void load_fp32_from_##name(const type *data, Vectorized<float>& out) { \
+  __at_align__ float values[Vectorized<float>::size()]; \
+  for (const auto k : c10::irange(Vectorized<float>::size())) { \
+    values[k] = data[k]; \
+  } \
+  out = Vectorized<float>::loadu(values); \
+} \
+\
+inline void load_fp32_from_##name(const type *data, Vectorized<float>& out1, Vectorized<float>& out2) { \
+  load_fp32_from_##name(data, out1); \
+  data += Vectorized<float>::size(); \
+  load_fp32_from_##name(data, out2); \
+}
+
+#if defined(CPU_CAPABILITY_SVE) && defined(__ARM_FEATURE_BF16)
 
 template <>
 struct is_vec_specialized_for<BFloat16> : std::bool_constant<true> {};
@@ -39,6 +76,8 @@ class Vectorized<BFloat16> {
 
   Vectorized();
   Vectorized(svbfloat16_t v) : values(v) {}
+  Vectorized(float val);
+  Vectorized(double val);
   Vectorized(int val);
   Vectorized(BFloat16 val);
 
@@ -586,7 +625,29 @@ Vectorized<BFloat16> inline fmadd(
   return a * b + c;
 }
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wignored-qualifiers"
+
+CONVERT_NON_VECTORIZED_INIT(Half, half);
+LOAD_FP32_NON_VECTORIZED_INIT(Half, fp16);
+
+#pragma GCC diagnostic pop
+
+#else // defined(CPU_CAPABILITY_SVE) && defined(__ARM_FEATURE_BF16)
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wignored-qualifiers"
+
+CONVERT_NON_VECTORIZED_INIT(BFloat16, bfloat16);
+CONVERT_NON_VECTORIZED_INIT(Half, half);
+
+LOAD_FP32_NON_VECTORIZED_INIT(BFloat16, bf16);
+LOAD_FP32_NON_VECTORIZED_INIT(Half, fp16);
+
+#pragma GCC diagnostic pop
+
 #endif // defined(CPU_CAPABILITY_SVE) && defined(__ARM_FEATURE_BF16)
+
 
 } // namespace CPU_CAPABILITY
 } // namespace vec
