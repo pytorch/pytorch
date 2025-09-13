@@ -515,6 +515,54 @@ class TestAutograd(FSDPTest):
             FlatParamHandle._use_unsharded_views = orig_use_unsharded_views
 
 
+class TestGradientReduction(FSDPTest):
+    @skip_if_lt_x_gpu(2)
+    @parametrize("use_orig_params", [False, True])
+    def test_fsdp_gradient_reduction_cpu(self, use_orig_params: bool):
+        """
+        Tests that FSDP correctly averages gradients on CPU, which uses the
+        gloo backend and does not support ReduceOp.AVG for reduce-scatter.
+        """
+        # Define a model
+        model = nn.Sequential(
+            nn.Linear(4, 3, bias=False),
+            nn.ReLU(),
+            nn.Linear(3, 2, bias=False),
+        )
+        fsdp_model = FSDP(
+            model,
+            auto_wrap_policy=ModuleWrapPolicy({nn.Linear}),
+            device_id=torch.device("cpu"),
+            cpu_offload=CPUOffload(offload_params=True),
+            use_orig_params=use_orig_params,
+        )
+
+        # Dummy input and target
+        input = torch.randn(1, 4, device="cpu")
+        target = torch.randn(1, 2, device="cpu")
+
+        # Reference forward/backward
+        ref_model = nn.Sequential(
+            nn.Linear(4, 3, bias=False),
+            nn.ReLU(),
+            nn.Linear(3, 2, bias=False),
+        ).to("cpu")
+        ref_model.load_state_dict(fsdp_model.state_dict())
+        ref_loss = ref_model(input).sum()
+        ref_loss.backward()
+        ref_grads = [p.grad.clone() for p in ref_model.parameters()]
+
+        # FSDP forward/backward
+        loss = fsdp_model(input).sum()
+        loss.backward()
+
+        # Check that FSDP gradients are the average of the reference gradients
+        for fsdp_param, ref_grad in zip(fsdp_model.parameters(), ref_grads):
+            # The reduce-scatter communication divides by world size, so the
+            # FSDP grad should match the reference grad
+            self.assertEqual(fsdp_param.grad, ref_grad)
+
+
 devices = ("cuda", "hpu", "xpu")
 instantiate_device_type_tests(TestHooks, globals(), only_for=devices, allow_xpu=True)
 instantiate_device_type_tests(
@@ -525,5 +573,6 @@ instantiate_device_type_tests(
     TestParamInit, globals(), only_for=devices, allow_xpu=True
 )
 instantiate_device_type_tests(TestAutograd, globals(), only_for=devices, allow_xpu=True)
+instantiate_device_type_tests(TestGradientReduction, globals(), only_for=devices, allow_xpu=True)
 if __name__ == "__main__":
     run_tests()

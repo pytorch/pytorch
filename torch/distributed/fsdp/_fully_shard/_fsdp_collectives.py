@@ -685,6 +685,10 @@ def _get_gradient_divide_factors(
     # MTIA appears to only support SUM reduction, hence we force it implicitly
     if device_type == "mtia":
         force_sum_reduction_for_comms = True
+    # For gloo, we do not use ReduceOp.AVG since it is not supported for
+    # reduce-scatter
+    if dist.get_backend(reduce_scatter_group) == "gloo":
+        force_sum_reduction_for_comms = True
 
     # For fp32/bf16, we do not need to worry about overflow/underflow, so we
     # use NCCL's built-in division to avoid separate div kernels

@@ -1511,6 +1511,11 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::reduce_scatter_tensor_coalesced(
     std::vector<at::Tensor>& outputTensors,
     std::vector<at::Tensor>& inputTensors,
     const ReduceScatterOptions& opts) {
+  if (opts.reduceOp == ReduceOp::AVG) {
+    TORCH_CHECK(
+        false,
+        "ProcessGroupGloo: reduce_scatter_tensor_coalesced with op AVG is not supported.");
+  }
   if (outputTensors.size() != inputTensors.size()) {
     TORCH_CHECK(
         false, "requires input/output tensor lists to have the same length");
@@ -2221,6 +2226,10 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::reduce_scatter(
     std::vector<at::Tensor>& outputs,
     std::vector<std::vector<at::Tensor>>& inputs,
     const ReduceScatterOptions& opts) {
+  if (opts.reduceOp == ReduceOp::AVG) {
+    TORCH_CHECK(
+        false, "ProcessGroupGloo: reduce_scatter with op AVG is not supported.");
+  }
   const auto rank = getRank();
   const auto worldSize = getSize();
 
