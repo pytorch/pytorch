@@ -56,6 +56,29 @@ def rotary_embedding_23(
     rotary_embedding_dim: int = 0,
 ) -> torch.Tensor:
     """RotaryEmbedding-23 https://onnx.ai/onnx/operators/onnx__RotaryEmbedding.html#rotaryembedding-23"""
+    if position_ids is None:
+        torch._check(
+            len(cos_cache.shape) == 3,
+            lambda: f"cos_cache must be 3D when position_ids is not provided. Received shape: {cos_cache.shape}",
+        )
+        torch._check(
+            len(sin_cache.shape) == 3,
+            lambda: f"sin_cache must be 3D when position_ids is not provided. Received shape: {sin_cache.shape}",
+        )
+    else:
+        torch._check(
+            len(cos_cache.shape) == 2,
+            lambda: f"cos_cache must be 2D when position_ids is provided. Received shape: {cos_cache.shape}",
+        )
+        torch._check(
+            len(sin_cache.shape) == 2,
+            lambda: f"sin_cache must be 2D when position_ids is provided. Received shape: {sin_cache.shape}",
+        )
+        torch._check(
+            len(position_ids.shape) == 2,
+            lambda: f"position_ids must be 2D when provided. Received shape: {position_ids.shape}",
+        )
+
     # x has shape (batch_size, num_heads, sequence_length, head_size)
     # or (batch_size, sequence_length, hidden_size)
     input_shape = x.shape
