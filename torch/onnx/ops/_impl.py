@@ -56,35 +56,37 @@ def rotary_embedding_23(
     rotary_embedding_dim: int = 0,
 ) -> torch.Tensor:
     """RotaryEmbedding-23 https://onnx.ai/onnx/operators/onnx__RotaryEmbedding.html#rotaryembedding-23"""
-    if position_ids is None:
-        torch._check(
-            len(cos_cache.shape) == 3,
-            lambda: f"cos_cache must be 3D when position_ids is not provided. Received shape: {cos_cache.shape}",
-        )
-        torch._check(
-            len(sin_cache.shape) == 3,
-            lambda: f"sin_cache must be 3D when position_ids is not provided. Received shape: {sin_cache.shape}",
-        )
-    else:
-        torch._check(
-            len(cos_cache.shape) == 2,
-            lambda: f"cos_cache must be 2D when position_ids is provided. Received shape: {cos_cache.shape}",
-        )
-        torch._check(
-            len(sin_cache.shape) == 2,
-            lambda: f"sin_cache must be 2D when position_ids is provided. Received shape: {sin_cache.shape}",
-        )
-        torch._check(
-            len(position_ids.shape) == 2,
-            lambda: f"position_ids must be 2D when provided. Received shape: {position_ids.shape}",
-        )
-
     # x has shape (batch_size, num_heads, sequence_length, head_size)
     # or (batch_size, sequence_length, hidden_size)
     input_shape = x.shape
     input_rank = len(input_shape)
     batch_size = input_shape[0]
     sequence_length = input_shape[-2]
+
+    # Validate position_ids and caches match x
+    if position_ids is not None:
+        torch._check(
+            position_ids.dim() == 2,
+            lambda: f"position_ids must be 2D when provided. Got {position_ids.shape}",
+        )
+        torch._check(
+            position_ids.shape[0] == batch_size,
+            lambda: f"position_ids first dim (batch) must match x.batch_size ({batch_size}). Got {position_ids.shape[0]}",
+        )
+        torch._check(
+            position_ids.shape[1] == sequence_length,
+            lambda: f"position_ids second dim (sequence) must match x.sequence_length ({sequence_length}). Got {position_ids.shape[1]}",
+        )
+        torch._check(
+            cos_cache.dim() == 2 and sin_cache.dim() == 2,
+            lambda: "cos_cache/sin_cache must be 2D (sequence_length, head_half) when position_ids is provided. "
+            f"Got cos_cache shape {cos_cache.shape}, sin_cache shape {sin_cache.shape}",
+        )
+    else:
+        torch._check(
+            cos_cache.dim() == 3 and sin_cache.dim() == 3,
+            lambda: "cos_cache/sin_cache must be 3D (batch, sequence_length, head_half) when position_ids is not provided",
+        )
 
     # First ensure x has shape [batch_size, num_heads, seq_len, head_size]
     # So that the rotation logic can be shared with reshaped 3D inputs
@@ -124,6 +126,12 @@ def rotary_embedding_23(
     else:
         cos = cos_cache
         sin = sin_cache
+
+    torch._check(
+        cos.shape[0] == batch_size and cos.shape[1] == sequence_length,
+        lambda: f"cos has shape {cos.shape} but expected (batch={batch_size}, seq={sequence_length}, ...)",
+    )
+
     cos = cos[
         :, :, :rotary_embedding_dim_half
     ]  # Shape: [batch_size, sequence_length, rotary_embedding_dim/2]
