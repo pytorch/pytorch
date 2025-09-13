@@ -1,12 +1,26 @@
 import logging
+import os
+import textwrap
 from typing import Any
 
+from cli.lib.common.gh_summary import write_gh_step_summary
 from cli.lib.common.git_helper import clone_external_repo
 from cli.lib.common.pip_helper import pip_install_packages
 from cli.lib.common.utils import run_command, temp_environ, working_directory
+from jinja2 import Template
 
 
 logger = logging.getLogger(__name__)
+
+_TPL_VLLM_INFO = Template(
+    textwrap.dedent("""\
+    ##  Vllm against Pytorch CI Test Summary
+    **Vllm Commit**: [{{ vllm_commit }}](https://github.com/vllm-project/vllm/commit/{{ vllm_commit }})
+    {%- if torch_sha %}
+    **Pytorch Commit**: [{{ torch_sha }}](https://github.com/pytorch/pytorch/commit/{{ torch_sha }})
+    {%- endif %}
+""")
+)
 
 
 def sample_vllm_test_library():
@@ -62,7 +76,6 @@ def sample_vllm_test_library():
                 ),
                 "pytest -v -s entrypoints/llm/test_lazy_outlines.py",
                 "pytest -v -s entrypoints/llm/test_generate.py ",
-                "pytest -v -s entrypoints/llm/test_generate_multiple_loras.py",
                 "VLLM_USE_V1=0 pytest -v -s entrypoints/offline_mode",
             ],
         },
@@ -83,14 +96,24 @@ def sample_vllm_test_library():
             "num_gpus": 4,
             "steps": [
                 "pytest -v -s -x lora/test_chatglm3_tp.py",
-                "echo $VLLM_WORKER_MULTIPROC_METHOD",
                 "pytest -v -s -x lora/test_llama_tp.py",
-                "pytest -v -s -x lora/test_multi_loras_with_tp.py",
+                "pytest -v -s -x lora/test_llm_with_multi_loras.py",
             ],
         },
-        "vllm_lora_280_failure_test": {
-            "title": "LoRA 280 failure test",
-            "id": "vllm_lora_280_failure_test",
+        "vllm_distributed_test_28_failure_test": {
+            "title": "Distributed Tests (2 GPUs) pytorch 2.8 release failure",
+            "id": "vllm_distributed_test_28_failure_test",
+            "env_vars": {
+                "VLLM_WORKER_MULTIPROC_METHOD": "spawn",
+            },
+            "num_gpus": 4,
+            "steps": [
+                "pytest -v -s distributed/test_sequence_parallel.py",
+            ],
+        },
+        "vllm_lora_28_failure_test": {
+            "title": "LoRA pytorch 2.8 failure test",
+            "id": "vllm_lora_28_failure_test",
             "steps": ["pytest -v lora/test_quant_model.py"],
         },
         "vllm_multi_model_processor_test": {
@@ -99,6 +122,15 @@ def sample_vllm_test_library():
             "package_install": ["git+https://github.com/TIGER-AI-Lab/Mantis.git"],
             "steps": [
                 "pytest -v -s models/multimodal/processing --ignore models/multimodal/processing/test_tensor_schema.py",
+            ],
+        },
+        "vllm_multi_model_test_28_failure_test": {
+            "title": "Multi-Model Test (Failed 2.8 release)",
+            "id": "vllm_multi_model_test_28_failure_test",
+            "package_install": ["git+https://github.com/TIGER-AI-Lab/Mantis.git"],
+            "steps": [
+                "pytest -v -s models/multimodal/generation/test_voxtral.py",
+                "pytest -v -s models/multimodal/pooling",
             ],
         },
         "vllm_pytorch_compilation_unit_tests": {
@@ -113,6 +145,28 @@ def sample_vllm_test_library():
                 "pytest -v -s compile/test_async_tp.py",
                 "pytest -v -s compile/test_fusion_all_reduce.py",
                 "pytest -v -s compile/test_decorator.py",
+            ],
+        },
+        "vllm_languagde_model_test_extended_generation_28_failure_test": {
+            "title": "Language Models Test (Extended Generation) 2.8 release failure",
+            "id": "vllm_languagde_model_test_extended_generation_28_failure_test",
+            "package_install": [
+                "--no-build-isolation",
+                "git+https://github.com/Dao-AILab/causal-conv1d@v1.5.0.post8",
+            ],
+            "steps": [
+                "pytest -v -s models/language/generation/test_mistral.py",
+            ],
+        },
+        "vllm_distributed_test_2_gpu_28_failure_test": {
+            "title": "Distributed Tests (2 GPUs) pytorch 2.8 release failure",
+            "id": "vllm_distributed_test_2_gpu_28_failure_test",
+            "env_vars": {
+                "VLLM_WORKER_MULTIPROC_METHOD": "spawn",
+            },
+            "num_gpus": 4,
+            "steps": [
+                "pytest -v -s distributed/test_sequence_parallel.py",
             ],
         },
         # TODO(elainewy):need to add g6 with 4 gpus to run this test
@@ -214,12 +268,13 @@ def run_test_plan(
 
 
 def clone_vllm(dst: str = "vllm"):
-    clone_external_repo(
+    _, commit = clone_external_repo(
         target="vllm",
         repo="https://github.com/vllm-project/vllm.git",
         dst=dst,
         update_submodules=True,
     )
+    return commit
 
 
 def replace_buildkite_placeholders(step: str, shard_id: int, num_shards: int) -> str:
@@ -230,3 +285,12 @@ def replace_buildkite_placeholders(step: str, shard_id: int, num_shards: int) ->
     for k in sorted(mapping, key=len, reverse=True):
         step = step.replace(k, mapping[k])
     return step
+
+
+def summarize_build_info(vllm_commit: str) -> bool:
+    torch_sha = os.getenv("GITHUB_SHA")
+    md = (
+        _TPL_VLLM_INFO.render(vllm_commit=vllm_commit, torch_sha=torch_sha).strip()
+        + "\n"
+    )
+    return write_gh_step_summary(md)
