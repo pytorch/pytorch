@@ -1777,6 +1777,12 @@ class TestMeta(TestCase):
         self.assertEqual(out[1].shape, meta_out[1].shape)
         self.assertEqual(out[1].dtype, meta_out[1].dtype)
 
+    @onlyCPU
+    def test_linalg_eig_meta_stride_consistency(self):
+        x = torch.randn(5, 5, device='meta')
+        eigenvals, eigenvecs = torch.linalg.eig(x)
+        self.assertEqual(eigenvecs.stride(), (1, 5))
+
     def test_meta_consistency_out_dtype_mismatch_pow_Tensor_Scalar(self):
         S = (5,)
 
