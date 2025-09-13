@@ -115,6 +115,7 @@ void unfold_backward_cpu_kernel(
   int64_t size,
   int64_t step
 ) {
+  TORCH_CHECK_VALUE(step > 0, "step is ", step, " but must be > 0");
   dim = maybe_wrap_dim(dim, grad_out.dim());
   // last dim stores the folds
   auto last_dim = maybe_wrap_dim(-1, grad_in.dim());
