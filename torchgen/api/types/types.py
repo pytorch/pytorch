@@ -52,7 +52,7 @@ float8_e5m2fnuzT = BaseCppType("at", "Float8_e5m2fnuz")
 float8_e4m3fnT = BaseCppType("at", "Float8_e4m3fn")
 float8_e4m3fnuzT = BaseCppType("at", "Float8_e4m3fnuz")
 float8_e8m0fnuT = BaseCppType("at", "Float8_e8m0fnu")
-stringT = BaseCppType("c10", "string_view")
+stringT = BaseCppType("std", "string_view")
 generatorT = BaseCppType("at", "Generator")
 scalarTypeT = BaseCppType("at", "ScalarType")
 tensorT = BaseCppType("at", "Tensor")
@@ -79,6 +79,7 @@ tensorOptionsT = BaseCppType("at", "TensorOptions")
 typeAndSizeT = BaseCppType("torch::autograd::generated", "TypeAndSize")
 tensorGeometryT = BaseCppType("at", "TensorGeometry")
 SymIntT = BaseCppType("c10", "SymInt")
+SymBoolT = BaseCppType("c10", "SymBool")
 symIntArrayRefT = BaseCppType("c10", "SymIntArrayRef")
 
 # Types representing template parameters.  Technically, we probably shouldn't
@@ -125,6 +126,7 @@ BaseTypeToCppMapping: dict[BaseTy, BaseCppType] = {
     BaseTy.Storage: storageT,
     BaseTy.Stream: streamT,
     BaseTy.SymInt: SymIntT,
+    BaseTy.SymBool: SymBoolT,
 }
 
 # CTypes encode C++ type structure as needed for translation.

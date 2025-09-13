@@ -1,4 +1,4 @@
-{{def_kernel("Q", "K", "V", "LSE", "KV_NUM_BLKS", "KV_IDX", "FULL_KV_NUM_BLKS", "FULL_KV_IDX")}}
+{{def_kernel("Q", "K", "V", "LSE", "MAX", "KV_NUM_BLKS", "KV_IDX", "FULL_KV_NUM_BLKS", "FULL_KV_IDX")}}
     # Sub notation for this kernel:
     #
     # Q: Query, K: Key, V: Value
@@ -205,3 +205,11 @@
             tl.store(l_ptrs, lse)
         else:
             tl.store(l_ptrs, lse, mask=offs_m < Q_LEN)
+
+    if OUTPUT_MAX:
+        off_hz = off_zq * HQ + off_hq
+        max_ptrs = MAX + off_hz * Q_LEN + offs_m
+        if IS_DIVISIBLE:
+            tl.store(max_ptrs, m_i)
+        else:
+            tl.store(max_ptrs, m_i, mask=offs_m < Q_LEN)

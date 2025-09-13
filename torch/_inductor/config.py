@@ -266,6 +266,9 @@ b2b_gemm_pass = False
 post_grad_custom_pre_pass: torch._inductor.custom_graph_pass.CustomGraphPassType = None
 post_grad_custom_post_pass: torch._inductor.custom_graph_pass.CustomGraphPassType = None
 
+# Allow users to pass in custom partition function
+custom_partitioner_fn: torch._inductor.custom_graph_pass.CustomPartitionerFnType = None
+
 # Registers a custom joint graph pass.
 joint_custom_pre_pass: torch._inductor.custom_graph_pass.CustomGraphPassType = None
 joint_custom_post_pass: torch._inductor.custom_graph_pass.CustomGraphPassType = None
@@ -388,6 +391,14 @@ reorder_prefetch_limit: Optional[int] = None
 
 # enable operator reordering for peak memory optimization
 reorder_for_peak_memory = True
+reorder_for_peak_memory_debug = False
+
+# In some cases, when all the nodes that can be scheduled are quite large,
+# it is beneficial to switch the scheduling strategy. So instead of using
+# size as the criterion, we choose a node that can unlock more nodes to
+# become schedulable by analyzing their successor nodes. The default value
+# is zero, which turns off this optimization.
+size_threshold_for_succ_based_strategy: int = 0
 
 reorder_iterative_debug_memory_recompute: bool = False
 reorder_iterative_debug_limit_to_reorder: Optional[int] = (
@@ -412,6 +423,8 @@ bucket_reduce_scatters_fx_bucket_size_determinator: Optional[Callable[[int], int
 # runtime estimation function for ops
 # for built-in estimation function, pass in "default"; for user-defined estimation function, pass in the function handle
 estimate_op_runtime = "default"
+
+runtime_estimations_mms_benchmark: bool = False
 
 # unit: GB/s, uni-directional P2P bandwidth per card
 # default value is NVLink
@@ -460,6 +473,8 @@ graph_partition: bool = (
     == "1"
 )
 
+# whether template autotuning should allow flexible layouts if possible (e.g. only extern choices)
+max_autotune_allow_flexible_layouts: bool = False
 
 # force cublas and triton to use the same precision; cublas supports TF32 for matmul operations
 # when m, n, k are multiples of 16, 16, 8, whereas triton supports TF32 for matmul operations
@@ -768,6 +783,10 @@ def decide_worker_start_method() -> str:
 
 worker_start_method: str = decide_worker_start_method()
 
+# Threshold to decide if a kernel has small memory access in bytes
+# Default value is 16 MB which is arbitrarily selected.
+small_memory_access_threshold: int = 16777216
+
 # Whether to log from subprocess workers that are launched.
 worker_suppress_logging: bool = Config(
     justknob="pytorch/compiler:worker_suppress_logging",
@@ -925,6 +944,9 @@ pad_dynamic_shapes = False
 
 # Disable comprehensive padding on the CPU
 disable_padding_cpu = True
+
+# Control if we will expand the dimension of pointwise nodes to fuse
+expand_dimension_for_pointwise_nodes = False
 
 # The width of comprehensive padding, in bytes.
 # CUDA max memory transaction size is 128 bytes for a warp.
@@ -1233,7 +1255,7 @@ class triton:
 
     # Warn loudly when the number of cudagraphs due to dynamic shape
     # exceeds this limit
-    cudagraph_dynamic_shape_warn_limit: Optional[int] = 50
+    cudagraph_dynamic_shape_warn_limit: Optional[int] = 8
 
     # synchronize after cudagraph invocation
     force_cudagraph_sync = False
@@ -1430,9 +1452,6 @@ class triton:
         os.environ.get("TORCHINDUCTOR_DECOMPOSE_K_THRESHOLD", "32")
     )
 
-    # Programmatic Dependent Launch improves launch latency on Nvidia Hopper+ devices
-    enable_pdl = False
-
 
 class aot_inductor:
     """
@@ -1570,6 +1589,17 @@ class aot_inductor:
 
     # Whether to enable link-time-optimization
     enable_lto = os.environ.get("AOT_INDUCTOR_ENABLE_LTO", "0") == "1"
+
+    # Whether the compiled .so should link to libtorch
+    # TODO: should consolidate this flag with compile_standalone
+    link_libtorch: bool = True
+
+    # If None, the default torch headers such as torch/include
+    # will be used. Otherwise, the provided path will be used instead.
+    # This is needed for torchnative to load libtorch-free .so.
+    # Such as [f"{torchnative_dir}/standalone",f"{torchnative_dir}/",].
+    # TODO: should consolidate this flag with compile_standalone
+    libtorch_free_headers: Optional[list[str]] = None
 
 
 class cuda:
@@ -1775,6 +1805,9 @@ class rocm:
 
     # The threshold at which we trigger a splitK config - K // max(M,N) has to be greater than this
     split_k_threshold: int = 16
+
+    # The threshold at which we trigger a contiguous subgraph transformation
+    contiguous_threshold: int = 16
 
 
 # Backend to use for CPU codegen either "cpp" or "triton" (experimental) or "halide" (experimental)
