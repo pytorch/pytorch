@@ -2,13 +2,13 @@ import sys
 import time
 
 import diffusers
+
+import torch
 from diffusers import (
     AuraFlowPipeline,
     AuraFlowTransformer2DModel,
     GGUFQuantizationConfig,
 )
-
-import torch
 from torch._higher_order_ops.invoke_subgraph import mark_compile_region
 
 
@@ -17,7 +17,7 @@ def compile_full_model(model):
 
 
 def compile_regions(model, nn_modules):
-    #model.compile_repeated_blocks(fullgraph=True)
+    # model.compile_repeated_blocks(fullgraph=True)
     for submod in model.modules():
         if isinstance(submod, nn_modules):
             print("Compiling", submod.__class__)
@@ -29,6 +29,7 @@ def compile_hierarchical(model, nn_modules):
         if isinstance(submod, nn_modules):
             submod.__class__.forward = mark_compile_region(submod.__class__.forward)
     model.compile(fullgraph=True)
+
 
 
 def auroflow_benchmark(mode):
@@ -105,7 +106,6 @@ def wan_benchmark(mode):
     width = round(np.sqrt(max_area / aspect_ratio)) // mod_value * mod_value
     image = image.resize((width, height))
 
-
     prompt = (
         "An astronaut hatching from an egg, on the surface of the moon, the darkness and depth of space realised in "
         "the background. High quality, ultrarealistic detail and breath-taking movie-like camera shot."
@@ -156,9 +156,8 @@ def wan_benchmark(mode):
 
 
 def ltx_benchmark(mode):
-    from diffusers import LTXConditionPipeline
-
     import torch
+    from diffusers import LTXConditionPipeline
 
     pipe = LTXConditionPipeline.from_pretrained(
         "Lightricks/LTX-Video-0.9.7-dev", torch_dtype=torch.bfloat16

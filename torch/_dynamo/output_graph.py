@@ -28,7 +28,9 @@ import itertools
 import logging
 import operator
 import re
+import statistics
 import sys
+import time
 import traceback
 import warnings
 import weakref
@@ -36,7 +38,6 @@ from collections.abc import Generator, Sequence
 from dataclasses import dataclass, field as dc_field
 from types import CodeType
 from typing import Any, Callable, cast, Optional, TYPE_CHECKING, Union
-from typing_extensions import ParamSpec, TypeVar
 
 import sympy
 
@@ -73,6 +74,7 @@ from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+from typing_extensions import ParamSpec, TypeVar
 
 from . import config, exc, logging as torchdynamo_logging, variables
 from .backends.registry import CompiledFn, CompilerFn
@@ -220,66 +222,198 @@ class VariableTrackerCache:
         self.cache.clear()
 
 
+ITER = 1
+
+
+def pretty_print(d):
+    items = sorted(d.items(), key=lambda kv: (-kv[1], kv[0]))
+    width = max((len(k) for k, _ in items), default=0)
+    for k, v in items:
+        print(f"{k:<{width}} : {v}")
+
+
+def count_calls_freq(gm):
+    import collections
+
+    freq = collections.defaultdict(lambda: 0)
+
+    for node in gm.graph.nodes:
+        if "call" in node.op:
+            freq[str(node.target)] += 1
+
+    pretty_print(freq)
+
+
+def run_fake(gm, real_inputs):
+    print(" --- Fake tensor study --")
+    from torch._subclasses.fake_tensor import now_breakpoint
+    from torch.utils._stats import simple_call_counter, simple_func_counter
+
+    simple_call_counter.clear()
+    simple_func_counter.clear()
+    pretty_print(simple_func_counter)
+    with (
+        torch._C.DisableTorchFunction(),
+        torch._C.DisableTorchFunctionSubclass(),
+    ):
+        fake_times = []
+        for _ in range(ITER):
+            fake_mode = torch._subclasses.FakeTensorMode(allow_non_fake_inputs=False)
+            fake_inputs = []
+            for inp in real_inputs:
+                fake_inputs.append(fake_mode.from_tensor(inp))
+
+            # make_fx with decomp table, python dispatcher on - another set of decompositions
+
+            # Decompositions in there should be more accurate
+            t0 = time.perf_counter()
+            with fake_mode:
+                gm(*fake_inputs)
+            torch.cuda.synchronize()
+            t1 = time.perf_counter()
+            fake_times.append(t1 - t0)
+        print("Ops = ", count_calls(gm.graph))
+        print("Ops in Fx graph have this frequency")
+        count_calls_freq(gm)
+        print("Fake = ", statistics.median(fake_times))
+        print("Stats = ", simple_call_counter)
+        print("Frequency of func object in __torch_dispatch__")
+        pretty_print(simple_func_counter)
+
+
+def run_func(gm, real_inputs):
+    from torch.utils._stats import simple_call_counter, simple_func_counter
+
+    simple_call_counter.clear()
+    simple_func_counter.clear()
+    pretty_print(simple_func_counter)
+
+    with (
+        torch._C.DisableTorchFunction(),
+        torch._C.DisableTorchFunctionSubclass(),
+    ):
+        func_times = []
+        from torch._subclasses.functional_tensor import (
+            FunctionalTensor,
+            FunctionalTensorMode,
+        )
+
+        func_mode = FunctionalTensorMode()
+        func_inputs = []
+        with func_mode:
+            for inp in real_inputs:
+                func_inputs.append(FunctionalTensor.to_functional(inp))
+
+            for _ in range(ITER):
+                t0 = time.perf_counter()
+                gm(*func_inputs)
+                torch.cuda.synchronize()
+                t1 = time.perf_counter()
+                func_times.append(t1 - t0)
+
+        print("Ops = ", count_calls(gm.graph))
+        print("Func = ", statistics.median(func_times))
+        print("Stats = ", simple_call_counter)
+        print()
+
+
+def run_func_fake(gm, real_inputs):
+    print(" ---------- func + fake ------------------")
+    from torch.utils._stats import simple_call_counter, simple_func_counter, simple_functionalize_counter
+
+    with (
+        torch._C.DisableTorchFunction(),
+        torch._C.DisableTorchFunctionSubclass(),
+    ):
+        from torch._subclasses.functional_tensor import (
+            FunctionalTensor,
+            FunctionalTensorMode,
+        )
+
+        func_mode = FunctionalTensorMode()
+        func_fake_times = []
+        with func_mode:
+            for _ in range(ITER):
+                fake_mode = torch._subclasses.FakeTensorMode(
+                    allow_non_fake_inputs=False
+                )
+                func_fake_inputs = []
+                for inp in real_inputs:
+                    func_fake_inputs.append(
+                        FunctionalTensor.to_functional(fake_mode.from_tensor(inp))
+                    )
+
+                simple_call_counter.clear()
+                simple_func_counter.clear()
+                simple_functionalize_counter.clear()
+                pretty_print(simple_func_counter)
+
+                simple_call_counter.clear()
+
+                # make_fx with decomp table, python dispatcher on - another set of decompositions
+
+                t0 = time.perf_counter()
+                with fake_mode:
+                    gm(*func_fake_inputs)
+                torch.cuda.synchronize()
+                t1 = time.perf_counter()
+                func_fake_times.append(t1 - t0)
+
+                print("Ops = ", count_calls(gm.graph))
+                count_calls_freq(gm)
+                print("Func + fake = ", statistics.median(func_fake_times))
+                print("Stats = ", simple_call_counter)
+                print("-------- Functionalize functions ----------")
+                pretty_print(simple_functionalize_counter)
+                print("-------- Fake functions ----------")
+                pretty_print(simple_func_counter)
+                print()
+
+
 def experiments(gm, real_inputs, self):
+    import statistics
     import time
 
     from functorch import make_fx
     from torch._dispatch.python import enable_python_dispatcher
     from torch._inductor.decomposition import select_decomp_table
 
-    t0 = time.perf_counter()
-    with (
-        torch._C.DisableTorchFunction(),
-        torch._C.DisableTorchFunctionSubclass(),
-        enable_python_dispatcher(),
-    ):
-        new_gm = make_fx(gm, decomposition_table=select_decomp_table())(*real_inputs)
-    t1 = time.perf_counter()
-    print("make_fx = ", t1 - t0)
+    # print(gm)
+    print("""------> Experiments on Dynamo graph """)
+    # real_times = []
+    # with torch._C.DisableTorchFunction(), torch._C.DisableTorchFunctionSubclass():
+    #     for _ in range(10):
+    #         t0 = time.perf_counter()
+    #         gm(*real_inputs)
+    #         torch.cuda.synchronize()
+    #         t1 = time.perf_counter()
+    #         real_times.append(t1 - t0)
+    # print("Real = ", statistics.median(real_times))
 
-    real_times = []
-    with torch._C.DisableTorchFunction(), torch._C.DisableTorchFunctionSubclass():
-        for _ in range(10):
-            t0 = time.perf_counter()
-            new_gm(*real_inputs)
-            torch.cuda.synchronize()
-            t1 = time.perf_counter()
-            real_times.append(t1 - t0)
+    print("\n", flush=True)
+    print("\n", flush=True)
+    print("\n", flush=True)
+    print("\n", flush=True)
+    # run_fake(gm, real_inputs)
+    # run_func(gm, real_inputs)
+    run_func_fake(gm, real_inputs)
 
-    fake_times = []
-    for _ in range(10):
-        fake_mode = torch._subclasses.FakeTensorMode(allow_non_fake_inputs=False)
-        fake_inputs = []
-        for inp in real_inputs:
-            fake_inputs.append(fake_mode.from_tensor(inp))
+    # #################################################################
+    # t0 = time.perf_counter()
+    # with (
+    #     torch._C.DisableTorchFunction(),
+    #     torch._C.DisableTorchFunctionSubclass(),
+    #     enable_python_dispatcher(),
+    # ):
+    #     new_gm = make_fx(gm, decomposition_table=select_decomp_table())(*real_inputs)
+    # t1 = time.perf_counter()
+    # print("make_fx = ", t1 - t0)
+    # ###########################################################
 
-        # make_fx with decomp table, python dispatcher on - another set of decompositions
-
-        # Decompositions in there should be more accurate
-        t0 = time.perf_counter()
-        with fake_mode:
-            new_gm(*fake_inputs)
-        torch.cuda.synchronize()
-        t1 = time.perf_counter()
-        fake_times.append(t1 - t0)
-
-    fake_cached_times = []
-    fake_mode = torch._subclasses.FakeTensorMode(allow_non_fake_inputs=False)
-    fake_inputs = []
-    for inp in real_inputs:
-        fake_inputs.append(fake_mode.from_tensor(inp))
-
-    for _ in range(10):
-        t0 = time.perf_counter()
-        with fake_mode:
-            new_gm(*fake_inputs)
-        torch.cuda.synchronize()
-        t1 = time.perf_counter()
-        fake_cached_times.append(t1 - t0)
-
-    print("Real", real_times)
-    print("Fake", fake_times)
-    print("Fake cached times", fake_cached_times)
+    # print("""------> Experiments on aten graph """)
+    # run_func(new_gm, real_inputs)
+    # run_fake(new_gm, real_inputs)
+    # run_func_fake(new_gm, real_inputs)
 
 
 @functools.cache
@@ -1445,9 +1579,9 @@ class OutputGraph(OutputGraphGuardsState):
 
         self.add_output_instructions(prefix_insts)
 
-        assert not (self.pregraph_bytecode and self.export), (
-            "export does not support pregraph_bytecode"
-        )
+        assert not (
+            self.pregraph_bytecode and self.export
+        ), "export does not support pregraph_bytecode"
         self.add_output_instructions(self.pregraph_bytecode)
 
         alias_insts, overridden_sources = self.handle_aliases_for_stolen_lists(
@@ -1930,9 +2064,9 @@ class OutputGraph(OutputGraphGuardsState):
                 payload_fn=lambda: ds.local_state.render(),
             )
             device_types = compile_pg._device_types
-            assert len(device_types) == 1, (
-                "Expect only one device type but got {}".format("+".join(device_types))
-            )
+            assert (
+                len(device_types) == 1
+            ), "Expect only one device type but got {}".format("+".join(device_types))
             with (
                 get_interface_for_device(device_types.pop()).device(  # type: ignore[attr-defined]
                     compile_pg.rank() % torch.accelerator.device_count()
@@ -3014,9 +3148,9 @@ class SubgraphTracer(fx.Tracer):
             for arg in flat_args:
                 if not isinstance(arg, torch.fx.Node):
                     continue
-                assert arg.graph == self.graph, (
-                    "create_node using arg not from this SubgraphTracer"
-                )
+                assert (
+                    arg.graph == self.graph
+                ), "create_node using arg not from this SubgraphTracer"
 
         node = super().create_node(op, target, args, kwargs, name, type_expr)
         node.meta["creation_timestamp"] = self.output_graph.timestamp
@@ -3066,9 +3200,9 @@ class SubgraphTracer(fx.Tracer):
             before,
         )
         if source is None:
-            assert self.parent is not None, (
-                f"you are required to provide a source for inputs {name} example_val {example_value} on the root tracer"
-            )
+            assert (
+                self.parent is not None
+            ), f"you are required to provide a source for inputs {name} example_val {example_value} on the root tracer"
 
         # Note [Export inputs must be explicitly passed in]
         # In eager, we are generally OK with adding graph inputs whenever we
@@ -3175,9 +3309,9 @@ class SubgraphTracer(fx.Tracer):
     ) -> Union[LazyProxy, fx.Proxy]:
         # You're doing something wrong if we are the root SubgraphTracer because
         # Dynamo adds tensors to graph inputs before creating a proxy for them.
-        assert self.parent is not None, (
-            "lift_tracked_freevar_to_input should not be called on root SubgraphTracer"
-        )
+        assert (
+            self.parent is not None
+        ), "lift_tracked_freevar_to_input should not be called on root SubgraphTracer"
 
         example_value = proxy.node.meta["example_value"]
 
@@ -3513,9 +3647,9 @@ class SubgraphTracer(fx.Tracer):
             if isinstance(proxy, LazyProxy):
                 proxy = proxy()
                 self.bound_symbols[s0] = proxy
-            assert isinstance(proxy, torch.fx.Proxy) and proxy.tracer is self, (
-                f"The proxy of symbol {s0} doesn't belong to current tracer."
-            )
+            assert (
+                isinstance(proxy, torch.fx.Proxy) and proxy.tracer is self
+            ), f"The proxy of symbol {s0} doesn't belong to current tracer."
         # Sort the symbols so that we can have a deterministic lifting order
         return sorted(to_be_bound, key=lambda s: s.name)
 

@@ -17,6 +17,7 @@ from torch.utils._python_dispatch import (
     return_and_correct_aliasing,
     TorchDispatchMode,
 )
+from torch.utils._stats import count, simple_functionalize_counter
 
 
 not_implemented_log = torch._logging.getArtifactLogger(__name__, "not_implemented")
@@ -133,6 +134,11 @@ class FunctionalTensor(torch.Tensor):
             elem.dtype,  # dtype
             elem.layout,  # layout
             elem.device,  # device
+            # # NB - AVOID calling elem.device because it can cause custom
+            # # get_device and unnecessary calling underlying fake tensor mode
+            # # __torch_dispatch__. Since this is a functional tensor, it must
+            # # have a storage, and we can simply extract the device.
+            # elem.storage().device, # device
             False,  # pin_memory
             elem.requires_grad,  # requires_grad
             None,  # dispatch_sizes_strides_policy
@@ -160,6 +166,7 @@ class FunctionalTensor(torch.Tensor):
                 assert out._inference_mode_base is not None
         return out
 
+    @count
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):  # type: ignore[override]
         unrecognized_types = [
             t
@@ -353,10 +360,12 @@ class FunctionalTensorMode(TorchDispatchMode):
         if is_on_stack:
             super().__exit__(a, b, c)
 
+    @count
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         if kwargs is None:
             kwargs = {}
 
+        simple_functionalize_counter[str(func)] += 1
         unrecognized_types = [
             t
             for t in types

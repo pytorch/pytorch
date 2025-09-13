@@ -47,7 +47,7 @@ from torch.utils._python_dispatch import (
     TorchDispatchMode,
 )
 from torch.utils._pytree import KeyPath, keystr, PyTree, tree_map, tree_map_, TreeSpec
-from torch.utils._stats import count
+from torch.utils._stats import count, simple_func_counter
 from torch.utils._traceback import CapturedTraceback
 
 from ._fake_tensor_utils import _CacheKeyState, _PySymInputStub, _SymIntOutputStub
@@ -1369,6 +1369,12 @@ class FakeTensorMode(TorchDispatchMode):
         kwargs: Mapping[str, object] = immutable_dict(),
     ) -> object:
         # FakeTensorMode should not be set when we're inside of it.
+        simple_func_counter[str(func)] += 1
+
+        # if str(func) == "prim.device.default":
+        #     print("TRACEBACK STARTS")
+        #     print(",".join(CapturedTraceback.extract(cpp=True).format()))
+
         assert (
             torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE) is None
         ), func
