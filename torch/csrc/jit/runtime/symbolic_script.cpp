@@ -70,6 +70,28 @@ const std::vector<std::string> functions = {
 
             return torch.mean(self, dim, keepdim, dtype=dtype), backward
 
+        def logsumexp_0(self):
+            result = torch.logsumexp(self)
+            def backward(grad_output):
+                grad_self = grad_output * (self - result).exp()
+                return grad_self
+
+            return result, backward
+
+        def logsumexp_1(self,
+                        dim: Optional[List[int]],
+                        keepdim: bool):
+            result = torch.logsumexp(self, dim, keepdim)
+            def backward(grad_output):
+                if dim is None:
+                    grad_self = grad_output * (self - result).exp()
+                    return grad_self, None, None
+                else:
+                    grad_self = AD_logsumexp_backward(grad_output, self, result, dim, keepdim)
+                    return grad_self, None, None
+
+            return result, backward
+
         def logsumexp(self,
                       dim: List[int],
                       keepdim: bool):

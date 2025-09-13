@@ -211,12 +211,12 @@ at::Tensor logsumexp_backward(
     at::Tensor grad,
     const at::Tensor& self,
     at::Tensor result,
-    at::IntArrayRef dim,
+    at::OptionalIntArrayRef opt_dim,
     bool keepdim);
 at::Tensor logsumexp_jvp(
     const at::Tensor& self_p,
     const at::Tensor& self_t,
-    IntArrayRef dim,
+    at::OptionalIntArrayRef opt_dim,
     bool keepdim);
 at::Tensor safe_logsumexp_jvp(
     const at::Tensor& self_p,

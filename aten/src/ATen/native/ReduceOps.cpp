@@ -283,6 +283,30 @@ TORCH_META_FUNC2(sum, dim_IntList)
   resize_reduction(*this, self, opt_dim, keepdim, out_dtype);
 }
 
+TORCH_META_FUNC2(logsumexp, dim_IntList)
+(const Tensor& self, OptionalIntArrayRef opt_dim, bool keepdim) {
+  const auto& result = maybe_get_output();
+
+  // Compute the correct output dtype based on logsumexp promotion rules
+  // This should match what the actual implementation would compute
+  ScalarType out_dtype;
+  if (at::isIntegralType(self.scalar_type(), /*includeBool=*/true)) {
+    // For integral inputs, promote to default floating type
+    out_dtype = at::typeMetaToScalarType(c10::get_default_dtype());
+  } else {
+    // For non-integral inputs, keep the same type
+    out_dtype = self.scalar_type();
+  }
+  // Apply the same validation as the actual logsumexp_out implementation
+  // Only check that result tensor is floating point or complex (no exact dtype matching)
+  if (result.defined()) {
+    TORCH_CHECK(at::isFloatingType(result.scalar_type()) || at::isComplexType(result.scalar_type()),
+                "logsumexp(): Expected floating point type for result tensor, but got: ",
+                result.scalar_type());
+  }
+  resize_reduction(*this, self, opt_dim, keepdim, out_dtype);
+}
+
 TORCH_META_FUNC2(prod, dim_int)
 (const Tensor& self,
  int64_t dim,
@@ -1487,6 +1511,7 @@ Tensor nanmean(
   return at::nansum(self, dim, keepdim, opt_dtype).div(factor);
 }
 
+
 static Tensor& logsumexp_out_impl(Tensor& result, const Tensor& self, IntArrayRef dims, bool keepdim) {
   // can't take max of empty tensor
   if (self.numel() != 0) {
@@ -1502,6 +1527,22 @@ static Tensor& logsumexp_out_impl(Tensor& result, const Tensor& self, IntArrayRe
     result.log_();
   }
   return result;
+}
+
+TORCH_IMPL_FUNC(logsumexp_out)
+(const Tensor& self, OptionalIntArrayRef opt_dim, bool keepdim, const Tensor& result) {
+  // Convert OptionalIntArrayRef to IntArrayRef using the same logic as resize_reduction
+  DimVector dims_vec = at::native::make_dim_vector(opt_dim, self.dim());
+  IntArrayRef dims(dims_vec);
+
+  // Handle integer promotion the same way as the old logsumexp_out function
+  if (at::isIntegralType(self.scalar_type(), /*includeBool=*/true)) {
+    // for integral inputs, promote input to default floating type.
+    auto default_dtype = at::typeMetaToScalarType(c10::get_default_dtype());
+    logsumexp_out_impl(const_cast<Tensor&>(result), self.to(default_dtype), dims, keepdim);
+  } else {
+    logsumexp_out_impl(const_cast<Tensor&>(result), self, dims, keepdim);
+  }
 }
 
 Tensor& logsumexp_out(const Tensor& self, IntArrayRef dims, bool keepdim, Tensor& result) {
@@ -1534,6 +1575,21 @@ Tensor logsumexp(const Tensor& self, IntArrayRef dims, bool keepdim) {
   }
   auto result = at::empty({0}, result_options);
   return at::logsumexp_outf(self, dims, keepdim, result);
+}
+
+Tensor logsumexp(const Tensor& self) {
+  // Route to our new structured kernel with OptionalIntArrayRef
+  return at::logsumexp(self, std::nullopt, false);
+}
+
+Tensor logsumexp(const Tensor& self, OptionalIntArrayRef opt_dims, bool keepdim) {
+  // Handle optional dimensions - if no dims specified, reduce over all dimensions
+  if (opt_dims.has_value()) {
+    return at::logsumexp(self, opt_dims.value(), keepdim);
+  } else {
+    // Reduce over all dimensions (flatten)
+    return at::logsumexp(self, IntArrayRef{}, false);
+  }
 }
 
 Tensor logsumexp(const Tensor& self, DimnameList dims, bool keepdim) {
