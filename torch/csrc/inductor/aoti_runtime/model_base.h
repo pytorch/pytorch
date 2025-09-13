@@ -603,7 +603,6 @@ class AOTInductorModelBase {
                 /* skip_copy = */ false)
           : nullptr;
       bytes_read += data_size;
-      non_folded_idx++; // Increment the non-folded index
 
       // Create at::Tensor from copied memory.
       auto dtype = this->constant_dtype(i);
@@ -612,13 +611,15 @@ class AOTInductorModelBase {
       auto stride = this->constant_stride(i);
 #ifdef USE_MPS
       auto offset = this->constant_offset(i) +
-          (constants_internal_offset[i] / aoti_torch_dtype_element_size(dtype));
+          (constants_internal_offset[non_folded_idx] / aoti_torch_dtype_element_size(dtype));
 #else
       auto offset = this->constant_offset(i);
 #endif
       auto layout = this->constant_layout(i);
       auto opaque_metadata_ptr = this->opaque_metadata(i);
       auto opaque_metadata_size = this->opaque_metadata_size(i);
+
+      non_folded_idx++; // Increment the non-folded index
 
       AtenTensorHandle tensor_handle = nullptr;
       AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_create_tensor_from_blob_v2(
