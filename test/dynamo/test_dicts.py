@@ -7,7 +7,7 @@ import operator
 import types
 import unittest
 import weakref
-from collections import defaultdict, namedtuple, OrderedDict
+from collections import defaultdict, namedtuple, OrderedDict, UserDict
 from typing import Any
 
 import torch
@@ -28,6 +28,10 @@ from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_
 
 
 class SimpleDict(dict):
+    pass
+
+
+class DummyUserDict(UserDict):
     pass
 
 
@@ -788,6 +792,17 @@ class DictTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(4)
         self.assertEqual(fn(x), opt_fn(x))
 
+    def test_construct_user_dict_and_return(self):
+        def fn(x):
+            return DummyUserDict({"a": x + 1})
+
+        x = torch.randn(4)
+        res = fn(x)
+        self.assertEqual(res["a"], x + 1)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(res["a"], opt_fn(x)["a"])
+
     def test_fn_id(self):
         def fn(x, f):
             d = {id(f): 3}
@@ -930,6 +945,25 @@ class DictTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(4)
         self.assertEqual(["b", "c", "a"], list(opt_fn(x).keys()))
         self.assertEqual(fn(x), opt_fn(x))
+
+    def test_mapping_proxy_ban_muation_on_dict_realization(self):
+        def fn(x):
+            class Foo:
+                b = 4
+
+            d = dict(Foo.__dict__)
+            y = torch.sin(x) * d["b"]
+            # This should cause a graph break, because otherwise the
+            # Foo.__dict__ will not be updated.
+            Foo.bar = 3
+            return Foo, y * Foo.__dict__["bar"]
+
+        opt_fn = torch.compile(fn, backend="eager")
+        x = torch.randn(4)
+        foo1, ref = fn(x)
+        foo2, res = opt_fn(x)
+        self.assertEqual(ref, res)
+        self.assertEqual(foo1.bar, foo2.bar)
 
     def test_overridden_get_item(self):
         class MyDict(dict):
