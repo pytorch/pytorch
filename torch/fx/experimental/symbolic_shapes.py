@@ -6251,7 +6251,6 @@ class ShapeEnv:
         hint for the particular hint values of backed and unbacked SymInts,
         e.g., if s0 happens to be 3 this run, compute_hint will substitute s0 with 3.
         """
-
         # axioms with compute hint NYE
         assert not compute_hint or not axioms
         expr = self.simplify(expr, size_oblivious)
@@ -6393,7 +6392,10 @@ class ShapeEnv:
                 if isinstance(atom.args[0], IntTrueDiv):
                     base, divisor = atom.args[0].args
                     if base % divisor == 0:
-                        trunc_replacements[atom] = base // divisor
+                        trunc_replacements[atom] = CleanDiv(base, divisor)
+                    else:
+                        # TruncToInt(IntTrueDiv(a,b)) == FloorDiv(a, b)
+                        trunc_replacements[atom] = FloorDiv(base, divisor)
             if trunc_replacements:
                 expr = expr.xreplace(trunc_replacements)
 
