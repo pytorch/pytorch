@@ -38,14 +38,26 @@ jobs:
             num_shards: 1,
             runner: "linux.aws.h100",
             op_benchmark_tests: [matmul, mm, add, bmm],
-            extra_flags: ["--use-compile", ""]
+            extra_flags: "--use-compile"
+          },
+          { config: "operator_microbenchmark_test",
+            shard: 1,
+            num_shards: 1,
+            runner: "linux.aws.h100",
+            op_benchmark_tests: [matmul, mm, add, bmm]
           },
           { config: "operator_microbenchmark_test",
             shard: 1,
             num_shards: 1,
             runner: "linux.aws.a100",
             op_benchmark_tests: [matmul, mm, add, bmm],
-            extra_flags: ["--use-compile", ""]
+            extra_flags: "--use-compile"
+          },
+          { config: "operator_microbenchmark_test",
+            shard: 1,
+            num_shards: 1,
+            runner: "linux.aws.a100",
+            op_benchmark_tests: [matmul, mm, add, bmm]
           }
         ]}
     secrets: inherit
