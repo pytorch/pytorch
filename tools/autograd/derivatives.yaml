@@ -336,6 +336,10 @@
 - name: atanh_(Tensor(a!) self) -> Tensor(a!)
   self: not_implemented("inplace version of atanh")
 
+- name: attention(Tensor query, Tensor key, Tensor value) -> (Tensor, Tensor)
+  output_differentiability: [True, True]
+  query, key, value: attention_backward(grads[0], grads[1], result1, query, key, value)
+
 - name: as_strided(Tensor(a) self, SymInt[] size, SymInt[] stride, SymInt? storage_offset=None) -> Tensor(a)
   self: as_strided_backward(grad, TensorGeometry(self), size, stride, storage_offset)
   result: auto_linear
