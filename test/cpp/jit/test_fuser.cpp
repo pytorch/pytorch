@@ -9,7 +9,6 @@
 #include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/api/module.h>
-#include <torch/csrc/jit/codegen/cuda/interface.h>
 #include <torch/csrc/jit/codegen/fuser/interface.h>
 #include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/frontend/tracer.h>
@@ -38,17 +37,9 @@
 
 #include <onnx/onnx_pb.h>
 
-#include <c10/util/Exception.h>
-
 #include <algorithm>
-#include <cstddef>
-#include <functional>
-#include <iostream>
 #include <memory>
-#include <stdexcept>
 #include <string>
-#include <tuple>
-#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -56,15 +47,8 @@ namespace torch {
 namespace jit {
 
 class FuserTest : public ::testing::Test {
-  void SetUp() override {
-    old_nvfuser_value_ = fuser::cuda::setEnabled(false);
-  }
-  void TearDown() override {
-    fuser::cuda::setEnabled(old_nvfuser_value_);
-  }
-
- private:
-  bool old_nvfuser_value_;
+  void SetUp() override {}
+  void TearDown() override {}
 };
 
 TEST_F(FuserTest, TestSimple_CUDA) {
