@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import contextlib
-from typing import Union
+from typing import Optional, Union
 from typing_extensions import deprecated
 
 import torch
@@ -151,6 +151,42 @@ class cuBLASModule:
         elif name == "fp32_precision":
             return torch._C._set_fp32_precision_setter("cuda", "matmul", value)
         raise AttributeError("Unknown attribute " + name)
+
+    @contextlib.contextmanager
+    def flags(
+        self,
+        *,
+        allow_fp16_reduced_precision_reduction: Optional[bool] = None,
+        allow_bf16_reduced_precision_reduction: Optional[bool] = None,
+        allow_fp16_accumulation: Optional[bool] = None,
+    ):
+        original = (
+            self.allow_fp16_reduced_precision_reduction,  # type: ignore[has-type]
+            self.allow_bf16_reduced_precision_reduction,  # type: ignore[has-type]
+            self.allow_fp16_accumulation,  # type: ignore[has-type]
+        )
+
+        if allow_fp16_reduced_precision_reduction is not None:
+            self.allow_fp16_reduced_precision_reduction = (
+                allow_fp16_reduced_precision_reduction
+            )
+
+        if allow_bf16_reduced_precision_reduction is not None:
+            self.allow_bf16_reduced_precision_reduction = (
+                allow_bf16_reduced_precision_reduction
+            )
+
+        if allow_fp16_accumulation is not None:
+            self.allow_fp16_accumulation = allow_fp16_accumulation
+
+        try:
+            yield
+        finally:
+            (
+                self.allow_fp16_reduced_precision_reduction,
+                self.allow_bf16_reduced_precision_reduction,
+                self.allow_fp16_accumulation,
+            ) = original
 
 
 _LinalgBackends = {
