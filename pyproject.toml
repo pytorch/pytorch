@@ -278,7 +278,7 @@ keep-runtime-typing = true
     "PYI021", # docstring-in-stub
     "PYI053", # string-or-bytes-too-long
 ]
-"functorch/notebooks/**" = [
+"functorch/docs/source/tutorials/**" = [
     "F401",
 ]
 "test/export/**" = [
