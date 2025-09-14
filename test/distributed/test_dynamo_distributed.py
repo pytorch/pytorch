@@ -551,7 +551,6 @@ class TestFakeDistributedSingleProc(torch._dynamo.test_case.TestCase):
 # Are these tests failing?  Check and see if TestFakeDistributedSingleProc has a
 # single process version; if it's just a problem in the Dynamo distributed
 # optimizer, you should be able to repro it single process!
-@requires_nccl()
 class TestMultiProc(DynamoDistributedMultiProcTestCase):
     """
     Note: MultiProcTestCase spawns processes per test and is slow.
