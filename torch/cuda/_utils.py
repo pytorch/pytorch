@@ -65,7 +65,7 @@ def _get_hiprtc_library() -> ctypes.CDLL:
     lib.nvrtcGetPTX = lib.hiprtcGetCode  # type: ignore[attr-defined]
     lib.nvrtcGetProgramLogSize = lib.hiprtcGetProgramLogSize  # type: ignore[attr-defined]
     lib.nvrtcGetProgramLog = lib.hiprtcGetProgramLog  # type: ignore[attr-defined]
-    lib.nvrtcAddNameExpression = lib.hiprtcAddNameExpression # type: ignore[attr-defined]
+    lib.nvrtcAddNameExpression = lib.hiprtcAddNameExpression  # type: ignore[attr-defined]
     lib.nvrtcGetLoweredName = lib.hiprtcGetLoweredName  # type: ignore[attr-defined]
     return lib
 
@@ -240,7 +240,10 @@ def _nvrtc_compile(
     # Get mangled name
     c_mangled_name = ctypes.c_char_p()
     check_nvrtc(libnvrtc.nvrtcGetLoweredName(prog, c_kernel_name, ctypes.byref(c_mangled_name)))
-    mangled_name = c_mangled_name.value.decode()  # make a copy
+    if c_mangled_name.value is not None:
+        mangled_name = c_mangled_name.value.decode()  # make a copy
+    else:
+        mangled_name = ""
 
     libnvrtc.nvrtcDestroyProgram(ctypes.byref(prog))
 
