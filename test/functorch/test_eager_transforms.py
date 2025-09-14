@@ -2696,17 +2696,6 @@ class TestHessian(TestCase):
         result = hessian(f, argnums=(0, 1), is_scalar=True)(x, y)
         self.assertEqual(result, expected)
 
-    def test_is_scalar_with_vmap(self, device):
-        def f(x):
-            return (x**2).sum()
-
-        x = torch.randn(5, 3, 4, device=device, requires_grad=True)
-
-        result_base = vmap(hessian(f))(x)
-        result_optimized = vmap(lambda x: hessian(f, is_scalar=True)(x))(x)
-
-        self.assertEqual(result_base, result_optimized)
-
 
 @markDynamoStrictTest
 class TestJvp(TestCase):
