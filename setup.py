@@ -1033,7 +1033,7 @@ def build_deps() -> None:
         CWD / "third_party/valgrind-headers/callgrind.h",
         CWD / "third_party/valgrind-headers/valgrind.h",
     ]
-    for sym_file, orig_file in zip(sym_files, orig_files):
+    for sym_file, orig_file in zip(sym_files, orig_files, strict=True):
         same = False
         if sym_file.exists():
             if filecmp.cmp(sym_file, orig_file):
