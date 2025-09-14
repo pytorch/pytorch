@@ -2988,16 +2988,13 @@ class AOTInductorTestsTemplate:
 
         example_inputs = (x, y, z)
         model = Model(self.device).to(dtype=torch.float)
-        if config.triton.enable_native_matmul:
-            self.check_model(
-                model,
-                example_inputs,
-                dynamic_shapes=dynamic_shapes,
-                atol=1e-5,
-                rtol=1e-5,
-            )
-        else:
-            self.check_model(model, example_inputs, dynamic_shapes=dynamic_shapes)
+        self.check_model(
+            model,
+            example_inputs,
+            dynamic_shapes=dynamic_shapes,
+            atol=1e-5,
+            rtol=1e-5,
+        )
 
     def test_fake_tensor_device_validation(self):
         if self.device != GPU_TYPE:
@@ -5908,11 +5905,7 @@ class AOTInductorTestsTemplate:
         expected = model(test_inputs)
         output = runner_call(test_inputs)
 
-        if config.triton.enable_native_matmul:
-            atol, rtol = 3e-4, 3e-4
-        else:
-            atol, rtol = None, None
-
+        atol, rtol = 3e-4, 3e-4
         self.assertEqual(expected, output, atol=atol, rtol=rtol)
 
     def test_weight_on_disk_legacy(self):
@@ -5954,11 +5947,7 @@ class AOTInductorTestsTemplate:
             pt2_contents = load_pt2(package_path, load_weights_from_disk=True)
             loaded1 = pt2_contents.aoti_runners["model"]
 
-        if config.triton.enable_native_matmul:
-            atol, rtol = 3e-4, 3e-4
-        else:
-            atol, rtol = None, None
-
+        atol, rtol = 3e-4, 3e-4
         self.assertEqual(loaded1(a), model(a), atol=atol, rtol=rtol)
 
     def test_extract_constants_map(self):
