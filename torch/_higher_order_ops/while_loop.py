@@ -12,6 +12,9 @@ from torch._higher_order_ops.utils import (
     autograd_not_implemented,
     check_input_alias_and_mutation_return_outputs,
     check_meta_consistency,
+    fill_none_with_masks,
+    filter_with_masks,
+    materialize_as_graph,
     reenter_make_fx,
     validate_subgraph_args_types,
 )
@@ -326,9 +329,16 @@ def while_loop_dense(
     return carried_vals
 
 
-while_loop_op.py_autograd_impl(
-    autograd_not_implemented(while_loop_op, deferred_error=True)
-)
+@while_loop_op.py_autograd_impl
+def while_loop_autograd(cond_fn, body_fn, operands, additional_inputs):
+    return WhileLoopAutogradOp.apply(
+        cond_fn,
+        body_fn,
+        len(operands),
+        len(additional_inputs),
+        *operands,
+        *additional_inputs,
+    )
 
 
 def _find_or_create_fake_mode() -> FakeTensorMode:
@@ -632,6 +642,268 @@ class WhileLoopStackOutputOp(HigherOrderOperator):
         validate_subgraph_args_types(carried_inputs)
         validate_subgraph_args_types(additional_inputs)
         return super().__call__(cond_fn, body_fn, carried_inputs, additional_inputs)
+
+
+# Note [while_loop autograd]
+# Consider wthe following while_loop that can be visualized as:
+#           additional_inputs
+#       ┌─────┬─────┼─────┬─────┐
+#       |     |     |     |     |
+#       ↓     ↓     ↓     ↓     ↓
+# x ──→ y0 ─→ y1 ─→ y2 ─→ y3 ─→ y4
+#
+# The bacwkard can be visualized as follows:
+#
+#             g_additional_inputs
+#         ┌──────┬──────┼──────┬──────┐
+#         |      |      |      |      |
+#         |      |      |      |      |
+# gx <── gy0 <─ gy1 <─ gy2 <─ gy3 <─ gy4
+#
+# We can compute gx using chain rule:
+#
+#     gx = gy0 * bw(y0, x),
+#
+# where gy0 denotes the graident of loss with respect to y0, and bw(y0, x) denotes the graident of y0 with
+# respect to x. Note that bw can be computed from forward body_fn easily using torch.autograd.grad.
+# We could substitute the unknowns gy0, gy1, ..., with chain rule until gy4:
+#
+#     gx = gy1 * bw(y1, y0) * bw(y0, x)
+#        = gy2 * bw(y2, y1) * bw(y1, y0) * bw(y0, x)
+#        = ...
+#        = gy4 * bw(y4, y3) * bw(y3, y2) * bw(y2, y1) * bw(y1, y0) * bw(y0, x)
+#
+# since gy4 is the graient of the final output, which is given as the backward input, we've got a formula
+# to compute gx. A abbr for the formula is: gy4 * bw43210x
+#
+# In a similar way, we can compute g_additional_inputs using chain rule:
+#
+# g_additional_inputs = gy0 * bw(y0, addi) + gy1 * bw(y1, addi) + gy2 * bw(y2, addi) + ... + gy4 * bw(y4, addi)
+#
+# Notice that gy0 = gy4 * bw43210, gy1 = gy4 * bw4321 etc, we now also get a formula for g_additional_inputs.
+#
+# Implementation:
+# The idea of implementation is to construct a while_loop to calculate both gx and g_additional_inputs.
+# Specifically, we can implement the backward of while_loop with as follows:
+#
+# def cond_fn(idx, grad_carries, grad_additional_inputs, fw_additional_inputs, fw_inps):
+#     return idx < fw_inps.size(0)
+#
+# def body_fn(idx, grad_carries, grad_additional_inputs, fw_additional_inputs, fw_inps):
+#     reversed_idx = fw_inps.size(0) - 1 - idx
+#     next_grad_carry, next_grad_additional_inputs  = bw(fw_inps[reversed_idx], fw_additional_inputs, grad_carries)
+#     return idx + 1, next_grad_carry, next_grad_additional_inputs + grad_additional_inputs
+#
+# idx = 0
+# init_grad_carries = grads
+# init_grad_additional_inputs = torch.zeros_like(g_additioanl_inputs)
+# fw_inps = torch.cat([ctx.fw_carried_inputs, fw_outputs[:-1]])
+# while_loop(cond_fn, body_fn, (idx, init_grad_carries, init_grad_additional_inputs,), (fw_additional_inputs, fw_inps))
+
+
+class WhileLoopAutogradOp(torch.autograd.Function):
+    @staticmethod
+    def forward(
+        ctx,
+        cond_fn,
+        body_fn,
+        num_carried_inputs,
+        num_additional_inputs,
+        *carries_and_inputs,
+    ):
+        from torch._higher_order_ops.scan import split_into_chunks
+
+        carries, additional_inputs = split_into_chunks(
+            carries_and_inputs, [num_carried_inputs, num_additional_inputs]
+        )
+        with torch._C._AutoDispatchBelowAutograd():
+            fw_outputs = while_loop_stack_output_op(
+                cond_fn, body_fn, carries, additional_inputs
+            )
+
+        assert not hasattr(ctx, "fw_cond_fn")
+        assert not hasattr(ctx, "fw_body_fn")
+        assert not hasattr(ctx, "carries")
+        assert not hasattr(ctx, "additional_inputs")
+        assert not hasattr(ctx, "fw_outputs")
+        ctx.fw_cond_fn = cond_fn
+        ctx.fw_body_fn = body_fn
+        ctx.carries = carries
+        ctx.additional_inputs = additional_inputs
+        ctx.fw_outputs = fw_outputs
+        loop_count = None
+        for out in fw_outputs:
+            if isinstance(out, torch.Tensor):
+                if loop_count is not None:
+                    assert out.size(0) == loop_count
+                else:
+                    loop_count = out.size(0)
+        assert loop_count is not None
+
+        # Remove the loop_count from pending_fresh_unbacked_symbols
+        # because it's not part of forward output and it's impossible
+        # to bind it to a proxy in forward graph anyways.
+        if (
+            isinstance(loop_count, torch.SymInt)
+            and (shape_env := loop_count.node.shape_env)
+            and loop_count in shape_env.pending_fresh_unbacked_symbols
+        ):
+            shape_env.pending_fresh_unbacked_symbols.remove(loop_count)
+
+        # Even when body function is not executed, we clone and unsqueeze the input
+        # to avoid the aliasing, therefore loop_count is always >= 1
+        torch._check(loop_count >= 1)
+        # We snapshot the dispatch keys in forward for materializing the
+        # the bw_graph in backward.
+        ctx._fw_include_key_set = torch._C._dispatch_tls_local_include_set()
+        ctx._fw_exclude_key_set = torch._C._dispatch_tls_local_exclude_set()
+        assert len(fw_outputs) > 0, "fw_outputs shouldn't be empty"
+        # Only the last of the output fw_outputs need to be returned
+        return tuple(ckp[-1] for ckp in fw_outputs)
+
+    @staticmethod
+    def backward(ctx, *grads):
+        from torch._higher_order_ops.cond import create_bw_fn
+        from torch._higher_order_ops.scan import split_into_chunks
+
+        # set up single step bw fn
+        bw_body_fn = create_bw_fn(ctx.fw_body_fn, ctx.carries + ctx.additional_inputs)
+        # Note [Handle inputs that're not differentiable]
+        # When a forward input is non-differentiable e.g. a symint or an integer tensor, their gradients
+        # will be None. However, we don't want to return None in the subgraph because this complicates the
+        # inductor codegen, where we need to do a non-unform treatment for None and tensors.
+        # So we set up masks and filter the None gradients so that only tensors are returned from each step.
+        carries_tensor_masks = [
+            True if isinstance(t, torch.Tensor) and t.dtype.is_floating_point else False
+            for t in ctx.carries
+        ]
+        additional_inputs_tensor_masks = [
+            True if isinstance(t, torch.Tensor) and t.dtype.is_floating_point else False
+            for t in ctx.additional_inputs
+        ]
+
+        init_idx = torch.zeros((), dtype=torch.int64)
+        init_grad_carries = filter_with_masks(grads, carries_tensor_masks)  # type: ignore[arg-type]
+        init_grad_additional_inputs = tuple(
+            torch.zeros_like(t)
+            for need_keep, t in zip(
+                additional_inputs_tensor_masks, ctx.additional_inputs
+            )
+            if need_keep
+        )
+        # We need to the forward inputs to each iteration to compute the backward
+        # which is the concatenation of first iteraiton input i.e. ctx.carries and all iterations's
+        # output except the last iteration.
+        fw_carries = [
+            torch.cat([carry.unsqueeze(0), carries[:-1]])
+            for carry, carries in zip(ctx.carries, ctx.fw_outputs)
+        ]
+        for fw_carry, carry in zip(fw_carries, ctx.carries):
+            fw_carry.requires_grad_(carry.requires_grad)
+
+        _, spec = pytree.tree_flatten(
+            (
+                init_idx,
+                init_grad_carries,
+                init_grad_additional_inputs,
+                ctx.fw_outputs,
+                ctx.additional_inputs,
+            )
+        )
+
+        def cond_fn(*flat_args):
+            (
+                idx,
+                grad_carries,
+                grad_additional_inputs,
+                fw_carries,
+                additional_inputs,
+            ) = pytree.tree_unflatten(flat_args, spec)
+            assert isinstance(fw_carries[0], torch.Tensor), fw_carries[0]
+            # excluding the last iteration's output
+            return idx < fw_carries[0].size(0)
+
+        def body_fn(*flat_args):
+            (
+                idx,
+                grad_carries,
+                grad_additional_inputs,
+                fw_carries,
+                additional_inputs,
+            ) = pytree.tree_unflatten(flat_args, spec)
+            reversed_idx = fw_carries[0].size(0) - idx - 1
+            selected_fw_carries = [
+                ckp.select(0, reversed_idx.item()) for ckp in fw_carries
+            ]
+            cur_grad_carries, cur_grad_additional_inputs = split_into_chunks(
+                bw_body_fn(*selected_fw_carries, *additional_inputs, *grad_carries),
+                [len(ctx.carries), len(ctx.additional_inputs)],
+            )
+            assert all(isinstance(t, torch.Tensor) for t in cur_grad_carries)
+            cur_grad_carries_tensors = filter_with_masks(
+                cur_grad_carries, carries_tensor_masks
+            )
+            cur_grad_additional_inputs_tensors = filter_with_masks(
+                cur_grad_additional_inputs, additional_inputs_tensor_masks
+            )
+            return (
+                idx + 1,
+                *cur_grad_carries_tensors,
+                *(
+                    cur_grad + grad
+                    for cur_grad, grad in zip(
+                        cur_grad_additional_inputs_tensors, grad_additional_inputs
+                    )
+                ),
+            )
+
+        args_single_step_bw = (
+            init_idx,
+            *init_grad_carries,
+            *init_grad_additional_inputs,
+            *fw_carries,
+            *ctx.additional_inputs,
+        )
+
+        cond_gm = materialize_as_graph(
+            cond_fn,
+            args_single_step_bw,
+            ctx._fw_include_key_set,
+            ctx._fw_exclude_key_set,
+            force_enable_grad=True,
+        )
+
+        body_gm = materialize_as_graph(
+            body_fn,
+            args_single_step_bw,
+            ctx._fw_include_key_set,
+            ctx._fw_exclude_key_set,
+            force_enable_grad=True,
+        )
+
+        _, final_grad_carries, final_grad_additional_inputs = split_into_chunks(
+            while_loop_op(
+                cond_gm,
+                body_gm,
+                (
+                    init_idx,
+                    *init_grad_carries,
+                    *init_grad_additional_inputs,
+                ),
+                (*fw_carries, *ctx.additional_inputs),
+            ),
+            [1, len(init_grad_carries), len(init_grad_additional_inputs)],
+        )
+        return (
+            None,
+            None,
+            None,
+            None,
+            *fill_none_with_masks(final_grad_carries, carries_tensor_masks),
+            *fill_none_with_masks(
+                final_grad_additional_inputs, additional_inputs_tensor_masks
+            ),
+        )
 
 
 while_loop_stack_output_op = WhileLoopStackOutputOp()
