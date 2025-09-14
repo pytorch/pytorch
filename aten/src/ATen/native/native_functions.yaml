@@ -2517,7 +2517,7 @@
   dispatch:
     CompositeExplicitAutograd: empty_like
     QuantizedCPU, QuantizedCUDA: empty_like_quantized
-    SparseCPU, SparseCUDA, SparseMeta: empty_like_sparse_coo
+    SparseCPU, SparseCUDA, SparseMPS, SparseMeta: empty_like_sparse_coo
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: empty_like_sparse_csr
     NestedTensorCPU, NestedTensorHPU, NestedTensorCUDA: empty_like_nested
   autogen: empty_like.out
@@ -6492,7 +6492,7 @@
   device_guard: False
   dispatch:
     CompositeExplicitAutograd: unsqueeze
-    SparseCPU, SparseCUDA: unsqueeze_sparse
+    SparseCPU, SparseCUDA, SparseMPS: unsqueeze_sparse
     QuantizedCPU, QuantizedCUDA: unsqueeze_quantized
     NestedTensorCPU, NestedTensorHPU, NestedTensorCUDA: unsqueeze_nested
   tags: core

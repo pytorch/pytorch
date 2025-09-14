@@ -1164,9 +1164,9 @@ class TestSparse(TestSparseBase):
                                     "Concatenating sparse tensors, but a dense tensor was found at position 1."):
             torch.cat((sp, dn))
 
-    @expectedFailureMPS
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
+    @dtypesIfMPS(torch.float32, torch.complex64)
     def test_unsqueeze(self, device, dtype, coalesced):
         def test_shape(sparse_dims, nnz, sizes, unsqueeze_dim, fail_message=None):
             x, _, _ = self._gen_sparse(sparse_dims, nnz, sizes, dtype, device, coalesced)
@@ -2353,14 +2353,14 @@ class TestSparse(TestSparseBase):
             self.assertTrue(result.layout == torch.strided)
 
         with self.assertRaisesRegex(
-            RuntimeError, r"Could not run 'aten::empty_strided' with arguments from the 'Sparse(CPU|CUDA)' backend"
+            RuntimeError, r"Could not run 'aten::empty_strided' with arguments from the 'Sparse(CPU|CUDA|MPS)' backend"
         ):
             dense_tensor = sparse_tensor.to_dense()
             result = torch.empty_like(dense_tensor, layout=torch.sparse_coo)
 
     @coalescedonoff
-    @expectedFailureMPS
     @dtypes(torch.double, torch.cdouble)
+    @dtypesIfMPS(torch.float32, torch.complex64)
     def test_empty_like(self, device, dtype, coalesced):
         # tests https://github.com/pytorch/pytorch/issues/43699
 
