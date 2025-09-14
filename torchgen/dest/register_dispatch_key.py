@@ -32,6 +32,8 @@ from torchgen.model import (
     DispatchKey,
     gets_generated_out_inplace_wrapper,
     is_cuda_dispatch_key,
+    is_mps_dispatch_key,
+    is_xpu_dispatch_key,
     NativeFunction,
     NativeFunctionsGroup,
     SchemaKind,
@@ -79,6 +81,7 @@ def gen_registration_headers(
         headers.append("#include <ATen/Functions.h>")
 
     headers.append("#include <c10/macros/Macros.h>")
+    headers.append("#include <c10/core/FallbackDetector.h>")  # Add FallbackDetector for device checks
     return headers
 
 
@@ -275,7 +278,24 @@ class RegisterDispatchKey:
     ) -> str:
         if type == DeviceCheckType.NoCheck:
             return "  // No device check\n"
+        
+        if type == DeviceCheckType.FallbackAware:
+            # Use fallback-aware device checking
+            device_check = "{\n"
+            device_check += "  std::vector<c10::Device> devices;\n"
+            for arg in args:
+                if arg.type.is_tensor_like():
+                    device_check += f"  if ({arg.name}.defined()) devices.push_back({arg.name}.device());\n"
+                elif arg.type.is_list_like() and arg.type.elem.is_tensor_like():
+                    device_check += f"""  for (const auto& tensor : {arg.name}) {{
+    if (tensor.defined()) devices.push_back(tensor.device());
+  }}
+"""
+            device_check += f'  if (!devices.empty()) c10::FallbackAwareDeviceChecker::validate_device_compatibility(devices, "{method_name}");\n'
+            device_check += "}\n"
+            return device_check
 
+        # Default ExactSame behavior
         device_check = "std::optional<Device> common_device = std::nullopt;\n"
         device_check += "(void)common_device; // Suppress unused variable warning\n"
         for arg in args:
