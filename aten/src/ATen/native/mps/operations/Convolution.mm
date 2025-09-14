@@ -1,23 +1,11 @@
 //  Copyright © 2022 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/ConvUtils.h>
-#include <ATen/native/mps/MPSGraphVenturaOps.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/ops/_mps_convolution_native.h>
 #include <ATen/ops/_mps_convolution_transpose_native.h>
 #include <ATen/ops/mps_convolution_backward_native.h>
 #include <ATen/ops/mps_convolution_transpose_backward_native.h>
-
-#if !defined(__MAC_13_2) && (!defined(MAC_OS_X_VERSION_13_2) || (MAC_OS_X_VERSION_MIN_REQUIRED < MAC_OS_X_VERSION_13_2))
-
-@implementation FakeMPSGraphConvolution3DOpDescriptor
-- (nonnull id)copyWithZone:(nullable NSZone*)zone {
-  return self;
-}
-
-@end
-
-#endif
 
 namespace at::native {
 
@@ -50,11 +38,9 @@ static void fill_conv3d_desc(MPSGraphConvolution3DOpDescriptor* descriptor_,
   descriptor_.paddingFront = paddingDepth;
   descriptor_.paddingBack = paddingDepth;
 
-  // PyTorch always uses NCDHW memory layout for 3D tensors
-  descriptor_.dataLayout = (MPSGraphTensorNamedDataLayout)7L; // MPSGraphTensorNamedDataLayoutNCDHW;
+  descriptor_.dataLayout = MPSGraphTensorNamedDataLayoutNCDHW;
 
-  // PyTorch always uses OIDHW memory layout for 3D weights
-  descriptor_.weightsLayout = (MPSGraphTensorNamedDataLayout)9L; // MPSGraphTensorNamedDataLayoutOIDHW;
+  descriptor_.weightsLayout = MPSGraphTensorNamedDataLayoutOIDHW;
 
   descriptor_.groups = groups; // not yet tested in Xcode/C++
 }
