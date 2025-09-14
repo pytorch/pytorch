@@ -1625,9 +1625,9 @@ test_operator_microbenchmark() {
   cd "${TEST_DIR}"/benchmarks/operator_benchmark
   tests=${OP_BENCHMARK_TESTS:?OP_BENCHMARK_TESTS must be set}
   for t in $tests; do
-    $TASKSET python -m "pt.${t}_test" --tag-filter long \
+    $TASKSET python -m pt.${t}_test --tag-filter long \
       --output-json-for-dashboard "${TEST_REPORTS_DIR}/operator_microbenchmark.json" \
-      --benchmark-name "PyTorch operator microbenchmark" $EXTRA_FLAGS \
+      --benchmark-name "PyTorch operator microbenchmark" $EXTRA_FLAGS
   done
 }
 
