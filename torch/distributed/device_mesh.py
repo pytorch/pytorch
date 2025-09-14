@@ -454,7 +454,9 @@ if True:  # just to temporarily avoid reindentation
                 world_size = get_world_size()
             except RuntimeError:
                 logger.error(
-                    "DeviceMesh construction requires the distributed environment to be initialized first. "
+                    "`DeviceMesh` construction requires information from the distribute environment. "
+                    "Please call `torch.distributed.init` to initialize the environment before using "
+                    "the `DeviceMesh` constructor. "
                 )
                 raise
 
