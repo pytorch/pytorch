@@ -2847,14 +2847,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 expand_shape = tuple(expand_list)
                 index_str = f"tl.broadcast_to({index_str}, {expand_str})"
             else:
-<<<<<<< HEAD
                 expand_str, expand_shape = _get_expand_str()
-=======
-                expand_str = (
-                    f"{copy_shape}.shape" if copy_shape else self.dense_size_str()
-                )
-                expand_shape = None if copy_shape else tuple(self.dense_size_list())
->>>>>>> lint fix
                 index_str = f"tl.broadcast_to({index_str}, {expand_str})"
                 mask_vars = dense_mask_vars
         elif not have_loop_vars and copy_shape:
