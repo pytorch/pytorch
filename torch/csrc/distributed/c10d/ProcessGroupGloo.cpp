@@ -797,10 +797,7 @@ class AsyncBroadcastWork : public ProcessGroupGloo::AsyncWork {
   const int rootTensor;
   const uint32_t tag;
 
-  void broadcast(at::Tensor tensor) {
-    if (tensor.is_complex()) {
-      tensor = at::view_as_real(tensor);
-    }
+  void broadcast(at::Tensor& tensor) {
     const auto& scalarType = tensor.scalar_type();
     gloo::BroadcastOptions opts(context_);
     opts.setRoot(rootRank);
@@ -1131,22 +1128,13 @@ class AsyncReduceWork : public ProcessGroupGloo::AsyncWork {
   const uint32_t tag;
 
   void reduce(std::vector<at::Tensor>& tensors) {
-    auto tensor = tensors[0];
-    if (tensor.is_complex()) {
-      TORCH_CHECK(
-          c10d::isComplexViewAsRealAllowed(reduceOp),
-          "reduce does not support",
-          reduceOp,
-          "on complex tensors");
-      tensor = at::view_as_real(tensor);
-    }
+    const auto& scalarType = tensors[0].scalar_type();
     gloo::ReduceOptions opts(context_);
-    const auto& scalarType = tensor.scalar_type();
     opts.setRoot(rootRank);
     opts.setTag(tag);
     opts.setReduceFunction(getFunction(scalarType, reduceOp));
     opts.setTimeout(timeout_);
-    GENERATE_ALL_TYPES(scalarType, setOutput, opts, tensor);
+    GENERATE_ALL_TYPES(scalarType, setOutput, opts, tensors[0]);
     gloo::reduce(opts);
 
     // Gloo doesn't support AVG so we use SUM + division.
