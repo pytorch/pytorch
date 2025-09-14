@@ -5335,6 +5335,10 @@ class Scheduler:
                 seen.add(key)
 
         self.current_device = self.default_device_context
+
+        if self.default_device_context and config.triton.autotune_at_compile_time:
+            V.graph.wrapper_code.write_get_raw_stream_header()
+
         for node in nodes:
             if log.isEnabledFor(logging.DEBUG):
                 try:
