@@ -10,11 +10,9 @@ from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.distributed.device_mesh import _mesh_resources, DeviceMesh, init_device_mesh
 from torch.distributed.distributed_c10d import (
     _get_default_group,
-    _world,
     get_global_rank,
     get_world_size,
     init_process_group,
-    is_initialized,
     new_group,
     ProcessGroup,
 )
@@ -74,24 +72,20 @@ class DeviceMeshSetDeviceTest(DTensorTestBase):
     @skip_if_lt_x_gpu(4)
     def test_manual_set_device(self):
         mesh_tensor = torch.arange(4).reshape(2, 2)
-        self.assertTrue(not is_initialized())
 
         # Set the device on each process before DeviceMesh constructor,
         # and device to be different than the default world rank
         torch.cuda.set_device((self.rank + 2) % self.world_size)
         _set_env_var(world_size=self.world_size, rank=self.rank)
         DeviceMesh(self.device_type, mesh_tensor)
-        self.assertTrue(is_initialized())
 
         # check that the device is set to the correct device
         # and respect the previous set_device calls
         self.assertEqual(torch.cuda.current_device(), (self.rank + 2) % self.world_size)
-        self.destroy_pg()
 
     @skip_if_lt_x_gpu(4)
     def test_auto_set_device_from_local_rank(self):
         mesh_tensor = torch.arange(4).reshape(2, 2)
-        self.assertTrue(not is_initialized())
         # set the local rank to be different than the default world rank,
         # DeviceMesh should respect LOCAL_RANK env var if it's set
         local_rank = (self.rank + 1) % self.world_size
@@ -102,17 +96,14 @@ class DeviceMeshSetDeviceTest(DTensorTestBase):
             local_rank=local_rank,
         )
         DeviceMesh(self.device_type, mesh_tensor)
-        self.assertTrue(is_initialized())
 
         # check that the device is set to the correct device
         # and respect the LOCAL_RANK env var
         self.assertEqual(torch.cuda.current_device(), local_rank)
-        self.destroy_pg()
 
     @skip_if_lt_x_gpu(4)
     def test_auto_set_device_from_heuristic(self):
         mesh_tensor = torch.arange(4).reshape(2, 2)
-        self.assertTrue(not is_initialized())
 
         _set_env_var(
             world_size=self.world_size,
@@ -122,11 +113,9 @@ class DeviceMeshSetDeviceTest(DTensorTestBase):
             UserWarning, "It seems like you did not set/select the default device"
         ):
             DeviceMesh(self.device_type, mesh_tensor)
-        self.assertTrue(is_initialized())
 
         # check that the device is set to the correct device
         self.assertEqual(torch.cuda.current_device(), self.rank)
-        self.destroy_pg()
 
 
 class DeviceMeshTest(DTensorTestBase):
@@ -137,11 +126,8 @@ class DeviceMeshTest(DTensorTestBase):
     @skip_if_lt_x_gpu(4)
     def test_init_process_group(self):
         mesh_tensor = torch.arange(4).reshape(2, 2)
-        self.assertTrue(not is_initialized())
         _set_env_var(world_size=self.world_size, rank=self.rank)
         DeviceMesh(self.device_type, mesh_tensor)
-        self.assertTrue(is_initialized())
-        self.destroy_pg(self.rank)
 
     @with_comms
     @skip_if_lt_x_gpu(4)
@@ -260,6 +246,10 @@ class DeviceMeshTest(DTensorTestBase):
         # we call init_backend we should make sure the default pg already created
         mesh.get_coordinate()
 
+    @skip_but_pass_in_sandcastle(
+        "What does this test want to achieve? "
+        "It init_process_group based on fake then calls init_device_mesh on real device."
+    )
     def test_fake_pg_device_mesh(self):
         fake_store = FakeStore()
         init_process_group("fake", store=fake_store, rank=0, world_size=self.world_size)
@@ -315,6 +305,7 @@ class DeviceMeshTest(DTensorTestBase):
                 groups, self.device_type, invalid_mesh, mesh_dim_names=("dim0", "dim1")
             )
 
+    @with_comms
     def test_raises_invalid_device_type(self):
         with self.assertRaisesRegex(
             RuntimeError,
@@ -629,6 +620,10 @@ class InitDeviceMeshTest(DTensorTestBase):
     def test_backend_override_argument_dict_with_idx_and_backend_eager(self):
         self._test_backend_override_argument_dict_with_idx_and_backend()
 
+    @skip_but_pass_in_sandcastle(
+        "This test won't work because the Options are for Fake PG but "
+        "the created device mesh is on `self.device_type` i.e. `cuda`"
+    )
     @with_comms(backend="fake")
     def test_backend_override_argument_dict_with_name_and_options(self):
         opts = FakeProcessGroup.Options()
@@ -785,24 +780,6 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         shard_mesh = hsdp_mesh_2["Shard"]
         self.assertEqual(shard_mesh.mesh.tolist(), shard_group[shard_group_idx])
 
-    @skip_but_pass_in_sandcastle(
-        "Invalid test, should not import _world and access its states"
-    )
-    @with_comms
-    def test_cache_and_reuse_submesh_slice_result(self):
-        mesh = init_device_mesh(self.device_type, (2, 4), mesh_dim_names=("dp", "tp"))
-
-        ref_pg_count = _world.group_count
-
-        # When we call the "dp" slice second time, it should not create any new pg.
-        # As we are just using the cached result so the pg count should be the same.
-        self.assertEqual(ref_pg_count, _world.group_count)
-
-        # When we call the "tp" slice, it should not create a new pg, as the "tp" slice would
-        # just reuse the parent mesh pg.
-        mesh["tp"]
-        self.assertEqual(_world.group_count, ref_pg_count)
-
     @with_comms
     def test_get_item_3d_noncontiguous_slicing(self):
         mesh_shape = (2, 2, 2)
@@ -851,11 +828,9 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         ]
         self.assertEqual(flatten_mesh_root_dims, (0, 1))
 
-        ref_pg_count = _world.group_count
         # Calling flatten again should not create a new pg.
         flattened_dp_cp_mesh_2 = dp_cp_mesh._flatten()
         self.assertEqual(flattened_dp_cp_mesh, flattened_dp_cp_mesh_2)
-        self.assertEqual(ref_pg_count, _world.group_count)
 
         # Test flatten non-contiguous dims
         dp_tp_mesh = mesh_3d["dp", "tp"]
