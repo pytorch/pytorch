@@ -270,7 +270,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor> mha_varle
 #endif
 
 TORCH_API
-std::tuple<
+inline std::tuple<
     at::Tensor,
     at::Tensor,
     at::Tensor,
@@ -294,7 +294,42 @@ mha_fwd(
     std::optional<int64_t> window_size_right,
     const float softcap,
     const bool return_softmax,
-    std::optional<at::Generator> gen_);
+    std::optional<at::Generator> gen_) {
+#if defined(USE_ROCM_CK_SDPA)
+  if (at::globalContext().getROCmFAPreferredBackend() ==
+      at::ROCmFABackend::Ck) {
+    const int non_null_window_left = window_size_left.value_or(-1);
+    const int non_null_window_right = window_size_right.value_or(-1);
+    std::optional<at::Tensor> dummy_attn_bias = std::nullopt;
+    return mha_fwd_ck(
+        q,
+        k,
+        v,
+        out_,
+        p_dropout,
+        softmax_scale,
+        is_causal,
+        non_null_window_left,
+        non_null_window_right,
+        return_softmax,
+        gen_,
+        dummy_attn_bias); // Not used in flash attention
+  }
+#endif
+  return mha_fwd_aot(
+      q,
+      k,
+      v,
+      out_,
+      alibi_slopes_,
+      p_dropout,
+      softmax_scale,
+      is_causal,
+      window_size_left,
+      window_size_right,
+      return_softmax,
+      gen_);
+}
 
 inline std::tuple<
     at::Tensor,
