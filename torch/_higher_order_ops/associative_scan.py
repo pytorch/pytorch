@@ -491,81 +491,81 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
             This creates a recursive data dependency structure where each output yst
             depends on all prior inputs xs0 through xst. The dependency can be visualized as:
 
-    Level 0 (Input):    xs0    xs1    xs2    xs3    xs4
-                        \    /       |      |      |
-                        \  /        |      |      |
-    Level 1:               ys1 ───────┘      |      |
-                            \               /       |
-                            \             /        |
-    Level 2:                  ys2 ────────┘         |
-                            \                   /
-                                \                 /
-    Level 3:                     ys3 ────────────┘
-                                \
-                                \
-    Level 4:                        ys4
-
-
-    We could get the following backward gradient graph:
-
-
-    Level 0 (output):   g_xs0   g_xs1   g_xs2   g_xs3   g_xs4
-                        \      /       |       |     |
-                        \    /        |       |     |
-    Level 1:    gl_ys1  ─> g_ys1  ──────┘       |     |
-                            \                  /      |
-                            \                /       |
-    Level 2:    gl_ys2     ─> g_ys2  ────────┘        |
-                            \                     /
+        Level 0 (Input):    xs0    xs1    xs2    xs3    xs4
+                            \    /       |      |      |
+                            \  /        |      |      |
+        Level 1:               ys1 ───────┘      |      |
+                                \               /       |
+                                \             /        |
+        Level 2:                  ys2 ────────┘         |
                                 \                   /
-    Level 3:    gl_ys3        ─> g_ys3  ───────────┘
-                                \
-                                \
-    Level 4:    gl_ys4           ─> g_ys4,
+                                    \                 /
+        Level 3:                     ys3 ────────────┘
+                                    \
+                                    \
+        Level 4:                        ys4
 
-    where gl_y1 is the gradient of the loss with respect to ys1 and the input of backward.
 
-    To calculate the gradients of the inputs, the chain rule suggests:
+        We could get the following backward gradient graph:
 
-    g_xs0 = g_ys1
-    g_xs1 = g_ys1 * bw(ys0, xs1) = g_ys1 * bwxs01
-    g_xs2 = g_ys2 * bw(ys1, xs2) = g_ys2 * bwxs12
-    g_xs3 = g_ys3 * bw(ys2, xs3) = g_ys3 * bwxs23
-    g_xs4 = g_ys4 * bw(ys3, xs4) = g_ys4 * bwxs34
 
-    Notice the bw(...) is just the single step bw (instantaneous gradients), whose formula can be computed from combine_fn.
-    For example bw(ys3, xs4) (also abbreviated with bwxs34) computes the gradients ∂/∂xs4 combine_fn(ys3, xs4).
-    Similarly, bw(ys4, ys3) (also abbreviated with bwys43) computes the gradients ∂/∂ys3 combine_fn(ys3, xs4).
+        Level 0 (output):   g_xs0   g_xs1   g_xs2   g_xs3   g_xs4
+                            \      /       |       |     |
+                            \    /        |       |     |
+        Level 1:    gl_ys1  ─> g_ys1  ──────┘       |     |
+                                \                  /      |
+                                \                /       |
+        Level 2:    gl_ys2     ─> g_ys2  ────────┘        |
+                                \                     /
+                                    \                   /
+        Level 3:    gl_ys3        ─> g_ys3  ───────────┘
+                                    \
+                                    \
+        Level 4:    gl_ys4           ─> g_ys4,
 
-    Let's break down how to calculate g_ys by recursively substituting the unknowns:
+        where gl_y1 is the gradient of the loss with respect to ys1 and the input of backward.
 
-    g_ys1 = gl_ys1 + g_ys2 * bw(ys2, ys1)
-          = gl_ys1 + (gl_ys2  + g_ys3 * bw(ys3, ys2)) * bw(ys2, ys1)
-          = gl_ys1 + gl_ys2 * bw(ys2, ys1) + g_ys3 * bw(ys3, ys2) * bw(y2, y1)
-          = gl_ys1 + gl_ys2 * bw(ys2, ys1) + gl_ys3 * bw(ys3, ys2) * bw(y2, y1) \
-                   + gl_ys4 * bw(ys4, ys3) * bw(ys3, ys2) * bw(ys2, ys1)
-    g_ys1 = gl_ys1 + gl_ys2 * bw(ys2, ys1) + gl_ys3 * bw(ys3, ys2) * bw(y2, y1) \
-                   + gl_ys4 * bw(ys4, ys3) * bw(ys3, ys2) * bw(ys2, ys1)
+        To calculate the gradients of the inputs, the chain rule suggests:
 
-    Let's do the same for all the g_ys:
-    g_ys2 = gl_ys2 + gl_ys3 * bw(ys3, ys2) + gl_ys4 * bw(ys4, ys3) * bw(ys3, ys2)
-    g_ys3 = gl_ys3 + gl_ys4 * bw(ys4, ys3)
-    g_ys4 = gl_ys4
+        g_xs0 = g_ys1
+        g_xs1 = g_ys1 * bw(ys0, xs1) = g_ys1 * bwxs01
+        g_xs2 = g_ys2 * bw(ys1, xs2) = g_ys2 * bwxs12
+        g_xs3 = g_ys3 * bw(ys2, xs3) = g_ys3 * bwxs23
+        g_xs4 = g_ys4 * bw(ys3, xs4) = g_ys4 * bwxs34
 
-    Notice that the above can be re-written as columnwise multiplication of y_mat and gl_ys:
+        Notice the bw(...) is just the single step bw (instantaneous gradients), whose formula can be computed from combine_fn.
+        For example bw(ys3, xs4) (also abbreviated with bwxs34) computes the gradients ∂/∂xs4 combine_fn(ys3, xs4).
+        Similarly, bw(ys4, ys3) (also abbreviated with bwys43) computes the gradients ∂/∂ys3 combine_fn(ys3, xs4).
 
-    g_ys1   1, bwys21, bwys321, bwys4321       gl_ys1
-    g_ys2 = 0,    1  , bwys321, bwys4321   .   gl_ys2
-    g_ys3   0,    0  ,     1  , bwys4321       gl_ys3
-    g_ys4   0,    0  ,     0  ,        1       gl_ys4,
+        Let's break down how to calculate g_ys by recursively substituting the unknowns:
 
-    where bwys21 is an abbreviation for bw(ys2, ys1),
-    bwys321 is an abbreviation for bw(ys3, ys2) * bw(ys2, ys1) so on and so forth.
+        g_ys1 = gl_ys1 + g_ys2 * bw(ys2, ys1)
+            = gl_ys1 + (gl_ys2  + g_ys3 * bw(ys3, ys2)) * bw(ys2, ys1)
+            = gl_ys1 + gl_ys2 * bw(ys2, ys1) + g_ys3 * bw(ys3, ys2) * bw(y2, y1)
+            = gl_ys1 + gl_ys2 * bw(ys2, ys1) + gl_ys3 * bw(ys3, ys2) * bw(y2, y1) \
+                    + gl_ys4 * bw(ys4, ys3) * bw(ys3, ys2) * bw(ys2, ys1)
+        g_ys1 = gl_ys1 + gl_ys2 * bw(ys2, ys1) + gl_ys3 * bw(ys3, ys2) * bw(y2, y1) \
+                    + gl_ys4 * bw(ys4, ys3) * bw(ys3, ys2) * bw(ys2, ys1)
 
-    We could effectively compute the upper triangular matrix y_mat with:
-    cumprod([1, bwys21, bwys32, bwys43]) then masking out the values as needed.
-    Thus, only [1, bwys21, bwys32, bwys43] are required to compute the y_mat.
+        Let's do the same for all the g_ys:
+        g_ys2 = gl_ys2 + gl_ys3 * bw(ys3, ys2) + gl_ys4 * bw(ys4, ys3) * bw(ys3, ys2)
+        g_ys3 = gl_ys3 + gl_ys4 * bw(ys4, ys3)
+        g_ys4 = gl_ys4
 
+        Notice that the above can be re-written as an associative_scan operation with
+
+        def g_ys_combine_fn_rev(bw_gl, bw_next_gl_next):
+            bw, gl = bw_gl
+            bw_next, gl_next = bw_next_gl_next
+            bw_prod = bw * bw_next
+            gl_acc = gl_next + bw_next * gl
+            return bw_prod, gl_acc
+
+        gl_ys_pinit = [gl_ys4, gl_ys3, gl_ys2, gl_ys1, 0]
+        bwys_pinit =  [bwys43, bwys32, bwys21,      1, 1]
+
+        g_ys_inputs = (bwys_pinit, gl_ys_pinit)
+        g_ys = associative_scan_op(g_ys_combine_fn_rev, g_ys_inputs, ())[1][1:]
 
         References: https://justintchiu.com/blog/pscan_diff/
 
@@ -596,55 +596,32 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
                 bwys = [bw(ys1, ys0), bw(ys2, ys1), ..., bw(ysT, ys{T-1})]
                 bwxs = [bw(ys1, xs0), bw(ys2, xs1), ..., bw(ys{T-1}, xsT)]
 
-        5.) Compute the gradient transition matrix y_mat
+        5.) Compute the gradients using an associative_scan
 
             As shown in the example above, each input xst affects all later outputs ysi for i ≥ t.
             According to the chain rule, each such path contributes a product of local gradients g_ysk.
 
             For example:
-                ∂ysT/∂xst = ∂ysT/∂ys{T-1} * ∂ys{T-1}/∂ys{T-2} * ... * ∂ys{t+1}/∂yst * ∂yst/∂xst
-                        = bw(ysT, ys{T-1}) * bw(ys{T-1}, ys{T-2}) * ... * bw(ys{t+1}, yst) * bw(ys{t-1}, xst)
+                g_yst = gl_yst + g_ys{t+1} * bw(ys{t+1}, yst)
 
-            This motivates the use of a cumulative product over bwys to compute all such paths efficiently.
+            This motivates the use of an right-to-left associative scan with bwys and gl_ys to compute all such paths efficiently.
 
-            We now construct the matrix of gradient transition paths:
+            5.1) Append the initial values for the associative_scan operation to gl_ys and bwys
 
-            5.1 Repeat g_y values to form the base matrix
-                y_mat = [[1, bwys21, bwys32, bwys43],
-                         [1, bwys21, bwys32, bwys43],
-                         [1, bwys21, bwys32, bwys43],
-                         [1, bwys21, bwys32, bwys43]]
+                The initial values for the gls is 0:
+                gl_ys_pinit = torch.cat([gl_ys, torch.zeros_like(gl_ys[0:1])], 0).
 
-            5.2 Mask the lower triangle (inclusive) with 1s
-                y_mat = [[1, bwys21, bwys32, bwys43],
-                         [1, 1     , bwys32, bwys43],
-                         [1, 1     , 1     , bwys43],
-                         [1, 1     , 1     , 1    ]]
+                The initial value for the bwys is 1 and in addition, since ys0 = xs0,
+                the first bwys is always 1 (see example above), resultig in:
+                bwys_pinit = torch.cat([bwys[1:], torch.ones_like(bwys[0:1]), torch.ones_like(bwys[0:1])], 0)
 
-            5.3 Apply cumulative product row-wise
-                y_mat = cumprod(y_mat, dim=1)
-                Resulting in:
-                y_mat = [[1, bwys21, bwys32 * bwys21, bwys43 * bwys32 * bwys21],
-                         [1, 1      , bwys32         , bwys43 * bwys32         ],
-                         [1, 1      , 1              , bwys43                  ],
-                         [1, 1      , 1              , 1                       ]]
+            5.2) Perform the associative scan from right-to-left and cut off the irrelevant values
+            in order to compute the g_ys
 
-            5.4 Zero out the lower triangle (exclusive)
-                Final y_mat:
-                y_mat = [[1, bwys21, bwys32 * bwys21, bwys43 * bwys32 * bwys21],
-                         [0, 1      , bwys32         , bwys43 * bwys32         ],
-                         [0, 0      , 1              , bwys43                  ],
-                         [0, 0      , 0              , 1                       ]]
+                In particular, use reverse=True for the associative_scan to compute from right-to-left
+                g_ys = associative_scan(g_ys_combine_fn_rev, g_ys_inputs, dim=dim, reverse=True)[1][:-1]
 
-        6.) Scale the y_mat with the upstream gradients gl_ys
-            scaled_y_mat = y_mat * gl_ys
-            Each entry now holds the full contribution of ∂L/∂ysj to ∂L/∂xsi via the path through ysj.
-
-        7.) Reduce the scaled_y_mat with a row-wise sum
-            summed_y_mat = scaled_y_mat.sum(dim=1)
-            This accumulates all downstream contributions for each xst.
-
-        8.) Scale with the instantaneous input gradients bwxs
+        6.) Scale with the instantaneous input gradients bwxs
             g_xs = summed_y_mat * bwxs
 
             This gives the final input gradients:
@@ -699,7 +676,6 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
 
         # The backward of associative_scan is always performed on the first dimension
         dim = 0
-        scan_length = ctx._scan_length
         num_xs = ctx._num_xs
         num_additional_inputs = ctx._num_additional_inputs
 
@@ -708,7 +684,6 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
         xs, additional_inputs, outs = split_into_chunks(
             flat_args, [num_xs, num_additional_inputs, num_xs]
         )
-        ndim = outs[0].ndim
 
         # First_slice_copy does not keep the original requires_grad flag,
         # but we need it here in order to compute the correcte gradients
@@ -751,168 +726,57 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
         )
         bwys, bwxs = split_into_chunks(grads, [num_xs, num_xs])
 
-        def compute_y_mat(bwys: torch.Tensor) -> torch.Tensor:
-            # Prepare a ones and a zeros helper mask in order to easily compute the y_mat
-            def compute_helper_tril_mask(diagonal):
-                def expand_masks(mask):
-                    for _ in range(ndim - 1):
-                        mask = mask.unsqueeze(-1)
-                    return mask
-
-                tril_mask = torch.tril(
-                    torch.ones(
-                        scan_length, scan_length, device=bwys.device, dtype=torch.bool
-                    ),
-                    diagonal=diagonal,
-                )
-                tril_mask = expand_masks(tril_mask)
-                tril_mask = tril_mask.expand(-1, -1, *bwys.shape[1:])
-                return tril_mask
-
-            # The ones mask is used to fill the main diagonal and all elements below it with 1s
-            ones_mask = compute_helper_tril_mask(0)
-
-            # The zero mask is used to set all elements below the main diagonal to 0
-            zeros_mask = compute_helper_tril_mask(-1)
-
-            # 5.1) Repeat the elements of bwys to form the square matrix
-            y_mat = bwys.unsqueeze(dim).repeat_interleave(scan_length, dim)
-
-            # 5.2) Fill the lower triangular part, including the diagonal,
-            # of the h_mat with 1s. I.e., use the ones_mask to fill with 1s.
-            y_mat.masked_fill_(ones_mask, 1.0)
-
-            # 5.3) Compute the cumulative products across dim + 1
-            y_mat = y_mat.cumprod(dim=dim + 1)
-
-            # 5.4) Replace the elements we filled with 1s before with 0s
-            y_mat.masked_fill_(zeros_mask, 0.0)
-
-            return y_mat
-
-        # def compute_grad(bwxs, bwys, gl_ys):
-        #     # Set the first gradient component of bwxs to 1.0, per definition.
-        #     torch.select(bwxs, dim, 0).fill_(1.0)
-
-        #     # 5.) Compute the gradient transition matrix
-        #     y_mat = compute_y_mat(bwys)
-
-        #     # 6.) scale the y_mat with the upstream gradients gl_ys
-        #     scaled_y_mat = y_mat * gl_ys
-
-        #     # 7.) Reduce the y_mat with sum along the columns to get the total contributions for xs_t
-        #     summed_y_mat = scaled_y_mat.sum(dim + 1)
-
-        #     # 8.) Scale with the bwxs to obtain the final gradients g_xs
-        #     g_xs = summed_y_mat * bwxs
-
-        #     return g_xs
-        
-        def scan_backward_gys(gl_ys: torch.Tensor, bwys: torch.Tensor, dim: int) -> torch.Tensor:
+        def compute_gys_associative_scan(
+            gl_ys: torch.Tensor, bwys: torch.Tensor, dim: int
+        ) -> torch.Tensor:
             """
-            Computes the gradient of ys via a right-to-left associative scan:
-                g_ys[t] = gl_ys[t] + g_ys[t+1] * bwys[t]
-            """            
-            rev_gl_ys = gl_ys.flip(dims=(dim,))
-            rev_bwys = bwys.flip(dims=(dim,))
-            
-            # import pdb
-            # pdb.set_trace()
-            rev_gl_ys = torch.cat([torch.zeros_like(rev_gl_ys[0:1]), rev_gl_ys[:]], 0)
-            rev_bwys = torch.cat([torch.ones_like(rev_bwys[0:1]), torch.ones_like(rev_bwys[0:1]), rev_bwys[:-1]], 0)
+            Computes the gradient g_ys via a right-to-left associative scan:
+            I.e., the gradients are computed from the last time step to the first, following this equation
+                g_yst = gl_yst + g_ys{t+1} * bw(ys{t+1}, yst)
+            """
 
-            # def combine_fn(g_next, gl_and_bwys):
-            #     gl, bw = gl_and_bwys
-            #     return gl + g_next[0] * bw, bw + 0.
-            # def combine_fn_assoc(bw, gl, bw_next, gl_next):
-            #     bw_tmp = bw * bw_next
-            #     return bw_tmp, bw * gl + gl_next
-            
-            def combine_fn_assoc(bw, gl, bw_next, gl_next):
+            # 5.1) Append the initial values for the associative_scan operation to gl_ys and bwys
+            gl_ys_pinit = torch.cat([gl_ys, torch.zeros_like(gl_ys[0:1])], 0)
+            bwys_pinit = torch.cat(
+                [bwys[1:], torch.ones_like(bwys[0:1]), torch.ones_like(bwys[0:1])], 0
+            )
+
+            def g_ys_combine_fn_rev(bw_gl, bw_next_gl_next):
+                bw, gl = bw_gl
+                bw_next, gl_next = bw_next_gl_next
                 bw_prod = bw * bw_next
                 gl_acc = gl_next + bw_next * gl
                 return bw_prod, gl_acc
-            
-            def combine_fn_scan(bw_gl, bw_next_gl_next):
-                bw, gl = bw_gl
-                bw_next, gl_next = bw_next_gl_next
-                tmp = gl * bw
-                return [tmp + gl_next, bw_next+0.], tmp
 
-            # zipped = list(zip(torch.unbind(rev_bwys, dim=dim), torch.unbind(rev_gl_ys, dim=dim)))
-            # import pdb
-            # pdb.set_trace()
-            # rev_bwys = torch.cat([torch.ones_like(rev_bwys[0:1]), rev_bwys[:-1]], 0)
-            # rev_bwys = torch.cat([torch.zeros_like(rev_bwys[0:1]), rev_bwys[:-1]], 0)
-            zipped = (rev_bwys, rev_gl_ys)
-            # rev_g_ys = associative_scan(combine_fn, zipped, dim, combine_mode="generic")[0]
-            with torch._C._AutoDispatchBelowAutograd():
-                # rev_g_ys = associative_scan_op(combine_fn, zipped, ())[0]
-                # import pdb
-                # pdb.set_trace()
-                rev_g_ys = associative_scan_op(combine_fn_assoc, zipped, ())[1][1:]
-                # rev_g_ys *= rev_gl_ys
-                # rev_g_ys = torch.cumsum(rev_g_ys, 0)
-                # from torch._higher_order_ops.scan import scan
-                # # import pdb
-                # # pdb.set_trace()
-                # rev_g_ys_scan = scan(combine_fn_scan, [z[0] for z in zipped], [z[1:] for z in zipped])[0]
-                # # import pdb
-                # # pdb.set_trace()
-            
-            # rev_g_ys[0] -= 1
+            # 5.2) Perform the associative_scan from right-to-left and cut off the irrelevant values
+            # in order to compute the g_ys
+            g_ys_inputs = (bwys_pinit, gl_ys_pinit)
+            g_ys = associative_scan(
+                g_ys_combine_fn_rev, g_ys_inputs, dim=dim, reverse=True
+            )[1][:-1]
 
-            # import pdb
-            # pdb.set_trace()
-
-            g_ys = rev_g_ys.flip(dims=(dim,))
-            
-            # import pdb
-            # pdb.set_trace()
-            
             return g_ys
-        
-        def compute_grad(bwxs: torch.Tensor, bwys: torch.Tensor, gl_ys: torch.Tensor) -> torch.Tensor:
+
+        def compute_grad(
+            bwxs: torch.Tensor, bwys: torch.Tensor, gl_ys: torch.Tensor
+        ) -> torch.Tensor:
             # Set the first gradient component of bwxs to 1.0, per definition.
             # Set ∂ys0 / ∂xs0 = 1
             torch.select(bwxs, dim, 0).fill_(1.0)
-        
-            # 5.) Compute the gradient transition matrix
-            y_mat = compute_y_mat(bwys)
 
-            # 6.) scale the y_mat with the upstream gradients gl_ys
-            scaled_y_mat = y_mat * gl_ys
+            # 5.) Compute the gradients via an associative_scan
+            g_ys = compute_gys_associative_scan(gl_ys, bwys, dim)
 
-            # import pdb
-            # pdb.set_trace()
-            # 7.) Reduce the y_mat with sum along the columns to get the total contributions for xs_t
-            g_ys_mat = scaled_y_mat.sum(dim + 1)
-            
-            g_ys_scan = scan_backward_gys(gl_ys, bwys, dim)
-            # import pdb
-            # pdb.set_trace()
-            
-            g_xs = g_ys_scan * bwxs
+            # 6.) Scale with the instantaneous input gradients bwxs
+            g_xs = g_ys * bwxs
+
             return g_xs
 
-        # Stack all leaves of the gradients along the first dimension.
-        # This is useful as later the gradients of those leaves can be computed in parallel.
-        bwxs_stacked_leaves = torch.stack(bwxs)
-        bwys_stacked_leaves = torch.stack(bwys)
-        gl_ys_stacked_leaves = torch.stack(gl_ys)
-
-        # import pdb
-        # pdb.set_trace()
-
-        # The compute_grad function is parallelized across all individual leaves of xs
-        # as these gradients can be computed independently from each other
-        # TODO: torch.vmap may create composability issues
-        # compute_grad_mapped = torch.vmap(compute_grad, 0, 0)
-
-        # g_xs = compute_grad_mapped(bwxs_stacked_leaves, bwys_stacked_leaves, gl_ys_stacked_leaves)
-
-        compute_grad_mapped = compute_grad
-        g_xs = [compute_grad_mapped(bwxs[ind], bwys[ind], gl_ys[ind]) for ind in range(len(gl_ys))]
+        # Compute the gradients of all leaves sequentially
+        # TODO: Use torch.vmap here for parallelization, requires vmap of associative_scan
+        g_xs = [
+            compute_grad(bwxs[ind], bwys[ind], gl_ys[ind]) for ind in range(len(gl_ys))
+        ]
 
         # TODO: Currently the gradients for the additional_inputs are not computed properly
         return *[None] * 3, *g_xs, *[None] * num_additional_inputs
