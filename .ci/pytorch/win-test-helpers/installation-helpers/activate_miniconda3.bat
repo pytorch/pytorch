@@ -27,4 +27,5 @@ if "%INSTALL_FRESH_CONDA%"=="1" (
 call %CONDA_ROOT_DIR%\Scripts\activate.bat %CONDA_ROOT_DIR%
 
 conda create -y -n py_tmp python=%PYTHON_VERSION%
+conda run -n py_tmp pip install -r requirements.txt
 set PATH=%CONDA_ROOT_DIR%\envs\py_tmp;%PATH%
