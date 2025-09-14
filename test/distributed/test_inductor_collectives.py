@@ -37,7 +37,7 @@ from torch.testing._internal.common_distributed import (
     DynamoDistributedMultiProcTestCase,
     DynamoDistributedSingleProcTestCase,
     MultiProcessTestCase,
-    requires_nccl,
+    requires_nccl_or,
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import (
@@ -59,7 +59,7 @@ def _tolist_with_constrain_as_size(tensor):
     return lst
 
 
-@requires_nccl()
+@requires_nccl_or(['xccl'])
 @instantiate_parametrized_tests
 class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
     device_type = torch.accelerator.current_accelerator().type
@@ -820,8 +820,8 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
 
 
 @instantiate_parametrized_tests
-@requires_nccl()
-@requires_cuda
+@requires_nccl_or(['xccl'])
+@unittest.skipIf(not torch.accelerator.is_available(), "accelerator not available")
 class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
     device_type = torch.accelerator.current_accelerator().type
     """
@@ -1990,7 +1990,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             self.assertEqual(stats.moves, 0)
 
 
-@requires_nccl()
+@requires_nccl_or(['xccl'])
 class TestSyncDecisionCrossRanks(MultiProcessTestCase):
     def setUp(self) -> None:
         super().setUp()
