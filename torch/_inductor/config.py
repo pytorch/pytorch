@@ -391,6 +391,14 @@ reorder_prefetch_limit: Optional[int] = None
 
 # enable operator reordering for peak memory optimization
 reorder_for_peak_memory = True
+reorder_for_peak_memory_debug = False
+
+# In some cases, when all the nodes that can be scheduled are quite large,
+# it is beneficial to switch the scheduling strategy. So instead of using
+# size as the criterion, we choose a node that can unlock more nodes to
+# become schedulable by analyzing their successor nodes. The default value
+# is zero, which turns off this optimization.
+size_threshold_for_succ_based_strategy: int = 0
 
 reorder_iterative_debug_memory_recompute: bool = False
 reorder_iterative_debug_limit_to_reorder: Optional[int] = (
@@ -415,6 +423,8 @@ bucket_reduce_scatters_fx_bucket_size_determinator: Optional[Callable[[int], int
 # runtime estimation function for ops
 # for built-in estimation function, pass in "default"; for user-defined estimation function, pass in the function handle
 estimate_op_runtime = "default"
+
+runtime_estimations_mms_benchmark: bool = False
 
 # unit: GB/s, uni-directional P2P bandwidth per card
 # default value is NVLink
@@ -463,6 +473,8 @@ graph_partition: bool = (
     == "1"
 )
 
+# whether template autotuning should allow flexible layouts if possible (e.g. only extern choices)
+max_autotune_allow_flexible_layouts: bool = False
 
 # force cublas and triton to use the same precision; cublas supports TF32 for matmul operations
 # when m, n, k are multiples of 16, 16, 8, whereas triton supports TF32 for matmul operations
@@ -1243,7 +1255,7 @@ class triton:
 
     # Warn loudly when the number of cudagraphs due to dynamic shape
     # exceeds this limit
-    cudagraph_dynamic_shape_warn_limit: Optional[int] = 50
+    cudagraph_dynamic_shape_warn_limit: Optional[int] = 8
 
     # synchronize after cudagraph invocation
     force_cudagraph_sync = False
@@ -1420,6 +1432,9 @@ class triton:
     enable_persistent_tma_matmul = (
         os.environ.get("ENABLE_PERSISTENT_TMA_MATMUL", "0") == "1"
     )
+    # Should TMA store be enable from templates. TODO: Remove once we
+    # can autotune over the result.
+    enable_template_tma_store = os.environ.get("ENABLE_TEMPLATE_TMA_STORE", "0") == "1"
     # Skip L1 cache for buffers that are used only once.  Disabled by default
     skip_l1_cache = os.environ.get("TORCHINDUCTOR_SKIP_L1", "0") == "1"
 
@@ -1577,6 +1592,17 @@ class aot_inductor:
 
     # Whether to enable link-time-optimization
     enable_lto = os.environ.get("AOT_INDUCTOR_ENABLE_LTO", "0") == "1"
+
+    # Whether the compiled .so should link to libtorch
+    # TODO: should consolidate this flag with compile_standalone
+    link_libtorch: bool = True
+
+    # If None, the default torch headers such as torch/include
+    # will be used. Otherwise, the provided path will be used instead.
+    # This is needed for torchnative to load libtorch-free .so.
+    # Such as [f"{torchnative_dir}/standalone",f"{torchnative_dir}/",].
+    # TODO: should consolidate this flag with compile_standalone
+    libtorch_free_headers: Optional[list[str]] = None
 
 
 class cuda:

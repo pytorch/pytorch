@@ -7,39 +7,18 @@ import threading
 import warnings
 from collections.abc import Iterator
 from functools import reduce
-from itertools import chain, zip_longest
+from itertools import zip_longest
 from typing import Optional, TYPE_CHECKING, Union
 
 import torch
-from torch.distributed import is_available
 from torch.utils._typing_utils import not_none
 
 
 __all__ = ["init_device_mesh", "DeviceMesh"]
 
 
-if not is_available():
-    import sys
-
-    # We need to create the stubs when distributed is not available.
-    # Otherwise, we would fail the doc tests (```./.ci/pytorch/docs-test.sh```),
-    # since it would try to import ``torch.distributed.device_mesh`` or
-    # ``torch.distributed.init_device_mesh`` but cannot find them.
-
-    class _DeviceMeshStub:
-        pass
-
-    def _init_device_mesh_stub():
-        pass
-
-    sys.modules["torch.distributed.device_mesh"].DeviceMesh = _DeviceMeshStub  # type: ignore[attr-defined]
-    sys.modules[
-        "torch.distributed.device_mesh"
-    ].init_device_mesh = _init_device_mesh_stub  # type: ignore[attr-defined]
-
-
-else:
-    from torch._C._distributed_c10d import Backend as C10dBackend
+if True:  # just to temporarily avoid reindentation
+    from torch.distributed._distributed_c10d import Backend as C10dBackend
     from torch.distributed.distributed_c10d import (
         _get_default_group,
         _resolve_process_group,
@@ -185,12 +164,15 @@ else:
             if not mesh_dim_name:
                 mesh_dim_name = "_".join(not_none(device_mesh.mesh_dim_names))
 
+            # Flatten a 1D device mesh into its original mesh_dim_name will return itself.
+            if device_mesh.ndim == 1 and mesh_dim_name in not_none(
+                device_mesh.mesh_dim_names
+            ):
+                return device_mesh
+
             # Check whether the mesh_dim_name for flattened mesh is valid.
             self.flatten_name_to_root_dims.setdefault(root_mesh, {})
-            invalid_dim_names = chain(
-                list(not_none(root_mesh.mesh_dim_names)),
-                *self.flatten_name_to_root_dims[root_mesh].keys(),
-            )
+            invalid_dim_names = not_none(root_mesh.mesh_dim_names)
             if mesh_dim_name in invalid_dim_names:
                 raise RuntimeError(
                     f"{mesh_dim_name} already exists for submesh of the {root_mesh}. ",
@@ -199,8 +181,6 @@ else:
                 )
 
             # Quick return if the flatten mesh has been created before.
-            # TODO: If we decide to restrict flatten initialization once, we should remove
-            # this check and throw an error if the flatten mesh is already created before.
             if (
                 root_mesh in self.root_to_flatten_mapping
                 and mesh_dim_name in self.root_to_flatten_mapping[root_mesh]
@@ -417,6 +397,9 @@ else:
             device_type (str): The device type of the mesh. Currently supports: "cpu", "cuda/cuda-like".
             mesh (ndarray): A multi-dimensional array or an integer tensor describing the layout
                 of devices, where the IDs are global IDs of the default process group.
+            _rank (int): (experimental/internal)
+                The global rank of the current process. If not provided, it will
+                be inferred from the default process group.
 
         Returns:
             DeviceMesh: A :class:`DeviceMesh` object representing the device layout.
@@ -451,6 +434,7 @@ else:
                 tuple[tuple[Optional[str], Optional[C10dBackend.Options]], ...]
             ] = None,
             _init_backend: bool = True,
+            _rank: Optional[int] = None,
         ) -> None:
             self.device_type = device_type
             if isinstance(mesh, torch.Tensor) and mesh.device.type != "cpu":
@@ -481,8 +465,11 @@ else:
                 if is_initialized() and get_backend() == "threaded":
                     self._thread_id = threading.get_ident()
 
+                if _rank is None:
+                    _rank = get_rank()
+
                 # calculate the coordinates of the current global rank on the mesh
-                rank_coords = (self.mesh == get_rank()).nonzero()
+                rank_coords = (self.mesh == _rank).nonzero()
                 assert rank_coords.size(0) in (0, 1)
                 self._coordinate_on_dim: Optional[list[int]] = (
                     rank_coords[0].tolist() if rank_coords.size(0) > 0 else None
@@ -526,15 +513,16 @@ else:
                     # heuristic to set the current cuda/cuda-like device base on num of gpu devices available in each host
                     # NOTE: This device selection would only work for homogeneous hardware.
                     num_devices_per_host = device_handle.device_count()
-                    if (
-                        world_size > num_devices_per_host
-                        and world_size % num_devices_per_host != 0
-                    ):
-                        raise RuntimeError(
-                            f"DeviceMesh only support homogeneous hardware, but found "
-                            f"{world_size} ranks and {num_devices_per_host} {self.device_type} devices!"
-                        )
-                    device_handle.set_device(get_rank() % num_devices_per_host)
+                    if num_devices_per_host:
+                        if (
+                            world_size > num_devices_per_host
+                            and world_size % num_devices_per_host != 0
+                        ):
+                            raise RuntimeError(
+                                f"DeviceMesh only support homogeneous hardware, but found "
+                                f"{world_size} ranks and {num_devices_per_host} {self.device_type} devices!"
+                            )
+                        device_handle.set_device(get_rank() % num_devices_per_host)
 
             return _get_default_group()
 
