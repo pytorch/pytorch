@@ -4699,11 +4699,6 @@ def _extract_tensor_dict(t: torch.Tensor) -> dict[str, Any]:
     return tensor_dict
 
 
-# This is useful for reconstructing within the Dynamo graph the non-graph-input objects
-# whose lifetime is governed by the user.
-# e.g. torch.cuda.Event is a prime example.
-user_obj_id_to_weakref: dict[int, weakref.ReferenceType[object]] = {}
-
 # Similar to above, except instead of ID, we use a dynamo-generated index
 # this allows us to register objects externally in pre-graph bytecode that we want
 # to pass to the graph, but not support their types as graph inputs
@@ -4740,18 +4735,6 @@ def register_user_object(value: Any, source: Source) -> int:
     index_to_source[index] = source
     index_to_user_object_weakref[index] = weakref.ref(value)
     return index
-
-
-# TODO: mlazos to remove after replacing w/ above API
-def get_user_object_from_id(obj_id: int) -> Any:
-    obj = user_obj_id_to_weakref[obj_id]()
-    assert obj is not None, "User object is no longer alive"
-    return obj
-
-
-def store_user_object_weakref(obj: object) -> None:
-    obj_id = id(obj)
-    user_obj_id_to_weakref[obj_id] = weakref.ref(obj)
 
 
 class CompileTimeInstructionCounter:
