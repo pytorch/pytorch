@@ -2434,14 +2434,14 @@ def get_rank(group: Optional[ProcessGroup] = None) -> int:
         -1, if not part of the group
 
     """
-    world = _World.get()
     if group is None or group is GroupMember.WORLD:
+        world = _World.get()
         return world.rank
 
     if _rank_not_in_group(group):
         return -1
 
-    return get_group_rank(group, world.rank)
+    return group.rank()
 
 
 def get_world_size(group: Optional[ProcessGroup] = None) -> int:
@@ -2457,14 +2457,14 @@ def get_world_size(group: Optional[ProcessGroup] = None) -> int:
         -1, if not part of the group
 
     """
-    world = _World.get()
     if group is None or group is GroupMember.WORLD:
+        world = _World.get()
         return world.world_size
 
     if _rank_not_in_group(group):
         return -1
 
-    return _get_group_size(group)
+    return group.size()
 
 
 def isend(

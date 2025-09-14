@@ -10,7 +10,6 @@ from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.distributed.device_mesh import _mesh_resources, DeviceMesh, init_device_mesh
 from torch.distributed.distributed_c10d import (
     _get_default_group,
-    _world,
     get_global_rank,
     get_world_size,
     init_process_group,
@@ -26,7 +25,7 @@ from torch.distributed.tensor._collective_utils import (
 )
 from torch.distributed.tensor.placement_types import _Partial, Shard
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_utils import run_tests, skip_but_pass_in_sandcastle
+from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
@@ -780,24 +779,6 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         shard_mesh = hsdp_mesh_2["Shard"]
         self.assertEqual(shard_mesh.mesh.tolist(), shard_group[shard_group_idx])
 
-    @skip_but_pass_in_sandcastle(
-        "Invalid test, should not import _world and access its states"
-    )
-    @with_comms
-    def test_cache_and_reuse_submesh_slice_result(self):
-        mesh = init_device_mesh(self.device_type, (2, 4), mesh_dim_names=("dp", "tp"))
-
-        ref_pg_count = _world.group_count
-
-        # When we call the "dp" slice second time, it should not create any new pg.
-        # As we are just using the cached result so the pg count should be the same.
-        self.assertEqual(ref_pg_count, _world.group_count)
-
-        # When we call the "tp" slice, it should not create a new pg, as the "tp" slice would
-        # just reuse the parent mesh pg.
-        mesh["tp"]
-        self.assertEqual(_world.group_count, ref_pg_count)
-
     @with_comms
     def test_get_item_3d_noncontiguous_slicing(self):
         mesh_shape = (2, 2, 2)
@@ -846,11 +827,9 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         ]
         self.assertEqual(flatten_mesh_root_dims, (0, 1))
 
-        ref_pg_count = _world.group_count
         # Calling flatten again should not create a new pg.
         flattened_dp_cp_mesh_2 = dp_cp_mesh._flatten()
         self.assertEqual(flattened_dp_cp_mesh, flattened_dp_cp_mesh_2)
-        self.assertEqual(ref_pg_count, _world.group_count)
 
         # Test flatten non-contiguous dims
         dp_tp_mesh = mesh_3d["dp", "tp"]
