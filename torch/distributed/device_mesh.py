@@ -1125,27 +1125,27 @@ if True:  # just to temporarily avoid reindentation
                 "If you maintained a 'torch.device' object, it's recommended to pass in 'device.type'.",
             )
 
+        mesh_size = math.prod(mesh_shape)
+
         # Optionally init distributed environment if user has not done so.
         try:
             get_world_size()
-        except RuntimeError:
-            logger.debug(
-                "Distributed environment is not initialized, initializing "
-                "it during DeviceMesh creation with an assumption that "
-                "the DeviceMesh has the same size as the world.",
-                exc_info=True,
+        except RuntimeError as e:
+            logger.info(
+                "Distributed environment is not initialized, attempting to initialize it within `init_device_mesh` "
+                "with an assumption that the DeviceMesh size is the same as the world size."
             )
+            # Implicit dist init
             torch.distributed.init()
-
-        # `init_device_mesh` requires the mesh size to be exactly the world size.
-        world_size = get_world_size()
-        mesh_size = math.prod(mesh_shape)
-        if mesh_size != world_size:
-            raise ValueError(
-                "`init_device_mesh` requires the mesh size to be exactly the world size. "
-                f"Found mesh size {mesh_size} and world size {world_size}. "
-                f"For more flexible mesh creation, please use the `DeviceMesh` constructor."
-            )
+            # Check if the size assumption above is true
+            world_size = get_world_size()
+            if mesh_size != world_size:
+                raise ValueError(
+                    f"Found mesh size {mesh_size} different from world size {world_size}. "
+                    "We thus cannot initialize the distributed environment implicitly within `init_device_mesh`. "
+                    "Please make sure the DeviceMesh size is the same as the world size, or explicitly initialize "
+                    "the distributed environment via `torch.distributed.init`."
+                ) from e
 
         # Always initialize the mesh's tensor on CPU, regardless of what the
         # external device type has been set to be (e.g. meta)

@@ -1253,7 +1253,7 @@ class InitWithoutGroup(DTensorTestBase):
 
     def test_mesh_without_dist_init(self):
         _set_env_var(world_size=self.world_size, rank=self.rank)
-        # Must be `init_device_mesh` instead of `DeviceMesh` due to implicit dist init
+        # Only `init_device_mesh` provides backward support for implicit dist init
         init_device_mesh(self.device_type, (self.world_size,))
 
 
