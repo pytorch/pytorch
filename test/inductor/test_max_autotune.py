@@ -53,7 +53,7 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.logging_utils import multiple_logs_to_string
 from torch.utils._triton import (
-    has_blackwell_tma_device,
+    has_datacenter_blackwell_tma_device,
     has_triton_stable_tma_api,
     has_triton_tma_device,
 )
@@ -264,7 +264,7 @@ class TestMaxAutotune(TestCase):
         FileCheck().check("triton_tem_fused_mm").check(check_str).run(code[0])
 
     @unittest.skipIf(
-        not has_blackwell_tma_device(),
+        not has_datacenter_blackwell_tma_device(),
         "Need Blackwell with device-side TMA support in Triton",
     )
     @parametrize("a_transposed", (False, True))
@@ -519,7 +519,7 @@ class TestMaxAutotune(TestCase):
         torch.testing.assert_close(c_actual, c_expected, atol=1e-2, rtol=1e-2)
 
     @unittest.skipIf(
-        not has_blackwell_tma_device(),
+        not has_datacenter_blackwell_tma_device(),
         "Need Blackwell with device-side TMA support in Triton",
     )
     @parametrize("a_transposed", (False, True))
