@@ -25,5 +25,5 @@ if "%INSTALL_FRESH_CONDA%"=="1" (
 :: Activate conda so that we can use its commands, i.e. conda, python, pip
 call %CONDA_PARENT_DIR%\Miniconda3\Scripts\activate.bat %CONDA_PARENT_DIR%\Miniconda3
 
-conda create -n py_310 python=3.10
-conda active py_310
+conda create -y -n py_tmp python=%PYTHON_VERSION%
+conda activate py_tmp
