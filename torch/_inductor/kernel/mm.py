@@ -646,7 +646,13 @@ _blackwell_ws_persistent_device_tma = r"""
         offs_cm = pid_m * BLOCK_M
         offs_cn = pid_n * BLOCK_N
         # TODO: Add EPILOGUE_SUBTILE
-        {{store_output(("offs_cm", "offs_cn"), "accumulator", indent_width=8, val_shape=("BLOCK_M", "BLOCK_N"), block_indexing=True)}}
+        {{store_output(
+            ("offs_cm", "offs_cn"), 
+            "accumulator", 
+            indent_width=8, 
+            val_shape=("BLOCK_M", "BLOCK_N"), 
+            block_indexing=True
+        )}}
 """
 
 blackwell_ws_persistent_device_tma_mm_template = TritonTemplate(

@@ -1953,7 +1953,7 @@ class CUDAAddmmPersistentTMATemplateConfigHeuristic(
     register=torch.version.hip is None,
 )
 class CUDABlackwellAddmmPersistentTMATemplateConfigHeuristic(
-    AddMMConfigMixin, BlackwellTMATemplateConfigMixin
+    AddMMConfigMixin, CUDABlackwellPersistentTMATemplateConfigHeuristic
 ):
     """Addmm extension for DataCenter Blackwell Templates"""
 
