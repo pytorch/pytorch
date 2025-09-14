@@ -114,11 +114,13 @@ mm_template = TritonTemplate(
 
         idx_m = offs_a_m[:, None]
         idx_n = a_k_idx_vals
-        {{load_input("A", "a", ("idx_m", "idx_n"), mask=None if EVEN_K else "a_mask", indent_width=8)}}
+        {{load_input("A", "a", ("idx_m", "idx_n"), mask=None if EVEN_K else "a_mask",
+                     indent_width=8, index_shape=("BLOCK_M", "BLOCK_K"))}}
 
         idx_m = b_k_idx_vals
         idx_n = offs_b_n[None, :]
-        {{load_input("B", "b", ("idx_m", "idx_n"), mask=None if EVEN_K else "b_mask", indent_width=8)}}
+        {{load_input("B", "b", ("idx_m", "idx_n"), mask=None if EVEN_K else "b_mask",
+                     indent_width=8, index_shape=("BLOCK_K", "BLOCK_N"))}}
 
         {% if USE_FAST_ACCUM %}
         acc = tl.dot(a, b, acc, allow_tf32=ALLOW_TF32, out_dtype=ACC_TYPE)
@@ -134,7 +136,7 @@ mm_template = TritonTemplate(
     mask = (idx_m < M) & (idx_n < N)
 
     # inductor generates a suffix
-    {{store_output(("idx_m", "idx_n"), "acc", "mask")}}
+    {{store_output(("idx_m", "idx_n"), "acc", "mask", val_shape=("BLOCK_M", "BLOCK_N"))}}
 """
         if (torch.version.hip is None) or triton_version >= "3.3.0"
         # FIXME: To get around rocm failures like https://github.com/pytorch/pytorch/actions/runs/13123783322/job/36617154943
@@ -190,11 +192,13 @@ mm_template = TritonTemplate(
 
         idx_m = offs_a_m[:, None]
         idx_n = a_k_idx_vals
-        {{load_input("A", "a", ("idx_m", "idx_n"), mask=None if EVEN_K else "a_mask", indent_width=8)}}
+        {{load_input("A", "a", ("idx_m", "idx_n"), mask=None if EVEN_K else "a_mask",
+                     indent_width=8, index_shape=("BLOCK_M", "BLOCK_K"))}}
 
         idx_m = b_k_idx_vals
         idx_n = offs_b_n[None, :]
-        {{load_input("B", "b", ("idx_m", "idx_n"), mask=None if EVEN_K else "b_mask", indent_width=8)}}
+        {{load_input("B", "b", ("idx_m", "idx_n"), mask=None if EVEN_K else "b_mask",
+                     indent_width=8, index_shape=("BLOCK_K", "BLOCK_N"))}}
         {% if USE_FAST_ACCUM %}
         acc = tl.dot(a, b, acc, allow_tf32=ALLOW_TF32, out_dtype=ACC_TYPE)
         {% else %}
@@ -209,7 +213,7 @@ mm_template = TritonTemplate(
     mask = (idx_m < M) & (idx_n < N)
 
     # inductor generates a suffix
-    {{store_output(("idx_m", "idx_n"), "acc", "mask")}}
+    {{store_output(("idx_m", "idx_n"), "acc", "mask", val_shape=("BLOCK_M", "BLOCK_N"))}}
 """
     ),
     cache_codegen_enabled_for_template=True,
@@ -336,15 +340,18 @@ persistent_tma_mm_template = TritonTemplate(
         )
 
         if ki == k_tiles - 1:
+            # inductor generates a suffix
+            {%- if TMA_EXPERIMENTAL_API %}
             # rematerialize rm and rn to save registers
             rcm = rm + tl.arange(0, BLOCK_M)
             rcn = rn + tl.arange(0, BLOCK_N)
             idx_m = rcm[:, None]
             idx_n = rcn[None, :]
             mask = (idx_m < M) & (idx_n < N)
-
-            # inductor generates a suffix
-            {{store_output(("idx_m", "idx_n"), "acc", "mask", indent_width=12)}}
+            {{store_output(("idx_m", "idx_n"), "acc", "mask", indent_width=12, val_shape=("BLOCK_M", "BLOCK_N"))}}
+            {%- else %}
+            {{store_output(("rm", "rn"), "acc", indent_width=12, val_shape=("BLOCK_M", "BLOCK_N"), block_indexing=True)}}
+            {%- endif %}
             acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=ACC_TYPE)
 
 """,
@@ -531,11 +538,21 @@ device_tma = r"""
                 stride_b_scale_n,
             )
 
+            # inductor generates a suffix
+            {%- if TMA_EXPERIMENTAL_API %}
             idx_m = offs_cm[:, None]
             idx_n = offs_cn[None, :]
             mask = (idx_m < M) & (idx_n < N)
-            # inductor generates a suffix
-            {{store_output(("idx_m", "idx_n"), "accumulator", "mask", indent_width=12)}}
+            {{store_output(("idx_m", "idx_n"), "accumulator", "mask", indent_width=12, val_shape=("BLOCK_M", "BLOCK_N"))}}
+            {%- else %}
+            {{store_output(
+                ("offs_am", "offs_bn"),
+                "accumulator",
+                indent_width=12,
+                val_shape=("BLOCK_M", "BLOCK_N"),
+                block_indexing=True,
+            )}}
+            {%- endif %}
             accumulator = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
 """
 
@@ -757,7 +774,7 @@ def tuned_mm(mat1, mat2, *, layout=None):
     if is_nonzero and use_triton_template(layout, check_max_autotune=True):
         templates_to_use.append(mm_template)
 
-        if use_triton_tma_template(mat1, mat2):
+        if use_triton_tma_template(mat1, mat2, output_layout=layout):
             templates_to_use.append(persistent_tma_mm_template)
 
         if use_decompose_k_choice(m, n, k):
@@ -960,7 +977,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     if is_nonzero and use_triton_template(layout, check_max_autotune=False):
         templates_to_use.append(mm_template)
 
-        if use_triton_tma_template(mat1, mat2):
+        if use_triton_tma_template(mat1, mat2, output_layout=layout):
             templates_to_use.append(persistent_tma_mm_template)
 
         templates_to_use.append(addmm_contiguous_subgraph_template)
@@ -1145,8 +1162,8 @@ def tuned_scaled_mm(
         overriders = dict(USE_FAST_ACCUM=use_fast_accum)
 
         # TODO (paulzhan): There is no template that exists for bias and TMA
-        # Don't run tma template currently if bias exists
-        if use_triton_tma_template(mat_a, mat_b) and not bias:
+        # Don't run tma template currently if bias exist
+        if use_triton_tma_template(mat_a, mat_b, output_layout=layout) and not bias:
             templates_to_use.append(scaled_mm_device_tma_template)
             kwarg_overrides[scaled_mm_device_tma_template.uid] = overriders
 
