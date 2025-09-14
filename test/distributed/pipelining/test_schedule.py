@@ -237,9 +237,7 @@ class ScheduleTest(TestCase):
 
         # Create a pipeline stage to wrap that submodule
         num_microbatches = 2
-        stages = [
-            PipelineStage(stage_module, 0, n_stages, device)
-        ]
+        stages = [PipelineStage(stage_module, 0, n_stages, device)]
 
         if issubclass(ScheduleClass, PipelineScheduleSingle):
             stages = stages[0]
