@@ -234,14 +234,25 @@ class NestedTensor(torch.Tensor):
         mt = self._min_seqlen_tensor
         return None if mt is None else _load_val_from_tensor(mt)
 
+    def _is_contiguous_or_false(self):
+        if self.lengths() is not None:
+            return False
+        from torch._prims_common import is_contiguous_for_memory_format_or_false
+
+        return is_contiguous_for_memory_format_or_false(
+            self._values, memory_format=torch.contiguous_format
+        )
+
     def __repr__(self):  # type: ignore[override]
         # We should implement this in torch/_tensor_str.py instead
         grad_fn_str = (
             f", requires_grad={self.requires_grad}" if self.requires_grad else ""
         )
+
         if self.grad_fn:
             grad_fn_str = f", grad_fn={self.grad_fn}"
-        return f"NestedTensor(size={self._size}, offsets={self._offsets}{grad_fn_str}, contiguous={self.is_contiguous()})"
+
+        return f"NestedTensor(size={self._size}, offsets={self._offsets}{grad_fn_str}, contiguous={self._is_contiguous_or_false()})"
 
     # TODO: Remove this in favor of the default tensor subclass serialization logic.
     # We don't do this today because of https://github.com/pytorch/pytorch/issues/125622.

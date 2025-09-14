@@ -436,7 +436,6 @@ static inline void launch_vectorized_templated_kernel(
     loader_t l,
     storer_t s) {
   TORCH_INTERNAL_ASSERT(N > 0 && N <= std::numeric_limits<int32_t>::max());
-  using traits = function_traits<func_t>;
   int64_t grid = (N + vectorized_templated_config::block_work_size() - 1) /
       vectorized_templated_config::block_work_size();
   auto stream = at::cuda::getCurrentCUDAStream();

@@ -351,16 +351,14 @@ c10::intrusive_ptr<c10::StorageImpl> THPStorage_readFileRaw(
         _storage_nbytes);
   }
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-  std::unique_ptr<char[]> cpu_data;
+  std::string cpu_data;
 
   uint8_t* data{};
   if (storage->device_type() == at::kCPU) {
     data = static_cast<uint8_t*>(storage->mutable_data());
   } else {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-    cpu_data = std::make_unique<char[]>(nbytes);
-    data = (uint8_t*)cpu_data.get();
+    cpu_data.resize(nbytes);
+    data = (uint8_t*)cpu_data.data();
   }
 
   // fast track for bytes and little endian
@@ -370,24 +368,23 @@ c10::intrusive_ptr<c10::StorageImpl> THPStorage_readFileRaw(
     doRead(file, data, storage->nbytes());
   } else {
     int64_t buffer_size = std::min(size, (int64_t)5000);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-    std::unique_ptr<uint8_t[]> le_buffer(
-        new uint8_t[buffer_size * element_size]);
+    std::vector<uint8_t> le_buffer;
+    le_buffer.resize(buffer_size * element_size);
 
     for (int64_t i = 0; i < size; i += buffer_size) {
       size_t to_convert = std::min(size - i, buffer_size);
-      doRead(file, le_buffer.get(), element_size * to_convert);
+      doRead(file, le_buffer.data(), element_size * to_convert);
 
       // NOLINTNEXTLINE(bugprone-branch-clone)
       if (element_size == 2) {
         torch::utils::THP_decodeBuffer(
-            (int16_t*)data + i, le_buffer.get(), true, to_convert);
+            (int16_t*)data + i, le_buffer.data(), true, to_convert);
       } else if (element_size == 4) {
         torch::utils::THP_decodeBuffer(
-            (int32_t*)data + i, le_buffer.get(), true, to_convert);
+            (int32_t*)data + i, le_buffer.data(), true, to_convert);
       } else if (element_size == 8) {
         torch::utils::THP_decodeBuffer(
-            (int64_t*)data + i, le_buffer.get(), true, to_convert);
+            (int64_t*)data + i, le_buffer.data(), true, to_convert);
       }
     }
   }

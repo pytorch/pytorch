@@ -255,7 +255,9 @@ class TORCH_API ProcessGroupGloo : public Backend {
       return c10::make_intrusive<Options>(timeout);
     }
 
-    std::vector<uint64_t> global_ranks_in_group;
+    static c10::intrusive_ptr<Options> create_default(
+        std::chrono::milliseconds timeout = kBackendDefaultTimeout);
+
     std::vector<std::shared_ptr<::gloo::transport::Device>> devices;
     int threads;
   };
