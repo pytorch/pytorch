@@ -1,5 +1,6 @@
 import abc
 import builtins
+import dataclasses
 import importlib
 import inspect
 import logging
@@ -11,6 +12,8 @@ from typing import Any, Callable, Optional
 
 import torch
 import torch.fx
+from torch._dynamo.graph_utils import _graph_uses_non_cpu
+from torch._dynamo.precompile_context import SystemInfo
 
 from . import convert_frame
 from .hooks import Hooks
@@ -50,6 +53,12 @@ class CompileArtifacts:
     compiled_fn: SerializableCallable
     original_code: types.CodeType
     closure: Optional[tuple[Any, ...]]
+    use_cuda: bool
+    system_info: SystemInfo = dataclasses.field(default_factory=SystemInfo.current)
+
+    def check_compatibility(self) -> None:
+        current_system = SystemInfo.current()
+        current_system.check_compatibility(self.system_info, self.use_cuda)
 
 
 @dataclass
@@ -62,6 +71,8 @@ class AOTCompiledFunction:
         return self._artifacts.guard_manager.check(f_locals)
 
     def __post_init__(self) -> None:
+        self._artifacts.check_compatibility()
+
         import_sources = {
             alias: importlib.import_module(module_name)
             for alias, module_name in self._artifacts.import_sources.items()
@@ -241,9 +252,11 @@ def aot_compile_fullgraph(
         assert check_fn.guards_state is not None
 
         backend_input = capture_output.backend_input
+        assert backend_input is not None
         backend_input.graph_module._backend_id = backend_input.backend_id  # type: ignore[assignment]
         output_graph = dynamo_output.tracer_output.output_graph
         assert output_graph is not None
+        use_cuda = _graph_uses_non_cpu(output_graph.current_tracer.graph)
         import_sources = output_graph.import_sources
         with (
             torch._guards.tracing(TracingContext(backend_input.fake_mode)),
@@ -282,8 +295,10 @@ def aot_compile_fullgraph(
             compiled_fn=compiled_fn,
             original_code=fn.__code__,
             closure=fn.__closure__,
+            use_cuda=use_cuda,
         )
         aot_compiled_fn = AOTCompiledFunction(_artifacts=artifacts)
+
     return aot_compiled_fn
 
 
