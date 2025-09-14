@@ -7,10 +7,10 @@
 #include <cstdint>
 
 #ifdef _WIN32
+#include <c10/util/FileSystem.h>
 #include <c10/util/win32-headers.h>
 #include <fileapi.h>
 #include <io.h>
-#include <c10/util/FileSystem.h>
 #else
 #include <sys/file.h>
 #include <unistd.h>
