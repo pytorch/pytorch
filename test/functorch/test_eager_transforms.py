@@ -2503,46 +2503,118 @@ class TestHessian(TestCase):
         hess2 = vmap(hessian(loss))(A, x1, x2)
         self.assertEqual(hess2, hess1)
 
-    def test_is_scalar_true_happy_path(self, device):
-        """Test is_scalar=True with scalar functions"""
+    def test_is_scalar_polynomial_sum(self, device):
+        x = torch.randn(4, device=device, requires_grad=True)
 
         def f(x):
-            return (x**2).sum()
+            return (x**3).sum()
 
-        x = torch.randn(3, 4, device=device, requires_grad=True)
-
-        # Compare with reference implementation
         expected = hessian(f)(x)
         result = hessian(f, is_scalar=True)(x)
-        print(f"Expected: {expected}, result: {result}")
-
         self.assertEqual(result, expected)
 
-        # Test with multi-input scalar function
-        def f2(x, y):
-            return (x**2).sum() + (y**2).sum()
+    def test_is_scalar_sin_sum(self, device):
+        x = torch.randn(4, device=device, requires_grad=True)
 
-        y = torch.randn(2, 3, device=device, requires_grad=True)
-        expected = hessian(f2)(x, y)
-        result = hessian(f2, is_scalar=True)(x, y)
-        print(f"Expected: {expected}, result: {result}")
+        def f(x):
+            return x.sin().sum()
+
+        expected = hessian(f)(x)
+        result = hessian(f, is_scalar=True)(x)
         self.assertEqual(result, expected)
+
+    def test_is_scalar_exp_log_sum(self, device):
+        x = torch.randn(4, device=device, requires_grad=True)
+
+        def f(x):
+            return x.exp().log().sum()
+
+        expected = hessian(f)(x)
+        result = hessian(f, is_scalar=True)(x)
+        self.assertEqual(result, expected)
+
+    def test_is_scalar_dot_product(self, device):
+        x = torch.randn(4, device=device, requires_grad=True)
+
+        def f(x):
+            return torch.dot(x, x)
+
+        expected = hessian(f)(x)
+        result = hessian(f, is_scalar=True)(x)
+        self.assertEqual(result, expected)
+
+    def test_is_scalar_trace(self, device):
+        def f(x):
+            return x.reshape(2, 2).trace()
+
+        x_matrix = torch.randn(4, device=device, requires_grad=True)
+        expected = hessian(f)(x_matrix)
+        result = hessian(f, is_scalar=True)(x_matrix)
+        self.assertEqual(result, expected)
+
+    def test_is_scalar_tanh(self, device):
+        x = torch.randn(4, device=device, requires_grad=True)
+
+        def f(x):
+            return torch.tanh(x).sum()
+
+        expected = hessian(f)(x)
+        result = hessian(f, is_scalar=True)(x)
+        self.assertEqual(result, expected)
+
+    def test_is_scalar_max(self, device):
+        x = torch.randn(4, device=device, requires_grad=True)
+
+        # max
+        def f(x):
+            return x.max()
+
+        expected = hessian(f)(x)
+        result = hessian(f, is_scalar=True)(x)
+        self.assertEqual(result, expected)
+
+    def test_is_scalar_conditional_sum(self, device):
+        x = torch.randn(4, device=device, requires_grad=True)
+
+        def f(x):
+            return torch.where(x > 0, x**2, x**3).sum()
+
+        expected = hessian(f)(x)
+        result = hessian(f, is_scalar=True)(x)
+        self.assertEqual(result, expected)
+
+    def test_is_scalar_broadcast_sum(self, device):
+        x = torch.randn(4, device=device, requires_grad=True)
+
+        def f(x, y):
+            return (x.unsqueeze(1) * y).sum()
+
+        y_broadcast = torch.randn(3, device=device, requires_grad=True)
+        expected = hessian(f)(x, y_broadcast)
+        result = hessian(f, is_scalar=True)(x, y_broadcast)
+        self.assertEqual(result, expected)
+
+    def test_is_scalar_zero_dim(self, device):
+        x = torch.randn(4, device=device, requires_grad=True)
+
+        def f(x):
+            return x.sum().view(())
+
+        result_scalar_true = hessian(f, is_scalar=True)(x)
+        result_scalar_false = hessian(f, is_scalar=False)(x)
+        self.assertEqual(result_scalar_true, result_scalar_false)
 
     def test_is_scalar_false_preserves_behavior(self, device):
-        """Test is_scalar=False preserves original behavior"""
-
         def f(x):
             return (x**2).sum()
 
         x = torch.randn(3, 4, device=device, requires_grad=True)
 
-        # Both should give same result
         result_base = hessian(f)(x)
         result_explicit_false = hessian(f, is_scalar=False)(x)
 
         self.assertEqual(result_base, result_explicit_false)
 
-        # Test with vector function
         def f_vector(x):
             return x**2
 
@@ -2552,170 +2624,88 @@ class TestHessian(TestCase):
         self.assertEqual(result_base, result_explicit_false)
 
     def test_is_scalar_none_preserves_behavior(self, device):
-        """Test is_scalar=None preserves original behavior"""
-
         def f(x):
             return (x**2).sum()
 
         x = torch.randn(3, 4, device=device, requires_grad=True)
 
-        # Both should give same result
         result_base = hessian(f)(x)
         result_explicit_none = hessian(f, is_scalar=None)(x)
 
         self.assertEqual(result_base, result_explicit_none)
 
-    def test_is_scalar_true_with_vector_function_raises_error(self, device):
-        """Test is_scalar=True with vector function raises appropriate error"""
-
         def f_vector(x):
-            return x**2  # Returns tensor, not scalar
+            return x**2
+
+        result_base = hessian(f_vector)(x)
+        result_explicit_false = hessian(f_vector, is_scalar=False)(x)
+
+        self.assertEqual(result_base, result_explicit_false)
+
+    def test_is_scalar_with_vector_function_raises_error(self, device):
+        def f_vector(x):
+            return x**2
 
         x = torch.randn(3, 4, device=device, requires_grad=True)
 
+        # TODO: perhaps we should fallback to original implementation in this case?
         with self.assertRaises(RuntimeError):
             hessian(f_vector, is_scalar=True)(x)
-
-    def test_is_scalar_edge_cases(self, device):
-        """Test edge cases for is_scalar parameter"""
-
-        # Zero-dimensional tensor (scalar)
-        def f_zero_dim(x):
-            return x.sum().view(())  # Ensure zero-dimensional
-
-        x = torch.randn(3, 4, device=device, requires_grad=True)
-
-        expected = hessian(f_zero_dim)(x)
-        result = hessian(f_zero_dim, is_scalar=True)(x)
-        self.assertEqual(result, expected)
 
         # Function that returns a tuple with a scalar
         def f_tuple_scalar(x):
             return (x**2).sum(), x  # Mixed output, first element is scalar
 
-        # This should work with is_scalar=False but not with is_scalar=True
-        result_false = hessian(f_tuple_scalar, is_scalar=False)(x)
+        # This should work with is_scalar=False
+        hessian(f_tuple_scalar, is_scalar=False)(x)
 
+        # but not with is_scalar=True
         with self.assertRaises(RuntimeError):
             hessian(f_tuple_scalar, is_scalar=True)(x)
 
-    def test_is_scalar_with_argnums(self, device):
-        """Test is_scalar works correctly with argnums parameter"""
-
+    def test_is_scalar_with_single_argnum(self, device):
         def f(x, y):
             return (x**2).sum() + (y**2).sum()
 
         x = torch.randn(3, 4, device=device, requires_grad=True)
         y = torch.randn(2, 3, device=device, requires_grad=True)
 
-        # Test with single argnum
         expected = hessian(f, argnums=0)(x, y)
         result = hessian(f, argnums=0, is_scalar=True)(x, y)
         self.assertEqual(result, expected)
 
-        # Test with different single argnum
+    def test_is_scalar_with_different_single_argnum(self, device):
+        def f(x, y):
+            return (x**2).sum() + (y**2).sum()
+
+        x = torch.randn(3, 4, device=device, requires_grad=True)
+        y = torch.randn(2, 3, device=device, requires_grad=True)
+
         expected = hessian(f, argnums=1)(x, y)
         result = hessian(f, argnums=1, is_scalar=True)(x, y)
         self.assertEqual(result, expected)
 
-        # For tuple argnums, compare element by element
+    def test_is_scalar_with_argnums_tuple(self, device):
+        def f(x, y):
+            return (x**2).sum() + (y**2).sum()
+
+        x = torch.randn(3, 4, device=device, requires_grad=True)
+        y = torch.randn(2, 3, device=device, requires_grad=True)
+
         expected = hessian(f, argnums=(0, 1))(x, y)
         result = hessian(f, argnums=(0, 1), is_scalar=True)(x, y)
-
-        # Handle the tuple structure comparison
-        if isinstance(expected, tuple) and isinstance(result, tuple):
-            for exp_tuple, res_tuple in zip(expected, result):
-                if isinstance(exp_tuple, tuple) and isinstance(res_tuple, tuple):
-                    for exp, res in zip(exp_tuple, res_tuple):
-                        self.assertEqual(exp, res)
-                else:
-                    self.assertEqual(exp_tuple, res_tuple)
-        else:
-            self.assertEqual(expected, result)
-
-    def test_is_scalar_performance_comparison(self, device):
-        """Test that is_scalar=True is at least as fast as base implementation"""
-        import time
-
-        def f(x):
-            return (x**2).sum()
-
-        x = torch.randn(50, 50, device=device, requires_grad=True)
-
-        # Warmup
-        hessian(f)(x)
-        hessian(f, is_scalar=True)(x)
-
-        # Time base implementation
-        start = time.time()
-        result_base = hessian(f)(x)
-        if device == "cuda":
-            torch.cuda.synchronize()
-        time_base = time.time() - start
-
-        # Time optimized implementation
-        start = time.time()
-        result_optimized = hessian(f, is_scalar=True)(x)
-        if device == "cuda":
-            torch.cuda.synchronize()
-        time_optimized = time.time() - start
-
-        # Results should be the same
-        self.assertEqual(result_base, result_optimized)
-
-        # Optimized should be at least as fast (with some tolerance for measurement variance)
-        # Note: This test might be flaky on CI, so we'll just check that it doesn't take
-        # significantly longer, but we won't fail the test if it's slightly slower
-        self.assertLess(
-            time_optimized,
-            time_base * 1.5,
-            f"Optimized implementation was slower: {time_optimized} vs {time_base}",
-        )
+        self.assertEqual(result, expected)
 
     def test_is_scalar_with_vmap(self, device):
-        """Test is_scalar works correctly with vmap"""
-
         def f(x):
             return (x**2).sum()
 
         x = torch.randn(5, 3, 4, device=device, requires_grad=True)
 
-        # Both should give same result
         result_base = vmap(hessian(f))(x)
         result_optimized = vmap(lambda x: hessian(f, is_scalar=True)(x))(x)
 
         self.assertEqual(result_base, result_optimized)
-
-    def test_is_scalar_backward_compatibility(self, device):
-        """Test that the original API still works without is_scalar parameter"""
-
-        def f(x):
-            return (x**2).sum()
-
-        x = torch.randn(3, 4, device=device, requires_grad=True)
-
-        # Original call should still work
-        result_old = hessian(f)(x)
-        result_new = hessian(f, is_scalar=None)(x)
-
-        self.assertEqual(result_old, result_new)
-
-    def test_is_scalar_documentation_example(self, device):
-        """Test the example from the documentation"""
-
-        def f(x):
-            return x.sin().sum()
-
-        x = torch.randn(5, device=device)
-
-        # Both should give the same result
-        hess_base = hessian(f)(x)
-        hess_optimized = hessian(f, is_scalar=True)(x)
-
-        self.assertEqual(hess_base, hess_optimized)
-        # Verify it matches the expected diagonal matrix
-        expected = torch.diag(-x.sin())
-        self.assertTrue(torch.allclose(hess_optimized, expected))
 
 
 @markDynamoStrictTest
