@@ -6248,9 +6248,6 @@ class AOTInductorTestsTemplate:
 
         runner.free_inactive_constant_buffer()
 
-    @unittest.skipIf(
-        config.triton.enable_native_matmul, "K is too large; precision issue"
-    )
     def test_update_user_managed_buffer(self):
         if self.device != "cuda":
             raise unittest.SkipTest("requires CUDA")
