@@ -103,7 +103,7 @@ def benchmark_compilation(use_pch, iterations=100):
                 header_code="",
                 cuda_include_dirs=cuda_include_dirs,
                 nvcc_options=["-std=c++17"],
-                enable_automatic_pch=use_pch
+                auto_pch=use_pch
             )
             
             elapsed = time.perf_counter() - start
