@@ -7,10 +7,10 @@
 #include <cstdint>
 
 #ifdef _WIN32
+#include <c10/util/FileSystem.h>
 #include <c10/util/win32-headers.h>
 #include <fileapi.h>
 #include <io.h>
-#include <filesystem>
 #else
 #include <sys/file.h>
 #include <unistd.h>
@@ -161,7 +161,7 @@ class File {
 #ifdef _WIN32
       // if the parent folder doesn't exist it will never be able to create the
       // file so we can skip the retry
-      if (!std::filesystem::exists(std::filesystem::path(path).parent_path())) {
+      if (!c10::filesystem::exists(c10::filesystem::path(path).parent_path())) {
         break;
       }
 #endif
