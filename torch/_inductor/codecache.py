@@ -390,14 +390,7 @@ class WritableTempFile:
 
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         self.temp_file.close()
-        try:
-            os.unlink(self.temp_file.name)
-        except OSError as e:
-            if _IS_WINDOWS:
-                # On Windows, some case temp file is opened and fail to unlink. Need to ignore it.
-                pass
-            else:
-                raise e
+        os.unlink(self.temp_file.name)
 
 
 def write(
