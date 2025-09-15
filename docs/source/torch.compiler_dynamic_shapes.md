@@ -11,6 +11,8 @@ mystnb:
 ```{code-cell}
 :tags: [remove-cell]
 import torch
+from compile import header_code
+
 torch._logging.set_logs(graph_breaks=True, graph_code=True)
 ```
 
@@ -50,6 +52,12 @@ Dynamic shapes allow avoiding recompilations by making certain dimensions or int
 dynamic. For example, if a function `f(x)` is compiled with a static size, it will need
 recompilation for different sizes:
 
+```{note}
+For simplicity, this example uses `@torch.compile(dynamic=True)`. Note, that
+this option is not recommended due to it being error prone.
+For a recommended way of enabling dynamic shapes, see {ref}`enable-dynamic-behavior`.
+```
+
 ```{code-cell}
 import torch
 @torch.compile(dynamic=False)
@@ -63,7 +71,7 @@ f(torch.rand(40))
 ```
 
 In the produced output, you can see that four graphs were generated.
-See the corresponding <a href="/_static/img/dynamic_shapes/tlparse1_dynamic_shapes_false.png" target="_blank">tlparse output</a>
+See the corresponding <a href="_static/img/dynamic_shapes/tlparse1_dynamic_shapes_false.png" target="_blank">tlparse output</a>
 
 By making the size dynamic, the function can handle various sizes without recompilation:
 
@@ -80,7 +88,7 @@ f(torch.rand(40))
 ```
 
 With dynamic shapes enabled, only one graph is created. See the
-corresponding <a href="/_static/img/dynamic_shapes/tlparse2_dynamic_shapes_true.png" target="_blank">tlparse output</a>.
+corresponding <a href="_static/img/dynamic_shapes/tlparse2_dynamic_shapes_true.png" target="_blank">tlparse output</a>.
 
 While compilation time differences
 are minimal for this small example, more complex use cases would show significant
@@ -97,11 +105,6 @@ this condition, the system will recompile the graph.
 Specialization allows you to create optimized computational graphs for specific input
 shapes, which can significantly improve execution speed.
 
-```{note}
-For simplicity, this example uses `@torch.compile(dynamic=True)`. Note, that
-this option is not recommended due to it being error prone.
-For a recommended way of enabling dynamic shapes, see {ref}`enable-dynamic-behavior`
-```
 
 ```{code-cell}
 import torch
@@ -126,12 +129,31 @@ In the code above, we specialize that the graph requires an input size of 10, in
 case it will return `x * 10`. If the input size is less than 30, it will return `x * 200`.
 In the output, you can see that this creates three graphs.
 
-See the corresponding <a href="/_static/img/dynamic_shapes/tlparse3_specialization.png" target="_blank">tlparse output</a>
+See the corresponding <a href="_static/img/dynamic_shapes/tlparse3_specialization.png" target="_blank">tlparse output</a>
 
 
 This is how graphs created for the above function:
 
-```{image} _static/img/dynamic_shapes/dynamic_shapes_example_specialization.png
+```{mermaid}
+  graph LR
+      %%{init: {'flowchart': {'nodeSpacing': 1}}}%%
+      A1["func(torch.rand(10))"] --> G1["Graph1"]
+      A2["func(torch.rand(20))"] --> G1["Graph1"]
+      A3["func(torch.rand(30))"] --> G2["Graph2"]
+      A4["func(torch.rand(40))"] --> G2["Graph2"]
+      A5["func(torch.rand(50))"] --> G3["Graph3"]
+      A6["..."] --> G3["Graph3"]
+
+      style A1 fill:none,stroke:none
+      style A2 fill:none,stroke:none
+      style A3 fill:none,stroke:none
+      style A4 fill:none,stroke:none
+      style A5 fill:none,stroke:none
+      style A6 fill:none,stroke:none
+
+      style G1 fill:#ffffff,stroke:#000000,stroke-width:1px
+      style G2 fill:#ffffff,stroke:#000000,stroke-width:1px
+      style G3 fill:#ffffff,stroke:#000000,stroke-width:1px
 ```
 
 (enable-dynamic-behavior)=
@@ -139,14 +161,14 @@ This is how graphs created for the above function:
 
 There are the following ways to make things dynamic:
 
-* Automatic dynamic
-* torch.compile (dynamic=true)
-* Profile-Guided Optimization (PGO)
-* Compiler Collective
-* Users annotations
+* {ref}`(automatic_dynamic)=`
+* {ref}`user_annotations`
+* {ref}`(torch_compile_dynami_true)`
+* Advanced options to control dynamic behavior
 
 Read below about each of this options.
 
+(automatic_dynamic)=
 ### Automatic dynamic
 
 **Automatic dynamic** is the default behavior where `torch.compile` performs
@@ -155,132 +177,37 @@ input sizes from that first compilation. When a recompile is triggered, it
 uses this information to identify which dimensions have changed and marks
 those as dynamic for the second compilation.
 
-### Profile-Guided Optimization (PGO)
-
-Profile-Guided Optimization (PGO) extends automatic dynamic across attempts, learning from previous runs to avoid initial static compilations. This means that things marked as dynamic in attempt 1 will remain dynamic in attempt 2 from the first compilation. If attempt 2 encounters different sizes for the same input, they will be marked as dynamic.
-
-For example, for the program discussed earlier:
-
-```python
-def f(x):
-    return x * x.size()[0]
-```
-
-In attempt 0, when we first encounter `f(x)` with `x=10`, we make it
-static since it's the initial observation. The second time we encounter `f(x)`
-with `x=20`, we have observed two different
-values for `x`, so we make it dynamic through automatic dynamic behavior.
-
-In attempt 1, we repeat the process above unless Profile-Guided Optimization (PGO) is enabled.
-With PGO, we already know from attempt 0 that `f(x)` should be dynamic, so it is marked as
-such the first time we encounter it.
-
-### torch.compile (dynamic=true) (Not recommended)
-
-This setting forces all sizes and integers to be dynamic, increasing the
-chance of encountering dynamic shape bugs. Setting this option is not
-recommended due to it  being error prone.
-It would make every input size dynamic which may result it performance
-regressions and ultimately increase compilation time.
-
-(identifying-dynamic-elements-marked-by-pgo)=
-#### Identifying Dynamic Elements Marked by PGO
-
-Use `tlparse` to find line numbers of interest and check for multiple values
-seen for inputs.
-
-To determine which elements are marked as dynamic by Profile-Guided Optimization (PGO),
-follow these steps using `tlparse`:
-
-1. In the `tlparse` output, identify the line number of the frame of interest. Example:
-
-   ```{image} _static/img/dynamic_shapes/tlparse4_pgo.png
-   ```
-
-2. Open `local_code` using `put_local_code_state_` or `put_remote_code_state_` for the
-   latest frame (for example, 6/1).
-
-   Each `?` indicates that multiple values have been observed for this input.
-
-   For instance, the following output shows that the input `L['m']` has been seen with
-   multiple sizes at `size[0]`, but the stride has consistently been 1:
-
-   ```
-   /data/users/bobren/a/pytorch/r2.py:2:func:
-   L['m']: fully dynamic scalar or tensor
-   L['x']: tensor size=[?] stride=[1]
-   L['y']: tensor size=[?] stride=[1]
-   L['z']: tensor size=[?] stride=[1]
-   ```
-
-```{note}
-If an element is marked as dynamic by PGO, it does not guarantee that it will remain dynamic in the graph. Specialization can revert it to a static state.
-```
-
-### Compiler Collective
-
-Different ranks can communicate with each other to share observed sizes. In the second
-iteration, automatic dynamic uses this information to determine which elements to mark
-as dynamic based on inputs seen across all ranks. Check the PR for more details.
-To enable this feature, use `enable_compiler_collectives=True` with the `@config.patch`
-decorator.
-
-```python
-@config.patch(enable_compiler_collectives=True)
-```
-
-```{note}
-This feature enables the use of collectives during compilation to
-synchronize behavior across ranks. Currently, it is used to modify
-automatic dynamic shapes behavior by inferring if an input is dynamic
-based on whether its size varies across ranks. Since this synchronization
-uses collectives, all ranks must run compilation simultaneously; ranks must
-not diverge with graph breaks. This is most reliably achieved by ensuring
-torch is only run on SPMD programs. Violating this invariant may result in
-deadlocking NCCL and encountering a NCCL timeout.
-```
-
 (user_annotations)=
 ### User Annotations
 
-Several tools allow users to explicitly mark specific inputs
+Several APIs allow users to explicitly mark specific inputs
 by name or code as dynamic. This is useful for avoiding initial compilations that
 would eventually become dynamic with the previous tools. It is also used to mark
 elements that do not automatically get marked as dynamic, such as neural network
-module parameters, and so on. These tools include:
+module parameters, and so on. User annotations are the preferred way to enable
+dynamic shapes.
 
-(dynamic_sources_allow_list)=
-#### Dynamic Allow List (DYNAMIC_SOURCES)
+#### `mark_dynamic(tensor, dim, min=min, max=max)`
 
-Use the evnironmental variable `TORCH_COMPILE_DYNAMIC_SOURCES` to pass a configuration
-list of source names to be marked as dynamic. For example:
-`TORCH_COMPILE_DYNAMIC_SOURCES=L[‘x’],L[‘y’]`
-It's easiest to find these dynamic source names using the PGO artifact in `tlparse`.
-See {ref}`identifying-dynamic-elements-marked-by-pgo` for more details. You can
-copy and paste the dynamic source names from the PGO artifact. This method works
-for integers and tensor sizes and has the highest precedence over all other flags
-that force static shapes. It will not throw an error if what is marked dynamic
-gets specialized or if the provided input does not exist.
-
-#### mark_dynamic(tensor, size)
-
-The `mark_dynamic` function marks a tensor dimension as dynamic and will fail if it
+The {func}`torch._dynamo.mark_dynamic` function marks a tensor dimension as dynamic and will fail if it
 gets specialized. It does not work for integers. Use this function only if you know
 all graphs in the frame using this input converge to a single dynamic graph.
 Otherwise, you may encounter a misleading constraint violation error.
-In such cases, consider using `maybe_mark_dynamic`. Currently, `mark_dynamic`
+In such cases, consider using {func}`torch._dynamo.maybe_mark_dynamic`. Currently,
+{func}`torch._dynamo.mark_dynamic`
 does not have precedence over `force_parameter_static_shapes = True` or `force_nn_module_property_static_shapes = True`.
 
-#### maybe_mark_dynamic(tensor, size)
+#### `maybe_mark_dynamic(tensor, dim)`
 
-The `maybe_mark_dynamic` function shares all properties with `mark_dynamic`
+The {func}`torch._dynamo.maybe_mark_dynamic` function shares all properties
+with  {func}`torch._dynamo.mark_dynamic`
 but does not fail if the size gets specialized. Use it for inputs shared by
 multiple graphs or if the number of graphs does not converge to one for a specific
-frame. For instance, in the example above, use `maybe_mark_dynamic()` because graphs
-with sizes 0 and 1 will specialize. However, you can use `mark_dynamic` to ensure
+frame. For instance, in the example above, use {func}`torch._dynamo.maybe_mark_dynamic()` because graphs
+with sizes 0 and 1 will specialize. However, you can use {func}`torch._dynamo.mark_dynamic` to ensure
 you never specialize.
 
-#### mark_unbacked(tensor, size)
+#### `mark_unbacked(tensor, dim)`
 
 The `mark_unbacked` function marks a tensor dimension as unbacked. It is unlikely
 to be the tool you need, but it could be useful if the specialization occurs inside
@@ -289,13 +216,47 @@ Ensure it fixes the specialization and does not introduce a data-dependent error
 that converts to a graph break at or before the specialization location
 you are trying to  avoid. It might be better to use the next option.
 
-#### backed_size_oblivious
+#### `backed_size_oblivious(bool)`
 
-Use `backed_size_oblivious` if you want to avoid specialization
+Use {func}`torch.fx.experimental._config.backed_size_oblivious` if you want to avoid specialization
 during `guard_size_oblivious`and aim to minimize compilations and
 specialization. Set a flag to treat backed as unbacked for all checks in the code
 that participate in size-oblivious reasoning, which avoids
 0/1 specialization for backed elements.
+
+(dynamic_sources_allow_list)=
+#### Dynamic Allow List (DYNAMIC_SOURCES)
+
+Use the evnironmental variable `TORCH_COMPILE_DYNAMIC_SOURCES` to pass a configuration
+list of source names to be marked as dynamic. For example:
+`TORCH_COMPILE_DYNAMIC_SOURCES=L[‘x’],L[‘y’]`
+It's easiest to find these dynamic source names using the PGO artifact in `tlparse`.
+You can copy and paste the dynamic source names from the PGO artifact. This method works
+for integers and tensor sizes and has the highest precedence over all other flags
+that force static shapes. It will not throw an error if what is marked dynamic
+gets specialized or if the provided input does not exist.
+
+(torch_compile_dynami_true)=
+### torch.compile (dynamic=true) (Not recommended)
+
+This setting forces all sizes and integers to be dynamic, increasing the
+chance of encountering dynamic shape bugs. Setting this option is not
+recommended due to it  being error prone.
+It would make every input size dynamic which may result it performance
+regressions and ultimately increase compilation time.
+
+(advanced_options_control_dynamic)=
+### Advanced options to control dynamic behavior
+
+PyTorch provides several advanced options to control dynamic behavior.
+These options requires a deep understanding of the PyTorch internals and
+may inlvolve setting additional tools. These options include:
+
+* Profile-Guided Optimization (PGO) is a technique that allows the compiler
+  to save automatic dynamic desicions and reuse them across jobs.
+* Compiler Collective is a feature that is used to modify automatic dynamic
+  shapes behavior by inferring if an input is dynamic based on whether
+  its size varies across ranks.
 
 ## Reducing Compilations: Step by Step
 
@@ -314,7 +275,6 @@ This is a two-step process:
 
 1. Find elements marked as dynamic by PGO or automatic dynamic.
 2. Mark them as dynamic using one of the {ref}`user_annotations` tools.
-   Using {ref}`dynamic_sources_allow_list` is easiest.
 
 #### How to Identify Elements to Mark as Dynamic
 
@@ -385,7 +345,7 @@ In the one below it is not, which indicates that dynamic shapes won't resolve it
 elementsthat exist in one graph but not the others.
 
 3. **Early Check for Custom Triton Kernels:** Check if your model calls custom
-Triton kernels with constant expression arguments, as these are always
+Triton kernels with `tl.constexpr` arguments, as these are always
 specialized. If your model receives different values for these arguments,
 it could be a source of recompilation.
 
@@ -405,14 +365,14 @@ identify this by:
     * Using dynamic logs:
 
       ```
-      +launcher.additional_environ=["TORCH_LOGS=+dynamic"]
+      ["TORCH_LOGS=+dynamic"]
       create_symbol s2 = 2 for L['self']._modules['cle ...
       ```
 
     * Reviewing guards files. If a tensor size is dynamic, it will be indicated as `None`:
 
       ```
-      | | | | | | | | | | | +- TENSOR_MATCH:check_tensor(L['self']._modules['cle']._modules['compress']._parameters['weight'], Parameter, DispatchKeySet(CPU, BackendSelect, ADInplaceOrView, AutogradCPU), torch.float32, device=None, requires_grad=True, size=[None, None], stride=[None, 1])
+      TENSOR_MATCH:check_tensor(L['self'].x._parameters['weight']], Parameter, DispatchKeySet(CPU, BackendSelect, ADInplaceOrView, AutogradCPU), torch.float32, device=None, requires_grad=True, size=[None, None], stride=[None, 1])
       ```
 
 2. **Why Is It Not Marked Dynamic?** If you determine an element is not marked dynamic, consider:
@@ -448,7 +408,7 @@ call  to a Triton kernel. To identify the reason for specialization:
     `if self.x ==33` at example4.py line 16.
     ```
 
-    * **+Dynamic Logs:** Ppass `+launcher.additional_environ=["TORCH_LOGS=+dynamic"]`. Look for the first specialization, as once a variable is specialized, all dependent variables get specialized too.
+    * **+Dynamic Logs:** pass `["TORCH_LOGS=+dynamic"]`. Look for the first specialization, as once a variable is specialized, all dependent variables get specialized too.
 
     Example log:
 
