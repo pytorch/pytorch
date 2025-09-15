@@ -194,6 +194,7 @@ def _nvrtc_compile(
 
     # Enable automatic precompiled headers (CUDA 12.8+)
     if auto_pch:
+        assert str(torch.version.cuda) >= "12.8", "PCH requires CUDA 12.8+"
         if nvcc_options is None:
             nvcc_options = []
         nvcc_options.append("--pch")
