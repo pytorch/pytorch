@@ -916,11 +916,11 @@ struct DTensorInternedStrings {
 static DTensorInternedStrings dtensor_interned_strings;
 
 static bool intern_dtensor_strings() {
-#define INTERN_DTENSOR_STRING(s)                                          \
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(dtensor_interned_strings.s == nullptr) \
-  dtensor_interned_strings.s = PyUnicode_InternFromString(#s);            \
-  if (dtensor_interned_strings.s == nullptr) {                            \
-    return false;                                                         \
+#define INTERN_DTENSOR_STRING(s)                                           \
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(dtensor_interned_strings.s == nullptr); \
+  dtensor_interned_strings.s = PyUnicode_InternFromString(#s);             \
+  if (dtensor_interned_strings.s == nullptr) {                             \
+    return false;                                                          \
   }
 
   FOR_EACH_DTENSOR_INTERNED_STRING(INTERN_DTENSOR_STRING);
