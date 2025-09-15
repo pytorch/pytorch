@@ -3120,6 +3120,66 @@ class TestGuardsExpressions(TestCase):
 
         self.assertEqual(f"{x_clean.stride()}", "(8, 1)")
         self.assertEqual(f"{x_clean.shape}", "torch.Size([5, 8])")
+    
+    def test_mm_recompilation(self):
+        """
+        Test matrix multiplication with different dimension scenarios does not recompile
+        by default and recompile with proper mm_recompile_hooks config.
+        Three cases: 
+        1. m, n, k all same (should use cached version if hook configured)
+        2. One dimension < 16 (should trigger recompilation if hook configured)  
+        3. All dimensions > 16 (should trigger recompilation if hook configured)
+        """
+        cnt = CompileCounterWithBackend("inductor")
+
+        @torch.compile(backend=cnt, dynamic=True)
+        def func(a, b):
+          return torch.mm(a, b)
+
+        def run_all():
+            # start with this to avoid duck sizing recompilations.
+            # Case 1: All dimensions > 16
+            m, n, k = 64, 128, 32  # all > 16
+            a3 = torch.randn(m, k, device="cuda")
+            b3 = torch.randn(k, n, device="cuda")
+            func(a3, b3)
+            
+            # Case 1: One dimension < 16 (should use cached)
+            m, n, k = 32, 32, 4  # k < 16
+            a2 = torch.randn(m, k, device="cuda")
+            b2 = torch.randn(k, n, device="cuda")
+            func(a2, b2)
+            
+
+            # Case 3: m=n=k=8 (all same - should use cached)
+            m = n = k = 8
+            a1 = torch.randn(m, k, device="cuda")
+            b1 = torch.randn(k, n, device="cuda")  
+            func(a1, b1)
+        
+        run_all()
+        self.assertEqual(cnt.frame_count, 1)
+
+        # Clear dynamo cache
+        torch._dynamo.reset()
+        
+        def mm_recompile_hook(m, n, k, sizevars):
+            # Specialization for square matrices
+            if sizevars.guard_or_false(sympy.And(sympy.Eq(m, n), sympy.Eq(n, k))):
+                pass
+            # Specialization for any small given 1 small dim.
+            elif sizevars.guard_or_false(sympy.Or(sympy.Lt(m, 16), sympy.Lt(n, 16), sympy.Lt(k,16))):
+                pass
+            else:
+            # all > 16
+                pass
+
+        # do it again but with mm_recompile_hooks
+        with torch._inductor.config.patch(mm_recompile_hooks={"mm":mm_recompile_hook}):
+            run_all()
+            self.assertEqual(cnt.frame_count, 4)
+
+
 
 
 def custom_pass(graph: torch.fx.Graph) -> torch.fx.Graph:
@@ -3699,6 +3759,57 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
         # ensure we compile this with no errors.
         x = torch.rand(10)
         f(x, 4, 4096, 3920)
+    
+    # def test_mm_with_recompile_hook():
+    #     """Test the matmul_recompile_hook with controlled recompilation scenarios"""
+    #     import torch._inductor.config
+        
+    #     # Track hook calls
+    #     hook_calls = []
+        
+    #     def test_hook(a: torch.Tensor, b: torch.Tensor, op_name: str) -> bool:
+    #         m, k = a.shape
+    #         k2, n = b.shape
+    #         hook_calls.append((op_name, m, n, k))
+            
+    #         # Test logic: 
+    #         # - If m == n == k: use cached (return False)
+    #         # - If any dim < 16: force recompile (return True)
+    #         # - If all dims > 16: force recompile (return True)
+    #         if m == n == k:
+    #             return False  # Use cached
+    #         elif m < 16 or n < 16 or k < 16:
+    #             return True   # Force recompilation
+    #         elif m > 16 and n > 16 and k > 16:
+    #             return True   # Force recompilation
+    #         return False
+        
+    #     # Set up the hook
+    #     original_hook = torch._inductor.config.matmul_recompile_hook
+    #     torch._inductor.config.matmul_recompile_hook = test_hook
+        
+    #     try:
+    #         compiled_mm = torch.compile(test_mm)
+    #         device = "cuda" if torch.cuda.is_available() else "cpu"
+            
+         
+            
+    #         # Verify shapes
+    #         assert result1.shape == (8, 8)
+    #         assert result2.shape == (32, 32)
+    #         assert result3.shape == (64, 128)
+            
+    #         # Verify hook was called
+    #         assert len(hook_calls) >= 3, f"Expected at least 3 hook calls, got {len(hook_calls)}"
+            
+    #         return len(hook_calls)
+            
+    #     finally:
+    #         # Restore original hook
+    #         torch._inductor.config.matmul_recompile_hook = original_hook
+
+    
+
 
 
 instantiate_parametrized_tests(TestUnbacked)

@@ -467,6 +467,38 @@ max_autotune_prune_choices_based_on_shared_mem = (
     == "1"
 )
 
+"""
+Matrix Multiplication Recompilation API
+
+This API allows users to trigger recompilations for matrix multiplications in 
+compiled models based on custom conditions. By providing a callable function, 
+users can control when recompilations occur.
+
+Example Usage:
+  def mm_recompile_hook(m, n, k, sizevars):
+            # Specialization for square matrices
+            if sizevars.guard_or_false(sympy.Eq(m == n) and sympy.Eq(n == k)):
+                pass
+            # Specialization for any small given 1 small dim.
+            elif sizevars.guard_or_false(m < 16 or n < 16 or k < 16):
+                pass
+            else:
+            # all > 16
+                pass
+
+if we call this before tuned_mm we can avoid passing sizevars and make it simpler
+operating on symNodes.
+
+The callable will force recompilations based on conditions specified. 
+For instance, the code above would trigger three recompilations:
+    1. When m == n == k (square matrices)
+    2. When all dimensions (m, n, k) are greater than 16
+    3. When at least one dimension is less than 16
+
+TODO: Add controllers for other matrix operations (e.g., bmm, add_mm)
+"""
+mm_recompile_hooks = {}
+
 # enable inductor graph partition to allow multiple inductor graphs for the same dynamo graph
 graph_partition: bool = (
     os.environ.get("TORCHINDUCTOR_GRAPH_PARTITION", "1" if not is_fbcode() else "0")
