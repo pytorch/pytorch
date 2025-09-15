@@ -1,6 +1,9 @@
 
 
 SET(Open_BLAS_INCLUDE_SEARCH_PATHS
+  $ENV{OpenBLAS_HOME}
+  $ENV{OpenBLAS_HOME}/include
+  $ENV{OpenBLAS_HOME}/include/openblas
   /usr/include
   /usr/include/openblas
   /usr/include/openblas-base
@@ -9,12 +12,13 @@ SET(Open_BLAS_INCLUDE_SEARCH_PATHS
   /usr/local/include/openblas-base
   /usr/local/opt/openblas/include
   /opt/OpenBLAS/include
-  $ENV{OpenBLAS_HOME}
-  $ENV{OpenBLAS_HOME}/include
-  $ENV{OpenBLAS_HOME}/include/openblas
 )
 
 SET(Open_BLAS_LIB_SEARCH_PATHS
+        $ENV{OpenBLAS}
+        $ENV{OpenBLAS}/lib
+        $ENV{OpenBLAS_HOME}
+        $ENV{OpenBLAS_HOME}/lib
         /lib/
         /lib/openblas-base
         /lib64/
@@ -25,14 +29,18 @@ SET(Open_BLAS_LIB_SEARCH_PATHS
         /usr/local/lib64
         /usr/local/opt/openblas/lib
         /opt/OpenBLAS/lib
-        $ENV{OpenBLAS}
-        $ENV{OpenBLAS}/lib
-        $ENV{OpenBLAS_HOME}
-        $ENV{OpenBLAS_HOME}/lib
  )
 
-FIND_PATH(OpenBLAS_INCLUDE_DIR NAMES cblas.h PATHS ${Open_BLAS_INCLUDE_SEARCH_PATHS})
-FIND_LIBRARY(OpenBLAS_LIB NAMES openblas PATHS ${Open_BLAS_LIB_SEARCH_PATHS})
+IF("$ENV{OpenBLAS_HOME}" STREQUAL "")
+  FIND_PATH(OpenBLAS_INCLUDE_DIR NAMES cblas.h PATHS ${Open_BLAS_INCLUDE_SEARCH_PATHS})
+ELSE($ENV{OpenBLAS_HOME})
+  FIND_PATH(OpenBLAS_INCLUDE_DIR NAMES cblas.h PATHS ${Open_BLAS_INCLUDE_SEARCH_PATHS} NO_DEFAULT_PATH)
+ENDIF()
+IF("$ENV{OpenBLAS}" STREQUAL "" AND "$ENV{OpenBLAS_HOME}" STREQUAL "")
+  FIND_LIBRARY(OpenBLAS_LIB NAMES openblas PATHS ${Open_BLAS_LIB_SEARCH_PATHS})
+ELSE()
+  FIND_LIBRARY(OpenBLAS_LIB NAMES openblas PATHS ${Open_BLAS_LIB_SEARCH_PATHS} NO_DEFAULT_PATH)
+ENDIF()
 
 SET(OpenBLAS_FOUND ON)
 
