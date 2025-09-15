@@ -79,11 +79,12 @@ class DistributedLoggingTest(MultiProcessTestCase):
 
     def test_warnings_only_on_rank_0(self):
         """Test that warnings.warn only emits on rank 0."""
+        store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(
             backend="gloo",
             rank=self.rank,
             world_size=self.world_size,
-            store=self.file_store,
+            store=store,
         )
         
         def emit_warnings():
@@ -98,11 +99,12 @@ class DistributedLoggingTest(MultiProcessTestCase):
 
     def test_logging_only_on_rank_0(self):
         """Test that logging only emits on rank 0."""
+        store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(
             backend="gloo",
             rank=self.rank,
             world_size=self.world_size,
-            store=self.file_store,
+            store=store,
         )
         
         def emit_logs():
@@ -131,11 +133,12 @@ class DistributedLoggingTest(MultiProcessTestCase):
 
     def test_deduplication(self):
         """Test that duplicate warnings are deduplicated."""
+        store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(
             backend="gloo",
             rank=self.rank,
             world_size=self.world_size,
-            store=self.file_store,
+            store=store,
         )
         
         stderr_capture = io.StringIO()
@@ -161,11 +164,12 @@ class DistributedLoggingTest(MultiProcessTestCase):
     @skip_if_lt_x_gpu(2)
     def test_with_nccl_backend(self):
         """Test distributed logging with NCCL backend."""
+        store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(
             backend="nccl",
             rank=self.rank,
             world_size=self.world_size,
-            store=self.file_store,
+            store=store,
         )
         
         def emit_warnings():
@@ -181,11 +185,12 @@ class DistributedLoggingTest(MultiProcessTestCase):
 
     def test_force_log_on_all_ranks(self):
         """Test that force_log_on_all_ranks works."""
+        store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(
             backend="gloo",
             rank=self.rank,
             world_size=self.world_size,
-            store=self.file_store,
+            store=store,
         )
         
         from torch.distributed._distributed_logging import force_log_on_all_ranks
@@ -205,11 +210,12 @@ class DistributedLoggingTest(MultiProcessTestCase):
 
     def test_distributed_print(self):
         """Test distributed_print utility."""
+        store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(
             backend="gloo",
             rank=self.rank,
             world_size=self.world_size,
-            store=self.file_store,
+            store=store,
         )
         
         from torch.distributed._distributed_logging import distributed_print
@@ -233,11 +239,12 @@ class DistributedLoggingTest(MultiProcessTestCase):
 
     def test_cpp_extension_case(self):
         """Test the specific cpp_extension case from the PR."""
+        store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(
             backend="gloo",
             rank=self.rank,
             world_size=self.world_size,
-            store=self.file_store,
+            store=store,
         )
         
         # Set debug level to trigger the message
@@ -266,11 +273,12 @@ class DistributedLoggingTest(MultiProcessTestCase):
 
     def test_unpatch_restore(self):
         """Test that unpatching restores original behavior."""
+        store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(
             backend="gloo",
             rank=self.rank,
             world_size=self.world_size,
-            store=self.file_store,
+            store=store,
         )
         
         from torch.distributed._distributed_logging import unpatch_logging, patch_logging_for_distributed
