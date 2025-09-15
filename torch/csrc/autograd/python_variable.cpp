@@ -864,6 +864,14 @@ static bool intern_dtensor_strings() {
   return true;
 }
 
+static bool checked_not(PyObject* obj) {
+  int result = PyObject_Not(obj);
+  if (result == -1) {
+    throw py::error_already_set();
+  }
+  return result;
+}
+
 static c10::SymDimVector tuple_to_symintlist(PyObject* obj) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(PyTuple_Check(obj));
   c10::SymDimVector res;
@@ -976,7 +984,7 @@ static bool DTensor_OpSchema_recompute_comparison_key_impl(
   const py::handle self_handle = py::handle(self);
   const py::handle schema_info =
       self_handle.attr(dtensor_interned_strings.schema_info);
-  if (PyObject_Not(schema_info.ptr())) {
+  if (checked_not(schema_info.ptr())) {
     static_argnum = args_schema.size();
     static_kwargkey = py::none();
   } else {
