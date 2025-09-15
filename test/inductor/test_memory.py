@@ -353,6 +353,33 @@ class TestOperatorReorderForPeakMemory(TestCase):
         y = torch.rand(N, N, dtype=torch.float32, device=GPU_TYPE)
         z = torch.rand(N, N, dtype=torch.float32, device=GPU_TYPE)
 
+        from torch._inductor.choices import InductorChoices
+        from torch._inductor.scheduler import BaseSchedulerNode, Scheduler
+
+        class CustomInductorChoices(InductorChoices):
+            @staticmethod
+            def can_fuse(
+                scheduler: Scheduler,
+                node1: BaseSchedulerNode,
+                node2: BaseSchedulerNode,
+                shared_data_score: int,
+            ) -> bool:
+                can_fuse_default = InductorChoices.can_fuse(
+                    scheduler, node1, node2, shared_data_score
+                )
+                if (not can_fuse_default) or (
+                    not config.realize_acc_reads_size_threshold
+                ):
+                    return can_fuse_default
+
+                all_reads = (node1.read_writes.reads | node2.read_writes.reads) - (
+                    node1.read_writes.writes | node2.read_writes.writes
+                )
+                size_of_reads = [scheduler.dep_size_hint(dep) for dep in all_reads]
+                return sum(size_of_reads) < config.realize_acc_reads_size_threshold
+
+        torch._inductor.virtualized.V.set_choices_handler(CustomInductorChoices())
+
         # CASE 1: no restriction on the amount of accumulation
         with config.patch({"realize_acc_reads_size_threshold": float("inf")}):
             f_compiled = torch.compile(f)
