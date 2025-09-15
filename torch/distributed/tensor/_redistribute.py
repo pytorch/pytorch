@@ -270,10 +270,10 @@ def redistribute_local_tensor(
                 # partial -> partial no op, should never hit
                 new_local_tensor = local_tensor
 
-        local_tensor = new_local_tensor
+        if not async_op and isinstance(new_local_tensor, funcol.AsyncCollectiveTensor):
+            new_local_tensor = new_local_tensor.wait()
 
-    if not async_op and isinstance(new_local_tensor, funcol.AsyncCollectiveTensor):
-        new_local_tensor = new_local_tensor.wait()
+        local_tensor = new_local_tensor
 
     return new_local_tensor
 

@@ -14,6 +14,7 @@ import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
 from torch._utils import _get_device_module
+from torch.distributed._local_tensor import LocalTensor
 from torch.distributed.tensor import (
     DeviceMesh,
     distribute_tensor,
@@ -655,7 +656,7 @@ class DTensorConverter:
     def to_dist_tensor(
         self, t: torch.Tensor, mesh: DeviceMesh, placements: list[Placement]
     ) -> torch.Tensor:
-        if type(t) is torch.Tensor or type(t) is nn.Parameter:
+        if type(t) is torch.Tensor or type(t) is nn.Parameter or type(t) is LocalTensor:
             if self.is_supported_tensor(t):
                 self.hit += 1
                 if t.ndim == 0:
@@ -664,7 +665,7 @@ class DTensorConverter:
                 else:
                     # distribute non-scalar tensors
                     r = distribute_tensor(t, mesh, placements)
-                if type(t) is nn.Parameter:
+                if isinstance(t, nn.Parameter):
                     r = nn.Parameter(  # type: ignore[assignment]
                         r, requires_grad=r.requires_grad
                     )

@@ -7,14 +7,14 @@ import warnings
 import torch
 import torch.distributed as dist
 import torch.testing._internal.common_methods_invocations as common_ops
-from torch.distributed.tensor import DeviceMesh, DTensor
+from torch.distributed.tensor import DeviceMesh, DTensor, init_device_mesh
 from torch.overrides import resolve_name
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     ops,
 )
 from torch.testing._internal.common_methods_invocations import DecorateInfo, op_db
-from torch.testing._internal.common_utils import run_tests, suppress_warnings
+from torch.testing._internal.common_utils import run_tests, suppress_warnings, TestCase
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorConverter,
     DTensorOpTestBase,
@@ -635,7 +635,7 @@ class TestDTensorOps(DTensorOpTestBase):
                         )
                 except Exception as e:
                     raise RuntimeError(
-                        f"failed to run: {resolve_name(func)}, with (*{dtensor_args}, **{dtensor_kwargs})"
+                        f"{str(e)}\n\nfailed to run: {resolve_name(func)}, with (*{dtensor_args}, **{dtensor_kwargs})"
                     ) from e
         return rs
 
@@ -664,8 +664,166 @@ class TestDTensorOps(DTensorOpTestBase):
         )
 
 
+class TestLocalDTensorOps(TestCase):
+    world_size: int = OP_DB_WORLD_SIZE
+
+    def setUp(self) -> None:
+        super().setUp()
+        torch.distributed.init_process_group("fake", rank=0, world_size=self.world_size)
+        self.fake_pg = torch.distributed.distributed_c10d._get_default_group()
+
+    def tearDown(self):
+        super().tearDown()
+        try:
+            dist.destroy_process_group()
+        except AssertionError:
+            pass
+
+    def run_opinfo_test(
+        self, dtype, op, requires_grad=True, sample_inputs_filter=lambda s: True
+    ):
+        self.mesh = init_device_mesh(DEVICE_TYPE, (self.world_size,))
+
+        # test each op with dist tensor inputs and normal inputs
+        def test():
+            samples = op.sample_inputs(DEVICE_TYPE, dtype, requires_grad=requires_grad)
+            for sample_input in samples:
+                if not sample_inputs_filter(sample_input):
+                    continue
+                args = [sample_input.input] + list(sample_input.args)
+                kwargs = sample_input.kwargs
+
+                self.run_dtensor_crossref(op.op, args, kwargs)
+                # we need to figure out a way to test the out variant, out variant testing
+                # is tricky, as we need to pre allocate the dtensor out, some of them rely
+                # on sharding placements to be pre-known (i.e. mm.out)
+                # if isinstance(expected, torch.Tensor) and op.supports_out:
+                #     func(*args, **kwargs, out=expected)
+
+        self.check_dtensor_func(test, op)
+
+    # only allow float dytpe for now, we can relax this constraint
+    # when feel necessary later (i.e when adding quantization support).
+    @suppress_warnings
+    @ops(op_db, allowed_dtypes=(torch.float,))
+    @skipOps("TestLocalDTensorOps", "test_dtensor_op_db", dtensor_fails)
+    def test_dtensor_op_db(self, dtype, op):
+        from torch.distributed._local_tensor import LocalTensorMode
+
+        with LocalTensorMode(frozenset(range(0, self.world_size))):
+            self.run_opinfo_test(dtype, op)
+
+    def assert_ref_dtensor_equal(self, dtensor_rs, rs):
+        flat_dtensor_rs = pytree.tree_leaves(dtensor_rs)
+        flat_rs = pytree.tree_leaves(rs)
+        self.assertEqual(len(flat_dtensor_rs), len(flat_rs))
+        for dtensor_r, r in zip(flat_dtensor_rs, flat_rs):
+            if not isinstance(r, torch.Tensor):
+                continue
+
+            self.assertIsInstance(dtensor_r, torch.Tensor)
+            self.assertEqual(
+                dtensor_r.shape,
+                r.shape,
+                f"Shape mismatch! original shape:{r.shape}, dtensor shape: {dtensor_r.shape}",
+            )
+            self.assertEqual(
+                dtensor_r.requires_grad,
+                r.requires_grad,
+                "op result requires_grad mismatch!"
+                f"original requires_grad: {r.requires_grad}, "
+                f"dtensor requires_grad: {dtensor_r.requires_grad}",
+            )
+
+            self.assertEqual(dtensor_r, r)
+
+    def run_dtensor_crossref(self, func, args, kwargs):
+        to_dtensor = DTensorConverter(self.mesh, args, kwargs)
+
+        def concat_res_if_necessary(func, res: object) -> object:
+            # concat the result on corresponding dim for ops like
+            # split, so that we can call backward on a single tensor
+            if (resolve_name(func) is not None) and ("split" in resolve_name(func)):
+                dim = args[2] if len(args) == 3 else 0
+                return torch.cat(res, dim=dim)
+            else:
+                return res
+
+        # TODO: also handle cases where func raise an exception
+        rs = func(*args, **kwargs)
+        rs = concat_res_if_necessary(func, rs)
+
+        def to_replicate(e: object) -> object:
+            return e.full_tensor() if isinstance(e, DTensor) else e
+
+        # Suppress warnings, this doesn't matter for test_meta.py
+        # but it does matter if you want to use this decorator
+        # for cross-ref testing, as some tests may be looking at
+        # errors
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            # for every comb of sharding choices, we test if it works
+            for dtensor_args, dtensor_kwargs in to_dtensor:
+                # Only attempt if we managed to convert all tensors to DTensor
+                # (if any of them failed, we're in a mixed tensor situation and
+                # this is not allowed in DTensor)
+                try:
+                    if to_dtensor.successful():
+                        # Handle special cases first if there's any
+                        # Suppress warnings, this doesn't matter for test_meta.py
+                        # but it does matter if you want to use this decorator
+                        # for cross-ref testing, as some tests may be looking at
+                        # errors
+                        dtensor_rs = func(*dtensor_args, **dtensor_kwargs)
+
+                        # we need to skip tests containing tensors of zero elements for now.
+                        # see issue: https://github.com/pytorch/PiPPy/issues/470
+                        # TODO remove this once issue above fixed.
+                        flat_args = pytree.tree_leaves(dtensor_rs)
+                        if any(
+                            isinstance(e, torch.Tensor) and e.numel() == 0
+                            for e in flat_args
+                        ):
+                            continue
+
+                        # redistribute/all_gather the results to compare with normal output
+                        dtensor_rs = tree_map(to_replicate, dtensor_rs)
+                        dtensor_rs = concat_res_if_necessary(func, dtensor_rs)
+                        if resolve_name(func) not in skip_bw:
+                            if isinstance(dtensor_rs, DTensor):
+                                dtensor_rs.to_local().sum().backward()
+                            elif isinstance(dtensor_rs, tuple):
+                                dtensor_rs[0].to_local().sum().backward()
+
+                        self.assert_ref_dtensor_equal(dtensor_rs, rs)
+                    else:
+                        raise RuntimeError(
+                            f"failed to convert args to DTensor; "
+                            f"originally (*{args}, **{kwargs})"
+                        )
+                except Exception as e:
+                    raise RuntimeError(
+                        f"{str(e)}\n\nfailed to run: {resolve_name(func)}, with (*{dtensor_args}, **{dtensor_kwargs})"
+                    ) from e
+        return rs
+
+    def check_dtensor_func(self, test_func, opinfo, dry_run=False):
+        try:
+            test_func()
+        except Exception:
+            if not dry_run:
+                raise
+            if opinfo.variant_test_name:
+                print(f"xfail('{opinfo.name}', '{opinfo.variant_test_name}'),")
+            else:
+                print(f"xfail('{opinfo.name}'),")
+
+
 # only instantiate tests for DEVICE_TYPE alone (i.e. either CPU or GPU)
 instantiate_device_type_tests(TestDTensorOps, globals(), only_for=(DEVICE_TYPE,))
+
+
+instantiate_device_type_tests(TestLocalDTensorOps, globals(), only_for=(DEVICE_TYPE,))
 
 
 if __name__ == "__main__":

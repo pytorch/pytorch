@@ -1,6 +1,5 @@
 import functools
 import operator
-from typing import Union
 
 import torch
 from torch.distributed._distributed_c10d import FakeWork
@@ -356,6 +355,7 @@ def _local_scatter_(
 
 # TODO: I haven't carefully checked if the alltoall implementations look
 # correct yet
+
 
 def _local_alltoall_(
     output_tensors, input_tensors, process_group_so, async_op=True, timeout=-1

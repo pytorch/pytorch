@@ -43,15 +43,13 @@ the Layout corresponding to the participating ranks, with respect to the global
 world size.
 """
 
-import os
-import sys
-
-
 import functools
 import operator
+import os
+import sys
 from collections.abc import Sequence
 from itertools import product
-from typing import Union
+from typing import Union, Optional
 
 import torch
 from torch import Tensor
@@ -60,8 +58,10 @@ from torch._export.wrappers import mark_subclass_constructor_exportable_experime
 from torch.distributed._distributed_c10d import FakeWork
 from torch.distributed.distributed_c10d import ProcessGroup, ReduceOp, Work
 from torch.utils import _pytree as pytree
-from torch.utils._python_dispatch import TorchDispatchMode
+from torch.utils._python_dispatch import TorchDispatchMode, _get_current_dispatch_mode_stack
 from torch.utils.checkpoint import get_device_states, set_device_states
+from torch.distributed._functional_collectives import AsyncCollectiveTensor
+from torch.utils._python_dispatch import return_and_correct_aliasing
 
 
 not_implemented_log = torch._logging.getArtifactLogger(__name__, "not_implemented")
@@ -234,6 +234,7 @@ class LocalTensor(torch.Tensor):
             _extra_dispatch_keys=extra_dispatch_keys,
         )
 
+        assert not any(isinstance(v, AsyncCollectiveTensor) for v in local_tensors.values())
         r._local_tensors = local_tensors
         r._ranks = frozenset(local_tensors.keys())
         return r
@@ -317,6 +318,11 @@ class LocalTensorMode(TorchDispatchMode):
             assert isinstance(ranks, frozenset)
             self.ranks = ranks
         self._disable = False
+
+    def __enter__(self):
+        # Recursively reentering NOT ALLOWED
+        assert not local_tensor_mode()
+        super().__enter__()
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         if kwargs is None:
@@ -420,9 +426,8 @@ class LocalTensorMode(TorchDispatchMode):
         rr_val = flat_rank_rets[rr_key]
 
         if isinstance(rr_val, Tensor):
-            return LocalTensor({r: flat_rank_rets[r] for r in sorted(self.ranks)})
-
-        if isinstance(rr_val, (list, tuple)):
+            ret = LocalTensor({r: flat_rank_rets[r] for r in sorted(self.ranks)})
+        elif isinstance(rr_val, (list, tuple)):
             ret = []
             for i in range(len(rr_val)):
                 rets = {r: flat_rank_rets[r][i] for r in sorted(self.ranks)}
@@ -434,12 +439,24 @@ class LocalTensorMode(TorchDispatchMode):
                     assert all(v == v2 for v2 in v_it)
                     ret.append(v)
 
+            # TODO: this is spooky
             if len(ret) == 1:
-                return ret[0]
-            return tuple(ret)
+                ret = ret[0]
+            else:
+                ret = tuple(ret) if isinstance(rr_val, tuple) else ret
         else:
             # Single non-tensor return value (scalar, etc.)
             v_it = iter(flat_rank_rets.values())
             v = next(v_it)
             assert all(v == v2 for v2 in v_it)
             return v
+
+        return return_and_correct_aliasing(func, args, kwargs, ret)
+
+def local_tensor_mode() -> Optional[LocalTensorMode]:
+    """
+    Retrieve the currently active LocalTensorMode.  LocalTensorMode cannot
+    be recursively applied.
+    """
+    r = [m for m in reversed(_get_current_dispatch_mode_stack()) if isinstance(m, LocalTensorMode)]
+    return r[0] if r else None
