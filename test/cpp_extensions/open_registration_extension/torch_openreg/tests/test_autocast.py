@@ -6,7 +6,7 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 class TestAutocast(TestCase):
-    def test_openreg_autocast_error_message(self):
+    def test_autocast_with_unsupported_type(self):
         with self.assertWarnsRegex(
             UserWarning,
             "In openreg autocast, but the target dtype torch.float32 is not supported.",
