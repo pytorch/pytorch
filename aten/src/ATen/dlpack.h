@@ -269,7 +269,7 @@ typedef struct DLManagedTensor {
   void (*deleter)(struct DLManagedTensor * self);
 } DLManagedTensor;
 
-// bit masks used in in the DLManagedTensorVersioned
+// bit masks used in the DLManagedTensorVersioned
 
 /*! \brief bit mask to indicate that the tensor is read only. */
 #define DLPACK_FLAG_BITMASK_READ_ONLY (1UL << 0UL)

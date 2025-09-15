@@ -697,7 +697,7 @@ class NonSerializableSetGetItemSource(ChainedSource):
 # Used to access an item from the dictionary
 @dataclasses.dataclass(frozen=True)
 class DictGetItemSource(ChainedSource):
-    # Key to access in the dictionary. It can be one of the the following types
+    # Key to access in the dictionary. It can be one of the following types
     # 1) ConstDictKeySource
     # 2) constant - like string, integer
     index: Any
@@ -734,7 +734,7 @@ class DictGetItemSource(ChainedSource):
 # torch.compile does not run the overridden __getitem__ method
 @dataclasses.dataclass(frozen=True)
 class DictSubclassGetItemSource(ChainedSource):
-    # Key to access in the dictionary. It can be one of the the following types
+    # Key to access in the dictionary. It can be one of the following types
     # 1) ConstDictKeySource
     # 2) constant - like string, integer
     index: Any

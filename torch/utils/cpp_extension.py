@@ -206,7 +206,7 @@ WRONG_COMPILER_WARNING = (
     "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
     "Your compiler (%s) is not compatible with the compiler Pytorch was"
     "built with for this platform, which is %s on %s. Please"
-    "use %s to to compile your extension. Alternatively, you may"
+    "use %s to compile your extension. Alternatively, you may"
     "compile PyTorch from source using %s, and then you can also use"
     "%s to compile your extension."
     "See https://github.com/pytorch/pytorch/blob/master/CONTRIBUTING.md for help"

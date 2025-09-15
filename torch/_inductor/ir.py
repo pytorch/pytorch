@@ -5926,7 +5926,7 @@ class ExternKernel(InputsKernel):
         if is_storage_and_layout(x):
             if isinstance(x.get_layout(), FlexibleLayout):
                 if order:
-                    # If the the FlexibleLayout already has the size and stride in the required order,
+                    # If the FlexibleLayout already has the size and stride in the required order,
                     # freeze it to a FixedLayout by using its current size and stride.
                     # The behavior of using its current size and stride or the given order can be different
                     # if the size and stride has ambiguilty, for example for a 4D input where the iC = 1:

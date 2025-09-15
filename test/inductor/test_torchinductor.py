@@ -14095,7 +14095,7 @@ def add_test_failures(
     """
     In-place modifies the given dictionary of `test_failures` to add the
     contents of `added_test_failures` by unioning the test_failure.suffixes, and
-    or-ing the the is_skip value.
+    or-ing the is_skip value.
     """
     for name, new_failure in added_test_failures.items():
         if name in test_failures:

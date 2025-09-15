@@ -418,7 +418,7 @@ def _call_while_loop(
         source_target=self.value,
         # NOTE [why we cannot use "automatic" for while_loop]:
         # The reason is that we want to enforce
-        # the ordering of inputs and outputs to be consistent and the the ordering
+        # the ordering of inputs and outputs to be consistent and the ordering
         # of cond_fn and body_fn to the consistent.
         # e.g. suppose we use "automatic" and we have:
         #

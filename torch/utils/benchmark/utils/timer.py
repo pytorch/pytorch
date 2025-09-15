@@ -484,7 +484,7 @@ class Timer:
         the fact that a small number of iterations is generally sufficient to
         obtain good measurements.
 
-        In order to to use this method `valgrind`, `callgrind_control`, and
+        In order to use this method `valgrind`, `callgrind_control`, and
         `callgrind_annotate` must be installed.
 
         Because there is a process boundary between the caller (this process)
