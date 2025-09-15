@@ -192,14 +192,16 @@ def _nvrtc_compile(
         for directory in cuda_include_dirs:
             options.append(f"-I{directory}".encode())
 
+    # Enable automatic precompiled headers (CUDA 12.8+)
+    if enable_automatic_pch:
+        if nvcc_options is None:
+            nvcc_options = []
+        nvcc_options.append("--pch")
+
     # Add custom NVCC options
     if nvcc_options:
         for option in nvcc_options:
             options.append(option.encode("utf-8"))
-
-    # Enable automatic precompiled headers (CUDA 12.8+)
-    if enable_automatic_pch:
-        options.append("--pch".encode("utf-8"))
 
     nvrtc_compatible_flags = _get_gpu_rtc_compatible_flags()
     options.extend([flag.encode("utf-8") for flag in nvrtc_compatible_flags])
