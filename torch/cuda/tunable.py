@@ -591,7 +591,6 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
         transA = layout[1] == "T"
         dtype = dtype_dict.get(data_type)
         if data_type == "tf32":
-            # User must still set HIPBLASLT_ALLOW_TF32=1
             torch.backends.cuda.matmul.allow_tf32 = True
         else:
             torch.backends.cuda.matmul.allow_tf32 = False
