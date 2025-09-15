@@ -512,6 +512,7 @@ libtorch_distributed_base_sources = [
     "torch/csrc/distributed/c10d/TCPStore.cpp",
     "torch/csrc/distributed/c10d/TCPStoreBackend.cpp",
     "torch/csrc/distributed/c10d/TCPStoreLibUvBackend.cpp",
+    "torch/csrc/distributed/c10d/Types.cpp",
     "torch/csrc/distributed/c10d/Utils.cpp",
     "torch/csrc/distributed/c10d/Work.cpp",
     "torch/csrc/distributed/c10d/comm.cpp",
@@ -635,6 +636,15 @@ libtorch_nativert_sources = [
     "torch/nativert/graph/passes/pass_manager/GraphPasses.cpp",
     "torch/nativert/graph/passes/pass_manager/PassManager.cpp",
     "torch/nativert/kernels/KernelHandlerRegistry.cpp",
+    "torch/nativert/kernels/TritonKernel.cpp",
+    "torch/nativert/executor/triton/CpuTritonKernelManager.cpp",
+    "torch/nativert/executor/AOTInductorDelegateExecutor.cpp",
+    "torch/nativert/kernels/ETCallDelegateKernel.cpp",
+]
+
+libtorch_nativert_cuda_sources = [
+    "torch/nativert/executor/triton/CudaTritonKernelManager.cpp",
+    "torch/nativert/executor/AOTInductorModelContainerCudaShim.cpp",
 ]
 
 torch_mobile_tracer_sources = [
@@ -770,7 +780,7 @@ libtorch_cuda_distributed_sources = libtorch_cuda_distributed_base_sources + lib
 
 libtorch_cuda_sources = libtorch_cuda_core_sources + libtorch_cuda_distributed_sources + [
     "torch/csrc/cuda/nccl.cpp",
-]
+] + libtorch_nativert_cuda_sources
 
 torch_cpp_srcs = [
     "torch/csrc/api/src/cuda.cpp",  # this just forwards stuff, no real CUDA
@@ -1087,6 +1097,7 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/DeviceAccelerator.cpp",
     "aten/src/ATen/Context.cpp",
     "aten/src/ATen/DLConvertor.cpp",
+    "aten/src/ATen/DTensorState.cpp",
     "aten/src/ATen/EmptyTensor.cpp",
     "aten/src/ATen/ExpandUtils.cpp",
     "aten/src/ATen/CachedTensorUtils.cpp",
