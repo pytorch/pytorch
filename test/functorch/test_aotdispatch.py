@@ -6542,6 +6542,7 @@ class TestAOTModuleSimplified(AOTTestCase):
         assert torch.allclose(inputs[0].grad, cloned_inputs[0].grad)
         assert torch.allclose(inputs[1].grad, cloned_inputs[1].grad)
 
+
     def test_aot_module_simplified_dynamic(self):
         class MockModule(torch.nn.Module):
             def __init__(self) -> None:
