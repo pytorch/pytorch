@@ -47,6 +47,8 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    TEST_XPU,
+    xfailIf,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
@@ -56,6 +58,9 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     with_comms,
 )
 from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
+
+
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 
 
 class SimpleModel(nn.Module):
@@ -73,7 +78,7 @@ class SimpleModel(nn.Module):
         return x
 
     def get_input(self):
-        return torch.rand(4, 5, device="cuda")
+        return torch.rand(4, 5, device=device_type)
 
 
 class SimpleModelUneven(nn.Module):
@@ -94,7 +99,7 @@ class SimpleModelUneven(nn.Module):
         return x
 
     def get_input(self):
-        return torch.rand(4, 5, device="cuda")
+        return torch.rand(4, 5, device=device_type)
 
 
 class TestFullyShard2DTraining(FSDPTest):
@@ -105,13 +110,15 @@ class TestFullyShard2DTraining(FSDPTest):
 
     @property
     def world_size(self) -> int:
-        return min(4, torch.cuda.device_count())
+        return min(4, torch.accelerator.device_count())
 
     def init_global_mesh(self) -> DeviceMesh:
         # Prefer to test with >=4 GPUs, but for 2 GPUs, use 2-way TP
         dp_size = 2 if self.world_size > 2 else 1
         return init_device_mesh(
-            "cuda", (dp_size, self.world_size // dp_size), mesh_dim_names=("dp", "tp")
+            device_type,
+            (dp_size, self.world_size // dp_size),
+            mesh_dim_names=("dp", "tp"),
         )
 
     @skip_if_lt_x_gpu(2)
@@ -138,7 +145,7 @@ class TestFullyShard2DTraining(FSDPTest):
 
         torch.manual_seed(42)
         model = MLPStack(mlp_dim)
-        ref_model = copy.deepcopy(model).cuda()
+        ref_model = copy.deepcopy(model).to(device_type)
         replicate(ref_model, device_ids=[self.rank], process_group=dp_pg)
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2, foreach=False)
         model.parallelize(
@@ -150,9 +157,8 @@ class TestFullyShard2DTraining(FSDPTest):
         optim = torch.optim.Adam(model.parameters(), lr=1e-2, foreach=False)
 
         torch.manual_seed(42 + dp_pg.rank() + 1)
-        device = torch.device("cuda")
         for iter_idx in range(10):
-            inp = torch.randn((8, mlp_dim), device=device)
+            inp = torch.randn((8, mlp_dim), device=device_type)
             losses: list[torch.Tensor] = []
             for _model, _optim in ((ref_model, ref_optim), (model, optim)):
                 _optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
@@ -162,6 +168,7 @@ class TestFullyShard2DTraining(FSDPTest):
             self.assertEqual(losses[0], losses[1])
 
     @skip_if_lt_x_gpu(2)
+    @xfailIf(TEST_XPU)  # https://github.com/intel/torch-xpu-ops/issues/1881
     def test_train_parity_2d_transformer(self):
         self.run_subtests(
             {"use_shard_placement_fn": [False, True]},
@@ -172,12 +179,12 @@ class TestFullyShard2DTraining(FSDPTest):
         torch.manual_seed(42)
         model_args = ModelArgs(n_layers=3, dropout_p=0.0)
         model = Transformer(model_args)
-        ref_model = copy.deepcopy(model).cuda()
+        ref_model = copy.deepcopy(model).to(device_type)
         ref_optim = torch.optim.AdamW(ref_model.parameters(), lr=1e-2)
 
         dp_size, tp_size = self.world_size // 2, 2
         global_mesh = init_device_mesh(
-            "cuda", (dp_size, tp_size), mesh_dim_names=("dp", "tp")
+            device_type, (dp_size, tp_size), mesh_dim_names=("dp", "tp")
         )
         model = Transformer.parallelize(model, global_mesh["tp"], use_seq_parallel=True)
 
@@ -205,7 +212,7 @@ class TestFullyShard2DTraining(FSDPTest):
             self.assertEqual(full_param, ref_param)
 
         torch.manual_seed(42 + global_mesh.get_local_rank("dp"))
-        inp = torch.randint(0, model_args.vocab_size, (2, 16), device="cuda")
+        inp = torch.randint(0, model_args.vocab_size, (2, 16), device=device_type)
         for iter_idx in range(5):
             ref_loss = ref_model(inp).sum()
             loss = model(inp).sum()
@@ -242,15 +249,16 @@ class TestFullyShard2DTraining(FSDPTest):
             self.assertEqual(full_param, ref_param)
 
     @skip_if_lt_x_gpu(2)
+    @xfailIf(TEST_XPU)  # https://github.com/pytorch/pytorch/issues/156782
     def test_tp_with_fsdp_offloading(self):
         global_mesh = init_device_mesh(
-            "cuda", (1, self.world_size), mesh_dim_names=("dp", "tp")
+            device_type, (1, self.world_size), mesh_dim_names=("dp", "tp")
         )
         dp_mesh, tp_mesh = global_mesh["dp"], global_mesh["tp"]
         torch.manual_seed(42)
         mlp_dim = 16
         model = MLPStack(mlp_dim)
-        ref_model = copy.deepcopy(model).cuda()
+        ref_model = copy.deepcopy(model).to(device_type)
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2, foreach=False)
         # Parallelize with N-way TP and 1-way FSDP
         model.parallelize(
@@ -268,7 +276,7 @@ class TestFullyShard2DTraining(FSDPTest):
         # NOTE: We still see the FSDP all-gather/reduce-scatter c10d ops
         # called, but they will just be no-ops without issuing any kernels.
         # We prefer to keep the no-op check at the c10d level, not in FSDP.
-        inp = torch.randn((4, mlp_dim), device="cuda")  # same on all ranks
+        inp = torch.randn((4, mlp_dim), device=device_type)  # same on all ranks
         for _ in range(10):
             ref_optim.zero_grad()
             optim.zero_grad()
@@ -297,6 +305,7 @@ class TestFullyShard2DTraining(FSDPTest):
             ref_optim.step()
 
     @skip_if_lt_x_gpu(2)
+    @xfailIf(TEST_XPU)  # https://github.com/intel/torch-xpu-ops/issues/1881
     @with_temp_dir
     def test_train_parity_2d_transformer_checkpoint_resume(self):
         """
@@ -352,7 +361,7 @@ class TestFullyShard2DTraining(FSDPTest):
         )
 
         torch.manual_seed(42 + global_mesh["dp"].get_local_rank() + 1)
-        inp = torch.randint(0, model_args.vocab_size, (3, 16), device="cuda")
+        inp = torch.randint(0, model_args.vocab_size, (3, 16), device=device_type)
         loss_no_cp1 = train_step(model_no_cp, optim_no_cp, inp)
         loss_no_cp2 = train_step(model_no_cp, optim_no_cp, inp)
 
@@ -410,14 +419,14 @@ class TestFullyShard2DStateDict(DTensorTestBase):
     @property
     def backend(self):
         # need to specify gloo backend for testing cpu offload
-        return "cpu:gloo,cuda:nccl"
+        return "cpu:gloo,xpu:xccl" if TEST_XPU else "cpu:gloo,cuda:nccl"
 
     @with_comms
     @skip_if_lt_x_gpu(4)
     def test_fully_shard_tp_2d_set_full_state_dict(self):
-        dummy_model = SimpleModel().cuda()
+        dummy_model = SimpleModel().to(device_type)
         mesh_2d = init_device_mesh(
-            "cuda",
+            device_type,
             (2, self.world_size // 2),
             mesh_dim_names=("dp", "tp"),
         )
@@ -561,7 +570,7 @@ class TestNew2dParallelTraining(DTensorTestBase):
             self.device_type, (2, self.world_size // 2), mesh_dim_names=("dp", "tp")
         )
         model = FSDP(
-            SimpleModel().cuda(),
+            SimpleModel().to(device_type),
             device_mesh=mesh_2d["dp"],
         )
         fsdp_state = _get_module_fsdp_state(model)
@@ -573,7 +582,7 @@ class TestNew2dParallelTraining(DTensorTestBase):
         recompute_activation=False,
     ) -> None:
         torch.manual_seed(0)
-        model = SimpleModel().cuda(self.rank)
+        model = SimpleModel().to(f"{device_type}:{self.rank}")
         model = FSDP(model, use_orig_params=use_orig_params)
         optim = torch.optim.Adam(model.parameters(), lr=0.01)
 
@@ -587,7 +596,9 @@ class TestNew2dParallelTraining(DTensorTestBase):
             "net1": ColwiseParallel(),
             "net2": RowwiseParallel(),
         }
-        model_2d = parallelize_module(SimpleModel().cuda(), tp_mesh, parallelize_plan)
+        model_2d = parallelize_module(
+            SimpleModel().to(device_type), tp_mesh, parallelize_plan
+        )
         model_2d = FSDP(
             model_2d,
             device_mesh=dp_mesh,
@@ -615,7 +626,7 @@ class TestNew2dParallelTraining(DTensorTestBase):
             # Ensure all input across TP ranks are same.
             # TODO: add a get_group_rank() to DeviceMesh.
             torch.manual_seed(i + dist.get_rank(dp_mesh.get_group(mesh_dim=0)))
-            input = torch.rand(4, 5).cuda(self.rank)
+            input = torch.rand(4, 5).to(f"{device_type}:{self.rank}")
             output = model(input)
             output_2d = model_2d(input)
             self.assertEqual(output, output_2d)
@@ -652,7 +663,7 @@ class TestNew2dParallelStateDict(DTensorTestBase):
     @property
     def backend(self):
         # need to specify gloo backend for testing cpu offload
-        return "cpu:gloo,cuda:nccl"
+        return "cpu:gloo,xpu:xccl" if TEST_XPU else "cpu:gloo,cuda:nccl"
 
     @with_comms
     @skip_if_lt_x_gpu(4)
@@ -669,7 +680,7 @@ class TestNew2dParallelStateDict(DTensorTestBase):
             "net3": ColwiseParallel(),
         }
         model_2d = parallelize_module(
-            SimpleModel().cuda(),
+            SimpleModel().to(device_type),
             mesh_2d["tp"],
             parallelize_plan=parallelize_plan,
         )
@@ -679,8 +690,10 @@ class TestNew2dParallelStateDict(DTensorTestBase):
             isinstance(model_2d_fsdp_state._fsdp_extension, DTensorExtensions)
         )
 
-        mesh_1d = init_device_mesh("cuda", (self.world_size,))
-        model_1d = FSDP(SimpleModel().cuda(), device_mesh=mesh_1d, use_orig_params=True)
+        mesh_1d = init_device_mesh(device_type, (self.world_size,))
+        model_1d = FSDP(
+            SimpleModel().to(device_type), device_mesh=mesh_1d, use_orig_params=True
+        )
         model_1d_fsdp_state = _get_module_fsdp_state(model_1d)
         self.assertEqual(model_1d_fsdp_state._fsdp_extension, None)
 
@@ -692,7 +705,7 @@ class TestNew2dParallelStateDict(DTensorTestBase):
 
         # Create a model without wrapper
         torch.manual_seed(0)
-        no_wrap_model = simple_model().cuda(self.rank)
+        no_wrap_model = simple_model().to(f"{device_type}:{self.rank}")
         no_wrap_state_dict = no_wrap_model.state_dict()
 
         # Create a model and sharded it with 2D FSDP + TP
@@ -706,7 +719,9 @@ class TestNew2dParallelStateDict(DTensorTestBase):
             "net1": ColwiseParallel(),
             "net2": RowwiseParallel(),
         }
-        model_2d = parallelize_module(simple_model().cuda(), tp_mesh, parallelize_plan)
+        model_2d = parallelize_module(
+            simple_model().to(device_type), tp_mesh, parallelize_plan
+        )
         model_2d = FSDP(model_2d, device_mesh=dp_mesh, use_orig_params=True)
 
         FSDP.set_state_dict_type(
@@ -754,7 +769,9 @@ class TestNew2dParallelStateDict(DTensorTestBase):
             "net1": ColwiseParallel(),
             "net2": RowwiseParallel(),
         }
-        model_2d = parallelize_module(simple_model().cuda(), tp_mesh, parallelize_plan)
+        model_2d = parallelize_module(
+            simple_model().to(device_type), tp_mesh, parallelize_plan
+        )
         model_2d = FSDP(model_2d, device_mesh=dp_mesh, use_orig_params=True)
         optim_2d = torch.optim.Adam(model_2d.parameters(), lr=0.01)
 
@@ -768,7 +785,7 @@ class TestNew2dParallelStateDict(DTensorTestBase):
         ref_state_dict = deepcopy(model_2d.state_dict())
 
         # Update the parameters so model.state_dict() will be different from ref_dtensor_sd.
-        model_2d(model_2d.get_input().cuda(self.rank)).sum().backward()
+        model_2d(model_2d.get_input().to(f"{device_type}:{self.rank}")).sum().backward()
         optim_2d.step()
 
         # Load ref_state_dict back.
@@ -799,9 +816,11 @@ class TestNew2dParallelStateDict(DTensorTestBase):
 
         # Create a model without wrapper
         torch.manual_seed(0)
-        no_wrap_model = simple_model().cuda(self.rank)
+        no_wrap_model = simple_model().to(f"{device_type}:{self.rank}")
         no_wrap_optim = torch.optim.Adam(no_wrap_model.parameters(), lr=0.01)
-        no_wrap_model(no_wrap_model.get_input().cuda(self.rank)).sum().backward()
+        no_wrap_model(
+            no_wrap_model.get_input().to(f"{device_type}:{self.rank}")
+        ).sum().backward()
         no_wrap_optim.step()
         no_wrap_osd = get_optimizer_state_dict(no_wrap_model, optimizers=no_wrap_optim)
 
@@ -815,7 +834,7 @@ class TestNew2dParallelStateDict(DTensorTestBase):
             "net2": RowwiseParallel(),
         }
         model_2d = parallelize_module(
-            simple_model().cuda(), mesh_2d["tp"], parallelize_plan
+            simple_model().to(device_type), mesh_2d["tp"], parallelize_plan
         )
         model_2d = FSDP(model_2d, device_mesh=mesh_2d["dp"], use_orig_params=True)
         FSDP.set_state_dict_type(
@@ -823,7 +842,7 @@ class TestNew2dParallelStateDict(DTensorTestBase):
             StateDictType.SHARDED_STATE_DICT,
         )
         optim_2d = torch.optim.Adam(model_2d.parameters(), lr=0.01)
-        model_2d(model_2d.get_input().cuda(self.rank)).sum().backward()
+        model_2d(model_2d.get_input().to(f"{device_type}:{self.rank}")).sum().backward()
         optim_2d.step()
         optim_2d_osd = get_optimizer_state_dict(model_2d, optimizers=optim_2d)
         ref_optim_2d_osd = deepcopy(optim_2d_osd)
@@ -842,7 +861,7 @@ class TestNew2dParallelStateDict(DTensorTestBase):
                 # compare with no_wrap state.
                 if isinstance(dist_state, DTensor):
                     dist_state = (
-                        dist_state.cuda()
+                        dist_state.to(device_type)
                         .redistribute(placements=(Replicate(), Replicate()))
                         .to_local()
                     )
@@ -850,7 +869,7 @@ class TestNew2dParallelStateDict(DTensorTestBase):
                 self.assertTrue(torch.allclose(state, dist_state))
 
         # Update the parameters 2d optim states will be different from ref_optim_state_dict.
-        model_2d(model_2d.get_input().cuda(self.rank)).sum().backward()
+        model_2d(model_2d.get_input().to(f"{device_type}:{self.rank}")).sum().backward()
         optim_2d.step()
 
         set_optimizer_state_dict(
@@ -892,8 +911,8 @@ class TestNew2dParallelStateDict(DTensorTestBase):
         5) dcp.load the state dict from storage
         6) load the state dict into the 2D model
         """
-        dummy_model = SimpleModel().cuda()
-        mesh_1d = init_device_mesh("cuda", (self.world_size,))
+        dummy_model = SimpleModel().to(device_type)
+        mesh_1d = init_device_mesh(device_type, (self.world_size,))
         model = FSDP(dummy_model, device_mesh=mesh_1d)
         optim = torch.optim.Adam(model.parameters(), lr=0.01)
         model(model.get_input()).sum().backward()
@@ -911,9 +930,9 @@ class TestNew2dParallelStateDict(DTensorTestBase):
         dcp.save(state_dict, checkpoint_id=self.temp_dir)
 
         # initialize 2d model
-        dummy_model = SimpleModel().cuda()
+        dummy_model = SimpleModel().to(device_type)
         mesh_2d = init_device_mesh(
-            "cuda",
+            device_type,
             (2, self.world_size // 2),
             mesh_dim_names=("dp", "tp"),
         )
