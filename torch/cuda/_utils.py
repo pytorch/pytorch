@@ -65,6 +65,8 @@ def _get_hiprtc_library() -> ctypes.CDLL:
     lib.nvrtcGetPTX = lib.hiprtcGetCode  # type: ignore[attr-defined]
     lib.nvrtcGetProgramLogSize = lib.hiprtcGetProgramLogSize  # type: ignore[attr-defined]
     lib.nvrtcGetProgramLog = lib.hiprtcGetProgramLog  # type: ignore[attr-defined]
+    lib.nvrtcAddNameExpression = lib.hiprtcAddNameExpression  # type: ignore[attr-defined]
+    lib.nvrtcGetLoweredName = lib.hiprtcGetLoweredName  # type: ignore[attr-defined]
     return lib
 
 
@@ -115,7 +117,8 @@ def _nvrtc_compile(
     header_code: str = "",
     cuda_include_dirs: Optional[list] = None,
     nvcc_options: Optional[list] = None,
-) -> bytes:
+    auto_pch: bool = False,
+) -> tuple[bytes, str]:
     """
     Compiles a CUDA kernel using NVRTC and returns the PTX code.
 
@@ -127,9 +130,10 @@ def _nvrtc_compile(
         header_code (str, optional): Additional header code to prepend to the kernel source
         cuda_include_dirs (list, None): List of directories containing CUDA headers
         nvcc_options (list, None): Additional options to pass to NVRTC
+        auto_pch (bool): Enable automatic precompiled headers (CUDA 12.8+)
 
     Returns:
-        str: The compiled PTX code
+        Tuple[bytes, str]: The compiled PTX code and mangled kernel name
     """
     # Ensure CUDA is initialized
     import torch.cuda
@@ -151,10 +155,6 @@ def _nvrtc_compile(
                 else "Unknown CUDA error"
             )
             raise RuntimeError(f"CUDA error: {error_message}")
-
-    # Add 'extern "C"' if not already present to ensure C linkage
-    if not kernel_source.strip().startswith('extern "C"'):
-        kernel_source = f'extern "C" {kernel_source}'
 
     # Combine header code and kernel source
     if header_code:
@@ -192,6 +192,13 @@ def _nvrtc_compile(
         for directory in cuda_include_dirs:
             options.append(f"-I{directory}".encode())
 
+    # Enable automatic precompiled headers (CUDA 12.8+)
+    if auto_pch:
+        assert str(torch.version.cuda) >= "12.8", "PCH requires CUDA 12.8+"
+        if nvcc_options is None:
+            nvcc_options = []
+        nvcc_options.append("--pch")
+
     # Add custom NVCC options
     if nvcc_options:
         for option in nvcc_options:
@@ -217,6 +224,10 @@ def _nvrtc_compile(
         )
     )
 
+    # Add kernel name, which can be a template expression
+    c_kernel_name = kernel_name.encode("utf-8")
+    check_nvrtc(libnvrtc.nvrtcAddNameExpression(prog, c_kernel_name))
+
     # Compile program
     res = libnvrtc.nvrtcCompileProgram(prog, num_options, options_array)
 
@@ -234,12 +245,24 @@ def _nvrtc_compile(
     check_nvrtc(libnvrtc.nvrtcGetPTXSize(prog, ctypes.byref(ptx_size)))
     ptx = ctypes.create_string_buffer(ptx_size.value)
     check_nvrtc(libnvrtc.nvrtcGetPTX(prog, ptx))
+
+    # Get mangled name
+    c_mangled_name = ctypes.c_char_p()
+    check_nvrtc(
+        libnvrtc.nvrtcGetLoweredName(prog, c_kernel_name, ctypes.byref(c_mangled_name))
+    )
+    if c_mangled_name.value is not None:
+        mangled_name = c_mangled_name.value.decode()  # make a copy
+    else:
+        mangled_name = ""
+
     libnvrtc.nvrtcDestroyProgram(ctypes.byref(prog))
 
     # For HIP, hipRTC generates raw CO binaries instead of PTX,
     # and for some reason, ".value" causes the string to be truncated,
     # likely due to the presence of '\0' in the string. So we use .raw instead.
-    return ptx.raw if torch.version.hip else ptx.value
+    ptx_bytes = ptx.raw if torch.version.hip else ptx.value
+    return ptx_bytes, mangled_name
 
 
 class _CudaModule:
