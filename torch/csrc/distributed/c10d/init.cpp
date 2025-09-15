@@ -3543,14 +3543,13 @@ Example::
 
                 auto options = ::c10d::ProcessGroupXCCL::Options::create();
                 options->is_high_priority_stream = false;
-                options->timeout = timeout;
                 return c10::make_intrusive<::c10d::ProcessGroupXCCL>(
                     store, rank, size, options);
               }),
               py::arg("store"),
               py::arg("rank"),
               py::arg("size"),
-              R"(Create a new ProcessGroupNCCL instance.)")
+              R"(Create a new ProcessGroupXCCL instance.)")
           .def_property_readonly(
               "options",
               &::c10d::ProcessGroupXCCL::getOptions,
