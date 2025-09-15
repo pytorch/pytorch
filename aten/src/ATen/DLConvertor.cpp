@@ -277,6 +277,66 @@ ScalarType toScalarType(const DLDataType& dtype) {
               false, "Unsupported kDLBool bits ", std::to_string(dtype.bits));
       }
       break;
+    case DLDataTypeCode::kDLFloat8_e5m2:
+      switch (dtype.bits) {
+        case 8:
+          stype = ScalarType::Float8_e5m2;
+          break;
+        default:
+          TORCH_CHECK_BUFFER(
+              false, "Unsupported kDLFloat8_e5m2 bits ", std::to_string(dtype.bits));
+      }
+      break;
+    case DLDataTypeCode::kDLFloat8_e5m2fnuz:
+      switch (dtype.bits) {
+        case 8:
+          stype = ScalarType::Float8_e5m2fnuz;
+          break;
+        default:
+          TORCH_CHECK_BUFFER(
+              false, "Unsupported kDLFloat8_e5m2fnuz bits ", std::to_string(dtype.bits));
+      }
+      break;
+    case DLDataTypeCode::kDLFloat8_e4m3fn:
+      switch (dtype.bits) {
+        case 8:
+          stype = ScalarType::Float8_e4m3fn;
+          break;
+        default:
+          TORCH_CHECK_BUFFER(
+              false, "Unsupported kDLFloat8_e4m3fn bits ", std::to_string(dtype.bits));
+      }
+      break;
+    case DLDataTypeCode::kDLFloat8_e4m3fnuz:
+      switch (dtype.bits) {
+        case 8:
+          stype = ScalarType::Float8_e4m3fnuz;
+          break;
+        default:
+          TORCH_CHECK_BUFFER(
+              false, "Unsupported kDLFloat8_e4m3fnuz bits ", std::to_string(dtype.bits));
+      }
+      break;
+    case DLDataTypeCode::kDLFloat8_e8m0fnu:
+      switch (dtype.bits) {
+        case 8:
+          stype = ScalarType::Float8_e8m0fnu;
+          break;
+        default:
+          TORCH_CHECK_BUFFER(
+              false, "Unsupported kDLFloat8_e8m0fnu bits ", std::to_string(dtype.bits));
+      }
+      break;
+    case dtype.code = DLDataTypeCode::kDLFloat4_e2m1fn:
+      switch (dtype.bits) {
+        case 4:
+          stype = ScalarType::Float4_e2m1fn_x2;
+          break;
+        default:
+          TORCH_CHECK_BUFFER(
+              false, "Unsupported kDLFloat4_e2m1fn bits ", std::to_string(dtype.bits));
+      }
+      break;
     default:
       TORCH_CHECK_BUFFER(false, "Unsupported code ", std::to_string(dtype.code));
   }
