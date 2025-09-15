@@ -4823,6 +4823,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         ):
             f_compiled(a)
         # See https://github.com/pytorch/pytorch/issues/161010
+
     def test_preserve_stride_with_clone(self) -> None:
         A = torch.rand(5, 5, device="cuda" if torch.cuda.is_available() else "cpu")
         B = torch.rand(5, 5, device="cuda" if torch.cuda.is_available() else "cpu")
@@ -4861,14 +4862,28 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             return y
 
         y = foo()
-        self.assertEqual(y.stride(), (1, 4), "Reference eager implementation should have stride (1, 4)")
+        self.assertEqual(
+            y.stride(),
+            (1, 4),
+            "Reference eager implementation should have stride (1, 4)",
+        )
         y = torch.compile(foo, backend="eager")()
-        self.assertEqual(y.stride(), (1, 4), "Compile with eager backend should have stride (1, 4)")
+        self.assertEqual(
+            y.stride(), (1, 4), "Compile with eager backend should have stride (1, 4)"
+        )
         y = torch.compile(foo, backend="aot_eager")()
-        self.assertEqual(y.stride(), (1, 4), "Compile with aot_eager backend should have stride (1, 4)")
+        self.assertEqual(
+            y.stride(),
+            (1, 4),
+            "Compile with aot_eager backend should have stride (1, 4)",
+        )
         y = torch.compile(foo, backend="inductor")()
-        self.assertEqual(y.stride(), (1, 4), "Compile with inductor backend should have stride (1, 4)")
-        
+        self.assertEqual(
+            y.stride(),
+            (1, 4),
+            "Compile with inductor backend should have stride (1, 4)",
+        )
+
     # https://github.com/pytorch/pytorch/issues/146598
     @unittest.expectedFailure
     def test_lru_cache_tracing(self):
