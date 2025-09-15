@@ -9,7 +9,6 @@ if sys.platform == "win32":
     _load_dll_libraries()
     del _load_dll_libraries
 
-# LITERALINCLUDE START: AUTOLOAD
 import torch_openreg._C  # type: ignore[misc]
 import torch_openreg.openreg
 
@@ -19,6 +18,7 @@ torch._register_device_module("openreg", torch_openreg.openreg)
 torch.utils.generate_methods_for_privateuse1_backend(for_storage=True)
 
 
+# LITERALINCLUDE START: AUTOLOAD
 def _autoload():
     # It is a placeholder function here to be registered as an entry point.
     pass

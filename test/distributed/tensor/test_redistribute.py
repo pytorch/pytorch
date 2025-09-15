@@ -19,6 +19,8 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    TEST_CUDA,
+    TEST_HPU,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
@@ -517,7 +519,7 @@ class RedistributeTest(DTensorTestBase):
                 local_out_dt = out_dt.to_local()
                 local_expected_dt = expected_dt.to_local()
                 self.assertEqual(out_dt.to_local(), expected_dt.to_local())
-                if torch.accelerator.is_available():
+                if TEST_HPU or TEST_CUDA:
                     self.assertEqual(
                         comm_mode.get_comm_counts()[
                             torch.ops._dtensor.shard_dim_alltoall
