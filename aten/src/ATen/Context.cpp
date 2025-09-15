@@ -180,7 +180,7 @@ void Context::setUserEnabledNNPACK(bool e) {
 }
 
 bool Context::allowTF32CuDNN(const std::string& op) const {
-  if (op.size() == 0){
+  if (op.empty()){
     bool allow_tf32_rnn = float32Precision("cuda", "rnn") == "tf32";
     bool allow_tf32_conv = float32Precision("cuda", "conv") == "tf32";
     TORCH_CHECK(
@@ -426,7 +426,7 @@ void Context::setFloat32Precision(const std::string& backend, const std::string&
     std::string msg;
     auto iterp = _fp32_precisions.find(backend);
     TORCH_CHECK(iterp != _fp32_precisions.end());
-    for (auto p : iterp->second) {
+    for (const auto& p : iterp->second) {
       msg += p;
       msg += " ";
     }

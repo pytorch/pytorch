@@ -51,7 +51,6 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_CUDNN_ATTENTION,
     tf32_on_and_off,
     tf32_enabled,
-    ROCM_VERSION,
 )
 
 if TEST_FAIRSEQ:
