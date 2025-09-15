@@ -7,7 +7,7 @@ Owner(s): ["distributed"]
 
 import io
 import warnings
-from contextlib import redirect_stderr
+from contextlib import redirect_stderr, redirect_stdout
 
 import torch
 import torch.distributed as dist
@@ -128,7 +128,7 @@ class DistributedLoggingTest(MultiProcessTestCase):
         # Capture what each rank would emit for print
         stdout_capture = io.StringIO()
         
-        with io.redirect_stdout(stdout_capture):
+        with redirect_stdout(stdout_capture):
             print(f"Test print from rank {self.rank}")
         
         rank_output = stdout_capture.getvalue()
