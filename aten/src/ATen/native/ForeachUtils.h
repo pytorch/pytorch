@@ -38,7 +38,8 @@ inline bool has_bool_tensor(TensorList tensors) {
 // - All TensorLists and ScalarLists must have the same number of elements.
 // - Corresponding tensors must have the same size.
 inline void check_foreach_api_restrictions(TensorList tensors) {
-  TORCH_CHECK(!tensors.empty(), "Tensor list must have at least one tensor.");
+  // Allowing empty lists by removing torch_check 
+  // TORCH_CHECK(!tensors.empty(), "Tensor list must have at least one tensor.");
 }
 
 inline void check_foreach_api_restrictions(
