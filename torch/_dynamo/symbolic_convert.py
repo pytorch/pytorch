@@ -1074,14 +1074,12 @@ class Stack:
         self._data[self.stack_pointer] = value
         self.stack_pointer += 1
 
-    # @torch._dynamo.utils.measure_time
     def pop(self) -> VariableTracker:
         if self.stack_pointer == 0:
             raise IndexError("pop from empty stack")
         self.stack_pointer -= 1
         value = self._data[self.stack_pointer]
         self._data[self.stack_pointer] = None
-        assert value is not None
         return value
 
     def clear(self) -> None:
@@ -1094,7 +1092,6 @@ class Stack:
         if index < 0 or index >= self.stack_pointer:
             raise IndexError("stack index out of range")
         value = self._data[index]
-        assert value is not None
         return value
 
     def __setitem__(self, index: int, value: VariableTracker) -> None:
@@ -1108,7 +1105,7 @@ class Stack:
         return self.stack_pointer
 
     def __iter__(self) -> Iterator[Optional[VariableTracker]]:
-        return self._data.__iter__()
+        return self._data[:self.stack_pointer].__iter__()
 
     def __str__(self) -> str:
         return self._data[: self.stack_pointer].__str__()
