@@ -54,7 +54,7 @@ def load_test_module(name):
 AOTIRunnerUtil = load_test_module("inductor.test_aot_inductor_utils").AOTIRunnerUtil
 
 import sys
-
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 
 if not dist.is_available():
     print("distributed package not available, skipping tests", file=sys.stderr)
@@ -779,7 +779,6 @@ class CompileTest(TestCase):
 
         self.rank = 0
         self.world_size = 2
-        device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
         torch.accelerator.set_device_index(f"{device_type}:0")
 
         store = FakeStore()
