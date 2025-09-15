@@ -806,7 +806,7 @@ class CompileTest(TestCase):
             ar1 = funcol.wait_tensor(ar1)
             return ar0, ar1
 
-        arg = torch.rand(4, 4, device="cuda")
+        arg = torch.rand(4, 4, device=device_type)
         compiled = torch.compile(func)
 
         code = run_and_get_triton_code(compiled, arg)
@@ -854,7 +854,7 @@ class CompileTest(TestCase):
             ar1 = [funcol.wait_tensor(out) for out in ar1]
             return ar0, ar1
 
-        args = [torch.rand(4, 4, device="cuda") for _ in range(2)]
+        args = [torch.rand(4, 4, device=device_type) for _ in range(2)]
         compiled = torch.compile(func)
         code = run_and_get_triton_code(compiled, args)
         buf0, buf1, buf2, buf3 = find_buffer_assignments(code)
@@ -895,7 +895,7 @@ class CompileTest(TestCase):
             ar0 = funcol.wait_tensor(ar0)
             return ar0
 
-        arg = torch.rand(4, 4, device="cuda")
+        arg = torch.rand(4, 4, device=device_type)
         compiled = torch.compile(func)
 
         code = run_and_get_triton_code(compiled, arg)
@@ -920,7 +920,7 @@ class CompileTest(TestCase):
             # Expect allocation
             return ar0
 
-        arg = torch.rand(4, 4, device="cuda").T
+        arg = torch.rand(4, 4, device=device_type).T
         compiled = torch.compile(func)
 
         code = run_and_get_triton_code(compiled, arg)
@@ -951,7 +951,7 @@ class CompileTest(TestCase):
             buf2 = torch.mm(arg, buf1)
             return buf1, buf2
 
-        arg = torch.rand(4, 4, device="cuda")
+        arg = torch.rand(4, 4, device=device_type)
         compiled = torch.compile(func)
         code = run_and_get_triton_code(compiled, arg)
         buf0, buf1 = find_buffer_assignments(code)
@@ -981,7 +981,7 @@ class CompileTest(TestCase):
             ag0 = funcol.wait_tensor(ag0)
             return ag0
 
-        arg = torch.rand(4, 4, device="cuda")
+        arg = torch.rand(4, 4, device=device_type)
         compiled = torch.compile(func)
         code = run_and_get_triton_code(compiled, arg)
         (
@@ -1008,7 +1008,7 @@ class CompileTest(TestCase):
             ag0 = [funcol.wait_tensor(out) for out in ag0]
             return ag0
 
-        args = [torch.rand(4, 4, device="cuda") for _ in range(4)]
+        args = [torch.rand(4, 4, device=device_type) for _ in range(4)]
         compiled = torch.compile(func)
         code = run_and_get_triton_code(compiled, args)
         (
@@ -1042,7 +1042,7 @@ class CompileTest(TestCase):
             return funcol.wait_tensor(t)
 
         # Test aoti
-        arg = torch.rand(4, 4, device="cuda")
+        arg = torch.rand(4, 4, device=device_type)
         compiled = torch.compile(func)
         code = run_and_get_triton_code(compiled, arg)
         (
@@ -1064,7 +1064,7 @@ class CompileTest(TestCase):
             rs0 = funcol.wait_tensor(rs0)
             return rs0
 
-        arg = torch.rand(4, 4, device="cuda")
+        arg = torch.rand(4, 4, device=device_type)
         compiled = torch.compile(func)
         code = run_and_get_triton_code(compiled, arg)
         (
@@ -1092,7 +1092,7 @@ class CompileTest(TestCase):
             rs0 = [funcol.wait_tensor(out) for out in rs0]
             return rs0
 
-        args = [torch.rand(4, 4, device="cuda") for _ in range(4)]
+        args = [torch.rand(4, 4, device=device_type) for _ in range(4)]
         compiled = torch.compile(func)
         code = run_and_get_triton_code(compiled, args)
         (
@@ -1179,7 +1179,7 @@ class CompileTest(TestCase):
             br1 = funcol.wait_tensor(br1)
             return br0, br1
 
-        arg = torch.rand(4, 4, device="cuda")
+        arg = torch.rand(4, 4, device=device_type)
         compiled = torch.compile(func)
 
         code = run_and_get_triton_code(compiled, arg)
@@ -1217,7 +1217,7 @@ class CompileTest(TestCase):
             ar1 = funcol.wait_tensor(ar1)
             return ar0, ar1
 
-        arg = torch.rand(4, 4, device="cuda")
+        arg = torch.rand(4, 4, device=device_type)
         compiled = torch.compile(func, fullgraph=True)
 
         code = run_and_get_triton_code(compiled, arg)
