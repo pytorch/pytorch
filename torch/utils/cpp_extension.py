@@ -2317,10 +2317,10 @@ def _prepare_ldflags(extra_ldflags, with_cuda, verbose, is_standalone):
 
         extra_ldflags.append('c10.lib')
         if with_cuda:
-            extra_ldflags.append('c10_cuda.lib')
+            extra_ldflags.append('c10_hip.lib' if IS_HIP_EXTENSION else 'c10_cuda.lib')
         extra_ldflags.append('torch_cpu.lib')
         if with_cuda:
-            extra_ldflags.append('torch_cuda.lib')
+            extra_ldflags.append('torch_hip.lib' if IS_HIP_EXTENSION else 'torch_cuda.lib')
             # /INCLUDE is used to ensure torch_cuda is linked against in a project that relies on it.
             # Related issue: https://github.com/pytorch/pytorch/issues/31611
             extra_ldflags.append('-INCLUDE:?warp_size@cuda@at@@YAHXZ')
@@ -2348,7 +2348,7 @@ def _prepare_ldflags(extra_ldflags, with_cuda, verbose, is_standalone):
     if with_cuda:
         if verbose:
             logger.info('Detected CUDA files, patching ldflags')
-        if IS_WINDOWS:
+        if IS_WINDOWS and not IS_HIP_EXTENSION:
             extra_ldflags.append(f'/LIBPATH:{_join_cuda_home("lib", "x64")}')
             extra_ldflags.append('cudart.lib')
             if CUDNN_HOME is not None:
@@ -2365,8 +2365,12 @@ def _prepare_ldflags(extra_ldflags, with_cuda, verbose, is_standalone):
             if CUDNN_HOME is not None:
                 extra_ldflags.append(f'-L{os.path.join(CUDNN_HOME, "lib64")}')
         elif IS_HIP_EXTENSION:
-            extra_ldflags.append(f'-L{_join_rocm_home("lib")}')
-            extra_ldflags.append('-lamdhip64')
+            if IS_WINDOWS:
+                extra_ldflags.append(f'/LIBPATH:{_join_rocm_home("lib")}')
+                extra_ldflags.append('amdhip64.lib')
+            else:
+                extra_ldflags.append(f'-L{_join_rocm_home("lib")}')
+                extra_ldflags.append('-lamdhip64')
     return extra_ldflags
 
 
@@ -2693,16 +2697,20 @@ def _write_ninja_file_to_build_library(path,
         common_cflags += [f'-isystem {shlex.quote(include)}' for include in system_includes]
 
     if IS_WINDOWS:
+        COMMON_HIP_FLAGS.extend(['-fms-runtime-lib=dll'])
         cflags = common_cflags + ['/std:c++17'] + extra_cflags
-        cflags += COMMON_HIP_FLAGS if IS_HIP_EXTENSION else COMMON_MSVC_FLAGS
+        cflags += COMMON_MSVC_FLAGS + (COMMON_HIP_FLAGS if IS_HIP_EXTENSION else [])
         cflags = _nt_quote_args(cflags)
     else:
         cflags = common_cflags + ['-fPIC', '-std=c++17'] + extra_cflags
 
     if with_cuda and IS_HIP_EXTENSION:
-        cuda_flags = ['-DWITH_HIP'] + cflags + COMMON_HIP_FLAGS + COMMON_HIPCC_FLAGS
+        cuda_flags = ['-DWITH_HIP'] + common_cflags + extra_cflags + COMMON_HIP_FLAGS + COMMON_HIPCC_FLAGS
+        cuda_flags = cuda_flags + ['-std=c++17']
         cuda_flags += _get_rocm_arch_flags(cuda_flags)
         cuda_flags += extra_cuda_cflags
+        if IS_WINDOWS:
+            cuda_flags = _nt_quote_args(cuda_flags)
     elif with_cuda:
         cuda_flags = common_cflags + COMMON_NVCC_FLAGS + _get_cuda_arch_flags(extra_cuda_cflags)
         if IS_WINDOWS:

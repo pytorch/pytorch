@@ -8,7 +8,7 @@ using namespace torch::nativert;
 TEST(AOTIModelContainerRegistrationTests, TestRegister) {
   EXPECT_TRUE(AOTIModelContainerRunnerRegistry()->Has(at::kCPU));
 
-#ifdef USE_CUDA
+#if defined(USE_CUDA) || defined(USE_ROCM)
   EXPECT_TRUE(AOTIModelContainerRunnerRegistry()->Has(at::kCUDA));
 #else
   EXPECT_FALSE(AOTIModelContainerRunnerRegistry()->Has(at::kCUDA));

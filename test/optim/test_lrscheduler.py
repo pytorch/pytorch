@@ -369,6 +369,16 @@ class TestLRScheduler(TestCase):
         scheduler = MultiStepLR(self.opt, gamma=0.1, milestones=[2, 5, 9])
         self._test_get_last_lr(scheduler, targets, epochs)
 
+    def test_raise_error_when_last_epoch_is_greater_than_0_and_initial_lr_is_not_specified(
+        self,
+    ):
+        optimizer = SGD([Parameter(torch.randn(2, 2, requires_grad=True))], 0.1)
+        with self.assertRaisesRegex(
+            KeyError,
+            r"param \'initial_lr\' is not specified in param_groups\[0\] when resuming scheduler with last_epoch >= 0",
+        ):
+            StepLR(optimizer, step_size=3, gamma=0.1, last_epoch=1)
+
     def test_multi_step_lr(self):
         # lr = 0.05     if epoch < 2
         # lr = 0.005    if 2 <= epoch < 5
