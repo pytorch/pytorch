@@ -2624,7 +2624,7 @@ void ProcessGroupNCCL::runHookLoop() {
         // Hook might grab GIL, unlock first to prevent deadlock
         lock.unlock();
 
-        auto timeFinished = std::chrono::system_clock::now();
+        auto timeFinished = std::chrono::steady_clock::now();
         auto timeStarted =
             timeFinished +
             std::chrono::duration_cast<std::chrono::steady_clock::duration>(
