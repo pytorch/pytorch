@@ -23,42 +23,28 @@ jobs:
     name: opmicrobenchmark-build
     uses: ./.github/workflows/_linux-build.yml
     with:
-      # Use a bigger runner here because CUDA_ARCH 9.0 is only built for H100
-      # or newer GPUs, so it doesn't benefit much from existing compiler cache
-      # from trunk. Also use a memory-intensive runner here because memory is
-      # usually the bottleneck
       runner: linux.12xlarge.memory
       build-environment: linux-jammy-cuda12.8-py3.10-gcc9-sm80
       docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11
       cuda-arch-list: '8.0 9.0'
       test-matrix: |
         { include: [
-          { config: "operator_microbenchmark_test",
-            shard: 1,
-            num_shards: 1,
-            runner: "linux.aws.h100",
-            op_benchmark_tests: "matmul mm add bmm",
-            extra_flags: "--use-compile"
-          },
-          { config: "operator_microbenchmark_test",
-            shard: 1,
-            num_shards: 1,
-            runner: "linux.aws.h100",
-            op_benchmark_tests: "matmul mm add bmm"
-          },
-          { config: "operator_microbenchmark_test",
-            shard: 1,
-            num_shards: 1,
-            runner: "linux.aws.a100",
-            op_benchmark_tests: "matmul mm add bmm",
-            extra_flags: "--use-compile"
-          },
-          { config: "operator_microbenchmark_test",
-            shard: 1,
-            num_shards: 1,
-            runner: "linux.aws.a100",
-            op_benchmark_tests: "matmul mm add bmm"
-          }
+          { config: "operator_microbenchmark_test", shard: 1, num_shards: 1, runner: "linux.aws.h100", op_benchmark_tests: "matmul", extra_flags: "--use-compile" },
+          { config: "operator_microbenchmark_test", shard: 1, num_shards: 1, runner: "linux.aws.h100", op_benchmark_tests: "matmul" },
+          { config: "operator_microbenchmark_test", shard: 1, num_shards: 1, runner: "linux.aws.h100", op_benchmark_tests: "mm", extra_flags: "--use-compile" },
+          { config: "operator_microbenchmark_test", shard: 1, num_shards: 1, runner: "linux.aws.h100", op_benchmark_tests: "mm" },
+          { config: "operator_microbenchmark_test", shard: 1, num_shards: 1, runner: "linux.aws.h100", op_benchmark_tests: "add", extra_flags: "--use-compile" },
+          { config: "operator_microbenchmark_test", shard: 1, num_shards: 1, runner: "linux.aws.h100", op_benchmark_tests: "add" },
+          { config: "operator_microbenchmark_test", shard: 1, num_shards: 1, runner: "linux.aws.h100", op_benchmark_tests: "bmm", extra_flags: "--use-compile" },
+          { config: "operator_microbenchmark_test", shard: 1, num_shards: 1, runner: "linux.aws.h100", op_benchmark_tests: "bmm" },
+          { config: "operator_microbenchmark_test", shard: 1, num_shards: 1, runner: "linux.aws.a100", op_benchmark_tests: "matmul", extra_flags: "--use-compile" },
+          { config: "operator_microbenchmark_test", shard: 1, num_shards: 1, runner: "linux.aws.a100", op_benchmark_tests: "matmul" },
+          { config: "operator_microbenchmark_test", shard: 1, num_shards: 1, runner: "linux.aws.a100", op_benchmark_tests: "mm", extra_flags: "--use-compile" },
+          { config: "operator_microbenchmark_test", shard: 1, num_shards: 1, runner: "linux.aws.a100", op_benchmark_tests: "mm" },
+          { config: "operator_microbenchmark_test", shard: 1, num_shards: 1, runner: "linux.aws.a100", op_benchmark_tests: "add", extra_flags: "--use-compile" },
+          { config: "operator_microbenchmark_test", shard: 1, num_shards: 1, runner: "linux.aws.a100", op_benchmark_tests: "add" },
+          { config: "operator_microbenchmark_test", shard: 1, num_shards: 1, runner: "linux.aws.a100", op_benchmark_tests: "bmm", extra_flags: "--use-compile" },
+          { config: "operator_microbenchmark_test", shard: 1, num_shards: 1, runner: "linux.aws.a100", op_benchmark_tests: "bmm" }
         ]}
     secrets: inherit
 
