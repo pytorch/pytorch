@@ -4,6 +4,7 @@ import itertools
 import logging
 import operator
 import typing
+import warnings
 from collections import Counter
 from collections.abc import Sequence
 from typing import Any, Union
@@ -566,7 +567,6 @@ def enable_zendnn_optimization() -> bool:
     - ZenDNN is available in torch AND
     - Either explicitly enabled via config OR auto-enabled on AMD CPU with AVX512
     """
-    import warnings
 
     if not torch._C.has_zendnn:  # type: ignore[attr-defined]
         if config.enable_zendnn:
