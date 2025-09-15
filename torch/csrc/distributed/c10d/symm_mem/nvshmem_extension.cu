@@ -1,6 +1,8 @@
 #include <dlfcn.h>
+#include <ATen/ceil_div.h>
 #include <c10/cuda/CUDAGuard.h>
 
+#include <torch/csrc/distributed/c10d/symm_mem/env.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/nvshmem_extension.cuh>
 #include <torch/csrc/distributed/c10d/symm_mem/nvshmem_team_manager.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory-inl.h>
@@ -34,8 +36,6 @@ namespace c10d::nvshmem_extension {
 
 #define THREADS_PER_BLOCK 512
 #define WARP_SIZE 32
-
-constexpr int MiB = 1024 * 1024;
 
 extern "C" void nvshmem_init() __attribute__((weak));
 
@@ -262,6 +262,21 @@ __global__ void allToAllV(void *send_data, void *recv_data, int64_t* in_out_spli
 #endif
 }
 
+static int get_a2a_nblocks(size_t size, int world_size, bool intra_node) {
+  // Check user setting first
+  int num_blocks = c10d::symmetric_memory::getenv_nblocks();
+  if (num_blocks > 0) {  // set by user
+    return num_blocks;
+  }
+  // 16B per thread, 8 loops
+  constexpr size_t chunk_size = 16 * THREADS_PER_BLOCK * 8;
+  num_blocks = at::ceil_div(size, chunk_size);
+  // Allow kernel to target even number of blocks per peer
+  num_blocks = at::round_up(num_blocks, world_size);
+  const int max_blocks = intra_node ? 64 : 16;
+  return std::min(num_blocks, max_blocks);
+}
+
 at::Tensor all_to_all_vdev(
     at::Tensor& input,
     at::Tensor& out,
@@ -307,28 +322,11 @@ at::Tensor all_to_all_vdev(
       stream);
 
   // CTA Tuning
-  // Intra-node: use multiple blocks per peer to increase data parallelism, up to 8.
-  // Up to 1 MB -> 1 block
-  // Up to 2 MB -> 2 blocks
-  // Up to 4 MB -> 4 blocks
-  // More -> 8 blocks
-  // The tuning for `num_blocks` below multiplies these numbers by world_size
-  // (e.g. 8 -> 8 * 8). If world_size is smaller, we simply shift the blocks
-  // towards data parallelism. (There may be room for improvement here)
   auto input_size = input.numel() * input.element_size();
-  int num_blocks = input_size < MiB ? 8 :
-      (input_size < 2 * MiB ? 16 :
-      (input_size < 4 * MiB ? 32 : 64));
-
-  // Inter-node: limit the total the number of blocks:
-  // = 16 for 16GPUs which is enough to max out 90 GB/s bandwidth perf
-  // = 8 for more than 16 GPUs which is enough to max out approx 50 GB/s bandwidth perf
-  // Above assumes 400Gb/s NIC for inter-node and 400GB/s NVLinks for intra-node comms.
-  // TODO: better intra vs inter detection, currently it is based on world_size.
-  int max_inter_node_blocks = world_size <= 16 ? 16 : 8;
-  if (world_size > 8) {
-    num_blocks = std::min(num_blocks, max_inter_node_blocks);
-  }
+  int num_blocks = get_a2a_nblocks(
+    input_size,
+    input_hdl->get_world_size(),
+    input_hdl->world_within_direct_access());
 
   // Stride at dim 0 (assuming input is contiguous, TODO)
   size_t stride_bytes = input.stride(0) * input.element_size();

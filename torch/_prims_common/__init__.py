@@ -534,12 +534,9 @@ def is_non_overlapping_and_dense(a: Tensor) -> bool:
 # This is also INCORRECT because it does not model TensorIterator's
 # short-circuit, which can cause different strides.
 def compute_elementwise_output_logical_to_physical_perm(
-    *tensors, _skip_checks=False
-) -> list[int]:
-    from torch.fx.experimental.symbolic_shapes import (
-        guard_or_false,
-        guard_size_oblivious,
-    )
+    *tensors, _skip_checks=False, ambiguity_check=False
+) -> tuple[list[int], bool]:
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
 
     if not _skip_checks and len(tensors) == 0:
         msg = "Can't compute elementwise output strides for zero tensors!"
@@ -558,15 +555,15 @@ def compute_elementwise_output_logical_to_physical_perm(
 
     # Short-circuits for CPU scalar case
     if len(tensors) == 0:
-        return []
+        return [], False
 
     # Short-circuits for shapes with zero or one dimensions
     # TODO: are these necessary?
     ndim = tensors[0].ndim
     if ndim == 0:
-        return []
+        return [], False
     if ndim == 1:
-        return [0]
+        return [0], False
 
     # Short-circuits if contiguous or channels last, following the fake fast path.
     # This reduces the number of guards we end up making
@@ -584,42 +581,40 @@ def compute_elementwise_output_logical_to_physical_perm(
         )
 
     if is_contiguous and not is_channels_last:
-        return list(range(ndim))
+        return list(range(ndim)), False
 
     if is_channels_last and not is_contiguous:
-        return [0, *list(range(2, ndim)), 1]
+        return [0, *list(range(2, ndim)), 1], False
 
     shape = tensors[0].shape
 
     def should_swap(idx_a, idx_b):
+        def ge(a, b):
+            """
+            Returns true if a is symbolically greater than or equal to b, assuming a >= 0, b >= 0.
+            """
+            if guard_or_false(b == 0):
+                return True
+            elif guard_or_false(a == 0):
+                return False
+            return guard_or_false(a >= b) or guard_or_false(a % b == 0)
+
         for tensor in tensors:
             stride_a = tensor.stride()[idx_a]
             stride_b = tensor.stride()[idx_b]
-            if guard_size_oblivious(stride_a == 0) or guard_size_oblivious(
-                stride_b == 0
-            ):
+
+            if guard_or_false(stride_a == 0) or guard_or_false(stride_b == 0):
                 continue
 
             if guard_or_false(stride_a == stride_b):
-                if guard_size_oblivious(shape[idx_a] > shape[idx_b]):
-                    return 1
-
-            # when stride_a = 1, we want stride_a < stride_b to be TRUE
-            # when stride_b = 1, we want stride_a < stride_b to be FALSE
-            elif guard_or_false(stride_a == 1):
-                return -1
-
-            elif guard_or_false(stride_b == 1):
+                if ge(shape[idx_b], shape[idx_a]):
+                    continue
                 return 1
 
-            if guard_size_oblivious(stride_a < stride_b):
+            if ge(stride_b, stride_a):
                 return -1
 
-            if guard_size_oblivious(stride_a > stride_b):
-                return 1
-
-            # stride_a == stride_b
-            if guard_size_oblivious(shape[idx_a] > shape[idx_b]):
+            if ge(stride_a, stride_b):
                 return 1
 
         # Note: this case is hit if all strides are zero,
@@ -644,7 +639,16 @@ def compute_elementwise_output_logical_to_physical_perm(
             elif comparison < 0:
                 break
 
-    return list(reversed(perm))
+    # verify we've imposed ordering if ambiguity_check=True
+    raise_ambiguous = False
+    if ambiguity_check:
+        for i, j in zip(range(ndim - 1), range(1, ndim)):
+            order = should_swap(perm[i], perm[j])
+            if order != -1:
+                raise_ambiguous = True
+                break
+
+    return list(reversed(perm)), raise_ambiguous
 
 
 def compute_elementwise_output_strides(*tensors) -> tuple[int, ...]:
@@ -674,7 +678,7 @@ def compute_elementwise_output_strides(*tensors) -> tuple[int, ...]:
     if ndim == 1:
         return (1,)
 
-    logical_to_physical_perm = compute_elementwise_output_logical_to_physical_perm(
+    logical_to_physical_perm, _ = compute_elementwise_output_logical_to_physical_perm(
         *tensors, _skip_checks=True
     )
     permuted_shape = apply_perm(shape, logical_to_physical_perm)  # to physical
