@@ -391,6 +391,14 @@ reorder_prefetch_limit: Optional[int] = None
 
 # enable operator reordering for peak memory optimization
 reorder_for_peak_memory = True
+reorder_for_peak_memory_debug = False
+
+# In some cases, when all the nodes that can be scheduled are quite large,
+# it is beneficial to switch the scheduling strategy. So instead of using
+# size as the criterion, we choose a node that can unlock more nodes to
+# become schedulable by analyzing their successor nodes. The default value
+# is zero, which turns off this optimization.
+size_threshold_for_succ_based_strategy: int = 0
 
 reorder_iterative_debug_memory_recompute: bool = False
 reorder_iterative_debug_limit_to_reorder: Optional[int] = (
@@ -1424,6 +1432,9 @@ class triton:
     enable_persistent_tma_matmul = (
         os.environ.get("ENABLE_PERSISTENT_TMA_MATMUL", "0") == "1"
     )
+    # Should TMA store be enable from templates. TODO: Remove once we
+    # can autotune over the result.
+    enable_template_tma_store = os.environ.get("ENABLE_TEMPLATE_TMA_STORE", "0") == "1"
     # Skip L1 cache for buffers that are used only once.  Disabled by default
     skip_l1_cache = os.environ.get("TORCHINDUCTOR_SKIP_L1", "0") == "1"
 

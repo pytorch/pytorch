@@ -81,8 +81,6 @@ class BaseCType(CType):
     type: BaseCppType
 
     def cpp_type(self, *, strip_ref: bool = False) -> str:
-        if self.type.ns == "std":
-            return "::" + str(self.type)
         return str(self.type)
 
     def remove_const_ref(self) -> CType:
