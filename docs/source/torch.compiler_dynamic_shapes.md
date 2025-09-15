@@ -149,14 +149,11 @@ Read below about each of this options.
 
 ### Automatic dynamic
 
-This is the default behavior where Dynamo makes an input dynamic if it
-sees different values for it.
-
-### torch.compile (dynamic=true) (Not recommended)
-
-This setting forces all sizes and integers to be dynamic, increasing the
-chance of encountering dynamic shape bugs. Setting this option is not recommended due to it  being error prone.
-It would make every input size dynamic which may result it performance regressions and ultimately increase compilation time.
+**Automatic dynamic** is the default behavior where `torch.compile` performs
+the initial compilation assuming static shapes are used, while tracking the
+input sizes from that first compilation. When a recompile is triggered, it
+uses this information to identify which dimensions have changed and marks
+those as dynamic for the second compilation.
 
 ### Profile-Guided Optimization (PGO)
 
@@ -177,6 +174,14 @@ values for `x`, so we make it dynamic through automatic dynamic behavior.
 In attempt 1, we repeat the process above unless Profile-Guided Optimization (PGO) is enabled.
 With PGO, we already know from attempt 0 that `f(x)` should be dynamic, so it is marked as
 such the first time we encounter it.
+
+### torch.compile (dynamic=true) (Not recommended)
+
+This setting forces all sizes and integers to be dynamic, increasing the
+chance of encountering dynamic shape bugs. Setting this option is not
+recommended due to it  being error prone.
+It would make every input size dynamic which may result it performance
+regressions and ultimately increase compilation time.
 
 (identifying-dynamic-elements-marked-by-pgo)=
 #### Identifying Dynamic Elements Marked by PGO
