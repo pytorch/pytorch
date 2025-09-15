@@ -10,7 +10,6 @@ from itertools import zip_longest
 from typing import Optional, TYPE_CHECKING, Union
 
 import torch
-from torch.distributed import is_available
 from torch.distributed._mesh_layout import _MeshLayout
 from torch.distributed._pycute.int_tuple import is_tuple
 from torch.utils._typing_utils import not_none
@@ -54,11 +53,109 @@ if True:  # just to temporarily avoid reindentation
             self.mesh_dim_group_options: dict[
                 int, tuple[Optional[str], Optional[C10dBackend.Options]]
             ] = {}
+            self.root_to_flatten_mapping: dict[DeviceMesh, dict[str, DeviceMesh]] = {}
+            # Record flatten mesh name to its flattened layout in root mesh.
+            self.flatten_name_to_root_layout: dict[
+                DeviceMesh, dict[str, _MeshLayout]
+            ] = {}
 
         def get_current_mesh(self) -> "DeviceMesh":
             if len(self.mesh_stack) == 0:
                 raise RuntimeError("No device mesh is currently active!")
             return self.mesh_stack[-1]
+
+        def create_sub_mesh(
+            self,
+            device_mesh: "DeviceMesh",
+            layout: _MeshLayout,
+            submesh_dim_names: tuple[str, ...],
+        ) -> "DeviceMesh":
+            res_submesh = DeviceMesh._from_layouts(
+                device_mesh.device_type,
+                layout,
+                device_mesh.get_rank(),
+                dim_names=submesh_dim_names,
+            )
+            slice_dim_group_name = []
+            for i, name in enumerate(submesh_dim_names):
+                if name in not_none(device_mesh.mesh_dim_names):
+                    slice_dim_group_name.append(
+                        device_mesh._dim_group_names[
+                            not_none(device_mesh.mesh_dim_names).index(name)
+                        ]  # type: ignore[has-type]
+                    )
+                else:
+                    flatten_mesh = self.root_to_flatten_mapping[device_mesh][name]
+                    slice_dim_group_name.append(
+                        flatten_mesh._dim_group_names[
+                            not_none(flatten_mesh.mesh_dim_names).index(name)
+                        ]  # type: ignore[has-type]
+                    )
+
+            res_submesh._dim_group_names = slice_dim_group_name  # type: ignore[possibly-undefined, has-type]
+            self.child_to_root_mapping[res_submesh] = self.get_root_mesh(device_mesh)
+
+            return res_submesh
+
+        def create_flatten_mesh(
+            self,
+            device_mesh: "DeviceMesh",
+            mesh_dim_name: Optional[str] = None,
+            backend_override: tuple[Optional[str], Optional[C10dBackend.Options]] = (
+                None,
+                None,
+            ),
+        ) -> "DeviceMesh":
+            root_mesh = _mesh_resources.get_root_mesh(device_mesh)
+
+            if not mesh_dim_name:
+                mesh_dim_name = "_".join(not_none(device_mesh.mesh_dim_names))
+
+            # Flatten a 1D device mesh into its original mesh_dim_name will return itself.
+            if device_mesh.ndim == 1 and mesh_dim_name in not_none(
+                device_mesh.mesh_dim_names
+            ):
+                return device_mesh
+
+            # Check whether the mesh_dim_name for flattened mesh is valid.
+            self.flatten_name_to_root_layout.setdefault(root_mesh, {})
+            invalid_dim_names = not_none(root_mesh.mesh_dim_names)
+            if mesh_dim_name in invalid_dim_names:
+                raise RuntimeError(
+                    f"{mesh_dim_name} already exists for submesh of the {root_mesh}. ",
+                    f"The mesh_dim_names of submesh and flattened mesh are {invalid_dim_names}. "
+                    f"Please specify another valid mesh_dim_name.",
+                )
+
+            # Quick return if the flatten mesh has been created before.
+            if (
+                root_mesh in self.root_to_flatten_mapping
+                and mesh_dim_name in self.root_to_flatten_mapping[root_mesh]
+            ):
+                return self.root_to_flatten_mapping[root_mesh][mesh_dim_name]
+
+            pg_ranks_by_dim = device_mesh._layout.global_ranks(root_mesh.size())
+            cur_rank = root_mesh.get_rank()
+            for mesh_nd in pg_ranks_by_dim:
+                # need to init backend here since the flattened pg doesn't exist in root mesh.
+                flattened_mesh = DeviceMesh(
+                    root_mesh.device_type,
+                    mesh_nd,
+                    mesh_dim_names=(mesh_dim_name,),
+                    backend_override=(backend_override,),
+                )
+                if cur_rank in mesh_nd:
+                    res_flattened_mesh = flattened_mesh
+
+            self.child_to_root_mapping[res_flattened_mesh] = root_mesh  # type: ignore[possibly-undefined]
+            self.root_to_flatten_mapping.setdefault(root_mesh, {})[mesh_dim_name] = (
+                res_flattened_mesh  # type: ignore[possibly-undefined]
+            )
+            self.flatten_name_to_root_layout[root_mesh][mesh_dim_name] = (
+                device_mesh._layout
+            )
+
+            return res_flattened_mesh
 
         def get_root_mesh(self, device_mesh: "DeviceMesh") -> "DeviceMesh":
             # If a mesh could not be found in the child_to_root_mapping, it is a root mesh itself.
@@ -136,10 +233,73 @@ if True:  # just to temporarily avoid reindentation
                     mesh_dim_names=(mesh_dim_name,),
                     _init_backend=False,
                 )
-                submesh._layouts = device_mesh._layouts if cur_rank in mesh_1d else ()
+                submesh._dim_group_names = (
+                    [device_mesh._dim_group_names[mesh_dim]]  # type: ignore[has-type]
+                    if cur_rank in mesh_1d
+                    else []
+                )
+                submesh._layout = (
+                    device_mesh._layout if cur_rank in mesh_1d else _MeshLayout(0, 0)
+                )
                 res_submeshes.append(submesh)
 
             return res_submeshes
+
+        def _get_slice_mesh_layout(self, device_mesh, mesh_dim_names) -> _MeshLayout:
+            """
+            Validate whether the mesh_dim_names is valid for slicing the given device_mesh.
+            If valid, return dim indexes of the slice mesh in the device mesh.
+            """
+            slice_from_root = True
+            if device_mesh != self.get_root_mesh(device_mesh):
+                warnings.warn(
+                    "You are attempting to slice a submesh from another submesh. While we support this operation, "
+                    "it is users' responsibility to ensure that the submesh is consistently sliced across all ranks. "
+                    "If not, this may result in some ranks receiving the submesh while others encounter errors."
+                )
+                slice_from_root = False
+
+            # The slice mesh_dim_names should consist either the device_mesh's mesh_dim_names
+            # or its flattened mesh's mesh_dim_names.
+            self.flatten_name_to_root_layout.setdefault(device_mesh, {})
+            flatten_name_to_root_layout = (
+                self.flatten_name_to_root_layout[device_mesh] if slice_from_root else {}
+            )
+            valid_mesh_dim_names = [
+                *device_mesh.mesh_dim_names,
+                *flatten_name_to_root_layout,
+            ]
+
+            if not all(
+                mesh_dim_name in valid_mesh_dim_names
+                for mesh_dim_name in mesh_dim_names
+            ):
+                raise KeyError(
+                    f"Invalid mesh_dim_names {mesh_dim_names} specified. "
+                    f"Valid mesh_dim_names are {valid_mesh_dim_names}."
+                )
+
+            layout_sliced = []
+            for name in mesh_dim_names:
+                if name in device_mesh.mesh_dim_names:
+                    layout_sliced.append(
+                        device_mesh._layout[device_mesh.mesh_dim_names.index(name)]
+                    )
+                elif name in flatten_name_to_root_layout:
+                    layout_sliced.append(flatten_name_to_root_layout[name])
+
+            sliced_sizes = tuple(x for l in layout_sliced for x in l.sizes)
+            sliced_strides = tuple(x for l in layout_sliced for x in l.strides)
+            # When users sliced dim_names outside from current mesh, we will check whether
+            # there is layout overlap. Eventually we will just directly throw error here because
+            # we will deprecate the slicing of flattened dim_name from root mesh.
+            dummy_tensor = torch.empty(sliced_sizes, dtype=torch.uint8)
+            t = torch.as_strided(dummy_tensor, size=sliced_sizes, stride=sliced_strides)
+            if torch._debug_has_internal_overlap(t):
+                raise RuntimeError(
+                    f"slicing overlapping dim_names {mesh_dim_names} is not allowed"
+                )
+            return _MeshLayout(sliced_sizes, sliced_strides)
 
     _mesh_resources: _MeshEnv = _MeshEnv()
 
@@ -202,11 +362,6 @@ if True:  # just to temporarily avoid reindentation
         mesh: torch.Tensor
         mesh_dim_names: Optional[tuple[str, ...]]
         _layout: _MeshLayout
-        _init_backend: bool
-        # # Use a dict per root mesh to bookkeep the mapping between layout and pg
-        # _layout_to_group: dict[_MeshLayout, str]
-        # # Use a dict per root mesh to bookkeep the mapping between mesh_dim_name and layout
-        # _names_to_layout: dict[str, _MeshLayout]
 
         def __init__(
             self,
@@ -229,12 +384,7 @@ if True:  # just to temporarily avoid reindentation
             )
             self.mesh_dim_names = tuple(mesh_dim_names) if mesh_dim_names else None
             # Internal bookkeeping for the device mesh.
-            self._layouts = _MeshLayout(
-                self.mesh.size(), self.mesh.stride()
-            )
-            self._layout_to_group: dict[_MeshLayout, str] = {}
-            # self._names_to_layouts: dict[str, _Layout] = {}
-            self._init_backend = _init_backend
+            self._layouts = _MeshLayout(self.mesh.size(), self.mesh.stride())
 
             # private field to pre-generate DeviceMesh's hash
             self._flatten_mesh_list = tuple(self.mesh.flatten().tolist())
@@ -258,7 +408,7 @@ if True:  # just to temporarily avoid reindentation
                             dtype=self.mesh.dtype,
                         ),
                     ):
-                        for i, layout in enumerate(self._layout):
+                        for i in range(len(self._layout)):
                             backend_override_ = backend_override[i]
                             global_override = (
                                 _mesh_resources.mesh_dim_group_options.get(
@@ -273,7 +423,7 @@ if True:  # just to temporarily avoid reindentation
                                     "and via _mesh_resources._set_mesh_dim_group_options"
                                 )
                             self._get_or_create_backend(
-                                layout,
+                                self._layout[i],
                                 i,
                                 self.mesh_dim_names[i] if self.mesh_dim_names else None,
                                 backend_override=backend_override_,
@@ -346,7 +496,9 @@ if True:  # just to temporarily avoid reindentation
                     is not CuTe expressible
             """
             default_group = _get_default_group()
-            if layout == _MeshLayout((get_world_size(),), (1,)) and backend_override == (
+            if layout == _MeshLayout(
+                (get_world_size(),), (1,)
+            ) and backend_override == (
                 None,
                 None,
             ):
@@ -462,45 +614,13 @@ if True:  # just to temporarily avoid reindentation
                 "lazy init" which means we lazily initialize the nccl communicator when we first hit first collective
                 - Because process group itself is not serializable, we only store the group name in the mapping
             """
-            # Every mesh_dim_name will map to one and only one layout.
-            root_mesh = _mesh_resources.get_root_mesh(self)
-            layouts_to_groups_map = (
-                root_mesh._layout_to_group | self._layout_to_group
-            )
-            # names_to_layouts_map = root_mesh._names_to_layouts | self._names_to_layouts
-            # # If mesh_dim_name has already mapped to another layout, we throw an error.
-            # if name is not None:
-            #     if (
-            #         name in names_to_layouts_map
-            #         and names_to_layouts_map[name] != layout
-            #     ):
-            #         raise ValueError(
-            #             f"Mesh_dim_name {name} has already mapped to layout {layout}."
-            #         )
-            #     root_mesh._names_to_layouts[name] = layout
-            #     self._names_to_layouts[name] = layout
-
-            # If the layout has already been mapped to a process group backend, we ignore the
-            # backend_override and group, and return early. We also throw a warning for that.
-            if layout in layouts_to_groups_map:
-                # TODO: We need to bookkeep pg_option together with the group name.
-                if backend_override != (None, None):
-                    warnings.warn(
-                        f"Group for {layout} ({name=}) already exists, ignoring backend override"
-                    )
-                if group is not None:
-                    warnings.warn(
-                        f"Group for {layout} ({name=}) already exists, ignoring explicit group"
-                    )
-                self._layout_to_group[layout] = layouts_to_groups_map[layout]
+            if hasattr(self, "_dim_group_names") and dim in self._dim_group_names:
                 return
 
             # When user explicitly pass in a process group, we directly reuse that PG as backend rather
             # than creating a new one.
             if group is not None:
-                # TODO: Add a check to validate that this group ranks matches layout first
-                root_mesh._layout_to_group[layout] = group.group_name
-                self._layout_to_group[layout] = group.group_name
+                self._dim_group_names = [group.group_name]
                 return
 
             group = self._init_process_group(
@@ -508,8 +628,7 @@ if True:  # just to temporarily avoid reindentation
             )
             assert group is not None or array_mesh is not None
             if group is not None:
-                root_mesh._layout_to_group[layout] = group.group_name
-                self._layout_to_group[layout] = group.group_name
+                self._dim_group_names = [group.group_name]
 
         def _setup_world_group_and_device(self):
             default_initialized = is_initialized()
@@ -605,9 +724,10 @@ if True:  # just to temporarily avoid reindentation
             """
             # Create tensor representation of the mesh
             pg_ranks_by_dim = layout.global_ranks(not_none(get_world_size()))
-            sizes = layout.sizes if is_tuple() else (layout.sizes,)
+            sizes = layout.sizes if is_tuple(layout.sizes) else (layout.sizes,)
             tensor = torch.tensor(pg_ranks_by_dim, device="cpu", dtype=torch.int).view(
-                -1, *sizes
+                -1,
+                *sizes,  # type: ignore[arg-type]
             )
 
             # Find the mesh containing current rank
@@ -737,10 +857,6 @@ if True:  # just to temporarily avoid reindentation
             """
             if not self.mesh_dim_names:
                 raise RuntimeError("Cannot slice a DeviceMesh without mesh_dim_names!")
-            if not self._init_backend:
-                raise NotImplementedError(
-                    "Slicing a DeviceMesh without backend initialized is not supported!"
-                )
 
             mesh_dim_names = (
                 (mesh_dim_names,) if isinstance(mesh_dim_names, str) else mesh_dim_names
@@ -749,22 +865,9 @@ if True:  # just to temporarily avoid reindentation
             if mesh_dim_names == self.mesh_dim_names:
                 return self
             else:
-                layout_sliced = []
-                for name in mesh_dim_names:
-                    if name in self.mesh_dim_names:
-                        layout_sliced.append(self._layout[self.mesh_dim_names.index(name)])
-                # This is only for flatten case, we will deprecate this case in the future.
-                root_mesh = _mesh_resources.get_root_mesh(self)
-                for name in mesh_dim_names:
-                    if name not in self.mesh_dim_names and name in not_none(root_mesh.mesh_dim_names):
-                        layout_sliced.append(root_mesh._layout[root_mesh.mesh_dim_names.index(name)])
-                if len(layout_sliced) != len(mesh_dim_names):
-                    raise KeyError(
-                        f"Invalid mesh_dim_names {mesh_dim_names} specified."
-                    )
-
-                sliced_sizes = tuple(x for l in layout_sliced for x in l.sizes)
-                sliced_strides = tuple(x for l in layout_sliced for x in l.strides)
+                sliced_mesh_layout = _mesh_resources._get_slice_mesh_layout(
+                    self, mesh_dim_names
+                )
                 # When using FakeTensorMode to trace the model, `create_sub_mesh()` will
                 # fail as it will require a real tensor to manipulate.
                 # `unset_fake_temporarily()` will allow us to materialize the tensors
@@ -775,35 +878,13 @@ if True:  # just to temporarily avoid reindentation
                 # yet and need a follow-up,
                 # TODO: compiler + device_mesh slicing.
                 with torch._subclasses.fake_tensor.unset_fake_temporarily():
-                    # When users sliced dim_names outside from current mesh, we will check whether
-                    # there is layout overlap. Eventually we will just directly throw error here because
-                    # we will deprecate the slicing of flattened dim_name from root mesh.
-                    dummy_tensor = torch.empty(sliced_sizes, dtype=torch.uint8)
-                    t = torch.as_strided(dummy_tensor, size=sliced_sizes, stride=sliced_strides)
-                    if torch._debug_has_internal_overlap(t):
-                        raise RuntimeError(
-                            f"slicing overlapping dim_names {mesh_dim_names} is not allowed"
-                        )
-                    layout = _MeshLayout(sliced_sizes, sliced_strides)
-                    res_mesh = DeviceMesh._from_layouts(
-                        self.device_type,
-                        layout,
-                        self.get_rank(),
-                        dim_names=mesh_dim_names,
+                    submesh = _mesh_resources.create_sub_mesh(
+                        self,
+                        sliced_mesh_layout,
+                        mesh_dim_names,
                     )
-                    res_mesh._layout_to_group[layout] = self._layout_to_group[
-                        layout
-                    ]
-                    # for name in mesh_dim_names:
-                    #     res_mesh._names_to_layouts[name] = layouts_sliced[
-                    #         mesh_dim_names.index(name)
-                    #     ]
-                    res_mesh._init_backend = True
-                _mesh_resources.child_to_root_mapping[res_mesh] = (
-                    _mesh_resources.get_root_mesh(self)
-                )
 
-                return res_mesh
+                return submesh
 
         def get_group(self, mesh_dim: Optional[Union[int, str]] = None) -> ProcessGroup:
             """
@@ -817,10 +898,8 @@ if True:  # just to temporarily avoid reindentation
             Returns:
                 A :class:`ProcessGroup` object.
             """
-            if not self._init_backend or not all(
-                layout in self._layouts_to_groups for layout in self._layouts
-            ):
-                raise RuntimeError("process groups not initialized!")
+            if not hasattr(self, "_dim_group_names"):
+                raise RuntimeError("DeviceMesh process groups not initialized!")
 
             if self.ndim > 1 and mesh_dim is None:
                 raise RuntimeError(
@@ -832,31 +911,25 @@ if True:  # just to temporarily avoid reindentation
 
             # Quick return if the current device_mesh is a 1D mesh.
             if self.ndim == 1 and mesh_dim is None:
-                return not_none(
-                    _resolve_process_group(self._layouts_to_groups[self._layouts[0]])
-                )
+                return not_none(_resolve_process_group(self._dim_group_names[0]))
 
-            if isinstance(mesh_dim, str):
-                if not self.mesh_dim_names:
-                    raise ValueError(
-                        "Cannot get group by name on a DeviceMesh without names"
-                    )
-                if mesh_dim not in self._names_to_layouts:
-                    raise ValueError(
-                        f"Invalid named dim {mesh_dim!r} for DeviceMesh with names {self.mesh_dim_names}"
-                    )
-            elif isinstance(mesh_dim, int):
-                if mesh_dim >= self.ndim:
-                    raise ValueError(
-                        f"Invalid mesh_dim {mesh_dim} for DeviceMesh with {self.ndim} dimensions"
-                    )
-
-            if isinstance(mesh_dim, str):
-                layout = self._names_to_layouts[mesh_dim]
+            root_mesh = _mesh_resources.get_root_mesh(self)
+            root_to_flatten_mapping = _mesh_resources.root_to_flatten_mapping.get(
+                root_mesh, None
+            )
+            if root_to_flatten_mapping and mesh_dim in root_to_flatten_mapping.keys():
+                dim_group_name = root_to_flatten_mapping[
+                    mesh_dim  # type: ignore[index]
+                ]._dim_group_names[0]
+                return not_none(_resolve_process_group(dim_group_name))
             else:
-                layout = self._layouts[not_none(mesh_dim)]
-
-            return not_none(_resolve_process_group(self._layouts_to_groups[layout]))
+                mesh_dim = (
+                    _mesh_resources.get_mesh_dim_by_name(self, mesh_dim)
+                    if isinstance(mesh_dim, str)
+                    else mesh_dim
+                )
+                assert isinstance(mesh_dim, int)
+                return not_none(_resolve_process_group(self._dim_group_names[mesh_dim]))
 
         def get_all_groups(self) -> list[ProcessGroup]:
             """
@@ -931,9 +1004,11 @@ if True:  # just to temporarily avoid reindentation
                 )
                 name = mesh_dim_names[0] if mesh_dim_names else None
                 device_mesh._get_or_create_backend(
-                    _Layout((mesh.size(0),), (mesh.stride(0),)), 0, name, group=group
+                    _MeshLayout((mesh.size(0),), (mesh.stride(0),)),
+                    0,
+                    name,
+                    group=group,
                 )
-                device_mesh._init_backend = True
                 return device_mesh
 
             # nD scenario
@@ -956,22 +1031,19 @@ if True:  # just to temporarily avoid reindentation
                     f"mesh {mesh.tolist()} and {len(group)} ProcessGroups"
                 )
 
-            layouts = _MeshLayout.to_single_depth_layouts(
-                mesh.size(), mesh.stride()
-            ).layouts
+            layout = _MeshLayout(mesh.size(), mesh.stride())
 
-            if len(layouts) != len(group):
+            if len(layout) != len(group):
                 raise ValueError(
-                    f"zip arguments must have equal lengths for layouts {layouts} and groups {group}"
+                    f"zip arguments must have equal lengths for layouts {layout} and groups {group}"
                 )
             device_mesh = DeviceMesh._from_layouts(
-                device_type, layouts, get_rank(), dim_names=mesh_dim_names
+                device_type, layout, get_rank(), dim_names=mesh_dim_names
             )
             # Update bookkeeping for layout to ProcessGroup mapping
-            for i, (l, g) in enumerate(zip(layouts, group)):
+            for i in range(len(layout)):
                 name = mesh_dim_names[i] if mesh_dim_names else None
-                device_mesh._get_or_create_backend(l, i, name, group=g)
-            device_mesh._init_backend = True
+                device_mesh._get_or_create_backend(layout[i], i, name, group=group[i])
 
             return device_mesh
 
@@ -986,7 +1058,7 @@ if True:  # just to temporarily avoid reindentation
 
         @property
         def shape(self) -> tuple[int, ...]:
-            return tuple(l.numel() for l in self._layouts)
+            return tuple(self.mesh.shape)
 
         def get_rank(self) -> int:
             """
@@ -1068,58 +1140,16 @@ if True:  # just to temporarily avoid reindentation
                     "Cannot flatten a DeviceMesh without mesh_dim_names!"
                 )
 
-            if not self._init_backend:
-                raise NotImplementedError(
-                    "flatten a device mesh without backend initialized is not supported!"
-                )
-
-            if not mesh_dim_name:
-                mesh_dim_name = "_".join(not_none(self.mesh_dim_names))
-
-            global_override = _mesh_resources.mesh_dim_group_options.get(
-                0, (None, None)
-            )
-            if backend_override is None:
-                backend_override_tuple = global_override
-            else:
+            if backend_override is not None:
                 (backend_override_tuple,) = _normalize_backend_override(
                     {0: backend_override}, 1
                 )
-                if backend_override_tuple == (None, None):
-                    backend_override_tuple = global_override
-                elif global_override != (None, None):
-                    raise RuntimeError(
-                        "Dimension 0 present both in the backend_override argument "
-                        "and via _mesh_resources._set_mesh_dim_group_options"
-                    )
+            else:
+                backend_override_tuple = (None, None)
 
-            res_sizes, res_strides = zip(
-                *sorted(
-                    [ss for l in self._layouts for ss in l.sizes_and_strides],
-                    key=lambda x: x[1],
-                    reverse=True,
-                )
+            return _mesh_resources.create_flatten_mesh(
+                self, mesh_dim_name, backend_override_tuple
             )
-            flattened_layout = _Layout(tuple(res_sizes), tuple(res_strides)).coalesce()
-
-            res_mesh = DeviceMesh._from_layouts(
-                self.device_type,
-                (flattened_layout,),
-                self.get_rank(),
-                dim_names=(mesh_dim_name,) if mesh_dim_name else None,
-            )
-            _mesh_resources.child_to_root_mapping[res_mesh] = (
-                _mesh_resources.get_root_mesh(self)
-            )
-            res_mesh._get_or_create_backend(
-                flattened_layout,
-                0,
-                mesh_dim_name,
-                backend_override=backend_override_tuple,
-            )
-            res_mesh._init_backend = True
-
-            return res_mesh
 
     def _normalize_backend_override(
         backend_override: dict[
