@@ -874,7 +874,7 @@ cmake_dependent_option(
   "Whether to build the flash_attention kernel for scaled dot product attention.\
   Will be disabled if not supported by the platform"
   ON
-  "USE_CUDA OR USE_ROCM"
+  "USE_CUDA OR USE_ROCM;NOT MSVC"
   OFF)
 
 cmake_dependent_option(
@@ -909,7 +909,7 @@ cmake_dependent_option(
 # USE_FLASH_ATTENTION -> USE_ROCM -> Dependencies.cmake -> aotriton.cmake
 #
 if(USE_ROCM)
-  if(USE_FLASH_ATTENTION OR USE_MEM_EFF_ATTENTION)
+  if(UNIX AND (USE_FLASH_ATTENTION OR USE_MEM_EFF_ATTENTION))
     include(cmake/External/aotriton.cmake)
   endif()
 endif()
