@@ -28,7 +28,7 @@ class TestAutocast(TestCase):
             result = torch.dot(x, y)
             self.assertEqual(result.dtype, torch.float32)
 
-    def test_autocast_fast_dtype(self):
+    def test_autocast_default_dtype(self):
         openreg_fast_dtype = torch.get_autocast_dtype(device_type="openreg")
         self.assertEqual(openreg_fast_dtype, torch.half)
 
