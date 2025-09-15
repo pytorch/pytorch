@@ -48,6 +48,22 @@ def patch_logging_for_distributed(patch_print=False):
             
             setattr(logging, method_name, make_distributed_logging_func(original_func))
     
+    # Patch Logger class methods to catch logger instances
+    original_logger_methods = {}
+    for method_name in ['debug', 'info', 'warning', 'warn', 'error', 'critical']:
+        if hasattr(logging.Logger, method_name):
+            original_method = getattr(logging.Logger, method_name)
+            original_logger_methods[method_name] = original_method
+            
+            def make_distributed_logger_method(orig_method):
+                def distributed_logger_method(self, msg, *args, **kwargs):
+                    if _is_non_rank_zero():
+                        return
+                    return orig_method(self, msg, *args, **kwargs)
+                return distributed_logger_method
+            
+            setattr(logging.Logger, method_name, make_distributed_logger_method(original_method))
+    
     # Optionally patch print
     if patch_print:
         import builtins
