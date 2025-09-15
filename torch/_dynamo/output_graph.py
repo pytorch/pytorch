@@ -1243,6 +1243,7 @@ class OutputGraph(OutputGraphGuardsState):
         # realize any unrealized tensor VTs in case they
         # need to be added to self.nn_modules as attributes
         for i, value in enumerate(tx.stack):
+            assert value is not None
             variables.LazyVariableTracker.realize_all(value)
             # ignore top `stack_pops` values on the stack
             if len(tx.stack) - i <= stack_pops:
