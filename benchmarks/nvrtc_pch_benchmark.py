@@ -186,35 +186,23 @@ def main():
     }
     """
     
-    # Test kernel 2: Very complex kernel with many CUB includes (should show better PCH speedup)
+    # Test kernel 2: More complex kernel with multiple CUB headers (should show better PCH speedup)
     kernel2_source = """
     #include <cub/block/block_reduce.cuh>
     #include <cub/block/block_scan.cuh>
-    #include <cub/block/block_load.cuh>
-    #include <cub/block/block_store.cuh>
-    #include <cub/block/block_radix_sort.cuh>
     #include <cub/warp/warp_reduce.cuh>
     #include <cub/warp/warp_scan.cuh>
-    #include <cub/device/device_reduce.cuh>
-    #include <cub/iterator/counting_input_iterator.cuh>
-    #include <cub/iterator/transform_input_iterator.cuh>
     
     extern "C"
     __global__ void complex_cub_kernel(const float* input, float* output, int n) {
         using BlockReduce = cub::BlockReduce<float, 256>;
         using BlockScan = cub::BlockScan<float, 256>;
-        using BlockLoad = cub::BlockLoad<float, 256, 4>;
-        using BlockStore = cub::BlockStore<float, 256, 4>;
-        using BlockRadixSort = cub::BlockRadixSort<float, 256>;
         using WarpReduce = cub::WarpReduce<float>;
         using WarpScan = cub::WarpScan<float>;
         
         __shared__ union {
             typename BlockReduce::TempStorage reduce;
             typename BlockScan::TempStorage scan;
-            typename BlockLoad::TempStorage load;
-            typename BlockStore::TempStorage store;
-            typename BlockRadixSort::TempStorage sort;
             typename WarpReduce::TempStorage warp_reduce[8];
             typename WarpScan::TempStorage warp_scan[8];
         } temp_storage;
@@ -222,7 +210,7 @@ def main():
         int idx = blockIdx.x * blockDim.x + threadIdx.x;
         float val = (idx < n) ? input[idx] : 0.0f;
         
-        // Use many different CUB operations to stress header compilation
+        // Use multiple CUB operations to stress header compilation
         float sum = BlockReduce(temp_storage.reduce).Sum(val);
         __syncthreads();
         
