@@ -279,9 +279,9 @@ void batchedTensorForLoopFallback(const c10::OperatorHandle& op, torch::jit::Sta
   TORCH_CHECK(!schema.is_mutable() && !schema.hasAnyAliasInfo(),
               "Batching rule not implemented for ", schema.operator_name(), "; ",
               "the fallback path doesn't work on out= or view ops.");
-  TORCH_CHECK(num_returns >= 1,
-              "Batching rule not implemented for ", schema.operator_name(), ". ",
-              "The fallback path does not support operations with no returns.");
+  // TORCH_CHECK(num_returns >= 1,
+  //             "Batching rule not implemented for ", schema.operator_name(), ". ",
+  //             "The fallback path does not support operations with no returns.");
   warnFallback(schema, /*in_place*/false);
 
   const auto arguments_begin = stack->size() - num_arguments;
