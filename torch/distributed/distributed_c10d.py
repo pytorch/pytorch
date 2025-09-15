@@ -1768,6 +1768,10 @@ def init_process_group(
         )
         _update_default_pg(default_pg)
 
+    # Enable distributed-safe logging to prevent log spew from non-rank-0 processes
+    from torch.distributed._distributed_logging import patch_logging_for_distributed
+    patch_logging_for_distributed()
+
     _world.pg_group_ranks[GroupMember.WORLD] = {  # type: ignore[index]
         i: i
         for i in range(GroupMember.WORLD.size())  # type: ignore[attr-defined]
