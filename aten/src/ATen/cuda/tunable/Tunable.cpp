@@ -521,12 +521,59 @@ void TuningContext::EnableNumericsCheck(bool value) {
   numerics_check_enable_ = value;
 }
 
-bool TuningContext::IsNumericsCheckEnabled() const {
-  const auto env = c10::utils::get_env("PYTORCH_TUNABLEOP_NUMERICAL_CHECK");
-  if (env == "1") {
-    return true;
+// bool TuningContext::IsNumericsCheckEnabled() const {
+//   const auto env = c10::utils::get_env("PYTORCH_TUNABLEOP_NUMERICAL_CHECK");
+//   if (env == "1") {
+//     return true;
+//   }
+//   return numerics_check_enable_;
+// }
+
+NumericalCheckConfig TuningContext::GetNumericalCheckConfig() const {
+  const auto env_opt = c10::utils::get_env("PYTORCH_TUNABLEOP_NUMERICAL_CHECK");
+
+  // Default: OFF
+  if (!env_opt.has_value()) {
+    return NumericalCheckConfig(false, 1e-5, 1e-5);
   }
-  return numerics_check_enable_;
+
+  const std::string& env = env_opt.value();
+
+  // Explicit OFF
+  if (env == "0" || env == "OFF" || env == "off") {
+    return NumericalCheckConfig(false, 1e-5, 1e-5);
+  }
+
+  // Legacy ON with default tolerances
+  if (env == "1") {
+    return NumericalCheckConfig(true, 1e-5, 1e-5);
+  }
+
+  // Expected: "atol_rtol"
+  const size_t underscore = env.find('_');
+  if (underscore == std::string::npos) {
+    TORCH_WARN("Invalid PYTORCH_TUNABLEOP_NUMERICAL_CHECK format. Expected 'atol_rtol', got: ", env);
+    return NumericalCheckConfig(false, 1e-5, 1e-5);
+  }
+
+  try {
+    const double atol = std::stod(env.substr(0, underscore));
+    const double rtol = std::stod(env.substr(underscore + 1));
+    if (atol <= 0.0 || rtol <= 0.0) {
+      TORCH_WARN("Tolerance values must be positive. atol=", atol, ", rtol=", rtol);
+      return NumericalCheckConfig(false, 1e-5, 1e-5);
+    }
+    return NumericalCheckConfig(true, atol, rtol);
+  } catch (const std::exception& e) {
+    TORCH_WARN("Failed to parse PYTORCH_TUNABLEOP_NUMERICAL_CHECK: ", e.what());
+    return NumericalCheckConfig(false, 1e-5, 1e-5);
+  }
+}
+
+bool TuningContext::IsNumericsCheckEnabled() const {
+  // Preserve the old boolean as a fallback; env wins if present.
+  const auto cfg = GetNumericalCheckConfig();
+  return cfg.enabled || numerics_check_enable_;
 }
 
 void TuningContext::SetMaxTuningDurationMs(int max_duration_ms) {

@@ -134,6 +134,16 @@ class TORCH_CUDA_CPP_API TuningResultsValidator {
     GetValidateFuncs validators_;
 };
 
+struct NumericalCheckConfig {
+  bool   enabled{false};
+  double atol{1e-5};
+  double rtol{1e-5};
+
+  NumericalCheckConfig() = default;
+  NumericalCheckConfig(bool e, double a, double r) : enabled(e), atol(a), rtol(r) {}
+};
+
+
 class TORCH_CUDA_CPP_API TuningContext {
   public:
     TuningContext();
@@ -155,6 +165,7 @@ class TORCH_CUDA_CPP_API TuningContext {
 
     void EnableNumericsCheck(bool value);
     bool IsNumericsCheckEnabled() const;
+    NumericalCheckConfig GetNumericalCheckConfig() const;
 
     void SetMaxTuningDurationMs(int max_duration_ms);
     int GetMaxTuningDurationMs() const;
