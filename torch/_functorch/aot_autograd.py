@@ -1072,6 +1072,7 @@ def aot_module_simplified(
             boxed_forward_device_index,
             ignore_shape_env,
             flatten=False,
+            force_non_lazy_backward_lowering=config.force_non_lazy_backward_lowering,
         )
 
         compiled_fn = None

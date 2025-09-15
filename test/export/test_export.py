@@ -16605,6 +16605,37 @@ def forward(self, x):
         wrapper = Wrapper(pyt_model, example_inputs)
         wrapper.forward()
 
+    def test_export_with_dict_input_nested_in_args(self):
+        """Test export with dictionary input nested in args."""
+
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super(MyModel, self).__init__()
+                self.linear = torch.nn.Linear(10, 1)
+
+            def forward(self, data_batch):
+                h1 = self.linear(data_batch["a1"])
+                h2 = self.linear(data_batch["a2"])
+                return h1 + h2
+
+        # Create model and example inputs
+        model = MyModel()
+        a1 = torch.randn(10)
+        a2 = torch.randn(10)
+        original_input = {"a1": a1, "a2": a2}
+        example_args_forward = (original_input,)
+
+        # Export the model
+        exported_model = export(model, example_args_forward)
+
+        # Run both models and compare results
+        reordered_input = {"a2": a2, "a1": a1}
+        original_output = exported_model.module()(reordered_input)
+        loaded_output = model(original_input)
+
+        # Verify outputs are close (allowing for floating point differences)
+        torch.testing.assert_close(original_output, loaded_output)
+
     def test_strict_export_with_shared_parameters(self):
         """Test that parameter names are preserved when there are shared parameters with the same name."""
 
