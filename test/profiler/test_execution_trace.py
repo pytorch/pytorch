@@ -120,6 +120,7 @@ class TestExecutionTrace(TestCase):
             if n["name"] != "[pytorch|profiler|execution_trace|process]"
             and n["name"] != "[pytorch|profiler|execution_trace|thread]"
         )
+
         return sorted(rf_id for rf_id in rf_ids_ if rf_id is not None)
 
     def get_kineto_rf_ids(self, events: list[Json]) -> list[int]:
