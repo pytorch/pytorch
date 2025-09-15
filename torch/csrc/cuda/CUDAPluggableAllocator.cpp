@@ -113,7 +113,7 @@ c10::DataPtr CUDAPluggableAllocator::allocate(size_t size) {
   c10::DeviceIndex device = -1;
   C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
   cudaStream_t stream = c10::cuda::getCurrentCUDAStream(device);
-  void* r = this->malloc(size, device, stream);
+  void* r = alloc_fn_(size, device, stream);
   auto* ctx = new CUDAPluggableAllocatorDeleterContext(
       free_fn_, r, size, device, stream);
   c10::DataPtr data_ptr = {
