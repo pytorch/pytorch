@@ -50,6 +50,22 @@ struct C10_API Storage {
   // is non-resizable
   Storage(
       use_byte_size_t /*use_byte_size*/,
+      size_t size_bytes,
+      at::DataPtr data_ptr,
+      at::Allocator* allocator = nullptr,
+      bool resizable = false)
+      : storage_impl_(c10::make_intrusive<StorageImpl>(
+            StorageImpl::use_byte_size_t(),
+            size_bytes,
+            std::move(data_ptr),
+            allocator,
+            resizable)) {}
+
+  // Creates storage with pre-allocated memory buffer. Allocator is given for
+  // potential future reallocations, however it can be nullptr if the storage
+  // is non-resizable
+  Storage(
+      use_byte_size_t /*use_byte_size*/,
       SymInt size_bytes,
       at::DataPtr data_ptr,
       at::Allocator* allocator = nullptr,
