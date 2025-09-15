@@ -404,7 +404,7 @@ def _prim_elementwise_meta(
     utils.check_same_device(*args_, allow_cpu_scalar_tensors=True)
     utils.check_same_shape(*args_, allow_cpu_scalar_tensors=True)
 
-    l2p_perm = utils.compute_elementwise_output_logical_to_physical_perm(*args_)
+    l2p_perm, _ = utils.compute_elementwise_output_logical_to_physical_perm(*args_)
     shape = utils.extract_shape(*args_, allow_cpu_scalar_tensors=True)
 
     # Acquires the dtype
@@ -1428,10 +1428,7 @@ def _collapse_view_helper(
 
             # early exit if we already know its invalid.
             if guard_or_false(valid_op is False):
-                if must_be_valid:
-                    torch._check(valid_op, lambda: must_be_valid)
-                else:
-                    return None, None
+                break
 
     # for unbacked this become a runtime assertion.
     valid_op = sym_or(valid_op, a.numel() == 0)
@@ -1442,17 +1439,26 @@ def _collapse_view_helper(
         if not guard_or_false(valid_op):
             return None, None
 
-    stride = min(strides[start : end + 1])
+    # compute stride
+    stride = strides[end]
+    for idx in range(end - 1, start - 1, -1):
+        if shape[idx] != 1:
+            # TODO with unbacked we should really exclude when shape[idx] == 1
+            # something like
+            # min(stride[end], torch.ite(shape[x]!=1,stride[idx], inf), ...)
+            stride = min(stride, strides[idx])
 
     # compute length
     length = shape[end]
     if guard_or_true(length != 0):
         for idx in range(end - 1, start - 1, -1):
-            # those are just show circuits, mm except
             if guard_or_false(shape[idx] == 0):
                 length = 0
+                stride = 0
                 break
             length = length * shape[idx]
+    else:
+        stride = 0
 
     new_shape = shape[:start] + (length,) + shape[end + 1 :]
     new_strides = strides[:start] + (stride,) + strides[end + 1 :]
