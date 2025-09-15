@@ -1858,7 +1858,7 @@ Tensor miopen_convolution_add_relu(
       dilation,
       groups,
       benchmark,
-      false); // deterministic
+      true); // deterministic
 
   return output_t;
 }
@@ -1907,7 +1907,7 @@ Tensor miopen_convolution_relu(
       dilation,
       groups,
       benchmark, // benchmark
-      false); // deterministic
+      true); // deterministic
 
   return output_t;
 }
