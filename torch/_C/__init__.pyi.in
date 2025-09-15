@@ -16,6 +16,7 @@ from typing import (
     Literal,
     NamedTuple,
     overload,
+    Sequence,
     SupportsIndex,
     TypeVar,
 )
@@ -41,7 +42,9 @@ from torch._C import (
 from torch._prims_common import DeviceLikeType
 from torch.autograd.graph import Node as _Node
 from torch.cuda import _POOL_HANDLE
+from toch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._op_schema import OpSchema
+from torch.distributed.tensor.placement_types import Placement
 from torch.fx.node import Node as FxNode
 from torch.package import PackageExporter
 from torch.storage import TypedStorage, UntypedStorage
@@ -1944,6 +1947,7 @@ _TensorBase = TensorBase
 
 def _DTensor_OpSchema_post_init(self: OpSchema) -> None: ...
 def _DTensor_OpSchema_recompute_comparison_key(self: OpSchema) -> None: ...
+def _DTensor_compute_global_tensor_info(tensor: Tensor, mesh: DeviceMesh, placements: Sequence[Placement]) -> tuple[list[int], list[int]]: ...
 
 # Defined in torch/csrc/multiprocessing/init.cpp
 def _multiprocessing_init() -> None: ...
