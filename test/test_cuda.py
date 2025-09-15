@@ -7243,8 +7243,10 @@ class TestCudaDeviceParametrized(TestCase):
         """
         from torch.cuda import _compile_kernel
 
+        compute_capability = "70" if torch.version.cuda < "13.0" else "75"
+
         spin_wait_kernel = _compile_kernel(
-            kernel_source, "wait_for_cpu", compute_capability="70"
+            kernel_source, "wait_for_cpu", compute_capability
         )
 
         x = torch.ones(4, device="cuda")
