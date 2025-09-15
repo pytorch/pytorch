@@ -1,6 +1,7 @@
 import builtins
 import inspect
 import logging
+import opcode
 import traceback
 from collections import namedtuple
 from typing import Any, Callable, Optional, Union
@@ -310,6 +311,149 @@ class DynamoGraphTransformer(torch.fx.Transformer):
         return result_gm
 
 
+def _assemble(opname: str, arg: int) -> bytes:
+    """
+    Helper function to assemble given instruction name
+    TODO considering replacing this with dynamo.bytecode_transformations logic
+    but this requires us to convert all bytecode to dynamo Instruction object
+    etc which seems unnecessarily complex.
+    """
+    op = opcode.opmap[opname]
+    out = []
+    x = arg >> 8
+    ext = []
+    while x:
+        ext.append(x & 0xFF)
+        x >>= 8
+    for b in reversed(ext):
+        out.append(bytes([opcode.opmap["EXTENDED_ARG"], b]))
+    out.append(bytes([op, arg & 0xFF]))
+    return b"".join(out)
+
+
+def _after_resume(code_bytes: bytes) -> int:
+    RESUME, CACHE = opcode.opmap.get("RESUME"), opcode.opmap.get("CACHE")
+    i, n = 0, len(code_bytes)
+    while i + 1 < n:
+        if code_bytes[i] == RESUME:
+            i += 2
+            while i + 1 < n and code_bytes[i] == CACHE:
+                i += 2
+            return i
+        i += 2
+    return 0
+
+
+def prepare_wrapper_code(
+    wrapper_forward,
+    inner_forward,
+    f_locals: dict,
+    wrapper_self_value,
+):
+    """
+    - (1) Rename wrapper `self` to inner's self name
+    - (2) Inject inner module's freevars as fast-locals (LOAD_FAST; STORE_FAST prologue) to wrapper module bytecode
+    - (3) Seed f_locals for the renamed `self` and the injected freevars (from inner closure)
+    Returns new CodeType for the wrapper module.
+
+    Why do we need this?
+
+    Consider following example:
+    ```
+    class Foo(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+
+        def forward(self, x, y):
+            return x + y
+
+
+    global_list = []
+
+
+    class ReferenceControl:
+        def __init__(self, mod):
+            self.bank = []
+            self.bank_dict = {}
+            self.mod = mod
+
+            def hacked_up_forward(self_, x, y):
+                self.bank.append(x.clone())
+                self.bank_dict["x"] = x.clone()
+                global_list.append(x.clone())
+                return x + y
+
+            self.mod.forward = hacked_up_forward.__get__(self.mod, Foo)
+
+        def __call__(self, x, y):
+            ep = torch.export.export(self.mod, (x, y), strict=True).module()
+            out = ep(x, y)
+            return out
+
+        def update(self):
+            print(self.bank)
+        ```
+
+        In this case, the original dynamo compiler will compile a following frame by converting closures to locals
+        f_locals = {"self_": self.mod, "x": x, "y": y, "self": reference_control, "global_list": global_list}
+
+        As you can see, there is a collision in the forward's self and parent object self.
+        But when we wrap inner module (self.mod) a flat module for our new tracer, we lose "self" and "global_list"
+        as they don't belong in the wrapper module's closures. From here we have to do couple things to make it work:
+           (1) When we define wrapper module, we use "self" for the first argument to forward but user could have wrote
+           their inner module with different name than "self" to avoid clash like above example. So we should fix the
+           wrapper bytecode to resolve this properly by comparing inner mod's signature
+
+           (2) Just updating locals is not enough because when dynamo builds guards on parent objects, dynamo requires them
+           to be accessible in the bytecode instructions (see guards.py:get_guard_manager_from_source), so we manually insert
+           LOAD_FAST instructions so that it has some reference in the instruction list.
+
+           (3) We need to do this after python's RESUME instruction as it marks the start of trace.
+
+    """
+    wrapper_code = wrapper_forward.__code__
+    inner_self_name = next(iter(inspect.signature(inner_forward.__func__).parameters))
+
+    inner_freevars = inner_forward.__func__.__code__.co_freevars
+    inner_closure = inner_forward.__closure__ or ()
+
+    # 1) rename wrapper self name to inner mod's self if it is renamed
+    varnames = list(wrapper_code.co_varnames)
+    varnames[0] = inner_self_name
+
+    # seed f_locals for arg0 under the new name
+    f_locals[inner_self_name] = wrapper_self_value
+
+    # 2) inject freevars into the bytecode by prepending
+    #    LOAD_FAST and STORE_FAST instructions
+    # 3) Make them available in f_locals (this is what dynamo does)
+    prologue = bytearray()
+    for name, cell in zip(inner_freevars, inner_closure):
+        idx = len(varnames)
+        varnames.append(name)
+        # minimal balanced no-op: LOAD_FAST idx ; STORE_FAST idx
+        prologue += _assemble("LOAD_FAST", idx)
+        prologue += _assemble("STORE_FAST", idx)
+        f_locals[name] = cell.cell_contents
+
+    # splice prologue after we skip python bytecode start instructions
+    insert_at = _after_resume(wrapper_code.co_code)
+    new_code_bytes = bytes(
+        wrapper_code.co_code[:insert_at] + prologue + wrapper_code.co_code[insert_at:]
+    )
+
+    return wrapper_code.replace(
+        co_code=new_code_bytes,
+        co_varnames=tuple(varnames),
+        co_nlocals=len(varnames),
+        co_stacksize=max(wrapper_code.co_stacksize, 1),
+        co_names=tuple(wrapper_code.co_names),
+        co_consts=tuple(wrapper_code.co_consts),
+        co_freevars=tuple(wrapper_code.co_freevars),
+        co_cellvars=tuple(wrapper_code.co_cellvars),
+    )
+
+
 def _dynamo_graph_capture_for_export(
     mod: Callable[..., Any],
     *,
@@ -346,10 +490,6 @@ def _dynamo_graph_capture_for_export(
             flat_inputs, in_spec = pytree.tree_flatten((args, kwargs))
             module_to_trace = ModuleToTrace(mod, in_spec)
 
-            signature = inspect.signature(module_to_trace.forward)
-            bound_arguments = signature.bind(*flat_inputs)
-            bound_arguments.apply_defaults()
-
             constraints: Optional[list[Constraint]] = _constraints
             dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]] = (
                 _dynamic_shapes
@@ -359,13 +499,24 @@ def _dynamo_graph_capture_for_export(
 
             reset()
 
-            f_locals = {"self": module_to_trace, **bound_arguments.arguments}
+            signature = inspect.signature(module_to_trace.forward)
+            bound_arguments = signature.bind(*flat_inputs)
+            bound_arguments.apply_defaults()
+
+            f_locals = {
+                **bound_arguments.arguments,
+            }
+
+            new_code = prepare_wrapper_code(
+                module_to_trace.forward, mod.forward, f_locals, module_to_trace
+            )
+
             frame = FrameInfo(
-                module_to_trace.forward.__func__.__code__,  # type: ignore[attr-defined]
-                module_to_trace.forward.__func__.__globals__,  # type: ignore[attr-defined]
+                new_code,
+                module_to_trace.forward.__globals__,
                 f_locals,
-                builtins,  # type: ignore[arg-type]
-                closure=(),  # type: ignore[arg-type]
+                builtins,
+                closure=module_to_trace.forward.__closure__ or (),
             )
 
             dynamo_config_ctx = torch._dynamo.config.patch(
@@ -466,9 +617,7 @@ def _dynamo_graph_capture_for_export(
             constraint_violation_error = None
             try:
                 # Check if we have any constraint violations
-                check_fn = out.dynamo_output.build_guards(
-                    module_to_trace.forward.__code__
-                ).guard_manager
+                check_fn = out.dynamo_output.build_guards(new_code).guard_manager
                 check_fn.check(f_locals)
             except ConstraintViolationError as e:
                 constraint_violation_error = e
