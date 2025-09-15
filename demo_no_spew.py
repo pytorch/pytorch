@@ -29,10 +29,8 @@ logging.warning("This logging should only appear ONCE (from rank 0)")
 # Test the original cpp_extension case
 logging.getLogger('torch.utils.cpp_extension').setLevel(logging.DEBUG)
 from torch.utils.cpp_extension import _get_cuda_arch_flags
-try:
-    _get_cuda_arch_flags()
-except:
-    pass
+_get_cuda_arch_flags()
+
 
 print(f"Process {rank} completed")
 
