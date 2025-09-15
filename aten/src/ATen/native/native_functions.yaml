@@ -4372,7 +4372,7 @@
   variants: function, method
   dispatch:
     CPU: narrow_copy_dense_cpu
-    SparseCPU, SparseCUDA: narrow_copy_sparse
+    SparseCPU, SparseCUDA, SparseMPS: narrow_copy_sparse
     CompositeExplicitAutogradNonFunctional: narrow_copy_dense_symint
   tags: view_copy
 
@@ -6660,7 +6660,7 @@
 - func: zeros.out(SymInt[] size, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CompositeExplicitAutograd: zeros_out
-    SparseCPU, SparseCUDA, SparseMeta: zeros_sparse_out
+    SparseCPU, SparseCUDA, SparseMPS, SparseMeta: zeros_sparse_out
 
 - func: zeros_like(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
   dispatch:
