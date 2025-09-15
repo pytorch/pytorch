@@ -46,7 +46,7 @@ from torch.testing._internal.common_distributed import (
     requires_nccl,
     skip_if_lt_x_gpu,
 )
-from torch.testing._internal.common_utils import requires_cuda
+from torch.testing._internal.common_utils import skip_but_pass_in_sandcastle_if, skipIfXpu, TEST_XPU
 from torch.testing._internal.inductor_utils import HAS_GPU
 
 
