@@ -346,12 +346,6 @@ class DTensor(torch.Tensor):
     # pyre-fixme[3]: Return type must be annotated.
     # pyre-fixme[2]: Parameter must be annotated.
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):  # type: ignore[override]
-        # These are all ops that can show up in AccumulateGrad,
-        # which is susceptible to DTensor overheads
-        if func is torch.ops.aten.detach.default:
-            return DTensor(
-                args[0]._local_tensor.detach(), args[0]._spec, requires_grad=False
-            )
         return DTensor._op_dispatcher.dispatch(
             func,
             args,
