@@ -5,7 +5,7 @@ import torch_openreg  # noqa: F401
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
-class TestAutocastoOpenReg(TestCase):
+class TestAutocast(TestCase):
     def test_openreg_autocast_error_message(self):
         with self.assertWarnsRegex(
             UserWarning,
