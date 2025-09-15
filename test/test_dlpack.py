@@ -113,7 +113,11 @@ class TestTorchDlPack(TestCase):
         stream = torch.cuda.Stream()
         with torch.cuda.stream(stream):
             # Do an operation in the actual stream
-            x = make_tensor((5,), dtype=dtype, device=device) + 1
+            if dtype == torch.float4_e2m1fn_x2:
+                x = make_tensor((5,), dtype=torch.uint8, device=device) + 1
+                x = x.view(torch.float4_e2m1fn_x2)
+            else:
+                x = make_tensor((5,), dtype=dtype, device=device) + 1
         # DLPack protocol helps establish a correct stream order
         # (hence data dependency) at the exchange boundary.
         # DLPack manages this synchronization for us, so we don't need to
@@ -205,7 +209,11 @@ class TestTorchDlPack(TestCase):
         # the `tensor.__dlpack__` method will insert a synchronization event
         # in the current stream to make sure that it was correctly populated.
         with torch.cuda.stream(stream_a):
-            x = make_tensor((5,), dtype=dtype, device=device) + 1
+            if dtype == torch.float4_e2m1fn_x2:
+                x = make_tensor((5,), dtype=torch.uint8, device=device) + 1
+                x = x.view(torch.float4_e2m1fn_x2)
+            else:
+                x = make_tensor((5,), dtype=dtype, device=device) + 1
             z = torch.from_dlpack(x.__dlpack__(stream=stream_b.cuda_stream))
             stream_a.synchronize()
         stream_b.synchronize()
