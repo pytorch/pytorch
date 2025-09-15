@@ -2,8 +2,8 @@
 import contextlib
 
 import torch
+import torch.distributed.tensor as dt
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
-from torch.distributed.tensor._api import DTensor
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
 from torch.utils._dtype_abbrs import dtype_abbrs
 from torch.utils._python_dispatch import _get_current_dispatch_mode, TorchDispatchMode
@@ -11,6 +11,8 @@ from torch.utils._pytree import tree_map
 
 
 __all__ = ["DebugMode"]
+
+REDISTRIBUTE_FUNC = "redistribute_input"
 
 
 def _stringify_shape(shape) -> str:
@@ -27,7 +29,7 @@ def _stringify_placement(placement) -> str:
 
 def _tensor_debug_string(tensor) -> str:
     """Convert tensor to debug string representation."""
-    if isinstance(tensor, DTensor):
+    if isinstance(tensor, dt.DTensor):
         # omitted device mesh
         return f"dt: {dtype_abbrs[tensor.dtype]}{_stringify_shape(tensor.shape)}{_stringify_placement(tensor.placements)}"
     elif isinstance(tensor, FakeTensor):
@@ -51,7 +53,13 @@ def _arg_to_str(arg) -> str:
 
 
 def _op_to_str(op, *args, **kwargs) -> str:
-    args_str = ", ".join(_arg_to_str(arg) for arg in args)
+    if op == REDISTRIBUTE_FUNC:
+        assert len(args) == 3
+        _args = [_arg_to_str(arg) for arg in args]
+        args_str = f"{_args[0]}, {_args[1]} -> {_args[2]}"
+    else:
+        args_str = ", ".join(_arg_to_str(arg) for arg in args)
+
     if kwargs:
         kwargs_str = ", " + ", ".join(
             f"{k}={_arg_to_str(v)}" for k, v in kwargs.items()
@@ -103,10 +111,10 @@ class DebugMode(TorchDispatchMode):
             kwargs = {}
 
         # Record the operation with its call depth
-        if any(t == DTensor for t in types):
+        if dt.DTensor in types:
             self.operators.append((func, args, kwargs, self.call_depth))
             return NotImplemented
-        elif any(t == FakeTensor for t in types) or isinstance(
+        elif FakeTensor in types or isinstance(
             _get_current_dispatch_mode(), FakeTensorMode
         ):
             if self.record_faketensor:
@@ -136,12 +144,12 @@ class DebugMode(TorchDispatchMode):
             torch._C._pop_torch_function_stack()
 
     @contextlib.contextmanager
-    def record_redistribute_calls(self, arg_idx, src_placement, target_placement):
+    def record_redistribute_calls(self, arg_idx, src_placement, dst_placement):
         try:
             self.operators.append(
                 (
-                    "redistribute_input",
-                    [arg_idx, src_placement, target_placement],
+                    REDISTRIBUTE_FUNC,
+                    [arg_idx, src_placement, dst_placement],
                     {},
                     self.call_depth + 1,
                 )
