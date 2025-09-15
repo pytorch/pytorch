@@ -1564,12 +1564,12 @@ def native_matmul_pass(graph: torch.fx.Graph):
             config.triton.enable_persistent_tma_matmul
             and torch.utils._triton.has_triton_tma_device()
         ):
-            return False
+            raise AssertionError("native matmul doesn't support tma codegen yet")
 
         # Currently only enable native matmul for default indexing
         # TODO : support block ptr
         if config.triton.use_block_ptr:
-            return False
+            raise AssertionError("native matmul doesn't support block_ptr codegen yet")
 
         # Currently only enable native matmul for triton on GPU.
         if not (mat1.device.type == "cuda" and config.cuda_backend == "triton"):

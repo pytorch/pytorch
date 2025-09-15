@@ -7,12 +7,10 @@ import torch
 from torch._dynamo.utils import same
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_triton_code
+from torch.testing import FileCheck
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from typing import Callable
 
-
-# Make the helper files in test/ importable
-pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
-sys.path.append(pytorch_test_dir)
 
 from torch._dynamo.testing import rand_strided
 from torch._inductor import config as inductor_config
@@ -22,9 +20,39 @@ aten = torch.ops.aten
 
 
 @inductor_config.patch(
-    {"triton.enable_native_matmul": True, "coordinate_descent_tuning": False}
+    {"triton.enable_native_matmul": True}
 )
 class TestTritonDotReduction(TestCase):
+    def _check_equal(
+        self,
+        f: Callable,
+        example_inputs: tuple[torch.Tensor],
+    ):
+        compiled = torch.compile(f)
+        actual = compiled(*example_inputs)
+        expect = f(*example_inputs)
+        self.assertTrue(same(expect, actual))
+
+    def _check_code(
+        self,
+        f: Callable,
+        example_inputs: tuple[torch.Tensor],
+        kernel_count: int,
+        dot_count: int,
+    ):
+        f = torch.compile(f)
+        code = run_and_get_triton_code(f, *example_inputs)
+        FileCheck().check_regex(r"triton.*mm.*\.run\("
+        ).run(code)
+
+        FileCheck().check_count(
+            "@triton.jit",
+            kernel_count,
+        ).check_count(
+            "tl.dot",
+            dot_count,
+        ).run(code)
+
     def test_matmul(self):
         def f(x, y):
             z = x @ y
@@ -34,52 +62,70 @@ class TestTritonDotReduction(TestCase):
         x = rand_strided((M, K), (K, 1), device=GPU_TYPE)
         y = rand_strided((K, N), (N, 1), device=GPU_TYPE)
 
-        compiled = torch.compile(f)
-        actual = compiled(x, y)
-        expect = f(x, y)
-        self.assertTrue(same(expect, actual, tol=1e-3), f"{expect=}\n{actual=}\n")
+        self._check_equal(f, (x,y))
+        self._check_code(f, (x,y), 1, 1)        
 
-        code = run_and_get_triton_code(compiled, x, y)
-        lines = [line for line in code.split("\n") if "tl.dot" in line]
-        assert len(lines) == 1
+    def test_mm_1d_expand(self):
+        def f(x, y, M, K):
+            z = x[:,None].expand(M,K) @ y
+            return z
 
-    @inductor_config.patch({"triton.codegen_upcast_to_fp32": False})
+        M, K, N = 128, 128, 128
+        x = rand_strided((M,), (1,), device=GPU_TYPE)
+        y = rand_strided((K, N), (N, 1), device=GPU_TYPE)
+
+        self._check_equal(f, (x,y,M,K))
+        self._check_code(f, (x,y,M,K), 1, 1)        
+
+    def test_mm_2_expand(self):
+        def f(x, y, M, K):
+            z = x[:,None].expand(M,K) @ y
+            return z
+
+        M, K, N = 128, 128, 128
+        x = rand_strided((1,), (0,), device=GPU_TYPE)
+        y = rand_strided((K, N), (N, 1), device=GPU_TYPE)
+
+        self._check_equal(f, (x,y,M,K))
+        self._check_code(f, (x,y,M,K), 1, 1)        
+
     def test_matmul_fp16(self):
         def f(x, y):
-            z = x @ y
+            z = x @ y.to(x.dtype)
             return z
 
         M, K, N = 128, 128, 128
         x = rand_strided((M, K), (K, 1), dtype=torch.float16, device=GPU_TYPE)
-        y = rand_strided((K, N), (N, 1), dtype=torch.float16, device=GPU_TYPE)
+        y = rand_strided((K, N), (N, 1), dtype=torch.float32, device=GPU_TYPE)
 
-        compiled = torch.compile(f)
-        actual = compiled(x, y)
-        expect = f(x, y)
-        self.assertTrue(same(expect, actual, tol=1e-3), f"{expect=}\n{actual=}\n")
+        self._check_equal(f, (x,y))
+        self._check_code(f, (x,y), 1, 1)        
 
-        code = run_and_get_triton_code(compiled, x, y)
-        lines = [line for line in code.split("\n") if "tl.dot" in line]
-        assert len(lines) == 1
+    def test_reduction_mask_zeroout(self):
+        def f(x, y):
+            return (x + 1) @ (y - 2)
 
-    def test_mm_add(self):
-        def f(x, y, z, w):
-            return x @ y + z @ w
+        M, K, N = 62, 62, 62
+        x = rand_strided((M, K), (K, 1), device=GPU_TYPE)
+        y = rand_strided((K, N), (N, 1), device=GPU_TYPE)
+
+        self._check_equal(f, (x,y))
+        self._check_code(f, (x,y), 1, 1) 
+    
+    def test_3mm_add(self):
+        def f(x, y, z, w, r, t):
+            return x @ y + z @ w + r @ t
 
         M, K, N = 128, 128, 128
         x = rand_strided((M, K), (K, 1), device=GPU_TYPE)
         y = rand_strided((K, N), (N, 1), device=GPU_TYPE)
         w = rand_strided((M, K), (K, 1), device=GPU_TYPE)
         z = rand_strided((K, N), (N, 1), device=GPU_TYPE)
+        r = rand_strided((M, K), (K, 1), device=GPU_TYPE)
+        t = rand_strided((K, N), (N, 1), device=GPU_TYPE)
 
-        compiled = torch.compile(f)
-        actual = compiled(x, y, z, w)
-        expect = f(x, y, z, w)
-        self.assertTrue(same(expect, actual, tol=1e-3), f"{expect=}\n{actual=}\n")
-
-        code = run_and_get_triton_code(compiled, x, y, z, w)
-        lines = [line for line in code.split("\n") if "tl.dot" in line]
-        assert len(lines) == 2
+        self._check_equal(f, (x,y,z,w,r,t))
+        self._check_code(f, (x,y,z,w,r,t), 1, 3) 
 
     def test_mm_complex(self):
         def f(x, y, z, w):
@@ -92,14 +138,8 @@ class TestTritonDotReduction(TestCase):
         z = torch.randint(M, (M, K), dtype=torch.long, device=GPU_TYPE)
         w = rand_strided((M, N), (N, 1), device=GPU_TYPE)
 
-        compiled = torch.compile(f)
-        actual = compiled(x, y, z, w)
-        expect = f(x, y, z, w)
-        self.assertTrue(same(expect, actual, tol=1e-3), f"{expect=}\n{actual=}\n")
-
-        code = run_and_get_triton_code(compiled, x, y, z, w)
-        lines = [line for line in code.split("\n") if "tl.dot" in line]
-        assert len(lines) == 1
+        self._check_equal(f, (x,y,z,w))
+        self._check_code(f, (x,y,z,w), 1, 1) 
 
     def test_batchmatmul(self):
         def f(x, y):
@@ -110,15 +150,8 @@ class TestTritonDotReduction(TestCase):
         x = rand_strided((B, M, K), (M * K, K, 1), device=GPU_TYPE)
         y = rand_strided((B, K, N), (K * N, N, 1), device=GPU_TYPE)
 
-        compiled = torch.compile(f)
-        actual = compiled(x, y)
-        expect = f(x, y)
-        self.assertTrue(same(expect, actual, tol=1e-3), f"{expect=}\n{actual=}\n")
-
-        code = run_and_get_triton_code(compiled, x, y)
-        lines = [line for line in code.split("\n") if "tl.dot" in line]
-        assert len(lines) == 1
-
+        self._check_equal(f, (x, y))
+        self._check_code(f, (x, y), 1, 1) 
 
 if HAS_GPU:
     torch.set_default_device(GPU_TYPE)
