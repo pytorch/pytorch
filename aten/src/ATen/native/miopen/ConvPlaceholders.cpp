@@ -34,7 +34,8 @@ at::Tensor miopen_convolution(
     IntArrayRef dilation,
     int64_t groups,
     bool benchmark,
-    bool deterministic) {
+    bool deterministic,
+    bool allow_tf32) {
   TORCH_CHECK(
       false,
       "miopen_convolution: ATen not compiled with MIOpen support");
