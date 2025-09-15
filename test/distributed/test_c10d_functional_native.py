@@ -779,7 +779,8 @@ class CompileTest(TestCase):
 
         self.rank = 0
         self.world_size = 2
-        torch.cuda.set_device("cuda:0")
+        device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+        torch.accelerator.set_device_index(device_type)
 
         store = FakeStore()
         dist.init_process_group(
