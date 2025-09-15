@@ -4604,9 +4604,9 @@ class TestSDPAXpuOnly(NNTestCase):
         q2, k2, v2 = q.clone(), k.clone(), v.clone()
 
         # (B, nh, T, hs)
-        q = q.view(batch_size, q_size, n_head, head_dim).transpose(1, 2).contiguous()
-        k = k.view(batch_size, kv_size, n_head, head_dim).transpose(1, 2).contiguous()
-        v = v.view(batch_size, kv_size, n_head, head_dim).transpose(1, 2).contiguous()
+        q = q.view(batch_size, q_size, n_head, head_dim).transpose(1, 2)
+        k = k.view(batch_size, kv_size, n_head, head_dim).transpose(1, 2)
+        v = v.view(batch_size, kv_size, n_head, head_dim).transpose(1, 2)
         attn_mask = None
         is_causal = False
         if mask_type == "bool":
