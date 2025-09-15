@@ -141,22 +141,27 @@ class DistributedLoggingTest(MultiProcessTestCase):
             store=store,
         )
         
+        # Verify that patching is enabled
+        from torch.distributed._distributed_logging import is_distributed_logging_enabled
+        self.assertTrue(is_distributed_logging_enabled(), 
+                       f"Distributed logging should be enabled on rank {self.rank}")
+        
         stderr_capture = io.StringIO()
         
         with redirect_stderr(stderr_capture):
             # Emit the same warning 5 times
-            for _ in range(5):
+            for i in range(5):
                 warnings.warn("Duplicate warning message")
         
         output = stderr_capture.getvalue()
         
         if self.rank == 0:
-            # Should only appear once
+            # Should only appear once due to deduplication
             count = output.count("Duplicate warning message")
             self.assertEqual(count, 1, 
-                           f"Warning appeared {count} times, expected 1")
+                           f"Warning appeared {count} times, expected 1. Full output: '{output}'")
         else:
-            self.assertEqual(output, "", "Expected no output on non-rank-0")
+            self.assertEqual(output, "", f"Expected no output on rank {self.rank}, got: '{output}'")
         
         dist.destroy_process_group()
 
