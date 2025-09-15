@@ -4076,8 +4076,15 @@ class InstructionTranslator(InstructionTranslatorBase):
             if inst.opname == "RETURN_VALUE"
             else create_instruction("RETURN_CONST", argval=inst.argval)
         )
-        # NOTE: does the stack need to be empty after the return?
-        self.output.add_output_instructions([return_inst])
+        # NOTE: Debug CPython expects the stack to be empty after the return.
+        # Expect the current stack to be in the state
+        # [[]] (empty frame values), current frame stack (0 or 1 values)
+        assert all_stack_locals_metadata[0].num_stack <= 1
+        if all_stack_locals_metadata[0].num_stack == 1:
+            self.output.add_output_instructions([
+                *create_swap(2),
+            ])
+        self.output.add_output_instructions([create_instruction("POP_TOP"), return_inst])
         raise ReturnValueOp
 
     def RETURN_VALUE(self, inst: Instruction) -> None:
