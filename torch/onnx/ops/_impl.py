@@ -79,13 +79,13 @@ def rotary_embedding_23(
         )
         torch._check(
             cos_cache.dim() == 2 and sin_cache.dim() == 2,
-            lambda: "cos_cache/sin_cache must be 2D (sequence_length, head_half) when position_ids is provided. "
+            lambda: "cos_cache/sin_cache must be 2D when position_ids is provided. "
             f"Received cos_cache shape {cos_cache.shape}, sin_cache shape {sin_cache.shape}",
         )
     else:
         torch._check(
             cos_cache.dim() == 3 and sin_cache.dim() == 3,
-            lambda: "cos_cache/sin_cache must be 3D (batch, sequence_length, head_half) when position_ids is not provided",
+            lambda: "cos_cache/sin_cache must be 3D when position_ids is not provided",
         )
 
     # First ensure x has shape [batch_size, num_heads, seq_len, head_size]
