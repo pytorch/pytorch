@@ -1301,8 +1301,11 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             torch.cuda.synchronize(device)
 
 
-@requires_nccl()
-@requires_cuda
+@skip_but_pass_in_sandcastle_if(
+    not dist.is_nccl_available() and not dist.is_xccl_available(),
+    "c10d was not compiled with the NCCL or XCCL backend",
+)
+@unittest.skipUnless(torch.accelerator.is_available() , "Requires accelerator")
 class TestSingleProc(DynamoDistributedSingleProcTestCase):
     """
     Test harness initializes dist process group.
