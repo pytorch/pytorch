@@ -170,26 +170,26 @@ def initialize_cuda_context_rng():
 
 @contextlib.contextmanager
 def tf32_off():
-    old_allow_tf32_matmul = torch.backends.cuda.matmul.allow_tf32
+    old_fp32_precision = torch.backends.cuda.matmul.fp32_precision
     try:
-        torch.backends.cuda.matmul.allow_tf32 = False
+        torch.backends.cuda.matmul.fp32_precision = 'ieee'
         with torch.backends.cudnn.flags(enabled=None, benchmark=None, deterministic=None, allow_tf32=False):
             yield
     finally:
-        torch.backends.cuda.matmul.allow_tf32 = old_allow_tf32_matmul
+        torch.backends.cuda.matmul.fp32_precision = old_fp32_precision
 
 
 @contextlib.contextmanager
 def tf32_on(self, tf32_precision=1e-5):
-    old_allow_tf32_matmul = torch.backends.cuda.matmul.allow_tf32
+    old_fp32_precision = torch.backends.cuda.matmul.fp32_precision
     old_precision = self.precision
     try:
-        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cuda.matmul.fp32_precision = 'tf32'
         self.precision = tf32_precision
         with torch.backends.cudnn.flags(enabled=None, benchmark=None, deterministic=None, allow_tf32=True):
             yield
     finally:
-        torch.backends.cuda.matmul.allow_tf32 = old_allow_tf32_matmul
+        torch.backends.cuda.matmul.fp32_precision = old_fp32_precision
         self.precision = old_precision
 
 
