@@ -2474,12 +2474,9 @@ def meta_conv(
 
 if torch._C.has_zendnn:  # type: ignore[attr-defined]
 
-    @register_meta(aten.zendnn_linear.default)
-    def meta_zendnn_linear(
-        input,
-        weight,
-        bias=None,
-        is_weight_prepacked=False,
+    @register_meta(aten.zendnn_linear_unary.default)
+    def meta_zendnn_linear_unary(
+        input, weight, bias=None, is_weight_prepacked=False, post_op="none"
     ):
         out_dim = list(input.size())
         out_dim[-1] = weight.size(0)
@@ -3485,7 +3482,7 @@ def meta_index_Tensor(self, indices):
     # Note that perm here is the reverse of the 'perm_' decided by
     # TensorIteratorBase::reorder_dimensions
     restrided_self = _restride_src(self)
-    perm = utils.compute_elementwise_output_logical_to_physical_perm(restrided_self)
+    perm, _ = utils.compute_elementwise_output_logical_to_physical_perm(restrided_self)
 
     # Follow TensorIteratorBase::allocate_or_resize_outputs
     if list(perm) != list(range(len(perm))):
@@ -7567,18 +7564,18 @@ def _meta_grouped_mm_common(
                 # scale sizes at compile time.
                 if is_mxfp8:
                     torch._check(
-                        mat.ndim == scale.ndim,
-                        lambda: f"For MXFP8, scale should have same number of dimensions as target tensor, but {scale_name} has mat.ndim={mat.ndim} and scale.ndim={scale.ndim}",  # noqa: B950
+                        scale.ndim == mat.ndim - 1,
+                        lambda: f"For MXFP8, 3d tensor should have 2d scales, but {scale_name} has mat.ndim={mat.ndim} and scale.ndim={scale.ndim}",  # noqa: B950
                     )
                     # TODO: This logic only holds for RHS tensor in 2d-3d case.
                     # We'll need to update it to handle LHS 3d tensor in 3d-2d and 3d-3d cases.
-                    G, K, N = scale.shape
+                    G, K, N = mat.shape
                     block_size = 32
                     blocked_K = round_up(K / block_size, 4)
                     blocked_N = round_up(N, 128)
                     torch._check(
-                        mat.shape[-2] == blocked_K and mat.shape[-1] == blocked_N,
-                        lambda: f"For MXFP8, expected mat.shape={mat.shape} to have scale shape of ({G},{blocked_K},{blocked_N}), but got {scale.shape}",  # noqa: B950
+                        scale.shape[0] == G and scale.shape[1] == blocked_K * blocked_N,
+                        lambda: f"For MXFP8, expected mat.shape={mat.shape} to have scale shape of ({G},{blocked_K * blocked_N}), but got {scale.shape}",  # noqa: B950
                     )
                 else:
                     torch._check(
