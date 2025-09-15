@@ -2,7 +2,7 @@
 # ruff: noqa: F841
 import unittest
 from torch.testing._internal.common_utils import TestCase, run_tests, TEST_NUMPY
-from torch.testing._internal.common_utils import skipIfTorchDynamo
+from torch.testing._internal.common_utils import skipIfTorchDynamo, skipIfXpu
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_device_type import get_all_device_types
 from collections import namedtuple, OrderedDict
@@ -280,6 +280,7 @@ class TestNamedTensor(TestCase):
         self.assertEqual(named_tensor.diagonal(outdim='E', dim1='B', dim2='D').names,
                          ['A', 'C', 'E'])
 
+    @skipIfXpu   # https://github.com/intel/torch-xpu-ops/issues/2023
     def test_max_pooling(self):
         def check_tuple_return(op, inputs, expected_names):
             values, indices = op(*inputs)
