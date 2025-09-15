@@ -31,9 +31,8 @@ echo "Before activate"
 call %CONDA_ROOT_DIR%\Scripts\activate.bat %CONDA_ROOT_DIR%
 echo "After activate, before env create"
 
-echo on
-conda create -y -n py_tmp python=%PYTHON_VERSION%
-echo "After env create, before pip install"
-conda run -n py_tmp pip install -r requirements.txt
+call conda create -y -n py_tmp python=%PYTHON_VERSION%
+call conda activate py_tmp
+call pip install -r requirements.txt
 set PATH="%CONDA_ROOT_DIR%\envs\py_tmp;%PATH%
 echo "PATH=%PATH%"
