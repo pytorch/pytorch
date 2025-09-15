@@ -49,6 +49,8 @@ C10_EXPORT void set_allow_inflight_collective_as_graph_input(bool value);
 
 C10_EXPORT bool allow_inflight_collective_as_graph_input();
 
+C10_EXPORT void print_unwaited_work();
+
 // ProcessGroup is a base class that captures collective and point to
 // point communication in a fixed set of processes.
 //

@@ -992,6 +992,12 @@ This class does not support ``__members__`` property.)");
     return ::c10d::allow_inflight_collective_as_graph_input();
   });
 
+  module.def(
+      "_print_unwaited_work",
+      []() {
+        return ::c10d::print_unwaited_work();
+      });
+
   // Remove a group from the native registry
   module.def(
       "_unregister_process_group",
