@@ -13,6 +13,16 @@ class TestAutocast(TestCase):
             with torch.autocast(device_type="openreg", dtype=torch.float32):
                 _ = torch.ones(10)
 
+    def test_autocast_operator_not_supported(self):
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "torch.nn.functional.binary_cross_entropy and torch.nn.BCELoss are not supported.",
+        ):
+            x = torch.randn(2, 3, device="openreg")
+            y = torch.randn(2, 3, device="openreg")
+            with torch.autocast(device_type="openreg", dtype=torch.float16):
+                _ = torch.nn.functional.binary_cross_entropy(x, y)
+
     def test_autocast_low_precision(self):
         with torch.amp.autocast(device_type="openreg", dtype=torch.float16):
             x = torch.randn(2, 3, device="openreg")
@@ -23,8 +33,7 @@ class TestAutocast(TestCase):
     def test_autocast_fp32(self):
         with torch.amp.autocast(device_type="openreg"):
             x = torch.randn(2, device="openreg", dtype=torch.float16)
-            y = torch.randn(2, device="openreg", dtype=torch.float16)
-            result = torch.dot(x, y)
+            result = torch.asin(x)
             self.assertEqual(result.dtype, torch.float32)
 
     def test_autocast_default_dtype(self):
