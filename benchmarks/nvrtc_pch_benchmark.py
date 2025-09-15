@@ -229,49 +229,7 @@ def main():
     }
     """
     
-    print("Benchmark 1: Simple CUB Block Reduction")
-    print("-"*40)
-    
-    # Warmup
-    print("Warming up...", end="", flush=True)
-    for _ in range(args.warmup):
-        benchmark_compilation(kernel1_source, "block_reduce_kernel", use_pch=False, iterations=1)
-        if pch_supported:
-            benchmark_compilation(kernel1_source, "block_reduce_kernel", use_pch=True, iterations=1)
-    print(" done")
-    
-    # Run alternating benchmark to eliminate order bias
-    if pch_supported:
-        print("Running alternating PCH/no-PCH benchmark...", end="", flush=True)
-        times_no_pch, times_with_pch = run_alternating_benchmark(
-            kernel1_source, "block_reduce_kernel", iterations=args.iterations
-        )
-        print(" done")
-        
-        if times_no_pch and times_with_pch:
-            avg_no_pch = mean(times_no_pch) * 1000
-            std_no_pch = stdev(times_no_pch) * 1000 if len(times_no_pch) > 1 else 0
-            avg_with_pch = mean(times_with_pch) * 1000
-            std_with_pch = stdev(times_with_pch) * 1000 if len(times_with_pch) > 1 else 0
-            
-            print(f"  Without PCH: {avg_no_pch:.2f} ms (±{std_no_pch:.2f} ms)")
-            print(f"  With PCH:    {avg_with_pch:.2f} ms (±{std_with_pch:.2f} ms)")
-            
-            speedup = avg_no_pch / avg_with_pch
-            print(f"  Speedup: {speedup:.2f}x")
-    else:
-        print("Running without PCH only...", end="", flush=True)
-        times_no_pch = benchmark_compilation(kernel1_source, "block_reduce_kernel", 
-                                            use_pch=False, iterations=args.iterations)
-        print(" done")
-        
-        if times_no_pch:
-            avg_no_pch = mean(times_no_pch) * 1000
-            std_no_pch = stdev(times_no_pch) * 1000 if len(times_no_pch) > 1 else 0
-            print(f"  Average: {avg_no_pch:.2f} ms (±{std_no_pch:.2f} ms)")
-    
-    print()
-    print("Benchmark 2: Complex Kernel with Many CUB Headers (should show better speedup)")
+    print("Benchmark 1: Complex Kernel with Multiple CUB Headers (clean PCH test)")
     print("-"*40)
     
     # Warmup
@@ -304,6 +262,48 @@ def main():
     else:
         print("Running without PCH only...", end="", flush=True)
         times_no_pch = benchmark_compilation(kernel2_source, "complex_cub_kernel", 
+                                            use_pch=False, iterations=args.iterations)
+        print(" done")
+        
+        if times_no_pch:
+            avg_no_pch = mean(times_no_pch) * 1000
+            std_no_pch = stdev(times_no_pch) * 1000 if len(times_no_pch) > 1 else 0
+            print(f"  Average: {avg_no_pch:.2f} ms (±{std_no_pch:.2f} ms)")
+    
+    print()
+    print("Benchmark 2: Simple CUB Block Reduction (may benefit from cached PCH)")
+    print("-"*40)
+    
+    # Warmup
+    print("Warming up...", end="", flush=True)
+    for _ in range(args.warmup):
+        benchmark_compilation(kernel1_source, "block_reduce_kernel", use_pch=False, iterations=1)
+        if pch_supported:
+            benchmark_compilation(kernel1_source, "block_reduce_kernel", use_pch=True, iterations=1)
+    print(" done")
+    
+    # Run alternating benchmark to eliminate order bias
+    if pch_supported:
+        print("Running alternating PCH/no-PCH benchmark...", end="", flush=True)
+        times_no_pch, times_with_pch = run_alternating_benchmark(
+            kernel1_source, "block_reduce_kernel", iterations=args.iterations
+        )
+        print(" done")
+        
+        if times_no_pch and times_with_pch:
+            avg_no_pch = mean(times_no_pch) * 1000
+            std_no_pch = stdev(times_no_pch) * 1000 if len(times_no_pch) > 1 else 0
+            avg_with_pch = mean(times_with_pch) * 1000
+            std_with_pch = stdev(times_with_pch) * 1000 if len(times_with_pch) > 1 else 0
+            
+            print(f"  Without PCH: {avg_no_pch:.2f} ms (±{std_no_pch:.2f} ms)")
+            print(f"  With PCH:    {avg_with_pch:.2f} ms (±{std_with_pch:.2f} ms)")
+            
+            speedup = avg_no_pch / avg_with_pch
+            print(f"  Speedup: {speedup:.2f}x")
+    else:
+        print("Running without PCH only...", end="", flush=True)
+        times_no_pch = benchmark_compilation(kernel1_source, "block_reduce_kernel", 
                                             use_pch=False, iterations=args.iterations)
         print(" done")
         
