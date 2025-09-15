@@ -1053,6 +1053,9 @@ static void registerCudaDeviceProperties(PyObject* module) {
       .def_readonly("warp_size", &cudaDeviceProp::warpSize)
 #ifndef USE_ROCM
       // NVIDIA-only properties
+      .def_readonly("clock_rate", &cudaDeviceProp::clockRate)
+      .def_readonly("memory_clock_rate", &cudaDeviceProp::memoryClockRate)
+      .def_readonly("memory_bus_width", &cudaDeviceProp::memoryBusWidth)
       .def_readonly(
           "shared_memory_per_block", &cudaDeviceProp::sharedMemPerBlock)
       .def_readonly(
