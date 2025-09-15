@@ -25,7 +25,7 @@ def _prepare_collective_groups(process_group_so):
     Returns:
         tuple: (ranks, layout, global_pg, group_offsets, offset)
     """
-    from pycute.layout import complement
+    from torch.distributed._pycute.layout import complement
 
     from . import indices_to_layout, layout_to_indices
 
@@ -97,7 +97,7 @@ def _local_all_reduce_(
     assert len(tensors) == 1
     tensor = tensors[0]
 
-    reduce_op = ReduceOp.unbox(reduce_op_so)
+    reduce_op = reduce_op_so.op()
     ranks, layout, global_pg, group_offsets, _offset = _prepare_collective_groups(
         process_group_so
     )
@@ -117,13 +117,13 @@ def _local_all_reduce_(
             group_tensors.append(tensor._local_tensors[rank])
 
         # Perform the reduction operation
-        if reduce_op == ReduceOp.SUM:
+        if reduce_op == ReduceOp.RedOpType.SUM:
             op = operator.add
-        elif reduce_op == ReduceOp.PRODUCT:
+        elif reduce_op == ReduceOp.RedOpType.PRODUCT:
             op = operator.mul
-        elif reduce_op == ReduceOp.MIN:
+        elif reduce_op == ReduceOp.RedOpType.MIN:
             op = torch.minimum
-        elif reduce_op == ReduceOp.MAX:
+        elif reduce_op == ReduceOp.RedOpType.MAX:
             op = torch.maximum
         else:
             raise NotImplementedError(f"ReduceOp {reduce_op} not implemented")

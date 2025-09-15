@@ -47,10 +47,6 @@ import os
 import sys
 
 
-sys.path.append(
-    os.path.join(os.path.dirname(__file__), "../../../third_party/cutlass/python")
-)
-
 import functools
 import operator
 from collections.abc import Sequence
@@ -71,8 +67,8 @@ from torch.utils.checkpoint import get_device_states, set_device_states
 not_implemented_log = torch._logging.getArtifactLogger(__name__, "not_implemented")
 
 
-from pycute.int_tuple import flatten, is_int, is_tuple
-from pycute.layout import complement, Layout
+from torch.distributed._pycute.int_tuple import flatten, is_int, is_tuple
+from torch.distributed._pycute.layout import complement, Layout
 
 from . import _c10d
 
