@@ -16,9 +16,13 @@ def _is_non_rank_zero():
             torch.distributed.get_rank() != 0)
 
 
-def patch_logging_for_distributed():
+def patch_logging_for_distributed(patch_print=False):
     """
     Patch warnings and logging to only emit on rank 0 in distributed mode.
+    
+    Args:
+        patch_print: If True, also patch print() to only emit on rank 0.
+                    Default False since print is often used for debugging.
     """
     original_warn = warnings.warn
     
@@ -43,3 +47,15 @@ def patch_logging_for_distributed():
                 return distributed_logging_func
             
             setattr(logging, method_name, make_distributed_logging_func(original_func))
+    
+    # Optionally patch print
+    if patch_print:
+        import builtins
+        original_print = builtins.print
+        
+        def distributed_safe_print(*args, **kwargs):
+            if _is_non_rank_zero():
+                return
+            return original_print(*args, **kwargs)
+        
+        builtins.print = distributed_safe_print
