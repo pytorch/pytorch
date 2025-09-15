@@ -367,7 +367,7 @@ class DTensorTestBase(MultiProcessTestCase):
 
     @property
     def backend(self) -> str:
-        backend = dist.get_default_backend_for_device(self.device_type)
+        backend = dist.get_default_backend_for_device(DEVICE_TYPE)
         return backend
 
     def build_device_mesh(self) -> DeviceMesh:
@@ -388,6 +388,7 @@ class DTensorTestBase(MultiProcessTestCase):
             "hccl",
             "xccl",
             "fake",
+            "cpu:gloo,xpu:xccl",
         ]:
             raise RuntimeError(f"Backend {backend} not supported!")
 
