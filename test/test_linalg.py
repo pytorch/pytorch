@@ -9848,24 +9848,24 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         """
         # Create test matrices
         a = make_tensor((5, 5), dtype=dtype, device=device)
-        
+
         # Test extreme positive k value
         k_max = 9223372036854775807
         result_triu_max = torch.triu(a, k_max)
         result_tril_max = torch.tril(a, k_max)
-        
+
         # With k = INT64_MAX, triu should return all zeros (since i + k will exceed matrix bounds for all i,j)
         # and tril should return the full matrix (since i + k + 1 will exceed matrix bounds for all i,j)
         expected_triu_max = torch.zeros_like(a)
         expected_tril_max = a.clone()
         self.assertEqual(result_triu_max, expected_triu_max)
         self.assertEqual(result_tril_max, expected_tril_max)
-        
+
         # Test extreme negative k value
         k_min = -9223372036854775808
         result_triu_min = torch.triu(a, k_min)
         result_tril_min = torch.tril(a, k_min)
-        
+
         # With k = INT64_MIN, triu should return the full matrix (since i + k will be negative for all i,j)
         # and tril should return all zeros (since i + k + 1 will be negative for all i,j)
         expected_triu_min = a.clone()
