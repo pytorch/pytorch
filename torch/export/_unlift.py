@@ -843,7 +843,7 @@ def _unlift_exported_program_lifted_states(
         )
 
         ep_guards_code = _force_ep_signature_match(ep._guards_code, input_paths)
-        ep_guards_code = _force_gm_signature_match(ep_guards_code, gm_sig)
+        ep_guards_code = _force_gm_signature_match(ep_guards_code, sig)
         guards_code.extend(ep_guards_code)
         unlift_gm._guards_fn = _convert_guards_code_to_fn(guards_code, input_paths)
 
