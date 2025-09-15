@@ -199,7 +199,7 @@ def _nvrtc_compile(
 
     # Enable automatic precompiled headers (CUDA 12.8+)
     if enable_automatic_pch:
-        options.append("--enable-automatic-pch".encode("utf-8"))
+        options.append("--pch".encode("utf-8"))
 
     nvrtc_compatible_flags = _get_gpu_rtc_compatible_flags()
     options.extend([flag.encode("utf-8") for flag in nvrtc_compatible_flags])
