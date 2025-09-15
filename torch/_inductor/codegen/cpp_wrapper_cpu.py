@@ -1364,9 +1364,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
         debug_handle = None
         if config.trace.provenance_tracking_level != 0:
+            shim_fn = self.get_c_shim_func_name(fallback_kernel.cpp_kernel_name, device)  # type: ignore[arg-type]
             debug_handle = set_kernel_post_grad_provenance_tracing(
                 fallback_kernel,
-                fallback_kernel.cpp_kernel_name,  # type: ignore[arg-type]
+                shim_fn,
                 is_extern=True,
             )
         self.generate_c_shim_extern_kernel_call(
