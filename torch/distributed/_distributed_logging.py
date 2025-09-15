@@ -16,6 +16,15 @@ def _is_non_rank_zero():
             torch.distributed.get_rank() != 0)
 
 
+def _make_rank_zero_only(original_func):
+    """Create a wrapper that only executes on rank 0."""
+    def wrapper(*args, **kwargs):
+        if _is_non_rank_zero():
+            return
+        return original_func(*args, **kwargs)
+    return wrapper
+
+
 def patch_logging_for_distributed(patch_print=False):
     """
     Patch warnings and logging to only emit on rank 0 in distributed mode.
@@ -38,40 +47,16 @@ def patch_logging_for_distributed(patch_print=False):
     for method_name in ['debug', 'info', 'warning', 'warn', 'error', 'critical']:
         if hasattr(logging, method_name):
             original_func = getattr(logging, method_name)
-            
-            def make_distributed_logging_func(orig_func):
-                def distributed_logging_func(msg, *args, **kwargs):
-                    if _is_non_rank_zero():
-                        return
-                    return orig_func(msg, *args, **kwargs)
-                return distributed_logging_func
-            
-            setattr(logging, method_name, make_distributed_logging_func(original_func))
+            setattr(logging, method_name, _make_rank_zero_only(original_func))
     
     # Patch Logger class methods to catch logger instances
-    original_logger_methods = {}
     for method_name in ['debug', 'info', 'warning', 'warn', 'error', 'critical']:
         if hasattr(logging.Logger, method_name):
             original_method = getattr(logging.Logger, method_name)
-            original_logger_methods[method_name] = original_method
-            
-            def make_distributed_logger_method(orig_method):
-                def distributed_logger_method(self, msg, *args, **kwargs):
-                    if _is_non_rank_zero():
-                        return
-                    return orig_method(self, msg, *args, **kwargs)
-                return distributed_logger_method
-            
-            setattr(logging.Logger, method_name, make_distributed_logger_method(original_method))
+            setattr(logging.Logger, method_name, _make_rank_zero_only(original_method))
     
     # Optionally patch print
     if patch_print:
         import builtins
         original_print = builtins.print
-        
-        def distributed_safe_print(*args, **kwargs):
-            if _is_non_rank_zero():
-                return
-            return original_print(*args, **kwargs)
-        
-        builtins.print = distributed_safe_print
+        builtins.print = _make_rank_zero_only(original_print)
