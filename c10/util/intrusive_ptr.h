@@ -196,20 +196,25 @@ TTarget* assign_ptr_(TTarget* rhs) {
   }
 }
 
-// Increment needs to be acquire-release to make use_count() and
-// unique() reliable.
+// The only requirement for refcount increment is that it happens-before
+// decrement, so no additional memory ordering is needed.
 inline uint32_t atomic_refcount_increment(std::atomic<uint32_t>& refcount) {
-  return refcount.fetch_add(1, std::memory_order_acq_rel) + 1;
+  return refcount.fetch_add(1, std::memory_order_relaxed) + 1;
 }
 
-// weak_use_count() is only used for testing, so we don't need it to
-// be reliable. Relaxed should be fine.
 inline uint32_t atomic_weakcount_increment(std::atomic<uint32_t>& weakcount) {
   return weakcount.fetch_add(1, std::memory_order_relaxed) + 1;
 }
 
-// Both decrements need to be acquire-release for correctness. See
-// e.g. std::shared_ptr implementation.
+// The requirement is that all modifications to the managed object happen-before
+// invocation of the managed object destructor, and that allocation of the
+// managed object storage happens-before deallocation of the storage.
+//
+// To get this ordering, all non-final decrements must synchronize-with the
+// final decrement. So all non-final decrements have to store-release while the
+// final decrement has to load-acquire, either directly or with the help of
+// fences. But it's easiest just to have all decrements be acq-rel. And it turns
+// out, on modern architectures and chips, it's also fastest.
 inline uint32_t atomic_refcount_decrement(std::atomic<uint32_t>& refcount) {
   return refcount.fetch_sub(1, std::memory_order_acq_rel) - 1;
 }
@@ -278,23 +283,55 @@ class intrusive_ptr final {
   }
 
   void reset_() noexcept {
-    if (target_ != NullType::singleton() &&
-        detail::atomic_refcount_decrement(target_->refcount_) == 0) {
-      // See comment above about weakcount. As long as refcount>0,
-      // weakcount is one larger than the actual number of weak references.
-      // So we need to decrement it here.
-      bool should_delete =
-          target_->weakcount_.load(std::memory_order_acquire) == 1;
-      if (!should_delete) {
-        // justification for const_cast: release_resources is basically a
-        // destructor and a destructor always mutates the object, even for const
-        // objects. NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-        const_cast<std::remove_const_t<TTarget>*>(target_)->release_resources();
-        should_delete =
-            detail::atomic_weakcount_decrement(target_->weakcount_) == 0;
+    if (target_ != NullType::singleton()) {
+#if defined(__linux__) && (defined(__aarch64__) || defined(__x86_64__))
+      if constexpr (
+          std::atomic<uint64_t>::is_always_lock_free &&
+          std::atomic<uint32_t>::is_always_lock_free &&
+          sizeof(std::atomic<uint64_t>) == 8 &&
+          sizeof(std::atomic<uint32_t>) == 4) {
+        auto both_counts_ =
+            reinterpret_cast<std::atomic<uint64_t>*>(&target_->refcount_);
+        TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+            (reinterpret_cast<std::uintptr_t>(both_counts_) %
+             sizeof(std::atomic<uint64_t>)) == 0 &&
+            (reinterpret_cast<std::uintptr_t>(&target_->weakcount_) -
+             reinterpret_cast<std::uintptr_t>(both_counts_)) ==
+                sizeof(std::atomic<uint32_t>));
+        // 0x100000001ULL is a 64-bit number combination of both the refcount_
+        // and weakcount_ being 1.
+        constexpr uint64_t unique_ref_ = 0x100000001ULL;
+        if (both_counts_->load(std::memory_order_acquire) == unique_ref_) {
+          // Both counts are 1, so there are no weak references and
+          // we are releasing the last strong reference. No other
+          // threads can observe the effects of this target_ deletion
+          // call (e.g. calling use_count()) without a data race.
+          target_->refcount_.store(0, std::memory_order_relaxed);
+          delete target_;
+          return;
+        }
       }
-      if (should_delete) {
-        delete target_;
+#endif
+
+      if (detail::atomic_refcount_decrement(target_->refcount_) == 0) {
+        // See comment above about weakcount. As long as refcount>0,
+        // weakcount is one larger than the actual number of weak references.
+        // So we need to decrement it here.
+        bool should_delete =
+            target_->weakcount_.load(std::memory_order_acquire) == 1;
+        if (!should_delete) {
+          // justification for const_cast: release_resources is basically a
+          // destructor and a destructor always mutates the object, even for
+          // const objects.
+          // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+          const_cast<std::remove_const_t<TTarget>*>(target_)
+              ->release_resources();
+          should_delete =
+              detail::atomic_weakcount_decrement(target_->weakcount_) == 0;
+        }
+        if (should_delete) {
+          delete target_;
+        }
       }
     }
   }
@@ -332,7 +369,7 @@ class intrusive_ptr final {
   intrusive_ptr() noexcept
       : intrusive_ptr(NullType::singleton(), raw::DontIncreaseRefcount{}) {}
 
-  intrusive_ptr(std::nullptr_t) noexcept
+  /* implicit */ intrusive_ptr(std::nullptr_t) noexcept
       : intrusive_ptr(NullType::singleton(), raw::DontIncreaseRefcount{}) {}
 
   // This constructor will not increase the ref counter for you.
@@ -445,14 +482,14 @@ class intrusive_ptr final {
     if (target_ == NullType::singleton()) {
       return 0;
     }
-    return target_->refcount_.load(std::memory_order_acquire);
+    return target_->refcount_.load(std::memory_order_relaxed);
   }
 
   uint32_t weak_use_count() const noexcept {
     if (target_ == NullType::singleton()) {
       return 0;
     }
-    return target_->weakcount_.load(std::memory_order_acquire);
+    return target_->weakcount_.load(std::memory_order_relaxed);
   }
 
   bool unique() const noexcept {
@@ -851,14 +888,14 @@ class weak_intrusive_ptr final {
       return 0;
     }
     return target_->refcount_.load(
-        std::memory_order_acquire); // refcount, not weakcount!
+        std::memory_order_relaxed); // refcount, not weakcount!
   }
 
   uint32_t weak_use_count() const noexcept {
     if (target_ == NullType::singleton()) {
       return 0;
     }
-    return target_->weakcount_.load(std::memory_order_acquire);
+    return target_->weakcount_.load(std::memory_order_relaxed);
   }
 
   bool expired() const noexcept {
@@ -866,18 +903,22 @@ class weak_intrusive_ptr final {
   }
 
   intrusive_ptr<TTarget, NullType> lock() const noexcept {
-    if (expired()) {
+    if (target_ == NullType::singleton()) {
       return intrusive_ptr<TTarget, NullType>();
     } else {
-      auto refcount = target_->refcount_.load(std::memory_order_seq_cst);
+      auto refcount = target_->refcount_.load(std::memory_order_relaxed);
       do {
         if (refcount == 0) {
           // Object already destructed, no strong references left anymore.
           // Return nullptr.
           return intrusive_ptr<TTarget, NullType>();
         }
-      } while (
-          !target_->refcount_.compare_exchange_weak(refcount, refcount + 1));
+      } while (!target_->refcount_.compare_exchange_weak(
+          refcount,
+          refcount + 1,
+          std::memory_order_acquire,
+          std::memory_order_relaxed));
+
       return intrusive_ptr<TTarget, NullType>(
           target_, raw::DontIncreaseRefcount{});
     }
