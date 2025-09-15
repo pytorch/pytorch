@@ -2290,6 +2290,7 @@ def triton_config_reduction(
     num_warps=None,
     register_intensive=False,
     dynamic_scale_rblock=True,
+    reduction_hint=None,
 ) -> Config:
     """
     Construct a reduction triton config with some adjustment heuristics
@@ -2317,7 +2318,13 @@ def triton_config_reduction(
             rnumels[prefix] *= 2
 
     if num_warps is None:
-        num_warps = total_numel() // 128
+        if reduction_hint == ReductionHint.INNER:
+            # r is contiguous, so ensure that each thread has 8 elements for
+            # vectorized loads, assuming bf16/fp16, fp32 case will be
+            # vectorized as well
+            num_warps = r // (32 * 8)
+        else:
+            num_warps = total_numel() // 128
 
     max_num_warps = 16 if r <= 8192 else 32
     num_warps = _num_warps(
@@ -2587,6 +2594,7 @@ def _reduction_configs(
                 num_stages=num_stages,
                 register_intensive=register_intensive,
                 dynamic_scale_rblock=dynamic_scale_rblock,
+                reduction_hint=reduction_hint,
             )
 
     def outer_config_opt():
@@ -2677,13 +2685,6 @@ def _reduction_configs(
     ):
         pass  # skip all these cases
     elif reduction_hint == ReductionHint.INNER:
-        if rnumel > 512:
-            # Less warps is much better sometimes for nice
-            # cache access patterns, decreases cache contention
-            # and large speedups on higher memory bw (B200)
-            inner_cfg = inner_config()
-            inner_cfg.num_warps = 4
-            configs.append(inner_cfg)
         return configs + [contiguous_config]
     elif reduction_hint == ReductionHint.OUTER:
         return configs + [outer_config]
@@ -2875,7 +2876,7 @@ def _persistent_reduction_configs(
 
     if "y" not in size_hints:
         configs = [
-            triton_config_reduction(size_hints, xblock, rnumel, register_intensive=True)
+            triton_config_reduction(size_hints, xblock, rnumel, register_intensive=True, reduction_hint=reduction_hint)
             for xblock in (1, 8, 32, 128)
             if xblock == 1
             or (rnumel * xblock <= MAX_PERSISTENT_BLOCK_NUMEL and xblock <= xnumel)
@@ -2911,6 +2912,7 @@ def _persistent_reduction_configs(
                     8,
                     rnumel,
                     register_intensive=True,
+                    reduction_hint=reduction_hint,
                 )
             ]
         else:
@@ -2920,14 +2922,9 @@ def _persistent_reduction_configs(
                     4,
                     rnumel,
                     register_intensive=True,
+                    reduction_hint=reduction_hint,
                 )
             ]
-
-        # Blackwell likes less num_warps
-        if configs[0].num_warps >= 4:
-            less_warps_cfg = copy.deepcopy(configs[0])
-            less_warps_cfg.num_warps = less_warps_cfg.num_warps // 4
-            configs.append(less_warps_cfg)
 
     elif reduction_hint == ReductionHint.OUTER:
         configs = configs[-1:]
@@ -2937,6 +2934,7 @@ def _persistent_reduction_configs(
                 size_hints,
                 2 * (256 // rnumel) if rnumel <= 256 else 1,
                 rnumel,
+                reduction_hint=reduction_hint,
             )
         ]
     for c in configs:
