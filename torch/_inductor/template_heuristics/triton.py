@@ -74,7 +74,8 @@ ConvConfig = BaseConfig
 class FlexConfig:
     """
     Base Config class for flex attention
-    - FlexAttn forward, backward and flex decode will use this
+    - FlexAttn forward and backward will use this. For flex decoding,
+      please use FlexDecodingConfig.
 
     NOTE:
     For flex_attn bwd block_m and block_n are reused for block_m1, block_m2, block_n1, block_n2
@@ -356,6 +357,10 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             GemmConfig(32, 64, 64, 6, 2),
             GemmConfig(32, 128, 64, 6, 4),
             GemmConfig(32, 256, 64, 6, 4),
+            GemmConfig(64, 16, 256, 5, 4),
+            GemmConfig(64, 32, 256, 5, 4),
+            GemmConfig(64, 128, 128, 3, 4),
+            GemmConfig(128, 256, 128, 4, 8),
         ]
 
         self.scaled_persistent_mm_configs: list[BaseConfig] = [
@@ -368,6 +373,10 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             GemmConfig(128, 128, 128, 5, 8),
             GemmConfig(128, 128, 128, 6, 8),
             GemmConfig(128, 128, 64, 4, 8),
+            GemmConfig(64, 32, 256, 5, 4),
+            GemmConfig(128, 256, 128, 3, 8),
+            GemmConfig(64, 128, 256, 4, 4),
+            GemmConfig(64, 256, 128, 4, 4),
         ]
 
         # TODO: Unify with other gemm patterns, mm_plus_mm currently follows
@@ -1139,6 +1148,13 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             for wpeu in [0, int(8 // num_warps)]
         ]
 
+    def _prune_exhaustive_configs(
+        self,
+        configs: list[BaseConfig],
+        dtype_size: int,
+    ) -> list[BaseConfig]:
+        return configs
+
     def _filter_configs(self, configs: list[BaseConfig]) -> list[BaseConfig]:
         """
         ROCm specific filtering
@@ -1626,6 +1642,7 @@ class TMATemplateConfigMixin(TMAWorkspaceMixin, MMTemplateConfigMixin):
             "NUM_SMS": get_num_sms(),
             "TMA_SIZE": TMA_DESCRIPTOR_SIZE,
             "TMA_EXPERIMENTAL_API": not has_triton_stable_tma_api(),
+            "tma_store": config.triton.enable_template_tma_store,
         }
         # Get base template configs from superclass
         for template_kwargs in super()._get_template_configs_impl(
@@ -1782,6 +1799,15 @@ class ScaledTMAConfigMixin(TMAWorkspaceMixin, BaseScaledMMConfigMixin):
     This inherits from BaseScaledMMConfigMixin and adds TMA-specific options.
     """
 
+    def _filter_configs(self, configs: list[BaseConfig]) -> list[BaseConfig]:
+        """
+        TMA specific filtering:
+        - num_warps=2 not safe for TMA
+        - block_k >= 32 required for TMA (requires inner-most dimension >= 32)
+        """
+        configs = [c for c in configs if c.num_warps != 2 and c.block_k >= 32]
+        return super()._filter_configs(configs)
+
     def _get_template_configs_impl(
         self,
         kernel_inputs: KernelInputs,
@@ -1885,11 +1911,10 @@ class CUDAScaledMMTemplateConfigHeuristic(ScaledMMConfigMixin, CUDAConfigHeurist
         super().__init__()
         # Override mm_configs to use scaled_mm_configs
         self.mm_configs = self.scaled_mm_configs
-        # NOTE: overriding exhaustive configs here to be the same as mm_configs
-        # as we haven't validated exhaustive support here yet
-        # TODO(coconutruben): remove this once we have validated exhaustive support
-        # for scaled_mm
-        self.exhaustive_configs = self.scaled_mm_configs
+
+    def _filter_configs(self, configs: list[BaseConfig]) -> list[BaseConfig]:
+        configs = [c for c in configs if c.block_k >= 32]
+        return super()._filter_configs(configs)
 
 
 @register_template_heuristic(
@@ -1904,11 +1929,6 @@ class CUDAScaledTMATemplateConfigHeuristic(ScaledTMAConfigMixin, CUDAConfigHeuri
         super().__init__()
         # Override mm_configs to use scaled_persistent_mm_configs for TMA
         self.mm_configs = self.scaled_persistent_mm_configs
-        # NOTE: overriding exhaustive configs here to be the same as mm_configs
-        # as we haven't validated exhaustive support here yet
-        # TODO(coconutruben): remove this once we have validated exhaustive support
-        # for scaled_mm
-        self.exhaustive_configs = self.scaled_persistent_mm_configs
 
 
 @register_template_heuristic(
