@@ -14,12 +14,12 @@ from re import escape
 import torch
 from functorch.experimental.control_flow import cond
 from torch._dynamo.eval_frame import is_dynamo_supported
+from torch._export import config
 from torch._export.non_strict_utils import (
     _fakify_script_objects,
     _gather_constant_attrs,
 )
 from torch._export.pass_base import _ExportPassBaseDeprecatedDoNotUse
-from torch._export import config
 from torch._export.passes.replace_set_grad_with_hop_pass import (
     _is_set_grad_enabled_node,
     _is_set_grad_enabled_sub_mod,
@@ -309,7 +309,9 @@ def _with_mixed_autocast_set_grad_tests():
     x = torch.randn(2, 2)
 
     def _get_predispatch_module(mod, args):
-        return _export(mod, args, pre_dispatch=True).module()
+        with torch._export.config.patch(use_new_tracer_experimental=True):
+            ep = _export(mod, args, pre_dispatch=True).module()
+            return ep
 
     return {
         "multi_ctx_manager": (
@@ -1016,28 +1018,29 @@ def forward(self, sin, cos):
 def forward(self, x):
     x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
     _guards_fn = self._guards_fn(x);  _guards_fn = None
-    submod_3 = self.submod_3
     add = torch.ops.aten.add.Tensor(x, 1);  x = None
-    sin = torch.ops.higher_order.wrap_with_set_grad_enabled(True, submod_3, add);  submod_3 = add = None
-    getitem_2 = sin[0];  sin = None
-    cos = torch.ops.aten.cos.default(getitem_2);  getitem_2 = None
-    submod_4 = self.submod_1
-    add_1 = torch.ops.higher_order.wrap_with_autocast('cpu', None, False, None, submod_4, cos);  submod_4 = cos = None
+    sin = torch.ops.aten.sin.default(add);  add = None
+    submod_3 = self.submod_2
+    wrap_with_set_grad_enabled = torch.ops.higher_order.wrap_with_set_grad_enabled(False, submod_3, sin);  submod_3 = sin = None
+    add_1 = wrap_with_set_grad_enabled[0]
+    sub = wrap_with_set_grad_enabled[1];  wrap_with_set_grad_enabled = None
+    return pytree.tree_unflatten((add_1, sub), self._out_spec)
+    """,
+        )
+        self.assertExpectedInline(
+            mod.submod_2.code.strip("\n"),
+            """\
+def forward(self, sin):
+    cos = torch.ops.aten.cos.default(sin);  sin = None
+    submod_3 = self.submod_1
+    add_1 = torch.ops.higher_order.wrap_with_autocast('cpu', None, False, None, submod_3, cos);  submod_3 = cos = None
     getitem = add_1[0];  add_1 = None
     sub = torch.ops.aten.sub.Tensor(getitem, 1)
-    return pytree.tree_unflatten((getitem, sub), self._out_spec)
+    return (getitem, sub)
     """,
         )
         self.assertExpectedInline(
-            mod.submod_3.code.strip("\n"),
-            """\
-def forward(self, add):
-    sin = torch.ops.aten.sin.default(add);  add = None
-    return (sin,)
-    """,
-        )
-        self.assertExpectedInline(
-            mod.submod_1.code.strip("\n"),
+            mod.submod_2.submod_1.code.strip("\n"),
             """\
 def forward(self, cos):
     add_1 = torch.ops.aten.add.Tensor(cos, 1);  cos = None
