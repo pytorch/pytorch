@@ -1,6 +1,5 @@
 # Owner(s): ["module: dynamo"]
 import contextlib
-import os
 
 import torch
 import torch.fx
