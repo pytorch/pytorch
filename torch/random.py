@@ -2,6 +2,7 @@
 import contextlib
 import warnings
 from collections.abc import Generator
+from typing import Union
 
 import torch
 from torch._C import default_generator
@@ -19,14 +20,25 @@ def set_rng_state(new_state: torch.Tensor) -> None:
     default_generator.set_state(new_state)
 
 
-def get_rng_state() -> torch.Tensor:
+def get_rng_state(device: Union[int, str, torch.device] = "cpu") -> torch.Tensor:
     r"""Returns the random number generator state as a `torch.ByteTensor`.
 
-    .. note:: The returned state is for the default generator on CPU only.
+    Args:
+        device (torch.device or int, optional): The device to return the RNG state of.
+            Default: ``'cpu'`` (i.e., ``torch.device('cpu')``, the current CPU device).
 
     See also: :func:`torch.random.fork_rng`.
     """
-    return default_generator.get_state()
+
+    if isinstance(device, str):
+        device = torch.device(device)
+    elif isinstance(device, int):
+        device = torch.device("cuda", device)
+
+    if device.type == "cpu":
+        return default_generator.get_state()
+    else:
+        return torch.get_device_module(device).get_rng_state(device)
 
 
 def manual_seed(seed) -> torch._C.Generator:
