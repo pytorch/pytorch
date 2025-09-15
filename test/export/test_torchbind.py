@@ -138,7 +138,7 @@ class TestExportTorchbind(TestCase):
         def export_wrapper(f, args, kwargs, strict, pre_dispatch):
             with enable_torchbind_tracing():
                 if pre_dispatch:
-                    exported_program = torch.export.export_for_training(
+                    exported_program = torch.export.export(
                         f, args, kwargs, strict=strict
                     ).run_decompositions({})
                 else:
@@ -755,7 +755,7 @@ def forward(self, arg0_1, arg1_1):
         b = torch.randn(2, 2)
         tq.push(a)
         tq.push(b)
-        ep = torch.export.export_for_training(
+        ep = torch.export.export(
             mod, (tq, torch.randn(2, 2)), strict=False
         ).run_decompositions({})
         self.assertExpectedInline(
@@ -809,9 +809,9 @@ def forward(self, L_safe_obj_ : torch.ScriptObject):
         )
 
         with enable_torchbind_tracing():
-            ep = torch.export.export_for_training(
-                mod, (safe_obj,), strict=False
-            ).run_decompositions({})
+            ep = torch.export.export(mod, (safe_obj,), strict=False).run_decompositions(
+                {}
+            )
             self.assertExpectedInline(
                 ep.graph_module.code.strip(),
                 """\
@@ -1407,9 +1407,9 @@ def forward(self, L_x_ : torch.Tensor, L_tq_ : torch.ScriptObject):
         x = torch.randn(3, 1)
         eager_out = mod(test_obj, x)
         compiled_out = torch.compile(mod, backend=backend, fullgraph=True)(test_obj, x)
-        ep = torch.export.export_for_training(
-            mod, (test_obj, x), strict=False
-        ).run_decompositions({})
+        ep = torch.export.export(mod, (test_obj, x), strict=False).run_decompositions(
+            {}
+        )
         self.assertExpectedInline(
             ep.graph_module.code.strip(),
             """\
