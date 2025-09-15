@@ -356,6 +356,23 @@ class WorkRegistry {
     return allow_inflight_collective_as_graph_input_;
   }
 
+  void print_unwaited_work() {
+    std::unique_lock lock(lock_);
+    for (auto& it : registry_) {
+      for (auto& work : it.second) {
+        auto s_tbs = torch::symbolize({work->traceback().get()});
+        const auto& s_tb = s_tbs.tracebacks.at(0);
+        for (auto idx : c10::irange(s_tb.size())) {
+            auto frame_id = s_tb[idx];
+            const auto& frame = s_tbs.all_frames.at(frame_id);
+            std::cerr << "#" << idx << " " << frame.funcname << " from " << frame.filename
+                << ":" << frame.lineno << '\n';
+        }
+        work.release();
+      }
+    }
+  }
+
   ~WorkRegistry() {
     // If there are still unwaited work objects, their corresponding process
     // groups should have already been destroyed at this stage. Any attempts to
@@ -426,6 +443,11 @@ void set_allow_inflight_collective_as_graph_input(bool value) {
 bool allow_inflight_collective_as_graph_input() {
   return RankLocal<WorkRegistry>::get()
       .allow_inflight_collective_as_graph_input();
+}
+
+void print_unwaited_work() {
+  return RankLocal<WorkRegistry>::get()
+      .print_unwaited_work();
 }
 
 c10::intrusive_ptr<ProcessGroup>& currentProcessGroup() {

@@ -5,6 +5,8 @@
 #include <mutex>
 #include <vector>
 
+#include <torch/csrc/profiler/combined_traceback.h>
+
 constexpr auto kNoTimeout = std::chrono::milliseconds(0);
 
 namespace c10d {
@@ -134,6 +136,10 @@ class TORCH_API Work : public torch::CustomClassHolder {
 
   OpType retrieveOpType() const;
 
+  const std::shared_ptr<torch::CapturedTraceback>& traceback() const {
+    return traceback_;
+  }
+
   static c10::intrusive_ptr<Work> create_from_future(
       const c10::intrusive_ptr<c10::ivalue::Future>&);
 
@@ -160,6 +166,8 @@ class TORCH_API Work : public torch::CustomClassHolder {
   // When profiling, the callback to record end of operation event. This
   // callback needs to be called when collective operation is complete.
   std::function<void()> recordFunctionEndCallback_;
+
+  std::shared_ptr<torch::CapturedTraceback> traceback_;
 };
 
 struct TORCH_API WorkInfo {

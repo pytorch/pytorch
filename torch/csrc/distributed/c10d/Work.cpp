@@ -12,7 +12,8 @@ Work::Work(
     OpType opType,
     const char* profilingTitle,
     const std::optional<std::vector<at::Tensor>>& inputTensors)
-    : rank_(rank), opType_(opType) {
+    // TODO: consider gathering C++ traceback
+    : rank_(rank), opType_(opType), traceback_(torch::CapturedTraceback::gather(true, false, false)) {
   if (profilingTitle != nullptr) {
     auto recordingFunction =
         std::make_shared<at::RecordFunction>(at::RecordScope::USER_SCOPE);
