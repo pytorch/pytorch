@@ -673,11 +673,11 @@ class FxConverter:
         assert isinstance(line, IndexPutFallbackLine)
         ir_node = line.node
 
-        def gen_buffer(
+        def generate_buffer_or_none(
             x: Union[ir.IRNode, Sequence[ir.IRNode], None],
         ) -> Optional[torch.fx.Node]:
             """
-            Type-narrowing version of _generate_buffer.
+            Handles None before calling _generate_buffer.
             """
             if x is None:
                 return None
@@ -685,8 +685,8 @@ class FxConverter:
             assert isinstance(x, ir.IRNode)
             return self._generate_buffer(x)
 
-        (x, values) = [gen_buffer(t) for t in ir_node.inputs[:2]]
-        indices = tuple(gen_buffer(t) for t in line.indices)
+        (x, values) = [generate_buffer_or_none(t) for t in ir_node.inputs[:2]]
+        indices = tuple(generate_buffer_or_none(t) for t in line.indices)
         accumulate = ir_node.constant_args[0]
         args = (x, indices, values, accumulate)
         self._generate_fallback_call(ir_node, args)

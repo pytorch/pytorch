@@ -94,7 +94,7 @@ _STEP_THREE_ERROR_MESSAGE = textwrap.dedent(
     f"""\
     Failed to convert the exported program to an ONNX model. {_BLUE}This is step 3/3{_END} of exporting the model to ONNX. Next steps:
     - If there is a missing ONNX function, implement it and register it to the registry.
-    - If there is an internal error during ONNX conversion, debug the error and summit a PR to PyTorch.
+    - If there is an internal error during ONNX conversion, debug the error and submit a PR to PyTorch.
     - Create an error report with `torch.onnx.export(..., report=True)`, and save the ExportedProgram as a pt2 file. Create an issue in the PyTorch GitHub repository against the {_BLUE}*onnx*{_END} component. Attach the error report and the pt2 model."""
 )
 
