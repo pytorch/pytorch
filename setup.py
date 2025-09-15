@@ -326,9 +326,6 @@ from tools.setup_helpers.env import (
 from tools.setup_helpers.generate_linker_script import gen_linker_script
 
 
-_IS_X8664 = platform.machine() == "x86_64"
-
-
 def str2bool(value: str | None) -> bool:
     """Convert environment variables to boolean values."""
     if not value:
@@ -1634,8 +1631,14 @@ def main() -> None:
         # for Windows inductor:
         # intel-openmp is requirement for Windows inductor on Windows x64.
         # We can also setup env var to skip the iomp.
+        def _is_AMD64_machine() -> bool:
+            if IS_WINDOWS:
+                return platform.machine() == "AMD64"
+            else:
+                return platform.machine() == "x86_64"
+
         skip_iomp = os.getenv("FORCE_SKIP_INTEL_OPENMP_DEPENDENCY", 0)
-        if IS_WINDOWS and _IS_X8664 and not skip_iomp:
+        if IS_WINDOWS and _is_AMD64_machine() and not skip_iomp:
             return ["intel-openmp==2025.1.1"]
         return []
 
