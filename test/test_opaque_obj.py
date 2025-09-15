@@ -2,6 +2,7 @@
 
 import torch
 from torch._dynamo.test_case import run_tests, TestCase
+from torch._library.opaque_object import make_opaque, get_payload
 
 
 class OpaqueQueue:
@@ -37,7 +38,7 @@ class TestOpaqueObject(TestCase):
             "_TestOpaqueObject::queue_push", "CompositeExplicitAutograd", lib=self.lib
         )
         def push_impl(q: torch._C.ScriptObject, b: torch.Tensor) -> None:
-            queue = torch._C.OpaqueObject.get_payload(q)
+            queue = get_payload(q)
             assert isinstance(queue, OpaqueQueue)
             queue.push(b)
 
@@ -46,7 +47,7 @@ class TestOpaqueObject(TestCase):
         )
 
         def pop_impl(q: torch._C.ScriptObject) -> torch.Tensor:
-            queue = torch._C.OpaqueObject.get_payload(q)
+            queue = get_payload(q)
             assert isinstance(queue, OpaqueQueue)
             return queue.pop()
 
@@ -61,33 +62,26 @@ class TestOpaqueObject(TestCase):
 
     def test_creation(self):
         queue = OpaqueQueue([], torch.zeros(3))
-        obj = torch._C.OpaqueObject(queue)
+        obj = make_opaque(queue)
+        self.assertTrue(isinstance(obj, torch._C.ScriptObject))
+        self.assertEqual(str(obj._type()), "__torch__.torch.classes.aten.OpaqueObject")
 
         # obj.payload stores a direct reference to this python queue object
-        self.assertEqual(obj.payload, queue)
-        queue.push(torch.ones(3))
-        self.assertEqual(obj.payload.size(), 1)
-
-        boxed = obj.boxed()
-        self.assertTrue(isinstance(boxed, torch._C.ScriptObject))
-
-        unboxed = torch._C.OpaqueObject.unbox(boxed)
-        self.assertTrue(isinstance(unboxed, torch._C.OpaqueObject))
-        self.assertEqual(unboxed.payload, queue)
-
-        payload = torch._C.OpaqueObject.get_payload(boxed)
+        payload = get_payload(obj)
         self.assertEqual(payload, queue)
+        queue.push(torch.ones(3))
+        self.assertEqual(payload.size(), 1)
 
     def test_ops(self):
         queue = OpaqueQueue([], torch.zeros(3))
-        cpp_obj = torch._C.OpaqueObject(queue).boxed()
+        obj = make_opaque(queue)
 
-        torch.ops._TestOpaqueObject.queue_push(cpp_obj, torch.ones(3) + 1)
+        torch.ops._TestOpaqueObject.queue_push(obj, torch.ones(3) + 1)
         self.assertEqual(queue.size(), 1)
-        popped = torch.ops._TestOpaqueObject.queue_pop(cpp_obj)
+        popped = torch.ops._TestOpaqueObject.queue_pop(obj)
         self.assertEqual(popped, torch.ones(3) + 1)
         self.assertEqual(queue.size(), 0)
-
+   
 
 if __name__ == "__main__":
     run_tests()
