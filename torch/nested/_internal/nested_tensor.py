@@ -165,21 +165,15 @@ class NestedTensor(torch.Tensor):
 
     def share_memory_(self):
         # Guard CUDA tensors
-        if self._values.is_cuda:
+        if self.is_cuda:
             return self
 
         # Share NestedTensor components
-        self._values.share_memory_()
-        self._offsets.share_memory_()
-
-        if self._lengths is not None:
-            self._lengths.share_memory_()
-
-        if self._min_seqlen_tensor is not None:
-            self._min_seqlen_tensor.share_memory_()
-        if self._max_seqlen_tensor is not None:
-            self._max_seqlen_tensor.share_memory_()
-
+        component_names, _ = self.__tensor_flatten__()
+        for name in component_names:
+            component = getattr(self, name, None)
+            if component is not None:
+                component.share_memory_()
         return self
 
     # Private accessor functions for min / max sequence length. They're
