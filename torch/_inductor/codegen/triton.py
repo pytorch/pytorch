@@ -2435,7 +2435,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         if expand_shape is None:
             if need_dense or have_dense:
-                expand_shape = None if copy_shape else tuple(self.dense_size_list())
+                _, expand_shape = _get_expand_str()
             else:
                 expand_shape = ()
 
