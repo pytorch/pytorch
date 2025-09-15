@@ -11,12 +11,14 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     TestCase,
+    requires_cuda,
 )
 from torch.testing._internal.distributed.fake_pg import FakeStore
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils.debug_mode import DebugMode
 
 
+@requires_cuda
 class TestDTensorDebugMode(TestCase):
     def tearDown(self):
         super().tearDown()
@@ -27,10 +29,9 @@ class TestDTensorDebugMode(TestCase):
         self.world_size = 8
         store = FakeStore()
         dist.init_process_group(
-            backend="fake", rank=1, world_size=self.world_size, store=store
+            backend="fake", rank=0, world_size=self.world_size, store=store
         )
-        self.device_type = "cuda" if torch.cuda.is_available() else "cpu"
-        self.world_pg = dist.distributed_c10d._get_default_group()
+        self.device_type = "cuda"
 
     def test_debug_mode_mm(self):
         mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
