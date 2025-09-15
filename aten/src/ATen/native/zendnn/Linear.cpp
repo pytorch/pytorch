@@ -5,19 +5,24 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
-#include <ATen/ops/zendnn_linear_native.h>
+#include <ATen/ops/zendnn_linear_unary_native.h>
 #endif
+
 #if !AT_ZENDNN_ENABLED()
 namespace at::native {
-at::Tensor zendnn_linear(
+at::Tensor zendnn_linear_unary(
     const at::Tensor& input,
     const at::Tensor& weight,
     const std::optional<at::Tensor>& bias,
-    bool is_weight_prepacked) {
-  TORCH_CHECK(false, "zendnn_linear: ATen is not compiled with ZenDNN support");
+    bool is_weight_prepacked,
+    std::string_view post_op) {
+  TORCH_CHECK(
+      false, "zendnn_linear_unary: ATen is not compiled with ZenDNN support");
 }
 } // namespace at::native
+
 #else // !AT_ZENDNN_ENABLED()
+
 namespace at::native {
 using namespace zendnnl::interface;
 
@@ -69,11 +74,12 @@ inline void zendnn_linear_impl(
   matmul_operator.execute();
 }
 
-at::Tensor zendnn_linear(
+at::Tensor zendnn_linear_unary(
     const at::Tensor& input,
     const at::Tensor& weight,
     const std::optional<at::Tensor>& bias,
-    bool is_weight_prepacked) {
+    bool is_weight_prepacked,
+    std::string_view post_op) {
   c10::MaybeOwned<at::Tensor> bias_maybe_owned =
       at::borrow_from_optional_tensor(bias);
   const at::Tensor& bias_t = *bias_maybe_owned;
@@ -84,4 +90,5 @@ at::Tensor zendnn_linear(
   return result;
 }
 } // namespace at::native
+
 #endif // !AT_ZENDNN_ENABLED()
