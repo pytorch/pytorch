@@ -9,6 +9,13 @@ import warnings
 import torch
 
 
+def _is_non_rank_zero():
+    """Check if we should suppress output (non-rank-0 in distributed mode)."""
+    return (torch.distributed.is_available() and 
+            torch.distributed.is_initialized() and 
+            torch.distributed.get_rank() != 0)
+
+
 def patch_logging_for_distributed():
     """
     Patch warnings and logging to only emit on rank 0 in distributed mode.
@@ -16,22 +23,9 @@ def patch_logging_for_distributed():
     original_warn = warnings.warn
     
     def distributed_safe_warn(message, category=None, stacklevel=1, source=None):
-        # Only warn on rank 0 in distributed mode
-        if (torch.distributed.is_available() and 
-            torch.distributed.is_initialized() and 
-            torch.distributed.get_rank() != 0):
+        if _is_non_rank_zero():
             return
         return original_warn(message, category, stacklevel + 1, source)
-    
-    def make_distributed_safe_logger(original_method):
-        def distributed_log_method(self, message, *args, **kwargs):
-            # Only log on rank 0 in distributed mode
-            if (torch.distributed.is_available() and 
-                torch.distributed.is_initialized() and 
-                torch.distributed.get_rank() != 0):
-                return
-            return original_method(self, message, *args, **kwargs)
-        return distributed_log_method
     
     # Patch warnings.warn
     warnings.warn = distributed_safe_warn
@@ -43,9 +37,7 @@ def patch_logging_for_distributed():
             
             def make_distributed_logging_func(orig_func):
                 def distributed_logging_func(msg, *args, **kwargs):
-                    if (torch.distributed.is_available() and 
-                        torch.distributed.is_initialized() and 
-                        torch.distributed.get_rank() != 0):
+                    if _is_non_rank_zero():
                         return
                     return orig_func(msg, *args, **kwargs)
                 return distributed_logging_func

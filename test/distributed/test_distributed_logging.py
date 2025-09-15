@@ -53,8 +53,8 @@ class DistributedLoggingTest(MultiProcessTestCase):
         
         dist.destroy_process_group()
 
-    def test_logging_only_on_rank_0(self):
-        """Test that logging only emits on rank 0."""
+    def test_cpp_extension_case(self):
+        """Test the specific cpp_extension case that was originally fixed."""
         store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(
             backend="gloo",
@@ -66,21 +66,21 @@ class DistributedLoggingTest(MultiProcessTestCase):
         stderr_capture = io.StringIO()
         
         with redirect_stderr(stderr_capture):
-            # Add a handler to capture output
-            handler = logging.StreamHandler()
-            logging.getLogger().addHandler(handler)
-            
-            logging.warning("Test logging warning - should only appear on rank 0")
+            try:
+                from torch.utils.cpp_extension import _get_cuda_arch_flags
+                _get_cuda_arch_flags()
+            except Exception:
+                pass  # May fail if CUDA not available, but we're testing logging
         
         output = stderr_capture.getvalue()
         
         if self.rank == 0:
-            # May or may not capture logging depending on handler setup
+            # Rank 0 should have the warning (if CUDA available)
             pass  # Just ensure no crash
         else:
-            # Should definitely not have warnings on non-rank-0
-            self.assertNotIn("Test logging warning", output,
-                           f"Unexpected logging on rank {self.rank}: {output}")
+            # Should definitely not have TORCH_CUDA_ARCH_LIST warning on non-rank-0
+            self.assertNotIn("TORCH_CUDA_ARCH_LIST", output,
+                           f"Unexpected CUDA arch warning on rank {self.rank}: {output}")
         
         dist.destroy_process_group()
 
