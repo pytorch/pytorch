@@ -2320,9 +2320,8 @@ def triton_config_reduction(
     if num_warps is None:
         if reduction_hint == ReductionHint.INNER:
             # r is contiguous, so ensure that each thread has 8 elements for
-            # vectorized loads, assuming bf16/fp16, fp32 case will be
-            # vectorized as well
-            num_warps = r // (32 * 8)
+            # vectorized loads, assuming bf16/fp16, scale based on xblock
+            num_warps = (r // (32 * 8)) * max((x // 2), 1)
         else:
             num_warps = total_numel() // 128
 
