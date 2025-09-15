@@ -113,6 +113,35 @@ class InlinedSource:
     firstlineno: int
     lastlineno: int
     checksum: str
+    content: str
+
+
+@functools.cache
+def _get_module_content(module: types.ModuleType) -> str:
+    return inspect.getsource(module)
+
+
+@dataclasses.dataclass
+class SourceInfo:
+    inlined_sources: set[InlinedSource]
+
+    def add_code(self, code: types.CodeType) -> None:
+        module = inspect.getmodule(code)
+        if module is None:
+            return
+        sourcelines, firstlineno = inspect.getsourcelines(code)
+        lastlineno = firstlineno + len(sourcelines)
+        source = "".join(sourcelines)
+        assert source == "".join(_get_sourcelines(module, firstlineno, lastlineno))
+        self.inlined_sources.add(
+            InlinedSource(
+                module=module.__name__,
+                firstlineno=firstlineno,
+                lastlineno=lastlineno,
+                checksum=_hash_source(source),
+                content=_get_module_content(module),
+            )
+        )
 
 
 @dataclasses.dataclass
@@ -278,7 +307,7 @@ def _get_code_source(code: types.CodeType) -> tuple[str, str]:
 @dataclasses.dataclass
 class _DynamoCacheEntry:
     codes: list[_DynamoCodeCacheEntry]
-    inlined_sources: set[InlinedSource]
+    source_info: SourceInfo
     use_cuda: bool
     system_info: SystemInfo = dataclasses.field(default_factory=SystemInfo.current)
 
@@ -383,7 +412,7 @@ class CompilePackage:
 
         # For debugging/testing purpose only.
         self._cached_backends: dict[_BackendId, Any] = {}
-        self._inlined_sources: set[InlinedSource] = set()
+        self._source_info: SourceInfo = SourceInfo(inlined_sources=set())
         self._resume_codes: set[types.CodeType] = set()
         self._initialized = False
         if fn is not None:
@@ -403,14 +432,14 @@ class CompilePackage:
         from .eval_frame import innermost_fn
 
         assert not self._initialized
-        self._inlined_sources = set()
+        self._source_info = SourceInfo(inlined_sources=set())
         self._innermost_fn = innermost_fn(fn)  # type: ignore[assignment]
         assert self._innermost_fn is not None
         if dynamo is not None:
             assert isinstance(dynamo, _DynamoCacheEntry)
             dynamo.check_versions()
             if not ignore_inlined_sources:
-                for code in dynamo.inlined_sources:
+                for code in dynamo.source_info.inlined_sources:
                     m = importlib.import_module(code.module)
                     checksum = _hash_sourcelines(m, code.firstlineno, code.lastlineno)
                     if checksum != code.checksum:
@@ -418,7 +447,7 @@ class CompilePackage:
                             f"Source code changes detected for {code.module} (line {code.firstlineno} - line {code.lastlineno})"
                         )
 
-                self._inlined_sources = dynamo.inlined_sources
+                self._source_info = dynamo.source_info
 
             main, *codes = dynamo.codes
             self._codes = {self._innermost_fn.__code__: main}
@@ -522,21 +551,7 @@ class CompilePackage:
         for code in sources:
             if code in self._resume_codes:
                 continue
-            module = inspect.getmodule(code)
-            if module is None:
-                continue
-            sourcelines, firstlineno = inspect.getsourcelines(code)
-            lastlineno = firstlineno + len(sourcelines)
-            source = "".join(sourcelines)
-            assert source == "".join(_get_sourcelines(module, firstlineno, lastlineno))
-            self._inlined_sources.add(
-                InlinedSource(
-                    module=module.__name__,
-                    firstlineno=firstlineno,
-                    lastlineno=lastlineno,
-                    checksum=_hash_source(source),
-                )
-            )
+            self._source_info.add_code(code)
 
     def update_use_cuda(self, graph: Optional[torch.fx.Graph]) -> None:
         self._use_cuda = _graph_uses_non_cpu(graph)
@@ -678,7 +693,7 @@ class CompilePackage:
         self.validate()
         return _DynamoCacheEntry(
             codes=list(self._codes.values()),
-            inlined_sources=self._inlined_sources,
+            source_info=self._source_info,
             use_cuda=self._use_cuda,
         )
 
