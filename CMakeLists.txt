@@ -234,6 +234,7 @@ cmake_dependent_option(INSTALL_TEST "Install test binaries if BUILD_TEST is on"
 option(USE_CPP_CODE_COVERAGE "Compile C/C++ with code coverage flags" OFF)
 option(USE_COLORIZE_OUTPUT "Colorize output during compilation" ON)
 option(USE_ASAN "Use Address+Undefined Sanitizers" OFF)
+option(USE_LSAN "Use Leak Sanitizer" OFF)
 option(USE_TSAN "Use Thread Sanitizer" OFF)
 option(USE_CUDA "Use CUDA" ON)
 option(USE_XPU "Use XPU" ON)
@@ -873,7 +874,7 @@ cmake_dependent_option(
   "Whether to build the flash_attention kernel for scaled dot product attention.\
   Will be disabled if not supported by the platform"
   ON
-  "USE_CUDA OR USE_ROCM;NOT MSVC"
+  "(USE_CUDA AND NOT MSVC) OR USE_ROCM"
   OFF)
 
 cmake_dependent_option(
@@ -889,9 +890,9 @@ IF(USE_FBGEMM_GENAI AND USE_ROCM AND NOT "gfx942" IN_LIST PYTORCH_ROCM_ARCH)
   set(USE_FBGEMM_GENAI off)
 endif()
 
-# Set USE_FBGEMM_GENAI to ON for CUDA build on SM100
-if(USE_CUDA AND "$ENV{TORCH_CUDA_ARCH_LIST}" MATCHES "10.0a")
-  message(WARNING "Setting USE_FBGEMM_GENAI to ON for CUDA build on SM100")
+# Set USE_FBGEMM_GENAI to ON for CUDA build on SM100.
+if(USE_CUDA AND "$ENV{TORCH_CUDA_ARCH_LIST}" MATCHES "10.0" AND CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL 12.8)
+  message(STATUS "Setting USE_FBGEMM_GENAI to ON, doing CUDA build for SM100a")
   set(USE_FBGEMM_GENAI ON)
 endif()
 
@@ -908,7 +909,7 @@ cmake_dependent_option(
 # USE_FLASH_ATTENTION -> USE_ROCM -> Dependencies.cmake -> aotriton.cmake
 #
 if(USE_ROCM)
-  if(UNIX AND (USE_FLASH_ATTENTION OR USE_MEM_EFF_ATTENTION))
+  if(USE_FLASH_ATTENTION OR USE_MEM_EFF_ATTENTION)
     include(cmake/External/aotriton.cmake)
   endif()
 endif()
