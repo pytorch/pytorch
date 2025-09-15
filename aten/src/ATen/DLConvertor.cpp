@@ -327,7 +327,7 @@ ScalarType toScalarType(const DLDataType& dtype) {
               false, "Unsupported kDLFloat8_e8m0fnu bits ", std::to_string(dtype.bits));
       }
       break;
-    case dtype.code = DLDataTypeCode::kDLFloat4_e2m1fn:
+    case DLDataTypeCode::kDLFloat4_e2m1fn:
       switch (dtype.bits) {
         case 4:
           stype = ScalarType::Float4_e2m1fn_x2;
