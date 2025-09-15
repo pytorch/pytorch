@@ -246,7 +246,7 @@ class EventList(list):
         header=None,
         top_level_events_only=False,
         time_unit=None,
-        show_func_name_map=False,
+        show_full_name=False,
     ):
         """Print an EventList as a nicely formatted table.
 
@@ -265,10 +265,9 @@ class EventList(list):
                 cpu/cuda/xpu ops events are omitted for profiler result readability.
             time_unit(str, optional): A time unit to be used for all values in the
                 table. Valid options are: ``s``, ``ms`` and ``us``.
-            show_func_name_map(bool, optional): Boolean flag to show the map of
-                the truncated show name and full name of functions. If the function name is
-                too long, it will be truncated. The map helps to find the full name.
-                The function names that are not truncated won't appear in the map.
+            show_full_name(bool, optional): Boolean flag to display the full name
+                of a function whose displayed name is truncated. It won't show anything
+                if the function's displayed name is not truncated.
         Returns:
             A string containing the table.
         """
@@ -284,7 +283,7 @@ class EventList(list):
             with_flops=self._with_flops,
             top_level_events_only=top_level_events_only,
             time_unit=time_unit,
-            show_func_name_map=show_func_name_map,
+            show_full_name=show_full_name,
         )
 
     def export_chrome_trace(self, path):
@@ -1046,13 +1045,13 @@ def _rewrite_name(name, with_wildcard=False):
             name = "ProfilerStep*"
     return name
 
-class _ShowName:
-    def __init__(self, max_name_column_width, show_func_name_map):
+class _DisplayName:
+    def __init__(self, max_name_column_width, show_full_name):
         self.max_name_column_width = max_name_column_width
-        self.show_func_name_map = show_func_name_map
-        self.show_name_map = (
+        self.show_full_name = show_full_name
+        self.display_name_map = (
             {}
-        )  # {name: {raw_show_name, index, show_name_with_index}}
+        )  # {name: {raw_display_name, index, display_name_with_index}}
 
     def truncate_name(self, name):
         if (
@@ -1063,55 +1062,40 @@ class _ShowName:
         else:
             return name
 
-    def create_show_name(self, name):
-        raw_show_name = self.truncate_name(name)
+    def create_display_name(self, name):
+        raw_display_name = self.truncate_name(name)
 
-        if not self.show_func_name_map:
-            return raw_show_name
+        if not self.show_full_name:
+            return raw_display_name
 
-        if raw_show_name != name:
-            if not self.show_name_map.get(name):
-                same_show_name_index_list = [
+        if raw_display_name != name:
+            if not self.display_name_map.get(name):
+                same_display_name_index_list = [
                     i[1]
-                    for i in self.show_name_map.values()
-                    if i[0] == raw_show_name
+                    for i in self.display_name_map.values()
+                    if i[0] == raw_display_name
                 ]
 
-                if len(same_show_name_index_list) == 0:
+                if len(same_display_name_index_list) == 0:
                     index = 0
-                    show_name = raw_show_name
+                    display_name = raw_display_name
                 else:
-                    same_show_name_index_list.sort()
-                    index = same_show_name_index_list[-1] + 1
-                    show_name = f"{raw_show_name[:-3]}~{index:02d}"
+                    same_display_name_index_list.sort()
+                    index = same_display_name_index_list[-1] + 1
+                    display_name = f"{raw_display_name[:-3]}~{index:02d}"
 
-                self.show_name_map[name] = (raw_show_name, index, show_name)
+                self.display_name_map[name] = (raw_display_name, index, display_name)
 
-            return self.show_name_map[name][2]
+            return self.display_name_map[name][2]
         else:
             return name
 
-    def get_map_as_str(self):
-        if len(self.show_name_map) == 0:
-            return ""
-
-        item = "Name"
-        separation_line = ["-" * self.max_name_column_width, "  ", "-" * 20, "\n"]
-
-        res = ["\n\nFunction Name Map:\n"]
-        res.extend(separation_line)
-        res.extend(
-            [f"{item:>{self.max_name_column_width}}", "  ", "Full Name", "\n"]
-        )
-        res.extend(separation_line)
-
-        for k, v in self.show_name_map.items():
-            res.extend([f"{v[2]:>{self.max_name_column_width}}", "  ", k, "\n"])
-
-        res.extend(separation_line)
-        res.extend(["\n"])
-
-        return "".join(res)
+    def get_full_name_by_display_name(self, display_name):
+        res = [k for k, v in self.display_name_map.items() if v[2] == display_name]
+        if len(res) == 0:
+            return display_name
+        else:
+            return res[0]
 
 def _build_table(
     events,
@@ -1125,7 +1109,7 @@ def _build_table(
     profile_memory=False,
     top_level_events_only=False,
     time_unit=None,
-    show_func_name_map=False,
+    show_full_name=False,
 ):
     """Print a summary of events (which can be a list of FunctionEvent or FunctionEventAvg)."""
     if len(events) == 0:
@@ -1287,6 +1271,16 @@ def _build_table(
         else:
             with_flops = False  # can't find any valid flops
 
+    if show_full_name:
+        if has_overload_names:
+            func_full_overload_name = "Full Overload Name"
+            headers.append(func_full_overload_name)
+            add_column(len(func_full_overload_name))
+
+        func_full_name = "Full Name"
+        headers.append(func_full_name)
+        add_column(len(func_full_name))
+
     row_format = row_format_lst[0]
     header_sep = header_sep_lst[0]
     line_length = line_length_lst[0]
@@ -1351,7 +1345,7 @@ def _build_table(
             return default_str
 
     event_limit = 0
-    show_name = _ShowName(max_name_column_width, show_func_name_map)
+    display_name = _DisplayName(max_name_column_width, show_full_name)
     for evt in events:
         if event_limit == row_limit:
             break
@@ -1359,8 +1353,8 @@ def _build_table(
             continue
         else:
             event_limit += 1
-        name = evt.key
-        name = show_name.create_show_name(name)
+        original_name = evt.key
+        name = display_name.create_display_name(original_name)
 
         evt.self_cpu_percent = _format_time_share(
             evt.self_cpu_time_total, sum_self_cpu_time_total
@@ -1373,8 +1367,8 @@ def _build_table(
 
         row_values = [name]
         if has_overload_names:
-            overload_name = evt.overload_name
-            overload_name = show_name.create_show_name(overload_name)
+            original_overload_name = evt.overload_name
+            overload_name = display_name.create_display_name(original_overload_name)
 
             row_values += [overload_name]
         row_values += [
@@ -1449,6 +1443,19 @@ def _build_table(
             if len(evt.stack) > 0:
                 src_field = trim_path(evt.stack[0], src_column_width)
             row_values.append(src_field)
+
+        if show_full_name:
+            if has_overload_names:
+                if original_overload_name != overload_name:
+                    row_values.append(original_overload_name)
+                else:
+                    row_values.append("")
+
+            if original_name != name:
+                row_values.append(original_name)
+            else:
+                row_values.append("")
+
         append(row_format.format(*row_values))
 
         if has_stack:
