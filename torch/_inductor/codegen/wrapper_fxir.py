@@ -63,6 +63,7 @@ from .wrapper import (
     PythonWrapperCodegen,
     ReinterpretLine,
     ReuseLine,
+    ScatterFallbackLine,
     SymbolicCallArg,
     SymbolicCallArgLine,
     WrapperLine,
@@ -652,6 +653,26 @@ class FxConverter:
         node = self.gm.graph.call_function(operator.getitem, args=(arg_node, idx))
         node.name = line.result_name
         self.buffer_to_node[line.result_name] = node
+
+    def _generate_scatter_fallback(self, line: WrapperLine) -> None:
+        assert isinstance(line, ScatterFallbackLine)
+        ir_node = line.node
+        assert ir.is_node_sequence(ir_node.inputs)
+        (x, index, src) = [self._generate_buffer(t) for t in ir_node.inputs] + (
+            [] if ir_node.src_is_tensor else [ir_node.constant_args[1]]
+        )
+        args = (x, ir_node.constant_args[0], index, src)
+        kwargs = {}
+        if reduce := ir_node.kwargs.get("reduce"):
+            kwargs["reduce"] = reduce
+
+        fx_node = self.gm.graph.call_function(
+            ir_node.op_overload,  # type: ignore[arg-type]
+            args=args,
+            kwargs=kwargs,
+        )
+        result_buffer = ir_node.codegen_reference()
+        self.buffer_to_node[result_buffer] = fx_node
 
     def _generate_null(self, line: WrapperLine) -> None:
         assert isinstance(line, NullLine)
