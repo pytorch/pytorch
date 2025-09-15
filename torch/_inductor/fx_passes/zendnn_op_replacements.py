@@ -18,6 +18,7 @@ from torch.fx.graph_module import GraphModule
 
 pass_pattern = PatternMatcherPass()
 aten = torch.ops.aten
+prims = torch.ops.prims
 
 
 # linear replacement
@@ -74,10 +75,12 @@ def is_placeholder(
     def fn(match: Match) -> bool:
         # get_attr is a corner case in export path
         if match.args[weight_idx].op not in ("placeholder", "get_attr"):
-            return False
+            if match.args[weight_idx].target != prims.convert_element_type.default:
+                return False
         if bias_idx is not None:
             if match.args[bias_idx].op not in ("placeholder", "get_attr"):
-                return False
+                if match.args[bias_idx].target != prims.convert_element_type.default:
+                    return False
             else:
                 return check_alpha_beta_bias(match)
         return True
