@@ -2852,7 +2852,7 @@ make_fallback(torch._prims.rng_prims.run_with_rng_state)
 make_fallback(torch._prims.rng_prims.graphsafe_run_with_rng_state)
 
 if torch._C.has_zendnn:  # type: ignore[attr-defined]
-    make_fallback(aten.zendnn_linear)
+    make_fallback(aten.zendnn_linear_unary)
     make_fallback(aten.zendnn_weight_prepack_for_linear)
     make_fallback(aten.zendnn_linear_unary_binary)
 

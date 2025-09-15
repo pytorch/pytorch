@@ -1,15 +1,18 @@
-# mypy: allow-untyped-defs
 import functools
+from typing import Any, Callable
 
 import torch
+from torch._dynamo.utils import counters
 from torch._inductor import config
 from torch._inductor.pattern_matcher import (
     Arg,
     CallFunction,
+    Match,
     PatternMatcherPass,
     register_graph_pattern,
     stable_topological_sort,
 )
+from torch.fx.graph_module import GraphModule
 
 from .zendnn_unary_post_op_fusions import (
     _silu_fusion,
@@ -17,15 +20,14 @@ from .zendnn_unary_post_op_fusions import (
     create_linear_compute_fn,
     create_pattern,
 )
-from .zendnn_utils import counters
 
 
 pass_pattern = PatternMatcherPass()
-at_ops = torch.ops.aten
+aten = torch.ops.aten
 
 
 # addmm replacement check
-def same_dtypes_check(match):
+def same_dtypes_check(match: Match) -> bool:
     if isinstance(match.args[0], torch.fx.node.Node):
         ref_dtype = match.args[0].meta["val"].dtype
     else:
@@ -38,7 +40,7 @@ def same_dtypes_check(match):
     return True
 
 
-def calc_strides(new_shape):
+def calc_strides(new_shape: list[int]) -> list[int]:
     # calculate stride from new_shape
     last_stride = 1
     new_stride: list[int] = []
@@ -48,8 +50,8 @@ def calc_strides(new_shape):
     return new_stride
 
 
-def binary_dim_check(idx):
-    def fn(match):
+def binary_dim_check(idx: int) -> Callable[[Match], bool]:
+    def fn(match: Match) -> bool:
         if isinstance(match.args[idx - 1], torch.fx.node.Node):
             s1 = match.args[idx].meta["val"].shape
             new_shape = s1[:-1] + (match.args[idx + 1].meta["val"].shape[0],)
@@ -65,7 +67,9 @@ def binary_dim_check(idx):
 
 
 # make an isometric patterns generator
-def unary_binary_patterns_generator(aten_op, unary_fusion):
+def unary_binary_patterns_generator(
+    aten_op: Any, unary_fusion: Any
+) -> list[CallFunction]:
     # we will return a list of patterns, order of elements is important
     return [
         CallFunction(aten_op, unary_fusion, Arg()),
@@ -75,18 +79,35 @@ def unary_binary_patterns_generator(aten_op, unary_fusion):
 
 # define registration functions
 def register_unary_binary_patterns(
-    unary_post_op_name, binary_post_op_name, pattern_lst, bias
-):
+    unary_post_op_name: str,
+    binary_post_op_name: str,
+    pattern_lst: list[CallFunction],
+    bias: bool,
+) -> None:
     """Register unary-binary fusion patterns along with replacements."""
     for i in range(len(pattern_lst)):
         # Create a unique function for each pattern
-        def create_replacement_fn_unary_binary(idx, unary_name, binary_name, has_bias):
+        def create_replacement_fn_unary_binary(
+            idx: int, unary_name: str, binary_name: str, has_bias: bool
+        ) -> Callable[..., Any]:
             if has_bias:
 
                 def replacement_fn(
-                    match, arg_0, arg_1, arg_2, arg_3, *, is_weight_prepacked
-                ):
-                    def repl(arg_0, arg_1, arg_2, arg_3, is_weight_prepacked):
+                    match: Match,
+                    arg_0: Any,
+                    arg_1: Any,
+                    arg_2: Any,
+                    arg_3: Any,
+                    *,
+                    is_weight_prepacked: Any,
+                ) -> None:
+                    def repl(
+                        arg_0: Any,
+                        arg_1: Any,
+                        arg_2: Any,
+                        arg_3: Any,
+                        is_weight_prepacked: Any,
+                    ) -> torch.Tensor:
                         if unary_name == "none":
                             counters["zendnn"]["zendnn_linear_" + binary_name] += 1
                             new_unary_name = "none"
@@ -102,7 +123,7 @@ def register_unary_binary_patterns(
                         # when i = 0 -> order is: mat_1, mat_2, bias, binary_op
                         # when i = 1 -> order is: binary_op, mat_1, mat_2, bias
                         if idx == 0:
-                            return at_ops.zendnn_linear_unary_binary(
+                            return aten.zendnn_linear_unary_binary(
                                 arg_0,
                                 arg_1,
                                 arg_3,
@@ -112,7 +133,7 @@ def register_unary_binary_patterns(
                                 post_op_2=binary_name,
                             )
                         else:
-                            return at_ops.zendnn_linear_unary_binary(
+                            return aten.zendnn_linear_unary_binary(
                                 arg_1,
                                 arg_2,
                                 arg_0,
@@ -132,8 +153,17 @@ def register_unary_binary_patterns(
                 return replacement_fn
             else:
 
-                def replacement_fn(match, arg_0, arg_1, arg_2, *, is_weight_prepacked):  # type: ignore[misc]
-                    def repl(arg_0, arg_1, arg_2, is_weight_prepacked):
+                def replacement_fn(  # type: ignore[misc]
+                    match: Match,
+                    arg_0: Any,
+                    arg_1: Any,
+                    arg_2: Any,
+                    *,
+                    is_weight_prepacked: Any,
+                ) -> None:
+                    def repl(
+                        arg_0: Any, arg_1: Any, arg_2: Any, is_weight_prepacked: Any
+                    ) -> torch.Tensor:
                         if unary_name == "none":
                             counters["zendnn"]["zendnn_linear_" + binary_name] += 1
                             new_unary_name = "none"
@@ -146,7 +176,7 @@ def register_unary_binary_patterns(
                                 "zendnn_linear_" + new_unary_name + "_" + binary_name
                             ] += 1
                         if idx == 0:
-                            return at_ops.zendnn_linear_unary_binary(
+                            return aten.zendnn_linear_unary_binary(
                                 arg_0,
                                 arg_1,
                                 arg_2,
@@ -155,7 +185,7 @@ def register_unary_binary_patterns(
                                 post_op_2=binary_name,
                             )
                         else:
-                            return at_ops.zendnn_linear_unary_binary(
+                            return aten.zendnn_linear_unary_binary(
                                 arg_1,
                                 arg_2,
                                 arg_0,
@@ -180,17 +210,18 @@ def register_unary_binary_patterns(
         )(replacement_func)
 
 
-binary_post_op_dict = {"add": at_ops.add, "mul": at_ops.mul}
+binary_post_op_dict: dict[str, Any] = {"add": aten.add, "mul": aten.mul}
 
 
-def register_unary_binary_fusions():
+@functools.cache
+def register_unary_binary_fusions() -> None:
     for bias in [True, False]:
         for unary_post_op in ["none", "silu"]:
             for binary_post_op, binary_post_op_fn in binary_post_op_dict.items():
                 if unary_post_op != "silu" or binary_post_op != "add":
                     if unary_post_op == "silu":
                         patterns_lst_no_decomp = unary_binary_patterns_generator(
-                            at_ops.mul,
+                            aten.mul,
                             _silu_fusion_no_decomp(create_linear_compute_fn(bias=bias)),
                         )
                         register_unary_binary_patterns(
@@ -199,7 +230,7 @@ def register_unary_binary_fusions():
                         for with_prims in [True, False]:
                             if with_prims:
                                 patterns_lst = unary_binary_patterns_generator(
-                                    at_ops.mul,
+                                    aten.mul,
                                     create_pattern(
                                         create_linear_compute_fn(bias=bias),
                                         _silu_fusion,
@@ -209,7 +240,7 @@ def register_unary_binary_fusions():
                                 )
                             else:
                                 patterns_lst = unary_binary_patterns_generator(
-                                    at_ops.mul,
+                                    aten.mul,
                                     create_pattern(
                                         create_linear_compute_fn(bias=bias, users=2),
                                         _silu_fusion,
@@ -228,9 +259,9 @@ def register_unary_binary_fusions():
                         )
 
 
-def zendnn_unary_binary_post_op_fusions(gm):
+def zendnn_unary_binary_post_op_fusions(gm: GraphModule) -> GraphModule:
     # register the patterns
-    register_unary_binary_fusions()
+    register_unary_binary_fusions()  # type: ignore[arg-type]
     GraphTransformObserver = functools.partial(
         torch.fx.passes.graph_transform_observer.GraphTransformObserver,
         subsystem="zendnn_unary_binary_post_op_fusions",

@@ -5,18 +5,20 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
-#include <ATen/ops/zendnn_linear_native.h>
 #include <ATen/ops/zendnn_linear_unary_binary_native.h>
+#include <ATen/ops/zendnn_linear_unary_native.h>
 #endif
+
 #if !AT_ZENDNN_ENABLED()
 namespace at::native {
-at::Tensor zendnn_linear(
+at::Tensor zendnn_linear_unary(
     const at::Tensor& input,
     const at::Tensor& weight,
     const std::optional<at::Tensor>& bias,
     bool is_weight_prepacked,
     std::string_view post_op) {
-  TORCH_CHECK(false, "zendnn_linear: ATen is not compiled with ZenDNN support");
+  TORCH_CHECK(
+      false, "zendnn_linear_unary: ATen is not compiled with ZenDNN support");
 }
 
 at::Tensor zendnn_linear_unary_binary(
@@ -33,7 +35,9 @@ at::Tensor zendnn_linear_unary_binary(
 }
 
 } // namespace at::native
+
 #else // !AT_ZENDNN_ENABLED()
+
 namespace at::native {
 using namespace zendnnl::interface;
 
@@ -115,7 +119,7 @@ inline void zendnn_linear_impl(
   matmul_operator.execute();
 }
 
-at::Tensor zendnn_linear(
+at::Tensor zendnn_linear_unary(
     const at::Tensor& input,
     const at::Tensor& weight,
     const std::optional<at::Tensor>& bias,
@@ -173,4 +177,5 @@ at::Tensor zendnn_linear_unary_binary(
   return result;
 }
 } // namespace at::native
+
 #endif // !AT_ZENDNN_ENABLED()

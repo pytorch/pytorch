@@ -1,29 +1,36 @@
-# mypy: allow-untyped-defs
 import functools
+from typing import Any, Callable
 
 import torch
+from torch._dynamo.utils import counters
 from torch._inductor import config
 from torch._inductor.pattern_matcher import (
     Arg,
     CallFunction,
     KeywordArg,
+    Match,
     PatternMatcherPass,
     register_graph_pattern,
     stable_topological_sort,
 )
+from torch.fx.graph_module import GraphModule
 
 from .mkldnn_fusion import _gelu_fusion_1, _gelu_fusion_2, _silu_fusion
-from .zendnn_utils import counters
 
 
 pass_pattern = PatternMatcherPass()
-at_ops = torch.ops.aten
+aten = torch.ops.aten
 prims = torch.ops.prims
 
 
 # helper function to create a generic pattern with linear call
 # supports prims and bias as well
-def create_pattern(compute_fn, unary_fusion, with_prims=False, users=1):
+def create_pattern(
+    compute_fn: CallFunction,
+    unary_fusion: Callable[[CallFunction], CallFunction],
+    with_prims: bool = False,
+    users: int = 1,
+) -> CallFunction:
     if with_prims:
         # linear->f32->unary->bf16
         upd_compute_fn = CallFunction(
@@ -47,12 +54,12 @@ def create_pattern(compute_fn, unary_fusion, with_prims=False, users=1):
 
 
 # creates the linear_compute_fn based on args and kwargs
-def create_linear_compute_fn(bias=False, users=1):
+def create_linear_compute_fn(bias: bool = False, users: int = 1) -> CallFunction:
     linear_args = [Arg(), Arg()]  # no bias by default
     if bias:
         linear_args.append(Arg())
     return CallFunction(
-        at_ops.zendnn_linear,
+        aten.zendnn_linear_unary,
         *linear_args,
         is_weight_prepacked=KeywordArg("is_weight_prepacked"),
         _users=users,
@@ -60,38 +67,38 @@ def create_linear_compute_fn(bias=False, users=1):
 
 
 # define a few other unary fusions
-def _relu_fusion(compute_fn):
-    return CallFunction(at_ops.relu, compute_fn)
+def _relu_fusion(compute_fn: CallFunction) -> CallFunction:
+    return CallFunction(aten.relu, compute_fn)
 
 
-def _silu_fusion_no_decomp(compute_fn):
-    return CallFunction(at_ops.silu, compute_fn)
+def _silu_fusion_no_decomp(compute_fn: CallFunction) -> CallFunction:
+    return CallFunction(aten.silu, compute_fn)
 
 
-def _tanh_fusion(compute_fn):
-    return CallFunction(at_ops.tanh, compute_fn)
+def _tanh_fusion(compute_fn: CallFunction) -> CallFunction:
+    return CallFunction(aten.tanh, compute_fn)
 
 
-def _sigmoid_fusion(compute_fn):
-    return CallFunction(at_ops.sigmoid, compute_fn)
+def _sigmoid_fusion(compute_fn: CallFunction) -> CallFunction:
+    return CallFunction(aten.sigmoid, compute_fn)
 
 
 # this is the non-decomposed version of gelu fusion
-def _gelu_fusion(compute_fn):
+def _gelu_fusion(compute_fn: CallFunction) -> CallFunction:
     return CallFunction(
-        at_ops.gelu,
+        aten.gelu,
         compute_fn,
         approximate=KeywordArg("approximate"),
     )
 
 
 # dummy extra check
-def dummy_extra_check(match):
+def dummy_extra_check(match: Match) -> bool:
     return True
 
 
 # gelu-erf extra check
-def gelu_erf_check(match):
+def gelu_erf_check(match: Match) -> bool:
     if (
         match.kwargs.get("approximate") == "none"
         or match.kwargs.get("approximate") is None
@@ -101,23 +108,32 @@ def gelu_erf_check(match):
 
 
 # gelu-tanh extra check
-def gelu_tanh_check(match):
+def gelu_tanh_check(match: Match) -> bool:
     if match.kwargs.get("approximate") == "tanh":
         return True
     return False
 
 
 # we need a generic registration function
-def register_patterns(post_op_name, pattern, bias, extra_check=dummy_extra_check):
+def register_patterns(
+    post_op_name: str,
+    pattern: CallFunction,
+    bias: bool,
+    extra_check: Callable[[Any], bool] = dummy_extra_check,
+) -> None:
     if bias:
 
         @register_graph_pattern(
             pattern, pass_dict=pass_pattern, extra_check=extra_check
         )
-        def replacement_fn(match, mat_1, mat_2, bias, *, is_weight_prepacked):
-            def repl(mat_1, mat_2, bias, is_weight_prepacked):
+        def replacement_fn(
+            match: Match, mat_1: Any, mat_2: Any, bias: Any, *, is_weight_prepacked: Any
+        ) -> None:
+            def repl(
+                mat_1: Any, mat_2: Any, bias: Any, is_weight_prepacked: Any
+            ) -> torch.Tensor:
                 counters["zendnn"]["zendnn_linear_" + post_op_name] += 1
-                return at_ops.zendnn_linear(
+                return aten.zendnn_linear_unary(
                     mat_1,
                     mat_2,
                     bias,
@@ -131,10 +147,12 @@ def register_patterns(post_op_name, pattern, bias, extra_check=dummy_extra_check
         @register_graph_pattern(
             pattern, pass_dict=pass_pattern, extra_check=extra_check
         )
-        def replacement_fn(match, mat_1, mat_2, *, is_weight_prepacked):
-            def repl(mat_1, mat_2, is_weight_prepacked):
+        def replacement_fn(
+            match: Match, mat_1: Any, mat_2: Any, *, is_weight_prepacked: Any
+        ) -> None:
+            def repl(mat_1: Any, mat_2: Any, is_weight_prepacked: Any) -> torch.Tensor:
                 counters["zendnn"]["zendnn_linear_" + post_op_name] += 1
-                return at_ops.zendnn_linear(
+                return aten.zendnn_linear_unary(
                     mat_1,
                     mat_2,
                     is_weight_prepacked=is_weight_prepacked,
@@ -144,10 +162,24 @@ def register_patterns(post_op_name, pattern, bias, extra_check=dummy_extra_check
             match.replace_by_example(repl, [mat_1, mat_2, is_weight_prepacked])
 
 
+# create a map to pass to unary_fusions_generator
+fusions_mapper = {
+    "gelu_erf": (_gelu_fusion_1, 2),
+    "gelu_tanh": (_gelu_fusion_2, 4),
+    "relu": (_relu_fusion, 1),
+    "sigmoid": (_sigmoid_fusion, 1),
+    "silu": (_silu_fusion, 2),
+    "tanh": (_tanh_fusion, 1),
+    "silu-no-decomp": (_silu_fusion_no_decomp, 1),
+    "gelu-no-decomp": (_gelu_fusion, 1),
+}
+
+
 # function which creates and registers the patterns
-def register_unary_fusions(mapper):
+@functools.cache
+def register_unary_fusions() -> None:
     for bias in [True, False]:
-        for post_op, (fusion, users) in mapper.items():
+        for post_op, (fusion, users) in fusions_mapper.items():
             if post_op in ("gelu_erf", "gelu_tanh", "silu"):
                 # we will create and register prims patterns with these as well since
                 # convert_element nodes appear in the graph for lower precision (bf16)
@@ -176,22 +208,9 @@ def register_unary_fusions(mapper):
             register_patterns(post_op, pattern, bias)
 
 
-# create a map to pass to unary_fusions_generator
-fusions_mapper = {
-    "gelu_erf": (_gelu_fusion_1, 2),
-    "gelu_tanh": (_gelu_fusion_2, 4),
-    "relu": (_relu_fusion, 1),
-    "sigmoid": (_sigmoid_fusion, 1),
-    "silu": (_silu_fusion, 2),
-    "tanh": (_tanh_fusion, 1),
-    "silu-no-decomp": (_silu_fusion_no_decomp, 1),
-    "gelu-no-decomp": (_gelu_fusion, 1),
-}
-
-
-def zendnn_unary_post_op_fusions(gm):
+def zendnn_unary_post_op_fusions(gm: GraphModule) -> GraphModule:
     # call register first
-    register_unary_fusions(fusions_mapper)
+    register_unary_fusions()  # type: ignore[arg-type]
     GraphTransformObserver = functools.partial(
         torch.fx.passes.graph_transform_observer.GraphTransformObserver,
         subsystem="zendnn_unary_post_op_fusions",

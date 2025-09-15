@@ -127,11 +127,11 @@ inline void check_tensor_dtypes_for_linear(
       (!bias.defined() || is_bf16(bias));
   TORCH_CHECK(
       all_fp32 ^ all_bf16,
-      "All tensors must have consistent dtype and zendnn_linear only supports Float and BFloat16");
+      "All tensors must have consistent dtype and zendnn linear only supports Float and BFloat16");
   if (all_bf16) {
     TORCH_CHECK(
         zendnn_bf16_device_check(),
-        "zendnn_linear bf16 path needs cpu support avx512bf16");
+        "zendnn linear bf16 path needs cpu support avx512bf16");
   }
   for (const at::Tensor& buffer : post_op_buffers) {
     if (buffer.defined()) {
