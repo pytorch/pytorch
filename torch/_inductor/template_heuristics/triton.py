@@ -1673,7 +1673,7 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
             kernel_inputs,
             op_name,
         ):
-            # Some Triton veresions requires num_warps >= 4 for WS
+            # Some Triton versions requires num_warps >= 4 for WS
             # to avoid compilation issues. Triton disables WS if num_warps < 4
             # or num_stages < 2. Similar issues have been seen with num_stages=1
             ws = (
