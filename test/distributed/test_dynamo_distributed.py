@@ -680,6 +680,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
 
     @skip_if_lt_x_gpu(2)
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(TEST_XPU, "torch._inductor.cudagraph_trees is not supported on XPU")
     def test_ddp_optimizer_cudagraph(self):
         class Net(nn.Module):
             def __init__(self):
@@ -1196,6 +1197,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             pg = dist.distributed_c10d.GroupMember.NON_GROUP_MEMBER
             self.assertEqual(f(x), x + 1)
 
+    @skipIfXpu  # ProcessGroupXCCL hasn't support _set_default_timeout yet.
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @patch.object(torch._inductor.config, "fx_graph_cache", False)
     @patch.object(torch._inductor.config, "fx_graph_remote_cache", False)
@@ -1247,6 +1249,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             for r in res[1:]:
                 self.assertEqual(res[0], r)
 
+    @skipIfXpu  # ProcessGroupXCCL hasn't support _set_default_timeout yet.
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @patch.object(torch._inductor.config, "fx_graph_cache", True)
     @patch.object(torch._inductor.config, "fx_graph_remote_cache", False)
