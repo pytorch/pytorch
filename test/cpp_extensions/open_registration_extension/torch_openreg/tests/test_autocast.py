@@ -21,7 +21,7 @@ class TestAutocast(TestCase):
             result = torch.mm(x, y)
             self.assertEqual(result.dtype, torch.float16)
 
-    def test_openreg_autocast_float32_supported(self):
+    def test_autocast_fp32(self):
         with torch.amp.autocast(device_type="openreg"):
             x = torch.randn(2, device="openreg", dtype=torch.float16)
             y = torch.randn(2, device="openreg", dtype=torch.float16)
