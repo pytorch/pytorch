@@ -37,7 +37,7 @@ from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
 from torch.testing._internal.distributed.fake_pg import FakeStore
 from torch.testing._internal.inductor_utils import HAS_GPU
 
-
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 def load_test_module(name):
     import sys
     from importlib.machinery import SourceFileLoader
@@ -61,7 +61,6 @@ if not dist.is_available():
     sys.exit(0)
 
 
-@requires_nccl()
 class TestWithNCCL(MultiProcessTestCase):
     def setUp(self) -> None:
         super().setUp()
@@ -77,13 +76,14 @@ class TestWithNCCL(MultiProcessTestCase):
 
     @property
     def device(self) -> torch.device:
-        return torch.device(f"cuda:{self.rank}")
+        return torch.device(f"{device_type}:{self.rank}")
 
     def _init_process_group(self) -> None:
-        torch.cuda.set_device(self.device)
+        torch.accelerator.set_device_index(self.device)
         store = dist.FileStore(self.file_name, self.world_size)
+        backend = "xccl" if TEST_XPU else "nccl"
         dist.init_process_group(
-            backend="nccl",
+            backend=backend,
             world_size=self.world_size,
             rank=self.rank,
             store=store,
@@ -275,7 +275,7 @@ class TestWithNCCL(MultiProcessTestCase):
         )
         # check memory leak
         for i in range(1, 10):
-            mem_usage[i] = torch.cuda.max_memory_allocated()
+            mem_usage[i] = torch.accelerator.max_memory_allocated()
             compiled(arg)
 
         assert mem_usage[9] == mem_usage[8]
@@ -372,14 +372,14 @@ class TestWithNCCL(MultiProcessTestCase):
     @skip_if_lt_x_gpu(2)
     def test_all_to_all_single(self) -> None:
         self._init_process_group()
-        torch.cuda.set_device(self.device)
+        torch.accelerator.set_device_index(self.device)
 
         torch.manual_seed(42)
         send_sz_matrix = torch.randint(0, 20, (self.world_size, self.world_size))
 
         input_split_sizes = send_sz_matrix[self.rank].tolist()
         output_split_sizes = send_sz_matrix[:, self.rank].tolist()
-        input = torch.full((sum(input_split_sizes),), float(self.rank)).cuda()
+        input = torch.full((sum(input_split_sizes),), float(self.rank)).to(device_type)
 
         output = torch.ops._c10d_functional.all_to_all_single(
             input,
@@ -390,7 +390,7 @@ class TestWithNCCL(MultiProcessTestCase):
         output = torch.ops._c10d_functional.wait_tensor(output)
         expect = torch.cat(
             [
-                torch.full((sz,), float(rank)).cuda()
+                torch.full((sz,), float(rank)).to(device_type)
                 for rank, sz in enumerate(output_split_sizes)
             ]
         )
@@ -466,7 +466,7 @@ class TestWithNCCL(MultiProcessTestCase):
     @fresh_cache()
     def test_threading(self):
         self._init_process_group()
-        device = torch.device(f"cuda:{self.rank}")
+        device = torch.device(f"{device_type}:{self.rank}")
 
         def func(arg: torch.Tensor) -> torch.Tensor:
             buf0 = arg + 42
@@ -548,9 +548,9 @@ class TestWithNCCL(MultiProcessTestCase):
             return in_grad, w_grad
 
         m, n, k = 128, 256, 64
-        in_ = torch.randn((m, k), device="cuda", dtype=torch.bfloat16)
-        w = torch.randn((n, k), device="cuda", dtype=torch.bfloat16)
-        out_grad = torch.randn((m, n), device="cuda", dtype=torch.bfloat16)
+        in_ = torch.randn((m, k), device=device_type, dtype=torch.bfloat16)
+        w = torch.randn((n, k), device=device_type, dtype=torch.bfloat16)
+        out_grad = torch.randn((m, n), device=device_type, dtype=torch.bfloat16)
 
         eager_in_grad, eager_w_grad = fp8_rowwise_backward(in_, w, out_grad)
         compile_in_grad, compile_w_grad = torch.compile(fp8_rowwise_backward)(
@@ -838,7 +838,7 @@ class CompileTest(TestCase):
 
         # Test aoti
         AOTIRunnerUtil.run(func, (arg,))
-        torch.cuda.synchronize()
+        torch.accelerator.synchronize()
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_cache()
@@ -883,7 +883,7 @@ class CompileTest(TestCase):
 
         # Test aoti
         out = AOTIRunnerUtil.run(func, (args,))  # noqa: F841
-        torch.cuda.synchronize()
+        torch.accelerator.synchronize()
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_cache()
@@ -997,7 +997,7 @@ class CompileTest(TestCase):
 
         # Test aoti
         AOTIRunnerUtil.run(func, (arg,))
-        torch.cuda.synchronize()
+        torch.accelerator.synchronize()
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_cache()
@@ -1031,7 +1031,7 @@ class CompileTest(TestCase):
 
         # Test aoti
         out = AOTIRunnerUtil.run(func, (args,))  # noqa: F841
-        torch.cuda.synchronize()
+        torch.accelerator.synchronize()
 
     @unittest.skipIf(not HAS_GPU, "This is a GPU test!")
     @fresh_cache()
@@ -1053,7 +1053,7 @@ class CompileTest(TestCase):
 
         # Test aoti
         AOTIRunnerUtil.run(func, (arg,))
-        torch.cuda.synchronize()
+        torch.accelerator.synchronize()
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_cache()
@@ -1079,7 +1079,7 @@ class CompileTest(TestCase):
 
         # Test aoti
         AOTIRunnerUtil.run(func, (arg,))
-        torch.cuda.synchronize()
+        torch.accelerator.synchronize()
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_cache()
@@ -1115,7 +1115,7 @@ class CompileTest(TestCase):
 
         # Test aoti
         AOTIRunnerUtil.run(func, (args,))
-        torch.cuda.synchronize()
+        torch.accelerator.synchronize()
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_cache()
@@ -1144,7 +1144,7 @@ class CompileTest(TestCase):
 
         input_split_sizes = send_sz_matrix[self.rank]
         output_split_sizes = send_sz_matrix[:, self.rank].contiguous()
-        input = torch.full((input_split_sizes.sum().item(),), float(self.rank)).cuda()
+        input = torch.full((input_split_sizes.sum().item(),), float(self.rank)).to(device_module)
 
         with torch._dynamo.config.patch(
             dynamic_shapes=True,
@@ -1201,7 +1201,7 @@ class CompileTest(TestCase):
 
         # Test aoti
         AOTIRunnerUtil.run(func, (arg,))
-        torch.cuda.synchronize()
+        torch.accelerator.synchronize()
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_cache()
