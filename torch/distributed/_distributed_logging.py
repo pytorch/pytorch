@@ -46,11 +46,13 @@ def _create_distributed_safe_warn():
         if msg_key in _distributed_logging_state.warned_messages:
             return
             
+        # Add to cache immediately to prevent duplicates
+        _distributed_logging_state.warned_messages.add(msg_key)
+            
         # Only warn on rank 0 in distributed mode
         if not _distributed_logging_state.is_rank_zero_or_non_distributed():
             return
             
-        _distributed_logging_state.warned_messages.add(msg_key)
         return original_warn(message, category, stacklevel + 1, source)
     
     return distributed_warn
@@ -218,14 +220,10 @@ def force_log_on_all_ranks(message: str, level: int = logging.INFO):
                                            torch.distributed.is_initialized()) else 0
     prefixed_message = f"[Rank {rank}] {message}"
     
-    # Temporarily bypass our patches
-    if _distributed_logging_state.original_warn:
-        # Use original logging if available
-        original_logging_info = _distributed_logging_state.original_logger_methods.get('info', logging.info)
-        original_logging_info(prefixed_message)
-    else:
-        # Fallback to print if logging is heavily patched
-        print(prefixed_message)
+    # Always use print to ensure it goes to stdout and is captured by tests
+    # Use original print if available to bypass any print patches
+    print_func = _distributed_logging_state.original_print or print
+    print_func(prefixed_message)
 
 
 def distributed_print(*args, rank_prefix: bool = True, **kwargs):
