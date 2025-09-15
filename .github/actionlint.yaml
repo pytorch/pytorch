@@ -21,6 +21,7 @@ self-hosted-runner:
     - linux.arm64.2xlarge.ephemeral
     - linux.arm64.m7g.4xlarge
     - linux.arm64.m7g.4xlarge.ephemeral
+    - linux.arm64.r7g.12xlarge.memory
     - linux.4xlarge.nvidia.gpu
     - linux.8xlarge.nvidia.gpu
     - linux.16xlarge.nvidia.gpu
