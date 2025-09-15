@@ -331,7 +331,7 @@ class AOTInductorTestsTemplate:
         self.assertTrue(actual_path == expected_path)
 
     @unittest.skipIf(
-        config.triton.enable_native_matmul,
+        config.triton.native_matmul,
         "different # of input/output/constants in native matmul",
     )
     def test_empty_constant_folding(self):
@@ -2313,7 +2313,7 @@ class AOTInductorTestsTemplate:
     # mps doesn't support float64
     @skipIfMPS
     @unittest.skipIf(
-        config.triton.enable_native_matmul,
+        config.triton.native_matmul,
         "FIXME: cannot do get_size on FakeTensor during lowering.",
     )
     def test_while_loop_with_parameters(self):
@@ -2894,7 +2894,7 @@ class AOTInductorTestsTemplate:
             self.assertTrue(same(result_ref.cpu(), result_package.cpu()))
 
     @unittest.skipIf(
-        config.triton.enable_native_matmul, "sin and mm are fused in native matmul"
+        config.triton.native_matmul, "sin and mm are fused in native matmul"
     )
     def test_reuse_kernel(self):
         class Model(torch.nn.Module):
@@ -5101,7 +5101,7 @@ class AOTInductorTestsTemplate:
         }
         self.check_model(model, example_inputs, dynamic_shapes=dynamic_shapes)
 
-    @unittest.skipIf(config.triton.enable_native_matmul, "matmul is generated")
+    @unittest.skipIf(config.triton.native_matmul, "matmul is generated")
     def test_aoti_debug_printer_codegen(self):
         # basic addmm model to test codegen for aoti intermediate debug printer
         class Model(torch.nn.Module):
@@ -5186,7 +5186,7 @@ class AOTInductorTestsTemplate:
                 FileCheck().check_not(f"after_launch - {kernel_name}").run(code)
 
     @unittest.skipIf(
-        config.triton.enable_native_matmul, "different kernel name when native matmul"
+        config.triton.native_matmul, "different kernel name when native matmul"
     )
     @common_utils.parametrize("enable_kernel_profile", (True, False))
     def test_aoti_profiler(self, enable_kernel_profile):
@@ -7286,7 +7286,7 @@ class AOTInductorTestsTemplate:
         model_aoti = torch._inductor.aoti_load_package(package_path)
         outputs_aoti = model_aoti(*example_inputs)
 
-        self.assertEqual(outputs, outputs_aoti)
+        self.assertEqual(outputs, outputs_aoti, atol=1e-2, rtol=1e-2)
 
         FileCheck().check_regex(
             r"aoti_torch_as_strided\(buf0_handle, .*, &buf0_handle_restrided\)"

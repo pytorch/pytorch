@@ -20,7 +20,7 @@ aten = torch.ops.aten
 
 
 @inductor_config.patch(
-    {"triton.enable_native_matmul": True}
+    {"triton.native_matmul": True}
 )
 class TestTritonDotReduction(TestCase):
     def _check_equal(

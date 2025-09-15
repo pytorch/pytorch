@@ -1102,7 +1102,7 @@ class TestMaxAutotune(TestCase):
             out, code = run_and_get_code(m_c, x)
             self.assertEqual(out, mod(x), atol=2e-3, rtol=2e-3)
 
-            if not config.triton.enable_native_matmul:
+            if not config.triton.native_matmul:
                 FileCheck().check("triton_tem_fused_baddbmm").run(code[0])
 
     @config.patch(max_autotune=True)
@@ -1145,7 +1145,7 @@ class TestMaxAutotune(TestCase):
         self.assertEqual(f_c(*inps), f(*inps), atol=0.03, rtol=0.25)
 
         # mm kernel, and cos kernel
-        count = 2 if (using_triton_mm or config.triton.enable_native_matmul) else 1
+        count = 2 if (using_triton_mm or config.triton.native_matmul) else 1
         FileCheck().check(get_func_call()).check_count(
             get_kernel_launch(), count, exactly=True
         ).run(code[0])
@@ -1173,7 +1173,7 @@ class TestMaxAutotune(TestCase):
 
     @config.patch("trace.enabled", True)
     @config.patch({"test_configs.force_extern_kernel_in_multi_template": True})
-    @config.patch("triton.enable_native_matmul", False)
+    @config.patch("triton.native_matmul", False)
     def test_mutation_rename(self):
         torch._logging.set_logs(ir_post_fusion=True)
 
@@ -1349,7 +1349,7 @@ class TestMaxAutotune(TestCase):
     # and enable this test case.
     @skipIfXpu
     @unittest.skipIf(
-        config.triton.enable_native_matmul,
+        config.triton.native_matmul,
         "native matmul and Triton template both have accuracy fail (2.2%)",
     )
     def test_non_contiguous_input_mm_plus_mm(self):
@@ -1372,7 +1372,7 @@ class TestMaxAutotune(TestCase):
         max_autotune_gemm_backends="",
     )
     @unittest.skipIf(
-        config.triton.enable_native_matmul, "native matmul generates when size >=2"
+        config.triton.native_matmul, "native matmul generates when size >=2"
     )
     def test_no_valid_choices(self):
         a = torch.zeros([2, 2], device=GPU_TYPE)
@@ -1382,7 +1382,7 @@ class TestMaxAutotune(TestCase):
         self.assertIn("NoValidChoicesError", str(context.exception))
 
     @unittest.skipIf(
-        config.triton.enable_native_matmul, "Only test when template is being called"
+        config.triton.native_matmul, "Only test when template is being called"
     )
     @parametrize("multi_template", (True, False))
     @config.patch(
@@ -1456,7 +1456,7 @@ class TestMaxAutotune(TestCase):
         config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
     )
     @unittest.skipIf(
-        config.triton.enable_native_matmul,
+        config.triton.native_matmul,
         "ignore decompose_k when native matmul codegen",
     )
     @parametrize("dynamic", (True, False))
@@ -1569,7 +1569,7 @@ class TestMaxAutotune(TestCase):
         config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
     )
     @unittest.skipIf(
-        config.triton.enable_native_matmul,
+        config.triton.native_matmul,
         "ignore decompose_k when native matmul codegen",
     )
     @config.patch(
@@ -1618,7 +1618,7 @@ class TestMaxAutotune(TestCase):
         config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
     )
     @unittest.skipIf(
-        config.triton.enable_native_matmul,
+        config.triton.native_matmul,
         "ignore decompose_k when native matmul codegen",
     )
     @config.patch(
@@ -1669,7 +1669,7 @@ class TestMaxAutotune(TestCase):
         config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
     )
     @unittest.skipIf(
-        config.triton.enable_native_matmul,
+        config.triton.native_matmul,
         "ignore decompose_k when native matmul codegen",
     )
     @config.patch(
@@ -1931,7 +1931,7 @@ class TestMaxAutotune(TestCase):
         }
     )
     @unittest.skipIf(
-        config.triton.enable_native_matmul, "only test on template-based matmul"
+        config.triton.native_matmul, "only test on template-based matmul"
     )
     def test_triton_template_generated_code_cache_strategy(self):
         def func_test1(x, y, z, m):
@@ -1960,7 +1960,7 @@ class TestMaxAutotune(TestCase):
         }
     )
     @unittest.skipIf(
-        config.triton.enable_native_matmul, "only test on template-based matmul"
+        config.triton.native_matmul, "only test on template-based matmul"
     )
     def test_triton_template_generated_code_caching(self):
         def reset_counters():
@@ -2147,7 +2147,7 @@ class TestMaxAutotune(TestCase):
         }
     )
     @unittest.skipIf(
-        config.triton.enable_native_matmul, "only test on template-based matmul"
+        config.triton.native_matmul, "only test on template-based matmul"
     )
     def test_triton_template_generated_code_caching_bmm(self):
         def func_test1(x, y, z, m):
@@ -2185,7 +2185,7 @@ class TestMaxAutotune(TestCase):
         }
     )
     @unittest.skipIf(
-        config.triton.enable_native_matmul, "only test on template-based matmul"
+        config.triton.native_matmul, "only test on template-based matmul"
     )
     def test_triton_template_generated_code_caching_mm_plus_mm(self):
         def func_test1(x, y, z, m):
@@ -2227,7 +2227,7 @@ class TestMaxAutotune(TestCase):
         config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
     )
     @unittest.skipIf(
-        config.triton.enable_native_matmul,
+        config.triton.native_matmul,
         "ignore decompose_k when native matmul codegen",
     )
     @config.patch(
@@ -2276,7 +2276,7 @@ class TestMaxAutotune(TestCase):
         TEST_WITH_ROCM, "exhaustive currently only thoroughly tested on NVIDIA"
     )
     @unittest.skipIf(
-        config.triton.enable_native_matmul,
+        config.triton.native_matmul,
         "native matmul takes different tuning configs",
     )
     @config.patch(max_autotune=True, max_autotune_gemm_search_space="EXHAUSTIVE")
@@ -2352,7 +2352,11 @@ class TestMaxAutotune(TestCase):
     @parametrize("op", ("mm", "addmm", "bmm", "baddbmm", "mm_plus_mm"))
     @parametrize("max_autotune", (False, True))
     @config.patch(
-        {"test_configs.max_mm_configs": 4, "max_autotune_gemm_backends": "ATEN,TRITON"}
+        {
+            "test_configs.max_mm_configs": 4, 
+            "max_autotune_gemm_backends": "ATEN,TRITON",
+            "triton.native_matmul": False,
+        }
     )
     def test_autotune_gemm_choice_validation(self, op, max_autotune):
         def generate_inputs_and_func(op_name):
@@ -2546,7 +2550,7 @@ class TestMaxAutotunePrecompile(TestCase):
 
     @config.patch(autotune_local_cache=False, autotune_remote_cache=False)
     @runOnRocmArch(MI300_ARCH)
-    @unittest.skipIf(config.triton.enable_native_matmul, "native matmul has counter 0")
+    @unittest.skipIf(config.triton.native_matmul, "native matmul has counter 0")
     def test_precompilations(self):
         def fn(a, b, c):
             a = (a @ b) @ c
@@ -3070,7 +3074,7 @@ class TestTuningProcessPool(TestCase):
             {
                 "max_autotune": True,
                 "max_autotune_gemm_backends": "TRITON",
-                "triton.enable_native_matmul": False,
+                "triton.native_matmul": False,
             }
         ):
             torch.compile(mm)(a, b)
@@ -3147,7 +3151,7 @@ class TestPrologueFusion(TestCase):
         out, code = run_and_get_code(torch.compile(foo), x, y)
         self.assertEqual(out, foo(x, y), atol=0.05, rtol=0.05)
         self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=2)
-        if config.triton.enable_native_matmul:
+        if config.triton.native_matmul:
             # native matmul preserves zero mask - need to optimize; see codegen/triton.py
             FileCheck().check("a =").check("tl.where").check("tl.dot").run(code[0])
         else:
@@ -3183,7 +3187,7 @@ class TestPrologueFusion(TestCase):
         not PLATFORM_SUPPORTS_FP8,
         "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
     )
-    @config.patch({"triton.enable_native_matmul": False})
+    @config.patch({"triton.native_matmul": False})
     def test_low_precision(self):
         M = K = N = 128
 
@@ -3216,7 +3220,7 @@ class TestPrologueFusion(TestCase):
         self.check_code(code[0], num_kernels=2, num_allocs=2, num_deallocs=3)
 
     @unittest.skipIf(
-        config.triton.enable_native_matmul,
+        config.triton.native_matmul,
         "generated code is different in native matmul",
     )
     def test_downcast(self):
@@ -3234,7 +3238,7 @@ class TestPrologueFusion(TestCase):
 
     @parametrize("sizes", ((64, 128, 256), (64, 64, 64), (64, 120, 64)))
     @unittest.skipIf(
-        config.triton.enable_native_matmul,
+        config.triton.native_matmul,
         "generated code is different in native matmul",
     )
     def test_multiple_fusions(self, sizes):
@@ -3343,7 +3347,7 @@ class TestPrologueFusion(TestCase):
     @config.patch(realize_reads_threshold=1, realize_opcount_threshold=1)
     @parametrize("sizes", ((64, 128, 256), (128, 128, 128), (63, 120, 250)))
     @unittest.skipIf(
-        config.triton.enable_native_matmul,
+        config.triton.native_matmul,
         "generated code is different in native matmul",
     )
     def test_prologue_multiple_nodes(self, sizes):
@@ -3386,7 +3390,7 @@ class TestPrologueFusion(TestCase):
         self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=2)
 
     @unittest.skipIf(
-        config.triton.enable_native_matmul,
+        config.triton.native_matmul,
         "generated code is different in native matmul",
     )
     def test_preserves_zero_analysis(self):
@@ -3442,7 +3446,7 @@ class TestPrologueFusion(TestCase):
     @config.patch(realize_reads_threshold=1, realize_opcount_threshold=1)
     @config.patch(allow_buffer_reuse=False)
     @unittest.skipIf(
-        config.triton.enable_native_matmul,
+        config.triton.native_matmul,
         "generated code is different in native matmul",
     )
     def test_mismatched_prologue_group(self):
@@ -3467,7 +3471,7 @@ class TestPrologueFusion(TestCase):
     @config.patch(force_shape_pad=True)
     @parametrize("sizes", ((250, 245, 128), (250, 256, 128), (256, 128, 62)))
     @unittest.skipIf(
-        config.triton.enable_native_matmul,
+        config.triton.native_matmul,
         "generated code is different in native matmul",
     )
     def test_prologue_masked_load(self, sizes):

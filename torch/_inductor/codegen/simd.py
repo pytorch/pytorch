@@ -421,7 +421,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                 if isinstance(node.node, ir.ComputedBuffer):
                     if (
                         node.node.get_reduction_type() == "dot"
-                        and config.triton.enable_native_matmul
+                        and config.triton.native_matmul
                     ):
                         self.is_native_matmul = True
 
@@ -2601,7 +2601,7 @@ class SIMDScheduling(BaseScheduling):
             if isinstance(node.node, ir.ComputedBuffer):
                 if (
                     node.node.get_reduction_type() == "dot"
-                    and config.triton.enable_native_matmul
+                    and config.triton.native_matmul
                 ):
                     # A[M,K] @ B[K,N]
                     # force tiling to be {'y':M, 'x':N, 'r0_':K}

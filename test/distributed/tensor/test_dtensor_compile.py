@@ -960,7 +960,7 @@ def forward(self, primals_1):
         out_dt.sum().backward()
 
     @unittest.skipIf(
-        torch._inductor.config.triton.enable_native_matmul, "Matmul is now generated"
+        torch._inductor.config.triton.native_matmul, "Matmul is now generated"
     )
     def _test_tp_compile_comm_reordering(self):
         class FakeAttention(nn.Module):

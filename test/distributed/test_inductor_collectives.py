@@ -1890,7 +1890,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
         # NOTE: The first return value should be the output of the first wait_tensor.
         # We want to make sure no unnecessary copy is made.
-        if not torch._inductor.config.triton.enable_native_matmul:
+        if not torch._inductor.config.triton.native_matmul:
             (
                 FileCheck()
                 .check_count(

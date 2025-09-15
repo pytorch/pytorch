@@ -185,7 +185,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
             )
         )
 
-    if config.triton.enable_native_matmul:
+    if config.triton.native_matmul:
         GraphTransformObserver(gm, "native_matmul_pass").apply_graph_pass(
             native_matmul_pass
         )
@@ -768,7 +768,7 @@ def is_valid_mm_plus_mm(match: Match):
     if m1 != m2 or n1 != n2:
         return False
 
-    if config.triton.enable_native_matmul:
+    if config.triton.native_matmul:
         shapes = [m1, m2, k1, k2, k3, k4, n1, n2]
         # if shape is unbacked symint, skip
         if any(map(has_free_unbacked_symbols, shapes)):
@@ -1556,7 +1556,7 @@ def native_matmul_pass(graph: torch.fx.Graph):
         mat1 = match.kwargs["mat1"].meta["val"]
         mat2 = match.kwargs["mat2"].meta["val"]
 
-        if not config.triton.enable_native_matmul:
+        if not config.triton.native_matmul:
             return False
 
         # If tma matmul is on, don't do native matmul
