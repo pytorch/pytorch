@@ -12,8 +12,10 @@
 namespace c10 {
 
 #if __has_include(<filesystem>)
+// NOLINTNEXTLINE(misc-unused-alias-decls)
 namespace filesystem = std::filesystem;
 #elif __has_include(<experimental/filesystem>)
+// NOLINTNEXTLINE(misc-unused-alias-decls)
 namespace filesystem = std::experimental::filesystem;
 #endif
 
