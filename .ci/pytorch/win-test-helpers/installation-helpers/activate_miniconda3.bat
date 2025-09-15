@@ -5,6 +5,7 @@ if "%BUILD_ENVIRONMENT%"=="" (
 )
 set CONDA_ROOT_DIR=%CONDA_PARENT_DIR%\Miniconda3
 
+echo "CD is %CD%"
 
 :: Be conservative here when rolling out the new AMI with conda. This will try
 :: to install conda as before if it couldn't find the conda installation. This
@@ -12,6 +13,8 @@ set CONDA_ROOT_DIR=%CONDA_PARENT_DIR%\Miniconda3
 if not exist %CONDA_ROOT_DIR% (
   set INSTALL_FRESH_CONDA=1
 )
+
+echo "Install fresh conda is %INSTALL_FRESH_CONDA%"
 
 if "%INSTALL_FRESH_CONDA%"=="1" (
   curl --retry 3 --retry-all-errors -k https://repo.anaconda.com/miniconda/Miniconda3-latest-Windows-x86_64.exe --output %TMP_DIR_WIN%\Miniconda3-latest-Windows-x86_64.exe
@@ -23,10 +26,14 @@ if "%INSTALL_FRESH_CONDA%"=="1" (
   if not errorlevel 0 exit /b
 )
 
+echo "Before activate"
 :: Activate conda so that we can use its commands, i.e. conda, python, pip
 call %CONDA_ROOT_DIR%\Scripts\activate.bat %CONDA_ROOT_DIR%
+echo "After activate, before env create"
 
-@echo on
+echo on
 conda create -y -n py_tmp python=%PYTHON_VERSION%
+echo "After env create, before pip install"
 conda run -n py_tmp pip install -r requirements.txt
-set PATH=%CONDA_ROOT_DIR%\envs\py_tmp;%PATH%
+set PATH="%CONDA_ROOT_DIR%\envs\py_tmp;%PATH%
+echo "PATH=%PATH%"
