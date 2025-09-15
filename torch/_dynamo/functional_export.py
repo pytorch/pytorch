@@ -52,31 +52,60 @@ def post_process_error_msg(
 def clean_nn_module_stack(
     graph_module: torch.fx.GraphModule, is_inline_builtin=False
 ) -> torch.fx.GraphModule:
-    for node in graph_module.graph.nodes:
-        if "nn_module_stack" in node.meta:
-            nn_module_stack = node.meta["nn_module_stack"].copy()
-            first_key = next(iter(nn_module_stack.keys()))
-            if "export_root" in first_key:
-                del nn_module_stack[first_key]
-            nn_module_stack_corrected = {}
-            for k, v in nn_module_stack.items():
-                k_new = k
-                if "._modules['_export_root']" in k:
-                    k_new = "".join(k.split("._modules['_export_root']"))
-                elif "._export_root" in k:
-                    k_new = "".join(k.split("._export_root"))
-                child_name, child_class = v
-                if "._modules['_export_root']" in child_name:
-                    child_name = child_name.replace("._modules['_export_root']", "")
-                elif "._export_root" in child_name:
-                    child_name = child_name.replace("._export_root", "")
+    """
+    Clean up nn_module_stack metadata by removing export_root references.
 
-                if is_inline_builtin:
-                    if child_name != "L['self']":
-                        nn_module_stack_corrected[k_new] = (child_name, child_class)
-                else:
-                    nn_module_stack_corrected[k_new] = (child_name, child_class)
-            node.meta["nn_module_stack"] = nn_module_stack_corrected
+    Removes the _export_root module references from nn_module_stack metadata
+    in graph nodes, which are artifacts from the export process. Fixes two patterns:
+
+    1. Keys: Removes "__export_root_" and "__modules['_export_root']_" prefixes
+       - Normal case: "L__self____export_root_child" -> "L__self__child"
+       - inline_builtin case: Uses numeric ID strings like "140468831433840"
+
+    2. Values: Removes "._export_root" and "._modules['_export_root']" from child names
+       e.g., "L['self']._export_root.child" -> "L['self'].child"
+       e.g., "L['self']._modules['_export_root'].child" -> "L['self'].child"
+
+    Also removes the root export entry "L__self____export_root" entirely.
+
+    Args:
+        graph_module: The GraphModule to clean up
+        is_inline_builtin: If True, keys are numeric ID strings and self references
+                          (L['self']) are filtered out
+
+    Returns:
+        The cleaned GraphModule (modified in-place)
+    """
+    for node in graph_module.graph.nodes:
+        if "nn_module_stack" not in node.meta:
+            continue
+
+        nn_module_stack = node.meta["nn_module_stack"].copy()
+
+        if "L__self____export_root" in nn_module_stack:
+            del nn_module_stack["L__self____export_root"]
+
+        # Clean up remaining entries
+        cleaned_stack = {}
+        for key, (child_name, child_class) in nn_module_stack.items():
+            # Clean key by removing export_root patterns
+            clean_key = key.replace("__modules['_export_root']_", "").replace(
+                "__export_root_", ""
+            )
+
+            # Clean child_name by removing export_root patterns
+            clean_name = child_name.replace("._modules['_export_root']", "").replace(
+                "._export_root", ""
+            )
+
+            # Skip self reference for inline builtin case
+            if is_inline_builtin and clean_name == "L['self']":
+                continue
+
+            cleaned_stack[clean_key] = (clean_name, child_class)
+
+        node.meta["nn_module_stack"] = cleaned_stack
+
     return graph_module
 
 
