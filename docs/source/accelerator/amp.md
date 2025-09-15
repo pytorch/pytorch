@@ -1,4 +1,4 @@
-# AMP Integration
+# AMP(Automatic Mixed Precision) Mechanism
 
 ## 1. Overview
 
@@ -14,7 +14,7 @@ Key components include:
 
 ### 2.1 Python Integration
 
-#### Register Supported Data Type
+**Register Supported Data Type**
 
 Implement the `get_amp_supported_dtype` method to return the data types supported by the accelerator in the AMP context.
 
@@ -28,7 +28,7 @@ Implement the `get_amp_supported_dtype` method to return the data types supporte
 
 ### 2.2 C++ Integration
 
-#### Kernel Registration
+**Kernel Registration**
 
 This section shows how AMP registers autocast kernels for the `AutocastPrivateUse1` dispatch key.
 
@@ -49,7 +49,7 @@ This section shows how AMP registers autocast kernels for the `AutocastPrivateUs
     :linenos:
 ```
 
-#### Casting Strategy: `at::autocast::CastPolicy`
+### 2.3 Casting Strategy: `at::autocast::CastPolicy`
 
 [`CastPolicy`](https://github.com/pytorch/pytorch/blob/09587daf8c9f21f5340f73921ce5f23d1a4a4572/aten/src/ATen/autocast_mode.h#L416-L438) serves as a label for type handling rules. Each enum value represents the casting needs of a class of operators, ensuring consistent handling of precision-sensitive vs. performance-oriented operations.
 

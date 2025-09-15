@@ -1,7 +1,6 @@
 # Owner(s): ["module: PrivateUse1"]
 
 import torch
-import torch_openreg  # noqa: F401
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
@@ -31,9 +30,12 @@ class TestAutocast(TestCase):
     def test_autocast_default_dtype(self):
         openreg_fast_dtype = torch.get_autocast_dtype(device_type="openreg")
         self.assertEqual(openreg_fast_dtype, torch.half)
-def test_autocast_set_dtype(self):
-    torch.set_autocast_dtype(device_type, type)
-    ...
+
+    def test_autocast_set_dtype(self):
+        for dtype in [torch.half, torch.bfloat16, torch.float32, torch.float64]:
+            torch.set_autocast_dtype("openreg", dtype)
+            self.assertEqual(torch.get_autocast_dtype("openreg"), dtype)
+
 
 if __name__ == "__main__":
     run_tests()
