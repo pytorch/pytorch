@@ -14,7 +14,7 @@ class TestAutocast(TestCase):
             with torch.autocast(device_type="openreg", dtype=torch.float32):
                 _ = torch.ones(10)
 
-    def test_openreg_autocast_float16_supported(self):
+    def test_autocast_low_precision(self):
         with torch.amp.autocast(device_type="openreg", dtype=torch.float16):
             x = torch.randn(2, 3, device="openreg")
             y = torch.randn(3, 3, device="openreg")
