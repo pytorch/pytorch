@@ -2752,34 +2752,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 return self.dense_size_str(), tuple(self.dense_size_list())
 
         if is_sympy_integer_like(index):
-            if self.inside_reduction and self.is_native_matmul:
-                # Consider the following code:
-                #
-                # tmp0 = tl.load(in_ptr0 + y0)
-                # tmp1 = tl.full([YBLOCK, XBLOCK, R0_BLOCK], 128, tl.int32)
-                # tmp2 = tmp0 + tmp1
-                # tmp3 = tmp0 < 0
-                # tmp4 = tl.where(tmp3, tmp2, tmp0)
-                # a = tl.load(in_ptr1 + (r + 128 * tmp4))
-                # b = tl.load(in_ptr2 + (x + 128 * r))
-                # tmp5 = tl.dot(
-                #     tl.reshape(a, [YBLOCK, R0_BLOCK]),
-                #     tl.trans(tl.reshape(b, [XBLOCK, R0_BLOCK]))
-                # )
-                #
-                # This handles an indirect matmul: A[y, :] @ B
-                # To deal with negative indices in the indirection,
-                # the generated code adds a constant (128) to the index.
-                #
-                # However, creating a dense constant of shape [YBLOCK, XBLOCK, R0_BLOCK]
-                # breaks axis alignment for tl.dot, which expects inputs shaped (Y, R) x (R, X).
-                #
-                # Instead of broadcasting a dense constant, we use a size-1 scalar constant
-                # to preserve the correct dependency on the [Y, R] axes for tl.dot.
-                expand_str = str([1]*len(self.dense_size_list()))
-                expand_shape = tuple([1]*len(self.dense_size_list()))
-            else :
-                expand_str, expand_shape = _get_expand_str()
+            expand_str = str([1]*len(self.dense_size_list()))
+            expand_shape = tuple([1]*len(self.dense_size_list()))
 
             index_str = f"tl.full({expand_str}, {index_str}, tl.int32)"
             if self.fixed_config and not self._has_constant_xmask():
