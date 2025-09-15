@@ -990,7 +990,6 @@ def _context_parallel_dispatcher(
 ) -> Generator[None, None, None]:
     _flex_cp = _ContextParallel(
         seq_dim=seq_dim,
-        mesh=mesh,
         attention_type=_ContextParallel.AttentionType.FLEX,
     )
 
@@ -1177,11 +1176,8 @@ class _ContextParallel(ParallelStyle):
         FLEX = "flex_attention"
         SDPA = "scaled_dot_product_attention"
 
-    def __init__(
-        self, mesh: DeviceMesh, seq_dim: int, attention_type: AttentionType
-    ) -> None:
+    def __init__(self, seq_dim: int, attention_type: AttentionType) -> None:
         super().__init__()
-        self.mesh = mesh
         self.seq_dim = seq_dim
         self.attention_type = attention_type
 
@@ -1192,14 +1188,14 @@ class _ContextParallel(ParallelStyle):
     def _apply(self, module: nn.Module, mesh: DeviceMesh) -> nn.Module:
         if self.attention_type == self.AttentionType.FLEX:
             module.register_forward_pre_hook(
-                partial(self.flex_input_fn, mesh=self.mesh), with_kwargs=True
+                partial(self.flex_input_fn, mesh=mesh), with_kwargs=True
             )
-            module.register_forward_hook(partial(self.flex_output_fn, mesh=self.mesh))
+            module.register_forward_hook(partial(self.flex_output_fn, mesh=mesh))
         elif self.attention_type == self.AttentionType.SDPA:
             module.register_forward_pre_hook(
-                partial(self.sdpa_input_fn, mesh=self.mesh, with_kwargs=True)
+                partial(self.sdpa_input_fn, mesh=mesh, with_kwargs=True)
             )
-            module.register_forward_hook(partial(self.sdpa_output_fn, mesh=self.mesh))
+            module.register_forward_hook(partial(self.sdpa_output_fn, mesh=mesh))
         else:
             raise ValueError(f"Unknown attention type: {self.attention_type}")
 

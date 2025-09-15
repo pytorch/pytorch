@@ -663,6 +663,59 @@ def gen_nn_functional(fm: FileManager) -> None:
                     "Tensor",
                 )
             ],
+            "im2col": [
+                defs(
+                    "im2col",
+                    [
+                        INPUT,
+                        KERNEL_SIZE,
+                        "dilation: _int | _size",
+                        "padding: _int | _size",
+                        "stride: _int | _size",
+                    ],
+                    "Tensor",
+                )
+            ],
+            "l1_loss": [
+                defs(
+                    "l1_loss",
+                    [
+                        INPUT,
+                        "target: Tensor",
+                        "reduction: str = ...",
+                    ],
+                    "Tensor",
+                )
+            ],
+            "mish": [
+                defs(
+                    "mish",
+                    [
+                        INPUT,
+                    ],
+                    "Tensor",
+                )
+            ],
+            "mish_": [
+                defs(
+                    "mish_",
+                    [
+                        INPUT,
+                    ],
+                    "Tensor",
+                )
+            ],
+            "mse_loss": [
+                defs(
+                    "mse_loss",
+                    [
+                        INPUT,
+                        "target: Tensor",
+                        "reduction: str = ...",
+                    ],
+                    "Tensor",
+                )
+            ],
         }
     )
 
