@@ -10,7 +10,6 @@ from typing import Any, Optional, Union
 import sympy
 
 import torch
-from torch._inductor.utils import can_use_tma
 from torch._inductor.virtualized import V
 
 from ...ir import ComputedBuffer, ExternKernel, FixedLayout, TensorBox
@@ -316,9 +315,6 @@ def flex_attention(
 
         # USE TMA = false by default
         cur_kernel_options.setdefault("USE_TMA", False)
-
-        if cur_kernel_options["USE_TMA"] and can_use_tma(query, key, value):
-            cur_kernel_options["USE_TMA"] = True
 
         cur_kernel_options.setdefault("BLOCK_M", conf.block_m)
         cur_kernel_options.setdefault("BLOCK_N", conf.block_n)
