@@ -2,7 +2,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/mps/Copy.h>
-#include <ATen/native/mps/MPSGraphSonomaOps.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/ops/_copy_from_and_resize_native.h>
 #include <ATen/ops/_copy_from_native.h>
