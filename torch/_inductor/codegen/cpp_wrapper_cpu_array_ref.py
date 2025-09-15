@@ -738,6 +738,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
     def generate_index_put_fallback(self, node: ir.IndexPutFallback) -> None:
         # No stack allocation when there is a fallback op
         self.allow_stack_allocation = False
+        super().generate_index_put_fallback(node)
 
     def _generate_index_put_fallback(self, kernel, x, indices, values, accumulate):
         self._assert_safe_to_use_borrow_arrayref_tensor_as_tensor()
