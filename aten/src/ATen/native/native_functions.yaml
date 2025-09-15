@@ -2351,6 +2351,7 @@
   dispatch:
     CPU: _embedding_bag_forward_only_cpu
     CUDA: _embedding_bag_forward_only_cuda
+    MPS: _embedding_bag_forward_only_mps
   autogen: _embedding_bag_forward_only.out
 
 - func: _rowwise_prune(Tensor weight, Tensor mask, ScalarType compressed_indices_dtype) -> (Tensor, Tensor)
@@ -2372,6 +2373,7 @@
   dispatch:
     CPU: _embedding_bag_cpu
     CUDA: _embedding_bag_cuda
+    MPS: _embedding_bag_mps
   autogen: _embedding_bag.out
   tags: core
 
