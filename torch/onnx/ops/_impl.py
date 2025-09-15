@@ -67,20 +67,20 @@ def rotary_embedding_23(
     if position_ids is not None:
         torch._check(
             position_ids.dim() == 2,
-            lambda: f"position_ids must be 2D when provided. Got {position_ids.shape}",
+            lambda: f"position_ids must be 2D when provided. Received shape {position_ids.shape}",
         )
         torch._check(
             position_ids.shape[0] == batch_size,
-            lambda: f"position_ids first dim (batch) must match x.batch_size ({batch_size}). Got {position_ids.shape[0]}",
+            lambda: f"position_ids first dim (batch) must match x.shape[0] ({batch_size}). Received {position_ids.shape[0]}",
         )
         torch._check(
             position_ids.shape[1] == sequence_length,
-            lambda: f"position_ids second dim (sequence) must match x.sequence_length ({sequence_length}). Got {position_ids.shape[1]}",
+            lambda: f"position_ids second dim (sequence) must match x.shape[-2] ({sequence_length}). Received {position_ids.shape[1]}",
         )
         torch._check(
             cos_cache.dim() == 2 and sin_cache.dim() == 2,
             lambda: "cos_cache/sin_cache must be 2D (sequence_length, head_half) when position_ids is provided. "
-            f"Got cos_cache shape {cos_cache.shape}, sin_cache shape {sin_cache.shape}",
+            f"Received cos_cache shape {cos_cache.shape}, sin_cache shape {sin_cache.shape}",
         )
     else:
         torch._check(
@@ -130,6 +130,10 @@ def rotary_embedding_23(
     torch._check(
         cos.shape[0] == batch_size and cos.shape[1] == sequence_length,
         lambda: f"cos has shape {cos.shape} but expected (batch={batch_size}, seq={sequence_length}, ...)",
+    )
+    torch._check(
+        sin.shape[0] == batch_size and sin.shape[1] == sequence_length,
+        lambda: f"sin has shape {sin.shape} but expected (batch={batch_size}, seq={sequence_length}, ...)",
     )
 
     cos = cos[
