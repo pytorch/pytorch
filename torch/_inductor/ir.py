@@ -4711,35 +4711,37 @@ class ComputedBuffer(OperationBuffer):
             Callable[[Sequence[int]], Sequence[int]],
             Callable[[Sequence[int]], Sequence[int]],
         ]:
-            # When doing native matmul, the codegen assumes the following loop order
-            # regardless of stride of A and B.
-            #
-            # for z:
-            #  for y:
-            #   for x:
-            #    for r:
-            #      C[z,y,x] += A[z,y,r] * B[z,r,x]
-            #
-            # For now, the tiling and the loop order is fixed. This may not be the
-            # optimal loop order when strides does not align with this default order.
-            # Maybe sth we should modify tl.dot codegen to support random loop order
-            newsizes: list[int]
-            reindex0: Callable[[Sequence[int]], Sequence[int]]
-            reindex1: Callable[[Sequence[int]], Sequence[int]]
-            if self.get_reduction_type() == "dot":
-                # TODO : what really matters is the location of "z" (batch) axis in bmm.
-                # while it is okay to swap the y and x like (x,y,r) or (z,x,y,r), but
-                # when we reorder the z axis (e.g., (y,x,z,r) ), codegen break.
-                # so relax the condition accordingly
-                order = list(range(len(sizes)))  # Dont reorder
-                newsizes = [sizes[i] for i in order]
-                reindex0 = same_reorder(order)
-                reindex1 = inverse_reorder(order)
-            else:
-                newsizes, reindex0, reindex1 = self._apply_loop_reordering(
-                    x_vars, support_vars, sizes, memory_addrs
-                )
+           
+            newsizes, reindex0, reindex1 = self._apply_loop_reordering(
+                x_vars, support_vars, sizes, memory_addrs
+            )
 
+            # When using native matmul, the codegen assumes the following loop order,
+            # regardless of the stride of A and B:
+            #
+            #   for z -> y -> x -> r:  C[z, y, x] += A[z, y, r] * B[z, r, x]
+            # or
+            #   for z -> x -> y -> r:  C[z, y, x] += A[z, y, r] * B[z, r, x]
+            #
+            # The critical point is the position of the "z" (batch) axis in bmm.
+            # It is fine to swap the y and x axes (e.g., (z, y, x, r) or (z, x, y, r)),
+            # but reordering the z axis (e.g., (y, x, z, r)) breaks codegen.
+            #
+            # Therefore, if loop reordering changes the "z" location in bmm,
+            # it should be reverted to the default.
+            # This may not always produce the optimal loop order when strides
+            # do not align with the default assumption.
+            #
+            # TODO: Consider extending tl.dot codegen to support arbitrary loop orders.
+            if self.get_reduction_type() == "dot" and len(sizes) == 3:
+                order = list(range(len(sizes))) # default order 
+                
+                # if z axis is not the outermost, use the default reorder.
+                if reindex0(order)[0] != 0 : 
+                    newsizes = [sizes[i] for i in order]
+                    reindex0 = same_reorder(order)
+                    reindex1 = inverse_reorder(order)
+                
             # for NHWC: reindex0([0,1,2,3]) = [0,2,3,1], reindex1([0,1,2,3]) = [0,3,2,1]
             x_vars = reindex0(x_vars)
 
