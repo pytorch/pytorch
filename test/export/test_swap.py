@@ -10,7 +10,7 @@ import torch
 import torch._dynamo as torchdynamo
 from torch import Tensor
 from torch._export.utils import register_dataclass_as_pytree_node
-from torch.export import export
+from torch.export import export, register_dataclass
 from torch.export._swap import _swap_modules
 from torch.testing._internal.common_utils import IS_WINDOWS, run_tests, TestCase
 
@@ -368,7 +368,7 @@ def forward(self, x, y):
             a: Tensor
             b: Tensor
 
-        register_dataclass_as_pytree_node(
+        register_dataclass(
             CustomInput,
             serialized_type_name="test_swap.test_custom_input.CustomInput",
         )
