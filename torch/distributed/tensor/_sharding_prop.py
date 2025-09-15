@@ -218,7 +218,7 @@ class ShardingPropagator:
         else:
             return self._propagate_tensor_meta(op_schema)
 
-    def _wrap_output_spec_tensor_meta(
+    def _create_output_spec_with_new_tensor_meta(
         self,
         op: OpOverload,
         output_specs: OutputSpecType,
@@ -285,7 +285,7 @@ class ShardingPropagator:
 
             return tuple(new_specs)
         else:
-            # I think it should always be None here
+            assert output_specs is None
             return output_specs
 
     def _wrap_with_op_strategy(self, op_schema: OpSchema) -> OpSchema:
@@ -513,7 +513,7 @@ class ShardingPropagator:
                 raise ValueError("Unsupported op strategy type")
 
             # associate the output sharding with the output tensor metadata
-            new_output_spec = self._wrap_output_spec_tensor_meta(
+            new_output_spec = self._create_output_spec_with_new_tensor_meta(
                 op_schema.op, output_sharding.output_spec, out_tensor_meta
             )
             output_sharding.output_spec = new_output_spec
@@ -556,7 +556,7 @@ class ShardingPropagator:
                     output_sharding.needs_redistribute = True
 
             # associate the output sharding with the output tensor metadata
-            new_output_spec = self._wrap_output_spec_tensor_meta(
+            new_output_spec = self._create_output_spec_with_new_tensor_meta(
                 op_schema.op, output_sharding.output_spec, out_tensor_meta
             )
             output_sharding.output_spec = new_output_spec
