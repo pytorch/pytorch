@@ -5111,7 +5111,7 @@ def empty_like(
         )
 
     # memory_format == torch.preserve_format
-    logical_to_physical_perm = (
+    logical_to_physical_perm, _ = (
         utils.compute_elementwise_output_logical_to_physical_perm(a)
     )
     # identity perm is [2, 1, 0]
