@@ -541,8 +541,8 @@ class NativeOnnxOpsTest(common_utils.TestCase):
     def test_rotary_embedding_3d(self):
         num_heads = 2
         input_data = torch.rand(2, 3, 8)
-        sin_cache_data = torch.rand(2, 3, 4)
-        cos_cache_data = torch.rand(2, 3, 4)
+        sin_cache_data = torch.rand(2, 3, 2)
+        cos_cache_data = torch.rand(2, 3, 2)
 
         class Model(torch.nn.Module):
             def forward(self, input_data, cos_cache_data, sin_cache_data):

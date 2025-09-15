@@ -124,8 +124,8 @@ def rotary_embedding_23(
             position_ids
         ]  # Shape: [batch_size, sequence_length, head_size/2]
     else:
-        cos = cos_cache
-        sin = sin_cache
+        cos = cos_cache  # Shape: [batch_size, sequence_length, rotary_embedding_dim/2]
+        sin = sin_cache  # Shape: [batch_size, sequence_length, rotary_embedding_dim/2]
 
     torch._check(
         cos.shape[0] == batch_size and cos.shape[1] == sequence_length,
@@ -135,13 +135,14 @@ def rotary_embedding_23(
         sin.shape[0] == batch_size and sin.shape[1] == sequence_length,
         lambda: f"sin has shape {sin.shape} but expected (batch={batch_size}, seq={sequence_length}, ...)",
     )
-
-    cos = cos[
-        :, :, :rotary_embedding_dim_half
-    ]  # Shape: [batch_size, sequence_length, rotary_embedding_dim/2]
-    sin = sin[
-        :, :, :rotary_embedding_dim_half
-    ]  # Shape: [batch_size, sequence_length, rotary_embedding_dim/2]
+    torch._check(
+        cos.shape[-1] == rotary_embedding_dim_half,
+        lambda: f"Last dimension of cos cache ({cos.shape[-1]}) should match rotary_embedding_dim/2 ({rotary_embedding_dim_half}).",
+    )
+    torch._check(
+        sin.shape[-1] == rotary_embedding_dim_half,
+        lambda: f"Last dimension of sin cache ({sin.shape[-1]}) should match rotary_embedding_dim/2 ({rotary_embedding_dim_half}).",
+    )
     cos = torch.unsqueeze(
         cos, 2
     )  # Shape: [batch_size, sequence_length, 1, rotary_embedding_dim/2]
