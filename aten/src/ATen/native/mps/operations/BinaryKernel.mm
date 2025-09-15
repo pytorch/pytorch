@@ -8,8 +8,6 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/mps/operations/BinaryKernel.h>
-// For MTLLanguageVersion_3_1
-#include <ATen/native/mps/MPSGraphSonomaOps.h>
 #include <fmt/format.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
