@@ -752,7 +752,7 @@ class _FileSystemWriter(StorageWriter):
             return fut
 
     def finish(self, metadata: Metadata, results: list[list[WriteResult]]) -> None:
-        metadata = dataclasses.replace(metadata, version=CURRENT_DCP_VERSION)
+        metadata.version = CURRENT_DCP_VERSION
 
         storage_md = {}
         for wr_list in results:
