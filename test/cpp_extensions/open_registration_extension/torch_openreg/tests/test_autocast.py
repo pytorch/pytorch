@@ -31,7 +31,9 @@ class TestAutocast(TestCase):
     def test_autocast_default_dtype(self):
         openreg_fast_dtype = torch.get_autocast_dtype(device_type="openreg")
         self.assertEqual(openreg_fast_dtype, torch.half)
-
+def test_autocast_set_dtype(self):
+    torch.set_autocast_dtype(device_type, type)
+    ...
 
 if __name__ == "__main__":
     run_tests()
