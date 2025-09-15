@@ -1144,7 +1144,7 @@ class CompileTest(TestCase):
 
         input_split_sizes = send_sz_matrix[self.rank]
         output_split_sizes = send_sz_matrix[:, self.rank].contiguous()
-        input = torch.full((input_split_sizes.sum().item(),), float(self.rank)).to(device_module)
+        input = torch.full((input_split_sizes.sum().item(),), float(self.rank)).to(device_type)
 
         with torch._dynamo.config.patch(
             dynamic_shapes=True,
