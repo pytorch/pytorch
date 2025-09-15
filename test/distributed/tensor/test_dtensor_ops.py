@@ -7,7 +7,7 @@ import warnings
 import torch
 import torch.distributed as dist
 import torch.testing._internal.common_methods_invocations as common_ops
-from torch.distributed.tensor import DeviceMesh, DTensor
+from torch.distributed.tensor import init_device_mesh, DTensor
 from torch.overrides import resolve_name
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
@@ -513,7 +513,7 @@ class TestDTensorOps(DTensorOpTestBase):
     @ops(op_db, allowed_dtypes=(torch.float,))
     @skipOps("TestDTensorOps", "test_dtensor_op_db", dtensor_fails)
     def test_dtensor_op_db(self, dtype, op):
-        self.mesh = DeviceMesh(DEVICE_TYPE, torch.arange(self.world_size))
+        self.mesh = init_device_mesh(DEVICE_TYPE, (self.world_size,))
 
         # test each op with dist tensor inputs and normal inputs
         def test():
