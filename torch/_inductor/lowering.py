@@ -4781,7 +4781,7 @@ def max_pool2d_with_indices_backward(
     new_size = list(x.get_size())
 
     h_window_size = max(
-        max( FloorDiv(h, stride[0] - max(0, FloorDiv(h - kernel_size[0], stride[0]))), 1)
+        max(FloorDiv(h, stride[0] - max(0, FloorDiv(h - kernel_size[0], stride[0]))), 1)
         for h in range(kernel_size[0] * 2)
     )
     w_window_size = max(
@@ -5299,7 +5299,9 @@ def upsample_nearest2d_backward(
     *_batch, out_h, out_w = input_size
 
     if inp_h % out_h == 0 and inp_w % out_w == 0:
-        return avg_pool2d(x, [FloorDiv(inp_h, out_h), FloorDiv(inp_w, out_w)], divisor_override=1)
+        return avg_pool2d(
+            x, [FloorDiv(inp_h, out_h), FloorDiv(inp_w, out_w)], divisor_override=1
+        )
 
     h_kernel_max = ceildiv(inp_h, out_h)
     w_kernel_max = ceildiv(inp_w, out_w)
@@ -5554,11 +5556,11 @@ def avg_pool2d_backward(
 
     # put those in helper function to avoid repition lol
     h_window_size = max(
-        max( FloorDiv(h, stride[0] - max(0, FloorDiv(h - kernel_size[0], stride[0]) )), 1 )
+        max(FloorDiv(h, stride[0] - max(0, FloorDiv(h - kernel_size[0], stride[0]))), 1)
         for h in range(kernel_size[0] * 2)
     )
     w_window_size = max(
-        max(FloorDiv(w, stride[1] - max(0, FloorDiv((w - kernel_size[1]), stride[1]))), 1))
+        max(FloorDiv(w, stride[1] - max(0, FloorDiv(w - kernel_size[1], stride[1]))), 1)
         for w in range(kernel_size[1] * 2)
     )
 
