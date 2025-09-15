@@ -1190,6 +1190,8 @@ class DeviceCachingAllocator {
         visited;
   };
   ska::flat_hash_map<cudaGraph_t, GraphReuseContext> graph_reuse_context;
+  // Each stream should only be in one graph
+  ska::flat_hash_map<cudaStream_t, cudaGraph_t> stream_to_graph;
 
   // outstanding cuda events
   ska::flat_hash_map<
@@ -1807,6 +1809,14 @@ class DeviceCachingAllocator {
       return;
     }
     auto& graph_context = graph_reuse_context[info.graph];
+    // If the stream is not in the graph context, we add it to the
+    // stream_to_graph map
+    if (graph_context.visited.count(stream) == 0) {
+      TORCH_INTERNAL_ASSERT(
+          stream_to_graph.count(stream) == 0,
+          "Each stream should only be involved in one graph");
+      stream_to_graph[stream] = info.graph;
+    }
     auto& visited = graph_context.visited[stream];
     update_visited(info, visited);
 
@@ -2475,6 +2485,32 @@ class DeviceCachingAllocator {
   // Called by CUDAGraph::capture_end
   void endAllocateToPool(MempoolId_t mempool_id) {
     std::lock_guard<std::recursive_mutex> lock(mutex);
+    // Erase the streams and graphs from the stream_to_graph map
+    ska::flat_hash_set<cudaStream_t> streams_to_erase;
+    for (auto& [stream, graph] : stream_to_graph) {
+      if (streams_to_erase.count(stream) > 0) {
+        continue;
+      }
+      // The stream is not capturing, so we are going to erase the graph from
+      // the graph_reuse_context
+      if (stream_get_capture_info(stream).status ==
+          cudaStreamCaptureStatusNone) {
+        auto& graph_context = graph_reuse_context[graph];
+        // There might be other streams in the graph, so we need to erase them
+        // too
+        for (auto& [other_stream_in_graph, _] : graph_context.visited) {
+          TORCH_INTERNAL_ASSERT(
+              stream_get_capture_info(other_stream_in_graph).status ==
+                  cudaStreamCaptureStatusNone,
+              "This stream should not be capturing when the capture is ended");
+          streams_to_erase.insert(other_stream_in_graph);
+        }
+        graph_reuse_context.erase(graph);
+      }
+    }
+    for (auto stream : streams_to_erase) {
+      stream_to_graph.erase(stream);
+    }
     for (auto it = captures_underway.begin(); it != captures_underway.end();
          ++it) {
       if (it->first == mempool_id) {
