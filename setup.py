@@ -1639,7 +1639,7 @@ def main() -> None:
 
         skip_iomp = os.getenv("FORCE_SKIP_INTEL_OPENMP_DEPENDENCY", 0)
         if IS_WINDOWS and _is_AMD64_machine() and not skip_iomp:
-            return ["intel-openmp==2025.1.1"]
+            return ["intel-openmp"]
         return []
 
     install_requires += add_iomp_dependency_for_Windows_inductor()
