@@ -26,13 +26,12 @@ void ensureCUDADeviceGuardSet() {
   const DeviceGuardImplInterface* p =
       device_guard_impl_registry[cuda_idx].load();
 
-  // A non-null `ptr` indicates that CUDA is already available.
-  if (p == nullptr || (p && p->deviceCount() == 0)) {
+  // A non-null `ptr` indicates that the CUDA guard is already set up,
+  // implying this is using cuda build
+  if (p && p->deviceCount() == 0) {
     // In following cases, we override CUDA guard interface with a no-op
-    // device guard.
-    // 1. p == nullptr; Trying to get a cuda device guard on a cpu-only build.
-    // 2. p->deviceCount() == 0; cuda build enabled, but no cuda devices
-    // available.
+    // device guard. When p->deviceCount() == 0, cuda build is enabled, but no
+    // cuda devices available.
     tls_fake_device_guard = std::make_unique<FakeGuardImpl<DeviceType::CUDA>>();
     device_guard_impl_registry[cuda_idx].store(tls_fake_device_guard.get());
   }
