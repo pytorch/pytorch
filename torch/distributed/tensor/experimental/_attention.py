@@ -7,7 +7,7 @@ from collections.abc import Generator
 from dataclasses import dataclass
 from enum import auto, Enum
 from functools import partial
-from typing import Any, Callable, ClassVar, Optional, Protocol, Union
+from typing import Any, Callable, Optional, Protocol
 
 import torch
 import torch.distributed as dist
@@ -19,10 +19,8 @@ from torch.distributed.tensor import distribute_tensor, DTensor, Shard
 from torch.distributed.tensor.parallel import ParallelStyle
 from torch.nn.attention.flex_attention import (
     _mask_mod_signature,
-    AuxOutput,
     BlockMask,
     create_block_mask,
-    flex_attention,
 )
 from torch.overrides import TorchFunctionMode
 
@@ -383,9 +381,9 @@ def _templated_ring_attention(
     if not is_causal and _cp_options.enable_load_balance:
         raise RuntimeError("Load balancing requires `is_causal=True`.")
 
-    assert isinstance(
-        group, dist.ProcessGroup
-    ), "process group must be single dimension"
+    assert isinstance(group, dist.ProcessGroup), (
+        "process group must be single dimension"
+    )
     rank = dist.get_rank(group)
     size = dist.get_world_size(group)
 
