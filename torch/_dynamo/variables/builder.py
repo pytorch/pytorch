@@ -169,11 +169,9 @@ from .ctx_manager import (
     AutocastModeVariable,
     DynamoConfigPatchVariable,
     ErrorOnGraphBreakVariable,
-    EventVariable,
     NullContextVariable,
     PreserveVersionContextVariable,
     StreamContextVariable,
-    StreamVariable,
 )
 from .dicts import (
     ConstDictVariable,
@@ -251,6 +249,7 @@ from .nn_module import (
 from .optimizer import OptimizerVariable
 from .script_object import TorchScriptObjectVariable
 from .sdpa import SDPAParamsVariable
+from .streams import EventVariable, StreamVariable
 from .tensor import (
     NumpyNdarrayVariable,
     supported_const_comparison_op_values,
