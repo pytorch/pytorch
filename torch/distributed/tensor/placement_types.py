@@ -1,10 +1,10 @@
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
-from dataclasses import dataclass
 from typing import cast, Optional
 
 import torch
+import torch._C
 import torch.distributed._functional_collectives as funcol
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._collective_utils import (
@@ -20,35 +20,10 @@ from torch.distributed.tensor._collective_utils import (
 __all__ = ["Placement", "Shard", "Replicate", "Partial"]
 
 
-class Placement:
-    """
-    The base class for the Placement type, where it describes how a DTensor is placed onto the
-    ``DeviceMesh``. ``Placement`` and ``DeviceMesh`` together could describe the DTensor Layout.
-    It is the base class of the three main DTensor Placement types: ``Shard``, ``Replicate``,
-    and ``Partial``.
-
-    This class is not meant to be used directly, mainly served as a typing stub.
-    """
-
-    # convenient utils to check for placement types
-    def is_shard(self, dim: Optional[int] = None) -> bool:
-        is_shard_instance = isinstance(self, Shard)
-        if dim is not None and is_shard_instance:
-            return cast(Shard, self).dim == dim
-        else:
-            return is_shard_instance
-
-    def is_replicate(self) -> bool:
-        return isinstance(self, Replicate)
-
-    def is_partial(self, reduce_op: Optional[str] = None) -> bool:
-        if reduce_op is None:
-            return isinstance(self, Partial)
-        return isinstance(self, Partial) and self.reduce_op == reduce_op
+Placement = torch._C.Placement
 
 
-@dataclass(frozen=True)
-class Shard(Placement):
+class Shard(torch._C.Shard):
     """
     The ``Shard(dim)`` placement describes the DTensor sharding on tensor dimension
     ``dim`` over a corresponding ``DeviceMesh`` dimension, where each rank on the
@@ -65,8 +40,6 @@ class Shard(Placement):
     .. warning:: sharding on a tensor dimension where the tensor dimension size is not
         evenly divisible on a DeviceMesh dimension is currently experimental and subject to change.
     """
-
-    dim: int
 
     def _split_tensor(
         self,
@@ -341,11 +314,6 @@ class Shard(Placement):
 
         return new_tensor
 
-    def __eq__(self, other: object) -> bool:
-        if not isinstance(other, Shard):
-            return False
-        return self.dim == other.dim
-
     def __hash__(self) -> int:
         return hash(self.dim)
 
@@ -360,12 +328,7 @@ class Shard(Placement):
         return f"S({self.dim})"
 
 
-# kw_only is only available in python >= 3.10
-kw_only_dataclass = dict(kw_only=True) if "kw_only" in dataclass.__kwdefaults__ else {}
-
-
-@dataclass(frozen=True, **kw_only_dataclass)
-class _StridedShard(Shard):
+class _StridedShard(torch._C.StridedShard):
     """
     _StridedShard is only introduced to support 2D FSDP2 + TP sharding where the tensor
     is sharded on the TP mesh dimension first, then sharded on the FSDP mesh dimension.
@@ -422,18 +385,6 @@ class _StridedShard(Shard):
 
     TODO: we should remove _StridedShard placement once we can unify it with Shard
     """
-
-    split_factor: int
-
-    def __eq__(self, other: object) -> bool:
-        if isinstance(other, _StridedShard):
-            return self.dim == other.dim and self.split_factor == other.split_factor
-        elif isinstance(other, Shard):
-            # TODO: this is to avoid extra all-gather in dtensor op dispatch
-            # note that sharding prop would not produce _StridedShard and an
-            # placement inequality would introduce an all-gather for resharding
-            return self.dim == other.dim
-        return False
 
     def __hash__(self) -> int:
         return hash((self.dim, self.split_factor))
@@ -599,17 +550,13 @@ class _StridedShard(Shard):
         return torch.cat(reordered_shards, dim=self.dim).contiguous()
 
 
-@dataclass(frozen=True)
-class Replicate(Placement):
+class Replicate(torch._C.Replicate):
     """
     The ``Replicate()`` placement describes the DTensor replicating on a corresponding
     ``DeviceMesh`` dimension, where each rank on the DeviceMesh dimension holds a
     replica of the global Tensor. The ``Replicate`` placement can be used by all
     DTensor APIs (i.e. ``distribute_tensor``, ``DTensor.from_local``, etc.)
     """
-
-    def __eq__(self, other: object) -> bool:
-        return isinstance(other, Replicate)
 
     def __hash__(self) -> int:
         # every replicate placement is the same
@@ -651,8 +598,7 @@ class Replicate(Placement):
         return tensor
 
 
-@dataclass(frozen=True)
-class Partial(Placement):
+class Partial(torch._C.Partial):
     """
     The ``Partial(reduce_op)`` placement describes the DTensor that is pending
     reduction on a specified ``DeviceMesh`` dimension, where each rank on the
@@ -670,8 +616,6 @@ class Partial(Placement):
     .. note:: The ``Partial`` placement can be generated as a result of the DTensor operators,
         and can only be used by the ``DTensor.from_local`` API.
     """
-
-    reduce_op: str = "sum"
 
     def _reduce_value(
         self, tensor: torch.Tensor, mesh: DeviceMesh, mesh_dim: int
@@ -708,11 +652,6 @@ class Partial(Placement):
         assert self.reduce_op == "sum", "only support replicate to PartialSUM for now!"
         num_chunks = mesh.size(mesh_dim=mesh_dim)
         return tensor / num_chunks
-
-    def __eq__(self, other: object) -> bool:
-        if not isinstance(other, Partial):
-            return False
-        return self.reduce_op == other.reduce_op
 
     def __hash__(self) -> int:
         return 1 + hash(self.reduce_op)
