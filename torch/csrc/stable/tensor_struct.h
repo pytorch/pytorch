@@ -1,5 +1,6 @@
 #pragma once
 
+#include <torch/csrc/inductor/aoti_runtime/mini_array_ref.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 #include <torch/headeronly/core/ScalarType.h>
 #include <torch/headeronly/util/Exception.h>
@@ -172,10 +173,28 @@ class Tensor {
     return size;
   }
 
+  auto sizes() const {
+    int64_t* ptr;
+    TORCH_ERROR_CODE_CHECK(aoti_torch_get_sizes(ath_.get(), &ptr));
+    return torch::aot_inductor::MiniArrayRef<int64_t>(ptr, dim());
+  }
+
+  auto strides() const {
+    int64_t* ptr;
+    TORCH_ERROR_CODE_CHECK(aoti_torch_get_strides(ath_.get(), &ptr));
+    return torch::aot_inductor::MiniArrayRef<int64_t>(ptr, dim());
+  }
+
   bool defined() const {
     bool defined;
     TORCH_ERROR_CODE_CHECK(aoti_torch_is_defined(ath_.get(), &defined));
     return defined;
+  }
+
+  Tensor clone() const {
+    AtenTensorHandle ret;
+    TORCH_ERROR_CODE_CHECK(aoti_torch_clone(get(), &ret));
+    return Tensor(ret);
   }
 
   // defined in tensor-inl.h to avoid circular dependencies
