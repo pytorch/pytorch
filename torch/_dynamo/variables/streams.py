@@ -1,7 +1,6 @@
 from typing import Any
 
 import torch
-from torch._dynamo.guards import install_guard
 from torch.fx import Proxy
 
 from .. import graph_break_hints
@@ -12,7 +11,6 @@ from .constant import ConstantVariable
 
 if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslator
-    from ..codegen import PyCodegen
 
     from ..codegen import PyCodegen
 
@@ -72,7 +70,8 @@ class StreamVariable(VariableTracker):
                 ),
             )
         elif name in cmp_name_to_op_mapping and len(args) == 1 and not kwargs:
-            from ..guards import install_guard, GuardBuilder
+            from ..guards import GuardBuilder, install_guard
+
             if self.source:
                 install_guard(self.source.make_guard(GuardBuilder.EQUALS_MATCH))
 
