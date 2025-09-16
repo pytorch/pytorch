@@ -92,7 +92,7 @@ class ShapePropagationOpsHandler:
             return ()
 
     @staticmethod
-    def store_reduction(name: str, index: int, value: ShapeArg):
+    def store_reduction(name: str, index: int, value: ShapeArg) -> BlockShapeType:
         # This doesn't return anything, but None means we don't know the shape
         return ()
 
@@ -108,7 +108,7 @@ class ShapePropagationOpsHandler:
     @staticmethod
     def store(
         name: str, index: int, value: ShapeArg, mode: Optional[str] = None
-    ):
+    ) -> BlockShapeType:
         # This doesn't return anything, but None means we don't know the shape
         return ()
 
@@ -143,6 +143,6 @@ class ShapePropagationOpsHandler:
         return lambda *args, **kwargs: broadcast_shapes_for_args(args)
 
     @staticmethod
-    def device_assert_async(cond: ShapeArg, msg: str):
+    def device_assert_async(cond: ShapeArg, msg: str) -> BlockShapeType:
         # This doesn't return anything, but None means we don't know the shape
         return ()
