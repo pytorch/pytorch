@@ -346,6 +346,34 @@ class MicroPipelineTPTest(TestCase):
         self.assertIn("fused_matmul_reduce_scatter", code)
         self.assertNotIn("reduce_scatter_tensor", code)
 
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @fresh_cache()
+    def test_fuse_matmul_split_cat_reduce_scatter(self):
+        group = dist.group.WORLD
+        from torch.distributed._symmetric_memory import enable_symm_mem_for_group
+
+        enable_symm_mem_for_group(group.group_name)
+
+        def func(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
+            # B = Bt.t()
+            mm = A @ B
+            splits = torch.ops.aten.split.Tensor(mm, 1024, 1)
+            # torch.distributed.breakpoint()
+            cat = torch.cat(splits)
+            w = torch.ops._c10d_functional.reduce_scatter_tensor.default(
+                cat, "sum", group.size(), group.group_name
+            )
+            return torch.ops._c10d_functional.wait_tensor.default(w)
+
+        A = torch.rand(32768, 1024, dtype=torch.bfloat16, device="cuda")
+        B_base = torch.rand(4096, 1024, dtype=torch.bfloat16, device="cuda")
+        B = torch.as_strided(B_base, (1024, 4096), (1, 1024))
+
+        func(A, B)
+
+        # with _test_mode():
+        compiled = torch.compile(func)(A, B)
+
     @runOnRocmArch(MI300_ARCH)
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @parametrize("A_dims", [2, 3])

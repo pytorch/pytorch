@@ -556,6 +556,7 @@ def _find_consumer_matmuls(node: torch.fx.Node) -> list[_Matmul]:
     """
     matmuls = []
     for user in node.users:
+        print(f"XXX _find_consumer_matmuls:{user} -> {user.target}")
         # ND matmuls
         if user.target == aten.reshape.default:
             matmuls.extend(_find_reshape_mm_reshape(user))
@@ -623,10 +624,12 @@ def fuse_all_gather_matmul(all_gather: _AllGatherMatch) -> None:
             A_shard, [B_0, B_1, B_2, ...], gather_dim, group_name,
         )
     """
+    print(f"XXX fuse_all_gather_matmul:{all_gather}")
     if (
         not torch.distributed.is_available()
         or not torch.distributed.is_nccl_available()
     ):
+        print("XXX RETURN 631")
         return
 
     from torch.distributed._symmetric_memory import (
@@ -643,11 +646,15 @@ def fuse_all_gather_matmul(all_gather: _AllGatherMatch) -> None:
     )
 
     if not is_symm_mem_enabled_for_group(group_name):
+        print("XXX RETURN NOT_SYMM_GROUP 648")
         return
 
-    if gather_dim >= len(_get_tensor(shard_node).shape) - 1:
-        # Decomposing the matmul on the K dimension is not supported
-        return
+    # if gather_dim >= len(_get_tensor(shard_node).shape) - 1:
+    #     # Decomposing the matmul on the K dimension is not supported
+    #     print(
+    #         f"XXX RETURN 653 K-dim gather_dim:{gather_dim} _get_tensor(shard_node).shape:{_get_tensor(shard_node).shape}"
+    #     )
+    #     return
 
     # Find consumer matmuls
     matmuls = _find_consumer_matmuls(ag_res_node)
@@ -660,7 +667,9 @@ def fuse_all_gather_matmul(all_gather: _AllGatherMatch) -> None:
         if all_gather.res_node not in matmul.arg_ancestor_nodes
     ]
 
+    print(f"XXX matmuls:{matmuls}")
     if len(matmuls) == 0 or len(OrderedSet(map(type, matmuls))) != 1:
+        print("XXX RETURN NO MATMULS 671")
         return
 
     # Fuse the all_gather_tensor with the eligible matmuls
@@ -716,6 +725,7 @@ def fuse_all_gather_matmul(all_gather: _AllGatherMatch) -> None:
     for node in nodes_to_raise:
         if order[node] > order[fused_node]:
             fused_node.prepend(node)
+    print("XXX fuse_all_gather_matmul PASSED!")
 
 
 def _scatter_dim_after_reshape(
@@ -850,6 +860,7 @@ def fuse_matmul_reduce_scatter(reduce_scatter: _ReduceScatterMatch) -> None:
 
     Returns boolean indicating if fusion was successful or not.
     """
+    print(f"XXX fuse_matmul_reduce_scatter:{reduce_scatter}")
     if (
         not torch.distributed.is_available()
         or not torch.distributed.is_nccl_available()
@@ -877,7 +888,13 @@ def fuse_matmul_reduce_scatter(reduce_scatter: _ReduceScatterMatch) -> None:
         reduce_scatter.group_name,
     )
 
+    print(f"XXX fuse_matmul_reduce_scatter orig_scatter_dim:{orig_scatter_dim}")
+    print(
+        f"XXX rs_node:{_reduce_scatter_node} args:{_reduce_scatter_node.args} kwargs:{_reduce_scatter_node.kwargs}"
+    )
+
     if not is_symm_mem_enabled_for_group(group_name):
+        print("XXX fuse_matmul_reduce_scatter not symm_mem_enabled return 891")
         return
 
     # Currently fused_matmul_reduce_scatter doesn't return the matmul result,
@@ -891,13 +908,21 @@ def fuse_matmul_reduce_scatter(reduce_scatter: _ReduceScatterMatch) -> None:
         return
 
     matmul = _find_producer_matmul(input_node)
+    print(f"XXX fuse_matmul_reduce_scatter matmul:{matmul}")
     if matmul is None:
         log.warning(
             "no producer matmul found for reduce scatter, skipping fuse_matmul_reduce_scatter fusion"
         )
         return
 
+    # if orig_scatter_dim >= len(_get_tensor(matmul.nodes[0]).shape) - 1:
+    #     # Decomposing the matmul on the K dimension is not supported
+    #     print(f"XXX fuse_matmul_reduce_scatter return 916")
+    #     torch.distributed.breakpoint()
+    #     return
+
     if rs_wait_tensor_node in matmul.arg_ancestor_nodes:
+        print("XXX fuse_matmul_reduce_scatter return 913")
         log.warning(
             "reduce-scatter result node is an ancestor of matmul, skipping fuse_matmul_reduce_scatter fusion"
         )
@@ -917,6 +942,7 @@ def fuse_matmul_reduce_scatter(reduce_scatter: _ReduceScatterMatch) -> None:
         )
     else:
         scatter_dim_after_maybe_reshape = orig_scatter_dim
+    print(f"XXX scatter_dim_after_maybe_reshape:{scatter_dim_after_maybe_reshape}")
 
     # If the 2D mm output was reshaped from 2D -> 3D+, we need to store the intended output shape for the
     # fused matmul reduce scatter implementation to use.
@@ -926,6 +952,7 @@ def fuse_matmul_reduce_scatter(reduce_scatter: _ReduceScatterMatch) -> None:
         A_orig_shape = list(_get_tensor(matmul.A_node).shape)
         B_shape = list(_get_tensor(matmul.B_node).shape)
         output_shape = [*A_orig_shape[:-1], B_shape[-1]]
+    print(f"XXX output_shape:{output_shape}")
 
     graph = rs_wait_tensor_node.graph
     with graph.inserting_before(rs_wait_tensor_node):
@@ -964,6 +991,7 @@ def fuse_matmul_reduce_scatter(reduce_scatter: _ReduceScatterMatch) -> None:
             fused_node.prepend(node)
 
     log.debug("successfully fused matmul reduce scatter")
+    print(f"XXX fuse_matmul_reduce_scatter:{reduce_scatter} PASSED")
 
 
 def _get_node_to_ancestors(
@@ -1050,6 +1078,7 @@ def _get_unexposed_collectives(graph: torch.fx.Graph) -> list[torch.fx.Node]:
 
 
 def micro_pipeline_tp_pass(graph: torch.fx.Graph):
+    print("XXX MICRO_PIPELINE_TP_PASS")
     all_gathers = find_all_gather_patterns(graph)
     reduce_scatters = find_reduce_scatter_patterns(graph)
 
@@ -1072,6 +1101,8 @@ def micro_pipeline_tp_pass(graph: torch.fx.Graph):
             "async TP found no matching all-gather/reduce-scatter patterns for fusion"
         )
 
+    print(f"XXX MPP: all_gathers:{all_gathers}")
+    print(f"XXX MPP: reduce_scatters:{reduce_scatters}")
     for all_gather in all_gathers:
         fuse_all_gather_matmul(all_gather)
 

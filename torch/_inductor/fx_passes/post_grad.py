@@ -166,7 +166,29 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
             B2B_GEMM_PASS.apply(gm.graph)  # type: ignore[arg-type]
 
     if config._micro_pipeline_tp:
+        trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "DEBUG_PRE_MICROPIPELINE",
+                "encoding": "string",
+            },
+            payload_fn=lambda: gm.print_readable(
+                print_output=False, include_stride=True, include_device=True
+            ),
+        )
+        print(f"XXX PRE_MPP:{gm.print_readable(False)}")
         micro_pipeline_tp_pass(gm.graph)
+        # print(f"XXX POST_MPP:{gm.print_readable(False)}")
+        trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "DEBUG_POST_MICROPIPELINE",
+                "encoding": "string",
+            },
+            payload_fn=lambda: gm.print_readable(
+                print_output=False, include_stride=True, include_device=True
+            ),
+        )
 
     if config._fuse_ddp_communication:
         GraphTransformObserver(gm, "fuse_ddp_communication").apply_graph_pass(
