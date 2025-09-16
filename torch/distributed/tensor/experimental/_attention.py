@@ -1188,8 +1188,8 @@ class _ContextParallel(ParallelStyle):
         key = key.contiguous()
         value = value.contiguous()
         """
-        These collectives may not work well with full AC.
-        We will get the warning:
+        TODO: the autograd collectives are not sound. The following warning can
+        appear. We should use custom ops.
 
         UserWarning: _c10d_functional::wait_tensor: an autograd kernel was not
         registered to the Autograd key(s) but we are trying to backprop through it.
