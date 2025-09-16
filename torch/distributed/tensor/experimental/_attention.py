@@ -457,7 +457,7 @@ def _templated_ring_attention(
         else:
             # Round-robin load balancing case, and i > rank.
             # We need to do SPDA with only the second half of the q, and update
-            # only the the second part of  logsumexp. So partial is True.
+            # only the second part of  logsumexp. So partial is True.
             # Note that q, k, v, each contains two chunks.
             q, k, v, partial = query.chunk(2, dim=2)[1], key, value, True
 
