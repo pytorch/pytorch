@@ -607,9 +607,7 @@ class ConstDictVariable(VariableTracker):
                         for k, v in kwargs.items()
                     }
                     self.items.update(kwargs)
-                return ConstantVariable.create(None)
-            else:
-                return super().call_method(tx, name, args, kwargs)
+            return ConstantVariable.create(None)
         elif name == "__contains__":
             if not len(args):
                 raise_args_mismatch(tx, name)
