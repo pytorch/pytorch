@@ -13,23 +13,10 @@ may inlvolve setting additional tools. These options include:
 
 ## Profile-Guided Optimization (PGO)
 
-NEEDS REWRITE!
+Profile-Guided Optimization (PGO) enhances automatic dynamic by sharing profiling decisions across runs of your model. Specifically, it serializes all the choices made by automatic dynamic into a file on disk. You can then copy this file—or store it in a centralized metadata service like S3—and reuse it on other machines to ensure consistent behavior across environments.
 
-Profile-Guided Optimization (PGO) extends automatic dynamic across attempts, learning from previous runs to avoid initial static compilations. This means that things marked as dynamic in attempt 1 will remain dynamic in attempt 2 from the first compilation. If attempt 2 encounters different sizes for the same input, they will be marked as dynamic.
-For example, for the program discussed earlier:
-```python
-def f(x):
-    return x * x.size()[0]
-```
-In attempt 0, when we first encounter `f(x)` with `x=10`, we make it
-static since it's the initial observation. The second time we encounter `f(x)`
-with `x=20`, we have observed two different
-values for `x`, so we make it dynamic through automatic dynamic behavior.
-In attempt 1, we repeat the process above unless Profile-Guided Optimization (PGO) is enabled.
-With PGO, we already know from attempt 0 that `f(x)` should be dynamic, so it is marked as
-such the first time we encounter it.
+For the purposes of the rest of this tutorial, you can use the following environmental variables to turn on PGO locally `TORCH_COMPILE_JOB_ID=1 TORCH_DYNAMO_AUTOMATIC_DYNAMIC_LOCAL_PGO=1`
 
-(identifying-dynamic-elements-marked-by-pgo)=
 #### Identifying Dynamic Elements Marked by PGO
 
 Use `tlparse` to find line numbers of interest and check for multiple values
@@ -64,8 +51,6 @@ If an element is marked as dynamic by PGO, it does not guarantee that it will re
 ```
 
 ## Compiler Collective
-
-NEEDS REWRITE!
 
 Different ranks can communicate with each other to share observed sizes. In the second
 iteration, automatic dynamic uses this information to determine which elements to mark
