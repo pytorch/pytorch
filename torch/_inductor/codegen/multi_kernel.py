@@ -31,7 +31,7 @@ class MultiKernelState:
         self.subkernel_to_kernel_name = {}
         self.kernel_defs = IndentedBuffer()
 
-    def define_kernel(self, kernels):
+    def define_kernel(self, kernels, kernel_shape_keys=None):
         """
         Previously we name the multi kernel as "multi_kernel_{kernel_names[0]}".
         This has some minor issue.
@@ -68,7 +68,7 @@ class MultiKernelState:
             kernels[0].output_node, MultiTemplateBuffer
         ):
             for i, kernel in enumerate(kernels):
-                additional_call_args, additional_arg_types = (
+                additional_call_args, _ = (
                     kernel.additional_call_args_and_types()
                 )
                 if i not in arg_index:
@@ -85,7 +85,7 @@ class MultiKernelState:
             for i in range(len(kernels)):
                 arg_index[i] = [slice(0, len(call_args))]
 
-        shape_specialize = isinstance(kernels[0], TritonTemplateKernel)
+        shape_specialize = kernel_shape_keys is not None
         buf = self.kernel_defs
         buf.writeline("")
         buf.writeline("arg_index = {")
@@ -93,13 +93,25 @@ class MultiKernelState:
             slice_reprs = ", ".join(repr(s) for s in slice_list)
             buf.writeline(f"    {key}: [{slice_reprs}],")
         buf.writeline("}")
-        buf.writeline(
-            f"{multi_kernel_name} = async_compile.multi_kernel({multi_kernel_name!r}, ["
-        )
-        with buf.indent():
-            for name in kernel_names:
-                buf.writeline(f"{name},")
-        buf.writeline(f"], arg_index=arg_index, shape_specialize={shape_specialize})")
+
+        if not shape_specialize:  # no size hint keys, just call with list of kernels
+            buf.writeline(
+                f"{multi_kernel_name} = async_compile.multi_kernel({multi_kernel_name!r}, ["
+            )
+            with buf.indent():
+                for name in kernel_names:
+                    buf.writeline(f"{name},")
+            buf.writeline(f"], arg_index=arg_index)")
+        else:  # call with dict[size hint key, kernel]
+            assert isinstance(kernels[0], TritonTemplateKernel)
+            assert len(kernels) == len(kernel_shape_keys)
+            buf.writeline(
+                f"{multi_kernel_name} = async_compile.size_hint_multi_kernel({multi_kernel_name!r}, {{"
+            )
+            with buf.indent():
+                for shape_key, name in zip(kernel_shape_keys, kernel_names):
+                    buf.writeline(f"{shape_key}: {name},")
+            buf.writeline(f"}}, arg_index=arg_index)")
 
         if config.triton.autotune_at_compile_time:
             V.graph.wrapper_code.src_to_kernel["\n".join(kernel_names)] = (
@@ -266,7 +278,7 @@ class MultiKernelCall:
     This class is called at run time to actually run the kernel
     """
 
-    def __init__(self, multi_kernel_name, kernels, arg_index, shape_specialize=False):
+    def __init__(self, multi_kernel_name, kernels, arg_index):
         assert len(kernels) >= 2
         self._kernels = kernels
         self.multi_kernel_name = multi_kernel_name
@@ -286,13 +298,6 @@ class MultiKernelCall:
             self.load_cache()
 
         self._recorded = False
-
-        # This means for each unique shape we will do a separate assessment
-        # for which kernel is the best. This is particularly useful for matmul
-        # kernels where the best kernel can vary based on very small differences
-        # in shape.
-        self._shape_specialize = shape_specialize
-        self._shape_cache = {}
 
     def cache_file_path(self):
         key = code_hash(
@@ -415,20 +420,6 @@ class MultiKernelCall:
         return V.graph.multi_kernel_to_choice[multi_kernel_name]
 
     def run(self, *args, **kwargs):
-        if self._shape_specialize:
-            cache_key = self._get_shape_cache_key(*args, **kwargs)
-            cached_choice = self._get_cached_shape_choice(cache_key)
-            if cached_choice is not None:
-                self.picked_kernel = cached_choice
-                log.debug(
-                    "using cached shape-specialized choice %dth sub-kernel in %s. Cache key: %s",
-                    self.picked_kernel,
-                    [k.inductor_meta.get("kernel_name") for k in self.kernels],
-                    cache_key,
-                )
-            else:
-                self._select_kernel_by_shape(*args, **kwargs)
-
         if self.picked_kernel is None:
             timings = self.benchmark_sub_kernels(*args, **kwargs)
             self.picked_kernel = timings.index(min(timings))
@@ -460,6 +451,59 @@ class MultiKernelCall:
         filtered_args = self._get_filtered_args(args, self.picked_kernel)
         run(*filtered_args, **kwargs)
 
+    def _metrics_table_row(self, timings):
+        def get_kernel_path(k):
+            return k.fn.fn.__code__.co_filename
+
+        k0 = self.kernels[0]
+        row = {
+            "size_hints": k0.size_hints,
+            "reduction_hint": k0.inductor_meta.get("reduction_hint"),
+        }
+        max_kernels = 4
+        assert len(timings) <= max_kernels
+        for i in range(max_kernels):
+            if i < len(self.kernels):
+                row[f"kernel{i}_path"] = get_kernel_path(self.kernels[i])
+                row[f"kernel{i}_latency"] = timings[i]
+            else:
+                row[f"kernel{i}_path"] = ""
+                row[f"kernel{i}_latency"] = ""
+        return row
+
+
+class SizeHintMultiKernel(MultiKernel):
+    def __init__(self, kernels):
+        assert isinstance(kernels, dict) and len(kernels) >= 2
+
+        self.kernels, self.kernel_shape_keys = [], []
+        for shape_key, kernel in kernels.items():
+            self.kernels.append(kernel)
+            self.kernel_shape_keys.append(shape_key)
+        self.kernel_name = V.graph.wrapper_code.multi_kernel_state.define_kernel(
+            self.kernels, self.kernel_shape_keys
+        )
+
+        # need this since some code in inductor check if the kernel object has an args
+        # attribute to decide if it's a non-null kernel.
+        self.args = object()
+
+
+class SizeHintMultiKernelCall(MultiKernelCall):
+    def __init__(self, multi_kernel_name, kernels, arg_index, selection_method="l1"):
+        super().__init__(multi_kernel_name, list(kernels.values()), arg_index)
+        self._kernel_hints = list(kernels.keys())
+
+        # This means for each unique shape we will do a separate assessment
+        # for which kernel is the best. This is particularly useful for matmul
+        # kernels where the best kernel can vary based on very small differences
+        # in shape.
+        self._shape_specialize = True
+        self._shape_cache = {}
+        
+        assert selection_method in ["benchmark", "l1"]
+        self.selection_method = selection_method
+
     def _get_shape_cache_key(self, *args, **kwargs):
         """
         Generate a cache key based on tensor shapes for shape-specialized dispatch.
@@ -482,32 +526,48 @@ class MultiKernelCall:
         """
         self._shape_cache[cache_key] = kernel_idx
 
+    def _l1_dist(self, k1, k2):
+        dist = 0
+        for s1, s2 in zip(k1, k2):
+            dist += sum(abs(x - y) for x, y in zip(s1, s2))
+        return dist
+
+    def run(self, *args, **kwargs):
+        cache_key = self._get_shape_cache_key(*args, **kwargs)
+        cached_choice = self._get_cached_shape_choice(cache_key)
+        if cached_choice is not None:
+            self.picked_kernel = cached_choice
+            log.debug(
+                "using cached shape-specialized choice %dth sub-kernel in %s. Cache key: %s",
+                self.picked_kernel,
+                [k.inductor_meta.get("kernel_name") for k in self.kernels],
+                cache_key,
+            )
+        else:
+            self._select_kernel_by_shape(*args, **kwargs)
+
+        if not self._recorded:
+            self._recorded = True
+            picked_kernel_name = self.kernels[self.picked_kernel].inductor_meta.get(
+                "kernel_name"
+            )
+            assert picked_kernel_name is not None
+            self.record_choice(self.multi_kernel_name, picked_kernel_name)
+
+        run = self.kernels[self.picked_kernel].run  # type: ignore[method-assign]
+        filtered_args = self._get_filtered_args(args, self.picked_kernel)
+        run(*filtered_args, **kwargs)
+
     def _select_kernel_by_shape(self, *args, **kwargs):
         """
         Benchmark kernels for a particular shape and return the
         best kernel for this shape.
         """
         shape_key = self._get_shape_cache_key(*args, **kwargs)
-        timings = self.benchmark_sub_kernels(*args, **kwargs)
-        self.picked_kernel = timings.index(min(timings))
+        if self.selection_method == "benchmark":
+            timings = self.benchmark_sub_kernels(*args, **kwargs)
+            self.picked_kernel = timings.index(min(timings))
+        else:
+            dists = [self._l1_dist(shape_key, key) if key is not None else 2**62 for key in self._kernel_hints]
+            self.picked_kernel = dists.index(min(dists))
         self._cache_shape_choice(shape_key, self.picked_kernel)
-
-    def _metrics_table_row(self, timings):
-        def get_kernel_path(k):
-            return k.fn.fn.__code__.co_filename
-
-        k0 = self.kernels[0]
-        row = {
-            "size_hints": k0.size_hints,
-            "reduction_hint": k0.inductor_meta.get("reduction_hint"),
-        }
-        max_kernels = 4
-        assert len(timings) <= max_kernels
-        for i in range(max_kernels):
-            if i < len(self.kernels):
-                row[f"kernel{i}_path"] = get_kernel_path(self.kernels[i])
-                row[f"kernel{i}_latency"] = timings[i]
-            else:
-                row[f"kernel{i}_path"] = ""
-                row[f"kernel{i}_latency"] = ""
-        return row
