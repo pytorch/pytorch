@@ -2700,5 +2700,23 @@
         "Set torch._dynamo.config.debug_force_graph_break_on_leaf_return = False"
       ]
     }
+  ],
+  "GB0270": [
+    {
+      "Gb_type": "unimplemented builtin op vars() with no arguments",
+      "Context": "vars: {self} {args}",
+      "Explanation": "Dynamo does not know how to trace builtin operator {self.fn} with no arguments",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB0271": [
+    {
+      "Gb_type": "Class attribute mutation when the __dict__ was already materialized",
+      "Context": "str(self.value)",
+      "Explanation": "Dyanmo does not support tracing mutations on a class when its __dict__ is materialized",
+      "Hints": []
+    }
   ]
 }

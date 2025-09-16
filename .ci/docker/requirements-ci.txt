@@ -379,7 +379,7 @@ dataclasses_json==0.6.7
 cmake==4.0.0
 #Description: required for building
 
-tlparse==0.3.30
+tlparse==0.4.0
 #Description: required for log parsing
 
 cuda-bindings>=12.0,<13.0 ; platform_machine != "s390x"

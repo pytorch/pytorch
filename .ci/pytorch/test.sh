@@ -496,6 +496,14 @@ test_inductor_cpp_wrapper_shard() {
     -k 'take' \
     --shard "$1" "$NUM_TEST_SHARDS" \
     --verbose
+
+  if [[ "${BUILD_ENVIRONMENT}" == *xpu* ]]; then
+    python test/run_test.py \
+      --include inductor/test_mkldnn_pattern_matcher \
+      -k 'xpu' \
+      --shard "$1" "$NUM_TEST_SHARDS" \
+      --verbose
+  fi
 }
 
 # "Global" flags for inductor benchmarking controlled by TEST_CONFIG
@@ -1713,11 +1721,6 @@ elif [[ "${TEST_CONFIG}" == *inductor_cpp_wrapper* ]]; then
 elif [[ "${TEST_CONFIG}" == *inductor* ]]; then
   install_torchvision
   test_inductor_shard "${SHARD_NUMBER}"
-  if [[ "${SHARD_NUMBER}" == 1 ]]; then
-    if [[ "${BUILD_ENVIRONMENT}" != linux-jammy-py3.9-gcc11-build ]]; then
-      test_inductor_distributed
-    fi
-  fi
 elif [[ "${TEST_CONFIG}" == *einops* ]]; then
   test_einops
 elif [[ "${TEST_CONFIG}" == *dynamo_wrapped* ]]; then
