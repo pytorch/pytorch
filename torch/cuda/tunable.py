@@ -600,7 +600,7 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
         assert count in [6, 7]
         untuned_gemm_temp = untuned_gemm[0].split("_")
         # dtypeC = might not be FP8 type, keep track
-        # of the the number of underscores
+        # of the number of underscores
         op_sig = untuned_gemm_temp[0]
         data_typeA = untuned_gemm_temp[1] + "_" + untuned_gemm_temp[2]
         data_typeB = untuned_gemm_temp[3] + "_" + untuned_gemm_temp[4]
