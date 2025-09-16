@@ -178,6 +178,12 @@ class Tensor {
     return defined;
   }
 
+  Tensor clone() const {
+    AtenTensorHandle ret;
+    TORCH_ERROR_CODE_CHECK(aoti_torch_clone(get(), &ret));
+    return Tensor(ret);
+  }
+
   // defined in tensor-inl.h to avoid circular dependencies
   ScalarType scalar_type() const;
 
