@@ -2336,7 +2336,7 @@ class DUAL_LEVEL_MATCH : public LeafGuard {
  * Relational guards compare more than one value. We implement Relational
  * guards by capturing some state in the guard object. For example for tensor
  * aliasing guards - tensor X is not tensor Y - we construct one leaf guard
- * and and install it at as a leaf of two guard managers (one for X and
+ * and install it at as a leaf of two guard managers (one for X and
  * another for Y). Therefore, this guard is run twice. In the first
  * invocation, it saves the first value (state) and returns True. In the
  * second invocation, it compares the saved value with the new value and
