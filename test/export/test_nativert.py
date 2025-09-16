@@ -6,9 +6,19 @@ import pathlib
 import tempfile
 import unittest
 
+from parameterized import parameterized
+
 import torch
+import torch._dynamo as torchdynamo
 from torch._C._nativert import PyModelRunner
+from torch._dynamo.test_case import TestCase
 from torch._subclasses.fake_tensor import FakeTensor
+from torch.nativert.backends._lower_utils import (
+    lower_exported_program,
+    package_nativert_with_aoti_delegate,
+)
+from torch.testing._internal.common_utils import IS_WINDOWS
+from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.utils import _pytree as pytree
 
 
@@ -183,6 +193,153 @@ def make_dynamic_cls(cls, strict=False):
     # REMOVING THIS LINE WILL STOP TESTS FROM RUNNING
     globals()[test_class.__name__] = test_class
     test_class.__module__ = __name__
+
+
+@unittest.skipIf(IS_WINDOWS, "Windows isn't supported for this case")
+@unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
+class TestNativeRT(TestCase):
+    @staticmethod
+    def get_module():
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                return self.relu(self.linear(x))
+
+        return M()
+
+    @staticmethod
+    def get_module_multi_output():
+        class MMultiOutput(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                return (self.relu(self.linear(x)), x)
+
+        return MMultiOutput()
+
+    @staticmethod
+    def get_model_pytree():
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear1 = torch.nn.Linear(4, 4)
+                self.linear2 = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                x1, (x2, x3) = x
+                y1 = self.linear1(x1)
+                y2 = self.linear2(x2)
+                y3 = self.linear2(x3)
+                return (y1, (y2, y3))
+
+        return M()
+
+    parameters = []
+    for device in ["cpu", "cuda"]:
+        if device == "cuda" and not HAS_GPU:
+            continue
+        for module, sample_inputs in [
+            (get_module.__func__().to(device), (torch.randn(4, 4).to(device),)),
+            (
+                get_module_multi_output.__func__().to(device),
+                (torch.randn(4, 4).to(device),),
+            ),
+            (
+                get_model_pytree.__func__().to(device),
+                (
+                    (
+                        torch.randn(4, 4).to(device),
+                        (
+                            torch.randn(4, 4).to(device),
+                            torch.randn(4, 4).to(device),
+                        ),
+                    ),
+                ),
+            ),
+        ]:
+            parameters.append(
+                (
+                    device,
+                    module,
+                    sample_inputs,
+                )
+            )
+
+    @parameterized.expand(parameters)
+    def test_aoti(self, device, m, sample_inputs):
+        MODEL_NAME = "model"
+        BACKEND_ID = "aoti"
+
+        # get the original EP
+        original_ep = torch.export.export(m, sample_inputs)
+
+        aoti_delegate_ep, aoti_files = lower_exported_program(
+            original_ep, MODEL_NAME, BACKEND_ID
+        )
+
+        # package everything needed for the NativeRT to execute the AOTI delegate
+        with tempfile.NamedTemporaryFile(suffix=".pt2", delete=False) as f:
+            package_nativert_with_aoti_delegate(
+                f,
+                MODEL_NAME,
+                BACKEND_ID,
+                original_ep,
+                aoti_delegate_ep,
+                aoti_files,
+            )
+            filename = f.name
+
+        try:
+            ep_args, ep_kwargs = aoti_delegate_ep.example_inputs
+            ep_args_copied, ep_kwargs_copied = (
+                copy.deepcopy(ep_args),
+                copy.deepcopy(ep_kwargs),
+            )
+            torch.manual_seed(0)
+            try:
+                flat_expected = pytree.tree_leaves(
+                    aoti_delegate_ep.module()(*ep_args_copied, **ep_kwargs_copied)
+                )
+            except Exception as e:
+                raise unittest.case.SkipTest(str(e)) from e
+
+            model_runner = PyModelRunner(filename, f"{MODEL_NAME}-{BACKEND_ID}")
+            torch.manual_seed(0)
+            if _is_supported_types((ep_args, ep_kwargs)):
+                results = model_runner.run(*ep_args, **ep_kwargs)
+            else:
+                results = model_runner.run_with_flat_inputs_and_outputs(
+                    *pytree.tree_leaves((ep_args, ep_kwargs))
+                )
+            flat_results = pytree.tree_leaves(results)
+            assert len(flat_results) == len(flat_expected)
+            for result, expected in zip(flat_results, flat_expected):
+                assert type(result) == type(expected)
+                if isinstance(result, torch.Tensor) and isinstance(
+                    expected, torch.Tensor
+                ):
+                    assert result.shape == expected.shape
+                    assert result.dtype == expected.dtype
+                    assert result.device == expected.device
+                    torch.testing.assert_close(result, expected, equal_nan=True)
+                else:
+                    assert result == expected
+        except RuntimeError as e:
+            # User need to register pytree type on the cpp side, which
+            # cannot be tested in python unittest.
+            if "Unknown pytree node type" in str(e):
+                pass
+            else:
+                raise e
+        finally:
+            pathlib.Path(filename).unlink(missing_ok=True)
 
 
 tests = [
