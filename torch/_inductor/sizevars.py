@@ -766,9 +766,7 @@ class SizeVarAllocator:
         assert isinstance(expr, Expr), type(expr)
         free_symbols = expr.free_symbols
         size_dict = {
-            symbol: V.graph.sizevars.size_hint(
-                symbol, fallback=fallback
-            )
+            symbol: V.graph.sizevars.size_hint(symbol, fallback=fallback)
             for symbol in free_symbols
         }
         return expr.subs(size_dict)
