@@ -115,7 +115,7 @@ class MultiKernelState:
             buf.writeline("], arg_index=arg_index)")
         else:  # call with dict[size hint key, kernel]
             assert isinstance(kernels[0], TritonTemplateKernel)
-            assert isinstance(kernel_shape_keys, dict)
+            assert isinstance(kernel_shape_keys, list)
             assert len(kernels) == len(kernel_shape_keys)
             buf.writeline(
                 f"{multi_kernel_name} = async_compile.size_hint_multi_kernel({multi_kernel_name!r}, {{"
@@ -123,7 +123,7 @@ class MultiKernelState:
             with buf.indent():
                 for shape_key, name in zip(kernel_shape_keys, kernel_names):
                     buf.writeline(f"{shape_key}: {name},")
-            buf.writeline("}}, arg_index=arg_index)")
+            buf.writeline("}, arg_index=arg_index)")
 
         if config.triton.autotune_at_compile_time:
             V.graph.wrapper_code.src_to_kernel["\n".join(kernel_names)] = (
@@ -527,11 +527,9 @@ class SizeHintMultiKernelCall(MultiKernelCall):
         super().__init__(multi_kernel_name, list(kernels.values()), arg_index)
         self._kernel_hints = list(kernels.keys())
 
-        # This means for each unique shape we will do a separate assessment
-        # for which kernel is the best. This is particularly useful for matmul
-        # kernels where the best kernel can vary based on very small differences
-        # in shape.
-        self._shape_specialize = True
+        # Caches results for unique shapes.
+        # If `selection_method` == "benchmark", we do a separate assessment for each shape (full benchmarking).
+        # If `selection_method` == "l1", this result is a pre-generated kernel selected on the basis of shape l1-similarity.
         self._shape_cache = {}
 
         self.selection_method = config.multi_kernel_shape_heuristic
