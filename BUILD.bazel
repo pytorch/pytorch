@@ -810,7 +810,7 @@ cc_library(
     name = "torch_python",
     srcs = libtorch_python_core_sources
         + if_cuda(libtorch_python_cuda_sources)
-        + if_cuda(libtorch_python_distributed_sources)
+        + libtorch_python_distributed_sources
         + GENERATED_AUTOGRAD_PYTHON,
     hdrs = glob([
         "torch/csrc/generic/*.cpp",
