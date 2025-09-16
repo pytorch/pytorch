@@ -47,7 +47,15 @@ from torch.fx.experimental.symbolic_shapes import (
     resolve_unbacked_bindings,
 )
 from torch.utils._ordered_set import OrderedSet
-from torch.utils._sympy.functions import CeilDiv, FloorDiv, Identity, ModularIndexing
+from torch.utils._sympy.functions import (
+    CeilDiv,
+    FloorDiv,
+    Identity,
+    Max,
+    Min,
+    Mod,
+    ModularIndexing,
+)
 
 from .._dynamo.utils import import_submodule
 from . import config, inductor_prims, ir, test_operators  # NOQA: F401
@@ -2676,12 +2684,14 @@ def sdpa_constraint(fx_node, *args, **kwargs):
                 # we can make them expanded by setting the stride equal to 0
                 if i in expanded_dims:
                     if V.graph.sizevars.statically_known_equals(
-                        out_strides[i + 1] % ALIGNMENT, 0
+                        Mod(out_strides[i + 1], ALIGNMENT), 0
                     ):
                         out_strides[i] = 0
                         continue
 
-                if not V.graph.sizevars.statically_known_equals(stride % ALIGNMENT, 0):
+                if not V.graph.sizevars.statically_known_equals(
+                    Mod(stride, ALIGNMENT), 0
+                ):
                     stride = ceildiv(stride, ALIGNMENT) * ALIGNMENT
 
                 out_strides[i] = stride
@@ -4780,12 +4790,12 @@ def max_pool2d_with_indices_backward(
     grad_loader = grad_output.make_loader()
     new_size = list(x.get_size())
 
-    h_window_size = max(
-        max(FloorDiv(h, stride[0]) - max(0, FloorDiv(h - kernel_size[0], stride[0])), 1)
+    h_window_size = Max(
+        Max(FloorDiv(h, stride[0]) - Max(0, FloorDiv(h - kernel_size[0], stride[0])), 1)
         for h in range(kernel_size[0] * 2)
     )
-    w_window_size = max(
-        max(FloorDiv(w, stride[1]) - max(0, FloorDiv(w - kernel_size[1], stride[1])), 1)
+    w_window_size = Max(
+        Max(FloorDiv(w, stride[1]) - Max(0, FloorDiv(w - kernel_size[1], stride[1])), 1)
         for w in range(kernel_size[1] * 2)
     )
 
@@ -5023,6 +5033,9 @@ def _adaptive_avg_pool2d(x, output_size):
 
     h_out, w_out = output_size
 
+    # TODO branching and comparing sympy expressions in this function
+    # need a review.
+
     # no-op if the same input and output
     if h_in == h_out and w_in == w_out:
         return clone(x)
@@ -5030,7 +5043,8 @@ def _adaptive_avg_pool2d(x, output_size):
     if h_out == 0 or w_out == 0:
         o_size = [*batch, h_out, w_out]
         return empty(o_size, dtype=x.get_dtype(), device=x.get_device())
-    if h_in % h_out == 0 and w_in % w_out == 0:
+
+    if Mod(h_in, h_out) == 0 and Mod(w_in, w_out) == 0:
         kernel_size = [FloorDiv(h_in, h_out), FloorDiv(w_in, w_out)]
         return avg_pool2d(x, kernel_size)
 
@@ -5104,7 +5118,7 @@ def adaptive_max_pool2d(x, output_size):
             o_size, dtype=torch.int64, device=x.get_device()
         )
 
-    if h_in % h_out == 0 and w_in % w_out == 0:
+    if Mod(h_in, h_out) == 0 and Mod(w_in, w_out) == 0:
         # This is handled by a decomposition
         raise ValueError
 
@@ -5298,7 +5312,7 @@ def upsample_nearest2d_backward(
 
     *_batch, out_h, out_w = input_size
 
-    if inp_h % out_h == 0 and inp_w % out_w == 0:
+    if Mod(inp_h, out_h) == 0 and Mod(inp_w, out_w) == 0:
         return avg_pool2d(
             x, [FloorDiv(inp_h, out_h), FloorDiv(inp_w, out_w)], divisor_override=1
         )
@@ -5486,10 +5500,10 @@ def _avg_poolnd(
             divide_factors = []
             for i in range(dim):
                 hstart = bh[i] * stride[i] - padding[i]
-                hend = sympy.Min(hstart + kernel_size[i], h[i] + padding[i])
+                hend = Min(hstart + kernel_size[i], h[i] + padding[i])
                 if not count_include_pad:
-                    hstart = sympy.Max(hstart, 0)
-                    hend = sympy.Min(hend, h[i])
+                    hstart = Max(hstart, 0)
+                    hend = Max(hend, h[i])
                 factor = ops.index_expr(hend - hstart, torch.int32)
                 divide_factors.append(factor)
             divide_factor = functools.reduce(ops.mul, divide_factors)
@@ -5554,12 +5568,12 @@ def avg_pool2d_backward(
     new_size = list(x.get_size())
     dtype = x.get_dtype()
 
-    h_window_size = max(
-        max(FloorDiv(h, stride[0]) - max(0, FloorDiv(h - kernel_size[0], stride[0])), 1)
+    h_window_size = Max(
+        Max(FloorDiv(h, stride[0]) - Max(0, FloorDiv(h - kernel_size[0], stride[0])), 1)
         for h in range(kernel_size[0] * 2)
     )
-    w_window_size = max(
-        max(FloorDiv(w, stride[1]) - max(0, FloorDiv(w - kernel_size[1], stride[1])), 1)
+    w_window_size = Max(
+        Max(FloorDiv(w, stride[1]) - Max(0, FloorDiv(w - kernel_size[1], stride[1])), 1)
         for w in range(kernel_size[1] * 2)
     )
 
@@ -5730,8 +5744,12 @@ def avg_pool3d_backward(
     dtype = x.get_dtype()
 
     d_window_size, h_window_size, w_window_size = (
-        max(
-            max(d // stride[i] - max(0, (d - kernel_size[i]) // stride[i]), 1)
+        Max(
+            Max(
+                FloorDiv(d, stride[i])
+                - Max(0, FloorDiv(d - kernel_size[i], stride[i])),
+                1,
+            )
             for d in range(kernel_size[i] * 2)
         )
         for i in range(3)
@@ -6017,7 +6035,7 @@ def var_mean_sum_(x, axis, correction, keepdim, return_mean):
 
     denom = sympy_product(size[i] for i in axis)
     if correction:
-        denom = sympy.Max(denom - correction, 0)
+        denom = Max(denom - correction, 0)
     denom = ir.IndexingConstant(index=denom, dtype=x.get_dtype(), device=x.get_device())
     denom = ExpandView.create(denom, list(sum_result.get_size()))
     x_var = div(sum_result, denom)
