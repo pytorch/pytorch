@@ -74,6 +74,16 @@ class _MeshLayout(Layout):
         layout = super().__getitem__(i)
         return _MeshLayout(layout.shape, layout.stride)
 
+    def __getstate__(self) -> dict[str, IntTuple]:
+        return {
+            "shape": self.shape,
+            "stride": self.stride,
+        }
+
+    def __setstate__(self, state: dict[str, IntTuple]) -> None:
+        object.__setattr__(self, "shape", state["shape"])
+        object.__setattr__(self, "stride", state["stride"])
+
     def coalesce(self) -> "_MeshLayout":
         """
         A layout is represented by (sizes):(strides), e.g. (3,2):(4,2).

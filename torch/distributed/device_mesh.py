@@ -18,6 +18,8 @@ from torch.utils._typing_utils import not_none
 __all__ = ["init_device_mesh", "DeviceMesh"]
 
 
+torch.serialization.add_safe_globals([_MeshLayout])
+
 if True:  # just to temporarily avoid reindentation
     from torch.distributed._distributed_c10d import Backend as C10dBackend
     from torch.distributed.distributed_c10d import (
