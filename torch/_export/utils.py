@@ -419,7 +419,7 @@ def _check_symint(
         # this means we deferred a guard from export analysis to runtime, let this pass
         # we'll add a runtime assert checking equality to this replacement expression
         pass
-    elif arg != symint:
+    elif arg != int(symint):
         path = get_keystr(keypath)
         if i is not None:
             path += f".shape[{i}]"
