@@ -24,8 +24,6 @@ if "%INSTALL_FRESH_CONDA%"=="1" (
 
 :: Activate conda so that we can use its commands, i.e. conda, python, pip
 call %CONDA_ROOT_DIR%\Scripts\activate.bat %CONDA_ROOT_DIR%
-:: Create an environment with desired python version
-call conda create -y -n py_tmp python=%PYTHON_VERSION%
 :: Activate conda so that we can use its commands, i.e. conda, python, pip
 call conda activate py_tmp
 
