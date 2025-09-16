@@ -521,14 +521,6 @@ void TuningContext::EnableNumericsCheck(bool value) {
   numerics_check_enable_ = value;
 }
 
-// bool TuningContext::IsNumericsCheckEnabled() const {
-//   const auto env = c10::utils::get_env("PYTORCH_TUNABLEOP_NUMERICAL_CHECK");
-//   if (env == "1") {
-//     return true;
-//   }
-//   return numerics_check_enable_;
-// }
-
 NumericalCheckConfig TuningContext::GetNumericalCheckConfig() const {
   const auto env_opt = c10::utils::get_env("PYTORCH_TUNABLEOP_NUMERICAL_CHECK");
 
@@ -571,7 +563,7 @@ NumericalCheckConfig TuningContext::GetNumericalCheckConfig() const {
 }
 
 bool TuningContext::IsNumericsCheckEnabled() const {
-  // Preserve the old boolean as a fallback; env wins if present.
+  // Preserve the old boolean as a fallback; 
   const auto cfg = GetNumericalCheckConfig();
   return cfg.enabled || numerics_check_enable_;
 }
