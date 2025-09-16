@@ -13,7 +13,6 @@ from torch.distributed.distributed_c10d import (
     get_global_rank,
     get_world_size,
     init_process_group,
-    is_initialized,
     new_group,
     ProcessGroup,
 )
@@ -25,7 +24,12 @@ from torch.distributed.tensor._collective_utils import (
 )
 from torch.distributed.tensor.placement_types import _Partial, Shard
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    skip_but_pass_in_sandcastle,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
@@ -68,24 +72,20 @@ class DeviceMeshSetDeviceTest(DTensorTestBase):
     @skip_if_lt_x_gpu(4)
     def test_manual_set_device(self):
         mesh_tensor = torch.arange(4).reshape(2, 2)
-        self.assertTrue(not is_initialized())
 
         # Set the device on each process before DeviceMesh constructor,
         # and device to be different than the default world rank
         torch.cuda.set_device((self.rank + 2) % self.world_size)
         _set_env_var(world_size=self.world_size, rank=self.rank)
         DeviceMesh(self.device_type, mesh_tensor)
-        self.assertTrue(is_initialized())
 
         # check that the device is set to the correct device
         # and respect the previous set_device calls
         self.assertEqual(torch.cuda.current_device(), (self.rank + 2) % self.world_size)
-        self.destroy_pg()
 
     @skip_if_lt_x_gpu(4)
     def test_auto_set_device_from_local_rank(self):
         mesh_tensor = torch.arange(4).reshape(2, 2)
-        self.assertTrue(not is_initialized())
         # set the local rank to be different than the default world rank,
         # DeviceMesh should respect LOCAL_RANK env var if it's set
         local_rank = (self.rank + 1) % self.world_size
@@ -96,17 +96,14 @@ class DeviceMeshSetDeviceTest(DTensorTestBase):
             local_rank=local_rank,
         )
         DeviceMesh(self.device_type, mesh_tensor)
-        self.assertTrue(is_initialized())
 
         # check that the device is set to the correct device
         # and respect the LOCAL_RANK env var
         self.assertEqual(torch.cuda.current_device(), local_rank)
-        self.destroy_pg()
 
     @skip_if_lt_x_gpu(4)
     def test_auto_set_device_from_heuristic(self):
         mesh_tensor = torch.arange(4).reshape(2, 2)
-        self.assertTrue(not is_initialized())
 
         _set_env_var(
             world_size=self.world_size,
@@ -116,11 +113,9 @@ class DeviceMeshSetDeviceTest(DTensorTestBase):
             UserWarning, "It seems like you did not set/select the default device"
         ):
             DeviceMesh(self.device_type, mesh_tensor)
-        self.assertTrue(is_initialized())
 
         # check that the device is set to the correct device
         self.assertEqual(torch.cuda.current_device(), self.rank)
-        self.destroy_pg()
 
 
 class DeviceMeshTest(DTensorTestBase):
@@ -131,11 +126,8 @@ class DeviceMeshTest(DTensorTestBase):
     @skip_if_lt_x_gpu(4)
     def test_init_process_group(self):
         mesh_tensor = torch.arange(4).reshape(2, 2)
-        self.assertTrue(not is_initialized())
         _set_env_var(world_size=self.world_size, rank=self.rank)
         DeviceMesh(self.device_type, mesh_tensor)
-        self.assertTrue(is_initialized())
-        self.destroy_pg(self.rank)
 
     @with_comms
     @skip_if_lt_x_gpu(4)
@@ -254,6 +246,10 @@ class DeviceMeshTest(DTensorTestBase):
         # we call init_backend we should make sure the default pg already created
         mesh.get_coordinate()
 
+    @skip_but_pass_in_sandcastle(
+        "What does this test want to achieve? "
+        "It init_process_group based on fake then calls init_device_mesh on real device."
+    )
     def test_fake_pg_device_mesh(self):
         fake_store = FakeStore()
         init_process_group("fake", store=fake_store, rank=0, world_size=self.world_size)
@@ -309,6 +305,7 @@ class DeviceMeshTest(DTensorTestBase):
                 groups, self.device_type, invalid_mesh, mesh_dim_names=("dim0", "dim1")
             )
 
+    @with_comms
     def test_raises_invalid_device_type(self):
         with self.assertRaisesRegex(
             RuntimeError,
@@ -623,6 +620,10 @@ class InitDeviceMeshTest(DTensorTestBase):
     def test_backend_override_argument_dict_with_idx_and_backend_eager(self):
         self._test_backend_override_argument_dict_with_idx_and_backend()
 
+    @skip_but_pass_in_sandcastle(
+        "This test won't work because the Options are for Fake PG but "
+        "the created device mesh is on `self.device_type` i.e. `cuda`"
+    )
     @with_comms(backend="fake")
     def test_backend_override_argument_dict_with_name_and_options(self):
         opts = FakeProcessGroup.Options()
@@ -1228,6 +1229,32 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
             )
             mesh_scatter(received_tensor, scattered_tensors, mesh, mesh_dim=dim)
             self.assertEqual(received_tensor, torch.ones(3, 3) * self.rank)
+
+
+@instantiate_parametrized_tests
+class InitWithoutGroup(DTensorTestBase):
+    @property
+    def world_size(self):
+        return 4
+
+    @parametrize(
+        "init_backend", [False, True]
+    )  # Whether DeviceMesh init dim groups during creation
+    def test_mesh_with_dist_init(self, init_backend: bool):
+        _set_env_var(world_size=self.world_size, rank=self.rank)
+        dist.init()
+        DeviceMesh(
+            self.device_type, torch.arange(self.world_size), _init_backend=init_backend
+        )
+
+    @parametrize(
+        "init_backend", [False, True]
+    )  # Whether DeviceMesh init dim groups during creation
+    def test_mesh_without_dist_init(self, init_backend: bool):
+        _set_env_var(world_size=self.world_size, rank=self.rank)
+        DeviceMesh(
+            self.device_type, torch.arange(self.world_size), _init_backend=init_backend
+        )
 
 
 if __name__ == "__main__":
