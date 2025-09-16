@@ -217,6 +217,15 @@ inline Tensor copy_(
   return to<Tensor>(stack[0]);
 }
 
+// We expect this to be the stable version of the clone op that takes
+// in no kwargs (memory_format). We will add kwargs support in the
+// future.
+inline Tensor clone(const Tensor& self) {
+  AtenTensorHandle ret = nullptr;
+  TORCH_ERROR_CODE_CHECK(aoti_torch_clone(self.get(), &ret));
+  return Tensor(ret);
+}
+
 // We expect this to be the stable version of the cpu op with
 // identical semantics to the existing copy_ op (except that it will
 // not be called as a tensor method but only as a function
