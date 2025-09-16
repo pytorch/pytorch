@@ -710,6 +710,15 @@ class TestLRScheduler(TestCase):
             scheduler.get_last_lr(), [0.5 for param_group in self.opt.param_groups]
         )
 
+    def test_reduce_lr_on_plateau_preserves_lr_type(self):
+        # Ensures that tensor lrs are preserved, preventing recompilations.
+        types = [type(group["lr"]) for group in self.opt.param_groups]
+        scheduler = ReduceLROnPlateau(self.opt, mode="min", patience=0)
+        scheduler.step(1.0)
+        scheduler.step(2.0)  # Triggers scheduler._reduce_lr
+        for group, type_ in zip(self.opt.param_groups, types):
+            self.assertEqual(type(group["lr"]), type_)
+
     def test_sequentiallr1(self):
         epochs = 19
         schedulers = [None] * 2
