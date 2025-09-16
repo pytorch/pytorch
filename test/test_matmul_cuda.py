@@ -1749,6 +1749,10 @@ class TestFP8Matmul(TestCase):
         if (recipe == "nvfp4" or recipe == "mxfp4") and K % 32 != 0:
             raise unittest.SkipTest("K must be divisible by 32 for nvfp4/mxfp4 cublas gemm, skipping")
 
+        if torch.version.hip:
+            if not (M % 32 == 0 and K % 128 == 0 and N % 32 == 0):
+                raise unittest.SkipTest("M and N must be multiples of 32 and K must be multiple of 128 on ROCm, skipping")
+
         fp4_scaling_dtype = torch.float8_e8m0fnu if torch.version.hip else torch.float8_e4m3fn
         BLOCK_SIZE = 32 if torch.version.hip else (16 if recipe == "nvfp4" else 32)
         require_exact_match = True
@@ -1913,8 +1917,8 @@ class TestFP8Matmul(TestCase):
                 B = B.clamp(min=min_val, max=max_val).to(torch.float8_e4m3fn)
             else:  # nvfp4 # mxfp4
                 scale_func = data_to_mx_scale if recipe == "mxfp4" else data_to_nvfp4_scale
-                A_scale = scale_func(*([A_ref, BLOCK_SIZE] + recipe if recipe == "mxfp4" else [A_ref, BLOCK_SIZE]))
-                B_scale = scale_func(*([B_ref, BLOCK_SIZE] + recipe if recipe == "mxfp4" else [B_ref, BLOCK_SIZE]))
+                A_scale = scale_func(*([A_ref, BLOCK_SIZE] + [recipe] if recipe == "mxfp4" else [A_ref, BLOCK_SIZE]))
+                B_scale = scale_func(*([B_ref, BLOCK_SIZE] + [recipe] if recipe == "mxfp4" else [B_ref, BLOCK_SIZE]))
                 max_val = FP4_MAX_VAL
                 min_val = -1 * max_val
 
