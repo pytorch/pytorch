@@ -10,7 +10,11 @@ import torch._logging.structured
 import torch.distributed as dist
 from torch._inductor.codecache import WritableTempFile
 from torch._inductor.test_case import TestCase
-from torch.testing._internal.common_utils import IS_FBCODE, IS_SANDCASTLE
+from torch.testing._internal.common_utils import (
+    IS_FBCODE,
+    IS_SANDCASTLE,
+    skip_but_pass_in_sandcastle,
+)
 from torch.utils._triton import has_triton
 
 
@@ -337,6 +341,7 @@ class FxGraphRunnableTest(TestCase):
 
         self._exec_and_verify_payload()
 
+    @skip_but_pass_in_sandcastle("Fake PG + real DeviceMesh doesn't work")
     @unittest.skipIf(
         not torch.distributed.is_available(), "Torch distributed not available"
     )

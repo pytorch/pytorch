@@ -5,10 +5,12 @@ import torch
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.distributed.tensor import DTensor
 from torch.distributed.tensor.placement_types import Shard
+from torch.testing._internal.common_distributed import requires_nccl
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.distributed.fake_pg import FakeStore
 
 
+@requires_nccl()
 class TestFakeDTensor(TestCase):
     def test_fake_dtensor_operations(self):
         # Use FakeTensorMode to handle CUDA tensors without actual CUDA
