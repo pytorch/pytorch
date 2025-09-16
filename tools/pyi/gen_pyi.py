@@ -1430,15 +1430,14 @@ def gen_pyi(
                     "S",
                 )
             ],
-            "_make_dtensor": [
+            "_dtensor__new__": [
                 "@staticmethod\n"
                 + defs(
-                    "_make_dtensor",
+                    "_dtensor__new__",
                     [
                         "cls: type[S]",
-                        "size: Sequence[_int | SymInt]",
-                        "strides: Sequence[_int | SymInt]",
                         "local_tensor: Tensor",
+                        "spec: torch.distributed.tensor._dtensor_spec.DTensorSpec",
                         "requires_grad: _bool",
                     ],
                     "S",
