@@ -274,6 +274,20 @@ if not IS_WINDOWS:
             expected0 = torch.narrow(t, dim0, start0, length0)
             self.assertEqual(out0, expected0)
 
+        def test_get_any_data_ptr(self, device):
+            import libtorch_agnostic
+
+            t = torch.randn(2, 5, device=device, dtype=torch.float32)
+            expected_p = t.data_ptr()
+
+            p = libtorch_agnostic.ops.get_any_data_ptr(t, True)
+            # p == 0 would correspond to a dtype case that support is
+            # not implemented in get_any_data_ptr@kernel.cpp
+            self.assertEqual(p, expected_p)
+
+            p = libtorch_agnostic.ops.get_any_data_ptr(t, False)
+            self.assertEqual(p, expected_p)
+
         @onlyCUDA
         @deviceCountAtLeast(2)
         def test_device_guard(self, device):
