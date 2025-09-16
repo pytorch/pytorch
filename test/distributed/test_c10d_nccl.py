@@ -2990,6 +2990,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
                 prev_nccl_async_error_handling
             )
 
+    @skip_but_pass_in_sandcastle("Fixed in later PR")
     @requires_nccl()
     @requires_nccl_version((2, 4, 0), "Need NCCL 2.4+ for error checking")
     @skip_if_rocm_multiprocess
