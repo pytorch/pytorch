@@ -576,12 +576,11 @@ class SizeVarAllocator:
         *,
         fallback: Optional[int] = None,
         hint_override: Optional[int] = None,
-        use_user_provided_hint_override: bool = False,
     ) -> int:
         out = self.symbolic_hint(
             expr,
             hint_override=hint_override,
-            use_user_provided_hint_override=use_user_provided_hint_override,
+            use_user_provided_hint_override=fallback is not None,
         )
         if not isinstance(out, (int, sympy.Integer)) and fallback is not None:
             # Use the provided heuristic fallback hint
@@ -617,14 +616,12 @@ class SizeVarAllocator:
         *,
         fallback: Optional[int] = None,
         hint_override: Optional[int] = None,
-        use_user_provided_hint_override: bool = False,
     ) -> tuple[int, ...]:
         return tuple(
             self.size_hint(
                 x,
                 fallback=fallback,
                 hint_override=hint_override,
-                use_user_provided_hint_override=use_user_provided_hint_override,
             )
             for x in exprs
         )
