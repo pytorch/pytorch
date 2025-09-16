@@ -713,6 +713,11 @@ class NativeFunction:
 
         precomputed_dict = e.pop("precomputed", None)
         assert precomputed_dict is None or structured is True
+        # Add validation before calling parse
+        if precomputed_dict is not None and not isinstance(precomputed_dict, list):
+            raise ValueError(
+                f"'precomputed' must be a list of strings, got {type(precomputed_dict).__name__}: {precomputed_dict}"
+            )
         precomputed = Precompute.parse(precomputed_dict) if precomputed_dict else None
 
         tags_inp = e.pop("tags", [])
