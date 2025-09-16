@@ -371,6 +371,7 @@ def draft_export(
     preserve_module_call_signature: tuple[str, ...] = (),
     strict: bool = False,
     pre_dispatch: bool = True,
+    prefer_deferred_runtime_asserts_over_guards: bool = False,
 ) -> ExportedProgram:
     start_time = time.time()
     kwargs = kwargs or {}
@@ -396,6 +397,7 @@ def draft_export(
                 strict=strict,
                 pre_dispatch=pre_dispatch,
                 preserve_module_call_signature=preserve_module_call_signature,
+                prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,
             )
         except Exception as exc:
             if (
@@ -420,6 +422,7 @@ def draft_export(
                     strict=strict,
                     pre_dispatch=pre_dispatch,
                     preserve_module_call_signature=preserve_module_call_signature,
+                    prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,
                 )
             else:
                 log_draft_export_usage(

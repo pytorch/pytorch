@@ -39,6 +39,13 @@ from contextlib import contextmanager
 from copy import deepcopy
 from inspect import currentframe
 from typing import Any, Callable, NoReturn, Optional, TYPE_CHECKING, Union
+
+
+try:
+    from typing import LiteralString
+except ImportError:
+    from typing_extensions import LiteralString
+
 from typing_extensions import TypeAliasType, TypeVar
 from weakref import ReferenceType
 
@@ -225,6 +232,22 @@ dunder_attrs_assumed_constants = (
     "__func__",
     "__mro__",
 )
+
+
+def get_framelocals_idx(code: types.CodeType, var_name: str) -> Optional[int]:
+    # Refer to index in the frame's localsplus directly.
+    # NOTE: name order for a code object doesn't change.
+    # NOTE: we need to find the LAST matching index because <= 3.10 contains
+    # duplicate names in the case of cells: a name can be both local and cell
+    # and will take up 2 slots of the frame's localsplus. The correct behavior
+    # is to refer to the cell, which has a higher index.
+    framelocals_names_reversed = code_framelocals_names_reversed_cached(code)
+    if var_name not in framelocals_names_reversed:
+        return None
+    framelocals_idx = (
+        len(framelocals_names_reversed) - framelocals_names_reversed.index(var_name) - 1
+    )
+    return framelocals_idx
 
 
 class IndentedBufferWithPrefix(IndentedBuffer):
@@ -1024,6 +1047,7 @@ class GuardBuilder(GuardBuilderBase):
         self.already_guarded_not_present_in_generic_dict: OrderedSet[
             tuple[str, str]
         ] = OrderedSet()
+        self.guard_tree_values: dict[int, Any] = {}
 
     def guard_on_dict_keys_and_ignore_order(
         self, example_value: dict[Any, Any], guard: Guard
@@ -1317,6 +1341,7 @@ class GuardBuilder(GuardBuilderBase):
 
         if source_name != "":
             example_value = self.get(source_name)
+            self.guard_tree_values[id(example_value)] = example_value
 
         guard_manager_enum = self.get_guard_manager_type(source, example_value)
 
@@ -1335,20 +1360,8 @@ class GuardBuilder(GuardBuilderBase):
 
         # Use istype instead of isinstance to check for exact type of source.
         if istype(source, LocalSource):
-            # Refer to index in the frame's localsplus directly.
-            # NOTE: name order for a code object doesn't change.
-            # NOTE: we need to find the LAST matching index because <= 3.10 contains
-            # duplicate names in the case of cells: a name can be both local and cell
-            # and will take up 2 slots of the frame's localsplus. The correct behavior
-            # is to refer to the cell, which has a higher index.
-            framelocals_names_reversed = code_framelocals_names_reversed_cached(
-                self.f_code
-            )
-            framelocals_idx = (
-                len(framelocals_names_reversed)
-                - framelocals_names_reversed.index(source.local_name)
-                - 1
-            )
+            framelocals_idx = get_framelocals_idx(self.f_code, source.local_name)
+            assert framelocals_idx is not None
             out = root_guard_manager.framelocals_manager(
                 key=(source.local_name, framelocals_idx),
                 source=source_name,
@@ -1736,15 +1749,34 @@ class GuardBuilder(GuardBuilderBase):
         guards_log.debug("Python shape guard function:\n%s", pycode)
         exec(pycode, globals_for_guard_fn, out)
         guard_fn = out["___make_guard_fn"](*closure_vars.values())
+
+        required_locals = {}
+        all_locals = self.scope["L"].keys()
+        for var_name in guard_fn.__code__.co_consts:
+            if isinstance(var_name, str) and var_name in all_locals:
+                index = get_framelocals_idx(self.f_code, var_name)
+                if index is not None:
+                    required_locals[var_name] = index
+
+        construct_partial_framelocals_dict = config.construct_partial_framelocals_dict
+
         if is_epilogue:
             # Epilogue guards are run after all the other guards have finished.
             # If epilogue guards contain a getattr or getitem access, one of the
             # other guards would fail preventing the epilogue guards to run.
             self.guard_manager.root.add_epilogue_lambda_guard(
-                guard_fn, verbose_code_parts
+                guard_fn,
+                required_locals,
+                construct_partial_framelocals_dict,
+                verbose_code_parts,
             )
         else:
-            self.guard_manager.root.add_lambda_guard(guard_fn, verbose_code_parts)
+            self.guard_manager.root.add_lambda_guard(
+                guard_fn,
+                required_locals,
+                construct_partial_framelocals_dict,
+                verbose_code_parts,
+            )
 
     # Warning: use this with care!  This lets you access what the current
     # value of the value you are guarding on is.  You probably don't want
@@ -2026,14 +2058,8 @@ class GuardBuilder(GuardBuilderBase):
         dual_level = self.check_fn_manager.output_graph.dual_level
         code = [f"torch.autograd.forward_ad._current_level == {dual_level}"]
         self._set_guard_export_info(guard, code)
-        # TODO(anijain2305) - Consider this moving this guard to C++
-        forward_ad = torch.autograd.forward_ad
-
-        def fn(x: Any) -> bool:
-            return forward_ad._current_level == dual_level
-
-        self.guard_manager.root.add_lambda_guard(
-            fn, get_verbose_code_parts(code, guard)
+        self.guard_manager.root.add_dual_level_match_guard(
+            dual_level, get_verbose_code_parts(code, guard)
         )
 
     def FUNCTORCH_STACK_MATCH(self, guard: Guard) -> None:
@@ -2048,10 +2074,10 @@ class GuardBuilder(GuardBuilderBase):
         # TODO(anijain2305) - Consider this moving this guard to C++
         compare_fn = torch._functorch.pyfunctorch.compare_functorch_state
 
-        def fn(x: Any) -> bool:
+        def fn() -> bool:
             return compare_fn(states)
 
-        self.guard_manager.root.add_lambda_guard(
+        self.guard_manager.root.add_lambda_guard_no_args(
             fn, get_verbose_code_parts(code, guard)
         )
 
@@ -2077,10 +2103,10 @@ class GuardBuilder(GuardBuilderBase):
         ]
         self._set_guard_export_info(guard, code)
 
-        def fn(x: Any) -> bool:
+        def fn() -> bool:
             return guard_hooks_ids == hooks_ids_fn(get_hooks())
 
-        self.guard_manager.root.add_lambda_guard(
+        self.guard_manager.root.add_lambda_guard_no_args(
             fn, get_verbose_code_parts(code, guard)
         )
 
@@ -2101,7 +2127,7 @@ class GuardBuilder(GuardBuilderBase):
                 return x.__tensor_flatten__()[1] == original_metadata
 
         global_name = f"___check_metadata_{id(metadata_checker)}_c{CompileContext.current_compile_id()}"
-        self.get_guard_manager(guard).add_lambda_guard(
+        self.get_guard_manager(guard).add_lambda_guard_no_framelocals(
             metadata_checker, get_verbose_code_parts(global_name, guard)
         )
 
@@ -2171,26 +2197,20 @@ class GuardBuilder(GuardBuilderBase):
 
         # Special case for nan because float("nan") == float("nan") evaluates to False
         if istype(val, float) and math.isnan(val):
-            self.TYPE_MATCH(guard)
-            code = []
-            code.append(f"__math_isnan({ref})")
+            code = [f"(type({ref}) is float and __math_isnan({ref}))"]
             self._set_guard_export_info(guard, code)
 
-            self.get_guard_manager(guard).add_lambda_guard(
-                _get_closure_vars()["__math_isnan"],  # type: ignore[arg-type]
+            self.get_guard_manager(guard).add_float_is_nan_guard(
                 get_verbose_code_parts(code, guard),
             )
             return
 
         # Python math library doesn't support complex nan, so we need to use numpy
         if istype(val, complex) and np.isnan(val):
-            self.TYPE_MATCH(guard)
-            code = []
-            code.append(f"__numpy_isnan({ref})")
+            code = [f"(type({ref}) is complex and __numpy_isnan({ref}))"]
             self._set_guard_export_info(guard, code)
 
-            self.get_guard_manager(guard).add_lambda_guard(
-                _get_closure_vars()["__numpy_isnan"],  # type: ignore[arg-type]
+            self.get_guard_manager(guard).add_complex_is_nan_guard(
                 get_verbose_code_parts(code, guard),
             )
             return
@@ -3069,11 +3089,34 @@ class _Missing:
     pass
 
 
+@functools.cache
+def _get_unsupported_types() -> tuple[type, ...]:
+    # We only do ID_MATCH on C objects which is already banned from guards serialization.
+    ret: tuple[type, ...] = (
+        types.CodeType,
+        torch._C.Stream,
+        weakref.ReferenceType,
+    )
+    try:
+        ret += (torch._C._distributed_c10d.ProcessGroup,)
+    except AttributeError:
+        pass
+    return ret
+
+
 class GuardsStatePickler(pickle.Pickler):
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
+    def __init__(
+        self,
+        guard_tree_values: dict[int, Any],
+        empty_values: dict[int, Any],
+        *args: Any,
+        **kwargs: Any,
+    ) -> None:
         super().__init__(*args, **kwargs)
         self.fake_mode = torch._subclasses.FakeTensorMode()
         self.tensor_converter = torch._subclasses.fake_tensor.FakeTensorConverter()
+        self.guard_tree_values = guard_tree_values
+        self.empty_values = empty_values
 
     @classmethod
     def _unpickle_module(cls, state: Any) -> torch.nn.Module:
@@ -3146,6 +3189,18 @@ class GuardsStatePickler(pickle.Pickler):
         return types.MappingProxyType(d)
 
     @classmethod
+    def _unpickle_dict_keys(cls, elems: list[Any]) -> Any:
+        return dict.fromkeys(elems).keys()
+
+    @classmethod
+    def _unpickle_fsdp_module_type(
+        cls, original_type: type[torch.nn.Module]
+    ) -> type[torch.nn.Module]:
+        return torch.distributed.fsdp._fully_shard._fully_shard.get_cls_to_fsdp_cls()[
+            original_type
+        ]
+
+    @classmethod
     def _unpickle_c_op(cls, name: str) -> Any:
         return getattr(torch.ops._C, name)
 
@@ -3154,8 +3209,14 @@ class GuardsStatePickler(pickle.Pickler):
     ) -> Union[tuple[Callable[..., Any], tuple[Any, ...]], Any]:
         import sympy
 
+        if id(obj) in self.empty_values:
+            return type(obj).__new__, (type(obj),)
+
         if isinstance(obj, torch.Tensor) and obj.device.type != "meta":
             from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+
+            if id(obj) not in self.guard_tree_values:
+                return _Missing, ()
 
             if is_traceable_wrapper_subclass(obj):
                 # inner_data is a list of tuples of:
@@ -3166,6 +3227,8 @@ class GuardsStatePickler(pickle.Pickler):
                 # recursively call for inner tensor components
                 for attr in attrs:
                     inner = getattr(obj, attr)
+                    if isinstance(inner, torch.Tensor):
+                        self.guard_tree_values[id(inner)] = inner
                     func, args_tuple = self.reducer_override(inner)
                     inner_data.append((attr, func, args_tuple))
 
@@ -3215,6 +3278,9 @@ class GuardsStatePickler(pickle.Pickler):
         elif isinstance(obj, types.MappingProxyType):
             return type(self)._unpickle_mapping_proxy, (obj.copy(),)
 
+        elif isinstance(obj, torch._dynamo.utils.dict_keys):
+            return type(self)._unpickle_dict_keys, (list(obj),)
+
         elif isinstance(
             obj, torch._ops.OpOverloadPacket
         ) and obj._qualified_op_name.startswith("_C::"):
@@ -3227,14 +3293,18 @@ class GuardsStatePickler(pickle.Pickler):
             # Skipping PyCapsule since there isn't much to be guarded about them.
             return _Missing, ()
 
-        elif isinstance(obj, types.CodeType):
-            # We only do ID_MATCH on code objects which is already banned from guards serialization.
+        elif isinstance(obj, _get_unsupported_types()):
             return _Missing, ()
 
-        elif inspect.isfunction(obj) and (obj.__code__.co_flags & inspect.CO_NESTED):
-            # Skipping nested function since CLOSURE_MATCH is banned from guards serialization.
-            assert obj.__qualname__ != obj.__name__
-            return _Missing, ()
+        elif inspect.isfunction(obj):
+            if obj.__code__.co_flags & inspect.CO_NESTED:
+                return _Missing, ()
+            if obj.__module__ in sys.modules:
+                f = sys.modules[obj.__module__]
+                for name in obj.__qualname__.split("."):
+                    f = getattr(f, name, None)  # type: ignore[assignment]
+                if f is not obj:
+                    return _Missing, ()
 
         if type(obj).__qualname__ != type(obj).__name__:
             raise torch._dynamo.exc.PackageError(
@@ -3243,12 +3313,44 @@ class GuardsStatePickler(pickle.Pickler):
                 + "Please define the class at global scope (top level of a module)."
             )
 
+        if hasattr(torch.distributed, "distributed_c10d") and isinstance(
+            obj, torch.distributed.distributed_c10d.Work
+        ):
+            if id(obj) not in self.guard_tree_values:
+                return _Missing, ()
+
+        if (
+            inspect.isclass(obj)
+            and hasattr(torch.distributed, "fsdp")
+            and issubclass(obj, torch.distributed.fsdp._fully_shard.FSDPModule)
+        ):
+            if obj is not torch.distributed.fsdp._fully_shard.FSDPModule:
+                original_type = obj.__mro__[2]
+                assert issubclass(original_type, torch.nn.Module)
+                assert (
+                    original_type
+                    in torch.distributed.fsdp._fully_shard._fully_shard.get_cls_to_fsdp_cls()
+                )
+                return type(self)._unpickle_fsdp_module_type, (original_type,)
+
         return NotImplemented
 
 
-def pickle_guards_state(state: GuardsState) -> bytes:
+def pickle_guards_state(state: GuardsState, guard_tree_values: dict[int, Any]) -> bytes:
     buf = io.BytesIO()
-    pickler = GuardsStatePickler(buf)
+    empty_values = {}
+
+    leaves = pytree.tree_leaves(state.output_graph.local_scope)
+    for leaf in leaves:
+        if inspect.ismethod(leaf) and hasattr(leaf, "__self__"):
+            base = leaf.__self__
+            if id(base) not in guard_tree_values:
+                try:
+                    type(base).__new__(type(base))
+                    empty_values[id(base)] = base
+                except:  # noqa: E722, B001
+                    pass
+    pickler = GuardsStatePickler(guard_tree_values, empty_values, buf)
     try:
         pickler.dump(state)
     except AttributeError as e:
@@ -3274,6 +3376,7 @@ class CheckFunctionManager:
         shape_code_parts: Optional[ShapeCodeParts] = None,
         runtime_global_scope: Optional[dict[str, Any]] = None,
         save_guards: bool = False,
+        strict_error: bool = False,
     ):
         guards = output_graph.guards if output_graph else None
         self._weakrefs: dict[int, ReferenceType[object]] = {}
@@ -3310,8 +3413,15 @@ class CheckFunctionManager:
                     if not keep:
                         ret.append(False)
                     elif (
-                        g.guard_type in ("ID_MATCH", "CLOSURE_MATCH", "WEAKREF_ALIVE")
+                        g.guard_type
+                        in (
+                            "ID_MATCH",
+                            "CLOSURE_MATCH",
+                            "WEAKREF_ALIVE",
+                            "DICT_VERSION",
+                        )
                         or "ID_MATCH" in g.derived_guard_types
+                        or "DICT_VERSION" in g.derived_guard_types
                     ):
                         log.warning(
                             "%s guard on %s is dropped with caching_precompile=True.",
@@ -3447,7 +3557,7 @@ class CheckFunctionManager:
                     builder, sorted_guards, self.output_graph
                 )
             except exc.PackageError as e:
-                if torch._dynamo.config.strict_precompile:
+                if torch._dynamo.config.strict_precompile or strict_error:
                     raise e
                 self.output_graph.bypass_package(
                     f"Guard evaluation failed: {str(e)}",
@@ -3470,20 +3580,21 @@ class CheckFunctionManager:
         self._weakrefs.clear()
         self.output_graph = None
 
+    UNSUPPORTED_SERIALIZATION_GUARD_TYPES: tuple[LiteralString, ...] = (
+        "DICT_VERSION",
+        "NN_MODULE",
+        "ID_MATCH",
+        "FUNCTION_MATCH",
+        "CLOSURE_MATCH",
+        "WEAKREF_ALIVE",
+    )
+
     def serialize_guards(
         self,
         builder: GuardBuilder,
         sorted_guards: list[Guard],
         output_graph: OutputGraph,
     ) -> bytes:
-        UNSUPPORTED_GUARD_TYPES = (
-            "DICT_VERSION",
-            "NN_MODULE",
-            "ID_MATCH",
-            "FUNCTION_MATCH",
-            "CLOSURE_MATCH",
-            "WEAKREF_ALIVE",
-        )
         # We check whether our list of guards are serializable here
         for guard in sorted_guards:
             guard_type = guard.create_fn_name()
@@ -3495,12 +3606,19 @@ class CheckFunctionManager:
                     # Only call builder.get again if we know we're going to throw
                     obj = builder.get(guard.name)
                     raise_local_type_error(obj)
-            elif guard_type in UNSUPPORTED_GUARD_TYPES:
+            elif (
+                guard_type in CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
+            ):
                 raise torch._dynamo.exc.PackageError(
                     f"{guard_type} guard cannot be serialized."
                 )
             elif failed := next(
-                (i for i in derived_guard_types if i in UNSUPPORTED_GUARD_TYPES), None
+                (
+                    i
+                    for i in derived_guard_types
+                    if i in CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
+                ),
+                None,
             ):
                 # Just raise the first failed guard name
                 raise torch._dynamo.exc.PackageError(
@@ -3592,7 +3710,7 @@ class CheckFunctionManager:
             shape_code_parts=self.shape_code_parts,
         )
 
-        return pickle_guards_state(guards_state)
+        return pickle_guards_state(guards_state, builder.guard_tree_values)
 
     def build_guards(
         self,
