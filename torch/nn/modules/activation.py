@@ -885,7 +885,10 @@ class LeakyReLU(Module):
         \begin{cases}
         x, & \text{ if } x \geq 0 \\
         \text{negative\_slope} \times x, & \text{ otherwise }
-        \end{cases}
+        \end{cases} 
+
+        See also :class:`~torch.nn.ReLU` for the non-leaky variant.
+
 
     Args:
         negative_slope: Controls the angle of the negative slope (which is used for
@@ -961,8 +964,8 @@ class Softplus(Module):
     .. math::
         \text{Softplus}(x) = \frac{1}{\beta} * \log(1 + \exp(\beta * x))
 
-    SoftPlus is a smooth approximation to the ReLU function and can be used
-    to constrain the output of a machine to always be positive.
+    SoftPlus is a smooth approximation to the :class:`~torch.nn.ReLU` function and can be used
+
 
     For numerical stability the implementation reverts to the linear function
     when :math:`input \times \beta > threshold`.
