@@ -17,7 +17,8 @@ import pytorch_test_common
 
 import torch
 from torch import export as torch_export
-from torch.onnx import _constants, verification
+from torch.onnx import _constants
+from torch.onnx._internal.torchscript_exporter import verification
 from torch.testing._internal import common_utils
 from torch.testing._internal.opinfo import core as opinfo_core
 from torch.types import Number
