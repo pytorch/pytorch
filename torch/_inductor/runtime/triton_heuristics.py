@@ -754,8 +754,9 @@ class CachingAutotuner(KernelInterface):
             "num_stages": compile_meta["num_stages"],
             "debug": compile_meta["debug"],
             "sanitize_overflow": False,  # turn off additional asserts added for overflow checks
-            "enable_fp_fusion": compile_meta["enable_fp_fusion"],
         }
+        if "enable_fp_fusion" in compile_meta:
+            options["enable_fp_fusion"] = compile_meta["enable_fp_fusion"]
         if HAS_WARP_SPEC:
             options.update(
                 {
