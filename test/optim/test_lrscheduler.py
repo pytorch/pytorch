@@ -369,6 +369,16 @@ class TestLRScheduler(TestCase):
         scheduler = MultiStepLR(self.opt, gamma=0.1, milestones=[2, 5, 9])
         self._test_get_last_lr(scheduler, targets, epochs)
 
+    def test_raise_error_when_last_epoch_is_greater_than_0_and_initial_lr_is_not_specified(
+        self,
+    ):
+        optimizer = SGD([Parameter(torch.randn(2, 2, requires_grad=True))], 0.1)
+        with self.assertRaisesRegex(
+            KeyError,
+            r"param \'initial_lr\' is not specified in param_groups\[0\] when resuming scheduler with last_epoch >= 0",
+        ):
+            StepLR(optimizer, step_size=3, gamma=0.1, last_epoch=1)
+
     def test_multi_step_lr(self):
         # lr = 0.05     if epoch < 2
         # lr = 0.005    if 2 <= epoch < 5
@@ -783,6 +793,19 @@ class TestLRScheduler(TestCase):
 
         scheduler = SequentialLR(self.opt, schedulers=schedulers, milestones=milestones)
         self._test(scheduler, targets, epochs)
+
+    def test_sequentiallr_no_warnings(self):
+        scheduler1 = LinearLR(self.opt, start_factor=0.5, end_factor=0.1, total_iters=5)
+        scheduler2 = ExponentialLR(self.opt, gamma=0.9)
+        scheduler = SequentialLR(
+            self.opt, schedulers=[scheduler1, scheduler2], milestones=[5]
+        )
+
+        for _ in range(10):
+            self.opt.step()
+            with warnings.catch_warnings(record=True) as ws:
+                scheduler.step()
+                self.assertTrue(len(ws) == 0, "No warning should be raised")
 
     def test_get_last_lr_sequentiallr(self):
         epochs = 12

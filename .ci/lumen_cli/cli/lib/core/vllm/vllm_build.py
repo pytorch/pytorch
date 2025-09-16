@@ -66,6 +66,11 @@ class VllmBuildParameters:
         "DOCKERFILE_PATH", ".github/ci_configs/vllm/Dockerfile.tmp_vllm"
     )
 
+    # the cleaning script to remove torch dependencies from pip
+    cleaning_script: Path = env_path_field(
+        "cleaning_script", ".github/ci_configs/vllm/use_existing_torch.py"
+    )
+
     # OUTPUT_DIR: where docker buildx (local exporter) will write artifacts
     output_dir: Path = env_path_field("OUTPUT_DIR", "external/vllm")
 
@@ -160,6 +165,7 @@ class VllmBuildRunner(BaseRunner):
         logger.info("Running vllm build with inputs: %s", inputs)
         vllm_commit = clone_vllm()
 
+        self.cp_torch_cleaning_script(inputs)
         self.cp_dockerfile_if_exist(inputs)
         # cp torch wheels from root direct to vllm workspace if exist
         self.cp_torch_whls_if_exist(inputs)
@@ -204,6 +210,11 @@ class VllmBuildRunner(BaseRunner):
         force_create_dir(tmp_path)
         copy(inputs.torch_whls_path, tmp_dir)
         return tmp_dir
+
+    def cp_torch_cleaning_script(self, inputs: VllmBuildParameters):
+        script = get_path(inputs.cleaning_script, resolve=True)
+        vllm_script = Path(f"./{self.work_directory}/use_existing_torch.py")
+        copy(script, vllm_script)
 
     def cp_dockerfile_if_exist(self, inputs: VllmBuildParameters):
         if not inputs.use_local_dockerfile:

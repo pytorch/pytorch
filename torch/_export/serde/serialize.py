@@ -42,6 +42,7 @@ from .schema import (  # type: ignore[attr-defined]
     Argument,
     ArgumentKind,
     BufferMutationSpec,
+    ComplexValue,
     ConstantValue,
     CustomObjArgument,
     Device,
@@ -92,14 +93,6 @@ from .schema import (  # type: ignore[attr-defined]
     UserOutputSpec,
 )
 from .union import _Union
-
-
-if has_triton():
-    from triton.runtime.autotuner import Autotuner
-else:
-
-    class Autotuner:  # type: ignore[no-redef]
-        pass
 
 
 __all__ = [
@@ -517,6 +510,59 @@ class Final(type):
         return type.__new__(metacls, name, bases, dict(classdict))
 
 
+def get_triton_kernel_and_cache_entry(node: torch.fx.Node):
+    assert (
+        node.target
+        is torch._higher_order_ops.triton_kernel_wrap.triton_kernel_wrapper_functional
+    )
+
+    assert has_triton(), "triton required to serialize triton kernels"
+    from triton.runtime.autotuner import Autotuner
+
+    assert isinstance(node.kwargs["kernel_idx"], int)
+    kernel = torch._higher_order_ops.triton_kernel_wrap.kernel_side_table.get_kernel(
+        node.kwargs["kernel_idx"]
+    )
+
+    kNumWarpsDefault = 4
+
+    # currently we only support specialization of
+    # num_warps -- so search for the entry that
+    # matches the value from the associated kernel
+    if isinstance(kernel, Autotuner):
+        assert len(kernel.configs) == 1
+        num_warps = kernel.configs[0].num_warps
+        assert kernel.configs[0].num_ctas == 1, (
+            "serialization only supports num_ctas == 1"
+        )
+        kernel = kernel.fn
+    else:
+        num_warps = kNumWarpsDefault
+
+    if hasattr(kernel, "device_caches"):
+        caches = kernel.device_caches
+        assert len(caches.keys()) == 1
+        cache = next(iter(caches.values()))[0]
+    elif hasattr(kernel, "cache"):
+        # old path, still used for cpu triton builds
+        caches = kernel.cache
+        assert len(caches.keys()) == 1
+        cache = next(iter(caches.values()))
+    else:
+        raise AssertionError(f"kernel caches not found for kernel {kernel.__name__}")
+
+    # can also get num_warps, num_ctas, etc. from here ig
+    if len(cache.keys()) == 1:
+        return kernel, next(iter(cache.values()))
+    else:
+        for cache_entry in cache.values():
+            if cache_entry.metadata.num_warps == num_warps:
+                return kernel, cache_entry
+        raise AssertionError(
+            f"couldn't find a kernel cache entry with metadata matching the autotuner configs for kernel {kernel.__name__}"
+        )
+
+
 @final
 class GraphModuleSerializer(metaclass=Final):
     def __init__(
@@ -683,28 +729,14 @@ class GraphModuleSerializer(metaclass=Final):
                 node.target
                 is torch._higher_order_ops.triton_kernel_wrap.triton_kernel_wrapper_functional
             ):
-                assert has_triton(), "triton required to serialize triton kernels"
+                kernel, kernel_cache_entry = get_triton_kernel_and_cache_entry(node)
+                kernel_cache_metadata = kernel_cache_entry.metadata
 
                 meta_val = node.meta["val"]
                 assert isinstance(meta_val, dict)
 
                 output_keys = meta_val.keys()
                 output_indices = []
-
-                assert isinstance(node.kwargs["kernel_idx"], int)
-                kernel = torch._higher_order_ops.triton_kernel_wrap.kernel_side_table.get_kernel(
-                    node.kwargs["kernel_idx"]
-                )
-
-                if isinstance(kernel, Autotuner):
-                    assert len(kernel.configs) == 1
-                    num_warps = kernel.configs[0].num_warps
-                    assert kernel.configs[0].num_ctas == 1, (
-                        "serialization only supports num_ctas == 1"
-                    )
-                    kernel = kernel.fn
-                else:
-                    num_warps = 4
 
                 constexpr_keys = set()
                 for p in kernel.params:
@@ -738,8 +770,11 @@ class GraphModuleSerializer(metaclass=Final):
                     "name": kernel.fn.__name__,
                     "grid": node.kwargs["grid"][0],
                     "output_indices": output_indices,
-                    "num_warps": num_warps,
+                    "num_warps": kernel_cache_metadata.num_warps,
                 }
+
+                if hasattr(kernel_cache_metadata, "shared"):
+                    kwargs_new["shared_memory_bytes"] = kernel_cache_metadata.shared
 
                 ex_node = Node(
                     target=self.serialize_operator(node.target),
@@ -988,6 +1023,15 @@ class GraphModuleSerializer(metaclass=Final):
                     return Argument.create(
                         as_graph=GraphArgument(name=arg.target, graph=graph)
                     )
+                elif type(attr).__name__ == "LoweredBackendModule":
+                    # Special handling for executorch_call_delegate HOP
+                    # It's first argument is a LoweredBackendModule, for which we
+                    # serialize name and backend id of the lowered module
+                    module_name = getattr(attr, "module_name", None)
+                    backend_id = getattr(attr, "backend_id", None)
+                    assert module_name is not None, "module_name should not be None"
+                    assert backend_id is not None, "backend_id should not be None"
+                    return Argument.create(as_string=f"{module_name}-{backend_id}")
                 else:
                     raise SerializeError(
                         f"Unsupported getattr attribute {arg.target} with type: {type(attr)}"
@@ -1055,6 +1099,10 @@ class GraphModuleSerializer(metaclass=Final):
             return Argument.create(as_int=arg)
         elif type(arg) is float:
             return Argument.create(as_float=arg)
+        elif type(arg) is complex:
+            return Argument.create(
+                as_complex=ComplexValue(real=arg.real, imag=arg.imag)
+            )
         elif arg is None:
             return Argument.create(as_none=True)
         elif isinstance(arg, (list, tuple)):
@@ -1787,6 +1835,7 @@ class ExportedProgramSerializer(metaclass=Final):
             ),
             verifiers=[v.dialect for v in exported_program.verifiers],
             torch_version=torch.__version__,
+            guards_code=exported_program._guards_code,
         )
 
         # Test canonical form is well defined.
@@ -2588,6 +2637,8 @@ class GraphModuleDeserializer(metaclass=Final):
             return inp.as_bool
         elif typ_ == "as_string":
             return inp.as_string
+        elif typ_ == "as_complex":
+            return complex(inp.as_complex.real, inp.as_complex.imag)
         elif typ_ == "as_sym_int":
             return self.deserialize_sym_argument(inp.as_sym_int)
         elif typ_ == "as_sym_float":
@@ -3029,6 +3080,7 @@ class ExportedProgramDeserializer(metaclass=Final):
             constants=res.constants,
             verifiers=[load_verifier(v) for v in exported_program.verifiers],
         )
+        result._guards_code = exported_program.guards_code
         log.debug("\n[deserialize]: %s", result)
         return result
 
@@ -3186,6 +3238,8 @@ def _canonicalize_graph(
         elif a.type == "as_string":
             return None
         elif a.type == "as_strings":
+            return None
+        elif a.type == "as_complex":
             return None
         elif a.type == "as_sym_int":
             return a.as_sym_int
@@ -3491,6 +3545,7 @@ def canonicalize(
     range_constraints = dict(
         sorted(ep.range_constraints.items(), key=operator.itemgetter(0))
     )
+    guards_code = sorted(ep.guards_code)
     module_call_graph = sorted(ep.graph_module.module_call_graph, key=lambda x: x.fqn)
     signature = ep.graph_module.signature
     graph = ep.graph_module.graph
@@ -3687,6 +3742,7 @@ def canonicalize(
         schema_version=ep.schema_version,
         verifiers=ep.verifiers,
         torch_version=ep.torch_version,
+        guards_code=guards_code,
     )
 
 
