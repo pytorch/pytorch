@@ -2002,11 +2002,18 @@ class CppKernel(Kernel):
             )
         )
         self.local_reduction_stores.writeline(f"{acc_local_in_array} = {acc_local};")
+        reduction_combine_line = reduction_combine_fn(
+            reduction_type,
+            acc,
+            acc_local_in_array,
+            src_dtype=dtype,
+            use_helper=use_helper,
+        )
         self.parallel_reduction_suffix.writelines(
             [
                 f"for (int tid = 0; tid < {num_threads}; tid++)",
                 "{",
-                f"    {acc} = {reduction_combine_fn(reduction_type, acc, acc_local_in_array, src_dtype=dtype, use_helper=use_helper)};",
+                f"    {acc} = {reduction_combine_line};",
                 "}",
             ],
         )
@@ -2348,7 +2355,7 @@ class CppKernel(Kernel):
             )
             if reduction_type == "welford_reduce":
                 self.reduction_suffix.writeline(
-                    f"{acc} = welford_combine({acc}, Welford<{DTYPE_TO_CPP[dtype]}>(), false, false, true);"
+                    f"{acc} = welford_combine_final_out({acc});"
                 )
 
         self._gen_parallel_reduction_buffers(
@@ -3053,7 +3060,7 @@ class CppVecKernel(CppKernel):
             operator.mul, self.ranges[self.reduction_depth :]
         )
         use_acc_helper = self.need_use_acc_helper(reduction_type, dtype, reduction_size)
-        if use_acc_helper or reduction_type == "welford_reduce":
+        if use_acc_helper:
             # use masked acc_vec for tail vec kernel
             self.reduction_prefix_generators.append(
                 self._gen_reduction_prefix(
@@ -3065,7 +3072,6 @@ class CppVecKernel(CppKernel):
                 )
             )
 
-        if use_acc_helper:
             # use welford_helper/cascade_helper for vec kernel
             if reduction_type == "welford_reduce":
                 helper_val = self.welford_helper_cse.generate(
@@ -3176,15 +3182,20 @@ class CppVecKernel(CppKernel):
                 ], "Welford reduction does not support VectorizedN (N>2)"
                 use_helper = "true" if use_acc_helper else "false"
                 next_value = f"welford_vec_reduce_all({acc_vec}, {use_helper})"
-                masked_next_value = (
-                    f"welford_vec_reduce_all({masked_acc_vec}, {use_helper})"
-                )
                 self.reduction_suffix.writeline(
                     f"{acc} = welford_combine({acc}, {next_value}, false, {use_helper});"
                 )
-                self.reduction_suffix.writeline(
-                    f"{acc} = welford_combine({acc}, {masked_next_value}, false, {use_helper}, true);"
-                )
+                if use_acc_helper:
+                    masked_next_value = (
+                        f"welford_vec_reduce_all({masked_acc_vec}, {use_helper})"
+                    )
+                    self.reduction_suffix.writeline(
+                        f"{acc} = welford_combine({acc}, {masked_next_value}, false, {use_helper});"
+                    )
+                else:
+                    self.reduction_suffix.writeline(
+                        f"{acc} = welford_combine_final_out({acc});"
+                    )
             else:
                 if argmax_or_argmin:
                     next_value = f"{reduction_type}_vec_reduce_all({acc_vec})"
@@ -3221,18 +3232,23 @@ class CppVecKernel(CppKernel):
             tmpvar = acc
         else:
             tmpvar = acc_vec
-            if is_welford_reduction(reduction_type):
+            if use_acc_helper:
                 masked_tmpvar = f"masked_{tmpvar}"
-                use_helper = "true" if use_acc_helper else "false"
-                self.reduction_suffix.writeline(
-                    f"{tmpvar} = welford_combine({tmpvar}, {masked_tmpvar}, false, {use_helper}, true);"
-                )
-            elif use_acc_helper:
-                assert reduction_type == "sum"
-                masked_tmpvar = f"masked_{tmpvar}"
-                self.reduction_suffix.writeline(
-                    f"{tmpvar} = {tmpvar} + {masked_tmpvar};"
-                )
+                if is_welford_reduction(reduction_type):
+                    use_helper = "true" if use_acc_helper else "false"
+                    self.reduction_suffix.writeline(
+                        f"{tmpvar} = welford_combine({tmpvar}, {masked_tmpvar}, false, {use_helper});"
+                    )
+                else:
+                    assert reduction_type == "sum"
+                    self.reduction_suffix.writeline(
+                        f"{tmpvar} = {tmpvar} + {masked_tmpvar};"
+                    )
+            else:
+                if is_welford_reduction(reduction_type):
+                    self.reduction_suffix.writeline(
+                        f"{acc} = welford_combine_final_out({acc});"
+                    )
 
         result = reduction_project(reduction_type, tmpvar)
         self.reduction_cse.reduction_cache[reduction_key] = result

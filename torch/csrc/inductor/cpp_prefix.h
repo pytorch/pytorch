@@ -167,8 +167,7 @@ Welford<T> welford_combine(
     const Welford<T>& a,
     const Welford<T>& b,
     bool use_index = false,
-    bool use_helper = true,
-    bool is_final_output = false) {
+    bool use_helper = true) {
   if (!use_helper) {
     Welford<T> out;
     if (a.index == 0) {
@@ -181,12 +180,7 @@ Welford<T> welford_combine(
       out = Welford<T>{
           a.mean + b.mean, a.m2 + b.m2, a_weight + b_weight, a.index + b.index};
     }
-    if (!is_final_output) {
-      return out;
-    }
-    T mean = out.mean / out.weight;
-    T m2 = out.m2 - out.mean * out.mean / out.weight;
-    return Welford<T>{mean, m2, out.weight, out.index};
+    return out;
   }
 
   if (a.index == 0) {
@@ -211,6 +205,13 @@ Welford<T> welford_combine(
       new_weight,
       new_index};
   return result;
+}
+
+template <typename T>
+Welford<T> welford_combine_final_out(const Welford<T>& out) {
+  T mean = out.mean / out.weight;
+  T m2 = out.m2 - out.mean * out.mean / out.weight;
+  return Welford<T>{mean, m2, out.weight, out.index};
 }
 
 template <typename T, typename S = float, uint64_t kChunkSize = 0>
