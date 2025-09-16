@@ -261,7 +261,7 @@ THP_PyObject_VirtualFree(void *obj, size_t size)
 {
     PyObjectArenaAllocator arena;
     PyObject_GetArenaAllocator(&arena);
-    return arena.free(arena.ctx, obj, size);
+    arena.free(arena.ctx, obj, size);
 }
 
 // https://github.com/python/cpython/blob/051b8a2589ff28f0194c3701b21f729444691752/Python/pystate.c#L728
@@ -363,7 +363,7 @@ THP_PyThreadState_PopFrame(PyThreadState *tstate, _PyInterpreterFrame * frame)
 
 #endif
 
-#if IS_PYTHON_3_11_PLUS
+#if IS_PYTHON_3_11_PLUS && !defined(_WIN32)
 
 const uint8_t* THP_PyOpcode_Caches = _PyOpcode_Caches;
 const int THP_PyOpcode_Caches_size = sizeof(_PyOpcode_Caches) / sizeof(uint8_t);
