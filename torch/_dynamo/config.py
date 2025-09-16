@@ -110,6 +110,12 @@ automatic_dynamic_shapes = True
 # Valid options: "dynamic", "unbacked"
 automatic_dynamic_shapes_mark_as: Literal["dynamic", "unbacked"] = "dynamic"
 
+# log graph in/out metadata
+# This is only turned on for export today since we
+# know we are tracing a flat callable. later, this
+# can extended to other use cases as well.
+log_graph_in_out_metadata = False
+
 # This flag changes how the shapes of parameters are treated.
 # If this flag is set to True, then the shapes of torch.nn.Parameter as well as of torch.Tensor are attempted to be dynamic
 # If this flag is set to False, then the shapes of torch.nn.Parameter are assumed to be static,
@@ -258,12 +264,6 @@ capture_dynamic_output_shape_ops = (
 # hybrid backed unbacked symints
 prefer_deferred_runtime_asserts_over_guards = False
 
-# For complex dynamic shapes guards that we're unable to specify with dynamo/export's
-# range constraints + dims + derived dims language, we raise constraint violation
-# errors or specialize by default. If set to True, this flag avoids crashing/specialization,
-# and allows complex guards as runtime assertions in the graph.
-allow_complex_guards_as_runtime_asserts = False
-
 # By default, dynamo will treat all ints as backed SymInts, which means (1) it
 # will wait to see the int change over multiple runs before generalizing and
 # (2) it will still always 0/1 specialize an int.  When true, this knob
@@ -380,6 +380,12 @@ use_recursive_dict_tags_for_guards = True
 # Maximum number of objects for which we check dict pointers tags. This is
 # useful for regional compilation.
 max_saved_pointers_for_recursive_dict_tags_check = 256
+
+# Controls whether to construct the partial framelocals to dict for lambda
+# guards. This is a temporary flag to allow quick fallback behavior in case of
+# unexpected issues. Default is True, i.e., we will construct only partial
+# dict, a faster version for guards. Set to False to fallback to old behavior.
+construct_partial_framelocals_dict = True
 
 # If True, raises exception if TorchDynamo is called with a context manager
 raise_on_ctx_manager_usage = True
