@@ -927,10 +927,14 @@ static bool is_float_or_complex_list(
 }
 
 static bool is_int_or_symint(PyObject* obj) {
+  // Call checkLong first so that actual ints go fast.
+  if (THPUtils_checkLong(obj)) {
+    return true;
+  }
+
   // THPUtils_checkIndex may call __index__ or __int__
   // which may have side effects if obj is a symint node
   // so we do `is_symint` check first
-  // TODO: maybe we should be using checkLong here?
   if (torch::is_symint(py::handle(obj))) {
     return true;
   }
