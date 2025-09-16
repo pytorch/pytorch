@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
-from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar
+import io
+from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import ParamSpec
 
 import torch
@@ -23,6 +24,7 @@ __all__ = [
     "set_stance",
     "set_enable_guard_collectives",
     "cudagraph_mark_step_begin",
+    "load_compiled_function",
     "wrap_numpy",
     "is_compiling",
     "is_dynamo_compiling",
@@ -39,6 +41,8 @@ __all__ = [
 
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
+FuncType = Callable[..., Any]
+F = TypeVar("F", bound=FuncType)
 
 
 def compile(*args, **kwargs):
@@ -252,7 +256,10 @@ def disable(fn=None, recursive=True, *, reason=None):
 
 
 def set_stance(
-    stance: str = "default", *, skip_guard_eval_unsafe=False, force_backend=None
+    stance: str = "default",
+    *,
+    skip_guard_eval_unsafe: bool = False,
+    force_backend: Union[str, Callable[..., Any], None] = None,
 ):
     """
     Set the current stance of the compiler.
@@ -355,7 +362,7 @@ def set_enable_guard_collectives(enabled: bool):
     from torch._dynamo.eval_frame import guard_collectives_hook
 
     if enabled:
-        return set_guard_complete_hook(guard_collectives_hook) is not None
+        return set_guard_complete_hook(guard_collectives_hook) is not None  # type: ignore[arg-type]
     else:
         return set_guard_complete_hook(None) is not None
 
@@ -634,3 +641,23 @@ def nested_compile_region(fn=None):
     )
 
     return _mark_compile_region(fn)
+
+
+def load_compiled_function(file: io.IOBase) -> Callable[..., Any]:
+    """
+    Load an aot-compiled function from a file.
+
+    .. warning::
+
+        This API is currently experimental and subject to change.
+
+    Args:
+        file: A file-like object containing the serialized compiled function.
+
+    Returns:
+        A torch-compiled function with compilation preloaded from disk.
+    """
+    from torch._dynamo.aot_compile import AOTCompiledFunction
+
+    data = file.read()
+    return AOTCompiledFunction.deserialize(data)

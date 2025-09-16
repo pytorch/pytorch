@@ -21,6 +21,8 @@ while IFS= read -r file; do
     if [ -f "$file" ]; then
         # Use sed to replace "make_kernel" with "make_kernel_pt" in place
         sed -i 's/make_kernel/make_kernel_pt/g' "$file"
+        sed -i 's/\#include \"fmha_fwd.hpp\"/\#include \"fmha_fwd.hpp\"\n\#include \"launch_kernel_pt.hpp\"/g' "$file"
+        sed -i 's/\#include \"fmha_bwd.hpp\"/\#include \"fmha_bwd.hpp\"\n\#include \"launch_kernel_pt.hpp\"/g' "$file"
         echo "Updated: $file"
     else
         echo "Skipping: $file (not found)"

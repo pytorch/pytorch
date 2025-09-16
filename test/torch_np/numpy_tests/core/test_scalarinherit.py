@@ -1,8 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
-""" Test printing of scalar types.
+"""Test printing of scalar types."""
 
-"""
 import functools
 from unittest import skipIf as skipif
 

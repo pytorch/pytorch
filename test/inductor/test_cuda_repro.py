@@ -189,9 +189,9 @@ class CudaReproTests(TestCase):
             # padded bias should have an expanded dim
             FileCheck().check("buf0 =").check_same(", 0, ").run(code[0])
             # single fused padded kernel
-            FileCheck().check("def call").check_count(
-                "empty_strided_cuda", 1, exactly=True
-            ).check("return").run(code[0])
+            FileCheck().check_count("empty_strided_cuda(", 1, exactly=True).check(
+                "return"
+            ).run(code[0])
 
             self.assertEqual(out, f(*inputs))
 
@@ -935,7 +935,7 @@ class CudaReproTests(TestCase):
 
         inp = inp.to(torch.float)
         out, code = run_and_get_code(torch.compile(foo), inp)
-        FileCheck().check_not("libdevice.exp").check("tl_math.exp").run(code[0])
+        FileCheck().check_not("tl_math.exp").check("libdevice.exp").run(code[0])
         self.assertEqual(foo(inp), out)
 
         def foo(x):
@@ -1845,6 +1845,7 @@ class CudaReproTests(TestCase):
         self.assertEqual(graph.disable_cudagraphs_reason, None)
         self.assertEqual(graph.device_types, {"cuda"})
 
+    @unittest.skipIf(IS_FBCODE, "Not runnable in fbcode")
     def test_triton_interpret(self):
         import subprocess
 
@@ -2098,6 +2099,7 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         self.assertIn("znumel", code)
 
     @xfailIfPy312Plus  # https://github.com/pytorch/pytorch/issues/142032
+    @unittest.skipIf(config.is_fbcode(), "Dependence on functorch.einops")
     def test_repeated_masked_load(self):
         target_size = (8, 2)
         mem_eff_temporal_upsampling_interp_chunks = 2
@@ -2216,7 +2218,7 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
-    from torch.testing._internal.inductor_utils import HAS_CUDA
+    from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
 
-    if HAS_CUDA and not TEST_WITH_ASAN:
+    if HAS_CUDA_AND_TRITON and not TEST_WITH_ASAN:
         run_tests(needs="filelock")

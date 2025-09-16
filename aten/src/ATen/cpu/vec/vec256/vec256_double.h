@@ -31,7 +31,9 @@ class Vectorized<double> {
   static constexpr size_type size() {
     return 4;
   }
-  Vectorized() {}
+  Vectorized() {
+    values = _mm256_setzero_pd();
+  }
   Vectorized(__m256d v) : values(v) {}
   Vectorized(double val) {
     values = _mm256_set1_pd(val);
@@ -494,11 +496,27 @@ Vectorized<double> inline fmadd(
 }
 
 template <>
+Vectorized<double> inline fnmadd(
+    const Vectorized<double>& a,
+    const Vectorized<double>& b,
+    const Vectorized<double>& c) {
+  return _mm256_fnmadd_pd(a, b, c);
+}
+
+template <>
 Vectorized<double> inline fmsub(
     const Vectorized<double>& a,
     const Vectorized<double>& b,
     const Vectorized<double>& c) {
   return _mm256_fmsub_pd(a, b, c);
+}
+
+template <>
+Vectorized<double> inline fnmsub(
+    const Vectorized<double>& a,
+    const Vectorized<double>& b,
+    const Vectorized<double>& c) {
+  return _mm256_fnmsub_pd(a, b, c);
 }
 #endif
 

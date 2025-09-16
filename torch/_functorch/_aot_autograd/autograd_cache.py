@@ -44,6 +44,7 @@ from torch._inductor.codecache import (
     sha256_hash,
     write_atomic,
 )
+from torch._inductor.cudagraph_utils import BoxedDeviceIndex
 from torch._inductor.output_code import (
     CompiledFxGraph,
     CompiledFxGraphConstants,
@@ -70,14 +71,15 @@ from .runtime_wrappers import (
     FunctionalizedRngRuntimeWrapper,
     post_compile,
     RuntimeWrapper,
+    SerializableCompiledFunction,
     SubclassMeta,
 )
 from .schemas import AOTAutogradCacheInfo, AOTConfig, ViewAndMutationMeta  # noqa: F401
+from .utils import simple_wraps
 
 
 if TYPE_CHECKING:
     from torch._inductor.compile_fx import _CompileFxKwargs
-    from torch._inductor.cudagraph_utils import BoxedDeviceIndex
     from torch._inductor.remote_cache import JsonDataTy, RemoteCache
     from torch._inductor.utils import BoxedBool
     from torch.fx.node import Node
@@ -95,7 +97,7 @@ class FXGraphCacheMiss(BypassAOTAutogradCache):
 
 
 def should_use_remote_autograd_cache():
-    if torch._inductor.config.force_disable_caches:
+    if torch.compiler.config.force_disable_caches:
         return False
     if config.enable_remote_autograd_cache is not None:
         return config.enable_remote_autograd_cache
@@ -116,7 +118,7 @@ def should_use_remote_autograd_cache():
 
 
 def should_use_local_autograd_cache():
-    if torch._inductor.config.force_disable_caches:
+    if torch.compiler.config.force_disable_caches:
         return False
     return config.enable_autograd_cache
 
@@ -302,6 +304,49 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
     a safe and stable cache key for AOTAutograd.
     """
 
+    def get_triton_source_codes_from_gm(
+        self,
+        gm: torch.fx.GraphModule,
+    ):
+        assert has_triton_package(), "Triton is not available"
+
+        triton_kernels = []
+        for module in gm.modules():
+            if not isinstance(module, torch.fx.GraphModule):
+                continue
+            for node in module.graph.nodes:
+                if isinstance(node.target, torch._ops.OpOverloadPacket):
+                    attrs = node.target._dir
+                    for attr in attrs:
+                        if custom_op := getattr(node.target, attr, None):
+                            kernels = torch._library.triton.get_triton_kernels_for_op(
+                                custom_op._name
+                            )
+                            triton_kernels.extend(kernels)
+                elif isinstance(node.target, torch._ops.OpOverload):
+                    kernels = torch._library.triton.get_triton_kernels_for_op(
+                        node.target._name
+                    )
+                    triton_kernels.extend(kernels)
+
+        triton_kernel_source_codes = []
+        from torch._inductor.codegen.wrapper import (
+            user_defined_triton_kernel_transitive_closure_source_code,
+        )
+
+        for kernel in triton_kernels:
+            from triton.runtime.autotuner import Autotuner
+
+            if isinstance(kernel, Autotuner):
+                # Grab the Inner JITFunction
+                kernel = kernel.fn
+            source_codes = user_defined_triton_kernel_transitive_closure_source_code(
+                kernel
+            )
+            triton_kernel_source_codes.append(source_codes)
+
+        return triton_kernel_source_codes
+
     def __init__(
         self,
         gm: torch.fx.GraphModule,
@@ -319,6 +364,8 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
             [],
             [],
         )
+        if has_triton_package():
+            self.triton_kernel_source_codes = self.get_triton_source_codes_from_gm(gm)
 
         if hasattr(gm, "saved_tensors_hooks_pack_0"):
 
@@ -918,6 +965,7 @@ class GenericAOTAutogradCacheEntry(Generic[TForward, TBackward]):
                 fw_metadata=self.runtime_metadata,
                 try_save_cache_entry=None,
             )
+
         else:
             compiled_function = RuntimeWrapper(
                 indices_of_inps_to_detach=self.indices_of_inps_to_detach,
@@ -926,6 +974,11 @@ class GenericAOTAutogradCacheEntry(Generic[TForward, TBackward]):
             ).post_compile(
                 compiled_fw_func, aot_config, runtime_metadata=self.runtime_metadata
             )
+
+        # Add serialization function back onto object
+        compiled_function = SerializableCompiledFunction(
+            compiled_function, lambda: self
+        )
 
         compiled_function, _ = post_compile(
             self.dispatch_wrappers,
@@ -1006,6 +1059,37 @@ class AOTAutogradCacheArtifact(CacheArtifact):
         return "aot_autograd"
 
 
+def deserialize_bundled_cache_entry(data: bytes) -> Callable:
+    entry = pickle.loads(data)
+    # In the precompile use case, guards are already serialized
+    # by dynamo, so we don't need to add them to the environment
+    entry.guards_expr = None
+    # TODO: this isn't exactly right, because cudagraphs needs to be a shared config
+    # which is set by compile_fx. But in precompile, we never actually call compile_fx
+    # so we don't have a place to track cudagraphs here.
+    cudagraphs = torch._inductor.config.triton.cudagraphs
+    boxed_forward_device_index = BoxedDeviceIndex(None)
+    compiled_fn = entry.wrap_post_compile(
+        [],
+        entry.sanitized_aot_config,
+        {
+            "cudagraphs": cudagraphs,
+            "boxed_forward_device_index": boxed_forward_device_index,
+        },
+    )
+
+    # TODO: this ignores flat_params, which can exist
+    # if inline_builtin_nn_modules=False
+    @simple_wraps(compiled_fn)
+    def forward(*runtime_args: tuple[Any]):
+        return compiled_fn(list(runtime_args))
+
+    assert hasattr(compiled_fn, "serialize")
+    forward.serialize = compiled_fn.serialize  # type: ignore[attr-defined]
+
+    return forward
+
+
 @CacheArtifactFactory.register
 class BundledAOTAutogradCacheArtifact(PrecompileCacheArtifact[Callable]):
     @override
@@ -1015,24 +1099,7 @@ class BundledAOTAutogradCacheArtifact(PrecompileCacheArtifact[Callable]):
 
     @override
     def after_deserialization(self) -> Callable:
-        entry = pickle.loads(self.content)
-        # In the precompile use case, guards are already serialized
-        # by dynamo, so we don't need to add them to the environment
-        entry.guards_expr = None
-        # TODO: this isn't exactly right, because cudagraphs needs to be a shared config
-        # which is set by compile_fx. But in precompile, we never actually call compile_fx
-        # so we don't have a place to track cudagraphs here.
-        cudagraphs = torch._inductor.config.triton.cudagraphs
-        compiled_fn = entry.wrap_post_compile(
-            [], entry.sanitized_aot_config, {"cudagraphs": cudagraphs}
-        )
-
-        # TODO: this ignores flat_params, which can exist
-        # if inline_builtin_nn_modules=False
-        def forward(*runtime_args: tuple[Any]):
-            return compiled_fn(list(runtime_args))
-
-        return forward
+        return deserialize_bundled_cache_entry(self.content)
 
 
 class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
@@ -1350,7 +1417,10 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
                 # useful, remove it from the entry.
                 entry.sanitized_aot_config.precompile_backend_id = None
                 PrecompileContext.record_artifact(
-                    BundledAOTAutogradCacheArtifact.type(), precompile_key, content
+                    BundledAOTAutogradCacheArtifact.type(),
+                    precompile_key,
+                    entry,
+                    editable=True,
                 )
             AOTAutogradCache._write_to_local_cache(key, content)
             counters["aot_autograd"]["autograd_cache_saved"] += 1

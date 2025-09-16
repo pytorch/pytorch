@@ -1,18 +1,13 @@
 # Owner(s): ["module: inductor"]
-import functools
 import unittest
 from unittest import mock
 from unittest.mock import MagicMock
 
 import torch
-from torch._dispatch.python import enable_python_dispatcher
-from torch._inductor.codegen.subgraph import SubgraphTemplate
-from torch._inductor.decomposition import select_decomp_table
 from torch._inductor.ir import Buffer, FixedLayout, FlexibleLayout
 from torch._inductor.lowering import register_lowering
 from torch._inductor.select_algorithm import autotune_select_algorithm
 from torch._inductor.test_case import run_tests, TestCase
-from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import skipIfXpu, TEST_WITH_ROCM
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
 
@@ -64,20 +59,14 @@ class TestSubgraphChoice(TestCase):
             choices = [aten_mm.bind((mat1, mat2), layout)]
 
             kPartitions = 256
-            with enable_python_dispatcher():
-                decompositions = select_decomp_table()
 
-                decompose_k_subgraph_template = SubgraphTemplate(
-                    name="decompose_k_mm",
-                    make_fx_graph=make_fx(
-                        functools.partial(decomposeK, kPartitions=kPartitions),
-                        decompositions,
-                        tracing_mode="real",
-                    ),
-                )
+            decompose_k_subgraph_template = (
+                torch._inductor.kernel.mm.DecomposeKSugraphTemplate()
+            )
 
             decompose_k_subgraph_template.maybe_append_choice(
                 choices,
+                k_split=kPartitions,
                 input_nodes=(mat1, mat2),
                 layout=layout,
             )
@@ -139,19 +128,14 @@ class TestSubgraphChoice(TestCase):
             choices = []
 
             kPartitions = 2
-            with enable_python_dispatcher():
-                decompositions = select_decomp_table()
 
-                decompose_k_subgraph_template = SubgraphTemplate(
-                    name="decompose_k_mm",
-                    make_fx_graph=make_fx(
-                        functools.partial(decomposeK, kPartitions=kPartitions),
-                        decompositions,
-                    ),
-                )
+            decompose_k_subgraph_template = (
+                torch._inductor.kernel.mm.DecomposeKSugraphTemplate()
+            )
 
             decompose_k_subgraph_template.maybe_append_choice(
                 choices,
+                k_split=kPartitions,
                 input_nodes=(mat1, mat2),
                 layout=layout,
             )

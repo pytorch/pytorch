@@ -55,6 +55,15 @@ class MPMCQueue {
     return true;
   }
 
+  /**
+   * Get the current size of the queue.
+   * @return The number of elements in the queue.
+   */
+  size_t size() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return storage_.size();
+  }
+
  private:
   std::mutex mutex_;
   std::deque<T> storage_;

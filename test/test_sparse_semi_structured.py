@@ -714,16 +714,18 @@ class TestSparseSemiStructuredTraining(TestCase):
         max_diff = (ref_gemm - pack_gemm).abs().argmax()
         torch.testing.assert_close(
             ref_gemm, pack_gemm,
-            **atol_rtol_kw[dtype]
-        ), f"packed is wrong at pos: ({max_diff // N}, {max_diff % N})"
+            **atol_rtol_kw[dtype],
+            msg=f"packed is wrong at pos: ({max_diff // N}, {max_diff % N})",
+        )
         # Test A.t@B
         pack_gemm = torch._sparse_semi_structured_linear(b.t(), packed_t, meta_t)
         max_diff = (ref_gemm - pack_gemm).abs().argmax()
 
         torch.testing.assert_close(
             ref_gemm, pack_gemm,
-            **atol_rtol_kw[dtype]
-        ), f"packed_t is wrong at pos: ({max_diff // N}, {max_diff % N})"
+            **atol_rtol_kw[dtype],
+            msg=f"packed_t is wrong at pos: ({max_diff // N}, {max_diff % N})",
+        )
 
     @training_dtypes
     @unittest.skipIf(TEST_WITH_ROCM, "Not supported on ROCm")

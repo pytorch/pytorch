@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 """
 The following example demonstrates how to train a ConvNeXt model
-with intermediate activations sharded across mutliple GPUs via DTensor
+with intermediate activations sharded across multiple GPUs via DTensor
 
 To run the example, use the following command:
 torchrun --standalone --nnodes=1 --nproc-per-node=4 convnext_example.py

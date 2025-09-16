@@ -147,7 +147,7 @@ static inline StreamIdType streamIdType(StreamId s) {
   // rightmost bit
   int mask_for_type = (1 << kStreamTypeBits) - 1;
   auto val = (s >> 1) & mask_for_type;
-  TORCH_INTERNAL_ASSERT(val || !(s & 1), "invalid StreamId", s);
+  TORCH_CHECK(val || !(s & 1), "invalid StreamId", s);
   return StreamIdType(val);
 }
 
@@ -216,9 +216,6 @@ static void initSingleStream(int p, DeviceIndex device_index, int i) {
 // Creates the low and high priority stream pools for the specified device
 // Warning: only call once per device!
 static void initDeviceStreamState(DeviceIndex device_index) {
-  // Switches to the requested device so streams are properly associated
-  // with it.
-  CUDAGuard device_guard{device_index};
   for (const auto i : c10::irange(kStreamsPerPool)) {
     for (const auto p : c10::irange(max_stream_priorities)) {
       initSingleStream(p, device_index, i);
@@ -279,7 +276,7 @@ cudaStream_t CUDAStream::stream() const {
   StreamIdType st = streamIdType(stream_id);
   size_t si = streamIdIndex(stream_id);
   if (st.isDefault()) {
-    TORCH_INTERNAL_ASSERT(
+    TORCH_CHECK(
         si == 0,
         "Unrecognized stream ",
         stream_,
@@ -294,7 +291,7 @@ cudaStream_t CUDAStream::stream() const {
     return reinterpret_cast<cudaStream_t>(stream_id);
   } else {
     auto streamType = st.getStreamType();
-    TORCH_INTERNAL_ASSERT(
+    TORCH_CHECK(
         streamType >= 1 && streamType <= max_stream_priorities,
         "Unrecognized stream ",
         stream_,

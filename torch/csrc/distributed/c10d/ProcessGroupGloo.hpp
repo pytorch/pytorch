@@ -255,13 +255,19 @@ class TORCH_API ProcessGroupGloo : public Backend {
       return c10::make_intrusive<Options>(timeout);
     }
 
-    std::vector<uint64_t> global_ranks_in_group;
+    static c10::intrusive_ptr<Options> create_default(
+        std::chrono::milliseconds timeout = kBackendDefaultTimeout);
+
     std::vector<std::shared_ptr<::gloo::transport::Device>> devices;
     int threads;
   };
 
   const std::string getBackendName() const override {
     return std::string(GLOO_BACKEND_NAME);
+  }
+
+  bool supportsSplitting() const override {
+    return true;
   }
 
   // Helper functions to create a new device object.
@@ -308,9 +314,16 @@ class TORCH_API ProcessGroupGloo : public Backend {
     return c10::static_intrusive_pointer_cast<Backend::Options>(options_);
   }
 
-  c10::intrusive_ptr<Backend> splitBackend(
+  c10::intrusive_ptr<Backend> split(
+      const c10::intrusive_ptr<Store>& store,
       const std::vector<int>& ranks,
-      const c10::intrusive_ptr<Backend::Options> opts) override;
+      const c10::intrusive_ptr<Backend::Options>& opts) override;
+
+  c10::intrusive_ptr<Backend> merge(
+      const c10::intrusive_ptr<Store>& store,
+      const c10::intrusive_ptr<Backend::Options>& opts,
+      const int& rank,
+      const int& size) override;
 
   const std::vector<uint64_t>& groupRanks() const;
 

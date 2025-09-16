@@ -1,5 +1,8 @@
 # Owner(s): ["module: inductor"]
+import contextlib
 import functools
+import unittest.mock
+from typing import Callable
 from unittest.mock import patch
 
 import torch
@@ -9,11 +12,24 @@ import torch._inductor.select_algorithm as select_algorithm
 import torch.nn.functional as F
 from torch._dynamo.testing import expectedFailureDynamicWrapper
 from torch._dynamo.utils import counters
+from torch._inductor import config
 from torch._inductor.autotune_process import TritonBenchmarkRequest
+from torch._inductor.ir import FixedLayout
+from torch._inductor.select_algorithm import (
+    autotune_select_algorithm,
+    TritonTemplate,
+    TritonTemplateKernel,
+)
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import is_big_gpu
+from torch._inductor.utils import is_big_gpu, run_and_get_kernels
+from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
 from torch.testing._internal.common_utils import IS_LINUX, skipIfRocm, skipIfXpu
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.testing._internal.inductor_utils import (
+    GPU_TYPE,
+    HAS_GPU,
+    requires_gpu,
+    requires_triton,
+)
 
 
 aten = torch.ops.aten
@@ -146,7 +162,6 @@ class TestSelectAlgorithm(TestCase):
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
     @patches
-    @skipIfXpu(msg="XPU has not supported _int_mm yet")
     def test__int_mm(self):
         @torch.compile
         def foo(a, b):
@@ -400,6 +415,120 @@ class TestSelectAlgorithm(TestCase):
         )
         caller_str = str(caller)
         self.assertEqual(caller_str, f"TritonTemplateCaller({module_path}, extra)")
+
+
+@contextlib.contextmanager
+def patch_lowering(lowering_overrides) -> Callable[[], None]:
+    import torch._inductor.lowering as inductor_lowering
+
+    with unittest.mock.patch.dict(inductor_lowering.lowerings):
+        for fn, (
+            decomp_fn,
+            broadcast,
+            type_promotion_kind,
+            convert_input_to_bool,
+        ) in lowering_overrides.items():
+            inductor_lowering._register_lowering(
+                fn,
+                decomp_fn,
+                broadcast=broadcast,
+                type_promotion_kind=type_promotion_kind,
+                convert_input_to_bool=convert_input_to_bool,
+                lowering_dict=inductor_lowering.lowerings,
+            )
+
+        yield
+
+
+class TestTemplateRender(TestCase):
+    @requires_gpu()
+    @requires_triton()
+    @config.patch(cuda_backend="triton")
+    def test_finalized_subclass_hooks(self):
+        """
+        Tests that all registered triton template hooks have been finalized,
+        especially in the case that the hooks are finalized manually by the
+        caller i.e. by calling template.finalize_hook(hook_name)
+        """
+        hook_identifier = "# CUSTOM_HOOK"
+
+        class ExtensionTritonTemplateKernel(TritonTemplateKernel):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                self._register_extra_template_env_fns(
+                    self.custom_hook,
+                )
+
+            def custom_hook(self) -> str:
+                """
+                Custom hook that just returns a test string for validation
+                """
+
+                def hook() -> str:
+                    return hook_identifier
+
+                return self._register_hook("<CUSTOM_HOOK>", hook)
+
+            def inductor_meta_common(self):
+                return super().inductor_meta_common()
+
+        class ExtensionTritonTemplate(TritonTemplate):
+            kernel_type = ExtensionTritonTemplateKernel
+
+        add_template = ExtensionTritonTemplate(
+            name="add",
+            grid=lambda *args, **kwargs: (1, 1, 1),
+            source=(
+                r"""
+{{def_kernel("A", "B")}}
+    {{custom_hook()}}
+    xoffset = tl.program_id(0)
+    xindex = xoffset + tl.arange(0, XBLOCK)
+    xmask = tl.full([XBLOCK], True, tl.int1)
+    tmp0 = tl.load(A + xindex)
+    tmp1 = tl.load(B + xindex)
+    tmp2 = tmp0 + tmp1
+    {{store_output(("xindex",), "tmp2", mask="xmask")}}
+    """
+            ),
+        )
+
+        XBLOCK = 32
+
+        def add_override(a, b, alpha=None):
+            layout = FixedLayout(a.get_device(), a.get_dtype(), a.get_size())
+            choices = []
+            add_template.maybe_append_choice(
+                choices,
+                input_nodes=(a, b),
+                layout=layout,
+                num_stages=1,
+                num_warps=2,
+                XBLOCK=XBLOCK,
+            )
+            return autotune_select_algorithm("add", choices, [a, b], layout)
+
+        with patch_lowering(
+            {
+                torch.ops.aten.add.Tensor: (
+                    add_override,
+                    True,
+                    ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+                    False,
+                )
+            }
+        ):
+
+            @torch.compile
+            def add(a, b):
+                return a + b
+
+            a = torch.zeros((XBLOCK,), device=GPU_TYPE)
+            b = torch.zeros((XBLOCK,), device=GPU_TYPE)
+
+            _result, kernels = run_and_get_kernels(add, a, b)
+            assert len(kernels) == 1
+            assert hook_identifier in kernels[0]
 
 
 if __name__ == "__main__":

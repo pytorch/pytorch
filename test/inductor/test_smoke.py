@@ -6,7 +6,11 @@ import torch
 import torch._logging
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_utils import IS_LINUX
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CUDA, HAS_GPU
+from torch.testing._internal.inductor_utils import (
+    GPU_TYPE,
+    HAS_CUDA_AND_TRITON,
+    HAS_GPU,
+)
 
 
 class MLP(torch.nn.Module):
@@ -62,5 +66,5 @@ if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
     if IS_LINUX and HAS_GPU:
-        if (not HAS_CUDA) or torch.cuda.get_device_properties(0).major <= 5:
+        if (not HAS_CUDA_AND_TRITON) or torch.cuda.get_device_properties(0).major <= 5:
             run_tests()

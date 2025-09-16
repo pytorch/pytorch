@@ -14,7 +14,6 @@
 /torch/csrc/autograd/ @albanD @soulitzer
 /torch/autograd/ @albanD @soulitzer
 /tools/autograd/ @albanD @soulitzer
-/torch/header_only_apis.txt @janeyx99
 /torch/nn/ @albanD @jbschlosser @mikaylagawarecki
 /torch/optim/ @albanD @janeyx99
 /test/test_public_bindings.py @albanD
@@ -51,12 +50,12 @@ nn/qat/ @jerryzh168
 /torch/csrc/distributed/c10d/Ops.* @kwen2501
 
 # ONNX Export
-/torch/_dynamo/backends/onnxrt.py @wschin
-/torch/csrc/jit/passes/onnx.h @titaiwangms @shubhambhokare1
-/torch/csrc/jit/passes/onnx.cpp @titaiwangms @shubhambhokare1
-/torch/csrc/jit/passes/onnx/ @titaiwangms @shubhambhokare1
-/torch/onnx/ @titaiwangms @shubhambhokare1 @justinchuby @wschin
-/test/onnx/  @titaiwangms @shubhambhokare1 @justinchuby @wschin
+/torch/_dynamo/backends/onnxrt.py @titaiwangms @xadupre @justinchuby
+/torch/csrc/jit/passes/onnx.h @titaiwangms @xadupre
+/torch/csrc/jit/passes/onnx.cpp @titaiwangms @xadupre
+/torch/csrc/jit/passes/onnx/ @titaiwangms @xadupre
+/torch/onnx/ @titaiwangms @xadupre @justinchuby
+/test/onnx/  @titaiwangms @xadupre @justinchuby
 
 # CI
 /.ci  @pytorch/pytorch-dev-infra
@@ -165,6 +164,7 @@ caffe2/utils/hip @jeffdaily @jithunnair-amd
 # torch.export
 /torch/export/ @avikchaudhuri @tugsbayasgalan @zhxchen17 @ydwu4 @angelayi
 /torch/_export/ @avikchaudhuri @tugsbayasgalan @zhxchen17 @ydwu4 @angelayi
+/torch/_export/serde/schema.py @SherlockNoMad @zhxchen17
 
 # Dynamic Shapes
 /torch/fx/experimental/symbolic_shapes.py @bobrenjc93 @laithsakka
@@ -196,3 +196,8 @@ torch/backends/cudnn/ @eqy @syed-ahmed
 /torch/utils/_cxx_pytree.py @XuehaiPan
 /torch/utils/pytree/ @XuehaiPan
 /torch/_dynamo/polyfills/pytree.py @XuehaiPan
+
+# Relating to libtorch ABI
+/torch/csrc/stable/ @janeyx99 @mikaylagawarecki
+/torch/headeronly/ @janeyx99
+/torch/header_only_apis.txt @janeyx99

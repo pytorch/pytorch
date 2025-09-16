@@ -128,7 +128,7 @@ def try_import_cutlass() -> bool:
         if tmp_cutlass_full_path not in sys.path:
 
             def link_and_append(dst_link, src_path, parent_dir):
-                if os.path.exists(dst_link):
+                if os.path.lexists(dst_link):
                     assert os.path.islink(dst_link), (
                         f"{dst_link} is not a symlink. Try to remove {dst_link} manually and try again."
                     )

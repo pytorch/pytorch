@@ -1,0 +1,215 @@
+{{def_kernel("Q", "K", "V", "LSE", "MAX", "KV_NUM_BLKS", "KV_IDX", "FULL_KV_NUM_BLKS", "FULL_KV_IDX")}}
+    # Sub notation for this kernel:
+    #
+    # Q: Query, K: Key, V: Value
+    # M: Number of queries, N: Number of keys/values, D: Model dimension
+    # QK_HEAD_DIM: The dimension of the query and key embeddings
+    # V_HEAD_DIM: The dimension of the value embeddings
+    # z: Batch size, h: Number of heads, m: Number of queries per head, k: Number of keys per head
+    # GQA_SHARED_HEADS: number of query heads sharing one kv head in GQA setups.
+    #
+    # The following FULL_* and PARTIAL_* is defined in the block sparse mask grid, rather than the thread block grid.
+    # KV_NUM_BLKS: The number of KV blocks (that may or may not require masking) for each query.
+    # KV_IDX: The indices of KV blocks (that may or may not require masking) for each query.
+    # FULL_KV_NUM_BLKS: The number of fully unmasked KV blocks (so we don't need masking) for each query.
+    # FULL_KV_IDX: The indices of fully unmasked KV blocks (so we don't need masking) for each query.
+    #
+    # OUTPUT_LOGSUMEXP: We only need to store the logsumexp if we require grad
+    #
+    # (Modifiable) Performance tuning options
+    # BLOCK_M: The thread block size across the seqlen dim of Q.
+    # BLOCK_N: Iterate over BLOCK_N across the seqlen dim of K/V in each thread block.
+
+    # The below are kernel options that can be applied for certain score_mods,
+    # or involve a numerics vs. perf tradeoff
+    # PRESCALE_QK: Whether to pre-scale QK by 1/sqrt(d) and change of base. Has
+    # about 20% more numerical error, but slightly faster.
+    # ROWS_GUARANTEED_SAFE: Is it guaranteed that at least one value in each row
+    # is not masked out? If so, we can skip an extra safety check
+    # BLOCKS_ARE_CONTIGUOUS: Is it guaranteed that all blocks in the mask are
+    # contiguous? If so, we don't need to do an indirect jump for every block
+
+    tl.static_assert(SPARSE_Q_BLOCK_SIZE >= BLOCK_M and SPARSE_Q_BLOCK_SIZE % BLOCK_M == 0)
+    tl.static_assert(SPARSE_KV_BLOCK_SIZE >= BLOCK_N and SPARSE_KV_BLOCK_SIZE % BLOCK_N == 0)
+
+    # Define strides of inputs
+    stride_qz, stride_qh, stride_qm, stride_qk = {{stride("Q")}}
+    stride_kz, stride_kh, stride_kn, stride_kk = {{stride("K")}}
+    stride_vz, stride_vh, stride_vn, stride_vk = {{stride("V")}}
+
+    ZQ = {{size("Q", 0)}}
+    HQ = {{size("Q", 1)}}
+    Q_LEN = {{size("Q", 2)}}
+    ZKV = {{size("K", 0)}}
+    KV_LEN = {{size("K", 2)}}
+
+    MATMUL_PRECISION = Q.dtype.element_ty
+
+    q_start = tl.program_id(0).to(INDEX_DTYPE)
+    off_zq = tl.program_id(1).to(INDEX_DTYPE)
+    off_hq = tl.program_id(2).to(INDEX_DTYPE)
+
+    # We support two cases for batch dimension. a) (ZKV == ZQ) where off_zkv = off_zq.
+    # b) (ZKV == 1 and ZQ > 1) where KV is broadcasted along the batch dimension and off_zkv=0.
+    off_zkv = off_zq % ZKV
+    off_hkv = off_hq // GQA_SHARED_HEADS
+    off_g = off_hq % GQA_SHARED_HEADS
+
+    q_offset = off_zq * stride_qz + off_hq * stride_qh
+    k_offset = off_zkv * stride_kz + off_hkv * stride_kh
+    v_offset = off_zkv * stride_vz + off_hkv * stride_vh
+
+    Q = Q + q_offset
+    K = K + k_offset
+    V = V + v_offset
+
+    # Setting up the TMA descriptors for Q, K, V
+    desc_q = None
+    desc_k = None
+    desc_v = None
+    {%- if USE_TMA %}
+    desc_q = tl.make_tensor_descriptor(
+        base=Q,
+        shape=[Q_LEN, QK_HEAD_DIM],
+        strides=[stride_qm, 1],
+        block_shape=[BLOCK_M, QK_HEAD_DIM_ROUNDED],
+    )
+
+    desc_k = tl.make_tensor_descriptor(
+        base=K,
+        shape=[KV_LEN, QK_HEAD_DIM],
+        strides=[stride_kn, 1],
+        block_shape=[BLOCK_N, QK_HEAD_DIM_ROUNDED],
+    )
+
+    desc_v = tl.make_tensor_descriptor(
+        base=V,
+        shape=[KV_LEN, V_HEAD_DIM],
+        strides=[stride_vn, 1],
+        block_shape=[BLOCK_N, V_HEAD_DIM_ROUNDED],
+    )
+    {%- endif %}
+
+    SPARSE_Z = {{size("KV_NUM_BLKS", 0)}}
+    SPARSE_HQ = {{size("KV_NUM_BLKS", 1)}}
+
+    sparse_idx_z = off_zq % SPARSE_Z
+    sparse_idx_hq = off_hq % SPARSE_HQ
+
+    SPARSE_Q_MULTIPLE: tl.constexpr = (SPARSE_Q_BLOCK_SIZE // BLOCK_M)
+    SPARSE_KV_MULTIPLE: tl.constexpr = (SPARSE_KV_BLOCK_SIZE // BLOCK_N)
+
+    stride_kv_num_blks_h = {{stride("KV_NUM_BLKS", 1)}}
+    stride_kv_idx_h = {{stride("KV_IDX", 1)}}
+    stride_kv_idx_m = {{stride("KV_IDX", 2)}}
+
+    # initialize pointer to m and l
+    m_i = tl.zeros([BLOCK_M], dtype=tl.float32) - float("inf")
+    l_i = tl.zeros([BLOCK_M], dtype=tl.float32)
+    acc = tl.zeros([BLOCK_M, V_HEAD_DIM_ROUNDED], dtype=tl.float32)
+
+    offs_m = q_start * BLOCK_M + tl.arange(0, BLOCK_M)
+
+    # KV_IDX and KV_NUM_BLKS are always contiguous.
+    sparse_hz_offset = sparse_idx_z * SPARSE_HQ + sparse_idx_hq
+    sparse_kv_num_blks_offset = sparse_hz_offset * stride_kv_num_blks_h + q_start // SPARSE_Q_MULTIPLE
+    sparse_kv_idx_offset = sparse_hz_offset * stride_kv_idx_h + (q_start // SPARSE_Q_MULTIPLE) * stride_kv_idx_m  # noqa: B950
+
+    {%- if USE_TMA %}
+    q = tl.load_tensor_descriptor(
+        desc_q,
+        [(q_start * BLOCK_M).to(tl.int32), 0],
+    )
+    {%- else %}
+    offs_m = q_start * BLOCK_M + tl.arange(0, BLOCK_M)
+    offs_k = tl.arange(0, QK_HEAD_DIM_ROUNDED)
+    q = load_checked_2d(Q, offs_m, offs_k, stride_qm, stride_qk, IS_DIVISIBLE, SAFE_HEAD_DIM, Q_LEN, QK_HEAD_DIM)
+    {%- endif %}
+
+    # ~~~~~~~~~~~~~~ normal blocks ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # We don't know anything "special" about these blocks, so we need to apply
+    # both score_mod and mask_mod to it
+    kv_indices = KV_IDX + sparse_kv_idx_offset
+    kv_start = tl.load(kv_indices) * SPARSE_KV_BLOCK_SIZE # first kv block we're loading
+    kv_num_blocks = tl.load(KV_NUM_BLKS + sparse_kv_num_blks_offset)
+    block_n_end = tl.minimum(kv_num_blocks * SPARSE_KV_MULTIPLE, tl.maximum(tl.cdiv(KV_LEN, BLOCK_N), 1))
+
+
+    # K and V pointers will be passed directly to forward_inner
+
+    offs_n = kv_start + tl.arange(0, BLOCK_N)
+
+
+    acc, l_i, m_i = forward_inner(
+        {{gen_argdefs()}},
+        q, K, V,
+        desc_k, desc_v, Q_LEN, KV_LEN,
+        acc, l_i, m_i,
+        off_zq, off_hq, offs_m[:, None], offs_n[None, :],
+        kv_start,
+        kv_indices, kv_num_blocks,
+        0, block_n_end,
+        MATMUL_PRECISION,
+        stride_kk, stride_kn, stride_vn, stride_vk,
+        IS_FULL_BLOCKS=False,
+    )
+
+    # ~~~~~~~~~~~~~~ "full" blocks ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # We know these blocks are guaranteed to be "full", so we don't need to
+    # apply mask_mod to them - only score_mod
+    if HAS_FULL_BLOCKS:
+        # FULL_KV_IDX and FULL_KV_NUM_BLKS are always contiguous.
+        kv_indices = FULL_KV_IDX + sparse_kv_idx_offset
+        kv_start = tl.load(kv_indices) * SPARSE_KV_BLOCK_SIZE # first kv block we're loading
+        kv_num_blocks = tl.load(FULL_KV_NUM_BLKS + sparse_kv_num_blks_offset)
+        block_n_end = tl.minimum(kv_num_blocks * SPARSE_KV_MULTIPLE, tl.maximum(tl.cdiv(KV_LEN, BLOCK_N), 1))
+        # K and V pointers will be passed directly to forward_inner
+        offs_n = kv_start + tl.arange(0, BLOCK_N)
+
+        acc, l_i, m_i = forward_inner(
+            {{gen_argdefs()}},
+            q, K, V,
+            desc_k, desc_v, Q_LEN, KV_LEN,
+            acc, l_i, m_i,
+            off_zq, off_hq, offs_m[:, None], offs_n[None, :],
+            kv_start,
+            kv_indices, kv_num_blocks,
+            0, block_n_end,
+            MATMUL_PRECISION,
+            stride_kk, stride_kn, stride_vn, stride_vk,
+            IS_FULL_BLOCKS=True,
+        )
+
+
+    # [Note] Handle fully masked out rows:
+    # Li will be the sum(e^(-inf)) == 0.0 for masked out rows, mi will be -inf.
+    # We set Li to 1.0 which will result in lse/out = 0.0 | after the log(li) + mi(0.0) step
+    l_i = tl.where(l_i == 0.0, 1, l_i)
+
+    acc = acc / l_i[:, None]
+    idx_zq = tl.program_id(1).to(INDEX_DTYPE)
+    idx_hq = tl.program_id(2).to(INDEX_DTYPE)
+    idx_m = offs_m[:, None].to(INDEX_DTYPE)
+    idx_d = tl.arange(0, V_HEAD_DIM_ROUNDED)[None, :].to(INDEX_DTYPE)
+
+    mask = (idx_m < Q_LEN) & (idx_d < V_HEAD_DIM)
+
+    tl.static_assert(acc.shape == [BLOCK_M, V_HEAD_DIM_ROUNDED])
+    {{store_output(("idx_zq", "idx_hq", "idx_m", "idx_d"), "acc", "mask", val_shape=["BLOCK_M", "V_HEAD_DIM_ROUNDED"])}}
+
+    if OUTPUT_LOGSUMEXP:
+        off_hz = off_zq * HQ + off_hq
+        l_ptrs = LSE + off_hz * Q_LEN + offs_m
+        lse = m_i + tl.math.log2(l_i)
+        if IS_DIVISIBLE:
+            tl.store(l_ptrs, lse)
+        else:
+            tl.store(l_ptrs, lse, mask=offs_m < Q_LEN)
+
+    if OUTPUT_MAX:
+        off_hz = off_zq * HQ + off_hq
+        max_ptrs = MAX + off_hz * Q_LEN + offs_m
+        if IS_DIVISIBLE:
+            tl.store(max_ptrs, m_i)
+        else:
+            tl.store(max_ptrs, m_i, mask=offs_m < Q_LEN)

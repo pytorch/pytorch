@@ -13,6 +13,7 @@ class StreamBlock : public ::c10d::cuda::StreamBlock {
   StreamBlock(std::chrono::milliseconds timeout);
 
   void abort() override {
+    std::atomic_thread_fence(std::memory_order_seq_cst);
     comm_[0] = 1;
   }
 

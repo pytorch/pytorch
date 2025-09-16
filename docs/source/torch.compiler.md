@@ -26,6 +26,9 @@ written in Python and it marks the transition of PyTorch from C++ to Python.
   which results in capturing the backwards pass "ahead-of-time". This enables
   acceleration of both forwards and backwards pass using TorchInductor.
 
+To better understand how `torch.compile` tracing behavior on your code, or to
+learn more about the internals of `torch.compile`, please refer to the [`torch.compile` programming model](compile/programming_model.md).
+
 :::{note}
 In some cases, the terms `torch.compile`, TorchDynamo, `torch.compiler`
 might be used interchangeably in this documentation.
@@ -96,6 +99,13 @@ Some of the most commonly used backends include:
    torch.compiler_troubleshooting
    torch.compiler_performance_dashboard
    torch.compiler_inductor_provenance
+```
+
+```{eval-rst}
+.. toctree::
+   :caption: `torch.compile` Programming Model
+
+   compile/programming_model
 ```
 
 % _If you want to contribute a developer-level topic
