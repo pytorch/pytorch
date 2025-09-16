@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+import os
 from unittest import skipIf
 
 import torch
@@ -30,6 +31,7 @@ class TestFakeDistributed(DynamoTestCase):
 
     def tearDown(self):
         dist.destroy_process_group()
+        dist.distributed_c10d._world = None
 
     def test_all_to_all_single_autograd(self):
         backend = AotEagerAndRecordGraphs()
@@ -116,10 +118,21 @@ class GraphModule(torch.nn.Module):
 """,  # noqa: B950
         )
 
+
+@skipIf(not dist.is_available(), "requires distributed")
+class TestDeviceMesh(DynamoTestCase):
+    def tearDown(self):
+        dist.destroy_process_group()
+        dist.distributed_c10d._world = None
+
     def test_device_mesh_get_local_rank(self):
+        os.environ["RANK"] = "0"
+        os.environ["WORLD_SIZE"] = "1"
+        os.environ["MASTER_ADDR"] = "localhost"
+        os.environ["MASTER_PORT"] = "12666"
         device_mesh = init_device_mesh(
             device_type="cpu",
-            mesh_shape=(self.world_size,),
+            mesh_shape=(1,),
             mesh_dim_names=("dp",),  # data parallel dimension
         )
 
