@@ -2716,7 +2716,18 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 return self.dense_size_str(), tuple(self.dense_size_list())
 
         if is_sympy_integer_like(index):
-            if copy_shape:
+            # Integer indexing produces a size-1 scalar tensor with the same shape
+            # as the dense dimension. E.g, if dense_size = [YBLOCK, XBLOCK, R0_BLOCK],
+            # then we create tl.full([1, 1, 1], int).
+            #
+            # Exceptions:
+            # 1. If copy_shape is explicitly provided, use copy_shape expansion instead.
+            # 2. If the dense tensor has only one dimension (e.g., [XBLOCK]),
+            #    broadcasting does not apply. For example:
+            #        tl.arange(0, XBLOCK) + tl.full([1], int)  # -> broadcasting error
+            #    In this case, we fall back to dense indexing:
+            #        tl.full([XBLOCK], int)
+            if copy_shape or len(self.dense_size_list()) == 1 :
                 expand_str, expand_shape = _get_expand_str()
             else:    
                 expand_str = str([1]*len(self.dense_size_list()))
