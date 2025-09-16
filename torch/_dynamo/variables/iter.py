@@ -246,6 +246,11 @@ class IteratorVariable(VariableTracker):
     def has_force_unpack_var_sequence(self, tx) -> bool:
         return True
 
+    def call_obj_hasattr(self, tx, name):
+        if name in ("__iter__", "__next__"):
+            return ConstantVariable.create(True)
+        return super().call_obj_hasattr(tx, name)
+
 
 class ObjectIteratorVariable(IteratorVariable):
     """
