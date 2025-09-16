@@ -433,9 +433,7 @@ def is_cpu(x: Union[IRNode, torch.device, None, str]) -> bool:
     return get_device_type(x) == "cpu"
 
 
-def is_aligned_realized_tensor(
-    x: Union[Buffer, TensorBox], alignment: int
-) -> bool:
+def is_aligned_realized_tensor(x: Union[Buffer, TensorBox], alignment: int) -> bool:
     if (
         not isinstance(x, IRNode)
         or x.maybe_get_stride() is None
@@ -451,7 +449,7 @@ def is_aligned_realized_tensor(
     )
     aligned_last_dim = V.graph.sizevars.guard_or_false(
         sympy.Eq(x.get_stride()[-1], 1)
-    ) or V.graph.sizevars.guard_or_false(sympy.Lte(x.get_size()[-1], 1))
+    ) or V.graph.sizevars.guard_or_false(sympy.Le(x.get_size()[-1], 1))
 
     return aligned_last_dim and aligned_strides
 
