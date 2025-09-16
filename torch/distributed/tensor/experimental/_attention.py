@@ -2,7 +2,6 @@ import contextlib
 import itertools
 import logging
 import types
-import weakref
 from abc import ABC, abstractmethod
 from collections.abc import Generator
 from dataclasses import dataclass
@@ -13,8 +12,8 @@ from typing import Any, Callable, ClassVar, Optional, Protocol, Union
 import torch
 import torch.distributed as dist
 import torch.distributed._functional_collectives as ft_c
+import torch.nn as nn
 import torch.nn.functional as F
-from torch import nn, Tensor
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor import distribute_tensor, DTensor, Shard
 from torch.distributed.tensor.parallel import parallelize_module, ParallelStyle
@@ -217,22 +216,18 @@ class _AttentionOp(Protocol):
         key: torch.Tensor,
         value: torch.Tensor,
         **kwargs: object,
-    ) -> tuple[torch.Tensor, ...]:
-        ...
+    ) -> tuple[torch.Tensor, ...]: ...
 
 
 class _RingRotater(ABC):
     @abstractmethod
-    def __init__(self, pg: dist.ProcessGroup, seq_dim: int) -> None:
-        ...
+    def __init__(self, pg: dist.ProcessGroup, seq_dim: int) -> None: ...
 
     @abstractmethod
-    def exchange_buffers(self, curr_buffer: torch.Tensor) -> None:
-        ...
+    def exchange_buffers(self, curr_buffer: torch.Tensor) -> None: ...
 
     @abstractmethod
-    def next_buffer(self) -> torch.Tensor:
-        ...
+    def next_buffer(self) -> torch.Tensor: ...
 
 
 class _AllToAllRotater(_RingRotater):
@@ -1147,7 +1142,9 @@ class _FlexAttentionWrapper(nn.Module):
 
     def forward(
         self, *args: ArgsType, **kwargs: KwargsType
-    ) -> Union[Tensor, tuple[Tensor, Tensor], tuple[Tensor, AuxOutput]]:
+    ) -> Union[
+        torch.Tensor, tuple[torch.Tensor, torch.Tensor], tuple[torch.Tensor, AuxOutput]
+    ]:
         # 1. _flex_attn has to be a class variable, otherwise there will
         #    be multiple complied flex_attention, which can be slow.
         # 2. `self._flex_attn` is not correct, `self` will be passed in
@@ -1164,7 +1161,9 @@ _flex_attention_wrapper_module: Optional[nn.Module] = None
 
 def _flex_attention_wrapper(
     *args: tuple[Any, ...], **kwargs: dict[str, Any]
-) -> Union[Tensor, tuple[Tensor, Tensor], tuple[Tensor, AuxOutput]]:
+) -> Union[
+    torch.Tensor, tuple[torch.Tensor, torch.Tensor], tuple[torch.Tensor, AuxOutput]
+]:
     global _flex_attention_wrapper_module
     if _flex_attention_wrapper_module is None:
         _flex_attention_wrapper_module = _FlexAttentionWrapper()
