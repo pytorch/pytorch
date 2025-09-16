@@ -1319,7 +1319,6 @@ class TestNestedTensorDeviceType(NestedTensorTestCase):
             lambda: func(nt_noncontiguous),
         )
 
-    @onlyCPU
     def test_is_any_true_jagged(self, device):
         B, Fin = 2, 6
         start = torch.zeros(B, dtype=torch.int64, device=device)
@@ -1358,7 +1357,6 @@ class TestNestedTensorDeviceType(NestedTensorTestCase):
             )
             self.assertTrue(torch.ops.aten._is_any_true.default(nt_mixed).item())
 
-    @onlyCPU
     def test_is_all_true_jagged(self, device):
         B, Fin = 2, 6
         start = torch.zeros(B, dtype=torch.int64, device=device)
