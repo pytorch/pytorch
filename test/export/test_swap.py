@@ -380,12 +380,11 @@ def forward(self, x, y):
 
         for use_new_tracer in [True, False]:
             with config.patch(use_new_tracer_experimental=use_new_tracer):
-                ep = torch.export._trace._export(
+                ep = export(
                     Foo(),
                     (torch.randn(2, 2),),
                     {"inputs": CustomInput(torch.randn(2, 3), torch.randn(3, 2))},
                     strict=self.strict,
-                    pre_dispatch=True,
                 )
         swapped = _swap_modules(ep, {})
         inp_args = (torch.randn(2, 2),)
@@ -393,6 +392,30 @@ def forward(self, x, y):
         res1 = torch.fx.Interpreter(swapped).run(*(*inp_args, *inp_kwargs.values()))
         res2 = swapped(*inp_args, **inp_kwargs)
         self.assertTrue(torch.allclose(res1, res2))
+
+    def test_custom_input_kwargs_use_private(self):
+        @dataclass
+        class CustomInput:
+            a: Tensor
+            b: Tensor
+
+        register_dataclass_as_pytree_node(
+            CustomInput,
+            serialized_type_name="test_swap.test_custom_input.CustomInput",
+        )
+
+        class Foo(torch.nn.Module):
+            def forward(self, x, *, inputs):
+                return x + torch.matmul(inputs.a, inputs.b)
+
+        # shouldn't error
+        with config.patch(use_new_tracer_experimental=True):
+            _ = export(
+                Foo(),
+                (torch.randn(2, 2),),
+                {"inputs": CustomInput(torch.randn(2, 3), torch.randn(3, 2))},
+                strict=self.strict,
+            )
 
     def test_custom_output(self):
         @dataclass
