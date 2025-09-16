@@ -18,6 +18,7 @@
 #include <ATen/ops/is_set_to_native.h>
 #include <ATen/ops/size_native.h>
 #include <ATen/ops/stride_native.h>
+#include <ATen/ops/sym_is_contiguous_native.h>
 #include <ATen/ops/sym_numel_native.h>
 #include <ATen/ops/sym_size_native.h>
 #include <ATen/ops/sym_storage_offset_native.h>
@@ -55,6 +56,12 @@ int64_t stride(const Tensor& self, int64_t dim) {
 
 c10::SymInt sym_size(const Tensor& self, int64_t dim) {
   return self.sym_size(dim);
+}
+
+c10::SymBool sym_is_contiguous(
+    const Tensor& self,
+    c10::MemoryFormat memory_format) {
+  return self.sym_is_contiguous(memory_format);
 }
 
 c10::SymInt sym_stride(const Tensor& self, int64_t dim) {
