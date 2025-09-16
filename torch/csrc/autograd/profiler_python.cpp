@@ -657,7 +657,7 @@ struct ThreadLocalResults {
   }
 
   template <CallType C, EventType E, typename Ephemeral, typename... Args>
-  TraceKey intern(Ephemeral ephemeral, Args&&... args) {
+  TraceKey intern(Ephemeral ephemeral, Args... args) {
     static_assert(
         Config<C>::event_type == E,
         "ThreadLocalResults.intern called from the wrong typed context.");
