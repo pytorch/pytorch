@@ -97,9 +97,10 @@ at::Tensor _cslt_compress(const Tensor& sparse_input) {
       break;
   }
 
-  // create a new compressed tensor with the same dtype as
-  auto compressed_tensor =
-      sparse_input.new_empty(sparse_input.numel() * compression_factor / 16);
+  // create a new compressed tensor with the same dtype as the input,
+  // and with packed data/metadata stored in a single tensor
+  auto packed_data_size = sparse_input.numel() * compression_factor / 16;
+  auto compressed_tensor = sparse_input.new_empty(packed_data_size);
 
   TORCH_CUDASPARSE_CHECK(cusparseLtStructuredDescriptorInit(
       &handle,
@@ -120,6 +121,10 @@ at::Tensor _cslt_compress(const Tensor& sparse_input) {
       &sparse_input_descriptor,
       &compressed_size,
       &compressed_buffer_size));
+
+  // sanity check on the compressed size computed by cusparseLt and
+  // the actually allocated packed data size in the compressed tensor
+  TORCH_INTERNAL_ASSERT(compressed_size == packed_data_size * sparse_input.itemsize());
 
   auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
   auto compressedBufferPtr = allocator.allocate(compressed_buffer_size);
