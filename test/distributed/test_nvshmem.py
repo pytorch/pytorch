@@ -7,7 +7,11 @@
 import torch
 import torch.distributed as dist
 import torch.distributed._symmetric_memory as symm_mem
-from torch.testing._internal.common_distributed import MultiProcContinuousTest
+from torch.distributed.device_mesh import init_device_mesh
+from torch.testing._internal.common_distributed import (
+    MultiProcContinuousTest,
+    skip_if_lt_x_gpu,
+)
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -544,17 +548,11 @@ class NVSHMEMAll2AllTest(MultiProcContinuousTest):
         # Check data
         torch.testing.assert_close(out_expected, out[:out_numel])
 
-    @skipIfRocm
-    @parametrize("align", [1, 8, 16])  # `major_align` of output
-    def test_shuffle_combine(self, align: int) -> None:
+    def helper_test_dispatch_combine(self, align: int, group_name) -> None:
         """
         Shuffle the tokens, then combine them, and check if the combined data is
         exactly the same as the original input data
         """
-        torch.manual_seed(42 + self.rank)
-        self._init_device()
-
-        group_name = dist.group.WORLD.group_name
         symm_mem.enable_symm_mem_for_group(group_name)
 
         dtype = torch.float
@@ -627,6 +625,36 @@ class NVSHMEMAll2AllTest(MultiProcContinuousTest):
             [torch.zeros(1, device=self.device), inp_offsets[:-1]]
         ).to(torch.int64)
         torch.testing.assert_close(combine_out_splits_offsets[1], inp_offsets)
+
+    @skipIfRocm
+    @parametrize("align", [1, 8, 16])  # `major_align` of output
+    def test_dispatch_combine(self, align: int) -> None:
+        """
+        Test dispatch-and-combine over World group
+        """
+        torch.manual_seed(42 + self.rank)
+        self._init_device()
+        self.helper_test_dispatch_combine(align, dist.group.WORLD.group_name)
+
+    @skipIfRocm
+    # TODO: FIXIT. Currently, `MultiProcContinuousTest` treats the skip code as a
+    # failure
+    @skip_if_lt_x_gpu(4)
+    def test_dispatch_combine_subgroup(self) -> None:
+        """
+        Test dispatch-and-combine over concurrent subgroups
+        """
+        torch.manual_seed(42 + self.rank)
+        self._init_device()
+        symm_mem.enable_symm_mem_for_group(dist.group.WORLD.group_name)
+        # Test on two concurrent subgroups
+        ngroups = 2
+        subgroup_size = self.world_size // ngroups
+        dm = init_device_mesh(
+            device_type, (ngroups, subgroup_size), mesh_dim_names=("dp", "ep")
+        )
+        subgroup = dm.get_group("ep")
+        self.helper_test_dispatch_combine(align=8, group_name=subgroup.group_name)
 
 
 if __name__ == "__main__":
