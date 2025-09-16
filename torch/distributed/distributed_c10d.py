@@ -2250,22 +2250,14 @@ def destroy_process_group(group: Optional[ProcessGroup] = None):
                                         groups including the default one will
                                         be destroyed.
     """
-    global _world
+    world = _World.maybe_get()
 
     if group == GroupMember.NON_GROUP_MEMBER:
         return
-
-    if group is None:
+    elif group is None:
         pg = GroupMember.WORLD
     else:
         pg = group
-
-    # If pg is still None, then default group has not been created, we will skip
-    # destruction of default group below.
-    # Otherwise, some checking:
-    if pg is not None:
-        if _world.pg_map.get(pg, None) is None:
-            raise ValueError("Invalid process group specified")
 
     # When users register Python onCompletion hooks, those hooks will run on a
     # different thread than the main thread. Today, the ProcessGroup dtor does
@@ -2278,53 +2270,62 @@ def destroy_process_group(group: Optional[ProcessGroup] = None):
     if type(pg) == ProcessGroup and pg._has_hooks():
         pg._wait_for_pending_works()
 
-    if group is None or group == GroupMember.WORLD:
+    if pg == GroupMember.WORLD:
+        if world is None:
+            # World hasn't bee created, thus destroy(None) or destroy(WORLD) is no-op
+            return
+
         # shutdown all backends in the order of pg names. shutting down in order because
         # ncclCommAbort() was a 'collective' call in some versions of NCCL.
         for pg_to_shutdown in sorted(
-            _world.pg_names, key=lambda x: _world.pg_names[x], reverse=True
+            world.pg_names, key=lambda x: world.pg_names[x], reverse=True
         ):
             pg_to_shutdown.shutdown()
 
         _update_default_pg(None)
-        _world.pg_map.clear()
-        _world.pg_names.clear()
-        _world.pg_group_ranks.clear()
-        _world.pg_backend_config.clear()
-        _world.pg_to_tag.clear()
-        _world.tags_to_pg.clear()
-        _world.pg_coalesce_state.clear()
+        world.pg_map.clear()
+        world.pg_names.clear()
+        world.pg_group_ranks.clear()
+        world.pg_backend_config.clear()
+        world.pg_to_tag.clear()
+        world.tags_to_pg.clear()
+        world.pg_coalesce_state.clear()
         _unregister_all_process_groups()
 
         # when process group doesn't have an explicit name (only WORLD (default)
-        # process group can have an explicit name), we use global _world.group_count
+        # process group can have an explicit name), we use global world.group_count
         # to generate the name. We need to reset the counter on destruction to
         # allow consistent value to be generated when we re-create process
         # groups after some trainers recover from failure
         #
         # We only reset this when WORLD is being destroyed because if this
         # process group is in good state, we aren't dealing with failures.
-        _world.group_count = 0
+        world.group_count = 0
     else:
         pg.shutdown()
-        del _world.pg_map[pg]
-        del _world.pg_names[pg]
-        del _world.pg_group_ranks[pg]
-        del _world.pg_backend_config[pg]
-        if pg in _world.pg_coalesce_state.keys():
+
+        if world is None:
+            # World hasn't bee created, thus no book-keeping
+            return
+
+        del world.pg_map[pg]
+        del world.pg_names[pg]
+        del world.pg_group_ranks[pg]
+        del world.pg_backend_config[pg]
+        if pg in world.pg_coalesce_state.keys():
             warnings.warn(
                 "Some coalesced collectives haven't been launched when "
                 "ProcessGroup is destroyed. They will be cleaned."
             )
-            del _world.pg_coalesce_state[pg]
+            del world.pg_coalesce_state[pg]
 
-        tag = _world.pg_to_tag.get(pg)
-        del _world.pg_to_tag[pg]
+        tag = world.pg_to_tag.get(pg)
+        del world.pg_to_tag[pg]
         if tag is not None:
             try:
-                _world.tags_to_pg[tag].remove(pg)
+                world.tags_to_pg[tag].remove(pg)
                 if tag.startswith("ptd:"):
-                    _world.tags_to_pg[""].remove(pg)
+                    world.tags_to_pg[""].remove(pg)
             except Exception:
                 pass
         _unregister_process_group(pg.group_name)
@@ -2346,26 +2347,23 @@ def _abort_process_group(group: Optional[ProcessGroup] = None):
         automatically handle errors or timeouts for you including aborting the
         ProcessGroup.
     """
-    global _world
+    world = _World.maybe_get()
 
     if group == GroupMember.NON_GROUP_MEMBER:
         return
 
     pg = group or GroupMember.WORLD
 
-    # If pg is still None, then default group has not been created, we will skip
-    # destruction of default group below.
-    # Otherwise, some checking:
-    if pg is not None:
-        if _world.pg_map.get(pg, None) is None:
-            raise ValueError("Invalid process group specified or has been destroyed.")
-
     try:
-        backend = pg._get_backend(torch.device("cuda"))
-    except Exception:
+        backend = pg._get_backend(torch.device("cuda")) if pg else None
+    except RuntimeError:
         backend = None
 
-    if group is None or group == GroupMember.WORLD:
+    if pg == GroupMember.WORLD:
+        if world is None:
+            # World hasn't bee created, thus destroy(None) or destroy(WORLD) is no-op
+            return
+
         # Abort all backends within a ncclGroupStart|End semantic.
         # This ensures that different NCCL communicators' abort calls won't
         # deadlock each other.
@@ -2373,51 +2371,56 @@ def _abort_process_group(group: Optional[ProcessGroup] = None):
         if is_nccl_available() and isinstance(backend, ProcessGroupNCCL):
             backend._group_start()
         for pg_to_abort in sorted(
-            _world.pg_names, key=lambda x: _world.pg_names[x], reverse=True
+            world.pg_names, key=lambda x: world.pg_names[x], reverse=True
         ):
             pg_to_abort.abort()
         if is_nccl_available() and isinstance(backend, ProcessGroupNCCL):
             backend._group_end()
 
         _update_default_pg(None)
-        _world.pg_map.clear()
-        _world.pg_names.clear()
-        _world.pg_group_ranks.clear()
-        _world.pg_backend_config.clear()
-        _world.pg_to_tag.clear()
-        _world.tags_to_pg.clear()
-        _world.pg_coalesce_state.clear()
+        world.pg_map.clear()
+        world.pg_names.clear()
+        world.pg_group_ranks.clear()
+        world.pg_backend_config.clear()
+        world.pg_to_tag.clear()
+        world.tags_to_pg.clear()
+        world.pg_coalesce_state.clear()
         _unregister_all_process_groups()
 
         # when process group doesn't have an explicit name (only WORLD (default)
-        # process group can have an explicit name), we use global _world.group_count
+        # process group can have an explicit name), we use global world.group_count
         # to generate the name. We need to reset the counter on destruction to
         # allow consistent value to be generated when we re-create process
         # groups after some trainers recover from failure
         #
         # We only reset this when WORLD is being destroyed because if this
         # process group is in good state, we aren't dealing with failures.
-        _world.group_count = 0
+        world.group_count = 0
     else:
         pg.abort()
-        del _world.pg_map[pg]
-        del _world.pg_names[pg]
-        del _world.pg_group_ranks[pg]
-        del _world.pg_backend_config[pg]
-        if pg in _world.pg_coalesce_state.keys():
+
+        if world is None:
+            # World hasn't bee created, thus no book-keeping
+            return
+
+        del world.pg_map[pg]
+        del world.pg_names[pg]
+        del world.pg_group_ranks[pg]
+        del world.pg_backend_config[pg]
+        if pg in world.pg_coalesce_state.keys():
             warnings.warn(
                 "Some coalesced collectives haven't been launched when "
                 "ProcessGroup is aborted. They will be cleaned."
             )
-            del _world.pg_coalesce_state[pg]
+            del world.pg_coalesce_state[pg]
 
-        tag = _world.pg_to_tag.get(pg)
-        del _world.pg_to_tag[pg]
+        tag = world.pg_to_tag.get(pg)
+        del world.pg_to_tag[pg]
         if tag is not None:
             try:
-                _world.tags_to_pg[tag].remove(pg)
+                world.tags_to_pg[tag].remove(pg)
                 if tag.startswith("ptd:"):
-                    _world.tags_to_pg[""].remove(pg)
+                    world.tags_to_pg[""].remove(pg)
             except Exception:
                 pass
         _unregister_process_group(pg.group_name)
