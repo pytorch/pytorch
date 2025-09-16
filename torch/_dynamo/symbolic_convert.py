@@ -3290,15 +3290,7 @@ class InstructionTranslatorBase(
         self.push(self.load_builtin_from_argval("AssertionError"))
 
     def LOAD_BUILD_CLASS(self, inst: Instruction) -> None:
-        unimplemented_v2(
-            gb_type="LOAD_BUILD_CLASS bytecode not supported",
-            context="",
-            explanation="Dynamo does not support tracing classes that are defined in the compiled region.",
-            hints=[
-                "Move the class definition out of the compiled region.",
-                *graph_break_hints.SUPPORTABLE,
-            ],
-        )
+        self.push(self.load_builtin_from_argval("__build_class__"))
 
     UNARY_POSITIVE = stack_op(operator.pos)
     UNARY_NEGATIVE = stack_op(operator.neg)
@@ -3756,8 +3748,8 @@ class InstructionTranslatorBase(
         self.num_calls: dict[str, int] = {}
         # Flag to indicate whether tracing is used for export.
         self.export = export
-        # NOTE: one_graph is used for export/debugging to always force errors on graph breaks.
-        # To toggle fullgraph during normal compile, self.error_on_graph_break
+        # NOTE: one_graph is used for export/fullgraph=True to always force errors on graph breaks.
+        # To toggle erroring/resuming on graph breaks during fullgraph=False compile, self.error_on_graph_break
         # is used instead. Every step(), its value is updated to the global tls.error_on_graph_break.
         # We mirror this value since cleanup may (correctly) inadvertently change tls.error_on_graph_break.
         # This assumes that we cannot both trace a change to tls.error_on_graph_break and graph break on
