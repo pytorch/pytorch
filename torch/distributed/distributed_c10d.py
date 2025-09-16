@@ -1752,6 +1752,9 @@ def init_process_group(
         "cpu:gloo,cuda:custom_backend".
 
     """
+    if GroupMember.WORLD is not None:
+        raise ValueError("trying to initialize the default process group twice!")
+
     # Initialize distributed environment if user didn't call it
     # (backward compatible purpose)
     if _World.maybe_get() is None:
