@@ -2506,14 +2506,26 @@ class ProcessGroupGlooLazyInitTest(ProcessGroupGlooTest):
         return super().tearDown()
 
 
-class ProcessGroupGlooFRTest(ProcessGroupGlooTest):
+class ProcessGroupGlooFRTest(MultiProcessTestCase):
+    lazy_init = False
+
+    def _create_process_group_gloo(self, store, rank, world_size, opts):
+        pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, opts)
+        dist.barrier(group=pg)
+        return pg
+
     def setUp(self):
         os.environ["TORCH_FR_BUFFER_SIZE"] = "10"
         super().setUp()
+        self._spawn_processes()
 
-    def tearDown(self) -> None:
-        del os.environ["TORCH_FR_BUFFER_SIZE"]
-        return super().tearDown()
+    def opts(self, threads=2, group_name="0"):
+        opts = c10d.ProcessGroupGloo._Options()
+        opts._timeout = 50.0
+        opts._devices = [create_device(interface=LOOPBACK, lazy_init=self.lazy_init)]
+        opts._threads = threads
+        opts.group_name = group_name
+        return opts
 
     def _verify_trace(self, t, is_json):
         ver = t["version"]
