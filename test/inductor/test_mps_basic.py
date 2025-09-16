@@ -121,6 +121,20 @@ class MPSBasicTests(TestCase):
             ),
         )
 
+    def test_conv_train(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/161905
+        def fn(x, y):
+            return torch.nn.functional.conv2d(x, y, None, 1, 1, 1)
+
+        self.common(
+            fn,
+            (
+                torch.rand(4, 512, 7, 7, requires_grad=True),
+                torch.rand(512, 512, 3, 3),
+            ),
+            check_gradient=True,
+        )
+
     def test_cholesky(self):
         def fn(x):
             return (
