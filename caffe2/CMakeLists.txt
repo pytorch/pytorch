@@ -551,6 +551,13 @@ if(USE_CUDA OR USE_ROCM)
 endif()
 
 if(USE_CUDA)
+  append_filelist("libtorch_nativert_cuda_sources" Caffe2_GPU_SRCS)
+endif()
+if(USE_ROCM)
+  append_filelist("libtorch_nativert_cuda_sources" Caffe2_HIP_SRCS)
+endif()
+
+if(USE_CUDA)
   list(APPEND Caffe2_GPU_CU_SRCS ${Caffe2_GPU_HIP_JIT_FUSERS_SRCS})
   add_library(caffe2_nvrtc SHARED ${ATen_NVRTC_STUB_SRCS})
   if(MSVC)
@@ -1638,6 +1645,10 @@ if(USE_CUDA)
   # order of the libraries in the linker call matters here when statically
   # linking; libculibos and cublas must be last.
   target_link_libraries(torch_cuda PUBLIC torch_cpu_library ${Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS})
+  if(USE_FBGEMM_GENAI)
+    # Link fbgemm_genai to torch_cuda (only for (1) CUDA build for SM100).
+    target_link_libraries(torch_cuda PRIVATE fbgemm_genai)
+  endif()
 endif()
 
 # ---[ XPU library.
@@ -1759,9 +1770,10 @@ if(USE_ROCM)
   target_link_libraries(torch_hip PRIVATE ${Caffe2_HIP_DEPENDENCY_LIBS})
 
   if(USE_FBGEMM_GENAI)
-    target_link_libraries(torch_hip PRIVATE fbgemm_genai)
+    if(USE_ROCM)
+      target_link_libraries(torch_hip PRIVATE fbgemm_genai)
+    endif()
   endif()
-
   # Since PyTorch files contain HIP headers, this is also needed to capture the includes.
   # ROCM_INCLUDE_DIRS is defined in LoadHIP.cmake
   target_include_directories(torch_hip PRIVATE ${Caffe2_HIP_INCLUDE} ${ROCM_INCLUDE_DIRS})
@@ -1824,6 +1836,12 @@ if(BUILD_TEST)
             if(TARGET Sanitizer::undefined)
               target_link_libraries(${test_name}_${CPU_CAPABILITY} Sanitizer::undefined)
             endif()
+          endif()
+          if(USE_LSAN AND TARGET Sanitizer::leak)
+            target_link_libraries(${test_name}_${CPU_CAPABILITY} Sanitizer::leak)
+          endif()
+          if(USE_TSAN AND TARGET Sanitizer::thread)
+            target_link_libraries(${test_name}_${CPU_CAPABILITY} Sanitizer::thread)
           endif()
         else()
           add_executable(${test_name}_${CPU_CAPABILITY} "${test_src}")
