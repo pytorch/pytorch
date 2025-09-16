@@ -4,6 +4,7 @@ import logging
 import os
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
+from datetime import timedelta
 from enum import Enum
 from typing import Any, Optional, Union
 from uuid import uuid4
@@ -215,7 +216,9 @@ class _AsyncCheckpointProcess:
                 "Initializing dist.ProcessGroup in checkpoint background process"
             )
             # NOTE: GLOO backend is enforced here.
-            dist.init_process_group(backend=dist.Backend.GLOO)
+            dist.init_process_group(
+                backend=dist.Backend.GLOO, timeout=timedelta(seconds=600)
+            )
             dist.barrier()
 
             logger.info("Checkpoint background process is running...")
