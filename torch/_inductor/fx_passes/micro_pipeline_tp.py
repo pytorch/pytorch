@@ -645,10 +645,6 @@ def fuse_all_gather_matmul(all_gather: _AllGatherMatch) -> None:
     if not is_symm_mem_enabled_for_group(group_name):
         return
 
-    if gather_dim >= len(_get_tensor(shard_node).shape) - 1:
-        # Decomposing the matmul on the K dimension is not supported
-        return
-
     # Find consumer matmuls
     matmuls = _find_consumer_matmuls(ag_res_node)
 
