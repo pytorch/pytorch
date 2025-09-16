@@ -767,7 +767,7 @@ class SizeVarAllocator:
         free_symbols = expr.free_symbols
         size_dict = {
             symbol: V.graph.sizevars.size_hint(
-                symbol, fallback=fallback, use_user_provided_hint_override=True
+                symbol, fallback=fallback
             )
             for symbol in free_symbols
         }

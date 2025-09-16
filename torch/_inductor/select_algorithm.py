@@ -558,7 +558,7 @@ class TritonTemplateKernel(TritonKernel):
         num_bytes = []
         for i, inp in enumerate(itertools.chain(self.input_nodes, (self.output_node,))):
             size = V.graph.sizevars.size_hints(
-                inp.get_size(), fallback=0, use_user_provided_hint_override=True
+                inp.get_size(), fallback=0
             )
             numel = functools.reduce(operator.mul, size, 1)
             dtype_size = get_dtype_size(inp.get_dtype())
@@ -571,7 +571,7 @@ class TritonTemplateKernel(TritonKernel):
                 f = count_flops_fx(fx_node)
                 if f is not None:
                     return V.graph.sizevars.size_hint(
-                        f, fallback=0, use_user_provided_hint_override=True
+                        f, fallback=0
                     )
         return 0
 
