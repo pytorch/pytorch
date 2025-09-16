@@ -749,7 +749,10 @@ class ConstDictVariable(VariableTracker):
             if name in self.user_cls.__dict__:
                 return ConstantVariable.create(True)
             return ConstantVariable.create(False)
-        elif self.user_cls is collections.OrderedDict and name == "__iter__":
+        elif (
+            self.user_cls in (collections.OrderedDict, collections.defaultdict)
+            and name == "__iter__"
+        ):
             return ConstantVariable.create(True)
 
         msg = f"hasattr on {self.user_cls} is not supported"
