@@ -105,6 +105,21 @@ def has_triton_tma_device() -> bool:
     return False
 
 
+@functools.cache
+def has_datacenter_blackwell_tma_device() -> bool:
+    import torch
+
+    if (
+        torch.cuda.is_available()
+        and torch.cuda.get_device_capability() >= (10, 0)
+        and torch.cuda.get_device_capability() < (11, 0)
+        and not torch.version.hip
+    ):
+        return has_triton_tma_device() and has_triton_tensor_descriptor_host_tma()
+
+    return False
+
+
 @functools.lru_cache(None)
 def has_triton_stable_tma_api() -> bool:
     if has_triton_package():
@@ -127,6 +142,11 @@ def has_triton_stable_tma_api() -> bool:
 @functools.cache
 def has_triton() -> bool:
     if not has_triton_package():
+        return False
+
+    from torch._inductor.config import triton_disable_device_detection
+
+    if triton_disable_device_detection:
         return False
 
     from torch._dynamo.device_interface import get_interface_for_device
