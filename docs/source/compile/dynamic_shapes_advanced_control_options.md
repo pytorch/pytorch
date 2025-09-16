@@ -6,14 +6,14 @@ These options requires a deep understanding of the PyTorch internals and
 may inlvolve setting additional tools. These options include:
 
 * Profile-Guided Optimization (PGO) is a technique that allows the compiler
-  to save automatic dynamic desicions and reuse them across jobs.
+  to save automatic dynamic decisions and reuse them across jobs.
 * Compiler Collective is a feature that is used to modify automatic dynamic
   shapes behavior by inferring if an input is dynamic based on whether
   its size varies across ranks.
 
 ## Profile-Guided Optimization (PGO)
 
-NEEEDS REWRITE!
+NEEDS REWRITE!
 
 Profile-Guided Optimization (PGO) extends automatic dynamic across attempts, learning from previous runs to avoid initial static compilations. This means that things marked as dynamic in attempt 1 will remain dynamic in attempt 2 from the first compilation. If attempt 2 encounters different sizes for the same input, they will be marked as dynamic.
 For example, for the program discussed earlier:
@@ -65,7 +65,7 @@ If an element is marked as dynamic by PGO, it does not guarantee that it will re
 
 ## Compiler Collective
 
-NEEEDS REWRITE!
+NEEDS REWRITE!
 
 Different ranks can communicate with each other to share observed sizes. In the second
 iteration, automatic dynamic uses this information to determine which elements to mark
