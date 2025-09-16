@@ -4,8 +4,6 @@
 #include <ATen/mps/MPSAllocatorInterface.h>
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/Resize.h>
-// For MTLLanguageVersion_3_1
-#include <ATen/native/mps/MPSGraphSonomaOps.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <fmt/format.h>
 
