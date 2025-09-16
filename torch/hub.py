@@ -200,7 +200,12 @@ def _validate_not_a_forked_repo(repo_owner, repo_name, ref):
         while True:
             page += 1
             url = f"{url_prefix}?per_page=100&page={page}"
-            response = json.loads(_read_url(Request(url, headers=headers)))
+            try:
+                response = json.loads(_read_url(Request(url, headers=headers)))
+            except HTTPError:
+                # Retry without token in case it had insufficient permissions.
+                del headers["Authorization"]
+                response = json.loads(_read_url(Request(url, headers=headers)))
             # Empty response means no more data to process
             if not response:
                 break

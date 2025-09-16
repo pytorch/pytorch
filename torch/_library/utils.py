@@ -2,23 +2,13 @@
 import dataclasses
 import inspect
 import sys
-import warnings
 from collections.abc import Iterable, Iterator
-from typing import Any, Callable, Union
+from typing import Any, Callable, Literal, Optional, overload, Union
 
 import torch
 import torch.utils._pytree as pytree
 from torch import _C, _utils_internal
 from torch._ops import OpOverload
-
-
-def warn_deploy(stacklevel=3):
-    warnings.warn(
-        "Python torch.library APIs do nothing under torch::deploy (multipy). "  # codespell:ignore multipy
-        "Please instead use C++ custom operator registration APIs.",
-        RuntimeWarning,
-        stacklevel=stacklevel,
-    )
 
 
 @dataclasses.dataclass
@@ -509,6 +499,20 @@ tags_by_priority = [
     _C.Tag.needs_fixed_stride_order,
     _C.Tag.flexible_layout,
 ]
+
+
+# Case 1: with_default=True (or omitted). Return type is guaranteed to be a Tag.
+@overload
+def get_layout_constraint_tag(
+    fn: Any, *, with_default: Literal[True] = True
+) -> _C.Tag: ...
+
+
+# Case 2: with_default=False. Return type can be a Tag or None.
+@overload
+def get_layout_constraint_tag(
+    fn: Any, *, with_default: Literal[False]
+) -> Optional[_C.Tag]: ...
 
 
 def get_layout_constraint_tag(fn, *, with_default=True):

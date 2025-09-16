@@ -34,7 +34,9 @@ class Vectorized<double> {
   static constexpr size_type size() {
     return 8;
   }
-  Vectorized() {}
+  Vectorized() {
+    values = _mm512_setzero_pd();
+  }
   Vectorized(__m512d v) : values(v) {}
   Vectorized(double val) {
     values = _mm512_set1_pd(val);
@@ -535,11 +537,27 @@ Vectorized<double> inline fmadd(
 }
 
 template <>
+Vectorized<double> inline fnmadd(
+    const Vectorized<double>& a,
+    const Vectorized<double>& b,
+    const Vectorized<double>& c) {
+  return _mm512_fnmadd_pd(a, b, c);
+}
+
+template <>
 Vectorized<double> inline fmsub(
     const Vectorized<double>& a,
     const Vectorized<double>& b,
     const Vectorized<double>& c) {
   return _mm512_fmsub_pd(a, b, c);
+}
+
+template <>
+Vectorized<double> inline fnmsub(
+    const Vectorized<double>& a,
+    const Vectorized<double>& b,
+    const Vectorized<double>& c) {
+  return _mm512_fnmsub_pd(a, b, c);
 }
 
 #endif

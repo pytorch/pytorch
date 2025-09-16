@@ -26,16 +26,20 @@ Error Formatting:
     - Debugging utilities for error reporting
 """
 
+import json
 import logging
 import os
 import re
 import textwrap
 import typing
 from enum import auto, Enum
+from functools import lru_cache
+from pathlib import Path
 from traceback import extract_stack, format_exc, format_list, StackSummary
 from typing import Any, NoReturn, Optional, TYPE_CHECKING
 
 import torch._guards
+from torch._utils_internal import get_file_path_2
 
 from . import config
 from .utils import counters
@@ -46,6 +50,7 @@ if TYPE_CHECKING:
 
     from torch._guards import CompileId
 
+    from .output_graph import DynamoTracerOutput
     from .symbolic_convert import InstructionTranslatorBase
     from .types import DynamoFrameType
 
@@ -63,7 +68,9 @@ graph_breaks_log = torch._logging.getArtifactLogger(__name__, "graph_breaks")
 
 
 class TorchDynamoException(RuntimeError):
-    pass
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._torch_dynamo_tracer_output: Optional[DynamoTracerOutput] = None
 
 
 class InternalTorchDynamoError(TorchDynamoException):
@@ -261,7 +268,14 @@ class UnsafeScriptObjectError(TorchDynamoException):
 
 
 class UncapturedHigherOrderOpError(TorchDynamoException):
-    pass
+    def __init__(self, msg: str, real_stack: Optional[StackSummary] = None) -> None:
+        super().__init__(msg)
+        self.msg = msg
+        self.real_stack = (
+            real_stack
+            if real_stack is not None
+            else torch._guards.TracingContext.extract_stack()
+        )
 
 
 class IncorrectUsage(Exception):
@@ -352,7 +366,7 @@ observed_exception_map = {
 def get_dynamo_observed_exception(exc_type: type[Exception]) -> type[ObservedException]:
     if exc_type not in observed_exception_map:
         name = getattr(exc_type, "__name__", str(exc_type))
-        observed_exception_map[exc_type] = type(
+        observed_exception_map[exc_type] = type(  # type: ignore[assignment]
             f"Observed{name}Error", (ObservedException,), {}
         )
     return observed_exception_map[exc_type]
@@ -370,7 +384,7 @@ def raise_observed_exception(
     # CPython here raises an exception. Since there is no python code, we have to manually setup the exception
     # stack and raise the exception.
     exception_vt = BuiltinVariable(exc_type).call_function(tx, args or [], kwargs or {})  # type: ignore[arg-type]
-    tx.exn_vt_stack.set_current_exception(exception_vt)
+    tx.exn_vt_stack.set_current_exception(exception_vt)  # type: ignore[arg-type]
     raise get_dynamo_observed_exception(exc_type)
 
 
@@ -498,6 +512,56 @@ def format_graph_break_message(
     return msg
 
 
+@lru_cache(maxsize=1)
+def _load_gb_type_to_gb_id_map() -> dict[str, Any]:
+    """
+    Loads the gb_type to gb_id map from the graph break registry from JSON file with caching.
+
+    Includes historical gb_type (mapping behavior of duplicate gb_types with different gb_ids is undefined).
+    """
+    try:
+        script_dir = Path(__file__).resolve().parent
+        registry_path = get_file_path_2(
+            "", str(script_dir), "graph_break_registry.json"
+        )
+        with open(registry_path) as f:
+            registry = json.load(f)
+    except Exception as e:
+        log.error("Error accessing the registry file: %s", e)
+        registry = {}
+
+    mapping = {}
+    for k, v in registry.items():
+        for entry in v:
+            mapping[entry["Gb_type"]] = k
+
+    return mapping
+
+
+def get_gbid_documentation_link(gb_type: str) -> Optional[str]:
+    """
+    Retrieves the GBID documentation link for a given graph break type.
+
+    Args:
+        gb_type: The graph break type to look up.
+
+    Returns:
+        A string containing the documentation URL if found, otherwise None.
+    """
+    GRAPH_BREAK_SITE_URL = (
+        "https://meta-pytorch.github.io/compile-graph-break-site/gb/"  # @lint-ignore
+    )
+
+    gb_type_to_gb_id_map = _load_gb_type_to_gb_id_map()
+
+    if gb_type in gb_type_to_gb_id_map:
+        return (
+            f"{GRAPH_BREAK_SITE_URL}gb{gb_type_to_gb_id_map[gb_type].lstrip('GB')}.html"
+        )
+
+    return None
+
+
 # TODO replace old unimplemented later
 def unimplemented_v2(
     gb_type: str,
@@ -520,21 +584,16 @@ def unimplemented_v2(
 
     msg = format_graph_break_message(gb_type, context, explanation, hints)
 
-    # Temporarily disabling the generation of the weblinks in error message
+    documentation_link = get_gbid_documentation_link(gb_type)
 
-    # documentation_link = get_gbid_documentation_link(gb_type)
-    # msg += f"\n For more details about this graph break, please visit: {documentation_link}"
+    if documentation_link:
+        msg += f"\n For more details about this graph break, please visit: {documentation_link}"
 
     if log_warning:
         log.warning(msg)
     if from_exc is not _NOTHING:
         raise Unsupported(msg) from from_exc
     raise Unsupported(msg)
-
-
-def warning(msg: str) -> None:
-    counters["warnings"][msg] += 1
-    assert msg != os.environ.get("BREAK", False)
 
 
 # KeyError has special handling for its args

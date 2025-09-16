@@ -1046,7 +1046,7 @@ class TestTypePromotion(TestCase):
                     and not (out_dtype.is_floating_point or out_dtype.is_complex))
                     or ((x_dtype.is_complex or y_dtype.is_complex) and not out_dtype.is_complex)):
                 # This combinations do not support type conversion to a different class out type
-                with self.assertRaises(RuntimeError):
+                with self.assertRaises(TypeError):
                     torch.cat([x, y], out=out)
             else:
                 torch.cat([x, y], out=out)

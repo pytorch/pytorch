@@ -316,17 +316,18 @@ class TensorVariable(VariableTracker):
         real_value = getattr(_input_associated_real_value, name)
 
         attr_source = AttrSource(self.source, name)
-        install_guard(attr_source.make_guard(GuardBuilder.HASATTR))
 
         # Typically we'd want to use variable builder here
         # but unfortunately id(real_value.__self__) is not id(<original value>)
         if is_bound_tensor_method(real_value):
+            # No need to install the guard because its a bound tensor method
             from .misc import GetAttrVariable
 
             return GetAttrVariable(
                 self, name, source=attr_source, py_type=type(real_value)
             )
 
+        install_guard(attr_source.make_guard(GuardBuilder.HASATTR))
         return VariableTracker.build(tx, real_value, attr_source)
 
     def method_attr_ndim(self, tx):
@@ -1088,6 +1089,30 @@ class TensorVariable(VariableTracker):
             operator.setitem,
             *proxy_args_kwargs([self, key, value], {}),
         )
+
+        if isinstance(value, TensorVariable):
+            # [Note: Tensor.__setitem__ and VariableTracker metadata]
+            # At this point, we proxied a node representing `self[key] = value` into the graph.
+            # When executed, this node will mutate `self`'s tensor metadata, so it's important
+            # even during tracing to propagate. For example:
+            #   value.requires_grad is True => self.requires_grad becomes True
+            #   value.requires_grad is True => self.has_grad_fn becomes True
+
+            # Not sure if __setitem__ can ever save activations, disabling just in case
+            with torch._dynamo.utils._disable_saved_tensors_hooks_during_tracing():
+                get_fake_value(proxy.node, tx, allow_non_graph_fake=False)
+
+            example_value = self.proxy.node.meta.get("example_value")
+            from .builder import get_specialized_props, infer_subclass_type
+
+            if isinstance(value, variables.lazy.LazyVariableTracker):
+                value = variables.lazy.LazyVariableTracker.realize_all(value)
+
+            specialized_props = get_specialized_props(
+                type(value), tx, example_value, infer_subclass_type(example_value)
+            )
+            for k, v in specialized_props.items():
+                setattr(self, k, v)
 
         if config.use_graph_deduplication or config.track_nodes_for_deduplication:
             tx.output.region_tracker.add_node_mutation(proxy.node, 0)

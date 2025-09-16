@@ -42,7 +42,7 @@ class AliasAnalyzer {
   }
 
   const std::vector<const Value*>& alive_values_at_time(size_t time) const {
-    TORCH_CHECK_LT(time, alive_values_at_time_.size());
+    TORCH_CHECK(time < alive_values_at_time_.size());
     return alive_values_at_time_[time];
   }
 

@@ -67,6 +67,12 @@ case ${image} in
         DOCKER_GPU_BUILD_ARG="--build-arg BASE_CUDA_VERSION=${GPU_ARCH_VERSION} --build-arg DEVTOOLSET_VERSION=13"
         MANY_LINUX_VERSION="2_28"
         ;;
+    manylinux2_28-builder:cuda13*)
+        TARGET=cuda_final
+        GPU_IMAGE=amd64/almalinux:8
+        DOCKER_GPU_BUILD_ARG="--build-arg BASE_CUDA_VERSION=${GPU_ARCH_VERSION} --build-arg DEVTOOLSET_VERSION=13"
+        MANY_LINUX_VERSION="2_28"
+        ;;
     manylinuxaarch64-builder:cuda*)
         TARGET=cuda_final
         GPU_IMAGE=amd64/almalinux:8
@@ -77,7 +83,7 @@ case ${image} in
     manylinux2_28-builder:rocm*)
         # we want the patch version of 6.4 instead
         if [[ $(ver $GPU_ARCH_VERSION) -eq $(ver 6.4) ]]; then
-            GPU_ARCH_VERSION="${GPU_ARCH_VERSION}.1"
+            GPU_ARCH_VERSION="${GPU_ARCH_VERSION}.2"
         fi
         TARGET=rocm_final
         MANY_LINUX_VERSION="2_28"

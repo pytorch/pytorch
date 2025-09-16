@@ -14,8 +14,10 @@
 #include <c10/util/Half.h>
 
 #ifdef USE_FBGEMM
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wextra-semi")
 #include <fbgemm/Fbgemm.h>
 #include <fbgemm/FbgemmConvert.h>
+C10_DIAGNOSTIC_POP()
 #else
 #include <caffe2/perfkernels/embedding_lookup_idx.h>
 #endif

@@ -168,4 +168,4 @@ def merge_operator_dicts(
 
 
 def strip_operator_overload_name(op_name: str) -> str:
-    return op_name.split(".")[0]
+    return op_name.split(".", maxsplit=1)[0]

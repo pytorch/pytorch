@@ -4152,7 +4152,7 @@ class TestVmapOperatorsOpInfo(TestCase):
                 with subtest_ctx(self), skip_xfail_ctx(self):
                     args = (sample_input.input,) + sample_input.args
                     if not any(isinstance(arg, torch.Tensor) for arg in args):
-                        # Atleast one tensor required for vmap.
+                        # At least one tensor required for vmap.
                         continue
                     kwargs = sample_input.kwargs
                     is_batch_norm_and_training = is_batch_norm_training(op.name, kwargs)
@@ -4230,7 +4230,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail("as_strided_copy"),
         xfail(
             "as_strided_scatter"
-        ),  # no batching rule implemented, default doesnt work
+        ),  # no batching rule implemented, default doesn't work
         skip(
             "new_empty_strided"
         ),  # empty tensor data is garbage so it's hard to make comparisons with it

@@ -330,7 +330,7 @@ def _full_post_state_dict_hook(
             try:
                 state_dict[fqn] = state_dict[fqn].detach().clone()
                 state_dict[fqn]._has_been_cloned = True  # type: ignore[attr-defined]
-            except BaseException as e:
+            except BaseException as e:  # noqa: B036
                 warnings.warn(
                     f"Failed to clone() tensor with name {fqn} on rank {fsdp_state.rank}. "
                     "This may mean that this state_dict entry could point to invalid "

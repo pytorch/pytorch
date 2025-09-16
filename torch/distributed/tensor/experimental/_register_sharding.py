@@ -41,7 +41,7 @@ def register_sharding(op: Union[OpOverload, list[OpOverload]]):
         as the original op (except that if an arg is a :class:`torch.Tensor`, it will be
         replaced by a tensor-like object that DTensor uses internally). The function should
         return a sequence of 2-tuples, each specifying acceptable output placements and its
-        corresponding intput placements.
+        corresponding input placements.
 
     Example:
         >>> # xdoctest: +SKIP("distributed")

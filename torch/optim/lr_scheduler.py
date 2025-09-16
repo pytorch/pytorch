@@ -106,8 +106,10 @@ class LRScheduler:
             for i, group in enumerate(optimizer.param_groups):
                 if "initial_lr" not in group:
                     raise KeyError(
-                        "param 'initial_lr' is not specified "
-                        f"in param_groups[{i}] when resuming an optimizer"
+                        f"param 'initial_lr' is not specified in param_groups[{i}] when resuming scheduler with last_epoch >= 0.\n"
+                        "This typically happens when:\n"
+                        "1. You're trying to resume training from a checkpoint but haven't properly loaded the optimizer state\n"
+                        "2. You're using last_epoch >= 0 for a fresh training run (not recommended)"
                     )
         self.base_lrs: list[float] = [
             group["initial_lr"] for group in optimizer.param_groups
@@ -200,13 +202,16 @@ class LRScheduler:
                 )
 
         self._step_count += 1
+        if epoch is not None:
+            warnings.warn(EPOCH_DEPRECATION_WARNING, UserWarning)
+        self._update_lr(epoch)
 
+    def _update_lr(self, epoch: Optional[int] = None):
         with _enable_get_lr_call(self):
             if epoch is None:
                 self.last_epoch += 1
                 values = self.get_lr()
             else:
-                warnings.warn(EPOCH_DEPRECATION_WARNING, UserWarning)
                 self.last_epoch = epoch
                 if hasattr(self, "_get_closed_form_lr"):
                     values = cast(list[float], self._get_closed_form_lr())
@@ -913,7 +918,7 @@ class SequentialLR(LRScheduler):
         idx = bisect_right(self._milestones, self.last_epoch)
         scheduler = self._schedulers[idx]
         if idx > 0 and self._milestones[idx - 1] == self.last_epoch:
-            scheduler.step(0)
+            scheduler._update_lr(0)
         else:
             scheduler.step()
 
@@ -1344,7 +1349,7 @@ class ReduceLROnPlateau(LRScheduler):
             warnings.warn(EPOCH_DEPRECATION_WARNING, UserWarning)
         self.last_epoch = epoch
 
-        if self.is_better(current, self.best):
+        if self._is_better(current, self.best):
             self.best = current
             self.num_bad_epochs = 0
         else:
@@ -1386,7 +1391,7 @@ class ReduceLROnPlateau(LRScheduler):
     def in_cooldown(self):  # noqa: D102
         return self.cooldown_counter > 0
 
-    def is_better(self, a, best):  # noqa: D102
+    def _is_better(self, a, best):  # noqa: D102
         if self.mode == "min" and self.threshold_mode == "rel":
             rel_epsilon = 1.0 - self.threshold
             return a < best * rel_epsilon
@@ -1686,6 +1691,15 @@ class CyclicLR(LRScheduler):
 
     @override
     def state_dict(self) -> dict[str, Any]:  # noqa: D102
+        """Return the state of the scheduler as a :class:`dict`.
+
+        It contains an entry for every variable in self.__dict__ which
+        is not the optimizer.
+        The learning rate lambda functions will only be saved if they are callable objects
+        and not if they are functions or lambdas.
+
+        When saving or loading the scheduler, please make sure to also save or load the state of the optimizer.
+        """
         state = super().state_dict()
         # We are dropping the `_scale_fn_ref` attribute because it is a
         # `weakref.WeakMethod` and can't be pickled.

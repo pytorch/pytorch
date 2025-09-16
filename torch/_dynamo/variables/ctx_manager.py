@@ -523,7 +523,7 @@ class VmapIncrementNestingCtxManagerVariable(ContextWrappingVariable):
         self.set_cleanup_hook(tx, lambda: torch._C._functorch._vmap_decrement_nesting())
         self.proxy = tx.output.create_node(
             "call_function",
-            torch._C._functorch._vmap_increment_nesting,
+            torch._functorch.predispatch._vmap_increment_nesting,
             (batch_size_node, randomness),
             {},
         )
@@ -532,7 +532,10 @@ class VmapIncrementNestingCtxManagerVariable(ContextWrappingVariable):
     def exit(self, tx: "InstructionTranslator", *args):
         self.cleanup()
         tx.output.create_node(
-            "call_function", torch._C._functorch._vmap_decrement_nesting, (), {}
+            "call_function",
+            torch._functorch.predispatch._vmap_decrement_nesting,
+            (),
+            {},
         )
         return variables.ConstantVariable.create(None)
 
@@ -807,10 +810,8 @@ class DeterministicAlgorithmsVariable(ContextWrappingVariable):
     def _call_func(self, tx: "InstructionTranslator", values):
         assert len(values) == 1
         value = values[0]
-        (
-            tx.output.create_node(
-                "call_function", torch._C._set_deterministic_algorithms, (value,), {}
-            ),
+        tx.output.create_node(
+            "call_function", torch._C._set_deterministic_algorithms, (value,), {}
         )
         torch._C._set_deterministic_algorithms(value)
 
@@ -942,7 +943,8 @@ class NullContextVariable(ContextWrappingVariable):
         super().__init__(target_values=target_values, **kwargs)
 
     def enter(self, tx):
-        return variables.ConstantVariable.create(None)
+        none = variables.ConstantVariable.create(None)
+        return self.target_values if self.target_values else none
 
     def exit(self, tx: "InstructionTranslator", *args):
         return variables.ConstantVariable.create(None)
@@ -1427,12 +1429,12 @@ class DynamoConfigPatchVariable(ContextWrappingVariable):
         return "patch_dynamo_config"
 
 
-class SetFullgraphVariable(ContextWrappingVariable):
-    """represents torch._dynamo.set_fullgraph"""
+class ErrorOnGraphBreakVariable(ContextWrappingVariable):
+    """represents torch._dynamo.error_on_graph_break"""
 
-    def __init__(self, fullgraph, **kwargs) -> None:
+    def __init__(self, error_on_graph_break, **kwargs) -> None:
         super().__init__(
-            target_values=(fullgraph,),
+            target_values=(error_on_graph_break,),
             initial_values=(_get_error_on_graph_break(),),
             **kwargs,
         )
@@ -1445,7 +1447,7 @@ class SetFullgraphVariable(ContextWrappingVariable):
         return "torch._dynamo"
 
     def fn_name(self):
-        return "set_fullgraph"
+        return "error_on_graph_break"
 
 
 class WithExitFunctionVariable(VariableTracker):
