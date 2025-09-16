@@ -43,7 +43,7 @@ def move_cutlass_compiled_cache() -> None:
     if config.is_fbcode():
         import python_cutlass  # type: ignore[import-not-found]
     else:
-        import cutlass as python_cutlass  # type: ignore[import-not-found]  # noqa: F401
+        import cutlass_cppgen as python_cutlass  # type: ignore[import-not-found]  # noqa: F401
 
     # Check if the CACHE_FILE attribute exists in python_cutlass and if the file exists
     if not hasattr(python_cutlass, "CACHE_FILE") or not os.path.exists(
@@ -156,7 +156,7 @@ def try_import_cutlass() -> bool:
                 )
 
         try:
-            import cutlass  # noqa: F401, F811
+            import cutlass_cppgen  # noqa: F401, F811
             import cutlass_library.generator  # noqa: F401
             import cutlass_library.library  # noqa: F401
             import cutlass_library.manifest  # noqa: F401
