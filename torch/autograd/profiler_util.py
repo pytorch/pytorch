@@ -1277,6 +1277,7 @@ def _build_table(
             headers.append(func_full_overload_name)
             add_column(len(func_full_overload_name))
 
+        # "Full Name" must be last column in the table, since it will be long.
         func_full_name = "Full Name"
         headers.append(func_full_name)
         add_column(len(func_full_name))
