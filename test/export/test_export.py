@@ -11825,7 +11825,6 @@ graph():
         self.assertEqual(ep.module()(3, 5), 8)
         self.assertEqual(ep.module()(5, 4), 9)
 
-    @testing.expectedFailureStrictV2  # ValueError: Found conflicts between user-specified and inferred ranges
     def test_dynamic_shapes_bounds(self):
         class M(torch.nn.Module):
             """
