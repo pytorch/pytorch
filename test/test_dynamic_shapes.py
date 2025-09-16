@@ -282,21 +282,6 @@ class TestPySymInt(TestCase):
         c = create_symbool(shape_env, True)
         self.assertIs(sympy.sympify(c), c.node.expr)
 
-    def test_trunc_int_div_true(self):
-        @torch.compile(backend="inductor", dynamic=True, fullgraph=True)
-        def f(x, s13, s57, s77):
-            torch._check(s13 >= 0)
-            torch._check(s57 >= 0)
-            torch._check(s77 >= 0)
-            if int(s13 * ((s57 // s13) + (s77 // s13)) / s13) >= 1:
-                return x * 2
-            else:
-                return x * 100
-
-        # ensure we compile this with no errors.
-        x = torch.rand(10)
-        f(x, 4, 4096, 3920)
-
     def test_roundtrip(self):
         shape_env = ShapeEnv()
         x = create_symbolic_tensor("x", torch.randn(5, 4, 3), shape_env)
@@ -3136,6 +3121,65 @@ class TestGuardsExpressions(TestCase):
         self.assertEqual(f"{x_clean.stride()}", "(8, 1)")
         self.assertEqual(f"{x_clean.shape}", "torch.Size([5, 8])")
 
+    def test_mm_recompilation(self):
+        """
+        Test matrix multiplication with different dimension scenarios does not recompile
+        by default and recompile with proper mm_recompile_hooks config.
+        Three cases:
+        1. m, n, k all same (should use cached version if hook configured)
+        2. One dimension < 16 (should trigger recompilation if hook configured)
+        3. All dimensions > 16 (should trigger recompilation if hook configured)
+        """
+        cnt = CompileCounterWithBackend("inductor")
+
+        @torch.compile(backend=cnt, dynamic=True)
+        def func(a, b):
+            return torch.mm(a, b)
+
+        def run_all():
+            # start with this to avoid duck sizing recompilations.
+            # Case 1: All dimensions > 16
+            m, n, k = 64, 128, 32  # all > 16
+            a3 = torch.randn(m, k)
+            b3 = torch.randn(k, n)
+            func(a3, b3)
+
+            # Case 1: One dimension < 16 (should use cached)
+            m, n, k = 32, 32, 4  # k < 16
+            a2 = torch.randn(m, k)
+            b2 = torch.randn(k, n)
+            func(a2, b2)
+
+            # Case 3: m=n=k=8 (all same - should use cached)
+            m = n = k = 8
+            a1 = torch.randn(m, k)
+            b1 = torch.randn(k, n)
+            func(a1, b1)
+
+        run_all()
+        self.assertEqual(cnt.frame_count, 1)
+
+        # Clear dynamo cache
+        torch._dynamo.reset()
+
+        def mm_recompile_hook(m, n, k, sizevars):
+            # Specialization for square matrices
+            if sizevars.guard_or_false(sympy.And(sympy.Eq(m, n), sympy.Eq(n, k))):
+                pass
+            # Specialization for any small given 1 small dim.
+            elif sizevars.guard_or_false(
+                sympy.Or(sympy.Lt(m, 16), sympy.Lt(n, 16), sympy.Lt(k, 16))
+            ):
+                pass
+            else:
+                # all > 16
+                pass
+
+        # do it again but with mm_recompile_hooks
+        with torch._inductor.config.patch(mm_recompile_hooks={"mm": mm_recompile_hook}):
+            run_all()
+            self.assertEqual(cnt.frame_count, 4)
+
 
 def custom_pass(graph: torch.fx.Graph) -> torch.fx.Graph:
     for node in graph.nodes:
@@ -3699,6 +3743,21 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
         idx = torch.tensor(1, dtype=torch.int64)
         out = torch.compile(f)(idx, x)
         self.assertEqual(out, f(idx, x))
+
+    def test_trunc_int_div_true(self):
+        @torch.compile(backend="inductor", dynamic=True, fullgraph=True)
+        def f(x, s13, s57, s77):
+            torch._check(s13 >= 0)
+            torch._check(s57 >= 0)
+            torch._check(s77 >= 0)
+            if int(s13 * ((s57 // s13) + (s77 // s13)) / s13) >= 1:
+                return x * 2
+            else:
+                return x * 100
+
+        # ensure we compile this with no errors.
+        x = torch.rand(10)
+        f(x, 4, 4096, 3920)
 
 
 instantiate_parametrized_tests(TestUnbacked)
