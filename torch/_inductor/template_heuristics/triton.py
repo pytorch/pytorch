@@ -18,6 +18,7 @@ from torch.utils._triton import has_triton_stable_tma_api
 from .. import config, config as inductor_config
 from ..kernel.bmm import bmm_template
 from ..kernel.mm import (
+    blackwell_ws_persistent_device_tma_mm_template,
     mm_template,
     persistent_tma_mm_template,
     scaled_mm_device_tma_template,
@@ -1652,6 +1653,35 @@ class TMATemplateConfigMixin(TMAWorkspaceMixin, MMTemplateConfigMixin):
             yield {**template_kwargs, **tma_opts}
 
 
+# TMA mixins for Blackwell templates
+class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
+    def _get_template_configs_impl(
+        self,
+        kernel_inputs: KernelInputs,
+        op_name: str,
+    ) -> Generator[dict[str, Any], None, None]:
+        """
+        Generate TMA template configs by calling super and adding TMA-specific options.
+        """
+        base_ops = {
+            "NUM_SMS": get_num_sms(),
+            # TODO: Consider making this tunable.
+            "FLATTEN": True,
+        }
+        # Get base template configs from superclass
+        for template_kwargs in super()._get_template_configs_impl(
+            kernel_inputs,
+            op_name,
+        ):
+            # Some Triton versions requires num_warps >= 4 for WS
+            # to avoid compilation issues. Triton disables WS if num_warps < 4
+            # or num_stages < 2. Similar issues have been seen with num_stages=1
+            ws = (
+                template_kwargs["num_warps"] >= 4 and template_kwargs["num_stages"] >= 2
+            )
+            yield {**template_kwargs, **base_ops, "WARP_SPECIALIZE": ws}
+
+
 # Scaled MM-specific mixin for scaled MM templates
 class BaseScaledMMConfigMixin(MMTemplateConfigMixin):
     """
@@ -1890,6 +1920,22 @@ class CUDAPersistentTMATemplateConfigHeuristic(
 
 
 @register_template_heuristic(
+    blackwell_ws_persistent_device_tma_mm_template.uid,
+    "cuda",
+    register=torch.version.hip is None,
+)
+class CUDABlackwellPersistentTMATemplateConfigHeuristic(
+    BlackwellTMATemplateConfigMixin, CUDAConfigHeuristic
+):
+    """Blackwell Persistent TMA template"""
+
+    def __init__(self) -> None:
+        super().__init__()
+        # TODO: Tune mm_configs for blackwell.
+        self.mm_configs = self.persistent_mm_configs
+
+
+@register_template_heuristic(
     persistent_tma_mm_template.uid,
     "cuda",
     register=torch.version.hip is None,
@@ -1899,6 +1945,22 @@ class CUDAAddmmPersistentTMATemplateConfigHeuristic(
     AddMMConfigMixin, CUDAPersistentTMATemplateConfigHeuristic
 ):
     """Addmm specific mixin for CUDA"""
+
+
+@register_template_heuristic(
+    blackwell_ws_persistent_device_tma_mm_template.uid,
+    "cuda",
+    register=torch.version.hip is None,
+)
+class CUDABlackwellAddmmPersistentTMATemplateConfigHeuristic(
+    AddMMConfigMixin, CUDABlackwellPersistentTMATemplateConfigHeuristic
+):
+    """Addmm extension for DataCenter Blackwell Templates"""
+
+    def __init__(self) -> None:
+        super().__init__()
+        # TODO: Tune mm_configs for blackwell.
+        self.mm_configs = self.persistent_mm_configs
 
 
 @register_template_heuristic(
