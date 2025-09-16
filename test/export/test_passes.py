@@ -411,9 +411,10 @@ class TestPasses(TestCase):
         )
 
         with self.assertRaisesRegex(
-            RuntimeError,
-            escape("Expected input at *args[0].shape[1] to be <= 6, but got 7"),
+            AssertionError,
+            escape("Guard failed: x.size()[1] <= 6"),
         ):
+            # expected <= 6, but got 7
             ep.module()(torch.zeros(2, 7, 3))
 
         self.assertEqual(
@@ -442,15 +443,17 @@ class TestPasses(TestCase):
         )
 
         with self.assertRaisesRegex(
-            RuntimeError,
-            escape("Expected input at *args[0].shape[1] to be <= 6, but got 7"),
+            AssertionError,
+            escape("Guard failed: x.size()[1] <= 6"),
         ):
+            # expected <= 6, but got 7
             ep.module()(torch.zeros(4, 7, 3), torch.ones(5, 5, 5))
 
         with self.assertRaisesRegex(
-            RuntimeError,
-            escape("Expected input at *args[1].shape[0] to be >= 3, but got 2"),
+            AssertionError,
+            escape("Guard failed: y.size()[0] >= 3"),
         ):
+            # expected >= 3, but got 2
             ep.module()(torch.zeros(4, 2, 3), torch.ones(2, 5, 5))
 
     def test_runtime_assert_some_dims_not_specified(self) -> None:
@@ -475,16 +478,18 @@ class TestPasses(TestCase):
         )
 
         with self.assertRaisesRegex(
-            RuntimeError,
-            escape("Expected input at *args[0].shape[1] to be <= 6, but got 7"),
+            AssertionError,
+            escape("Guard failed: x.size()[1] <= 6"),
         ):
+            # expected <= 6, but got 7
             ep.module()(torch.zeros(4, 7, 3), torch.ones(5, 5, 5))
 
         # y is specialized to 5
         with self.assertRaisesRegex(
-            RuntimeError,
-            escape("Expected input at *args[1].shape[0] to be equal to 5, but got 2"),
+            AssertionError,
+            escape("Guard failed: y.size()[0] == 5"),
         ):
+            # expected 5, but got 2
             ep.module()(torch.zeros(4, 2, 3), torch.ones(2, 5, 5))
 
         # Since we didn't insert the constraint for x[1] >= 2, it should work for case where x[1] == 1
@@ -509,14 +514,19 @@ class TestPasses(TestCase):
             M(), (x, y), dynamic_shapes={"x": None, "y": {1: dim1_y}}, strict=True
         )
 
-        with self.assertRaisesRegex(RuntimeError, escape("shape[1] to be equal to 2")):
+        with self.assertRaisesRegex(
+            AssertionError,
+            escape("Guard failed: x.size()[1] == 2"),
+        ):
+            # expected 2, but got 7
             ep.module()(torch.zeros(4, 7, 3), torch.ones(5, 5, 5))
 
         # y is specialized to 5
         with self.assertRaisesRegex(
-            RuntimeError,
-            escape("Expected input at *args[1].shape[0] to be equal to 5, but got 2"),
+            AssertionError,
+            escape("Guard failed: y.size()[0] == 5"),
         ):
+            # expected 5, but got 2
             ep.module()(torch.zeros(4, 2, 3), torch.ones(2, 5, 5))
 
         # Since we didn't insert the constraint for x[1] >= 2, it should work for case where x[1] == 1
@@ -803,6 +813,7 @@ def forward(self, token, obj_attr, x):
             """\
 def forward(self, x):
     x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    _guards_fn = self._guards_fn(x);  _guards_fn = None
     add = torch.ops.aten.add.Tensor(x, 1);  x = None
     sin = torch.ops.aten.sin.default(add);  add = None
     sum_1 = torch.ops.aten.sum.default(sin);  sin = None
@@ -822,6 +833,7 @@ def forward(self, x):
             """\
 def forward(self, x):
     x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    _guards_fn = self._guards_fn(x);  _guards_fn = None
     add = torch.ops.aten.add.Tensor(x, 1);  x = None
     sin = torch.ops.aten.sin.default(add);  add = None
     sum_1 = torch.ops.aten.sum.default(sin);  sin = None
@@ -841,6 +853,7 @@ def forward(self, x):
             """\
 def forward(self, x):
     x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    _guards_fn = self._guards_fn(x);  _guards_fn = None
     add = torch.ops.aten.add.Tensor(x, 1);  x = None
     sin = torch.ops.aten.sin.default(add);  add = None
     sum_1 = torch.ops.aten.sum.default(sin);  sin = None
@@ -860,6 +873,7 @@ def forward(self, x):
             """\
 def forward(self, x):
     x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    _guards_fn = self._guards_fn(x);  _guards_fn = None
     add = torch.ops.aten.add.Tensor(x, 1);  x = None
     submod_5 = self.submod_1
     sum_1 = torch.ops.higher_order.wrap_with_set_grad_enabled(True, submod_5, add);  submod_5 = add = None
@@ -880,6 +894,7 @@ def forward(self, x):
             """\
 def forward(self, x):
     x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    _guards_fn = self._guards_fn(x);  _guards_fn = None
     add = torch.ops.aten.add.Tensor(x, 1);  x = None
     sin = torch.ops.aten.sin.default(add)
     sum_1 = torch.ops.aten.sum.default(sin);  sin = None
@@ -905,6 +920,7 @@ def forward(self, x):
             """\
 def forward(self, x):
     x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    _guards_fn = self._guards_fn(x);  _guards_fn = None
     add = torch.ops.aten.add.Tensor(x, 1);  x = None
     submod_5 = self.submod_1
     wrap_with_set_grad_enabled = torch.ops.higher_order.wrap_with_set_grad_enabled(True, submod_5, add);  submod_5 = add = None
@@ -940,6 +956,7 @@ def forward(self, x):
             """\
 def forward(self, x1, x2):
     x1, x2, = fx_pytree.tree_flatten_spec(([x1, x2], {}), self._in_spec)
+    submod_0 = self.submod_0(x1, x2);  submod_0 = None
     submod_1 = self.submod_1(x1, x2);  x1 = x2 = None
     getitem = submod_1[0]
     getitem_1 = submod_1[1];  submod_1 = None
@@ -995,6 +1012,7 @@ def forward(self, sin, cos):
             """\
 def forward(self, x):
     x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    _guards_fn = self._guards_fn(x);  _guards_fn = None
     submod_3 = self.submod_3
     add = torch.ops.aten.add.Tensor(x, 1);  x = None
     sin = torch.ops.higher_order.wrap_with_set_grad_enabled(True, submod_3, add);  submod_3 = add = None
@@ -1033,6 +1051,7 @@ def forward(self, cos):
             """\
 def forward(self, x):
     x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    _guards_fn = self._guards_fn(x);  _guards_fn = None
     add = torch.ops.aten.add.Tensor(x, 1);  x = None
     submod_3 = self.submod_1
     add_1 = torch.ops.higher_order.wrap_with_autocast('cpu', None, True, None, submod_3, add);  submod_3 = add = None
@@ -1065,6 +1084,7 @@ def forward(self, add):
             """\
 def forward(self, x):
     x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    _guards_fn = self._guards_fn(x);  _guards_fn = None
     add = torch.ops.aten.add.Tensor(x, 1);  x = None
     submod_4 = self.submod_1
     sum_1 = torch.ops.higher_order.wrap_with_autocast('cpu', None, True, None, submod_4, add);  submod_4 = add = None
@@ -1115,6 +1135,7 @@ def forward(self, add_1):
             """\
 def forward(self, x):
     x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    _guards_fn = self._guards_fn(x);  _guards_fn = None
     add = torch.ops.aten.add.Tensor(x, 1);  x = None
     submod_4 = self.submod_1
     wrap_with_autocast = torch.ops.higher_order.wrap_with_autocast('cpu', None, True, None, submod_4, add);  submod_4 = add = None
@@ -1172,6 +1193,7 @@ def forward(self, add_1, add_2):
             """\
 def forward(self, x):
     x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    _guards_fn = self._guards_fn(x);  _guards_fn = None
     add = torch.ops.aten.add.Tensor(x, 1);  x = None
     submod_4 = self.submod_1
     sum_1 = torch.ops.higher_order.wrap_with_autocast('cpu', None, True, None, submod_4, add);  submod_4 = add = None
@@ -1213,6 +1235,7 @@ def forward(self, add_1):
             )
             after_inline_str = new_gm.print_readable(print_output=False)
             self.assertEqual(before_str, after_inline_str)
+            new_gm._guards_fn = gm._guards_fn
             self.assertEqual(gm(*args), new_gm(*args))
 
     def test_remove_auto_functionalized_pass(self) -> None:
