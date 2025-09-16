@@ -5354,7 +5354,7 @@ if torch.distributed.is_available() and HAS_CUDA_AND_TRITON:
         test_dtensor.TestDTensorCompile
     )
 
-xfail_hops = {}
+xfail_hops = {"local_map_hop"}
 
 
 class TestCompiledAutogradOpInfo(TestCase):

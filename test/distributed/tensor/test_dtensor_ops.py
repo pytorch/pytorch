@@ -636,7 +636,7 @@ class TestDTensorOps(DTensorOpTestBase):
                         )
                 except Exception as e:
                     raise RuntimeError(
-                        f"failed to run: {resolve_name(func)}, with (*{dtensor_args}, **{dtensor_kwargs})"
+                        f"{str(e)}\n\nfailed to run: {resolve_name(func)}, with (*{dtensor_args}, **{dtensor_kwargs})"
                     ) from e
         return rs
 
