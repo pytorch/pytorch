@@ -2718,5 +2718,18 @@
       "Explanation": "Dyanmo does not support tracing mutations on a class when its __dict__ is materialized",
       "Hints": []
     }
+  ],
+  "GB0272": [
+    {
+      "Gb_type": "Attempted to reconstruct context manager's __enter__ method",
+      "Context": "str(self.ctx)",
+      "Explanation": "Attempted to reconstruct context manager {type_str} while tracing `with ...:`",
+      "Hints": [
+        "It is likely there is a graph break while tracing `with ctx:` ",
+        "but outside the actual `ctx.__enter__()` method. ",
+        "`torch.compile` does not expect this to happen.",
+        "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
+    }
   ]
 }

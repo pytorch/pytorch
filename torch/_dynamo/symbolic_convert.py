@@ -138,6 +138,7 @@ from .variables.constant import ConstantVariable
 from .variables.ctx_manager import (
     ContextWrappingVariable,
     GenericContextWrappingVariable,
+    WithEnterFunctionVariable,
     WithExitFunctionVariable,
 )
 from .variables.dicts import ConstDictVariable, SetVariable
@@ -2507,7 +2508,7 @@ class InstructionTranslatorBase(
         # NOTE: Debug CPython expects the stack to be empty after the return.
         # Expect the current stack to be in the state
         # [[]] (empty frame values), current frame stack (0 or 1 values)
-        assert meta.num_stack <= 1, breakpoint()
+        assert meta.num_stack <= 1
         if meta.num_stack == 1:
             insts.extend(create_swap(2))
         return_inst = (
@@ -3448,6 +3449,43 @@ class InstructionTranslatorBase(
     def BEFORE_WITH(self, inst: Instruction) -> None:
         self.setup_or_before_with(inst)
 
+    def enter_ctx(
+        self,
+        ctx: Union[ContextWrappingVariable, GenericContextWrappingVariable],
+        inst: Instruction,
+    ) -> VariableTracker:
+        if (
+            isinstance(ctx, GenericContextWrappingVariable)
+            and not ctx.supports_graph_breaks()
+        ):
+            self.active_generic_context_managers.append(ctx)
+
+        if sys.version_info >= (3, 11):
+            # See create_call_resume_at for block stack details.
+            # Only push a block if the current instruction's block is a
+            # with block that is not nested in a try block - that is, the current
+            # instruction's block target is the same as the top block's target.
+            if inst.exn_tab_entry and (
+                not self.block_stack
+                or inst.exn_tab_entry.target is not self.block_stack[-1].target
+            ):
+                target = None
+            else:
+                assert self.next_instruction.exn_tab_entry is not None
+                target = self.next_instruction.exn_tab_entry.target
+        else:
+            target = inst.target
+
+        if target:
+            if isinstance(self, InstructionTranslator) or config.nested_graph_breaks:
+                self.block_stack.append(
+                    BlockStackEntry(inst, target, len(self.stack), ctx)
+                )
+            else:
+                self.block_stack.append(BlockStackEntry(inst, target, len(self.stack)))
+
+        return ctx.enter(self)
+
     def setup_or_before_with(self, inst: Instruction) -> None:
         ctx = self.pop()
         if not isinstance(
@@ -3468,49 +3506,13 @@ class InstructionTranslatorBase(
                 ],
             )
 
-        if (
-            isinstance(ctx, GenericContextWrappingVariable)
-            and not ctx.supports_graph_breaks()
-        ):
-            self.active_generic_context_managers.append(ctx)
-
         # Need this redundant check for mypy
         assert isinstance(
             ctx, (ContextWrappingVariable, GenericContextWrappingVariable)
         )
 
-        exit = WithExitFunctionVariable(
-            ctx,
-            inst.target,
-        )
-
-        if sys.version_info >= (3, 11):
-            # See create_call_resume_at for block stack details.
-            # Only push a block if the current instruction's block is a
-            # with block that is not nested in a try block - that is, the current
-            # instruction's block target is the same as the top block's target.
-            if inst.exn_tab_entry and (
-                not self.block_stack
-                or inst.exn_tab_entry.target is not self.block_stack[-1].target
-            ):
-                target = None
-            else:
-                assert self.next_instruction.exn_tab_entry is not None
-                target = self.next_instruction.exn_tab_entry.target
-        else:
-            target = inst.target
-
-        self.push(exit)
-
-        if target:
-            if isinstance(self, InstructionTranslator) or config.nested_graph_breaks:
-                self.block_stack.append(
-                    BlockStackEntry(inst, target, len(self.stack), ctx)
-                )
-            else:
-                self.block_stack.append(BlockStackEntry(inst, target, len(self.stack)))
-
-        self.push(ctx.enter(self))
+        self.push(WithExitFunctionVariable(ctx, inst.target))
+        self.push(self.enter_ctx(ctx, inst))
 
     def append_prefix_inst(self, inst: Instruction) -> None:
         assert self.accept_prefix_inst
@@ -3651,11 +3653,28 @@ class InstructionTranslatorBase(
     )
 
     def LOAD_SPECIAL(self, inst: Instruction) -> None:
-        # Implementation is similar to LOAD_METHOD for 3.13+
-        self._load_attr(self._load_special_names[inst.arg])
-        obj = self.pop()
-        self.push(obj)
-        self.PUSH_NULL(inst)
+        attr = self._load_special_names[inst.arg]
+        if attr == "__enter__":
+            ctx = self.pop()
+            assert isinstance(
+                ctx, (ContextWrappingVariable, GenericContextWrappingVariable)
+            )
+            self.push(WithEnterFunctionVariable(ctx))
+            self.PUSH_NULL(inst)
+        elif attr == "__exit__":
+            ctx = self.pop()
+            assert isinstance(
+                ctx, (ContextWrappingVariable, GenericContextWrappingVariable)
+            )
+            # WithExitFunctionVariable doesn't really do anything with target for 3.11+
+            self.push(WithExitFunctionVariable(ctx, None))
+            self.PUSH_NULL(inst)
+        else:
+            # Implementation is similar to LOAD_METHOD for 3.13+
+            self._load_attr(attr)
+            obj = self.pop()
+            self.push(obj)
+            self.PUSH_NULL(inst)
 
     def LOAD_SMALL_INT(self, inst: Instruction) -> None:
         self.push(ConstantVariable.create(inst.argval))
