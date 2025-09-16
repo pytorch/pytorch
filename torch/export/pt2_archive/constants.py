@@ -13,6 +13,7 @@ CONSTANTS_CONFIG_FILENAME_FORMAT: str = (
     pt2_archive_constants.CONSTANTS_CONFIG_FILENAME_FORMAT
 )
 CUSTOM_OBJ_FILENAME_PREFIX: str = pt2_archive_constants.CUSTOM_OBJ_FILENAME_PREFIX
+EXECUTORCH_DIR: str = pt2_archive_constants.EXECUTORCH_DIR
 EXTRA_DIR: str = pt2_archive_constants.EXTRA_DIR
 MODELS_DIR: str = pt2_archive_constants.MODELS_DIR
 MODELS_FILENAME_FORMAT: str = pt2_archive_constants.MODELS_FILENAME_FORMAT
