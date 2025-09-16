@@ -42,6 +42,7 @@ _ConvMetadata = namedtuple(
         "fused_conv_bn",
         "fused_conv_bn_relu",
         "qat",
+        "transpose_qat",
         "relu_qat",
         "bn_qat",
         "bn_relu_qat",
@@ -59,6 +60,7 @@ _Conv1dMetadata = _ConvMetadata(
     nni.ConvBn1d,
     nni.ConvBnReLU1d,
     nnqat.Conv1d,
+    nnqat.ConvTranspose1d,
     nniqat.ConvReLU1d,
     nniqat.ConvBn1d,
     nniqat.ConvBnReLU1d,
@@ -75,6 +77,7 @@ _Conv2dMetadata = _ConvMetadata(
     nni.ConvBn2d,
     nni.ConvBnReLU2d,
     nnqat.Conv2d,
+    nnqat.ConvTranspose2d,
     nniqat.ConvReLU2d,
     nniqat.ConvBn2d,
     nniqat.ConvBnReLU2d,
@@ -91,6 +94,7 @@ _Conv3dMetadata = _ConvMetadata(
     nni.ConvBn3d,
     nni.ConvBnReLU3d,
     nnqat.Conv3d,
+    nnqat.ConvTranspose3d,
     nniqat.ConvReLU3d,
     nniqat.ConvBn3d,
     nniqat.ConvBnReLU3d,
@@ -446,6 +450,14 @@ def _get_conv_configs(dtype_configs):
         conv_configs.append(
             BackendPatternConfig(convs.transpose)
             .set_dtype_configs(dtype_configs)  # noqa: E131
+            .set_root_module(convs.transpose)
+            .set_reference_quantized_module(convs.transpose_reference)
+            .set_qat_module(convs.transpose_qat)
+        )
+        conv_configs.append(
+            BackendPatternConfig(convs.transpose_qat)
+            .set_observation_type(observation_type)  # noqa: E131
+            .set_dtype_configs(dtype_configs)
             .set_root_module(convs.transpose)
             .set_reference_quantized_module(convs.transpose_reference)
         )
