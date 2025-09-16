@@ -1566,7 +1566,7 @@ class OutputGraph(OutputGraphGuardsState):
                             )
                         elif (
                             vt.source is not None
-                            and (source := getattr(vt.source, "base", None))
+                            and (source := getattr(vt.source, "base", None))  # type: ignore[assignment]
                             and source.is_input
                         ):
                             self.export_metadata.output_return_type[idx] = (
