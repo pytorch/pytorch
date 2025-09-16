@@ -5,8 +5,6 @@
 #include <ATen/native/DistributionTemplates.h>
 #include <ATen/native/Distributions.h>
 #include <ATen/native/TensorFactories.h>
-#include <ATen/native/mps/MPSGraphSonomaOps.h>
-#include <ATen/native/mps/MPSGraphVenturaOps.h>
 #include <ATen/native/mps/OperationUtils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
