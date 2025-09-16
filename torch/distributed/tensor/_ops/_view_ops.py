@@ -562,6 +562,7 @@ def propagate_shape_and_sharding(
                                 "Please explicitly redistribute the tensor instead."
                             )
                 shardable_dims[dim.input_dim] = [can_shard_dim] * mesh_ndim
+
             assert isinstance(cmd.input_dims[0], InputDim)
             return cmd.input_dims[0]
         elif isinstance(cmd, Split):
