@@ -71,6 +71,7 @@ def _use_flex_decoding(query, kv_indices, value, kernel_options, enable_gqa) -> 
 
     return (
         not force_flex
+        and not kernel_options.get("OUTPUT_MAX", False)
         and short_query_length
         and static_batch
         and static_num_heads

@@ -15,7 +15,7 @@ optree==0.13.0
 packaging==23.1
 parameterized==0.8.1
 pillow==10.3.0
-protobuf==5.29.4
+protobuf==5.29.5
 psutil==5.9.8
 pygments==2.15.0
 pytest-cpp==2.3.0
@@ -26,7 +26,7 @@ pytest-xdist==3.3.1
 pytest==7.3.2
 pyyaml==6.0.2
 scipy==1.12.0
-setuptools==72.1.0
+setuptools==78.1.1
 sympy==1.13.3
 tlparse==0.4.0
 tensorboard==2.13.0
