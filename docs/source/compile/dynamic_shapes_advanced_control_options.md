@@ -54,7 +54,7 @@ If an element is marked as dynamic by PGO, it does not guarantee that it will re
 
 Different ranks can communicate with each other to share observed sizes. In the second
 iteration, automatic dynamic uses this information to determine which elements to mark
-as dynamic based on inputs seen across all ranks. Check the PR for more details.
+as dynamic based on inputs seen across all ranks. Check this [PR](https://github.com/pytorch/pytorch/pull/130935) for more details.
 To enable this feature, use `enable_compiler_collectives=True` with the `@config.patch`
 decorator.
 
