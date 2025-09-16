@@ -12234,7 +12234,7 @@ class TestConsistency(TestCaseMPS):
         'arange', 'linspace',
         'special.xlog1py',
 
-        # CPU accumulates sequantially, but GPU does in in parallel
+        # CPU accumulates sequantially, but GPU does in parallel
         '_unsafe_masked_index_put_accumulate',
     }
 

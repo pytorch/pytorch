@@ -7,6 +7,8 @@
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/mps/kernels/EmbeddingBag.h>
 
+#include <fmt/base.h>
+
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
@@ -106,8 +108,8 @@ static std::tuple<Tensor, Tensor, Tensor, Tensor> _embedding_bag_mps_impl(
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
       id<MTLComputeCommandEncoder> computeEncoder = stream->commandEncoder();
-      auto pipeline_state = lib.getPipelineStateForFunc("embedding_bag_" + scalarToMetalTypeString(weight) + "_" +
-                                                        scalarToMetalTypeString(indices));
+      auto pipeline_state = lib.getPipelineStateForFunc(
+          fmt::format("embedding_bag_{}_{}", scalarToMetalTypeString(weight), scalarToMetalTypeString(indices)));
 
       getMPSProfiler().beginProfileKernel(pipeline_state, "embedding_bag", {weight, indices, offsets});
       [computeEncoder setComputePipelineState:pipeline_state];
@@ -127,7 +129,8 @@ static std::tuple<Tensor, Tensor, Tensor, Tensor> _embedding_bag_mps_impl(
     }
   });
 
-  return std::tuple<Tensor, Tensor, Tensor, Tensor>(output, offset2bag, bag_size, max_indices);
+  return std::tuple<Tensor, Tensor, Tensor, Tensor>(
+      std::move(output), std::move(offset2bag), std::move(bag_size), std::move(max_indices));
 }
 
 } // namespace mps
