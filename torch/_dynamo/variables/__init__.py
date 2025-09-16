@@ -37,7 +37,6 @@ from .ctx_manager import (
     SDPAKernelVariable,
     SetFwdGradEnabledContextManager,
     StreamContextVariable,
-    StreamVariable,
     TemporarilyPopInterpreterStackCtxManagerVariable,
     VmapIncrementNestingCtxManagerVariable,
     WithExitFunctionVariable,
@@ -129,6 +128,7 @@ from .nn_module import (
 )
 from .optimizer import OptimizerVariable
 from .sdpa import SDPAParamsVariable
+from .streams import EventVariable, StreamVariable
 from .tensor import (
     DataPtrVariable,
     FakeItemVariable,
