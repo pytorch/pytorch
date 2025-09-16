@@ -628,7 +628,7 @@ static PyObject* THPVariable_make_subclass(
 }
 
 // Shared code factored out of THPVariable_make_wrapper_subclass and
-// THPVariable_make_dtensor.
+// THPVariable_dtensor__new__.
 static Tensor make_tensor_for_subclass_helper(
     SymIntArrayRef sym_sizes,
     OptionalSymIntArrayRef sym_strides,
