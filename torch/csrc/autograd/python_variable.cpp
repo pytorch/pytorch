@@ -628,7 +628,7 @@ static PyObject* THPVariable_make_subclass(
 }
 
 // Shared code factored out of THPVariable_make_wrapper_subclass and
-// THPVariable_make_dtensor.
+// THPVariable_dtensor__new__.
 static Tensor make_tensor_for_subclass_helper(
     SymIntArrayRef sym_sizes,
     OptionalSymIntArrayRef sym_strides,
@@ -867,6 +867,14 @@ static bool intern_dtensor_strings() {
   FOR_EACH_DTENSOR_INTERNED_STRING(INTERN_DTENSOR_STRING);
 #undef INTERN_DTENSOR_STRING
   return true;
+}
+
+static bool checked_is_true(PyObject* obj) {
+  int result = PyObject_IsTrue(obj);
+  if (result == -1) {
+    throw py::error_already_set();
+  }
+  return result;
 }
 
 static bool checked_not(PyObject* obj) {
@@ -1149,7 +1157,7 @@ static PyObject* DTensor_compute_global_tensor_info_impl(
     // TODO: C++ify Placement and DeviceMesh somehow; profiling seems
     // to say that nearly all our remaining time spent is spent
     // calling back into Python.
-    if (PyObject_IsTrue(
+    if (checked_is_true(
             placement.attr(dtensor_interned_strings.is_shard)().ptr())) {
       const auto shard_dim =
           py::cast<int64_t>(placement.attr(dtensor_interned_strings.dim));
