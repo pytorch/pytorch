@@ -1460,6 +1460,9 @@ class IndentedBuffer:
         res.writelines(other._lines)
         return res
 
+    def contains(self, new_line: Union[DeferredLineBase, LineContext, str]) -> bool:
+        return new_line in self._lines
+
 
 class FakeIndentedBuffer(IndentedBuffer):
     def __init__(self) -> None:
