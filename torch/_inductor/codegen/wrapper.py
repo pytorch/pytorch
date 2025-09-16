@@ -909,6 +909,56 @@ class MultiOutputLine(WrapperLine):
 
 
 @dataclasses.dataclass
+class IndexPutFallbackLine(WrapperLine):
+    wrapper: PythonWrapperCodegen
+    node: ir.IndexPutFallback
+    indices: list[Optional[ir.IRNode]]
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        node = self.node
+        assert ir.is_node_sequence(node.inputs)
+        (x, values) = (t.codegen_reference() for t in node.inputs[:2])
+        indices = [
+            idx.codegen_reference() if idx else self.wrapper.none_str
+            for idx in self.indices
+        ]
+
+        self.wrapper._generate_index_put_fallback(
+            node.get_kernel_name(), x, indices, values, *node.codegen_const_args()
+        )
+
+    def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
+        return converter._generate_index_put_fallback
+
+
+@dataclasses.dataclass
+class ScatterFallbackLine(WrapperLine):
+    wrapper: PythonWrapperCodegen
+    node: ir.ScatterFallback
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        node = self.node
+        assert ir.is_node_sequence(node.inputs)
+        if node.src_is_tensor:
+            (x, index, src) = (t.codegen_reference() for t in node.inputs)
+        else:
+            (x, index) = (t.codegen_reference() for t in node.inputs)
+            src = node.constant_args[1]
+        self.wrapper._generate_scatter_fallback(
+            x,
+            [x, node.constant_args[0], index, src],
+            node.cpp_kernel_name,
+            node.python_kernel_name,
+            node.src_is_tensor,
+            node.kwargs["reduce"],
+            node.codegen_kwargs(),
+        )
+
+    def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
+        return converter._generate_scatter_fallback
+
+
+@dataclasses.dataclass
 class SymbolicCallArgLine(WrapperLine):
     wrapper: PythonWrapperCodegen
     arg: SymbolicCallArg
@@ -1511,7 +1561,10 @@ class PythonWrapperCodegen(CodeGen):
         line = f"{desc.name} = {call}{self.ending}"
         self.writeline(line)
 
-    def generate_scatter_fallback(
+    def generate_scatter_fallback(self, node: ir.ScatterFallback):
+        self.writeline(ScatterFallbackLine(self, node))
+
+    def _generate_scatter_fallback(
         self,
         output,
         inputs,
@@ -1530,7 +1583,22 @@ class PythonWrapperCodegen(CodeGen):
         line += ")"
         self.writeline(line)
 
-    def generate_index_put_fallback(self, kernel, x, indices, values, accumulate):
+    def generate_index_put_fallback(self, node: ir.IndexPutFallback) -> None:
+        # Collect index tensors into a list.
+        indices: list[Optional[ir.IRNode]] = []
+        valid_indices = node.inputs[2:]
+        iter_valid_indices = iter(valid_indices)
+        for i, _ in enumerate(node.indices):
+            if node.indices[i] is not None:
+                index = next(iter_valid_indices)
+                assert isinstance(index, ir.IRNode)
+                indices.append(index)
+            else:
+                indices.append(None)
+
+        self.writeline(IndexPutFallbackLine(self, node, indices))
+
+    def _generate_index_put_fallback(self, kernel, x, indices, values, accumulate):
         indices_str = f"[{', '.join(indices)}]"
         args = [x, indices_str, values, accumulate]
         self.writeline(self.wrap_kernel_call(kernel, args))
@@ -2385,7 +2453,10 @@ class PythonWrapperCodegen(CodeGen):
         # constant now, need type info. I agree, this needs type info, and while this is not true type info
         # it suffices as a type hint for the purposes of producing the correct code for this type.
         arg = SymbolicCallArg(sym, tree.numel)
-        self.writeline(SymbolicCallArgLine(self, arg, V.graph))
+
+        is_benchmark_kernel = kernel_name == ""
+        if not is_benchmark_kernel:
+            self.writeline(SymbolicCallArgLine(self, arg, V.graph))
 
         return arg
 
