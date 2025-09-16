@@ -266,7 +266,7 @@ CUDAGeneratorImpl::CUDAGeneratorImpl(
  * See Note [Acquire lock when using random generators]
  */
 void CUDAGeneratorImpl::set_current_seed(uint64_t seed) {
-  if (at::cuda::currentStreamCaptureStatus() == at::cuda::CaptureStatus::None) {
+  if (C10_LIKELY(at::cuda::currentStreamCaptureStatus() == at::cuda::CaptureStatus::None)) {
     state_->seed_ = seed;
     state_->philox_offset_per_thread_ = 0;
     no_reset_rnn_state_.clear();
@@ -405,7 +405,7 @@ void CUDAGeneratorImpl::set_philox_offset_per_thread(uint64_t offset) {
   // set_philox_offset_per_thread instead of set_offset will cause the
   // cudnn RNN rng state to become stale.
   TORCH_CHECK(offset % 4 == 0, "offset must be a multiple of 4");
-  if (at::cuda::currentStreamCaptureStatus() == at::cuda::CaptureStatus::None) {
+  if (C10_LIKELY(at::cuda::currentStreamCaptureStatus() == at::cuda::CaptureStatus::None)) {
     state_->philox_offset_per_thread_ = offset;
   } else {
     state_->offset_intragraph_ = offset;
@@ -416,7 +416,7 @@ void CUDAGeneratorImpl::set_philox_offset_per_thread(uint64_t offset) {
  * Gets the current philox_offset_per_thread_ of CUDAGeneratorImpl.
  */
 uint64_t CUDAGeneratorImpl::philox_offset_per_thread() const {
-  if (at::cuda::currentStreamCaptureStatus() == at::cuda::CaptureStatus::None) {
+  if (C10_LIKELY(at::cuda::currentStreamCaptureStatus() == at::cuda::CaptureStatus::None)) {
     return state_->philox_offset_per_thread_;
   } else {
     return state_->offset_intragraph_;
