@@ -174,7 +174,7 @@ inline Tensor pad(
 
 // This function is an overload to compute the maximum value along each slice of
 // `self` along a single dimension `dim`.
-inline Tensor amax(Tensor& self, int64_t dim, bool keepdim = false) {
+inline Tensor amax(const Tensor& self, int64_t dim, bool keepdim = false) {
   AtenTensorHandle ret = nullptr;
   TORCH_ERROR_CODE_CHECK(
       aoti_torch_aten_amax(self.get(), &dim, 1, keepdim, &ret));
@@ -187,7 +187,7 @@ inline Tensor amax(Tensor& self, int64_t dim, bool keepdim = false) {
 // typed as use std::vector<int64_t> here because (1) IntArrayRef is not yet
 // header-only (2) SymInt is not yet header-only
 inline Tensor amax(
-    Tensor& self,
+    const Tensor& self,
     std::vector<int64_t> dims,
     bool keepdim = false) {
   AtenTensorHandle ret = nullptr;
@@ -219,6 +219,37 @@ inline Tensor zero_(Tensor& self) {
   TORCH_ERROR_CODE_CHECK(
       aoti_torch_call_dispatcher("aten::zero_", "", stack.data()));
   return to<Tensor>(stack[0]);
+}
+
+// We expect this to be the stable version of the copy_ op with
+// identical semantics to the existing copy_ op (except that it will
+// not be called as a tensor method but only as a function
+// i.e. copy_(dst, src) not dst.zero_(src)).
+inline Tensor copy_(
+    Tensor& self,
+    const Tensor& src,
+    std::optional<bool> non_blocking = std::nullopt) {
+  const auto num_args = 3;
+  std::array<StableIValue, num_args> stack{
+      from(self), from(src), from(non_blocking.value_or(false))};
+  TORCH_ERROR_CODE_CHECK(
+      aoti_torch_call_dispatcher("aten::copy_", "", stack.data()));
+  return to<Tensor>(stack[0]);
+}
+
+// We expect this to be the stable version of the cpu op with
+// identical semantics to the existing copy_ op (except that it will
+// not be called as a tensor method but only as a function
+// i.e. cpu(t) not t.cpu()).
+// We will add kwargs support in the future.
+inline Tensor cpu(const Tensor& self) {
+  auto sizes = self.sizes();
+  auto ptr = sizes.data();
+  std::vector<int64_t> sizes_(ptr, ptr + sizes.size());
+  auto cpu_type = aoti_torch_device_type_cpu();
+  auto result = new_empty(self, sizes_, std::nullopt, cpu_type);
+  torch::stable::copy_(result, self);
+  return result;
 }
 
 } // namespace torch::stable

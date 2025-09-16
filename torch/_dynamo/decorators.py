@@ -752,12 +752,13 @@ def mark_static(
 
 
 @forbid_in_graph
-def mark_static_address(t: Any, guard: bool = True) -> None:
+def mark_static_address(t: Any, guard: bool = False) -> None:
     """
-    Marks an input tensor whose data_ptr will not change across multiple calls
-    to a dynamo-compiled function. This indicates to cudagraphs that an extra allocation
-    is not needed for this input. The data_ptr will be guarded if guard=True. Note:
-    Tensors marked in this way will be kept alive until `torch._dynamo.reset()` is called.
+    Marks an input tensor whose address should be treated as constant across calls to the
+    same dynamo-compiled function. This indicates to cudagraphs that an extra allocation
+    is not needed for this input. The data_ptr will be guarded if guard=True, and cause a full
+    recompile if the data_ptr changes. Note: If this address changes, cudagraphs will re-record
+    if guard=False.
     """
     if not isinstance(t, torch.Tensor):
         raise TypeError(f"mark_static_address expects a tensor but received {type(t)}")
@@ -918,15 +919,15 @@ def dont_skip_tracing(fn: Optional[Any] = None) -> Any:
     return ctx
 
 
-class SetFullgraphDecoratorContextManager:
-    def __init__(self, fullgraph: bool) -> None:
-        self.fullgraph = fullgraph
+class ErrorOnGraphBreakDecoratorContextManager:
+    def __init__(self, error_on_graph_break: bool) -> None:
+        self.error_on_graph_break = error_on_graph_break
 
     __call__ = wrap_dunder_call_ctx_manager
 
     def __enter__(self) -> None:
-        self.prev_fullgraph = _get_error_on_graph_break()
-        _set_error_on_graph_break(self.fullgraph)
+        self.prev_error_on_graph_break = _get_error_on_graph_break()
+        _set_error_on_graph_break(self.error_on_graph_break)
 
     def __exit__(
         self,
@@ -934,14 +935,24 @@ class SetFullgraphDecoratorContextManager:
         exc_val: Optional[BaseException],
         exc_tb: Optional[TracebackType],
     ) -> None:
-        _set_error_on_graph_break(self.prev_fullgraph)
+        _set_error_on_graph_break(self.prev_error_on_graph_break)
 
 
-def set_fullgraph(fullgraph: bool) -> SetFullgraphDecoratorContextManager:
+def error_on_graph_break(
+    error_on_graph_break: bool,
+) -> ErrorOnGraphBreakDecoratorContextManager:
     """
-    Context manager/decorator to toggle fullgraph setting.
+    Context manager/decorator to toggle torch.compile's `error_on_graph_break` setting at compile time.
 
-    More precisely, when encountering a graph break, we will decide to resume (fullgraph=False)
-    or error out (fullgraph=True) based on the fullgraph setting at the location of the graph break.
+    If `fullgraph` is set, then `error_on_graph_break` does nothing
+    (i.e. `fullgraph = True` takes higher precedence). If `fullgraph` is False, then
+    `error_on_graph_break` determines whether `torch.compile` throws an error upon
+    encountering a graph break, or attempts to continue tracing.
+
+    `error_on_graph_break` can be toggled during compile time with this decorator to allow graph breaks in some
+    compiled regions but not others. One key difference from `fullgraph` is that `error_on_graph_break = True`
+    does NOT guarantee that a single graph is captured from the compiled function.
+
+    The default value of torch.compile's `error_on_graph_break` setting is False.
     """
-    return SetFullgraphDecoratorContextManager(fullgraph)
+    return ErrorOnGraphBreakDecoratorContextManager(error_on_graph_break)
