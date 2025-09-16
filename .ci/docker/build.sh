@@ -214,8 +214,7 @@ case "$tag" in
     TRITON=yes
     ;;
   pytorch-linux-jammy-py3-gcc11-inductor-benchmarks)
-    # TODO (huydhn): Upgrade this to Python >= 3.10
-    ANACONDA_PYTHON_VERSION=3.9
+    ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=11
     VISION=yes
     KATEX=yes

@@ -7,38 +7,40 @@ import sympy
 import torch
 
 from ..ir import get_free_symbols
+from ..kernel.mm import decompose_k_subgraph_template
 from ..kernel_inputs import KernelInputs, MMKernelInputs
 from ..utils import get_k_splits
 from ..virtualized import V
 from .base import TemplateConfigHeuristics
+from .gemm import GemmMaxAutotuneTemplateConfigHeuristics
 from .registry import register_template_heuristic
 
 
 if TYPE_CHECKING:
     from collections.abc import Generator
 
-    from ..ir import Layout
 
-
-@register_template_heuristic("decompose_k", None, op_name="mm")
+@register_template_heuristic(decompose_k_subgraph_template.uid, None, op_name="mm")
 class EmptyDecomposeKConfigHeuristics(TemplateConfigHeuristics):
     """empty heuristics to skip decompose k on anything not cuda"""
 
 
 # on CUDA, we don't support hip for decompose_k yet
 @register_template_heuristic(
-    "decompose_k", "cuda", register=torch.version.hip is None, op_name="mm"
+    decompose_k_subgraph_template.uid,
+    "cuda",
+    register=torch.version.hip is None,
+    op_name="mm",
 )
 # TODO(coconutruben): enable decompose k on AMD by removing the register bool
 # and benchmarking it for performance and stability
 # TODO(coconutruben): enable decompose k on other devices (xpu, cpu, mps, mtia)
 # by either adding specific register_template_heuristic tags, or setting the
 # device to None (enabled on all devices)
-class DecomposeKConfigHeuristics(TemplateConfigHeuristics):
-    def get_template_configs(
+class DecomposeKConfigHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
+    def _get_template_configs_impl(
         self,
         kernel_inputs: KernelInputs,
-        layout: Layout,
         op_name: str,
     ) -> Generator[dict[str, Any], None, None]:
         """
