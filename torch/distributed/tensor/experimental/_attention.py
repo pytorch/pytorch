@@ -741,6 +741,37 @@ def _scaled_dot_product_ring_cudnn_attention(
         scale=scale,
     )
 
+def _scaled_dot_product_ring_fused_attention_overrideable(
+    mesh: DeviceMesh,
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    attn_bias: Optional[torch.Tensor] = None,
+    dropout_p: float = 0.0,
+    is_causal: bool = False,
+    return_debug_mask: bool = False,
+    *,
+    scale: Optional[float] = None,
+) -> tuple[torch.Tensor, ...]:
+    if attn_bias is not None:
+        raise NotImplementedError("attn_bias is not supported yet")
+
+    seq_dim = 2
+    group = mesh.get_group()
+    return _templated_ring_attention(
+        group,
+        mesh,
+        seq_dim,
+        aten._scaled_dot_product_fused_attention_overrideable,
+        query=query,
+        key=key,
+        value=value,
+        is_causal=is_causal,
+        attn_bias=attn_bias,
+        dropout_p=dropout_p,
+        scale=scale,
+        return_debug_mask=return_debug_mask,
+    )
 
 def _scaled_dot_product_ring_flash_attention_backward(
     mesh: DeviceMesh,
@@ -874,6 +905,51 @@ def _scaled_dot_product_ring_cudnn_attention_backward(
         scale=scale,
     )
 
+def _scaled_dot_product_ring_fused_attention_overrideable_backward(
+    mesh: DeviceMesh,
+    grad_out: torch.Tensor,
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    out: torch.Tensor,
+    logsumexp: torch.Tensor,
+    cum_seq_q: torch.Tensor,
+    cum_seq_k: torch.Tensor,
+    max_q: int,
+    max_k: int,
+    dropout_p: float,
+    is_causal: bool,
+    philox_seed: torch.Tensor,
+    philox_offset: torch.Tensor,
+    *,
+    scale: Optional[float] = None,
+) -> tuple[torch.Tensor, ...]:
+    seq_dim = 2
+    group = mesh.get_group()
+    result = _templated_ring_attention_backward(
+        group,
+        mesh,
+        seq_dim,
+        aten._scaled_dot_product_fused_attention_overrideable_backward.default,
+        grad_out=grad_out,
+        grad_out_name="grad_out",
+        query=query,
+        key=key,
+        value=value,
+        out=out,
+        logsumexp=logsumexp,
+        is_causal=is_causal,
+        cum_seq_q=cum_seq_q,
+        cum_seq_k=cum_seq_k,
+        max_q=max_q,
+        max_k=max_k,
+        dropout_p=dropout_p,
+        philox_seed=philox_seed,
+        philox_offset=philox_offset,
+        scale=scale,
+    )
+    return result
+
 
 def _sdpa_handler(
     op_call: torch._ops.OpOverload,
@@ -897,9 +973,11 @@ def _sdpa_handler(
         aten._scaled_dot_product_flash_attention.default: _scaled_dot_product_ring_flash_attention,
         aten._scaled_dot_product_efficient_attention.default: _scaled_dot_product_ring_efficient_attention,
         aten._scaled_dot_product_cudnn_attention.default: _scaled_dot_product_ring_cudnn_attention,
+        aten._scaled_dot_product_fused_attention_overrideable.default: _scaled_dot_product_ring_fused_attention_overrideable,
         aten._scaled_dot_product_flash_attention_backward.default: _scaled_dot_product_ring_flash_attention_backward,
         aten._scaled_dot_product_efficient_attention_backward.default: _scaled_dot_product_ring_efficient_attention_backward,
         aten._scaled_dot_product_cudnn_attention_backward.default: _scaled_dot_product_ring_cudnn_attention_backward,
+        aten._scaled_dot_product_fused_attention_overrideable_backward.default: _scaled_dot_product_ring_fused_attention_overrideable_backward
     }
     if op_call in call_maps:
         local_results = call_maps[op_call](
@@ -922,6 +1000,8 @@ customized_ops = {
     aten._scaled_dot_product_efficient_attention_backward.default: _sdpa_handler,
     aten._scaled_dot_product_cudnn_attention.default: _sdpa_handler,
     aten._scaled_dot_product_cudnn_attention_backward.default: _sdpa_handler,
+    aten._scaled_dot_product_fused_attention_overrideable.default: _sdpa_handler,
+    aten._scaled_dot_product_fused_attention_overrideable_backward.default: _sdpa_handler
 }
 
 
