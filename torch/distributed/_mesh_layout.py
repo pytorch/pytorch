@@ -207,3 +207,14 @@ class _MeshLayout(Layout):
             [group_offset + group_rank for group_rank in self.member_ranks()]
             for group_offset in self.complement(world_size).member_ranks()
         ]
+
+    def check_overlap(self) -> bool:
+        """
+        Check if the layout has any overlap between the ranks.
+        """
+        previous_span = 1
+        for size, stride in sorted(self.sizes_and_strides, key=lambda x: x[1]):
+            if size * stride <= previous_span:
+                return False
+            previous_span = size * stride
+        return True

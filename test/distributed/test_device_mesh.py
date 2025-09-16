@@ -422,7 +422,7 @@ class DeviceMeshTestNDim(DTensorTestBase):
         ep_mesh = ep_mesh_1 if self.rank < self.world_size // 2 else ep_mesh_2
         # ep_mesh is considered different from mesh_2d["TP"]
         self.assertEqual(mesh_2d["TP"]._flatten_mesh_list, ep_mesh._flatten_mesh_list)
-        self.assertEqual(mesh_2d["TP"]._layouts, ep_mesh._layouts)
+        self.assertEqual(mesh_2d["TP"]._layout, ep_mesh._layout)
         self.assertEqual(mesh_2d["TP"].mesh.shape, ep_mesh.mesh.shape)
         self.assertEqual(mesh_2d["TP"].device_type, ep_mesh.device_type)
         self.assertNotEqual(mesh_2d["TP"].mesh_dim_names, ep_mesh.mesh_dim_names)
@@ -437,7 +437,7 @@ class DeviceMeshTestNDim(DTensorTestBase):
         )
         # another_mesh is considered the same as ep_mesh
         self.assertEqual(ep_mesh._flatten_mesh_list, another_mesh._flatten_mesh_list)
-        self.assertEqual(ep_mesh._layouts, another_mesh._layouts)
+        self.assertEqual(ep_mesh._layout, another_mesh._layout)
         self.assertEqual(ep_mesh.mesh.shape, another_mesh.mesh.shape)
         self.assertEqual(ep_mesh.device_type, another_mesh.device_type)
         self.assertEqual(ep_mesh.mesh_dim_names, another_mesh.mesh_dim_names)
@@ -843,12 +843,12 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         self.assertEqual(flattened_dp_cp_mesh.mesh_dim_names[0], "dp_cp")
         root_mesh = _mesh_resources.get_root_mesh(dp_cp_mesh)
         self.assertEqual(root_mesh, mesh_3d)
-        flatten_mesh_root_dims = _mesh_resources.flatten_name_to_root_dims[root_mesh][
+        flatten_mesh_layout = _mesh_resources.flatten_name_to_root_layout[root_mesh][
             "dp_cp"
         ]
-        self.assertEqual(flatten_mesh_root_dims, (0, 1))
+        self.assertEqual(flatten_mesh_layout, flattened_dp_cp_mesh._layout)
         self.assertEqual(
-            flattened_dp_cp_mesh._layouts[0].global_ranks(8),
+            flattened_dp_cp_mesh._layout.global_ranks(8),
             [[0, 2, 4, 6], [1, 3, 5, 7]],
         )
 
@@ -865,12 +865,12 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         self.assertEqual(flattened_dp_tp_mesh.mesh_dim_names[0], "dp_tp")
         root_mesh = _mesh_resources.get_root_mesh(dp_tp_mesh)
         self.assertEqual(root_mesh, mesh_3d)
-        flatten_mesh_root_dims = _mesh_resources.flatten_name_to_root_dims[root_mesh][
-            "dp_tp"
-        ]
-        self.assertEqual(flatten_mesh_root_dims, (0, 2))
+        flatten_mesh_root_layout = _mesh_resources.flatten_name_to_root_layout[
+            root_mesh
+        ]["dp_tp"]
+        self.assertEqual(flatten_mesh_root_layout, flattened_dp_tp_mesh._layout)
         self.assertEqual(
-            flattened_dp_tp_mesh._layouts[0].global_ranks(8),
+            flattened_dp_tp_mesh._layout.global_ranks(8),
             [[0, 1, 4, 5], [2, 3, 6, 7]],
         )
 
@@ -881,13 +881,13 @@ class TestDeviceMeshGetItem(DTensorTestBase):
 
         # Test flatten into an existing mesh_dim_name inside the mesh
         with self.assertRaisesRegex(
-            ValueError,
-            "Mesh_dim_name dp has already mapped to layout",
+            RuntimeError,
+            "dp already exists for submesh of the DeviceMes",
         ):
             mesh_3d._flatten("dp")
         with self.assertRaisesRegex(
-            ValueError,
-            "Mesh_dim_name dp_tp has already mapped to layout",
+            RuntimeError,
+            "Flatten mesh with mesh_dim_name dp_tp has been created before",
         ):
             mesh_3d["cp", "tp"]._flatten("dp_tp")
 
