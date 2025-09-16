@@ -36,7 +36,7 @@ if try_import_cutlass():
     )
 
     if config.is_fbcode():
-        import python_cutlass  # type: ignore[import-untyped, import-not-found]  # noqa: F401
+        import cutlass_cppgen as python_cutlass  # type: ignore[import-untyped, import-not-found]  # noqa: F401
     else:
         import cutlass as python_cutlass  # type: ignore[import-untyped, import-not-found]  # noqa: F401
 
