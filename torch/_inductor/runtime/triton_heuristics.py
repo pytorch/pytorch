@@ -1311,11 +1311,23 @@ class CachingAutotuner(KernelInterface):
 
             def filtered_signature() -> list[str]:
                 # constexprs are not passed in as args
-                return [
-                    x
-                    for x in self.triton_meta["signature"].keys()
-                    if x not in cfg.kwargs.keys()
-                ]
+                new_signature: list[str] = []
+                from triton.runtime.interpreter import InterpretedFunction
+
+                for i, x in enumerate(self.triton_meta["signature"].keys()):
+                    if isinstance(self.fn, InterpretedFunction):
+                        # These are torch compiled triton kernels that definitely
+                        # have block size configs. Dynamo does not currently
+                        # trace user defined triton kernels when TRITON_INTERPRET=1
+                        if x not in cfg.kwargs.keys():
+                            new_signature.append(x)
+                    elif i not in self.fn.constexprs:
+                        # use constexprs rather than just configs since user
+                        # defined triton kernels may not have any configs
+                        new_signature.append(x)
+
+                return new_signature
+
         else:
 
             def filtered_signature() -> list[str]:
