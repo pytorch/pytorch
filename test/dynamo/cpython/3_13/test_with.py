@@ -131,7 +131,7 @@ class FailureTestCase(__TestCase):
         self.assertRaises(NameError, fooNotDeclared)
 
     def testEnterAttributeError1(self):
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class LacksEnter(object):
                 def __exit__(self, type, value, traceback):
                     pass
@@ -142,7 +142,7 @@ class FailureTestCase(__TestCase):
         self.assertRaisesRegex(TypeError, 'the context manager', fooLacksEnter)
 
     def testEnterAttributeError2(self):
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class LacksEnterAndExit(object):
                 pass
 
@@ -152,7 +152,7 @@ class FailureTestCase(__TestCase):
         self.assertRaisesRegex(TypeError, 'the context manager', fooLacksEnterAndExit)
 
     def testExitAttributeError(self):
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class LacksExit(object):
                 def __enter__(self):
                     pass
@@ -185,7 +185,7 @@ class FailureTestCase(__TestCase):
             '  pass')
 
     def testEnterThrows(self):
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class EnterThrows(object):
                 def __enter__(self):
                     raise RuntimeError("Enter threw")
@@ -204,7 +204,7 @@ class FailureTestCase(__TestCase):
         self.assertEqual(self.foo, None)
 
     def testExitThrows(self):
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class ExitThrows(object):
                 def __enter__(self):
                     return
@@ -492,7 +492,7 @@ class ExceptionalTestCase(ContextmanagerAssertionMixin, __TestCase):
 
     def testRaisedStopIteration2(self):
         # From bug 1462485
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class cm(object):
                 def __enter__(self):
                     pass
@@ -534,7 +534,7 @@ class ExceptionalTestCase(ContextmanagerAssertionMixin, __TestCase):
 
     def testRaisedGeneratorExit2(self):
         # From bug 1462485
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class cm (object):
                 def __enter__(self):
                     pass
@@ -551,7 +551,7 @@ class ExceptionalTestCase(ContextmanagerAssertionMixin, __TestCase):
         # issue4589: __exit__ return code may raise an exception
         # when looking at its truth value.
 
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class cm(object):
                 def __init__(self, bool_conversion):
                     class Bool:
@@ -650,14 +650,14 @@ class AssignmentTargetTestCase(__TestCase):
             keys = list(targets.keys())
             keys.sort()
             self.assertEqual(keys, [1, 2])
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class C: pass
         blah = C()
         with mock_contextmanager_generator() as blah.foo:
             self.assertEqual(hasattr(blah, "foo"), True)
 
     def testMultipleComplexTargets(self):
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class C:
                 def __enter__(self): return 1, 2, 3
                 def __exit__(self, t, v, tb): pass
@@ -668,7 +668,7 @@ class AssignmentTargetTestCase(__TestCase):
             self.assertEqual(targets, {1: [3, 2, 1]})
         with C() as (targets[1], targets[2], targets[3]):
             self.assertEqual(targets, {1: 1, 2: 2, 3: 3})
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class B: pass
         blah = B()
         with C() as (blah.one, blah.two, blah.three):
@@ -686,7 +686,7 @@ class AssignmentTargetTestCase(__TestCase):
 class ExitSwallowsExceptionTestCase(__TestCase):
 
     def testExitTrueSwallowsException(self):
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class AfricanSwallow:
                 def __enter__(self): pass
                 def __exit__(self, t, v, tb): return True
@@ -697,7 +697,7 @@ class ExitSwallowsExceptionTestCase(__TestCase):
             self.fail("ZeroDivisionError should have been swallowed")
 
     def testExitFalseDoesntSwallowException(self):
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class EuropeanSwallow:
                 def __enter__(self): pass
                 def __exit__(self, t, v, tb): return False
