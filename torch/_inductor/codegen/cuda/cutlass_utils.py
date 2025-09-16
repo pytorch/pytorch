@@ -78,8 +78,8 @@ def try_import_cutlass() -> bool:
     """
     if config.is_fbcode():
         try:
-            import cutlass_library  # type: ignore[import-not-found]
             import cutlass_cppgen  # type: ignore[import-not-found]  # noqa: F401
+            import cutlass_library  # type: ignore[import-not-found]
         except ImportError as e:
             log.warning(
                 "Failed to import CUTLASS packages in fbcode: %s, ignoring the CUTLASS backend.",
