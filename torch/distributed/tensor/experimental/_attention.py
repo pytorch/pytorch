@@ -445,7 +445,7 @@ def _templated_ring_attention(
         else:
             # Round-robin load balancing case, and i > rank.
             # We need to do SPDA with only the second half of the q, and update
-            # only the the second part of  logsumexp. So partial is True.
+            # only the second part of  logsumexp. So partial is True.
             # Note that q, k, v, each contains two chunks.
             q, k, v, partial = query.chunk(2, dim=2)[1], key, value, True
 
@@ -919,12 +919,10 @@ customized_ops = {
 }
 
 
-ArgsType = tuple[object, ...]
-KwargsType = dict[str, object]
-InputFnType = Callable[
-    tuple[ArgsType, KwargsType, DeviceMesh], tuple[ArgsType, KwargsType]
-]
-OutputFnType = Callable[tuple[object, DeviceMesh], object]
+ArgsType = tuple[Any, ...]
+KwargsType = dict[str, Any]
+InputFnType = Callable[[Optional[nn.Module], ArgsType, KwargsType, DeviceMesh], Any]
+OutputFnType = Callable[[Optional[nn.Module], Any, Any, DeviceMesh], Any]
 
 _replaced_functions: dict[Callable, tuple[str, Callable]] = {}
 
@@ -940,9 +938,9 @@ def _distribute_function(
         target_fn: Callable, input_fn: InputFnType, output_fn: OutputFnType
     ) -> Callable:
         def inner_fn(*args: ArgsType, **kwargs: KwargsType) -> Any:
-            args, kwargs = input_fn(args, kwargs, device_mesh)
+            args, kwargs = input_fn(None, args, kwargs, device_mesh)
             outputs = target_fn(*args, **kwargs)
-            return output_fn(outputs, device_mesh)
+            return output_fn(None, (args, kwargs), outputs, device_mesh)
 
         return inner_fn
 
@@ -983,18 +981,22 @@ def _enable_cp_dtensor_dispatcher() -> Generator[None, None, None]:
 def _context_parallel_dispatcher(
     seq_dim: int, mesh: DeviceMesh
 ) -> Generator[None, None, None]:
-    _flex_cp = _ContextParallel(
+    flex_cp = _ContextParallel(
         seq_dim=seq_dim,
         attention_type=_ContextParallel.AttentionType.FLEX,
+    )
+    sdpa_cp = _ContextParallel(
+        seq_dim=seq_dim,
+        attention_type=_ContextParallel.AttentionType.SDPA,
     )
 
     class DistributeFunction(TorchFunctionMode):
         def __init__(
             self,
-            fns: list[Callable],
+            fns: tuple[Callable, ...],
             device_mesh: DeviceMesh,
-            input_fns: list[InputFnType],
-            output_fns: list[OutputFnType],
+            input_fns: tuple[InputFnType, ...],
+            output_fns: tuple[OutputFnType, ...],
         ):
             self._device_mesh = device_mesh
             self._input_fns = input_fns
@@ -1025,8 +1027,8 @@ def _context_parallel_dispatcher(
             F.scaled_dot_product_attention,
             F,
             mesh,
-            sdpa_input_fn,
-            sdpa_output_fn,
+            sdpa_cp.sdpa_input_fn,
+            sdpa_cp.sdpa_output_fn,
         )
         with _enable_cp_dtensor_dispatcher():
             yield
@@ -1041,12 +1043,12 @@ def _context_parallel_dispatcher(
                 ),
                 mesh,
                 (
-                    _flex_cp.flex_input_fn,
-                    _ContextParallel.sdpa_input_fn,
+                    flex_cp.flex_input_fn,
+                    sdpa_cp.sdpa_input_fn,
                 ),
                 (
-                    _flex_cp.flex_output_fn,
-                    _ContextParallel.sdpa_output_fn,
+                    flex_cp.flex_output_fn,
+                    sdpa_cp.sdpa_output_fn,
                 ),
             )
             _cp_global_vars.torch_function_mode = tf_mode
@@ -1061,7 +1063,7 @@ def _context_parallel_dispatcher(
             parallelize_module(
                 _flex_attention_wrapper_module,
                 mesh,
-                _flex_cp,
+                flex_cp,
             )
         yield
     else:
@@ -1190,16 +1192,18 @@ class _ContextParallel(ParallelStyle):
                 partial(self.flex_input_fn, mesh=mesh), with_kwargs=True
             )
             module.register_forward_hook(partial(self.flex_output_fn, mesh=mesh))
+            return module
         elif self.attention_type == self.AttentionType.SDPA:
             module.register_forward_pre_hook(
-                partial(self.sdpa_input_fn, mesh=mesh, with_kwargs=True)
+                partial(self.sdpa_input_fn, mesh=mesh), with_kwargs=True
             )
             module.register_forward_hook(partial(self.sdpa_output_fn, mesh=mesh))
+            return module
         else:
             raise ValueError(f"Unknown attention type: {self.attention_type}")
 
     def flex_input_fn(
-        self, module: nn.Module, args: Any, kwargs: Any, mesh: DeviceMesh
+        self, module: Optional[nn.Module], args: Any, kwargs: Any, mesh: DeviceMesh
     ) -> Any:
         args_list = list(args)
         for idx, name in enumerate(
@@ -1253,7 +1257,7 @@ class _ContextParallel(ParallelStyle):
         return tuple(args_list), kwargs
 
     def flex_output_fn(
-        self, module: nn.Module, inputs: Any, outputs: Any, mesh: DeviceMesh
+        self, module: Optional[nn.Module], inputs: Any, outputs: Any, mesh: DeviceMesh
     ) -> Any:
         if self._orig_seq_lengths is not None:
             assert isinstance(self._block_mask, BlockMask)
@@ -1261,14 +1265,14 @@ class _ContextParallel(ParallelStyle):
         self._block_mask = None
         return outputs
 
-    @staticmethod
     def sdpa_input_fn(
-        module: nn.Module,
+        self,
+        module: Optional[nn.Module],
         args: tuple[Any, ...],
         kwargs: dict[str, Any],
         mesh: DeviceMesh,
     ) -> tuple[tuple[Any, ...], dict[str, Any]]:
-        placement = [Shard(seq_dim)]
+        placement = [Shard(self.seq_dim)]
         all_args = []
 
         for arg in itertools.chain(args, kwargs.values()):
@@ -1281,9 +1285,8 @@ class _ContextParallel(ParallelStyle):
         new_kwargs = dict(zip(kwargs.keys(), all_args[len(args) :]))
         return new_args, new_kwargs
 
-    @staticmethod
     def sdpa_output_fn(
-        module: nn.Module, inputs: Any, outputs: Any, mesh: DeviceMesh
+        self, module: Optional[nn.Module], inputs: Any, outputs: Any, mesh: DeviceMesh
     ) -> Any:
         new_outputs = []
         for output in [outputs] if isinstance(outputs, torch.Tensor) else outputs:
