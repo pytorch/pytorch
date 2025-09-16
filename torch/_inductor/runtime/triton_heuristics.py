@@ -2860,6 +2860,10 @@ def _persistent_reduction_configs(
 ):
     xnumel = size_hints["x"]
     rnumel = get_total_reduction_numel(size_hints)
+    loads_and_stores = inductor_meta.get("num_load", 0) + inductor_meta.get(
+        "num_store", 0
+    )
+
 
     MAX_PERSISTENT_BLOCK_NUMEL = 4096
 
@@ -2894,20 +2898,18 @@ def _persistent_reduction_configs(
     elif reduction_hint == ReductionHint.INNER:
         if rnumel > 1024:
             configs = configs[:1]
-        elif rnumel <= 512:
-            configs = [
-                triton_config_reduction(
-                    size_hints,
-                    8,
-                    rnumel,
-                    register_intensive=True,
-                )
-            ]
         else:
+            x_block = 8 if rnumel < 1024 else 4
+            if xnumel // x_block < 128 or (loads_and_stores >= 5 and rnumel >= 256):
+                # If loads/stores greater than 5, a lot of register pressure
+                # rnumel < 256 means no vectorized loads if we split up r dim
+                # so xblock still needs to be larger
+                x_block = 1
+
             configs = [
                 triton_config_reduction(
                     size_hints,
-                    4,
+                    x_block,
                     rnumel,
                     register_intensive=True,
                 )
