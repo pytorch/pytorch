@@ -166,8 +166,8 @@ struct TORCH_API WorkInfo {
   WorkInfo(
       const OpType& opType,
       const uint64_t seq,
-      const std::chrono::time_point<std::chrono::system_clock>& timeStarted,
-      const std::chrono::time_point<std::chrono::system_clock>& timeFinished,
+      const std::chrono::time_point<std::chrono::steady_clock>& timeStarted,
+      const std::chrono::time_point<std::chrono::steady_clock>& timeFinished,
       const std::chrono::duration<float>& activeDuration)
       : opType(opType),
         seq(seq),
@@ -177,8 +177,8 @@ struct TORCH_API WorkInfo {
 
   OpType opType;
   uint64_t seq;
-  std::chrono::time_point<std::chrono::system_clock> timeStarted;
-  std::chrono::time_point<std::chrono::system_clock> timeFinished;
+  std::chrono::time_point<std::chrono::steady_clock> timeStarted;
+  std::chrono::time_point<std::chrono::steady_clock> timeFinished;
   std::chrono::duration<float> activeDuration;
 };
 
