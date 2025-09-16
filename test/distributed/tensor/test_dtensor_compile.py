@@ -94,7 +94,9 @@ aot_eager_graph = aot_autograd(
     partition_fn=min_cut_rematerialization_partition,
 )
 
-device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+device_type = (
+    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
+)
 
 
 def _apply_sharding(mod: nn.Module, shard_dim: int, device_mesh: DeviceMesh):
