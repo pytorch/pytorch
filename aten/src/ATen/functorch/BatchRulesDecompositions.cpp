@@ -114,7 +114,6 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   m.impl("fft_hfftn", native::fft_hfftn_symint);
   m.impl("fft_ifft", native::fft_ifft_symint);
   OP_DECOMPOSE(fft_ifftshift);
-  m.impl("_assert_tensor_metadata", native::_assert_tensor_metadata);
   m.impl("fft_ifft2", native::fft_ifft2_symint);
   m.impl("fft_ifftn", native::fft_ifftn_symint);
   m.impl("fft_ihfft", native::fft_ihfft_symint);
