@@ -831,6 +831,22 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         dist.destroy_process_group()
 
     @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    def test_destroy_without_default(self):
+        """Test if destroy works without default world group created"""
+        store = c10d.FileStore(self.file_name, self.world_size)
+        device = torch.device(f"cuda:{self.rank % torch.cuda.device_count()}")
+        dist.init(self.world_size, self.rank, store)
+        subgroup_ranks = [0, 1]
+        subgroup = dist.new_group(
+            ranks=subgroup_ranks,
+            backend="nccl",
+        )
+        tensor = torch.empty(1024, device=device)
+        dist.all_reduce(tensor, group=subgroup)
+        dist.destroy_process_group()
+
+    @requires_nccl()
     @skip_but_pass_in_sandcastle_if(
         torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs"
     )
