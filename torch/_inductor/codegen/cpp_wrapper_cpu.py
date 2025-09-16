@@ -1364,9 +1364,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
         debug_handle = None
         if config.trace.provenance_tracking_level != 0:
+            shim_fn = self.get_c_shim_func_name(fallback_kernel.cpp_kernel_name, device)  # type: ignore[arg-type]
             debug_handle = set_kernel_post_grad_provenance_tracing(
                 fallback_kernel,
-                fallback_kernel.cpp_kernel_name,  # type: ignore[arg-type]
+                shim_fn,
                 is_extern=True,
             )
         self.generate_c_shim_extern_kernel_call(
@@ -1398,7 +1399,15 @@ class CppWrapperCpu(PythonWrapperCodegen):
             kernel, args, device, debug_handle=debug_handle
         )
 
-    def generate_scatter_fallback(
+    def _get_scatter_reduce_enum(self, reduce):
+        # Follow aten/src/ATen/native/ReductionType.h:get_operator_enum
+        get_operator_enum = {"add": "sum", "multiply": "prod"}
+        if reduce in get_operator_enum:
+            reduce = get_operator_enum[reduce]
+
+        return reduce
+
+    def _generate_scatter_fallback(
         self,
         output,
         inputs,
@@ -1408,6 +1417,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
         reduce,
         kwargs,
     ):
+        reduce = self._get_scatter_reduce_enum(reduce)
+
         # call the ABI shim function instead of the ATen one
         cpp_kernel_name = self.get_c_shim_func_name(cpp_kernel_name, self.device)
         # TODO: consider remove "_out" and add missing inplace variants to fallback_ops.py
@@ -1428,7 +1439,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         line += ");"
         self.writeline(line)
 
-    def generate_index_put_fallback(self, kernel, x, indices, values, accumulate):
+    def _generate_index_put_fallback(self, kernel, x, indices, values, accumulate):
         # TODO: update aoti_torch_index_put_out in ir.py to use autogen out version
         # See the comment in codegen_reinterpret_view about why having something like
         # RAIIAtenTensorHandle(tmp_tensor_handle_2) in a tmp array can cause the corresponding

@@ -109,22 +109,6 @@ def get_tunableop_untuned_filename():
     return untuned_filename
 
 class TestLinalg(TestCase):
-    @contextlib.contextmanager
-    def _hip_allow_tf32(self):
-        # for HIP/AMDGPU, tf32 is behind a flag because the TF32 support is new
-        # and only for MI300+. Environment variable will be removed in the future.
-        import os
-        hip_allow_tf32 = os.environ.get("HIPBLASLT_ALLOW_TF32", None)
-        os.environ["HIPBLASLT_ALLOW_TF32"] = "1"
-
-        try:
-            yield
-        finally:
-            if hip_allow_tf32 is not None:
-                os.environ["HIPBLASLT_ALLOW_TF32"] = hip_allow_tf32
-            else:
-                del os.environ["HIPBLASLT_ALLOW_TF32"]
-
     def setUp(self):
         super().setUp()
         torch.backends.cuda.matmul.allow_tf32 = False
@@ -5542,13 +5526,8 @@ class TestLinalg(TestCase):
     @runOnRocmArch(MI300_ARCH)
     @dtypes(torch.float)
     def test_tf32_tunableop(self, device, dtype):
-        # Test TunableOp with TF32. Supported by hipblasLT on MI300+.
-        # for HIP/AMDGPU, tf32 is behind a flag because the TF32 support is new
-        # and only for MI300+. Eventually this flag will go away.
-        tf32_ctx = self._hip_allow_tf32 if torch.version.hip else contextlib.nullcontext
-
         try:
-            with self._tunableop_ctx(), tf32_ctx():
+            with self._tunableop_ctx():
                 torch.backends.cuda.matmul.allow_tf32 = True
                 torch.cuda.tunable.set_rotating_buffer_size(0)
 
@@ -5611,13 +5590,8 @@ class TestLinalg(TestCase):
         # This test is the offline version of test_tf32_tunableop
         import os
 
-        # Test TunableOp with TF32. Supported by hipblasLT on MI300+.
-        # for HIP/AMDGPU, tf32 is behind a flag because the TF32 support is new
-        # and only for MI300+. Eventually this flag will go away.
-        tf32_ctx = self._hip_allow_tf32 if torch.version.hip else contextlib.nullcontext
-
         try:
-            with self._tunableop_ctx(), tf32_ctx():
+            with self._tunableop_ctx():
                 torch.backends.cuda.matmul.allow_tf32 = True
                 ordinal = torch.cuda.current_device()
                 torch.cuda.tunable.set_rotating_buffer_size(0)
@@ -9839,6 +9813,39 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         B = torch.rand(n, dtype=dtype, device=device)
         C = torch.matmul(A, B)
         self.assertEqual(C, B.sum().expand(B.shape))
+
+    @dtypes(*all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16))
+    def test_triu_tril_extreme_k_values(self, device, dtype):
+        """
+        Test triu/tril with extreme k values to verify overflow fix.
+        Regression test for https://github.com/pytorch/pytorch/pull/153240
+        """
+        # Create test matrices
+        a = make_tensor((5, 5), dtype=dtype, device=device)
+
+        # Test extreme positive k value
+        k_max = 9223372036854775807
+        result_triu_max = torch.triu(a, k_max)
+        result_tril_max = torch.tril(a, k_max)
+
+        # With k = INT64_MAX, triu should return all zeros (since i + k will exceed matrix bounds for all i,j)
+        # and tril should return the full matrix (since i + k + 1 will exceed matrix bounds for all i,j)
+        expected_triu_max = torch.zeros_like(a)
+        expected_tril_max = a.clone()
+        self.assertEqual(result_triu_max, expected_triu_max)
+        self.assertEqual(result_tril_max, expected_tril_max)
+
+        # Test extreme negative k value
+        k_min = -9223372036854775808
+        result_triu_min = torch.triu(a, k_min)
+        result_tril_min = torch.tril(a, k_min)
+
+        # With k = INT64_MIN, triu should return the full matrix (since i + k will be negative for all i,j)
+        # and tril should return all zeros (since i + k + 1 will be negative for all i,j)
+        expected_triu_min = a.clone()
+        expected_tril_min = torch.zeros_like(a)
+        self.assertEqual(result_triu_min, expected_triu_min)
+        self.assertEqual(result_tril_min, expected_tril_min)
 
     @dtypes(torch.float, torch.double)
     @precisionOverride({torch.float32: 1e-4})
