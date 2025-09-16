@@ -2680,7 +2680,9 @@ def sdpa_constraint(fx_node, *args, **kwargs):
             )
 
         def is_aligned(x):
-            return (V.graph.sizevars.size_hint(x.get_size()[-1]) % ALIGNMENT) == 0
+            return V.graph.sizevars.guard_or_false(
+                sympy.Eq(x.get_size()[-1] % ALIGNMENT, 0)
+            )
 
         if isinstance(arg.data, ir.BaseView):
             if not is_aligned(arg):
