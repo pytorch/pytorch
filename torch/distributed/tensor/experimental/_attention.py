@@ -383,9 +383,9 @@ def _templated_ring_attention(
     if not is_causal and _cp_options.enable_load_balance:
         raise RuntimeError("Load balancing requires `is_causal=True`.")
 
-    assert isinstance(
-        group, dist.ProcessGroup
-    ), "process group must be single dimension"
+    assert isinstance(group, dist.ProcessGroup), (
+        "process group must be single dimension"
+    )
     rank = dist.get_rank(group)
     size = dist.get_world_size(group)
 
