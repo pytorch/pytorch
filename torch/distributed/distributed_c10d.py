@@ -33,6 +33,7 @@ from torch._C._distributed_c10d import (
     BarrierOptions,
     BroadcastOptions,
     DebugLevel,
+    FakeProcessGroup,
     GatherOptions,
     get_debug_level,
     PrefixStore,
@@ -2844,6 +2845,19 @@ def broadcast(
     # Otherwise, the backend has sync'ed at CPP level
 
 
+def _check_fake_process_group_usage(group):
+    """
+    Check if user is using FakeProcessGroup directly without proper initialization.
+    This can cause dispatch issues and should raise error.
+    """
+    if isinstance(group, FakeProcessGroup) and not is_initialized():
+        raise RuntimeError(
+            "FakeProcessGroup is not supported for direct use. "
+            "Call torch.distributed.init_process_group(backend='fake') first to ensure "
+            "proper dispatch system integration."
+        )
+
+
 @_exception_logger
 def all_reduce(tensor, op=ReduceOp.SUM, group=None, async_op=False):
     """
@@ -2910,6 +2924,8 @@ def all_reduce(tensor, op=ReduceOp.SUM, group=None, async_op=False):
         )
 
     _check_single_tensor(tensor, "tensor")
+    if group is not None:
+        _check_fake_process_group_usage(group)
     if _rank_not_in_group(group):
         _warn_not_in_group("all_reduce")
         return
