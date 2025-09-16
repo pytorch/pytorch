@@ -206,10 +206,7 @@ from .functions import (
     UserMethodVariable,
     WrapperUserFunctionVariable,
 )
-from .higher_order_ops import (
-    LocalMapWrappedHigherOrderVariable,
-    TorchHigherOrderOperatorVariable,
-)
+from .higher_order_ops import TorchHigherOrderOperatorVariable
 from .iter import ItertoolsVariable
 from .lazy import LazyVariableTracker
 from .lists import (
@@ -853,8 +850,6 @@ class VariableBuilder:
             return build_checkpoint_variable(source=self.source)
         elif is_invoke_subgraph(value):
             return build_invoke_subgraph_variable(source=self.source)
-        elif LocalMapWrappedHigherOrderVariable.should_wrap_in_hop(value):
-            return LocalMapWrappedHigherOrderVariable.build(source=self.source)
         elif isinstance(value, functools.partial):
             func_src = AttrSource(self.get_source(), "func")
             func_obj = VariableBuilder(self.tx, func_src)(value.func)
