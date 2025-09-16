@@ -138,7 +138,7 @@ class TestDTensorDebugMode(TestCase):
       redistribute_input(0, [P, R] -> [S(2), S(2)])
         aten::chunk(t: f32[1, 96, 8], 4, 2)
         aten::cat(['t: f32[1, 96, 2]', 't: f32[1, 96, 2]', 't: f32[1, 96, 2]', 't: f32[1, 96, 2]'])
-        _c10d_functional::reduce_scatter_tensor(t: f32[4, 96, 2], sum, 4, 2)
+        _c10d_functional::reduce_scatter_tensor(t: f32[4, 96, 2], sum, 4, 1)
         aten::clone(t: f32[1, 96, 1])
       redistribute_input(1, [R, P] -> [S(1), S(1)])
         aten::chunk(t: f32[1, 8, 16], 4, 1)
