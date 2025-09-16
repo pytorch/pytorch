@@ -15,7 +15,7 @@ from torch._utils import ExceptionWrapper
 from . import MP_STATUS_CHECK_INTERVAL
 
 
-def _pin_memory_loop(in_queue, out_queue, device_id, done_event, device):
+def _pin_memory_loop(in_queue, out_queue, device_id, done_event):
     # This setting is thread local, and prevents the copy in pin_memory from
     # consuming all CPU cores.
     torch.set_num_threads(1)
@@ -31,7 +31,7 @@ def _pin_memory_loop(in_queue, out_queue, device_id, done_event, device):
         idx, data = r
         if not done_event.is_set() and not isinstance(data, ExceptionWrapper):
             try:
-                data = pin_memory(data, device)
+                data = pin_memory(data)
             except Exception:
                 data = ExceptionWrapper(
                     where=f"in pin memory thread for device {device_id}"
@@ -52,9 +52,9 @@ def _pin_memory_loop(in_queue, out_queue, device_id, done_event, device):
         do_one_step()
 
 
-def pin_memory(data, device=None):
+def pin_memory(data):
     if isinstance(data, torch.Tensor):
-        return data.pin_memory(device)
+        return data.pin_memory()
     elif isinstance(data, (str, bytes)):
         return data
     elif isinstance(data, collections.abc.Mapping):
@@ -65,22 +65,22 @@ def pin_memory(data, device=None):
                 # Create a clone and update it if the sequence type is mutable.
                 clone = copy.copy(data)
                 clone.update(
-                    {k: pin_memory(sample, device) for k, sample in data.items()}
+                    {k: pin_memory(sample) for k, sample in data.items()}
                 )
                 return clone
             else:
                 return type(data)(
-                    {k: pin_memory(sample, device) for k, sample in data.items()}
+                    {k: pin_memory(sample) for k, sample in data.items()}
                 )  # type: ignore[call-arg]
         except TypeError:
             # The mapping type may not support `copy()` / `update(mapping)`
             # or `__init__(iterable)`.
-            return {k: pin_memory(sample, device) for k, sample in data.items()}
+            return {k: pin_memory(sample) for k, sample in data.items()}
     elif isinstance(data, tuple) and hasattr(data, "_fields"):  # namedtuple
-        return type(data)(*(pin_memory(sample, device) for sample in data))
+        return type(data)(*(pin_memory(sample) for sample in data))
     elif isinstance(data, tuple):
         return [
-            pin_memory(sample, device) for sample in data
+            pin_memory(sample) for sample in data
         ]  # Backwards compatibility.
     elif isinstance(data, collections.abc.Sequence):
         try:
@@ -90,13 +90,13 @@ def pin_memory(data, device=None):
                 # Create a clone and update it if the sequence type is mutable.
                 clone = copy.copy(data)  # type: ignore[arg-type]
                 for i, item in enumerate(data):
-                    clone[i] = pin_memory(item, device)
+                    clone[i] = pin_memory(item)
                 return clone
-            return type(data)([pin_memory(sample, device) for sample in data])  # type: ignore[call-arg]
+            return type(data)([pin_memory(sample) for sample in data])  # type: ignore[call-arg]
         except TypeError:
             # The sequence type may not support `copy()` / `__setitem__(index, item)`
             # or `__init__(iterable)` (e.g., `range`).
-            return [pin_memory(sample, device) for sample in data]
+            return [pin_memory(sample) for sample in data]
     elif hasattr(data, "pin_memory"):
         return data.pin_memory()
     else:
