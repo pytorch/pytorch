@@ -493,16 +493,16 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
 
     Level 0 (Input):    xs0    xs1    xs2    xs3    xs4
                         \    /       |      |      |
-                        \  /        |      |      |
-    Level 1:               ys1 ───────┘      |      |
-                            \               /       |
+                         \  /        |      |      |
+    Level 1:              ys1 ───────┘      |      |
+                           \               /       |
                             \             /        |
-    Level 2:                  ys2 ────────┘         |
-                            \                   /
-                                \                 /
-    Level 3:                     ys3 ────────────┘
-                                \
-                                \
+    Level 2:                 ys2 ────────┘         |
+                              \                   /
+                               \                 /
+    Level 3:                    ys3 ────────────┘
+                                 \
+                                  \
     Level 4:                        ys4
 
 
@@ -510,17 +510,17 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
 
 
     Level 0 (output):   g_xs0   g_xs1   g_xs2   g_xs3   g_xs4
-                        \      /       |       |     |
-                        \    /        |       |     |
-    Level 1:    gl_ys1  ─> g_ys1  ──────┘       |     |
-                            \                  /      |
-                            \                /       |
-    Level 2:    gl_ys2     ─> g_ys2  ────────┘        |
-                            \                     /
-                                \                   /
-    Level 3:    gl_ys3        ─> g_ys3  ───────────┘
-                                \
-                                \
+                         \      /       |       |       |
+                          \    /        |       |       |
+    Level 1:    gl_ys1  ─> g_ys1  ──────┘       |       |
+                            \                  /        |
+                             \                /         |
+    Level 2:    gl_ys2     ─> g_ys2  ────────┘          |
+                               \                       /
+                                \                    /
+    Level 3:    gl_ys3        ─> g_ys3  ────────────┘
+                                  \
+                                   \
     Level 4:    gl_ys4           ─> g_ys4,
 
     where gl_y1 is the gradient of the loss with respect to ys1 and the input of backward.
