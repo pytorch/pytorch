@@ -1293,15 +1293,7 @@ class NamedTupleVariable(TupleVariable):
                 field_index = fields.index(field_name)
                 new_items[field_index] = new_value
 
-            # Create new NamedTupleVariable with replaced items
-            # Copy dynamic attributes if any
-            new_dynamic_attributes = (
-                dict(self.dynamic_attributes) if self.dynamic_attributes else {}
-            )
-
-            return NamedTupleVariable(
-                new_items, self.tuple_cls, dynamic_attributes=new_dynamic_attributes
-            )
+            return NamedTupleVariable(new_items, self.tuple_cls)
 
         return super().call_method(tx, name, args, kwargs)
 
