@@ -150,18 +150,28 @@ struct VecReduceAllSIMD<float, Op> {
       const Vectorized<float>& acc_vec) {
     using Vec = Vectorized<float>;
     Vec v = acc_vec;
-    // 128-bit shuffle
-    svuint32_t ind = svdupq_n_u32(4, 5, 6, 7);
-    Vec v1 = svtbl_f32(v, ind);
-    v = vec_fun(v, v1);
-    // 64-bit shuffle
-    ind = svdupq_n_u32(2, 3, 0, 1);
-    v1 = svtbl_f32(v, ind);
-    v = vec_fun(v, v1);
-    // 32-bit shuffle
-    ind = svdupq_n_u32(1, 0, 2, 3);
-    v1 = svtbl_f32(v, ind);
-    v = vec_fun(v, v1);
+    if (Vec::size() == 8) {
+      // 128-bit shuffle
+      svuint32_t ind = svdupq_n_u32(4, 5, 6, 7);
+      Vec v1 = svtbl_f32(v, ind);
+      v = vec_fun(v, v1);
+      // 64-bit shuffle
+      ind = svdupq_n_u32(2, 3, 0, 1);
+      v1 = svtbl_f32(v, ind);
+      v = vec_fun(v, v1);
+      // 32-bit shuffle
+      ind = svdupq_n_u32(1, 0, 2, 3);
+      v1 = svtbl_f32(v, ind);
+      v = vec_fun(v, v1);
+    } else {
+      svuint32_t ind = svdupq_n_u32(2, 3, 0, 1);  // 64-bit stride-2
+      Vec v1 = svtbl_f32(v, ind);
+      v = vec_fun(v, v1);
+
+      ind = svdupq_n_u32(1, 0, 2, 3);             // 32-bit stride-1
+      v1 = svtbl_f32(v, ind);
+      v = vec_fun(v, v1);
+    }
     return svlasta(svpfalse(), v);
   }
 };
