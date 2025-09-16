@@ -607,9 +607,7 @@ class ConstDictVariable(VariableTracker):
                         for k, v in kwargs.items()
                     }
                     self.items.update(kwargs)
-                return ConstantVariable.create(None)
-            else:
-                return super().call_method(tx, name, args, kwargs)
+            return ConstantVariable.create(None)
         elif name == "__contains__":
             if not len(args):
                 raise_args_mismatch(tx, name)
@@ -1371,6 +1369,8 @@ class DictItemsVariable(DictViewVariable):
         return dict_items
 
     def call_method(self, tx, name, args, kwargs):
+        # TODO(guilhermeleobas): This should actually check if args[0]
+        # implements the mapping protocol.
         if name == "__eq__":
             assert len(args) == 1
             if isinstance(args[0], DictItemsVariable):
