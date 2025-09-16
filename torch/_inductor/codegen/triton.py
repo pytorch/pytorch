@@ -1238,42 +1238,6 @@ class TritonOverrides(OpOverrides):
         assert V.kernel.is_native_matmul
         orig_a, orig_b = a, b
 
-        # Downcast if we upcasted to fp32 before
-        for node in V.kernel.features.node_schedule:
-            if not isinstance(node, SchedulerNode):
-                continue
-            if not isinstance(node.node, ir.ComputedBuffer):
-                continue
-            if not node.node.get_reduction_type() == "dot":
-                continue
-
-            matmul_dtype = node.node.dtype
-            # TODO : float8 support?
-            if not (a.dtype == matmul_dtype) and matmul_dtype in (
-                torch.float16,
-                torch.bfloat16,
-            ):
-                a = V.kernel.cse.generate(
-                    V.kernel.compute,
-                    TritonKernelOverrides.to_dtype(
-                        a, matmul_dtype, use_compute_types=False
-                    ),
-                    dtype=matmul_dtype,
-                    shape=a.shape,
-                )
-
-                b = V.kernel.cse.generate(
-                    V.kernel.compute,
-                    TritonKernelOverrides.to_dtype(
-                        b, matmul_dtype, use_compute_types=False
-                    ),
-                    dtype=matmul_dtype,
-                    shape=b.shape,
-                )
-
-            # can multiple matmuls in horizontal fusion have different dtypes?
-            break
-
         def is_where_needed(var):
             # Skip if the variable doesn't have a reduction mask
             if not any(map(prefix_is_reduction, var.mask_vars)):
@@ -2752,8 +2716,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 return self.dense_size_str(), tuple(self.dense_size_list())
 
         if is_sympy_integer_like(index):
-            expand_str = str([1]*len(self.dense_size_list()))
-            expand_shape = tuple([1]*len(self.dense_size_list()))
+            if copy_shape:
+                expand_str, expand_shape = _get_expand_str()
+            else:    
+                expand_str = str([1]*len(self.dense_size_list()))
+                expand_shape = tuple([1]*len(self.dense_size_list()))
 
             index_str = f"tl.full({expand_str}, {index_str}, tl.int32)"
             if self.fixed_config and not self._has_constant_xmask():
