@@ -1021,12 +1021,13 @@ class VariableBuilder:
                 "call_function", get_user_object_by_index, (index,), {}
             )
             set_example_value(stream_proxy.node, value)
-            return StreamVariable(
+            var = StreamVariable(
                 stream_proxy,
                 value,
                 value.device,
                 source=self.source,
             )
+            return self.tx.output.side_effects.track_object_existing(value, var)
         elif isinstance(value, (torch._C._SDPAParams)):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             return SDPAParamsVariable.create(self.tx, value, self.source)
