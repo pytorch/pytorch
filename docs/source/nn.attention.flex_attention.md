@@ -30,9 +30,6 @@
 .. autofunction:: create_mask
 ```
 ```{eval-rst}
-.. autofunction:: create_nested_block_mask
-```
-```{eval-rst}
 .. autofunction:: and_masks
 ```
 ```{eval-rst}
