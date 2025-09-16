@@ -29,7 +29,14 @@ def _check_cuda(result: int) -> None:
     raise RuntimeError(f"CUDA error: {error_message}")
 
 
-def _get_nvrtc_library() -> ctypes.CDLL:
+def _get_nvrtc_library(nvrtc_path: Optional[str] = None) -> ctypes.CDLL:
+    # If a custom path is provided, try to load it directly
+    if nvrtc_path is not None:
+        try:
+            return ctypes.CDLL(nvrtc_path)
+        except OSError as e:
+            raise OSError(f"Failed to load NVRTC library from provided path: {nvrtc_path}") from e
+    
     # Try to load versioned NVRTC libraries in order from newest to oldest
     # This matches how cuda-python does it
     # https://github.com/NVIDIA/cuda-python/tree/90096d270d795b9295545e25dc84e1bcd0ca2765/cuda_pathfinder/cuda/pathfinder/_dynamic_libs
@@ -73,6 +80,7 @@ def _nvrtc_compile(
     header_code: str = "",
     cuda_include_dirs: Optional[list] = None,
     nvcc_options: Optional[list] = None,
+    nvrtc_path: Optional[str] = None,
 ) -> bytes:
     """
     Compiles a CUDA kernel using NVRTC and returns the PTX code.
@@ -85,6 +93,8 @@ def _nvrtc_compile(
         header_code (str, optional): Additional header code to prepend to the kernel source
         cuda_include_dirs (list, None): List of directories containing CUDA headers
         nvcc_options (list, None): Additional options to pass to NVRTC
+        nvrtc_path (str, optional): Path to the NVRTC library. If provided, this will skip the 
+                                   automatic discovery logic and use the specified library directly.
 
     Returns:
         str: The compiled PTX code
@@ -96,7 +106,7 @@ def _nvrtc_compile(
         torch.cuda.init()
 
     # Load NVRTC library
-    libnvrtc = _get_nvrtc_library()
+    libnvrtc = _get_nvrtc_library(nvrtc_path)
 
     # NVRTC constants
     NVRTC_SUCCESS = 0
