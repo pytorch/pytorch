@@ -594,7 +594,7 @@ def rebind_unbacked(
             # exist in the ShapeEnv but are never bound anywhere.  You might
             # like an invariant that unbacked symbols never get lost.  But
             # we do not have this invariant, so do not try to enforce it.
-            if isinstance(u1, int):
+            if isinstance(u1, (int, float)):
                 log.info(
                     "rebind_unbacked: discard %s %s %s -> %s",
                     n.target,
@@ -1943,7 +1943,7 @@ class EqualityConstraint(Constraint):
         for source, root, fn in self.derived_equalities:
             # preprocess into a transitively-closed map
             # NOTE(avik): we reuse the union-find forest for canonicalizing input sources
-            if isinstance(root, sympy.Symbol):
+            if isinstance(root, (sympy.Symbol, sympy.Integer)):
                 self._defs[self._find(source)] = fn(root)
             else:
                 self._defs[self._find(source)] = fn(self._rewrite(root))
@@ -5427,11 +5427,12 @@ class ShapeEnv:
             for srcEq, root, fn in equalities_inputs.derived_equalities:
                 expr1 = get_expression(srcEq)
                 # recall that root is either a phantom symbol or an input source
-                expr2, debug_name = (
-                    (root, self.var_to_sources[root][0].name())
-                    if isinstance(root, sympy.Symbol)
-                    else (get_expression(root), self._debug_name(root))
-                )
+                if isinstance(root, sympy.Symbol):
+                    expr2, debug_name = root, self.var_to_sources[root][0].name()
+                elif isinstance(root, sympy.Integer):
+                    expr2, debug_name = root, str(root)
+                else:
+                    expr2, debug_name = get_expression(root), self._debug_name(root)
                 expr2_ = fn(expr2)
                 # Check whether given input shape values satisfy a specified equation s = fn(s').
                 # - Raise when the equation was violated by the given input shape values.
@@ -5446,10 +5447,11 @@ class ShapeEnv:
                     )
 
             for phantom_symbol in equalities_inputs.phantom_symbols:
-                # we created additional phantom symbols that are not input shape dimensions
-                symbol_to_source[phantom_symbol].extend(
-                    self.var_to_sources[phantom_symbol]
-                )
+                if isinstance(phantom_symbol, sympy.Symbol):
+                    # we created additional phantom symbols that are not input shape dimensions
+                    symbol_to_source[phantom_symbol].extend(
+                        self.var_to_sources[phantom_symbol]
+                    )
 
         # How do we know what the value of s0 is?  Fresh variables can only be
         # bound by inputs, so there MUST be some other input which binds the
@@ -6251,6 +6253,7 @@ class ShapeEnv:
         hint for the particular hint values of backed and unbacked SymInts,
         e.g., if s0 happens to be 3 this run, compute_hint will substitute s0 with 3.
         """
+
         # axioms with compute hint NYE
         assert not compute_hint or not axioms
         expr = self.simplify(expr, size_oblivious)
