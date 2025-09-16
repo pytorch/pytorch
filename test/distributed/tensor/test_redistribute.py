@@ -695,5 +695,75 @@ class MultiDimRedistributeTest(DTensorTestBase):
             self.assertEqual(local_out_dt, local_expected_dt)
 
 
+class DeviceOrderRedistributeTest(DTensorTestBase):
+    @property
+    def world_size(self) -> int:
+        return 8
+
+    @with_comms
+    def test_redistribute_mesh_dim_reorder(self):
+        mesh = init_device_mesh(self.device_type, (2, 2, 2))
+        input_data = torch.randn((8, 8, 8), device=self.device_type)
+        sharding_src_dst_pairs_with_order = [
+            # after reordering: S(0)S(0)S(0) -> RS(0)S(0) (S(0) to mesh axis
+            # I_{0,1,2}->I_{1,2}). 2: S0->R, 1: S0->R, 0: S0->R, 1: R->S0, 2:
+            # R->S0. Note that [0, 1, 2] device order will trigger the
+            # generate_greedy_transform_infos() without using the device_order
+            # information.
+            (
+                ([Shard(0), Shard(0), Shard(0)], [0, 1, 2]),
+                ([Replicate(), Shard(0), Shard(0)], [0, 1, 2]),
+            ),
+            # same as above, device order will be default to [0,1,2] if not
+            # specified
+            (
+                ([Shard(0), Shard(0), Shard(0)], None),
+                ([Replicate(), Shard(0), Shard(0)], None),
+            ),
+            # Below comments we use [x] to represent the sequence of mesh axis,
+            # e.g., S(0)[1]S(0)[0] means we Shard(0) on mesh axis 1, then
+            # Shard(0) on mesh axis 0.
+            # S(0)[1]S(0)[0]S(0)[2] -> S(0)[1]S(0)[0]S(1)[0] -> RS(0)[0]S(1)[0]
+            # -> RS(0)[0]S(0)[1]
+            (
+                ([Shard(0), Shard(0), Shard(0)], [1, 0, 2]),
+                ([Replicate(), Shard(0), Shard(0)], [0, 1, 2]),
+            ),
+            #  S(0)[0]S(0)[1]S(0)[2] -> S(0)[0]S(0)[1]S(1)[0] ->
+            #  S(0)[0]S(1)[1]S(1)[0] -> RS(1)[1]S(1)[0] -> RS(0)[0]S(1)[0] ->
+            #  RS(0)[0]S(0)[1]
+            (
+                ([Shard(0), Shard(0), Shard(0)], [0, 1, 2]),
+                ([Replicate(), Shard(0), Shard(0)], [2, 0, 1]),
+            ),
+            # RS(0)[0]S(0)[1] -> S(1)[0]S(0)[0]S(0)[1] -> S(1)[0]S(0)[0]R
+            (
+                ([Replicate(), Shard(0), Shard(0)], [0, 1, 2]),
+                ([Shard(1), Shard(0), Replicate()], [1, 2, 0]),
+            ),
+        ]
+        excepted_comm_counts = [3, 3, 3, 5, 1]
+        comm_mode = CommDebugMode()
+        for idx, ((src_placement, src_order), (dst_placement, dst_order)) in enumerate(
+            sharding_src_dst_pairs_with_order
+        ):
+            sharded_dt = distribute_tensor(
+                input_data, mesh, src_placement, device_order=src_order
+            )
+            expected_dt = distribute_tensor(
+                input_data.clone(), mesh, dst_placement, device_order=dst_order
+            )
+            with comm_mode:
+                out_dt = sharded_dt.redistribute(
+                    mesh, dst_placement, device_order=dst_order
+                )
+                self.assertEqual(
+                    comm_mode.get_total_counts(), excepted_comm_counts[idx]
+                )
+            local_out_dt = out_dt.to_local()
+            local_expected_dt = expected_dt.to_local()
+            self.assertEqual(local_out_dt, local_expected_dt)
+
+
 if __name__ == "__main__":
     run_tests()
