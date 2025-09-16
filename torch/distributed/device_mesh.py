@@ -226,36 +226,6 @@ if True:  # just to temporarily avoid reindentation
         ) -> None:
             self.mesh_dim_group_options[dim] = (backend, pg_options)
 
-        def _get_all_submeshes(
-            self, device_mesh: "DeviceMesh", mesh_dim_name: str
-        ) -> list["DeviceMesh"]:
-            """
-            Return all the submeshes of a given mesh dimension of the device mesh.
-            """
-            mesh_dim = self.get_mesh_dim_by_name(device_mesh, mesh_dim_name)
-            layout = device_mesh._layout[mesh_dim]
-            pg_ranks_by_dim = layout.global_ranks(device_mesh.size())
-            cur_rank = device_mesh.get_rank()
-            res_submeshes = []
-            for mesh_1d in pg_ranks_by_dim:
-                submesh = DeviceMesh(
-                    device_mesh.device_type,
-                    mesh_1d,
-                    mesh_dim_names=(mesh_dim_name,),
-                    _init_backend=False,
-                )
-                submesh._dim_group_names = (  # type: ignore[has-type]
-                    [device_mesh._dim_group_names[mesh_dim]]
-                    if cur_rank in mesh_1d
-                    else []
-                )
-                submesh._layout = (
-                    device_mesh._layout if cur_rank in mesh_1d else _MeshLayout(0, 0)
-                )
-                res_submeshes.append(submesh)
-
-            return res_submeshes
-
         def _get_slice_mesh_layout(self, device_mesh, mesh_dim_names) -> _MeshLayout:
             """
             Validate whether the mesh_dim_names is valid for slicing the given device_mesh.
@@ -311,6 +281,36 @@ if True:  # just to temporarily avoid reindentation
                 )
 
             return layout_sliced
+
+        def _get_all_submeshes(
+            self, device_mesh: "DeviceMesh", mesh_dim_name: str
+        ) -> list["DeviceMesh"]:
+            """
+            Return all the submeshes of a given mesh dimension of the device mesh.
+            """
+            mesh_dim = self.get_mesh_dim_by_name(device_mesh, mesh_dim_name)
+            layout = device_mesh._layout[mesh_dim]
+            pg_ranks_by_dim = layout.global_ranks(device_mesh.size())
+            cur_rank = device_mesh.get_rank()
+            res_submeshes = []
+            for mesh_1d in pg_ranks_by_dim:
+                submesh = DeviceMesh(
+                    device_mesh.device_type,
+                    mesh_1d,
+                    mesh_dim_names=(mesh_dim_name,),
+                    _init_backend=False,
+                )
+                submesh._dim_group_names = (  # type: ignore[has-type]
+                    [device_mesh._dim_group_names[mesh_dim]]
+                    if cur_rank in mesh_1d
+                    else []
+                )
+                submesh._layout = (
+                    device_mesh._layout if cur_rank in mesh_1d else _MeshLayout(0, 0)
+                )
+                res_submeshes.append(submesh)
+
+            return res_submeshes
 
     _mesh_resources: _MeshEnv = _MeshEnv()
 
