@@ -1929,6 +1929,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         opt_mod(x)
         self.assertEqual(cnt.frame_count, 3)
 
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     def test_module_to_called_in_forward_constant_fold(self):
         class Mod(torch.nn.Module):
             def __init__(self) -> None:
@@ -1940,12 +1941,20 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
                 self.to("cpu")
                 return y
 
-        mod = Mod()
-        x = torch.rand(1, 1024)
-        ref = mod(x)
-        mod.compile(fullgraph=False)
-        res = mod(x)
-        self.assertTrue(torch.allclose(ref, res))
+        mod_cuda = Mod().cuda()
+        fn = torch.compile(mod_cuda)
+        x_cuda = torch.randn(2, 4).cuda()
+
+        # first call should move to CPU
+        ref = fn(x_cuda)
+        self.assertEqual(mod_cuda.fc.weight.device.type, "cpu")
+
+        # move back to CUDA
+        mod_cuda.cuda()
+
+        # should move to CPU again
+        ref2 = fn(x_cuda)
+        self.assertEqual(mod_cuda.fc.weight.device.type, "cpu")
 
     @torch._dynamo.config.patch(guard_nn_modules=True)
     def test_param_order(self):
