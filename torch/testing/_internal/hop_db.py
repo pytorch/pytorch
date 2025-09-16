@@ -202,6 +202,15 @@ def simple_while_loop(iter_t, x):
 
     return torch._higher_order_ops.while_loop(cond_fn, body_fn, (iter_t, x))
 
+def simple_while_loop_stack_output(iter_t, x):
+    def cond_fn(iter_t, x):
+        return iter_t > 0
+
+    def body_fn(iter_t, x):
+        return iter_t - 1, x.cos()
+
+    return torch._higher_order_ops.while_loop_stack_output(cond_fn, body_fn, (iter_t, x), tuple())
+
 
 def sample_inputs_scan(opinfo, device, dtype, requires_grad, **kwargs):
     make_arg = functools.partial(
@@ -365,6 +374,19 @@ hop_db = [
         name="while_loop",
         variant_test_name="simple",
         op=simple_while_loop,
+        sample_inputs_func=sample_inputs_while_loop,
+        dtypes=all_types_and(torch.bool, torch.half),
+        supports_out=False,
+        check_batched_grad=False,
+        check_batched_gradgrad=False,
+        check_batched_forward_grad=False,
+        check_inplace_batched_forward_grad=False,
+        supports_autograd=False,
+    ),
+    OpInfo(
+        name="while_loop_stack_output",
+        variant_test_name="simple",
+        op=simple_while_loop_stack_output,
         sample_inputs_func=sample_inputs_while_loop,
         dtypes=all_types_and(torch.bool, torch.half),
         supports_out=False,

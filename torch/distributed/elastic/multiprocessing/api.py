@@ -477,11 +477,35 @@ class PContext(abc.ABC):
     def start(self) -> None:
         """Start processes using parameters defined in the constructor."""
         if threading.current_thread() is threading.main_thread():
-            signal.signal(signal.SIGTERM, _terminate_process_handler)
-            signal.signal(signal.SIGINT, _terminate_process_handler)
-            if not IS_WINDOWS:
-                signal.signal(signal.SIGHUP, _terminate_process_handler)
-                signal.signal(signal.SIGQUIT, _terminate_process_handler)
+            # Register signal handlers for the signals specified in the environment variable
+            signals_to_handle = os.environ.get(
+                "TORCHELASTIC_SIGNALS_TO_HANDLE", "SIGTERM,SIGINT,SIGHUP,SIGQUIT"
+            )
+            signal_list = signals_to_handle.split(",")
+
+            for sig_name in signal_list:
+                try:
+                    sig = getattr(signal, sig_name.strip())
+                    signal.signal(sig, _terminate_process_handler)
+                    logger.info("Registered signal handler for %s", sig_name)
+                except (AttributeError, ValueError) as e:
+                    logger.warning(
+                        "Failed to register signal handler for %s: %s", sig_name, e
+                    )
+                except RuntimeError as e:
+                    if IS_WINDOWS and sig_name.strip() in [
+                        "SIGHUP",
+                        "SIGQUIT",
+                        "SIGUSR1",
+                        "SIGUSR2",
+                    ]:
+                        logger.info(
+                            "Signal %s is not supported on Windows, skipping", sig_name
+                        )
+                    else:
+                        logger.warning(
+                            "Failed to register signal handler for %s: %s", sig_name, e
+                        )
         else:
             logger.warning(
                 "Failed to register signal handlers since torchelastic is running on a child thread. "
