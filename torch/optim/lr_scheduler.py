@@ -79,6 +79,17 @@ def _format_param(name: str, optimizer: Optimizer, param):
     return list(map(_copy, param))
 
 
+def _param_groups_val_list(optimizer: Optimizer, key: str) -> list[Any]:
+    """Create a list containing group[key] for each optimizer param_group.
+    Prevents aliasing when group[key] could be a Tensor.
+    Raises a KeyError when group[key] does not exist.
+    """
+    return [
+        group[key].clone() if isinstance(group[key], Tensor) else group[key]
+        for group in optimizer.param_groups
+    ]
+
+
 class LRScheduler:
     r"""Adjusts the learning rate during optimization."""
 
@@ -111,9 +122,9 @@ class LRScheduler:
                         "1. You're trying to resume training from a checkpoint but haven't properly loaded the optimizer state\n"
                         "2. You're using last_epoch >= 0 for a fresh training run (not recommended)"
                     )
-        self.base_lrs: list[float] = [
-            group["initial_lr"] for group in optimizer.param_groups
-        ]
+        self.base_lrs: list[float | Tensor] = _param_groups_val_list(
+            optimizer, "initial_lr"
+        )
         self.last_epoch = last_epoch
 
         # Following https://github.com/pytorch/pytorch/issues/20124
@@ -167,11 +178,11 @@ class LRScheduler:
         """
         self.__dict__.update(state_dict)
 
-    def get_last_lr(self) -> list[float]:
+    def get_last_lr(self) -> list[float | Tensor]:
         """Return last computed learning rate by current scheduler."""
         return self._last_lr
 
-    def get_lr(self) -> list[float]:
+    def get_lr(self) -> list[float | Tensor]:
         """Compute learning rate using chainable form of the scheduler."""
         raise NotImplementedError
 
@@ -214,7 +225,7 @@ class LRScheduler:
             else:
                 self.last_epoch = epoch
                 if hasattr(self, "_get_closed_form_lr"):
-                    values = cast(list[float], self._get_closed_form_lr())
+                    values = cast(list[float | Tensor], self._get_closed_form_lr())
                 else:
                     values = self.get_lr()
 
@@ -224,9 +235,9 @@ class LRScheduler:
             else:
                 param_group["lr"] = lr
 
-        self._last_lr: list[float] = [
-            group["lr"] for group in self.optimizer.param_groups
-        ]
+        self._last_lr: list[float | Tensor] = _param_groups_val_list(
+            self.optimizer, "lr"
+        )
 
 
 def _warn_get_lr_called_within_step(lr_scheduler: LRScheduler) -> None:
@@ -367,7 +378,7 @@ class LambdaLR(LRScheduler):
                 self.lr_lambdas[idx].__dict__.update(fn)
 
     @override
-    def get_lr(self) -> list[float]:
+    def get_lr(self) -> list[float | Tensor]:
         """Compute learning rate."""
         _warn_get_lr_called_within_step(self)
 
@@ -466,7 +477,7 @@ class MultiplicativeLR(LRScheduler):
                 self.lr_lambdas[idx].__dict__.update(fn)
 
     @override
-    def get_lr(self) -> list[float]:
+    def get_lr(self) -> list[float | Tensor]:
         """Compute the learning rate of each parameter group."""
         _warn_get_lr_called_within_step(self)
 
@@ -520,7 +531,7 @@ class StepLR(LRScheduler):
         super().__init__(optimizer, last_epoch)
 
     @override
-    def get_lr(self) -> list[float]:
+    def get_lr(self) -> list[float | Tensor]:
         """Compute the learning rate of each parameter group."""
         _warn_get_lr_called_within_step(self)
 
@@ -528,7 +539,7 @@ class StepLR(LRScheduler):
             return [group["lr"] for group in self.optimizer.param_groups]
         return [group["lr"] * self.gamma for group in self.optimizer.param_groups]
 
-    def _get_closed_form_lr(self) -> list[float]:
+    def _get_closed_form_lr(self) -> list[float | Tensor]:
         return [
             base_lr * self.gamma ** (self.last_epoch // self.step_size)
             for base_lr in self.base_lrs
@@ -575,7 +586,7 @@ class MultiStepLR(LRScheduler):
         super().__init__(optimizer, last_epoch)
 
     @override
-    def get_lr(self) -> list[float]:
+    def get_lr(self) -> list[float | Tensor]:
         """Compute the learning rate of each parameter group."""
         _warn_get_lr_called_within_step(self)
 
@@ -644,7 +655,7 @@ class ConstantLR(LRScheduler):
         super().__init__(optimizer, last_epoch)
 
     @override
-    def get_lr(self) -> list[float]:
+    def get_lr(self) -> list[float | Tensor]:
         """Compute the learning rate of each parameter group."""
         _warn_get_lr_called_within_step(self)
 
@@ -726,7 +737,7 @@ class LinearLR(LRScheduler):
         super().__init__(optimizer, last_epoch)
 
     @override
-    def get_lr(self) -> list[float]:
+    def get_lr(self) -> list[float | Tensor]:
         """Compute the learning rate."""
         _warn_get_lr_called_within_step(self)
 
@@ -795,7 +806,7 @@ class ExponentialLR(LRScheduler):
         super().__init__(optimizer, last_epoch)
 
     @override
-    def get_lr(self) -> list[float]:
+    def get_lr(self) -> list[float | Tensor]:
         """Compute the learning rate of each parameter group."""
         _warn_get_lr_called_within_step(self)
 
@@ -1001,7 +1012,7 @@ class PolynomialLR(LRScheduler):
         super().__init__(optimizer, last_epoch)
 
     @override
-    def get_lr(self) -> list[float]:
+    def get_lr(self) -> list[float | Tensor]:
         """Compute the learning rate."""
         _warn_get_lr_called_within_step(self)
 
@@ -1014,7 +1025,7 @@ class PolynomialLR(LRScheduler):
         ) ** self.power
         return [group["lr"] * decay_factor for group in self.optimizer.param_groups]
 
-    def _get_closed_form_lr(self):
+    def _get_closed_form_lr(self) -> list[float | Tensor]:
         return [
             (
                 base_lr
@@ -1087,7 +1098,7 @@ class CosineAnnealingLR(LRScheduler):
         super().__init__(optimizer, last_epoch)
 
     @override
-    def get_lr(self) -> list[float]:
+    def get_lr(self) -> list[float | Tensor]:
         """Retrieve the learning rate of each parameter group."""
         _warn_get_lr_called_within_step(self)
 
@@ -1115,7 +1126,7 @@ class CosineAnnealingLR(LRScheduler):
             for group in self.optimizer.param_groups
         ]
 
-    def _get_closed_form_lr(self) -> list[float]:
+    def _get_closed_form_lr(self) -> list[float | Tensor]:
         return [
             self.eta_min
             + (base_lr - self.eta_min)
@@ -1184,17 +1195,13 @@ class ChainedScheduler(LRScheduler):
                 )
         self._schedulers = schedulers
         self.optimizer = optimizer
-        self._last_lr = [
-            group["lr"] for group in self._schedulers[-1].optimizer.param_groups
-        ]
+        self._last_lr = _param_groups_val_list(self._schedulers[-1].optimizer, "lr")
 
     def step(self) -> None:  # type: ignore[override]
         """Perform a step."""
         for scheduler in self._schedulers:
             scheduler.step()
-        self._last_lr = [
-            group["lr"] for group in self._schedulers[-1].optimizer.param_groups
-        ]
+        self._last_lr = _param_groups_val_list(self._schedulers[-1].optimizer, "lr")
 
     @override
     def state_dict(self) -> dict[str, Any]:
@@ -1327,7 +1334,7 @@ class ReduceLROnPlateau(LRScheduler):
         self.cooldown = cooldown
         self.eps = eps
         self.last_epoch = 0
-        self._last_lr = [group["lr"] for group in self.optimizer.param_groups]
+        self._last_lr = _param_groups_val_list(self.optimizer, "lr")
         self._init_is_better(
             mode=mode, threshold=threshold, threshold_mode=threshold_mode
         )
@@ -1364,7 +1371,7 @@ class ReduceLROnPlateau(LRScheduler):
             self.cooldown_counter = self.cooldown
             self.num_bad_epochs = 0
 
-        self._last_lr = [group["lr"] for group in self.optimizer.param_groups]
+        self._last_lr = _param_groups_val_list(self.optimizer, "lr")
 
     def _reduce_lr(self, epoch):
         if len(self.optimizer.param_groups) != len(self.min_lrs):
@@ -1642,7 +1649,7 @@ class CyclicLR(LRScheduler):
         return gamma**x
 
     @override
-    def get_lr(self) -> list[float]:
+    def get_lr(self) -> list[float | Tensor]:
         """Calculate the learning rate at batch index.
 
         This function treats `self.last_epoch` as the last batch index.
@@ -1788,7 +1795,7 @@ class CosineAnnealingWarmRestarts(LRScheduler):
         super().__init__(optimizer, last_epoch)
 
     @override
-    def get_lr(self) -> list[float]:
+    def get_lr(self) -> list[float | Tensor]:
         """Compute the initial learning rate."""
         _warn_get_lr_called_within_step(self)
 
@@ -1862,7 +1869,7 @@ class CosineAnnealingWarmRestarts(LRScheduler):
             for param_group, lr in zip(self.optimizer.param_groups, self.get_lr()):
                 param_group["lr"] = lr
 
-        self._last_lr = [group["lr"] for group in self.optimizer.param_groups]
+        self._last_lr = _param_groups_val_list(self.optimizer, "lr")
 
 
 class _SchedulePhase(TypedDict):
@@ -2134,7 +2141,7 @@ class OneCycleLR(LRScheduler):
         return (end - start) * pct + start
 
     @override
-    def get_lr(self) -> list[float]:
+    def get_lr(self) -> list[float | Tensor]:
         """Compute the learning rate of each parameter group."""
         _warn_get_lr_called_within_step(self)
 
