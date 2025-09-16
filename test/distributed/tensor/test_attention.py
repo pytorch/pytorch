@@ -9,7 +9,7 @@ from typing import Union
 import torch
 import torch.distributed as dist
 import torch.nn.functional as F
-from torch import nn, Tensor
+from torch import Tensor
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import DeviceMesh
 from torch.distributed.tensor.debug import CommDebugMode
@@ -40,8 +40,6 @@ from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import run_tests, skipIfRocm
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
-    ModelArgs,
-    Transformer,
     with_comms,
 )
 
