@@ -101,7 +101,7 @@ def get_fma_per_cycle_per_sm_tensor_cores(
 
 def get_tflops_per_second(
     target_device: torch.device, data_type: dtype, use_tensor_cores: bool = True
-) -> int:
+) -> float:
     device_properties = torch.cuda.get_device_properties(target_device)
     comp_capability = int(f"{device_properties.major}{device_properties.minor}")
     num_sms = device_properties.multi_processor_count
@@ -129,8 +129,8 @@ def get_memory_bandwidth_Bps(target_device: torch.device) -> int:
 
     # DRAM devices are Double-Data which means they provide an output at both fronts of
     # a clock beat
-    bus_bytes_per_cycle = 2 * device_properties.memory_bus_width / 8
-    mem_clock_rate_Hz = device_properties.memory_clock_rate * 1e3
+    bus_bytes_per_cycle = int(2 * device_properties.memory_bus_width / 8)
+    mem_clock_rate_Hz = device_properties.memory_clock_rate * 1000
     bytes_per_second = bus_bytes_per_cycle * mem_clock_rate_Hz * 2
     return bytes_per_second
 
@@ -143,5 +143,5 @@ def get_shared_memory_bandwidth_Bps(target_device: torch.device) -> int:
     num_sms = device_properties.multi_processor_count
     bytes_per_cycle_per_sm = 128
     bytes_per_cycle_per_device = num_sms * bytes_per_cycle_per_sm
-    bytes_per_second = bytes_per_cycle_per_device * device_properties.clock_rate * 1e3
+    bytes_per_second = bytes_per_cycle_per_device * device_properties.clock_rate * 1000
     return bytes_per_second
