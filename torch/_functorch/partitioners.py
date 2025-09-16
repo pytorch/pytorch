@@ -1792,7 +1792,7 @@ def solve_min_cut(
             # If someone saves a input for backward as-is and backward
             # returns that tensor as-is as a grad input, then the node x would
             # be both a required_bw_node and an input. In this case we
-            # (1) connect x_in to to the source, (2) x_out to the sink, and
+            # (1) connect x_in to the source, (2) x_out to the sink, and
             # (3) assign the proper weight to the x_in-x_out edge, so that
             # x would be part of cut nodes. A case where this happens is if
             # NestedTensor saves a offset tensor as part of the singleton int
@@ -2535,7 +2535,7 @@ def _sync_decision_cross_ranks(
         # proxy to check if the graph is the same across different GPUs.
         # We only consider the name and order of nodes. A more robust way
         # would be to check the hash of the whole graph (disregarding input shapes),
-        # this is is a reasonable first-order approximation.
+        # this is a reasonable first-order approximation.
         node_str = "/".join(x.name for x in joint_graph.nodes)
         inputs = hashlib.sha256(node_str.encode("utf-8")).hexdigest()
         all_inputs = [None for _ in range(torch.distributed.get_world_size())]
