@@ -117,6 +117,7 @@ from .source import (
     TensorPropertySource,
 )
 from .utils import (
+    _get_error_on_graph_break,
     _extract_tensor_dict,
     checkpoint_params,
     CleanupHook,
@@ -457,7 +458,8 @@ class OutputGraph(OutputGraphGuardsState):
             # TrackedFake instances may have its metadata changed throughout
             # the program execution.
             tracked_fakes=self.tracked_fakes,
-            allow_scalar_outputs=config.capture_scalar_outputs,
+            # We want to allow scalar outputs when fullgraph=True
+            allow_scalar_outputs=_get_error_on_graph_break() or config.capture_scalar_outputs,
             allow_dynamic_output_shape_ops=config.capture_dynamic_output_shape_ops,
             prefer_deferred_runtime_asserts_over_guards=config.prefer_deferred_runtime_asserts_over_guards,
             allow_complex_guards_as_runtime_asserts=config.allow_complex_guards_as_runtime_asserts,
