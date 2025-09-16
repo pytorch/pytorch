@@ -1510,6 +1510,18 @@ class BuiltinVariable(VariableTracker):
             assert istype(arg.sym_num, (torch.SymInt, torch.SymFloat))
             return SymNodeVariable.create(tx, arg.as_proxy() != 0)
 
+        if isinstance(arg, ConstDictVariable):
+            return ConstantVariable.create(len(arg.items) > 0)
+        if isinstance(arg, UserDefinedObjectVariable):
+            # for user defined objects, first try __bool__ if defined, else
+            # __len__. If neither is defined, then any instance is considered True
+            if arg.call_obj_hasattr(tx, "__bool__").value:
+                return arg.call_method(tx, "__bool__", [], {})
+            elif arg.call_obj_hasattr(tx, "__len__").value:
+                length = arg.call_method(tx, "__len__", [], {})
+                return ConstantVariable.create(length.value > 0)
+            else:
+                return ConstantVariable.create(True)
         # TODO handle more cases and merge this with this with `generic_jump`.
 
     def call_str(self, tx: "InstructionTranslator", arg):
@@ -1919,10 +1931,10 @@ class BuiltinVariable(VariableTracker):
     def call_custom_dict_fromkeys(
         tx: "InstructionTranslator", user_cls, *args, **kwargs
     ):
-        assert user_cls in {dict, OrderedDict, defaultdict}
+        assert issubclass(user_cls, (dict, OrderedDict, defaultdict))
         if kwargs:
             # Only `OrderedDict.fromkeys` accepts `value` passed by keyword
-            assert user_cls is OrderedDict
+            assert issubclass(user_cls, OrderedDict)
             assert len(args) == 1 and len(kwargs) == 1 and "value" in kwargs
             args = (*args, kwargs.pop("value"))
         if len(args) == 0:
@@ -2858,7 +2870,7 @@ class BuiltinVariable(VariableTracker):
         # Unwrap the underlying ConstDictVariable
         if isinstance(a, DictViewVariable):
             a = a.dv_dict
-        if isinstance(a, (ListVariable, ConstDictVariable)):
+        if isinstance(a, (ListVariable, ConstDictVariable, UserDefinedDictVariable)):
             return ConstantVariable.create(len(a.items) == 0)
 
         return None
