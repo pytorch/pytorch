@@ -17,7 +17,7 @@ Profile-Guided Optimization (PGO) enhances automatic dynamic by sharing profilin
 
 For the purposes of the rest of this tutorial, you can use the following environmental variables to turn on PGO locally `TORCH_COMPILE_JOB_ID=1 TORCH_DYNAMO_AUTOMATIC_DYNAMIC_LOCAL_PGO=1`
 
-#### Identifying Dynamic Elements Marked by PGO
+### Identifying Dynamic Elements Marked by PGO
 
 Use `tlparse` to find line numbers of interest and check for multiple values
 seen for inputs.
@@ -165,7 +165,7 @@ specialized. If your model receives different values for these arguments,
 it could be a source of recompilation.
 
 
-### **Identifying and Fixing Recompilation Causes**
+## **Identifying and Fixing Recompilation Causes**
 
 1. **Is Something Not Marked Dynamic but Should Be?** Determine if an input was
 marked dynamic and got specialized or was not marked dynamic at all. You can
