@@ -351,7 +351,8 @@ class DtypePropagationOpsHandler:
 
     @staticmethod
     def dot(x: DTypeArg, y: DTypeArg) -> torch.dtype:
-        return promote_types([x, y])
+        # triton tl.dot out_dtype is tl.float32 by default.
+        return torch.float32
 
     @staticmethod
     def inline_asm_elementwise(
