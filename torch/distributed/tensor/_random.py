@@ -82,7 +82,7 @@ def manual_seed(seed: int, device_mesh: DeviceMesh) -> None:
     #     "DTensor manual_seed() is deprecated, since DTensor no longer maintains a separate copy of generator state. "
     #     "Use `torch.manual_seed` instead"
     # )
-    # Note: we still need to ensure setting `run_state_sync=False` to support the the pp case
+    # Note: we still need to ensure setting `run_state_sync=False` to support the pp case
 
     # instantiate a RNG tracker if haven't. By default DTensor uses an
     # OffsetBasedRNGTracker to perform random operators.
