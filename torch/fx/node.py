@@ -155,7 +155,7 @@ def _get_qualified_name(func: Callable[..., Any]) -> str:
         isinstance(func, (types.MethodDescriptorType, types.WrapperDescriptorType))
         and func is getattr(torch.Tensor, func.__name__, None)
     ) or (
-        func.__module__ == torch._tensor
+        func.__module__ == torch._tensor.__name__
         and func.__qualname__ == f"Tensor.{func.__name__}"
     ):
         return f"torch.Tensor.{func.__name__}"

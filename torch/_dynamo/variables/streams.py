@@ -14,6 +14,8 @@ if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslator
     from ..codegen import PyCodegen
 
+    from ..codegen import PyCodegen
+
 
 from torch._library.custom_ops import custom_op
 
