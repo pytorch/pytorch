@@ -307,34 +307,38 @@ from user code:
             model.train()
             expected.sum().backward()
 
-
     def test_aot_module_simplified_serializable_autograd(self):
         mod = SimpleLinearModule()
-        compiled_fn : SerializableCallable = torch.compile(mod,
-            fullgraph=True,
-            backend="inductor"
-        ).forward.aot_compile(
-            ((torch.randn(3, 3),), {})
-        )
+        compiled_fn: SerializableCallable = torch.compile(
+            mod, fullgraph=True, backend="inductor"
+        ).forward.aot_compile(((torch.randn(3, 3),), {}))
         backend_result = compiled_fn._artifacts.compiled_fn
-        self.assertTrue(isinstance(backend_result, torch._dynamo.aot_compile.BundledAOTAutogradSerializableCallable))
+        self.assertTrue(
+            isinstance(
+                backend_result,
+                torch._dynamo.aot_compile.BundledAOTAutogradSerializableCallable,
+            )
+        )
         assert hasattr(backend_result.compiled_fn, "serialize")
         assert backend_result.compiled_fn.serialize is not None
-
 
     def test_aot_module_simplified_serializable_inference(self):
         def fn(x):
             return x.sin()
-        compiled_fn : SerializableCallable = torch.compile(fn,
-            fullgraph=True,
-            backend="inductor"
-        ).aot_compile(
-            ((torch.randn(3, 3),), {})
-        )
+
+        compiled_fn: SerializableCallable = torch.compile(
+            fn, fullgraph=True, backend="inductor"
+        ).aot_compile(((torch.randn(3, 3),), {}))
         backend_result = compiled_fn._artifacts.compiled_fn
-        self.assertTrue(isinstance(backend_result, torch._dynamo.aot_compile.BundledAOTAutogradSerializableCallable))
+        self.assertTrue(
+            isinstance(
+                backend_result,
+                torch._dynamo.aot_compile.BundledAOTAutogradSerializableCallable,
+            )
+        )
         assert hasattr(backend_result.compiled_fn, "serialize")
         assert backend_result.compiled_fn.serialize is not None
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
