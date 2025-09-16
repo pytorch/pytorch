@@ -1735,7 +1735,6 @@ def init_process_group(
             timeout=timeout,
             group_desc="default_pg",
         )
-        _update_default_pg(default_pg)
     else:
         # backward compatible API
         if store is None:
@@ -1766,7 +1765,8 @@ def init_process_group(
             device_id=device_id,
             group_desc="default_pg",
         )
-        _update_default_pg(default_pg)
+
+    _update_default_pg(default_pg)
 
     _world.pg_group_ranks[GroupMember.WORLD] = {  # type: ignore[index]
         i: i
@@ -5150,7 +5150,11 @@ def split_group(
             my_group = split_group
             break
 
-    group_name = _process_group_name(my_group, use_hashed_name=False)
+    # use_hashed_name is True to ensure that subgroups have unique names.
+    # This is needed as some backends (e.g. Gloo) use the group name as a
+    # PrefixStore prefix for initialization of splits. Thus, names have to be
+    # unique to avoid key collisions.
+    group_name = _process_group_name(my_group, use_hashed_name=True)
     split_pg = parent_pg.split_group(
         my_group,
         timeout=timeout,

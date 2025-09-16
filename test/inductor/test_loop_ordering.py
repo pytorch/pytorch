@@ -26,7 +26,6 @@ from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
-    skipIfRocm,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 from torch.utils._ordered_set import OrderedSet
@@ -415,7 +414,6 @@ class LoopOrderingTest(TestCase):
         self.do_acc_test(f, x)
         self.assertEqual(1, metrics.generated_kernel_count)
 
-    @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, "FP8 requires H100+ and MI300+")
     def test_fp8_cast_and_t(self):
         """
@@ -438,7 +436,6 @@ class LoopOrderingTest(TestCase):
         self.do_acc_test(f, x, scale)
         self.assertEqual(1, metrics.generated_kernel_count)
 
-    @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, "FP8 requires H100+ and MI300+")
     def test_fp8_pattern_2(self):
         """
@@ -591,6 +588,23 @@ class LoopOrderingTest(TestCase):
         FileCheck().check("def call(").check_count(
             ".run(", 1 + int(inductor_config.benchmark_kernel), exactly=True
         ).run(code[0])
+
+    def test_fuse_with_scalar_shared_memory(self):
+        """
+        Make sure if we can fuse two nodes sharing a scalar before,
+        we can still do it with LOAF applied.
+
+        This is not really a big deal. But some tests rely on this and
+        less number of kernels has some small benefits.
+        """
+
+        @torch.compile
+        def f(x):
+            return torch.mean(x)
+
+        x = torch.randn([5, 5], device=GPU_TYPE)
+        out, code = run_and_get_code(f, x)
+        FileCheck().check_count("@triton.jit", 1, exactly=True).run(code[0])
 
 
 @inductor_config.patch(
