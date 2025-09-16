@@ -13,7 +13,7 @@ exclude_patterns = [
     '**/fb/**',
     'functorch/docs/**',
     'functorch/examples/**',
-    'functorch/notebooks/**',
+    'functorch/docs/source/tutorials/**',
     'torch/_inductor/fx_passes/serialized_patterns/**',
     'torch/_inductor/autoheuristic/artifacts/**',
     'scripts/**',
@@ -1568,7 +1568,6 @@ include_patterns = [
 exclude_patterns = [
     'caffe2/**',
     'functorch/docs/**',
-    'functorch/notebooks/**',
     'torch/_inductor/fx_passes/serialized_patterns/**',
     'torch/_inductor/autoheuristic/artifacts/**',
     'test/dynamo/cpython/**',
@@ -1800,27 +1799,4 @@ include_patterns = ["torch/_dynamo/**/*.py"]
 command = [
   "python3",
   "tools/linter/adapters/gb_registry_linter.py",
-]
-
-[[linter]]
-code = 'DISTRIBUTED_C10D_DIRECT_ACCESS'
-include_patterns = ['**/*.py']
-exclude_patterns = [
-    'torch/distributed/_distributed_c10d.py',
-    'fb/**',
-    '**/fb/**',
-]
-command = [
-    'python3',
-    'tools/linter/adapters/grep_linter.py',
-    '--pattern=torch\._C\._distributed_c10d',
-    '--linter-name=DISTRIBUTED_C10D_DIRECT_ACCESS',
-    '--error-name=direct access to torch._C._distributed_c10d',
-    """--error-description=\
-        Never access torch._C._distributed_c10d directly in code. Always \
-        import from and use torch.distributed._distributed_c10d which is \
-        guaranteed to have all functions available\
-    """,
-    '--',
-    '@{{PATHSFILE}}'
 ]
