@@ -365,7 +365,7 @@ def _dynamo_graph_capture_for_export(
                 module_to_trace.forward.__func__.__globals__,  # type: ignore[attr-defined]
                 f_locals,
                 builtins,  # type: ignore[arg-type]
-                closure=(),  # type: ignore[arg-type]
+                closure=module_to_trace.forward.__closure__ or (),  # type: ignore[arg-type]
             )
 
             dynamo_config_ctx = torch._dynamo.config.patch(
