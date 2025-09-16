@@ -1371,6 +1371,8 @@ class DictItemsVariable(DictViewVariable):
         return dict_items
 
     def call_method(self, tx, name, args, kwargs):
+        # TODO(guilhermeleobas): This should actually check if args[0]
+        # implements the mapping protocol.
         if name == "__eq__":
             assert len(args) == 1
             if isinstance(args[0], DictItemsVariable):
