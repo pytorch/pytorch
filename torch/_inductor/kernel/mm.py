@@ -747,10 +747,10 @@ def tuned_mm(mat1, mat2, *, layout=None):
     m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2, layout=layout)
     static_shape, is_nonzero = _is_static_problem(layout)
     name = "mm"
-   
+
     if name in torch._inductor.config.mm_recompile_hooks:
         torch._inductor.config.mm_recompile_hooks["mm"](m, n, k, V.graph.sizevars)
-        
+
     # Create MMKernelInputs for standard MM at the top
     kernel_inputs = MMKernelInputs([mat1, mat2])
 

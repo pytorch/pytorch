@@ -470,8 +470,8 @@ max_autotune_prune_choices_based_on_shared_mem = (
 """
 Matrix Multiplication Recompilation API
 
-This API allows users to trigger recompilations for matrix multiplications in 
-compiled models based on custom conditions. By providing a callable function, 
+This API allows users to trigger recompilations for matrix multiplications in
+compiled models based on custom conditions. By providing a callable function,
 users can control when recompilations occur.
 
 Example Usage:
@@ -486,10 +486,10 @@ Example Usage:
             # all > 16
                 pass
 
-if we call this before tuned_mm we can avoid passing sizevars and make it simpler
-operating on symNodes.
+if we call this before tuned_mm we can avoid passing sizevars we can make it
+simpler by operating on symNodes.
 
-The callable will force recompilations based on conditions specified. 
+The callable will force recompilations based on conditions specified.
 For instance, the code above would trigger three recompilations:
     1. When m == n == k (square matrices)
     2. When all dimensions (m, n, k) are greater than 16
