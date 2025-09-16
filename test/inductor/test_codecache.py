@@ -7,7 +7,6 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import textwrap
 import unittest
 from contextlib import contextmanager
 from typing import Optional, Union
@@ -34,6 +33,7 @@ from torch._inductor.cpp_builder import normalize_path_separator
 from torch._inductor.custom_graph_pass import (
     CustomGraphModulePass,
     CustomGraphPass,
+    CustomPartitionerFn,
     get_hash_for_files,
 )
 from torch._inductor.graph import GraphLowering
@@ -137,100 +137,6 @@ class TestPyCodeCache(TestCase):
         PyCodeCache.load_by_key_path(key, path, linemap=[])
         stack_frames = PyCodeCache.stack_frames_for_code(path, 0)
         self.assertEqual(stack_frames, None)
-
-    def test_editable_cached_wrapper(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            env = os.environ.copy()
-            env["TORCHINDUCTOR_CACHE_DIR"] = tmpdir
-
-            step1 = textwrap.dedent(
-                """
-                import glob
-                import os
-                import torch
-                import warnings
-                from torch._inductor import config
-
-                warnings.filterwarnings("ignore")
-                config.fx_graph_cache = True
-                config.fx_graph_remote_cache = False
-                torch._dynamo.reset()
-
-                @torch.compile(backend="inductor")
-                def f(x):
-                    return x * 2
-
-                f(torch.ones(2))
-                cache_dir = os.environ["TORCHINDUCTOR_CACHE_DIR"]
-                pyfiles = glob.glob(os.path.join(cache_dir, "**", "*.py"), recursive=True)
-                print(pyfiles[0])
-                """
-            )
-            wrapper_path = (
-                subprocess.check_output([sys.executable, "-c", step1], env=env)
-                .decode()
-                .strip()
-            )
-
-            step2 = textwrap.dedent(
-                """
-                import torch
-                import warnings
-                from torch._dynamo.utils import counters
-                from torch._inductor import config
-
-                warnings.filterwarnings("ignore")
-                config.fx_graph_cache = True
-                config.fx_graph_remote_cache = False
-                torch._dynamo.reset()
-
-                @torch.compile(backend="inductor")
-                def f(x):
-                    return x * 2
-
-                f(torch.ones(2))
-                print(counters["inductor"]["fxgraph_cache_hit"])
-                """
-            )
-            hit = (
-                subprocess.check_output([sys.executable, "-c", step2], env=env)
-                .decode()
-                .strip()
-            )
-            self.assertEqual(hit, "1")
-
-            with open(wrapper_path) as f:
-                src = f.read()
-            with open(wrapper_path, "w") as f:
-                f.write(
-                    src.replace(
-                        "def call(self, args):",
-                        "def call(self, args):\n        print('debug')",
-                    )
-                )
-
-            step3 = textwrap.dedent(
-                """
-                import torch
-                import warnings
-                from torch._inductor import config
-
-                warnings.filterwarnings("ignore")
-                config.fx_graph_cache = True
-                config.fx_graph_remote_cache = False
-                torch._dynamo.reset()
-
-                @torch.compile(backend="inductor")
-                def f(x):
-                    return x * 2
-
-                f(torch.ones(2))
-                """
-            )
-            out = subprocess.check_output(
-                [sys.executable, "-c", step3], env=env
-            ).decode()
-            self.assertIn("debug", out)
 
 
 @instantiate_parametrized_tests
@@ -2210,6 +2116,19 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
 
 
+class TestCustomPartitionerFn(CustomPartitionerFn):
+    def __init__(self):
+        self._uuid = None
+
+    def __call__(
+        self, gm, joint_inputs, **kwargs
+    ) -> tuple[torch.fx.GraphModule, torch.fx.GraphModule]:
+        return gm, gm  # Dummy implementation
+
+    def uuid(self) -> Optional[Union[bytes, str]]:
+        return self._uuid
+
+
 class TestFxGraphCacheHashing(TestCase):
     def test_parameter_constants(self):
         """
@@ -2614,6 +2533,35 @@ class TestFxGraphCacheHashing(TestCase):
             compiled_fn(x, y)
             self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+
+    def test_hash_custom_partitioner_fn(self):
+        """
+        Test that the custom partitioner function's UUID is properly used in the FX graph cache hashing.
+        """
+        custom_partitioner_fn = TestCustomPartitionerFn()
+        with config.patch({"custom_partitioner_fn": custom_partitioner_fn}):
+            custom_partitioner_fn._uuid = "1"
+            details1 = FxGraphHashDetails(None, [], {}, [])
+            details2 = FxGraphHashDetails(None, [], {}, [])
+
+            custom_partitioner_fn._uuid = "2"
+            details3 = FxGraphHashDetails(None, [], {}, [])
+
+            self.assertEqual(details1._custom_partitioner_fn, "1")
+            self.assertEqual(details2._custom_partitioner_fn, "1")
+            self.assertEqual(details3._custom_partitioner_fn, "2")
+
+            gm = torch.fx.GraphModule({}, torch.fx.Graph())
+            pickler = FxGraphCachePickler(gm)
+
+            self.assertEqual(
+                pickler.dumps(details1),
+                pickler.dumps(details2),
+            )
+            self.assertNotEqual(
+                pickler.dumps(details1),
+                pickler.dumps(details3),
+            )
 
     def test_bypass_unsupported(self):
         """
