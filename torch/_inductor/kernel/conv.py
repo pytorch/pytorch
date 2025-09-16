@@ -180,7 +180,7 @@ conv2d_template = TritonTemplate(
     idx_w = idx_y_w[:, None]
 
     # inductor generates a suffix
-    {{store_output(("idx_n", "idx_c", "idx_h", "idx_w"), "acc", "mask")}}
+    {{store_output(("idx_n", "idx_c", "idx_h", "idx_w"), "acc", "mask", val_shape=("BLOCK_M", "BLOCK_N"))}}
 """,
 )
 
@@ -318,7 +318,7 @@ conv3d_template = TritonTemplate(
     idx_w = idx_y_w[:, None]
 
     # inductor generates a suffix
-    {{store_output(("idx_n", "idx_c", "idx_d", "idx_h", "idx_w"), "acc", "mask")}}
+    {{store_output(("idx_n", "idx_c", "idx_d", "idx_h", "idx_w"), "acc", "mask", val_shape=("BLOCK_M", "BLOCK_N"))}}
 """,
 )
 
@@ -591,10 +591,12 @@ def convolution(
 
         conv_configs = V.choices.get_conv_configs(device_type)
 
+        dtype_size = x.get_dtype().itemsize
         for cfg in conv_configs(
             sympy_product([x.get_size()[0], *x.get_size()[2:]]),
             out_chan,
             in_chan,
+            dtype_size=dtype_size,
         ):
             if ndim == 2:
                 conv2d_template.maybe_append_choice(
