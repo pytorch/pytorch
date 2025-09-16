@@ -2,7 +2,6 @@ import contextlib
 import itertools
 import logging
 import types
-import weakref
 from abc import ABC, abstractmethod
 from collections.abc import Generator
 from dataclasses import dataclass
@@ -13,7 +12,6 @@ import torch
 import torch.distributed as dist
 import torch.distributed._functional_collectives as ft_c
 import torch.nn.functional as F
-from torch import nn
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor import distribute_tensor, DTensor, Shard
 from torch.nn.attention.flex_attention import (
