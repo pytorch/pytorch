@@ -2,6 +2,8 @@
 import itertools
 import logging
 import os
+import pathlib
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -7090,6 +7092,62 @@ class AOTInductorTestsTemplate:
         ).check("wrap_with_raii_handle_if_needed(buf0_handle);").check(
             "RAIIAtenTensorHandle buf0(buf0_handle_restrided);"
         ).run(code)
+
+    @unittest.skipIf(IS_MACOS, "might have no readelf on Mac")
+    def test_libtorch_free_so(self):
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10)
+
+            def forward(self, x, y):
+                return x + self.linear(y)
+
+        example_inputs = (
+            torch.randn(10, 10, device=self.device),
+            torch.randn(10, 10, device=self.device),
+        )
+
+        model = Model().to(self.device)
+        ep = torch.export.export(model, example_inputs)
+
+        package_path = torch._inductor.aoti_compile_and_package(
+            ep,
+            inductor_configs={
+                "aot_inductor.link_libtorch": False,
+            },
+        )
+
+        torch_libs = {
+            "libtorch.so",
+            "libc10.so",
+            "libtorch_cuda.so",
+            "libc10_cuda.so",
+            "libtorch_cpu.so",
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Unpack
+            with zipfile.ZipFile(package_path, "r") as zf:
+                zf.extractall(tmpdir)
+
+            so_files = list(pathlib.Path(tmpdir).rglob("*.so"))
+            self.assertTrue(len(so_files) > 0)
+
+            for so_file in so_files:
+                so_copy = pathlib.Path(tmpdir) / f"{so_file.name}.checkcopy"
+                so_copy.write_bytes(so_file.read_bytes())
+
+                result = subprocess.run(
+                    ["readelf", "-d", str(so_copy)],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                )
+                for line in result.stdout.splitlines():
+                    if "NEEDED" in line:
+                        for lib in torch_libs:
+                            self.assertTrue(lib not in line)
 
 
 class AOTInductorLoggingTest(LoggingTestCase):

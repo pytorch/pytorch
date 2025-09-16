@@ -146,6 +146,8 @@ def rmse(ref, res):
     """
     Calculate root mean squared error
     """
+    ref = ref.to(torch.float64)
+    res = res.to(torch.float64)
     return torch.sqrt(torch.mean(torch.square(ref - res)))
 
 
