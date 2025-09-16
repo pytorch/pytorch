@@ -3120,7 +3120,10 @@ class TestGuardsExpressions(TestCase):
 
         self.assertEqual(f"{x_clean.stride()}", "(8, 1)")
         self.assertEqual(f"{x_clean.shape}", "torch.Size([5, 8])")
-
+    
+    # TODO atributeError: Can't pickle local object 
+    # 'TestGuardsExpressions.test_mm_recompilation.<locals>.mm_recompile_hook'
+    @torch.compiler.config.patch({"force_disable_caches":1})
     def test_mm_recompilation(self):
         """
         Test matrix multiplication with different dimension scenarios does not recompile
