@@ -245,7 +245,6 @@ Welford<T> welford_combine(
       mask >>= 1;
     }
   }
-
   // Add a single data point
   uint64_t new_index = acc.index + 1;
   auto new_weight = acc.weight + T(1);
