@@ -4,7 +4,6 @@ import torch
 from torch.fx import Proxy
 
 from .. import graph_break_hints
-from ..codegen import PyCodegen
 from ..exc import TYPE_CHECKING, unimplemented_v2
 from .base import VariableTracker
 from .constant import ConstantVariable
@@ -12,6 +11,8 @@ from .constant import ConstantVariable
 
 if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslator
+
+    from ..codegen import PyCodegen
 
 
 class StreamVariable(VariableTracker):
@@ -83,7 +84,7 @@ class StreamVariable(VariableTracker):
     def as_proxy(self) -> Proxy:
         return self.proxy
 
-    def reconstruct(self, codegen: PyCodegen) -> None:
+    def reconstruct(self, codegen: "PyCodegen") -> None:
         # If we got here, this stream is fully subsumed by the graph - this means it is
         # not an input or global
         assert not self.source
@@ -146,7 +147,7 @@ class EventVariable(VariableTracker):
     def as_proxy(self) -> Proxy:
         return self.proxy
 
-    def reconstruct(self, codegen: PyCodegen) -> None:
+    def reconstruct(self, codegen: "PyCodegen") -> None:
         # If we got here, this event is fully subsumed by the graph - this means it is
         # not an input or global
         assert not self.source

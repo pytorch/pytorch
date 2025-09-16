@@ -1772,12 +1772,10 @@ def _compile_kernel(
         >>> c = torch.empty_like(a)
         >>> add_kernel(grid=(4, 1, 1), block=(256, 1, 1), args=[a, b, c, a.numel()])
     """
-    import ctypes
-
     from torch.cuda._utils import _cuda_load_module, _nvrtc_compile
 
     # Compile the kernel to PTX
-    ptx = _nvrtc_compile(
+    ptx, mangled_name = _nvrtc_compile(
         kernel_source,
         kernel_name,
         compute_capability,
@@ -1787,14 +1785,14 @@ def _compile_kernel(
     )
 
     # Load the module and get the kernel
-    result = _cuda_load_module(ptx, [kernel_name])
+    result = _cuda_load_module(ptx, [mangled_name])
 
     if isinstance(result, dict):
-        return result[kernel_name]
+        return result[mangled_name]
     else:
         # This branch shouldn't be executed if kernel_names is provided,
         # but MyPy needs this to understand type narrowing
-        return getattr(result, kernel_name)
+        return getattr(result, mangled_name)
 
 
 from . import amp, jiterator, nvtx, profiler, sparse, tunable
