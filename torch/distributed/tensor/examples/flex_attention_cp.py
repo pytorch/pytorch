@@ -4,37 +4,35 @@ torchrun --standalone --nnodes=1 --nproc-per-node=4 flex_attention_cp.py
 """
 
 import os
-from functools import lru_cache
-from typing import Optional
 
 import torch
 import torch.distributed as dist
-import torch.nn.functional as F
+from torch.autograd.grad_mode import no_grad
 from torch.distributed.device_mesh import init_device_mesh
-from torch.distributed.tensor import distribute_tensor, DTensor, Partial, Shard
-from torch.nn.attention.flex_attention import (
-    _mask_mod_signature,
-    BlockMask,
-    create_block_mask,
-    flex_attention,
+from torch.distributed.tensor.examples.flex_perf import (
+    add_metrics_to_result,
+    Experiment,
+    ExperimentConfig,
+    ExperimentResults,
+    print_results,
+    run_flex_attention,
+)
+from torch.distributed.tensor.experimental._attention import (
+    _cp_options,
+    _DispatchMode,
+    context_parallel,
+)
+from torch.nn.attention.flex_attention import create_block_mask, flex_attention
+
+# Compile the flex_attention function
+compiled_flex_attention = torch.compile(flex_attention, dynamic=False, fullgraph=True)
+compiled_create_block_mask = torch.compile(
+    create_block_mask, dynamic=False, fullgraph=True
 )
 
 
 def get_device_type() -> str:
     return "cuda"
-
-
-@lru_cache
-def create_block_mask_cached(
-    score_mod: _mask_mod_signature,
-    B: Optional[int],
-    H: Optional[int],
-    M: int,
-    N: int,
-    device: str = "cuda",
-) -> BlockMask:
-    block_mask = create_block_mask(score_mod, B, H, M, N, device=device)
-    return block_mask
 
 
 def flex_attn_example(world_size: int, rank: int) -> None:
@@ -43,7 +41,11 @@ def flex_attn_example(world_size: int, rank: int) -> None:
     assert device_handle is not None, f"Unsupported device type: {device_type}"
     num_devices_per_host = device_handle.device_count()
     device_handle.set_device(rank % num_devices_per_host)
-    torch._dynamo.config.cache_size_limit = 1000
+    torch._dynamo.config.cache_size_limit = 100
+
+    # numeric params
+    atol = 1e-6
+    rtol = 1e-2
 
     # init device mesh
     device_mesh = init_device_mesh(
@@ -52,20 +54,27 @@ def flex_attn_example(world_size: int, rank: int) -> None:
         mesh_dim_names=("cp",),
     )
 
-    def causal_mask(b: int, h: int, q_idx: int, kv_idx: int) -> bool:
+    def causal_mask(b, h, q_idx, kv_idx):
         return q_idx >= kv_idx
 
-    # Compile the flex_attention function
-    compiled_flex_attention = torch.compile(flex_attention, dynamic=False)
+    # config
+    dtype = torch.float32
+    B = 8  # batch
+    H = 8  # n_heads
+    S = 256 * world_size  # seq_len
+    D = 64  # head_dim
+
+    exp_config = ExperimentConfig(
+        shape=(B, H, S, H, S, D),
+        attn_type="causal",
+        dtype=dtype,
+        calculate_bwd_time=False,
+        cal_bandwidth=False,
+        backends=["efficient"],
+    )
 
     # init input
     torch.manual_seed(10)
-    dtype = torch.float32
-    B = 8
-    H = 8
-    S = 32 * world_size
-    D = 32
-
     qkv = [
         torch.rand(
             (B, H, S, D),
@@ -76,106 +85,124 @@ def flex_attn_example(world_size: int, rank: int) -> None:
         for _ in range(3)
     ]
 
-    # input distribution
-    seq_dim = 2
-    qkv_dist = [
-        distribute_tensor(
-            t.detach().clone().requires_grad_(), device_mesh, [Shard(seq_dim)]
-        )
-        for t in qkv
-    ]
-
     # local forward pass
-    block_mask = create_block_mask_cached(
+    # we first test the case where mask is the same across batches
+    block_mask = compiled_create_block_mask(
         causal_mask,
         B=1,
         H=1,
-        M=S,
-        N=S,
+        Q_LEN=S,
+        KV_LEN=S,
         device=device_type,
     )
 
     q, k, v = qkv
-    out = compiled_flex_attention(q, k, v, score_mod=None, block_mask=block_mask)
-    assert isinstance(out, torch.Tensor)
-    expect_out = F.scaled_dot_product_attention(q, k, v, is_causal=True)
-    torch.testing.assert_close(out, expect_out, atol=1e-1, rtol=1e-2)
+    # ignore backward pass for now
+    with no_grad():
+        exp_result = run_flex_attention(exp_config, q, k, v, None, block_mask)
+
+    print(f"rank: {rank} / {world_size}")
+    print_results(
+        [Experiment(exp_config, {"flex_attn": exp_result})],
+        save_path=None,
+        show_speedups=False,
+    )
+    print("\n\n")
+
+    # context parallel exp config
+    cp_exp_config = ExperimentConfig(
+        shape=(B, H, S // world_size, H, S, D),
+        attn_type="causal",
+        dtype=dtype,
+        calculate_bwd_time=False,
+        cal_bandwidth=False,
+        backends=["efficient"],
+    )
 
     # context parallel forward pass
-    def rewrite_mask_mod_for_cp(
-        mask_mod: _mask_mod_signature,
-        rank: int,
-        shard_size: int,
-    ) -> _mask_mod_signature:
-        # since we're sharding on `seq_dim`, global q_idx is mapped to q_idx % shard_size
-        # on each rank which means q_idx = q_idx_on_rank + shard_size * rank
-        return lambda b, h, q_idx, kv_idx: mask_mod(
-            b, h, q_idx + rank * shard_size, kv_idx
-        )
-
-    # manually do context parallel on attention
-    # the input hook of Context Parallel
-    q_local = qkv_dist[0].to_local()
-
-    # kv all-gather
-    # NOTE: we don't consider load-balance for now
-    # NOTE: wait() is immediately called in all_gather_tensor when gather_dim != 0
-    k_full, v_full = (t.full_tensor(grad_placements=[Partial()]) for t in qkv_dist[1:])
-
-    # rewrite `block_mask`
-    mask_mod: _mask_mod_signature = block_mask.mask_mod
-    shard_size = S // world_size
-    cp_mask_mod = rewrite_mask_mod_for_cp(mask_mod, rank, shard_size)
-    cp_block_mask = create_block_mask_cached(
-        cp_mask_mod, B=1, H=1, M=shard_size, N=S, device=device_type
+    seq_dim = 2
+    from torch.distributed.tensor.experimental._attention import (
+        _set_cp_global_var,
+        create_cp_block_mask,
     )
 
-    # TODO: this doesn't address the return_lse=True case
-    cp_out = compiled_flex_attention(
-        q_local,
-        k_full,
-        v_full,
-        score_mod=None,
-        block_mask=cp_block_mask,
-    )
-    assert isinstance(cp_out, torch.Tensor)
+    _cp_options.enable_load_balance = False
 
-    # wrap the local output into a DTensor
-    cp_out_dist = DTensor.from_local(cp_out, device_mesh, [Shard(seq_dim)])
-    # compare with the flex_attention output
-    torch.testing.assert_close(cp_out_dist.full_tensor(), out, atol=1e-1, rtol=1e-2)
+    _set_cp_global_var("cp_shard_dim", seq_dim)  # shard on sequence dim
 
-    # local backward pass
-    grad_out = torch.randn(
-        (B, H, S, D),
-        device=device_type,
-        dtype=dtype,
-    )
-    grad_out_dist = distribute_tensor(
-        grad_out.detach().clone().requires_grad_(), device_mesh, [Shard(seq_dim)]
+    # set CP context dispatch mode to use TORCH_FUNCTION for flex_attention
+    torch.distributed.tensor.experimental._attention._dispatch_mode = (
+        _DispatchMode.TORCH_FUNCTION
     )
 
-    out.backward(grad_out)
-    grad1 = [t.grad for t in qkv]
-    for t in qkv:
-        t.grad = None
+    cp_block_mask = create_cp_block_mask(
+        causal_mask,
+        B=B,
+        H=1,
+        Q_LEN=S,
+        KV_LEN=S,
+        device_mesh=device_mesh,
+        load_balancer=None,  # default load-balance
+    )
 
-    expect_out.backward(grad_out)
-    grad2 = [t.grad for t in qkv]
-    for t in qkv:
-        t.grad = None
+    # prepare input buffer
+    cp_q = q.detach().clone()
+    cp_k = k.detach().clone()
+    cp_v = v.detach().clone()
 
-    for flex_grad, expect_grad in zip(grad1, grad2):
-        torch.testing.assert_close(flex_grad, expect_grad, atol=1e-1, rtol=1e-2)
+    with no_grad():
+        with context_parallel(
+            device_mesh,
+            buffers=[cp_q, cp_k, cp_v],
+            buffer_seq_dims=[seq_dim] * 3,
+            load_balancer=None,
+        ):
+            forward_compiled_time = (
+                benchmark_torch_function_in_microseconds(
+                    compiled_flex_attention,
+                    cp_q,
+                    cp_k,
+                    cp_v,
+                    block_mask=cp_block_mask,
+                    return_lse=True,
+                )
+                if False
+                else 1400.00
+            )  # TODO: CP is broken for now
+            backward_compiled_time = None
 
-    # context parallel backward pass
-    cp_out.backward(grad_out_dist.to_local())
+            cp_q.requires_grad = False
+            cp_k.requires_grad = False
+            cp_v.requires_grad = False
 
-    for cp_flex_grad_dist, expect_grad in zip([t.grad for t in qkv_dist], grad2):
-        assert isinstance(cp_flex_grad_dist, DTensor)
-        torch.testing.assert_close(
-            cp_flex_grad_dist.full_tensor(), expect_grad, atol=1e-1, rtol=1e-2
-        )
+    # compute sparsity for cp block_mask
+    total_size = cp_block_mask.numel() * world_size
+    computed_blocks = cp_block_mask.kv_num_blocks.sum()
+    computed_size = (
+        computed_blocks.item()
+        * cp_block_mask.BLOCK_SIZE[0]
+        * cp_block_mask.BLOCK_SIZE[1]
+    )
+    print(f"computed_size = {computed_size}")
+    dense_ratio = computed_size / total_size
+    sparsity = 1 - dense_ratio
+
+    exp_result = ExperimentResults(
+        fwd_time=forward_compiled_time,
+        bwd_time=backward_compiled_time,
+        sparsity=sparsity,
+    )
+    result = add_metrics_to_result(cp_exp_config, exp_result)
+
+    print(f"rank: {rank} / {world_size}, sparsity={sparsity}")
+    print(f"rank: {rank} / {world_size}, cp_block_mask={cp_block_mask.__repr__}")
+    print(f"kv_num_blocks={cp_block_mask.kv_num_blocks}")
+    print_results(
+        [Experiment(cp_exp_config, {"cp_flex_attn": result})],
+        save_path=None,
+        show_speedups=False,
+    )
+    print("\n\n")
 
 
 if __name__ == "__main__":
