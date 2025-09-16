@@ -10,7 +10,7 @@ import torch._inductor.config
 import torch._inductor.test_case
 import torch.onnx.operators
 import torch.utils.cpp_extension
-from torch._dynamo.aot_compile import ModelInput
+from torch._dynamo.aot_compile import ModelInput, SerializableCallable
 from torch._dynamo.exc import PackageError, Unsupported
 from torch._dynamo.package import DynamoCache
 from torch._dynamo.precompile_context import PrecompileContext
@@ -306,6 +306,38 @@ from user code:
             # Shouldn't recompile
             model.train()
             expected.sum().backward()
+
+    def test_aot_module_simplified_serializable_autograd(self):
+        mod = SimpleLinearModule()
+        compiled_fn: SerializableCallable = torch.compile(
+            mod, fullgraph=True, backend="inductor"
+        ).forward.aot_compile(((torch.randn(3, 3),), {}))
+        backend_result = compiled_fn._artifacts.compiled_fn
+        self.assertTrue(
+            isinstance(
+                backend_result,
+                torch._dynamo.aot_compile.BundledAOTAutogradSerializableCallable,
+            )
+        )
+        assert hasattr(backend_result.compiled_fn, "serialize")
+        self.assertIsNotNone(backend_result.compiled_fn.serialize)
+
+    def test_aot_module_simplified_serializable_inference(self):
+        def fn(x):
+            return x.sin()
+
+        compiled_fn: SerializableCallable = torch.compile(
+            fn, fullgraph=True, backend="inductor"
+        ).aot_compile(((torch.randn(3, 3),), {}))
+        backend_result = compiled_fn._artifacts.compiled_fn
+        self.assertTrue(
+            isinstance(
+                backend_result,
+                torch._dynamo.aot_compile.BundledAOTAutogradSerializableCallable,
+            )
+        )
+        assert hasattr(backend_result.compiled_fn, "serialize")
+        self.assertIsNotNone(backend_result.compiled_fn.serialize)
 
 
 if __name__ == "__main__":
