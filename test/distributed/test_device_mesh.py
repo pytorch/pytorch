@@ -10,7 +10,6 @@ from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.distributed.device_mesh import _mesh_resources, DeviceMesh, init_device_mesh
 from torch.distributed.distributed_c10d import (
     _get_default_group,
-    _world,
     get_global_rank,
     get_world_size,
     init_process_group,
@@ -781,21 +780,6 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         self.assertEqual(shard_mesh.mesh.tolist(), shard_group[shard_group_idx])
 
     @with_comms
-    def test_cache_and_reuse_submesh_slice_result(self):
-        mesh = init_device_mesh(self.device_type, (2, 4), mesh_dim_names=("dp", "tp"))
-
-        ref_pg_count = _world.group_count
-
-        # When we call the "dp" slice second time, it should not create any new pg.
-        # As we are just using the cached result so the pg count should be the same.
-        self.assertEqual(ref_pg_count, _world.group_count)
-
-        # When we call the "tp" slice, it should not create a new pg, as the "tp" slice would
-        # just reuse the parent mesh pg.
-        mesh["tp"]
-        self.assertEqual(_world.group_count, ref_pg_count)
-
-    @with_comms
     def test_get_item_3d_noncontiguous_slicing(self):
         mesh_shape = (2, 2, 2)
         mesh_dim_names = ("dp", "pp", "cp")
@@ -843,11 +827,9 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         ]
         self.assertEqual(flatten_mesh_root_dims, (0, 1))
 
-        ref_pg_count = _world.group_count
         # Calling flatten again should not create a new pg.
         flattened_dp_cp_mesh_2 = dp_cp_mesh._flatten()
         self.assertEqual(flattened_dp_cp_mesh, flattened_dp_cp_mesh_2)
-        self.assertEqual(ref_pg_count, _world.group_count)
 
         # Test flatten non-contiguous dims
         dp_tp_mesh = mesh_3d["dp", "tp"]

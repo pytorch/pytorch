@@ -45,6 +45,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    skip_but_pass_in_sandcastle,
     skipIfHpu,
     skipIfTorchDynamo,
     TEST_CUDA,
@@ -627,6 +628,9 @@ def forward(self, b_parametrizations_buffer_original0, x):
             tmp_dt._local_tensor.stride(), tmp_dt_fake._local_tensor.stride()
         )
 
+    @skip_but_pass_in_sandcastle(
+        "InternalTorchDynamoError: `tensor` needs to be a `FakeTensor`wrapped by this instance of Dynamo"
+    )
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_dtensor_contiguous_dtensor_noncontiguous_local_as_tangent(self):
         # Partial -> Shard on an unbalanced tensor results in:

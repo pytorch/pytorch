@@ -498,15 +498,21 @@ class WorldData:
     tags_to_pg: dict[str, list[dist.ProcessGroup]]
     pg_to_tag: dict[dist.ProcessGroup, str]
     pg_coalesce_state: dict[dist.ProcessGroup, list[Union[_CollOp, P2POp]]]
+    rank: int
 
 
 class ThreadLocalWorld:
     _world = threading.local()
 
+    # we create thread local world, and a global store
+    def __init__(self, world_size, store) -> None:
+        self.world_size = world_size
+        self.store = store
+
     def _get_world(self) -> WorldData:
         if not hasattr(ThreadLocalWorld._world, "world"):
             ThreadLocalWorld._world.world = WorldData(
-                None, {}, {}, {}, {}, 0, {}, {}, {}
+                None, {}, {}, {}, {}, 0, {}, {}, {}, -1
             )
         return ThreadLocalWorld._world.world
 
@@ -517,6 +523,14 @@ class ThreadLocalWorld:
     @default_pg.setter
     def default_pg(self, value):
         self._get_world().default_pg = value
+
+    @property
+    def rank(self):
+        return self._get_world().rank
+
+    @rank.setter
+    def rank(self, value):
+        self._get_world().rank = value
 
     @property
     def pg_map(self):
@@ -559,11 +573,11 @@ _old_pg_world = None
 _ctx_manager = None
 
 
-def _install_threaded_pg():
+def _install_threaded_pg(world_size, global_store):
     global _old_pg_world
     global _ctx_manager
     _old_pg_world = dist.distributed_c10d._world
-    dist.distributed_c10d._world = ThreadLocalWorld()
+    dist.distributed_c10d._world = ThreadLocalWorld(world_size, global_store)
     _ctx_manager = torch.autograd.set_multithreading_enabled(False)
 
     return dist.distributed_c10d._world

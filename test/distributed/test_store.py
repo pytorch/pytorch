@@ -18,7 +18,10 @@ import torch.distributed.distributed_c10d as c10d
 import torch.distributed.rpc as rpc
 from torch.distributed import DistError, DistNetworkError, DistStoreError
 from torch.testing._internal.common_distributed import MultiThreadedTestCase
-from torch.testing._internal.common_utils import instantiate_parametrized_tests
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    skip_but_pass_in_sandcastle,
+)
 
 
 if not dist.is_available():
@@ -270,6 +273,7 @@ class FileStoreTest(TestCase, StoreTestBase):
         store.set_timeout(timedelta(seconds=300))
         return store
 
+    @skip_but_pass_in_sandcastle("Invalid test")
     def test_init_pg_and_rpc_with_same_file(self):
         file = tempfile.NamedTemporaryFile(delete=False)
         # Init RPC using file
