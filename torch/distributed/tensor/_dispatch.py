@@ -23,7 +23,11 @@ from torch.distributed.tensor._tp_conv import (
 )
 from torch.distributed.tensor._utils import try_find_mesh_from_args
 from torch.distributed.tensor.placement_types import Partial, Placement, Replicate
-from torch.utils._python_dispatch import return_and_correct_aliasing
+from torch.utils._python_dispatch import (
+    _get_current_dispatch_mode,
+    return_and_correct_aliasing,
+)
+from torch.utils.debug_mode import DebugMode
 
 
 try:
@@ -334,6 +338,9 @@ class OpDispatcher:
         suggested_input_schema: OpSchema,
         use_val_from_redistribute_schema: bool,
     ) -> None:
+        debug_mode = _get_current_dispatch_mode()
+        in_debug_mode = isinstance(debug_mode, DebugMode)
+
         # NOTE: it's very rare that we need to reshard kwargs so we intentionally skip it
         if op_info.args_tree_spec is not None:
             flatten_args_schema_to_reshard = tuple(
@@ -348,9 +355,18 @@ class OpDispatcher:
             if isinstance(arg_spec, DTensorSpec):
                 local_tensor = cast(torch.Tensor, op_info.local_args[i])
                 if arg_spec != reshard_arg_spec:
-                    resharded_local_tensor = redistribute_local_tensor(
-                        local_tensor, arg_spec, reshard_arg_spec
+                    redistribute_context = (
+                        debug_mode.record_redistribute_calls(
+                            i, arg_spec, reshard_arg_spec
+                        )
+                        if in_debug_mode
+                        else contextlib.nullcontext()
                     )
+
+                    with redistribute_context:
+                        resharded_local_tensor = redistribute_local_tensor(
+                            local_tensor, arg_spec, reshard_arg_spec
+                        )
                     new_local_args.append(resharded_local_tensor)
                 else:
                     new_local_args.append(local_tensor)
