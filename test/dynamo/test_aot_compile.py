@@ -320,7 +320,7 @@ from user code:
             )
         )
         assert hasattr(backend_result.compiled_fn, "serialize")
-        assert backend_result.compiled_fn.serialize is not None
+        self.assertIsNotNone(backend_result.compiled_fn.serialize)
 
     def test_aot_module_simplified_serializable_inference(self):
         def fn(x):
@@ -337,7 +337,7 @@ from user code:
             )
         )
         assert hasattr(backend_result.compiled_fn, "serialize")
-        assert backend_result.compiled_fn.serialize is not None
+        self.assertIsNotNone(backend_result.compiled_fn.serialize)
 
 
 if __name__ == "__main__":
