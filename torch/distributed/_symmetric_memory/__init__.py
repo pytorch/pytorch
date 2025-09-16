@@ -37,7 +37,7 @@ def enable_symm_mem_for_group(group_name: str) -> None:
         return
 
     group = c10d._resolve_process_group(group_name)
-    global_ranks = sorted(c10d._world.pg_group_ranks[group].keys())
+    global_ranks = sorted(c10d._World.get().pg_group_ranks[group].keys())
     # Different subgroups with the same name should use different stores
     global_ranks_str = "_".join(map(str, global_ranks))
     store = c10d.PrefixStore(
