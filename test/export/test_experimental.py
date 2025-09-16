@@ -9,7 +9,7 @@ import torch
 import torch._dynamo
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._functorch.aot_autograd import aot_export_module
-from torch.export import export, export_for_training
+from torch.export import export
 from torch.export.experimental import _export_forward_backward, _sticky_export
 from torch.export.graph_signature import OutputKind
 from torch.testing import FileCheck
@@ -32,7 +32,7 @@ class TestExperiment(TestCase):
         m = Module()
         example_inputs = (torch.randn(3),)
         m(*example_inputs)
-        ep = torch.export.export_for_training(m, example_inputs, strict=True)
+        ep = torch.export.export(m, example_inputs, strict=True)
         joint_ep = _export_forward_backward(ep)
         self.assertExpectedInline(
             str(joint_ep.graph_module.code).strip(),
@@ -141,7 +141,7 @@ def forward(self, p_linear_weight, p_linear_bias, c_lifted_tensor_0, x):
         m = Module()
         example_inputs = (torch.randn(3),)
         m(*example_inputs)
-        ep = torch.export.export_for_training(
+        ep = torch.export.export(
             m, example_inputs, dynamic_shapes={"x": {0: Dim("x0")}}, strict=True
         )
         _export_forward_backward(ep)
@@ -177,7 +177,7 @@ def forward(self, p_linear_weight, p_linear_bias, c_lifted_tensor_0, x):
         labels = torch.ones(4, dtype=torch.int64)
         inputs = (x, labels)
 
-        ep = export_for_training(net, inputs, strict=True)
+        ep = export(net, inputs, strict=True)
         ep = _export_forward_backward(ep)
 
     def test_joint_loss_index(self):
@@ -197,7 +197,7 @@ def forward(self, p_linear_weight, p_linear_bias, c_lifted_tensor_0, x):
 
         inputs = (torch.randn(4, 4),)
         for i in [0, 1]:
-            ep = export_for_training(Foo(i), inputs, strict=True)
+            ep = export(Foo(i), inputs, strict=True)
             ep_joint = _export_forward_backward(ep, joint_loss_index=i)
             for j, spec in enumerate(ep_joint.graph_signature.output_specs):
                 if i == j:

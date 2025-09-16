@@ -246,14 +246,16 @@ class DeviceMeshTest(DTensorTestBase):
 
     @with_comms
     def test_device_mesh_init_backend(self):
-        mesh = DeviceMesh(self.device_type, [1], _init_backend=False)
+        mesh = DeviceMesh(
+            self.device_type, torch.arange(10), _init_backend=False, _rank=5
+        )
 
         with self.assertRaisesRegex(RuntimeError, "process groups not initialized!"):
             mesh.get_group()
 
         # coordinates should always been populated when init_backend is False, as whenever
         # we call init_backend we should make sure the default pg already created
-        mesh.get_coordinate()
+        self.assertEqual(mesh.get_coordinate(), [5])
 
     def test_fake_pg_device_mesh(self):
         fake_store = FakeStore()
@@ -824,12 +826,28 @@ class TestDeviceMeshGetItem(DTensorTestBase):
             mesh_3d["cp", "dp"]
 
     @with_comms
+    def test_flatten_mesh_1d(self):
+        mesh_shape = (4,)
+        mesh_dim_names = ("default",)
+        mesh_1d = init_device_mesh(
+            self.device_type, mesh_shape, mesh_dim_names=mesh_dim_names
+        )
+        mesh_1d._flatten()
+
+    @with_comms
     def test_flatten_mesh_3d(self):
         mesh_shape = (2, 2, 2)
         mesh_dim_names = ("dp", "cp", "tp")
         mesh_3d = init_device_mesh(
             self.device_type, mesh_shape, mesh_dim_names=mesh_dim_names
         )
+
+        # Test flatten into an existing mesh_dim_name inside the mesh
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "already exists for submesh of the DeviceMesh",
+        ):
+            mesh_3d._flatten("dp")
 
         # Test flatten contiguous dims
         dp_cp_mesh = mesh_3d["dp", "cp"]

@@ -60,13 +60,16 @@ from torch.testing._internal.common_cuda import (
     SM70OrLater,
     TEST_CUDA,
 )
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    E4M3_MAX_POS,
+    e4m3_type,
+    instantiate_device_type_tests,
+)
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     serialTest,
     skipIfHpu,
-    skipIfRocm,
     skipIfWindows,
     TEST_WITH_ROCM,
 )
@@ -7500,7 +7503,6 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
             out = f_compiled(x, s0, s1, s2)
             self.assertEqual(out_ref, out)
 
-    @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, "requires gpu with fp8 support")
     @requires_cuda
     def test_partitioner_saves_weights_for_bw(self):
@@ -7512,9 +7514,9 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
             return a
 
         def scale(t, amax_t):
-            max_v = torch.finfo(torch.float8_e4m3fn).max
+            max_v = E4M3_MAX_POS
             scale_t = torch.clamp(amax_t.float(), min=1e-12) / max_v
-            t_fp8 = mul_tiled(t, scale_t.reciprocal()).to(torch.float8_e4m3fn)
+            t_fp8 = mul_tiled(t, scale_t.reciprocal()).to(e4m3_type)
             return t_fp8, scale_t
 
         def matmul(first, amax_first, second_t, amax_second_t, bias):
