@@ -909,6 +909,29 @@ class MultiOutputLine(WrapperLine):
 
 
 @dataclasses.dataclass
+class IndexPutFallbackLine(WrapperLine):
+    wrapper: PythonWrapperCodegen
+    node: ir.IndexPutFallback
+    indices: list[Optional[ir.IRNode]]
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        node = self.node
+        assert ir.is_node_sequence(node.inputs)
+        (x, values) = (t.codegen_reference() for t in node.inputs[:2])
+        indices = [
+            idx.codegen_reference() if idx else self.wrapper.none_str
+            for idx in self.indices
+        ]
+
+        self.wrapper._generate_index_put_fallback(
+            node.get_kernel_name(), x, indices, values, *node.codegen_const_args()
+        )
+
+    def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
+        return converter._generate_index_put_fallback
+
+
+@dataclasses.dataclass
 class ScatterFallbackLine(WrapperLine):
     wrapper: PythonWrapperCodegen
     node: ir.ScatterFallback
@@ -1560,7 +1583,22 @@ class PythonWrapperCodegen(CodeGen):
         line += ")"
         self.writeline(line)
 
-    def generate_index_put_fallback(self, kernel, x, indices, values, accumulate):
+    def generate_index_put_fallback(self, node: ir.IndexPutFallback) -> None:
+        # Collect index tensors into a list.
+        indices: list[Optional[ir.IRNode]] = []
+        valid_indices = node.inputs[2:]
+        iter_valid_indices = iter(valid_indices)
+        for i, _ in enumerate(node.indices):
+            if node.indices[i] is not None:
+                index = next(iter_valid_indices)
+                assert isinstance(index, ir.IRNode)
+                indices.append(index)
+            else:
+                indices.append(None)
+
+        self.writeline(IndexPutFallbackLine(self, node, indices))
+
+    def _generate_index_put_fallback(self, kernel, x, indices, values, accumulate):
         indices_str = f"[{', '.join(indices)}]"
         args = [x, indices_str, values, accumulate]
         self.writeline(self.wrap_kernel_call(kernel, args))
