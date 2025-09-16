@@ -866,6 +866,19 @@ class AOTFxirTestCase(InductorTestCase):
         # Now the backend should have been called.
         self.assertTrue(called)
 
+    def test_dynamic_input_expr(self):
+        """
+        Test dynamic shapes with a nontrivial input expression.
+        """
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x.reshape(x.shape[0] * x.shape[1]) + x.shape[1]
+
+        dynamic_shapes = {"x": {0: 2 * Dim("x", min=1) + 1}}
+        inp = (torch.randn((5, 4), device=self.device),)
+        self.check(M().to(self.device), inp, dynamic_shapes=dynamic_shapes)
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
