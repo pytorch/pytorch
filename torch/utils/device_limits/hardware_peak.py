@@ -5,6 +5,7 @@ import torch
 import torch.utils.device_limits._nvidia_gpu as nv
 from torch._C import dtype
 
+
 __all__ = [
     "get_tflops_per_second_per_dtype",
     "get_memory_bandwidth_GBps",

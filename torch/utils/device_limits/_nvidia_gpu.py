@@ -3,6 +3,7 @@ import warnings
 import torch
 from torch._C import dtype
 
+
 # FLOPs per cycle information derived from Table 2 in:
 # https://resources.nvidia.com/en-us-hopper-architecture/nvidia-h100-tensor-c
 
