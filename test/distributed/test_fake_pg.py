@@ -7,6 +7,7 @@ import torch
 import torch.distributed as dist
 import torch.distributed._functional_collectives as funcol
 import torch.nn as nn
+from torch._C._distributed_c10d import FakeProcessGroup
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.tensor import DeviceMesh, Shard
@@ -22,6 +23,7 @@ from torch.testing._internal.common_fsdp import get_devtype
 from torch.testing._internal.common_utils import run_tests, skipIfHpu, TestCase
 from torch.testing._internal.distributed._tensor.common_dtensor import MLPModule
 from torch.testing._internal.distributed.fake_pg import FakeStore
+from torch.utils._python_dispatch import TorchDispatchMode
 
 
 if not dist.is_available():
@@ -263,6 +265,23 @@ class TestFakePG(TestCase):
             RuntimeError, "FakeProcessGroup collective operation error"
         ):
             dist.barrier()
+    def test_fake_process_group_direct_usage_error(self):
+        class SimpleTensorMode(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                if kwargs is None:
+                    kwargs = {}
+                return func(*args, **kwargs)
+
+        fake_pg = FakeProcessGroup(rank=0, world_size=3)
+        with SimpleTensorMode():
+            tensor = torch.tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+            with self.assertRaisesRegex(
+                RuntimeError,
+                r"FakeProcessGroup is not supported for direct use\. "
+                r"Call torch\.distributed\.init_process_group\(backend='fake'\) first to ensure "
+                r"proper dispatch system integration\.",
+            ):
+                dist.all_reduce(tensor, group=fake_pg)
 
 
 if __name__ == "__main__":
