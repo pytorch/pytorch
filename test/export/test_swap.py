@@ -10,7 +10,7 @@ import torch
 import torch._dynamo as torchdynamo
 from torch import Tensor
 from torch._export.utils import register_dataclass_as_pytree_node
-from torch.export import export
+from torch.export import export, register_dataclass
 from torch.export._swap import _swap_modules
 from torch.testing._internal.common_utils import IS_WINDOWS, run_tests, TestCase
 
@@ -368,6 +368,36 @@ def forward(self, x, y):
             a: Tensor
             b: Tensor
 
+        register_dataclass(
+            CustomInput,
+            serialized_type_name="test_swap.test_custom_input.CustomInput",
+        )
+
+        class Foo(torch.nn.Module):
+            def forward(self, x, *, inputs):
+                return x + torch.matmul(inputs.a, inputs.b)
+
+        for use_new_tracer in [True, False]:
+            ep = export(
+                Foo(),
+                (torch.randn(2, 2),),
+                {"inputs": CustomInput(torch.randn(2, 3), torch.randn(3, 2))},
+                strict=self.strict,
+                _use_new_tracer_experimental=use_new_tracer,
+            )
+        swapped = _swap_modules(ep, {})
+        inp_args = (torch.randn(2, 2),)
+        inp_kwargs = {"inputs": CustomInput(torch.randn(2, 3), torch.randn(3, 2))}
+        res1 = torch.fx.Interpreter(swapped).run(*(*inp_args, *inp_kwargs.values()))
+        res2 = swapped(*inp_args, **inp_kwargs)
+        self.assertTrue(torch.allclose(res1, res2))
+
+    def test_custom_input_kwargs_use_private(self):
+        @dataclass
+        class CustomInput:
+            a: Tensor
+            b: Tensor
+
         register_dataclass_as_pytree_node(
             CustomInput,
             serialized_type_name="test_swap.test_custom_input.CustomInput",
@@ -377,18 +407,14 @@ def forward(self, x, y):
             def forward(self, x, *, inputs):
                 return x + torch.matmul(inputs.a, inputs.b)
 
-        ep = export(
+        # shouldn't error
+        _ = export(
             Foo(),
             (torch.randn(2, 2),),
             {"inputs": CustomInput(torch.randn(2, 3), torch.randn(3, 2))},
             strict=self.strict,
+            _use_new_tracer_experimental=True,
         )
-        swapped = _swap_modules(ep, {})
-        inp_args = (torch.randn(2, 2),)
-        inp_kwargs = {"inputs": CustomInput(torch.randn(2, 3), torch.randn(3, 2))}
-        res1 = torch.fx.Interpreter(swapped).run(*(*inp_args, *inp_kwargs.values()))
-        res2 = swapped(*inp_args, **inp_kwargs)
-        self.assertTrue(torch.allclose(res1, res2))
 
     def test_custom_output(self):
         @dataclass
