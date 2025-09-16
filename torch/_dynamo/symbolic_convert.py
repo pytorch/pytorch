@@ -1616,13 +1616,18 @@ class InstructionTranslatorBase(
 
     LOAD_CLOSURE = LOAD_FAST
 
-    def _load_const(self, inst: Instruction) -> ConstantVariable:
+    def _load_const(self, inst: Instruction) -> Union[ConstantVariable, SliceVariable]:
         i = inst.arg
         if i is None:
             return ConstantVariable.create(value=inst.argval)  # type: ignore[return-value]
         val = self._constants_cache[i]
         if not val:
-            self._constants_cache[i] = ConstantVariable.create(value=inst.argval)  # type: ignore[call-overload]
+            if sys.version_info >= (3, 14) and isinstance(inst.argval, slice):
+                self._constants_cache[i] = SliceVariable(
+                    (inst.argval.start, inst.argval.stop, inst.argval.step)
+                )
+            else:
+                self._constants_cache[i] = ConstantVariable.create(value=inst.argval)  # type: ignore[call-overload]
             val = self._constants_cache[i]
         assert val is not None
         return val
@@ -3852,9 +3857,9 @@ class InstructionTranslatorBase(
 
         self.inline_depth = inline_depth
         self.inconsistent_side_effects = False
-        self._constants_cache: list[Optional[ConstantVariable]] = [None] * len(
-            f_code.co_consts
-        )
+        self._constants_cache: list[
+            Optional[Union[ConstantVariable, SliceVariable]]
+        ] = [None] * len(f_code.co_consts)
 
         self.is_trace_bytecode_log_enabled: Optional[bool] = (
             trace_bytecode_log.isEnabledFor(logging.DEBUG)
