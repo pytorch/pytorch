@@ -17,7 +17,6 @@
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorAdvancedIndexing.h>
-#include <ATen/native/mps/MPSGraphVenturaOps.h>
 #include <c10/util/SmallVector.h>
 #include <c10/util/irange.h>
 #include <fmt/format.h>
@@ -528,12 +527,10 @@ TORCH_IMPL_FUNC(index_add_mps_out)
     for (const auto i : c10::irange(dim)) {
       indices.emplace_back();
     }
-    const auto&& index_ = (index.dim() == 0) ? index.view(1).to(at::kLong) : index.to(at::kLong);
-    indices.emplace_back(index_);
-    const auto&& result_ = (result.dim() == 0) ? result.view(1) : result;
-    const auto&& source_ = (source.dim() == 0) ? source.view(1) : source;
-    const auto&& alpha_ = at::scalar_tensor(alpha, source_.options());
-    result_.index_put_(indices, source_.mul(alpha_), true);
+    indices.emplace_back(index.to(at::kLong));
+    const Tensor result_ = (result.dim() == 0) ? result.view(1) : result;
+    const Tensor source_ = (source.dim() == 0) ? source.view(1) : source;
+    result_.index_put_(indices, source_.mul(alpha), true);
     return;
   }
 
