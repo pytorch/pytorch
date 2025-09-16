@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
   schedule:
     # Run at 06:00 UTC every Sunday
-    - cron: 0 6 * * 0
+    - cron: 0 6 * * *
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
@@ -29,22 +29,8 @@ jobs:
       cuda-arch-list: '8.0 9.0'
       test-matrix: |
         { include: [
-          { config: "operator_microbenchmark_test", shard: 1, num_shards: 1, runner: "linux.aws.h100", op_benchmark_tests: "matmul", extra_flags: "--use-compile" },
-          { config: "operator_microbenchmark_test", shard: 1, num_shards: 1, runner: "linux.aws.h100", op_benchmark_tests: "matmul" },
-          { config: "operator_microbenchmark_test", shard: 1, num_shards: 1, runner: "linux.aws.h100", op_benchmark_tests: "mm", extra_flags: "--use-compile" },
-          { config: "operator_microbenchmark_test", shard: 1, num_shards: 1, runner: "linux.aws.h100", op_benchmark_tests: "mm" },
-          { config: "operator_microbenchmark_test", shard: 1, num_shards: 1, runner: "linux.aws.h100", op_benchmark_tests: "add", extra_flags: "--use-compile" },
-          { config: "operator_microbenchmark_test", shard: 1, num_shards: 1, runner: "linux.aws.h100", op_benchmark_tests: "add" },
-          { config: "operator_microbenchmark_test", shard: 1, num_shards: 1, runner: "linux.aws.h100", op_benchmark_tests: "bmm", extra_flags: "--use-compile" },
-          { config: "operator_microbenchmark_test", shard: 1, num_shards: 1, runner: "linux.aws.h100", op_benchmark_tests: "bmm" },
-          { config: "operator_microbenchmark_test", shard: 1, num_shards: 1, runner: "linux.aws.a100", op_benchmark_tests: "matmul", extra_flags: "--use-compile" },
-          { config: "operator_microbenchmark_test", shard: 1, num_shards: 1, runner: "linux.aws.a100", op_benchmark_tests: "matmul" },
-          { config: "operator_microbenchmark_test", shard: 1, num_shards: 1, runner: "linux.aws.a100", op_benchmark_tests: "mm", extra_flags: "--use-compile" },
-          { config: "operator_microbenchmark_test", shard: 1, num_shards: 1, runner: "linux.aws.a100", op_benchmark_tests: "mm" },
-          { config: "operator_microbenchmark_test", shard: 1, num_shards: 1, runner: "linux.aws.a100", op_benchmark_tests: "add", extra_flags: "--use-compile" },
-          { config: "operator_microbenchmark_test", shard: 1, num_shards: 1, runner: "linux.aws.a100", op_benchmark_tests: "add" },
-          { config: "operator_microbenchmark_test", shard: 1, num_shards: 1, runner: "linux.aws.a100", op_benchmark_tests: "bmm", extra_flags: "--use-compile" },
-          { config: "operator_microbenchmark_test", shard: 1, num_shards: 1, runner: "linux.aws.a100", op_benchmark_tests: "bmm" }
+          { config: "operator_microbenchmark_test", shard: 1, num_shards: 1, runner: "linux.aws.h100" },
+          { config: "operator_microbenchmark_test", shard: 1, num_shards: 1, runner: "linux.aws.a100" },
         ]}
     secrets: inherit
 

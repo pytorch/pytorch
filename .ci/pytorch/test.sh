@@ -1623,11 +1623,14 @@ test_operator_microbenchmark() {
   python -m pip install .
 
   cd "${TEST_DIR}"/benchmarks/operator_benchmark
-  tests=${OP_BENCHMARK_TESTS:?OP_BENCHMARK_TESTS must be set}
-  for t in $tests; do
-    $TASKSET python -m pt.${t}_test --tag-filter long \
-      --output-json-for-dashboard "${TEST_REPORTS_DIR}/operator_microbenchmark.json" \
-      --benchmark-name "PyTorch operator microbenchmark" $EXTRA_FLAGS
+
+  for OP_BENCHMARK_TESTS in matmul mm add bmm; do
+    $TASKSET python -m pt.${OP_BENCHMARK_TESTS}_test --tag-filter long \
+      --output-json-for-dashboard "${TEST_REPORTS_DIR}/operator_microbenchmark_${OP_BENCHMARK_TESTS}_compile.json" \
+      --benchmark-name "PyTorch operator microbenchmark" --use-compile
+    $TASKSET python -m pt.${OP_BENCHMARK_TESTS}_test --tag-filter long \
+      --output-json-for-dashboard "${TEST_REPORTS_DIR}/operator_microbenchmark_${OP_BENCHMARK_TESTS}.json" \
+      --benchmark-name "PyTorch operator microbenchmark"
   done
 }
 
