@@ -52,7 +52,10 @@ def _contains_multi_kernel_code(wrapper_code: str):
 
 def _contains_size_hint_multi_kernel_code(wrapper_code: str):
     return (
-        re.search(r"multi_kernel_[^ ]* = async_compile.size_hint_multi_kernel[(]", wrapper_code)
+        re.search(
+            r"multi_kernel_[^ ]* = async_compile.size_hint_multi_kernel[(]",
+            wrapper_code,
+        )
         is not None
     )
 

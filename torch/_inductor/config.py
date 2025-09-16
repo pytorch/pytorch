@@ -483,6 +483,11 @@ force_same_precision: bool = Config(
 # as expected before turning it on for everyone.
 multi_kernel_hints: list[int] = []
 
+# For multi-kernel dispatch with size hints. Determines kernel selection method for novel runtime shapes.
+# If "benchmark", runs full benchmarking for all unique runtime shapes, caching choice at end.
+# If "l1", selects from kernels pre-generated via size hints, via l1-distance on input & output shapes.
+multi_kernel_shape_heuristic: Literal["benchmark", "l1"] = "l1"
+
 # Specify candidate backends for gemm autotune.
 # Possible choices are combinations of: ATen, Triton, CUTLASS, CK, CKTILE, CPP.
 # ATen: default Pytorch ATen kernels.

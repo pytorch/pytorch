@@ -1692,23 +1692,50 @@ class SIMDScheduling(BaseScheduling):
 
             return kernel
 
-    def _get_multikernel_shapes(self, node: MultiTemplateBuffer) -> tuple[tuple[int, ...], ...]:
+    def _get_multikernel_shapes(
+        self, node: MultiTemplateBuffer
+    ) -> tuple[tuple[int, ...], ...]:
+        from ..ir import IRNode
+
+        def get_size(arg):
+            if not isinstance(arg, IRNode) or (size := arg.maybe_get_size()) is None:
+                return None
+            return tuple(s for s in size)
+
         out = []
         for arg in list(node.inputs) + [node]:
-            if (size := arg.maybe_get_size()) is not None:
-                out.append(tuple(s for s in size))
+            if isinstance(arg, (list, tuple)):
+                out.append(tuple(get_size(_arg) for _arg in arg))
+            else:
+                out.append(get_size(arg))
         return tuple(out)
 
     def _kernel_has_dynamic_shapes(self, node: MultiTemplateBuffer) -> bool:
         shapes = self._get_multikernel_shapes(node)
-        return any(any(isinstance(s, sympy.Expr) and not isinstance(s, sympy.Integer) for s in shape) for shape in shapes)
+        return any(
+            any(
+                isinstance(s, sympy.Expr) and not isinstance(s, sympy.Integer)
+                for s in shape
+            )
+            for shape in shapes
+        )
 
-    def _make_shape_cache_key(self, node: MultiTemplateBuffer, hint: int) -> tuple[tuple[int, ...], ...]:
+    def _make_shape_cache_key(
+        self, node: MultiTemplateBuffer, hint: int
+    ) -> tuple[tuple[int, ...], ...]:
         """
         Returns cache key for hint-based multi-graph; key is tuple of shapes with hint filled in.
         """
         shapes = self._get_multikernel_shapes(node)
-        return tuple(tuple(hint if isinstance(s, sympy.Expr) and not isinstance(s, sympy.Integer) else s for s in shape) for shape in shapes)
+        return tuple(
+            tuple(
+                hint
+                if isinstance(s, sympy.Expr) and not isinstance(s, sympy.Integer)
+                else s
+                for s in shape
+            )
+            for shape in shapes
+        )
 
     def codegen_template(
         self,
@@ -1738,7 +1765,10 @@ class SIMDScheduling(BaseScheduling):
             kernels = {}
             src_codes = []
 
-            for size_hint, make_kernel_render in template_node.node._make_kernel_renders.items():
+            for (
+                size_hint, 
+                make_kernel_render,
+             ) in template_node.node._make_kernel_renders.items():
                 kernel, render = make_kernel_render(
                     template_node.node, hint_override=hint_override
                 )
@@ -1755,6 +1785,11 @@ class SIMDScheduling(BaseScheduling):
                     assert isinstance(src_code, str)
                     src_codes.append(src_code)
                 else:
+                    if (
+                        config.multi_kernel_shape_heuristic != "benchmark"
+                        and size_hint is None
+                    ):  # without full benchmarking, skip kernel generation based on real runtime value; only use hints
+                        continue
                     kernel = self._codegen_single_template(
                         kernel,
                         render,
@@ -1763,7 +1798,11 @@ class SIMDScheduling(BaseScheduling):
                         prologue_nodes,
                         only_gen_src_code=False,
                     )
-                    shape_cache_key = None if size_hint is None else self._make_shape_cache_key(template_node.node, size_hint)
+                    shape_cache_key = (
+                        None
+                        if size_hint is None
+                        else self._make_shape_cache_key(template_node.node, size_hint)
+                    )
                     kernels[shape_cache_key] = kernel
 
             if only_gen_src_code:

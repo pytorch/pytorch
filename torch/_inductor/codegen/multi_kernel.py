@@ -3,6 +3,7 @@ import functools
 import logging
 import os
 import pathlib
+from typing import Any, Optional, Union
 
 from torch._inductor.ir import MultiTemplateBuffer
 from torch._inductor.metrics import get_metric_table, is_metric_table_enabled
@@ -31,7 +32,11 @@ class MultiKernelState:
         self.subkernel_to_kernel_name = {}
         self.kernel_defs = IndentedBuffer()
 
-    def define_kernel(self, kernels, kernel_shape_keys=None):
+    def define_kernel(
+        self,
+        kernels: list[Any],
+        kernel_shape_keys: Optional[list[Union[None, tuple[tuple[int, ...], ...]]]] = None,
+    ) -> str:
         """
         Previously we name the multi kernel as "multi_kernel_{kernel_names[0]}".
         This has some minor issue.
@@ -45,6 +50,12 @@ class MultiKernelState:
         The only different is cache eviction policy.
 
         We should name the multi-kernel differently in these 2 cases.
+
+        kernels:
+            A list of kernels
+        kernel_shape_keys:
+            Specified for size-hint multi-kernels.
+            Each list element is a shape key, corresponding to the concrete input & output size hints each kernel was tuned for.
         """
         # Prevent circular import
         from ..select_algorithm import TritonTemplateKernel
@@ -68,9 +79,7 @@ class MultiKernelState:
             kernels[0].output_node, MultiTemplateBuffer
         ):
             for i, kernel in enumerate(kernels):
-                additional_call_args, _ = (
-                    kernel.additional_call_args_and_types()
-                )
+                additional_call_args, _ = kernel.additional_call_args_and_types()
                 if i not in arg_index:
                     arg_index[i] = []
                 arg_index[i].append(slice(0, len(call_args)))
@@ -101,7 +110,7 @@ class MultiKernelState:
             with buf.indent():
                 for name in kernel_names:
                     buf.writeline(f"{name},")
-            buf.writeline(f"], arg_index=arg_index)")
+            buf.writeline("], arg_index=arg_index)")
         else:  # call with dict[size hint key, kernel]
             assert isinstance(kernels[0], TritonTemplateKernel)
             assert len(kernels) == len(kernel_shape_keys)
@@ -111,7 +120,7 @@ class MultiKernelState:
             with buf.indent():
                 for shape_key, name in zip(kernel_shape_keys, kernel_names):
                     buf.writeline(f"{shape_key}: {name},")
-            buf.writeline(f"}}, arg_index=arg_index)")
+            buf.writeline("}}, arg_index=arg_index)")
 
         if config.triton.autotune_at_compile_time:
             V.graph.wrapper_code.src_to_kernel["\n".join(kernel_names)] = (
@@ -473,6 +482,15 @@ class MultiKernelCall:
 
 
 class SizeHintMultiKernel(MultiKernel):
+    """
+    Version of multi-kernel that generates kernels based on specified size hints.
+    Currently only performs 1-d search over hints; doesn't perform combinatorial n-d search
+    if n > 1 dynamic dimensions are specified.
+
+    e.g. matmul([s0, s1], [s1, s2]) with size-hints [64, 256] only generates 2 kernels,
+    based on tuning shapes ([64, 64], [64, 64]) and ([256, 256], [256, 256]) 
+    """
+
     def __init__(self, kernels):
         assert isinstance(kernels, dict) and len(kernels) >= 2
 
@@ -490,6 +508,18 @@ class SizeHintMultiKernel(MultiKernel):
 
 
 class SizeHintMultiKernelCall(MultiKernelCall):
+    """
+    Runtime class for size-hint multi-kernels.
+    Instead of having a plain list of kernels to benchmark over, keys them by input & output shapes,
+    and optionally perform shape-based selection, based on config option `multi_kernel_shape_heuristic`.
+
+    If `multi_kernel_shape_heuristic` == "benchmark", acts like a plain multi-kernel, performing full
+    benchmarking over all pre-generated kernels, caching the selection for each particular runtime shape key.
+
+    If `multi_kernel_shape_heuristic` == "l1", the pre-generated kernel is chosen based on the shape keys,
+    with the heuristic being l1 distance between the pre-generated / runtime input & output shapes.
+    """
+
     def __init__(self, multi_kernel_name, kernels, arg_index, selection_method="l1"):
         super().__init__(multi_kernel_name, list(kernels.values()), arg_index)
         self._kernel_hints = list(kernels.keys())
@@ -500,9 +530,8 @@ class SizeHintMultiKernelCall(MultiKernelCall):
         # in shape.
         self._shape_specialize = True
         self._shape_cache = {}
-        
-        assert selection_method in ["benchmark", "l1"]
-        self.selection_method = selection_method
+
+        self.selection_method = config.multi_kernel_shape_heuristic
 
     def _get_shape_cache_key(self, *args, **kwargs):
         """
@@ -522,11 +551,14 @@ class SizeHintMultiKernelCall(MultiKernelCall):
 
     def _cache_shape_choice(self, cache_key, kernel_idx):
         """
-        Cache kernel choice for a specific shape
+        Cache kernel choice for a specific shape.
         """
         self._shape_cache[cache_key] = kernel_idx
 
     def _l1_dist(self, k1, k2):
+        """
+        L1 distance heuristic for kernel selection.
+        """
         dist = 0
         for s1, s2 in zip(k1, k2):
             dist += sum(abs(x - y) for x, y in zip(s1, s2))
@@ -568,6 +600,9 @@ class SizeHintMultiKernelCall(MultiKernelCall):
             timings = self.benchmark_sub_kernels(*args, **kwargs)
             self.picked_kernel = timings.index(min(timings))
         else:
-            dists = [self._l1_dist(shape_key, key) if key is not None else 2**62 for key in self._kernel_hints]
+            dists = [
+                self._l1_dist(shape_key, key) if key is not None else 2**62
+                for key in self._kernel_hints
+            ]
             self.picked_kernel = dists.index(min(dists))
         self._cache_shape_choice(shape_key, self.picked_kernel)
