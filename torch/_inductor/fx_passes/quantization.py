@@ -3876,7 +3876,7 @@ def quant_lift_up(graph_module: torch.fx.GraphModule):
         ADD
       SOFTMAX
 
-    We want to lift up the the quant nodes from matmul before view like nodes
+    We want to lift up the quant nodes from matmul before view like nodes
     as the output of Linear node.
 
              DQ
