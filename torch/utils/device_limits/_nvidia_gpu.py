@@ -66,11 +66,11 @@ def get_fma_per_cycle_per_sm_tensor_cores(
         "fp32_90": 1024,
         "fp64_90": 128,
         # Blackwell Architecture
-        "int8_90": 4096,
-        "fp8_90": 4096,
-        "fp16_90": 2048,
-        "fp32_90": 1024,
-        "fp64_90": 128,
+        "int8_100": 4096,
+        "fp8_100": 4096,
+        "fp16_100": 2048,
+        "fp32_100": 1024,
+        "fp64_100": 128,
     }
     dict_key = ""
     if data_type is torch.float16:
@@ -85,7 +85,7 @@ def get_fma_per_cycle_per_sm_tensor_cores(
     elif data_type is torch.float64:
         dict_key = f"fp64_{compute_capability}"
     else:
-        dict_key = "unkown"
+        dict_key = "unknown"
 
     if dict_key not in hardcoded_device_values.keys():
         # We return 1 because typically the peak FLOPs/sec value is used to compute
