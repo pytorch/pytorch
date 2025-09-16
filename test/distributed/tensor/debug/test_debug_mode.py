@@ -9,9 +9,9 @@ from torch.distributed.tensor import DeviceMesh, DTensor, Partial, Replicate, Sh
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    requires_cuda,
     run_tests,
     TestCase,
-    requires_cuda,
 )
 from torch.testing._internal.distributed.fake_pg import FakeStore
 from torch.utils._python_dispatch import TorchDispatchMode
