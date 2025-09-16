@@ -85,7 +85,8 @@ def rotary_embedding_23(
     else:
         torch._check(
             cos_cache.dim() == 3 and sin_cache.dim() == 3,
-            lambda: "cos_cache/sin_cache must be 3D when position_ids is not provided",
+            lambda: "cos_cache/sin_cache must be 3D when position_ids is not provided. "
+            f"Received cos_cache shape {cos_cache.shape}, sin_cache shape {sin_cache.shape}",
         )
 
     # First ensure x has shape [batch_size, num_heads, seq_len, head_size]
