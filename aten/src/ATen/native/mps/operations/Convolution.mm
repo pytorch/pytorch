@@ -134,7 +134,7 @@ static Tensor _mps_convolution_impl(const Tensor& input_t_,
     bias_defined = bias_opt->defined();
 
   auto memory_format = input_t.suggest_memory_format();
-  bool is_channels_last = (memory_format == at::MemoryFormat::ChannelsLast) && !is3DConv;
+  bool is_channels_last = mps_conv_use_channels_last(input_t, weight_t) && !is3DConv && is_macOS_15_0_or_newer;
   auto output_t =
       at::empty(input_shape.has_value() ? input_shape.value()
                                         : conv_output_size(input->sizes(), weight->sizes(), padding, stride, dilation),
@@ -142,7 +142,7 @@ static Tensor _mps_convolution_impl(const Tensor& input_t_,
                 std::nullopt,
                 kMPS,
                 std::nullopt,
-                is_macOS_15_0_or_newer ? memory_format : MemoryFormat::Contiguous);
+                is_channels_last ? MemoryFormat::ChannelsLast : MemoryFormat::Contiguous);
   if (output_t.numel() == 0) {
     return output_t;
   }
@@ -352,9 +352,7 @@ static Tensor mps_convolution_backward_input(IntArrayRef input_size,
   checkAllSameType(c, {grad_output, weight});
   checkAllSameGPU(c, {grad_output, weight});
   constexpr auto kChannelsLast = at::MemoryFormat::ChannelsLast;
-  bool is_channels_last =
-      (grad_output_t.suggest_memory_format() == kChannelsLast || weight_t.suggest_memory_format() == kChannelsLast) &&
-      !is3DConv;
+  bool is_channels_last = mps_conv_use_channels_last(grad_output_t, weight_t) && !is3DConv;
   auto grad_input_t =
       at::empty(input_size, grad_output_t.options(), is_channels_last ? std::optional(kChannelsLast) : std::nullopt);
 
@@ -480,9 +478,7 @@ static Tensor mps_convolution_backward_weights(IntArrayRef weight_size,
   TORCH_CHECK(isFloatingType(grad_output_t.scalar_type()), "Convolution is supported only for Floating types");
   CheckedFrom c = "mps_convolution_backward_weights";
   constexpr auto kChannelsLast = at::MemoryFormat::ChannelsLast;
-  bool is_channels_last =
-      (input_t.suggest_memory_format() == kChannelsLast || grad_output_t.suggest_memory_format() == kChannelsLast) &&
-      !is3DConv;
+  bool is_channels_last = mps_conv_use_channels_last(input_t, grad_output_t) && !is3DConv;
 
   // For uniformity with everything else, although it seems grad_weight
   // would be unambiguous too.
