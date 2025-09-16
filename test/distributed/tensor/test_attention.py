@@ -4,7 +4,7 @@ import functools
 import itertools
 import random
 import unittest
-from typing import Union
+from typing import Callable, ClassVar, Union
 
 import torch
 import torch.distributed as dist
@@ -15,18 +15,20 @@ from torch.distributed.tensor import DeviceMesh
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.experimental._attention import (
     _CausalBehavior,
+    _ContextParallel,
     _cp_options,
     _DispatchMode,
-    _flex_attention_wrapper,
     _is_causal_behavior,
     _RotateMethod,
     context_parallel,
     context_parallel_unshard,
     set_rotate_method,
 )
+from torch.distributed.tensor.parallel import parallelize_module
 from torch.nn.attention import sdpa_kernel, SDPBackend
 from torch.nn.attention.flex_attention import (
     _mask_mod_signature,
+    AuxOutput,
     AuxRequest,
     create_block_mask,
     flex_attention,
@@ -355,6 +357,23 @@ def generate_doc_mask_mod(
     return doc_mask_mod
 
 
+class FlexAttentionWrapper(torch.nn.Module):
+    _flex_attn: ClassVar[Callable] = torch.compile(
+        flex_attention, mode="max-autotune-no-cudagraphs"
+    )
+
+    def __init__(self) -> None:
+        super().__init__()
+
+    def forward(
+        self, *args: object, **kwargs: object
+    ) -> [
+        torch.Tensor | tuple[torch.Tensor, torch.Tensor],
+        tuple[torch.Tensor, AuxOutput],
+    ]:
+        return FlexAttentionWrapper._flex_attn(*args, **kwargs)
+
+
 class CPFlexAttentionTest(DTensorTestBase):
     @property
     def world_size(self) -> int:
@@ -445,6 +464,18 @@ class CPFlexAttentionTest(DTensorTestBase):
         # shard qkv on seq_dim
         shard_dim = 2
 
+        if dispatch_mode == _DispatchMode.MODULE_WRAPPER:
+            flex_attention_wrapper_module = FlexAttentionWrapper()
+            flex_cp = _ContextParallel(
+                seq_dim=shard_dim,
+                attention_type=_ContextParallel.AttentionType.FLEX,
+            )
+            parallelize_module(
+                flex_attention_wrapper_module,
+                device_mesh,
+                flex_cp,
+            )
+
         with context_parallel(
             device_mesh,
             buffers=[cp_q, cp_k, cp_v],
@@ -463,7 +494,7 @@ class CPFlexAttentionTest(DTensorTestBase):
                     return_aux=AuxRequest(lse=True),
                 )
             elif dispatch_mode == _DispatchMode.MODULE_WRAPPER:
-                cp_out, cp_aux = _flex_attention_wrapper(
+                cp_out, cp_aux = flex_attention_wrapper_module(
                     cp_q,
                     cp_k,
                     cp_v,

@@ -16,7 +16,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor import distribute_tensor, DTensor, Shard
-from torch.distributed.tensor.parallel import parallelize_module, ParallelStyle
+from torch.distributed.tensor.parallel import ParallelStyle
 from torch.nn.attention.flex_attention import (
     _mask_mod_signature,
     AuxOutput,
@@ -383,9 +383,9 @@ def _templated_ring_attention(
     if not is_causal and _cp_options.enable_load_balance:
         raise RuntimeError("Load balancing requires `is_causal=True`.")
 
-    assert isinstance(group, dist.ProcessGroup), (
-        "process group must be single dimension"
-    )
+    assert isinstance(
+        group, dist.ProcessGroup
+    ), "process group must be single dimension"
     rank = dist.get_rank(group)
     size = dist.get_world_size(group)
 
@@ -934,6 +934,13 @@ def _distribute_function(
     input_fn: InputFnType,
     output_fn: OutputFnType,
 ) -> None:
+    """
+    A helper function to replace a function with a distributed version by
+    using the monkey patching approach.
+
+    This function is for the CP internal usage only.
+    """
+
     def wrapper(
         target_fn: Callable, input_fn: InputFnType, output_fn: OutputFnType
     ) -> Callable:
@@ -1057,14 +1064,7 @@ def _context_parallel_dispatcher(
             with _enable_cp_dtensor_dispatcher():
                 yield
     elif _dispatch_mode == _DispatchMode.MODULE_WRAPPER:
-        global _flex_attention_wrapper_module
-        if _flex_attention_wrapper_module is None:
-            _flex_attention_wrapper_module = _FlexAttentionWrapper()
-            parallelize_module(
-                _flex_attention_wrapper_module,
-                mesh,
-                flex_cp,
-            )
+        # Do nothing as we expect parallelize_module to handle this.
         yield
     else:
         raise NotImplementedError("torch dispatch mode is not supported yet.")
@@ -1134,42 +1134,9 @@ def _context_parallel_buffers(
     return new_buffers
 
 
-class _FlexAttentionWrapper(nn.Module):
-    _flex_attn: ClassVar[Callable] = torch.compile(
-        flex_attention, mode="max-autotune-no-cudagraphs"
-    )
-
-    def __init__(self) -> None:
-        super().__init__()
-
-    def forward(
-        self, *args: ArgsType, **kwargs: KwargsType
-    ) -> Union[
-        torch.Tensor, tuple[torch.Tensor, torch.Tensor], tuple[torch.Tensor, AuxOutput]
-    ]:
-        # 1. _flex_attn has to be a class variable, otherwise there will
-        #    be multiple complied flex_attention, which can be slow.
-        # 2. `self._flex_attn` is not correct, `self` will be passed in
-        #    as the first argument, which will cause an error.
-        #    `_FlexAttentionWrapper._flex_attn` is correct.
-        return _FlexAttentionWrapper._flex_attn(*args, **kwargs)
-
-
 #####################
 # Experimental APIs
 #####################
-_flex_attention_wrapper_module: Optional[nn.Module] = None
-
-
-def _flex_attention_wrapper(
-    *args: tuple[Any, ...], **kwargs: dict[str, Any]
-) -> Union[
-    torch.Tensor, tuple[torch.Tensor, torch.Tensor], tuple[torch.Tensor, AuxOutput]
-]:
-    global _flex_attention_wrapper_module
-    if _flex_attention_wrapper_module is None:
-        _flex_attention_wrapper_module = _FlexAttentionWrapper()
-    return _flex_attention_wrapper_module(*args, **kwargs)
 
 
 class _ContextParallel(ParallelStyle):
