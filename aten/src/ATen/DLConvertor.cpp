@@ -81,6 +81,8 @@ DLDataType getDLDataType(const Tensor& t) {
       break;
     case ScalarType::Float4_e2m1fn_x2:
       dtype.code = DLDataTypeCode::kDLFloat4_e2m1fn;
+      dtype.lanes = 2;
+      dtype.bits = 4;
       break;
     case ScalarType::QInt8:
     case ScalarType::QUInt8:
@@ -330,7 +332,14 @@ ScalarType toScalarType(const DLDataType& dtype) {
     case DLDataTypeCode::kDLFloat4_e2m1fn:
       switch (dtype.bits) {
         case 4:
-          stype = ScalarType::Float4_e2m1fn_x2;
+          switch (dtype.lanes) {
+            case 2:
+              stype = ScalarType::Float4_e2m1fn_x2;
+              break;
+            default:
+              TORCH_CHECK_BUFFER(
+                false, "Unsupported kDLFloat4_e2m1fn lanes ", std::to_string(dtype.lanes));
+          }
           break;
         default:
           TORCH_CHECK_BUFFER(
