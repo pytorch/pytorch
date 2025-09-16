@@ -4,7 +4,7 @@
 from collections.abc import Sequence
 
 from torch.onnx import errors
-from torch.onnx._internal import registration
+from torch.onnx._internal.torchscript_exporter import registration
 from torch.testing._internal import common_utils
 
 
