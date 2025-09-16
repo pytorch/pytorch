@@ -1766,9 +1766,9 @@ class SIMDScheduling(BaseScheduling):
             src_codes = []
 
             for (
-                size_hint, 
+                size_hint,
                 make_kernel_render,
-             ) in template_node.node._make_kernel_renders.items():
+            ) in template_node.node._make_kernel_renders.items():
                 kernel, render = make_kernel_render(
                     template_node.node, hint_override=hint_override
                 )

@@ -35,7 +35,9 @@ class MultiKernelState:
     def define_kernel(
         self,
         kernels: list[Any],
-        kernel_shape_keys: Optional[list[Union[None, tuple[tuple[int, ...], ...]]]] = None,
+        kernel_shape_keys: Optional[
+            list[Union[None, tuple[tuple[int, ...], ...]]]
+        ] = None,
     ) -> str:
         """
         Previously we name the multi kernel as "multi_kernel_{kernel_names[0]}".
@@ -113,6 +115,7 @@ class MultiKernelState:
             buf.writeline("], arg_index=arg_index)")
         else:  # call with dict[size hint key, kernel]
             assert isinstance(kernels[0], TritonTemplateKernel)
+            assert isinstance(kernel_shape_keys, dict)
             assert len(kernels) == len(kernel_shape_keys)
             buf.writeline(
                 f"{multi_kernel_name} = async_compile.size_hint_multi_kernel({multi_kernel_name!r}, {{"
@@ -488,7 +491,7 @@ class SizeHintMultiKernel(MultiKernel):
     if n > 1 dynamic dimensions are specified.
 
     e.g. matmul([s0, s1], [s1, s2]) with size-hints [64, 256] only generates 2 kernels,
-    based on tuning shapes ([64, 64], [64, 64]) and ([256, 256], [256, 256]) 
+    based on tuning shapes ([64, 64], [64, 64]) and ([256, 256], [256, 256])
     """
 
     def __init__(self, kernels):
