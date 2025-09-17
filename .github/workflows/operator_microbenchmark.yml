@@ -39,6 +39,7 @@ jobs:
     uses: ./.github/workflows/_linux-test.yml
     needs: opmicrobenchmark-build
     with:
+      timeout-minutes: 500
       build-environment: linux-jammy-cuda12.8-py3.10-gcc9-sm80
       docker-image: ${{ needs.opmicrobenchmark-build.outputs.docker-image }}
       test-matrix: ${{ needs.opmicrobenchmark-build.outputs.test-matrix }}
