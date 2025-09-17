@@ -496,7 +496,7 @@ class SizeHintMultiKernel(MultiKernel):
     """
 
     def __init__(self, kernels):
-        assert isinstance(kernels, dict) and len(kernels) >= 2
+        assert isinstance(kernels, dict) and len(kernels) >= 1
 
         self.kernels, self.kernel_shape_keys = [], []
         for shape_key, kernel in kernels.items():
