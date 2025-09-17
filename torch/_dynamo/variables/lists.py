@@ -1230,6 +1230,26 @@ class NamedTupleVariable(TupleVariable):
             codegen.extend_output(create_rot_n(2))
             codegen.store_attr(name)
 
+    def _is_method_overridden(self, method_name: str) -> bool:
+        """Checks if a method is overridden in the NamedTuple subclass.
+
+        Args:
+            method_name (str): The name of the method to check.
+
+        Returns:
+            bool: True if the method is overridden in the subclass, False otherwise.
+
+        Raises:
+            ValueError: If the NamedTuple class does not inherit from both Tuple and Object.
+        """
+        if len(self.tuple_cls.__mro__) < 3:
+            raise ValueError("NamedTuple should inherit from Tuple and Object.")
+        if getattr(self.tuple_cls, method_name, None) == getattr(
+            self.tuple_cls.__mro__[-3], method_name, None
+        ):
+            return False
+        return True
+
     def call_method(
         self,
         tx,
@@ -1313,7 +1333,12 @@ class NamedTupleVariable(TupleVariable):
             else:
                 return None
 
-        if name == "_replace":
+        # Avoid UserMethodVariable fallback precisely when methods NamedTuple methods have not been overwritten.
+        if (
+            name == "_replace"
+            and not self._is_method_overridden("_replace")
+            and not self._is_method_overridden("__getattr__")
+        ):
             # Return a BuiltinVariable for the _replace method
             # Get the actual _replace method from the tuple class
             actual_replace_method = getattr(self.tuple_cls, "_replace", None)
