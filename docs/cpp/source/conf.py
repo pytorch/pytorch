@@ -78,6 +78,10 @@ exhale_args = {
     "exhaleExecutesDoxygen": True,
     "exhaleUseDoxyfile": True,
     "verboseBuild": True,
+    # Enable incremental rebuilds (only process changed files)
+    "exhaleDoxygenStdin": "INCREMENTAL_MODE=YES",
+    # Reduce memory usage during parsing
+    "fullToctreeMaxDepth": 2,
     ############################################################################
     # HTML Theme specific configurations.                                      #
     ############################################################################
