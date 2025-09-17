@@ -1998,7 +1998,7 @@ def clamp_max(
 
 # https://pytorch.org/docs/stable/generated/torch.where.html
 # TODO: implement alternate where
-@register_decomposition(aten.where)
+@register_decomposition(aten.where.self)
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a", "b"),
