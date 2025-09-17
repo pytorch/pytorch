@@ -959,8 +959,8 @@ static int THPVariable_set_grad(
 
   const auto& grad = THPVariable_Unpack(py_grad);
   const auto expected_grad_dtype = var.grad_dtype().has_value()
-    ? var.grad_dtype().value()
-    : var.scalar_type();
+      ? var.grad_dtype().value()
+      : var.scalar_type();
   if (!var.allow_grad_dtype_mismatch()) {
     TORCH_CHECK(
         grad.dtype() == expected_grad_dtype,
@@ -981,8 +981,8 @@ static int THPVariable_set_grad(
       "'. Please ensure that the gradient and the tensor are on the same device");
   if (grad.layout() != kSparse) {
     auto expected_options = var.options().dtype(
-      var.allow_grad_dtype_mismatch() ? grad.scalar_type() : expected_grad_dtype
-    );
+        var.allow_grad_dtype_mismatch() ? grad.scalar_type()
+                                        : expected_grad_dtype);
     TORCH_CHECK(
         grad.options().type_equal(expected_options),
         "attempting to assign a gradient to a tensor that has data of a different type");
@@ -1491,6 +1491,36 @@ static PyObject* THPVariable_get_nbytes(THPVariable* self, void* unused) {
   END_HANDLE_TH_ERRORS
 }
 
+// Note [ grad_dtype UX vs impl representation ]
+//
+// Semantics of t.grad_dtype
+// - Default: grad dtype must match t's dtype
+//     t.grad_dtype returns t's dtype
+// - t.grad_dtype=<dtype>: grad dtype must match <dtype>
+//     t.grad_dtype returns <dtype>
+// - t.grad_dtype=None: grad dtype can be any dtype
+//     t.grad_dtype returns None
+//
+// Internally t.grad_dtype is actually represented by two fields:
+// grad_dtype_: Optional<ScalarType> and allow_grad_dtype_mismatch_: bool
+// We do this because we want to be able to represent:
+//   (1) the state where t.grad is allowed to be any dtype
+//   (2) the state where t.grad must match t's dtype.
+//
+// It is the most convenient to have grad_dtype = nullopt represent
+// the default state, because classes can be default constructed, and
+// since tensor's dtype can be mutated, its good to avoid manually
+// maintain consistency between grad_dtype and t's dtype.
+//
+// How internal representation maps to UX:
+// - when allow_grad_dtype_mismatch_ is true, t.grad_dtype returns None
+// - when grad_dtype is nullopt, t.grad_dtype returns t's dtype
+// - when grad_dtype is not nullopt, t.grad_dtype returns grad_dtype_
+//
+// Note: it is not possible to revert to default behavior once
+// grad_dtype is set. We are okay with this because mutating dtypes is
+// really only done through .data.
+//
 static PyObject* THPVariable_get_grad_dtype(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
   if (check_has_torch_function((PyObject*)self)) {
@@ -1539,7 +1569,6 @@ static int THPVariable_set_grad_dtype(
   bool allow_mismatch = false;
 
   if (obj == Py_None) {
-    new_dtype = std::nullopt;
     allow_mismatch = true;
   } else {
     auto* dtype = reinterpret_cast<THPDtype*>(obj);
@@ -1550,7 +1579,8 @@ static int THPVariable_set_grad_dtype(
   // 1) If there's already a grad_acc, update its InputMetadata now.
   if (auto grad_acc = torch::autograd::impl::try_get_grad_accumulator(var)) {
     grad_acc->mutable_input_metadata(0).set_grad_dtype(new_dtype);
-    grad_acc->mutable_input_metadata(0).set_allow_grad_dtype_mismatch(allow_mismatch);
+    grad_acc->mutable_input_metadata(0).set_allow_grad_dtype_mismatch(
+        allow_mismatch);
   }
   // 2) Always set grad_dtype in the tensor, so that we can set
   //    InputMetadata appropriately when grad_acc is (re)constructed

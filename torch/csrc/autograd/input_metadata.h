@@ -125,11 +125,10 @@ struct TORCH_API InputMetadata {
   bool is_tensor_subclass_ = false;
   bool is_nested_ = false;
   bool was_default_constructed_ = true;
-  // grad_dtype_ being nullopt means we should use the tensor's dtype (from
-  // options_)
+  // When nullopt, defer to the tensor's dtype; otherwise, use this dtype.
   std::optional<at::ScalarType> grad_dtype_;
-  // When true, allows gradient dtype to be different from tensor dtype,
-  // bypassing dtype casting and validation in the autograd engine.
+  // When true, bypass dtype casting and validation in the engine.
+  // This is only used for accumulate grad.
   bool allow_grad_dtype_mismatch_ = false;
 };
 } // namespace torch::autograd
