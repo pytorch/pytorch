@@ -51,6 +51,7 @@ from torchgen.utils import dataclass_repr
 from .. import config
 from .autograd_cache import (
     AOTAutogradCache,
+    GenericAOTAutogradCacheEntry,
     serialize_graph_module,
     should_bundle_autograd_cache,
     should_use_remote_autograd_cache,
@@ -73,6 +74,7 @@ from .runtime_wrappers import (
     post_compile,
     pre_compile,
     RuntimeWrapper,
+    SerializableCompiledFunction,
 )
 from .schemas import (
     AOTConfig,
@@ -363,6 +365,7 @@ def aot_stage2_inference(
             AOTAutogradCache.save(
                 cache_info.cache_key, entry, remote=should_use_remote_autograd_cache()
             )
+            compiled_fw = SerializableCompiledFunction(compiled_fw, lambda: entry)
 
     compiled_fw = fakified_out_wrapper.post_compile(
         compiled_fw,
@@ -516,6 +519,48 @@ class InvokeSubgraphHopGraphs:
     new_num_saved_nodes: Optional[int] = None
 
 
+def prepare_for_partitioner(mod, num_primals, num_fw_outputs):
+    # min-cut partitioner requires the placeholders to have primals and
+    # tangents string in the node.name. The signature of the joint graph is
+    # (*primals, *tangents)
+
+    # We also have to update the output signature which is right now
+    # (*grads, *fw_outs) and we have to change to (*fw_outs, *grads) for the
+    # partitioner to work.
+    new_graph = torch.fx.Graph()
+    env = {}
+
+    primals_counter = itertools.count(0)
+    tangents_counter = itertools.count(0)
+
+    for idx, node in enumerate(mod.graph.nodes):
+        if node.op == "placeholder":
+            if idx < num_primals:
+                env[node] = new_graph.placeholder(f"primals_{next(primals_counter)}")
+            else:
+                env[node] = new_graph.placeholder(f"tangents_{next(tangents_counter)}")
+            env[node].meta = copy.copy(node.meta)
+        elif node.op == "output":
+            # Reverse the (*grads, *fw_outs) to (*fw_outs, *grads)
+            # The reason for having the reversed signature in the first
+            # place is to simplify step 3.
+            old_outputs = node.args[0]
+            new_outputs = (
+                *old_outputs[-num_fw_outputs:],
+                *old_outputs[:-num_fw_outputs],
+            )
+            new_outputs = [env[n] if n else None for n in new_outputs]
+            new_graph.output(tuple(new_outputs))
+        else:
+            env[node] = new_graph.node_copy(node, lambda n: env[n])
+            env[node].meta = copy.copy(node.meta)
+
+    new_graph.lint()
+
+    out = torch.fx.GraphModule(mod, new_graph)
+    return out
+
+
 def run_joint_graph_passes_on_hops(
     joint_gm: torch.fx.GraphModule,
     joint_inputs: Any,
@@ -552,51 +597,6 @@ def run_joint_graph_passes_on_hops(
 
     def num_inputs(mod):
         return len(mod.graph.find_nodes(op="placeholder"))
-
-    def prepare_for_partitioner(mod, num_primals, num_fw_outputs):
-        # min-cut partitioner requires the placeholders to have primals and
-        # tangents string in the node.name. The signature of the joint graph is
-        # (*primals, *tangents)
-
-        # We also have to update the output signature which is right now
-        # (*grads, *fw_outs) and we have to change to (*fw_outs, *grads) for the
-        # partitioner to work.
-        new_graph = torch.fx.Graph()
-        env = {}
-
-        primals_counter = itertools.count(0)
-        tangents_counter = itertools.count(0)
-
-        for idx, node in enumerate(mod.graph.nodes):
-            if node.op == "placeholder":
-                if idx < num_primals:
-                    env[node] = new_graph.placeholder(
-                        f"primals_{next(primals_counter)}"
-                    )
-                else:
-                    env[node] = new_graph.placeholder(
-                        f"tangents_{next(tangents_counter)}"
-                    )
-                env[node].meta = copy.copy(node.meta)
-            elif node.op == "output":
-                # Reverse the (*grads, *fw_outs) to (*fw_outs, *grads)
-                # The reason for having the reversed signature in the first
-                # place is to simplify step 3.
-                old_outputs = node.args[0]
-                new_outputs = (
-                    *old_outputs[-num_fw_outputs:],
-                    *old_outputs[:-num_fw_outputs],
-                )
-                new_outputs = [env[n] if n else None for n in new_outputs]
-                new_graph.output(tuple(new_outputs))
-            else:
-                env[node] = new_graph.node_copy(node, lambda n: env[n])
-                env[node].meta = copy.copy(node.meta)
-
-        new_graph.lint()
-
-        out = torch.fx.GraphModule(mod, new_graph)
-        return out
 
     new_hop_graphs: dict[str, InvokeSubgraphHopGraphs] = defaultdict(
         lambda: InvokeSubgraphHopGraphs()
@@ -1318,7 +1318,8 @@ def maybe_inline_graph_saved_tensors_hooks(
 
 
 def aot_stage2_autograd(
-    aot_state: AOTState, aot_graph_capture: AOTGraphCapture
+    aot_state: AOTState,
+    aot_graph_capture: AOTGraphCapture,
 ) -> DispatchReturn:
     """
     Autograd logic. Generates a joint graph, partitions it, manipulates the input with various wrappers,
@@ -1367,7 +1368,8 @@ def aot_stage2_autograd(
             if maybe_subclass_meta is None
             else maybe_subclass_meta.fw_metadata
         )
-        with track_graph_compiling(aot_config, "joint"):
+        context = torch._C._DisableAutocast if disable_amp else nullcontext
+        with context(), track_graph_compiling(aot_config, "joint"):
             # See Note: [Partitioner handling for Subclasses, Part 1]
             # See Note: [Recomputing subclass mutation handling]
             mutated_inp_runtime_indices = (
@@ -1834,6 +1836,7 @@ def aot_stage2_autograd(
     make_runtime_safe(fw_metadata, maybe_subclass_meta)
 
     try_save_cache_entry: Optional[Callable] = None
+    entry: Optional[GenericAOTAutogradCacheEntry] = None
 
     if aot_config.cache_info is not None:
         forward_time_taken_ns = time.time_ns() - aot_config.cache_info.start_time_ns
@@ -1846,7 +1849,7 @@ def aot_stage2_autograd(
             bw_module: torch.fx.GraphModule,
             _fw_metadata: ViewAndMutationMeta,
             aot_config: AOTConfig,
-        ):
+        ) -> Optional[GenericAOTAutogradCacheEntry]:
             cache_info = aot_config.cache_info
 
             def should_save_cache():
@@ -1893,10 +1896,14 @@ def aot_stage2_autograd(
                 )
                 remote = should_use_remote_autograd_cache()
                 AOTAutogradCache.save(cache_info.cache_key, entry, remote)
+                return entry
+            return None
 
         if compiled_bw_func is not None:
             # If we already compiled the backward, we save its cache entry now
-            try_save_cache_entry(compiled_bw_func, bw_module, fw_metadata, aot_config)
+            entry = try_save_cache_entry(
+                compiled_bw_func, bw_module, fw_metadata, aot_config
+            )
             try_save_cache_entry = None
 
     compiled_fn = AOTDispatchAutograd.post_compile(
@@ -1912,6 +1919,9 @@ def aot_stage2_autograd(
         fw_metadata=fw_metadata,
         try_save_cache_entry=try_save_cache_entry,
     )
+
+    if entry is not None:
+        compiled_fn = SerializableCompiledFunction(compiled_fn, lambda: entry)
 
     if config.debug_assert:
         flat_requires_grad: list[Optional[bool]] = [

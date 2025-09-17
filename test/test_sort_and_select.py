@@ -179,7 +179,7 @@ class TestSortAndSelect(TestCase):
     def test_complex_unsupported_cpu(self):
         x = torch.tensor([3.0 + 2j, 4.0 + 3j])
         with self.assertRaisesRegex(
-            ValueError, "Sort currently does not support complex dtypes on CPU."
+            RuntimeError, " Sort does not support complex dtypes on CPU"
         ):
             torch.sort(input=x)
 
@@ -215,7 +215,7 @@ class TestSortAndSelect(TestCase):
             )
 
     @onlyCUDA
-    @dtypes(torch.uint8)
+    @dtypes(torch.float16)
     @largeTensorTest("200GB")  # Unfortunately 80GB A100 is not large enough
     def test_sort_large(self, device, dtype):
         t0 = torch.randperm(8192, device=device).to(dtype)

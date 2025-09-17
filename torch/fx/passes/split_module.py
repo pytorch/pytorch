@@ -248,6 +248,7 @@ def split_module(
                                 s_def_partition = partitions[s_defined]
                                 s_def_partition.outputs.setdefault(s_node.name)
                                 s_def_partition.dependents.setdefault(used)
+                                use_partition.dependencies.setdefault(s_defined)
                 if defined is not None:
                     use_partition.dependencies.setdefault(defined)
 

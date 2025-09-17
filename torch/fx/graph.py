@@ -1621,7 +1621,7 @@ class Graph:
             op="output", target="output", args=(result,), type_expr=type_expr
         )
 
-    def _target_to_str(self, target: Target) -> str:
+    def _target_to_str(self, target: Optional[Target]) -> str:
         if callable(target):
             op = target.__name__
         else:

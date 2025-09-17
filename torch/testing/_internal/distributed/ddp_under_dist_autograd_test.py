@@ -253,7 +253,11 @@ class Trainer:
             else:
                 input_batches = batches
 
-        with self.hybrid_module.join() if simulate_uneven_inputs else contextlib.nullcontext():
+        with (
+            self.hybrid_module.join()
+            if simulate_uneven_inputs
+            else contextlib.nullcontext()
+        ):
             for b in input_batches:
                 with dist_autograd.context() as context_id:
                     output = self.hybrid_module.forward(b)
@@ -261,8 +265,7 @@ class Trainer:
                     dist_autograd.backward(context_id, [loss])
                     grads_dict = dist_autograd.get_gradients(context_id)
                     gLogger.info(
-                        "Loss is %s for mini batch: %s. "
-                        "Grads dict has %s entries: %s",
+                        "Loss is %s for mini batch: %s. Grads dict has %s entries: %s",
                         loss,
                         mini_batch,
                         len(grads_dict),

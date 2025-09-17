@@ -21,7 +21,8 @@ from torch.distributed._functional_collectives import (
     reduce_scatter_tensor,
     reduce_scatter_tensor_coalesced,
 )
-from torch.testing._internal.common_cuda import SM90OrLater
+from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
+from torch.testing._internal.common_device_type import e4m3_type
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     requires_nccl,
@@ -29,7 +30,6 @@ from torch.testing._internal.common_distributed import (
 )
 from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     run_tests,
-    skipIfRocm,
     TestCase,
 )
 from torch.testing._internal.distributed.fake_pg import FakeStore
@@ -501,10 +501,9 @@ class TestWithNCCL(MultiProcessTestCase):
         t.start()
         t.join()
 
-    @skipIfRocm
     @unittest.skipIf(
-        not SM90OrLater,
-        "_scaled_mm currently only supports sm>=90",
+        not PLATFORM_SUPPORTS_FP8,
+        "_scaled_mm currently only supports sm>=90 on cuda and gfx94/95 on ROCm",
     )
     @skip_if_lt_x_gpu(2)
     @fresh_cache()
@@ -513,10 +512,9 @@ class TestWithNCCL(MultiProcessTestCase):
 
         def scale(t):
             scale = (
-                torch.finfo(torch.float8_e4m3fn).max
-                / t.abs().amax(dim=-1, keepdim=True).float()
+                torch.finfo(e4m3_type).max / t.abs().amax(dim=-1, keepdim=True).float()
             )
-            t = t.mul(scale).to(torch.float8_e4m3fn)
+            t = t.mul(scale).to(e4m3_type)
             return t, scale
 
         def fp8_rowwise_backward(in_, w, out_grad):
@@ -827,9 +825,12 @@ class CompileTest(TestCase):
 
         with torch._inductor.config.patch({"cpp_wrapper": True}):
             code = run_and_get_triton_code(compiled, arg)
-            # Check the return tensor from wait_tensor is not used anywhere by
-            # checking if it is explicitly deleted by calling aoti_torch_delete_tensor_object
-            FileCheck().check_count("aoti_torch_delete_tensor_object(buf", 2).run(code)
+            # Check the return tensors from all_reduce and wait_tensor are not used anywhere by
+            # checking if they are explicitly deleted by calling aoti_torch_delete_tensor_object
+            FileCheck().check_not(
+                # all_reduce must have been rewritten into all_reduce_
+                "aoti_torch_cpu__c10d_functional_all_reduce(buf"
+            ).check_count("aoti_torch_delete_tensor_object(buf", 4).run(code)
 
         # Test aoti
         AOTIRunnerUtil.run(func, (arg,))

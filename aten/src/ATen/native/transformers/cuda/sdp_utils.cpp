@@ -16,6 +16,7 @@
 #include <c10/util/irange.h>
 #include <c10/util/Array.h>
 #include <c10/util/Exception.h>
+#include <c10/util/string_view.h>
 
 #if AT_CUDNN_ENABLED()
 #include <ATen/cudnn/cudnn-wrapper.h>
@@ -25,9 +26,12 @@
 
 #if USE_ROCM
 #if defined(USE_FLASH_ATTENTION) || defined(USE_MEM_EFF_ATTENTION)
+#include <ATen/native/transformers/hip/aotriton_versions.h>
 #include <aotriton/flash.h>
 #define USE_ROCM_ATTENTION 1
 #endif
+#else
+#define USE_ROCM_ATTENTION 0
 #endif
 
 // Avoid potential compiler -Wall -Werror complains undefined macro
@@ -57,21 +61,29 @@
 namespace sdp {
 namespace {
 
+// tracks whether we've set the default priority order once, to avoid setting
+// it redundantly or overwriting a user-specified priority order
+// when the priority order context manager is used before the default priority
+// order is initialized the following happens:
+// (1) the current priority order is queried
+// (2) priority_order() is called, which initializes it to the default as init_ is false
+// (3) the user-specified priority order is set
+// (3.1) we are in the priority context...
+// (3.2) we exit the priority context...
+// (4) the previous priority order (default) is restored
+bool priority_order_init_ = false;
+
 // TODO(eqy): more benchmarking to determine whether this should include sm86/89
 // Needs to be kept in-sync with test_fused_chocie in test_transformers.py
 bool check_prefer_cudnn_attention() {
-  // TODO(eqy): Re-enable by default after upgrading to a release later than 9.5.0
-  // see context: https://github.com/pytorch/pytorch/issues/138340
-  // return false;
-#if defined(CUDNN_VERSION)
-
-#if CUDNN_VERSION > 90000
+  static const bool prefer_cudnn = c10::utils::check_env("TORCH_CUDNN_SDPA_PREFERRED") != false;
+  if (!prefer_cudnn) {
+    return false;
+  }
+#if (defined(CUDNN_VERSION) && (CUDNN_VERSION >= 90900))
   auto dprops = at::cuda::getCurrentDeviceProperties();
-  return dprops->major >= 9;
-#else
-  return false;
-#endif
-
+  auto major = dprops->major;
+  return (major == 9 || major == 10) && !dprops->minor;
 #else
   return false;
 #endif
@@ -79,6 +91,16 @@ bool check_prefer_cudnn_attention() {
 
 // flash_attention V2 is universally faster than efficient_attention and Math
 std::array<SDPBackend, num_backends> priority_order(sdp_params const& params) {
+  if (!priority_order_init_) {
+    priority_order_init_ = true;
+    if (check_prefer_cudnn_attention()) {
+        const std::vector<int64_t> cudnn_order = {static_cast<int64_t>(at::SDPBackend::cudnn_attention),
+                                                  static_cast<int64_t>(at::SDPBackend::flash_attention),
+                                                  static_cast<int64_t>(at::SDPBackend::efficient_attention),
+                                                  static_cast<int64_t>(at::SDPBackend::math)};
+        at::globalContext().setSDPPriorityOrder(cudnn_order);
+    }
+  }
   return at::globalContext().sDPPriorityOrder();
 }
 
@@ -112,9 +134,24 @@ int64_t minimum_gemm_alignment(sdp_params const& params) {
 // caller_is_meff is added to make the TORCH_WARN message showing the correct result
 template<bool caller_is_meff = false>
 bool check_head_dim_size_flash(sdp_params const& params, bool debug) {
-#if USE_ROCM_ATTENTION && AOTRITON_VERSION_MINOR >= 9
+#if USE_ROCM_ATTENTION
   // AOTriton 0.9+ supports head_dim up to 512
-  const auto max_size = c10::SymInt(512);
+  const static auto max_hdim = []() {
+#if AOTRITON_VERSION_CURRENT == AOTRITON_VERSION_INT(0, 11)
+    // gfx11xx only support hdim <= 256 on AOTriton 0.11
+    auto dprops = at::cuda::getCurrentDeviceProperties();
+    const c10::basic_string_view<char> arch(dprops->gcnArchName);
+    if (arch.starts_with("gfx11")) {
+      return 256;
+    }
+#endif // AOTriton 0.11
+#if AOTRITON_VERSION_CURRENT >= AOTRITON_VERSION_INT(0, 9)
+    return 512;
+#else
+    return 256;
+#endif
+  }();
+  const auto max_size = c10::SymInt(max_hdim);
 #else
   // All head_dim sizes must be equal and less than 256
   const auto max_size = c10::SymInt(256);
@@ -414,9 +451,9 @@ bool check_cudnn_tensor_shapes(sdp_params const& params, bool debug) {
     return false;
   }
   auto head_dim_limit = 128;
-  if (cudnn_version >= 90501) {
+  if (cudnn_version >= 91000) {
     auto dprops = at::cuda::getCurrentDeviceProperties();
-    if (dprops->major == 9  && !dprops->minor) {
+    if (dprops->major == 9 && !dprops->minor) {
       head_dim_limit = 256;
     }
   }
@@ -453,9 +490,15 @@ bool check_cudnn_tensor_shapes(sdp_params const& params, bool debug) {
       return false;
     }
   }
-  if (s_q == 1 || s_k == 1) {
+  if (s_k == 1) {
     if (debug) {
-      TORCH_WARN_ONCE("cudnn SDPA does not support sequence length 1.");
+      TORCH_WARN_ONCE("cudnn SDPA does not support key/value sequence length 1.");
+    }
+    return false;
+  }
+  if (s_q == 1 && params.dropout != 0.0) {
+    if (debug) {
+      TORCH_WARN_ONCE("cudnn SDPA does not support query sequence length 1 with dropout.");
     }
     return false;
   }
@@ -563,9 +606,9 @@ bool check_for_nested_inputs(sdp_params const& params, bool debug) {
 
   const auto dprop = at::cuda::getCurrentDeviceProperties();
   // Check that the input is nested
-  if (dprop->major != 9 && has_for_nested_inputs(params)) {
+  if (!(dprop->major == 9 || dprop->major == 10) && has_for_nested_inputs(params)) {
     if (debug) {
-      TORCH_WARN("CuDNN SDPA supports nested tensors on SM 9.0.");
+      TORCH_WARN("cuDNN SDPA supports nested tensors on SM 9.0, SM 10.0.");
     }
     return false;
   }
@@ -589,7 +632,7 @@ bool check_runtime_disabled_cudnn(sdp_params const& params, bool debug) {
   // sdp kernels
   if (!at::globalContext().userEnabledCuDNNSDP()) {
     if (debug) {
-      TORCH_WARN("CuDNN attention has been runtime disabled.");
+      TORCH_WARN("cuDNN attention has been runtime disabled.");
     }
     return false;
   }
@@ -620,7 +663,7 @@ bool can_use_cudnn_attention(const sdp_params& params, bool debug) {
 #endif
 #if defined(CUDNN_VERSION) && CUDNN_VERSION < 90000
   if (debug) {
-    TORCH_WARN(CUDNN_VERSION, " cuDNN version too old to use CuDNN Attention (< v9.0.0)");
+    TORCH_WARN(CUDNN_VERSION, " cuDNN version too old to use cuDNN Attention (< v9.0.0)");
   }
   return false;
 #endif
@@ -630,10 +673,8 @@ bool can_use_cudnn_attention(const sdp_params& params, bool debug) {
       c10::array_of<bool (*)(sdp_params const&, bool)>(
           check_runtime_disabled_cudnn,
           check_for_nested_inputs,
-          check_nonzero_sequence_lengths_dense,
           check_all_tensors_on_device,
           check_tensor_shapes,
-          check_cudnn_tensor_shapes,
           check_cudnn_deterministic,
           check_dtypes_low_precision,
           check_attn_mask_shape,
@@ -646,8 +687,10 @@ bool can_use_cudnn_attention(const sdp_params& params, bool debug) {
   }
   constexpr auto dense_constraints =
       c10::array_of<bool (*)(sdp_params const&, bool)>(
+      check_nonzero_sequence_lengths_dense,
       check_last_dim_stride_equals_1_dense<true /*ignore_singleton_dim=*/>,
-      check_batch_size_and_num_heads_dense<true /*enable_gqa*/, false /*requires_same_num_heads*/>
+      check_batch_size_and_num_heads_dense<true /*enable_gqa*/, false /*requires_same_num_heads*/>,
+      check_cudnn_tensor_shapes
   );
 
   if (has_only_dense_inputs(params)) {
@@ -864,7 +907,7 @@ SDPBackend select_sdp_backend(sdp_params const& kernel_params) {
   sdp::can_use_mem_efficient_attention(kernel_params, print_debug);
   TORCH_WARN("Flash attention kernel not used because:");
   sdp::can_use_flash_attention(kernel_params, print_debug);
-  TORCH_WARN("CuDNN attention kernel not used because:");
+  TORCH_WARN("cuDNN attention kernel not used because:");
   sdp::can_use_cudnn_attention(kernel_params, print_debug);
   TORCH_CHECK(!print_debug, "No available kernel. Aborting execution.")
   return SDPBackend::error;

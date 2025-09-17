@@ -75,6 +75,65 @@ struct IsVecMaskType<at::vec::VecMask<T, N>> : std::true_type {};
 #endif
 
 template <typename T, uint64_t kChunkSize>
+struct CascadeSumHelper {
+  // A data struct to help cascade summation:
+  std::vector<T> sum_stk{};
+  uint64_t depth{0}; // depth of sum_stk.
+  uint64_t num_chunks{0}; // number of chunks stored in sum_stk.
+  uint64_t index{0}; // index of the current data.
+  CascadeSumHelper() = default;
+  CascadeSumHelper(uint64_t N) {
+    uint64_t m = (N + kChunkSize - 1) / kChunkSize; // div up
+    depth = m > 0
+        ? static_cast<std::uint64_t>(ceil(log2(static_cast<double>(m))))
+        : 0;
+    if constexpr (IsVecType<T>::value) {
+      sum_stk.assign(
+          std::max(depth, static_cast<uint64_t>(1)),
+          T(typename T::value_type(0)));
+    } else {
+      sum_stk.assign(std::max(depth, static_cast<uint64_t>(1)), T(0));
+    }
+  }
+};
+
+template <typename T, uint64_t kChunkSize = 0>
+inline T cascade_sum_combine(T& data, CascadeSumHelper<T, kChunkSize>* c) {
+  // Note: In order to be consistent with other reductions in inductor,
+  // the returned value may be wrong and cascade_sum_final must be executed to
+  // get the final correct result. Inductor uses the reduction suffix to ensure
+  // that cascade_sum_final is called in the end.
+  c->sum_stk[0] = c->sum_stk[0] + data;
+  // Use cascade summation to improve numerical stability.
+  // https://en.wikipedia.org/wiki/Pairwise_summation
+  if (c->depth > 0) {
+    c->index++;
+    if (c->index == kChunkSize) {
+      c->num_chunks += 1;
+      c->index = 0;
+      uint64_t mask = c->num_chunks;
+      uint64_t j = 1;
+      for (; j < c->depth && (mask & 1) == 0; ++j) {
+        c->sum_stk[j] = c->sum_stk[j] + c->sum_stk[j - 1];
+        c->sum_stk[j - 1] = T(0);
+        mask >>= 1;
+      }
+      return c->sum_stk[j - 1];
+    }
+  }
+  return c->sum_stk[0];
+}
+
+template <typename T, uint64_t kChunkSize = 0>
+inline T cascade_sum_final(CascadeSumHelper<T, kChunkSize>* c) {
+  T result = c->sum_stk[0];
+  for (const auto i : c10::irange(1, c->depth)) {
+    result = result + c->sum_stk[i];
+  }
+  return result;
+}
+
+template <typename T, uint64_t kChunkSize>
 struct WelfordHelper {
   // A data struct to help welford reduction:
   // 1. Save the reciprocal of weights to avoid redundant divisions.
@@ -209,6 +268,31 @@ Welford<T> welford_combine(
       T::set(acc.m2, out.m2, tail_size),
       T::set(acc.weight, out.weight, tail_size),
       out.index};
+}
+
+template <typename T, uint64_t kChunkSize = 0>
+inline T cascade_sum_combine(
+    T& data,
+    int64_t tail_size,
+    CascadeSumHelper<T, kChunkSize>* c) {
+  auto out = c->sum_stk[0] + data;
+  c->sum_stk[0] = T::set(c->sum_stk[0], out, tail_size);
+  if (c->depth > 0) {
+    c->index++;
+    if (c->index == kChunkSize) {
+      c->num_chunks += 1;
+      c->index = 0;
+      uint64_t mask = c->num_chunks;
+      uint64_t j = 1;
+      for (; j < c->depth && (mask & 1) == 0; ++j) {
+        c->sum_stk[j] = c->sum_stk[j] + c->sum_stk[j - 1];
+        c->sum_stk[j - 1] = T(0);
+        mask >>= 1;
+      }
+      return c->sum_stk[j - 1];
+    }
+  }
+  return c->sum_stk[0];
 }
 
 template <typename T>

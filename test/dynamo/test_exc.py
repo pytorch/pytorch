@@ -43,7 +43,7 @@ Call to `torch._dynamo.graph_break()`
 
   Developer debug context: Called `torch._dynamo.graph_break()` with args `[]`, kwargs `{}`
 
- For more details about this graph break, please visit: https://pytorch-labs.github.io/compile-graph-break-site/gb/gb0025.html
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0025.html
 
 from user code:
    File "test_exc.py", line N, in fn001
@@ -183,7 +183,7 @@ Graph Break Reason: Call to `torch._dynamo.graph_break()`
 
   Developer debug context: Called `torch._dynamo.graph_break()` with args `[]`, kwargs `{}`
 
- For more details about this graph break, please visit: https://pytorch-labs.github.io/compile-graph-break-site/gb/gb0025.html
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0025.html
 User code traceback:
   File "test_exc.py", line N, in test_graph_break_log
     torch.compile(fn001, backend="eager")(torch.randn(1))

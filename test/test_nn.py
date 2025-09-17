@@ -8,6 +8,7 @@ import unittest
 import io
 import itertools
 import warnings
+import os
 import pickle
 import re
 from copy import deepcopy
@@ -58,6 +59,10 @@ from torch.types import _TensorOrTensors
 from torch.testing._internal.common_mkldnn import reduced_f32_on_and_off
 
 AMPERE_OR_ROCM = TEST_WITH_ROCM or torch.cuda.is_tf32_supported()
+
+if TEST_WITH_ROCM:
+    os.environ["PYTORCH_MIOPEN_SUGGEST_NHWC"] = "1"
+    os.environ["PYTORCH_MIOPEN_SUGGEST_NHWC_BATCHNORM"] = "1"
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -3510,7 +3515,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             self.assertRaisesRegex(RuntimeError, re.escape("input.size(-1) must be equal to input_size"), rnn, x_wrong)
 
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
-    @skipIfRocm
     def test_cudnn_weight_format(self):
         rnns = [
             nn.LSTM(10, 20, batch_first=True),
@@ -3518,7 +3522,8 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             nn.GRU(10, 20, batch_first=True),
             nn.RNN(10, 20, batch_first=True)
         ]
-        first_warn = True
+        # ROCm RNN does not issue warning about single contig chunk of memory, so don't assert it
+        first_warn = False if torch.version.hip else True
         for rnn in rnns:
             rnn.cuda()
             input = torch.randn(5, 4, 10, requires_grad=True, device="cuda")
@@ -5167,24 +5172,38 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             ("NCHW", "native", False, torch.float),
             ("NCHW", "native", True, torch.half),
             ("NCHW", "native", True, torch.bfloat16),
+
+            ("NHWC", "cpu", False, torch.float),
+            ("NHWC", "cpu", True, torch.half),
+            ("NHWC", "cpu", True, torch.bfloat16),
+
+            ("NHWC", "native", False, torch.float),
+            ("NHWC", "native", True, torch.half),
+            ("NHWC", "native", True, torch.bfloat16),
+
+            ("NHWC", "NCHW", False, torch.float),
+            ("NHWC", "NCHW", True, torch.half),
+            ("NHWC", "NCHW", True, torch.bfloat16),
         ],
         name_fn=lambda f, b, m, t: f"{f}_vs_{b}{'_mixed' if m else ''}_{dtype_name(t)}"
     )
     def test_batchnorm(self, dims, mode, memory_format, ref_backend, mixed, dtype):
         if torch.version.cuda:
             if self._testMethodName in ("test_batchnorm_2D_train_NCHW_vs_cpu_mixed_bfloat16",
-                                        "test_batchnorm_3D_train_NCHW_vs_cpu_mixed_bfloat16"):
-                self.skipTest("bfloat16 NHWC train failed on CUDA due to native tolerance issue "
-                              "https://github.com/pytorch/pytorch/issues/156513")
-            if self._testMethodName == "test_batchnorm_3D_train_NCHW_vs_native_mixed_float16":
-                self.skipTest("Batchnorm 3D NHWC train failed on CUDA")
+                                        "test_batchnorm_3D_train_NCHW_vs_cpu_mixed_bfloat16",
+                                        "test_batchnorm_2D_train_NHWC_vs_NCHW_mixed_bfloat16",
+                                        "test_batchnorm_3D_train_NHWC_vs_NCHW_mixed_bfloat16",
+                                        "test_batchnorm_3D_train_NCHW_vs_native_mixed_float16"):
+                self.skipTest("Failed on CUDA")
 
         if torch.version.hip:
             if self._testMethodName in ("test_batchnorm_2D_train_NCHW_vs_cpu_mixed_bfloat16",
-                                        "test_batchnorm_3D_train_NCHW_vs_cpu_mixed_bfloat16") \
+                                        "test_batchnorm_3D_train_NCHW_vs_cpu_mixed_bfloat16",
+                                        "test_batchnorm_2D_train_NHWC_vs_NCHW_mixed_bfloat16",
+                                        "test_batchnorm_3D_train_NHWC_vs_NCHW_mixed_bfloat16") \
                     and _get_torch_rocm_version() < (6, 4):
                 # NCHW bfloat16 path uses native kernels for rocm<=6.3
-                # train failed on rocm<=6.3 due to native tolerance issue
+                # train failed on rocm<=6.3 due to native accuracy issue
                 # https://github.com/pytorch/pytorch/issues/156513
                 self.skipTest("bfloat16 NHWC train failed on ROCm <= 6.3")
 
@@ -5194,9 +5213,8 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                 # https://github.com/pytorch/pytorch/issues/156513
                 self.skipTest("bfloat16 NCHW train failed due to native tolerance issue")
 
-            if self._testMethodName == "test_batchnorm_3D_train_NCHW_vs_native_mixed_float16" \
-                    and _get_torch_rocm_version() < (7, 0):
-                self.skipTest("3D float16 NCHW train failed on ROCm<7.0")
+            if self._testMethodName == "test_batchnorm_3D_train_NCHW_vs_native_mixed_float16":
+                self.skipTest("3D float16 NCHW train failed on ROCm")
 
         if dims == 3 and memory_format in ("NHWC", "NCHW"):
             memory_format = memory_format + "3D"
@@ -7431,6 +7449,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                 if bias and elementwise_affine:
                     self.assertEqual(ln.bias.grad, ln_cuda.bias.grad, f"bias grad failed: {m=} {n=}", rtol=rtol, atol=atol)
 
+    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
     @largeTensorTest("40GB", device="cuda")
     def test_layer_norm_large_tensor(self):
         # test for https://github.com/pytorch/pytorch/issues/136291
@@ -7642,13 +7661,6 @@ def add_test(test, decorator=None):
             add(cuda_test_name + '_tf32', with_tf32_on)
         else:
             add(cuda_test_name, with_tf32_off)
-
-if __name__ == '__main__':
-    from torch.testing._internal.common_utils import parse_cmd_line_args
-
-    # The value of the SEED depends on command line arguments so make sure they're parsed
-    # before instantiating tests because some modules as part of get_new_module_tests() will call torch.randn
-    parse_cmd_line_args()
 
 for test_params in module_tests + get_new_module_tests():
     # TODO: CUDA is not implemented yet
@@ -8521,7 +8533,6 @@ class TestNNDeviceType(NNTestCase):
 
     @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
                      "Scipy v1.0 and/or numpy not found")
-    @expectedFailureMPS  # aten::grid_sampler_3d not implemented https://github.com/pytorch/pytorch/issues/77764
     @tf32_on_and_off(0.05 if TEST_WITH_ROCM else 0.005)
     @reduced_f32_on_and_off(0.005)
     def test_affine_3d_rotateRandom(self, device):
@@ -8773,6 +8784,7 @@ class TestNNDeviceType(NNTestCase):
 
     @onlyNativeDeviceTypes
     @dtypes(torch.float16, torch.bfloat16, torch.float32, torch.float64)
+    @dtypesIfMPS(torch.float16, torch.bfloat16, torch.float32)
     def test_rmsnorm_epsilon(self, device, dtype):
         def rms_norm_reference_fn(i, normalized_shape):
             eps = torch.finfo(i.dtype).eps
@@ -8947,6 +8959,7 @@ class TestNNDeviceType(NNTestCase):
             Y_cpu = group_norm(X.cpu())
             self.assertEqual(Y_cpu, Y, rtol=0, atol=1e-5)
 
+    @expectedFailureMPS  # Double is not supported on MPS
     @onlyNativeDeviceTypes
     @dtypes(torch.float64, torch.complex128)
     def test_pad(self, device, dtype):
@@ -8978,6 +8991,7 @@ class TestNNDeviceType(NNTestCase):
             out.fill_(4)
             self.assertTrue(torch.all(torch.abs(inputs) < 2))
 
+    @expectedFailureMPS  # Unsupported float64/complex128
     @onlyNativeDeviceTypes
     @dtypes(torch.float64, torch.complex128)
     def test_ReplicationPad_empty(self, device, dtype):
@@ -9116,6 +9130,7 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(inp1.grad, torch.zeros_like(inp1))
         self.assertEqual(inp2.grad, torch.zeros_like(inp2))
 
+    @expectedFailureMPS  # Double not supported
     @expectedFailureMeta  # RuntimeError: cannot reshape tensor of 0 elements into shape [1, 0, -1]
     @onlyNativeDeviceTypes
     def test_TransformerEncoderLayer_empty(self, device):
@@ -9145,6 +9160,7 @@ class TestNNDeviceType(NNTestCase):
                     _test_module_empty_input(self, encoder_layer, input, check_size=False)
 
     @expectedFailureMeta  # RuntimeError: cannot reshape tensor of 0 elements into shape [1, 0, -1]
+    @expectedFailureMPS   # Float64 is not supported
     @onlyNativeDeviceTypes
     def test_TransformerEncoder_empty(self, device):
         for batch_first, input_shape in [(True, (0, 10, 512)),
@@ -9155,6 +9171,7 @@ class TestNNDeviceType(NNTestCase):
             _test_module_empty_input(self, transformer_encoder, input, check_size=False)
 
     @expectedFailureMeta  # RuntimeError: cannot reshape tensor of 0 elements into shape [1, 0, -1]
+    @expectedFailureMPS   # Float64 is not supported
     @onlyNativeDeviceTypes
     def test_TransformerDecoderLayer_empty(self, device):
         for batch_first, memory_shape, tgt_shape in [(True, (0, 10, 512), (0, 20, 512)),
@@ -9165,6 +9182,7 @@ class TestNNDeviceType(NNTestCase):
             self._test_module_empty_inputs(decoder_layer, [tgt, memory])
 
     @expectedFailureMeta  # RuntimeError: cannot reshape tensor of 0 elements into shape [1, 0, -1]
+    @expectedFailureMPS   # Float64 is not supported
     @onlyNativeDeviceTypes
     def test_TransformerDecoder_empty(self, device):
         for batch_first, memory_shape, tgt_shape in [(True, (0, 10, 512), (0, 20, 512)),
@@ -9176,6 +9194,7 @@ class TestNNDeviceType(NNTestCase):
             self._test_module_empty_inputs(transformer_decoder, [tgt, memory])
 
     @expectedFailureMeta  # RuntimeError: cannot reshape tensor of 0 elements into shape [1, 0, -1]
+    @expectedFailureMPS   # Float64 is not supported
     @onlyNativeDeviceTypes
     def test_Transformer_empty(self, device):
         for batch_first, src_shape, tgt_shape in [(True, (10, 0, 512), (20, 0, 512))]:
@@ -9210,7 +9229,7 @@ class TestNNDeviceType(NNTestCase):
 
     @onlyNativeDeviceTypes
     def test_ReflectionPad_fails(self, device):
-        with self.assertRaisesRegex(RuntimeError, 'Only 2D, 3D, 4D, 5D'):
+        with self.assertRaisesRegex(RuntimeError, r'Padding size 2 is not supported for 4D input tensor'):
             mod = torch.nn.ReflectionPad1d(2)
             inp = torch.randn(3, 3, 10, 10, device=device)
             mod(inp)
@@ -9219,7 +9238,7 @@ class TestNNDeviceType(NNTestCase):
             inp = torch.randn(3, 3, 10, 10, device=device)
             torch.ops.aten.reflection_pad1d(inp, (2, 2))
 
-        with self.assertRaisesRegex(RuntimeError, 'Only 2D, 3D, 4D, 5D'):
+        with self.assertRaisesRegex(RuntimeError, r'Padding size 4 is not supported for 5D input tensor'):
             mod = torch.nn.ReflectionPad2d(2)
             inp = torch.randn(3, 3, 10, 10, 10, device=device)
             mod(inp)
@@ -9228,7 +9247,7 @@ class TestNNDeviceType(NNTestCase):
             inp = torch.randn(3, 3, 10, 10, 10, device=device)
             torch.ops.aten.reflection_pad2d(inp, (2, 2, 2, 2))
 
-        with self.assertRaisesRegex(RuntimeError, 'Only 2D, 3D, 4D, 5D'):
+        with self.assertRaisesRegex(RuntimeError, r'Padding size 6 is not supported for 6D input tensor'):
             mod = torch.nn.ReflectionPad3d(3)
             inp = torch.randn(3, 3, 10, 10, 10, 10, device=device)
             mod(inp)
@@ -9311,6 +9330,7 @@ class TestNNDeviceType(NNTestCase):
 
             self.assertEqual(x.grad, ref_x.grad)
 
+    @expectedFailureMPS  # Unimplemented margin_loss
     @onlyNativeDeviceTypes
     @dtypes(torch.float, torch.double)
     def test_MarginLoss_empty(self, device, dtype):
@@ -9377,6 +9397,7 @@ class TestNNDeviceType(NNTestCase):
         with self.assertRaisesRegex(RuntimeError, 'Expected all tensors to be on the same device'):
             F.mse_loss(i, t)
 
+    @expectedFailureMPS   # TODO: Fixme, and raise assert on empty tensor
     @onlyNativeDeviceTypes
     def test_Unfold_empty(self, device):
         inp = torch.randn(0, 3, 3, 4, device=device)
@@ -9600,6 +9621,7 @@ class TestNNDeviceType(NNTestCase):
                     verify_reduction_scalars(input, reduction, output)
 
     # verify that bogus reduction strings are errors
+    @expectedFailureMPS  # CTCLoss unimplemented
     @onlyNativeDeviceTypes
     def test_invalid_reduction_strings(self, device):
         input = torch.randn(3, 5, requires_grad=True, device=device)
@@ -10086,6 +10108,7 @@ class TestNNDeviceType(NNTestCase):
     @parametrize_test("align_corners", [True, False])
     @parametrize_test("mode", ["bilinear", "bicubic"])
     @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last])
+    @expectedFailureMPS  # double device type
     @onlyNativeDeviceTypes
     def test_upsamplingBiMode2d(self, device, antialias, align_corners, mode, memory_format):
         # Forward AD does not support XLA because XLA tensors don't have storage
@@ -10155,6 +10178,7 @@ class TestNNDeviceType(NNTestCase):
     @parametrize_test("num_channels", [3, 5])
     @parametrize_test("mode", ["nearest", "nearest-exact", "bilinear", "bicubic"])
     @parametrize_test("dtype", integral_types() + floating_types())
+    @skipIfMPS  # Error message is wrong for some dtypes
     @onlyNativeDeviceTypes
     def test_upsamplingBiMode2d_nonsupported_dtypes(self, device, antialias, num_channels, mode, dtype):
         x = torch.ones(1, num_channels, 32, 32, dtype=dtype, device=device)
@@ -11477,6 +11501,7 @@ class TestNNDeviceType(NNTestCase):
         self.assertTrue(gradcheck(F.hardsigmoid, (inputs,)))
 
     # currently fails on XLA
+    @expectedFailureMPS  # TypeError: the MPS framework doesn't support float64
     @onlyNativeDeviceTypes
     def test_hardswish_grad(self, device):
         inputs = (torch.randn(4, 16, 16, device=device, dtype=torch.double) - 0.5) * 10
@@ -11684,6 +11709,7 @@ class TestNNDeviceType(NNTestCase):
                 self._test_batchnorm_simple_average(device, dtype, torch.float)
 
     @onlyNativeDeviceTypes
+    @expectedFailureMPS  # Unsupported Border padding mode
     @dtypes(torch.float, torch.double)
     def test_grid_sample_nan_inf(self, device, dtype):
         input = torch.zeros([1, 1, 3, 3], device=device, dtype=dtype)
@@ -12035,6 +12061,12 @@ class TestNNDeviceType(NNTestCase):
             _test_bfloat16_ops(self, torch.nn.Softmax(dim=dim), device, inp_dims=(16, 33, 15, 16), prec=1e-2)
             # test softmax with large input value which causes exp() to overflow
             _test_bfloat16_ops(self, torch.nn.Softmax(dim=dim), device, inp_dims=(16, 33, 15, 16), prec=0.05, scale_factor=1000.0)
+
+    def test_nll_loss_1d_input_1d_target_invalid_size(self, device):
+        x = torch.randn(10, device=device)
+        t = torch.randint(0, 10, (3,), dtype=torch.int64, device=device)
+        with self.assertRaisesRegex(ValueError, "For 1D input, 1D target must have size 1"):
+            F.nll_loss(x, t)
 
     def test_nll_loss_mismatched_batch(self, device):
         x = torch.randn((10, 3), requires_grad=True, device=device)
@@ -12796,6 +12828,7 @@ if __name__ == '__main__':
         F.threshold(x, 0.5, 0.5, inplace=True)
         F.threshold_(x, 0.5, 0.5)
 
+    @expectedFailureMPS  # Double is unsupported
     @onlyNativeDeviceTypes
     def test_triplet_margin_with_distance_loss_default_parity(self, device):
         # Test for `nn.TripletMarginWithDistanceLoss` and
@@ -12830,6 +12863,7 @@ if __name__ == '__main__':
             self.assertTrue(gradcheck(lambda a, p, n: loss_op(a, p, n),
                             (anchor, positive, negative)))
 
+    @expectedFailureMPS  # Double is unsupported
     @onlyNativeDeviceTypes
     def test_triplet_margin_with_distance_loss(self, device):
         # Test for parity between `nn.TripletMarginWithDistanceLoss` and

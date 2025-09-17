@@ -65,20 +65,20 @@ struct dummy_int1_7_t {};
   _(uint16_t, UInt16) /* 27 */                           \
   _(uint32_t, UInt32) /* 28 */                           \
   _(uint64_t, UInt64) /* 29 */                           \
-  _(dummy_uint1_7_t<1>, UInt1) /* 30 */                  \
-  _(dummy_uint1_7_t<2>, UInt2) /* 31 */                  \
-  _(dummy_uint1_7_t<3>, UInt3) /* 32 */                  \
-  _(dummy_uint1_7_t<4>, UInt4) /* 33 */                  \
-  _(dummy_uint1_7_t<5>, UInt5) /* 34 */                  \
-  _(dummy_uint1_7_t<6>, UInt6) /* 35 */                  \
-  _(dummy_uint1_7_t<7>, UInt7) /* 36 */                  \
-  _(dummy_int1_7_t<1>, Int1) /* 37 */                    \
-  _(dummy_int1_7_t<2>, Int2) /* 38 */                    \
-  _(dummy_int1_7_t<3>, Int3) /* 39 */                    \
-  _(dummy_int1_7_t<4>, Int4) /* 40 */                    \
-  _(dummy_int1_7_t<5>, Int5) /* 41 */                    \
-  _(dummy_int1_7_t<6>, Int6) /* 42 */                    \
-  _(dummy_int1_7_t<7>, Int7) /* 43 */                    \
+  _(c10::dummy_uint1_7_t<1>, UInt1) /* 30 */             \
+  _(c10::dummy_uint1_7_t<2>, UInt2) /* 31 */             \
+  _(c10::dummy_uint1_7_t<3>, UInt3) /* 32 */             \
+  _(c10::dummy_uint1_7_t<4>, UInt4) /* 33 */             \
+  _(c10::dummy_uint1_7_t<5>, UInt5) /* 34 */             \
+  _(c10::dummy_uint1_7_t<6>, UInt6) /* 35 */             \
+  _(c10::dummy_uint1_7_t<7>, UInt7) /* 36 */             \
+  _(c10::dummy_int1_7_t<1>, Int1) /* 37 */               \
+  _(c10::dummy_int1_7_t<2>, Int2) /* 38 */               \
+  _(c10::dummy_int1_7_t<3>, Int3) /* 39 */               \
+  _(c10::dummy_int1_7_t<4>, Int4) /* 40 */               \
+  _(c10::dummy_int1_7_t<5>, Int5) /* 41 */               \
+  _(c10::dummy_int1_7_t<6>, Int6) /* 42 */               \
+  _(c10::dummy_int1_7_t<7>, Int7) /* 43 */               \
   _(c10::Float8_e8m0fnu, Float8_e8m0fnu) /* 44 */        \
   _(c10::Float4_e2m1fn_x2, Float4_e2m1fn_x2) /* 45 */
 

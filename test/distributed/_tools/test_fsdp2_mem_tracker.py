@@ -37,15 +37,16 @@ def _init_cublas_workspace(dev: torch.device):
 
 
 def _reset_mem_stats(dev: torch.device):
-    torch.cuda.empty_cache()
-    torch.cuda.reset_accumulated_memory_stats(dev)
-    torch.cuda.reset_peak_memory_stats(dev)
+    mod = torch.get_device_module(dev)
+    mod.empty_cache()
+    mod.reset_accumulated_memory_stats(dev)
+    mod.reset_peak_memory_stats(dev)
 
 
 class TestTrackerFullyShard1DTrainingCore(FSDPTest):
     @property
     def world_size(self) -> int:
-        return min(4, torch.cuda.device_count())
+        return min(4, torch.accelerator.device_count())
 
     @skip_if_lt_x_gpu(2)
     def test_tracker_multi_group_eager(self):
@@ -77,17 +78,18 @@ class TestTrackerFullyShard1DTrainingCore(FSDPTest):
         mp_policy: MixedPrecisionPolicy,
     ):
         debug = False
-        dev = torch.device(torch.cuda.current_device())
+        dev = torch.device(torch.accelerator.current_device_index())
         _init_cublas_workspace(dev)
         gc.collect()
         _reset_mem_stats(dev)
-        mem_stats = torch.cuda.memory_stats(dev)
-        pre_cuda_active = mem_stats["active_bytes.all.current"]
+        mod = torch.get_device_module(dev)
+        mem_stats = mod.memory_stats(dev)
+        pre_acc_active = mem_stats["active_bytes.all.current"]
         torch.manual_seed(42)
         lin_dim, bsz = 2048, 8192
         with torch.device(dev):
             model = nn.Sequential(*[MLP(dim=lin_dim, device=dev) for _ in range(4)])
-        mesh = init_device_mesh("cuda", (self.world_size,))
+        mesh = init_device_mesh(dev.type, (self.world_size,))
         fully_shard_fn = functools.partial(
             fully_shard,
             mesh=mesh,
@@ -110,17 +112,19 @@ class TestTrackerFullyShard1DTrainingCore(FSDPTest):
                 optim.zero_grad()
                 if iter_idx == 0:
                     fmt.reset_mod_stats()
-        mem_stats = torch.cuda.memory_stats()
+        mem_stats = mod.memory_stats()
         tracker_max = fmt.get_tracker_snapshot("peak")[dev]["Total"]
-        cuda_max = mem_stats["active_bytes.all.peak"] - pre_cuda_active
-        accuracy = tracker_max / cuda_max
+        acc_max = mem_stats["active_bytes.all.peak"] - pre_acc_active
+        accuracy = tracker_max / acc_max
         if self.rank == 0 and debug:
-            print(f"Accuracy: {accuracy} Tracker Max:{tracker_max} CUDA Max:{cuda_max}")
+            print(
+                f"Accuracy: {accuracy} Tracker Max:{tracker_max} Accelerator Max:{acc_max}"
+            )
         self.assertAlmostEqual(
             accuracy,
             1.0,
             delta=0.1,
-            msg=f"Tracker Max:{tracker_max} CUDA Max:{cuda_max}",
+            msg=f"Tracker Max:{tracker_max} Accelerator Max:{acc_max}",
         )
         del model
         del inp
@@ -132,12 +136,13 @@ class TestTrackerFullyShard1DTrainingCore(FSDPTest):
         Tests tracker accuracy when running forward/backward through a non-root.
         """
         debug = False
-        dev = torch.device(torch.cuda.current_device())
+        dev = torch.device(torch.accelerator.current_device_index())
         _init_cublas_workspace(dev)
         gc.collect()
         _reset_mem_stats(dev)
-        mem_stats = torch.cuda.memory_stats(dev)
-        pre_cuda_active = mem_stats["active_bytes.all.current"]
+        mod = torch.get_device_module(dev)
+        mem_stats = mod.memory_stats(dev)
+        pre_acc_active = mem_stats["active_bytes.all.current"]
         torch.manual_seed(42)
         lin_dim, bsz = 2048, 8
         model = nn.Sequential(*[MLP(lin_dim, dev) for _ in range(3)])
@@ -157,17 +162,19 @@ class TestTrackerFullyShard1DTrainingCore(FSDPTest):
                 optim.zero_grad()
                 if iter_idx == 0:
                     fmt.reset_mod_stats()
-        mem_stats = torch.cuda.memory_stats()
+        mem_stats = mod.memory_stats()
         tracker_max = fmt.get_tracker_snapshot("peak")[dev]["Total"]
-        cuda_max = mem_stats["active_bytes.all.peak"] - pre_cuda_active
-        accuracy = tracker_max / cuda_max
+        acc_max = mem_stats["active_bytes.all.peak"] - pre_acc_active
+        accuracy = tracker_max / acc_max
         if self.rank == 0 and debug:
-            print(f"Accuracy: {accuracy} Tracker Max:{tracker_max} CUDA Max:{cuda_max}")
+            print(
+                f"Accuracy: {accuracy} Tracker Max:{tracker_max} Accelerator Max:{acc_max}"
+            )
         self.assertAlmostEqual(
             accuracy,
             1.0,
             delta=0.1,
-            msg=f"Tracker Max:{tracker_max} CUDA Max:{cuda_max}",
+            msg=f"Tracker Max:{tracker_max} Accelerator Max:{acc_max}",
         )
         del inp
         del model
@@ -177,7 +184,7 @@ class TestTrackerFullyShard1DTrainingCore(FSDPTest):
 class TestTrackerFullyShard1DTrainingCompose(FSDPTest):
     @property
     def world_size(self) -> int:
-        return min(torch.cuda.device_count(), 4)
+        return min(torch.accelerator.device_count(), 4)
 
     @skip_if_lt_x_gpu(2)
     def test_tracker_with_activation_checkpointing(self):
@@ -197,12 +204,13 @@ class TestTrackerFullyShard1DTrainingCompose(FSDPTest):
     ):
         assert checkpoint_impl in ("composable", "wrapper")
         debug = False
-        dev = torch.device(torch.cuda.current_device())
+        dev = torch.device(torch.accelerator.current_device_index())
         _init_cublas_workspace(dev)
         gc.collect()
         _reset_mem_stats(dev)
-        mem_stats = torch.cuda.memory_stats(dev)
-        pre_cuda_active = mem_stats["active_bytes.all.current"]
+        mod = torch.get_device_module(dev)
+        mem_stats = mod.memory_stats(dev)
+        pre_acc_active = mem_stats["active_bytes.all.current"]
         torch.manual_seed(42)
         vocab_size = 8192
         bsz, seq_len = 16, 512
@@ -249,17 +257,19 @@ class TestTrackerFullyShard1DTrainingCompose(FSDPTest):
                 optim.zero_grad()
                 if iter_idx == 0:
                     fmt.reset_mod_stats()
-        mem_stats = torch.cuda.memory_stats()
+        mem_stats = mod.memory_stats()
         tracker_max = fmt.get_tracker_snapshot("peak")[dev]["Total"]
-        cuda_max = mem_stats["active_bytes.all.peak"] - pre_cuda_active
-        accuracy = tracker_max / cuda_max
+        acc_max = mem_stats["active_bytes.all.peak"] - pre_acc_active
+        accuracy = tracker_max / acc_max
         if self.rank == 0 and debug:
-            print(f"Accuracy: {accuracy} Tracker Max:{tracker_max} CUDA Max:{cuda_max}")
+            print(
+                f"Accuracy: {accuracy} Tracker Max:{tracker_max} Accelerator Max:{acc_max}"
+            )
         self.assertAlmostEqual(
             accuracy,
             1.0,
             delta=0.1,
-            msg=f"Tracker Max:{tracker_max} CUDA Max:{cuda_max}",
+            msg=f"Tracker Max:{tracker_max} Accelerator Max:{acc_max}",
         )
         del inp
         del model

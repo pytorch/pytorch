@@ -19,7 +19,6 @@ import inspect
 import logging
 import os
 import pickle
-import platform
 import shutil
 import sys
 import types
@@ -30,7 +29,12 @@ from typing_extensions import Never
 import torch
 import torch._inductor.package
 from torch._dynamo.exc import PackageError
-from torch._dynamo.precompile_context import PrecompileCacheArtifact, PrecompileContext
+from torch._dynamo.graph_utils import _graph_uses_non_cpu
+from torch._dynamo.precompile_context import (
+    PrecompileCacheArtifact,
+    PrecompileContext,
+    SystemInfo,
+)
 from torch._inductor.runtime.cache_dir_utils import cache_dir
 from torch.compiler._cache import CacheArtifactFactory
 
@@ -109,10 +113,49 @@ class InlinedSource:
     firstlineno: int
     lastlineno: int
     checksum: str
+    content: str
+
+
+@functools.cache
+def _get_module_content(module: types.ModuleType) -> str:
+    return inspect.getsource(module)
 
 
 @dataclasses.dataclass
-class _DynamoCodeCacheEntry:
+class SourceInfo:
+    inlined_sources: set[InlinedSource]
+
+    def add_code(self, code: types.CodeType) -> None:
+        module = inspect.getmodule(code)
+        if module is None:
+            return
+        sourcelines, firstlineno = inspect.getsourcelines(code)
+        lastlineno = firstlineno + len(sourcelines)
+        source = "".join(sourcelines)
+        assert source == "".join(_get_sourcelines(module, firstlineno, lastlineno))
+        self.inlined_sources.add(
+            InlinedSource(
+                module=module.__name__,
+                firstlineno=firstlineno,
+                lastlineno=lastlineno,
+                checksum=_hash_source(source),
+                content=_get_module_content(module),
+            )
+        )
+
+
+@dataclasses.dataclass
+class DynamoCaptureOutput:
+    """
+    Core information generated from Dynamo for fullgraph=True.
+    """
+
+    guarded_codes: list[_GuardedCodeCacheEntry]
+    backend_ids: list[_BackendId]
+
+
+@dataclasses.dataclass
+class _DynamoCodeCacheEntry(DynamoCaptureOutput):
     """
     Contains the serializable information associated with a single code object
     in dynamo. To restore an execution of compiled code, we will need the following
@@ -130,17 +173,17 @@ class _DynamoCodeCacheEntry:
          A code object can be accessed by "{python_module}.{function_name}.{code_source}" .
       8. A boolean flag indicating whether the function is installed to global scope.
       9. A boolean flag indicating whether the function has a compile id.
+      10. Whether or not this code entry was bypassed
     """
 
     python_code: SerializedCode
     python_module: str
     function_names: list[_FunctionId]
-    guarded_codes: list[_GuardedCodeCacheEntry]
     import_sources: dict[str, str]
-    backend_ids: list[_BackendId]
     code_source: Optional[str]
     install_to_global: bool
     has_compile_id: bool = False
+    bypassed: bool = False
 
 
 def _lookup_code(entry: _DynamoCodeCacheEntry) -> types.CodeType:
@@ -264,13 +307,18 @@ def _get_code_source(code: types.CodeType) -> tuple[str, str]:
 @dataclasses.dataclass
 class _DynamoCacheEntry:
     codes: list[_DynamoCodeCacheEntry]
-    inlined_sources: set[InlinedSource]
-    python_version: str = platform.python_version()
-    torch_version: str = torch.__version__
+    source_info: SourceInfo
+    use_cuda: bool
+    system_info: SystemInfo = dataclasses.field(default_factory=SystemInfo.current)
 
     @property
     def backend_ids(self) -> set[_BackendId]:
         return {backend_id for code in self.codes for backend_id in code.backend_ids}
+
+    def check_versions(self) -> None:
+        """Check if the current system is compatible with the system used to create this cache entry."""
+        current_system_info = SystemInfo.current()
+        self.system_info.check_compatibility(current_system_info, self.use_cuda)
 
 
 @CacheArtifactFactory.register
@@ -314,7 +362,6 @@ def _compile_frame_context(
     def _ctx() -> Iterator[None]:
         increment_frame()
         compile_id = get_compile_id(frame_state={})
-        log_dynamo_start(code)
         with (
             compile_context(CompileContext(compile_id)),
             dynamo_timed(
@@ -330,6 +377,7 @@ def _compile_frame_context(
                 },
             ),
         ):
+            log_dynamo_start(code)
             yield
 
     return _ctx()
@@ -359,10 +407,12 @@ class CompilePackage:
 
         self._current_entry: Optional[_DynamoCodeCacheEntry] = None
         self._installed_globals: dict[types.ModuleType, list[str]] = {}
+        # whether cuda is used
+        self._use_cuda = False
 
         # For debugging/testing purpose only.
         self._cached_backends: dict[_BackendId, Any] = {}
-        self._inlined_sources: set[InlinedSource] = set()
+        self._source_info: SourceInfo = SourceInfo(inlined_sources=set())
         self._resume_codes: set[types.CodeType] = set()
         self._initialized = False
         if fn is not None:
@@ -382,21 +432,14 @@ class CompilePackage:
         from .eval_frame import innermost_fn
 
         assert not self._initialized
-        self._inlined_sources = set()
+        self._source_info = SourceInfo(inlined_sources=set())
         self._innermost_fn = innermost_fn(fn)  # type: ignore[assignment]
         assert self._innermost_fn is not None
         if dynamo is not None:
             assert isinstance(dynamo, _DynamoCacheEntry)
-            if dynamo.python_version != platform.python_version():
-                raise RuntimeError(
-                    f"Compile package was created with a different Python version: {dynamo.python_version}"
-                )
-            if dynamo.torch_version != torch.__version__:
-                raise RuntimeError(
-                    f"Compile package was created with a different PyTorch version: {dynamo.torch_version}"
-                )
+            dynamo.check_versions()
             if not ignore_inlined_sources:
-                for code in dynamo.inlined_sources:
+                for code in dynamo.source_info.inlined_sources:
                     m = importlib.import_module(code.module)
                     checksum = _hash_sourcelines(m, code.firstlineno, code.lastlineno)
                     if checksum != code.checksum:
@@ -404,7 +447,7 @@ class CompilePackage:
                             f"Source code changes detected for {code.module} (line {code.firstlineno} - line {code.lastlineno})"
                         )
 
-                self._inlined_sources = dynamo.inlined_sources
+                self._source_info = dynamo.source_info
 
             main, *codes = dynamo.codes
             self._codes = {self._innermost_fn.__code__: main}
@@ -480,6 +523,10 @@ class CompilePackage:
         try:
             yield
         finally:
+            if (
+                entry.bypassed
+            ):  # Remove the code from the cache entry if it's been bypassed
+                del self._codes[code]
             entry.has_compile_id = True
             self._current_entry = None
 
@@ -489,6 +536,8 @@ class CompilePackage:
         dynamo_code: types.CodeType,
     ) -> None:
         assert self._current_entry is not None
+        if self._current_entry.bypassed:
+            return
         guarded_code_entry = _GuardedCodeCacheEntry(
             guards_state=guards_state,
             dynamo_code=SerializedCode.from_code_object(dynamo_code),
@@ -496,25 +545,20 @@ class CompilePackage:
         self._current_entry.guarded_codes.append(guarded_code_entry)
 
     def add_inlined_source(self, sources: list[types.CodeType]) -> None:
+        assert self._current_entry is not None
+        if self._current_entry.bypassed:
+            return
         for code in sources:
             if code in self._resume_codes:
                 continue
-            module = inspect.getmodule(code)
-            if module is None:
-                continue
-            source = inspect.getsource(code)
-            lastlineno = code.co_firstlineno + len(inspect.getsourcelines(code)[0])
-            assert source == "".join(
-                _get_sourcelines(module, code.co_firstlineno, lastlineno)
-            )
-            self._inlined_sources.add(
-                InlinedSource(
-                    module=module.__name__,
-                    firstlineno=code.co_firstlineno,
-                    lastlineno=lastlineno,
-                    checksum=_hash_source(source),
-                )
-            )
+            self._source_info.add_code(code)
+
+    def update_use_cuda(self, graph: Optional[torch.fx.Graph]) -> None:
+        self._use_cuda = _graph_uses_non_cpu(graph)
+
+    def bypass_current_entry(self) -> None:
+        assert self._current_entry is not None
+        self._current_entry.bypassed = True
 
     def add_resume_function(
         self,
@@ -636,7 +680,6 @@ class CompilePackage:
                     check_fn_manager = torch._dynamo.guards.CheckFunctionManager(
                         target_code,
                         guards_state.output_graph,
-                        guards_serialization_mode="load",
                         shape_code_parts=guards_state.shape_code_parts,
                         runtime_global_scope=runtime_global_scope,
                     )
@@ -649,7 +692,9 @@ class CompilePackage:
     def cache_entry(self) -> _DynamoCacheEntry:
         self.validate()
         return _DynamoCacheEntry(
-            codes=list(self._codes.values()), inlined_sources=self._inlined_sources
+            codes=list(self._codes.values()),
+            source_info=self._source_info,
+            use_cuda=self._use_cuda,
         )
 
     @staticmethod
