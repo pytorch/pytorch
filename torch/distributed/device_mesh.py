@@ -767,16 +767,16 @@ if True:  # just to temporarily avoid reindentation
             if not hasattr(self, "_dim_group_names"):
                 raise RuntimeError("DeviceMesh process groups not initialized!")
 
-            if self.ndim > 1 and mesh_dim is None:
+            if self.mesh.ndim > 1 and mesh_dim is None:
                 raise RuntimeError(
-                    f"Found the DeviceMesh have {self.ndim} dimensions",
+                    f"Found the DeviceMesh have {self.mesh.ndim} dimensions",
                     "Optional kwarg `mesh_dim` needs to be specified when device_mesh.ndim > 1.",
                     "If you want to get the list of all the ProcessGroups in the DeviceMesh,"
                     "please use `get_all_groups()` instead.",
                 )
 
             # Quick return if the current device_mesh is a 1D mesh.
-            if self.ndim == 1 and mesh_dim is None:
+            if self.mesh.ndim == 1 and mesh_dim is None:
                 return not_none(_resolve_process_group(self._dim_group_names[0]))
 
             root_mesh = _mesh_resources.get_root_mesh(self)
@@ -804,7 +804,7 @@ if True:  # just to temporarily avoid reindentation
             Returns:
                 A list of :class:`ProcessGroup` object.
             """
-            return [self.get_group(i) for i in range(self.ndim)]
+            return [self.get_group(i) for i in range(self.mesh.ndim)]
 
         @staticmethod
         def from_group(
