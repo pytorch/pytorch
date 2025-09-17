@@ -562,6 +562,7 @@ __all__ = [
     "is_available",
     "is_bf16_supported",
     "is_initialized",
+    "is_tf32_supported",
     "manual_seed",
     "manual_seed_all",
     "max_memory_allocated",
