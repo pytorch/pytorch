@@ -1,3 +1,4 @@
+import logging
 import os
 import subprocess
 import sysconfig
@@ -5,6 +6,9 @@ from typing import Any, Optional
 
 import torch.distributed as dist
 from torch.utils._triton import has_triton
+
+
+logger = logging.getLogger(__name__)
 
 
 def _find_nvshmem_device_library() -> str:
@@ -98,7 +102,7 @@ def enable_triton(lib_dir: Optional[str] = None) -> dict[str, str]:
             key = kwargs["key"]
             device = kwargs["compile"]["device"]
             jit_function = kwargs["fn"].jit_function
-            kernel_cache, *rest = jit_function.device_caches[device]
+            kernel_cache = jit_function.device_caches[device][0]
             kernel = kernel_cache.get(key, None)
             if kernel is not None:
                 kernel.run
@@ -1006,9 +1010,11 @@ if has_triton():
             _semantic=_semantic,
         )
 
+    # Utility for inspecting Triton kernels
+
     triton_kernels: dict = {}
 
-    def log_triton_kernel(kernel) -> None:  # type: ignore[no-untyped-def]
+    def _log_triton_kernel(kernel) -> None:  # type: ignore[no-untyped-def]
         import atexit
         import tempfile
 
@@ -1016,11 +1022,11 @@ if has_triton():
             return
 
         def on_exit() -> None:
-            print("PTX files:")
+            logger.info("PTX files:")
             for kernel in triton_kernels:
-                f = tempfile.NamedTemporaryFile(dir="/tmp", delete=False)
-                f.write(kernel.asm["ptx"].encode("utf-8"))
-                print(f"+- {kernel.name}: {f.name}")
+                with tempfile.NamedTemporaryFile(dir="/tmp", delete=False) as f:
+                    f.write(kernel.asm["ptx"].encode("utf-8"))
+                    logger.info(f"+- {kernel.name}: {f.name}")  # noqa: G004
 
         if len(triton_kernels) == 0:
             atexit.register(on_exit)
