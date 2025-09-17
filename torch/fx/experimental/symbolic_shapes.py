@@ -2068,6 +2068,8 @@ class StatelessSymbolicContext(Generic[_P1, _T1], SymbolicContext):
     # information on how to allocate symbols when recursively fakeifying the base
     # during view fake-ification.
     view_base_context: Optional[SymbolicContext] = None
+    # Maps dimension indices to dynamic names for symbol sharing
+    dynamic_names: Optional[dict[int, str]] = None
     # TODO: add storage offset and stride symbolic_context
 
     def __post_init__(self) -> None:
@@ -3720,6 +3722,9 @@ class ShapeEnv:
         self.var_to_stack: dict[sympy.Symbol, CapturedTraceback] = {}
         # Maps a source to the *original* symbol that was assigned to it
         self.source_to_var: dict[str, sympy.Symbol] = {}
+        # Maps named dynamic dimensions to their shared symbols for symbol sharing
+        # across tensors marked with the same name via mark_dynamic(name=...)
+        self.named_symbols: dict[str, sympy.Symbol] = {}
         # Maps from sympy ints to expressions representing them
         # Populated from equality guards (i.e. a.shape[0] == b.shape[0])
         self.replacements: dict[sympy.Symbol, sympy.Expr] = {}
@@ -4375,6 +4380,15 @@ class ShapeEnv:
         constraint_dims = symbolic_context.constraint_sizes  # type: ignore[attr-defined]
         size = []
         for i, val in enumerate(tensor_size):
+            # Get dynamic name for this dimension if available
+            dynamic_name = None
+            if (
+                hasattr(symbolic_context, "dynamic_names")
+                and symbolic_context.dynamic_names is not None
+                and i in symbolic_context.dynamic_names
+            ):
+                dynamic_name = symbolic_context.dynamic_names[i]
+            
             sym = self.create_symbol(
                 val if i not in hint_overrides else hint_overrides[i],
                 TensorPropertySource(source, TensorProperty.SIZE, i),
@@ -4382,6 +4396,7 @@ class ShapeEnv:
                 constraint_dims[i],
                 do_not_specialize_zero_one=config.backed_size_oblivious,
                 symbolic_context=symbolic_context,
+                dynamic_name=dynamic_name,
             )
             if (
                 isinstance(symbolic_context, StatelessSymbolicContext)
@@ -4923,6 +4938,7 @@ class ShapeEnv:
         positive: Optional[bool] = True,
         do_not_specialize_zero_one: bool = False,
         symbolic_context: Optional[StatelessSymbolicContext] = None,
+        dynamic_name: Optional[str] = None,
     ) -> sympy.Expr:
         """Create a new symbol which is tracked by this ShapeEnv"""
         # check if constraint_dim is actually static integer
@@ -5014,6 +5030,12 @@ class ShapeEnv:
                 return sympy.S.Zero
             else:
                 return sympy.S.One
+        elif dynamic_name is not None and dynamic_name in self.named_symbols:
+            # If we have a named dynamic dimension and a symbol exists for this name,
+            # reuse the existing symbol
+            r = self.named_symbols[dynamic_name]
+            self.source_to_var[source_name] = r
+            self.log.debug("create_symbol %s reused for name %s %s", r, dynamic_name, source.name())
         elif not duck or val not in self.val_to_var:
             # If we're not duck shaping, we always create a new symbol
             # Even if we're duck shaping, if we haven't seen this particular
@@ -5101,6 +5123,10 @@ class ShapeEnv:
                 range_str = ""
 
             r = sympy_expr
+              
+            # If this is a named dynamic dimension, store it for future reuse
+            if dynamic_name is not None:
+                self.named_symbols[dynamic_name] = r
 
             is_debug = config.extended_debug_create_symbol is not None and str(
                 sympy_expr
@@ -5135,16 +5161,6 @@ class ShapeEnv:
                     "val": repr(val),
                     "vr": range_str,
                     "source": source.name(),
-                    "user_stack": structured.from_traceback(
-                        TracingContext.extract_stack()
-                    ),
-                    "stack": structured.from_traceback(
-                        CapturedTraceback.extract(skip=1).summary()
-                    ),
-                },
-            )
-
-            self.counter["create_symbol"] += 1
         else:
             # This implements duck-shaping: input sizes that match are assigned
             # the same symint

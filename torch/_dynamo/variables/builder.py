@@ -3448,6 +3448,9 @@ def _automatic_dynamic(
         dynamic_sizes.append(dynamic_size)
         dynamic_strides.append(dynamic_stride)
 
+    # Extract dynamic names if present
+    dynamic_names = getattr(e, "_dynamo_dynamic_names", None)
+
     return StatefulSymbolicContext(
         dynamic_sizes=dynamic_sizes,
         dynamic_strides=dynamic_strides,
@@ -3457,6 +3460,7 @@ def _automatic_dynamic(
         view_base_context=view_base_context,
         tensor_source=source,
         shape_env_to_source_to_symbol_cache=shape_env_to_source_to_symbol_cache,
+        dynamic_names=dynamic_names,
     )
 
 
