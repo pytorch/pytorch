@@ -16,8 +16,8 @@ Features
 Requirements
 ------------
 
-- NVIDIA GPU with CUDA support
-- NVIDIA driver version r570 or newer
+- CUDA-compatible GPU
+- CUDA driver version r570 or newer
 - PyNVML library (``pip install pynvml``)
 - Python 3.7+
 
@@ -184,7 +184,7 @@ Examples
 
 See the following example files:
 - ``torch/distributed/elastic/examples/example_gpu_health_check.py``: Comprehensive usage examples
-- ``test/distributed/elastic/agent/server/test/gpu_health_check_nvidia_test.py``: Test suite demonstrating functionality
+- ``test/distributed/elastic/agent/server/test/gpu_health_check_test.py``: Test suite demonstrating functionality
 
 Integration with Distributed Training
 -------------------------------------
@@ -203,7 +203,7 @@ Common Issues
 ~~~~~~~~~~~~~
 
 1. **"PyNVML not installed"**: Install PyNVML with ``pip install pynvml``
-2. **"Driver version too old"**: Update to NVIDIA driver version r570 or newer
+2. **"Driver version too old"**: Update to CUDA driver version r570 or newer
 3. **"GPU health monitoring not available"**: Check GPU availability and driver compatibility
 
 Debug Information

@@ -8,10 +8,10 @@
 # LICENSE file in the root directory of this source tree.
 
 """
-Test script for NVIDIA-style GPU health check functionality.
+Test script for CUDA GPU health check functionality.
 
 This script demonstrates the usage of the GPU health check system
-based on the NVIDIA resiliency extension implementation.
+based on the NVIDIA Resiliency Extension implementation.
 """
 
 import time

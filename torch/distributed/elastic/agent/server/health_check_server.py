@@ -62,7 +62,7 @@ class GPUHealthCheckServer(HealthCheckServer):
     GPU-aware health check monitoring server for distributed elastic training.
     
     This server extends the basic HealthCheckServer with GPU health monitoring
-    capabilities based on the NVIDIA resiliency extension implementation.
+    capabilities based on the NVIDIA Resiliency Extension implementation.
     
     Args:
         alive_callback: Callable[[], int], callback to last progress time of agent

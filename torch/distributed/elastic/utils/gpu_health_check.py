@@ -10,7 +10,7 @@
 GPU Health Check utilities for distributed elastic training.
 
 This module provides GPU health monitoring capabilities based on the NVIDIA
-resiliency extension implementation, including GPU recovery action detection
+Resiliency Extension implementation, including GPU recovery action detection
 and health status monitoring.
 """
 

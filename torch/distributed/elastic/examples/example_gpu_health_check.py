@@ -177,7 +177,7 @@ def main():
         print()
         print("Note: GPU health monitoring requires:")
         print("1. PyNVML library installed (pip install pynvml)")
-        print("2. NVIDIA GPU driver version r570 or newer")
+        print("2. CUDA driver version r570 or newer")
         print("3. CUDA-compatible GPU")
         
     except Exception as e:
