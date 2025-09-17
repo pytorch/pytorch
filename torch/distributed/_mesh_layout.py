@@ -7,6 +7,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from itertools import product
 
+import torch
 from torch.distributed._pycute import (
     coalesce,
     complement,
@@ -223,11 +224,138 @@ class _MeshLayout(Layout):
 
     def check_overlap(self) -> bool:
         """
-        Check if the layout has any overlap between the ranks.
+        Check if the layout has any overlap between the ranks it generates.
+
+        This method determines whether multiple coordinates can map to the same rank,
+        which would indicate an invalid layout for distributed computing purposes.
+
+        Algorithm:
+        1. Sort dimensions by stride (smallest stride first)
+        2. For each dimension, check if:
+           - It has the same stride as previous dimension (duplicate mapping)
+           - Its stride overlaps with the previous dimension's span
+
+        A dimension's "span" is size * stride, representing the address space it covers.
+
+        Example 1 - Valid (no overlap):
+        Layout: sizes=(2,3), strides=(6,1)
+        - Dim 1: stride=1, span=3*1=3, covers addresses [0,1,2]
+        - Dim 0: stride=6, span=2*6=12, covers addresses [0,6]
+        → No overlap since 6 > 3
+
+        Example 2 - Invalid (overlap):
+        Layout: sizes=(2,3), strides=(2,1)
+        - Dim 1: stride=1, span=3*1=3, covers addresses [0,1,2]
+        - Dim 0: stride=2, span=2*2=4, covers addresses [0,2]
+        → Overlap! stride=2 < span=3, so addresses [0,2] are duplicated
+
+        Returns:
+            bool: True if no overlap exists (valid layout), False if overlap detected
         """
-        previous_span = 1
+        previous_span = -1
+        previous_stride = -1
         for size, stride in sorted(self.sizes_and_strides, key=lambda x: x[1]):
-            if size * stride <= previous_span:
+            if previous_stride == stride or stride < previous_span:
                 return False
+            previous_stride = stride
             previous_span = size * stride
         return True
+
+    def to_remapping_tensor(
+        self,
+        original_mesh_tensor: torch.Tensor,
+        world_size: int,
+    ) -> torch.Tensor:
+        """
+        Convert this layout into a tensor representation that maps the logical mesh
+        structure to actual device ranks, handling cases where the mesh doesn't use
+        consecutive ranks or doesn't span the full world size (Neither is CuTe representible).
+
+        With this method, the cute layout serves as the backend of indices bookkeeping for the
+        mesh tensor when it comes to flatten, unflatten and slicing operations. The actual mesh
+        tensor still represents the actual device assignment and ranks.
+
+        Overview:
+        1. Generate logical process groups using this layout's structure
+        2. Check if the original mesh uses consecutive ranks (0,1,2,...)
+        3. If consecutive: return the logical groups directly
+        4. If non-consecutive or partial world: map logical indices to actual ranks
+
+        Examples:
+
+        Case 1 - Consecutive ranks, full world:
+        original_mesh_tensor = [[0,1],[2,3]]  # 2x2 mesh, ranks 0-3
+        world_size = 4
+        layout = Layout(2:2)
+        → Returns logical groups directly: [[0,2],[1,3]]
+
+        Case 2 - Non-consecutive ranks:
+        original_mesh_tensor = [[10,20],[30,40]]  # custom rank assignment
+        world_size = 4
+        layout = Layout(2:2)
+        → Maps logical indices to actual ranks: [[[10,30],[20,40]]]
+
+        Case 3 - Partial world (stride scaling needed):
+        original_mesh_tensor = [[0,1]]  # 1x2 mesh in world_size=8
+        world_size = 8
+        layout = Layout((2,), (4,))  # every 4th rank
+        → Scale down stride: (4,) → (1,) to fit mesh size
+        → Map scaled indices to actual ranks: [[0,1]]
+
+        Args:
+            original_mesh_tensor: The concrete mesh tensor with actual device ranks
+            world_size: Total number of ranks in the distributed system
+
+        Returns:
+            torch.Tensor: A tensor representing the actual device rank from original_mesh_tensor
+        """
+
+        def scale_stride(scale: int, strides: IntTuple) -> IntTuple:
+            """
+            Recursively scale down strides by a factor to fit within smaller mesh.
+
+            When layout expects world_size=8 but mesh only has 4 elements,
+            we need to scale strides down by factor of 2 to generate valid indices.
+
+            Example: stride=4 with scale=2 → stride=2 (or keep as-is if stride < scale)
+            """
+            if is_int(strides):
+                return strides if strides < scale else strides // scale
+            else:
+                return tuple(scale_stride(scale, stride) for stride in strides)
+
+        # Create tensor representation of the mesh
+        pg_ranks_by_dim = self.global_ranks(original_mesh_tensor.numel())
+        sizes = flatten(self.sizes)
+        tensor = torch.tensor(pg_ranks_by_dim, device="cpu", dtype=torch.int).view(
+            -1,
+            *sizes,  # type: ignore[arg-type]
+        )
+
+        # When the mesh tensor value can be represented as a cute layout, we can use the global ranks
+        # generated by the layout directly for the mesh tensor. Otherwise, the ranks generated by the layout
+        # will be used as indices to get the actual ranks from the original mesh tensor.
+        if torch.equal(
+            original_mesh_tensor.flatten().sort().values,
+            torch.arange(
+                original_mesh_tensor.numel(),
+                device=original_mesh_tensor.device,
+                dtype=original_mesh_tensor.dtype,
+            ),
+        ):
+            return tensor
+
+        # This is important because the indices generated by the layout will be larger than the original mesh tensor
+        # when the original mesh tensor does not contain all ranks in the world. So we need to scale the layout's stride
+        # by world_size // mesh_tensor.numel() so that the indices generated by the layout will be within the range of
+        # the original mesh tensor.
+        if original_mesh_tensor.numel() != world_size:
+            scale_factor = world_size // original_mesh_tensor.numel()
+            scaled_strides = scale_stride(scale_factor, self.strides)
+            scaled_layout = _MeshLayout(self.sizes, scaled_strides)
+            pg_ranks_by_dim = scaled_layout.global_ranks(original_mesh_tensor.numel())
+            tensor = torch.tensor(pg_ranks_by_dim, device="cpu", dtype=torch.int).view(
+                -1,
+                *sizes,  # type: ignore[arg-type]
+            )
+        return original_mesh_tensor.flatten()[tensor]
