@@ -1603,14 +1603,15 @@ def get_cpp_torch_device_options(
                 raise OSError(xpu_error_string)
             include_dirs += [os.path.join(ze_root, "include")]
             libraries_dirs += [os.path.join(ze_root, "lib")]
-            libraries += ["c10_xpu", "sycl", "ze_loader", "torch_xpu"]
         else:
             # Suppress multi-line comment warnings in sycl headers
             cflags += ["Wno-comment"]
-            libraries += ["c10_xpu", "sycl", "ze_loader", "torch_xpu"]
-
             if not find_library("ze_loader"):
                 raise OSError(xpu_error_string)
+
+        libraries += ["ze_loader", "sycl"]
+        if link_libtorch:
+            libraries += ["c10_xpu", "torch_xpu"]
 
     if device_type == "mps":
         definitions.append(" USE_MPS")
