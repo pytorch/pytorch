@@ -4,8 +4,6 @@
 #include <c10/core/impl/HermeticPyObjectTLS.h>
 #include <c10/core/impl/PythonDispatcherTLS.h>
 #include <c10/util/irange.h>
-#include <pybind11/operators.h>
-#include <pybind11/pybind11.h>
 #include <pybind11/pytypes.h>
 #include <torch/csrc/Device.h>
 #include <torch/csrc/DynamicTypes.h>
@@ -839,19 +837,19 @@ static bool arg_type_tensor_or_tensor_list_like(py::handle arg) {
 
 #define FOR_EACH_DTENSOR_INTERNED_STRING(_)                   \
   MAYBE_FOR_EACH_PYTHON_3_10_MINUS_DTENSOR_INTERNED_STRING(_) \
-  _(_comparison_key)                        \
-  _(_local_tensor)                          \
-  _(_spec)                                  \
-  _(args_schema)                            \
-  _(has_symints)                            \
-  _(kwargs_schema)                          \
-  _(op)                                     \
-  _(schema_info)                            \
-  _(shape)                                  \
-  _(size)                                   \
-  _(static_argnum)                          \
-  _(static_kwargkey)                        \
-  _(stride)                                 \
+  _(_comparison_key)                                          \
+  _(_local_tensor)                                            \
+  _(_spec)                                                    \
+  _(args_schema)                                              \
+  _(has_symints)                                              \
+  _(kwargs_schema)                                            \
+  _(op)                                                       \
+  _(schema_info)                                              \
+  _(shape)                                                    \
+  _(size)                                                     \
+  _(static_argnum)                                            \
+  _(static_kwargkey)                                          \
+  _(stride)                                                   \
   _(tensor_meta)
 
 struct DTensorInternedStrings {
@@ -1144,118 +1142,6 @@ static py::list int_array_to_list(IntArrayRef arr) {
   }
   return result;
 }
-
-// XXX: Move this somewhere
-static const char placement_class_docstring[] =
-    "The base class for the Placement type, where it describes how a DTensor is placed onto the\n"
-    "``DeviceMesh``. ``Placement`` and ``DeviceMesh`` together could describe the DTensor Layout.\n"
-    "It is the base class of the three main DTensor Placement types: ``Shard``, ``Replicate``,\n"
-    "and ``Partial``.\n"
-    "\n"
-    "This class is not meant to be used directly, mainly served as a typing stub.\n";
-
-class Placement {
- public:
-  // Not pure virtual so that Python subclasses can be constructed.
-  virtual ~Placement() = default;
-
-  virtual bool is_shard(std::optional<int64_t> dim) const {
-    return false;
-  }
-
-  virtual bool is_replicate() const {
-    return false;
-  }
-
-  virtual bool is_partial(std::optional<std::string_view> reduce_op = std::nullopt) const {
-    return false;
-  }
-};
-
-class Shard : public Placement {
- public:
-  int64_t dim;
-  explicit Shard(int64_t dim_) : dim(dim_) {}
-
-  ~Shard() override = default;
-
-  bool is_shard(std::optional<int64_t> dim_) const override {
-    return !dim_.has_value() || *dim_ == dim;
-  }
-
-  bool operator==(const Shard& rhs) const {
-    return dim == rhs.dim;
-  }
-
-  bool operator!=(const Shard& rhs) const {
-    return !operator==(rhs);
-  }
-};
-
-class StridedShard : public Shard {
- public:
-  int64_t split_factor;
-  explicit StridedShard(int64_t dim, int64_t split_factor_)
-      : Shard(dim), split_factor(split_factor_) {}
-
-  bool operator==(const StridedShard& rhs) const {
-    return dim == rhs.dim && split_factor == rhs.split_factor;
-  }
-
-  bool operator==(const Shard& rhs) const {
-    if (auto* rhs_strided = dynamic_cast<const StridedShard*>(&rhs)) {
-      return operator==(*rhs_strided);
-    }
-    // TODO: this is to avoid extra all-gather in dtensor op dispatch
-    // note that sharding prop wouldnot produce _StridedShard and a
-    // placement inequality would introduce an all-gather for resharding
-    return dim == rhs.dim;
-  }
-
-  bool operator!=(const Shard& rhs) const {
-    return !operator==(rhs);
-  }
-};
-
-class Replicate : public Placement {
- public:
-  ~Replicate() override = default;
-
-  bool is_replicate() const override {
-    return true;
-  }
-
-  bool operator==(const Replicate& rhs) const {
-    return true;
-  }
-
-  bool operator!=(const Replicate& rhs) const {
-    return false;
-  }
-};
-
-class Partial : public Placement {
- public:
-  std::string reduce_op;
-
-  Partial() : Partial("sum") {}
-
-  explicit Partial(std::string reduce_op_) : reduce_op(std::move(reduce_op_)) {}
-
-  ~Partial() override = default;
-
-  bool is_partial(std::optional<std::string_view> op = std::nullopt) const override {
-    return !op.has_value() || *op == reduce_op;
-  }
-
-  bool operator==(const Partial& rhs) const {
-    return reduce_op == rhs.reduce_op;
-  }
-
-  bool operator!=(const Partial& rhs) const {
-    return !operator==(rhs);
-  }
-};
 
 static PyObject* DTensor_compute_global_tensor_info_impl(
     const Tensor& tensor,
@@ -3027,53 +2913,5 @@ bool THPVariable_initModule(PyObject* module) {
   }
   PyModule_AddFunctions(module, extra_functions);
 
-  // TODO: Consider porting to nanobind instead since these types are
-  // isolated and don't touch anything else.
-  auto py_module = py::reinterpret_borrow<py::module>(module);
-  py::class_<Placement>(py_module, "Placement", placement_class_docstring)
-      .def(py::init<>())
-      .def(
-          "is_partial",
-          &Placement::is_partial,
-          py::arg("reduce_op") = py::none())
-      .def("is_replicate", &Placement::is_replicate)
-      .def("is_shard", &Placement::is_shard, py::arg("dim") = py::none());
-  py::class_<Shard, Placement>(py_module, "Shard")
-      .def(py::init<int64_t>(), py::arg("dim"))
-      .def_readonly("dim", &Shard::dim)
-      .def("is_shard", &Shard::is_shard, py::arg("dim") = py::none())
-      .def(
-          "__eq__",
-          [](const Shard& lhs, const Shard& rhs) { return lhs == rhs; },
-          py::is_operator());
-  py::class_<StridedShard, Shard>(py_module, "StridedShard")
-      .def(
-          py::init<int64_t, int64_t>(),
-          py::arg("dim"),
-          py::kw_only(),
-          py::arg("split_factor"))
-      .def_readonly("split_factor", &StridedShard::split_factor)
-      .def("is_shard", &StridedShard::is_shard, py::arg("dim") = py::none())
-      .def(
-          "__eq__",
-          [](const StridedShard& lhs, const Shard& rhs) { return lhs == rhs; },
-          py::is_operator());
-  py::class_<Replicate, Placement>(py_module, "Replicate")
-      .def(py::init())
-      .def("is_replicate", &Replicate::is_replicate)
-      .def(
-          "__eq__",
-          [](const Replicate& lhs, const Replicate& rhs) { return lhs == rhs; },
-          py::is_operator());
-  py::class_<Partial, Placement>(py_module, "Partial")
-      .def(py::init<>())
-      .def(py::init<std::string>(), py::arg("reduce_op"))
-      .def_readonly("reduce_op", &Partial::reduce_op)
-      .def(
-          "is_partial", &Partial::is_partial, py::arg("reduce_op") = py::none())
-      .def(
-          "__eq__",
-          [](const Partial& lhs, const Partial& rhs) { return lhs == rhs; },
-          py::is_operator());
   return true;
 }
