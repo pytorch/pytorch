@@ -11,6 +11,7 @@ from torch.autograd.grad_mode import no_grad
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor.examples.flex_perf import (
     add_metrics_to_result,
+    benchmark_torch_function_in_microseconds,
     Experiment,
     ExperimentConfig,
     ExperimentResults,
@@ -89,7 +90,7 @@ def flex_attn_example(world_size: int, rank: int) -> None:
     # we first test the case where mask is the same across batches
     block_mask = compiled_create_block_mask(
         causal_mask,
-        B=1,
+        B=B,
         H=1,
         Q_LEN=S,
         KV_LEN=S,
@@ -126,7 +127,7 @@ def flex_attn_example(world_size: int, rank: int) -> None:
         create_cp_block_mask,
     )
 
-    _cp_options.enable_load_balance = False
+    _cp_options.enable_load_balance = True
 
     _set_cp_global_var("cp_shard_dim", seq_dim)  # shard on sequence dim
 
@@ -157,27 +158,33 @@ def flex_attn_example(world_size: int, rank: int) -> None:
             buffer_seq_dims=[seq_dim] * 3,
             load_balancer=None,
         ):
-            forward_compiled_time = (
-                benchmark_torch_function_in_microseconds(
-                    compiled_flex_attention,
-                    cp_q,
-                    cp_k,
-                    cp_v,
-                    block_mask=cp_block_mask,
-                    return_lse=True,
-                )
-                if False
-                else 1400.00
-            )  # TODO: CP is broken for now
+            # TODO: compiled flex_attention doesn't work with reuse of block_mask
+            import torch.nn.attention.flex_attention as fa
+
+            fa._FLEX_ATTENTION_DISABLE_COMPILE_DEBUG = True
+            forward_compiled_time = benchmark_torch_function_in_microseconds(
+                # compiled_flex_attention,
+                flex_attention,
+                cp_q,
+                cp_k,
+                cp_v,
+                block_mask=cp_block_mask,
+                enable_gqa=True,
+            )
             backward_compiled_time = None
 
             cp_q.requires_grad = False
             cp_k.requires_grad = False
             cp_v.requires_grad = False
 
+    print(f"rank: {rank} / {world_size}, cp_flex_attn completes")
+
     # compute sparsity for cp block_mask
     total_size = cp_block_mask.numel() * world_size
     computed_blocks = cp_block_mask.kv_num_blocks.sum()
+    if cp_block_mask.full_kv_num_blocks is not None:
+        computed_blocks += cp_block_mask.full_kv_num_blocks.sum()
+
     computed_size = (
         computed_blocks.item()
         * cp_block_mask.BLOCK_SIZE[0]
@@ -195,8 +202,6 @@ def flex_attn_example(world_size: int, rank: int) -> None:
     result = add_metrics_to_result(cp_exp_config, exp_result)
 
     print(f"rank: {rank} / {world_size}, sparsity={sparsity}")
-    print(f"rank: {rank} / {world_size}, cp_block_mask={cp_block_mask.__repr__}")
-    print(f"kv_num_blocks={cp_block_mask.kv_num_blocks}")
     print_results(
         [Experiment(cp_exp_config, {"cp_flex_attn": result})],
         save_path=None,

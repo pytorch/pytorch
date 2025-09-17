@@ -778,7 +778,7 @@ def print_results(
             table_data[key].append(value)
 
     # Add metrics grouped by backend
-    all_backends = results[0].config.backends + ["flex_attn"]
+    all_backends = results[0].config.backends + ["flex_attn", "cp_flex_attn"]
     for backend in all_backends:
         if backend in results[0].results:
             # Forward metrics grouped by backend
