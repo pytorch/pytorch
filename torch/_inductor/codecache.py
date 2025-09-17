@@ -1777,7 +1777,7 @@ class AotCodeCompiler:
 
         header_code = ""
         header_path = ""
-        if config.aot_inductor.compile_standalone:
+        if not config.aot_inductor.dynamic_linkage:
             # to link statically, we also need a header file
             with open(
                 os.path.join(
@@ -1827,7 +1827,7 @@ class AotCodeCompiler:
             generated_files.append(wrapper_path)
             if not config.aot_inductor.package_cpp_only:
                 generated_files.append(kernel_path)
-            if config.aot_inductor.compile_standalone:
+            if not config.aot_inductor.dynamic_linkage:
                 generated_files.append(header_path)
 
         output_code_log.info("Wrapper code written to: %s", wrapper_path)
@@ -1850,7 +1850,7 @@ class AotCodeCompiler:
             },
             payload_fn=lambda: kernel_code,
         )
-        if config.aot_inductor.compile_standalone:
+        if not config.aot_inductor.dynamic_linkage:
             output_code_log.info("Header code written to: %s", header_path)
             trace_structured(
                 "graph_dump",
@@ -2373,6 +2373,26 @@ end
             )
 
             obj_srcs = [wrapper_o, kernel_o, consts_o, *gpu_kernels_o, *cubins_o]
+            if config.aot_inductor.cross_target_platform == "windows":
+                windows_shim_lib_path = os.path.join(output_dir, "libshim.lib")
+                def_file_path = os.path.join(
+                    os.path.dirname(os.path.dirname(__file__)),
+                    "csrc",
+                    "inductor",
+                    "aoti_runtime",
+                    "windows_symbol_exports.def",
+                )
+                subprocess.run(
+                    [
+                        "x86_64-w64-mingw32-dlltool",
+                        "-d",
+                        def_file_path,
+                        "-l",
+                        windows_shim_lib_path,
+                    ]
+                )
+                # windows_shim_lib must be after the .o files
+                obj_srcs.append(windows_shim_lib_path)
             so_builder = CppBuilder(
                 name=output_name,
                 sources=obj_srcs,

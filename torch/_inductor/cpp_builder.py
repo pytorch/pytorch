@@ -332,6 +332,16 @@ def check_msvc_cl_language_id(compiler: str) -> None:
 
 
 def get_cpp_compiler() -> str:
+    if (
+        config.aot_inductor.cross_target_platform == "windows"
+        and sys.platform != "win32"
+    ):
+        # we're doing cross-compilation
+        compiler = "x86_64-w64-mingw32-g++"
+        if not config.aot_inductor.package_cpp_only:
+            check_compiler_exist_windows(compiler)
+        return compiler
+
     if _IS_WINDOWS:
         compiler = os.environ.get("CXX", "cl")
         compiler = normalize_path_separator(compiler)
@@ -1087,7 +1097,7 @@ def _get_torch_related_args(
     from torch.utils.cpp_extension import include_paths, TORCH_LIB_PATH
 
     libraries = []
-    include_dirs = config.aot_inductor.libtorch_free_headers or include_paths()
+    include_dirs = include_paths()
 
     if config.aot_inductor.link_libtorch:
         libraries_dirs = [TORCH_LIB_PATH]
@@ -1227,6 +1237,9 @@ def _get_openmp_args(
     lib_dir_paths: list[str] = []
     libs: list[str] = []
     passthrough_args: list[str] = []
+
+    if config.aot_inductor.cross_target_platform == "windows":
+        return cflags, ldflags, include_dir_paths, lib_dir_paths, libs, passthrough_args
     if _IS_MACOS:
         # Per https://mac.r-project.org/openmp/ right way to pass `openmp` flags to MacOS is via `-Xclang`
         cflags.append("Xclang")
@@ -1589,6 +1602,8 @@ def get_cpp_torch_device_options(
                 libraries += ["cuda"]
             else:
                 libraries += ["c10_cuda", "cuda", "torch_cuda"]
+            if config.aot_inductor.cross_target_platform == "windows":
+                libraries += ["cudart"]
             _transform_cuda_paths(libraries_dirs)
 
     if device_type == "xpu":
@@ -2028,6 +2043,8 @@ class CppBuilder:
         _create_if_dir_not_exist(_build_tmp_dir)
 
         build_cmd = self.get_command_line()
+        print(build_cmd)
+        # breakpoint()
         run_compile_cmd(build_cmd, cwd=_build_tmp_dir)
         _remove_dir(_build_tmp_dir)
 
@@ -2043,7 +2060,7 @@ class CppBuilder:
 
         definitions = " ".join(self._build_option.get_definitions())
         target_library_type = (
-            "STATIC" if config.aot_inductor.compile_standalone else "SHARED"
+            "STATIC" if not config.aot_inductor.dynamic_linkage else "SHARED"
         )
 
         contents = textwrap.dedent(
@@ -2058,10 +2075,7 @@ class CppBuilder:
             """
         )
 
-        if (
-            not config.aot_inductor.compile_standalone
-            or config.test_configs.use_libtorch
-        ):
+        if config.aot_inductor.link_libtorch or config.test_configs.use_libtorch:
             # When compile_standalone is True, the generated cpp project should
             # not use Torch. But for unit testing purpose, we need to use Torch here.
             contents += textwrap.dedent(
@@ -2196,10 +2210,7 @@ class CppBuilder:
                 )
 
     def save_link_cmd_to_cmake(self, cmake_path: str) -> None:
-        if (
-            config.aot_inductor.compile_standalone
-            and not config.test_configs.use_libtorch
-        ):
+        if config.aot_inductor.link_libtorch and not config.test_configs.use_libtorch:
             # When compile_standalone is True, do not link with libtorch
             return
 
