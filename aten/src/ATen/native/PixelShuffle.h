@@ -13,7 +13,7 @@ inline void check_pixel_shuffle_shapes(const Tensor& self, int64_t upscale_facto
               upscale_factor);
   int64_t c = self.size(-3);
   uint64_t upscale_factor_squared;
-  TORCH_CHECK(!(c10::mul_overflows(upscale_factor, upscale_factor, &upscale_factor_squared)), 
+  TORCH_CHECK(!(c10::mul_overflows(upscale_factor, upscale_factor, &upscale_factor_squared)),
         "upscale factor is too large, (upscale_factor}^2 overflowed: upscale_factor=", upscale_factor);
   TORCH_CHECK(c % static_cast<int64_t>(upscale_factor_squared) == 0,
               "pixel_shuffle expects its input's 'channel' dimension to be divisible by the square of "
