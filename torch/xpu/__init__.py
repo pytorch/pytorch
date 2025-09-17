@@ -77,6 +77,13 @@ def is_bf16_supported(including_emulation: bool = True) -> bool:
     )
 
 
+def is_tf32_supported() -> bool:
+    r"""Return a bool indicating if the current XPU device supports dtype tf32."""
+    if not is_available():
+        return False
+    return torch.xpu.get_device_properties().has_tf32
+
+
 def is_initialized():
     r"""Return whether PyTorch's XPU state has been initialized."""
     return _initialized and not _is_in_bad_fork()

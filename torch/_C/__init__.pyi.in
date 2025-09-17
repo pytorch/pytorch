@@ -2395,6 +2395,7 @@ class _XpuDeviceProperties:
     architecture: _int
     type: str
     uuid: Any
+    has_tf32: _bool
 
 # Defined in torch/csrc/xpu/Stream.cpp
 class _XpuStreamBase(Stream):

@@ -190,6 +190,20 @@ void initDeviceProperties(DeviceProp* device_prop, DeviceIndex device) {
   AT_FORALL_XPU_EXP_DEVICE_PROPERTIES(ASSIGN_EXP_DEVICE_PROP);
 #endif
 
+  // The following properties are experimental and may be removed or altered.
+  auto is_tf32_supported = [](const sycl::device& dev) -> bool {
+    auto combinations = dev.get_info<
+        sycl::ext::oneapi::experimental::info::device::matrix_combinations>();
+    return std::any_of(
+        combinations.begin(),
+        combinations.end(),
+        [](const sycl::ext::oneapi::experimental::matrix::combination& comb) {
+          return comb.atype ==
+              sycl::ext::oneapi::experimental::matrix::matrix_type::tf32;
+        });
+  };
+  device_prop->has_tf32 = is_tf32_supported(raw_device);
+
   return;
 }
 
