@@ -1245,9 +1245,8 @@ class TestNestedTensorDeviceType(NestedTensorTestCase):
         result = nt.share_memory_()
         self.assertIs(result, nt)
 
-        # Verify values/offsets are in shared memory
-        self.assertTrue(nt._values.is_shared())
-        self.assertTrue(nt._offsets.is_shared())
+        # Verify in shared memory
+        self.assertTrue(nt.is_shared())
 
     @dtypes(torch.float, torch.float16, torch.double)
     def test_nested_tensor_indexing(self, device, dtype):
