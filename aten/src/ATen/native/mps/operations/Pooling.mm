@@ -535,37 +535,14 @@ static void max_unpool_out_mps_template(const Tensor& input,
   output.fill_(0);
 
   if (indices.defined() && indices.numel() > 0) {
-    int64_t channels = 0;
-    [[maybe_unused]] int64_t output_depth = 1;
-    [[maybe_unused]] int64_t output_height = 1;
-    [[maybe_unused]] int64_t output_width = 1;
-
-    if (pooling_dims == 3) {
-      channels = input.ndimension() == 4 ? input.size(0) : input.size(0) * input.size(1);
-      output_depth = output.size(-3);
-      output_height = output.size(-2);
-      output_width = output.size(-1);
-    } else {
-      channels = input.ndimension() == 3 ? input.size(0) : input.size(0) * input.size(1);
-      output_height = output.size(-2);
-      output_width = output.size(-1);
-    }
-
-    int64_t output_image_size = 1;
-    for (int dim = leading_dims; dim < dims; ++dim) {
-      output_image_size *= output.size(dim);
-    }
+    auto output_image_size = c10::multiply_integers(output_size_);
 
     int64_t min_idx = indices.min().item<int64_t>();
     int64_t max_idx = indices.max().item<int64_t>();
 
     if (min_idx < 0 || max_idx >= output_image_size) {
       int64_t error_idx = (min_idx < 0) ? min_idx : max_idx;
-        TORCH_CHECK(false,
-                    "Found an invalid max index: ",
-                    error_idx,
-                    "for output tensor of shape ", output.shape());
-      }
+      TORCH_CHECK(false, "Found an invalid max index: ", error_idx, " for output tensor of shape ", output_size_);
     }
   }
 

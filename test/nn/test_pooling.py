@@ -27,7 +27,6 @@ from torch.testing._internal.common_device_type import (
     largeTensorTest,
     onlyCPU,
     onlyCUDA,
-    onlyMPS,
     onlyNativeDeviceTypes,
     skipCUDAIfRocm,
     TEST_WITH_ROCM,
@@ -1387,7 +1386,6 @@ torch.cuda.synchronize()
                 indices,
             )
 
-    @onlyMPS
     def test_max_unpool_invalid_indices(self):
         input = torch.randn(1, 1, 2, 2)
         negative_indices = torch.tensor([[[[-1, 0], [0, 2]]]], dtype=torch.int64)
