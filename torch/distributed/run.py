@@ -77,7 +77,9 @@ Single-node multi-worker
 .. note:: ``--nproc-per-node`` may be
           ``"gpu"`` (spawn one process per GPU),
           ``"cpu"`` (spawn one process per CPU),
+          ``"xpu"`` (spawn one process per XPU),
           ``"auto"`` (equivalent to ``"gpu"`` if CUDA is available,
+          else equivalent to ``"xpu"`` if XPU is available,
           else equivalent to ``"cpu"``),
           or an integer specifying the number of processes.
           See `torch.distributed.run.determine_local_world_size
@@ -413,7 +415,7 @@ def get_args_parser() -> ArgumentParser:
         action=env,
         type=str,
         default="1",
-        help="Number of workers per node; supported values: [auto, cpu, gpu, int].",
+        help="Number of workers per node; supported values: [auto, cpu, gpu, xpu, int].",
     )
 
     #
@@ -705,21 +707,20 @@ def determine_local_world_size(nproc_per_node: str):
                 raise ValueError("Cuda is not available.") from e
             device_type = "gpu"
             num_proc = torch.cuda.device_count()
+        elif nproc_per_node == "xpu":
+            if not torch.xpu.is_available():
+                raise ValueError("Xpu is not available.") from e
+            device_type = "xpu"
+            num_proc = torch.xpu.device_count()
         elif nproc_per_node == torch._C._get_privateuse1_backend_name():
             if not _get_custom_mod_func("is_available")():
                 raise ValueError(f"{nproc_per_node} is not available.") from e
             device_type = nproc_per_node
             num_proc = _get_custom_mod_func("device_count")()
         elif nproc_per_node == "auto":
-            if torch.cuda.is_available():
-                num_proc = torch.cuda.device_count()
-                device_type = "gpu"
-            elif (
-                hasattr(torch, torch._C._get_privateuse1_backend_name())
-                and _get_custom_mod_func("is_available")()
-            ):
-                num_proc = _get_custom_mod_func("device_count")()
-                device_type = torch._C._get_privateuse1_backend_name()
+            if torch.accelerator.is_available():
+                num_proc = torch.accelerator.device_count()
+                device_type = torch.accelerator.current_accelerator().type  # type: ignore[union-attr]
             else:
                 num_proc = os.cpu_count()
                 device_type = "cpu"
