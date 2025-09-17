@@ -8,6 +8,7 @@ import subprocess
 from pathlib import Path
 
 from setuptools import distutils  # type: ignore[import,attr-defined]
+from packaging.version import Version
 
 
 UNKNOWN = "Unknown"
@@ -49,29 +50,46 @@ def get_tag(pytorch_root: str | Path) -> str:
 
 
 def get_torch_version(sha: str | None = None) -> str:
+    pytorch_root = Path(__file__).absolute().parent.parent
     # If building from a source distribution, the PKG-INFO file will be present
     # and will contain the version information.
     # Otherwise, the version will be in version.txt, possibly extended with
     # the git commit SHA.
-    pytorch_root = Path(__file__).absolute().parent.parent
     pkg_info_path = pytorch_root / "PKG-INFO"
     if pkg_info_path.exists():
         with open(pkg_info_path) as f:
             pkg_info = email.message_from_file(f)
-        version = pkg_info["Version"]
+        sdist_version = pkg_info["Version"]
     else:
-        version = open(pytorch_root / "version.txt").read().strip()
-
-        if os.getenv("PYTORCH_BUILD_VERSION"):
-            assert os.getenv("PYTORCH_BUILD_NUMBER") is not None
-            build_number = int(os.getenv("PYTORCH_BUILD_NUMBER", ""))
-            version = os.getenv("PYTORCH_BUILD_VERSION", "")
-            if build_number > 1:
-                version += ".post" + str(build_number)
-        elif sha != UNKNOWN:
-            if sha is None:
-                sha = get_sha(pytorch_root)
-            version += "+git" + sha[:7]
+        sdist_version = None
+    version = open(pytorch_root / "version.txt").read().strip()
+    origin = "version.txt"
+    if os.getenv("PYTORCH_BUILD_VERSION"):
+        assert os.getenv("PYTORCH_BUILD_NUMBER") is not None
+        build_number = int(os.getenv("PYTORCH_BUILD_NUMBER", ""))
+        version = os.getenv("PYTORCH_BUILD_VERSION", "")
+        if build_number > 1:
+            version += ".post" + str(build_number)
+        origin = "PYTORCH_BUILD_{VERSION,NUMBER} env variables"
+    elif sdist_version is None and sha != UNKNOWN:
+        if sha is None:
+            sha = get_sha(pytorch_root)
+        version += "+git" + sha[:7]
+        origin += " and git commit"
+    # Validate that the version is PEP 440 compliant
+    parsed_version = Version(version)
+    if sdist_version:
+        if (l:=parsed_version.local) and l.startswith("git"):
+            # Assume local version is git<sha> and
+            # hence whole version is source version
+            source_version = version
+        else:
+            # local version is absent or platform tag
+            source_version = version.partition("+")[0]
+        assert sdist_version == source_version, (
+            f"Source part '{source_version}' of version '{version}' from "
+            f"{origin} does not match version '{sdist_version}' from PKG-INFO"
+        )
     return version
 
 
