@@ -733,7 +733,7 @@ def timed(
 
     time_total = 0
     # Dont collect outputs to correctly measure timing
-    for _ in range(times):
+    for i in range(times):
         # If batch_size is 1, it too often collides with other non batch size
         # dimensions resulting in errors.
         if batch_size and batch_size > 1:
@@ -1106,7 +1106,13 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
         elif args.torchscript_jit_trace:
             frozen_model_iter_fn = torchscript_jit_trace(model, example_inputs)
         else:
-            frozen_model_iter_fn = torch._dynamo.run(model_iter_fn)
+            if kwargs["hf_llm"]:
+                # If it's an llm, we want to optimize model.forward, and use
+                # the generate function
+                model.forward = torch._dynamo.run(model)
+                frozen_model_iter_fn = model_iter_fn
+            else:
+                frozen_model_iter_fn = torch._dynamo.run(model_iter_fn)
 
         for rep in trange(args.repeat, desc="running benchmark"):
             inputs = (
@@ -1120,7 +1126,10 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
             maybe_mark_step(args)
 
             # interleave the runs to handle frequency scaling and load changes
-            with maybe_mark_profile(p=p, mark="expected"):
+            with (
+                maybe_mark_profile(p=p, mark="expected"),
+                torch.compiler.set_stance("force_eager"),
+            ):
                 timings[rep, 0], expected_output = timed(
                     model,
                     model_iter_fn,
@@ -1427,23 +1436,13 @@ class AOTInductorModelCache:
             inductor_configs = {}
             if mode == "max-autotune":
                 inductor_configs["max_autotune"] = True
-            # We can't support this in non-strict
-            if hasattr(model_clone, "name") and model.name == "levit_128":
-                ep = torch.export.export(
-                    model_clone,
-                    example_args,
-                    example_kwargs,
-                    dynamic_shapes=dynamic_shapes,
-                    strict=True,
-                )
-            else:
-                ep = torch.export.export(
-                    model_clone,
-                    example_args,
-                    example_kwargs,
-                    dynamic_shapes=dynamic_shapes,
-                    strict=True,
-                )
+            ep = torch.export.export(
+                model_clone,
+                example_args,
+                example_kwargs,
+                dynamic_shapes=dynamic_shapes,
+                strict=False,
+            )
             with torch.no_grad():
                 package_path = torch._inductor.aoti_compile_and_package(
                     ep, inductor_configs=inductor_configs
@@ -2243,11 +2242,12 @@ class BenchmarkRunner:
             reset_rng_state()
             model_copy = None
             try:
-                model_copy = self.deepcopy_and_maybe_parallelize(model)
-                self.init_optimizer(name, current_device, model_copy.parameters())
-                correct_result = self.run_n_iterations(
-                    model_copy, clone_inputs(example_inputs), self.model_iter_fn
-                )
+                with torch.compiler.set_stance("force_eager"):
+                    model_copy = self.deepcopy_and_maybe_parallelize(model)
+                    self.init_optimizer(name, current_device, model_copy.parameters())
+                    correct_result = self.run_n_iterations(
+                        model_copy, clone_inputs(example_inputs), self.model_iter_fn
+                    )
             except Exception as e:
                 accuracy_status = (
                     "eager_1st_run_OOM"
@@ -2264,11 +2264,12 @@ class BenchmarkRunner:
             reset_rng_state()
             model_copy = None
             try:
-                model_copy = self.deepcopy_and_maybe_parallelize(model)
-                self.init_optimizer(name, current_device, model_copy.parameters())
-                correct_rerun_result = self.run_n_iterations(
-                    model_copy, clone_inputs(example_inputs), self.model_iter_fn
-                )
+                with torch.compiler.set_stance("force_eager"):
+                    model_copy = self.deepcopy_and_maybe_parallelize(model)
+                    self.init_optimizer(name, current_device, model_copy.parameters())
+                    correct_rerun_result = self.run_n_iterations(
+                        model_copy, clone_inputs(example_inputs), self.model_iter_fn
+                    )
             except Exception as e:
                 accuracy_status = (
                     "eager_2nd_run_OOM"
@@ -2327,7 +2328,6 @@ class BenchmarkRunner:
                     # no need for n iterations
                     # the logic should be the same to self.model_iter_fn (forward_pass)
                     with self.autocast(**self.autocast_arg):
-                        model_copy.name = name
                         optimized_model_iter_fn = optimize_ctx(
                             model_copy, example_inputs
                         )
@@ -2553,7 +2553,11 @@ class BenchmarkRunner:
                     )
 
             baseline_timings = experiment(
-                model, example_inputs, mark="expected", **experiment_kwargs
+                self.model_iter_fn,
+                model,
+                example_inputs,
+                mark="expected",
+                **experiment_kwargs,
             )
 
             if self.args.export_aot_inductor:
@@ -2621,7 +2625,11 @@ class BenchmarkRunner:
                     )
 
             backend_timings = experiment(
-                model, example_inputs, mark="expected", **experiment_kwargs
+                self.model_iter_fn,
+                model,
+                example_inputs,
+                mark="expected",
+                **experiment_kwargs,
             )
             timings = np.stack((baseline_timings, backend_timings), axis=1)
             result_summary = latency_experiment_summary(
@@ -2640,9 +2648,17 @@ class BenchmarkRunner:
         tag=None,
         batch_size=None,
     ):
+        niters = 5
+        if getattr(self, "hf_llm", False):
+            # If we're benchmarking an llm, we want to use the generate function
+            self.model_iter_fn = self.generate
+            niters = 1
+
         if self.args.xla:
             with self.pick_grad(name, self.args.training):
-                return experiment(*self.maybe_cast(model, example_inputs))
+                return experiment(
+                    self.model_iter_fn, *self.maybe_cast(model, example_inputs)
+                )
 
         def warmup(fn, model, example_inputs, mode, niters=5):
             gc.collect()
@@ -2707,17 +2723,22 @@ class BenchmarkRunner:
             with maybe_snapshot_memory(
                 self.args.snapshot_memory, f"eager_{self.args.only}"
             ):
-                eager_latency, eager_peak_mem, _ = warmup(
-                    self.model_iter_fn, copy.deepcopy(model), example_inputs, "eager"
-                )
-                if self.args.use_warm_peak_memory:
-                    _, eager_peak_mem, _ = warmup(
+                with torch.compiler.set_stance("force_eager"):
+                    eager_latency, eager_peak_mem, _ = warmup(
                         self.model_iter_fn,
                         copy.deepcopy(model),
                         example_inputs,
                         "eager",
-                        niters=1,
+                        niters=niters,
                     )
+                    if self.args.use_warm_peak_memory:
+                        _, eager_peak_mem, _ = warmup(
+                            self.model_iter_fn,
+                            copy.deepcopy(model),
+                            example_inputs,
+                            "eager",
+                            niters=1,
+                        )
 
             if (
                 self.args.export_aot_inductor
@@ -2726,7 +2747,13 @@ class BenchmarkRunner:
             ):
                 optimized_model_iter_fn = optimize_ctx
             else:
-                optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)
+                if getattr(self, "hf_llm", False):
+                    # If it's an llm, we want to optimize model.forward, and use
+                    # the generate function
+                    model = optimize_ctx(model)
+                    optimized_model_iter_fn = self.model_iter_fn
+                else:
+                    optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)
 
             with maybe_snapshot_memory(
                 self.args.snapshot_memory, f"compiled_{self.args.only}"
@@ -2804,7 +2831,13 @@ class BenchmarkRunner:
                     f"{ok:3}/{total:3} +{frames_third_pass} frames {compilation_time:3.0f}s"
                 )
 
-            results.append(experiment(model, example_inputs, **experiment_kwargs))
+            experiment_kwargs["hf_llm"] = getattr(self, "hf_llm", False)
+
+            results.append(
+                experiment(
+                    self.model_iter_fn, model, example_inputs, **experiment_kwargs
+                )
+            )
             return " ".join(map(str, results))
 
     def minify_model(
@@ -4095,7 +4128,7 @@ def run(runner, args, original_dir=None):
         # Overwrite 'translation_validation' config, if specified.
         torch.fx.experimental._config.translation_validation = False
 
-    experiment = functools.partial(experiment, args, runner.model_iter_fn)
+    experiment = functools.partial(experiment, args)
 
     if args.only and should_diff_branch(args):
         import git

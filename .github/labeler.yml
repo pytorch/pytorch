@@ -41,9 +41,6 @@
 - test/inductor/**
 - test/dynamo/**
 
-"ciflow/vllm":
-- .github/ci_commit_pins/vllm.txt
-
 "module: cpu":
 - aten/src/ATen/cpu/**
 - aten/src/ATen/native/cpu/**

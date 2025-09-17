@@ -644,6 +644,8 @@ inline void bgemm_internal_cublas_half_helper(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYP
   void * beta_ptr = &fbeta;
 #ifdef USE_ROCM
   int flag = 0;
+  rocblas_datatype c_type = std::is_same<C_Dtype, float>::value ? rocblas_datatype_f32_r : rocblas_datatype_f16_r;
+  rocblas_datatype d_type = c_type;
 #if USE_GEMM_FLAGS_FP16_ALT_IMPL
   flag = at::ROCmBackwardPassGuard::is_backward_pass() ? rocblas_gemm_flags_fp16_alt_impl : 0;
 #endif
@@ -652,8 +654,8 @@ inline void bgemm_internal_cublas_half_helper(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYP
                                    hipOperationToRocOperation(opb), (int)m, (int)n, (int)k,
                                    (void*)alpha_ptr, a, rocblas_datatype_f16_r, (int)lda, stridea,
                                    b, rocblas_datatype_f16_r, (int)ldb, strideb,
-                                   (void*)beta_ptr, c, rocblas_datatype_f16_r, (int)ldc, stridec,
-                                   c, rocblas_datatype_f16_r, (int)ldc, stridec,
+                                   (void*)beta_ptr, c, c_type, (int)ldc, stridec,
+                                   c, d_type, (int)ldc, stridec,
                                    (int) num_batches, rocblas_datatype_f32_r, rocblas_gemm_algo_standard,
                                    0, flag)));
 #else
@@ -996,9 +998,6 @@ void bgemm<at::BFloat16>(CUDABLAS_BGEMM_ARGTYPES(at::BFloat16)) {
 
 template <>
 void bgemm<at::Half, float>(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(at::Half, float)) {
-  #ifdef USE_ROCM
-  TORCH_CHECK(false, "bgemm input type at::Half and output type float is not supported for ROCm");
-  #endif
   // TODO: Support tuning for Half inputs and FP32 output
   bgemm_internal<at::Half, float>(CUDABLAS_BGEMM_ARGS(at::Half));
 }
@@ -1006,9 +1005,7 @@ void bgemm<at::Half, float>(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(at::Half, float)
 
 template <>
 void bgemm<at::BFloat16, float>(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(at::BFloat16, float)) {
-  #ifdef USE_ROCM
-  TORCH_CHECK(false, "bgemm input type at::BFloat16 and output type float is not supported for ROCm");
-  #else
+  #ifndef USE_ROCM
     cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
 
     if (prop->major < 8)
@@ -1101,6 +1098,8 @@ inline void gemm_internal_cublas_half_helper(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(
   GEMM_CHECK_ARGVALUES(at::Half);
 #ifdef USE_ROCM
   int flag = 0;
+  rocblas_datatype c_type = std::is_same<C_Dtype, float>::value ? rocblas_datatype_f32_r : rocblas_datatype_f16_r;
+  rocblas_datatype d_type = c_type;
 #if USE_GEMM_FLAGS_FP16_ALT_IMPL
   flag = at::ROCmBackwardPassGuard::is_backward_pass() ? rocblas_gemm_flags_fp16_alt_impl : 0;
 #endif
@@ -1120,10 +1119,10 @@ inline void gemm_internal_cublas_half_helper(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(
       ldb,
       beta_ptr,
       c,
-      rocblas_datatype_f16_r,
+      c_type,
       ldc,
       c,
-      rocblas_datatype_f16_r,
+      d_type,
       ldc,
       rocblas_datatype_f32_r,
       rocblas_gemm_algo_standard,
@@ -1513,9 +1512,6 @@ void gemm<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
 
 template <>
 void gemm<at::Half, float>(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(at::Half, float)) {
-  #ifdef USE_ROCM
-  TORCH_CHECK(false, "gemm input type at::Half and output type float is not supported for ROCm");
-  #endif
   // TODO: Support Tuning for fp16-fp32 gemm
   gemm_internal<at::Half, float>(CUDABLAS_GEMM_ARGS(at::Half));
 }
@@ -1523,9 +1519,7 @@ void gemm<at::Half, float>(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(at::Half, float)) 
 
 template <>
 void gemm<at::BFloat16, float>(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(at::BFloat16, float)) {
-  #ifdef USE_ROCM
-  TORCH_CHECK(false, "gemm input type at::BFloat16 and output type float is not supported for ROCm");
-  #else
+  #ifndef USE_ROCM
     cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
 
     if (prop->major < 8)
@@ -1966,7 +1960,7 @@ void scaled_gemm(
             }
   #endif
   }
-#elif (CUDA_VERSION < 12080) && !defined(USE_ROCM)
+#elif (CUDA_VERSION < 12090) && !defined(USE_ROCM)
   // hipblaslt supported row-wise before cublas, and did so their own way (via
   // the SCALE_POINTERSs), but then migrated to match how cublas does it (via
   // the SCALE_MODEs). Here we check for this early custom mode.
@@ -2587,8 +2581,6 @@ void vdot<c10::complex<double>>(CUDABLAS_DOT_ARGTYPES(c10::complex<double>)) {
                                    reinterpret_cast<cuDoubleComplex*>(result)));
 }
 
-// HIP on Windows does not support
-#if !(defined(USE_ROCM) && defined(_MSC_VER))
 template <>
 void getrsBatched<float>(CUDABLAS_GETRS_ARGTYPES(float)) {
   TORCH_CUDABLAS_CHECK(cublasSgetrsBatched(
@@ -2787,6 +2779,5 @@ void gelsBatched<c10::complex<float>>(CUDABLAS_GELS_BATCHED_ARGTYPES(c10::comple
       devInfoArray,
       batchSize));
 }
-#endif // !(defined(USE_ROCM) && defined(_MSC_VER))
 
 } // namespace at::cuda::blas
