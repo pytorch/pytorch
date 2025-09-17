@@ -3,7 +3,6 @@
 
 import os
 import random
-import re
 import shutil
 import subprocess
 import sys
@@ -631,7 +630,6 @@ class TestDataLoaderUtils(TestCase):
 
 
 test_dir = os.path.abspath(os.path.dirname(str(__file__)))
-
 
 
 from torch.utils.collect_env import get_pretty_env_info
