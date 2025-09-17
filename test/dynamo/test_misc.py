@@ -13234,16 +13234,13 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
         # We expect to no longer raise here
         foo(torch.tensor(2.0))
 
-
     def test_full_graph_capture_dynamic_output_shape_ops(self):
         def fn(x):
             nz = torch.nonzero(x)
             squared = nz * nz
             sliced = torch.ops.aten.slice.Tensor(squared, dim=1, start=-2, end=None)
             view = sliced.unsqueeze(dim=0)
-            return view.squeeze(
-                dim=0
-            )
+            return view.squeeze(dim=0)
 
         example_inputs = (torch.randn(1, 1, 1, 1),)
         # we expect to no longer raise here
