@@ -1003,7 +1003,7 @@ class TensorVariable(VariableTracker):
 
         tx = InstructionTranslator.current_tx()
         # We enable capture_scalar_outputs when full_graph=True by default.
-        if not tx.error_on_graph_break and not config.capture_scalar_outputs:
+        if not tx.one_graph and not config.capture_scalar_outputs:
             self._warn_capture_scalar_outputs()
             unimplemented_v2(
                 gb_type="Unsupported Tensor.item() call with capture_scalar_outputs=False",
