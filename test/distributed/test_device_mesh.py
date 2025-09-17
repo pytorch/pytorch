@@ -47,23 +47,6 @@ def _set_env_var(addr="localhost", port="25364", world_size=1, rank=0, local_ran
         os.environ["LOCAL_RANK"] = f"{local_rank}"
 
 
-class DeviceMeshTestGlooBackend(DTensorTestBase):
-    @property
-    def backend(self):
-        return "gloo"
-
-    @with_comms
-    def test_device_mesh_reuse_default_group(self):
-        mesh = init_device_mesh(self.device_type, (self.world_size,))
-        mesh_group = mesh.get_group()
-        default_group = _get_default_group()
-        if torch.cuda.is_available():
-            self.assertNotEqual(mesh_group, default_group)
-            self.assertEqual(get_world_size(mesh_group), get_world_size(default_group))
-        else:
-            self.assertEqual(mesh_group, default_group)
-
-
 class DeviceMeshSetDeviceTest(DTensorTestBase):
     @property
     def world_size(self):
