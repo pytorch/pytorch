@@ -51,7 +51,11 @@ def eq_spec(self: pytree.TreeSpec, other: pytree.TreeSpec) -> bool:
             return True
         if _normalize_type(a.type) != _normalize_type(b.type):
             return False
-        if a.context != b.context:
+        if a.type is dict and b.type is dict:
+            # in the case of dict, the context is list of keys and we allow the keys to be in any order
+            if set(a.context) != set(b.context):
+                return False
+        elif a.context != b.context:
             return False
         if len(a.children_specs) != len(b.children_specs):
             return False

@@ -5,71 +5,67 @@ Definition of CuTe inspired Layouts for DeviceMesh internal bookkeeping and func
 import math
 from collections.abc import Iterator
 from dataclasses import dataclass
-from typing import TypeAlias
 
 from torch.distributed._pycute import (
     coalesce,
     complement,
     composition,
     flatten,
+    IntTuple,
+    is_int,
     is_tuple,
     Layout,
 )
 
 
-NestedIntTuple: TypeAlias = tuple["int | NestedIntTuple", ...]
-
-
 @dataclass(frozen=True, init=True)
-class _Layout(Layout):
-    shape: NestedIntTuple
-    stride: NestedIntTuple
+class _MeshLayout(Layout):
+    shape: IntTuple
+    stride: IntTuple
 
     def __post_init__(self) -> None:
-        if not is_tuple(self.shape):
-            raise ValueError(f"shape must be a tuple, got {type(self.shape)}")
-        if not is_tuple(self.stride):
-            raise ValueError(f"stride must be a tuple, got {type(self.stride)}")
-        if len(flatten(self.shape)) != len(flatten(self.stride)):
+        if not is_tuple(self.shape) and not is_int(self.shape):
+            raise TypeError(f"shape must be a tuple or int, got {type(self.shape)}")
+        if not is_tuple(self.stride) and not is_int(self.stride):
+            raise TypeError(f"stride must be a tuple or int, got {type(self.stride)}")
+        if (
+            is_tuple(self.shape)
+            and is_tuple(self.stride)
+            and len(flatten(self.shape)) != len(flatten(self.stride))
+        ):
             raise ValueError(
                 f"sizes {len(flatten(self.shape))} and "
                 f"strides {len(flatten(self.stride))} must have the same length"
             )
 
     @property
-    def sizes(self) -> NestedIntTuple:
+    def sizes(self) -> IntTuple:
         return self.shape
 
     @property
-    def strides(self) -> NestedIntTuple:
+    def strides(self) -> IntTuple:
         return self.stride
 
     @property
     def sizes_and_strides(self) -> Iterator[tuple[int, int]]:
-        return zip(flatten(self.shape), flatten(self.stride))  # type: ignore[arg-type]
+        return zip(flatten(self.shape), flatten(self.stride))
 
     def numel(self) -> int:
         return math.prod(flatten(self.shape))
 
-    # operator []    (get-i like tuples)
-    def __getitem__(self, i: int) -> "_Layout":
-        size = self.sizes[i]
-        stride = self.strides[i]
-        if is_tuple(size) and is_tuple(stride):
-            return _Layout(size, stride)  # type: ignore[arg-type]
-        elif isinstance(size, int) and isinstance(stride, int):
-            return _Layout((size,), (stride,))
-        else:
-            raise ValueError("size and stride must be either int or tuple")
+    # # operator []    (get-i like tuples)
+    def __getitem__(self, i: int) -> "_MeshLayout":
+        layout = super().__getitem__(i)
+        return _MeshLayout(layout.shape, layout.stride)
 
-    def coalesce(self) -> "_Layout":
+    def coalesce(self) -> "_MeshLayout":
         layout = coalesce(self)
-        return _Layout(layout.shape, layout.stride)  # type: ignore[arg-type]
+        return _MeshLayout(layout.shape, layout.stride)
 
-    def composition(self, layout: "_Layout") -> "_Layout":
+    def composition(self, layout: "_MeshLayout") -> "_MeshLayout":
         result = composition(self, layout)
-        return _Layout(result.shape, result.stride)  # type: ignore[arg-type]
+        return _MeshLayout(result.shape, result.stride)
 
-    def complement(self, max_idx: int) -> "_Layout":
-        layout = complement(self, max_idx)
-        return _Layout(layout.shape, layout.stride)  # type: ignore[arg-type]
+    def complement(self, world_size: int) -> "_MeshLayout":
+        layout = complement(self, world_size)
+        return _MeshLayout(layout.shape, layout.stride)
