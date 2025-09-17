@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <iterator>
 #include <numeric>
+#include <vector>
 
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
@@ -647,10 +648,10 @@ _vec_softmax(
   parallel_for(
       0, outer_size * inner_size, 0, [&](int64_t begin, int64_t end) {
         int64_t idx = begin;
-        auto temp_vec_input = std::make_unique<float[]>(dim_size * vectorized_step);
-        auto temp_vec_output = std::make_unique<float[]>(dim_size * vectorized_step);
-        float* temp_vec_input_data = temp_vec_input.get();
-        float* temp_vec_output_data = temp_vec_output.get();
+        std::vector<float> temp_vec_input(dim_size * vectorized_step);
+        std::vector<float> temp_vec_output(dim_size * vectorized_step);
+        float* temp_vec_input_data = temp_vec_input.data();
+        float* temp_vec_output_data = temp_vec_output.data();
         while (idx < end) {
           int64_t outer_idx = idx / inner_size;
           int64_t inner_idx = idx % inner_size;

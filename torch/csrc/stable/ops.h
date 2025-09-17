@@ -90,6 +90,44 @@ inline Tensor new_empty(
   return Tensor(ret0);
 }
 
+// We expect this to be a stable version of the new_zeros op that takes in
+// only dtype information.
+inline Tensor new_zeros(
+    const Tensor& self,
+    std::vector<int64_t> size,
+    std::optional<c10::ScalarType> dtype = std::nullopt) {
+  int32_t device_type;
+  TORCH_ERROR_CODE_CHECK(aoti_torch_get_device_type(self.get(), &device_type));
+
+  int32_t device_index;
+  TORCH_ERROR_CODE_CHECK(
+      aoti_torch_get_device_index(self.get(), &device_index));
+
+  int32_t target_dtype;
+  if (dtype.has_value()) {
+    target_dtype = to<int32_t>(from(dtype.value()));
+  } else {
+    TORCH_ERROR_CODE_CHECK(aoti_torch_get_dtype(self.get(), &target_dtype));
+  }
+
+  int32_t layout;
+  TORCH_ERROR_CODE_CHECK(aoti_torch_get_layout(self.get(), &layout));
+
+  AtenTensorHandle ath;
+  TORCH_ERROR_CODE_CHECK(aoti_torch_aten_new_zeros(
+      self.get(),
+      size.data(),
+      static_cast<int64_t>(size.size()),
+      &target_dtype,
+      &layout,
+      &device_type,
+      device_index,
+      nullptr, // pin_memory (nullptr for default)
+      &ath));
+
+  return Tensor(ath);
+}
+
 // We expect this to be the stable version of the pad.default op.
 // pad.default takes in a SymInt[] as the pad argument however pad is typed as
 // use std::vector<int64_t> because
@@ -116,7 +154,7 @@ inline Tensor pad(
 
 // This function is an overload to compute the maximum value along each slice of
 // `self` along a single dimension `dim`.
-inline Tensor amax(Tensor& self, int64_t dim, bool keepdim = false) {
+inline Tensor amax(const Tensor& self, int64_t dim, bool keepdim = false) {
   AtenTensorHandle ret = nullptr;
   TORCH_ERROR_CODE_CHECK(
       aoti_torch_aten_amax(self.get(), &dim, 1, keepdim, &ret));
@@ -129,7 +167,7 @@ inline Tensor amax(Tensor& self, int64_t dim, bool keepdim = false) {
 // typed as use std::vector<int64_t> here because (1) IntArrayRef is not yet
 // header-only (2) SymInt is not yet header-only
 inline Tensor amax(
-    Tensor& self,
+    const Tensor& self,
     std::vector<int64_t> dims,
     bool keepdim = false) {
   AtenTensorHandle ret = nullptr;

@@ -63,7 +63,7 @@ from torch._dynamo.utils import counters
 from torch._prims_common import is_integer_dtype
 from torch._subclasses.fake_tensor import unset_fake_temporarily
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.fx.experimental.symbolic_shapes import statically_known_true
+from torch.fx.experimental.symbolic_shapes import guard_or_false, statically_known_true
 from torch.fx.graph_module import _get_attr
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 from torch.fx.passes.graph_transform_observer import GraphTransformObserver
@@ -1306,7 +1306,9 @@ class ReplacementPatternEntry(PatternEntry):
                 for user in old_uses:
                     idx = maybe_getitem(user)
                     if idx is None:
-                        raise AssertionError("can't handle")
+                        raise AssertionError(
+                            "Deleted index from getitem, did you erase the index and not properly replace it?"
+                        )
                     replace(user, new[idx])
                 graph.erase_node(old)
 
@@ -1976,7 +1978,8 @@ class PatternMatcherPass:
                         continue
                     if os.environ.get("TORCHINDUCTOR_PATTERN_MATCH_DEBUG") == node.name:
                         log.warning("%s%s %s %s", node, node.args, m, entry.pattern)
-                    if is_match(m) and entry.extra_check(m):
+
+                    if is_match(m) and guard_or_false(entry.extra_check(m)):
                         count += 1
                         entry.apply(m, graph, node)
                         counters[backend]["pattern_matcher_count"] += 1

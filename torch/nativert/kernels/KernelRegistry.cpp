@@ -390,6 +390,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.leaky_relu.default", aten_leaky_relu, {
     return;
   }
   auto& out_t = KernelOutput(0).toTensor();
+  fastResizeToZero(out_t);
   at::cpu::leaky_relu_out(out_t, in0_t, in1_s);
 })
 
@@ -901,6 +902,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.repeat.default", aten_repeat, {
     return;
   }
   at::Tensor& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::native::repeat_out(out, self, repeats);
 })
 
@@ -1017,6 +1019,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.full_like.default", aten_full_like, {
         in0_t, dtype, layout, device, pin_memory, memory_format);
   }
   auto& out_t = KernelOutput(0).toTensor();
+  fastResizeToZero(out_t);
   at::native::resize_(out_t, in0_t.sizes(), std::nullopt);
   at::native::fill_out(out_t, in1_s);
 })
@@ -1055,6 +1058,7 @@ REGISTER_CPU_KERNEL("torch.ops.fb.scale_gradient.default", fb_scale_gradient, {
     KernelOutput(0) = create_empty_from(in_0);
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   out.resize_(in_0.sizes());
   out.copy_(in_0);
 })

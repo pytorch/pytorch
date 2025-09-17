@@ -5472,6 +5472,24 @@ class CPUReproTests(TestCase):
                 # Verify correctness with explicit samples (should match exactly)
                 torch.testing.assert_close(result, expected, rtol=1e-4, atol=1e-4)
 
+    def test_outer_looop_fusion_with_local_buf(self):
+        def fn(
+            xs: torch.Tensor,
+            Ls: torch.Tensor,
+        ):
+            arr = -torch.einsum("i...,i->i...", xs, Ls)
+            temp = torch.exp(arr)
+            Q = torch.einsum("i...->i", temp)
+            ans = torch.einsum("i,i...->i...", 1 / Q, temp)
+            return ans
+
+        xs = torch.ones((5, 1, 32, 32), requires_grad=False)
+        Ls = torch.ones((5), requires_grad=False)
+        expected = fn(xs, Ls)
+        compiled_func = torch.compile(fn, backend="inductor")
+        result = compiled_func(xs, Ls)
+        torch.testing.assert_close(result, expected)
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
