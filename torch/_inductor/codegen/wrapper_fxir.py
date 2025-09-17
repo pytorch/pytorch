@@ -357,7 +357,7 @@ class FxConverter:
                 return
 
             elif isinstance(sym_or_exp, sympy.Expr):
-                # Try to solve for one undefined symbol.
+                # Check if we need to solve for an undefined symbol.
                 undefined_symbols = [
                     sym
                     for sym in sym_or_exp.free_symbols
@@ -366,8 +366,10 @@ class FxConverter:
                 if len(undefined_symbols) == 0:
                     self._sympy_interp(sym_or_exp)
                     return
+                elif len(undefined_symbols) > 1:
+                    raise ValueError(f"Underdetermined input expression: {sym_or_exp}")
 
-                # Define a new symbol for the overall size.
+                # Define a new symbol for the input size.
                 size_proxy = codegen_proxy()
                 size_symbol = sympy.Symbol(
                     size_proxy.node.name, integer=True, nonnegative=True

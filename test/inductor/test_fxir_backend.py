@@ -731,7 +731,9 @@ class FxirTestCase(InductorTestCase):
 class AOTFxirTestCase(InductorTestCase):
     device = GPU_TYPE
 
-    def check(self, model, inp, dynamic_shapes=None, strict=False):
+    def check(
+        self, model, inp, dynamic_shapes=None, strict=False
+    ) -> torch.fx.GraphModule:
         if self.device == "xpu":
             raise unittest.SkipTest("The feature AOTFxir not currently ready for XPU")
         with torch.no_grad():
@@ -749,6 +751,8 @@ class AOTFxirTestCase(InductorTestCase):
                     and node.target != triton_kernel_wrapper_mutation
                 ):
                     self.assertTrue(node.meta.get("val", None) is not None)
+
+            return gm
 
     def test_aoti_fx_add(self):
         class M(torch.nn.Module):
@@ -885,7 +889,17 @@ class AOTFxirTestCase(InductorTestCase):
 
         dynamic_shapes = {"x": {0: expr}}
         inp = (torch.randn((5, 4), device=self.device),)
-        self.check(M().to(self.device), inp, dynamic_shapes=dynamic_shapes)
+        gm = self.check(M().to(self.device), inp, dynamic_shapes=dynamic_shapes)
+
+        # Check for dynamic size ops.
+        self.assertEqual(
+            len(
+                gm.graph.find_nodes(
+                    op="call_function", target=torch.ops.aten.sym_size.int
+                )
+            ),
+            1,
+        )
 
 
 if __name__ == "__main__":
