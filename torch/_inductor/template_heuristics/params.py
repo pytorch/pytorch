@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from dataclasses import asdict, dataclass
 from typing import Any
 
 
@@ -40,3 +41,18 @@ class DictKernelTemplateParams(KernelTemplateParams):
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> DictKernelTemplateParams:
         return cls(data)
+
+
+@dataclass
+class DataclassTemplateParams(KernelTemplateParams):
+    """Base class to implement dataclass based params."""
+
+    def to_kwargs(self) -> dict[str, Any]:
+        return asdict(self)
+
+    def to_serializeable_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> KernelTemplateParams:
+        return cls(**data)
