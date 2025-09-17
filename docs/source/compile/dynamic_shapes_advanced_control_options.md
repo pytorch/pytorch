@@ -17,6 +17,7 @@ Profile-Guided Optimization (PGO) enhances automatic dynamic by sharing profilin
 
 For the purposes of the rest of this tutorial, you can use the following environmental variables to turn on PGO locally `TORCH_COMPILE_JOB_ID=1 TORCH_DYNAMO_AUTOMATIC_DYNAMIC_LOCAL_PGO=1`
 
+(identifying-dynamic-elements-marked-by-pgo)=
 ### Identifying Dynamic Elements Marked by PGO
 
 Use `tlparse` to find line numbers of interest and check for multiple values
