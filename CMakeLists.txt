@@ -181,8 +181,9 @@ elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(ppc64le)")
   set(CPU_POWER ON)
 endif()
 
-# For non-supported platforms, turn USE_DISTRIBUTED off by default. It is not
-# tested and likely won't work without additional changes.
+# For non-supported platforms, turn USE_DISTRIBUTED off by default.
+# NB: USE_DISTRIBUTED simply disables the backend; distributed code
+# still gets built
 if(NOT LINUX AND NOT WIN32)
   set(USE_DISTRIBUTED
       OFF
@@ -233,6 +234,7 @@ cmake_dependent_option(INSTALL_TEST "Install test binaries if BUILD_TEST is on"
 option(USE_CPP_CODE_COVERAGE "Compile C/C++ with code coverage flags" OFF)
 option(USE_COLORIZE_OUTPUT "Colorize output during compilation" ON)
 option(USE_ASAN "Use Address+Undefined Sanitizers" OFF)
+option(USE_LSAN "Use Leak Sanitizer" OFF)
 option(USE_TSAN "Use Thread Sanitizer" OFF)
 option(USE_CUDA "Use CUDA" ON)
 option(USE_XPU "Use XPU" ON)
@@ -261,11 +263,11 @@ option(USE_PYTORCH_METAL "Use Metal for PyTorch iOS build" OFF)
 option(USE_PYTORCH_METAL_EXPORT "Export Metal models on MacOSX desktop" OFF)
 option(USE_NATIVE_ARCH "Use -march=native" OFF)
 cmake_dependent_option(USE_MPS "Use MPS for macOS build" ON "MPS_FOUND" OFF)
-option(USE_DISTRIBUTED "Use distributed" ON)
+option(USE_DISTRIBUTED "Enable default distributed backends" ON)
 cmake_dependent_option(USE_NCCL "Use NCCL" ON
                        "USE_DISTRIBUTED;USE_CUDA OR USE_ROCM;UNIX;NOT APPLE" OFF)
 cmake_dependent_option(USE_XCCL "Use XCCL" ON
-                       "USE_XPU;UNIX;NOT APPLE" OFF)
+                       "USE_DISTRIBUTED;USE_XPU;UNIX;NOT APPLE" OFF)
 cmake_dependent_option(USE_RCCL "Use RCCL" ON USE_NCCL OFF)
 cmake_dependent_option(USE_RCCL "Use RCCL" ON "USE_NCCL;NOT WIN32" OFF)
 cmake_dependent_option(USE_STATIC_NCCL "Use static NCCL" OFF "USE_NCCL" OFF)
@@ -430,11 +432,10 @@ if(WIN32)
       PATH_SUFFIXES lib
       NO_DEFAULT_PATH)
     if(NOT libuv_tmp_LIBRARY)
-      set(USE_DISTRIBUTED OFF)
       set(USE_GLOO OFF)
       message(
         WARNING
-          "Libuv is not installed in current conda env. Set USE_DISTRIBUTED to OFF. "
+          "Libuv is not installed in current conda env. Set USE_GLOO to OFF. "
           "Please run command 'conda install -c conda-forge libuv=1.39' to install libuv."
       )
     else()
@@ -873,16 +874,27 @@ cmake_dependent_option(
   "Whether to build the flash_attention kernel for scaled dot product attention.\
   Will be disabled if not supported by the platform"
   ON
-  "USE_CUDA OR USE_ROCM;NOT MSVC"
+  "(USE_CUDA AND NOT MSVC) OR USE_ROCM"
   OFF)
 
 cmake_dependent_option(
   USE_FBGEMM_GENAI
   "Whether to build FBGEMM GenAI quantized GEMM kernels.\
   Will be disabled if not supported by the platform"
-  OFF
-  "USE_CUDA OR USE_ROCM"
+  ON
+  "USE_ROCM"
   OFF)
+
+IF(USE_FBGEMM_GENAI AND USE_ROCM AND NOT "gfx942" IN_LIST PYTORCH_ROCM_ARCH)
+  message(WARNING "Unsupported ROCM arch for FBGEMM GenAI, will set USE_FBGEMM_GENAI to OFF")
+  set(USE_FBGEMM_GENAI off)
+endif()
+
+# Set USE_FBGEMM_GENAI to ON for CUDA build on SM100.
+if(USE_CUDA AND "$ENV{TORCH_CUDA_ARCH_LIST}" MATCHES "10.0" AND CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL 12.8 AND NOT WIN32)
+  message(STATUS "Setting USE_FBGEMM_GENAI to ON, doing CUDA build for SM100a")
+  set(USE_FBGEMM_GENAI ON)
+endif()
 
 # CAVEAT: Again, Flash Attention2 will error while building for sm52 while Mem
 # Eff Attention won't
@@ -897,7 +909,7 @@ cmake_dependent_option(
 # USE_FLASH_ATTENTION -> USE_ROCM -> Dependencies.cmake -> aotriton.cmake
 #
 if(USE_ROCM)
-  if(UNIX AND (USE_FLASH_ATTENTION OR USE_MEM_EFF_ATTENTION))
+  if(USE_FLASH_ATTENTION OR USE_MEM_EFF_ATTENTION)
     include(cmake/External/aotriton.cmake)
   endif()
 endif()

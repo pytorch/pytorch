@@ -325,10 +325,23 @@ using RAIIDataPtr = std::unique_ptr<void, std::function<void(void*)>>;
 
 // NOLINTNEXTLINE(clang-diagnostic-unneeded-internal-declaration)
 RAIIDataPtr RAII_gpuMalloc(size_t num_bytes) {
+#ifdef AOT_INDUCTOR_USE_CACHING_ALLOCATOR
+  // Use caching allocator for allocating GPU memory
+  void* data_ptr = nullptr;
+  AOTI_TORCH_ERROR_CODE_CHECK(
+      aoti_torch_cuda_caching_allocator_raw_alloc(num_bytes, &data_ptr));
+  auto deleter = [](void* ptr) {
+    AOTI_TORCH_ERROR_CODE_CHECK(
+        aoti_torch_cuda_caching_allocator_raw_delete(ptr));
+  };
+  return RAIIDataPtr(data_ptr, deleter);
+#else
+  // Use cudaMalloc directly for allocating GPU memory
   void* data_ptr = nullptr;
   AOTI_RUNTIME_CUDA_CHECK(cudaMalloc((void**)&data_ptr, num_bytes));
   auto deleter = [](void* ptr) { AOTI_RUNTIME_CUDA_CHECK(cudaFree(ptr)); };
   return RAIIDataPtr(data_ptr, deleter);
+#endif
 }
 
 #elif defined(USE_XPU)
@@ -587,6 +600,7 @@ class AOTInductorModelBase {
 #endif
 
     size_t bytes_read = 0;
+    size_t non_folded_idx = 0; // Separate index for non-folded constants
     for (size_t i = 0; i < num_constants; i++) {
       bool from_folded = this->constant_from_folded(i);
       if (from_folded) {
@@ -596,12 +610,13 @@ class AOTInductorModelBase {
       size_t data_size = this->constant_data_size(i);
       uint8_t* internal_ptr = (data_size != 0)
           ? constant_ptr(
-                constants_internal_offset[i],
+                constants_internal_offset[non_folded_idx],
                 bytes_read,
                 data_size,
                 /* skip_copy = */ false)
           : nullptr;
       bytes_read += data_size;
+      non_folded_idx++; // Increment the non-folded index
 
       // Create at::Tensor from copied memory.
       auto dtype = this->constant_dtype(i);
