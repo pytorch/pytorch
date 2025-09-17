@@ -261,16 +261,17 @@ these features.
 .. py:module:: torch.distributed.tensor.device_mesh
 ```
 
-# Mixed Tensor and DTensor operations
+## Mixed Tensor and DTensor operations
 
 So you got the following error message.
 ```
-: got mixed torch.Tensor and DTensor, need to convert all
+got mixed torch.Tensor and DTensor, need to convert all
+torch.Tensor to DTensor before calling distributed operators!
 ```
 
 There are two cases.
 
-## Case 1: this is user error
+### Case 1: this is user error
 
 The most common way to run into this error is to create a regular Tensor
 (using a factory function) and then perform a Tensor-DTensor operation,
@@ -296,14 +297,18 @@ tensor = DTensor.from_local(tensor, placements=(Replicate(),))
 return tensor + dtensor
 ```
 
-If each rank is creating a different Tensor, then please construct a
-DTensor with Sharded placements:
+If you wanted to create a DTensor with shards, below is how to do it.
+Semantically this means that your Tensor data is split between the shards
+and that operations act on the "full stacked data".
 
 ```
 tensor = torch.full([], RANK)
 tensor = DTensor.from_local(tensor, placements=(Shard(0),))
 return tensor + dtensor
 ```
+
+There are other things you may wish to do with your tensor beyond
+these situations (these are not the only two options!).
 
 ## Case 2: the error came from PyTorch framework code
 
@@ -324,4 +329,4 @@ non-DTensors can be replicated. Please be careful when using this as it
 can lead to silent incorrectness.
 
 - [Turning on implicit replication in Python](https://github.com/pytorch/pytorch/blob/d8e6b2fddc54c748d976e8f0ebe4b63ebe36d85b/torch/distributed/tensor/experimental/__init__.py#L15)
-- [Turning on implicit replication in C++](https://github.com/pytorch/pytorch/blob/main/aten/src/ATen/DTensorState.h#L10)
+- [Turning on implicit replication in C++](https://github.com/pytorch/pytorch/blob/7a0f93344e2c851b9bcf2b9c3225a323d48fde26/aten/src/ATen/DTensorState.h#L10)
