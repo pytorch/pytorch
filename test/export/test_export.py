@@ -16026,6 +16026,17 @@ def forward(self, q, k, v):
         ):
             export(Foo(), (torch.randn(1, 33, 256, 128), k, v))
 
+    def test_lstm_export(self):
+        mod = torch.nn.LSTM(
+            input_size=8, hidden_size=16, num_layers=1, batch_first=True
+        )
+        sample_inputs = (torch.randn(4, 16, 8),)
+        ep = export(mod, sample_inputs)
+
+        eager_out = mod(*sample_inputs)
+        ep_out = ep.module()(*sample_inputs)
+        self.assertEqual(eager_out, ep_out)
+
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestOneOffModelExportResult(TestCase):
