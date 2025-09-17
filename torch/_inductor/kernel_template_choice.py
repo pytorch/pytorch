@@ -63,7 +63,6 @@ class KernelTemplateChoice:
 def make_ktc_generator(
     template: Union[KernelTemplate, ExternKernelChoice],
     cs: Generator[dict[str, Any], None, None],
-    overrides: dict[str, Any],
     extra_kwargs: dict[str, Any],
     layout: Layout,
     inputs: KernelInputs,
@@ -74,9 +73,8 @@ def make_ktc_generator(
     Args:
         template: The template object (KernelTemplate or ExternKernelChoice)
         cs: Generator of configurations from template heuristic
-        overrides: Override kwargs for the template
         extra_kwargs: Extra kwargs from the heuristic
-        layout_val: Layout value for the template
+        layout: Layout value for the template
         inputs: KernelInputs for the op
 
     Yields:
@@ -85,7 +83,7 @@ def make_ktc_generator(
     for ckwargs in cs:
         yield KernelTemplateChoice(
             template=template,
-            kwargs={**ckwargs, **overrides},
+            kwargs=ckwargs,
             extra_kwargs=extra_kwargs,
             layout=layout,
             inputs=inputs,

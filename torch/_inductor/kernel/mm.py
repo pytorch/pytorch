@@ -1251,7 +1251,6 @@ def tuned_scaled_mm(
 
     # Collect all templates for unified call
     templates_to_use: list[Union[ExternKernelChoice, KernelTemplate]] = []
-    kwarg_overrides = {}
 
     if use_aten_gemm_kernels():
         templates_to_use.append(aten__fp8_mm)
@@ -1264,16 +1263,12 @@ def tuned_scaled_mm(
         and is_nonzero
         and use_triton_template(layout, enable_float8=True, check_max_autotune=False)
     ):
-        overriders = dict(USE_FAST_ACCUM=use_fast_accum)
-
         # TODO (paulzhan): There is no template that exists for bias and TMA
         # Don't run tma template currently if bias exist
         if use_triton_tma_template(mat_a, mat_b, output_layout=layout) and not bias:
             templates_to_use.append(scaled_mm_device_tma_template)
-            kwarg_overrides[scaled_mm_device_tma_template.uid] = overriders
 
         templates_to_use.append(mm_template)
-        kwarg_overrides[mm_template.uid] = overriders
 
     # Single unified call for all templates
     choices.extend(
@@ -1281,7 +1276,6 @@ def tuned_scaled_mm(
             kernel_inputs,
             templates_to_use,
             name,
-            kwarg_overrides=kwarg_overrides,
         )
     )
 
