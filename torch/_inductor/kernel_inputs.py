@@ -27,19 +27,23 @@ class KernelInputs(ABC):
     def __init__(
         self,
         input_nodes: list[Any],
-        scalars: Optional[dict[str, Union[float, int]]] = None,
+        kwargs: Optional[dict[str, Union[float, int, bool]]] = None,
         out_dtype: Optional[torch.dtype] = None,
     ):
         """
         Initialize with a tuple of input nodes.
 
+        You can use kwargs to propagate through any kwargs that are not nodes
+
         Args:
             input_nodes: A tuple of input nodes to store
             out_dtype: Optional output dtype to store
+            kwargs: Optional dictionary of kwargs values
+                e.g. {'alpha': 0.5, 'use_fast_accum': True}
         """
         self._input_nodes = input_nodes
         self._device_name: Optional[str] = None
-        self._scalars = scalars if scalars is not None else {}
+        self._kwargs = kwargs if kwargs is not None else {}
         self._out_dtype = out_dtype
         assert len(input_nodes) > 0, "Expected at least one input node"
 
@@ -183,18 +187,27 @@ class KernelInputs(ABC):
             The output dtype
         """
 
-    def get_scalar(self, name: str) -> Union[float, int]:
+    def kwargs(self) -> dict[str, Union[float, int, bool]]:
         """
-        Get the scalar value for a given name.
-
-        Args:
-            name: Name of the scalar to get
+        Get the kwargs values for all input nodes.
 
         Returns:
-            The scalar value
+            A dictionary of kwargs values for each input node
         """
-        assert name in self._scalars, f"Scalar {name} not found, but required"
-        return self._scalars[name]
+        return self._kwargs
+
+    def get_kwarg(self, name: str, default: Any = None) -> Any:
+        """
+        Get the kwarg value for a given name.
+
+        Args:
+            name: Name of the kwarg to get
+            default: Default value to return if kwarg is not found
+
+        Returns:
+            The kwarg value or default if not found
+        """
+        return self._kwargs.get(name, default)
 
     @abstractmethod
     def output_layout(self, flexible: bool = True) -> Layout:
@@ -216,7 +229,7 @@ class MMKernelInputs(KernelInputs):
     def __init__(
         self,
         input_nodes: list[Any],
-        scalars: Optional[dict[str, Union[float, int]]] = None,
+        kwargs: Optional[dict[str, Union[float, int, bool]]] = None,
         out_dtype: Optional[torch.dtype] = None,
         mat1_idx: int = -2,
         mat2_idx: int = -1,
@@ -227,7 +240,7 @@ class MMKernelInputs(KernelInputs):
         By default, we assume the last 2 input nodes are mat1 and mat2, but
         the caller can adjust when necessary
         """
-        super().__init__(input_nodes, scalars, out_dtype)
+        super().__init__(input_nodes, kwargs, out_dtype)
         # for mm, we need at least 2 nodes, and we need to know which nodes
         # are the main matrixes e.g. addmm is (bias, mat1, mat2) whereas others
         # might be (mat1, mat2, scale), etc.

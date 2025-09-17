@@ -55,8 +55,8 @@ class ATenAddMMConfigHeuristics(ATenConfigHeuristics):
         op_name: str,
     ) -> dict[str, Any]:
         kwargs = super().get_extra_kwargs(kernel_inputs, op_name)
-        alpha = kernel_inputs.get_scalar("alpha")
-        beta = kernel_inputs.get_scalar("beta")
+        alpha = kernel_inputs.get_kwarg("alpha")
+        beta = kernel_inputs.get_kwarg("beta")
         return {
             **kwargs,
             "alpha": alpha,

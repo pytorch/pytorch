@@ -260,7 +260,7 @@ def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
 
     # Create MMKernelInputs for BadDBMM at the top
     kernel_inputs = MMKernelInputs(
-        [inp, mat1, mat2], scalars=dict(alpha=alpha, beta=beta)
+        [inp, mat1, mat2], kwargs=dict(alpha=alpha, beta=beta)
     )
 
     # below is for getting an overview logging info of inductor mms
