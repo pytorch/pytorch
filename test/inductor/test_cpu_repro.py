@@ -2656,6 +2656,18 @@ class CPUReproTests(TestCase):
             actual = torch.compile(op)(t)
             self.assertEqual(expected, actual)
 
+    def test_outer_mean_large_size(self):
+        def fn(x):
+            vec = x.flatten()
+            vec_one = torch.ones_like(vec)
+            x = torch.outer(vec, vec_one)
+            return torch.mean(x, dim=1)
+
+        x = torch.randn(3, 8, 64, 64)
+        expected = fn(x)
+        actual = torch.compile(fn)(x)
+        self.assertEqual(expected, actual, atol=5e-4, rtol=5e-4)
+
     @unittest.skipIf(IS_FBCODE, "Not yet runnable in fbcode")
     @requires_vectorization
     @patch("torch.cuda.is_available", lambda: False)
