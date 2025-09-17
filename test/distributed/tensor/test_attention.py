@@ -358,9 +358,7 @@ def generate_doc_mask_mod(
 
 
 class FlexAttentionWrapper(torch.nn.Module):
-    _flex_attn: ClassVar[Callable] = torch.compile(
-        flex_attention, mode="max-autotune-no-cudagraphs"
-    )
+    _flex_attn: ClassVar[Callable] = torch.compile(flex_attention)
 
     def __init__(self) -> None:
         super().__init__()
