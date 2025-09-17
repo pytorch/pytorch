@@ -10,14 +10,12 @@ from torch.distributed._composable.replicate_with_fsdp import replicate
 from torch.distributed.fsdp import FSDPModule
 from torch.distributed.tensor import DTensor
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_fsdp import FSDPTestMultiThread, MLP
+from torch.testing._internal.common_fsdp import FSDPTestMultiThread, get_devtype, MLP
 from torch.testing._internal.common_utils import run_tests
 
 
 c10d_ops = torch.ops.c10d
 funcol = torch.ops.c10d_functional
-
-from torch.testing._internal.common_fsdp import get_devtype
 
 
 device_type = torch.device(get_devtype())

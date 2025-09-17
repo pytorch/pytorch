@@ -35,6 +35,7 @@ def compute_loss_helper(x):
 
 
 @functorch_config.patch("bundled_autograd_cache", True)
+@torch._dynamo.config.patch({"strict_precompile": True})
 @instantiate_parametrized_tests
 class TestPackage(torch._inductor.test_case.TestCase):
     def path(self):
@@ -609,6 +610,27 @@ def add(x, y):
             compiled_fn(*args)
 
         self.assertEqual(torch._dynamo.convert_frame.FRAME_COUNTER, total_frames)
+
+    @parametrize("device", ("cpu", "cuda", "xpu"))
+    @torch._dynamo.config.patch(caching_precompile=True)
+    def test_code_with_generator(self, device):
+        if device == "cuda" and not HAS_CUDA_AND_TRITON:
+            raise unittest.SkipTest("Requires CUDA/Triton")
+        if device == "xpu" and not HAS_XPU_AND_TRITON:
+            raise unittest.SkipTest("Requires XPU/Triton")
+
+        def foo(set_of_x):
+            if not all(isinstance(s, torch.Tensor) for s in set_of_x):
+                raise TypeError(
+                    f"Expected all elements of set_of_x to be tensors, got {set_of_x}"
+                )
+
+            return torch.cat(set_of_x, dim=0)
+
+        args = ([torch.randn(3, 2, device=device) for _ in range(3)],)
+        compiled_fn = torch.compile(foo)
+        compiled_fn(*args)
+        self._save_and_reload(expected_backends=1, expected_dynamo=1)
 
 
 if __name__ == "__main__":

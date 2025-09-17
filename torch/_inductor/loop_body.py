@@ -223,6 +223,53 @@ class LoopBody:
         )
         return new_body2
 
+    def expand_dimension_for_pointwise_node(
+        self, dimension: int, new_range: int
+    ) -> LoopBody:
+        """
+        Expand node on `dimension` to `new_range` and rely on index modular to avoid
+        out-of-boundary access.
+        """
+
+        old_body = self
+        old_sizes = self.sizes
+
+        iter_size, reduce_size = old_sizes
+        original_range = iter_size[dimension]
+        new_iter_size = list(iter_size)
+        new_iter_size[dimension] = new_range
+        new_sizes = (new_iter_size, reduce_size)
+
+        (iter_vars, reduce_vars), var_ranges = dependencies.index_vars_no_squeeze(
+            *new_sizes,
+            prefix="t",  # type: ignore[arg-type]
+        )
+
+        def new_body(*indices: Sequence[sympy.Expr]) -> Any:
+            index = [*itertools.chain.from_iterable(indices)]
+            assert len(index) == len(iter_size) + len(reduce_size)
+            iter_idx = index[: len(iter_size)]
+            reduce_idx = index[len(iter_size) :]
+
+            new_iter_idx = list(iter_idx)
+            new_iter_idx[dimension] = iter_idx[dimension] % original_range
+
+            return old_body(new_iter_idx, reduce_idx)
+
+        loop_body = LoopBody(
+            new_body, (iter_vars, reduce_vars), var_ranges, iter_vars, reduce_vars
+        )
+
+        # use the original symbol prefix so we can do multiple round of reordering
+        (iter_vars2, reduce_vars2), var_ranges2 = dependencies.index_vars_no_squeeze(
+            *new_sizes,
+            prefix="p",  # type: ignore[arg-type]
+        )
+        new_body = LoopBody(
+            loop_body, (iter_vars2, reduce_vars2), var_ranges2, iter_vars2, reduce_vars2
+        )
+        return new_body
+
     def reorder_iter_loops(self, new_order) -> LoopBody:
         """
         Reorder iteration loops and return a new LoopBody.
