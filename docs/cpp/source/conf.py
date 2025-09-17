@@ -38,6 +38,7 @@ run_doxygen = os.environ.get("RUN_DOXYGEN", "false") == "true"
 # ones.
 extensions = [
     "sphinx.ext.intersphinx",
+    "sphinx_remove_toctrees",
 ] + (["breathe", "exhale"] if run_doxygen else [])
 
 intersphinx_mapping = {"pytorch": ("https://pytorch.org/docs/main", None)}
@@ -77,9 +78,10 @@ exhale_args = {
     "createTreeView": True,
     "exhaleExecutesDoxygen": True,
     "exhaleUseDoxyfile": True,
-    "verboseBuild": True,
+    "verboseBuild": False,
     # Reduce memory usage during parsing
-    "fullToctreeMaxDepth": 2,
+    "fullToctreeMaxDepth": 1,
+    "createUnabridgedApiPage": False,
     ############################################################################
     # HTML Theme specific configurations.                                      #
     ############################################################################
@@ -95,6 +97,15 @@ exhale_args = {
     "kindsWithContentsDirectives": ["class", "file", "namespace", "struct"],
     # Exclude PIMPL files from class hierarchy tree and namespace pages.
     "listingExclude": [r".*Impl$"],
+    ############################################################################
+    # Performance optimizations for exhale 0.3.7                              #
+    ############################################################################
+    # Disable expensive operations for faster builds
+    "generateBreatheFileDirectives": False,
+    # Skip expensive cross-referencing for faster builds
+    "lexerMapping": {},
+    # Reduce file processing overhead
+    "customSpecificationsMapping": {},
     ############################################################################
     # Main library page layout example configuration.                          #
     ############################################################################
@@ -169,6 +180,7 @@ todo_include_todos = True
 # a list of builtin themes.
 #
 html_theme = "pytorch_sphinx_theme2"
+remove_from_toctrees = ["api/*"]
 
 # Theme options are theme-specific and customize the look and feel of a theme
 # further.  For a list of options available for each theme, see the
