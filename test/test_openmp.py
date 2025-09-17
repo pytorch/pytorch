@@ -1,4 +1,4 @@
-# Owner(s): ["module: unknown"]
+# Owner(s): ["module: openmp"]
 
 import collections
 import unittest

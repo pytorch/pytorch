@@ -1,5 +1,5 @@
 # mypy: ignore-errors
-# Owner(s): ["module: unknown"]
+# Owner(s): ["module: typing"]
 import token
 from itertools import product
 from pathlib import Path

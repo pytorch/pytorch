@@ -1,4 +1,4 @@
-# Owner(s): ["module: unknown"]
+# Owner(s): ["module: mkldnn"]
 
 from torch.testing._internal.common_utils import TestCase, run_tests
 import os
