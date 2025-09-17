@@ -337,7 +337,7 @@ class TestReplicate1DTrainingCore(FSDPTest):
             {
                 "reshard_after_forward": [True],  # save CI time
                 "offload_policy": [
-                    # CPUOffloadPolicy(pin_memory=True),
+                    CPUOffloadPolicy(pin_memory=True),
                     CPUOffloadPolicy(pin_memory=False),
                 ],
                 "test_device_type": [device_type.type],
