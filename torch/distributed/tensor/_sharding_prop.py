@@ -243,7 +243,7 @@ class ShardingPropagator:
                 )
             return output_specs.shallow_copy_with_tensor_meta(output_tensor_meta)
         elif isinstance(output_specs, (tuple, list)):
-            new_specs = []
+            new_specs: list[Optional[DTensorSpec]] = []
             if not isinstance(output_tensor_meta, (tuple, list)) or len(
                 output_specs
             ) != len(output_tensor_meta):
@@ -269,7 +269,7 @@ class ShardingPropagator:
                             and output_tensor_meta_i is None
                         ):
                             assert isinstance(output_specs, list)
-                            output_specs[i] = None
+                            new_specs.append(None)
                             continue
                         else:
                             raise ValueError(
