@@ -94,8 +94,11 @@ CALLER_GRAPH           = NO
 # Disable include dependency graphs
 INCLUDE_GRAPH          = NO
 INCLUDED_BY_GRAPH      = NO
-# Use fewer threads if memory is limited (default is 0 = all cores)
-NUM_PROC_THREADS       = 4
+# Disable graph generation which can be slow
+HAVE_DOT               = NO
+CLASS_DIAGRAMS         = NO
+# Reduce memory usage
+DOT_MULTI_TARGETS      = YES
 ################################################################################
 # Output formats for Doxygen to create.                                        #
 ################################################################################
@@ -127,7 +130,7 @@ INCLUDE_PATH           = ../../.. \
 ################################################################################
 # Compound extraction control.                                                 #
 ################################################################################
-EXTRACT_ALL            = YES
+EXTRACT_ALL            = NO
 EXTRACT_PACKAGE        = YES
 EXTRACT_STATIC         = YES
 CASE_SENSE_NAMES       = NO
