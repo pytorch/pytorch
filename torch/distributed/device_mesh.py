@@ -303,7 +303,7 @@ if True:  # just to temporarily avoid reindentation
                     _init_backend=False,
                 )
                 submesh._dim_group_names = (  # type: ignore[has-type]
-                    [device_mesh._dim_group_names[mesh_dim]]
+                    [device_mesh._dim_group_names[mesh_dim]]  # type: ignore[has-type]
                     if cur_rank in mesh_1d
                     else []
                 )
