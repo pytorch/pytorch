@@ -2656,14 +2656,12 @@ def _reduction_configs(
             register_intensive=register_intensive,
         )
 
-    def inner_config():
-        return make_config(
-            1 if rnumel > 2048 else 2, # 1024 or less is persistent
-            min(rnumel, MAX_R0_BLOCK),
-            register_intensive=register_intensive,
-        )
 
-    contiguous_config = inner_config()
+    contiguous_config = make_config(
+        1 if rnumel > 2048 else 2, # 1024 or less is persistent
+        min(rnumel, MAX_R0_BLOCK),
+        register_intensive=register_intensive,
+    )
     tiny_config = make_config(
         2 * (256 // rnumel) if rnumel <= 256 else 1,
         min(rnumel, MAX_R0_BLOCK),
@@ -2891,7 +2889,13 @@ def _persistent_reduction_configs(
 
     if "y" not in size_hints:
         configs = [
-            triton_config_reduction(size_hints, xblock, rnumel, register_intensive=True, reduction_hint=reduction_hint)
+            triton_config_reduction(
+                size_hints,
+                xblock,
+                rnumel,
+                register_intensive=True,
+                reduction_hint=reduction_hint
+            )
             for xblock in (1, 8, 32, 128)
             if xblock == 1
             or (rnumel * xblock <= MAX_PERSISTENT_BLOCK_NUMEL and xblock <= xnumel)
