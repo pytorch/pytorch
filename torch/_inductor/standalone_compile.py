@@ -62,6 +62,75 @@ class CompiledArtifact:
     def __call__(self, *args: Any) -> Any:
         return self._compiled_fn(*args)
 
+    def to_bytes(self) -> bytes:
+        if self._artifacts is None:
+            raise RuntimeError(
+                "CompiledArtifact.to_bytes failed to get since there's no artifact to get"
+            )
+
+        artifact_bytes, cache_info = self._artifacts
+        assert len(cache_info.aot_autograd_artifacts) == 1, cache_info
+        key = cache_info.aot_autograd_artifacts[0]
+
+        from torch.utils._appending_byte_serializer import BytesWriter
+
+        from .codecache import torch_key
+
+        writer = BytesWriter()
+        writer.write_bytes(torch_key())
+        writer.write_str(key)
+        writer.write_bytes(artifact_bytes)
+
+        return writer.to_bytes()
+
+    @staticmethod
+    def from_bytes(artifact: bytes) -> CompiledArtifact:
+        from torch.utils._appending_byte_serializer import BytesReader
+
+        from .codecache import torch_key
+
+        reader = BytesReader(artifact)
+        assert reader.read_bytes() == torch_key()
+        key = reader.read_str()
+        artifact_bytes = reader.read_bytes()
+        assert reader.is_finished()
+
+        torch.compiler.load_cache_artifacts(artifact_bytes)
+        cache_dir_ctx: AbstractContextManager[None] = nullcontext()
+        with (
+            cache_dir_ctx,
+            config.patch(unsafe_skip_cache_dynamic_shape_guards=True),
+        ):
+            with torch._functorch.config.patch(strict_autograd_cache=True):
+                from torch._functorch._aot_autograd.autograd_cache import (
+                    AOTAutogradCache,
+                )
+
+                entry = AOTAutogradCache._lookup(
+                    key,
+                    local=True,
+                    remote=False,
+                    args=[],
+                    cache_info={},
+                    aot_config=None,
+                )
+
+            assert entry is not None
+
+            from .compile_fx import _CompileFxKwargs
+
+            fx_config = _CompileFxKwargs(
+                cudagraphs=BoxedBool(False),
+                boxed_forward_device_index=BoxedDeviceIndex(0),
+            )
+
+            context = torch._guards.TracingContext(FakeTensorMode(shape_env=ShapeEnv()))
+            with torch._guards.tracing(context):
+                compiled_fn = entry.wrap_post_compile(
+                    [], entry.sanitized_aot_config, fx_config
+                )
+        return CompiledArtifact(lambda *args: compiled_fn(list(args)), None)
+
     def save(
         self, *, path: str, format: Literal["binary", "unpacked"] = "binary"
     ) -> None:
