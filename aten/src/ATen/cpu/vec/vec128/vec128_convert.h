@@ -4,7 +4,7 @@
 
 namespace at::vec {
 inline namespace CPU_CAPABILITY {
-#if (defined(__aarch64__) && !defined(CPU_CAPABILITY_SVE256))
+#if defined(__aarch64__) && (!defined(CPU_CAPABILITY_SVE) || defined(CPU_CAPABILITY_SVE128))
 template <typename src_t>
 struct VecConvert<
     float,
@@ -60,6 +60,6 @@ struct VecConvert<float, 1, BFloat16, 1> {
   }
 };
 
-#endif // defined(__aarch64__) && !defined(CPU_CAPABILITY_SVE256)
+#endif // defined(__aarch64__) && (!defined(CPU_CAPABILITY_SVE) || defined(CPU_CAPABILITY_SVE128))
 } // namespace CPU_CAPABILITY
 } // namespace at::vec

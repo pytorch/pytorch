@@ -6,7 +6,6 @@
 #include <ATen/Parallel.h>
 #include <ATen/ScalarOps.h>
 #include <ATen/TensorUtils.h>
-#include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
 #include <ATen/native/EmbeddingBag.h>
 #include <ATen/native/Fill.h>
