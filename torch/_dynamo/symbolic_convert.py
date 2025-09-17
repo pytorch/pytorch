@@ -1057,7 +1057,7 @@ class ExceptionStack:
     """
 
     # Exception handling in CPython is a bit confusing and some of the bytecode
-    # have a slightly different behavior than what is is documented. While reading
+    # have a slightly different behavior than what is documented. While reading
     # the documentation, is important to notice that the terms "current exception"
     # and "stack" sometimes refers to a C variable with the same name and the
     # exception stack, respectively.
@@ -3491,25 +3491,29 @@ class InstructionTranslatorBase(
 
         return ctx.enter(self)
 
+    @staticmethod
+    def unsupported_ctx_graph_break(ctx: VariableTracker) -> NoReturn:
+        unimplemented_v2(
+            gb_type="Unsupported context manager",
+            context=f"Attempted SETUP_WITH/BEFORE_WITH/LOAD_SPECIAL on {ctx}",
+            explanation=f"Dynamo does not know how to enter a `{ctx.python_type_name()}` context manager.",
+            hints=[
+                "Avoid using the unsupported context manager.",
+                "If the context manager seems like it should be supported (e.g. torch.set_grad_enabled), then "
+                "it may be the case that it was created outside the compiled region, which Dynamo does not support. "
+                "Supported context managers can cross graph break boundaries only if they are local non-closure "
+                "variables, or are intermediate values.",
+                "File an issue to PyTorch. Simple context managers can potentially be supported, "
+                "but note that context managers can't be supported in general",
+            ],
+        )
+
     def setup_or_before_with(self, inst: Instruction) -> None:
         ctx = self.pop()
         if not isinstance(
             ctx, (ContextWrappingVariable, GenericContextWrappingVariable)
         ):
-            unimplemented_v2(
-                gb_type="Unsupported context manager",
-                context=f"Attempted SETUP_WITH/BEFORE_WITH on {ctx}",
-                explanation=f"Dynamo does not know how to enter a `{ctx.python_type_name()}` context manager.",
-                hints=[
-                    "Avoid using the unsupported context manager.",
-                    "If the context manager seems like it should be supported (e.g. torch.set_grad_enabled), then "
-                    "it may be the case that it was created outside the compiled region, which Dynamo does not support. "
-                    "Supported context managers can cross graph break boundaries only if they are local non-closure "
-                    "variables, or are intermediate values.",
-                    "File an issue to PyTorch. Simple context managers can potentially be supported, "
-                    "but note that context managers can't be supported in general",
-                ],
-            )
+            self.unsupported_ctx_graph_break(ctx)
 
         # Need this redundant check for mypy
         assert isinstance(
@@ -3658,22 +3662,26 @@ class InstructionTranslatorBase(
     )
 
     def LOAD_SPECIAL(self, inst: Instruction) -> None:
+        assert isinstance(inst.arg, int), "expected LOAD_SPECIAL arg to be set to int"
         attr = self._load_special_names[inst.arg]
-        if attr == "__enter__":
+        if attr in ("__enter__", "__exit__"):
             ctx = self.pop()
+            if not isinstance(
+                ctx, (ContextWrappingVariable, GenericContextWrappingVariable)
+            ):
+                self.unsupported_ctx_graph_break(ctx)
+
+            # Need this redundant check for mypy
             assert isinstance(
                 ctx, (ContextWrappingVariable, GenericContextWrappingVariable)
             )
-            self.push(WithEnterFunctionVariable(ctx))
-            self.PUSH_NULL(inst)
-        elif attr == "__exit__":
-            ctx = self.pop()
-            assert isinstance(
-                ctx, (ContextWrappingVariable, GenericContextWrappingVariable)
-            )
-            # WithExitFunctionVariable doesn't really do anything with target for 3.11+
-            self.push(WithExitFunctionVariable(ctx, None))
-            self.PUSH_NULL(inst)
+            if attr == "__enter__":
+                self.push(WithEnterFunctionVariable(ctx))
+                self.PUSH_NULL(inst)
+            else:
+                # WithExitFunctionVariable doesn't really do anything with target for 3.11+
+                self.push(WithExitFunctionVariable(ctx, None))
+                self.PUSH_NULL(inst)
         else:
             # Implementation is similar to LOAD_METHOD for 3.13+
             self._load_attr(attr)
@@ -4455,7 +4463,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         # because we dont mutate them in transform_code_object (those
         # instructions are for the top most Instruction translator).  Also, we
         # have to be careful about not using _cached_cleaned_instructions here
-        # because that function is global, while we want the the cache to be
+        # because that function is global, while we want the cache to be
         # alive only during a compmilation.
         tracing_ctx = parent.output.tracing_context
         instructions = None

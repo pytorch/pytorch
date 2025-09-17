@@ -1384,6 +1384,20 @@
   "GB0142": [
     {
       "Gb_type": "Unsupported context manager",
+      "Context": "Attempted SETUP_WITH/BEFORE_WITH/LOAD_SPECIAL on {ctx}",
+      "Explanation": "Dynamo does not know how to enter a `{ctx.python_type_name()}` context manager.",
+      "Hints": [
+        "Avoid using the unsupported context manager.",
+        "If the context manager seems like it should be supported (e.g. torch.set_grad_enabled), then ",
+        "it may be the case that it was created outside the compiled region, which Dynamo does not support. ",
+        "Supported context managers can cross graph break boundaries only if they are local non-closure ",
+        "variables, or are intermediate values.",
+        "File an issue to PyTorch. Simple context managers can potentially be supported, ",
+        "but note that context managers can't be supported in general"
+      ]
+    },
+    {
+      "Gb_type": "Unsupported context manager",
       "Context": "Attempted SETUP_WITH/BEFORE_WITH on {ctx}",
       "Explanation": "Dynamo does not know how to enter a `{ctx.python_type_name()}` context manager.",
       "Hints": [
