@@ -2019,6 +2019,7 @@ end
                         consts, ALIGN_BYTES, symbol_prefix
                     )
 
+            assert config.aot_inductor.model_name_for_generated_files is not None
             _, consts_s = write(
                 consts_code,
                 code_ext,
@@ -2041,7 +2042,7 @@ end
             consts_o = object_builder.get_target_file_path()
             if use_asm_build is False and is_zero_size_consts:
                 run_asm_build_object(str(consts_s), consts_o, str(consts_s.parent))
-            elif config.aot_inductor.cross_target_platform != "windows":
+            else: #if config.aot_inductor.cross_target_platform != "windows":
                 object_builder.build()
 
             if is_large_consts and use_asm_build:
@@ -2406,6 +2407,9 @@ end
             )
 
             obj_srcs = [wrapper_o, kernel_o, consts_o, *gpu_kernels_o, *cubins_o]
+            if config.aot_inductor.cross_target_platform == "windows":
+                # x86_64-w64-mingw32-g++ -c /data/users/shangdiy/pytorch/torch/csrc/inductor/aoti_torch/dummy_shim.cpp -o aoti_torch_shim.o
+                obj_srcs.append("/data/users/shangdiy/aoti_torch_shim.o")
             so_builder = CppBuilder(
                 name=output_name,
                 sources=obj_srcs,

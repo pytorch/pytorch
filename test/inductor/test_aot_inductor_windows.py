@@ -83,6 +83,35 @@ class TestAOTInductorWindowsCrossCompilation(TestCase):
 
                 # TODO: actually compile the package in the test later in windows CI
 
+    @requires_gpu()
+    def test_simple_so(self):
+        with torch.no_grad():
+            device = "cuda"
+            model = Simple().to(device=device)
+            example_inputs = (torch.randn(8, 10, device=device),)
+            batch_dim = torch.export.Dim("batch", min=1, max=1024)
+            exported = torch.export.export(
+                model, example_inputs, dynamic_shapes={"x": {0: batch_dim}}
+            )
+            package_path = torch._inductor.aoti_compile_and_package(
+                exported,
+                inductor_configs={
+                    "aot_inductor.model_name_for_generated_files": "model",
+                    "aot_inductor.cross_target_platform": "windows",
+                    "aot_inductor.link_libtorch": False,
+                    # no fallback ops
+                    "max_autotune": True,
+                    "max_autotune_gemm_backends": "TRITON,CPP",
+                    "max_autotune_conv_backends": "TRITON,CPP",
+                    # simplify things for now
+                    "aot_inductor.precompile_headers": False,
+                },
+            )
+
+            with tempfile.TemporaryDirectory() as tmpdir:
+                with zipfile.ZipFile(package_path, "r") as zf:
+                    zf.extractall(tmpdir)
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests

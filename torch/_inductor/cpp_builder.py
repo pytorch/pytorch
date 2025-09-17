@@ -78,7 +78,10 @@ log = logging.getLogger(__name__)
 def is_target_windows() -> bool:
     return (
         sys.platform == "win32"
-        or config.aot_inductor.cross_target_platform == "windows"
+        or (config.aot_inductor.cross_target_platform == "windows" and 
+        # if  config.aot_inductor.package_cpp_only == False, we're cross-compiling using 
+        # x86_64-w64-mingw32-gcc
+        config.aot_inductor.package_cpp_only == True)
     )
 
 
@@ -146,9 +149,6 @@ def check_compiler_exist_windows(compiler: str) -> None:
     """
     Check if compiler is ready, in case end user not activate MSVC environment.
     """
-    if config.aot_inductor.cross_target_platform == "windows":
-        # Do not check compiler if cross target platform is windows.
-        return
     try:
         subprocess.check_output([compiler, "/help"], stderr=subprocess.STDOUT)
     except FileNotFoundError as exc:
@@ -348,7 +348,14 @@ def check_msvc_cl_language_id(compiler: str) -> None:
 
 
 def get_cpp_compiler() -> str:
-    if is_target_windows():
+    if config.aot_inductor.cross_target_platform == "windows" and sys.platform != "win32":
+        # we're doing cross-compilation
+        compiler = "x86_64-w64-mingw32-g++"
+        if not config.aot_inductor.package_cpp_only:
+            check_compiler_exist_windows(compiler)
+        return compiler
+
+    if is_compiling_on_windows():
         compiler = os.environ.get("CXX", "cl")
         compiler = normalize_path_separator(compiler)
         check_compiler_exist_windows(compiler)
@@ -949,6 +956,11 @@ def get_cpp_options(
 
     passthrough_args.append(" ".join(extra_flags))
 
+    if (config.aot_inductor.cross_target_platform == "windows" and 
+        config.aot_inductor.package_cpp_only == True and
+        sys.platform != "win32"):
+        include_dirs.append("/usr/x86_64-w64-mingw32/sys-root/mingw/include/")
+
     return (
         definitions,
         include_dirs,
@@ -1247,6 +1259,9 @@ def _get_openmp_args(
     lib_dir_paths: list[str] = []
     libs: list[str] = []
     passthrough_args: list[str] = []
+
+    if config.aot_inductor.cross_target_platform == "windows":
+        return cflags, ldflags, include_dir_paths, lib_dir_paths, libs, passthrough_args
     if _IS_MACOS:
         # Per https://mac.r-project.org/openmp/ right way to pass `openmp` flags to MacOS is via `-Xclang`
         cflags.append("Xclang")
@@ -1612,6 +1627,8 @@ def get_cpp_torch_device_options(
                 libraries += ["cuda"]
             else:
                 libraries += ["c10_cuda", "cuda", "torch_cuda"]
+            if config.aot_inductor.cross_target_platform == "windows":
+                libraries += ["cudart"]
             _transform_cuda_paths(libraries_dirs)
 
     if device_type == "xpu":
@@ -1795,7 +1812,7 @@ class CppBuilder:
 
     @staticmethod
     def __get_object_flags() -> tuple[str, str]:
-        extension = ".obj" if is_target_windows() else ".o"
+        extension = ".obj" if is_target_windows() else ".o"  # maybe windows specific target?
         output_flags = "/c /Fo" if is_target_windows() else "-c -o"  # codespell:ignore
         return extension, output_flags
 
@@ -2051,6 +2068,8 @@ class CppBuilder:
         _create_if_dir_not_exist(_build_tmp_dir)
 
         build_cmd = self.get_command_line()
+        print(build_cmd)
+        breakpoint()
         run_compile_cmd(build_cmd, cwd=_build_tmp_dir)
         _remove_dir(_build_tmp_dir)
 
