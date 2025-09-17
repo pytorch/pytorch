@@ -717,4 +717,4 @@ jobs:
       - name: Get the workflow type for the current user
         id: set-condition
         run: |
-          echo "label-type=''" >> ${GITHUB_OUTPUT}
+          echo "label-type=" >> ${GITHUB_OUTPUT}
