@@ -12,6 +12,7 @@ from typing import Any, Callable, Optional, Protocol
 import torch
 import torch.distributed as dist
 import torch.distributed._functional_collectives as ft_c
+import torch.distributed.distributed_c10d as c10d
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributed.device_mesh import DeviceMesh
@@ -23,6 +24,8 @@ from torch.nn.attention.flex_attention import (
     create_block_mask,
 )
 from torch.overrides import TorchFunctionMode
+
+from ._cp_custom_ops import flex_cp_forward
 
 
 __all__ = ["context_parallel", "set_rotate_method"]
@@ -1142,10 +1145,16 @@ class _ContextParallel(ParallelStyle):
         FLEX = "flex_attention"
         SDPA = "scaled_dot_product_attention"
 
-    def __init__(self, seq_dim: int, attention_type: AttentionType) -> None:
+    def __init__(
+        self,
+        seq_dim: int,
+        attention_type: AttentionType,
+        dispatch_mode: _DispatchMode = _DispatchMode.MODULE_WRAPPER,
+    ) -> None:
         super().__init__()
         self.seq_dim = seq_dim
         self.attention_type = attention_type
+        self.dispatch_mode = dispatch_mode
 
         # Used by FlexAttention
         self._block_mask: Optional[BlockMask] = None
@@ -1185,21 +1194,25 @@ class _ContextParallel(ParallelStyle):
 
         key = key.contiguous()
         value = value.contiguous()
-        """
-        TODO: the autograd collectives are not sound. The following warning can
-        appear. We should use custom ops.
 
-        UserWarning: _c10d_functional::wait_tensor: an autograd kernel was not
-        registered to the Autograd key(s) but we are trying to backprop through it.
-        This may lead to silently incorrect behavior. This behavior is deprecated and
-        will be removed in a future version of PyTorch. If your operator is differentiable,
-        please ensure you have registered an autograd kernel to the correct Autograd key
-        (e.g. DispatchKey::Autograd, DispatchKey::CompositeImplicitAutograd).  If your
-        operator is not differentiable, or to squash this warning and use the previous
-        behavior, please register torch::CppFunction::makeFallthrough() to DispatchKey::Autograd.
-        """
-        global_key = ft_c.all_gather_tensor_autograd(key, self.seq_dim, mesh)
-        global_value = ft_c.all_gather_tensor_autograd(value, self.seq_dim, mesh)
+        if self.dispatch_mode == _DispatchMode.TORCH_FUNCTION:
+            """
+            UserWarning: _c10d_functional::wait_tensor: an autograd kernel was not
+            registered to the Autograd key(s) but we are trying to backprop through it.
+            This may lead to silently incorrect behavior. This behavior is deprecated and
+            will be removed in a future version of PyTorch. If your operator is differentiable,
+            please ensure you have registered an autograd kernel to the correct Autograd key
+            (e.g. DispatchKey::Autograd, DispatchKey::CompositeImplicitAutograd).  If your
+            operator is not differentiable, or to squash this warning and use the previous
+            behavior, please register torch::CppFunction::makeFallthrough() to
+            DispatchKey::Autograd.
+            """
+            global_key = ft_c.all_gather_tensor_autograd(key, self.seq_dim, mesh)
+            global_value = ft_c.all_gather_tensor_autograd(value, self.seq_dim, mesh)
+        else:
+            global_key, global_value = flex_cp_forward(
+                key, value, self.seq_dim, c10d._get_process_group_name(mesh.get_group())
+            )
         args_list[1] = global_key
         args_list[2] = global_value
 

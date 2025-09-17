@@ -8,6 +8,7 @@ from typing import Callable, ClassVar, Union
 
 import torch
 import torch.distributed as dist
+import torch.distributed.distributed_c10d as c10d
 import torch.nn.functional as F
 from torch import Tensor
 from torch.distributed.device_mesh import init_device_mesh
@@ -24,6 +25,7 @@ from torch.distributed.tensor.experimental._attention import (
     context_parallel_unshard,
     set_rotate_method,
 )
+from torch.distributed.tensor.experimental._cp_custom_ops import flex_cp_forward
 from torch.distributed.tensor.parallel import parallelize_module
 from torch.nn.attention import sdpa_kernel, SDPBackend
 from torch.nn.attention.flex_attention import (
@@ -614,6 +616,37 @@ class CPFlexAttentionTest(DTensorTestBase):
             )
 
             test_func()
+
+
+class TestCPCustomOps(DTensorTestBase):
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_flex_cp_custom_op(self) -> None:
+        mesh = init_device_mesh(
+            device_type=self.device_type,
+            mesh_shape=(self.world_size,),
+            mesh_dim_names=("cp",),
+        )
+        examples_k_v = [
+            (
+                torch.randn(8, 8, 8, 8, device=self.device_type),
+                torch.randn(8, 8, 8, 8, device=self.device_type),
+                2,
+                c10d._get_process_group_name(mesh.get_group()),
+            ),
+            (
+                torch.randn(8, 8, 8, 8, device=self.device_type, requires_grad=True),
+                torch.randn(8, 8, 8, 8, device=self.device_type, requires_grad=True),
+                2,
+                c10d._get_process_group_name(mesh.get_group()),
+            ),
+        ]
+        for example in examples_k_v:
+            torch.library.opcheck(flex_cp_forward, example)
 
 
 if __name__ == "__main__":
