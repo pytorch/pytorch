@@ -393,7 +393,7 @@ class TestAOTInductorPackage(TestCase):
 
             # Test compilation when no name is passed in
             options = {
-                "aot_inductor.compile_standalone": True,
+                "aot_inductor_mode.compile_standalone": True,
             }
             with (
                 tempfile.TemporaryDirectory() as tmp_dir,
@@ -407,7 +407,7 @@ class TestAOTInductorPackage(TestCase):
 
             # Test compilation when model name is passed in
             options = {
-                "aot_inductor.compile_standalone": True,
+                "aot_inductor_mode.compile_standalone": True,
                 "aot_inductor.model_name_for_generated_files": "linear",
             }
             with (
@@ -422,7 +422,7 @@ class TestAOTInductorPackage(TestCase):
 
             # test invalid model name
             options = {
-                "aot_inductor.compile_standalone": True,
+                "aot_inductor_mode.compile_standalone": True,
                 "aot_inductor.model_name_for_generated_files": "linear/linear",
             }
             with self.assertRaisesRegex(Exception, "Invalid AOTI model name"):
@@ -448,7 +448,7 @@ class TestAOTInductorPackage(TestCase):
 
             # Test compilation when model name is passed in
             options = {
-                "aot_inductor.compile_standalone": True,
+                "aot_inductor_mode.compile_standalone": True,
                 "aot_inductor.model_name_for_generated_files": "cos",
             }
             with (
