@@ -28,6 +28,7 @@ from torch.distributed.tensor.parallel import parallelize_module
 from torch.nn.attention import sdpa_kernel, SDPBackend
 from torch.nn.attention.flex_attention import (
     _mask_mod_signature,
+    AuxRequest,
     create_block_mask,
     flex_attention,
 )
@@ -574,8 +575,8 @@ class RingFlexAttentionTest(DTensorTestBase):
             device=self.device_type,
         )
 
-        expect_out, expect_lse = compiled_flex_attention(
-            q, k, v, block_mask=block_mask, return_lse=True
+        expect_out, expect_aux = compiled_flex_attention(
+            q, k, v, block_mask=block_mask, return_aux=AuxRequest(lse=True)
         )
         expect_out.sum().backward()
 
@@ -635,12 +636,12 @@ class RingFlexAttentionTest(DTensorTestBase):
             cp_k.requires_grad = True
             cp_v.requires_grad = True
 
-            cp_out, cp_lse = compiled_flex_attention(
+            cp_out, cp_aux = compiled_flex_attention(
                 cp_q,
                 cp_k,
                 cp_v,
                 block_mask=cp_block_mask,
-                return_lse=True,
+                return_aux=AuxRequest(lse=True),
             )
 
             # check block_mask rewrite doesn't escape to the outside
@@ -657,9 +658,11 @@ class RingFlexAttentionTest(DTensorTestBase):
             cp_v.requires_grad = False
 
         # unshard the output
-        cp_out, cp_lse = context_parallel_unshard(device_mesh, [cp_out, cp_lse], [2, 2])
+        cp_out, cp_lse = context_parallel_unshard(
+            device_mesh, [cp_out, cp_aux.lse], [2, 2]
+        )
         torch.testing.assert_close(cp_out, expect_out, atol=atol, rtol=rtol)
-        torch.testing.assert_close(cp_lse, expect_lse, atol=atol, rtol=rtol)
+        torch.testing.assert_close(cp_lse, expect_aux.lse, atol=atol, rtol=rtol)
 
         # unshard the gradient
         cp_q_grad, cp_k_grad, cp_v_grad = context_parallel_unshard(

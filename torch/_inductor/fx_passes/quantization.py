@@ -1146,9 +1146,7 @@ def _is_valid_woq_optimization_pattern():
             x.dtype == torch.bfloat16
             and weight.dtype == torch.int8
             and scales.dtype == torch.bfloat16
-            # _weight_int8pack_mm kernel only supports cpu now
-            # TODO: add cuda kernel support instead of calling mul+sum
-            and x.device.type == "cpu"
+            and x.device.type in ("cpu", "cuda")
             and x.device == weight.device
             and x.device == scales.device
         )
@@ -3876,7 +3874,7 @@ def quant_lift_up(graph_module: torch.fx.GraphModule):
         ADD
       SOFTMAX
 
-    We want to lift up the the quant nodes from matmul before view like nodes
+    We want to lift up the quant nodes from matmul before view like nodes
     as the output of Linear node.
 
              DQ

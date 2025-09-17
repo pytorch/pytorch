@@ -34,13 +34,14 @@ class KernelTemplateChoice:
         self.params = params
         self.layout = layout
         self.inputs = inputs
+        self.annotations: dict[str, Any] = {"ktc": self}
 
     @property
     def choice(self) -> Optional[ChoiceCaller]:
         """
         Lazily evaluate and return the ChoiceCaller for this template choice.
 
-        On first access, calls template.choice_or_None() with the stored parameters.
+        On first access, calls template.choice_or_none() with the stored parameters.
         If successful, caches and returns the ChoiceCaller. If it fails, caches
         and returns None. Subsequent accesses return the cached value.
 
@@ -55,6 +56,8 @@ class KernelTemplateChoice:
                 layout=self.layout,
                 input_nodes=self.inputs.nodes(),
             )
+            if self._choice is not None:
+                self._choice.annotations = self.annotations
         return self._choice
 
 
