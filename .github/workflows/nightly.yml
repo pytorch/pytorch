@@ -75,10 +75,11 @@ jobs:
             repo-owner: pytorch
             branch: main
             pin-folder: .github/ci_commit_pins
-          - repo-name: executorch
-            repo-owner: pytorch
-            branch: main
-            pin-folder: .ci/docker/ci_commit_pins
+          # executorch jobs are disabled since it needs some manual work for the hash update
+          # - repo-name: executorch
+          #   repo-owner: pytorch
+          #   branch: main
+          #   pin-folder: .ci/docker/ci_commit_pins
           - repo-name: triton
             repo-owner: triton-lang
             branch: main
