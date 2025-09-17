@@ -7124,6 +7124,8 @@ class AOTInductorTestsTemplate:
             "libtorch_cuda.so",
             "libc10_cuda.so",
             "libtorch_cpu.so",
+            "libtorch_xpu.so",
+            "libc10_xpu.so",
         }
 
         with tempfile.TemporaryDirectory() as tmpdir:
