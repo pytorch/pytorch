@@ -3604,7 +3604,6 @@ class Scheduler:
 
         nodes = sorted(fused_nodes, key=lambda x: x.min_order)
         nodes = self.topological_sort_schedule(nodes)
-        self.prune_redundant_deps(nodes)
         return nodes
 
     def create_combo_kernel_nodes(self, num_ck_nodes: Optional[int] = None) -> None:
@@ -3653,6 +3652,7 @@ class Scheduler:
             num_nodes_orig,
             len(self.nodes),
         )
+        self.prune_redundant_deps(nodes)
 
     def prune_redundant_deps(self, nodes: list[BaseSchedulerNode]) -> None:
         for node in nodes:
