@@ -441,11 +441,14 @@ struct ConvParams {
     }
     // native kernel doesn't support 64-bit non-splittable case
     if (!(canUse32BitIndexMath(input) && canUse32BitIndexMath(weight))) {
-      // TODO(eqy): remove this once cuDNN fixes 64-bit depthwise support
-      if (cudnn_conv_suggest_memory_format(input, weight) != at::MemoryFormat::Contiguous) {
-        return false;
-      }
       static long cudnn_version = detail::getCUDAHooks().compiledWithCuDNN() ? detail::getCUDAHooks().versionCuDNN() : -1;
+      // TODO(eqy): remove this once cuDNN fixes 64-bit depthwise support, first broken in 9.11x
+      if (cudnn_conv_suggest_memory_format(input, weight) != at::MemoryFormat::Contiguous) {
+        if (cudnn_version < 0 || cudnn_version > 91000) {
+          return false;
+	}
+      }
+
       if (!(cudnn_version >= 90300 && at::native::cudnnv8_enabled_check_debug())) {
         TORCH_WARN_ONCE("cuDNN cannot be used for large non-batch-splittable convolutions"
                         " if the V8 API is not enabled or before cuDNN version 9.3+."
