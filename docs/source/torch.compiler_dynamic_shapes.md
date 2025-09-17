@@ -178,6 +178,26 @@ In such cases, consider using {func}`torch._dynamo.maybe_mark_dynamic`. Currentl
 {func}`torch._dynamo.mark_dynamic`
 does not have precedence over `force_parameter_static_shapes = True` or `force_nn_module_property_static_shapes = True`.
 
+Here is a quick example:
+
+```{code-cell}
+import torch
+
+@torch.compile(dynamic=True)
+def f(x):
+    return x * x.size()[0]
+
+x = torch.randn(10)
+torch._dynamo.mark_dynamic(x, 0)
+
+# first invocation we give it is a tensor marked as dynamic
+f(x)
+# rest of these invocations will use dynamically compiled code
+f(torch.randn(20))
+f(torch.randn(30))
+f(torch.randn(40))
+```
+
 #### `maybe_mark_dynamic(tensor, dim)`
 
 The {func}`torch._dynamo.maybe_mark_dynamic` function shares all properties
