@@ -2543,6 +2543,8 @@ def pointwise(
                 triton_config_with_settings(size_hints, 64, 64),  # ~8% better for fp16
                 triton_config_with_settings(size_hints, 256, 16),
                 triton_config_with_settings(size_hints, 16, 256),
+                triton_config_with_settings(size_hints, 128, 16), # wrt: +10% for some kernels
+                triton_config_with_settings(size_hints, 32, 512), # wrt: +30% for some kernels
                 triton_config_with_settings(size_hints, bs, 1),
                 triton_config_with_settings(size_hints, 1, bs),
                 *hinted_configs,
