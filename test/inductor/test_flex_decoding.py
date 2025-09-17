@@ -1716,7 +1716,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @skipCUDAIf(True, "Not supported on CUDA")
     @skipXPUIf(True, "Not supported on XPU")
     @common_utils.parametrize("dtype", test_dtypes)
-    @common_utils.parametrize("partition_size", [128, 256, 1024])
+    @common_utils.parametrize("partition_size", [64, 128, 256, 1024])
     def test_flash_decoding_partition_size(self, device, dtype, partition_size):
         def score_mod(score, b, h, m, n):
             return score * 2
@@ -1724,6 +1724,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         self.run_test_with_paged_attention(
             score_mod,
             dtype,
+            KV_S=64,
             device=device,
             kernel_options={"PARTITION_SIZE": partition_size},
         )
