@@ -42,7 +42,6 @@ class ATenConfigHeuristics(TemplateConfigHeuristics):
 
 
 @register_template_heuristic(aten_bmm_dtype.uid, "cuda")
-@register_template_heuristic(aten__fp8_mm.uid, None)
 class ATenOutDtypeConfigHeuristics(ATenConfigHeuristics):
     def get_extra_kwargs(
         self,
@@ -55,6 +54,20 @@ class ATenOutDtypeConfigHeuristics(ATenConfigHeuristics):
             f"out_dtype is required for {op_name} but got None"
         )
         kwargs["out_dtype"] = out_dtype
+        return kwargs
+
+
+@register_template_heuristic(aten__fp8_mm.uid, None)
+class ATenFP8ConfigHeuristics(ATenOutDtypeConfigHeuristics):
+    def get_extra_kwargs(
+        self,
+        kernel_inputs: KernelInputs,
+        op_name: str,
+    ) -> dict[str, Any]:
+        kwargs = super().get_extra_kwargs(kernel_inputs, op_name)
+        use_fast_accum = kernel_inputs.get_kwarg("use_fast_accum")
+        assert use_fast_accum is not None, f"use_fast_accum is required for {op_name}"
+        kwargs["use_fast_accum"] = use_fast_accum
         return kwargs
 
 
