@@ -2003,7 +2003,7 @@ def clamp_max(
 @register_decomposition(aten.where.ScalarOther)
 @register_decomposition(aten.where.Scalar)
 @register_decomposition(aten.where.self_out)
-@out_wrapper()
+@out_wrapper(exact_dtype=True)
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a", "b"),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH,
