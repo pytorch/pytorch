@@ -93,7 +93,7 @@ class TestTorchDlPack(TestCase):
         z[0] = z[0] + 20.0
         self.assertEqual(z, x)
 
-    def _dlpack_conversion_with_streams(stream, x):
+    def _dlpack_conversion_with_streams(self, stream, x):
         # DLPack protocol helps establish a correct stream order
         # (hence data dependency) at the exchange boundary.
         # DLPack manages this synchronization for us, so we don't need to
@@ -117,7 +117,7 @@ class TestTorchDlPack(TestCase):
         with torch.cuda.stream(stream):
             # Do an operation in the actual stream
             x = make_tensor((5,), dtype=dtype, device=device) + 1
-        z = _dlpack_conversion_with_streams(stream, x)
+        z = self._dlpack_conversion_with_streams(stream, x)
         self.assertEqual(z, x)
 
     @skipMeta
@@ -135,7 +135,7 @@ class TestTorchDlPack(TestCase):
         with torch.cuda.stream(stream):
             x = make_tensor((5,), dtype=torch.uint8, device=device) + 1
             x = x.view(dtype)
-        z = _dlpack_conversion_with_streams(stream, x)
+        z = self._dlpack_conversion_with_streams(stream, x)
         self.assertEqual(z.view(torch.uint8), x.view(torch.uint8))
 
     @skipMeta
