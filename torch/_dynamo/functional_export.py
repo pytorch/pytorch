@@ -132,6 +132,17 @@ def clean_export_root(graph_module: torch.fx.GraphModule) -> None:
                     param = torch.fx.graph_module._get_attr(graph_module, old_target)
                     torch.fx.graph_module._assign_attr(param, graph_module, new_target)
                     torch.fx.graph_module._del_attr(graph_module, old_target)
+        # Dynamo will only have one nested level
+        if node.op == "call_module":
+            old_target = node.target
+            new_target = clean_name(old_target)
+            new_name = clean_name(node.name)
+            if new_target != old_target:
+                node.target = new_target
+                target = graph_module.get_submodule(old_target)
+                graph_module.delete_submodule(old_target)
+                graph_module.add_submodule(new_target, target)
+                node.name = new_name
 
 
 class ModuleToTrace(torch.nn.Module):
