@@ -253,11 +253,6 @@ class FSDPParam:
                 lambda *args, **kwargs: self.reset_sharded_param()
             )
         )
-        self._state_dict_pre_hook_handle = (
-            module_info.module.register_state_dict_pre_hook(
-                lambda *args, **kwargs: self.reset_sharded_param()
-            )
-        )
 
     @torch.no_grad()
     def _init_sharded_param(

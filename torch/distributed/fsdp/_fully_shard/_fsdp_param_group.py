@@ -713,9 +713,16 @@ class FSDPParamGroup:
         def to_sharded_hook(*args: Any, **kwargs: Any) -> None:
             self._to_sharded()
 
+        def to_sharded_and_reset_sharded_param_hook(*args: Any, **kwargs: Any) -> None:
+            self._to_sharded()
+            for fsdp_param in self.fsdp_params:
+                fsdp_param.reset_sharded_param()
+
         for module in modules_with_fsdp_params:
             self._module_to_pre_save_state_dict_hook_handle[module] = (
-                module.register_state_dict_pre_hook(to_sharded_hook)
+                module.register_state_dict_pre_hook(
+                    to_sharded_and_reset_sharded_param_hook
+                )
             )
             self._module_to_pre_load_state_dict_hook_handle[module] = (
                 module._register_load_state_dict_pre_hook(to_sharded_hook)
