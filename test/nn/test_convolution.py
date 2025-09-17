@@ -4083,6 +4083,8 @@ class TestConvolutionNNDeviceType(NNTestCase):
         y = m.to(device=device)(x.to(device=device))
         self.assertEqual(yref, y)
 
+    # TODO(eqy): remove once cuDNN depthwise support is fixed
+    @unittest.expectedFailure
     @skipCUDAIfRocm
     @onlyCUDA
     @largeTensorTest("20GB")
