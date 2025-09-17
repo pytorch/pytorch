@@ -586,9 +586,26 @@ def _get_input_paths(example_inputs, signature):
     """
 
     args, kwargs = example_inputs
-    ctx = signature.bind(*args, **kwargs).arguments
+    binded = signature.bind(*args, **kwargs)
+    binded.apply_defaults()
+    ctx = binded.arguments
     flat_example_inputs_with_paths = pytree.tree_leaves_with_path(ctx)
     return [path for path, _ in flat_example_inputs_with_paths]
+
+
+def _replace_sources(result_str: str, flat_input_paths: list[Any]):
+    """
+    Given user specified input paths, maybe fix up the guard string
+    to reflect user path instead of tracer path.
+    """
+    name_mapping = {}
+    for idx, path in enumerate(flat_input_paths):
+        name_mapping[f"L['flat_args'][{idx}]"] = f"L{pytree.keystr(path)}"
+
+    replace = result_str
+    for key, val in name_mapping.items():
+        replace = replace.replace(key, val)
+    return replace
 
 
 def _get_input_guards_for_graph(
@@ -802,14 +819,31 @@ def _unlift_exported_program_lifted_states(
     graph = unlift_gm.graph
     placeholders = graph.find_nodes(op="placeholder")
     if check_guards and placeholders and ep.example_inputs:
-        gm_sig = inspect.signature(unlift_gm.forward)
-        input_paths = _get_input_paths(ep.example_inputs, gm_sig)
+        sig = inspect.signature(unlift_gm.forward)
+        input_paths = _get_input_paths(
+            ep.example_inputs,
+            sig,
+        )
+
+        # TODO (tmanlaibaatar)
+        # This is band-aid solution to export new tracer replacing
+        # shape env sources to flat_args. The real fix should be replacing
+        # shape env sources to original user sources but this is quite
+        # involved because you need to carefully construct new sources using
+        # dynamo and replace all instances of it inside shape env. But it is
+        # lot easier to manipulate after we turn them into strings and only
+        # time we use these guards is during retracing or running exported program,
+        # so it is probably ok to have "not useful" guards on ep for now.
+        ep_guards = []
+        for guard in ep._guards_code:
+            ep_guards.append(_replace_sources(guard, input_paths))
+
         guards_code = _get_input_guards_for_graph(
             placeholders, ep.range_constraints, input_paths
         )
 
         ep_guards_code = _force_ep_signature_match(ep._guards_code, input_paths)
-        ep_guards_code = _force_gm_signature_match(ep_guards_code, gm_sig)
+        ep_guards_code = _force_gm_signature_match(ep_guards_code, sig)
         guards_code.extend(ep_guards_code)
         unlift_gm._guards_fn = _convert_guards_code_to_fn(guards_code, input_paths)
 
