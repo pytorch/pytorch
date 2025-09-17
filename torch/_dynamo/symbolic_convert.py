@@ -1055,7 +1055,7 @@ class ExceptionStack:
     """
 
     # Exception handling in CPython is a bit confusing and some of the bytecode
-    # have a slightly different behavior than what is is documented. While reading
+    # have a slightly different behavior than what is documented. While reading
     # the documentation, is important to notice that the terms "current exception"
     # and "stack" sometimes refers to a C variable with the same name and the
     # exception stack, respectively.
@@ -4384,7 +4384,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         # because we dont mutate them in transform_code_object (those
         # instructions are for the top most Instruction translator).  Also, we
         # have to be careful about not using _cached_cleaned_instructions here
-        # because that function is global, while we want the the cache to be
+        # because that function is global, while we want the cache to be
         # alive only during a compmilation.
         tracing_ctx = parent.output.tracing_context
         instructions = None

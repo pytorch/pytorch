@@ -479,8 +479,8 @@ class TestSparse(TestSparseBase):
                                                 "cannot set is_coalesced to true if indices correspond to uncoalesced COO tensor"):
                         torch.autograd.gradcheck(func, (t._indices(), t._values().requires_grad_(True), shape, True))
 
-    @expectedFailureMPS
     @dtypes(*floating_and_complex_types_and(torch.float16, torch.bfloat16))
+    @dtypesIfMPS(*all_mps_types())
     @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupported triggers assertion error")
     @gradcheck_semantics()
     def test_to_dense_with_gradcheck(self, device, dtype, gradcheck):
@@ -505,7 +505,8 @@ class TestSparse(TestSparseBase):
             x.requires_grad_(True)
             gradcheck(fn, (x,))
 
-        for value_type in [torch.double, torch.cdouble]:
+        values_types = [torch.double, torch.cdouble] if device != "mps:0" else [torch.float32, torch.complex64]
+        for value_type in values_types:
             i = self.index_tensor([
                 [0, 1, 2, 2],
                 [0, 0, 0, 3],
@@ -859,8 +860,8 @@ class TestSparse(TestSparseBase):
         test_shape(3, 0, [0, 0, 100, 5, 5, 5, 0])
 
     @coalescedonoff
-    @expectedFailureMPS
     @dtypes(torch.double, torch.cdouble, torch.bfloat16)
+    @dtypesIfMPS(torch.float32, torch.complex64, torch.bfloat16)
     @precisionOverride({torch.bfloat16: 2e-2})
     def test_Sparse_to_Sparse_copy_(self, device, dtype, coalesced):
         # This is for testing torch.copy_(SparseTensor, SparseTensor)
@@ -883,7 +884,7 @@ class TestSparse(TestSparseBase):
         x1.copy_(x2)
         self.assertEqual(x1_dtype, x1.dtype)
 
-        x2 = x2.to(torch.float64)
+        x2 = x2.to(torch.float64) if device != "mps:0" else x2.to(torch.float32)
         x1_dtype = x1.dtype
         x1.copy_(x2)
         self.assertEqual(x1_dtype, x1.dtype)
@@ -1121,9 +1122,9 @@ class TestSparse(TestSparseBase):
         x.sub_(2 * x)
         self.assertLessEqual(x._nnz(), 10)
 
-    @expectedFailureMPS
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
+    @dtypesIfMPS(torch.float32, torch.complex64)
     def test_cat(self, device, dtype, coalesced):
         # shapes: list of tuples (sparse_dims, nnz, sizes)
         def test_shapes(shapes, dim, fail_message=None):
@@ -1164,9 +1165,9 @@ class TestSparse(TestSparseBase):
                                     "Concatenating sparse tensors, but a dense tensor was found at position 1."):
             torch.cat((sp, dn))
 
-    @expectedFailureMPS
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
+    @dtypesIfMPS(torch.float32, torch.complex64)
     def test_unsqueeze(self, device, dtype, coalesced):
         def test_shape(sparse_dims, nnz, sizes, unsqueeze_dim, fail_message=None):
             x, _, _ = self._gen_sparse(sparse_dims, nnz, sizes, dtype, device, coalesced)
@@ -2275,8 +2276,8 @@ class TestSparse(TestSparseBase):
         test_shape([2, 3, 4], [0, 4, 5, 6], [2, 3, 0], [9, 12])
 
     @coalescedonoff
-    @expectedFailureMPS
     @dtypes(torch.double, torch.cdouble)
+    @dtypesIfMPS(torch.float32, torch.complex64)
     def test_zeros_like(self, device, dtype, coalesced):
         def _test_zeros_like(nnzs, template_shape_i, template_shape_v=None):
             template_shape_v = template_shape_v or []
@@ -2353,14 +2354,14 @@ class TestSparse(TestSparseBase):
             self.assertTrue(result.layout == torch.strided)
 
         with self.assertRaisesRegex(
-            RuntimeError, r"Could not run 'aten::empty_strided' with arguments from the 'Sparse(CPU|CUDA)' backend"
+            RuntimeError, r"Could not run 'aten::empty_strided' with arguments from the 'Sparse(CPU|CUDA|MPS)' backend"
         ):
             dense_tensor = sparse_tensor.to_dense()
             result = torch.empty_like(dense_tensor, layout=torch.sparse_coo)
 
     @coalescedonoff
-    @expectedFailureMPS
     @dtypes(torch.double, torch.cdouble)
+    @dtypesIfMPS(torch.float32, torch.complex64)
     def test_empty_like(self, device, dtype, coalesced):
         # tests https://github.com/pytorch/pytorch/issues/43699
 
@@ -2416,8 +2417,8 @@ class TestSparse(TestSparseBase):
                     yield [dim, start, length]
 
     @coalescedonoff
-    @expectedFailureMPS
     @dtypes(torch.double, torch.cdouble)
+    @dtypesIfMPS(torch.float32, torch.complex64)
     def test_narrow(self, device, dtype, coalesced):
         shape = [3, 3, 4, 2]
         input, _, _ = self._gen_sparse(4, 19, shape, dtype, device, coalesced)
@@ -3278,8 +3279,8 @@ class TestSparse(TestSparseBase):
         self.assertEqual(list(t.coalesce().values().size()), [1, 3])
 
     @coalescedonoff
-    @expectedFailureMPS
     @dtypes(torch.double)
+    @dtypesIfMPS(torch.float32)
     def test_pickle(self, device, dtype, coalesced):
         import pickle
 
@@ -3310,7 +3311,6 @@ class TestSparse(TestSparseBase):
             sp_tensor_loaded = pickle.loads(serialized)
             self.assertEqual(sp_tensor, sp_tensor_loaded)
 
-    @expectedFailureMPS
     def test_any(self, device):
         t = torch.sparse_coo_tensor(torch.tensor(([0, 0], [2, 0])), torch.tensor([False, False]), device=device)
         t_any = torch.tensor(False)
