@@ -48,9 +48,9 @@ except ImportError:
 _initialized = False
 _tls = threading.local()
 _initialization_lock = threading.Lock()
-_queued_calls: list[
-    tuple[Callable[[], None], list[str]]
-] = []  # don't invoke these until initialization occurs
+_queued_calls: list[tuple[Callable[[], None], list[str]]] = (
+    []
+)  # don't invoke these until initialization occurs
 _is_in_bad_fork = getattr(torch._C, "_cuda_isInBadFork", lambda: False)
 
 _HAS_PYNVML = False
