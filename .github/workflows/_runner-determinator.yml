@@ -717,4 +717,18 @@ jobs:
       - name: Get the workflow type for the current user
         id: set-condition
         run: |
-          echo "label-type=''" >> ${GITHUB_OUTPUT}
+          curr_branch="${{ inputs.curr_branch }}"
+          curr_ref_type="${{ inputs.curr_ref_type }}"
+          echo "Current branch is '$curr_branch'"
+
+          python3 runner_determinator.py \
+            --github-token "$GITHUB_TOKEN" \
+            --github-issue "$ISSUE_NUMBER" \
+            --github-branch "$curr_branch" \
+            --github-actor "$TRIGGERING_ACTOR" \
+            --github-issue-owner "$ISSUE_OWNER" \
+            --github-ref-type "$curr_ref_type" \
+            --github-repo "$GITHUB_REPOSITORY" \
+            --eligible-experiments "$CHECK_EXPERIMENTS" \
+            --opt-out-experiments "$OPT_OUT_EXPERIMENTS" \
+            --pr-number "${PR_NUMBER}"
