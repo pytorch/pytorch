@@ -60,10 +60,7 @@ from torch.export.passes import move_to_device_pass
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.testing import FileCheck
-from torch.testing._internal.common_cuda import (
-    PLATFORM_SUPPORTS_FLASH_ATTENTION,
-    xfailIfDistributedNotSupported,
-)
+from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTION
 from torch.testing._internal.common_utils import (
     find_library_location,
     IS_FBCODE,
@@ -621,6 +618,22 @@ class TestExport(TestCase):
                 self.assertTrue(node.target == torch.ops.aten.linear.default)
 
         self.assertEqual(counter, 1)
+
+    @testing.expectedFailureSerDer  # can't serialize functorch ops
+    @testing.expectedFailureSerDerNonStrict  # can't serialize functorch ops
+    def test_vmap_to_assert(self):
+        class VmapToAssert(torch.nn.Module):
+            def forward(self, x, y):
+                f = lambda x, y: (
+                    (x * y).to("cpu", memory_format=torch.channels_last) + 1
+                ).sum(dim=0)  # noqa: E731
+                vmapped = torch.vmap(f)(x, y)
+                return vmapped.sum(dim=0)
+
+        ep = export(VmapToAssert(), (torch.zeros(4, 4, 4, 4), torch.zeros(4, 4, 4, 4)))
+        exported = ep.module()(torch.ones(4, 4, 4, 4), torch.ones(4, 4, 4, 4))
+        eager = VmapToAssert()(torch.ones(4, 4, 4, 4), torch.ones(4, 4, 4, 4))
+        self.assertEqual(exported, eager)
 
     def test_from_node_metadata_export(self):
         class Foo(torch.nn.Module):
@@ -4853,6 +4866,47 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
 
         exported = export(model, inputs).module()
         self.assertEqual(model(*inputs), exported(*inputs))
+
+    def test_dynamic_shapes_wrapped_with_shape_guards(self):
+        class Neuron(torch.nn.Module):
+            def __init__(self, n_dims: int = 5, n_targets: int = 3):
+                super().__init__()
+                self.linear = torch.nn.Linear(n_dims, n_targets)
+
+            def forward(self, x, y):
+                return torch.sigmoid(self.linear(x + y))
+
+        args = (torch.randn(2, 5), torch.randn(2, 5))
+        batch = torch.export.Dim.DYNAMIC
+
+        n = Neuron()
+        compiled = export(n, args, dynamic_shapes=({0: batch}, {0: batch}))
+        expected = n(*args)
+        mod = compiled.module()
+        got = mod(*args)
+        self.assertTrue(torch.allclose(expected, got))
+
+        class Wrapped(Neuron):
+            def forward(self, *args):
+                return super().forward(*args)
+
+        w = Wrapped()
+
+        if is_retracebility_test(self._testMethodName):
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.UserError,
+                "Detected mismatch between the structure of `inputs` and `dynamic_shapes`"
+                ": `inputs` has 2 elements, but `dynamic_shapes` has 1 elements",
+            ):
+                export(w, args, dynamic_shapes={"args": ({0: batch}, {0: batch})})
+        else:
+            compiled = export(
+                w, args, dynamic_shapes={"args": ({0: batch}, {0: batch})}
+            )
+            expected = w(*args)
+            mod = compiled.module()
+            got = mod(*args)
+            self.assertTrue(torch.allclose(expected, got))
 
     def test_dynamic_shapes_builder_basic(self):
         class M(torch.nn.Module):
@@ -11787,7 +11841,6 @@ graph():
         self.assertEqual(ep.module()(3, 5), 8)
         self.assertEqual(ep.module()(5, 4), 9)
 
-    @testing.expectedFailureStrictV2  # ValueError: Found conflicts between user-specified and inferred ranges
     def test_dynamic_shapes_bounds(self):
         class M(torch.nn.Module):
             """
@@ -13758,21 +13811,24 @@ def forward(self, x, y):
 
         inputs = (torch.randn(10, 72),)
         dx, dy = dims("dx", "dy")
-        ep = torch.export._trace._export(
-            Mod4Reshape(),
-            inputs,
-            dynamic_shapes={"x": (dx, dy)},
-            prefer_deferred_runtime_asserts_over_guards=True,
-        )
-        out1 = ep.module()(torch.randn(8, 7))
-        self.assertEqual(out1.shape, torch.ones(7, 4, 2).shape)
-        out2 = ep.module()(torch.randn(12, 11))
-        self.assertEqual(out2.shape, torch.ones(11, 4, 3).shape)
-        with self.assertRaisesRegex(
-            RuntimeError,
-            r"Runtime assertion failed for expression Eq\(Mod\(s27\*s77, 4\*s77 \- 4\), 0\) on node 'eq.*'",
-        ):
-            ep.module()(torch.randn(8, 8))  # fail
+        for use_new_tracer in [True, False]:
+            ep = torch.export._trace._export(
+                Mod4Reshape(),
+                inputs,
+                dynamic_shapes={"x": (dx, dy)},
+                prefer_deferred_runtime_asserts_over_guards=True,
+                pre_dispatch=True,
+                _use_new_tracer_experimental=use_new_tracer,
+            )
+            out1 = ep.module()(torch.randn(8, 7))
+            self.assertEqual(out1.shape, torch.ones(7, 4, 2).shape)
+            out2 = ep.module()(torch.randn(12, 11))
+            self.assertEqual(out2.shape, torch.ones(11, 4, 3).shape)
+            with self.assertRaisesRegex(
+                RuntimeError,
+                r"^Runtime assertion failed for expression Eq\(Mod\(s\d+\*s\d+, 4\*s\d+\s*-\s*4\), 0\) on node 'eq[^']*'$",
+            ):
+                ep.module()(torch.randn(8, 8))  # fail
 
         # case 2: 2d reshape
         class FreeReshape(torch.nn.Module):
@@ -15731,7 +15787,6 @@ class GraphModule(torch.nn.Module):
         finally:
             torch.distributed.destroy_process_group()
 
-    @xfailIfDistributedNotSupported
     def test_distributed_all_reduce(self):
         class Foo(torch.nn.Module):
             def __init__(self):
@@ -15749,7 +15804,6 @@ class GraphModule(torch.nn.Module):
             inp = (torch.randn(4, 4),)
             self.assertTrue(torch.allclose(ep.module()(*inp), m(*inp)))
 
-    @xfailIfDistributedNotSupported
     def test_distributed_all_gather(self):
         class Foo(torch.nn.Module):
             def forward(self, x):
@@ -15765,7 +15819,6 @@ class GraphModule(torch.nn.Module):
                 torch.allclose(a, b) for a, b in zip(ep.module()(*inp), m(*inp))
             )
 
-    @xfailIfDistributedNotSupported
     def test_distributed_all_gather_into_tensor(self):
         class Foo(torch.nn.Module):
             def forward(self, x):
@@ -15779,7 +15832,6 @@ class GraphModule(torch.nn.Module):
             inp = (torch.randn(2),)
             self.assertTrue(torch.allclose(ep.module()(*inp), m(*inp)))
 
-    @xfailIfDistributedNotSupported
     @testing.expectedFailureCppRuntime
     def test_distributed_all_to_all_single(self):
         class Foo(torch.nn.Module):
@@ -15797,7 +15849,6 @@ class GraphModule(torch.nn.Module):
             )
             self.assertEqual(len(nodes), 1)
 
-    @xfailIfDistributedNotSupported
     @testing.expectedFailureCppRuntime
     def test_distributed_reduce_scatter_tensor(self):
         class Foo(torch.nn.Module):
@@ -16149,9 +16200,11 @@ def forward(self, q, k, v):
             ) -> torch.Tensor:
                 # x.sizes(): 1, 128, 16, 128
                 sp = start_pos.item()
-                torch._check_is_size(sp)
+
+                # Checks needed for slicing.
                 torch._check(sp >= 0)
                 torch._check(sp <= 126)
+
                 key = cache[:, : sp + 1, :, :]  # 1, sp+1, 16, 128
                 value = cache[:, : sp + 1, :, :]  # 1, sp+1, 16, 128
                 query = query.transpose(1, 2)  # (bs, n_local_heads, seqlen, head_dim)
@@ -16571,6 +16624,37 @@ def forward(self, x):
 
         wrapper = Wrapper(pyt_model, example_inputs)
         wrapper.forward()
+
+    def test_export_with_dict_input_nested_in_args(self):
+        """Test export with dictionary input nested in args."""
+
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super(MyModel, self).__init__()
+                self.linear = torch.nn.Linear(10, 1)
+
+            def forward(self, data_batch):
+                h1 = self.linear(data_batch["a1"])
+                h2 = self.linear(data_batch["a2"])
+                return h1 + h2
+
+        # Create model and example inputs
+        model = MyModel()
+        a1 = torch.randn(10)
+        a2 = torch.randn(10)
+        original_input = {"a1": a1, "a2": a2}
+        example_args_forward = (original_input,)
+
+        # Export the model
+        exported_model = export(model, example_args_forward)
+
+        # Run both models and compare results
+        reordered_input = {"a2": a2, "a1": a1}
+        original_output = exported_model.module()(reordered_input)
+        loaded_output = model(original_input)
+
+        # Verify outputs are close (allowing for floating point differences)
+        torch.testing.assert_close(original_output, loaded_output)
 
     def test_strict_export_with_shared_parameters(self):
         """Test that parameter names are preserved when there are shared parameters with the same name."""
