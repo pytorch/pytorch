@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any, Optional, TYPE_CHECKING, Union
 
+from .template_heuristics.params import DictKernelTemplateParams
+
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -10,6 +12,7 @@ if TYPE_CHECKING:
     from .ir import ChoiceCaller, Layout
     from .kernel_inputs import KernelInputs
     from .select_algorithm import ExternKernelChoice
+    from .template_heuristics.params import KernelTemplateParams
 
 
 class KernelTemplateChoice:
@@ -23,14 +26,12 @@ class KernelTemplateChoice:
     def __init__(
         self,
         template: Union[KernelTemplate, ExternKernelChoice],
-        kwargs: dict[str, Any],
-        extra_kwargs: dict[str, Any],
+        params: KernelTemplateParams,
         layout: Layout,
         inputs: KernelInputs,
     ):
         self.template = template
-        self.kwargs = kwargs
-        self.extra_kwargs = extra_kwargs
+        self.params = params
         self.layout = layout
         self.inputs = inputs
         self.annotations: dict[str, Any] = {"ktc": self}
@@ -49,11 +50,11 @@ class KernelTemplateChoice:
         """
         if not hasattr(self, "_choice"):
             # First time accessing choice - try to generate it
+            kwargs = self.params.to_kwargs()
             self._choice = self.template.choice_or_none(
-                **self.kwargs,
+                **kwargs,
                 layout=self.layout,
                 input_nodes=self.inputs.nodes(),
-                **self.extra_kwargs,
             )
             if self._choice is not None:
                 self._choice.annotations = self.annotations
@@ -62,9 +63,8 @@ class KernelTemplateChoice:
 
 def make_ktc_generator(
     template: Union[KernelTemplate, ExternKernelChoice],
-    cs: Generator[dict[str, Any], None, None],
+    cs: Generator[KernelTemplateParams, None, None],
     overrides: dict[str, Any],
-    extra_kwargs: dict[str, Any],
     layout: Layout,
     inputs: KernelInputs,
 ) -> Generator[KernelTemplateChoice, None, None]:
@@ -73,20 +73,23 @@ def make_ktc_generator(
 
     Args:
         template: The template object (KernelTemplate or ExternKernelChoice)
-        cs: Generator of configurations from template heuristic
+        cs: Generator of KernelTemplateParams from template heuristic
         overrides: Override kwargs for the template
-        extra_kwargs: Extra kwargs from the heuristic
-        layout_val: Layout value for the template
+        layout: Layout value for the template
         inputs: KernelInputs for the op
 
     Yields:
         KernelTemplateChoice objects
     """
-    for ckwargs in cs:
+    for params in cs:
+        # Apply overrides to params
+        base_kwargs = params.to_kwargs()
+        final_kwargs = {**base_kwargs, **overrides}
+        final_params = DictKernelTemplateParams(final_kwargs)
+
         yield KernelTemplateChoice(
             template=template,
-            kwargs={**ckwargs, **overrides},
-            extra_kwargs=extra_kwargs,
+            params=final_params,
             layout=layout,
             inputs=inputs,
         )
