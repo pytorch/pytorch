@@ -38,7 +38,6 @@ run_doxygen = os.environ.get("RUN_DOXYGEN", "false") == "true"
 # ones.
 extensions = [
     "sphinx.ext.intersphinx",
-    "sphinx_remove_toctrees",
 ] + (["breathe", "exhale"] if run_doxygen else [])
 
 intersphinx_mapping = {"pytorch": ("https://pytorch.org/docs/main", None)}
@@ -180,7 +179,6 @@ todo_include_todos = True
 # a list of builtin themes.
 #
 html_theme = "pytorch_sphinx_theme2"
-remove_from_toctrees = ["api/*"]
 
 # Theme options are theme-specific and customize the look and feel of a theme
 # further.  For a list of options available for each theme, see the
