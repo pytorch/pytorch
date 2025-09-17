@@ -1306,7 +1306,6 @@ class XPUConfigHeuristic(BaseConfigHeuristic):
 
     def __init__(self) -> None:
         super().__init__()
-
         self.xpu_default_flex_config = {
             (torch.float32, 64): FlexConfig(128, 32, 1, 16),
             (torch.float32, 128): FlexConfig(128, 32, 1, 16),
@@ -2208,6 +2207,12 @@ class CPUMMPlusMMTemplateConfigHeuristic(
 @register_template_heuristic(bmm_template.uid, "xpu")
 class XPUMMTemplateConfigHeuristic(MMTemplateConfigMixin, XPUConfigHeuristic):
     """Standard MM template heuristic for XPU"""
+
+    def __init__(self) -> None:
+        super().__init__()
+
+        # TODO(etaf): Design proper exhaustive search space for XPU.
+        self.exhaustive_configs = self.mm_configs
 
 
 @register_template_heuristic(mm_template.uid, "xpu", op_name="addmm")

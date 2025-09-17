@@ -5408,7 +5408,7 @@ class CppScheduling(BaseScheduling):
             src_code = src_code.replace("#pragma CMT", "//")
 
             # Get the lines in the source code representing the function definition,
-            # excluding the the first line including cpp_prefix.h.
+            # excluding the first line including cpp_prefix.h.
             first_char = src_code.rfind('extern "C"')
             last_char = src_code.find(")", first_char)
             if _IS_WINDOWS:
