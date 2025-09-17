@@ -2527,6 +2527,9 @@ def pointwise(
                 triton_config_with_settings(
                     size_hints, bs // 2, num_elements_per_warp=64
                 ),
+                triton_config_with_settings(
+                    size_hints, TRITON_MAX_BLOCK["X"], waves_per_eu=2
+                ),
                 *hinted_configs,
             ]
             # Additional reduction configs appended for ROCm builds
