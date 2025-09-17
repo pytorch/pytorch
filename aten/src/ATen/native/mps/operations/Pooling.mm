@@ -561,26 +561,10 @@ static void max_unpool_out_mps_template(const Tensor& input,
 
     if (min_idx < 0 || max_idx >= output_image_size) {
       int64_t error_idx = (min_idx < 0) ? min_idx : max_idx;
-      if (pooling_dims == 3) {
         TORCH_CHECK(false,
                     "Found an invalid max index: ",
                     error_idx,
-                    " (output volumes are of size ",
-                    output_depth,
-                    "x",
-                    output_height,
-                    "x",
-                    output_width,
-                    ")");
-      } else {
-        TORCH_CHECK(false,
-                    "Found an invalid max index: ",
-                    error_idx,
-                    " (output volumes are of size ",
-                    output_height,
-                    "x",
-                    output_width,
-                    ")");
+                    "for output tensor of shape ", output.shape());
       }
     }
   }
