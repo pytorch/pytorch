@@ -833,7 +833,18 @@ def should_offload(node: torch.fx.Node) -> bool:
     """
     Determine if a node should be offloaded to CPU based on size threshold.
     Similar to should_quantize but for CPU offloading.
+    Don't offload view operations and getitem operations as they are cheap and don't benefit from CPU offloading.
     """
+    op_types = get_default_op_list()
+    
+    # Don't offload view operations - they're cheap and don't benefit from CPU offloading
+    if op_types.is_view(node):
+        return False
+    
+    # Don't offload getitem operations - they're cheap tuple/list indexing operations
+    if node.target == operator.getitem:
+        return False
+    
     return True
     
 
@@ -849,18 +860,43 @@ def offload_activation_fw(graph: torch.fx.Graph) -> None:
     for node in fwd_outputs:
         # Check if the activation node is marked for offloading
         if node.meta.get("saved_for_offloading", False):
-            # Move tensor to CPU using aten.to.device with dtype preserved
-            with graph.inserting_after(node):
-                cpu_node = graph.call_function(
-                    torch.ops.aten.to.device,
-                    args=(node,),
-                    kwargs={"device": torch.device("cpu"), "dtype": node.meta["val"].dtype},
-                    name="cpu_offload_" + str(node.name),
-                )
-                cpu_node.meta["val"] = node.meta["val"].to(torch.device("cpu"))
-                cpu_node.meta["tensor_meta"] = extract_tensor_metadata(
-                    cpu_node.meta["val"]
-                )
+            # Find the last user of this node (excluding the output node)
+            last_user = None
+            if node.users:
+                # Filter out the output node and find the last user (topologically)
+                non_output_users = [user for user in node.users.keys() if user.op != "output"]
+                if non_output_users:
+                    # Find the last user by their position in the graph
+                    graph_nodes = list(graph.nodes)
+                    last_user = max(non_output_users, key=lambda n: graph_nodes.index(n))
+            
+            # Insert the CPU offload operation after the last user, or before the output if no users
+            if last_user:
+                with graph.inserting_after(last_user):
+                    cpu_node = graph.call_function(
+                        torch.ops.aten.to.device,
+                        args=(node,),
+                        kwargs={"device": torch.device("cpu"), "dtype": node.meta["val"].dtype},
+                        name="cpu_offload_" + str(node.name),
+                    )
+                    cpu_node.meta["val"] = node.meta["val"].to(torch.device("cpu"))
+                    cpu_node.meta["tensor_meta"] = extract_tensor_metadata(
+                        cpu_node.meta["val"]
+                    )
+            else:
+                # If no users, we can safely offload right after the node creation
+                with graph.inserting_after(node):
+                    cpu_node = graph.call_function(
+                        torch.ops.aten.to.device,
+                        args=(node,),
+                        kwargs={"device": torch.device("cpu"), "dtype": node.meta["val"].dtype},
+                        name="cpu_offload_" + str(node.name),
+                    )
+                    cpu_node.meta["val"] = node.meta["val"].to(torch.device("cpu"))
+                    cpu_node.meta["tensor_meta"] = extract_tensor_metadata(
+                        cpu_node.meta["val"]
+                    )
+            
             node_to_offload[node] = cpu_node
 
     # Update the return node args
@@ -885,8 +921,18 @@ def offload_activation_bw(graph: torch.fx.Graph) -> None:
             node.meta.pop("saved_for_offloading")
             original_device = node.meta.pop("original_device")
 
+            # Find the first user to determine where to place the restore node
+            first_user = None
+            if node.users:
+                # Find the first user (topologically)
+                first_user = min(node.users.keys(), key=lambda n: list(graph.nodes).index(n))
+
             # Move tensor back to original device (GPU) using aten.to.device with dtype preserved
-            with graph.inserting_after(node):
+            # Place it right before the first user if possible, otherwise after the placeholder
+            insert_point = first_user if first_user else node
+            insert_method = graph.inserting_before if first_user else graph.inserting_after
+            
+            with insert_method(insert_point):
                 gpu_node = graph.call_function(
                     torch.ops.aten.to.device,
                     args=(node,),
@@ -936,7 +982,9 @@ def perform_activation_offloading(
             bwd_input.replace_all_uses_with(offload_bwd_input)
             bwd_module.graph.erase_node(bwd_input)
 
-    offload_activation_bw(bwd_module.graph)
+    offload_activation_bw(bwd_module.graph)    
+    print("bw")
+    print(bwd_module.graph)
 
 
 def enable_activation_offloading(
@@ -1104,9 +1152,11 @@ def _extract_fwd_bwd_modules(
     enable_activation_quantization(
         saved_values, fwd_module, bwd_module, static_lifetime_input_nodes
     )
-    enable_activation_offloading(
-        saved_values, fwd_module, bwd_module, static_lifetime_input_nodes
-    )
+    if config.enable_activation_offloading:
+        print("EAO XXXXX")
+        enable_activation_offloading(
+            saved_values, fwd_module, bwd_module, static_lifetime_input_nodes
+        )
     return fwd_module, bwd_module
 
 
