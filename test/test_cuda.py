@@ -759,7 +759,53 @@ print(t.is_pinned())
 
         torch._C._cuda_clearCublasWorkspaces()
 
+    @contextlib.contextmanager
+    def _hip_allow_tf32(self):
+        # for HIP/AMDGPU, tf32 is behind a flag because the TF32 support is new
+        # and only for MI300+
+        hip_allow_tf32 = os.environ.get("HIPBLASLT_ALLOW_TF32", None)
+        os.environ["HIPBLASLT_ALLOW_TF32"] = "1"
+
+        try:
+            yield
+        finally:
+            if hip_allow_tf32 is not None:
+                os.environ["HIPBLASLT_ALLOW_TF32"] = hip_allow_tf32
+            else:
+                del os.environ["HIPBLASLT_ALLOW_TF32"]
+
+    @unittest.skipIf(not TEST_WITH_ROCM, "not relevant for CUDA testing")
+    def test_hipblaslt_allow_tf32(self):
+        tf32_ctx = self._hip_allow_tf32
+        with tf32_ctx():
+            os.environ["HIPBLASLT_ALLOW_TF32"] = "0"
+            # Save original value of allow_tf32
+            orig = torch.backends.cuda.matmul.allow_tf32
+            # If allow_tf32 variable is declared as static in aten/src/ATen/Context.cpp
+            # then matmul.allow_tf32 will return False after this point even if
+            # HIP_BLASLT_ALLOW_TF32 is set to 1 and matmul.allow_tf32 is changed.
+            os.environ["HIPBLASLT_ALLOW_TF32"] = "1"
+            # Toggle torch.backends.cuda.matmul.allow_tf32 couple of times.
+            torch.backends.cuda.matmul.allow_tf32 = not orig
+            test1 = torch.backends.cuda.matmul.allow_tf32
+            torch.backends.cuda.matmul.allow_tf32 = orig
+            test2 = torch.backends.cuda.matmul.allow_tf32
+            self.assertNotEqual(test1, test2)
+            # Restore original value of allow_tf32
+            torch.backends.cuda.matmul.allow_tf32 = orig
+
     def test_cublas_allow_tf32_get_set(self):
+        """
+        We only turn on TF32 for MI300 with a special env var. This is because TF32
+        is only available in MI300+ and is in experimental mode (hipblaslt support
+        is current WIP)
+        """
+        tf32_ctx = self._hip_allow_tf32 if torch.version.hip else contextlib.nullcontext
+
+        with tf32_ctx():
+            self._test_cublas_allow_tf32_get_set_inner()
+
+    def _test_cublas_allow_tf32_get_set_inner(self):
         skip_tf32_cublas = "TORCH_ALLOW_TF32_CUBLAS_OVERRIDE" in os.environ and int(
             os.environ["TORCH_ALLOW_TF32_CUBLAS_OVERRIDE"]
         )
@@ -774,6 +820,12 @@ print(t.is_pinned())
         torch.backends.cuda.matmul.allow_tf32 = orig
 
     def test_float32_matmul_precision_get_set(self):
+        tf32_ctx = self._hip_allow_tf32 if torch.version.hip else contextlib.nullcontext
+
+        with tf32_ctx():
+            self._test_float32_matmul_precision_get_set_inner()
+
+    def _test_float32_matmul_precision_get_set_inner(self):
         orig = torch.get_float32_matmul_precision()
         skip_tf32_cublas = "TORCH_ALLOW_TF32_CUBLAS_OVERRIDE" in os.environ and int(
             os.environ["TORCH_ALLOW_TF32_CUBLAS_OVERRIDE"]
@@ -3104,6 +3156,54 @@ exit(2)
         g.replay()
 
         model(x)
+
+    @skipIfRocm
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @serialTest()
+    def test_graph_checkpoint_preserve_rng_state(self):
+        torch.cuda.manual_seed(42)
+
+        def fn(x):
+            return x * torch.sigmoid(torch.randn(1, device="cuda"))
+
+        fn(torch.ones(1, device="cuda"))
+
+        torch.cuda.manual_seed(42)
+        eager_in = torch.ones(1, device="cuda", requires_grad=True)
+        eager_out = torch.utils.checkpoint.checkpoint(
+            fn, eager_in, use_reentrant=False, preserve_rng_state=True
+        )
+        (eager_in_grad,) = torch.autograd.grad(eager_out, eager_in)
+
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(g):
+            graph_in = torch.ones(1, device="cuda", requires_grad=True)
+            graph_out = torch.utils.checkpoint.checkpoint(
+                fn, graph_in, use_reentrant=False, preserve_rng_state=True
+            )
+            (graph_in_grad,) = torch.autograd.grad(graph_out, graph_in)
+
+        torch.cuda.manual_seed(42)
+        g.replay()
+
+        self.assertEqual(eager_in_grad, graph_in_grad, rtol=0.0, atol=0.0)
+
+    @skipIfRocm
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @serialTest()
+    def test_graph_manual_seed_mismatch_raises(self):
+        torch.cuda.manual_seed(0)
+        g = torch.cuda.CUDAGraph()
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "CUDAGeneratorImpl::set_current_seed can be called during stream capture only if new seed is the same as the original seed.",  # noqa: B950
+        ):
+            with torch.cuda.graph(g):
+                torch.cuda.manual_seed(1)
 
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
@@ -7253,7 +7353,7 @@ class TestCudaDeviceParametrized(TestCase):
 
             # This writes allows wait_for_cpu to proceed
             # This is an atomic store at system scope according to this rule:
-            # "the scope is thread_scope_system and and it is a load or store that affects a naturally-aligned object of sizes 1, 2, 4, 8, or 16 bytes on mapped memory"  # noqa: B950
+            # "the scope is thread_scope_system and it is a load or store that affects a naturally-aligned object of sizes 1, 2, 4, 8, or 16 bytes on mapped memory"  # noqa: B950
             # https://nvidia.github.io/cccl/libcudacxx/extended_api/memory_model.html#atomicity
 
             # Note that every CPU store is implicitly system scope,
