@@ -175,20 +175,6 @@ case "$tag" in
     fi
     GCC_VERSION=11
     VISION=yes
-    ROCM_VERSION=6.4
-    NINJA_VERSION=1.9.0
-    TRITON=yes
-    KATEX=yes
-    UCX_COMMIT=${_UCX_COMMIT}
-    UCC_COMMIT=${_UCC_COMMIT}
-    if [[ $tag =~ "benchmarks" ]]; then
-      INDUCTOR_BENCHMARKS=yes
-    fi
-    ;;
-  pytorch-linux-noble-rocm-alpha-py3)
-    ANACONDA_PYTHON_VERSION=3.12
-    GCC_VERSION=11
-    VISION=yes
     ROCM_VERSION=7.0
     NINJA_VERSION=1.9.0
     TRITON=yes
@@ -196,6 +182,9 @@ case "$tag" in
     UCX_COMMIT=${_UCX_COMMIT}
     UCC_COMMIT=${_UCC_COMMIT}
     PYTORCH_ROCM_ARCH="gfx90a;gfx942;gfx950"
+    if [[ $tag =~ "benchmarks" ]]; then
+      INDUCTOR_BENCHMARKS=yes
+    fi
     ;;
   pytorch-linux-jammy-xpu-n-1-py3)
     ANACONDA_PYTHON_VERSION=3.10
