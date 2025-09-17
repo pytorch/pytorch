@@ -9604,6 +9604,69 @@ def ___make_guard_fn():
 
             f(torch.randn(9, requires_grad=True), torch.tensor([3, 6]))
 
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_dim_order(self):
+        @torch.compile(dynamic=False, fullgraph=True, backend="eager")
+        def f(x):
+            x = x.permute(3, 0, 2, 1)
+            return x, x.dim_order()
+
+        @torch.compile(dynamic=False, fullgraph=True, backend="eager")
+        def g(x):
+            return x.dim_order()
+
+        @torch.compile(dynamic=False, fullgraph=True, backend="eager")
+        def h0(xs, ambiguity_check=False):
+            u0, u1, u2 = xs.tolist()
+            torch._check(u2 >= u0)
+            torch._check(u1 >= u0)
+            # stride ordering still isn't unique here, should raise
+            y = torch.empty_strided([4, 4, 4], [u0, u1, u2])
+            return y.dim_order(ambiguity_check=ambiguity_check)
+
+        @torch.compile(dynamic=False, fullgraph=True, backend="eager")
+        def h1(xs, ambiguity_check=False):
+            u0, u1, u2 = xs.tolist()
+            y = torch.empty_strided([4, 4, 4], [u0, u0, u0])  # no ordering
+            return y.dim_order(ambiguity_check=ambiguity_check)
+
+        # check that for functions permuting contiguous input, the original stride is recovered with dim_order.
+        def test(x):
+            stride_inp = tuple(x.stride())
+            f_out, f_order = f(x)
+            self.assertEqual(stride_inp, tuple(f_out.stride(i) for i in f_order))
+
+        # shape: [4, u0, 5, u1]
+        x0 = torch.randn(4, 1, 5, 2)
+        torch._dynamo.decorators.mark_unbacked(x0, 1)
+        torch._dynamo.decorators.mark_unbacked(x0, 3)
+        test(x0)
+
+        # shape: [u0, u1, u2, u3]
+        x1 = torch.randn(4, 1, 5, 2)
+        for i in range(x1.ndim):
+            torch._dynamo.decorators.mark_unbacked(x1, i)
+        test(x1)
+
+        # custom strides (all integers)
+        x2 = torch.randn(10000)
+        x2 = x2.as_strided([4, 4, 4, 4], [1, 2, 4, 8])
+        assert g(x2) == (3, 2, 1, 0)
+
+        # custom unbacked strides with no ordering: ambiguity check should raise
+        xs = torch.tensor([2, 3, 4])
+        h0(xs)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.TorchRuntimeError,
+            r"The tensor does not have unique dim order.",
+        ):
+            h0(xs, ambiguity_check=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.TorchRuntimeError,
+            r"The tensor does not have unique dim order.",
+        ):
+            h1(xs, ambiguity_check=True)
+
     def test_str_format_assert1(self):
         @torch.compile(backend="eager", fullgraph=True)
         def fn(img):
