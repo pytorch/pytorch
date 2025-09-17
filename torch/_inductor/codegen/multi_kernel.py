@@ -292,7 +292,7 @@ class MultiKernelCall:
     """
 
     def __init__(self, multi_kernel_name, kernels, arg_index):
-        assert len(kernels) >= 2
+        assert len(kernels) >= 1
         self._kernels = kernels
         self.multi_kernel_name = multi_kernel_name
 
