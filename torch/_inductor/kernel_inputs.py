@@ -187,6 +187,15 @@ class KernelInputs(ABC):
             The output dtype
         """
 
+    def out_dtype_explicit(self) -> Optional[torch.dtype]:
+        """
+        Get the explicitly set output dtype without any inference
+
+        Returns:
+            The explicit output dtype or None if not set
+        """
+        return self._out_dtype
+
     def kwargs(self) -> dict[str, Union[float, int, bool]]:
         """
         Get the kwargs values for all input nodes.
@@ -286,12 +295,6 @@ class MMKernelInputs(KernelInputs):
         return (m, n, k)
 
     def out_dtype(self) -> torch.dtype:
-        """
-        Get the output dtype, whether passed in or inferred from the nodes
-
-        Returns:
-            The output dtype
-        """
         if self._out_dtype is not None:
             return self._out_dtype
         return self.mat1mat2()[0].get_dtype()

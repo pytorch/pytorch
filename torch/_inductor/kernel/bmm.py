@@ -191,21 +191,17 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
     )
 
     aten_handler: ExternKernelChoice = aten_bmm
-    aten_extra_kwargs = {}
     if out_dtype:
         assert mat1.get_device().type == "cuda", "out_dtype is only supported for CUDA"
         aten_handler = aten_bmm_dtype
-        aten_extra_kwargs = {"out_dtype": out_dtype}
 
     choices: list[ChoiceCaller] = []
 
     # Collect all templates for unified call
     templates_to_use: list[Union[ExternKernelChoice, KernelTemplate]] = []
-    kwarg_overrides = {}
 
     if use_aten_gemm_kernels():
         templates_to_use.append(aten_handler)
-        kwarg_overrides[aten_handler.uid] = aten_extra_kwargs
 
     if use_triton_template(layout, check_max_autotune=False):
         # TODO: add out_dtype support for Triton Template
@@ -218,7 +214,6 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
             kernel_inputs,
             templates_to_use,
             name,
-            kwarg_overrides=kwarg_overrides,
         )
     )
     _, is_nonzero = _is_static_problem(layout)
