@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import functools
 import logging
+import math
 import os
 import pathlib
 from typing import Any, Optional, Union
@@ -560,10 +561,15 @@ class SizeHintMultiKernelCall(MultiKernelCall):
         """
         L1 distance heuristic for kernel selection.
         """
-        dist = 0
+        def dist(x, y):
+            lx = math.log2(x) if x > 0 else -1
+            ly = math.log2(y) if y > 0 else -1
+            return abs(lx - ly)
+
+        out = 0
         for s1, s2 in zip(k1, k2):
-            dist += sum(abs(x - y) for x, y in zip(s1, s2))
-        return dist
+            out += sum(dist(x, y) for x, y in zip(s1, s2))
+        return out
 
     def run(self, *args, **kwargs):
         cache_key = self._get_shape_cache_key(*args, **kwargs)
