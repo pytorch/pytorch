@@ -173,7 +173,7 @@ non-contiguous layout, received stride: {stride} and shape: {shape}"
         # Fragile, but this is the only way to guarantee t is expected type because t is a local class
         def is_nested_visitor_type(t: type) -> bool:
             return ".".join([t.__module__, t.__qualname__]) in {
-                "python_cutlass.backend.c_types.visitor_factory.<locals>.VisitorType",
+                "cutlass_cppgen.backend.c_types.visitor_factory.<locals>.VisitorType",
                 "cutlass.backend.c_types.visitor_factory.<locals>.VisitorType",
             }
 
