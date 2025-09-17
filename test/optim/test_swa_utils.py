@@ -150,6 +150,44 @@ class TestSWAUtils(TestCase):
             self.assertEqual(p_swa, p_swa2)
         self.assertTrue(averaged_dnn.n_averaged == averaged_dnn2.n_averaged)
 
+    def test_averaged_model_backward_compatibility(self):
+        """Test that AveragedModel correctly handles old checkpoints with tensor n_averaged."""
+        dnn = torch.nn.Sequential(
+            torch.nn.Conv2d(1, 5, kernel_size=3), torch.nn.Linear(5, 10)
+        )
+        averaged_dnn = AveragedModel(dnn)
+
+        # Update parameters a few times
+        n_updates = 5
+        for _ in range(n_updates):
+            for p in dnn.parameters():
+                p.detach().add_(torch.randn_like(p))
+            averaged_dnn.update_parameters(dnn)
+
+        # Verify the expected n_averaged
+        state_dict = averaged_dnn.state_dict()
+        expected_n_averaged = torch.tensor(n_updates, dtype=torch.long)
+        self.assertEqual(state_dict["n_averaged"], expected_n_averaged)
+
+        # Create new model and load the previous state dict
+        averaged_dnn2 = AveragedModel(dnn)
+        self.assertEqual(averaged_dnn2.is_copy_initialized, False)
+        averaged_dnn2.load_state_dict(state_dict)
+
+        # Check that is_copy_initialized was correctly initialized
+        self.assertEqual(averaged_dnn2.is_copy_initialized, True)
+        self.assertIsInstance(averaged_dnn2.n_averaged, torch.Tensor)
+
+        # Verify that parameters are correctly loaded
+        for p_swa, p_swa2 in zip(averaged_dnn.parameters(), averaged_dnn2.parameters()):
+            self.assertEqual(p_swa, p_swa2)
+
+        # Test that we can continue to update parameters without issues
+        for p in dnn.parameters():
+            p.detach().add_(torch.randn_like(p))
+        averaged_dnn2.update_parameters(dnn)
+        self.assertEqual(averaged_dnn2.n_averaged, expected_n_averaged + 1)
+
     def test_averaged_model_default_avg_fn_picklable(self):
         dnn = torch.nn.Sequential(
             torch.nn.Conv2d(1, 5, kernel_size=3),
