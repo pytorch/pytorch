@@ -122,7 +122,6 @@ from .source import (
 )
 from .utils import (
     _extract_tensor_dict,
-    _get_error_on_graph_break,
     checkpoint_params,
     CleanupHook,
     clone_inputs,
@@ -431,8 +430,8 @@ class OutputGraph(OutputGraphGuardsState):
         global_scope: Scope,
         f_code: CodeType,
         torch_function_mode_stack: list[torch.overrides.TorchFunctionMode],
-        one_graph: bool,
         package: Optional["CompilePackage"],
+        one_graph: bool = False,
     ) -> None:
         super().__init__(
             local_scope,
