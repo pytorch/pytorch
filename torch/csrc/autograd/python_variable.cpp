@@ -980,7 +980,7 @@ static bool DTensor_OpSchema_recompute_comparison_key_impl(
     PyObject* self,
     const py::tuple& args_schema) {
   py::object static_kwargkey;
-  Py_ssize_t static_argnum;
+  size_t static_argnum = 0;
   const py::handle self_handle = py::handle(self);
   const py::handle schema_info =
       self_handle.attr(dtensor_interned_strings.schema_info);
@@ -988,13 +988,13 @@ static bool DTensor_OpSchema_recompute_comparison_key_impl(
     static_argnum = args_schema.size();
     static_kwargkey = py::none();
   } else {
-    static_argnum = py::cast<Py_ssize_t>(
+    static_argnum = py::cast<size_t>(
         schema_info.attr(dtensor_interned_strings.static_argnum));
     static_kwargkey =
         schema_info.attr(dtensor_interned_strings.static_kwargkey);
   }
   c10::SmallVector<py::object, 8> args_to_hash;
-  Py_ssize_t idx = 0;
+  size_t idx = 0;
   for (const auto& e : args_schema) {
     if (idx >= static_argnum || arg_type_tensor_or_tensor_list_like(e)) {
       if (PyList_Check(e.ptr())) {
@@ -1028,8 +1028,12 @@ static bool DTensor_OpSchema_recompute_comparison_key_impl(
     }
     auto kwargs_schema = py::reinterpret_borrow<py::dict>(raw_kwargs_schema);
     for (const auto& k : static_kwargkey_list) {
-      kwargs_to_hash[idx++] =
-          PyDict_GetItem(kwargs_schema.ptr(), k.ptr()) ?: Py_None;
+      PyObject* item = PyDict_GetItem(kwargs_schema.ptr(), k.ptr());
+      if (item) {
+        kwargs_to_hash[idx] = item;
+      } else {
+        kwargs_to_hash[idx] = Py_None;
+      }
     }
     PyObject* comparison_key = PyTuple_Pack(
         3,
