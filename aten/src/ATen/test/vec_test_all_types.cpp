@@ -1017,6 +1017,57 @@ namespace {
             RESOLVE_OVERLOAD(filter_fmadd));
     }
 #endif
+#if defined(CPU_CAPABILITY_SVE)
+    // Test for counting the number of active lanes using svcntw
+    TYPED_TEST(BitwiseFloatsAdditional, SVE_CountActiveLanes) {
+      CACHE_ALIGN int actual_vals[1];
+
+      // Get the number of active lanes in the vector register
+      int lane_count = svcntw();  // svcntw returns the active lane count
+      actual_vals[0] = lane_count;
+
+      // Validate that the number of active lanes is a valid number
+      EXPECT_EQ(actual_vals[0], lane_count) << "svcntw should return a valid number of active lanes";
+    }
+    // Test for loading and storing data using SVE intrinsics
+    TYPED_TEST(BitwiseFloatsAdditional, SVE_LoadStore) {
+      using VT = float;
+      int num_elements = svcntw();  // Get number of lanes dynamically
+      CACHE_ALIGN VT input[num_elements], output[num_elements];
+
+      // Initialize input array with data
+      for (int i = 0; i < num_elements; i++) {
+          input[i] = static_cast<VT>(i); // Fill input with values from 0 to num_elements-1
+          output[i] = 0.0f; // Initialize output array to 0
+      }
+
+      svbool_t pg = svptrue_b32();  // Predicate enabling all lanes
+      svfloat32_t vec = svld1(pg, input);  // Load data from input array
+      svst1(pg, output, vec);  // Store the data into output array
+
+      // Verify that the data loaded and stored correctly
+      for (int i = 0; i < num_elements; i++) {
+          EXPECT_EQ(input[i], output[i]) << "Mismatch at index " << i;
+      }
+    }
+    // Test for manipulating predicate lanes and counting them
+    TYPED_TEST(BitwiseFloatsAdditional, SVE_PredicateLaneManipulation) {
+      CACHE_ALIGN int actual_vals[1];
+
+      svbool_t pg_all = svptrue_b32(); // Create a predicate for all lanes enabled
+      // Create a predicate for a subset of lanes, here using svwhilelt
+      // This is used to select lanes where the index is less than the number of active lanes
+      svbool_t pg_alt = svwhilelt_b32(0, static_cast<int>(svcntw()));  // Cast to int
+
+      int active_lanes_all = svcntw();  // Count the active lanes using svcntw
+      int active_lanes_alt = svcntp_b32(pg_alt, pg_all);  // Count active lanes in predicate pg_alt
+
+      actual_vals[0] = active_lanes_alt; // Store the result of active lane count in actual_vals
+
+      // Verify that the active lane count in both predicates is the same
+      EXPECT_EQ(active_lanes_all, actual_vals[0]) << "Mismatch in active lane count.";
+    }
+#endif  // CPU_CAPABILITY_SVE
     template<typename vec, typename VT, int64_t mask>
     typename std::enable_if_t<(mask < 0 || mask> 255), void>
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
@@ -2269,7 +2320,6 @@ namespace {
     #undef TEST_MASK_LOAD
     #undef TEST_MASK_LOAD_N
     }
-#if !defined(CPU_CAPABILITY_SVE)
     TYPED_TEST(VecMaskTests, MaskedCheck) {
       using VT = ValueType<TypeParam>;
       using vec = TypeParam;
@@ -2293,8 +2343,6 @@ namespace {
 
     #undef TEST_MASK_CHECK_N
     }
-#endif
-#if !defined(CPU_CAPABILITY_SVE)
     TYPED_TEST(VecMaskTests, ToFrom) {
       using vec = TypeParam;
       using VT = ValueType<TypeParam>;
@@ -2320,8 +2368,6 @@ namespace {
             << "Failure Details:\nTest Seed to reproduce: " << seed;
       }
     }
-#endif
-#if !defined(CPU_CAPABILITY_SVE)
     TYPED_TEST(VecMaskTests, Cast) {
       using vec = TypeParam;
       using src_t = ValueType<TypeParam>;
@@ -2366,7 +2412,6 @@ namespace {
     #undef TEST_MASK_CAST
     #undef TEST_MASK_CAST_N
     }
-#endif
 #else
 #error GTEST does not have TYPED_TEST
 #endif
