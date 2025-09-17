@@ -710,6 +710,15 @@ class TestLRScheduler(TestCase):
             scheduler.get_last_lr(), [0.5 for param_group in self.opt.param_groups]
         )
 
+    def test_reduce_lr_on_plateau_preserves_lr_type(self):
+        # Ensures that tensor lrs are preserved, preventing recompilations.
+        types = [type(group["lr"]) for group in self.opt.param_groups]
+        scheduler = ReduceLROnPlateau(self.opt, mode="min", patience=0)
+        scheduler.step(1.0)
+        scheduler.step(2.0)  # Triggers scheduler._reduce_lr
+        for group, type_ in zip(self.opt.param_groups, types):
+            self.assertEqual(type(group["lr"]), type_)
+
     def test_sequentiallr1(self):
         epochs = 19
         schedulers = [None] * 2
@@ -821,6 +830,27 @@ class TestLRScheduler(TestCase):
         single_targets = constant_lr_target + exponential_lr_target + step_lr_target
         targets = [single_targets, [x * 10 for x in single_targets]]
         self._test_get_last_lr(scheduler, targets, epochs)
+
+    def test_sequentiallr_does_not_alias_lr_and_initial_lr(self):
+        # The TestLRScheduler object uses self.opt to avoid instantiating a new optimizer for each test.
+        # self.opt has a float lr, and we need to use a Tensor lr to ensure that a former SequentialLR bug is fixed.
+        # For more context, see https://github.com/pytorch/pytorch/issues/162359
+        old_opt = self.opt
+        lr = torch.tensor(2.0)
+        self.opt = SGD(self.net.parameters(), lr=lr)
+        milestone = 4
+        epochs = 8
+        start, end = 0.1, 0.8
+
+        schedulers = [
+            LinearLR(self.opt, start, end, total_iters=milestone),
+            LinearLR(self.opt, end, start, total_iters=epochs - milestone),
+        ]
+        targets = [[0.2, 0.55, 0.9, 1.25, 1.6, 1.25, 0.9, 0.55]]
+
+        scheduler = SequentialLR(self.opt, schedulers, milestones=[milestone])
+        self._test(scheduler, targets, epochs)
+        self.opt = old_opt
 
     def test_chained_lr2_get_last_lr_before_step(self):
         schedulers = [

@@ -1,4 +1,4 @@
-#if defined(__aarch64__) && defined(CAFFE2_PERF_WITH_SVE128)
+#if defined(__aarch64__) && defined(__ARM_FEATURE_SVE) && defined(CAFFE2_PERF_WITH_SVE128)
 #include <arm_neon.h>
 #include <arm_neon_sve_bridge.h>
 #include <arm_sve.h>
@@ -240,4 +240,4 @@ template void compute_batch_box_cox__sve128<float>(
 
 } // namespace caffe2::details
 
-#endif // __aarch64__ && CAFFE2_PERF_WITH_SVE128
+#endif // __aarch64__ && __ARM_FEATURE_SVE && CAFFE2_PERF_WITH_SVE128
