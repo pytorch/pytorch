@@ -1037,7 +1037,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     name = "addmm"
     # Create MMKernelInputs for AddMM at the top
     kernel_inputs = MMKernelInputs(
-        [inp_expanded, mat1, mat2], scalars=dict(alpha=alpha, beta=beta)
+        [inp_expanded, mat1, mat2], kwargs=dict(alpha=alpha, beta=beta)
     )
     choices: list[ChoiceCaller] = []
 
@@ -1059,7 +1059,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         # a subgraph or something as inp vs inp_expanded causes some slight numeric
         # differences
         kernel_inputs = MMKernelInputs(
-            [inp, mat1, mat2], scalars=dict(alpha=alpha, beta=beta)
+            [inp, mat1, mat2], kwargs=dict(alpha=alpha, beta=beta)
         )
         choices.extend(
             V.choices.get_template_configs(

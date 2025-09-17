@@ -12,7 +12,7 @@ if TYPE_CHECKING:
 
 class AddMMConfigMixin(TemplateConfigHeuristics):
     """
-    Simple mixin to handle scalars for addmm like operators (addmm, baddbmm)
+    Simple mixin to handle kwargs for addmm like operators (addmm, baddbmm)
     """
 
     def get_extra_kwargs(
@@ -25,8 +25,8 @@ class AddMMConfigMixin(TemplateConfigHeuristics):
             "addmm",
             "baddbmm",
         ], f"op_name={op_name} invalid for AddMMConfigMixin"
-        alpha = kernel_inputs.get_scalar("alpha")
-        beta = kernel_inputs.get_scalar("beta")
+        alpha = kernel_inputs.get_kwarg("alpha")
+        beta = kernel_inputs.get_kwarg("beta")
         return {
             **kwargs,
             "epilogue_fn": addmm_epilogue(kernel_inputs.out_dtype(), alpha, beta),
