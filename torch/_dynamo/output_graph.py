@@ -431,6 +431,7 @@ class OutputGraph(OutputGraphGuardsState):
         global_scope: Scope,
         f_code: CodeType,
         torch_function_mode_stack: list[torch.overrides.TorchFunctionMode],
+        one_graph: bool,
         package: Optional["CompilePackage"],
     ) -> None:
         super().__init__(
@@ -489,8 +490,7 @@ class OutputGraph(OutputGraphGuardsState):
             # the program execution.
             tracked_fakes=self.tracked_fakes,
             # We want to allow scalar outputs when fullgraph=True
-            allow_scalar_outputs=_get_error_on_graph_break()
-            or config.capture_scalar_outputs,
+            allow_scalar_outputs=one_graph or config.capture_scalar_outputs,
             allow_dynamic_output_shape_ops=config.capture_dynamic_output_shape_ops,
             prefer_deferred_runtime_asserts_over_guards=config.prefer_deferred_runtime_asserts_over_guards,
             co_fields=self.co_fields,
