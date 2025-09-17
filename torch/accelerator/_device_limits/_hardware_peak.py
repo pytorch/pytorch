@@ -39,18 +39,6 @@ def get_memory_bandwidth_GBps(target_device: torch.device) -> float:
     return 1.0
 
 
-def get_memory_bandwidth_GiBps(target_device: torch.device) -> float:
-    if torch.cuda.is_available():
-        bytes_per_second = nv.get_memory_bandwidth_Bps(target_device)
-        return bytes_per_second / (2**30)
-    else:
-        warnings.warn(
-            "Memory bandwidth is only supported for CUDA devices. Returning default value of 1.0.",
-            UserWarning,
-        )
-    return 1.0
-
-
 def get_l1_cache_bandwidth_GBps(target_device: torch.device) -> float:
     if torch.cuda.is_available():
         bytes_per_second = nv.get_shared_memory_bandwidth_Bps(target_device)
