@@ -495,7 +495,7 @@ class MultiplicativeLR(LRScheduler):
                 for lmbda, group in zip(self.lr_lambdas, self.optimizer.param_groups)
             ]
         else:
-            return [group["lr"] for group in self.optimizer.param_groups]
+            return _param_groups_val_list(self.optimizer, "lr")
 
 
 class StepLR(LRScheduler):
@@ -544,7 +544,7 @@ class StepLR(LRScheduler):
         _warn_get_lr_called_within_step(self)
 
         if (self.last_epoch == 0) or (self.last_epoch % self.step_size != 0):
-            return [group["lr"] for group in self.optimizer.param_groups]
+            return _param_groups_val_list(self.optimizer, "lr")
         return [group["lr"] * self.gamma for group in self.optimizer.param_groups]
 
     def _get_closed_form_lr(self) -> list[float | Tensor]:
@@ -599,7 +599,7 @@ class MultiStepLR(LRScheduler):
         _warn_get_lr_called_within_step(self)
 
         if self.last_epoch not in self.milestones:
-            return [group["lr"] for group in self.optimizer.param_groups]
+            return _param_groups_val_list(self.optimizer, "lr")
         return [
             group["lr"] * self.gamma ** self.milestones[self.last_epoch]
             for group in self.optimizer.param_groups
@@ -671,7 +671,7 @@ class ConstantLR(LRScheduler):
             return [group["lr"] * self.factor for group in self.optimizer.param_groups]
 
         if self.last_epoch != self.total_iters:
-            return [group["lr"] for group in self.optimizer.param_groups]
+            return _param_groups_val_list(self.optimizer, "lr")
 
         return [
             group["lr"] * (1.0 / self.factor) for group in self.optimizer.param_groups
@@ -755,7 +755,7 @@ class LinearLR(LRScheduler):
             ]
 
         if self._is_initial or self.last_epoch > self.total_iters:
-            return [group["lr"] for group in self.optimizer.param_groups]
+            return _param_groups_val_list(self.optimizer, "lr")
 
         return [
             group["lr"]
@@ -821,7 +821,7 @@ class ExponentialLR(LRScheduler):
         # when loading from a checkpoint, we don't want _initial_step (called from the constructor)
         # to update the lr one more step ahead of itself.
         if self._is_initial:
-            return [group["lr"] for group in self.optimizer.param_groups]
+            return _param_groups_val_list(self.optimizer, "lr")
         return [group["lr"] * self.gamma for group in self.optimizer.param_groups]
 
     def _get_closed_form_lr(self):
@@ -1025,7 +1025,7 @@ class PolynomialLR(LRScheduler):
         _warn_get_lr_called_within_step(self)
 
         if self._is_initial or self.last_epoch > self.total_iters:
-            return [group["lr"] for group in self.optimizer.param_groups]
+            return _param_groups_val_list(self.optimizer, "lr")
 
         decay_factor = (
             (1.0 - self.last_epoch / self.total_iters)
@@ -1111,7 +1111,7 @@ class CosineAnnealingLR(LRScheduler):
         _warn_get_lr_called_within_step(self)
 
         if self._is_initial:
-            return [group["lr"] for group in self.optimizer.param_groups]
+            return _param_groups_val_list(self.optimizer, "lr")
         elif self._step_count == 1 and self.last_epoch > 0:
             return [
                 self.eta_min
@@ -1569,11 +1569,7 @@ class CyclicLR(LRScheduler):
         base_lrs = _format_param("base_lr", optimizer, base_lr)
         if last_epoch == -1:
             for lr, group in zip(base_lrs, optimizer.param_groups):
-                if isinstance(group["lr"], Tensor):
-                    lr_val = lr.item() if isinstance(lr, Tensor) else lr
-                    group["lr"].fill_(lr_val)
-                else:
-                    group["lr"] = lr
+                _update_param_group_val(group, "lr", lr)
 
         self.max_lrs = _format_param("max_lr", optimizer, max_lr)
 
