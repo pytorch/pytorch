@@ -161,12 +161,9 @@ class ShardingPropagator:
             # data dependent ops can't be used for fake propagation
             return None
 
-        # NOTE: We must call the tracing in fake tensor mode so that it avoids
-        # materializing memory. Also disable the proxy mode tracing to prevent
-        # these operators to be inserted in the fx graph.
-        from torch.fx.experimental.proxy_tensor import disable_proxy_modes_tracing
-
-        with FakeTensorMode(), disable_proxy_modes_tracing():
+        # NOTE: We must call the tracing in fake tensor mode so that it
+        # avoids materializing memory
+        with FakeTensorMode():
             fake_args = op_schema.gen_fake_args()
             fake_kwargs = op_schema.gen_fake_kwargs()
             fake_out = op_schema.op(*fake_args, **fake_kwargs)

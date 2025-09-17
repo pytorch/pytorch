@@ -2351,7 +2351,6 @@
   dispatch:
     CPU: _embedding_bag_forward_only_cpu
     CUDA: _embedding_bag_forward_only_cuda
-    MPS: _embedding_bag_forward_only_mps
   autogen: _embedding_bag_forward_only.out
 
 - func: _rowwise_prune(Tensor weight, Tensor mask, ScalarType compressed_indices_dtype) -> (Tensor, Tensor)
@@ -2373,7 +2372,6 @@
   dispatch:
     CPU: _embedding_bag_cpu
     CUDA: _embedding_bag_cuda
-    MPS: _embedding_bag_mps
   autogen: _embedding_bag.out
   tags: core
 
@@ -10701,7 +10699,6 @@
   dispatch:
     CompositeExplicitAutograd: foreach_tensor_div_list_kernel_slow
     CUDA: foreach_tensor_div_list_kernel_cuda
-    MTIA: foreach_tensor_div_list_kernel_mtia
 
 - func: _foreach_div_.List(Tensor(a!)[] self, Tensor[] other) -> ()
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
@@ -10709,7 +10706,6 @@
   dispatch:
     CompositeExplicitAutograd: foreach_tensor_div_list_kernel_slow_
     CUDA: foreach_tensor_div_list_kernel_cuda_
-    MTIA: foreach_tensor_div_list_kernel_mtia_
   autogen: _foreach_div.List_out
 
 - func: _foreach_div.ScalarList(Tensor[] self, Scalar[] scalars) -> Tensor[]
@@ -10733,7 +10729,6 @@
   dispatch:
     CompositeExplicitAutograd: foreach_tensor_div_tensor_kernel_slow
     CUDA: foreach_tensor_div_tensor_kernel_cuda
-    MTIA: foreach_tensor_div_tensor_kernel_mtia
 
 - func: _foreach_div_.Tensor(Tensor(a!)[] self, Tensor other) -> ()
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
@@ -10741,7 +10736,6 @@
   dispatch:
     CompositeExplicitAutograd: foreach_tensor_div_tensor_kernel_slow_
     CUDA: foreach_tensor_div_tensor_kernel_cuda_
-    MTIA: foreach_tensor_div_tensor_kernel_mtia_
   autogen: _foreach_div.Tensor_out
 
 - func: _foreach_clamp_max.Scalar(Tensor[] self, Scalar scalar) -> Tensor[]

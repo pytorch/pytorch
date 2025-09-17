@@ -6848,13 +6848,15 @@ class TestCompileKernel(TestCase):
         self.assertEqual(c_int, expected_int)
 
         # Test with header code
-        scale_kernel_source = """
+        header_code = """
         #define SCALE_FACTOR 2.0f
 
         __device__ float scale_value(float val) {
             return val * SCALE_FACTOR;
         }
+        """
 
+        scale_kernel_source = """
         __global__ void scale_tensors(const float* input, float* output, int n) {
             int i = threadIdx.x + blockIdx.x * blockDim.x;
             if (i < n)
@@ -6862,7 +6864,9 @@ class TestCompileKernel(TestCase):
         }
         """
 
-        scale_kernel = _compile_kernel(scale_kernel_source, "scale_tensors")
+        scale_kernel = _compile_kernel(
+            scale_kernel_source, "scale_tensors", header_code=header_code
+        )
 
         input_tensor = torch.rand(N, device="cuda")
         output_tensor = torch.empty_like(input_tensor)

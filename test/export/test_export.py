@@ -29,7 +29,6 @@ from torch._decomp import decomposition_table, get_decompositions
 from torch._dynamo._trace_wrapped_higher_order_op import mod_index
 from torch._dynamo.test_case import TestCase
 from torch._dynamo.testing import normalize_gm
-from torch._export import config
 from torch._export.pass_base import _ExportPassBaseDeprecatedDoNotUse
 from torch._export.utils import (
     get_buffer,
@@ -1728,12 +1727,22 @@ class GraphModule(torch.nn.Module):
         trigger = 0
         target = 2
         args = (x, trigger, target)
-        with config.patch(use_new_tracer_experimental=True):
-            ep = export(m, args, dynamic_shapes=(None, Dim.DYNAMIC, Dim.DYNAMIC))
+        ep = export(m, args, dynamic_shapes=(None, Dim.DYNAMIC, Dim.DYNAMIC))
+        if is_training_ir_strict_test(self._testMethodName):
+            # In strict mode export's result capturing compiler, we create
+            # 2 new symints when re-fakifying the symint inputs.
+            # Then in run_decompositions, ep.range_constraints was updated
+            # where it checks the var_to_range and put the two newly added ones into the range_constraints.
+            self.assertExpectedInline(
+                str(tuple(ep.range_constraints.values())),
+                """(VR[0, int_oo], VR[0, int_oo], VR[-int_oo, int_oo], VR[-int_oo, int_oo])""",
+            )
+        else:
             self.assertExpectedInline(
                 str(tuple(ep.range_constraints.values())),
                 """(VR[0, int_oo], VR[0, int_oo])""",
             )
+
         self.assertEqual(m(*args), ep.module()(*args))
 
     def test_cond_branches_return_same_int(self):
@@ -13803,14 +13812,14 @@ def forward(self, x, y):
         inputs = (torch.randn(10, 72),)
         dx, dy = dims("dx", "dy")
         for use_new_tracer in [True, False]:
-            with torch._export.config.patch(use_new_tracer_experimental=use_new_tracer):
-                ep = torch.export._trace._export(
-                    Mod4Reshape(),
-                    inputs,
-                    dynamic_shapes={"x": (dx, dy)},
-                    prefer_deferred_runtime_asserts_over_guards=True,
-                    pre_dispatch=True,
-                )
+            ep = torch.export._trace._export(
+                Mod4Reshape(),
+                inputs,
+                dynamic_shapes={"x": (dx, dy)},
+                prefer_deferred_runtime_asserts_over_guards=True,
+                pre_dispatch=True,
+                _use_new_tracer_experimental=use_new_tracer,
+            )
             out1 = ep.module()(torch.randn(8, 7))
             self.assertEqual(out1.shape, torch.ones(7, 4, 2).shape)
             out2 = ep.module()(torch.randn(12, 11))
