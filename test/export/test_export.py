@@ -11825,7 +11825,6 @@ graph():
         self.assertEqual(ep.module()(3, 5), 8)
         self.assertEqual(ep.module()(5, 4), 9)
 
-    @testing.expectedFailureStrictV2  # ValueError: Found conflicts between user-specified and inferred ranges
     def test_dynamic_shapes_bounds(self):
         class M(torch.nn.Module):
             """
@@ -13796,21 +13795,24 @@ def forward(self, x, y):
 
         inputs = (torch.randn(10, 72),)
         dx, dy = dims("dx", "dy")
-        ep = torch.export._trace._export(
-            Mod4Reshape(),
-            inputs,
-            dynamic_shapes={"x": (dx, dy)},
-            prefer_deferred_runtime_asserts_over_guards=True,
-        )
-        out1 = ep.module()(torch.randn(8, 7))
-        self.assertEqual(out1.shape, torch.ones(7, 4, 2).shape)
-        out2 = ep.module()(torch.randn(12, 11))
-        self.assertEqual(out2.shape, torch.ones(11, 4, 3).shape)
-        with self.assertRaisesRegex(
-            RuntimeError,
-            r"Runtime assertion failed for expression Eq\(Mod\(s27\*s77, 4\*s77 \- 4\), 0\) on node 'eq.*'",
-        ):
-            ep.module()(torch.randn(8, 8))  # fail
+        for use_new_tracer in [True, False]:
+            ep = torch.export._trace._export(
+                Mod4Reshape(),
+                inputs,
+                dynamic_shapes={"x": (dx, dy)},
+                prefer_deferred_runtime_asserts_over_guards=True,
+                pre_dispatch=True,
+                _use_new_tracer_experimental=use_new_tracer,
+            )
+            out1 = ep.module()(torch.randn(8, 7))
+            self.assertEqual(out1.shape, torch.ones(7, 4, 2).shape)
+            out2 = ep.module()(torch.randn(12, 11))
+            self.assertEqual(out2.shape, torch.ones(11, 4, 3).shape)
+            with self.assertRaisesRegex(
+                RuntimeError,
+                r"^Runtime assertion failed for expression Eq\(Mod\(s\d+\*s\d+, 4\*s\d+\s*-\s*4\), 0\) on node 'eq[^']*'$",
+            ):
+                ep.module()(torch.randn(8, 8))  # fail
 
         # case 2: 2d reshape
         class FreeReshape(torch.nn.Module):
@@ -16182,9 +16184,11 @@ def forward(self, q, k, v):
             ) -> torch.Tensor:
                 # x.sizes(): 1, 128, 16, 128
                 sp = start_pos.item()
-                torch._check_is_size(sp)
+
+                # Checks needed for slicing.
                 torch._check(sp >= 0)
                 torch._check(sp <= 126)
+
                 key = cache[:, : sp + 1, :, :]  # 1, sp+1, 16, 128
                 value = cache[:, : sp + 1, :, :]  # 1, sp+1, 16, 128
                 query = query.transpose(1, 2)  # (bs, n_local_heads, seqlen, head_dim)
@@ -16604,6 +16608,37 @@ def forward(self, x):
 
         wrapper = Wrapper(pyt_model, example_inputs)
         wrapper.forward()
+
+    def test_export_with_dict_input_nested_in_args(self):
+        """Test export with dictionary input nested in args."""
+
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super(MyModel, self).__init__()
+                self.linear = torch.nn.Linear(10, 1)
+
+            def forward(self, data_batch):
+                h1 = self.linear(data_batch["a1"])
+                h2 = self.linear(data_batch["a2"])
+                return h1 + h2
+
+        # Create model and example inputs
+        model = MyModel()
+        a1 = torch.randn(10)
+        a2 = torch.randn(10)
+        original_input = {"a1": a1, "a2": a2}
+        example_args_forward = (original_input,)
+
+        # Export the model
+        exported_model = export(model, example_args_forward)
+
+        # Run both models and compare results
+        reordered_input = {"a2": a2, "a1": a1}
+        original_output = exported_model.module()(reordered_input)
+        loaded_output = model(original_input)
+
+        # Verify outputs are close (allowing for floating point differences)
+        torch.testing.assert_close(original_output, loaded_output)
 
     def test_strict_export_with_shared_parameters(self):
         """Test that parameter names are preserved when there are shared parameters with the same name."""
