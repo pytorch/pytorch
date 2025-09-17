@@ -123,7 +123,7 @@ void IpcChannel::send_fd(int dst_pid, int fd) {
     msg.msg_controllen = 0;
   }
 
-  // Finally send the the message
+  // Finally send the message
   TORCH_CHECK(
       sendmsg(socket_, &msg, 0) > 0,
       "Failed to send fd: ",

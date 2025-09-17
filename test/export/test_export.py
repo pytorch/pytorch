@@ -619,6 +619,22 @@ class TestExport(TestCase):
 
         self.assertEqual(counter, 1)
 
+    @testing.expectedFailureSerDer  # can't serialize functorch ops
+    @testing.expectedFailureSerDerNonStrict  # can't serialize functorch ops
+    def test_vmap_to_assert(self):
+        class VmapToAssert(torch.nn.Module):
+            def forward(self, x, y):
+                f = lambda x, y: (
+                    (x * y).to("cpu", memory_format=torch.channels_last) + 1
+                ).sum(dim=0)  # noqa: E731
+                vmapped = torch.vmap(f)(x, y)
+                return vmapped.sum(dim=0)
+
+        ep = export(VmapToAssert(), (torch.zeros(4, 4, 4, 4), torch.zeros(4, 4, 4, 4)))
+        exported = ep.module()(torch.ones(4, 4, 4, 4), torch.ones(4, 4, 4, 4))
+        eager = VmapToAssert()(torch.ones(4, 4, 4, 4), torch.ones(4, 4, 4, 4))
+        self.assertEqual(exported, eager)
+
     def test_from_node_metadata_export(self):
         class Foo(torch.nn.Module):
             def __init__(self) -> None:
@@ -11825,7 +11841,6 @@ graph():
         self.assertEqual(ep.module()(3, 5), 8)
         self.assertEqual(ep.module()(5, 4), 9)
 
-    @testing.expectedFailureStrictV2  # ValueError: Found conflicts between user-specified and inferred ranges
     def test_dynamic_shapes_bounds(self):
         class M(torch.nn.Module):
             """
@@ -13796,21 +13811,24 @@ def forward(self, x, y):
 
         inputs = (torch.randn(10, 72),)
         dx, dy = dims("dx", "dy")
-        ep = torch.export._trace._export(
-            Mod4Reshape(),
-            inputs,
-            dynamic_shapes={"x": (dx, dy)},
-            prefer_deferred_runtime_asserts_over_guards=True,
-        )
-        out1 = ep.module()(torch.randn(8, 7))
-        self.assertEqual(out1.shape, torch.ones(7, 4, 2).shape)
-        out2 = ep.module()(torch.randn(12, 11))
-        self.assertEqual(out2.shape, torch.ones(11, 4, 3).shape)
-        with self.assertRaisesRegex(
-            RuntimeError,
-            r"Runtime assertion failed for expression Eq\(Mod\(s27\*s77, 4\*s77 \- 4\), 0\) on node 'eq.*'",
-        ):
-            ep.module()(torch.randn(8, 8))  # fail
+        for use_new_tracer in [True, False]:
+            ep = torch.export._trace._export(
+                Mod4Reshape(),
+                inputs,
+                dynamic_shapes={"x": (dx, dy)},
+                prefer_deferred_runtime_asserts_over_guards=True,
+                pre_dispatch=True,
+                _use_new_tracer_experimental=use_new_tracer,
+            )
+            out1 = ep.module()(torch.randn(8, 7))
+            self.assertEqual(out1.shape, torch.ones(7, 4, 2).shape)
+            out2 = ep.module()(torch.randn(12, 11))
+            self.assertEqual(out2.shape, torch.ones(11, 4, 3).shape)
+            with self.assertRaisesRegex(
+                RuntimeError,
+                r"^Runtime assertion failed for expression Eq\(Mod\(s\d+\*s\d+, 4\*s\d+\s*-\s*4\), 0\) on node 'eq[^']*'$",
+            ):
+                ep.module()(torch.randn(8, 8))  # fail
 
         # case 2: 2d reshape
         class FreeReshape(torch.nn.Module):
