@@ -1539,6 +1539,12 @@ def force_save_bw_mutation_src(joint_module: fx.GraphModule) -> None:
             break
 
 
+def force_save_custom_triton_kernels(joint_module: fx.GraphModule) -> None:
+    for node in joint_module.graph.nodes:
+        if node.target is torch.ops.higher_order.triton_kernel_wrapper_functional:
+            node.meta["recompute"] = CheckpointPolicy.MUST_SAVE
+
+
 def cleanup_recompute_tags(joint_module: fx.GraphModule) -> fx.GraphModule:
     """
     If there are two consecutive checkpointed blocks with no operator in
@@ -2732,6 +2738,8 @@ def min_cut_rematerialization_partition(
     if not config.unsafe_allow_optimization_of_collectives:
         force_save_collectives(joint_module)
     force_save_bw_mutation_src(joint_module)
+    if config.force_save_custom_triton_kernels:
+        force_save_custom_triton_kernels(joint_module)
 
     def classify_nodes(joint_module, static_lifetime_input_indices):
         name_to_node = get_name_to_node(joint_module.graph)
