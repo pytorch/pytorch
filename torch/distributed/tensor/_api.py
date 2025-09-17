@@ -8,7 +8,6 @@ from typing import Any, Callable, cast, Optional
 from typing_extensions import deprecated
 
 import torch
-
 import torch.distributed.tensor._dispatch as op_dispatch
 import torch.distributed.tensor._random as random
 import torch.nn as nn
@@ -241,7 +240,7 @@ class DTensor(torch.Tensor):
     # _op_dispatcher instance as a class attribute to handle runtime dispatching logic
     _op_dispatcher: op_dispatch.OpDispatcher = op_dispatch.OpDispatcher()
 
-    __new__ = torch.Tensor._dtensor__new__  # type: ignore
+    __new__ = torch.Tensor._dtensor__new__  # type: ignore[assignment]
 
     @torch._disable_dynamo
     @mark_subclass_constructor_exportable_experimental

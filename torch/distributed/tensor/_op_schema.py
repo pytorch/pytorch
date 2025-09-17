@@ -478,7 +478,8 @@ class OpSchema:
     def is_view_op(self) -> bool:
         return self.op._schema._is_view_op()
 
-    _recompute_comparison_key = _DTensor_OpSchema_recompute_comparison_key
+    def _recompute_comparison_key(self) -> None:
+        _DTensor_OpSchema_recompute_comparison_key(self)
 
     def __hash__(self) -> int:
         return hash(self._comparison_key)
