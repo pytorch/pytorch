@@ -71,7 +71,7 @@ from torch.fx.experimental.symbolic_shapes import (
 )
 from torch.fx.node import Node
 from torch.utils._ordered_set import OrderedSet
-from torch.utils._sympy.functions import CleanDiv, FloorDiv, ModularIndexing
+from torch.utils._sympy.functions import CleanDiv, FloorDiv, Mod, ModularIndexing
 from torch.utils._sympy.symbol import SymT
 
 from . import config, dependencies
@@ -442,16 +442,16 @@ def is_aligned_realized_tensor(x: Union[Buffer, TensorBox], alignment: int) -> b
     ):
         return False
 
-    # Make sure to guard to recompile when necessary.
-    aligned_strides = all(
-        (V.graph.sizevars.guard_or_false(sympy.Eq(x.get_stride()[i] % alignment, 0)))
-        for i in range(len(x.get_stride()) - 1)
+    aligned_strides = sympy.And(
+        *(sympy.Eq(Mod(s, alignment), 0) for s in x.get_stride()[:-1])
     )
-    aligned_last_dim = V.graph.sizevars.guard_or_false(
-        sympy.Eq(x.get_stride()[-1], 1)
-    ) or V.graph.sizevars.guard_or_false(sympy.Le(x.get_size()[-1], 1))
+    aligned_last_dim = sympy.Or(
+        sympy.Eq(x.get_stride()[-1], 1), sympy.Le(x.get_size()[-1], 1)
+    )
+    is_aligned = sympy.And(aligned_strides, aligned_last_dim)
 
-    return aligned_last_dim and aligned_strides
+    # Make sure to guard to recompile when necessary.
+    return V.graph.sizevars.guard_or_false(is_aligned)
 
 
 def significant_strides_equal(

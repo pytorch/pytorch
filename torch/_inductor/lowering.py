@@ -47,7 +47,13 @@ from torch.fx.experimental.symbolic_shapes import (
     resolve_unbacked_bindings,
 )
 from torch.utils._ordered_set import OrderedSet
-from torch.utils._sympy.functions import CeilDiv, FloorDiv, Identity, ModularIndexing
+from torch.utils._sympy.functions import (
+    CeilDiv,
+    FloorDiv,
+    Identity,
+    Mod,
+    ModularIndexing,
+)
 
 from .._dynamo.utils import import_submodule
 from . import config, inductor_prims, ir, test_operators  # NOQA: F401
@@ -2681,7 +2687,7 @@ def sdpa_constraint(fx_node, *args, **kwargs):
 
         def is_aligned(x):
             return V.graph.sizevars.guard_or_false(
-                sympy.Eq(x.get_size()[-1] % ALIGNMENT, 0)
+                sympy.Eq(Mod(x.get_size()[-1], ALIGNMENT), 0)
             )
 
         if isinstance(arg.data, ir.BaseView):
