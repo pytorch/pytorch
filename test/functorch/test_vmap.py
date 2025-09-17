@@ -4848,6 +4848,20 @@ class TestVmapOperatorsOpInfo(TestCase):
         y = vmap(lambda x: x.sum(-1))(x)
         self.assertEqual(y, x)
 
+    def test_aten_assert_metadata(self, device):
+        t = torch.tensor([0.5, 0.5], device=device)
+        with self.assertRaisesRegex(ValueError, "must only return Tensors"):
+            vmap(torch._assert_tensor_metadata)(t, device=device)
+
+        def _vmap_func(x):
+            nonlocal device
+            torch._assert_tensor_metadata(x, device=device)
+            return x.sin()
+
+        vmap_res = vmap(_vmap_func)(t)
+        eager_res = _vmap_func(t)
+        self.assertEqual(vmap_res, eager_res)
+
     def test_isinf(self, device):
         test = functools.partial(_vmap_test, check_propagates_grad=False)
 
