@@ -1,4 +1,4 @@
-# Owner(s): ["module: unknown"]
+# Owner(s): ["module: nn"]
 
 import hypothesis.strategies as st
 from hypothesis import given

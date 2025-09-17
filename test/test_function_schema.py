@@ -1,4 +1,4 @@
-# Owner(s): ["module: unknown"]
+# Owner(s): ["module: dispatch"]
 
 import torch
 from torch._C import parse_schema
