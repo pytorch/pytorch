@@ -268,9 +268,7 @@ LOAD_FP32_VECTORIZED_INIT(Half, fp16)
 
 #else // defined(CPU_CAPABILITY_AVX2)
 
-#if !(                                                                      \
-    defined(__aarch64__) && !defined(C10_MOBILE) && !defined(__CUDACC__) && \
-    !defined(CPU_CAPABILITY_SVE256))
+#if !defined(__aarch64__) || defined(CPU_CAPABILITY_SVE256)
 CONVERT_NON_VECTORIZED_INIT(Half, half)
 #endif
 
