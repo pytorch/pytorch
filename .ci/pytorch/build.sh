@@ -237,6 +237,14 @@ if [[ "$BUILD_ENVIRONMENT" == *-debug* ]]; then
   export CMAKE_BUILD_TYPE=RelWithAssert
 fi
 
+# For SymmetricMemory CI on H100, we want a slim build to save time
+if [[ "$BUILD_ENVIRONMENT" == *-symm* ]]; then
+  export USE_XNNPACK=0
+  export USE_MKLDNN=0
+  export USE_FBGEMM=0
+  export USE_QNNPACK=0
+fi
+
 # Do not change workspace permissions for ROCm and s390x CI jobs
 # as it can leave workspace with bad permissions for cancelled jobs
 if [[ "$BUILD_ENVIRONMENT" != *rocm* && "$BUILD_ENVIRONMENT" != *s390x* && "$BUILD_ENVIRONMENT" != *riscv64* && -d /var/lib/jenkins/workspace ]]; then
