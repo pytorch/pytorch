@@ -836,17 +836,12 @@ def should_offload(node: torch.fx.Node) -> bool:
     Don't offload view operations and getitem operations as they are cheap and don't benefit from CPU offloading.
     """
     op_types = get_default_op_list()
-    
-    # Don't offload view operations - they're cheap and don't benefit from CPU offloading
-    if op_types.is_view(node):
+
+    if op_types.is_view(node) or node.target == operator.getitem:
         return False
-    
-    # Don't offload getitem operations - they're cheap tuple/list indexing operations
-    if node.target == operator.getitem:
-        return False
-    
+
     return True
-    
+
 
 def offload_activation_fw(graph: torch.fx.Graph) -> None:
     """
@@ -856,27 +851,59 @@ def offload_activation_fw(graph: torch.fx.Graph) -> None:
     output = graph.find_nodes(op="output")[0]
     fwd_outputs = output.args[0]
     node_to_offload = dict()
+    op_types = get_default_op_list()
+
+    def find_all_effective_users(node: fx.Node, visited: set = None) -> set[fx.Node]:
+        """
+        Find all effective users of a node, considering that view operations
+        extend the lifetime of the original tensor. If a user is a view operation,
+        recursively find users of that view operation.
+        """
+        if visited is None:
+            visited = set()
+
+        if node in visited:
+            return set()
+
+        visited.add(node)
+        effective_users = set()
+
+        for user in node.users.keys():
+            if user.op == "output":
+                continue
+
+            effective_users.add(user)
+
+            # If this user is a view operation, its users are also effectively
+            # users of the original node since they share the same memory
+            if op_types.is_view(user):
+                effective_users.update(find_all_effective_users(user, visited))
+
+        return effective_users
 
     for node in fwd_outputs:
         # Check if the activation node is marked for offloading
         if node.meta.get("saved_for_offloading", False):
-            # Find the last user of this node (excluding the output node)
+            # Find all effective users, including users of view operations
+            all_effective_users = find_all_effective_users(node)
+
             last_user = None
-            if node.users:
-                # Filter out the output node and find the last user (topologically)
-                non_output_users = [user for user in node.users.keys() if user.op != "output"]
-                if non_output_users:
-                    # Find the last user by their position in the graph
-                    graph_nodes = list(graph.nodes)
-                    last_user = max(non_output_users, key=lambda n: graph_nodes.index(n))
-            
-            # Insert the CPU offload operation after the last user, or before the output if no users
+            if all_effective_users:
+                # Find the last user by their position in the graph
+                graph_nodes = list(graph.nodes)
+                last_user = max(all_effective_users, key=lambda n: graph_nodes.index(n))
+
+            # Insert the CPU offload operation after the last effective user,
+            # or before the output if no users
             if last_user:
                 with graph.inserting_after(last_user):
                     cpu_node = graph.call_function(
                         torch.ops.aten.to.device,
                         args=(node,),
-                        kwargs={"device": torch.device("cpu"), "dtype": node.meta["val"].dtype},
+                        kwargs={
+                            "device": torch.device("cpu"),
+                            "dtype": node.meta["val"].dtype,
+                        },
                         name="cpu_offload_" + str(node.name),
                     )
                     cpu_node.meta["val"] = node.meta["val"].to(torch.device("cpu"))
@@ -889,14 +916,17 @@ def offload_activation_fw(graph: torch.fx.Graph) -> None:
                     cpu_node = graph.call_function(
                         torch.ops.aten.to.device,
                         args=(node,),
-                        kwargs={"device": torch.device("cpu"), "dtype": node.meta["val"].dtype},
+                        kwargs={
+                            "device": torch.device("cpu"),
+                            "dtype": node.meta["val"].dtype,
+                        },
                         name="cpu_offload_" + str(node.name),
                     )
                     cpu_node.meta["val"] = node.meta["val"].to(torch.device("cpu"))
                     cpu_node.meta["tensor_meta"] = extract_tensor_metadata(
                         cpu_node.meta["val"]
                     )
-            
+
             node_to_offload[node] = cpu_node
 
     # Update the return node args
@@ -925,13 +955,17 @@ def offload_activation_bw(graph: torch.fx.Graph) -> None:
             first_user = None
             if node.users:
                 # Find the first user (topologically)
-                first_user = min(node.users.keys(), key=lambda n: list(graph.nodes).index(n))
+                first_user = min(
+                    node.users.keys(), key=lambda n: list(graph.nodes).index(n)
+                )
 
             # Move tensor back to original device (GPU) using aten.to.device with dtype preserved
             # Place it right before the first user if possible, otherwise after the placeholder
             insert_point = first_user if first_user else node
-            insert_method = graph.inserting_before if first_user else graph.inserting_after
-            
+            insert_method = (
+                graph.inserting_before if first_user else graph.inserting_after
+            )
+
             with insert_method(insert_point):
                 gpu_node = graph.call_function(
                     torch.ops.aten.to.device,
@@ -982,7 +1016,7 @@ def perform_activation_offloading(
             bwd_input.replace_all_uses_with(offload_bwd_input)
             bwd_module.graph.erase_node(bwd_input)
 
-    offload_activation_bw(bwd_module.graph)    
+    offload_activation_bw(bwd_module.graph)
     print("bw")
     print(bwd_module.graph)
 
@@ -993,35 +1027,31 @@ def enable_activation_offloading(
     bwd_module: fx.GraphModule,
     static_lifetime_input_nodes: Optional[OrderedSet[fx.Node]] = None,
 ) -> None:
-    print("fw")
-    print(fwd_module.graph)
-    print("bw")
-    print(bwd_module.graph)
     static_input_names = (
         [node.name for node in static_lifetime_input_nodes]
         if static_lifetime_input_nodes
         else []
     )
     saved_values_names = {node.name: node for node in saved_values}
-    saved_values_names = {
-        node.name: node for node in saved_values if "primals" not in node.name
-    }
     fwd_module_outputs = fwd_module.graph.find_nodes(op="output")[0].args[0]
     bwd_module_inputs = {
         node.name: node for node in bwd_module.graph.find_nodes(op="placeholder")
     }
-    print("saved_values_names", saved_values_names)
-    print("fwd_module_outputs", fwd_module_outputs)
-    print("bwd_module_inputs", bwd_module_inputs)
-    should_perform_offloading = True
+    should_perform_offloading = False
     for node in fwd_module_outputs:
-        if node.name in saved_values_names and should_offload(node):
-            if node.name in static_input_names:
-                log.debug("Skipping offloading of static input %s: ", node.name)
-                continue
+        # this is the case of fwd output
+        if not node.name in saved_values_names:
+            continue
+        # this is the case of graph inputs (i.e., not intermediate activations)
+        if node.name in static_input_names or "primals" not in node.name:
+            continue
+
+        if should_offload(node):
+            # mark the fwd nodes
             node.meta["saved_for_offloading"] = True
             node.meta["original_device"] = node.meta["val"].device
-            # some of the fwd outputs and bwd inputs are not share the same object
+
+            # mark the bwd nodes
             bwd_module_inputs[node.name].meta["saved_for_offloading"] = True
             bwd_module_inputs[node.name].meta["original_device"] = node.meta[
                 "val"
