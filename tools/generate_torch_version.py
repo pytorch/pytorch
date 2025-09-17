@@ -7,8 +7,8 @@ import re
 import subprocess
 from pathlib import Path
 
-from setuptools import distutils  # type: ignore[import,attr-defined]
 from packaging.version import Version
+from setuptools import distutils  # type: ignore[import,attr-defined]
 
 
 UNKNOWN = "Unknown"
@@ -79,7 +79,7 @@ def get_torch_version(sha: str | None = None) -> str:
     # Validate that the version is PEP 440 compliant
     parsed_version = Version(version)
     if sdist_version:
-        if (l:=parsed_version.local) and l.startswith("git"):
+        if (l := parsed_version.local) and l.startswith("git"):
             # Assume local version is git<sha> and
             # hence whole version is source version
             source_version = version
