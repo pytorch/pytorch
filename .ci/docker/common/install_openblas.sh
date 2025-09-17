@@ -4,9 +4,10 @@
 set -ex
 
 cd /
-git clone https://github.com/OpenMathLib/OpenBLAS.git -b "${OPENBLAS_VERSION:-v0.3.30}" --depth 1 --shallow-submodules
+git clone https://github.com/OpenMathLib/OpenBLAS.git
 
 OPENBLAS_CHECKOUT_DIR="OpenBLAS"
+git -C "${OPENBLAS_CHECKOUT_DIR}" checkout 5e43ba948c3cb35864c7b0953b8dd02374dd3967
 OPENBLAS_BUILD_FLAGS="
 NUM_THREADS=128
 USE_OPENMP=1
