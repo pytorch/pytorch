@@ -397,7 +397,7 @@ class TensorVariable(VariableTracker):
                 hints=[],
             )
         else:
-            return variables.ConstantVariable(None)
+            return variables.constant_none
 
     def method_attr__version(self, tx):
         from ..tensor_version_op import _tensor_version
@@ -415,7 +415,7 @@ class TensorVariable(VariableTracker):
         # attributes and existing attributes. This is a bug and requires more
         # deep dive.
         if name in ("size", "stride"):
-            return ConstantVariable(True)
+            return variables.constant_true
 
         try:
             var = BuiltinVariable(getattr).call_function(
@@ -662,7 +662,7 @@ class TensorVariable(VariableTracker):
 
         # This is seen in inspect signature where we check if the value is a default value
         if name == "__eq__" and isinstance(args[0], UserDefinedClassVariable):
-            return variables.ConstantVariable(False)
+            return variables.constant_false
 
         # For historical reasons, these ops decompose down to syntactically
         # invalid aten ops because they contain the python keyword `from`, see

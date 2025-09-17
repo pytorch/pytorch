@@ -457,7 +457,7 @@ def get_torch_function_fn(tx: "InstructionTranslator", vt):
     # they satisfy the calling convention in `call_torch_function`.
     from .builtin import BuiltinVariable
 
-    args = [vt, ConstantVariable("__torch_function__")]
+    args = [vt, ConstantVariable.cache("__torch_function__")]
     func_vt = BuiltinVariable(getattr).call_function(tx, args, {})
     return func_vt
 

@@ -1429,7 +1429,7 @@ class BuiltinVariable(VariableTracker):
 
         if self.fn is object and name == "__init__":
             # object.__init__ is a no-op
-            return variables.ConstantVariable(None)
+            return variables.constant_none
 
         if self.fn is dict and name == "fromkeys":
             return BuiltinVariable.call_custom_dict_fromkeys(tx, dict, *args, **kwargs)

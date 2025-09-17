@@ -34,6 +34,15 @@ class ConstantVariable(VariableTracker):
     """
 
     @staticmethod
+    def cache(value) -> VariableTracker:
+        assert type(value) in (int, str)
+        if value not in _constants:
+            c = ConstantVariable(value)
+            _constants[value] = c
+            return c
+        return _constants[value]
+
+    @staticmethod
     def create(value, **kwargs) -> VariableTracker:
         """
         Create a `ConstantVariable` based on the given value, and supports
@@ -44,9 +53,6 @@ class ConstantVariable(VariableTracker):
         the guard will be `CONSTANT_MATCH`.
         """
         source = kwargs.get("source", None)
-
-        # if c := _check_constant_cache(value):
-        #     return c
 
         # Routing for supported collection literals.
         if isinstance(value, set):
@@ -246,44 +252,41 @@ its type to `common_constant_types`.
         return variables.ConstantVariable.create(result)
 
 
-_constant_cache = {}
+constant_zero = ConstantVariable(0)
+constant_one = ConstantVariable(1)
 constant_none = ConstantVariable(None)
 constant_true = ConstantVariable(True)
 constant_false = ConstantVariable(False)
 constant_NotImplemented = ConstantVariable(NotImplemented)
+_constants = {}
 
 
-def _check_constant_cache(value):
-    global _constant_cache
-    if value in (None, NotImplemented) or istype(value, (int, bool, str)):
-        return _constant_cache.get((value, type(value)))
-
-
-def _fill_constant_cache(cache):
+def _fill_constant_cache():
     # CPython caches literals (i.e. None, True, False), small integers (-5, 257),
     # strings (one-char latin-1) and code object constants, which are stored
     # in "tx._constants_cache"
 
-    if len(cache) > 0:
+    if len(_constants) > 0:
         return
-
-    cache[(None, type(None))] = constant_none
-    cache[(True, bool)] = constant_true
-    cache[(False, bool)] = constant_false
-    cache[(NotImplemented, type(NotImplemented))] = constant_NotImplemented
 
     _PY_NSMALLNEGINTS = 5
     _PY_NSMALLPOSINTS = 257
 
     for i in range(-_PY_NSMALLNEGINTS, _PY_NSMALLPOSINTS):
-        cache[(i, int)] = ConstantVariable(i)
+        _constants[i] = ConstantVariable(i)
 
     # latin1 one-char strings
     for i in range(256):
-        cache[(chr(i), str)] = ConstantVariable(chr(i))
+        _constants[chr(i)] = ConstantVariable(chr(i))
+
+    string_intering = ("__context__", "__cause__", "__traceback__", "__torch_function__",
+                       "__func__", "__doc__", "args", "kwds", "kwargs", "gen", "get", "msg",
+                       "__eq__",)
+    for s in string_intering:
+        _constants[s] = ConstantVariable(s)
 
 
-# _fill_constant_cache(_constant_cache)
+_fill_constant_cache()
 
 
 class EnumVariable(VariableTracker):

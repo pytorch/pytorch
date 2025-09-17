@@ -1108,7 +1108,7 @@ class ExceptionStack:
                 break
 
             if context is val:
-                o.set_context(ConstantVariable(None))  # type: ignore[union-attr, arg-type]
+                o.set_context(variables.constant_none)  # type: ignore[union-attr, arg-type]
                 break
 
             o = context  # type: ignore[assignment]
@@ -1970,7 +1970,7 @@ class InstructionTranslatorBase(
                 # Update __cause__/__supppress_context__ in the raised exception
                 curr_exc = self.exn_vt_stack.get_current_exception()
                 cause = self._create_exception_type(from_vt)
-                curr_exc.call_setattr(self, ConstantVariable("__cause__"), cause)  # type: ignore[arg-type, union-attr, assignment]
+                curr_exc.call_setattr(self, ConstantVariable.cache("__cause__"), cause)  # type: ignore[arg-type, union-attr, assignment]
 
     def CLEANUP_THROW(self, inst: Instruction) -> None:
         # https://github.com/python/cpython/pull/96010
@@ -2033,14 +2033,14 @@ class InstructionTranslatorBase(
             val = self.stack[-1]
             assert self._isinstance_exception(val)
             typ = BuiltinVariable(val.exc_type)  # type: ignore[attr-defined, union-attr]
-            tb = ConstantVariable(None)
+            tb = variables.constant_none
         else:
             assert len(self.stack) >= 7
             fn = self.stack[-7]
             val = self.stack[-2]
             assert self._isinstance_exception(val)
             typ = BuiltinVariable(val.exc_type)  # type: ignore[attr-defined]
-            tb = ConstantVariable(None)
+            tb = variables.constant_none
 
         self.call_function(fn, [typ, val, tb], {})
 
@@ -2146,9 +2146,9 @@ class InstructionTranslatorBase(
                     self.push(variables.BuiltinVariable(old_exception.exc_type))
                 else:
                     # Push empty exception tb, value, type
-                    self.push(variables.ConstantVariable(None))
-                    self.push(variables.ConstantVariable(None))
-                    self.push(variables.ConstantVariable(None))
+                    self.push(variables.constant_none)
+                    self.push(variables.constant_none)
+                    self.push(variables.constant_none)
 
                 # Push new exception - tb, val, type
                 # Traceback is currently mapped to UnknownVariable
@@ -2188,7 +2188,7 @@ class InstructionTranslatorBase(
 
         val = self.pop()
         if len(self.exn_vt_stack) == 0:
-            prev_exc: VariableTracker = ConstantVariable(None)
+            prev_exc: VariableTracker = variables.constant_none
         else:
             prev_exc = self.exn_vt_stack[-1]
         self.push(prev_exc)
@@ -2424,7 +2424,7 @@ class InstructionTranslatorBase(
         obj = self.pop()
         result = BuiltinVariable(getattr).call_function(
             self,  # type: ignore[arg-type]
-            [obj, ConstantVariable.create(inst.argval)],
+            [obj, ConstantVariable.cache(inst.argval)],
             {},
         )
         self.push(result)
@@ -2452,7 +2452,7 @@ class InstructionTranslatorBase(
         try:
             BuiltinVariable(setattr).call_function(
                 self,  # type: ignore[arg-type]
-                [obj, ConstantVariable.create(inst.argval), val],
+                [obj, ConstantVariable.cache(inst.argval), val],
                 {},
             )
             return
@@ -3228,8 +3228,8 @@ class InstructionTranslatorBase(
                 [ConstantVariable("generator raised StopIteration")],
                 {},
             )
-            new_val.call_setattr(self, ConstantVariable("__context__"), val)  # type: ignore[attr-defined]
-            new_val.call_setattr(self, ConstantVariable("__cause__"), val)  # type: ignore[attr-defined]
+            new_val.call_setattr(self, ConstantVariable.cache("__context__"), val)  # type: ignore[attr-defined]
+            new_val.call_setattr(self, ConstantVariable.cache("__cause__"), val)  # type: ignore[attr-defined]
             self.stack[-1] = new_val
 
     def DICT_MERGE(self, inst: Instruction) -> None:
