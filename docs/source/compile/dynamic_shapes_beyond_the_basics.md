@@ -5,7 +5,6 @@ This section covers some advanced topics related to dynamic shapes. This include
 
 ```{toctree}
 :maxdepth: 1
-dynamic_shapes_core_concepts
 dynamic_shapes_zero_one_specialization
 dynamic_shapes_backed_unbacked
 ```

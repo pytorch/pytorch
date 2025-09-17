@@ -134,26 +134,7 @@ See the corresponding <a href="_static/img/dynamic_shapes/tlparse3_specializatio
 
 This is how graphs created for the above function:
 
-```{mermaid}
-  graph LR
-      %%{init: {'flowchart': {'nodeSpacing': 1}}}%%
-      A1["func(torch.rand(10))"] --> G1["Graph1"]
-      A2["func(torch.rand(20))"] --> G1["Graph1"]
-      A3["func(torch.rand(30))"] --> G2["Graph2"]
-      A4["func(torch.rand(40))"] --> G2["Graph2"]
-      A5["func(torch.rand(50))"] --> G3["Graph3"]
-      A6["..."] --> G3["Graph3"]
-
-      style A1 fill:none,stroke:none
-      style A2 fill:none,stroke:none
-      style A3 fill:none,stroke:none
-      style A4 fill:none,stroke:none
-      style A5 fill:none,stroke:none
-      style A6 fill:none,stroke:none
-
-      style G1 fill:#ffffff,stroke:#000000,stroke-width:1px
-      style G2 fill:#ffffff,stroke:#000000,stroke-width:1px
-      style G3 fill:#ffffff,stroke:#000000,stroke-width:1px
+```{image} _static/img/dynamic_shapes/dynamic_shapes_example_specialization.png
 ```
 
 (enable-dynamic-behavior)=
@@ -171,7 +152,7 @@ Read below about each of this options.
 (automatic_dynamic)=
 ### Automatic dynamic
 
-**Automatic dynamic** is the default behavior where `torch.compile` performs
+**Automatic dynamic** is the default behavior where {func}`torch.compile` performs
 the initial compilation assuming static shapes are used, while tracking the
 input sizes from that first compilation. When a recompile is triggered, it
 uses this information to identify which dimensions have changed and marks
@@ -209,20 +190,12 @@ you never specialize.
 
 #### `mark_unbacked(tensor, dim)`
 
-The `mark_unbacked` function marks a tensor dimension as unbacked. It is unlikely
+The {func}`torch._dynamo.mark_unbacked` function marks a tensor dimension as unbacked. It is unlikely
 to be the tool you need, but it could be useful if the specialization occurs inside
 a condition `guard_size_oblivious(x)`, and if using it removes the specialization.
 Ensure it fixes the specialization and does not introduce a data-dependent error
 that converts to a graph break at or before the specialization location
 you are trying to  avoid. It might be better to use the next option.
-
-#### `backed_size_oblivious(bool)`
-
-Use {func}`torch.fx.experimental._config.backed_size_oblivious` if you want to avoid specialization
-during `guard_size_oblivious`and aim to minimize compilations and
-specialization. Set a flag to treat backed as unbacked for all checks in the code
-that participate in size-oblivious reasoning, which avoids
-0/1 specialization for backed elements.
 
 (dynamic_sources_allow_list)=
 #### Dynamic Allow List (`DYNAMIC_SOURCES`)
@@ -245,7 +218,8 @@ recommended due to it  being error prone.
 It would make every input size dynamic which may result it performance
 regressions and ultimately increase compilation time.
 
-For more a
+PyTorch also provides advanced control options for dynamic shapes, see:
+{ref}`dynamic_shapes_advanced_control_options`.
 
 ## Where Do I Go From Here?
 
@@ -263,3 +237,6 @@ compile/dynamic_shapes_beyond_the_basics
 compile/dynamic_shapes_troubleshooting
 compile/dynamic_shapes_advanced_control_options
 ```
+
+```{seealso}
+* [tlparse documentation](https://github.com/pytorch/tlparse)

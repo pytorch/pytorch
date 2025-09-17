@@ -33,10 +33,6 @@ sorting and guard creation.to avoid unnecessary recomputation of these propertie
 guards on unbacked symbolic integers are only applied when necessary,
 reducing computational overhead.
 
-* Use the `constrain_range` API to define bounds for integer tensor sizes.
-This helps maintain tensor sizes within specified limits, enhancing control
-and predictability.
-
 ## How to use unbacked
 To use unbacked APIs, replace `mark_dynamic` with `mark_unbacked` and
 `TORCH_COMPILE_DYNAMIC_SOURCES` with `TORCH_COMPILE_UNBACKED_SOURCES`.
