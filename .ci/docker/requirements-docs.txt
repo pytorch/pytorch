@@ -33,7 +33,7 @@ breathe==4.34.0
 #Description: This is used to generate PyTorch C++ docs
 #Pinned versions: 4.34.0
 
-exhale>=0.3.7
+exhale==0.3.7
 #Description: This is used to generate PyTorch C++ docs
 #Pinned versions: 0.3.7
 
