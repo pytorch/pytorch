@@ -25,6 +25,7 @@ from torch._inductor.codegen.wrapper_fxir import FxConverter, WrapperFxCodegen
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch.export import Dim
 from torch.testing._internal.common_utils import (
+    DeterministicGuard,
     instantiate_parametrized_tests,
     parametrize,
 )
@@ -567,6 +568,68 @@ class FxirTestCase(InductorTestCase):
 
         self.assertTrue(same(ref, result))
 
+    def test_scatter_fallback_scalar_src(self):
+        """
+        Test a special case where ScatterFallback takes a scalar 'src' argument.
+        """
+
+        def foo(input_):
+            dim = 0
+            src = 1.5
+            return torch.ops.aten.scatter(input_, dim, index, src)
+
+        length = 8
+        index = torch.randint(length, (length,), device=self.device)
+        input_ = torch.randn(length, device=self.device)
+        with DeterministicGuard(True):
+            (gm,) = self._compile_and_check(
+                foo,
+                (input_,),
+            )
+
+        # Check for the fallback op.
+        num_fallback = self._count_ops(gm, torch.ops.aten.scatter_.value)
+        self.assertEqual(num_fallback, 1)
+
+    def test_index_put_fallback(self):
+        """
+        Test the deterministic fallback for index_put.
+        """
+        length = 8
+        out, values = [torch.randn(length, device=self.device) for _ in range(2)]
+        indices = (torch.randint(length, (length,), device=self.device),)
+        accumulate = True
+        with DeterministicGuard(True):
+            (gm,) = self._compile_and_check(
+                torch.index_put,
+                (out, indices, values, accumulate),
+                expected_num_triton_kernels=1,
+            )
+
+        # Check for the fallback op.
+        self.assertEqual(self._count_ops(gm, torch.ops.aten.index_put_.default), 1)
+
+    def test_scatter_reduce_fallback(self):
+        """
+        Test the customized wrapper codegen for ScatterFallback ops.
+        """
+        fallback_op = torch.ops.aten.scatter_reduce_.two
+
+        def foo(out, index, src):
+            dim = 0
+            out = fallback_op(out, dim, index, src, reduce="amax", include_self=False)
+            return out + 1
+
+        length = 8
+        out, src = [torch.randn(length, device=self.device) for _ in range(2)]
+        index = torch.randint(length, (length,), device=self.device)
+        (gm,) = self._compile_and_check(
+            foo, (out, index, src), expected_num_triton_kernels=2
+        )
+
+        # Check for the fallback.
+        self.assertEqual(self._count_ops(gm, fallback_op), 1)
+
     @torch._inductor.config.patch("graph_partition", True)
     def test_subgraph_raises(self):
         """
@@ -682,10 +745,13 @@ class FxirTestCase(InductorTestCase):
         self._compile_and_check(foo, args, expected_num_triton_kernels=0)
 
 
+@instantiate_parametrized_tests
 class AOTFxirTestCase(InductorTestCase):
     device = GPU_TYPE
 
-    def check(self, model, inp, dynamic_shapes=None, strict=False):
+    def check(
+        self, model, inp, dynamic_shapes=None, strict=False
+    ) -> torch.fx.GraphModule:
         if self.device == "xpu":
             raise unittest.SkipTest("The feature AOTFxir not currently ready for XPU")
         with torch.no_grad():
@@ -703,6 +769,8 @@ class AOTFxirTestCase(InductorTestCase):
                     and node.target != triton_kernel_wrapper_mutation
                 ):
                     self.assertTrue(node.meta.get("val", None) is not None)
+
+            return gm
 
     def test_aoti_fx_add(self):
         class M(torch.nn.Module):
@@ -820,6 +888,36 @@ class AOTFxirTestCase(InductorTestCase):
 
         # Now the backend should have been called.
         self.assertTrue(called)
+
+    @parametrize(
+        "expr",
+        [
+            (2 * Dim("x") + 1),
+            (Dim("x", min=3) - 3),
+        ],
+    )
+    def test_dynamic_input_expr(self, expr: sympy.Expr):
+        """
+        Test dynamic shapes with a nontrivial input expression.
+        """
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x.reshape(x.shape[0] * x.shape[1]) + x.shape[1]
+
+        dynamic_shapes = {"x": {0: expr}}
+        inp = (torch.randn((5, 4), device=self.device),)
+        gm = self.check(M().to(self.device), inp, dynamic_shapes=dynamic_shapes)
+
+        # Check for dynamic size ops.
+        self.assertEqual(
+            len(
+                gm.graph.find_nodes(
+                    op="call_function", target=torch.ops.aten.sym_size.int
+                )
+            ),
+            1,
+        )
 
 
 if __name__ == "__main__":
