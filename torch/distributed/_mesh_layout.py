@@ -106,23 +106,26 @@ class _MeshLayout(Layout):
 
     def composition(self, layout: "_MeshLayout") -> "_MeshLayout":
         """
-        Perform a by-dimension composition between this layout (self) and another layout (layout).
+        By-dimension composition allows one layout to "select from" or "filter through" another layout.
+        Think of it as function composition: (self ∘ layout)(input) = self(layout(input))
+        between two layouts. This function is a wrapper of pycute's composition.
 
         Mental model about how to understand the composition logic:
-        - Think of each dimension in this layout as a "slot" that can itself be
-          refined by another layout.
-        - Composition substitutes one of these slots with the provided `layout`, producing
-          a new combined layout with updated sizes and strides.
-        - For each (size, stride) pair in the layout, we expand the dimension
-          according to the self layout's structure.
+        - The LEFT layout (self) defines the "output space" - what indices are possible
+        - The RIGHT layout (layout parameter) acts as a "selector" - which specific indices to pick
+        - The composition only generates indices that the left layout could originally produce,
+          but the right layout determines which indices to be picked.
+        - The stride of the composition layout will not be smaller than the stride of the right layout,
+          because when picking the indices the composition will at least follow the the right layout's stride
+          to move forward.
 
         Example:
           self = (6,2):(2,1)      # sizes=(6,2), strides=(2,1)
           layout = (3:2)          # sizes=(3,), stride=(2,)
-          self o layout = (3:4)
+          self o layout = (3:2)
 
         Returns:
-          A list of composed layouts.
+          Layout being composed.
         """
         result = composition(self, layout)
         return _MeshLayout(result.shape, result.stride)
