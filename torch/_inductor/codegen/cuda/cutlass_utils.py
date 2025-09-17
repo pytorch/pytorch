@@ -112,13 +112,13 @@ def try_import_cutlass() -> bool:
     )
 
     cutlass_library_src_path = path_join(cutlass_python_path, "cutlass_library")
-    cutlass_src_path = path_join(cutlass_python_path, "cutlass")
+    cutlass_src_path = path_join(cutlass_python_path, "cutlass_cppgen")
     pycute_src_path = path_join(cutlass_python_path, "pycute")
 
     tmp_cutlass_full_path = os.path.abspath(os.path.join(cache_dir(), "torch_cutlass"))
 
     dst_link_library = path_join(tmp_cutlass_full_path, "cutlass_library")
-    dst_link_cutlass = path_join(tmp_cutlass_full_path, "cutlass")
+    dst_link_cutlass = path_join(tmp_cutlass_full_path, "cutlass_cppgen")
     dst_link_pycute = path_join(tmp_cutlass_full_path, "pycute")
 
     # mock modules to import cutlass
