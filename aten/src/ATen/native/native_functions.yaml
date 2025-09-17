@@ -2517,7 +2517,7 @@
   dispatch:
     CompositeExplicitAutograd: empty_like
     QuantizedCPU, QuantizedCUDA: empty_like_quantized
-    SparseCPU, SparseCUDA, SparseMeta: empty_like_sparse_coo
+    SparseCPU, SparseCUDA, SparseMPS, SparseMeta: empty_like_sparse_coo
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: empty_like_sparse_csr
     NestedTensorCPU, NestedTensorHPU, NestedTensorCUDA: empty_like_nested
   autogen: empty_like.out
@@ -4372,7 +4372,7 @@
   variants: function, method
   dispatch:
     CPU: narrow_copy_dense_cpu
-    SparseCPU, SparseCUDA: narrow_copy_sparse
+    SparseCPU, SparseCUDA, SparseMPS: narrow_copy_sparse
     CompositeExplicitAutogradNonFunctional: narrow_copy_dense_symint
   tags: view_copy
 
@@ -6492,7 +6492,7 @@
   device_guard: False
   dispatch:
     CompositeExplicitAutograd: unsqueeze
-    SparseCPU, SparseCUDA: unsqueeze_sparse
+    SparseCPU, SparseCUDA, SparseMPS: unsqueeze_sparse
     QuantizedCPU, QuantizedCUDA: unsqueeze_quantized
     NestedTensorCPU, NestedTensorHPU, NestedTensorCUDA: unsqueeze_nested
   tags: core
@@ -6660,7 +6660,7 @@
 - func: zeros.out(SymInt[] size, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CompositeExplicitAutograd: zeros_out
-    SparseCPU, SparseCUDA, SparseMeta: zeros_sparse_out
+    SparseCPU, SparseCUDA, SparseMPS, SparseMeta: zeros_sparse_out
 
 - func: zeros_like(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
   dispatch:
@@ -10259,7 +10259,7 @@
   structured_delegate: any.all_out
   variants: method, function
   dispatch:
-    SparseCPU, SparseCUDA: any_sparse
+    SparseCPU, SparseCUDA, SparseMPS: any_sparse
   tags: core
 
 - func: any.all_out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
