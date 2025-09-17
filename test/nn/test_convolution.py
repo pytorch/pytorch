@@ -3865,6 +3865,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
     @onlyCUDA
     @skipCUDAIfNoCudnn
     @dtypes(torch.float, torch.float16)
+    @torch.backends.cudnn.flags(enabled=True, deterministic=True, benchmark=False)
     @precisionOverride({torch.half: 0.002, torch.float: 1e-4})
     def test_cudnn_convolution_relu(self, device, dtype):
         for batch, groups, image_size, kernel_size, memory_format in product(
@@ -3898,6 +3899,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
     @onlyCUDA
     @skipCUDAIfNoCudnn
     @dtypes(torch.float, torch.float16)
+    @torch.backends.cudnn.flags(enabled=True, deterministic=True, benchmark=False)
     @precisionOverride({torch.half: 0.002, torch.float: 1e-4})
     def test_cudnn_convolution_add_relu(self, device, dtype):
         for batch, groups, image_size, kernel_size, memory_format in product(
