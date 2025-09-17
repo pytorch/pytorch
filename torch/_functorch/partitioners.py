@@ -235,9 +235,9 @@ def _extract_graph_with_inputs_outputs(
         if isinstance(x, fx.Node):
             if x not in env:
                 raise RuntimeError(f"Node {x} couldn't be found in env")
-            assert not isinstance(env[x], InvalidNodeBase), (
-                f"Node {x} was invalid, but is output"
-            )
+            assert not isinstance(
+                env[x], InvalidNodeBase
+            ), f"Node {x} was invalid, but is output"
             output_values.append(env[x])
         else:
             output_values.append(x)
@@ -829,6 +829,209 @@ def enable_activation_quantization(
         perform_fp8_activation_quantization(fwd_module, bwd_module, bwd_module_inputs)
 
 
+def should_offload(node: torch.fx.Node) -> bool:
+    """
+    Determine if a node should be offloaded to CPU based on size threshold.
+    Similar to should_quantize but for CPU offloading.
+    Don't offload view operations and getitem operations as they are cheap and don't benefit from CPU offloading.
+    """
+    op_types = get_default_op_list()
+    
+    # Don't offload view operations - they're cheap and don't benefit from CPU offloading
+    if op_types.is_view(node):
+        return False
+    
+    # Don't offload getitem operations - they're cheap tuple/list indexing operations
+    if node.target == operator.getitem:
+        return False
+    
+    return True
+    
+
+def offload_activation_fw(graph: torch.fx.Graph) -> None:
+    """
+    Forward pass modification for CPU offloading.
+    Similar to quantize_activation_fw but moves tensors to CPU instead of quantizing.
+    """
+    output = graph.find_nodes(op="output")[0]
+    fwd_outputs = output.args[0]
+    node_to_offload = dict()
+
+    for node in fwd_outputs:
+        # Check if the activation node is marked for offloading
+        if node.meta.get("saved_for_offloading", False):
+            # Find the last user of this node (excluding the output node)
+            last_user = None
+            if node.users:
+                # Filter out the output node and find the last user (topologically)
+                non_output_users = [user for user in node.users.keys() if user.op != "output"]
+                if non_output_users:
+                    # Find the last user by their position in the graph
+                    graph_nodes = list(graph.nodes)
+                    last_user = max(non_output_users, key=lambda n: graph_nodes.index(n))
+            
+            # Insert the CPU offload operation after the last user, or before the output if no users
+            if last_user:
+                with graph.inserting_after(last_user):
+                    cpu_node = graph.call_function(
+                        torch.ops.aten.to.device,
+                        args=(node,),
+                        kwargs={"device": torch.device("cpu"), "dtype": node.meta["val"].dtype},
+                        name="cpu_offload_" + str(node.name),
+                    )
+                    cpu_node.meta["val"] = node.meta["val"].to(torch.device("cpu"))
+                    cpu_node.meta["tensor_meta"] = extract_tensor_metadata(
+                        cpu_node.meta["val"]
+                    )
+            else:
+                # If no users, we can safely offload right after the node creation
+                with graph.inserting_after(node):
+                    cpu_node = graph.call_function(
+                        torch.ops.aten.to.device,
+                        args=(node,),
+                        kwargs={"device": torch.device("cpu"), "dtype": node.meta["val"].dtype},
+                        name="cpu_offload_" + str(node.name),
+                    )
+                    cpu_node.meta["val"] = node.meta["val"].to(torch.device("cpu"))
+                    cpu_node.meta["tensor_meta"] = extract_tensor_metadata(
+                        cpu_node.meta["val"]
+                    )
+            
+            node_to_offload[node] = cpu_node
+
+    # Update the return node args
+    output_updated_args = [
+        node_to_offload[node] if node in node_to_offload else node
+        for node in fwd_outputs
+    ]
+
+    output.update_arg(0, tuple(output_updated_args))
+    counters["inductor"]["activation_offloading_fwd_aten_pass"] += 1
+
+
+def offload_activation_bw(graph: torch.fx.Graph) -> None:
+    """
+    Backward pass modification for CPU offloading.
+    Similar to quantize_activation_bw but moves tensors back to GPU instead of dequantizing.
+    """
+    bw_inputs = [node for node in graph.nodes if node.op == "placeholder"]
+
+    for node in bw_inputs:
+        if node.meta.get("saved_for_offloading", False):
+            node.meta.pop("saved_for_offloading")
+            original_device = node.meta.pop("original_device")
+
+            # Find the first user to determine where to place the restore node
+            first_user = None
+            if node.users:
+                # Find the first user (topologically)
+                first_user = min(node.users.keys(), key=lambda n: list(graph.nodes).index(n))
+
+            # Move tensor back to original device (GPU) using aten.to.device with dtype preserved
+            # Place it right before the first user if possible, otherwise after the placeholder
+            insert_point = first_user if first_user else node
+            insert_method = graph.inserting_before if first_user else graph.inserting_after
+            
+            with insert_method(insert_point):
+                gpu_node = graph.call_function(
+                    torch.ops.aten.to.device,
+                    args=(node,),
+                    kwargs={"device": original_device, "dtype": node.meta["val"].dtype},
+                    name="gpu_restore_" + str(node.name),
+                )
+                gpu_node.meta["val"] = node.meta["val"].to(original_device)
+                gpu_node.meta["tensor_meta"] = extract_tensor_metadata(
+                    gpu_node.meta["val"]
+                )
+
+            # Replace all uses of the CPU tensor with the GPU tensor
+            for user in list(node.users.keys()):
+                if user != gpu_node:
+                    user.replace_input_with(node, gpu_node)
+
+    counters["inductor"]["activation_offloading_bwd_aten_pass"] += 1
+
+
+def perform_activation_offloading(
+    fwd_module: fx.GraphModule,
+    bwd_module: fx.GraphModule,
+    bwd_module_inputs: dict[str, fx.Node],
+) -> None:
+    """
+    Perform activation offloading to CPU in forward and restore in backward.
+    Similar to perform_fp8_activation_quantization but for CPU offloading.
+    """
+    offload_activation_fw(fwd_module.graph)
+
+    offload_fwd_module_outputs = fwd_module.graph.find_nodes(op="output")[0].args[0]
+    print("offload_fwd_module_outputs: ", offload_fwd_module_outputs)
+    print("fw")
+    print(fwd_module.graph)
+    # Update the corresponding bwd_inputs due to the fwd_outputs offloading
+    for fwd_node in offload_fwd_module_outputs:
+        if "cpu_offload_" in fwd_node.name:
+            original_name = fwd_node.name.replace("cpu_offload_", "")
+            print("original_name: ", original_name)
+            bwd_input = bwd_module_inputs[original_name]
+            with bwd_module.graph.inserting_after(bwd_input):
+                offload_bwd_input = bwd_module.graph.placeholder(name=fwd_node.name)
+            original_device = bwd_input.meta["val"].device
+            offload_bwd_input.meta.update(fwd_node.meta)
+            offload_bwd_input.meta["saved_for_offloading"] = True
+            offload_bwd_input.meta["original_device"] = original_device
+            bwd_input.replace_all_uses_with(offload_bwd_input)
+            bwd_module.graph.erase_node(bwd_input)
+
+    offload_activation_bw(bwd_module.graph)    
+    print("bw")
+    print(bwd_module.graph)
+
+
+def enable_activation_offloading(
+    saved_values: list[fx.Node],
+    fwd_module: fx.GraphModule,
+    bwd_module: fx.GraphModule,
+    static_lifetime_input_nodes: Optional[OrderedSet[fx.Node]] = None,
+) -> None:
+    print("fw")
+    print(fwd_module.graph)
+    print("bw")
+    print(bwd_module.graph)
+    static_input_names = (
+        [node.name for node in static_lifetime_input_nodes]
+        if static_lifetime_input_nodes
+        else []
+    )
+    saved_values_names = {node.name: node for node in saved_values}
+    saved_values_names = {
+        node.name: node for node in saved_values if "primals" not in node.name
+    }
+    fwd_module_outputs = fwd_module.graph.find_nodes(op="output")[0].args[0]
+    bwd_module_inputs = {
+        node.name: node for node in bwd_module.graph.find_nodes(op="placeholder")
+    }
+    print("saved_values_names", saved_values_names)
+    print("fwd_module_outputs", fwd_module_outputs)
+    print("bwd_module_inputs", bwd_module_inputs)
+    should_perform_offloading = True
+    for node in fwd_module_outputs:
+        if node.name in saved_values_names and should_offload(node):
+            if node.name in static_input_names:
+                log.debug("Skipping offloading of static input %s: ", node.name)
+                continue
+            node.meta["saved_for_offloading"] = True
+            node.meta["original_device"] = node.meta["val"].device
+            # some of the fwd outputs and bwd inputs are not share the same object
+            bwd_module_inputs[node.name].meta["saved_for_offloading"] = True
+            bwd_module_inputs[node.name].meta["original_device"] = node.meta[
+                "val"
+            ].device
+            should_perform_offloading = True
+
+    if should_perform_offloading:
+        perform_activation_offloading(fwd_module, bwd_module, bwd_module_inputs)
+
+
 def _extract_fwd_bwd_modules(
     joint_module: fx.GraphModule,
     saved_values: list[fx.Node],
@@ -949,6 +1152,11 @@ def _extract_fwd_bwd_modules(
     enable_activation_quantization(
         saved_values, fwd_module, bwd_module, static_lifetime_input_nodes
     )
+    if config.enable_activation_offloading:
+        print("EAO XXXXX")
+        enable_activation_offloading(
+            saved_values, fwd_module, bwd_module, static_lifetime_input_nodes
+        )
     return fwd_module, bwd_module
 
 
