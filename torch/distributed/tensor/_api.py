@@ -240,7 +240,23 @@ class DTensor(torch.Tensor):
     # _op_dispatcher instance as a class attribute to handle runtime dispatching logic
     _op_dispatcher: op_dispatch.OpDispatcher = op_dispatch.OpDispatcher()
 
-    __new__ = torch.Tensor._dtensor__new__  # type: ignore[assignment]
+    # This implementation is just to convince mypy _spec and _local_tensor are
+    # initialized; it is immediately overridden below.
+    def __new__(
+        cls,
+        local_tensor: torch.Tensor,
+        spec: DTensorSpec,
+        *,
+        requires_grad: bool,
+    ) -> "DTensor":
+        r = torch.Tensor._dtensor__new__(
+            cls, local_tensor, spec, requires_grad=requires_grad
+        )
+        r._spec = spec
+        r._local_tensor = local_tensor
+        return r
+
+    __new__ = torch.Tensor._dtensor__new__  # type: ignore[assignment] # noqa: F811
 
     @torch._disable_dynamo
     @mark_subclass_constructor_exportable_experimental
