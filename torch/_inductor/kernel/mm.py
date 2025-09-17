@@ -1251,9 +1251,7 @@ def tuned_scaled_mm(
 
     if use_aten_gemm_kernels():
         templates_to_use.append(aten__fp8_mm)
-        kwarg_overrides[aten__fp8_mm.uid] = dict(
-            out_dtype=out_dtype, use_fast_accum=use_fast_accum
-        )
+        kwarg_overrides[aten__fp8_mm.uid] = dict(use_fast_accum=use_fast_accum)
 
     _, is_nonzero = _is_static_problem(layout)
 
