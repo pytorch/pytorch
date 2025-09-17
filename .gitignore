@@ -392,3 +392,5 @@ android/pytorch_android_torchvision/.cxx
 
 # Claude Code local configuration
 CLAUDE.local.md
+/test_*.py
+/debug_*.py
