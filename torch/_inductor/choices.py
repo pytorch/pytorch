@@ -112,7 +112,6 @@ class InductorChoices:
         kernel_inputs: KernelInputs,
         templates: list[Union[KernelTemplate, ExternKernelChoice]],
         op_name: str,
-        kwarg_overrides: Optional[dict[str, dict[str, Any]]] = None,
     ) -> list[KernelTemplateChoice]:
         """
         This method can be subclassed to perform any override/modification of the choices.
@@ -128,7 +127,6 @@ class InductorChoices:
             kernel_inputs: MMKernelInputs containing input tensor nodes and matrix indices
             templates: List of template objects (KernelTemplate or ExternKernelChoice) in use
             op_name: Operation name (e.g., "bmm", "baddbmm", "addmm")
-            kwarg_overrides: Optional dict of kwargs to override for each template heuristic
 
         Returns:
             Flattened list of KernelTemplateChoice objects across all templates
@@ -143,7 +141,6 @@ class InductorChoices:
         kernel_inputs: KernelInputs,
         template: Union[KernelTemplate, ExternKernelChoice],
         op_name: str,
-        kwarg_overrides: Optional[dict[str, Any]] = None,
     ) -> Generator[KernelTemplateChoice, None, None]:
         """
         Utility to get the KernelTemplateChoice generator for a specific input.
@@ -168,11 +165,9 @@ class InductorChoices:
         # default here is to just return the kernel_inputs as is
         inputs_val = heuristic.adjust_kernel_inputs(kernel_inputs, op_name)
         # Create KernelTemplateChoice generator using the moved function
-        overrides = kwarg_overrides or {}
         return make_ktc_generator(
             template=template,
             cs=cs,
-            overrides=overrides,
             extra_kwargs=extra_kwargs,
             layout=kernel_inputs.output_layout(),
             inputs=inputs_val,
@@ -238,23 +233,18 @@ class InductorChoices:
         kernel_inputs: KernelInputs,
         templates: list[Union[KernelTemplate, ExternKernelChoice]],
         op_name: str,
-        kwarg_overrides: Optional[dict[str, dict[str, Any]]] = None,
     ) -> list[ChoiceCaller]:
         """
         Get list of ChoiceCallers for MM templates using template-specific heuristics.
 
         Args:
             kernel_inputs: MMKernelInputs containing input tensor nodes and matrix indices
-            layout: Output layout
             templates: List of template objects (KernelTemplate or ExternKernelChoice)
             op_name: Operation name (e.g., "bmm", "baddbmm", "addmm", "mm_plus_mm")
-            kwarg_overrides: Optional dict of kwargs to override for each template heuristic,
-                             indexed by template.uid. These only override the per config kwargs, not the extra kwargs
+
         Returns:
             List of ChoiceCaller objects from the templates
         """
-        if kwarg_overrides is None:
-            kwarg_overrides = {}
         input_tensors = kernel_inputs.nodes()
         if len(input_tensors) < 2:
             raise ValueError(f"Need at least 2 input tensors, got {len(input_tensors)}")
@@ -266,7 +256,6 @@ class InductorChoices:
                 kernel_inputs,
                 template,
                 op_name,
-                kwarg_overrides.get(template.uid, {}),
             )
 
         # Second pass: Adjust the template choices
@@ -275,7 +264,6 @@ class InductorChoices:
             kernel_inputs,
             templates,
             op_name,
-            kwarg_overrides,
         )
         # Layout optimization: if all choices are ExternKernelChoice and layout is FixedLayout, convert to FlexibleLayout
         if self._need_to_fix_layout(adjusted_choices, op_name):
