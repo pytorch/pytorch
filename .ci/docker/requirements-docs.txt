@@ -33,9 +33,9 @@ breathe==4.34.0
 #Description: This is used to generate PyTorch C++ docs
 #Pinned versions: 4.34.0
 
-exhale==0.3.0
+exhale==0.3.4
 #Description: This is used to generate PyTorch C++ docs
-#Pinned versions: 0.3.0
+#Pinned versions: 0.3.4
 
 docutils==0.16
 #Description: This is used to generate PyTorch C++ docs
