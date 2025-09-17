@@ -102,7 +102,7 @@ except ImportError:
 
 
 MI300_ARCH = ("gfx942",)
-
+MI200_ARCH = ("gfx90a")
 
 def freeze_rng_state(*args, **kwargs):
     return torch.testing._utils.freeze_rng_state(*args, **kwargs)
