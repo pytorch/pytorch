@@ -18,6 +18,7 @@ from torch.utils._triton import has_triton_stable_tma_api
 from .. import config, config as inductor_config
 from ..kernel.bmm import bmm_template
 from ..kernel.mm import (
+    blackwell_ws_persistent_device_tma_mm_template,
     mm_template,
     persistent_tma_mm_template,
     scaled_mm_device_tma_template,
@@ -1148,6 +1149,13 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             for wpeu in [0, int(8 // num_warps)]
         ]
 
+    def _prune_exhaustive_configs(
+        self,
+        configs: list[BaseConfig],
+        dtype_size: int,
+    ) -> list[BaseConfig]:
+        return configs
+
     def _filter_configs(self, configs: list[BaseConfig]) -> list[BaseConfig]:
         """
         ROCm specific filtering
@@ -1298,7 +1306,6 @@ class XPUConfigHeuristic(BaseConfigHeuristic):
 
     def __init__(self) -> None:
         super().__init__()
-
         self.xpu_default_flex_config = {
             (torch.float32, 64): FlexConfig(128, 32, 1, 16),
             (torch.float32, 128): FlexConfig(128, 32, 1, 16),
@@ -1635,6 +1642,7 @@ class TMATemplateConfigMixin(TMAWorkspaceMixin, MMTemplateConfigMixin):
             "NUM_SMS": get_num_sms(),
             "TMA_SIZE": TMA_DESCRIPTOR_SIZE,
             "TMA_EXPERIMENTAL_API": not has_triton_stable_tma_api(),
+            "tma_store": config.triton.enable_template_tma_store,
         }
         # Get base template configs from superclass
         for template_kwargs in super()._get_template_configs_impl(
@@ -1642,6 +1650,35 @@ class TMATemplateConfigMixin(TMAWorkspaceMixin, MMTemplateConfigMixin):
             op_name,
         ):
             yield {**template_kwargs, **tma_opts}
+
+
+# TMA mixins for Blackwell templates
+class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
+    def _get_template_configs_impl(
+        self,
+        kernel_inputs: KernelInputs,
+        op_name: str,
+    ) -> Generator[dict[str, Any], None, None]:
+        """
+        Generate TMA template configs by calling super and adding TMA-specific options.
+        """
+        base_ops = {
+            "NUM_SMS": get_num_sms(),
+            # TODO: Consider making this tunable.
+            "FLATTEN": True,
+        }
+        # Get base template configs from superclass
+        for template_kwargs in super()._get_template_configs_impl(
+            kernel_inputs,
+            op_name,
+        ):
+            # Some Triton versions requires num_warps >= 4 for WS
+            # to avoid compilation issues. Triton disables WS if num_warps < 4
+            # or num_stages < 2. Similar issues have been seen with num_stages=1
+            ws = (
+                template_kwargs["num_warps"] >= 4 and template_kwargs["num_stages"] >= 2
+            )
+            yield {**template_kwargs, **base_ops, "WARP_SPECIALIZE": ws}
 
 
 # Scaled MM-specific mixin for scaled MM templates
@@ -1791,6 +1828,15 @@ class ScaledTMAConfigMixin(TMAWorkspaceMixin, BaseScaledMMConfigMixin):
     This inherits from BaseScaledMMConfigMixin and adds TMA-specific options.
     """
 
+    def _filter_configs(self, configs: list[BaseConfig]) -> list[BaseConfig]:
+        """
+        TMA specific filtering:
+        - num_warps=2 not safe for TMA
+        - block_k >= 32 required for TMA (requires inner-most dimension >= 32)
+        """
+        configs = [c for c in configs if c.num_warps != 2 and c.block_k >= 32]
+        return super()._filter_configs(configs)
+
     def _get_template_configs_impl(
         self,
         kernel_inputs: KernelInputs,
@@ -1873,6 +1919,22 @@ class CUDAPersistentTMATemplateConfigHeuristic(
 
 
 @register_template_heuristic(
+    blackwell_ws_persistent_device_tma_mm_template.uid,
+    "cuda",
+    register=torch.version.hip is None,
+)
+class CUDABlackwellPersistentTMATemplateConfigHeuristic(
+    BlackwellTMATemplateConfigMixin, CUDAConfigHeuristic
+):
+    """Blackwell Persistent TMA template"""
+
+    def __init__(self) -> None:
+        super().__init__()
+        # TODO: Tune mm_configs for blackwell.
+        self.mm_configs = self.persistent_mm_configs
+
+
+@register_template_heuristic(
     persistent_tma_mm_template.uid,
     "cuda",
     register=torch.version.hip is None,
@@ -1885,6 +1947,22 @@ class CUDAAddmmPersistentTMATemplateConfigHeuristic(
 
 
 @register_template_heuristic(
+    blackwell_ws_persistent_device_tma_mm_template.uid,
+    "cuda",
+    register=torch.version.hip is None,
+)
+class CUDABlackwellAddmmPersistentTMATemplateConfigHeuristic(
+    AddMMConfigMixin, CUDABlackwellPersistentTMATemplateConfigHeuristic
+):
+    """Addmm extension for DataCenter Blackwell Templates"""
+
+    def __init__(self) -> None:
+        super().__init__()
+        # TODO: Tune mm_configs for blackwell.
+        self.mm_configs = self.persistent_mm_configs
+
+
+@register_template_heuristic(
     mm_template.uid, "cuda", register=torch.version.hip is None, op_name="scaled_mm"
 )
 class CUDAScaledMMTemplateConfigHeuristic(ScaledMMConfigMixin, CUDAConfigHeuristic):
@@ -1894,11 +1972,10 @@ class CUDAScaledMMTemplateConfigHeuristic(ScaledMMConfigMixin, CUDAConfigHeurist
         super().__init__()
         # Override mm_configs to use scaled_mm_configs
         self.mm_configs = self.scaled_mm_configs
-        # NOTE: overriding exhaustive configs here to be the same as mm_configs
-        # as we haven't validated exhaustive support here yet
-        # TODO(coconutruben): remove this once we have validated exhaustive support
-        # for scaled_mm
-        self.exhaustive_configs = self.scaled_mm_configs
+
+    def _filter_configs(self, configs: list[BaseConfig]) -> list[BaseConfig]:
+        configs = [c for c in configs if c.block_k >= 32]
+        return super()._filter_configs(configs)
 
 
 @register_template_heuristic(
@@ -1913,11 +1990,6 @@ class CUDAScaledTMATemplateConfigHeuristic(ScaledTMAConfigMixin, CUDAConfigHeuri
         super().__init__()
         # Override mm_configs to use scaled_persistent_mm_configs for TMA
         self.mm_configs = self.scaled_persistent_mm_configs
-        # NOTE: overriding exhaustive configs here to be the same as mm_configs
-        # as we haven't validated exhaustive support here yet
-        # TODO(coconutruben): remove this once we have validated exhaustive support
-        # for scaled_mm
-        self.exhaustive_configs = self.scaled_persistent_mm_configs
 
 
 @register_template_heuristic(
@@ -2135,6 +2207,12 @@ class CPUMMPlusMMTemplateConfigHeuristic(
 @register_template_heuristic(bmm_template.uid, "xpu")
 class XPUMMTemplateConfigHeuristic(MMTemplateConfigMixin, XPUConfigHeuristic):
     """Standard MM template heuristic for XPU"""
+
+    def __init__(self) -> None:
+        super().__init__()
+
+        # TODO(etaf): Design proper exhaustive search space for XPU.
+        self.exhaustive_configs = self.mm_configs
 
 
 @register_template_heuristic(mm_template.uid, "xpu", op_name="addmm")
