@@ -5,6 +5,7 @@ import functools
 import sys
 import unittest
 from collections import namedtuple
+from contextlib import contextmanager
 from typing import Callable, Optional, Union
 from unittest import expectedFailure
 from unittest.mock import patch
@@ -23,7 +24,7 @@ from torch.nn.attention.flex_attention import (
 )
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
-from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_BF16, with_tf32_off
+from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_BF16
 from torch.testing._internal.common_device_type import (
     flex_attention_supported_platform as supported_platform,
     instantiate_device_type_tests,
@@ -43,6 +44,25 @@ if IS_WINDOWS and IS_CI:
 
 
 Tolerances = namedtuple("Tolerances", ["atol", "rtol"])
+
+
+@contextmanager
+def flex_attention_tf32_off():
+    """
+    Turn off TF32 for flex attention tests using the new API.
+    Handles both matmul and cudnn settings.
+    """
+    old_matmul_precision = torch.backends.cuda.matmul.fp32_precision
+    try:
+        torch.backends.cuda.matmul.fp32_precision = "ieee"
+        with torch.backends.cudnn.flags(
+            enabled=None, benchmark=None, deterministic=None, allow_tf32=False
+        ):
+            yield
+    finally:
+        torch.backends.cuda.matmul.fp32_precision = old_matmul_precision
+
+
 # In MI300, HIPBLASLT_ALLOW_TF32=1 is used to enable tf32 for matmul.
 # In the current test, HIPBLASLT_ALLOW_TF32 is not set, according to the
 # logic of allowTF32CuBLAS(), set float32_matmul_precision to ieee (conservative).
@@ -784,7 +804,7 @@ class TestFlexDecoding(InductorTestCase):
     @common_utils.parametrize("dtype", test_dtypes)
     @common_utils.parametrize("score_mod", test_score_mods)
     @common_utils.parametrize("head_dims", test_Hq_Hkv)
-    @with_tf32_off
+    @flex_attention_tf32_off()
     def test_builtin_score_mods(
         self, device, dtype: torch.dtype, score_mod: Callable, head_dims
     ):
@@ -1124,7 +1144,7 @@ class TestFlexDecoding(InductorTestCase):
     @common_utils.parametrize("score_mod", test_score_mods)
     @common_utils.parametrize("dtype", test_dtypes)
     @common_utils.parametrize("head_dims", [(D, D // 2), (D // 2, D)])
-    @with_tf32_off
+    @flex_attention_tf32_off()
     def test_non_equal_head_dims(self, device, dtype, score_mod, head_dims):
         qk_d, v_d = head_dims
         self.run_test(
