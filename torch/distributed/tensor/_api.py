@@ -269,22 +269,13 @@ class DTensor(torch.Tensor):
         # new method instruct wrapper tensor from local_tensor and add
         # placement spec, it does not do actual distribution
         assert spec.tensor_meta is not None, "TensorMeta should not be None!"
-        extra_dispatch_keys = torch._C.DispatchKeySet.from_raw_repr(0)
-        if torch._C._dispatch_keys(local_tensor).has(torch._C.DispatchKey.Conjugate):
-            extra_dispatch_keys = extra_dispatch_keys.add(
-                torch._C.DispatchKey.Conjugate
-            )
-        if torch._C._dispatch_keys(local_tensor).has(torch._C.DispatchKey.Negative):
-            extra_dispatch_keys = extra_dispatch_keys.add(torch._C.DispatchKey.Negative)
-        r = torch.Tensor._make_wrapper_subclass(
+
+        r = torch.Tensor._make_dtensor(
             cls,
             spec.tensor_meta.shape,
-            strides=spec.tensor_meta.stride,
-            dtype=local_tensor.dtype,
-            device=local_tensor.device,
-            layout=local_tensor.layout,
-            requires_grad=requires_grad,
-            _extra_dispatch_keys=extra_dispatch_keys,
+            spec.tensor_meta.stride,
+            local_tensor,
+            requires_grad,
         )
 
         r._spec = spec
