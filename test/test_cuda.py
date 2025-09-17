@@ -7275,29 +7275,29 @@ class TestCompileKernel(TestCase):
                 c[i] = a[i] + b[i];
         }
         """
-        
+
         from torch.cuda import _compile_kernel
         import torch.utils.dlpack
-        
+
         add_kernel = _compile_kernel(kernel_source, "add_tensors")
-        
+
         N = 512
         a = torch.rand(N, device="cuda", dtype=torch.float32)
         b = torch.rand(N, device="cuda", dtype=torch.float32)
-        
+
         a_dlpack = torch.utils.dlpack.from_dlpack(torch.utils.dlpack.to_dlpack(a))
         b_dlpack = torch.utils.dlpack.from_dlpack(torch.utils.dlpack.to_dlpack(b))
         c = torch.empty_like(a)
-        
+
         threads_per_block = 256
         blocks_per_grid = (N + threads_per_block - 1) // threads_per_block
-        
+
         add_kernel(
             grid=(blocks_per_grid, 1, 1),
             block=(threads_per_block, 1, 1),
             args=[a_dlpack, b_dlpack, c, N],
         )
-        
+
         self.assertEqual(c, a + b)
         a_dlpack[0] = 42.0
         self.assertEqual(a[0].item(), 42.0, "DLPack tensors should share memory")
