@@ -1,0 +1,68 @@
+#include <torch/csrc/distributed/python_placement.h>
+
+#include <pybind11/pybind11.h>
+#include <torch/csrc/distributed/Placement.h>
+#include <torch/csrc/utils/pybind.h>
+
+namespace torch::distributed {
+namespace {
+const char placement_class_docstring[] =
+    "The base class for the Placement type, where it describes how a DTensor is placed onto the\n"
+    "``DeviceMesh``. ``Placement`` and ``DeviceMesh`` together could describe the DTensor Layout.\n"
+    "It is the base class of the three main DTensor Placement types: ``Shard``, ``Replicate``,\n"
+    "and ``Partial``.\n"
+    "\n"
+    "This class is not meant to be used directly, mainly served as a typing stub.\n";
+} // namespace
+
+void initPlacementBindings(PyObject* module) {
+  // TODO: Consider porting to nanobind instead since these types are
+  // isolated and don't touch anything else.
+  auto py_module = py::reinterpret_borrow<py::module>(module);
+  py::class_<Placement>(py_module, "Placement", placement_class_docstring)
+      .def(py::init<>()) // Allow construction of Python subclasses.
+      .def(
+          "is_partial",
+          &Placement::is_partial,
+          py::arg("reduce_op") = py::none())
+      .def("is_replicate", &Placement::is_replicate)
+      .def("is_shard", &Placement::is_shard, py::arg("dim") = py::none());
+  py::class_<Shard, Placement>(py_module, "Shard")
+      .def(py::init<int64_t>(), py::arg("dim"))
+      .def_readonly("dim", &Shard::dim)
+      .def("is_shard", &Shard::is_shard, py::arg("dim") = py::none())
+      .def(
+          "__eq__",
+          [](const Shard& lhs, const Shard& rhs) { return lhs == rhs; },
+          py::is_operator());
+  py::class_<StridedShard, Shard>(py_module, "StridedShard")
+      .def(
+          py::init<int64_t, int64_t>(),
+          py::arg("dim"),
+          py::kw_only(),
+          py::arg("split_factor"))
+      .def_readonly("split_factor", &StridedShard::split_factor)
+      .def("is_shard", &StridedShard::is_shard, py::arg("dim") = py::none())
+      .def(
+          "__eq__",
+          [](const StridedShard& lhs, const Shard& rhs) { return lhs == rhs; },
+          py::is_operator());
+  py::class_<Replicate, Placement>(py_module, "Replicate")
+      .def(py::init())
+      .def("is_replicate", &Replicate::is_replicate)
+      .def(
+          "__eq__",
+          [](const Replicate& lhs, const Replicate& rhs) { return lhs == rhs; },
+          py::is_operator());
+  py::class_<Partial, Placement>(py_module, "Partial")
+      .def(py::init<>())
+      .def(py::init<std::string>(), py::arg("reduce_op"))
+      .def_readonly("reduce_op", &Partial::reduce_op)
+      .def(
+          "is_partial", &Partial::is_partial, py::arg("reduce_op") = py::none())
+      .def(
+          "__eq__",
+          [](const Partial& lhs, const Partial& rhs) { return lhs == rhs; },
+          py::is_operator());
+}
+} // namespace torch::distributed
