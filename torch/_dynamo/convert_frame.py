@@ -1435,6 +1435,7 @@ def _compile(
         fail_user_frame_lineno: Optional[int] = None
         torch._dynamo.utils.ReinplaceCounters.clear()
         guarded_code = None
+        tracer_output = None
         try:
             guarded_code, tracer_output = compile_inner(code, one_graph, hooks)
 
