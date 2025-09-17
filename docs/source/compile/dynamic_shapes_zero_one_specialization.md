@@ -24,35 +24,6 @@ with symbolic variables. For example, in hand tracking, a dimension
 size of `N = 0`, `1`, or `2` may lead to different graph behaviors.
 Simply hoping that the `N > 2` model generalizes can expose soundness issues.
 
-## Size-Oblivious Reasoning
-
-The main technique to address the 0/1 specialization problem is to
-use size-oblivious reasoning, which involves treating tensor dimensions
-as if they are greater than or equal to `2`, even when they are actually `0` or `1`.
-In PyTorch, this is achieved by using {ref}`unbacked SymInts <backed-vs-unbacked-symints>`.
-When using unbacked SymInts, PyTorch would emulate the behavior as if the
-tensor dimension is `>=2` even if it is `0` or `1`.
-
-Consider the following example:
-
-```python
-torch.squeeze(torch.randn(s0, 20, 1))
-```
-
-{func}`torch.squeeze` checks if the tensor is of size 1 and removes the dimension.
-
-If you mark `s0` as unbacked `SymInt`, the tensor will have a size of `[s0, 20]`,
-even if `s0 = 1` at runtime. This approach avoids recompilation, though it
-diverges from the eager execution behavior, which would yield `[20]`.
-This is particularly useful in scenarios involving sparse models.
-
-For example, you have a model that tracks restaurants visits and you have a total of 100
-restaurants to track, where many entries might be 0 or 1. In such cases, avoiding
-recompilation for each tensor change prevents potentially 200 recompilations,
-making the use of unbacked `SymInts` advantageous.
-
-However, you might avoid using unbacked `SymInts` if there are specific
-runtime performance requirements or guards, as they can be less efficient.
 
 ```{seealso}
 * {ref}`dynamic_shapes`
