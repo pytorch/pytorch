@@ -247,47 +247,43 @@ its type to `common_constant_types`.
 
 
 _constant_cache = {}
+constant_none = ConstantVariable(None)
+constant_true = ConstantVariable(True)
+constant_false = ConstantVariable(False)
+constant_NotImplemented = ConstantVariable(NotImplemented)
 
 
 def _check_constant_cache(value):
     global _constant_cache
     if value in (None, NotImplemented) or istype(value, (int, bool, str)):
-        return _constant_cache.get(value)
+        return _constant_cache.get((value, type(value)))
 
 
-def _fill_constant_cache():
+def _fill_constant_cache(cache):
     # CPython caches literals (i.e. None, True, False), small integers (-5, 257),
     # strings (one-char latin-1) and code object constants, which are stored
     # in "tx._constants_cache"
 
-    global _constant_cache
-    if len(_constant_cache) > 0:
+    if len(cache) > 0:
         return
 
-    constant_none = ConstantVariable(None)
-    constant_true = ConstantVariable(True)
-    constant_false = ConstantVariable(False)
-    constant_NotImplemented = ConstantVariable(NotImplemented)
-
-    _constants_cache = {
-        None: constant_none,
-        True: constant_true,
-        False: constant_false,
-        NotImplemented: constant_NotImplemented,
-    }
+    cache[(None, type(None))] = constant_none
+    cache[(True, bool)] = constant_true
+    cache[(False, bool)] = constant_false
+    cache[(NotImplemented, type(NotImplemented))] = constant_NotImplemented
 
     _PY_NSMALLNEGINTS = 5
     _PY_NSMALLPOSINTS = 257
 
     for i in range(-_PY_NSMALLNEGINTS, _PY_NSMALLPOSINTS):
-        _constants_cache[i] = ConstantVariable(i)
+        cache[(i, int)] = ConstantVariable(i)
 
     # latin1 one-char strings
     for i in range(256):
-        _constants_cache[chr(i)] = ConstantVariable(chr(i))
+        cache[(chr(i), str)] = ConstantVariable(chr(i))
 
 
-_fill_constant_cache()
+_fill_constant_cache(_constant_cache)
 
 
 class EnumVariable(VariableTracker):

@@ -41,7 +41,7 @@ from ..source import (
 )
 from ..utils import GLOBAL_KEY_PREFIX
 from .base import VariableTracker
-from .constant import ConstantVariable
+from .constant import constant_true, ConstantVariable
 from .dicts import ConstDictVariable
 from .lists import ListVariable
 from .misc import GetAttrVariable
@@ -197,7 +197,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
             key = ConstDictVariable._HashableTracker(
                 ConstantVariable.create("capturable")
             )
-            param_group_vt.items[key] = ConstantVariable.create(True)
+            param_group_vt.items[key] = constant_true
 
     def get_python_args(self, *args, **kwargs):
         """Get python values equivalent to the variable tracker args"""
