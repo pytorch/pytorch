@@ -80,7 +80,6 @@ exhale_args = {
     "verboseBuild": False,
     # Reduce memory usage during parsing
     "fullToctreeMaxDepth": 1,
-    "createUnabridgedApiPage": False,
     ############################################################################
     # HTML Theme specific configurations.                                      #
     ############################################################################
