@@ -265,6 +265,14 @@ IF(USE_FBGEMM_GENAI)
       "${FBGEMM_GENAI_SRCS}/cutlass_extensions/**/*.cu")
     list(FILTER fbgemm_genai_native_cuda_cu INCLUDE REGEX ${FBGEMM_CUTLASS_KERNELS_REGEX})
 
+    # PyTorch is not built for 10.0a in CI, due to lack of portability,
+    # so we need to explicitly build these files for 10.0a.
+    foreach(cu_file ${fbgemm_genai_native_cuda_cu})
+      _BUILD_FOR_ADDITIONAL_ARCHS(
+        "${cu_file}"
+        "100a")
+    endforeach()
+
     file(GLOB_RECURSE fbgemm_genai_native_cuda_cpp
       "${FBGEMM_GENAI_SRCS}/common/*.cpp"
     )

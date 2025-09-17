@@ -624,8 +624,7 @@ class TestMatmulCuda(TestCase):
     @parametrize("N", [1, 32, 64])
     @parametrize("K", [1, 32, 64])
     @parametrize("batch_size", [None, 1, 16])
-    # TODO: enable rocblas path on ROCm
-    @parametrize("backend", ["cublaslt"] if torch.version.hip else ["cublas", "cublaslt"])
+    @parametrize("backend", ["cublas", "cublaslt"])
     def test_mm_bmm_dtype_overload(self, input_dtype, M, N, K, batch_size, backend):
         device = "cuda"
         dtype = input_dtype
@@ -679,8 +678,7 @@ class TestMatmulCuda(TestCase):
     @parametrize("N", [1, 32, 64])
     @parametrize("K", [1, 32, 64])
     @parametrize("batch_size", [None, 1, 32])
-    # TODO: enable rocblas path on ROCm
-    @parametrize("backend", ["cublaslt"] if torch.version.hip else ["cublas", "cublaslt"])
+    @parametrize("backend", ["cublas", "cublaslt"])
     def test_addmm_baddmm_dtype_overload(self, input_dtype, M, N, K, batch_size, backend):
         device = "cuda"
         dtype = input_dtype

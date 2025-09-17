@@ -210,10 +210,6 @@ templates_path = [
 coverage_ignore_functions = [
     # torch
     "typename",
-    # torch.cuda
-    "check_error",
-    "cudart",
-    "is_bf16_supported",
     # torch.cuda._sanitizer
     "zip_arguments",
     "zip_by_key",
@@ -3180,6 +3176,8 @@ coverage_ignore_classes = [
     "WeakIdKeyDictionary",
     "WeakIdRef",
     "WeakTensorKeyDictionary",
+    # torch.utils.debug_mode
+    "DebugMode",
 ]
 
 # The suffix(es) of source filenames.
@@ -3332,13 +3330,6 @@ def coverage_post_process(app, exception):
     # Only run this test for the coverage build
     if not isinstance(app.builder, CoverageBuilder):
         return
-
-    if not torch.distributed.is_available():
-        raise RuntimeError(
-            "The coverage tool cannot run with a version "
-            "of PyTorch that was built with USE_DISTRIBUTED=0 "
-            "as this module's API changes."
-        )
 
     # These are all the modules that have "automodule" in an rst file
     # These modules are the ones for which coverage is checked

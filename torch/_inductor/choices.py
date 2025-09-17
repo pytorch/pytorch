@@ -205,7 +205,19 @@ class InductorChoices:
         # Since the following backends are not using get_mm_configs yet through the singular call,
         if not (config.max_autotune or config.max_autotune_gemm):
             # no danger of using other backends than ATEN
+            if not config.max_autotune_allow_flexible_layouts and op_name not in [
+                # The historical implementation for mm and addmm allowed had flexible layouts in the
+                # not max-autotune world
+                "mm",
+                "addmm",
+            ]:
+                # TODO: deprecate this by migrating users to the new behavior
+                return True
             return False
+
+        if not config.max_autotune_allow_flexible_layouts:
+            # we always need to fix the layout
+            return True
 
         # Since the following backends are not using get_template_configs yet through the singular call,
         # we don't know if they are a valid choice or not. Instead, just skip the optimization
@@ -482,17 +494,6 @@ class InductorChoices:
 
         if scheduler.can_fusion_increase_peak_memory(node1, node2):
             WhyNoFuse(node1, node2)("Fusion will increase peak memory")
-            return False
-
-        if (
-            config.realize_acc_reads_size_threshold is not None
-            and scheduler.fusion_accumulate_large_reads(
-                node1,
-                node2,
-                config.realize_acc_reads_size_threshold,
-            )
-        ):
-            WhyNoFuse(node1, node2)("Fusion accumulate large amount of reads")
             return False
 
         return True

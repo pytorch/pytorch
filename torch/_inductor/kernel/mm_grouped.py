@@ -389,9 +389,9 @@ triton_grouped_mm_source = r"""
 {%- endif %}
                 mask = (offs_am[:, None] < m_size) & (offs_bn[None, :] < n_size)
 {%- if M_IS_VARYING or N_IS_VARYING %}
-                {{store_output(("idx_m", "idx_n"), "c", "mask", indent_width=16)}}
+                {{store_output(("idx_m", "idx_n"), "c", "mask", indent_width=16, val_shape=("BLOCK_M", "BLOCK_N"))}}
 {%- else %}
-                {{store_output(("g", "idx_m", "idx_n"), "c", "mask", indent_width=16)}}
+                {{store_output(("g", "idx_m", "idx_n"), "c", "mask", indent_width=16, val_shape=("BLOCK_M", "BLOCK_N"))}}
 {%- endif %}
                 tidx += NUM_SMS
 
