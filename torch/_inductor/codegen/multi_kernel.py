@@ -561,6 +561,7 @@ class SizeHintMultiKernelCall(MultiKernelCall):
         """
         L1 distance heuristic for kernel selection.
         """
+
         def dist(x, y):
             lx = math.log2(x) if x > 0 else -1
             ly = math.log2(y) if y > 0 else -1
