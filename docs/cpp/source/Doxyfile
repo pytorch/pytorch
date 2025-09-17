@@ -83,6 +83,19 @@ EXCLUDE = ../../../torch/csrc/api/include/torch/nn/pimpl-inl.h \
           ../../../torch/csrc/api/include/torch/detail
 # Increase the max node size for our large files
 DOT_GRAPH_MAX_NODES    = 100
+# Performance optimizations for CI
+# Skip source browser (saves significant time)
+SOURCE_BROWSER         = NO
+# Skip inline sources (saves time and space)
+INLINE_SOURCES         = NO
+# Disable call/caller graphs (very expensive)
+CALL_GRAPH             = NO
+CALLER_GRAPH           = NO
+# Disable include dependency graphs
+INCLUDE_GRAPH          = NO
+INCLUDED_BY_GRAPH      = NO
+# Use fewer threads if memory is limited (default is 0 = all cores)
+NUM_PROC_THREADS       = 4
 ################################################################################
 # Output formats for Doxygen to create.                                        #
 ################################################################################
