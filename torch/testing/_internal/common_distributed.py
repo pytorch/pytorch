@@ -339,26 +339,17 @@ def requires_gloo():
 
 
 def requires_nccl_version(version, msg):
-    if TEST_CUDA:
-        if not c10d.is_nccl_available():
-            return skip_but_pass_in_sandcastle(
-                "c10d was not compiled with the NCCL backend",
-            )
-        else:
-            return skip_but_pass_in_sandcastle_if(
-                torch.cuda.nccl.version() < version,
-                f"Requires NCCL version greater than or equal to: {version}, found: {torch.cuda.nccl.version()}, reason: {msg}",
-            )
+    if not TEST_CUDA:
+        return lambda f: f
+    if not c10d.is_nccl_available():
+        return skip_but_pass_in_sandcastle(
+            "c10d was not compiled with the NCCL backend",
+        )
     else:
-
-        def decorator(func):
-            @wraps(func)
-            def wrapper(*args, **kwargs):
-                return func(*args, **kwargs)
-
-            return wrapper
-
-        return decorator
+        return skip_but_pass_in_sandcastle_if(
+            torch.cuda.nccl.version() < version,
+            f"Requires NCCL version greater than or equal to: {version}, found: {torch.cuda.nccl.version()}, reason: {msg}",
+        )
 
 
 def requires_nccl():
