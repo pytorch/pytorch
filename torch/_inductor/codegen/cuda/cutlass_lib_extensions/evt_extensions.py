@@ -234,7 +234,7 @@ non-contiguous layout, received stride: {stride} and shape: {shape}"
         # node's memory, a stride tuple, the datatype
         # Once again, need to check for local class type for stride tuple
         if str(arg_ty) in {
-            "<class 'python_cutlass.backend.c_types.tuple_factory_.<locals>.TupleType'>",
+            "<class 'cutlass_cppgen.backend.c_types.tuple_factory_.<locals>.TupleType'>",
             "<class 'cutlass.backend.c_types.tuple_factory_.<locals>.TupleType'>",
         }:
             DEFAULT_STRIDE_LEN = 3
