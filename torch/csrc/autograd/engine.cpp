@@ -949,21 +949,21 @@ static void validate_outputs_impl(
     TORCH_CHECK(
         isFloatingType(grad.scalar_type()) ||
         (input_is_complex == grad_is_complex));
-    if (metadata.grad_dtype().has_value() ||
-        metadata.was_default_constructed()) {
-      // If metadata was default constructed, default to the input dtype
-      at::ScalarType grad_dtype = metadata.grad_dtype().has_value()
+
+    if (!metadata.allow_grad_dtype_mismatch()) {
+      at::ScalarType expected_dtype = metadata.grad_dtype().has_value()
           ? metadata.grad_dtype().value()
           : c10::typeMetaToScalarType(metadata.options().dtype());
-      if (grad.scalar_type() != grad_dtype) {
-        grad = grad.to(grad_dtype);
+
+      if (grad.scalar_type() != expected_dtype) {
+        grad = grad.to(expected_dtype);
       }
       // This check is kind of pointless except for the case where a subclass
       // or mode decides to override .to() and forgets to actually update dtype
-      if (grad.dtype() != grad_dtype) {
+      if (grad.dtype() != expected_dtype) {
         std::stringstream ss;
         ss << "invalid gradient at index " << i << " - expected dtype ";
-        ss << grad_dtype << " but got " << grad.dtype();
+        ss << expected_dtype << " but got " << grad.dtype();
         TORCH_CHECK(false, format_error(ss.str()));
       }
     }

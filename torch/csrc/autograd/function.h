@@ -224,6 +224,18 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
     return input_nr;
   }
 
+  uint32_t add_input_metadata(
+      const at::Tensor& t,
+      const std::optional<at::ScalarType>& grad_dtype,
+      bool allow_grad_dtype_mismatch) noexcept {
+    uint32_t input_nr = input_metadata_.size();
+    input_metadata_.emplace_back(t);
+    input_metadata_.back().set_grad_dtype(grad_dtype);
+    input_metadata_.back().set_allow_grad_dtype_mismatch(
+        allow_grad_dtype_mismatch);
+    return input_nr;
+  }
+
   /// Adds a placeholder for an input that will not be used.
   uint32_t add_input_metadata(undefined_input u) noexcept {
     uint32_t input_nr = input_metadata_.size();

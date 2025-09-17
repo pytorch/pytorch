@@ -181,4 +181,12 @@ void TensorBase::set_grad_dtype(const std::optional<ScalarType>& grad_dtype) con
   impl::GetVariableHooks()->set_grad_dtype(*this, grad_dtype);
 }
 
+bool TensorBase::allow_grad_dtype_mismatch() const {
+  return impl::GetVariableHooks()->allow_grad_dtype_mismatch(*this);
+}
+
+void TensorBase::set_allow_grad_dtype_mismatch(bool allow_mismatch) const {
+  impl::GetVariableHooks()->set_allow_grad_dtype_mismatch(*this, allow_mismatch);
+}
+
 } // namespace at

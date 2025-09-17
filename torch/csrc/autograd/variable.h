@@ -253,10 +253,12 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
   // correctly when this variable is passed to another function.
   uint32_t output_nr_;
 
-  // The dtype of the grad field; this is populated with the dtype of the
-  // tensor upon constructon. When set to nullopt, indicates that the grad
-  // field can be of any dtype.
+  // The dtype of the grad field; when nullopt, defaults to tensor's dtype.
   std::optional<at::ScalarType> grad_dtype_;
+
+  // When true, allows gradient dtype to be different from tensor dtype,
+  // bypassing dtype casting and validation in the autograd engine.
+  bool allow_grad_dtype_mismatch_{false};
 
   // Mutex to ensure that concurrent read operations that modify internal
   // state are still thread-safe. Used by grad_fn(), grad_accumulator(),
@@ -306,28 +308,31 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
     grad_dtype_ = grad_dtype;
   }
 
-  // Default construction is banned so that we always have access
-  // to TensorImpl to initialize grad_dtype_.
-  AutogradMeta() = delete;
+  bool allow_grad_dtype_mismatch() const {
+    return allow_grad_dtype_mismatch_;
+  }
+
+  void set_allow_grad_dtype_mismatch(bool allow_mismatch) {
+    allow_grad_dtype_mismatch_ = allow_mismatch;
+  }
 
   AutogradMeta(
-      at::TensorImpl* self_impl,
+      at::TensorImpl* self_impl = nullptr,
       bool requires_grad = false,
       Edge gradient_edge = Edge())
       : grad_fn_(std::move(gradient_edge.function)),
         output_nr_(gradient_edge.input_nr) {
-    TORCH_INTERNAL_ASSERT(self_impl);
-
     // set_requires_grad also checks error conditions.
     if (requires_grad) {
+      TORCH_INTERNAL_ASSERT(self_impl);
       set_requires_grad(requires_grad, self_impl);
     }
     TORCH_CHECK(
         !grad_fn_ || !requires_grad_,
         "requires_grad should be false if grad_fn is set");
-
-    // Initialize grad_dtype_ with the dtype of the tensor
-    grad_dtype_ = at::typeMetaToScalarType(self_impl->dtype());
+    if (self_impl) {
+      grad_dtype_ = at::typeMetaToScalarType(self_impl->dtype());
+    }
   }
 
   ~AutogradMeta() override {
@@ -965,6 +970,9 @@ struct VariableHooks final : at::impl::VariableHooksInterface {
   void set_grad_dtype(
       const at::TensorBase&,
       const std::optional<c10::ScalarType>&) const override;
+  bool allow_grad_dtype_mismatch(const at::TensorBase&) const override;
+  void set_allow_grad_dtype_mismatch(const at::TensorBase&, bool)
+      const override;
 };
 
 namespace utils {
