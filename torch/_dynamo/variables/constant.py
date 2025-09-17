@@ -45,8 +45,8 @@ class ConstantVariable(VariableTracker):
         """
         source = kwargs.get("source", None)
 
-        if c := _check_constant_cache(value):
-            return c
+        # if c := _check_constant_cache(value):
+        #     return c
 
         # Routing for supported collection literals.
         if isinstance(value, set):
@@ -283,7 +283,7 @@ def _fill_constant_cache(cache):
         cache[(chr(i), str)] = ConstantVariable(chr(i))
 
 
-_fill_constant_cache(_constant_cache)
+# _fill_constant_cache(_constant_cache)
 
 
 class EnumVariable(VariableTracker):
