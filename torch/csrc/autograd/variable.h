@@ -321,6 +321,7 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
       bool requires_grad = false,
       Edge gradient_edge = Edge())
       : grad_fn_(std::move(gradient_edge.function)),
+
         output_nr_(gradient_edge.input_nr) {
     // set_requires_grad also checks error conditions.
     if (requires_grad) {
@@ -330,9 +331,6 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
     TORCH_CHECK(
         !grad_fn_ || !requires_grad_,
         "requires_grad should be false if grad_fn is set");
-    if (self_impl) {
-      grad_dtype_ = at::typeMetaToScalarType(self_impl->dtype());
-    }
   }
 
   ~AutogradMeta() override {
