@@ -100,27 +100,21 @@ def temp_float32_matmul_precision(precision: Literal["tf32", "ieee"]):
     """
 
     def set_float32_matmul_precision_xpu(precision: str):
-        if precision == "highest":
+        if precision == "ieee":
             torch._C._set_onednn_allow_tf32(False)
-        if precision == "high":
+        if precision == "tf32":
             torch._C._set_onednn_allow_tf32(True)
 
-    original_precision = torch.get_float32_matmul_precision()
+    original_precision = torch.backends.cuda.matmul.fp32_precision
     try:
-        torch.set_float32_matmul_precision(precision)
+        torch.backends.cuda.matmul.fp32_precision = precision
         if TEST_ON_XPU:
             set_float32_matmul_precision_xpu(precision)
         yield
     finally:
-        torch.set_float32_matmul_precision(original_precision)
+        torch.backends.cuda.matmul.fp32_precision = original_precision
         if TEST_ON_XPU:
             set_float32_matmul_precision_xpu(original_precision)
-
-    # try:
-    #     torch.backends.cuda.matmul.fp32_precision = precision
-    #     yield
-    # finally:
-    #     torch.backends.cuda.matmul.fp32_precision = original_precision
 
 
 def skip_on_cpu(test_func):
