@@ -126,10 +126,6 @@ dtensor_fails = {
     xfail("cummin"),
     xfail("diagonal_scatter"),
     xfail("dist"),
-    xfail("empty"),
-    xfail("empty_strided"),
-    xfail("empty_like"),
-    xfail("empty_permuted"),
     xfail("expand_copy"),
     xfail("exponential"),
     xfail("equal"),
@@ -482,6 +478,11 @@ dtensor_fails = {
     skip("_segment_reduce", "offsets"),
     # TODO: fix the following ops
     skip("squeeze"),
+    # These must be skipped as their contents are nondeterministic
+    skip("empty"),
+    skip("empty_strided"),
+    skip("empty_like"),
+    skip("empty_permuted"),
 }
 
 
@@ -635,7 +636,7 @@ class TestDTensorOps(DTensorOpTestBase):
                         )
                 except Exception as e:
                     raise RuntimeError(
-                        f"failed to run: {resolve_name(func)}, with (*{dtensor_args}, **{dtensor_kwargs})"
+                        f"{str(e)}\n\nfailed to run: {resolve_name(func)}, with (*{dtensor_args}, **{dtensor_kwargs})"
                     ) from e
         return rs
 
