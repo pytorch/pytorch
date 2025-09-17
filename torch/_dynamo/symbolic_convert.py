@@ -183,7 +183,7 @@ from .variables.user_defined import (
 
 
 if TYPE_CHECKING:
-    from collections.abc import Generator, Sequence
+    from collections.abc import Generator, Iterator, Sequence
 
     from torch._subclasses.fake_tensor import FakeTensorMode
 
@@ -1048,6 +1048,72 @@ class BytecodeDistpatchTableMeta(type):
         cls.dispatch_table = [dispatch_table.get(i) for i in range(2**8)]
 
 
+class Stack:
+    """A fixed length stack of VariableTracker objects with fast append and pop.
+    The stack is initialized with a fixed capacity, and holds a pointer to the
+    next free slot. This allows O(1) append/pop operations without resizing the
+    underlying list. Random access is also O(1).
+
+    CPython implements the stack as a contiguous C array with a fixed capacity.
+    When the interpreter executes a PUSH operation, it writes the value to the
+    next free slot and increments the stack pointer. When it executes a POP
+    operation, it decrements the stack pointer and returns the value.
+    The capacity is computed beforehand as "co_nlocalsplus + co_stacksize" in:
+    https://github.com/python/cpython/blob/32e1e0699ffda8ec1dd5a0eb178b052352ab7d31/Objects/frameobject.c#L2122-L2139
+    """
+
+    def __init__(self, capacity: int) -> None:
+        self._data: list[Optional[VariableTracker]] = [None] * capacity
+        self.stack_pointer = 0  # points to the next free slot
+
+    def append(self, value: VariableTracker) -> None:
+        if self.stack_pointer >= len(self._data):
+            # This is only here for safety reasons. In practice, the stack
+            # should never grow beyond its initial capacity.
+            self._data.append(None)
+        self._data[self.stack_pointer] = value
+        self.stack_pointer += 1
+
+    def pop(self) -> VariableTracker:
+        if self.stack_pointer == 0:
+            raise IndexError("pop from empty stack")
+        self.stack_pointer -= 1
+        value = self._data[self.stack_pointer]
+        self._data[self.stack_pointer] = None
+        return value
+
+    def clear(self) -> None:
+        self._data = []
+        self.stack_pointer = 0
+
+    def __getitem__(self, index: int) -> VariableTracker:
+        if index < 0:
+            index += self.stack_pointer
+        if index < 0 or index >= self.stack_pointer:
+            raise IndexError("stack index out of range")
+        value = self._data[index]
+        return value
+
+    def __setitem__(self, index: int, value: VariableTracker) -> None:
+        if index < 0:
+            index += self.stack_pointer
+        if index < 0 or index >= self.stack_pointer:
+            raise IndexError("stack assignment index out of range")
+        self._data[index] = value
+
+    def __len__(self) -> int:
+        return self.stack_pointer
+
+    def __iter__(self) -> Iterator[Optional[VariableTracker]]:
+        return self._data[:self.stack_pointer].__iter__()
+
+    def __str__(self) -> str:
+        return self._data[: self.stack_pointer].__str__()
+
+    def __repr__(self) -> str:
+        return self._data[: self.stack_pointer].__repr__()
+
+
 @dataclasses.dataclass
 class ExceptionStack:
     """
@@ -1155,7 +1221,7 @@ class InstructionTranslatorBase(
     symbolic_globals: dict[str, VariableTracker]
     symbolic_torch_function_state: SymbolicTorchFunctionState
     post_prune_cell_and_freevars: Optional[dict[str, VariableTracker]]
-    stack: list[VariableTracker]
+    stack: Stack
     instruction_pointer: Optional[int]
     current_instruction: Instruction
     block_stack: list[BlockStackEntry]
@@ -3677,6 +3743,18 @@ class InstructionTranslatorBase(
             self.instructions[self.instruction_pointer - 1],
         )
 
+    @staticmethod
+    def compute_stack_capacity(code_options: dict[str, Any]) -> int:
+        """CPython computes the stack size as the sum of co_stacksize,
+        co_nlocals, co_freevars and co_cellvars.
+        """
+        capacity = 0
+        capacity += code_options["co_stacksize"]
+        capacity += code_options["co_nlocals"]
+        capacity += len(code_options["co_freevars"])
+        capacity += len(code_options["co_cellvars"])
+        return capacity
+
     def __init__(
         self,
         output: OutputGraph,
@@ -3710,7 +3788,7 @@ class InstructionTranslatorBase(
         # used to keep cell/freevars alive after pruning symbolic_locals (prune_dead_locals)
         # in order to generate any nested closures
         self.post_prune_cell_and_freevars = None
-        self.stack: list[VariableTracker] = []
+        self.stack: Stack = Stack(self.compute_stack_capacity(code_options))
         self.instruction_pointer = 0
         self.start_point = None
         self.current_instruction = create_instruction("NOP")
