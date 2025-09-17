@@ -1240,7 +1240,11 @@ def tuned_scaled_mm(
 
     # Create MMKernelInputs for Scaled MM (matrices are at indices 0, 1)
     kernel_inputs = MMKernelInputs(
-        input_nodes, mat1_idx=0, mat2_idx=1, out_dtype=out_dtype
+        input_nodes,
+        mat1_idx=0,
+        mat2_idx=1,
+        out_dtype=out_dtype,
+        kwargs=dict(use_fast_accum=use_fast_accum),
     )
 
     choices: list[ChoiceCaller] = []
@@ -1251,7 +1255,6 @@ def tuned_scaled_mm(
 
     if use_aten_gemm_kernels():
         templates_to_use.append(aten__fp8_mm)
-        kwarg_overrides[aten__fp8_mm.uid] = dict(use_fast_accum=use_fast_accum)
 
     _, is_nonzero = _is_static_problem(layout)
 

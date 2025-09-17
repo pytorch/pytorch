@@ -1529,7 +1529,7 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
         options_dict = dict(
             EVEN_K=even_k_symbolic,
             ALLOW_TF32=allow_tf32,
-            USE_FAST_ACCUM=False,  # Option for _scaled_mm
+            USE_FAST_ACCUM=False,  # Default value, will be overridden if needed
             ACC_TYPE=self._get_acc_type(out_dtype),
             num_stages=triton_config.num_stages,
             num_warps=triton_config.num_warps,
@@ -1782,6 +1782,11 @@ class BaseScaledMMConfigMixin(MMTemplateConfigMixin):
             # Add SCALING_ROWWISE attribute based on scale tensor shapes
             both_scalar_like = is_scalar_like(size_a) and is_scalar_like(size_b)
             template_kwargs["SCALING_ROWWISE"] = not both_scalar_like
+
+            # Extract use_fast_accum from kernel inputs if available
+            use_fast_accum = kernel_inputs.get_kwarg("use_fast_accum")
+            if use_fast_accum is not None:
+                template_kwargs["USE_FAST_ACCUM"] = use_fast_accum
 
             yield template_kwargs
 
