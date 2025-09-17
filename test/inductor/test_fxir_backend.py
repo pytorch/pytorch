@@ -591,6 +591,24 @@ class FxirTestCase(InductorTestCase):
         num_fallback = self._count_ops(gm, torch.ops.aten.scatter_.value)
         self.assertEqual(num_fallback, 1)
 
+    def test_index_put_fallback(self):
+        """
+        Test the deterministic fallback for index_put.
+        """
+        length = 8
+        out, values = [torch.randn(length, device=self.device) for _ in range(2)]
+        indices = (torch.randint(length, (length,), device=self.device),)
+        accumulate = True
+        with DeterministicGuard(True):
+            (gm,) = self._compile_and_check(
+                torch.index_put,
+                (out, indices, values, accumulate),
+                expected_num_triton_kernels=1,
+            )
+
+        # Check for the fallback op.
+        self.assertEqual(self._count_ops(gm, torch.ops.aten.index_put_.default), 1)
+
     def test_scatter_reduce_fallback(self):
         """
         Test the customized wrapper codegen for ScatterFallback ops.
