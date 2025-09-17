@@ -8,8 +8,6 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/mps/operations/BinaryKernel.h>
-// For MTLLanguageVersion_3_1
-#include <ATen/native/mps/MPSGraphSonomaOps.h>
 #include <fmt/format.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -168,6 +166,10 @@ static void lerp_scalar_mps_kernel(at::TensorIteratorBase& iter, const Scalar& w
   lib.exec_binary_kernel(iter, "lerp_alpha", weight);
 }
 
+static void native_dropout_mask_and_scale_mps_kernel(at::TensorIteratorBase& iter, const Scalar& scale) {
+  lib.exec_binary_kernel(iter, "native_dropout_mask_and_scale", scale);
+}
+
 static void mul_mps_kernel(TensorIteratorBase& iter) {
   lib.exec_binary_kernel(iter, "mul");
 }
@@ -190,6 +192,14 @@ static void remainder_mps_kernel(TensorIteratorBase& iter) {
 
 static void fmod_mps_kernel(TensorIteratorBase& iter) {
   lib.exec_binary_kernel(iter, "fmod");
+}
+
+static void igamma_mps_kernel(TensorIteratorBase& iter) {
+  lib.exec_binary_kernel(iter, "igamma");
+}
+
+static void igammac_mps_kernel(TensorIteratorBase& iter) {
+  lib.exec_binary_kernel(iter, "igammac");
 }
 
 REGISTER_DISPATCH(fmax_stub, &fmax_mps_kernel)
@@ -217,4 +227,6 @@ REGISTER_DISPATCH(div_floor_stub, &div_floor_mps_kernel)
 REGISTER_DISPATCH(div_trunc_stub, &div_trunc_mps_kernel)
 REGISTER_DISPATCH(fmod_stub, &fmod_mps_kernel)
 REGISTER_DISPATCH(remainder_stub, &remainder_mps_kernel)
+REGISTER_DISPATCH(igamma_stub, &igamma_mps_kernel)
+REGISTER_DISPATCH(igammac_stub, &igammac_mps_kernel)
 } // namespace at::native
