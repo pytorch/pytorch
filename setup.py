@@ -1627,6 +1627,23 @@ def main() -> None:
     if BUILD_PYTHON_ONLY:
         install_requires += [f"{LIBTORCH_PKG_NAME}=={TORCH_VERSION}"]
 
+    def add_iomp_dependency_for_Windows_inductor() -> list[str]:
+        # for Windows inductor:
+        # intel-openmp is requirement for Windows inductor on Windows x64.
+        # We can also setup env var to skip the iomp.
+        def _is_AMD64_machine() -> bool:
+            if IS_WINDOWS:
+                return platform.machine() == "AMD64"
+            else:
+                return platform.machine() == "x86_64"
+
+        skip_iomp = os.getenv("FORCE_SKIP_INTEL_OPENMP_DEPENDENCY", 0)
+        if IS_WINDOWS and _is_AMD64_machine() and not skip_iomp:
+            return ["intel-openmp"]
+        return []
+
+    install_requires += add_iomp_dependency_for_Windows_inductor()
+
     if str2bool(os.getenv("USE_PRIORITIZED_TEXT_FOR_LD")):
         gen_linker_script(
             filein="cmake/prioritized_text.txt", fout="cmake/linker_script.ld"
