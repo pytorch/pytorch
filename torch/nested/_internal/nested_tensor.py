@@ -163,19 +163,6 @@ class NestedTensor(torch.Tensor):
     def lengths(self):
         return self._lengths
 
-    def share_memory_(self):
-        # Guard CUDA tensors
-        if self.is_cuda:
-            return self
-
-        # Share NestedTensor components
-        component_names, _ = self.__tensor_flatten__()
-        for name in component_names:
-            component = getattr(self, name, None)
-            if component is not None:
-                component.share_memory_()
-        return self
-
     # Private accessor functions for min / max sequence length. They're
     # purposefully not @properties because those don't work with PT2 (yet).
     # These compute / cache if not present.

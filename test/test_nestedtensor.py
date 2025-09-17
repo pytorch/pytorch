@@ -1237,7 +1237,7 @@ class TestNestedTensorDeviceType(NestedTensorTestCase):
         nt = torch.nested.nested_tensor([a, b], layout=torch.jagged)
 
         # Guard CUDA tensors
-        if device == "cuda":
+        if "cuda" in device:
             result = nt.share_memory_()
             self.assertIs(result, nt)
             return
