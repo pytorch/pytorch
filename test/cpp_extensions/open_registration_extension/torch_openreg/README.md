@@ -60,6 +60,7 @@ torch_openreg/
     ├── __init__.py
     └── openreg
         ├── __init__.py
+        ├── meta.py
         └── random.py
 ```
 
@@ -110,35 +111,28 @@ There are 4 DSOs in torch_openreg, and the dependencies between them are as foll
 
 - Operator Implementation
 
-  - `TORCH_LIBRARY` form
-    - Registering a specific operator for an existing schema: See `empty.memory_format`
-    - Registering an operator with a custom schema
-      - Extending an existing namespace: (TODO)
-      - Custom namespace: See `custom_autograd_fn_returns_self`
-    - Autograd: See `custom_autograd_fn_returns_self`
-  - STUB form: See `abs_stub`
-
-  - Fallback
+  - Register for builtin PyTorch Operators
+    - `TORCH_LIBRARY_IMPL` form: See `empty.memory_format
+    - `STUB` form: See `abs_stub`
+  - Register for custom operators
+    - Schema Registration: See `custom_abs`
+    - Kernel Registration: See `custom_abs`
+    - Fallback Registration for `AutogradPriavateUse1`: See `custom_abs`
+    - Meta Registration: See `custom_abs`
+    - `torch.autograd.Function`: See `custom_autograd_fn_aliasing`
+  - Register for fallback
+    - Per-operator Fallback: See `sub.Tensor`
     - Global Fallback: See `wrapper_cpu_fallback`
-    - Per-operator Fallback: (TODO)
-
-  - AMP (TODO)
-
-### Memory Management
-
-- Device Memory Management (TODO)
-- Host Memory Management (TODO)
-
-### Custom Storage
-
-- Adding custom device descriptions (TODO)
-- Serialization support (TODO)
 
 ### Autoload
 
-- (TODO)
+- Autoload Machanism
 
-...
+    When `import torch`, installed accelerators (such as `torch_openreg`) will be automatically loaded, achieving the same experience as the built-in backends.
+
+  - Registering the backend with Python `entry points`: See `setup` in `setup.py`
+  - Adding a callable function for backend initialization: See `_autoload` in `torch_openreg/__init__.py`
+  - Dynamically loading the backend without explicit imports: See [Usage Example](#usage-example)
 
 ## Installation and Usage
 
@@ -155,7 +149,6 @@ After installation, you can use the `openreg` device in Python just like any oth
 
 ```python
 import torch
-import torch_openreg
 
 if not torch.openreg.is_available():
     print("OpenReg backend is not available in this build.")
@@ -177,7 +170,15 @@ print(f"Device of z: {z.device}")
 
 ## Future Plans
 
-- **Enhance Features**: AMP, memory management, generators, distributed computing, etc. (to reiterate, the fundamental goal is to verify the integration mechanism).
+- **Enhance Features**:
+  - Autoload
+  - AMP
+  - Device-agnostic APIs
+  - Memory Management
+  - Generator
+  - Distrubuted
+  - Custom Tensor&Storage
+  - ...
 - **Improve Tests**: Add more test cases related to the integration mechanism.
 - **Improve Documentation**: Add a new chapter on third-party device integration in the `Developer Notes` section of the PyTorch documentation.
 - **Real-time Synchronization**: Keep the code and documentation updated iteratively and in sync.

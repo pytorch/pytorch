@@ -17,6 +17,7 @@
 #include <c10/util/irange.h>
 
 #include <cstring>
+#include <vector>
 
 
 namespace at::native {
@@ -53,8 +54,8 @@ static void upsample_nearest2d_out_frame(
     return;
   }
 
-  auto input_offset_arr = std::make_unique<int64_t[]>(output_width);
-  int64_t* input_offset = input_offset_arr.get();
+  std::vector<int64_t> input_offset_arr(output_width);
+  int64_t* input_offset = input_offset_arr.data();
 
   for (const auto w2 : c10::irange(output_width)) {
     const int64_t w1 = nn_compute_source_index_fn(width_scale, w2, input_width);
