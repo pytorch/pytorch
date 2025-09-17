@@ -3246,7 +3246,7 @@ class CppVecKernel(CppKernel):
             else:
                 if is_welford_reduction(reduction_type):
                     self.reduction_suffix.writeline(
-                        f"{acc} = welford_combine_final_out({acc});"
+                        f"{tmpvar} = welford_combine_final_out({tmpvar});"
                     )
 
         result = reduction_project(reduction_type, tmpvar)
