@@ -187,7 +187,11 @@ static Device getATenDevice(DLDeviceType type, c10::DeviceIndex index, void* dat
 
 ScalarType toScalarType(const DLDataType& dtype) {
   ScalarType stype = ScalarType::Undefined;
-  TORCH_CHECK_BUFFER(dtype.lanes == 1, "ATen does not support lanes != 1");
+  if (dtype.code != DLDataTypeCode::kDLFloat4_e2m1fn) {
+    TORCH_CHECK_BUFFER(
+        dtype.lanes == 1,
+        "ATen does not support lanes != 1 for dtype code", std::to_string(dtype.code));
+  }
   switch (dtype.code) {
     case DLDataTypeCode::kDLUInt:
       switch (dtype.bits) {
