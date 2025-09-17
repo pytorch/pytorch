@@ -235,7 +235,6 @@ class DistributedWeightedRandomSampler(Sampler[_T_co]):
         sampled_indices = indices[sampled_indices]
 
         # Distribute samples across processes
-        # sampled_indices = sampled_indices[self.rank:self.num_samples_per_proc * self.num_replicas:self.num_replicas]
         start_index = sum(
             self.num_samples // self.num_replicas + (1 if r < self.num_samples % self.num_replicas else 0)
             for r in range(self.rank)

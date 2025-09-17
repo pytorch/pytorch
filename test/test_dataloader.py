@@ -3643,18 +3643,66 @@ class TestDistributedWeightedRandomSampler(TestCase):
         # Higher weights should have higher counts
         self.assertGreater(counts[max(counts, key=counts.get)], counts[min(counts, key=counts.get)])  # Index 9 has the highest weight, index 0 the lowest
 
-    def test_limited_overlapping_samples_across_processes(self):
-        """Ensure different ranks do not have excessive overlap in sampled indices."""
-        sampler_0 = DistributedWeightedRandomSampler(self.weights, self.num_samples, num_replicas=2, rank=0)
-        sampler_1 = DistributedWeightedRandomSampler(self.weights, self.num_samples, num_replicas=2, rank=1)
+    def test_disjoint_when_no_replacement(self):
+        """When sampling WITHOUT replacement (and num_samples == dataset_size),
+        the global sampled pool is a permutation of indices, so ranks should be disjoint.
+        """
+        # Make num_samples equal to dataset size to force multinomial to draw a permutation
+        num_samples = len(self.weights)
+        sampler_0 = DistributedWeightedRandomSampler(
+            self.weights, num_samples, num_replicas=2, rank=0, replacement=False, shuffle=True, seed=42
+        )
+        sampler_1 = DistributedWeightedRandomSampler(
+            self.weights, num_samples, num_replicas=2, rank=1, replacement=False, shuffle=True, seed=42
+        )
 
         indices_0 = set(iter(sampler_0))
         indices_1 = set(iter(sampler_1))
 
-        overlap = len(indices_0.intersection(indices_1))
+        # They must be disjoint because the global pool contains each index at most once
+        self.assertTrue(indices_0.isdisjoint(indices_1),
+                        "Expected disjoint partitions when sampling without replacement.")
 
-        # Allow some overlap but not complete overlap
-        self.assertLess(overlap, len(indices_0) * 0.5, "Excessive overlap between sampled indices across ranks")
+    def test_expected_overlap_with_replacement(self):
+        """When sampling WITH replacement, duplicates across ranks are allowed.
+        Instead of asserting the sets differ, assert that empirical counts follow the weights.
+        """
+        num_samples = 200
+        num_replicas = 2
+
+        sampler_0 = DistributedWeightedRandomSampler(
+            self.weights, num_samples, num_replicas=num_replicas, rank=0,
+            replacement=True, shuffle=True, seed=123
+        )
+        sampler_1 = DistributedWeightedRandomSampler(
+            self.weights, num_samples, num_replicas=num_replicas, rank=1,
+            replacement=True, shuffle=True, seed=123
+        )
+
+        # Keep full lists (not sets) to compute counts
+        samples0 = list(iter(sampler_0))
+        samples1 = list(iter(sampler_1))
+
+        # counts per index for each rank
+        counts0 = [samples0.count(i) for i in range(len(self.weights))]
+        counts1 = [samples1.count(i) for i in range(len(self.weights))]
+
+        # pooled counts across ranks
+        pooled_counts = [c0 + c1 for c0, c1 in zip(counts0, counts1)]
+
+        # sanity: pooled_counts length equals num dataset elements
+        self.assertEqual(len(pooled_counts), len(self.weights))
+
+        # Check that indices with higher weights tend to have higher pooled counts.
+        # Simple check: pooled count of max-weight index > pooled count of min-weight index
+        max_w_idx = int(torch.argmax(self.weights).item())
+        min_w_idx = int(torch.argmin(self.weights).item())
+        self.assertGreater(pooled_counts[max_w_idx], pooled_counts[min_w_idx])
+
+        # Optional stronger check: Pearson correlation between weights and pooled_counts > 0
+        import numpy as np
+        corr = np.corrcoef(self.weights.numpy(), np.array(pooled_counts))[0, 1]
+        self.assertGreater(corr, 0.0, f"Expected positive correlation between weights and pooled counts, got {corr:.3f}")
 
     def test_shuffling_works_across_epochs(self):
         """Ensure shuffling changes the sampled indices when the epoch is updated."""
