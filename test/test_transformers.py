@@ -2070,6 +2070,11 @@ class TestSDPA(NNTestCase):
             sdp_math = torch.nn.functional.scaled_dot_product_attention(x, x, x, scale=-1.0 / 0.0001)
         self.assertEqual(ref_result, sdp_math)
 
+    def test_scaled_dot_product_attention_fp16_overflow(self, device):
+        # Regression test for https://github.com/pytorch/pytorch/issues/160841
+        x = torch.full((1, 32, 23, 80), 64.0, dtype=torch.half, device=device)
+        y = torch.nn.functional.scaled_dot_product_attention(x, x, x)
+        self.assertFalse(y.isnan().any().item())
 
 class TestSDPACpuOnly(NNTestCase):
     """ Used to test CPU only functionality of scaled_dot_product_attention """
@@ -2817,6 +2822,29 @@ class TestSDPACudaOnly(NNTestCase):
 
         for permute_order in permute_orders:
             test_attention(SDPBackend.CUDNN_ATTENTION, list(permute_order) + [3])
+
+    @skipIfRocm
+    @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cudnn Attention is not supported on this system")
+    def test_cudnn_attention_compiles(self):
+        q = torch.randn(2, 8, 1024, 128, dtype=torch.half, device='cuda', requires_grad=True)
+        grad = torch.randn_like(q)
+
+        @torch.compile()
+        def func():
+            with torch.nn.attention.sdpa_kernel(torch.nn.attention.SDPBackend.CUDNN_ATTENTION):
+                out = torch.nn.functional.scaled_dot_product_attention(q, q, q)
+                out.backward(grad)
+            return out
+
+        out = func()
+
+        q_cpu = q.float().cpu().detach().clone()
+        q_cpu.requires_grad = True
+        grad_cpu = grad.cpu().float()
+        out_cpu = torch.nn.functional.scaled_dot_product_attention(q_cpu, q_cpu, q_cpu)
+        out_cpu.backward(grad_cpu)
+        self.assertEqual(out, out_cpu.cuda().half(), atol=1e-3, rtol=1e-3)
+        self.assertEqual(q.grad, q_cpu.grad.cuda().half(), atol=7e-3, rtol=5e-3)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
     @parametrize("mask_dim", [1, 2, 3, 4])
