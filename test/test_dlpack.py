@@ -130,7 +130,10 @@ class TestTorchDlPack(TestCase):
         with torch.cuda.stream(stream):
             z = from_dlpack(x)
         stream.synchronize()
-        self.assertEqual(z, x)
+        if dtype == torch.float4_e2m1fn_x2:
+            self.assertEqual(z.view(torch.uint8), x.view(torch.uint8))
+        else:
+            self.assertEqual(z, x)
 
     @skipMeta
     @onlyNativeDeviceTypes
@@ -217,7 +220,10 @@ class TestTorchDlPack(TestCase):
             z = torch.from_dlpack(x.__dlpack__(stream=stream_b.cuda_stream))
             stream_a.synchronize()
         stream_b.synchronize()
-        self.assertEqual(z, x)
+        if dtype == torch.float4_e2m1fn_x2:
+            self.assertEqual(z.view(torch.uint8), x.view(torch.uint8))
+        else:
+            self.assertEqual(z, x)
 
     @skipMeta
     @onlyNativeDeviceTypes
