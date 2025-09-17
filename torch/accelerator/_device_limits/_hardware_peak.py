@@ -1,7 +1,7 @@
 import warnings
 
 import torch
-import torch.accelerator.device_limits._nvidia_gpu as nv
+import torch.accelerator._device_limits._nvidia_gpu as nv
 from torch._C import dtype
 
 
