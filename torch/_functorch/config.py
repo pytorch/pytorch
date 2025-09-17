@@ -330,6 +330,12 @@ strict_autograd_cache = False
 # that any decisions on collectives are made consistently.
 unsafe_allow_optimization_of_collectives = False
 
+# Currently, custom triton kernels are recomputed. However, custom kernels are
+# paired with custom backward implementations that handle recomputation internally.
+# Therefore, recomputation is redundant and should be avoided.
+# This flag ensures that custom triton kernel are never recomputed
+force_save_custom_triton_kernels = False
+
 # See Note [AOTAutograd Tangent Subclassness for mutated inputs]
 # TODO(ivankobzarev): Remove this config, being able to deduce it compile time.
 disable_guess_zero_tangent_for_mutated_input_subclass = False
