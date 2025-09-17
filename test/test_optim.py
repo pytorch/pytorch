@@ -1305,6 +1305,8 @@ class TestOptimRenewed(TestCase):
                     optimizer.step(closure=closure, zero_grad=zero_grad)
                 continue
 
+            grad_before = weight.grad.clone() if weight.grad is not None else None
+
             optimizer.step(closure=closure, zero_grad=zero_grad)
 
             if zero_grad == "to_zero":
@@ -1313,6 +1315,7 @@ class TestOptimRenewed(TestCase):
                 self.assertTrue(weight.grad is None)
             else:
                 self.assertTrue(weight.grad is not None)
+                self.assertEqual(weight.grad, grad_before)
 
     @optims(optim_db, dtypes=[torch.float32])
     def test_param_groups_lr(self, device, dtype, optim_info):
