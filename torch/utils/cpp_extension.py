@@ -575,20 +575,31 @@ def _append_sycl_std_if_no_std_present(cflags) -> None:
         cflags.append('-sycl-std=2020')
 
 
-def _wrap_sycl_host_flags(cflags):
+def _wrap_sycl_host_flags(host_cflags):
+    cflags = []
     host_cxx = get_cxx_compiler()
     if IS_WINDOWS:
-        host_cflags = [
-            "-fsycl",
+        for flag in host_cflags:
+            if flag.startswith("-I"):
+                flag = flag.replace("\\", "\\\\").replace("-I", "/I")
+            else:
+                flag = flag.replace("-D", "/D")
+            flag = flag.replace('"', '\\"')
+            cflags.append(flag)
+        cflags = ' '.join(cflags)
+
+        external_include = _join_sycl_home("include").replace("\\", "\\\\")
+        wrapped_host_cflags = [
             f"-fsycl-host-compiler={host_cxx}",
-            f'-fsycl-host-compiler-options="/std:c++17 {cflags}"',
+            f'-fsycl-host-compiler-options="/std:c++17 \\"/external:I{external_include}\\" /external:W0 {cflags}"',
         ]
     else:
-        host_cflags = [
+        cflags = ' '.join(cflags)
+        wrapped_host_cflags = [
             f"-fsycl-host-compiler={host_cxx}",
             shlex.quote(f"-fsycl-host-compiler-options={cflags}"),
         ]
-    return host_cflags
+    return wrapped_host_cflags
 
 
 class BuildExtension(build_ext):
@@ -814,6 +825,7 @@ class BuildExtension(build_ext):
             extra_cc_cflags = self.compiler.compiler_so[1:]
             with_cuda = any(map(_is_cuda_file, sources))
             with_sycl = any(map(_is_sycl_file, sources))
+            assert not (with_sycl and with_cuda)
 
             # extra_postargs can be either:
             # - a dict mapping cxx/nvcc/sycl to extra flags
@@ -869,7 +881,6 @@ class BuildExtension(build_ext):
                     host_cflags = [item.replace('"', '\\"') for item in host_cflags]
                 else:
                     host_cflags = [item.replace('"', '\\\\"') for item in host_cflags]
-                host_cflags = ' '.join(host_cflags)
                 # Note the order: shlex.quote sycl_flags first, _wrap_sycl_host_flags
                 # second. Reason is that sycl host flags are quoted, space containing
                 # strings passed to SYCL compiler.
@@ -1023,6 +1034,7 @@ class BuildExtension(build_ext):
                 common_cflags.extend(COMMON_MSVC_FLAGS)
             with_cuda = any(map(_is_cuda_file, sources))
             with_sycl = any(map(_is_sycl_file, sources))
+            assert not (with_sycl and with_cuda)
 
             # extra_postargs can be either:
             # - a dict mapping cxx/nvcc to extra flags
@@ -1084,16 +1096,6 @@ class BuildExtension(build_ext):
                 sycl_cflags = _nt_quote_args(sycl_cflags)
                 host_cflags = _nt_quote_args(host_cflags)
 
-                for i, flag in enumerate(host_cflags):
-                    if "-I" in flag:
-                        flag = flag.replace("\\", "\\\\").replace("-I", "/I")
-                    else:
-                        flag = flag.replace("-D", "/D")
-                    flag = flag.replace('"', '\\"')
-
-                    host_cflags[i] = flag
-
-                host_cflags = ' '.join(host_cflags)
                 sycl_cflags += _wrap_sycl_host_flags(host_cflags)
                 sycl_dlink_post_cflags = _SYCL_DLINK_FLAGS.copy()
                 sycl_dlink_post_cflags += _get_sycl_device_flags(sycl_post_cflags)
@@ -2150,6 +2152,7 @@ def _jit_compile(name,
     with_cudnn = any('cudnn' in f for f in extra_ldflags or [])
     if with_sycl is None:
         with_sycl = any(map(_is_sycl_file, sources))
+    assert not (with_sycl and with_cuda)
     old_version = JIT_EXTENSION_VERSIONER.get_version(name)
     version = JIT_EXTENSION_VERSIONER.bump_version_if_changed(
         name,
@@ -2254,6 +2257,7 @@ def _write_ninja_file_and_compile_objects(
         with_cuda = any(map(_is_cuda_file, sources))
     if with_sycl is None:
         with_sycl = any(map(_is_sycl_file, sources))
+    assert not (with_sycl and with_cuda)
     build_file_path = os.path.join(build_directory, 'build.ninja')
     if verbose:
         logger.debug('Emitting ninja build file %s...', build_file_path)
@@ -2313,6 +2317,7 @@ def _write_ninja_file_and_build_library(
         with_cuda = any(map(_is_cuda_file, sources))
     if with_sycl is None:
         with_sycl = any(map(_is_sycl_file, sources))
+    assert not (with_sycl and with_cuda)
     extra_ldflags = _prepare_ldflags(
         extra_ldflags or [],
         with_cuda,
@@ -2807,18 +2812,9 @@ def _write_ninja_file_to_build_library(path,
         host_cflags = cflags
         # escaping quoted arguments to pass them thru SYCL compiler
         icpx_version = _get_icpx_version()
-        if IS_WINDOWS:
-            for i, flag in enumerate(host_cflags):
-                if "-I" in flag:
-                    flag = flag.replace("\\", "\\\\").replace("-I", "/I")
-                else:
-                    flag = flag.replace("-D", "/D")
-                flag = flag.replace('"', '\\"')
-                host_cflags[i] = flag
-        elif int(icpx_version) < 20250200:
+        if int(icpx_version) < 20250200:
             host_cflags = [item.replace('\\"', '\\\\"') for item in host_cflags]
 
-        host_cflags = ' '.join(host_cflags)
         sycl_cflags += _wrap_sycl_host_flags(host_cflags)
         sycl_dlink_post_cflags = _SYCL_DLINK_FLAGS.copy()
         sycl_dlink_post_cflags += _get_sycl_device_flags(sycl_cflags)
