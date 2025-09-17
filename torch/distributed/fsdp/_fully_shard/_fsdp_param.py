@@ -837,6 +837,7 @@ class FSDPParam:
         # 1st time in fully_shard(model)
         # 2nd time in model(input) lazy_init
         # 2nd time should be no-op if parameters remain unchanged
+        # 2nd time shouldn't be no-op if people call model.load_state_dict(...) before lazy_init
         # this makes it possible for trainer to call `sd = model.state_dict()` before the training loop
         # and use `sd` without calling .state_dict() per iteration
         same_local_tensor = (
