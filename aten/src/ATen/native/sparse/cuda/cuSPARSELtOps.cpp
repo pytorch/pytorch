@@ -64,7 +64,6 @@ at::Tensor _cslt_compress(const Tensor& sparse_input) {
   // create sparse descriptor, dtype
   cusparseLtMatDescriptor_t sparse_input_descriptor;
   cudaDataType type;
-  auto compression_factor = 9;
 
   #ifdef USE_ROCM
   TORCH_CHECK(isHipSparseLtSupported());
@@ -73,7 +72,6 @@ at::Tensor _cslt_compress(const Tensor& sparse_input) {
   switch (sparse_input.scalar_type()) {
     case at::ScalarType::Char:
       type = CUDA_R_8I;
-      compression_factor = 10;
       break;
     case at::ScalarType::Half:
       type = CUDA_R_16F;
@@ -89,18 +87,12 @@ at::Tensor _cslt_compress(const Tensor& sparse_input) {
 #if defined(CUSPARSELT_VERSION) && CUSPARSELT_VERSION >= 602 && !defined(USE_ROCM)
     case at::ScalarType::Float8_e4m3fn:
       type = CUDA_R_8F_E4M3;
-      compression_factor = 10;
       break;
 #endif
     default:
       TORCH_CHECK(false, "Unsupported dtype for cuSPARSELt/hipSparseLt compressed matrix");
       break;
   }
-
-  // create a new compressed tensor with the same dtype as the input,
-  // and with packed data/metadata stored in a single tensor
-  auto packed_data_size = sparse_input.numel() * compression_factor / 16;
-  auto compressed_tensor = sparse_input.new_empty(packed_data_size);
 
   TORCH_CUDASPARSE_CHECK(cusparseLtStructuredDescriptorInit(
       &handle,
@@ -122,9 +114,9 @@ at::Tensor _cslt_compress(const Tensor& sparse_input) {
       &compressed_size,
       &compressed_buffer_size));
 
-  // sanity check on the compressed size computed by cusparseLt and
-  // the actually allocated packed data size in the compressed tensor
-  TORCH_INTERNAL_ASSERT(compressed_size == packed_data_size * sparse_input.itemsize());
+  // create a new compressed tensor with the same dtype as the input,
+  // and with sufficient size for the packed data/metadata (given in bytes)
+  auto compressed_tensor = sparse_input.new_empty(compressed_size / sparse_input.itemsize());
 
   auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
   auto compressedBufferPtr = allocator.allocate(compressed_buffer_size);
