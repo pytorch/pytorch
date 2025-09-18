@@ -34,6 +34,15 @@ class ConstantVariable(VariableTracker):
     """
 
     @staticmethod
+    def cache(value) -> VariableTracker:
+        assert type(value) in (int, str)
+        if value not in _constants:
+            c = ConstantVariable(value)
+            _constants[value] = c
+            return c
+        return _constants[value]
+
+    @staticmethod
     def create(value, **kwargs) -> VariableTracker:
         """
         Create a `ConstantVariable` based on the given value, and supports
@@ -241,6 +250,55 @@ its type to `common_constant_types`.
     ) -> "VariableTracker":
         result = hasattr(self.value, name)
         return variables.ConstantVariable.create(result)
+
+
+constant_zero = ConstantVariable(0)
+constant_one = ConstantVariable(1)
+constant_none = ConstantVariable(None)
+constant_true = ConstantVariable(True)
+constant_false = ConstantVariable(False)
+constant_NotImplemented = ConstantVariable(NotImplemented)
+_constants = {}
+
+
+def _fill_constant_cache():
+    # CPython caches literals (i.e. None, True, False), small integers (-5, 257),
+    # strings (one-char latin-1) and code object constants, which are stored
+    # in "tx._constants_cache"
+
+    if len(_constants) > 0:
+        return
+
+    _PY_NSMALLNEGINTS = 5
+    _PY_NSMALLPOSINTS = 257
+
+    for i in range(-_PY_NSMALLNEGINTS, _PY_NSMALLPOSINTS):
+        _constants[i] = ConstantVariable(i)
+
+    # latin1 one-char strings
+    for i in range(256):
+        _constants[chr(i)] = ConstantVariable(chr(i))
+
+    string_intering = (
+        "__context__",
+        "__cause__",
+        "__traceback__",
+        "__torch_function__",
+        "__func__",
+        "__doc__",
+        "args",
+        "kwds",
+        "kwargs",
+        "gen",
+        "get",
+        "msg",
+        "__eq__",
+    )
+    for s in string_intering:
+        _constants[s] = ConstantVariable(s)
+
+
+_fill_constant_cache()
 
 
 class EnumVariable(VariableTracker):
