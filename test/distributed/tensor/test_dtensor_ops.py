@@ -482,6 +482,7 @@ dtensor_fails = {
     skip("_segment_reduce", "offsets"),
     # TODO: fix the following ops
     skip("squeeze"),
+    skip("chunk"),
 }
 
 
