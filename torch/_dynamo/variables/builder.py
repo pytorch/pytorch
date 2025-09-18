@@ -3447,9 +3447,7 @@ def _automatic_dynamic(
         dynamic_sizes.append(dynamic_size)
         dynamic_strides.append(dynamic_stride)
 
-    dynamic_names = getattr(
-        e, "_dynamo_dynamic_names", collections.defaultdict(lambda: None)
-    )
+    dynamic_names = getattr(e, "_dynamo_dynamic_names", {})
 
     return StatefulSymbolicContext(
         dynamic_sizes=dynamic_sizes,

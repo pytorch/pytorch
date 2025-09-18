@@ -2,7 +2,6 @@
 This module provides decorators and utilities for controlling TorchDynamo's behavior during compilation.
 """
 
-import collections
 import functools
 import inspect
 import weakref
@@ -646,7 +645,7 @@ def mark_dynamic(
             t._specialize_on = {}
 
         if not hasattr(t, "_dynamo_dynamic_names"):
-            t._dynamo_dynamic_names = collections.defaultdict(lambda: None)
+            t._dynamo_dynamic_names = {}
 
         if hint_override:
             t._dynamo_hint_overrides[index] = hint_override

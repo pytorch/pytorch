@@ -5012,7 +5012,14 @@ class ShapeEnv:
             raise AssertionError(f"unhandled dynamic_dim {dynamic_dim}")
 
         sloc = self._get_sloc()
-        name = symbolic_context.dynamic_names[source.idx]
+        name = None
+        if (
+            symbolic_context
+            and hasattr(source, "idx")
+            and symbolic_context.dynamic_names is not None
+            and source.idx in symbolic_context.dynamic_names
+        ):
+            name = symbolic_context.dynamic_names[source.idx]
 
         if val in (0, 1) and specialize_zero_one:
             if val == 0:
