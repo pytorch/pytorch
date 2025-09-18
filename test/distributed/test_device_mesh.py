@@ -60,6 +60,7 @@ class DeviceMeshSetDeviceTest(DTensorTestBase):
         # and device to be different than the default world rank
         torch.cuda.set_device((self.rank + 2) % self.world_size)
         _set_env_var(world_size=self.world_size, rank=self.rank)
+        dist.init()
         DeviceMesh(self.device_type, mesh_tensor)
 
         # check that the device is set to the correct device
@@ -78,6 +79,7 @@ class DeviceMeshSetDeviceTest(DTensorTestBase):
             rank=self.rank,
             local_rank=local_rank,
         )
+        dist.init()
         DeviceMesh(self.device_type, mesh_tensor)
 
         # check that the device is set to the correct device
@@ -92,6 +94,7 @@ class DeviceMeshSetDeviceTest(DTensorTestBase):
             world_size=self.world_size,
             rank=self.rank,
         )
+        dist.init()
         with self.assertWarnsRegex(
             UserWarning, "It seems like you did not set/select the default device"
         ):
@@ -110,6 +113,7 @@ class DeviceMeshTest(DTensorTestBase):
     def test_init_process_group(self):
         mesh_tensor = torch.arange(4).reshape(2, 2)
         _set_env_var(world_size=self.world_size, rank=self.rank)
+        dist.init()
         DeviceMesh(self.device_type, mesh_tensor)
 
     @with_comms
@@ -1230,14 +1234,10 @@ class InitWithoutGroup(DTensorTestBase):
             self.device_type, torch.arange(self.world_size), _init_backend=init_backend
         )
 
-    @parametrize(
-        "init_backend", [False, True]
-    )  # Whether DeviceMesh init dim groups during creation
-    def test_mesh_without_dist_init(self, init_backend: bool):
+    def test_mesh_without_dist_init(self):
         _set_env_var(world_size=self.world_size, rank=self.rank)
-        DeviceMesh(
-            self.device_type, torch.arange(self.world_size), _init_backend=init_backend
-        )
+        # Only `init_device_mesh` provides backward support for implicit dist init
+        init_device_mesh(self.device_type, (self.world_size,))
 
 
 if __name__ == "__main__":

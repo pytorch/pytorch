@@ -447,19 +447,20 @@ if True:  # just to temporarily avoid reindentation
             self._flatten_mesh_list = tuple(self.mesh.flatten().tolist())
             self._thread_id = None
 
-            # Optionally init distributed environment if user has not done so.
+            # Direct DeviceMesh construction requires the distributed
+            # environment to be initialized first because the mesh size may
+            # differ from the world size -- no implicit initialization here.
             try:
-                get_world_size()
+                world_size = get_world_size()
             except RuntimeError:
-                logger.debug(
-                    "Distributed environment is not initialized, initializing "
-                    "it during DeviceMesh creation with an assumption that "
-                    "the DeviceMesh has the same scope as the world."
+                logger.error(
+                    "`DeviceMesh` construction requires information from the distribute environment. "
+                    "Please call `torch.distributed.init` to initialize the environment before using "
+                    "the `DeviceMesh` constructor. "
                 )
-                torch.distributed.init()
+                raise
 
             # Check if the requested mesh is valid
-            world_size = get_world_size()
             if self.mesh.numel() > world_size:
                 raise RuntimeError(
                     f"Mesh should not be bigger than world size {world_size}, but found {self.mesh.numel()} ranks!"
@@ -1124,10 +1125,33 @@ if True:  # just to temporarily avoid reindentation
                 "If you maintained a 'torch.device' object, it's recommended to pass in 'device.type'.",
             )
 
+        mesh_size = math.prod(mesh_shape)
+
+        # Optionally init distributed environment if user has not done so.
+        try:
+            get_world_size()
+        except RuntimeError as e:
+            logger.info(
+                "Distributed environment is not initialized, attempting to initialize it within `init_device_mesh` "
+                "with an assumption that the DeviceMesh size is the same as the world size."
+            )
+            # Implicit dist init
+            torch.distributed.init()
+            # Check if the size assumption above is true
+            world_size = get_world_size()
+            if mesh_size != world_size:
+                raise ValueError(
+                    f"Found mesh size {mesh_size} different from world size {world_size}. "
+                    "We thus cannot initialize the distributed environment implicitly within `init_device_mesh`. "
+                    "Please make sure the DeviceMesh size is the same as the world size, or explicitly initialize "
+                    "the distributed environment via `torch.distributed.init`."
+                ) from e
+
         # Always initialize the mesh's tensor on CPU, regardless of what the
         # external device type has been set to be (e.g. meta)
         with torch.device("cpu"):
-            mesh = torch.arange(math.prod(mesh_shape), dtype=torch.int).view(mesh_shape)
+            mesh = torch.arange(mesh_size, dtype=torch.int).view(mesh_shape)
+
         device_mesh = DeviceMesh(
             device_type=device_type,
             mesh=mesh,
