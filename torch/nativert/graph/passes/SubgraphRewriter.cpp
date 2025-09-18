@@ -1,8 +1,9 @@
 #include <variant>
 
+#include <c10/util/Exception.h>
+#include <fmt/core.h>
 #include <torch/nativert/graph/Graph.h>
 #include <torch/nativert/graph/passes/SubgraphRewriter.h>
-
 namespace torch::nativert {
 
 const std::string kDummyTarget = "dummy";
@@ -66,7 +67,12 @@ bool compareConstants(const Constant& a, const Constant& b) {
         // Unsupported types (Graph)
         LOG(ERROR) << "Unsupported Constant types for pattern matching: "
                    << typeid(lhs).name() << " vs " << typeid(rhs).name();
-        throw std::runtime_error("Unsupported Constant types.");
+        TORCH_CHECK(
+            false,
+            fmt::format(
+                "Unsupported Constant types for pattern matching: {} vs {}",
+                typeid(lhs).name(),
+                typeid(rhs).name()))
       },
       a,
       b);
