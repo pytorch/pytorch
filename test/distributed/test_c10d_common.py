@@ -2250,6 +2250,57 @@ class LocalRankTest(MultiProcessTestCase):
         self.assertEqual(dist.get_node_local_rank(), self.rank)
 
 
+class InitWithoutDefaultGroup(MultiProcessTestCase):
+    """Test dist.init() API without initializing the default group"""
+
+    @property
+    def world_size(self):
+        return 2
+
+    def setUp(self):
+        super().setUp()
+        self._spawn_processes()
+
+    def tearDown(self):
+        super().tearDown()
+        try:
+            os.remove(self.file_name)
+        except OSError:
+            pass
+
+    def test_init_with_store(self):
+        store = dist.FileStore(self.file_name, self.world_size)
+        dist.init(
+            store=store,
+            rank=self.rank,
+            world_size=self.world_size,
+        )
+        self.assertEqual(dist.get_world_size(), self.world_size)
+        self.assertEqual(dist.get_rank(), self.rank)
+
+    def test_init_with_env(self):
+        os.environ["RANK"] = str(self.rank)
+        os.environ["WORLD_SIZE"] = str(self.world_size)
+        os.environ["MASTER_ADDR"] = "localhost"
+        os.environ["MASTER_PORT"] = "12355"
+        dist.init()
+        self.assertEqual(dist.get_world_size(), self.world_size)
+        self.assertEqual(dist.get_rank(), self.rank)
+
+    def test_init_then_init_pg(self):
+        store = dist.FileStore(self.file_name, self.world_size)
+        dist.init(
+            store=store,
+            rank=self.rank,
+            world_size=self.world_size,
+        )
+        dist.init_process_group(
+            backend="gloo",
+            rank=dist.get_rank(),
+            world_size=dist.get_world_size(),
+        )
+
+
 if __name__ == "__main__":
     assert not torch.cuda._initialized, (
         "test_distributed must not have initialized CUDA context on main process"
