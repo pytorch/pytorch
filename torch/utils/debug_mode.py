@@ -160,9 +160,10 @@ class DebugMode(TorchDispatchMode):
             self.call_depth -= 1
 
     def debug_string(self) -> str:
-        result = ""
-        result += "\n".join(
-            "  " + "  " * depth + _op_to_str(op, *args, **kwargs)
-            for op, args, kwargs, depth in self.operators
-        )
+        with torch._C.DisableTorchFunction():
+            result = ""
+            result += "\n".join(
+                "  " + "  " * depth + _op_to_str(op, *args, **kwargs)
+                for op, args, kwargs, depth in self.operators
+            )
         return result

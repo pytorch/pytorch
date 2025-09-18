@@ -1379,6 +1379,7 @@ def _get_linalg_preferred_backend() -> _LinalgBackend: ...
 def _set_linalg_preferred_backend(arg: _LinalgBackend): ...
 def _get_fp32_precision_getter(backend: str, op: str) -> str: ...
 def _set_fp32_precision_setter(backend: str, op: str, value: str) -> str: ...
+def _ensureCUDADeviceGuardSet() -> None: ...
 
 class _LinalgBackend:
     Default: _LinalgBackend
@@ -2203,6 +2204,9 @@ class _CudaDeviceProperties:
     warp_size: _int
     uuid: str
     L2_cache_size: _int
+    clock_rate: _int
+    memory_clock_rate: _int
+    memory_bus_width: _int
 
 # Functions related to SDPA
 class _SDPAParams:
