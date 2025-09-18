@@ -1345,6 +1345,15 @@ def get_mmap_self_macro(use_mmap_weights: bool) -> list[str]:
     return macros
 
 
+def get_caching_allocator_macro() -> list[str]:
+    from torch._inductor import config
+
+    macros = []
+    if config.aot_inductor.weight_use_caching_allocator:
+        macros.append(" AOT_INDUCTOR_USE_CACHING_ALLOCATOR")
+    return macros
+
+
 def get_cpp_torch_options(
     cpp_compiler: str,
     vec_isa: VecISA,
@@ -1401,6 +1410,7 @@ def get_cpp_torch_options(
     fb_macro_passthrough_args = _use_fb_internal_macros()
 
     mmap_self_macros = get_mmap_self_macro(use_mmap_weights)
+    caching_allocator_macros = get_caching_allocator_macro()
 
     definitions = (
         torch_cpp_wrapper_definitions
@@ -1408,6 +1418,7 @@ def get_cpp_torch_options(
         + isa_macros
         + fb_macro_passthrough_args
         + mmap_self_macros
+        + caching_allocator_macros
     )
     include_dirs = (
         sys_libs_include_dirs
@@ -1603,14 +1614,15 @@ def get_cpp_torch_device_options(
                 raise OSError(xpu_error_string)
             include_dirs += [os.path.join(ze_root, "include")]
             libraries_dirs += [os.path.join(ze_root, "lib")]
-            libraries += ["c10_xpu", "sycl", "ze_loader", "torch_xpu"]
         else:
             # Suppress multi-line comment warnings in sycl headers
             cflags += ["Wno-comment"]
-            libraries += ["c10_xpu", "sycl", "ze_loader", "torch_xpu"]
-
             if not find_library("ze_loader"):
                 raise OSError(xpu_error_string)
+
+        libraries += ["ze_loader", "sycl"]
+        if link_libtorch:
+            libraries += ["c10_xpu", "torch_xpu"]
 
     if device_type == "mps":
         definitions.append(" USE_MPS")
