@@ -201,9 +201,9 @@ jobs:
       sync-tag: rocm-build
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.mi250.1" },
-          { config: "default", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.mi250.1" },
-          { config: "distributed", shard: 1, num_shards: 1, runner: "linux.rocm.gpu.mi250.4" },
+          { config: "default", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.gfx90a.1" },
+          { config: "default", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.gfx90a.1" },
+          { config: "distributed", shard: 1, num_shards: 1, runner: "linux.rocm.gpu.gfx90a.4" },
         ]}
     secrets: inherit
 
