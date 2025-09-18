@@ -190,11 +190,23 @@ class LRScheduler:
         self.__dict__.update(state_dict)
 
     def get_last_lr(self) -> list[float | Tensor]:
-        """Return last computed learning rate by current scheduler."""
+        """Get the most recent learning rates computed by this scheduler.
+        
+        Returns:
+            list[float | Tensor]: A :class:`list` of learning rates with entries for each of the optimizer's :attr:`~torch.optim.Optimizer.param_groups`, with the same types as their ``group["lr"]``s.
+
+        .. note:: The returned :class:`~torch.Tensor`s are copies, and never alias the optimizer's ``group["lr"]``s.
+        """
         return self._last_lr
 
     def get_lr(self) -> list[float | Tensor]:
-        """Compute learning rate using chainable form of the scheduler."""
+        """Compute the next learning rate for each of the optimizer's :attr:`~torch.optim.Optimizer.param_groups`.
+
+        Returns:
+            list[float | Tensor]: A :class:`list` of learning rates for each of the optimizer's :attr:`~torch.optim.Optimizer.param_groups` with the same types as their current ``group["lr"]``s.
+
+        .. note:: If you're trying to inspect the most recent learning rate, use :meth:`get_last_lr()` instead.
+        """
         raise NotImplementedError
 
     def step(self, epoch: Optional[int] = None) -> None:
@@ -387,7 +399,15 @@ class LambdaLR(LRScheduler):
 
     @override
     def get_lr(self) -> list[float | Tensor]:
-        """Compute learning rate."""
+        """Compute the next learning rate for each of the optimizer's :attr:`~torch.optim.Optimizer.param_groups`.
+
+        Scales the :attr:`base_lrs` by the outputs of the :attr:`lr_lambdas` at :attr:`last_epoch`.
+
+        Returns:
+            list[float | Tensor]: A :class:`list` of learning rates for each of the optimizer's :attr:`~torch.optim.Optimizer.param_groups` with the same types as their current ``group["lr"]``s.
+
+        .. note:: If you're trying to inspect the most recent learning rate, use :meth:`get_last_lr()` instead.
+        """
         _warn_get_lr_called_within_step(self)
 
         return [
@@ -486,7 +506,15 @@ class MultiplicativeLR(LRScheduler):
 
     @override
     def get_lr(self) -> list[float | Tensor]:
-        """Compute the learning rate of each parameter group."""
+        """Compute the next learning rate for each of the optimizer's :attr:`~torch.optim.Optimizer.param_groups`.
+
+        Scales the current ``group["lr"]``s in each of the optimizer's :attr:`~torch.optim.Optimizer.param_groups` by the outputs of the :attr:`lr_lambdas` at :attr:`last_epoch`.
+
+        Returns:
+            list[float | Tensor]: A :class:`list` of learning rates for each of the optimizer's :attr:`~torch.optim.Optimizer.param_groups` with the same types as their current ``group["lr"]``s.
+
+        .. note:: If you're trying to inspect the most recent learning rate, use :meth:`get_last_lr()` instead.
+        """
         _warn_get_lr_called_within_step(self)
 
         if not self._is_initial:
@@ -540,7 +568,15 @@ class StepLR(LRScheduler):
 
     @override
     def get_lr(self) -> list[float | Tensor]:
-        """Compute the learning rate of each parameter group."""
+        """Compute the next learning rate for each of the optimizer's :attr:`~torch.optim.Optimizer.param_groups`.
+
+        If the current epoch is a non-zero multiple of :attr:`step_size`, we scale the current ``group["lr"]``s in the optimizer's :attr:`~torch.optim.Optimizer.param_groups` by :attr:`gamma`.
+
+        Returns:
+            list[float | Tensor]: A :class:`list` of learning rates for each of the optimizer's :attr:`~torch.optim.Optimizer.param_groups` with the same types as their current ``group["lr"]``s.
+
+        .. note:: If you're trying to inspect the most recent learning rate, use :meth:`get_last_lr()` instead.
+        """
         _warn_get_lr_called_within_step(self)
 
         if (self.last_epoch == 0) or (self.last_epoch % self.step_size != 0):
@@ -548,6 +584,13 @@ class StepLR(LRScheduler):
         return [group["lr"] * self.gamma for group in self.optimizer.param_groups]
 
     def _get_closed_form_lr(self) -> list[float | Tensor]:
+        """Compute learning rates for each of the optimizer's :attr:`~torch.optim.Optimizer.param_groups` at :attr:`last_epoch` using a closed-form formula.
+
+        Uses :attr:`base_lrs` to compute learning rates. This method is called when an epoch is passed to :meth:`step`.
+
+        Returns:
+            list[float | Tensor]: A :class:`list` of learning rates for each of the optimizer's :attr:`~torch.optim.Optimizer.param_groups` with the same types as their current ``group["lr"]``s.
+        """
         return [
             base_lr * self.gamma ** (self.last_epoch // self.step_size)
             for base_lr in self.base_lrs
@@ -595,7 +638,17 @@ class MultiStepLR(LRScheduler):
 
     @override
     def get_lr(self) -> list[float | Tensor]:
-        """Compute the learning rate of each parameter group."""
+        """Compute the next learning rate for each of the optimizer's :attr:`~torch.optim.Optimizer.param_groups`.
+
+        If the current epoch is in :attr:`milestones`, decays the ``group["lr"]``s in the optimizer's :attr:`~torch.optim.Optimizer.param_groups` by :attr:`gamma`. 
+
+        Returns:
+            list[float | Tensor]: A :class:`list` of learning rates for each of the optimizer's :attr:`~torch.optim.Optimizer.param_groups` with the same types as their current ``group["lr"]``s.
+
+        .. note:: If you're trying to inspect the most recent learning rate, use :meth:`get_last_lr()` instead.
+        
+        .. note:: If the current epoch appears in :attr:`milestones` ``n`` times, we scale by :attr:`gamma` to the power of ``n``
+        """
         _warn_get_lr_called_within_step(self)
 
         if self.last_epoch not in self.milestones:
@@ -606,6 +659,13 @@ class MultiStepLR(LRScheduler):
         ]
 
     def _get_closed_form_lr(self):
+        """Compute learning rates for each of the optimizer's :attr:`~torch.optim.Optimizer.param_groups` at :attr:`last_epoch` using a closed-form formula.
+
+        Uses :attr:`base_lrs` to compute learning rates. This method is called when an epoch is passed to :meth:`step`.
+
+        Returns:
+            list[float | Tensor]: A :class:`list` of learning rates for each of the optimizer's :attr:`~torch.optim.Optimizer.param_groups` with the same types as their current ``group["lr"]``s.
+        """
         milestones = sorted(self.milestones.elements())
         return [
             base_lr * self.gamma ** bisect_right(milestones, self.last_epoch)
@@ -664,7 +724,15 @@ class ConstantLR(LRScheduler):
 
     @override
     def get_lr(self) -> list[float | Tensor]:
-        """Compute the learning rate of each parameter group."""
+        """Compute the next learning rate for each of the optimizer's :attr:`~torch.optim.Optimizer.param_groups`.
+
+        When :attr:`last_epoch` is 0, this method scales the ``group["lr"]``s in each of the optimizer's :attr:`~torch.optim.Optimizer.param_groups` by :attr:`factor`. Once :attr:`total_iters` is reached, it undoes this, scaling by ``1 / factor``.
+
+        Returns:
+            list[float | Tensor]: A :class:`list` of learning rates for each of the optimizer's :attr:`~torch.optim.Optimizer.param_groups` with the same types as their current ``group["lr"]``s.
+
+        .. note:: If you're trying to inspect the most recent learning rate, use :meth:`get_last_lr()` instead.
+        """
         _warn_get_lr_called_within_step(self)
 
         if self.last_epoch == 0:
@@ -678,6 +746,13 @@ class ConstantLR(LRScheduler):
         ]
 
     def _get_closed_form_lr(self):
+        """Compute learning rates for each of the optimizer's :attr:`~torch.optim.Optimizer.param_groups` at :attr:`last_epoch` using a closed-form formula.
+
+        Uses :attr:`base_lrs` to compute learning rates. This method is called when an epoch is passed to :meth:`step`.
+
+        Returns:
+            list[float | Tensor]: A :class:`list` of learning rates for each of the optimizer's :attr:`~torch.optim.Optimizer.param_groups` with the same types as their current ``group["lr"]``s.
+        """
         return [
             base_lr
             * (self.factor + (self.last_epoch >= self.total_iters) * (1 - self.factor))
@@ -746,7 +821,15 @@ class LinearLR(LRScheduler):
 
     @override
     def get_lr(self) -> list[float | Tensor]:
-        """Compute the learning rate."""
+        """Compute the next learning rate for each of the optimizer's :attr:`~torch.optim.Optimizer.param_groups`.
+
+        Scales the ``group["lr"]``s in the optimizer's :attr:`~torch.optim.Optimizer.param_groups` such that successive steps interpolate linearly from :attr:`start_factor` up to :attr:`end_factor` across :attr:`total_iters` steps.
+
+        Returns:
+            list[float | Tensor]: A :class:`list` of learning rates for each of the optimizer's :attr:`~torch.optim.Optimizer.param_groups` with the same types as their current ``group["lr"]``s.
+
+        .. note:: If you're trying to inspect the most recent learning rate, use :meth:`get_last_lr()` instead.
+        """
         _warn_get_lr_called_within_step(self)
 
         if self.last_epoch == 0:
@@ -771,6 +854,13 @@ class LinearLR(LRScheduler):
         ]
 
     def _get_closed_form_lr(self):
+        """Compute learning rates for each of the optimizer's :attr:`~torch.optim.Optimizer.param_groups` at :attr:`last_epoch` using a closed-form formula.
+
+        Uses :attr:`base_lrs` to compute learning rates. This method is called when an epoch is passed to :meth:`step`.
+
+        Returns:
+            list[float | Tensor]: A :class:`list` of learning rates for each of the optimizer's :attr:`~torch.optim.Optimizer.param_groups` with the same types as their current ``group["lr"]``s.
+        """
         return [
             base_lr
             * (
@@ -815,7 +905,15 @@ class ExponentialLR(LRScheduler):
 
     @override
     def get_lr(self) -> list[float | Tensor]:
-        """Compute the learning rate of each parameter group."""
+        """Compute the next learning rate for each of the optimizer's :attr:`~torch.optim.Optimizer.param_groups`.
+
+        Multiplies the current ``group["lr"]``s in the optimizer's :attr:`~torch.optim.Optimizer.param_groups` by :attr:`gamma`.
+
+        Returns:
+            list[float | Tensor]: A :class:`list` of learning rates for each of the optimizer's :attr:`~torch.optim.Optimizer.param_groups` with the same types as their current ``group["lr"]``s.
+
+        .. note:: If you're trying to inspect the most recent learning rate, use :meth:`get_last_lr()` instead.
+        """
         _warn_get_lr_called_within_step(self)
 
         # when loading from a checkpoint, we don't want _initial_step (called from the constructor)
@@ -825,6 +923,13 @@ class ExponentialLR(LRScheduler):
         return [group["lr"] * self.gamma for group in self.optimizer.param_groups]
 
     def _get_closed_form_lr(self):
+        """Compute learning rates for each of the optimizer's :attr:`~torch.optim.Optimizer.param_groups` at :attr:`last_epoch` using a closed-form formula.
+
+        Uses :attr:`base_lrs` to compute learning rates. This method is called when an epoch is passed to :meth:`step`.
+
+        Returns:
+            list[float | Tensor]: A :class:`list` of learning rates for each of the optimizer's :attr:`~torch.optim.Optimizer.param_groups` with the same types as their current ``group["lr"]``s.
+        """
         return [base_lr * self.gamma**self.last_epoch for base_lr in self.base_lrs]
 
 
@@ -1021,7 +1126,20 @@ class PolynomialLR(LRScheduler):
 
     @override
     def get_lr(self) -> list[float | Tensor]:
-        """Compute the learning rate."""
+        r"""Compute the next learning rate for each of the optimizer's :attr:`~torch.optim.Optimizer.param_groups`.
+
+        Scales the ``group["lr"]``s in the optimizer's :attr:`~torch.optim.Optimizer.param_groups` such that the learning rates follow
+
+        .. math::
+            \texttt{base_lr} \cdot \left(1 - \frac{\texttt{last_epoch}}{\texttt{total_iters}} \right)^\texttt{power}
+        
+        Returns the current learning rates unchanged after :attr:`total_iters` is reached.
+
+        Returns:
+            list[float | Tensor]: A :class:`list` of learning rates for each of the optimizer's :attr:`~torch.optim.Optimizer.param_groups` with the same types as their current ``group["lr"]``s.
+
+        .. note:: If you're trying to inspect the most recent learning rate, use :meth:`get_last_lr()` instead.
+        """
         _warn_get_lr_called_within_step(self)
 
         if self._is_initial or self.last_epoch > self.total_iters:
@@ -1034,6 +1152,13 @@ class PolynomialLR(LRScheduler):
         return [group["lr"] * decay_factor for group in self.optimizer.param_groups]
 
     def _get_closed_form_lr(self) -> list[float | Tensor]:
+        """Compute learning rates for each of the optimizer's :attr:`~torch.optim.Optimizer.param_groups` at :attr:`last_epoch` using a closed-form formula.
+
+        Uses :attr:`base_lrs` to compute learning rates. This method is called when an epoch is passed to :meth:`step`.
+
+        Returns:
+            list[float | Tensor]: A :class:`list` of learning rates for each of the optimizer's :attr:`~torch.optim.Optimizer.param_groups` with the same types as their current ``group["lr"]``s.
+        """
         return [
             (
                 base_lr
@@ -1107,7 +1232,19 @@ class CosineAnnealingLR(LRScheduler):
 
     @override
     def get_lr(self) -> list[float | Tensor]:
-        """Retrieve the learning rate of each parameter group."""
+        r"""Compute the next learning rate for each of the optimizer's :attr:`~torch.optim.Optimizer.param_groups`.
+
+        Scales the ``group["lr"]``s in the optimizer's :attr:`~torch.optim.Optimizer.param_groups` such that their learning rates approximate
+
+        .. math::
+            \texttt{eta_min} + \frac{1}{2} (\texttt{base_lr} - \texttt{eta_min}) \left(
+                1 + \cos\left(\frac{\texttt{last_epoch} \pi}{\texttt{T_max}}\right) \right)
+
+        Returns:
+            list[float | Tensor]: A :class:`list` of learning rates for each of the optimizer's :attr:`~torch.optim.Optimizer.param_groups` with the same types as their current ``group["lr"]``s.
+
+        .. note:: If you're trying to inspect the most recent learning rate, use :meth:`get_last_lr()` instead.
+        """
         _warn_get_lr_called_within_step(self)
 
         if self._is_initial:
@@ -1135,6 +1272,13 @@ class CosineAnnealingLR(LRScheduler):
         ]
 
     def _get_closed_form_lr(self) -> list[float | Tensor]:
+        """Compute learning rates for each of the optimizer's :attr:`~torch.optim.Optimizer.param_groups` at :attr:`last_epoch` using a closed-form formula.
+
+        Uses :attr:`base_lrs` to compute learning rates. This method is called when an epoch is passed to :meth:`step`.
+
+        Returns:
+            list[float | Tensor]: A :class:`list` of learning rates for each of the optimizer's :attr:`~torch.optim.Optimizer.param_groups` with the same types as their current ``group["lr"]``s.
+        """
         return [
             self.eta_min
             + (base_lr - self.eta_min)
@@ -1654,12 +1798,18 @@ class CyclicLR(LRScheduler):
 
     @override
     def get_lr(self) -> list[float | Tensor]:
-        """Calculate the learning rate at batch index.
+        """Compute the next learning rate for each of the optimizer's :attr:`~torch.optim.Optimizer.param_groups`.
 
-        This function treats `self.last_epoch` as the last batch index.
+        Advances each ``group["lr"]`` in the optimizer's :attr:`~torch.optim.Optimizer.param_groups` along a cycle between the group's ``base_lr`` and ``max_lr`` using :meth:`scale_fn`.
 
-        If `self.cycle_momentum` is ``True``, this function has a side effect of
-        updating the optimizer's momentum.
+        Returns:
+            list[float | Tensor]: A :class:`list` of learning rates for each of the optimizer's :attr:`~torch.optim.Optimizer.param_groups` with the same types as their current ``group["lr"]``s.
+
+        .. note:: If you're trying to inspect the most recent learning rate, use :meth:`get_last_lr()` instead.
+        
+        .. note:: This method treats :attr:`last_epoch` as the index of the previous batch.
+        
+        .. note:: When :attr:`cycle_momentum` is ``True``, this method has a side effect of updating the optimizer's momentum.
         """
         _warn_get_lr_called_within_step(self)
 
@@ -1800,7 +1950,20 @@ class CosineAnnealingWarmRestarts(LRScheduler):
 
     @override
     def get_lr(self) -> list[float | Tensor]:
-        """Compute the initial learning rate."""
+        r"""Compute the next learning rate for each of the optimizer's :attr:`~torch.optim.Optimizer.param_groups`.
+
+        Computes learning rates for the optimizer's :attr:`~torch.optim.Optimizer.param_groups` following:
+
+        .. math::
+            \texttt{eta_min} + \frac{1}{2}(\texttt{base_lr} - \texttt{eta_min})\left(1 + \cos\left(\frac{\texttt{T_cur}}{\texttt{T_i}}\pi\right)\right)
+        
+        Where :attr:`T_cur` is the number of epochs since the last restart and :attr:`T_i` is the number of epochs between two restarts. Both :attr:`T_cur` and :attr:`T_i` are updated in :meth:`step`, and :attr:`T_i` becomes :attr:`T_mult` times larger after each restart.
+
+        Returns:
+            list[float | Tensor]: A :class:`list` of learning rates for each of the optimizer's :attr:`~torch.optim.Optimizer.param_groups` with the same types as their current ``group["lr"]``s.
+
+        .. note:: If you're trying to inspect the most recent learning rate, use :meth:`get_last_lr()` instead.
+        """
         _warn_get_lr_called_within_step(self)
 
         return [
@@ -2146,7 +2309,17 @@ class OneCycleLR(LRScheduler):
 
     @override
     def get_lr(self) -> list[float | Tensor]:
-        """Compute the learning rate of each parameter group."""
+        """Compute the next learning rate for each of the optimizer's :attr:`~torch.optim.Optimizer.param_groups`.
+
+        Finds the appropriate :attr:`_schedule_phases` entry for the current step and interpolates between its ``start_lr`` and ``end_lr`` using :meth:`_anneal_func`.
+
+        Returns:
+            list[float | Tensor]: A :class:`list` of learning rates for each of the optimizer's :attr:`~torch.optim.Optimizer.param_groups` with the same types as their current ``group["lr"]``s.
+
+        .. note:: If you're trying to inspect the most recent learning rate, use :meth:`get_last_lr()` instead.
+        
+        .. note:: When :attr:`cycle_momentum` is ``True``, this method has a side effect of updating the optimizer's momentum.
+        """
         _warn_get_lr_called_within_step(self)
 
         lrs = []
