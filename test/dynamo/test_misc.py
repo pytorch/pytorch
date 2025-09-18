@@ -19,6 +19,7 @@ import operator
 import os
 import pickle
 import random
+import re
 import sys
 import tempfile
 import threading
@@ -7970,11 +7971,16 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         with self.assertLogs(
             logger="torch.fx.experimental.symbolic_shapes", level="INFO"
         ) as logs:
-            # Clear logs to prevent pollution between tests
-            logs.records.clear()
             fn_opt(x, x_shadow)
             self.assertEqual(
-                len([r for r in logs.records if "create_symbol" in r.msg]), 1
+                len(
+                    {
+                        re.search(r"create_symbol\s+(\w+)\s*=", line).group(1)
+                        for line in logs.output
+                        if re.search(r"create_symbol\s+(\w+)\s*=", line)
+                    }
+                ),
+                1,
             )
 
     def test_raise_guard_indirect_full_constraint(self):
