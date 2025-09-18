@@ -1,6 +1,20 @@
-from typing import Any
+from typing import Any, Union
 
 import torch
+from torch._library.fake_class_registry import FakeScriptObject
+
+
+@torch._library.register_fake_class("aten::OpaqueObject")
+class FakeOpaqueObject:
+    def __init__(self, payload: Any) -> None:
+        self.payload: Any = payload
+
+    @classmethod
+    def __obj_unflatten__(cls, flattened_ctx: dict[str, Any]) -> None:
+        raise RuntimeError(
+            "FakeOpaqueObject should not be created through __obj_unflatten__ "
+            "and should be special handled. Please file an issue to Github."
+        )
 
 
 def make_opaque(payload: Any = None) -> torch._C.ScriptObject:
@@ -71,10 +85,10 @@ def make_opaque(payload: Any = None) -> torch._C.ScriptObject:
         >>> torch.ops.mylib.queue_push(obj, torch.ones(3) + 1)
         >>> assert get_payload(obj).size() == 1
     """
-    return torch._C.make_opaque_object(payload)
+    return torch._C.make_opaque_object(payload)  # type: ignore[attr-defined]
 
 
-def get_payload(opaque_object: torch._C.ScriptObject) -> Any:
+def get_payload(opaque_object: Union[torch._C.ScriptObject, FakeScriptObject]) -> Any:
     """
     Retrieves the Python object stored in the given opaque object.
 
@@ -85,7 +99,17 @@ def get_payload(opaque_object: torch._C.ScriptObject) -> Any:
         payload (Any): The Python object stored in the opaque object. This can
         be set with `set_payload()`.
     """
-    return torch._C.get_opaque_object_payload(opaque_object)
+    if isinstance(opaque_object, FakeScriptObject):
+        return opaque_object.wrapped_obj.payload
+    elif isinstance(opaque_object, torch._C.ScriptObject):
+        if str(opaque_object._type()) == "__torch__.torch.classes.aten.OpaqueObject":
+            return torch._C.get_opaque_object_payload(opaque_object)  # type: ignore[attr-defined]
+        else:
+            raise RuntimeError(
+                f"Unable to get payload of ScriptObject object of type {str(opaque_object._type())}"
+            )
+    else:
+        raise RuntimeError(f"Unable to get payload of object {opaque_object}")
 
 
 def set_payload(opaque_object: torch._C.ScriptObject, payload: Any) -> None:
