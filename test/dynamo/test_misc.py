@@ -7970,6 +7970,8 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         with self.assertLogs(
             logger="torch.fx.experimental.symbolic_shapes", level="INFO"
         ) as logs:
+            # Clear logs to prevent pollution between tests
+            logs.records.clear()
             fn_opt(x, x_shadow)
             self.assertEqual(
                 len([r for r in logs.records if "create_symbol" in r.msg]), 1
