@@ -71,7 +71,7 @@ def make_opaque(payload: Any = None) -> torch._C.ScriptObject:
         >>> torch.ops.mylib.queue_push(obj, torch.ones(3) + 1)
         >>> assert get_payload(obj).size() == 1
     """
-    return torch._C.make_opaque_object(payload)
+    return torch._C._make_opaque_object(payload)
 
 
 def get_payload(opaque_object: torch._C.ScriptObject) -> Any:
@@ -85,7 +85,7 @@ def get_payload(opaque_object: torch._C.ScriptObject) -> Any:
         payload (Any): The Python object stored in the opaque object. This can
         be set with `set_payload()`.
     """
-    return torch._C.get_opaque_object_payload(opaque_object)
+    return torch._C._get_opaque_object_payload(opaque_object)
 
 
 def set_payload(opaque_object: torch._C.ScriptObject, payload: Any) -> None:
@@ -96,4 +96,4 @@ def set_payload(opaque_object: torch._C.ScriptObject, payload: Any) -> None:
         torch._C.ScriptObject: The opaque object that stores the given Python object.
         payload (Any): The Python object to store in the opaque object.
     """
-    torch._C.set_opaque_object_payload(opaque_object, payload)
+    torch._C._set_opaque_object_payload(opaque_object, payload)
