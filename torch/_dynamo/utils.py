@@ -2735,7 +2735,13 @@ def iter_contains(
     tx: InstructionTranslator,
     check_tensor_identity: bool = False,
 ) -> Any:
-    from .variables import BuiltinVariable, ConstantVariable, TensorVariable
+    from .variables import (
+        BuiltinVariable,
+        constant_false,
+        constant_true,
+        ConstantVariable,
+        TensorVariable,
+    )
 
     if search.is_python_constant():
         found_const = any(
@@ -2756,7 +2762,7 @@ def iter_contains(
         if must_check_tensor_id:
             if isinstance(x, TensorVariable):
                 if search is _get_fake_tensor(x):  # Object equivalence
-                    return ConstantVariable.create(True)
+                    return constant_true
         else:
             check = BuiltinVariable(operator.eq).call_function(tx, [x, search], {})
             if found is None:
@@ -2766,7 +2772,7 @@ def iter_contains(
                     tx, [check, found], {}
                 )
     if found is None:
-        found = ConstantVariable.create(False)
+        found = constant_false
     return found
 
 

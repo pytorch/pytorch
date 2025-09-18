@@ -351,7 +351,7 @@ class BaseUserFunctionVariable(VariableTracker):
         except NotImplementedError:
             if name == "__name__" and isinstance(self, NestedUserFunctionVariable):
                 result = True
-        return variables.ConstantVariable.create(result)
+        return variables.constant_true if result else variables.constant_false
 
     def inspect_parameter_names(self):
         return list(inspect.signature(self.get_function()).parameters)
@@ -727,8 +727,8 @@ class LocalGeneratorObjectVariable(VariableTracker):
 
     def call_obj_hasattr(self, tx, name):
         if name in self.python_type().__dict__:
-            return ConstantVariable.create(True)
-        return ConstantVariable.create(False)
+            return variables.constant_true
+        return variables.constant_false
 
     def has_unpack_var_sequence(self, tx):
         return False
@@ -808,7 +808,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
             tracer = self._get_inline_tracer(tx)
             if self._is_generator_just_started() or self._is_generator_exhausted():
                 tracer.generator_exhausted = True
-                return variables.ConstantVariable(None)
+                return variables.constant_none
 
             # Raise GeneratorExit to see if user code catches it. Any other exception
             # is propagated to the parent frame.
@@ -837,11 +837,11 @@ class LocalGeneratorObjectVariable(VariableTracker):
                     and tracer.next_instruction.opname == "CALL_INTRINSIC_1"
                 ):
                     tracer.generator_exhausted = True
-                    return variables.ConstantVariable(None)
+                    return variables.constant_none
             except ObservedGeneratorExit:
                 # If it doesn't catch, we just return None, as per the text above
                 tracer.generator_exhausted = True
-                return variables.ConstantVariable(None)
+                return variables.constant_none
 
             try:
                 # Raise RuntimeError if the generator yields any other value
@@ -849,7 +849,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
                     raise_observed_exception(RuntimeError, tx)
             except ObservedGeneratorExit:
                 tracer.generator_exhausted = True
-                return variables.ConstantVariable(None)
+                return variables.constant_none
             except ObservedUserStopIteration:
                 # In Python 3.13+, one can capture GeneratorExit and return a value
                 # See test_generator.py::test_close_capture_GeneratorExit_return
@@ -1307,7 +1307,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         val: VariableTracker,
     ):
         tx.output.side_effects.store_attr(self, name_var.value, val)
-        return ConstantVariable(None)
+        return variables.constant_none
 
     def call_method(self, tx, name, args, kwargs):
         if name == "__setattr__":
@@ -2124,9 +2124,9 @@ class SysFunctionVariable(VariableTracker):
             ]
         else:
             items = [
-                variables.ConstantVariable(None),
-                variables.ConstantVariable(None),
-                variables.ConstantVariable(None),
+                variables.constant_none,
+                variables.constant_none,
+                variables.constant_none,
             ]
         return variables.TupleVariable(items)
 

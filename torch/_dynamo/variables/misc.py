@@ -298,7 +298,7 @@ class SuperVariable(VariableTracker):
             tx.output.side_effects.store_attr(
                 self.objvar, attr, variables.DeletedVariable()
             )
-            return variables.ConstantVariable(None)
+            return variables.constant_none
         elif (
             isinstance(self.objvar, variables.UserDefinedDictVariable)
             and inner_fn in self.objvar._dict_methods
@@ -395,15 +395,15 @@ class ExceptionVariable(VariableTracker):
         # When raising a new exception while another exception is already being
         # handled, the new exception's __context__ attribute is automatically
         # set to the handled exception.
-        self.__context__ = ConstantVariable(None)
+        self.__context__ = variables.constant_none
         # Set when user raised an exception from another:
         # raise ... from ...
-        self.__cause__ = ConstantVariable(None)
+        self.__cause__ = variables.constant_none
         # Boolean flag that controls whether the __context__ attribute is set
-        self.__suppress_context__ = ConstantVariable(False)
+        self.__suppress_context__ = variables.constant_false
         # Contains the call stack where the exception was raised. Dynamo does
         # not track traceback. So, this variable is always set to None
-        self.__traceback__ = ConstantVariable(None)
+        self.__traceback__ = variables.constant_none
 
     def set_context(self, context: "ExceptionVariable"):
         self.__context__ = context
@@ -455,7 +455,7 @@ class ExceptionVariable(VariableTracker):
                 ),
             ):
                 self.__cause__ = val
-                self.__suppress_context__ = variables.ConstantVariable(True)
+                self.__suppress_context__ = variables.constant_true
             else:
                 raise_error("exception cause must be None or derive from BaseException")
         elif name == "__suppress_context__":
@@ -487,14 +487,14 @@ class ExceptionVariable(VariableTracker):
                 "`__cause__`, `__suppress_context__`, and `__traceback__` are supported.",
                 hints=[*graph_break_hints.SUPPORTABLE],
             )
-        return variables.ConstantVariable(None)
+        return variables.constant_none
 
     def call_method(self, tx, name, args, kwargs):
         if name == "__setattr__":
             return self.call_setattr(tx, *args)
         elif name == "with_traceback":
             [tb] = args
-            self.call_setattr(tx, ConstantVariable("__traceback__"), tb)
+            self.call_setattr(tx, ConstantVariable.cache("__traceback__"), tb)
             return self
         else:
             return super().call_method(tx, name, args, kwargs)
@@ -507,7 +507,7 @@ class ExceptionVariable(VariableTracker):
         elif name == "__suppress_context__":
             return self.__suppress_context__
         elif name == "__traceback__":
-            return variables.ConstantVariable(None)
+            return variables.constant_none
         elif name == "args":
             return variables.ListVariable(self.args, source=self.source)
         return super().var_getattr(tx, name)
@@ -606,7 +606,7 @@ class ComptimeVariable(VariableTracker):
         else:
             raise RuntimeError(f"unsupported argument to comptime: {type(fn)}")
 
-        return variables.ConstantVariable.create(None)
+        return variables.constant_none
 
 
 class CellVariable(VariableTracker):
@@ -935,7 +935,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         elif name == "mark_non_differentiable":
             assert len(kwargs) == 0
             self.non_differentiable = proxy_args_kwargs(args, {})[0]
-            return variables.ConstantVariable.create(None)
+            return variables.constant_none
 
         if name != "save_for_backward":
             unimplemented_v2(
@@ -969,7 +969,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
             self.saved_tensors.tensors = []
         for arg in args:
             self.saved_tensors.tensors.append(arg)
-        return variables.ConstantVariable.create(None)
+        return variables.constant_none
 
     def var_getattr(self, tx: "InstructionTranslator", name):
         if name in ["save_for_backward", "mark_non_differentiable"]:
@@ -1146,7 +1146,7 @@ class GetAttrVariable(VariableTracker):
                 if len(args) == 2:
                     return args[1]
                 else:
-                    return variables.ConstantVariable(None)
+                    return variables.constant_none
 
         elif (
             name == "__contains__"
@@ -1166,9 +1166,9 @@ class GetAttrVariable(VariableTracker):
             obj = self.obj
             key = args[0].as_python_constant()
             if obj.has_key_in_generic_dict(tx, key):
-                return variables.ConstantVariable(True)
+                return variables.constant_true
             else:
-                return variables.ConstantVariable(False)
+                return variables.constant_false
 
         elif name == "__setitem__" and self.name == "__dict__" and not kwargs:
             if isinstance(self.obj, variables.UserDefinedObjectVariable):
@@ -1646,7 +1646,7 @@ class LoggingLoggerVariable(VariableTracker):
         method = getattr(self.value, name, None)
         function = getattr(method, "__func__", None)
         if {method, function}.intersection(torch._dynamo.config.ignore_logger_methods):
-            return variables.ConstantVariable.create(None)
+            return variables.constant_none
         unimplemented(
             "Logger not supported for non-export cases. "
             "To avoid graph breaks caused by logger in compile-mode, it is recommended to"
@@ -1763,7 +1763,7 @@ class RandomClassVariable(VariableTracker):
             unimplemented("random.Random() with > 1 arg")
         elif kwargs:
             unimplemented("random.Random() with kwargs")
-        seed = variables.ConstantVariable.create(None) if len(args) == 0 else args[0]
+        seed = variables.constant_none if len(args) == 0 else args[0]
         return RandomVariable(
             seed=seed, mutation_type=variables.base.ValueMutationNew()
         )
@@ -1869,13 +1869,13 @@ class RandomVariable(VariableTracker):
                 *[x.as_python_constant() for x in args],
                 **{key: val.as_python_constant() for key, val in kwargs.items()},
             )
-            return variables.ConstantVariable.create(None)
+            return variables.constant_none
         elif name == "getstate":
             return self.wrap_state(self.random.getstate())
         elif name == "setstate":
             tx.output.side_effects.mutation(self)
             self.random.setstate(self.unwrap_state(args[0]))
-            return variables.ConstantVariable.create(None)
+            return variables.constant_none
         elif name in self._supported_fn_names:
             tx.output.side_effects.mutation(self)
             state = self.random.getstate()

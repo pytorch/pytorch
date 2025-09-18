@@ -57,7 +57,7 @@ from ..utils import (
     set_torch_function_mode_stack,
 )
 from .base import VariableTracker
-from .constant import ConstantVariable
+from .constant import constant_none, ConstantVariable
 from .ctx_manager import GenericContextWrappingVariable
 from .functions import UserFunctionVariable, UserMethodVariable
 from .lazy import LazyVariableTracker
@@ -344,12 +344,12 @@ class TorchFunctionModeVariable(GenericContextWrappingVariable):
         from .torch import TorchInGraphFunctionVariable
 
         if isinstance(self.value, NoEnterTorchFunctionMode):
-            return ConstantVariable.create(None)
+            return constant_none
 
         TorchInGraphFunctionVariable(
             torch._C._push_on_torch_function_stack
         ).call_function(tx, [self], {})
-        return ConstantVariable.create(None)
+        return constant_none
 
     def exit(self, tx: "InstructionTranslator", *args):
         from .torch import TorchInGraphFunctionVariable
@@ -357,7 +357,7 @@ class TorchFunctionModeVariable(GenericContextWrappingVariable):
         TorchInGraphFunctionVariable(torch._C._pop_torch_function_stack).call_function(
             tx, [], {}
         )
-        return ConstantVariable.create(None)
+        return constant_none
 
     def reconstruct_type(self, codegen: "PyCodegen"):
         ty = NoEnterTorchFunctionMode
@@ -457,7 +457,7 @@ def get_torch_function_fn(tx: "InstructionTranslator", vt):
     # they satisfy the calling convention in `call_torch_function`.
     from .builtin import BuiltinVariable
 
-    args = [vt, ConstantVariable("__torch_function__")]
+    args = [vt, ConstantVariable.cache("__torch_function__")]
     func_vt = BuiltinVariable(getattr).call_function(tx, args, {})
     return func_vt
 
