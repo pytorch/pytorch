@@ -64,8 +64,9 @@ enum class CPUCapability {
   VSX = 1,
 #elif defined(HAVE_ZVECTOR_CPU_DEFINITION)
   ZVECTOR = 1,
-#elif defined(HAVE_SVE256_CPU_DEFINITION) && defined(HAVE_ARM_BF16_CPU_DEFINITION)
+#elif defined(HAVE_SVE_CPU_DEFINITION) && defined(HAVE_ARM_BF16_CPU_DEFINITION)
   SVE256 = 1,
+  SVE128 = 2,
 #else
   AVX2 = 1,
   AVX512 = 2,
@@ -118,6 +119,9 @@ struct TORCH_API DispatchStubImpl {
 #ifdef HAVE_SVE256_CPU_DEFINITION
       , void *SVE256
 #endif
+#ifdef HAVE_SVE128_CPU_DEFINITION
+      , void *SVE128
+#endif
   );
 
   // Analogous to try_get_call_ptr(), but it will return the ErrorType and not
@@ -139,6 +143,9 @@ struct TORCH_API DispatchStubImpl {
 #ifdef HAVE_SVE256_CPU_DEFINITION
     , void *SVE256
 #endif
+#ifdef HAVE_SVE128_CPU_DEFINITION
+    , void *SVE128
+#endif
   );
 
 
@@ -159,6 +166,9 @@ struct TORCH_API DispatchStubImpl {
 #endif
 #ifdef HAVE_SVE256_CPU_DEFINITION
       , void *SVE256
+#endif
+#ifdef HAVE_SVE128_CPU_DEFINITION
+      , void *SVE128
 #endif
   );
 
@@ -183,6 +193,9 @@ struct TORCH_API DispatchStubImpl {
 #endif
 #ifdef HAVE_SVE256_CPU_DEFINITION
     , void *SVE256
+#endif
+#ifdef HAVE_SVE128_CPU_DEFINITION
+    , void *SVE128
 #endif
   );
 
@@ -240,6 +253,9 @@ private:
 #endif
 #ifdef HAVE_SVE256_CPU_DEFINITION
       , reinterpret_cast<void*>(SVE256)
+#endif
+#ifdef HAVE_SVE128_CPU_DEFINITION
+      , reinterpret_cast<void*>(SVE128)
 #endif
       )
     );
@@ -302,6 +318,9 @@ public:
 #ifdef HAVE_SVE256_CPU_DEFINITION
       , reinterpret_cast<void*>(SVE256)
 #endif
+#ifdef HAVE_SVE128_CPU_DEFINITION
+      , reinterpret_cast<void*>(SVE128)
+#endif
       );
     if (std::holds_alternative<ErrorType>(result)){
       return false;
@@ -324,6 +343,9 @@ public:
 #endif
 #ifdef HAVE_SVE256_CPU_DEFINITION
   static TORCH_API FnPtr SVE256;
+#endif
+#ifdef HAVE_SVE128_CPU_DEFINITION
+  static TORCH_API FnPtr SVE128;
 #endif
 private:
   DispatchStubImpl impl;
@@ -432,6 +454,12 @@ struct RegisterPRIVATEUSE1Dispatch {
 #define REGISTER_SVE256_DISPATCH(name, fn)
 #endif
 
+#ifdef HAVE_SVE128_CPU_DEFINITION
+#define REGISTER_SVE128_DISPATCH(name, fn) REGISTER_ARCH_DISPATCH(name, SVE128, fn)
+#else
+#define REGISTER_SVE128_DISPATCH(name, fn)
+#endif
+
 // Macro to register the same kernel for all CPU arch types. This is useful
 // if a kernel does not benefit from being recompiled across different arch types.
 #define REGISTER_ALL_CPU_DISPATCH(name, fn)                                    \
@@ -440,6 +468,11 @@ struct RegisterPRIVATEUSE1Dispatch {
   REGISTER_AVX2_DISPATCH(name, fn)                                             \
   REGISTER_VSX_DISPATCH(name, fn)                                              \
   REGISTER_ZVECTOR_DISPATCH(name, fn)                                          \
+  REGISTER_SVE256_DISPATCH(name, fn)                                           \
+  REGISTER_SVE128_DISPATCH(name, fn)
+
+#define REGISTER_SVE_DISPATCH(name, fn)                                        \
+  REGISTER_SVE128_DISPATCH(name, fn)                                           \
   REGISTER_SVE256_DISPATCH(name, fn)
 
 #define REGISTER_NO_CPU_DISPATCH(name)                                         \
@@ -482,6 +515,7 @@ struct RegisterPRIVATEUSE1Dispatch {
 // REGISTER_DISPATCH now dispatches an AVX512 kernel to nullptr but registers other dispatches.
 // ALSO_REGISTER_AVX512_DISPATCH should be used for ensuring AVX512 dispatch, among others.
 // ALSO_REGISTER_SVE256_DISPATCH should be used for ensuring SVE256 dispatch, among others.
+// ALSO_REGISTER_SVE128_DISPATCH should be used for ensuring SVE128 dispatch, among others.
 #ifdef CPU_CAPABILITY_AVX512
 #define REGISTER_DISPATCH(name, fn) REGISTER_ARCH_DISPATCH(name, CPU_CAPABILITY, ((void*)(fn) ? nullptr : nullptr))
 #else
@@ -489,6 +523,7 @@ struct RegisterPRIVATEUSE1Dispatch {
 #endif
 #define ALSO_REGISTER_AVX512_DISPATCH(name, fn) REGISTER_ARCH_DISPATCH(name, CPU_CAPABILITY, fn)
 #define ALSO_REGISTER_SVE256_DISPATCH(name, fn) REGISTER_ARCH_DISPATCH(name, CPU_CAPABILITY, fn)
+#define ALSO_REGISTER_SVE128_DISPATCH(name, fn) REGISTER_ARCH_DISPATCH(name, CPU_CAPABILITY, fn)
 #endif
 } // namespace at::native
 
