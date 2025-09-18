@@ -7,7 +7,9 @@
 #include <ATen/cpu/vec/vec_base.h>
 
 #ifdef __aarch64__
-#if defined(CPU_CAPABILITY_SVE128) || !defined(CPU_CAPABILITY_SVE)
+#ifdef CPU_CAPABILITY_SVE128
+#include <ATen/cpu/vec/vec128/vec128_float_sve.h>
+#elif !defined(CPU_CAPABILITY_SVE)
 #include <ATen/cpu/vec/vec128/vec128_float_neon.h>
 #endif
 #endif
