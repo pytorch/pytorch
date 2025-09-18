@@ -191,10 +191,10 @@ static inline void transpose_vnni4_pad_4x16_block(
   // Store output
   if (krem == 4) {
     // normal case
-    _mm_storeu_epi8(reinterpret_cast<__m128i*>(dst), r0);
-    _mm_storeu_epi8(reinterpret_cast<__m128i*>(dst + ld_dst), r1);
-    _mm_storeu_epi8(reinterpret_cast<__m128i*>(dst + ld_dst * 2), r2);
-    _mm_storeu_epi8(reinterpret_cast<__m128i*>(dst + ld_dst * 3), r3);
+    _mm_storeu_si128(reinterpret_cast<__m128i*>(dst), r0);
+    _mm_storeu_si128(reinterpret_cast<__m128i*>(dst + ld_dst), r1);
+    _mm_storeu_si128(reinterpret_cast<__m128i*>(dst + ld_dst * 2), r2);
+    _mm_storeu_si128(reinterpret_cast<__m128i*>(dst + ld_dst * 3), r3);
   } else {
     // masked case
     __mmask16 mask = (1ULL << (krem * 4)) - 1;
