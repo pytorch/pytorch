@@ -3248,13 +3248,8 @@ class AlgorithmSelectorCache(PersistentCache):
 
         # only benchmark triton kernel in sub process for now.
         # ATen/Extern kernel are still benchmarked in the current process.
-        extern = []
-        triton = []
-        for c in choices:
-            if isinstance(c, TritonTemplateCaller):
-                triton.append(c)
-            else:
-                extern.append(c)
+        extern = [c for c in choices if isinstance(c, ExternKernelCaller)]
+        triton = [c for c in choices if not isinstance(c, ExternKernelCaller)]
 
         timings = cls.benchmark_in_current_process(
             extern, input_nodes, layout, input_gen_fns, hint_override=hint_override
