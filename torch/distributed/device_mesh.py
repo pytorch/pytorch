@@ -185,7 +185,16 @@ if True:  # just to temporarily avoid reindentation
                 root_mesh in self.root_to_flatten_mapping
                 and mesh_dim_name in self.root_to_flatten_mapping[root_mesh]
             ):
-                return self.root_to_flatten_mapping[root_mesh][mesh_dim_name]
+                if (
+                    tuple(flatten_dims_in_root)
+                    == self.flatten_name_to_root_dims[root_mesh][mesh_dim_name]
+                ):
+                    return self.root_to_flatten_mapping[root_mesh][mesh_dim_name]
+                else:
+                    raise RuntimeError(
+                        f"Flatten mesh with mesh_dim_name {mesh_dim_name} has been created before, "
+                        f"Please specify another valid mesh_dim_name.",
+                    )
 
             flattened_mesh_dim_size = math.prod(device_mesh.mesh.size())
 
