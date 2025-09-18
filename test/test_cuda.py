@@ -4396,7 +4396,6 @@ class TestCudaMallocAsync(TestCase):
             _, all_memory = torch.cuda.memory.mem_get_info()
             pre_reserved = torch.cuda.memory_reserved()
             total_allowed = 120 * mb + pre_reserved
-            print(total_allowed)
             fraction_allowed = total_allowed / all_memory
             self.assertEqual(int(round(fraction_allowed * all_memory)), total_allowed)
             torch.cuda.memory.set_per_process_memory_fraction(fraction_allowed)

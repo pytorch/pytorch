@@ -3118,6 +3118,8 @@ class DeviceCachingAllocator {
 
     bool active_pool =
         p.pool->owner_PrivatePool && p.pool->owner_PrivatePool->allocator();
+    TORCH_WARN(total_allocated_memory + size);
+    TORCH_WARN(allowed_memory_maximum);
     if (set_fraction &&
         total_allocated_memory + size > allowed_memory_maximum) {
       p.err = cudaErrorMemoryAllocation;
