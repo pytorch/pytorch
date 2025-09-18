@@ -622,7 +622,7 @@ class SparseSemiStructuredTensorCUSPARSELT(SparseSemiStructuredTensor):
 
         return cls(
             original_tensor.shape,
-            packed=packed,
+            packed=packed.view(original_tensor.shape[0], -1),  # 2-d view
             meta=meta,
             packed_t=packed_t,
             meta_t=meta_t,

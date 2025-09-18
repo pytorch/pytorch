@@ -652,7 +652,6 @@ def meta__cslt_sparse_mm(
             "dense input must be transposed for 8bit dtypes"
         )
 
-    k = dense_B.size(0)
     n = dense_B.size(1)
     m = compressed_A.size(0)
     if bias is not None:
