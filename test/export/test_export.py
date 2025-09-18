@@ -29,6 +29,7 @@ from torch._decomp import decomposition_table, get_decompositions
 from torch._dynamo._trace_wrapped_higher_order_op import mod_index
 from torch._dynamo.test_case import TestCase
 from torch._dynamo.testing import normalize_gm
+from torch._export import config
 from torch._export.pass_base import _ExportPassBaseDeprecatedDoNotUse
 from torch._export.utils import (
     get_buffer,
@@ -618,6 +619,22 @@ class TestExport(TestCase):
                 self.assertTrue(node.target == torch.ops.aten.linear.default)
 
         self.assertEqual(counter, 1)
+
+    @testing.expectedFailureSerDer  # can't serialize functorch ops
+    @testing.expectedFailureSerDerNonStrict  # can't serialize functorch ops
+    def test_vmap_to_assert(self):
+        class VmapToAssert(torch.nn.Module):
+            def forward(self, x, y):
+                f = lambda x, y: (
+                    (x * y).to("cpu", memory_format=torch.channels_last) + 1
+                ).sum(dim=0)  # noqa: E731
+                vmapped = torch.vmap(f)(x, y)
+                return vmapped.sum(dim=0)
+
+        ep = export(VmapToAssert(), (torch.zeros(4, 4, 4, 4), torch.zeros(4, 4, 4, 4)))
+        exported = ep.module()(torch.ones(4, 4, 4, 4), torch.ones(4, 4, 4, 4))
+        eager = VmapToAssert()(torch.ones(4, 4, 4, 4), torch.ones(4, 4, 4, 4))
+        self.assertEqual(exported, eager)
 
     def test_from_node_metadata_export(self):
         class Foo(torch.nn.Module):
@@ -1711,22 +1728,12 @@ class GraphModule(torch.nn.Module):
         trigger = 0
         target = 2
         args = (x, trigger, target)
-        ep = export(m, args, dynamic_shapes=(None, Dim.DYNAMIC, Dim.DYNAMIC))
-        if is_training_ir_strict_test(self._testMethodName):
-            # In strict mode export's result capturing compiler, we create
-            # 2 new symints when re-fakifying the symint inputs.
-            # Then in run_decompositions, ep.range_constraints was updated
-            # where it checks the var_to_range and put the two newly added ones into the range_constraints.
-            self.assertExpectedInline(
-                str(tuple(ep.range_constraints.values())),
-                """(VR[0, int_oo], VR[0, int_oo], VR[-int_oo, int_oo], VR[-int_oo, int_oo])""",
-            )
-        else:
+        with config.patch(use_new_tracer_experimental=True):
+            ep = export(m, args, dynamic_shapes=(None, Dim.DYNAMIC, Dim.DYNAMIC))
             self.assertExpectedInline(
                 str(tuple(ep.range_constraints.values())),
                 """(VR[0, int_oo], VR[0, int_oo])""",
             )
-
         self.assertEqual(m(*args), ep.module()(*args))
 
     def test_cond_branches_return_same_int(self):
@@ -13795,21 +13802,24 @@ def forward(self, x, y):
 
         inputs = (torch.randn(10, 72),)
         dx, dy = dims("dx", "dy")
-        ep = torch.export._trace._export(
-            Mod4Reshape(),
-            inputs,
-            dynamic_shapes={"x": (dx, dy)},
-            prefer_deferred_runtime_asserts_over_guards=True,
-        )
-        out1 = ep.module()(torch.randn(8, 7))
-        self.assertEqual(out1.shape, torch.ones(7, 4, 2).shape)
-        out2 = ep.module()(torch.randn(12, 11))
-        self.assertEqual(out2.shape, torch.ones(11, 4, 3).shape)
-        with self.assertRaisesRegex(
-            RuntimeError,
-            r"Runtime assertion failed for expression Eq\(Mod\(s27\*s77, 4\*s77 \- 4\), 0\) on node 'eq.*'",
-        ):
-            ep.module()(torch.randn(8, 8))  # fail
+        for use_new_tracer in [True, False]:
+            with torch._export.config.patch(use_new_tracer_experimental=use_new_tracer):
+                ep = torch.export._trace._export(
+                    Mod4Reshape(),
+                    inputs,
+                    dynamic_shapes={"x": (dx, dy)},
+                    prefer_deferred_runtime_asserts_over_guards=True,
+                    pre_dispatch=True,
+                )
+            out1 = ep.module()(torch.randn(8, 7))
+            self.assertEqual(out1.shape, torch.ones(7, 4, 2).shape)
+            out2 = ep.module()(torch.randn(12, 11))
+            self.assertEqual(out2.shape, torch.ones(11, 4, 3).shape)
+            with self.assertRaisesRegex(
+                RuntimeError,
+                r"^Runtime assertion failed for expression Eq\(Mod\(s\d+\*s\d+, 4\*s\d+\s*-\s*4\), 0\) on node 'eq[^']*'$",
+            ):
+                ep.module()(torch.randn(8, 8))  # fail
 
         # case 2: 2d reshape
         class FreeReshape(torch.nn.Module):
