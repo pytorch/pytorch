@@ -649,16 +649,34 @@ class TestDTensorOps(DTensorOpTestBase):
                 else:
                     print(f"xfail('{opinfo.name}'),")
 
-    def test_partial_sum_add_scalar(self):
+    def test_pointwise_partial_scalar(self):
         self.mesh = init_device_mesh(DEVICE_TYPE, (self.world_size,))
 
-        tensor = torch.arange(10, dtype=torch.float, device=DEVICE_TYPE)
+        # Avoid having 0, so that tensor.prod() is not zero.
+        tensor = torch.arange(1, 12, dtype=torch.float, device=DEVICE_TYPE)
         dt = distribute_tensor(tensor, self.mesh, [Shard(0)])
 
-        def func(t):
-            return t.sum() + 1
+        funcs = [
+            lambda t: t.sum() + 2,
+            lambda t: t.sum() - 2,
+            lambda t: t.sum() * 2,
+            lambda t: t.sum() / 2,
+            lambda t: t.prod() + 2,
+            lambda t: t.prod() - 2,
+            lambda t: t.prod() * 2,
+            lambda t: t.prod() / 2,
+            # TODO: fix the following cases
+            # lambda t: t.mean() + 2,  # AssertionError: only support replicate to PartialSUM for now!
+            # lambda t: t.mean() - 2,  # AssertionError: Scalars are not close!
+            # lambda t: t.mean() * 2,  # AssertionError: Scalars are not close!
+            # lambda t: t.mean() / 2,  # AssertionError: Scalars are not close!
+            # lambda t: t.sum().copy_(2),  # AssertionError: Scalars are not close!
+            # lambda t: t.sum().clamp_(max=2),  # AssertionError: Scalars are not close!
+            # lambda t: t.sum().clamp_(max=torch.tensor(2)),  # AssertionError: Scalars are not close!
+        ]
 
-        self.assertEqual(func(dt).full_tensor(), func(tensor))
+        for func in funcs:
+            self.assertEqual(func(dt).full_tensor(), func(tensor))
 
     def test_one_hot(self):
         ops = [op for op in op_db if op.name == "nn.functional.one_hot"]
