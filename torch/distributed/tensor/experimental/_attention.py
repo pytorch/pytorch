@@ -6,14 +6,17 @@ from abc import ABC, abstractmethod
 from collections.abc import Generator
 from dataclasses import dataclass
 from enum import auto, Enum
+from functools import partial
 from typing import Any, Callable, Optional, Protocol
 
 import torch
 import torch.distributed as dist
 import torch.distributed._functional_collectives as ft_c
+import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor import distribute_tensor, DTensor, Shard
+from torch.distributed.tensor.parallel import ParallelStyle
 from torch.nn.attention.flex_attention import (
     _mask_mod_signature,
     BlockMask,
@@ -44,6 +47,7 @@ class _DispatchMode(Enum):
     MONKEY_PATCH = auto()
     TORCH_FUNCTION = auto()
     TORCH_DISPATCH = auto()
+    MODULE_WRAPPER = auto()
 
 
 _dispatch_mode: _DispatchMode = _DispatchMode.MONKEY_PATCH
@@ -925,6 +929,11 @@ customized_ops = {
 }
 
 
+ArgsType = tuple[Any, ...]
+KwargsType = dict[str, Any]
+InputFnType = Callable[[Optional[nn.Module], ArgsType, KwargsType, DeviceMesh], Any]
+OutputFnType = Callable[[Optional[nn.Module], Any, Any, DeviceMesh], Any]
+
 _replaced_functions: dict[Callable, tuple[str, Callable]] = {}
 
 
@@ -932,38 +941,23 @@ def _distribute_function(
     fn: Callable,
     fn_module: types.ModuleType,
     device_mesh: DeviceMesh,
-    input_fn: Optional[Callable] = None,
-    output_fn: Optional[Callable] = None,
+    input_fn: InputFnType,
+    output_fn: OutputFnType,
 ) -> None:
     """
     A helper function to replace a function with a distributed version by
     using the monkey patching approach.
 
     This function is for the CP internal usage only.
-
-    Args:
-        fn (Callable): the function to be distributed.
-        fn_module (types.ModuleType): the Python module that the function is declared.
-            e.g., if ``fn`` is ``torch.nn.functional.scaled_dot_product_attention``,
-            ``fn_module`` is ``torch.nn.functional``.
-        device_mesh (:class:`DeviceMesh`): the device mesh that will be used by the
-            input and output hooks to distribute the tensors.
-        input_fn (Optional[Callable]): the hook to distribute or convert the input
-            arguments of ``fn``.
-        output_fn (Optional[Callable]): the hook to distribute or convert the output
-            arguments of ``fn``.
     """
 
     def wrapper(
-        target_fn: Callable, input_fn: Optional[Callable], output_fn: Optional[Callable]
+        target_fn: Callable, input_fn: InputFnType, output_fn: OutputFnType
     ) -> Callable:
-        def inner_fn(*args: tuple[Any, ...], **kwargs: dict[str, Any]) -> Any:
-            if input_fn is not None:
-                args, kwargs = input_fn(device_mesh, *args, **kwargs)
-            output = target_fn(*args, **kwargs)
-            if output_fn is not None:
-                output = output_fn(device_mesh, output)
-            return output
+        def inner_fn(*args: ArgsType, **kwargs: KwargsType) -> Any:
+            args, kwargs = input_fn(None, args, kwargs, device_mesh)
+            outputs = target_fn(*args, **kwargs)
+            return output_fn(None, (args, kwargs), outputs, device_mesh)
 
         return inner_fn
 
@@ -1004,47 +998,27 @@ def _enable_cp_dtensor_dispatcher() -> Generator[None, None, None]:
 def _context_parallel_dispatcher(
     seq_dim: int, mesh: DeviceMesh
 ) -> Generator[None, None, None]:
-    """Replace SDPA with the CP-wrapped version and enable DTensor CP dispatcher."""
-
-    def attention_input_fn(
-        mesh: DeviceMesh, *args: tuple[Any, ...], **kwargs: dict[str, Any]
-    ) -> tuple[tuple[Any, ...], dict[str, Any]]:
-        placement = [Shard(seq_dim)]
-        all_args = []
-
-        for arg in itertools.chain(args, kwargs.values()):
-            if isinstance(arg, torch.Tensor) and not isinstance(arg, DTensor):
-                arg = DTensor.from_local(arg, mesh, placement, run_check=False)
-
-            all_args.append(arg)
-
-        new_args = tuple(all_args[0 : len(args)])
-        new_kwargs = dict(zip(kwargs.keys(), all_args[len(args) :]))
-        return new_args, new_kwargs
-
-    def attention_output_fn(mesh: DeviceMesh, outputs: Any) -> Any:
-        new_outputs = []
-        for output in [outputs] if isinstance(outputs, torch.Tensor) else outputs:
-            output = output.to_local() if isinstance(output, DTensor) else output
-            new_outputs.append(output)
-
-        if isinstance(outputs, torch.Tensor):
-            return new_outputs[0]
-
-        return tuple(new_outputs)
+    flex_cp = _ContextParallel(
+        seq_dim=seq_dim,
+        attention_type=_ContextParallel.AttentionType.FLEX,
+    )
+    sdpa_cp = _ContextParallel(
+        seq_dim=seq_dim,
+        attention_type=_ContextParallel.AttentionType.SDPA,
+    )
 
     class DistributeFunction(TorchFunctionMode):
         def __init__(
             self,
-            fn: Callable,
+            fns: tuple[Callable, ...],
             device_mesh: DeviceMesh,
-            input_fn: Optional[Callable] = None,
-            output_fn: Optional[Callable] = None,
+            input_fns: tuple[InputFnType, ...],
+            output_fns: tuple[OutputFnType, ...],
         ):
             self._device_mesh = device_mesh
-            self._input_fn = input_fn
-            self._output_fn = output_fn
-            self._fn = fn
+            self._input_fns = input_fns
+            self._output_fns = output_fns
+            self._fns = fns
 
         def __torch_function__(
             self,
@@ -1055,55 +1029,23 @@ def _context_parallel_dispatcher(
         ) -> Any:
             kwargs = kwargs or {}
 
-            # special handler for flex_attention
-            if func == torch._higher_order_ops.flex_attention:
-                query, key, value, score_mod, block_mask = args[:5]
-                assert isinstance(query, torch.Tensor)
-                assert isinstance(key, torch.Tensor)
-                assert isinstance(value, torch.Tensor)
-                assert isinstance(block_mask, tuple)
-
-                global_key = ft_c.all_gather_tensor_autograd(
-                    key, seq_dim, self._device_mesh
-                )
-                global_value = ft_c.all_gather_tensor_autograd(
-                    value, seq_dim, self._device_mesh
-                )
-
-                # shape rewrite: because torch.nn.flex_attention() checks
-                # the QKV shape against the block_mask object, we need to
-                # manually rewrite the shape info in block_mask tuple to
-                # make it compatible with q_shard, k_global, v_global
-                if block_mask[1] != global_key.size(-2):
-                    block_mask = (block_mask[0], global_key.size(-2), *block_mask[2:])
-
-                return func(
-                    query,
-                    global_key,
-                    global_value,
-                    score_mod,
-                    block_mask,
-                    *args[5:],
-                    **kwargs,
-                )
-
-            if func != self._fn:
+            try:
+                idx = self._fns.index(func)
+            except ValueError:
                 return func(*args, **kwargs)
 
-            if self._input_fn is not None:
-                args, kwargs = self._input_fn(self._device_mesh, *args, **kwargs)
-            output = func(*args, **kwargs)
-            if self._output_fn is not None:
-                output = self._output_fn(self._device_mesh, output)
-            return output
+            args, kwargs = self._input_fns[idx](None, args, kwargs, self._device_mesh)
+            outputs = func(*args, **kwargs)
+            outputs = self._output_fns[idx](None, args, outputs, self._device_mesh)
+            return outputs
 
     if _dispatch_mode == _DispatchMode.MONKEY_PATCH:
         _distribute_function(
             F.scaled_dot_product_attention,
             F,
             mesh,
-            attention_input_fn,
-            attention_output_fn,
+            sdpa_cp.sdpa_input_fn,
+            sdpa_cp.sdpa_output_fn,
         )
         with _enable_cp_dtensor_dispatcher():
             yield
@@ -1112,16 +1054,28 @@ def _context_parallel_dispatcher(
         tf_mode = _cp_global_vars.torch_function_mode
         if tf_mode is None:
             tf_mode = DistributeFunction(
-                F.scaled_dot_product_attention,
+                (
+                    torch._higher_order_ops.flex_attention,
+                    F.scaled_dot_product_attention,
+                ),
                 mesh,
-                attention_input_fn,
-                attention_output_fn,
+                (
+                    flex_cp.flex_input_fn,
+                    sdpa_cp.sdpa_input_fn,
+                ),
+                (
+                    flex_cp.flex_output_fn,
+                    sdpa_cp.sdpa_output_fn,
+                ),
             )
             _cp_global_vars.torch_function_mode = tf_mode
 
         with tf_mode:
             with _enable_cp_dtensor_dispatcher():
                 yield
+    elif _dispatch_mode == _DispatchMode.MODULE_WRAPPER:
+        # Do nothing as we expect parallelize_module to handle this.
+        yield
     else:
         raise NotImplementedError("torch dispatch mode is not supported yet.")
 
@@ -1188,6 +1142,138 @@ def _context_parallel_buffers(
         new_buffers.append(sharded_buffer)
 
     return new_buffers
+
+
+#####################
+# Experimental APIs
+#####################
+
+
+class _ContextParallel(ParallelStyle):
+    class AttentionType(Enum):
+        FLEX = "flex_attention"
+        SDPA = "scaled_dot_product_attention"
+
+    def __init__(self, seq_dim: int, attention_type: AttentionType) -> None:
+        super().__init__()
+        self.seq_dim = seq_dim
+        self.attention_type = attention_type
+
+        # Used by FlexAttention
+        self._block_mask: Optional[BlockMask] = None
+        self._orig_seq_lengths: Optional[tuple[int, int]] = None
+
+    def _apply(self, module: nn.Module, mesh: DeviceMesh) -> nn.Module:
+        if self.attention_type == self.AttentionType.FLEX:
+            module.register_forward_pre_hook(
+                partial(self.flex_input_fn, mesh=mesh), with_kwargs=True
+            )
+            module.register_forward_hook(partial(self.flex_output_fn, mesh=mesh))
+            return module
+        elif self.attention_type == self.AttentionType.SDPA:
+            module.register_forward_pre_hook(
+                partial(self.sdpa_input_fn, mesh=mesh), with_kwargs=True
+            )
+            module.register_forward_hook(partial(self.sdpa_output_fn, mesh=mesh))
+            return module
+        else:
+            raise ValueError(f"Unknown attention type: {self.attention_type}")
+
+    def flex_input_fn(
+        self, module: Optional[nn.Module], args: Any, kwargs: Any, mesh: DeviceMesh
+    ) -> Any:
+        args_list = list(args)
+        for idx, name in enumerate(
+            ("query", "key", "value", "score_mod", "block_mask")
+        ):
+            if idx >= len(args):
+                args_list.append(kwargs.pop(name, None))
+
+        query, key, value, score_mod, block_mask = args_list[:5]
+        assert isinstance(query, torch.Tensor)
+        assert isinstance(key, torch.Tensor)
+        assert isinstance(value, torch.Tensor)
+        assert isinstance(block_mask, (BlockMask, tuple))
+
+        key = key.contiguous()
+        value = value.contiguous()
+        """
+        TODO: the autograd collectives are not sound. The following warning can
+        appear. We should use custom ops.
+
+        UserWarning: _c10d_functional::wait_tensor: an autograd kernel was not
+        registered to the Autograd key(s) but we are trying to backprop through it.
+        This may lead to silently incorrect behavior. This behavior is deprecated and
+        will be removed in a future version of PyTorch. If your operator is differentiable,
+        please ensure you have registered an autograd kernel to the correct Autograd key
+        (e.g. DispatchKey::Autograd, DispatchKey::CompositeImplicitAutograd).  If your
+        operator is not differentiable, or to squash this warning and use the previous
+        behavior, please register torch::CppFunction::makeFallthrough() to DispatchKey::Autograd.
+        """
+        global_key = ft_c.all_gather_tensor_autograd(key, self.seq_dim, mesh)
+        global_value = ft_c.all_gather_tensor_autograd(value, self.seq_dim, mesh)
+        args_list[1] = global_key
+        args_list[2] = global_value
+
+        # shape rewrite: because torch.nn.flex_attention() checks
+        # the QKV shape against the block_mask object, we need to
+        # manually rewrite the shape info in block_mask tuple to
+        # make it compatible with q_shard, k_global, v_global
+        if isinstance(block_mask, tuple):
+            if block_mask[1] != global_key.size(-2):
+                block_mask = (block_mask[0], global_key.size(-2), *block_mask[2:])
+        else:
+            if block_mask.seq_lengths[1] != global_key.size(-2):
+                self._orig_seq_lengths = block_mask.seq_lengths
+                block_mask.seq_lengths = (
+                    block_mask.seq_lengths[0],
+                    global_key.size(-2),
+                )
+                self._block_mask = block_mask
+
+        return tuple(args_list), kwargs
+
+    def flex_output_fn(
+        self, module: Optional[nn.Module], inputs: Any, outputs: Any, mesh: DeviceMesh
+    ) -> Any:
+        if self._orig_seq_lengths is not None:
+            assert isinstance(self._block_mask, BlockMask)
+            self._block_mask.seq_lengths = self._orig_seq_lengths
+        self._block_mask = None
+        return outputs
+
+    def sdpa_input_fn(
+        self,
+        module: Optional[nn.Module],
+        args: tuple[Any, ...],
+        kwargs: dict[str, Any],
+        mesh: DeviceMesh,
+    ) -> tuple[tuple[Any, ...], dict[str, Any]]:
+        placement = [Shard(self.seq_dim)]
+        all_args = []
+
+        for arg in itertools.chain(args, kwargs.values()):
+            if isinstance(arg, torch.Tensor) and not isinstance(arg, DTensor):
+                arg = DTensor.from_local(arg, mesh, placement, run_check=False)
+
+            all_args.append(arg)
+
+        new_args = tuple(all_args[0 : len(args)])
+        new_kwargs = dict(zip(kwargs.keys(), all_args[len(args) :]))
+        return new_args, new_kwargs
+
+    def sdpa_output_fn(
+        self, module: Optional[nn.Module], inputs: Any, outputs: Any, mesh: DeviceMesh
+    ) -> Any:
+        new_outputs = []
+        for output in [outputs] if isinstance(outputs, torch.Tensor) else outputs:
+            output = output.to_local() if isinstance(output, DTensor) else output
+            new_outputs.append(output)
+
+        if isinstance(outputs, torch.Tensor):
+            return new_outputs[0]
+
+        return tuple(new_outputs)
 
 
 #####################################################
