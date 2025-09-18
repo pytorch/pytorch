@@ -171,8 +171,7 @@ static inline void transpose_vnni4_pad_4x16_block(
 #if defined(CPU_CAPABILITY_AVX512)
   __m128i r[4];
   for (int i = 0; i < krem; ++i) {
-    r[i] = _mm_loadu_si128(
-        reinterpret_cast<const __m128i*>(src + i * ld_src));
+    r[i] = _mm_loadu_si128(reinterpret_cast<const __m128i*>(src + i * ld_src));
   }
   for (int i = krem; i < 4; ++i) {
     r[i] = _mm_setzero_si128();
@@ -201,8 +200,10 @@ static inline void transpose_vnni4_pad_4x16_block(
     __mmask16 mask = (1ULL << (krem * 4)) - 1;
     _mm_mask_storeu_epi8(dst, mask, r0);
     _mm_mask_storeu_epi8(reinterpret_cast<__m128i*>(dst + ld_dst), mask, r1);
-    _mm_mask_storeu_epi8(reinterpret_cast<__m128i*>(dst + ld_dst * 2), mask, r2);
-    _mm_mask_storeu_epi8(reinterpret_cast<__m128i*>(dst + ld_dst * 3), mask, r3);
+    _mm_mask_storeu_epi8(
+        reinterpret_cast<__m128i*>(dst + ld_dst * 2), mask, r2);
+    _mm_mask_storeu_epi8(
+        reinterpret_cast<__m128i*>(dst + ld_dst * 3), mask, r3);
   }
 #else
   TORCH_CHECK(
@@ -221,7 +222,8 @@ static inline void transpose_pack_vnni4(
     int64_t K,
     int64_t N) {
 #if defined(CPU_CAPABILITY_AVX512)
-  TORCH_CHECK(N % 16 == 0, "N needs to be multiple of 16 for transpose_pack_vnni4");
+  TORCH_CHECK(
+      N % 16 == 0, "N needs to be multiple of 16 for transpose_pack_vnni4");
   int64_t bk = 0;
   int64_t _K = K / 4 * 4;
   for (; bk < _K; bk += 4) {
@@ -242,7 +244,8 @@ static inline void transpose_pack_vnni4(
     }
   }
 #else
-  TORCH_CHECK(false, "transpose_pack_vnni4 is only supported when AVX-512 is supported")
+  TORCH_CHECK(
+      false, "transpose_pack_vnni4 is only supported when AVX-512 is supported")
 #endif
 }
 
