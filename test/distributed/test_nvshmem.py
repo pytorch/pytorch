@@ -240,8 +240,6 @@ class NVSHMEMAll2AllTest(MultiProcContinuousTest):
     def _init_device(self) -> None:
         # TODO: relieve this (seems to hang if without)
         device_module.set_device(self.device)
-        # NOTE: required for nvshmem allocation
-        torch.empty(1, device=self.device)
         # Set NVSHMEM as SymmMem backend
         symm_mem.set_backend("NVSHMEM")
 
@@ -306,6 +304,9 @@ class NVSHMEMAll2AllTest(MultiProcContinuousTest):
         )
         # Row 0 is input splits
         in_out_splits[0].copy_(inp_splits)
+
+        # Sync all ranks to ensure remote tensors are allocated
+        dist.barrier()
 
         torch.ops.symm_mem.all_to_all_vdev(inp, out, in_out_splits, group_name)
 
@@ -374,6 +375,9 @@ class NVSHMEMAll2AllTest(MultiProcContinuousTest):
         out_splits_offsets = symm_mem.empty(
             (2, nsplits), dtype=torch.int64, device=self.device
         ).fill_(-1)
+
+        # Sync all ranks to ensure remote tensors are allocated
+        dist.barrier()
 
         torch.ops.symm_mem.all_to_all_vdev_2d(
             inp, out, in_splits, out_splits_offsets, group_name, major_align=align
@@ -489,6 +493,9 @@ class NVSHMEMAll2AllTest(MultiProcContinuousTest):
         in_splits_offsets[0].copy_(inp_splits)
         # Row 1 is input offsets
         in_splits_offsets[1].copy_(inp_offsets)
+
+        # Sync all ranks to ensure remote tensors are allocated
+        dist.barrier()
 
         torch.ops.symm_mem.all_to_all_vdev_2d_offset(
             inp, out, in_splits_offsets, out_splits_offsets, group_name
