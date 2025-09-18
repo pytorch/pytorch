@@ -84,7 +84,6 @@ from ..utils import (
 )
 from .base import AsPythonConstantNotImplementedError, ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
-from .ctx_manager import EventVariable, StreamVariable
 from .dicts import (
     ConstDictVariable,
     DefaultDictVariable,
@@ -102,6 +101,7 @@ from .lists import (
     TupleIteratorVariable,
     TupleVariable,
 )
+from .streams import EventVariable, StreamVariable
 from .tensor import (
     FakeItemVariable,
     supported_comparison_ops,
