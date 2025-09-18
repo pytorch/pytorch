@@ -10,17 +10,17 @@
 
 namespace torch::jit {
 struct TORCH_API OpaqueObject : public CustomClassHolder {
-  OpaqueObject(py::handle payload) : payload_(payload) {}
+  OpaqueObject(py::object payload) : payload_(payload) {}
 
-  void setPayload(py::handle payload) {
+  void setPayload(py::object payload) {
     payload_ = payload;
   }
 
-  py::handle getPayload() {
+  py::object getPayload() {
     return payload_;
   }
 
-  py::handle payload_;
+  py::object payload_;
 };
 
 static auto register_opaque_obj_class =
