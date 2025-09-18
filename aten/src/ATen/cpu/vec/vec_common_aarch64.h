@@ -8,13 +8,48 @@
 #include <ATen/cpu/vec/sve/sve_helper.h>
 #include <ATen/cpu/vec/vec_base.h>
 
-#if defined(CPU_CAPABILITY_SVE)
-#include <ATen/cpu/vec/sve/vec_bfloat16.h>
-#include <ATen/cpu/vec/sve/vec_double.h>
-#include <ATen/cpu/vec/sve/vec_float.h>
-#include <ATen/cpu/vec/sve/vec_int.h>
+#ifdef CPU_CAPABILITY_SVE128
+
+#include <ATen/cpu/vec/vec128/vec128_float_neon.h>
+
+#include <ATen/cpu/vec/vec128/vec128_bfloat16_neon.h>
+
+#include <ATen/cpu/vec/vec128/vec128_half_neon.h>
+
+#include <ATen/cpu/vec/vec128/vec128_convert.h>
+
 #include <ATen/cpu/vec/sve/vec_qint.h>
-#endif
+
+#elif defined(CPU_CAPABILITY_SVE)
+
+#include <ATen/cpu/vec/sve/vec_float.h>
+
+#include <ATen/cpu/vec/sve/vec_bfloat16.h>
+
+#include <ATen/cpu/vec/sve/vec_double.h>
+#include <ATen/cpu/vec/sve/vec_int.h>
+
+#include <ATen/cpu/vec/sve/vec_qint.h>
+
+#include <ATen/cpu/vec/vec256/vec256_half.h>
+
+#include <ATen/cpu/vec/vec256/vec256_convert.h>
+
+#else // NEON
+
+#include <ATen/cpu/vec/vec128/vec128_float_neon.h>
+
+#include <ATen/cpu/vec/vec128/vec128_half_neon.h>
+
+#include <ATen/cpu/vec/vec128/vec128_bfloat16_neon.h>
+
+#include <ATen/cpu/vec/vec128/vec128_convert.h>
+
+#include <ATen/cpu/vec/vec256/vec256_qint.h>
+
+#endif // defined(CPU_CAPABILITY_SVE128)
+
+#include <ATen/cpu/vec/functional.h>
 
 namespace at::vec {
 // Note [CPU_CAPABILITY namespace]
@@ -47,12 +82,6 @@ DEFINE_SVE_CAST(int64_t, s64, float, f32)
 DEFINE_SVE_CAST(int32_t, s32, float, f32)
 DEFINE_SVE_CAST(int16_t, s16, float, f32)
 DEFINE_SVE_CAST(float, f32, double, f64)
-
-#ifdef __ARM_FEATURE_BF16
-DEFINE_SVE_CAST(int64_t, s64, c10::BFloat16, bf16)
-DEFINE_SVE_CAST(int32_t, s32, c10::BFloat16, bf16)
-DEFINE_SVE_CAST(int16_t, s16, c10::BFloat16, bf16)
-#endif // __ARM_FEATURE_BF16
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ GATHER ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -173,9 +202,11 @@ std::pair<
   // group cols crossing lanes:
   //   return {a0, b0, a1, b1, a2, b2, a3, b3}
   //          {a4, b4, a5, b5, a6, b6, a7, b7}
-  return std::make_pair(
-      Vectorized<c10::BFloat16>(svzip1_bf16(a, b)),
-      Vectorized<c10::BFloat16>(svzip2_bf16(a, b)));
+  svbfloat16_t aReg = a;
+  svbfloat16_t bReg = b;
+  Vectorized<c10::BFloat16> c = svzip1_bf16(aReg, bReg);
+  Vectorized<c10::BFloat16> d = svzip2_bf16(aReg, bReg);
+  return std::make_pair(c, d);
 }
 #endif // __ARM_FEATURE_BF16
 
@@ -224,11 +255,26 @@ std::pair<
   // swap lanes:
   //   return {a0, a1, a2, a3, a4, a5, a6, a7}
   //          {b0, b1, b2, b3, b4, b5, b6, b7}
-  return std::make_pair(
-      Vectorized<c10::BFloat16>(svuzp1_bf16((svbfloat16_t)a, (svbfloat16_t)b)),
-      Vectorized<c10::BFloat16>(svuzp2_bf16((svbfloat16_t)a, (svbfloat16_t)b)));
+  svbfloat16_t aReg = a;
+  svbfloat16_t bReg = b;
+  Vectorized<c10::BFloat16> c = svuzp1_bf16(aReg, bReg);
+  Vectorized<c10::BFloat16> d = svuzp2_bf16(aReg, bReg);
+  return std::make_pair(c, d);
 }
 #endif // __ARM_FEATURE_BF16
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ FLIP ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#define DEFINE_FLIP_FUNC(type, sve_func)                    \
+  inline Vectorized<type> flip(const Vectorized<type>& v) { \
+    return Vectorized<type>(sve_func(v));                   \
+  }
+// Use the macro to define the flip functions
+DEFINE_FLIP_FUNC(float, svrev_f32)
+DEFINE_FLIP_FUNC(double, svrev_f64)
+DEFINE_FLIP_FUNC(int64_t, svrev_s64)
+DEFINE_FLIP_FUNC(int32_t, svrev_s32)
+DEFINE_FLIP_FUNC(int16_t, svrev_s16)
+DEFINE_FLIP_FUNC(int8_t, svrev_s8)
 
 #endif // defined(CPU_CAPABILITY_SVE)
 
