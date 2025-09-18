@@ -324,7 +324,7 @@ class autocast:
         elif self.device == self.custom_backend_name:
             supported_dtype = self.custom_device_mod.get_amp_supported_dtype()
             if self.fast_dtype not in supported_dtype:
-                error_message = f"In {self.custom_backend_name} autocast, but the target dtype is not supported. "
+                error_message = f"In {self.custom_backend_name} autocast, but the target dtype {self.fast_dtype} is not supported. "
                 error_message += f"Disabling autocast.\n {self.custom_backend_name} Autocast only supports dtypes of "
                 error_message += (
                     ", ".join(str(dtype) for dtype in supported_dtype) + " currently."

@@ -7,6 +7,10 @@ from typing import Any, cast, Optional, TYPE_CHECKING, Union
 import torch
 import torch.distributed as dist
 import torch.distributed.distributed_c10d as c10d
+from torch.distributed._distributed_c10d import (
+    _allow_inflight_collective_as_graph_input,
+    _set_allow_inflight_collective_as_graph_input,
+)
 from torch.distributed.device_mesh import DeviceMesh
 from torch.fx.experimental.proxy_tensor import get_proxy_mode
 
@@ -765,7 +769,7 @@ def _resolve_group_name(group: RANK_TYPES, tag: str = "") -> str:
         assert group.ndim == 1, (
             "Only 1D mesh is supported, pass in (DeviceMesh, int) together if mesh > 1D"
         )
-        return group._layouts_to_groups[group._layouts[0]]
+        return group._dim_group_names[0]
     elif isinstance(group, tuple):
         if (
             len(group) == 2
@@ -774,7 +778,7 @@ def _resolve_group_name(group: RANK_TYPES, tag: str = "") -> str:
         ):
             dmesh = group[0]
             dim = group[1]
-            return dmesh._layouts_to_groups[dmesh._layouts[dim]]
+            return dmesh._dim_group_names[dim]
         else:
             raise ValueError("Invalid tuple for group must be (DeviceMesh, int)")
     elif isinstance(group, list):
@@ -815,6 +819,11 @@ def _are_we_tracing() -> bool:
     # If fake mode is turned on, we are almost definitely compiling/tracing.
     if torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE) is not None:
         return True
+    # See Note [enable_python_dispatcher in dynamo]
+    if torch._C._dispatch_tls_is_dispatch_key_included(
+        torch._C.DispatchKey.PythonDispatcher
+    ):
+        return True
     return get_proxy_mode() is not None
 
 
@@ -853,15 +862,13 @@ def allow_inflight_collective_as_graph_input_ctx(value: bool = True):
     will be registered in the work registry, and the wait_tensor() in compiled region called on
     the output tensor of the collective will wait on the correct work object.
     """
-    previous = torch._C._distributed_c10d._allow_inflight_collective_as_graph_input()
+    previous = _allow_inflight_collective_as_graph_input()
 
     try:
-        torch._C._distributed_c10d._set_allow_inflight_collective_as_graph_input(value)
+        _set_allow_inflight_collective_as_graph_input(value)
         yield
     finally:
-        torch._C._distributed_c10d._set_allow_inflight_collective_as_graph_input(
-            previous
-        )
+        _set_allow_inflight_collective_as_graph_input(previous)
 
 
 def _make_all_gather_out_tensor(input, group_size):
