@@ -4,6 +4,7 @@
 #include <ATen/native/CPUBlas.h>
 #include <ATen/native/cpu/zmath.h>
 #include <ATen/native/cpu/ReducedPrecisionFloatGemvFastPathKernel.h>
+#include <ATen/native/DispatchStub.h>
 #include <c10/util/irange.h>
 #include <c10/util/Unroll.h>
 
