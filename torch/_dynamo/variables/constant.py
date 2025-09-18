@@ -279,9 +279,21 @@ def _fill_constant_cache():
     for i in range(256):
         _constants[chr(i)] = ConstantVariable(chr(i))
 
-    string_intering = ("__context__", "__cause__", "__traceback__", "__torch_function__",
-                       "__func__", "__doc__", "args", "kwds", "kwargs", "gen", "get", "msg",
-                       "__eq__",)
+    string_intering = (
+        "__context__",
+        "__cause__",
+        "__traceback__",
+        "__torch_function__",
+        "__func__",
+        "__doc__",
+        "args",
+        "kwds",
+        "kwargs",
+        "gen",
+        "get",
+        "msg",
+        "__eq__",
+    )
     for s in string_intering:
         _constants[s] = ConstantVariable(s)
 
