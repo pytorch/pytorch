@@ -1053,7 +1053,8 @@ void _trace_post_record(
       }
     }
   }
-  py::object onnx_globals = py::module::import("torch.onnx._globals");
+  py::object onnx_globals =
+      py::module::import("torch.onnx._internal.torchscript_exporter._globals");
   py::bool_ is_in_onnx_export =
       py::module::import("torch.onnx.__init__").attr("is_in_onnx_export");
   py::bool_ is_autograd_inlining_enabled =

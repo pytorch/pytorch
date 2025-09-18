@@ -45,7 +45,7 @@ from torch._export.serde.serialize import (
 )
 from torch._higher_order_ops.torchbind import enable_torchbind_tracing
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
-from torch.export import Dim, export_for_training, load, save, unflatten
+from torch.export import Dim, export, load, save, unflatten
 from torch.export.pt2_archive.constants import ARCHIVE_VERSION_PATH
 from torch.fx.experimental.symbolic_shapes import is_concrete_int, ValueRanges
 from torch.testing._internal.common_utils import (
@@ -115,7 +115,7 @@ class TestSerialize(TestCase):
                 return torch.ops.aten.add.Tensor._schema
 
         inp = (torch.ones(10),)
-        ep = export_for_training(TestModule(), inp, strict=True)
+        ep = export(TestModule(), inp, strict=True)
 
         # Register the custom op handler.
         foo_custom_op = FooExtensionOp()
@@ -180,9 +180,7 @@ class TestSerialize(TestCase):
 
         model = MyModule().eval()
         random_inputs = (torch.rand([2, 3]), torch.rand([2, 3]))
-        exp_program = export_for_training(
-            model, random_inputs, {"use_p": True}, strict=True
-        )
+        exp_program = export(model, random_inputs, {"use_p": True}, strict=True)
 
         output_buffer = io.BytesIO()
         # Tests that example inputs are preserved when saving and loading module.
@@ -201,7 +199,7 @@ class TestSerialize(TestCase):
             def forward(self, x):
                 return x.sin()
 
-        exp_program = export_for_training(M(), (torch.randn(4, 4),), strict=True)
+        exp_program = export(M(), (torch.randn(4, 4),), strict=True)
 
         output_buffer = io.BytesIO()
         # Tests that example forward arg names are preserved when saving and loading module.
@@ -241,7 +239,7 @@ def forward(self, x):
         inp = (torch.ones(10),)
         # Module will only be able to roundtrip if metadata
         # can be correctly parsed.
-        ep = export_for_training(MyModule(), inp, strict=True)
+        ep = export(MyModule(), inp, strict=True)
         buffer = io.BytesIO()
         save(ep, buffer)
         loaded_ep = load(buffer)
@@ -282,7 +280,7 @@ def forward(self, x):
                 return h + out_c
 
         inp = (torch.ones(10),)
-        ep = export_for_training(Foo(), inp, strict=True)
+        ep = export(Foo(), inp, strict=True)
         buffer = io.BytesIO()
         save(ep, buffer)
         loaded_ep = load(buffer)
@@ -324,7 +322,7 @@ def forward(self, x):
 
         # Check that module can be roundtripped, thereby confirming proper deserialization.
         inp = (torch.ones(10),)
-        ep = export_for_training(MyModule(), inp, strict=True)
+        ep = export(MyModule(), inp, strict=True)
         buffer = io.BytesIO()
         save(ep, buffer)
         loaded_ep = load(buffer)
@@ -347,7 +345,7 @@ def forward(self, x):
                     eps=1e-5,
                 )
 
-        exported_module = export_for_training(
+        exported_module = export(
             MyModule(),
             (
                 torch.ones([512, 512], requires_grad=True),
@@ -391,7 +389,7 @@ def forward(self, x):
             "b": {1: dim1_bc},
             "c": {0: dim0_ac, 1: dim1_bc},
         }
-        exported_module = export_for_training(
+        exported_module = export(
             DynamicShapeSimpleModel(),
             inputs,
             dynamic_shapes=dynamic_shapes,
@@ -455,7 +453,7 @@ def forward(self, x):
             "b": {1: dim1_bc},
             "c": {0: dim0_ac, 1: dim1_bc},
         }
-        exported_module = export_for_training(
+        exported_module = export(
             DynamicShapeSimpleModel(),
             inputs,
             dynamic_shapes=dynamic_shapes,
@@ -485,9 +483,7 @@ def forward(self, x):
                 return torch.split(x, 2)
 
         input = torch.arange(10.0).reshape(5, 2)
-        exported_module = export_for_training(
-            MyModule(), (input,), strict=True
-        ).run_decompositions()
+        exported_module = export(MyModule(), (input,), strict=True).run_decompositions()
 
         serialized = ExportedProgramSerializer().serialize(exported_module)
         node = serialized.exported_program.graph_module.graph.nodes[-1]
@@ -550,7 +546,7 @@ def forward(self, x):
             def forward(self, x):
                 return torch.ops.aten.var_mean.correction(x, [1])[0]
 
-        exported_module = export_for_training(
+        exported_module = export(
             MyModule(), (torch.ones([512, 512], requires_grad=True),), strict=True
         ).run_decompositions()
 
@@ -571,7 +567,7 @@ def forward(self, x):
             def forward(self, x):
                 return x + x
 
-        ep = export_for_training(
+        ep = export(
             M(), (torch.randn(4),), dynamic_shapes=({0: Dim("temp")},), strict=True
         )
 
@@ -673,7 +669,7 @@ def forward(self, x):
                     kwargs.append(arg.arg)
 
             self.assertEqual(len(args), 4)
-            self.assertEqual(len(kwargs), 4)
+            self.assertEqual(len(kwargs), 5)
 
             for i in range(3):
                 self.assertIsNotNone(args[i].as_tensor)
@@ -686,6 +682,7 @@ def forward(self, x):
             self.assertEqual(
                 kwargs[3].as_int, 8 if isinstance(m, MyModelAutotune) else 4
             )  # num warps
+            self.assertEqual(kwargs[4].as_int, 0)  # shared mem bytes
 
             self.assertEqual(len(triton_node.outputs), 1)
             self.assertIsNotNone(triton_node.outputs[0].as_tensors)
@@ -719,7 +716,7 @@ def forward(self, x):
         f = Foo()
 
         x, _ = torch.sort(torch.randn(3, 4))
-        exported_module = export_for_training(f, (x,), strict=True).run_decompositions()
+        exported_module = export(f, (x,), strict=True).run_decompositions()
         serialized = ExportedProgramSerializer().serialize(exported_module)
 
         node = serialized.exported_program.graph_module.graph.nodes[-1]
@@ -737,9 +734,7 @@ def forward(self, x):
                 b = x + y
                 return b + a
 
-        ep = export_for_training(
-            Module(), (torch.randn(3, 2), torch.randn(3, 2)), strict=True
-        )
+        ep = export(Module(), (torch.randn(3, 2), torch.randn(3, 2)), strict=True)
         s = ExportedProgramSerializer().serialize(ep)
         c = canonicalize(s.exported_program)
         g = c.graph_module.graph
@@ -753,11 +748,53 @@ def forward(self, x):
             def forward(self, x):
                 return torch.ops.aten.sum.dim_IntList(x, [])
 
-        ep = torch.export.export_for_training(M(), (torch.randn(3, 2),), strict=True)
+        ep = torch.export.export(M(), (torch.randn(3, 2),), strict=True)
         serialized = ExportedProgramSerializer().serialize(ep)
         for node in serialized.exported_program.graph_module.graph.nodes:
             if "aten.sum.dim_IntList" in node.target:
                 self.assertEqual(node.inputs[1].arg.type, "as_ints")
+
+    def test_empty_constant(self) -> None:
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        m = M()
+        sample_inputs = (torch.randn(1, 4),)
+        eager_out = m(*sample_inputs)
+        ep = torch.export.export(m, sample_inputs)
+        buffer = io.BytesIO()
+        torch.export.save(ep, buffer)
+        buffer.seek(0)
+        loaded_ep = torch.export.load(buffer)
+        ep_out = loaded_ep.module()(*sample_inputs)
+        self.assertTrue(torch.allclose(eager_out, ep_out))
+        self.assertEqual(len(loaded_ep.constants), 0)
+
+    def test_empty_state_dict(self) -> None:
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.const = torch.randn(4, 4)
+
+            def forward(self, x):
+                return x + self.const
+
+        m = M()
+        sample_inputs = (torch.randn(4, 4),)
+        eager_out = m(*sample_inputs)
+        ep = torch.export.export(m, sample_inputs)
+        buffer = io.BytesIO()
+        torch.export.save(ep, buffer)
+        buffer.seek(0)
+        loaded_ep = torch.export.load(buffer)
+        ep_out = loaded_ep.module()(*sample_inputs)
+        self.assertTrue(torch.allclose(eager_out, ep_out))
+        self.assertEqual(len(loaded_ep.state_dict), 0)
 
     def test_preserve_aliasing(self) -> None:
         class M(torch.nn.Module):
@@ -831,6 +868,25 @@ def forward(self, x):
         self.assertEqual(epm.const2[0], 123)
         epm.const2[-1] = 321
         self.assertEqual(epm.const1[-1][-1], 321)
+
+    def test_storage_offset(self) -> None:
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.const = torch.arange(8)[:4]
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                return self.linear(x) + self.const
+
+        m = M()
+        sample_inputs = (torch.randn(1, 4),)
+        ep = torch.export.export(m, sample_inputs)
+        buffer = io.BytesIO()
+        save(ep, buffer)
+        buffer.seek(0)
+        loaded_ep = load(buffer)
+        self.assertEqual(m(*sample_inputs), loaded_ep.module()(*sample_inputs))
 
     def test_complex_constant(self) -> None:
         class M(torch.nn.Module):
@@ -962,7 +1018,7 @@ class TestDeserialize(TestCase):
 
         def _check_graph(pre_dispatch):
             if pre_dispatch:
-                ep = torch.export.export_for_training(
+                ep = torch.export.export(
                     fn,
                     _deepcopy_inputs(inputs),
                     {},
@@ -1512,7 +1568,7 @@ class TestDeserialize(TestCase):
                 a = a * 2
                 return a, b
 
-        ep = torch.export.export_for_training(M(), (torch.ones(3),), strict=True)
+        ep = torch.export.export(M(), (torch.ones(3),), strict=True)
 
         # insert another getitem node
         for node in ep.graph.nodes:
@@ -1556,7 +1612,8 @@ def forward(self, x):
     def test_exportdb_supported(self, name: str, case: ExportCase) -> None:
         model = case.model
         _check_meta = "map" not in name
-        self.check_graph(model, case.example_args, _check_meta=_check_meta)
+        with torch._export.config.patch(use_new_tracer_experimental=True):
+            self.check_graph(model, case.example_args, _check_meta=_check_meta)
 
     def test_constraints(self):
         class Module(torch.nn.Module):
@@ -1658,7 +1715,7 @@ def forward(self, x):
             def forward(self):
                 return self.p * self.p
 
-        ep = torch.export.export_for_training(M(), (), strict=True)
+        ep = torch.export.export(M(), (), strict=True)
         ep._example_inputs = None
         roundtrip_ep = deserialize(serialize(ep))
         self.assertTrue(torch.allclose(ep.module()(), roundtrip_ep.module()()))
@@ -1700,7 +1757,7 @@ class TestSchemaVersioning(TestCase):
                 return x + x
 
         f = Module()
-        ep = export_for_training(f, (torch.randn(1, 3),), strict=True)
+        ep = export(f, (torch.randn(1, 3),), strict=True)
 
         serialized_program = ExportedProgramSerializer().serialize(ep)
         serialized_program.exported_program.schema_version.major = -1
@@ -1736,7 +1793,7 @@ class TestSaveLoad(TestCase):
                 y = self.linear(y)
                 return y
 
-        ep = export_for_training(Module(), inp, strict=True)
+        ep = export(Module(), inp, strict=True)
 
         buffer = io.BytesIO()
         save(ep, buffer)
@@ -1754,7 +1811,7 @@ class TestSaveLoad(TestCase):
         f = Foo()
 
         inp = (torch.randn(2, 2),)
-        ep = export_for_training(f, inp, strict=True)
+        ep = export(f, inp, strict=True)
 
         with tempfile.NamedTemporaryFile(suffix=".pt2") as f:
             save(ep, f.name)
@@ -1771,7 +1828,7 @@ class TestSaveLoad(TestCase):
         f = Foo()
 
         inp = (torch.tensor([6]), torch.tensor([7]))
-        ep = export_for_training(f, inp, strict=True)
+        ep = export(f, inp, strict=True)
 
         with TemporaryFileName(suffix=".pt2") as fname:
             path = Path(fname)
@@ -1789,7 +1846,7 @@ class TestSaveLoad(TestCase):
 
         f = Foo()
 
-        ep = export_for_training(f, inp, strict=True)
+        ep = export(f, inp, strict=True)
 
         buffer = io.BytesIO()
         save(ep, buffer, extra_files={"extra.txt": "moo"})
@@ -1810,7 +1867,7 @@ class TestSaveLoad(TestCase):
 
         f = Foo()
 
-        ep = export_for_training(f, (torch.randn(1, 3),), strict=True)
+        ep = export(f, (torch.randn(1, 3),), strict=True)
 
         with self.assertRaisesRegex(
             ValueError, r"Saved archive version -1 does not match our current"
@@ -1846,7 +1903,7 @@ class TestSaveLoad(TestCase):
                 list_tensor = [torch.tensor(3), torch.tensor(4)]
                 return x + self.a + list_tensor[0] + list_tensor[1]
 
-        ep = export_for_training(Foo(), (torch.tensor(1),), strict=True)
+        ep = export(Foo(), (torch.tensor(1),), strict=True)
         buffer = io.BytesIO()
         save(ep, buffer)
         buffer.seek(0)
@@ -1872,7 +1929,7 @@ class TestSerializeCustomClass(TestCase):
         f = Foo()
 
         inputs = (torch.zeros(4, 4),)
-        ep = export_for_training(f, inputs, strict=True)
+        ep = export(f, inputs, strict=True)
 
         # Replace one of the values with an instance of our custom class
         for node in ep.graph.nodes:
@@ -1926,7 +1983,7 @@ class TestSerializeCustomClass(TestCase):
 
         inputs = (torch.zeros(2, 3),)
         with enable_torchbind_tracing():
-            ep = export_for_training(f, inputs, strict=False)
+            ep = export(f, inputs, strict=False)
 
         serialized_vals = serialize(ep)
         ep = deserialize(serialized_vals)
@@ -1946,7 +2003,7 @@ class TestSerializeCustomClass(TestCase):
 
         inputs = (torch.zeros(2, 3),)
         with enable_torchbind_tracing():
-            ep = export_for_training(f, inputs, strict=False)
+            ep = export(f, inputs, strict=False)
 
         serialized_vals = serialize(ep)
         ep = deserialize(serialized_vals)
@@ -1966,6 +2023,7 @@ def forward(self, obj_attr, x):
 def forward(self, x):
     x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
     attr = self.attr
+    _guards_fn = self._guards_fn(x);  _guards_fn = None
     takes_foo = torch.ops._TorchScriptTesting.takes_foo.default(attr, x);  attr = None
     add = torch.ops.aten.add.Tensor(x, takes_foo);  x = takes_foo = None
     return pytree.tree_unflatten((add,), self._out_spec)""",
@@ -1980,7 +2038,7 @@ def forward(self, x):
         f = Foo()
 
         inputs = (torch.zeros(4, 4),)
-        ep = export_for_training(f, inputs, strict=True)
+        ep = export(f, inputs, strict=True)
 
         new_gm = copy.deepcopy(ep.graph_module)
         new_gm.meta["custom"] = {}
@@ -2015,7 +2073,7 @@ def forward(self, x):
         f = Foo()
 
         inputs = (torch.ones(2, 2),)
-        ep = export_for_training(f, inputs, strict=True)
+        ep = export(f, inputs, strict=True)
 
         new_gm = copy.deepcopy(ep.graph_module)
         new_gm.meta["custom"] = {}
@@ -2051,7 +2109,7 @@ def forward(self, x):
         f = Foo()
 
         inputs = (torch.zeros(4, 4),)
-        ep = export_for_training(f, inputs, strict=True)
+        ep = export(f, inputs, strict=True)
 
         new_gm = copy.deepcopy(ep.graph_module)
         new_gm.meta["custom"] = {}
