@@ -197,6 +197,8 @@ class LRScheduler:
 
         .. note:: The returned :class:`~torch.Tensor`s are copies, and never alias the optimizer's ``group["lr"]``s.
         """
+        # We always update self._last_lr with _param_groups_val_list, so it's a .clone() of the group["lr"]s.
+        # If we didn't do this, the user could corrupt their learning rates by modifying the outputs in place.
         return self._last_lr
 
     def get_lr(self) -> list[float | Tensor]:
