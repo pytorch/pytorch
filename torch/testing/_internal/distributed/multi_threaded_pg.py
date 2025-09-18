@@ -98,7 +98,9 @@ class AllToAll:
             for src_rank in range(world_size):
                 _, input_tensor_list = data[src_rank]
                 # See Note [Hide collectives mutation from autograd]
-                output_tensor_list[src_rank].detach().copy_(input_tensor_list[dest_rank])
+                output_tensor_list[src_rank].detach().copy_(
+                    input_tensor_list[dest_rank]
+                )
 
 
 class AllToAllBase:
@@ -249,11 +251,15 @@ class ReduceScatter:
                 dst_tensor_device = dest_tensor_on_rank_i[0].device
                 if not start_reduction[i]:
                     # See Note [Hide collectives mutation from autograd]
-                    dest_tensor_on_rank_i[0].detach().copy_(to_scatter[i].to(dst_tensor_device))
+                    dest_tensor_on_rank_i[0].detach().copy_(
+                        to_scatter[i].to(dst_tensor_device)
+                    )
                     start_reduction[i] = True
                 else:
                     # See Note [Hide collectives mutation from autograd]
-                    dest_tensor_on_rank_i[0].detach().add_(to_scatter[i].to(dst_tensor_device))
+                    dest_tensor_on_rank_i[0].detach().add_(
+                        to_scatter[i].to(dst_tensor_device)
+                    )
         if self.op == dist.ReduceOp.AVG:
             num_ranks = len(data)
             for each_rank_data in data:
