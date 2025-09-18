@@ -1845,6 +1845,18 @@ class TestUnaryUfuncs(TestCase):
                 # Ensure we are notified when NumPy changes its behavior
                 self.compare_with_numpy(torch.exp, np.exp, nan_real_inf_imag_in)
 
+    def test_rsqrt_precision(self, device):
+        # Ensure we are using float as intermidiate type in torch.rsqrt for float16 and bfloat16
+        def test_dtype(input, dtype):
+            input = input.view(dtype)
+            out1 = torch.rsqrt(input)
+            out2 = (1.0 / torch.sqrt(input.to(torch.float32))).to(dtype)
+            self.assertEqual(out1, out2, atol=0.0, rtol=0.0)
+        float16_cases = torch.tensor([0x03d3, 0x1802, 0x2964, 0x35a5, 0x4a18, 0x5218, 0x6c1c, 0x7b4b], dtype=torch.uint16, device=device)
+        bfloat16_cases = torch.tensor([0x0377, 0x1292, 0x217b, 0x3f1b, 0x4105, 0x5ecc, 0x64d9, 0x76d5], dtype=torch.uint16, device=device)
+        test_dtype(float16_cases, torch.float16)
+        test_dtype(bfloat16_cases, torch.bfloat16)
+
 
 instantiate_device_type_tests(TestUnaryUfuncs, globals())
 
