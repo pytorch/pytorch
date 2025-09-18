@@ -7,7 +7,7 @@ import warnings
 import torch
 import torch.distributed as dist
 import torch.testing._internal.common_methods_invocations as common_ops
-from torch.distributed.tensor import DTensor, init_device_mesh
+from torch.distributed.tensor import distribute_tensor, DTensor, init_device_mesh, Shard
 from torch.overrides import resolve_name
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
@@ -648,6 +648,17 @@ class TestDTensorOps(DTensorOpTestBase):
                     print(f"xfail('{opinfo.name}', '{opinfo.variant_test_name}'),")
                 else:
                     print(f"xfail('{opinfo.name}'),")
+
+    def test_partial_sum_add_scalar(self):
+        self.mesh = init_device_mesh(DEVICE_TYPE, (self.world_size,))
+
+        tensor = torch.arange(10, dtype=torch.float, device=DEVICE_TYPE)
+        dt = distribute_tensor(tensor, self.mesh, [Shard(0)])
+
+        def func(t):
+            return t.sum() + 1
+
+        self.assertEqual(func(dt).full_tensor(), func(tensor))
 
     def test_one_hot(self):
         ops = [op for op in op_db if op.name == "nn.functional.one_hot"]

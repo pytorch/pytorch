@@ -49,6 +49,22 @@ def is_same_size_handler(
     return lhs.shape == rhs.shape
 
 
+def add_handler_predicate(
+    op_call: torch._ops.OpOverload, args: tuple[object, ...], kwargs: dict[str, object]
+) -> bool:
+    return not isinstance(args[1], torch.Tensor)
+
+
+def add_scalar_handler(
+    op_call: torch._ops.OpOverload,
+    args: tuple[object, ...],
+    kwargs: dict[str, object],
+) -> object:
+    assert add_handler_predicate(op_call, args, kwargs)
+    new_args = (args[0], torch.tensor(args[1]))
+    return op_call(*new_args, **kwargs)
+
+
 def found_inf_reduce_handler(
     op_call: torch._ops.OpOverload,
     args: tuple[object, ...],
@@ -125,6 +141,10 @@ class OpDispatcher:
             aten._amp_foreach_non_finite_check_and_unscale_.default: found_inf_reduce_handler,
         }
 
+        self._custom_op_handlers_with_condition = {
+            aten.add.Tensor: (add_handler_predicate, add_scalar_handler),
+        }
+
     # This flag is used internally to control whether we treat the torch.Tensor(non-DTensor)
     # as implicitly replicated or we throw error to user.
     # NOTE: It is EXTREMELY UNSAFE to turn this flag on by default so we intentionally leave
@@ -151,6 +171,11 @@ class OpDispatcher:
         """
         if op_call in self._custom_op_handlers:
             return self._custom_op_handlers[op_call](op_call, args, kwargs)  # type: ignore[operator]
+
+        if op_call in self._custom_op_handlers_with_condition:
+            condition, handler = self._custom_op_handlers_with_condition[op_call]
+            if condition(op_call, args, kwargs):
+                return handler(op_call, args, kwargs)
 
         # extract local tensor and sharding infos to a OpInfo
         op_info = self.unwrap_to_op_info(op_call, args, kwargs)
