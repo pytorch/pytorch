@@ -27,6 +27,7 @@ from torch.distributed.tensor.parallel import (
     RowwiseParallel,
 )
 from torch.testing._internal.common_device_type import e4m3_type
+from torch.testing._internal.common_distributed import MultiProcContinuousTest
 from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     instantiate_parametrized_tests,
     MI300_ARCH,
@@ -495,28 +496,15 @@ class MicroPipelineTPTest(TestCase):
 
 
 @instantiate_parametrized_tests
-class MicroPipelineTP4GPUTest(TestCase):
-    def setUp(self):
-        torch._inductor.config._micro_pipeline_tp = True
-
-        self.rank = 0
-        self.world_size = 4
-        torch.cuda.set_device("cuda:0")
-
-        store = FakeStore()
-        dist.init_process_group(
-            backend="fake",
-            world_size=self.world_size,
-            rank=self.rank,
-            store=store,
-        )
-
-    def tearDown(self):
-        dist.destroy_process_group()
+class MicroPipelineTP4GPUTest(MultiProcContinuousTest):
+    @property
+    def device(self) -> torch.device:
+        return torch.device(self.__class__.device_type(), self.rank)
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_cache()
     def test_extra_collectives(self):
+        torch._inductor.config._micro_pipeline_tp = True
         device_mesh = DeviceMesh(
             "cuda",
             torch.arange(0, self.world_size).view(2, -1),
@@ -530,9 +518,9 @@ class MicroPipelineTP4GPUTest(TestCase):
             hidden = reduce_scatter_tensor(full_hidden, "avg", 0, (device_mesh, 1))
             return reduce_scatter_tensor(hidden @ w2.t(), "avg", 0, (device_mesh, 0))
 
-        inp = torch.rand(8, 10, device="cuda")
-        w1 = torch.rand(7, 10, device="cuda")
-        w2 = torch.rand(10, 7, device="cuda")
+        inp = torch.rand(8, 10, device=self.device)
+        w1 = torch.rand(7, 10, device=self.device)
+        w2 = torch.rand(10, 7, device=self.device)
 
         with _test_mode(group_names={device_mesh["tp"].get_group().group_name}):
             compiled = torch.compile(func)

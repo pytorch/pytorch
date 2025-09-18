@@ -19,7 +19,12 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
 from torch.testing._internal.common_distributed import HAS_ACCELERATOR
 from torch.testing._internal.common_fsdp import get_devtype
-from torch.testing._internal.common_utils import run_tests, skipIfHpu, TestCase
+from torch.testing._internal.common_utils import (
+    run_tests,
+    skip_but_pass_in_sandcastle,
+    skipIfHpu,
+    TestCase,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import MLPModule
 from torch.testing._internal.distributed.fake_pg import FakeStore
 
@@ -169,6 +174,9 @@ class TestFakePG(TestCase):
         dist.recv(output, 1)
         self.assertEqual(tuple(output.shape), (3, 3))
 
+    @skip_but_pass_in_sandcastle(
+        "Mesh should not be bigger than world size 2, but found 4 ranks!"
+    )
     @skipIfHpu
     @unittest.skipIf(not HAS_ACCELERATOR, "No accelerator")
     def test_fsdp_tp_fake_e2e(self):
