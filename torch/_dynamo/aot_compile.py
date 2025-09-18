@@ -12,7 +12,7 @@ from typing import Any, Callable, Optional, TYPE_CHECKING
 
 import torch
 import torch.fx
-from torch._dynamo.graph_utils import _graph_uses_non_cpu
+from torch._dynamo.graph_utils import _graph_device_type
 from torch._dynamo.precompile_context import SystemInfo
 
 from . import convert_frame
@@ -59,12 +59,12 @@ class CompileArtifacts:
     original_code: types.CodeType
     closure: Optional[tuple[Any, ...]]
     source_info: "SourceInfo"
-    use_cuda: bool
+    device_type: str
     system_info: SystemInfo = dataclasses.field(default_factory=SystemInfo.current)
 
     def check_compatibility(self) -> None:
         current_system = SystemInfo.current()
-        current_system.check_compatibility(self.system_info, self.use_cuda)
+        current_system.check_compatibility(self.system_info, self.device_type)
 
 
 @dataclass
@@ -266,7 +266,7 @@ def aot_compile_fullgraph(
         backend_input.graph_module._backend_id = backend_input.backend_id  # type: ignore[assignment]
         output_graph = dynamo_output.tracer_output.output_graph
         assert output_graph is not None
-        use_cuda = _graph_uses_non_cpu(output_graph.current_tracer.graph)
+        device_type = _graph_device_type(output_graph.current_tracer.graph)
         import_sources = output_graph.import_sources
         with (
             torch._guards.tracing(TracingContext(backend_input.fake_mode)),
@@ -310,7 +310,7 @@ def aot_compile_fullgraph(
             original_code=fn.__code__,
             closure=fn.__closure__,
             source_info=source_info,
-            use_cuda=use_cuda,
+            device_type=device_type,
         )
         aot_compiled_fn = AOTCompiledFunction(_artifacts=artifacts)
 

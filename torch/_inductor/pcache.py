@@ -3,6 +3,8 @@ from __future__ import annotations
 from functools import cached_property
 from os import getenv
 from pathlib import Path
+from tempfile import gettempdir
+from threading import Lock
 from typing import Generic, TYPE_CHECKING, TypeVar
 from typing_extensions import override, Self
 
@@ -79,6 +81,7 @@ class InMemoryCache(Cache[str, bytes]):
         Initialize the in-memory cache.
         """
         self._cache: dict[str, bytes] = {}
+        self._lock: Lock = Lock()
 
     @override
     def get(self: Self, key: str) -> bytes | None:
@@ -91,7 +94,8 @@ class InMemoryCache(Cache[str, bytes]):
         Returns:
             bytes | None: The value associated with the key, or None if not found.
         """
-        return self._cache.get(key)
+        with self._lock:
+            return self._cache.get(key)
 
     @override
     def insert(self: Self, key: str, value: bytes) -> bool:
@@ -106,10 +110,11 @@ class InMemoryCache(Cache[str, bytes]):
         Returns:
             bool: True if the value was stored successfully, False if the key already exists.
         """
-        if key in self._cache:
-            return False
-        self._cache[key] = value
-        return True
+        with self._lock:
+            if key in self._cache:
+                return False
+            self._cache[key] = value
+            return True
 
     @classmethod
     def from_env_var(cls, env_var: str) -> Self:
@@ -239,11 +244,8 @@ class OnDiskCache(AsyncCache[str, bytes]):
 
         Returns:
             Path: The base directory for the on-disk cache.
-
-        Raises:
-            NotImplementedError: If not implemented by a subclass.
         """
-        raise NotImplementedError
+        return Path(gettempdir())
 
     def _fpath_from_key(self: Self, key: str) -> Path:
         """
