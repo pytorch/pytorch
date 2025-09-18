@@ -490,7 +490,8 @@ class OutputGraph(OutputGraphGuardsState):
             tracked_fakes=self.tracked_fakes,
             # We want to allow capture scalar outputs and allow_dynamic_output_shape_ops when fullgraph=True
             allow_scalar_outputs=one_graph or config.capture_scalar_outputs,
-            allow_dynamic_output_shape_ops=one_graph or config.capture_dynamic_output_shape_ops,
+            allow_dynamic_output_shape_ops=one_graph
+            or config.capture_dynamic_output_shape_ops,
             prefer_deferred_runtime_asserts_over_guards=config.prefer_deferred_runtime_asserts_over_guards,
             co_fields=self.co_fields,
         )
