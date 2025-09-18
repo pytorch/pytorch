@@ -73,7 +73,6 @@ TESTS = discover_tests(
     cpp_tests_dir=CPP_TESTS_DIR,
     blocklisted_patterns=[
         "ao",
-        "bottleneck_test",
         "custom_backend",
         "custom_operator",
         "fx",  # executed by test_fx.py
