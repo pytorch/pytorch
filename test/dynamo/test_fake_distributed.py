@@ -6,7 +6,10 @@ import torch
 import torch.distributed as dist
 from torch._dynamo.test_case import TestCase as DynamoTestCase
 from torch._dynamo.testing import AotEagerAndRecordGraphs, normalize_gm
-from torch.testing._internal.common_utils import instantiate_parametrized_tests
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    IS_LINUX,
+)
 
 
 if dist.is_available():
@@ -119,6 +122,7 @@ class GraphModule(torch.nn.Module):
         )
 
 
+@skipIf(not IS_LINUX, "libuv TCPStore works only on Linux")
 @skipIf(not dist.is_available(), "requires distributed")
 class TestDeviceMesh(DynamoTestCase):
     def tearDown(self):
