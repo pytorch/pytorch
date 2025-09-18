@@ -270,8 +270,8 @@ def common_reduction_strategy(
 
     for op_spec in input_strategy.strategies:
         if reduction_op == "avg":
-            output_spec = op_spec.output_specs
-            local_shape = list(output_spec.tensor_meta.shape)
+            output_spec = op_spec.output_spec
+            local_shape = list(output_spec.tensor_meta.shape)  # type:ignore[union-attr]
             for dim in reduce_dims:
                 if not is_tensor_evenly_shardable_on_dim(local_shape, output_spec, dim):
                     # reduce(avg) is not linear for unevenly sharded tensors
