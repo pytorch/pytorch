@@ -7550,7 +7550,25 @@ class FallbackKernel(ExternKernelAlloc):
         return get_schema_info(self.op_overload).is_mutable()
 
     def get_inputs_that_alias_output(self) -> Sequence[str]:
-        return self.alias_names
+        assert isinstance(
+            self.op_overload, (torch._ops.OpOverload, torch._ops.HigherOrderOperator)
+        ), (
+            f"Fails to create FallbackKernel for {self.op_overload}: "
+            f"{type(self.op_overload)} not supported"
+        )
+
+        # See [Note: FallbackKernel supported operators]: for a mutating
+        # op that is auto-functionalizable, its outputs does NOT
+        # alias any of the inputs.
+        if (
+            not isinstance(self.op_overload, torch._ops.HigherOrderOperator)
+            and "_c10d_functional" not in self.op_overload.name()
+            and self.op_overload._schema.is_mutable
+            and can_auto_functionalize(self.op_overload)
+        ):
+            return []
+        else:
+            return self.alias_names
 
     def get_mutation_names(self) -> Sequence[str]:
         assert len(self.mutation_names) <= 1
