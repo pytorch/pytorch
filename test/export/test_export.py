@@ -1366,10 +1366,17 @@ graph():
         # TODO (tmanlaibaatar) this kinda sucks but today there is no good way to get
         # good source name. We should have an util that post processes dynamo source names
         # to be more readable.
-        if is_inline_and_install_strict_test(self._testMethodName) or is_strict_v2_test(
-            self._testMethodName
-        ):
-            with self.assertWarnsRegex(UserWarning, "__closure__"):
+        if is_strict_v2_test(self._testMethodName):
+            with self.assertWarnsRegex(
+                UserWarning,
+                "L\['self']\._export_root.forward\.__func__\.__closure__\[1\]\.cell_contents\.bank",
+            ):
+                ref(torch.randn(4, 4), torch.randn(4, 4))
+        elif is_inline_and_install_strict_test(self._testMethodName):
+            with self.assertWarnsRegex(
+                UserWarning,
+                "L\['self'\]\._modules\['_export_root'\]\.forward\.__func__\.__closure__\[0\]\.cell_contents",
+            ):
                 ref(torch.randn(4, 4), torch.randn(4, 4))
         else:
             with self.assertWarnsRegex(
