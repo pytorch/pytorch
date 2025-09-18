@@ -579,6 +579,15 @@ aoti_torch_delete_cuda_stream_guard(CUDAStreamGuardHandle guard);
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_get_current_cuda_stream(int32_t device_index, void** ret_stream);
 
+// CUDA memory allocation using CUDACachingAllocator
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cuda_caching_allocator_raw_alloc(
+    uint64_t nbytes,
+    void** ret_ptr // returns raw GPU memory pointer
+);
+
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_cuda_caching_allocator_raw_delete(void* ptr);
+
 #endif // USE_CUDA
 
 // See `ProxyExecutor Design Note` in ir.py for more details
