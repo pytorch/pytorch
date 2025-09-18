@@ -15,7 +15,7 @@
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: !{{ config["desired_cuda"] }}
 {%- if config["gpu_arch_version"] %}
-      GPU_ARCH_VERSION: !{{ config["gpu_arch_version"] }}
+      GPU_ARCH_VERSION: "!{{ config["gpu_arch_version"] }}"
 {%- endif %}
       GPU_ARCH_TYPE: !{{ config["gpu_arch_type"] }}
 {%- if include_skip_tests %}

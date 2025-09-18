@@ -10,7 +10,7 @@ seamlessly optimize PyTorch programs, including those using modern Python featur
 
 import torch
 
-from . import config, convert_frame, eval_frame, resume_execution
+from . import aot_compile, config, convert_frame, eval_frame, resume_execution
 from .backends.registry import list_backends, lookup_backend, register_backend
 from .callback import callback_handler, on_compile_end, on_compile_start
 from .code_context import code_context
@@ -51,7 +51,6 @@ from .mutation_guard import GenerationTracker
 from .pgo import reset_code_state
 from .symbolic_convert import TensorifyState
 from .utils import (
-    create_nested_fn_cache,
     graph_break_reasons,
     guard_failures,
     orig_code_map,
@@ -145,7 +144,6 @@ def reset() -> None:
         torch._dynamo.utils.warn_once_cache.clear()
         torch._dynamo.utils.user_obj_id_to_weakref.clear()
         torch._C._autograd._saved_tensors_hooks_set_tracing(False)
-        create_nested_fn_cache.clear()
 
 
 def reset_code_caches() -> None:

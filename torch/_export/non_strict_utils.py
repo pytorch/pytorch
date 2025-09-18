@@ -382,7 +382,7 @@ def make_fake_inputs(
                 shape_env=ShapeEnv(
                     tracked_fakes=[],
                     co_fields=co_fields,
-                    prefer_deferred_runtime_asserts_over_guards=True,
+                    prefer_deferred_runtime_asserts_over_guards=allow_complex_guards_as_runtime_asserts,
                     allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,
                     trace_asserts=True,
                 ),

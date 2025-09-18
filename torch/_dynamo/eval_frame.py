@@ -36,6 +36,7 @@ import textwrap
 import threading
 import traceback
 import types
+import unittest
 import warnings
 import weakref
 from dataclasses import dataclass
@@ -113,7 +114,7 @@ from .utils import (
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
 
-    from torch._dynamo.package import CompilePackage, DynamoCaptureOutput
+    from torch._dynamo.package import CompilePackage
     from torch._dynamo.repro.after_dynamo import WrapBackendDebug
     from torch._subclasses import fake_tensor
     from torch.fx.node import Argument, Node, Target
@@ -602,6 +603,7 @@ class _TorchDynamoContext:
         dynamic: Optional[bool] = None,
         compiler_config: Optional[Any] = None,
         package: Optional[CompilePackage] = None,
+        hooks: Optional[Hooks] = None,
     ) -> None:
         super().__init__()
         assert callable(callback) or callback is False or callback is None
@@ -616,6 +618,7 @@ class _TorchDynamoContext:
         self.cleanup_fns: list[Callable[[], Any]] = []
         self.enter_exit_hooks = []
         self._package = package
+        self._hooks = hooks
         patch_fn()
 
         # Save the backends so that we can reset them during torch._dynamo.reset
@@ -699,6 +702,27 @@ class _TorchDynamoContext:
 
         fn = innermost_fn(fn)
 
+        def aot_compile(example_inputs: tuple[tuple[Any, ...], dict[str, Any]]) -> Any:
+            from torch._dynamo.aot_compile import aot_compile_fullgraph
+
+            if not self.error_on_graph_break:
+                raise RuntimeError(
+                    "Graph breaks are not supported with aot compile. Please use torch.compile(fullgraph=True)."
+                )
+
+            if not callable(self.callback):
+                raise RuntimeError("aot compile requires a callable dynamo callback.")
+
+            assert self._hooks is not None
+            return aot_compile_fullgraph(
+                fn,
+                example_inputs,
+                hooks=self._hooks,
+                backend=innermost_fn(
+                    self.callback, unaltered_fn_attr="_torchdynamo_orig_backend"
+                ),
+            )
+
         # add context containing GraphModule to any GraphModule forward functions
         if isinstance(fn, GraphModule):
             # add context containing GraphModule to any GraphModule forward functions
@@ -739,7 +763,9 @@ class _TorchDynamoContext:
             filename = inspect.getsourcefile(fn)
         except TypeError:
             filename = None
-        if config.wrap_top_frame or (
+        if config.debug_force_nested_calls:
+            fn = external_utils.wrap_inline(fn)
+        elif config.wrap_top_frame or (
             (filename is None or trace_rules.check(fn))
             and (
                 getattr(fn, "__name__", "")
@@ -758,13 +784,13 @@ class _TorchDynamoContext:
             callback = self.callback  # type: ignore[assignment]
 
         is_jit_tracing = torch._C._is_tracing
-        is_fx_tracing = torch.fx._symbolic_trace.is_fx_tracing
+        is_fx_symbolic_tracing = torch.fx._symbolic_trace.is_fx_symbolic_tracing
 
         @functools.wraps(fn)
         def compile_wrapper(*args: Any, **kwargs: Any) -> Any:
             prior = set_eval_frame(None)
             try:
-                if is_fx_tracing():
+                if is_fx_symbolic_tracing():
                     if config.error_on_nested_fx_trace:
                         raise RuntimeError(
                             "Detected that you are using FX to symbolically trace "
@@ -843,6 +869,8 @@ class _TorchDynamoContext:
         # provide public api _fn.get_compiler_config()
         assert not hasattr(compile_wrapper, "get_compiler_config")
         compile_wrapper.get_compiler_config = get_compiler_config  # type: ignore[attr-defined]
+        if torch._dynamo.config.enable_aot_compile:
+            compile_wrapper.aot_compile = aot_compile  # type: ignore[attr-defined]
 
         # If the function is called using torch._dynamo.optimize decorator, we
         # should prevent any type of skipping.
@@ -901,6 +929,7 @@ class OptimizeContext(_TorchDynamoContext):
             Callable[[], Union[OptimizeContext, _NullDecorator]]
         ] = None,
         package: Optional[CompilePackage] = None,
+        hooks: Optional[Hooks] = None,
     ) -> None:
         def on_enter() -> None:
             install_generation_tagging_init()
@@ -916,6 +945,7 @@ class OptimizeContext(_TorchDynamoContext):
             dynamic=dynamic,
             compiler_config=compiler_config,
             package=package,
+            hooks=hooks,
         )
 
         if config.compiled_autograd:
@@ -1052,6 +1082,7 @@ def _optimize_catch_errors(
         compiler_config=compiler_config,
         rebuild_ctx=rebuild_ctx,
         package=package,
+        hooks=hooks,
     )
 
 
@@ -1219,7 +1250,8 @@ def _optimize(
         ),
         hooks,
         backend_ctx_ctor,
-        error_on_graph_break=nopython,
+        error_on_graph_break=nopython
+        and not config.debug_force_graph_break_on_leaf_return,
         dynamic=dynamic,
         compiler_config=(
             backend.get_compiler_config()
@@ -1760,6 +1792,9 @@ def export(
 
     Note - this headerdoc was authored by ChatGPT, with slight modifications by the author.
     """
+    if config.debug_force_graph_break_on_leaf_return:
+        raise unittest.SkipTest("Cannot force graph break on export")
+
     if _log_export_usage:
         log_export_usage(event="export.private_api", flags={"_dynamo"})
 
@@ -2288,83 +2323,3 @@ def skip_code(code: types.CodeType) -> None:
     set_code_exec_strategy(
         code, FrameExecStrategy(FrameAction.SKIP, FrameAction.DEFAULT)
     )
-
-
-@dataclass
-class BackendInput:
-    graph_module: torch.fx.GraphModule
-    example_inputs: tuple[Any, ...]
-    fake_mode: torch._subclasses.fake_tensor.FakeTensorMode
-
-
-@dataclass
-class CaptureOutput:
-    """
-    Core data structure that contains the all the information dynamo generates
-    from fullgraph=True. Ideally, this is should be the "return" type if dynamo
-    has a standard API to return compilation artifacts.
-    """
-
-    dynamo_artifacts: DynamoCaptureOutput
-    backend_inputs: dict[str, BackendInput]
-
-
-def fullgraph_capture(model: Callable[..., Any]) -> Callable[..., Any]:
-    """
-    A helper function which wraps a model and returns a callable like optimize().
-    The callable can be called with normal inputs like torch.compile()-ed functions
-    and user can dump dynamo compilation artifacts through `get_artifacts()` call.
-
-    The CaptureOutput is separated into two parts:
-    1. Dynamo specific information from DynamoCaptureOutput, which includes:
-        - guards
-        - generated bytecode
-        - python source information
-    2. Backend specific information (indexed by unique backend id) such as:
-        - fx graph
-        - example inputs
-
-    Example:
-        def fn(*args):
-            ...
-
-        compiled_fn = fullgraph_capture(fn)
-        compiled_fn(args)
-        compiled_fn(another_args)
-        artifacts = compiled_fn.get_artifacts()
-    """
-    from torch._dynamo.package import CompilePackage
-
-    package = CompilePackage(model)
-
-    backend_inputs: dict[str, BackendInput] = {}
-
-    def _backend(
-        gm: torch.fx.GraphModule, example_inputs: tuple[Any, ...]
-    ) -> torch.fx.GraphModule:
-        from torch._guards import TracingContext
-
-        fake_mode = TracingContext.get().fake_mode
-        assert fake_mode is not None
-        backend_id = gm._backend_id
-        assert isinstance(backend_id, str)
-        backend_inputs[backend_id] = BackendInput(gm, example_inputs, fake_mode)
-        return gm
-
-    # TODO For now we use eval_frame to give us the frame. This is can be simplified to
-    #      a manual frame creation helper.
-    optimized_model = optimize(nopython=True, backend=_backend, package=package)(model)
-
-    @functools.wraps(model)
-    def capture_context(*args: Any, **kwargs: Any) -> Any:
-        return optimized_model(*args, **kwargs)
-
-    def get_artifacts() -> CaptureOutput:
-        cache_entry = package.cache_entry()
-        assert len(cache_entry.codes) == 1
-        return CaptureOutput(
-            dynamo_artifacts=cache_entry.codes[0], backend_inputs=backend_inputs
-        )
-
-    capture_context.get_artifacts = get_artifacts  # type: ignore[attr-defined]
-    return capture_context

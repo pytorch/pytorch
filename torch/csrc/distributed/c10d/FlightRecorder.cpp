@@ -39,7 +39,7 @@ DebugInfoWriter& DebugInfoWriter::getWriter(int rank) {
     auto cacheDirPath = std::filesystem::path(homeDir + "/.cache/torch");
     // Create the .cache directory if it doesn't exist
     std::filesystem::create_directories(cacheDirPath);
-    auto defaultLocation = cacheDirPath / "nccl_trace_rank_";
+    auto defaultLocation = cacheDirPath / "comm_lib_trace_rank_";
 
     // For internal bc compatibility, we keep the old the ENV check.
     std::string fileNamePrefix = getCvarString(

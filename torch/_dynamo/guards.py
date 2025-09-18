@@ -31,6 +31,7 @@ import math
 import pickle
 import sys
 import textwrap
+import traceback
 import types
 import warnings
 import weakref
@@ -1545,6 +1546,7 @@ class GuardBuilder(GuardBuilderBase):
                 )
         elif istype(source, DefaultsSource):
             assert base_guard_manager  # to make mypy happy
+            assert base_source_name
             assert callable(base_example_value)
             if not source.is_kw:
                 out = base_guard_manager.func_defaults_manager(
@@ -2175,7 +2177,7 @@ class GuardBuilder(GuardBuilderBase):
             self._set_guard_export_info(guard, code)
 
             self.get_guard_manager(guard).add_lambda_guard(
-                _get_closure_vars()["__math_isnan"],
+                _get_closure_vars()["__math_isnan"],  # type: ignore[arg-type]
                 get_verbose_code_parts(code, guard),
             )
             return
@@ -2188,7 +2190,7 @@ class GuardBuilder(GuardBuilderBase):
             self._set_guard_export_info(guard, code)
 
             self.get_guard_manager(guard).add_lambda_guard(
-                _get_closure_vars()["__numpy_isnan"],
+                _get_closure_vars()["__numpy_isnan"],  # type: ignore[arg-type]
                 get_verbose_code_parts(code, guard),
             )
             return
@@ -2796,14 +2798,14 @@ class GuardBuilder(GuardBuilderBase):
                         size,
                         stride,
                         pytype,
-                        dispatch_keys,  # type: ignore[arg-type]
+                        dispatch_keys,
                     ),
                     guard,
                 )
                 guard_manager.add_tensor_match_guard(
                     value,
-                    size,
-                    stride,
+                    size,  # type: ignore[arg-type]
+                    stride,  # type: ignore[arg-type]
                     tensor_name,
                     verbose_code_parts,
                     pytype,
@@ -2910,7 +2912,9 @@ class GuardBuilder(GuardBuilderBase):
             getattr(guarded_object.__class__, "__weakrefoffset__", 0) != 0
         )
         # See D64140537 for why we are checking for tuple.
-        if supports_weakref and not isinstance(guarded_object, (enum.Enum, tuple)):
+        if supports_weakref and not isinstance(
+            guarded_object, (enum.Enum, tuple, weakref.ProxyTypes)
+        ):
             obj_ref = weakref.ref(guarded_object)
 
         guard.set_export_info(
@@ -3438,9 +3442,17 @@ class CheckFunctionManager:
             from torch._dynamo.output_graph import OutputGraph
 
             assert isinstance(self.output_graph, OutputGraph)
-            self.guards_state = self.serialize_guards(
-                builder, sorted_guards, self.output_graph
-            )
+            try:
+                self.guards_state = self.serialize_guards(
+                    builder, sorted_guards, self.output_graph
+                )
+            except exc.PackageError as e:
+                if torch._dynamo.config.strict_precompile:
+                    raise e
+                self.output_graph.bypass_package(
+                    f"Guard evaluation failed: {str(e)}",
+                    traceback=traceback.format_exc().split("\n"),
+                )
 
         # TODO: don't do the string rep, do something more structured here
         torch._logging.trace_structured(

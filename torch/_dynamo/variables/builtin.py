@@ -308,6 +308,7 @@ class BuiltinVariable(VariableTracker):
             bool,
             callable,
             chr,
+            complex,
             divmod,
             float,
             getattr,
@@ -1157,6 +1158,21 @@ class BuiltinVariable(VariableTracker):
 
         return builtin_dispatch
 
+    def call_vars(self, tx: "InstructionTranslator", *args):
+        if len(args) == 0:
+            unimplemented_v2(
+                gb_type="unimplemented builtin op vars() with no arguments",
+                context=f"vars: {self} {args}",
+                explanation=f"Dynamo does not know how to trace builtin operator {self.fn} with no arguments",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        assert len(args) == 1
+        # vars(obj) is obj.__dict__ if __dict__ is present else TypeError
+        try:
+            return args[0].var_getattr(tx, "__dict__")
+        except ObservedAttributeError:
+            raise_observed_exception(TypeError, tx)
+
     def _handle_insert_op_in_graph(self, tx: "InstructionTranslator", args, kwargs):
         from .builder import wrap_fx_proxy, wrap_fx_proxy_cls
 
@@ -1477,21 +1493,6 @@ class BuiltinVariable(VariableTracker):
 
     call_int = _call_int_float
     call_float = _call_int_float
-
-    def call_complex(self, tx: "InstructionTranslator", *args, **kwargs):
-        if self.constant_args(*args, **kwargs):
-            try:
-                c = complex(
-                    *(arg.as_python_constant() for arg in args),
-                    **{k: kwargs[k].as_python_constant() for k in kwargs},
-                )
-            except (TypeError, ValueError) as exc:
-                raise_observed_exception(
-                    type(exc),
-                    tx,
-                    args=list(map(ConstantVariable.create, exc.args)),
-                )
-            return ConstantVariable(c)
 
     def call_bool(self, tx: "InstructionTranslator", arg):
         # Emulate `PyBool_Type.tp_vectorcall` which boils down to `PyObject_IsTrue`.
@@ -1895,6 +1896,17 @@ class BuiltinVariable(VariableTracker):
 
     @staticmethod
     def call_custom_dict(tx: "InstructionTranslator", user_cls, *args, **kwargs):
+        args = list(args)
+        if (
+            len(args) == 1
+            and isinstance(args[0], variables.GetAttrVariable)
+            and isinstance(args[0].obj, variables.UserDefinedClassVariable)
+            and not tx.output.side_effects.has_pending_mutation(args[0].obj)
+        ):
+            # Forward the GetAttrVariable(foo, "__dict__") to a realized vt of
+            # VT(foo.__dict__). This simplifies the construction of the new
+            # dict.
+            args[0] = args[0].get_forwarded_dict(tx)
         return tx.inline_user_function_return(
             VariableTracker.build(tx, polyfills.construct_dict),
             [VariableTracker.build(tx, user_cls), *args],
@@ -2186,6 +2198,18 @@ class BuiltinVariable(VariableTracker):
     def call_filter(self, tx: "InstructionTranslator", fn, seq):
         seq = seq.unpack_var_sequence(tx) if seq.has_unpack_var_sequence(tx) else seq
         return variables.FilterVariable(fn, seq, mutation_type=ValueMutationNew())
+
+    def var_getattr(self, tx: "InstructionTranslator", name):
+        source = self.source and AttrSource(self.source, name)
+        if self.fn is object:
+            # for object, we can just directly read the attribute
+            try:
+                value = getattr(self.fn, name)
+            except AttributeError:
+                raise_observed_exception(AttributeError, tx)
+            if not callable(value):
+                return VariableTracker.build(tx, value, source)
+        return variables.GetAttrVariable(self, name, source=source)
 
     def call_getattr(
         self,
@@ -2781,6 +2805,8 @@ class BuiltinVariable(VariableTracker):
                 UserDefinedObjectVariable,
             ),
         ):
+            # TODO(guilhermeleobas): forward the call to b.__ror__(a) if
+            # a.__ror__(b) returns NotImplemented
             return a.call_method(tx, "__or__", [b], {})
 
         # None no-ops this handler and lets the driving function proceed

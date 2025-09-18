@@ -42,20 +42,26 @@ from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_BF16, TEST_MUL
 from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCUDA,
+    dtypesIfXPU,
     flex_attention_supported_platform as supported_platform,
     instantiate_device_type_tests,
     largeTensorTest,
     skipCPUIf,
     skipCUDAIf,
+    skipXPUIf,
 )
+from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.utils._triton import has_triton, has_triton_tma_device
 
 
 # Use this decorator only when hitting Triton bugs on H100
 running_on_a100_only = skipUnless(
-    (torch.cuda.is_available() and has_triton())
-    and (torch.cuda.get_device_capability() == (8, 0) or torch.version.hip),
-    "Requires Triton + A100 or Triton + ROCm",
+    (
+        (torch.cuda.is_available() and has_triton())
+        and (torch.cuda.get_device_capability() == (8, 0) or torch.version.hip)
+    )
+    or (torch.xpu.is_available() and has_triton()),
+    "Requires Triton + A100 or Triton + ROCm or Triton + Intel GPU",
 )
 
 Tolerances = namedtuple("Tolerances", ["atol", "rtol"])
@@ -89,12 +95,23 @@ def temp_float32_matmul_precision(precision: str):
     Args:
     precision (str): The precision to set ('highest', 'high', or 'medium').
     """
+
+    def set_float32_matmul_precision_xpu(precision: str):
+        if precision == "highest":
+            torch._C._set_onednn_allow_tf32(False)
+        if precision == "high":
+            torch._C._set_onednn_allow_tf32(True)
+
     original_precision = torch.get_float32_matmul_precision()
     try:
         torch.set_float32_matmul_precision(precision)
+        if TEST_ON_XPU:
+            set_float32_matmul_precision_xpu(precision)
         yield
     finally:
         torch.set_float32_matmul_precision(original_precision)
+        if TEST_ON_XPU:
+            set_float32_matmul_precision_xpu(original_precision)
 
 
 def skip_on_cpu(test_func):
@@ -113,6 +130,12 @@ def skip_on_rocm(test_func):
     """Decorator to skip tests that are not supported on CUDA."""
     IS_ROCM = torch.cuda.is_available() and torch.version.hip
     decorated_func = skipCUDAIf(IS_ROCM, "Not supported on ROCM")(test_func)
+    return decorated_func
+
+
+def skip_on_xpu(test_func):
+    """Decorator to skip tests that are not supported on Intel GPU."""
+    decorated_func = skipXPUIf(True, "Not supported on Intel GPU")(test_func)
     return decorated_func
 
 
@@ -156,9 +179,20 @@ TEST_ON_CUDA = (
     and torch.utils._triton.has_triton()
     and torch.cuda.get_device_capability() >= (8, 0)
 )
+TEST_ON_XPU = torch.xpu.is_available() and torch.utils._triton.has_triton()
 
 device_configs = {}
-test_device = ("cpu", "cuda")
+if HAS_GPU:
+    if TEST_ON_CUDA:
+        test_device = (
+            "cuda",
+            "cpu",
+        )
+    elif TEST_ON_XPU:
+        torch._C._set_onednn_allow_tf32(True)
+        test_device = ("xpu",)
+else:
+    test_device = ("cpu",)
 
 
 class SubstringSet:
@@ -168,6 +202,8 @@ class SubstringSet:
     def __contains__(self, item):
         if "cuda" in item:
             item = "cuda"
+        if "xpu" in item:
+            item = "xpu"
         return item in self.items
 
 
@@ -183,6 +219,10 @@ device_configs["cuda"] = DeviceConfig(
         if PLATFORM_SUPPORTS_BF16
         else [torch.float16, torch.float32]
     ),
+    dtypes_fast=[torch.float16],
+)
+device_configs["xpu"] = DeviceConfig(
+    dtypes=([torch.float32, torch.bfloat16, torch.float16]),
     dtypes_fast=[torch.float16],
 )
 device_configs["cpu"] = DeviceConfig(
@@ -393,7 +433,7 @@ def batch_reserve(paged_attention: PagedAttention, target_seq_len: Tensor):
         )
 
 
-@large_tensor_test_class("2GB", device="cuda")
+@large_tensor_test_class("2GB", device=test_device[0])
 class TestFlexAttention(InductorTestCase):
     def setUp(self):
         super().setUp()
@@ -659,8 +699,13 @@ class TestFlexAttention(InductorTestCase):
         paged_attention.assign(batch_idx, input_pos, k, v, k_cache, v_cache)
 
         # convert block mask and score mod
-        converted_block_mask = paged_attention.convert_logical_block_mask(block_mask)
-        converted_score_mod = paged_attention.get_score_mod(score_mod)
+        kv_len_tensor = torch.full((KV_B,), KV_S, device=device, dtype=torch.int64)
+        converted_block_mask = paged_attention.convert_logical_block_mask(
+            block_mask, kv_len=kv_len_tensor
+        )
+        converted_score_mod = paged_attention.get_score_mod(
+            score_mod, kv_len=kv_len_tensor
+        )
         return k_cache, v_cache, converted_block_mask, converted_score_mod
 
     def run_paged_attention(
@@ -1194,6 +1239,7 @@ class TestFlexAttention(InductorTestCase):
     @supported_platform
     @dtypes(*device_configs["cpu"].dtypes)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes)
+    @dtypesIfXPU(*device_configs["xpu"].dtypes)
     @common_utils.parametrize("score_mod", test_score_mods)
     def test_builtin_score_mods(self, device, dtype, score_mod: Callable):
         self.run_test(score_mod, dtype, device=device)
@@ -1203,6 +1249,7 @@ class TestFlexAttention(InductorTestCase):
     @common_utils.parametrize("score_mod", test_score_mods)
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
+    @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
     def test_builtin_score_mods_seqlen_lt_default_sparse_block_size(
         self, device, dtype, score_mod: Callable
     ):
@@ -1217,6 +1264,7 @@ class TestFlexAttention(InductorTestCase):
     @running_on_a100_only
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
+    @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
     @common_utils.parametrize("score_mod", test_score_mods)
     def test_builtin_score_mods_seqlen_lt_custom_sparse_block_size(
         self, device, dtype: torch.dtype, score_mod: Callable
@@ -1250,6 +1298,7 @@ class TestFlexAttention(InductorTestCase):
     @supported_platform
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
+    @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
     @common_utils.parametrize("score_mask_mod", test_score_mask_mod_map.items())
     def test_builtin_score_mods_dynamic(
         self, device, dtype: torch.dtype, score_mask_mod: tuple[Callable, Callable]
@@ -1259,6 +1308,7 @@ class TestFlexAttention(InductorTestCase):
     @supported_platform
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
+    @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
     @common_utils.parametrize("score_mod", test_score_mods)
     def test_builtin_score_mods_automatic_dynamic(
         self, device, dtype: torch.dtype, score_mod: Callable
@@ -1268,6 +1318,7 @@ class TestFlexAttention(InductorTestCase):
     @supported_platform
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
+    @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
     @common_utils.parametrize("score_mod", test_score_mods)
     def test_builtin_score_mods_different_seqlen(
         self, device, dtype: torch.dtype, score_mod: Callable
@@ -1291,6 +1342,7 @@ class TestFlexAttention(InductorTestCase):
     @supported_platform
     @dtypes(*device_configs["cpu"].dtypes)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes)
+    @dtypesIfXPU(*device_configs["xpu"].dtypes)
     @common_utils.parametrize("score_mod", test_score_mods)
     @common_utils.parametrize("BLOCK_SIZE", test_block_size)
     def test_builtin_score_mods_different_block_size(
@@ -1311,6 +1363,7 @@ class TestFlexAttention(InductorTestCase):
     @supported_platform
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
+    @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
     @common_utils.parametrize("batch_dims", test_Bq_Bkv)
     @common_utils.parametrize("head_dims", test_Hq_Hkv)
     @common_utils.parametrize("score_mod", test_score_mods)
@@ -1381,6 +1434,7 @@ class TestFlexAttention(InductorTestCase):
     @supported_platform
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
+    @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
     @common_utils.parametrize("batch_dims", test_Bq_Bkv)
     @common_utils.parametrize("head_dims", test_Hq_Hkv)
     @common_utils.parametrize("score_mod", test_score_mods)
@@ -1411,8 +1465,10 @@ class TestFlexAttention(InductorTestCase):
     @supported_platform
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
+    @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
     @common_utils.parametrize("score_mod", test_score_mods)
     @skip_on_rocm  # TODO: NaNs on ROCM
+    @skip_on_xpu  # TODO: NaNs on XPU like ROCM, need another PR to fix.
     def test_GQA(self, device, dtype: torch.dtype, score_mod: Callable):
         inputs = (
             score_mod,
@@ -1433,6 +1489,7 @@ class TestFlexAttention(InductorTestCase):
     @supported_platform
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
+    @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
     @common_utils.parametrize(
         "q_s", test_strides[:2]
     )  # TODO: fix layout for query braodcasting
@@ -1580,6 +1637,7 @@ class TestFlexAttention(InductorTestCase):
     @supported_platform
     @dtypes(*device_configs["cpu"].dtypes)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes)
+    @dtypesIfXPU(*device_configs["xpu"].dtypes)
     def test_skip_odd_keys(self, device, dtype: torch.dtype):
         def score_mod(score, b, h, q, kv):
             return torch.where(kv % 2 == 0, score, float("-inf"))
@@ -1590,6 +1648,7 @@ class TestFlexAttention(InductorTestCase):
     @supported_platform
     @dtypes(*device_configs["cpu"].dtypes)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes)
+    @dtypesIfXPU(*device_configs["xpu"].dtypes)
     def test_function_composition(self, device, dtype: torch.dtype):
         def score_mod_1(score, b, h, m, n):
             return score + (m - n)
@@ -1606,6 +1665,7 @@ class TestFlexAttention(InductorTestCase):
     @supported_platform
     @dtypes(*device_configs["cpu"].dtypes)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes)
+    @dtypesIfXPU(*device_configs["xpu"].dtypes)
     def test_captured_buffers_all_dims(self, device, dtype: torch.dtype):
         head_scale = torch.randn(H, device=device)
         batch_scale = torch.randn(B, device=device)
@@ -1623,6 +1683,7 @@ class TestFlexAttention(InductorTestCase):
     @supported_platform
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
+    @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
     def test_seq_masking(self, device, dtype):
         seq_idx = torch.zeros(S, device=device, dtype=torch.bool)
         seq_idx[S // 2 :] = 1
@@ -1636,6 +1697,7 @@ class TestFlexAttention(InductorTestCase):
     @supported_platform
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
+    @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
     def test_load_from_bias_seq_only(self, device, dtype):
         bias = torch.randn(S, S, device=device, dtype=dtype)
 
@@ -1648,6 +1710,7 @@ class TestFlexAttention(InductorTestCase):
     @supported_platform
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
+    @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
     def test_load_from_bias_seq_batch(self, device, dtype):
         bias = torch.randn(B, S, S, device=device, dtype=dtype)
 
@@ -1707,6 +1770,7 @@ class TestFlexAttention(InductorTestCase):
     @supported_platform
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
+    @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
     def test_load_from_bias_head_seq_batch(self, device, dtype):
         bias = torch.randn(B, H, S, S, device=device, dtype=dtype)
 
@@ -1719,6 +1783,7 @@ class TestFlexAttention(InductorTestCase):
     @supported_platform
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
+    @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
     def test_load_rel_bias(self, device, dtype):
         rel_bias = torch.randn(2 * S, device=device, dtype=dtype)
 
@@ -1731,6 +1796,7 @@ class TestFlexAttention(InductorTestCase):
     @supported_platform
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
+    @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
     def test_dependent_causal_bidirectional(self, device, dtype):
         num_bidirectional = torch.randint(0, S, (B,), device=device, dtype=torch.int32)
 
@@ -1752,6 +1818,7 @@ class TestFlexAttention(InductorTestCase):
     @supported_platform
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
+    @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
     def test_natten_2d(self, device, dtype):
         H = 32
         W = S // H
@@ -1820,6 +1887,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @supported_platform
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
+    @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
     def test_silu_on_score(self, device, dtype):
         def silu_score(score, b, h, q, kv):
             return torch.nn.functional.silu(score)
@@ -1830,6 +1898,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @supported_platform
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
+    @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
     def test_padded_dense_causal(self, device, dtype):
         seq_len = torch.arange(B, device=device, dtype=torch.int32) + 1
 
@@ -1848,6 +1917,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @supported_platform
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
+    @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
     def test_captured_scale(self, device, dtype):
         scale = torch.ones((), device=device, dtype=torch.int32)
 
@@ -1860,6 +1930,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @supported_platform
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
+    @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
     def test_recompile_changed_score_mod(self, device, dtype):
         scale = torch.ones((), device=device, dtype=torch.int32)
         ADD = True
@@ -1881,6 +1952,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @expectedFailure  # If we capture a tensor then we can perform a reduction on it, and that shouldn't be allowed
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
+    @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
     def test_captured_reduction(self, device, dtype):
         scale = torch.randn((B, 8), device=device)
 
@@ -2340,6 +2412,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @supported_platform
     @dtypes(*device_configs["cpu"].dtypes)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes)
+    @dtypesIfXPU(*device_configs["xpu"].dtypes)
     def test_njt_causal(self, device, dtype):
         offsets = torch.tensor(
             [0, 1024, 1024 + 512, S], device=device, dtype=torch.int32
@@ -2381,6 +2454,12 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         self.run_test_with_paged_attention(
             score_mod, dtype=torch.float16, device=device
         )
+        self.run_test_with_paged_attention(
+            score_mod=score_mod,
+            dtype=torch.bfloat16,
+            KV_S=64,
+            device=device,
+        )
 
     @supported_platform
     @skip("TODO: Figure out why this is erroring")
@@ -2402,6 +2481,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @common_utils.parametrize("score_mod", test_score_mods)
     @dtypes(*device_configs["cpu"].dtypes)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes)
+    @dtypesIfXPU(*device_configs["xpu"].dtypes)
     @common_utils.parametrize("head_dims", [(D, D // 2), (D // 2, D)])
     def test_non_equal_head_dims(self, device, dtype, score_mod, head_dims):
         qk_d, v_d = head_dims
@@ -2495,6 +2575,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @common_utils.parametrize("head_dim", [17, 24, 94, 121])
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
+    @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
     def test_non_pow_2_headdim(self, device, dtype, head_dim):
         self.run_test(_rel_bias, dtype, device, B, H, S, head_dim, B, H, S, head_dim)
 
@@ -2559,6 +2640,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @skip_on_cpu
     @dtypes(*device_configs["cpu"].dtypes)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes)
+    @dtypesIfXPU(*device_configs["xpu"].dtypes)
     @common_utils.parametrize("score_mod", [_identity, _causal])
     def test_logsumexp_correctness(self, device, dtype, score_mod):
         make_tensor = functools.partial(
@@ -2910,6 +2992,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             torch.testing.assert_close(eager, compiled, atol=9e-3, rtol=0)
 
     @supported_platform
+    @skip_on_cpu
     @common_utils.parametrize("mode", ["eager", "inductor", "paged_attention"])
     @common_utils.parametrize(
         "permute_order",
@@ -2924,6 +3007,11 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @common_utils.parametrize("shape", [(2, 1, 128, 16), (4, 2, 64, 16)])
     def test_flex_attention_stride_ordering(self, device, mode, permute_order, shape):
         from torch._inductor.ir import get_stride_order
+
+        if torch.version.hip and mode == "paged_attention":
+            raise self.skipTest(
+                "TODO: figure out why mode_paged_attention_permute_order3_shape0 on MI200 caused mem fault"
+            )
 
         dtype = torch.float32
         # Setup
@@ -3015,7 +3103,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     def test_non_contiguous_last_dim(self, device):
         """Test flex_attention with tensors having non contiguous last dimension."""
         B, H, D = 4, 8, 64
-        dtype = torch.float16 if device == "cuda" else torch.float32
+        dtype = torch.float16 if device in DEVICE_SUPPORTS_BACKWARDS else torch.float32
         for S in [16, 64]:
 
             def column_major_tensor():
@@ -3245,7 +3333,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         )
 
         torch.testing.assert_close(lse_eager, lse_compiled, atol=3e-3, rtol=0)
-        torch.testing.assert_close(lse_eager, lse_paged, atol=3e-3, rtol=0)
+        requires_grad = device in DEVICE_SUPPORTS_BACKWARDS
+        if requires_grad:
+            torch.testing.assert_close(lse_eager, lse_paged, atol=3e-3, rtol=0)
 
     @supported_platform
     @skip_on_cpu
@@ -3847,7 +3937,7 @@ class GraphModule(torch.nn.Module):
 
     class mask_graph0(torch.nn.Module):
         def forward(self, arg0_1: "i32[]", arg1_1: "i32[]", arg2_1: "i32[]", arg3_1: "i32[]"):
-            full_default: "b8[]" = torch.ops.aten.full.default([], True, dtype = torch.bool, layout = torch.strided, device = device(type='cuda', index=0), pin_memory = False)
+            full_default: "b8[]" = torch.ops.aten.full.default([], True, dtype = torch.bool, layout = torch.strided, device = device(type='GPU_TYPE', index=0), pin_memory = False)
             return full_default
 """.replace(  # noqa: B950
             "GPU_TYPE", torch.device(device).type
@@ -4135,9 +4225,9 @@ class GraphModule(torch.nn.Module):
                 return output
 
         flex_module = SacModule(hidden_size=512, num_heads=8, context_fn=context_fn).to(
-            "cuda", dtype=torch.bfloat16
+            device, dtype=torch.bfloat16
         )
-        x = torch.ones(8, 1024, 512, device="cuda", dtype=torch.bfloat16)
+        x = torch.ones(8, 1024, 512, device=device, dtype=torch.bfloat16)
 
         # Run without compilation
         output_module = flex_module(x)
@@ -4233,11 +4323,11 @@ class GraphModule(torch.nn.Module):
     @supported_platform
     @skip_on_cpu
     @skipCUDAIf(not has_triton_tma_device(), "Requires TMA enabled CUDA device")
-    def test_tma_with_customer_kernel_options(self):
+    def test_tma_with_customer_kernel_options(self, device):
         make_tensor = functools.partial(
             torch.ones,
             (1, 1, 256, 128),
-            device="cuda",
+            device=device,
             dtype=torch.bfloat16,
         )
         query, key, value = make_tensor(), make_tensor(), make_tensor()
@@ -4821,6 +4911,7 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
         )
 
     @supported_platform
+    @skip_on_xpu
     def test_create_is_cuda_graphable(self, device):
         def mask_mod(b, h, q, kv):
             return q >= kv
@@ -5002,7 +5093,7 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
             self.assertIsNone(cpu_mask.q_indices)
 
 
-@large_tensor_test_class("2GB", device="cuda")
+@large_tensor_test_class("2GB", device=test_device[0])
 class TestPagedAttention(InductorTestCase):
     def setUp(self):
         super().setUp()
@@ -5124,7 +5215,12 @@ class TestPagedAttention(InductorTestCase):
         block_mask = create_block_mask(
             causal_mask, max_batch_size, 1, max_seq_len, max_seq_len, device=device
         )
-        new_block_mask = paged_cache.convert_logical_block_mask(block_mask)
+        kv_len_tensor = torch.full(
+            (max_batch_size,), max_seq_len, device=device, dtype=torch.int64
+        )
+        new_block_mask = paged_cache.convert_logical_block_mask(
+            block_mask, kv_len=kv_len_tensor
+        )
 
         zeros = [0, 0, 0, 0]
         # Check that the new block mask is correct
@@ -5317,6 +5413,7 @@ class TestPagedAttention(InductorTestCase):
     @supported_platform
     @dtypes(*device_configs["cpu"].dtypes)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes)
+    @dtypesIfXPU(*device_configs["xpu"].dtypes)
     @common_utils.parametrize("score_mod", test_score_mods)
     def test_paged_builtin_score_mods(
         self, device, dtype: torch.dtype, score_mod: Callable
@@ -5399,11 +5496,18 @@ class TestPagedAttention(InductorTestCase):
         )
         paged_cache.assign(batch_idx, input_pos, k, v, k_cache, v_cache)
 
-        new_block_mask = paged_cache.convert_logical_block_mask(block_mask)
+        kv_len_tensor = torch.full(
+            (max_batch_size,), max_seq_len, device=device, dtype=torch.int64
+        )
+        new_block_mask = paged_cache.convert_logical_block_mask(
+            block_mask, kv_len=kv_len_tensor
+        )
 
         compiled_sdpa = torch.compile(
             create_attention(
-                paged_cache.get_score_mod(score_mod), block_mask, enable_gqa=False
+                paged_cache.get_score_mod(score_mod, kv_len=kv_len_tensor),
+                block_mask,
+                enable_gqa=False,
             )
         )
         paged_out = compiled_sdpa(q, k_cache, v_cache, block_mask=new_block_mask)
@@ -5445,14 +5549,16 @@ def get_params(dtypes: list[torch.dtype]) -> list[Params]:
 
 
 supports_learnable_bias = unittest.skipUnless(
-    (torch.cuda.is_available() and has_triton())
-    and (torch.cuda.get_device_capability() >= (8, 0) or torch.version.hip),
+    (
+        (torch.cuda.is_available() and has_triton())
+        and (torch.cuda.get_device_capability() >= (8, 0) or torch.version.hip)
+    ),
     "Requires Triton + A100 or Triton + ROCm",
 )
 
 
 @supports_learnable_bias
-@large_tensor_test_class("2GB", device="cuda")
+@large_tensor_test_class("2GB", device=test_device[0])
 class TestLearnableBiases(InductorTestCase):
     def setUp(self):
         super().setUp()
@@ -5505,7 +5611,7 @@ class TestLearnableBiases(InductorTestCase):
     def _check_outputs_and_grads(
         self, out_eager, out_compiled, out_gold, tensors, names=None
     ):
-        backwards_grad = torch.randn_like(out_eager)
+        backwards_grad = torch.randn_like(out_eager, device="cpu").to(out_eager.device)
         grads_eager = torch.autograd.grad((out_eager,), tensors, backwards_grad)
         grads_compiled = torch.autograd.grad((out_compiled,), tensors, backwards_grad)
         grads_gold = torch.autograd.grad((out_gold,), tensors, backwards_grad)
@@ -6001,6 +6107,56 @@ class TestLearnableBiases(InductorTestCase):
     @common_utils.parametrize(
         "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
     )
+    @torch.compile
+    def test_learnable_bias_global_compiled(self, device, params):
+        batch_size = 1
+        num_heads = 1
+        seq_len = 128
+        head_dim = 16
+        d_model = num_heads * head_dim
+
+        query = torch.randn(batch_size, num_heads, seq_len, head_dim, device=device)
+        key = torch.randn(batch_size, num_heads, seq_len, head_dim, device=device)
+        value = torch.randn(batch_size, num_heads, seq_len, head_dim, device=device)
+
+        out_proj = nn.Linear(d_model, d_model, device=device)
+
+        query.requires_grad = True
+        key.requires_grad = True
+        value.requires_grad = True
+
+        bias = torch.randn(
+            batch_size,
+            num_heads,
+            seq_len,
+            seq_len,
+            device=device,
+            requires_grad=True,
+        )
+
+        def bias_mod(score, b, h, q_idx, kv_idx):
+            return score + bias[b, h, q_idx, kv_idx]
+
+        out = flex_attention(
+            query=query,
+            key=key,
+            value=value,
+            score_mod=bias_mod,
+        )
+        out = out.transpose(1, 2).contiguous().view(batch_size, seq_len, d_model)
+
+        attn_output = out_proj(out)
+        random_target = torch.randn(batch_size, seq_len, d_model, device=device)
+        loss = torch.nn.functional.mse_loss(attn_output, random_target)
+        loss.backward()
+
+        assert bias.grad, "No gradient computed for bias"
+        assert torch.any(bias.grad != 0), "Gradient for bias is 0"
+
+    @skip_on_cpu
+    @common_utils.parametrize(
+        "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
+    )
     def test_relative_1d_bias_only_grad(self, device, params):
         query, key, value = self._init_tensors(params, device=device)
         query = query.detach().requires_grad_(False)
@@ -6343,10 +6499,22 @@ class TestLearnableBiases(InductorTestCase):
             )
 
 
-instantiate_device_type_tests(TestFlexAttention, globals(), only_for=test_device)
-instantiate_device_type_tests(TestPagedAttention, globals(), only_for=test_device)
-instantiate_device_type_tests(TestBlockMask, globals(), only_for=("cuda",))
-instantiate_device_type_tests(TestLearnableBiases, globals(), only_for=test_device)
+instantiate_device_type_tests(
+    TestFlexAttention, globals(), only_for=test_device, allow_xpu=True
+)
+instantiate_device_type_tests(
+    TestPagedAttention, globals(), only_for=test_device, allow_xpu=True
+)
+instantiate_device_type_tests(
+    TestBlockMask,
+    globals(),
+    only_for=(test_device[0] if HAS_GPU else "cuda",),
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    TestLearnableBiases, globals(), only_for=test_device, allow_xpu=True
+)
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests

@@ -19,6 +19,7 @@ from torch._dynamo.testing import CompileCounterWithBackend
 from torch._higher_order_ops.wrap import tag_activation_checkpoint
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import IS_WINDOWS, skipIfHpu, skipIfRocm
+from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
 from torch.testing._internal.triton_utils import requires_cuda_and_triton
 from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils.checkpoint import (
@@ -26,6 +27,26 @@ from torch.utils.checkpoint import (
     CheckpointPolicy,
     create_selective_checkpoint_contexts,
 )
+
+
+if HAS_CUDA_AND_TRITON:
+    import triton
+    from triton import language as tl
+
+    @triton.jit
+    def add_one_kernel(
+        in_ptr0,
+        out_ptr,
+        n_elements,
+        BLOCK_SIZE: "tl.constexpr",
+    ):
+        pid = tl.program_id(axis=0)
+        block_start = pid * BLOCK_SIZE
+        offsets = block_start + tl.arange(0, BLOCK_SIZE)
+        mask = offsets < n_elements
+        x = tl.load(in_ptr0 + offsets, mask=mask)
+        output = x + 1
+        tl.store(out_ptr + offsets, output, mask=mask)
 
 
 requires_distributed = functools.partial(
@@ -182,46 +203,75 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         # The original version and the checkpointed version of the same function
         # should produce the same outputs and the same gradients under torch.compile.
 
-        # Run original version
-        cloned_args_orig_fn = []
-        for arg in args:
-            cloned_args_orig_fn.append(
-                arg.detach().clone().requires_grad_(arg.requires_grad)
-            )
-        torch.manual_seed(0)
-        compiled_orig_fn = torch.compile(
-            orig_fn, fullgraph=fullgraph, backend="inductor"
-        )
-        result_orig_fn = compiled_orig_fn(*cloned_args_orig_fn)
-        result_orig_fn.sum().backward()
+        def clone_args(args):
+            cloned_args = []
+            for arg in args:
+                cloned_args.append(
+                    arg.detach().clone().requires_grad_(arg.requires_grad)
+                )
+            return cloned_args
 
-        # Run checkpointed version
-        cloned_args_checkpointed_fn = []
-        for arg in args:
-            cloned_args_checkpointed_fn.append(
-                arg.detach().clone().requires_grad_(arg.requires_grad)
-            )
-        torch.manual_seed(0)
-        compiled_checkpointed_fn = torch.compile(
-            checkpointed_fn, fullgraph=fullgraph, backend="inductor"
-        )
-        result_checkpointed_fn = compiled_checkpointed_fn(*cloned_args_checkpointed_fn)
-        result_checkpointed_fn.sum().backward()
+        def run(compiler):
+            # Run original version
+            cloned_args_orig_fn = clone_args(args)
+            torch.manual_seed(0)
+            compiled_orig_fn = compiler(orig_fn)
+            result_orig_fn = compiled_orig_fn(*cloned_args_orig_fn)
+            result_orig_fn.sum().backward()
 
-        # Check that outputs and gradients are equal
-        self.assertEqual(
-            result_orig_fn,
-            result_checkpointed_fn,
-            msg="Output mismatch between the original version and the checkpointed version of the same function",
-        )
-        for cloned_arg_orig_fn, cloned_arg_checkpointed_fn in zip(
-            cloned_args_orig_fn, cloned_args_checkpointed_fn
-        ):
+            # Run checkpointed version
+            cloned_args_checkpointed_fn = clone_args(args)
+            torch.manual_seed(0)
+            compiled_checkpointed_fn = compiler(copy.deepcopy(checkpointed_fn))
+            result_checkpointed_fn = compiled_checkpointed_fn(
+                *cloned_args_checkpointed_fn
+            )
+            result_checkpointed_fn.sum().backward()
+
+            # Check that outputs and gradients are equal
             self.assertEqual(
-                cloned_arg_orig_fn.grad,
-                cloned_arg_checkpointed_fn.grad,
-                msg="Gradient mismatch between the original version and the checkpointed version of the same function",
+                result_orig_fn,
+                result_checkpointed_fn,
+                msg="Output mismatch between the original version and the checkpointed version of the same function",
             )
+            for cloned_arg_orig_fn, cloned_arg_checkpointed_fn in zip(
+                cloned_args_orig_fn, cloned_args_checkpointed_fn
+            ):
+                self.assertEqual(
+                    cloned_arg_orig_fn.grad,
+                    cloned_arg_checkpointed_fn.grad,
+                    msg="Gradient mismatch between the original version and the checkpointed version of the same function",
+                )
+
+        run(functools.partial(torch.compile, fullgraph=fullgraph))
+        if fullgraph:
+
+            def export_compiler(fn):
+                class WrapAsModule(nn.Module):
+                    def forward(self, *args, **kwargs):
+                        return fn(*args, **kwargs)
+
+                mod = WrapAsModule()
+
+                def runtime_wrapper(*runtime_args):
+                    from torch.export import _trace
+
+                    gm = _trace._export_to_torch_ir(
+                        f=mod,
+                        args=tuple(clone_args(args)),
+                        kwargs={},
+                        dynamic_shapes=None,
+                        preserve_module_call_signature=(),
+                        restore_fqn=False,
+                        allow_complex_guards_as_runtime_asserts=False,
+                        _log_export_usage=False,
+                    )
+                    # NOTE: this is necessary for rng to be added to the exported graph
+                    return torch.compile(gm, fullgraph=False)(*runtime_args)
+
+                return runtime_wrapper
+
+            run(export_compiler)
 
     def test_tags_function(self, device):
         def gn(x, y):
@@ -722,6 +772,73 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
 
         def gn(x, y):
             return torch.sigmoid(torch.matmul(torch.matmul(x, y), y)) * y
+
+        def fn(x, y):
+            return torch.utils.checkpoint.checkpoint(
+                gn,
+                x,
+                y,
+                use_reentrant=False,
+                context_fn=selective_checkpointing_context_fn,
+            )
+
+        x = torch.randn(4, 4, requires_grad=True, device=device)
+        y = torch.randn(4, 4, requires_grad=True, device=device)
+
+        fw_compiler = functools.partial(
+            count_ops,
+            freq=2,
+            op=torch.ops.aten.mm.default,
+        )
+        bw_compiler = functools.partial(
+            count_ops,
+            # We would've expected 6 here
+            # (2 matmul recompute and 2 mm ops per fwd matmul, so 2 + 2 * 2 = 6)
+            # if we didn't enable selective checkpointing.
+            freq=4,
+            op=torch.ops.aten.mm.default,
+        )
+        backend = aot_autograd(
+            fw_compiler=fw_compiler,
+            bw_compiler=bw_compiler,
+            partition_fn=min_cut_rematerialization_partition,
+        )
+        self._validate(fn, backend, x, y)
+        self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
+
+    @requires_cuda_and_triton
+    @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
+    def test_compile_selective_checkpoint_triton_kernel(self, device):
+        # Copy of the above test, but make sure that having a triton kernel in the
+        # region does not error.
+        def add_one(x):
+            out = torch.empty_like(x)
+            n_elements = x.numel()
+            add_one_kernel[(n_elements,)](x, out, n_elements, BLOCK_SIZE=4)
+            return out
+
+        class AddOne(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return add_one(x)
+
+            @staticmethod
+            def backward(ctx, x):
+                return x
+
+        def selective_checkpointing_context_fn():
+            no_recompute_list = [
+                torch.ops.aten.mm.default,
+            ]
+            return create_selective_checkpoint_contexts(
+                _get_custom_policy(no_recompute_list=no_recompute_list)
+            )
+
+        def gn(x, y):
+            return (
+                torch.sigmoid(torch.matmul(torch.matmul(AddOne.apply(x.sin()), y), y))
+                * y
+            )
 
         def fn(x, y):
             return torch.utils.checkpoint.checkpoint(

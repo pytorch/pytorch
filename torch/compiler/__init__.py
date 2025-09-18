@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import io
 from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import ParamSpec
 
@@ -23,6 +24,7 @@ __all__ = [
     "set_stance",
     "set_enable_guard_collectives",
     "cudagraph_mark_step_begin",
+    "load_compiled_function",
     "wrap_numpy",
     "is_compiling",
     "is_dynamo_compiling",
@@ -639,3 +641,23 @@ def nested_compile_region(fn=None):
     )
 
     return _mark_compile_region(fn)
+
+
+def load_compiled_function(file: io.IOBase):
+    """
+    Load an aot-compiled function from a file.
+
+    .. warning::
+
+        This API is currently experimental and subject to change.
+
+    Args:
+        file: A file-like object containing the serialized compiled function.
+
+    Returns:
+        A torch-compiled function with compilation preloaded from disk.
+    """
+    from torch._dynamo.aot_compile import CompileArtifacts
+
+    data = file.read()
+    return CompileArtifacts.deserialize(data).compiled_function()

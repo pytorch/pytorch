@@ -47,6 +47,11 @@ from .virtualized import V
 
 log = logging.getLogger(__name__)
 
+# Graph execution tracking for debugging
+GRAPH_EXECUTION_ORDER: Optional[list[dict[str, object]]] = None
+RECORD_GRAPH_EXECUTION: bool = False
+GRAPH_COMPILE_IDS: Optional[dict[int, Optional[str]]] = None
+
 ir_pre_fusion_log = getArtifactLogger(__name__, "ir_pre_fusion")
 ir_post_fusion_log = getArtifactLogger(__name__, "ir_post_fusion")
 SchedulerNodeList = list[Any]
@@ -321,6 +326,12 @@ _inductor_triton_kernel_to_post_grad_node_info: dict[str, list[str]] = {}
 _pre_grad_graph_id: Optional[int] = None
 _inductor_pre_grad_node_stack_trace: dict[str, str] = {}
 _inductor_kernel_stack_trace: dict[str, list[str]] = {}
+_inductor_kernel_provenance_debug_handle: int = 0
+
+
+def reset_inductor_kernel_provenance_debug_handle() -> None:
+    global _inductor_kernel_provenance_debug_handle
+    _inductor_kernel_provenance_debug_handle = 0
 
 
 @contextlib.contextmanager
@@ -802,6 +813,39 @@ def log_runtime_and_tensor_meta(node_runtimes: Sequence[tuple[Any, float]]) -> N
         log.debug("Failed to log inductor_runtime_and_tensor_meta", exc_info=True)
 
 
+def log_graph_execution() -> None:
+    """Emit a structured artifact with the graph execution order."""
+    if not GRAPH_EXECUTION_ORDER:
+        return
+    try:
+        trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "graph_execution",
+                "encoding": "json",
+            },
+            payload_fn=lambda: {"graph_execution_order": GRAPH_EXECUTION_ORDER},
+        )
+    except Exception:
+        log.debug("Failed to log graph_execution", exc_info=True)
+
+
+@contextlib.contextmanager
+def record_and_log_graph_execution_order() -> Iterator[None]:
+    """Record graph execution order and log it once on exit."""
+    global RECORD_GRAPH_EXECUTION, GRAPH_EXECUTION_ORDER, GRAPH_COMPILE_IDS
+    GRAPH_EXECUTION_ORDER = []
+    GRAPH_COMPILE_IDS = {}
+    RECORD_GRAPH_EXECUTION = True
+    try:
+        yield
+    finally:
+        log_graph_execution()
+        RECORD_GRAPH_EXECUTION = False
+        GRAPH_EXECUTION_ORDER = None
+        GRAPH_COMPILE_IDS = None
+
+
 @dataclasses.dataclass
 class TensorMetadataHolder:
     tensor_metadata: TensorMetadata
@@ -968,18 +1012,12 @@ def create_node_mapping_kernel_to_post_grad(
         return empty_return
 
 
-def dump_inductor_provenance_info(
-    filename: str = "inductor_generated_kernel_to_post_grad_nodes.json",
-) -> dict[str, Any]:
+def dump_inductor_provenance_info() -> dict[str, Any]:
     try:
         global _pre_grad_graph_id
         global _inductor_post_to_pre_grad_nodes
         global _inductor_triton_kernel_to_post_grad_node_info
-        if config.trace.enabled:
-            with V.debug.fopen(filename, "w") as fd:
-                log.info("Writing provenance tracing debugging info to %s", fd.name)
-                json.dump(_inductor_triton_kernel_to_post_grad_node_info, fd)
-        node_mapping = {}
+        node_mapping: dict[str, Any] = {}
         if _pre_grad_graph_id:
             node_mapping_kernel = create_node_mapping_kernel_to_post_grad(
                 _inductor_triton_kernel_to_post_grad_node_info
@@ -993,6 +1031,9 @@ def dump_inductor_provenance_info(
                     "inductor_provenance_tracking_node_mappings.json", "w"
                 ) as fd:
                     json.dump(node_mapping, fd)
+        # we need to update the node mapping version when node mapping format changes
+        # so the tlparse tool knows which node mapping version it is looking at
+        node_mapping["version"] = 2.0
         return node_mapping
     except Exception as e:
         # Since this is just debugging, it should never interfere with regular
@@ -1055,13 +1096,23 @@ def set_kernel_post_grad_provenance_tracing(
     node_schedule: Union[Sequence[BaseSchedulerNode], ExternKernelOut],
     kernel_name: str,
     is_extern: bool = False,
-) -> None:
+) -> Optional[int]:
+    """
+    Set the mapping between `kernel_name` and the post_grad nodes in `node_schedule`.
+
+    Returns a unique int debug handler for each call to this function.
+    """
+
     try:
         from .codegen.simd_kernel_features import DisableReduction, EnableReduction
 
         global _inductor_triton_kernel_to_post_grad_node_info
         global _inductor_kernel_stack_trace
+        global _inductor_kernel_provenance_debug_handle
+
+        _inductor_kernel_provenance_debug_handle += 1
         stack_traces: list[str] = []
+        kernel_name = f"{kernel_name}:{_inductor_kernel_provenance_debug_handle}"
         if is_extern:
             assert isinstance(node_schedule, ExternKernelOut)
             curr_node_info = _inductor_triton_kernel_to_post_grad_node_info.setdefault(
@@ -1100,6 +1151,7 @@ def set_kernel_post_grad_provenance_tracing(
                         )
             stack_traces = list(stack_traces_set)
         _inductor_kernel_stack_trace.setdefault(kernel_name, []).extend(stack_traces)
+        return _inductor_kernel_provenance_debug_handle
     except Exception as e:
         # Since this is just debugging, it should never interfere with regular
         # program execution, so we use this try-except to guard against any error
@@ -1112,6 +1164,7 @@ def set_kernel_post_grad_provenance_tracing(
                 "stack_trace": traceback.format_exc(),
             },
         )
+        return None
 
 
 def save_args_for_compile_fx_inner(*args: Any, **kwargs: Any) -> None:
