@@ -222,14 +222,14 @@ class _MeshLayout(Layout):
             for group_offset in self.complement(world_size).member_ranks()
         ]
 
-    def check_overlap(self) -> bool:
+    def check_non_overlap(self) -> bool:
         """
-        Check if the layout has any overlap between the ranks it generates.
+        Check if the layout has any overlap between the ranks it generates. If there is overlap,
+        we return False, otherwise True.
 
-        This method determines whether multiple coordinates can map to the same rank,
-        which would indicate an invalid layout for distributed computing purposes.
+        Aside from indice 0, indices from each dim of the layout must be non-overlapping.
 
-        Algorithm:
+        Here is how it works:
         1. Sort dimensions by stride (smallest stride first)
         2. For each dimension, check if:
            - It has the same stride as previous dimension (duplicate mapping)
@@ -255,6 +255,8 @@ class _MeshLayout(Layout):
         previous_span = -1
         previous_stride = -1
         for size, stride in sorted(self.sizes_and_strides, key=lambda x: x[1]):
+            if size == 1:
+                continue
             if previous_stride == stride or stride < previous_span:
                 return False
             previous_stride = stride
@@ -273,7 +275,8 @@ class _MeshLayout(Layout):
 
         With this method, the cute layout serves as the backend of indices bookkeeping for the
         mesh tensor when it comes to flatten, unflatten and slicing operations. The actual mesh
-        tensor still represents the actual device assignment and ranks.
+        tensor still represents the actual device assignment and ranks. We need this function
+        to specify device allocation and create backend for a mesh.
 
         Overview:
         1. Generate logical process groups using this layout's structure
