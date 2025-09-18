@@ -149,7 +149,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
 
     supports_caching = False
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args: Any, **kwargs: Any):
         super().__init__(*args, **kwargs)
         self.subgms: dict[str, torch.fx.GraphModule] = {}
 
@@ -159,7 +159,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         Since the FX converter handles this, do nothing here.
         """
 
-    def codegen_conditional(self, conditional):
+    def codegen_conditional(self, conditional: ir.Conditional) -> None:
         """
         Conditional codegen normally emits a number of different wrapper lines.
         Instead, FX conversion uses a dedicated line for the whole conditional.
@@ -170,7 +170,9 @@ class WrapperFxCodegen(PythonWrapperCodegen):
 
         self.writeline(ConditionalLine(self, conditional))
 
-    def define_subgraph_launcher_fn(self, name: str, subgraph_code):
+    def define_subgraph_launcher_fn(
+        self, name: str, subgraph_code: Union[str, FileBackedGraphModule]
+    ) -> None:
         """
         Record subgms as they're generated.
         """
@@ -235,7 +237,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
 
     @classmethod
     def create(
-        cls,
+        cls: type["WrapperFxCodegen"],
         is_subgraph: bool,
         subgraph_name: Optional[str],
         parent_wrapper: Optional[PythonWrapperCodegen],
@@ -248,13 +250,13 @@ class WrapperFxCodegen(PythonWrapperCodegen):
             # Subgraphs override some methods of PythonWrapperCodegen.
             # Apply these overrides to the user-provided class, with priority given to
             # user-provided methods.
-            class SubgraphFxWrapperCodegen(cls, SubgraphPythonWrapperCodegen):
+            class SubgraphFxWrapperCodegen(cls, SubgraphPythonWrapperCodegen):  # type: ignore[misc,valid-type]
                 def compile_graph(self, gm: GraphModule) -> Callable[..., Any]:
                     """
                     Skip graph compilation for subgraphs.
                     """
 
-                    def crash_if_run(*args, **kwargs):
+                    def crash_if_run(*args: Any) -> None:
                         raise NotImplementedError("Cannot run a subgraph in isolation!")
 
                     return crash_if_run
@@ -572,11 +574,13 @@ class FxConverter:
             name: generate_getattr(name, subgm) for name, subgm in self.subgms.items()
         }
 
-    def _get_subgm(self, subgraph: ir.Subgraph) -> torch.fx.Node:
+    def _get_subgm_attr(self, subgraph: ir.Subgraph) -> torch.fx.Node:
         """
-        Look up the FX IR node for a subgraph.
+        Look up the getattr node for a subgraph.
         """
-        return self.subgm_getattrs[subgraph.graph.name]
+        graph = subgraph.graph
+        assert graph is not None
+        return self.subgm_getattrs[graph.name]
 
     def generate(self) -> torch.fx.GraphModule:
         """
@@ -690,15 +694,24 @@ class FxConverter:
     def _generate_conditional(self, line: WrapperLine) -> None:
         assert isinstance(line, ConditionalLine)
 
+        def get_subgm_attr(subgraph: Optional[ir.Subgraph]) -> torch.fx.Node:
+            assert subgraph is not None
+            return self._get_subgm_attr(subgraph)
+
         # Access the subgraphs as getattrs.
         ir_node = line.node
         (true_subgm, false_subgm) = [
-            self._get_subgm(subgraph)
+            get_subgm_attr(subgraph)
             for subgraph in (ir_node.true_subgraph, ir_node.false_subgraph)
         ]
 
-        predicate = self._generate_buffer(ir_node.predicate)
-        operands = tuple(self._generate_buffer(arg) for arg in ir_node.operands)
+        def generate_buffer(node: Optional[ir.IRNode]) -> Optional[torch.fx.Node]:
+            assert node is not None
+            return self._generate_buffer(node)
+
+        predicate = generate_buffer(ir_node.predicate)
+        assert ir_node.operands is not None
+        operands = tuple(generate_buffer(arg) for arg in ir_node.operands)
         fx_node = self.gm.graph.call_function(
             torch.ops.higher_order.cond,
             args=(predicate, true_subgm, false_subgm, operands),

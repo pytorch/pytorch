@@ -2182,7 +2182,9 @@ class PythonWrapperCodegen(CodeGen):
         )
         self.header.splice(body)
 
-    def define_subgraph_launcher_fn(self, name: str, subgraph_code):
+    def define_subgraph_launcher_fn(
+        self, name: str, subgraph_code
+    ):
         self.subgraph_definitions.splice(subgraph_code.value)
 
     def define_user_defined_triton_kernel(
@@ -3424,7 +3426,7 @@ class PythonWrapperCodegen(CodeGen):
         else:
             self.codegen_subgraph(invoke_subgraph.subgraph, outer_inputs, name)
 
-    def codegen_conditional(self, conditional):
+    def codegen_conditional(self, conditional) -> None:
         name = conditional.get_name()
 
         outer_inputs = [buf.codegen_reference() for buf in conditional.operands]
