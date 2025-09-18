@@ -4270,17 +4270,17 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                 hx_val, grad_hy, cx_val, grad_cy)
             compare_cpu_gpu(outputs_cpu, outputs_gpu)
 
-    @unittest.skipIf(not (TEST_CUDNN or TEST_XPU), "needs cudnn")
+    @unittest.skipIf(not (TEST_CUDNN or TEST_XPU), "needs cudnn or XPU")
     def test_RNN_cpu_vs_cudnn_no_dropout(self):
         dtype = torch.double
         self._test_RNN_cpu_vs_cudnn(0, dtype)
 
-    @unittest.skipIf(not (TEST_CUDNN or TEST_XPU), "needs cudnn")
+    @unittest.skipIf(not (TEST_CUDNN or TEST_XPU), "needs cudnn or XPU")
     def test_RNN_cpu_vs_cudnn_with_dropout(self):
         # Because of dropout randomness, can only compare dropout=0 and dropout=1
         self._test_RNN_cpu_vs_cudnn(1)
 
-    @unittest.skipIf(not (TEST_CUDNN or TEST_XPU), "needs cudnn")
+    @unittest.skipIf(not (TEST_CUDNN or TEST_XPU), "needs cudnn or XPU")
     @tf32_on_and_off
     def test_RNN_cudnn_weight_norm(self):
         input_size = 10
@@ -4335,7 +4335,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         warnings.simplefilter("always")
         self.assertEqual(m(inp)[0].cpu(), out_expected[0])
 
-    @unittest.skipIf(not (TEST_CUDNN or TEST_XPU), "needs cudnn")
+    @unittest.skipIf(not (TEST_CUDNN or TEST_XPU), "needs cudnn or XPU")
     @set_default_dtype(torch.double)
     def test_RNN_dropout(self):
         # checking the assumption that cuDNN sticks dropout in between
@@ -4379,7 +4379,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                     self.assertEqual(hy.data[0][0][0], 10)
                     self.assertEqual(hy.data[1][0][0], output_val)
 
-    @unittest.skipIf(not (TEST_CUDNN or TEST_XPU), "needs cudnn")
+    @unittest.skipIf(not (TEST_CUDNN or TEST_XPU), "needs cudnn or XPU")
     @set_default_dtype(torch.double)
     def test_error_RNN_seq_len_zero(self):
         # checking error message when RNN has seq_len = 0
@@ -4408,7 +4408,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                 # Check that backward does not cause a hard error
                 outs[0].sum().backward()
 
-    @unittest.skipIf(not (TEST_CUDNN or TEST_XPU), "needs cudnn")
+    @unittest.skipIf(not (TEST_CUDNN or TEST_XPU), "needs cudnn or XPU")
     def test_RNN_dropout_state(self):
         for p in (0, 0.1234):
             for train in (True, False):
@@ -4449,7 +4449,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                         self.assertNotEqual(hy1, hy2)
                         self.assertNotEqual(hy1, hy3)
 
-    @unittest.skipIf(not (TEST_CUDNN or TEST_XPU), "needs cudnn")
+    @unittest.skipIf(not (TEST_CUDNN or TEST_XPU), "needs cudnn or XPU")
     @set_default_dtype(torch.double)
     def test_RNN_change_dropout(self):
         for train, gpu in product((True, False), repeat=2):
@@ -5013,7 +5013,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         helper(self, torch.bfloat16)
         helper(self, torch.float16)
 
-    @unittest.skipIf(not (TEST_CUDNN or TEST_XPU), "needs cudnn")
+    @unittest.skipIf(not (TEST_CUDNN or TEST_XPU), "needs cudnn or XPU")
     def test_batchnorm_cudnn_nhwc(self):
         def run_test(input, grad_output):
             c = input.size(1)
@@ -6704,7 +6704,12 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         torch.set_printoptions(precision=5)
         self.assertEqual(out_t, expected_out_t, atol=1e-4, rtol=0)
 
-        device_list = get_all_device_types()
+        device_list = ['cpu']
+        if TEST_CUDA:
+            device_list.append('cuda')
+
+        if TEST_XPU:
+            device_list.append('xpu')
 
         for align_corners in [True, False]:
             kwargs = dict(mode='bicubic', align_corners=align_corners)
@@ -6907,7 +6912,12 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             size += [2] * dim
             return torch.ones(size, requires_grad=True, device=device)
 
-        device_list = get_all_device_types()
+        device_list = ['cpu']
+        if TEST_CUDA:
+            device_list.append('cuda')
+
+        if TEST_XPU:
+            device_list.append('xpu')
 
         for device in device_list:
             for scale_factor in [0.5, 1.5, 2]:
@@ -10480,7 +10490,7 @@ class TestNNDeviceType(NNTestCase):
                         # CUDA path doesn't support padding mask when the number of heads is odd
                         continue
                     input = torch.randn((B, num_heads, L, L))
-                    if (TEST_GPU and self.device_type == device_type):
+                    if (self.device_type in ["cuda", "xpu"]):
                         input = input.to(device_type)
                         mask = mask.to(device_type)
                         mask_orig = mask_orig.to(device_type)
@@ -10639,7 +10649,7 @@ class TestNNDeviceType(NNTestCase):
                 for mask_type in [1, 2]:  # 1 = BxL => src_key_padding_mask
                     input = torch.randn(shape, requires_grad=True)
                     mask = torch.randint(0, 2, shape).bool()
-                    if (TEST_GPU and self.device_type == device_type):
+                    if (self.device_type in ["cuda", "xpu"]):
                         input = input.to(device_type).detach().requires_grad_()
                         mask = mask.to(device_type)
                     self._test_masked_softmax_helper(input, dim, mask, mask_type)
@@ -10652,7 +10662,7 @@ class TestNNDeviceType(NNTestCase):
             for mask_type in [1, 2]:  # 1 = BxL => src_key_padding_mask
                 input = torch.randn((x, y), requires_grad=True)
                 mask = torch.tensor([i % 2 for i in range(y)]).expand((x, y)).bool()
-                if (TEST_GPU and self.device_type == device_type):
+                if (self.device_type in ["cuda", "xpu"]):
                     input = input.to(device_type).detach().requires_grad_()
                     mask = mask.to(device_type)
                 self._test_masked_softmax_helper(input, dim, mask, mask_type)
