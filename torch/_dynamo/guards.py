@@ -2163,6 +2163,8 @@ class GuardBuilder(GuardBuilderBase):
                 range,
                 dict_keys,
                 torch.Size,
+                torch.Stream,
+                torch.cuda.streams.Stream,
                 *np_types,
                 *ok_mutable_types,
             }

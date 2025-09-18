@@ -70,11 +70,19 @@ class StreamVariable(VariableTracker):
                 ),
             )
         elif name in cmp_name_to_op_mapping and len(args) == 1 and not kwargs:
+            from ..guards import GuardBuilder, install_guard
+
+            if self.source:
+                install_guard(self.source.make_guard(GuardBuilder.EQUALS_MATCH))
+
             # NB : Checking for mutation is necessary because we compare
             # constant values
             other = args[0]
             if not isinstance(other, StreamVariable):
                 return ConstantVariable.create(NotImplemented)
+
+            if other.source:
+                install_guard(self.source.make_guard(GuardBuilder.EQUALS_MATCH))
             return ConstantVariable.create(
                 cmp_name_to_op_mapping[name](self.value, other.value)  # type: ignore[arg-type]
             )

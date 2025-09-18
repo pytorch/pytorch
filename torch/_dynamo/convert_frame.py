@@ -154,6 +154,7 @@ from .utils import (
     maybe_disable_inference_mode_for_fake_prop,
     orig_code_map,
     reset_graph_break_dup_checker,
+    reset_user_object_tracking,
     setup_compile_debug,
     to_int_us,
     troubleshooting_url,
@@ -309,6 +310,7 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
                 torch.fx._symbolic_trace._maybe_revert_all_patches()
             )
             exit_stack.enter_context(torch_function_mode_stack_state_mgr)
+            reset_user_object_tracking()
             try:
                 return fn(*args, **kwargs)
             finally:

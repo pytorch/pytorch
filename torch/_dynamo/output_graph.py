@@ -133,7 +133,9 @@ from .utils import (
     get_static_address_type,
     get_unique_name_wrt,
     graph_break_reasons,
+    has_user_objects,
     increment_op_count,
+    index_to_source,
     istype,
     lazy_format_graph_code,
     LazyString,
@@ -1413,6 +1415,21 @@ class OutputGraph(OutputGraphGuardsState):
 
         from .decorators import disable
 
+        if has_user_objects():
+            codegen = PyCodegen(
+                self.root_tx, root, overridden_sources=overridden_sources
+            )
+            codegen.add_push_null(
+                lambda: codegen.load_import_from(
+                    torch._dynamo.utils.__name__, "store_user_object_weakrefs"
+                )
+            )
+            for source in reversed(index_to_source.values()):
+                codegen(source)
+            codegen.call_function(len(index_to_source), False)
+            codegen.pop_top()
+            self.add_output_instructions(codegen.get_instructions())
+
         # to handle random calls
         if len(self.random_calls) > 0:
             random_calls_instructions = []
@@ -1550,7 +1567,7 @@ class OutputGraph(OutputGraphGuardsState):
                             )
                         elif (
                             vt.source is not None
-                            and (source := getattr(vt.source, "base", None))
+                            and (source := getattr(vt.source, "base", None))  # type: ignore[assignment]
                             and source.is_input
                         ):
                             self.export_metadata.output_return_type[idx] = (
