@@ -1050,18 +1050,23 @@ class TorchBindOpOverload(OpOverload[_P, _T]):
     @contextlib.contextmanager
     def _register_as_effectful_op_temporarily(self):
         from torch._higher_order_ops.effects import (
+            _deregister_effectful_op,
             _EffectType,
             _register_effectful_op,
             SIDE_EFFECTS,
         )
 
         try:
-            if self not in SIDE_EFFECTS:
+            # We don't want to register the effect if there already exists a
+            # registration, especially if the registration is None (explicitly
+            # no effect)
+            registered_op = SIDE_EFFECTS.contains(self)
+            if not registered_op:
                 _register_effectful_op(self, _EffectType.ORDERED)
             yield
         finally:
-            if self in SIDE_EFFECTS:
-                del SIDE_EFFECTS[self]
+            if not registered_op:
+                _deregister_effectful_op(self)
 
     # Use positional-only argument to avoid naming collision with aten ops arguments
     # that are named "self". This way, all the aten ops can be called by kwargs.

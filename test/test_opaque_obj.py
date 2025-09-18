@@ -3,6 +3,8 @@ import copy
 
 import torch
 from torch._dynamo.test_case import run_tests, TestCase
+from torch._functorch.aot_autograd import aot_export_module
+from torch._higher_order_ops.effects import _deregister_effectful_op
 from torch._library.opaque_object import get_payload, make_opaque, set_payload
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import (
@@ -196,6 +198,103 @@ def forward(self, arg0_1, arg1_1):
 
         self.assertTrue(q1 is not q2)
         self.assertTrue(q1 == q2)
+
+    def test_aot_export_tensor_queue_operators(self):
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, tq, x):
+                torch.ops._TestOpaqueObject.queue_push(tq, x.cos())
+                torch.ops._TestOpaqueObject.queue_push(tq, x.sin())
+                x_sin = torch.ops._TestOpaqueObject.queue_pop(
+                    tq
+                ) - torch.ops._TestOpaqueObject.queue_size(tq)
+                x_cos = torch.ops._TestOpaqueObject.queue_pop(
+                    tq
+                ) + torch.ops._TestOpaqueObject.queue_size(tq)
+                return x_sin, x_cos, tq
+
+        mod = Model()
+
+        tq1 = OpaqueQueue([], torch.empty(0).fill_(-1))
+        obj1 = make_opaque(tq1)
+        x = torch.ones(2, 3)
+
+        fake_mode = torch._subclasses.fake_tensor.FakeTensorMode()
+        # fake_tq1 = torch._library.fake_class_registry.maybe_to_fake_obj(fake_mode, tq1)
+        fake_x = fake_mode.from_tensor(x)
+        gm = aot_export_module(mod, (obj1, fake_x), trace_joint=False)[0]
+
+        # inputs: token, tq, x
+        # return: token, x_sin, x_cos, tq
+        self.assertExpectedInline(
+            gm.code.strip(),
+            """\
+def forward(self, arg0_1, arg1_1, arg2_1):
+    cos = torch.ops.aten.cos.default(arg2_1)
+    with_effects = torch.ops.higher_order.with_effects(arg0_1, torch.ops._TestOpaqueObject.queue_push.default, arg1_1, cos);  arg0_1 = cos = None
+    getitem = with_effects[0];  with_effects = None
+    sin = torch.ops.aten.sin.default(arg2_1);  arg2_1 = None
+    with_effects_1 = torch.ops.higher_order.with_effects(getitem, torch.ops._TestOpaqueObject.queue_push.default, arg1_1, sin);  getitem = sin = None
+    getitem_2 = with_effects_1[0];  with_effects_1 = None
+    with_effects_2 = torch.ops.higher_order.with_effects(getitem_2, torch.ops._TestOpaqueObject.queue_pop.default, arg1_1);  getitem_2 = None
+    getitem_4 = with_effects_2[0]
+    getitem_5 = with_effects_2[1];  with_effects_2 = None
+    with_effects_3 = torch.ops.higher_order.with_effects(getitem_4, torch.ops._TestOpaqueObject.queue_size.default, arg1_1);  getitem_4 = None
+    getitem_6 = with_effects_3[0];  with_effects_3 = None
+    sub = torch.ops.aten.sub.Tensor(getitem_5, 1);  getitem_5 = None
+    with_effects_4 = torch.ops.higher_order.with_effects(getitem_6, torch.ops._TestOpaqueObject.queue_pop.default, arg1_1);  getitem_6 = None
+    getitem_8 = with_effects_4[0]
+    getitem_9 = with_effects_4[1];  with_effects_4 = None
+    with_effects_5 = torch.ops.higher_order.with_effects(getitem_8, torch.ops._TestOpaqueObject.queue_size.default, arg1_1);  getitem_8 = None
+    getitem_10 = with_effects_5[0];  with_effects_5 = None
+    add = torch.ops.aten.add.Tensor(getitem_9, 0);  getitem_9 = None
+    return (getitem_10, sub, add, arg1_1)""",  # noqa: B950
+        )
+
+        # If we register with None, this should mean the ops do not have effect
+        # since by default ops with ScriptObjects have effect
+        torch.library.register_effectful_op(
+            "_TestOpaqueObject::queue_push.default", None
+        )
+        torch.library.register_effectful_op(
+            "_TestOpaqueObject::queue_pop.default", None
+        )
+        torch.library.register_effectful_op(
+            "_TestOpaqueObject::queue_size.default", None
+        )
+        gm = aot_export_module(mod, (obj1, fake_x), trace_joint=False)[0]
+
+        # inputs: token, tq, x
+        # return: token, x_sin, x_cos, tq
+        self.assertExpectedInline(
+            gm.code.strip(),
+            """\
+def forward(self, arg0_1, arg1_1, arg2_1):
+    cos = torch.ops.aten.cos.default(arg2_1)
+    with_effects = torch.ops.higher_order.with_effects(arg0_1, torch.ops._TestOpaqueObject.queue_push.default, arg1_1, cos);  arg0_1 = cos = None
+    getitem = with_effects[0];  with_effects = None
+    sin = torch.ops.aten.sin.default(arg2_1);  arg2_1 = None
+    with_effects_1 = torch.ops.higher_order.with_effects(getitem, torch.ops._TestOpaqueObject.queue_push.default, arg1_1, sin);  getitem = sin = None
+    getitem_2 = with_effects_1[0];  with_effects_1 = None
+    with_effects_2 = torch.ops.higher_order.with_effects(getitem_2, torch.ops._TestOpaqueObject.queue_pop.default, arg1_1);  getitem_2 = None
+    getitem_4 = with_effects_2[0]
+    getitem_5 = with_effects_2[1];  with_effects_2 = None
+    with_effects_3 = torch.ops.higher_order.with_effects(getitem_4, torch.ops._TestOpaqueObject.queue_size.default, arg1_1);  getitem_4 = None
+    getitem_6 = with_effects_3[0];  with_effects_3 = None
+    sub = torch.ops.aten.sub.Tensor(getitem_5, 1);  getitem_5 = None
+    with_effects_4 = torch.ops.higher_order.with_effects(getitem_6, torch.ops._TestOpaqueObject.queue_pop.default, arg1_1);  getitem_6 = None
+    getitem_8 = with_effects_4[0]
+    getitem_9 = with_effects_4[1];  with_effects_4 = None
+    with_effects_5 = torch.ops.higher_order.with_effects(getitem_8, torch.ops._TestOpaqueObject.queue_size.default, arg1_1);  getitem_8 = None
+    getitem_10 = with_effects_5[0];  with_effects_5 = None
+    add = torch.ops.aten.add.Tensor(getitem_9, 0);  getitem_9 = None
+    return (getitem_10, sub, add, arg1_1)""",  # noqa: B950
+        )
+        _deregister_effectful_op("_TestOpaqueObject::queue_push.default")
+        _deregister_effectful_op("_TestOpaqueObject::queue_pop.default")
+        _deregister_effectful_op("_TestOpaqueObject::queue_size.default")
 
 
 instantiate_parametrized_tests(TestOpaqueObject)

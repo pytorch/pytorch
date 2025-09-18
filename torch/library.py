@@ -28,6 +28,7 @@ from torch._library.custom_ops import (
     CustomOpDef,
     device_types_t,
 )
+from torch._library.effects import register_effectful_op
 from torch._library.infer_schema import infer_schema  # noqa: F401
 from torch._library.triton import triton_op, wrap_triton
 from torch._ops import OpOverload
@@ -40,6 +41,7 @@ __all__ = [
     "define",
     "fallthrough_kernel",
     "impl_abstract",
+    "register_effectful_op",
     "register_autocast",
     "register_fake",
     "register_torch_dispatch",

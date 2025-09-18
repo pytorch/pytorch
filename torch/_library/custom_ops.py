@@ -13,6 +13,7 @@ from torch.types import _dtype
 from torch.utils._exposed_in import exposed_in
 
 from . import autograd, utils
+from .effects import _EffectType, register_effectful_op
 
 
 device_types_t = Optional[Union[str, Sequence[str]]]
@@ -53,6 +54,7 @@ def custom_op(
     device_types: device_types_t = None,
     schema: Optional[str] = None,
     tags: Optional[Sequence[_C.Tag]] = None,
+    effect: Optional[_EffectType] = None,
 ) -> Union[Callable[[Callable[..., object]], "CustomOpDef"], "CustomOpDef"]:
     """Wraps a function into custom operator.
 
@@ -151,6 +153,7 @@ def custom_op(
 
         namespace, opname = name.split("::")
         result = CustomOpDef(namespace, opname, schema_str, fn, tags)
+
         if schema is not None:
             # Check that schema's alias annotations match those of `mutates_args`.
             expected = set()
@@ -164,6 +167,10 @@ def custom_op(
                     f"which is different from what was provided to us in `mutates_args`. "
                     f"Please make these consistent."
                 )
+
+        if effect is not None:
+            register_effectful_op(name, effect)
+
         result.register_kernel(device_types)(fn)
         return result
 
