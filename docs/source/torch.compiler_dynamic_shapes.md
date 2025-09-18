@@ -229,6 +229,31 @@ for integers and tensor sizes and has the highest precedence over all other flag
 that force static shapes. It will not throw an error if what is marked dynamic
 gets specialized or if the provided input does not exist.
 
+Here is an example:
+
+```{code-cell}
+import torch
+
+@torch.compile()
+def f(x):
+     return x * x.size()[0]
+
+with torch.compiler.config.patch(dynamic_sources="L['x']"):
+    f(torch.rand(10))
+f(torch.rand(20))
+f(torch.rand(30))
+f(torch.rand(40))
+```
+
+(torch.compiler.set_stance_eager_then_compile)
+#### `torch.compiler.set_stance ("eager_then_compile")`
+
+At times, identifying the appropriate inputs to mark as dynamic can
+be challenging. If you are willing to accept a performance cost for
+the first batch, another convenient option is to use the
+`eager_then_compile` stances, which automatically determine dynamic
+inputs for you. For more information, see {func}`torch.compiler.set_stance` and [Dynamic Compilation Control with torch.compiler.set_stance](https://docs.pytorch.org/tutorials/recipes/torch_compiler_set_stance_tutorial.html).
+
 (torch_compile_dynamic_true)=
 ### `torch.compile (dynamic=true)` (Not recommended)
 
@@ -253,9 +278,9 @@ argument, evaluate whether you can rewrite it to address the problem.
 ```{toctree}
 :maxdepth: 1
 compile/dynamic_shapes_core_concepts
-compile/dynamic_shapes_beyond_the_basics
 compile/dynamic_shapes_troubleshooting
 compile/dynamic_shapes_advanced_control_options
+compile/dynamic_shapes_beyond_the_basics
 ```
 
 ```{seealso}
