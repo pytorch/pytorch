@@ -646,12 +646,12 @@ class FxirTestCase(InductorTestCase):
         """
 
         def foo(cond, x):
-            return torch.cond(cond, torch.cos, torch.sin, [x])
+            return torch.cond(cond, torch.cos, torch.sin, [x]) + 1
 
         cond = torch.tensor([True], device=self.device)
         x = torch.randn((2, 3), device=self.device)
 
-        self._compile_and_check(foo, [cond, x], expected_num_triton_kernels=2)
+        self._compile_and_check(foo, [cond, x], expected_num_triton_kernels=3)
 
     def test_cpp_raises(self):
         """
