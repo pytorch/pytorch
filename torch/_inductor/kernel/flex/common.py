@@ -125,12 +125,6 @@ def build_subgraph_module_buffer(
     with V.set_graph_handler(pw_subgraph):  # type: ignore[arg-type]
         pw_subgraph.run(*args)
 
-    # Since we are allowing mutations/buffer creation, we need to register any fresh buffers
-    # creating during the pointwise subgraph lowering
-    if len(pw_subgraph.buffers) > 0:
-        for buffer in pw_subgraph.buffers:
-            V.graph.register_buffer(buffer)
-
     def convert_output_node_to_buffer(output_buffer) -> Optional[ComputedBuffer]:
         if output_buffer is None:
             return None

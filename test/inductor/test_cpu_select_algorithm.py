@@ -828,7 +828,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
         vec_amx = VecAMX()
         # Currently brgemm config is only added for half
-        if dtype == torch.half:
+        if dtype == torch.half and not vec_amx.is_amx_fp16_supported():
             self._check_brgemm_counter(vec_amx)
         else:
             self._check_amx_counter(vec_amx)
@@ -2680,7 +2680,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @torch.no_grad
     @unittest.skipIf(not TEST_MKL, "Test requires MKL")
     @parametrize("bs", (5,))
-    @parametrize("Mdim", (64,))
+    @parametrize("Mdim", (3, 64))  # Test small Mdim which uses reshaped weights
     @dtypes(torch.float)
     def test_bmm_self_square(self, bs, Mdim, dtype):
         class M(torch.nn.Module):
@@ -2766,6 +2766,33 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             self.common(mod, (x, w), atol=atol, rtol=rtol)
         self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
         self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 1)
+
+    @patches
+    @torch.no_grad
+    @parametrize("bs", (1, 50))
+    @parametrize("Mdim", (192,))
+    @parametrize("Kdim", (196,))
+    @parametrize("Ndim", (84, 385))
+    @dtypes(torch.float, torch.bfloat16, torch.half)
+    def test_bmm_with_y_storage_offset(self, dtype, bs, Mdim, Kdim, Ndim):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, y):
+                # y_with_offset: contiguous, but has non-zero storage offset
+                y_with_offset = torch.empty(
+                    (3, *y.shape), dtype=y.dtype, device=y.device
+                )[2].copy_(y)
+                return x @ y_with_offset
+
+        counters.clear()
+        u = torch.randn(bs, Mdim, Kdim).to(dtype=dtype)
+        v = torch.randn(bs, Kdim, Ndim).to(dtype=dtype)
+        mod = M().to(dtype=dtype).eval()
+        with verify(dtype) as (atol, rtol):
+            self.common(mod, (u, v), atol=atol, rtol=rtol)
+        self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
 
     @patches
     @torch.no_grad
@@ -2882,6 +2909,37 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         v = torch.randn(48, 512, 64)
         with verify(u.dtype) as (atol, rtol):
             self.common(mod, (u, v))
+
+    @unittest.skipIf(
+        not torch._C._cpu._is_amx_tile_supported(), "AMX ISA support is required"
+    )
+    @inductor_config.patch({"freezing": True})
+    @patches
+    @torch.no_grad
+    @parametrize("batch_size", (1024,))
+    @parametrize("in_features", (1024,))
+    @parametrize("out_features", (2048,))
+    @dtypes(torch.bfloat16)
+    def test_linear_reuse_kernels(self, batch_size, in_features, out_features, dtype):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear_x = torch.nn.Linear(in_features, out_features)
+                self.linear_y = torch.nn.Linear(out_features, in_features)
+                self.linear_z = torch.nn.Linear(in_features, out_features)
+
+            def forward(self, x):
+                out = self.linear_x(x)
+                out = self.linear_y(out)
+                out = self.linear_z(out)
+                return out
+
+        x = torch.randn(batch_size, in_features).to(dtype=dtype)
+        mod = M().to(dtype=dtype).eval()
+        self.common(mod, (x))
+        _, code = run_and_get_cpp_code(mod, x)
+        # Check that only 2 kernels are in the generated code
+        assert code.count("AMXState amx_state") == 2
 
 
 @dynamo_config.patch({"dynamic_shapes": True, "assume_static_by_default": False})

@@ -7,6 +7,8 @@ import os
 import shlex
 import subprocess
 import sys
+from contextlib import contextmanager
+from pathlib import Path
 from typing import Optional
 
 
@@ -77,3 +79,61 @@ def str2bool(value: Optional[str]) -> bool:
     if value in false_value_set:
         return False
     raise ValueError(f"Invalid string value for boolean conversion: {value}")
+
+
+@contextmanager
+def temp_environ(updates: dict[str, str]):
+    """
+    Temporarily set environment variables and restore them after the block.
+    Args:
+        updates: Dict of environment variables to set.
+    """
+    missing = object()
+    old: dict[str, str | object] = {k: os.environ.get(k, missing) for k in updates}
+    try:
+        os.environ.update(updates)
+        yield
+    finally:
+        for k, v in old.items():
+            if v is missing:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v  # type: ignore[arg-type]
+
+
+@contextmanager
+def working_directory(path: str):
+    """
+    Temporarily change the working directory inside a context.
+    """
+    if not path:
+        # No-op context
+        yield
+        return
+    prev_cwd = os.getcwd()
+    try:
+        os.chdir(path)
+        yield
+    finally:
+        os.chdir(prev_cwd)
+
+
+def get_wheels(
+    output_dir: Path,
+    max_depth: Optional[int] = None,
+) -> list[str]:
+    """Return a list of wheels found in the given output directory."""
+    root = Path(output_dir)
+    if not root.exists():
+        return []
+    items = []
+    for dirpath, _, filenames in os.walk(root):
+        depth = Path(dirpath).relative_to(root).parts
+        if max_depth is not None and len(depth) > max_depth:
+            continue
+        for fname in sorted(filenames):
+            if fname.endswith(".whl"):
+                pkg = fname.split("-")[0]
+                relpath = str((Path(dirpath) / fname).relative_to(root))
+                items.append({"pkg": pkg, "relpath": relpath})
+    return items
