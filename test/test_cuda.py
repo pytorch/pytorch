@@ -4249,6 +4249,7 @@ class TestCudaMallocAsync(TestCase):
     )
     @unittest.skipIf(not has_triton(), "test needs triton")
     @requiresCppContext
+    @serialTest()
     def test_memory_compile_regions(self):
         expected_allocation_sequence = [
             "Torch-Compiled Region: 0/0",
@@ -4304,6 +4305,7 @@ class TestCudaMallocAsync(TestCase):
             pass
         finally:
             torch.cuda.memory._record_memory_history(None)
+            torch._C._cuda_clearCublasWorkspaces()
 
     @unittest.skipIf(
         TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync"
