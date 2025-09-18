@@ -76,11 +76,10 @@ class GPULimits:
             "fp32_90": 1024,
             "fp64_90": 128,
             # Blackwell Architecture
-            "int8_100": 4096,
-            "fp8_100": 4096,
-            "fp16_100": 2048,
-            "fp32_100": 1024,
-            "fp64_100": 128,
+            "int8_100": 8192,
+            "fp8_100": 8192,
+            "fp16_100": 4096,
+            "fp32_100": 2048,
         }
         dict_key = ""
         if data_type is torch.float16:
