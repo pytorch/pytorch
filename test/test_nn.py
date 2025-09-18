@@ -47,7 +47,7 @@ from torch.testing._internal.common_device_type import dtypesIfMPS, instantiate_
     dtypesIfCUDA, dtypesIfXPU, precisionOverride, onlyOn, onlyCUDA, onlyCPU, \
     skipCUDAIfRocm, skipCUDAIf, skipCUDAIfNotRocm, \
     onlyNativeDeviceTypes, deviceCountAtLeast, largeTensorTest, expectedFailureCUDA, expectedFailureMeta, expectedFailureMPS, \
-    skipMeta, get_all_device_types
+    skipMeta, get_all_device_types, skipXPU
 
 from hypothesis import given
 import torch.testing._internal.hypothesis_utils as hu
@@ -233,7 +233,7 @@ class TestNN(NNTestCase):
         self.assertEqual(m.double(), m.to(torch.float64))
         self.assertRaises(RuntimeError, lambda: m.to('cpu', copy=True))
 
-        if torch.accelerator.is_available():
+        if torch.cuda.is_available() or torch.xpu.is_available():
             for gpu in [device_type,
                         str(torch.device(0)) if torch.accelerator.device_count() == 1 else str(torch.device(1))]:
                 m2 = m.to(device=gpu)
@@ -4270,17 +4270,17 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                 hx_val, grad_hy, cx_val, grad_cy)
             compare_cpu_gpu(outputs_cpu, outputs_gpu)
 
-    @unittest.skipIf(not (TEST_CUDNN or TEST_XPU), "needs cudnn")
+    @unittest.skipIf(not (TEST_CUDNN or TEST_XPU), "needs cudnn or XPU")
     def test_RNN_cpu_vs_cudnn_no_dropout(self):
         dtype = torch.double
         self._test_RNN_cpu_vs_cudnn(0, dtype)
 
-    @unittest.skipIf(not (TEST_CUDNN or TEST_XPU), "needs cudnn")
+    @unittest.skipIf(not (TEST_CUDNN or TEST_XPU), "needs cudnn or XPU")
     def test_RNN_cpu_vs_cudnn_with_dropout(self):
         # Because of dropout randomness, can only compare dropout=0 and dropout=1
         self._test_RNN_cpu_vs_cudnn(1)
 
-    @unittest.skipIf(not (TEST_CUDNN or TEST_XPU), "needs cudnn")
+    @unittest.skipIf(not (TEST_CUDNN or TEST_XPU), "needs cudnn or XPU")
     @tf32_on_and_off
     def test_RNN_cudnn_weight_norm(self):
         input_size = 10
@@ -4335,7 +4335,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         warnings.simplefilter("always")
         self.assertEqual(m(inp)[0].cpu(), out_expected[0])
 
-    @unittest.skipIf(not (TEST_CUDNN or TEST_XPU), "needs cudnn")
+    @unittest.skipIf(not (TEST_CUDNN or TEST_XPU), "needs cudnn or XPU")
     @set_default_dtype(torch.double)
     def test_RNN_dropout(self):
         # checking the assumption that cuDNN sticks dropout in between
@@ -4379,7 +4379,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                     self.assertEqual(hy.data[0][0][0], 10)
                     self.assertEqual(hy.data[1][0][0], output_val)
 
-    @unittest.skipIf(not (TEST_CUDNN or TEST_XPU), "needs cudnn")
+    @unittest.skipIf(not (TEST_CUDNN or TEST_XPU), "needs cudnn or XPU")
     @set_default_dtype(torch.double)
     def test_error_RNN_seq_len_zero(self):
         # checking error message when RNN has seq_len = 0
@@ -4408,7 +4408,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                 # Check that backward does not cause a hard error
                 outs[0].sum().backward()
 
-    @unittest.skipIf(not (TEST_CUDNN or TEST_XPU), "needs cudnn")
+    @unittest.skipIf(not (TEST_CUDNN or TEST_XPU), "needs cudnn or XPU")
     def test_RNN_dropout_state(self):
         for p in (0, 0.1234):
             for train in (True, False):
@@ -4449,7 +4449,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                         self.assertNotEqual(hy1, hy2)
                         self.assertNotEqual(hy1, hy3)
 
-    @unittest.skipIf(not (TEST_CUDNN or TEST_XPU), "needs cudnn")
+    @unittest.skipIf(not (TEST_CUDNN or TEST_XPU), "needs cudnn or XPU")
     @set_default_dtype(torch.double)
     def test_RNN_change_dropout(self):
         for train, gpu in product((True, False), repeat=2):
@@ -5013,7 +5013,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         helper(self, torch.bfloat16)
         helper(self, torch.float16)
 
-    @unittest.skipIf(not (TEST_CUDNN or TEST_XPU), "needs cudnn")
+    @unittest.skipIf(not (TEST_CUDNN or TEST_XPU), "needs cudnn or XPU")
     def test_batchnorm_cudnn_nhwc(self):
         def run_test(input, grad_output):
             c = input.size(1)
@@ -5385,6 +5385,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertTrue(gradcheck(lambda x, y: F.pairwise_distance(x, y), (input1, input2)))
 
     # TODO: Create an OpInfo for pdist
+    @skipIfMPS  # MPS framework doesn't support float64.
     def test_pdist(self):
         for device, trans in itertools.product(device_(), [False, True]):
             inp = torch.randn(4, 5, dtype=torch.double, device=device, requires_grad=True)
@@ -5393,6 +5394,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             for p in [0, 1, 2, 0.5, 1.5, 2.5, float('inf')]:
                 self.assertTrue(gradcheck(lambda x: F.pdist(x, p), (inp,)))
 
+    @skipIfMPS  # MPS framework doesn't support float64.
     def test_pdist_zeros(self):
         """Test that grad is still valid when dist is 0"""
         for device in device_():
@@ -5400,11 +5402,13 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             for p in [0, 1, 2, 0.5, 1.5, 2.5, float('inf')]:
                 self.assertTrue(gradcheck(lambda x: F.pdist(x, p), (inp,)))
 
+    @skipIfMPS  # MPS framework doesn't support float64.
     def test_pdist_empty_row(self):
         for device in device_():
             inp = torch.randn(1, 3, dtype=torch.double, device=device, requires_grad=True)
             self.assertTrue(gradcheck(F.pdist, (inp,)))
 
+    @skipIfMPS  # MPS framework doesn't support float64.
     def test_pdist_empty_col(self):
         for device in device_():
             inp = torch.randn(4, 0, dtype=torch.double, device=device, requires_grad=True)
@@ -5422,6 +5426,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
     # Merge into OpInfo?
     # test for backward in https://github.com/pytorch/pytorch/issues/15511
+    @skipIfMPS  # NotImplementedError: The operator 'aten::_pdist_forward' is not currently implemented for the MPS device.
     def test_pdist_large(self):
         for device in device_():
             def func(x):
@@ -5436,6 +5441,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             # just run a single backward, as gradcheck/gradgradcheck is expensive here
             output.sum().backward()
 
+    @skipIfMPS  # MPS framework doesn't support float64.
     def test_cosine_embedding_loss_with_diff_type(self):
         for device in device_():
             input1 = torch.tensor([[2, 3, 4], [6, 2, 4]], dtype=torch.double, device=device)
@@ -5456,6 +5462,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                         result = torch.nn.functional.cosine_embedding_loss(input1, input2, target)
                         self.assertEqual(result.item(), expected.item(), atol=0.001, rtol=0)
 
+    @skipIfMPS  # MPS framework doesn't support float64.
     def test_cosine_embedding_loss_error_on_diff_shapes(self):
         for device in device_():
             input1 = torch.empty((0, 0), dtype=torch.double, device=device)
@@ -5464,6 +5471,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             with self.assertRaisesRegex(RuntimeError, ".*expects 2D.*"):
                 torch.nn.functional.cosine_embedding_loss(input1, input2, target)
 
+    @skipIfMPS  # MPS framework doesn't support float64.
     def test_cosine_embedding_loss_error_on_nonexpandable_shapes(self):
         for device in device_():
             input1 = torch.empty((1, 5), dtype=torch.double, device=device)
@@ -5472,6 +5480,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             with self.assertRaisesRegex(RuntimeError, ".*must match the size.*"):
                 torch.nn.functional.cosine_embedding_loss(input1, input2, target)
 
+    @skipIfMPS  # MPS framework doesn't support float64.
     def test_kl_div_with_diff_type(self):
         for device in device_():
             input = torch.tensor([[2, 3, 5], [3, 2, 1]], dtype=torch.double, device=device)
@@ -5486,6 +5495,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                 result = torch.nn.functional.kl_div(input, target)
                 self.assertEqual(result.item(), expected.item(), atol=0.001, rtol=0)
 
+    @skipIfMPS  # MPS framework doesn't support float64.
     def test_kl_div_with_diff_type_log_target(self):
         for device in device_():
             input = torch.tensor([[2, 3, 5], [3, 2, 1]], dtype=torch.double, device=device)
@@ -5749,7 +5759,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         with self.assertRaisesRegex(RuntimeError, "bicubic interpolation only supports 4D input"):
             F.grid_sample(torch.empty(1, 1, 2, 2, 2), torch.empty(1, 1, 1, 1, 3), mode='bicubic')
 
-        if TEST_GPU:
+        if TEST_CUDA or TEST_XPU:
             with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device"):
                 F.grid_sample(input.to(device_type), grid, align_corners=False)
 
@@ -6231,7 +6241,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                 gradients = torch.randn_like(out_cpu)
                 out_cpu.backward(gradients)
 
-                if TEST_GPU:
+                if TEST_CUDA or TEST_XPU:
                     input_gpu = input_cpu.detach() \
                         .transpose(0, 1) \
                         .to(device_type) \
@@ -6352,6 +6362,11 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
     def test_grid_sample_nearest_neighbor_rounding_mode_consistency(self):
 
         device_list = get_all_device_types()
+        device_list = ['cpu']
+        if TEST_CUDA:
+            device_list.append('cuda')
+        elif TEST_XPU:
+            device_list.append('xpu')
 
         def normalize_indices(indices_unnormalized: torch.Tensor, dim_size: int, align_corners: bool):
             if align_corners:
@@ -6537,7 +6552,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                     (inp,), check_forward_ad=True))
 
         # test CPU against GPU
-        if TEST_GPU:
+        if TEST_CUDA or TEST_XPU:
             N = random.randint(1, 8)
             C = random.randint(1, 8)
             H = random.randint(1, 8)
@@ -6589,7 +6604,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                     (inp,), check_forward_ad=True))
 
         # test CPU against GPU
-        if TEST_GPU:
+        if TEST_CUDA and TEST_XPU:
             N = random.randint(1, 8)
             C = random.randint(1, 8)
             D = random.randint(1, 8)
@@ -6704,7 +6719,12 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         torch.set_printoptions(precision=5)
         self.assertEqual(out_t, expected_out_t, atol=1e-4, rtol=0)
 
-        device_list = get_all_device_types()
+        device_list = ['cpu']
+        if TEST_CUDA:
+            device_list.append('cuda')
+
+        if TEST_XPU:
+            device_list.append('xpu')
 
         for align_corners in [True, False]:
             kwargs = dict(mode='bicubic', align_corners=align_corners)
@@ -6907,7 +6927,12 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             size += [2] * dim
             return torch.ones(size, requires_grad=True, device=device)
 
-        device_list = get_all_device_types()
+        device_list = ['cpu']
+        if TEST_CUDA:
+            device_list.append('cuda')
+
+        if TEST_XPU:
+            device_list.append('xpu')
 
         for device in device_list:
             for scale_factor in [0.5, 1.5, 2]:
@@ -10488,7 +10513,7 @@ class TestNNDeviceType(NNTestCase):
                         # CUDA path doesn't support padding mask when the number of heads is odd
                         continue
                     input = torch.randn((B, num_heads, L, L))
-                    if (TEST_GPU and self.device_type == device_type):
+                    if (self.device_type in ["cuda", "xpu"]):
                         input = input.to(device_type)
                         mask = mask.to(device_type)
                         mask_orig = mask_orig.to(device_type)
@@ -10647,7 +10672,7 @@ class TestNNDeviceType(NNTestCase):
                 for mask_type in [1, 2]:  # 1 = BxL => src_key_padding_mask
                     input = torch.randn(shape, requires_grad=True)
                     mask = torch.randint(0, 2, shape).bool()
-                    if (TEST_GPU and self.device_type == device_type):
+                    if (self.device_type in ["cuda", "xpu"]):
                         input = input.to(device_type).detach().requires_grad_()
                         mask = mask.to(device_type)
                     self._test_masked_softmax_helper(input, dim, mask, mask_type)
@@ -10660,7 +10685,7 @@ class TestNNDeviceType(NNTestCase):
             for mask_type in [1, 2]:  # 1 = BxL => src_key_padding_mask
                 input = torch.randn((x, y), requires_grad=True)
                 mask = torch.tensor([i % 2 for i in range(y)]).expand((x, y)).bool()
-                if (TEST_GPU and self.device_type == device_type):
+                if (self.device_type in ["cuda", "xpu"]):
                     input = input.to(device_type).detach().requires_grad_()
                     mask = mask.to(device_type)
                 self._test_masked_softmax_helper(input, dim, mask, mask_type)
@@ -12139,6 +12164,7 @@ class TestNNDeviceType(NNTestCase):
                 F.nll_loss(x, t, weight=weight)
 
     # Ref: https://github.com/pytorch/pytorch/issues/85005
+    @skipXPU   # https://github.com/intel/torch-xpu-ops/issues/1972
     @onlyOn(["cuda", "xpu"])
     @largeTensorTest("120GB", "cpu")
     @largeTensorTest("45GB", device_type)
