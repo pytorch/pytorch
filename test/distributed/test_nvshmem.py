@@ -548,17 +548,33 @@ class NVSHMEMAll2AllTest(MultiProcContinuousTest):
         # Check data
         torch.testing.assert_close(out_expected, out[:out_numel])
 
-    def helper_test_dispatch_combine(self, align: int, group_name) -> None:
+
+@instantiate_parametrized_tests
+@requires_nvshmem()
+@requires_cuda_p2p_access()
+class DispatchCombineTest(MultiProcContinuousTest):
+    def _init_device(self) -> None:
+        # TODO: relieve this (seems to hang if without)
+        device_module.set_device(self.device)
+        # Set NVSHMEM as SymmMem backend
+        symm_mem.set_backend("NVSHMEM")
+
+    @property
+    def device(self) -> torch.device:
+        return torch.device(device_type, self.rank)
+
+    def helper_test_dispatch_combine(self, align: int, group) -> None:
         """
         Shuffle the tokens, then combine them, and check if the combined data is
         exactly the same as the original input data
         """
+        group_name = group.group_name
         symm_mem.enable_symm_mem_for_group(group_name)
 
         dtype = torch.float
         # Number of experts per rank
         ne = 8
-        nsplits = ne * self.world_size
+        nsplits = ne * group.size()
 
         # Number of elements for an expert is random between [0, k)
         k = 10
@@ -573,7 +589,7 @@ class NVSHMEMAll2AllTest(MultiProcContinuousTest):
         # Max number of input elements (must be a constant across ranks for symmetric memory allocation)
         max_inp_numel = k * nsplits
         # Max number of output elements (must be a constant across ranks for symmetric memory allocation)
-        overflow_factor = self.world_size  # worst case: one rank receives all data
+        overflow_factor = group.size()  # worst case: one rank receives all data
         max_out_numel = max_inp_numel * overflow_factor
 
         # Buffers for shuffle
@@ -590,11 +606,6 @@ class NVSHMEMAll2AllTest(MultiProcContinuousTest):
             (2, nsplits), dtype=torch.int64, device=self.device
         ).fill_(-1)
 
-        # Shuffle the tokens
-        torch.ops.symm_mem.all_to_all_vdev_2d(
-            inp, out, in_splits, out_splits_offsets, group_name, major_align=align
-        )
-
         # Buffers for combine
         combine_out = symm_mem.empty(
             max_out_numel, dtype=dtype, device=self.device
@@ -604,6 +615,15 @@ class NVSHMEMAll2AllTest(MultiProcContinuousTest):
         combine_out_splits_offsets = symm_mem.empty(
             (2, nsplits), dtype=torch.int64, device=self.device
         ).fill_(-1)
+
+        # Wait for all ranks to finish tensor allocation before accessing them
+        torch.cuda.synchronize(self.device)
+        dist.barrier(group=group)
+
+        # Shuffle the tokens
+        torch.ops.symm_mem.all_to_all_vdev_2d(
+            inp, out, in_splits, out_splits_offsets, group_name, major_align=align
+        )
 
         # Combine the tokens
         # `out_splits_offsets` from shuffle is exactly the `input_splits_offsets` for combine
@@ -626,6 +646,10 @@ class NVSHMEMAll2AllTest(MultiProcContinuousTest):
         ).to(torch.int64)
         torch.testing.assert_close(combine_out_splits_offsets[1], inp_offsets)
 
+        # Wait for all ranks to finish accessing tensors before freeing them
+        dist.barrier(group=group)
+        torch.cuda.synchronize(self.device)
+
     @skipIfRocm
     @parametrize("align", [1, 8, 16])  # `major_align` of output
     def test_dispatch_combine(self, align: int) -> None:
@@ -634,7 +658,7 @@ class NVSHMEMAll2AllTest(MultiProcContinuousTest):
         """
         torch.manual_seed(42 + self.rank)
         self._init_device()
-        self.helper_test_dispatch_combine(align, dist.group.WORLD.group_name)
+        self.helper_test_dispatch_combine(align, dist.group.WORLD)
 
     @skipIfRocm
     # TODO: FIXIT. Currently, `MultiProcContinuousTest` treats the skip code as a
@@ -654,7 +678,7 @@ class NVSHMEMAll2AllTest(MultiProcContinuousTest):
             device_type, (ngroups, subgroup_size), mesh_dim_names=("dp", "ep")
         )
         subgroup = dm.get_group("ep")
-        self.helper_test_dispatch_combine(align=8, group_name=subgroup.group_name)
+        self.helper_test_dispatch_combine(align=8, group=subgroup)
 
 
 if __name__ == "__main__":
