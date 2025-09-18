@@ -85,7 +85,7 @@ _reduce_ops = {
 # ordinarily "doesn't matter" because distributed collectives aren't
 # differentiable anyway, but it's possible to tickle this in testing if
 # someone tries to touch the grad_fn of a Tensor.  There a few ways to
-# fix this, but the easiest way was to use the .data trick to hide
+# fix this, but the easiest way was to use the .detach() trick to hide
 # the mutations from autograd.
 
 
@@ -264,7 +264,7 @@ class ReduceScatter:
             num_ranks = len(data)
             for each_rank_data in data:
                 # See Note [Hide collectives mutation from autograd]
-                each_rank_data[0][0].data /= num_ranks
+                each_rank_data[0][0].detach() /= num_ranks
 
 
 class Broadcast:
