@@ -84,8 +84,8 @@ fi
 _UCX_COMMIT=7836b165abdbe468a2f607e7254011c07d788152
 _UCC_COMMIT=430e241bf5d38cbc73fc7a6b89155397232e3f96
 if [[ "$image" == *rocm* ]]; then
-  _UCX_COMMIT=cc312eaa4655c0cc5c2bcd796db938f90563bcf6
-  _UCC_COMMIT=0c0fc21559835044ab107199e334f7157d6a0d3d
+  _UCX_COMMIT=29831d319e6be55cb8c768ca61de335c934ca39e
+  _UCC_COMMIT=9f4b242cbbd8b1462cbc732eb29316cdfa124b77
 fi
 
 tag=$(echo $image | awk -F':' '{print $2}')
