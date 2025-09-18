@@ -2617,7 +2617,7 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved_dynamic_$is_traceable, m) {
         )
 
         def fn():
-            for i in [10, 100, 10, 20, 10]:
+            for i in [10, 30, 10, 20, 10]:
                 x = torch.ones(i, i, requires_grad=True)
                 out = module.custom_op_backed_by_autograd_fn(x)
                 loss = out.sum()
