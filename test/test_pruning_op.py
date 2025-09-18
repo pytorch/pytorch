@@ -1,4 +1,4 @@
-# Owner(s): ["module: nn"]
+# Owner(s): ["oncall: quantization"]
 
 import hypothesis.strategies as st
 from hypothesis import given
