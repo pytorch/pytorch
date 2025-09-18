@@ -1157,7 +1157,7 @@ class InplacingTests(TestCase):
             )
 
             # Check that we are not allocate intermediate buffers
-            # which can be reinplaced.
+            # which can be reused.
             matches = re.findall(r"empty_strided_\w+\(", code)
             self.assertEqual(len(matches), 0)
             self.assertEqual("in_out" in code, True)
