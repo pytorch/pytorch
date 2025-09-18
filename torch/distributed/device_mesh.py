@@ -148,7 +148,6 @@ if True:  # just to temporarily avoid reindentation
                 else:
                     raise RuntimeError(
                         f"Flatten mesh with mesh_dim_name {mesh_dim_name} has been created before, "
-                        f"but the layout is different from the current layout. "
                         f"Please specify another valid mesh_dim_name."
                     )
 
