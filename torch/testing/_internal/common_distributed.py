@@ -15,6 +15,7 @@ import time
 import traceback
 import types
 import unittest
+import warnings
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import timedelta
@@ -55,6 +56,15 @@ from torch.testing._internal.distributed.multi_threaded_pg import (
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
+
+# Mute the following warning (which becomes too dense in distributed tests)
+# """
+# hypothesis/entry_points.py:23: UserWarning: pkg_resources is deprecated as an
+# API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The
+# pkg_resources package is slated for removal  ...
+# """
+warnings.filterwarnings("ignore", category=UserWarning, module="pkg_resources")
+
 
 ACCELERATOR_DIST_BACKENDS = ["nccl", "xccl", "hccl"]
 DDP_RANK_DEVICES = ["cuda", "xpu"]
