@@ -6940,6 +6940,8 @@ class TestMPS(TestCaseMPS):
         with self.assertRaisesRegex(RuntimeError, "Index to scalar can have only 1 value"):
             helper(22, 0, [])
 
+    # TODO: This test can be removed once the backward pass of embedding_bag is
+    # implemented and tested
     @parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32])
     @parametrize("idx_dtype", [torch.long, torch.int])
     @parametrize("padding_idx", [-1, 1])
