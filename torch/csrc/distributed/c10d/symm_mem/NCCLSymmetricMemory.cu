@@ -260,6 +260,10 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
     return "NCCL";
   }
 
+  size_t num_active_allocations() override {
+    return allocations_.size();
+  }
+
  private:
   std::unordered_map<void*, c10::intrusive_ptr<SymmetricMemory>>
       ptr_to_symm_mem_;
