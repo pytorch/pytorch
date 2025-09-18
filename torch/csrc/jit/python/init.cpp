@@ -1865,7 +1865,7 @@ void initJITBindings(PyObject* module) {
       py::arg("schema"),
       py::arg("allow_typevars") = true);
   m.def(
-      "make_opaque_object",
+      "_make_opaque_object",
       [](py::object payload) {
         auto obj = c10::make_intrusive<OpaqueObject>(payload);
         auto typePtr =
@@ -1874,7 +1874,7 @@ void initJITBindings(PyObject* module) {
       },
       R"doc(Creates an opaque object which stores the given Python object.)doc");
   m.def(
-      "get_opaque_object_payload",
+      "_get_opaque_object_payload",
       [](py::object obj) {
         auto typePtr =
             torch::getCustomClass("__torch__.torch.classes.aten.OpaqueObject");
@@ -1884,13 +1884,13 @@ void initJITBindings(PyObject* module) {
       },
       R"doc(Returns the Python object stored on the given opaque object.)doc");
   m.def(
-      "set_opaque_object_payload",
+      "_set_opaque_object_payload",
       [](py::object obj, py::object payload) {
         auto typePtr =
             torch::getCustomClass("__torch__.torch.classes.aten.OpaqueObject");
         auto ivalue = torch::jit::toIValue(std::move(obj), typePtr);
         auto customObj = ivalue.toCustomClass<OpaqueObject>();
-        customObj->setPayload(payload);
+        customObj->setPayload(std::move(payload));
       },
       R"doc(Sets the payload of the given opaque object with the given Python object.)doc");
   m.def("unify_type_list", [](const std::vector<TypePtr>& types) {
