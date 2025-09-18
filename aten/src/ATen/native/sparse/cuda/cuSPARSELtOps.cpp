@@ -115,8 +115,13 @@ at::Tensor _cslt_compress(const Tensor& sparse_input) {
       &compressed_buffer_size));
 
   // create a new compressed tensor with the same dtype as the input,
-  // and with sufficient size for the packed data/metadata (given in bytes)
-  auto compressed_tensor = sparse_input.new_empty(compressed_size / sparse_input.itemsize());
+  // and with packed data/metadata stored in an array with original
+  // number of rows, and sufficient columns to provide compressed_size
+  // buffer (in bytes)
+  size_t orig_m = sparse_input.size(0);
+  size_t div = orig_m * sparse_input.itemsize();
+  size_t new_n = (compressed_size + div - 1) / div; // floor
+  auto compressed_tensor = sparse_input.new_empty({(int64_t)orig_m, (int64_t)new_n});
 
   auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
   auto compressedBufferPtr = allocator.allocate(compressed_buffer_size);
@@ -162,7 +167,6 @@ std::tuple<at::Tensor, int64_t, int64_t, int64_t, int64_t> _cslt_sparse_mm_impl(
   cudaDataType output_type;
   cudaDataType C_type;
   cusparseComputeType compute_type;
-  auto compression_factor = 9;
 
   #ifdef USE_ROCM
   TORCH_CHECK(isHipSparseLtSupported());
@@ -174,7 +178,6 @@ std::tuple<at::Tensor, int64_t, int64_t, int64_t, int64_t> _cslt_sparse_mm_impl(
       output_type = CUDA_R_8I;
       C_type = CUDA_R_8I;
       compute_type = CUSPARSE_COMPUTE_32I;
-      compression_factor = 10;
       break;
 
 // cuSPARSELt v0.5.2 onwards changes CUSPARSE_COMPUTE_TF32, CUSPARSE_COMPUT_16F
@@ -207,7 +210,6 @@ std::tuple<at::Tensor, int64_t, int64_t, int64_t, int64_t> _cslt_sparse_mm_impl(
       output_type = CUDA_R_8F_E4M3;
       C_type = CUDA_R_16F;
       compute_type = CUSPARSE_COMPUTE_32F;
-      compression_factor = 10;
       break;
 #endif
 // cuSPARSELt <= v0.5.2 uses CUSPARSE_COMPUTE_TF32, CUSPARSE_COMPUTE_16F
@@ -299,7 +301,7 @@ std::tuple<at::Tensor, int64_t, int64_t, int64_t, int64_t> _cslt_sparse_mm_impl(
 
   int64_t k = dense_B.size(0);
   int64_t n = dense_B.size(1);
-  int64_t m = (compressed_A.numel() * 16 / compression_factor) / k;
+  int64_t m = compressed_A.size(0);
 
   // initialize sparse descriptor
   cusparseLtMatDescriptor_t sparse_input_descriptor;
