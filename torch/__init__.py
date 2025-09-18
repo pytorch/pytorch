@@ -244,7 +244,7 @@ if sys.platform == "win32":
                 textwrap.dedent(
                     """
                     Microsoft Visual C++ Redistributable is not installed, this may lead to the DLL load failure.
-                    It can be downloaded at https://aka.ms/vs/16/release/vc_redist.x64.exe
+                    It can be downloaded at https://aka.ms/vs/17/release/vc_redist.x64.exe
                     """
                 ).strip()
             )

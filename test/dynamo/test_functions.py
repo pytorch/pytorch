@@ -2088,6 +2088,12 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return mytuple.add(), mytuple.static_method(), mytuple.class_method()
 
     @make_test
+    def test_namedtuple_replace(a, b):
+        mytuple = FunctionTests.MyNamedTuple(a, b)
+        replaced = mytuple._replace(first=b)
+        return mytuple.first + mytuple.second + replaced.first + replaced.second
+
+    @make_test
     def test_generic_namedtuple_user_methods(a, b):
         mytuple = FunctionTests.MyGenericNamedTuple(a, b)
         return mytuple.add(), mytuple.static_method(), mytuple.class_method()
