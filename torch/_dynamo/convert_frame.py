@@ -1264,7 +1264,7 @@ def _compile(
             assert check_fn.guards_state is not None
             package.add_guarded_code(check_fn.guards_state, out_code)
             package.add_inlined_source(output.tracing_context.traced_code)
-            package.update_use_cuda(output.current_tracer.graph)
+            package.update_device_type(output.current_tracer.graph)
 
         compile_id_str = str(compile_id) if compile_id is not None else "Unknown"
         annotation_str = "Torch-Compiled Region: " + compile_id_str
@@ -1435,6 +1435,7 @@ def _compile(
         fail_user_frame_lineno: Optional[int] = None
         torch._dynamo.utils.ReinplaceCounters.clear()
         guarded_code = None
+        tracer_output = None
         try:
             guarded_code, tracer_output = compile_inner(code, one_graph, hooks)
 

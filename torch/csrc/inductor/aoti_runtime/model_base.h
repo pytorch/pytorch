@@ -325,10 +325,23 @@ using RAIIDataPtr = std::unique_ptr<void, std::function<void(void*)>>;
 
 // NOLINTNEXTLINE(clang-diagnostic-unneeded-internal-declaration)
 RAIIDataPtr RAII_gpuMalloc(size_t num_bytes) {
+#ifdef AOT_INDUCTOR_USE_CACHING_ALLOCATOR
+  // Use caching allocator for allocating GPU memory
+  void* data_ptr = nullptr;
+  AOTI_TORCH_ERROR_CODE_CHECK(
+      aoti_torch_cuda_caching_allocator_raw_alloc(num_bytes, &data_ptr));
+  auto deleter = [](void* ptr) {
+    AOTI_TORCH_ERROR_CODE_CHECK(
+        aoti_torch_cuda_caching_allocator_raw_delete(ptr));
+  };
+  return RAIIDataPtr(data_ptr, deleter);
+#else
+  // Use cudaMalloc directly for allocating GPU memory
   void* data_ptr = nullptr;
   AOTI_RUNTIME_CUDA_CHECK(cudaMalloc((void**)&data_ptr, num_bytes));
   auto deleter = [](void* ptr) { AOTI_RUNTIME_CUDA_CHECK(cudaFree(ptr)); };
   return RAIIDataPtr(data_ptr, deleter);
+#endif
 }
 
 #elif defined(USE_XPU)

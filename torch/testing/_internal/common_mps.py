@@ -348,7 +348,6 @@ if torch.backends.mps.is_available():
             "nn.functional.interpolatearea": None,
             "nn.functional.interpolatebicubic": [torch.uint8],
             "nn.functional.ctc_loss": None,
-            "nn.functional.embedding_bag": None,
             "nn.functional.multi_margin_loss": None,
             "nn.functional.multilabel_margin_loss": None,
             "nn.functional.pdist": None,
@@ -740,6 +739,7 @@ if torch.backends.mps.is_available():
             "equal": [torch.float16, torch.float32],
             # 'float' object is not iterable
             "item": [torch.float16, torch.float32],
+            "nn.functional.embedding_bag": None,
             # "smooth_l1_backward_cpu_out" not implemented for 'Half'
             "nn.functional.smooth_l1_loss": [torch.float16],
             # cpu error: grad requires non-empty inputs

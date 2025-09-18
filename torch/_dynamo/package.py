@@ -29,7 +29,7 @@ from typing_extensions import Never
 import torch
 import torch._inductor.package
 from torch._dynamo.exc import PackageError
-from torch._dynamo.graph_utils import _graph_uses_non_cpu
+from torch._dynamo.graph_utils import _graph_device_type
 from torch._dynamo.precompile_context import (
     PrecompileCacheArtifact,
     PrecompileContext,
@@ -308,7 +308,7 @@ def _get_code_source(code: types.CodeType) -> tuple[str, str]:
 class _DynamoCacheEntry:
     codes: list[_DynamoCodeCacheEntry]
     source_info: SourceInfo
-    use_cuda: bool
+    device_type: str
     system_info: SystemInfo = dataclasses.field(default_factory=SystemInfo.current)
 
     @property
@@ -318,7 +318,7 @@ class _DynamoCacheEntry:
     def check_versions(self) -> None:
         """Check if the current system is compatible with the system used to create this cache entry."""
         current_system_info = SystemInfo.current()
-        self.system_info.check_compatibility(current_system_info, self.use_cuda)
+        self.system_info.check_compatibility(current_system_info, self.device_type)
 
 
 @CacheArtifactFactory.register
@@ -407,8 +407,8 @@ class CompilePackage:
 
         self._current_entry: Optional[_DynamoCodeCacheEntry] = None
         self._installed_globals: dict[types.ModuleType, list[str]] = {}
-        # whether cuda is used
-        self._use_cuda = False
+        # device_type that model compiled with.
+        self._device_type = "cpu"
 
         # For debugging/testing purpose only.
         self._cached_backends: dict[_BackendId, Any] = {}
@@ -553,8 +553,8 @@ class CompilePackage:
                 continue
             self._source_info.add_code(code)
 
-    def update_use_cuda(self, graph: Optional[torch.fx.Graph]) -> None:
-        self._use_cuda = _graph_uses_non_cpu(graph)
+    def update_device_type(self, graph: Optional[torch.fx.Graph]) -> None:
+        self._device_type = _graph_device_type(graph)
 
     def bypass_current_entry(self) -> None:
         assert self._current_entry is not None
@@ -694,7 +694,7 @@ class CompilePackage:
         return _DynamoCacheEntry(
             codes=list(self._codes.values()),
             source_info=self._source_info,
-            use_cuda=self._use_cuda,
+            device_type=self._device_type,
         )
 
     @staticmethod

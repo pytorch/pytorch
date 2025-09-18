@@ -536,19 +536,26 @@ class _DimRange:
 def mark_unbacked(
     t: Any,
     index: Union[int, list[Any], tuple[Any]],
+    hint_override: Optional[int] = None,
     strict: bool = False,
     specialize_on: Optional[list[Any]] = None,
 ) -> None:
     """
-    Mark a tensor as having an unbacked dim.  This changes the semantics of operations,
-    we will always report the size does not equal zero/one, we will turn asserts
-    on this index into runtime asserts, and if you try to get the real value we will
-    raise an exception.  In other words, we will treat this dimension as if it was
-    data dependent (we do not know anything about its value.)
+    Mark a tensor as having an unbacked dimension. This changes the semantics of operations:
+    - The size of the specified dimension will always be reported as not equal to zero or one.
+    - Assertions on this index will be turned into runtime asserts.
+    - Attempting to get the real value of this dimension will raise an exception.
+    - In effect, this dimension is treated as data-dependent (its value is unknown).
 
-    For historical reasons, by default if an unbacked dim is specialized, we will
-    happily specialize it and continue. If you want to error in these cases, pass
-    strict=True.
+    Args:
+        t (Any): The tensor to mark as having an unbacked dimension.
+        index (int or list/tuple of int): The dimension(s) to mark as unbacked. Can be a single integer or a list/tuple of integers.
+        hint_override (Optional[int], default=None): An optional integer to override the size hint for this dimension.
+            This is only used by the inductor backend for size hint queries, such as during autotuning.
+        strict (bool, default=False): If True, an error will be raised if the unbacked dimension is specialized.
+            By default (strict=False), specialization is allowed and will proceed without error.
+        specialize_on (Optional[list[Any]], default=None): A list of specialization criteria (e.g., lambdas) for this dimension.
+            If provided, Dynamo will generate specialized compiled regions for each criterion in addition to a generic trace.
     """
     # You could have copied the mark_dynamic behavior but I'm not convinced
     # it's what you want
@@ -566,6 +573,12 @@ def mark_unbacked(
 
         if not hasattr(t, "_dynamo_unbacked_indices"):
             t._dynamo_unbacked_indices = set()
+
+        if not hasattr(t, "_dynamo_hint_overrides"):
+            t._dynamo_hint_overrides = {}
+
+        if hint_override:
+            t._dynamo_hint_overrides[index] = hint_override
 
         # FX tracers don't respect @forbid_in_graph and choke on the following error since it passes in proxies:
         # TypeError: 'Attribute' object does not support item assignment
@@ -612,7 +625,10 @@ def mark_dynamic(
     4) Attempts to trace this function will explicitly raise. As such, all calls to mark_dynamic must be made
     before torch.compile.
 
-    5) If specialize_on is passed in, we will perform a single generic Dynamo trace followed by
+    5) If hint_override is passed, the hint_override for the specified dimension will replace the provided value
+    from the first example input as the official size hint.
+
+    6) If specialize_on is passed in, we will perform a single generic Dynamo trace followed by
     multiple specialized compilations in addition to a single generic compilation. NB: For now we only support
     per dimension specialization, or in other words we do not generate a cross product of specializations.
     At runtime, we will dispatch to a specialized compiled region if the input matches the specialization criteria.
@@ -626,6 +642,7 @@ def mark_dynamic(
     This approach results in one Dynamo trace and two backend compilations. When the input dimension equals 8 or 16
     at runtime, execution will be directed to the specialized compiled region. Performance measurements indicate
     2-8x speedups depending on the specific specialization and model architecture.
+
     """
     if is_traceable_wrapper_subclass(t):
         # default behavior: mirror mark_dynamic() on all inner tensors with same dim as t

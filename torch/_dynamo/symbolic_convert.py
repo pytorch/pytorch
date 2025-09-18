@@ -167,7 +167,7 @@ from .variables.misc import (
     PythonModuleVariable,
     UnknownVariable,
 )
-from .variables.nn_module import NNModuleVariable
+from .variables.nn_module import NNModuleVariable, UnspecializedNNModuleVariable
 from .variables.tensor import supported_comparison_ops, SymNodeVariable, TensorVariable
 from .variables.torch_function import (
     SymbolicTorchFunctionState,
@@ -4265,6 +4265,15 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         # by checking if the first argument (self) is a variable tracking a GraphModule.
         if args and isinstance(args[0], NNModuleVariable):
             module = parent.output.get_submodule(args[0].module_key)
+            if isinstance(module, torch.fx.GraphModule):
+                # The inline call might not actually be a call to `forward`,
+                # but it is enough to add a context for `forward` in case it is called.
+                code_context.get_context(module.forward.__code__)[
+                    "orig_graphmodule"
+                ] = weakref.ref(module)
+        # When we have inline_nn_module turned on, modules resolve to UnspecializedNNModuleVariable
+        if args and isinstance(args[0], UnspecializedNNModuleVariable):
+            module = args[0].value
             if isinstance(module, torch.fx.GraphModule):
                 # The inline call might not actually be a call to `forward`,
                 # but it is enough to add a context for `forward` in case it is called.

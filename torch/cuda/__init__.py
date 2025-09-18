@@ -1733,7 +1733,6 @@ def _compile_kernel(
     kernel_source: str,
     kernel_name: str,
     compute_capability: Optional[str] = None,
-    header_code: str = "",
     cuda_include_dirs: Optional[list] = None,
     nvcc_options: Optional[list] = None,
 ):
@@ -1750,7 +1749,6 @@ def _compile_kernel(
         kernel_name (str): The name of the kernel function to compile
         compute_capability (str, optional): The compute capability to target (e.g., "86").
                                            If None, will detect from current device.
-        header_code (str, optional): Additional header code to prepend to the kernel source
         cuda_include_dirs (list, optional): List of directories containing CUDA headers
         nvcc_options (list, optional): Additional options to pass to NVRTC
 
@@ -1780,7 +1778,6 @@ def _compile_kernel(
         kernel_source,
         kernel_name,
         compute_capability,
-        header_code,
         cuda_include_dirs,
         nvcc_options,
     )

@@ -31,6 +31,7 @@ from torch.utils import _pytree as pytree
 from torch.utils._sympy.functions import FloorDiv
 from torch.utils._sympy.interp import _run_sympy_handler, sympy_interp
 from torch.utils._sympy.reference import OptimizedPythonReferenceAnalysis
+from torch.utils._sympy.solve import try_solve
 
 from .. import config, ir
 from ..runtime.triton_compat import Config
@@ -107,32 +108,36 @@ def replace_floor_div(expr: sympy.Expr) -> sympy.Expr:
     """
     Replace sympy.floor with FloorDiv.
     """
-    expr = sympy.together(expr)
 
-    # Find division operations in the sympy.floor expression
-    # Div is either represented as Mul with:
-    # Rational denominator or Pow with negative exponent
-    if not isinstance(expr, sympy.core.mul.Mul):
-        return sympy.floor(expr)
+    def replace(expr: sympy.Expr) -> sympy.Expr:
+        expr = sympy.together(expr)
 
-    if isinstance(expr.args[0], sympy.Rational):
-        frac = expr.args[0]
-        numerator = sympy_product(expr.args[1:]) * frac.numerator
-        denominator = frac.denominator
+        # Find division operations in the sympy.floor expression
+        # Div is either represented as Mul with:
+        # Rational denominator or Pow with negative exponent
+        if not isinstance(expr, sympy.core.mul.Mul):
+            return sympy.floor(expr)
 
-        return FloorDiv(numerator, denominator)
-    elif isinstance(expr.args[0], sympy.Pow):
-        base = expr.args[0].base
-        exp = expr.args[0].exp
-        numerator = sympy_product(expr.args[1:])
-        if exp < 0:
-            denominator = base ** (-exp)
+        if isinstance(expr.args[0], sympy.Rational):
+            frac = expr.args[0]
+            numerator = sympy_product(expr.args[1:]) * frac.numerator
+            denominator = frac.denominator
+
+            return FloorDiv(numerator, denominator)
+        elif isinstance(expr.args[0], sympy.Pow):
+            base = expr.args[0].base
+            exp = expr.args[0].exp
+            numerator = sympy_product(expr.args[1:])
+            if exp < 0:
+                denominator = base ** (-exp)
+            else:
+                numerator = numerator * (base**exp)
+                denominator = 1
+            return FloorDiv(numerator, denominator)
         else:
-            numerator = numerator * (base**exp)
-            denominator = 1
-        return FloorDiv(numerator, denominator)
-    else:
-        return sympy.floor(expr)
+            return sympy.floor(expr)
+
+    return expr.replace(sympy.floor, replace)
 
 
 class WrapperFxCodegen(PythonWrapperCodegen):
@@ -141,6 +146,12 @@ class WrapperFxCodegen(PythonWrapperCodegen):
     """
 
     supports_caching = False
+
+    def codegen_inputs(self) -> None:
+        """
+        This would generate code for symbolic input shapes, strides, etc.
+        Since the FX converter handles this, do nothing here.
+        """
 
     def _generate(self, is_inference: bool) -> tuple[FileBackedGraphModule, None]:
         self.run_wrapper_ir_passes(is_inference)
@@ -332,20 +343,61 @@ class FxConverter:
             target: torch._ops.OpOverload,
             dim: int,
         ) -> None:
+            def codegen_proxy() -> torch.fx.Proxy:
+                size_node = self.gm.graph.call_function(target, (base_node, dim))
+                size_proxy = torch.fx.Proxy(size_node, tracer=self.tracer)
+                self.expr_to_proxy[sym_or_exp] = size_proxy
+                return size_proxy
+
             if isinstance(sym_or_exp, sympy.Symbol):
                 if sym_or_exp in self.expr_to_proxy:
                     return
-
-                size_node = self.gm.graph.call_function(target, (base_node, dim))
-                size_proxy = torch.fx.Proxy(size_node, tracer=self.tracer)
-
-                self.expr_to_proxy[sym_or_exp] = size_proxy
+                codegen_proxy()
 
             elif isinstance(sym_or_exp, sympy.Integer):
                 return
 
             elif isinstance(sym_or_exp, sympy.Expr):
-                self._sympy_interp(sym_or_exp)
+                # Check if we need to solve for an undefined symbol.
+                undefined_symbols = [
+                    sym
+                    for sym in sym_or_exp.free_symbols
+                    if sym not in self.expr_to_proxy
+                ]
+                if len(undefined_symbols) == 0:
+                    self._sympy_interp(sym_or_exp)
+                    return
+                elif len(undefined_symbols) > 1:
+                    raise ValueError(f"Underdetermined input expression: {sym_or_exp}")
+
+                # Define a new symbol for the input size.
+                size_proxy = codegen_proxy()
+                size_symbol = sympy.Symbol(
+                    size_proxy.node.name, integer=True, nonnegative=True
+                )
+                self.expr_to_proxy[size_symbol] = size_proxy
+
+                # Solve for the undefined symbol.
+                undefined_symbol = undefined_symbols[0]
+                solution = try_solve(
+                    sympy.Eq(sym_or_exp, size_symbol), undefined_symbol
+                )
+                if solution is None:
+                    raise ValueError(f"Cannot solve input expression: {sym_or_exp}")
+
+                # Since the symbol is a size, it must be an integer.
+                # Therefore, we can convert division to FloorDiv.
+                undefined_symbol_expr = solution[1]
+                if undefined_symbol.is_integer:
+                    undefined_symbol_expr = replace_floor_div(
+                        sympy.floor(undefined_symbol_expr)
+                    )
+
+                # Generate FX for the symbol.
+                self._sympy_interp(undefined_symbol_expr)
+                self.expr_to_proxy[undefined_symbol] = self.expr_to_proxy[
+                    undefined_symbol_expr
+                ]
 
         for node in V.graph.module.graph.find_nodes(op="placeholder"):  # type: ignore[operator, union-attr]
             name = node.name
@@ -803,12 +855,7 @@ class FxConverter:
 
         # Replace all sympy.floor with FloorDiv
         # _generate_sym_node does not support sympy.floor
-        grid = [
-            x.replace(sympy.floor, replace_floor_div)
-            if isinstance(x, sympy.Expr)
-            else x
-            for x in grid
-        ]
+        grid = [replace_floor_div(x) if isinstance(x, sympy.Expr) else x for x in grid]
         wrapper_grid = [tuple(self._generate_sym_nodes(grid))]
         call_kwargs = {
             name: self._generate_sym_node(val) for name, val in call_kwargs.items()

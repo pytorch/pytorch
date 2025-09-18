@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any, TYPE_CHECKING
 
+from .params import DictKernelTemplateParams, KernelTemplateParams
+
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -27,7 +29,7 @@ class TemplateConfigHeuristics:
         self,
         kernel_inputs: KernelInputs,
         op_name: str,
-    ) -> Generator[dict[str, Any], None, None]:
+    ) -> Generator[KernelTemplateParams, None, None]:
         """
         Get template configs for the given inputs.
 
@@ -37,10 +39,14 @@ class TemplateConfigHeuristics:
         if not self.should_run(kernel_inputs):
             return
 
-        yield from self._get_template_configs_impl(
-            kernel_inputs,
-            op_name,
-        )
+        # Get extra kwargs once
+        extra_kwargs = self.get_extra_kwargs(kernel_inputs, op_name)
+
+        # Generate configs and fuse with extra_kwargs
+        for config_dict in self._get_template_configs_impl(kernel_inputs, op_name):
+            # Fuse extra_kwargs into config
+            fused_kwargs = {**config_dict, **extra_kwargs}
+            yield DictKernelTemplateParams(fused_kwargs)
 
     def _get_template_configs_impl(
         self,

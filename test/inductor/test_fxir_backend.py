@@ -745,10 +745,13 @@ class FxirTestCase(InductorTestCase):
         self._compile_and_check(foo, args, expected_num_triton_kernels=0)
 
 
+@instantiate_parametrized_tests
 class AOTFxirTestCase(InductorTestCase):
     device = GPU_TYPE
 
-    def check(self, model, inp, dynamic_shapes=None, strict=False):
+    def check(
+        self, model, inp, dynamic_shapes=None, strict=False
+    ) -> torch.fx.GraphModule:
         if self.device == "xpu":
             raise unittest.SkipTest("The feature AOTFxir not currently ready for XPU")
         with torch.no_grad():
@@ -766,6 +769,8 @@ class AOTFxirTestCase(InductorTestCase):
                     and node.target != triton_kernel_wrapper_mutation
                 ):
                     self.assertTrue(node.meta.get("val", None) is not None)
+
+            return gm
 
     def test_aoti_fx_add(self):
         class M(torch.nn.Module):
@@ -883,6 +888,36 @@ class AOTFxirTestCase(InductorTestCase):
 
         # Now the backend should have been called.
         self.assertTrue(called)
+
+    @parametrize(
+        "expr",
+        [
+            (2 * Dim("x") + 1),
+            (Dim("x", min=3) - 3),
+        ],
+    )
+    def test_dynamic_input_expr(self, expr: sympy.Expr):
+        """
+        Test dynamic shapes with a nontrivial input expression.
+        """
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x.reshape(x.shape[0] * x.shape[1]) + x.shape[1]
+
+        dynamic_shapes = {"x": {0: expr}}
+        inp = (torch.randn((5, 4), device=self.device),)
+        gm = self.check(M().to(self.device), inp, dynamic_shapes=dynamic_shapes)
+
+        # Check for dynamic size ops.
+        self.assertEqual(
+            len(
+                gm.graph.find_nodes(
+                    op="call_function", target=torch.ops.aten.sym_size.int
+                )
+            ),
+            1,
+        )
 
 
 if __name__ == "__main__":
