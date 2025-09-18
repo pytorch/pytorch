@@ -419,10 +419,9 @@ def evaluate_platform_supports_symm_mem():
         for arch in arch_list:
             if arch in torch.cuda.get_device_properties(0).gcnArchName:
                 return True
-    if TEST_CUDA:
+        return False
+    else:
         return True
-
-    return False
 
 
 PLATFORM_SUPPORTS_SYMM_MEM: bool = LazyVal(
