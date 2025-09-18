@@ -840,10 +840,13 @@ class FSDPParam:
         # 2nd time shouldn't be no-op if people call model.load_state_dict(...) before lazy_init
         # this makes it possible for trainer to call `sd = model.state_dict()` before the training loop
         # and use `sd` without calling .state_dict() per iteration
-        same_local_tensor = (
-            self._sharded_param_data.untyped_storage().data_ptr()
-            == local_tensor.untyped_storage().data_ptr()
-        )
+        same_local_tensor = False
+        # TODO: need to support tensor subclass
+        if type(self._sharded_param_data) is torch.Tensor:
+            same_local_tensor = (
+                self._sharded_param_data.untyped_storage().data_ptr()
+                == local_tensor.untyped_storage().data_ptr()
+            )
         padded_sharded_size = self.padded_sharded_param_size
         shard_dim = self.fsdp_placement.dim
         length = local_tensor.size(shard_dim) if local_tensor.numel() > 0 else 0
