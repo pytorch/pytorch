@@ -264,7 +264,7 @@ class ReduceScatter:
             num_ranks = len(data)
             for each_rank_data in data:
                 # See Note [Hide collectives mutation from autograd]
-                each_rank_data[0][0].detach() /= num_ranks
+                each_rank_data[0][0].detach().div_(num_ranks)
 
 
 class Broadcast:
