@@ -85,7 +85,7 @@ def make_opaque(payload: Any = None) -> torch._C.ScriptObject:
         >>> torch.ops.mylib.queue_push(obj, torch.ones(3) + 1)
         >>> assert get_payload(obj).size() == 1
     """
-    return torch._C.make_opaque_object(payload)  # type: ignore[attr-defined]
+    return torch._C._make_opaque_object(payload)
 
 
 def get_payload(opaque_object: Union[torch._C.ScriptObject, FakeScriptObject]) -> Any:
@@ -103,7 +103,7 @@ def get_payload(opaque_object: Union[torch._C.ScriptObject, FakeScriptObject]) -
         return opaque_object.wrapped_obj.payload
     elif isinstance(opaque_object, torch._C.ScriptObject):
         if str(opaque_object._type()) == "__torch__.torch.classes.aten.OpaqueObject":
-            return torch._C.get_opaque_object_payload(opaque_object)  # type: ignore[attr-defined]
+            return torch._C._get_opaque_object_payload(opaque_object)  # type: ignore[attr-defined]
         else:
             raise RuntimeError(
                 f"Unable to get payload of ScriptObject object of type {str(opaque_object._type())}"
@@ -120,4 +120,4 @@ def set_payload(opaque_object: torch._C.ScriptObject, payload: Any) -> None:
         torch._C.ScriptObject: The opaque object that stores the given Python object.
         payload (Any): The Python object to store in the opaque object.
     """
-    torch._C.set_opaque_object_payload(opaque_object, payload)
+    torch._C._set_opaque_object_payload(opaque_object, payload)
