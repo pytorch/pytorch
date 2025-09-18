@@ -259,31 +259,36 @@ class SystemInfo:
 
     python_version: str
     torch_version: str
-    cuda_version: Optional[str]
+    toolkit_version: Optional[str]
     triton_version: Optional[tuple[int, int]]
     gpu_name: Optional[str]
+    CHECK_GPUS = ("cuda", "xpu")
 
     @classmethod
     def current(cls) -> "SystemInfo":
         """Create a SystemInfo instance with current system information."""
-        # Get GPU name if CUDA is available
-        gpu_name = None
-        if torch.cuda.is_available():
-            try:
-                gpu_name = torch.cuda.get_device_name()
-            except Exception:
-                # If we can't get GPU info, leave as None
-                pass
+        # Get GPU name if CUDA or XPU is available
+        gpu_name, toolkit_version = None, None
+        for device_type in cls.CHECK_GPUS:
+            if getattr(torch, device_type).is_available():
+                try:
+                    gpu_name = getattr(torch, device_type).get_device_name()
+                    toolkit_version = getattr(torch.version, device_type)
+                    break
+                except Exception:
+                    pass
 
         return cls(
             python_version=platform.python_version(),
             torch_version=torch.__version__,
-            cuda_version=torch.version.cuda,
+            toolkit_version=toolkit_version,
             triton_version=get_triton_version((0, 0)),
             gpu_name=gpu_name,
         )
 
-    def check_compatibility(self, other: "SystemInfo", use_cuda: bool = False) -> None:
+    def check_compatibility(
+        self, other: "SystemInfo", device_type: str = "cpu"
+    ) -> None:
         """
         Check if this SystemInfo is compatible with another SystemInfo.
         Raises RuntimeError if incompatible.
@@ -297,13 +302,13 @@ class SystemInfo:
             raise RuntimeError(
                 f"Compile package was created with a different PyTorch version: {self.torch_version}"
             )
+        if device_type in self.CHECK_GPUS:
+            if not getattr(torch, device_type).is_available():
+                raise RuntimeError(f"{device_type} is not available")
 
-        if use_cuda:
-            if not torch.cuda.is_available():
-                raise RuntimeError("CUDA is not available")
-            if self.cuda_version != other.cuda_version:
+            if self.toolkit_version != other.toolkit_version:
                 raise RuntimeError(
-                    f"Compile package was created with a different CUDA version: {self.cuda_version}"
+                    f"Compile package was created with a different toolkit version: {self.toolkit_version}"
                 )
 
             if (
@@ -314,7 +319,7 @@ class SystemInfo:
                     f"Compile package was created with a different Triton version: {self.triton_version}"
                 )
 
-            # Check GPU name if CUDA was used
+            # Check GPU name if CUDA/XPU was used
             if other.gpu_name is not None and self.gpu_name != other.gpu_name:
                 raise RuntimeError(
                     f"Compile package was created with different GPU: "

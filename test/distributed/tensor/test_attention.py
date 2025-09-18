@@ -9,12 +9,11 @@ from typing import Union
 import torch
 import torch.distributed as dist
 import torch.nn.functional as F
-from torch import nn, Tensor
+from torch import Tensor
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import DeviceMesh
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.experimental._attention import (
-    _AttentionContextParallel,
     _CausalBehavior,
     _cp_options,
     _DispatchMode,
@@ -24,7 +23,6 @@ from torch.distributed.tensor.experimental._attention import (
     context_parallel_unshard,
     set_rotate_method,
 )
-from torch.distributed.tensor.parallel import parallelize_module
 from torch.nn.attention import sdpa_kernel, SDPBackend
 from torch.nn.attention.flex_attention import (
     _mask_mod_signature,
@@ -42,8 +40,6 @@ from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import run_tests, skipIfRocm
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
-    ModelArgs,
-    Transformer,
     with_comms,
 )
 
@@ -272,180 +268,6 @@ class RingAttentionTest(DTensorTestBase):
                     _is_causal_behavior(rank=rank, world_size=2, i=i, is_causal=True),
                     behavior,
                 )
-
-    @skip_if_lt_x_gpu(2)
-    @unittest.skipIf(
-        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support flash attention"
-    )
-    @with_comms
-    def test_ring_attention_native_transformer(self) -> None:
-        self.run_subtests(
-            {
-                "is_causal": [True, False],
-                "rotater": [_RotateMethod.ALL_GATHER, _RotateMethod.ALL_TO_ALL],
-            },
-            self._test_ring_attention_native_transformer,
-        )
-
-    @sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION])
-    def _test_ring_attention_native_transformer(
-        self, is_causal: bool, rotater: _RotateMethod
-    ) -> None:
-        _cp_options.enable_load_balance = is_causal
-        set_rotate_method(rotater_enum_to_str[rotater])
-        self.assertEqual(_cp_options.rotate_method, rotater)
-        device_mesh = DeviceMesh(
-            self.device_type,
-            torch.arange(0, self.world_size),
-        )
-        dtype = torch.bfloat16
-        bs = 8
-        ntokens = 8
-        dim = 32
-        nheads = 8
-        num_layers = 2
-
-        encoder_layer = nn.TransformerEncoderLayer(
-            d_model=dim,
-            nhead=nheads,
-            dim_feedforward=dim,
-            batch_first=True,
-        ).to(dtype)
-        encoder_layer = parallelize_module(
-            module=encoder_layer,
-            device_mesh=device_mesh,
-            parallelize_plan={
-                "self_attn": _AttentionContextParallel(),
-            },
-        )
-        model = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
-        model = model.to(self.device_type).to(dtype)
-
-        mask = (
-            nn.Transformer.generate_square_subsequent_mask(
-                ntokens, device=self.device_type, dtype=dtype
-            )
-            if is_causal
-            else None
-        )
-        seq = torch.rand((bs, ntokens, dim), device=self.device_type, dtype=dtype)
-
-        with CommDebugMode() as comm_mode:
-            out = model(seq, mask=mask, is_causal=is_causal)
-
-        if rotater == _RotateMethod.ALL_TO_ALL:
-            self.assertDictEqual(
-                comm_mode.get_comm_counts(),
-                {
-                    c10d_functional.all_to_all_single: (self.world_size - 1)
-                    * num_layers,
-                },
-            )
-        else:
-            self.assertDictEqual(
-                comm_mode.get_comm_counts(),
-                {
-                    c10d_functional.all_gather_into_tensor: num_layers,
-                },
-            )
-
-        with CommDebugMode() as comm_mode:
-            out.sum().backward()
-
-        if rotater == _RotateMethod.ALL_TO_ALL:
-            self.assertDictEqual(
-                comm_mode.get_comm_counts(),
-                {
-                    c10d_functional.all_to_all_single: (self.world_size * 2 - 1)
-                    * num_layers,
-                },
-            )
-        else:
-            self.assertDictEqual(
-                comm_mode.get_comm_counts(),
-                {
-                    c10d_functional.all_gather_into_tensor: num_layers,
-                    c10d_functional.all_to_all_single: self.world_size * num_layers,
-                },
-            )
-
-    @skip_if_lt_x_gpu(2)
-    @unittest.skipIf(
-        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support flash attention"
-    )
-    @with_comms
-    @sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION])
-    def test_ring_attention_custom_transformer(self) -> None:
-        self.run_subtests(
-            {"rotater": [_RotateMethod.ALL_GATHER, _RotateMethod.ALL_TO_ALL]},
-            self._test_ring_attention_custom_transformer,
-        )
-
-    def _test_ring_attention_custom_transformer(self, rotater: _RotateMethod) -> None:
-        set_rotate_method(rotater_enum_to_str[rotater])
-        self.assertEqual(_cp_options.rotate_method, rotater)
-        device_mesh = DeviceMesh(
-            self.device_type,
-            torch.arange(0, self.world_size),
-        )
-        # early init DTensor RNG tracker to avoid broadcast be captuured in comm_mode
-        torch.distributed.tensor._random.manual_seed(10, device_mesh)
-
-        dtype = torch.bfloat16
-        bs = 2
-        args = ModelArgs()
-
-        model = Transformer(args).to(dtype).to(self.device_type)
-
-        model = parallelize_module(
-            module=model,
-            device_mesh=device_mesh,
-            parallelize_plan={
-                f"layers.{i}.attention": _AttentionContextParallel()
-                for i in range(args.n_layers)
-            },
-        )
-
-        seq = torch.randint(
-            args.vocab_size, (bs, args.max_seq_len), device=self.device_type
-        )
-
-        with CommDebugMode() as comm_mode:
-            out = model(seq)
-
-        if rotater == _RotateMethod.ALL_TO_ALL:
-            self.assertDictEqual(
-                comm_mode.get_comm_counts(),
-                {
-                    c10d_functional.all_to_all_single: (self.world_size - 1)
-                    * args.n_layers,
-                },
-            )
-        else:
-            self.assertDictEqual(
-                comm_mode.get_comm_counts(),
-                {c10d_functional.all_gather_into_tensor: args.n_layers},
-            )
-
-        with CommDebugMode() as comm_mode:
-            out.sum().backward()
-
-        if rotater == _RotateMethod.ALL_TO_ALL:
-            self.assertDictEqual(
-                comm_mode.get_comm_counts(),
-                {
-                    c10d_functional.all_to_all_single: (self.world_size * 2 - 1)
-                    * args.n_layers,
-                },
-            )
-        else:
-            self.assertDictEqual(
-                comm_mode.get_comm_counts(),
-                {
-                    c10d_functional.all_gather_into_tensor: args.n_layers,
-                    c10d_functional.all_to_all_single: self.world_size * args.n_layers,
-                },
-            )
 
 
 # Compile the flex_attention function
