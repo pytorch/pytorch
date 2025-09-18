@@ -7,6 +7,7 @@ import warnings
 from collections.abc import Iterable
 from copy import deepcopy
 from typing import Any, Callable, cast, Literal, Optional, Union
+from typing_extensions import override
 
 import torch
 from torch import Tensor
@@ -116,28 +117,6 @@ def get_swa_avg_fn():
     return swa_update
 
 
-def _load_state_dict_pre_hook(
-    module,
-    state_dict,
-    prefix,
-    local_metadata,
-    strict,
-    missing_keys,
-    unexpected_keys,
-    error_msgs,
-):
-    """Pre-hook to handle backward compatibility with tensor n_averaged."""
-    # Check if the old tensor n_averaged is present in the state dict
-    n_averaged_key = prefix + "n_averaged"
-    if n_averaged_key in state_dict:
-        # Convert tensor n_averaged to Python int for backward compatibility
-        n_averaged_tensor = state_dict[n_averaged_key]
-        if isinstance(n_averaged_tensor, Tensor):
-            module.n_averaged = int(n_averaged_tensor.item())
-        # Remove the old tensor buffer from state_dict to avoid loading it
-        del state_dict[n_averaged_key]
-
-
 class AveragedModel(Module):
     r"""Implements averaged model for Stochastic Weight Averaging (SWA) and Exponential Moving Average (EMA).
 
@@ -237,7 +216,7 @@ class AveragedModel(Module):
         https://paperswithcode.com/method/polyak-averaging
     """
 
-    n_averaged: int
+    n_averaged: Tensor
 
     def __init__(
         self,
@@ -256,24 +235,16 @@ class AveragedModel(Module):
         self.module = deepcopy(model)
         if device is not None:
             self.module = self.module.to(device)
-        self.n_averaged = 0
+        self.register_buffer(
+            "n_averaged", torch.tensor(0, dtype=torch.long, device=device)
+        )
         self.avg_fn = avg_fn
         self.multi_avg_fn = multi_avg_fn
         self.use_buffers = use_buffers
-        self.register_load_state_dict_pre_hook(_load_state_dict_pre_hook)
 
     def forward(self, *args, **kwargs):
         """Forward pass."""
         return self.module(*args, **kwargs)
-
-    def get_extra_state(self) -> Any:
-        """Get extra state for serialization."""
-        return {"n_averaged": self.n_averaged}
-
-    def set_extra_state(self, state: Any) -> None:
-        """Set extra state from deserialization."""
-        if isinstance(state, dict) and "n_averaged" in state:
-            self.n_averaged = state["n_averaged"]
 
     def update_parameters(self, model: Module):
         """Update model parameters."""
@@ -310,26 +281,28 @@ class AveragedModel(Module):
                         self.multi_avg_fn(
                             self_params,  # type: ignore[arg-type]
                             model_params,  # type: ignore[arg-type]
-                            self.n_averaged,
+                            self.n_averaged.to(device),
                         )
                     elif (
                         device is not None
                         and device.type in _get_foreach_kernels_supported_devices()
                     ):
                         multi_avg_fn = get_swa_multi_avg_fn()
-                        multi_avg_fn(self_params, model_params, self.n_averaged)
+                        multi_avg_fn(
+                            self_params, model_params, self.n_averaged.to(device)
+                        )
                     else:
                         avg_fn = get_swa_avg_fn()
+                        n_averaged = self.n_averaged.to(device)
                         for p_averaged, p_model in zip(self_params, model_params):  # type: ignore[assignment]
-                            p_averaged.copy_(
-                                avg_fn(p_averaged, p_model, self.n_averaged)
-                            )
+                            p_averaged.copy_(avg_fn(p_averaged, p_model, n_averaged))
             else:
                 for p_averaged, p_model in zip(  # type: ignore[assignment]
                     self_param_detached, model_param_detached
                 ):
+                    n_averaged = self.n_averaged.to(p_averaged.device)
                     p_averaged.detach().copy_(
-                        self.avg_fn(p_averaged.detach(), p_model, self.n_averaged)
+                        self.avg_fn(p_averaged.detach(), p_model, n_averaged)
                     )
 
         if not self.use_buffers:
@@ -459,10 +432,7 @@ class SWALR(LRScheduler):
                 "anneal_strategy must by one of 'cos' or 'linear', "
                 f"instead got {anneal_strategy}"
             )
-        elif anneal_strategy == "cos":
-            self.anneal_func = self._cosine_anneal
-        elif anneal_strategy == "linear":
-            self.anneal_func = self._linear_anneal
+        self._set_anneal_func(anneal_strategy)
         if not isinstance(anneal_epochs, int) or anneal_epochs < 0:
             raise ValueError(
                 f"anneal_epochs must be equal or greater than 0, got {anneal_epochs}"
@@ -510,3 +480,34 @@ class SWALR(LRScheduler):
             group["swa_lr"] * alpha + lr * (1 - alpha)
             for group, lr in zip(self.optimizer.param_groups, prev_lrs)
         ]
+
+    def _set_anneal_func(self, anneal_strategy: Literal["cos", "linear"]):
+        self._anneal_strategy = anneal_strategy
+        if anneal_strategy == "cos":
+            self.anneal_func = self._cosine_anneal
+        else:
+            self.anneal_func = self._linear_anneal
+
+    @override
+    def state_dict(self) -> dict[str, Any]:
+        """Return the state of the scheduler as a :class:`dict`.
+
+        It contains an entry for every variable in self.__dict__ which
+        is not the optimizer or anneal_func.
+        """
+        return {
+            key: value
+            for key, value in self.__dict__.items()
+            if key not in ("optimizer", "anneal_func")
+        }
+
+    @override
+    def load_state_dict(self, state_dict: dict[str, Any]) -> None:
+        """Load the scheduler's state.
+
+        Args:
+            state_dict (dict): scheduler state. Should be an object returned
+                from a call to :meth:`state_dict`.
+        """
+        self.__dict__.update(state_dict)
+        self._set_anneal_func(self._anneal_strategy)

@@ -5421,7 +5421,7 @@ class CppScheduling(BaseScheduling):
             _, _, arg_types = args.cpp_argdefs()
             if not V.graph.cpp_wrapper:
                 compile_wrapper.writeline(
-                    f"async_compile.cpp_pybinding({arg_types!r}, '''"
+                    f"async_compile.cpp_pybinding({arg_types!r}, r'''"
                 )
             compile_wrapper.splice(src_code, strip=True)
             if not V.graph.cpp_wrapper:
