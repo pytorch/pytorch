@@ -116,8 +116,17 @@ class FxirTestCase(InductorTestCase):
     def setUpClass(cls):
         super().setUpClass()
 
-        # Register the FX backend.
+        # Register the FX backend, storing the default for later.
+        common.init_backend_registration()
+        cls.default_backend = common.device_codegens[cls.device]
         register_backend_for_device(cls.device, TritonScheduling, WrapperFxCodegen)
+
+    @classmethod
+    def tearDownClass(cls):
+        super().tearDownClass()
+
+        # Revert to the default backend.
+        common.device_codegens[cls.device] = cls.default_backend
 
     def test_basic(self):
         args = [torch.randn(8, device=self.device) for _ in range(2)]
@@ -613,20 +622,18 @@ class FxirTestCase(InductorTestCase):
         self.assertEqual(self._count_ops(gm, fallback_op), 1)
 
     @torch._inductor.config.patch("graph_partition", True)
-    def test_subgraph_raises(self):
+    def test_cond_subgraph(self):
         """
-        Test a model with subgraphs. This is not yet supported, so check that we get the
-        expected exception.
+        Test a model with subgraphs.
         """
 
         def foo(cond, x):
             return torch.cond(cond, torch.cos, torch.sin, [x])
 
         cond = torch.tensor([True], device=self.device)
-        x = torch.ones([2, 3], device=self.device)
+        x = torch.randn((2, 3), device=self.device)
 
-        with self.assertRaisesRegex(BackendCompilerFailed, "Subgraph"):
-            self._compile_and_check(foo, [cond, x])
+        self._compile_and_check(foo, [cond, x], expected_num_triton_kernels=2)
 
     def test_cpp_raises(self):
         """
