@@ -2026,7 +2026,101 @@ class OutputGraph(OutputGraphGuardsState):
                 # a lot of fake_tensor ownership assumptions and runs afoul of detect_fake_mode
                 self.tracing_context.fake_mode = backend_fake_mode
 
+            def pretty_print_counts(d):
+                # sort by value desc, then by key asc for stable, readable output
+                items = sorted(d.items(), key=lambda kv: (-kv[1], kv[0]))
+                width = max((len(k) for k, _ in items), default=0)
+                for k, v in items:
+                    print(f"{k:<{width}} : {v}")
+
+            def profile(name, mod, inputs):
+                with (
+                    torch._C.DisableTorchFunctionSubclass(),
+                    torch._C.DisableTorchFunction(),
+                ):
+                    mod(*inputs)
+                    mod(*inputs)
+                    mod(*inputs)
+
+                    import time
+
+                    t0 = time.perf_counter()
+                    for _ in range(10):
+                        mod(*inputs)
+                    t1 = time.perf_counter()
+                    print(f"{name:<50}{round((t1 - t0) * 1000, 3)} ms")
+
             with self.restore_global_state():
+                counts = collections.defaultdict(lambda: 0)
+                for node in gm.graph.nodes:
+                    if "call" in node.op:
+                        counts[str(node.target)] += 1
+
+                print("--- Dynamo Fx graph --")
+                pretty_print_counts(counts)
+                profile("Base Time", gm, self.example_inputs())
+
+                # Meta prop
+                meta_inputs = []
+                for inp in self.example_inputs():
+                    meta_inputs.append(inp.to(device="meta"))
+                profile("Meta  Time", gm, meta_inputs)
+
+                # Fake prop
+                from torch._subclasses.fake_tensor import (
+                    FakeTensor,
+                    FakeTensorMode,
+                    in_kernel_invocation_manager,
+                )
+
+                fake_mode = torch._subclasses.fake_tensor.FakeTensorMode()
+                fake_inputs = []
+                for inp in self.example_inputs():
+                    fake_inputs.append(fake_mode.from_tensor(inp))
+                with fake_mode:
+                    profile("Fake Time", gm, fake_inputs)
+
+                    with torch._subclasses.fake_tensor.disable_fake_tensor_cache(
+                        fake_mode
+                    ):
+                        profile("Fake w/o caching Time", gm, fake_inputs)
+
+                # Patch __torch_dispatch__ to return a fake tensor very quickly.
+                # This makes __torch_dispatch__ free, and shows the upper limit,
+                # with using Fake Tensors because of python.
+                x = self.example_inputs()[0]
+
+                def get_fake_output():
+                    empty = torch.empty_strided(
+                        x.size(),
+                        x.stride(),
+                        dtype=x.dtype,
+                        device="meta",
+                        requires_grad=x.requires_grad,
+                    )
+
+                    return FakeTensor(fake_mode, empty, x.device)
+
+                def create_fake_tensor(self, *args, **kwargs):
+                    with in_kernel_invocation_manager(self):
+                        return get_fake_output()
+
+                FakeTensorMode.__torch_dispatch__ = create_fake_tensor
+
+                with fake_mode:
+                    profile("Patched FakeTensorMode TD Time", gm, fake_inputs)
+
+                y = get_fake_output()
+
+                def return_fake_tensor(self, *args, **kwargs):
+                    return y
+
+                FakeTensorMode.__torch_dispatch__ = return_fake_tensor
+                with fake_mode:
+                    profile(
+                        "Free FakeTensorMode TD Time", gm, fake_inputs
+                    )
+
                 compiled_fn = self.call_user_compiler(gm, self.example_inputs())
 
             from torch.fx._lazy_graph_module import _LazyGraphModule
