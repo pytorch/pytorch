@@ -3,8 +3,9 @@
 
 import unittest
 
-from torch._dynamo import config
+from torch._dynamo import config as dynamo_config
 from torch._dynamo.testing import make_test_cls_with_patches
+from torch._export import config as export_config
 
 
 try:
@@ -44,8 +45,9 @@ def make_dynamic_cls(cls):
         cls_a,
         cls_prefix,
         "",
-        (config, "install_free_tensors", True),
-        (config, "inline_inbuilt_nn_modules", True),
+        (export_config, "use_new_tracer_experimental", True),
+        (dynamo_config, "install_free_tensors", True),
+        (dynamo_config, "inline_inbuilt_nn_modules", True),
         xfail_prop="_expected_failure_inline_and_install",
     )
 
@@ -71,7 +73,30 @@ del test
 unittest.expectedFailure(
     InlineAndInstallStrictExportTestExport.test_buffer_util_inline_and_install_strict  # noqa: F821
 )
-
+# this is because we can't preserve stacktrace
+unittest.expectedFailure(
+    InlineAndInstallStrictExportTestExport.test_stack_trace_make_fx_inline_and_install_strict  # noqa: F821
+)
+# this is because we marked unlift hooks to be dynamo skip traced
+unittest.expectedFailure(
+    InlineAndInstallStrictExportTestExport.test_custom_tag_metadata_re_export_inline_and_install_strict  # noqa: F821
+)
+unittest.expectedFailure(
+    InlineAndInstallStrictExportTestExport.test_from_node_metadata_export_inline_and_install_strict  # noqa: F821
+)
+unittest.expectedFailure(
+    InlineAndInstallStrictExportTestExport.test_module_inline_and_install_strict  # noqa: F821
+)
+unittest.expectedFailure(
+    InlineAndInstallStrictExportTestExport.test_module_with_dict_container_inp_out_inline_and_install_strict  # noqa: F821
+)
+unittest.expectedFailure(
+    InlineAndInstallStrictExportTestExport.test_retrace_pre_autograd_inline_and_install_strict  # noqa: F821
+)
+# this is because detect leak test has export root
+unittest.expectedFailure(
+    InlineAndInstallStrictExportTestExport.test_detect_leak_strict_inline_and_install_strict  # noqa: F821
+)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
