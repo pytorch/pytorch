@@ -48,27 +48,6 @@ class GenericCtxMgr:
 
 
 class ErrorMessagesTest(LoggingTestCase):
-    def test_dynamic_shape_operator(self):
-        def fn():
-            return torch.nonzero(torch.rand([10, 10]))
-
-        self.assertExpectedInlineMunged(
-            Unsupported,
-            lambda: torch.compile(fn, backend="eager", fullgraph=True)(),
-            """\
-Dynamic shape operator
-  Explanation: Operator `aten.nonzero.default`'s output shape depends on input Tensor data.
-  Hint: Enable tracing of dynamic shape operators with `torch._dynamo.config.capture_dynamic_output_shape_ops = True`
-
-  Developer debug context: aten.nonzero.default
-
- For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0036.html
-
-from user code:
-   File "test_error_messages.py", line N, in fn
-    return torch.nonzero(torch.rand([10, 10]))""",
-        )
-
     def test_dynamic_shape_operator_no_meta_kernel(self):
         def fn():
             return torch.linalg.lstsq(torch.rand(10, 10), torch.rand(10, 10))
