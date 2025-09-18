@@ -58,6 +58,20 @@ class TestDTensorDebugMode(TestCase):
       aten::sum(t: f32[1, 32])""",
         )
 
+    def test_debug_string_inside_context(self):
+        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+
+        x = torch.randn(1, 8, requires_grad=False)
+        y = torch.randn(1, 32, requires_grad=True)
+        x_dtensor = DTensor.from_local(x, mesh, [Shard(0)], run_check=False)
+        y_dtensor = DTensor.from_local(y, mesh, [Shard(0)], run_check=False)
+
+        with DebugMode() as debug_mode:
+            torch.mm(x_dtensor, y_dtensor).sum()
+            s0 = debug_mode.debug_string()
+        s1 = debug_mode.debug_string()
+        self.assertEqual(s0, s1)
+
     def test_debug_mode_backward(self):
         mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
 
@@ -139,6 +153,8 @@ class TestDTensorDebugMode(TestCase):
         aten::chunk(t: f32[1, 96, 8], 4, 2)
         aten::cat(['t: f32[1, 96, 2]', 't: f32[1, 96, 2]', 't: f32[1, 96, 2]', 't: f32[1, 96, 2]'])
         _c10d_functional::reduce_scatter_tensor(t: f32[4, 96, 2], sum, 4, 1)
+        _c10d_functional::wait_tensor(t: f32[1, 96, 2])
+        aten::chunk(t: f32[1, 96, 2], 2, 2)
         aten::clone(t: f32[1, 96, 1])
       redistribute_input(1, [R, P] -> [S(1), S(1)])
         aten::chunk(t: f32[1, 8, 16], 4, 1)

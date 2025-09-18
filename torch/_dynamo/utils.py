@@ -4734,6 +4734,11 @@ def store_user_object_weakrefs(*args: Any) -> None:
     )
 
 
+def reset_user_object_tracking() -> None:
+    index_to_source.clear()
+    index_to_user_object_weakref.clear()
+
+
 # Register a user object to be used in the graph
 def register_user_object(value: Any, source: Source) -> int:
     global index_to_source
