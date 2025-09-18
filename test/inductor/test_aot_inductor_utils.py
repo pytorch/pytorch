@@ -52,15 +52,16 @@ class AOTIRunnerUtil:
             )
             gm = ep.module()
         else:
-            gm = torch.export._trace._export_to_torch_ir(
-                model,
-                example_inputs,
-                dynamic_shapes=dynamic_shapes,
-                disable_constraint_solver=disable_constraint_solver,
-                # Disabling this flag, because instead we can rely on the mapping
-                # dynamo_flat_name_to_original_fqn which is coming from Dynamo.
-                restore_fqn=False,
-            )
+            with torch._export.config.patch(use_new_tracer_experimental=True):
+                gm = torch.export._trace._export_to_torch_ir(
+                    model,
+                    example_inputs,
+                    dynamic_shapes=dynamic_shapes,
+                    disable_constraint_solver=disable_constraint_solver,
+                    # Disabling this flag, because instead we can rely on the mapping
+                    # dynamo_flat_name_to_original_fqn which is coming from Dynamo.
+                    restore_fqn=False,
+                )
 
         if IS_FBCODE:
             from deeplearning.aot_inductor.extern_node_thrift_serializer import (

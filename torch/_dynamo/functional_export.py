@@ -105,6 +105,19 @@ def clean_nn_module_stack(
 
         node.meta["nn_module_stack"] = cleaned_stack
 
+    if "dynamo_flat_name_to_original_fqn" in graph_module.meta:
+        # Clean up flat name to original fqn mapping
+        clean_name_to_original_fqn = {}
+        for flat_name, original_fqn in graph_module.meta[
+            "dynamo_flat_name_to_original_fqn"
+        ].items():
+            clean_name_to_original_fqn[flat_name.replace("__export_root_", "_")] = (
+                original_fqn.replace("_export_root.", "")
+            )
+        graph_module.meta["dynamo_flat_name_to_original_fqn"] = (
+            clean_name_to_original_fqn
+        )
+
     return graph_module
 
 
