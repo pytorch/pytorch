@@ -102,6 +102,114 @@ def get_constant_fqn(node: torch.fx.Node, constant_name: str) -> str:
         return constant_name
 
 
+def _get_constant_name_and_fqn(
+    node: torch.fx.Node,
+    constant_val: _ConstantAttributeType,
+    constant_attrs: ConstantAttrMap,
+    used_target_names: set[str],
+    num_tensor_constants: int,
+    num_custom_obj: int,
+) -> tuple[str, str, int, int]:
+    """
+    Single helper to get the name and FQN for all constants, handling custom names,
+    module attribute names, and default names with uniqueness checking.
+    """
+    if isinstance(constant_val, torch.Tensor):
+        # Check for custom name first
+        custom_name = getattr(constant_val, "_export_name", None)
+        if custom_name is not None:
+            return _get_unique_name(
+                node,
+                custom_name,
+                1,
+                used_target_names,
+                num_tensor_constants,
+                num_custom_obj,
+                is_custom_name=True,
+            )
+
+        # Fall back to module attribute name if available
+        constant_fqn = _get_first_fqn(constant_attrs, constant_val)
+        if constant_fqn is not None:
+            constant_name = constant_fqn.replace(".", "_")
+            return constant_name, constant_fqn, num_tensor_constants, num_custom_obj
+
+        # Use default tensor naming
+        return _get_unique_name(
+            node,
+            "",
+            num_tensor_constants,
+            used_target_names,
+            num_tensor_constants,
+            num_custom_obj,
+            is_custom_name=False,
+            prefix="lifted_tensor",
+        )
+
+    elif isinstance(constant_val, (torch.ScriptObject, FakeScriptObject)):
+        # Fall back to module attribute name if available
+        constant_fqn = _get_first_fqn(constant_attrs, constant_val)
+        if constant_fqn is not None:
+            constant_name = constant_fqn.replace(".", "_")
+            return constant_name, constant_fqn, num_tensor_constants, num_custom_obj
+
+        # Use default custom object naming
+        return _get_unique_name(
+            node,
+            "",
+            num_custom_obj,
+            used_target_names,
+            num_tensor_constants,
+            num_custom_obj,
+            is_custom_name=False,
+            prefix="lifted_custom",
+        )
+
+    else:
+        raise SpecViolationError(
+            f"Unsupported constant type {type(constant_val)} in _get_constant_name_and_fqn"
+        )
+
+
+def _get_unique_name(
+    node: torch.fx.Node,
+    base_name: str,
+    counter: int,
+    used_target_names: set[str],
+    num_tensor_constants: int,
+    num_custom_obj: int,
+    is_custom_name: bool = False,
+    prefix: str = "",
+) -> tuple[str, str, int, int]:
+    """Get a unique name, handling both custom names and default names with counter increments."""
+    if is_custom_name:
+        # For custom names, start with the base name and add suffixes if needed
+        constant_name = base_name
+        counter = 1
+    else:
+        # For default names, start with prefix_counter format
+        constant_name = f"{prefix}_{counter}"
+
+    constant_fqn = get_constant_fqn(node, constant_name)
+
+    while constant_fqn in used_target_names:
+        counter += 1
+        if is_custom_name:
+            constant_name = f"{base_name}_{counter}"
+        else:
+            constant_name = f"{prefix}_{counter}"
+        constant_fqn = get_constant_fqn(node, constant_name)
+
+    # Return updated counters
+    if is_custom_name:
+        # Custom names don't affect the default counters
+        return constant_name, constant_fqn, num_tensor_constants, num_custom_obj
+    elif prefix == "lifted_tensor":
+        return constant_name, constant_fqn, counter + 1, num_custom_obj
+    else:  # prefix == "lifted_custom"
+        return constant_name, constant_fqn, num_tensor_constants, counter + 1
+
+
 def _get_first_fqn(
     const_attrs: ConstantAttrMap,
     key: _ConstantAttributeType,
@@ -248,47 +356,41 @@ def lift_constants_pass(
             # constant (e.g. x + torch.tensor(0)), and thus did not have a
             # specific location in the eager module. In that case, just generate
             # some name and attach it to the module in which it was used.
-            if isinstance(constant_val, (torch.ScriptObject, FakeScriptObject)):
-                constant_kind = InputKind.CUSTOM_OBJ
-                constant_fqn = _get_first_fqn(constant_attrs, constant_val)
-                if constant_fqn is not None:
-                    constant_name = constant_fqn.replace(".", "_")
-                else:
-                    constant_name = f"lifted_custom_{num_custom_obj}"
-                    constant_fqn = get_constant_fqn(node, constant_name)
-                    while constant_fqn in used_target_names:
-                        num_custom_obj += 1
-                        constant_name = f"lifted_custom_{num_custom_obj}"
-                        constant_fqn = get_constant_fqn(node, constant_name)
-                    num_custom_obj += 1
-            elif isinstance(constant_val, torch.Tensor):
-                # Remove the parameterness of constant_val
-                if isinstance(constant_val, torch.nn.Parameter):
-                    log.debug(
-                        "%s created when tracing %s is a parameter. But "
-                        "it's not registered with register_parameter(). export will treat it as a constant tensor",
-                        str(node.target),
-                        str(node.meta.get("stack_trace", "<unknown stack>")),
-                    )
-                    # We get the real data out of the parameter by disabling the surrounding fake mode.
-                    with unset_fake_temporarily():
-                        constant_val = constant_val.data
+            # Remove the parameterness of constant_val for tensors
+            if isinstance(constant_val, torch.Tensor) and isinstance(
+                constant_val, torch.nn.Parameter
+            ):
+                log.debug(
+                    "%s created when tracing %s is a parameter. But "
+                    "it's not registered with register_parameter(). export will treat it as a constant tensor",
+                    str(node.target),
+                    str(node.meta.get("stack_trace", "<unknown stack>")),
+                )
+                # We get the real data out of the parameter by disabling the surrounding fake mode.
+                with unset_fake_temporarily():
+                    constant_val = constant_val.data
+
+            # Set the constant kind
+            if isinstance(constant_val, torch.Tensor):
                 constant_kind = InputKind.CONSTANT_TENSOR
-                constant_fqn = _get_first_fqn(constant_attrs, constant_val)
-                if constant_fqn is not None:
-                    constant_name = constant_fqn.replace(".", "_")
-                else:
-                    constant_name = f"lifted_tensor_{num_tensor_constants}"
-                    constant_fqn = get_constant_fqn(node, constant_name)
-                    while constant_fqn in used_target_names:
-                        num_tensor_constants += 1
-                        constant_name = f"lifted_tensor_{num_tensor_constants}"
-                        constant_fqn = get_constant_fqn(node, constant_name)
-                    num_tensor_constants += 1
+            elif isinstance(constant_val, (torch.ScriptObject, FakeScriptObject)):
+                constant_kind = InputKind.CUSTOM_OBJ
             else:
                 raise SpecViolationError(
                     f"getattr node {node} referencing unsupported type {type(constant_val)}"
                 )
+
+            # Use single helper to get the name - handles all naming logic internally
+            constant_name, constant_fqn, num_tensor_constants, num_custom_obj = (
+                _get_constant_name_and_fqn(
+                    node=node,
+                    constant_val=constant_val,
+                    constant_attrs=constant_attrs,
+                    used_target_names=used_target_names,  # type: ignore[arg-type]
+                    num_tensor_constants=num_tensor_constants,
+                    num_custom_obj=num_custom_obj,
+                )
+            )
 
             with gm.graph.inserting_before(first_user_input):
                 # Insert the constant node before the first user input
@@ -352,11 +454,14 @@ def lift_constants_pass(
                         target=constant_fqn,
                     ),
                 )
+                # Store the constant with our custom name
+                all_constants[constant_fqn] = constant_val
+
+                # Also store with original module attribute names if they exist
+                # This ensures compatibility with other parts of the export system
                 if constant_val in constant_attrs:
                     for fqn in constant_attrs[constant_val]:
                         all_constants[fqn] = constant_val
-                else:
-                    all_constants[constant_fqn] = constant_val
                 first_user_input_loc += 1
 
     for spec in graph_signature.output_specs:

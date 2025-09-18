@@ -16060,6 +16060,285 @@ def forward(self, q, k, v):
         ):
             export(Foo(), (torch.randn(1, 33, 256, 128), k, v))
 
+    def test_tensor_naming_external_tensor(self):
+        """Test naming for external tensor created outside the model."""
+        from torch.export._name_tensor_constants import set_tensor_name
+
+        # Create a tensor outside the model
+        external_tensor = torch.randn(3, 4)
+        external_tensor = set_tensor_name(external_tensor, "external_data")
+
+        class ModelWithExternalTensor(torch.nn.Module):
+            def forward(self, x):
+                # Use the external tensor directly in forward
+                return x + external_tensor.sum()
+
+        model = ModelWithExternalTensor()
+        example_input = torch.randn(3, 4)
+
+        # Test with non-strict mode
+        ep = export(model, (example_input,), strict=False)
+
+        # Check that our custom name appears
+        lifted_tensor_names = list(
+            ep.graph_signature.inputs_to_lifted_tensor_constants.values()
+        )
+
+        # The custom name should be used
+        has_custom_name = any("external_data" in name for name in lifted_tensor_names)
+        self.assertTrue(
+            has_custom_name,
+            f"Custom name 'external_data' not found in: {lifted_tensor_names}",
+        )
+
+        # Verify functional correctness
+        torch.testing.assert_close(ep.module()(example_input), model(example_input))
+
+    def test_tensor_naming_created_in_init(self):
+        """Test naming for tensor created in __init__ method."""
+        from torch.export._name_tensor_constants import set_tensor_name
+
+        class ModelWithInitTensor(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                # Create and name tensor in init
+                self.constant = set_tensor_name(
+                    torch.tensor([1.0, 2.0, 3.0]), "init_constant"
+                )
+
+            def forward(self, x):
+                return x + self.constant.sum()
+
+        model = ModelWithInitTensor()
+        example_input = torch.randn(3)
+
+        # Test with non-strict mode
+        ep = export(model, (example_input,), strict=False)
+
+        # Check lifted tensor names
+        lifted_tensor_names = list(
+            ep.graph_signature.inputs_to_lifted_tensor_constants.values()
+        )
+
+        # Should have custom name for the tensor created in init
+        has_custom_name = any("init_constant" in name for name in lifted_tensor_names)
+        self.assertTrue(
+            has_custom_name,
+            f"Custom name 'init_constant' not found in: {lifted_tensor_names}",
+        )
+
+        # Verify functional correctness
+        torch.testing.assert_close(ep.module()(example_input), model(example_input))
+
+    def test_tensor_naming_created_in_forward(self):
+        """Test naming for tensor created in forward method."""
+        from torch.export._name_tensor_constants import set_tensor_name
+
+        class ModelWithForwardTensor(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                # Create tensor in init but don't name it yet
+                self.constant = torch.tensor([4.0, 5.0, 6.0])
+
+            def forward(self, x):
+                # Name the tensor in forward
+                named_constant = set_tensor_name(self.constant, "forward_named")
+                return x + named_constant.sum()
+
+        model = ModelWithForwardTensor()
+        example_input = torch.randn(3)
+
+        # Test with non-strict mode
+        ep = export(model, (example_input,), strict=False)
+
+        # Check lifted tensor names
+        lifted_tensor_names = list(
+            ep.graph_signature.inputs_to_lifted_tensor_constants.values()
+        )
+
+        # Should have custom name for the tensor named in forward
+        has_custom_name = any("forward_named" in name for name in lifted_tensor_names)
+        self.assertTrue(
+            has_custom_name,
+            f"Custom name 'forward_named' not found in: {lifted_tensor_names}",
+        )
+
+        # Verify functional correctness
+        torch.testing.assert_close(ep.module()(example_input), model(example_input))
+
+    def test_tensor_naming_constant_in_forward_fails(self):
+        """Test that trying to name a constant tensor created in forward fails during export."""
+        from torch.export._name_tensor_constants import set_tensor_name
+
+        class ModelWithConstantNaming(torch.nn.Module):
+            def forward(self, x):
+                # Create a constant tensor in forward
+                constant = torch.tensor([1.0])
+                # Try to name it - this should fail during export because it becomes a FakeTensor
+                named_constant = set_tensor_name(constant, "my_constant")
+                return x + named_constant.sum()
+
+        model = ModelWithConstantNaming()
+        example_input = torch.randn(3)
+
+        # This should fail because during export tracing, the torch.tensor([1.0])
+        # becomes a FakeTensor, and we can't name FakeTensors
+        with self.assertRaises(RuntimeError) as cm:
+            export(model, (example_input,), strict=False)
+
+        self.assertIn("Cannot name FakeTensor", str(cm.exception))
+
+    def test_tensor_naming_strict_mode_limitation(self):
+        """Test that strict mode has limitations with tensor naming for @assume_constant_result."""
+        from torch.export._name_tensor_constants import set_tensor_name
+
+        # Create a tensor outside the model
+        external_tensor = torch.randn(3, 4)
+        external_tensor = set_tensor_name(external_tensor, "external_strict_data")
+
+        @torchdynamo.assume_constant_result
+        def get_external_tensor():
+            return external_tensor
+
+        class ModelWithExternalTensor(torch.nn.Module):
+            def forward(self, x):
+                # Use the external tensor via assume_constant_result for strict mode
+                tensor = get_external_tensor()
+                return x + tensor
+
+        model = ModelWithExternalTensor()
+        example_input = torch.randn(3, 4)
+
+        # Test with strict=True - export should work but custom names are not preserved
+        # for @assume_constant_result functions
+        ep = export(model, (example_input,), strict=True)
+
+        # Check that export succeeded and model works
+        lifted_tensor_names = list(
+            ep.graph_signature.inputs_to_lifted_tensor_constants.values()
+        )
+
+        # Verify functional correctness
+        torch.testing.assert_close(ep.module()(example_input), model(example_input))
+
+        # Note: In strict mode with @assume_constant_result, the function name is used
+        # instead of the custom tensor name. This is a known limitation.
+        # We just verify that some constant was lifted
+        self.assertGreater(
+            len(lifted_tensor_names), 0, "Should have some lifted tensor constants"
+        )
+
+    def test_tensor_naming_serialization_deserialization(self):
+        """Test tensor naming with serialization/deserialization."""
+        import os
+        import tempfile
+
+        from torch.export._name_tensor_constants import set_tensor_name
+
+        # Create a tensor outside the model
+        external_tensor = torch.randn(2, 3)
+        external_tensor = set_tensor_name(external_tensor, "serialized_data")
+
+        class ModelForSerialization(torch.nn.Module):
+            def forward(self, x):
+                return x * external_tensor.sum()
+
+        model = ModelForSerialization()
+        example_input = torch.randn(2, 3)
+
+        # Export the model
+        ep = export(model, (example_input,), strict=False)
+
+        # Check that our custom name appears in original
+        lifted_tensor_names = list(
+            ep.graph_signature.inputs_to_lifted_tensor_constants.values()
+        )
+        has_custom_name = any("serialized_data" in name for name in lifted_tensor_names)
+        self.assertTrue(
+            has_custom_name,
+            f"Custom name 'serialized_data' not found in: {lifted_tensor_names}",
+        )
+
+        # Test serialization/deserialization
+        with tempfile.NamedTemporaryFile(suffix=".pt2", delete=False) as f:
+            try:
+                torch.export.save(ep, f.name)
+                ep_loaded = torch.export.load(f.name)
+
+                # Check that custom names are preserved after serialization
+                lifted_names_loaded = list(
+                    ep_loaded.graph_signature.inputs_to_lifted_tensor_constants.values()
+                )
+                has_custom_loaded = any(
+                    "serialized_data" in name for name in lifted_names_loaded
+                )
+                self.assertTrue(
+                    has_custom_loaded,
+                    f"Custom name not preserved after serdes: {lifted_names_loaded}",
+                )
+
+                # Verify functional correctness after serialization
+                torch.testing.assert_close(
+                    ep_loaded.module()(example_input), model(example_input)
+                )
+            finally:
+                os.unlink(f.name)
+
+    def test_tensor_naming_multiple_named_tensors_serdes(self):
+        """Test multiple named tensors with serialization."""
+        import os
+        import tempfile
+
+        from torch.export._name_tensor_constants import set_tensor_name
+
+        # Create multiple tensors with different names
+        tensor1 = set_tensor_name(torch.tensor([1.0, 2.0]), "first_tensor")
+        tensor2 = set_tensor_name(torch.tensor([3.0, 4.0]), "second_tensor")
+        tensor3 = set_tensor_name(torch.tensor([5.0]), "third_tensor")
+
+        class MultiTensorModel(torch.nn.Module):
+            def forward(self, x):
+                return x + tensor1.sum() + tensor2.sum() + tensor3.sum()
+
+        model = MultiTensorModel()
+        example_input = torch.randn(2)
+
+        # Export and serialize
+        ep = export(model, (example_input,), strict=False)
+
+        with tempfile.NamedTemporaryFile(suffix=".pt2", delete=False) as f:
+            try:
+                torch.export.save(ep, f.name)
+                ep_loaded = torch.export.load(f.name)
+
+                # Check that all custom names are preserved
+                lifted_names_loaded = list(
+                    ep_loaded.graph_signature.inputs_to_lifted_tensor_constants.values()
+                )
+
+                has_first = any("first_tensor" in name for name in lifted_names_loaded)
+                has_second = any(
+                    "second_tensor" in name for name in lifted_names_loaded
+                )
+                has_third = any("third_tensor" in name for name in lifted_names_loaded)
+
+                self.assertTrue(
+                    has_first, f"'first_tensor' not found in: {lifted_names_loaded}"
+                )
+                self.assertTrue(
+                    has_second, f"'second_tensor' not found in: {lifted_names_loaded}"
+                )
+                self.assertTrue(
+                    has_third, f"'third_tensor' not found in: {lifted_names_loaded}"
+                )
+
+                # Verify functional correctness
+                torch.testing.assert_close(
+                    ep_loaded.module()(example_input), model(example_input)
+                )
+            finally:
+                os.unlink(f.name)
+
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestOneOffModelExportResult(TestCase):
