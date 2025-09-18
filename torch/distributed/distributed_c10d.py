@@ -337,10 +337,12 @@ class Backend(str):  # noqa: SLOT000
             # assume default devices "cpu" and "cuda", but warn
             warnings.warn(
                 f"Device capability of {name} unspecified, assuming `cpu` and "
-                "`cuda`. Please specify it via the `devices` argument of "
+                "`cuda` or `xpu`. Please specify it via the `devices` argument of "
                 "`register_backend`."
             )
-            Backend.backend_capability[name.lower()] = ["cpu", "cuda"]
+            Backend.backend_capability[name.lower()] = (
+                ["cpu", "cuda", "xpu"] if torch.xpu.is_available() else ["cpu", "cuda"]
+            )
         elif isinstance(devices, str):
             # Single device string specified. Simply convert to list.
             Backend.backend_capability[name.lower()] = [devices]
@@ -1735,7 +1737,6 @@ def init_process_group(
             timeout=timeout,
             group_desc="default_pg",
         )
-        _update_default_pg(default_pg)
     else:
         # backward compatible API
         if store is None:
@@ -1766,7 +1767,8 @@ def init_process_group(
             device_id=device_id,
             group_desc="default_pg",
         )
-        _update_default_pg(default_pg)
+
+    _update_default_pg(default_pg)
 
     _world.pg_group_ranks[GroupMember.WORLD] = {  # type: ignore[index]
         i: i
