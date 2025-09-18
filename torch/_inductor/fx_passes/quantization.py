@@ -26,6 +26,7 @@ from ..pattern_matcher import (
 from ..utils import pad_listlike
 from .freezing_patterns import register_freezing_graph_pattern
 from .post_grad import register_lowering_pattern
+from ..virtualized import V
 
 
 aten = torch.ops.aten
@@ -615,22 +616,19 @@ def _register_quantized_linear_binary_lowering(
         o_zero_point = kwargs["output_zero_point"]
 
         x2.realize()
-        from .mkldnn_fusion import _can_be_inplace
+        from .mkldnn_fusion import _can_be_linear_binary_inplace
 
         binary_op_name = kwargs["binary_op_name"]
         alpha = kwargs["alpha"]
         unary_op_name = kwargs["unary_op_name"]
         unary_op_args = kwargs["unary_op_args"]
         unary_op_algorithm = kwargs["unary_op_algorithm"]
-
-        if binary_op_name == "sum" and not _can_be_inplace(x2):
-            # When we enable the GEMM Template, the output of QLinear
-            # will be reshaped from 2D back to 3D if the input is 3D.
-            # This causes _can_be_inplace(x2) to return False if x2 happens
-            # to be the output of QLinear in this scenario.
-            # Change the post op from sum to binary add for this case.
-            # Refer to test case:
-            #   test_mkldnn_pattern_matcher.py::test_qlinear_dequant_promotion_cpu_input_dim_exceeds_2
+        if (
+            binary_op_name == "sum"
+            # Support sum for a special case on VIT model when the output of previous QLinearPointwiseBinaryPT2E/CPPTemplateBuffer
+            # is the x2 of current QLinearPointwiseBinaryPT2E even if x2 is a view of the output of previous QLinearPointwiseBinaryPT2E/CPPTemplateBuffer
+            and (not _can_be_linear_binary_inplace(x2))
+        ):
             binary_op_name = "add"
 
         computation_args = (

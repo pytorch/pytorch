@@ -138,6 +138,38 @@ def can_match_buffer_size(input_buf: BufferLike, output_buf: BufferLike):
     return False
 
 
+def codegen_reinterpret_view_helper(data):
+    """
+    Collapse a chain of (StorageBox | ReinterpretView) wrappers if every layer
+    has the same offset as the innermost (base) buffer.
+
+    Returns:
+        (size, stride, offset, dtype, collapsible: bool)
+    """
+    if isinstance(data, ir.Buffer):
+        lay = data.layout
+        return lay.size, lay.stride, lay.offset, lay.dtype, True
+
+    layouts: list[Any] = []
+    cur = data
+    while isinstance(cur, (ir.TensorBox, ir.StorageBox, ir.ReinterpretView)):
+        lay = getattr(cur, "layout", None)
+        if lay is None:
+            return None, None, None, None, False
+        layouts.append(lay)
+        cur = cur.data  # unwrap
+
+    if not isinstance(cur, ir.Buffer):
+        return None, None, None, None, False
+
+    # All wrapper offsets must match base offset to be collapsible
+    for lay in layouts:
+        if lay.offset != cur.layout.offset:
+            return None, None, None, None, False
+
+    return cur.layout.size, cur.layout.stride, cur.layout.offset, cur.layout.dtype, True
+
+
 # TODO: Move to a well known place
 TritonMetaParams = dict[str, int]
 TritonGrid = Union[
@@ -2022,25 +2054,36 @@ class PythonWrapperCodegen(CodeGen):
         writeline: Callable[..., None],
         dtype=None,
     ) -> str:
-        if (
-            size == data.layout.size
-            and stride == data.layout.stride
-            and offset == data.layout.offset
-        ):
-            if dtype is not None and dtype != data.dtype:
-                return f"aten.view.dtype({data.get_name()}, {dtype})"
-            else:
-                return f"{data.get_name()}"
+        d_size, d_stride, d_offset, d_dtype, collapsible = codegen_reinterpret_view_helper(data)
+
+        def apply_reinterpret(name, tgt_size, tgt_stride, tgt_offset, cast_dtype, base_dtype):
+            s = self.codegen_python_shape_tuple(tgt_size)
+            st = self.codegen_python_shape_tuple(tgt_stride)
+            off = self.codegen_sizevar(tgt_offset)
+            expr = f"reinterpret_tensor({name}, {s}, {st}, {off})"
+            if cast_dtype is not None and cast_dtype != base_dtype:
+                return f"aten.view.dtype({expr}, {cast_dtype})"
+            return expr
+
+        name = data.get_name()
+        collapsed = collapsible and offset == d_offset
+        if collapsed:
+            same_layout = (size == d_size and stride == d_stride)
+            base_dtype = d_dtype
         else:
-            size = self.codegen_python_shape_tuple(size)
-            stride = self.codegen_python_shape_tuple(stride)
-            offset = self.codegen_sizevar(offset)
-            if dtype is not None and dtype != data.dtype:
-                return f"aten.view.dtype(reinterpret_tensor({data.get_name()}, {size}, {stride}, {offset}), {dtype})"
-            else:
-                return (
-                    f"reinterpret_tensor({data.get_name()}, {size}, {stride}, {offset})"
-                )
+            same_layout = (
+                size == data.layout.size
+                and stride == data.layout.stride
+                and offset == data.layout.offset
+            )
+            base_dtype = data.dtype
+
+        if same_layout:
+            if dtype is not None and dtype != base_dtype:
+                return f"aten.view.dtype({name}, {dtype})"
+            return f"{name}"
+
+        return apply_reinterpret(name, size, stride, offset, dtype, base_dtype)
 
     def codegen_device_copy(self, src, dst, non_blocking: Union[bool, str]):
         self.writeline(f"{dst}.copy_({src}, {non_blocking})")
@@ -3180,7 +3223,7 @@ class PythonWrapperCodegen(CodeGen):
         if (
             name in V.graph.removed_buffers
             or name in self.allocated
-            or isinstance(buffer, (ir.DonatedBuffer, ir.SubgraphBuffer))
+            or isinstance(buffer, (ir.DonatedBuffer, ir.SubgraphBuffer, ir.InputBuffer))
         ):
             return
         self.allocated.add(name)
@@ -3205,7 +3248,7 @@ class PythonWrapperCodegen(CodeGen):
             box = layout.view.data
             assert isinstance(box, ir.StorageBox), type(box)
             input_buffer = box.data
-            assert isinstance(input_buffer, ir.Buffer), type(box)
+            assert isinstance(input_buffer, (ir.Buffer, ir.ReinterpretView)), type(input_buffer)
             self.codegen_allocation(input_buffer)
             self.writeline(ReinterpretLine(self, input_buffer, buffer, layout))
             return
