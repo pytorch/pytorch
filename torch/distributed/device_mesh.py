@@ -158,7 +158,6 @@ if True:  # just to temporarily avoid reindentation
                 root_mesh.mesh,
                 get_world_size(),
             )
-
             for mesh_nd in pg_ranks_by_dim:
                 # need to init backend here since the flattened pg doesn't exist in root mesh.
                 flattened_mesh = DeviceMesh(
@@ -170,7 +169,6 @@ if True:  # just to temporarily avoid reindentation
                 )
                 if cur_rank in mesh_nd:
                     res_flattened_mesh = flattened_mesh
-
             self.child_to_root_mapping[res_flattened_mesh] = root_mesh  # type: ignore[possibly-undefined]
             self.root_to_flatten_mapping.setdefault(root_mesh, {})[mesh_dim_name] = (
                 res_flattened_mesh  # type: ignore[possibly-undefined]
@@ -421,8 +419,9 @@ if True:  # just to temporarily avoid reindentation
                 "Please use a non-overlapping layout when creating a DeviceMesh."
             )
             # Because we still need to support slicing of flattened dim from root mesh, so we don't check stride here.
-            assert self._layout.sizes == self.mesh.size(), (
+            assert self._layout.numel() == self.mesh.numel(), (
                 "Please use a valid layout when creating a DeviceMesh."
+                f"The layout {self._layout} is not consistent with the mesh size {self.mesh.size()}."
             )
 
             # private field to pre-generate DeviceMesh's hash
