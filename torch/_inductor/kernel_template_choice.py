@@ -33,6 +33,7 @@ class KernelTemplateChoice:
         self.extra_kwargs = extra_kwargs
         self.layout = layout
         self.inputs = inputs
+        self.annotations: dict[str, Any] = {"ktc": self}
 
     @property
     def choice(self) -> Optional[ChoiceCaller]:
@@ -54,6 +55,8 @@ class KernelTemplateChoice:
                 input_nodes=self.inputs.nodes(),
                 **self.extra_kwargs,
             )
+            if self._choice is not None:
+                self._choice.annotations = self.annotations
         return self._choice
 
 
