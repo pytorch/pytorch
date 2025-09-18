@@ -5980,6 +5980,28 @@ class TestLinalg(TestCase):
             # There must be exactly three kernels only
             self.assertEqual(kernel_count, 3)
 
+    @onlyCUDA
+    @skipCUDAIfNotRocm
+    @dtypes(torch.float16, torch.float32)
+    def test_numerical_check_accuracy_tunableop(self, device, dtype):
+        import os
+        shapes = [(127,193,61), (251,317,73), (89,149,41)]
+        atol, rtol = 1e-2, 1e-1
+
+        for (m, k, n) in shapes:
+            a = torch.randn(m, k, device='cuda')
+            b = torch.randn(k, n, device='cuda')
+            with self._tunableop_ctx():
+                torch.cuda.tunable.enable(False)
+                os.environ["PYTORCH_TUNABLEOP_NUMERICAL_CHECK"] = "0"
+                C_baseline = a @ b
+            with self._tunableop_ctx():
+                torch.cuda.tunable.enable(True)
+                os.environ["PYTORCH_TUNABLEOP_NUMERICAL_CHECK"] = f"{atol}_{rtol}"
+                C_numeric = a @ b
+            self.assertTrue(torch.allclose(C_baseline, C_numeric, atol=atol, rtol=rtol))
+
+
     @dtypes(torch.float, torch.complex64)
     def test_matmul_out_kernel_errors_with_autograd(self, device, dtype):
         a = torch.empty((256, 512), device=device, dtype=dtype, requires_grad=True).unsqueeze(0)

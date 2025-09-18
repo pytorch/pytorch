@@ -532,13 +532,8 @@ NumericalCheckConfig TuningContext::GetNumericalCheckConfig() const {
   const std::string& env = env_opt.value();
 
   // Explicit OFF
-  if (env == "0" || env == "OFF" || env == "off") {
+  if (env == "0") {
     return NumericalCheckConfig(false, 1e-5, 1e-5);
-  }
-
-  // Legacy ON with default tolerances
-  if (env == "1") {
-    return NumericalCheckConfig(true, 1e-5, 1e-5);
   }
 
   // Expected: "atol_rtol"
