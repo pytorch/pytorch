@@ -24,6 +24,7 @@ from typing import Any, Callable, cast, Optional
 from .bytecode_transformation import (
     add_push_null,
     bytecode_from_template,
+    create_binary_subscr,
     create_call_function,
     create_instruction,
     create_jump_absolute,
@@ -476,7 +477,7 @@ class ContinueExecutionCache:
                                     "LOAD_FAST", argval="__nested_resume_fns"
                                 ),
                                 create_instruction("LOAD_CONST", argval=-1),
-                                create_instruction("BINARY_SUBSCR"),
+                                create_binary_subscr(),
                             ]
                         ),
                         # del __nested_resume_fns[-1]
@@ -490,7 +491,7 @@ class ContinueExecutionCache:
                         # load __nested_frame_values[-1]
                         create_instruction("LOAD_FAST", argval="__nested_frame_values"),
                         create_instruction("LOAD_CONST", argval=-1),
-                        create_instruction("BINARY_SUBSCR"),
+                        create_binary_subscr(),
                         # create [
                         #     __nested_resume_fns,
                         #     __nested_frame_values,
