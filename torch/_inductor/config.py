@@ -1932,6 +1932,9 @@ class test_configs:
     # for unit testing
     use_libtorch = False
 
+    # to be migrated when ready for use
+    aten_fx_overlap_scheduling = False
+
 
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403
