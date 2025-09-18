@@ -61,7 +61,7 @@ def add_scalar_handler(
     kwargs: dict[str, object],
 ) -> object:
     assert add_handler_predicate(op_call, args, kwargs)
-    new_args = (args[0], torch.tensor(args[1]))
+    new_args = (args[0], torch.tensor(args[1], device=args[0].device))  # type: ignore[attr-defined]
     return op_call(*new_args, **kwargs)
 
 
