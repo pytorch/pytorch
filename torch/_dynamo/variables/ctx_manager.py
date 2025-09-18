@@ -1450,6 +1450,46 @@ class ErrorOnGraphBreakVariable(ContextWrappingVariable):
         return "error_on_graph_break"
 
 
+class WithEnterFunctionVariable(VariableTracker):
+    def __init__(
+        self,
+        ctx: Union[ContextWrappingVariable, GenericContextWrappingVariable],
+        **kwargs,
+    ) -> None:
+        super().__init__(**kwargs)
+        self.ctx = ctx
+
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        assert not args
+        assert not kwargs
+        # NOTE: we assume that the instruction immediately after the current CALL instruction
+        # is the first instruction of the block.
+        return tx.enter_ctx(self.ctx, tx.current_instruction)
+
+    def reconstruct(self, codegen: "PyCodegen"):
+        try:
+            type_str = f"{self.ctx.module_name()}.{self.ctx.fn_name()}"
+        except NotImplementedError:
+            type_str = str(type(self.ctx))
+        unimplemented_v2(
+            gb_type="Attempted to reconstruct context manager's __enter__ method",
+            context=str(self.ctx),
+            explanation=f"Attempted to reconstruct context manager {type_str} while tracing `with ...:`",
+            hints=[
+                "It is likely there is a graph break while tracing `with ctx:` "
+                "but outside the actual `ctx.__enter__()` method. "
+                "`torch.compile` does not expect this to happen.",
+                *graph_break_hints.DIFFICULT,
+                *graph_break_hints.DYNAMO_BUG,
+            ],
+        )
+
+
 class WithExitFunctionVariable(VariableTracker):
     _nonvar_fields = {
         "target",
