@@ -324,14 +324,21 @@ class CachingAutotuner(KernelInterface):
         self.custom_kernel = custom_kernel
         self.cuda_kernel_saved = False
         self.autotune_cache_info = autotune_cache_info
+        
+        # Enhanced logging for debugging
         if log.isEnabledFor(logging.DEBUG):
             log.debug(
-                "CachingAutotuner gets %d configs for %s",
-                len(self.configs),
-                self.fn.__name__,
+                "CachingAutotuner initialized for %s: %d configs, device=%s, custom=%s, heuristic=%s",
+                self.fn.__name__, len(self.configs), self.device_props.type, 
+                custom_kernel, heuristic_type
             )
-            for c in self.configs:
-                log.debug(c)
+            for i, c in enumerate(self.configs):
+                log.debug("  Config %d: %s", i, c)
+        elif log.isEnabledFor(logging.INFO):
+            log.info(
+                "CachingAutotuner initialized for %s with %d configurations", 
+                self.fn.__name__, len(self.configs)
+            )
 
         self.compile_results: list[CompileResult[_KernelType]] = []
         self.launchers: list[LauncherType] = []
@@ -1246,6 +1253,28 @@ class CachingAutotuner(KernelInterface):
         benchmark_run=False,
         **kwargs,
     ):  # type:ignore[override]
+        # Validate argument count
+        expected_arg_count = len(self.fn.arg_names)
+        if len(args) != expected_arg_count:
+            raise TypeError(
+                f"CachingAutotuner: Expected {expected_arg_count} arguments, but got {len(args)}. "
+                f"Please check the function signature ({self.fn.__name__}) and provide the correct number of arguments."
+            )
+        
+        # Validate stream parameter
+        if stream is None and not benchmark_run:
+            raise ValueError(
+                f"CachingAutotuner: 'stream' parameter cannot be None for kernel {self.fn.__name__}. "
+                "Please provide a valid CUDA stream."
+            )
+        
+        # Validate that we have valid configs
+        if not self.configs:
+            raise RuntimeError(
+                f"CachingAutotuner: No valid configurations available for kernel {self.fn.__name__}. "
+                "This may indicate a compilation or configuration issue."
+            )
+        
         if hasattr(triton, "set_allocator"):
 
             def alloc_fn(size: int, align: int, stream: Optional[int]):
@@ -2113,35 +2142,92 @@ def unique_configs(configs: list[Config]):
 
 
 def check_config(cfg, *, xnumel=None, ynumel=None, znumel=None):
+    """
+    Validate triton configuration parameters against size hints.
+    
+    Args:
+        cfg: Configuration dictionary containing block sizes
+        xnumel, ynumel, znumel: Size hints for validation
+    
+    Raises:
+        ValueError: If configuration is invalid with detailed explanation
+    """
+    if not isinstance(cfg, dict):
+        raise TypeError(f"Configuration must be a dictionary, got {type(cfg).__name__}")
+    
     for numel, label in zip((xnumel, ynumel, znumel), "XYZ"):
         if numel is None:
             continue
-        block = cfg[f"{label}BLOCK"]
+        
+        block_key = f"{label}BLOCK"
+        if block_key not in cfg:
+            raise KeyError(f"Missing required configuration key '{block_key}' for {label.lower()}numel={numel}")
+        
+        block = cfg[block_key]
+        if not isinstance(block, int) or block <= 0:
+            raise ValueError(f"Block size '{block_key}' must be a positive integer, got {block}")
+        
         if numel == 1:
-            assert block == 1, (
-                f"TritonKernel.indexing assumes numel == 1 => BLOCK == 1"
-                f" but {label.lower()}numel=={numel} and {label}BLOCK={block} (cfg={cfg})."
-            )
+            if block != 1:
+                raise ValueError(
+                    f"Invalid configuration: When {label.lower()}numel=1, {label}BLOCK must be 1. "
+                    f"Got {label.lower()}numel={numel} and {label}BLOCK={block}. "
+                    f"This is required for correct kernel indexing. Configuration: {cfg}"
+                )
+        
         max_block = TRITON_MAX_BLOCK[label]
         max_block_str = f'config.triton.max_block["{label}"]'
-        assert max_block % block == 0, (
-            f"TritonKernel.indexing assumes {label}BLOCK divides {max_block_str}"
-            f" but {label}BLOCK={block} and {max_block_str}={max_block} (cfg={cfg})."
-        )
+        if max_block % block != 0:
+            raise ValueError(
+                f"Invalid configuration: {label}BLOCK must divide {max_block_str}. "
+                f"Got {label}BLOCK={block} and {max_block_str}={max_block}. "
+                f"This is required for correct kernel indexing. Configuration: {cfg}"
+            )
 
 
 def check_max_block(cfg: dict[str, int]):
     """
-    Check that block sizes are within the maximum allowed.
+    Check that block sizes are within the maximum allowed limits.
+    
+    Args:
+        cfg: Configuration dictionary containing block sizes
+    
+    Raises:
+        ValueError: If any block size exceeds the maximum allowed value
+        TypeError: If configuration is not a dictionary or contains invalid types
     """
+    if not isinstance(cfg, dict):
+        raise TypeError(f"Configuration must be a dictionary, got {type(cfg).__name__}")
+    
+    block_suffix = "BLOCK"
+    invalid_blocks = []
+    
     for var, val in cfg.items():
-        block_suffix = "BLOCK"
+        if not isinstance(var, str):
+            raise TypeError(f"Configuration keys must be strings, got {type(var).__name__}: {var}")
+        
         if block_suffix in var:
+            if not isinstance(val, int) or val <= 0:
+                raise ValueError(f"Block size '{var}' must be a positive integer, got {val}")
+            
             prefix = var.removesuffix(block_suffix)
+            if prefix not in TRITON_MAX_BLOCK:
+                raise KeyError(f"Unknown block type '{prefix}' in configuration key '{var}'")
+            
             max_block = TRITON_MAX_BLOCK[prefix]
-            assert val <= max_block, (
-                f"'{var}' too large. Maximum: {max_block}. Actual: {val}."
-            )
+            if val > max_block:
+                invalid_blocks.append((var, val, max_block))
+    
+    if invalid_blocks:
+        error_details = []
+        for var, actual, maximum in invalid_blocks:
+            error_details.append(f"  {var}: {actual} > {maximum} (maximum)")
+        
+        raise ValueError(
+            f"Block sizes exceed maximum allowed values:\n" + 
+            "\n".join(error_details) + 
+            f"\nConfiguration: {cfg}"
+        )
 
 
 def _num_warps(num_warps, max_num_warps=8, min_num_warps=2, register_intensive=False):
@@ -2197,7 +2283,58 @@ def triton_config(
 
     min_elem_per_thread controls the minimum number of elements
     processed by each thread. It's always enforced.
+    
+    Args:
+        size_hints: Dictionary containing size hints for each dimension
+        x, y, z: Block sizes for each dimension
+        num_stages: Number of pipeline stages
+        num_elements_per_warp: Suggested elements per warp
+        min_elem_per_thread: Minimum elements per thread
+        
+    Raises:
+        TypeError: If size_hints is not a dictionary or parameters have wrong types
+        ValueError: If parameters are out of valid range
     """
+    # Validate input parameters
+    if not isinstance(size_hints, dict):
+        raise TypeError(f"size_hints must be a dictionary, got {type(size_hints).__name__}")
+    
+    required_keys = {"x"}
+    missing_keys = required_keys - set(size_hints.keys())
+    if missing_keys:
+        raise KeyError(f"size_hints missing required keys: {missing_keys}")
+    
+    for key, value in size_hints.items():
+        if not isinstance(value, int) or value <= 0:
+            raise ValueError(f"size_hints['{key}'] must be a positive integer, got {value}")
+    
+    if not isinstance(x, int) or x <= 0:
+        raise ValueError(f"x must be a positive integer, got {x}")
+    
+    if y is not None and (not isinstance(y, int) or y <= 0):
+        raise ValueError(f"y must be a positive integer or None, got {y}")
+    
+    if z is not None and (not isinstance(z, int) or z <= 0):
+        raise ValueError(f"z must be a positive integer or None, got {z}")
+    
+    if not isinstance(num_stages, int) or num_stages <= 0:
+        raise ValueError(f"num_stages must be a positive integer, got {num_stages}")
+    
+    if not isinstance(num_elements_per_warp, int) or num_elements_per_warp <= 0:
+        raise ValueError(f"num_elements_per_warp must be a positive integer, got {num_elements_per_warp}")
+    
+    if not isinstance(min_elem_per_thread, int) or min_elem_per_thread < 0:
+        raise ValueError(f"min_elem_per_thread must be a non-negative integer, got {min_elem_per_thread}")
+    
+    # Check for reasonable maximum values to prevent obvious errors
+    if x > 8192:
+        raise ValueError(f"x block size {x} is unusually large (>8192). This may cause compilation errors.")
+    
+    if y is not None and y > 8192:
+        raise ValueError(f"y block size {y} is unusually large (>8192). This may cause compilation errors.")
+    
+    if z is not None and z > 8192:
+        raise ValueError(f"z block size {z} is unusually large (>8192). This may cause compilation errors.")
     # Ideally we want to read this from some device config
 
     maxGridSize = [2147483647, 65535, 65535]
