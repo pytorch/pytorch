@@ -1152,6 +1152,7 @@ def detect_fake_mode(inputs: Any = None) -> Optional[FakeTensorMode]:
 
     flat_inputs = pytree.tree_leaves(inputs)
     for i, flat_input in enumerate(flat_inputs):
+        from torch.distributed.tensor import DTensor
         if isinstance(flat_input, FakeTensor):
             fake_modes.append((flat_input.fake_mode, "fake tensor input", i))
         if is_traceable_wrapper_subclass(flat_input):
