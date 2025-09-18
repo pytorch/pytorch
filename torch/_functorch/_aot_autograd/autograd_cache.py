@@ -71,9 +71,11 @@ from .runtime_wrappers import (
     FunctionalizedRngRuntimeWrapper,
     post_compile,
     RuntimeWrapper,
+    SerializableCompiledFunction,
     SubclassMeta,
 )
 from .schemas import AOTAutogradCacheInfo, AOTConfig, ViewAndMutationMeta  # noqa: F401
+from .utils import simple_wraps
 
 
 if TYPE_CHECKING:
@@ -963,6 +965,7 @@ class GenericAOTAutogradCacheEntry(Generic[TForward, TBackward]):
                 fw_metadata=self.runtime_metadata,
                 try_save_cache_entry=None,
             )
+
         else:
             compiled_function = RuntimeWrapper(
                 indices_of_inps_to_detach=self.indices_of_inps_to_detach,
@@ -971,6 +974,11 @@ class GenericAOTAutogradCacheEntry(Generic[TForward, TBackward]):
             ).post_compile(
                 compiled_fw_func, aot_config, runtime_metadata=self.runtime_metadata
             )
+
+        # Add serialization function back onto object
+        compiled_function = SerializableCompiledFunction(
+            compiled_function, lambda: self
+        )
 
         compiled_function, _ = post_compile(
             self.dispatch_wrappers,
@@ -1051,6 +1059,37 @@ class AOTAutogradCacheArtifact(CacheArtifact):
         return "aot_autograd"
 
 
+def deserialize_bundled_cache_entry(data: bytes) -> Callable:
+    entry = pickle.loads(data)
+    # In the precompile use case, guards are already serialized
+    # by dynamo, so we don't need to add them to the environment
+    entry.guards_expr = None
+    # TODO: this isn't exactly right, because cudagraphs needs to be a shared config
+    # which is set by compile_fx. But in precompile, we never actually call compile_fx
+    # so we don't have a place to track cudagraphs here.
+    cudagraphs = torch._inductor.config.triton.cudagraphs
+    boxed_forward_device_index = BoxedDeviceIndex(None)
+    compiled_fn = entry.wrap_post_compile(
+        [],
+        entry.sanitized_aot_config,
+        {
+            "cudagraphs": cudagraphs,
+            "boxed_forward_device_index": boxed_forward_device_index,
+        },
+    )
+
+    # TODO: this ignores flat_params, which can exist
+    # if inline_builtin_nn_modules=False
+    @simple_wraps(compiled_fn)
+    def forward(*runtime_args: tuple[Any]):
+        return compiled_fn(list(runtime_args))
+
+    assert hasattr(compiled_fn, "serialize")
+    forward.serialize = compiled_fn.serialize  # type: ignore[attr-defined]
+
+    return forward
+
+
 @CacheArtifactFactory.register
 class BundledAOTAutogradCacheArtifact(PrecompileCacheArtifact[Callable]):
     @override
@@ -1060,30 +1099,7 @@ class BundledAOTAutogradCacheArtifact(PrecompileCacheArtifact[Callable]):
 
     @override
     def after_deserialization(self) -> Callable:
-        entry = pickle.loads(self.content)
-        # In the precompile use case, guards are already serialized
-        # by dynamo, so we don't need to add them to the environment
-        entry.guards_expr = None
-        # TODO: this isn't exactly right, because cudagraphs needs to be a shared config
-        # which is set by compile_fx. But in precompile, we never actually call compile_fx
-        # so we don't have a place to track cudagraphs here.
-        cudagraphs = torch._inductor.config.triton.cudagraphs
-        boxed_forward_device_index = BoxedDeviceIndex(None)
-        compiled_fn = entry.wrap_post_compile(
-            [],
-            entry.sanitized_aot_config,
-            {
-                "cudagraphs": cudagraphs,
-                "boxed_forward_device_index": boxed_forward_device_index,
-            },
-        )
-
-        # TODO: this ignores flat_params, which can exist
-        # if inline_builtin_nn_modules=False
-        def forward(*runtime_args: tuple[Any]):
-            return compiled_fn(list(runtime_args))
-
-        return forward
+        return deserialize_bundled_cache_entry(self.content)
 
 
 class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
