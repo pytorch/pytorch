@@ -25,7 +25,7 @@ class OpaqueQueue:
 
 class TestOpaqueObject(TestCase):
     def setUp(self):
-        self.lib = torch.library.Library("_TestOpaqueObject", "FRAGMENT")
+        self.lib = torch.library.Library("_TestOpaqueObject", "FRAGMENT")  # noqa: TOR901
 
         torch.library.define(
             "_TestOpaqueObject::queue_push",
