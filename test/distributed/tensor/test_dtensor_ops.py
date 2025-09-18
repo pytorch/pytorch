@@ -117,7 +117,6 @@ dtensor_fails = {
     xfail("cholesky"),
     xfail("cholesky_inverse"),
     xfail("cholesky_solve"),
-    xfail("chunk"),
     xfail("combinations"),
     xfail("complex"),
     xfail("count_nonzero"),
