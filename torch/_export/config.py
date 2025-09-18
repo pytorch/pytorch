@@ -15,7 +15,7 @@ from torch.utils._config_module import install_config_module
 
 # this flag controls whether we use new functional tracer. It
 # should be True in the long term.
-use_new_tracer_experimental = False
+use_new_tracer_experimental = True
 
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403
