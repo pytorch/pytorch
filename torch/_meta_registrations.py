@@ -5710,7 +5710,7 @@ def meta__scaled_dot_product_cudnn_attention(
     res = alloc_with_matching_layout(query, res_shape)
 
     logsum_exp = torch.empty(
-        (B, H, S_Q),
+        (B, H, S_Q, 1),
         dtype=torch.float,
         device=query.device,
     )

@@ -1612,7 +1612,8 @@ def forward(self, x):
     def test_exportdb_supported(self, name: str, case: ExportCase) -> None:
         model = case.model
         _check_meta = "map" not in name
-        self.check_graph(model, case.example_args, _check_meta=_check_meta)
+        with torch._export.config.patch(use_new_tracer_experimental=True):
+            self.check_graph(model, case.example_args, _check_meta=_check_meta)
 
     def test_constraints(self):
         class Module(torch.nn.Module):
