@@ -24,6 +24,7 @@ else:
     TEST_CUDNN = LazyVal(lambda: TEST_CUDA and torch.backends.cudnn.is_acceptable(torch.tensor(1., device=CUDA_DEVICE)))
 
 TEST_CUDNN_VERSION = LazyVal(lambda: torch.backends.cudnn.version() if TEST_CUDNN else 0)
+ROCM_VERSION = LazyVal(lambda : tuple(int(v) for v in torch.version.hip.split('.')[:2]) if torch.version.hip else (0, 0))
 
 SM53OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (5, 3))
 SM60OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (6, 0))
@@ -40,6 +41,7 @@ IS_THOR = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_ca
 IS_JETSON = LazyVal(lambda: torch.cuda.is_available() and (torch.cuda.get_device_capability() in [(7, 2), (8, 7)] or IS_THOR))
 IS_SM89 = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() == (8, 9))
 IS_SM90 = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() == (9, 0))
+IS_SM100 = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() == (10, 0))
 
 def evaluate_gfx_arch_within(arch_list):
     if not torch.cuda.is_available():
@@ -94,7 +96,6 @@ PLATFORM_SUPPORTS_BF16: bool = LazyVal(lambda: TEST_CUDA and SM80OrLater)
 def evaluate_platform_supports_fp8():
     if torch.cuda.is_available():
         if torch.version.hip:
-            ROCM_VERSION = tuple(int(v) for v in torch.version.hip.split('.')[:2])
             archs = ['gfx94']
             if ROCM_VERSION >= (6, 3):
                 archs.extend(['gfx120'])
@@ -123,16 +124,23 @@ def evaluate_platform_supports_fp8_grouped_gemm():
 def evaluate_platform_supports_mx_gemm():
     if torch.cuda.is_available():
         if torch.version.hip:
-            ROCM_VERSION = tuple(int(v) for v in torch.version.hip.split('.')[:2])
             if ROCM_VERSION >= (7, 0):
                 return 'gfx950' in torch.cuda.get_device_properties(0).gcnArchName
         else:
             return SM100OrLater
     return False
 
+def evaluate_platform_supports_mxfp8_grouped_gemm():
+    if torch.cuda.is_available() and not torch.version.hip:
+        built_with_fbgemm_genai = "USE_FBGEMM_GENAI" in torch.__config__.show()
+        return built_with_fbgemm_genai and IS_SM100
+    return False
+
 PLATFORM_SUPPORTS_MX_GEMM: bool = LazyVal(lambda: evaluate_platform_supports_mx_gemm())
 PLATFORM_SUPPORTS_FP8: bool = LazyVal(lambda: evaluate_platform_supports_fp8())
 PLATFORM_SUPPORTS_FP8_GROUPED_GEMM: bool = LazyVal(lambda: evaluate_platform_supports_fp8_grouped_gemm())
+PLATFORM_SUPPORTS_MX_GEMM: bool = LazyVal(lambda: TEST_CUDA and SM100OrLater)
+PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM: bool = LazyVal(lambda: evaluate_platform_supports_mxfp8_grouped_gemm())
 
 if TEST_NUMBA:
     try:
@@ -173,9 +181,6 @@ def tf32_off():
 
 @contextlib.contextmanager
 def tf32_on(self, tf32_precision=1e-5):
-    if torch.version.hip:
-        hip_allow_tf32 = os.environ.get("HIPBLASLT_ALLOW_TF32", None)
-        os.environ["HIPBLASLT_ALLOW_TF32"] = "1"
     old_allow_tf32_matmul = torch.backends.cuda.matmul.allow_tf32
     old_precision = self.precision
     try:
@@ -184,11 +189,6 @@ def tf32_on(self, tf32_precision=1e-5):
         with torch.backends.cudnn.flags(enabled=None, benchmark=None, deterministic=None, allow_tf32=True):
             yield
     finally:
-        if torch.version.hip:
-            if hip_allow_tf32 is not None:
-                os.environ["HIPBLASLT_ALLOW_TF32"] = hip_allow_tf32
-            else:
-                del os.environ["HIPBLASLT_ALLOW_TF32"]
         torch.backends.cuda.matmul.allow_tf32 = old_allow_tf32_matmul
         self.precision = old_precision
 
@@ -238,7 +238,7 @@ def tf32_enabled():
 # if device is specified, it will check if device is cuda
 # if dtype is specified, it will check if dtype is float32 or complex64
 # tf32 and fp32 are different only when all the three checks pass
-def tf32_on_and_off(tf32_precision=1e-5):
+def tf32_on_and_off(tf32_precision=1e-5, *, only_if=True):
     def with_tf32_disabled(self, function_call):
         with tf32_off():
             function_call()
@@ -254,7 +254,7 @@ def tf32_on_and_off(tf32_precision=1e-5):
         @functools.wraps(f)
         def wrapped(*args, **kwargs):
             kwargs.update(zip(arg_names, args))
-            cond = torch.cuda.is_tf32_supported()
+            cond = torch.cuda.is_tf32_supported() and only_if
             if 'device' in kwargs:
                 cond = cond and (torch.device(kwargs['device']).type == 'cuda')
             if 'dtype' in kwargs:
@@ -267,7 +267,6 @@ def tf32_on_and_off(tf32_precision=1e-5):
 
         return wrapped
     return wrapper
-
 
 # This is a wrapper that wraps a test to run it with TF32 turned off.
 # This wrapper is designed to be used when a test uses matmul or convolutions

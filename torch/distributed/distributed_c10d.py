@@ -19,13 +19,21 @@ from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 from typing_extensions import deprecated
 
 import torch
+import torch.distributed._distributed_c10d as _c10d
 from torch._C import _DistStoreError as DistStoreError
-from torch._C._distributed_c10d import (
+from torch._utils_internal import set_pytorch_distributed_envs_from_justknobs
+from torch.distributed._distributed_c10d import (  # Process group implementations; Availability flags
     _DistributedBackendOptions,
+    _GLOO_AVAILABLE,
+    _MPI_AVAILABLE,
+    _NCCL_AVAILABLE,
+    _ProcessGroupWrapper,
     _register_process_group,
     _resolve_process_group,
+    _UCC_AVAILABLE,
     _unregister_all_process_groups,
     _unregister_process_group,
+    _XCCL_AVAILABLE,
     AllgatherOptions,
     AllreduceCoalescedOptions,
     AllreduceOptions,
@@ -37,6 +45,11 @@ from torch._C._distributed_c10d import (
     get_debug_level,
     PrefixStore,
     ProcessGroup,
+    ProcessGroupGloo,
+    ProcessGroupMPI,
+    ProcessGroupNCCL,
+    ProcessGroupUCC,
+    ProcessGroupXCCL,
     ReduceOp,
     ReduceOptions,
     ReduceScatterOptions,
@@ -44,7 +57,6 @@ from torch._C._distributed_c10d import (
     Store,
     Work,
 )
-from torch._utils_internal import set_pytorch_distributed_envs_from_justknobs
 from torch.monitor import _WaitCounter
 from torch.overrides import handle_torch_function, has_torch_function
 from torch.utils._typing_utils import not_none
@@ -131,17 +143,11 @@ __all__ = [
     "split_group",
 ]
 
-_MPI_AVAILABLE = True
-_NCCL_AVAILABLE = True
-_GLOO_AVAILABLE = True
-_UCC_AVAILABLE = True
-_XCCL_AVAILABLE = True
-
 _pickler = pickle.Pickler
 _unpickler = pickle.Unpickler
 
 
-# Change __module__ of all imported types from torch._C._distributed_c10d that are public
+# Change __module__ of all imported types from the distributed wrapper that are public
 def _export_c_types() -> None:
     _public_types_to_change_module = [
         AllreduceCoalescedOptions,
@@ -167,45 +173,26 @@ def _export_c_types() -> None:
 
 _export_c_types()
 
-try:
-    from torch._C._distributed_c10d import ProcessGroupMPI
-
+# Add process groups to __all__ and set their module based on availability
+if _MPI_AVAILABLE:
     ProcessGroupMPI.__module__ = "torch.distributed.distributed_c10d"
     __all__ += ["ProcessGroupMPI"]
-except ImportError:
-    _MPI_AVAILABLE = False
 
-try:
-    from torch._C._distributed_c10d import ProcessGroupNCCL
-
+if _NCCL_AVAILABLE:
     ProcessGroupNCCL.__module__ = "torch.distributed.distributed_c10d"
     __all__ += ["ProcessGroupNCCL"]
-except ImportError:
-    _NCCL_AVAILABLE = False
 
-try:
-    from torch._C._distributed_c10d import _ProcessGroupWrapper, ProcessGroupGloo
-
+if _GLOO_AVAILABLE:
     ProcessGroupGloo.__module__ = "torch.distributed.distributed_c10d"
     __all__ += ["ProcessGroupGloo"]
-except ImportError:
-    _GLOO_AVAILABLE = False
 
-try:
-    from torch._C._distributed_c10d import ProcessGroupUCC
-
+if _UCC_AVAILABLE:
     ProcessGroupUCC.__module__ = "torch.distributed.distributed_c10d"
     __all__ += ["ProcessGroupUCC"]
-except ImportError:
-    _UCC_AVAILABLE = False
 
-try:
-    from torch._C._distributed_c10d import ProcessGroupXCCL
-
+if _XCCL_AVAILABLE:
     ProcessGroupXCCL.__module__ = "torch.distributed.distributed_c10d"
     __all__ += ["ProcessGroupXCCL"]
-except ImportError:
-    _XCCL_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -350,10 +337,12 @@ class Backend(str):  # noqa: SLOT000
             # assume default devices "cpu" and "cuda", but warn
             warnings.warn(
                 f"Device capability of {name} unspecified, assuming `cpu` and "
-                "`cuda`. Please specify it via the `devices` argument of "
+                "`cuda` or `xpu`. Please specify it via the `devices` argument of "
                 "`register_backend`."
             )
-            Backend.backend_capability[name.lower()] = ["cpu", "cuda"]
+            Backend.backend_capability[name.lower()] = (
+                ["cpu", "cuda", "xpu"] if torch.xpu.is_available() else ["cpu", "cuda"]
+            )
         elif isinstance(devices, str):
             # Single device string specified. Simply convert to list.
             Backend.backend_capability[name.lower()] = [devices]
@@ -1325,7 +1314,8 @@ def _get_default_store() -> Store:
 def _update_default_pg(pg) -> None:
     _world.default_pg = pg
     rank = pg.rank() if pg is not None and pg != GroupMember.NON_GROUP_MEMBER else -1
-    torch._C._distributed_c10d._set_global_rank(rank)
+
+    _c10d._set_global_rank(rank)
 
 
 def get_backend_config(group: Optional[ProcessGroup] = None) -> str:
@@ -1747,15 +1737,19 @@ def init_process_group(
             timeout=timeout,
             group_desc="default_pg",
         )
-        _update_default_pg(default_pg)
     else:
         # backward compatible API
         if store is None:
-            rendezvous_iterator = rendezvous(
-                not_none(init_method), rank, world_size, timeout=timeout
-            )
-            store, rank, world_size = next(rendezvous_iterator)
-            store.set_timeout(timeout)
+            if backend == "fake":
+                from torch.testing._internal.distributed.fake_pg import FakeStore
+
+                store = FakeStore()
+            else:
+                rendezvous_iterator = rendezvous(
+                    not_none(init_method), rank, world_size, timeout=timeout
+                )
+                store, rank, world_size = next(rendezvous_iterator)
+                store.set_timeout(timeout)
 
             # Use a PrefixStore to avoid accidental overrides of keys used by
             # different systems (e.g. RPC) in case the store is multi-tenant.
@@ -1773,7 +1767,8 @@ def init_process_group(
             device_id=device_id,
             group_desc="default_pg",
         )
-        _update_default_pg(default_pg)
+
+    _update_default_pg(default_pg)
 
     _world.pg_group_ranks[GroupMember.WORLD] = {  # type: ignore[index]
         i: i
@@ -1934,9 +1929,9 @@ def _new_process_group_helper(
     if "," not in str(backend) and ":" not in str(backend):
         assert backend in Backend.backend_type_map, f"Unknown backend type {backend}"
         if backend == Backend.UNDEFINED:
-            # Currently when backend is UNDEFINED, both ``gloo`` and ``nccl`` backends
-            # will be created, we use nccl(if cuda is available) or gloo as default
-            # backend so we can correctly call getDefaultBackend which in ProcessGroup.
+            # Currently when backend is UNDEFINED, only one backend will be initialized
+            # we use nccl (if cuda is available) or gloo as default backend
+            # so we can correctly call getDefaultBackend which in ProcessGroup.
             if Backend.NCCL in backend_config.get_device_backend_map().values():
                 pg._set_default_backend(ProcessGroup.BackendType.NCCL)
             else:
@@ -1957,7 +1952,7 @@ def _new_process_group_helper(
 
     if device_id:
         pg.bound_device_id = device_id
-    backend_class: torch._C._distributed_c10d.Backend
+    backend_class: _c10d.Backend
     for device, backend_str in backend_config.get_device_backend_map().items():
         # Use the group name as prefix in the default store, such that
         # a single store can be reused by multiple groups.
@@ -3072,7 +3067,9 @@ def _object_to_tensor(obj, device, group):
         if get_debug_level() == DebugLevel.DETAIL and is_nccl_available():
             backend = get_backend(group)
             if backend == Backend.NCCL:
-                hash = torch._C._distributed_c10d._hash_tensors([byte_tensor])
+                from torch.distributed._distributed_c10d import _hash_tensors
+
+                hash = _hash_tensors([byte_tensor])
                 logger.warning(
                     "_object_to_tensor size: %s hash value: %s",
                     byte_tensor.numel(),
@@ -3087,7 +3084,9 @@ def _tensor_to_object(tensor, tensor_size, group):
         if get_debug_level() == DebugLevel.DETAIL and is_nccl_available():
             backend = get_backend(group)
             if backend == Backend.NCCL:
-                hash = torch._C._distributed_c10d._hash_tensors([tensor])
+                from torch.distributed._distributed_c10d import _hash_tensors
+
+                hash = _hash_tensors([tensor])
                 logger.warning(
                     "_tensor_to_object size: %s hash value: %s", tensor.numel(), hash
                 )
@@ -4867,9 +4866,11 @@ def barrier(
         # may use default device 0, causing issues like hang or all processes
         # creating context on device 0.
         opts.device = device
-        warnings.warn(  # warn only once
-            "No device id is provided via `init_process_group` or `barrier `. Using the current device set by the user. "
-        )
+        if group.rank() == 0:
+            warnings.warn(  # warn only once
+                "barrier(): using the device under current context. "
+                "You can specify `device_id` in `init_process_group` to mute this warning."
+            )
 
     work = group.barrier(opts=opts)
 
@@ -4962,7 +4963,7 @@ def monitored_barrier(
 
 
 def _create_process_group_wrapper(
-    wrapped_pg: torch._C._distributed_c10d.Backend,
+    wrapped_pg: _c10d.Backend,
     store_prefix: str,
     store: Store,
     rank: int,
@@ -5151,7 +5152,11 @@ def split_group(
             my_group = split_group
             break
 
-    group_name = _process_group_name(my_group, use_hashed_name=False)
+    # use_hashed_name is True to ensure that subgroups have unique names.
+    # This is needed as some backends (e.g. Gloo) use the group name as a
+    # PrefixStore prefix for initialization of splits. Thus, names have to be
+    # unique to avoid key collisions.
+    group_name = _process_group_name(my_group, use_hashed_name=True)
     split_pg = parent_pg.split_group(
         my_group,
         timeout=timeout,

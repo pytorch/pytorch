@@ -84,9 +84,8 @@ jobs:
       curr_ref_type: ${{ github.ref_type }}
       opt_out_experiments: lf
 
-  # NB: Keep this in sync with trunk.yml
   build:
-    name: cuda12.8-py3.10-gcc9-sm90
+    name: build
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
@@ -128,7 +127,7 @@ jobs:
     secrets: inherit
 
   test-periodically:
-    name: cuda12.8-py3.10-gcc9-sm90
+    name: test-periodically
     uses: ./.github/workflows/_linux-test.yml
     needs: build
     if: github.event.schedule == '15 0,12 * * 1-6'
@@ -145,7 +144,7 @@ jobs:
     secrets: inherit
 
   test-weekly:
-    name: cuda12.8-py3.10-gcc9-sm90
+    name: test-weekly
     uses: ./.github/workflows/_linux-test.yml
     needs: build
     if: github.event.schedule == '0 7 * * 0'
@@ -162,7 +161,7 @@ jobs:
     secrets: inherit
 
   test:
-    name: cuda12.8-py3.10-gcc9-sm90
+    name: test
     uses: ./.github/workflows/_linux-test.yml
     needs: build
     # The pull_request trigger is used in PR to bump transformers pin which always

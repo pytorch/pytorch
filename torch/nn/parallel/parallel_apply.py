@@ -58,7 +58,9 @@ def parallel_apply(
     else:
         devices = [None] * len(modules)
     devices = [_get_device_index(x, True) for x in devices]
-    streams = [torch.cuda.current_stream(x) for x in devices]
+    streams = [torch.accelerator.current_stream(x) for x in devices]
+    assert torch.accelerator.is_available(), "No available accelerator found."
+    device_type = torch.accelerator.current_accelerator().type  # type: ignore[union-attr]
     lock = threading.Lock()
     results = {}
     grad_enabled, autocast_enabled = (
@@ -72,7 +74,7 @@ def parallel_apply(
         input: Any,
         kwargs: dict[str, Any],
         device: Optional[Union[int, torch.device]] = None,
-        stream: Optional[torch.cuda.Stream] = None,
+        stream: Optional[torch.Stream] = None,
     ) -> None:
         torch.set_grad_enabled(grad_enabled)
         if device is None:
@@ -85,13 +87,15 @@ def parallel_apply(
                     )
                 return
             device = t.get_device()
+        if isinstance(device, torch.device):
+            device = device.index
         if stream is None:
-            stream = torch.cuda.current_stream(device)
+            stream = torch.accelerator.current_stream(device)
         try:
             with (
-                torch.cuda.device(device),
-                torch.cuda.stream(stream),
-                torch.amp.autocast("cuda", enabled=autocast_enabled),
+                torch.accelerator.device_index(device),
+                stream,
+                torch.amp.autocast(device_type, enabled=autocast_enabled),
             ):
                 # this also avoids accidental slicing of `input` if it is a Tensor
                 if not isinstance(input, (list, tuple)):
