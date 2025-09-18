@@ -124,7 +124,13 @@ def infer_schema(
         annotation_type, _ = unstringify_type(param.annotation)
 
         if annotation_type not in SUPPORTED_PARAM_TYPES:
-            if annotation_type.__origin__ is tuple:
+            if annotation_type == torch._C.ScriptObject:
+                error_fn(
+                    f"Parameter {name}'s type cannot be inferred from the schema "
+                    "as it is a ScriptObject. Please manually specify the schema "
+                    "using the `schema=` kwarg with the actual type of the ScriptObject."
+                )
+            elif annotation_type.__origin__ is tuple:
                 list_type = tuple_to_list(annotation_type)
                 example_type_str = "\n\n"
                 # Only suggest the list type if this type is supported.
