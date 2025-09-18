@@ -299,7 +299,7 @@ std::tuple<at::Tensor, int64_t, int64_t, int64_t, int64_t> _cslt_sparse_mm_impl(
     }
   }
 
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(compressed_A.dim() == 2); // encoded M
+  TORCH_INTERNAL_ASSERT(compressed_A.dim() == 2); // encoded M x S
   int64_t k = dense_B.size(0);
   int64_t n = dense_B.size(1);
   int64_t m = compressed_A.size(0);
