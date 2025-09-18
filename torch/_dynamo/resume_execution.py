@@ -431,6 +431,10 @@ class ContinueExecutionCache:
                     prefix.append(
                         create_instruction("LOAD_FAST", argval=f"___stack{stack_i}")
                     )
+                    if stack_i in stack_ctx_vars_d:
+                        # NOTE: we assume that current stack var is a context manager CLASS!
+                        # Load args for context variable and construct it
+                        prefix.extend(_load_tuple_and_call(stack_ctx_vars_d[stack_i]))
                     stack_i += 1
 
                 if i in hooks:
@@ -442,10 +446,6 @@ class ContinueExecutionCache:
                         old_hook_target = offset_to_inst[hook_target_offset]
                         meta.prefix_block_target_offset_remap.append(hook_target_offset)
                         old_hook_target_remap[old_hook_target] = exn_target
-                if i in stack_ctx_vars_d:
-                    # NOTE: we assume that current stack var is a context manager CLASS!
-                    # Load args for context variable and construct it
-                    prefix.extend(_load_tuple_and_call(stack_ctx_vars_d[i]))
 
             if is_py311_plus:
                 # reverse the mapping since targets of later/nested contexts are inserted
