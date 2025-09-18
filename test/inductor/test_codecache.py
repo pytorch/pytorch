@@ -57,6 +57,7 @@ from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_FBCODE,
+    IS_SANDCASTLE,
     parametrize,
     TEST_WITH_ROCM,
 )
@@ -139,6 +140,7 @@ class TestPyCodeCache(TestCase):
         stack_frames = PyCodeCache.stack_frames_for_code(path, 0)
         self.assertEqual(stack_frames, None)
 
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
     def test_editable_cached_wrapper(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             env = os.environ.copy()
