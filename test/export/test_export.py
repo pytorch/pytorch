@@ -3337,6 +3337,28 @@ def forward(self, causal_mask, fill_value):
         )
         check_users_for_graph(ep.graph)
 
+    def test_hoo_retrace_serialize(self):
+        class SetGradCase(torch.nn.Module):
+            def forward(self, x):
+                with torch.no_grad():
+                    y = x * 4
+                return y
+
+        ep = torch.export.export(
+            SetGradCase(),
+            (torch.randn(6),),
+            strict=False,
+        )
+
+        # TODO: re-trace should not create empry submodule
+        # https://github.com/pytorch/pytorch/issues/163294
+        ep2 = torch.export.export(ep.module(), (torch.randn(6),))
+
+        buffer = io.BytesIO()
+        torch.export.save(ep2, buffer)
+        buffer.seek(0)
+        torch.export.load(buffer)
+
     def test_export_custom_op_lib(self):
         ops_registered_before = set(torch.ops.mylib)
 

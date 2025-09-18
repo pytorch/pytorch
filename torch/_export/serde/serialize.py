@@ -2717,6 +2717,10 @@ class GraphModuleDeserializer(metaclass=Final):
     def deserialize_outputs(self, serialized_node: Node, fx_node: torch.fx.Node):
         # Check single value return
         if len(serialized_node.outputs) == 0:
+            if isinstance(
+                fx_node.target, torch._higher_order_ops.wrap.WrapWithSetGradEnabled
+            ):
+                fx_node.meta["val"] = tuple()
             return
 
         if (
