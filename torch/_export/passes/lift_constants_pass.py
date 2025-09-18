@@ -337,6 +337,11 @@ def lift_constants_pass(
                         f"tried to lift unsupported type {type(constant_val)} from node {node.format_node()}"
                     )
 
+                # source id is not meant to be serialized and expected to be
+                # used for tracking correspondence between placeholder nodes and
+                # the it's original constant objects. It's up to downstream to
+                # preserve this metadata or not.
+                const_placeholder_node.meta["source_id"] = id(constant_val)
                 lifted_objs.add(constant_val, const_placeholder_node)
                 node.replace_all_uses_with(const_placeholder_node)
                 gm.graph.erase_node(node)
