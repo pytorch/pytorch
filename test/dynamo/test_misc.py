@@ -13354,6 +13354,14 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
         y = torch.tensor(5)
         f(x, y)
 
+    def test_full_graph_capture_scalar_outputs(self):
+        @torch.compile(fullgraph=True)
+        def foo(a):
+            return torch.randn(5) * a.item()
+
+        # We expect to no longer raise here
+        foo(torch.tensor(2.0))
+
     def test_dynamic_float_scalar_tensor_coersion(self):
         # Minified version of https://github.com/pytorch/pytorch/issues/158376#issuecomment-3079591367
         class Foo:
