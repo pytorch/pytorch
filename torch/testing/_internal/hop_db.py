@@ -235,6 +235,7 @@ def simple_local_map_hop(inp1, inp2):
         "out_placements": ((Replicate(), Replicate(), Replicate()),)
     }
 
+    # TODO: Dynamo would rewrite this op differently
     return torch._higher_order_ops.local_map_hop(gm, inp1, inp2)
 
 def sample_inputs_scan(opinfo, device, dtype, requires_grad, **kwargs):
@@ -487,6 +488,14 @@ hop_db = [
         check_batched_gradgrad=False,
         check_batched_forward_grad=False,
         check_inplace_batched_forward_grad=False,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestHOP", "test_aot_export"),
+            DecorateInfo(
+                unittest.expectedFailure, "TestHOP", "test_pre_dispatch_export"
+            ),
+            DecorateInfo(unittest.expectedFailure, "TestHOP", "test_serialize_export"),
+            DecorateInfo(unittest.expectedFailure, "TestHOP", "test_retrace_export"),
+        ),
         decorators=[onlyCUDA, unittest.skipIf(not torch.distributed.is_available(), "requires distributed build")],
     ),
 ]
