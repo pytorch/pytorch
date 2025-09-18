@@ -1158,7 +1158,7 @@ class PolynomialLR(LRScheduler):
         learning rates follow
 
         .. math::
-            \texttt{base_lr} \cdot \left(1 - \frac{\texttt{last_epoch}}{\texttt{total_iters}} \right)^\texttt{power}
+            \texttt{base\_lr} \cdot \left(1 - \frac{\texttt{last\_epoch}}{\texttt{total\_iters}} \right)^\texttt{power}
 
         Returns the current learning rates unchanged after :attr:`total_iters` is reached.
 
@@ -1268,8 +1268,8 @@ class CosineAnnealingLR(LRScheduler):
         learning rates approximate
 
         .. math::
-            \texttt{eta_min} + \frac{1}{2} (\texttt{base_lr} - \texttt{eta_min}) \left(
-                1 + \cos\left(\frac{\texttt{last_epoch} \pi}{\texttt{T_max}}\right) \right)
+            \texttt{eta\_min} + \frac{1}{2} (\texttt{base\_lr} - \texttt{eta\_min}) \left(
+                1 + \cos\left(\pi \cdot \frac{\texttt{last\_epoch}}{\texttt{T\_max}}\right) \right)
 
         Returns:
             list[float | Tensor]: A :class:`list` of learning rates for each of the optimizer's
@@ -1992,8 +1992,8 @@ class CosineAnnealingWarmRestarts(LRScheduler):
         Computes learning rates for the optimizer's :attr:`~torch.optim.Optimizer.param_groups` following:
 
         .. math::
-            \texttt{eta_min} + \frac{1}{2}(\texttt{base_lr} - \texttt{eta_min})\left(1 +
-            \cos\left(\frac{\texttt{T_cur}}{\texttt{T_i}}\pi\right)\right)
+            \texttt{eta\_min} + \frac{1}{2}(\texttt{base\_lr} - \texttt{eta\_min})\left(1 +
+            \cos\left(\pi \cdot \frac{\texttt{T\_cur}}{\texttt{T\_i}}\right)\right)
 
         Where :attr:`T_cur` is the number of epochs since the last restart and :attr:`T_i` is the number of epochs
         between two restarts. Both :attr:`T_cur` and :attr:`T_i` are updated in :meth:`step`, and :attr:`T_i` becomes
