@@ -757,7 +757,6 @@ def _export_to_torch_ir(
     preserve_module_call_signature: tuple[str, ...] = (),
     disable_constraint_solver: bool = False,
     prefer_deferred_runtime_asserts_over_guards: bool = False,
-    _use_new_tracer_experimental: bool = False,
     restore_fqn: bool = True,
     _log_export_usage: bool = True,
     same_signature: bool = True,
@@ -815,7 +814,7 @@ def _export_to_torch_ir(
                     f, preserve_module_call_signature, module_call_specs
                 )
             with ctx, _ignore_backend_decomps():
-                if _use_new_tracer_experimental:
+                if torch._export.config.use_new_tracer_experimental:
                     from torch._dynamo.functional_export import (
                         _dynamo_graph_capture_for_export,
                     )
@@ -1422,7 +1421,6 @@ def _strict_export(
     orig_in_spec: TreeSpec,
     prefer_deferred_runtime_asserts_over_guards: bool,
     _to_aten_func: Callable,
-    _use_new_tracer_experimental: bool = False,
 ) -> ExportArtifact:
     """
     _to_aten_func can either be `_export_to_aten_ir_make_fx` or `_export_to_aten_ir`
@@ -1437,7 +1435,6 @@ def _strict_export(
         restore_fqn=False,  # don't need to restore because we will do it later
         prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,
         _log_export_usage=False,
-        _use_new_tracer_experimental=_use_new_tracer_experimental,
     )
 
     # We detect the fake_mode by looking at gm_torch_level's placeholders, this is the fake_mode created in dynamo.
@@ -2058,7 +2055,6 @@ def _export_for_training(
     strict: bool = True,
     preserve_module_call_signature: tuple[str, ...] = (),
     prefer_deferred_runtime_asserts_over_guards: bool = False,
-    _use_new_tracer_experimental: bool = False,
 ) -> ExportedProgram:
     global _EXPORT_MODULE_HIERARCHY
     _EXPORT_MODULE_HIERARCHY = _get_module_hierarchy(mod)
@@ -2074,13 +2070,7 @@ def _export_for_training(
     original_state_dict = _get_original_state_dict(mod)
 
     # Call the appropriate export function based on the strictness of tracing.
-    export_func = (
-        functools.partial(
-            _strict_export, _use_new_tracer_experimental=_use_new_tracer_experimental
-        )
-        if strict
-        else _non_strict_export
-    )
+    export_func = _strict_export if strict else _non_strict_export
 
     alive_fake_input_ids_before_export: list[int] = []
 
@@ -2209,7 +2199,6 @@ def _export(
     preserve_module_call_signature: tuple[str, ...] = (),
     pre_dispatch: bool = False,
     prefer_deferred_runtime_asserts_over_guards: bool = False,
-    _use_new_tracer_experimental: bool = False,
 ) -> ExportedProgram:
     """
     Traces either an nn.Module's forward function or just a callable with PyTorch
@@ -2285,7 +2274,6 @@ def _export(
             strict=strict,
             preserve_module_call_signature=preserve_module_call_signature,
             prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,
-            _use_new_tracer_experimental=_use_new_tracer_experimental,
         )
         dtrace_structured("exported_program", payload_fn=lambda: str(ep))
         return ep
