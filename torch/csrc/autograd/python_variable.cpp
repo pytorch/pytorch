@@ -2193,7 +2193,7 @@ static PyMethodDef extra_functions[] = {
      METH_O,
      nullptr},
     {"_DTensor_compute_global_tensor_info",
-     (PyCFunction)DTensor_compute_global_tensor_info,
+     castPyCFunctionFast(DTensor_compute_global_tensor_info),
      METH_FASTCALL,
      compute_global_tensor_info_doc},
     {nullptr}};
