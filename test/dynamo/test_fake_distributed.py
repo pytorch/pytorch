@@ -1,11 +1,15 @@
 # Owner(s): ["module: dynamo"]
+import os
 from unittest import skipIf
 
 import torch
 import torch.distributed as dist
 from torch._dynamo.test_case import TestCase as DynamoTestCase
 from torch._dynamo.testing import AotEagerAndRecordGraphs, normalize_gm
-from torch.testing._internal.common_utils import instantiate_parametrized_tests
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    IS_LINUX,
+)
 
 
 if dist.is_available():
@@ -30,6 +34,7 @@ class TestFakeDistributed(DynamoTestCase):
 
     def tearDown(self):
         dist.destroy_process_group()
+        dist.distributed_c10d._world = None
 
     def test_all_to_all_single_autograd(self):
         backend = AotEagerAndRecordGraphs()
@@ -116,10 +121,22 @@ class GraphModule(torch.nn.Module):
 """,  # noqa: B950
         )
 
+
+@skipIf(not IS_LINUX, "libuv TCPStore works only on Linux")
+@skipIf(not dist.is_available(), "requires distributed")
+class TestDeviceMesh(DynamoTestCase):
+    def tearDown(self):
+        dist.destroy_process_group()
+        dist.distributed_c10d._world = None
+
     def test_device_mesh_get_local_rank(self):
+        os.environ["RANK"] = "0"
+        os.environ["WORLD_SIZE"] = "1"
+        os.environ["MASTER_ADDR"] = "localhost"
+        os.environ["MASTER_PORT"] = "12666"
         device_mesh = init_device_mesh(
             device_type="cpu",
-            mesh_shape=(self.world_size,),
+            mesh_shape=(1,),
             mesh_dim_names=("dp",),  # data parallel dimension
         )
 
