@@ -13,6 +13,7 @@ import torch.utils._pytree as pytree
 from torch._dynamo.convert_frame import FrameInfo, fullgraph_capture, get_compile_id
 from torch._dynamo.eval_frame import argument_names
 from torch._dynamo.utils import dynamo_timed, get_metrics_context
+from torch._export.utils import _compiling_state_context
 from torch._guards import compile_context, CompileContext
 from torch.export.dynamic_shapes import _RelaxedConstraint, Constraint
 from torch.fx import Node
@@ -27,20 +28,84 @@ from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 log = logging.getLogger(__name__)
 
 
-def clean_nn_module_stack(graph_module: torch.fx.GraphModule) -> torch.fx.GraphModule:
+def post_process_error_msg(
+    constraint_violation_error: ConstraintViolationError,
+    mod: Callable[..., Any],
+    args: Any,
+    kwargs: Any,
+):
+    """
+    Because we trace a different callable, the sources are all messed up.
+    Manually patch them so the error message looks correct.
+    """
+    from torch.export._unlift import _get_input_paths, _replace_sources
+
+    assert isinstance(mod, torch.nn.Module)
+    orig_sig = inspect.signature(mod.forward)
+    flat_input_paths = _get_input_paths((args, kwargs), orig_sig)
+    constraint_violation_error.args = (
+        _replace_sources(constraint_violation_error.args[0], flat_input_paths),
+    )
+    return constraint_violation_error
+
+
+def clean_nn_module_stack(
+    graph_module: torch.fx.GraphModule, is_inline_builtin=False
+) -> torch.fx.GraphModule:
+    """
+    Clean up nn_module_stack metadata by removing export_root references.
+
+    Removes the _export_root module references from nn_module_stack metadata
+    in graph nodes, which are artifacts from the export process. Fixes two patterns:
+
+    1. Keys: Removes "__export_root_" and "__modules['_export_root']_" prefixes
+       - Normal case: "L__self____export_root_child" -> "L__self__child"
+       - inline_builtin case: Uses numeric ID strings like "140468831433840"
+
+    2. Values: Removes "._export_root" and "._modules['_export_root']" from child names
+       e.g., "L['self']._export_root.child" -> "L['self'].child"
+       e.g., "L['self']._modules['_export_root'].child" -> "L['self'].child"
+
+    Also removes the root export entry "L__self____export_root" entirely.
+
+    Args:
+        graph_module: The GraphModule to clean up
+        is_inline_builtin: If True, keys are numeric ID strings and self references
+                          (L['self']) are filtered out
+
+    Returns:
+        The cleaned GraphModule (modified in-place)
+    """
     for node in graph_module.graph.nodes:
-        if "nn_module_stack" in node.meta:
-            nn_module_stack = node.meta["nn_module_stack"].copy()
-            first_key = next(iter(nn_module_stack.keys()))
-            if "export_root" in first_key:
-                del nn_module_stack[first_key]
-            nn_module_stack_corrected = {}
-            for k, v in nn_module_stack.items():
-                k_new = "".join(k.split("__export_root"))
-                child_name, child_class = v
-                child_name = child_name.replace("._export_root", "")
-                nn_module_stack_corrected[k_new] = (child_name, child_class)
-            node.meta["nn_module_stack"] = nn_module_stack_corrected
+        if "nn_module_stack" not in node.meta:
+            continue
+
+        nn_module_stack = node.meta["nn_module_stack"].copy()
+
+        if "L__self____export_root" in nn_module_stack:
+            del nn_module_stack["L__self____export_root"]
+
+        # Clean up remaining entries
+        cleaned_stack = {}
+        for key, (child_name, child_class) in nn_module_stack.items():
+            # Clean key by removing export_root patterns
+            clean_key = key.replace("__modules['_export_root']_", "").replace(
+                "__export_root_", ""
+            )
+
+            # Clean child_name by removing export_root patterns
+            clean_name = child_name.replace("._modules['_export_root']", "").replace(
+                "._export_root", ""
+            )
+
+            # Skip self reference for inline builtin case
+            if is_inline_builtin and clean_name == "L['self']":
+                continue
+
+            cleaned_stack[clean_key] = (clean_name, child_class)
+
+        node.meta["nn_module_stack"] = cleaned_stack
+
     return graph_module
 
 
@@ -49,7 +114,11 @@ def clean_export_root(graph_module: torch.fx.GraphModule) -> None:
 
     # Clean parameter names: L__self____export_root_param -> L__self___param
     def clean_name(name) -> str:
-        return name.replace("__export_root_", "_") if "__export_root_" in name else name
+        if "____modules___export_root_" in name:
+            return name.replace("____modules___export_root_", "_")
+        if "__export_root_" in name:
+            return name.replace("__export_root_", "_")
+        return name
 
     # Update get_attr nodes in-place
     for node in graph_module.graph.nodes:
@@ -272,179 +341,182 @@ def _dynamo_graph_capture_for_export(
     _constraints = constraints
 
     def inner(*args: Any, **kwargs: Any) -> torch.fx.GraphModule:
-        flat_inputs, in_spec = pytree.tree_flatten((args, kwargs))
-        module_to_trace = ModuleToTrace(mod, in_spec)
+        # This sets the is_exporting flag when building guards.
+        with _compiling_state_context():
+            flat_inputs, in_spec = pytree.tree_flatten((args, kwargs))
+            module_to_trace = ModuleToTrace(mod, in_spec)
 
-        signature = inspect.signature(module_to_trace.forward)
-        bound_arguments = signature.bind(*flat_inputs)
-        bound_arguments.apply_defaults()
+            signature = inspect.signature(module_to_trace.forward)
+            bound_arguments = signature.bind(*flat_inputs)
+            bound_arguments.apply_defaults()
 
-        constraints: Optional[list[Constraint]] = _constraints
-        dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]] = (
-            _dynamic_shapes
-        )
-
-        from . import reset  # type: ignore[attr-defined]
-
-        reset()
-
-        f_locals = {"self": module_to_trace, **bound_arguments.arguments}
-        frame = FrameInfo(
-            module_to_trace.forward.__func__.__code__,  # type: ignore[attr-defined]
-            module_to_trace.forward.__func__.__globals__,  # type: ignore[attr-defined]
-            f_locals,
-            builtins,  # type: ignore[arg-type]
-            closure=(),  # type: ignore[arg-type]
-        )
-
-        dynamo_config_ctx = torch._dynamo.config.patch(
-            specialize_int=True,
-            specialize_float=True,
-            assume_static_by_default=True,
-            automatic_dynamic_shapes=False,
-            capture_dynamic_output_shape_ops=True,
-            capture_scalar_outputs=True,
-            prefer_deferred_runtime_asserts_over_guards=False,
-            log_graph_in_out_metadata=True,
-        )
-
-        with (
-            compile_context(CompileContext(get_compile_id({}))),
-            get_metrics_context(),
-            dynamo_timed("fullgraph_capture"),
-            dynamo_config_ctx,
-        ):
-            out = fullgraph_capture(
-                frame,
-                constraints=_constraints,
-                _is_export_deprecated_do_not_use=True,
+            constraints: Optional[list[Constraint]] = _constraints
+            dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]] = (
+                _dynamic_shapes
             )
 
-            assert out.dynamo_output.tracer_output.output_graph is not None
+            from . import reset  # type: ignore[attr-defined]
 
-            # Extract export metadata from the new location
-            export_metadata = (
-                out.dynamo_output.tracer_output.output_graph.export_metadata
+            reset()
+
+            f_locals = {"self": module_to_trace, **bound_arguments.arguments}
+            frame = FrameInfo(
+                module_to_trace.forward.__func__.__code__,  # type: ignore[attr-defined]
+                module_to_trace.forward.__func__.__globals__,  # type: ignore[attr-defined]
+                f_locals,
+                builtins,  # type: ignore[arg-type]
+                closure=(),  # type: ignore[arg-type]
             )
-            graph_inputs = export_metadata.graph_input_idx_to_local_source
-            graph_output_map = export_metadata.output_return_type
-            out_spec = export_metadata.out_spec
-            module_call_spec = export_metadata.module_call_spec
 
-        example_inputs: list[Any] = []
-        if out.backend_input is not None:
-            graph = out.backend_input.graph_module
-            fake_mode = out.backend_input.fake_mode
-            example_inputs = out.backend_input.example_inputs
-        else:
-            graph = torch.fx.GraphModule(torch.nn.Module(), torch.fx.Graph())
-            graph.graph.output(None)
-            graph.recompile()
-            fake_mode = out.dynamo_output.tracer_output.output_graph.fake_mode
+            dynamo_config_ctx = torch._dynamo.config.patch(
+                specialize_int=True,
+                specialize_float=True,
+                assume_static_by_default=True,
+                automatic_dynamic_shapes=False,
+                capture_dynamic_output_shape_ops=True,
+                capture_scalar_outputs=True,
+                log_graph_in_out_metadata=True,
+            )
 
-        # Compute dynamic dimensions for each input based on constraints
-        flat_args_dynamic_dims = [
-            {
-                c.dim
-                for c in (constraints or ())
-                if (
-                    c.t_id == id(x)
-                    and not isinstance(c, _RelaxedConstraint)
-                    and c.constraint_range.vr.lower != c.constraint_range.vr.upper
+            with (
+                compile_context(CompileContext(get_compile_id({}))),
+                get_metrics_context(),
+                dynamo_timed("fullgraph_capture"),
+                dynamo_config_ctx,
+            ):
+                out = fullgraph_capture(
+                    frame,
+                    constraints=_constraints,
+                    _is_export_deprecated_do_not_use=True,
                 )
-            }
-            for x in flat_inputs
-        ]
 
-        # Create input order mapping from dynamo's internal order to user order
-        graph_input_order: dict[int, int] = {}
-        for inp in graph_inputs:
-            source = graph_inputs[inp]
-            assert isinstance(source, torch._dynamo.source.GetItemSource)
-            graph_input_order[source.index] = len(graph_input_order)
+                assert out.dynamo_output.tracer_output.output_graph is not None
 
-        for real_idx, graph_idx in graph_input_order.items():
-            flat_inputs[real_idx] = example_inputs[graph_idx]
-
-        # Use FX transformer to rebuild the graph cleanly
-        transformed_graph = DynamoGraphTransformer(
-            graph,
-            flat_inputs,
-            flat_args_dynamic_dims,
-            graph_input_order,
-            graph_output_map,
-            fake_mode,
-        ).transform()
-
-        # Set up PyTree codegen for proper input/output handling
-        transformed_graph.graph._codegen = _PyTreeCodeGen(
-            _PyTreeInfo(
-                argument_names(inspect.signature(mod.forward), args, kwargs),  # type: ignore[attr-defined, arg-type]
-                in_spec,
-                out_spec,
-            )
-        )
-        transformed_graph.recompile()
-
-        clean_nn_module_stack(transformed_graph)
-        clean_export_root(transformed_graph)
-
-        transformed_graph.meta["module_call_specs"] = module_call_spec
-
-        constraint_violation_error = None
-        try:
-            # Check if we have any constraint violations
-            check_fn = out.dynamo_output.build_guards(
-                module_to_trace.forward.__code__
-            ).guard_manager
-            check_fn.check(f_locals)
-        except (
-            ConstraintViolationError,
-            torch.utils._sympy.value_ranges.ValueRangeError,
-        ) as e:
-            constraint_violation_error = e
-
-        if (
-            (shape_env := getattr(fake_mode, "shape_env", None)) is not None
-            and (dim_constraints := shape_env.dim_constraints) is not None
-            and not isinstance(
-                module_to_trace.forward,
-                (torch._ops.OpOverloadPacket, torch._ops.OpOverload),
-            )
-        ):
-            dim_constraints.solve()
-            forced_specializations = dim_constraints.forced_specializations()
-            msg = dim_constraints.prettify_results(
-                inspect.signature(mod.forward),  # type: ignore[attr-defined]
-                dynamic_shapes,
-                constraint_violation_error,
-                forced_specializations,
-            )
-            if constraint_violation_error:
-                constraint_violation_error.args = (
-                    constraint_violation_error.args[0] + msg,
+                # Extract export metadata from the new location
+                export_metadata = (
+                    out.dynamo_output.tracer_output.output_graph.export_metadata
                 )
+                graph_inputs = export_metadata.graph_input_idx_to_local_source
+                graph_output_map = export_metadata.output_return_type
+                out_spec = export_metadata.out_spec
+                module_call_spec = export_metadata.module_call_spec
+
+            example_inputs: list[Any] = []
+            if out.backend_input is not None:
+                graph = out.backend_input.graph_module
+                fake_mode = out.backend_input.fake_mode
+                example_inputs = out.backend_input.example_inputs
             else:
-                if forced_specializations:
-                    constraint_violation_error = ConstraintViolationError(msg)
+                graph = torch.fx.GraphModule(torch.nn.Module(), torch.fx.Graph())
+                graph.graph.output(None)
+                graph.recompile()
+                fake_mode = out.dynamo_output.tracer_output.output_graph.fake_mode
+
+            # Compute dynamic dimensions for each input based on constraints
+            flat_args_dynamic_dims = [
+                {
+                    c.dim
+                    for c in (constraints or ())
+                    if (
+                        c.t_id == id(x)
+                        and not isinstance(c, _RelaxedConstraint)
+                        and c.constraint_range.vr.lower != c.constraint_range.vr.upper
+                    )
+                }
+                for x in flat_inputs
+            ]
+
+            # Create input order mapping from dynamo's internal order to user order
+            graph_input_order: dict[int, int] = {}
+            for inp in graph_inputs:
+                source = graph_inputs[inp]
+                assert isinstance(source, torch._dynamo.source.GetItemSource)
+                graph_input_order[source.index] = len(graph_input_order)
+
+            for real_idx, graph_idx in graph_input_order.items():
+                flat_inputs[real_idx] = example_inputs[graph_idx]
+
+            # Use FX transformer to rebuild the graph cleanly
+            transformed_graph = DynamoGraphTransformer(
+                graph,
+                flat_inputs,
+                flat_args_dynamic_dims,
+                graph_input_order,
+                graph_output_map,
+                fake_mode,
+            ).transform()
+
+            # Set up PyTree codegen for proper input/output handling
+            transformed_graph.graph._codegen = _PyTreeCodeGen(
+                _PyTreeInfo(
+                    argument_names(inspect.signature(mod.forward), args, kwargs),  # type: ignore[attr-defined, arg-type]
+                    in_spec,
+                    out_spec,
+                )
+            )
+            transformed_graph.recompile()
+
+            clean_nn_module_stack(
+                transformed_graph, torch._dynamo.config.inline_inbuilt_nn_modules
+            )
+            clean_export_root(transformed_graph)
+
+            transformed_graph.meta["module_call_specs"] = module_call_spec
+
+            constraint_violation_error = None
+            try:
+                # Check if we have any constraint violations
+                check_fn = out.dynamo_output.build_guards(
+                    module_to_trace.forward.__code__
+                ).guard_manager
+                check_fn.check(f_locals)
+            except ConstraintViolationError as e:
+                constraint_violation_error = e
+
+            if (
+                (shape_env := getattr(fake_mode, "shape_env", None)) is not None
+                and (dim_constraints := shape_env.dim_constraints) is not None
+                and not isinstance(
+                    module_to_trace.forward,
+                    (torch._ops.OpOverloadPacket, torch._ops.OpOverload),
+                )
+            ):
+                dim_constraints.solve()
+                forced_specializations = dim_constraints.forced_specializations()
+                msg = dim_constraints.prettify_results(
+                    inspect.signature(mod.forward),  # type: ignore[attr-defined]
+                    dynamic_shapes,
+                    constraint_violation_error,
+                    forced_specializations,
+                )
+                if constraint_violation_error:
+                    constraint_violation_error.args = (
+                        constraint_violation_error.args[0] + msg,
+                    )
                 else:
-                    log.info(
-                        "Summary of dimension constraints:%s",
-                        msg,
-                    )
+                    if forced_specializations:
+                        constraint_violation_error = ConstraintViolationError(msg)
+                    else:
+                        log.info(
+                            "Summary of dimension constraints:%s",
+                            msg,
+                        )
 
-            # Error if we have any constraints on static values
-            for k in shape_env.var_to_range.keys():
-                if isinstance(k, sympy.Integer):
-                    constraint_violation_error = ConstraintViolationError(
-                        f"{''.join(traceback.format_list(shape_env.var_to_stack[k]))}\n"
-                        "It appears that you're trying to set a constraint on a "
-                        f"value which we evaluated to have a static value of {k}. "
-                        'Set TORCH_LOGS="+export" for more information.'
-                    )
-        if constraint_violation_error:
-            raise constraint_violation_error
+                # Error if we have any constraints on static values
+                for k in shape_env.var_to_range.keys():
+                    if isinstance(k, sympy.Integer):
+                        constraint_violation_error = ConstraintViolationError(
+                            f"{''.join(traceback.format_list(shape_env.var_to_stack[k]))}\n"
+                            "It appears that you're trying to set a constraint on a "
+                            f"value which we evaluated to have a static value of {k}. "
+                            'Set TORCH_LOGS="+export" for more information.'
+                        )
+            if constraint_violation_error:
+                constraint_violation_error = post_process_error_msg(
+                    constraint_violation_error, mod, args, kwargs
+                )
+                raise constraint_violation_error
 
-        return transformed_graph
+            return transformed_graph
 
     return inner
