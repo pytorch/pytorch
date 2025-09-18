@@ -351,7 +351,7 @@ def _templated_ring_attention(
     (k0, k3). For rank0, no computation is needed for q0. However, computations for
     q3k1 and q3k2 are required, so only q3 is used for SDPA. This corresponds to the
     `else` of the (`if`, `elif`, `else`) in the implementation.
-    For rank1, k0 is not needed for q1 and q2, so only k3 is used for SDPA. This
+    For rank1, k3 is not needed for q1 and q2, so only k0 is used for SDPA. This
     corresponds to the `elif` of (`if`, `elif`, `else`) in the implementation.
 
     Parameters
