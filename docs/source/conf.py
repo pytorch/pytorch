@@ -210,10 +210,6 @@ templates_path = [
 coverage_ignore_functions = [
     # torch
     "typename",
-    # torch.cuda
-    "check_error",
-    "cudart",
-    "is_bf16_supported",
     # torch.cuda._sanitizer
     "zip_arguments",
     "zip_by_key",
@@ -2514,6 +2510,8 @@ coverage_ignore_classes = [
     # torch.distributed.checkpoint.hf_storage
     "HuggingFaceStorageReader",
     "HuggingFaceStorageWriter",
+    # torch.distributed.checkpoint.quantized_hf_storage
+    "QuantizedHuggingFaceStorageReader",
     # torch.distributed.checkpoint.metadata
     "BytesStorageMetadata",
     "ChunkStorageMetadata",
@@ -3178,6 +3176,8 @@ coverage_ignore_classes = [
     "WeakIdKeyDictionary",
     "WeakIdRef",
     "WeakTensorKeyDictionary",
+    # torch.utils.debug_mode
+    "DebugMode",
 ]
 
 # The suffix(es) of source filenames.
