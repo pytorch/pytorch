@@ -760,7 +760,6 @@ def _scaled_dot_product_ring_fused_attention_overrideable(
     group = mesh.get_group()
     return _templated_ring_attention(
         group,
-        mesh,
         seq_dim,
         aten._scaled_dot_product_fused_attention_overrideable,
         query=query,
@@ -928,7 +927,6 @@ def _scaled_dot_product_ring_fused_attention_overrideable_backward(
     group = mesh.get_group()
     result = _templated_ring_attention_backward(
         group,
-        mesh,
         seq_dim,
         aten._scaled_dot_product_fused_attention_overrideable_backward.default,
         grad_out=grad_out,
