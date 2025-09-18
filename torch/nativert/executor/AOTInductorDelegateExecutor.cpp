@@ -120,6 +120,10 @@ AOTIDelegateExecutor::AOTIDelegateExecutor(
       /*cubin_dir=*/tmp_dir,
       /*run_single_threaded=*/false);
 
+  TORCH_CHECK(
+      aoti_model_container_runner_ != nullptr,
+      "Failed to create AOTI model container runner");
+
   for (const auto& [name, original_fqn] :
        aoti_model_container_runner_->getConstantNamesToOriginalFQNs()) {
     if (weights->contains(original_fqn)) {

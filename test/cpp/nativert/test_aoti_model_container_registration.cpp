@@ -12,5 +12,5 @@ TEST(AOTIModelContainerRegistrationTests, TestRegister) {
   EXPECT_TRUE(AOTIModelContainerRunnerRegistry()->Has(at::kCUDA));
 #else
   EXPECT_FALSE(AOTIModelContainerRunnerRegistry()->Has(at::kCUDA));
-#endif // USE_CUDA
+#endif // defined(USE_CUDA) || defined(USE_ROCM)
 }
