@@ -1710,8 +1710,8 @@ def native_layer_norm_backward(
 
     return (
         _maybe_cast(d_input, input.dtype),
-        _maybe_cast(d_weight, input.dtype),
-        _maybe_cast(d_bias, input.dtype),
+        _maybe_cast(d_weight, weight.dtype if weight is not None else None),
+        _maybe_cast(d_bias, bias.dtype if bias is not None else None),
     )
 
 
