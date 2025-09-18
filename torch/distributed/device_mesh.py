@@ -304,7 +304,9 @@ if True:  # just to temporarily avoid reindentation
             """
             mesh_dim = self.get_mesh_dim_by_name(device_mesh, mesh_dim_name)
             layout = device_mesh._layout[mesh_dim]
-            pg_ranks_by_dim = layout.global_ranks(device_mesh.size())
+            pg_ranks_by_dim = layout.to_remapping_tensor(
+                device_mesh.mesh, get_world_size()
+            )  # type: ignore[arg-type]
             cur_rank = device_mesh.get_rank()
             res_submeshes = []
             for mesh_1d in pg_ranks_by_dim:
@@ -413,6 +415,8 @@ if True:  # just to temporarily avoid reindentation
                 else torch.tensor(mesh, device="cpu", dtype=torch.int)
             )
             self.mesh_dim_names = tuple(mesh_dim_names) if mesh_dim_names else None
+            if backend_override is None:
+                backend_override = ((None, None),) * self.mesh.ndim
             # Internal bookkeeping for the device mesh.
             self._layout = (
                 layout if layout else _MeshLayout(self.mesh.size(), self.mesh.stride())
@@ -430,8 +434,6 @@ if True:  # just to temporarily avoid reindentation
                 # process (we need to know if the current global rank is in the mesh or not).
                 if _init_backend:
                     self._setup_world_group_and_device()
-                    if backend_override is None:
-                        backend_override = ((None, None),) * self.mesh.ndim
                     self._init_process_groups(backend_override)
 
                 if is_initialized() and get_backend() == "threaded":
@@ -745,11 +747,8 @@ if True:  # just to temporarily avoid reindentation
                 # TODO: compiler + device_mesh slicing.
                 with torch._subclasses.fake_tensor.unset_fake_temporarily():
                     submesh = _mesh_resources.create_sub_mesh(
-                        self,
-                        sliced_mesh_layout,
-                        mesh_dim_names,
+                        self, sliced_mesh_layout, mesh_dim_names
                     )
-
                 return submesh
 
         def get_group(self, mesh_dim: Optional[Union[int, str]] = None) -> ProcessGroup:
