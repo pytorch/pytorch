@@ -564,6 +564,7 @@ class NVSHMEMAll2AllTest(MultiProcContinuousTest):
         # Check data
         torch.testing.assert_close(out_expected, out[:out_numel])
 
+
 # Help function used by multiple tests
 def dispatch_then_combine(device, align: int, group) -> None:
     """
@@ -595,9 +596,9 @@ def dispatch_then_combine(device, align: int, group) -> None:
         torch.randn(max_inp_numel, dtype=dtype, device=device)
     )
     out = symm_mem.empty(max_out_numel, dtype=dtype, device=device).fill_(-1)
-    in_splits = symm_mem.empty(
-        nsplits, dtype=torch.int64, device=device
-    ).copy_(inp_splits)
+    in_splits = symm_mem.empty(nsplits, dtype=torch.int64, device=device).copy_(
+        inp_splits
+    )
     # 2 rows: output splits, output offsets
     # Initiallizing all values to -1 to check if they are updated
     out_splits_offsets = symm_mem.empty(
@@ -605,9 +606,7 @@ def dispatch_then_combine(device, align: int, group) -> None:
     ).fill_(-1)
 
     # Buffers for combine
-    combine_out = symm_mem.empty(
-        max_out_numel, dtype=dtype, device=device
-    ).fill_(-1)
+    combine_out = symm_mem.empty(max_out_numel, dtype=dtype, device=device).fill_(-1)
     # 2 rows: output splits, output offsets
     # Initiallizing all values to -1 to check if they are updated
     combine_out_splits_offsets = symm_mem.empty(
@@ -639,9 +638,9 @@ def dispatch_then_combine(device, align: int, group) -> None:
     # Assert the combined out offsets are exactly the same as the original input offsets
     inp_offsets = torch.cumsum(inp_splits, dim=0)  # inclusive scan
     # Make it exclusive scan because that's what `all_to_all_vdev_2d_offset` returns
-    inp_offsets = torch.cat(
-        [torch.zeros(1, device=device), inp_offsets[:-1]]
-    ).to(torch.int64)
+    inp_offsets = torch.cat([torch.zeros(1, device=device), inp_offsets[:-1]]).to(
+        torch.int64
+    )
     torch.testing.assert_close(combine_out_splits_offsets[1], inp_offsets)
 
     # Wait for all ranks to finish accessing tensors before freeing them
