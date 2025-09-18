@@ -1032,6 +1032,7 @@ static bool DTensor_OpSchema_recompute_comparison_key_impl(
   for (const auto idx : c10::irange(args_to_hash.size())) {
     args_to_hash_tup[idx] = std::move(args_to_hash[idx]);
   }
+  PyObject* comparison_key = nullptr;
   if (!static_kwargkey.is_none()) {
     if (!PyList_Check(static_kwargkey.ptr())) {
       PyErr_SetString(
@@ -1050,28 +1051,32 @@ static bool DTensor_OpSchema_recompute_comparison_key_impl(
     int idx = 0;
     auto kwargs_schema = py::reinterpret_borrow<py::dict>(raw_kwargs_schema);
     for (const auto& k : static_kwargkey_list) {
-      PyObject* item = PyDict_GetItem(kwargs_schema.ptr(), k.ptr());
+      PyObject* item = PyDict_GetItemWithError(kwargs_schema.ptr(), k.ptr());
       if (item) {
         kwargs_to_hash[idx++] = py::reinterpret_borrow<py::object>(item);
+      } else if (PyErr_Occurred()) {
+        return false;
       } else {
         kwargs_to_hash[idx++] = py::none();
       }
     }
-    PyObject* comparison_key = PyTuple_Pack(
+    comparison_key = PyTuple_Pack(
         3,
         self_handle.attr(dtensor_interned_strings.op).ptr(),
         args_to_hash_tup.ptr(),
         kwargs_to_hash.ptr());
-    self_handle.attr(dtensor_interned_strings._comparison_key) =
-        py::reinterpret_steal<py::object>(comparison_key);
   } else {
-    PyObject* comparison_key = PyTuple_Pack(
+    comparison_key = PyTuple_Pack(
         2,
         self_handle.attr(dtensor_interned_strings.op).ptr(),
         args_to_hash_tup.release().ptr());
-    self_handle.attr(dtensor_interned_strings._comparison_key) =
-        py::reinterpret_steal<py::object>(comparison_key);
   }
+  if (!comparison_key) {
+    return false;
+  }
+  self_handle.attr(dtensor_interned_strings._comparison_key) =
+      py::reinterpret_steal<py::object>(comparison_key);
+
   return true;
 }
 
