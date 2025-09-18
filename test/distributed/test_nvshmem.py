@@ -548,83 +548,103 @@ class NVSHMEMAll2AllTest(MultiProcContinuousTest):
         # Check data
         torch.testing.assert_close(out_expected, out[:out_numel])
 
-    def helper_test_dispatch_combine(self, align: int, group_name) -> None:
-        """
-        Shuffle the tokens, then combine them, and check if the combined data is
-        exactly the same as the original input data
-        """
-        symm_mem.enable_symm_mem_for_group(group_name)
 
-        dtype = torch.float
-        # Number of experts per rank
-        ne = 8
-        nsplits = ne * self.world_size
+# Help function used by multiple tests
+def dispatch_then_combine(device, align: int, group) -> None:
+    """
+    Shuffle the tokens, then combine them, and check if the combined data is
+    exactly the same as the original input data
+    """
+    group_name = group.group_name
+    symm_mem.enable_symm_mem_for_group(group_name)
 
-        # Number of elements for an expert is random between [0, k)
-        k = 10
-        inp_splits = torch.randint(k, (nsplits,), dtype=torch.int64, device=self.device)
+    dtype = torch.float
+    # Number of experts per rank
+    ne = 8
+    nsplits = ne * group.size()
 
-        # Exchange input splits to get output splits
-        out_splits = torch.zeros_like(inp_splits)
-        dist.all_to_all_single(out_splits, inp_splits)
+    # Number of elements for an expert is random between [0, k)
+    k = 10
+    inp_splits = torch.randint(k, (nsplits,), dtype=torch.int64, device=device)
 
-        # Actual number of input elements
-        inp_numel = inp_splits.sum().item()
-        # Max number of input elements (must be a constant across ranks for symmetric memory allocation)
-        max_inp_numel = k * nsplits
-        # Max number of output elements (must be a constant across ranks for symmetric memory allocation)
-        overflow_factor = self.world_size  # worst case: one rank receives all data
-        max_out_numel = max_inp_numel * overflow_factor
+    # Actual number of input elements
+    inp_numel = inp_splits.sum().item()
+    # Max number of input elements (must be a constant across ranks for symmetric memory allocation)
+    max_inp_numel = k * nsplits
+    # Max number of output elements (must be a constant across ranks for symmetric memory allocation)
+    overflow_factor = group.size()  # worst case: one rank receives all data
+    max_out_numel = max_inp_numel * overflow_factor
 
-        # Buffers for shuffle
-        inp = symm_mem.empty(max_inp_numel, dtype=dtype, device=self.device).fill_(
-            self.rank
-        )
-        out = symm_mem.empty(max_out_numel, dtype=dtype, device=self.device).fill_(-1)
-        in_splits = symm_mem.empty(
-            nsplits, dtype=torch.int64, device=self.device
-        ).copy_(inp_splits)
-        # 2 rows: output splits, output offsets
-        # Initiallizing all values to -1 to check if they are updated
-        out_splits_offsets = symm_mem.empty(
-            (2, nsplits), dtype=torch.int64, device=self.device
-        ).fill_(-1)
+    # Buffers for shuffle
+    inp = symm_mem.empty(max_inp_numel, dtype=dtype, device=device).copy_(
+        torch.randn(max_inp_numel, dtype=dtype, device=device)
+    )
+    out = symm_mem.empty(max_out_numel, dtype=dtype, device=device).fill_(-1)
+    in_splits = symm_mem.empty(nsplits, dtype=torch.int64, device=device).copy_(
+        inp_splits
+    )
+    # 2 rows: output splits, output offsets
+    # Initiallizing all values to -1 to check if they are updated
+    out_splits_offsets = symm_mem.empty(
+        (2, nsplits), dtype=torch.int64, device=device
+    ).fill_(-1)
 
-        # Shuffle the tokens
-        torch.ops.symm_mem.all_to_all_vdev_2d(
-            inp, out, in_splits, out_splits_offsets, group_name, major_align=align
-        )
+    # Buffers for combine
+    combine_out = symm_mem.empty(max_out_numel, dtype=dtype, device=device).fill_(-1)
+    # 2 rows: output splits, output offsets
+    # Initiallizing all values to -1 to check if they are updated
+    combine_out_splits_offsets = symm_mem.empty(
+        (2, nsplits), dtype=torch.int64, device=device
+    ).fill_(-1)
 
-        # Buffers for combine
-        combine_out = symm_mem.empty(
-            max_out_numel, dtype=dtype, device=self.device
-        ).fill_(-1)
-        # 2 rows: output splits, output offsets
-        # Initiallizing all values to -1 to check if they are updated
-        combine_out_splits_offsets = symm_mem.empty(
-            (2, nsplits), dtype=torch.int64, device=self.device
-        ).fill_(-1)
+    # Wait for all ranks to finish tensor allocation before accessing them
+    torch.cuda.synchronize(device)
+    dist.barrier(group=group)
 
-        # Combine the tokens
-        # `out_splits_offsets` from shuffle is exactly the `input_splits_offsets` for combine
-        # `out` data from shuffle is exactly the `input` data for combine
-        torch.ops.symm_mem.all_to_all_vdev_2d_offset(
-            out, combine_out, out_splits_offsets, combine_out_splits_offsets, group_name
-        )
+    # Shuffle the tokens
+    torch.ops.symm_mem.all_to_all_vdev_2d(
+        inp, out, in_splits, out_splits_offsets, group_name, major_align=align
+    )
 
-        # Assert the combined data is exactly the same as the original input data
-        torch.testing.assert_close(combine_out[:inp_numel], inp[:inp_numel])
+    # Combine the tokens
+    # `out_splits_offsets` from shuffle is exactly the `input_splits_offsets` for combine
+    # `out` data from shuffle is exactly the `input` data for combine
+    torch.ops.symm_mem.all_to_all_vdev_2d_offset(
+        out, combine_out, out_splits_offsets, combine_out_splits_offsets, group_name
+    )
 
-        # Assert the combined out splits are exactly the same as the original input splits
-        torch.testing.assert_close(combine_out_splits_offsets[0], inp_splits)
+    # Assert the combined data is exactly the same as the original input data
+    torch.testing.assert_close(combine_out[:inp_numel], inp[:inp_numel])
 
-        # Assert the combined out offsets are exactly the same as the original input offsets
-        inp_offsets = torch.cumsum(inp_splits, dim=0)  # inclusive scan
-        # Make it exclusive scan because that's what `all_to_all_vdev_2d_offset` returns
-        inp_offsets = torch.cat(
-            [torch.zeros(1, device=self.device), inp_offsets[:-1]]
-        ).to(torch.int64)
-        torch.testing.assert_close(combine_out_splits_offsets[1], inp_offsets)
+    # Assert the combined out splits are exactly the same as the original input splits
+    torch.testing.assert_close(combine_out_splits_offsets[0], inp_splits)
+
+    # Assert the combined out offsets are exactly the same as the original input offsets
+    inp_offsets = torch.cumsum(inp_splits, dim=0)  # inclusive scan
+    # Make it exclusive scan because that's what `all_to_all_vdev_2d_offset` returns
+    inp_offsets = torch.cat([torch.zeros(1, device=device), inp_offsets[:-1]]).to(
+        torch.int64
+    )
+    torch.testing.assert_close(combine_out_splits_offsets[1], inp_offsets)
+
+    # Wait for all ranks to finish accessing tensors before freeing them
+    dist.barrier(group=group)
+    torch.cuda.synchronize(device)
+
+
+@instantiate_parametrized_tests
+@requires_nvshmem()
+@requires_cuda_p2p_access()
+class DispatchCombineTest(MultiProcContinuousTest):
+    def _init_device(self) -> None:
+        # TODO: relieve this (seems to hang if without)
+        device_module.set_device(self.device)
+        # Set NVSHMEM as SymmMem backend
+        symm_mem.set_backend("NVSHMEM")
+
+    @property
+    def device(self) -> torch.device:
+        return torch.device(device_type, self.rank)
 
     @skipIfRocm
     @parametrize("align", [1, 8, 16])  # `major_align` of output
@@ -634,7 +654,22 @@ class NVSHMEMAll2AllTest(MultiProcContinuousTest):
         """
         torch.manual_seed(42 + self.rank)
         self._init_device()
-        self.helper_test_dispatch_combine(align, dist.group.WORLD.group_name)
+        dispatch_then_combine(self.device, align, dist.group.WORLD)
+
+
+@instantiate_parametrized_tests
+@requires_nvshmem()
+@requires_cuda_p2p_access()
+class DispatchCombineInSubgroups(MultiProcContinuousTest):
+    def _init_device(self) -> None:
+        # TODO: relieve this (seems to hang if without)
+        device_module.set_device(self.device)
+        # Set NVSHMEM as SymmMem backend
+        symm_mem.set_backend("NVSHMEM")
+
+    @property
+    def device(self) -> torch.device:
+        return torch.device(device_type, self.rank)
 
     @skipIfRocm
     # TODO: FIXIT. Currently, `MultiProcContinuousTest` treats the skip code as a
@@ -654,7 +689,7 @@ class NVSHMEMAll2AllTest(MultiProcContinuousTest):
             device_type, (ngroups, subgroup_size), mesh_dim_names=("dp", "ep")
         )
         subgroup = dm.get_group("ep")
-        self.helper_test_dispatch_combine(align=8, group_name=subgroup.group_name)
+        dispatch_then_combine(self.device, align=8, group=subgroup)
 
 
 if __name__ == "__main__":
