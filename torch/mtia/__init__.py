@@ -205,6 +205,7 @@ def attach_out_of_memory_observer(
 
 
 def is_bf16_supported(including_emulation: bool = True):
+    r"""Return a bool indicating if the current MTIA device supports dtype bfloat16."""
     return True
 
 

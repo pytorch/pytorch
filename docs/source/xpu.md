@@ -12,6 +12,7 @@
     :nosignatures:
 
     StreamContext
+    can_device_access_peer
     current_device
     current_stream
     device
@@ -25,6 +26,7 @@
     get_stream_from_external
     init
     is_available
+    is_bf16_supported
     is_initialized
     set_device
     set_stream

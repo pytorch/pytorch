@@ -257,7 +257,7 @@ class TestCutlassBackend(TestCase):
         if config.is_fbcode():
             import python_cutlass
         else:
-            import cutlass as python_cutlass  # noqa: F401
+            import cutlass_cppgen as python_cutlass  # noqa: F401
         import cutlass_library  # noqa: F401
 
     def test_cutlass_key(self):
