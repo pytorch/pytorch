@@ -173,7 +173,7 @@ class SchedulerBuffer:
             self.node
         ):
             return False
-        if self.get_name in V.graph.get_output_names():
+        if self.get_name() in V.graph.get_output_names():
             return False
         return True
 
