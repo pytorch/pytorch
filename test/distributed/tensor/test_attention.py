@@ -37,7 +37,11 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
 )
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_utils import run_tests, skipIfRocm
+from torch.testing._internal.common_utils import (
+    run_tests, 
+    skipIfRocm, 
+    TEST_HPU
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
@@ -46,12 +50,16 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 
 c10d_functional = torch.ops.c10d_functional
 backends = []
+
+PLATFORM_SUPPORTS_OVERRIDEABLE_ATTENTION = TEST_HPU # append this to extend support for other devices
 if PLATFORM_SUPPORTS_FLASH_ATTENTION:
     backends.append(SDPBackend.FLASH_ATTENTION)
 if PLATFORM_SUPPORTS_MEM_EFF_ATTENTION:
     backends.append(SDPBackend.EFFICIENT_ATTENTION)
 if PLATFORM_SUPPORTS_CUDNN_ATTENTION:
     backends.append(SDPBackend.CUDNN_ATTENTION)
+if PLATFORM_SUPPORTS_OVERRIDEABLE_ATTENTION:
+    backends.append(SDPBackend.OVERRIDEABLE)
 
 rotater_enum_to_str = {
     _RotateMethod.ALL_GATHER: "allgather",
@@ -71,7 +79,7 @@ class RingAttentionTest(DTensorTestBase):
     @skip_if_lt_x_gpu(2)
     @skipIfRocm  # Missing _c10d_functional_autograd::all_to_all_single
     @unittest.skipIf(
-        not PLATFORM_SUPPORTS_FUSED_ATTENTION,
+        not PLATFORM_SUPPORTS_FUSED_ATTENTION or PLATFORM_SUPPORTS_OVERRIDEABLE_ATTENTION,
         "Does not support flash nor efficient attention",
     )
     @with_comms
@@ -130,6 +138,7 @@ class RingAttentionTest(DTensorTestBase):
             torch.bfloat16
             if backend == SDPBackend.FLASH_ATTENTION
             or backend == SDPBackend.CUDNN_ATTENTION
+            or backend == SDPBackend.OVERRIDEABLE
             else torch.float32
         )
 
