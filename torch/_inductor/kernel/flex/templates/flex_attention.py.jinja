@@ -195,7 +195,7 @@
     mask = (idx_m < Q_LEN) & (idx_d < V_HEAD_DIM)
 
     tl.static_assert(acc.shape == [BLOCK_M, V_HEAD_DIM_ROUNDED])
-    {{store_output(("idx_zq", "idx_hq", "idx_m", "idx_d"), "acc", "mask", val_shape=["BLOCK_M", "V_HEAD_DIM_ROUNDED"])}}
+    {{store_output(("idx_zq", "idx_hq", "idx_m", "idx_d"), "acc", "mask", val_shape=("BLOCK_M", "V_HEAD_DIM_ROUNDED"))}}
 
     if OUTPUT_LOGSUMEXP:
         off_hz = off_zq * HQ + off_hq
