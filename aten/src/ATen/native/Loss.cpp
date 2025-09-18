@@ -56,6 +56,8 @@
 #include <ATen/ops/where.h>
 #include <ATen/ops/xlogy.h>
 #include <ATen/ops/zeros_like.h>
+#include <ATen/ops/ones_like.h>
+#include <ATen/ops/any.h>
 #endif
 
 constexpr float EPSILON = 1e-12;
@@ -347,14 +349,57 @@ Tensor& binary_cross_entropy_backward_out_cpu(const Tensor& grad, const Tensor& 
 }
 
 Tensor binary_cross_entropy_with_logits(const Tensor& input, const Tensor& target, const std::optional<Tensor>& weight_opt, const std::optional<Tensor>& pos_weight_opt, int64_t reduction) {
+  // Binary cross entropy with logits tensor is defined by the equation:
+  // L = -w (y ln(sigma(x)) + (1-y) ln(1-sigma(x)))
+  // Which can be simplified to
+  // L = -w (x (1-y) - ln(sigma(x))
+
   auto log_sigmoid_input = at::log_sigmoid(input);
+
   if (pos_weight_opt.has_value() && pos_weight_opt->defined()) {
       // pos_weight need to be broadcasted, thus mul(target) is not inplace.
       auto log_weight = (*pos_weight_opt- 1).mul(target).add_(1);
       log_sigmoid_input.mul_(log_weight);
   }
-
   Tensor loss = (1 - target).mul_(input).sub_(log_sigmoid_input);
+
+  // Threshold when ln(sigma(x)) or ln(1-sigma(x)) < -100 to be consistent with binary_cross_entropy
+  // Note: ln(sigma(x)) ~= x if x < -100 and ln(1-sigma(x)) ~= -x for x > 100
+  float thresh_value = 100.0;
+
+  auto large_mask = input > thresh_value;
+  auto small_mask = input < -thresh_value;
+
+  bool has_large_values = at::any(large_mask).item<bool>();
+  bool has_small_values = at::any(small_mask).item<bool>();
+
+  if (has_large_values || has_small_values) {
+    // Handle large values
+    if (has_large_values) {
+      auto large_target = at::where(large_mask, target, at::zeros_like(target));
+      auto large_loss = thresh_value * (1 - large_target);
+      loss = at::where(large_mask, large_loss, loss);
+    }
+
+    // Handle small values
+    if (has_small_values) {
+      auto small_target = at::where(large_mask, target, at::zeros_like(target));
+      auto small_loss = thresh_value * small_target;
+      loss = at::where(small_mask, small_loss, loss);
+    }
+
+    // Apply pos_weight to extreme values
+    if (pos_weight_opt.has_value() && pos_weight_opt->defined()) {
+      auto pos_weight_expanded = pos_weight_opt->expand_as(input);
+      auto extreme_mask = large_mask | small_mask;
+
+      if (at::any(extreme_mask).item<bool>()) {
+        auto log_weight = (pos_weight_expanded - 1) * target + 1;
+        auto extreme_adjustment = at::where(extreme_mask, log_weight, at::ones_like(input));
+        loss = loss * extreme_adjustment;
+      }
+    }
+  }
 
   if (weight_opt.has_value() && weight_opt->defined()) {
       loss.mul_(*weight_opt);
