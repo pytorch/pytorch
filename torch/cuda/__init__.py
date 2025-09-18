@@ -25,7 +25,7 @@ import torch._C
 from torch import device as _device
 from torch._utils import _dummy_type, _LazySeedTracker, classproperty
 
-from . import gds
+from . import _device_limits, gds
 from ._utils import _get_device_index
 from .graphs import (
     CUDAGraph,
@@ -500,6 +500,7 @@ class CudaError(RuntimeError):
 
 
 def check_error(res: int) -> None:
+    r"""Raise an error if the result of a CUDA runtime API call is not success."""
     if res != _cudart.cudaError.success:
         raise CudaError(res)
 
@@ -1732,7 +1733,6 @@ def _compile_kernel(
     kernel_source: str,
     kernel_name: str,
     compute_capability: Optional[str] = None,
-    header_code: str = "",
     cuda_include_dirs: Optional[list] = None,
     nvcc_options: Optional[list] = None,
 ):
@@ -1749,7 +1749,6 @@ def _compile_kernel(
         kernel_name (str): The name of the kernel function to compile
         compute_capability (str, optional): The compute capability to target (e.g., "86").
                                            If None, will detect from current device.
-        header_code (str, optional): Additional header code to prepend to the kernel source
         cuda_include_dirs (list, optional): List of directories containing CUDA headers
         nvcc_options (list, optional): Additional options to pass to NVRTC
 
@@ -1772,29 +1771,26 @@ def _compile_kernel(
         >>> c = torch.empty_like(a)
         >>> add_kernel(grid=(4, 1, 1), block=(256, 1, 1), args=[a, b, c, a.numel()])
     """
-    import ctypes
-
     from torch.cuda._utils import _cuda_load_module, _nvrtc_compile
 
     # Compile the kernel to PTX
-    ptx = _nvrtc_compile(
+    ptx, mangled_name = _nvrtc_compile(
         kernel_source,
         kernel_name,
         compute_capability,
-        header_code,
         cuda_include_dirs,
         nvcc_options,
     )
 
     # Load the module and get the kernel
-    result = _cuda_load_module(ptx, [kernel_name])
+    result = _cuda_load_module(ptx, [mangled_name])
 
     if isinstance(result, dict):
-        return result[kernel_name]
+        return result[mangled_name]
     else:
         # This branch shouldn't be executed if kernel_names is provided,
         # but MyPy needs this to understand type narrowing
-        return getattr(result, kernel_name)
+        return getattr(result, mangled_name)
 
 
 from . import amp, jiterator, nvtx, profiler, sparse, tunable

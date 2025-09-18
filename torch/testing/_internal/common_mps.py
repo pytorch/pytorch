@@ -313,8 +313,6 @@ if torch.backends.mps.is_available():
             "nn.functional.grid_sample": None,  # Unsupported Border padding mode
             "hash_tensor": None,
             "heaviside": None,
-            "igamma": None,
-            "igammac": None,
             "index_reduceprod": None,
             "index_reducemean": None,
             "index_reduceamax": None,
@@ -342,7 +340,6 @@ if torch.backends.mps.is_available():
             "masked.median": None,
             "matrix_exp": None,
             "mode": None,
-            "native_dropout_backward": None,
             "normnuc": None,
             "nn.functional.fractional_max_pool2d": None,
             "nn.functional.fractional_max_pool3d": None,
@@ -351,7 +348,6 @@ if torch.backends.mps.is_available():
             "nn.functional.interpolatearea": None,
             "nn.functional.interpolatebicubic": [torch.uint8],
             "nn.functional.ctc_loss": None,
-            "nn.functional.embedding_bag": None,
             "nn.functional.multi_margin_loss": None,
             "nn.functional.multilabel_margin_loss": None,
             "nn.functional.pdist": None,
@@ -696,6 +692,8 @@ if torch.backends.mps.is_available():
             "masked.scatter": [torch.float16, torch.float32],
             "grid_sampler_3d": None,
             "index_fill": [torch.float16, torch.float32],  # missing `aten::_unique`.
+            "igamma": None,  # currently not supported for any device
+            "igammac": None,  # currently not supported for any device
             "linalg.solve": [torch.float16, torch.float32],  # missing `aten::lu_solve`.
             "linalg.solve_ex": [
                 torch.float16,
@@ -741,6 +739,7 @@ if torch.backends.mps.is_available():
             "equal": [torch.float16, torch.float32],
             # 'float' object is not iterable
             "item": [torch.float16, torch.float32],
+            "nn.functional.embedding_bag": None,
             # "smooth_l1_backward_cpu_out" not implemented for 'Half'
             "nn.functional.smooth_l1_loss": [torch.float16],
             # cpu error: grad requires non-empty inputs
