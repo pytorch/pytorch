@@ -18,7 +18,12 @@ from functorch.compile import (
     nop,
 )
 from torch._functorch.aot_autograd import aot_export_module
-from torch._higher_order_ops.effects import with_effects
+from torch._higher_order_ops.effects import (
+    _deregister_effectful_op,
+    _EffectType,
+    _register_effectful_op,
+    with_effects,
+)
 from torch._higher_order_ops.torchbind import enable_torchbind_tracing
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
@@ -335,12 +340,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             def record_scalar_tensor_meta(x, prefix):
                 return
 
-            from torch._higher_order_ops.effects import (
-                _EffectType,
-                _register_effectful_op,
-            )
-
-            _register_effectful_op(
+            torch.library.register_effectful_op(
                 torch.ops.mylib.record_scalar_tensor.default, _EffectType.ORDERED
             )
 
@@ -469,13 +469,12 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 
             torch.library.register_autograd("_mylib::zoo", foo_bwd, lib=lib)
 
-            from torch._higher_order_ops.effects import (
-                _EffectType,
-                _register_effectful_op,
+            torch.library.register_effectful_op(
+                torch.ops._mylib.zoo.default, _EffectType.ORDERED
             )
-
-            _register_effectful_op(torch.ops._mylib.zoo.default, _EffectType.ORDERED)
-            _register_effectful_op(torch.ops._mylib.zoo2.default, _EffectType.ORDERED)
+            torch.library.register_effectful_op(
+                "_mylib::zoo2.default", _EffectType.ORDERED
+            )
 
             def fn(x, y):
                 return torch.ops._mylib.zoo(x) + y
@@ -691,12 +690,6 @@ def forward(self, arg0_1, arg1_1):
 
             torch.library.register_autograd("_mylib::foo", foo_bwd, lib=lib)
 
-            from torch._higher_order_ops.effects import (
-                _deregister_effectful_op,
-                _EffectType,
-                _register_effectful_op,
-            )
-
             _register_effectful_op(torch.ops._mylib.foo.default, _EffectType.ORDERED)
             try:
 
@@ -787,12 +780,6 @@ def forward(self, tangents_1, tangents_2, tangents_token):
 
     @skipIfNoDynamoSupport
     def test_regular_effectful_op_only_in_backward(self):
-        from torch._higher_order_ops.effects import (
-            _deregister_effectful_op,
-            _EffectType,
-            _register_effectful_op,
-        )
-
         _register_effectful_op(torch.ops.aten.cos.default, _EffectType.ORDERED)
         try:
 
@@ -860,12 +847,6 @@ def forward(self, primals_1, primals_2, tangents_1, tangents_2, tangents_token):
 
     @skipIfNoDynamoSupport
     def test_regular_effectful_op_in_forward_and_backward(self):
-        from torch._higher_order_ops.effects import (
-            _deregister_effectful_op,
-            _EffectType,
-            _register_effectful_op,
-        )
-
         _register_effectful_op(torch.ops.aten.cos.default, _EffectType.ORDERED)
         try:
 
