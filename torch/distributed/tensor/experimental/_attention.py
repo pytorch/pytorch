@@ -2,27 +2,18 @@ import contextlib
 import itertools
 import logging
 import types
-import weakref
 from abc import ABC, abstractmethod
 from collections.abc import Generator
 from dataclasses import dataclass
 from enum import auto, Enum
-from typing import Any, Callable, Optional, Protocol, Union
+from typing import Any, Callable, Optional, Protocol
 
 import torch
 import torch.distributed as dist
 import torch.distributed._functional_collectives as ft_c
 import torch.nn.functional as F
-from torch import nn
 from torch.distributed.device_mesh import DeviceMesh
-from torch.distributed.tensor import (
-    distribute_module,
-    distribute_tensor,
-    DTensor,
-    Replicate,
-    Shard,
-)
-from torch.distributed.tensor.parallel.style import ParallelStyle
+from torch.distributed.tensor import distribute_tensor, DTensor, Shard
 from torch.nn.attention.flex_attention import (
     _mask_mod_signature,
     BlockMask,
@@ -1014,108 +1005,6 @@ def _enable_cp_dispatcher() -> Generator[None, None, None]:
     DTensor._op_dispatcher._custom_op_handlers = old_handlers
 
 
-class _AttentionContextParallel(ParallelStyle):
-    """
-    Applies context parallel optimizations to the attention layer.
-
-    This will work for nn.MultiHeadedAttention and custom attention layers that
-    call F.scaled_dotproduct_attention with a similar signature.
-
-    This expects the `forward` method consumes either:
-
-    * a single tensor for self attention
-    * one argument for each of: query, key, value
-
-    This currently only supports ring attention and the
-    SDPBackend.FLASH_ATTENTION backend. See sdpa_kernel.
-
-    Non-flash attention backends will result in incorrect results.
-    """
-
-    # use a weakref dictionary to store context managers for each nn.Module
-    _CONTEXT_MANAGERS: "weakref.WeakKeyDictionary[nn.Module, Any]" = (
-        weakref.WeakKeyDictionary()
-    )
-
-    def _apply(self, module: nn.Module, device_mesh: DeviceMesh) -> nn.Module:
-        if not device_mesh.ndim == 1:
-            raise ValueError("CP only supports single dimension device mesh")
-
-        return distribute_module(
-            module,
-            device_mesh,
-            input_fn=self._input_fn,  # type: ignore[arg-type]
-            output_fn=self._output_fn,  # type: ignore[arg-type]
-        )
-
-    @classmethod
-    def _input_fn(
-        cls,
-        module: nn.Module,
-        inputs: tuple[Union[torch.Tensor, int, float], ...],
-        device_mesh: DeviceMesh,
-    ) -> tuple[Union[torch.Tensor, int, float], ...]:
-        # TODO(d4l3k); this should be Shard(2), need to fix Linear layer rules
-        placement = [Replicate()]
-
-        def backward_hook(grad: torch.Tensor) -> None:
-            if module in cls._CONTEXT_MANAGERS:
-                cls._CONTEXT_MANAGERS[module].__exit__(None, None, None)
-                del cls._CONTEXT_MANAGERS[module]
-
-        # convert inputs to DTensor
-        inp = []
-        for input in inputs:
-            if isinstance(input, torch.Tensor) and not isinstance(input, DTensor):
-                input = DTensor.from_local(
-                    input.contiguous(), device_mesh, placement, run_check=False
-                )
-
-            if isinstance(input, torch.Tensor) and input.requires_grad:
-                input.register_hook(backward_hook)
-
-            inp.append(input)
-
-        manager = _enable_cp_dispatcher()
-        manager.__enter__()
-        cls._CONTEXT_MANAGERS[module] = manager
-
-        return tuple(inp)
-
-    @classmethod
-    def _output_fn(
-        cls,
-        module: nn.Module,
-        outputs: Union[torch.Tensor, tuple[Union[torch.Tensor, int, float], ...]],
-        device_mesh: DeviceMesh,
-    ) -> Union[
-        Union[torch.Tensor, int, float], tuple[Union[torch.Tensor, int, float], ...]
-    ]:
-        cls._CONTEXT_MANAGERS[module].__exit__(None, None, None)
-        del cls._CONTEXT_MANAGERS[module]
-
-        def backward_hook(grad: torch.Tensor) -> None:
-            if module not in cls._CONTEXT_MANAGERS:
-                manager = _enable_cp_dispatcher()
-                manager.__enter__()
-                cls._CONTEXT_MANAGERS[module] = manager
-
-        # back to local tensor
-        out = []
-        for output in [outputs] if isinstance(outputs, torch.Tensor) else outputs:
-            output = output.to_local() if isinstance(output, DTensor) else output
-
-            if isinstance(output, torch.Tensor) and output.requires_grad:
-                output.register_hook(backward_hook)
-
-            out.append(output)
-
-        if isinstance(outputs, torch.Tensor):
-            return out[0]
-
-        return tuple(out)
-
-
 def create_cp_block_mask(
     mask_mod: _mask_mod_signature,
     B: int,
@@ -1232,12 +1121,6 @@ def _context_parallel(seq_dim: int, mesh: DeviceMesh) -> Generator[None, None, N
             return new_outputs[0]
 
         return tuple(new_outputs)
-
-    def unshard(x: torch.Tensor, mesh: DeviceMesh, shard_dim: int) -> torch.Tensor:
-        x = x.contiguous()
-        all_xs = [torch.empty_like(x) for _ in range(mesh.size())]
-        ft_c.all_gather_inplace(all_xs, x, mesh)
-        return torch.cat(all_xs, dim=shard_dim)
 
     class DistributeFunction(TorchFunctionMode):
         def __init__(
