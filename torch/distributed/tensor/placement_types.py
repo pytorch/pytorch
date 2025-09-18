@@ -21,6 +21,7 @@ __all__ = ["Placement", "Shard", "Replicate", "Partial"]
 
 
 Placement = torch._C.Placement
+Placement.__module__ = "torch.distributed.tensor"
 
 
 class Shard(torch._C.Shard):

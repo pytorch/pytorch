@@ -34,7 +34,10 @@ void initPlacementBindings(PyObject* module) {
       .def(
           "__eq__",
           [](const Shard& lhs, const Shard& rhs) { return lhs == rhs; },
-          py::is_operator());
+          py::is_operator())
+      .def(py::pickle(
+          [](const Shard& shard) { return shard.dim; },
+          [](std::int64_t dim) { return Shard(dim); }));
   py::class_<StridedShard, Shard>(py_module, "StridedShard")
       .def(
           py::init<int64_t, int64_t>(),
@@ -46,14 +49,28 @@ void initPlacementBindings(PyObject* module) {
       .def(
           "__eq__",
           [](const StridedShard& lhs, const Shard& rhs) { return lhs == rhs; },
-          py::is_operator());
+          py::is_operator())
+      .def(py::pickle(
+          [](const StridedShard& shard) {
+            return py::make_tuple(shard.dim, shard.split_factor);
+          },
+          [](py::tuple tup) {
+            if (tup.size() != 2) {
+              throw std::runtime_error("invalid pickled StridedShard!");
+            }
+            return StridedShard(
+                py::cast<int64_t>(tup[0]), py::cast<int64_t>(tup[1]));
+          }));
   py::class_<Replicate, Placement>(py_module, "Replicate")
       .def(py::init())
       .def("is_replicate", &Replicate::is_replicate)
       .def(
           "__eq__",
           [](const Replicate& lhs, const Replicate& rhs) { return lhs == rhs; },
-          py::is_operator());
+          py::is_operator())
+      .def(py::pickle(
+          [](const Replicate& repl) { return py::none(); },
+          [](py::none none) { return Replicate(); }));
   py::class_<Partial, Placement>(py_module, "Partial")
       .def(py::init<>())
       .def(py::init<std::string>(), py::arg("reduce_op"))
@@ -63,6 +80,9 @@ void initPlacementBindings(PyObject* module) {
       .def(
           "__eq__",
           [](const Partial& lhs, const Partial& rhs) { return lhs == rhs; },
-          py::is_operator());
+          py::is_operator())
+      .def(py::pickle(
+          [](const Partial& part) { return part.reduce_op; },
+          [](std::string op) { return Partial(std::move(op)); }));
 }
 } // namespace torch::distributed
