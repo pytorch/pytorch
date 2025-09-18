@@ -189,11 +189,12 @@ auto PyNode::apply(variable_list&& inputs) -> variable_list {
 
   // Now the number of gradients should match
   if (num_outputs != num_forward_inputs) {
-    std::string msg("function ");
-    msg += name() + " returned an incorrect number of gradients (expected ";
-    msg += std::to_string(num_forward_inputs) + ", got ";
-    msg += std::to_string(num_outputs) + ")";
-    throw std::runtime_error(msg);
+    auto error_msg = fmt::format(
+        "function {} returned an incorrect number of gradients (expected {}, got {})",
+        name(),
+        num_forward_inputs,
+        num_outputs);
+    TORCH_CHECK(false, error_msg);
   }
 
   // Massage the Python results tuple back into a C++ variable_list
@@ -436,11 +437,11 @@ variable_list PyNode::to_variable_list(
     bool was_variable = is_variable_input[i];
     if (!was_variable) {
       if (output != Py_None) {
-        std::string msg("function ");
-        msg += name() + " returned a gradient different than None at position ";
-        msg += std::to_string(i + 1) +
-            ", but the corresponding forward input was not a Variable";
-        throw std::runtime_error(msg);
+        auto error_msg = fmt::format(
+            "function {} returned a gradient different than None at position {}, but the corresponding forward input was not a Variable",
+            name(),
+            i + 1);
+        TORCH_CHECK(false, error_msg);
       }
       continue;
     }
@@ -448,10 +449,9 @@ variable_list PyNode::to_variable_list(
       results.emplace_back();
     } else {
       if (!THPVariable_Check(output)) {
-        std::string msg("expected Variable or None (got ");
-        msg += THPUtils_typename(output);
-        msg += ")";
-        throw std::runtime_error(msg);
+        auto error_msg = fmt::format(
+            "expected Variable or None (got {})", THPUtils_typename(output));
+        TORCH_CHECK(false, error_msg);
       }
       results.emplace_back(THPVariable_Unpack(output));
     }
