@@ -22,6 +22,8 @@
 
 #include <ATen/cpu/vec/vec128/vec128_convert.h>
 
+#include <ATen/cpu/vec/vec128/vec128_double_sve.h>
+
 #include <ATen/cpu/vec/vec128/vec128_int_sve.h>
 #include <ATen/cpu/vec/vec128/vec128_uint_sve.h>
 
