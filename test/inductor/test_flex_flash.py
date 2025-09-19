@@ -138,7 +138,6 @@ class TestFlexFlash(InductorTestCase):
         )
 
 
-
 instantiate_device_type_tests(TestFlexFlash, globals(), only_for="cuda")
 
 
