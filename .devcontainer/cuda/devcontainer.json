@@ -8,7 +8,7 @@
     "args": {
       "USERNAME": "vscode",
       "BUILDKIT_INLINE_CACHE": "0",
-      "CUDA_VERSION": "12.8.0",
+      "CUDA_VERSION": "12.8",
       "CLANG_VERSION": ""
     }
   },
@@ -19,7 +19,7 @@
   "containerEnv": {
     "PIP_USER": "0" // <‑‑ disable implicit --user
   },
-// Use 'forwardPorts' to make a list of ports inside the container available locally.
+  // Use 'forwardPorts' to make a list of ports inside the container available locally.
   // "forwardPorts": [],
 
   // Use 'postCreateCommand' to run commands after the container is created.
