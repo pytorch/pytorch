@@ -748,7 +748,7 @@ void initJitScriptBindings(PyObject* module) {
   py::class_<c10::Capsule>(m, "Capsule");
 
   auto object_class =
-      py::class_<Object>(m, "ScriptObject")
+      py::class_<Object>(m, "ScriptObject", py::is_final())
           .def("_type", [](Object& o) { return o.type(); })
           .def(
               "_get_method",
