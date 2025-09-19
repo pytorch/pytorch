@@ -349,14 +349,15 @@ class DeferredTritonCallWrapper:
                     process_args_for_input_shape(arg, arg_type, arg_signature)
 
                 # Add input name into kwargs
+                name_var = f"{normalized_kernel_name}_input_names"
                 prefix.writelines(
                     [
                         "// Create c10::IValue for input names",
-                        f"C10IValueHandle tmp_{normalized_kernel_name}_input_names;",
-                        f"std::vector<const char*> {normalized_kernel_name}_input_names({{{', '.join(ordered_argsname)}}});",
-                        f"aoti_torch_strlist_to_ivalue({normalized_kernel_name}_input_names.data(), {len(ordered_argsname)}, &tmp_{normalized_kernel_name}_input_names);",
-                        f"RAIIC10IValueHandle RAII_{normalized_kernel_name}_input_names(tmp_{normalized_kernel_name}_input_names);",
-                        f'kwargs_{normalized_kernel_name}.emplace("Input Args", RAII_{normalized_kernel_name}_input_names);',
+                        f"C10IValueHandle tmp_{name_var};",
+                        f"std::vector<const char*> {name_var}({{{', '.join(ordered_argsname)}}});",
+                        f"aoti_torch_strlist_to_ivalue({name_var}.data(), {len(ordered_argsname)}, &tmp_{name_var});",
+                        f"RAIIC10IValueHandle RAII_{name_var}(tmp_{name_var});",
+                        f'kwargs_{normalized_kernel_name}.emplace("Input Args", RAII_{name_var});',
                     ]
                 )
 
