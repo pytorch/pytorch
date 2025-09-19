@@ -1,8 +1,14 @@
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
+#include <torch/csrc/stable/accelerator.h>
 #include <torch/csrc/stable/library.h>
 #include <torch/csrc/stable/tensor.h>
 #include <torch/csrc/stable/ops.h>
 #include <torch/headeronly/util/Exception.h>
+#include <torch/headeronly/core/ScalarType.h>
+
+#ifdef LAE_USE_CUDA
+#include <cuda_runtime.h>
+#endif
 
 #include <optional>
 
@@ -134,12 +140,10 @@ Tensor my_ones_like(Tensor t, StableIValue device) {
   const auto num_args = 6;
   StableIValue stack[num_args];
 
-  int32_t t_dtype;
-  aoti_torch_get_dtype(t.get(), &t_dtype);
   auto mf = aoti_torch_memory_format_contiguous_format();
 
   stack[0] = from(t);
-  stack[1] = from(std::optional(t_dtype));    // dtype
+  stack[1] = from(std::optional(t.scalar_type()));    // dtype
   stack[2] = from(std::nullopt);              // layout
   stack[3] = from(std::optional(device));     // device
   stack[4] = from(std::optional(false));      // pin_memory
@@ -283,6 +287,16 @@ void boxed_empty_like(StableIValue* stack, uint64_t num_args, uint64_t num_outpu
   stack[0] = from(res);
 }
 
+bool my_is_cpu(Tensor t) {
+  return t.is_cpu();
+}
+
+
+void boxed_my_is_cpu(StableIValue* stack, uint64_t num_args, uint64_t num_outputs) {
+  auto res = my_is_cpu(to<Tensor>(stack[0]));
+  stack[0] = from(res);
+}
+
 Tensor fill_infinity(Tensor t) {
   auto value = std::numeric_limits<float>::infinity();
   return fill_(t, value);
@@ -327,18 +341,45 @@ void boxed_my_narrow(
   stack[0] = from(res);
 }
 
+Tensor my_new_empty_dtype_variant(Tensor t) {
+  std::vector<int64_t> sizes = {2, 5};
+  auto dtype = std::make_optional(torch::headeronly::ScalarType::BFloat16);
+  return new_empty(t, sizes, dtype);
+}
+
+void boxed_my_new_empty_dtype_variant(StableIValue* stack, uint64_t num_args, uint64_t num_outputs) {
+  auto res = my_new_empty_dtype_variant(to<Tensor>(stack[0]));
+  stack[0] = from(res);
+}
+
+Tensor my_new_zeros_dtype_variant(Tensor t) {
+  std::vector<int64_t> sizes = {2, 5};
+  auto dtype = std::make_optional(at::ScalarType::Float);
+  return new_zeros(t, sizes, dtype);
+}
+
+void boxed_my_new_zeros_dtype_variant(StableIValue* stack, uint64_t num_args, uint64_t num_outputs) {
+  auto res = my_new_zeros_dtype_variant(to<Tensor>(stack[0]));
+  stack[0] = from(res);
+}
+
 STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
   m.def("my_transpose(Tensor t, int dim0, int dim1) -> Tensor");
   m.def("my_empty_like(Tensor t) -> Tensor");
   m.def("fill_infinity(Tensor(a!) t) -> Tensor(a!)");
   m.def("my_pad(Tensor t) -> Tensor");
   m.def("my_narrow(Tensor t, int dim, int start, int length) -> Tensor");
+  m.def("my_new_empty_dtype_variant(Tensor t) -> Tensor");
+  m.def("my_new_zeros_dtype_variant(Tensor t) -> Tensor");
 }
 
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
   m.impl("my_transpose", &boxed_my_transpose);
   m.impl("my_empty_like", &boxed_empty_like);
   m.impl("fill_infinity", &boxed_fill_infinity);
+  m.impl("my_is_cpu", &boxed_my_is_cpu);
+  m.impl("my_new_empty_dtype_variant", &boxed_my_new_empty_dtype_variant);
+  m.impl("my_new_zeros_dtype_variant", &boxed_my_new_zeros_dtype_variant);
 }
 
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeImplicitAutograd, m) {
@@ -355,8 +396,31 @@ void boxed_my_zero_(StableIValue* stack, uint64_t num_args, uint64_t num_outputs
   stack[0] = from(res);
 }
 
+Tensor my_amax(Tensor t) {
+  return amax(t, 0, false);
+}
+
+void boxed_my_amax(StableIValue* stack, uint64_t num_args, uint64_t num_outputs) {
+  auto res = my_amax(to<Tensor>(stack[0]));
+  stack[0] = from(res);
+}
+
+Tensor my_amax_vec(Tensor t) {
+  std::vector<int64_t> v = {0,1};
+  return amax(t, v, false);
+}
+
+void boxed_my_amax_vec(StableIValue* stack, uint64_t num_args, uint64_t num_outputs) {
+  auto res = my_amax_vec(to<Tensor>(stack[0]));
+  stack[0] = from(res);
+}
+
+
 STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
   m.def("my_zero_(Tensor(a!) t) -> Tensor(a!)");
+  m.def("my_amax(Tensor a) -> Tensor");
+  m.def("my_amax_vec(Tensor a) -> Tensor");
+  m.def("my_is_cpu(Tensor t) -> bool");
 }
 
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CPU, m) {
@@ -396,4 +460,95 @@ STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
 
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
   m.impl("test_default_constructor", &boxed_test_default_constructor);
+  m.impl("my_amax", &boxed_my_amax);
+  m.impl("my_amax_vec", &boxed_my_amax_vec);
 }
+
+// Test functions for torch::stable::accelerator APIs
+
+#ifdef LAE_USE_CUDA
+int64_t test_device_guard(int64_t device_index) {
+  using torch::stable::accelerator::DeviceGuard;
+
+  STD_TORCH_CHECK(
+      device_index >= std::numeric_limits<int32_t>::min() &&
+          device_index <= std::numeric_limits<int32_t>::max(),
+      "Device index is out of range of DeviceIndex (int32_t).");
+
+  DeviceGuard guard(device_index);
+  int currentDevice;
+  cudaError_t err = cudaGetDevice(&currentDevice);
+  STD_TORCH_CHECK(err == cudaSuccess);
+  return currentDevice;
+}
+
+void boxed_test_device_guard(
+    StableIValue* stack,
+    uint64_t num_args,
+    uint64_t num_outputs) {
+  int res = test_device_guard(static_cast<int64_t>(to<int64_t>(stack[0])));
+  stack[0] = from(res);
+}
+
+int64_t test_device_guard_set_index() {
+  using torch::stable::accelerator::DeviceGuard;
+
+  DeviceGuard guard(1);
+  guard.set_index(0);
+  int currentDevice;
+  cudaError_t err = cudaGetDevice(&currentDevice);
+  STD_TORCH_CHECK(err == cudaSuccess);
+  return currentDevice;
+}
+
+void boxed_test_device_guard_set_index(
+    StableIValue* stack,
+    uint64_t num_args,
+    uint64_t num_outputs) {
+  int64_t res = test_device_guard_set_index();
+  stack[0] = from(res);
+}
+
+int64_t test_stream(int32_t device_index) {
+  STD_TORCH_CHECK(
+      device_index >= std::numeric_limits<int32_t>::min() &&
+          device_index <= std::numeric_limits<int32_t>::max(),
+      "Device index is out of range of DeviceIndex (int32_t).");
+
+  return torch::stable::accelerator::getCurrentStream(device_index).id();
+}
+
+void boxed_test_stream(
+    StableIValue* stack,
+    uint64_t num_args,
+    uint64_t num_outputs) {
+  int64_t res = test_stream(static_cast<int64_t>(to<int64_t>(stack[0])));
+  stack[0] = from(res);
+}
+
+int64_t test_get_current_device_index() {
+  return torch::stable::accelerator::getCurrentDeviceIndex();
+}
+
+void boxed_test_get_current_device_index(
+    StableIValue* stack,
+    uint64_t num_args,
+    uint64_t num_outputs) {
+  int64_t res = test_get_current_device_index();
+  stack[0] = from(res);
+}
+
+STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
+  m.def("test_device_guard(int device_index) -> int");
+  m.def("test_device_guard_set_index() -> int");
+  m.def("test_stream(int device_index) -> int");
+  m.def("test_get_current_device_index() -> int");
+}
+
+STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
+  m.impl("test_device_guard", &boxed_test_device_guard);
+  m.impl("test_device_guard_set_index", &boxed_test_device_guard_set_index);
+  m.impl("test_stream", &boxed_test_stream);
+  m.impl("test_get_current_device_index", &boxed_test_get_current_device_index);
+}
+#endif // LAE_USE_CUDA

@@ -359,9 +359,10 @@ class TestUnflatten(TestCase):
 
         export_module = torch.export.export(Mod(), (torch.randn((2, 3)),), strict=True)
         with self.assertRaisesRegex(
-            RuntimeError,
-            escape("Expected input at *args[0].shape[0] to be equal to 2, but got 6"),
+            AssertionError,
+            escape("Guard failed: x.size()[0] == 2"),
         ):
+            # expected 2, but got 6
             export_module.module()(torch.randn(6, 6))
 
         unflattened = unflatten(export_module)
@@ -933,7 +934,7 @@ def forward(self, x):
         fn_count_sym_size = lambda graph: [node.target for node in graph.nodes].count(
             torch.ops.aten.sym_size.int
         )
-        self.assertEqual(fn_count_sym_size(unflat.graph), 3)
+        self.assertEqual(fn_count_sym_size(unflat.graph), 1)
         self.assertEqual(fn_count_sym_size(unflat.m1.graph), 1)
         self.assertEqual(fn_count_sym_size(unflat.m2.graph), 0)
 
