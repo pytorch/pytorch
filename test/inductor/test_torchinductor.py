@@ -5483,7 +5483,7 @@ class CommonTemplate:
             return g
 
         a = torch.randn(10, 10, dtype=torch.bfloat16)
-        out = self.common(fn, (a,), reference_in_float=False)
+        self.common(fn, (a,), reference_in_float=False)
 
         # test dtype separately
         out = fn(a)
