@@ -138,6 +138,8 @@ class TestOnlineSoftmax(TestCase):
         self.assertTrue(same(ref, act, tol=1e-2))
 
         if nrow == 2048 and dim == 0 and GPU_TYPE != "xpu":
+            # Note: split reduction is not triggered for this shape on xpu devices.
+            #       check "num_splits" for more detail
             # split reduction is triggered. We have multiple kernels
             self.assertTrue(code.count("def triton") >= 2)
         else:
