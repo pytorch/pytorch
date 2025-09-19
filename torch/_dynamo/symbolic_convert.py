@@ -2037,7 +2037,7 @@ class InstructionTranslatorBase(
             #    - FOURTH: the context.__exit__ bound method
             #    We call FOURTH(type(TOP), TOP, GetTraceback(TOP)).
             #    Then we push the __exit__ return value.
-            # In Python 3.15+, there is a NULL placed between the context.__exit__ bound method and the lasti,
+            # In Python 3.14+, there is a NULL placed between the context.__exit__ bound method and the lasti,
             # that is, fn is now the 5th from TOS.
             assert len(self.stack) >= fn_loc
             fn = self.stack[-fn_loc]
