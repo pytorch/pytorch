@@ -8,15 +8,20 @@ import pickle
 import types
 from contextlib import AbstractContextManager, ExitStack
 from dataclasses import dataclass
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, TYPE_CHECKING
 
 import torch
 import torch.fx
-from torch._dynamo.graph_utils import _graph_uses_non_cpu
-from torch._dynamo.precompile_context import SystemInfo
+from torch._dynamo.graph_utils import _graph_device_type
+from torch._dynamo.package import SystemInfo
 
 from . import convert_frame
 from .hooks import Hooks
+
+
+if TYPE_CHECKING:
+    from .guards import GuardManagerWrapper
+    from .package import SourceInfo
 
 
 log = logging.getLogger(__name__)
@@ -46,19 +51,20 @@ def bind_locals(
 class CompileArtifacts:
     signature: inspect.Signature
     bytecode: types.CodeType
-    guard_manager: Optional[torch._dynamo.guards.GuardManagerWrapper]
+    guard_manager: Optional["GuardManagerWrapper"]
     guards_state: bytes
     import_sources: dict[str, str]
     backend_id: str
     compiled_fn: SerializableCallable
     original_code: types.CodeType
     closure: Optional[tuple[Any, ...]]
-    use_cuda: bool
+    source_info: "SourceInfo"
+    device_type: str
     system_info: SystemInfo = dataclasses.field(default_factory=SystemInfo.current)
 
     def check_compatibility(self) -> None:
         current_system = SystemInfo.current()
-        current_system.check_compatibility(self.system_info, self.use_cuda)
+        current_system.check_compatibility(self.system_info, self.device_type)
 
 
 @dataclass
@@ -101,6 +107,9 @@ class AOTCompiledFunction:
             reason = str(self._artifacts.guard_manager.check_verbose(f_locals))
             raise RuntimeError(f"GuardManager check failed, reason: {reason}")
         return self.fn(*args, **kwargs)
+
+    def source_info(self) -> "SourceInfo":
+        return self._artifacts.source_info
 
     def save_compiled_function(self, path: str) -> None:
         with open(path, "wb") as f:
@@ -187,6 +196,7 @@ def aot_compile_fullgraph(
     backend: Callable[[torch.fx.GraphModule, list[torch.Tensor]], SerializableCallable],
 ) -> AOTCompiledFunction:
     from torch._dynamo.guards import CheckFunctionManager
+    from torch._dynamo.package import SourceInfo
     from torch._dynamo.utils import dynamo_timed, get_metrics_context
     from torch._guards import compile_context, CompileContext, TracingContext
 
@@ -256,7 +266,7 @@ def aot_compile_fullgraph(
         backend_input.graph_module._backend_id = backend_input.backend_id  # type: ignore[assignment]
         output_graph = dynamo_output.tracer_output.output_graph
         assert output_graph is not None
-        use_cuda = _graph_uses_non_cpu(output_graph.current_tracer.graph)
+        device_type = _graph_device_type(output_graph.current_tracer.graph)
         import_sources = output_graph.import_sources
         with (
             torch._guards.tracing(TracingContext(backend_input.fake_mode)),
@@ -285,6 +295,10 @@ def aot_compile_fullgraph(
                 + f"from backend {compiler_fn}) does not implement SerializableCallable."
             )
 
+        source_info = SourceInfo(inlined_sources=set())
+        for traced_code in output_graph.traced_code:
+            source_info.add_code(traced_code)
+
         artifacts = CompileArtifacts(
             signature=signature,
             bytecode=dynamo_output.bytecode,
@@ -295,7 +309,8 @@ def aot_compile_fullgraph(
             compiled_fn=compiled_fn,
             original_code=fn.__code__,
             closure=fn.__closure__,
-            use_cuda=use_cuda,
+            source_info=source_info,
+            device_type=device_type,
         )
         aot_compiled_fn = AOTCompiledFunction(_artifacts=artifacts)
 
