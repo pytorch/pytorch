@@ -48,7 +48,7 @@ template <
         decltype(detail::bin_op_deducer(std::declval<Op>())),
         void>>* = nullptr>
 static ExprPtr mutateBinaryOp(
-    NodePtr<Op> v,
+    const NodePtr<Op>& v,
     IRMutator* mutator,
     bool option = false) {
   ExprPtr lhs = v->lhs();
@@ -1211,8 +1211,8 @@ namespace {
 // second type refers to the corresponding term, as in MinTerm or MaxTerm.
 template <class Op, class OpTerm>
 ExprPtr combineMinMaxTerms(
-    ExprPtr lhs,
-    ExprPtr rhs,
+    const ExprPtr& lhs,
+    const ExprPtr& rhs,
     bool propagate_nans,
     HashProvider& hasher) {
   auto combine_scalars = [&](ExprPtr c1, ExprPtr c2) -> ExprPtr {
@@ -1225,19 +1225,24 @@ ExprPtr combineMinMaxTerms(
     return c2;
   };
 
-  auto combine_opterms = [&](NodePtr<OpTerm> m1, NodePtr<OpTerm> m2) {
+  auto combine_opterms = [&](const NodePtr<OpTerm>& m1,
+                             const NodePtr<OpTerm>& m2) {
     ExprPtr scalar = combine_scalars(m1->scalar(), m2->scalar());
+    auto const& m1_variables = m1->variables();
+    auto const& m2_variables = m2->variables();
     std::vector<ExprPtr> variables;
-    for (const auto& v : m1->variables()) {
+    variables.reserve(m1_variables.size() + m2_variables.size());
+    for (const auto& v : m1_variables) {
       variables.push_back(v);
     }
-    for (const auto& v : m2->variables()) {
+    for (const auto& v : m2_variables) {
       variables.push_back(v);
     }
     return alloc<OpTerm>(hasher, scalar, propagate_nans, std::move(variables));
   };
 
-  auto add_expr_to_opterm = [&](ExprPtr expr, NodePtr<OpTerm> opterm) {
+  auto add_expr_to_opterm = [&](const ExprPtr& expr,
+                                const NodePtr<OpTerm>& opterm) {
     ExprPtr scalar = nullptr;
     std::vector<ExprPtr> variables;
     if (opterm) {
@@ -1275,7 +1280,7 @@ ExprPtr combineMinMaxTerms(
 // the other op of opterm in other_op.
 template <class OpTerm>
 bool isOperandInMinMaxTerm(
-    NodePtr<OpTerm> opterm,
+    const NodePtr<OpTerm>& opterm,
     ExprPtr op,
     HashProvider& hasher,
     ExprPtr* other_op) {
@@ -1308,8 +1313,8 @@ bool isOperandInMinMaxTerm(
 // type corresponding to the expected inner op (e.g. MinTerm).
 template <class OpTerm, class OtherOpTerm>
 bool simplifyNestedMinMax(
-    ExprPtr lhs,
-    ExprPtr rhs,
+    const ExprPtr& lhs,
+    const ExprPtr& rhs,
     bool propagate_nans,
     HashProvider& hasher,
     ExprPtr* new_op) {

@@ -1370,7 +1370,7 @@ struct to_ir {
           union_type_hint->containedTypes().begin(),
           union_type_hint->containedTypes().end(),
           std::back_inserter(candidate_types),
-          [&](TypePtr type_ptr) { return type_match(type_ptr); });
+          [&](const TypePtr& type_ptr) { return type_match(type_ptr); });
 
       if (!is_dict_constructor && candidate_types.empty()) {
         throw(
@@ -1516,7 +1516,7 @@ struct to_ir {
   }
 
   Value* emitListComprehension(const ListComp& lc, const TypePtr& type_hint) {
-    const auto loc = lc.range();
+    const auto& loc = lc.range();
     const auto targets_list = List<Expr>::create(lc.range(), {lc.target()});
     const auto itrs = List<Expr>::create(lc.range(), {lc.iter()});
 
@@ -1642,7 +1642,7 @@ struct to_ir {
   }
 
   Value* emitDictComprehension(const DictComp& dc, const TypePtr& type_hint) {
-    const auto loc = dc.range();
+    const auto& loc = dc.range();
     const auto targets_list = List<Expr>::create(dc.range(), {dc.target()});
     const auto itrs = List<Expr>::create(dc.range(), {dc.iter()});
 
@@ -5244,9 +5244,9 @@ struct to_ir {
       const std::vector<std::optional<NamedValue>>& tuple_args) {
     auto tuple_type = tuple_val.value(*graph)->type()->expect<TupleType>();
     auto tuple_len = tuple_type->elements().size();
-    auto beg_val = tuple_args[0];
-    auto end_val = tuple_args[1];
-    auto step = tuple_args[2];
+    const auto& beg_val = tuple_args[0];
+    const auto& end_val = tuple_args[1];
+    const auto& step = tuple_args[2];
 
     int64_t step_size = 1;
     if (step) {

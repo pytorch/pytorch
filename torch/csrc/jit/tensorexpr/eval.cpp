@@ -169,8 +169,8 @@ class SimpleIREvaluatorImpl : public IRVisitor {
       const InterpValue& lhs,
       const InterpValue& rhs,
       IRNodeType op_type) {
-    std::vector<T> lhs_v = lhs.as_vec<T>();
-    std::vector<T> rhs_v = rhs.as_vec<T>();
+    const std::vector<T>& lhs_v = lhs.as_vec<T>();
+    const std::vector<T>& rhs_v = rhs.as_vec<T>();
     std::vector<T> result_v(lhs_v.size());
     for (const auto i : c10::irange(lhs_v.size())) {
       switch (op_type) {
@@ -208,8 +208,8 @@ class SimpleIREvaluatorImpl : public IRVisitor {
       const InterpValue& lhs,
       const InterpValue& rhs,
       IRNodeType op_type) {
-    std::vector<T> lhs_v = lhs.as_vec<T>();
-    std::vector<T> rhs_v = rhs.as_vec<T>();
+    const std::vector<T>& lhs_v = lhs.as_vec<T>();
+    const std::vector<T>& rhs_v = rhs.as_vec<T>();
     std::vector<T> result_v(lhs_v.size());
     for (const auto i : c10::irange(lhs_v.size())) {
       switch (op_type) {
@@ -235,8 +235,8 @@ class SimpleIREvaluatorImpl : public IRVisitor {
       const InterpValue& lhs,
       const InterpValue& rhs,
       IRNodeType op_type) {
-    std::vector<T> lhs_v = lhs.as_vec<T>();
-    std::vector<T> rhs_v = rhs.as_vec<T>();
+    const std::vector<T>& lhs_v = lhs.as_vec<T>();
+    const std::vector<T>& rhs_v = rhs.as_vec<T>();
     std::vector<T> result_v(lhs_v.size());
     for (const auto i : c10::irange(lhs_v.size())) {
       switch (op_type) {
@@ -263,8 +263,8 @@ class SimpleIREvaluatorImpl : public IRVisitor {
       const InterpValue& retval1,
       const InterpValue& retval2,
       CompareSelectOperation cmp_op) {
-    std::vector<T> lhs_v = lhs.as_vec<T>();
-    std::vector<T> rhs_v = rhs.as_vec<T>();
+    const std::vector<T>& lhs_v = lhs.as_vec<T>();
+    const std::vector<T>& rhs_v = rhs.as_vec<T>();
     std::vector<R> ret_val1_v = retval1.as_vec<R>();
     std::vector<R> ret_val2_v = retval2.as_vec<R>();
     std::vector<R> result_v(lhs_v.size());
@@ -301,7 +301,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
       std::enable_if_t<std::is_same_v<
           decltype(detail::bin_op_deducer(std::declval<D>())),
           void>>* = nullptr>
-  void visit_binary_op(NodePtr<D> v, bool option = false) {
+  void visit_binary_op(const NodePtr<D>& v, bool option = false) {
     v->lhs()->accept(this);
     InterpValue lhs_v = value_;
     v->rhs()->accept(this);
