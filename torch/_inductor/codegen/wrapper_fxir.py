@@ -35,7 +35,7 @@ from torch.utils._sympy.solve import try_solve
 
 from .. import config, ir
 from ..runtime.triton_compat import Config
-from ..utils import LineContext
+from ..utils import LineContext, ValueWithLineMap
 from .common import (
     CodegenSymbol,
     FileBackedGraphModule,
@@ -164,14 +164,12 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         Conditional codegen normally emits a number of different wrapper lines.
         Instead, FX conversion uses a dedicated line for the whole conditional.
         """
-        # Codegen subgraphs, so their FX IR is ready for inlining.
+        self.writeline(ConditionalLine(self, conditional))
         for subgraph in (conditional.true_subgraph, conditional.false_subgraph):
             self.codegen_subgraph_common(subgraph)
 
-        self.writeline(ConditionalLine(self, conditional))
-
     def define_subgraph_launcher_fn(
-        self, name: str, subgraph_code: Union[str, FileBackedGraphModule]
+        self, name: str, subgraph_code: Union[ValueWithLineMap, FileBackedGraphModule]
     ) -> None:
         """
         Record subgms as they're generated.
