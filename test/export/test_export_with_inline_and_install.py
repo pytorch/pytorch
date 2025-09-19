@@ -73,10 +73,6 @@ del test
 unittest.expectedFailure(
     InlineAndInstallStrictExportTestExport.test_buffer_util_inline_and_install_strict  # noqa: F821
 )
-# this is because we can't preserve stacktrace
-unittest.expectedFailure(
-    InlineAndInstallStrictExportTestExport.test_stack_trace_make_fx_inline_and_install_strict  # noqa: F821
-)
 # this is because we marked unlift hooks to be dynamo skip traced
 unittest.expectedFailure(
     InlineAndInstallStrictExportTestExport.test_custom_tag_metadata_re_export_inline_and_install_strict  # noqa: F821
