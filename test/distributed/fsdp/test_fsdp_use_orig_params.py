@@ -42,6 +42,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
+    TEST_XPU,
     TestCase,
 )
 from torch.testing._internal.inductor_utils import HAS_GPU
@@ -58,7 +59,8 @@ if TEST_WITH_DEV_DBG_ASAN:
     )
     sys.exit(0)
 
-device_type = torch.accelerator.current_accelerator().type
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+
 
 class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
     """Tests multiple parameter groups."""
@@ -1124,7 +1126,8 @@ class TestFSDPUseOrigParamsWriteback(FSDPTest):
 
         # Train forward -> full-precision unshard -> train forward
         fsdp_model = FSDP(
-            TestFSDPUseOrigParamsWriteback.Model(torch.device(device_type)), **fsdp_kwargs
+            TestFSDPUseOrigParamsWriteback.Model(torch.device(device_type)),
+            **fsdp_kwargs,
         )
         inp = fsdp_model.get_input(torch.device(device_type))
         fsdp_model(*inp)

@@ -8,7 +8,12 @@ import torch
 from torch.distributed.fsdp import CPUOffloadPolicy, fully_shard, OffloadPolicy
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest, get_devtype
-from torch.testing._internal.common_utils import run_tests, TEST_CUDA, TEST_HPU, TEST_XPU
+from torch.testing._internal.common_utils import (
+    run_tests,
+    TEST_CUDA,
+    TEST_HPU,
+    TEST_XPU,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     ModelArgs,
     Transformer,

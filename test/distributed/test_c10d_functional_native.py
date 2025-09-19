@@ -21,16 +21,15 @@ from torch.distributed._functional_collectives import (
     reduce_scatter_tensor,
     reduce_scatter_tensor_coalesced,
 )
-from torch.testing._internal.common_cuda import SM90OrLater
+from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
+from torch.testing._internal.common_device_type import e4m3_type
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
-    requires_nccl,
+    requires_accelerator_dist_backend,
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     run_tests,
-    skipIfRocm,
-    skip_but_pass_in_sandcastle_if,
     TestCase,
     TEST_XPU,
 )
@@ -61,6 +60,7 @@ if not dist.is_available():
     sys.exit(0)
 
 
+@requires_accelerator_dist_backend(["nccl", "xccl"])
 class TestWithNCCL(MultiProcessTestCase):
     def setUp(self) -> None:
         super().setUp()
@@ -76,12 +76,13 @@ class TestWithNCCL(MultiProcessTestCase):
 
     @property
     def device(self) -> torch.device:
-        return torch.device(f"{device_type}:{self.rank}")
+        return torch.device(self.rank)
 
     def _init_process_group(self) -> None:
-        torch.accelerator.set_device_index(self.device)
+        torch.accelerator.set_device_index(self.rank)
         store = dist.FileStore(self.file_name, self.world_size)
-        backend = "xccl" if TEST_XPU else "nccl"
+        backend = dist.get_default_backend_for_device(self.device.type)
+
         dist.init_process_group(
             backend=backend,
             world_size=self.world_size,
@@ -372,14 +373,16 @@ class TestWithNCCL(MultiProcessTestCase):
     @skip_if_lt_x_gpu(2)
     def test_all_to_all_single(self) -> None:
         self._init_process_group()
-        torch.accelerator.set_device_index(self.device)
+        torch.accelerator.set_device_index(self.rank)
 
         torch.manual_seed(42)
         send_sz_matrix = torch.randint(0, 20, (self.world_size, self.world_size))
 
         input_split_sizes = send_sz_matrix[self.rank].tolist()
         output_split_sizes = send_sz_matrix[:, self.rank].tolist()
-        input = torch.full((sum(input_split_sizes),), float(self.rank)).to(device_type)
+        input = torch.full((sum(input_split_sizes),), float(self.rank)).to(
+            self.device.type
+        )
 
         output = torch.ops._c10d_functional.all_to_all_single(
             input,
@@ -390,7 +393,7 @@ class TestWithNCCL(MultiProcessTestCase):
         output = torch.ops._c10d_functional.wait_tensor(output)
         expect = torch.cat(
             [
-                torch.full((sz,), float(rank)).to(device_type)
+                torch.full((sz,), float(rank)).to(self.device.type)
                 for rank, sz in enumerate(output_split_sizes)
             ]
         )
@@ -466,7 +469,7 @@ class TestWithNCCL(MultiProcessTestCase):
     @fresh_cache()
     def test_threading(self):
         self._init_process_group()
-        device = torch.device(f"{device_type}:{self.rank}")
+        device = self.device
 
         def func(arg: torch.Tensor) -> torch.Tensor:
             buf0 = arg + 42
@@ -503,10 +506,9 @@ class TestWithNCCL(MultiProcessTestCase):
         t.start()
         t.join()
 
-    @skipIfRocm
     @unittest.skipIf(
-        not SM90OrLater,
-        "_scaled_mm currently only supports sm>=90",
+        not PLATFORM_SUPPORTS_FP8,
+        "_scaled_mm currently only supports sm>=90 on cuda and gfx94/95 on ROCm",
     )
     @skip_if_lt_x_gpu(2)
     @fresh_cache()
@@ -515,10 +517,9 @@ class TestWithNCCL(MultiProcessTestCase):
 
         def scale(t):
             scale = (
-                torch.finfo(torch.float8_e4m3fn).max
-                / t.abs().amax(dim=-1, keepdim=True).float()
+                torch.finfo(e4m3_type).max / t.abs().amax(dim=-1, keepdim=True).float()
             )
-            t = t.mul(scale).to(torch.float8_e4m3fn)
+            t = t.mul(scale).to(e4m3_type)
             return t, scale
 
         def fp8_rowwise_backward(in_, w, out_grad):
@@ -548,9 +549,9 @@ class TestWithNCCL(MultiProcessTestCase):
             return in_grad, w_grad
 
         m, n, k = 128, 256, 64
-        in_ = torch.randn((m, k), device=device_type, dtype=torch.bfloat16)
-        w = torch.randn((n, k), device=device_type, dtype=torch.bfloat16)
-        out_grad = torch.randn((m, n), device=device_type, dtype=torch.bfloat16)
+        in_ = torch.randn((m, k), device=self.device.type, dtype=torch.bfloat16)
+        w = torch.randn((n, k), device=self.device.type, dtype=torch.bfloat16)
+        out_grad = torch.randn((m, n), device=self.device.type, dtype=torch.bfloat16)
 
         eager_in_grad, eager_w_grad = fp8_rowwise_backward(in_, w, out_grad)
         compile_in_grad, compile_w_grad = torch.compile(fp8_rowwise_backward)(
@@ -779,7 +780,8 @@ class CompileTest(TestCase):
 
         self.rank = 0
         self.world_size = 2
-        torch.accelerator.set_device_index(f"{device_type}:0")
+        torch.accelerator.set_device_index(0)
+        self.device = torch.accelerator.current_accelerator()
 
         store = FakeStore()
         dist.init_process_group(
@@ -805,7 +807,7 @@ class CompileTest(TestCase):
             ar1 = funcol.wait_tensor(ar1)
             return ar0, ar1
 
-        arg = torch.rand(4, 4, device=device_type)
+        arg = torch.rand(4, 4, device=self.device)
         compiled = torch.compile(func)
 
         code = run_and_get_triton_code(compiled, arg)
@@ -853,7 +855,7 @@ class CompileTest(TestCase):
             ar1 = [funcol.wait_tensor(out) for out in ar1]
             return ar0, ar1
 
-        args = [torch.rand(4, 4, device=device_type) for _ in range(2)]
+        args = [torch.rand(4, 4, device=self.device.type) for _ in range(2)]
         compiled = torch.compile(func)
         code = run_and_get_triton_code(compiled, args)
         buf0, buf1, buf2, buf3 = find_buffer_assignments(code)
@@ -894,7 +896,7 @@ class CompileTest(TestCase):
             ar0 = funcol.wait_tensor(ar0)
             return ar0
 
-        arg = torch.rand(4, 4, device=device_type)
+        arg = torch.rand(4, 4, device=self.device.type)
         compiled = torch.compile(func)
 
         code = run_and_get_triton_code(compiled, arg)
@@ -919,7 +921,7 @@ class CompileTest(TestCase):
             # Expect allocation
             return ar0
 
-        arg = torch.rand(4, 4, device=device_type).T
+        arg = torch.rand(4, 4, device=self.device.type).T
         compiled = torch.compile(func)
 
         code = run_and_get_triton_code(compiled, arg)
@@ -950,7 +952,7 @@ class CompileTest(TestCase):
             buf2 = torch.mm(arg, buf1)
             return buf1, buf2
 
-        arg = torch.rand(4, 4, device=device_type)
+        arg = torch.rand(4, 4, device=self.device.type)
         compiled = torch.compile(func)
         code = run_and_get_triton_code(compiled, arg)
         buf0, buf1 = find_buffer_assignments(code)
@@ -980,7 +982,7 @@ class CompileTest(TestCase):
             ag0 = funcol.wait_tensor(ag0)
             return ag0
 
-        arg = torch.rand(4, 4, device=device_type)
+        arg = torch.rand(4, 4, device=self.device.type)
         compiled = torch.compile(func)
         code = run_and_get_triton_code(compiled, arg)
         (
@@ -1007,7 +1009,7 @@ class CompileTest(TestCase):
             ag0 = [funcol.wait_tensor(out) for out in ag0]
             return ag0
 
-        args = [torch.rand(4, 4, device=device_type) for _ in range(4)]
+        args = [torch.rand(4, 4, device=self.device.type) for _ in range(4)]
         compiled = torch.compile(func)
         code = run_and_get_triton_code(compiled, args)
         (
@@ -1041,7 +1043,7 @@ class CompileTest(TestCase):
             return funcol.wait_tensor(t)
 
         # Test aoti
-        arg = torch.rand(4, 4, device=device_type)
+        arg = torch.rand(4, 4, device=self.device.type)
         compiled = torch.compile(func)
         code = run_and_get_triton_code(compiled, arg)
         (
@@ -1063,7 +1065,7 @@ class CompileTest(TestCase):
             rs0 = funcol.wait_tensor(rs0)
             return rs0
 
-        arg = torch.rand(4, 4, device=device_type)
+        arg = torch.rand(4, 4, device=self.device.type)
         compiled = torch.compile(func)
         code = run_and_get_triton_code(compiled, arg)
         (
@@ -1091,7 +1093,7 @@ class CompileTest(TestCase):
             rs0 = [funcol.wait_tensor(out) for out in rs0]
             return rs0
 
-        args = [torch.rand(4, 4, device=device_type) for _ in range(4)]
+        args = [torch.rand(4, 4, device=self.device.type) for _ in range(4)]
         compiled = torch.compile(func)
         code = run_and_get_triton_code(compiled, args)
         (
@@ -1144,7 +1146,9 @@ class CompileTest(TestCase):
 
         input_split_sizes = send_sz_matrix[self.rank]
         output_split_sizes = send_sz_matrix[:, self.rank].contiguous()
-        input = torch.full((input_split_sizes.sum().item(),), float(self.rank)).to(device_type)
+        input = torch.full((input_split_sizes.sum().item(),), float(self.rank)).to(
+            self.device.type
+        )
 
         with torch._dynamo.config.patch(
             dynamic_shapes=True,
@@ -1178,7 +1182,7 @@ class CompileTest(TestCase):
             br1 = funcol.wait_tensor(br1)
             return br0, br1
 
-        arg = torch.rand(4, 4, device=device_type)
+        arg = torch.rand(4, 4, device=self.device.type)
         compiled = torch.compile(func)
 
         code = run_and_get_triton_code(compiled, arg)
@@ -1216,7 +1220,7 @@ class CompileTest(TestCase):
             ar1 = funcol.wait_tensor(ar1)
             return ar0, ar1
 
-        arg = torch.rand(4, 4, device=device_type)
+        arg = torch.rand(4, 4, device=self.device.type)
         compiled = torch.compile(func, fullgraph=True)
 
         code = run_and_get_triton_code(compiled, arg)

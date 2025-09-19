@@ -58,6 +58,10 @@ device_type = torch.accelerator.current_accelerator().type
 import torch.distributed as dist
 backend = dist.get_default_backend_for_device(device_type)
 
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+backend = torch.distributed.get_default_backend_for_device(device_type)
+
+
 class BatchNormNet(nn.Module):
     def __init__(self) -> None:
         super().__init__()
@@ -136,7 +140,7 @@ class TestFSDPWrap(FSDPTest):
 
     class NestedSequentialModel:
         @staticmethod
-        def get_model(device_type, device=True):
+        def get_model(device=True):
             sequential = nn.Sequential(
                 nn.Linear(5, 5),
                 nn.Linear(5, 5),
@@ -471,7 +475,7 @@ class TestAutoWrap(TestCase):
         Test to ensure that if `always_wrap_policy` is
         passed into FSDP, all submodules are wrapped.
         """
-        seq = TestFSDPWrap.NestedSequentialModel.get_model(device_type, device=True)
+        seq = TestFSDPWrap.NestedSequentialModel.get_model(device=True)
         model = FSDP(
             seq, process_group=self.process_group, auto_wrap_policy=always_wrap_policy
         )
@@ -633,7 +637,7 @@ class TestAutoWrap(TestCase):
         Test to ensure with auto wrap, we wrap child modules correctly based on the min_num_params.
         ``nn.Linear(5, 5)`` does not exceed the bucket size, but combined they do.
         """
-        sequential = TestFSDPWrap.NestedSequentialModel.get_model(device_type, device=False)
+        sequential = TestFSDPWrap.NestedSequentialModel.get_model(device=False)
         my_auto_wrap_policy = functools.partial(
             size_based_auto_wrap_policy, min_num_params=40
         )
@@ -750,7 +754,9 @@ class TestAutoWrap(TestCase):
         device = torch.device(device_type)
         torch.accelerator.set_device_index(0)
         device_id = (
-            torch.device(device_type, torch.accelerator.current_device_index()) if use_device_id else None
+            torch.device(device_type, torch.accelerator.current_device_index())
+            if use_device_id
+            else None
         )
 
         # Random port in case the next test run quickly, same port would cause conflict.
@@ -770,7 +776,7 @@ class TestAutoWrap(TestCase):
         device_after_init = device_init_mode == DEVICEInitMode.DEVICE_AFTER
         try:
             sequential = TestFSDPWrap.NestedSequentialModel.get_model(
-                device_type, device=(not device_after_init)
+                device=(not device_after_init)
             )
             my_auto_wrap_policy = functools.partial(
                 size_based_auto_wrap_policy, min_num_params=40
@@ -799,7 +805,7 @@ class TestAutoWrap(TestCase):
     @unittest.skipIf(not TEST_MULTIGPU, "Requires at least 2 GPUs")
     @parametrize("wrap_method", [WrapMethod.FSDP_CTOR, WrapMethod.WRAP_API])
     def test_always_wrap_with_ignored_modules(self, wrap_method: WrapMethod):
-        sequential = TestFSDPWrap.NestedSequentialModel.get_model(device_type, device=False)
+        sequential = TestFSDPWrap.NestedSequentialModel.get_model(device=False)
         ignored_modules = [sequential[1], sequential[2][0]]
         fsdp_kwargs = {
             "process_group": self.process_group,
@@ -824,7 +830,7 @@ class TestAutoWrap(TestCase):
     @unittest.skipIf(not TEST_MULTIGPU, "Requires at least 2 GPUs")
     @parametrize("wrap_method", [WrapMethod.FSDP_CTOR, WrapMethod.WRAP_API])
     def test_auto_wrap_with_ignored_modules(self, wrap_method: WrapMethod):
-        sequential = TestFSDPWrap.NestedSequentialModel.get_model(device_type, device=False)
+        sequential = TestFSDPWrap.NestedSequentialModel.get_model(device=False)
         ignored_modules = [sequential[1], sequential[2][0]]
         my_auto_wrap_policy = functools.partial(
             size_based_auto_wrap_policy,
