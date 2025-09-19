@@ -148,7 +148,6 @@ if True:  # just to temporarily avoid reindentation
                 else:
                     raise RuntimeError(
                         f"Flatten mesh with mesh_dim_name {mesh_dim_name} has been created before, "
-                        f"but the layout is different from the current layout. "
                         f"Please specify another valid mesh_dim_name."
                     )
 
@@ -159,7 +158,6 @@ if True:  # just to temporarily avoid reindentation
                 root_mesh.mesh,
                 get_world_size(),
             )
-
             for mesh_nd in pg_ranks_by_dim:
                 # need to init backend here since the flattened pg doesn't exist in root mesh.
                 flattened_mesh = DeviceMesh(
@@ -171,7 +169,6 @@ if True:  # just to temporarily avoid reindentation
                 )
                 if cur_rank in mesh_nd:
                     res_flattened_mesh = flattened_mesh
-
             self.child_to_root_mapping[res_flattened_mesh] = root_mesh  # type: ignore[possibly-undefined]
             self.root_to_flatten_mapping.setdefault(root_mesh, {})[mesh_dim_name] = (
                 res_flattened_mesh  # type: ignore[possibly-undefined]
@@ -289,7 +286,7 @@ if True:  # just to temporarily avoid reindentation
             # there is layout overlap. Eventually we will just directly throw error here because
             # we will deprecate the slicing of flattened dim_name from root mesh.
             layout_sliced = _MeshLayout(sliced_sizes, sliced_strides)
-            if not layout_sliced.check_overlap():
+            if not layout_sliced.check_non_overlap():
                 raise RuntimeError(
                     f"slicing overlapping dim_names {mesh_dim_names} is not allowed"
                 )
@@ -320,9 +317,6 @@ if True:  # just to temporarily avoid reindentation
                     [device_mesh._dim_group_names[mesh_dim]]  # type: ignore[has-type]
                     if cur_rank in mesh_1d
                     else []
-                )
-                submesh._layout = (
-                    device_mesh._layout if cur_rank in mesh_1d else _MeshLayout(0, 0)
                 )
                 res_submeshes.append(submesh)
 
@@ -420,6 +414,14 @@ if True:  # just to temporarily avoid reindentation
             # Internal bookkeeping for the device mesh.
             self._layout = (
                 layout if layout else _MeshLayout(self.mesh.size(), self.mesh.stride())
+            )
+            assert self._layout.check_non_overlap(), (
+                "Please use a non-overlapping layout when creating a DeviceMesh."
+            )
+            # Because we still need to support slicing of flattened dim from root mesh, so we don't check stride here.
+            assert self._layout.numel() == self.mesh.numel(), (
+                "Please use a valid layout when creating a DeviceMesh."
+                f"The layout {self._layout} is not consistent with the mesh size {self.mesh.size()}."
             )
 
             # private field to pre-generate DeviceMesh's hash
