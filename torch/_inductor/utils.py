@@ -2968,6 +2968,15 @@ def shape_env_from_inputs(inputs: Sequence[InputType]) -> Optional[ShapeEnv]:
         if isinstance(input, torch.SymInt):
             return input.node.shape_env
 
+        # Check tensor sizes and strides for SymInt values
+        if isinstance(input, torch.Tensor):
+            for size in input.size():
+                if isinstance(size, torch.SymInt):
+                    return size.node.shape_env
+            for stride in input.stride():
+                if isinstance(stride, torch.SymInt):
+                    return stride.node.shape_env
+
     # TODO(voz): Should we always have one anyway?
     return None
 
@@ -3740,4 +3749,6 @@ def is_nonfreeable_buffers(dep: Dep) -> bool:
     # before checking for known strings.
     if V.graph.name:
         dep_name = dep_name.removeprefix(V.graph.name + "_")
-    return dep_name.startswith(("primals_", "arg", "fwd_rng_state", "bwd_rng_state"))
+    return dep_name.startswith(
+        ("primals_", "arg", "fwd_rng_state", "bwd_rng_state", "tangents")
+    )
