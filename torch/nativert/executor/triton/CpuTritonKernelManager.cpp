@@ -1,5 +1,6 @@
-#include <torch/nativert/executor/triton/CpuTritonKernelManager.h>
+#include <torch/nativert/executor/triton/TritonKernelManager.h>
 
+#include <c10/util/FbcodeMaps.h>
 #include <c10/util/Logging.h>
 
 #ifndef _WIN32
@@ -34,6 +35,43 @@ char* _dlerror() {
 }
 
 } // namespace
+
+typedef void* kernel_ptr_t;
+typedef void (
+    *launcher_ptr_t)(uint32_t, uint32_t, uint32_t, void**, kernel_ptr_t);
+
+struct DlcloseDeleter {
+  void operator()(void* p) const {
+    if (p) {
+#if defined(_WIN32)
+      TORCH_CHECK(false, "Windows is not supported");
+#else
+      dlclose(p);
+#endif
+    }
+  }
+};
+
+class CpuTritonKernelManager final : public TritonKernelManager {
+ public:
+  CpuTritonKernelManager(
+      std::string kernel_name,
+      std::string kernel_bin_path,
+      std::string kernel_launcher_bin_path);
+  ~CpuTritonKernelManager() final = default;
+  void launch(const LaunchParams& launch_params, void** args) final;
+
+ private:
+  void load();
+
+  kernel_ptr_t kernel_fn_{nullptr};
+  launcher_ptr_t launcher_fn_{nullptr};
+
+  std::unique_ptr<void, DlcloseDeleter> kernel_handle_{nullptr};
+  std::unique_ptr<void, DlcloseDeleter> launcher_handle_{nullptr};
+
+  std::string kernel_launcher_bin_path_;
+};
 
 CpuTritonKernelManager::CpuTritonKernelManager(
     std::string kernel_name,
@@ -87,5 +125,22 @@ void CpuTritonKernelManager::launch(
       args,
       kernel_fn_);
 }
+
+namespace {
+std::unique_ptr<TritonKernelManager> create_cpu_triton_kernel_manager(
+    std::string kernel_name,
+    std::string kernel_bin_path,
+    std::string kernel_launcher_bin_path) {
+  return std::make_unique<CpuTritonKernelManager>(
+      std::move(kernel_name),
+      std::move(kernel_bin_path),
+      std::move(kernel_launcher_bin_path));
+}
+} // namespace
+
+C10_REGISTER_TYPED_CREATOR(
+    TritonKernelManagerRegistry,
+    at::kCPU,
+    create_cpu_triton_kernel_manager)
 
 } // namespace torch::nativert

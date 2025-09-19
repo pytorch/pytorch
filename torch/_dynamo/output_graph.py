@@ -506,6 +506,7 @@ class OutputGraph(OutputGraphGuardsState):
             )
         self.tracing_context: TracingContext = TracingContext(fake_mode)
         self.tracing_context.traced_code.append(f_code)
+        self.traced_code = self.tracing_context.traced_code
         self.dynamo_compile_id: Optional[CompileId] = (
             CompileContext.current_compile_id()
         )
@@ -2070,7 +2071,7 @@ class OutputGraph(OutputGraphGuardsState):
                     check_fn_source = inspect.getsource(specialization.check_fn).strip()
                     # Required because the LABDA_GUARD API requires a root guard manager
                     unused_root_guard_manager = RootGuardManager()
-                    check_fn = guards.LAMBDA_GUARD(  # type: ignore[attr-defined]
+                    check_fn = guards.LAMBDA_GUARD_NO_FRAMELOCALS(  # type: ignore[attr-defined]
                         unused_root_guard_manager,
                         specialization.check_fn,
                         [check_fn_source],
