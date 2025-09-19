@@ -195,6 +195,9 @@ struct C10_XPU_API DeviceProp {
 #if SYCL_COMPILER_VERSION >= 20250000
   AT_FORALL_XPU_EXP_DEVICE_PROPERTIES(DEFINE_EXP_DEVICE_PROP);
 #endif
+
+  // The following properties are experimental and may be removed or altered.
+  bool has_tf32;
 };
 
 #undef _DEFINE_SYCL_PROP
