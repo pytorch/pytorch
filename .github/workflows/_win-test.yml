@@ -217,7 +217,6 @@ jobs:
           PYTORCH_TEST_CUDA_MEM_LEAK_CHECK: ${{ matrix.mem_leak_check && '1' || '0' }}
           PYTORCH_TEST_RERUN_DISABLED_TESTS: ${{ matrix.rerun_disabled_tests && '1' || '0' }}
         run: |
-          which python3
           pushd "${PYTORCH_FINAL_PACKAGE_DIR}"
           # shellcheck disable=SC2046,SC2102
           python3 -mpip install $(echo *.whl)[opt-einsum,optree] optree==0.13.0
