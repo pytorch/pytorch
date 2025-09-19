@@ -74,8 +74,8 @@ AllocationRef::~AllocationRef() {
 #endif
   C10_CUDA_DRIVER_CHECK(driver_api->cuMemRelease_(handle));
 #elif defined(USE_ROCM)
-  C10_HIP_CHECK(hipMemUnmap(reinterpret_cast<hipDeviceptr_t>(ptr), block_size));
-  C10_HIP_CHECK(hipMemRelease(handle));
+  C10_CUDA_CHECK(hipMemUnmap(reinterpret_cast<hipDeviceptr_t>(ptr), block_size));
+  C10_CUDA_CHECK(hipMemRelease(handle));
 #else
   TORCH_CHECK(
       false, "CUDASymmetricMemory requires PYTORCH_C10_DRIVER_API_SUPPORTED");
@@ -387,12 +387,12 @@ void* CUDASymmetricMemoryAllocator::alloc(
   prop.requestedHandleType = hipMemHandleTypePosixFileDescriptor;
 
   size_t granularity;
-  C10_HIP_CHECK(hipMemGetAllocationGranularity(
+  C10_CUDA_CHECK(hipMemGetAllocationGranularity(
       &granularity, &prop, hipMemAllocationGranularityRecommended));
   block_size = at::round_up(block_size, granularity);
 
   HandleType handle;
-  C10_HIP_CHECK(hipMemCreate(
+  C10_CUDA_CHECK(hipMemCreate(
       reinterpret_cast<hipMemGenericAllocationHandle_t*>(&handle),
       block_size,
       &prop,
@@ -633,7 +633,7 @@ c10::intrusive_ptr<CUDASymmetricMemory> make_symm_mem(
                         : CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR,
       0));
 #elif defined(USE_ROCM)
-  C10_HIP_CHECK(hipMemExportToShareableHandle(
+  C10_CUDA_CHECK(hipMemExportToShareableHandle(
       &block_handle,
       block->alloc_ref->handle,
       hipMemHandleTypePosixFileDescriptor,
@@ -697,7 +697,7 @@ c10::intrusive_ptr<CUDASymmetricMemory> make_symm_mem(
           CU_MEM_HANDLE_TYPE_FABRIC));
     }
 #elif defined(USE_ROCM)
-    C10_HIP_CHECK(hipMemImportFromShareableHandle(
+    C10_CUDA_CHECK(hipMemImportFromShareableHandle(
         &handles[r],
         (void*)(uintptr_t) & (imported_handles[r]),
         hipMemHandleTypePosixFileDescriptor));
