@@ -49,7 +49,7 @@ def get_all_examples():
         "",
         "from typing import Any, ClassVar, Generic, List, Tuple, Union",
         "from typing_extensions import Literal, get_origin, TypeAlias",
-        "T: TypeAlias = Any",
+        "T: TypeAlias = object",
         "",
         "import numpy",
         "",
@@ -57,7 +57,7 @@ def get_all_examples():
         "import torch.nn.functional as F",
         "",
         "from typing_extensions import ParamSpec as _ParamSpec",
-        "ParamSpec: Any = _ParamSpec",
+        "ParamSpec = _ParamSpec",
         "",
         # for requires_grad_ example
         # NB: We are parsing this file as Python 2, so we must use
