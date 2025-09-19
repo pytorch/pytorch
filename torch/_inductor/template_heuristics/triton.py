@@ -996,15 +996,14 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
         else:
             capability_class = "baseline"
 
+        # fmt: off
         config_map = {
             "float32": lambda h: FlexBwDConfig(16, 16, 16, 16, 1, 4),
             "baseline": lambda h: FlexBwDConfig(16, 16, 16, 16, 1, 4),
             "sm90": lambda h: (
-                FlexBwDConfig(64, 64, 64, 64, 3, 4)
-                if h < 64
-                else FlexBwDConfig(64, 128, 128, 64, 3, 8)
-                if h <= 128
-                else FlexBwDConfig(64, 64, 64, 64, 2, 4)
+                FlexBwDConfig(64, 64, 64, 64, 3, 4) if h < 64 else
+                FlexBwDConfig(64, 128, 128, 64, 3, 8) if h <= 128 else
+                FlexBwDConfig(64, 64, 64, 64, 2, 4)
             ),
             "sm10x": lambda h: (
                 FlexBwDConfig(64, 128, 128, 64, 3, 4)
@@ -1019,6 +1018,7 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
                 )
             ),
         }
+        # fmt: on
 
         if head_dim <= 256:
             default_config = config_map[capability_class](head_dim)
