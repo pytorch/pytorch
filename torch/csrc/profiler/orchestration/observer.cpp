@@ -21,6 +21,7 @@ ExperimentalConfig::ExperimentalConfig(
     bool disable_external_correlation,
     bool profile_all_threads,
     bool capture_overload_names,
+    bool record_python_gc_info,
     std::string custom_profiler_config,
     bool adjust_timestamps)
     : profiler_metrics{std::move(profiler_metrics)},
@@ -32,6 +33,7 @@ ExperimentalConfig::ExperimentalConfig(
       disable_external_correlation{disable_external_correlation},
       profile_all_threads{profile_all_threads},
       capture_overload_names{capture_overload_names},
+      record_python_gc_info{record_python_gc_info},
       custom_profiler_config(std::move(custom_profiler_config)),
       adjust_timestamps{adjust_timestamps} {}
 

@@ -12,6 +12,7 @@ namespace torch {
 TORCH_PYTHON_API py::handle get_symint_class();
 TORCH_PYTHON_API py::handle get_symfloat_class();
 TORCH_PYTHON_API py::handle get_symbool_class();
+TORCH_PYTHON_API py::handle get_dynint_class();
 
 // NB: These functions must not be called too early, otherwise torch not setup.
 // Alternate design is to have torch "register" the object to us
@@ -23,6 +24,9 @@ inline bool is_symfloat(py::handle obj) {
 }
 inline bool is_symbool(py::handle obj) {
   return py::isinstance(obj, get_symbool_class());
+}
+inline bool is_dynint(py::handle obj) {
+  return py::isinstance(obj, get_dynint_class());
 }
 
 namespace impl {

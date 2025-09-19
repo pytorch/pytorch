@@ -266,14 +266,35 @@ struct AddGenericMetadata : public MetadataBase {
 
       // Until needed, lets limit the kwargs to only ints, doubles, strings and
       // bools
-      if (!val.isInt() && !val.isDouble() && !val.isString() && !val.isBool()) {
+      if (!val.isInt() && !val.isDouble() && !val.isString() && !val.isBool() &&
+          !val.isList()) {
         LOG(WARNING) << "Inputted kwarg: " << key
-                     << " is not an int, double, string, or bool for op: "
+                     << " is not an int, double, string, bool, list for op: "
                      << op_event.name_ << " skipping";
         continue;
       }
-      bool isString = val.isString();
-      addMetadata(key, ivalueToStr(val, isString));
+      if (val.isList()) {
+        bool allStr = true;
+        c10::List<c10::IValue> valList = val.toList();
+
+        for (size_t i = 0; i < valList.size(); i++) {
+          if (!valList.get(i).isString()) {
+            allStr = false;
+            break;
+          }
+        }
+        if (allStr) {
+          addMetadata(key, ivalueListToStr(valList.vec()));
+        } else {
+          LOG(WARNING) << "Inputted kwarg: " << key
+                       << " is a list but not list of str for op: "
+                       << op_event.name_ << " skipping";
+          continue;
+        }
+      } else {
+        bool isString = val.isString();
+        addMetadata(key, ivalueToStr(val, isString));
+      }
     }
     // Add extra metadata if any
     for (const auto& [key, val] : op_event.extra_meta_) {

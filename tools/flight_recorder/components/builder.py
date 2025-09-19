@@ -134,6 +134,7 @@ def build_collectives(
     _memberships: dict[str, set[Any]],
     _pg_guids: dict[tuple[str, int], str],
     version: str,
+    mismatch_cap: int = 10,
 ) -> tuple[list[Traceback], list[Collective], list[NCCLCall]]:
     """
     groups, memberships are the non-flat dicts that are indexable
@@ -171,7 +172,6 @@ def build_collectives(
     # once we find one mismatch, we stop pairing up collectives since the pairing is possibly incorrect
     # instead, just record the remaining ops as NCCLCalls
     mismatch = {_groups[g].id: 0 for g in _groups}
-    MISMATCH_TAIL = 10
 
     # For best effort partial analysis.
     dumps_ranks = {int(key) for key in all_entries.keys()}
@@ -365,7 +365,7 @@ def build_collectives(
                     )
                 )
 
-        if mismatch[pg_name] > MISMATCH_TAIL:
+        if mismatch[pg_name] > mismatch_cap:
             logger.error(
                 "Too many mismatches for process_group %s: %s aborting", pg_name, desc
             )
@@ -402,17 +402,17 @@ def build_db(
     )
     logger.debug("built groups, memberships")
 
-    if not args.allow_incomplete_ranks:
-        check_no_missing_dump_files(entries, memberships)
-
     if args.just_print_entries:
         just_print_entries(
             entries, _groups, _memberships, _pg_guids, args, stack_id_trace_map
         )
         sys.exit(0)
 
+    if not args.allow_incomplete_ranks:
+        check_no_missing_dump_files(entries, memberships)
+
     tracebacks, collectives, nccl_calls = build_collectives(
-        entries, _groups, _memberships, _pg_guids, version
+        entries, _groups, _memberships, _pg_guids, version, args.mismatch_cap
     )
     logger.debug("built collectives, nccl_calls")
     if args.verbose:

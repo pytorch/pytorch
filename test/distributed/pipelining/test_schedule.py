@@ -10,10 +10,12 @@ from model_registry import MultiMLP
 import torch
 from torch.distributed.pipelining import (
     Schedule1F1B,
+    ScheduleDualPipeV,
     ScheduleGPipe,
     ScheduleInterleaved1F1B,
     ScheduleInterleavedZeroBubble,
     ScheduleLoopedBFS,
+    ScheduleZBVZeroBubble,
 )
 from torch.distributed.pipelining._utils import generate_stage_to_rank_mapping
 from torch.distributed.pipelining.schedules import (
@@ -38,7 +40,7 @@ from torch.distributed.pipelining.schedules import (
     W,
 )
 from torch.distributed.pipelining.stage import _PipelineStageBase, PipelineStage
-from torch.testing._internal.common_distributed import requires_nccl
+from torch.testing._internal.common_distributed import requires_accelerator_dist_backend
 from torch.testing._internal.common_utils import (
     check_leaked_tensors,
     instantiate_parametrized_tests,
@@ -51,6 +53,7 @@ from torch.testing._internal.distributed.fake_pg import FakeStore
 
 ARTIFACTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "artifacts")
 
+device = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 logger = logging.getLogger(__name__)
 torch.manual_seed(0)
 
@@ -348,8 +351,89 @@ class TestSchedulePlan(TestCase):
                     num_stages=num_stages,
                 )
 
+    @parametrize(
+        "ScheduleClass",
+        [ScheduleDualPipeV, ScheduleZBVZeroBubble],
+    )
+    def test_pipeline_order_for_v_schedules(self, ScheduleClass):
+        for num_local_stages, num_microbatches, group_size in self.test_cases:
+            with self.subTest(
+                num_local_stages=num_local_stages,
+                num_microbatches=num_microbatches,
+                group_size=group_size,
+            ):
+                num_stages = num_local_stages * group_size
+                stages = [
+                    MockPipelineStage(group_size=group_size, num_stages=num_stages)
+                    for i in range(num_local_stages)
+                ]
+
+                # V schedules only support 2 stages per rank so if num_local_stages is not 2, ensure an error is thrown
+                if num_local_stages != 2:
+                    with self.assertRaises(ValueError):
+                        ScheduleClass(
+                            stages,
+                            num_microbatches,
+                        )
+                    continue
+
+                # DualPipeV requires num_microbatches to be >= num_stages
+                if ScheduleClass == ScheduleDualPipeV and num_microbatches < num_stages:
+                    with self.assertRaises(ValueError):
+                        ScheduleClass(
+                            stages,
+                            num_microbatches,
+                        )
+                    continue
+
+                # Create schedule and validate it
+                schedule = ScheduleClass(stages, num_microbatches)
+                _validate_schedule(
+                    schedule.pipeline_order, group_size, num_stages, num_microbatches
+                )
+
 
 instantiate_parametrized_tests(TestSchedulePlan)
+
+
+class TestScheduleCsv(TestCase):
+    @parametrize(
+        "ScheduleClass,csv_name",
+        [
+            (ScheduleDualPipeV, "dualpipev_4rank_10mb"),
+        ],
+    )
+    def test_csv_compare(self, ScheduleClass, csv_name):
+        """
+        Test that schedules matches the expected CSV.  This is a regression test to ensure that the schedule
+        is not changed unintentionally.
+        """
+        num_local_stages = 2
+        group_size = 4
+        num_stages = num_local_stages * group_size
+        stages = [
+            MockPipelineStage(group_size=group_size, num_stages=num_stages)
+            for _ in range(num_local_stages)
+        ]
+        num_microbatches = 10
+        schedule = ScheduleClass(stages, num_microbatches)
+        comms_csv = os.path.join(ARTIFACTS_DIR, f"{csv_name}.csv")
+        sch = schedule.pipeline_order
+
+        # Uncomment to regenerate reference output
+        # schedule._dump_csv("test.csv", "compute_only")
+
+        sch_ref = {}
+        with open(comms_csv, newline="") as ref:
+            for rank, row in enumerate(csv.reader(ref)):
+                sch_ref[rank] = [_Action.from_str(s) for s in row]
+
+        for rank in sch_ref:
+            for timestep, (a, b) in enumerate(zip(sch[rank], sch_ref[rank])):
+                self.assertEqual(a, b, f"Mismatch at {timestep=}, {a=}, expected {b}")
+
+
+instantiate_parametrized_tests(TestScheduleCsv)
 
 
 class TestScheduleLowering(TestCase):
@@ -657,7 +741,7 @@ class TestScheduleLowering(TestCase):
         # print(_format_pipeline_order(simulated_schedule))
         self.assertEqual(num_steps, 113)
 
-    @requires_nccl()
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_grad_with_v_schedule(self):
         """
         We have a special case for V schedules where 2 adjacent stages are on the same rank.
@@ -677,7 +761,6 @@ class TestScheduleLowering(TestCase):
         d_hid = 512
         batch_size = 256
         n_stages = 2
-        device = "cuda"
         full_mod = MultiMLP(d_hid, n_layers=n_stages)
         full_mod.to(device)
 
@@ -721,7 +804,7 @@ class TestScheduleLowering(TestCase):
             loss_fn=loss_fn,
             scale_grads=False,
         )
-        schedule._load_actions(
+        schedule._prepare_schedule_with_comms(
             {
                 0: self._parse_actions(
                     [
@@ -776,7 +859,7 @@ class TestScheduleLowering(TestCase):
 
         torch.distributed.destroy_process_group()
 
-    @requires_nccl()
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_grad_with_split_b_w(self):
         """
         Ensure that separate dInput and dWeight computations are correctly executed.
@@ -789,7 +872,6 @@ class TestScheduleLowering(TestCase):
         d_hid = 512
         batch_size = 256
         n_stages = 1
-        device = "cuda"
         full_mod = MultiMLP(d_hid, n_layers=n_stages)
         full_mod.to(device)
 
@@ -832,7 +914,7 @@ class TestScheduleLowering(TestCase):
             num_microbatches,
             loss_fn=loss_fn,
         )
-        schedule._load_actions(
+        schedule._prepare_schedule_with_comms(
             {
                 0: self._parse_actions(
                     [

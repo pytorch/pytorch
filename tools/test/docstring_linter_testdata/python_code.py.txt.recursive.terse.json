@@ -1,17 +1,17 @@
 {
   "class ImpossibleCombo": {
     "children": {
-      "72": {
+      "71": {
         "children": {
-          "73": {
+          "72": {
             "children": {
-              "74": {
+              "73": {
                 "docstring_len": 0,
                 "lines": 6,
                 "name": "class ImpossibleCombo.needs_docs.not_short.Long",
                 "status": "good"
               },
-              "81": {
+              "80": {
                 "docstring_len": 0,
                 "lines": 3,
                 "name": "class ImpossibleCombo.needs_docs.not_short.Short",
@@ -23,13 +23,13 @@
             "name": "def ImpossibleCombo.needs_docs.not_short",
             "status": "good"
           },
-          "74": {
+          "73": {
             "docstring_len": 0,
             "lines": 6,
             "name": "class ImpossibleCombo.needs_docs.not_short.Long",
             "status": "good"
           },
-          "81": {
+          "80": {
             "docstring_len": 0,
             "lines": 3,
             "name": "class ImpossibleCombo.needs_docs.not_short.Short",
@@ -41,15 +41,15 @@
         "name": "def ImpossibleCombo.needs_docs",
         "status": "good"
       },
-      "73": {
+      "72": {
         "children": {
-          "74": {
+          "73": {
             "docstring_len": 0,
             "lines": 6,
             "name": "class ImpossibleCombo.needs_docs.not_short.Long",
             "status": "good"
           },
-          "81": {
+          "80": {
             "docstring_len": 0,
             "lines": 3,
             "name": "class ImpossibleCombo.needs_docs.not_short.Short",
@@ -61,13 +61,13 @@
         "name": "def ImpossibleCombo.needs_docs.not_short",
         "status": "good"
       },
-      "74": {
+      "73": {
         "docstring_len": 0,
         "lines": 6,
         "name": "class ImpossibleCombo.needs_docs.not_short.Long",
         "status": "good"
       },
-      "81": {
+      "80": {
         "docstring_len": 0,
         "lines": 3,
         "name": "class ImpossibleCombo.needs_docs.not_short.Short",
@@ -75,13 +75,13 @@
       }
     },
     "docstring_len": 44,
-    "line": 69,
-    "lines": 15,
+    "line": 62,
+    "lines": 21,
     "status": "good"
   },
   "class LongWithDocstring": {
     "children": {
-      "14": {
+      "13": {
         "docstring_len": 0,
         "lines": 3,
         "name": "def LongWithDocstring.short1",
@@ -89,13 +89,13 @@
       }
     },
     "docstring_len": 44,
-    "line": 11,
+    "line": 10,
     "lines": 6,
     "status": "good"
   },
   "class LongWithShortDocstring": {
     "children": {
-      "28": {
+      "27": {
         "docstring_len": 0,
         "lines": 3,
         "name": "def LongWithShortDocstring.short1",
@@ -103,13 +103,13 @@
       }
     },
     "docstring_len": 10,
-    "line": 25,
+    "line": 24,
     "lines": 6,
     "status": "good"
   },
   "class LongWithoutDocstring": {
     "children": {
-      "21": {
+      "20": {
         "docstring_len": 0,
         "lines": 3,
         "name": "def LongWithoutDocstring.short1",
@@ -117,31 +117,31 @@
       }
     },
     "docstring_len": 0,
-    "line": 20,
-    "lines": 4,
+    "line": 17,
+    "lines": 6,
     "status": "good"
   },
   "class NotDocstring": {
     "children": {
-      " 87": {
+      " 86": {
         "docstring_len": 0,
         "lines": 2,
         "name": "def NotDocstring.short1",
         "status": "good"
       },
-      " 97": {
+      " 92": {
         "docstring_len": 0,
-        "lines": 2,
+        "lines": 6,
         "name": "def NotDocstring.long_with_override",
         "status": "good"
       },
-      "100": {
+      " 99": {
         "docstring_len": 0,
         "lines": 2,
         "name": "def NotDocstring.short2",
         "status": "good"
       },
-      "103": {
+      "102": {
         "docstring_len": 0,
         "lines": 4,
         "name": "def NotDocstring.short3",
@@ -149,25 +149,25 @@
       }
     },
     "docstring_len": 0,
-    "line": 86,
+    "line": 85,
     "lines": 21,
     "status": "good"
   },
   "class Short": {
     "docstring_len": 0,
-    "line": 7,
+    "line": 6,
     "lines": 3,
     "status": "good"
   },
   "class ShortWithDocstring": {
     "docstring_len": 44,
-    "line": 2,
+    "line": 1,
     "lines": 4,
     "status": "good"
   },
   "class _Protected": {
     "children": {
-      "35": {
+      "34": {
         "docstring_len": 0,
         "lines": 3,
         "name": "def _Protected.short1",
@@ -175,32 +175,32 @@
       }
     },
     "docstring_len": 10,
-    "line": 32,
+    "line": 31,
     "lines": 6,
     "status": "good"
   },
   "def long": {
     "docstring_len": 44,
-    "line": 46,
+    "line": 45,
     "lines": 8,
     "status": "good"
   },
   "def long_with_omit": {
     "docstring_len": 0,
-    "line": 112,
-    "lines": 1,
+    "line": 107,
+    "lines": 5,
     "status": "good"
   },
   "def long_without_docstring": {
     "docstring_len": 0,
-    "line": 59,
-    "lines": 3,
+    "line": 54,
+    "lines": 7,
     "status": "good"
   },
   "def short": {
     "docstring_len": 0,
-    "line": 42,
-    "lines": 3,
+    "line": 38,
+    "lines": 6,
     "status": "good"
   }
 }

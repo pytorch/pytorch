@@ -294,7 +294,7 @@ if HAS_CUDA_AND_TRITON:
             for out_code in [code, code2]:
                 FileCheck().check(get_func_call()).check_count(
                     "empty_strided", 1, exactly=True
-                ).check("triton_tem_fused_addmm_relu_0").check_count(
+                ).check("triton_tem_fused_addmm_relu_t_0").check_count(
                     ".reset()" if config.cpp_wrapper else "del", 3, exactly=True
                 ).check("" if config.cpp_wrapper else "return").run(out_code[0])
 

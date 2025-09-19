@@ -292,6 +292,7 @@ class DeferredTritonCallWrapper:
 
                 curr_arg_id = -1
                 total_args = []
+                ordered_argsname = []
 
                 def write_scalar_ivalue(arg_name):
                     # We only care about the shape, therefore we create a dummy scalar here.
@@ -340,11 +341,24 @@ class DeferredTritonCallWrapper:
                     else:
                         write_scalar_ivalue(arg_name)
 
-                # Add input shape information
+                # Add input name and shape information
                 for arg, arg_type, arg_signature in zip_longest(
                     call_args, arg_types, arg_signatures
                 ):
+                    ordered_argsname.append(f'"{arg}"')
                     process_args_for_input_shape(arg, arg_type, arg_signature)
+
+                # Add input name into kwargs
+                prefix.writelines(
+                    [
+                        "// Create c10::IValue for input names",
+                        f"C10IValueHandle tmp_{normalized_kernel_name}_input_names;",
+                        f"std::vector<const char*> {normalized_kernel_name}_input_names({{{', '.join(ordered_argsname)}}});",
+                        f"aoti_torch_strlist_to_ivalue({normalized_kernel_name}_input_names.data(), {len(ordered_argsname)}, &tmp_{normalized_kernel_name}_input_names);",
+                        f"RAIIC10IValueHandle RAII_{normalized_kernel_name}_input_names(tmp_{normalized_kernel_name}_input_names);",
+                        f'kwargs_{normalized_kernel_name}.emplace("Input Args", RAII_{normalized_kernel_name}_input_names);',
+                    ]
+                )
 
                 inputs_info_ = f"{normalized_kernel_name}_inputs_info_"
                 # We pass in the non-RAII handles, since C10 doesn't automatically free them.
