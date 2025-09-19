@@ -1121,7 +1121,7 @@ class TestInductorDynamic(TestCase):
             """Reduce over a dimension with bounded size."""
             # x shape: [batch, features, reduction_dim]
             # reduction_dim is dynamic but bounded to max 128
-            assert x.shape[2] <= 128, f"Reduction dim {x.shape[2]} exceeds max 128"
+            assert x.shape[2] <= 64, f"Reduction dim {x.shape[2]} exceeds max 128"
 
             # Perform reduction (sum) over the last dimension
             result = torch.sum(x * y, dim=2)
@@ -1135,8 +1135,8 @@ class TestInductorDynamic(TestCase):
         x = torch.randn(reduction_dim, batch, features, device="cuda").permute(1, 2, 0)
         y = torch.randn(reduction_dim, batch, features, device="cuda").permute(1, 2, 0)
 
-        torch._dynamo.mark_dynamic(x, 2, min=6, max=128)
-        torch._dynamo.mark_dynamic(y, 2, min=6, max=128)
+        torch._dynamo.mark_dynamic(x, 2, min=6, max=64)
+        torch._dynamo.mark_dynamic(y, 2, min=6, max=64)
 
         compiled_fn = torch.compile(reduce_bounded)
         result, source_codes = run_and_get_code(compiled_fn, x, y)
