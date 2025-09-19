@@ -68,7 +68,7 @@ def raise_unhashable(arg, tx=None):
 
         tx = InstructionTranslator.current_tx()
     raise_observed_exception(
-        TypeError, tx, args=[ConstantVariable(f"unhashable type: {type(arg)}")]
+        TypeError, tx, args=[ConstantVariable(f"unhashable type: {type(arg.realize())}")]
     )
 
 
