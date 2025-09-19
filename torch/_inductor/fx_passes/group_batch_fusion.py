@@ -391,9 +391,11 @@ class BatchPointwiseMathOpsPostGradFusion(BatchPointwiseOpsFusionFactory):
         # of the aten.cat when do the stack should be the same dtype
         # otherwise, the output of the aten.cat may be not the same as
         # its inputs, and cause dtype not same error in mm or addmm
+        from torch.fx.experimental.symbolic_shapes import guard_or_false
+        
         input, other = node.args
         return (
-            input.meta["val"].shape == other.meta["val"].shape  # type: ignore[union-attr]
+            guard_or_false(input.meta["val"].shape == other.meta["val"].shape)  # type: ignore[union-attr]
             # input and other can be scalars, where they have no attribute 'meta'
             if hasattr(input, "meta")
             and hasattr(other, "meta")
