@@ -950,6 +950,8 @@ static void validate_outputs_impl(
         isFloatingType(grad.scalar_type()) ||
         (input_is_complex == grad_is_complex));
 
+    // grad_dtype and allow_grad_dtype_mismatch can only be customized
+    // on leaf tensors, defaulting to nullopt and false otherwise.
     if (!metadata.allow_grad_dtype_mismatch()) {
       at::ScalarType expected_dtype = metadata.grad_dtype().has_value()
           ? metadata.grad_dtype().value()
@@ -958,8 +960,6 @@ static void validate_outputs_impl(
       if (grad.scalar_type() != expected_dtype) {
         grad = grad.to(expected_dtype);
       }
-      // This check is kind of pointless except for the case where a subclass
-      // or mode decides to override .to() and forgets to actually update dtype
       if (grad.dtype() != expected_dtype) {
         std::stringstream ss;
         ss << "invalid gradient at index " << i << " - expected dtype ";

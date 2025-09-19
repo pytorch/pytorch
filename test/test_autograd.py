@@ -3696,6 +3696,7 @@ class TestAutograd(TestCase):
     def test_sparse_gather_both_scalar(self):
         self._test_sparse_gather((), (), 0)
 
+    @skipIfTorchDynamo("grad_dtype not supported in compile")
     def test_grad_dtype(self):
         leaf = torch.tensor([1.0, 2.0], requires_grad=True)
         # Default to tensor's dtype
@@ -3798,6 +3799,26 @@ class TestAutograd(TestCase):
         output = MismatchedGradientFunction.apply(h)
         output.sum().backward()
         self.assertEqual(h.grad.dtype, torch.float64)
+
+        # Mixed accumulation cases
+        k = torch.tensor([1.0, 2.0], requires_grad=True)
+        k.grad_dtype = None
+        y = k * 2
+        y.sum().backward()
+        k.grad = k.grad.to(torch.bfloat16)
+        y2 = k * 3
+        # Doesn't type promote to float32, always coerce to current .grad's dtype.
+        # This is because the accumulation is done in-place on the existing grad.
+        self.assertEqual(k.grad.dtype, torch.bfloat16)
+
+        l = torch.tensor([3.0, 4.0], requires_grad=True, dtype=torch.bfloat16)
+        l.grad_dtype = None
+        z = l * 2
+        z.sum().backward()
+        l.grad = l.grad.to(torch.float32)
+        z2 = l * 3
+        z2.sum().backward()
+        self.assertEqual(l.grad.dtype, torch.float32)
 
     def test_gc_in_destructor(self):
         """
