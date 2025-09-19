@@ -1187,8 +1187,7 @@ int64_t _Tensor_ndim(mpy::handle h) {
 mpy::handle handle_from_tensor(Arena& A, TensorRef t) {
   // fast case: tensor is live in python
   std::optional<PyObject*> mb_obj =
-      t->unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
-          /*ignore_hermetic_tls=*/false);
+      t->unsafeGetTensorImpl()->pyobj_slot()->check_pyobj();
   if (mb_obj.has_value() &&
       !t->unsafeGetTensorImpl()->pyobj_slot()->owns_pyobj()) {
     return *mb_obj;

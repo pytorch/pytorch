@@ -8,8 +8,6 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/mps/operations/BinaryKernel.h>
-// For MTLLanguageVersion_3_1
-#include <ATen/native/mps/MPSGraphSonomaOps.h>
 #include <fmt/format.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -166,6 +164,10 @@ static void complex_mps_kernel(TensorIterator& iter) {
 
 static void lerp_scalar_mps_kernel(at::TensorIteratorBase& iter, const Scalar& weight) {
   lib.exec_binary_kernel(iter, "lerp_alpha", weight);
+}
+
+static void native_dropout_mask_and_scale_mps_kernel(at::TensorIteratorBase& iter, const Scalar& scale) {
+  lib.exec_binary_kernel(iter, "native_dropout_mask_and_scale", scale);
 }
 
 static void mul_mps_kernel(TensorIteratorBase& iter) {
