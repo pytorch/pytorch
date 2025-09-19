@@ -813,7 +813,10 @@ _fuse_ddp_communication_passes: list[Union[Callable[..., None], str]] = [
     "schedule_comm_wait",
 ]
 
-_micro_pipeline_tp: bool = False
+_micro_pipeline_tp: bool = True
+_micro_pipeline_tp_mm_rs_last_dim_enabled: bool = False
+_micro_pipeline_tp_ag_mm_last_dim_enabled: bool = False
+_micro_pipeline_tp_ag_transpose_mm_enabled: bool = False
 
 
 class _collective:
