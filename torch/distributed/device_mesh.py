@@ -987,6 +987,20 @@ if True:  # just to temporarily avoid reindentation
             Return the relative indices of this rank relative to all
             dimensions of the mesh. If this rank is not part of the mesh, return None.
             """
+            # TODO: this is slow, do a faster monkeypatch version
+            from torch.distributed._local_tensor import local_tensor_mode, LocalIntNode
+
+            if lm := local_tensor_mode():
+                rank_coords = (
+                    self.mesh == lm.rank_map(lambda r: torch.tensor(r))
+                ).nonzero()
+                # NB: unlike the regular mechanism, we don't allow for MPMD
+                assert rank_coords.size(0) == 1
+                coords = [{} for _ in range(rank_coords.size(1))]
+                for r, v in rank_coords[0]._local_tensors.items():
+                    for i, x in enumerate(v.tolist()):
+                        coords[i][r] = x
+                return [torch.SymInt(LocalIntNode(c)) for c in coords]
             return self._coordinate_on_dim if self._coordinate_on_dim else None
 
         def _flatten(

@@ -43,25 +43,31 @@ the Layout corresponding to the participating ranks, with respect to the global
 world size.
 """
 
+from __future__ import annotations
+
+import contextlib
 import functools
 import operator
 import os
 import sys
 from collections.abc import Sequence
 from itertools import product
-from typing import Union, Optional
+from typing import Optional, Union
 
 import torch
 from torch import Tensor
 from torch._C import DispatchKey
 from torch._export.wrappers import mark_subclass_constructor_exportable_experimental
 from torch.distributed._distributed_c10d import FakeWork
+from torch.distributed._functional_collectives import AsyncCollectiveTensor
 from torch.distributed.distributed_c10d import ProcessGroup, ReduceOp, Work
 from torch.utils import _pytree as pytree
-from torch.utils._python_dispatch import TorchDispatchMode, _get_current_dispatch_mode_stack
+from torch.utils._python_dispatch import (
+    _get_current_dispatch_mode_stack,
+    return_and_correct_aliasing,
+    TorchDispatchMode,
+)
 from torch.utils.checkpoint import get_device_states, set_device_states
-from torch.distributed._functional_collectives import AsyncCollectiveTensor
-from torch.utils._python_dispatch import return_and_correct_aliasing
 
 
 not_implemented_log = torch._logging.getArtifactLogger(__name__, "not_implemented")
@@ -159,6 +165,70 @@ def layout_to_indices(layout):
     ]
 
 
+class LocalIntNode:
+    """
+    Like a LocalTensor, but for an int.  We can't use a 0D tensor to represent this
+    because often only a SymInt is accepted where we wish to use this.
+    """
+
+    def __init__(self, local_ints: dict[int, int]):
+        self._local_ints = local_ints
+
+    def maybe_as_int(self) -> Optional[int]:
+        return None
+
+    def is_int(self) -> bool:
+        return True
+
+    def is_float(self) -> bool:
+        return False
+
+    def is_bool(self) -> bool:
+        return False
+
+    def is_nested_int(self) -> bool:
+        return False
+
+    def clone(self) -> NestedIntNode:
+        return self
+
+    def _str(self) -> str:
+        return f"LocalIntNode({self._local_ints})"
+
+    def str(self) -> str:
+        return self._str()
+
+    def __str__(self) -> str:
+        return self._str()
+
+    def __repr__(self) -> str:
+        return self._str()
+
+    def _graph_repr(self) -> str:
+        return self._str()
+
+    def is_symbolic(self) -> bool:
+        return False
+
+    def is_constant(self) -> bool:
+        return False
+
+    def add(self, other) -> LocalIntNode:
+        return LocalIntNode(
+            {r: self._local_ints[r] + other._local_ints[r] for r in self._local_ints}
+        )
+
+    def mul(self, other) -> LocalIntNode:
+        return LocalIntNode(
+            {r: self._local_ints[r] * other._local_ints[r] for r in self._local_ints}
+        )
+
+    def wrap_int(self, num: int) -> LocalIntNode:
+        lm = local_tensor_mode()
+        assert lm is not None
+        return LocalIntNode(dict.fromkeys(lm.ranks, num))
+
+
 class LocalTensor(torch.Tensor):
     # Map from global rank to the local tensor
     # This is a dict because in an MPMD situation, you will only have a subset
@@ -173,7 +243,7 @@ class LocalTensor(torch.Tensor):
     def __new__(
         cls,
         local_tensors: dict[int, torch.Tensor],
-    ) -> "LocalTensor":
+    ) -> LocalTensor:
         """
         .. note:: This is not a public API and it's only supposed to be used by the
             operator implementations and internals.
@@ -234,7 +304,9 @@ class LocalTensor(torch.Tensor):
             _extra_dispatch_keys=extra_dispatch_keys,
         )
 
-        assert not any(isinstance(v, AsyncCollectiveTensor) for v in local_tensors.values())
+        assert not any(
+            isinstance(v, AsyncCollectiveTensor) for v in local_tensors.values()
+        )
         r._local_tensors = local_tensors
         r._ranks = frozenset(local_tensors.keys())
         return r
@@ -290,6 +362,17 @@ class LocalTensor(torch.Tensor):
 
         assert local_tensor is not None
 
+        # Check for unrecognized tensor subclasses (but allow regular tensors and scalars)
+        has_unrecognized_types = _check_for_subclass(flat_args)
+        if has_unrecognized_types:
+            unrecognized_types = [
+                type(x) for x in flat_args if _check_for_subclass_arg(x)
+            ]
+            not_implemented_log.debug(
+                "LocalTensor unrecognized subclass(es): %s", unrecognized_types
+            )
+            return NotImplemented
+
         with LocalTensorMode(local_tensor._ranks):
             return func(*args, **kwargs)
 
@@ -321,10 +404,32 @@ class LocalTensorMode(TorchDispatchMode):
 
     def __enter__(self):
         # Recursively reentering NOT ALLOWED
-        assert not local_tensor_mode()
+        assert not local_tensor_mode(), (
+            "cannot reenter LocalTensorMode when already active"
+        )
         super().__enter__()
 
+    @contextlib.contextmanager
+    def disable(self):
+        old = self._disable
+        self._disable = True
+        try:
+            yield
+        finally:
+            self._disable = old
+
+    def rank_map(self, cb):
+        with self.disable():
+            return LocalTensor({r: cb(r) for r in self.ranks})
+
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        # print(func, args, kwargs)
+        ret = self._dispatch(func, types, args, kwargs)
+        # print("----")
+        # print(func, args, kwargs, "-->", ret)
+        return ret
+
+    def _dispatch(self, func, types, args=(), kwargs=None):
         if kwargs is None:
             kwargs = {}
 
@@ -332,15 +437,6 @@ class LocalTensorMode(TorchDispatchMode):
 
         # Find all LocalTensor arguments to determine ranks
         local_tensors = [a for a in flat_args if isinstance(a, LocalTensor)]
-
-        # Factory functions convert into LocalTensor, so we don't have to
-        # transmute a Tensor into a LocalTensor if mutation happens...
-        # But if you do an operation on a Tensor, do NOT wrap it into a
-        # LocalTensor.  This helps prevent accidents when you're doing Tensor
-        # operations on the inner non-wrapped tensors.
-        if not local_tensors:
-            if self._disable or any(isinstance(a, Tensor) for a in flat_args):
-                return func(*args, **kwargs)
 
         # Check for unrecognized tensor subclasses (but allow regular tensors and scalars)
         has_unrecognized_types = _check_for_subclass(flat_args)
@@ -352,6 +448,15 @@ class LocalTensorMode(TorchDispatchMode):
                 "LocalTensorMode unrecognized subclass(es): %s", unrecognized_types
             )
             return NotImplemented
+
+        # Factory functions convert into LocalTensor, so we don't have to
+        # transmute a Tensor into a LocalTensor if mutation happens...
+        # But if you do an operation on a Tensor, do NOT wrap it into a
+        # LocalTensor.  This helps prevent accidents when you're doing Tensor
+        # operations on the inner non-wrapped tensors.
+        if not local_tensors:
+            if self._disable or any(isinstance(a, Tensor) for a in flat_args):
+                return func(*args, **kwargs)
 
         # For LocalTensors, verify they have compatible ranks
         for a in flat_args:
@@ -389,7 +494,7 @@ class LocalTensorMode(TorchDispatchMode):
                 return _c10d._local_recv_any_source_(*args, **kwargs)
             raise NotImplementedError(f"{func} not implemented")
 
-        if func.namespace == "_c10d_functional":
+        if func.namespace == "_c10d_functional" or func.namespace == "_dtensor":
             with self:
                 # la la la
                 return func._op_dk(
@@ -397,9 +502,6 @@ class LocalTensorMode(TorchDispatchMode):
                 )
 
         if func.namespace == "_c10d_functional_autograd":
-            raise NotImplementedError(f"{func} not implemented")
-
-        if func.namespace == "_dtensor":
             raise NotImplementedError(f"{func} not implemented")
 
         if func.namespace == "symm_mem":
@@ -419,7 +521,7 @@ class LocalTensorMode(TorchDispatchMode):
             ]
             rank_args, rank_kwargs = pytree.tree_unflatten(rank_flat_args, args_spec)
             rank_ret = func(*rank_args, **rank_kwargs)
-            flat_rank_rets[r] = pytree.tree_flatten(rank_ret)[0]
+            flat_rank_rets[r] = rank_ret
 
         # Create the LocalTensors
         rr_key = next(iter(flat_rank_rets.keys()))
@@ -439,11 +541,7 @@ class LocalTensorMode(TorchDispatchMode):
                     assert all(v == v2 for v2 in v_it)
                     ret.append(v)
 
-            # TODO: this is spooky
-            if len(ret) == 1:
-                ret = ret[0]
-            else:
-                ret = tuple(ret) if isinstance(rr_val, tuple) else ret
+            ret = tuple(ret) if isinstance(rr_val, tuple) else ret
         else:
             # Single non-tensor return value (scalar, etc.)
             v_it = iter(flat_rank_rets.values())
@@ -453,10 +551,28 @@ class LocalTensorMode(TorchDispatchMode):
 
         return return_and_correct_aliasing(func, args, kwargs, ret)
 
+
+def list_tensor_index(xs: list[Tensor], i: torch.SymInt) -> LocalTensor:
+    if isinstance(i, int):
+        return xs[i]
+
+    assert isinstance(i, torch.SymInt) and isinstance(i.node, LocalIntNode)
+    ret = {}
+    for r, idx in i.node._local_ints.items():
+        cand = xs[idx]
+        # TODO: not sure if we need to support non-LocalTensor case
+        ret[r] = cand._local_tensors[r] if isinstance(cand, LocalTensor) else cand
+    return LocalTensor(ret)
+
+
 def local_tensor_mode() -> Optional[LocalTensorMode]:
     """
     Retrieve the currently active LocalTensorMode.  LocalTensorMode cannot
     be recursively applied.
     """
-    r = [m for m in reversed(_get_current_dispatch_mode_stack()) if isinstance(m, LocalTensorMode)]
+    r = [
+        m
+        for m in reversed(_get_current_dispatch_mode_stack())
+        if isinstance(m, LocalTensorMode)
+    ]
     return r[0] if r else None

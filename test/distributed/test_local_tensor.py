@@ -3,16 +3,21 @@
 
 import torch
 import torch.distributed as dist
-from torch.distributed._local_tensor import LocalTensor, LocalTensorMode, local_tensor_mode
+from torch.distributed._local_tensor import (
+    local_tensor_mode,
+    LocalTensor,
+    LocalTensorMode,
+)
 from torch.distributed.tensor import (
     DeviceMesh,
     distribute_tensor,
     init_device_mesh,
+    Partial,
     Replicate,
     Shard,
 )
 from torch.testing._internal.common_utils import run_tests, TestCase
-from torch.testing._internal.distributed.fake_pg import FakeStore
+
 
 class LocalTensorTestBase(TestCase):
     def assertEqual(self, lhs, rhs, **kwargs):
@@ -234,6 +239,52 @@ class TestLocalTensorWorld2(LocalTensorTestBase):
             result = lt + 1.0
             self.assertIsInstance(result, LocalTensor)
 
+    def test_mixed_dtensor_localtensor(self):
+        with LocalTensorMode(self.world_size):
+            device_mesh = self.build_device_mesh()
+
+            t1 = torch.arange(16).view(4, 4).float()
+            d1 = distribute_tensor(t1, device_mesh, [Replicate()])
+            t2 = torch.ones(16).view(4, 4).float()
+            t2 + d1
+
+    def test_scalar_mul_reduction_bug(self):
+        with LocalTensorMode(self.world_size):
+            mesh = self.build_device_mesh()
+
+            tensor = torch.tensor([10, 10]).float()
+            dt = distribute_tensor(tensor, device_mesh=mesh, placements=[Shard(0)])
+            y = dt.sum() * 1
+
+            tensor = torch.arange(10).reshape(10, 1).float().requires_grad_()
+            dt = distribute_tensor(tensor, device_mesh=mesh, placements=[Shard(0)])
+
+            print(dt.sum() * 1, dt.sum() * 2, dt.sum() * 3)
+
+    def test_uneven_sharding_mean_bug(self):
+        with LocalTensorMode(self.world_size):
+            mesh = self.build_device_mesh()
+            tensor = torch.arange(12).reshape(-1, 4).float()
+
+            dt = distribute_tensor(tensor, device_mesh=mesh, placements=[Shard(0)])
+
+            mean = dt.mean()
+            self.assertEqual(mean.placements, [Replicate()])
+            full = mean.full_tensor()
+            self.assertEqual(tensor.mean(), full)
+
+    def test_even_sharding_mean_is_partial(self):
+        with LocalTensorMode(self.world_size):
+            mesh = self.build_device_mesh()
+            tensor = torch.arange(16).reshape(4, 4).float()
+
+            dt = distribute_tensor(tensor, device_mesh=mesh, placements=[Shard(0)])
+
+            mean = dt.mean()
+            full = mean.full_tensor()
+            self.assertEqual(tensor.mean(), full)
+            self.assertEqual(mean.placements, [Partial("avg")])
+
 
 class TestLocalTensorWorld3(LocalTensorTestBase):
     world_size = 3
@@ -332,6 +383,25 @@ class TestLocalTensorWorld3(LocalTensorTestBase):
         self.assertEqual(tensor_list[0], different_tensors[0])
         self.assertEqual(tensor_list[1], different_tensors[1])
         self.assertEqual(tensor_list[2], different_tensors[2])
+
+
+class TestLocalTensorWorld4(LocalTensorTestBase):
+    world_size = 4
+
+    def test_dtensor_cat(self):
+        with LocalTensorMode(self.world_size):
+            device_mesh = self.build_device_mesh()
+
+            t1 = torch.arange(16).view(4, 4).float()
+            d1 = distribute_tensor(t1, device_mesh, [Replicate()])
+            t2 = (torch.arange(16) + 16).view(4, 4).float()
+            d2 = distribute_tensor(t2, device_mesh, [Shard(0)])
+
+            local_res = torch.cat([t1, t2], dim=-1)
+            dist_res = torch.cat([d1, d2], dim=-1)
+            full_tensor = dist_res.full_tensor()
+            self.assertEqual(full_tensor, local_res)
+
 
 class TestLocalTensorWorld8(LocalTensorTestBase):
     world_size = 8

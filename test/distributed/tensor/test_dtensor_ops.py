@@ -117,7 +117,7 @@ dtensor_fails = {
     xfail("cholesky"),
     xfail("cholesky_inverse"),
     xfail("cholesky_solve"),
-    xfail("chunk"),
+    # xfail("chunk"),
     xfail("combinations"),
     xfail("complex"),
     xfail("count_nonzero"),
@@ -126,10 +126,6 @@ dtensor_fails = {
     xfail("cummin"),
     xfail("diagonal_scatter"),
     xfail("dist"),
-    xfail("empty"),
-    xfail("empty_strided"),
-    xfail("empty_like"),
-    xfail("empty_permuted"),
     xfail("expand_copy"),
     xfail("exponential"),
     xfail("equal"),
@@ -225,7 +221,7 @@ dtensor_fails = {
     xfail("masked_select"),
     xfail("masked.argmax"),
     xfail("masked.argmin"),
-    xfail("masked.cumprod"),
+    # xfail("masked.cumprod"),
     xfail("masked.logsumexp"),
     xfail("masked.median"),
     xfail("matrix_exp"),
@@ -243,8 +239,6 @@ dtensor_fails = {
     xfail("native_batch_norm"),
     xfail("narrow_copy"),
     xfail("ne"),
-    xfail("new_empty"),
-    xfail("new_empty_strided"),
     xfail("transpose"),
     xfail("nn.functional.adaptive_avg_pool1d"),
     xfail("nn.functional.adaptive_avg_pool2d"),
@@ -271,8 +265,8 @@ dtensor_fails = {
     xfail("nn.functional.cosine_similarity"),
     xfail("nn.functional.ctc_loss"),
     xfail("nn.functional.dropout"),
-    xfail("nn.functional.dropout2d"),
-    xfail("nn.functional.dropout3d"),
+    # xfail("nn.functional.dropout2d"),
+    # xfail("nn.functional.dropout3d"),
     xfail("nn.functional.elu"),
     xfail("nn.functional.fractional_max_pool2d"),
     xfail("nn.functional.fractional_max_pool3d"),
@@ -482,6 +476,12 @@ dtensor_fails = {
     skip("_segment_reduce", "offsets"),
     # TODO: fix the following ops
     skip("squeeze"),
+    skip("empty"),
+    skip("empty_strided"),
+    skip("empty_like"),
+    skip("empty_permuted"),
+    skip("new_empty"),
+    skip("new_empty_strided"),
 }
 
 
@@ -792,7 +792,9 @@ class TestLocalDTensorOps(TestCase):
                         if resolve_name(func) not in skip_bw:
                             if isinstance(dtensor_rs, DTensor):
                                 dtensor_rs.to_local().sum().backward()
-                            elif isinstance(dtensor_rs, tuple):
+                            elif isinstance(dtensor_rs, tuple) and isinstance(
+                                dtensor_rs[0], DTensor
+                            ):
                                 dtensor_rs[0].to_local().sum().backward()
 
                         self.assert_ref_dtensor_equal(dtensor_rs, rs)

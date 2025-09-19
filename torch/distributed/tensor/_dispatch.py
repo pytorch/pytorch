@@ -1,8 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import contextlib
-import functools
 import logging
-import operator
 import warnings
 from collections.abc import Sequence
 from typing import cast, Optional
@@ -166,7 +164,7 @@ class OpDispatcher:
                 raise
         except Exception as e:
             raise RuntimeError(
-                f"Sharding propagation failed for {op_info.schema}"
+                f"{e}\n\nSharding propagation failed for {op_info.schema}"
             ) from e
 
         output_sharding = op_info.output_sharding
@@ -278,11 +276,9 @@ class OpDispatcher:
                 # For equal operator, The local results from all devices should be all-gathered
                 # and a reduce op (AND) will be performed on the list of results to ensure SPMD
                 # execution. We can extend this for more ops if necessary.
-                obj_list = [None for _ in range(dist.get_world_size())]
-                dist.all_gather_object(obj_list, local_results)  # type: ignore[possibly-undefined]
-                obj_list = list(filter(lambda x: x is not None, obj_list))
-                # perform reduce on the collection with AND op
-                local_results = functools.reduce(operator.and_, obj_list, True)
+                r = torch.tensor(local_results if local_results is not None else True)
+                dist.all_reduce(r, op=dist.ReduceOp.BAND)
+                local_results = r.item()
 
         if op_info.schema.is_inplace_op():
             # inplace op should return self instead of re-wrapping

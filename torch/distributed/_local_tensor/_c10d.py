@@ -118,16 +118,35 @@ def _local_all_reduce_(
         # Perform the reduction operation
         if reduce_op == ReduceOp.RedOpType.SUM:
             op = operator.add
+        elif reduce_op == ReduceOp.RedOpType.AVG:
+            op = None
         elif reduce_op == ReduceOp.RedOpType.PRODUCT:
             op = operator.mul
         elif reduce_op == ReduceOp.RedOpType.MIN:
             op = torch.minimum
         elif reduce_op == ReduceOp.RedOpType.MAX:
             op = torch.maximum
+        elif reduce_op == ReduceOp.RedOpType.BAND:
+            op = torch.bitwise_and
+        elif reduce_op == ReduceOp.RedOpType.BOR:
+            op = torch.bitwise_or
+        elif reduce_op == ReduceOp.RedOpType.BXOR:
+            op = torch.bitwise_xor
+        elif reduce_op == ReduceOp.RedOpType.PREMUL_SUM:
+            raise NotImplementedError(
+                "PREMUL_SUM: need to add binding for scaling factor"
+            )
         else:
             raise NotImplementedError(f"ReduceOp {reduce_op} not implemented")
 
-        reduced_tensor = functools.reduce(op, group_tensors)
+        if reduce_op == ReduceOp.RedOpType.AVG:
+            denom = len(group_tensors)
+            reduced_tensor = functools.reduce(operator.add, group_tensors) / len(
+                group_tensors
+            )
+        else:
+            assert op is not None
+            reduced_tensor = functools.reduce(op, group_tensors)
 
         # Update all tensors in the group with the reduced result
         for rank in group_ranks:
