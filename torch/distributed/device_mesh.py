@@ -11,6 +11,7 @@ from typing import Optional, TYPE_CHECKING, Union
 
 import torch
 from torch.distributed._mesh_layout import _MeshLayout
+from torch.distributed._pycute import is_tuple, suffix_product
 from torch.utils._typing_utils import not_none
 
 
@@ -178,6 +179,109 @@ if True:  # just to temporarily avoid reindentation
             )
 
             return res_flattened_mesh
+
+        def create_unflatten_mesh(
+            self,
+            device_mesh: "DeviceMesh",
+            dim: int,
+            mesh_sizes: tuple[int, ...],
+            mesh_dim_names: tuple[str, ...],
+            backend_override: tuple[
+                tuple[Optional[str], Optional[C10dBackend.Options]], ...
+            ] = ((None, None),),
+        ) -> "DeviceMesh":
+            root_mesh = self.get_root_mesh(device_mesh)
+            unflatten_length = len(mesh_sizes)
+            original_sizes = (
+                device_mesh._layout.sizes
+                if is_tuple(device_mesh._layout.sizes)
+                else (device_mesh._layout.sizes,)
+            )
+            original_strides = (
+                device_mesh._layout.strides
+                if is_tuple(device_mesh._layout.strides)
+                else (device_mesh._layout.strides,)
+            )
+            orig_mesh_dim_names = not_none(device_mesh.mesh_dim_names)
+            unflatten_layout = device_mesh._layout[dim].composition(
+                _MeshLayout(tuple(mesh_sizes), suffix_product(mesh_sizes))
+            )
+            cur_rank = device_mesh.get_rank()
+            unflattened_layout = _MeshLayout(
+                tuple(
+                    original_sizes[:dim]
+                    + (
+                        unflatten_layout.sizes
+                        if is_tuple(unflatten_layout.sizes)
+                        else (unflatten_layout.sizes,)
+                    )
+                    + original_sizes[dim + 1 :]
+                ),
+                tuple(
+                    original_strides[:dim]
+                    + (
+                        unflatten_layout.strides
+                        if is_tuple(unflatten_layout.strides)
+                        else (unflatten_layout.strides,)
+                    )
+                    + original_strides[dim + 1 :]
+                ),
+            )
+            pg_ranks_by_dim = unflattened_layout.to_remapping_tensor(
+                device_mesh.mesh,
+                get_world_size(),
+            )
+            for mesh_nd in pg_ranks_by_dim:
+                submesh = DeviceMesh(
+                    device_mesh.device_type,
+                    mesh_nd,
+                    mesh_dim_names=tuple(
+                        orig_mesh_dim_names[:dim]
+                        + mesh_dim_names
+                        + orig_mesh_dim_names[dim + 1 :]
+                    ),
+                    _init_backend=False,
+                    _layout=unflattened_layout,
+                )
+                if cur_rank in mesh_nd:
+                    res_mesh = submesh
+
+            # If original mesh has initiated its backend, we need to initialize the backend
+            # of unflatten dims as well.
+            # TODO: To make backend init more efficient with cute layout representation and support
+            # per dim backend init.
+            if hasattr(device_mesh, "_dim_group_names"):
+                pg_ranks_by_dim = unflatten_layout.to_remapping_tensor(
+                    root_mesh.mesh,
+                    get_world_size(),
+                )
+                for mesh_nd in pg_ranks_by_dim:
+                    submesh = DeviceMesh(
+                        device_mesh.device_type,
+                        mesh_nd,
+                        mesh_dim_names=mesh_dim_names,
+                        backend_override=backend_override,
+                        # _layout=unflatten_layout,
+                    )
+                    if cur_rank in mesh_nd:
+                        unflatten_submesh = submesh
+
+                dim_group_names = []
+                for idx in range(0, res_mesh.ndim):  # type: ignore[possibly-undefined]
+                    if idx < dim:
+                        dim_group_names.append(device_mesh._dim_group_names[idx])
+                    elif idx >= dim + unflatten_length:
+                        dim_group_names.append(
+                            device_mesh._dim_group_names[idx - unflatten_length + 1]
+                        )
+                    else:
+                        dim_group_names.append(
+                            unflatten_submesh._dim_group_names[idx - dim]  # type: ignore[possibly-undefined]
+                        )
+                res_mesh._dim_group_names = dim_group_names
+
+            self.child_to_root_mapping[res_mesh] = root_mesh  # type: ignore[possibly-undefined]
+            return res_mesh
 
         def get_root_mesh(self, device_mesh: "DeviceMesh") -> "DeviceMesh":
             # If a mesh could not be found in the child_to_root_mapping, it is a root mesh itself.
@@ -1002,6 +1106,57 @@ if True:  # just to temporarily avoid reindentation
 
             return _mesh_resources.create_flatten_mesh(
                 self, mesh_dim_name, backend_override_tuple
+            )
+
+        def _unflatten(
+            self,
+            dim: Union[int, str],
+            mesh_sizes: tuple[int, ...],
+            mesh_dim_names: tuple[str, ...],
+            backend_override: Optional[
+                tuple[tuple[Optional[str], Optional[C10dBackend.Options]], ...]
+            ] = None,
+        ) -> "DeviceMesh":
+            """
+            Returns a DeviceMesh by unflatten the current DeviceMesh.
+
+            This api can be used to unflatten a N-D DeviceMesh into N-1+len(mesh_sizes)-D meshes or submeshes.
+            The dim is the dimension to be unflattened which can be either a string or an integer.
+
+            The mesh_sizes is a tuple which specifies the shape of the mesh unflatten into for the given dim.
+            The mesh_dim_names is a list of strings which specifies the names of the dimensions of the mesh unflatten into.
+            Its length must match the length of mesh_sizes.
+
+            For example, if we have a 1D mesh DeviceMesh([0, 1, 2, 3, 4, 5, 6, 7], mesh_dim_names=("world")),
+            calling mesh_1d._unflatten(0, (2, 2, 4), ["dp", "pp", "tp"]) will create a 3D mesh
+            DeviceMesh([[[0, 1], [2, 3]], [[4, 5], [6, 7]]], mesh_dim_names=("dp", "cp", "tp")).
+
+            Note that after calling the unflatten, there is no access to the unflattened dimension in mesh_1d, one can only
+            use the newly unflattened mesh to slice out the unflattened mesh dims.
+            """
+            if isinstance(dim, int) and dim >= self.ndim:
+                raise ValueError(
+                    f"dim {dim} specified in `_unflatten` is out of range {self.ndim}"
+                )
+            elif isinstance(dim, str) and dim in not_none(self.mesh_dim_names):
+                raise ValueError(
+                    f"dim {dim} specified in `_unflatten` is not in {self.mesh_dim_names}"
+                )
+
+            if len(mesh_sizes) != len(mesh_dim_names):
+                raise RuntimeError(
+                    "mesh_dim_names must have same length as mesh_sizes in _unflatten!"
+                )
+
+            if isinstance(dim, str):
+                dim = not_none(self.mesh_dim_names).index(dim)
+
+            # TODO: Need to figure out how to handle backend override for unflatten.
+            if backend_override is None:
+                backend_override = ((None, None),) * len(mesh_dim_names)
+
+            return _mesh_resources.create_unflatten_mesh(
+                self, dim, mesh_sizes, mesh_dim_names, backend_override
             )
 
     def _normalize_backend_override(
