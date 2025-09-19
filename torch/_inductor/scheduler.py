@@ -3652,7 +3652,7 @@ class Scheduler:
             num_nodes_orig,
             len(self.nodes),
         )
-        self.prune_redundant_deps(nodes)
+        self.prune_redundant_deps(self.nodes)
 
     def prune_redundant_deps(self, nodes: list[BaseSchedulerNode]) -> None:
         for node in nodes:
