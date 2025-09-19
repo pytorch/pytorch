@@ -1,7 +1,6 @@
 #pragma once
 
 #include <ATen/TensorMeta.h>
-#include <ATen/core/Dimname.h>
 #include <ATen/core/Range.h>
 #include <ATen/core/TensorBase.h>
 #include <c10/core/DynamicCast.h>
