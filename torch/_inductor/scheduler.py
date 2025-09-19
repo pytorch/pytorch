@@ -173,9 +173,8 @@ class SchedulerBuffer:
             self.node
         ):
             return False
-        for use in self.users:
-            if isinstance(use.node, OutputNode):
-                return False
+        if self.get_name() in V.graph.get_output_names():
+            return False
         return True
 
     def set_users(self, users: list[NodeUser]) -> None:

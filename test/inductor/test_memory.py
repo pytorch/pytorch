@@ -462,6 +462,53 @@ class TestOperatorReorderForPeakMemory(TestCase):
             FileCheck().check("allocated=['buf0']").run(code)
 
 
+class TestAtenToDevice(TestCase):
+    @unittest.skipUnless(HAS_GPU, "GPU is not available")
+    def test_aten_to_device(self):
+        @torch.compile()
+        def f(x, y):
+            x = x**2
+            y = x @ y
+            z = y @ y
+            return (x, z)
+
+        x = torch.rand([32, 32], device=GPU_TYPE)
+        y = torch.rand([32, 32], device=GPU_TYPE)
+
+        def offload_x_squared(graph):
+            # Find the pow and mm nodes
+            pow_node = graph.find_nodes(
+                op="call_function", target=torch.ops.aten.pow.Tensor_Scalar
+            )[0]
+            mm_nodes = graph.find_nodes(
+                op="call_function", target=torch.ops.aten.mm.default
+            )
+            output_node = graph.find_nodes(op="output")[0]
+
+            with graph.inserting_after(mm_nodes[0]):
+                pow_1_on_cpu = graph.call_function(
+                    torch.ops.aten.to.device,
+                    args=(pow_node,),
+                    kwargs={"device": torch.device("cpu"), "dtype": torch.float32},
+                    name="pow_1_on_cpu",
+                )
+            output_node.args = ((pow_1_on_cpu, mm_nodes[1]),)
+
+        with torch._inductor.config.patch(
+            {
+                "post_grad_custom_post_pass": offload_x_squared,
+                "reorder_for_peak_memory": False,
+                "allow_buffer_reuse": False,
+            }
+        ):
+            code = run_and_get_triton_code(f, x, y)
+            FileCheck().check("del buf0").run(code)
+            outp = f(x, y)
+
+        self.assertEqual(outp[0].to(GPU_TYPE), x**2)
+        self.assertEqual(outp[1], (x**2 @ y) @ (x**2 @ y))
+
+
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
