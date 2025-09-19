@@ -12,6 +12,7 @@ import torch
 import torch.library
 from torch._dynamo.testing import CompileCounterWithBackend, make_test_cls_with_patches
 from torch._inductor import metrics
+from torch._inductor.choices import InductorChoices
 from torch._inductor.codegen.wrapper import PythonWrapperCodegen
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_and_get_code
@@ -104,10 +105,17 @@ if TEST_WITH_ROCM:
     test_failures["test_unbacked_reduction"] = TestFailure(("cpu"), is_skip=True)
 
 
-if os.getenv("BUILD_ENVIRONMENT", "").endswith("-debug"):
+if any(os.getenv("BUILD_ENVIRONMENT", "").endswith(x) for x in ("-debug", "-asan")):
     # Fails with TORCH_INTERNAL_ASSERT(!is_heap_allocated()), see https://github.com/pytorch/pytorch/issues/130073
-    test_failures["test_resize_as_dynamic_shapes"] = TestFailure(("cpu", "cuda"))
-    test_failures["test_resize_dynamic_shapes"] = TestFailure(("cpu", "cuda"))
+    # After https://github.com/pytorch/pytorch/pull/161586, starts failing UBSAN so we can't even xfail.
+    # Root cause seems to be SymInt issues in StorageImpl, see
+    # https://github.com/pytorch/pytorch/pull/161586#issuecomment-3246530671
+    test_failures["test_resize_as_dynamic_shapes"] = TestFailure(
+        ("cpu", "cuda"), is_skip=True
+    )
+    test_failures["test_resize_dynamic_shapes"] = TestFailure(
+        ("cpu", "cuda"), is_skip=True
+    )
 
 
 def make_dynamic_cls(cls, xfail_prop="_expected_failure_dynamic"):
@@ -1077,6 +1085,36 @@ class TestInductorDynamic(TestCase):
         self.assertEqual(fn(x, 3.0), fn_opt(x, 3.0))
         self.assertEqual(fn(x, 4.0), fn_opt(x, 4.0))
         self.assertEqual(cnt.frame_count, 2)
+
+    @onlyOn(GPU_TYPE)
+    def test_dynamic_rblock_bounds(self):
+        class ForcePersistent(InductorChoices):
+            @staticmethod
+            def should_use_cooperative_reduction(*args, **kwargs) -> bool:
+                return False
+
+            @staticmethod
+            def should_use_persistent_reduction(*args, **kwargs) -> bool:
+                return True
+
+        def fn(x):
+            return x.sum()
+
+        x = torch.rand([31], device=GPU_TYPE)
+
+        with V.set_choices_handler(ForcePersistent()):
+            torch._dynamo.mark_dynamic(x, 0, min=1, max=62)
+            fn_c = torch.compile(fn)
+            actual, source_codes = run_and_get_code(fn_c, x)
+            self.assertEqual(fn(x), actual)
+            FileCheck().check("R0_BLOCK: tl.constexpr = 64").run(source_codes[0])
+            torch._dynamo.reset()
+
+            torch._dynamo.mark_dynamic(x, 2, min=1, max=64)
+            fn_c = torch.compile(fn)
+            actual, source_codes = run_and_get_code(fn_c, x)
+            self.assertEqual(fn(x), actual)
+            FileCheck().check("R0_BLOCK: tl.constexpr = 64").run(source_codes[0])
 
     def test_unspecialized_float_dynamic(self):
         def fn(x, y):

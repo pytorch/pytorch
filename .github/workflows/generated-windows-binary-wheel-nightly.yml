@@ -752,7 +752,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
-  wheel-py3_10-cuda12_9-build:
+  wheel-py3_10-cuda13_0-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
@@ -762,8 +762,8 @@ jobs:
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: "12.9"
+      DESIRED_CUDA: cu130
+      GPU_ARCH_VERSION: "13.0"
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.10"
@@ -844,7 +844,7 @@ jobs:
       - uses: actions/upload-artifact@v4.4.0
         if: always()
         with:
-          name: wheel-py3_10-cuda12_9
+          name: wheel-py3_10-cuda13_0
           retention-days: 14
           if-no-files-found: error
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
@@ -862,10 +862,10 @@ jobs:
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
 
-  wheel-py3_10-cuda12_9-test:  # Testing
+  wheel-py3_10-cuda13_0-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
-      - wheel-py3_10-cuda12_9-build
+      - wheel-py3_10-cuda13_0-build
       - get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
     timeout-minutes: 360
@@ -874,8 +874,8 @@ jobs:
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: "12.9"
+      DESIRED_CUDA: cu130
+      GPU_ARCH_VERSION: "13.0"
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.10"
@@ -948,7 +948,7 @@ jobs:
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
-          name: wheel-py3_10-cuda12_9
+          name: wheel-py3_10-cuda13_0
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Populate binary env
         shell: bash
@@ -971,22 +971,22 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  wheel-py3_10-cuda12_9-upload:  # Uploading
+  wheel-py3_10-cuda13_0-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
       contents: read
-    needs: wheel-py3_10-cuda12_9-test
+    needs: wheel-py3_10-cuda13_0-test
     with:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: "12.9"
+      DESIRED_CUDA: cu130
+      GPU_ARCH_VERSION: "13.0"
       GPU_ARCH_TYPE: cuda
       DESIRED_PYTHON: "3.10"
-      build_name: wheel-py3_10-cuda12_9
+      build_name: wheel-py3_10-cuda13_0
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
@@ -1937,7 +1937,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
-  wheel-py3_11-cuda12_9-build:
+  wheel-py3_11-cuda13_0-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
@@ -1947,8 +1947,8 @@ jobs:
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: "12.9"
+      DESIRED_CUDA: cu130
+      GPU_ARCH_VERSION: "13.0"
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.11"
@@ -2029,7 +2029,7 @@ jobs:
       - uses: actions/upload-artifact@v4.4.0
         if: always()
         with:
-          name: wheel-py3_11-cuda12_9
+          name: wheel-py3_11-cuda13_0
           retention-days: 14
           if-no-files-found: error
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
@@ -2047,10 +2047,10 @@ jobs:
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
 
-  wheel-py3_11-cuda12_9-test:  # Testing
+  wheel-py3_11-cuda13_0-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
-      - wheel-py3_11-cuda12_9-build
+      - wheel-py3_11-cuda13_0-build
       - get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
     timeout-minutes: 360
@@ -2059,8 +2059,8 @@ jobs:
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: "12.9"
+      DESIRED_CUDA: cu130
+      GPU_ARCH_VERSION: "13.0"
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.11"
@@ -2133,7 +2133,7 @@ jobs:
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
-          name: wheel-py3_11-cuda12_9
+          name: wheel-py3_11-cuda13_0
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Populate binary env
         shell: bash
@@ -2156,22 +2156,22 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  wheel-py3_11-cuda12_9-upload:  # Uploading
+  wheel-py3_11-cuda13_0-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
       contents: read
-    needs: wheel-py3_11-cuda12_9-test
+    needs: wheel-py3_11-cuda13_0-test
     with:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: "12.9"
+      DESIRED_CUDA: cu130
+      GPU_ARCH_VERSION: "13.0"
       GPU_ARCH_TYPE: cuda
       DESIRED_PYTHON: "3.11"
-      build_name: wheel-py3_11-cuda12_9
+      build_name: wheel-py3_11-cuda13_0
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
@@ -3122,7 +3122,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
-  wheel-py3_12-cuda12_9-build:
+  wheel-py3_12-cuda13_0-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
@@ -3132,8 +3132,8 @@ jobs:
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: "12.9"
+      DESIRED_CUDA: cu130
+      GPU_ARCH_VERSION: "13.0"
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.12"
@@ -3214,7 +3214,7 @@ jobs:
       - uses: actions/upload-artifact@v4.4.0
         if: always()
         with:
-          name: wheel-py3_12-cuda12_9
+          name: wheel-py3_12-cuda13_0
           retention-days: 14
           if-no-files-found: error
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
@@ -3232,10 +3232,10 @@ jobs:
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
 
-  wheel-py3_12-cuda12_9-test:  # Testing
+  wheel-py3_12-cuda13_0-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
-      - wheel-py3_12-cuda12_9-build
+      - wheel-py3_12-cuda13_0-build
       - get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
     timeout-minutes: 360
@@ -3244,8 +3244,8 @@ jobs:
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: "12.9"
+      DESIRED_CUDA: cu130
+      GPU_ARCH_VERSION: "13.0"
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.12"
@@ -3318,7 +3318,7 @@ jobs:
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
-          name: wheel-py3_12-cuda12_9
+          name: wheel-py3_12-cuda13_0
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Populate binary env
         shell: bash
@@ -3341,22 +3341,22 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  wheel-py3_12-cuda12_9-upload:  # Uploading
+  wheel-py3_12-cuda13_0-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
       contents: read
-    needs: wheel-py3_12-cuda12_9-test
+    needs: wheel-py3_12-cuda13_0-test
     with:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: "12.9"
+      DESIRED_CUDA: cu130
+      GPU_ARCH_VERSION: "13.0"
       GPU_ARCH_TYPE: cuda
       DESIRED_PYTHON: "3.12"
-      build_name: wheel-py3_12-cuda12_9
+      build_name: wheel-py3_12-cuda13_0
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
@@ -4307,7 +4307,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
-  wheel-py3_13-cuda12_9-build:
+  wheel-py3_13-cuda13_0-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
@@ -4317,8 +4317,8 @@ jobs:
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: "12.9"
+      DESIRED_CUDA: cu130
+      GPU_ARCH_VERSION: "13.0"
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.13"
@@ -4399,7 +4399,7 @@ jobs:
       - uses: actions/upload-artifact@v4.4.0
         if: always()
         with:
-          name: wheel-py3_13-cuda12_9
+          name: wheel-py3_13-cuda13_0
           retention-days: 14
           if-no-files-found: error
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
@@ -4417,10 +4417,10 @@ jobs:
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
 
-  wheel-py3_13-cuda12_9-test:  # Testing
+  wheel-py3_13-cuda13_0-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
-      - wheel-py3_13-cuda12_9-build
+      - wheel-py3_13-cuda13_0-build
       - get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
     timeout-minutes: 360
@@ -4429,8 +4429,8 @@ jobs:
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: "12.9"
+      DESIRED_CUDA: cu130
+      GPU_ARCH_VERSION: "13.0"
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.13"
@@ -4503,7 +4503,7 @@ jobs:
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
-          name: wheel-py3_13-cuda12_9
+          name: wheel-py3_13-cuda13_0
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Populate binary env
         shell: bash
@@ -4526,22 +4526,22 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  wheel-py3_13-cuda12_9-upload:  # Uploading
+  wheel-py3_13-cuda13_0-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
       contents: read
-    needs: wheel-py3_13-cuda12_9-test
+    needs: wheel-py3_13-cuda13_0-test
     with:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: "12.9"
+      DESIRED_CUDA: cu130
+      GPU_ARCH_VERSION: "13.0"
       GPU_ARCH_TYPE: cuda
       DESIRED_PYTHON: "3.13"
-      build_name: wheel-py3_13-cuda12_9
+      build_name: wheel-py3_13-cuda13_0
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
@@ -5492,7 +5492,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
-  wheel-py3_13t-cuda12_9-build:
+  wheel-py3_13t-cuda13_0-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
@@ -5502,8 +5502,8 @@ jobs:
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: "12.9"
+      DESIRED_CUDA: cu130
+      GPU_ARCH_VERSION: "13.0"
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.13t"
@@ -5584,7 +5584,7 @@ jobs:
       - uses: actions/upload-artifact@v4.4.0
         if: always()
         with:
-          name: wheel-py3_13t-cuda12_9
+          name: wheel-py3_13t-cuda13_0
           retention-days: 14
           if-no-files-found: error
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
@@ -5602,10 +5602,10 @@ jobs:
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
 
-  wheel-py3_13t-cuda12_9-test:  # Testing
+  wheel-py3_13t-cuda13_0-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
-      - wheel-py3_13t-cuda12_9-build
+      - wheel-py3_13t-cuda13_0-build
       - get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
     timeout-minutes: 360
@@ -5614,8 +5614,8 @@ jobs:
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: "12.9"
+      DESIRED_CUDA: cu130
+      GPU_ARCH_VERSION: "13.0"
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.13t"
@@ -5688,7 +5688,7 @@ jobs:
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
-          name: wheel-py3_13t-cuda12_9
+          name: wheel-py3_13t-cuda13_0
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Populate binary env
         shell: bash
@@ -5711,22 +5711,22 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  wheel-py3_13t-cuda12_9-upload:  # Uploading
+  wheel-py3_13t-cuda13_0-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
       contents: read
-    needs: wheel-py3_13t-cuda12_9-test
+    needs: wheel-py3_13t-cuda13_0-test
     with:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: "12.9"
+      DESIRED_CUDA: cu130
+      GPU_ARCH_VERSION: "13.0"
       GPU_ARCH_TYPE: cuda
       DESIRED_PYTHON: "3.13t"
-      build_name: wheel-py3_13t-cuda12_9
+      build_name: wheel-py3_13t-cuda13_0
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
@@ -6677,7 +6677,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
-  wheel-py3_14-cuda12_9-build:
+  wheel-py3_14-cuda13_0-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
@@ -6687,8 +6687,8 @@ jobs:
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: "12.9"
+      DESIRED_CUDA: cu130
+      GPU_ARCH_VERSION: "13.0"
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.14"
@@ -6769,7 +6769,7 @@ jobs:
       - uses: actions/upload-artifact@v4.4.0
         if: always()
         with:
-          name: wheel-py3_14-cuda12_9
+          name: wheel-py3_14-cuda13_0
           retention-days: 14
           if-no-files-found: error
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
@@ -6787,10 +6787,10 @@ jobs:
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
 
-  wheel-py3_14-cuda12_9-test:  # Testing
+  wheel-py3_14-cuda13_0-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
-      - wheel-py3_14-cuda12_9-build
+      - wheel-py3_14-cuda13_0-build
       - get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
     timeout-minutes: 360
@@ -6799,8 +6799,8 @@ jobs:
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: "12.9"
+      DESIRED_CUDA: cu130
+      GPU_ARCH_VERSION: "13.0"
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.14"
@@ -6873,7 +6873,7 @@ jobs:
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
-          name: wheel-py3_14-cuda12_9
+          name: wheel-py3_14-cuda13_0
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Populate binary env
         shell: bash
@@ -6896,22 +6896,22 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  wheel-py3_14-cuda12_9-upload:  # Uploading
+  wheel-py3_14-cuda13_0-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
       contents: read
-    needs: wheel-py3_14-cuda12_9-test
+    needs: wheel-py3_14-cuda13_0-test
     with:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: "12.9"
+      DESIRED_CUDA: cu130
+      GPU_ARCH_VERSION: "13.0"
       GPU_ARCH_TYPE: cuda
       DESIRED_PYTHON: "3.14"
-      build_name: wheel-py3_14-cuda12_9
+      build_name: wheel-py3_14-cuda13_0
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
@@ -7862,7 +7862,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
-  wheel-py3_14t-cuda12_9-build:
+  wheel-py3_14t-cuda13_0-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
@@ -7872,8 +7872,8 @@ jobs:
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: "12.9"
+      DESIRED_CUDA: cu130
+      GPU_ARCH_VERSION: "13.0"
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.14t"
@@ -7954,7 +7954,7 @@ jobs:
       - uses: actions/upload-artifact@v4.4.0
         if: always()
         with:
-          name: wheel-py3_14t-cuda12_9
+          name: wheel-py3_14t-cuda13_0
           retention-days: 14
           if-no-files-found: error
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
@@ -7972,10 +7972,10 @@ jobs:
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
 
-  wheel-py3_14t-cuda12_9-test:  # Testing
+  wheel-py3_14t-cuda13_0-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
-      - wheel-py3_14t-cuda12_9-build
+      - wheel-py3_14t-cuda13_0-build
       - get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
     timeout-minutes: 360
@@ -7984,8 +7984,8 @@ jobs:
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: "12.9"
+      DESIRED_CUDA: cu130
+      GPU_ARCH_VERSION: "13.0"
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.14t"
@@ -8058,7 +8058,7 @@ jobs:
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
-          name: wheel-py3_14t-cuda12_9
+          name: wheel-py3_14t-cuda13_0
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Populate binary env
         shell: bash
@@ -8081,22 +8081,22 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  wheel-py3_14t-cuda12_9-upload:  # Uploading
+  wheel-py3_14t-cuda13_0-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
       contents: read
-    needs: wheel-py3_14t-cuda12_9-test
+    needs: wheel-py3_14t-cuda13_0-test
     with:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: "12.9"
+      DESIRED_CUDA: cu130
+      GPU_ARCH_VERSION: "13.0"
       GPU_ARCH_TYPE: cuda
       DESIRED_PYTHON: "3.14t"
-      build_name: wheel-py3_14t-cuda12_9
+      build_name: wheel-py3_14t-cuda13_0
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
