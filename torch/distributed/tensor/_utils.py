@@ -169,7 +169,6 @@ def _compute_local_shape_and_global_offset(
 
             local_shape[shard_dim] = shard_size
 
-
             global_offset[shard_dim] = torch.sym_ite(
                 shard_size == 0,
                 # Special case to fill in a standardized non-garbage value for
