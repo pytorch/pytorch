@@ -89,7 +89,8 @@ variable_list AccumulateGrad_apply_functional_no_hooks_ivalue(
 // ASAP during backwards.
 AccumulateGrad::AccumulateGrad(Variable variable_)
     : Node(/*sequence_nr=*/UINT64_MAX), variable(std::move(variable_)) {
-  add_input_metadata(variable);
+  add_input_metadata(
+      variable, variable.grad_dtype(), variable.allow_grad_dtype_mismatch());
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
