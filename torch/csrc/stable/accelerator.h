@@ -5,9 +5,9 @@
 
 #include <memory>
 
-namespace torch::stable::accelerator {
-
 using DeleterFnPtr = void (*)(void*);
+
+namespace torch::stable::accelerator {
 
 namespace {
 inline void delete_device_guard(void* ptr) {
