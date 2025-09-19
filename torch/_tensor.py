@@ -1750,12 +1750,7 @@ class Tensor(torch._C.TensorBase):
             is_cuda = not is_rocm
 
             if stream is None:
-                if torch.cuda.is_current_stream_capturing():
-                    # During capture, default-stream ops would invalidate capture.
-                    # Route to the current (capturing) stream instead.
-                    stream = torch.cuda.current_stream()
-                else:
-                    stream = torch.cuda.default_stream()
+                stream = torch.cuda.current_stream()
             elif (is_rocm and stream == 0) or (is_cuda and stream == 1):
                 stream = torch.cuda.default_stream()
             else:
