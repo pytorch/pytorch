@@ -734,9 +734,7 @@ def flex_attention_backward(*args, **kwargs):
 
     original_kernel_options = kernel_options.copy()
 
-    from tqdm import tqdm
-
-    for conf in tqdm(configs):
+    for conf in configs:
         if (
             SPARSE_KV_BLOCK_SIZE % conf.block_m1 != 0
             or SPARSE_Q_BLOCK_SIZE % conf.block_m2 != 0
