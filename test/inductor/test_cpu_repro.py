@@ -4348,6 +4348,19 @@ class CPUReproTests(TestCase):
                 actual = compiled_m(x)
                 self.assertEqual(expected, actual)
 
+        # test scalar welford_reduce
+        with config.patch({"cpp.simdlen": 0}):
+            for dynamic in [True, False]:
+                torch._dynamo.reset()
+                metrics.reset()
+                mod = M().eval()
+                x = torch.randn(1, 32, 128, 128, 128)
+                with torch.no_grad():
+                    expected = mod(x)
+                    compiled_m = torch.compile(mod, dynamic=dynamic)
+                    actual = compiled_m(x)
+                    self.assertEqual(expected, actual)
+
     def test_int_div_vec(self):
         def fn(x, y, mode):
             return torch.div(x, y, rounding_mode=mode)
