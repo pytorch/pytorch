@@ -172,9 +172,9 @@ def run_single_experiment(config: ExperimentConfig) -> ExperimentResults:
         out_torch = scaled_dot_product_attention(
             q, k, v, is_causal=is_causal, attn_mask=None
         )
-        dOut = torch.randn_like(out_torch)
+        d_out = torch.randn_like(out_torch)
         backward_time = benchmark_cuda_function_in_microseconds(
-            out_torch.backward, dOut, retain_graph=True
+            out_torch.backward, d_out, retain_graph=True
         )
 
     # Calculate TFLOPS for forward and backward passes

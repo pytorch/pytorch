@@ -70,7 +70,7 @@ def observe_garbage(observer):
         gc.callbacks.remove(gc_callback)
     return remove
 
-# Function to visualize cycles adapated from refcycle:
+# Function to visualize cycles adapted from refcycle:
 # Copyright 2013 Mark Dickinson
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -336,7 +336,7 @@ def cuda_allocation_context():
 def to_dot(nodes):
     lines = ["digraph GraphName {", "node [shape=rect];", 'rankdir=LR;']
     for i, n in enumerate(nodes):
-        lines.append(f'{i} [label={escape(n.label)}, color={ "red" if n.root else "black"}];')
+        lines.append(f'{i} [label={escape(n.label)}, color={"red" if n.root else "black"}];')
 
     for i, f in enumerate(nodes):
         for label, j in f.referrents:
@@ -482,7 +482,7 @@ def warn_tensor_cycles():
     Install a warning that reports whenever a cycle that is holding CUDA memory is observed.
 
     The warning produces an .html file that visualizes the cycle,
-    and links it to the stack frame that allocted the CUDA tensor.
+    and links it to the stack frame that allocated the CUDA tensor.
 
     Reference cycles are freed by the cycle collector rather than being cleaned up
     when the objects in the cycle first become unreachable. If a cycle points to a tensor,

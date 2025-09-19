@@ -44,8 +44,7 @@ Your transform will take in a {class}`torch.nn.Module`, acquire a {class}`Graph`
 from it, do some modifications, and return a new
 {class}`torch.nn.Module`. You should think of the {class}`torch.nn.Module` that your FX
 transform returns as identical to a regular {class}`torch.nn.Module` -- you can pass it to another
-FX transform, you can pass it to TorchScript, or you can
-run it. Ensuring that the inputs and outputs of your FX transform are a
+FX transform, or you can run it. Ensuring that the inputs and outputs of your FX transform are a
 {class}`torch.nn.Module` will allow for composability.
 
 ```{note}

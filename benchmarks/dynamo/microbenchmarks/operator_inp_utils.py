@@ -274,7 +274,7 @@ class OperatorInputsLoader:
             yield
             return
 
-        # line[1] represents number of times these inputs occured, ignored for now
+        # line[1] represents number of times these inputs occurred, ignored for now
         for line in self.operator_db[str(operator)].items():
             inps = line[0]
 

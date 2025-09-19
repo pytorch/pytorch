@@ -139,6 +139,15 @@ PyObject* dynamo__custom_eval_frame(
 
   auto fail = [&]() { clear_old_frame_if_python_312_plus(tstate, frame); };
 
+#if IS_PYTHON_3_12_PLUS
+  // skip tracing the frame if CPython is in a tracing state (e.g.
+  // sys.monitoring call)
+  if (tstate->tracing > 0) {
+    eval_default();
+    return eval_result;
+  }
+#endif
+
   ExtraState* extra = get_extra_state(F_CODE(frame));
 
   if (callback.is(py::bool_(false)) && extra == nullptr) {
@@ -294,7 +303,7 @@ PyObject* dynamo__custom_eval_frame(
     // NB: We could use extract_cache_entry to get the cache_entry, but
     // extract_cache_entry returns a borrowed reference. Modifying a borrowed
     // reference seems wrong. Therefore, we directly access the
-    // extra->cache_entry. extra wont be NULL here.
+    // extra->cache_entry. extra won't be NULL here.
     CacheEntry* new_cache_entry =
         create_cache_entry(extra, guarded_code, backend);
 
@@ -334,4 +343,15 @@ PyObject* set_code_exec_strategy(PyObject* dummy, PyObject* args) {
 
   extra_state_set_exec_strategy(extra, strategy);
   Py_RETURN_NONE;
+}
+
+void skip_code_recursive(PyCodeObject* code) {
+  ExtraState* extra = get_extra_state(code);
+  if (extra == nullptr) {
+    extra = init_and_set_extra_state(code);
+  }
+
+  FrameExecStrategy strategy =
+      FrameExecStrategy{FrameAction::SKIP, FrameAction::SKIP};
+  extra_state_set_exec_strategy(extra, strategy);
 }

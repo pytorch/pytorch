@@ -192,7 +192,9 @@ class Vectorized16 {
   static constexpr size_type size() {
     return 32;
   }
-  Vectorized16() {}
+  Vectorized16() {
+    values = _mm512_setzero_si512();
+  }
   Vectorized16(__m512i v) : values(v) {}
   Vectorized16(T val) {
     value_type uw = val.x;
@@ -534,6 +536,9 @@ class Vectorized16 {
   }
   Vectorized<T> expm1() const {
     return map(Sleef_expm1f16_u10);
+  }
+  Vectorized<T> fexp_u20() const {
+    return exp();
   }
   Vectorized<T> exp_u20() const {
     return exp();

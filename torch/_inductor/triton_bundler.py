@@ -109,7 +109,7 @@ class TritonBundler:
     _static_autotuners: Optional[list[StaticallyLaunchedAutotuner]] = None
 
     # __grp__kernel_name.json contains metadata with source code paths
-    # we use this as sentinal value for search and replace
+    # we use this as sentinel value for search and replace
     _REPLACE_BYTES: bytes = b"[REPLACE]"
 
     @staticmethod
@@ -183,14 +183,9 @@ class TritonBundler:
                     new_kernel,
                 )
             )
+
             # Put the values back since we need it to use now
-            (
-                kernel.fn.fn,
-                kernel.fn.__globals__,
-                kernel.fn.used_global_vals,
-                kernel.fn.repr,
-                kernel.launchers,
-            ) = old_values
+            kernel.restore_after_unpickle(old_values)
 
     @classmethod
     def collect_static_autotuners(

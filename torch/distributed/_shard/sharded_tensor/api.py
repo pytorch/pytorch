@@ -515,7 +515,7 @@ class ShardedTensor(ShardedTensorBase):
 
         .. note:: When moving a ShardedTensor from GPU to CPU, the ShardedTensor might
             need to be managed by a different type of ProcessGroup(i.e. ProcessGroupGloo),
-            it is the user's responsiblity to explicitly pass in a new process_group that
+            it is the user's responsibility to explicitly pass in a new process_group that
             is compatible with CPU.
         """
         # TODO: make this a __torch_function__ op once ShardedTensor becomes a
@@ -575,7 +575,7 @@ class ShardedTensor(ShardedTensorBase):
         metadata, but no underlying data movements are performed.
         .. note:: When moving a ShardedTensor from CPU to GPU, the ShardedTensor might
             need to be managed by a different type of ProcessGroup(i.e. ProcessGroupNCCL),
-            it is the user's responsiblity to explicitly pass in a new process_group that
+            it is the user's responsibility to explicitly pass in a new process_group that
             is compatible with GPU.
         """
         if (
@@ -1146,8 +1146,12 @@ class ShardedTensor(ShardedTensorBase):
             resharding_spec, shard_spec.ChunkShardingSpec
         ) or not isinstance(self._sharding_spec, shard_spec.ChunkShardingSpec):
             raise NotImplementedError("Only ChunkShardingSpec supported for reshard.")
-        if len(self.local_shards()) != 1:
-            raise NotImplementedError("Only single local shard supported for reshard.")
+
+        num_local_shards = len(self.local_shards())
+        if num_local_shards != 1:
+            raise NotImplementedError(
+                f"Only single local shard supported for reshard. Number of shards: {num_local_shards}"
+            )
 
         if self._sharding_spec.dim == resharding_spec.dim:  # type: ignore[attr-defined]
             if self._sharding_spec.placements == resharding_spec.placements:  # type: ignore[attr-defined]
@@ -1180,8 +1184,11 @@ class ShardedTensor(ShardedTensorBase):
         Returns:
             A :class:`torch.Tensor` of the local shard.
         """
-        if len(self.local_shards()) != 1:
-            raise NotImplementedError("Only single local shard is supported.")
+        num_local_shards = len(self.local_shards())
+        if num_local_shards != 1:
+            raise NotImplementedError(
+                f"Only single local shard is supported. Number of shards: {num_local_shards}"
+            )
         return self.local_shards()[0].tensor
 
     @classmethod

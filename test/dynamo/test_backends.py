@@ -8,7 +8,6 @@ import torch._dynamo
 import torch._dynamo.backends
 import torch._dynamo.test_case
 from torch._dynamo.backends.debugging import ExplainWithBackend
-from torch._dynamo.backends.onnxrt import has_onnxruntime
 from torch._dynamo.backends.tvm import has_tvm
 from torch._dynamo.testing import same
 from torch.fx._lazy_graph_module import _force_skip_lazy_graph_module
@@ -17,10 +16,7 @@ from torch.testing._internal.common_device_type import (
     onlyHPU,
 )
 from torch.testing._internal.common_utils import skipIfHpu
-from torch.testing._internal.inductor_utils import HAS_CUDA
-
-
-requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
+from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
 
 class Seq(torch.nn.Module):
@@ -134,13 +130,9 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
     def test_aot_ts(self, device):
         self._check_backend_works("aot_ts", device)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     def test_aot_cudagraphs(self, device):
         self._check_backend_works("cudagraphs", device)
-
-    @unittest.skipIf(not has_onnxruntime(), "requires onnxruntime")
-    def test_onnxrt(self, device):
-        self._check_backend_works("onnxrt", device)
 
     @unittest.skipIf(not has_tvm(), "requires tvm")
     def test_tvm(self, device):

@@ -42,14 +42,6 @@ CamemBert,pass,0
 
 
 
-DebertaForMaskedLM,pass,0
-
-
-
-DebertaForQuestionAnswering,pass,0
-
-
-
 DebertaV2ForMaskedLM,pass_due_to_skip,0
 
 
@@ -66,7 +58,7 @@ DistilBertForQuestionAnswering,pass,0
 
 
 
-DistillGPT2,pass,0
+DistillGPT2,pass,2
 
 
 
@@ -154,10 +146,6 @@ RobertaForQuestionAnswering,pass,0
 
 
 
-Speech2Text2ForCausalLM,pass,0
-
-
-
 T5ForConditionalGeneration,pass,0
 
 
@@ -179,3 +167,23 @@ XLNetLMHeadModel,pass,0
 
 
 YituTechConvBert,pass,0
+
+
+
+meta-llama/Llama-3.2-1B,fail_accuracy,0
+
+
+
+google/gemma-2-2b,fail_accuracy,0
+
+
+
+google/gemma-3-4b-it,fail_accuracy,0
+
+
+
+openai/whisper-tiny,fail_to_run,0
+
+
+
+Qwen/Qwen3-0.6B,fail_accuracy,0

@@ -20,10 +20,10 @@ namespace c10d {
 // (minor when adding fields, major when changing existing fields)
 // Also update both JSON and Pickle dumps to make use of the newly defined
 // field(s).
-DEFINE_CONSTANT(version_val, "2.8")
+DEFINE_CONSTANT(version_val, "2.10")
 DEFINE_CONSTANT(entries_key, "entries")
 DEFINE_CONSTANT(nccl_comm_key, "nccl_comm_state")
-DEFINE_CONSTANT(nccl_version_key, "nccl_version")
+DEFINE_CONSTANT(comm_lib_version_key, "comm_lib_version")
 DEFINE_CONSTANT(version_key, "version")
 DEFINE_CONSTANT(pg_config_key, "pg_config")
 DEFINE_CONSTANT(pg_status_key, "pg_status")
@@ -145,7 +145,7 @@ struct FlightRecorder {
     std::optional<c10::time_t> time_discovered_started_;
 
     // timestamp when our CPU threads discovered that the kernel completed.
-    // will always be _after_ it actually complated, and can be the same time
+    // will always be _after_ it actually completed, and can be the same time
     // as the discovery of the start if the watchdog thread is stuck on CUDA
     // APIs
     std::optional<c10::time_t> time_discovered_completed_;
@@ -179,7 +179,7 @@ struct FlightRecorder {
   std::map<size_t, std::shared_ptr<ProcessGroupStatus>> all_pg_status_ = {};
   std::map<std::tuple<std::string, std::string>, std::vector<uint64_t>>
       pg_name_to_ranks_ = {};
-  std::string nccl_version_;
+  std::string comm_lib_version_;
 
   std::optional<size_t> record(
       size_t pg_id,
@@ -200,7 +200,7 @@ struct FlightRecorder {
       const std::tuple<std::string, std::string>& pg_name,
       std::vector<uint64_t> ranks);
 
-  void record_accelerator_version(const std::string nccl_version);
+  void record_accelerator_version(const std::string comm_lib_version);
 
   void update_state(Entry& r);
 

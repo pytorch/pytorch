@@ -49,7 +49,10 @@ def trace_call_delegate(proxy_mode, func_overload, lowered_module, *args):
         if not isinstance(e, (torch.Tensor, torch.SymInt, torch.SymFloat)):
             return e
         return get_proxy_slot(
-            cast(torch.Tensor, e), proxy_mode.tracer, e, lambda e: e.proxy  # type: ignore[attr-defined]
+            cast(torch.Tensor, e),
+            proxy_mode.tracer,
+            e,
+            lambda e: e.proxy,  # type: ignore[attr-defined]
         )
 
     if not is_lowered_module(lowered_module):

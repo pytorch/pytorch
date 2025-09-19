@@ -156,7 +156,6 @@ class MetalShaderLibrary {
       MTLLibrary_t lib,
       const std::string& fname);
   MTLLibrary_t compileLibrary(const std::string& src);
-  void bind_tensors(MTLComputeCommandEncoder_t, TensorIteratorBase&);
   std::string shaderSource;
   unsigned nparams;
   MTLCompileOptions* compile_options;

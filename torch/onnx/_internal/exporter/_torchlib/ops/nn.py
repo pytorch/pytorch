@@ -58,6 +58,33 @@ def aten_group_norm(
     )
 
 
+@onnx_impl(aten.rms_norm.default, trace_only=True, opset_introduced=23)
+def aten_rms_norm(
+    input: TFloat,
+    normalized_shape: list[int],
+    weight: Optional[TFloat] = None,
+    eps: Optional[float] = None,
+) -> TFloat:
+    """rms_norm(Tensor input, SymInt[] normalized_shape, Tensor? weight=None, float? eps=None) -> Tensor"""
+
+    # Default eps value if not provided
+    if eps is None:
+        eps = torch.finfo(torch.float).eps  # Observed from decomp
+
+    # Calculate axis: the first normalization dimension
+    # For normalized_shape with D dimensions, normalize over last D dimensions
+    # Since ONNX RMSNormalization supports negative axis values, we use -len(normalized_shape)
+    # which correctly maps to the first axis of the normalized dimensions
+    normalized_dims = len(normalized_shape)
+    axis = -normalized_dims
+
+    # Create weight tensor if not provided
+    if weight is None:
+        weight = op23.Constant(value=ir.tensor(1.0, dtype=input.dtype))
+
+    return op23.RMSNormalization(input, weight, axis=axis, epsilon=eps)
+
+
 @onnx_impl(
     aten.scaled_dot_product_attention.default, trace_only=True, opset_introduced=23
 )
@@ -77,7 +104,7 @@ def aten_scaled_dot_product_attention_23(
         1. https://pytorch.org/docs/stable/generated/torch.nn.functional.scaled_dot_product_attention.html
         2. https://onnx.ai/onnx/operators/onnx__Attention.html
 
-    Attempts to convert SDPA to Attention onnx op and fallbacks to an onnx graph equivivalent to the following PyTorch code::
+    Attempts to convert SDPA to Attention onnx op and fallbacks to an onnx graph equivalent to the following PyTorch code::
         scale_factor = 1 / math.sqrt(Q.size(-1)) if scale is None else scale
         attn_mask = (
             torch.ones(L, S, dtype=torch.bool).tril(diagonal=0)
@@ -101,6 +128,9 @@ def aten_scaled_dot_product_attention_23(
     assert (not is_causal) or (is_causal and attn_mask is None), (
         "is_causal and attn_mask cannot be set at the same time"
     )
+    assert len(query.shape) == 4 and len(key.shape) == 4 and len(value.shape) == 4, (
+        "only 4D query, key, and value are supported"
+    )
 
     # Attention onnx op can only handle non-training scenarios where dropout is disabled.
     if dropout_p == 0:
@@ -115,14 +145,20 @@ def aten_scaled_dot_product_attention_23(
             assert query.shape[1] == key.shape[1] == value.shape[1], (
                 "SDPA (MHA) requires q_num_heads = kv_num_heads"
             )
+
+        # NOTE: num_heads attributes (q_num_heads/kv_num_heads) should not be specified for 4D.
+        # They are not populated with 4D inputs because this information directly comes from input shapes:
+        # `q_num_heads=query.shape[1]` and `kv_num_heads=key.shape[1]`.
+        # This dimension is usually static but it could not be dynamic if also given as an attribute.
+        # num_heads attributes are needed for 3D attention inputs:
+        # (shape: [B, S, N*H]), 4D shape is ([B, N, S, H]).
+
         Y, _, _, _ = op23.Attention(
             query,
             key,
             value,
             attn_mask=attn_mask,
             scale=scale,
-            q_num_heads=query.shape[3],
-            kv_num_heads=key.shape[3],
             is_causal=is_causal,
         )
         return Y
@@ -134,6 +170,9 @@ def aten_scaled_dot_product_attention_23(
     if is_causal:
         attn_mask = _causal_attention_mask(query, key, op23)
 
+    if enable_gqa:
+        key, value = _attention_repeat_kv_for_group_query(query, key, value, op23)
+
     if attn_mask is None:
         return _aten_scaled_dot_product_attention_no_mask_onnx(
             query, key, value, scale, dropout_p, op23
@@ -142,6 +181,67 @@ def aten_scaled_dot_product_attention_23(
     return _aten_scaled_dot_product_attention_float_mask_onnx(
         query, key, value, attn_mask, scale, dropout_p, op23
     )
+
+
+def _attention_repeat_kv_for_group_query(
+    query: TFloat, key: TFloat, value: TFloat, op: Opset
+) -> tuple[TFloat, TFloat]:
+    """Expand key and value for group query attention.
+
+    repeat_interleave is applied on key and value to match the number of heads in query.
+
+    Args:
+        query: Tensor of shape [B, q_num_heads, q_S, E]
+        key: Tensor of shape [B, k_num_heads, kv_S, E]
+        value: Tensor of shape [B, v_num_heads, kv_S, E]
+
+    Returns:
+        Tuple of (expanded_key, expanded_value) where:
+            - expanded_key: Tensor of shape [B, q_num_heads, kv_S, E]
+            - expanded_value: Tensor of shape [B, q_num_heads, kv_S, E
+    """
+
+    assert (
+        query.shape[1] > key.shape[1] == value.shape[1]
+        and query.shape[1] % key.shape[1] == 0
+    ), (
+        "SDPA (GQA or MQA) requires q_num_heads > kv_num_heads & q_num_heads % kv_num_heads == 0"
+    )
+
+    # NOTE: QKV are expected to be 4D tensors
+
+    batch_size = op.Shape(query, start=0, end=1)  # [B]
+    q_num_heads = op.Shape(query, start=1, end=2)  # [Hq]
+    kv_num_heads = op.Shape(key, start=1, end=2)  # [Hk]
+    qk_head_size = op.Shape(key, start=3, end=4)  # [Dk]
+    v_head_size = op.Shape(value, start=3, end=4)  # [Dv]
+    new_kv_seq_len = op.Shape(key, start=2, end=3)  # [T]
+
+    interleave_dim = op.Div(q_num_heads, kv_num_heads)  # Hq / Hk
+    two = op.Constant(value_int=2)
+    k_unsqueezed = op.Unsqueeze(key, two)  # [B, Hk, 1, T, Dk]
+    v_unsqueezed = op.Unsqueeze(value, two)  # [B, Hv, 1, T, Dv]
+
+    k_expand_shape = op.Concat(
+        batch_size, kv_num_heads, interleave_dim, new_kv_seq_len, qk_head_size, axis=0
+    )
+    k_expand = op.Expand(k_unsqueezed, k_expand_shape)
+    v_expand_shape = op.Concat(
+        batch_size, kv_num_heads, interleave_dim, new_kv_seq_len, v_head_size, axis=0
+    )
+    v_expand = op.Expand(v_unsqueezed, v_expand_shape)
+
+    k_attention_shape = op.Concat(
+        batch_size, q_num_heads, new_kv_seq_len, qk_head_size, axis=0
+    )
+    v_attention_shape = op.Concat(
+        batch_size, q_num_heads, new_kv_seq_len, v_head_size, axis=0
+    )
+
+    expanded_key = op.Reshape(k_expand, k_attention_shape)
+    expanded_value = op.Reshape(v_expand, v_attention_shape)
+
+    return expanded_key, expanded_value
 
 
 def _attention_scale(query: TFloat, op: Opset) -> TFloat:

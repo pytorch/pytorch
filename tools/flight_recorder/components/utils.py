@@ -115,13 +115,19 @@ def match_coalesced_groups(
             for r in all_ops:
                 if len(all_ops[r]) > i:
                     rank, event = all_rank_events[r][i]
-                    row.append(
-                        Op(
-                            event,
-                            memberships,
-                            _pg_guids[(event["process_group"][0], rank)],
+                    # Check if the pg_guid exists for this rank and process group
+                    pg_key = (event["process_group"][0], rank)
+                    if pg_key in _pg_guids:
+                        row.append(
+                            Op(
+                                event,
+                                memberships,
+                                _pg_guids[pg_key],
+                            )
                         )
-                    )
+                    else:
+                        # Skip this entry if pg_guid mapping doesn't exist
+                        row.append(None)  # type: ignore[arg-type]
                     progress = True
                 else:
                     row.append(None)  # type: ignore[arg-type]
@@ -244,13 +250,19 @@ def match_coalesced_groups_with_non_p2p(
             for r in all_ops:
                 if len(all_ops[r]) > i:
                     rank, event = all_rank_events[r][i]
-                    row.append(
-                        Op(
-                            event,
-                            memberships,
-                            _pg_guids[(event["process_group"][0], rank)],
+                    # Check if the pg_guid exists for this rank and process group
+                    pg_key = (event["process_group"][0], rank)
+                    if pg_key in _pg_guids:
+                        row.append(
+                            Op(
+                                event,
+                                memberships,
+                                _pg_guids[pg_key],
+                            )
                         )
-                    )
+                    else:
+                        # Skip this entry if pg_guid mapping doesn't exist
+                        row.append(None)  # type: ignore[arg-type]
                     progress = True
                 else:
                     row.append(None)  # type: ignore[arg-type]
@@ -312,7 +324,7 @@ def match_coalesced_groups_with_non_p2p(
                 {first_rank},
             )
 
-            # Iterate through all the ranks and check if there is a mis-match for the current entry.
+            # Iterate through all the ranks and check if there is a mismatch for the current entry.
             check_current_entry_match(
                 all_coalesced_entries,
                 _pg_guids,
@@ -463,10 +475,10 @@ def error_analysis(
         match_record.candidate_idx.update(match_record.found_idx)
         match_record.found_idx.clear()
         match_record.found_ranks.clear()
-    elif (
-        len(match_record.candidate_ranks) == 1
-        and dumps_ranks == match_record.expected_ranks
-    ):
+    # We didn't see any mismatch and all expected ranks are in the dump.
+    elif len(
+        match_record.candidate_ranks
+    ) == 1 and match_record.expected_ranks.issubset(dumps_ranks):
         # case two: alltoall or alltoall_base case.
         if match_record.has_undecided_case:
             alltoall_cases = [current_entry] + [
@@ -527,6 +539,7 @@ def error_analysis(
         match_record.candidate_idx.update(match_record.found_idx)
         match_record.found_idx.clear()
         match_record.found_ranks.clear()
+        # if any element in expected_ranks not in dumps_ranks.
         if match_record.expected_ranks - dumps_ranks:
             mismatch[pg_name] += 1
             logger.info(
@@ -615,6 +628,7 @@ def just_print_entries(
     _memberships: dict[str, set[Any]],
     _pg_guids: dict[tuple[str, int], str],
     args: argparse.Namespace,
+    stack_id_trace_map: dict[str, int],
 ) -> None:
     rows = []
     ranks = sorted(all_entries.keys())
@@ -649,6 +663,17 @@ def just_print_entries(
 
     logger.info(tabulate(rows, headers=headers))
 
+    if stack_id_trace_map and args.print_stack_trace:
+        headers = ["stack_id", "frame_stack"]
+        rows = []
+
+        for frame, stack_id in sorted(
+            stack_id_trace_map.items(), key=lambda item: item[1]
+        ):
+            rows.append([str(stack_id), frame])
+
+        logger.info(tabulate(rows, headers=headers))
+
 
 def check_no_missing_dump_files(
     entries: dict[int, Any], memberships: list[Membership]
@@ -674,6 +699,27 @@ def get_version_detail(version: str) -> tuple[int, int]:
     assert len(version) == 2, f"Invalid version {version}"
     major, minor = map(int, version)
     return major, minor
+
+
+def add_stack_id_in_entries(
+    entries: dict[int, list[dict[str, Any]]],
+) -> tuple[dict[int, list[dict[str, Any]]], dict[str, int]]:
+    stack_id = 0
+    stack_id_trace_map = {}
+    for rank in entries:
+        for dump in entries[rank]:
+            if dump.get("frames", []):
+                frames = str(dump["frames"])
+                if frames not in stack_id_trace_map:
+                    stack_id_trace_map[frames] = stack_id
+                    dump["stack_id"] = stack_id
+                    stack_id += 1
+                else:
+                    dump["stack_id"] = stack_id_trace_map[frames]
+            else:
+                dump["stack_id"] = -1
+
+    return entries, stack_id_trace_map
 
 
 def align_trace_from_beginning(

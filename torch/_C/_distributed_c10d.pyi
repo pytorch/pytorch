@@ -279,11 +279,12 @@ class Work:
     def is_success(self) -> bool: ...
     def exception(self) -> Any: ...
     def wait(self, timeout: timedelta = ...) -> bool: ...
+    def block_current_stream(self) -> None: ...
     def get_future(self) -> Future: ...
     def source_rank(self) -> int: ...
     def _source_rank(self) -> int: ...
     def result(self) -> list[Tensor]: ...
-    def synchronize(self): ...
+    def synchronize(self) -> None: ...
     def boxed(self) -> ScriptObject: ...
     @staticmethod
     def unbox(obj: ScriptObject) -> Work: ...
@@ -297,6 +298,8 @@ class Backend:
         def _timeout(self) -> timedelta: ...
         @_timeout.setter
         def _timeout(self, val: timedelta) -> None: ...
+        global_ranks_in_group: list[int]
+        group_name: str
 
     def __init__(
         self,
@@ -309,16 +312,26 @@ class Backend:
     def supports_coalescing(self) -> bool: ...
     @property
     def supports_time_estimate(self) -> bool: ...
+    def set_timeout(self, timeout: timedelta) -> None: ...
     @property
     def options(self) -> Options: ...
     def rank(self) -> int: ...
     def size(self) -> int: ...
+    def name(self) -> str: ...
     def abort(self) -> None: ...
     def shutdown(self) -> None: ...
     def eager_connect_single_device(self, device: torch.device | None) -> None: ...
     def _set_sequence_number_for_group(self) -> None: ...
     def _set_default_timeout(self, timeout: timedelta) -> None: ...
     def get_error(self) -> ErrorType: ...
+    def supports_tensor_alloc(self, device: torch.device) -> bool: ...
+    def allocate_tensor(
+        self,
+        size: int,
+        *,
+        dtype: torch.dtype,
+        device: torch.device,
+    ) -> Tensor: ...
     @property
     def mem_allocator(self) -> Any: ...
 
@@ -340,7 +353,25 @@ class ProcessGroup:
     ) -> None: ...
     def rank(self) -> int: ...
     def size(self) -> int: ...
+    def get_group_store(self) -> Store: ...
+    def split_group(
+        self,
+        new_ranks: list[int],
+        timeout: Optional[timedelta] = None,
+        opts: Optional[Backend.Options] = None,
+        group_name: Optional[str] = None,
+        group_desc: Optional[str] = None,
+    ) -> Optional[ProcessGroup]: ...
+    def merge_remote_group(
+        self,
+        store: Store,
+        size: int,
+        timeout: timedelta,
+        group_name: Optional[str] = None,
+        group_desc: Optional[str] = None,
+    ) -> ProcessGroup: ...
     def abort(self) -> None: ...
+    def set_timeout(self, timeout: timedelta) -> None: ...
     def shutdown(self) -> None: ...
     @overload
     def broadcast(
@@ -353,6 +384,7 @@ class ProcessGroup:
         self,
         tensor: Tensor,
         root: int,
+        timeout: timedelta | None = None,
     ) -> Work: ...
     @overload
     def allreduce(
@@ -365,12 +397,14 @@ class ProcessGroup:
         self,
         tensors: list[Tensor],
         op=...,
+        timeout: timedelta | None = None,
     ) -> Work: ...
     @overload
     def allreduce(
         self,
         tensor: Tensor,
         op=...,
+        timeout: timedelta | None = None,
     ) -> Work: ...
     def allreduce_coalesced(
         self,
@@ -395,6 +429,7 @@ class ProcessGroup:
         tensor: Tensor,
         root: int,
         op=...,
+        timeout: timedelta | None = None,
     ) -> Work: ...
     @overload
     def allgather(
@@ -408,6 +443,7 @@ class ProcessGroup:
         self,
         output_tensors: list[Tensor],
         input_tensor: Tensor,
+        timeout: timedelta | None = None,
     ) -> Work: ...
     def _allgather_base(
         self,
@@ -440,6 +476,7 @@ class ProcessGroup:
         output_tensors: list[Tensor],
         input_tensor: Tensor,
         root: int,
+        timeout: timedelta | None = None,
     ) -> Work: ...
     @overload
     def scatter(
@@ -454,6 +491,7 @@ class ProcessGroup:
         output_tensor: Tensor,
         input_tensors: list[Tensor],
         root: int,
+        timeout: timedelta | None = None,
     ) -> Work: ...
     @overload
     def reduce_scatter(
@@ -467,6 +505,8 @@ class ProcessGroup:
         self,
         output_tensors: Tensor,
         input_tensor: list[Tensor],
+        op=...,
+        timeout: timedelta | None = None,
     ) -> Work: ...
     def _reduce_scatter_base(
         self,
@@ -490,6 +530,7 @@ class ProcessGroup:
         input: Tensor,
         output_split_sizes: list[int],
         input_split_sizes: list[int],
+        timeout: timedelta | None = None,
     ) -> Work: ...
     @overload
     def alltoall(
@@ -503,6 +544,7 @@ class ProcessGroup:
         self,
         output: list[Tensor],
         input: list[Tensor],
+        timeout: timedelta | None = None,
     ) -> Work: ...
     def send(
         self,
@@ -517,7 +559,10 @@ class ProcessGroup:
         tag: int,
     ) -> Work: ...
     def recv_anysource(self, tensors: list[Tensor], tag: int) -> Work: ...
+    @overload
     def barrier(self, opts=...) -> Work: ...
+    @overload
+    def barrier(self, timeout: timedelta | None = None) -> Work: ...
     def boxed(self) -> ScriptObject: ...
     @staticmethod
     def unbox(obj: ScriptObject) -> ProcessGroup: ...
@@ -565,8 +610,6 @@ class ProcessGroupGloo(Backend):
     class Options(Backend.Options):
         devices: list[ProcessGroupGloo.Device]
         threads: int
-        global_ranks_in_group: list[int]
-        group_name: str
 
         def __init__(self): ...
 
@@ -601,14 +644,13 @@ class ProcessGroupNCCL(Backend):
         cga_cluster_size: int
         min_ctas: int
         max_ctas: int
+        def unsafe_get_ptr(self) -> int: ...
 
     class Options(Backend.Options):
         config: ProcessGroupNCCL.NCCLConfig
         is_high_priority_stream: bool
         split_from: ProcessGroupNCCL
         split_color: int
-        global_ranks_in_group: list[int]
-        group_name: str
 
         def __init__(self, is_high_priority_stream: bool = False): ...
 
@@ -635,6 +677,10 @@ class ProcessGroupNCCL(Backend):
     def uid(self) -> int: ...
     @property
     def options(self) -> Options: ...  # type: ignore[override]
+    @staticmethod
+    def get_build_nccl_version(self) -> tuple[int, int, int]: ...
+    @staticmethod
+    def get_runtime_nccl_version(self) -> tuple[int, int, int]: ...
 
 class ProcessGroupUCC(Backend):
     def __init__(
@@ -688,10 +734,13 @@ def _allow_inflight_collective_as_graph_input() -> bool: ...
 def _unregister_all_process_groups() -> None: ...
 def _unregister_process_group(group_name: str) -> None: ...
 
-# Intializes the device state in CUmodule so that it’s able to perform NVSHMEM
+# Initializes the device state in CUmodule so that it’s able to perform NVSHMEM
 # operations.  CUmodule is a pointer to a CUDA module, carried by a int64 in
 # Python. At C++ interface, it is converted to a uintptr_t.
 def _nvshmemx_cumodule_init(module: int) -> None: ...
+
+# Check if NVSHMEM is available on current system.
+def _is_nvshmem_available() -> bool: ...
 
 class _SymmetricMemory:
     @staticmethod
@@ -715,6 +764,13 @@ class _SymmetricMemory:
         device_type: DeviceType,
         device_idx: int,
     ) -> bool: ...
+    # Set Symmetric Memory allocation backend.
+    @staticmethod
+    def set_backend(name: str) -> None: ...
+    @staticmethod
+    def get_backend(device: torch.device) -> Optional[str]: ...
+    @staticmethod
+    def get_mempool_allocator(device: torch.device) -> Any: ...
     @property
     def rank(self) -> int: ...
     @property
@@ -750,6 +806,12 @@ class _SymmetricMemory:
         channel: int = 0,
         timeout_ms: int = 0,
     ) -> None: ...
+    def get_remote_tensor(
+        self,
+        peer: int,
+        sizes: torch.types._size,
+        dtype: torch.dtype,
+    ) -> torch.Tensor: ...
     @staticmethod
     def memset32(
         tensor: torch.Tensor, offset: int, val: int, count: int = 1
@@ -774,9 +836,27 @@ class _SymmetricMemory:
     def signal_pad_size(self) -> int: ...
 
 class ProcessGroupXCCL(Backend):
+    class Options(Backend.Options):
+        def __init__(self): ...
+
     def __init__(
         self,
         store: Store,
         rank: int,
         size: int,
-    ): ...
+        options: Options,
+    ) -> None: ...
+    @property
+    def options(self) -> Options: ...  # type: ignore[override]
+
+def _set_process_group(pg: ProcessGroup) -> None: ...
+def _current_process_group() -> ProcessGroup: ...
+def _dump_nccl_trace_json(
+    includeCollectives: Optional[bool] = ...,
+    onlyActive: Optional[bool] = ...,
+) -> bytes: ...
+def _dump_nccl_trace(
+    includeCollectives: Optional[bool] = ...,
+    includeStackTraces: Optional[bool] = ...,
+    onlyActive: Optional[bool] = ...,
+) -> bytes: ...

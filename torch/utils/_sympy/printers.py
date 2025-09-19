@@ -20,6 +20,9 @@ class ExprPrinter(StrPrinter):
     def _print_Mul(self, expr: sympy.Expr) -> str:
         return self.stringify(expr.args, "*", precedence(expr))
 
+    def _print_Not(self, expr: sympy.Expr) -> str:
+        return f"not ({self._print(expr.args[0])})"
+
     def _print_Add(self, expr: sympy.Expr, order: Optional[str] = None) -> str:
         return self.stringify(expr.args, " + ", precedence(expr))
 

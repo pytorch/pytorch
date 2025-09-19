@@ -133,7 +133,7 @@ class TestFullyShardCompile(FSDPTest):
             device_type.type,
             self.rank % torch.get_device_module(device_type).device_count(),
         )
-        if not sm_is_or_higher_than(device, 8, 0):
+        if device_type.type == "cuda" and not sm_is_or_higher_than(device, 8, 0):
             self.skipTest("bf16 requires sm >= 8.0")
 
     def test_dynamo_trace_use_training_state(self):
@@ -222,9 +222,7 @@ class TestFullyShardCompile(FSDPTest):
             ):
                 unsharded_param_graph_inputs.add(node.args[0])
         assert len(unsharded_param_graph_inputs) > 0
-        assert len(unsharded_param_graph_inputs) == len(
-            list(model.parameters())
-        ), """\
+        assert len(unsharded_param_graph_inputs) == len(list(model.parameters())), """\
 Expected all model parameters to be wrapped by FSDP2 and
 have their unsharded version as graph input, but it's not true!
 """
@@ -237,7 +235,7 @@ have their unsharded version as graph input, but it's not true!
                 no_aliased_unsharded_params_in_graph_inputs = False
                 err_msg += f"""\n
 Found aliased unsharded param in graph inputs: {aliased_graph_inputs},
-val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
+val.shape: {[node.meta["val"].shape for node in aliased_graph_inputs]},
 """
         self.assertTrue(no_aliased_unsharded_params_in_graph_inputs, err_msg)
 
@@ -301,12 +299,20 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
 
     def _reinplace_all_gather_with_optional_checks(self, fwd_fullgraph):
         def _run_with_checks(graph, orig_fn):
-            self.assertGreater(
-                _count_op_in_graph(
-                    graph, torch.ops._c10d_functional.all_gather_into_tensor.default
-                ),
-                0,
-            )
+            if self.world_size > 1:
+                self.assertGreater(
+                    _count_op_in_graph(
+                        graph, torch.ops._c10d_functional.all_gather_into_tensor.default
+                    ),
+                    0,
+                )
+            elif self.world_size == 1:
+                self.assertEqual(
+                    _count_op_in_graph(
+                        graph, torch.ops._c10d_functional.all_gather_into_tensor.default
+                    ),
+                    0,
+                )
 
             orig_fn(graph)
 
@@ -317,12 +323,22 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                 0,
             )
 
-            self.assertGreater(
-                _count_op_in_graph(
-                    graph, torch.ops._c10d_functional.all_gather_into_tensor_out.default
-                ),
-                0,
-            )
+            if self.world_size > 1:
+                self.assertGreater(
+                    _count_op_in_graph(
+                        graph,
+                        torch.ops._c10d_functional.all_gather_into_tensor_out.default,
+                    ),
+                    0,
+                )
+            else:
+                self.assertEqual(
+                    _count_op_in_graph(
+                        graph,
+                        torch.ops._c10d_functional.all_gather_into_tensor_out.default,
+                    ),
+                    0,
+                )
 
         if fwd_fullgraph:
             return mock.patch.object(
@@ -466,10 +482,9 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_compiled_autograd_ctx(self):
         self.skipTestForOldSm()
-        with torch._dynamo.config.patch(
-            skip_fsdp_hooks=False,
-        ), torch._functorch.config.patch(
-            recompute_views=True,
+        with (
+            torch._dynamo.config.patch(skip_fsdp_hooks=False),
+            torch._functorch.config.patch(recompute_views=True),
         ):
             inputs = torch.randn(8, 8)
             model = torch.nn.Linear(8, 8)
@@ -551,7 +566,8 @@ Unsupported Tensor.backward() call
   Hint: This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround.
 
   Developer debug context: call_method TensorVariable() backward () {}
-""",  # noqa: B950
+
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0123.html""",  # noqa: B950
                     )
                 else:
                     self.assertGreater(len(counters["graph_break"]), 1)
@@ -566,24 +582,28 @@ Unsupported Tensor.backward() call
 
         torch._dynamo.reset()
         torch._dynamo.compiled_autograd.reset()
-        with torch._dynamo.config.patch(
-            compiled_autograd=True,
-            compiled_autograd_kwargs_override={
-                "fullgraph": True,
-            },
-            inline_inbuilt_nn_modules=True,
-            skip_fsdp_hooks=False,
-        ), torch._functorch.config.patch(
-            enable_autograd_cache=False,
-            recompute_views=True,
-        ), torch._inductor.config.patch(
-            force_disable_caches=True,
-            reorder_for_compute_comm_overlap=True,
-            reorder_for_compute_comm_overlap_passes=[
-                "sink_waits",
-                "raise_comms",
-                "reorder_compute_for_overlap",
-            ],
+        with (
+            torch._dynamo.config.patch(
+                compiled_autograd=True,
+                compiled_autograd_kwargs_override={
+                    "fullgraph": True,
+                },
+                inline_inbuilt_nn_modules=True,
+                skip_fsdp_hooks=False,
+            ),
+            torch._functorch.config.patch(
+                enable_autograd_cache=False,
+                recompute_views=True,
+            ),
+            torch._inductor.config.patch(
+                force_disable_caches=True,
+                reorder_for_compute_comm_overlap=True,
+                reorder_for_compute_comm_overlap_passes=[
+                    "sink_waits",
+                    "raise_comms",
+                    "reorder_compute_for_overlap",
+                ],
+            ),
         ):
             losses_compiled = test_compiled()
         losses_eager = test_eager()
@@ -740,20 +760,21 @@ Unsupported Tensor.backward() call
     def _test_nested_fully_shard_backend_inductor_fullgraph_True(self):
         self.skipTestForOldSm()
         for fwd_fullgraph in [True]:
-            with self._reinplace_all_gather_with_optional_checks(
-                fwd_fullgraph
-            ), torch._inductor.config.patch(
-                post_grad_custom_post_pass=(
-                    functools.partial(
-                        self._check_fsdp_copy_and_resize_ops_count_in_graph,
-                        fwd_copy_count=0,
-                        fwd_resize_count=0,
-                        bwd_copy_count=0,
-                        bwd_resize_count=0,
+            with (
+                self._reinplace_all_gather_with_optional_checks(fwd_fullgraph),
+                torch._inductor.config.patch(
+                    post_grad_custom_post_pass=(
+                        functools.partial(
+                            self._check_fsdp_copy_and_resize_ops_count_in_graph,
+                            fwd_copy_count=0,
+                            fwd_resize_count=0,
+                            bwd_copy_count=0,
+                            bwd_resize_count=0,
+                        )
+                        if fwd_fullgraph
+                        else None
                     )
-                    if fwd_fullgraph
-                    else None
-                )
+                ),
             ):
                 _, triton_codes = run_and_get_code(
                     lambda: self._test_traceable_fsdp(
@@ -942,9 +963,10 @@ Unsupported Tensor.backward() call
         for fwd_fullgraph, all_requires_grad in itertools.product(
             [True], [True, False]
         ):
-            with self._maybe_add_graph_break_to_sdpa(
-                fwd_fullgraph
-            ), self._reinplace_all_gather_with_optional_checks(fwd_fullgraph):
+            with (
+                self._maybe_add_graph_break_to_sdpa(fwd_fullgraph),
+                self._reinplace_all_gather_with_optional_checks(fwd_fullgraph),
+            ):
                 self._test_traceable_fsdp(
                     *self._create_transformer_factory_fns(
                         all_requires_grad=all_requires_grad
@@ -981,23 +1003,24 @@ Unsupported Tensor.backward() call
             log.warning(
                 f"fwd_fullgraph={fwd_fullgraph}, all_requires_grad={all_requires_grad}, activation_checkpoint={activation_checkpoint}"  # noqa: G004, G001, B950
             )
-            with self._reinplace_all_gather_with_optional_checks(
-                fwd_fullgraph
-            ), torch._inductor.config.patch(
-                post_grad_custom_post_pass=(
-                    functools.partial(
-                        self._check_fsdp_copy_and_resize_ops_count_in_graph,
-                        # NOTE: For the root unsharded params, we don't reshard after forward since for training,
-                        # the parameters would be freed and all-gathered immediately. Hence we still have
-                        # their resize and copy ops in the graph.
-                        fwd_copy_count=4,
-                        fwd_resize_count=4,
-                        bwd_copy_count=0,
-                        bwd_resize_count=4,
+            with (
+                self._reinplace_all_gather_with_optional_checks(fwd_fullgraph),
+                torch._inductor.config.patch(
+                    post_grad_custom_post_pass=(
+                        functools.partial(
+                            self._check_fsdp_copy_and_resize_ops_count_in_graph,
+                            # NOTE: For the root unsharded params, we don't reshard after forward since for training,
+                            # the parameters would be freed and all-gathered immediately. Hence we still have
+                            # their resize and copy ops in the graph.
+                            fwd_copy_count=4,
+                            fwd_resize_count=4,
+                            bwd_copy_count=0,
+                            bwd_resize_count=4,
+                        )
+                        if fwd_fullgraph
+                        else None
                     )
-                    if fwd_fullgraph
-                    else None
-                )
+                ),
             ):
                 _, triton_codes = run_and_get_code(
                     lambda: self._test_traceable_fsdp(
@@ -1087,6 +1110,7 @@ Unsupported Tensor.backward() call
                     pass
                 file_check.run(bwd_code)
 
+    @unittest.skip('"Traceable FSDP2" is not being maintained anymore.')
     @skipIfRocm
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     # TODO: native_dropout causes CUDA IMA error, need to figure out why
@@ -1094,6 +1118,7 @@ Unsupported Tensor.backward() call
     def test_transformer_backend_inductor_fullgraph_True(self):
         self._test_transformer_backend_inductor_fullgraph_True()
 
+    @unittest.skip('"Traceable FSDP2" is not being maintained anymore.')
     @skipIfRocm
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     # TODO: native_dropout causes CUDA IMA error, need to figure out why

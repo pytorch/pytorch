@@ -225,6 +225,15 @@ class InPlaceCompilationTests(TestCase):
         c_output = c_fn(x)
         self.assertEqual(output, c_output)
 
+    def test_list_bad_access(self):
+        @torch.compile(backend="eager")
+        def fn(x, y):
+            a = [x]
+            return a[y]
+
+        with self.assertRaises(IndexError):
+            fn(torch.randn(10), 99)
+
 
 # The private variants of the below functions are extensively tested
 # So as long as the signatures match we're good

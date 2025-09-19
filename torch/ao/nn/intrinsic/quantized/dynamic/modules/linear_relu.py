@@ -1,4 +1,6 @@
-# mypy: allow-untyped-defs
+from typing import Any
+from typing_extensions import Self
+
 import torch
 import torch.ao.nn.intrinsic as nni
 import torch.ao.nn.quantized.dynamic as nnqd
@@ -28,9 +30,15 @@ class LinearReLU(nnqd.Linear):
         torch.Size([128, 30])
     """
 
-    _FLOAT_MODULE = nni.LinearReLU  # type: ignore[assignment]
+    _FLOAT_MODULE = nni.LinearReLU
 
-    def __init__(self, in_features, out_features, bias=True, dtype=torch.qint8):
+    def __init__(
+        self,
+        in_features: int,
+        out_features: int,
+        bias: bool = True,
+        dtype: torch.dtype = torch.qint8,
+    ) -> None:
         super().__init__(in_features, out_features, bias, dtype)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -47,15 +55,17 @@ class LinearReLU(nnqd.Linear):
             raise RuntimeError("Unsupported dtype on dynamic quantized linear relu!")
         return Y.to(x.dtype)
 
-    def _get_name(self):
+    def _get_name(self) -> str:
         return "DynamicQuantizedLinearReLU"
 
     @classmethod
-    def from_float(cls, mod, use_precomputed_fake_quant=False):
+    def from_float(
+        cls, mod: torch.nn.Module, use_precomputed_fake_quant: bool = False
+    ) -> Self:
         return super().from_float(
             mod, use_precomputed_fake_quant=use_precomputed_fake_quant
         )
 
     @classmethod
-    def from_reference(cls, ref_qlinear_relu):  # type: ignore[override]
+    def from_reference(cls, ref_qlinear_relu: Any) -> Self:  # type: ignore[override]
         return super().from_reference(ref_qlinear_relu[0])

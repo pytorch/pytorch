@@ -25,8 +25,8 @@ if_condition_template = CodeTemplate(if_condition_template_str)
 
 selected_kernel_dtypes_h_template_str = """
 #include <c10/core/ScalarType.h>
-#include <c10/util/string_view.h>
 #include <c10/macros/Macros.h>
+#include <string_view>
 
 namespace at {
 inline constexpr bool should_include_kernel_dtype(

@@ -35,7 +35,7 @@ def register_propagate_rule(aten_op):
 
 def propagate_scale_by(nodes_with_chunking_meta):
     """
-    The input is a list of nodes that have chunking medadata.
+    The input is a list of nodes that have chunking metadata.
     The nodes are already in topological order.
     """
     for node in nodes_with_chunking_meta:

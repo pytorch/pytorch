@@ -66,9 +66,10 @@ def generate_callgrind_artifacts() -> None:
         json.dump(artifacts, f, indent=4)
 
 
-def load_callgrind_artifacts() -> (
-    tuple[benchmark_utils.CallgrindStats, benchmark_utils.CallgrindStats]
-):
+def load_callgrind_artifacts() -> tuple[
+    benchmark_utils.CallgrindStats,
+    benchmark_utils.CallgrindStats,
+]:
     """Hermetic artifact to unit test Callgrind wrapper.
 
     In addition to collecting counts, this wrapper provides some facilities for
@@ -698,14 +699,16 @@ class TestBenchmarkUtils(TestCase):
               8959166  /tmp/build/80754af9/python_15996 ... a3/envs/throwaway/bin/python3.6]
                   ...
                 92821  /tmp/build/80754af9/python_15996 ... a3/envs/throwaway/bin/python3.6]
-                91000  build/../torch/csrc/tensor/pytho ... ch/torch/lib/libtorch_python.so]
+                91000  build/../torch/csrc/tensor/pytho ... ch/torch/lib/libtorch_python.so]  # codespell:ignore
                 91000  /data/users/test_user/repos/pyto ... nsors::get_default_scalar_type()
                 90090  ???:pthread_mutex_lock [/usr/lib64/libpthread-2.28.so]
                 90000  build/../c10/core/TensorImpl.h:c ... ch/torch/lib/libtorch_python.so]
                 90000  build/../aten/src/ATen/record_fu ... torch/torch/lib/libtorch_cpu.so]
                 90000  /data/users/test_user/repos/pyto ... uard(std::optional<c10::Device>)
                 90000  /data/users/test_user/repos/pyto ... ersionCounter::~VersionCounter()
-                88000  /data/users/test_user/repos/pyto ... ratorKernel*, at::Tensor const&)""",
+                88000  /data/users/test_user/repos/pyto ... ratorKernel*, at::Tensor const&)""".replace(
+                "  # codespell:ignore", ""
+            ),
         )
 
         self.regularizeAndAssertExpectedInline(

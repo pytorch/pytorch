@@ -1946,7 +1946,7 @@ const auto chebyshev_polynomial_t_string = jiterator_stringify(
         T q = x;
         T r;
 
-        for (int64_t k = 2; k <= n; k++) {
+        for (int64_t k = 2; (k <= n) && !isnan(q); k++) {
             r = (x + x) * q - p;
             p = q;
             q = r;
@@ -1996,7 +1996,7 @@ const auto chebyshev_polynomial_u_string = jiterator_stringify(
         T q = x + x;
         T r;
 
-        for (int64_t k = 2; k <= n; k++) {
+        for (int64_t k = 2; (k <= n) && !isnan(q); k++) {
             r = (x + x) * q - p;
             p = q;
             q = r;
@@ -2054,7 +2054,7 @@ const auto chebyshev_polynomial_v_string = jiterator_stringify(
         T q = x + x - T(1.0);
         T r;
 
-        for (int64_t k = 2; k <= n; k++) {
+        for (int64_t k = 2; (k <= n) && !isnan(q); k++) {
             r = (x + x) * q - p;
             p = q;
             q = r;
@@ -2116,7 +2116,7 @@ const auto chebyshev_polynomial_w_string = jiterator_stringify(
         T q = x + x + T(1.0);
         T r;
 
-        for (int64_t k = 2; k <= n; k++) {
+        for (int64_t k = 2; (k <= n) && !isnan(q); k++) {
             r = (x + x) * q - p;
             p = q;
             q = r;
@@ -2252,7 +2252,7 @@ const auto laguerre_polynomial_l_string = jiterator_stringify(
         T q = T(1.0) - x;
         T r;
 
-        for (int64_t k = 1; k < n; k++) {
+        for (int64_t k = 1; (k < n) && !isnan(q); k++) {
             r = (((k + k) + (T(1.0) - x)) * q - k * p) / (k + 1);
             p = q;
             q = r;
@@ -2294,7 +2294,7 @@ const auto legendre_polynomial_p_string = jiterator_stringify(
         T q = x;
         T r;
 
-        for (int64_t k = 1; k < n; k++) {
+        for (int64_t k = 1; (k < n) && !isnan(q); k++) {
             r = ((k + k + 1) * x * q - k * p) / (k + 1);
             p = q;
             q = r;
@@ -2851,7 +2851,7 @@ const auto shifted_chebyshev_polynomial_t_string = jiterator_stringify(
         T q = x + x - T(1.0);
         T r;
 
-        for (int64_t k = 2; k <= n; k++) {
+        for (int64_t k = 2; (k <= n) && !isnan(q); k++) {
             r = (x + x - T(1.0) + (x + x - T(1.0))) * q - p;
             p = q;
             q = r;
@@ -2905,7 +2905,7 @@ const auto shifted_chebyshev_polynomial_u_string = jiterator_stringify(
         T q = x + x - T(1.0) + (x + x - T(1.0));
         T r;
 
-        for (int64_t k = 2; k <= n; k++) {
+        for (int64_t k = 2; (k <= n) && !isnan(q); k++) {
             r = (x + x - T(1.0) + (x + x - T(1.0))) * q - p;
             p = q;
             q = r;
@@ -2963,7 +2963,7 @@ const auto shifted_chebyshev_polynomial_v_string = jiterator_stringify(
         T q = x + x - T(1.0) + (x + x - T(1.0)) - T(1.0);
         T r;
 
-        for (int64_t k = 2; k <= n; k++) {
+        for (int64_t k = 2; (k <= n) && !isnan(q); k++) {
             r = (x + x - T(1.0) + (x + x - T(1.0))) * q - p;
             p = q;
             q = r;
@@ -3021,7 +3021,7 @@ const auto shifted_chebyshev_polynomial_w_string = jiterator_stringify(
         T q = x + x - T(1.0) + (x + x - T(1.0)) + T(1.0);
         T r;
 
-        for (int64_t k = 2; k <= n; k++) {
+        for (int64_t k = 2; (k <= n) && !isnan(q); k++) {
             r = (x + x - T(1.0) + (x + x - T(1.0))) * q - p;
             p = q;
             q = r;

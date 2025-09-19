@@ -7,7 +7,7 @@ from torch._dynamo.utils import same
 from torch._inductor import config, metrics
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_device_type import largeTensorTest
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CUDA
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CUDA_AND_TRITON
 
 
 USE_LARGE_INPUT = os.environ.get("USE_LARGE_INPUT", "1") == "1"
@@ -67,7 +67,7 @@ class AutoChunkerTest(TestCase):
         )
         peak_memory = torch.cuda.max_memory_allocated()
 
-        print(f"Peak memory {peak_memory / 10 ** 9 :.6f} GB")
+        print(f"Peak memory {peak_memory / 10**9:.6f} GB")
 
         self.assertTrue(same(expect, actual, tol=1e-3), f"{expect=}\n{actual=}")
 
@@ -147,7 +147,7 @@ class AutoChunkerTest(TestCase):
         torch.cuda.reset_peak_memory_stats()
         actual = (opt_f(x, y), x.grad, mod.linear.weight.grad, mod.linear.bias.grad)
         peak_memory = torch.cuda.max_memory_allocated()
-        print(f"Peak memory {peak_memory / 10 ** 9 :.6f} GB")
+        print(f"Peak memory {peak_memory / 10**9:.6f} GB")
 
         self.assertTrue(same(expect, actual, tol=1e-3), f"{expect=}\n{actual=}")
 
@@ -180,5 +180,5 @@ class AutoChunkerTest(TestCase):
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if HAS_CUDA:
+    if HAS_CUDA_AND_TRITON:
         run_tests()

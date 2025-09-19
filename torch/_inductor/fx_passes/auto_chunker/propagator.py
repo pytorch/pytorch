@@ -38,7 +38,7 @@ prims = torch.ops.prims
 """
 NOTE [Why we need both fwd and bwd chunking metadata propagation?]
 The starting point of chunking is we found a op that creates a much larger output
-than input. We attach chunking medadata upon the op and propagate it forward.
+than input. We attach chunking metadata upon the op and propagate it forward.
 
 But for backward rules like NLLLossBackward, we do a scatter upon a zero matrix. That
 zero matrix is created by torch.full. We only know we should chunk that tensor
@@ -49,7 +49,7 @@ by propagating chunking metadata backward.
 NOTE [Why we need a separate pass to propagate ChunkingMeta.scale_by?]
 
 ChunkingMeta.scale_by only need to be propagate forward from the tangent placeholder nodes.
-If we do this together with propgating other metadata, we can not fully control the propagating
+If we do this together with propagating other metadata, we can not fully control the propagating
 order and end up with cases like:
     out = aten.sub(lhs, rhs)
 where `lhs` has scale_by set, while `rhs` and `out` don't.

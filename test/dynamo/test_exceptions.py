@@ -19,7 +19,7 @@ from torch.testing._internal.common_utils import (
 
 
 class CustomException(Exception):
-    ...
+    pass
 
 
 class CustomExceptionMeta(type):
@@ -28,7 +28,7 @@ class CustomExceptionMeta(type):
 
 
 class CustomExceptionWithInstanceCheck(Exception, metaclass=CustomExceptionMeta):
-    ...
+    pass
 
 
 class CustomExceptionWithArgs(Exception):
@@ -136,6 +136,20 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
+    def test_exception_with_vars(self):
+        def fn(x):
+            try:
+                vars(42)
+                raise RuntimeError("Should not be raised")
+            except TypeError:
+                return x.sin()
+
+        x = torch.randn(4)
+        ref = fn(x)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
     def test_autocast_with_exception(self):
         class Optimizer(torch.autograd.Function):
             @staticmethod
@@ -172,7 +186,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         def cm():
             try:
                 yield
-            except BaseException:
+            except BaseException:  # noqa: B036
                 raise ValueError  # noqa: B904
 
         @contextlib.contextmanager
@@ -250,7 +264,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
                 for x, y in args:
                     try:
                         fn(x, y)
-                    except BaseException:
+                    except BaseException:  # noqa: B036
                         new_exc = sys.exc_info()
                         fix_exc_context(frame_exc[1], new_exc[1], prev_exc[1])
                         prev_exc = new_exc
@@ -258,7 +272,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
                 try:
                     fixed_ctx = prev_exc[1].__context__
                     raise prev_exc[1]
-                except BaseException:
+                except BaseException:  # noqa: B036
                     prev_exc[1].__context__ = fixed_ctx
                     raise
 
@@ -292,7 +306,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
 
         x = torch.randn(4)
         fn(x)
-        # Cant use fullgraph=True because RERAISE is not supported
+        # Can't use fullgraph=True because RERAISE is not supported
         opt_fn = torch.compile(fn, backend="eager")
         opt_fn(x)
 
@@ -358,7 +372,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
 
     def test_raise_custom_exception(self):
         class Exc(Exception):
-            ...
+            pass
 
         @torch.compile(backend="eager", fullgraph=True)
         def fn(t):
@@ -375,7 +389,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
 
     def test_raise_custom_exception_with_args(self):
         class Exc(Exception):
-            ...
+            pass
 
         @torch.compile(backend="eager", fullgraph=True)
         def fn(t):
@@ -749,7 +763,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
                 raise GeneratorExit
             except Exception:
                 return t.sin()
-            except BaseException:
+            except BaseException:  # noqa: B036
                 return t.cos()
 
         t = torch.randn(2)

@@ -39,7 +39,7 @@ def set_chunking_meta(node, meta=None, **kwargs):
 def update_chunking_meta(node, **kwargs):
     """
     Unlike set_chunking_mete, this function keeps the existing chunking
-    metadata if it's not overriden.
+    metadata if it's not overridden.
     """
     changed = False
     meta = get_chunking_meta(node)

@@ -397,7 +397,7 @@ class WriterPayload : public c10::intrusive_ptr_target {
   void registeredInLoop() {
     /*
     This refcount increment must be matched by a reclaim call.
-    Call this method after sucessfully scheduling this handle with a loop.
+    Call this method after successfully scheduling this handle with a loop.
     */
     at::raw::intrusive_ptr::incref(this);
   }

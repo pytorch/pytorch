@@ -423,7 +423,7 @@ class TestSympyInterp(TestCase):
                 sargs = [sympy.sympify(a) for a in args]
                 sympy_expr = getattr(ReferenceAnalysis, fn)(*symbols)
                 ref_r = getattr(ReferenceAnalysis, fn)(*sargs)
-                # Yes, I know this is a longwinded way of saying xreplace; the
+                # Yes, I know this is a long-winded way of saying xreplace; the
                 # point is to test sympy_interp
                 r = sympy_interp(
                     ReferenceAnalysis, dict(zip(symbols, sargs)), sympy_expr

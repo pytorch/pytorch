@@ -164,7 +164,7 @@ class TGreatestUpperBound(Constraint):
 
     def __init__(self, res, rhs1, rhs2):
         """
-        :param res: tensor variable that stores the result of the outout
+        :param res: tensor variable that stores the result of the output
         :param rhs1: tensor or tensor variable
         :param rhs2: tensor or tensor variabke
         """
@@ -407,7 +407,7 @@ class CalcConv(Constraint):
         """
         :param conv_result: the convolution result
         :param input_var: input to convolution
-        :param c_out: output chanel type
+        :param c_out: output channel type
         :param kernel: kernel tuple
         """
         self.conv_result = conv_result

@@ -408,7 +408,7 @@ class _EmptyStateDictLoadPlanner(DefaultLoadPlanner):
             return True
 
         if key in self.keys:
-            True
+            return True
 
         unflattened_keys: list[str] = []
         planner_data = metadata.planner_data.get(key)
@@ -451,10 +451,7 @@ class _EmptyStateDictLoadPlanner(DefaultLoadPlanner):
 
 
 def create_default_local_load_plan(
-    state_dict: dict[str, Any],
-    metadata: Metadata,
-    strict: bool = True,
-    check_md_size: bool = True,
+    state_dict: dict[str, Any], metadata: Metadata, strict: bool = True
 ) -> LoadPlan:
     requests = []
     """
@@ -480,7 +477,6 @@ def create_default_local_load_plan(
             isinstance(md, TensorStorageMetadata)
             and getattr(obj, "size", None) is not None
             and md.size != obj.size()
-            and check_md_size
         ):
             raise ValueError(
                 f"Size mismatch between saved {md.size} and current: {obj.size()} for {fqn}",
@@ -658,7 +654,7 @@ def _validate_global_plan(global_plan: list[SavePlan], metadata: Metadata) -> bo
 
         # Check whether combined chunk cover the whole tensor
         tensor_volume = reduce(operator.mul, value.size, 1)
-        if chunks_volume != tensor_volume:
+        if len(global_plan) > 1 and chunks_volume != tensor_volume:
             logger.warning(
                 """
                     key:%s invalid fill tensor-volume:

@@ -212,8 +212,6 @@ class _SymNodePickleData:
         self.hint = node._hint
 
     def _to_sym_node(self) -> SymNode:
-        from torch.fx.experimental.sym_node import SymNode
-
         assert self.shape_env is not None
         return SymNode(self.expr, self.shape_env, self.pytype, self.hint)
 
@@ -253,9 +251,9 @@ class _TensorPickleData:
         for k in MetaTensorDesc._UNSERIALIZABLE:
             if k in ("fake_mode", "view_func"):
                 continue
-            assert (
-                getattr(self.metadata, k) is None
-            ), f"not None: {k}: {getattr(self.metadata, k)}"
+            assert getattr(self.metadata, k) is None, (
+                f"not None: {k}: {getattr(self.metadata, k)}"
+            )
 
     def unpickle(self, unpickle_state: _UnpickleState) -> FakeTensor:
         # TODO: make common w/ _output_from_cache_entry() in fake_tensor.py?

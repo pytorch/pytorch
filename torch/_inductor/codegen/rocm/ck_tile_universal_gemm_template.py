@@ -242,15 +242,20 @@ class CKTileGemmTemplate(CKTileTemplate):
         constexpr auto TileK = {{instance_namespace}}::TileK;
         constexpr auto kPrefetchStages = BaseGemmPipeline::PrefetchStages;
 
-        auto kargs = ck_tile::GemmKernelArgs {
-           X,
-           W,
+        const auto BiasTerms = std::array<const void*, 0> ();
+        const auto BiasStrides = std::array<int32_t, 0> ();
+
+        auto kargs = ck_tile::UniversalGemmKernelArgs<> {
+           {X},
+           {W},
+           BiasTerms,
            Y,
            M,
            N,
            K,
-           LDA,
-           LDB,
+           {LDA},
+           {LDB},
+           BiasStrides,
            LDC,
            kBatch
         };
@@ -688,11 +693,18 @@ class CKTileGemmTemplate(CKTileTemplate):
             elif epilogue_type == "CShuffle":
                 return r"""
             constexpr auto kMemoryOperation = ck_tile::memory_operation_enum::set;
+            using DsDataType = ck_tile::tuple<>; // no bias terms for vanilla GEMM
+            using DsLayout = ck_tile::tuple<>;
+            constexpr auto ELayout = CLayout;
+            using CDEElementWise = ck_tile::element_wise::PassThrough; // no-op
             using EpilogueProblem = ck_tile::CShuffleEpilogueProblem<ADataType,
                                                                      BDataType,
+                                                                     DsDataType,
                                                                      AccDataType,
                                                                      CDataType,
-                                                                     CLayout,
+                                                                     DsLayout,
+                                                                     ELayout,
+                                                                     CDEElementWise,
                                                                      GemmPipelineProblem::kBlockSize,
                                                                      TileM,
                                                                      TileN,

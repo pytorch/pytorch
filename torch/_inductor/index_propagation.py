@@ -65,7 +65,18 @@ class TypedExpr:
 
     def __post_init__(self):
         if _is_constant(self.expr):
-            self.expr = dtype_to_type(self.dtype)(self.expr)
+            expr = self.expr
+            if isinstance(expr, sympy.Expr):
+                expr = expr.expand(identity=True)
+            expr = dtype_to_type(self.dtype)(expr)
+            if is_integer_dtype(self.dtype):
+                bits = torch.iinfo(self.dtype).bits
+                if self.dtype.is_signed:
+                    expr = expr + 2 ** (bits - 1)
+                expr = expr % 2**bits
+                if self.dtype.is_signed:
+                    expr = expr - 2 ** (bits - 1)
+            self.expr = expr
 
 
 class SymPyOps:
@@ -311,7 +322,7 @@ class IndexPropagation(DefaultHandler):
               If this is an issue, just use guards in `self.axioms`.
 
               The proper way of handling this would be to have a global shape_env that adds
-              runtime_asserts as they happen in the code. Then, it shuld be used in SimplifyIndexing
+              runtime_asserts as they happen in the code. Then, it should be used in SimplifyIndexing
               to perform wrap_expr and in CSEProxy.check_bounds to elide upper / lower bounds also
               for indirect_indexing
         """

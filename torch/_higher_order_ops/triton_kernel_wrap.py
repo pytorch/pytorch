@@ -18,6 +18,7 @@ import torch.fx as fx
 import torch.utils._pytree as pytree
 from torch import SymInt, Tensor
 from torch._C import DispatchKey
+from torch._higher_order_ops.utils import redirect_to_mode
 from torch._ops import HigherOrderOperator
 from torch._prims_common import clone_preserve_strides
 from torch._subclasses.fake_tensor import FakeTensorMode
@@ -28,6 +29,7 @@ from torch.fx.experimental.proxy_tensor import (
 )
 from torch.fx.experimental.symbolic_shapes import guard_scalar
 from torch.types import IntLikeType
+from torch.utils.checkpoint import _CachedTorchDispatchMode, _CachingTorchDispatchMode
 
 
 if TYPE_CHECKING:
@@ -93,7 +95,7 @@ def create_tma_experimental_metadata(
 
 
 def maybe_unpack_tma_experimental_metadata(
-    tma_meta: Union[TMAExperimentalMetadata, TMAStableMetadata]
+    tma_meta: Union[TMAExperimentalMetadata, TMAStableMetadata],
 ) -> Optional[tuple[list[IntLikeType], list[IntLikeType], IntLikeType]]:
     if not tma_meta or len(tma_meta) != 2:
         return None
@@ -109,7 +111,7 @@ def create_tma_stable_metadata(
 
 
 def maybe_unpack_tma_stable_metadata(
-    tma_meta: Union[TMAExperimentalMetadata, TMAStableMetadata]
+    tma_meta: Union[TMAExperimentalMetadata, TMAStableMetadata],
 ) -> Optional[tuple[list[IntLikeType]]]:
     if not tma_meta or len(tma_meta) != 2:
         return None
@@ -461,11 +463,16 @@ def generate_ttir(
     elif make_ir_sig_params == 3:
         codegen_fns = backend.get_codegen_implementation()
         ttir_module = src.make_ir(options, codegen_fns, context)
-    else:
+    elif make_ir_sig_params == 4:
         codegen_args = [options] if get_codegen_implementation_sig_params == 1 else []
         codegen_fns = backend.get_codegen_implementation(*codegen_args)
         module_map = backend.get_module_map()
         ttir_module = src.make_ir(options, codegen_fns, module_map, context)
+    else:
+        codegen_args = [options] if get_codegen_implementation_sig_params == 1 else []
+        codegen_fns = backend.get_codegen_implementation(*codegen_args)
+        module_map = backend.get_module_map()
+        ttir_module = src.make_ir(target, options, codegen_fns, module_map, context)
     if not ttir_module.verify():
         raise RuntimeError("Verification for TTIR module has failed")
 
@@ -798,6 +805,9 @@ def get_tma_stores(
             elif op.name == "tt.experimental_descriptor_store":
                 assert len(op.args) >= 1
                 result.add(op.args[0])
+            elif op.name == "tt.descriptor_store":
+                assert len(op.args) >= 1
+                result.add(op.args[0])
 
     for val in list(result):
         if val in ops:
@@ -847,9 +857,6 @@ def analyze_kernel_mutations(
             # (e.g. `tt.elementwise_inline_asm`), we assume it does not mutate any input parameters.
             if op.name in UNKNOWN_OPS:
                 if op.name == "tt.elementwise_inline_asm" and op.is_pure:
-                    log.warning(
-                        "TTIR mutation analysis: Skipping pure tt.elementwise_inline_asm op (is_pure=True)"
-                    )
                     continue
                 raise RuntimeError(
                     f"ttir analysis hit an op we do not know how to analyze: {op.name}"
@@ -1037,7 +1044,7 @@ def triton_kernel_wrapper_mutation_dense(
         # as we need to launch the kernel here, we "unwrap" the
         # tma_descriptor_metadata, create the TMA descriptors
         # from it, and replace the tensors in the kwargs by the
-        # correspoinding TMA descriptors before launching
+        # corresponding TMA descriptors before launching
         kwargs = kwargs.copy()
         for k, v in tma_descriptor_metadata.items():
             tensor = kwargs[k]
@@ -1122,7 +1129,8 @@ def trace_triton_kernel_wrapper(
         out = func_overload(**node_args)
 
     proxy_args = pytree.tree_map(
-        proxy_mode.tracer.unwrap_proxy, node_args  # type: ignore[union-attr]
+        proxy_mode.tracer.unwrap_proxy,  # type: ignore[union-attr]
+        node_args,
     )
     out_proxy = proxy_mode.tracer.create_proxy(
         "call_function",
@@ -1336,6 +1344,9 @@ triton_kernel_wrapper_functional.fallthrough(DispatchKey.AutogradCUDA)
 triton_kernel_wrapper_functional.fallthrough(DispatchKey.AutogradCUDA)
 triton_kernel_wrapper_functional.fallthrough(DispatchKey.AutogradCPU)
 
+# Adds SAC support for triton ops
+redirect_to_mode(triton_kernel_wrapper_mutation, _CachingTorchDispatchMode)
+redirect_to_mode(triton_kernel_wrapper_mutation, _CachedTorchDispatchMode)
 
 ###############################################################################
 # The "TritonHOPifier": a class that transforms a call to a triton kernel into
@@ -1660,9 +1671,9 @@ class TritonHOPifier:
 
                         # Update the kwargs in each config
                         # maybe_unpack_heuristic_result raises unsupported if the value is non-constant
-                        new_configs[config_idx].__dict__["kwargs"][
-                            kwarg_key
-                        ] = self.maybe_unpack_heuristic_result(heuristic_result)
+                        new_configs[config_idx].__dict__["kwargs"][kwarg_key] = (
+                            self.maybe_unpack_heuristic_result(heuristic_result)
+                        )
 
                 iter_kernel = iter_kernel.fn
             assert isinstance(iter_kernel, JITFunction)
@@ -1742,9 +1753,9 @@ class TritonHOPifier:
                 for config in new_configs:
                     for name in special_param_names:
                         if name not in config.__dict__["kwargs"]:
-                            assert (
-                                name in config.__dict__
-                            ), f"{name} must be in autotuning configs to be used as a kernel parameter"
+                            assert name in config.__dict__, (
+                                f"{name} must be in autotuning configs to be used as a kernel parameter"
+                            )
                             config.__dict__["kwargs"][name] = config.__dict__[name]
                             updated = True
 

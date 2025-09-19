@@ -104,7 +104,7 @@ class ChunkingApplier:
             if meta is None:
                 continue
 
-            # skip tangent nodes since they are overriden as 1 and
+            # skip tangent nodes since they are overridden as 1 and
             # reapplied later in the bwd graph
             if node.op == "placeholder" and "tangent" in node.target:
                 self.overriden_tangent[node] = None  # will update the value later
@@ -180,7 +180,7 @@ class ChunkingApplier:
 
             self.chunked_subgraph_input.append(chunks)
 
-            # let's do a small meta progation to get the size of each chunk
+            # let's do a small meta propagation to get the size of each chunk
             if self.chunk_sizes is None:
                 input_tensor = subgraph_input.meta["val"]
                 tensors = torch.chunk(input_tensor, self.num_chunk)
@@ -395,7 +395,7 @@ class ChunkingApplier:
             node.replace_all_uses_with(recovered)
 
     def erase_original_nodes(self):
-        # Traveral reversely to erase user first
+        # Traverse reversely to erase user first
         for node in reversed(tuple(self.subgraph_body + self.subgraph_output)):
             if node.op == "placeholder":
                 continue

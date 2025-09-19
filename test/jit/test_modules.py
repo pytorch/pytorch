@@ -21,7 +21,7 @@ class TestModules(JitTestCase):
         """
 
         # torch.nn.Linear has a __constants__ attribute defined
-        # and intialized to a list.
+        # and initialized to a list.
         class Net(torch.nn.Linear):
             x: torch.jit.Final[int]
 
