@@ -13,7 +13,7 @@ from typing import Any, Callable, Optional, TYPE_CHECKING
 import torch
 import torch.fx
 from torch._dynamo.graph_utils import _graph_device_type
-from torch._dynamo.precompile_context import SystemInfo
+from torch._dynamo.package import SystemInfo
 
 from . import convert_frame
 from .hooks import Hooks

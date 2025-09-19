@@ -43,9 +43,6 @@ if IS_WINDOWS and IS_CI:
 
 
 Tolerances = namedtuple("Tolerances", ["atol", "rtol"])
-# In MI300, HIPBLASLT_ALLOW_TF32=1 is used to enable tf32 for matmul.
-# In the current test, HIPBLASLT_ALLOW_TF32 is not set, according to the
-# logic of allowTF32CuBLAS(), set float32_matmul_precision to highest.
 if torch.version.hip:
     torch.set_float32_matmul_precision("highest")
 else:

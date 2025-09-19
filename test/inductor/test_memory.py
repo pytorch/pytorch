@@ -408,13 +408,9 @@ class TestOperatorReorderForPeakMemory(TestCase):
             code = run_and_get_triton_code(f_compiled, x, y, z)
             (
                 FileCheck()
-                .check("triton_poi_fused_add_0.run(buf1, arg2_1,")
-                .check("triton_poi_fused_add_0.run(buf3, arg2_1,")
-                .check("triton_poi_fused_add_0.run(buf4, buf3,")
-                .check("triton_poi_fused_add_0.run(buf6, arg2_1,")
-                .check("triton_poi_fused_add_0.run(buf7, buf6,")
-                .check("triton_poi_fused_add_0.run(buf9, arg2_1,")
-                .check("triton_poi_fused_add_0.run(buf10, buf9,")
+                .check("triton_poi_fused_add_0.run(buf2, arg2_1, buf1,")
+                .check("triton_poi_fused_add_1.run(buf4, buf3, arg2_1")
+                .check("triton_poi_fused_add_1.run(buf6, buf5, arg2_1,")
                 .run(code)
             )
 

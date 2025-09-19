@@ -81,7 +81,7 @@ class DebugMode(TorchDispatchMode):
     def __init__(
         self,
         *,
-        record_torchfunction=True,
+        record_torchfunction=False,
         record_faketensor=False,
         record_realtensor=True,
     ):

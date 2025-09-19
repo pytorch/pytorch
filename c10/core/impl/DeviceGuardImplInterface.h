@@ -6,6 +6,7 @@
 #include <c10/util/Exception.h>
 
 // Just for C10_ANONYMOUS_VARIABLE
+#include <c10/core/impl/TorchDispatchModeTLS.h>
 #include <c10/util/Registry.h>
 
 #include <array>
@@ -251,7 +252,7 @@ struct C10_API DeviceGuardImplInterface {
 // for devices that don't actually have a concept of device index.  Prominent
 // examples are CPU and Meta.
 template <DeviceType D>
-struct NoOpDeviceGuardImpl final : public DeviceGuardImplInterface {
+struct NoOpDeviceGuardImpl : public DeviceGuardImplInterface {
   NoOpDeviceGuardImpl() = default;
   DeviceType type() const override {
     return D;
@@ -370,6 +371,8 @@ inline const DeviceGuardImplInterface* getDeviceGuardImpl(DeviceType type) {
 inline bool hasDeviceGuardImpl(DeviceType type) {
   return device_guard_impl_registry[static_cast<size_t>(type)].load();
 }
+
+void C10_API ensureCUDADeviceGuardSet();
 
 } // namespace impl
 } // namespace c10

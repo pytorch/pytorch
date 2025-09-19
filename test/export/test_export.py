@@ -1458,6 +1458,40 @@ graph():
         ep = export(f, args, strict=False)
         self.assertEqual(ep.module()(*args), f(*args))
 
+    def test_where_decomp(self):
+        class TestModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return torch.ops.aten.where.default(x > 0)
+
+        test_module = TestModule()
+        sample_input = (torch.randn(2, 3),)
+
+        def auto_dynamic_shapes_from_args(args):  # pyre-ignore
+            """
+            This function creates dynamic shapes specification with Dim.AUTO
+            in all dimensions of all tensors for given argument list.
+            """
+            if isinstance(args, list):
+                return [auto_dynamic_shapes_from_args(arg) for arg in args]
+            elif isinstance(args, tuple):
+                return tuple(auto_dynamic_shapes_from_args(arg) for arg in args)
+            elif isinstance(args, dict):
+                return {k: auto_dynamic_shapes_from_args(v) for k, v in args.items()}
+            elif isinstance(args, torch.Tensor):
+                return {j: Dim.AUTO for j in range(args.dim())}
+            else:
+                print(f"args type: {type(args)}")
+                return None
+
+        ep = torch.export.export(
+            test_module,
+            sample_input,
+            dynamic_shapes=auto_dynamic_shapes_from_args(sample_input),
+        ).run_decompositions({})
+
     def test_basic_non_strict_fake_tensor(self):
         class Basic(torch.nn.Module):
             def __init__(self) -> None:

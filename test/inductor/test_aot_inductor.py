@@ -50,6 +50,7 @@ from torch.testing._internal.common_cuda import (
 )
 from torch.testing._internal.common_device_type import (
     _has_sufficient_memory,
+    e4m3_type,
     skipCUDAIf,
 )
 from torch.testing._internal.common_quantization import (
@@ -1194,7 +1195,6 @@ class AOTInductorTestsTemplate:
         not PLATFORM_SUPPORTS_FP8,
         "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
     )
-    @skipIfRocm  # _scaled_mm_out_cuda  is not compiled for ROCm platform
     @skipIfXpu
     def test_fp8(self):
         # cuda only
@@ -1207,7 +1207,7 @@ class AOTInductorTestsTemplate:
                 self.out_dtype = dtype
 
             def forward(self, x, weight, bias, scale_a, scale_b):
-                weight = weight.to(torch.float8_e4m3fn)
+                weight = weight.to(e4m3_type)
                 output = torch._scaled_mm(
                     x,
                     weight,
@@ -1229,7 +1229,7 @@ class AOTInductorTestsTemplate:
         b_inverse_scale = 1 / b_scale
 
         x_shape = (16, 16)
-        x = torch.rand(*x_shape, device=GPU_TYPE, dtype=dtype).to(torch.float8_e4m3fn)
+        x = torch.rand(*x_shape, device=GPU_TYPE, dtype=dtype).to(e4m3_type)
         dim0_x = Dim("dim0_x", min=1, max=2048)
         dynamic_shapes = ({0: dim0_x}, None, None, None, None)
         self.check_model(
@@ -1242,7 +1242,6 @@ class AOTInductorTestsTemplate:
         not PLATFORM_SUPPORTS_FP8,
         "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
     )
-    @skipIfRocm  # _scaled_mm_out_cuda  is not compiled for ROCm platform
     @skipIfXpu
     def test_fp8_view_of_param(self):
         # cuda only
@@ -1277,15 +1276,13 @@ class AOTInductorTestsTemplate:
         input_bias = torch.rand(32, device=self.device, dtype=dtype)
         weight_shape = (32, 16)
         weight = torch.rand(*weight_shape, device=self.device, dtype=dtype).to(
-            torch.float8_e4m3fn
+            e4m3_type
         )
         a_inverse_scale = 1 / a_scale
         b_inverse_scale = 1 / b_scale
 
         x_shape = (16, 16)
-        x = torch.rand(*x_shape, device=self.device, dtype=dtype).to(
-            torch.float8_e4m3fn
-        )
+        x = torch.rand(*x_shape, device=self.device, dtype=dtype).to(e4m3_type)
         dim0_x = Dim("dim0_x", min=1, max=2048)
         dynamic_shapes = ({0: dim0_x}, None, None, None)
         self.check_model(
@@ -5195,7 +5192,6 @@ class AOTInductorTestsTemplate:
         not PLATFORM_SUPPORTS_FP8,
         "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
     )
-    @skipIfRocm  # _scaled_mm_out_cuda  is not compiled for ROCm platform
     @skipIfXpu
     def test_aoti_debug_printer_fp8_dtype(self):
         if self.device != GPU_TYPE:
@@ -5207,7 +5203,7 @@ class AOTInductorTestsTemplate:
                 self.out_dtype = dtype
 
             def forward(self, x, weight, bias, scale_a, scale_b):
-                weight = weight.to(torch.float8_e4m3fn)
+                weight = weight.to(e4m3_type)
                 output = torch._scaled_mm(
                     x,
                     weight,
@@ -5229,7 +5225,7 @@ class AOTInductorTestsTemplate:
         b_inverse_scale = 1 / b_scale
 
         x_shape = (16, 16)
-        x = torch.rand(*x_shape, device=GPU_TYPE, dtype=dtype).to(torch.float8_e4m3fn)
+        x = torch.rand(*x_shape, device=GPU_TYPE, dtype=dtype).to(e4m3_type)
 
         kernel_calls = [
             (f"aoti_torch_{GPU_TYPE}__scaled_mm_out", 5),

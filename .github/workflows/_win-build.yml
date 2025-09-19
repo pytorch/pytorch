@@ -151,7 +151,7 @@ jobs:
           BUILD_WHEEL: 1
           MAX_JOBS: 8
           CUDA_VERSION: ${{ inputs.cuda-version }}
-          PYTHON_VERSION: "3.9"
+          PYTHON_VERSION: "3.10"
           SCCACHE_BUCKET: "ossci-compiler-cache"
           SCCACHE_S3_KEY_PREFIX: ${{ github.workflow }}
           SCCACHE_REGION: us-east-1

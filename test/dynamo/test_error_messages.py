@@ -48,27 +48,6 @@ class GenericCtxMgr:
 
 
 class ErrorMessagesTest(LoggingTestCase):
-    def test_dynamic_shape_operator(self):
-        def fn():
-            return torch.nonzero(torch.rand([10, 10]))
-
-        self.assertExpectedInlineMunged(
-            Unsupported,
-            lambda: torch.compile(fn, backend="eager", fullgraph=True)(),
-            """\
-Dynamic shape operator
-  Explanation: Operator `aten.nonzero.default`'s output shape depends on input Tensor data.
-  Hint: Enable tracing of dynamic shape operators with `torch._dynamo.config.capture_dynamic_output_shape_ops = True`
-
-  Developer debug context: aten.nonzero.default
-
- For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0036.html
-
-from user code:
-   File "test_error_messages.py", line N, in fn
-    return torch.nonzero(torch.rand([10, 10]))""",
-        )
-
     def test_dynamic_shape_operator_no_meta_kernel(self):
         def fn():
             return torch.linalg.lstsq(torch.rand(10, 10), torch.rand(10, 10))
@@ -90,29 +69,6 @@ from user code:
    File "test_error_messages.py", line N, in fn
     return torch.linalg.lstsq(torch.rand(10, 10), torch.rand(10, 10))""",
             )
-
-    def test_data_dependent_operator(self):
-        def fn(x):
-            return x.item()
-
-        self.assertExpectedInlineMunged(
-            Unsupported,
-            lambda: torch.compile(fn, backend="eager", fullgraph=True)(
-                torch.Tensor([1])
-            ),
-            """\
-Unsupported Tensor.item() call with capture_scalar_outputs=False
-  Explanation: Dynamo does not support tracing `Tensor.item()` with config.capture_scalar_outputs=False.
-  Hint: Set `torch._dynamo.config.capture_scalar_outputs = True` or `export TORCHDYNAMO_CAPTURE_SCALAR_OUTPUTS=1` to include these operations in the captured graph.
-
-  Developer debug context: call_method TensorVariable() item () {}
-
- For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0124.html
-
-from user code:
-   File "test_error_messages.py", line N, in fn
-    return x.item()""",
-        )
 
     def test_data_dependent_operator2(self):
         def fn(x):

@@ -601,6 +601,56 @@ class TestReplicate1DTrainingCore(FSDPTest):
 
             self.assertEqual(losses[0], losses[1])
 
+    @skip_if_lt_x_gpu(2)
+    @unittest.skipIf(TEST_HPU, "Sleep is not supported on HPU")
+    def test_post_optim_event(self):
+        torch.manual_seed(42)
+        model_args = ModelArgs(dropout_p=0.0)
+        model = Transformer(model_args)
+        ref_model = copy.deepcopy(model).to(device_type.type)
+        ref_optim = torch.optim.AdamW(ref_model.parameters(), lr=1e-2)
+        for layer in itertools.chain(model.layers, [model]):
+            replicate(layer)
+        optim = torch.optim.AdamW(model.parameters(), lr=1e-2)
+
+        def step_post_hook(
+            fsdp_module: FSDPModule, opt: torch.optim.Optimizer, args, kwargs
+        ) -> None:
+            post_optim_event = (
+                torch.get_device_module(device_type).current_stream().record_event()
+            )
+            fsdp_module.set_post_optim_event(post_optim_event)
+
+        optim.register_step_post_hook(functools.partial(step_post_hook, model))
+
+        torch.manual_seed(42 + self.rank)
+        inp = torch.randint(0, model_args.vocab_size, (2, 8), device=device_type.type)
+        # Track all losses and check for equality at the end to avoid a CPU
+        # sync point after each iteration
+        ref_losses: list[torch.Tensor] = []
+        losses: list[torch.Tensor] = []
+        for _ in range(10):
+            ref_optim.zero_grad()
+            ref_losses.append(ref_model(inp).sum())
+            ref_losses[-1].backward()
+
+            for param in ref_model.parameters():
+                if param.grad is not None:
+                    dist.all_reduce(param.grad)
+                    param.grad.div_(self.world_size)
+
+            ref_optim.step()
+        for _ in range(10):
+            optim.zero_grad()
+            losses.append(model(inp).sum())
+            losses[-1].backward()
+            optim.step()
+            # Sleep after the optimizer step to allow CPU to run ahead into the
+            # next iteration's forward, exercising the post-optim stream sync
+            torch.get_device_module(device_type)._sleep(int(25 * get_cycles_per_ms()))
+        for ref_loss, loss in zip(ref_losses, losses):
+            self.assertEqual(ref_loss, loss)
+
 
 if __name__ == "__main__":
     run_tests()

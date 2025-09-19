@@ -380,6 +380,13 @@ cmake_dependent_option(BUILD_BUNDLE_PTXAS "Bundle PTX into torch/bin fodler"
                        OFF "USE_CUDA" OFF)
 cmake_dependent_option(USE_KLEIDIAI "Use KleidiAI for the ARM CPU & AARCH64 architecture." ON
                         "CPU_AARCH64" OFF)
+# prioritized text linker, ON by default for AArch64+Linux, option visible to all AArch64, x86 and ppc64le.
+set(USE_PRIORITIZED_TEXT_DEFAULT OFF)
+if(LINUX AND CPU_AARCH64)
+  set(USE_PRIORITIZED_TEXT_DEFAULT ON)
+endif()
+cmake_dependent_option(USE_PRIORITIZED_TEXT_FOR_LD "Use prioritized text linker for ld."
+  "${USE_PRIORITIZED_TEXT_DEFAULT}" "CPU_INTEL OR CPU_AARCH64 OR CPU_POWER" OFF)
 
 option(USE_MIMALLOC "Use mimalloc" OFF)
 # Enable third party mimalloc library to improve memory allocation performance
@@ -656,6 +663,11 @@ if(MSVC)
 endif(MSVC)
 
 string(APPEND CMAKE_CUDA_FLAGS " -Xfatbin -compress-all")
+
+# Set linker max-page-size to 64KiB on AArch64 Linux
+if(LINUX AND CPU_AARCH64)
+  add_link_options_if_supported("-z,max-page-size=0x10000")
+endif()
 
 # Set INTERN_BUILD_MOBILE for all mobile builds. Components that are not
 # applicable to mobile are disabled by this variable. Setting
@@ -1420,4 +1432,58 @@ if(BUILD_BUNDLE_PTXAS AND USE_CUDA)
   endif()
   install(PROGRAMS "${PROJECT_BINARY_DIR}/ptxas"
           DESTINATION "${CMAKE_INSTALL_BINDIR}")
+endif()
+
+if(USE_PRIORITIZED_TEXT_FOR_LD)
+  add_compile_options(
+    $<$<COMPILE_LANGUAGE:C,CXX>:-ffunction-sections>
+    $<$<COMPILE_LANGUAGE:C,CXX>:-fdata-sections>
+  )
+  set(LINKER_SCRIPT_FILE_OUT "${CMAKE_SOURCE_DIR}/cmake/linker_script.ld")
+  set(LINKER_SCRIPT_FILE_IN "${CMAKE_SOURCE_DIR}/cmake/prioritized_text.txt")
+
+  add_custom_command(
+    OUTPUT "${LINKER_SCRIPT_FILE_OUT}"
+    COMMAND ${Python_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/setup_helpers/generate_linker_script.py --filein "${LINKER_SCRIPT_FILE_IN}" --fout "${LINKER_SCRIPT_FILE_OUT}"
+    DEPENDS ${CMAKE_SOURCE_DIR}/tools/setup_helpers/generate_linker_script.py "${LINKER_SCRIPT_FILE_IN}"
+    COMMENT "Generating prioritized text linker files"
+    VERBATIM
+  )
+
+  add_custom_target(generate_linker_script DEPENDS "${LINKER_SCRIPT_FILE_OUT}")
+
+  if(BUILD_PYTHON)
+    set(LINKER_OPT_TARGETS torch_python)
+  endif()
+
+  if(NOT BUILD_LIBTORCHLESS)
+    list(APPEND LINKER_OPT_TARGETS torch_cpu c10)
+    if(USE_CUDA)
+      list(APPEND LINKER_OPT_TARGETS torch_cuda c10_cuda)
+    endif()
+    if(USE_XPU)
+      list(APPEND LINKER_OPT_TARGETS torch_xpu c10_xpu)
+    endif()
+    if(USE_ROCM)
+      list(APPEND LINKER_OPT_TARGETS torch_hip c10_hip)
+    endif()
+  endif()
+
+  foreach(tgt IN LISTS LINKER_OPT_TARGETS)
+    if(TARGET ${tgt})
+      add_dependencies("${tgt}" generate_linker_script)
+      target_link_options_if_supported(${tgt} "-T,${LINKER_SCRIPT_FILE_OUT}")
+      set_property(TARGET ${tgt} APPEND PROPERTY LINK_DEPENDS "${LINKER_SCRIPT_FILE_OUT}")
+    else()
+       message(WARNING "Requested target '${tgt}' for linker script optimization was not found.")
+    endif()
+  endforeach()
+
+else()
+  if(LINUX AND CPU_AARCH64)
+    message(WARNING [[
+    It is strongly recommend to enable linker script optimization for all AArch64 Linux builds.
+    To do so please export USE_PRIORITIZED_TEXT_FOR_LD=1
+    ]])
+  endif()
 endif()

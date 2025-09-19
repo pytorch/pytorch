@@ -964,7 +964,6 @@ exclude_patterns = [
     'test/jit/**',  # should be run through test/test_jit.py
     'test/ao/sparsity/**',  # should be run through test/test_ao_sparsity.py
     'test/fx/**',  # should be run through test/test_fx.py
-    'test/bottleneck_test/**',  # excluded by test/run_test.py
     'test/package/**',  # excluded by test/run_test.py
     'test/distributed/argparse_util_test.py',
     'test/distributed/bin/test_script.py',
@@ -1410,8 +1409,6 @@ exclude_patterns = [
     'torch/utils/benchmark/utils/timer.py',
     'torch/utils/benchmark/utils/valgrind_wrapper/__init__.py',
     'torch/utils/benchmark/utils/valgrind_wrapper/timer_interface.py',
-    'torch/utils/bottleneck/__init__.py',
-    'torch/utils/bottleneck/__main__.py',
     'torch/utils/bundled_inputs.py',
     'torch/utils/checkpoint.py',
     'torch/utils/collect_env.py',

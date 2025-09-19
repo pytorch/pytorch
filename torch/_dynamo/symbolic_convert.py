@@ -3847,6 +3847,7 @@ class InstructionTranslator(InstructionTranslatorBase):
                 global_scope=f_globals,
                 f_code=f_code,
                 torch_function_mode_stack=torch_function_mode_stack,
+                one_graph=one_graph,
                 package=package,
             ),
             instructions=instructions,

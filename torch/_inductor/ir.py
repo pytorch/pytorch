@@ -8199,12 +8199,23 @@ class StorageBox(MutableBox):
             self.realize()
 
     def has_accumulated_enough_reads_by_size(self, threshold: int) -> bool:
-        size_of_reads = [V.graph.get_dep_size_hint(dep) for dep in self.get_reads()]
+        from torch._inductor.utils import is_nonfreeable_buffers
+
+        size_of_reads = [
+            V.graph.get_dep_size_hint(dep)
+            for dep in self.get_reads()
+            if not is_nonfreeable_buffers(dep)
+        ]
         if not size_of_reads:
             return False
         total_size = sum(size_of_reads)
         max_size = max(size_of_reads)
-        return total_size > threshold and total_size / max_size >= 2
+        min_size = min(size_of_reads)
+        return (
+            total_size >= threshold
+            and total_size / max_size >= 2
+            and max_size == min_size
+        )
 
     def has_exceeded_max_reads(self) -> bool:
         return isinstance(self.data, Pointwise) and (
