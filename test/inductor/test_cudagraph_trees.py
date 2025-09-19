@@ -5,6 +5,7 @@ import functools
 import gc
 import importlib
 import itertools
+import re
 import sys
 import unittest
 import warnings
@@ -914,10 +915,8 @@ if HAS_CUDA_AND_TRITON:
 
         @torch._inductor.config.patch("graph_partition", True)
         @torch._inductor.config.patch("implicit_fallbacks", True)
-        def test_graph_partition_custom(self):
+        def test_graph_partition_custom_rule(self):
             def get_num_partitions(code):
-                import re
-
                 code = "".join(code)
                 found = re.search(r"partitions=\[(.*)\]", code)
                 assert found is not None
