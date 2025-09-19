@@ -322,8 +322,10 @@ def prepare_softmax_extra_check(match):
     """
     return (
         config.online_softmax
-        and match.kwargs["x"].meta["val"].device.type == "cuda"
-        and config.cuda_backend == "triton"
+        and (
+            (match.kwargs["x"].meta["val"].device.type == "cuda" and config.cuda_backend == "triton")
+            or (match.kwargs["x"].meta["val"].device.type == "xpu" and config.xpu_backend == "triton")
+        )
     )
 
 
