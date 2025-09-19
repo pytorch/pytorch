@@ -736,10 +736,10 @@ def flex_attention_backward(*args, **kwargs):
 
     for conf in configs:
         if (
-            SPARSE_KV_BLOCK_SIZE % conf.block_m1 != 0
+            SPARSE_KV_BLOCK_SIZE % conf.block_n1 != 0
+            or SPARSE_Q_BLOCK_SIZE % conf.block_m1 != 0
+            or SPARSE_KV_BLOCK_SIZE % conf.block_n2 != 0
             or SPARSE_Q_BLOCK_SIZE % conf.block_m2 != 0
-            or SPARSE_KV_BLOCK_SIZE % conf.block_n1 != 0
-            or SPARSE_Q_BLOCK_SIZE % conf.block_n2 != 0
         ):
             continue
 
