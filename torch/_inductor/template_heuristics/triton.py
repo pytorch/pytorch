@@ -94,6 +94,24 @@ class FlexBwDConfig:
     """
     Base Config class for flex attention backward
     - FlexAttn backward will use this.
+
+    Note: flex bwd configs
+
+    Kernel Constraints:
+      * BLOCK_N1 % BLOCK_M1 == 0
+      * BLOCK_M2 % BLOCK_N2 == 0
+
+    Pattern 1 - Symmetric Pairing (M, N, N, M):
+    - Used in autotune configs
+    - block_m1=M, block_n1=N, block_m2=N, block_n2=M
+    - Only requires checking BLOCK_N % BLOCK_M == 0
+    - Second constraint (BLOCK_M2 % BLOCK_N2) automatically satisfied
+
+    Pattern 2 - Independent Parameters (M1, N1, M2, N2):
+    - Used in exhaustive search for maximum flexibility
+    - All four parameters can be set independently
+    - Requires checking both constraints
+
     """
 
     block_m1: int
@@ -440,12 +458,13 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         ]
 
         self.flex_attn_bwd_autotune_configs: list[FlexBwDConfig] = [
+            # See Note: flex bwd configs
             FlexBwDConfig(BLOCK_M, BLOCK_N, BLOCK_N, BLOCK_M, s, w)
-            for BLOCK_M in [32, 64, 128]
+            for BLOCK_M in [32, 64]
             for BLOCK_N in [32, 64, 128]
             for s in [1, 3, 4, 5]  # num_stages
             for w in ([4, 8] if BLOCK_M >= 128 or BLOCK_N >= 128 else [4])
-            if BLOCK_N % BLOCK_M == 0 and not (BLOCK_M == 128 and BLOCK_N == 128)
+            if BLOCK_N % BLOCK_M == 0
         ]
 
         self.flex_decode_autotune_configs: list[FlexDecodeConfig] = [
@@ -463,6 +482,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         ]
 
         self.exhaustive_flex_attn_bwd_configs: list[FlexBwDConfig] = [
+            # See Note: flex bwd configs
             FlexBwDConfig(BLOCK_M1, BLOCK_N1, BLOCK_M2, BLOCK_N2, num_stages, num_warps)
             for BLOCK_M1 in [16, 32, 64, 128]
             for BLOCK_N1 in [16, 32, 64, 128]
@@ -1158,6 +1178,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
         ]
 
         self.flex_attn_bwd_autotune_configs: list[FlexBwDConfig] = [
+            # See Note: flex bwd configs
             ROCmFlexBwDConfig(BLOCK1, BLOCK2, BLOCK2, BLOCK1, 1, w, mfma)
             for BLOCK1 in [16, 32, 64]
             for BLOCK2 in [32, 64, 128]
@@ -1186,6 +1207,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
         ]
 
         self.exhaustive_flex_attn_bwd_configs: list[FlexBwDConfig] = [
+            # See Note: flex bwd configs
             ROCmFlexBwDConfig(
                 BLOCK_M1,
                 BLOCK_N1,
@@ -1399,6 +1421,7 @@ class XPUConfigHeuristic(BaseConfigHeuristic):
 
         if not bool(os.getenv("CI")):
             self.flex_attn_bwd_autotune_configs += [
+                # See Note: flex bwd configs
                 FlexBwDConfig(BLOCK1, BLOCK2, BLOCK2, BLOCK1, s, w)
                 for BLOCK1 in [32, 64]
                 for BLOCK2 in [32, 64, 128]
