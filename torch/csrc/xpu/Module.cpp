@@ -330,12 +330,12 @@ static void registerXpuDeviceProperties(PyObject* module) {
       ._(sub_group_sizes)                                        \
       ._(has_fp16)                                               \
       ._(has_fp64)                                               \
+      ._(has_tf32)                                               \
       ._(has_atomic64)                                           \
       ._(has_bfloat16_conversions)                               \
       ._(has_subgroup_matrix_multiply_accumulate)                \
       ._(has_subgroup_matrix_multiply_accumulate_tensor_float32) \
-      ._(has_subgroup_2d_block_io)                               \
-      ._(has_tf32)
+      ._(has_subgroup_2d_block_io)
 
   THXP_FORALL_DEVICE_PROPERTIES(DEFINE_READONLY_MEMBER)
       .def_readonly("total_memory", &DeviceProp::global_mem_size)

@@ -2386,6 +2386,7 @@ class _XpuDeviceProperties:
     sub_group_sizes: list[_int]
     has_fp16: _bool
     has_fp64: _bool
+    has_tf32: _bool
     has_atomic64: _bool
     has_bfloat16_conversions: _bool
     has_subgroup_matrix_multiply_accumulate: _bool
@@ -2396,7 +2397,6 @@ class _XpuDeviceProperties:
     architecture: _int
     type: str
     uuid: Any
-    has_tf32: _bool
 
 # Defined in torch/csrc/xpu/Stream.cpp
 class _XpuStreamBase(Stream):
