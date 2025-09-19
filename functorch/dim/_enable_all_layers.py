@@ -14,9 +14,18 @@ if TYPE_CHECKING:
 class EnableAllLayers:
     """
     RAII-style context manager for enabling functorch vmap layers.
-
-    This corresponds to the EnableAllLayers struct in the C++ code.
     It manages the creation and cleanup of functorch dynamic layers.
+
+    This is probably one of the more algorithmically important parts of first
+    class dims. Intuitively, FCD can be thought of as another way of using
+    vmap, where you don't actually have to vmap at the top level, instead the
+    vmaps are implicitly determined by inspecting the bound dimensions on the
+    FCD tensors involved in a compute (this is similar to our concept of
+    non-lexical modes that we spent a long time talking about years ago). But
+    under the hood you still need to actually enable the vmap mode. So once
+    FCD has determined all of the dims we are batching over, it needs to
+    enable all those layers so functorch can actually apply the batching
+    rules. Therefore enable all layers!
     """
 
     levels_start: int

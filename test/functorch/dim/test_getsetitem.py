@@ -18,13 +18,13 @@ class TestGetSetItem(TestCase):
 
         # Test indexing with each dim
         result1 = tensor[x]
-        self.assertTrue(isinstance(result1, (torch.Tensor, Tensor)))
+        self.assertIsInstance(result1, Tensor)
 
         result2 = tensor[y]
-        self.assertTrue(isinstance(result2, (torch.Tensor, Tensor)))
+        self.assertIsInstance(result2, Tensor)
 
         result3 = tensor[z]
-        self.assertTrue(isinstance(result3, (torch.Tensor, Tensor)))
+        self.assertIsInstance(result3, Tensor)
 
     def test_multiple_dim_indexing(self):
         """Test indexing with multiple Dims."""
@@ -33,10 +33,10 @@ class TestGetSetItem(TestCase):
 
         # Test multiple dims in one indexing operation
         result = tensor[x, y]
-        self.assertTrue(isinstance(result, (torch.Tensor, Tensor)))
+        self.assertIsInstance(result, Tensor)
 
         result = tensor[x, y, z]
-        self.assertTrue(isinstance(result, (torch.Tensor, Tensor)))
+        self.assertIsInstance(result, Tensor)
 
     def test_mixed_indexing(self):
         """Test mixing Dims with regular indexing."""
@@ -45,17 +45,17 @@ class TestGetSetItem(TestCase):
 
         # Mix dim with slice
         result1 = tensor[x, :]
-        self.assertTrue(isinstance(result1, (torch.Tensor, Tensor)))
+        self.assertIsInstance(result1, Tensor)
 
         result2 = tensor[:, y]
-        self.assertTrue(isinstance(result2, (torch.Tensor, Tensor)))
+        self.assertIsInstance(result2, Tensor)
 
         # Mix dim with integer
         result3 = tensor[x, 0]
-        self.assertTrue(isinstance(result3, (torch.Tensor, Tensor)))
+        self.assertIsInstance(result3, Tensor)
 
         result4 = tensor[0, y]
-        self.assertTrue(isinstance(result4, (torch.Tensor, Tensor)))
+        self.assertIsInstance(result4, Tensor)
 
     def test_ellipsis_indexing(self):
         """Test indexing with ellipsis (...)."""
@@ -64,13 +64,13 @@ class TestGetSetItem(TestCase):
 
         # Test ellipsis with dims
         result1 = tensor[x, ...]
-        self.assertTrue(isinstance(result1, (torch.Tensor, Tensor)))
+        self.assertIsInstance(result1, Tensor)
 
         result2 = tensor[..., y]
-        self.assertTrue(isinstance(result2, (torch.Tensor, Tensor)))
+        self.assertIsInstance(result2, Tensor)
 
         result3 = tensor[x, ..., y]
-        self.assertTrue(isinstance(result3, (torch.Tensor, Tensor)))
+        self.assertIsInstance(result3, Tensor)
 
     def test_none_indexing(self):
         """Test indexing with None (newaxis)."""
@@ -79,10 +79,10 @@ class TestGetSetItem(TestCase):
 
         # Test None with dims
         result1 = tensor[x, None, y]
-        self.assertTrue(isinstance(result1, (torch.Tensor, Tensor)))
+        self.assertIsInstance(result1, Tensor)
 
         result2 = tensor[None, x]
-        self.assertTrue(isinstance(result2, (torch.Tensor, Tensor)))
+        self.assertIsInstance(result2, Tensor)
 
     def test_slice_indexing(self):
         """Test indexing with slices mixed with dims."""
@@ -91,13 +91,13 @@ class TestGetSetItem(TestCase):
 
         # Test various slice patterns with dims
         result1 = tensor[x, 1:5]
-        self.assertTrue(isinstance(result1, (torch.Tensor, Tensor)))
+        self.assertIsInstance(result1, Tensor)
 
         result2 = tensor[1:3, y]
-        self.assertTrue(isinstance(result2, (torch.Tensor, Tensor)))
+        self.assertIsInstance(result2, Tensor)
 
         result3 = tensor[x, 1:5, z]
-        self.assertTrue(isinstance(result3, (torch.Tensor, Tensor)))
+        self.assertIsInstance(result3, Tensor)
 
     def test_tensor_indexing(self):
         """Test indexing with tensor indices."""
@@ -109,10 +109,10 @@ class TestGetSetItem(TestCase):
 
         # Test tensor indexing with dims
         result1 = tensor[x, idx]
-        self.assertTrue(isinstance(result1, (torch.Tensor, Tensor)))
+        self.assertIsInstance(result1, Tensor)
 
         result2 = tensor[idx, y]
-        self.assertTrue(isinstance(result2, (torch.Tensor, Tensor)))
+        self.assertIsInstance(result2, Tensor)
 
     def test_boolean_indexing(self):
         """Test boolean indexing with dims."""
@@ -124,7 +124,7 @@ class TestGetSetItem(TestCase):
 
         # Test boolean indexing
         result = tensor[x, mask]
-        self.assertTrue(isinstance(result, (torch.Tensor, Tensor)))
+        self.assertIsInstance(result, Tensor)
 
     def test_dim_pack_indexing(self):
         """Test indexing with dimension packs (tuples/lists of dims)."""
@@ -135,7 +135,7 @@ class TestGetSetItem(TestCase):
 
         # Test dim pack indexing - using separate dimensions
         result = tensor[a, b]
-        self.assertTrue(isinstance(result, (torch.Tensor, Tensor)))
+        self.assertIsInstance(result, Tensor)
 
     def test_unbound_dim_binding(self):
         """Test automatic binding of unbound dimensions during indexing."""
@@ -145,7 +145,7 @@ class TestGetSetItem(TestCase):
 
         # Should automatically bind dimensions
         result = tensor[x, y]
-        self.assertTrue(isinstance(result, (torch.Tensor, Tensor)))
+        self.assertIsInstance(result, Tensor)
         self.assertEqual(x.size, 6)
         self.assertEqual(y.size, 8)
 
@@ -158,7 +158,7 @@ class TestGetSetItem(TestCase):
 
         # Test dimlist indexing
         result = tensor[dl, :]
-        self.assertTrue(isinstance(result, (torch.Tensor, Tensor)))
+        self.assertIsInstance(result, Tensor)
 
     def test_unbound_dimlist_indexing(self):
         """Test indexing with unbound DimList."""
@@ -169,7 +169,7 @@ class TestGetSetItem(TestCase):
 
         # Should bind to remaining dimensions
         result = tensor[0, dl]
-        self.assertTrue(isinstance(result, (torch.Tensor, Tensor)))
+        self.assertIsInstance(result, Tensor)
 
     def test_repeated_dim_usage(self):
         """Test using the same dim multiple times in indexing."""
@@ -178,7 +178,7 @@ class TestGetSetItem(TestCase):
 
         # This should trigger advanced indexing for repeated dims
         result = tensor[x, x]
-        self.assertTrue(isinstance(result, (torch.Tensor, Tensor)))
+        self.assertIsInstance(result, Tensor)
 
     def test_complex_mixed_indexing(self):
         """Test complex combinations of different indexing types."""
@@ -189,12 +189,12 @@ class TestGetSetItem(TestCase):
         idx = torch.tensor([0, 2])
 
         result1 = tensor[a, 1:3, None, idx, :]
-        self.assertTrue(isinstance(result1, (torch.Tensor, Tensor)))
+        self.assertIsInstance(result1, Tensor)
 
         # Use mask with correct shape
         correct_mask = torch.tensor([True, False, True, False, False, True, True])
         result2 = tensor[..., correct_mask]
-        self.assertTrue(isinstance(result2, (torch.Tensor, Tensor)))
+        self.assertIsInstance(result2, torch.Tensor)
 
     def test_edge_cases(self):
         """Test edge cases and boundary conditions."""
@@ -204,13 +204,13 @@ class TestGetSetItem(TestCase):
         vec = torch.randn(5)
         a = Dim("a")
         result1 = vec[a]
-        self.assertTrue(isinstance(result1, (torch.Tensor, Tensor)))
+        self.assertIsInstance(result1, Tensor)
         self.assertEqual(a.size, 5)  # Should bind to tensor size
 
         # Empty tensor indexing
         empty = torch.empty(0, 3, 4)
         result2 = empty[x, :]
-        self.assertTrue(isinstance(result2, (torch.Tensor, Tensor)))
+        self.assertIsInstance(result2, Tensor)
 
     def test_error_conditions(self):
         """Test conditions that should raise errors."""
@@ -242,13 +242,13 @@ class TestGetSetItem(TestCase):
         # Test basic indexing instead of complex dim packs
         a, b = dims(2)
         result1 = tensor[a, b]
-        self.assertTrue(isinstance(result1, (torch.Tensor, Tensor)))
+        self.assertIsInstance(result1, Tensor)
 
         # Test with different tensor
         tensor2 = torch.randn(2, 3, 4)
         c, d, e = dims(3)
         result2 = tensor2[c, d, e]
-        self.assertTrue(isinstance(result2, (torch.Tensor, Tensor)))
+        self.assertIsInstance(result2, Tensor)
 
     def test_device_handling(self):
         """Test indexing behavior with different devices."""
@@ -258,13 +258,13 @@ class TestGetSetItem(TestCase):
             x, y = dims(2)
 
             result_cpu = cpu_tensor[x, y]
-            self.assertTrue(isinstance(result_cpu, (torch.Tensor, Tensor)))
+            self.assertIsInstance(result_cpu, Tensor)
             self.assertEqual(result_cpu.device, torch.device("cpu"))
 
             # CUDA tensor
             cuda_tensor = torch.randn(3, 4, device="cuda")
             result_cuda = cuda_tensor[x, y]
-            self.assertTrue(isinstance(result_cuda, (torch.Tensor, Tensor)))
+            self.assertIsInstance(result_cuda, Tensor)
             self.assertEqual(result_cuda.device.type, "cuda")
 
 

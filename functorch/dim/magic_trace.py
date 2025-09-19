@@ -29,8 +29,7 @@ def magic_trace(
         subprocess.run(["chmod", "+x", magic_trace_cache])
     args = [magic_trace_cache, "attach", "-pid", str(pid), "-o", output]
     p = subprocess.Popen(args, stderr=subprocess.PIPE, encoding="utf-8")
-    if p.stderr is None:
-        raise RuntimeError("Failed to capture stderr")
+    assert p.stderr is not None
     while True:
         x = p.stderr.readline()
         print(x)

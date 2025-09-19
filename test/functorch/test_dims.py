@@ -92,7 +92,6 @@ class TestMin(TestCase):
             self.mem_allocated = torch.cuda.memory_allocated()
 
     def tearDown(self):
-        return
         interesting = []
         for o in gc.get_objects():
             if (

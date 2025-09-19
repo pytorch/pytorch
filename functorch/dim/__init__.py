@@ -21,7 +21,7 @@ from ._tensor_info import TensorInfo
 POINTWISE_OPTIMIZE = True
 DOT_OPTIMIZED = True
 
-# Global dimension level counter (similar to C++ n_dims_created)
+# Global dimension level counter
 _n_dims_created = 0
 
 
@@ -46,8 +46,7 @@ def dims(
     """
     Create and return one or more Dim objects.
 
-    Uses bytecode inspection to determine variable names when possible,
-    following the algorithm from functorch/csrc/dim/dim_creation.cpp
+    Uses bytecode inspection to determine variable names when possible.
 
     Args:
         n (int, optional): The number of dimensions to create. Can be omitted if sizes is specified.
@@ -65,13 +64,13 @@ def dims(
     specified_ndims = -1
     found_ndims = 0
 
-    # Parse arguments (equivalent to C++ argument parsing)
+    # Parse arguments
     if sizes is not None:
         specified_ndims = len(sizes)
     if n is not None:
         specified_ndims = n
 
-    # Use bytecode inspection following C++ PyInstDecoder logic
+    # Use bytecode inspection
     frame = inspect.currentframe()
     if frame is None:
         raise RuntimeError("Unable to get current frame")
@@ -82,10 +81,8 @@ def dims(
         code = frame.f_code
         lasti = frame.f_lasti
 
-        # Create decoder following C++ pattern
         decoder = _PyInstDecoder(code, lasti)
 
-        # Handle Python 3.11+ PRECALL instruction (like C++)
         if sys.version_info >= (3, 11):
             if decoder.opcode() == "PRECALL":
                 decoder.next()
@@ -100,7 +97,6 @@ def dims(
             found_ndims = decoder.oparg()
             decoder.next()  # Move past UNPACK_SEQUENCE
 
-        # Determine final ndims (following C++ logic exactly)
         if specified_ndims == -1:
             if found_ndims == 0:
                 raise SyntaxError(
@@ -109,9 +105,8 @@ def dims(
             specified_ndims = found_ndims
 
         if found_ndims != specified_ndims:
-            found_ndims = 0  # avoid taking the wrong names for dimensions
+            found_ndims = 0
 
-        # Generator function following C++ genobject lambda
         def genobject(i: int) -> Dim:
             nonlocal found_ndims
             name = None
@@ -120,9 +115,7 @@ def dims(
 
             if not name:
                 name = f"d{i}"
-                found_ndims = (
-                    0  # once we fail at finding a name, we can't find any more
-                )
+                found_ndims = 0
             else:
                 decoder.next()  # Move to next STORE instruction
 
@@ -133,7 +126,6 @@ def dims(
         if sizes is not None and len(sizes) != specified_ndims:
             raise ValueError(f"expected {specified_ndims} sizes but found {len(sizes)}")
 
-        # Create dimensions following C++ pattern
         if specified_ndims == 1:
             return genobject(0)
 
@@ -150,8 +142,6 @@ def dims(
 class DimList:
     """
     A list of first-class dimensions that can be bound to tensor dimensions.
-
-    This is the Python port of the C++ DimList class from functorch/csrc/dim/dimlist_class.cpp.
 
     A DimList can be in one of two states:
     1. Unbound: Created with just a name, no specific dimensions yet
@@ -337,7 +327,6 @@ def dimlists(
     if n is not None:
         specified_ndims = n
 
-    # Use bytecode inspection following dims() pattern
     frame = inspect.currentframe()
     if frame is None:
         raise RuntimeError("Unable to get current frame")
@@ -348,10 +337,8 @@ def dimlists(
         code = frame.f_code
         lasti = frame.f_lasti
 
-        # Create decoder following C++ pattern
         decoder = _PyInstDecoder(code, lasti)
 
-        # Handle Python 3.11+ PRECALL instruction (like C++)
         if sys.version_info >= (3, 11):
             if decoder.opcode() == "PRECALL":
                 decoder.next()
@@ -366,7 +353,6 @@ def dimlists(
             found_ndims = decoder.oparg()
             decoder.next()  # Move past UNPACK_SEQUENCE
 
-        # Determine final ndims (following C++ logic exactly)
         if specified_ndims == -1:
             if found_ndims == 0:
                 raise SyntaxError(
@@ -386,9 +372,7 @@ def dimlists(
 
             if not name:
                 name = f"d{i}"
-                found_ndims = (
-                    0  # once we fail at finding a name, we can't find any more
-                )
+                found_ndims = 0
             else:
                 decoder.next()  # Move to next STORE instruction
 
@@ -441,27 +425,15 @@ def _safe_print(*args: Any, **kwargs: Any) -> None:
     print(*safe_args, **kwargs, file=sys.stderr)
 
 
-"""
-def _levels_to_tuple(levels: List[DimEntry]) -> tuple[Any, ...]:
-    return tuple(l.position() if l.is_positional() else l.dim() for l in levels)
-"""
-
-
 class _Tensor:
-    # fast path around slow wrapping/unwrapping logic for simply queries used
-    # by the implementation...
-
     def _get_levels(self) -> list[Any]:
-        # Abstract method - must be implemented by subclasses
         raise NotImplementedError("_get_levels must be implemented by subclass")
 
     def _get_tensor(self) -> Optional[torch.Tensor]:
-        # Abstract method - must be implemented by subclasses
         raise NotImplementedError("_get_tensor must be implemented by subclass")
 
     @property
     def ndim(self) -> int:
-        # Abstract method - must be implemented by subclasses
         raise NotImplementedError("ndim must be implemented by subclass")
 
     @property
@@ -482,7 +454,6 @@ class _Tensor:
         if kwargs is None:
             kwargs = {}
 
-        # Delayed multiplication optimization port from C++
         if DOT_OPTIMIZED and func is torch.Tensor.__mul__:
             # Check conditions: 2 args, both are tensor-like, both 0-dimensional
             if (
@@ -507,7 +478,6 @@ class _Tensor:
                     and lhs_info.tensor.dim() == 0
                     and rhs_info.tensor.dim() == 0
                 ):
-                    # Check that tensors are floating point (following C++ logic)
                     if (
                         lhs_info.tensor.is_floating_point()
                         and rhs_info.tensor.is_floating_point()
@@ -672,14 +642,11 @@ class _Tensor:
             >>> expanded = t[i].expand(j, k)  # Add j, k dimensions
             >>> expanded2 = t[i].expand(2, 4)  # Regular expand with sizes
         """
-        # Create TensorInfo first (following C++ order)
         info = TensorInfo.create(self, ensure_batched=False, ensure_present=False)
 
-        # Check if any args are not Dim objects
         for arg in args:
             if not isinstance(arg, Dim):
                 # Not all args are Dims, fallback to regular expand
-                # THPVariable_Check equivalent - check if this is a regular torch.Tensor
                 if isinstance(self, torch.Tensor) and not isinstance(self, _Tensor):
                     return torch.Tensor.expand(self, *args)
                 else:
@@ -704,12 +671,10 @@ class _Tensor:
 
         levels = info.levels
 
-        # Build new levels list - new dims come first (following C++ logic)
         new_levels: list[DimEntry] = []
         new_sizes = []
         new_strides = []
 
-        # Add new dimensions with stride 0, checking for duplicates as we go (following C++)
         for d in args:
             # Check if dimension already exists in current levels or new_levels
             for level in levels:
@@ -756,8 +721,6 @@ class _Tensor:
     ) -> _Tensor:
         """
         Index tensor using first-class dimensions.
-
-        Faithful port of the C++ mpy::object index() function.
         """
         from ._dim_entry import _match_levels
         from ._getsetitem import getsetitem_flat, invoke_getitem
@@ -769,7 +732,6 @@ class _Tensor:
                 return list(obj), True
             return None, False
 
-        # Helper to parse dimension entry matching C++ _wrap_dim
         def parse_dim_entry(s: Any) -> Any:
             d = _wrap_dim(s, self.ndim, False)
             if d.is_none():
@@ -785,7 +747,6 @@ class _Tensor:
             else:
                 raise TypeError(f"dimension {repr(d.dim())} not in tensor")
 
-        # Normalize dims and indices to lists (faithful to C++ logic)
         dims_list: list[Union[int, Dim]] = []
         indices_list: list[Union[int, slice, torch.Tensor]] = []
 
@@ -834,7 +795,6 @@ class _Tensor:
                 rest = []
                 for j in range(1, len(m)):
                     d = parse_dim_entry(m[j])
-                    # Remove from new_levels using faithful C++ remove logic
                     removed = False
                     for k in range(len(new_levels)):
                         if new_levels[k] == d:
@@ -855,7 +815,6 @@ class _Tensor:
                     dim_not_present(first)
                     continue  # Skip this iteration if dimension not found
 
-                # Insert rest after first (faithful to C++ slice insertion)
                 for j, r in enumerate(rest):
                     new_levels.insert(first_idx + 1 + j, r)
                 to_flatten.extend(rest)
@@ -995,11 +954,14 @@ class Dim(_Tensor):
         """String representation of a Dim object."""
         return self._name
 
-    # note that _C.Dim comes before tensor because we want the Dim API for things like size to take precedence.
+    # note that Dim comes before tensor because we want the Dim API for things like size to take precedence.
     # Tensor defines format, but we want to print Dims with special formatting
     __format__ = object.__format__
 
 
+# Somewhat confusingly, an FCD tensor is also called Tensor.  This confusion
+# is somewhat intentional, as FCD tensors are intended to be substitutable
+# with regular Tensor (just with some positional dims hidden).
 class Tensor(_Tensor):
     _tensor: Optional[torch.Tensor]
     _batchtensor: Optional[torch.Tensor]
@@ -1008,8 +970,6 @@ class Tensor(_Tensor):
     _delayed: Optional[Callable[[], torch.Tensor]]
     _delayed_orig: Optional[Callable]
     _delayed_args: Optional[tuple]
-
-    # NB: capture_levels is just assign to _levels
 
     @property
     def ndim(self) -> int:
@@ -1040,7 +1000,6 @@ class Tensor(_Tensor):
         seen_dims = 0
         last = 0
 
-        # Validate levels and count named dimensions (following C++ logic)
         for i, l in enumerate(levels):
             if l.is_positional():
                 # Validate consecutive positional dimensions
@@ -1057,7 +1016,6 @@ class Tensor(_Tensor):
             f"Final positional dimension must be 0 or -1, got {last}"
         )
 
-        # If no named dimensions, return regular PyTorch tensor (optimization from C++)
         if not seen_dims:
             return tensor
 
@@ -1084,8 +1042,6 @@ class Tensor(_Tensor):
     ) -> _Tensor:
         """
         Create a delayed tensor that defers the operation until later.
-
-        Port of the C++ Tensor::create_delayed method.
         """
         result = cls()
         result._tensor = None  # Will be computed when needed
@@ -1152,7 +1108,6 @@ class Tensor(_Tensor):
             i = 0
             r = 0
 
-            # Direct port of the C++ for loop
             for r, l in enumerate(levels):
                 if not l.is_none():
                     if not l.is_positional() and l.dim()._level < min_value:
@@ -1164,7 +1119,6 @@ class Tensor(_Tensor):
             if min_index == -1:
                 return t
 
-            # at::functorch::addBatchDim(std::move(t), min_index, min_value)
             assert t is not None
             t = torch._C._functorch._add_batch_dim(t, min_index, int(min_value))
 
@@ -1182,8 +1136,6 @@ class Tensor(_Tensor):
 def stack(tensors: Any, new_dim: Any, dim: int = 0) -> _Tensor:
     """
     Stack tensors along a new dimension.
-
-    Faithful port of the C++ py_stack function.
 
     Args:
         tensors: Sequence of tensors to stack
@@ -1385,7 +1337,6 @@ def cat(tensors: Any, dim: Any, new_dim: Any) -> _Tensor:
 class DotPart:
     """
     Helper class for organizing dimensions in dot products.
-    Port of C++ DotPart structure.
     """
 
     def __init__(self) -> None:
@@ -1402,7 +1353,6 @@ class DotPart:
 def dot_prepare(parts: list[DotPart], tensor_info: TensorInfo) -> torch.Tensor:
     """
     Prepare tensor for dot product by matching levels and reshaping.
-    Port of C++ dot_prepare function.
     """
     new_levels = []
     needs_reshape = False
@@ -1427,7 +1377,6 @@ def dot_prepare(parts: list[DotPart], tensor_info: TensorInfo) -> torch.Tensor:
 def dot_finish(parts: list[DotPart], result_tensor: torch.Tensor) -> Tensor:
     """
     Finish dot product by reshaping result and creating Tensor.
-    Port of C++ dot_finish function.
     """
     result_levels = []
     needs_reshape = False
@@ -1450,7 +1399,6 @@ def dot_finish(parts: list[DotPart], result_tensor: torch.Tensor) -> Tensor:
 def dot(lhs: Any, rhs: Any, sum_dims: Any) -> Union[_Tensor, torch.Tensor]:
     """
     Perform dot product between two tensors along specified dimensions.
-    Port of C++ dot function.
 
     Args:
         lhs: Left-hand side tensor

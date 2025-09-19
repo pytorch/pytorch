@@ -4,6 +4,7 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+import functools
 from types import (
     BuiltinMethodType,
     FunctionType,
@@ -27,9 +28,8 @@ def _py_wrap_method(orig: Callable, __torch_function__: Callable) -> Callable:
     def impl(*args: Any, **kwargs: Any) -> Any:
         return __torch_function__(orig, None, args, kwargs)
 
-    # Copy metadata from original function
-    impl.__name__ = getattr(orig, "__name__", "")
-    impl.__doc__ = getattr(orig, "__doc__", None)
+    # Copy metadata using functools.update_wrapper for just __name__ and __doc__
+    functools.update_wrapper(impl, orig, assigned=("__name__", "__doc__"), updated=())
 
     return impl
 
