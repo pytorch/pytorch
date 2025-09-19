@@ -998,9 +998,9 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
                 None: FlexBwDConfig(64, 64, 64, 64, 2, 4),
             },
             "b200": {
-                64: FlexBwDConfig(32, 32, 32, 32, 2, 4),
-                128: FlexBwDConfig(32, 32, 32, 32, 2, 4),
-                None: FlexBwDConfig(32, 32, 32, 32, 1, 4),
+                64: FlexBwDConfig(64, 128, 128, 64, 3, 4),
+                128: FlexBwDConfig(64, 128, 128, 64, 3, 4),
+                None: FlexBwDConfig(64, 64, 64, 64, 2, 4),
             },
             "a100": {
                 64: FlexBwDConfig(32, 128, 128, 32, 3, 4),
