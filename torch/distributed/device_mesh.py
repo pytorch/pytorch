@@ -7,7 +7,7 @@ import threading
 import warnings
 from collections.abc import Iterator
 from functools import reduce
-from itertools import chain, zip_longest
+from itertools import zip_longest
 from typing import Optional, TYPE_CHECKING, Union
 
 import torch
@@ -164,12 +164,15 @@ if True:  # just to temporarily avoid reindentation
             if not mesh_dim_name:
                 mesh_dim_name = "_".join(not_none(device_mesh.mesh_dim_names))
 
+            # Flatten a 1D device mesh into its original mesh_dim_name will return itself.
+            if device_mesh.ndim == 1 and mesh_dim_name in not_none(
+                device_mesh.mesh_dim_names
+            ):
+                return device_mesh
+
             # Check whether the mesh_dim_name for flattened mesh is valid.
             self.flatten_name_to_root_dims.setdefault(root_mesh, {})
-            invalid_dim_names = chain(
-                list(not_none(root_mesh.mesh_dim_names)),
-                *self.flatten_name_to_root_dims[root_mesh].keys(),
-            )
+            invalid_dim_names = not_none(root_mesh.mesh_dim_names)
             if mesh_dim_name in invalid_dim_names:
                 raise RuntimeError(
                     f"{mesh_dim_name} already exists for submesh of the {root_mesh}. ",
@@ -178,8 +181,6 @@ if True:  # just to temporarily avoid reindentation
                 )
 
             # Quick return if the flatten mesh has been created before.
-            # TODO: If we decide to restrict flatten initialization once, we should remove
-            # this check and throw an error if the flatten mesh is already created before.
             if (
                 root_mesh in self.root_to_flatten_mapping
                 and mesh_dim_name in self.root_to_flatten_mapping[root_mesh]
@@ -396,6 +397,9 @@ if True:  # just to temporarily avoid reindentation
             device_type (str): The device type of the mesh. Currently supports: "cpu", "cuda/cuda-like".
             mesh (ndarray): A multi-dimensional array or an integer tensor describing the layout
                 of devices, where the IDs are global IDs of the default process group.
+            _rank (int): (experimental/internal)
+                The global rank of the current process. If not provided, it will
+                be inferred from the default process group.
 
         Returns:
             DeviceMesh: A :class:`DeviceMesh` object representing the device layout.
@@ -430,6 +434,7 @@ if True:  # just to temporarily avoid reindentation
                 tuple[tuple[Optional[str], Optional[C10dBackend.Options]], ...]
             ] = None,
             _init_backend: bool = True,
+            _rank: Optional[int] = None,
         ) -> None:
             self.device_type = device_type
             if isinstance(mesh, torch.Tensor) and mesh.device.type != "cpu":
@@ -460,8 +465,11 @@ if True:  # just to temporarily avoid reindentation
                 if is_initialized() and get_backend() == "threaded":
                     self._thread_id = threading.get_ident()
 
+                if _rank is None:
+                    _rank = get_rank()
+
                 # calculate the coordinates of the current global rank on the mesh
-                rank_coords = (self.mesh == get_rank()).nonzero()
+                rank_coords = (self.mesh == _rank).nonzero()
                 assert rank_coords.size(0) in (0, 1)
                 self._coordinate_on_dim: Optional[list[int]] = (
                     rank_coords[0].tolist() if rank_coords.size(0) > 0 else None
@@ -994,8 +1002,8 @@ if True:  # just to temporarily avoid reindentation
             If no mesh_dim_name is provided, the default is a string concatenating the mesh_dim_names of the
             given submesh with each mesh_dim_name separated by "_". For example, if we have a 3D mesh
             DeviceMesh([[[0, 1], [2, 3]], [[4, 5], [6, 7]]], mesh_dim_names=("dp", "cp", "tp")), calling
-            mesh_3d["dp", "cp"]._flatten() will create a 1D submesh DeviceMesh([0, 1, 2, 3], mesh_dim_names=("dp_cp",))
-            on rank 0, 1, 2, 3 and a 1D submesh DeviceMesh([4, 5, 6, 7], mesh_dim_names=("dp_cp",)) on rank 4, 5, 6, 7.
+            mesh_3d["dp", "cp"]._flatten() will create a 1D submesh DeviceMesh([0, 2, 4, 6], mesh_dim_names=("dp_cp",))
+            on rank 0, 2, 4, 6 and a 1D submesh DeviceMesh([1, 3, 5, 7], mesh_dim_names=("dp_cp",)) on rank 1, 3, 5, 7.
 
             After the flattened dimension is created, to access the flattened dimension in mesh_3d, one can use the
             existing slicing method to obtain the flattened mesh through calling mesh_3d["dp_cp"].

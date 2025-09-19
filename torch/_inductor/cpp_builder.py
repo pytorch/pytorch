@@ -6,6 +6,7 @@ import ctypes
 import errno
 import functools
 import json
+import locale
 import logging
 import os
 import platform
@@ -67,7 +68,7 @@ _IS_LINUX = sys.platform.startswith("linux")
 _IS_MACOS = sys.platform.startswith("darwin")
 _IS_WINDOWS = sys.platform == "win32"
 
-SUBPROCESS_DECODE_ARGS = ("utf-8",) if _IS_WINDOWS else ()
+SUBPROCESS_DECODE_ARGS = (locale.getpreferredencoding(),) if _IS_WINDOWS else ()
 
 log = logging.getLogger(__name__)
 
@@ -572,7 +573,7 @@ def _run_compile_cmd(cmd_line: str, cwd: str) -> None:
             cmd, cwd=cwd, check=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT
         )
     except subprocess.CalledProcessError as e:
-        output = e.stdout.decode("utf-8")
+        output = e.stdout.decode(*SUBPROCESS_DECODE_ARGS)
         openmp_problem = "'omp.h' file not found" in output or "libomp" in output
         if openmp_problem and sys.platform == "darwin":
             instruction = (
@@ -1086,13 +1087,17 @@ def _get_torch_related_args(
 ) -> tuple[list[str], list[str], list[str]]:
     from torch.utils.cpp_extension import include_paths, TORCH_LIB_PATH
 
-    include_dirs = include_paths()
-    libraries_dirs = [TORCH_LIB_PATH]
     libraries = []
-    if sys.platform != "darwin" and not config.is_fbcode():
-        libraries = ["torch", "torch_cpu"]
-        if not aot_mode:
-            libraries.append("torch_python")
+    include_dirs = config.aot_inductor.libtorch_free_headers or include_paths()
+
+    if config.aot_inductor.link_libtorch:
+        libraries_dirs = [TORCH_LIB_PATH]
+        if sys.platform != "darwin" and not config.is_fbcode():
+            libraries.extend(["torch", "torch_cpu"])
+            if not aot_mode:
+                libraries.append("torch_python")
+    else:
+        libraries_dirs = []
 
     if _IS_WINDOWS:
         libraries.append("sleef")
@@ -1341,6 +1346,15 @@ def get_mmap_self_macro(use_mmap_weights: bool) -> list[str]:
     return macros
 
 
+def get_caching_allocator_macro() -> list[str]:
+    from torch._inductor import config
+
+    macros = []
+    if config.aot_inductor.weight_use_caching_allocator:
+        macros.append(" AOT_INDUCTOR_USE_CACHING_ALLOCATOR")
+    return macros
+
+
 def get_cpp_torch_options(
     cpp_compiler: str,
     vec_isa: VecISA,
@@ -1397,6 +1411,7 @@ def get_cpp_torch_options(
     fb_macro_passthrough_args = _use_fb_internal_macros()
 
     mmap_self_macros = get_mmap_self_macro(use_mmap_weights)
+    caching_allocator_macros = get_caching_allocator_macro()
 
     definitions = (
         torch_cpp_wrapper_definitions
@@ -1404,6 +1419,7 @@ def get_cpp_torch_options(
         + isa_macros
         + fb_macro_passthrough_args
         + mmap_self_macros
+        + caching_allocator_macros
     )
     include_dirs = (
         sys_libs_include_dirs
@@ -1562,21 +1578,26 @@ def get_cpp_torch_device_options(
     _set_gpu_runtime_env()
     from torch.utils import cpp_extension
 
-    include_dirs = cpp_extension.include_paths(device_type)
-    libraries_dirs = cpp_extension.library_paths(device_type)
-    if not config.is_fbcode():
+    include_dirs = cpp_extension.include_paths(
+        device_type, config.aot_inductor.link_libtorch is None
+    )
+    link_libtorch = config.aot_inductor.link_libtorch
+    libraries_dirs = cpp_extension.library_paths(
+        device_type, torch_include_dirs=link_libtorch
+    )
+    if not config.is_fbcode() and link_libtorch:
         libraries += ["c10"]
     if device_type == "cuda":
         definitions.append(" USE_ROCM" if torch.version.hip else " USE_CUDA")
 
         if torch.version.hip is not None:
-            if config.is_fbcode():
+            if config.is_fbcode() or not link_libtorch:
                 libraries += ["amdhip64"]
             else:
                 libraries += ["c10_hip", "torch_hip"]
             definitions.append(" __HIP_PLATFORM_AMD__")
         else:
-            if config.is_fbcode():
+            if config.is_fbcode() or not link_libtorch:
                 libraries += ["cuda"]
             else:
                 libraries += ["c10_cuda", "cuda", "torch_cuda"]
@@ -1594,14 +1615,15 @@ def get_cpp_torch_device_options(
                 raise OSError(xpu_error_string)
             include_dirs += [os.path.join(ze_root, "include")]
             libraries_dirs += [os.path.join(ze_root, "lib")]
-            libraries += ["c10_xpu", "sycl", "ze_loader", "torch_xpu"]
         else:
             # Suppress multi-line comment warnings in sycl headers
             cflags += ["Wno-comment"]
-            libraries += ["c10_xpu", "sycl", "ze_loader", "torch_xpu"]
-
             if not find_library("ze_loader"):
                 raise OSError(xpu_error_string)
+
+        libraries += ["ze_loader", "sycl"]
+        if link_libtorch:
+            libraries += ["c10_xpu", "torch_xpu"]
 
     if device_type == "mps":
         definitions.append(" USE_MPS")
@@ -1689,7 +1711,9 @@ class CppTorchDeviceOptions(CppTorchOptions):
             device_libraries,
             device_passthrough_args,
         ) = get_cpp_torch_device_options(
-            device_type=device_type, aot_mode=aot_mode, compile_only=compile_only
+            device_type=device_type,
+            aot_mode=aot_mode,
+            compile_only=compile_only,
         )
         _append_list(self._definitions, device_definitions)
         _append_list(self._include_dirs, device_include_dirs)
