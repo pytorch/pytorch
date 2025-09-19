@@ -222,11 +222,7 @@ class GuardManager:
     ) -> GuardManager: ...
     # Leaf guards
     def add_lambda_guard(
-        self,
-        user_lambda: Callable[..., Any],
-        required_locals: dict[str, int],
-        construct_partial_framelocals_dict: bool,
-        verbose_code_parts: list[str],
+        self, user_lambda: Callable[..., Any], verbose_code_parts: list[str]
     ) -> None: ...
     def add_lambda_guard_no_args(
         self, user_lambda: Callable[..., Any], verbose_code_parts: list[str]
@@ -359,8 +355,6 @@ class RootGuardManager(GuardManager):
     def add_epilogue_lambda_guard(
         self,
         guard: LeafGuard,
-        required_locals: dict[str, int],
-        construct_partial_framelocals_dict: bool,
         verbose_code_parts: list[str],
     ) -> None: ...
     def clone_manager(
