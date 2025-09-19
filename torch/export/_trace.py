@@ -798,7 +798,12 @@ def _export_to_torch_ir(
         (args, kwargs),
     )
 
-    with torch._dynamo.config.patch(dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)):
+    dynamo_cfg = dataclasses.replace(
+        DEFAULT_EXPORT_DYNAMO_CONFIG,
+        prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,
+    )
+
+    with torch._dynamo.config.patch(dataclasses.asdict(dynamo_cfg)):
         try:
             module_call_specs: dict[str, dict[str, pytree.TreeSpec]] = (
                 _ExportModuleSpecTrackerDict()
@@ -809,20 +814,31 @@ def _export_to_torch_ir(
                     f, preserve_module_call_signature, module_call_specs
                 )
             with ctx, _ignore_backend_decomps():
-                gm_torch_level, _ = torch._dynamo.export(
-                    f,
-                    dynamic_shapes=dynamic_shapes,  # type: ignore[arg-type]
-                    constraints=constraints,  # type: ignore[arg-type]
-                    assume_static_by_default=True,
-                    tracing_mode="symbolic",
-                    disable_constraint_solver=disable_constraint_solver,
-                    prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,
-                    _log_export_usage=_log_export_usage,
-                    same_signature=same_signature,
-                )(
-                    *args,
-                    **kwargs,
-                )
+                if torch._export.config.use_new_tracer_experimental:
+                    from torch._dynamo.functional_export import (
+                        _dynamo_graph_capture_for_export,
+                    )
+
+                    gm_torch_level = _dynamo_graph_capture_for_export(
+                        f, constraints=constraints, dynamic_shapes=dynamic_shapes
+                    )(*args, **kwargs)
+
+                else:
+                    gm_torch_level, _ = torch._dynamo.export(
+                        f,
+                        dynamic_shapes=dynamic_shapes,  # type: ignore[arg-type]
+                        constraints=constraints,  # type: ignore[arg-type]
+                        assume_static_by_default=True,
+                        tracing_mode="symbolic",
+                        disable_constraint_solver=disable_constraint_solver,
+                        prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,
+                        _log_export_usage=_log_export_usage,
+                        same_signature=same_signature,
+                    )(
+                        *args,
+                        **kwargs,
+                    )
+                    gm_torch_level.meta["module_call_specs"] = module_call_specs
         except (ConstraintViolationError, ValueRangeError) as e:
             raise UserError(UserErrorType.CONSTRAINT_VIOLATION, str(e))  # noqa: B904
         except GuardOnDataDependentSymNode as e:
@@ -831,8 +847,6 @@ def _export_to_torch_ir(
                 f"Consider annotating your code using torch._check*(). {str(e)}",
                 case_name="constrain_as_size_example",
             )
-
-    gm_torch_level.meta["module_call_specs"] = module_call_specs
 
     if isinstance(f, torch.nn.Module) and restore_fqn:
         _restore_state_dict(f, gm_torch_level)

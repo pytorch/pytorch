@@ -14,6 +14,7 @@
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
 #include <c10/macros/Macros.h>
+#include <algorithm>
 #include <limits>
 #include <utility>
 
@@ -300,67 +301,50 @@ struct ConvParams {
   bool allow_tf32{};
 
   bool is_strided() const {
-    bool is_strided = false;
-    for (const auto& s : stride) {
-      is_strided |= (s != 1);
-    }
-    return is_strided;
+    return std::any_of(
+      stride.cbegin(), stride.cend(), [](const T& s) { return s != 1; });
   }
 
   bool is_dilated() const {
-    bool is_dilated = false;
-    for (const auto& d : dilation) {
-      is_dilated |= (d != 1);
-    }
-    return is_dilated;
+    return std::any_of(
+      dilation.cbegin(), dilation.cend(), [](const T& d) { return d != 1; });
   }
 
   bool is_padded() const {
-    bool is_padded = false;
-    for (auto p : padding) {
-      is_padded |= (p != 0);
-    }
-    return is_padded;
+    return std::any_of(
+      padding.cbegin(), padding.cend(), [](const T& p) { return p != 0; });
   }
 
   bool is_output_padding_neg() const {
-    bool is_non_neg = false;
-    for (const auto& p : output_padding) {
-      is_non_neg |= (p < 0);
-    }
-    return is_non_neg;
+    return std::any_of(
+      output_padding.cbegin(),
+      output_padding.cend(),
+      [](const T& p) { return p < 0; });
   }
 
   bool is_output_padding_big() const {
-    bool is_big = false;
+    // Revisit this with std::views::zip at C++20.
     for (auto i: c10::irange(output_padding.size())) {
-      is_big |= (output_padding[i] >= stride[i]);
+      if (output_padding[i] >= stride[i]) {
+        return true;
+      }
     }
-    return is_big;
+    return false;
   }
 
   bool is_padding_neg() const {
-    bool is_non_neg = false;
-    for (const auto& p : padding) {
-      is_non_neg |= (p < 0);
-    }
-    return is_non_neg;
+    return std::any_of(
+      padding.cbegin(), padding.cend(), [](const T& p) { return p < 0; });
   }
 
   bool is_dilation_neg() const {
-    bool is_non_neg = false;
-    for (const auto& p : dilation) {
-      is_non_neg |= (p < 0);
-    }
-    return is_non_neg;
+    return std::any_of(
+      dilation.cbegin(), dilation.cend(), [](const T& d) { return d < 0; });
   }
 
   bool is_stride_nonpos() const {
-    bool is_nonpos = false;
-    for (const auto& s : stride) {
-      is_nonpos |= (s <= 0);
-    }
-    return is_nonpos;
+    return std::any_of(
+      stride.cbegin(), stride.cend(), [](const T& s) { return s <= 0; });
   }
 
   void view1d_as_2d() {
