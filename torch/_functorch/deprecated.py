@@ -125,9 +125,9 @@ def jacfwd(
     return _impl.jacfwd(func, argnums, has_aux, randomness=randomness)
 
 
-def hessian(func, argnums=0):
+def hessian(func, argnums=0, *, chunk_size: Optional[int] = None):
     warn_deprecated("hessian")
-    return _impl.hessian(func, argnums=argnums)
+    return _impl.hessian(func, argnums=argnums, chunk_size=chunk_size)
 
 
 def functionalize(func: Callable, *, remove: str = "mutations") -> Callable:

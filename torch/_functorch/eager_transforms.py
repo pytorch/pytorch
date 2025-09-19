@@ -1308,7 +1308,7 @@ def jacfwd(
 
 
 @exposed_in("torch.func")
-def hessian(func, argnums=0):
+def hessian(func, argnums=0, *, chunk_size: Optional[int] = None):
     """
     Computes the Hessian of ``func`` with respect to the arg(s) at index
     ``argnum`` via a forward-over-reverse strategy.
@@ -1324,6 +1324,10 @@ def hessian(func, argnums=0):
         argnums (int or Tuple[int]): Optional, integer or tuple of integers,
             saying which arguments to get the Hessian with respect to.
             Default: 0.
+        chunk_size (None or int): If not None, computes the Hessian using
+            chunked jacrev. Use this to trade computation time for
+            reduced memory usage when computing Hessians of larger functions.
+            Default: None.
 
     Returns:
         Returns a function that takes in the same inputs as ``func`` and
@@ -1346,8 +1350,14 @@ def hessian(func, argnums=0):
         >>> hess = hessian(f)(x)  # equivalent to jacfwd(jacrev(f))(x)
         >>> assert torch.allclose(hess, torch.diag(-x.sin()))
 
+    Example with chunking for a large input:
+        >>> x = torch.randn(1000)  # Large input
+        >>> # Use chunking to reduce memory usage
+        >>> # Equivalent to jacfwd(jacrev(f, chunk_size=50))(x)
+        >>> hess = hessian(f, chunk_size=50)(x)
+        >>> assert torch.allclose(hess, torch.diag(-x.sin()))
     """
-    return jacfwd(jacrev(func, argnums), argnums)
+    return jacfwd(jacrev(func, argnums, chunk_size=chunk_size), argnums)
 
 
 @doesnt_support_saved_tensors_hooks
