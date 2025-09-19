@@ -7771,6 +7771,74 @@ def meta__jagged_to_padded_dense_forward(
     return values.new_empty(output_shape)
 
 
+@register_meta([aten._native_multi_head_attention])
+def meta_native_multi_head_attention(
+    query: Tensor,
+    key: Tensor,
+    value: Tensor,
+    embed_dim: torch.SymInt,
+    num_head: torch.SymInt,
+    qkv_weight: Tensor,
+    qkv_bias: Tensor,
+    proj_weight: Tensor,
+    proj_bias: Tensor,
+    mask: Optional[Tensor] = None,
+    need_weights: bool = True,
+    average_attn_weights: bool = True,
+    mask_type: Optional[int] = None,
+):
+    torch._check(
+        not mask or not query.is_nested, "NestedTensor with mask is not supported yet"
+    )
+    torch._check(query.dim() == 3, f"expect 3-D `query`, got {query.dim()}-D tensor")
+    torch._check(
+        query.is_nested or query.size()[2] == embed_dim,
+        f"passed-in embed_dim {embed_dim} didn't match last dim of query {query.size()[2]}",
+    )
+    torch._check(key.dim() == 3, f"expect 3-D `key`, got {key.dim()}-D tensor")
+    torch._check(value.dim() == 3, f"expect 3-D `value`, got {value.dim()}-D tensor")
+    torch._check(
+        query.is_nested
+        or key.is_nested
+        or value.is_nested
+        or (query.size() == key.size() and key.size() == value.size()),
+        "expected `query`/`key`/`value` shapes to match",
+    )
+    torch._check(
+        qkv_weight.dim() == 2,
+        f"expect 2-D `qkv_weight`, got {qkv_weight.dim()}-D tensor",
+    )
+    torch._check(
+        embed_dim * 3 == qkv_weight.size()[0],
+        "expected `qkv_weight` first dim to be 3x embed_dim",
+    )
+    torch._check(
+        embed_dim == qkv_weight.size()[1],
+        "expected `qkv_weight` second dim to be embed_dim",
+    )
+    torch._check(
+        qkv_bias.dim() == 1, f"expect 1-D `qkv_bias`, got {qkv_bias.dim()}-D tensor"
+    )
+    torch._check(
+        qkv_bias.size()[0] == 3 * embed_dim,
+        "expected `qkv_bias` first dim and first dim of query to be equal",
+    )
+    torch._check(
+        embed_dim % num_head == 0, "expected `embed_dim` to be divisible by `num_head`"
+    )
+
+    B = query.get_nested_size()[0] if query.is_nested else query.size()[0]  # type: ignore[attr-defined]
+    T = 0 if query.is_nested else query.size()[1]
+    proj = query.new_empty([B, T, embed_dim])
+    qkt = (
+        query.new_empty([B, T, T])
+        if need_weights and average_attn_weights
+        else query.new_empty([B, num_head, T, T])
+    )
+
+    return proj, qkt
+
+
 def _create_unary_float_meta_func(func):
     @register_meta(func)
     @out_wrapper()
