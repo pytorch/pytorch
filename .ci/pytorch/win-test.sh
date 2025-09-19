@@ -40,7 +40,7 @@ fi
 # TODO: Move both of them to Windows AMI
 python -m pip install tensorboard==2.13.0 protobuf==5.29.4 pytest-subtests==0.13.1
 
-# Copied from https://github.com/pytorch/test-infra/blob/be01a40157c36cd5a48391fdf44a7bc3ebd4c7e3/aws/ami/windows/scripts/Installers/Install-Pip-Dependencies.ps1#L16 with some adjustements
+# Copied from https://github.com/pytorch/test-infra/blob/be01a40157c36cd5a48391fdf44a7bc3ebd4c7e3/aws/ami/windows/scripts/Installers/Install-Pip-Dependencies.ps1#L16 with some adjustments
 # pytest-rerunfailures==10.3 as 10.2 fails with INTERNALERROR> pluggy._manager.PluginValidationError: unknown hook 'pytest_configure_node'
 # scipy from 1.6.3 to 1.10
 # expecttest from 0.1.3 to 0.3.0
