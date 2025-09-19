@@ -251,7 +251,7 @@ f(torch.rand(30))
 f(torch.rand(40))
 ```
 
-(torch.compiler.set_stance_eager_then_compile)
+(torch.compiler.set_stance_eager_then_compile)=
 #### `torch.compiler.set_stance ("eager_then_compile")`
 
 At times, identifying the appropriate inputs to mark as dynamic can
@@ -287,8 +287,9 @@ compile/dynamic_shapes_core_concepts
 compile/dynamic_shapes_troubleshooting
 compile/dynamic_shapes_advanced_control_options
 compile/dynamic_shapes_beyond_the_basics
-[The dynamic shapes manual](https://docs.google.com/document/d/1GgvOe7C8_NVOMLOCwDaYV1mXXyHMXY7ExoewHqooxrs/edit?tab=t.0#heading=h.fh8zzonyw8ng)
 ```
 
 ```{seealso}
 * [tlparse documentation](https://github.com/pytorch/tlparse)
+* [The dynamic shapes manual](https://docs.google.com/document/d/1GgvOe7C8_NVOMLOCwDaYV1mXXyHMXY7ExoewHqooxrs/edit?tab=t.0#heading=h.fh8zzonyw8ng)
+```
