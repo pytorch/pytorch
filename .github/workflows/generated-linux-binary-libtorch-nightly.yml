@@ -38,19 +38,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  get-label-type:
-    if: github.repository_owner == 'pytorch'
-    name: get-label-type
-    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
-    with:
-      triggering_actor: ${{ github.triggering_actor }}
-      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
-      curr_branch: ${{ github.head_ref || github.ref_name }}
-      curr_ref_type: ${{ github.ref_type }}
   libtorch-cpu-shared-with-deps-release-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
-    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: libtorch
@@ -62,7 +52,6 @@ jobs:
       DOCKER_IMAGE_TAG_PREFIX: cpu
       LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-with-deps
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: libtorch-cpu-shared-with-deps-release
       build_environment: linux-binary-libtorch
     secrets:
@@ -71,7 +60,6 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
       - libtorch-cpu-shared-with-deps-release-build
-      - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
@@ -86,7 +74,6 @@ jobs:
       LIBTORCH_VARIANT: shared-with-deps
       build_name: libtorch-cpu-shared-with-deps-release
       build_environment: linux-binary-libtorch
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.4xlarge
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -115,7 +102,6 @@ jobs:
   libtorch-cuda12_6-shared-with-deps-release-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
-    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: libtorch
@@ -128,7 +114,6 @@ jobs:
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
       LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-with-deps
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: libtorch-cuda12_6-shared-with-deps-release
       build_environment: linux-binary-libtorch
     secrets:
@@ -137,7 +122,6 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
       - libtorch-cuda12_6-shared-with-deps-release-build
-      - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
@@ -153,7 +137,6 @@ jobs:
       LIBTORCH_VARIANT: shared-with-deps
       build_name: libtorch-cuda12_6-shared-with-deps-release
       build_environment: linux-binary-libtorch
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.4xlarge.nvidia.gpu  # 12.6 build can use maxwell (sm_50) runner
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -183,7 +166,6 @@ jobs:
   libtorch-cuda12_8-shared-with-deps-release-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
-    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: libtorch
@@ -196,7 +178,6 @@ jobs:
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
       LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-with-deps
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: libtorch-cuda12_8-shared-with-deps-release
       build_environment: linux-binary-libtorch
     secrets:
@@ -205,7 +186,6 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
       - libtorch-cuda12_8-shared-with-deps-release-build
-      - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
@@ -221,7 +201,6 @@ jobs:
       LIBTORCH_VARIANT: shared-with-deps
       build_name: libtorch-cuda12_8-shared-with-deps-release
       build_environment: linux-binary-libtorch
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.g4dn.4xlarge.nvidia.gpu # 12.8+ builds need sm_70+ runner
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -251,7 +230,6 @@ jobs:
   libtorch-cuda13_0-shared-with-deps-release-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
-    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: libtorch
@@ -264,7 +242,6 @@ jobs:
       DOCKER_IMAGE_TAG_PREFIX: cuda13.0
       LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-with-deps
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: libtorch-cuda13_0-shared-with-deps-release
       build_environment: linux-binary-libtorch
     secrets:
@@ -273,7 +250,6 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
       - libtorch-cuda13_0-shared-with-deps-release-build
-      - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
@@ -289,7 +265,6 @@ jobs:
       LIBTORCH_VARIANT: shared-with-deps
       build_name: libtorch-cuda13_0-shared-with-deps-release
       build_environment: linux-binary-libtorch
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.g4dn.4xlarge.nvidia.gpu # 12.8+ builds need sm_70+ runner
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -319,7 +294,6 @@ jobs:
   libtorch-rocm6_3-shared-with-deps-release-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
-    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: libtorch
@@ -332,7 +306,6 @@ jobs:
       DOCKER_IMAGE_TAG_PREFIX: rocm6.3
       LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-with-deps
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: libtorch-rocm6_3-shared-with-deps-release
       build_environment: linux-binary-libtorch
     secrets:
@@ -341,7 +314,6 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
       - libtorch-rocm6_3-shared-with-deps-release-build
-      - get-label-type
     runs-on: linux.rocm.gpu.mi250
     timeout-minutes: 240
     env:
@@ -433,7 +405,6 @@ jobs:
   libtorch-rocm6_4-shared-with-deps-release-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
-    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: libtorch
@@ -446,7 +417,6 @@ jobs:
       DOCKER_IMAGE_TAG_PREFIX: rocm6.4
       LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-with-deps
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: libtorch-rocm6_4-shared-with-deps-release
       build_environment: linux-binary-libtorch
     secrets:
@@ -455,7 +425,6 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
       - libtorch-rocm6_4-shared-with-deps-release-build
-      - get-label-type
     runs-on: linux.rocm.gpu.mi250
     timeout-minutes: 240
     env:

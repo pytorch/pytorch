@@ -38,18 +38,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  get-label-type:
-    if: github.repository_owner == 'pytorch'
-    name: get-label-type
-    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
-    with:
-      triggering_actor: ${{ github.triggering_actor }}
-      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
-      curr_branch: ${{ github.head_ref || github.ref_name }}
-      curr_ref_type: ${{ github.ref_type }}
   wheel-py3_11-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: get-label-type
     runs-on: "windows-11-arm64-preview"
     timeout-minutes: 360
     env:
@@ -122,7 +112,6 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
       - wheel-py3_11-cpu-build
-      - get-label-type
     runs-on: "windows-11-arm64-preview"
     timeout-minutes: 360
     env:
@@ -196,7 +185,6 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   wheel-py3_12-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: get-label-type
     runs-on: "windows-11-arm64-preview"
     timeout-minutes: 360
     env:
@@ -269,7 +257,6 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
       - wheel-py3_12-cpu-build
-      - get-label-type
     runs-on: "windows-11-arm64-preview"
     timeout-minutes: 360
     env:
@@ -343,7 +330,6 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   wheel-py3_13-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: get-label-type
     runs-on: "windows-11-arm64-preview"
     timeout-minutes: 360
     env:
@@ -416,7 +402,6 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
       - wheel-py3_13-cpu-build
-      - get-label-type
     runs-on: "windows-11-arm64-preview"
     timeout-minutes: 360
     env:
