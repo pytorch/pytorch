@@ -1,4 +1,5 @@
 # Owner(s): ["oncall: distributed"]
+import copy
 import itertools
 import sys
 import unittest
@@ -68,6 +69,15 @@ class PlacementTypesTestCase(TestCase):
         with self.assertRaises(TypeError):
             _StridedShard(3, 4)
         _StridedShard(3, split_factor=4)
+
+    def test_deepcopy(self):
+        for placement in (
+            Shard(3),
+            _StridedShard(dim=3, split_factor=7),
+            Partial("max"),
+            Replicate(),
+        ):
+            copy.deepcopy(placement)
 
 
 if __name__ == "__main__":
