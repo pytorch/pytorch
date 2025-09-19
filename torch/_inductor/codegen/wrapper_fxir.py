@@ -730,11 +730,11 @@ class FxConverter:
 
     def _generate_enter_subgraph(self, line: WrapperLine) -> None:
         assert isinstance(line, EnterSubgraphLine)
-        raise NotImplementedError("Subgraphs are not yet supported by FX conversion")
+        # We ignore memory planning lines in FX IR.
 
     def _generate_exit_subgraph(self, line: WrapperLine) -> None:
         assert isinstance(line, ExitSubgraphLine)
-        raise NotImplementedError("Subgraphs are not yet supported by FX conversion")
+        # We ignore memory planning lines in FX IR.
 
     def _generate_free(self, line: WrapperLine) -> None:
         assert isinstance(line, FreeLine)
