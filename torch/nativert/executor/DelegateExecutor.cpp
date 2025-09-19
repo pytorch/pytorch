@@ -28,6 +28,7 @@ char* _mkdtemp(char* outputDir) {
 std::string extractToTemporaryFolder(
     caffe2::serialize::PyTorchStreamReader& packageReader,
     const std::string& targetPath) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   char outputDir[] = "/tmp/delegate_model_XXXXXX";
   char* tempdir = _mkdtemp(outputDir);
   TORCH_CHECK(

@@ -1010,7 +1010,10 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         # for the "cat". However, I think it might be a bit overwhelming that
         # we add such complexity only for handling some particular cases for
         # benchmarking.
-        out_numel = V.graph.sizevars.size_hint(sympy_product(self.numels.values()))
+        out_numel = V.graph.sizevars.size_hint(
+            sympy_product(self.numels.values()),
+            fallback=config.unbacked_symint_fallback,
+        )
         for i, arg in enumerate(call_args):
             # "buf" may be narrowed. In this case, the number of memory accesses
             # should be estimated based on the reinterpreted layout.
@@ -1021,7 +1024,9 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                 nbytes.append(0)
                 continue
             arg_numel = V.graph.get_numel(arg)
-            buf_size = V.graph.sizevars.size_hint(arg_numel)
+            buf_size = V.graph.sizevars.size_hint(
+                arg_numel, fallback=config.unbacked_symint_fallback
+            )
             if buf_size > out_numel:
                 # This arg points to a buf that has been sliced.
                 # We need to count each individual slice to have
