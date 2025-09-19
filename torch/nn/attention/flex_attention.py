@@ -199,8 +199,13 @@ class FlexKernelOptions(TypedDict, total=False):
     waves_per_eu: NotRequired[int]
     """ROCm-specific waves per execution unit."""
 
-    disable_flash: NotRequired[bool]
-    """ If True, we will not attempt to run the cute-dsl flash attention kernel"""
+    force_flash: NotRequired[bool]
+    """ If True, forces use of the cute-dsl flash attention kernel.
+
+    Raises an error if flash attention cannot be used instead of falling back
+    to the default implementation. Useful for ensuring flash attention is used
+    when expected.
+    """
 
 
 class AuxRequest(NamedTuple):
