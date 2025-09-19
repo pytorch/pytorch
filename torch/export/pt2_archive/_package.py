@@ -955,11 +955,9 @@ def load_pt2(
         (isinstance(f, (io.IOBase, IO)) and f.readable() and f.seekable())
         or (isinstance(f, (str, os.PathLike)) and os.fspath(f).endswith(".pt2"))
     ):
-        # TODO: turn this into an error in 2.9
-        logger.warning(
-            "Unable to load package. f must be a buffer or a file ending in "
-            ".pt2. Instead got {%s}",
-            f,
+        raise TypeError(
+            f"Unable to load package. `f` must be a buffer (i.e. a readable and seekable file-like object) "
+            f"or a string path ending in `.pt2`. Instead got {type(f).__name__}."
         )
 
     if isinstance(f, (str, os.PathLike)):
