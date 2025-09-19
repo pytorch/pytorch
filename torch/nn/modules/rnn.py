@@ -388,7 +388,7 @@ class RNNBase(Module):
         return s.format(**self.__dict__)
 
     def _update_flat_weights(self) -> None:
-        if not torch.jit.is_scripting():
+        if not torch.jit.is_scripting() and not torch.compiler.is_exporting():
             if self._weights_have_changed():
                 self._init_flat_weights()
 
