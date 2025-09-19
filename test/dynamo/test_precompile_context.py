@@ -47,7 +47,8 @@ class PrecompileContextTests(InductorTestCase):
         x = torch.randn(10, device=GPU_TYPE, requires_grad=True)
         result = compiled_fn(x)
         result.sum().backward()
-        self.assertEqual(len(PrecompileContext._new_cache_artifacts_by_key), 2)
+        self.assertEqual(len(PrecompileContext._dynamo_cache_entries), 1)
+        self.assertEqual(len(PrecompileContext._backend_artifacts_by_key), 1)
         self.assertEqual(len(PrecompileContext._new_cache_artifacts), 0)
 
         result = PrecompileContext.serialize()
@@ -82,8 +83,9 @@ class PrecompileContextTests(InductorTestCase):
         x = torch.randn(10, device=GPU_TYPE, requires_grad=True)
         result = compiled_fn(x)
         result.sum().backward()
-        self.assertEqual(len(PrecompileContext._new_cache_artifacts_by_key), 2)
-        for key in PrecompileContext._new_cache_artifacts_by_key.keys():
+        self.assertEqual(len(PrecompileContext._dynamo_cache_entries), 1)
+        self.assertEqual(len(PrecompileContext._backend_artifacts_by_key), 1)
+        for key in PrecompileContext._backend_artifacts_by_key.keys():
             result = PrecompileContext.serialize_artifact_by_key(key)
             assert isinstance(result, PrecompileCacheArtifact)
             self.assertEqual(result.key, key)
@@ -109,11 +111,12 @@ class PrecompileContextTests(InductorTestCase):
         x = torch.randn(10, device=GPU_TYPE, requires_grad=True)
         result = compiled_fn(x)
         result.sum().backward()
-        self.assertEqual(len(PrecompileContext._new_cache_artifacts_by_key), 2)
+        self.assertEqual(len(PrecompileContext._dynamo_cache_entries), 1)
+        self.assertEqual(len(PrecompileContext._backend_artifacts_by_key), 1)
         # Find the key for the artifact of type "precompile_aot_autograd"
         key = next(
             k
-            for k, v in PrecompileContext._new_cache_artifacts_by_key.items()
+            for k, v in PrecompileContext._backend_artifacts_by_key.items()
             if isinstance(v, EditablePrecompileCacheArtifact)
         )
 

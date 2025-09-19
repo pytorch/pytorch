@@ -1954,8 +1954,8 @@ void scaled_gemm(
   #if ROCM_VERSION >= 70000
             if (at::detail::getCUDAHooks().isGPUArch({"gfx950"})) {
                 // TODO: add constraints based on hipblaslt internals
-                TORCH_CHECK((m % 32 == 0) && (n % 32 == 0) && (k % 32 == 0),
-                           "Matrix dimensions must be multiples of 32 for MX format. "
+                TORCH_CHECK((m % 16 == 0) && (n % 16 == 0) && (k % 128 == 0),
+                           "M, N must be multiples of 16 and K should be multiple of 128 for MX format. "
                            "Got m=", m, ", n=", n, ", k=", k);
             }
   #endif

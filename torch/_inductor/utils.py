@@ -60,7 +60,7 @@ import sympy
 
 import torch
 import torch.utils._pytree as pytree
-from torch._inductor.analysis.device_info import DeviceInfo
+from torch._inductor.analysis.device_info import datasheet_tops
 from torch._inductor.runtime.hints import DeviceProperties
 from torch.utils._dtype_abbrs import dtype_abbrs
 from torch.utils._ordered_set import OrderedSet
@@ -2416,9 +2416,7 @@ def get_device_tflops(dtype: torch.dtype) -> float:
     We don't want to throw errors in this function. First check to see if the device is in device_info.py,
     then fall back to the inaccurate triton estimation.
     """
-    ds_tops = DeviceInfo.lookup_tops_current_device(
-        dtype, is_tf32=torch.backends.cuda.matmul.allow_tf32
-    )
+    ds_tops = datasheet_tops(dtype, is_tf32=torch.backends.cuda.matmul.allow_tf32)
     if ds_tops is not None:
         return ds_tops
 
@@ -2967,6 +2965,15 @@ def shape_env_from_inputs(inputs: Sequence[InputType]) -> Optional[ShapeEnv]:
     for input in inputs:
         if isinstance(input, torch.SymInt):
             return input.node.shape_env
+
+        # Check tensor sizes and strides for SymInt values
+        if isinstance(input, torch.Tensor):
+            for size in input.size():
+                if isinstance(size, torch.SymInt):
+                    return size.node.shape_env
+            for stride in input.stride():
+                if isinstance(stride, torch.SymInt):
+                    return stride.node.shape_env
 
     # TODO(voz): Should we always have one anyway?
     return None
@@ -3740,4 +3747,6 @@ def is_nonfreeable_buffers(dep: Dep) -> bool:
     # before checking for known strings.
     if V.graph.name:
         dep_name = dep_name.removeprefix(V.graph.name + "_")
-    return dep_name.startswith(("primals_", "arg", "fwd_rng_state", "bwd_rng_state"))
+    return dep_name.startswith(
+        ("primals_", "arg", "fwd_rng_state", "bwd_rng_state", "tangents")
+    )

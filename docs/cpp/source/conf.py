@@ -174,6 +174,7 @@ html_theme = "pytorch_sphinx_theme2"
 #
 html_theme_options = {
     "canonical_url": "https://pytorch.org/docs/stable/",
+    "analytics_id": "GTM-T8XT4PS",
     "collapse_navigation": False,
     "logo": {"text": "Home"},
     "icon_links": [

@@ -50,8 +50,8 @@ _IS_SM9X = False
 _IS_HIPSPARSELT_AVAILABLE = False
 
 if torch.cuda.is_available():
-    _IS_SM8X = torch.cuda.get_device_capability(0)[0] == 8
-    _IS_SM9X = torch.cuda.get_device_capability(0)[0] == 9
+    _IS_SM8X = torch.version.cuda is not None and (torch.cuda.get_device_capability(0)[0] == 8)
+    _IS_SM9X = torch.version.cuda is not None and (torch.cuda.get_device_capability(0)[0] == 9)
     _IS_HIPSPARSELT_AVAILABLE = torch.version.hip is not None and tuple(int(v) for v in torch.version.hip.split('.')[:2]) > (6, 4)
     # CUTLASS kernels only work for Ampere
     if _IS_SM8X:

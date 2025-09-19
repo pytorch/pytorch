@@ -476,7 +476,7 @@ class Module:
     call_super_init: bool = False
     _compiled_call_impl: Optional[Callable] = None
 
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         """Initialize internal Module state, shared by both nn.Module and ScriptModule."""
         torch._C._log_api_usage_once("python.nn_module")
 

@@ -1,9 +1,14 @@
+import logging
 import os
 import subprocess
 import sysconfig
 from typing import Any, Optional
 
+import torch.distributed as dist
 from torch.utils._triton import has_triton
+
+
+logger = logging.getLogger(__name__)
 
 
 def _find_nvshmem_device_library() -> str:
@@ -97,7 +102,7 @@ def enable_triton(lib_dir: Optional[str] = None) -> dict[str, str]:
             key = kwargs["key"]
             device = kwargs["compile"]["device"]
             jit_function = kwargs["fn"].jit_function
-            kernel_cache, _, _, _ = jit_function.device_caches[device]
+            kernel_cache = jit_function.device_caches[device][0]
             kernel = kernel_cache.get(key, None)
             if kernel is not None:
                 kernel.run
@@ -147,7 +152,7 @@ if has_triton():
         tl.static_assert(dest.type == source.type)
         nbytes = nelems * dest.type.element_ty.itemsize
         return putmem_block_extern_wrapper(
-            dest.to(tl.int64), source.to(tl.int64), nbytes, pe
+            dest.to(tl.int64), source.to(tl.int64), nbytes.to(tl.int64), pe
         )
 
     @core.extern
@@ -162,7 +167,7 @@ if has_triton():
                     core.dtype("int64"),  # dest ptr
                     core.dtype("int64"),  # source ptr
                     core.dtype("int64"),  # size in bytes
-                    core.dtype("int64"),  # pe number
+                    core.dtype("int32"),  # pe number
                 ): ("nvshmemx_putmem_block", core.dtype("int32"))
             },
             is_pure=False,
@@ -200,7 +205,7 @@ if has_triton():
         tl.static_assert(dest.type == source.type)
         nbytes = nelems * dest.type.element_ty.itemsize
         return getmem_block_extern_wrapper(
-            dest.to(tl.int64), source.to(tl.int64), nbytes, pe
+            dest.to(tl.int64), source.to(tl.int64), nbytes.to(tl.int64), pe
         )
 
     @core.extern
@@ -215,23 +220,22 @@ if has_triton():
                     core.dtype("int64"),  # dest ptr
                     core.dtype("int64"),  # source ptr
                     core.dtype("int64"),  # size in bytes
-                    core.dtype("int64"),  # pe number
+                    core.dtype("int32"),  # pe number
                 ): ("nvshmemx_getmem_block", core.dtype("int32"))
             },
             is_pure=False,
             _semantic=_semantic,
         )
 
-    @core.extern
+    @triton.jit  # type: ignore[misc]
     def putmem_signal_block(  # type: ignore[no-untyped-def]
         dst,
         src,
         size_bytes,
-        sig_addr,
         signal,
+        sig_val,
         sig_op,
         pe,
-        _semantic=None,
     ):  # type: ignore[no-untyped-def]
         """
         Put data to remote PE with atomic signal operation using block-scoped operation.
@@ -241,17 +245,16 @@ if has_triton():
         This enables efficient point-to-point synchronization between PEs.
 
         Args:
-            dst (int64): Symmetric address of the destination data object on the remote PE.
-            src (int64): Local address of the source data object containing data to be copied.
+            dst (tensor): A tensor on calling PE symmetric to the destination tensor on remote PE.
+            src (tensor): Local tensor containing the source data.
             size_bytes (int64): Number of bytes to transfer. Must be positive.
-            sig_addr (int64): Symmetric address of the signal variable (uint64_t) on the remote PE.
+            signal (tensor): Symmetric signal pad with remote PE.
                              Must be 8-byte aligned symmetric memory.
             signal (int64): Value to be used in the signal operation.
-            sig_op (int64): Signal operation type. Common values:
+            sig_op (int32): Signal operation type. Common values:
                            - NVSHMEM_SIGNAL_SET (0): Atomic set operation
                            - NVSHMEM_SIGNAL_ADD (5): Atomic add operation
-            pe (int64): PE number of the remote PE (0 ≤ pe < nvshmem_n_pes()).
-            _semantic: Optional semantic information for Triton compilation.
+            pe (int32): PE number of the remote PE (0 ≤ pe < nvshmem_n_pes()).
 
         Returns:
             int32: Status code (0 for success).
@@ -273,19 +276,42 @@ if has_triton():
             )
             ```
         """
+        # Ensure sig_val is 64 bits
+        sig_val = 0 << 32 | sig_val
+        return putmem_signal_block_extern_wrapper(
+            dst.to(tl.int64),
+            src.to(tl.int64),
+            size_bytes.to(tl.int64),
+            signal.to(tl.int64),
+            sig_val.to(tl.uint64),
+            sig_op,
+            pe,
+        )
+
+    @core.extern
+    def putmem_signal_block_extern_wrapper(  # type: ignore[no-untyped-def]
+        dst,
+        src,
+        size_bytes,
+        signal,
+        sig_val,
+        sig_op,
+        pe,
+        _semantic=None,
+    ):  # type: ignore[no-untyped-def]
         return core.extern_elementwise(
             "",
             "",
-            [dst, src, size_bytes, sig_addr, signal, sig_op, pe],
+            [dst, src, size_bytes, signal, sig_val, sig_op, pe],
             {
                 (
                     core.dtype("int64"),
                     core.dtype("int64"),
                     core.dtype("int64"),
                     core.dtype("int64"),
-                    core.dtype("int64"),
-                    core.dtype("int64"),
-                    core.dtype("int64"),
+                    core.dtype("uint64"),
+                    core.dtype("int32"),
+                    core.dtype("int32"),
                 ): ("nvshmemx_putmem_signal_block", core.dtype("int32"))
             },
             is_pure=False,
@@ -327,8 +353,8 @@ if has_triton():
             ```
         """
         tl.static_assert(
-            ivar.type.element_ty.itemsize == 8,
-            "wait_until expects a 64-bit type for the synchronization variable",
+            ivar.type.element_ty.itemsize == 4,
+            "wait_until expects a 32-bit type for the synchronization variable",
         )
         return wait_until_extern_wrapper(ivar.to(tl.int64), cmp_op, cmp_val)
 
@@ -341,16 +367,16 @@ if has_triton():
             {
                 (
                     core.dtype("int64"),
-                    core.dtype("int64"),
-                    core.dtype("int64"),
-                ): ("nvshmem_longlong_wait_until", core.dtype("int32"))
+                    core.dtype("int32"),
+                    core.dtype("int32"),
+                ): ("nvshmem_int_wait_until", core.dtype("int32"))
             },
             is_pure=False,
             _semantic=_semantic,
         )
 
-    @core.extern
-    def signal_wait_until(sig_addr, cmp, cmp_val, _semantic=None):  # type: ignore[no-untyped-def]
+    @triton.jit  # type: ignore[misc]
+    def signal_wait_until(signal, cmp, cmp_val):  # type: ignore[no-untyped-def]
         """
         Wait until a signal variable meets a specified condition.
 
@@ -360,9 +386,9 @@ if has_triton():
         with signal operations.
 
         Args:
-            sig_addr (int64): Symmetric address of the signal variable (uint64_t).
+            signal (tensor): Symmetric signal tensor with remote PE.
                              Must be 8-byte aligned symmetric memory.
-            cmp (int64): Comparison operator. Common values:
+            cmp (int32): Comparison operator. Common values:
                         - NVSHMEM_CMP_EQ (0): Wait until signal == cmp_val
                         - NVSHMEM_CMP_NE (1): Wait until signal != cmp_val
                         - NVSHMEM_CMP_GT (2): Wait until signal > cmp_val
@@ -370,7 +396,6 @@ if has_triton():
                         - NVSHMEM_CMP_LT (4): Wait until signal < cmp_val
                         - NVSHMEM_CMP_LE (5): Wait until signal <= cmp_val
             cmp_val (int64): Value to compare against.
-            _semantic: Optional semantic information for Triton compilation.
 
         Returns:
             int32: Status code (0 for success).
@@ -389,15 +414,22 @@ if has_triton():
             nvshmem.signal_wait_until(signal_ptr, NVSHMEM_CMP_EQ, 42)
             ```
         """
+        cmp_val = 0 << 32 | cmp_val
+        return signal_wait_until_extern_wrapper(
+            signal.to(tl.int64), cmp, cmp_val.to(tl.uint64)
+        )
+
+    @core.extern
+    def signal_wait_until_extern_wrapper(signal, cmp, cmp_val, _semantic=None):  # type: ignore[no-untyped-def]
         return core.extern_elementwise(
             "",
             "",
-            [sig_addr, cmp, cmp_val],
+            [signal, cmp, cmp_val],
             {
                 (
                     core.dtype("int64"),
-                    core.dtype("int64"),
-                    core.dtype("int64"),
+                    core.dtype("int32"),
+                    core.dtype("uint64"),
                 ): ("nvshmem_signal_wait_until", core.dtype("int32"))
             },
             is_pure=False,
@@ -417,10 +449,10 @@ if has_triton():
             sig_addr (int64): Symmetric address of the signal variable (uint64_t) on the remote PE.
                              Must be 8-byte aligned symmetric memory.
             signal (int64): Value to be used in the signal operation.
-            sig_op (int64): Signal operation type. Common values:
+            sig_op (int32): Signal operation type. Common values:
                            - NVSHMEM_SIGNAL_SET (0): Atomically set sig_addr = signal
                            - NVSHMEM_SIGNAL_ADD (5): Atomically set sig_addr += signal
-            pe (int64): PE number of the remote PE (0 ≤ pe < nvshmem_n_pes()).
+            pe (int32): PE number of the remote PE (0 ≤ pe < nvshmem_n_pes()).
             _semantic: Optional semantic information for Triton compilation.
 
         Returns:
@@ -448,8 +480,8 @@ if has_triton():
                 (
                     core.dtype("int64"),
                     core.dtype("int64"),
-                    core.dtype("int64"),
-                    core.dtype("int64"),
+                    core.dtype("int32"),
+                    core.dtype("int32"),
                 ): ("nvshmemx_signal_op", core.dtype("int32"))
             },
             is_pure=False,
@@ -764,7 +796,7 @@ if has_triton():
         tl.static_assert(dest.type == source.type)
         size_bytes_per_pe = nelems_per_pe * dest.type.element_ty.itemsize
         return alltoallmem_block_extern_wrapper(
-            team, dest.to(tl.int64), source.to(tl.int64), size_bytes_per_pe
+            team, dest.to(tl.int64), source.to(tl.int64), size_bytes_per_pe.to(tl.int64)
         )
 
     @core.extern  # type: ignore[misc]
@@ -778,7 +810,7 @@ if has_triton():
             [team, dest, source, size_bytes],
             {
                 (
-                    core.dtype("int64"),  # team handle
+                    core.dtype("int32"),  # team handle
                     core.dtype("int64"),  # dest ptr
                     core.dtype("int64"),  # source ptr
                     core.dtype("int64"),  # size in bytes
@@ -819,7 +851,7 @@ if has_triton():
         tl.static_assert(dest.type == source.type)
         nbytes = nelems * dest.type.element_ty.itemsize
         return broadcastmem_block_extern_wrapper(
-            team, dest.to(tl.int64), source.to(tl.int64), nbytes, pe_root
+            team, dest.to(tl.int64), source.to(tl.int64), nbytes.to(tl.int64), pe_root
         )
 
     @core.extern  # type: ignore[misc]
@@ -838,11 +870,11 @@ if has_triton():
             [team, dest, source, size_bytes, pe_root],
             {
                 (
-                    core.dtype("int64"),  # team handle
+                    core.dtype("int32"),  # team handle
                     core.dtype("int64"),  # dest ptr
                     core.dtype("int64"),  # source ptr
                     core.dtype("int64"),  # size in bytes
-                    core.dtype("int64"),  # pe_root
+                    core.dtype("int32"),  # pe_root
                 ): ("nvshmemx_broadcastmem_block", core.dtype("int32"))
             },
             is_pure=False,
@@ -883,7 +915,7 @@ if has_triton():
             team,
             dest.to(tl.int64),
             source.to(tl.int64),
-            nreduce,
+            nreduce.to(tl.int64),
             operation,
             dtype,
         )
@@ -966,7 +998,7 @@ if has_triton():
 
         # Define function signature - all parameters are int64 in Triton (they are just ptrs)
         signature = (
-            core.dtype("int64"),  # team handle
+            core.dtype("int32"),  # team handle
             core.dtype("int64"),  # destination pointer
             core.dtype("int64"),  # source pointer
             core.dtype("int64"),  # number of elements
@@ -980,3 +1012,27 @@ if has_triton():
             is_pure=False,
             _semantic=_semantic,
         )
+
+    # Utility for inspecting Triton kernels
+
+    triton_kernels: dict = {}
+
+    def _log_triton_kernel(kernel) -> None:  # type: ignore[no-untyped-def]
+        import atexit
+        import tempfile
+
+        if dist.is_initialized() and dist.get_rank() != 0:
+            return
+
+        def on_exit() -> None:
+            logger.info("PTX files:")
+            for kernel in triton_kernels:
+                with tempfile.NamedTemporaryFile(dir="/tmp", delete=False) as f:
+                    f.write(kernel.asm["ptx"].encode("utf-8"))
+                    logger.info(f"+- {kernel.name}: {f.name}")  # noqa: G004
+
+        if len(triton_kernels) == 0:
+            atexit.register(on_exit)
+
+        if kernel not in triton_kernels:
+            triton_kernels[kernel] = None

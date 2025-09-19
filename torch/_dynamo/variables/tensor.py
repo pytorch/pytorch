@@ -999,7 +999,11 @@ class TensorVariable(VariableTracker):
         return DataPtrVariable(self)
 
     def method_item(self, *args, **kwargs):
-        if not config.capture_scalar_outputs:
+        from ..symbolic_convert import InstructionTranslator
+
+        tx = InstructionTranslator.current_tx()
+        # We enable capture_scalar_outputs when full_graph=True by default.
+        if not tx.one_graph and not config.capture_scalar_outputs:
             self._warn_capture_scalar_outputs()
             unimplemented_v2(
                 gb_type="Unsupported Tensor.item() call with capture_scalar_outputs=False",

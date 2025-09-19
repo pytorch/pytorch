@@ -1128,6 +1128,7 @@ class TritonTemplateKernel(TritonKernel):
             assert isinstance(indices, (list, tuple))
             assert isinstance(val, str)
             assert isinstance(mask, (str, type(None)))
+            assert isinstance(val_shape, (tuple, type(None)))
             assert isinstance(block_indexing, bool)
             assert self.template_mask is None
             indices = list(map(OpOverrides.paren, indices))

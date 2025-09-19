@@ -1271,6 +1271,15 @@ def tuned_scaled_mm(
             templates_to_use.append(scaled_mm_device_tma_template)
             kwarg_overrides[scaled_mm_device_tma_template.uid] = overriders
 
+        if (
+            use_triton_blackwell_tma_template(mat_a, mat_b, output_layout=layout)
+            and not bias
+        ):
+            templates_to_use.append(blackwell_ws_persistent_device_tma_mm_template)
+            kwarg_overrides[blackwell_ws_persistent_device_tma_mm_template.uid] = (
+                overriders
+            )
+
         templates_to_use.append(mm_template)
         kwarg_overrides[mm_template.uid] = overriders
 

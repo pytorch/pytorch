@@ -10,14 +10,12 @@
 #include <torch/csrc/inductor/aoti_torch/generated/c_shim_aten.h>
 #include <torch/headeronly/core/ScalarType.h>
 
-using torch::stable::Tensor;
-
 namespace torch::stable {
 
 // We expect this to be the stable version of the empty_like op that takes in
 // no kwargs (device, dtype, layout, memory_format). We will add kwargs
 // support in the future.
-inline Tensor empty_like(const Tensor& self) {
+inline torch::stable::Tensor empty_like(const torch::stable::Tensor& self) {
   const auto num_args = 6;
   std::array<StableIValue, num_args> stack{
       from(self),
@@ -28,7 +26,7 @@ inline Tensor empty_like(const Tensor& self) {
       from(std::nullopt)};
   TORCH_ERROR_CODE_CHECK(
       aoti_torch_call_dispatcher("aten::empty_like", "", stack.data()));
-  return to<Tensor>(stack[0]);
+  return to<torch::stable::Tensor>(stack[0]);
 }
 
 // We expect this to be the stable version of the fill_.Scalar op
@@ -36,7 +34,9 @@ inline Tensor empty_like(const Tensor& self) {
 // A subtle nuance is that `value` is typed as a double, but it is
 // actually a Scalar. This is because Scalar.h is currently not
 // header-only.
-inline Tensor fill_(const Tensor& self, double value) {
+inline torch::stable::Tensor fill_(
+    const torch::stable::Tensor& self,
+    double value) {
   TORCH_ERROR_CODE_CHECK(aoti_torch_aten_fill__Scalar(self.get(), value));
   return self;
 }
@@ -44,18 +44,22 @@ inline Tensor fill_(const Tensor& self, double value) {
 // We expect this to be the stable version of the narrow.default op.
 // narrow takes in a SymInt for start and length, but these are typed as
 // int64_t as SymInt is not yet header-only.
-inline Tensor narrow(Tensor& self, int64_t dim, int64_t start, int64_t length) {
+inline torch::stable::Tensor narrow(
+    torch::stable::Tensor& self,
+    int64_t dim,
+    int64_t start,
+    int64_t length) {
   AtenTensorHandle ret0 = nullptr;
 
   TORCH_ERROR_CODE_CHECK(
       aoti_torch_aten_narrow(self.get(), dim, start, length, &ret0));
-  return Tensor(ret0);
+  return torch::stable::Tensor(ret0);
 }
 
 // We expect this to be a stable version of the new_empty op that takes in
 // only dtype information.
-inline Tensor new_empty(
-    const Tensor& self,
+inline torch::stable::Tensor new_empty(
+    const torch::stable::Tensor& self,
     std::vector<int64_t> size,
     std::optional<c10::ScalarType> dtype = std::nullopt) {
   int32_t device_type;
@@ -87,13 +91,13 @@ inline Tensor new_empty(
       nullptr, // pin_memory (nullptr for default)
       &ret0));
 
-  return Tensor(ret0);
+  return torch::stable::Tensor(ret0);
 }
 
 // We expect this to be a stable version of the new_zeros op that takes in
 // only dtype information.
-inline Tensor new_zeros(
-    const Tensor& self,
+inline torch::stable::Tensor new_zeros(
+    const torch::stable::Tensor& self,
     std::vector<int64_t> size,
     std::optional<c10::ScalarType> dtype = std::nullopt) {
   int32_t device_type;
@@ -125,7 +129,7 @@ inline Tensor new_zeros(
       nullptr, // pin_memory (nullptr for default)
       &ath));
 
-  return Tensor(ath);
+  return torch::stable::Tensor(ath);
 }
 
 // We expect this to be the stable version of the pad.default op.
@@ -133,8 +137,8 @@ inline Tensor new_zeros(
 // use std::vector<int64_t> because
 // (1) IntArrayRef is not yet header-only
 // (2) SymInt is not yet header-only
-inline Tensor pad(
-    const Tensor& self,
+inline torch::stable::Tensor pad(
+    const torch::stable::Tensor& self,
     std::vector<int64_t> pad,
     const std::string& mode = "constant",
     double value = 0.0) {
@@ -142,7 +146,7 @@ inline Tensor pad(
 
   TORCH_ERROR_CODE_CHECK(aoti_torch_aten_pad(
       self.get(), pad.data(), pad.size(), mode.c_str(), &value, &ret0));
-  return Tensor(ret0);
+  return torch::stable::Tensor(ret0);
 }
 
 // We expect the following two functions to be stable versions of the
@@ -154,11 +158,14 @@ inline Tensor pad(
 
 // This function is an overload to compute the maximum value along each slice of
 // `self` along a single dimension `dim`.
-inline Tensor amax(const Tensor& self, int64_t dim, bool keepdim = false) {
+inline torch::stable::Tensor amax(
+    const torch::stable::Tensor& self,
+    int64_t dim,
+    bool keepdim = false) {
   AtenTensorHandle ret = nullptr;
   TORCH_ERROR_CODE_CHECK(
       aoti_torch_aten_amax(self.get(), &dim, 1, keepdim, &ret));
-  return Tensor(ret);
+  return torch::stable::Tensor(ret);
 }
 
 // This function is an overload to compute the maximum value along each slice of
@@ -166,8 +173,8 @@ inline Tensor amax(const Tensor& self, int64_t dim, bool keepdim = false) {
 // amax.default op takes in a SymInt[] as the dims argument, however dims is
 // typed as use std::vector<int64_t> here because (1) IntArrayRef is not yet
 // header-only (2) SymInt is not yet header-only
-inline Tensor amax(
-    const Tensor& self,
+inline torch::stable::Tensor amax(
+    const torch::stable::Tensor& self,
     std::vector<int64_t> dims,
     bool keepdim = false) {
   AtenTensorHandle ret = nullptr;
@@ -177,28 +184,31 @@ inline Tensor amax(
       static_cast<int64_t>(dims.size()),
       keepdim,
       &ret));
-  return Tensor(ret);
+  return torch::stable::Tensor(ret);
 }
 
 // We expect this to be the stable version of the transpose op with identical
 // semantics to the existing transpose.int op.
-inline Tensor transpose(const Tensor& self, int64_t dim0, int64_t dim1) {
+inline torch::stable::Tensor transpose(
+    const torch::stable::Tensor& self,
+    int64_t dim0,
+    int64_t dim1) {
   const auto num_args = 3;
   std::array<StableIValue, num_args> stack{from(self), from(dim0), from(dim1)};
   TORCH_ERROR_CODE_CHECK(
       aoti_torch_call_dispatcher("aten::transpose", "int", stack.data()));
-  return to<Tensor>(stack[0]);
+  return to<torch::stable::Tensor>(stack[0]);
 }
 
 // We expect this to be the stable version of the zero_ op with identical
 // semantics to the existing zero_ op (except that it will not be called as
 // a tensor method but only as a function i.e. zero_(t) not t.zero_()).
-inline Tensor zero_(Tensor& self) {
+inline torch::stable::Tensor zero_(torch::stable::Tensor& self) {
   const auto num_args = 1;
   std::array<StableIValue, num_args> stack{from(self)};
   TORCH_ERROR_CODE_CHECK(
       aoti_torch_call_dispatcher("aten::zero_", "", stack.data()));
-  return to<Tensor>(stack[0]);
+  return to<torch::stable::Tensor>(stack[0]);
 }
 
 } // namespace torch::stable

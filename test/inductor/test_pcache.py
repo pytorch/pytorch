@@ -1,10 +1,10 @@
 # Owner(s): ["module: inductor"]
 from __future__ import annotations
 
-from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor
+from inspect import isclass
 from os import environ
 from random import randint
-from typing import TYPE_CHECKING
 from typing_extensions import Self
 
 from torch._inductor import pcache
@@ -15,282 +15,295 @@ from torch.testing._internal.common_utils import (
 )
 
 
-if TYPE_CHECKING:
-    from collections.abc import Generator
+# abstract cache classes don't go through the testing
+# process, as they have unimplemented components and are
+# not meant to be utilized directly by the end user
+ABSTRACT_CACHES: list[type[pcache.Cache]] = [
+    pcache.Cache,
+    pcache.AsyncCache,
+]
+
+STR_BYTES_CACHES: list[type[pcache.Cache]] = []
+STR_BYTES_ASYNC_CACHES: list[type[pcache.AsyncCache]] = []
+
+UNSUPPORTED_CACHES: list[type[pcache.Cache]] = []
 
 
-str_key_gen: Generator[str, None, None] = (
-    f"dummy_key_{randint(0, 100000)}" for _ in iter(int, 1)
-)
-bytes_value_gen: Generator[bytes, None, None] = (
-    f"dummy_value_{randint(0, 100000)}".encode() for _ in iter(int, 1)
-)
+for obj_name in dir(pcache):
+    obj = getattr(pcache, obj_name)
+    if not isclass(obj) or not issubclass(obj, pcache.Cache) or obj in ABSTRACT_CACHES:
+        continue
+    # we only have Key=str, Value=bytes tests setup
+    for _orig_base in obj.__orig_bases__:
+        if issubclass(_orig_base.__origin__, pcache.Cache):
+            key_type, value_type = _orig_base.__args__
+            if (key_type != str) or (value_type != bytes):
+                UNSUPPORTED_CACHES.append(obj)
+                continue
+    # check association from strongest to weakest
+    if issubclass(obj, pcache.AsyncCache):
+        STR_BYTES_ASYNC_CACHES.append(obj)
+    if issubclass(obj, pcache.Cache):
+        STR_BYTES_CACHES.append(obj)
 
 
-Caches: list[type[pcache.Cache]] = [pcache.InMemoryCache]
-AsyncCaches: list[type[pcache.AsyncCache]] = [pcache.InductorOnDiskCache]
+class TestMixin:
+    def str_key(self: Self) -> str:
+        return f"key-{randint(0, 2**32)}"
+
+    def str_key_not_in(self: Self, cache: pcache.Cache[str, pcache.Value]) -> str:
+        while cache.get(str_key := self.str_key()) is not None:
+            continue
+
+        return str_key
+
+    def str_keys_not_in(
+        self: Self, cache: pcache.Cache[str, pcache.Value], num: int
+    ) -> list[str]:
+        str_keys: list[str] = []
+
+        while len(str_keys) < num:
+            str_key = self.str_key_not_in(cache)
+            if str_key not in str_keys:
+                str_keys.append(str_key)
+
+        return str_keys
+
+    def bytes_value(self: Self) -> bytes:
+        return f"value-{randint(0, 2**32)}".encode()
 
 
 @instantiate_parametrized_tests
-class CacheTest(TestCase):
-    @parametrize("Cache", Caches)
-    def test_get_insert_get(self: Self, Cache: type[pcache.Cache]) -> None:
-        key: str = next(str_key_gen)
-        value: bytes = next(bytes_value_gen)
-
+class CacheTest(TestMixin, TestCase):
+    @parametrize("Cache", STR_BYTES_CACHES)
+    def test_str_bytes_get_hit(self: Self, Cache: type[pcache.Cache]) -> None:
         cache: pcache.Cache = Cache()
 
-        # make sure our key is fresh
-        while cache.get(key) is not None:
-            key = next(str_key_gen)
+        key = self.str_key_not_in(cache)
+        value = self.bytes_value()
 
-        # first get should return None, no hit
         self.assertIsNone(cache.get(key))
-        # insert should return True, having set key -> value
         self.assertTrue(cache.insert(key, value))
-        # second get should return value, hit
         self.assertEqual(cache.get(key), value)
 
-    @parametrize("Cache", Caches)
-    def test_insert_insert(self: Self, Cache: type[pcache.Cache]) -> None:
-        key: str = next(str_key_gen)
-        value: bytes = next(bytes_value_gen)
-
+    @parametrize("Cache", STR_BYTES_CACHES)
+    def test_str_bytes_get_miss(self: Self, Cache: type[pcache.Cache]) -> None:
         cache: pcache.Cache = Cache()
 
-        if cache.get(key) is None:
-            # if key isn't already cached, cache it
-            self.assertTrue(cache.insert(key, value))
+        key = self.str_key_not_in(cache)
 
-        # second insert should not update the value
-        self.assertFalse(cache.insert(key, value))
+        self.assertIsNone(cache.get(key))
+        self.assertIsNone(cache.get(key))
 
-    def test_in_memory_cache_from_env_var(
-        self: Self, Cache: type[pcache.InMemoryCache] = pcache.InMemoryCache
+    @parametrize("Cache", STR_BYTES_CACHES)
+    def test_str_bytes_insert_no_overwrite(
+        self: Self, Cache: type[pcache.Cache]
     ) -> None:
-        key_1: str = next(str_key_gen)
-        value_1: bytes = next(bytes_value_gen)
+        cache: pcache.Cache = Cache()
 
-        key_2: str = next(str_key_gen)
-        while key_2 == key_1:
-            key_2 = next(str_key_gen)
-        value_2: bytes = next(bytes_value_gen)
+        key = self.str_key_not_in(cache)
+        value_1, value_2 = self.bytes_value(), self.bytes_value()
 
-        key_3: str = next(str_key_gen)
-        while key_3 in (key_1, key_2):
-            key_3 = next(str_key_gen)
+        self.assertIsNone(cache.get(key))
+        self.assertTrue(cache.insert(key, value_1))
+        self.assertFalse(cache.insert(key, value_2))
+        self.assertEqual(cache.get(key), value_1)
 
-        env_var = "INMEMORYCACHE_TEST"
-        env_val = f"{key_1},{value_1!r};{key_2},{value_2!r}"
-        environ[env_var] = env_val
-
-        cache = Cache.from_env_var(env_var)
-
-        # key_1 -> value_1 is in env_val, so we should hit
-        self.assertEqual(cache.get(key_1), value_1)
-        # key_2 -> value_2 is in env_val, so we should hit
-        self.assertEqual(cache.get(key_2), value_2)
-        # key_3 -> value_3 is not in env_val, so we should miss
-        self.assertIsNone(cache.get(key_3))
-
-    def test_in_memory_cache_from_env_var_bad_kv_pair(
-        self: Self, Cache: type[pcache.InMemoryCache] = pcache.InMemoryCache
+    @parametrize("Cache", STR_BYTES_CACHES)
+    def test_str_bytes_get_insert_thread_safe(
+        self: Self, Cache: type[pcache.Cache]
     ) -> None:
-        key_1: str = next(str_key_gen)
-        value_1: bytes = next(bytes_value_gen)
+        cache: pcache.Cache = Cache()
+        executor: ThreadPoolExecutor = ThreadPoolExecutor()
 
-        env_var = "INMEMORYCACHE_TEST"
-        # missing "," delimiter
-        env_val = f"{key_1}{value_1!r};"
-        kv_pair = env_val[:-1]
-        environ[env_var] = env_val
+        num_iters = 1000
 
-        with self.assertRaisesRegex(
-            ValueError,
-            f"Malformed kv_pair {kv_pair!r} in env_var {env_var!r}, missing comma separator!",
+        keys = self.str_keys_not_in(cache, num_iters)
+        values = [self.bytes_value() for _ in range(num_iters)]
+
+        get_futures = executor.map(cache.get, keys)
+        insert_futures = executor.map(cache.insert, keys, values)
+
+        for value, get_result, insert_result in zip(
+            values, get_futures, insert_futures
         ):
-            _ = Cache.from_env_var(env_var)
+            if get_result is not None:
+                self.assertIsEqual(get_result, value)
+                self.assertTrue(insert_result)
 
-    def test_in_memory_cache_from_env_var_bad_value(
-        self: Self, Cache: type[pcache.InMemoryCache] = pcache.InMemoryCache
+        executor.shutdown()
+
+    @parametrize("Cache", STR_BYTES_CACHES)
+    def test_str_bytes_insert_no_overwrite_thread_safe(
+        self: Self, Cache: type[pcache.Cache]
     ) -> None:
-        key_1: str = next(str_key_gen)
-        # exclude b' prefix and ' suffix
-        value_1: str = "bad_value"
+        cache: pcache.Cache = Cache()
+        executor: ThreadPoolExecutor = ThreadPoolExecutor()
 
-        env_var = "INMEMORYCACHE_TEST"
-        env_val = f"{key_1},{value_1};"
-        kv_pair = env_val[:-1]
-        environ[env_var] = env_val
+        num_iters = 1000
 
-        with self.assertRaisesRegex(
-            ValueError,
-            f"Malformed value {value_1!r} in kv_pair {kv_pair!r}, expected b'...' format!",
-        ):
-            _ = Cache.from_env_var(env_var)
+        key = self.str_key_not_in(cache)
+        keys = [key for _ in range(num_iters)]
+        values = [self.bytes_value() for _ in range(num_iters)]
 
-        # not encoded
-        value_2: str = f"b'{chr(256)}'"
+        insert_futures = executor.map(cache.insert, keys, values)
 
-        env_val = f"{key_1},{value_2};"
-        kv_pair = env_val[:-1]
-        environ[env_var] = env_val
+        hit_count = 0
+        for value, insert_result in zip(values, insert_futures):
+            self.assertLessEqual(hit_count, 1)
+            if insert_result:
+                hit_count += 1
+                self.assertEqual(cache.get(key), value)
 
-        with self.assertRaisesRegex(
-            ValueError, f"Malformed value {value_2!r} in kv_pair {kv_pair!r}!"
-        ):
-            _ = Cache.from_env_var(env_var)
-
-    def test_in_memory_cache_from_env_var_one_key_many_values(
-        self: Self, Cache: type[pcache.InMemoryCache] = pcache.InMemoryCache
-    ) -> None:
-        key_1: str = next(str_key_gen)
-        value_1: bytes = next(bytes_value_gen)
-        value_2: bytes = next(bytes_value_gen)
-
-        env_var = "INMEMORYCACHE_TEST"
-        env_val = f"{key_1},{value_1!r};{key_1},{value_2!r}"
-        environ[env_var] = env_val
-
-        with self.assertRaisesRegex(
-            ValueError,
-            f"Duplicated values for key {key_1!r}, got {value_1!r} and {value_2!r}!",
-        ):
-            _ = Cache.from_env_var(env_var)
+        executor.shutdown()
 
 
 @instantiate_parametrized_tests
-class AsyncCacheTest(TestCase):
-    @parametrize("AsyncCache", AsyncCaches)
-    @parametrize("Executor", [ThreadPoolExecutor, None])
-    def test_get_insert_get(
-        self: Self,
-        AsyncCache: type[pcache.AsyncCache],
-        Executor: type[ThreadPoolExecutor] | None = None,
+class AsyncCacheTest(TestMixin, TestCase):
+    @parametrize("Cache", STR_BYTES_ASYNC_CACHES)
+    def test_str_bytes_get_hit_async(
+        self: Self, Cache: type[pcache.AsyncCache]
     ) -> None:
-        key: str = next(str_key_gen)
-        value: bytes = next(bytes_value_gen)
+        cache: pcache.AsyncCache = Cache()
+        executor: ThreadPoolExecutor = ThreadPoolExecutor()
 
-        async_cache: pcache.AsyncCache = AsyncCache()
-        executor: ThreadPoolExecutor = Executor() if Executor is not None else None
+        key = self.str_key_not_in(cache)
+        value = self.bytes_value()
 
-        if executor is None:
-            # make sure our key is fresh
-            while async_cache.get(key) is not None:
-                key = next(str_key_gen)
+        self.assertIsNone(cache.get_async(key, executor).result())
+        self.assertTrue(cache.insert_async(key, value, executor).result())
+        self.assertEqual(cache.get_async(key, executor).result(), value)
 
-            # first get should miss
-            self.assertIsNone(async_cache.get(key))
-            # insert should set key -> value mapping
-            self.assertTrue(async_cache.insert(key, value))
-            # second get should hit
-            self.assertEqual(async_cache.get(key), value)
-        else:
-            # make sure our key is fresh
-            while async_cache.get_async(key, executor).result() is not None:
-                key = next(str_key_gen)
-
-            # first get should miss
-            self.assertIsNone(async_cache.get_async(key, executor).result())
-            # insert should set key -> value mapping
-            self.assertTrue(async_cache.insert_async(key, value, executor).result())
-            # second get should hit
-            self.assertEqual(async_cache.get_async(key, executor).result(), value)
-            executor.shutdown()
-
-    @parametrize("AsyncCache", AsyncCaches)
-    @parametrize("Executor", [ThreadPoolExecutor, None])
-    def test_insert_insert(
-        self: Self,
-        AsyncCache: type[pcache.AsyncCache],
-        Executor: type[ThreadPoolExecutor] | None = None,
-    ) -> None:
-        key: str = next(str_key_gen)
-        value: bytes = next(bytes_value_gen)
-
-        async_cache: pcache.AsyncCache = AsyncCache()
-        executor: ThreadPoolExecutor = Executor() if Executor is not None else None
-
-        if executor is None:
-            if async_cache.get(key) is None:
-                # set key -> value mapping if unset
-                self.assertTrue(async_cache.insert(key, value))
-            # second insert should not override the prior insert
-            self.assertFalse(async_cache.insert(key, value))
-        else:
-            if async_cache.get_async(key, executor).result() is None:
-                # set key -> value mapping if unset
-                self.assertTrue(async_cache.insert_async(key, value, executor).result())
-            # second insert should not override the prior insert
-            self.assertFalse(async_cache.insert_async(key, value, executor).result())
-            executor.shutdown()
-
-    @parametrize("AsyncCache", AsyncCaches)
-    def test_concurrent_insert_insert(
-        self: Self,
-        AsyncCache: type[pcache.AsyncCache],
-        Executor: type[ThreadPoolExecutor] = ThreadPoolExecutor,
-    ) -> None:
-        key: str = next(str_key_gen)
-        value: bytes = next(bytes_value_gen)
-
-        async_cache: pcache.AsyncCache = AsyncCache()
-        executor: ThreadPoolExecutor = Executor()
-
-        # make sure our key is fresh
-        while async_cache.get_async(key, executor).result() is not None:
-            key = next(str_key_gen)
-
-        insert_1: Future[bool] = async_cache.insert_async(key, value, executor)
-        insert_2: Future[bool] = async_cache.insert_async(key, value, executor)
-
-        # only one insert should succeed
-        self.assertTrue(insert_1.result() ^ insert_2.result())
         executor.shutdown()
 
-    @parametrize("AsyncCache", AsyncCaches)
-    def test_concurrent_get_insert(
-        self: Self,
-        AsyncCache: type[pcache.AsyncCache],
-        Executor: type[ThreadPoolExecutor] = ThreadPoolExecutor,
+    @parametrize("Cache", STR_BYTES_ASYNC_CACHES)
+    def test_str_bytes_get_miss_async(
+        self: Self, Cache: type[pcache.AsyncCache]
     ) -> None:
-        key: str = next(str_key_gen)
-        value: bytes = next(bytes_value_gen)
+        cache: pcache.AsyncCache = Cache()
+        executor: ThreadPoolExecutor = ThreadPoolExecutor()
 
-        async_cache: pcache.AsyncCache = AsyncCache()
-        executor: ThreadPoolExecutor = Executor()
+        key = self.str_key_not_in(cache)
 
-        # make sure our key is fresh
-        while async_cache.get_async(key, executor).result() is not None:
-            key = next(str_key_gen)
-
-        # try get first
-        get_1: Future[bytes | None] = async_cache.get_async(key, executor)
-        insert_1: Future[bool] = async_cache.insert_async(key, value, executor)
-
-        if get_1.result() is not None:
-            # if the get succeeded it should return the value stored by the insert
-            self.assertEqual(get_1.result(), value)
-
-        # either way the insert should succeed as the key is fresh
-        self.assertTrue(insert_1.result())
-
-        # make sure our key is fresh
-        while async_cache.get_async(key, executor).result() is not None:
-            key = next(str_key_gen)
-
-        # try insert first
-        insert_2: Future[bool] = async_cache.insert_async(key, value, executor)
-        get_2: Future[bytes | None] = async_cache.get_async(key, executor)
-
-        if get_2.result() is not None:
-            # if the get succeeded it should return the value stored by the insert
-            self.assertEqual(get_2.result(), value)
-
-        # either way the insert should succeed as the key is fresh
-        self.assertTrue(insert_2.result())
+        self.assertIsNone(cache.get_async(key, executor).result())
+        self.assertIsNone(cache.get_async(key, executor).result())
 
         executor.shutdown()
+
+    @parametrize("Cache", STR_BYTES_ASYNC_CACHES)
+    def test_str_bytes_insert_async_no_overwrite(
+        self: Self, Cache: type[pcache.AsyncCache]
+    ) -> None:
+        cache: pcache.AsyncCache = Cache()
+        executor: ThreadPoolExecutor = ThreadPoolExecutor()
+
+        num_iters = 10
+
+        key = self.str_key_not_in(cache)
+        values = [self.bytes_value() for _ in range(num_iters)]
+
+        self.assertIsNone(cache.get_async(key, executor).result())
+
+        futures = []
+        for value in values:
+            futures.append(cache.insert_async(key, value, executor))
+
+        for future, value in zip(futures, values):
+            if future.result():
+                self.assertTrue(cache.get(key), value)
+
+        executor.shutdown()
+
+
+@instantiate_parametrized_tests
+class OtherTest(TestMixin, TestCase):
+    def test_str_bytes_in_memory_cache_from_env_var(self: Self) -> None:
+        num_iters = 100
+
+        keys = [self.str_key() for _ in range(num_iters)]
+        values = [self.bytes_value() for _ in range(num_iters)]
+
+        env_var = "INMEMORYCACHE_TEST"
+        env_val = ";".join([f"{key},{value!r}" for key, value in zip(keys, values)])
+        environ[env_var] = env_val
+
+        cache = pcache.InMemoryCache.from_env_var(env_var)
+
+        for key, value in zip(keys, values):
+            self.assertEqual(cache.get(key), value)
+
+        for key in keys[num_iters:]:
+            self.assertIsNone(cache.get(key))
+
+    def test_str_bytes_in_memory_cache_from_env_var_bad_kv_pair(self: Self) -> None:
+        key = self.str_key()
+        value = self.bytes_value()
+
+        env_var = "INMEMORYCACHE_TEST"
+        # no comma separator
+        env_val = f"{key}{value!r};"
+        environ[env_var] = env_val
+
+        with self.assertRaisesRegex(
+            ValueError,
+            f"Malformed kv_pair {env_val[:-1]!r} in env_var {env_var!r}, missing comma separator!",
+        ):
+            _ = pcache.InMemoryCache.from_env_var(env_var)
+
+    def test_str_bytes_in_memory_cache_from_env_var_bad_value_not_bytes(
+        self: Self,
+    ) -> None:
+        key = self.str_key()
+        # value is str, not bytes
+        value = self.str_key()
+
+        env_var = "INMEMORYCACHE_TEST"
+        env_val = f"{key},{value};"
+        environ[env_var] = env_val
+
+        with self.assertRaisesRegex(
+            ValueError,
+            f"Malformed value {value!r} in kv_pair {env_val[:-1]!r}, expected b'...' format!",
+        ):
+            _ = pcache.InMemoryCache.from_env_var(env_var)
+
+    def test_str_bytes_in_memory_cache_from_env_var_bad_value_not_encoded(
+        self: Self,
+    ) -> None:
+        key = self.str_key()
+        # value is not encoded properly
+        value = f"b'{chr(256)}'"
+
+        env_var = "INMEMORYCACHE_TEST"
+        env_val = f"{key},{value};"
+        environ[env_var] = env_val
+
+        with self.assertRaisesRegex(
+            ValueError, f"Malformed value {value!r} in kv_pair {env_val[:-1]!r}!"
+        ):
+            _ = pcache.InMemoryCache.from_env_var(env_var)
+
+    def test_str_bytes_in_memory_cache_from_env_var_one_key_many_values(
+        self: Self,
+    ) -> None:
+        num_iters = 2
+
+        key = self.str_key()
+        keys = [key for _ in range(num_iters)]
+        values = [self.bytes_value() for _ in range(num_iters)]
+
+        env_var = "INMEMORYCACHE_TEST"
+        env_val = ";".join([f"{key},{value!r}" for key, value in zip(keys, values)])
+        environ[env_var] = env_val
+
+        with self.assertRaisesRegex(
+            ValueError,
+            f"Duplicated values for key {key!r}, got {values[0]!r} and {values[1]!r}!",
+        ):
+            _ = pcache.InMemoryCache.from_env_var(env_var)
+
+    def test_no_unsupported_caches(self: Self) -> None:
+        self.assertEqual(UNSUPPORTED_CACHES, [])
 
 
 if __name__ == "__main__":
