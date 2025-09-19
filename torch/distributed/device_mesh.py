@@ -97,7 +97,7 @@ if True:  # just to temporarily avoid reindentation
                     mesh_nd,
                     mesh_dim_names=submesh_dim_names,
                     _init_backend=False,
-                    layout=layout,
+                    _layout=layout,
                 )
                 if cur_rank in mesh_nd:
                     res_submesh = submesh
@@ -166,7 +166,7 @@ if True:  # just to temporarily avoid reindentation
                     mesh_nd.flatten(),  # Flatten is needed for non-contiguous dim flatten.
                     mesh_dim_names=(mesh_dim_name,),
                     backend_override=(backend_override,),
-                    layout=device_mesh._layout.coalesce(),
+                    _layout=device_mesh._layout.coalesce(),
                 )
                 if cur_rank in mesh_nd:
                     res_flattened_mesh = flattened_mesh
@@ -190,10 +190,7 @@ if True:  # just to temporarily avoid reindentation
                 tuple[Optional[str], Optional[C10dBackend.Options]], ...
             ] = ((None, None),),
         ) -> "DeviceMesh":
-            root_mesh = _mesh_resources.get_root_mesh(device_mesh)
-            unflatten_layout = _MeshLayout(
-                tuple(mesh_sizes), suffix_product(mesh_sizes)
-            )
+            root_mesh = self.get_root_mesh(device_mesh)
             unflatten_length = len(mesh_sizes)
             original_sizes = (
                 device_mesh._layout.sizes
@@ -206,19 +203,28 @@ if True:  # just to temporarily avoid reindentation
                 else (device_mesh._layout.strides,)
             )
             orig_mesh_dim_names = not_none(device_mesh.mesh_dim_names)
-            unflatten_layout = device_mesh._layout[dim].composition(unflatten_layout)
+            unflatten_layout = device_mesh._layout[dim].composition(
+                _MeshLayout(tuple(mesh_sizes), suffix_product(mesh_sizes))
+            )
             cur_rank = device_mesh.get_rank()
             unflattened_layout = _MeshLayout(
                 tuple(
-                    original_sizes[:dim] + unflatten_layout.sizes
-                    if is_tuple(unflatten_layout.sizes)
-                    else (unflatten_layout.sizes,) + tuple(original_sizes[dim + 1 :])
+                    original_sizes[:dim]
+                    + (
+                        unflatten_layout.sizes
+                        if is_tuple(unflatten_layout.sizes)
+                        else (unflatten_layout.sizes,)
+                    )
+                    + original_sizes[dim + 1 :]
                 ),
                 tuple(
-                    original_strides[:dim] + unflatten_layout.strides
-                    if is_tuple(unflatten_layout.strides)
-                    else (unflatten_layout.strides,)
-                    + tuple(original_strides[dim + 1 :])
+                    original_strides[:dim]
+                    + (
+                        unflatten_layout.strides
+                        if is_tuple(unflatten_layout.strides)
+                        else (unflatten_layout.strides,)
+                    )
+                    + original_strides[dim + 1 :]
                 ),
             )
             pg_ranks_by_dim = unflattened_layout.to_remapping_tensor(
@@ -235,7 +241,7 @@ if True:  # just to temporarily avoid reindentation
                         + orig_mesh_dim_names[dim + 1 :]
                     ),
                     _init_backend=False,
-                    layout=unflattened_layout,
+                    _layout=unflattened_layout,
                 )
                 if cur_rank in mesh_nd:
                     res_mesh = submesh
@@ -255,6 +261,7 @@ if True:  # just to temporarily avoid reindentation
                         mesh_nd,
                         mesh_dim_names=mesh_dim_names,
                         backend_override=backend_override,
+                        # _layout=unflatten_layout,
                     )
                     if cur_rank in mesh_nd:
                         unflatten_submesh = submesh
@@ -380,16 +387,18 @@ if True:  # just to temporarily avoid reindentation
             sliced_sizes = tuple(l.sizes for l in layout_sliced)
             sliced_strides = tuple(l.strides for l in layout_sliced)
             # When users sliced dim_names outside from current mesh, we will check whether
-            # there is layout overlap. Eventually we will just directly throw error here because
+            # there is layout overlap.
+            # TODO: Eventually we will just directly throw error here because
             # we will deprecate the slicing of flattened dim_name from root mesh.
             layout_sliced = _MeshLayout(sliced_sizes, sliced_strides)
             if not layout_sliced.check_non_overlap():
                 raise RuntimeError(
-                    f"slicing overlapping dim_names {mesh_dim_names} is not allowed"
+                    f"Slicing overlapping dim_names {mesh_dim_names} is not allowed."
                 )
 
             return layout_sliced
 
+        # TODO: to make this use case by other components public API in the future.
         def _get_all_submeshes(
             self, device_mesh: "DeviceMesh", mesh_dim_name: str
         ) -> list["DeviceMesh"]:
@@ -495,7 +504,7 @@ if True:  # just to temporarily avoid reindentation
             ] = None,
             _init_backend: bool = True,
             _rank: Optional[int] = None,
-            layout: Optional[_MeshLayout] = None,
+            _layout: Optional[_MeshLayout] = None,
         ) -> None:
             self.device_type = device_type
             if isinstance(mesh, torch.Tensor) and mesh.device.type != "cpu":
@@ -510,7 +519,9 @@ if True:  # just to temporarily avoid reindentation
                 backend_override = ((None, None),) * self.mesh.ndim
             # Internal bookkeeping for the device mesh.
             self._layout = (
-                layout if layout else _MeshLayout(self.mesh.size(), self.mesh.stride())
+                _layout
+                if _layout
+                else _MeshLayout(self.mesh.size(), self.mesh.stride())
             )
             assert self._layout.check_non_overlap(), (
                 "Please use a non-overlapping layout when creating a DeviceMesh."
