@@ -4361,6 +4361,29 @@ class CPUReproTests(TestCase):
                     actual = compiled_m(x)
                     self.assertEqual(expected, actual)
 
+    def test_group_norm_small_size(self):
+        # For smaller reduction sizes, we use the native algorithm as a fast path for reduction,
+        # which is the case for this test case.
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.gn = torch.nn.GroupNorm(32, 32)
+
+            def forward(self, x):
+                return self.gn(x)
+
+        torch._dynamo.reset()
+        metrics.reset()
+        mod = M().eval()
+        x = torch.randn(1, 32, 16, 16)
+        with torch.no_grad():
+            expected = mod(x)
+            compiled_m = torch.compile(mod)
+            actual, code = run_and_get_cpp_code(compiled_m, x)
+            self.assertEqual(expected, actual)
+            # check that there is no welford_helper
+            FileCheck().check_not("welford_helper").run(code)
+
     def test_int_div_vec(self):
         def fn(x, y, mode):
             return torch.div(x, y, rounding_mode=mode)
