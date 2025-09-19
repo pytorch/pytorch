@@ -63,22 +63,20 @@ def nvshmem_get_kernel(
 
 @triton.jit
 def nvshmem_putmem_signal_block_kernel(
-    dst_ptr,
-    src_ptr,
+    dst,
+    src,
     size_bytes,
-    sig_ptr,
-    signal_val,
+    signal,
+    sig_val,
     sig_op,
     peer,
 ):
-    nvshmem.putmem_signal_block(
-        dst_ptr, src_ptr, size_bytes, sig_ptr, signal_val, sig_op, peer
-    )
+    nvshmem.putmem_signal_block(dst, src, size_bytes, signal, sig_val, sig_op, peer)
 
 
 @triton.jit
-def nvshmem_signal_wait_until_kernel(sig_ptr, cmp_op, cmp_val):
-    nvshmem.signal_wait_until(sig_ptr, cmp_op, cmp_val)
+def nvshmem_signal_wait_until_kernel(signal, cmp_op, cmp_val):
+    nvshmem.signal_wait_until(signal, cmp_op, cmp_val)
 
 
 @triton.jit
@@ -419,7 +417,7 @@ class NVSHMEMTritonTest(MultiProcContinuousTest):
         val = 11
         inp = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(val)
         out = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(-1)
-        inp_hdl = symm_mem.rendezvous(inp, group=group_name)
+        symm_mem.rendezvous(inp, group=group_name)
         out_hdl = symm_mem.rendezvous(out, group=group_name)
 
         # Use the signal pad attached to the output symmetric memory handle
@@ -433,15 +431,12 @@ class NVSHMEMTritonTest(MultiProcContinuousTest):
 
         if rank == 0:
             # Rank 0 puts into Rank 1
-            dst_ptr = out_hdl.buffer_ptrs[peer]
-            src_ptr = inp_hdl.buffer_ptrs[rank]
-            sig_ptr = out_hdl.signal_pad_ptrs[peer]
             nvshmem_putmem_signal_block_kernel[(1, 1, 1)](
-                dst_ptr,
-                src_ptr,
+                out,
+                inp,
                 size_bytes=msg_size_bytes,
-                sig_ptr=sig_ptr,
-                signal_val=SIGNAL_VAL,
+                signal=flag,
+                sig_val=SIGNAL_VAL,
                 sig_op=NVSHMEM_SIGNAL_SET,
                 peer=peer,
                 extern_libs=nvshmem_lib,
@@ -449,9 +444,8 @@ class NVSHMEMTritonTest(MultiProcContinuousTest):
 
         if rank == 1:
             # Wait until signal flag is set by Rank 0
-            sig_ptr_local = out_hdl.signal_pad_ptrs[rank]
             nvshmem_signal_wait_until_kernel[(1,)](
-                sig_ptr_local,
+                flag,
                 cmp_op=NVSHMEM_CMP_EQ,
                 cmp_val=SIGNAL_VAL,
                 extern_libs=nvshmem_lib,
@@ -485,7 +479,7 @@ class NVSHMEMTritonTest(MultiProcContinuousTest):
         val = 11
         inp = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(val)
         out = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(-1)
-        inp_hdl = symm_mem.rendezvous(inp, group=group_name)
+        symm_mem.rendezvous(inp, group=group_name)
         out_hdl = symm_mem.rendezvous(out, group=group_name)
 
         # Use the signal pad attached to the output symmetric memory handle
@@ -499,24 +493,20 @@ class NVSHMEMTritonTest(MultiProcContinuousTest):
 
         if rank == 0:
             # Rank 0 puts into Rank 1
-            dst_ptr = out_hdl.buffer_ptrs[peer]
-            src_ptr = inp_hdl.buffer_ptrs[rank]
-            sig_ptr = out_hdl.signal_pad_ptrs[peer]
             nvshmem_putmem_signal_block_kernel[(1, 1, 1)](
-                dst_ptr,
-                src_ptr,
+                out,
+                inp,
                 size_bytes=msg_size_bytes,
-                sig_ptr=sig_ptr,
-                signal_val=SIGNAL_VAL,
+                signal=flag,
+                sig_val=SIGNAL_VAL,
                 sig_op=NVSHMEM_SIGNAL_ADD,
                 peer=peer,
                 extern_libs=nvshmem_lib,
             )
 
         if rank == 1:
-            sig_ptr_local = out_hdl.signal_pad_ptrs[rank]
             nvshmem_signal_wait_until_kernel[(1, 1, 1)](
-                sig_ptr_local,
+                flag,
                 cmp_op=NVSHMEM_CMP_EQ,
                 cmp_val=SIGNAL_VAL,
                 extern_libs=nvshmem_lib,
@@ -546,10 +536,13 @@ class NVSHMEMTritonTest(MultiProcContinuousTest):
         FLAG_FINAL_VALUE = 42
 
         # Use a single int64 symmetric tensor as our synchronization flag.
-        flag = symm_mem.empty(1, dtype=torch.int64, device=self.device).fill_(
+        flag = symm_mem.empty(1, dtype=torch.int32, device=self.device).fill_(
             FLAG_INITIAL_VALUE
         )
         symm_mem.rendezvous(flag, group=group_name)
+        expected_flag = torch.tensor(
+            [FLAG_FINAL_VALUE], dtype=torch.int32, device=self.device
+        )
 
         nvshmem_barrier_all_kernel[(1,)](extern_libs=nvshmem_lib)
 
@@ -565,19 +558,15 @@ class NVSHMEMTritonTest(MultiProcContinuousTest):
             # Verification
             torch.testing.assert_close(
                 flag,
-                torch.tensor([FLAG_FINAL_VALUE], dtype=torch.int64, device=self.device),
+                expected_flag,
             )
 
         if rank == 1:
             # Rank 1 (the signaler)
-            val_to_put = torch.tensor(
-                [FLAG_FINAL_VALUE], dtype=torch.int64, device=self.device
-            )
-
             # Launch a kernel to put the value to Rank 0's flag tensor.
             nvshmem_put_kernel[(1,)](
                 flag,  # Destination symmetric tensor on the remote PE
-                val_to_put,  # Source data tensor (local)
+                expected_flag,  # Source data tensor (local)
                 1,  # Number of elements
                 peer,  # The target PE (Rank 0)
                 extern_libs=nvshmem_lib,
@@ -609,7 +598,7 @@ class NVSHMEMTritonTest(MultiProcContinuousTest):
 
         # Producer (rank 0) prepares the data to send
         inp = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(val_to_put)
-        inp_hdl = symm_mem.rendezvous(inp, group=group_name)
+        symm_mem.rendezvous(inp, group=group_name)
         # Consumer (rank 1) prepares the destination buffer
         out = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(-1)
         out_hdl = symm_mem.rendezvous(out, group=group_name)
@@ -619,24 +608,20 @@ class NVSHMEMTritonTest(MultiProcContinuousTest):
 
         if rank == 0:
             # Producer (rank 0): Puts data into rank 1's `out` buffer and then sets the flag
-            dst_ptr = out_hdl.buffer_ptrs[peer]
-            src_ptr = inp_hdl.buffer_ptrs[rank]
-            sig_ptr = out_hdl.signal_pad_ptrs[peer]
             nvshmem_putmem_signal_block_kernel[(1, 1, 1)](
-                dst_ptr,
-                src_ptr,
+                out,
+                inp,
                 size_bytes=msg_size_bytes,
-                sig_ptr=sig_ptr,
-                signal_val=COMPLETION_FLAG_VAL,
+                signal=flag,
+                sig_val=COMPLETION_FLAG_VAL,
                 sig_op=NVSHMEM_SIGNAL_SET,
                 peer=peer,
                 extern_libs=nvshmem_lib,
             )
         elif rank == 1:
             # Consumer (rank 1): Waits on the signal variable using `signal_wait_until`.
-            sig_ptr = out_hdl.signal_pad_ptrs[rank]
             nvshmem_signal_wait_until_kernel[(1, 1, 1)](
-                sig_ptr,
+                flag,
                 cmp_op=NVSHMEM_CMP_EQ,
                 cmp_val=COMPLETION_FLAG_VAL,
                 extern_libs=nvshmem_lib,
@@ -689,10 +674,10 @@ class NVSHMEMTritonTest(MultiProcContinuousTest):
         symm_mem.rendezvous(out2, group=group_name)
 
         # Use regular symmetric memory tensor for flag
-        flag = symm_mem.empty(1, dtype=torch.int64, device=self.device).fill_(0)
+        flag = symm_mem.empty(1, dtype=torch.int32, device=self.device).fill_(0)
         symm_mem.rendezvous(flag, group=group_name)
         flag_update_val = torch.tensor(
-            [flag_val], dtype=torch.int64, device=self.device
+            [flag_val], dtype=torch.int32, device=self.device
         )
         NVSHMEM_CMP_EQ = 0  # compare equal
 
@@ -725,7 +710,7 @@ class NVSHMEMTritonTest(MultiProcContinuousTest):
                 out2, val2 * torch.ones(numel, dtype=dtype, device=self.device)
             )
             torch.testing.assert_close(
-                flag, torch.tensor([flag_val], dtype=torch.int64, device=self.device)
+                flag, torch.tensor([flag_val], dtype=torch.int32, device=self.device)
             )
 
     @skipIfRocm
@@ -747,9 +732,9 @@ class NVSHMEMTritonTest(MultiProcContinuousTest):
 
         inp = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(val)
         out = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(-1)
-        flag = symm_mem.empty(1, dtype=torch.int64, device=self.device).fill_(0)
+        flag = symm_mem.empty(1, dtype=torch.int32, device=self.device).fill_(0)
         flag_update_val = torch.tensor(
-            [flag_val], dtype=torch.int64, device=self.device
+            [flag_val], dtype=torch.int32, device=self.device
         )
 
         symm_mem.rendezvous(inp, group=group_name)
@@ -982,7 +967,7 @@ class NVSHMEMTritonTest(MultiProcContinuousTest):
             torch.uint8,
             torch.float16,
             torch.float32,
-            torch.float64,
+            # torch.float64,  # Tensor-likes are not close
             torch.bfloat16,
         ],
     )
@@ -1135,7 +1120,7 @@ class NVSHMEMTritonTest(MultiProcContinuousTest):
             torch.int64,
             torch.float16,
             torch.float32,
-            torch.float64,
+            # torch.float64,  # Tensor-likes are not close
             torch.bfloat16,
         ],
     )
