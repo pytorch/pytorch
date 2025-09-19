@@ -8,15 +8,19 @@ include LICENSE
 include MANIFEST.in
 include Makefile
 include NOTICE
+include .bc-linter.yml
 include .clang-format .clang-tidy
 include .cmakelintrc
 include .coveragerc
 include .dockerignore
+include .editorconfig
 include .flake8
 include .gdbinit
 include .lintrunner.toml
 include .lldbinit
+include codex_setup.sh
 include docker.Makefile
+include pyrefly.toml
 include ubsan.supp
 
 # Include bazel and BUCK related files
