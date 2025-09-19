@@ -27,7 +27,8 @@ class Placement {
     return false;
   }
 
-  virtual bool is_partial(std::optional<std::string_view> reduce_op) const {
+  virtual bool is_partial(
+      std::optional<std::string_view> reduce_op = std::nullopt) const {
     return false;
   }
 };
@@ -98,7 +99,8 @@ class Partial : public Placement {
 
   explicit Partial(std::string reduce_op_) : reduce_op(std::move(reduce_op_)) {}
 
-  bool is_partial(std::optional<std::string_view> op) const override {
+  bool is_partial(
+      std::optional<std::string_view> op = std::nullopt) const override {
     return !op.has_value() || *op == reduce_op;
   }
 
