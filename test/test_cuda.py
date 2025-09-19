@@ -759,53 +759,7 @@ print(t.is_pinned())
 
         torch._C._cuda_clearCublasWorkspaces()
 
-    @contextlib.contextmanager
-    def _hip_allow_tf32(self):
-        # for HIP/AMDGPU, tf32 is behind a flag because the TF32 support is new
-        # and only for MI300+
-        hip_allow_tf32 = os.environ.get("HIPBLASLT_ALLOW_TF32", None)
-        os.environ["HIPBLASLT_ALLOW_TF32"] = "1"
-
-        try:
-            yield
-        finally:
-            if hip_allow_tf32 is not None:
-                os.environ["HIPBLASLT_ALLOW_TF32"] = hip_allow_tf32
-            else:
-                del os.environ["HIPBLASLT_ALLOW_TF32"]
-
-    @unittest.skipIf(not TEST_WITH_ROCM, "not relevant for CUDA testing")
-    def test_hipblaslt_allow_tf32(self):
-        tf32_ctx = self._hip_allow_tf32
-        with tf32_ctx():
-            os.environ["HIPBLASLT_ALLOW_TF32"] = "0"
-            # Save original value of allow_tf32
-            orig = torch.backends.cuda.matmul.allow_tf32
-            # If allow_tf32 variable is declared as static in aten/src/ATen/Context.cpp
-            # then matmul.allow_tf32 will return False after this point even if
-            # HIP_BLASLT_ALLOW_TF32 is set to 1 and matmul.allow_tf32 is changed.
-            os.environ["HIPBLASLT_ALLOW_TF32"] = "1"
-            # Toggle torch.backends.cuda.matmul.allow_tf32 couple of times.
-            torch.backends.cuda.matmul.allow_tf32 = not orig
-            test1 = torch.backends.cuda.matmul.allow_tf32
-            torch.backends.cuda.matmul.allow_tf32 = orig
-            test2 = torch.backends.cuda.matmul.allow_tf32
-            self.assertNotEqual(test1, test2)
-            # Restore original value of allow_tf32
-            torch.backends.cuda.matmul.allow_tf32 = orig
-
     def test_cublas_allow_tf32_get_set(self):
-        """
-        We only turn on TF32 for MI300 with a special env var. This is because TF32
-        is only available in MI300+ and is in experimental mode (hipblaslt support
-        is current WIP)
-        """
-        tf32_ctx = self._hip_allow_tf32 if torch.version.hip else contextlib.nullcontext
-
-        with tf32_ctx():
-            self._test_cublas_allow_tf32_get_set_inner()
-
-    def _test_cublas_allow_tf32_get_set_inner(self):
         skip_tf32_cublas = "TORCH_ALLOW_TF32_CUBLAS_OVERRIDE" in os.environ and int(
             os.environ["TORCH_ALLOW_TF32_CUBLAS_OVERRIDE"]
         )
@@ -820,12 +774,6 @@ print(t.is_pinned())
         torch.backends.cuda.matmul.allow_tf32 = orig
 
     def test_float32_matmul_precision_get_set(self):
-        tf32_ctx = self._hip_allow_tf32 if torch.version.hip else contextlib.nullcontext
-
-        with tf32_ctx():
-            self._test_float32_matmul_precision_get_set_inner()
-
-    def _test_float32_matmul_precision_get_set_inner(self):
         orig = torch.get_float32_matmul_precision()
         skip_tf32_cublas = "TORCH_ALLOW_TF32_CUBLAS_OVERRIDE" in os.environ and int(
             os.environ["TORCH_ALLOW_TF32_CUBLAS_OVERRIDE"]
@@ -3156,6 +3104,54 @@ exit(2)
         g.replay()
 
         model(x)
+
+    @skipIfRocm
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @serialTest()
+    def test_graph_checkpoint_preserve_rng_state(self):
+        torch.cuda.manual_seed(42)
+
+        def fn(x):
+            return x * torch.sigmoid(torch.randn(1, device="cuda"))
+
+        fn(torch.ones(1, device="cuda"))
+
+        torch.cuda.manual_seed(42)
+        eager_in = torch.ones(1, device="cuda", requires_grad=True)
+        eager_out = torch.utils.checkpoint.checkpoint(
+            fn, eager_in, use_reentrant=False, preserve_rng_state=True
+        )
+        (eager_in_grad,) = torch.autograd.grad(eager_out, eager_in)
+
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(g):
+            graph_in = torch.ones(1, device="cuda", requires_grad=True)
+            graph_out = torch.utils.checkpoint.checkpoint(
+                fn, graph_in, use_reentrant=False, preserve_rng_state=True
+            )
+            (graph_in_grad,) = torch.autograd.grad(graph_out, graph_in)
+
+        torch.cuda.manual_seed(42)
+        g.replay()
+
+        self.assertEqual(eager_in_grad, graph_in_grad, rtol=0.0, atol=0.0)
+
+    @skipIfRocm
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @serialTest()
+    def test_graph_manual_seed_mismatch_raises(self):
+        torch.cuda.manual_seed(0)
+        g = torch.cuda.CUDAGraph()
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "CUDAGeneratorImpl::set_current_seed can be called during stream capture only if new seed is the same as the original seed.",  # noqa: B950
+        ):
+            with torch.cuda.graph(g):
+                torch.cuda.manual_seed(1)
 
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
@@ -6734,7 +6730,6 @@ class TestCudaAutocast(TestAutocast):
     os.environ.get("USE_LEGACY_DRIVER", None) == "1", "Doesn't work with older driver"
 )
 class TestCompileKernel(TestCase):
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCM does not support nvrtc")
     @unittest.skipIf(not TEST_CUDA, "No CUDA")
     def test_compile_kernel(self):
         # Simple vector addition kernel
@@ -6801,15 +6796,13 @@ class TestCompileKernel(TestCase):
         self.assertEqual(c_int, expected_int)
 
         # Test with header code
-        header_code = """
+        scale_kernel_source = """
         #define SCALE_FACTOR 2.0f
 
         __device__ float scale_value(float val) {
             return val * SCALE_FACTOR;
         }
-        """
 
-        scale_kernel_source = """
         __global__ void scale_tensors(const float* input, float* output, int n) {
             int i = threadIdx.x + blockIdx.x * blockDim.x;
             if (i < n)
@@ -6817,9 +6810,7 @@ class TestCompileKernel(TestCase):
         }
         """
 
-        scale_kernel = _compile_kernel(
-            scale_kernel_source, "scale_tensors", header_code=header_code
-        )
+        scale_kernel = _compile_kernel(scale_kernel_source, "scale_tensors")
 
         input_tensor = torch.rand(N, device="cuda")
         output_tensor = torch.empty_like(input_tensor)
@@ -6844,7 +6835,6 @@ class TestCompileKernel(TestCase):
         with self.assertRaises(RuntimeError):
             _compile_kernel(invalid_kernel_source, "invalid_kernel")
 
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCM does not support nvrtc")
     @unittest.skipIf(not TEST_CUDA, "No CUDA")
     def test_compile_kernel_large_shared_memory(self):
         kernel_source = """
@@ -6902,14 +6892,20 @@ class TestCompileKernel(TestCase):
         self.assertEqual(output_data.cpu(), expected)
 
         # Test error handling with more than supported shared memory size
-        max_smem = get_device_properties().shared_memory_per_block_optin
+        if torch.version.hip:
+            max_smem = (
+                65536
+                if get_device_properties().gcnArchName not in ["gfx950"]
+                else 160 * 1024
+            )
+        else:
+            max_smem = get_device_properties().shared_memory_per_block_optin
         excessive_shared_mem = max_smem * 2
 
         with self.assertRaises(RuntimeError):
             kernel.set_shared_memory_config(excessive_shared_mem)
 
     @tf32_on_and_off(0.005)
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCM does not support nvrtc")
     @unittest.skipIf(not TEST_CUDA, "No CUDA")
     def test_compile_kernel_advanced(self):
         # Test matrix multiplication
@@ -6960,7 +6956,10 @@ class TestCompileKernel(TestCase):
 
         # Test with different compute capability if specified
         device_props = torch.cuda.get_device_properties(torch.cuda.current_device())
-        compute_cap = f"{device_props.major}{device_props.minor}"
+        if not torch.version.hip:
+            compute_cap = f"{device_props.major}{device_props.minor}"
+        else:
+            compute_cap = f"{device_props.gcnArchName}"
 
         # Recompile with explicit compute capability
         matmul_kernel_explicit = _compile_kernel(
@@ -6979,7 +6978,6 @@ class TestCompileKernel(TestCase):
         # Verify results
         self.assertEqual(C_explicit, expected)
 
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCM does not support nvrtc")
     @unittest.skipIf(not TEST_CUDA, "No CUDA")
     def test_compile_kernel_as_custom_op(self):
         # Define a simple vector addition kernel
@@ -7039,7 +7037,6 @@ class TestCompileKernel(TestCase):
         expected = a + b
         torch.testing.assert_close(result, expected, rtol=1e-5, atol=1e-5)
 
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCM does not support nvrtc")
     @unittest.skipIf(not TEST_CUDA, "No CUDA")
     def test_compile_kernel_custom_op_validation(self):
         kernel_source = """
@@ -7087,7 +7084,6 @@ class TestCompileKernel(TestCase):
         expected = input_data + scalar_val
         torch.testing.assert_close(result, expected, rtol=1e-5, atol=1e-5)
 
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCM does not support nvrtc")
     @unittest.skipIf(not TEST_CUDA, "No CUDA")
     def test_compile_kernel_double_precision(self):
         """Test that Python floats are correctly handled as doubles in kernels."""
@@ -7122,12 +7118,13 @@ class TestCompileKernel(TestCase):
         )
         torch.testing.assert_close(output, expected, rtol=1e-14, atol=1e-14)
 
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCM does not support nvrtc")
     @unittest.skipIf(not TEST_CUDA, "No CUDA")
     def test_compile_kernel_cuda_headers(self):
         """Test that kernels can include and use CUDA headers like cuda_fp16.h."""
         kernel_source = """
+        #ifndef __HIPCC__
         #include <cuda_fp16.h>
+        #endif
 
         extern "C"
         __global__ void half_precision_kernel(__half* output, double input_value, int n) {
@@ -7154,6 +7151,103 @@ class TestCompileKernel(TestCase):
 
         expected = torch.full((n,), test_value, device="cuda", dtype=torch.float16)
         torch.testing.assert_close(output, expected, rtol=1e-3, atol=1e-3)
+
+    @unittest.skipIf(not TEST_CUDA, "No CUDA")
+    def test_compile_kernel_template(self):
+        kernel_source = """
+        template<typename T>
+        __global__ void add_tensors(const T* a, const T* b, T* c, int n) {
+            int i = threadIdx.x + blockIdx.x * blockDim.x;
+            if (i < n)
+                c[i] = a[i] + b[i];
+        }
+        """
+
+        # Compile the kernel
+        from torch.cuda import _compile_kernel
+
+        add_kernel_float = _compile_kernel(kernel_source, "add_tensors<float>")
+
+        # Prepare data
+        N = 1024
+        a = torch.rand(N, device="cuda")
+        b = torch.rand(N, device="cuda")
+        c = torch.empty_like(a)
+
+        # Calculate grid and block dimensions
+        threads_per_block = 256
+        blocks_per_grid = (N + threads_per_block - 1) // threads_per_block
+
+        # Launch kernel
+        add_kernel_float(
+            grid=(blocks_per_grid, 1, 1),
+            block=(threads_per_block, 1, 1),
+            args=[a, b, c, N],
+        )
+
+        # Verify results
+        expected = a + b
+        self.assertEqual(c, expected)
+
+        # do again with different dtype
+        add_kernel_int = _compile_kernel(kernel_source, "add_tensors<int>")
+
+        # Prepare data
+        N = 1024
+        a = torch.randint(-1000, 1000, size=(N,), dtype=torch.int, device="cuda")
+        b = torch.randint(-1000, 1000, size=(N,), dtype=torch.int, device="cuda")
+        c = torch.empty_like(a)
+
+        # Calculate grid and block dimensions
+        threads_per_block = 256
+        blocks_per_grid = (N + threads_per_block - 1) // threads_per_block
+
+        # Launch kernel
+        add_kernel_int(
+            grid=(blocks_per_grid, 1, 1),
+            block=(threads_per_block, 1, 1),
+            args=[a, b, c, N],
+        )
+
+        # Verify results
+        expected = a + b
+        self.assertEqual(c, expected)
+
+    @unittest.skipIf(not TEST_CUDA, "No CUDA")
+    def test_compile_kernel_dlpack(self):
+        """Test that compile_kernel works with tensors created via DLPack."""
+        kernel_source = """
+        __global__ void add_tensors(const float* a, const float* b, float* c, int n) {
+            int i = threadIdx.x + blockIdx.x * blockDim.x;
+            if (i < n)
+                c[i] = a[i] + b[i];
+        }
+        """
+
+        from torch.cuda import _compile_kernel
+
+        add_kernel = _compile_kernel(kernel_source, "add_tensors")
+
+        N = 512
+        a = torch.rand(N, device="cuda", dtype=torch.float32)
+        b = torch.rand(N, device="cuda", dtype=torch.float32)
+
+        a_dlpack = torch.utils.dlpack.from_dlpack(torch.utils.dlpack.to_dlpack(a))
+        b_dlpack = torch.utils.dlpack.from_dlpack(torch.utils.dlpack.to_dlpack(b))
+        c = torch.empty_like(a)
+
+        threads_per_block = 256
+        blocks_per_grid = (N + threads_per_block - 1) // threads_per_block
+
+        add_kernel(
+            grid=(blocks_per_grid, 1, 1),
+            block=(threads_per_block, 1, 1),
+            args=[a_dlpack, b_dlpack, c, N],
+        )
+
+        self.assertEqual(c, a + b)
+        a_dlpack[0] = 42.0
+        self.assertEqual(a[0].item(), 42.0, "DLPack tensors should share memory")
 
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
@@ -7239,7 +7333,7 @@ class TestCudaDeviceParametrized(TestCase):
 
             # This writes allows wait_for_cpu to proceed
             # This is an atomic store at system scope according to this rule:
-            # "the scope is thread_scope_system and and it is a load or store that affects a naturally-aligned object of sizes 1, 2, 4, 8, or 16 bytes on mapped memory"  # noqa: B950
+            # "the scope is thread_scope_system and it is a load or store that affects a naturally-aligned object of sizes 1, 2, 4, 8, or 16 bytes on mapped memory"  # noqa: B950
             # https://nvidia.github.io/cccl/libcudacxx/extended_api/memory_model.html#atomicity
 
             # Note that every CPU store is implicitly system scope,
