@@ -3685,6 +3685,21 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
         out = torch.compile(f)(idx, x)
         self.assertEqual(out, f(idx, x))
 
+    def test_trunc_int_div_true(self):
+        @torch.compile(backend="inductor", dynamic=True, fullgraph=True)
+        def f(x, s13, s57, s77):
+            torch._check(s13 >= 0)
+            torch._check(s57 >= 0)
+            torch._check(s77 >= 0)
+            if int(s13 * ((s57 // s13) + (s77 // s13)) / s13) >= 1:
+                return x * 2
+            else:
+                return x * 100
+
+        # ensure we compile this with no errors.
+        x = torch.rand(10)
+        f(x, 4, 4096, 3920)
+
 
 instantiate_parametrized_tests(TestUnbacked)
 
