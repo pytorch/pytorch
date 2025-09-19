@@ -2092,7 +2092,7 @@ class DistAutogradTest(CommonDistAutogradTest):
 
             debug_info = dist_autograd._get_debug_info()
             num_autograd_context = int(debug_info["num_autograd_contexts"])
-            # Need atleast one context and not more than 4.
+            # Need at least one context and not more than 4.
             self.assertTrue(num_autograd_context >= 1 and num_autograd_context <= 4)
 
         for rd in range(self.world_size - 1):

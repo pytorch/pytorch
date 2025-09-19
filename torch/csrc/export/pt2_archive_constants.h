@@ -32,15 +32,23 @@ namespace torch::_export::archive_spec {
   /* weights, including parameters and buffers */                              \
   DO(WEIGHTS_DIR, "data/weights/")                                             \
   DO(WEIGHT_FILENAME_PREFIX, "weight_")                                        \
+  DO(WEIGHTS_PARAM_CONFIG_FORMAT, "data/weights/{}_model_param_config.json")   \
+  DO(WEIGHTS_CONFIG_FILENAME_FORMAT, "data/weights/{}_weights_config.json")    \
   /* constants, including tensor_constants, non-persistent buffers and script  \
    * objects */                                                                \
   DO(CONSTANTS_DIR, "data/constants/")                                         \
+  DO(CONSTANTS_PARAM_CONFIG_FORMAT,                                            \
+     "data/constants/{}_model_constants_config.json")                          \
+  DO(CONSTANTS_CONFIG_FILENAME_FORMAT,                                         \
+     "data/constants/{}_constants_config.json")                                \
   DO(TENSOR_CONSTANT_FILENAME_PREFIX, "tensor_")                               \
   DO(CUSTOM_OBJ_FILENAME_PREFIX, "custom_obj_")                                \
   /* example inputs */                                                         \
   DO(SAMPLE_INPUTS_DIR, "data/sample_inputs/")                                 \
   DO(SAMPLE_INPUTS_FILENAME_FORMAT,                                            \
      "data/sample_inputs/{}.pt") /* {model_name} */                            \
+  /* ExecuTorch artifacts, including PTE files */                              \
+  DO(EXECUTORCH_DIR, "data/executorch/")                                       \
   /* extra folder */                                                           \
   DO(EXTRA_DIR, "extra/")                                                      \
   DO(MODULE_INFO_PATH, "extra/module_info.json")                               \

@@ -78,7 +78,7 @@ def _topological_sort_passes(
     if len(constraints) == 0:
         return passes
 
-    # Contruct a graph mapping nodes to a list of their users
+    # Construct a graph mapping nodes to a list of their users
     graph: dict[Callable, list[Callable]] = {p: [] for p in passes}
     indegree_map: dict[Callable, int] = dict.fromkeys(passes, 0)
     candidates: Queue = Queue()

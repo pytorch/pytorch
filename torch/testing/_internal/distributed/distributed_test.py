@@ -459,6 +459,14 @@ def require_world_size(world_size):
     return lambda func: func
 
 
+def require_exact_world_size(world_size):
+    if int(os.environ["WORLD_SIZE"]) != world_size:
+        return skip_but_pass_in_sandcastle(
+            f"Test requires an exact world size of {world_size:d}"
+        )
+    return lambda func: func
+
+
 @contextmanager
 def _lock():
     TEMP_DIR = os.environ["TEMP_DIR"]
@@ -921,8 +929,7 @@ class DistributedTest:
             BACKEND not in DistTestCases.backend_feature["subgroup"],
             f"The {BACKEND} backend does not support creating subgroups on CUDA devices",
         )
-        @require_world_size(4)
-        @skip_if_lt_x_gpu(4)
+        @require_exact_world_size(4)
         def test_new_subgroups_with_group_param(self):
             # Initialize global test environment
             self._init_global_test()
@@ -967,9 +974,10 @@ class DistributedTest:
         @require_world_size(4)
         @skip_if_lt_x_gpu(4)
         def test_new_subgroups_world_size_not_divisible_by_group_size(self):
+            expected_msg = f"The world size ({dist.get_world_size()}) must be divisible by 'group_size=3'"
             with self.assertRaisesRegex(
                 ValueError,
-                re.escape("The world size (4) must be divisible by 'group_size=3'"),
+                re.escape(expected_msg),
             ):
                 dist.new_subgroups(3)
 
@@ -6873,7 +6881,7 @@ class DistributedTest:
         def _test_ddp_profiling(self, profiler_ctx, profiler_ctx2=None):
             """Runs DDP based model training and captures profiles.
             This test will do two profiler runs.
-            1. An inital basic run to check if profiler events are correctly captured.
+            1. An initial basic run to check if profiler events are correctly captured.
             2. A second profiling pass after running some iterations of DDP, to check robustness of thread local state.
 
             args
@@ -6996,7 +7004,7 @@ class DistributedTest:
 
         def _validate_execution_trace_nccl(self, et_file: str) -> None:
             """Torch profiler includes nccl metadata in an inserted operator called "record_param_comms"
-            We test for basic fields in theese nodes in the Execution Trace.
+            We test for basic fields in these nodes in the Execution Trace.
             """
             with open(et_file) as f:
                 et = json.load(f)

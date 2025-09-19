@@ -75,9 +75,7 @@ def inner(x):
     return x - torch.tensor(655, dtype=torch.half, device='GPU_TYPE') * 100
 
 inner(torch.tensor(655 * 100, dtype=torch.half, device='GPU_TYPE'))
-""".replace(
-            "GPU_TYPE", GPU_TYPE
-        )
+""".replace("GPU_TYPE", GPU_TYPE)
 
         # If we disable RMSE against fp64, this triggers accuracy error,
         # as the increased precision from torch.compile changes the result
@@ -251,7 +249,7 @@ with torch.no_grad():
         assert res is not None
         ep_file_path = res.get_exported_program_path()
         assert ep_file_path is not None
-        gm = export_load(ep_file_path).module()
+        gm = export_load(ep_file_path).module(check_guards=False)
         self.assertExpectedInline(
             str(gm.code).strip(),
             """\

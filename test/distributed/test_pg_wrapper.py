@@ -376,7 +376,7 @@ if not TEST_WITH_DEV_DBG_ASAN:
             ):
                 self._create_wrapper_pg(with_new_group=True)
                 # nothing to assert, isinstance(pg, _ProcessGroupWrapper)
-                # should never be invoked since it is preceeded by
+                # should never be invoked since it is proceeded by
                 # _GLOO_AVAILABLE check, this test will fail on
                 # an unexpected NameError if not.
 
@@ -464,8 +464,8 @@ class ProcessGroupGlooWrapperTest(AbstractProcessGroupWrapperTest):
 
 
 if __name__ == "__main__":
-    assert (
-        not torch.cuda._initialized
-    ), "test_pg_wrapper must not have initialized CUDA context on main process"
+    assert not torch.cuda._initialized, (
+        "test_pg_wrapper must not have initialized CUDA context on main process"
+    )
 
     run_tests()

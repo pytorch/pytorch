@@ -6,6 +6,7 @@ If you are adding a new entry/functionality, please, add it to the
 `torch/ao/quantization/observer.py`, while adding an import statement
 here.
 """
+
 from torch.ao.quantization.observer import (
     _is_activation_post_process,
     _is_per_channel_script_obs_instance,

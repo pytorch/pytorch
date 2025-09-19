@@ -15,7 +15,6 @@ inside an ``if torch.onnx.is_in_onnx_export`` block.
 .. autofunction:: torch.onnx.ops.symbolic_multi_out
 ```
 
-
 ## ONNX Operators
 
 The following operators are implemented as native PyTorch ops and can be exported as
@@ -23,7 +22,7 @@ ONNX operators. They can be used natively in an ``nn.Module``.
 
 For example, you can define a module:
 
-```{code-block} python
+```py
 class Model(torch.nn.Module):
     def forward(
         self, input_data, cos_cache_data, sin_cache_data, position_ids_data
@@ -38,7 +37,7 @@ class Model(torch.nn.Module):
 
 and export it to ONNX using:
 
-```{code-block} python
+```py
 input_data = torch.rand(2, 3, 4, 8)
 position_ids_data = torch.randint(0, 50, (2, 3)).long()
 sin_cache_data = torch.rand(50, 4)
@@ -84,7 +83,8 @@ graph(
 with the corresponding ``ExportedProgram``:
 
 ExportedProgram:
-```{code-block} python
+
+```py
 class GraphModule(torch.nn.Module):
     def forward(self, input_data: "f32[s0, 3, 4, 8]", cos_cache_data: "f32[50, 4]", sin_cache_data: "f32[50, 4]", position_ids_data: "i64[s0, 3]"):
         rotary_embedding: "f32[s0, 3, 4, 8]" = torch.ops.onnx.RotaryEmbedding.opset23(input_data, cos_cache_data, sin_cache_data, position_ids_data);  input_data = cos_cache_data = sin_cache_data = position_ids_data = None
@@ -93,6 +93,7 @@ class GraphModule(torch.nn.Module):
 
 ```{eval-rst}
 .. autofunction:: torch.onnx.ops.rotary_embedding
+.. autofunction:: torch.onnx.ops.attention
 ```
 
 ## ONNX to ATen Decomposition Table
@@ -100,7 +101,7 @@ class GraphModule(torch.nn.Module):
 You can use {func}`torch.onnx.ops.aten_decompositions` to obtain a decomposition table
 to decompose ONNX operators defined above to ATen operators.
 
-```{code-block} python
+```py
 class Model(torch.nn.Module):
     def forward(
         self, input_data, cos_cache_data, sin_cache_data, position_ids_data

@@ -15,6 +15,6 @@ if [[ "${BUILD_ENVIRONMENT}" == *rocm* ]]; then
   export PYTORCH_TEST_WITH_ROCM=1
 fi
 
-# TODO: Renable libtorch testing for MacOS, see https://github.com/pytorch/pytorch/issues/62598
+# TODO: Reenable libtorch testing for MacOS, see https://github.com/pytorch/pytorch/issues/62598
 # shellcheck disable=SC2034
 BUILD_TEST_LIBTORCH=0

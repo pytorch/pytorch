@@ -31,7 +31,12 @@ class SparseAdam(Optimizer):
         if not 0.0 <= betas[1] < 1.0:
             raise ValueError(f"Invalid beta parameter at index 1: {betas[1]}")
 
-        defaults = dict(lr=lr, betas=betas, eps=eps, maximize=maximize)
+        defaults = {
+            "lr": lr,
+            "betas": betas,
+            "eps": eps,
+            "maximize": maximize,
+        }
         super().__init__(params, defaults)
 
         sparse_params = []

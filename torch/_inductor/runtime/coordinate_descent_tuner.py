@@ -208,7 +208,7 @@ class CoordescTuner:
         """
         Check if candidate_config is better than best_config.
 
-        Return a touple of (compare_result, candidate_timing).
+        Return a tuple of (compare_result, candidate_timing).
         compare_result is true iff candidate_config is better.
         """
         log.debug("Try config %s", candidate_config)
@@ -241,7 +241,10 @@ class CoordescTuner:
 
         log.debug("= Do coordinate descent tuning for %s =", self.name)
         log.debug(
-            "Baseline Config %s, baseline timing %f", baseline_config, baseline_timing
+            "%s: Baseline Config %s, baseline timing %f",
+            self.name,
+            baseline_config,
+            baseline_timing,
         )
         improved = True
         best_config = baseline_config
@@ -283,15 +286,17 @@ class CoordescTuner:
 
                 if improved:
                     msg = red_text(
-                        "Coordinate descend tuning found improvement of %.3fx by looking in all directions."
+                        "%s: Coordinate descend tuning found improvement of %.3fx by looking in all directions."
                     )
                     log.debug(
                         msg,
+                        self.name,
                         old_best_timing / best_timing,
                     )
 
         log.debug(
-            "Improve from %s %f -> %s %f, %.3fx",
+            "%s: Improve from %s %f -> %s %f, %.3fx",
+            self.name,
             baseline_config,
             baseline_timing,
             best_config,

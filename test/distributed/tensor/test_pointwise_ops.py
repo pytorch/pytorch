@@ -17,6 +17,7 @@ from torch.distributed.tensor import (
     Replicate,
     Shard,
 )
+from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorOpTestBase,
@@ -147,14 +148,6 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         d_3 = d_1 + d_2
         self.assertTrue(d_3._spec.placements[0].is_partial())
 
-    def test_partial_mul(self):
-        device_mesh = self.build_device_mesh()
-        d_1 = DTensor.from_local(torch.ones(2, 2), device_mesh, [Partial()])
-        d_2 = DTensor.from_local(torch.ones(2, 2), device_mesh, [Partial()])
-        d_3 = d_1 * d_2
-        self.assertTrue(d_3._spec.placements[0].is_replicate())
-        self.assertEqual(d_3.to_local(), torch.ones(2, 2) * (self.world_size**2))
-
     def test_activations(self):
         device_mesh = self.build_device_mesh()
         self._run_sharded_elementwise_ops(
@@ -281,6 +274,62 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         expected = torch.mul(input_tensor, other_tensor, out=output_tensor)
         self.assertEqual(input_tensor, dtensor.to_local())
         self.assertEqual(expected, dt.to_local())
+
+    def test_mul_partial(self):
+        # we only test the partial behavior for mul op as other placement
+        # behaviors should be well tested in test_dtensor_ops.py
+        device_mesh = self.build_device_mesh()
+        comm_mode = CommDebugMode()
+        # 1. simple test for partial * partial
+        d_1 = DTensor.from_local(torch.ones(2, 2), device_mesh, [Partial()])
+        d_2 = DTensor.from_local(torch.ones(2, 2), device_mesh, [Partial()])
+        with comm_mode:
+            d_3 = d_1 * d_2
+        comm_counts = comm_mode.get_total_counts()
+        self.assertEqual(comm_counts, 1)
+        self.assertTrue(isinstance(d_3, DTensor))
+        self.assertEqual(d_3.placements, (Partial(),))
+        self.assertEqual(d_3.to_local(), torch.ones(2, 2) * (self.world_size))
+
+        # 2. test the partial input DTensor * scalar/replicate input
+        input = torch.full((8, 8), 1.0, device=self.device_type)
+
+        # test for different types of other inputs
+        other_inps = (
+            2.0,  # scalar
+            torch.tensor(2.0, device=self.device_type),  # scalar tensor
+            torch.full((8, 8), 2.0, device=self.device_type),  # tensor
+        )
+
+        for partial_op in ["sum", "avg"]:
+            expected_p_out = (
+                input * self.world_size * 2.0 if partial_op == "sum" else input * 2.0
+            )
+
+            d_input = DTensor.from_local(input, device_mesh, [Partial(partial_op)])
+
+            for other_inp in other_inps:
+                if isinstance(other_inp, Tensor) and other_inp.numel() > 1:
+                    d_other = distribute_tensor(other_inp, device_mesh, [Replicate()])
+                else:
+                    d_other = other_inp
+
+                with comm_mode:
+                    z = d_input * d_other
+
+                comm_counts = comm_mode.get_total_counts()
+                self.assertEqual(comm_counts, 0)
+                self.assertTrue(isinstance(z, DTensor))
+                self.assertEqual(z.placements, (Partial(partial_op),))
+                self.assertEqual(z.full_tensor(), expected_p_out)
+
+        # test other partial to assert the partial not getting propagated
+        d_input = DTensor.from_local(input, device_mesh, [Partial("max")])
+        d_other = distribute_tensor(torch.ones(8, 8), device_mesh, [Replicate()])
+
+        z = d_input * d_other
+        self.assertEqual(z.placements, (Replicate(),))
+        self.assertEqual(z.to_local(), input)
 
 
 if __name__ == "__main__":

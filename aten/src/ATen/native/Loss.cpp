@@ -127,6 +127,9 @@ TORCH_IMPL_FUNC(smooth_l1_loss_out)
 
 TORCH_IMPL_FUNC(mse_loss_out)
 (const Tensor& input, const Tensor& target, int64_t reduction, const Tensor& result) {
+  TORCH_CHECK(input.device() == target.device(),
+      "Expected all tensors to be on the same device, but found at least two devices, ",
+      input.device(), " and ", target.device(), "!");
   if (reduction != Reduction::None) {
     Tensor loss;
     auto iter = TensorIterator::borrowing_binary_op(loss, input, target);

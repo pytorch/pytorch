@@ -4,7 +4,7 @@ import shutil
 from typing import Optional
 
 import torch
-from torch._inductor.utils import clear_on_fresh_inductor_cache
+from torch._inductor.utils import clear_on_fresh_cache
 
 from ... import config
 
@@ -12,7 +12,7 @@ from ... import config
 log = logging.getLogger(__name__)
 
 
-@clear_on_fresh_inductor_cache
+@clear_on_fresh_cache
 @functools.lru_cache(1)
 def get_cuda_arch() -> Optional[str]:
     try:
@@ -27,7 +27,17 @@ def get_cuda_arch() -> Optional[str]:
         return None
 
 
-@clear_on_fresh_inductor_cache
+@clear_on_fresh_cache
+@functools.lru_cache(1)
+def is_datacenter_blackwell_arch() -> bool:
+    arch = get_cuda_arch()
+    if arch is None:
+        return False
+    arch_number = int(arch)
+    return arch_number >= 100 and arch_number < 110
+
+
+@clear_on_fresh_cache
 @functools.lru_cache(1)
 def get_cuda_version() -> Optional[str]:
     try:

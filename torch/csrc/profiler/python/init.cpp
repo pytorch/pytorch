@@ -220,8 +220,7 @@ PyObject* RecordFunctionFast_enter(PyObject* selfGeneric, PyObject* unused) {
     TORCH_INTERNAL_ASSERT(
         !self->guard,
         "Trying to enter a new record_function_fast context but the guard is unexpectedly already set");
-    self->guard =
-        std::make_unique<at::RecordFunction>(at::RecordScope::FUNCTION);
+    auto scope = at::RecordScope::FUNCTION;
     std::vector<at::IValue> args;
     std::unordered_map<std::string, at::IValue> kwargs;
     bool profiler_need_input = torch::autograd::profiler::profilerEnabled() &&
@@ -262,6 +261,17 @@ PyObject* RecordFunctionFast_enter(PyObject* selfGeneric, PyObject* unused) {
         kwargs[key_str] = ivalue;
       }
     }
+    auto it = kwargs.find("scope");
+    if (it != kwargs.end()) {
+      auto value = it->second;
+      if (value.isString()) {
+        auto value_str = value.toStringRef();
+        if (value_str == "user_scope") {
+          scope = at::RecordScope::USER_SCOPE;
+        }
+      }
+    }
+    self->guard = std::make_unique<at::RecordFunction>(scope);
     self->guard->before(THPUtils_unpackString(self->name), &args, &kwargs);
   }
   Py_RETURN_NONE;
@@ -340,7 +350,9 @@ void initPythonBindings(PyObject* module) {
               bool /* adjust_profiler_step */,
               bool /* disable_external_correlation*/,
               bool /* profile_all_threads */,
-              bool /* capture_overload_names */
+              bool /* capture_overload_names */,
+              bool /* record_python_gc_info */,
+              std::string /* custom_profiler_config*/
               >(),
           "An experimental config for Kineto features. Please note that"
           "backward compatibility is not guaranteed.\n"
@@ -355,10 +367,12 @@ void initPythonBindings(PyObject* module) {
           "       that expose CUDA device, stream and event synchronization activities. This feature is new\n"
           "       and currently disabled by default.\n"
           "    adjust_profiler_step (bool) : whether to adjust the profiler step to\n"
-          "       match the parent python event duration. This feature is new and currently disabled by default.\n",
-          "    disable_external_correlation (bool) : whether to disable external correlation\n",
-          "    profile_all_threads (bool) : whether to profile all threads\n",
-          "    capture_overload_names (bool) : whether to include ATen overload names in the profile\n",
+          "       match the parent python event duration. This feature is new and currently disabled by default.\n"
+          "    disable_external_correlation (bool) : whether to disable external correlation\n"
+          "    profile_all_threads (bool) : whether to profile all threads\n"
+          "    capture_overload_names (bool) : whether to include ATen overload names in the profile\n"
+          "    record_python_gc_info (bool) : adds python gc events to profile\n"
+          "    custom_profiler_config (string) : Used to pass some configurations to the custom profiler backend.\n",
           py::arg("profiler_metrics") = std::vector<std::string>(),
           py::arg("profiler_measure_per_kernel") = false,
           py::arg("verbose") = false,
@@ -367,7 +381,9 @@ void initPythonBindings(PyObject* module) {
           py::arg("adjust_profiler_step") = false,
           py::arg("disable_external_correlation") = false,
           py::arg("profile_all_threads") = false,
-          py::arg("capture_overload_names") = false)
+          py::arg("capture_overload_names") = false,
+          py::arg("record_python_gc_info") = false,
+          py::arg("custom_profiler_config") = "")
       .def(py::pickle(
           [](const ExperimentalConfig& p) { // __getstate__
             py::list py_metrics;
@@ -390,11 +406,13 @@ void initPythonBindings(PyObject* module) {
                 p.disable_external_correlation,
                 p.profile_all_threads,
                 p.capture_overload_names,
+                p.record_python_gc_info,
+                p.custom_profiler_config,
                 p.performance_events);
           },
           [](const py::tuple& t) { // __setstate__
             if (t.size() >= 5) {
-              throw std::runtime_error("Expected atleast 5 values in state");
+              throw std::runtime_error("Expected at least 5 values in state");
             }
 
             py::list py_metrics = t[0].cast<py::list>();

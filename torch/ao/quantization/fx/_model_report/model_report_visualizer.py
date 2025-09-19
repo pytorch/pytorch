@@ -63,7 +63,7 @@ class ModelReportVisualizer:
     1.) Initialize ModelReport object with reports of interest by passing in initialized detector objects
     2.) Prepare your model with prepare_fx
     3.) Call model_report.prepare_detailed_calibration on your model to add relevant observers
-    4.) Callibrate your model with data
+    4.) Calibrate your model with data
     5.) Call model_report.generate_report on your model to generate report and optionally remove added observers
     6.) Use output of model_report.generate_report to initialize ModelReportVisualizer instance
     7.) Use instance to view different views of data as desired, applying filters as needed

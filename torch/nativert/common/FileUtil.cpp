@@ -76,7 +76,7 @@ int filterCloseReturn(int r) {
   return r;
 }
 
-//  The following wrapX() funcions are private functions for wrapping file-io
+//  The following wrapX() functions are private functions for wrapping file-io
 //  against interrupt and partial op completions.
 
 // Wrap call to f(args) in loop to retry on EINTR

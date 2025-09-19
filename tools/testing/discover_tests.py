@@ -13,7 +13,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def parse_test_module(test: str) -> str:
-    return test.split(".")[0]
+    return test.split(".", maxsplit=1)[0]
 
 
 def discover_tests(
@@ -83,6 +83,7 @@ TESTS = discover_tests(
         "package",  # executed by test_package.py
         "quantization",  # executed by test_quantization.py
         "autograd",  # executed by test_autograd.py
+        "cpp_extensions/open_registration_extension/torch_openreg/tests",  # executed by test_openreg.py
     ],
     blocklisted_tests=[
         "test_bundled_images",
@@ -138,6 +139,7 @@ TESTS = discover_tests(
         "doctests",
         "test_autoload_enable",
         "test_autoload_disable",
+        "test_openreg",
     ],
 )
 

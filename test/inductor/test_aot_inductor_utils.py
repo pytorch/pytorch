@@ -5,7 +5,7 @@ import os
 import shutil
 import tempfile
 import types
-from typing import Any, Optional, Union
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch._export
@@ -19,6 +19,10 @@ from torch.testing import FileCheck
 from torch.testing._internal.common_utils import IS_FBCODE, run_tests
 from torch.testing._internal.inductor_utils import clone_preserve_strides_offset
 from torch.utils import _pytree as pytree
+
+
+if TYPE_CHECKING:
+    from torch._C._aoti import AOTIModelContainerRunner
 
 
 class WrapperModule(torch.nn.Module):
@@ -73,7 +77,7 @@ class AOTIRunnerUtil:
         return so_path
 
     @staticmethod
-    def legacy_load_runner(device, so_path):
+    def legacy_load_runner(device, so_path: str) -> "AOTIModelContainerRunner":
         if IS_FBCODE:
             from .fb import test_aot_inductor_model_runner_pybind  # @manual
 
@@ -98,6 +102,8 @@ class AOTIRunnerUtil:
                 return torch._C._aoti.AOTIModelContainerRunnerCpu(so_path, 1)
             elif device == "xpu":
                 return torch._C._aoti.AOTIModelContainerRunnerXpu(so_path, 1, device)
+            elif device == "mps":
+                return torch._C._aoti.AOTIModelContainerRunnerMps(so_path, 1)
             else:
                 return torch._C._aoti.AOTIModelContainerRunnerCuda(so_path, 1, device)
 
@@ -142,7 +148,7 @@ class AOTIRunnerUtil:
     @staticmethod
     def compile(
         model: Union[torch.nn.Module, types.FunctionType],
-        example_inputs: list[torch.Tensor],
+        example_inputs: tuple[torch.Tensor, ...],
         inductor_configs: Optional[dict[str, Any]] = None,
         dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]] = None,
     ):
@@ -153,7 +159,11 @@ class AOTIRunnerUtil:
         with torch.no_grad():
             # strict=False needs extra migration work
             ep = torch.export.export(
-                model, example_inputs, dynamic_shapes=dynamic_shapes, strict=True
+                model,
+                example_inputs,
+                dynamic_shapes=dynamic_shapes,
+                strict=True,
+                prefer_deferred_runtime_asserts_over_guards=True,
             )
             package_path = torch._inductor.aoti_compile_and_package(
                 ep, inductor_configs=inductor_configs
@@ -163,7 +173,7 @@ class AOTIRunnerUtil:
     @staticmethod
     def run(
         model: Union[torch.nn.Module, types.FunctionType],
-        example_inputs: list[torch.Tensor],
+        example_inputs: tuple[torch.Tensor, ...],
         inductor_configs: Optional[dict[str, Any]] = None,
         dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]] = None,
     ):
@@ -179,7 +189,7 @@ class AOTIRunnerUtil:
     @staticmethod
     def run_multiple(
         model: Union[torch.nn.Module, types.FunctionType],
-        list_example_inputs: list[list[torch.Tensor]],
+        list_example_inputs: list[tuple[torch.Tensor, ...]],
         inductor_configs: Optional[dict[str, Any]] = None,
         dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]] = None,
     ):
@@ -218,7 +228,7 @@ def check_model(
         if not isinstance(model, types.FunctionType):
             model = model.to(self.device)
 
-        # For non mixed device inputs with default "cpu",set the device manully.
+        # For non mixed device inputs with default "cpu",set the device manually.
         if all(
             t.device.type == "cpu"
             for t in example_inputs

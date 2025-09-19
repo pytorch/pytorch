@@ -391,13 +391,13 @@ void _validate_sparse_coo_tensor_args(
   int64_t sparse_dim = indices.size(0);
   int64_t dense_dim = values.dim() - 1;
   TORCH_CHECK(
-      static_cast<int64_t>(size.size()) == sparse_dim + dense_dim,
-      "number of dimensions must be sparse_dim (",
-      sparse_dim,
-      ") + dense_dim (",
-      dense_dim,
-      "), but got ",
-      size.size());
+    sparse_dim + dense_dim == static_cast<int64_t>(size.size()),
+    "'len(size) == sparse_dim + dense_dim' is not satisfied: len(size) = ",
+    size.size(),
+    ", sparse_dim = ",
+    sparse_dim,
+    ", dense_dim = ",
+    dense_dim);
 
   if (check_pinning) {
     TORCH_CHECK(
@@ -730,7 +730,7 @@ static std::tuple<Tensor, Tensor, OptTensor> sparse_mask_like_prepare_sparse_inp
   // is that these primitives might project first argument onto second one or
   // the other way around depending on which arguments are coalesced and which are
   // larger. This function prepares inputs for `sparse_mask` such that `t` is
-  // projected onto `mask` by sorting `t` if uncoalesced and artifically marking it
+  // projected onto `mask` by sorting `t` if uncoalesced and artificially marking it
   // as coalesced all while `mask` is set to uncoalesced.
   // The result of this projectionk is going to be uncoalesced, so it is up to the
   // user to set the corresponding flag correctly with respect to the operations'

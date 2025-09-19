@@ -121,7 +121,7 @@ struct InlineEvent final {
         was_marked_for_recording() && other.was_marked_for_recording(),
         "Both events must be recorded before calculating elapsed time.");
     // elapsedTime in MPS can wait event to be completed if event is not ready,
-    // which is a little differenct from CUDA
+    // which is a little different from CUDA
     TORCH_CHECK(
         (query() && other.query()) || device_type_ == DeviceType::MPS,
         "Both events must be completed before calculating elapsed time.");

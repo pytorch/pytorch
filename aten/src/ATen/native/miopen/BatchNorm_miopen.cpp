@@ -7,6 +7,7 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
 #include <ATen/ops/miopen_batch_norm_native.h>
 #include <ATen/ops/miopen_batch_norm_backward_native.h>
 #endif
@@ -79,7 +80,9 @@ std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm(
     checkAllDefined(c, {running_mean, running_var});
   }
   checkAllSameGPU(c, {input, weight, bias, running_mean, running_var});
-  if (input->scalar_type() != ScalarType::Half) {
+  if (input->scalar_type() == ScalarType::Half || input->scalar_type() == ScalarType::BFloat16) {
+    checkScalarType(c, weight, ScalarType::Float);
+  } else {
     checkAllSameType(c, {input, weight});
   }
   checkAllSameType(c, {weight, bias, running_mean, running_var});
@@ -100,7 +103,7 @@ std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm(
     mode = miopenBNSpatial;
   }
 
-  auto output_t = at::empty(input->sizes(), input->options());
+  auto output_t = at::empty_like(input_t, input_t.options(), input_t.suggest_memory_format());
   TensorArg output{ output_t, "output", 0 };
 
   auto handle = getMiopenHandle();
@@ -168,32 +171,31 @@ std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm_backward(
     const std::optional<Tensor>& save_var_t_opt,
     double epsilon) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& running_mean =
-      running_mean_opt.value_or(Tensor());
-  const Tensor& running_var =
-      running_var_opt.value_or(Tensor());
-  const Tensor& save_mean_t =
-      save_mean_t_opt.value_or(Tensor());
-  const Tensor& save_var_t =
-      save_var_t_opt.value_or(Tensor());
+  const Tensor& save_mean_t = save_mean_t_opt.value_or(Tensor());
+  const Tensor& save_var_t = save_var_t_opt.value_or(Tensor());
 
-  TensorArg input{ input_t, "input", 1 },
-            grad_output{ grad_output_t, "grad_output", 2 },
-            weight{ weight_t, "weight", 3 },
-            save_mean{ save_mean_t, "save_mean", 4 },
-            save_var{ save_var_t, "save_var", 5 };
+  auto grad_output_contig =
+      grad_output_t.contiguous(input_t.suggest_memory_format());
+  TensorArg input{input_t, "input", 1},
+      grad_output{grad_output_contig, "grad_output", 2},
+      weight{weight_t, "weight", 3}, save_mean{save_mean_t, "save_mean", 4},
+      save_var{save_var_t, "save_var", 5};
   CheckedFrom c = "miopen_batch_norm_backward";
 
   checkAllDefined(c, {input, grad_output, weight, save_mean, save_var});
   checkAllSameGPU(c, {input, grad_output, weight, save_mean, save_var});
-  if (input->scalar_type() == ScalarType::Half) {
+  if (input->scalar_type() == ScalarType::Half || input->scalar_type() == ScalarType::BFloat16) {
     checkScalarType(c, weight, ScalarType::Float);
   } else {
     checkAllSameType(c, {input, weight});
   }
   checkAllSameType(c, {input, grad_output});
   checkAllSameType(c, {weight, save_mean, save_var});
-  checkAllContiguous(c, {input, grad_output, save_mean, save_var});
+  // TODO: is weight required to be contiguous?
+  checkAllContiguous(c, {save_mean, save_var});
+  // TODO: TensorArg check should start handle memory format
+  TORCH_CHECK(input->is_contiguous(input->suggest_memory_format()));
+  TORCH_CHECK(grad_output->is_contiguous(input->suggest_memory_format()));
   checkDimRange(c, input, 2, 6 /* exclusive */);
   checkSameSize(c, input, grad_output);
   auto num_features = input->size(1);
@@ -208,7 +210,7 @@ std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm_backward(
     mode = miopenBNSpatial;
   }
 
-  auto grad_input_t  = at::empty(input->sizes(), input->options());
+  auto grad_input_t  = at::empty(input->sizes(), input->options(), input->suggest_memory_format());
   auto grad_weight_t = at::empty(weight->sizes(), weight->options());
   auto grad_bias_t   = at::empty(weight->sizes(), weight->options());
 

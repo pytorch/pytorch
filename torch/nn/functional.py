@@ -338,9 +338,6 @@ avg_pool1d(input, kernel_size, stride=None, padding=0, ceil_mode=False, count_in
 Applies a 1D average pooling over an input signal composed of several
 input planes.
 
-.. note::
-    pad should be at most half of effective kernel size.
-
 See :class:`~torch.nn.AvgPool1d` for details and output shape.
 
 Args:
@@ -349,8 +346,9 @@ Args:
       tuple `(kW,)`
     stride: the stride of the window. Can be a single number or a tuple
       `(sW,)`. Default: :attr:`kernel_size`
-    padding: implicit zero paddings on both sides of the input. Can be a
-      single number or a tuple `(padW,)`. Default: 0
+    padding: implicit zero paddings on both sides of the input. Can be a single
+      number or a tuple `(padW,)`. Should be at most half of effective kernel
+      size, that is :math:`((kernelSize - 1) * dilation + 1) / 2`. Default: 0
     ceil_mode: when True, will use `ceil` instead of `floor` to compute the
         output shape. Default: ``False``
     count_include_pad: when True, will include the zero-padding in the
@@ -376,9 +374,6 @@ Applies 2D average-pooling operation in :math:`kH \times kW` regions by step siz
 :math:`sH \times sW` steps. The number of output features is equal to the number of
 input planes.
 
-.. note::
-    pad should be at most half of effective kernel size.
-
 See :class:`~torch.nn.AvgPool2d` for details and output shape.
 
 Args:
@@ -388,7 +383,9 @@ Args:
     stride: stride of the pooling operation. Can be a single number, a single-element tuple or a
       tuple `(sH, sW)`. Default: :attr:`kernel_size`
     padding: implicit zero paddings on both sides of the input. Can be a
-      single number, a single-element tuple or a tuple `(padH, padW)`. Default: 0
+      single number, a single-element tuple or a tuple `(padH, padW)`.
+      Should be at most half of effective kernel size, that
+      is :math:`((kernelSize - 1) * dilation + 1) / 2`. Default: 0
     ceil_mode: when True, will use `ceil` instead of `floor` in the formula
         to compute the output shape. Default: ``False``
     count_include_pad: when True, will include the zero-padding in the
@@ -407,9 +404,6 @@ Applies 3D average-pooling operation in :math:`kT \times kH \times kW` regions b
 size :math:`sT \times sH \times sW` steps. The number of output features is equal to
 :math:`\lfloor\frac{\text{input planes}}{sT}\rfloor`.
 
-.. note::
-    pad should be at most half of effective kernel size.
-
 See :class:`~torch.nn.AvgPool3d` for details and output shape.
 
 Args:
@@ -419,7 +413,9 @@ Args:
     stride: stride of the pooling operation. Can be a single number or a
       tuple `(sT, sH, sW)`. Default: :attr:`kernel_size`
     padding: implicit zero paddings on both sides of the input. Can be a
-      single number or a tuple `(padT, padH, padW)`, Default: 0
+      single number or a tuple `(padT, padH, padW)`. Should be at most half
+      of effective kernel size, that is :math:`((kernelSize - 1) * dilation + 1) / 2`.
+      Default: 0
     ceil_mode: when True, will use `ceil` instead of `floor` in the formula
         to compute the output shape
     count_include_pad: when True, will include the zero-padding in the
@@ -4687,7 +4683,7 @@ def interpolate(  # noqa: F811
         )
 
     # "area" mode always requires an explicit size rather than scale factor.
-    # Re-use the recompute_scale_factor code path.
+    # Reuse the recompute_scale_factor code path.
     if mode == "area" and output_size is None:
         recompute_scale_factor = True
 
@@ -4762,9 +4758,7 @@ def interpolate(  # noqa: F811
         # Two levels are necessary to prevent TorchScript from touching
         # are_deterministic_algorithms_enabled.
         if not torch.jit.is_scripting():
-            if torch.are_deterministic_algorithms_enabled() and (
-                input.is_cuda or input.is_xpu
-            ):
+            if not input.is_cpu and torch.are_deterministic_algorithms_enabled():
                 # Use slow decomp whose backward will be in terms of index_put
                 # importlib is required because the import cannot be top level
                 # (cycle) and cannot be nested (TS doesn't support)
@@ -4776,6 +4770,16 @@ def interpolate(  # noqa: F811
         )
     if input.dim() == 5 and mode == "trilinear":
         assert align_corners is not None
+        # Two levels are necessary to prevent TorchScript from touching
+        # are_deterministic_algorithms_enabled.
+        if not torch.jit.is_scripting():
+            if not input.is_cpu and torch.are_deterministic_algorithms_enabled():
+                # Use slow decomp whose backward will be in terms of index_put
+                # importlib is required because the import cannot be top level
+                # (cycle) and cannot be nested (TS doesn't support)
+                return importlib.import_module(
+                    "torch._decomp.decompositions"
+                )._upsample_linear_vec(input, output_size, align_corners, scale_factors)
         return torch._C._nn.upsample_trilinear3d(
             input, output_size, align_corners, scale_factors
         )
@@ -4907,7 +4911,7 @@ def upsample_bilinear(input, size=None, scale_factor=None):  # noqa: F811
         This is equivalent with
         ``nn.functional.interpolate(..., mode='bilinear', align_corners=True)``.
 
-    Expected inputs are spatial (4 dimensional). Use `upsample_trilinear` fo
+    Expected inputs are spatial (4 dimensional). Use `upsample_trilinear` for
     volumetric (5 dimensional) inputs.
 
     Args:
@@ -5819,7 +5823,6 @@ scaled_dot_product_attention = _add_docstr(
                 assert attn_mask is None
                 temp_mask = torch.ones(L, S, dtype=torch.bool).tril(diagonal=0)
                 attn_bias.masked_fill_(temp_mask.logical_not(), float("-inf"))
-                attn_bias.to(query.dtype)
 
             if attn_mask is not None:
                 if attn_mask.dtype == torch.bool:

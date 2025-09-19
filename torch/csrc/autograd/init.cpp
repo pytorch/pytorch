@@ -307,7 +307,11 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
                 e.activityType() ==
                 (uint8_t)libkineto::ActivityType::GPU_USER_ANNOTATION;
           })
-      .def("nbytes", [](const KinetoEvent& e) { return e.nBytes(); });
+      .def("nbytes", [](const KinetoEvent& e) { return e.nBytes(); })
+      // whether the event is hidden
+      .def("is_hidden_event", [](const KinetoEvent& e) {
+        return e.isHiddenEvent();
+      });
 
   m.def("_soft_assert_raises", &setSoftAssertRaises);
   m.def("_get_sequence_nr", &at::sequence_number::peek);
@@ -605,7 +609,7 @@ static PyObject* set_autocast_enabled(
   HANDLE_TH_ERRORS
   static PythonArgParser parser(
       {"set_autocast_enabled(std::string_view device_type, bool enabled)",
-       "set_autocast_enabled(bool enabled)"}); // this signature is depracated.
+       "set_autocast_enabled(bool enabled)"}); // this signature is deprecated.
   ParsedArgs<2> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   // Set at::kCUDA as default value to prevent BC-breaking changes.
@@ -628,7 +632,7 @@ static PyObject* is_autocast_enabled(
   HANDLE_TH_ERRORS
   static PythonArgParser parser(
       {"is_autocast_enabled(std::string_view device_type)",
-       "is_autocast_enabled()"}); // this signature is depracated.
+       "is_autocast_enabled()"}); // this signature is deprecated.
   ParsedArgs<1> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   // Set at::kCUDA as default value to prevent BC-breaking changes.
