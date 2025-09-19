@@ -997,10 +997,32 @@ def _store_based_barrier(
     )
 
 
+def _check_fake_process_group_usage(group):
+    """
+    Check if user is using FakeProcessGroup directly without proper initialization.
+    This can cause dispatch issues and should raise error.
+
+    Args:
+        group (ProcessGroup): Process group to validate.
+
+    Raises:
+        RuntimeError: If group is FakeProcessGroup and distributed is not initialized.
+            Users should call init_process_group(backend='fake') instead.
+    """
+    if isinstance(group, FakeProcessGroup) and not is_initialized():
+        raise RuntimeError(
+            "FakeProcessGroup is not supported for direct use. "
+            "Call torch.distributed.init_process_group(backend='fake') first to ensure "
+            "proper dispatch system integration."
+        )
+
+
 def _rank_not_in_group(group: Optional[ProcessGroup]) -> bool:
     """Check if the current process's rank is not in a given group."""
     if group is None:
         return False
+    else:
+        _check_fake_process_group_usage(group)
     return group == GroupMember.NON_GROUP_MEMBER
 
 
@@ -2846,19 +2868,6 @@ def broadcast(
     # Otherwise, the backend has sync'ed at CPP level
 
 
-def _check_fake_process_group_usage(group):
-    """
-    Check if user is using FakeProcessGroup directly without proper initialization.
-    This can cause dispatch issues and should raise error.
-    """
-    if isinstance(group, FakeProcessGroup) and not is_initialized():
-        raise RuntimeError(
-            "FakeProcessGroup is not supported for direct use. "
-            "Call torch.distributed.init_process_group(backend='fake') first to ensure "
-            "proper dispatch system integration."
-        )
-
-
 @_exception_logger
 def all_reduce(tensor, op=ReduceOp.SUM, group=None, async_op=False):
     """
@@ -2925,8 +2934,6 @@ def all_reduce(tensor, op=ReduceOp.SUM, group=None, async_op=False):
         )
 
     _check_single_tensor(tensor, "tensor")
-    if group is not None:
-        _check_fake_process_group_usage(group)
     if _rank_not_in_group(group):
         _warn_not_in_group("all_reduce")
         return
