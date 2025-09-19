@@ -959,10 +959,10 @@ static PyObject* THPVariable_dtensor_new(
   TORCH_CHECK(!tensor_meta.is_none());
   const auto sizes = tensor_meta.attr(dtensor_interned_strings.shape);
   TORCH_CHECK(
-      THPSize_Check(sizes.ptr()),
-      "spec.tensor_meta.shape must be a torch.Size");
+      PyTuple_Check(sizes.ptr()), "spec.tensor_meta.shape must be a tuple");
   const auto stride = tensor_meta.attr(dtensor_interned_strings.stride);
-  TORCH_CHECK(PyTuple_Check(stride.ptr()));
+  TORCH_CHECK(
+      PyTuple_Check(stride.ptr()), "spec.tensor_meta.stride must be a tuple");
 
   Tensor tensor = make_tensor_for_subclass_helper(
       /*sym_sizes=*/tuple_to_symintlist(sizes.ptr()),
@@ -971,6 +971,7 @@ static PyObject* THPVariable_dtensor_new(
       options,
       /*storage_size=*/std::nullopt,
       extra_dispatch_keys);
+  tensor.set_requires_grad(requires_grad);
   py::object py_tensor =
       py::reinterpret_steal<py::object>(THPVariable_NewWithVar(
           (PyTypeObject*)cls,
@@ -1019,6 +1020,7 @@ static bool DTensor_OpSchema_recompute_comparison_key_impl(
   for (const auto idx : c10::irange(args_to_hash.size())) {
     args_to_hash_tup[idx] = std::move(args_to_hash[idx]);
   }
+  PyObject* comparison_key = nullptr;
   if (!static_kwargkey.is_none()) {
     if (!PyList_Check(static_kwargkey.ptr())) {
       PyErr_SetString(
@@ -1027,38 +1029,42 @@ static bool DTensor_OpSchema_recompute_comparison_key_impl(
     }
     py::list static_kwargkey_list =
         py::reinterpret_borrow<py::list>(static_kwargkey);
-    py::tuple kwargs_to_hash(static_kwargkey_list.size());
-    int idx = 0;
     auto raw_kwargs_schema =
         self_handle.attr(dtensor_interned_strings.kwargs_schema);
     if (!PyDict_Check(raw_kwargs_schema.ptr())) {
       PyErr_SetString(PyExc_TypeError, "self.kwargs_schema must be a dict!");
       return false;
     }
+    py::tuple kwargs_to_hash(static_kwargkey_list.size());
+    int idx = 0;
     auto kwargs_schema = py::reinterpret_borrow<py::dict>(raw_kwargs_schema);
     for (const auto& k : static_kwargkey_list) {
-      PyObject* item = PyDict_GetItem(kwargs_schema.ptr(), k.ptr());
+      PyObject* item = PyDict_GetItemWithError(kwargs_schema.ptr(), k.ptr());
       if (item) {
-        kwargs_to_hash[idx] = item;
+        kwargs_to_hash[idx++] = py::reinterpret_borrow<py::object>(item);
+      } else if (PyErr_Occurred()) {
+        return false;
       } else {
-        kwargs_to_hash[idx] = Py_None;
+        kwargs_to_hash[idx++] = py::none();
       }
     }
-    PyObject* comparison_key = PyTuple_Pack(
+    comparison_key = PyTuple_Pack(
         3,
         self_handle.attr(dtensor_interned_strings.op).ptr(),
-        args_to_hash_tup.release().ptr(),
-        kwargs_to_hash.release().ptr());
-    self_handle.attr(dtensor_interned_strings._comparison_key) =
-        py::reinterpret_steal<py::object>(comparison_key);
+        args_to_hash_tup.ptr(),
+        kwargs_to_hash.ptr());
   } else {
-    PyObject* comparison_key = PyTuple_Pack(
+    comparison_key = PyTuple_Pack(
         2,
         self_handle.attr(dtensor_interned_strings.op).ptr(),
         args_to_hash_tup.release().ptr());
-    self_handle.attr(dtensor_interned_strings._comparison_key) =
-        py::reinterpret_steal<py::object>(comparison_key);
   }
+  if (!comparison_key) {
+    return false;
+  }
+  self_handle.attr(dtensor_interned_strings._comparison_key) =
+      py::reinterpret_steal<py::object>(comparison_key);
+
   return true;
 }
 
@@ -1207,6 +1213,7 @@ static PyObject* DTensor_compute_global_tensor_info_impl(
       .ptr();
 }
 
+// NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 static constexpr const char compute_global_tensor_info_doc[] =
     "Compute the global size and stride of a DTensor from the given local tensor.\n"
     "The local size is multiplied by `world_size` per Sharding dim.\n"
@@ -2175,7 +2182,7 @@ static PyMethodDef extra_functions[] = {
      METH_O,
      nullptr},
     {"_DTensor_compute_global_tensor_info",
-     (PyCFunction)DTensor_compute_global_tensor_info,
+     castPyCFunctionFast(DTensor_compute_global_tensor_info),
      METH_FASTCALL,
      compute_global_tensor_info_doc},
     {nullptr}};
