@@ -490,6 +490,22 @@ class TestUnbackedSymints(InductorTestCase):
         torch.testing.assert_close(actual, expected)
 
     @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
+    def test_softmax(self, device):
+        def fn(x):
+            nz = x.nonzero().float()
+            soft = torch.softmax(nz, dim=0)
+            logsoft = torch.nn.functional.log_softmax(nz, dim=0)
+            return soft * logsoft
+
+        example_inputs = (
+            torch.randint(low=0, high=2, size=(32,), device=device, dtype=torch.int8),
+        )
+        actual = torch.compile(fn, fullgraph=True)(*example_inputs)
+        expected = fn(*example_inputs)
+        torch.testing.assert_close(actual, expected)
+
+    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
     @skipIfXpu(msg="_scaled_dot_product_flash_attention is not supported on XPU yet")
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     def test_sdpfa(self, device):

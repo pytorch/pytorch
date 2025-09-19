@@ -10,6 +10,8 @@
 #include <torch/csrc/inductor/aoti_torch/generated/c_shim_aten.h>
 #include <torch/headeronly/core/ScalarType.h>
 
+#include <c10/core/MemoryFormat.h>
+
 using torch::stable::Tensor;
 
 namespace torch::stable {
@@ -222,9 +224,7 @@ inline Tensor zero_(Tensor& self) {
 }
 
 // We expect this to be the stable version of the copy_ op with
-// identical semantics to the existing copy_ op (except that it will
-// not be called as a tensor method but only as a function
-// i.e. copy_(dst, src) not dst.zero_(src)).
+// identical semantics to the existing copy_ op.
 inline Tensor copy_(
     Tensor& self,
     const Tensor& src,
@@ -237,13 +237,15 @@ inline Tensor copy_(
   return to<Tensor>(stack[0]);
 }
 
-// We expect this to be the stable version of the clone op that takes
-// in no kwargs (memory_format). We will add kwargs support in the
-// future.
-inline Tensor clone(const Tensor& self) {
-  AtenTensorHandle ret = nullptr;
-  TORCH_ERROR_CODE_CHECK(aoti_torch_clone(self.get(), &ret));
-  return Tensor(ret);
+// We expect this to be the stable version of the clone op.
+inline Tensor clone(
+    const Tensor& self,
+    std::optional<c10::MemoryFormat> memory_format = std::nullopt) {
+  const auto num_args = 2;
+  std::array<StableIValue, num_args> stack{from(self), from(memory_format)};
+  TORCH_ERROR_CODE_CHECK(
+      aoti_torch_call_dispatcher("aten::clone", "", stack.data()));
+  return to<Tensor>(stack[0]);
 }
 
 // We expect this to be the stable version of the cpu op with

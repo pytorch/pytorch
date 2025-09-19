@@ -1460,6 +1460,9 @@ class triton:
         os.environ.get("TORCHINDUCTOR_DECOMPOSE_K_THRESHOLD", "32")
     )
 
+    # Programmatic Dependent Launch improves launch latency on Nvidia Hopper+ devices
+    enable_pdl = False
+
 
 class aot_inductor:
     """
