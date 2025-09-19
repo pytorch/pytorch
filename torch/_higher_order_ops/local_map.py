@@ -15,6 +15,7 @@ import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._higher_order_ops.utils import (
     clone_outputs_aliasing_inputs,
+    redirect_to_mode,
     save_tensors_and_symints_for_backward,
     saved_tensors_and_symints,
 )
@@ -22,6 +23,7 @@ from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx import GraphModule
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_tensor_tree
+from torch.utils.checkpoint import _CachedTorchDispatchMode, _CachingTorchDispatchMode
 
 
 # Proxy the HOP instead of inlining into it
@@ -48,6 +50,10 @@ class LocalMapHOP(HigherOrderOperator):
 
 
 local_map_hop = LocalMapHOP()
+
+# Registers dispatches for SAC
+redirect_to_mode(local_map_hop, _CachingTorchDispatchMode)
+redirect_to_mode(local_map_hop, _CachedTorchDispatchMode)
 
 
 def create_hop_fw_bw(
