@@ -15,6 +15,7 @@ collection support for PyTorch APIs.
 import functools
 import sys
 import types
+import warnings
 from collections.abc import Iterable
 from typing import Any, Callable, Optional, overload, TypeVar, Union
 from typing_extensions import deprecated, TypeIs
@@ -123,24 +124,28 @@ def _reverse_args(func: UnflattenFunc) -> OpTreeUnflattenFunc:
 
 def register_pytree_node(
     cls: type[Any],
-    flatten_fn: FlattenFunc,
-    unflatten_fn: UnflattenFunc,
+    flatten_func: FlattenFunc = None,  # type: ignore[assignment] # the type is guaranteed
+    unflatten_func: UnflattenFunc = None,  # type: ignore[assignment] # the type is guaranteed
     *,
     serialized_type_name: Optional[str] = None,
     to_dumpable_context: Optional[ToDumpableContextFn] = None,
     from_dumpable_context: Optional[FromDumpableContextFn] = None,
+    flatten_with_keys_func: Optional[FlattenWithKeysFunc] = None,
+    # TODO(XuehaiPan): remove these deprecated arguments and remove the type ignore above
+    flatten_fn: Optional[FlattenFunc] = None,
+    unflatten_fn: Optional[UnflattenFunc] = None,
     flatten_with_keys_fn: Optional[FlattenWithKeysFunc] = None,
 ) -> None:
     """Register a container-like type as pytree node.
 
     Args:
         cls (type): A Python type to treat as an internal pytree node.
-        flatten_fn (callable): A function to be used during flattening, taking an instance of
+        flatten_func (callable): A function to be used during flattening, taking an instance of
             ``cls`` and returning a pair, with (1) an iterable for the children to be flattened
             recursively, and (2) some hashable auxiliary data to be stored in the treespec and to be
-            passed to the ``unflatten_fn``.
-        unflatten_fn (callable): A function taking two arguments: the auxiliary data that was
-            returned by ``flatten_fn`` and stored in the treespec, and the unflattened children.
+            passed to the ``unflatten_func``.
+        unflatten_func (callable): A function taking two arguments: the auxiliary data that was
+            returned by ``flatten_func`` and stored in the treespec, and the unflattened children.
             The function should return an instance of ``cls``.
         serialized_type_name (str, optional): A keyword argument used to specify the fully
             qualified name used when serializing the tree spec.
@@ -162,13 +167,57 @@ def register_pytree_node(
         ...     lambda children, _: set(children),
         ... )
     """
-    if flatten_with_keys_fn is not None:
+    if flatten_with_keys_func is not None:
         raise NotImplementedError("KeyPaths are not yet supported in cxx_pytree.")
+
+    if (flatten_func is None) != (unflatten_func is None):
+        raise ValueError(
+            "Both flatten_func and unflatten_func must be provided together."
+        )
+    if (flatten_fn is None) != (unflatten_fn is None):
+        raise ValueError("Both flatten_fn and unflatten_fn must be provided together.")
+    if flatten_func is None and flatten_fn is None:
+        raise TypeError(
+            "Missing required argument: 'flatten_func' and 'unflatten_func'."
+        )
+    if flatten_func is not None and flatten_fn is not None:
+        raise ValueError(
+            "Either (flatten_func, unflatten_func) or (flatten_fn, unflatten_fn) "
+            "should be provided, not both."
+        )
+    if flatten_with_keys_func is not None and flatten_with_keys_fn is not None:
+        raise ValueError(
+            "Either flatten_with_keys_func or flatten_with_keys_fn "
+            "should be provided, not both."
+        )
+
+    if flatten_fn is not None:
+        warnings.warn(
+            "The `flatten_fn` and `unflatten_fn` arguments are deprecated. "
+            "Use `flatten_func` and `unflatten_func` instead.",
+            category=FutureWarning,
+            statcklevel=2,
+        )
+        (
+            (flatten_func, unflatten_func),
+            (flatten_fn, unflatten_fn),
+        ) = (
+            (flatten_fn, unflatten_fn),
+            (None, None),
+        )
+    if flatten_with_keys_fn is not None:
+        warnings.warn(
+            "The `flatten_with_keys_fn` argument is deprecated. "
+            "Use `flatten_with_keys_func` instead.",
+            category=FutureWarning,
+            stacklevel=2,
+        )
+        flatten_with_keys_func, flatten_with_keys_fn = flatten_with_keys_fn, None
 
     _private_register_pytree_node(
         cls,
-        flatten_fn,
-        unflatten_fn,
+        flatten_func,
+        unflatten_func,
         serialized_type_name=serialized_type_name,
         to_dumpable_context=to_dumpable_context,
         from_dumpable_context=from_dumpable_context,
@@ -176,8 +225,8 @@ def register_pytree_node(
 
     python_pytree._private_register_pytree_node(
         cls,
-        flatten_fn,
-        unflatten_fn,
+        flatten_func,
+        unflatten_func,
         serialized_type_name=serialized_type_name,
         to_dumpable_context=to_dumpable_context,
         from_dumpable_context=from_dumpable_context,
@@ -242,8 +291,8 @@ def _register_pytree_node(
 
 def _private_register_pytree_node(
     cls: type[Any],
-    flatten_fn: FlattenFunc,
-    unflatten_fn: UnflattenFunc,
+    flatten_func: FlattenFunc,
+    unflatten_func: UnflattenFunc,
     *,
     serialized_type_name: Optional[str] = None,
     to_dumpable_context: Optional[ToDumpableContextFn] = None,
@@ -258,8 +307,8 @@ def _private_register_pytree_node(
     if not optree.is_structseq_class(cls):
         optree.register_pytree_node(
             cls,
-            flatten_fn,
-            _reverse_args(unflatten_fn),
+            flatten_func,
+            _reverse_args(unflatten_func),
             namespace="torch",
         )
 
