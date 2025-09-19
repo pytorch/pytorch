@@ -687,6 +687,28 @@
     "kineto_available",
     "record_function"
   ],
+  "torch.pytree": [
+    "PyTreeSpec",
+    "register_node",
+    "all",
+    "all_only",
+    "any",
+    "any_only",
+    "flatten",
+    "iter",
+    "leaves",
+    "map",
+    "map_",
+    "map_only",
+    "map_only_",
+    "structure",
+    "is_namedtuple",
+    "is_namedtuple_class",
+    "is_namedtuple_instance",
+    "is_structseq",
+    "is_structseq_class",
+    "is_structseq_instance"
+  ],
   "torch.quantization": [
     "ABC",
     "DeQuantStub",
