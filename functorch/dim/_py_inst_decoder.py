@@ -4,10 +4,7 @@ from typing import Any, Optional
 
 class _PyInstDecoder:
     """
-    Python port of the C++ PyInstDecoder class.
-
     Decodes Python bytecode instructions to extract variable names
-    following the algorithm from functorch/csrc/dim/dim_creation.cpp
     """
 
     def __init__(self, code_object: Any, lasti: int) -> None:
@@ -46,8 +43,6 @@ class _PyInstDecoder:
     def name(self) -> Optional[str]:
         """
         Extract variable name from current instruction.
-
-        Follows the C++ logic for different STORE_* opcodes.
         """
         opname = self.opcode()
         if not opname:
@@ -59,7 +54,6 @@ class _PyInstDecoder:
         elif opname == "STORE_FAST":
             names = self.code_object.co_varnames
         elif opname == "STORE_DEREF":
-            # Handle both cellvars and freevars like C++ code
             names = self.code_object.co_cellvars
             if not names:
                 names = self.code_object.co_freevars

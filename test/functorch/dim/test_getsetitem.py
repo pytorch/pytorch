@@ -250,22 +250,15 @@ class TestGetSetItem(TestCase):
         result2 = tensor2[c, d, e]
         self.assertIsInstance(result2, Tensor)
 
-    def test_device_handling(self):
-        """Test indexing behavior with different devices."""
-        if torch.cuda.is_available():
-            # CPU tensor
-            cpu_tensor = torch.randn(3, 4)
-            x, y = dims(2)
+    def test_device_handling_cpu(self):
+        """Test indexing behavior with CPU tensors."""
+        # CPU tensor
+        cpu_tensor = torch.randn(3, 4)
+        x, y = dims(2)
 
-            result_cpu = cpu_tensor[x, y]
-            self.assertIsInstance(result_cpu, Tensor)
-            self.assertEqual(result_cpu.device, torch.device("cpu"))
-
-            # CUDA tensor
-            cuda_tensor = torch.randn(3, 4, device="cuda")
-            result_cuda = cuda_tensor[x, y]
-            self.assertIsInstance(result_cuda, Tensor)
-            self.assertEqual(result_cuda.device.type, "cuda")
+        result_cpu = cpu_tensor[x, y]
+        self.assertIsInstance(result_cpu, Tensor)
+        self.assertEqual(result_cpu.device, torch.device("cpu"))
 
 
 if __name__ == "__main__":

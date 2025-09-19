@@ -51,14 +51,12 @@ def has_dims(obj: Any) -> bool:
     """
     from . import Dim, Tensor
 
-    # Use the proper check_exact methods like the C++ implementation
     return Dim.check_exact(obj) or Tensor.check_exact(obj)
 
 
 def _bind_dims_to_size(sz: int, sd: int, dims: list, nsz: list, nsd: list) -> None:
     """
     Bind dimensions to size and calculate proper strides for dim packs.
-    Based on the C++ implementation in functorch/csrc/dim/dim.cpp:2192-2225
     """
     from . import DimensionBindError
 
@@ -75,7 +73,6 @@ def _bind_dims_to_size(sz: int, sd: int, dims: list, nsz: list, nsd: list) -> No
 
             # Calculate the size for this unbound dimension
             if sz % rhs_prod != 0:
-                # Create tuple showing bound vs unbound dimensions like C++ version
                 tup = tuple(dim.size if dim.is_bound else "?" for dim in dims)
                 raise DimensionBindError(
                     f"inferred dimension does not evenly fit into larger dimension: {sz} vs {tup}"
@@ -114,7 +111,6 @@ def slice_to_tuple(flat_inputs: list) -> tuple:
 
 
 def extractIndices(index: Any, indices: list) -> bool:
-    # Follow the C++ switch structure more closely
     if isinstance(index, tuple):  # mpy::tuple_view::check
         indices.extend(index)
         return True
@@ -217,7 +213,6 @@ def setitem(self: Any, index: Any, rhs: Any) -> None:
         matched_rhs = rhs
 
     # For advanced indexing with dimensions, we need special handling
-    # We'll use the simpler approach that follows the C++ implementation more closely
     if iinfo.advanced_indexing:
         # Use advanced indexing - the flat_inputs already contain matched tensors
         tup = slice_to_tuple(iinfo.flat_inputs)
@@ -283,7 +278,6 @@ def getsetitem(self: Any, index: Any, tensors_have_dims: bool) -> IndexingInfo:
         expanding_object = i
 
     def is_dimpack(s: Any) -> bool:
-        # Check if s is a tuple/list of Dim objects, following C++ dimpack logic
         from . import Dim
 
         return (

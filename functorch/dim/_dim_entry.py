@@ -86,8 +86,6 @@ def _match_levels(
     """
     Reshape a tensor to match target levels using as_strided.
 
-    This corresponds to the _match_levels function in C++ code.
-
     Args:
         tensor: Input tensor to reshape
         from_levels: Current levels of the tensor

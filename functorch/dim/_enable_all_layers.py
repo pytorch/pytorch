@@ -75,8 +75,6 @@ class EnableAllLayers:
         """
         Create a Tensor from a batched tensor by unwrapping functorch layers.
 
-        This corresponds to EnableAllLayers::from_batched in C++.
-
         Args:
             batchedtensor: Batched tensor from functorch operation
             has_device: Whether tensor has device info
@@ -118,8 +116,7 @@ class EnableAllLayers:
         """
         Update the levels of a batched tensor in place.
 
-        This corresponds to EnableAllLayers::inplace_update_layers in C++.
-        This requires the _unsafe_set_level binding that we'll add to functorch.
+        This requires the _maybe_unsafe_set_level binding that we'll add to functorch.
 
         Args:
             batchtensor: Batched tensor to update
@@ -138,5 +135,5 @@ class EnableAllLayers:
             if any(l == DimEntry(self.levels_to_dim[i]) for l in levels):
                 # This is very interesting!  The level on batch tensor is
                 # meaningless!  We set it RIGHT before we go into vmap
-                torch._C._functorch._unsafe_set_level(impl, self.levels_start + i)
+                torch._C._functorch._maybe_unsafe_set_level(impl, self.levels_start + i)
                 impl = torch._C._functorch.get_unwrapped(impl)

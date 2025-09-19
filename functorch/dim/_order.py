@@ -15,8 +15,6 @@ def _wrap_dim(arg: Any, orig_ndim: int, allow_none: bool = True) -> DimEntry:
     """
     Convert various dimension representations to DimEntry.
 
-    This corresponds to the _wrap_dim function in the C++ code.
-
     Args:
         arg: The argument to convert (Dim, int, or other)
         orig_ndim: Original number of dimensions
@@ -32,7 +30,6 @@ def _wrap_dim(arg: Any, orig_ndim: int, allow_none: bool = True) -> DimEntry:
     elif isinstance(arg, Dim):
         return DimEntry(arg)
     elif isinstance(arg, int):
-        # Convert to negative indexing following C++ convention
         if arg < 0:
             pos = arg
         else:
@@ -48,7 +45,6 @@ def order(
     """
     Reorder the dimensions of a tensor or create a tensor from a dimension.
 
-    This function ports the C++ order function from functorch/csrc/dim/dim.cpp.
     It allows reordering tensor dimensions using first-class dimensions and
     positional indices.
 
