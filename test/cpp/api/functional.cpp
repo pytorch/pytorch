@@ -3187,11 +3187,12 @@ TEST_F(FunctionalTest, BCEWithLogitsLoss) {
             sigmoid(output),
             target,
             F::BinaryCrossEntropyFuncOptions().weight(weight))));
-
-    // test extreme values
+  }
+  {
+    // test BCEWithLogits and BCE with sigmoid give same with extreme values
     float inf_f = std::numeric_limits<float>::infinity();
-    target = torch::rand(2);
-    output = torch::tensor({inf_f, -inf_f});
+    const auto target = torch::rand(2);
+    const auto output = torch::tensor({inf_f, -inf_f});
 
     auto bce_with_logits = F::binary_cross_entropy_with_logits(
         output,
@@ -3251,6 +3252,20 @@ TEST_F(FunctionalTest, BCEWithLogitsLoss) {
     const auto target = torch::rand({64, 4});
     const auto output = torch::rand({64, 4}) - 0.5;
     const auto pos_weight = torch::ones({64, 4});
+
+    ASSERT_TRUE(torch::allclose(
+        F::binary_cross_entropy_with_logits(output, target),
+        F::binary_cross_entropy_with_logits(
+            output,
+            target,
+            F::BinaryCrossEntropyWithLogitsFuncOptions().pos_weight(
+                pos_weight))));
+  }
+  { // test BCE with logits ones in pos weights with extreme values
+    float inf_f = std::numeric_limits<float>::infinity();
+    const auto target = torch::rand(2);
+    const auto output = torch::tensor({inf_f, -inf_f});
+    const auto pos_weight = torch::ones(2);
 
     ASSERT_TRUE(torch::allclose(
         F::binary_cross_entropy_with_logits(output, target),

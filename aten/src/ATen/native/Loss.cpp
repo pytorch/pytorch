@@ -379,7 +379,7 @@ Tensor binary_cross_entropy_with_logits(const Tensor& input, const Tensor& targe
     if (has_large_values) {
       auto large_target = at::where(large_mask, target, at::zeros_like(target));
       auto large_loss = thresh_value * (1 - large_target);
-      // Note: position weight does not effect loss if log(sigma(x)) ~= 0. 
+      // Note: pos_weight does not effect loss if log(sigma(x)) ~= 0.
       loss = at::where(large_mask, large_loss, loss);
     }
 
