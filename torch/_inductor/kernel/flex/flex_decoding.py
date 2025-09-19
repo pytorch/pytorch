@@ -34,7 +34,7 @@ prims = torch.ops.prims
 def _use_flex_decoding(query, kv_indices, value, kernel_options, enable_gqa) -> bool:
     """Decide which kernel to use, return true if use flex decoding kernel.
     Note:
-       Since the number of splits is calculated based of the the number of batch and head dims
+       Since the number of splits is calculated based of the number of batch and head dims
        we need to ensure that the batch and head dims are statically known. Otherwise we just
        use the main flex_attention kernel.
     """
@@ -71,6 +71,7 @@ def _use_flex_decoding(query, kv_indices, value, kernel_options, enable_gqa) -> 
 
     return (
         not force_flex
+        and not kernel_options.get("OUTPUT_MAX", False)
         and short_query_length
         and static_batch
         and static_num_heads

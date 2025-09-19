@@ -606,7 +606,7 @@ bool check_for_nested_inputs(sdp_params const& params, bool debug) {
 
   const auto dprop = at::cuda::getCurrentDeviceProperties();
   // Check that the input is nested
-  if ((dprop->major == 9 || dprop->major == 10) && has_for_nested_inputs(params)) {
+  if (!(dprop->major == 9 || dprop->major == 10) && has_for_nested_inputs(params)) {
     if (debug) {
       TORCH_WARN("cuDNN SDPA supports nested tensors on SM 9.0, SM 10.0.");
     }
