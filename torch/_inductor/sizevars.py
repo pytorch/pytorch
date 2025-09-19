@@ -70,6 +70,8 @@ class SizeVarAllocator:
 
     def __init__(self, shape_env=None) -> None:
         super().__init__()
+        # Note: this can lead to bugs. Reasoning APIs depends on existing information in
+        # in the shape_env. For example! var_to_ranges can't be empty!
         if shape_env is None:
             shape_env = ShapeEnv()
         self.shape_env = shape_env
