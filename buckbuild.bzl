@@ -156,7 +156,7 @@ ROOT = "//" if IS_OSS else "//xplat/caffe2"
 # for targets in subfolders
 ROOT_PATH = "//" if IS_OSS else "//xplat/caffe2/"
 
-C10 = "//c10:c10" if IS_OSS else "//xplat/caffe2/c10:c10"
+C10 = "//c10:c10" if IS_OSS else ("//xplat/caffe2/c10:c10_ovrsource" if is_arvr_mode() else "//xplat/caffe2/c10:c10")
 
 # a dictionary maps third party library name to fbsource and oss target
 THIRD_PARTY_LIBS = {
@@ -1998,7 +1998,21 @@ def define_buck_targets(
                     third_party("sleef_arm"),
                 ],
             }),
-            compiler_flags = get_aten_compiler_flags(),
+            compiler_flags = get_aten_compiler_flags() + select({
+                "DEFAULT": [],
+                "ovr_config//os:android-arm32": [
+                    "-mfpu=vfpv3-d16",
+                    "-march=armv7-a",
+                    "-mthumb",
+                    "-mfpu=neon",
+                ],
+                "ovr_config//os:android-x86_32": [
+                    "-mssse3",
+                ],
+                "ovr_config//os:android-x86_64": [
+                    "-mssse3",
+                ],
+            }),
             exported_preprocessor_flags = get_aten_preprocessor_flags(),
             exported_deps = [
                 ":aten_header",

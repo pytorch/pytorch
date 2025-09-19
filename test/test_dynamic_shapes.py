@@ -1818,6 +1818,96 @@ class TestSymNumberMagicMethods(TestCase):
         self.assertTrue(isinstance(s3, int))
         self.assertTrue(str(s1.node.expr) != str(s2.node.expr))
 
+    @fresh_cache()
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    @parametrize("backend", ["inductor", "eager"])
+    def test_dynamic_int_basic_compile(self, backend):
+        from torch.fx.experimental.sym_node import DynamicInt
+
+        cnt = CompileCounterWithBackend(backend)
+
+        # test scalar inputs to function
+        def f(x, y, z):
+            out = torch.tensor([x + y + z])
+            out = out + torch.zeros(abs(x) + 2).sum()  # test out tensor construction
+            return out
+
+        fn = torch.compile(f, fullgraph=True, backend=cnt)
+        x = DynamicInt(1)
+        z = DynamicInt(3)
+        self.assertEqual(fn(x, x, z), f(1, 1, 3))  # guard: x == y
+        self.assertEqual(fn(2, 2, 0), f(2, 2, 0))
+        self.assertEqual(fn(-1, -1, 2), f(-1, -1, 2))
+        self.assertEqual(cnt.frame_count, 1)  # no recompiles
+
+        self.assertEqual(fn(3, 4, 5), f(3, 4, 5))  # now we recompile
+        self.assertEqual(cnt.frame_count, 2)
+
+        # test nn module property
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.i = DynamicInt(1)
+
+            def forward(self, x):
+                return torch.tensor([x + self.i])
+
+        cnt.clear()
+        m = Foo()
+        mc = torch.compile(m, backend=cnt, fullgraph=True)
+
+        self.assertEqual(mc(DynamicInt(0)), m(0))
+        mc.i = -2  # override attribute
+        self.assertEqual(mc(-1), m(-1))
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_dynamic_int_eager_usage(self):
+        from torch.fx.experimental.sym_node import DynamicInt
+
+        w = DynamicInt(-1)
+        x = DynamicInt(0)
+        y = DynamicInt(1)
+        z = DynamicInt(2)
+
+        def check(l, r):
+            self.assertTrue(isinstance(l, DynamicInt))
+            self.assertEqual(l, r)
+
+        # test arithmetic
+        check(2 * y + z, 4)
+        check((10 - z) // 2, 4)
+        check(1 // z, 0)
+        check(-w + w**2, 2)
+        check(x % z, 0)
+        check(1 << z, 4)
+        check(z | y, 3)
+        check(min(y, z), 1)
+        self.assertTrue(z > -2)
+        with self.assertRaises(ZeroDivisionError):
+            y % x
+
+        # math, numpy
+        self.assertEqual(math.cos(x), y)
+        self.assertEqual(math.prod([z, z], start=z), 8)
+        self.assertEqual(np.arange(z)[y], 1)
+        self.assertTrue(np.allclose(np.ones([y, z]).sum(axis=x), np.ones(z)))
+
+        # test conversions
+        self.assertTrue(isinstance(x + 2, int))
+        self.assertTrue(isinstance(x + 2, DynamicInt))
+        self.assertEqual(y / 2.0, 0.5)  # this could return DynamicFloat in future
+        self.assertEqual(float(z), 2.0)
+        self.assertFalse(bool(x))
+        self.assertEqual(DynamicInt(x).real, x.real)
+
+        # torch functions, scalar inputs
+        self.assertEqual(torch.arange(z)[:w][x], 0)
+        self.assertEqual(torch.add(torch.tensor(w), torch.tensor(w), alpha=z), -3)
+        self.assertEqual(
+            list(torch.nn.Linear(z, y)(torch.randn(z * 2, z)).shape), [4, 1]
+        )
+        self.assertEqual(z * torch.ones(z).sum(dim=x), 4)
+
 
 instantiate_parametrized_tests(TestSymNumberMagicMethods)
 
@@ -3684,6 +3774,21 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
         idx = torch.tensor(1, dtype=torch.int64)
         out = torch.compile(f)(idx, x)
         self.assertEqual(out, f(idx, x))
+
+    def test_trunc_int_div_true(self):
+        @torch.compile(backend="inductor", dynamic=True, fullgraph=True)
+        def f(x, s13, s57, s77):
+            torch._check(s13 >= 0)
+            torch._check(s57 >= 0)
+            torch._check(s77 >= 0)
+            if int(s13 * ((s57 // s13) + (s77 // s13)) / s13) >= 1:
+                return x * 2
+            else:
+                return x * 100
+
+        # ensure we compile this with no errors.
+        x = torch.rand(10)
+        f(x, 4, 4096, 3920)
 
 
 instantiate_parametrized_tests(TestUnbacked)

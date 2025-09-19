@@ -106,11 +106,11 @@ dlrm,pass,0
 
 
 
-doctr_det_predictor,eager_fail_to_run,5
+doctr_det_predictor,eager_fail_to_run,3
 
 
 
-doctr_reco_predictor,eager_fail_to_run,4
+doctr_reco_predictor,eager_fail_to_run,1
 
 
 
@@ -198,7 +198,7 @@ llama,pass,0
 
 
 
-llama_v2_7b_16h,model_fail_to_load,0
+llama_v2_7b_16h,pass_due_to_skip,0
 
 
 
