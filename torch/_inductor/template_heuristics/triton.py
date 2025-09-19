@@ -1944,6 +1944,30 @@ class ScaledTMAConfigMixin(TMAWorkspaceMixin, BaseScaledMMConfigMixin):
             yield template_kwargs
 
 
+# Scaled Blackwell TMA-specific mixin for scaled MM templates with TMA
+class ScaledBlackwellTMAConfigMixin(
+    BlackwellTMATemplateConfigMixin, ScaledMMConfigMixin
+):
+    """
+    Scaled Blackwell TMA-specific mixin that extends ScaledMMConfigMixin with TMA functionality.
+    This is for scaled MM templates that use device TMA on Blackwell.
+    This inherits from ScaledMMConfigMixin, which inherits the scale_mm_epilogue, and adds TMA-specific options.
+    """
+
+    def _filter_configs(self, configs: list[BaseConfig]) -> list[BaseConfig]:
+        """
+        Warp specialization-specific filtering (BlackwellTMATemplateConfigMixin)
+        (compilation issues occur in some versions of Triton)
+        - num_warps < 4 unsafe for warpspec
+        - num_stages < 2 unsafe for warpspec
+
+        TMA-specific filtering:
+        - block_k >= 32 required for TMA (requires inner-most dimension >= 32)
+        """
+        configs = [c for c in configs if c.block_k >= 32]
+        return super()._filter_configs(configs)
+
+
 # Template-specific heuristic classes using multiple inheritance
 
 
@@ -2075,6 +2099,23 @@ class CUDAScaledTMATemplateConfigHeuristic(ScaledTMAConfigMixin, CUDAConfigHeuri
     def __init__(self) -> None:
         super().__init__()
         # Override mm_configs to use scaled_persistent_mm_configs for TMA
+        self.mm_configs = self.scaled_persistent_mm_configs
+
+
+@register_template_heuristic(
+    blackwell_ws_persistent_device_tma_mm_template.uid,  # regular Blackwell MM template + scaling epilogue from ScaledMMConfigMixin
+    "cuda",
+    register=torch.version.hip is None,
+)
+class CUDAScaledBlackwellTMATemplateConfigHeuristic(
+    ScaledBlackwellTMAConfigMixin, CUDAConfigHeuristic
+):
+    """Scaled Blackwell TMA template heuristic for CUDA"""
+
+    def __init__(self) -> None:
+        super().__init__()
+        # Override mm_configs to use scaled_persistent_mm_configs for TMA
+        # TODO: Tune scaled_persistent_mm_configs for Blackwell
         self.mm_configs = self.scaled_persistent_mm_configs
 
 
