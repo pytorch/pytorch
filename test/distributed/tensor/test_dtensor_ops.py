@@ -691,6 +691,24 @@ class TestDTensorOps(DTensorOpTestBase):
             else:
                 self.assertTrue("redistribute_input" in debug_mode.debug_string())
 
+    def test_expand(self):
+        self.mesh = init_device_mesh(DEVICE_TYPE, (self.world_size,))
+
+        tensor = torch.arange(4, dtype=torch.float, device=DEVICE_TYPE).reshape(1, 4)
+        dt0 = distribute_tensor(tensor, self.mesh, [Shard(0)])
+        dt1 = distribute_tensor(tensor, self.mesh, [Shard(1)])
+
+        funcs = [
+            lambda t: t.expand(4, 4),
+            lambda t: t.expand(4, 4, 4),
+            lambda t: t.expand(1, 4, 4),
+            lambda t: t.broadcast_to(4, 4),
+        ]
+
+        for func in funcs:
+            self.assertEqual(func(dt0).full_tensor(), func(tensor))
+            self.assertEqual(func(dt1).full_tensor(), func(tensor))
+
 
 # only instantiate tests for DEVICE_TYPE alone (i.e. either CPU or GPU)
 instantiate_device_type_tests(TestDTensorOps, globals(), only_for=(DEVICE_TYPE,))

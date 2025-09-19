@@ -605,6 +605,11 @@ def propagate_shape_and_sharding(
             if in_dim is not None:
                 shardable_dims[in_dim.input_dim] = [False] * mesh_ndim
             return None
+        elif isinstance(cmd, Broadcast):
+            in_dim = get_in_dim_to_shard(cmd.dim)
+            if in_dim is not None:
+                shardable_dims[in_dim.input_dim] = [False] * mesh_ndim
+            return None
         else:
             return None
 
