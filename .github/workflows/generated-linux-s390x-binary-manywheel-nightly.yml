@@ -38,19 +38,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  get-label-type:
-    if: github.repository_owner == 'pytorch'
-    name: get-label-type
-    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
-    with:
-      triggering_actor: ${{ github.triggering_actor }}
-      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
-      curr_branch: ${{ github.head_ref || github.ref_name }}
-      curr_ref_type: ${{ github.ref_type }}
   manywheel-py3_10-cpu-s390x-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
-    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
@@ -72,7 +62,6 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
       - manywheel-py3_10-cpu-s390x-build
-      - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
@@ -114,7 +103,6 @@ jobs:
   manywheel-py3_11-cpu-s390x-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
-    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
@@ -136,7 +124,6 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
       - manywheel-py3_11-cpu-s390x-build
-      - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
@@ -178,7 +165,6 @@ jobs:
   manywheel-py3_12-cpu-s390x-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
-    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
@@ -200,7 +186,6 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
       - manywheel-py3_12-cpu-s390x-build
-      - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
@@ -242,7 +227,6 @@ jobs:
   manywheel-py3_13-cpu-s390x-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
-    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
@@ -264,7 +248,6 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
       - manywheel-py3_13-cpu-s390x-build
-      - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
@@ -306,7 +289,6 @@ jobs:
   manywheel-py3_13t-cpu-s390x-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
-    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
@@ -328,7 +310,6 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
       - manywheel-py3_13t-cpu-s390x-build
-      - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
@@ -370,7 +351,6 @@ jobs:
   manywheel-py3_14-cpu-s390x-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
-    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
@@ -392,7 +372,6 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
       - manywheel-py3_14-cpu-s390x-build
-      - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
@@ -434,7 +413,6 @@ jobs:
   manywheel-py3_14t-cpu-s390x-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
-    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
@@ -456,7 +434,6 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
       - manywheel-py3_14t-cpu-s390x-build
-      - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch

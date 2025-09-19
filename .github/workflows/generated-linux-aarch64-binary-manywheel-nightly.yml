@@ -38,19 +38,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  get-label-type:
-    if: github.repository_owner == 'pytorch'
-    name: get-label-type
-    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
-    with:
-      triggering_actor: ${{ github.triggering_actor }}
-      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
-      curr_branch: ${{ github.head_ref || github.ref_name }}
-      curr_ref_type: ${{ github.ref_type }}
   manywheel-py3_10-cpu-aarch64-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
-    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
@@ -61,7 +51,6 @@ jobs:
       DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cpu-aarch64
       DESIRED_PYTHON: "3.10"
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.arm64.m7g.4xlarge.ephemeral
       ALPINE_IMAGE: "arm64v8/alpine"
       build_name: manywheel-py3_10-cpu-aarch64
@@ -72,7 +61,6 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
       - manywheel-py3_10-cpu-aarch64-build
-      - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
@@ -86,7 +74,6 @@ jobs:
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cpu-aarch64
       build_environment: linux-aarch64-binary-manywheel
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.arm64.2xlarge
       ALPINE_IMAGE: "arm64v8/alpine"
     secrets:
@@ -115,7 +102,6 @@ jobs:
   manywheel-py3_10-cuda-aarch64-12_6-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
-    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
@@ -127,7 +113,6 @@ jobs:
       DOCKER_IMAGE: manylinuxaarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
       DESIRED_PYTHON: "3.10"
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.arm64.m7g.4xlarge.ephemeral
       ALPINE_IMAGE: "arm64v8/alpine"
       build_name: manywheel-py3_10-cuda-aarch64-12_6
@@ -161,7 +146,6 @@ jobs:
   manywheel-py3_10-cuda-aarch64-12_8-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
-    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
@@ -173,7 +157,6 @@ jobs:
       DOCKER_IMAGE: manylinuxaarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
       DESIRED_PYTHON: "3.10"
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.arm64.m7g.4xlarge.ephemeral
       ALPINE_IMAGE: "arm64v8/alpine"
       build_name: manywheel-py3_10-cuda-aarch64-12_8
@@ -207,7 +190,6 @@ jobs:
   manywheel-py3_10-cuda-aarch64-13_0-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
-    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
@@ -219,7 +201,6 @@ jobs:
       DOCKER_IMAGE: manylinuxaarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda13.0
       DESIRED_PYTHON: "3.10"
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.arm64.m7g.4xlarge.ephemeral
       ALPINE_IMAGE: "arm64v8/alpine"
       build_name: manywheel-py3_10-cuda-aarch64-13_0
@@ -253,7 +234,6 @@ jobs:
   manywheel-py3_11-cpu-aarch64-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
-    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
@@ -264,7 +244,6 @@ jobs:
       DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cpu-aarch64
       DESIRED_PYTHON: "3.11"
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.arm64.m7g.4xlarge.ephemeral
       ALPINE_IMAGE: "arm64v8/alpine"
       build_name: manywheel-py3_11-cpu-aarch64
@@ -275,7 +254,6 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
       - manywheel-py3_11-cpu-aarch64-build
-      - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
@@ -289,7 +267,6 @@ jobs:
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cpu-aarch64
       build_environment: linux-aarch64-binary-manywheel
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.arm64.2xlarge
       ALPINE_IMAGE: "arm64v8/alpine"
     secrets:
@@ -318,7 +295,6 @@ jobs:
   manywheel-py3_11-cuda-aarch64-12_6-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
-    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
@@ -330,7 +306,6 @@ jobs:
       DOCKER_IMAGE: manylinuxaarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
       DESIRED_PYTHON: "3.11"
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.arm64.m7g.4xlarge.ephemeral
       ALPINE_IMAGE: "arm64v8/alpine"
       build_name: manywheel-py3_11-cuda-aarch64-12_6
@@ -364,7 +339,6 @@ jobs:
   manywheel-py3_11-cuda-aarch64-12_8-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
-    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
@@ -376,7 +350,6 @@ jobs:
       DOCKER_IMAGE: manylinuxaarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
       DESIRED_PYTHON: "3.11"
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.arm64.m7g.4xlarge.ephemeral
       ALPINE_IMAGE: "arm64v8/alpine"
       build_name: manywheel-py3_11-cuda-aarch64-12_8
@@ -410,7 +383,6 @@ jobs:
   manywheel-py3_11-cuda-aarch64-13_0-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
-    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
@@ -422,7 +394,6 @@ jobs:
       DOCKER_IMAGE: manylinuxaarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda13.0
       DESIRED_PYTHON: "3.11"
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.arm64.m7g.4xlarge.ephemeral
       ALPINE_IMAGE: "arm64v8/alpine"
       build_name: manywheel-py3_11-cuda-aarch64-13_0
@@ -456,7 +427,6 @@ jobs:
   manywheel-py3_12-cpu-aarch64-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
-    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
@@ -467,7 +437,6 @@ jobs:
       DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cpu-aarch64
       DESIRED_PYTHON: "3.12"
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.arm64.m7g.4xlarge.ephemeral
       ALPINE_IMAGE: "arm64v8/alpine"
       build_name: manywheel-py3_12-cpu-aarch64
@@ -478,7 +447,6 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
       - manywheel-py3_12-cpu-aarch64-build
-      - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
@@ -492,7 +460,6 @@ jobs:
       DESIRED_PYTHON: "3.12"
       build_name: manywheel-py3_12-cpu-aarch64
       build_environment: linux-aarch64-binary-manywheel
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.arm64.2xlarge
       ALPINE_IMAGE: "arm64v8/alpine"
     secrets:
@@ -521,7 +488,6 @@ jobs:
   manywheel-py3_12-cuda-aarch64-12_6-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
-    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
@@ -533,7 +499,6 @@ jobs:
       DOCKER_IMAGE: manylinuxaarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
       DESIRED_PYTHON: "3.12"
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.arm64.m7g.4xlarge.ephemeral
       ALPINE_IMAGE: "arm64v8/alpine"
       build_name: manywheel-py3_12-cuda-aarch64-12_6
@@ -567,7 +532,6 @@ jobs:
   manywheel-py3_12-cuda-aarch64-12_8-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
-    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
@@ -579,7 +543,6 @@ jobs:
       DOCKER_IMAGE: manylinuxaarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
       DESIRED_PYTHON: "3.12"
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.arm64.m7g.4xlarge.ephemeral
       ALPINE_IMAGE: "arm64v8/alpine"
       build_name: manywheel-py3_12-cuda-aarch64-12_8
@@ -613,7 +576,6 @@ jobs:
   manywheel-py3_12-cuda-aarch64-13_0-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
-    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
@@ -625,7 +587,6 @@ jobs:
       DOCKER_IMAGE: manylinuxaarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda13.0
       DESIRED_PYTHON: "3.12"
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.arm64.m7g.4xlarge.ephemeral
       ALPINE_IMAGE: "arm64v8/alpine"
       build_name: manywheel-py3_12-cuda-aarch64-13_0
@@ -659,7 +620,6 @@ jobs:
   manywheel-py3_13-cpu-aarch64-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
-    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
@@ -670,7 +630,6 @@ jobs:
       DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cpu-aarch64
       DESIRED_PYTHON: "3.13"
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.arm64.m7g.4xlarge.ephemeral
       ALPINE_IMAGE: "arm64v8/alpine"
       build_name: manywheel-py3_13-cpu-aarch64
@@ -681,7 +640,6 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
       - manywheel-py3_13-cpu-aarch64-build
-      - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
@@ -695,7 +653,6 @@ jobs:
       DESIRED_PYTHON: "3.13"
       build_name: manywheel-py3_13-cpu-aarch64
       build_environment: linux-aarch64-binary-manywheel
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.arm64.2xlarge
       ALPINE_IMAGE: "arm64v8/alpine"
     secrets:
@@ -724,7 +681,6 @@ jobs:
   manywheel-py3_13-cuda-aarch64-12_6-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
-    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
@@ -736,7 +692,6 @@ jobs:
       DOCKER_IMAGE: manylinuxaarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
       DESIRED_PYTHON: "3.13"
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.arm64.m7g.4xlarge.ephemeral
       ALPINE_IMAGE: "arm64v8/alpine"
       build_name: manywheel-py3_13-cuda-aarch64-12_6
@@ -770,7 +725,6 @@ jobs:
   manywheel-py3_13-cuda-aarch64-12_8-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
-    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
@@ -782,7 +736,6 @@ jobs:
       DOCKER_IMAGE: manylinuxaarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
       DESIRED_PYTHON: "3.13"
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.arm64.m7g.4xlarge.ephemeral
       ALPINE_IMAGE: "arm64v8/alpine"
       build_name: manywheel-py3_13-cuda-aarch64-12_8
@@ -816,7 +769,6 @@ jobs:
   manywheel-py3_13-cuda-aarch64-13_0-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
-    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
@@ -828,7 +780,6 @@ jobs:
       DOCKER_IMAGE: manylinuxaarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda13.0
       DESIRED_PYTHON: "3.13"
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.arm64.m7g.4xlarge.ephemeral
       ALPINE_IMAGE: "arm64v8/alpine"
       build_name: manywheel-py3_13-cuda-aarch64-13_0
@@ -862,7 +813,6 @@ jobs:
   manywheel-py3_13t-cpu-aarch64-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
-    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
@@ -873,7 +823,6 @@ jobs:
       DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cpu-aarch64
       DESIRED_PYTHON: "3.13t"
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.arm64.m7g.4xlarge.ephemeral
       ALPINE_IMAGE: "arm64v8/alpine"
       build_name: manywheel-py3_13t-cpu-aarch64
@@ -884,7 +833,6 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
       - manywheel-py3_13t-cpu-aarch64-build
-      - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
@@ -898,7 +846,6 @@ jobs:
       DESIRED_PYTHON: "3.13t"
       build_name: manywheel-py3_13t-cpu-aarch64
       build_environment: linux-aarch64-binary-manywheel
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.arm64.2xlarge
       ALPINE_IMAGE: "arm64v8/alpine"
     secrets:
@@ -927,7 +874,6 @@ jobs:
   manywheel-py3_13t-cuda-aarch64-12_6-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
-    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
@@ -939,7 +885,6 @@ jobs:
       DOCKER_IMAGE: manylinuxaarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
       DESIRED_PYTHON: "3.13t"
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.arm64.m7g.4xlarge.ephemeral
       ALPINE_IMAGE: "arm64v8/alpine"
       build_name: manywheel-py3_13t-cuda-aarch64-12_6
@@ -973,7 +918,6 @@ jobs:
   manywheel-py3_13t-cuda-aarch64-12_8-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
-    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
@@ -985,7 +929,6 @@ jobs:
       DOCKER_IMAGE: manylinuxaarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
       DESIRED_PYTHON: "3.13t"
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.arm64.m7g.4xlarge.ephemeral
       ALPINE_IMAGE: "arm64v8/alpine"
       build_name: manywheel-py3_13t-cuda-aarch64-12_8
@@ -1019,7 +962,6 @@ jobs:
   manywheel-py3_13t-cuda-aarch64-13_0-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
-    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
@@ -1031,7 +973,6 @@ jobs:
       DOCKER_IMAGE: manylinuxaarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda13.0
       DESIRED_PYTHON: "3.13t"
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.arm64.m7g.4xlarge.ephemeral
       ALPINE_IMAGE: "arm64v8/alpine"
       build_name: manywheel-py3_13t-cuda-aarch64-13_0
@@ -1065,7 +1006,6 @@ jobs:
   manywheel-py3_14-cpu-aarch64-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
-    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
@@ -1076,7 +1016,6 @@ jobs:
       DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cpu-aarch64
       DESIRED_PYTHON: "3.14"
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.arm64.m7g.4xlarge.ephemeral
       ALPINE_IMAGE: "arm64v8/alpine"
       build_name: manywheel-py3_14-cpu-aarch64
@@ -1087,7 +1026,6 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
       - manywheel-py3_14-cpu-aarch64-build
-      - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
@@ -1101,7 +1039,6 @@ jobs:
       DESIRED_PYTHON: "3.14"
       build_name: manywheel-py3_14-cpu-aarch64
       build_environment: linux-aarch64-binary-manywheel
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.arm64.2xlarge
       ALPINE_IMAGE: "arm64v8/alpine"
     secrets:
@@ -1130,7 +1067,6 @@ jobs:
   manywheel-py3_14-cuda-aarch64-12_6-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
-    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
@@ -1142,7 +1078,6 @@ jobs:
       DOCKER_IMAGE: manylinuxaarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
       DESIRED_PYTHON: "3.14"
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.arm64.m7g.4xlarge.ephemeral
       ALPINE_IMAGE: "arm64v8/alpine"
       build_name: manywheel-py3_14-cuda-aarch64-12_6
@@ -1176,7 +1111,6 @@ jobs:
   manywheel-py3_14-cuda-aarch64-12_8-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
-    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
@@ -1188,7 +1122,6 @@ jobs:
       DOCKER_IMAGE: manylinuxaarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
       DESIRED_PYTHON: "3.14"
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.arm64.m7g.4xlarge.ephemeral
       ALPINE_IMAGE: "arm64v8/alpine"
       build_name: manywheel-py3_14-cuda-aarch64-12_8
@@ -1222,7 +1155,6 @@ jobs:
   manywheel-py3_14-cuda-aarch64-13_0-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
-    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
@@ -1234,7 +1166,6 @@ jobs:
       DOCKER_IMAGE: manylinuxaarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda13.0
       DESIRED_PYTHON: "3.14"
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.arm64.m7g.4xlarge.ephemeral
       ALPINE_IMAGE: "arm64v8/alpine"
       build_name: manywheel-py3_14-cuda-aarch64-13_0
@@ -1268,7 +1199,6 @@ jobs:
   manywheel-py3_14t-cpu-aarch64-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
-    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
@@ -1279,7 +1209,6 @@ jobs:
       DOCKER_IMAGE: manylinux2_28_aarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cpu-aarch64
       DESIRED_PYTHON: "3.14t"
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.arm64.m7g.4xlarge.ephemeral
       ALPINE_IMAGE: "arm64v8/alpine"
       build_name: manywheel-py3_14t-cpu-aarch64
@@ -1290,7 +1219,6 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
       - manywheel-py3_14t-cpu-aarch64-build
-      - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
@@ -1304,7 +1232,6 @@ jobs:
       DESIRED_PYTHON: "3.14t"
       build_name: manywheel-py3_14t-cpu-aarch64
       build_environment: linux-aarch64-binary-manywheel
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.arm64.2xlarge
       ALPINE_IMAGE: "arm64v8/alpine"
     secrets:
@@ -1333,7 +1260,6 @@ jobs:
   manywheel-py3_14t-cuda-aarch64-12_6-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
-    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
@@ -1345,7 +1271,6 @@ jobs:
       DOCKER_IMAGE: manylinuxaarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
       DESIRED_PYTHON: "3.14t"
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.arm64.m7g.4xlarge.ephemeral
       ALPINE_IMAGE: "arm64v8/alpine"
       build_name: manywheel-py3_14t-cuda-aarch64-12_6
@@ -1379,7 +1304,6 @@ jobs:
   manywheel-py3_14t-cuda-aarch64-12_8-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
-    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
@@ -1391,7 +1315,6 @@ jobs:
       DOCKER_IMAGE: manylinuxaarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
       DESIRED_PYTHON: "3.14t"
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.arm64.m7g.4xlarge.ephemeral
       ALPINE_IMAGE: "arm64v8/alpine"
       build_name: manywheel-py3_14t-cuda-aarch64-12_8
@@ -1425,7 +1348,6 @@ jobs:
   manywheel-py3_14t-cuda-aarch64-13_0-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
-    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
@@ -1437,7 +1359,6 @@ jobs:
       DOCKER_IMAGE: manylinuxaarch64-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda13.0
       DESIRED_PYTHON: "3.14t"
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.arm64.m7g.4xlarge.ephemeral
       ALPINE_IMAGE: "arm64v8/alpine"
       build_name: manywheel-py3_14t-cuda-aarch64-13_0
