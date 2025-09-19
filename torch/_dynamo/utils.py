@@ -3314,6 +3314,7 @@ def get_fake_value(
         UserError,
         UserErrorType,
     )
+    from .variables.streams import stream_state_mgr
 
     op = node.op
 
@@ -3328,13 +3329,27 @@ def get_fake_value(
     if (
         torch._dynamo.config.use_graph_deduplication
         or torch._dynamo.config.track_nodes_for_deduplication
+        or stream_state_mgr.in_stream_context()
     ):
-        flat_args_kwargs = get_fake_values_from_nodes(
-            tx, _get_flat_args(node, {}), allow_non_graph_fake
-        )
-        id_to_initial_version = {
-            id(arg): arg._version for arg in flat_args_kwargs if is_fake(arg)
-        }
+        flat_args = _get_flat_args(node, {})
+        if stream_state_mgr.in_stream_context():
+            for arg in flat_args:
+                if isinstance(arg, torch.fx.Node):
+                    stream_state_mgr.track_node(arg)
+
+        if (
+            torch._dynamo.config.use_graph_deduplication
+            or torch._dynamo.config.track_nodes_for_deduplication
+        ):
+            flat_args_kwargs = get_fake_values_from_nodes(
+                tx, flat_args, allow_non_graph_fake
+            )
+            id_to_initial_version = {
+                id(arg): arg._version for arg in flat_args_kwargs if is_fake(arg)
+            }
+        else:
+            flat_args_kwargs = []
+            id_to_initial_version = {}
     else:
         flat_args_kwargs = []
         id_to_initial_version = {}
@@ -3482,6 +3497,9 @@ def get_fake_value(
         _ = pytree.tree_map_only(
             torch.Tensor, functools.partial(ensure_graph_fake, tx=tx), ret_val
         )
+
+    if stream_state_mgr.in_stream_context():
+        stream_state_mgr.track_internal_node(node)
 
     if (
         torch._dynamo.config.use_graph_deduplication
