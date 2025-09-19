@@ -182,16 +182,6 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_get_data_ptr(
     void** ret_data_ptr // returns borrowed reference
 );
 
-AOTI_TORCH_EXPORT AOTITorchError aoti_torch_get_mutable_data_ptr(
-    AtenTensorHandle tensor,
-    void** ret_data_ptr // returns borrowed reference
-);
-
-AOTI_TORCH_EXPORT AOTITorchError aoti_torch_get_const_data_ptr(
-    AtenTensorHandle tensor,
-    const void** ret_data_ptr // returns borrowed reference
-);
-
 // Get the nbytes of the underlying storage
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_get_storage_size(AtenTensorHandle tensor, int64_t* ret_size);
@@ -588,6 +578,15 @@ aoti_torch_delete_cuda_stream_guard(CUDAStreamGuardHandle guard);
 
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_get_current_cuda_stream(int32_t device_index, void** ret_stream);
+
+// CUDA memory allocation using CUDACachingAllocator
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cuda_caching_allocator_raw_alloc(
+    uint64_t nbytes,
+    void** ret_ptr // returns raw GPU memory pointer
+);
+
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_cuda_caching_allocator_raw_delete(void* ptr);
 
 #endif // USE_CUDA
 

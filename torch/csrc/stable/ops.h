@@ -202,9 +202,7 @@ inline Tensor zero_(Tensor& self) {
 }
 
 // We expect this to be the stable version of the copy_ op with
-// identical semantics to the existing copy_ op (except that it will
-// not be called as a tensor method but only as a function
-// i.e. copy_(dst, src) not dst.zero_(src)).
+// identical semantics to the existing copy_ op.
 inline Tensor copy_(
     Tensor& self,
     const Tensor& src,

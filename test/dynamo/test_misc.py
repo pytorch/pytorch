@@ -7207,9 +7207,7 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
             return x + 1
 
         guard_manager = torch._dynamo.guards.RootGuardManager()
-        guard_manager.add_lambda_guard(
-            lambda L: isinstance(L["x"], int), {"x": 0}, True, []
-        )
+        guard_manager.add_lambda_guard(lambda L: isinstance(L["x"], int), [])
 
         def injected(x):
             return x + 42
@@ -7234,33 +7232,27 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
             return x + 1
 
         guard_manager_bool = torch._dynamo.guards.RootGuardManager()
-        guard_manager_bool.add_lambda_guard(
-            lambda L: isinstance(L["x"], bool), {"x": 0}, True, []
-        )
+        guard_manager_bool.add_lambda_guard(lambda L: isinstance(L["x"], bool), [])
 
         def injected_bool(x: bool):
             return x + 102
 
         guard_manager_int = torch._dynamo.guards.RootGuardManager()
-        guard_manager_int.add_lambda_guard(
-            lambda L: isinstance(L["x"], int), {"x": 0}, True, []
-        )
+        guard_manager_int.add_lambda_guard(lambda L: isinstance(L["x"], int), [])
 
         def injected_int(x: int):
             return x + 42
 
         guard_manager_tensor = torch._dynamo.guards.RootGuardManager()
         guard_manager_tensor.add_lambda_guard(
-            lambda L: isinstance(L["x"], torch.Tensor), {"x": 0}, True, []
+            lambda L: isinstance(L["x"], torch.Tensor), []
         )
 
         def injected_tensor(x: torch.Tensor):
             return x + 100
 
         guard_manager_str = torch._dynamo.guards.RootGuardManager()
-        guard_manager_str.add_lambda_guard(
-            lambda L: isinstance(L["x"], str), {"x": 0}, True, []
-        )
+        guard_manager_str.add_lambda_guard(lambda L: isinstance(L["x"], str), [])
 
         def injected_str(x: str):
             return x + "1"
@@ -7337,10 +7329,7 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
 
         guard_manager_bool = torch._dynamo.guards.RootGuardManager()
         guard_manager_bool.add_lambda_guard(
-            lambda L: isinstance(L["x"], bool),
-            {"x": 0},
-            True,
-            ["isinstance(L['x'], bool)"],
+            lambda L: isinstance(L["x"], bool), ["isinstance(L['x'], bool)"]
         )
 
         def injected_bool(x: bool):
@@ -13274,7 +13263,7 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
         self.assertEqual(out, opt_out)
 
     @unittest.skipIf(not TEST_MULTIGPU, "need multiple GPU")
-    def test_cuda_set_device(self, device):
+    def test_gpu_set_device(self, device):
         def fn():
             a = torch.ones(2, device=device)
             torch.get_device_module(device).set_device(1)
@@ -13353,6 +13342,26 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
         x = torch.ones([1], dtype=torch.int64)
         y = torch.tensor(5)
         f(x, y)
+
+    def test_full_graph_capture_scalar_outputs(self):
+        @torch.compile(fullgraph=True)
+        def foo(a):
+            return torch.randn(5) * a.item()
+
+        # We expect to no longer raise here
+        foo(torch.tensor(2.0))
+
+    def test_full_graph_capture_dynamic_output_shape_ops(self):
+        def fn(x):
+            nz = torch.nonzero(x)
+            squared = nz * nz
+            sliced = torch.ops.aten.slice.Tensor(squared, dim=1, start=-2, end=None)
+            view = sliced.unsqueeze(dim=0)
+            return view.squeeze(dim=0)
+
+        example_inputs = (torch.randn(1, 1, 1, 1),)
+        # we expect to no longer raise here
+        torch.compile(fn, fullgraph=True)(*example_inputs)
 
     def test_dynamic_float_scalar_tensor_coersion(self):
         # Minified version of https://github.com/pytorch/pytorch/issues/158376#issuecomment-3079591367
