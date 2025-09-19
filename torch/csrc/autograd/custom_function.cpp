@@ -4,6 +4,7 @@
 #include <torch/csrc/autograd/custom_function.h>
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
 
+#include <fmt/format.h>
 #include <utility>
 
 namespace torch::autograd {
@@ -483,28 +484,27 @@ void check_variable_result(
     const at::TensorBase& result,
     const std::string& hook_name) {
   if (!original.options().type_equal(result.options())) {
-    std::stringstream ss;
-    ss << "hook '" << hook_name << "' has changed the type of value (";
-    ss << "was " << original.toString() << " got ";
-    ss << result.toString() << ")";
-    throw std::runtime_error(ss.str());
+    auto error_msg = fmt::format(
+        "hook '{}' has changed the type of value (was {} got {})",
+        hook_name,
+        original.toString(),
+        result.toString());
+    TORCH_CHECK(false, error_msg);
   }
 
   if (original.is_cuda() != result.is_cuda()) {
-    std::stringstream ss;
-    ss << "hook '" << hook_name << "' has changed the type of value";
-    if (original.is_cuda()) {
-      ss << " (was CUDA tensor got CPU tensor)";
-    } else {
-      ss << " (was CPU tensor got CUDA tensor)";
-    }
-    throw std::runtime_error(ss.str());
+    auto error_msg = fmt::format(
+        "hook '{}' has changed the type of value (was {} got {})",
+        hook_name,
+        original.is_cuda() ? "CUDA tensor" : "CPU tensor",
+        result.is_cuda() ? "CUDA tensor" : "CPU tensor");
+    TORCH_CHECK(false, error_msg);
   }
 
   if (original.sym_sizes().vec() != result.sym_sizes().vec()) {
-    std::stringstream ss;
-    ss << "hook '" << hook_name << "' has changed the size of value";
-    throw std::runtime_error(ss.str());
+    auto error_msg =
+        fmt::format("hook '{}' has changed the size of value", hook_name);
+    TORCH_CHECK(false, error_msg);
   }
 }
 

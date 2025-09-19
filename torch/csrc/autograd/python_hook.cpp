@@ -11,6 +11,7 @@
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_strings.h>
 
+#include <fmt/format.h>
 #include <iostream>
 #include <sstream>
 
@@ -289,9 +290,9 @@ static variable_list unwrap_variables(PyObject* py_variables) {
       results[i] = THPVariable_Unpack(item);
     } else {
       // this should never happen, but just in case...
-      std::stringstream ss;
-      ss << "expected variable but got " << Py_TYPE(item)->tp_name;
-      throw std::runtime_error(ss.str());
+      auto error_msg =
+          fmt::format("expected variable but got {}", Py_TYPE(item)->tp_name);
+      TORCH_CHECK(false, error_msg);
     }
   }
   return results;
@@ -309,12 +310,12 @@ static void check_result(PyObject* prev, PyObject* result, PyObject* hook) {
   auto prev_size = PyTuple_GET_SIZE(prev);
   auto result_size = PyTuple_GET_SIZE(result);
   if (prev_size != result_size) {
-    std::stringstream ss;
-    auto name = hook_name(hook);
-    ss << "hook '" << name << "' has returned an incorrect number ";
-    ss << "of values (got " << result_size << ", but expected ";
-    ss << prev_size << ")";
-    throw std::runtime_error(ss.str());
+    auto error_msg = fmt::format(
+        "hook '{}' has returned an incorrect number of values (got {}, but expected {})",
+        hook_name(hook),
+        result_size,
+        prev_size);
+    TORCH_CHECK(false, error_msg);
   }
 
   for (const auto i : c10::irange(prev_size)) {
@@ -330,10 +331,9 @@ static void check_single_result(
   if (_result == Py_None)
     return;
 
-  if (_original == Py_None) {
-    throw std::runtime_error(
-        "can't replace a None gradient with a non-None value");
-  }
+  TORCH_CHECK(
+      _original != Py_None,
+      "can't replace a None gradient with a non-None value");
 
   if (!PyObject_IsInstance(_result, THPVariableClass)) {
     PyErr_Format(
