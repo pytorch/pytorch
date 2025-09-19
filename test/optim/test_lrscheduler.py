@@ -2442,6 +2442,7 @@ class TestLRScheduler(TestCase):
             partial(CyclicLR, base_lr=0.01, max_lr=0.1),
             partial(OneCycleLR, max_lr=0.01, total_steps=10, anneal_strategy="linear"),
             partial(CosineAnnealingWarmRestarts, T_0=20),
+            partial(SWALR, swa_lr=0.01),
         ],
     )
     @parametrize("weights_only", [True, False])
