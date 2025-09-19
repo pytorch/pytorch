@@ -4101,7 +4101,8 @@ class TestConvolutionNNDeviceType(NNTestCase):
             del y, yref
 
             # try a batch-splittable case
-            x = x.reshape(100, 2, 3280, 3280).contiguous(memory_format=torch.channels_last)
+            x = x.reshape(100, 2, 3280, 3280)
+            x = x.contiguous(memory_format=torch.channels_last)
             yref = c(x)
             y = c.to(device=device)(x.to(device=device))
             self.assertEqual(yref, y, atol=1e-3, rtol=1e-4)
