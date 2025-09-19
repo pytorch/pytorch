@@ -421,7 +421,7 @@ def get_max_alignment(inductor_layout: Layout) -> int:
     offset = inductor_layout.offset
 
     def is_static_int(number):
-        return isinstance(number, (int, sympy.Integer))
+        return isinstance(number, (int | sympy.Integer))
 
     def a_factor_of(x, alignment):
         if is_static_int(x) and is_static_int(alignment):

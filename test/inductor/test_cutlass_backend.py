@@ -85,7 +85,7 @@ def _check_if_instances_equal(op1, op2) -> bool:
     Utility function to check if two instances of a class are equal.
     """
     # cutlass uses list and tuple inconsistently
-    if isinstance(op1, (list, tuple)):
+    if isinstance(op1, (list | tuple)):
         return tuple(op1) == tuple(op2)
 
     if type(op1) != type(op2):
