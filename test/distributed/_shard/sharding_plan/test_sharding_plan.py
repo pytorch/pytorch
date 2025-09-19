@@ -8,7 +8,10 @@ from torch.distributed._shard import shard_module
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed._shard.sharding_plan import ShardingPlan, ShardingPlanner
 from torch.distributed._shard.sharding_spec import ChunkShardingSpec
-from torch.testing._internal.common_distributed import requires_nccl, skip_if_lt_x_gpu
+from torch.testing._internal.common_distributed import (
+    requires_accelerator_dist_backend,
+    skip_if_lt_x_gpu,
+)
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
 from torch.testing._internal.distributed._shard.sharded_tensor import (
     ShardedTensorTestBase,
@@ -28,6 +31,10 @@ if TEST_WITH_DEV_DBG_ASAN:
     )
     sys.exit(0)
 
+if torch.accelerator.is_available():
+    DEVICE_TYPE = torch.accelerator.current_accelerator().type
+    BACKEND = dist.get_default_backend_for_device(DEVICE_TYPE)
+
 
 # Example ShardingPlanner that chunks every parameter in the module
 # to all available devices defined.
@@ -37,7 +44,7 @@ class ChunkAllShardingPlanner(ShardingPlanner):
 
     def __init__(self, chunk_dim=0, device_count=0):
         self.dim = chunk_dim
-        self.devices = [f"rank:{i}/cuda:{i}" for i in range(device_count)]
+        self.devices = [f"rank:{i}/{DEVICE_TYPE}:{i}" for i in range(device_count)]
 
     def build_plan(self, module: nn.Module) -> ShardingPlan:
         named_params = module.named_parameters()
@@ -49,9 +56,9 @@ class ChunkAllShardingPlanner(ShardingPlanner):
 
 
 class TestShardingPlan(ShardedTensorTestBase):
-    @with_comms(init_rpc=False)
+    @with_comms(init_rpc=False, backend=BACKEND)
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
-    @requires_nccl()
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_sharding_plan_errors(self):
         rowwise_sharding_spec = generate_chunk_sharding_specs_for_test(1)[0]
         sharding_plan_wrong_plan = ShardingPlan(
@@ -61,7 +68,7 @@ class TestShardingPlan(ShardedTensorTestBase):
             output_plan={"": rowwise_sharding_spec},
         )
 
-        megatron_lm = SimpleMegatronLM([[17, 12], [12, 29]]).cuda(self.rank)
+        megatron_lm = SimpleMegatronLM([[17, 12], [12, 29]]).to(torch.device(self.rank))
 
         with self.assertRaisesRegex(
             TypeError, "Only `ShardingSpec` and `Sharder` are supported to shard"
@@ -100,12 +107,12 @@ class TestShardingPlan(ShardedTensorTestBase):
             # shard the module with the provided sharding plan
             shard_module(megatron_lm, sharding_plan_wrong_param_path)
 
-    @with_comms(init_rpc=False)
+    @with_comms(init_rpc=False, backend=BACKEND)
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
-    @requires_nccl()
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_custom_sharding_planner(self):
-        megatron_lm = SimpleMegatronLM([[17, 12], [12, 29]], rank=self.rank).cuda(
-            self.rank
+        megatron_lm = SimpleMegatronLM([[17, 12], [12, 29]], rank=self.rank).to(
+            torch.device(self.rank)
         )
         planner = ChunkAllShardingPlanner(device_count=TEST_GPU_NUM)
         sharding_plan = planner.build_plan(megatron_lm)
@@ -118,23 +125,23 @@ class TestShardingPlan(ShardedTensorTestBase):
         self.assertTrue(isinstance(megatron_lm.fc1.bias, ShardedTensor))
         self.assertTrue(isinstance(megatron_lm.fc2.bias, ShardedTensor))
 
-    @with_comms(init_rpc=False)
+    @with_comms(init_rpc=False, backend=BACKEND)
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
-    @requires_nccl()
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_shard_module_sub_process_group(self):
         megatron_lm = SimpleMegatronLM([[17, 12], [12, 29]], rank=self.rank)
         colwise_sharding_spec = ChunkShardingSpec(
             dim=0,
             placements=[
-                "rank:2/cuda:2",
-                "rank:3/cuda:3",
+                f"rank:2/{DEVICE_TYPE}:2",
+                f"rank:3/{DEVICE_TYPE}:3",
             ],
         )
         rowwise_sharding_spec = ChunkShardingSpec(
             dim=1,
             placements=[
-                "rank:2/cuda:2",
-                "rank:3/cuda:3",
+                f"rank:2/{DEVICE_TYPE}:2",
+                f"rank:3/{DEVICE_TYPE}:3",
             ],
         )
         sharding_plan = ShardingPlan(
