@@ -1109,6 +1109,16 @@ class CachingAutotuner(KernelInterface):
             "global_scratch": launcher.global_scratch,
             "profile_scratch": launcher.profile_scratch,
         }
+        if self.device_props.type == "xpu":
+            # On the XPU backend, threads_per_warp is not always 32.
+            # For Intel GEMM Triton kernels, it can be 16.
+            # This information must be preserved so that the Cpp wrapper
+            # can launch the kernel with the correct configuration.
+            threads_per_warp = 32
+            if hasattr(launcher.bin.metadata, "threads_per_warp"):
+                threads_per_warp = launcher.bin.metadata.threads_per_warp
+            params["threads_per_warp"] = threads_per_warp
+
         from torch._inductor.codecache import CudaKernelParamCache
 
         bin_type = {"hip": "hsaco", "xpu": "spv"}.get(self.device_props.type, "cubin")
