@@ -89,12 +89,12 @@ _P = ParamSpec("_P")
 
 
 _custom_should_partition_fns: weakref.WeakKeyDictionary[
-    Union[torch._ops.OpOverload, torch._ops.HigherOrderOperator], Callable[..., bool]
+    torch._ops.OpOverload, Callable[..., bool]
 ] = weakref.WeakKeyDictionary()
 
 
 def register_should_partition_rule(
-    op: Union[torch._ops.OpOverload, torch._ops.HigherOrderOperator],
+    op: torch._ops.OpOverload,
     func: Callable[..., bool],
 ) -> None:
     """Register a function that says if Inductor should partition the graph on this op.
@@ -106,7 +106,7 @@ def register_should_partition_rule(
     `register_should_partition_rule` is currently private and experimental.
     Use at your own risk.
     """
-    assert isinstance(op, (torch._ops.OpOverload, torch._ops.HigherOrderOperator))
+    assert isinstance(op, torch._ops.OpOverload)
     _custom_should_partition_fns[op] = func
 
 
@@ -4377,11 +4377,15 @@ class Scheduler:
         if isinstance(ir_node, torch._inductor.ir.FallbackKernel):
             operator = ir_node.op_overload
             if operator is not None and operator in _custom_should_partition_fns:
+                assert isinstance(operator, torch._ops.OpOverload)
                 should_partition_fn = _custom_should_partition_fns[operator]
                 fx_node = ir_node.get_origin_node()
                 assert fx_node is not None
-                _, fake_args, fake_kwargs = (
+                success, fake_args, fake_kwargs = (
                     torch._inductor.fx_utils.get_fake_args_kwargs(fx_node)
+                )
+                assert success, (
+                    "If this op came from a custom inductor pass, make sure to run FakeTensorUpdator"
                 )
                 should_partition = should_partition_fn(*fake_args, **fake_kwargs)
                 return should_partition
