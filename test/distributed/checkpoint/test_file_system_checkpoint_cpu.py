@@ -442,6 +442,7 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
         )
         rank = dist.get_rank()
         device_type = torch.accelerator.current_accelerator().type
+        
         device = f"xpu:{dist.get_rank()}"
         model_to_save = MyShardedModel3(src_spec).to(device)
         model_to_save._register_state_dict_hook(state_dict_hook)
