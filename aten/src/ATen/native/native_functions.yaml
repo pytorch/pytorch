@@ -10848,6 +10848,7 @@
   dispatch:
     CompositeExplicitAutograd: foreach_tensor_clamp_min_scalar_kernel_slow_
     CUDA: foreach_tensor_clamp_min_scalar_kernel_cuda_
+    MTIA: foreach_tensor_maximum_scalar_kernel_mtia_
   autogen: _foreach_maximum.Scalar_out
 
 # foreach_minimum/maximum dispatches to clamp_max/min
