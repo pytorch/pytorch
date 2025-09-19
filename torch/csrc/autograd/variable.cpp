@@ -910,4 +910,34 @@ std::unique_ptr<ViewFunc> ChainedViewFunc::clone_and_set(
       second->clone_and_set(second_symints, second_tensors));
 }
 
+std::optional<c10::ScalarType> VariableHooks::grad_dtype(
+    const at::TensorBase& self) const {
+  if (auto* meta = impl::get_autograd_meta(self)) {
+    return meta->grad_dtype();
+  }
+  return std::nullopt;
+}
+
+void VariableHooks::set_grad_dtype(
+    const at::TensorBase& self,
+    const std::optional<c10::ScalarType>& grad_dtype) const {
+  auto* meta = impl::materialize_autograd_meta(self);
+  meta->set_grad_dtype(grad_dtype);
+}
+
+bool VariableHooks::allow_grad_dtype_mismatch(
+    const at::TensorBase& self) const {
+  if (auto* meta = impl::get_autograd_meta(self)) {
+    return meta->allow_grad_dtype_mismatch();
+  }
+  return false;
+}
+
+void VariableHooks::set_allow_grad_dtype_mismatch(
+    const at::TensorBase& self,
+    bool allow_mismatch) const {
+  auto* meta = impl::materialize_autograd_meta(self);
+  meta->set_allow_grad_dtype_mismatch(allow_mismatch);
+}
+
 } // namespace torch::autograd

@@ -949,15 +949,23 @@ static void validate_outputs_impl(
     TORCH_CHECK(
         isFloatingType(grad.scalar_type()) ||
         (input_is_complex == grad_is_complex));
-    if (c10::typeMetaToScalarType(metadata.options().dtype()) !=
-        grad.scalar_type()) {
-      grad = grad.to(c10::typeMetaToScalarType(metadata.options().dtype()));
-    }
-    if (grad.dtype() != metadata.dtype()) {
-      std::stringstream ss;
-      ss << "invalid gradient at index " << i << " - expected dtype ";
-      ss << metadata.dtype() << " but got " << grad.dtype();
-      TORCH_CHECK(false, format_error(ss.str()));
+
+    // grad_dtype and allow_grad_dtype_mismatch can only be customized
+    // on leaf tensors, defaulting to nullopt and false otherwise.
+    if (!metadata.allow_grad_dtype_mismatch()) {
+      at::ScalarType expected_dtype = metadata.grad_dtype().has_value()
+          ? metadata.grad_dtype().value()
+          : c10::typeMetaToScalarType(metadata.options().dtype());
+
+      if (grad.scalar_type() != expected_dtype) {
+        grad = grad.to(expected_dtype);
+      }
+      if (grad.dtype() != expected_dtype) {
+        std::stringstream ss;
+        ss << "invalid gradient at index " << i << " - expected dtype ";
+        ss << expected_dtype << " but got " << grad.dtype();
+        TORCH_CHECK(false, format_error(ss.str()));
+      }
     }
     if (grad.layout() != metadata.layout()) {
       // TODO: Currently we only support (*, Sparse) combination for
