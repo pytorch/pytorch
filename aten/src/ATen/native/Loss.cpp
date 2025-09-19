@@ -383,7 +383,7 @@ Tensor binary_cross_entropy_with_logits(const Tensor& input, const Tensor& targe
 
     // Handle small values
     if (has_small_values) {
-      auto small_target = at::where(large_mask, target, at::zeros_like(target));
+      auto small_target = at::where(small_mask, target, at::zeros_like(target));
       auto small_loss = thresh_value * small_target;
       loss = at::where(small_mask, small_loss, loss);
     }

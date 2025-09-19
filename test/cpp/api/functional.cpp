@@ -3187,6 +3187,22 @@ TEST_F(FunctionalTest, BCEWithLogitsLoss) {
             sigmoid(output),
             target,
             F::BinaryCrossEntropyFuncOptions().weight(weight))));
+
+    // test extreme values
+    float inf_f = std::numeric_limits<float>::infinity();
+    target = torch::rand(2);
+    output = torch::tensor({inf_f, -inf_f});
+
+    auto bce_with_logits = F::binary_cross_entropy_with_logits(
+        output,
+        target,
+        F::BinaryCrossEntropyWithLogitsFuncOptions().reduction(torch::kNone));
+    auto bce_sigmoid = F::binary_cross_entropy(
+        sigmoid(output),
+        target,
+        F::BinaryCrossEntropyFuncOptions().reduction(torch::kNone));
+
+    ASSERT_TRUE(torch::allclose(bce_with_logits, bce_sigmoid));
   }
   { // test BCE with logits has correct grad at zero
     const auto output = torch::zeros({3, 1}, torch::requires_grad());
