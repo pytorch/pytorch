@@ -444,6 +444,9 @@ use_experimental_benchmarker: bool = Config(
     justknob="pytorch/inductor:use_experimental_benchmarker",
 )
 
+# Enable distributed autotuning
+distributed_autotune = os.environ.get("TORCHINDUCTOR_DISTRIBUTED_AUTOTUNE") == "1"
+
 # enable slow autotuning passes to select algorithms
 max_autotune = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE") == "1"
 
