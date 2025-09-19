@@ -271,12 +271,14 @@ class TestMaxAutotune(TestCase):
     @parametrize("b_transposed", (False, True))
     @parametrize("dynamic", (False, True))
     @parametrize("tma_store", (False, True))
+    @parametrize("epilogue_subtile", (False, True))
     def test_blackwell_max_autotune_regular_mm_persistent_tma(
         self,
         a_transposed: bool,
         b_transposed: bool,
         dynamic: bool,
         tma_store: bool,
+        epilogue_subtile: bool,
     ):
         def mm(a, b):
             # TMA requires 16-byte alignment: here we repeat the dims
@@ -308,6 +310,7 @@ class TestMaxAutotune(TestCase):
                 "max_autotune": True,
                 "triton.enable_persistent_tma_matmul": True,
                 "triton.enable_template_tma_store": tma_store,
+                "triton.enable_epilogue_subtiling": epilogue_subtile,
                 "test_configs.autotune_choice_name_regex": "blackwell_ws_persistent_device_tma",
             }
         ):
@@ -652,12 +655,14 @@ class TestMaxAutotune(TestCase):
     @parametrize("b_transposed", (False, True))
     @parametrize("dynamic", (False, True))
     @parametrize("tma_store", (False, True))
+    @parametrize("epilogue_subtile", (False, True))
     def test_blackwell_max_autotune_addmm_persistent_tma(
         self,
         a_transposed: bool,
         b_transposed: bool,
         dynamic: bool,
         tma_store: bool,
+        epilogue_subtile: bool,
     ):
         def addmm(x, a, b):
             # TMA requires 16-byte alignment: here we repeat the dims
@@ -692,6 +697,7 @@ class TestMaxAutotune(TestCase):
                 "max_autotune": True,
                 "triton.enable_persistent_tma_matmul": True,
                 "triton.enable_template_tma_store": tma_store,
+                "triton.enable_epilogue_subtiling": epilogue_subtile,
                 "test_configs.autotune_choice_name_regex": "blackwell_ws_persistent_device_tma",
             }
         ):
