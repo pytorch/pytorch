@@ -56,6 +56,7 @@ torch.monitor <monitor>
 torch.signal <signal>
 torch.special <special>
 torch.overrides
+torch.nativert <nativert>
 torch.package <package>
 torch.pytree <pytree>
 profiler
@@ -77,7 +78,6 @@ torch.testing <testing>
 torch.utils <utils>
 torch.utils.pytree
 torch.utils.benchmark <benchmark_utils>
-torch.utils.bottleneck <bottleneck>
 torch.utils.checkpoint <checkpoint>
 torch.utils.cpp_extension <cpp_extension>
 torch.utils.data <data>
