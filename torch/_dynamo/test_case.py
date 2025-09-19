@@ -117,8 +117,6 @@ class TestCase(TorchTestCase):
                 return
         return super().assertEqual(x, y, *args, **kwargs)
 
-    # assertExpectedInline might also need to be disabled for wrapped nested
-    # graph break tests
     def assertExpectedInline(self, *args: Any, **kwargs: Any) -> None:  # type: ignore[override]
         if config.debug_disable_compile_counter:
             return

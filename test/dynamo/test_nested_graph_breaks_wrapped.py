@@ -10,17 +10,7 @@ from torch._dynamo.testing import make_test_cls_with_patches
 try:
     from . import test_ctx_manager
 except ImportError:
-    # import test_aot_autograd
     import test_ctx_manager
-
-    # import test_export
-    # import test_functions
-    # import test_higher_order_ops
-    # import test_misc
-    # import test_modules
-    # import test_repros
-    # import test_sdpa
-    # import test_subgraphs
 
 
 test_classes = {}
@@ -60,15 +50,6 @@ def make_nested_cls(cls, strong):
 
 tests = [
     test_ctx_manager.CtxManagerTests,
-    # test_functions.FunctionTests,
-    # test_misc.MiscTests,
-    # test_repros.ReproTests,
-    # test_modules.NNModuleTests,
-    # test_subgraphs.SubGraphTests,
-    # test_higher_order_ops.HigherOrderOpTests,
-    # test_higher_order_ops.FuncTorchHigherOrderOpTests,
-    # test_aot_autograd.AotAutogradFallbackTests,
-    # test_sdpa.TestSDPA,
 ]
 
 strong_tests = []
@@ -102,6 +83,9 @@ xfails = [
     # recursion limit exceeded
     # NestedGraphBreaksStrongCtxManagerTests.test_cuda_stream_compared_with_constant_nested_graph_breaks_strong,  # noqa: F821
 ]
+
+
+case = None
 
 for case in xfails:
     unittest.expectedFailure(case)
