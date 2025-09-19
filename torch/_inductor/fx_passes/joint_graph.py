@@ -40,6 +40,7 @@ from .replace_random import replace_random_passes
 
 
 log = logging.getLogger(__name__)
+early_patterns = PatternMatcherPass()
 patterns = PatternMatcherPass()
 aten = torch.ops.aten
 prims = torch.ops.prims
@@ -595,6 +596,22 @@ def joint_graph_passes(graph: torch.fx.GraphModule):
         count += 1
 
     if config.pattern_matcher:
+        count += early_patterns.apply(graph.graph)
+
+    # Make sure AutoChunker happens before pad_mm so we don't need
+    # to handle padding when searching for chunking patterns.
+    if config.AutoChunker.enable:
+        from .auto_chunker import CantChunk, chunk
+
+        try:
+            graph = chunk(graph)
+        except CantChunk as e:
+            auto_chunker_log = torch._logging.getArtifactLogger(
+                __name__, "auto_chunker"
+            )
+            auto_chunker_log.debug("AutoChunker fail with error: %s", str(e))
+
+    if config.pattern_matcher:
         for i, patterns in enumerate(pass_patterns):
             maybe_count = GraphTransformObserver(
                 graph, f"pass_pattern_{i}"
@@ -744,7 +761,7 @@ def definitely_equal(
 
 @register_graph_pattern(
     CallFunction(torch.ops.aten.view.default, KeywordArg("arg"), KeywordArg("size")),
-    pass_dict=patterns,
+    pass_dict=early_patterns,
 )
 def pointless_view(match: Match, arg, size):
     """Remove no-op view"""
@@ -761,7 +778,7 @@ def pointless_view(match: Match, arg, size):
         CallFunction(aten.view.default, KeywordArg("arg"), KeywordArg("size1")),
         KeywordArg("size2"),
     ),
-    pass_dict=patterns,
+    pass_dict=early_patterns,
 )
 def pointless_view_pair(match: Match, arg, size1, size2):
     """
@@ -781,7 +798,7 @@ def pointless_view_pair(match: Match, arg, size1, size2):
         CallFunction(aten.permute.default, KeywordArg("arg"), KeywordArg("perm1")),
         KeywordArg("perm2"),
     ),
-    pass_dict=patterns,
+    pass_dict=early_patterns,
 )
 def pointless_permute_pair(match: Match, arg, perm1, perm2):
     rank = len(perm1)

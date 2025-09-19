@@ -201,6 +201,12 @@ register_artifact(
 )
 
 register_artifact(
+    "auto_chunker",
+    "Logs related to the auto chunker",
+    off_by_default=True,
+)
+
+register_artifact(
     "overlap",
     "Detailed Inductor compute/comm overlap decisions",
     off_by_default=True,
