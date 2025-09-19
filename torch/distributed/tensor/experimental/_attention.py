@@ -64,21 +64,12 @@ _cp_options = _ContextParallelOptions()
 
 @dataclass
 class _ContextParallelGlobalVars:
-    # The current context parallel impl requires a record of some info
-    # as global vars. This dataclass stores those variables.
-    # TODO: this var should be able to stored in CP context
-    cp_shard_dim: int = 0
     # This variable stores the TorchFunctionMode singleton because using multiple TF
     # instances for dispatching may trigger recompilations
     torch_function_mode: Optional[TorchFunctionMode] = None
 
 
 _cp_global_vars = _ContextParallelGlobalVars()
-
-
-def _set_cp_global_var(name: str, value: Any) -> None:
-    """Set a global variable for context parallelism."""
-    setattr(_cp_global_vars, name, value)
 
 
 def _is_causal_behavior(
@@ -1153,10 +1144,10 @@ def _context_parallel(seq_dim: int, mesh: DeviceMesh) -> Generator[None, None, N
                 assert isinstance(block_mask, tuple)
 
                 global_key = ft_c.all_gather_tensor_autograd(
-                    key, _cp_global_vars.cp_shard_dim, self._device_mesh
+                    key, seq_dim, self._device_mesh
                 )
                 global_value = ft_c.all_gather_tensor_autograd(
-                    value, _cp_global_vars.cp_shard_dim, self._device_mesh
+                    value, seq_dim, self._device_mesh
                 )
 
                 # shape rewrite: because torch.nn.flex_attention() checks
@@ -1206,7 +1197,7 @@ def _context_parallel(seq_dim: int, mesh: DeviceMesh) -> Generator[None, None, N
                 attention_input_fn,
                 attention_output_fn,
             )
-            _set_cp_global_var("torch_function_mode", tf_mode)
+            _cp_global_vars.torch_function_mode = tf_mode
 
         with tf_mode:
             with _enable_cp_dispatcher():
