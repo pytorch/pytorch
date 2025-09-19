@@ -8468,7 +8468,8 @@ def sample_inputs_nll_loss(op_info, device, dtype, requires_grad, **kwargs):
             yield make_input(s), make_target(s), dict(reduction=reduction)
             yield make_input(s), make_target(s), dict(weight=make_weight(), reduction=reduction)
             yield make_input(s), make_target(s), dict(weight=make_weight(low=0), reduction=reduction)
-            yield make_input(s), make_target(s), dict(weight=make_weight(high=0), reduction=reduction)
+            if dtype.is_floating_point or dtype.is_complex:
+                yield make_input(s), make_target(s), dict(weight=make_weight(high=0), reduction=reduction)
             t = make_target(s)
             ignore = num_classes // 2
             # If "mean", nll returns NaN, so it's not differentiable at those points
@@ -12362,6 +12363,10 @@ op_db: list[OpInfo] = [
                DecorateInfo(
                    toleranceOverride({torch.complex64: tol(atol=1e-05, rtol=1.2e-03)}),
                    'TestCommon', 'test_variant_consistency_eager', device_type='cuda'),
+               # Higher differences starting with Zen3 or Alder Lake
+               DecorateInfo(
+                   toleranceOverride({torch.complex64: tol(atol=4e-05, rtol=4e-06)}),
+                   'TestDecomp', 'test_quick', device_type='cpu'),
                DecorateInfo(
                    toleranceOverride({torch.complex64: tol(atol=1e-05, rtol=1.2e-03)}),
                    'TestMathBits', 'test_conj_view', device_type='cuda'),
@@ -16589,12 +16594,7 @@ op_db: list[OpInfo] = [
                 toleranceOverride({torch.float16: tol(atol=1e-04, rtol=0.001)}), 'TestUnaryUfuncs', device_type='cuda',), ],
         skips=[
             # still want to test that first derivative works though second derivative isn't supported
-            DecorateInfo(unittest.expectedFailure, 'TestBwdGradients', "test_inplace_gradgrad"),
-            # produces 0 instead of nan on ROCM
-            DecorateInfo(unittest.expectedFailure,
-                         'TestUnaryUfuncs', "test_reference_numerics_extremal",
-                         device_type='cuda',
-                         active_if=(TEST_WITH_ROCM)), ]
+            DecorateInfo(unittest.expectedFailure, 'TestBwdGradients', "test_inplace_gradgrad")]
     ),
     UnaryUfuncInfo(
         'nn.functional.logsigmoid',

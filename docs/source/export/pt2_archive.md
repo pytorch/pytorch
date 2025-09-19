@@ -22,18 +22,22 @@ The following is a sample archive. We will walk through the archive folder by fo
 ├── data
 │   ├── aotinductor
 │   │   └── model1
-│   │       ├── aotinductor_pickle_data.json
-│   │       ├── cf5ez6ifexr7i2hezzz4s7xfusj4wtisvu2gddeamh37bw6bghjw.cpp
-│   │       ├── cf5ez6ifexr7i2hezzz4s7xfusj4wtisvu2gddeamh37bw6bghjw.so
+│   │       ├── cf5ez6ifexr7i2hezzz4s7xfusj4wtisvu2gddeamh37bw6bghjw.kernel_metadata.json
+│   │       ├── cf5ez6ifexr7i2hezzz4s7xfusj4wtisvu2gddeamh37bw6bghjw.kernel.cpp
+│   │       ├── cf5ez6ifexr7i2hezzz4s7xfusj4wtisvu2gddeamh37bw6bghjw.wrapper_metadata.json
+│   │       ├── cf5ez6ifexr7i2hezzz4s7xfusj4wtisvu2gddeamh37bw6bghjw.wrapper.cpp
+│   │       ├── cf5ez6ifexr7i2hezzz4s7xfusj4wtisvu2gddeamh37bw6bghjw.wrapper.so
 │   │       ├── cg7domx3woam3nnliwud7yvtcencqctxkvvcafuriladwxw4nfiv.cubin
 │   │       └── cubaaxppb6xmuqdm4bej55h2pftbce3bjyyvljxbtdfuolmv45ex.cubin
 │   ├── weights
-│   │  ├── model1_model_param_config.json
+│   │  ├── model1_weights_config.json
+│   │  ├── model2_weights_config.json
 │   │  ├── weight_0
 │   │  ├── weight_1
 │   │  ├── weight_2
 │   └── constants
-│   │  ├── model1_model_constants_config.json
+│   │  ├── model1_constants_config.json
+│   │  ├── model2_constants_config.json
 │   │  ├── tensor_0
 │   │  ├── tensor_1
 │   │  ├── custom_obj_0
@@ -67,11 +71,12 @@ example, compilation artifacts for the `model1` model on A100 and H100 will be
 saved in `model1-a100` and `model1-h100` folders separately.
 
 The folder typically contains
-* `<uuid>.so`: Dynamic library compiled from <uuid>.cpp.
-* `<uuid>.cpp`: AOTInductor generated cpp wrapper file.
+* `<uuid>.wrapper.so`: Dynamic library compiled from <uuid>.cpp.
+* `<uuid>.wrapper.cpp`: AOTInductor generated cpp wrapper file.
+* `<uuid>.kernel.cpp`: AOTInductor generated cpp kernel file.
 * `*.cubin`: Triton kernels compiled from triton codegen kernels
+* `<uuid>.wrapper_metadata.json`: Metadata which was passed in from the `aot_inductor.metadata` inductor config
 * (optional) `<uuid>.json`: External fallback nodes for custom ops to be executed by `ProxyExecutor`, serialized according to `ExternKernelNode` struct. If the model doesn’t use custom ops/ProxyExecutor, this file would be omitted.
-* `<uuid>_metadata.json`: Metadata which was passed in from the `aot_inductor.metadata` inductor config
 
 ### Weights
 
@@ -79,16 +84,16 @@ Path: `/data/weights/*`
 
 Model parameters and buffers are saved in the `/data/weights/` folder. Each
 tensor is saved as a separated file. The file only contains the raw data blob,
-tensor metadata are saved separately in the
-`<model_name>_model_param_config.json`.
+tensor metadata and mapping from model weight FQN to saved raw data blob are saved separately in the
+`<model_name>_weights_config.json`.
 
 ### Constants
 
 Path: `/data/constants/*`
 
 TensorConstants, non-persistent buffers and TorchBind objects are saved in the
-`/data/constants/` folder. Metadata is saved separately in the
-`<model_name>_model_constants_config.json`
+`/data/constants/` folder. Metadata and mapping from model constant FQN to saved raw data blob are saved separately in the
+`<model_name>_constants_config.json`
 
 ### Sample Inputs
 
