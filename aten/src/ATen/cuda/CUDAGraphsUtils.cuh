@@ -14,7 +14,7 @@
 
 namespace at::cuda {
 
-using CaptureId_t = c10::cuda::CaptureId_t;
+using CaptureId_t = c10::CaptureId_t;
 using CaptureStatus = c10::cuda::CaptureStatus;
 
 // Use this version where you don't want to create a CUDA context if none exists.

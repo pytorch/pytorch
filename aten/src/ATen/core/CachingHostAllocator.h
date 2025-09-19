@@ -10,7 +10,9 @@
 #include <optional>
 
 #include <deque>
+#include <vector>
 #include <mutex>
+#include <shared_mutex>
 
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-parameter")
 namespace at {
@@ -36,6 +38,9 @@ struct HostBlock {
   bool allocated_{false}; // in-use flag
   size_t event_count_{0}; // number of related events
   ska::flat_hash_set<S> streams_; // streams on which the block was used
+  c10::MempoolId_t owning_pool_{0,0};
+  std::optional<S> allocating_stream_;
+  bool was_allocated_during_stream_capture_;
 };
 
 template <typename B>
@@ -220,6 +225,39 @@ struct alignas(hardware_destructive_interference_size) HostStatsStaged {
  * we hold the same locks as empty_cache, to ensure the fidelity of the stats.
  */
 
+// Generic per-pool structures for the host caching allocator. These are
+// templated so they can reference the allocator's template parameters B and E.
+template <typename S_, typename E_, typename B_>
+struct HostBlockPool {
+  HostBlockPool() = default;
+  HostBlockPool(const HostBlockPool&) = delete;
+  HostBlockPool& operator=(const HostBlockPool&) = delete;
+
+  alignas(hardware_destructive_interference_size) std::mutex blocks_mutex_;
+  ska::flat_hash_set<B_*> blocks_; // all blocks in this pool
+  ska::flat_hash_map<void*, B_*> ptr_to_block_;
+
+  // Per-size free lists guarded by their own mutexes.
+  alignas(hardware_destructive_interference_size) std::vector<FreeBlockList<B_>> free_list_ =
+      std::vector<FreeBlockList<B_>>(MAX_SIZE_INDEX);
+
+  // Events pending for blocks in this pool.
+  alignas(hardware_destructive_interference_size) std::mutex events_mutex_;
+  std::deque<std::pair<E_, B_*>> events_;
+};
+
+template <typename S_, typename E_, typename B_>
+struct HostPrivatePool {
+  explicit HostPrivatePool(c10::MempoolId_t id_) : id(id_) {}
+  HostPrivatePool(const HostPrivatePool&) = delete;
+  HostPrivatePool& operator=(const HostPrivatePool&) = delete;
+
+  c10::MempoolId_t id;
+  int use_count{1};
+  HostBlockPool<S_, E_, B_> blocks;
+};
+
+
 template <
     typename S,
     typename E,
@@ -239,30 +277,43 @@ struct CachingHostAllocatorImpl {
       return {nullptr, nullptr};
     }
 
+    auto&& [mempool_id, pool] = get_allocation_pool(get_current_stream());
+
     // If we are using background threads, we can process events in the
     // background.
     if (!pinned_use_background_threads()) {
-      process_events();
+      process_events(pool);
     }
 
     // Round up the allocation to the nearest power of two to improve reuse.
     // These power of two sizes are also used to index into the free list.
     size_t roundSize = c10::llvm::PowerOf2Ceil(size);
 
-    // First, try to allocate from the free list
-    auto* block = get_free_block(roundSize);
+    // First, try to allocate from the free list of the chosen pool
+    auto* block = get_free_block(roundSize, pool);
     if (block) {
+      block->allocating_stream_ = get_current_stream();
+      block->was_allocated_during_stream_capture_ = stream_is_capturing(*block->allocating_stream_);
       return {block->ptr_, reinterpret_cast<void*>(block)};
     }
 
     // Check in the recently freed blocks with pending events to see if we
     // can reuse them. Call get_free_block again after processing events
     if (pinned_use_background_threads()) {
+      process_events_for_specific_size(roundSize, pool);
+      block = get_free_block(roundSize, pool);
+      if (block) {
+        block->allocating_stream_ = get_current_stream();
+        block->was_allocated_during_stream_capture_ = stream_is_capturing(*block->allocating_stream_);
+        return {block->ptr_, reinterpret_cast<void*>(block)};
+      }
+
       // Launch the background thread and process events in a loop.
       static bool background_thread_flag [[maybe_unused]] = [this] {
         getBackgroundThreadPool()->run([&]() {
           while (active_) {
-            process_events();
+            // Background thread conservatively processes default pool events.
+            process_events(default_pool_);
             std::this_thread::sleep_for(std::chrono::microseconds(100));
           }
         });
@@ -278,8 +329,10 @@ struct CachingHostAllocatorImpl {
     // Then, create a new block.
     block = new B(roundSize, ptr);
     block->allocated_ = true;
-
-    add_allocated_block(block);
+    block->owning_pool_ = mempool_id;
+    block->allocating_stream_ = get_current_stream();
+    block->was_allocated_during_stream_capture_ = stream_is_capturing(*block->allocating_stream_);
+    add_allocated_block(block, pool);
     return {block->ptr_, reinterpret_cast<void*>(block)};
   }
 
@@ -309,82 +362,93 @@ struct CachingHostAllocatorImpl {
       }
     }
 
-    // Event recording must be done outside the mutex to avoid potential
-    // deadlocks (e.g., when Python GIL is involved)
-    for (auto stream : streams) {
-      record_stream(events, stream);
+    if (!block->was_allocated_during_stream_capture_) {
+      // Event recording must be done outside the mutex to avoid potential
+      // deadlocks (e.g., when Python GIL is involved)
+      for (auto stream : streams) {
+        record_stream(events, stream);
+      }
     }
 
     if (!events) {
+      auto& pool = pool_from_block(block);
       auto index = size_index(block->size_);
-      std::lock_guard<std::mutex> g(free_list_[index].mutex_);
-      free_list_[index].list_.push_back(block);
+      std::lock_guard<std::mutex> g(pool.free_list_[index].mutex_);
+      pool.free_list_[index].list_.push_back(block);
     } else {
+      TORCH_INTERNAL_ASSERT(!block->was_allocated_during_stream_capture_ || events->empty());
       // restore these events that record by used streams.
-      std::lock_guard<std::mutex> g(events_mutex_);
+      auto& pool = pool_from_block(block);
+      std::lock_guard<std::mutex> g(pool.events_mutex_);
       for (auto&& event : *events) {
-        events_.emplace_front(std::move(event), block);
+        pool.events_.emplace_front(std::move(event), block);
       }
     }
   }
 
   virtual bool record_event(void* ptr, void* ctx, c10::Stream s) {
-    S stream = S(s);
-    auto* block = reinterpret_cast<B*>(ctx);
-
-    // Note: we need to check if the passed-in `ctx` is valid. This is because
-    // `record_event` (via `CachingHostAllocator_recordEvent`) can be invoked on
-    // an arbitrary tensor, and is not guaranteed to correspond to a pinned
-    // memory allocation. Therefore, we need to check that `ctx` is valid before
-    // proceeding.
-    {
-      std::lock_guard<std::mutex> g(blocks_mutex_);
-      if (blocks_.find(block) != blocks_.end()) {
-        // Now we know this object is safe to access.
-        std::lock_guard<std::mutex> gb(block->mutex_);
-        TORCH_INTERNAL_ASSERT(block->allocated_);
-        block->streams_.insert(stream);
-        return true;
-      }
-      auto it = ptr_to_block_.find(ptr);
-      if (it != ptr_to_block_.end()) {
-        block = it->second;
-        std::lock_guard<std::mutex> g(block->mutex_);
-        TORCH_INTERNAL_ASSERT(block->allocated_);
-        block->streams_.insert(stream);
-        return true;
-      }
+    B *block = nullptr;
+    if (block_exists(ctx)) {
+      block = reinterpret_cast<B*>(ctx);
+    } else {
+      block = get_block_from_ptr(ptr);
     }
-
-    return false;
+    if (block == nullptr) {
+      return false;
+    }
+    S stream = S(s);
+    std::lock_guard<std::mutex> gb(block->mutex_);
+    TORCH_INTERNAL_ASSERT(block->allocated_);
+    block->streams_.insert(stream);
+    return true;
   }
 
+  // TODO: Rethink how this is implemented. Should it take a pool id
+  // like in CUDACachingAllocator?
   virtual void empty_cache() {
-    // Flush any available blocks into the free_list.
-    process_events();
+    // Flush available blocks in all pools into their free_lists.
+    process_events(default_pool_);
 
-    // Remove all elements from the free list, remove them from the blocks
-    // list, and free the associated pinned memory allocation. This requires
-    // concurrently holding both the free list mutexes and the blocks mutex, and
-    // is the only function that concurrently holds multiple mutexes.
-    for (size_t i = 0; i < free_list_.size(); ++i) {
-      std::lock(free_list_[i].mutex_, blocks_mutex_);
-      std::lock_guard<std::mutex> gf(free_list_[i].mutex_, std::adopt_lock);
-      std::lock_guard<std::mutex> gb(blocks_mutex_, std::adopt_lock);
+    auto free_from_pool = [&](auto& pool) {
+      for (size_t i = 0; i < pool.free_list_.size(); ++i) {
+        std::lock(pool.free_list_[i].mutex_, pool.blocks_mutex_);
+        std::lock_guard<std::mutex> gf(pool.free_list_[i].mutex_, std::adopt_lock);
+        std::lock_guard<std::mutex> gb(pool.blocks_mutex_, std::adopt_lock);
 
-      std::vector<B*> blocks_to_remove(free_list_[i].list_.begin(), free_list_[i].list_.end());
-      free_list_[i].list_.clear();
+        std::vector<B*> blocks_to_remove(
+            pool.free_list_[i].list_.begin(), pool.free_list_[i].list_.end());
+        pool.free_list_[i].list_.clear();
 
-      for (auto* block : blocks_to_remove) {
-        blocks_.erase(block);
-        ptr_to_block_.erase(block->ptr_);
-        auto index = size_index(block->size_);
-        free_block(block);
-        stats_.allocations.decrease(1);
-        stats_.allocated_bytes.decrease(block->size_);
-        stats_.allocation_bucket_stats[index].decrease(1);
-        stats_.allocated_bytes_bucket_stats[index].decrease(block->size_);
-        delete block;
+        for (auto* block : blocks_to_remove) {
+          // this suggests that you can be part of the free_list_
+          // while still being in blocks_. Hmm...
+          pool.blocks_.erase(block);
+          pool.ptr_to_block_.erase(block->ptr_);
+          auto index = size_index(block->size_);
+          free_block(block);
+          stats_.allocations.decrease(1);
+          stats_.allocated_bytes.decrease(block->size_);
+          stats_.allocation_bucket_stats[index].decrease(1);
+          stats_.allocated_bytes_bucket_stats[index].decrease(block->size_);
+          delete block;
+        }
+      }
+    };
+
+    free_from_pool(default_pool_);
+    // Also flush and free from private pools that are marked freeable
+    {
+      std::shared_lock<std::shared_mutex> lg(instance_mutex_);
+      for (auto it = graph_pools_freeable_.begin(); it != graph_pools_freeable_.end();) {
+        process_events(it->second->blocks);
+        free_from_pool(it->second->blocks);
+        if (it->second->blocks.blocks_.empty()) {
+          auto erase_count = graph_pools_.erase(it->first);
+          TORCH_INTERNAL_ASSERT(erase_count == 1);
+          it = graph_pools_freeable_.erase(it);
+        } else {
+          ++it;
+        }
       }
     }
   }
@@ -421,10 +485,13 @@ struct CachingHostAllocatorImpl {
     // Accurate reading of memory stats requires concurrently holding both the
     // free list mutexes and the blocks mutex. Previously, this was only done in
     // empty_cache function.
-    for (size_t i = 0; i < free_list_.size(); ++i) {
-      std::lock(free_list_[i].mutex_, blocks_mutex_);
-      std::lock_guard<std::mutex> gf(free_list_[i].mutex_, std::adopt_lock);
-      std::lock_guard<std::mutex> gb(blocks_mutex_, std::adopt_lock);
+    for (size_t i = 0; i < default_pool_.free_list_.size(); ++i) {
+      std::lock(
+          default_pool_.free_list_[i].mutex_, default_pool_.blocks_mutex_);
+      std::lock_guard<std::mutex> gf(
+          default_pool_.free_list_[i].mutex_, std::adopt_lock);
+      std::lock_guard<std::mutex> gb(
+          default_pool_.blocks_mutex_, std::adopt_lock);
 
       // We collect the slow-path stats only once, since they are not collected
       // per bucket (we pick index 0 arbitrarily). These are also all the host
@@ -458,10 +525,13 @@ struct CachingHostAllocatorImpl {
     // Resetting accumulated memory stats requires concurrently holding both the
     // free list mutexes and the blocks mutex. Previously, this was only done in
     // empty_cache function.
-    for (size_t i = 0; i < free_list_.size(); ++i) {
-      std::lock(free_list_[i].mutex_, blocks_mutex_);
-      std::lock_guard<std::mutex> gf(free_list_[i].mutex_, std::adopt_lock);
-      std::lock_guard<std::mutex> gb(blocks_mutex_, std::adopt_lock);
+    for (size_t i = 0; i < default_pool_.free_list_.size(); ++i) {
+      std::lock(
+          default_pool_.free_list_[i].mutex_, default_pool_.blocks_mutex_);
+      std::lock_guard<std::mutex> gf(
+          default_pool_.free_list_[i].mutex_, std::adopt_lock);
+      std::lock_guard<std::mutex> gb(
+          default_pool_.blocks_mutex_, std::adopt_lock);
 
       if (i == 0) {
         stats_.allocations.reset_accumulated();
@@ -485,10 +555,13 @@ struct CachingHostAllocatorImpl {
     // Resetting peak memory stats requires concurrently holding both the
     // free list mutexes and the blocks mutex. Previously, this was only done in
     // empty_cache function.
-    for (size_t i = 0; i < free_list_.size(); ++i) {
-      std::lock(free_list_[i].mutex_, blocks_mutex_);
-      std::lock_guard<std::mutex> gf(free_list_[i].mutex_, std::adopt_lock);
-      std::lock_guard<std::mutex> gb(blocks_mutex_, std::adopt_lock);
+    for (size_t i = 0; i < default_pool_.free_list_.size(); ++i) {
+      std::lock(
+          default_pool_.free_list_[i].mutex_, default_pool_.blocks_mutex_);
+      std::lock_guard<std::mutex> gf(
+          default_pool_.free_list_[i].mutex_, std::adopt_lock);
+      std::lock_guard<std::mutex> gb(
+          default_pool_.blocks_mutex_, std::adopt_lock);
 
       if (i == 0) {
         stats_.allocations.reset_peak();
@@ -509,141 +582,223 @@ struct CachingHostAllocatorImpl {
   }
 
  private:
-  virtual void add_allocated_block(B* block) {
-    std::lock_guard<std::mutex> g(blocks_mutex_);
-    blocks_.insert(block);
-    stats_.allocations.increase(1);
-    stats_.allocated_bytes.increase(block->size_);
-    ptr_to_block_.insert({block->ptr_, block});
 
-    // Unfortunately, we have to, on the slow path, quickly
-    // lock the bucket to record the allocation. This should
-    // be a rare event once the cache is warmed up.
-    auto size = block->size_;
-    auto index = size_index(size);
-    {
-      std::lock_guard<std::mutex> g(free_list_[index].mutex_);
-      stats_.allocation_bucket_stats[index].increase(1);
-      stats_.allocated_bytes_bucket_stats[index].increase(size);
-      stats_.active_bucket_stats[index].increase(1);
-      stats_.active_bytes_bucket_stats[index].increase(size);
-    }
-  }
+  using BlockPool = HostBlockPool<S, E, B>;
+  using PrivatePool = HostPrivatePool<S, E, B>;
 
-  virtual B* get_free_block(size_t size) {
-    auto index = size_index(size);
-    std::lock_guard<std::mutex> g(free_list_[index].mutex_);
-    if (!free_list_[index].list_.empty()) {
-      B* block = free_list_[index].list_.back();
-      free_list_[index].list_.pop_back();
-      block->allocated_ = true;
-      stats_.active_bucket_stats[index].increase(1);
-      stats_.active_bytes_bucket_stats[index].increase(size);
-      return block;
-    }
-    return nullptr;
-  }
-
-  virtual void process_events() {
-    // process all events until the last unready event, not for specific size.
-    process_events_for_specific_size(-1);
+  virtual void process_events(BlockPool& pool) {
+    // process all events in the given pool until the last unready event.
+    process_events_for_specific_size(-1, pool);
   }
 
   // If size is -1, process all events from backwards until the last unready
   // event. Otherwise, process events for a specific size and on first ready block
   // is found, add it to the free list and return.
-  virtual void process_events_for_specific_size(int64_t size) {
-    size_t event_count = 0;
-    size_t max_events = 0;
-    {
-      std::lock_guard<std::mutex> g(events_mutex_);
-      max_events = events_.size();
-    }
-
-    while (true) {
-      // Avoid calling cudaEventDestroy while holding a mutex, so move
-      // intermediate events out of the lock into this object.
-      // process the last event
-      std::optional<std::pair<E, B*>> processed;
+  virtual void process_events_for_specific_size(int64_t size, BlockPool& pool) {
+      size_t event_count = 0;
+      size_t max_events = 0;
       {
-        std::lock_guard<std::mutex> g(events_mutex_);
-        if (!events_.empty()) {
-          processed = std::move(events_.back());
-          events_.pop_back();
-        }
+        std::lock_guard<std::mutex> g(pool.events_mutex_);
+        max_events = pool.events_.size();
       }
 
-      if (!processed) {
-        return;
-      }
-
-      if (size != -1) {
-        if (event_count++ > max_events) {
-          {
-            std::lock_guard<std::mutex> g(events_mutex_);
-            events_.push_front(std::move(*processed));
+      while (true) {
+        std::optional<std::pair<E, B*>> processed;
+        {
+          std::lock_guard<std::mutex> g(pool.events_mutex_);
+          if (!pool.events_.empty()) {
+            processed = std::move(pool.events_.back());
+            pool.events_.pop_back();
           }
+        }
+
+        if (!processed) {
           return;
         }
-        if (size != (int64_t)processed->second->size_) {
-          // if we are processing a specific size, and the size of the block
-          // doesn't match, we can't use it.
-          {
-            std::lock_guard<std::mutex> g(events_mutex_);
-            events_.push_front(std::move(*processed));
-          }
-          continue;
-        }
-      }
 
-      // otherwise, query the event
-      {
-        // now, see if we can handle this element
-        auto& event = processed->first;
-        if (!query_event(event)) {
-          // push the event onto the back if it's not ready.
-          {
-            std::lock_guard<std::mutex> g(events_mutex_);
-            if (size == -1) {
-              events_.push_back(std::move(*processed));
-              return;
-            } else {
-              events_.push_front(std::move(*processed));
-              continue;
+        if (size != -1) {
+          if (event_count++ > max_events) {
+            {
+              std::lock_guard<std::mutex> g(pool.events_mutex_);
+              pool.events_.push_front(std::move(*processed));
+            }
+            return;
+          }
+          if (size != (int64_t)processed->second->size_) {
+            {
+              std::lock_guard<std::mutex> g(pool.events_mutex_);
+              pool.events_.push_front(std::move(*processed));
+            }
+            continue;
+          }
+        }
+
+        {
+          auto& event = processed->first;
+          if (!query_event(event)) {
+            {
+              std::lock_guard<std::mutex> g(pool.events_mutex_);
+              if (size == -1) {
+                pool.events_.push_back(std::move(*processed));
+                return;
+              } else {
+                pool.events_.push_front(std::move(*processed));
+                continue;
+              }
             }
           }
         }
-      }
 
-      // Process the events.
-      TORCH_INTERNAL_ASSERT(processed);
-      auto* block = processed->second;
-      bool available = false;
-      {
-        std::lock_guard<std::mutex> g(block->mutex_);
-        TORCH_INTERNAL_ASSERT(!block->allocated_)
-        block->event_count_--;
-        if (block->event_count_ == 0) {
-          available = true;
+        TORCH_INTERNAL_ASSERT(processed);
+        auto* block = processed->second;
+        bool available = false;
+        {
+          std::lock_guard<std::mutex> g(block->mutex_);
+          TORCH_INTERNAL_ASSERT(!block->allocated_)
+          block->event_count_--;
+          if (block->event_count_ == 0) {
+            available = true;
+          }
+        }
+
+        if (available) {
+          auto index = size_index(block->size_);
+          std::lock_guard<std::mutex> g(pool.free_list_[index].mutex_);
+          pool.free_list_[index].list_.push_back(block);
+          stats_.active_bucket_stats[index].decrease(1);
+          stats_.active_bytes_bucket_stats[index].decrease(size);
+          if (size != -1) {
+            return;
+          }
         }
       }
-
-      if (available) {
-        auto index = size_index(block->size_);
-        std::lock_guard<std::mutex> g(free_list_[index].mutex_);
-        free_list_[index].list_.push_back(block);
-        stats_.active_bucket_stats[index].decrease(1);
-        stats_.active_bytes_bucket_stats[index].decrease(size);
-        if (size != -1) {
-          return;
-        }
-      }
-    }
   }
 
   TaskThreadPool* getBackgroundThreadPool() {
     static TaskThreadPool* pool = new TaskThreadPool(1);
     return pool;
+  }
+
+ public:
+  void begin_allocate_to_pool(
+      c10::MempoolId_t pool_id,
+      std::function<bool(c10::Stream)> filter) {
+    std::unique_lock<std::shared_mutex> lg(instance_mutex_);
+    create_or_incref_pool(pool_id);
+    for (auto it2 = captures_underway_.begin(); it2 != captures_underway_.end();
+         ++it2) {
+      TORCH_CHECK(
+          it2->first != pool_id,
+          "beginAllocateToPool: already recording to mempool_id");
+    }
+    captures_underway_.emplace_back(pool_id, std::move(filter));
+  }
+
+  void end_allocate_to_pool(c10::MempoolId_t pool_id) {
+    std::unique_lock<std::shared_mutex> lg(instance_mutex_);
+    for (auto it = captures_underway_.begin(); it != captures_underway_.end();
+         ++it) {
+      if (it->first == pool_id) {
+        captures_underway_.erase(it);
+        return;
+      }
+    }
+    TORCH_CHECK(false, "endAllocatePool: not currently recording to mempool_id");
+  }
+
+  void create_or_incref_pool(c10::MempoolId_t pool_id) {
+    auto it = graph_pools_.find(pool_id);
+    if (it == graph_pools_.end()) {
+      graph_pools_.emplace(pool_id, std::make_unique<PrivatePool>(pool_id));
+    } else {
+      TORCH_INTERNAL_ASSERT(it->second->use_count > 0);
+      it->second->use_count++;
+    }
+  }
+
+  void release_pool(c10::MempoolId_t pool_id) {
+    std::unique_lock<std::shared_mutex> lg(instance_mutex_);
+    auto* pp = graph_pools_.at(pool_id).get();
+    TORCH_INTERNAL_ASSERT(pp != nullptr);
+    auto uc = --(pp->use_count);
+    TORCH_INTERNAL_ASSERT(uc >= 0);
+    if (uc == 0) {
+      bool inserted = graph_pools_freeable_.insert({pool_id, pp}).second;
+      TORCH_INTERNAL_ASSERT(inserted);
+    }
+  }
+
+ private:
+  // Helper: returns the correct pool for a newly allocated block.
+  std::tuple<c10::MempoolId_t, BlockPool&> get_allocation_pool(c10::Stream stream) {
+    std::shared_lock<std::shared_mutex> lg(instance_mutex_);
+    if (C10_UNLIKELY(!captures_underway_.empty())) {
+      for (auto& entry : captures_underway_) {
+        if (entry.second(stream)) {
+          auto it = graph_pools_.find(entry.first);
+          TORCH_INTERNAL_ASSERT(it != graph_pools_.end());
+          return {entry.first, it->second->blocks};
+        }
+      }
+    }
+    return {c10::MempoolId_t{0, 0}, default_pool_};
+  }
+
+  // Helper: return the pool containing a block, based on its owning_pool_.
+  BlockPool& pool_from_block(B* block) {
+    auto id = block->owning_pool_;
+    if (id == c10::MempoolId_t{0, 0}) {
+      return default_pool_;
+    }
+    std::shared_lock<std::shared_mutex> lg(instance_mutex_);
+    auto it = graph_pools_.find(id);
+    TORCH_INTERNAL_ASSERT(it != graph_pools_.end());
+    return it->second->blocks;
+  }
+
+  B* get_block_from_ptr(void *ptr) {
+    std::shared_lock<std::shared_mutex> lk(instance_mutex_);
+    {
+      std::lock_guard<std::mutex> lk(default_pool_.blocks_mutex_);
+      if (default_pool_.ptr_to_block_.count(ptr)) {
+        return default_pool_.ptr_to_block_.at(ptr);
+      }
+    }
+    if (C10_LIKELY(graph_pools_.empty())) {
+      return nullptr;
+    } else {
+      for (auto &&[_, private_pool]: graph_pools_) {
+        BlockPool& pool = private_pool->blocks;
+        std::lock_guard<std::mutex> lk(pool.blocks_mutex_);
+        if (pool.ptr_to_block_.count(ptr)) {
+          return pool.ptr_to_block_.at(ptr);
+        }
+      }
+      return nullptr;
+    }
+  }
+
+  bool block_exists(void *block_) {
+    B *block = reinterpret_cast<B*>(block_);
+    std::shared_lock<std::shared_mutex> lk(instance_mutex_);
+    {
+      std::lock_guard<std::mutex> lk(default_pool_.blocks_mutex_);
+      if (default_pool_.blocks_.count(block)) {
+        return true;
+      }
+    }
+    if (C10_LIKELY(graph_pools_.empty())) {
+      return false;
+    } else {
+      for (auto &&[_, private_pool]: graph_pools_) {
+        BlockPool& pool = private_pool->blocks;
+        std::lock_guard<std::mutex> lk(pool.blocks_mutex_);
+        if (pool.blocks_.count(block)) {
+          return true;
+        }
+      }
+      return false;
+    }
   }
 
   /* These following functions are runtime-related. */
@@ -669,25 +824,70 @@ struct CachingHostAllocatorImpl {
     TORCH_CHECK_NOT_IMPLEMENTED(false, "Not implemented for query_event");
   }
 
-  alignas(hardware_destructive_interference_size) std::mutex blocks_mutex_;
-  ska::flat_hash_set<B*> blocks_; // block list
-  ska::flat_hash_map<void*, B*> ptr_to_block_;
+  virtual S get_current_stream() const = 0;
+  /* { */
+  /*   TORCH_CHECK_NOT_IMPLEMENTED(false, "Not implemented for query_event"); */
+  /* } */
 
-  // We keep free list as a vector of free lists, one for each power of two
-  // size. This allows us to quickly find a free block of the right size.
-  // We use deque to store per size free list and guard the list with its own
-  // mutex.
-  alignas(hardware_destructive_interference_size) std::vector<FreeBlockList<B>>
-      free_list_{MAX_SIZE_INDEX};
+  virtual bool stream_is_capturing(S s) const = 0;
 
-  alignas(hardware_destructive_interference_size) std::mutex events_mutex_;
-  std::deque<std::pair<E, B*>> events_; // event queue paired with block
+  // instance variables
+
+  alignas(hardware_destructive_interference_size) std::shared_mutex instance_mutex_;
+
+  // corresponds to c10::MempoolId_t{0,0}
+  BlockPool default_pool_;
+
+  // Private pools for captures
+  ska::flat_hash_map<c10::MempoolId_t, std::unique_ptr<PrivatePool>, c10::MempoolIdHash>
+      graph_pools_;
+  ska::flat_hash_map<c10::MempoolId_t, PrivatePool*, c10::MempoolIdHash>
+      graph_pools_freeable_;
+
+  // Track active capture contexts requesting allocations to specific pools
+  std::vector<
+      std::pair<c10::MempoolId_t, std::function<bool(c10::Stream)>>> captures_underway_;
 
   // Indicates whether the object is active.
   // Set to false in the destructor to signal background threads to stop.
   std::atomic<bool> active_{true};
 protected:
   alignas(hardware_destructive_interference_size) HostStatsStaged stats_;
+
+ private:
+  // Insert a newly-allocated block into the allocator structures for a pool
+  void add_allocated_block(B* block, BlockPool& pool) {
+    std::lock_guard<std::mutex> g(pool.blocks_mutex_);
+    pool.blocks_.insert(block);
+    stats_.allocations.increase(1);
+    stats_.allocated_bytes.increase(block->size_);
+    pool.ptr_to_block_.insert({block->ptr_, block});
+
+    auto size = block->size_;
+    auto index = size_index(size);
+    {
+      std::lock_guard<std::mutex> gf(pool.free_list_[index].mutex_);
+      stats_.allocation_bucket_stats[index].increase(1);
+      stats_.allocated_bytes_bucket_stats[index].increase(size);
+      stats_.active_bucket_stats[index].increase(1);
+      stats_.active_bytes_bucket_stats[index].increase(size);
+    }
+  }
+
+  // Try to get a free block from a given pool
+  B* get_free_block(size_t size, BlockPool& pool) {
+    auto index = size_index(size);
+    std::lock_guard<std::mutex> g(pool.free_list_[index].mutex_);
+    if (!pool.free_list_[index].list_.empty()) {
+      B* block = pool.free_list_[index].list_.back();
+      pool.free_list_[index].list_.pop_back();
+      block->allocated_ = true;
+      stats_.allocation_bucket_stats[index].increase(1);
+      stats_.allocated_bytes_bucket_stats[index].increase(size);
+      return block;
+    }
+    return nullptr;
+  }
 };
 
 struct TORCH_API HostAllocator : public at::Allocator {
@@ -709,8 +909,28 @@ struct TORCH_API HostAllocator : public at::Allocator {
 
   // Resets the peak memory usage metrics
   virtual void reset_peak_stats() = 0;
+
+  virtual void begin_allocate_to_pool(
+      c10::MempoolId_t pool_id,
+      std::function<bool(c10::Stream)> filter) {
+    TORCH_CHECK_NOT_IMPLEMENTED(false, "Not implemented for begin_allocate_to_pool");
+  }
+
+  virtual void end_allocate_to_pool(c10::MempoolId_t pool_id) {
+    TORCH_CHECK_NOT_IMPLEMENTED(false, "Not implemented for end_allocate_to_pool");
+  }
+
+  virtual void create_or_incref_pool(
+      c10::MempoolId_t pool_id) {
+    TORCH_CHECK_NOT_IMPLEMENTED(false, "Not implemented for create_or_incref_pool");
+  }
+
+  virtual void release_pool(c10::MempoolId_t pool_id) {
+    TORCH_CHECK_NOT_IMPLEMENTED(false, "Not implemented for release_pool");
+  }
 };
 
+// this needs to support memory pools somehow...
 template <typename T, c10::DeleterFnPtr deleteFunc>
 struct CachingHostAllocatorInterface : public HostAllocator {
   CachingHostAllocatorInterface() : impl_(std::make_unique<T>()) {}
@@ -751,6 +971,25 @@ struct CachingHostAllocatorInterface : public HostAllocator {
 
   void reset_peak_stats() override {
     impl_->resetPeakStats();
+  }
+
+  void begin_allocate_to_pool(
+      c10::MempoolId_t pool_id,
+      std::function<bool(c10::Stream)> filter) override {
+    impl_->begin_allocate_to_pool(pool_id, std::move(filter));
+  }
+
+  void end_allocate_to_pool(c10::MempoolId_t pool_id) override {
+    impl_->end_allocate_to_pool(pool_id);
+  }
+
+  void create_or_incref_pool(
+      c10::MempoolId_t pool_id) override {
+    impl_->create_or_incref_pool(pool_id);
+  }
+
+  void release_pool(c10::MempoolId_t pool_id) override {
+    impl_->release_pool(pool_id);
   }
 
   std::unique_ptr<T> impl_;
