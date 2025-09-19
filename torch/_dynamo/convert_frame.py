@@ -46,6 +46,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from types import CellType, CodeType, FunctionType, ModuleType
 from typing import Any, Callable, Optional, TypeVar, Union
+from typing_extensions import ParamSpec
 from weakref import ReferenceType
 
 import torch
@@ -76,7 +77,6 @@ from torch.utils._python_dispatch import (
     is_in_torch_dispatch_mode,
 )
 from torch.utils._traceback import CapturedTraceback, format_traceback_short
-from typing_extensions import ParamSpec
 
 from . import config, decorators, exc, graph_break_hints, trace_rules
 from .bytecode_analysis import remove_dead_code, remove_pointless_jumps
@@ -313,9 +313,9 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
                 return fn(*args, **kwargs)
             finally:
                 cleanup.close()
-                assert (
-                    torch._C._len_torch_function_stack() == 0
-                ), "Torch function mode stack state changed while dynamo tracing, please report a bug"
+                assert torch._C._len_torch_function_stack() == 0, (
+                    "Torch function mode stack state changed while dynamo tracing, please report a bug"
+                )
                 exit_stack.close()
                 torch._C._set_grad_enabled(prior_grad_mode)
                 torch.autograd.grad_mode._enter_inference_mode(prior_inference_mode)
@@ -336,9 +336,9 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
                     "cuda", "matmul", cuda_matmul_fp32_prec
                 )
                 torch.fx.graph_module._forward_from_src = prior_fwd_from_src
-                assert (
-                    guards.check()
-                ), f"Global {guards.reason()}state changed while dynamo tracing, please report a bug"
+                assert guards.check(), (
+                    f"Global {guards.reason()}state changed while dynamo tracing, please report a bug"
+                )
 
     _fn._torchdynamo_orig_backend = fn  # type: ignore[attr-defined]
     return _fn
@@ -1264,6 +1264,7 @@ def _compile(
             assert check_fn.guards_state is not None
             package.add_guarded_code(check_fn.guards_state, out_code)
             package.add_inlined_source(output.tracing_context.traced_code)
+            package.update_device_type(output.current_tracer.graph)
 
         compile_id_str = str(compile_id) if compile_id is not None else "Unknown"
         annotation_str = "Torch-Compiled Region: " + compile_id_str
@@ -1434,6 +1435,7 @@ def _compile(
         fail_user_frame_lineno: Optional[int] = None
         torch._dynamo.utils.ReinplaceCounters.clear()
         guarded_code = None
+        tracer_output = None
         try:
             guarded_code, tracer_output = compile_inner(code, one_graph, hooks)
 
@@ -1862,7 +1864,9 @@ class CatchErrorsWrapper:
                     )
                     assert hasattr(
                         self._torchdynamo_orig_backend, "_clone_with_backend"
-                    ), "DDPOptimizer only supports callback fns that know how to clone themselves."
+                    ), (
+                        "DDPOptimizer only supports callback fns that know how to clone themselves."
+                    )
                     hijacked_callback = (
                         self._torchdynamo_orig_backend._clone_with_backend(
                             ddp_optimizer.compile_fn,

@@ -25,13 +25,13 @@ import types
 import unittest
 from collections.abc import Sequence
 from typing import Any, Callable, Optional, overload, TypeVar, Union
+from typing_extensions import ParamSpec
 from unittest.mock import patch
 
 import torch
 from torch import fx
 from torch._dynamo.backends.debugging import aot_eager
 from torch._dynamo.output_graph import OutputGraph
-from typing_extensions import ParamSpec
 
 from . import config, eval_frame, optimize, reset
 from .bytecode_transformation import (
