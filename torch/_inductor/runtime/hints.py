@@ -153,9 +153,6 @@ class DeviceProperties(typing.NamedTuple):
         except AttributeError:
             if device_type == "xpu":
                 multi_processor_count = props.gpu_subslice_count
-            elif device_type == "mps":
-                # TODO: Fetch the actual value from ioreg
-                multi_processor_count = 8
             elif device_type == "mtia":
                 multi_processor_count = 64
             else:

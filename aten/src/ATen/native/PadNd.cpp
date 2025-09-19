@@ -240,8 +240,15 @@ Tensor _pad_enum_symint(const Tensor &self, c10::SymIntArrayRef pad, int64_t mod
       default: {}
     }
   }
-  C10_THROW_ERROR(NotImplementedError,
-      "Only 2D, 3D, 4D, 5D padding with non-constant padding are supported for now");
+
+  std::ostringstream error_msg;
+  error_msg << "Padding size " << pad.size() << " is not supported for " << input_dim << "D input tensor.\n";
+  error_msg << "Supported combinations for non-constant padding:\n";
+  error_msg << "  - 2D or 3D input: padding size = 2 (pads last dimension)\n";
+  error_msg << "  - 3D or 4D input: padding size = 4 (pads last 2 dimensions)\n";
+  error_msg << "  - 4D or 5D input: padding size = 6 (pads last 3 dimensions)";
+
+  C10_THROW_ERROR(NotImplementedError, error_msg.str());
 }
 
 Tensor pad_symint(const Tensor &self, c10::SymIntArrayRef pad, std::string_view mode, std::optional<double> value) {

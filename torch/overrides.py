@@ -362,6 +362,7 @@ def get_ignored_functions() -> set[Callable]:
         Tensor._view_func,
         Tensor._view_func_unsafe,
         Tensor._rev_view_func_unsafe,
+        Tensor._make_dtensor,
         Tensor._make_wrapper_subclass,
         Tensor._python_dispatch.__get__,
         Tensor._has_symbolic_sizes_strides.__get__,
@@ -609,8 +610,8 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         torch.fused_moving_avg_obs_fake_quant: (
             lambda x, observer_on, fake_quant_on, averaging_const, running_min, running_max, scale, zero_point, quant_min, quant_max, ch_axis, per_row_fake_quant=False, symmetric_quant=False: -1  # noqa: B950
         ),
-        torch.fbgemm_linear_fp16_weight: lambda input, packed_weight, bias: -1,
-        torch.fbgemm_linear_fp16_weight_fp32_activation: lambda input, packed_weight, bias: -1,
+        torch.fbgemm_linear_fp16_weight: lambda input, packed_weight, bias, output: -1,
+        torch.fbgemm_linear_fp16_weight_fp32_activation: lambda input, packed_weight, bias, output: -1,
         torch.fbgemm_linear_int8_weight: lambda input, weight, packed, col_offsets, weight_scale, weight_zero_point, bias: -1,  # noqa: B950
         torch.fbgemm_linear_int8_weight_fp32_activation: (
             lambda input, weight, packed, col_offsets, weight_scale, weight_zero_point, bias: -1

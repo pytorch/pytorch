@@ -10,7 +10,10 @@ from torch.distributed.pipelining._backward import (
     stage_backward_input,
     stage_backward_weight,
 )
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    skipXPUIf,
+)
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
@@ -19,6 +22,7 @@ batch_size = 256
 
 
 class StageBackwardTests(TestCase):
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/1682")
     def test_stage_backward(self, device):
         # MLP as a stage module
         mod = MLPModule(d_hid).to(device)
@@ -93,6 +97,7 @@ class StageBackwardTests(TestCase):
             # Check that the weight gradients were not updated
             self.assertEqual(p.grad, None)
 
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/1682")
     def test_stage_backward_weight(self, device):
         # MLP as a stage module
         mod = MLPModule(d_hid).to(device)
@@ -133,6 +138,7 @@ class StageBackwardTests(TestCase):
                 print(f"Gradient test failed for {name}: {p.grad} vs {ref_p.grad}")
                 raise
 
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/1682")
     def test_stage_backward_weight_multiple_iters(self, device):
         # MLP as a stage module
         mod = MLPModule(d_hid).to(device)
@@ -223,7 +229,9 @@ class StageBackwardTests(TestCase):
 
 
 devices = ["cpu", "cuda", "hpu", "xpu"]
-instantiate_device_type_tests(StageBackwardTests, globals(), only_for=devices)
+instantiate_device_type_tests(
+    StageBackwardTests, globals(), only_for=devices, allow_xpu=True
+)
 
 if __name__ == "__main__":
     run_tests()

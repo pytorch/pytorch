@@ -999,7 +999,11 @@ class TensorVariable(VariableTracker):
         return DataPtrVariable(self)
 
     def method_item(self, *args, **kwargs):
-        if not config.capture_scalar_outputs:
+        from ..symbolic_convert import InstructionTranslator
+
+        tx = InstructionTranslator.current_tx()
+        # We enable capture_scalar_outputs when full_graph=True by default.
+        if not tx.one_graph and not config.capture_scalar_outputs:
             self._warn_capture_scalar_outputs()
             unimplemented_v2(
                 gb_type="Unsupported Tensor.item() call with capture_scalar_outputs=False",
@@ -1089,6 +1093,30 @@ class TensorVariable(VariableTracker):
             operator.setitem,
             *proxy_args_kwargs([self, key, value], {}),
         )
+
+        if isinstance(value, TensorVariable):
+            # [Note: Tensor.__setitem__ and VariableTracker metadata]
+            # At this point, we proxied a node representing `self[key] = value` into the graph.
+            # When executed, this node will mutate `self`'s tensor metadata, so it's important
+            # even during tracing to propagate. For example:
+            #   value.requires_grad is True => self.requires_grad becomes True
+            #   value.requires_grad is True => self.has_grad_fn becomes True
+
+            # Not sure if __setitem__ can ever save activations, disabling just in case
+            with torch._dynamo.utils._disable_saved_tensors_hooks_during_tracing():
+                get_fake_value(proxy.node, tx, allow_non_graph_fake=False)
+
+            example_value = self.proxy.node.meta.get("example_value")
+            from .builder import get_specialized_props, infer_subclass_type
+
+            if isinstance(value, variables.lazy.LazyVariableTracker):
+                value = variables.lazy.LazyVariableTracker.realize_all(value)
+
+            specialized_props = get_specialized_props(
+                type(value), tx, example_value, infer_subclass_type(example_value)
+            )
+            for k, v in specialized_props.items():
+                setattr(self, k, v)
 
         if config.use_graph_deduplication or config.track_nodes_for_deduplication:
             tx.output.region_tracker.add_node_mutation(proxy.node, 0)
