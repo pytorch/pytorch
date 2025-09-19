@@ -24,3 +24,7 @@ if "%INSTALL_FRESH_CONDA%"=="1" (
 
 :: Activate conda so that we can use its commands, i.e. conda, python, pip
 call %CONDA_ROOT_DIR%\Scripts\activate.bat %CONDA_ROOT_DIR%
+:: Activate conda so that we can use its commands, i.e. conda, python, pip
+call conda activate py_tmp
+
+call pip install -r .ci/docker/requirements-ci.txt
