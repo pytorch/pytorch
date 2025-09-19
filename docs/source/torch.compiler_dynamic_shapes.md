@@ -178,6 +178,12 @@ In such cases, consider using {func}`torch._dynamo.maybe_mark_dynamic`. Currentl
 {func}`torch._dynamo.mark_dynamic`
 does not have precedence over `force_parameter_static_shapes = True` or `force_nn_module_property_static_shapes = True`.
 
+If you know in advance that a particular dimension will be dynamic, you
+can avoid the initial recompilation by using {func}`torch._dynamo.mark_dynamic(tensor, dim)`.
+Additionally, if you already know the minimum and maximum possible
+values for this dimension, you can specify them with
+{func}`torch._dynamo.mark_dynamic(tensor, dim, min=min, max=max)`.
+
 Here is a quick example:
 
 ```{code-cell}
@@ -281,6 +287,7 @@ compile/dynamic_shapes_core_concepts
 compile/dynamic_shapes_troubleshooting
 compile/dynamic_shapes_advanced_control_options
 compile/dynamic_shapes_beyond_the_basics
+[The dynamic shapes manual](https://docs.google.com/document/d/1GgvOe7C8_NVOMLOCwDaYV1mXXyHMXY7ExoewHqooxrs/edit?tab=t.0#heading=h.fh8zzonyw8ng)
 ```
 
 ```{seealso}

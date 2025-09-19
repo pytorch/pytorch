@@ -78,7 +78,7 @@ option we have are the `eager_then_compile` stances which derive dynamism for yo
 See {func}`torch.compiler.set_stance` for more details.
 
 
-## Overall architecture
+## Overall Architecture
 
 Symbolic shapes workflow:
 
@@ -90,6 +90,35 @@ and Sympy expressions for reasoning.
 4. We add guards based on conditionals during Dynamo tracing or Inductor optimization, induced from both Python and C++.
 5. Guards can simplify symbolic variables. For instance, asserting `s0 == 4` allows replacing all occurrences of `s0` with `4`.
 6. After tracing and optimizing, we install all guards with the compiled code, ensuring reusability only if all guards evaluate true.
+
+## Internal API Class Hierarchy
+
+### Python Classes
+
+- **`SymInt`/`SymFloat`/`SymBool`**: User-visible classes that simulate their `int`/`float`/`bool` counterparts. Adding two `SymInts` produces a new `SymInt` that symbolically tracks the integer addition.
+
+- **`SymNode`**: Internal structure (accessible via `symint.node`) that holds actual symbolic tracking information. `SymNode` is type-erased, making it convenient to represent mixed-type operations.
+
+- **`ShapeEnv`**: Per-compile context state that tracks all free symbols and guards accumulated so far. Every `SymNode` records its `ShapeEnv` (but not vice versa; `SymNodes` are only used if they participate in a guard).
+
+### C++ Equivalents
+
+- **`c10::SymInt`/`SymFloat`/`SymBool`**: User-visible classes that simulate `int`/`float`/`bool`
+- **`c10::SymNode`/`SymNodeImpl`**: Analogous to Python `SymNode`
+- **No C++ `ShapeEnv`**: For debugging ease, the entire symbolic reasoning apparatus remains in Python
+
+When writing code traceable with `make_fx`, it must handle `SymInt`/`SymFloat`/`SymBool` flowing through it.
+
+## Value Ranges and Constraints
+
+Symbolic variables maintain **value ranges** that specify the set of possible values. By default:
+- Size-like unbacked `SymInts` have value range `[0, Inf]`
+- Regular unbacked `SymInts` have value range `[-Inf, Inf]`
+
+When assertions are made (e.g., `torch._check(x == y)`), the system:
+1. Attempts to replace unbacked symbols with equivalent expressions
+2. Refines value ranges based on the assertion
+3. Remembers boolean expressions that are always true
 
 Important files:
 
