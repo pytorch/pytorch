@@ -8,9 +8,10 @@ import sysconfig
 import time
 import unittest
 import unittest.mock as mock
+from collections.abc import Callable
 from enum import Enum
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Optional
 
 from torch._dynamo.exc import BackendCompilerFailed
 from torch._inductor.codegen.cuda.serialization import get_cutlass_operation_serializer
@@ -2150,7 +2151,7 @@ class TestCutlassBackend(TestCase):
         deserialized_ops = [
             serializer.deserialize(serialized_op) for serialized_op in serialized_ops
         ]
-        for op, deserialized_op in zip(ops, deserialized_ops):
+        for op, deserialized_op in zip(ops, deserialized_ops, strict=False):
             self.assertTrue(_check_if_instances_equal(op, deserialized_op))
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, "FP8 is only supported on H100+")
