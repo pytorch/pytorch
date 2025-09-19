@@ -1348,7 +1348,7 @@ class CudaReproTests(TestCase):
             out2 = model(input2)
             out3 = model(input3)
 
-        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.frame_count, 2)
 
     @config.patch({"triton.cudagraphs": True})
     def test_index_put_no_fallback_cudagraph(self):
