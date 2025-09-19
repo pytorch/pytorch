@@ -1114,10 +1114,9 @@ class CachingAutotuner(KernelInterface):
             # For Intel GEMM Triton kernels, it can be 16.
             # This information must be preserved so that the Cpp wrapper
             # can launch the kernel with the correct configuration.
-            threads_per_warp = 32
-            if hasattr(launcher.bin.metadata, "threads_per_warp"):
-                threads_per_warp = launcher.bin.metadata.threads_per_warp
-            params["threads_per_warp"] = threads_per_warp
+            params["threads_per_warp"] = getattr(
+                launcher.bin.metadata, "threads_per_warp", 32
+            )
 
         from torch._inductor.codecache import CudaKernelParamCache
 
