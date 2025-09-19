@@ -284,7 +284,7 @@
         # first compute broadcasted dk of shape [Bq, Hkv, KV_LEN, V_HEAD_DIM]
         # then reduce to dk of shape [Bkv, Hkv, KV_LEN, V_HEAD_DIM]
         tl.static_assert(dk.shape == [BLOCK_N1, QK_HEAD_DIM_ROUNDED])
-        {{store_output(("off_zq", "off_hkv", "index_n", "index_k"), "dk", "mask", indent_width=8, val_shape=["BLOCK_N1", "QK_HEAD_DIM_ROUNDED"])}}
+        {{store_output(("off_zq", "off_hkv", "index_n", "index_k"), "dk", "mask", indent_width=8, val_shape=("BLOCK_N1", "QK_HEAD_DIM_ROUNDED"))}}
 
 @triton.jit
 def bwd_dq_inner(
