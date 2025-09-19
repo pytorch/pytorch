@@ -96,7 +96,7 @@ if True:  # just to temporarily avoid reindentation
                     mesh_nd,
                     mesh_dim_names=submesh_dim_names,
                     _init_backend=False,
-                    layout=layout,
+                    _layout=layout,
                 )
                 if cur_rank in mesh_nd:
                     res_submesh = submesh
@@ -165,7 +165,7 @@ if True:  # just to temporarily avoid reindentation
                     mesh_nd.flatten(),  # Flatten is needed for non-contiguous dim flatten.
                     mesh_dim_names=(mesh_dim_name,),
                     backend_override=(backend_override,),
-                    layout=device_mesh._layout.coalesce(),
+                    _layout=device_mesh._layout.coalesce(),
                 )
                 if cur_rank in mesh_nd:
                     res_flattened_mesh = flattened_mesh
@@ -283,16 +283,18 @@ if True:  # just to temporarily avoid reindentation
             sliced_sizes = tuple(l.sizes for l in layout_sliced)
             sliced_strides = tuple(l.strides for l in layout_sliced)
             # When users sliced dim_names outside from current mesh, we will check whether
-            # there is layout overlap. Eventually we will just directly throw error here because
+            # there is layout overlap.
+            # TODO: Eventually we will just directly throw error here because
             # we will deprecate the slicing of flattened dim_name from root mesh.
             layout_sliced = _MeshLayout(sliced_sizes, sliced_strides)
             if not layout_sliced.check_non_overlap():
                 raise RuntimeError(
-                    f"slicing overlapping dim_names {mesh_dim_names} is not allowed"
+                    f"Slicing overlapping dim_names {mesh_dim_names} is not allowed."
                 )
 
             return layout_sliced
 
+        # TODO: to make this use case by other components public API in the future.
         def _get_all_submeshes(
             self, device_mesh: "DeviceMesh", mesh_dim_name: str
         ) -> list["DeviceMesh"]:
@@ -398,7 +400,7 @@ if True:  # just to temporarily avoid reindentation
             ] = None,
             _init_backend: bool = True,
             _rank: Optional[int] = None,
-            layout: Optional[_MeshLayout] = None,
+            _layout: Optional[_MeshLayout] = None,
         ) -> None:
             self.device_type = device_type
             if isinstance(mesh, torch.Tensor) and mesh.device.type != "cpu":
@@ -413,7 +415,9 @@ if True:  # just to temporarily avoid reindentation
                 backend_override = ((None, None),) * self.mesh.ndim
             # Internal bookkeeping for the device mesh.
             self._layout = (
-                layout if layout else _MeshLayout(self.mesh.size(), self.mesh.stride())
+                _layout
+                if _layout
+                else _MeshLayout(self.mesh.size(), self.mesh.stride())
             )
             assert self._layout.check_non_overlap(), (
                 "Please use a non-overlapping layout when creating a DeviceMesh."
