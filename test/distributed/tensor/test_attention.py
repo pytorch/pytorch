@@ -408,15 +408,6 @@ class RingFlexAttentionTest(DTensorTestBase):
             mesh_shape=(self.world_size,),
             mesh_dim_names=("cp",),
         )
-        # NOTE: cp needs to know the sharding dimension
-        # TODO: see if this can be moved to the cp context
-        from torch.distributed.tensor.experimental._attention import _set_cp_global_var
-
-        _set_cp_global_var("cp_shard_dim", 2)
-        self.assertEqual(
-            torch.distributed.tensor.experimental._attention._cp_global_vars.cp_shard_dim,
-            2,
-        )
 
         # NOTE: we do not test load balance here
         _cp_options.enable_load_balance = False

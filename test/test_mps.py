@@ -6952,11 +6952,20 @@ class TestMPS(TestCaseMPS):
         torch.manual_seed(time.time() * 1000)
         mode_num = {'sum': 0, 'mean': 1, 'max': 2}[mode]
         num_words = 10
-        feature_size = 4
+        feature_size = 7
         num_indices = 40
         num_bags = 5
 
         weight_cpu = torch.randn(num_words, feature_size, dtype=dtype)
+
+        # Test nan value behavior.
+        # Set second element of each word to nan.
+        weight_cpu[:, 1] = float('nan')
+        # Set third element of a randomized half of the words to nan.
+        weight_cpu[torch.randperm(num_words)[:num_words // 2], 2] = float('nan')
+        # Set fourth element of one randomized word to nan.
+        weight_cpu[torch.randint(0, num_words, ()), 3] = float('nan')
+
         input_cpu = torch.randint(0, num_words, (num_indices,), dtype=idx_dtype)
         offsets_cpu = torch.tensor(
             [0] + (torch.randperm(num_indices - 1)[:num_bags - 1].sort()[0] + 1).tolist(),

@@ -22,15 +22,21 @@ struct ReductionOpInit<EmbeddingBagMode::MAX, T> {
 
 template <EmbeddingBagMode M, typename T>
 struct ReductionOp {
-  inline opmath_t<T> operator()(opmath_t<T> weight_val, opmath_t<T> out_val) {
+  inline opmath_t<T> operator()(
+      opmath_t<T> weight_val,
+      opmath_t<T> out_val,
+      bool is_first) {
     return weight_val + out_val;
   }
 };
 
 template <typename T>
 struct ReductionOp<EmbeddingBagMode::MAX, T> {
-  inline opmath_t<T> operator()(opmath_t<T> weight_val, opmath_t<T> out_val) {
-    return max(weight_val, out_val);
+  inline opmath_t<T> operator()(
+      opmath_t<T> weight_val,
+      opmath_t<T> out_val,
+      bool is_first) {
+    return (is_first || weight_val > out_val) ? weight_val : out_val;
   }
 };
 
@@ -65,8 +71,9 @@ struct MaybeApplyPerSampleWeight<EmbeddingBagMode::SUM, T> {
 template <EmbeddingBagMode M, typename T, typename I>
 struct MaybeCalcMaxIndex {
   inline opmath_t<T> operator()(
+      opmath_t<T> weight_val,
       opmath_t<T> out_val,
-      opmath_t<T> new_out_val,
+      bool is_first,
       thread I& max_idx,
       I weight_idx,
       bool pad) {}
@@ -75,12 +82,17 @@ struct MaybeCalcMaxIndex {
 template <typename T, typename I>
 struct MaybeCalcMaxIndex<EmbeddingBagMode::MAX, T, I> {
   inline opmath_t<T> operator()(
+      opmath_t<T> weight_val,
       opmath_t<T> out_val,
-      opmath_t<T> new_out_val,
+      bool is_first,
       thread I& max_idx,
       I weight_idx,
       bool pad) {
-    max_idx = (pad || new_out_val == out_val) ? max_idx : weight_idx;
+    max_idx = !pad && (is_first || weight_val > out_val) ? weight_idx : max_idx;
+    // max_idx = (pad || new_out_val == out_val) ? max_idx : weight_idx;
+
+    // max_idx = !pad && (new_out_val != out_val) ? weight_idx : max_idx;
+    // max_idx = weight_idx;
   }
 };
 
@@ -174,18 +186,17 @@ void embedding_bag_impl(
             [static_cast<uint32_t>(weight_idx) * weight_strides[0] +
              feature_idx * weight_strides[1]]);
 
-    bag_size_ += static_cast<uint32_t>(!pad);
-
     weight_val = MaybeApplyPerSampleWeight<M, T>()(
         weight_val, indices_idx, per_sample_weights, per_sample_weights_stride);
 
-    auto new_out_val = ReductionOp<M, T>()(weight_val, out_val);
+    auto new_out_val = ReductionOp<M, T>()(weight_val, out_val, bag_size_ == 0);
 
     MaybeCalcMaxIndex<M, T, I>()(
-        out_val, new_out_val, max_idx, weight_idx, pad);
+        weight_val, out_val, bag_size_ == 0, max_idx, weight_idx, pad);
 
     out_val = pad ? out_val : new_out_val;
     offset2bag[indices_idx] = bag_idx;
+    bag_size_ += static_cast<uint32_t>(!pad);
   }
 
   output[bag_idx * output_strides[0] + feature_idx * output_strides[1]] =
