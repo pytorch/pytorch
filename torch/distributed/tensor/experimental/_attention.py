@@ -55,7 +55,7 @@ class _ContextParallelOptions:
     # errors. It is likely this is always True but we currently keep this variable
     # for the experimental purpose.
     convert_to_f32: bool = True
-    enable_load_balance = True
+    enable_load_balance: bool = True
     rotate_method: _RotateMethod = _RotateMethod.ALL_GATHER
 
 
@@ -924,18 +924,10 @@ def _distribute_function(
     output_fn: Optional[Callable] = None,
 ) -> None:
     """
-    ``distribute_function`` is an experimental API that allows users to "distribute"
-    the inputs and outputs of a function. Similar to ``distribute_module``, this API
-    installs hooks to the ``fn`` to convert the inputs and outputs. There are two
-    major differences between ``distribute_function`` and ``distribute_module``.
-    First, a function does not have parameters and buffers, as a result,
-    ``distribute_function`` itself won't convert any parameters/buffers but simply
-    install the input and output hooks.  The tensor conversion will happen in the hooks.
-    Another difference is an nn.Module subclass can have several instances and each
-    instance be fed into ``distribute_module`` independently with affecting other
-    instance. On the other hand, function is a singleton object. So if a function
-    is distributed by ``distribute_function`` all subsequent calls to the function
-    will invoke the installed hooks.
+    A helper function to replace a function with a distributed version by
+    using the monkey patching approach.
+
+    This function is for the CP internal usage only.
 
     Args:
         fn (Callable): the function to be distributed.
@@ -986,7 +978,7 @@ def _restore_function(fn: Callable, fn_module: types.ModuleType) -> None:
 
 
 @contextlib.contextmanager
-def _enable_cp_dispatcher() -> Generator[None, None, None]:
+def _enable_cp_dtensor_dispatcher() -> Generator[None, None, None]:
     """Enables DTensor dispatcher to dispatch SDPA to CP."""
     old_handlers = DTensor._op_dispatcher._custom_op_handlers
     DTensor._op_dispatcher._custom_op_handlers = {**old_handlers, **customized_ops}
@@ -996,94 +988,10 @@ def _enable_cp_dispatcher() -> Generator[None, None, None]:
     DTensor._op_dispatcher._custom_op_handlers = old_handlers
 
 
-def create_cp_block_mask(
-    mask_mod: _mask_mod_signature,
-    B: int,
-    H: int,
-    Q_LEN: int,
-    KV_LEN: int,
-    device_mesh: DeviceMesh,
-) -> BlockMask:
-    """
-    This API creates a special BlockMask for Context Parallel FlexAttention:
-    1. This BlockMask is masking on the attention of Q shard and KV global views, by
-    mapping the local q_idx to the global q_idx before sending to mask_mod.
-    2. The kv_seq_length (i.e. seq_lengths[1]) of this blockMask is tailored to match
-    the sequence length of KV shard instead of KV global. This is to pass the shape check
-    in flex_atttention(). The correct value (i.e. the sequence length of KV global) will be
-    used in flex_attention once the shape check passes.
-
-    Args:
-        mask_mod (Callable): Function to modify the mask over the global attention result.
-        B (int): Batch size.
-        H (int): Number of query heads.
-        Q_LEN (int): Sequence length of query (global view).
-        KV_LEN (int): Sequence length of key/value (global view).
-        device_mesh (:class:`DeviceMesh`): The device mesh for the context parallelism.
-
-    Return:
-        :class:`BlockMask`: the block_mask to be used in flex_attention() within the
-        context_parallel() context.
-
-    .. warning::
-        This function cannot generate correct block_mask if the BLOCK_SIZE is not
-        ``_DEFAULT_SPARSE_BLOCK_SIZE`` which usually happens when the attention
-        size is smaller than 128. Please do not use context_parallel() when the
-        FlexAttention size is small.
-    """
-    from torch.nn.attention.flex_attention import _DEFAULT_SPARSE_BLOCK_SIZE
-
-    compiled_create_block_mask = torch.compile(
-        create_block_mask, dynamic=False, fullgraph=True
-    )
-
-    def _rewrite_mask_mod(
-        mask_mod: _mask_mod_signature,
-        rank: int,
-        world_size: int,
-        block_size: int,
-        local_q_size: int,
-    ) -> _mask_mod_signature:
-        def local_q_idx_to_q_idx(local_q_idx: torch.Tensor) -> torch.Tensor:
-            # calculate local block_idx and block_offset
-            local_blk_idx, local_blk_offset = (
-                local_q_idx // block_size,
-                local_q_idx % block_size,
-            )
-            # NOTE: load balancing is not used
-            local_num_blocks = local_q_size // block_size
-            blk_idx = local_num_blocks * rank + local_blk_idx
-            return blk_idx * block_size + local_blk_offset
-
-        return lambda b, h, q_idx, kv_idx: mask_mod(
-            b,
-            h,
-            local_q_idx_to_q_idx(q_idx),
-            kv_idx,
-        )
-
-    cp_rank = device_mesh.get_local_rank()
-    cp_group_size = device_mesh.size()
-    Q_SHARD_LEN = Q_LEN // cp_group_size
-    block_size = _DEFAULT_SPARSE_BLOCK_SIZE
-    block_mask = compiled_create_block_mask(
-        _rewrite_mask_mod(mask_mod, cp_rank, cp_group_size, block_size, Q_SHARD_LEN),
-        B,
-        H,
-        Q_SHARD_LEN,
-        KV_LEN,
-        device=device_mesh.device_type,
-        BLOCK_SIZE=(block_size, block_size),
-    )
-    # flex_attention function checks the following shape so we need to rewrite:
-    # key.size(-2) == block_mask.seq_lengths[1]
-    seq_lengths = block_mask.seq_lengths
-    block_mask.seq_lengths = (seq_lengths[0], seq_lengths[1] // cp_group_size)
-    return block_mask
-
-
 @contextlib.contextmanager
-def _context_parallel(seq_dim: int, mesh: DeviceMesh) -> Generator[None, None, None]:
+def _context_parallel_dispatcher(
+    seq_dim: int, mesh: DeviceMesh
+) -> Generator[None, None, None]:
     """Replace SDPA with the CP-wrapped version and enable DTensor CP dispatcher."""
 
     def attention_input_fn(
@@ -1185,7 +1093,7 @@ def _context_parallel(seq_dim: int, mesh: DeviceMesh) -> Generator[None, None, N
             attention_input_fn,
             attention_output_fn,
         )
-        with _enable_cp_dispatcher():
+        with _enable_cp_dtensor_dispatcher():
             yield
         _restore_function(F.scaled_dot_product_attention, F)
     elif _dispatch_mode == _DispatchMode.TORCH_FUNCTION:
@@ -1200,7 +1108,7 @@ def _context_parallel(seq_dim: int, mesh: DeviceMesh) -> Generator[None, None, N
             _cp_global_vars.torch_function_mode = tf_mode
 
         with tf_mode:
-            with _enable_cp_dispatcher():
+            with _enable_cp_dtensor_dispatcher():
                 yield
     else:
         raise NotImplementedError("torch dispatch mode is not supported yet.")
@@ -1270,6 +1178,9 @@ def _context_parallel_buffers(
     return new_buffers
 
 
+#####################################################
+# Current public APIs, but are also subject to change
+#####################################################
 @contextlib.contextmanager
 @torch.no_grad()
 def context_parallel(
@@ -1343,7 +1254,7 @@ def context_parallel(
         buffer.resize_(shard.shape)
         buffer.copy_(shard)
 
-    with _context_parallel(seq_dim=2, mesh=mesh):
+    with _context_parallel_dispatcher(seq_dim=2, mesh=mesh):
         yield
 
     for buffer, original_buffer in zip(buffers, original_buffers):
@@ -1421,3 +1332,89 @@ def set_rotate_method(rotate_method: str) -> None:
             "Context Parallel does not support "
             f"using {rotate_method} for kv shards rotation"
         )
+
+
+def create_cp_block_mask(
+    mask_mod: _mask_mod_signature,
+    B: int,
+    H: int,
+    Q_LEN: int,
+    KV_LEN: int,
+    device_mesh: DeviceMesh,
+) -> BlockMask:
+    """
+    This API creates a special BlockMask for Context Parallel FlexAttention:
+    1. This BlockMask is masking on the attention of Q shard and KV global views, by
+    mapping the local q_idx to the global q_idx before sending to mask_mod.
+    2. The kv_seq_length (i.e. seq_lengths[1]) of this blockMask is tailored to match
+    the sequence length of KV shard instead of KV global. This is to pass the shape check
+    in flex_atttention(). The correct value (i.e. the sequence length of KV global) will be
+    used in flex_attention once the shape check passes.
+
+    Args:
+        mask_mod (Callable): Function to modify the mask over the global attention result.
+        B (int): Batch size.
+        H (int): Number of query heads.
+        Q_LEN (int): Sequence length of query (global view).
+        KV_LEN (int): Sequence length of key/value (global view).
+        device_mesh (:class:`DeviceMesh`): The device mesh for the context parallelism.
+
+    Return:
+        :class:`BlockMask`: the block_mask to be used in flex_attention() within the
+        context_parallel() context.
+
+    .. warning::
+        This function cannot generate correct block_mask if the BLOCK_SIZE is not
+        ``_DEFAULT_SPARSE_BLOCK_SIZE`` which usually happens when the attention
+        size is smaller than 128. Please do not use context_parallel() when the
+        FlexAttention size is small.
+    """
+    from torch.nn.attention.flex_attention import _DEFAULT_SPARSE_BLOCK_SIZE
+
+    compiled_create_block_mask = torch.compile(
+        create_block_mask, dynamic=False, fullgraph=True
+    )
+
+    def _rewrite_mask_mod(
+        mask_mod: _mask_mod_signature,
+        rank: int,
+        world_size: int,
+        block_size: int,
+        local_q_size: int,
+    ) -> _mask_mod_signature:
+        def local_q_idx_to_q_idx(local_q_idx: torch.Tensor) -> torch.Tensor:
+            # calculate local block_idx and block_offset
+            local_blk_idx, local_blk_offset = (
+                local_q_idx // block_size,
+                local_q_idx % block_size,
+            )
+            # NOTE: load balancing is not used
+            local_num_blocks = local_q_size // block_size
+            blk_idx = local_num_blocks * rank + local_blk_idx
+            return blk_idx * block_size + local_blk_offset
+
+        return lambda b, h, q_idx, kv_idx: mask_mod(
+            b,
+            h,
+            local_q_idx_to_q_idx(q_idx),
+            kv_idx,
+        )
+
+    cp_rank = device_mesh.get_local_rank()
+    cp_group_size = device_mesh.size()
+    Q_SHARD_LEN = Q_LEN // cp_group_size
+    block_size = _DEFAULT_SPARSE_BLOCK_SIZE
+    block_mask = compiled_create_block_mask(
+        _rewrite_mask_mod(mask_mod, cp_rank, cp_group_size, block_size, Q_SHARD_LEN),
+        B,
+        H,
+        Q_SHARD_LEN,
+        KV_LEN,
+        device=device_mesh.device_type,
+        BLOCK_SIZE=(block_size, block_size),
+    )
+    # flex_attention function checks the following shape so we need to rewrite:
+    # key.size(-2) == block_mask.seq_lengths[1]
+    seq_lengths = block_mask.seq_lengths
+    block_mask.seq_lengths = (seq_lengths[0], seq_lengths[1] // cp_group_size)
+    return block_mask
