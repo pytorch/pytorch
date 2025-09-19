@@ -15,6 +15,7 @@
 
     StreamContext
     can_device_access_peer
+    check_error
     current_blas_handle
     current_device
     current_stream
@@ -34,6 +35,7 @@
     init
     ipc_collect
     is_available
+    is_bf16_supported
     is_initialized
     is_tf32_supported
     memory_usage
@@ -266,10 +268,6 @@ See the docs for {class}`~torch.cuda.gds.GdsFile` for an example of how to use t
 
 ```{eval-rst}
 .. py:module:: torch.cuda.comm
-```
-
-```{eval-rst}
-.. py:module:: torch.cuda.error
 ```
 
 ```{eval-rst}

@@ -228,6 +228,9 @@ aoti_torch_get_device_type(AtenTensorHandle tensor, int32_t* ret_device_type);
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_get_device_index(AtenTensorHandle tensor, int32_t* ret_device_index);
 
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_get_layout(AtenTensorHandle tensor, int32_t* ret_layout);
+
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_get_storage_offset(
     AtenTensorHandle tensor,
     int64_t* ret_storage_offset);
@@ -520,6 +523,39 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_call_dispatcher(
     const char* overloadName,
     StableIValue* stack);
 
+// Device-generic guard for managing device context
+struct DeviceGuardOpaque;
+using DeviceGuardHandle = DeviceGuardOpaque*;
+
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_create_device_guard(
+    int32_t device_index,
+    DeviceGuardHandle* ret_guard // returns new reference
+);
+
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_delete_device_guard(DeviceGuardHandle guard);
+
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_device_guard_set_index(
+    DeviceGuardHandle guard,
+    int32_t device_index);
+
+// Device-generic stream for managing stream objects
+struct StreamOpaque;
+using StreamHandle = StreamOpaque*;
+
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_delete_stream(StreamHandle stream);
+
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_stream_id(StreamHandle stream, int64_t* ret_stream_id);
+
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_get_current_stream(
+    int32_t device_index,
+    StreamHandle* ret_stream // returns new reference
+);
+
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_get_current_device_index(int32_t* ret_device_index);
+
 #ifdef USE_CUDA
 
 struct CUDAGuardOpaque;
@@ -550,6 +586,15 @@ aoti_torch_delete_cuda_stream_guard(CUDAStreamGuardHandle guard);
 
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_get_current_cuda_stream(int32_t device_index, void** ret_stream);
+
+// CUDA memory allocation using CUDACachingAllocator
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cuda_caching_allocator_raw_alloc(
+    uint64_t nbytes,
+    void** ret_ptr // returns raw GPU memory pointer
+);
+
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_cuda_caching_allocator_raw_delete(void* ptr);
 
 #endif // USE_CUDA
 

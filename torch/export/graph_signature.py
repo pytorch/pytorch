@@ -121,6 +121,7 @@ class OutputKind(Enum):
     USER_OUTPUT = auto()
     LOSS_OUTPUT = auto()
     BUFFER_MUTATION = auto()
+    PARAMETER_MUTATION = auto()
     GRADIENT_TO_PARAMETER = auto()
     GRADIENT_TO_USER_INPUT = auto()
     USER_INPUT_MUTATION = auto()
@@ -407,6 +408,16 @@ class ExportGraphSignature:
         )
 
     @property
+    def parameters_to_mutate(self) -> Mapping[str, str]:
+        return _immutable_dict(
+            (s.arg.name, s.target)
+            for s in self.output_specs
+            if s.kind == OutputKind.PARAMETER_MUTATION
+            and isinstance(s.arg, TensorArgument)
+            and isinstance(s.target, str)
+        )
+
+    @property
     def user_inputs_to_mutate(self) -> Mapping[str, str]:
         return _immutable_dict(
             (s.arg.name, s.target)
@@ -601,6 +612,7 @@ def _convert_to_export_graph_signature(
     inputs_to_buffers = graph_signature.inputs_to_buffers
     user_outputs = set(graph_signature.user_outputs)
     buffer_mutations = graph_signature.buffers_to_mutate
+    parameter_mutations = graph_signature.parameters_to_mutate
     user_input_mutations = graph_signature.user_inputs_to_mutate
     grad_params = (
         graph_signature.backward_signature.gradients_to_parameter  # type: ignore[union-attr]
@@ -662,12 +674,20 @@ def _convert_to_export_graph_signature(
         if not isinstance(o, TensorArgument):
             return OutputSpec(kind=OutputKind.USER_OUTPUT, arg=o, target=None)
         name = o.name
-        if idx < len(buffer_mutations) + len(user_input_mutations) + len(output_tokens):
+        if idx < len(buffer_mutations) + len(parameter_mutations) + len(
+            user_input_mutations
+        ) + len(output_tokens):
             if name in buffer_mutations:
                 return OutputSpec(
                     kind=OutputKind.BUFFER_MUTATION,
                     arg=o,
                     target=buffer_mutations[name],  # type: ignore[index]
+                )
+            elif name in parameter_mutations:
+                return OutputSpec(
+                    kind=OutputKind.PARAMETER_MUTATION,
+                    arg=o,
+                    target=parameter_mutations[name],  # type: ignore[index]
                 )
             elif name in user_input_mutations:
                 return OutputSpec(
