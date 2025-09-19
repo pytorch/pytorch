@@ -186,11 +186,11 @@ export USE_QNNPACK=OFF
 export BUILD_TEST=OFF
 
 pushd "$pytorch_rootdir"
-echo "Calling setup.py bdist_wheel at $(date)"
+echo "Calling -m build --wheel --no-isolation at $(date)"
 
-_PYTHON_HOST_PLATFORM=${mac_version} ARCHFLAGS="-arch arm64" python setup.py bdist_wheel -d "$whl_tmp_dir" --plat-name "${mac_version//[-.]/_}"
+_PYTHON_HOST_PLATFORM=${mac_version} ARCHFLAGS="-arch arm64" python -m build --wheel --no-isolation --outdir "$whl_tmp_dir" -C--plat-name="${mac_version//[-.]/_}"
 
-echo "Finished setup.py bdist_wheel at $(date)"
+echo "Finished -m build --wheel --no-isolation at $(date)"
 
 if [[ $package_type != 'libtorch' ]]; then
     echo "delocating wheel dependencies"
