@@ -17,7 +17,6 @@ from torch._dynamo.exc import BackendCompilerFailed
 from torch._dynamo.utils import same
 from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_mutation
 from torch._inductor import config
-from torch._inductor.codegen.common import register_backend_for_device
 from torch._inductor.codegen.cpp import CppScheduling
 from torch._inductor.codegen.triton import TritonScheduling
 from torch._inductor.codegen.wrapper import PythonWrapperCodegen
@@ -118,15 +117,17 @@ class FxirTestCase(InductorTestCase):
 
         # Register the FX backend, storing the default for later.
         common.init_backend_registration()
-        cls.default_backend = common.device_codegens[cls.device]
-        register_backend_for_device(cls.device, TritonScheduling, WrapperFxCodegen)
+        cls._default_backend = common.device_codegens[cls.device]
+        common.register_backend_for_device(
+            cls.device, TritonScheduling, WrapperFxCodegen
+        )
 
     @classmethod
     def tearDownClass(cls):
         super().tearDownClass()
 
-        # Revert to the default backend.
-        common.device_codegens[cls.device] = cls.default_backend
+        # Restore the default backend.
+        common.device_codegens[cls.device] = cls._default_backend
 
     def test_basic(self):
         args = [torch.randn(8, device=self.device) for _ in range(2)]
@@ -639,19 +640,47 @@ class FxirTestCase(InductorTestCase):
         # Check for the fallback.
         self.assertEqual(self._count_ops(gm, fallback_op), 1)
 
-    @torch._inductor.config.patch("graph_partition", True)
-    def test_cond_subgraph(self):
+    @parametrize("pred", (False, True))
+    def test_cond_subgraph(self, pred: bool):
         """
         Test a model with subgraphs.
         """
 
-        def foo(cond, x):
-            return torch.cond(cond, torch.cos, torch.sin, [x]) + 1
+        def foo(pred, x):
+            return torch.cond(pred, torch.cos, torch.sin, [x]) + 1
 
-        cond = torch.tensor([True], device=self.device)
         x = torch.randn((2, 3), device=self.device)
+        pred_tensor = torch.tensor([pred], device=self.device)
+        gm = self._compile_and_check(
+            foo, [pred_tensor, x], expected_num_triton_kernels=3
+        )[-1]
 
-        self._compile_and_check(foo, [cond, x], expected_num_triton_kernels=3)
+        # Check for subgraphs.
+        subgm_getattrs = list(gm.graph.find_nodes(op="get_attr"))
+        self.assertEqual(len(subgm_getattrs), 2)
+        for subgm_getattr in subgm_getattrs:
+            target = subgm_getattr.name
+            self.assertTrue(isinstance(getattr(gm, target), torch.fx.GraphModule))
+
+    @parametrize("pred", (False, True))
+    def test_cond_no_operands(self, pred: bool):
+        """
+        Test torch.cond when the subgraphs take no inputs.
+        """
+
+        length = 8
+
+        def true_fn():
+            return torch.zeros(length, device=self.device)
+
+        def false_fn():
+            return true_fn() + 5
+
+        def foo(pred):
+            return torch.cond(pred, true_fn, false_fn, ())
+
+        pred_tensor = torch.tensor([pred], device=self.device)
+        self._compile_and_check(foo, [pred_tensor], expected_num_triton_kernels=2)
 
     def test_cpp_raises(self):
         """

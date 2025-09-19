@@ -2182,9 +2182,7 @@ class PythonWrapperCodegen(CodeGen):
         )
         self.header.splice(body)
 
-    def define_subgraph_launcher_fn(
-        self, name: str, subgraph_code
-    ):
+    def define_subgraph_launcher_fn(self, name: str, subgraph_code):
         self.subgraph_definitions.splice(subgraph_code.value)
 
     def define_user_defined_triton_kernel(
