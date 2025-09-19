@@ -22,6 +22,7 @@ from torch.distributed.tensor._ops.utils import (
     expand_to_full_mesh_op_strategy,
     generate_redistribute_costs,
     is_tensor_evenly_shardable,
+    is_tensor_evenly_shardable_on_dim,
     normalize_dim,
     normalize_dims,
     register_op_strategy,
@@ -268,6 +269,15 @@ def common_reduction_strategy(
     reduction_strategy = OpStrategy([])
 
     for op_spec in input_strategy.strategies:
+        if reduction_op == "avg":
+            output_spec = op_spec.output_spec
+            local_shape = list(output_spec.tensor_meta.shape)  # type:ignore[union-attr]
+            for dim in reduce_dims:
+                if not is_tensor_evenly_shardable_on_dim(local_shape, output_spec, dim):
+                    # reduce(avg) is not linear for unevenly sharded tensors
+                    reduction_linear = False
+                    break
+
         if not reduction_linear:
             # input placements for this strategy should clear out pending sum and sharding
             # on the reduction dimension
@@ -310,6 +320,7 @@ LINEAR_REDUCTION_OP_MAP = {
     aten.prod.default: "product",
     aten.prod.dim_int: "product",
     aten.prod.int_out: "product",
+    # avg is only linear when there is no padding
     aten.mean.default: "avg",
     aten.mean.dim: "avg",
     aten.mean.out: "avg",
