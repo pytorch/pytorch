@@ -4973,6 +4973,10 @@ class ChoiceCaller:
         # knowing what autotuning is choosing)
         self.description = description
         self.failed: bool = False
+        # A place to store annotations that can be read post benchmarking
+        # Use this to shuttle information between ChoieCaller generation
+        # and the end of benchmarking
+        self.annotations: dict[Any, Any] = {}
 
     def benchmark(self, *args: Any, out: torch.Tensor) -> float:
         algo = self.to_callable()
@@ -5926,7 +5930,7 @@ class ExternKernel(InputsKernel):
         if is_storage_and_layout(x):
             if isinstance(x.get_layout(), FlexibleLayout):
                 if order:
-                    # If the the FlexibleLayout already has the size and stride in the required order,
+                    # If the FlexibleLayout already has the size and stride in the required order,
                     # freeze it to a FixedLayout by using its current size and stride.
                     # The behavior of using its current size and stride or the given order can be different
                     # if the size and stride has ambiguilty, for example for a 4D input where the iC = 1:
@@ -8195,12 +8199,23 @@ class StorageBox(MutableBox):
             self.realize()
 
     def has_accumulated_enough_reads_by_size(self, threshold: int) -> bool:
-        size_of_reads = [V.graph.get_dep_size_hint(dep) for dep in self.get_reads()]
+        from torch._inductor.utils import is_nonfreeable_buffers
+
+        size_of_reads = [
+            V.graph.get_dep_size_hint(dep)
+            for dep in self.get_reads()
+            if not is_nonfreeable_buffers(dep)
+        ]
         if not size_of_reads:
             return False
         total_size = sum(size_of_reads)
         max_size = max(size_of_reads)
-        return total_size > threshold and total_size / max_size >= 2
+        min_size = min(size_of_reads)
+        return (
+            total_size >= threshold
+            and total_size / max_size >= 2
+            and max_size == min_size
+        )
 
     def has_exceeded_max_reads(self) -> bool:
         return isinstance(self.data, Pointwise) and (

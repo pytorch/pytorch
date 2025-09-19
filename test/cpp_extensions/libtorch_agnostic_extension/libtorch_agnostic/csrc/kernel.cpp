@@ -372,14 +372,15 @@ void boxed_my_copy_(StableIValue* stack, uint64_t num_args, uint64_t num_outputs
   stack[0] = from(tensor_res);
 }
 
-Tensor my_clone(Tensor t) {
-  return clone(t);
+Tensor my_clone(Tensor t, std::optional<c10::MemoryFormat> m=std::nullopt) {
+  return clone(t, m);
 }
 
-void boxed_my_clone(StableIValue* stack, uint64_t num_args, uint64_t num_outputs) {
-  Tensor tensor_res = my_clone(to<Tensor>(stack[0]));
+void boxed_my_clone_memory_format(StableIValue* stack, uint64_t num_args, uint64_t num_outputs) {
+  Tensor tensor_res = my_clone(to<Tensor>(stack[0]), to<std::optional<c10::MemoryFormat>>(stack[1]));
   stack[0] = from(tensor_res);
 }
+
 
 STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
   m.def("my_transpose(Tensor t, int dim0, int dim1) -> Tensor");
@@ -390,7 +391,7 @@ STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
   m.def("my_new_empty_dtype_variant(Tensor t) -> Tensor");
   m.def("my_new_zeros_dtype_variant(Tensor t) -> Tensor");
   m.def("my_copy_(Tensor dst, Tensor src, bool non_blocking) -> Tensor");
-  m.def("my_clone(Tensor t) -> Tensor");
+  m.def("my_clone.memory_format(Tensor t, MemoryFormat? m=None) -> Tensor");
 }
 
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
@@ -401,7 +402,7 @@ STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
   m.impl("my_new_empty_dtype_variant", &boxed_my_new_empty_dtype_variant);
   m.impl("my_new_zeros_dtype_variant", &boxed_my_new_zeros_dtype_variant);
   m.impl("my_copy_", &boxed_my_copy_);
-  m.impl("my_clone", &boxed_my_clone);
+  m.impl("my_clone.memory_format", &boxed_my_clone_memory_format);
 }
 
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeImplicitAutograd, m) {
@@ -475,38 +476,14 @@ void boxed_test_default_constructor(
   stack[0] = from(res);
 }
 
-uint64_t get_any_data_ptr(Tensor t, bool mutable_) {
-  switch (t.scalar_type()) {
-  case at::ScalarType::Float:
-    if (mutable_) {
-      return reinterpret_cast<uint64_t>(t.mutable_data_ptr<float>());
-    } else {
-      return reinterpret_cast<uint64_t>(t.const_data_ptr<float>());
-    }
-    break;
-  default:
-    return 0;  // dtype support not implemented
-  }
-}
-
-void boxed_get_any_data_ptr(
-    StableIValue* stack,
-    uint64_t num_args,
-    uint64_t num_outputs) {
-  uint64_t res = get_any_data_ptr(to<Tensor>(stack[0]), to<bool>(stack[1]));
-  stack[0] = from(res);
-}
-
 STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
   m.def("test_default_constructor(bool undefined) -> bool");
-  m.def("get_any_data_ptr(Tensor t, bool mutable_) -> int");
 }
 
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
   m.impl("test_default_constructor", &boxed_test_default_constructor);
   m.impl("my_amax", &boxed_my_amax);
   m.impl("my_amax_vec", &boxed_my_amax_vec);
-  m.impl("get_any_data_ptr", &boxed_get_any_data_ptr);
 }
 
 // Test functions for torch::stable::accelerator APIs

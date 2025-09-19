@@ -14,7 +14,6 @@ from torch.testing._internal.common_utils import (
     install_cpp_extension,
     IS_WINDOWS,
     run_tests,
-    skipIfTorchDynamo,
     TestCase,
     xfailIfTorchDynamo,
 )
@@ -275,21 +274,6 @@ if not IS_WINDOWS:
             expected0 = torch.narrow(t, dim0, start0, length0)
             self.assertEqual(out0, expected0)
 
-        @skipIfTorchDynamo("no data pointer defined for FakeTensor, FunctionalTensor")
-        def test_get_any_data_ptr(self, device):
-            import libtorch_agnostic
-
-            t = torch.randn(2, 5, device=device, dtype=torch.float32)
-            expected_p = t.data_ptr()
-
-            p = libtorch_agnostic.ops.get_any_data_ptr(t, True)
-            # p == 0 would correspond to a dtype case that support is
-            # not implemented in get_any_data_ptr@kernel.cpp
-            self.assertEqual(p, expected_p)
-
-            p = libtorch_agnostic.ops.get_any_data_ptr(t, False)
-            self.assertEqual(p, expected_p)
-
         @onlyCUDA
         @deviceCountAtLeast(2)
         def test_device_guard(self, device):
@@ -375,12 +359,21 @@ if not IS_WINDOWS:
         def test_my_clone(self, device):
             import libtorch_agnostic
 
-            t = torch.randn(2, 5, device=device)
+            t = torch.randn(2, 5, 2, 3, device=device)
 
             result = libtorch_agnostic.ops.my_clone(t)
             expected = t.clone()
             self.assertEqual(result, expected)
             self.assertNotEqual(result.data_ptr(), expected.data_ptr())
+            self.assertEqual(result.stride(), expected.stride())
+
+            result = libtorch_agnostic.ops.my_clone(
+                t, memory_format=torch.channels_last
+            )
+            expected = t.clone(memory_format=torch.channels_last)
+            self.assertEqual(result, expected)
+            self.assertNotEqual(result.data_ptr(), expected.data_ptr())
+            self.assertEqual(result.stride(), expected.stride())
 
     instantiate_device_type_tests(TestLibtorchAgnostic, globals(), except_for=None)
 

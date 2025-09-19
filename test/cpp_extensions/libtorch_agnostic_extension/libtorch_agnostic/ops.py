@@ -215,19 +215,6 @@ def test_default_constructor(defined) -> bool:
     return torch.ops.libtorch_agnostic.test_default_constructor.default(defined)
 
 
-def get_any_data_ptr(t, mutable) -> int:
-    """
-    Return data pointer value of the tensor.
-
-    Args:
-        t: Input tensor
-        mutable: whether data pointer qualifier is mutable or const
-
-    Returns: int - pointer value
-    """
-    return torch.ops.libtorch_agnostic.get_any_data_ptr.default(t, mutable)
-
-
 def my_pad(t) -> Tensor:
     """
     Pads the input tensor with hardcoded padding parameters.
@@ -269,16 +256,17 @@ def my_copy_(dst, src, non_blocking) -> Tensor:
     return torch.ops.libtorch_agnostic.my_copy_.default(dst, src, non_blocking)
 
 
-def my_clone(t) -> Tensor:
+def my_clone(t, *, memory_format=None) -> Tensor:
     """
     Returns a clone of input tensor.
 
     Args:
         t: Input tensor
+        memory_format:
 
     Returns: Cloned tensor
     """
-    return torch.ops.libtorch_agnostic.my_clone.default(t)
+    return torch.ops.libtorch_agnostic.my_clone.memory_format(t, memory_format)
 
 
 def test_device_guard(device_index) -> int:
