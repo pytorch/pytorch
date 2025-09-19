@@ -175,6 +175,7 @@ jobs:
     timeout-minutes: !{{ common.timeout_minutes }}
     !{{ upload.binary_env(config) }}
     steps:
+      !{{ common.checkout(deep_clone=False, directory="pytorch") }}
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
       - uses: !{{ common.download_artifact_action }}
@@ -182,7 +183,6 @@ jobs:
         with:
           name: !{{ config["build_name"] }}
           path: "${{ runner.temp }}/artifacts/"
-      !{{ common.checkout(deep_clone=False, directory="pytorch") }}
       - name: ROCm set GPU_FLAG
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
