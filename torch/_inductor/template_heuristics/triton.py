@@ -90,6 +90,39 @@ class FlexConfig:
 
 
 @dataclasses.dataclass
+class FlexBwDConfig:
+    """
+    Base Config class for flex attention backward
+    - FlexAttn backward will use this.
+
+    Note: flex bwd configs
+
+    Kernel Constraints:
+      * BLOCK_N1 % BLOCK_M1 == 0
+      * BLOCK_M2 % BLOCK_N2 == 0
+
+    Pattern 1 - Symmetric Pairing (M, N, N, M):
+    - Used in autotune configs
+    - block_m1=M, block_n1=N, block_m2=N, block_n2=M
+    - Only requires checking BLOCK_N % BLOCK_M == 0
+    - Second constraint (BLOCK_M2 % BLOCK_N2) automatically satisfied
+
+    Pattern 2 - Independent Parameters (M1, N1, M2, N2):
+    - Used in exhaustive search for maximum flexibility
+    - All four parameters can be set independently
+    - Requires checking both constraints
+
+    """
+
+    block_m1: int
+    block_n1: int
+    block_m2: int
+    block_n2: int
+    num_stages: int
+    num_warps: int
+
+
+@dataclasses.dataclass
 class FlexDecodeConfig:
     """
     Config class for flex decoding
@@ -127,6 +160,17 @@ class ROCmConvConfig(ConvConfig):
 class ROCmFlexConfig(FlexConfig):
     """
     ROCm subclass for FlexAttn, with AMD backend specific tuneable kernargs
+    """
+
+    matrix_instr_nonkdim: int = 0
+    waves_per_eu: int = 0
+    kpack: int = 2
+
+
+@dataclasses.dataclass
+class ROCmFlexBwDConfig(FlexBwDConfig):
+    """
+    ROCm subclass for FlexAttn backward, with AMD backend specific tuneable kernargs
     """
 
     matrix_instr_nonkdim: int = 0
@@ -413,13 +457,14 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             FlexConfig(64, 64, 3, 4),
         ]
 
-        self.flex_attn_bwd_autotune_configs: list[FlexConfig] = [
-            FlexConfig(BLOCK1, BLOCK2, s, w)
-            for BLOCK1 in [32, 64]
-            for BLOCK2 in [32, 64, 128]
+        self.flex_attn_bwd_autotune_configs: list[FlexBwDConfig] = [
+            # See Note: flex bwd configs
+            FlexBwDConfig(BLOCK_M, BLOCK_N, BLOCK_N, BLOCK_M, s, w)
+            for BLOCK_M in [32, 64]
+            for BLOCK_N in [32, 64, 128]
             for s in [1, 3, 4, 5]  # num_stages
-            for w in ([4, 8] if BLOCK1 >= 128 or BLOCK2 >= 128 else [4])
-            if BLOCK2 % BLOCK1 == 0
+            for w in ([4, 8] if BLOCK_M >= 128 or BLOCK_N >= 128 else [4])
+            if BLOCK_N % BLOCK_M == 0
         ]
 
         self.flex_decode_autotune_configs: list[FlexDecodeConfig] = [
@@ -436,13 +481,17 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             for num_warps in [2, 4, 8]
         ]
 
-        self.exhaustive_flex_attn_bwd_configs: list[FlexConfig] = [
-            FlexConfig(BLOCK1, BLOCK2, num_stages, num_warps)
-            for BLOCK1 in [16, 32, 64, 128]
-            for BLOCK2 in [16, 32, 64, 128]
-            for num_stages in [1, 3, 4, 5]
+        self.exhaustive_flex_attn_bwd_configs: list[FlexBwDConfig] = [
+            # See Note: flex bwd configs
+            FlexBwDConfig(BLOCK_M1, BLOCK_N1, BLOCK_M2, BLOCK_N2, num_stages, num_warps)
+            for BLOCK_M1 in [16, 32, 64, 128]
+            for BLOCK_N1 in [16, 32, 64, 128]
+            for BLOCK_M2 in [16, 32, 64, 128]
+            for BLOCK_N2 in [16, 32, 64, 128]
+            for num_stages in [1, 3, 4]
             for num_warps in [2, 4, 8]
-            if BLOCK2 % BLOCK1 == 0
+            if BLOCK_N1 % BLOCK_M1 == 0
+            and BLOCK_M2 % BLOCK_N2 == 0  # kernel static assertions
         ]
 
         self.exhaustive_flex_decode_configs: list[FlexDecodeConfig] = [
@@ -715,15 +764,17 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
 
         return flex_attn_fwd_configs
 
-    def get_flex_attn_bwd_configs(self, head_dim: int, dtype: Any) -> list[FlexConfig]:
-        flex_attn_bwd_configs: list[FlexConfig] = []
+    def get_flex_attn_bwd_configs(
+        self, head_dim: int, dtype: Any
+    ) -> list[FlexBwDConfig]:
+        flex_attn_bwd_configs: list[FlexBwDConfig] = []
 
         if config.max_autotune:
             if config.max_autotune_flex_search_space == "EXHAUSTIVE":
                 return self.exhaustive_flex_attn_bwd_configs
             flex_attn_bwd_configs += self.flex_attn_bwd_autotune_configs
 
-        default_config = FlexConfig(16, 16, 1, 4)
+        default_config = FlexBwDConfig(16, 16, 16, 16, 1, 4)
 
         if default_config not in flex_attn_bwd_configs:
             flex_attn_bwd_configs.append(default_config)
@@ -922,41 +973,57 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
 
         return flex_attn_fwd_configs
 
-    def get_flex_attn_bwd_configs(self, head_dim: int, dtype: Any) -> list[FlexConfig]:
+    def get_flex_attn_bwd_configs(
+        self, head_dim: int, dtype: Any
+    ) -> list[FlexBwDConfig]:
         capability = torch.cuda.get_device_capability()
-
-        flex_attn_bwd_configs: list[FlexConfig] = []
+        flex_attn_bwd_configs: list[FlexBwDConfig] = []
 
         if config.max_autotune:
             if config.max_autotune_flex_search_space == "EXHAUSTIVE":
                 return self.exhaustive_flex_attn_bwd_configs
             flex_attn_bwd_configs += self.flex_attn_bwd_autotune_configs
 
+        major, minor = capability
         if dtype == torch.float32:
-            default_config = FlexConfig(16, 16, 1, 4)
-        elif head_dim <= 256 and capability == (9, 0):  # H100
-            if head_dim == 64:
-                default_config = FlexConfig(64, 64, 3, 4)
-            elif head_dim == 128:
-                default_config = FlexConfig(64, 128, 3, 8)
-            else:
-                default_config = FlexConfig(64, 64, 2, 4)
-        elif head_dim <= 256 and capability >= (10, 0):  # B100
-            if head_dim == 64 or head_dim == 128:
-                default_config = FlexConfig(32, 32, 2, 4)
-            else:
-                default_config = FlexConfig(32, 32, 1, 4)
-        elif capability >= (8, 0):  # A100
-            if head_dim == 64:
-                default_config = FlexConfig(32, 128, 3, 4)
-            elif head_dim == 128:
-                # SM86/89 have smaller shared memory sizes
-                num_stages = 3 if capability[1] == 0 else 2
-                default_config = FlexConfig(64, 64, num_stages, 4)
-            else:
-                default_config = FlexConfig(64, 64, 2, 4)
-        else:  # modest hardware or extremely large head_dim
-            default_config = FlexConfig(16, 16, 1, 4)
+            capability_class = "float32"
+        elif major >= 10:
+            capability_class = "sm10x"
+        elif capability == (9, 0):
+            capability_class = "sm90"
+        elif major >= 8:
+            capability_class = "sm8x"
+        else:
+            capability_class = "baseline"
+
+        # fmt: off
+        config_map = {
+            "float32": lambda h: FlexBwDConfig(16, 16, 16, 16, 1, 4),
+            "baseline": lambda h: FlexBwDConfig(16, 16, 16, 16, 1, 4),
+            "sm90": lambda h: (
+                FlexBwDConfig(64, 64, 64, 64, 3, 4) if h < 64 else
+                FlexBwDConfig(64, 128, 128, 64, 3, 8) if h <= 128 else
+                FlexBwDConfig(64, 64, 64, 64, 2, 4)
+            ),
+            "sm10x": lambda h: (
+                FlexBwDConfig(64, 128, 128, 64, 3, 4)
+                if h <= 128
+                else FlexBwDConfig(64, 64, 64, 64, 2, 4)
+            ),
+            "sm8x": lambda h: (
+                FlexBwDConfig(32, 128, 128, 32, 3, 4)
+                if h < 64
+                else FlexBwDConfig(
+                    64, 64, 64, 64, 3 if minor == 6 and h == 128 else 2, 4
+                )
+            ),
+        }
+        # fmt: on
+
+        if head_dim <= 256:
+            default_config = config_map[capability_class](head_dim)
+        else:
+            default_config = FlexBwDConfig(16, 16, 16, 16, 1, 4)
 
         if default_config not in flex_attn_bwd_configs:
             flex_attn_bwd_configs.append(default_config)
@@ -1101,8 +1168,9 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             for w in [4, 8]
         ]
 
-        self.flex_attn_bwd_autotune_configs: list[FlexConfig] = [
-            ROCmFlexConfig(BLOCK1, BLOCK2, 1, w, mfma)
+        self.flex_attn_bwd_autotune_configs: list[FlexBwDConfig] = [
+            # See Note: flex bwd configs
+            ROCmFlexBwDConfig(BLOCK1, BLOCK2, BLOCK2, BLOCK1, 1, w, mfma)
             for BLOCK1 in [16, 32, 64]
             for BLOCK2 in [32, 64, 128]
             for w in ([4, 8] if BLOCK1 >= 128 or BLOCK2 >= 128 else [4])
@@ -1129,15 +1197,28 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             for wpeu in [0, int(8 // num_warps)]
         ]
 
-        self.exhaustive_flex_attn_bwd_configs: list[FlexConfig] = [
-            ROCmFlexConfig(BLOCK1, BLOCK2, num_stages, num_warps, mfma, wpeu)
-            for BLOCK1 in [16, 32, 64, 128]
-            for BLOCK2 in [16, 32, 64, 128]
+        self.exhaustive_flex_attn_bwd_configs: list[FlexBwDConfig] = [
+            # See Note: flex bwd configs
+            ROCmFlexBwDConfig(
+                BLOCK_M1,
+                BLOCK_N1,
+                BLOCK_M2,
+                BLOCK_N2,
+                num_stages,
+                num_warps,
+                mfma,
+                wpeu,
+            )
+            for BLOCK_M1 in [16, 32, 64, 128]
+            for BLOCK_N1 in [16, 32, 64, 128]
+            for BLOCK_M2 in [16, 32, 64, 128]
+            for BLOCK_N2 in [16, 32, 64, 128]
             for num_stages in [1, 2]
             for num_warps in [2, 4, 8]
             for mfma in [0, 16]
             for wpeu in [0, int(8 // num_warps)]
-            if BLOCK2 % BLOCK1 == 0
+            if BLOCK_N1 % BLOCK_M1 == 0
+            and BLOCK_M2 % BLOCK_N2 == 0  # kernel static assertions
         ]
 
         self.exhaustive_flex_decode_configs: list[FlexDecodeConfig] = [
@@ -1256,8 +1337,10 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
 
         return flex_attn_fwd_configs
 
-    def get_flex_attn_bwd_configs(self, head_dim: int, dtype: Any) -> list[FlexConfig]:
-        flex_attn_bwd_configs: list[FlexConfig] = []
+    def get_flex_attn_bwd_configs(
+        self, head_dim: int, dtype: Any
+    ) -> list[FlexBwDConfig]:
+        flex_attn_bwd_configs: list[FlexBwDConfig] = []
 
         if config.max_autotune:
             if config.max_autotune_flex_search_space == "EXHAUSTIVE":
@@ -1265,16 +1348,16 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             flex_attn_bwd_configs += self.flex_attn_bwd_autotune_configs
 
         if dtype == torch.float32:
-            default_config = ROCmFlexConfig(16, 16, 1, 4)
+            default_config = ROCmFlexBwDConfig(16, 16, 16, 16, 1, 4)
         elif head_dim <= 256:
             if head_dim == 64:
-                default_config = ROCmFlexConfig(64, 64, 1, 4)
+                default_config = ROCmFlexBwDConfig(64, 64, 64, 64, 1, 4)
             elif head_dim == 128:
-                default_config = ROCmFlexConfig(64, 128, 1, 8)
+                default_config = ROCmFlexBwDConfig(64, 128, 128, 64, 1, 8)
             else:
-                default_config = ROCmFlexConfig(64, 64, 1, 4)
+                default_config = ROCmFlexBwDConfig(64, 64, 64, 64, 1, 4)
         else:
-            default_config = ROCmFlexConfig(16, 16, 1, 4)
+            default_config = ROCmFlexBwDConfig(16, 16, 16, 16, 1, 4)
 
         if default_config not in flex_attn_bwd_configs:
             flex_attn_bwd_configs.append(default_config)
@@ -1324,12 +1407,13 @@ class XPUConfigHeuristic(BaseConfigHeuristic):
             FlexConfig(128, 32, 2, 16),
             FlexConfig(128, 32, 2, 8),
         ]
-        self.flex_attn_bwd_autotune_configs: list[FlexConfig] = []
+        self.flex_attn_bwd_autotune_configs: list[FlexBwDConfig] = []
         self.flex_decode_autotune_configs: list[FlexDecodeConfig] = []
 
         if not bool(os.getenv("CI")):
             self.flex_attn_bwd_autotune_configs += [
-                FlexConfig(BLOCK1, BLOCK2, s, w)
+                # See Note: flex bwd configs
+                FlexBwDConfig(BLOCK1, BLOCK2, BLOCK2, BLOCK1, s, w)
                 for BLOCK1 in [32, 64]
                 for BLOCK2 in [32, 64, 128]
                 for s in [1, 3, 4, 5]  # num_stages
@@ -1374,8 +1458,10 @@ class XPUConfigHeuristic(BaseConfigHeuristic):
 
         return flex_attn_fwd_configs
 
-    def get_flex_attn_bwd_configs(self, head_dim: int, dtype: Any) -> list[FlexConfig]:
-        flex_attn_bwd_configs: list[FlexConfig] = []
+    def get_flex_attn_bwd_configs(
+        self, head_dim: int, dtype: Any
+    ) -> list[FlexBwDConfig]:
+        flex_attn_bwd_configs: list[FlexBwDConfig] = []
 
         if config.max_autotune:
             if config.max_autotune_flex_search_space == "EXHAUSTIVE":
@@ -1383,16 +1469,16 @@ class XPUConfigHeuristic(BaseConfigHeuristic):
             flex_attn_bwd_configs += self.flex_attn_bwd_autotune_configs
 
         if dtype == torch.float32:
-            default_config = FlexConfig(16, 16, 1, 4)
+            default_config = FlexBwDConfig(16, 16, 16, 16, 1, 4)
         elif head_dim <= 256:
             if head_dim == 64:
-                default_config = FlexConfig(64, 64, 1, 8)
+                default_config = FlexBwDConfig(64, 64, 64, 64, 1, 8)
             elif head_dim == 128:
-                default_config = FlexConfig(64, 128, 1, 8)
+                default_config = FlexBwDConfig(64, 128, 64, 128, 1, 8)
             else:
-                default_config = FlexConfig(64, 64, 1, 8)
+                default_config = FlexBwDConfig(64, 64, 64, 64, 1, 8)
         else:  # modest hardware or extremely large head_dim
-            default_config = FlexConfig(16, 16, 1, 4)
+            default_config = FlexBwDConfig(16, 16, 16, 16, 1, 4)
 
         if default_config not in flex_attn_bwd_configs:
             flex_attn_bwd_configs.append(default_config)
