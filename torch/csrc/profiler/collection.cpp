@@ -1094,18 +1094,16 @@ class TransferEvents {
     for (const auto* activity : trace_activities_) {
       auto e = toResult(activity);
       if (e) {
-        e->visit(c10::overloaded(
-            [&](ExtraFields<EventType::TorchOp>& i) {
-              if (config_.experimental_config.expose_kineto_event_metadata) {
+        if (config_.experimental_config.expose_kineto_event_metadata) {
+          e->visit(c10::overloaded(
+              [&](ExtraFields<EventType::TorchOp>& i) {
                 i.metadata_json_ = activity->metadataJson();
-              }
-            },
-            [&](ExtraFields<EventType::Kineto>& i) {
-              if (config_.experimental_config.expose_kineto_event_metadata) {
+              },
+              [&](ExtraFields<EventType::Kineto>& i) {
                 i.metadata_json_ = activity->metadataJson();
-              }
-            },
-            [](auto&) { return; }));
+              },
+              [](auto&) { return; }));
+        }
         const auto* linked_activity = activity->linkedActivity();
         if (linked_activity) {
           e->visit(c10::overloaded(
