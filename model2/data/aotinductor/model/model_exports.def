@@ -1,0 +1,6 @@
+LIBRARY model
+EXPORTS
+    AOTInductorModelContainerCreate
+    AOTInductorModelContainerCreateWithDevice
+    AOTInductorModelContainerRun
+    AOTInductorModelContainerDelete
