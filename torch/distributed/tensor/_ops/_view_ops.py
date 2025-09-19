@@ -490,7 +490,9 @@ def propagate_shape_and_sharding(
     - An output dimension that is a split of the input dimension can only be sharded
       if the leftmost split size is divisible by the mesh dimension
     """
-    assert len(input_src_placements) == len(mesh_sizes)
+    assert len(input_src_placements) == len(mesh_sizes), (
+        f"{input_src_placements} != {mesh_sizes}"
+    )
     # for each input dim, for each mesh dim, provides a list of possible shardable dimensions
     mesh_ndim = len(mesh_sizes)
     shardable_dims: dict[int, list[bool]] = {}
