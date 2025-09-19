@@ -28,8 +28,10 @@
 #include <c10/util/irange.h>
 
 #include <cstdint>
-#include <map>
 #include <mutex>
+#include <string>
+#include <unordered_map>
+#include <utility>
 
 namespace at {
 
@@ -456,7 +458,6 @@ class TORCH_API Context {
       ? at::Float32MatmulPrecision::HIGH
       : at::Float32MatmulPrecision::HIGHEST;
   int benchmark_limit_cudnn = 10;
-  bool allow_tf32_cudnn = true;
   bool allow_fp16_reduction_cublas = true;
   bool allow_bf16_reduction_cublas = true;
   bool allow_fp16_accumulation_cublas = false;
@@ -488,22 +489,28 @@ class TORCH_API Context {
   bool enable_sparse_tensor_invariant_checks = false;
   bool allow_fp16_reduction_cpu = false;
 
-  std::map<std::string, std::map<std::string, std::string>> fp32_precision = {
-      {"generic", {{"all", "none"}}},
-      {"mkldnn",
-       {{"matmul", "none"},
-        {"conv", "none"},
-        {"rnn", "none"},
-        {"all", "none"}}},
-      {"cuda",
-       {{"matmul",
-         float32_matmul_precision == at::Float32MatmulPrecision::HIGHEST
-             ? "none"
-             : "tf32"},
-        {"conv", "tf32"},
-        {"rnn", "tf32"},
-        {"all", "none"}}},
+  struct StringPairHash {
+    size_t operator()(const std::pair<std::string, std::string>& p) const {
+      return (1ull << p.first.size()) + (1ull << p.second.size());
+    }
   };
+
+  // `settings` defines the fp32 precisions for different backends and ops
+  std::unordered_map<
+      std::pair<std::string, std::string>,
+      std::string,
+      StringPairHash>
+      settings{
+          {{"cuda", "conv"}, "tf32"},
+          {{"cuda", "matmul"},
+           float32_matmul_precision == at::Float32MatmulPrecision::HIGHEST
+               ? "none"
+               : "tf32"},
+          {{"cuda", "rnn"}, "tf32"},
+          {{"mkldnn", "conv"}, "none"},
+          {{"mkldnn", "matmul"}, "none"},
+          {{"mkldnn", "rnn"}, "none"},
+      };
 
   Allocator* prev_allocator_ptr_{nullptr};
 };
