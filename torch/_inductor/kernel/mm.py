@@ -18,7 +18,7 @@ from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.torch_version import TorchVersion
 
-from .. import config as inductor_config
+from .. import config as inductor_config, distributed_autotune
 from ..codegen.cuda.gemm_template import CUTLASS2xGemmTemplate, CUTLASS3xGemmTemplate
 from ..codegen.rocm.ck_tile_universal_gemm_template import CKTileGemmTemplate
 from ..codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
@@ -749,6 +749,11 @@ def tuned_mm(mat1, mat2, *, layout=None):
         mat2.get_dtype(),
         layout,
     )
+
+    if box := distributed_autotune.maybe_autotune_remote(
+        name, kernel_inputs.nodes(), layout
+    ):
+        return box
 
     choices: list[ChoiceCaller] = []
     static_shape, is_nonzero = _is_static_problem(layout)
