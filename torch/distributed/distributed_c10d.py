@@ -1737,7 +1737,6 @@ def init_process_group(
             timeout=timeout,
             group_desc="default_pg",
         )
-        _update_default_pg(default_pg)
     else:
         # backward compatible API
         if store is None:
@@ -1768,7 +1767,8 @@ def init_process_group(
             device_id=device_id,
             group_desc="default_pg",
         )
-        _update_default_pg(default_pg)
+
+    _update_default_pg(default_pg)
 
     _world.pg_group_ranks[GroupMember.WORLD] = {  # type: ignore[index]
         i: i
@@ -1929,9 +1929,9 @@ def _new_process_group_helper(
     if "," not in str(backend) and ":" not in str(backend):
         assert backend in Backend.backend_type_map, f"Unknown backend type {backend}"
         if backend == Backend.UNDEFINED:
-            # Currently when backend is UNDEFINED, both ``gloo`` and ``nccl`` backends
-            # will be created, we use nccl(if cuda is available) or gloo as default
-            # backend so we can correctly call getDefaultBackend which in ProcessGroup.
+            # Currently when backend is UNDEFINED, only one backend will be initialized
+            # we use nccl (if cuda is available) or gloo as default backend
+            # so we can correctly call getDefaultBackend which in ProcessGroup.
             if Backend.NCCL in backend_config.get_device_backend_map().values():
                 pg._set_default_backend(ProcessGroup.BackendType.NCCL)
             else:
@@ -5152,7 +5152,11 @@ def split_group(
             my_group = split_group
             break
 
-    group_name = _process_group_name(my_group, use_hashed_name=False)
+    # use_hashed_name is True to ensure that subgroups have unique names.
+    # This is needed as some backends (e.g. Gloo) use the group name as a
+    # PrefixStore prefix for initialization of splits. Thus, names have to be
+    # unique to avoid key collisions.
+    group_name = _process_group_name(my_group, use_hashed_name=True)
     split_pg = parent_pg.split_group(
         my_group,
         timeout=timeout,
