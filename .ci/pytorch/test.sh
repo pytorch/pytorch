@@ -820,9 +820,9 @@ test_dynamo_benchmark() {
   shift
 
 
-  ### Perf benchmark 2.8 baseline
+  ### Perf benchmark 2.9 RC
   pip_uninstall torch torchvision torchaudio torchrec fbgemm-gpu
-  pip_install torch==2.8.0 torchvision torchaudio torchrec fbgemm-gpu
+  pip_install torch==2.9.0 torchvision torchaudio torchrec fbgemm-gpu --index-url https://download.pytorch.org/whl/test/cu128
   pip freeze
 
 
