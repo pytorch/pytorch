@@ -91,7 +91,6 @@ from torch.utils._triton import has_triton, has_triton_package
 from torch.utils.hooks import RemovableHandle
 
 from .graph_utils import _get_flat_args
-from .streams import stream_state_mgr
 
 
 if typing.TYPE_CHECKING:
@@ -3315,6 +3314,7 @@ def get_fake_value(
         UserError,
         UserErrorType,
     )
+    from .variables.streams import stream_state_mgr
 
     op = node.op
 
