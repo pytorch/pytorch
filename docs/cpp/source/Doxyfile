@@ -130,7 +130,7 @@ INCLUDE_PATH           = ../../.. \
 ################################################################################
 # Compound extraction control.                                                 #
 ################################################################################
-EXTRACT_ALL            = NO
+EXTRACT_ALL            = YES
 EXTRACT_PACKAGE        = YES
 EXTRACT_STATIC         = YES
 CASE_SENSE_NAMES       = NO
