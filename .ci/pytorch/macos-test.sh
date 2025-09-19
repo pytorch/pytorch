@@ -181,9 +181,6 @@ checkout_install_torchbench() {
   popd
 
   pip install -r .ci/docker/ci_commit_pins/huggingface-requirements.txt
-  # https://github.com/pytorch/pytorch/issues/160689 to remove torchao because
-  # its current version 0.12.0 doesn't work with transformers 4.54.0
-  pip uninstall -y torchao
 
   echo "Print all dependencies after TorchBench is installed"
   python -mpip freeze
