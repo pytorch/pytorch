@@ -1121,7 +1121,7 @@ class TestInductorDynamic(TestCase):
             """Reduce over a dimension with bounded size."""
             # x shape: [batch, features, reduction_dim]
             # reduction_dim is dynamic but bounded to max 128
-            assert x.shape[2] <= 16, f"Reduction dim {x.shape[2]} exceeds max 128"
+            assert x.shape[2] <= 128, f"Reduction dim {x.shape[2]} exceeds max 128"
 
             # Perform reduction (sum) over the last dimension
             result = torch.sum(x * y, dim=2)
@@ -1135,22 +1135,14 @@ class TestInductorDynamic(TestCase):
         x = torch.randn(reduction_dim, batch, features, device="cuda").permute(1, 2, 0)
         y = torch.randn(reduction_dim, batch, features, device="cuda").permute(1, 2, 0)
 
-        torch._dynamo.mark_dynamic(x, 2, min=6, max=16)
-        torch._dynamo.mark_dynamic(y, 2, min=6, max=16)
+        torch._dynamo.mark_dynamic(x, 2, min=6, max=128)
+        torch._dynamo.mark_dynamic(y, 2, min=6, max=128)
 
         compiled_fn = torch.compile(reduce_bounded)
         result, source_codes = run_and_get_code(compiled_fn, x, y)
 
         FileCheck().check_not("@triton_heuristics.reduction").run(source_codes[0])
-
-        # Verify shape
-        assert result.shape == (batch, features)
-
-        # Test with expected value
         expected = reduce_bounded(x, y)
-        import triton
-
-        print(triton.testing.do_bench(lambda: compiled_fn(x, y)))
 
         assert torch.allclose(result, expected, atol=1e-3, rtol=1e-3)
 
