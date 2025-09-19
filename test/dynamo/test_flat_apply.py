@@ -147,8 +147,8 @@ class GraphModule(torch.nn.Module):
 
         t: "f32[10]" = l_x_ + l_y_
 
-        trace_point_tensor_spec : torch.utils._pytree.TreeSpec = self.trace_point_tensor_spec
-        trace_point_tensor_input_spec : torch.utils._pytree.TreeSpec = self.trace_point_tensor_input_spec
+        trace_point_tensor_spec : torch.utils.pytree.PyTreeSpec = self.trace_point_tensor_spec
+        trace_point_tensor_input_spec : torch.utils.pytree.PyTreeSpec = self.trace_point_tensor_input_spec
         res: "f32[10]" = torch.ops.higher_order.flat_apply(trace_point_tensor_spec, trace_point_tensor_input_spec, l_x_, l_y_, t);  trace_point_tensor_spec = trace_point_tensor_input_spec = l_x_ = l_y_ = t = None
         return (res,)
 """,  # NOQA: B950
