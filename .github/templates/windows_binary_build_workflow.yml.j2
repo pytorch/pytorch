@@ -153,7 +153,7 @@ jobs:
 {%- else %}
 {%- if config["gpu_arch_type"] == "cuda" %}
 {%- if branches == "nightly" %}
-    runs-on: "$windows.g4dn.xlarge"
+    runs-on: "windows.g4dn.xlarge"
 {%- else %}
     runs-on: "windows.g4dn.xlarge.nonephemeral"
 {%- endif %}
