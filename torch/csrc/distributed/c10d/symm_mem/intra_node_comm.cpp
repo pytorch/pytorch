@@ -171,7 +171,7 @@ bool IntraNodeComm::rendezvous() {
   gethostname(devInfo.hostname, sizeof(devInfo.hostname));
   devInfo.deviceIdx = deviceIdx_;
 
-#if defined(USE_ROCM)
+#if defined(USE_ROCM) && defined(HAS_ROCM_SMI)
   auto ret = rsmi_init(0);
   if (ret != RSMI_STATUS_SUCCESS) {
     LOG(ERROR) << "IntraNodeComm:: rendezvous failed in rsmi_init, ret=" << ret;
