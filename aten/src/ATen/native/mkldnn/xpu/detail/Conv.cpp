@@ -81,12 +81,13 @@ sycl::event convolution(
     IntArrayRef stride,
     IntArrayRef dilation,
     int64_t groups,
+    const bool& is_1d,
     Attr& attr,
     const std::vector<sycl::event>& deps) {
   auto& engine = GpuEngineManager::Instance().get_engine();
   auto& stream = GpuStreamManager::Instance().get_stream();
 
-  bool is_channels_last = use_channels_last_for_conv(src, weight);
+  bool is_channels_last = !is_1d & use_channels_last_for_conv(src, weight);
 
   // create usr_md for tensors, and md for conv primitive
   auto [src_md, weight_md, dst_md] =
