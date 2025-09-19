@@ -4,7 +4,6 @@
 #include <ATen/WrapDimUtils.h>
 #include <ATen/native/TensorShape.h>
 #include <ATen/native/TypeProperties.h>
-#include <ATen/native/mps/MPSGraphVenturaOps.h>
 #include <ATen/native/mps/OperationUtils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS

@@ -1227,7 +1227,9 @@ class _InProcessFxCompile(FxCompile):
             # structured logs...
             # trace_structured("inductor_input_graph", payload_fn=lambda: gm.print_readable(print_output=False))
 
-            shape_env = shape_env_from_inputs(example_inputs)
+            shape_env = gm.shape_env
+            if shape_env is None:
+                shape_env = shape_env_from_inputs(example_inputs)
 
             # Convert view to reshape in the graph. This is necessary primarily for
             # layout optimization. Do it unconditionally for uniformity.
