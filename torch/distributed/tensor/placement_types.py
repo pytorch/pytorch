@@ -4,7 +4,6 @@
 from typing import cast, Optional
 
 import torch
-
 import torch._C
 import torch.distributed._functional_collectives as funcol
 from torch._C._distributed import Placement
