@@ -283,16 +283,18 @@ if True:  # just to temporarily avoid reindentation
             sliced_sizes = tuple(l.sizes for l in layout_sliced)
             sliced_strides = tuple(l.strides for l in layout_sliced)
             # When users sliced dim_names outside from current mesh, we will check whether
-            # there is layout overlap. Eventually we will just directly throw error here because
+            # there is layout overlap.
+            # TODO: Eventually we will just directly throw error here because
             # we will deprecate the slicing of flattened dim_name from root mesh.
             layout_sliced = _MeshLayout(sliced_sizes, sliced_strides)
             if not layout_sliced.check_non_overlap():
                 raise RuntimeError(
-                    f"slicing overlapping dim_names {mesh_dim_names} is not allowed"
+                    f"Slicing overlapping dim_names {mesh_dim_names} is not allowed."
                 )
 
             return layout_sliced
 
+        # TODO: to make this use case by other components public API in the future.
         def _get_all_submeshes(
             self, device_mesh: "DeviceMesh", mesh_dim_name: str
         ) -> list["DeviceMesh"]:
