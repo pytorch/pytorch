@@ -49,11 +49,7 @@ def from_dynamic_axes_to_dynamic_shapes(
 
     if kwargs is None:
         kwargs = {}
-    sig = _signature(model)
-    actual_input_names = list(sig.parameters.keys())
-    invalid_keys = [key for key in dynamic_axes.keys() if key not in actual_input_names]
-    if invalid_keys:
-        raise ValueError(f"Invalid dynamic_axes keys: {invalid_keys}")
+
     dynamic_shapes: dict[str, Any | None] = {}
     for input_name, axes in dynamic_axes.items():
         # NOTE: torch.export.Dim.DYNAMIC does its best to infer the min and max values
@@ -87,6 +83,7 @@ def from_dynamic_axes_to_dynamic_shapes(
             dynamic_shapes[input_name] = None
 
     # Order the inputs according to the signature of the model
+    sig = _signature(model)
     inputs = []
     for idx, param_name in enumerate(sig.parameters):
         if idx < len(args):
