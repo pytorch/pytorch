@@ -823,6 +823,7 @@ test_dynamo_benchmark() {
   ### Perf benchmark 2.8 baseline
   pip_uninstall torch torchvision torchaudio torchrec fbgemm-gpu
   pip_install torch==2.8.0 torchvision torchaudio torchrec fbgemm-gpu
+  pip freeze
 
 
   if [[ "${TEST_CONFIG}" == *perf_compare* ]]; then
