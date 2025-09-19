@@ -699,7 +699,9 @@ class TestDTensorOps(DTensorOpTestBase):
         dt1 = distribute_tensor(tensor, self.mesh, [Shard(1)])
 
         funcs = [
+            lambda t: t.expand(2, 4),
             lambda t: t.expand(4, 4),
+            lambda t: t.expand(5, 4),
             lambda t: t.expand(4, 4, 4),
             lambda t: t.expand(1, 4, 4),
             lambda t: t.broadcast_to(4, 4),
