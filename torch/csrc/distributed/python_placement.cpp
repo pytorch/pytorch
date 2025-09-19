@@ -6,6 +6,7 @@
 
 namespace torch::distributed {
 namespace {
+// NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 const char placement_class_docstring[] =
     "The base class for the Placement type, where it describes how a DTensor is placed onto the\n"
     "``DeviceMesh``. ``Placement`` and ``DeviceMesh`` together could describe the DTensor Layout.\n"
@@ -19,7 +20,9 @@ void initPlacementBindings(PyObject* module) {
   // TODO: Consider porting to nanobind instead since these types are
   // isolated and don't touch anything else.
   auto py_module = py::reinterpret_borrow<py::module>(module);
-  py::class_<Placement>(py_module, "Placement", placement_class_docstring)
+  auto distributed_module = py_module.def_submodule("_distributed");
+  py::class_<Placement>(
+      distributed_module, "Placement", placement_class_docstring)
       .def(py::init<>()) // Allow construction of Python subclasses.
       .def(
           "is_partial",
@@ -27,7 +30,7 @@ void initPlacementBindings(PyObject* module) {
           py::arg("reduce_op") = py::none())
       .def("is_replicate", &Placement::is_replicate)
       .def("is_shard", &Placement::is_shard, py::arg("dim") = py::none());
-  py::class_<Shard, Placement>(py_module, "Shard")
+  py::class_<Shard, Placement>(distributed_module, "Shard")
       .def(py::init<int64_t>(), py::arg("dim"))
       .def_readonly("dim", &Shard::dim)
       .def("is_shard", &Shard::is_shard, py::arg("dim") = py::none())
@@ -38,7 +41,7 @@ void initPlacementBindings(PyObject* module) {
       .def(py::pickle(
           [](const Shard& shard) { return shard.dim; },
           [](std::int64_t dim) { return Shard(dim); }));
-  py::class_<StridedShard, Shard>(py_module, "StridedShard")
+  py::class_<StridedShard, Shard>(distributed_module, "StridedShard")
       .def(
           py::init<int64_t, int64_t>(),
           py::arg("dim"),
@@ -54,14 +57,14 @@ void initPlacementBindings(PyObject* module) {
           [](const StridedShard& shard) {
             return py::make_tuple(shard.dim, shard.split_factor);
           },
-          [](py::tuple tup) {
+          [](const py::tuple& tup) {
             if (tup.size() != 2) {
               throw std::runtime_error("invalid pickled StridedShard!");
             }
             return StridedShard(
                 py::cast<int64_t>(tup[0]), py::cast<int64_t>(tup[1]));
           }));
-  py::class_<Replicate, Placement>(py_module, "Replicate")
+  py::class_<Replicate, Placement>(distributed_module, "Replicate")
       .def(py::init())
       .def("is_replicate", &Replicate::is_replicate)
       .def(
@@ -70,8 +73,8 @@ void initPlacementBindings(PyObject* module) {
           py::is_operator())
       .def(py::pickle(
           [](const Replicate& repl) { return py::none(); },
-          [](py::none none) { return Replicate(); }));
-  py::class_<Partial, Placement>(py_module, "Partial")
+          [](const py::none&) { return Replicate(); }));
+  py::class_<Partial, Placement>(distributed_module, "Partial")
       .def(py::init<>())
       .def(py::init<std::string>(), py::arg("reduce_op"))
       .def_readonly("reduce_op", &Partial::reduce_op)

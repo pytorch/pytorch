@@ -4,8 +4,10 @@
 from typing import cast, Optional
 
 import torch
+
 import torch._C
 import torch.distributed._functional_collectives as funcol
+from torch._C._distributed import Placement
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._collective_utils import (
     fill_empty_tensor_to_shards,
@@ -20,11 +22,10 @@ from torch.distributed.tensor._collective_utils import (
 __all__ = ["Placement", "Shard", "Replicate", "Partial"]
 
 
-Placement = torch._C.Placement
 Placement.__module__ = "torch.distributed.tensor"
 
 
-class Shard(torch._C.Shard):
+class Shard(torch._C._distributed.Shard):
     """
     The ``Shard(dim)`` placement describes the DTensor sharding on tensor dimension
     ``dim`` over a corresponding ``DeviceMesh`` dimension, where each rank on the
@@ -329,7 +330,7 @@ class Shard(torch._C.Shard):
         return f"S({self.dim})"
 
 
-class _StridedShard(torch._C.StridedShard):
+class _StridedShard(torch._C._distributed.StridedShard):
     """
     _StridedShard is only introduced to support 2D FSDP2 + TP sharding where the tensor
     is sharded on the TP mesh dimension first, then sharded on the FSDP mesh dimension.
@@ -551,7 +552,7 @@ class _StridedShard(torch._C.StridedShard):
         return torch.cat(reordered_shards, dim=self.dim).contiguous()
 
 
-class Replicate(torch._C.Replicate):
+class Replicate(torch._C._distributed.Replicate):
     """
     The ``Replicate()`` placement describes the DTensor replicating on a corresponding
     ``DeviceMesh`` dimension, where each rank on the DeviceMesh dimension holds a
@@ -599,7 +600,7 @@ class Replicate(torch._C.Replicate):
         return tensor
 
 
-class Partial(torch._C.Partial):
+class Partial(torch._C._distributed.Partial):
     """
     The ``Partial(reduce_op)`` placement describes the DTensor that is pending
     reduction on a specified ``DeviceMesh`` dimension, where each rank on the
