@@ -2669,6 +2669,9 @@ class Def(TreeView):
 
 class Decl(TreeView): ...
 
+# Defined in torch/csrc/autograd/python_variable.cpp
+def _DTensor_compute_global_tensor_info(tensor: Tensor, mesh: DeviceMesh, placements: Sequence[Placement]) -> tuple[list[_int], list[_int]]: ...
+
 # Defined in torch/csrc/distributed/rpc/init.cpp
 def _rpc_init() -> _bool: ...
 

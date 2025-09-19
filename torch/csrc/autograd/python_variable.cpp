@@ -1230,6 +1230,7 @@ static PyObject* DTensor_compute_global_tensor_info_impl(
       .ptr();
 }
 
+// NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 static constexpr const char compute_global_tensor_info_doc[] =
     "Compute the global size and stride of a DTensor from the given local tensor.\n"
     "The local size is multiplied by `world_size` per Sharding dim.\n"
@@ -2935,5 +2936,6 @@ bool THPVariable_initModule(PyObject* module) {
     return false;
   }
   PyModule_AddFunctions(module, extra_functions);
+
   return true;
 }
