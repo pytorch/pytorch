@@ -240,14 +240,12 @@ static inline void slow_conv3d_shape_check(
       "). Output size is too small");
 
   uint64_t kernel_product;
-  if (c10::mul_overflows(kernel_height, kernel_width, &kernel_product)) {
-    TORCH_CHECK(
-      false,
-      "Kernel height x width product is too large: kernel_height=",
-      kernel_height,
-      ", kernel_width=",
-      kernel_width);
-  }
+  TORCH_CHECK(
+    !c10::mul_overflows(kernel_height, kernel_width, &kernel_product),
+    "Kernel height x width product is too large: kernel_height=",
+    kernel_height,
+    ", kernel_width=",
+    kernel_width);
 
   if (weight.defined()) {
     int64_t n_input_plane = weight.size(1);
