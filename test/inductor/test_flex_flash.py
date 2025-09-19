@@ -271,7 +271,6 @@ class TestFlexFlash(InductorTestCase):
                 kernel_options={"force_flash": True},
             )
 
-
 instantiate_device_type_tests(TestFlexFlash, globals(), only_for="cuda")
 
 
