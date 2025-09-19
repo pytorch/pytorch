@@ -350,9 +350,10 @@ Tensor& binary_cross_entropy_backward_out_cpu(const Tensor& grad, const Tensor& 
 
 Tensor binary_cross_entropy_with_logits(const Tensor& input, const Tensor& target, const std::optional<Tensor>& weight_opt, const std::optional<Tensor>& pos_weight_opt, int64_t reduction) {
   // Binary cross entropy with logits tensor is defined by the equation:
-  // L = -w (y ln(sigma(x)) + (1-y) ln(1-sigma(x)))
+  // L = -w (p y ln(sigma(x)) + (1-y) ln(1-sigma(x)))
   // Which can be simplified to
-  // L = -w (x (1-y) - ln(sigma(x))
+  // L = -w (x (1-y) - ln(sigma(x))(1+y(p-1))
+  // => L = -w (x (1-y) - ln(sigma(x)), when p==1.
 
   auto log_sigmoid_input = at::log_sigmoid(input);
 
@@ -378,6 +379,7 @@ Tensor binary_cross_entropy_with_logits(const Tensor& input, const Tensor& targe
     if (has_large_values) {
       auto large_target = at::where(large_mask, target, at::zeros_like(target));
       auto large_loss = thresh_value * (1 - large_target);
+      // Note: position weight does not effect loss if log(sigma(x)) ~= 0. 
       loss = at::where(large_mask, large_loss, loss);
     }
 
@@ -385,19 +387,11 @@ Tensor binary_cross_entropy_with_logits(const Tensor& input, const Tensor& targe
     if (has_small_values) {
       auto small_target = at::where(small_mask, target, at::zeros_like(target));
       auto small_loss = thresh_value * small_target;
-      loss = at::where(small_mask, small_loss, loss);
-    }
-
-    // Apply pos_weight to extreme values
-    if (pos_weight_opt.has_value() && pos_weight_opt->defined()) {
-      auto pos_weight_expanded = pos_weight_opt->expand_as(input);
-      auto extreme_mask = large_mask | small_mask;
-
-      if (at::any(extreme_mask).item<bool>()) {
-        auto log_weight = (pos_weight_expanded - 1) * target + 1;
-        auto extreme_adjustment = at::where(extreme_mask, log_weight, at::ones_like(input));
-        loss = loss * extreme_adjustment;
+      // Apply pos_weight to extreme values
+      if (pos_weight_opt.has_value() && pos_weight_opt->defined()) {
+        small_loss.mul_(*pos_weight_opt);
       }
+      loss = at::where(small_mask, small_loss, loss);
     }
   }
 
