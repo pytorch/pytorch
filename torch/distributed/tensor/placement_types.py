@@ -22,7 +22,8 @@ from torch.distributed.tensor._collective_utils import (
 __all__ = ["Placement", "Shard", "Replicate", "Partial"]
 
 
-Placement.__module__ = "torch.distributed.tensor"
+# Appease TestPublicBindings.test_correct_module_names
+Placement.__module__ = "torch.distributed.tensor.placement_types"
 
 
 class Shard(torch._C._distributed.Shard):

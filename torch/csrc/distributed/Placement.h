@@ -13,7 +13,11 @@ namespace torch::distributed {
 
 class Placement {
  public:
+  Placement() = default;
   virtual ~Placement() = default;
+
+  Placement(const Placement&) = default;
+  Placement& operator=(const Placement&) = default;
 
   virtual bool is_shard(std::optional<std::int64_t> dim) const {
     return false;
