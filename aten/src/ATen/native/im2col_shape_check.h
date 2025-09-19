@@ -63,7 +63,7 @@ inline void col2im_shape_check(
             " and kernel_height = ",
             kernel_height,
             " the product of kernel_width and kernel_height overflowed.");
-  
+
   if (n_input_plane % (kernel_width * kernel_height) != 0) {
     TORCH_CHECK(false,
         "Expected size of input's dimension 1 to be divisible by the "
