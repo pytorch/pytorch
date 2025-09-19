@@ -926,7 +926,7 @@ def compute_error(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
 # largest power of 2 representable in `torch.float8_e4m3fn`
 F8E4M3_LARGEST_POW2 = 8
 # largest power of 2 representable in `torch.float4_e2m1fn_x2`
-FP4E2M1FN_LARGEST_POW2 = 1.0
+FP4E2M1FN_LARGEST_POW2 = 2.0
 # max value of `torch.float8_e4m3fn` (448)
 F8E4M3_MAX_VAL = torch.finfo(torch.float8_e4m3fn).max
 # exponent bias of `torch.float8_e8m0fnu`
@@ -1746,12 +1746,12 @@ class TestFP8Matmul(TestCase):
 
         device = "cuda"
         M, K, N = mkn
-        if (recipe == "nvfp4" or recipe == "mxfp4") and K % 32 != 0:
-            raise unittest.SkipTest("K must be divisible by 32 for nvfp4/mxfp4 cublas gemm, skipping")
+        if recipe == "nvfp4" and K % 32 != 0:
+            raise unittest.SkipTest("K must be divisible by 32 for nvfp4 cublas gemm, skipping")
 
         if torch.version.hip:
-            if not (M % 32 == 0 and K % 128 == 0 and N % 32 == 0):
-                raise unittest.SkipTest("M and N must be multiples of 32 and K must be multiple of 128 on ROCm, skipping")
+            if not (M % 16 == 0 and K % 128 == 0 and N % 16 == 0):
+                raise unittest.SkipTest("M and N must be multiples of 16 and K must be multiple of 128 on ROCm, skipping")
 
         fp4_scaling_dtype = torch.float8_e8m0fnu if torch.version.hip else torch.float8_e4m3fn
         BLOCK_SIZE = 32 if torch.version.hip else (16 if recipe == "nvfp4" else 32)
@@ -1932,7 +1932,7 @@ class TestFP8Matmul(TestCase):
                 B = B.clamp(min=min_val, max=max_val)
                 B = _bfloat16_to_float4_e2m1fn_x2(B)
 
-                approx_match_sqnr_target = 12.0 if torch.version.hip else 15.8
+                approx_match_sqnr_target = 15 if torch.version.hip else 15.8
 
         C_ref = A_ref @ B_ref.t()
 
