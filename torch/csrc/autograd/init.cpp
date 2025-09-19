@@ -560,6 +560,22 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
     }
   });
 
+  py::class_<at::ThreadLocalState>(_C_m, "_ThreadLocalState");
+
+  // Then define your functions that use it
+  _C_m.def(
+      "_stash_tls_state",
+      []() { return at::ThreadLocalState(); },
+      "Captures and returns the current thread local state");
+
+  _C_m.def(
+      "_restore_tls_state",
+      [](const at::ThreadLocalState& state) {
+        at::ThreadLocalState::setThreadLocalState(state);
+      },
+      "Restores a previously stashed thread local state",
+      py::arg("state"));
+
   _C_m.def("_activate_gpu_trace", []() { activateGPUTrace(); });
 
   py_context_manager_DEPRECATED<c10::InferenceMode, bool>(
