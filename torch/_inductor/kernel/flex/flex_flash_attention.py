@@ -33,6 +33,20 @@ flash_attention_cutedsl_template = CuteDSLTemplate(
 )
 
 
+def input_buffers_require_grads(graph_module):
+    """Check if any of the input buffers (beyond the first 5) require gradients."""
+    inputs = []
+    for node in graph_module.graph.nodes:
+        if node.op == "placeholder":
+            inputs.append(node)
+    if len(inputs) <= 5:
+        return False
+    for n in inputs[5:]:
+        if n.meta["tensor_meta"].requires_grad:
+            return True
+    return False
+
+
 def is_trivial_graph(graph_module: GraphModule, is_score_graph: bool):
     """Check if the flex graphs are trivial"""
     graph = graph_module.graph
@@ -49,20 +63,59 @@ def is_trivial_graph(graph_module: GraphModule, is_score_graph: bool):
     return len(placeholders) == 4 and output_val.target == torch.ops.aten.full.default
 
 
+def _can_use_flex_flash_attention(
+    subgraph: Subgraph, mask_graph: Subgraph
+) -> tuple[bool, str]:
+    """Check if flex flash attention can be used for the given inputs.
+
+    Returns:
+        tuple: (can_use, reason) where reason explains why it can't be used if can_use is False
+    """
+    if not CUTE_AVAILABLE:
+        return False, "CUTE flash attention library is not available"
+
+    if input_buffers_require_grads(subgraph.graph_module):
+        return (
+            False,
+            "Input buffers require gradients (not supported by flash attention)",
+        )
+
+    score_trivial = is_trivial_graph(subgraph.graph_module, is_score_graph=True)
+    mask_trivial = is_trivial_graph(mask_graph.graph_module, is_score_graph=False)
+
+    if not score_trivial and not mask_trivial:
+        return (
+            False,
+            "Both score and mask graphs are too complex for flash attention (require simple operations only)",
+        )
+    elif not score_trivial:
+        return (
+            False,
+            "Score modification captured tensors that require gradients (not supported by flash attention)",
+        )
+    elif not mask_trivial:
+        return (
+            False,
+            "A non None BlockMask was passed to flex attention (not supported by flash attention yet)",
+        )
+
+    return True, ""
+
+
 def _use_flex_flash_attention(
     subgraph: Subgraph, mask_graph: Subgraph, kernel_options: dict[str, Any]
 ) -> bool:
-    """Determine if we can use flex flash attention for the given inputs."""
-    if not CUTE_AVAILABLE:
-        return False
-    if kernel_options.get("disable_flash", False):
-        return False
-    if is_trivial_graph(
-        subgraph.graph_module, is_score_graph=True
-    ) and is_trivial_graph(mask_graph.graph_module, is_score_graph=False):
-        return True
+    """Determine if we should use flex flash attention for the given inputs."""
+    force_flash = kernel_options.get("force_flash", False)
 
-    return False
+    can_use, reason = _can_use_flex_flash_attention(subgraph, mask_graph)
+
+    if force_flash and not can_use:
+        raise RuntimeError(
+            f"force_flash=True but flash attention cannot be used: {reason}"
+        )
+
+    return force_flash and can_use
 
 
 def create_flex_flash_attention_kernel(
