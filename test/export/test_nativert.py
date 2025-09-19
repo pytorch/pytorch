@@ -18,7 +18,7 @@ from torch.nativert.backends._lower_utils import (
     package_nativert_with_aoti_delegate,
 )
 from torch.testing._internal.common_utils import IS_WINDOWS
-from torch.testing._internal.inductor_utils import HAS_GPU
+from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
 from torch.utils import _pytree as pytree
 
 
@@ -243,7 +243,7 @@ class TestNativeRT(TestCase):
 
     parameters = []
     for device in ["cpu", "cuda"]:
-        if device == "cuda" and not HAS_GPU:
+        if device == "cuda" and not HAS_CUDA_AND_TRITON:
             continue
         for module, sample_inputs in [
             (get_module.__func__().to(device), (torch.randn(4, 4).to(device),)),
@@ -353,4 +353,6 @@ del test
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
-    run_tests()
+    # nativert has not been supported on XPU yet.
+    if not torch.xpu.is_available():
+        run_tests()

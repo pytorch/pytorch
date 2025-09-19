@@ -426,7 +426,7 @@ def _flatten_optim_state_dict(
     Note that ``_flatten_tensor_optim_state`` does not need ``optim`` to
     flatten/shard the state. However, NamedOptimizer and KeyedOptimizer require
     all the states even if the corresponding parameters are empty. To this end,
-    ``optim`` will be used to to get the initial state of the empty parameters.
+    ``optim`` will be used to get the initial state of the empty parameters.
     ``optim`` should only be non-None if the ``optim` is KeyedOptimizer or
     NamedOptimizer.
 
