@@ -11,6 +11,7 @@ from typing import Optional, TYPE_CHECKING, Union
 
 import torch
 from torch.distributed._mesh_layout import _MeshLayout
+from torch.distributed._pycute import is_tuple, suffix_product
 from torch.utils._typing_utils import not_none
 
 
@@ -148,7 +149,6 @@ if True:  # just to temporarily avoid reindentation
                 else:
                     raise RuntimeError(
                         f"Flatten mesh with mesh_dim_name {mesh_dim_name} has been created before, "
-                        f"but the layout is different from the current layout. "
                         f"Please specify another valid mesh_dim_name."
                     )
 
@@ -159,7 +159,6 @@ if True:  # just to temporarily avoid reindentation
                 root_mesh.mesh,
                 get_world_size(),
             )
-
             for mesh_nd in pg_ranks_by_dim:
                 # need to init backend here since the flattened pg doesn't exist in root mesh.
                 flattened_mesh = DeviceMesh(
@@ -171,7 +170,6 @@ if True:  # just to temporarily avoid reindentation
                 )
                 if cur_rank in mesh_nd:
                     res_flattened_mesh = flattened_mesh
-
             self.child_to_root_mapping[res_flattened_mesh] = root_mesh  # type: ignore[possibly-undefined]
             self.root_to_flatten_mapping.setdefault(root_mesh, {})[mesh_dim_name] = (
                 res_flattened_mesh  # type: ignore[possibly-undefined]
@@ -181,6 +179,102 @@ if True:  # just to temporarily avoid reindentation
             )
 
             return res_flattened_mesh
+
+        def create_unflatten_mesh(
+            self,
+            device_mesh: "DeviceMesh",
+            dim: int,
+            mesh_sizes: tuple[int, ...],
+            mesh_dim_names: tuple[str, ...],
+            backend_override: tuple[
+                tuple[Optional[str], Optional[C10dBackend.Options]], ...
+            ] = ((None, None),),
+        ) -> "DeviceMesh":
+            root_mesh = _mesh_resources.get_root_mesh(device_mesh)
+            unflatten_layout = _MeshLayout(
+                tuple(mesh_sizes), suffix_product(mesh_sizes)
+            )
+            unflatten_length = len(mesh_sizes)
+            original_sizes = (
+                device_mesh._layout.sizes
+                if is_tuple(device_mesh._layout.sizes)
+                else (device_mesh._layout.sizes,)
+            )
+            original_strides = (
+                device_mesh._layout.strides
+                if is_tuple(device_mesh._layout.strides)
+                else (device_mesh._layout.strides,)
+            )
+            orig_mesh_dim_names = not_none(device_mesh.mesh_dim_names)
+            unflatten_layout = device_mesh._layout[dim].composition(unflatten_layout)
+            cur_rank = device_mesh.get_rank()
+            unflattened_layout = _MeshLayout(
+                tuple(
+                    original_sizes[:dim] + unflatten_layout.sizes
+                    if is_tuple(unflatten_layout.sizes)
+                    else (unflatten_layout.sizes,) + tuple(original_sizes[dim + 1 :])
+                ),
+                tuple(
+                    original_strides[:dim] + unflatten_layout.strides
+                    if is_tuple(unflatten_layout.strides)
+                    else (unflatten_layout.strides,)
+                    + tuple(original_strides[dim + 1 :])
+                ),
+            )
+            pg_ranks_by_dim = unflattened_layout.to_remapping_tensor(
+                device_mesh.mesh,
+                get_world_size(),
+            )
+            for mesh_nd in pg_ranks_by_dim:
+                submesh = DeviceMesh(
+                    device_mesh.device_type,
+                    mesh_nd,
+                    mesh_dim_names=tuple(
+                        orig_mesh_dim_names[:dim]
+                        + mesh_dim_names
+                        + orig_mesh_dim_names[dim + 1 :]
+                    ),
+                    _init_backend=False,
+                    layout=unflattened_layout,
+                )
+                if cur_rank in mesh_nd:
+                    res_mesh = submesh
+
+            # If original mesh has initiated its backend, we need to initialize the backend
+            # of unflatten dims as well.
+            # TODO: To make backend init more efficient with cute layout representation and support
+            # per dim backend init.
+            if hasattr(device_mesh, "_dim_group_names"):
+                pg_ranks_by_dim = unflatten_layout.to_remapping_tensor(
+                    root_mesh.mesh,
+                    get_world_size(),
+                )
+                for mesh_nd in pg_ranks_by_dim:
+                    submesh = DeviceMesh(
+                        device_mesh.device_type,
+                        mesh_nd,
+                        mesh_dim_names=mesh_dim_names,
+                        backend_override=backend_override,
+                    )
+                    if cur_rank in mesh_nd:
+                        unflatten_submesh = submesh
+
+                dim_group_names = []
+                for idx in range(0, res_mesh.ndim):  # type: ignore[possibly-undefined]
+                    if idx < dim:
+                        dim_group_names.append(device_mesh._dim_group_names[idx])
+                    elif idx >= dim + unflatten_length:
+                        dim_group_names.append(
+                            device_mesh._dim_group_names[idx - unflatten_length + 1]
+                        )
+                    else:
+                        dim_group_names.append(
+                            unflatten_submesh._dim_group_names[idx - dim]  # type: ignore[possibly-undefined]
+                        )
+                res_mesh._dim_group_names = dim_group_names
+
+            self.child_to_root_mapping[res_mesh] = root_mesh  # type: ignore[possibly-undefined]
+            return res_mesh
 
         def get_root_mesh(self, device_mesh: "DeviceMesh") -> "DeviceMesh":
             # If a mesh could not be found in the child_to_root_mapping, it is a root mesh itself.
@@ -289,7 +383,7 @@ if True:  # just to temporarily avoid reindentation
             # there is layout overlap. Eventually we will just directly throw error here because
             # we will deprecate the slicing of flattened dim_name from root mesh.
             layout_sliced = _MeshLayout(sliced_sizes, sliced_strides)
-            if not layout_sliced.check_overlap():
+            if not layout_sliced.check_non_overlap():
                 raise RuntimeError(
                     f"slicing overlapping dim_names {mesh_dim_names} is not allowed"
                 )
@@ -320,9 +414,6 @@ if True:  # just to temporarily avoid reindentation
                     [device_mesh._dim_group_names[mesh_dim]]  # type: ignore[has-type]
                     if cur_rank in mesh_1d
                     else []
-                )
-                submesh._layout = (
-                    device_mesh._layout if cur_rank in mesh_1d else _MeshLayout(0, 0)
                 )
                 res_submeshes.append(submesh)
 
@@ -420,6 +511,14 @@ if True:  # just to temporarily avoid reindentation
             # Internal bookkeeping for the device mesh.
             self._layout = (
                 layout if layout else _MeshLayout(self.mesh.size(), self.mesh.stride())
+            )
+            assert self._layout.check_non_overlap(), (
+                "Please use a non-overlapping layout when creating a DeviceMesh."
+            )
+            # Because we still need to support slicing of flattened dim from root mesh, so we don't check stride here.
+            assert self._layout.numel() == self.mesh.numel(), (
+                "Please use a valid layout when creating a DeviceMesh."
+                f"The layout {self._layout} is not consistent with the mesh size {self.mesh.size()}."
             )
 
             # private field to pre-generate DeviceMesh's hash
@@ -1003,6 +1102,9 @@ if True:  # just to temporarily avoid reindentation
             dim: Union[int, str],
             mesh_sizes: tuple[int, ...],
             mesh_dim_names: tuple[str, ...],
+            backend_override: Optional[
+                tuple[tuple[Optional[str], Optional[C10dBackend.Options]], ...]
+            ] = None,
         ) -> "DeviceMesh":
             """
             Returns a DeviceMesh by unflatten the current DeviceMesh.
@@ -1035,64 +1137,16 @@ if True:  # just to temporarily avoid reindentation
                     "mesh_dim_names must have same length as mesh_sizes in _unflatten!"
                 )
 
-            if not self._init_backend:
-                raise NotImplementedError(
-                    "flatten a device mesh without backend initialized is not supported!"
-                )
-
-            strides = [1]
-            for i in range(len(mesh_sizes) - 1):
-                strides.append(strides[-1] * mesh_sizes[i])
-            strides.reverse()
-
             if isinstance(dim, str):
                 dim = not_none(self.mesh_dim_names).index(dim)
 
-            unflatten_layout = _Layout(tuple(mesh_sizes), tuple(strides))
-            unflattened_layout: list[_Layout] = []
-            unflattened_dim_names: list[str] = []
-            idxs = [i + dim for i in range(len(mesh_sizes))]
-            for i in range(self.ndim):
-                if i == dim:
-                    unflattened_layout.extend(
-                        self._layouts[i].composition(unflatten_layout)
-                    )
-                    unflattened_dim_names.extend(mesh_dim_names)
-                else:
-                    unflattened_layout.append(self._layouts[i])
-                    unflattened_dim_names.append(not_none(self.mesh_dim_names)[i])
+            # TODO: Need to figure out how to handle backend override for unflatten.
+            if backend_override is None:
+                backend_override = ((None, None),) * len(mesh_dim_names)
 
-            global_override = _mesh_resources.mesh_dim_group_options.get(
-                dim, (None, None)
+            return _mesh_resources.create_unflatten_mesh(
+                self, dim, mesh_sizes, mesh_dim_names, backend_override
             )
-            res_mesh = DeviceMesh._from_layouts(
-                self.device_type,
-                tuple(unflattened_layout),
-                self.get_rank(),
-                dim_names=tuple(unflattened_dim_names),
-            )
-            _mesh_resources.child_to_root_mapping[res_mesh] = (
-                _mesh_resources.get_root_mesh(self)
-            )
-            for dim in range(0, self.ndim + len(idxs) - 1):
-                if dim in idxs:
-                    res_mesh._get_or_create_backend(
-                        unflattened_layout[dim],
-                        dim,
-                        unflattened_dim_names[dim],
-                        backend_override=global_override,
-                    )
-                else:
-                    idx = dim - len(idxs) + 1 if dim > idxs[-1] else dim
-                    res_mesh._layouts_to_groups[unflattened_layout[dim]] = (
-                        self._layouts_to_groups[self._layouts[idx]]
-                    )
-                    res_mesh._names_to_layouts[unflattened_dim_names[dim]] = (
-                        self._names_to_layouts[not_none(self.mesh_dim_names)[idx]]
-                    )
-            res_mesh._init_backend = True
-
-            return res_mesh
 
     def _normalize_backend_override(
         backend_override: dict[

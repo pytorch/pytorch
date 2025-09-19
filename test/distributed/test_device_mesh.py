@@ -960,18 +960,14 @@ class TestDeviceMeshGetItem(DTensorTestBase):
             unflatten_mesh.mesh_dim_names, ["dp_shard", "dp_replicate", "tp"]
         )
         self.assertEqual(mesh_2d["tp"].mesh, unflatten_mesh["tp"].mesh)
-        self.assertEqual(mesh_2d["dp_shard"].mesh, unflatten_mesh["dp_shard"].mesh)
+
+        # Not supporting slicing out unflatten dim name from root mesh.
+        with self.assertRaises(KeyError):
+            self.assertEqual(mesh_2d["dp_shard"].mesh, unflatten_mesh["dp_shard"].mesh)
         # Existing unflatten dim name should not create a new pg.
         self.assertEqual(
-            mesh_2d["tp"]._layouts_to_groups, unflatten_mesh["tp"]._layouts_to_groups
+            mesh_2d["tp"]._dim_group_names, unflatten_mesh["tp"]._dim_group_names
         )
-
-        # TODO: Need to more clarity and discussions on the behavior of flatten + unflatten
-        mesh_2d["dp_shard", "dp_replicate"]._flatten()
-
-        # Not supporting unflatten into a different shape for the same dim name.
-        with self.assertRaises(ValueError):
-            mesh_2d._unflatten(0, (2, 2), ("dp", "cp"))
 
         # Test unflatten from a dummy world mesh, which is the case we need for Expert Parallelism(EP).
         global_mesh = init_device_mesh(
@@ -979,7 +975,6 @@ class TestDeviceMeshGetItem(DTensorTestBase):
             (8,),
             mesh_dim_names=("world",),
         )
-        self.assertFalse(hasattr(global_mesh.mesh_dim_names, "_dim_group_names"))
         non_ep_mesh = global_mesh._unflatten(0, (2, 2, 2), ("dp", "cp", "tp"))
         ep_mesh = global_mesh._unflatten(0, (2, 2, 2), ("dp", "ep", "ep_tp"))
         self.assertEqual(non_ep_mesh["cp"].mesh, ep_mesh["ep"].mesh)
@@ -1551,39 +1546,39 @@ class CuTeLayoutTest(TestCase):
             right_l = _Layout((2,), (3,))
             orig_l.composition(right_l)
 
-    def test_check_overlap(self):
-        """Test the check_overlap method for various layout configurations."""
+    def test_check_non_overlap(self):
+        """Test the check_non_overlap method for various layout configurations."""
         # Test 1: Valid layout - no overlap
         # sizes=(2,3), strides=(6,1) - stride 6 > span 3, so no overlap
         layout1 = _Layout((2, 3), (6, 1))
-        self.assertTrue(layout1.check_overlap())
+        self.assertTrue(layout1.check_non_overlap())
 
         # Test 2: Invalid layout - overlap due to stride < previous span
         # sizes=(2,3), strides=(2,1) - stride 2 < span 3, causes overlap
         layout2 = _Layout((2, 3), (2, 1))
-        self.assertFalse(layout2.check_overlap())
+        self.assertFalse(layout2.check_non_overlap())
 
         # Test 3: Invalid layout - duplicate strides
         # sizes=(2,3), strides=(1,1) - same stride, causes overlap
         layout3 = _Layout((2, 3), (1, 1))
-        self.assertFalse(layout3.check_overlap())
+        self.assertFalse(layout3.check_non_overlap())
 
         # Test 4: Valid layout - single dimension
         layout4 = _Layout((4,), (1,))
-        self.assertTrue(layout4.check_overlap())
+        self.assertTrue(layout4.check_non_overlap())
 
         # Test 5: Valid layout - exact boundary case
         # sizes=(2,3), strides=(3,1) - stride 3 == span 3, valid
         layout5 = _Layout((2, 3), (3, 1))
-        self.assertTrue(layout5.check_overlap())
+        self.assertTrue(layout5.check_non_overlap())
 
         # Test 6: Valid layout - multi-dimensional with proper spacing
         layout6 = _Layout((2, 2, 2), (8, 4, 1))
-        self.assertTrue(layout6.check_overlap())
+        self.assertTrue(layout6.check_non_overlap())
 
         # Test 7: Invalid layout - middle dimension overlaps
         layout7 = _Layout((2, 2, 2), (4, 1, 2))
-        self.assertTrue(layout7.check_overlap())
+        self.assertTrue(layout7.check_non_overlap())
 
     def test_to_remapping_tensor(self):
         """Test the to_remapping_tensor method for various scenarios."""
