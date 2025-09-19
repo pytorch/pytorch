@@ -1625,7 +1625,9 @@ class LeafGuard {
   // is not exposed to Python and can only be called from C++.
   virtual bool check_nopybind(PyObject* value) = 0;
   virtual bool check_nopybind(FrameLocalsMapping* map) {
-    throw std::runtime_error("fallback to python");
+    // throw std::runtime_error("fallback to python");
+    // Could fallback to running check on the Python dict (lazily constructed)
+    return check_nopybind((PyObject*)map->to_dict());
   }
 
   virtual ~LeafGuard() = default;
@@ -1656,13 +1658,8 @@ class LAMBDA_GUARD : public LeafGuard {
   LAMBDA_GUARD(
       RootGuardManager* root_guard_manager,
       py::object guard_check_fn,
-      py::object required_locals,
-      bool construct_partial_framelocals_dict,
       py::object verbose_code_parts)
-      : LeafGuard(root_guard_manager, std::move(verbose_code_parts)),
-        _required_locals(py::cast<py::dict>(required_locals)),
-        _construct_partial_framelocals_dict(
-            construct_partial_framelocals_dict) {
+      : LeafGuard(root_guard_manager, std::move(verbose_code_parts)) {
     if (py::isinstance<py::function>(guard_check_fn)) {
       _guard_check_fn = py::cast<py::function>(std::move(guard_check_fn));
     } else {
@@ -1699,30 +1696,7 @@ class LAMBDA_GUARD : public LeafGuard {
     return GuardDebugInfo(false, verbose_code_parts(), 0);
   }
 
-  bool check_nopybind(FrameLocalsMapping* map) override {
-    // TODO (anijain2305) - Get rid of the _construct_partial_framelocals_dict
-    // once its stable.
-    if (_construct_partial_framelocals_dict) {
-      py::dict partial_dict;
-
-      for (auto item : _required_locals) {
-        partial_dict[item.first] = map->get(item.second.cast<int>());
-      }
-
-      return check_nopybind(partial_dict.ptr());
-    }
-    return check_nopybind((PyObject*)map->to_dict());
-  }
-
  private:
-  // Dict of (local_name, framelocal_idx) representing the minimum number of
-  // framelocals needed to construct the dictionary for the lambda guard.
-  py::dict _required_locals;
-
-  // Temporary flag to allow a fallback behavior. With stability, we can remove
-  // this member.
-  bool _construct_partial_framelocals_dict;
-
   // The user provided lambda function for check_fn.
   py::function _guard_check_fn;
 };
@@ -1798,12 +1772,7 @@ class LAMBDA_GUARD_NO_FRAMELOCALS : public LAMBDA_GUARD {
       RootGuardManager* root_guard_manager,
       py::object guard_check_fn,
       py::object verbose_code_parts)
-      : LAMBDA_GUARD(
-            root_guard_manager,
-            guard_check_fn,
-            py::dict(),
-            false,
-            verbose_code_parts) {}
+      : LAMBDA_GUARD(root_guard_manager, guard_check_fn, verbose_code_parts) {}
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
     return LAMBDA_GUARD::check_nopybind(value);
@@ -6802,8 +6771,7 @@ PyObject* torch_c_dynamo_guards_init() {
       .def("verbose_code_parts", &LeafGuard::verbose_code_parts);
   py::class_<LAMBDA_GUARD, LeafGuard, std::shared_ptr<LAMBDA_GUARD>>(
       py_m, "LAMBDA_GUARD")
-      .def(
-          py::init<RootGuardManager*, py::function, py::dict, bool, py::list>())
+      .def(py::init<RootGuardManager*, py::function, py::list>())
       .def("__call__", &LAMBDA_GUARD::check);
   py::class_<
       LAMBDA_GUARD_NO_ARGS,
@@ -7126,14 +7094,10 @@ PyObject* torch_c_dynamo_guards_init() {
           "add_lambda_guard",
           [](GuardManager& self,
              py::object lambda,
-             py::object required_locals,
-             bool construct_partial_framelocals_dict,
              py::object verbose_code_parts) -> void {
             self.add_leaf_guard(std::make_shared<LAMBDA_GUARD>(
                 self.get_root(),
                 std::move(lambda),
-                std::move(required_locals),
-                construct_partial_framelocals_dict,
                 std::move(verbose_code_parts)));
           })
       .def(
@@ -7816,15 +7780,9 @@ PyObject* torch_c_dynamo_guards_init() {
           "add_epilogue_lambda_guard",
           [](RootGuardManager& self,
              py::object lambda,
-             py::object required_locals,
-             bool construct_partial_framelocals_dict,
              py::object verbose_code_parts) -> void {
             self.add_epilogue_lambda_guard(std::make_unique<LAMBDA_GUARD>(
-                &self,
-                std::move(lambda),
-                std::move(required_locals),
-                construct_partial_framelocals_dict,
-                std::move(verbose_code_parts)));
+                &self, std::move(lambda), std::move(verbose_code_parts)));
           });
 
   // Dict Guard Manager
