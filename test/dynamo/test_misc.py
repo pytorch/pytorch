@@ -8478,43 +8478,24 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         def fn(x):
             return x + 1
 
-        import contextlib
-
-        @contextlib.contextmanager
-        def _hip_allow_tf32():
-            # for HIP/AMDGPU, tf32 is behind a flag because the TF32 support is new
-            # and only for MI300+
-            hip_allow_tf32 = os.environ.get("HIPBLASLT_ALLOW_TF32", None)
-            os.environ["HIPBLASLT_ALLOW_TF32"] = "1"
-
-            try:
-                yield
-            finally:
-                if hip_allow_tf32 is not None:
-                    os.environ["HIPBLASLT_ALLOW_TF32"] = hip_allow_tf32
-                else:
-                    del os.environ["HIPBLASLT_ALLOW_TF32"]
-
-        tf32_ctx = _hip_allow_tf32 if torch.version.hip else contextlib.nullcontext
-        with tf32_ctx():
-            initial_state = read_state()
-            y = torch.randn(10)
-            try:
-                for round in range(3):
-                    for i in range(len(initial_state)):
-                        new_state = [False] * len(initial_state)
-                        new_state[i] = True
-                        write_state(new_state)
-                        assert read_state() == new_state
-                        last_state.clear()
-                        fn(y)
-                        assert last_state == new_state
-                        if round == 0:
-                            assert cnt == i + 1
-                        else:
-                            assert cnt == len(initial_state)
-            finally:
-                write_state(initial_state)
+        initial_state = read_state()
+        y = torch.randn(10)
+        try:
+            for round in range(3):
+                for i in range(len(initial_state)):
+                    new_state = [False] * len(initial_state)
+                    new_state[i] = True
+                    write_state(new_state)
+                    assert read_state() == new_state
+                    last_state.clear()
+                    fn(y)
+                    assert last_state == new_state
+                    if round == 0:
+                        assert cnt == i + 1
+                    else:
+                        assert cnt == len(initial_state)
+        finally:
+            write_state(initial_state)
 
     def test_grad_state_mutated(self):
         prior = torch.is_grad_enabled()
@@ -13372,6 +13353,26 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
         x = torch.ones([1], dtype=torch.int64)
         y = torch.tensor(5)
         f(x, y)
+
+    def test_full_graph_capture_scalar_outputs(self):
+        @torch.compile(fullgraph=True)
+        def foo(a):
+            return torch.randn(5) * a.item()
+
+        # We expect to no longer raise here
+        foo(torch.tensor(2.0))
+
+    def test_full_graph_capture_dynamic_output_shape_ops(self):
+        def fn(x):
+            nz = torch.nonzero(x)
+            squared = nz * nz
+            sliced = torch.ops.aten.slice.Tensor(squared, dim=1, start=-2, end=None)
+            view = sliced.unsqueeze(dim=0)
+            return view.squeeze(dim=0)
+
+        example_inputs = (torch.randn(1, 1, 1, 1),)
+        # we expect to no longer raise here
+        torch.compile(fn, fullgraph=True)(*example_inputs)
 
     def test_dynamic_float_scalar_tensor_coersion(self):
         # Minified version of https://github.com/pytorch/pytorch/issues/158376#issuecomment-3079591367

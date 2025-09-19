@@ -1997,9 +1997,13 @@ def clamp_max(
 
 
 # https://pytorch.org/docs/stable/generated/torch.where.html
-# TODO: implement alternate where
-@register_decomposition(aten.where)
-@out_wrapper()
+# TODO: implement where.default
+@register_decomposition(aten.where.self)
+@register_decomposition(aten.where.ScalarSelf)
+@register_decomposition(aten.where.ScalarOther)
+@register_decomposition(aten.where.Scalar)
+@register_decomposition(aten.where.self_out)
+@out_wrapper(exact_dtype=True)
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a", "b"),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH,
@@ -2259,11 +2263,14 @@ def _reduction(
         dims = (dims,)  # type: ignore[assignment]
     dims = utils.reduction_dims(a.shape, dims)
     if not has_identity:
-        valid_shape = a.ndim == 0 or builtins.all(a.shape[i] for i in dims)
-        if not valid_shape:
-            raise RuntimeError(
-                "reducing over zero-size dimension for reduction operation without identity"
-            )
+        from torch.fx.experimental.symbolic_shapes import sym_and
+
+        valid_shape = a.ndim == 0 or sym_and(*(a.shape[i] > 0 for i in dims))
+        torch._check(
+            valid_shape,
+            lambda: "reducing over zero-size dimension for reduction operation without identity",
+        )
+
     computation_dtype, result_dtype = utils.reduction_dtypes(
         a, output_dtype_kind, dtype
     )
