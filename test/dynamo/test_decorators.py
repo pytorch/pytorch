@@ -893,6 +893,29 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(gn(inp), inp + 3)
         self.assertEqual(cnts.frame_count, 1)
 
+    def test_step_unsupported(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts)
+        def fn(x):
+            x = x + 1 + 2
+            torch._dynamo.step_unsupported()
+            return x + 4
+
+        inp = torch.ones(3)
+        self.assertEqual(fn(inp), inp + 7)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 2)
+
+    def test_step_unsupported_empty_checkpoint(self):
+        @torch.compile(backend="eager")
+        def fn(x):
+            torch._dynamo.step_unsupported()
+            return x + 1
+
+        inp = torch.ones(3)
+        self.assertEqual(fn(inp), inp + 1)
+
     @skipIfWindows(
         msg="TODO: (xuhancn), confirm if torch.compiler.disable work on Windows."
     )
