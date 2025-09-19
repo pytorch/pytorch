@@ -70,7 +70,7 @@ struct MaybeApplyPerSampleWeight<EmbeddingBagMode::SUM, T> {
 
 template <EmbeddingBagMode M, typename T, typename I>
 struct MaybeCalcMaxIndex {
-  inline opmath_t<T> operator()(
+  inline void operator()(
       opmath_t<T> weight_val,
       opmath_t<T> out_val,
       bool is_first,
@@ -81,7 +81,7 @@ struct MaybeCalcMaxIndex {
 
 template <typename T, typename I>
 struct MaybeCalcMaxIndex<EmbeddingBagMode::MAX, T, I> {
-  inline opmath_t<T> operator()(
+  inline void operator()(
       opmath_t<T> weight_val,
       opmath_t<T> out_val,
       bool is_first,
@@ -89,10 +89,6 @@ struct MaybeCalcMaxIndex<EmbeddingBagMode::MAX, T, I> {
       I weight_idx,
       bool pad) {
     max_idx = !pad && (is_first || weight_val > out_val) ? weight_idx : max_idx;
-    // max_idx = (pad || new_out_val == out_val) ? max_idx : weight_idx;
-
-    // max_idx = !pad && (new_out_val != out_val) ? weight_idx : max_idx;
-    // max_idx = weight_idx;
   }
 };
 
