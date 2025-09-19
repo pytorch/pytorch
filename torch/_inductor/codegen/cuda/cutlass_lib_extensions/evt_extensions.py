@@ -174,7 +174,6 @@ non-contiguous layout, received stride: {stride} and shape: {shape}"
         def is_nested_visitor_type(t: type) -> bool:
             return ".".join([t.__module__, t.__qualname__]) in {
                 "cutlass_cppgen.backend.c_types.visitor_factory.<locals>.VisitorType",
-                "cutlass_cppgen.backend.c_types.visitor_factory.<locals>.VisitorType",
             }
 
         buffer = IndentedBuffer()
@@ -234,7 +233,6 @@ non-contiguous layout, received stride: {stride} and shape: {shape}"
         # node's memory, a stride tuple, the datatype
         # Once again, need to check for local class type for stride tuple
         if str(arg_ty) in {
-            "<class 'cutlass_cppgen.backend.c_types.tuple_factory_.<locals>.TupleType'>",
             "<class 'cutlass_cppgen.backend.c_types.tuple_factory_.<locals>.TupleType'>",
         }:
             DEFAULT_STRIDE_LEN = 3
