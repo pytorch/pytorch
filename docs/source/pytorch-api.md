@@ -63,6 +63,7 @@ nn.init
 nn.attention
 onnx
 optim
+pytree <pytree>
 complex_numbers
 ddp_comm_hooks
 quantization
