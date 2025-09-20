@@ -1344,13 +1344,13 @@ def _optimize(
             torch.jit.fuser("fuser2"), by setting the backend_ctx_ctor attribute.
             See AOTAutogradMemoryEfficientFusionWithContext for the usage.
             - Or, a string backend name in `torch._dynamo.list_backends()`
-        nopython: If True, graph breaks will be errors and there will
+        fullgraph: If True, graph breaks will be errors and there will
             be a single whole-program graph.
         error_on_graph_break: If not None, the current `error_on_graph_break` setting is set to the given value.
             See `torch._dynamo.error_on_graph_break()` for more details on what `error_on_graph_break` means.
 
-            Unlike `nopython=True` (i.e. `fullgraph=True`), there is no guarantee of a single whole-program graph.
-            If `nopython` is True, `error_on_graph_break` does nothing.
+            Unlike `fullgraph=True`, there is no guarantee of a single whole-program graph.
+            If `fullgraph` is True, `error_on_graph_break` does nothing.
         disable: If True, turn this decorator into a no-op
         dynamic: If True, upfront compile as dynamic a kernel as possible.  If False,
             disable all dynamic shapes support (always specialize).  If None, automatically

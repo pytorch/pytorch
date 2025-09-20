@@ -1494,7 +1494,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         data = torch.randn(1)
         out1 = m(data)
         cnt = torch._dynamo.testing.CompileCounter()
-        opt_m = torch._dynamo.optimize(cnt, nopython=True)(m)
+        opt_m = torch._dynamo.optimize(cnt, fullgraph=True)(m)
         out2 = opt_m(data)
         self.assertEqual(cnt.op_count, 2)
         self.assertTrue(torch._dynamo.testing.same(out1, out2))
@@ -1505,7 +1505,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         out1 = m(data)
         cnt = torch._dynamo.testing.CompileCounter()
         torch._dynamo.reset()
-        opt_m = torch._dynamo.optimize(cnt, nopython=True)(m)
+        opt_m = torch._dynamo.optimize(cnt, fullgraph=True)(m)
         out2 = opt_m(data)
 
         self.assertEqual(cnt.op_count, 1)
@@ -1822,7 +1822,7 @@ class NNModuleTestsDevice(torch._dynamo.test_case.TestCase):
         m = LazyMLP()
         x = torch.rand([10, 10])
         cnt = torch._dynamo.testing.CompileCounter()
-        opt_m = torch._dynamo.optimize(cnt, nopython=True)(m)
+        opt_m = torch._dynamo.optimize(cnt, fullgraph=True)(m)
         # first iteration
         res = opt_m(x)
         ref = m(x)

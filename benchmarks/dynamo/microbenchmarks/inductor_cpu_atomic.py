@@ -6,7 +6,7 @@ import torch
 import torch._dynamo
 
 
-@torch._dynamo.optimize("inductor", nopython=True)
+@torch._dynamo.optimize("inductor", fullgraph=True)
 def inductor_scatter_add(dst, src, index):
     return torch.scatter_add(dst, 1, index, src)
 

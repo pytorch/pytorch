@@ -957,7 +957,7 @@ class MiscTests(torch._inductor.test_case.TestCase):
             guard_failure = failure
 
         opt_fn = torch._dynamo.optimize(
-            "eager", nopython=True, guard_fail_fn=guard_failures
+            "eager", fullgraph=True, guard_fail_fn=guard_failures
         )(compare_shapes)
         opt_fn(torch.randn([3, 4]))
         opt_fn(torch.randn([4, 3]))
@@ -6778,7 +6778,7 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
             guard_failure = failure
 
         opt_fn = torch._dynamo.optimize(
-            "eager", nopython=True, guard_fail_fn=guard_failures
+            "eager", fullgraph=True, guard_fail_fn=guard_failures
         )(fn)
 
         x2 = torch.tensor([0.5, 0.5, 1.0])
@@ -6817,7 +6817,7 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
             guard_failure = failure
 
         opt_fn = torch._dynamo.optimize(
-            "eager", nopython=True, guard_fail_fn=guard_failures
+            "eager", fullgraph=True, guard_fail_fn=guard_failures
         )(fn)
 
         x2 = torch.randn([5, 5])
@@ -6852,7 +6852,7 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
             guard_failure = failure
 
         opt_fn = torch._dynamo.optimize(
-            "eager", nopython=True, guard_fail_fn=guard_failures
+            "eager", fullgraph=True, guard_fail_fn=guard_failures
         )(fn)
 
         x2 = torch.tensor([0.5, 0.5, 1.0])
@@ -6882,7 +6882,7 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
             guard_failure = failure
 
         opt_fn = torch._dynamo.optimize(
-            "eager", nopython=True, guard_fail_fn=guard_failures
+            "eager", fullgraph=True, guard_fail_fn=guard_failures
         )(fn)
 
         args1 = torch.randn(10, 10)

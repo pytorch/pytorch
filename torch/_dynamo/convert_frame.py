@@ -552,7 +552,7 @@ class ConvertFrameAssert:
     def __init__(
         self,
         compiler_fn: CompilerFn,
-        one_graph: bool = True,
+        fullgraph: bool = True,
         export: bool = False,
         export_constraints: Optional[typing.Never] = None,
         package: Optional[CompilePackage] = None,
@@ -560,7 +560,7 @@ class ConvertFrameAssert:
         # assert export_constraints is None
         reset_graph_break_dup_checker()
         self._torchdynamo_orig_backend = compiler_fn
-        self._one_graph = one_graph
+        self._fullgraph = fullgraph
         self._export = export
         self._export_constraints = export_constraints
         self._package = package
@@ -570,7 +570,7 @@ class ConvertFrameAssert:
     def _clone_with_backend(self) -> Callable[[CompilerFn], ConvertFrameAssert]:
         return lambda backend: convert_frame_assert(
             backend,
-            self._one_graph,
+            self._fullgraph,
             self._export,
             self._export_constraints,
         )
@@ -693,7 +693,7 @@ class ConvertFrameAssert:
                 frame.f_builtins,
                 frame.closure,
                 self._torchdynamo_orig_backend,
-                self._one_graph,
+                self._fullgraph,
                 self._export,
                 self._export_constraints,
                 hooks,
@@ -717,14 +717,14 @@ class ConvertFrameAssert:
 
 def convert_frame_assert(
     compiler_fn: CompilerFn,
-    one_graph: bool = True,
+    fullgraph: bool = True,
     export: bool = False,
     export_constraints: Optional[typing.Never] = None,
     package: Optional[CompilePackage] = None,
 ) -> ConvertFrameAssert:
     """Fully convert a frame into an FX graph, raising an exception if we fail."""
     return ConvertFrameAssert(
-        compiler_fn, one_graph, export, export_constraints, package
+        compiler_fn, fullgraph, export, export_constraints, package
     )
 
 
@@ -756,7 +756,7 @@ def trace_frame(
     closure: tuple[CellType],
     compiler_fn: CompilerFn,
     tf_mode_stack: list[torch.overrides.TorchFunctionMode],
-    one_graph: bool,
+    fullgraph: bool,
     speculation_log: SpeculationLog,
     instructions: list[Instruction],
     code_options: dict[str, object],
@@ -781,7 +781,7 @@ def trace_frame(
         tf_mode_stack,
         code_options,
         compiler_fn,
-        one_graph,
+        fullgraph,
         export,
         export_constraints,
         frame_state=frame_state,
@@ -982,7 +982,7 @@ def compile_frame(  # type: ignore[return]
     builtins: dict[str, object],
     closure: tuple[CellType],
     compiler_fn: CompilerFn,
-    one_graph: bool,
+    fullgraph: bool,
     restart_reasons: set[str],
     *,
     export: bool = False,
@@ -1605,7 +1605,7 @@ class ConvertFrame:
     ) -> None:
         self._torchdynamo_orig_backend = compiler_fn
         self._inner_convert = convert_frame_assert(
-            compiler_fn, one_graph=False, package=package
+            compiler_fn, fullgraph=False, package=package
         )
         self._hooks = hooks
 
