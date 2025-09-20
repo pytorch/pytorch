@@ -72,7 +72,6 @@ class TORCH_API OptimizerOptions {
   virtual double get_lr() const = 0;
   virtual void set_lr(const double lr) = 0;
 
-  // CLEAN: Virtual dispatch for merge (will be overridden by derived classes)
   virtual void merge_explicit_fields_from(const OptimizerOptions& source) = 0;
 
   // Simple field tracking methods
@@ -104,7 +103,6 @@ class OptimizerCloneableOptions : public OptimizerOptions {
   }
 
  public:
-  // CLEAN COMPILE-TIME: Override virtual merge with static dispatch
   void merge_explicit_fields_from(const OptimizerOptions& source) override {
     Derived::merge_impl(
         static_cast<Derived*>(this), static_cast<const Derived&>(source));

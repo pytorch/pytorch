@@ -15,7 +15,7 @@ class InputArchive;
 namespace torch::optim {
 
 struct TORCH_API AdamWOptions : public OptimizerCloneableOptions<AdamWOptions> {
-  // CLEAN COMPILE-TIME: Explicit deterministic field IDs
+  // Field IDs for tracking
   static constexpr size_t LR_ID = 0;
   static constexpr size_t BETAS_ID = 1;
   static constexpr size_t EPS_ID = 2;
@@ -32,7 +32,6 @@ struct TORCH_API AdamWOptions : public OptimizerCloneableOptions<AdamWOptions> {
   TORCH_ARG_WITH_TRACKING(bool, amsgrad, AMSGRAD_ID) = false;
 
  public:
-  // CLEAN: Static merge function
   static void merge_impl(AdamWOptions* dst, const AdamWOptions& src) {
     if (src.is_field_explicitly_set(LR_ID))
       dst->lr_ = src.lr_;

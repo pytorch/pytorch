@@ -103,8 +103,7 @@ void Optimizer::add_param_group(const OptimizerParamGroup& param_group) {
   if (!param_group.has_options()) {
     param_group_.set_options(defaults_->clone());
   } else {
-    // CLEAN COMPILE-TIME: Start with defaults, then merge user's explicit
-    // options
+    // Start with defaults, then merge user's explicit options
     auto final_options = defaults_->clone();
     final_options->merge_explicit_fields_from(param_group.options());
     param_group_.set_options(std::move(final_options));

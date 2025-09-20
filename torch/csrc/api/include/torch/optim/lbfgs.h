@@ -14,7 +14,7 @@
 namespace torch::optim {
 
 struct TORCH_API LBFGSOptions : public OptimizerCloneableOptions<LBFGSOptions> {
-  // CLEAN COMPILE-TIME: Explicit deterministic field IDs
+  // Field IDs for tracking
   static constexpr size_t LR_ID = 0;
   static constexpr size_t MAX_ITER_ID = 1;
   static constexpr size_t MAX_EVAL_ID = 2;
@@ -37,7 +37,6 @@ struct TORCH_API LBFGSOptions : public OptimizerCloneableOptions<LBFGSOptions> {
       LINE_SEARCH_FN_ID) = std::nullopt;
 
  public:
-  // CLEAN: Static merge function
   static void merge_impl(LBFGSOptions* dst, const LBFGSOptions& src) {
     if (src.is_field_explicitly_set(LR_ID))
       dst->lr_ = src.lr_;

@@ -21,7 +21,7 @@ namespace torch::optim {
 
 struct TORCH_API RMSpropOptions
     : public OptimizerCloneableOptions<RMSpropOptions> {
-  // CLEAN COMPILE-TIME: Explicit deterministic field IDs
+  // Field IDs for tracking
   static constexpr size_t LR_ID = 0;
   static constexpr size_t ALPHA_ID = 1;
   static constexpr size_t EPS_ID = 2;
@@ -38,7 +38,6 @@ struct TORCH_API RMSpropOptions
   TORCH_ARG_WITH_TRACKING(bool, centered, CENTERED_ID) = false;
 
  public:
-  // CLEAN: Static merge function
   static void merge_impl(RMSpropOptions* dst, const RMSpropOptions& src) {
     if (src.is_field_explicitly_set(LR_ID))
       dst->lr_ = src.lr_;

@@ -30,7 +30,7 @@ void SGDOptions::serialize(torch::serialize::OutputArchive& archive) const {
   _TORCH_OPTIM_SERIALIZE_TORCH_ARG(dampening);
   _TORCH_OPTIM_SERIALIZE_TORCH_ARG(weight_decay);
   _TORCH_OPTIM_SERIALIZE_TORCH_ARG(nesterov);
-  // CLEAN: Serialize field tracking mask for bitset
+  // Serialize field tracking mask
   archive.write("_field_mask", static_cast<int64_t>(get_field_mask()));
 }
 
@@ -40,13 +40,11 @@ void SGDOptions::serialize(torch::serialize::InputArchive& archive) {
   _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(double, dampening);
   _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(double, weight_decay);
   _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(bool, nesterov);
-  // CLEAN: Deserialize field tracking mask for bitset
+  // Deserialize field tracking mask
   c10::IValue mask_ivalue;
   if (archive.try_read("_field_mask", mask_ivalue)) {
     set_field_mask(static_cast<uint32_t>(mask_ivalue.toInt()));
   }
-  // CLEAN COMPILE-TIME: No function pointer re-registration needed!
-  // merge_impl() is a static function resolved at compile time
 }
 
 double SGDOptions::get_lr() const {

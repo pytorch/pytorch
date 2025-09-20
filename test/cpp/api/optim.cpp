@@ -200,14 +200,12 @@ TEST(OptimTest, OptimizerAccessors) {
 
 struct MyOptimizerOptions
     : public OptimizerCloneableOptions<MyOptimizerOptions> {
-  // CLEAN COMPILE-TIME: Explicit deterministic field ID
   static constexpr size_t LR_ID = 0;
 
   MyOptimizerOptions(double lr = 1.0) : lr_(lr) {}
   TORCH_ARG_WITH_TRACKING(double, lr, LR_ID) = 1.0;
 
  public:
-  // CLEAN: Static merge function for compile-time dispatch
   static void merge_impl(
       MyOptimizerOptions* dst,
       const MyOptimizerOptions& src) {

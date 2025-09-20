@@ -18,7 +18,7 @@ namespace torch::optim {
 
 struct TORCH_API AdagradOptions
     : public OptimizerCloneableOptions<AdagradOptions> {
-  // CLEAN COMPILE-TIME: Explicit deterministic field IDs
+  // Field IDs for tracking
   static constexpr size_t LR_ID = 0;
   static constexpr size_t LR_DECAY_ID = 1;
   static constexpr size_t WEIGHT_DECAY_ID = 2;
@@ -36,7 +36,6 @@ struct TORCH_API AdagradOptions
   TORCH_ARG_WITH_TRACKING(double, eps, EPS_ID) = 1e-10;
 
  public:
-  // CLEAN: Static merge function
   static void merge_impl(AdagradOptions* dst, const AdagradOptions& src) {
     if (src.is_field_explicitly_set(LR_ID))
       dst->lr_ = src.lr_;

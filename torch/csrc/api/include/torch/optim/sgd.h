@@ -18,7 +18,7 @@ class InputArchive;
 namespace torch::optim {
 
 struct TORCH_API SGDOptions : public OptimizerCloneableOptions<SGDOptions> {
-  // CLEAN COMPILE-TIME: Explicit deterministic field IDs
+  // Field IDs for tracking
   static constexpr size_t LR_ID = 0;
   static constexpr size_t MOMENTUM_ID = 1;
   static constexpr size_t DAMPENING_ID = 2;
@@ -34,7 +34,6 @@ struct TORCH_API SGDOptions : public OptimizerCloneableOptions<SGDOptions> {
   TORCH_ARG_WITH_TRACKING(bool, nesterov, NESTEROV_ID) = false;
 
  public:
-  // CLEAN: Static merge function - called directly, no lookup needed!
   static void merge_impl(SGDOptions* dst, const SGDOptions& src) {
     if (src.is_field_explicitly_set(LR_ID))
       dst->lr_ = src.lr_;
