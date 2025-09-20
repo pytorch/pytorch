@@ -1749,7 +1749,9 @@ class Tensor(torch._C.TensorBase):
             is_rocm = torch.version.hip is not None
             is_cuda = not is_rocm
 
-            if stream is None or (is_rocm and stream == 0) or (is_cuda and stream == 1):
+            if stream is None:
+                stream = torch.cuda.current_stream()
+            elif (is_rocm and stream == 0) or (is_cuda and stream == 1):
                 stream = torch.cuda.default_stream()
             else:
                 if is_cuda and stream == 2:
