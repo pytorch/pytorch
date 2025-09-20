@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Optional, Union
 
 import torch
-from torch._inductor.analysis.device_info import DeviceInfo, lookup_device_info
+from torch._inductor.analysis.device_info import DeviceSpec, lookup_device_info
 from torch._inductor.utils import tabulate_2d, zip_dicts
 from torch.utils import _pytree as pytree
 from torch.utils._ordered_set import OrderedSet
@@ -381,7 +381,7 @@ KernelNameMap = defaultdict[str, OrderedSet[KernelStats]]
 class Device:
     name: str
     index: int
-    info: Optional[DeviceInfo]
+    info: Optional[DeviceSpec]
     stats: KernelNameMap
 
     def __repr__(self) -> str:
