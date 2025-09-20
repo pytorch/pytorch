@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 """
 Visualization tools for operation stacks as DAGs.
 """

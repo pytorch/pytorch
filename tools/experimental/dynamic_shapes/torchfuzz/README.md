@@ -19,7 +19,7 @@ The result is a stack of pytorch operations to execute (TODO make it a graph ins
 
 Here's a concrete example of how TorchFuzz generates a test:
 
-**Target Spec Generated:** `TensorSpec(size=(2, 3), stride=(3, 1), dtype=torch.float32)`
+**Target Spec Generated:** `TensorSpec(size=(1, ), stride=(1,) , dtype=torch.complex128`
 
 **Operation Stack Created:**
 ```
