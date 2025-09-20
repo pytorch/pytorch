@@ -234,6 +234,8 @@ class DeferredTritonCallWrapper:
             "kernel_args_",
             "stream_",
         ]
+        if wrapper.device == "xpu":
+            launch_kernel_args.append(str(params["threads_per_warp"]))
         prefix.writeline(f"launchKernel({', '.join(launch_kernel_args)});")
 
 
