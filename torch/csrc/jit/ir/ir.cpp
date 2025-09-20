@@ -1999,13 +1999,16 @@ std::string Graph::toString(bool print_source_locations) const {
 }
 
 Graph::~Graph() {
-  for (const Node* n : all_nodes) {
-    delete n;
-  }
   for (const Value* v : all_values) {
+    AT_ASSERT(v->owningGraph() == this);
     delete v;
   }
+  for (const Node* n : all_nodes) {
+    AT_ASSERT(n->owningGraph() == this);
+    delete n;
+  }
   for (const Block* b : all_blocks) {
+    AT_ASSERT(b->owningGraph() == this);
     delete b;
   }
 }
