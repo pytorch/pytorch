@@ -41,7 +41,7 @@ def solve_for_zero(expr: sympy.Expr) -> Optional[sympy.Expr]:
     Given an expr with a single free symbol, solve for a constant relation that would make
     this expression 0.
     """
-    if expr.is_constant():
+    if len(expr.free_symbols) < 1 and expr.is_constant():
         return None
     elif isinstance(expr, FloorDiv):
         return None
