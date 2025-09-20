@@ -273,6 +273,17 @@ class TestLocalTensorWorld2(LocalTensorTestBase):
             full = mean.full_tensor()
             self.assertEqual(tensor.mean(), full)
 
+    def test_uneven_sharding_prod(self):
+        with LocalTensorMode(self.world_size):
+            mesh = self.build_device_mesh()
+            tensor = (torch.arange(12)+1).reshape(-1, 4).float()
+
+            dt = distribute_tensor(tensor, device_mesh=mesh, placements=[Shard(0)])
+
+            x = dt.prod()
+            full = x.full_tensor()
+            self.assertEqual(tensor.prod(), full)
+
     def test_even_sharding_mean_is_partial(self):
         with LocalTensorMode(self.world_size):
             mesh = self.build_device_mesh()

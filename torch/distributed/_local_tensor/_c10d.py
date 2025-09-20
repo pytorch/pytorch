@@ -91,12 +91,12 @@ def _local_all_reduce_(
 ):
     # "allreduce_(Tensor[] tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, __torch__.torch.classes.c10d.ReduceOp reduce_op, Tensor? sparse_indices, bool async_op=True, int timeout=-1) -> (Tensor[], __torch__.torch.classes.c10d.Work)");
 
-    from . import LocalTensor
 
     assert len(tensors) == 1
     tensor = tensors[0]
 
     reduce_op = reduce_op_so.op()
+    from . import LocalTensor
     ranks, layout, global_pg, group_offsets, _offset = _prepare_collective_groups(
         process_group_so
     )

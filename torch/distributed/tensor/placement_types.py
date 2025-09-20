@@ -193,13 +193,8 @@ class Shard(Placement):
             output, scatter_list, mesh, mesh_dim=mesh_dim, group_src=src_data_rank
         )
 
-        # Only unpad if the local_tensor was padded on the dimension.
-        """
-        if pad_sizes[mesh_dim_local_rank] > 0:
-            output = unpad_tensor(output, self.dim, pad_sizes[mesh_dim_local_rank])
-            # Unpad might return a view, hence we need to remake it contiguous
-            output = output.contiguous()
-        """
+        from torch.distributed._local_tensor import maybe_unpad_tensor
+        output = maybe_unpad_tensor(pad_sizes, mesh_dim_local_rank, output, self.dim)
         return output
 
     def _reduce_shard_tensor(

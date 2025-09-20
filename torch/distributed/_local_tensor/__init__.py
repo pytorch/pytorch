@@ -50,12 +50,13 @@ import functools
 import operator
 import os
 import sys
+from collections import defaultdict
 from collections.abc import Sequence
 from itertools import product
 from typing import Optional, Union
 
 import torch
-from torch import Tensor
+from torch import Tensor, SymInt
 from torch._C import DispatchKey
 from torch._export.wrappers import mark_subclass_constructor_exportable_experimental
 from torch.distributed._distributed_c10d import FakeWork
@@ -68,6 +69,7 @@ from torch.utils._python_dispatch import (
     TorchDispatchMode,
 )
 from torch.utils.checkpoint import get_device_states, set_device_states
+from torch.fx.experimental._constant_symnode import ConstantIntNode
 
 
 not_implemented_log = torch._logging.getArtifactLogger(__name__, "not_implemented")
@@ -77,6 +79,9 @@ from torch.distributed._pycute.int_tuple import flatten, is_int, is_tuple
 from torch.distributed._pycute.layout import complement, Layout
 
 from . import _c10d
+
+
+_LOCAL_TENSOR_MODE = None
 
 
 # TODO: this claude code implementation sucks, redo it
@@ -165,11 +170,25 @@ def layout_to_indices(layout):
     ]
 
 
+def int_on_rank(i, r):
+    if isinstance(i, LocalIntNode):
+        return i._local_ints[r]
+    elif isinstance(i, ConstantIntNode):
+        return i.val
+    else:
+        assert False, type(i)
+
+
 class LocalIntNode:
     """
     Like a LocalTensor, but for an int.  We can't use a 0D tensor to represent this
     because often only a SymInt is accepted where we wish to use this.
     """
+
+    def __new__(cls, local_ints: dict[int, int]):
+        if len(set(local_ints.values())) == 1:
+            return ConstantIntNode(next(iter(local_ints.values())))
+        return super().__new__(cls)
 
     def __init__(self, local_ints: dict[int, int]):
         self._local_ints = local_ints
@@ -215,18 +234,31 @@ class LocalIntNode:
 
     def add(self, other) -> LocalIntNode:
         return LocalIntNode(
-            {r: self._local_ints[r] + other._local_ints[r] for r in self._local_ints}
+            {r: self._local_ints[r] + int_on_rank(other, r) for r in self._local_ints}
+        )
+
+    def sub(self, other) -> LocalIntNode:
+        return LocalIntNode(
+            {r: self._local_ints[r] - int_on_rank(other, r) for r in self._local_ints}
         )
 
     def mul(self, other) -> LocalIntNode:
         return LocalIntNode(
-            {r: self._local_ints[r] * other._local_ints[r] for r in self._local_ints}
+            {r: self._local_ints[r] * int_on_rank(other, r) for r in self._local_ints}
         )
 
+    def eq(self, other) -> bool:
+        r = {self._local_ints[r] == int_on_rank(other, r) for r in self._local_ints}
+        assert len(r) == 1, (self, other)
+        return torch._C._get_constant_bool_symnode(next(iter(r)))
+
+    def gt(self, other) -> bool:
+        r = {self._local_ints[r] > int_on_rank(other, r) for r in self._local_ints}
+        assert len(r) == 1, (self, other)
+        return torch._C._get_constant_bool_symnode(next(iter(r)))
+
     def wrap_int(self, num: int) -> LocalIntNode:
-        lm = local_tensor_mode()
-        assert lm is not None
-        return LocalIntNode(dict.fromkeys(lm.ranks, num))
+        return ConstantIntNode(num)
 
 
 class LocalTensor(torch.Tensor):
@@ -265,8 +297,9 @@ class LocalTensor(torch.Tensor):
         it = iter(local_tensors.items())
         first_rank, first_local_tensor = next(it)
 
-        shape = first_local_tensor.shape
-        strides = first_local_tensor.stride()
+        first_shape = first_local_tensor.shape
+        first_strides = first_local_tensor.stride()
+        ndim = len(first_shape)
         dtype = first_local_tensor.dtype
         device = first_local_tensor.device
         layout = first_local_tensor.layout
@@ -287,11 +320,29 @@ class LocalTensor(torch.Tensor):
         extra_dispatch_keys = get_extra_dispatch_keys(first_local_tensor)
 
         for _rank, local_tensor in it:
-            assert shape == local_tensor.shape
-            assert strides == local_tensor.stride()
             assert dtype == local_tensor.dtype
             assert layout == local_tensor.layout
             assert extra_dispatch_keys == get_extra_dispatch_keys(local_tensor)
+
+        # Compute shape/stride.  We allow for non-SPMD'ness here
+        local_shapes = defaultdict(dict)  # dim => rank => size
+        local_strides = defaultdict(dict)  # dim => rank => size
+        for r, local_tensor in local_tensors.items():
+            for d, size in enumerate(local_tensor.shape):
+                local_shapes[d][r] = size
+                local_strides[d][r] = local_tensor.stride(d)
+        shape = [
+            first_shape[d]
+            if len(set(local_shapes[d])) == 1
+            else torch.SymInt(LocalIntNode(local_shapes[d]))
+            for d in range(len(first_shape))
+        ]
+        strides = [
+            first_stride[d]
+            if len(set(local_strides[d])) == 1
+            else torch.SymInt(LocalIntNode(local_strides[d]))
+            for d in range(len(first_shape))
+        ]
 
         r = torch.Tensor._make_wrapper_subclass(
             cls,
@@ -402,11 +453,10 @@ class LocalTensorMode(TorchDispatchMode):
             self.ranks = ranks
         self._disable = False
 
+        global _LOCAL_TENSOR_MODE
+        _LOCAL_TENSOR_MODE = self
+
     def __enter__(self):
-        # Recursively reentering NOT ALLOWED
-        assert not local_tensor_mode(), (
-            "cannot reenter LocalTensorMode when already active"
-        )
         super().__enter__()
 
     @contextlib.contextmanager
@@ -565,14 +615,29 @@ def list_tensor_index(xs: list[Tensor], i: torch.SymInt) -> LocalTensor:
     return LocalTensor(ret)
 
 
+def maybe_unpad_tensor(pad_sizes: list[int], mesh_dim_local_rank: SymInt, output: Tensor, dim: int):
+    from torch.distributed.tensor._collective_utils import (
+        unpad_tensor,
+    )
+
+    if not isinstance(output, LocalTensor):
+        assert type(mesh_dim_local_rank) is int
+        return unpad_tensor(output, self.dim, pad_sizes[mesh_dim_local_rank]).contiguous()
+
+    assert isinstance(mesh_dim_local_rank, SymInt)
+
+    ret = {}
+    for r in output._ranks:
+        if pad_sizes[mesh_dim_local_rank.node._local_ints[r]] > 0:
+            ret[r] = unpad_tensor(output._local_tensors[r], dim, pad_sizes[mesh_dim_local_rank.node._local_ints[r]]).contiguous()
+        else:
+            ret[r] = output._local_tensors[r]
+
+    r = LocalTensor(ret)
+    print(r)
+    print(r.shape)
+    return r
+
+
 def local_tensor_mode() -> Optional[LocalTensorMode]:
-    """
-    Retrieve the currently active LocalTensorMode.  LocalTensorMode cannot
-    be recursively applied.
-    """
-    r = [
-        m
-        for m in reversed(_get_current_dispatch_mode_stack())
-        if isinstance(m, LocalTensorMode)
-    ]
-    return r[0] if r else None
+    return _LOCAL_TENSOR_MODE

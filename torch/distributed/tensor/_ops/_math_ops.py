@@ -278,7 +278,7 @@ def common_reduction_strategy(
                     break
                 local_shape[p.dim] //= output_spec.mesh.size(mesh_d)
 
-        if not reduction_linear or padded_reduction:
+        if not reduction_linear or (padded_reduction and False):
             # input placements for this strategy should clear out pending sum and sharding
             # on the reduction dimension
             input_placements = replicate_reduction_dims(
