@@ -1469,6 +1469,13 @@ class CommonTemplate:
             "extern_kernels.add",
             "torch.ops.aten.add.Tensor",
         ]
+        if config.cpp_wrapper:
+            fallback_markers.extend(
+                [
+                    "aoti_torch_cuda_add_Tensor",
+                    "aoti_torch_cpu_add_Tensor",
+                ]
+            )
         self.assertTrue(
             any(code.count(marker) >= 1 for marker in fallback_markers),
             msg=f"Expected complex add with strided inputs to fall back to extern kernels, got:\n{code}",
