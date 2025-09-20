@@ -1,10 +1,11 @@
 import warnings
 from collections.abc import Callable, Iterable
-from typing import Any, NamedTuple, overload, TypeVar
+from typing import Any, NamedTuple, TypeVar
 from typing_extensions import Self
 
 import torch
 from torch import _VF, Tensor
+from torch.utils._typing_utils import copy_method_params
 
 
 __all__ = [
@@ -99,31 +100,7 @@ class PackedSequence(PackedSequence_):
             bind(self.unsorted_indices, lambda t: t.pin_memory()),
         )
 
-    @overload
-    def to(
-        self,
-        dtype: torch.dtype,
-        non_blocking: bool = ...,
-        copy: bool = ...,
-    ) -> Self: ...
-
-    @overload
-    def to(
-        self,
-        device: str | torch.device | int | None = ...,
-        dtype: torch.dtype | None = ...,
-        non_blocking: bool = ...,
-        copy: bool = ...,
-    ) -> Self: ...
-
-    @overload
-    def to(
-        self,
-        other: Tensor,
-        non_blocking: bool = ...,
-        copy: bool = ...,
-    ) -> Self: ...
-
+    @copy_method_params(torch.Tensor.to)
     def to(self, *args: Any, **kwargs: Any) -> Self:
         r"""Perform dtype and/or device conversion on `self.data`.
 
@@ -155,6 +132,7 @@ class PackedSequence(PackedSequence_):
             )
             return type(self)(data, self.batch_sizes, sorted_indices, unsorted_indices)
 
+    @copy_method_params(torch.Tensor.cuda)
     def cuda(self, *args: Any, **kwargs: Any) -> Self:
         # Tests to see if 'cuda' should be added to kwargs
         ex = torch.tensor((), dtype=self.data.dtype, device=self.data.device).to(
@@ -165,6 +143,7 @@ class PackedSequence(PackedSequence_):
         kwargs["device"] = "cuda"
         return self.to(*args, **kwargs)
 
+    @copy_method_params(torch.Tensor.cpu)
     def cpu(self, *args: Any, **kwargs: Any) -> Self:
         ex = torch.tensor((), dtype=self.data.dtype, device=self.data.device).to(
             *args, **kwargs
