@@ -9,8 +9,6 @@ from queue import Empty, Queue
 from threading import Thread
 from typing import Any, Optional, Union
 
-import torch
-
 from tensor_fuzzer import (  # type: ignore[import-untyped]
     fuzz_scalar,
     fuzz_tensor_simple,
@@ -18,6 +16,8 @@ from tensor_fuzzer import (  # type: ignore[import-untyped]
     Spec,
     TensorSpec,
 )
+
+import torch
 
 
 @dataclass
@@ -88,12 +88,12 @@ def convert_stack_to_python_code(
     # Track generated operations to avoid duplicates
     generated_operations = set()
     generated_code_lines = []
-    operation_variables: dict[int, tuple[str, Spec]] = (
-        {}
-    )  # Maps operation index to (var_name, spec)
-    arg_operations: list[tuple[int, Spec]] = (
-        []
-    )  # List of (operation_index, spec) for arg operations
+    operation_variables: dict[
+        int, tuple[str, Spec]
+    ] = {}  # Maps operation index to (var_name, spec)
+    arg_operations: list[
+        tuple[int, Spec]
+    ] = []  # List of (operation_index, spec) for arg operations
 
     def specs_compatible(spec1: Spec, spec2: Spec) -> bool:
         """Check if two specifications are compatible (one can be used where the other is expected)."""
