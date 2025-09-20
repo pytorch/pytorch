@@ -8612,7 +8612,10 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         from torch._guards import compile_context, CompileContext
 
         def foo(x):
-            return x + x.shape[0]
+            if x.shape[1] >= 3:
+                return x + x.shape[0]
+            else:
+                return x - x.shape[0]
 
         x = torch.randn(4, 3)
         f_locals = {"x": x}
@@ -8630,19 +8633,48 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
                     (),
                 )
             )
-            dynamo_output = capture_output.dynamo_output
+            graph_capture_output = capture_output.graph_capture_output
+            fn = graph_capture_output.build_guards(foo.__code__)
+
+            for guard in graph_capture_output.output_graph.guards:
+                if guard.source == torch._guards.GuardSource.SHAPE_ENV:
+                    dynamic = guard.code_list is not None
+                    if dynamic:
+                        self.assertEqual(
+                            guard.code_list,
+                            [
+                                "L['x'].stride()[0] == L['x'].size()[1]",
+                                "2 <= L['x'].size()[0]",
+                                "3 <= L['x'].size()[1]",
+                            ],
+                        )
+                        self.assertTrue(
+                            fn.guard_manager.check({"x": torch.randn(3, 3)})
+                        )
+                        self.assertTrue(
+                            fn.guard_manager.check({"x": torch.randn(4, 4)})
+                        )
+                    else:
+                        self.assertFalse(
+                            fn.guard_manager.check({"x": torch.randn(3, 3)})
+                        )
+                        self.assertFalse(
+                            fn.guard_manager.check({"x": torch.randn(4, 4)})
+                        )
+                    self.assertFalse(fn.guard_manager.check({"x": torch.randn(4, 2)}))
+                    self.assertFalse(fn.guard_manager.check({"x": torch.randn(1, 3)}))
+                    break
+
             backend_input = capture_output.backend_input
-            self.assertTrue(
-                dynamo_output.build_guards(foo.__code__).guard_manager.check(f_locals)
-            )
+            self.assertTrue(fn.guard_manager.check(f_locals))
         import_sources = {
             alias: importlib.import_module(module_name)
-            for alias, module_name in dynamo_output.tracer_output.output_graph.import_sources.items()
+            for alias, module_name in graph_capture_output.import_sources.items()
         }
         self.assertEqual(
             foo(x),
             types.FunctionType(
-                dynamo_output.bytecode,
+                graph_capture_output.bytecode,
                 {
                     **import_sources,
                     backend_input.backend_id: backend_input.graph_module,
