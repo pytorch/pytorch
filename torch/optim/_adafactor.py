@@ -119,12 +119,17 @@ class Adafactor(Optimizer):
         return False  # has_complex
 
     @torch.no_grad()
-    def step(self, closure=None):
+    def step(self, closure=None, zero_grad=None):
         r"""Perform a single optimization step.
 
         Args:
             closure (Callable, optional): A closure that reevaluates the model
                 and returns the loss.
+            zero_grad (str, optional): Reset the gradients of all optimized :class:`torch.Tensor` s after the step.
+
+                * ``"to_zero"`` - set gradients to ``0``.
+                * ``"to_none"`` - set gradients to ``None``.
+                * ``None`` - default, not change gradients.
         """
         self._cuda_graph_capture_health_check()
 
@@ -171,7 +176,7 @@ class Adafactor(Optimizer):
                 found_inf=getattr(self, "found_inf", None),
                 has_complex=has_complex,
             )
-
+        super()._zero_grad(zero_grad)
         return loss
 
 

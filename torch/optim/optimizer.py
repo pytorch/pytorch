@@ -7,7 +7,7 @@ from collections import defaultdict, OrderedDict
 from collections.abc import Hashable, Iterable, Sequence
 from copy import deepcopy
 from itertools import chain
-from typing import Any, Callable, cast, Optional, overload, TypeVar, Union
+from typing import Any, Callable, cast, Literal, Optional, overload, TypeVar, Union
 from typing_extensions import ParamSpec, Self, TypeAlias
 
 import torch
@@ -37,6 +37,7 @@ GlobalOptimizerPreHook: TypeAlias = Callable[
     ["Optimizer", Args, Kwargs], Optional[tuple[Args, Kwargs]]
 ]
 GlobalOptimizerPostHook: TypeAlias = Callable[["Optimizer", Args, Kwargs], None]
+ZeroGradParamType: TypeAlias = Union[Literal["to_none", "to_zero"], None]
 
 __all__ = [
     "Optimizer",
@@ -1051,18 +1052,43 @@ class Optimizer:
                     for grads in per_dtype_grads.values():
                         torch._foreach_zero_(grads)
 
-    @overload
-    def step(self, closure: None = None) -> None: ...
+    def _zero_grad(self, zero_grad: ZeroGradParamType = None) -> None:
+        if zero_grad is None:
+            return
+        elif zero_grad == "to_zero":
+            self.zero_grad(set_to_none=False)
+        elif zero_grad == "to_none":
+            self.zero_grad(set_to_none=True)
+        else:
+            raise ValueError(
+                f'Expect `zero_grad` to be one of (None, "to_zero", "to_none"), but got {zero_grad}.'
+            )
 
     @overload
-    def step(self, closure: Callable[[], float]) -> float: ...
+    def step(
+        self, closure: None = None, zero_grad: ZeroGradParamType = None
+    ) -> None: ...
 
-    def step(self, closure: Optional[Callable[[], float]] = None) -> Optional[float]:
+    @overload
+    def step(
+        self, closure: Callable[[], float], zero_grad: ZeroGradParamType = None
+    ) -> float: ...
+
+    def step(
+        self,
+        closure: Optional[Callable[[], float]] = None,
+        zero_grad: ZeroGradParamType = None,
+    ) -> Optional[float]:
         r"""Perform a single optimization step to update parameter.
 
         Args:
             closure (Callable): A closure that reevaluates the model and
                 returns the loss. Optional for most optimizers.
+            zero_grad (str, optional): Reset the gradients of all optimized :class:`torch.Tensor` s after the step.
+
+                * ``"to_zero"`` - set gradients to ``0``.
+                * ``"to_none"`` - set gradients to ``None``.
+                * ``None`` - default, not change gradients.
         """
         raise NotImplementedError
 
