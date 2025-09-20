@@ -31,11 +31,12 @@ from torch.testing._internal.common_distributed import (
 from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     run_tests,
     TestCase,
+    TEST_XPU,
 )
 from torch.testing._internal.distributed.fake_pg import FakeStore
 from torch.testing._internal.inductor_utils import HAS_GPU
 
-
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 def load_test_module(name):
     import sys
     from importlib.machinery import SourceFileLoader
@@ -52,7 +53,7 @@ def load_test_module(name):
 AOTIRunnerUtil = load_test_module("inductor.test_aot_inductor_utils").AOTIRunnerUtil
 
 import sys
-
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 
 if not dist.is_available():
     print("distributed package not available, skipping tests", file=sys.stderr)

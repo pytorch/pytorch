@@ -1782,16 +1782,21 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
         # Ensure backend config can be created with the following arguments
         backend_config_strings_and_expected_values = [
             (dist.Backend.GLOO, "cpu:gloo,cuda:gloo"),
+            (dist.Backend.XCCL, "xpu:xccl"),
             (dist.Backend.NCCL, "cuda:nccl"),
             (dist.Backend.MPI, "cpu:mpi,cuda:mpi"),
             (dist.Backend.UCC, "cpu:ucc,cuda:ucc"),
-            (dist.Backend.DUMMY, "cpu:dummy,cuda:dummy"),
-            ("DUMMY", "cpu:dummy,cuda:dummy"),
-            ("dummy", "cpu:dummy,cuda:dummy"),
+            (dist.Backend.DUMMY, "cpu:dummy,cuda:dummy,xpu:dummy"),
+            ("DUMMY", "cpu:dummy,cuda:dummy,xpu:dummy"),
+            ("dummy", "cpu:dummy,cuda:dummy,xpu:dummy"),
             ("cpu:dummy,cuda:dummy", "cpu:dummy,cuda:dummy"),
             ("cpu:dummy,cuda:nccl", "cpu:dummy,cuda:nccl"),
             ("cpu:gloo,cuda:dummy", "cpu:gloo,cuda:dummy"),
             ("cpu:gloo,cuda:nccl", "cpu:gloo,cuda:nccl"),
+            ("cpu:dummy,xpu:dummy", "cpu:dummy,xpu:dummy"),
+            ("cpu:dummy,xpu:xccl", "cpu:dummy,xpu:xccl"),
+            ("cpu:gloo,xpu:dummy", "cpu:gloo,xpu:dummy"),
+            ("cpu:gloo,xpu:xccl", "cpu:gloo,xpu:xccl"),
         ]
 
         if TEST_XPU:

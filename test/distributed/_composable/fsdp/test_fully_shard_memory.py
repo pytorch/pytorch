@@ -241,7 +241,6 @@ class TestFullyShardMemory(FSDPTest):
 
     def _get_peak_active_memory_mb(self) -> int:
         mem_stats = torch.get_device_module(device_type).memory_stats()
-
         if TEST_CUDA or TEST_XPU:
             return round(mem_stats["active_bytes.all.peak"] / 1e6)
         if TEST_HPU:

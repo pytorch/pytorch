@@ -22,7 +22,7 @@ from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
     spawn_threads_and_init_comms,
 )
-from torch.testing._internal.common_utils import IS_SANDCASTLE, run_tests, TestCase
+from torch.testing._internal.common_utils import IS_SANDCASTLE, run_tests, skipIfXpu, TestCase
 
 
 device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
@@ -301,6 +301,7 @@ class TestCollectivesWithBaseClass(MultiThreadedTestCase):
         self.assertEqual(t0, torch.ones(3, 3) * res_num)
         self.assertEqual(t1, torch.ones(3, 3) * (res_num * 2))
 
+    @skipIfXpu
     @skip_if_lt_x_gpu(1)
     def test_bwd_sees_fwd_pg(self):
         fwd_tid = threading.current_thread().ident
@@ -332,7 +333,7 @@ class TestCollectivesWithBaseClass(MultiThreadedTestCase):
                 return grad_output * result
 
         x = torch.tensor(
-            [dist.get_rank()], dtype=torch.float, device=device_type, requires_grad=True
+            [dist.get_rank()], dtype=torch.float, device=torch.accelerator.current_accelerator(), requires_grad=True
         )
         x = MyFunc.apply(x)
         x.sum().backward()

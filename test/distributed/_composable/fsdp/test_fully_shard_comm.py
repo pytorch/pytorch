@@ -233,6 +233,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
                 reduce_scatter_dtype=torch.float32,
             )
 
+
     @skip_if_lt_x_gpu(1)
     def test_reduce_scatter_fp16(self):
         param_sizes = self._get_param_sizes()

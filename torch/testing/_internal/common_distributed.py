@@ -90,6 +90,8 @@ TEST_SKIPS = {
     ),
     "importerror": TestSkip(88, "Test skipped due to missing import"),
     "no_accelerator": TestSkip(89, "accelerator is not available."),
+    "not-support-multithread": TestSkip(90, "backend not support multithread."),
+    "power-of-two": TestSkip(91, "world size needs to be power of two on xpu."),
 }
 
 
@@ -107,7 +109,7 @@ class DistTestCases:
     backend_feature["gpu"] = {"nccl", "gloo", "ucc"}
     backend_feature["cuda"] = {"nccl", "gloo", "ucc"}
     backend_feature["ddp"] = {"nccl", "gloo", "ucc"}
-    backend_feature["subgroup"] = {"nccl", "gloo", "ucc"}
+    backend_feature["subgroup"] = {"nccl", "gloo", "ucc", "xccl"}
     backend_feature["plugin"] = set()
     if TEST_HPU:
         backend_feature["hpu"] = {"hccl"}
@@ -219,6 +221,23 @@ def skip_if_lt_x_gpu(x):
             if TEST_XPU and torch.xpu.device_count() >= x:
                 return func(*args, **kwargs)
             sys.exit(TEST_SKIPS[f"multi-gpu-{x}"].exit_code)
+
+        return wrapper
+
+    return decorator
+
+
+def skip_if_not_powerof2_worldsize_xpu():
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            if TEST_XPU:
+                x = torch.xpu.device_count()
+                print(f"skip_if_not_powerof2_worldsize_xpu x: {x}")
+                if (x & (x - 1)) == 0:
+                    return func(*args, **kwargs)
+                sys.exit(TEST_SKIPS[f"power-of-two"].exit_code)
+            return func(*args, **kwargs)
 
         return wrapper
 
@@ -351,6 +370,18 @@ def requires_nccl_version(version, msg):
             f"Requires NCCL version greater than or equal to: {version}, found: {torch.cuda.nccl.version()}, reason: {msg}",
         )
 
+def requires_nccl_version_or(version, msg, backends):
+    assert(isinstance(backends, list))
+    if not c10d.is_nccl_available():
+        return skip_but_pass_in_sandcastle_if(
+            'xccl' not in backends if c10d.is_xccl_available() else True,
+            "c10d was not compiled with the NCCL backend and " + str(backends) + " backend.",
+        )
+    else:
+        return skip_but_pass_in_sandcastle_if(
+            torch.cuda.nccl.version() < version,
+            f"Requires NCCL version greater than or equal to: {version}, found: {torch.cuda.nccl.version()}, reason: {msg}",
+        )
 
 def requires_nccl():
     return skip_but_pass_in_sandcastle_if(
@@ -358,6 +389,19 @@ def requires_nccl():
         "c10d was not compiled with the NCCL backend",
     )
 
+def requires_nccl_or(backends):
+    assert(isinstance(backends, list))
+    return skip_but_pass_in_sandcastle_if(
+        not c10d.is_nccl_available() and
+        ( not c10d.is_xccl_available() if 'xccl' in backends else True ),
+        "c10d was not compiled with the NCCL backend or " + str(backends) + " backend.",
+    )
+
+def requires_xccl():
+    return skip_but_pass_in_sandcastle_if(
+        not c10d.is_xccl_available(),
+        "c10d was not compiled with the XCCL backend",
+    )
 
 def requires_ucc():
     return skip_but_pass_in_sandcastle_if(
@@ -487,6 +531,10 @@ def sm_is_or_higher_than(device: torch.device, major: int, minor: int) -> bool:
     Returns False if device is a RoCM device.
     Returns True if device is a non-CUDA device.
     """
+    if device.type == "xpu":
+        # XPU devices have different compute capability codes
+        return True
+
     if device.type != "cuda":
         return True
 
@@ -1532,6 +1580,8 @@ def _dynamo_dist_per_rank_init(
                 store=store,
             )
         else:
+            backend = c10d.distributed_c10d.Backend.default_device_backend_map.get(
+                torch.accelerator.current_accelerator().type)
             c10d.init_process_group(backend=backend, rank=rank, world_size=world_size)
     torch._dynamo.reset()
     torch._dynamo.utils.counters.clear()

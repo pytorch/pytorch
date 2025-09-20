@@ -41,6 +41,7 @@ from torch.testing._internal.common_fsdp import (
 from torch.testing._internal.common_utils import (
     get_cycles_per_ms,
     run_tests,
+    TEST_XPU,
     TEST_HPU,
     TEST_XPU,
     wrapSwapTensorsTest,
@@ -51,7 +52,6 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     Transformer,
     TransformerBlock,
 )
-
 
 c10d_ops = torch.ops.c10d
 funcol = torch.ops.c10d_functional

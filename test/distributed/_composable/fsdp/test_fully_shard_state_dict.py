@@ -29,6 +29,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     TransformerBlock,
 )
 
+device_type = torch.accelerator.current_accelerator().type
 
 device_type = torch.device(get_devtype())
 

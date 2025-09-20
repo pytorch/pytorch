@@ -29,8 +29,9 @@ class TestFsdpTpCheckpointConversion(DTensorTestBase):
     @with_temp_dir
     def test_fsdp_to_tp(self):
         CHECKPOINT_DIR = self.temp_dir
-
-        model = MLPModule(self.device_type).cuda(self.rank)
+        device_type = torch.accelerator.current_accelerator().type
+        device = torch.device(f"{device_type}:{self.rank}")
+        model = MLPModule(self.device_type).to(device)
         # create a FSDP wrapped model
         fsdp_model = FSDP(model, use_orig_params=True)
 
@@ -49,7 +50,7 @@ class TestFsdpTpCheckpointConversion(DTensorTestBase):
         # create a TP wrapped model
         mesh_shape = (self.world_size,)
         device_mesh = init_device_mesh(self.device_type, mesh_shape)
-        model = MLPModule(self.device_type).cuda(self.rank)
+        model = MLPModule(self.device_type).to(device)
         # Parallelize the module based on the given Parallel Style.
         parallelize_plan = {
             "net1": ColwiseParallel(),
@@ -60,7 +61,7 @@ class TestFsdpTpCheckpointConversion(DTensorTestBase):
 
         # Update the parameters so tp_model.state_dict() will be different from fsdp_model.state_dict().
         torch.manual_seed(0)
-        inp = torch.rand(20, 10).cuda(self.rank)
+        inp = torch.rand(20, 10).to(device)
         output = tp_model(inp)
         output.sum().backward()
         optimizer.step()

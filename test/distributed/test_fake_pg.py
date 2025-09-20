@@ -19,7 +19,7 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
 from torch.testing._internal.common_distributed import HAS_ACCELERATOR
 from torch.testing._internal.common_fsdp import get_devtype
-from torch.testing._internal.common_utils import run_tests, skipIfHpu, TestCase
+from torch.testing._internal.common_utils import run_tests, skipIfHpu, skipIfXpu, TestCase
 from torch.testing._internal.distributed._tensor.common_dtensor import MLPModule
 from torch.testing._internal.distributed.fake_pg import FakeStore
 
@@ -32,6 +32,7 @@ device_type = get_devtype().type
 
 
 class TestFakePG(TestCase):
+    device_type = torch.accelerator.current_accelerator().type if HAS_ACCELERATOR else "cpu"
     def tearDown(self):
         super().tearDown()
         try:
@@ -69,9 +70,10 @@ class TestFakePG(TestCase):
     def test_construct_fsdp(self):
         store = FakeStore()
         dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
-        FSDP(nn.Linear(2, 3, device=device_type))
+        FSDP(nn.Linear(2, 3, device=self.device_type))
 
     @skipIfHpu
+    @skipIfXpu
     @unittest.skipIf(not HAS_ACCELERATOR, "No accelerator")
     def test_fsdp_fake_e2e(self):
         store = dist.HashStore()
@@ -90,6 +92,7 @@ class TestFakePG(TestCase):
         optim.step()
 
     @skipIfHpu
+    @skipIfXpu
     @unittest.skipIf(not HAS_ACCELERATOR, "No accelerator")
     def test_fake_pg_tracing(self):
         store = dist.HashStore()
@@ -170,6 +173,7 @@ class TestFakePG(TestCase):
         self.assertEqual(tuple(output.shape), (3, 3))
 
     @skipIfHpu
+    @skipIfXpu
     @unittest.skipIf(not HAS_ACCELERATOR, "No accelerator")
     def test_fsdp_tp_fake_e2e(self):
         world_size = 4

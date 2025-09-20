@@ -22,9 +22,10 @@ from torch.testing._internal.common_fsdp import (
     get_devtype,
     MLP,
 )
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, TEST_XPU
 from torch.testing._internal.two_tensor import TwoTensor
 
+device_type = torch.accelerator.current_accelerator().type
 
 device_type = torch.device(get_devtype())
 
@@ -259,7 +260,7 @@ class TestFullyShardAllGatherExtensionsMultiThread(
 ):
     @property
     def world_size(self) -> int:
-        return 8
+        return min(8, torch.accelerator.device_count())
 
     @property
     def device(self) -> torch.device:

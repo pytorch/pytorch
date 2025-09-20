@@ -14,6 +14,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     with_comms,
 )
 
+device_type = torch.accelerator.current_accelerator().type
 
 device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 

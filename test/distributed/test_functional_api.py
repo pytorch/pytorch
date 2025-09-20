@@ -467,7 +467,7 @@ class TestMakeFx(TestCase):
         )
 
 
-BACKEND = dist.Backend.NCCL if torch.cuda.is_available() else dist.Backend.GLOO
+BACKEND = dist.Backend.default_device_backend_map[DEVICE] if torch.accelerator.is_available() else dist.Backend.GLOO
 
 # Adding support for HCCL backend
 # To add a different backend

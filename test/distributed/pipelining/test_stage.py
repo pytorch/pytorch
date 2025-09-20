@@ -24,6 +24,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     skip_but_pass_in_sandcastle_if,
+    TEST_MULTIGPU,
 )
 from torch.utils._pytree import tree_map_only
 
@@ -31,6 +32,8 @@ from torch.utils._pytree import tree_map_only
 d_hid = 512
 batch_size = 256
 chunks = 4
+device = torch.accelerator.current_accelerator()
+backend = dist.get_default_backend_for_device(device) if device is not None else "None"
 
 device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 backend = dist.get_default_backend_for_device(device_type)

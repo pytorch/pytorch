@@ -29,7 +29,9 @@ if TEST_WITH_DEV_DBG_ASAN:
     )
     sys.exit(0)
 
-WORLD_SIZE = min(4, max(2, torch.get_device_module(device_type).device_count()))
+BACKEND = dist.Backend.default_device_backend_map[torch.accelerator.current_accelerator().type] \
+    if torch.accelerator.is_available() else dist.Backend.NCCL
+WORLD_SIZE = min(4, max(2, torch.accelerator.device_count()))
 
 
 def with_comms(func=None):
@@ -40,7 +42,8 @@ def with_comms(func=None):
 
     @wraps(func)
     def wrapper(self, *args, **kwargs):
-        if torch.get_device_module(device_type).device_count() < self.world_size:
+        if BACKEND == (BACKEND == dist.Backend.NCCL or BACKEND == dist.Backend.XCCL) \
+          and torch.accelerator.device_count() < self.world_size:
             sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
         self.create_pg(device_type)
         func(self)

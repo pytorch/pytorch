@@ -567,6 +567,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
     Prefer MultiThreadedTestCase for most tests. Perhaps use this one
     sparingly for integration tests.
     """
+    device_type = torch.accelerator.current_accelerator().type
 
     device_type = (
         acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
@@ -725,7 +726,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
 
             for _ in range(10):
                 optimizer.zero_grad()
-                data = torch.randn((16, 46, 8, 8), dtype=torch.float32, device="cuda")
+                data = torch.randn((16, 46, 8, 8), dtype=torch.float32, device=device_type)
                 opt_net(data).sum().backward()
 
             # 2 fwd and 2 bwd graph such that 4 graphs in total
@@ -1332,6 +1333,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
     Test simple things here since they are simpler to debug.
     Use TestMultiProc for things that really need to run on multiple nodes
     """
+    device_type = torch.accelerator.current_accelerator().type
 
     device_type = (
         acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"

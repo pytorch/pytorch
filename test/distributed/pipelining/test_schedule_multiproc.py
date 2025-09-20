@@ -39,6 +39,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     skip_but_pass_in_sandcastle_if,
+    TEST_MULTIGPU,
 )
 
 
@@ -46,6 +47,11 @@ logger = logging.getLogger(__name__)
 
 d_hid = 512
 batch_size = 64
+
+device = torch.accelerator.current_accelerator()
+device_type = device.type if torch.accelerator.is_available() else "cpu"
+backend = dist.get_default_backend_for_device(device) if device is not None else "None"
+
 torch.manual_seed(0)
 device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 backend = dist.get_default_backend_for_device(device_type)
@@ -351,7 +357,6 @@ class ScheduleTest(MultiProcContinuousTest):
             else:
                 schedule.step()
 
-        dist.barrier(device_ids=[self.rank])
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(

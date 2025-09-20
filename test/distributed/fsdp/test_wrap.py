@@ -54,6 +54,9 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 
+device_type = torch.accelerator.current_accelerator().type
+import torch.distributed as dist
+backend = dist.get_default_backend_for_device(device_type)
 
 device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 backend = torch.distributed.get_default_backend_for_device(device_type)
