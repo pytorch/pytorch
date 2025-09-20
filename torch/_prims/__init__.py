@@ -1358,33 +1358,45 @@ def _broadcast_in_dim_aten(a, shape, broadcast_dimensions):
 
 
 def _broadcast_in_dim_view_impl(a, shape, broadcast_dimensions):
+    from torch.fx.experimental.symbolic_shapes import guard_or_false, guard_or_true
+
     target_shape = list(shape)
-    reshape_sizes = []
-    input_dim = 0
+    new_strides = []
+    original_idx = 0
     dims_set = set(broadcast_dimensions)
-    input_sizes = torch.ops.aten.sym_size.default(a)
 
-    for idx in range(len(target_shape)):
-        if idx in dims_set:
-            reshape_sizes.append(input_sizes[input_dim])
-            input_dim += 1
-        else:
-            reshape_sizes.append(1)
+    input_sizes = a.size()
+    input_strides = a.stride()
+    storage_offset = a.storage_offset()
 
-    view_tensor = torch.ops.aten.reshape.default(a, reshape_sizes)
-    view_strides = torch.ops.aten.sym_stride.default(view_tensor)
-    storage_offset = torch.ops.aten.sym_storage_offset.default(view_tensor)
-
-    expanded_strides = []
     for idx, size in enumerate(target_shape):
-        reshape_size = reshape_sizes[idx]
-        if idx in dims_set and reshape_size == size:
-            expanded_strides.append(view_strides[idx])
+        if idx in dims_set:
+            current_size = input_sizes[original_idx]
+            stride = input_strides[original_idx]
+            if guard_or_false(current_size == 1):
+                if guard_or_false(current_size == size):
+                    new_strides.append(stride)
+                else:
+                    new_strides.append(0)
+            else:
+                torch._check(
+                    current_size == size,
+                    lambda: f"non-broadcasting semantics require {current_size} == {size}",
+                )
+                new_strides.append(stride)
+            original_idx += 1
         else:
-            expanded_strides.append(0)
+            if guard_or_true(size != 1):
+                new_strides.append(0)
+            elif original_idx == a.ndim:
+                new_strides.append(1)
+            else:
+                new_strides.append(
+                    input_strides[original_idx] * input_sizes[original_idx]
+                )
 
     return torch.ops.aten.as_strided.default(
-        view_tensor, shape, expanded_strides, storage_offset
+        a, target_shape, new_strides, storage_offset
     )
 
 
