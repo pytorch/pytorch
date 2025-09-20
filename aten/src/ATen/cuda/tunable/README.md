@@ -38,7 +38,7 @@ GemmTunableOp_float_NT,nt_25088_4096_64,1219,1.262
 GemmTunableOp_float_NT,nt_4096_4096_64,1216,0.033
 ```
 
-Note the "Validator" lines. If you change a library verison, or ROCm version, or PyTorch version, TunableOp will detect
+Note the "Validator" lines. If you change a library version, or ROCm version, or PyTorch version, TunableOp will detect
 this and reject the tunings file because the prior tunings are likely affected by other software changes.
 
 The remaining lines are the tuned solutions for each TunableOp encountered during your execution. Each line consists of
