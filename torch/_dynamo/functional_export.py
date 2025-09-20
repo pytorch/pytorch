@@ -390,12 +390,10 @@ def _dynamo_graph_capture_for_export(
                     _is_export_deprecated_do_not_use=True,
                 )
 
-                assert out.dynamo_output.tracer_output.output_graph is not None
+                assert out.graph_capture_output.output_graph is not None
 
                 # Extract export metadata from the new location
-                export_metadata = (
-                    out.dynamo_output.tracer_output.output_graph.export_metadata
-                )
+                export_metadata = out.graph_capture_output.output_graph.export_metadata
                 graph_inputs = export_metadata.graph_input_idx_to_local_source
                 graph_output_map = export_metadata.output_return_type
                 out_spec = export_metadata.out_spec
@@ -410,7 +408,7 @@ def _dynamo_graph_capture_for_export(
                 graph = torch.fx.GraphModule(torch.nn.Module(), torch.fx.Graph())
                 graph.graph.output(None)
                 graph.recompile()
-                fake_mode = out.dynamo_output.tracer_output.output_graph.fake_mode
+                fake_mode = None
 
             # Compute dynamic dimensions for each input based on constraints
             flat_args_dynamic_dims = [
@@ -466,7 +464,7 @@ def _dynamo_graph_capture_for_export(
             constraint_violation_error = None
             try:
                 # Check if we have any constraint violations
-                check_fn = out.dynamo_output.build_guards(
+                check_fn = out.graph_capture_output.build_guards(
                     module_to_trace.forward.__code__
                 ).guard_manager
                 check_fn.check(f_locals)
