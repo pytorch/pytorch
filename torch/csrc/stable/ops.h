@@ -213,16 +213,26 @@ inline torch::stable::Tensor zero_(torch::stable::Tensor& self) {
 
 // We expect this to be the stable version of the copy_ op with
 // identical semantics to the existing copy_ op.
-inline Tensor copy_(
-    Tensor& self,
-    const Tensor& src,
+inline torch::stable::Tensor copy_(
+    torch::stable::Tensor& self,
+    const torch::stable::Tensor& src,
     std::optional<bool> non_blocking = std::nullopt) {
   const auto num_args = 3;
   std::array<StableIValue, num_args> stack{
       from(self), from(src), from(non_blocking.value_or(false))};
   TORCH_ERROR_CODE_CHECK(
       aoti_torch_call_dispatcher("aten::copy_", "", stack.data()));
-  return to<Tensor>(stack[0]);
+  return to<torch::stable::Tensor>(stack[0]);
+}
+
+// We expect this to be the stable version of the clone op. We will
+// add optional memory_format kwarg support in the future.
+inline torch::stable::Tensor clone(const torch::stable::Tensor& self) {
+  const auto num_args = 2;
+  std::array<StableIValue, num_args> stack{from(self), from(std::nullopt)};
+  TORCH_ERROR_CODE_CHECK(
+      aoti_torch_call_dispatcher("aten::clone", "", stack.data()));
+  return to<torch::stable::Tensor>(stack[0]);
 }
 
 } // namespace torch::stable
