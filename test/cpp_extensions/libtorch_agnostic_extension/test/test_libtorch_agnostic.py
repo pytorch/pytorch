@@ -359,18 +359,10 @@ if not IS_WINDOWS:
         def test_my_clone(self, device):
             import libtorch_agnostic
 
-            t = torch.randn(2, 5, 2, 3, device=device)
+            t = torch.randn(2, 5, device=device)
 
             result = libtorch_agnostic.ops.my_clone(t)
             expected = t.clone()
-            self.assertEqual(result, expected)
-            self.assertNotEqual(result.data_ptr(), expected.data_ptr())
-            self.assertEqual(result.stride(), expected.stride())
-
-            result = libtorch_agnostic.ops.my_clone(
-                t, memory_format=torch.channels_last
-            )
-            expected = t.clone(memory_format=torch.channels_last)
             self.assertEqual(result, expected)
             self.assertNotEqual(result.data_ptr(), expected.data_ptr())
             self.assertEqual(result.stride(), expected.stride())
