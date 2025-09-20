@@ -34,7 +34,7 @@ struct Dist {
   //     finish :   This tells what to do with the aggregated value to compute
   //                the norm. Generally this is the result of val ^ (1 / p).
   //     backward : This is the gradient for that norm. Arguments are pretty
-  //                self explanitory.
+  //                self explanatory.
   //
   // There are a few cases where these aren't used. The 0 norm has no backward,
   // because it's always 0, so that's shortcircuited earlier. There's a special
