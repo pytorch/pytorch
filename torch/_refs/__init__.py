@@ -2995,7 +2995,7 @@ def constant_pad_nd(
         pad_idx = len(pad) - ((i + 1) * 2)
         new_dim = input_sizes[l_diff + i] + pad[pad_idx] + pad[pad_idx + 1]
         torch._check(
-            new_dim > 0,
+            new_dim >= 0,
             lambda: f"The input size {input_sizes[l_diff + i]}, plus negative padding "
             f"{pad[pad_idx]} and {pad[pad_idx + 1]} resulted in a negative output size, "
             f"which is invalid. Check dimension {l_diff + i} of your input.",
