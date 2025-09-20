@@ -21,7 +21,6 @@ import shutil
 import signal
 import subprocess
 import sys
-import tempfile
 import time
 import weakref
 from contextlib import contextmanager
@@ -42,7 +41,6 @@ import torch._export
 import torch.distributed
 import torch.multiprocessing as mp
 from torch._C import _has_cuda as HAS_CUDA, _has_xpu as HAS_XPU
-from torch._C._nativert import PyModelRunner
 from torch._dynamo.profiler import fx_insert_profiling, Profiler
 from torch._dynamo.testing import (
     dummy_fx_compile,
@@ -1101,10 +1099,6 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
             frozen_model_iter_fn = export_aot_inductor(
                 model, example_inputs, args.inductor_compile_mode
             )
-        elif args.export_nativert:
-            frozen_model_iter_fn = export_nativert(model, example_inputs)
-        elif args.torchscript_jit_trace:
-            frozen_model_iter_fn = torchscript_jit_trace(model, example_inputs)
         else:
             if kwargs["hf_llm"]:
                 # If it's an llm, we want to optimize model.forward, and use
@@ -1538,16 +1532,6 @@ def export(model, example_inputs):
         return ep.module()(*example_args, **example_kwargs)
 
     return opt_export
-
-
-def export_nativert(model, example_inputs):
-    optimized = NativeRTCache.load(model, example_inputs)
-
-    def opt_nativert(_, example_inputs, collect_outputs=False):
-        example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
-        return optimized.run(*example_args, **example_kwargs)
-
-    return opt_nativert
 
 
 def export_aot_inductor(model, example_inputs, mode):
@@ -2318,12 +2302,7 @@ class BenchmarkRunner:
             try:
                 model_copy = self.deepcopy_and_maybe_parallelize(model)
                 self.init_optimizer(name, current_device, model_copy.parameters())
-                if (
-                    self.args.export
-                    or self.args.export_aot_inductor
-                    or self.args.export_nativert
-                    or self.args.torchscript_jit_trace
-                ):
+                if self.args.export or self.args.export_aot_inductor:
                     # apply export on module directly
                     # no need for n iterations
                     # the logic should be the same to self.model_iter_fn (forward_pass)
@@ -2740,11 +2719,7 @@ class BenchmarkRunner:
                             niters=1,
                         )
 
-            if (
-                self.args.export_aot_inductor
-                or self.args.export_nativert
-                or self.args.torchscript_jit_trace
-            ):
+            if self.args.export_aot_inductor:
                 optimized_model_iter_fn = optimize_ctx
             else:
                 if getattr(self, "hf_llm", False):
@@ -3510,16 +3485,6 @@ def parse_args(args=None):
         help="Measure pass rate with Export+AOTInductor",
     )
     group.add_argument(
-        "--export-nativert",
-        action="store_true",
-        help="Measure pass rate with Export+NativeRT",
-    )
-    group.add_argument(
-        "--torchscript-jit-trace",
-        action="store_true",
-        help="Measure pass rate with TorchScript jit.trace",
-    )
-    group.add_argument(
         "--xla", action="store_true", help="Compare TorchXLA to eager PyTorch"
     )
     group.add_argument(
@@ -3960,14 +3925,6 @@ def run(runner, args, original_dir=None):
         optimize_ctx = export
         experiment = speedup_experiment
         output_filename = "export.csv"
-    elif args.export_nativert:
-        optimize_ctx = export_nativert
-        experiment = speedup_experiment
-        output_filename = "export_nativert.csv"
-    elif args.torchscript_jit_trace:
-        optimize_ctx = torchscript_jit_trace
-        experiment = speedup_experiment
-        output_filename = "torchscript_jit_trace.csv"
     elif args.xla:
         (dev,) = args.devices
         os.environ["PJRT_DEVICE"] = {"cuda": "GPU", "cpu": "CPU"}[dev]
