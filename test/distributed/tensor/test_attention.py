@@ -354,12 +354,12 @@ def generate_doc_mask_mod(
     return doc_mask_mod
 
 
-class RingFlexAttentionTest(DTensorTestBase):
+class CPFlexAttentionTest(DTensorTestBase):
     @property
     def world_size(self) -> int:
         return 2
 
-    def _test_ring_flex_attention(
+    def _test_cp_flex_attention(
         self, qkv_size, B=1, mask_func=causal_mask, atol=1e-6, rtol=1e-2
     ) -> None:
         torch.cuda.manual_seed(10)
@@ -497,17 +497,17 @@ class RingFlexAttentionTest(DTensorTestBase):
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support flash attention"
     )
-    def test_ring_flex_attention(self) -> None:
+    def test_cp_flex_attention(self) -> None:
         self.run_subtests(
             {"qkv_size": [128 * self.world_size, 2048]},
-            self._test_ring_flex_attention,
+            self._test_cp_flex_attention,
         )
 
         # NOTE: Context Parallel should not be used for small attentions (block_size < 128)
         with self.assertRaisesRegex(AssertionError, "Tensor-likes are not close"):
             self.run_subtests(
                 {"qkv_size": [64 * self.world_size]},
-                self._test_ring_flex_attention,
+                self._test_cp_flex_attention,
             )
 
     # TODO: merge with the above test
@@ -516,7 +516,7 @@ class RingFlexAttentionTest(DTensorTestBase):
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support flash attention"
     )
-    def test_ring_flex_attention_document_mask(self) -> None:
+    def test_cp_flex_attention_document_mask(self) -> None:
         random.seed(10)
 
         # NOTE: Each (batch_size, seq_len) tuple introduces 2 create_block_mask
@@ -537,7 +537,7 @@ class RingFlexAttentionTest(DTensorTestBase):
 
         # TODO: change this for-loop to run_subtests
         # Use a for-loop instead of run_subtests because we need to intialize the mask
-        # for each subtest. This can be baked into self._test_ring_flex_attention as
+        # for each subtest. This can be baked into self._test_cp_flex_attention as
         # a str argument denoting mask type.
         for batch_size, max_seq_len in itertools.product(
             batch_size_list, max_seq_len_list
@@ -551,7 +551,7 @@ class RingFlexAttentionTest(DTensorTestBase):
 
             # construct testing function
             test_func = functools.partial(
-                self._test_ring_flex_attention,
+                self._test_cp_flex_attention,
                 qkv_size=max_seq_len,
                 B=batch_size,
                 mask_func=document_causal_mask,

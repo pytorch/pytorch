@@ -5,6 +5,7 @@ import functools
 import gc
 import importlib
 import itertools
+import re
 import sys
 import unittest
 import warnings
@@ -911,6 +912,67 @@ if HAS_CUDA_AND_TRITON:
         @torch._inductor.config.patch("triton.cudagraphs", False)
         def test_unaligned_static_input_no_cudagraphs(self):
             self._test_unaligned_static_input_impl(expected_clones=0)
+
+        @torch._inductor.config.patch("graph_partition", True)
+        @torch._inductor.config.patch("implicit_fallbacks", True)
+        def test_graph_partition_custom_rule(self):
+            def get_num_partitions(code):
+                code = "".join(code)
+                found = re.search(r"partitions=\[(.*)\]", code)
+                assert found is not None
+                partitions = found.group(1)
+                num_partitions = len([p for p in partitions.split(",") if p])
+                return num_partitions
+
+            @torch.library.custom_op("mylib::bar", mutates_args=())
+            def bar(x: torch.Tensor, flag: int) -> torch.Tensor:
+                return x.clone()
+
+            @bar.register_fake
+            def _(x, flag):
+                return x.clone()
+
+            def f(x, flag):
+                x = x + 1
+                x = bar(x, flag)
+                x = x + 1
+                return x
+
+            x = torch.randn(2, device="cuda")
+            f_compiled = torch.compile(f, mode="reduce-overhead", fullgraph=True)
+            _, code = run_and_get_code(f_compiled, x, True)
+            num_partitions = get_num_partitions(code)
+            self.assertEqual(num_partitions, 1)
+
+            @torch.library.custom_op("mylib::baz", mutates_args=())
+            def baz(x: torch.Tensor, flag: int) -> torch.Tensor:
+                return x.clone()
+
+            @baz.register_fake
+            def _(x, flag):
+                return x.clone()
+
+            def should_partition(x, flag):
+                return flag
+
+            torch._inductor.scheduler.register_should_partition_rule(
+                torch.ops.mylib.baz.default, should_partition
+            )
+
+            def f(x, flag):
+                x = x + 1
+                x = baz(x, flag)
+                x = x + 1
+                return x
+
+            f_compiled = torch.compile(f, mode="reduce-overhead", fullgraph=True)
+            _, code = run_and_get_code(f_compiled, x, True)
+            num_partitions = get_num_partitions(code)
+            self.assertEqual(num_partitions, 2)
+
+            _, code = run_and_get_code(f_compiled, x, False)
+            num_partitions = get_num_partitions(code)
+            self.assertEqual(num_partitions, 1)
 
         @torch._inductor.config.patch("graph_partition", True)
         @torch._inductor.config.patch("triton.cudagraph_trees", False)
@@ -3230,6 +3292,60 @@ if HAS_CUDA_AND_TRITON:
 
             # splitting on 1 custom gives 2 cudagraphs
             self.assertEqual(self.get_manager().new_graph_id().id, 2)
+
+        @config.patch(implicit_fallbacks=True)
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_custom_op_mutation_late_free(self):
+            @torch.library.custom_op(
+                "mylib::op1",
+                mutates_args=["x"],
+                schema="(Tensor(a!)?  x) -> (Tensor, Tensor)",
+                device_types="cuda",
+            )
+            def op1(x) -> tuple[torch.Tensor, torch.Tensor]:
+                x = x + 1
+                return (x + 1, x + 2)
+
+            @op1.register_fake
+            def _(x) -> tuple[torch.Tensor, torch.Tensor]:
+                return (torch.empty_like(x), torch.empty_like(x))
+
+            @torch.library.custom_op(
+                "mylib::cg_unsafe_op",
+                mutates_args=[],
+                schema="(Tensor x, Tensor y, Tensor x1, Tensor y1) -> Tensor",
+                device_types="cuda",
+                tags=(torch._C.Tag.cudagraph_unsafe,),
+            )
+            def cg_unsafe_op(x0, x1, y0, y1) -> torch.Tensor:
+                return x0 + x1 + y0 + y1
+
+            @cg_unsafe_op.register_fake
+            def _(x0, x1, y0, y1) -> torch.Tensor:
+                return torch.empty_like(x0)
+
+            def f(x):
+                x = x + 1
+                x = op1(x)
+                x0, x1 = x[0], x[1]
+                y0 = x0 + 1
+                y1 = x1 + 1
+                y = cg_unsafe_op(x0, x1, y0, y1)
+                z = y + x0 + x1
+                z0, z1 = op1(z)
+                z2 = z0 + z1
+                res = cg_unsafe_op(z2, z2, y, y)
+                return res
+
+            x = torch.randn(2, 2, device="cuda")
+            x_cloned = x.clone()
+            eager_out = f(x)
+
+            f_compiled = torch.compile(f, mode="reduce-overhead")
+
+            for _ in range(5):
+                compiled_out = f_compiled(x_cloned)
+                self.assertEqual(eager_out, compiled_out)
 
         @config.patch(implicit_fallbacks=True)
         @torch._inductor.config.patch("graph_partition", True)
