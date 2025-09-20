@@ -1,3 +1,4 @@
+#include <c10/util/Exception.h>
 #include <torch/csrc/monitor/counters.h>
 
 #include <unordered_set>
@@ -21,7 +22,8 @@ const char* aggregationName(Aggregation agg) {
     case Aggregation::MIN:
       return "min";
     default:
-      throw std::runtime_error(
+      TORCH_CHECK(
+          false,
           "unknown aggregation: " + std::to_string(static_cast<int>(agg)));
   }
 }
