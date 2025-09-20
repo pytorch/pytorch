@@ -1894,7 +1894,7 @@ class TestDict(JitTestCase):
 
         @torch.jit.script
         def missing_index(x: Dict[str, int]) -> int:
-            return x["done"]
+            return x["dne"]  # codespell:ignore
 
         with self.assertRaisesRegexWithHighlight(RuntimeError, "KeyError", 'x["done"'):
             missing_index({"item": 20, "other_item": 120})

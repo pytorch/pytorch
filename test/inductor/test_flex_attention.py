@@ -4723,7 +4723,7 @@ class TestBlockMask(InductorTestCase):
         # Index on batch and head dimension
         new_block_mask = block_mask[0, 1]
         assert new_block_mask.kv_num_blocks.shape == (4,)
-        assert new_block_mask.kv_indidces.shape == (4, 4)
+        assert new_block_mask.kv_indices.shape == (4, 4)
 
         # slicing on batch and head dimension
         new_block_mask = block_mask[0:2, 1:2]
