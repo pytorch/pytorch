@@ -82,15 +82,34 @@ FrameLocalsMapping::FrameLocalsMapping(FrameLocalsFrameType* frame)
   // since we don't actually copy free vars from the closure to the frame
   // localsplus.
 }
-
 void FrameLocalsMapping::_realize_dict() {
   _dict = py::dict();
-  py::tuple framelocals_names = code_framelocals_names(_code_obj);
 
-  auto nlocalsplus = ((PyCodeObject*)_code_obj.ptr())->co_nlocalsplus;
+  auto* co = (PyCodeObject*)_code_obj.ptr();
+  py::tuple framelocals_names = code_framelocals_names(_code_obj);
+  auto nlocalsplus = co->co_nlocalsplus;
   DEBUG_CHECK(nlocalsplus == _framelocals.size());
-  for (int i = 0; i < nlocalsplus; i++) {
-    if (_framelocals[i]) {
+
+  // ---- compute how many parameter names we want ----
+  int posonly = co->co_posonlyargcount;
+  int pos_or_kw = co->co_argcount;
+  int kwonly = co->co_kwonlyargcount;
+  int nargs = posonly + pos_or_kw + kwonly +
+      ((co->co_flags & CO_VARARGS) ? 1 : 0) +
+      ((co->co_flags & CO_VARKEYWORDS) ? 1 : 0);
+
+  // Build a tiny set {arg names}. co_varnames starts with all arg names.
+  py::tuple varnames = _code_obj.attr("co_varnames");
+  int limit = std::min<int>(nargs, (int)varnames.size());
+  py::dict argset; // using a dict for .contains()
+  for (int i = 0; i < limit; ++i) {
+    argset[varnames[i]] = py::none();
+  }
+
+  // Fill only arguments; later entries (e.g., cell/free) still override
+  // earlier ones for captured arguments, matching CPython's behavior.
+  for (int i = 0; i < nlocalsplus; ++i) {
+    if (_framelocals[i] && argset.contains(framelocals_names[i])) {
       _dict[framelocals_names[i]] = _framelocals[i];
     }
   }
@@ -148,8 +167,31 @@ void FrameLocalsMapping::_realize_dict() {
   py::tuple framelocals_names = code_framelocals_names(_code_obj);
   PyCodeObject* co = (PyCodeObject*)_code_obj.ptr();
 
+  // ---- compute parameter count & arg name set (from co_varnames) ----
+#if PY_VERSION_HEX >= 0x03080000
+  int posonly = co->co_posonlyargcount;
+#else
+  int posonly = 0;
+#endif
+  int pos_or_kw = co->co_argcount;
+  int kwonly = co->co_kwonlyargcount;
+  int nargs = posonly + pos_or_kw + kwonly +
+      ((co->co_flags & CO_VARARGS) ? 1 : 0) +
+      ((co->co_flags & CO_VARKEYWORDS) ? 1 : 0);
+
+  py::tuple varnames = _code_obj.attr("co_varnames");
+  int limit = std::min<int>(nargs, (int)varnames.size());
+  py::dict argset;
+  for (int i = 0; i < limit; ++i) {
+    argset[varnames[i]] = py::none();
+  }
+
   auto update_mapping = [&](int i) {
     DEBUG_CHECK(0 <= i && i < _framelocals.size());
+    // only keep arguments
+    if (!argset.contains(framelocals_names[i])) {
+      return;
+    }
     PyObject* value = _framelocals[i].ptr();
     if (value == nullptr) {
       _dict.attr("pop")(framelocals_names[i], py::none());
@@ -158,9 +200,9 @@ void FrameLocalsMapping::_realize_dict() {
     }
   };
 
-  // locals
-  py::tuple varnames = _code_obj.attr("co_varnames");
-  auto nlocals = std::min(co->co_nlocals, (int)varnames.size());
+  // Keep original override order: locals -> cellvars -> (maybe) freevars.
+  auto nlocals =
+      std::min(co->co_nlocals, (int)PyTuple_GET_SIZE(co->co_varnames));
   for (int i = 0; i < nlocals; i++) {
     update_mapping(i);
   }
