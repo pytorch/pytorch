@@ -6448,7 +6448,23 @@ def multi_head_attention_forward(
             )
         else:
             attn_output_weights = torch.bmm(q_scaled, k.transpose(-2, -1))
+
+        is_neginf = torch.isneginf(attn_output_weights)
+
+        if (is_neginf).all():
+            # get NaN if all values are -inf
+            is_neginf = is_neginf.fill_(False)
+
+        # safe softmax
         attn_output_weights = softmax(attn_output_weights, dim=-1)
+        all_neginf_along_dim = is_neginf.all(dim=-1, keepdim=True)
+        zeros = torch.scalar_tensor(
+            0.0, dtype=attn_output_weights.dtype, device=attn_output_weights.device
+        )
+        attn_output_weights = torch.where(
+            all_neginf_along_dim, zeros, attn_output_weights
+        )
+
         if dropout_p > 0.0:
             attn_output_weights = dropout(attn_output_weights, p=dropout_p)
 
@@ -6469,6 +6485,7 @@ def multi_head_attention_forward(
             # squeeze the output if input was unbatched
             attn_output = attn_output.squeeze(1)
             attn_output_weights = attn_output_weights.squeeze(0)
+
         return attn_output, attn_output_weights
     else:
         # attn_mask can be either (L,S) or (N*num_heads, L, S)
