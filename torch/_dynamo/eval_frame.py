@@ -1312,7 +1312,7 @@ def optimize(*args: Any, **kwargs: Any) -> Union[OptimizeContext, _NullDecorator
             assert set(ca_kwargs_override.keys()) == {"fullgraph"}, (
                 f"Only `fullgraph` kwarg override is supported for now, but got {ca_kwargs_override.keys()}"
             )
-            kwargs["nopython"] = ca_kwargs_override["fullgraph"]
+            kwargs["fullgraph"] = ca_kwargs_override["fullgraph"]
         return optimize(*args, **kwargs)
 
     return _optimize(rebuild_ctx, *args, **kwargs)
@@ -1322,7 +1322,7 @@ def _optimize(
     rebuild_ctx: Callable[[], Union[OptimizeContext, _NullDecorator]],
     backend: Union[str, Callable[..., Any]] = "inductor",
     *,
-    nopython: bool = False,
+    fullgraph: bool = False,
     error_on_graph_break: Optional[bool] = None,
     guard_export_fn: Optional[Callable[[_guards.GuardsSet], None]] = None,
     guard_fail_fn: Optional[Callable[[GuardFail], None]] = None,
@@ -1381,7 +1381,7 @@ def _optimize(
     ):
         return _NullDecorator()
 
-    if nopython and not config.debug_force_graph_break_on_leaf_return:
+    if fullgraph and not config.debug_force_graph_break_on_leaf_return:
         return optimize_assert(
             backend,
             dynamic=dynamic,
@@ -1467,7 +1467,7 @@ def explain(f: Callable[..., Any], *extra_args: Any, **extra_kwargs: Any) -> Any
 
         opt_f = optimize(
             dynamo_graph_accumulating_compiler,
-            nopython=False,
+            fullgraph=False,
             guard_export_fn=guard_export_print,
         )(f)
         # TODO(voz): We may have instances of `f` that mutate inputs, we should track sideeffects and reject.

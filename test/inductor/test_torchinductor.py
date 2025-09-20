@@ -726,7 +726,7 @@ def check_model_gpu(
             grad_atol=grad_atol,
             grad_rtol=grad_rtol,
             exact_dtype=exact_dtype,
-            nopython=nopython,
+            fullgraph=fullgraph,
             reference_in_float=reference_in_float,
             assert_equal=assert_equal,
             check_gradient=check_gradient,

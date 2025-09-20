@@ -957,7 +957,7 @@ def fullgraph_capture(
             compiler_fn=fullgraph_compiler,
             export=_is_export_deprecated_do_not_use,
             export_constraints=constraints,  # type: ignore[arg-type]
-            one_graph=True,
+            fullgraph=True,
             restart_reasons=set(),
         )
         # https://github.com/pytorch/pytorch/blob/main/torch/_dynamo/eval_frame.py#L831
@@ -1014,7 +1014,7 @@ def compile_frame(  # type: ignore[return]
             closure,
             compiler_fn,
             tf_mode_stack,
-            one_graph,
+            fullgraph,
             speculation_log,
             instructions,
             code_options,
@@ -1082,7 +1082,7 @@ def _compile(
     builtins: dict[str, object],
     closure: tuple[CellType],
     compiler_fn: CompilerFn,
-    one_graph: bool,
+    fullgraph: bool,
     export: bool,
     export_constraints: Optional[typing.Never],
     hooks: Hooks,
@@ -1110,7 +1110,7 @@ def _compile(
 
     @compile_time_strobelight_meta(phase_name="compile_inner")
     def compile_inner(
-        code: CodeType, one_graph: bool, hooks: Hooks
+        code: CodeType, fullgraph: bool, hooks: Hooks
     ) -> tuple[ConvertFrameReturn, Optional[DynamoTracerOutput]]:
         with contextlib.ExitStack() as stack:
             stack.enter_context(
@@ -1119,7 +1119,7 @@ def _compile(
                 )
             )
             stack.enter_context(CompileTimeInstructionCounter.record())
-            return _compile_inner(code, one_graph, hooks)
+            return _compile_inner(code, fullgraph, hooks)
 
         return (
             ConvertFrameReturn(),
@@ -1129,7 +1129,7 @@ def _compile(
     @maybe_cprofile
     def _compile_inner(
         code: CodeType,
-        one_graph: bool,
+        fullgraph: bool,
         hooks: Hooks,
     ) -> tuple[ConvertFrameReturn, DynamoTracerOutput]:
         nonlocal dynamo_time_before_restart
@@ -1160,7 +1160,7 @@ def _compile(
                 builtins,
                 closure,
                 compiler_fn,
-                one_graph,
+                fullgraph,
                 restart_reasons,
                 export=export,
                 export_constraints=export_constraints,
@@ -1169,7 +1169,7 @@ def _compile(
                 package=package,
             )
         except exc.SkipFrame as e:
-            if one_graph:
+            if fullgraph:
                 log.debug("No graph captured with export/fullgraph=True")
             assert e._torch_dynamo_tracer_output is not None
             return ConvertFrameReturn(), e._torch_dynamo_tracer_output
@@ -1377,7 +1377,7 @@ def _compile(
                 raise FailOnRecompileLimitHit(
                     f"{limit_type} reached, because fail_on_recompile_limit_hit = True this is a HARD failure"
                 )
-            elif one_graph:
+            elif fullgraph:
                 raise FailOnRecompileLimitHit(
                     f"{limit_type} reached with fullgraph=True. Excessive recompilations can degrade "
                     "performance due to the compilation overhead of each recompilation. To monitor "
@@ -1436,7 +1436,7 @@ def _compile(
         torch._dynamo.utils.ReinplaceCounters.clear()
         guarded_code = None
         try:
-            guarded_code, tracer_output = compile_inner(code, one_graph, hooks)
+            guarded_code, tracer_output = compile_inner(code, fullgraph, hooks)
 
             # NB: We only put_code_state in success case.  Success case here
             # does include graph breaks; specifically, if a graph break still
@@ -1756,7 +1756,7 @@ def replay(filename: str) -> None:
                 record.builtins,
                 record.closure,
                 compiler_fn=eager,
-                one_graph=False,
+                fullgraph=False,
                 export=False,
                 export_constraints=None,
                 hooks=Hooks(),

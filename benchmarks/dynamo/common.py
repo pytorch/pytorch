@@ -4025,7 +4025,7 @@ def run(runner, args, original_dir=None):
             baseline_ctx = functools.partial(
                 torch.compile,
                 backend="inductor",
-                fullgraph=args.nopython,
+                fullgraph=args.fullgraph,
                 mode=args.inductor_compile_mode,
             )
             model_iter_fn = baseline_ctx(runner.model_iter_fn)
