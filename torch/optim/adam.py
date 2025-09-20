@@ -773,7 +773,12 @@ def _multi_tensor_adam(
 
             bias_correction2_sqrt = [bc**0.5 for bc in bias_correction2]  # type: ignore[arg-type]
 
-            step_size = _stack_if_compiling([-(lr * bc2 / bc1) for bc1, bc2 in zip(bias_correction1, bias_correction2_sqrt)])
+            step_size = _stack_if_compiling(
+                [
+                    -(lr * bc2 / bc1)
+                    for bc1, bc2 in zip(bias_correction1, bias_correction2_sqrt)
+                ]
+            )
 
             if amsgrad:
                 device_max_exp_avg_sqs = cast(list[Tensor], device_max_exp_avg_sqs_)
