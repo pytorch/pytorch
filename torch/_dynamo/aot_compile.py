@@ -182,7 +182,9 @@ class BundledAOTAutogradSerializableCallable(SerializableCallable):
             deserialize_bundled_cache_entry,
         )
 
-        compiled_fn = deserialize_bundled_cache_entry(data)
+        entry = pickle.loads(data)
+
+        compiled_fn = deserialize_bundled_cache_entry(entry)
         return cls(compiled_fn)
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
