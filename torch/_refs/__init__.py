@@ -5599,10 +5599,13 @@ def eye(
     torch._check(n >= 0, lambda: f"n must be greater or equal to 0, got {n}")
     torch._check(m >= 0, lambda: f"m must be greater or equal to 0, got {m}")
 
-    if max(n, m) <= torch.iinfo(torch.int32).max:
-        range_dtype = torch.int32  # optimization for small tensors
-    else:
-        range_dtype = torch.int64
+    range_dtype = torch.int64
+    if isinstance(n, utils.IntWithoutSymInt) and isinstance(m, utils.IntWithoutSymInt):
+        # strength reduction optimization
+        for possible_dtype in (torch.int8, torch.int16, torch.int32):
+            if max(n, m) <= torch.iinfo(possible_dtype).max:
+                range_dtype = possible_dtype
+                break
     range_n = torch.arange(n, dtype=range_dtype, device=device, requires_grad=False)
     range_m = torch.arange(m, dtype=range_dtype, device=device, requires_grad=False)
 
