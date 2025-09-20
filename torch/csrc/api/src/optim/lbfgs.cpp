@@ -34,6 +34,8 @@ void LBFGSOptions::serialize(torch::serialize::OutputArchive& archive) const {
   _TORCH_OPTIM_SERIALIZE_TORCH_ARG(tolerance_change);
   _TORCH_OPTIM_SERIALIZE_TORCH_ARG(history_size);
   _TORCH_OPTIM_SERIALIZE_TORCH_ARG(line_search_fn);
+  // CLEAN: Serialize field tracking mask for bitset
+  archive.write("_field_mask", static_cast<int64_t>(get_field_mask()));
 }
 
 void LBFGSOptions::serialize(torch::serialize::InputArchive& archive) {
@@ -44,6 +46,13 @@ void LBFGSOptions::serialize(torch::serialize::InputArchive& archive) {
   _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(double, tolerance_change);
   _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(int64_t, history_size);
   _TORCH_OPTIM_DESERIALIZE_TORCH_ARG_OPTIONAL(std::string, line_search_fn);
+  // CLEAN: Deserialize field tracking mask for bitset
+  c10::IValue mask_ivalue;
+  if (archive.try_read("_field_mask", mask_ivalue)) {
+    set_field_mask(static_cast<uint32_t>(mask_ivalue.toInt()));
+  }
+  // CLEAN COMPILE-TIME: No function pointer re-registration needed!
+  // merge_impl() is a static function resolved at compile time
 }
 
 double LBFGSOptions::get_lr() const {
