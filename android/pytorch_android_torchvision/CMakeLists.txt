@@ -9,6 +9,8 @@ file(GLOB pytorch_vision_SOURCES
   ${pytorch_vision_cpp_DIR}/pytorch_vision_jni.cpp
 )
 
+set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,-z,max-page-size=16384,-z,common-page-size=16384")
+
 add_library(pytorch_vision_jni SHARED
     ${pytorch_vision_SOURCES}
 )
