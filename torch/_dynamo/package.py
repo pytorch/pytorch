@@ -316,6 +316,7 @@ class SystemInfo:
     def current(cls) -> "SystemInfo":
         """Create a SystemInfo instance with current system information."""
         # Get GPU name if CUDA or XPU is available
+        gpu_name = None
         from torch.utils._triton import get_triton_version
 
         gpu_name, toolkit_version = None, None
@@ -404,6 +405,19 @@ class _DynamoCacheEntry:
             "device_type": self.device_type,
             "backend_ids": list(self.backend_ids),
         }
+
+
+@dataclasses.dataclass
+class PrecompileCacheEntry:
+    """
+    A full cache entry for caching precompile, for a toplevel torch.compile.
+    Consists of a _DynamoCacheEntry, which contains all the dynamo related contents,
+    and a set of backends content. In general, the backend content here will always
+    be of type precompile_context.BackendCacheArtifact
+    """
+
+    dynamo: _DynamoCacheEntry
+    backends: dict[_BackendId, Any]
 
 
 def _hash_source(source: str) -> str:
@@ -817,10 +831,8 @@ class DynamoStore(abc.ABC):
             PrecompileContext,
         )
 
-        pickled_result = pickle.dumps(backend)
-        PrecompileContext.record_artifact(
-            EagerCacheArtifact.type(), key=backend_id, content=pickled_result
-        )
+        result = EagerCacheArtifact(key=backend_id, content=backend)
+        PrecompileContext.record_artifact(result)
 
     @abc.abstractmethod
     def clear(self) -> None: ...
@@ -828,8 +840,7 @@ class DynamoStore(abc.ABC):
     @abc.abstractmethod
     def write(
         self,
-        dynamo: _DynamoCacheEntry,
-        backends: _Backends,
+        cache_entry: PrecompileCacheEntry,
         path: str,
     ) -> None:
         """
@@ -847,7 +858,7 @@ class DynamoStore(abc.ABC):
         Saves a package to a given path. Grabs backends from PrecompileContext.
         """
         from torch._dynamo.precompile_context import (
-            PrecompileCacheArtifact,
+            BackendCacheArtifact,
             PrecompileContext,
         )
 
@@ -858,10 +869,12 @@ class DynamoStore(abc.ABC):
                 raise RuntimeError(
                     f"Backend {backend_id} is not found in the given backends"
                 )
-            assert isinstance(serialized_backend, PrecompileCacheArtifact)
+            assert isinstance(serialized_backend, BackendCacheArtifact)
             backend_content[backend_id] = serialized_backend
 
-        self.write(cache_entry, backend_content, key)
+        entry = PrecompileCacheEntry(cache_entry, backend_content)
+
+        self.write(entry, key)
 
     def save_package(self, package: CompilePackage, key: str) -> None:
         """
@@ -872,7 +885,7 @@ class DynamoStore(abc.ABC):
         self.save_cache_entry(cache_entry, key)
 
     @abc.abstractmethod
-    def read(self, path: str) -> tuple[_DynamoCacheEntry, _Backends]:
+    def read(self, path: str) -> PrecompileCacheEntry:
         """
         Abstract method to read dynamo cache entry and backends from storage.
 
@@ -884,19 +897,18 @@ class DynamoStore(abc.ABC):
         """
         ...
 
-    def load_cache_entry(
-        self, key: str
-    ) -> tuple[_DynamoCacheEntry, dict[_BackendId, Any]]:
-        from torch._dynamo.precompile_context import PrecompileContext
+    def load_cache_entry(self, key: str) -> PrecompileCacheEntry:
+        from torch._dynamo.precompile_context import (
+            BackendCacheArtifact,
+            PrecompileContext,
+        )
 
-        cache_entry, backend_content = self.read(key)
-        for backend_id, backend in backend_content.items():
-            PrecompileContext.record_artifact(
-                backend.type(), key=backend.key, content=backend.content
-            )
-            backend_content[backend_id] = backend
+        precompile_entry = self.read(key)
+        for backend in precompile_entry.backends.values():
+            assert isinstance(backend, BackendCacheArtifact)
+            PrecompileContext.record_artifact(backend)
 
-        return cache_entry, backend_content
+        return precompile_entry
 
     def load_package(
         self, fn: Any, key: str
@@ -904,9 +916,9 @@ class DynamoStore(abc.ABC):
         """
         Loads a package from a given path and returns it plus a list of deserialized backends
         """
-        cache_entry, backend_content = self.load_cache_entry(key)
-        package = CompilePackage(fn, cache_entry)
-        return package, backend_content
+        entry = self.load_cache_entry(key)
+        package = CompilePackage(fn, entry.dynamo)
+        return package, entry.backends
 
 
 class InMemoryDynamoStore(DynamoStore):
@@ -915,23 +927,22 @@ class InMemoryDynamoStore(DynamoStore):
     """
 
     def __init__(self) -> None:
-        self.packages: dict[str, tuple[_DynamoCacheEntry, _Backends]] = {}
+        self.packages: dict[str, PrecompileCacheEntry] = {}
 
     def clear(self) -> None:
         self.packages.clear()
 
     def write(
         self,
-        dynamo: _DynamoCacheEntry,
-        backends: _Backends,
+        entry: PrecompileCacheEntry,
         path: str,
     ) -> None:
         """
         Store the dynamo cache entry and backends in memory instead of writing to disk.
         """
-        self.packages[path] = (dynamo, backends)
+        self.packages[path] = entry
 
-    def read(self, path: str) -> tuple[_DynamoCacheEntry, _Backends]:
+    def read(self, path: str) -> PrecompileCacheEntry:
         """
         Read dynamo cache entry and backends from memory.
         """
@@ -964,34 +975,32 @@ class DiskDynamoStore(DynamoStore):
 
     def write(
         self,
-        dynamo: _DynamoCacheEntry,
-        backends: _Backends,
+        entry: PrecompileCacheEntry,
         path: str,
     ) -> None:
         """
         Write dynamo cache entry and backends to disk.
         """
+        from torch._inductor.codecache import write_atomic
+
         path = os.path.join(self.path_prefix, path) if self.path_prefix else path
         try:
             os.makedirs(path, exist_ok=True)
-            with open(os.path.join(path, "dynamo"), "wb") as dynamo_path:
-                pickle.dump(dynamo, dynamo_path)
-            with open(os.path.join(path, "backends"), "wb") as backend_path:
-                pickle.dump(backends, backend_path)
+            pickled_content: bytes = pickle.dumps(entry)
+            write_atomic(os.path.join(path, "entry"), pickled_content)
         except Exception as e:
             raise RuntimeError(f"Failed to save package to {path}: {e}") from e
 
-    def read(self, path: str) -> tuple[_DynamoCacheEntry, _Backends]:
+    def read(self, path: str) -> PrecompileCacheEntry:
         """
         Read dynamo cache entry and backends from disk.
         """
         path = os.path.join(self.path_prefix, path) if self.path_prefix else path
         try:
-            with open(os.path.join(path, "dynamo"), "rb") as dynamo_path:
-                cache_entry = pickle.load(dynamo_path)
-            with open(os.path.join(path, "backends"), "rb") as backend_path:
-                backend_content = pickle.load(backend_path)
-            return cache_entry, backend_content
+            with open(os.path.join(path, "entry"), "rb") as f:
+                pickled_content = f.read()
+                entry = pickle.loads(pickled_content)
+                return entry
         except Exception as e:
             raise RuntimeError(f"Failed to load package from path {path}: {e}") from e
 
@@ -1010,9 +1019,7 @@ class DiskDynamoCache(DiskDynamoStore):
         logger.info("Saving CompilePackage for %s", package.source_id)
         super().save_package(package, key)
 
-    def load(
-        self, fn: Callable[..., Any]
-    ) -> Optional[tuple[_DynamoCacheEntry, dict[_BackendId, Any]]]:
+    def load(self, fn: Callable[..., Any]) -> Optional[PrecompileCacheEntry]:
         """
         Loads a package from a given path and returns it plus a list of deserialized backends
         """
@@ -1039,9 +1046,8 @@ class DiskDynamoCache(DiskDynamoStore):
         if results is None:
             return None
         else:
-            (entry, backends) = results
-            package = CompilePackage(fn, entry)
-            package.install(backends)
+            package = CompilePackage(fn, results.dynamo)
+            package.install(results.backends)
             return package
 
 
