@@ -1,3 +1,4 @@
+import logging
 import random
 from dataclasses import dataclass
 from typing import List, Optional, Union
@@ -295,20 +296,44 @@ def fuzz_and_execute(
 
         print(f"📁 All files saved to: {iteration_folder}")
 
+    import time
+
     try:
-        # Generate target specification and operation stack
+        logger = logging.getLogger(__name__)
+
+        # Generate target specification first
+        logger.debug("⏱️  Step 1: Generating target spec...")
+        start_time = time.time()
         target_spec = fuzz_spec()
+        logger.debug(f"   Completed in {time.time() - start_time:.3f}s - {target_spec}")
+
+        logger.debug("⏱️  Step 2: Generating operation stack...")
+        start_time = time.time()
         operation_stack = fuzz_operation_stack(
             target_spec, max_depth=max_depth, seed=seed
         )
+        logger.debug(
+            f"   Completed in {time.time() - start_time:.3f}s - {len(operation_stack)} operations"
+        )
 
-        # Convert operation stack to Python code
+        logger.debug("⏱️  Step 3: Converting to Python code...")
+        start_time = time.time()
         python_code = convert_stack_to_python_code(
             operation_stack, target_spec, seed=seed
         )
+        logger.debug(
+            f"   Completed in {time.time() - start_time:.3f}s - {len(python_code)} chars"
+        )
 
-        # Execute the generated Python code
-        result = execute_python_code(python_code, target_spec)
+        logger.debug("⏱️  Step 4: Executing Python code...")
+        start_time = time.time()
+        # Enable temporary file preservation in debug mode for easier debugging
+        preserve_temp = logger.isEnabledFor(logging.DEBUG)
+        # Use a 60-second timeout for execution
+        result = execute_python_code(
+            python_code, target_spec, preserve_temp_file=preserve_temp, timeout=300
+        )
+        logger.debug(f"   Completed in {time.time() - start_time:.3f}s")
 
         # # Validate the result matches target specification
         # validate_result_against_spec(result, target_spec)
@@ -781,26 +806,33 @@ def generate_simple_operation_code(
 
 
 def execute_python_code(
-    python_code: str, target_spec
+    python_code: str, target_spec, preserve_temp_file: bool = False, timeout: int = 60
 ) -> Union[torch.Tensor, float, int, bool, complex]:
     """
     Execute the generated Python code by writing it to a file and running it.
-    Also execute it in-process to get the actual result for validation.
+    Supports both real-time output printing and output capturing with proper process termination.
 
     Args:
         python_code: String containing Python code to execute
         target_spec: Expected output specification for validation
+        preserve_temp_file: If True, don't delete the temporary file after execution
+        timeout: Maximum time in seconds to wait for execution (default: 60)
 
     Returns:
         The actual result from executing the generated code
 
     Raises:
         RuntimeError: With full stdout/stderr output if execution fails
+        TimeoutError: If execution exceeds the timeout
     """
     import os
+    import signal
     import subprocess
     import sys
     import tempfile
+    import time
+    from queue import Empty, Queue
+    from threading import Thread
 
     # Write the generated code to a temporary file
     with tempfile.NamedTemporaryFile(
@@ -809,48 +841,196 @@ def execute_python_code(
         f.write(python_code)
         generated_file_path = f.name
 
+    print(f"📄 Generated code written to: {generated_file_path}")
+
+    process = None
+    stdout_thread = None
+    stderr_thread = None
+
+    def stream_reader(stream, queue, stream_name):
+        """Read from stream and put lines in queue with stream identifier"""
+        try:
+            for line in iter(stream.readline, ""):
+                if line:
+                    queue.put((stream_name, line.rstrip("\n")))
+        except Exception:
+            pass
+        finally:
+            try:
+                stream.close()
+            except:
+                pass
+
+    def kill_process_tree(process):
+        """Kill the process and all its children"""
+        try:
+            # Try to terminate gracefully first
+            if process.poll() is None:
+                process.terminate()
+                try:
+                    process.wait(timeout=5)
+                    print("🔄 Process terminated gracefully")
+                except subprocess.TimeoutExpired:
+                    # Force kill if it doesn't terminate gracefully
+                    print("💀 Force killing process...")
+                    process.kill()
+                    try:
+                        process.wait(timeout=5)
+                        print("💀 Process force killed")
+                    except subprocess.TimeoutExpired:
+                        print("⚠️  Process may still be running after force kill")
+
+            # Also try to kill process group if it was created
+            try:
+                pid = process.pid
+                os.killpg(os.getpgid(pid), signal.SIGTERM)
+                time.sleep(2)
+                os.killpg(os.getpgid(pid), signal.SIGKILL)
+            except (OSError, ProcessLookupError):
+                pass  # Process group might not exist or already killed
+
+        except Exception as e:
+            print(f"⚠️  Error killing process: {e}")
+
     try:
-        # Execute the generated file and capture all output
-        result = subprocess.run(
+        # Execute the generated file with real-time output streaming
+        print(f"🚀 Executing: python {generated_file_path} (timeout: {timeout}s)")
+        print("=" * 50)
+
+        # Start process with new process group to enable killing child processes
+        process = subprocess.Popen(
             [sys.executable, generated_file_path],
-            check=True,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
+            bufsize=1,  # Line buffered
+            universal_newlines=True,
+            preexec_fn=os.setsid,  # Create new process group
         )
 
-        # If we get here, both original and compiled execution succeeded
-        # Print the captured output for visibility
-        if result.stdout:
-            print(result.stdout)
-        if result.stderr:
-            print(result.stderr, file=sys.stderr)
+        # Create queues and threads for reading stdout and stderr
+        output_queue = Queue()
+        stdout_thread = Thread(
+            target=stream_reader, args=(process.stdout, output_queue, "stdout")
+        )
+        stderr_thread = Thread(
+            target=stream_reader, args=(process.stderr, output_queue, "stderr")
+        )
 
-        return True
+        stdout_thread.daemon = True
+        stderr_thread.daemon = True
+        stdout_thread.start()
+        stderr_thread.start()
 
-    except subprocess.CalledProcessError as e:
-        # Capture all output from the failed execution
-        full_output = ""
-        if e.stdout:
-            full_output += "STDOUT:\n" + e.stdout + "\n"
-        if e.stderr:
-            full_output += "STDERR:\n" + e.stderr + "\n"
-        full_output += f"Return code: {e.returncode}\n"
+        # Collect output while printing in real-time
+        captured_stdout = []
+        captured_stderr = []
+        start_time = time.time()
 
-        # Print to console as well for immediate visibility
-        print(f"❌ Generated file execution failed with return code {e.returncode}")
-        if e.stdout:
-            print("STDOUT:", e.stdout)
-        if e.stderr:
-            print("STDERR:", e.stderr)
+        # Read output until process finishes or timeout
+        while process.poll() is None:
+            # Check for timeout
+            if time.time() - start_time > timeout:
+                print(f"⏰ Execution timeout ({timeout}s) reached, killing process...")
+                kill_process_tree(process)
+                raise TimeoutError(f"Execution exceeded {timeout} seconds timeout")
 
-        # Raise exception with full output
-        raise RuntimeError(full_output)
+            try:
+                stream_name, line = output_queue.get(timeout=0.1)
+                if stream_name == "stdout":
+                    print(line)  # Print to console in real-time
+                    captured_stdout.append(line)
+                elif stream_name == "stderr":
+                    print(line, file=sys.stderr)  # Print to stderr in real-time
+                    captured_stderr.append(line)
+            except Empty:
+                continue
+
+        # Process has finished, collect any remaining output
+        timeout_remaining = max(0, timeout - (time.time() - start_time))
+        output_timeout = min(5, timeout_remaining)  # Max 5 seconds for remaining output
+
+        end_time = time.time() + output_timeout
+        while not output_queue.empty() and time.time() < end_time:
+            try:
+                stream_name, line = output_queue.get(timeout=0.1)
+                if stream_name == "stdout":
+                    print(line)
+                    captured_stdout.append(line)
+                elif stream_name == "stderr":
+                    print(line, file=sys.stderr)
+                    captured_stderr.append(line)
+            except Empty:
+                break
+
+        # Wait for threads to finish with timeout
+        if stdout_thread.is_alive():
+            stdout_thread.join(timeout=2)
+        if stderr_thread.is_alive():
+            stderr_thread.join(timeout=2)
+
+        # Get the return code
+        return_code = process.returncode
+
+        print("=" * 50)
+        print(f"🏁 Process finished with return code: {return_code}")
+
+        if return_code == 0:
+            # Success - we already printed output in real-time
+            if preserve_temp_file:
+                print(f"📁 Temporary file preserved at: {generated_file_path}")
+            return True
+        else:
+            # Failed execution
+            full_output = ""
+            if captured_stdout:
+                full_output += "STDOUT:\n" + "\n".join(captured_stdout) + "\n"
+            if captured_stderr:
+                full_output += "STDERR:\n" + "\n".join(captured_stderr) + "\n"
+            full_output += f"Return code: {return_code}\n"
+
+            print(f"❌ Generated file execution failed with return code {return_code}")
+            if preserve_temp_file:
+                print(f"📁 Failed execution file preserved at: {generated_file_path}")
+            raise RuntimeError(full_output)
+
+    except TimeoutError:
+        # Re-raise timeout error as-is
+        raise
+    except Exception as e:
+        if hasattr(e, "returncode"):
+            # This was a CalledProcessError-like exception
+            raise e
+        else:
+            # Some other error occurred
+            print(f"❌ Execution error: {e}")
+            if preserve_temp_file:
+                print(f"📁 Error execution file preserved at: {generated_file_path}")
+            raise RuntimeError(f"Execution failed: {e}")
     finally:
-        # Clean up the temporary file
+        # Ensure process and threads are properly cleaned up
         try:
-            os.unlink(generated_file_path)
+            if process is not None:
+                kill_process_tree(process)
         except:
             pass
+
+        # Force cleanup threads if they're still running
+        try:
+            if stdout_thread is not None and stdout_thread.is_alive():
+                stdout_thread.join(timeout=1)
+            if stderr_thread is not None and stderr_thread.is_alive():
+                stderr_thread.join(timeout=1)
+        except:
+            pass
+
+        # Clean up the temporary file unless preservation is requested
+        if not preserve_temp_file:
+            try:
+                os.unlink(generated_file_path)
+                print(f"🗑️  Temporary file cleaned up: {generated_file_path}")
+            except:
+                pass
 
 
 def compare_results(result1, result2) -> bool:
@@ -1091,13 +1271,21 @@ def fuzz_and_test(seed: Optional[int] = None, max_depth: Optional[int] = None):
         seed: Starting seed for the test loop. If provided, each iteration uses seed + i
         max_depth: Maximum depth for operation stack to use in all iterations
     """
+    known_issues = {
+        "RuntimeError: self.stride(-1) must be 1 to view ComplexDouble as":"https://github.com/pytorch/pytorch/issues/162561",
+        "BooleanAtom not allowed in this context":"https://github.com/pytorch/pytorch/issues/160726"
+    }
+
+    def known_issue(error_message):
+        return any(issue in error_message for issue in known_issues.keys())
+
     print("=== Testing fuzz_and_execute with arguments ===")
     if seed is not None:
         print(f"Using starting seed: {seed}")
     if max_depth is not None:
         print(f"Using max_depth: {max_depth}")
 
-    for i in range(100):
+    for i in range(1000):
         print(f"------------------ TEST iteration {i} ---------------")
 
         # Use starting seed + iteration number for reproducible but varied results
@@ -1107,6 +1295,9 @@ def fuzz_and_test(seed: Optional[int] = None, max_depth: Optional[int] = None):
             seed=iteration_seed, max_depth=max_depth
         )
         if not success:
+            if known_issue(error_message):
+                print(f"Known issue skipped")
+                continue
 
             print(f"Test failed with error: {error_message}")
             return
@@ -1165,8 +1356,20 @@ if __name__ == "__main__":
     parser.add_argument(
         "--single", action="store_true", help="Run a single fuzz_and_execute"
     )
+    parser.add_argument(
+        "--log-level",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+        default="INFO",
+        help="Set the logging level (default: INFO)",
+    )
 
     args = parser.parse_args()
+
+    # Configure logging
+    logging.basicConfig(
+        level=getattr(logging, args.log_level), format="%(levelname)s: %(message)s"
+    )
+    logger = logging.getLogger(__name__)
 
     if args.single:
         # Run a single execution with optional seed and max_depth
@@ -1177,12 +1380,6 @@ if __name__ == "__main__":
         print(f"Result: seed={seed}, success={success}")
         if not success:
             print(f"Error: {error_message}")
-    elif args.test:
-        # Run the test loop
-        fuzz_and_test(seed=args.seed, max_depth=args.max_depth)
     else:
-        # Default behavior - run all tests
-        test_fuzzing_tensors()
-
-        # Test the new function interface
-        fuzz_and_test()
+        # Default behavior - run the test loop (--test is now the default)
+        fuzz_and_test(seed=args.seed, max_depth=args.max_depth)
