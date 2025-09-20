@@ -13,7 +13,7 @@ from typing import Any, Callable, Optional, TYPE_CHECKING
 import torch
 import torch.fx
 from torch._dynamo.graph_utils import _graph_device_type
-from torch._dynamo.precompile_context import SystemInfo
+from torch._dynamo.package import SystemInfo
 
 from . import convert_frame
 from .hooks import Hooks
@@ -182,7 +182,9 @@ class BundledAOTAutogradSerializableCallable(SerializableCallable):
             deserialize_bundled_cache_entry,
         )
 
-        compiled_fn = deserialize_bundled_cache_entry(data)
+        entry = pickle.loads(data)
+
+        compiled_fn = deserialize_bundled_cache_entry(entry)
         return cls(compiled_fn)
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
