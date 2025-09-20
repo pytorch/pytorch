@@ -1622,9 +1622,15 @@ test_operator_microbenchmark() {
   cd benchmarks/operator_benchmark/pt_extension
   python -m pip install .
 
-  cd "${TEST_DIR}"/benchmarks/operator_benchmark
+  # ### Perf benchmark 2.8 baseline
+  # pip_uninstall torch torchvision torchaudio
+  pip_install torch==2.8.0
+  # pip show torch
+  # pip uninstall -y torch
+  # pip install torch==2.8.0 --force-reinstall
 
-  for OP_BENCHMARK_TESTS in matmul mm add bmm; do
+  cd "${TEST_DIR}"/benchmarks/operator_benchmark
+  for OP_BENCHMARK_TESTS in matmul mm; do
     $TASKSET python -m pt.${OP_BENCHMARK_TESTS}_test --tag-filter long \
       --output-json-for-dashboard "${TEST_REPORTS_DIR}/operator_microbenchmark_${OP_BENCHMARK_TESTS}_compile.json" \
       --benchmark-name "PyTorch operator microbenchmark" --use-compile
