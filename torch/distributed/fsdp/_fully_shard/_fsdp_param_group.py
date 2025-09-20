@@ -452,6 +452,11 @@ class FSDPParamGroup:
     def _record_post_forward(self) -> None:
         # Since a group has one pre-backward unshard for each forward call
         # before the backward, we record each usage (with multiplicity)
+
+        # for AC(fully_shard(model)), AC runs fsdp's _pre_forward
+        # it shouldn't change post_forward_order
+        if self in self.comm_ctx.post_forward_order:
+            return
         post_forward_index = len(self.comm_ctx.post_forward_order)
         self.comm_ctx.post_forward_order.append(self)
         self._post_forward_indices.append(post_forward_index)
@@ -472,8 +477,10 @@ class FSDPParamGroup:
             self._training_state = TrainingState.PRE_BACKWARD
             self.unshard(self.unshard_async_op)  # no-op if prefetched
             self.wait_for_unshard()
-            if default_prefetch and not compiled_autograd_enabled():
-                self._backward_prefetch()
+            # backward prefetch order is messed up with AC(fully_shard(model))
+            # remove it and check perf for implicit prefetch
+            # if default_prefetch and not compiled_autograd_enabled():
+            #     self._backward_prefetch()
 
     def post_backward(self, *unused: Any):
         # This method should be idempotent and safe to call even when this
