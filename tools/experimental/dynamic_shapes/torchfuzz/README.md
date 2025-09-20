@@ -23,29 +23,115 @@ Here's a concrete example of how TorchFuzz generates a test:
 
 **Operation Stack Created:**
 ```
-Operation 0: torch.ops.aten.add -> TensorSpec(size=(2, 3), stride=(3, 1), dtype=torch.float32) (depth 0)
-  └─ Operation 1: arg -> TensorSpec(size=(2, 3), stride=(3, 1), dtype=torch.float32) (depth 1)
-  └─ Operation 2: torch.ops.aten.mul -> TensorSpec(size=(2, 3), stride=(3, 1), dtype=torch.float32) (depth 1)
-      └─ Operation 3: arg -> TensorSpec(size=(2, 3), stride=(3, 1), dtype=torch.int32) (depth 2)
-      └─ Operation 4: constant -> ScalarSpec(dtype=torch.float32) (depth 2)
+Operation stack (in reverse order - dependencies first):
+        5: constant -> ScalarSpec(dtype=torch.int32, constant=None) (depth 0)
+        4: constant -> ScalarSpec(dtype=torch.int32, constant=None) (depth 0)
+    3: scalar_add -> ScalarSpec(dtype=torch.int32, constant=None) (depth 1)
+        2: arg_0 -> TensorSpec(size=(1,), stride=(1,), dtype=torch.complex128) (depth 0)
+    1: torch.ops.aten.item -> ScalarSpec(dtype=torch.complex128, constant=None) (depth 1)
+  0: scalar_add -> ScalarSpec(dtype=torch.complex128, constant=None) (depth 2)
 ```
 
 **Generated Python Code:**
-```python
+```import torch
+import sys
+import os
+# Add fuzzer directory to path so we can import tensor_fuzzer
+fuzzer_dir = r'/home/lsakka/pytorch/tools/experimental/dynamic_shapes/torchfuzz'
+if fuzzer_dir not in sys.path:
+    sys.path.insert(0, fuzzer_dir)
+from tensor_fuzzer import fuzz_scalar, fuzz_tensor_simple, ScalarSpec, TensorSpec
+
+# Generated fuzzed program code (backward recursion from stack top)
+# Stack has 6 operations
+
+def fuzzed_program(arg_0):
+    # Operation 2: arg_0 (stack position 2)
+    tmp_2 = arg_0
+
+    # Operation 1: torch.ops.aten.item (stack position 1)
+    tmp_1 = tmp_2.item()
+
+    # Operation 4: constant (stack position 4)
+    tmp_4 = 5
+
+    # Operation 5: constant (stack position 5)
+    tmp_5 = 7
+
+    # Operation 3: scalar_add (stack position 3)
+    tmp_3 = tmp_4 + tmp_5
+
+    # Operation 0: scalar_add (stack position 0)
+    tmp_0 = tmp_1 + tmp_3
+
+    # Final result from top of stack (operation 0)
+    return tmp_0
+
+# Create arguments for the fuzzed program
+arg_0 = fuzz_tensor_simple((1,), (1,), torch.complex128, seed=10042)
+
+# Execute the fuzzed program both normally and with torch.compile
 import torch
+import tempfile
+import os
+import sys
+import contextlib
+from io import StringIO
 
-def test_function(arg_0, arg_1):
-    constant_0 = 2.5
-    var_0 = torch.ops.aten.mul(arg_1, constant_0)
-    var_1 = torch.ops.aten.add(arg_0, var_0)
-    return var_1
+# Create arguments
+args = (arg_0,)
 
-# Test with both eager and compiled execution
-result_eager = test_function(arg_0, arg_1)
-result_compiled = torch.compile(test_function)(arg_0, arg_1)
-assert torch.allclose(result_eager, result_compiled)
+# Execute original version
+print('=== Executing Original Program ===')
+try:
+    result_original = fuzzed_program(*args)
+    print('✅ Original execution successful')
+except Exception as e:
+    print(f'❌ Original execution failed: {e}')
+    raise
+
+# Execute compiled version
+print('\n=== Executing Compiled Program  fullgraph=False')
+try:
+    compiled_program = torch.compile(fuzzed_program, fullgraph=False)
+    result_compiled = compiled_program(*args)
+    print('✅ Compiled execution successful')
+    print(f'Compiled result type: {type(result_compiled)}')
+except Exception as e:
+    print(f'❌ Compiled execution failed: {e}')
+    # Exit with non-zero code to signal compile failure
+    import sys
+    sys.exit(1)
+
+# Execute compiled version 2
+print('\n=== Executing Compiled Program  fullgraph=False dynamic=True')
+try:
+    compiled_program = torch.compile(fuzzed_program, fullgraph=False, dynamic=True)
+    result_compiled = compiled_program(*args)
+    print('✅ Compiled execution successful')
+    print(f'Compiled result type: {type(result_compiled)}')
+except Exception as e:
+    print(f'❌ Compiled execution failed: {e}')
+    # Exit with non-zero code to signal compile failure
+    import sys
+    sys.exit(1)
+
+# Execute compiled version 3
+print('\n=== Executing Compiled Program  fullgraph=True dynamic=True')
+try:
+    with torch._dynamo.config.patch(capture_scalar_outputs=True):
+       compiled_program = torch.compile(fuzzed_program, fullgraph=False, dynamic=True)
+       result_compiled = compiled_program(*args)
+       print('✅ Compiled execution successful')
+       print(f'Compiled result type: {type(result_compiled)}')
+except Exception as e:
+    print(f'❌ Compiled execution failed: {e}')
+    # Exit with non-zero code to signal compile failure
+    import sys
+    sys.exit(1)
 ```
-
+## diagram representation.
+![alt text](operation_stack.png)
 
 ## Quick Start
 
@@ -135,35 +221,6 @@ Each test run creates artifacts in `/tmp/fuzzing_seed_{seed}_{timestamp}_{status
 - **`operation_stack.txt`** - Human-readable operation sequence
 - **`generated_code.py`** - Executable Python code
 - **`operation_stack_diagram.png`** - Visual operation stack diagram
-  ```
-  Example diagram visualization:
-
-  ┌─────────────────────────────────────────────────────────────┐
-  │ Target: TensorSpec(size=(2,3), stride=(3,1), dtype=float32) │
-  └─────────────────────────────────────────────────────────────┘
-                                  │
-                                  ▼
-  ┌─────────────────────────────────────────────────────────────┐
-  │           torch.ops.aten.add (depth 0)                     │
-  │     TensorSpec(size=(2,3), stride=(3,1), dtype=float32)    │
-  └─────────────────────────────────────────────────────────────┘
-                      │                         │
-                      ▼                         ▼
-  ┌─────────────────────────┐     ┌─────────────────────────────┐
-  │      arg (depth 1)      │     │   torch.ops.aten.mul       │
-  │ TensorSpec(size=(2,3))  │     │      (depth 1)             │
-  │   dtype=float32         │     │ TensorSpec(size=(2,3))     │
-  └─────────────────────────┘     │   dtype=float32            │
-                                  └─────────────────────────────┘
-                                              │                │
-                                              ▼                ▼
-                                  ┌─────────────────┐ ┌──────────────┐
-                                  │  arg (depth 2)  │ │constant      │
-                                  │ TensorSpec(...) │ │(depth 2)     │
-                                  │  dtype=int32    │ │ScalarSpec    │
-                                  └─────────────────┘ │dtype=float32 │
-                                                      └──────────────┘
-  ```
 
 ## Configuration
 

@@ -655,6 +655,7 @@ def specs_compatible(spec1: Spec, spec2: Spec) -> bool:
         # For scalars, require exact dtype match for simplicity
         return spec1.dtype == spec2.dtype
     elif isinstance(spec1, TensorSpec):
+        assert isinstance(spec2, TensorSpec)
         # For tensors, shape and dtype should match exactly
         return spec1.size == spec2.size and spec1.dtype == spec2.dtype
 
