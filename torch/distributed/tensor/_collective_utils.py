@@ -42,7 +42,8 @@ def _shard_dim_alltoall_meta(input, gather_dim, shard_dim, group_name):
 
 
 def shard_dim_alltoall(input, gather_dim, shard_dim, mesh, mesh_dim):
-    if mesh.device_type == "cpu":
+    # TODO: move this dispatch inside the op
+    if mesh.device_type == "cpu" and False:
         # Gloo does not support alltoall, so falling back to allgather + chunk
         warning_once(
             logger,

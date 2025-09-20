@@ -136,6 +136,10 @@ class Shard(Placement):
         full_chunk_size = (curr_local_size + num_chunks - 1) // num_chunks
         shard_starting_idx = full_chunk_size * rank
 
+        # TODO: HANDLE THIS.  ITE possible
+        # Edge case: we don't have enough data to actually have data for this
+        # shard, so its zero and it "starts" (and "ends") at the very end of
+        # the local shard
         if curr_local_size < shard_starting_idx:
             return 0, curr_local_size
         else:
@@ -177,18 +181,20 @@ class Shard(Placement):
         scatter_list, pad_sizes = self._split_tensor(
             tensor, num_chunks, with_padding=True, contiguous=True
         )
-        output = torch.empty_like(scatter_list[mesh_dim_local_rank])
+
+        it = iter(scatter_list)
+        first = next(it)
+        assert all(first.shape == v.shape for v in it)
+
+        output = torch.empty_like(first)
 
         # perform scatter from the src_data_rank as data source when it is not None
         mesh_scatter(
             output, scatter_list, mesh, mesh_dim=mesh_dim, group_src=src_data_rank
         )
 
-        # Only unpad if the local_tensor was padded on the dimension.
-        if pad_sizes[mesh_dim_local_rank] > 0:
-            output = unpad_tensor(output, self.dim, pad_sizes[mesh_dim_local_rank])
-            # Unpad might return a view, hence we need to remake it contiguous
-            output = output.contiguous()
+        from torch.distributed._local_tensor import maybe_unpad_tensor
+        output = maybe_unpad_tensor(pad_sizes, mesh_dim_local_rank, output, self.dim)
         return output
 
     def _reduce_shard_tensor(
@@ -278,7 +284,9 @@ class Shard(Placement):
             with_padding=False,
             contiguous=False,
         )
-        return shards[shard_index].clone()
+        from torch.distributed._local_tensor import list_tensor_index
+
+        return list_tensor_index(shards, shard_index).clone()
 
     def _to_new_shard_dim(
         self,

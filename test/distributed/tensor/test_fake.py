@@ -7,9 +7,17 @@ from torch.distributed.tensor import DTensor
 from torch.distributed.tensor.placement_types import Shard
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.distributed.fake_pg import FakeStore
+import torch.distributed as dist
 
 
 class TestFakeDTensor(TestCase):
+    def tearDown(self):
+        super().tearDown()
+        try:
+            dist.destroy_process_group()
+        except AssertionError:
+            pass
+
     def test_fake_dtensor_operations(self):
         # Use FakeTensorMode to handle CUDA tensors without actual CUDA
         fake_mode = FakeTensorMode()
@@ -35,6 +43,27 @@ class TestFakeDTensor(TestCase):
             # Test sum operation
             r = x.sum(1)
             self.assertIsInstance(r, DTensor)
+
+    def test_fake_collectives(self):
+        # Ensure that we can run (non-functional) collectives under FakeTensorMode.
+        # This requires the meta impls for non-functional collectives
+        # to be registered at import
+        #
+        # TODO: Figure out why this isn't imported implicitly, maybe the
+        # USE_DISTRIBUTED patch needs to land
+        import torch.distributed._tools.fake_collectives
+
+        fake_mode = FakeTensorMode()
+        world_size = 4
+
+        fake_store = FakeStore()
+        torch.distributed.init_process_group(
+            "fake", store=fake_store, rank=0, world_size=world_size
+        )
+        default_pg = torch.distributed.distributed_c10d._get_default_group()
+        with fake_mode:
+            x = torch.randn(2, 2, device="cuda")
+            torch.distributed.all_reduce(x, group=default_pg)
 
 
 if __name__ == "__main__":

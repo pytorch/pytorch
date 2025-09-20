@@ -268,7 +268,17 @@ def common_reduction_strategy(
     reduction_strategy = OpStrategy([])
 
     for op_spec in input_strategy.strategies:
-        if not reduction_linear:
+        padded_reduction = False
+        output_spec = op_spec.output_specs
+        local_shape = list(output_spec.tensor_meta.shape)
+        for mesh_d, p in enumerate(output_spec.placements):
+            if isinstance(p, Shard) and p.dim in reduce_dims:
+                if local_shape[p.dim] % output_spec.mesh.size(mesh_d) != 0:
+                    padded_reduction = True
+                    break
+                local_shape[p.dim] //= output_spec.mesh.size(mesh_d)
+
+        if not reduction_linear or (padded_reduction and False):
             # input placements for this strategy should clear out pending sum and sharding
             # on the reduction dimension
             input_placements = replicate_reduction_dims(
@@ -307,6 +317,10 @@ LINEAR_REDUCTION_OP_MAP = {
     aten.all.dim: "sum",
     aten.sum.default: "sum",
     aten.sum.dim_IntList: "sum",
+    aten.any.default: "sum",
+    aten.any.dim: "sum",
+    aten.any.out: "sum",
+    # These are only valid when there is no padding
     aten.prod.default: "product",
     aten.prod.dim_int: "product",
     aten.prod.int_out: "product",
@@ -319,9 +333,6 @@ LINEAR_REDUCTION_OP_MAP = {
     aten.min.default: "min",
     aten.min.dim: "min",
     aten.min.out: "min",
-    aten.any.default: "sum",
-    aten.any.dim: "sum",
-    aten.any.out: "sum",
     aten.amax.default: "max",
     aten.amax.out: "max",
     aten.amin.default: "min",
