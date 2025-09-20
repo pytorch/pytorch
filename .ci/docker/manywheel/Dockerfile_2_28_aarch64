@@ -62,6 +62,13 @@ ARG OPENBLAS_VERSION
 ADD ./common/install_openblas.sh install_openblas.sh
 RUN bash ./install_openblas.sh && rm install_openblas.sh
 
+# Install Arm Compute Library
+FROM base as arm_compute
+# use python3.9 to install scons
+RUN python3.9 -m pip install scons==4.7.0
+RUN ln -sf /opt/python/cp39-cp39/bin/scons /usr/local/bin
+COPY ./common/install_acl.sh install_acl.sh
+RUN bash ./install_acl.sh && rm install_acl.sh
 FROM base as final
 
 # remove unnecessary python versions
@@ -70,4 +77,5 @@ RUN rm -rf /opt/python/cp26-cp26mu /opt/_internal/cpython-2.6.9-ucs4
 RUN rm -rf /opt/python/cp33-cp33m /opt/_internal/cpython-3.3.6
 RUN rm -rf /opt/python/cp34-cp34m /opt/_internal/cpython-3.4.6
 COPY --from=openblas     /opt/OpenBLAS/  /opt/OpenBLAS/
-ENV LD_LIBRARY_PATH=/opt/OpenBLAS/lib:$LD_LIBRARY_PATH
+COPY --from=arm_compute /acl /acl
+ENV LD_LIBRARY_PATH=/opt/OpenBLAS/lib:/acl/build/:$LD_LIBRARY_PATH
