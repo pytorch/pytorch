@@ -7720,6 +7720,23 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertTrue(same(arg1, arg2))
         self.assertTrue(same(arg3, arg4))
 
+    def test_select_scatter_mutation_consistency(self):
+        def foo(x):
+            x[0].sin_()
+            x[1].sin_()
+            y = torch.zeros_like(x)
+            y[2] = x[0]
+            y[3] = x[1]
+            return y
+
+        x1 = torch.tensor(
+            [[1, 2, 3], [4, 5, 6], [7, 8, 9], [10, 11, 12]], dtype=torch.float32
+        )
+        x2 = x1.clone()
+        eager_result = foo(x1)
+        compiled_result = torch.compile(foo)(x2)
+        self.assertTrue(same(eager_result, compiled_result))
+
     def test_input_mutation2(self):
         def fn(a):
             b = a + 1
