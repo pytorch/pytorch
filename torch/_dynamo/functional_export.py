@@ -1,4 +1,3 @@
-import builtins
 import inspect
 import logging
 import traceback
@@ -10,7 +9,7 @@ import sympy
 import torch
 import torch.fx
 import torch.utils._pytree as pytree
-from torch._dynamo.convert_frame import FrameInfo, fullgraph_capture, get_compile_id
+from torch._dynamo.convert_frame import fullgraph_capture, get_traced_fn
 from torch._dynamo.eval_frame import argument_names
 from torch._dynamo.utils import dynamo_timed, get_metrics_context
 from torch._export.utils import _compiling_state_context
