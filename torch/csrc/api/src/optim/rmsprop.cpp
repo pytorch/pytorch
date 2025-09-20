@@ -45,6 +45,30 @@ void RMSpropOptions::set_lr(const double lr) {
   this->lr(lr);
 }
 
+void RMSpropOptions::overwrite_from(const OptimizerOptions& source) {
+  const auto& source_rmsprop = static_cast<const RMSpropOptions&>(source);
+  const RMSpropOptions default_ctor_opts;
+
+  if (source_rmsprop.lr() != default_ctor_opts.lr()) {
+    this->lr(source_rmsprop.lr());
+  }
+  if (source_rmsprop.alpha() != default_ctor_opts.alpha()) {
+    this->alpha(source_rmsprop.alpha());
+  }
+  if (source_rmsprop.eps() != default_ctor_opts.eps()) {
+    this->eps(source_rmsprop.eps());
+  }
+  if (source_rmsprop.weight_decay() != default_ctor_opts.weight_decay()) {
+    this->weight_decay(source_rmsprop.weight_decay());
+  }
+  if (source_rmsprop.momentum() != default_ctor_opts.momentum()) {
+    this->momentum(source_rmsprop.momentum());
+  }
+  if (source_rmsprop.centered() != default_ctor_opts.centered()) {
+    this->centered(source_rmsprop.centered());
+  }
+}
+
 bool operator==(const RMSpropParamState& lhs, const RMSpropParamState& rhs) {
   return (lhs.step() == rhs.step()) &&
       torch::equal(lhs.square_avg(), rhs.square_avg()) &&

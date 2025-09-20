@@ -54,6 +54,33 @@ void LBFGSOptions::set_lr(const double lr) {
   this->lr(lr);
 }
 
+void LBFGSOptions::overwrite_from(const OptimizerOptions& source) {
+  const auto& source_lbfgs = static_cast<const LBFGSOptions&>(source);
+  const LBFGSOptions default_ctor_opts;
+
+  if (source_lbfgs.lr() != default_ctor_opts.lr()) {
+    this->lr(source_lbfgs.lr());
+  }
+  if (source_lbfgs.max_iter() != default_ctor_opts.max_iter()) {
+    this->max_iter(source_lbfgs.max_iter());
+  }
+  if (source_lbfgs.max_eval() != default_ctor_opts.max_eval()) {
+    this->max_eval(source_lbfgs.max_eval());
+  }
+  if (source_lbfgs.tolerance_grad() != default_ctor_opts.tolerance_grad()) {
+    this->tolerance_grad(source_lbfgs.tolerance_grad());
+  }
+  if (source_lbfgs.tolerance_change() != default_ctor_opts.tolerance_change()) {
+    this->tolerance_change(source_lbfgs.tolerance_change());
+  }
+  if (source_lbfgs.history_size() != default_ctor_opts.history_size()) {
+    this->history_size(source_lbfgs.history_size());
+  }
+  if (source_lbfgs.line_search_fn() != default_ctor_opts.line_search_fn()) {
+    this->line_search_fn(source_lbfgs.line_search_fn());
+  }
+}
+
 template <typename T>
 static bool if_container_equal(T lhs, T rhs) {
   if (!(lhs.size() == rhs.size()))

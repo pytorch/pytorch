@@ -33,6 +33,7 @@ struct TORCH_API AdagradOptions
       const AdagradOptions& rhs);
   double get_lr() const override;
   void set_lr(const double lr) override;
+  void overwrite_from(const OptimizerOptions& source) override;
 };
 
 struct TORCH_API AdagradParamState

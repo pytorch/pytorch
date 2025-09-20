@@ -31,6 +31,7 @@ struct TORCH_API LBFGSOptions : public OptimizerCloneableOptions<LBFGSOptions> {
       const LBFGSOptions& rhs);
   double get_lr() const override;
   void set_lr(const double lr) override;
+  void overwrite_from(const OptimizerOptions& source) override;
 };
 
 struct TORCH_API LBFGSParamState

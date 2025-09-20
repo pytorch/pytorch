@@ -64,6 +64,9 @@ class TORCH_API OptimizerOptions {
   virtual ~OptimizerOptions() = default;
   virtual double get_lr() const;
   virtual void set_lr(const double lr);
+  // Method for true Python API parity: overwrite this object with explicitly
+  // set values from source
+  virtual void overwrite_from(const OptimizerOptions& source) = 0;
 };
 
 template <typename Derived>
