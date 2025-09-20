@@ -747,12 +747,11 @@ class _TorchDynamoContext:
                     # Create a fresh CompilePackage
                     self._package.initialize(fn, None, ignore_inlined_sources=False)
                 else:
-                    cache_entry, backends = result
                     try:
                         self._package.initialize(
-                            fn, cache_entry, ignore_inlined_sources=False
+                            fn, result.dynamo, ignore_inlined_sources=False
                         )
-                        self._package.install(backends)
+                        self._package.install(result.backends)
                     except RuntimeError as e:
                         log.warning("Failed to load entry from dynamo cache: %s", e)
                         self._package.initialize(fn, None, ignore_inlined_sources=False)
