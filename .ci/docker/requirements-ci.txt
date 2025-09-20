@@ -93,8 +93,9 @@ librosa==0.10.2 ; python_version == "3.12" and platform_machine != "s390x"
 #Pinned versions:
 #test that import:
 
-mypy==1.16.0
+mypy==1.16.0 ; platform_system != "Windows"
 # Pin MyPy version because new errors are likely to appear with each release
+# Skip on Windows as lots of type annotations are POSIX specific
 #Description: linter
 #Pinned versions: 1.16.0
 #test that import: test_typing.py, test_type_hints.py
