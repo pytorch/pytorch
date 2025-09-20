@@ -12,6 +12,7 @@
 #endif
 #include <cerrno>
 
+#include <c10/util/Exception.h>
 #include <fmt/core.h>
 
 namespace torch::nativert {
@@ -130,14 +131,14 @@ File::File(int fd, bool ownsFd) noexcept : fd_(fd), ownsFd_(ownsFd) {
 
 File::File(std::string_view name, int flags, mode_t mode)
     : fd_(::open(std::string(name).c_str(), flags, mode)), ownsFd_(false) {
-  if (fd_ == -1) {
-    throw std::runtime_error(fmt::format(
-        "open(\"{}\", {}, 0{}) failed with errno {}.",
-        name,
-        flags,
-        mode,
-        errno));
-  }
+  TORCH_CHECK(
+      fd_ != -1,
+      fmt::format(
+          "open(\"{}\", {}, 0{}) failed with errno {}.",
+          name,
+          flags,
+          mode,
+          errno));
   ownsFd_ = true;
 }
 
@@ -166,15 +167,11 @@ File::~File() {
 /* static */ File File::temporary() {
   // make a temp file with tmpfile(), dup the fd, then return it in a File.
   FILE* tmpFile = tmpfile();
-  if (!tmpFile) {
-    throw std::runtime_error("tmpfile() failed");
-  }
+  TORCH_CHECK(tmpFile != nullptr, "tmpfile() failed");
   auto guard = c10::make_scope_exit([&]() { fclose(tmpFile); });
 
   int fd = ::dup(fileno(tmpFile));
-  if (fd == -1) {
-    throw std::runtime_error("dup() failed");
-  }
+  TORCH_CHECK(fd != -1, "dup() failed");
 
   return File(fd, true);
 }
@@ -193,9 +190,7 @@ void File::swap(File& other) noexcept {
 }
 
 void File::close() {
-  if (!closeNoThrow()) {
-    throw std::runtime_error("close() failed");
-  }
+  TORCH_CHECK(closeNoThrow(), "close() failed");
 }
 
 [[nodiscard]] bool File::closeNoThrow() {
