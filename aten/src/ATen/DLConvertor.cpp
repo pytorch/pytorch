@@ -401,30 +401,13 @@ T* toDLPackImpl(const Tensor& src) {
   // The following code detects whether the src follows
   // a continuous pattern. If the src follows such pattern (common-case)
   // then we do not need to normalize the strides.
-  bool need_normalize_strides = false;
-  int64_t expected_stride = 1;
-  for (int i = src.dim() - 1; i >= 0; i--) {
-    // detect if we do not meet continuous pattern
-    // and the size is 1, so there is opportunity to normalize
-    if (src.stride(i) != expected_stride && src.size(i) == 1) {
-      need_normalize_strides = true;
-      break;
-    }
-    expected_stride *= src.size(i);
-  }
-
+  bool need_normalize_strides = src.dim() == 1 && src.size(0) == 1 && src.stride(0) != 1;
   // less common case, try normalizing the strides
   if (need_normalize_strides) {
     // create a new tensor with possibly normalized strides
     // gh-83069
     auto shape = src.sizes();
-    auto strides = src.strides().vec();
-    for (int i = 0; i < src.dim(); i++) {
-      if (shape[i] < 2) {
-        strides[i] = 1;
-      }
-    }
-    view = src.as_strided(shape, strides, src.storage_offset());
+    view = src.as_strided(shape, {1}, src.storage_offset());
   }
 
   ATenDLMTensor<T>* atDLMTensor(new ATenDLMTensor<T>);
