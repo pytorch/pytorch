@@ -706,7 +706,7 @@ class CompilePackage:
         """
         from torch._C._dynamo.eval_frame import _load_precompile_entry
 
-        from .output_graph import get_builtins_dict
+        from .output_graph import get_builtins_dict, OutputGraphCommon
 
         self.uninstall()
         for code, entry in self._codes.items():
@@ -768,7 +768,7 @@ class CompilePackage:
                     assert isinstance(guards_state, torch._dynamo.guards.GuardsState)
                     check_fn_manager = torch._dynamo.guards.CheckFunctionManager(
                         target_code,
-                        guards_state.output_graph,
+                        OutputGraphCommon(guards_state.output_graph),
                         shape_code_parts=guards_state.shape_code_parts,
                         runtime_global_scope=runtime_global_scope,
                     )
