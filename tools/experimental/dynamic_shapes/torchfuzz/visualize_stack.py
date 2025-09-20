@@ -6,11 +6,7 @@ Visualization tools for operation stacks as DAGs.
 
 import subprocess
 
-
-try:
-    from .fuzzer import Operation
-except ImportError:
-    from fuzzer import Operation
+from codegen import Operation
 
 
 def operation_stack_to_dot(

@@ -1,46 +1,19 @@
+from __future__ import annotations
+
 import logging
 import random
-from dataclasses import dataclass
 from typing import Any, Optional, Union
 
-from codegen import convert_stack_to_python_code, execute_python_code
+from codegen import convert_stack_to_python_code, execute_python_code, Operation
 from ops_fuzzer import fuzz_op, fuzz_spec
 from tensor_fuzzer import ScalarSpec, Spec, TensorSpec
+from visualize_stack import visualize_operation_stack
 
 import torch
 
 
 # Global variable counter for generating unique variable names
-_var_name_counters = {}
-
-
-@dataclass
-class Operation:
-    """
-    Represents a single operation in the fuzzed operation stack.
-
-    Attributes:
-        op_name: Name of the operation (e.g., 'torch.ops.aten.add', 'scalar_add', 'arg')
-        input_specs: List of input specifications required by this operation
-        output_spec: Output specification produced by this operation
-        depth: Depth level of this operation in the generation tree
-    """
-
-    op_name: str
-    input_specs: list[Spec]
-    output_spec: Spec
-    depth: int
-
-    def __str__(self) -> str:
-        """String representation for debugging."""
-        return f"{self.op_name} -> {self.output_spec} (depth {self.depth})"
-
-    def __repr__(self) -> str:
-        """Detailed representation for debugging."""
-        return (
-            f"Operation(op_name='{self.op_name}', input_specs={self.input_specs}, "
-            f"output_spec={self.output_spec}, depth={self.depth})"
-        )
+_var_name_counters: dict[str, int] = {}
 
 
 def generate_argument_creation_code(
@@ -144,9 +117,9 @@ def fuzz_operation_stack(
         )
 
         # Start with empty dependency list
-        all_dependencies = []
+        all_dependencies: list[Operation] = []
 
-        # If this operation requires inputs, recursively generate them
+        # If this operation requires input_var_name_counterss, recursively generate them
         if input_specs:  # Non-leaf operations (not constant or arg)
             for input_spec in input_specs:
                 # Generate operations for each input at depth-1
@@ -268,7 +241,6 @@ def fuzz_and_execute(
                     )
 
             # Generate visualization in the iteration folder
-            from visualize_stack import visualize_operation_stack
 
             visualize_operation_stack(
                 operation_stack, "Operation Stack", iteration_folder
@@ -357,6 +329,7 @@ def specs_compatible(spec1: Spec, spec2: Spec) -> bool:
         # For scalars, require exact dtype match for simplicity
         return spec1.dtype == spec2.dtype
     elif isinstance(spec1, TensorSpec):
+        assert isinstance(spec2, TensorSpec)
         # For tensors, shape and dtype should match exactly
         return spec1.size == spec2.size and spec1.dtype == spec2.dtype
 
@@ -578,7 +551,7 @@ def fuzz_and_test(seed: Optional[int] = None, max_depth: Optional[int] = None) -
         "BooleanAtom not allowed in this context": "https://github.com/pytorch/pytorch/issues/160726",
     }
 
-    def known_issue(error_message):
+    def known_issue(error_message: str) -> bool:
         return any(issue in error_message for issue in known_issues.keys())
 
     print("=== Testing fuzz_and_execute with arguments ===")
@@ -597,6 +570,7 @@ def fuzz_and_test(seed: Optional[int] = None, max_depth: Optional[int] = None) -
             seed=iteration_seed, max_depth=max_depth
         )
         if not success:
+            assert error_message is not None
             if known_issue(error_message):
                 print("Known issue skipped")
                 continue

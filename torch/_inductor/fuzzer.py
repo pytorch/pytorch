@@ -1,1374 +1,1018 @@
+import importlib
+import itertools
 import logging
+import pickle
 import random
-from dataclasses import dataclass
-from typing import List, Optional, Union
-
-from ops_fuzzer import fuzz_op, fuzz_spec
-from tensor_fuzzer import fuzz_scalar, fuzz_tensor_simple, ScalarSpec, Spec, TensorSpec
+import signal
+import string
+import sys
+import traceback
+from collections.abc import KeysView, Sequence
+from enum import Enum
+from functools import partial, wraps
+from types import FrameType
+from typing import (
+    Any,
+    Callable,
+    get_args,
+    get_origin,
+    Literal,
+    Optional,
+    TypeVar,
+    Union,
+)
 
 import torch
+from functorch.compile import min_cut_rematerialization_partition
+from torch._inductor.custom_graph_pass import CustomGraphPass, CustomPartitionerFn
+from torch._inductor.scheduler import BaseSchedulerNode
+from torch.utils._config_module import _ConfigEntry, ConfigModule
 from torch.utils._ordered_set import OrderedSet
 
 
-# Global variable counter for generating unique variable names
-_var_name_counters = {}
+log = logging.getLogger(__name__)
 
 
-@dataclass
-class Operation:
+def is_type(type_hint, comp_type) -> bool:  # type: ignore[no-untyped-def]
     """
-    Represents a single operation in the fuzzed operation stack.
-
-    Attributes:
-        op_name: Name of the operation (e.g., 'torch.ops.aten.add', 'scalar_add', 'arg')
-        input_specs: List of input specifications required by this operation
-        output_spec: Output specification produced by this operation
-        depth: Depth level of this operation in the generation tree
-        reuse_target: Optional index of operation being reused (for reuse operations)
+    Determines if type_hint is comp_type. There are some type annotations that this doesn't work for.
+    I think it's because some Type annotations are Type Objects and some are Special Forms, but not sure.
+    There's definite room for improvement to make this more general for someone who deeply understands
+    Python types.
     """
-
-    op_name: str
-    input_specs: List[Spec]
-    output_spec: Spec
-    depth: int
-    reuse_target: Optional[int] = None  # Index of operation being reused
-
-    def __str__(self) -> str:
-        """String representation for debugging."""
-        if self.reuse_target is not None:
-            return f"{self.op_name} -> {self.output_spec} (depth {self.depth}, reuses op {self.reuse_target})"
-        return f"{self.op_name} -> {self.output_spec} (depth {self.depth})"
-
-    def __repr__(self) -> str:
-        """Detailed representation for debugging."""
-        return f"Operation(op_name='{self.op_name}', input_specs={self.input_specs}, output_spec={self.output_spec}, depth={self.depth}, reuse_target={self.reuse_target})"
+    return type_hint is comp_type or get_origin(type_hint) is comp_type
 
 
-def generate_argument_creation_code(arg_names: list, arg_specs: list) -> list:
+def is_optional_type(type_hint) -> bool:  # type: ignore[no-untyped-def]
     """
-    Generate Python code lines for creating arguments from specifications.
-
-    Args:
-        arg_names: List of argument variable names (e.g., ['arg_0', 'arg_1'])
-        arg_specs: List of argument specifications (TensorSpec or ScalarSpec)
-
-    Returns:
-        List of code lines as strings
+    Special case of is_type.
     """
-    code_lines = []
+    origin = get_origin(type_hint)
 
-    for i, (arg_name, arg_spec) in enumerate(zip(arg_names, arg_specs)):
-        if isinstance(arg_spec, ScalarSpec):
-            # Generate scalar creation code using fuzz_scalar
-            dtype_str = f"torch.{arg_spec.dtype}".replace("torch.torch.", "torch.")
-
-            code_lines.extend(
-                [
-                    f"# Create scalar argument {i}",
-                    "from tensor_fuzzer import fuzz_scalar, ScalarSpec",
-                    f"scalar_spec_{i} = ScalarSpec(dtype={dtype_str})",
-                    f"{arg_name} = fuzz_scalar(scalar_spec_{i})",
-                ]
-            )
-
-        elif isinstance(arg_spec, TensorSpec):
-            # Generate tensor creation code using fuzz_tensor_simple
-            size_str = str(arg_spec.size)
-            stride_str = str(arg_spec.stride)
-            dtype_str = f"torch.{arg_spec.dtype}".replace("torch.torch.", "torch.")
-
-            code_lines.extend(
-                [
-                    f"# Create tensor argument {i}",
-                    "from tensor_fuzzer import fuzz_tensor_simple",
-                    f"{arg_name} = fuzz_tensor_simple({size_str}, {stride_str}, {dtype_str})",
-                ]
-            )
-
-    return code_lines
-
-
-def generate_random_var_name(prefix: str = "var") -> str:
-    """Generate a variable name with the given prefix and incremental number suffix."""
-    global _var_name_counters
-
-    if prefix not in _var_name_counters:
-        _var_name_counters[prefix] = 0
-    else:
-        _var_name_counters[prefix] += 1
-
-    return f"{prefix}_{_var_name_counters[prefix]}"
-
-
-def fuzz_operation_stack(
-    target_spec: Spec,
-    max_depth: int = 3,
-    seed: Optional[int] = None,
-    enable_reuse: bool = False,
-    reuse_probability: float = 0.25,
-) -> List[Operation]:
-    """
-    Recursively generate a stack of operations that produces the target specification.
-
-    The returned stack has the target-producing operation at index 0 (top of stack).
-
-    Args:
-        target_spec: The desired output specification (TensorSpec or ScalarSpec)
-        max_depth: Maximum depth of operations. At depth 0, only leaf operations (constant, arg) are used.
-        seed: Random seed for reproducible generation. If None, uses current random state.
-        enable_reuse: Whether to enable reusing existing compatible operations (disabled by default)
-        reuse_probability: Probability of reusing an existing operation when possible
-
-    Returns:
-        List of Operation dataclass instances with target-producing operation at index 0
-    """
-
-    # Set seed for reproducible generation
-    if seed is not None:
-        import random
-
-        random.seed(seed)
-        torch.manual_seed(seed)
-
-    def _generate_recursive(
-        spec: Spec, depth: int, stack_size: int = 0
-    ) -> List[Operation]:
-        """
-        Recursively generate operations for the given spec at the given depth.
-        Returns list of operations with the spec-producing operation at index 0.
-        """
-
-        # Generate new operation normally
-        op_name, input_specs = fuzz_op(spec, depth, stack_size)
-
-        # Create operation entry using dataclass
-        operation = Operation(
-            op_name=op_name, input_specs=input_specs, output_spec=spec, depth=depth
-        )
-
-        # Start with empty dependency list
-        all_dependencies = []
-
-        # If this operation requires inputs, recursively generate them
-        if input_specs:  # Non-leaf operations (not constant or arg)
-            for input_spec in input_specs:
-                # Generate operations for each input at depth-1
-                input_ops = _generate_recursive(
-                    input_spec,
-                    max(0, depth - 1),
-                    stack_size + len(all_dependencies) + 1,
-                )
-                # Add all input operations to dependencies
-                all_dependencies.extend(input_ops)
-
-        # Return list with the target operation at index 0, followed by all dependencies
-        return [operation] + all_dependencies
-
-    # Generate the operation stack
-    operation_stack = _generate_recursive(target_spec, max_depth, 0)
-
-    # Verify that the operation at index 0 produces the target spec
-    if operation_stack and not specs_compatible(
-        operation_stack[0].output_spec, target_spec
-    ):
-        raise ValueError(
-            f"Generated stack top operation produces {operation_stack[0].output_spec}, "
-            f"but target spec is {target_spec}"
-        )
-
-    return operation_stack
-
-
-def fuzz_and_execute(
-    seed: Optional[int] = None, max_depth: Optional[int] = None, log_at_faluire=False
-):
-    """
-    Generate a fuzzed operation stack, convert it to Python code, and execute it.
-
-    Args:
-        seed: Random seed for reproducible generation. If None, uses a random seed.
-        max_depth: Maximum depth for operation stack (1-10). If None, uses a random depth.
-
-    Returns:
-        tuple: (seed_used, success_status, error_message)
-            - seed_used: The actual seed that was used for generation
-            - success_status: True if execution succeeded, False if it failed
-            - error_message: Error message if failed, None if succeeded
-
-    This function:
-    1. Generates a random target specification
-    2. Creates a stack of operations to produce that target
-    3. Converts the stack into executable Python code
-    4. Executes the generated Python code
-    5. Validates the final result matches the target spec
-    """
-
-    # Generate seed if not provided
-    if seed is None:
-        seed = random.randint(0, 2**31 - 1)
-
-    # Generate max_depth if not provided (range 1-10)
-    if max_depth is None:
-        random.seed(seed + 999)  # Use seed offset for consistent depth selection
-        max_depth = random.randint(1, 20)
-    else:
-        # Clamp max_depth to valid range
-        max_depth = max(1, max_depth)
-
-    print(f"Using seed: {seed}")
-    print(f"Using max_depth: {max_depth}")
-
-    # Set seed for reproducible generation
-    random.seed(seed)
-    torch.manual_seed(seed)
-    operation_stack = None
-    python_code = None
-    result = None
-    target_spec = None
-
-    def log(success):
-        import os
-        import time
-
-        # Create a unique folder for this iteration
-        timestamp = int(time.time() * 1000)  # milliseconds
-        folder_name = (
-            f"fuzzing_seed_{seed}_{timestamp}_{'success' if success else 'failed'}"
-        )
-        iteration_folder = os.path.join("/tmp", folder_name)
-        os.makedirs(iteration_folder, exist_ok=True)
-
-        if success:
-            print(f"✅ SUCCESS - artifacts saved to: {iteration_folder}")
-        else:
-            print(f"❌ FAILED - artifacts saved to: {iteration_folder}")
-
-        # Write summary file
-        summary_path = os.path.join(iteration_folder, "summary.txt")
-        with open(summary_path, "w") as f:
-            f.write("Fuzzing Session Summary\n")
-            f.write("======================\n")
-            f.write(f"Seed: {seed}\n")
-            f.write(f"Max depth: {max_depth}\n")
-            f.write(f"Success: {success}\n")
-            f.write(f"Target specification: {target_spec}\n")
-            if operation_stack:
-                f.write(f"Operations count: {len(operation_stack)}\n")
-
-        if operation_stack:
-            # Write operation stack to file in iteration folder
-            stack_file_path = os.path.join(iteration_folder, "operation_stack.txt")
-            with open(stack_file_path, "w") as f:
-                f.write(f"Target specification: {target_spec}\n")
-                f.write(f"Generated {len(operation_stack)} operations in stack\n\n")
-                f.write("Operation stack (in reverse order - dependencies first):\n")
-                for i in range(len(operation_stack) - 1, -1, -1):
-                    op = operation_stack[i]
-                    f.write(
-                        f"  {i}: {op.op_name} -> {op.output_spec} (depth {op.depth})\n"
-                    )
-
-            # Generate visualization in the iteration folder
-            from visualize_stack import visualize_operation_stack
-
-            visualize_operation_stack(
-                operation_stack, "Operation Stack", iteration_folder
-            )
-
-        if python_code:
-            # Write Python code to file in iteration folder
-            code_file_path = os.path.join(iteration_folder, "generated_code.py")
-            with open(code_file_path, "w") as f:
-                f.write(python_code)
-
-            print(f"📁 Code saved in : {code_file_path}")
-
-        print(f"📁 All files saved to: {iteration_folder}")
-
-    import time
-
-    try:
-        logger = logging.getLogger(__name__)
-
-        # Generate target specification first
-        logger.debug("⏱️  Step 1: Generating target spec...")
-        start_time = time.time()
-        target_spec = fuzz_spec()
-        logger.debug(f"   Completed in {time.time() - start_time:.3f}s - {target_spec}")
-
-        logger.debug("⏱️  Step 2: Generating operation stack...")
-        start_time = time.time()
-        operation_stack = fuzz_operation_stack(
-            target_spec, max_depth=max_depth, seed=seed
-        )
-        logger.debug(
-            f"   Completed in {time.time() - start_time:.3f}s - {len(operation_stack)} operations"
-        )
-
-        logger.debug("⏱️  Step 3: Converting to Python code...")
-        start_time = time.time()
-        python_code = convert_stack_to_python_code(
-            operation_stack, target_spec, seed=seed
-        )
-        logger.debug(
-            f"   Completed in {time.time() - start_time:.3f}s - {len(python_code)} chars"
-        )
-
-        logger.debug("⏱️  Step 4: Executing Python code...")
-        start_time = time.time()
-        # Enable temporary file preservation in debug mode for easier debugging
-        preserve_temp = logger.isEnabledFor(logging.DEBUG)
-        # Use a 60-second timeout for execution
-        result = execute_python_code(
-            python_code, target_spec, preserve_temp_file=preserve_temp, timeout=300
-        )
-        logger.debug(f"   Completed in {time.time() - start_time:.3f}s")
-
-        # # Validate the result matches target specification
-        # validate_result_against_spec(result, target_spec)
-        if not log_at_faluire:
-            log(True)
-        return seed, result, None
-
-    except Exception as e:
-        print(f"\n❌ Execution failed: {e}")
-        # from visualize_stack import visualize_operation_stack
-        log(False)
-        import traceback
-
-        traceback.print_exc()
-        error_message = str(e)
-        return seed, False, error_message
-
-
-def specs_compatible(spec1, spec2) -> bool:
-    """
-    Check if two specifications are compatible (one can be used where the other is expected).
-    """
-    if type(spec1) != type(spec2):
-        return False
-
-    if isinstance(spec1, ScalarSpec):
-        # For scalars, require exact dtype match for simplicity
-        return spec1.dtype == spec2.dtype
-    elif isinstance(spec1, TensorSpec):
-        # For tensors, shape and dtype should match exactly
-        return spec1.size == spec2.size and spec1.dtype == spec2.dtype
+    if origin is Union:
+        args = get_args(type_hint)
+        return type(None) in args
 
     return False
 
 
-def validate_result_against_spec(result, target_spec) -> None:
+def is_callable_type(type_hint) -> bool:  # type: ignore[no-untyped-def]
     """
-    Validate that the result matches the target specification.
-
-    Args:
-        result: The actual result from execution
-        target_spec: Expected specification
-
-    Raises:
-        AssertionError: If validation fails
+    Special Case of is_type.
     """
-
-    if isinstance(target_spec, ScalarSpec):
-        # Check that result is a Python scalar of compatible type
-        expected_python_types = {
-            torch.float16: (float,),
-            torch.float32: (float,),
-            torch.float64: (float,),
-            torch.bfloat16: (float,),
-            torch.int8: (int,),
-            torch.int16: (int,),
-            torch.int32: (int,),
-            torch.int64: (int,),
-            torch.bool: (bool,),
-            torch.complex64: (complex,),
-            torch.complex128: (complex,),
-        }
-
-        expected_types = expected_python_types.get(target_spec.dtype, (type(result),))
-
-        if not isinstance(result, expected_types):
-            raise AssertionError(
-                f"Expected Python type {expected_types} for dtype {target_spec.dtype}, got {type(result)}"
-            )
-
-    elif isinstance(target_spec, TensorSpec):
-        # Check that result is a tensor with correct properties
-        if not isinstance(result, torch.Tensor):
-            raise AssertionError(f"Expected torch.Tensor, got {type(result)}")
-
-        if result.shape != target_spec.size:
-            raise AssertionError(
-                f"Expected shape {target_spec.size}, got {result.shape}"
-            )
-
-        if result.dtype != target_spec.dtype:
-            raise AssertionError(
-                f"Expected dtype {target_spec.dtype}, got {result.dtype}"
-            )
-
-    else:
-        raise ValueError(f"Unknown target spec type: {type(target_spec)}")
+    return type_hint.__name__ == "Callable"
 
 
-def convert_stack_to_python_code(
-    operation_stack: List[Operation], target_spec, seed: Optional[int] = None
-) -> str:
+class DummyPass(CustomGraphPass):
     """
-    Convert an operation stack to executable Python code using backward recursion.
-
-    The stack represents operations in LIFO order:
-    - operation_stack[0] is the TOP of the stack (final result we want)
-    - operation_stack[-1] is the BOTTOM of the stack (foundational dependencies)
-
-    Code generation uses backward recursion:
-    1. Start from the top operation (index 0) - what we want to compute
-    2. Recursively generate code for its dependencies
-    3. Generate code in proper execution order (dependencies first)
-
-    Args:
-        operation_stack: List of Operation dataclass instances in stack order (top to bottom)
-        target_spec: Expected output specification
-        seed: Random seed for reproducible code generation. If None, uses current random state.
-
-    Returns:
-        String containing the complete Python code that executes the operations
+    A Dummy pass to be used by ConfigFuzzer
     """
 
-    # Set seed for reproducible code generation
-    if seed is not None:
-        import random
+    def __call__(self, graph: torch.fx.graph.Graph) -> None:
+        return None
 
-        random.seed(
-            seed + 1000
-        )  # Offset to avoid conflicts with operation_stack generation
-        torch.manual_seed(seed + 1000)
-
-    if not operation_stack:
-        raise ValueError("Empty operation stack")
-
-    # Track generated operations to avoid duplicates
-    generated_operations = OrderedSet()
-    generated_code_lines = []
-    operation_variables = {}  # Maps operation index to (var_name, spec)
-    arg_operations = []  # List of (operation_index, spec) for arg operations
-
-    def generate_operation_recursive(op_idx: int) -> tuple[str, int]:
-        """
-        Recursively generate code for operation at op_idx and its dependencies.
-        Returns (variable_name, subtree_size) where subtree_size is the number of operations processed.
-        """
-        # If already generated, return the variable name and size 1
-        if op_idx in generated_operations:
-            return operation_variables[op_idx][0], 1
-
-        operation = operation_stack[op_idx]
-        op_name = operation.op_name
-        input_specs = operation.input_specs
-        output_spec = operation.output_spec
-
-        # Track total subtree size starting with this operation
-        total_subtree_size = 1
-
-        # Generate input variables by recursively processing dependencies FIRST
-        input_var_names = []
-        if input_specs:
-            # Calculate dependency indices based on stack generation pattern
-            current_dep_idx = op_idx + 1
-
-            for j, input_spec in enumerate(input_specs):
-                # Find the dependency that produces this input
-                dep_idx = current_dep_idx
-
-                if dep_idx >= len(operation_stack):
-                    raise ValueError(
-                        f"Operation {op_idx} ({op_name}) requires input {j} at index {dep_idx}, "
-                        f"but stack only has {len(operation_stack)} operations"
-                    )
-
-                # Verify the dependency produces the expected spec
-                dep_operation = operation_stack[dep_idx]
-                if not specs_compatible(dep_operation.output_spec, input_spec):
-                    raise ValueError(
-                        f"Operation {op_idx} ({op_name}) requires input {input_spec} at position {j}, "
-                        f"but operation {dep_idx} produces {dep_operation.output_spec}"
-                    )
-
-                # Recursively generate this dependency
-                dep_var_name, dependency_subtree_size = generate_operation_recursive(
-                    dep_idx
-                )
-                input_var_names.append(dep_var_name)
-
-                # Update indices and total size
-                current_dep_idx += dependency_subtree_size
-                total_subtree_size += dependency_subtree_size
-
-        # NOW add the comment for this operation (after dependencies are processed)
-        generated_code_lines.append(
-            f"    # Operation {op_idx}: {op_name} (stack position {op_idx})"
-        )
-
-        # Generate output variable name
-        output_var_name = f"tmp_{op_idx}"
-
-        # Handle different operation types
-        if op_name == "arg":
-            # Track arg operations for later function signature generation
-            arg_operations.append((op_idx, output_spec))
-            arg_name = f"arg_{len(arg_operations) - 1}"
-            operation_lines = [f"{output_var_name} = {arg_name}"]
-        elif op_name.startswith("reuse_"):
-            # Handle reuse operations - reference the variable from the reused operation
-            if operation.reuse_target is not None:
-                # Generate variable name for the target operation (even if not generated yet)
-                target_var_name = f"tmp_{operation.reuse_target}"
-                operation_lines = [
-                    f"{output_var_name} = {target_var_name}  # Reusing operation {operation.reuse_target}"
-                ]
-            else:
-                # Fallback if reuse target is invalid - this shouldn't happen
-                operation_lines = [f"# ERROR: Invalid reuse operation {op_name}"]
-        else:
-            # Generate operation execution code
-            operation_lines = generate_simple_operation_code(
-                output_var_name, input_var_names, op_name, output_spec, {}
-            )
-
-        # Add proper indentation for function body
-        generated_code_lines.extend(["    " + line for line in operation_lines])
-        generated_code_lines.append("")
-
-        # Track this operation as generated
-        generated_operations.add(op_idx)
-        operation_variables[op_idx] = (output_var_name, output_spec)
-
-        return output_var_name, total_subtree_size
-
-    # Start backward recursion from the top operation (index 0)
-    final_var_name, _ = generate_operation_recursive(0)
-
-    # Generate function signature based on discovered arg operations
-    if arg_operations:
-        arg_names = [f"arg_{i}" for i in range(len(arg_operations))]
-        function_signature = f"def fuzzed_program({', '.join(arg_names)})"
-    else:
-        function_signature = "def fuzzed_program()"
-
-    # Build the complete code
-    code_lines = [
-        "import torch",
-        "from tensor_fuzzer import fuzz_scalar, fuzz_tensor_simple, ScalarSpec, TensorSpec",
-        "",
-        "# Generated fuzzed program code (backward recursion from stack top)",
-        f"# Stack has {len(operation_stack)} operations",
-        "",
-        function_signature + ":",
-    ]
-
-    # Add the generated operation code
-    code_lines.extend(generated_code_lines)
-
-    # Add return statement
-    code_lines.extend(
-        [
-            "    # Final result from top of stack (operation 0)",
-            f"    return {final_var_name}",
-            "",
-        ]
-    )
-
-    # Generate argument creation code with deterministic seeds
-    if arg_operations:
-        code_lines.append("# Create arguments for the fuzzed program")
-        for i, (_, spec) in enumerate(arg_operations):
-            arg_name = f"arg_{i}"
-            # Use a deterministic seed based on the argument index and main seed
-            arg_seed = (seed + 10000 + i) if seed is not None else None
-
-            if isinstance(spec, ScalarSpec):
-                dtype_str = f"torch.{spec.dtype}".replace("torch.torch.", "torch.")
-                if arg_seed is not None:
-                    code_lines.extend(
-                        [
-                            f"scalar_spec = ScalarSpec(dtype={dtype_str})",
-                            f"{arg_name} = fuzz_scalar(scalar_spec, seed={arg_seed})",
-                        ]
-                    )
-                else:
-                    code_lines.extend(
-                        [
-                            f"scalar_spec = ScalarSpec(dtype={dtype_str})",
-                            f"{arg_name} = fuzz_scalar(scalar_spec)",
-                        ]
-                    )
-            elif isinstance(spec, TensorSpec):
-                size_str = str(spec.size)
-                stride_str = str(spec.stride)
-                dtype_str = f"torch.{spec.dtype}".replace("torch.torch.", "torch.")
-                if arg_seed is not None:
-                    code_lines.append(
-                        f"{arg_name} = fuzz_tensor_simple({size_str}, {stride_str}, {dtype_str}, seed={arg_seed})"
-                    )
-                else:
-                    code_lines.append(
-                        f"{arg_name} = fuzz_tensor_simple({size_str}, {stride_str}, {dtype_str})"
-                    )
-
-    # Generate the final execution with both normal and compiled versions
-    if arg_operations:
-        arg_names = [f"arg_{i}" for i in range(len(arg_operations))]
-        if len(arg_names) == 1:
-            args_tuple = (
-                f"({arg_names[0]},)"  # Single element tuple needs trailing comma
-            )
-        else:
-            args_tuple = f"({', '.join(arg_names)})"
-    else:
-        args_tuple = "()"
-
-    code_lines.extend(
-        [
-            "",
-            "# Execute the fuzzed program both normally and with torch.compile",
-            "import torch",
-            "import tempfile",
-            "import os",
-            "import sys",
-            "import contextlib",
-            "from io import StringIO",
-            "",
-            "# Create arguments",
-            f"args = {args_tuple}",
-            "",
-            "# Execute original version",
-            "print('=== Executing Original Program ===')",
-            "try:",
-            "    result_original = fuzzed_program(*args)",
-            "    print('✅ Original execution successful')",
-            "except Exception as e:",
-            "    print(f'❌ Original execution failed: {e}')",
-            "    raise",
-            "",
-            "# Execute compiled version",
-            "print('\\n=== Executing Compiled Program  fullgraph=False')",
-            "try:",
-            "    compiled_program = torch.compile(fuzzed_program, fullgraph=False)",
-            "    result_compiled = compiled_program(*args)",
-            "    print('✅ Compiled execution successful')",
-            "    print(f'Compiled result type: {type(result_compiled)}')",
-            "except Exception as e:",
-            "    print(f'❌ Compiled execution failed: {e}')",
-            "    # Exit with non-zero code to signal compile failure",
-            "    import sys",
-            "    sys.exit(1)",
-            "",
-            "# Execute compiled version 2",
-            "print('\\n=== Executing Compiled Program  fullgraph=False dynamic=True')",
-            "try:",
-            "    compiled_program = torch.compile(fuzzed_program, fullgraph=False, dynamic=True)",
-            "    result_compiled = compiled_program(*args)",
-            "    print('✅ Compiled execution successful')",
-            "    print(f'Compiled result type: {type(result_compiled)}')",
-            "except Exception as e:",
-            "    print(f'❌ Compiled execution failed: {e}')",
-            "    # Exit with non-zero code to signal compile failure",
-            "    import sys",
-            "    sys.exit(1)",
-            "",
-            "# Execute compiled version 3",
-            "print('\\n=== Executing Compiled Program  fullgraph=True dynamic=True')",
-            "try:",
-            "    with torch._dynamo.config.patch(capture_scalar_outputs=True):",
-            "       compiled_program = torch.compile(fuzzed_program, fullgraph=False, dynamic=True)",
-            "       result_compiled = compiled_program(*args)",
-            "       print('✅ Compiled execution successful')",
-            "       print(f'Compiled result type: {type(result_compiled)}')",
-            "except Exception as e:",
-            "    print(f'❌ Compiled execution failed: {e}')",
-            "    # Exit with non-zero code to signal compile failure",
-            "    import sys",
-            "    sys.exit(1)",
-            "",
-        ]
-    )
-
-    return "\n".join(code_lines)
+    def uuid(self) -> Optional[Any]:
+        return None
 
 
-def generate_simple_operation_code(
-    output_var: str,
-    input_vars: list,
-    op_name: str,
-    output_spec,
-    available_variables: Optional[dict] = None,
-) -> list:
+class DummyPartitionerFn(CustomPartitionerFn):
     """
-    Generate code lines for executing a single operation (simplified version without arg_tracker).
-
-    Args:
-        output_var: Name of the output variable
-        input_vars: List of input variable names
-        op_name: Name of the operation
-        output_spec: Output specification for the operation
-        available_variables: Dict mapping variable names to their specs, for potential reuse
-    """
-    if op_name == "scalar_add":
-        return [f"{output_var} = {input_vars[0]} + {input_vars[1]}"]
-
-    elif op_name == "scalar_multiply":
-        return [f"{output_var} = {input_vars[0]} * {input_vars[1]}"]
-
-    elif op_name == "torch.ops.aten.item":
-        return [f"{output_var} = {input_vars[0]}.item()"]
-
-    elif op_name == "torch.ops.aten.add":
-        return [f"{output_var} = torch.ops.aten.add({input_vars[0]}, {input_vars[1]})"]
-
-    elif op_name == "torch.ops.aten.mul":
-        return [f"{output_var} = torch.ops.aten.mul({input_vars[0]}, {input_vars[1]})"]
-
-    elif op_name == "constant":
-        # Create constant by calling fuzzing functions during codegen with deterministic seed
-        # Use a deterministic seed based on the variable name to ensure reproducibility
-        var_seed = hash(output_var) % (2**31)
-
-        if isinstance(output_spec, ScalarSpec):
-            # Call fuzz_scalar during codegen and embed the result
-            actual_value = fuzz_scalar(output_spec, seed=var_seed)
-
-            # Format the value for embedding in code
-            if isinstance(actual_value, bool):
-                value_str = str(actual_value)
-            elif isinstance(actual_value, (int, float)):
-                value_str = repr(actual_value)
-            elif isinstance(actual_value, complex):
-                value_str = f"complex({actual_value.real}, {actual_value.imag})"
-            else:
-                value_str = repr(actual_value)
-
-            return [f"{output_var} = {value_str}"]
-
-        elif isinstance(output_spec, TensorSpec):
-            # Call fuzz_tensor_simple during codegen and embed the result
-            actual_tensor = fuzz_tensor_simple(
-                output_spec.size, output_spec.stride, output_spec.dtype, seed=var_seed
-            )
-
-            # Convert tensor to code representation
-            size_str = str(output_spec.size)
-            dtype_str = f"torch.{output_spec.dtype}".replace("torch.torch.", "torch.")
-
-            # Handle empty tensors (with 0 elements)
-            if actual_tensor.numel() == 0:
-                # For empty tensors, use a default fill value based on dtype
-                default_values = {
-                    torch.float16: 0.0,
-                    torch.float32: 0.0,
-                    torch.float64: 0.0,
-                    torch.bfloat16: 0.0,
-                    torch.int8: 0,
-                    torch.int16: 0,
-                    torch.int32: 0,
-                    torch.int64: 0,
-                    torch.bool: False,
-                    torch.complex64: 0.0,
-                    torch.complex128: 0.0,
-                }
-                fill_value = default_values.get(output_spec.dtype, 0)
-                return [
-                    f"{output_var} = torch.full({size_str}, {fill_value}, dtype={dtype_str})"
-                ]
-            else:
-                # For non-empty tensors, use the first element as fill value
-                fill_value = actual_tensor.flatten()[0].item()
-                return [
-                    f"{output_var} = torch.full({size_str}, {fill_value}, dtype={dtype_str})"
-                ]
-
-        else:
-            return [f"# Unknown output spec type for constant: {type(output_spec)}"]
-
-    else:
-        return [f"# Unknown operation: {op_name}"]
-
-
-def execute_python_code(
-    python_code: str, target_spec, preserve_temp_file: bool = False, timeout: int = 60
-) -> Union[torch.Tensor, float, int, bool, complex]:
-    """
-    Execute the generated Python code by writing it to a file and running it.
-    Supports both real-time output printing and output capturing with proper process termination.
-
-    Args:
-        python_code: String containing Python code to execute
-        target_spec: Expected output specification for validation
-        preserve_temp_file: If True, don't delete the temporary file after execution
-        timeout: Maximum time in seconds to wait for execution (default: 60)
-
-    Returns:
-        The actual result from executing the generated code
-
-    Raises:
-        RuntimeError: With full stdout/stderr output if execution fails
-        TimeoutError: If execution exceeds the timeout
-    """
-    import os
-    import signal
-    import subprocess
-    import sys
-    import tempfile
-    import time
-    from queue import Empty, Queue
-    from threading import Thread
-
-    # Write the generated code to a temporary file
-    with tempfile.NamedTemporaryFile(
-        mode="w", suffix="_generated.py", delete=False
-    ) as f:
-        f.write(python_code)
-        generated_file_path = f.name
-
-    print(f"📄 Generated code written to: {generated_file_path}")
-
-    process = None
-    stdout_thread = None
-    stderr_thread = None
-
-    def stream_reader(stream, queue, stream_name):
-        """Read from stream and put lines in queue with stream identifier"""
-        try:
-            for line in iter(stream.readline, ""):
-                if line:
-                    queue.put((stream_name, line.rstrip("\n")))
-        except Exception:
-            pass
-        finally:
-            try:
-                stream.close()
-            except:
-                pass
-
-    def kill_process_tree(process):
-        """Kill the process and all its children"""
-        try:
-            # Try to terminate gracefully first
-            if process.poll() is None:
-                process.terminate()
-                try:
-                    process.wait(timeout=5)
-                    print("🔄 Process terminated gracefully")
-                except subprocess.TimeoutExpired:
-                    # Force kill if it doesn't terminate gracefully
-                    print("💀 Force killing process...")
-                    process.kill()
-                    try:
-                        process.wait(timeout=5)
-                        print("💀 Process force killed")
-                    except subprocess.TimeoutExpired:
-                        print("⚠️  Process may still be running after force kill")
-
-            # Also try to kill process group if it was created
-            try:
-                pid = process.pid
-                os.killpg(os.getpgid(pid), signal.SIGTERM)
-                time.sleep(2)
-                os.killpg(os.getpgid(pid), signal.SIGKILL)
-            except (OSError, ProcessLookupError):
-                pass  # Process group might not exist or already killed
-
-        except Exception as e:
-            print(f"⚠️  Error killing process: {e}")
-
-    try:
-        # Execute the generated file with real-time output streaming
-        print(f"🚀 Executing: python {generated_file_path} (timeout: {timeout}s)")
-        print("=" * 50)
-
-        # Start process with new process group to enable killing child processes
-        process = subprocess.Popen(
-            [sys.executable, generated_file_path],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            bufsize=1,  # Line buffered
-            universal_newlines=True,
-            preexec_fn=os.setsid,  # Create new process group
-        )
-
-        # Create queues and threads for reading stdout and stderr
-        output_queue = Queue()
-        stdout_thread = Thread(
-            target=stream_reader, args=(process.stdout, output_queue, "stdout")
-        )
-        stderr_thread = Thread(
-            target=stream_reader, args=(process.stderr, output_queue, "stderr")
-        )
-
-        stdout_thread.daemon = True
-        stderr_thread.daemon = True
-        stdout_thread.start()
-        stderr_thread.start()
-
-        # Collect output while printing in real-time
-        captured_stdout = []
-        captured_stderr = []
-        start_time = time.time()
-
-        # Read output until process finishes or timeout
-        while process.poll() is None:
-            # Check for timeout
-            if time.time() - start_time > timeout:
-                print(f"⏰ Execution timeout ({timeout}s) reached, killing process...")
-                kill_process_tree(process)
-                raise TimeoutError(f"Execution exceeded {timeout} seconds timeout")
-
-            try:
-                stream_name, line = output_queue.get(timeout=0.1)
-                if stream_name == "stdout":
-                    print(line)  # Print to console in real-time
-                    captured_stdout.append(line)
-                elif stream_name == "stderr":
-                    print(line, file=sys.stderr)  # Print to stderr in real-time
-                    captured_stderr.append(line)
-            except Empty:
-                continue
-
-        # Process has finished, collect any remaining output
-        timeout_remaining = max(0, timeout - (time.time() - start_time))
-        output_timeout = min(5, timeout_remaining)  # Max 5 seconds for remaining output
-
-        end_time = time.time() + output_timeout
-        while not output_queue.empty() and time.time() < end_time:
-            try:
-                stream_name, line = output_queue.get(timeout=0.1)
-                if stream_name == "stdout":
-                    print(line)
-                    captured_stdout.append(line)
-                elif stream_name == "stderr":
-                    print(line, file=sys.stderr)
-                    captured_stderr.append(line)
-            except Empty:
-                break
-
-        # Wait for threads to finish with timeout
-        if stdout_thread.is_alive():
-            stdout_thread.join(timeout=2)
-        if stderr_thread.is_alive():
-            stderr_thread.join(timeout=2)
-
-        # Get the return code
-        return_code = process.returncode
-
-        print("=" * 50)
-        print(f"🏁 Process finished with return code: {return_code}")
-
-        if return_code == 0:
-            # Success - we already printed output in real-time
-            if preserve_temp_file:
-                print(f"📁 Temporary file preserved at: {generated_file_path}")
-            return True
-        else:
-            # Failed execution
-            full_output = ""
-            if captured_stdout:
-                full_output += "STDOUT:\n" + "\n".join(captured_stdout) + "\n"
-            if captured_stderr:
-                full_output += "STDERR:\n" + "\n".join(captured_stderr) + "\n"
-            full_output += f"Return code: {return_code}\n"
-
-            print(f"❌ Generated file execution failed with return code {return_code}")
-            if preserve_temp_file:
-                print(f"📁 Failed execution file preserved at: {generated_file_path}")
-            raise RuntimeError(full_output)
-
-    except TimeoutError:
-        # Re-raise timeout error as-is
-        raise
-    except Exception as e:
-        if hasattr(e, "returncode"):
-            # This was a CalledProcessError-like exception
-            raise e
-        else:
-            # Some other error occurred
-            print(f"❌ Execution error: {e}")
-            if preserve_temp_file:
-                print(f"📁 Error execution file preserved at: {generated_file_path}")
-            raise RuntimeError(f"Execution failed: {e}")
-    finally:
-        # Ensure process and threads are properly cleaned up
-        try:
-            if process is not None:
-                kill_process_tree(process)
-        except:
-            pass
-
-        # Force cleanup threads if they're still running
-        try:
-            if stdout_thread is not None and stdout_thread.is_alive():
-                stdout_thread.join(timeout=1)
-            if stderr_thread is not None and stderr_thread.is_alive():
-                stderr_thread.join(timeout=1)
-        except:
-            pass
-
-        # Clean up the temporary file unless preservation is requested
-        if not preserve_temp_file:
-            try:
-                os.unlink(generated_file_path)
-                print(f"🗑️  Temporary file cleaned up: {generated_file_path}")
-            except:
-                pass
-
-
-def compare_results(result1, result2) -> bool:
-    """
-    Compare two results for equality, handling different types appropriately.
-
-    Args:
-        result1: First result
-        result2: Second result
-
-    Returns:
-        True if results are considered equal, False otherwise
+    A Dummy partitioner function to be used by ConfigFuzzer
     """
 
-    # Check if types match
-    if type(result1) != type(result2):
-        print(f"Type mismatch: {type(result1)} vs {type(result2)}")
-        return False
+    def __call__(
+        self, gm: torch.fx.GraphModule, joint_inputs: Sequence[object], **kwargs: Any
+    ) -> tuple[torch.fx.GraphModule, torch.fx.GraphModule]:
+        return min_cut_rematerialization_partition(gm, joint_inputs, **kwargs)
 
-    if isinstance(result1, torch.Tensor):
-        # For tensors, check shape, dtype, and values
-        if result1.shape != result2.shape:
-            print(f"Shape mismatch: {result1.shape} vs {result2.shape}")
-            return False
-
-        if result1.dtype != result2.dtype:
-            print(f"Dtype mismatch: {result1.dtype} vs {result2.dtype}")
-            return False
-
-        # Use torch.allclose for floating point comparison
-        try:
-            if result1.dtype in [
-                torch.float16,
-                torch.float32,
-                torch.float64,
-                torch.bfloat16,
-                torch.complex64,
-                torch.complex128,
-            ]:
-                if not torch.allclose(
-                    result1, result2, rtol=1e-5, atol=1e-8, equal_nan=True
-                ):
-                    print("Values differ (allclose failed)")
-                    print(
-                        f"Max absolute difference: {torch.max(torch.abs(result1 - result2)).item()}"
-                    )
-                    return False
-            else:
-                # For integer/bool tensors, use exact equality
-                if not torch.equal(result1, result2):
-                    print("Values differ (exact comparison)")
-                    return False
-        except Exception as e:
-            print(f"Error comparing tensor values: {e}")
-            return False
-
-        return True
-
-    elif isinstance(result1, (int, float, bool, complex)):
-        # For scalars, use appropriate comparison
-        if isinstance(result1, float):
-            # Use relative tolerance for floats
-            import math
-
-            if math.isnan(result1) and math.isnan(result2):
-                return True
-            elif math.isnan(result1) or math.isnan(result2):
-                return False
-            else:
-                return abs(result1 - result2) <= 1e-8 * max(
-                    abs(result1), abs(result2), 1.0
-                )
-        elif isinstance(result1, complex):
-            # Use tolerance for complex numbers
-            return abs(result1 - result2) <= 1e-8 * max(abs(result1), abs(result2), 1.0)
-        else:
-            # Exact equality for int and bool
-            return result1 == result2
-
-    else:
-        # For other types, use regular equality
-        return result1 == result2
+    def uuid(self) -> Optional[Any]:
+        return None
 
 
-def generate_code_only(seed: Optional[int] = None):
+T = TypeVar("T")
+
+
+class TypeExemplars:
     """
-    Generate operation stack and Python code without executing it.
-
-    Args:
-        seed: Random seed for reproducible generation
-
-    Returns:
-        tuple: (operation_stack, python_code, target_spec)
+    This class returns examples of a Type, given its class name.
     """
-    # Set seed for reproducible generation
-    if seed is not None:
-        import random
 
-        random.seed(seed)
-        torch.manual_seed(seed)
-
-    # Generate target specification and operation stack
-    target_spec = fuzz_spec()
-    operation_stack = fuzz_operation_stack(target_spec, max_depth=2, seed=seed)
-
-    # Convert operation stack to Python code
-    python_code = convert_stack_to_python_code(operation_stack, target_spec, seed=seed)
-
-    return operation_stack, python_code, target_spec
-
-
-def test_reproducible_generation():
-    """
-    Test that using the same seed produces identical code generation.
-    """
-    print("=== Testing Reproducible Generation ===")
-
-    test_seed = 42
-
-    # Generate code twice with the same seed
-    print(f"🔄 First generation with seed {test_seed}:")
-    try:
-        stack1, code1, spec1 = generate_code_only(seed=test_seed)
-        print(f"Target spec: {spec1}")
-        print(f"Operations: {len(stack1)}")
-        for i, op in enumerate(stack1):
-            print(f"  {i}: {op.op_name}")
-        print(f"Code length: {len(code1)} characters")
-        print("\n📄 Generated Python Code:")
-        print("=" * 50)
-        print(code1)
-        print("=" * 50)
-    except Exception as e:
-        print(f"❌ First generation failed: {e}")
-        return
-
-    print(f"\n🔄 Second generation with seed {test_seed}:")
-    try:
-        stack2, code2, spec2 = generate_code_only(seed=test_seed)
-        print(f"Target spec: {spec2}")
-        print(f"Operations: {len(stack2)}")
-        for i, op in enumerate(stack2):
-            print(f"  {i}: {op.op_name}")
-        print(f"Code length: {len(code2)} characters")
-        print("\n📄 Generated Python Code (should be identical):")
-        print("=" * 50)
-        print(code2)
-        print("=" * 50)
-    except Exception as e:
-        print(f"❌ Second generation failed: {e}")
-        return
-
-    # Compare results
-    print("\n🔍 Comparing generations:")
-
-    # Compare target specs
-    if spec1 == spec2:
-        print("✅ Target specs are identical")
-    else:
-        print(f"❌ Target specs differ: {spec1} vs {spec2}")
-
-    # Compare operation stacks
-    if len(stack1) == len(stack2):
-        print(f"✅ Operation stack lengths match ({len(stack1)})")
-
-        all_ops_match = True
-        for i, (op1, op2) in enumerate(zip(stack1, stack2)):
-            if (
-                op1.op_name == op2.op_name
-                and op1.input_specs == op2.input_specs
-                and op1.output_spec == op2.output_spec
-                and op1.depth == op2.depth
-            ):
-                print(f"  ✅ Operation {i}: {op1.op_name} matches")
-            else:
-                print(f"  ❌ Operation {i} differs:")
-                print(f"    First:  {op1}")
-                print(f"    Second: {op2}")
-                all_ops_match = False
-
-        if all_ops_match:
-            print("✅ All operations are identical")
-    else:
-        print(f"❌ Operation stack lengths differ: {len(stack1)} vs {len(stack2)}")
-
-    # Compare generated code
-    if code1 == code2:
-        print("✅ Generated code is identical")
-        print("🎉 Reproducible generation test PASSED!")
-    else:
-        print("❌ Generated code differs")
-        print("First few lines of difference:")
-
-        lines1 = code1.split("\n")
-        lines2 = code2.split("\n")
-
-        max_lines = max(len(lines1), len(lines2))
-        differences_shown = 0
-
-        for i in range(max_lines):
-            line1 = lines1[i] if i < len(lines1) else "<missing>"
-            line2 = lines2[i] if i < len(lines2) else "<missing>"
-
-            if line1 != line2:
-                print(f"  Line {i + 1}:")
-                print(f"    First:  '{line1}'")
-                print(f"    Second: '{line2}'")
-                differences_shown += 1
-
-                if differences_shown >= 5:
-                    print("    ... (showing first 5 differences)")
-                    break
-
-        print("❌ Reproducible generation test FAILED!")
-
-    # Test with different seed to ensure it produces different results
-    print(f"\n🔄 Third generation with different seed {test_seed + 1}:")
-    try:
-        stack3, code3, spec3 = generate_code_only(seed=test_seed + 1)
-        print(f"Target spec: {spec3}")
-        print(f"Operations: {len(stack3)}")
-        print(f"Code length: {len(code3)} characters")
-
-        if code1 != code3:
-            print("✅ Different seed produces different code (as expected)")
-        else:
-            print("⚠️  Different seed produced identical code (unusual but possible)")
-
-    except Exception as e:
-        print(f"❌ Third generation failed: {e}")
-
-
-def fuzz_and_test(seed: Optional[int] = None, max_depth: Optional[int] = None):
-    """
-    Test the new fuzz_and_execute function with seed and max_depth arguments.
-
-    Args:
-        seed: Starting seed for the test loop. If provided, each iteration uses seed + i
-        max_depth: Maximum depth for operation stack to use in all iterations
-    """
-    known_issues = {
-        "RuntimeError: self.stride(-1) must be 1 to view ComplexDouble as": "https://github.com/pytorch/pytorch/issues/162561",
-        "BooleanAtom not allowed in this context": "https://github.com/pytorch/pytorch/issues/160726",
+    TYPE_EXEMPLARS: dict[str, Any] = {
+        CustomGraphPass.__name__: DummyPass(),
+        CustomPartitionerFn.__name__: DummyPartitionerFn(),
+        torch.fx.graph.Graph.__name__: torch.fx.graph.Graph(),
+        BaseSchedulerNode.__name__: BaseSchedulerNode(None),  # type: ignore[arg-type]
     }
 
-    def known_issue(error_message):
-        return any(issue in error_message for issue in known_issues.keys())
+    @staticmethod
+    def example(t: type[T]) -> Optional[T]:
+        """
+        Return an example of a class.
+        """
+        return TypeExemplars.TYPE_EXEMPLARS.get(t.__name__, None)
 
-    print("=== Testing fuzz_and_execute with arguments ===")
-    if seed is not None:
-        print(f"Using starting seed: {seed}")
-    if max_depth is not None:
-        print(f"Using max_depth: {max_depth}")
-
-    for i in range(1000):
-        print(f"------------------ TEST iteration {i} ---------------")
-
-        # Use starting seed + iteration number for reproducible but varied results
-        iteration_seed = seed + i if seed is not None else None
-
-        iteration_seed, success, error_message = fuzz_and_execute(
-            seed=iteration_seed, max_depth=max_depth
-        )
-        if not success:
-            if known_issue(error_message):
-                print("Known issue skipped")
-                continue
-
-            print(f"Test failed with error: {error_message}")
-            return
+    @staticmethod
+    def contains(t: type[T]) -> bool:
+        return t.__name__ in TypeExemplars.TYPE_EXEMPLARS
 
 
-def quick_visualize_test(
-    seed: Optional[int] = None, max_depth: int = 3, title: Optional[str] = None
-):
-    """
-    Quick helper to generate and visualize an operation stack.
-
-    Args:
-        seed: Random seed for reproducible generation
-        max_depth: Maximum operation depth
-        title: Optional title for the visualization
-    """
+def check_halide_import() -> bool:
+    """checks if we have halide available"""
     try:
-        from visualize_stack import visualize_operation_stack
-    except ImportError:
-        print("⚠️  visualize_stack.py not found in current directory")
-        return
-
-    print(f"🎲 Generating operation stack (seed={seed}, max_depth={max_depth})...")
-
-    # Generate random target spec and operation stack
-    target_spec = fuzz_spec()
-    operation_stack = fuzz_operation_stack(target_spec, max_depth=max_depth, seed=seed)
-
-    print(f"🎯 Target: {target_spec}")
-    print(f"📚 Generated {len(operation_stack)} operations")
-
-    # Create descriptive title
-    if title is None:
-        title = f"Stack (seed={seed}, depth={max_depth}, {len(operation_stack)} ops)"
-
-    # Visualize
-    visualize_operation_stack(operation_stack, title)
-
-    return operation_stack
+        importlib.import_module("halide")
+        return True
+    except ModuleNotFoundError:
+        return False
 
 
-if __name__ == "__main__":
-    import argparse
+if check_halide_import():
+    CUDA_BACKEND = ["triton", "halide"]
+else:
+    CUDA_BACKEND = ["triton"]
 
-    # Set up command-line argument parsing
-    parser = argparse.ArgumentParser(
-        description="PyTorch Fuzzer - Generate and test random PyTorch operations"
-    )
-    parser.add_argument(
-        "--seed", type=int, help="Random seed for reproducible generation"
-    )
-    parser.add_argument(
-        "--max-depth", type=int, help="Maximum depth for operation stack (1-20)"
-    )
-    parser.add_argument("--test", action="store_true", help="Run the fuzzing test loop")
-    parser.add_argument(
-        "--single", action="store_true", help="Run a single fuzz_and_execute"
-    )
-    parser.add_argument(
-        "--log-level",
-        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
-        default="INFO",
-        help="Set the logging level (default: INFO)",
-    )
 
-    args = parser.parse_args()
+class Status(Enum):
+    """
+    The Status return value enum for Config Fuzzer
+    """
 
-    # Configure logging
-    logging.basicConfig(
-        level=getattr(logging, args.log_level), format="%(levelname)s: %(message)s"
-    )
-    logger = logging.getLogger(__name__)
+    # ConfigFuzzer skipped the test
+    SKIPPED = "skipped"
+    # ConfigFuzzer compiled and ran the test and function it passed.
+    PASSED = "passed"
+    # ConfigFuzzer failed to compile the test function
+    FAILED_COMPILE = "failed_compile"
+    # ConfigFuzzer compiled the test function and running it raised an exception
+    FAILED_RUN_COMPILE_EXCEPTION = "failed_run_compile_exception"
+    # ConfigFuzzer ran eager and it raised an exception
+    FAILED_RUN_EAGER_EXCEPTION = "failed_run_eager_exception"
+    # ConfigFuzzer compiled the test function, but the return value indicated that the compiled value didn't match the
+    # value from eager (or however else you set up the comparison in the test function)
+    FAILED_RUN_RETURN = "failed_run_return"
 
-    if args.single:
-        # Run a single execution with optional seed and max_depth
-        print("Running single fuzz_and_execute...")
-        seed, success, error_message = fuzz_and_execute(
-            seed=args.seed, max_depth=args.max_depth
+    def failing(self) -> bool:
+        """
+        Convenience method to check whether these status represent failure.
+        """
+        return (
+            self == Status.FAILED_COMPILE
+            or self == Status.FAILED_RUN_EAGER_EXCEPTION
+            or self == Status.FAILED_RUN_COMPILE_EXCEPTION
+            or self == Status.FAILED_RUN_RETURN
         )
-        print(f"Result: seed={seed}, success={success}")
-        if not success:
-            print(f"Error: {error_message}")
-    else:
-        # Default behavior - run the test loop (--test is now the default)
-        fuzz_and_test(seed=args.seed, max_depth=args.max_depth)
+
+
+# Sometime the types of configs aren't expressive enough to be captured by python type system, so the options can be
+# manually specified here:
+# TODO this needs to be indexed to the module, like inductor or dynamo, for name collisions
+TYPE_OVERRIDES: dict[str, list[Any]] = {
+    "cuda_backend": CUDA_BACKEND,
+    "post_grad_fusion_options": [
+        {
+            "batch_linear_post_grad": {
+                "shape_broadcast_batch_linear": True,
+                "fuse_nodes_with_same_users": True,
+            },
+            "batch_aten_mul": {"fuse_nodes_with_same_parent": False},
+            "batch_aten_sigmoid": {"fuse_nodes_with_same_parent": True},
+            "batch_aten_add": {"fuse_nodes_with_same_parent": True},
+            "normalization_aten_pass": {},
+            "unbind_stack_aten_pass": {},
+        },
+        {
+            "batch_aten_add": {},
+            "batch_aten_mul": {},
+            "batch_aten_sub": {},
+            "batch_aten_div": {},
+            "group_linear": {"require_fbgemm": True},
+        },
+    ],
+    "autoheuristic_collect": ["pad_mm", "mixed_mm"],
+    "autoheuristic_use": ["pad_mm", "mixed_mm"],
+    "traceable_tensor_subclasses": [OrderedSet()],
+    "nontraceable_tensor_subclasses": [OrderedSet()],
+}
+SamplingType = Callable[[str, type[Any], Any], Any]
+
+
+class SamplingMethod(Enum):
+    """
+    This class handles the process of assigning concrete values to type annotations. So a type annotation of
+    ```python
+    foo: Optional[int] = None
+    ```
+    Will be assigned an int if the dispatch function gets TOGGLE, or a 50/50 split between an int and None if it gets
+    RANDOM.
+    """
+
+    TOGGLE = "TOGGLE"  # toggle to the opposite value
+    RANDOM = "RANDOM"  # randomly choose an option
+
+    @staticmethod
+    def _generate_value_for_type(
+        random_sample: bool, field_name: str, type_hint: type[Any], default: Any
+    ) -> Any:
+        """
+        Generates a value of a type based on the setting.
+        """
+        # look for name in type overrides
+        if field_name in TYPE_OVERRIDES:
+            return random.choice(TYPE_OVERRIDES[field_name])
+
+        if type_hint == bool:
+            return random.choice([True, False]) if random_sample else not default
+        elif type_hint == int:
+            # NOTE initially tried to use negation of the value, but it doesn't work because most types are ints
+            # when they should be natural numbers + zero. Python types to cover these values aren't super convenient.
+            return random.randint(0, 1000)
+        elif type_hint == float:
+            return random.uniform(0, 1000)
+        elif type_hint == str:
+            characters = string.ascii_letters + string.digits + string.punctuation
+            return "".join(
+                random.choice(characters) for _ in range(random.randint(1, 20))
+            )
+        elif is_type(type_hint, list):
+            elem_type = getattr(
+                type_hint,
+                "__args__",
+                [type(default[0])] if default and len(default) else [type(None)],
+            )[0]
+            new_default = default[0] if default and len(default) > 0 else None
+            return [
+                SamplingMethod._generate_value_for_type(
+                    random_sample, field_name, elem_type, new_default
+                )
+                for _ in range(random.randint(1, 3))
+            ]
+        elif is_type(type_hint, set):  # noqa: set_linter
+            indexable = list(default)
+            elem_type = getattr(
+                type_hint,
+                "__args__",
+                [type(indexable[0])] if default and len(default) else [type(None)],
+            )[0]
+            new_default = indexable[0] if default and len(default) > 0 else None
+            return {  # noqa: set_linter
+                SamplingMethod._generate_value_for_type(
+                    random_sample, field_name, elem_type, new_default
+                )
+                for _ in range(random.randint(1, 3))
+            }
+        elif is_type(type_hint, OrderedSet):
+            indexable = list(default)
+            elem_type = getattr(
+                type_hint,
+                "__args__",
+                [type(indexable[0])] if default and len(default) else [type(None)],
+            )[0]
+            new_default = indexable[0] if default and len(default) > 0 else None
+            return OrderedSet(
+                [
+                    SamplingMethod._generate_value_for_type(
+                        random_sample, field_name, elem_type, new_default
+                    )
+                    for _ in range(random.randint(1, 3))
+                ]
+            )
+        elif is_type(type_hint, dict):
+            key_type, value_type = getattr(
+                type_hint,
+                "__args__",
+                map(type, next(iter(default.items())))
+                if (default is not None and len(default))
+                else (type(None), type(None)),
+            )
+            if default is not None and len(default.items()) > 0:
+                default_key, default_val = next(iter(default.items()))
+            else:
+                default_key, default_val = None, None
+            return {
+                SamplingMethod._generate_value_for_type(
+                    random_sample, field_name, key_type, default_key
+                ): SamplingMethod._generate_value_for_type(
+                    random_sample, field_name, value_type, default_val
+                )
+                for _ in range(random.randint(0, 3))
+            }
+        elif is_type(type_hint, Union):
+            # do whatever is not the type of default
+            try:
+                assert len(type_hint.__args__) > 1
+            except AttributeError as err:
+                raise ValueError("Union type with no args") from err
+            if random_sample:
+                new_type = random.choice(type_hint.__args__)
+            else:
+                new_type = random.choice(
+                    [t for t in type_hint.__args__ if t != type(default)]
+                )
+            try:
+                new_default = new_type()
+            except Exception:  # noqa: E722
+                # if default constructor doesn't work, try None
+                new_default = None
+
+            return SamplingMethod._generate_value_for_type(
+                random_sample, field_name, new_type, new_default
+            )
+        elif is_type(type_hint, tuple):
+            args = getattr(
+                type_hint,
+                "__args__",
+                tuple(map(type, default)),
+            )
+            zipped = zip(args, default)
+            return tuple(
+                map(  # noqa: C417
+                    lambda x: SamplingMethod._generate_value_for_type(
+                        random_sample, field_name, x[0], x[1]
+                    ),
+                    zipped,
+                )
+            )
+        elif is_type(type_hint, Literal):
+            try:
+                if random_sample:
+                    return random.choice(type_hint.__args__)
+                else:
+                    choices = [t for t in type_hint.__args__ if t != default]
+                    if choices:
+                        return random.choice(choices)
+                    else:
+                        return default
+            except AttributeError as err:
+                raise ValueError("Literal type with no args") from err
+        elif is_optional_type(type_hint):
+            try:
+                elem_type = type_hint.__args__[0]
+            except AttributeError as err:
+                raise ValueError("Optional type with no args") from err
+            if random_sample:
+                return random.choice(
+                    [
+                        None,
+                        SamplingMethod._generate_value_for_type(
+                            random_sample, field_name, elem_type, default
+                        ),
+                    ]
+                )
+            else:
+                if default is None:
+                    return SamplingMethod._generate_value_for_type(
+                        random_sample, field_name, elem_type, None
+                    )
+                else:
+                    return None
+        elif type_hint is type(None):
+            return None
+        elif is_callable_type(type_hint):
+            try:
+                return_type = list(type_hint.__args__)[-1]
+            except AttributeError as err:
+                raise ValueError("Callable type with no args") from err
+
+            @wraps(lambda *args, **kwargs: None)
+            def dummy_function(*args, **kwargs):  # type: ignore[no-untyped-def]
+                return SamplingMethod._generate_value_for_type(
+                    random_sample, field_name, return_type, None
+                )
+
+            return dummy_function
+        elif type_hint == torch._ops.OpOverload:
+            return torch.ops.aten.add.default
+        elif TypeExemplars.contains(type_hint):
+            return TypeExemplars.example(type_hint)
+        elif type_hint == Any:
+            return 1 if not default == 1 else 2
+        else:
+            raise ValueError(f"Unable to process type {type_hint}. PRs welcome :)")
+
+    @staticmethod
+    def dispatch(sm: "SamplingMethod") -> SamplingType:
+        """
+        Returns a function that will generate values from a type, based on the SamplingMethod passed in.
+        """
+        if sm == SamplingMethod.RANDOM:
+            return partial(SamplingMethod._generate_value_for_type, True)
+        elif sm == SamplingMethod.TOGGLE:
+            return partial(SamplingMethod._generate_value_for_type, False)
+        else:
+            raise ValueError(f"malformed sampling method: {sm}")
+
+
+class Default:
+    """
+    Singleton default object that will cause the ConfigFuzzer to always use the default value set in the config.
+    """
+
+
+DEFAULT = Default()
+
+# The combination of config settings being set (based on their strings)
+ComboType = tuple[str, ...]
+
+
+class ResultType:
+    """
+    The mapping of the combo strings to the result status after running the config fuzzer.
+    """
+
+    _vals: dict[ComboType, Status]
+
+    def __repr__(self) -> str:
+        return f"ResultType[{self._vals}]"
+
+    def __init__(self) -> None:
+        self._vals = {}
+
+    def __len__(self) -> int:
+        return len(self._vals)
+
+    def num_ran(self) -> int:
+        """
+        Returns how many combos actually ran (weren't skipped).
+        """
+        ret = len(self._vals)
+        for status in self._vals.values():
+            if status == Status.SKIPPED:
+                ret -= 1
+        return ret
+
+    def set(self, combo: ComboType, status: Status) -> None:
+        combo = tuple(sorted(combo))
+        self._vals[combo] = status
+
+    def lookup(self, combo: ComboType) -> Optional[Status]:
+        combo = tuple(sorted(combo))
+        return self._vals.get(combo, None)
+
+    def keys(self) -> KeysView[ComboType]:
+        return self._vals.keys()
+
+
+# Type that maps config strings to their default value
+ConfigType = dict[str, Any]
+# Callable that returns a bool
+FactoryOutputType = Callable[[], bool]
+# input function factory
+FactoryType = Callable[[], FactoryOutputType]
+
+# Why are some configs disabled by default? Because if we don't the fuzzer produces uninteresting results.
+# It will always hone-in on these failures, even with the most basic model, making it useless for
+#   debugging more complex models.
+#
+# More explicit explanations are below:
+# Out of Scope: We can't fuzz, say, the cuda version because that comes from the environment and will
+#   produce a failure if not aligned with env.
+# Known Failure: Disabled due to known failure. Hopefully re-enable. Known failures are listed in the
+#   docstring of this file.
+# Required: Required for the fuzzer to operate (removing caching, etc.)
+# FSDP: Flag meant for FSDP that fails in non FSDP envs. Re-enable these if you're testing FSDP.
+# Typing: disabled because the type annotation of the config isn't constrained enough to produce
+#   meaningful fuzz values. These could be improved.
+# Timing: These take too long to compile, feel free to enable.
+MODULE_DEFAULTS: dict[str, ConfigType] = {
+    "torch._inductor.config": {
+        "force_disable_caches": True,  # Required
+        "cpp.cxx": DEFAULT,  # Out of Scope
+        "TYPE_CHECKING": DEFAULT,  # Not a config
+        "max_autotune_pointwise": DEFAULT,  # Timing
+        "max_autotune_gemm": DEFAULT,  # Timing, re-enable when autotune speed improvements merged.
+        "max_autotune_gemm_backends": DEFAULT,  # Timing
+        "max_autotune_conv_backends": DEFAULT,  # Timing
+        "max_autotune_gemm_search_space": DEFAULT,  # Timing
+        "max_autotune_subproc_result_timeout_seconds": DEFAULT,  # Timing
+        "max_autotune_subproc_graceful_timeout_seconds": DEFAULT,  # Timing
+        "max_autotune_subproc_terminate_timeout_seconds": DEFAULT,  # Timing
+        "aot_inductor.presets": DEFAULT,  # Typing
+        "cuda.arch": DEFAULT,  # Out of Scope
+        "cuda.version": DEFAULT,  # Out of Scope
+        "cuda.cutlass_dir": DEFAULT,  # Out of Scope
+        "cuda.cuda_cxx": DEFAULT,  # Out of Scope
+        "rocm.arch": DEFAULT,  # Out of Scope
+        "rocm.ck_supported_arch": DEFAULT,  # Out of Scope
+        "rocm.ck_dir": DEFAULT,  # Out of Scope
+        "rocm.rocm_home": DEFAULT,  # Out of Scope
+        "check_stack_no_cycles_TESTING_ONLY": DEFAULT,  # Testing
+        "sleep_sec_TESTING_ONLY": DEFAULT,  # Testing
+        "triton.inject_relu_bug_TESTING_ONLY": DEFAULT,  # Testing
+        "reorder_for_compute_comm_overlap": DEFAULT,  # FSDP
+        "enabled_metric_tables": DEFAULT,  # Typing
+        "triton.debug_sync_graph": DEFAULT,  # Known Failure
+        "triton.debug_sync_kernel": DEFAULT,  # Known Failure
+        "profile_bandwidth_regex": DEFAULT,  # Known Failure
+        "disable_cpp_codegen": DEFAULT,  # Known Failure
+        "trace.save_real_tensors": DEFAULT,  # Known Failure
+        "pre_grad_fusion_options": DEFAULT,  # Typing
+        "external_matmul": DEFAULT,  # Typing, need to add this to type overrides or type exemplars.
+        "test_configs.autotune_choice_name_regex": DEFAULT,  # Typing
+        "test_configs.autotune_choice_desc_regex": DEFAULT,  # Typing
+        "cpp.enable_floating_point_contract_flag": DEFAULT,  # Typing
+        "post_grad_custom_pre_pass": DEFAULT,  # Typing
+        "post_grad_custom_post_pass": DEFAULT,  # Typing
+        "reorder_for_compute_comm_overlap_passes": DEFAULT,  # Typing
+        "joint_custom_post_pass": DEFAULT,  # Typing
+        "joint_custom_pre_pass": DEFAULT,  # Typing
+        "pre_grad_custom_pass": DEFAULT,  # Typing
+        "custom_partitioner_fn": DEFAULT,  # Typing
+    },
+    "torch._dynamo.config": {
+        "traceable_tensor_subclasses": DEFAULT,  # Typing
+        "nontraceable_tensor_subclasses": DEFAULT,  # Typing
+        "compiled_autograd_kwargs_override": DEFAULT,  # Typing
+        "fail_on_recompile_limit_hit": DEFAULT,  # fails in combo with suppress_errors
+        "suppress_errors": DEFAULT,
+        "caching_precompile": False,  # Required
+    },
+}
+
+
+class ConfigFuzzer:
+    """
+    This tool makes it easy to search through config state-space with a minimal reproduction or test, either for
+      debugging or just bug hunting.
+    It has two entry points:
+     - bisect, which randomly flips configs and tries to find the minimal reproduction upon failure.
+     - fuzz_n_tuple, which tries every combination of n configs. This grows quickly as a function of n, so beware.
+    bisect is recommended, but fuzz_n_tuple can give you peace of mind that a new config will compose with
+      every other config.
+
+    The main interface is a function factory that will return Callables to be torch.compiled. This function factory
+      should return a test function when it's called. Said test function returns a boolean, which determines whether
+      the ConfigFuzzer considers it a successful run or not. Throwing an exception from within the function will be
+      considered a failure as well.
+
+    # Example usage:
+
+    ```python
+    import torch._inductor.config as cfg
+
+
+    def create_simple_test_model_gpu() -> FactoryOutputType:
+        batch_size = 32
+        seq_length = 50
+        hidden_size = 768
+
+        def test_fn() -> bool:
+            inp = torch.randn(batch_size, seq_length, hidden_size, device="cuda")
+            weight = torch.randn(hidden_size, hidden_size, device="cuda")
+            matmul_output = inp @ weight
+            final_output = torch.nn.LayerNorm(hidden_size, device="cuda")(matmul_output)
+            return True
+
+        return test_fn
+
+
+    fuzzer = ConfigFuzzer(cfg, create_simple_test_model_gpu, seed=2)
+
+    # Test every pair of configs:
+    results = fuzzer.fuzz_n_tuple(n, max_combinations=10000000)
+
+    visualize_results(n, results)
+
+    # Test random configs with bisection:
+    ret = fuzzer.bisect(num_attempts=10)
+
+    # reproduce a failing config
+    fuzzer.reproduce(
+        [{"triton.autotune_pointwise": ..., "coordinate_descent_tuning": ...}]
+    )
+    ```
+
+    The list of known failures on inductor config are:
+    cpp_wrapper, triton_debug_sync_graph
+    cpp_wrapper, triton_debug_sync_kernel
+    cpp_wrapper, disable_cpp_codegen
+    combo_kernels, benchmark_combo_kernel, profile_bandwidth, profile_bandwidth_regex
+    trace.enabled, trace.save_real_tensors
+    """
+
+    sample: SamplingType
+    default: ConfigType
+
+    def __init__(
+        self,
+        config_module: ConfigModule,
+        test_model_fn_factory: FactoryType,
+        seed: int,
+        default: Optional[ConfigType] = None,
+        sm: SamplingMethod = SamplingMethod.TOGGLE,
+        test_timeout: int = 3600,
+    ):
+        """
+        Args:
+            config_module: The module containing the configs to fuzz
+            test_model_fn_factory: Function that returns a test model, which runs and returns True if successful, or
+              the outputs if they should be compared with eager
+            seed: Randomness seed.
+            default: Default values for the config. Inductor has preset based on know failures.
+            sm: How type value samples are generated, default TOGGLE.
+            test_timeout: max time a test can take.
+        """
+        if sys.version_info < (3, 10):
+            log.error("Only python 3.10 and later supported")
+            return
+        self.seed = seed
+        self.test_timeout = test_timeout
+        self.detailed_results: dict[ComboType, dict[str, Any]] = {}
+        self.config_module = config_module
+        self.test_model_fn_factory = test_model_fn_factory
+        self.fields: dict[str, _ConfigEntry] = self.config_module._config
+        self.sample = SamplingMethod.dispatch(sm)
+
+        if default is None:
+            if self.config_module.__name__ in MODULE_DEFAULTS:
+                self.default = MODULE_DEFAULTS[self.config_module.__name__]
+            else:
+                raise ValueError("No default passed to ConfigFuzzer.")
+        else:
+            self.default = default
+
+    def __repr__(self) -> str:
+        return (
+            f"ConfigFuzzer(config_module={self.config_module}, "
+            f"test_model_fn_factor={self.test_model_fn_factory}, seed={self.seed}, default={self.default})"
+        )
+
+    def _set_config(self, field_name: str, value: Any) -> None:
+        """Set a config value in the module."""
+        setattr(self.config_module, field_name, value)
+
+    def _reset_configs(self) -> None:
+        """Reset all configs to their default values."""
+        for field_name, field_obj in self.fields.items():
+            self._set_config(field_name, field_obj.default)
+
+    def new_config(self) -> ConfigType:
+        """creates a new config from the default"""
+        ret = {
+            name: val if val != DEFAULT else self.fields[name].default
+            for name, val in self.default.items()
+        }
+        return ret
+
+    def reproduce(self, configs: Sequence[ConfigType]) -> ResultType:
+        """entrypoint to reproduce any failure"""
+        results = ResultType()
+        for conf in configs:
+            self._reproduce_single_helper(conf, results)
+        return results
+
+    def _reproduce_single_helper(self, conf: ConfigType, results: ResultType) -> None:
+        print(f"Starting repro of {conf}")
+        new_config = self.new_config()
+        new_config.update(conf)
+        self.test_config(results, new_config)
+        print(f"Status of {conf}:\n{results.lookup(tuple(conf.keys()))}")
+
+    def reproduce_single(self, config: ConfigType) -> ResultType:
+        results = ResultType()
+        self._reproduce_single_helper(config, results)
+        return results
+
+    def _fuzz_helper(self, results: ResultType, combo: ComboType) -> Status:
+        print(combo)
+        if st := results.lookup(combo):
+            # we already processed this config
+            return st
+
+        config = self.new_config()
+
+        skip = False
+        for field_name in combo:
+            if field_name in config:
+                # don't break here because we need to build the config dict
+                skip = True
+            if field_name.startswith("_"):
+                skip = True
+            field = self.fields[field_name]
+            value = self.sample(field_name, field.value_type, field.default)
+            config[field_name] = value
+        if skip:
+            results.set(combo, Status.SKIPPED)
+            return Status.SKIPPED
+
+        return self.test_config(results, config)
+
+    def fuzz_n_tuple(self, n: int, max_combinations: int = 1000) -> ResultType:
+        """
+        Test every combination of n configs.
+
+        returns a dict of this shape: {(config-1, config-2... config-n): status}
+        """
+        results = ResultType()
+        print(f"Starting {n}-tuple testing with seed {self.seed}")
+        random.seed(self.seed)
+
+        for combo in itertools.combinations(self.fields, n):
+            st = self._fuzz_helper(results, combo)
+            if st != Status.SKIPPED:
+                max_combinations -= 1
+                if max_combinations <= 0:
+                    print("Reached maximum combinations limit")
+                    break
+
+        return results
+
+    def save_state(self, filename: str = "fuzzer_state.pkl") -> None:
+        """Save the current fuzzer state to a file"""
+        with open(filename, "wb") as f:
+            pickle.dump(
+                {"results": self.results, "detailed_results": self.detailed_results}, f
+            )
+
+    def load_state(self, filename: str = "fuzzer_state.pkl") -> None:
+        """Load fuzzer state from a file"""
+        with open(filename, "rb") as f:
+            state = pickle.load(f)
+            self.results = state["results"]
+            self.detailed_results = state.get("detailed_results", {})
+
+    def timeout_handler(self, signum: int, frame: Optional[FrameType]) -> None:
+        raise TimeoutError("Test execution timed out")
+
+    def test_config(self, results: ResultType, config: ConfigType) -> Status:
+        """
+        Tests a config by calling the function produced by the factory function.
+        """
+        original_handler = signal.signal(signal.SIGALRM, self.timeout_handler)
+        signal.alarm(self.test_timeout)
+        print(f"Testing config {config}")
+        config_tuple = tuple(config.keys())
+        if ret := results.lookup(config_tuple):
+            signal.signal(signal.SIGALRM, original_handler)
+            return ret
+
+        def print_config() -> None:
+            for field, value in config.items():
+                print(f"{field} = {value}")
+
+        def get_error_info(exc: Exception) -> dict[str, Any]:
+            return {
+                "exception": str(exc),
+                "traceback": traceback.format_exc(),
+                "config": config.copy(),
+            }
+
+        def handle_return(
+            message: str,
+            return_status: Status,
+            print_traceback: bool,
+            exc: Optional[Exception],
+        ) -> Status:
+            signal.signal(signal.SIGALRM, original_handler)
+            print(f"{message} with config combination:")
+            print_config()
+            if exc:
+                self.detailed_results[config_tuple] = get_error_info(exc)
+            if print_traceback:
+                traceback.print_exc()
+            results.set(config_tuple, return_status)
+            return return_status
+
+        # reset config
+        torch._dynamo.reset()
+        self._reset_configs()
+        for name, value in config.items():
+            self._set_config(name, value)
+
+        # try running eager
+        test_model_fn = self.test_model_fn_factory()
+        try:
+            test_model_fn()
+        except Exception as exc:  # noqa: E722
+            return handle_return(
+                "Eager exception", Status.FAILED_RUN_EAGER_EXCEPTION, True, exc
+            )
+
+        # try compilation
+        try:
+            test_model_fn2 = self.test_model_fn_factory()
+            comp = torch.compile(test_model_fn2, backend="inductor")
+        except Exception as exc:  # noqa: E722
+            return handle_return(
+                "Exception compiling", Status.FAILED_COMPILE, True, exc
+            )
+
+        # try running compiled
+        try:
+            compile_result = comp()
+        except Exception as exc:  # noqa: E722
+            return handle_return(
+                "Exception running compiled",
+                Status.FAILED_RUN_COMPILE_EXCEPTION,
+                True,
+                exc,
+            )
+
+        # bool return value means don't compare with eager
+        if not compile_result:
+            return handle_return(
+                "Function returned False", Status.FAILED_RUN_RETURN, False, None
+            )
+        else:
+            return handle_return("Function succeeded", Status.PASSED, False, None)
+
+    def bisect(self, num_attempts: int = 100, p: float = 0.5) -> list[ConfigType]:
+        """
+        Test configs and bisect to minimal failing configuration.
+        """
+        print(f"Starting random testing with bisection, seed {self.seed}, and p {p}")
+        random.seed(self.seed)
+        self._reset_configs()
+        results = ResultType()
+        ret: list[ConfigType] = []
+
+        for attempt in range(num_attempts):
+            print(f"Random attempt {attempt + 1}/{num_attempts}")
+
+            config = self.new_config()
+
+            for field_name, config_entry in self.fields.items():
+                if (
+                    field_name not in config
+                    and not field_name.startswith("_")
+                    and "TESTING_ONLY" not in field_name
+                    and random.random() < p
+                ):
+                    value = self.sample(
+                        field_name, config_entry.value_type, config_entry.default
+                    )
+                    config[field_name] = value
+
+            status = self.test_config(results, config)
+            if status not in OrderedSet([Status.PASSED, Status.SKIPPED]):
+                if minimal_failing_config := self._bisect_failing_config(
+                    results, config
+                ):
+                    print(f"Minimum failing config: {minimal_failing_config}")
+                    ret.append(minimal_failing_config)
+
+        return ret
+
+    def _bisect_failing_config(
+        self, results: ResultType, failing_config: ConfigType
+    ) -> Optional[ConfigType]:
+        return self._bisect_failing_config_helper(results, list(failing_config.items()))
+
+    def _bisect_failing_config_helper(
+        self, results: ResultType, failing_config: list[tuple[str, Any]]
+    ) -> Optional[ConfigType]:
+        """
+        Bisect a failing configuration to find minimal set of configs that cause failure.
+
+        Splits it into halves, then fourths, then tries dropping configs one-by-one.
+        """
+        print(f"bisecting config: {failing_config}")
+
+        if not failing_config:
+            return None
+
+        def test(x: list[tuple[str, Any]]) -> Status:
+            d = dict(x)
+            result = self.test_config(results, d)
+            return result
+
+        if len(failing_config) <= 1:
+            return dict(failing_config) if test(failing_config).failing() else None
+
+        random.shuffle(failing_config)
+
+        mid = len(failing_config) // 2
+        first_half = failing_config[:mid]
+        second_half = failing_config[mid:]
+        if test(first_half).failing():
+            return self._bisect_failing_config_helper(results, first_half)
+        if test(second_half).failing():
+            return self._bisect_failing_config_helper(results, second_half)
+
+        if len(failing_config) >= 8:
+            low = len(failing_config) // 4
+            high = mid + low
+            quart1 = failing_config[low:]
+            if test(quart1).failing():
+                return self._bisect_failing_config_helper(results, quart1)
+            quart2 = failing_config[:low] + second_half
+            if test(quart2).failing():
+                return self._bisect_failing_config_helper(results, quart2)
+            quart3 = first_half + failing_config[:high]
+            if test(quart3).failing():
+                return self._bisect_failing_config_helper(results, quart3)
+            quart4 = failing_config[high:]
+            if test(quart4).failing():
+                return self._bisect_failing_config_helper(results, quart4)
+        # try dropping one value at a time
+        for i in range(len(failing_config)):
+            new_list = [x for j, x in enumerate(failing_config) if j != i]
+            if test(new_list).failing():
+                return self._bisect_failing_config_helper(results, new_list)
+        # we have the minimal set
+        return dict(failing_config)
+
+
+def visualize_results(
+    n: int, results: ResultType, filename: str = "results.html"
+) -> None:
+    """
+    Creates an HTML document representing the results of running the fuzzer with fuzz_n_tuple, with n = 2.
+    """
+    # TODO support more dimensions
+    assert n == 2
+    assert len(results) > 0
+
+    input_set: OrderedSet[str] = OrderedSet({})
+    for key in results.keys():
+        input_set.add(key[0])
+        input_set.add(key[1])
+    input_list = sorted(input_set)
+
+    # Start the HTML content
+    html_content = """
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title> Fuzzer Visualization</title>
+        <style>
+            table {
+                border-collapse: collapse;
+                width: 50%;
+                margin: 20px auto;
+            }
+            th, td {
+                border: 1px solid #ddd;
+                padding: 8px;
+                text-align: center;
+            }
+            th {
+                background-color: #f2f2f2;
+            }
+            .skipped {
+                background-color: yellow;
+            }
+            .passed {
+                background-color: green;
+                color: white;
+            }
+            .failed {
+                background-color: red;
+                color: white;
+            }
+        </style>
+    </head>
+    <body>
+        <h2 style="text-align: center;">Fuzzer Visualization</h2>
+        <table>
+        <thead>
+    """
+
+    html_content += "<tr><th>\\</th>"
+    for col_name in input_list:
+        col = "<br>".join(col_name)
+        html_content += f"<th>{col}</th>"
+    html_content += "</tr></thead><tbody>"
+
+    # Add table rows
+    for row_name in input_list:
+        html_content += f"<tr><th>{row_name}</th>"
+        for col_name in input_list:
+            # Determine the status class for the cell
+            status_enum = results.lookup((row_name, col_name))
+            status_class = ""
+            status_val = ""
+            if status_enum == Status.SKIPPED:
+                status_class = "skipped"
+                status_val = "-"
+            elif status_enum == Status.PASSED:
+                status_class = "passed"
+                status_val = "O"
+            elif status_enum == Status.FAILED_RUN_EAGER_EXCEPTION:
+                status_class = "failed"
+                status_val = "e"
+            elif status_enum == Status.FAILED_RUN_COMPILE_EXCEPTION:
+                status_class = "failed"
+                status_val = "E"
+            elif status_enum == Status.FAILED_RUN_RETURN:
+                status_class = "failed"
+                status_val = "R"
+            elif status_enum == Status.FAILED_COMPILE:
+                status_class = "failed"
+                status_val = "C"
+            else:
+                status_class = "skipped"
+                status_val = "-"
+
+            html_content += f'<td class="{status_class}">{status_val}</td>'
+        html_content += "</tr>"
+
+    html_content += """
+        </tbody>
+        </table>
+    </body>
+    </html>
+    """
+
+    with open(filename, "w") as file:
+        file.write(html_content)
