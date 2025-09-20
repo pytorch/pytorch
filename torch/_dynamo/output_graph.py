@@ -431,7 +431,6 @@ class OutputGraph(OutputGraphGuardsState):
         f_code: CodeType,
         torch_function_mode_stack: list[torch.overrides.TorchFunctionMode],
         package: Optional["CompilePackage"],
-        one_graph: bool = False,
     ) -> None:
         super().__init__(
             local_scope,
@@ -488,10 +487,8 @@ class OutputGraph(OutputGraphGuardsState):
             # TrackedFake instances may have its metadata changed throughout
             # the program execution.
             tracked_fakes=self.tracked_fakes,
-            # We want to allow capture scalar outputs and allow_dynamic_output_shape_ops when fullgraph=True
-            allow_scalar_outputs=one_graph or config.capture_scalar_outputs,
-            allow_dynamic_output_shape_ops=one_graph
-            or config.capture_dynamic_output_shape_ops,
+            allow_scalar_outputs=config.capture_scalar_outputs,
+            allow_dynamic_output_shape_ops=config.capture_dynamic_output_shape_ops,
             prefer_deferred_runtime_asserts_over_guards=config.prefer_deferred_runtime_asserts_over_guards,
             co_fields=self.co_fields,
         )
