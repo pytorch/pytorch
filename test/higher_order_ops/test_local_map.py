@@ -314,6 +314,108 @@ class GraphModule(torch.nn.Module):
                         # can still be in fw_outs for post-graph bytecode
                         self.assertFalse(node.name in bw_ins)
 
+    @requires_cuda_and_triton
+    @unittest.skipIf(
+        not torch.distributed.is_available(), "Torch distributed not available."
+    )
+    def test_sac_deferred(self):
+        # This test is in a bit of a weird state, it needs compositional compile API
+        # so that we can defer inlining for up until AOTAutograd stage 1.
+        # Then we should be inlined by stage 2. But we can't do that today.
+
+        cp_decorated, cp_function = get_local_mapped_functions()
+        bs = 8 * 1
+        dim1 = 96
+        dim2 = dim1 * 4
+        nheads = 16
+        seq_len = 16
+
+        from torch._dynamo.testing import AotEagerAndRecordGraphs, normalize_gm
+
+        backend = AotEagerAndRecordGraphs()
+
+        model = create_model(
+            cp_decorated, nheads, dim1, dim2, sac_policy=save_scalar_muls
+        ).cuda()
+        inputs = (torch.randn(bs, seq_len, dim1, requires_grad=True).cuda(),)
+        try:
+            with (
+                LocalMapWrappedHigherOrderVariable.enable(),
+                torch._higher_order_ops.local_map.defer_inlining(),
+            ):
+                out = torch.compile(model, backend=backend)(*inputs)
+            out.sum().backward()
+        except AttributeError as e:
+            # TODO: get rid of this when we can install as a subgraph
+            self.assertTrue(
+                "module 'torch._higher_order_ops.local_map' has no attribute 'call_local_map'"
+                in str(e)
+            )
+
+        model = create_model(
+            cp_function, nheads, dim1, dim2, sac_policy=save_scalar_muls
+        ).cuda()
+        inputs = (torch.randn(bs, seq_len, dim1, requires_grad=True).cuda(),)
+        try:
+            with (
+                LocalMapWrappedHigherOrderVariable.enable(),
+                torch._higher_order_ops.local_map.defer_inlining(),
+            ):
+                out = torch.compile(model, backend=backend)(*inputs)
+            out.sum().backward()
+        except AttributeError as e:
+            # TODO: get rid of this when we can install as a subgraph
+            self.assertTrue(
+                "module 'torch._higher_order_ops.local_map' has no attribute 'call_local_map'"
+                in str(e)
+            )
+
+        # TODO: re-enable tests on backward when we can install as a subgraph
+        if not TEST_WITH_CROSSREF:
+            self.assertEqual(len(backend.graphs), 2)
+            self.assertEqual(
+                normalize_gm(backend.graphs[0].print_readable(print_output=False)),
+                normalize_gm(backend.graphs[1].print_readable(print_output=False)),
+            )
+            self.assertEqual(
+                normalize_gm(backend.fw_graphs[0].print_readable(print_output=False)),
+                normalize_gm(backend.fw_graphs[1].print_readable(print_output=False)),
+            )
+            # self.assertEqual(
+            #     normalize_gm(backend.bw_graphs[0].print_readable(print_output=False)),
+            #     normalize_gm(backend.bw_graphs[1].print_readable(print_output=False)),
+            # )
+            self.assertEqual(
+                len(
+                    backend.graphs[0].graph.find_nodes(
+                        op="call_function",
+                        target=torch._higher_order_ops.wrap.tag_activation_checkpoint,
+                    )
+                ),
+                1,
+            )
+            # TODO: add joint to the testing compile backend
+            fw_outs = {
+                n.name
+                for n in backend.fw_graphs[0].graph.find_nodes(op="output")[0].args[0]
+            }
+            # bw_ins = {
+            #     n.name for n in backend.bw_graphs[0].graph.find_nodes(op="placeholder")
+            # }
+            for node in backend.fw_graphs[0].graph.nodes:
+                if "recompute" in node.meta:
+                    expected = save_scalar_muls(None, node.target, None, None)
+                    actual = node.meta["recompute"]
+                    self.assertEqual(expected, actual)
+                    if actual == torch.utils.checkpoint.CheckpointPolicy.MUST_SAVE:
+                        self.assertTrue(node.name in fw_outs)
+                    #     self.assertTrue(node.name in fw_outs and node.name in bw_ins)
+                    # elif (
+                    #     actual == torch.utils.checkpoint.CheckpointPolicy.MUST_RECOMPUTE
+                    # ):
+                    #     # can still be in fw_outs for post-graph bytecode
+                    #     self.assertFalse(node.name in bw_ins)
+
 
 if __name__ == "__main__":
     run_tests()
