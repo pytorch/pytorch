@@ -1,115 +1,27 @@
+# mypy: ignore-errors
 import random
-
-from tensor_fuzzer import (
-    fuzz_tensor_size,
-    fuzz_torch_tensor_type,
-    fuzz_valid_stride,
-    ScalarSpec,
-    Spec,
-    TensorSpec,
-)
 
 import torch
 
 
-class ArgumentTracker:
-    """
-    Tracks existing arguments by their specifications to enable argument reuse.
-
-    When we need a new argument, we can choose to either:
-    1. Reuse an existing argument of the same type
-    2. Create a new argument
-
-    This reduces redundant argument generation and tests more realistic scenarios
-    where the same inputs are used in multiple operations.
-    """
-
-    def __init__(self):
-        # Maps arg_id to (spec, reuse_count)
-        self._args: dict[int, tuple[Spec, int]] = {}
-        # Maps spec key to arg_id for quick lookup
-        self._spec_to_arg_id: dict[str, int] = {}
-        self._next_arg_id = 0
-        self.reuse_probability = 0.7  # 70% chance to reuse existing arg
-
-    def reset(self):
-        """Reset the tracker for a new fuzzing session."""
-        self._args.clear()
-        self._spec_to_arg_id.clear()
-        self._next_arg_id = 0
-
-    def get_or_create_arg(self, spec: Spec, enable_reuse: bool = True) -> int:
-        """
-        Get an existing argument ID for the given spec, or create a new one.
-
-        Args:
-            spec: The specification for the argument
-            enable_reuse: Whether to enable reusing existing arguments
-
-        Returns:
-            int: The argument ID to use
-        """
-        spec_key = self._spec_to_key(spec)
-
-        # Check if we have an existing argument of this type
-        if enable_reuse and spec_key in self._spec_to_arg_id:
-            # Decide whether to reuse or create new
-            if random.random() < self.reuse_probability:
-                # Reuse existing argument
-                arg_id = self._spec_to_arg_id[spec_key]
-                old_spec, reuse_count = self._args[arg_id]
-                self._args[arg_id] = (old_spec, reuse_count + 1)
-                return arg_id
-
-        # Create new argument
-        new_arg_id = self._next_arg_id
-        self._next_arg_id += 1
-        self._args[new_arg_id] = (spec, 0)  # 0 reuses initially
-        self._spec_to_arg_id[spec_key] = new_arg_id
-        return new_arg_id
-
-    def _spec_to_key(self, spec: Spec) -> str:
-        """Convert a spec to a string key for tracking."""
-        if isinstance(spec, ScalarSpec):
-            return f"scalar_{spec.dtype}"
-        elif isinstance(spec, TensorSpec):
-            # Create a more robust key that includes all relevant info
-            size_str = "_".join(map(str, spec.size))
-            stride_str = "_".join(map(str, spec.stride))
-            return f"tensor_size[{size_str}]_stride[{stride_str}]_{spec.dtype}"
-        else:
-            return f"unknown_{type(spec)}"
-
-    def get_all_args(self) -> list[tuple[int, Spec]]:
-        """Get all unique arguments that were created."""
-        result = [(arg_id, spec) for arg_id, (spec, _) in self._args.items()]
-        # Sort by arg_id to ensure consistent order
-        return sorted(result, key=lambda x: x[0])
-
-    def get_stats(self) -> dict[str, int]:
-        """Get statistics about argument reuse."""
-        total_args = len(self._args)
-        total_reuses = sum(reuse_count for _, reuse_count in self._args.values())
-        return {
-            "total_unique_args": total_args,
-            "total_reuses": total_reuses,
-            "total_arg_references": total_args + total_reuses,
-        }
-
-
-# Global argument tracker instance
-_arg_tracker = ArgumentTracker()
-
-
-def reset_arg_tracker():
-    """Reset the global argument tracker. Call this before generating a new program."""
-    global _arg_tracker
-    _arg_tracker.reset()
-
-
-def get_arg_tracker() -> ArgumentTracker:
-    """Get the global argument tracker instance."""
-    return _arg_tracker
+try:
+    from .tensor_fuzzer import (
+        fuzz_tensor_size,
+        fuzz_torch_tensor_type,
+        fuzz_valid_stride,
+        ScalarSpec,
+        Spec,
+        TensorSpec,
+    )
+except ImportError:
+    from tensor_fuzzer import (
+        fuzz_tensor_size,
+        fuzz_torch_tensor_type,
+        fuzz_valid_stride,
+        ScalarSpec,
+        Spec,
+        TensorSpec,
+    )
 
 
 def fuzz_spec() -> Spec:
@@ -203,13 +115,7 @@ def fuzz_op(target_spec: Spec, depth, stack_size) -> tuple[str, list[Spec]]:
             non_leaf_ops = [
                 "torch.ops.aten.add",
                 "torch.ops.aten.mul",
-                "torch.ops.aten.sin",
-                "torch.ops.aten.cos",
             ]
-
-            # Only add cat operation if target is not 0-dimensional
-            if len(target_spec.size) > 0:
-                non_leaf_ops.append("torch.ops.aten.cat")
 
             leaf_ops = ["arg"]
 
@@ -229,12 +135,6 @@ def fuzz_op(target_spec: Spec, depth, stack_size) -> tuple[str, list[Spec]]:
             return _get_aten_add_args_specs(target_spec)
         elif chosen_op == "torch.ops.aten.mul":
             return _get_aten_mul_args_specs(target_spec)
-        elif chosen_op == "torch.ops.aten.sin":
-            return _get_aten_sin_args_specs(target_spec)
-        elif chosen_op == "torch.ops.aten.cos":
-            return _get_aten_cos_args_specs(target_spec)
-        elif chosen_op == "torch.ops.aten.cat":
-            return _get_aten_cat_args_specs(target_spec)
         elif chosen_op == "constant":
             return _get_constant_args_specs(target_spec)
         else:  # arg
@@ -411,171 +311,31 @@ def _get_aten_mul_args_specs(target_spec: TensorSpec) -> tuple[str, list[Spec]]:
     return "torch.ops.aten.mul", arg_specs
 
 
-def _get_aten_sin_args_specs(target_spec: TensorSpec) -> tuple[str, list[Spec]]:
-    """Get argument specifications for torch.ops.aten.sin operation."""
-    # sin is a unary operation that takes one tensor and returns a tensor with same shape
-    # but sin is only defined for floating point types, so input should be floating point
-    # If target is integer, we'll need to use a float input that can be converted
-
-    if target_spec.dtype in [
-        torch.float16,
-        torch.float32,
-        torch.float64,
-        torch.bfloat16,
-        torch.complex64,
-        torch.complex128,
-    ]:
-        # Target is already floating point, use same dtype for input
-        input_dtype = target_spec.dtype
-    else:
-        # Target is integer/bool - use float32 as input (sin always returns float)
-        input_dtype = torch.float32
-
-    arg_specs: list[Spec] = [
-        TensorSpec(target_spec.size, target_spec.stride, input_dtype)
-    ]
-    return "torch.ops.aten.sin", arg_specs
-
-
-def _get_aten_cos_args_specs(target_spec: TensorSpec) -> tuple[str, list[Spec]]:
-    """Get argument specifications for torch.ops.aten.cos operation."""
-    # cos is a unary operation that takes one tensor and returns a tensor with same shape
-    # but cos is only defined for floating point types, so input should be floating point
-    # If target is integer, we'll need to use a float input that can be converted
-
-    if target_spec.dtype in [
-        torch.float16,
-        torch.float32,
-        torch.float64,
-        torch.bfloat16,
-        torch.complex64,
-        torch.complex128,
-    ]:
-        # Target is already floating point, use same dtype for input
-        input_dtype = target_spec.dtype
-    else:
-        # Target is integer/bool - use float32 as input (sin always returns float)
-        input_dtype = torch.float32
-
-    arg_specs: list[Spec] = [
-        TensorSpec(target_spec.size, target_spec.stride, input_dtype)
-    ]
-    return "torch.ops.aten.cos", arg_specs
-
-
-def _get_aten_cat_args_specs(target_spec: TensorSpec) -> tuple[str, list[Spec]]:
-    """Get argument specifications for torch.ops.aten.cat operation.
-
-    torch.cat signature: torch.cat(tensors, dim=0, *, out=None)
-    Returns a flattened list: [tensor_spec1, tensor_spec2, ..., dim_spec]
-    """
-    target_size = target_spec.size
-    target_dtype = target_spec.dtype
-
-    # Handle 0-dimensional target (scalar tensors with size ())
-    if len(target_size) == 0:
-        raise RuntimeError("torch.cat does not support 0-dimensional tensors")
-
-    # Choose a random dimension to concatenate along
-    # Make sure we don't choose a dimension that's out of range
-    if len(target_size) == 0:
-        raise RuntimeError("torch.cat does not support 0-dimensional tensors")
-
-    cat_dim = random.randint(0, len(target_size) - 1)
-    target_cat_size = target_size[cat_dim]
-
-    # Generate 2-4 input tensors that when concatenated produce the target
-    num_inputs = random.randint(
-        2, min(4, target_cat_size + 2)
-    )  # Allow more inputs since we can have empty tensors
-
-    # Distribute the target cat dimension size among inputs
-    # Allow some inputs to have size 0 (empty tensors) when needed
-    input_cat_sizes = []
-    remaining_size = target_cat_size
-
-    # Distribute target_cat_size among num_inputs
-    # This handles all cases: target_cat_size == 0, < num_inputs, or >= num_inputs
-    for i in range(num_inputs - 1):
-        # Each input can have size 0 or more
-        max_size = remaining_size
-        if max_size <= 0:
-            input_size = 0  # Use empty tensor
-        else:
-            input_size = random.randint(0, max_size)  # Allow size 0
-        input_cat_sizes.append(input_size)
-        remaining_size -= input_size
-
-    # Last input gets whatever is left (can be 0)
-    input_cat_sizes.append(max(0, remaining_size))
-
-    # Verify our split worked correctly
-    if sum(input_cat_sizes) != target_cat_size:
-        # Fallback: distribute evenly
-        base_size = target_cat_size // num_inputs
-        remainder = target_cat_size % num_inputs
-        input_cat_sizes = [base_size] * num_inputs
-        for i in range(remainder):
-            input_cat_sizes[i] += 1
-
-    # Generate flattened list of tensor specs followed by dimension spec
-    arg_specs: list[Spec] = []
-    for i in range(num_inputs):
-        # Create input size: same as target except for cat dimension
-        input_size = list(target_size)
-        input_size[cat_dim] = input_cat_sizes[i]
-        input_size = tuple(input_size)
-
-        # Generate valid stride for this size
-        input_stride = fuzz_valid_stride(input_size)
-
-        # Use same dtype as target (cat preserves dtype)
-        arg_specs.append(TensorSpec(input_size, input_stride, target_dtype))
-
-    # Verify that all input tensors have compatible shapes
-    # (same shape except in cat dimension)
-    for i in range(len(target_size)):
-        if i == cat_dim:
-            continue  # Skip cat dimension, it can vary
-        else:
-            sz = target_size[i]
-            for j in range(len(arg_specs)):
-                # Check that dimension i of tensor j matches target
-                if i < len(arg_specs[j].size):  # Make sure dimension exists
-                    assert arg_specs[j].size[i] == sz, (
-                        f"Tensor {j} dim {i}: expected {sz}, got {arg_specs[j].size[i]}"
-                    )
-
-    # Ensure cat_dim is valid (should already be, but double-check)
-    if cat_dim >= len(target_size) or cat_dim < 0:
-        print(
-            f"ERROR: cat_dim {cat_dim} is out of range for target tensor with {len(target_size)} dimensions"
-        )
-        cat_dim = 0  # Fallback to dimension 0
-
-    dim_spec = ScalarSpec(
-        dtype=torch.int64, constant=cat_dim
-    )  # concatenate along the chosen dimension
-    arg_specs.append(dim_spec)
-
-    return "torch.ops.aten.cat", arg_specs
-
-
 def _get_constant_args_specs(target_spec: Spec) -> tuple[str, list[Spec]]:
     """Get argument specifications for constant operation."""
     # Constant operation takes no arguments - generates a fixed constant value/tensor
     return "constant", []
 
 
+# Global counter for generating unique argument IDs
+_next_arg_id = 0
+
+
 def _get_arg_args_specs(
     target_spec: Spec, enable_reuse: bool = True
 ) -> tuple[str, list[Spec]]:
-    """Get argument specifications for arg operation with optional reuse."""
-    global _arg_tracker
+    """Get argument specifications for arg operation."""
+    global _next_arg_id
 
-    # Get or create an argument ID for this specification
-    arg_id = _arg_tracker.get_or_create_arg(target_spec, enable_reuse=enable_reuse)
+    # Generate a unique argument ID
+    arg_id = _next_arg_id
+    _next_arg_id += 1
 
     # Return the operation name with the arg_id embedded and no input specs
-    # We'll use the arg_id in code generation to decide whether to reuse
     return f"arg_{arg_id}", []
+
+
+def reset_arg_tracker() -> None:
+    """Reset the argument counter for a new program."""
+    global _next_arg_id
+    _next_arg_id = 0

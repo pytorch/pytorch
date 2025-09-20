@@ -1,3 +1,4 @@
+# mypy: ignore-errors
 import random
 from typing import NamedTuple, Optional, Union
 
@@ -535,7 +536,8 @@ def test_fuzzing_tensors() -> None:
         f"Overlapping: {overlapping_count} ({overlapping_count / total_tests * 100:.1f}%)"
     )
     print(
-        f"Non-contiguous and non-dense: {non_contiguous_non_dense_count} ({non_contiguous_non_dense_count / total_tests * 100:.1f}%)"
+        f"Non-contiguous and non-dense: {non_contiguous_non_dense_count} "
+        f"({non_contiguous_non_dense_count / total_tests * 100:.1f}%)"
     )
 
 

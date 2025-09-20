@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
+# mypy: ignore-errors
 """
 Visualization tools for operation stacks as DAGs.
 """
 
 import subprocess
 
-from fuzzer import Operation
+
+try:
+    from .fuzzer import Operation
+except ImportError:
+    from fuzzer import Operation
 
 
 def operation_stack_to_dot(
@@ -245,47 +250,6 @@ def calculate_actual_dependencies(operation_stack: list[Operation]) -> dict:
                         current_dep_idx += 1
 
     return dependencies
-
-
-def analyze_operation_usage(operation_stack: list[Operation]) -> dict:
-    """
-    Analyze which operations are actually used vs unused in the stack.
-
-    Args:
-        operation_stack: List of Operation instances
-
-    Returns:
-        Dict with 'used', 'unused', 'dependencies', and 'usage_graph' keys
-    """
-    # Get actual dependencies using correct logic
-    dependencies = calculate_actual_dependencies(operation_stack)
-
-    used_operations = set()
-    usage_graph = {}  # op_idx -> list of operations that depend on it
-
-    # Initialize usage graph
-    for i in range(len(operation_stack)):
-        usage_graph[i] = []
-
-    # Build usage graph from dependencies
-    for op_idx, deps in dependencies.items():
-        for dep_idx, input_pos in deps:
-            used_operations.add(dep_idx)
-            usage_graph[dep_idx].append((op_idx, input_pos))
-
-    # The target operation (index 0) is always "used"
-    used_operations.add(0)
-
-    # Find unused operations
-    all_operations = set(range(len(operation_stack)))
-    unused_operations = all_operations - used_operations
-
-    return {
-        "used": sorted(used_operations),
-        "unused": sorted(unused_operations),
-        "dependencies": dependencies,
-        "usage_graph": usage_graph,
-    }
 
 
 def visualize_operation_stack(
