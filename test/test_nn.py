@@ -7111,6 +7111,14 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             unfold = nn.Unfold(kernel_size=(1, 3), padding=(1, 1), dilation=(1, 2))
             unfold(torch.randn(1, 2, 2, 2))
 
+        with self.assertRaisesRegex(RuntimeError, r"the product of kernel_width and kernel_height overflowed"):
+            tensor_data = torch.tensor([
+                [1.4009e-03, -1.3341e-32, -1.3334e-32, -1.3341e-32, 1.2723e-38, 3.6334e+00, 1.5374e-02],
+                [-1.5525e-02, 9.2391e-29, -2.5615e-13, -1.3322e-32, -1.3341e-32, -1.3341e-32, -1.3341e-32],
+                [-1.3341e-32, -1.3341e-32, -1.3341e-32, 3.0466e+14, 2.3677e+14, 2.3677e+14, 2.3677e+14],
+            ])
+            F.fold(tensor_data, 16, 7318349394477056)
+
     def test_softmin(self):
         x = torch.randn(2, 16)
         self.assertEqual(F.softmin(x, 1), F.softmax(-x, 1))
