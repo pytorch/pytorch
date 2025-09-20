@@ -1198,7 +1198,7 @@ if True:  # just to temporarily avoid reindentation
                     mesh_nd,
                     mesh_dim_names=tuple(concatenate_dim_names),
                     _init_backend=False,
-                    layout=concatenate_mesh_layout,
+                    _layout=concatenate_mesh_layout,
                 )
                 if cur_rank in mesh_nd:
                     res_submesh = mesh
