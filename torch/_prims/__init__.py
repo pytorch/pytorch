@@ -39,6 +39,9 @@ prim_impl = torch.library.Library("prims", "IMPL", "CompositeExplicitAutograd")
 prim_backend_select_impl = torch.library.Library("prims", "IMPL", "BackendSelect")
 prim_autograd_impl = torch.library.Library("prims", "IMPL", "Autograd")
 prim_meta_impl = torch.library.Library("prims", "IMPL", "Meta")
+prim_composite_implicit_impl = torch.library.Library(
+    "prims", "IMPL", "CompositeImplicitAutograd"
+)
 
 # Experimental module containing prototype "primitive" operations.
 
@@ -274,6 +277,7 @@ def _make_prim(
     tags: Optional[Sequence[torch.Tag]] = None,
     use_old_custom_ops_api: bool = False,
     register_conj_neg_fallthrough: bool = False,
+    composite_impl: Optional[Callable] = None,
 ):
     """
     Creates a primitive operation.
@@ -312,6 +316,8 @@ def _make_prim(
         prim_impl.impl(name, _prim_impl)
         prim_autograd_impl.impl(name, _autograd_impl)
         prim_meta_impl.impl(name, meta)
+        if composite_impl is not None:
+            prim_composite_implicit_impl.impl(name, composite_impl)
     else:
         mutates_args = [
             arg.name
@@ -330,6 +336,13 @@ def _make_prim(
         if return_type == RETURN_TYPE.VIEW or register_conj_neg_fallthrough:
             prim_def._lib.impl(name, torch.library.fallthrough_kernel, "Conjugate")
             prim_def._lib.impl(name, torch.library.fallthrough_kernel, "Negative")
+
+        if composite_impl is not None:
+            prim_def._lib.impl(
+                name,
+                composite_impl,
+                torch._C.DispatchKey.CompositeImplicitAutograd,
+            )
 
     _prim_packet = getattr(torch._ops.ops.prims, name)
     _prim = _prim_packet.default
@@ -369,6 +382,14 @@ def _make_prim(
         p.prim_impl = _prim_impl
         p.prim_meta_impl = meta
         p.impl_aten = impl_aten
+
+        if composite_impl is not None:
+
+            def _can_decompose() -> bool:
+                return True
+
+            p._can_decompose = _can_decompose  # type: ignore[attr-defined]
+            p.decompose = composite_impl  # type: ignore[attr-defined]
 
     return _prim
 
@@ -1336,6 +1357,49 @@ def _broadcast_in_dim_aten(a, shape, broadcast_dimensions):
     return v.expand(shape)
 
 
+def _broadcast_in_dim_view_impl(a, shape, broadcast_dimensions):
+    from torch.fx.experimental.symbolic_shapes import guard_or_false, guard_or_true
+
+    target_shape = list(shape)
+    new_strides = []
+    original_idx = 0
+    dims_set = set(broadcast_dimensions)
+
+    input_sizes = a.size()
+    input_strides = a.stride()
+    storage_offset = a.storage_offset()
+
+    for idx, size in enumerate(target_shape):
+        if idx in dims_set:
+            current_size = input_sizes[original_idx]
+            stride = input_strides[original_idx]
+            if guard_or_false(current_size == 1):
+                if guard_or_false(current_size == size):
+                    new_strides.append(stride)
+                else:
+                    new_strides.append(0)
+            else:
+                torch._check(
+                    current_size == size,
+                    lambda: f"non-broadcasting semantics require {current_size} == {size}",
+                )
+                new_strides.append(stride)
+            original_idx += 1
+        else:
+            if guard_or_true(size != 1):
+                new_strides.append(0)
+            elif original_idx == a.ndim:
+                new_strides.append(1)
+            else:
+                new_strides.append(
+                    input_strides[original_idx] * input_sizes[original_idx]
+                )
+
+    return torch.ops.aten.as_strided.default(
+        a, target_shape, new_strides, storage_offset
+    )
+
+
 _broadcast_in_dim_doc = """
   Creates a view of a with the specified shape.
 
@@ -1353,6 +1417,7 @@ broadcast_in_dim = _make_prim(
     impl_aten=_broadcast_in_dim_aten,
     return_type=RETURN_TYPE.VIEW,
     doc=_broadcast_in_dim_doc,
+    composite_impl=_broadcast_in_dim_view_impl,
 )
 
 

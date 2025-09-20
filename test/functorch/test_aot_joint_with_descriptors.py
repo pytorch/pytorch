@@ -173,16 +173,16 @@ class inner_f(torch.nn.Module):
         convolution: "f32[2, 3, 4, 4]" = torch.ops.aten.convolution.default(primals_8, primals_1, primals_2, [1, 1], [1, 1], [1, 1], False, [0, 0], 1);  primals_2 = None
         add: "i64[]" = torch.ops.prims.add.default(primals_7, 1);  primals_7 = None
         var: "f32[3]" = torch.ops.prims.var.default(convolution, [0, 2, 3], 0.0)
-        broadcast_in_dim: "f32[1, 3, 1, 1]" = torch.ops.prims.broadcast_in_dim.default(var, [1, 3, 1, 1], [1]);  var = None
+        as_strided: "f32[1, 3, 1, 1]" = torch.ops.aten.as_strided.default(var, [1, 3, 1, 1], [3, 1, 1, 1], 0);  var = None
         sum_1: "f32[3]" = torch.ops.prims.sum.default(convolution, [0, 2, 3])
-        broadcast_in_dim_1: "f32[1, 3, 1, 1]" = torch.ops.prims.broadcast_in_dim.default(sum_1, [1, 3, 1, 1], [1]);  sum_1 = None
-        div: "f32[1, 3, 1, 1]" = torch.ops.prims.div.default(broadcast_in_dim_1, 32.0);  broadcast_in_dim_1 = None
-        add_1: "f32[1, 3, 1, 1]" = torch.ops.prims.add.default(broadcast_in_dim, 1e-05)
+        as_strided_1: "f32[1, 3, 1, 1]" = torch.ops.aten.as_strided.default(sum_1, [1, 3, 1, 1], [3, 1, 1, 1], 0);  sum_1 = None
+        div: "f32[1, 3, 1, 1]" = torch.ops.prims.div.default(as_strided_1, 32.0);  as_strided_1 = None
+        add_1: "f32[1, 3, 1, 1]" = torch.ops.prims.add.default(as_strided, 1e-05)
         rsqrt: "f32[1, 3, 1, 1]" = torch.ops.prims.rsqrt.default(add_1);  add_1 = None
-        broadcast_in_dim_2: "f32[2, 3, 4, 4]" = torch.ops.prims.broadcast_in_dim.default(div, [2, 3, 4, 4], [0, 1, 2, 3])
-        sub: "f32[2, 3, 4, 4]" = torch.ops.prims.sub.default(convolution, broadcast_in_dim_2);  broadcast_in_dim_2 = None
-        broadcast_in_dim_3: "f32[2, 3, 4, 4]" = torch.ops.prims.broadcast_in_dim.default(rsqrt, [2, 3, 4, 4], [0, 1, 2, 3])
-        mul: "f32[2, 3, 4, 4]" = torch.ops.prims.mul.default(sub, broadcast_in_dim_3);  sub = broadcast_in_dim_3 = None
+        as_strided_2: "f32[2, 3, 4, 4]" = torch.ops.aten.as_strided.default(div, [2, 3, 4, 4], [0, 1, 0, 0], 0)
+        sub: "f32[2, 3, 4, 4]" = torch.ops.prims.sub.default(convolution, as_strided_2);  as_strided_2 = None
+        as_strided_3: "f32[2, 3, 4, 4]" = torch.ops.aten.as_strided.default(rsqrt, [2, 3, 4, 4], [0, 1, 0, 0], 0)
+        mul: "f32[2, 3, 4, 4]" = torch.ops.prims.mul.default(sub, as_strided_3);  sub = as_strided_3 = None
         squeeze: "f32[1, 3, 1]" = torch.ops.prims.squeeze.default(div, [3]);  div = None
         squeeze_1: "f32[1, 3]" = torch.ops.prims.squeeze.default(squeeze, [2]);  squeeze = None
         squeeze_2: "f32[3]" = torch.ops.prims.squeeze.default(squeeze_1, [0]);  squeeze_1 = None
@@ -192,21 +192,21 @@ class inner_f(torch.nn.Module):
         mul_1: "f32[3]" = torch.ops.prims.mul.default(squeeze_2, 0.1)
         mul_2: "f32[3]" = torch.ops.prims.mul.default(primals_5, 0.9);  primals_5 = None
         add_2: "f32[3]" = torch.ops.prims.add.default(mul_1, mul_2);  mul_1 = mul_2 = None
-        squeeze_6: "f32[1, 3, 1]" = torch.ops.prims.squeeze.default(broadcast_in_dim, [3]);  broadcast_in_dim = None
+        squeeze_6: "f32[1, 3, 1]" = torch.ops.prims.squeeze.default(as_strided, [3]);  as_strided = None
         squeeze_7: "f32[1, 3]" = torch.ops.prims.squeeze.default(squeeze_6, [2]);  squeeze_6 = None
         squeeze_8: "f32[3]" = torch.ops.prims.squeeze.default(squeeze_7, [0]);  squeeze_7 = None
         mul_3: "f32[3]" = torch.ops.prims.mul.default(squeeze_8, 1.032258064516129);  squeeze_8 = None
         mul_4: "f32[3]" = torch.ops.prims.mul.default(mul_3, 0.1);  mul_3 = None
         mul_5: "f32[3]" = torch.ops.prims.mul.default(primals_6, 0.9);  primals_6 = None
         add_3: "f32[3]" = torch.ops.prims.add.default(mul_4, mul_5);  mul_4 = mul_5 = None
-        broadcast_in_dim_4: "f32[3, 1]" = torch.ops.prims.broadcast_in_dim.default(primals_3, [3, 1], [0])
-        broadcast_in_dim_5: "f32[3, 1, 1]" = torch.ops.prims.broadcast_in_dim.default(broadcast_in_dim_4, [3, 1, 1], [0, 1]);  broadcast_in_dim_4 = None
-        broadcast_in_dim_6: "f32[2, 3, 4, 4]" = torch.ops.prims.broadcast_in_dim.default(broadcast_in_dim_5, [2, 3, 4, 4], [1, 2, 3]);  broadcast_in_dim_5 = None
-        mul_6: "f32[2, 3, 4, 4]" = torch.ops.prims.mul.default(mul, broadcast_in_dim_6);  mul = broadcast_in_dim_6 = None
-        broadcast_in_dim_7: "f32[3, 1]" = torch.ops.prims.broadcast_in_dim.default(primals_4, [3, 1], [0]);  primals_4 = None
-        broadcast_in_dim_8: "f32[3, 1, 1]" = torch.ops.prims.broadcast_in_dim.default(broadcast_in_dim_7, [3, 1, 1], [0, 1]);  broadcast_in_dim_7 = None
-        broadcast_in_dim_9: "f32[2, 3, 4, 4]" = torch.ops.prims.broadcast_in_dim.default(broadcast_in_dim_8, [2, 3, 4, 4], [1, 2, 3]);  broadcast_in_dim_8 = None
-        add_4: "f32[2, 3, 4, 4]" = torch.ops.prims.add.default(mul_6, broadcast_in_dim_9);  mul_6 = broadcast_in_dim_9 = None
+        as_strided_4: "f32[3, 1]" = torch.ops.aten.as_strided.default(primals_3, [3, 1], [1, 1], 0)
+        as_strided_5: "f32[3, 1, 1]" = torch.ops.aten.as_strided.default(as_strided_4, [3, 1, 1], [1, 1, 1], 0);  as_strided_4 = None
+        as_strided_6: "f32[2, 3, 4, 4]" = torch.ops.aten.as_strided.default(as_strided_5, [2, 3, 4, 4], [0, 1, 0, 0], 0);  as_strided_5 = None
+        mul_6: "f32[2, 3, 4, 4]" = torch.ops.prims.mul.default(mul, as_strided_6);  mul = as_strided_6 = None
+        as_strided_7: "f32[3, 1]" = torch.ops.aten.as_strided.default(primals_4, [3, 1], [1, 1], 0);  primals_4 = None
+        as_strided_8: "f32[3, 1, 1]" = torch.ops.aten.as_strided.default(as_strided_7, [3, 1, 1], [1, 1, 1], 0);  as_strided_7 = None
+        as_strided_9: "f32[2, 3, 4, 4]" = torch.ops.aten.as_strided.default(as_strided_8, [2, 3, 4, 4], [0, 1, 0, 0], 0);  as_strided_8 = None
+        add_4: "f32[2, 3, 4, 4]" = torch.ops.prims.add.default(mul_6, as_strided_9);  mul_6 = as_strided_9 = None
         le: "b8[2, 3, 4, 4]" = torch.ops.prims.le.default(add_4, 0.0)
         where: "f32[2, 3, 4, 4]" = torch.ops.prims.where.default(le, 0.0, add_4);  le = add_4 = None
         view_of: "f32[2, 3, 4, 4]" = torch.ops.prims.view_of.default(where)
@@ -215,37 +215,37 @@ class inner_f(torch.nn.Module):
         view_of_3: "f32[2, 3, 4, 4]" = torch.ops.prims.view_of.default(view_of_2);  view_of_2 = None
         le_1: "b8[2, 3, 4, 4]" = torch.ops.prims.le.default(view_of_3, 0.0);  view_of_3 = None
         where_1: "f32[2, 3, 4, 4]" = torch.ops.prims.where.default(le_1, 0.0, tangents_1);  le_1 = tangents_1 = None
-        broadcast_in_dim_10: "f32[1, 3]" = torch.ops.prims.broadcast_in_dim.default(squeeze_2, [1, 3], [1]);  squeeze_2 = None
-        broadcast_in_dim_11: "f32[1, 3, 1]" = torch.ops.prims.broadcast_in_dim.default(broadcast_in_dim_10, [1, 3, 1], [0, 1]);  broadcast_in_dim_10 = None
-        broadcast_in_dim_12: "f32[1, 3, 1, 1]" = torch.ops.prims.broadcast_in_dim.default(broadcast_in_dim_11, [1, 3, 1, 1], [0, 1, 2]);  broadcast_in_dim_11 = None
+        as_strided_10: "f32[1, 3]" = torch.ops.aten.as_strided.default(squeeze_2, [1, 3], [3, 1], 0);  squeeze_2 = None
+        as_strided_11: "f32[1, 3, 1]" = torch.ops.aten.as_strided.default(as_strided_10, [1, 3, 1], [3, 1, 1], 0);  as_strided_10 = None
+        as_strided_12: "f32[1, 3, 1, 1]" = torch.ops.aten.as_strided.default(as_strided_11, [1, 3, 1, 1], [3, 1, 1, 1], 0);  as_strided_11 = None
         sum_2: "f32[3]" = torch.ops.prims.sum.default(where_1, [0, 2, 3])
-        broadcast_in_dim_13: "f32[2, 3, 4, 4]" = torch.ops.prims.broadcast_in_dim.default(broadcast_in_dim_12, [2, 3, 4, 4], [0, 1, 2, 3])
-        sub_1: "f32[2, 3, 4, 4]" = torch.ops.prims.sub.default(convolution, broadcast_in_dim_13);  broadcast_in_dim_13 = None
+        as_strided_13: "f32[2, 3, 4, 4]" = torch.ops.aten.as_strided.default(as_strided_12, [2, 3, 4, 4], [0, 1, 0, 0], 0)
+        sub_1: "f32[2, 3, 4, 4]" = torch.ops.prims.sub.default(convolution, as_strided_13);  as_strided_13 = None
         mul_7: "f32[2, 3, 4, 4]" = torch.ops.prims.mul.default(where_1, sub_1);  sub_1 = None
         sum_3: "f32[3]" = torch.ops.prims.sum.default(mul_7, [0, 2, 3]);  mul_7 = None
         mul_8: "f32[3]" = torch.ops.prims.mul.default(sum_2, 0.03125)
-        broadcast_in_dim_14: "f32[1, 3]" = torch.ops.prims.broadcast_in_dim.default(mul_8, [1, 3], [1]);  mul_8 = None
-        broadcast_in_dim_15: "f32[1, 3, 1]" = torch.ops.prims.broadcast_in_dim.default(broadcast_in_dim_14, [1, 3, 1], [0, 1]);  broadcast_in_dim_14 = None
-        broadcast_in_dim_16: "f32[1, 3, 1, 1]" = torch.ops.prims.broadcast_in_dim.default(broadcast_in_dim_15, [1, 3, 1, 1], [0, 1, 2]);  broadcast_in_dim_15 = None
+        as_strided_14: "f32[1, 3]" = torch.ops.aten.as_strided.default(mul_8, [1, 3], [3, 1], 0);  mul_8 = None
+        as_strided_15: "f32[1, 3, 1]" = torch.ops.aten.as_strided.default(as_strided_14, [1, 3, 1], [3, 1, 1], 0);  as_strided_14 = None
+        as_strided_16: "f32[1, 3, 1, 1]" = torch.ops.aten.as_strided.default(as_strided_15, [1, 3, 1, 1], [3, 1, 1, 1], 0);  as_strided_15 = None
         mul_9: "f32[3]" = torch.ops.prims.mul.default(sum_3, 0.03125)
         mul_10: "f32[3]" = torch.ops.prims.mul.default(squeeze_5, squeeze_5)
         mul_11: "f32[3]" = torch.ops.prims.mul.default(mul_9, mul_10);  mul_9 = mul_10 = None
-        broadcast_in_dim_17: "f32[1, 3]" = torch.ops.prims.broadcast_in_dim.default(mul_11, [1, 3], [1]);  mul_11 = None
-        broadcast_in_dim_18: "f32[1, 3, 1]" = torch.ops.prims.broadcast_in_dim.default(broadcast_in_dim_17, [1, 3, 1], [0, 1]);  broadcast_in_dim_17 = None
-        broadcast_in_dim_19: "f32[1, 3, 1, 1]" = torch.ops.prims.broadcast_in_dim.default(broadcast_in_dim_18, [1, 3, 1, 1], [0, 1, 2]);  broadcast_in_dim_18 = None
+        as_strided_17: "f32[1, 3]" = torch.ops.aten.as_strided.default(mul_11, [1, 3], [3, 1], 0);  mul_11 = None
+        as_strided_18: "f32[1, 3, 1]" = torch.ops.aten.as_strided.default(as_strided_17, [1, 3, 1], [3, 1, 1], 0);  as_strided_17 = None
+        as_strided_19: "f32[1, 3, 1, 1]" = torch.ops.aten.as_strided.default(as_strided_18, [1, 3, 1, 1], [3, 1, 1, 1], 0);  as_strided_18 = None
         mul_12: "f32[3]" = torch.ops.prims.mul.default(squeeze_5, primals_3);  primals_3 = None
-        broadcast_in_dim_20: "f32[1, 3]" = torch.ops.prims.broadcast_in_dim.default(mul_12, [1, 3], [1]);  mul_12 = None
-        broadcast_in_dim_21: "f32[1, 3, 1]" = torch.ops.prims.broadcast_in_dim.default(broadcast_in_dim_20, [1, 3, 1], [0, 1]);  broadcast_in_dim_20 = None
-        broadcast_in_dim_22: "f32[1, 3, 1, 1]" = torch.ops.prims.broadcast_in_dim.default(broadcast_in_dim_21, [1, 3, 1, 1], [0, 1, 2]);  broadcast_in_dim_21 = None
-        broadcast_in_dim_23: "f32[2, 3, 4, 4]" = torch.ops.prims.broadcast_in_dim.default(broadcast_in_dim_12, [2, 3, 4, 4], [0, 1, 2, 3]);  broadcast_in_dim_12 = None
-        sub_2: "f32[2, 3, 4, 4]" = torch.ops.prims.sub.default(convolution, broadcast_in_dim_23);  convolution = broadcast_in_dim_23 = None
-        broadcast_in_dim_24: "f32[2, 3, 4, 4]" = torch.ops.prims.broadcast_in_dim.default(broadcast_in_dim_19, [2, 3, 4, 4], [0, 1, 2, 3]);  broadcast_in_dim_19 = None
-        mul_13: "f32[2, 3, 4, 4]" = torch.ops.prims.mul.default(sub_2, broadcast_in_dim_24);  sub_2 = broadcast_in_dim_24 = None
+        as_strided_20: "f32[1, 3]" = torch.ops.aten.as_strided.default(mul_12, [1, 3], [3, 1], 0);  mul_12 = None
+        as_strided_21: "f32[1, 3, 1]" = torch.ops.aten.as_strided.default(as_strided_20, [1, 3, 1], [3, 1, 1], 0);  as_strided_20 = None
+        as_strided_22: "f32[1, 3, 1, 1]" = torch.ops.aten.as_strided.default(as_strided_21, [1, 3, 1, 1], [3, 1, 1, 1], 0);  as_strided_21 = None
+        as_strided_23: "f32[2, 3, 4, 4]" = torch.ops.aten.as_strided.default(as_strided_12, [2, 3, 4, 4], [0, 1, 0, 0], 0);  as_strided_12 = None
+        sub_2: "f32[2, 3, 4, 4]" = torch.ops.prims.sub.default(convolution, as_strided_23);  convolution = as_strided_23 = None
+        as_strided_24: "f32[2, 3, 4, 4]" = torch.ops.aten.as_strided.default(as_strided_19, [2, 3, 4, 4], [0, 1, 0, 0], 0);  as_strided_19 = None
+        mul_13: "f32[2, 3, 4, 4]" = torch.ops.prims.mul.default(sub_2, as_strided_24);  sub_2 = as_strided_24 = None
         sub_3: "f32[2, 3, 4, 4]" = torch.ops.prims.sub.default(where_1, mul_13);  where_1 = mul_13 = None
-        broadcast_in_dim_25: "f32[2, 3, 4, 4]" = torch.ops.prims.broadcast_in_dim.default(broadcast_in_dim_16, [2, 3, 4, 4], [0, 1, 2, 3]);  broadcast_in_dim_16 = None
-        sub_4: "f32[2, 3, 4, 4]" = torch.ops.prims.sub.default(sub_3, broadcast_in_dim_25);  sub_3 = broadcast_in_dim_25 = None
-        broadcast_in_dim_26: "f32[2, 3, 4, 4]" = torch.ops.prims.broadcast_in_dim.default(broadcast_in_dim_22, [2, 3, 4, 4], [0, 1, 2, 3]);  broadcast_in_dim_22 = None
-        mul_14: "f32[2, 3, 4, 4]" = torch.ops.prims.mul.default(sub_4, broadcast_in_dim_26);  sub_4 = broadcast_in_dim_26 = None
+        as_strided_25: "f32[2, 3, 4, 4]" = torch.ops.aten.as_strided.default(as_strided_16, [2, 3, 4, 4], [0, 1, 0, 0], 0);  as_strided_16 = None
+        sub_4: "f32[2, 3, 4, 4]" = torch.ops.prims.sub.default(sub_3, as_strided_25);  sub_3 = as_strided_25 = None
+        as_strided_26: "f32[2, 3, 4, 4]" = torch.ops.aten.as_strided.default(as_strided_22, [2, 3, 4, 4], [0, 1, 0, 0], 0);  as_strided_22 = None
+        mul_14: "f32[2, 3, 4, 4]" = torch.ops.prims.mul.default(sub_4, as_strided_26);  sub_4 = as_strided_26 = None
         mul_15: "f32[3]" = torch.ops.prims.mul.default(sum_3, squeeze_5);  sum_3 = squeeze_5 = None
         convolution_backward = torch.ops.aten.convolution_backward.default(mul_14, primals_8, primals_1, [3], [1, 1], [1, 1], [1, 1], False, [0, 0], 1, [False, True, True]);  mul_14 = primals_8 = primals_1 = None
         getitem_1: "f32[3, 1, 3, 3]" = convolution_backward[1]
