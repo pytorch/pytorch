@@ -1,4 +1,4 @@
-# TorchFuzz - PyTorch Dynamic Shape Fuzzing Tool
+# TorchFuzz - Torch Compile e2e Fuzz Testing Tool
 
 TorchFuzz is an experimental fuzzing framework for testing PyTorch operations. It generates
 random operation stacks, converts them to executable Python code, and tests them with both eager
