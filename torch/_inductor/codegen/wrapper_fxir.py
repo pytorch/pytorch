@@ -392,7 +392,6 @@ class FxConverter:
         """
 
         for name, ir_node in self.graph_inputs.items():
-            ir_node = self.graph_inputs[name]
             if ir_node is None:
                 # Create dummy input nodes to match the input signature
                 self.gm.graph.placeholder(name)
