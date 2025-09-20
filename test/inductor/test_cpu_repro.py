@@ -216,6 +216,34 @@ class CPUReproTests(TestCase):
                 (v,),
             )
 
+    def test_complex_cholesky_mh_view_fallback(self):
+        torch.manual_seed(0)
+
+        n = 8
+
+        def fn(inp: torch.Tensor):
+            I0 = torch.eye(n, dtype=inp.dtype, device=inp.device)
+            I = I0.unsqueeze(0).expand(inp.shape[0], n, n).contiguous()
+            hermitian = I + 0.5 * (inp @ inp.mH)
+            chol = torch.linalg.cholesky(hermitian, upper=True)
+            return chol.abs().sum()
+
+        base = torch.randn(4, n, n, dtype=torch.complex64)
+
+        def run(compiled_fn):
+            inp = base.clone().detach().requires_grad_(True)
+            loss = compiled_fn(inp)
+            loss.backward()
+            return loss.detach(), inp.grad.detach()
+
+        expected_loss, expected_grad = run(fn)
+
+        compiled = torch.compile(fn, backend="inductor")
+        actual_loss, actual_grad = run(compiled)
+
+        torch.testing.assert_close(actual_loss, expected_loss)
+        torch.testing.assert_close(actual_grad, expected_grad)
+
     def test_nn_fold(self):
         # Fix https://github.com/pytorch/pytorch/issues/147848
 
