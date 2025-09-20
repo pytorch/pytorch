@@ -1448,6 +1448,39 @@ class CommonTemplate:
                 code.count("view_dtype" if config.cpp_wrapper else "aten.view"), 3
             )
 
+    def test_add_complex_strided_fallback(self):
+        @torch.compile
+        def fn(a, b):
+            return a + b
+
+        if not self.is_dtype_supported(torch.complex64):
+            raise unittest.SkipTest("complex64 not supported on device")
+
+        base = torch.randn(3, 4, dtype=torch.complex64, device=self.device)
+        x = base.transpose(0, 1)
+        y = base.transpose(0, 1)
+
+        torch._inductor.metrics.reset()
+        _, code = run_and_get_code(fn, x, y)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 0)
+
+        code = " ".join(code)
+        fallback_markers = [
+            "extern_kernels.add",
+            "torch.ops.aten.add.Tensor",
+        ]
+        if config.cpp_wrapper:
+            fallback_markers.extend(
+                [
+                    "aoti_torch_cuda_add_Tensor",
+                    "aoti_torch_cpu_add_Tensor",
+                ]
+            )
+        self.assertTrue(
+            any(code.count(marker) >= 1 for marker in fallback_markers),
+            msg=f"Expected complex add with strided inputs to fall back to extern kernels, got:\n{code}",
+        )
+
     def test_add_complex5(self):
         def fn(a, b, alpha):
             return torch.add(a, b, alpha=alpha)
