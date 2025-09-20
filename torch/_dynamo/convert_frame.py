@@ -898,6 +898,24 @@ class CaptureOutput:
     # BackendInput can be None when dynamo didn't compile any graph (no tensor op)
     backend_input: Optional[BackendInput]
 
+    def forward_callable(self) -> Callable[..., Any]:
+        import importlib
+        # TODO code sharing
+        import_sources = self.dynamo_output.tracer_output.output_graph.import_sources
+        assert self.backend_input is not None
+        backend_id = self.backend_input.backend_id
+        import_sources = {
+            alias: importlib.import_module(module_name)
+            for alias, module_name in import_sources.items()
+        }
+        f_globals = {
+            **import_sources,
+            backend_id: self.backend_input.graph_module,
+        }
+        return types.FunctionType(
+            self.dynamo_output.bytecode, f_globals, closure=(),
+        )
+
 
 @dataclass
 class FrameInfo:
