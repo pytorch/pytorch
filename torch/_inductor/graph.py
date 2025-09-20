@@ -44,6 +44,7 @@ from torch.fx.experimental.symbolic_shapes import (
     SymTypes,
 )
 from torch.fx.node import Node
+from torch.fx.passes.reinplace import _is_view_op
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.numbers import int_oo
@@ -203,6 +204,30 @@ def get_user_visible_output_strides(g: Graph) -> dict[Node, tuple[int, ...]]:
     return ret
 
 
+def extend_user_visible_output_strides(
+    user_visible_outputs: dict[Node, tuple[int, ...]],
+) -> dict[Node, object]:
+    """
+    Extend user_visible_output_strides to include view ops that lead to user-visible outputs.
+    """
+    result: dict[Node, object] = {**user_visible_outputs}
+    queue = [*result.keys()]
+    visited = OrderedSet([*queue])
+    while queue:
+        current = queue.pop()
+        if (
+            _is_view_op(current.target)
+            and current.args
+            and isinstance(current.args[0], torch.fx.Node)
+        ):
+            base = current.args[0]
+            if base not in visited:
+                result.setdefault(base, None)
+                visited.add(base)
+                queue.append(base)
+    return result
+
+
 def mark_nodes_dislike_padding(
     g: Graph, user_visible_output_strides: dict[Node, tuple[int, ...]]
 ) -> None:
@@ -216,6 +241,10 @@ def mark_nodes_dislike_padding(
     """
     if not config.comprehensive_padding:
         return
+
+    extended_user_visible_nodes = extend_user_visible_output_strides(
+        user_visible_output_strides
+    )
     ops_dislike_padding = OrderedSet(
         [
             aten.convolution,
@@ -284,7 +313,7 @@ def mark_nodes_dislike_padding(
                 if prior_op not in ops_like_padding:
                     prior.meta["dislike_padding"] = True
         # We only want to mark output nodes. So, move it after the above prior nodes process.
-        if not config.pad_outputs and cur in user_visible_output_strides:
+        if not config.pad_outputs and cur in extended_user_visible_nodes:
             cur.meta["dislike_padding"] = True
 
 
