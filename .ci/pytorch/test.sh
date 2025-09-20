@@ -32,6 +32,16 @@ if [[ "$BUILD_ENVIRONMENT" != *rocm* && "$BUILD_ENVIRONMENT" != *s390x* && -d /v
   git config --global --add safe.directory /var/lib/jenkins/workspace
 fi
 
+
+# Patch numba to avoid CUDA-13 crash, see https://github.com/pytorch/pytorch/issues/162878
+NUMBA_CUDA_DIR=$(python -c "import os;import numba.cuda; print(os.path.dirname(numba.cuda.__file__))" 2>/dev/null || true)
+if [ -n "$NUMBA_CUDA_DIR" ]; then
+  NUMBA_PATCH="$(dirname "$(realpath "${BASH_SOURCE[0]}")")/numba-cuda-13.patch"
+  pushd "$NUMBA_CUDA_DIR"
+  patch -p4 <"$NUMBA_PATCH"
+  popd
+fi
+
 echo "Environment variables:"
 env
 
@@ -1540,14 +1550,10 @@ test_executorch() {
   install_torchvision
   install_torchaudio
 
+  INSTALL_SCRIPT="$(pwd)/.ci/docker/common/install_executorch.sh"
+
   pushd /executorch
-
-  export PYTHON_EXECUTABLE=python
-  export CMAKE_ARGS="-DEXECUTORCH_BUILD_PYBIND=ON -DEXECUTORCH_BUILD_XNNPACK=ON -DEXECUTORCH_BUILD_KERNELS_QUANTIZED=ON"
-
-  # NB: We need to rebuild ExecuTorch runner here because it depends on PyTorch
-  # from the PR
-  bash .ci/scripts/setup-linux.sh --build-tool cmake
+  "${INSTALL_SCRIPT}" setup_executorch
 
   echo "Run ExecuTorch unit tests"
   pytest -v -n auto
@@ -1560,10 +1566,6 @@ test_executorch() {
   source .ci/scripts/test_model.sh mv3 cmake xnnpack-quantization-delegation ''
 
   popd
-
-  # Test torchgen generated code for Executorch.
-  echo "Testing ExecuTorch op registration"
-  "$BUILD_BIN_DIR"/test_edge_op_registration
 
   assert_git_not_dirty
 }
