@@ -42,15 +42,17 @@ if HAS_GPU:
 
     from torch.testing._internal.triton_utils import add_kernel_2d_autotuned
 
+test_config = {
+    "compile_threads": 1,
+    "alignment_asserts": False,
+    "size_asserts": False,
+    "scalar_asserts": False,
+    "nan_asserts": False,
+}
+
 
 @requires_gpu()
-@config.patch(
-    compile_threads=1,
-    alignment_asserts=False,
-    size_asserts=False,
-    scalar_asserts=False,
-    nan_asserts=False,
-)
+@config.patch(test_config)
 @instantiate_parametrized_tests
 class FxirTestCase(InductorTestCase):
     device = GPU_TYPE
@@ -795,9 +797,9 @@ class AOTFxirTestCase(InductorTestCase):
                 model, inp, dynamic_shapes=dynamic_shapes, strict=strict
             )
             gm = torch._inductor.aot_compile(
-                ep.module(), inp, options={"fx_wrapper": True, "compile_threads": 1}
+                ep.module(), inp, options={"fx_wrapper": True, **test_config}
             )
-            self.assertTrue(torch.allclose(model(*inp), gm(*inp)))
+            self.assertTrue(same(model(*inp), gm(*inp)))
 
             for node in gm.graph.nodes:
                 if (
@@ -953,6 +955,39 @@ class AOTFxirTestCase(InductorTestCase):
                 )
             ),
             1,
+        )
+
+    @parametrize("pred", (False, True))
+    def test_cond_multi_inputs_and_outputs(self, pred):
+        """
+        Test torch.cond and check the output graphs.
+        """
+
+        class M(torch.nn.Module):
+            def forward(self, pred, x, y):
+                def true_fn(x, y):
+                    return torch.tanh(x), torch.relu(y)
+
+                def false_fn(x, y):
+                    return tuple(t / 2 for t in true_fn(x, y))
+
+                return torch.cond(pred, true_fn, false_fn, (x, y))
+
+        pred = torch.tensor([True], device=self.device)
+        (x, y) = [torch.randn(8, device=self.device) for _ in range(2)]
+        gm = self.check(M(), (pred, x, y))
+
+        # Check the graph.
+        self.assertExpectedInline(
+            gm.code.strip(),
+            """\
+def forward(self, arg0_1, arg1_1, arg2_1):
+    true_graph_0 = self.true_graph_0
+    false_graph_0 = self.false_graph_0
+    cond = torch.ops.higher_order.cond(arg0_1, true_graph_0, false_graph_0, (arg1_1, arg2_1));  arg0_1 = true_graph_0 = false_graph_0 = arg1_1 = arg2_1 = None
+    buf1 = cond[0]
+    buf2 = cond[1];  cond = None
+    return [buf1, buf2]""",  # noqa: B950
         )
 
 
