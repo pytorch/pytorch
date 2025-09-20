@@ -18,7 +18,7 @@ log = logging.getLogger(__name__)
 @lru_cache(maxsize=8)
 def _should_use_cudnn(device_index: int) -> bool:
     """Cache device capability check to avoid repeated CUDA calls."""
-    return torch.cuda.get_device_capability(device_index)[0] >= 10
+    return False
 
 
 # import failures when I try to register as custom op

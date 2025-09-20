@@ -14,7 +14,7 @@ from torch.backends.cuda import (
     SDPAParams,
 )
 
-from .var_len import varlen_attn
+from .varlen import varlen_attn
 
 
 __all__: list[str] = [
