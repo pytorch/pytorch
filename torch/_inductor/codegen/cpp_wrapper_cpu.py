@@ -25,7 +25,6 @@ from .. import config, cpp_builder, ir
 from ..debug import set_kernel_post_grad_provenance_tracing
 from ..utils import _align, DeferredLineBase, LineContext, normalize_name
 from ..virtualized import V
-from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .common import get_device_op_overrides, IndentedBuffer, Kernel
 from .cpp_utils import cexpr, DEVICE_TO_ATEN, DEVICE_TO_INT, DTYPE_TO_ATEN, DTYPE_TO_CPP
 from .wrapper import (
@@ -34,6 +33,9 @@ from .wrapper import (
     PythonWrapperCodegen,
     SymbolicCallArg,
 )
+
+if torch.version.hip:
+    from .aoti_hipify_utils import maybe_hipify_code_wrapper
 
 
 if TYPE_CHECKING:
