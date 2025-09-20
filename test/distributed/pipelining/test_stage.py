@@ -368,6 +368,9 @@ class StageNegativeTest(MultiProcessTestCase):
     @skip_but_pass_in_sandcastle_if(
         not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
     )
+    @skip_but_pass_in_sandcastle_if(
+        True, "https://github.com/pytorch/pytorch/issues/162746"
+    )
     def test_shape_prop_mismatch(self):
         """Tests shape prop errors are raised"""
         self.init_pg()

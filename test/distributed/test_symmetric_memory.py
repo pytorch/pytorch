@@ -46,6 +46,9 @@ from torch.testing._internal.common_utils import (
 
 test_contexts = [nullcontext, _test_mode]
 
+# Set environment variable to disable multicast for all tests in this module
+os.environ["TORCH_SYMM_MEM_DISABLE_MULTICAST"] = "1"
+
 # So that tests are written in device-agnostic way
 device_type = "cuda"
 device_module = torch.get_device_module(device_type)
@@ -324,6 +327,10 @@ class AsyncTPTest(MultiProcContinuousTest):
     @skip_if_lt_x_gpu(2)
     @parametrize("symm_mem_input", [True, False])
     @parametrize("is_b_row_major", [True, False])
+    @skipIf(
+        True,
+        "https://github.com/pytorch/pytorch/issues/162917",
+    )
     def test_fused_all_gather_matmul_native(
         self, symm_mem_input: bool, is_b_row_major: bool
     ) -> None:
@@ -534,6 +541,10 @@ class AsyncTPTest(MultiProcContinuousTest):
     @skip_if_lt_x_gpu(2)
     @parametrize("scatter_dim", [0, 1])
     @parametrize("rowwise", [True, False])
+    @skipIf(
+        True,
+        "https://github.com/pytorch/pytorch/issues/162940",
+    )
     def test_fused_scaled_matmul_reduce_scatter(
         self, scatter_dim: int, rowwise: bool
     ) -> None:

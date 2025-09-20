@@ -242,6 +242,10 @@ def nvshmem_reduce_kernel(
     nvshmem.reduce(team_handle, dest_tensor, source_tensor, nreduce, operation)
 
 
+@skip_but_pass_in_sandcastle_if(
+    True,
+    "Skipping all NVSHMEM Triton tests due to https://github.com/pytorch/pytorch/issues/162897",
+)
 @instantiate_parametrized_tests
 @requires_nvshmem()
 class NVSHMEMTritonTest(MultiProcContinuousTest):
