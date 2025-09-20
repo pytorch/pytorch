@@ -77,8 +77,9 @@ if TYPE_CHECKING:
     import triton
 
     from ..graph import GraphLowering
+    from ..ir import ExternKernel
+    from ..scheduler import BaseSchedulerNode
     from .wrapper_fxir import FxConverter
-
 
 log = logging.getLogger(__name__)
 
@@ -509,6 +510,7 @@ class ExternKernelOutLine(WrapperLine):
             args,
             device,
             provenance_debug_handle,
+            self.node.get_stack_traces(),
         )
 
     def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
@@ -1504,6 +1506,7 @@ class PythonWrapperCodegen(CodeGen):
         args: list[str],
         device: str,
         debug_handle: Optional[int] = None,
+        stack_traces: Optional[str] = None,
     ) -> None:
         # add debug printer code for triton kernel calls at (jit) inductor level
         debug_printer_manager = V.graph.wrapper_code.debug_printer
@@ -3582,6 +3585,29 @@ class PythonWrapperCodegen(CodeGen):
     @staticmethod
     def can_prove_buffer_has_static_shape(buffer):
         return PythonWrapperCodegen.static_shape_for_buffer_or_none(buffer) is not None
+
+    def write_kernel_context_guard(
+        self,
+        kernel_name: str,
+        node_schedule: Union[Sequence[BaseSchedulerNode], ExternKernel],
+    ):
+        return
+
+    def write_kernel_context_guard_begin(
+        self,
+    ):
+        """
+        Mark the beginning of kernel context guard
+        """
+        return
+
+    def write_kernel_context_guard_end(
+        self,
+    ):
+        """
+        Mark the end of kernel context guard
+        """
+        return
 
 
 class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
