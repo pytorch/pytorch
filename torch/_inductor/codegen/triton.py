@@ -2485,14 +2485,22 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             and self.range_trees[-1].is_loop
             and indexing.has_rindex()
         ) or indexing.can_lift:
+            block_ptr_line = indexing.format(var, roffset=False)
+            block_descriptor = self.cse.try_get(block_ptr_line)
+
+            # Early return if block descriptor already exists
+            if block_descriptor:
+                return block_descriptor, other
+
             block_descriptor_id = next(self.block_ptr_id)
             if isinstance(indexing, BlockPtrOptions):
                 block_descriptor = f"block_ptr{block_descriptor_id}"
             else:
                 block_descriptor = f"tma_descriptor{block_descriptor_id}"
-            line_body = DeferredLine(
-                name, f"{block_descriptor} = {indexing.format(var, roffset=False)}"
-            )
+            named_var = self.cse.namedvar(block_descriptor, dtype=torch.uint64)
+            self.cse.put(block_ptr_line, named_var)
+
+            line_body = DeferredLine(name, f"{block_descriptor} = {block_ptr_line}")
             if indexing.can_lift:
                 self.prologue.writeline(line_body)
             else:
