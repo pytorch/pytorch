@@ -19,6 +19,8 @@ from typing import Any, Callable, Generic, Optional, TYPE_CHECKING, TypeVar, Uni
 from typing_extensions import ParamSpec, TypeAlias
 
 
+
+
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
     from types import ModuleType
@@ -5730,3 +5732,11 @@ class BaseScheduling:
         and memory copy time in milliseconds on randomly generated inputs.
         """
         raise NotImplementedError
+
+    def codegen_comment(self, node_schedule, kernel_name=None):
+        from torch._inductor.debug import set_kernel_post_grad_provenance_tracing
+        debug_handle = set_kernel_post_grad_provenance_tracing(
+            node_schedule,  # type: ignore[arg-type]
+            kernel_name,
+        )
+        V.graph.wrapper_code.write_provenance_debug_handle(kernel_name, debug_handle)

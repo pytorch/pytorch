@@ -5603,6 +5603,16 @@ class ExternKernel(InputsKernel):
         origin_str, _detailed_origin_str = get_kernel_metadata(self, wrapper)
         if origin_str:
             wrapper.make_comment(origin_str)
+        
+        kernel_name = self.get_kernel_name()
+
+        from .debug import set_kernel_post_grad_provenance_tracing
+        debug_handle = set_kernel_post_grad_provenance_tracing(
+            self,
+            kernel_name,
+            is_extern=True
+        )
+        wrapper.write_provenance_debug_handle(kernel_name, debug_handle)
 
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
         raise NotImplementedError

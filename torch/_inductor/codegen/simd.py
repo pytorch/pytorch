@@ -41,7 +41,6 @@ from ..dependencies import MemoryDep, StarDep, WeakDep
 if TYPE_CHECKING:
     from ..ir import IRNode
 
-from ..debug import set_kernel_post_grad_provenance_tracing
 from ..optimize_indexing import indexing_dtype_strength_reduction
 from ..runtime.runtime_utils import green_text, yellow_text
 from ..scheduler import BaseSchedulerNode, BaseScheduling, WhyNoFuse
@@ -1464,17 +1463,10 @@ class SIMDScheduling(BaseScheduling):
         for kernel in kernels:
             self.codegen_node_schedule_with_kernel(node_schedule, kernel)
         MultiKernel.merge_workspaces_inplace(kernels)
-        debug_handles: list[tuple[str, Optional[int]]] = []
         for kernel in kernels:
             with V.set_kernel_handler(kernel):
                 src_code = kernel.codegen_kernel()
             kernel_name = self.define_kernel(src_code, node_schedule, kernel)
-            if config.trace.provenance_tracking_level != 0:
-                debug_handle = set_kernel_post_grad_provenance_tracing(
-                    node_schedule,  # type: ignore[arg-type]
-                    kernel_name,
-                )
-                debug_handles.append((kernel_name, debug_handle))
             log.debug("Generating kernel code with kernel_name: %s", kernel_name)
             kernel.kernel_name = kernel_name
             kernel.code_hash = code_hash(src_code)
@@ -1490,11 +1482,7 @@ class SIMDScheduling(BaseScheduling):
             for node in kernel_features.scheduler_nodes():
                 node.mark_run()
 
-        self.codegen_comment(node_schedule)
-        for kernel_name, debug_handle in debug_handles:
-            V.graph.wrapper_code.write_provenance_debug_handle(
-                kernel_name, debug_handle
-            )
+        self.codegen_comment(node_schedule, final_kernel.kernel_name)
         final_kernel.call_kernel(final_kernel.kernel_name)
 
         if config.nan_asserts:
@@ -1685,11 +1673,6 @@ class SIMDScheduling(BaseScheduling):
 
             kernel.kernel_name = self.define_kernel(src_code, node_schedule, kernel)
 
-            if config.trace.provenance_tracking_level != 0:
-                set_kernel_post_grad_provenance_tracing(
-                    node_schedule, kernel.kernel_name
-                )
-
             return kernel
 
     def codegen_template(
@@ -1751,8 +1734,7 @@ class SIMDScheduling(BaseScheduling):
             MultiKernel.merge_workspaces_inplace(kernels)
             multi_kernel = MultiKernel(kernels)
             node_schedule = [*prologue_nodes, template_node, *epilogue_nodes]
-            self.codegen_comment(node_schedule)
-
+            self.codegen_comment(node_schedule, multi_kernel.kernel_name)
             multi_kernel.call_kernel(multi_kernel.kernel_name)
             V.graph.removed_buffers |= multi_kernel.removed_buffers
             V.graph.inplaced_to_remove |= multi_kernel.inplaced_to_remove
@@ -1783,7 +1765,7 @@ class SIMDScheduling(BaseScheduling):
                 )
 
                 node_schedule = [*prologue_nodes, template_node, *epilogue_nodes]
-                self.codegen_comment(node_schedule)
+                self.codegen_comment(node_schedule, kernel.kernel_name)
                 kernel.call_kernel(kernel.kernel_name, template_node.node)
 
                 V.graph.removed_buffers |= kernel.removed_buffers
@@ -1869,12 +1851,7 @@ class SIMDScheduling(BaseScheduling):
 
         for src_code, kernel, _ in kernel_code_list:
             kernel_name = self.define_kernel(src_code, [combo_kernel_node], kernel)
-            # dump provenance node info for ComboKernelNode/ForeachKernel type
-            if config.trace.provenance_tracking_level != 0:
-                set_kernel_post_grad_provenance_tracing(
-                    combo_kernel_node.snodes, kernel_name
-                )
-            self.codegen_comment([combo_kernel_node])
+            self.codegen_comment(combo_kernel_node.snodes, kernel_name)
             log.debug("ComboKernels: generated kernel %s.", kernel_name)
             kernel.call_kernel(V.graph.wrapper_code, kernel_name)
 
@@ -2594,9 +2571,6 @@ class SIMDScheduling(BaseScheduling):
 
         src_code = src_code.replace(str(Placeholder.KERNEL_NAME), "triton_")
         return src_code
-
-    def codegen_comment(self, node_schedule):
-        pass
 
     def define_kernel(self, src_code, node_schedule, kernel):
         raise NotImplementedError
