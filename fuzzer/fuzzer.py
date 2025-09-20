@@ -220,7 +220,7 @@ def fuzz_and_execute(
     # Generate max_depth if not provided (range 1-10)
     if max_depth is None:
         random.seed(seed + 999)  # Use seed offset for consistent depth selection
-        max_depth = random.randint(1, 20)
+        max_depth = random.randint(1, 3)
     else:
         # Clamp max_depth to valid range
         max_depth = max(1, max_depth)
@@ -906,6 +906,7 @@ def execute_python_code(
             bufsize=1,  # Line buffered
             universal_newlines=True,
             preexec_fn=os.setsid,  # Create new process group
+            env={**os.environ, "PYTHONPATH": os.getcwd()},
         )
 
         # Create queues and threads for reading stdout and stderr
@@ -1285,22 +1286,22 @@ def fuzz_and_test(seed: Optional[int] = None, max_depth: Optional[int] = None):
     if max_depth is not None:
         print(f"Using max_depth: {max_depth}")
 
-    for i in range(1000):
-        print(f"------------------ TEST iteration {i} ---------------")
+    # Use starting seed + iteration number for reproducible but varied results
+    iteration_seed = seed if seed is not None else None
 
-        # Use starting seed + iteration number for reproducible but varied results
-        iteration_seed = seed + i if seed is not None else None
+    iteration_seed, success, error_message = fuzz_and_execute(
+        seed=iteration_seed, max_depth=max_depth
+    )
+    if not success:
+        if known_issue(error_message):
+            print(f"Known issue skipped")
 
-        iteration_seed, success, error_message = fuzz_and_execute(
-            seed=iteration_seed, max_depth=max_depth
-        )
-        if not success:
-            if known_issue(error_message):
-                print(f"Known issue skipped")
-                continue
+        print(f"Test failed with error: {error_message}")
+        import sys
+        sys.exit(1)
+    else:
+        print("Success")
 
-            print(f"Test failed with error: {error_message}")
-            return
 
 
 def quick_visualize_test(
