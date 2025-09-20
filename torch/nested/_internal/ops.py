@@ -2107,7 +2107,10 @@ def min_dim(func, *args, **kwargs):
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
 
-    dtype_max = torch.finfo(new_kwargs["input"].dtype).max
+    dtype = new_kwargs["input"].dtype
+    dtype_max = (
+        torch.finfo(dtype).max if dtype.is_floating_point else torch.iinfo(dtype).max
+    )
     return _apply_reduction(func, "min", dtype_max, *args, **kwargs)
 
 
@@ -2117,7 +2120,10 @@ def max_dim(func, *args, **kwargs):
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
 
-    dtype_min = torch.finfo(new_kwargs["input"].dtype).min
+    dtype = new_kwargs["input"].dtype
+    dtype_min = (
+        torch.finfo(dtype).min if dtype.is_floating_point else torch.iinfo(dtype).min
+    )
     return _apply_reduction(func, "max", dtype_min, *args, **kwargs)
 
 
@@ -2129,7 +2135,10 @@ def amin_default(func, *args, **kwargs):
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
 
-    dtype_max = torch.finfo(new_kwargs["input"].dtype).max
+    dtype = new_kwargs["input"].dtype
+    dtype_max = (
+        torch.finfo(dtype).max if dtype.is_floating_point else torch.iinfo(dtype).max
+    )
     return _apply_reduction(func, "amin", dtype_max, *args, **kwargs)
 
 
@@ -2141,7 +2150,10 @@ def amax_default(func, *args, **kwargs):
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
 
-    dtype_min = torch.finfo(new_kwargs["input"].dtype).min
+    dtype = new_kwargs["input"].dtype
+    dtype_min = (
+        torch.finfo(dtype).min if dtype.is_floating_point else torch.iinfo(dtype).min
+    )
     return _apply_reduction(func, "amax", dtype_min, *args, **kwargs)
 
 
@@ -2153,7 +2165,10 @@ def argmin_default(func, *args, **kwargs):
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
 
-    dtype_max = torch.finfo(new_kwargs["input"].dtype).max
+    dtype = new_kwargs["input"].dtype
+    dtype_max = (
+        torch.finfo(dtype).max if dtype.is_floating_point else torch.iinfo(dtype).max
+    )
     return _apply_reduction(func, "argmin", dtype_max, *args, **kwargs)
 
 
@@ -2165,7 +2180,10 @@ def argmax_default(func, *args, **kwargs):
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
 
-    dtype_min = torch.finfo(new_kwargs["input"].dtype).min
+    dtype = new_kwargs["input"].dtype
+    dtype_min = (
+        torch.finfo(dtype).min if dtype.is_floating_point else torch.iinfo(dtype).min
+    )
     return _apply_reduction(func, "argmax", dtype_min, *args, **kwargs)
 
 
