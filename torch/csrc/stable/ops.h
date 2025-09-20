@@ -255,4 +255,19 @@ inline torch::stable::Tensor clone(const torch::stable::Tensor& self) {
   return to<torch::stable::Tensor>(stack[0]);
 }
 
+// We expect this to be the stable version of the cpu op with
+// identical semantics to the existing copy_ op (except that it will
+// not be called as a tensor method but only as a function
+// i.e. cpu(t) not t.cpu()).
+// We will add kwargs support in the future.
+inline Tensor cpu(const Tensor& self) {
+  auto sizes = self.sizes();
+  auto ptr = sizes.data();
+  std::vector<int64_t> sizes_(ptr, ptr + sizes.size());
+  auto cpu_type = aoti_torch_device_type_cpu();
+  auto result = new_empty(self, sizes_, std::nullopt, cpu_type);
+  torch::stable::copy_(result, self);
+  return result;
+}
+
 } // namespace torch::stable
