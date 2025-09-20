@@ -524,17 +524,20 @@ def _single_tensor_adam(
             step_size = lr / bias_correction1
 
             bias_correction2_sqrt = bias_correction2**0.5
+            # We use this identity:
+            # 1 / (sqrt(v) / beta2_correction_sqrt + eps) =
+            # beta2_correction_sqrt / (sqrt(v) + eps * beta2_correction_sqrt)
 
             if amsgrad:
                 # Maintains the maximum of all 2nd moment running avg. till now
                 torch.maximum(max_exp_avg_sqs[i], exp_avg_sq, out=max_exp_avg_sqs[i])
 
                 # Use the max. for normalizing running avg. of gradient
-                denom = (max_exp_avg_sqs[i].sqrt() / bias_correction2_sqrt).add_(eps)
+                denom = max_exp_avg_sqs[i].sqrt().add_(eps * bias_correction2_sqrt)
             else:
-                denom = (exp_avg_sq.sqrt() / bias_correction2_sqrt).add_(eps)
+                denom = exp_avg_sq.sqrt().add_(eps * bias_correction2_sqrt)
 
-            param.addcdiv_(exp_avg, denom, value=-step_size)  # type: ignore[arg-type]
+            param.addcdiv_(exp_avg, denom, value=-step_size * bias_correction2_sqrt)  # type: ignore[arg-type]
 
         # Lastly, switch back to complex view
         if amsgrad and torch.is_complex(params[i]):
@@ -738,6 +741,13 @@ def _multi_tensor_adam(
             step_size = bias_correction1
             bias_correction2_sqrt = bias_correction2
 
+            # now step_size = - lr * sqrt(1 - beta2 ^ t) / (1 - beta1 ^ t)
+            torch._foreach_mul_(step_size, bias_correction2_sqrt)
+
+            # bias_correction2_sqrt unused after this; reuse its buffer for eps
+            torch._foreach_mul_(bias_correction2_sqrt, eps)
+            eps_bias_corrected = bias_correction2_sqrt
+
             if amsgrad:
                 device_max_exp_avg_sqs = cast(list[Tensor], device_max_exp_avg_sqs_)
                 # Maintains the maximum of all 2nd moment running avg. till now
@@ -748,8 +758,7 @@ def _multi_tensor_adam(
             else:
                 exp_avg_sq_sqrt = torch._foreach_sqrt(device_exp_avg_sqs)
 
-            torch._foreach_div_(exp_avg_sq_sqrt, bias_correction2_sqrt)
-            torch._foreach_add_(exp_avg_sq_sqrt, eps)
+            torch._foreach_add_(exp_avg_sq_sqrt, eps_bias_corrected)
             torch._foreach_div_(exp_avg_sq_sqrt, step_size)
 
             # at this point, exp_avg_sq_sqrt = - (1 - beta^t) * [sqrt(exp_avg_sq / (1 - beta2^t)) + eps] / lr
@@ -762,9 +771,9 @@ def _multi_tensor_adam(
                 1 - beta2 ** _get_value(step) for step in device_state_steps
             ]
 
-            step_size = _stack_if_compiling([(lr / bc) * -1 for bc in bias_correction1])
-
             bias_correction2_sqrt = [bc**0.5 for bc in bias_correction2]  # type: ignore[arg-type]
+
+            step_size = _stack_if_compiling([-(lr * bc2 / bc1) for bc1, bc2 in zip(bias_correction1, bias_correction2_sqrt)])
 
             if amsgrad:
                 device_max_exp_avg_sqs = cast(list[Tensor], device_max_exp_avg_sqs_)
@@ -776,8 +785,8 @@ def _multi_tensor_adam(
             else:
                 exp_avg_sq_sqrt = torch._foreach_sqrt(device_exp_avg_sqs)
 
-            torch._foreach_div_(exp_avg_sq_sqrt, bias_correction2_sqrt)
-            torch._foreach_add_(exp_avg_sq_sqrt, eps)
+            bias_correction_eps = [bc2 * eps for bc2 in bias_correction2_sqrt]
+            torch._foreach_add_(exp_avg_sq_sqrt, bias_correction_eps)
             torch._foreach_addcdiv_(
                 device_params,
                 device_exp_avgs,
