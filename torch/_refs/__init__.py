@@ -5599,12 +5599,16 @@ def eye(
     torch._check(n >= 0, lambda: f"n must be greater or equal to 0, got {n}")
     torch._check(m >= 0, lambda: f"m must be greater or equal to 0, got {m}")
 
-    range_n = torch.arange(n, dtype=torch.int64, device=device, requires_grad=False)
-    range_m = torch.arange(m, dtype=torch.int64, device=device, requires_grad=False)
+    if max(n, m) <= torch.iinfo(torch.int32).max:
+        range_dtype = torch.int32  # optimization for small tensors
+    else:
+        range_dtype = torch.int64
+    range_n = torch.arange(n, dtype=range_dtype, device=device, requires_grad=False)
+    range_m = torch.arange(m, dtype=range_dtype, device=device, requires_grad=False)
 
     cond = range_n.unsqueeze(-1) == range_m
-    if dtype is torch.bool:
-        return cond
+    if layout in (torch.strided, None) and not pin_memory:
+        return cond.to(dtype or torch.get_default_dtype())
     else:
         one = torch.ones(
             (1,),
