@@ -1550,7 +1550,7 @@ class TestFP8Matmul(TestCase):
 
         # only cuBLAS supports rowwise with fp32 output and cuBLAS only supports
         # rowwise on SM 9.0
-        if torch.cuda.get_device_capability != (9, 0) and output_dtype == torch.float:
+        if torch.cuda.get_device_capability() != (9, 0) and output_dtype == torch.float:
             with self.assertRaisesRegex(
                 RuntimeError,
                 "Only bf16 high precision output types are supported for row-wise scaling."
