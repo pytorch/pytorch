@@ -477,20 +477,19 @@ class FxConverter:
 
         for node in V.graph.module.graph.find_nodes(op="placeholder"):  # type: ignore[operator, union-attr]
             name = node.name
-            if name in self.graph_inputs:
-                ir_node = self.graph_inputs[name]
-                if isinstance(ir_node, ir.TensorBox):
-                    buffer = self._get_buffer(ir_node)
-                    placeholder_node = self.buffer_to_node[buffer.get_name()]
+            ir_node = self.graph_inputs.get(name)
+            if isinstance(ir_node, ir.TensorBox):
+                buffer = self._get_buffer(ir_node)
+                placeholder_node = self.buffer_to_node[buffer.get_name()]
 
-                    for dim, size in enumerate(ir_node.get_size()):
-                        _codegen_symbol(
-                            size, placeholder_node, torch.ops.aten.sym_size.int, dim
-                        )
-                    for dim, stride in enumerate(ir_node.get_stride()):
-                        _codegen_symbol(
-                            stride, placeholder_node, torch.ops.aten.sym_stride.int, dim
-                        )
+                for dim, size in enumerate(ir_node.get_size()):
+                    _codegen_symbol(
+                        size, placeholder_node, torch.ops.aten.sym_size.int, dim
+                    )
+                for dim, stride in enumerate(ir_node.get_stride()):
+                    _codegen_symbol(
+                        stride, placeholder_node, torch.ops.aten.sym_stride.int, dim
+                    )
 
     def _generate_graph_constants(self) -> None:
         for name, value in V.graph.constants.items():
