@@ -779,6 +779,53 @@ class _TorchDynamoContext:
                 ),
             )
 
+        def graph_capture(example_inputs: tuple[tuple[Any, ...], dict[str, Any]]) -> Any:
+            from torch._dynamo.aot_compile import bind_locals
+            from torch._dynamo.convert_frame import FrameInfo, fullgraph_capture
+            from torch._dynamo.utils import dynamo_timed, get_metrics_context
+            from torch._guards import compile_context, CompileContext
+            import builtins
+
+            if not self.fullgraph:
+                raise RuntimeError(
+                    "Graph breaks are not supported with aot compile. Please use torch.compile(fullgraph=True)."
+                )
+
+            assert self._hooks is not None
+
+            # TODO code sharing
+            args, kwargs = example_inputs
+            if hasattr(fn, "__self__"):
+                fn_ = fn.__func__
+                args = (fn.__self__,) + args
+            elif inspect.isfunction(fn):
+                fn_ = fn
+            else:
+                raise RuntimeError(f"Unsupported model code type {fn}")
+            signature = inspect.signature(fn_)
+            f_locals = bind_locals(signature, *args, **kwargs)
+            if fn_.__code__.co_freevars or fn_.__closure__:
+                assert len(fn_.__closure__) == len(fn_.__code__.co_freevars)
+                f_locals.update(
+                    {
+                        name: cell.cell_contents
+                        for name, cell in zip(fn_.__code__.co_freevars, fn_.__closure__)
+                    }
+                )
+            with (
+                compile_context(CompileContext(convert_frame.get_compile_id({}))),
+                get_metrics_context(),
+                dynamo_timed("fullgraph_capture"),
+            ):
+                return fullgraph_capture(FrameInfo(
+                    fn_.__code__,
+                    fn_.__globals__,
+                    f_locals,
+                    builtins,
+                    fn_.__closure__ or ())
+                )
+
+
         # add context containing GraphModule to any GraphModule forward functions
         if isinstance(fn, GraphModule):
             # add context containing GraphModule to any GraphModule forward functions
@@ -932,6 +979,7 @@ class _TorchDynamoContext:
         compile_wrapper.get_compiler_config = get_compiler_config  # type: ignore[attr-defined]
         if torch._dynamo.config.enable_aot_compile:
             compile_wrapper.aot_compile = aot_compile  # type: ignore[attr-defined]
+            compile_wrapper.graph_capture = graph_capture  # type: ignore[attr-defined]
 
         # If the function is called using torch._dynamo.optimize decorator, we
         # should prevent any type of skipping.

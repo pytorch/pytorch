@@ -2,6 +2,7 @@
 
 import os
 import pickle
+import types
 from contextlib import contextmanager
 
 import torch
@@ -68,6 +69,27 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
         torch._dynamo.utils.counters.clear()
         DynamoCache.clear()
         PrecompileContext.clear()
+
+    def test_graph_capture_basic_fn(self):
+        def fn(x, y):
+            return x + y
+
+        graph = torch.compile(fn, fullgraph=True).graph_capture(
+            ((torch.randn(3, 4), torch.randn(3, 4)), {})
+        )
+        inputs = (torch.randn(3, 4), torch.randn(3, 4))
+        expected = fn(*inputs)
+        self.assertEqual(graph.forward_callable()(*inputs), expected)
+
+    def test_graph_capture_basic_module_forward(self):
+        mod = SimpleLinearModule()
+        graph = torch.compile(mod.forward, fullgraph=True).graph_capture(
+            ((torch.randn(3, 3),), {})
+        )
+        inputs = (torch.randn(3, 3),)
+        expected = mod(*inputs)
+        mod.forward = types.MethodType(graph.forward_callable(), mod)
+        self.assertEqual(mod(*inputs), expected)
 
     def test_aot_compile_basic_fn(self):
         def fn(x, y):
