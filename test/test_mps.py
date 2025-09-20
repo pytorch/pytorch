@@ -7675,7 +7675,9 @@ class TestMPS(TestCaseMPS):
         x = net1(x)
         torch.mps.profiler.stop()
 
-    def test_mps_event_module(self):
+    @parametrize("sync_start", [True, False])
+    @parametrize("sync_end", [True, False])
+    def test_mps_event_module(self, sync_start, sync_end):
         startEvent = torch.mps.Event(enable_timing=True)
         startEvent.record()
         net1 = torch.nn.ConvTranspose2d(128, 64, kernel_size=3, stride=2, padding=1, output_padding=1)\
@@ -7684,6 +7686,10 @@ class TestMPS(TestCaseMPS):
         x = net1(x)
         endEvent = torch.mps.Event(enable_timing=True)
         endEvent.record()
+        if sync_start:
+            startEvent.synchronize()
+        if sync_end:
+            endEvent.synchronize()
         elapsedTime = startEvent.elapsed_time(endEvent)
         self.assertGreater(elapsedTime, 0.0)
 
