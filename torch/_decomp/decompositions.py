@@ -121,6 +121,11 @@ def _unsqueeze_to_dim(x: Tensor, dim: int) -> Tensor:
     return x
 
 
+@register_decomposition(torch.ops.prims.broadcast_in_dim.default)
+def broadcast_in_dim_decomposition(a: Tensor, shape, broadcast_dimensions):
+    return prims._broadcast_in_dim_view_impl(a, shape, broadcast_dimensions)
+
+
 @register_decomposition(aten.tanh_backward)
 @out_wrapper("grad_input")
 @pw_cast_for_opmath
