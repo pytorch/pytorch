@@ -236,7 +236,8 @@ def aot_compile_fullgraph(
                 closure=fn.__closure__ or (),  # type: ignore[arg-type]
             )
         )
-        dynamo_output = capture_output.dynamo_output
+        graph_capture_output = capture_output.graph_capture_output
+        assert graph_capture_output.output_graph is not None
 
         if not hooks.guard_filter_fn:
             from torch._dynamo.types import GuardFilterEntry
@@ -257,7 +258,7 @@ def aot_compile_fullgraph(
 
             hooks.guard_filter_fn = new_guard_filter_fn
 
-        check_fn = dynamo_output.build_guards(
+        check_fn = graph_capture_output.build_guards(
             fn.__code__, hooks=hooks, save=True, strict_error=True
         )
 
@@ -266,10 +267,7 @@ def aot_compile_fullgraph(
         backend_input = capture_output.backend_input
         assert backend_input is not None
         backend_input.graph_module._backend_id = backend_input.backend_id  # type: ignore[assignment]
-        output_graph = dynamo_output.tracer_output.output_graph
-        assert output_graph is not None
-        device_type = _graph_device_type(output_graph.current_tracer.graph)
-        import_sources = output_graph.import_sources
+        device_type = _graph_device_type(backend_input.graph_module.graph)
         with (
             torch._guards.tracing(TracingContext(backend_input.fake_mode)),
             torch._functorch.config.patch(
@@ -298,15 +296,15 @@ def aot_compile_fullgraph(
             )
 
         source_info = SourceInfo(inlined_sources=set())
-        for traced_code in output_graph.traced_code:
+        for traced_code in graph_capture_output.traced_code:
             source_info.add_code(traced_code)
 
         artifacts = CompileArtifacts(
             signature=signature,
-            bytecode=dynamo_output.bytecode,
+            bytecode=graph_capture_output.bytecode,
             guard_manager=check_fn.guard_manager,
             guards_state=check_fn.guards_state,
-            import_sources=import_sources,
+            import_sources=graph_capture_output.import_sources,
             backend_id=backend_input.backend_id,
             compiled_fn=compiled_fn,
             original_code=fn.__code__,
