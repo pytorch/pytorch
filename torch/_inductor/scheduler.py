@@ -23,6 +23,8 @@ if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
     from types import ModuleType
 
+import weakref
+
 import sympy
 
 import torch
@@ -90,6 +92,28 @@ compute_dependencies_log = torch._logging.getArtifactLogger(
 PartitionType: TypeAlias = list["BaseSchedulerNode"]
 _T = TypeVar("_T")
 _P = ParamSpec("_P")
+
+
+_custom_should_partition_fns: weakref.WeakKeyDictionary[
+    torch._ops.OpOverload, Callable[..., bool]
+] = weakref.WeakKeyDictionary()
+
+
+def register_should_partition_rule(
+    op: torch._ops.OpOverload,
+    func: Callable[..., bool],
+) -> None:
+    """Register a function that says if Inductor should partition the graph on this op.
+
+    The function should be have the same signature as the operator.
+    Inductor will invoke the function with FakeTensors when it needs to decide
+    if the graph should be partitioned.
+
+    `register_should_partition_rule` is currently private and experimental.
+    Use at your own risk.
+    """
+    assert isinstance(op, torch._ops.OpOverload)
+    _custom_should_partition_fns[op] = func
 
 
 @dataclasses.dataclass
@@ -2978,7 +3002,7 @@ class Scheduler:
                     i + 1,
                     old_len,
                 )
-                nodes = self.fuse_nodes_once(nodes)
+                nodes = self.fuse_nodes_once(nodes, is_reorder_round=False)
                 new_len = len(nodes)
                 fusion_log.debug(
                     "completed fusion round (%d/10): fused %d nodes into %d nodes\n",
@@ -2991,6 +3015,9 @@ class Scheduler:
                         "===== fusion complete (%d iterations) =====", i + 1
                     )
                     break
+
+            if config.loop_ordering_after_fusion:
+                nodes = self.fuse_nodes_once(nodes, is_reorder_round=True)
             return nodes
 
     def process_grouped_nodes(self) -> None:
@@ -3497,7 +3524,9 @@ class Scheduler:
         return self.name_to_fused_node[node.get_first_name()]
 
     def fuse_nodes_once(
-        self, nodes: list[BaseSchedulerNode]
+        self,
+        nodes: list[BaseSchedulerNode],
+        is_reorder_round: bool,
     ) -> list[BaseSchedulerNode]:
         """
         Combine eligible nodes into FusedSchedulerNodes.
@@ -3560,7 +3589,7 @@ class Scheduler:
 
                 fuse_two_nodes(node_key1, node_key2)
 
-        for node1, node2 in self.get_possible_fusions(nodes):
+        for node1, node2 in self.get_possible_fusions(nodes, is_reorder_round):
             # if either node is in a pending fusion, resolve it.
             # since we iterate on potential fusions based on profitability
             # the first potential fusion should take precedence.
@@ -3568,9 +3597,9 @@ class Scheduler:
             node1 = self.get_fused_node(node1)
             node2 = self.get_fused_node(node2)
 
-            if self.can_fuse(node1, node2) and not self.will_fusion_create_cycle(
-                node1, node2
-            ):
+            if self.can_fuse(
+                node1, node2, is_reorder_round
+            ) and not self.will_fusion_create_cycle(node1, node2):
                 speedup = self.speedup_by_fusion(node1, node2)
                 if callable(speedup):
                     pending_fusions[node1] = (speedup, node1, node2)
@@ -3655,7 +3684,9 @@ class Scheduler:
             node.prune_redundant_deps(self.name_to_fused_node)
 
     def get_possible_fusions(
-        self, nodes: list[BaseSchedulerNode]
+        self,
+        nodes: list[BaseSchedulerNode],
+        is_reorder_round: bool,
     ) -> list[tuple[BaseSchedulerNode, BaseSchedulerNode]]:
         """
         Helper to find all legal fusion opportunities, sorted by self.score_fusion()
@@ -3675,10 +3706,10 @@ class Scheduler:
                         continue
                     seen.add(key)
 
-                    if self.can_fuse(node1, node2):
+                    if self.can_fuse(node1, node2, is_reorder_round):
                         possible_fusions.append(key)
                     elif (node2.is_template() or node2.is_foreach()) and self.can_fuse(
-                        node2, node1
+                        node2, node1, is_reorder_round
                     ):
                         # foreach fusions and epilogue fusions are order dependent
                         possible_fusions.append((node2, node1))
@@ -4148,7 +4179,12 @@ class Scheduler:
         else:
             return None
 
-    def can_fuse(self, node1: BaseSchedulerNode, node2: BaseSchedulerNode) -> bool:
+    def can_fuse(
+        self,
+        node1: BaseSchedulerNode,
+        node2: BaseSchedulerNode,
+        can_reorder: bool = False,
+    ) -> bool:
         """
         Determine if it is possible to combine node1 and node2 into a
         single fused node.
@@ -4265,7 +4301,8 @@ class Scheduler:
 
         shared_data_score = self.score_fusion_memory(node1, node2)
         if (
-            shared_data_score < config.score_fusion_memory_threshold
+            can_reorder
+            and shared_data_score < config.score_fusion_memory_threshold
             and config.loop_ordering_after_fusion
         ):
             new_shared_data_score = self.shared_data_after_reordering_loop(node1, node2)
@@ -4618,6 +4655,25 @@ class Scheduler:
         self, node: BaseSchedulerNode, should_log: bool = False
     ) -> bool:
         """Return True if we should partition the inductor graph on this node"""
+
+        # Allow users to manually specify if a node should be partitioned
+        # Can only do this for FallbackKernels
+        ir_node = node.node
+        if isinstance(ir_node, torch._inductor.ir.FallbackKernel):
+            operator = ir_node.op_overload
+            if operator is not None and operator in _custom_should_partition_fns:
+                assert isinstance(operator, torch._ops.OpOverload)
+                should_partition_fn = _custom_should_partition_fns[operator]
+                fx_node = ir_node.get_origin_node()
+                assert fx_node is not None
+                success, fake_args, fake_kwargs = (
+                    torch._inductor.fx_utils.get_fake_args_kwargs(fx_node)
+                )
+                assert success, (
+                    "If this op came from a custom inductor pass, make sure to run FakeTensorUpdator"
+                )
+                should_partition = should_partition_fn(*fake_args, **fake_kwargs)
+                return should_partition
 
         # When not using cudagraphs, keep all kernels in the `call` function
         # instead of graph partition functions, since graph partition only brings
