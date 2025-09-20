@@ -648,6 +648,9 @@ class BlockMask:
                 assert new_block_mask.kv_num_blocks.shape == (2, 1, 1)
                 assert new_block_mask.kv_indices.shape == (2, 1, 1, 4)
         """
+        index = (index,) if not isinstance(index, tuple) else index
+        padded = (*index, slice(None), slice(None), slice(None))[:3]
+        index = tuple(slice(i, i + 1) if isinstance(i, int) else i for i in padded)
         new_kv_num_blocks = self.kv_num_blocks[index]
         new_kv_indices = self.kv_indices[index]
         if self.full_kv_num_blocks is not None:
