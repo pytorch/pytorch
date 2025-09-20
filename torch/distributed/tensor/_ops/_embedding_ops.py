@@ -35,11 +35,18 @@ class MaskBuffer:
     refcount: int = 0
 
     def materialize_mask(self, mask):
+        torch.distributed.breakpoint()
         if self.refcount == 0:
             self.data = mask
         else:
             assert self.data is not None
-            if not torch.equal(self.data, mask):
+            # TODO @azahed98: Does this Tensor check break graph capture or refcount?
+            if type(self.data) is not torch.Tensor:
+                # If data was FunctionalTensor/FakeTensor, update without
+                # updating the refcount
+                self.data = mask
+                self.refcount -= 1
+            elif not torch.equal(self.data, mask):
                 raise RuntimeError(
                     "MaskBuffer has been materialized with conflicting data"
                 )
@@ -60,6 +67,7 @@ class MaskBuffer:
         # For gather, the mask has the same dimension as the output tensor, whereas
         # the output of the embedding op has an additional dimension compare to the input,
         # hence the output masking logic below having two different cases.
+        # torch.distributed.breakpoint()
         if tensor.ndim == self.data.ndim:
             tensor[self.data] = 0.0
         else:
@@ -113,6 +121,7 @@ class _MaskPartial(Partial):
     def _reduce_value(
         self, tensor: torch.Tensor, mesh: DeviceMesh, mesh_dim: int
     ) -> torch.Tensor:
+        # torch.distributed.breakpoint()
         # by the time we need reduction, we should have already saved the mask
         assert self.mask_buffer.data is not None
 
@@ -134,6 +143,7 @@ class _MaskPartial(Partial):
         mesh_dim: int,
         shard_spec: Placement,
     ) -> torch.Tensor:
+        # torch.distributed.breakpoint()
         # by the time we need reduction, we should have already saved the mask
         assert self.mask_buffer.data is not None
 

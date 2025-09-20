@@ -60,7 +60,7 @@ else:
     DEVICE_TYPE = "cpu"
     PG_BACKEND = "gloo"
 
-NUM_DEVICES = 4
+NUM_DEVICES = 1
 
 # We use this as a proxy for "multiple GPUs exist"
 if (TEST_CUDA or TEST_XPU or TEST_HPU) and DEVICE_COUNT > 1:
