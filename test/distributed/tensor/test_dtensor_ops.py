@@ -193,7 +193,6 @@ dtensor_fails = {
     xfail("linalg.lu_factor_ex"),
     xfail("linalg.lu_solve"),
     xfail("linalg.matrix_power"),
-    xfail("linalg.multi_dot"),
     xfail("linalg.pinv"),
     xfail("linalg.pinv", "hermitian"),
     xfail("linalg.slogdet"),
