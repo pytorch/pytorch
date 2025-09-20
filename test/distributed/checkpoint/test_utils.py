@@ -199,7 +199,7 @@ class TestReaderView(TestCase):
 class TestDistWrapper(DTensorTestBase):
     @property
     def world_size(self):
-        return min(4, torch.cuda.device_count())
+        return min(4, torch.accelerator.device_count())
 
     @with_comms
     @skip_if_lt_x_gpu(4)
