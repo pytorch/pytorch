@@ -43,9 +43,9 @@ from torch.fx.experimental.proxy_tensor import is_sym_node
 from torch.fx.experimental.symbolic_shapes import fx_placeholder_vals
 from torch.fx.graph_module import GraphModule
 from torch.fx.passes._tensorify_python_scalars import tensorify_python_scalars
-from torch.multiprocessing.reductions import StorageWeakRef
 from torch.types import py_sym_types
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+from torch.utils.weak import StorageWeakRef
 from torchgen.utils import dataclass_repr
 
 from .. import config

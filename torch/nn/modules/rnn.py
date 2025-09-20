@@ -12,6 +12,7 @@ from torch import _VF, Tensor
 from torch.nn import init
 from torch.nn.parameter import Parameter
 from torch.nn.utils.rnn import PackedSequence
+from torch.utils.weak import StorageWeakRef
 
 from .module import Module
 
@@ -252,12 +253,21 @@ class RNNBase(Module):
         # a sufficient check, because overlapping parameter buffers that don't completely
         # alias would break the assumptions of the uniqueness check in
         # Module.named_parameters().
-        unique_data_ptrs = {
-            p.data_ptr()  # type: ignore[union-attr]
-            for p in self._flat_weights
-        }
-        if len(unique_data_ptrs) != len(self._flat_weights):
-            return
+        try:
+            unique_storage_refs = {
+                StorageWeakRef(p.untyped_storage())
+                for p in self._flat_weights  # type: ignore[union-attr]
+                if p is not None
+            }
+            if len(unique_storage_refs) != len(self._flat_weights):
+                return
+        except Exception:
+            unique_data_ptrs = {
+                p.data_ptr()  # type: ignore[union-attr]
+                for p in self._flat_weights
+            }
+            if len(unique_data_ptrs) != len(self._flat_weights):
+                return
 
         with torch.cuda.device_of(first_fw):
             import torch.backends.cudnn.rnn as rnn

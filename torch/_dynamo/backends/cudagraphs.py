@@ -46,7 +46,7 @@ from torch._inductor.utils import (
     num_fw_fixed_arguments,
     output_node,
 )
-from torch.multiprocessing.reductions import StorageWeakRef
+from torch.utils.weak import StorageWeakRef
 
 from .registry import register_backend
 

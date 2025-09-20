@@ -9,9 +9,9 @@ import torch
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.fx import Node
 from torch.fx._compatibility import compatibility
-from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils import _pytree as pytree
 from torch.utils._pytree import tree_map_only
+from torch.utils.weak import StorageWeakRef
 
 
 __all__ = ["reinplace"]

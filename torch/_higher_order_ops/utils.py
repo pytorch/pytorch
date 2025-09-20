@@ -25,7 +25,7 @@ from torch.fx.experimental.proxy_tensor import (
 )
 from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 from torch.fx.passes.shape_prop import _extract_tensor_metadata, TensorMetadata
-from torch.multiprocessing.reductions import StorageWeakRef
+from torch.utils.weak import StorageWeakRef
 
 
 @dataclass
