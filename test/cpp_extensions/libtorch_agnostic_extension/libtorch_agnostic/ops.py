@@ -269,17 +269,16 @@ def my_copy_(dst, src, non_blocking) -> Tensor:
     return torch.ops.libtorch_agnostic.my_copy_.default(dst, src, non_blocking)
 
 
-def my_clone(t, *, memory_format=None) -> Tensor:
+def my_clone(t) -> Tensor:
     """
     Returns a clone of input tensor.
 
     Args:
         t: Input tensor
-        memory_format:
 
     Returns: Cloned tensor
     """
-    return torch.ops.libtorch_agnostic.my_clone.memory_format(t, memory_format)
+    return torch.ops.libtorch_agnostic.my_clone.default(t)
 
 
 def test_device_guard(device_index) -> int:
