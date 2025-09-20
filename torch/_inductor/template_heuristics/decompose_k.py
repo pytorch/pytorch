@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Any, TYPE_CHECKING
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import sympy
 
@@ -13,11 +14,19 @@ from ..utils import get_k_splits
 from ..virtualized import V
 from .base import TemplateConfigHeuristics
 from .gemm import GemmMaxAutotuneTemplateConfigHeuristics
+from .params import DataclassTemplateParams
 from .registry import register_template_heuristic
 
 
 if TYPE_CHECKING:
     from collections.abc import Generator
+
+
+@dataclass
+class DecomposeKTemplateParams(DataclassTemplateParams):
+    """Decompose K template parameters are just the k_split"""
+
+    k_split: int = 0
 
 
 @register_template_heuristic(decompose_k_subgraph_template.uid, None, op_name="mm")
@@ -42,7 +51,7 @@ class DecomposeKConfigHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
         self,
         kernel_inputs: KernelInputs,
         op_name: str,
-    ) -> Generator[dict[str, Any], None, None]:
+    ) -> Generator[DecomposeKTemplateParams, None, None]:
         """
         Get all the valid k_splits for the given m, n, k.
         """
@@ -68,4 +77,4 @@ class DecomposeKConfigHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
                 sympy.Eq(sympy.Mod(k, k_split), 0)
             ):
                 continue
-            yield {"k_split": k_split}
+            yield DecomposeKTemplateParams(k_split=k_split)

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING, Union
 
 from .params import DictKernelTemplateParams, KernelTemplateParams
 
@@ -40,15 +40,22 @@ class TemplateConfigHeuristics:
             return
 
         # Generate configs and fuse with extra_kwargs
-        for config_dict in self._get_template_configs_impl(kernel_inputs, op_name):
-            # Fuse extra_kwargs into config
-            yield DictKernelTemplateParams(config_dict)
+        for cfg in self._get_template_configs_impl(kernel_inputs, op_name):
+            if isinstance(cfg, dict):
+                # Fuse extra_kwargs into config
+                yield DictKernelTemplateParams(cfg)
+            else:
+                # Assume config_dict is a KernelTemplateParams
+                yield cfg
 
     def _get_template_configs_impl(
         self,
         kernel_inputs: KernelInputs,
         op_name: str,
-    ) -> Generator[dict[str, Any], None, None]:
+    ) -> Union[
+        Generator[dict[str, Any], None, None],
+        Generator[KernelTemplateParams, None, None],
+    ]:
         """
         Get template configs for the given inputs.
         This is the main entry point for template-specific logic.
