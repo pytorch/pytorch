@@ -76,7 +76,7 @@ void initPlacementBindings(PyObject* module) {
           [](const py::none&) { return Replicate(); }));
   py::class_<Partial, Placement>(distributed_module, "Partial")
       .def(py::init<>())
-      .def(py::init<std::string>(), py::arg("reduce_op"))
+      .def(py::init<std::optional<std::string>>(), py::arg("reduce_op"))
       .def_readonly("reduce_op", &Partial::reduce_op)
       .def(
           "is_partial", &Partial::is_partial, py::arg("reduce_op") = py::none())
