@@ -5,6 +5,7 @@ import functools
 import gc
 import importlib
 import itertools
+import re
 import sys
 import unittest
 import warnings
@@ -911,6 +912,67 @@ if HAS_CUDA_AND_TRITON:
         @torch._inductor.config.patch("triton.cudagraphs", False)
         def test_unaligned_static_input_no_cudagraphs(self):
             self._test_unaligned_static_input_impl(expected_clones=0)
+
+        @torch._inductor.config.patch("graph_partition", True)
+        @torch._inductor.config.patch("implicit_fallbacks", True)
+        def test_graph_partition_custom_rule(self):
+            def get_num_partitions(code):
+                code = "".join(code)
+                found = re.search(r"partitions=\[(.*)\]", code)
+                assert found is not None
+                partitions = found.group(1)
+                num_partitions = len([p for p in partitions.split(",") if p])
+                return num_partitions
+
+            @torch.library.custom_op("mylib::bar", mutates_args=())
+            def bar(x: torch.Tensor, flag: int) -> torch.Tensor:
+                return x.clone()
+
+            @bar.register_fake
+            def _(x, flag):
+                return x.clone()
+
+            def f(x, flag):
+                x = x + 1
+                x = bar(x, flag)
+                x = x + 1
+                return x
+
+            x = torch.randn(2, device="cuda")
+            f_compiled = torch.compile(f, mode="reduce-overhead", fullgraph=True)
+            _, code = run_and_get_code(f_compiled, x, True)
+            num_partitions = get_num_partitions(code)
+            self.assertEqual(num_partitions, 1)
+
+            @torch.library.custom_op("mylib::baz", mutates_args=())
+            def baz(x: torch.Tensor, flag: int) -> torch.Tensor:
+                return x.clone()
+
+            @baz.register_fake
+            def _(x, flag):
+                return x.clone()
+
+            def should_partition(x, flag):
+                return flag
+
+            torch._inductor.scheduler.register_should_partition_rule(
+                torch.ops.mylib.baz.default, should_partition
+            )
+
+            def f(x, flag):
+                x = x + 1
+                x = baz(x, flag)
+                x = x + 1
+                return x
+
+            f_compiled = torch.compile(f, mode="reduce-overhead", fullgraph=True)
+            _, code = run_and_get_code(f_compiled, x, True)
+            num_partitions = get_num_partitions(code)
+            self.assertEqual(num_partitions, 2)
+
+            _, code = run_and_get_code(f_compiled, x, False)
+            num_partitions = get_num_partitions(code)
+            self.assertEqual(num_partitions, 1)
 
         @torch._inductor.config.patch("graph_partition", True)
         @torch._inductor.config.patch("triton.cudagraph_trees", False)
