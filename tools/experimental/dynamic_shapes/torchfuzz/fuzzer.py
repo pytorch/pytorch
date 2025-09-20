@@ -1,3 +1,4 @@
+# mypy: ignore-errors
 import logging
 import random
 from typing import Any, Optional, Union

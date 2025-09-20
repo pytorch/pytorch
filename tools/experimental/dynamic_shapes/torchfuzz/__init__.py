@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 """
 PyTorch Operation Fuzzer for Dynamic Shapes Testing.
 
@@ -19,8 +21,7 @@ from tensor_fuzzer import (
     TensorSpec,
     test_fuzzing_tensors,
 )
-
-from .visualize_stack import operation_stack_to_dot, visualize_operation_stack
+from visualize_stack import operation_stack_to_dot, visualize_operation_stack
 
 
 __all__ = [
