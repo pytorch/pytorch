@@ -222,15 +222,6 @@ Each test run creates artifacts in `/tmp/fuzzing_seed_{seed}_{timestamp}_{status
 - **`generated_code.py`** - Executable Python code
 - **`operation_stack_diagram.png`** - Visual operation stack diagram
 
-## Configuration
-
-### Depth Control
-
-Higher `max_depth` values generate more complex operation chains:
-- `depth=1`: Simple operations (mostly leaf nodes)
-- `depth=3`: Moderate complexity (default)
-- `depth=10`: Very complex chains
-
 ### Known Issues Handling
 
 TorchFuzz automatically skips known PyTorch issues or previously found, you should add them to the list known_issues.
@@ -243,15 +234,6 @@ known_issues = {
         "https://github.com/pytorch/pytorch/issues/160726",
 }
 ```
-
-## Debugging Failed Tests
-
-When a test fails, examine the generated artifacts:
-
-1. **Check `summary.txt`** for test parameters
-2. **Review `generated_code.py`** for the exact failing code
-3. **Examine `operation_stack.txt`** for the operation sequence
-4. **View `operation_stack_diagram.png`** for visual understanding
 
 ## API Usage
 
