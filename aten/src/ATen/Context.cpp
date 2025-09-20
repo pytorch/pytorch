@@ -25,65 +25,49 @@ namespace at {
 
 namespace {
 
-/*
-  These const variables defined the fp32 precisions for different backend
-  We have "generic", "cuda", "mkldnn" backend now and we can choose fp32
-  prevision from "ieee", "tf32", "bf16" and "none". The "ieee" precision means
-  IEEE standard floating point format, "tf32" and "bf16" means we are allowed to
-  use "tf32" or "bf16" as internal computation data types for fp32 computations.
-  And "none" means it is override-able by parent's node
+// "generic" is a special backend used to
+// refer to all other available backends
+bool isBackendValid(const std::string& backend) {
+  return backend == "cuda"
+      || backend == "generic"
+      || backend == "mkldnn";
+}
 
-  generic->mkldnn->matmul
-                ->conv
-                ->rnn
-         ->cuda ->matmul
-                ->conv
-                ->rnn
-*/
-const std::map<std::string, std::vector<std::string>> _fp32_precisions = {
-    {"generic", {{"ieee", "tf32", "bf16", "none"}}},
-    {"mkldnn", {{"ieee", "tf32", "bf16", "none"}}},
-    {"cuda", {{"ieee", "tf32", "none"}}}};
+// "all" is a special op used to refer
+// to all the other available operations
+bool isOpValid(const std::string& op) {
+  return op == "all"
+      || op == "conv"
+      || op == "matmul"
+      || op == "rnn";
+}
 
-// Check whether the backend and op are legal
-void check_fp32_prec_backend_and_op(
-    const std::string& backend,
-    const std::string& op) {
-  static std::vector<std::string> backends = {"generic", "mkldnn", "cuda"};
-  static std::vector<std::string> operators = {"conv", "matmul", "rnn", "all"};
-  TORCH_CHECK(
-      std::find(backends.begin(), backends.end(), backend) != backends.end(),
-      "Invalid backend: ",
-      backend);
-  TORCH_CHECK(
-      std::find(operators.begin(), operators.end(), op) != operators.end(),
-      "Invalid operator: ",
-      op);
-  if (backend == "generic") {
-    TORCH_CHECK(op == "all", "Invalid operation for generic backend: ", op);
-  }
-  }
+// - The "ieee" precision means IEEE standard floating point format
+// - "tf32" and "bf16" means we are allowed to use "tf32" or "bf16"
+//   as internal computation data types for fp32 computations
+// - "none" is a special precision used to indicate that
+//   the precision is overridable by the parent node
+bool isPrecisionValid(const std::string& precision) {
+  return precision == "bf16"
+      || precision == "ieee"
+      || precision == "none"
+      || precision == "tf32";
+}
 
-  // Return whether the precision is supported by backends
-  bool validate_fp32_prec(
-      const std::string& backend,
-      const std::string& precision) {
-    auto iterp = _fp32_precisions.find(backend);
-    TORCH_CHECK(iterp != _fp32_precisions.end());
-    auto precisions = iterp->second;
-    bool valid = std::find(precisions.begin(), precisions.end(), precision) !=
-        precisions.end();
-    return valid;
-  }
+bool isPrecisionCompatible(const std::string& backend, const std::string& precision) {
+  // all (backends, precision) pairs are compatible except ("cuda", "bf16")
+  // This check assumes backend and precision are valid
+  return !(backend == "cuda" && precision == "bf16");
+}
 
-  C10_ALWAYS_INLINE void warn_deprecated_fp32_precision_api(){
-    TORCH_WARN_ONCE(
-      "Please use the new API settings to control TF32 behavior, such as torch.backends.cudnn.conv.fp32_precision = 'tf32' "
-      "or torch.backends.cuda.matmul.fp32_precision = 'ieee'. Old settings, e.g, torch.backends.cuda.matmul.allow_tf32 = True, "
-      "torch.backends.cudnn.allow_tf32 = True, allowTF32CuDNN() and allowTF32CuBLAS() will be deprecated after Pytorch 2.9. Please see "
-      "https://pytorch.org/docs/main/notes/cuda.html#tensorfloat-32-tf32-on-ampere-and-later-devices"
-    );
-  }
+C10_ALWAYS_INLINE void warn_deprecated_fp32_precision_api(){
+  TORCH_WARN_ONCE(
+    "Please use the new API settings to control TF32 behavior, such as torch.backends.cudnn.conv.fp32_precision = 'tf32' "
+    "or torch.backends.cuda.matmul.fp32_precision = 'ieee'. Old settings, e.g, torch.backends.cuda.matmul.allow_tf32 = True, "
+    "torch.backends.cudnn.allow_tf32 = True, allowTF32CuDNN() and allowTF32CuBLAS() will be deprecated after Pytorch 2.9. Please see "
+    "https://pytorch.org/docs/main/notes/cuda.html#tensorfloat-32-tf32-on-ampere-and-later-devices"
+  );
+}
 } // namespace
 
 Context::Context() = default;
@@ -180,7 +164,7 @@ void Context::setUserEnabledNNPACK(bool e) {
 }
 
 bool Context::allowTF32CuDNN(const std::string& op) const {
-  if (op.empty()){
+  if (op.empty()) {
     bool allow_tf32_rnn = float32Precision("cuda", "rnn") == "tf32";
     bool allow_tf32_conv = float32Precision("cuda", "conv") == "tf32";
     TORCH_CHECK(
@@ -377,14 +361,14 @@ Float32MatmulPrecision Context::float32MatmulPrecision() const {
 }
 
 std::string Context::float32Precision(const std::string& backend, const std::string& op) const {
-  check_fp32_prec_backend_and_op(backend, op);
-  auto precision = fp32_precision.find(backend)->second.find(op)->second;
-  if (precision == "none")
-    precision = fp32_precision.find(backend)->second.find("all")->second;
-  if (precision == "none")
-    precision = fp32_precision.find("generic")->second.find("all")->second;
-  bool valid_prec = validate_fp32_prec(backend, precision);
-  return valid_prec ? precision : "none";
+  auto it = settings.find(std::make_pair(backend, op));
+  if (C10_LIKELY(it != settings.end())) {
+    return it->second;
+  }
+
+  TORCH_CHECK(isBackendValid(backend), "Invalid backend '", backend, "'");
+  TORCH_CHECK(isOpValid(op), "Invalid op '", op, "'");
+  return "none";
 }
 
 void Context::setFloat32MatmulPrecision(const std::string &s) {
@@ -418,24 +402,24 @@ void Context::setFloat32MatmulPrecision(const std::string &s) {
     "setFloat32MatmulPrecision call has no effect.");
 }
 
-void Context::setFloat32Precision(const std::string& backend, const std::string& op, const std::string& p) {
-  check_fp32_prec_backend_and_op(backend, op);
-  if (validate_fp32_prec(backend, p)) {
-    fp32_precision[backend][op] = p;
-  } else {
-    std::string msg;
-    auto iterp = _fp32_precisions.find(backend);
-    TORCH_CHECK(iterp != _fp32_precisions.end());
-    for (const auto& p : iterp->second) {
-      msg += p;
-      msg += " ";
+void Context::setFloat32Precision(const std::string& backend, const std::string& op, const std::string& prec) {
+  TORCH_CHECK(isBackendValid(backend), "Invalid backend '", backend, "'");
+  TORCH_CHECK(isOpValid(op), "Invalid op '", op, "'");
+  TORCH_CHECK(isPrecisionValid(prec), "Invalid precision '", prec, "'");
+
+  if (C10_UNLIKELY(!isPrecisionCompatible(backend, prec))) {
+    TORCH_WARN("Incompatible precision '", prec, "' for backend '", backend, "'");
+    return;
+  }
+
+  for (auto& setting : settings) {
+    auto& [key, p] = setting;
+    auto& [b, o] = key;
+    if (backend == "generic" || backend == b) {
+      if (op == "all" || op == o) {
+        p = prec;
+      }
     }
-    TORCH_WARN(
-        "you have set wrong precision for backend:",
-        backend,
-        " setFloat32Precision call has no effect.",
-        "Please choose precision from: ",
-        msg);
   }
 }
 
