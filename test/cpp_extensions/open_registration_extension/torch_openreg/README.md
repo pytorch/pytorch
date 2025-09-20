@@ -126,7 +126,7 @@ There are 4 DSOs in torch_openreg, and the dependencies between them are as foll
 
 ### Autoload
 
-- Autoload Machanism
+- Autoload Mechanism
 
     When `import torch`, installed accelerators (such as `torch_openreg`) will be automatically loaded, achieving the same experience as the built-in backends.
 
@@ -176,7 +176,7 @@ print(f"Device of z: {z.device}")
   - Device-agnostic APIs
   - Memory Management
   - Generator
-  - Distrubuted
+  - Distributed
   - Custom Tensor&Storage
   - ...
 - **Improve Tests**: Add more test cases related to the integration mechanism.
