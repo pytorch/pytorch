@@ -1896,7 +1896,11 @@ class TestDict(JitTestCase):
         def missing_index(x: Dict[str, int]) -> int:
             return x["dne"]  # codespell:ignore
 
-        with self.assertRaisesRegexWithHighlight(RuntimeError, "KeyError", 'x["done"'):
+        with self.assertRaisesRegexWithHighlight(
+            RuntimeError,
+            "KeyError",
+            'x["dne"',  # codespell:ignore
+        ):
             missing_index({"item": 20, "other_item": 120})
 
         code = dedent(
