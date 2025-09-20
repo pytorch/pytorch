@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from functools import cached_property
+from itertools import chain
 from os import getenv
 from pathlib import Path
 from tempfile import gettempdir
@@ -24,11 +25,10 @@ class Cache(Generic[Key, Value]):
     Abstract base class for cache implementations.
 
     Provides the interface for basic synchronous get and insert methods for storing and retrieving data.
-    Subclasses must implement both methods.
+    Subclasses must implement both methods, and must be thread-safe.
 
     Note:
-        - Not guaranteed to be thread-safe.
-        - For asynchronous and thread-safe cache, see `AsyncCache`.
+        - For asynchronous caches, see `AsyncCache`.
 
     Methods:
         get(key): Retrieve a value by key.
@@ -73,7 +73,6 @@ class InMemoryCache(Cache[str, bytes]):
     In-memory cache implementation.
 
     Stores cache data in a dictionary for fast lookups and insertions.
-    Not thread-safe.
     """
 
     def __init__(self: Self) -> None:
@@ -330,3 +329,98 @@ class InductorOnDiskCache(OnDiskCache):
         from torch._inductor.runtime.runtime_utils import default_cache_dir
 
         return Path(default_cache_dir(), "pcache")
+
+
+class MultiCache(Generic[Key, Value]):
+    def __init__(self: Self, *caches: Cache[Key, Value]) -> None:
+        if not caches:
+            raise ValueError(
+                "MultiCache requires that at least one Cache instance be provided."
+            )
+        
+        # treat duplicated caches as a no-op, although if we
+        # really wanted to be picky we could raise a ValueError
+        self.caches: list[Cache[Key, Value]] = list(set(caches))
+
+        self._caches: list[Cache[Key, Value]] = []
+        self._async_caches: list[AsyncCache[Key, Value]] = []
+
+        for cache in self.caches:
+            # the order in which we check types is important, as, for example,
+            # all AsyncCaches are Caches themselves. therefore, we need to
+            # check class attribution from most to least specialized
+            if isinstance(cache, AsyncCache):
+                self._async_caches.append(cache)
+            else:
+                self._caches.append(cache)
+        
+        self._lock = Lock()
+
+    @override
+    def get(self: Self, key: Key) -> Value | None:
+        with self._lock:
+            value: Value | None = None
+
+            # check ThreadSafeCacheWrapper instances first, as those should be the fastest
+            for cache in chain(self._caches, self._async_caches):
+                if (value := cache.get(key)) is not None:
+                    return value
+
+            return value
+
+    @override
+    def get_async(self: Self, key: Key, executor: ThreadPoolExecutor) -> Future[Value | None]:
+        # we can immediately kick off the AsyncCache.get_async(...) operations
+        futures: list[Future[Value | None]] = [
+            executor.submit(async_cache.get_async(key, executor)) for async_cache in self._async_caches
+        ]
+
+        def _get() -> Value | None:
+            with self._lock:
+                value: Value | None = None
+
+                for cache in self._caches:
+                    if (value := cache.get(key)) is not None:
+                        return value
+
+            for future in as_completed(futures):
+                if (value := future.result()) is not None:
+                    return value
+
+            return value
+        
+        return executor.submit(_get)
+
+    @override
+    def insert(self: Self, key: Key, value: Value) -> list[tuple[Cache, bool]]:
+        with self._lock:
+            cache_and_inserted: list[tuple[Cache, bool]] = []
+
+            for cache in chain(self._caches, self._async_caches):
+                cache_and_inserted.append((cache, cache.insert(key, value)))
+
+            return cache_and_inserted
+
+    @override
+    def insert_async(self: Self, key: Key, value: Value, executor: ThreadPoolExecutor) -> Future[Generator[tuple[Cache, bool], None, None]]:
+        # we can immediately kick off the AsyncCache.insert_async(...) operations
+        future_to_async_cache: dict[Future[bool], AsyncCache] = {
+            executor.submit(async_cache.insert_async(key, value, executor)): AsyncCache
+            for async_cache in self._async_caches
+        }
+
+        def _insert() -> Generator[tuple[Cache, bool], None, None]:
+            for cache in self._caches:
+                with self._lock:
+                    inserted = cache.insert(key, value)
+                yield (cache, inserted)
+
+            for future in as_completed(future_to_async_cache.keys()):
+                yield (future_to_async_cache[future], future.result())
+
+        return executor.submit(_insert)
+
+
+class MemoizedOnDiskCache(MultiCache[str, bytes]):
+    def __init__(self: Self, *extra_caches: Cache[str, bytes]) -> None:
+        super().__init__(InMemoryCache(), OnDiskCache(), *extra_caches)

@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 from inspect import isclass
 from os import environ
 from random import randint
+from typing import Generic
 from typing_extensions import Self
 
 from torch._inductor import pcache
@@ -21,30 +22,39 @@ from torch.testing._internal.common_utils import (
 ABSTRACT_CACHES: list[type[pcache.Cache]] = [
     pcache.Cache,
     pcache.AsyncCache,
+    pcache.MultiCache,
 ]
 
 STR_BYTES_CACHES: list[type[pcache.Cache]] = []
 STR_BYTES_ASYNC_CACHES: list[type[pcache.AsyncCache]] = []
+STR_BYTES_MULTI_CACHES: list[type[pcache.MultiCache]] = []
 
 UNSUPPORTED_CACHES: list[type[pcache.Cache]] = []
 
 
 for obj_name in dir(pcache):
     obj = getattr(pcache, obj_name)
-    if not isclass(obj) or not issubclass(obj, pcache.Cache) or obj in ABSTRACT_CACHES:
+    if (
+        not isclass(obj)
+        or not (issubclass(obj, pcache.Cache) or issubclass(obj, pcache.MultiCache))
+        or obj in ABSTRACT_CACHES
+    ):
         continue
     # we only have Key=str, Value=bytes tests setup
     for _orig_base in obj.__orig_bases__:
-        if issubclass(_orig_base.__origin__, pcache.Cache):
+        if (
+            issubclass(_orig_base.__origin__, Generic)
+        ):
             key_type, value_type = _orig_base.__args__
             if (key_type != str) or (value_type != bytes):
                 UNSUPPORTED_CACHES.append(obj)
                 continue
-    # check association from strongest to weakest
-    if issubclass(obj, pcache.AsyncCache):
-        STR_BYTES_ASYNC_CACHES.append(obj)
     if issubclass(obj, pcache.Cache):
         STR_BYTES_CACHES.append(obj)
+    if issubclass(obj, pcache.AsyncCache):
+        STR_BYTES_ASYNC_CACHES.append(obj)
+    if issubclass(obj, pcache.MultiCache):
+        STR_BYTES_MULTI_CACHES.append(obj)
 
 
 class TestMixin:
@@ -128,7 +138,7 @@ class CacheTest(TestMixin, TestCase):
             values, get_futures, insert_futures
         ):
             if get_result is not None:
-                self.assertIsEqual(get_result, value)
+                self.assertEqual(get_result, value)
                 self.assertTrue(insert_result)
 
         executor.shutdown()
@@ -213,6 +223,63 @@ class AsyncCacheTest(TestMixin, TestCase):
                 self.assertTrue(cache.get(key), value)
 
         executor.shutdown()
+
+
+@instantiate_parametrized_tests
+class MultiCacheTest(TestMixin, TestCase):
+    @parametrize("MultiCache", STR_BYTES_MULTI_CACHES)
+    def test_str_bytes_get_hit_in_all(self: Self, MultiCache: type[pcache.MultiCache]) -> None:
+        caches: list[pcache.Cache] = [Cache() for Cache in STR_BYTES_CACHES if Cache not in STR_BYTES_ASYNC_CACHES]
+        async_caches: list[pcache.AsyncCache] = [AsyncCache() for AsyncCache in STR_BYTES_ASYNC_CACHES]
+
+        mcache: pcache.MultiCache = MultiCache(*caches, *async_caches)
+
+        key = self.str_key_not_in(mcache)
+        value = self.bytes_value()
+
+        self.assertIsNone(mcache.get(key))
+        self.assertTrue(any([inserted for _, inserted in mcache.insert(key, value)]))
+        self.assertEqual(mcache.get(key), value)
+    
+    @parametrize("MultiCache", STR_BYTES_MULTI_CACHES)
+    def test_str_bytes_get_hit_in_one_cache(self: Self, MultiCache: type[pcache.MultiCache]) -> None:
+        caches: list[pcache.Cache] = [Cache() for Cache in STR_BYTES_CACHES if Cache not in STR_BYTES_ASYNC_CACHES]
+        async_caches: list[pcache.AsyncCache] = [AsyncCache() for AsyncCache in STR_BYTES_ASYNC_CACHES]
+
+        mcache: pcache.MultiCache = MultiCache(*caches, *async_caches)
+
+        key = self.str_key_not_in(mcache)
+        value = self.bytes_value()
+
+        self.assertIsNone(mcache.get(key))
+        self.assertTrue(caches[0].insert(key, value))
+        self.assertEqual(mcache.get(key), value)
+    
+    @parametrize("MultiCache", STR_BYTES_MULTI_CACHES)
+    def test_str_bytes_get_hit_in_one_async_cache(self: Self, MultiCache: type[pcache.MultiCache]) -> None:
+        caches: list[pcache.Cache] = [Cache() for Cache in STR_BYTES_CACHES if Cache not in STR_BYTES_ASYNC_CACHES]
+        async_caches: list[pcache.AsyncCache] = [AsyncCache() for AsyncCache in STR_BYTES_ASYNC_CACHES]
+
+        mcache: pcache.MultiCache = MultiCache(*caches, *async_caches)
+
+        key = self.str_key_not_in(mcache)
+        value = self.bytes_value()
+
+        self.assertIsNone(mcache.get(key))
+        self.assertTrue(async_caches[0].insert(key, value))
+        self.assertEqual(mcache.get(key), value)
+
+    @parametrize("MultiCache", STR_BYTES_MULTI_CACHES)
+    def test_str_bytes_get_miss(self: Self, MultiCache: type[pcache.MultiCache]) -> None:
+        caches: list[pcache.Cache] = [Cache() for Cache in STR_BYTES_CACHES if Cache not in STR_BYTES_ASYNC_CACHES]
+        async_caches: list[pcache.AsyncCache] = [AsyncCache() for AsyncCache in STR_BYTES_ASYNC_CACHES]
+
+        mcache: pcache.MultiCache = MultiCache(*caches, *async_caches)
+
+        key = self.str_key_not_in(mcache)
+
+        self.assertIsNone(mcache.get(key))
+        self.assertIsNone(mcache.get(key))
 
 
 @instantiate_parametrized_tests
