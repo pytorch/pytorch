@@ -1275,7 +1275,7 @@ struct EnableAllLayers {
         break;
       }
       if (levels.contains(levels_to_dim_[i])) {
-        impl->_unsafe_maybe_set_level(levels_start_ + i);
+        impl->_unsafe_set_level(levels_start_ + i);
         impl = maybeGetBatchedImpl(impl->value());
       }
     }
