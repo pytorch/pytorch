@@ -31,14 +31,6 @@ from typing import (  # type: ignore[attr-defined]
 from torch.utils.data.datapipes._hook_iterator import _SnapshotState, hook_iterator
 
 
-class GenericMeta(ABCMeta):  # type: ignore[no-redef]
-    pass
-
-
-class Integer(numbers.Integral):
-    pass
-
-
 class Boolean(numbers.Integral):
     pass
 
@@ -49,7 +41,7 @@ class Boolean(numbers.Integral):
 # Map Python 'type' to abstract base class
 TYPE2ABC = {
     bool: Boolean,
-    int: Integer,
+    int: numbers.Integral,
     float: numbers.Real,
     complex: numbers.Complex,
     dict: dict,
@@ -268,7 +260,7 @@ _T_co = TypeVar("_T_co", covariant=True)
 _DEFAULT_TYPE = _DataPipeType(Generic[_T_co])
 
 
-class _DataPipeMeta(GenericMeta):
+class _DataPipeMeta(ABCMeta):
     r"""
     Metaclass for `DataPipe`.
 
@@ -297,9 +289,6 @@ class _DataPipeMeta(GenericMeta):
             {"type": _DEFAULT_TYPE, "__init_subclass__": _dp_init_subclass}
         )
         return super().__new__(cls, name, bases, namespace, **kwargs)  # type: ignore[call-overload]
-
-    def __init__(self, name, bases, namespace, **kwargs):
-        super().__init__(name, bases, namespace, **kwargs)  # type: ignore[call-overload]
 
     # TODO: Fix isinstance bug
     @_tp_cache
