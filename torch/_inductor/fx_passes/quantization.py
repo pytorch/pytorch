@@ -1112,9 +1112,7 @@ def _is_valid_concat_linear_int8_woq_optimization_pattern():
             and w2.dtype == torch.int8
             and w3.dtype == torch.int8
             and scales.dtype == torch.bfloat16
-            # _weight_int8pack_mm kernel only supports cpu now
-            # TODO: add cuda kernel support instead of calling mul+sum
-            and x.device.type == "cpu"
+            and x.device.type in ("cpu", "cuda")
             and x.device == w1.device
             and w1.device == w2.device
             and w2.device == w3.device
