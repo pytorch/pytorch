@@ -1,5 +1,5 @@
-#include <third_party/py/torch/aten/src/ATen/core/ATen_fwd.h>
-#include <third_party/py/torch/c10/core/ScalarType.h>
+#include <ATen/core/ATen_fwd.h>
+#include <c10/core/ScalarType.h>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
