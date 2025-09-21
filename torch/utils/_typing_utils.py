@@ -51,23 +51,26 @@ def copy_method_params(
     return return_func
 
 
-# stricter variants to preserve the origin callers Return Type too
-_RSrc = TypeVar("_RSrc")  # source callable's return type for stricter variants
-
-
+# stricter variants to preserve the origin callers Return Type too.
+# TODO: consider folding both these into the above variants with an optional
+# parameter to control whether to copy the return type or not.
 def copy_func_sig(
-    source_func: Callable[_P, _RSrc],
-) -> Callable[[Callable[..., _RSrc]], Callable[_P, _RSrc]]:
-    def _return(func: Callable[..., _RSrc]) -> Callable[_P, _RSrc]:
-        return cast(Callable[_P, _RSrc], func)
+    source_func: Callable[_P, _R],
+) -> Callable[[Callable[..., _R]], Callable[_P, _R]]:
+    """Cast the decorated function's call signature and return type to the source_func's."""
+
+    def _return(func: Callable[..., _R]) -> Callable[_P, _R]:
+        return cast(Callable[_P, _R], func)
 
     return _return
 
 
 def copy_method_sig(
-    source_method: Callable[Concatenate[_A1, _P], _RSrc],
-) -> Callable[[Callable[..., _RSrc]], Callable[Concatenate[_A1, _P], _RSrc]]:
-    def _return(func: Callable[..., _RSrc]) -> Callable[Concatenate[_A1, _P], _RSrc]:
-        return cast(Callable[Concatenate[_A1, _P], _RSrc], func)
+    source_method: Callable[Concatenate[_A1, _P], _R],
+) -> Callable[[Callable[..., _R]], Callable[Concatenate[_A1, _P], _R]]:
+    """Cast the decorated *method*'s call signature to the source_method and return type."""
+
+    def _return(func: Callable[..., _R]) -> Callable[Concatenate[_A1, _P], _R]:
+        return cast(Callable[Concatenate[_A1, _P], _R], func)
 
     return _return

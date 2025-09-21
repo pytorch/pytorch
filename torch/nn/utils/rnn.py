@@ -104,9 +104,7 @@ class PackedSequence(PackedSequence_):
     def to(self, *args: Any, **kwargs: Any) -> Self:
         r"""Perform dtype and/or device conversion on `self.data`.
 
-        It has similar signature as :meth:`torch.Tensor.to`, except optional
-        arguments like `non_blocking` and `copy` should be passed as kwargs,
-        not args, or they will not apply to the index tensors.
+        It has similar signature as :meth:`torch.Tensor.to`
 
         .. note::
 
@@ -114,21 +112,27 @@ class PackedSequence(PackedSequence_):
             and :class:`torch.device`, then ``self`` is returned.
             Otherwise, returns a copy with the desired configuration.
         """
+
         # Why not convert `batch_sizes`?
         # See NOTE [ device and dtype of a PackedSequence ]
         data = self.data.to(*args, **kwargs)
         if data is self.data:
             return self
         else:
-            # Does not forward device or dtype arg/kwargs, device is set from data.device
-            kwargs = dict(
-                filter(lambda t: t[0] != "device" and t[0] != "dtype", kwargs.items())
+            _device, _dtype, non_blocking, convert_to_format = torch._C._nn._parse_to(
+                *args, **kwargs
             )
+            new_kwargs = {
+                "non_blocking": non_blocking,
+                "memory_format": convert_to_format,
+            }
+
+            # Does not forward device or dtype arg/kwargs, device is set from data.device
             sorted_indices = bind(
-                self.sorted_indices, lambda t: t.to(data.device, **kwargs)
+                self.sorted_indices, lambda t: t.to(data.device, **new_kwargs)
             )
             unsorted_indices = bind(
-                self.unsorted_indices, lambda t: t.to(data.device, **kwargs)
+                self.unsorted_indices, lambda t: t.to(data.device, **new_kwargs)
             )
             return type(self)(data, self.batch_sizes, sorted_indices, unsorted_indices)
 
