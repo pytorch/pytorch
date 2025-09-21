@@ -2,6 +2,8 @@
 # To run:
 # python test/distributed/test_nvshmem_triton.py
 
+import sys
+
 import triton.language as tl
 
 import torch
@@ -21,12 +23,9 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.inductor_utils import IS_H100, requires_triton
 
 
-# Decorators
-def skip_if_no_nvshmem():
-    return skip_but_pass_in_sandcastle_if(
-        not symm_mem.is_nvshmem_available(),
-        "test_nvshmem requires NVSHMEM, skipping tests",
-    )
+if not symm_mem.is_nvshmem_available():
+    print("NVSHMEM not available, skipping tests")
+    sys.exit(0)
 
 
 def requires_h100():
@@ -42,6 +41,8 @@ device_module = torch.get_device_module(device_type)
 
 
 # Shared Triton JIT kernels
+
+
 @requires_nvshmem
 @triton.jit
 def my_put_kernel(
@@ -259,7 +260,6 @@ def my_reduce_kernel(
 
 
 @instantiate_parametrized_tests
-@skip_if_no_nvshmem()
 class NVSHMEMTritonTest(MultiProcContinuousTest):
     def _init_device(self) -> None:
         # TODO: relieve this (seems to hang if without)

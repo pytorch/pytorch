@@ -176,6 +176,27 @@ def _nvshmem_init_hook(*args, **kwargs) -> None:  # type: ignore[no-untyped-def]
             )
 
 
+if has_triton():
+    from triton.runtime.jit import JITFunction, KernelInterface
+
+    # Create a new Callable class that follows the KernelInterface protocol so
+    # that the Callable works with the subscript operator, e.g. `foo[(1, 1)]`
+    class GridCallableWithExtern(KernelInterface):
+        """
+        `KernelInterface` invokes `self.run` in `__getitem__`, i.e. [].  We
+        implement a `run` method by directing the call to `JITFunction.run`,
+        with added extern_libs kwarg, so that users don't have to pass it
+        """
+
+        def __init__(self, jit_func: JITFunction, extern_libs: dict[str, str]) -> None:
+            self.jit_func = jit_func
+            self.extern_libs = extern_libs
+
+        def run(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+            # Call the JITFunction.run with added extern_libs kwarg
+            return self.jit_func.run(*args, **kwargs, extern_libs=self.extern_libs)
+
+
 def requires_nvshmem(  # type: ignore[no-untyped-def]
     jit_func,  # JITFunction created by triton.jit
 ):
@@ -199,7 +220,7 @@ def requires_nvshmem(  # type: ignore[no-untyped-def]
     """
 
     import triton
-    from triton.runtime.jit import JITFunction, KernelInterface
+    from triton.runtime.jit import JITFunction
 
     if not isinstance(jit_func, JITFunction):
         raise TypeError(f"Expected a JITFunction, but got {type(jit_func)}")
@@ -218,22 +239,7 @@ def requires_nvshmem(  # type: ignore[no-untyped-def]
     # NvshmemKernelRegistry.
     triton.knobs.runtime.jit_post_compile_hook = _nvshmem_init_hook
 
-    # Create a new Callable class that follows the KernelInterface protocol so
-    # that the Callable works with the subscript operator, e.g. `foo[(1, 1)]`
-    class MyGridCallable(KernelInterface):
-        """
-        `KernelInterface` invokes `self.run` in `__getitem__`, i.e. [].  We
-        implement a `run` method by directing the call to `JITFunction.run`,
-        with added extern_libs kwarg, so that users don't have to pass it
-        """
-
-        def run(self, *args, grid, warmup, **kwargs):  # type: ignore[no-untyped-def]
-            # Call the JITFunction.run with added extern_libs kwarg
-            return jit_func.run(
-                *args, **kwargs, grid=grid, warmup=warmup, extern_libs=extern_libs
-            )
-
-    return MyGridCallable()
+    return GridCallableWithExtern(jit_func, extern_libs)
 
 
 if has_triton():
