@@ -44,7 +44,10 @@ from torch._inductor.template_heuristics.triton import (
     CUDAMMTemplateConfigHeuristic,
     GemmConfig,
 )
-from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
+from torch.testing._internal.common_cuda import (
+    PLATFORM_SUPPORTS_FP8,
+    xfailIfSM100OrLater,
+)
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_WINDOWS,
@@ -100,9 +103,7 @@ class FailChoiceCaller(ChoiceCaller):
         raise RuntimeError("This choice caller will always throw")
 
 
-@unittest.skip(
-    "Skipping entire TestMaxAutotune class due to https://github.com/pytorch/pytorch/issues/163429"
-)
+@xfailIfSM100OrLater
 @unittest.mock.patch(
     "torch._inductor.select_algorithm.TritonTemplate.test_cache", new=True
 )
