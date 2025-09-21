@@ -15,6 +15,7 @@
 #include <torch/library.h>
 
 #include <c10/core/SafePyObject.h>
+#include <c10/core/impl/PyInterpreterHooks.h>
 #include <torch/csrc/PyInterpreter.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
@@ -155,37 +156,35 @@ class PythonKernelHolder : public c10::OperatorKernel {
     const auto& schema = op.schema();
     const auto num_arguments = schema.arguments().size();
 
-    // Otherwise, find a PyInterpreter on a Tensor IF if has Python key (which
-    // means it's a nontrivial tensor subclass)
+    // Check if any tensors have Python key and use global interpreter
+    bool has_python_tensor = false;
     for (const auto& ivalue : torch::jit::last(*stack, num_arguments)) {
       if (ivalue.isTensor()) {
-        auto* interpreter =
-            ivalue.unsafeToTensorImpl()->pyobj_slot()->pyobj_interpreter();
-        if (interpreter &&
-            ivalue.unsafeToTensorImpl()->key_set().has(
+        if (ivalue.unsafeToTensorImpl()->key_set().has(
                 at::DispatchKey::Python)) {
-          (*interpreter)
-              ->python_op_registration_trampoline(
-                  op, dispatch_key_, keyset, stack, with_keyset_, with_op_);
-          return;
+          has_python_tensor = true;
+          break;
         }
       } else if (ivalue.isTensorList() || ivalue.isOptionalTensorList()) {
-        // NB: use toListRef as it doesn't induce refcount bumps
-        // (toTensorListRef is not a thing)
         for (const auto& nv : ivalue.toListRef()) {
-          if (nv.isNone()) {
-            continue;
-          }
-          auto* interpreter =
-              nv.unsafeToTensorImpl()->pyobj_slot()->pyobj_interpreter();
-          if (interpreter &&
+          if (!nv.isNone() &&
               nv.unsafeToTensorImpl()->key_set().has(at::DispatchKey::Python)) {
-            (*interpreter)
-                ->python_op_registration_trampoline(
-                    op, dispatch_key_, keyset, stack, with_keyset_, with_op_);
-            return;
+            has_python_tensor = true;
+            break;
           }
         }
+        if (has_python_tensor)
+          break;
+      }
+    }
+
+    if (has_python_tensor) {
+      auto* interpreter = c10::impl::getGlobalPyInterpreter();
+      if (interpreter) {
+        (*interpreter)
+            ->python_op_registration_trampoline(
+                op, dispatch_key_, keyset, stack, with_keyset_, with_op_);
+        return;
       }
     }
 
