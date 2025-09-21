@@ -61,14 +61,18 @@ class Fuzzer:
                         # With some probability, try to share a compatible tensor from the pool
                         if len(tensor_pool) > 1 and random.random() < 0.5:
                             # Exclude the current output_tensor to avoid trivial cycles
-                            candidates_for_sharing = [
-                                tp for tp in tensor_pool
-                                if tp is not output_tensor
-                                and tp.size == t.size
-                                and tp.stride == t.stride
-                                and tp.dtype == t.dtype
-                                and tp.device == t.device
-                            ]
+                            # Also exclude any tensors that would create circular dependencies
+                            candidates_for_sharing = []
+                            for tp in tensor_pool:
+                                if (tp is not output_tensor
+                                    and tp.size == t.size
+                                    and tp.stride == t.stride
+                                    and tp.dtype == t.dtype
+                                    and tp.device == t.device):
+                                    # Check if using this tensor would create a circular dependency
+                                    if not self._would_create_cycle(output_tensor, tp, tensor_to_node):
+                                        candidates_for_sharing.append(tp)
+
                             if candidates_for_sharing:
                                 shared_tensor = random.choice(candidates_for_sharing)
                                 input_tensors.append(shared_tensor)
@@ -80,6 +84,7 @@ class Fuzzer:
                     tensor_to_node[id(output_tensor)] = new_node
                     # Instead of just adding new leaves, always update tensor_to_node for all input_tensors
                     for t in input_tensors:
+                        # Only add as a new leaf if not already present
                         if id(t) not in tensor_to_node:
                             tensor_to_node[id(t)] = (t, None, [])
                             new_nodes.append((t, None, []))
@@ -89,32 +94,13 @@ class Fuzzer:
                     continue
             if not new_nodes:
                 break
+            # Enforce deterministic order for new_nodes to ensure topological order
+            # Sort by id of the output tensor to have a consistent order
+            new_nodes.sort(key=lambda n: id(n[0]))
             nodes = new_nodes
 
-        # Collect all nodes (including leaves)
-        all_nodes = []
-        visited = set()
-        def collect_nodes(tensor):
-            tid = id(tensor)
-            if tid in visited:
-                return
-            visited.add(tid)
-            node = tensor_to_node.get(tid, (tensor, None, []))
-            for inp in node[2]:
-                collect_nodes(inp)
-            all_nodes.append(node)  # <-- Move append after recursion to ensure dependencies first
-        collect_nodes(target)
-
-        # Remove duplicate nodes and ensure topological order (dependencies before uses)
-        seen = set()
-        topo_nodes = []
-        for node in reversed(all_nodes):
-            tid = id(node[0])
-            if tid not in seen:
-                topo_nodes.append(node)
-                seen.add(tid)
-        topo_nodes.reverse()
-        all_nodes = topo_nodes
+        # Collect all nodes (including leaves) and perform proper topological sort
+        all_nodes = self._topological_sort(target, tensor_to_node)
 
         # Generate and write code using CodeGenerator
         codegen = CodeGenerator()
@@ -126,9 +112,67 @@ class Fuzzer:
         runner = ProgramRunner()
         runner.run_program(abs_path)
 
+    def _topological_sort(self, target, tensor_to_node):
+        """
+        Perform proper topological sort with circular dependency detection.
+        Returns list of nodes in dependency order (dependencies before uses).
+        """
+        all_nodes = []
+        visited = set()
+        visiting = set()  # For cycle detection
+
+        def visit(tensor):
+            tid = id(tensor)
+            if tid in visited:
+                return
+            if tid in visiting:
+                # Circular dependency detected - skip to avoid infinite loop
+                print(f"Warning: Circular dependency detected involving tensor {tid}, skipping...")
+                return
+
+            visiting.add(tid)
+            node = tensor_to_node.get(tid, (tensor, None, []))
+
+            # Visit all input tensors first (dependencies)
+            for input_tensor in node[2]:
+                visit(input_tensor)
+
+            # Then add this node
+            all_nodes.append(node)
+            visiting.remove(tid)
+            visited.add(tid)
+
+        visit(target)
+        return all_nodes
+
+    def _would_create_cycle(self, output_tensor, candidate_input, tensor_to_node):
+        """
+        Check if using candidate_input as an input to output_tensor would create a cycle.
+        Returns True if it would create a cycle, False otherwise.
+        """
+        # Check if candidate_input depends on output_tensor
+        def depends_on(tensor, target):
+            if tensor is target:
+                return True
+            tid = id(tensor)
+            node = tensor_to_node.get(tid)
+            if node is None or node[1] is None:  # Leaf node
+                return False
+            # Check all inputs recursively
+            for input_tensor in node[2]:
+                if depends_on(input_tensor, target):
+                    return True
+            return False
+
+        return depends_on(candidate_input, output_tensor)
+
     def generate_random_tensor(self):
-        ndim = random.randint(1, 5)
-        size = tuple(random.randint(1, 10) for _ in range(ndim))
+        # Allow ndim=0 to generate a scalar tensor
+        ndim = random.randint(0, 3)
+        if ndim == 0:
+            size = ()
+        else:
+            size = tuple(random.randint(1, 1024) for _ in range(ndim))
 
         stride = []
         acc = 1
@@ -137,8 +181,8 @@ class Fuzzer:
             acc *= s
         stride = tuple(stride)
 
-        dtypes = ['float32', 'float16', 'bfloat16', 'int8', 'int32']
-        devices = ['cpu', 'cuda']
+        dtypes = ['float32', 'float16', 'bfloat16']
+        devices = ['cuda']
         dtype = random.choice(dtypes)
         device = random.choice(devices)
 
@@ -196,11 +240,45 @@ class AddOperator(Operator):
         return True
 
     def decompose(self, tensor, num_inputs=2):
-        # Return num_inputs tensors that could be added to produce 'tensor'
+        # Type promotion table for realistic LLM/diffusion model types
+        # Each output dtype maps to possible input dtype pairs (in order of preference)
+        promotion_table = {
+            "float32": [
+                ("float32", "float32"),
+                ("bfloat16", "float32"),
+                ("float32", "bfloat16"),
+                ("bfloat16", "bfloat16"),
+                ("float16", "float32"),
+                ("float32", "float16"),
+                ("float16", "float16"),
+            ],
+            "bfloat16": [
+                ("bfloat16", "bfloat16"),
+                ("float16", "bfloat16"),
+                ("bfloat16", "float16"),
+            ],
+            "float16": [
+                ("float16", "float16"),
+            ],
+        }
+        # If num_inputs > 2, promote left-to-right (e.g. (((a + b) + c) + d))
+        # For simplicity, we generate the first two with promotion, rest match output dtype
+        dtype = tensor.dtype
+        supported_types = promotion_table.get(dtype, [(dtype, dtype)])
+        # Pick a random promotion pattern for the first two inputs
+        if num_inputs >= 2:
+            dtypes = list(random.choice(supported_types))
+            # For >2 inputs, fill with output dtype
+            while len(dtypes) < num_inputs:
+                dtypes.append(dtype)
+        else:
+            dtypes = [dtype] * num_inputs
+
         return [
-            Tensor(tensor.size, tensor.stride, tensor.dtype, tensor.device, tensor.supported_ops)
-            for _ in range(num_inputs)
+            Tensor(tensor.size, tensor.stride, dt, tensor.device, tensor.supported_ops)
+            for dt in dtypes
         ]
+
 
     def codegen(self, output_name, input_names, output_tensor):
         # Sum all input tensors
@@ -386,6 +464,71 @@ class SumOperator(Operator):
             # Safe default for legacy cases: reduce all dims
             return f"{output_name} = {src}.sum()"
 
+class GeluOperator(Operator):
+    def __init__(self):
+        super().__init__("gelu")
+
+    def can_produce(self, tensor):
+        # GELU can be applied to any tensor (elementwise op)
+        return True
+
+    def decompose(self, tensor):
+        # The input to GELU must have the same shape, dtype, and device as the output
+        return [
+            Tensor(tensor.size, tensor.stride, tensor.dtype, tensor.device, tensor.supported_ops)
+        ]
+
+    def codegen(self, output_name, input_names, output_tensor):
+        # Use torch.nn.functional.gelu for the GELU activation
+        return f"{output_name} = torch.nn.functional.gelu({input_names[0]})"
+
+class FillDiagonalOperator_(Operator):
+    def __init__(self):
+        super().__init__("fill_diagonal_")
+
+    def can_produce(self, tensor):
+        # PyTorch's fill_diagonal_ requires all dimensions to be of equal length
+        # Only produce for tensors where all dimensions have the same size
+        if len(tensor.size) < 2:
+            return False
+        # Check if all dimensions have the same size
+        first_size = tensor.size[0]
+        return all(s == first_size for s in tensor.size)
+
+    def decompose(self, tensor):
+        # Import here to avoid circular import
+        from tensor import Tensor
+
+        # Find two dimensions with equal size
+        dims = None
+        for i in range(len(tensor.size)):
+            for j in range(i + 1, len(tensor.size)):
+                if tensor.size[i] == tensor.size[j]:
+                    dims = (i, j)
+                    break
+            if dims is not None:
+                break
+        if dims is None:
+            # Fallback: just return a tensor of the same shape and a scalar
+            return [
+                Tensor(tensor.size, tensor.stride, tensor.dtype, tensor.device, tensor.supported_ops),
+                Tensor((), (), tensor.dtype, tensor.device, tensor.supported_ops)
+            ]
+
+        # Input 0: tensor to fill (same shape as output)
+        # Input 1: value to fill (scalar)
+        t_in = Tensor(tensor.size, tensor.stride, tensor.dtype, tensor.device, tensor.supported_ops)
+        t_val = Tensor((), (), tensor.dtype, tensor.device, tensor.supported_ops)
+        # Store dims for codegen
+        tensor._fill_diag_dims = dims
+        return [t_in, t_val]
+
+    def codegen(self, output_name, input_names, output_tensor):
+        # PyTorch's fill_diagonal_ expects a scalar number, so use .item() to extract from tensor
+        fill_value = f"{input_names[1]}.item()"
+        # Since all dimensions are equal now, we can just use fill_diagonal_ directly
+        return f"{output_name} = {input_names[0]}.clone(); {output_name}.fill_diagonal_({fill_value})"
+
 def main():
     parser = argparse.ArgumentParser(description="Fuzzer for generating PyTorch programs.")
     parser.add_argument("--max-depth", type=int, default=3, help="Maximum depth of the operation tree.")
@@ -393,7 +536,7 @@ def main():
     parser.add_argument("--output", type=str, default=None, help="Output file path.")
     args = parser.parse_args()
 
-    supported_ops = [AddOperator(), CatOperator(), ViewOperator(), SumOperator()]
+    supported_ops = [AddOperator(), CatOperator(), ViewOperator(), SumOperator(), GeluOperator(), FillDiagonalOperator_()]
     max_depth = args.max_depth
     if args.seed is not None:
         seed = args.seed
@@ -405,6 +548,7 @@ def main():
     print(f"Running fuzzer with max_depth={max_depth}, seed={seed}, output={output_path}")
     fuzzer = Fuzzer(supported_ops, max_depth, seed)
     fuzzer.fuzz(output_path=output_path)
+
 
 if __name__ == "__main__":
     main()
