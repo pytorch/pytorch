@@ -67,7 +67,7 @@ std::vector<Tensor> foreach_unary_op(TensorList tensors) {
           /* res_arg_index */ 1>(),
       Op<opmath_t>());
 
-  return tensor_lists[1];
+  return std::move(tensor_lists[1]);
 }
 
 template <typename scalar_t, template <class> class Op>
