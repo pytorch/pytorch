@@ -508,7 +508,7 @@ static void linalg_inv_ex_out_mps_impl(const Tensor& A, bool check_errors, const
   Tensor LU = empty_like(A, MemoryFormat::Contiguous);
   Tensor identity = zeros_like(A, MemoryFormat::Contiguous);
   Tensor pivots = empty({A_sizes.begin(), A_sizes.end() - 1}, A.options().dtype(kInt));
-  (ndim == 2 ? identity.diagonal() : identity.diagonal(0, -2, -1)).fill_(1);
+  identity.diagonal(0, -2, -1).fill_(1);
   // need to do this to keep the strides of the result tensor
   // mps's solve expects row major layout, while inductor
   // expects result to be column major

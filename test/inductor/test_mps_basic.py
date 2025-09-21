@@ -135,7 +135,9 @@ class MPSBasicTests(TestCase):
         self.common(torch.max, (torch.rand(16384, dtype=torch.half),), check_lowp=False)
 
     def test_linalg_inv(self):
-        fn = lambda x: torch.linalg.inv(torch.linalg.cholesky(x))
+        def fn(x):
+            return torch.linalg.inv(torch.linalg.cholesky(x))
+
         A = torch.diag(torch.tensor([20.0, 0.5, 5.0], dtype=torch.float32) ** 2)
         self.common(fn, (A,), check_lowp=False)
 
