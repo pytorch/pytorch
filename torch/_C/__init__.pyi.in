@@ -41,6 +41,7 @@ from torch._C import (
 from torch._prims_common import DeviceLikeType
 from torch.autograd.graph import Node as _Node
 from torch.cuda import _POOL_HANDLE
+from torch.distributed.tensor._op_schema import OpSchema
 from torch.fx.node import Node as FxNode
 from torch.package import PackageExporter
 from torch.storage import TypedStorage, UntypedStorage
@@ -1942,6 +1943,9 @@ class TensorBase(metaclass=_TensorMeta):
 
 _TensorBase = TensorBase
 
+def _DTensor_OpSchema_post_init(self: OpSchema) -> None: ...
+def _DTensor_OpSchema_recompute_comparison_key(self: OpSchema) -> None: ...
+
 # Defined in torch/csrc/multiprocessing/init.cpp
 def _multiprocessing_init() -> None: ...
 def _set_thread_name(name: str) -> None: ...
@@ -2204,9 +2208,6 @@ class _CudaDeviceProperties:
     warp_size: _int
     uuid: str
     L2_cache_size: _int
-    clock_rate: _int
-    memory_clock_rate: _int
-    memory_bus_width: _int
 
 # Functions related to SDPA
 class _SDPAParams:
