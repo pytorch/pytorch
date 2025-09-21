@@ -5,6 +5,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <vector>
+#include <c10/util/Exception.h>
 
 namespace torch::_export {
 
@@ -27,9 +28,7 @@ static nlohmann::json getFieldByKeypath(
     const std::vector<std::string>& keypath) {
   nlohmann::json current = obj;
   for (const auto& key : keypath) {
-    if (!current.contains(key)) {
-      throw std::runtime_error("Keypath not found: " + key);
-    }
+    TORCH_CHECK(current.contains(key), "Keypath not found: " + key);
     current = current[key];
   }
   return current;
@@ -42,14 +41,10 @@ static void setFieldByKeypath(
   nlohmann::json* current = &obj;
   for (size_t i = 0; i < keypath.size() - 1; ++i) {
     const auto& key = keypath[i];
-    if (!current->contains(key)) {
-      throw std::runtime_error("Keypath not found: " + key);
-    }
+    TORCH_CHECK(current->contains(key), "Keypath not found: " + key);
     current = &((*current)[key]);
   }
-  if (!current->contains(keypath.back())) {
-    throw std::runtime_error("Keypath not found: " + keypath.back());
-  }
+  TORCH_CHECK(current->contains(keypath.back()), "Keypath not found: " + keypath.back());
   (*current)[keypath.back()] = value;
 }
 
@@ -85,7 +80,7 @@ void registerUpgrader(
             error_stream << ".";
           error_stream << keypath[i];
         }
-        throw std::runtime_error(error_stream.str());
+        TORCH_CHECK(false, error_stream.str());
       }
     }
   }
@@ -176,16 +171,14 @@ void throwUpgraderError(
     error_stream << "\nProblematic object: " << problematic_object.dump(2);
   }
 
-  throw std::runtime_error(error_stream.str());
+  TORCH_CHECK(false, error_stream.str());
 }
 
 nlohmann::json upgrade(const nlohmann::json& artifact, int target_version) {
   auto current_artifact = artifact;
 
   // Validate that the artifact contains required schema version information
-  if (!current_artifact.contains("schema_version")) {
-    throw std::runtime_error("Missing schema_version field in artifact");
-  }
+  TORCH_CHECK(current_artifact.contains("schema_version"), "Missing schema_version field in artifact");
 
   int current_version = current_artifact["schema_version"]["major"];
 
@@ -233,7 +226,7 @@ nlohmann::json upgrade(const nlohmann::json& artifact, int target_version) {
         << "Failed to upgrade to target version " << target_version
         << ". Final version reached: " << current_version
         << ". This may indicate missing upgraders for intermediate versions.";
-    throw std::runtime_error(error_stream.str());
+    TORCH_CHECK(false, error_stream.str());
   }
 
   return current_artifact;
