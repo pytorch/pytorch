@@ -513,7 +513,7 @@ class TestPixelShuffle(TestCaseMPS):
             _test_pixel_unshuffle_error_case_helper(num_input_dims=num_input_dims, downscale_factor=-2)
 
         def test_pixel_shuffle_large_upscale_factor():
-            with self.assertRaises(RuntimeError):
+            with self.assertRaises(ValueError):
                 ps = nn.PixelShuffle(545460846592)
                 ps(torch.randn(2, 16, 9, 3))
 
