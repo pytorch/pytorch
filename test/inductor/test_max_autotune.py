@@ -103,6 +103,7 @@ class FailChoiceCaller(ChoiceCaller):
         raise RuntimeError("This choice caller will always throw")
 
 
+# xfail on SM100 due to https://github.com/pytorch/pytorch/issues/163429
 @xfailIfSM100OrLater
 @unittest.mock.patch(
     "torch._inductor.select_algorithm.TritonTemplate.test_cache", new=True

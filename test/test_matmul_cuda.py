@@ -24,6 +24,7 @@ from torch.testing._internal.common_cuda import (
     SM80OrLater,
     SM89OrLater,
     SM90OrLater,
+    xfailIfSM100OrLater,
     xfailIfSM120OrLater,
     _get_torch_cuda_version,
     PLATFORM_SUPPORTS_FP8,
@@ -200,7 +201,8 @@ class TestMatmulCuda(TestCase):
 
     @onlyCUDA
     @skipIfRocmVersionLessThan((5, 2))
-    @unittest.skipIf(True, "https://github.com/pytorch/pytorch/issues/162178")
+    #XFail due to https://github.com/pytorch/pytorch/issues/162178
+    @xfailIfSM100OrLater
     # imported 'tol' as 'xtol' to avoid aliasing in code above
     @toleranceOverride({torch.float16: xtol(atol=7e-1, rtol=2e-1),
                         torch.bfloat16: xtol(atol=1e1, rtol=2e-1)})
