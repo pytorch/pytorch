@@ -284,18 +284,18 @@ class autocast:
         }
 
         if self.device in device_supported_dtypes:
-            supported_dtype = device_supported_dtypes[self.device]
+            supported_dtypes = device_supported_dtypes[self.device]
             device_name = (
                 self.device
                 if self.device == self.custom_backend_name
                 else self.device.upper()
             )
 
-            if self.fast_dtype not in supported_dtype and enabled:
+            if self.fast_dtype not in supported_dtypes and enabled:
                 error_message = (
                     f"In {device_name} autocast, but the target dtype is not supported. Disabling autocast.\n"
                     f"{device_name} Autocast only supports dtypes of "
-                    + ", ".join(str(dtype) for dtype in supported_dtype)
+                    + ", ".join(map(str, supported_dtypes))
                     + " currently."
                 )
                 warnings.warn(error_message)
