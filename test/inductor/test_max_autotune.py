@@ -100,6 +100,9 @@ class FailChoiceCaller(ChoiceCaller):
         raise RuntimeError("This choice caller will always throw")
 
 
+@unittest.skip(
+    "Skipping entire TestMaxAutotune class due to https://github.com/pytorch/pytorch/issues/163429"
+)
 @unittest.mock.patch(
     "torch._inductor.select_algorithm.TritonTemplate.test_cache", new=True
 )

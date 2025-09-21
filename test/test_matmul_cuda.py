@@ -24,7 +24,6 @@ from torch.testing._internal.common_cuda import (
     SM80OrLater,
     SM89OrLater,
     SM90OrLater,
-    xfailIfSM100OrLater,
     xfailIfSM120OrLater,
     _get_torch_cuda_version,
     PLATFORM_SUPPORTS_FP8,
@@ -201,6 +200,7 @@ class TestMatmulCuda(TestCase):
 
     @onlyCUDA
     @skipIfRocmVersionLessThan((5, 2))
+    @unittest.skipIf(True, "https://github.com/pytorch/pytorch/issues/162178")
     # imported 'tol' as 'xtol' to avoid aliasing in code above
     @toleranceOverride({torch.float16: xtol(atol=7e-1, rtol=2e-1),
                         torch.bfloat16: xtol(atol=1e1, rtol=2e-1)})
@@ -499,7 +499,7 @@ class TestMatmulCuda(TestCase):
             self.grouped_mm_helper(a, blist, gOlist, agradlist, bgradlist, outlist)
 
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
-    @xfailIfSM100OrLater
+    @xfailIfSM120OrLater
     # TODO(future PR): enable compile for torch._grouped_mm fallback path
     @unittest.skipIf(not SM90OrLater, "Grouped gemm with compile supported on SM90")
     @parametrize("op", ["2d/2d", "2d/3d", "3d/2d", "3d/3d"])
