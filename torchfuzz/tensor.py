@@ -10,9 +10,10 @@ class Tensor:
         # Add optional attributes for cat operation - allow int values
         self._cat_dim = None  # type: int | None
         self._cat_sizes = None  # type: tuple | None
-        # For view/sum
+        # For view/sum/fill_diagonal
         self._view_shape = None  # type: tuple | None
-        self._sum_dim = None  # type: int | tuple | None
+        self._sum_dim = None  # type: int | tuple | str | None
+        self._fill_diag_dims = None  # type: tuple | None
 
     def decompose(self):
         from operators import AddOperator, CatOperator
