@@ -20,6 +20,7 @@
 #include <ATen/ops/baddbmm_native.h>
 #include <ATen/ops/bmm_native.h>
 #include <ATen/ops/cholesky_native.h>
+#include <ATen/ops/eye_native.h>
 #include <ATen/ops/linalg_cholesky_ex_native.h>
 #include <ATen/ops/linalg_inv_ex_native.h>
 #include <ATen/ops/linalg_lu_factor_ex_native.h>
@@ -506,9 +507,8 @@ static void linalg_inv_ex_out_mps_impl(const Tensor& A, bool check_errors, const
   int ndim = A.dim();
 
   Tensor LU = empty_like(A, MemoryFormat::Contiguous);
-  Tensor identity = zeros_like(A, MemoryFormat::Contiguous);
+  Tensor identity = eye(A.size(-2), A.size(-1), A.scalar_type(), A.options().layout(), A.device()).expand_as(A);
   Tensor pivots = empty({A_sizes.begin(), A_sizes.end() - 1}, A.options().dtype(kInt));
-  identity.diagonal(0, -2, -1).fill_(1);
   // need to do this to keep the strides of the result tensor
   // mps's solve expects row major layout, while inductor
   // expects result to be column major
