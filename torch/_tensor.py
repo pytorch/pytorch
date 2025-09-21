@@ -626,6 +626,34 @@ class Tensor(torch._C.TensorBase):
             self, gradient, retain_graph, create_graph, inputs=inputs
         )
 
+    def index(self, positions, dims):
+        """
+        Index a regular tensor by binding specified positions to dims.
+
+        This converts a regular tensor to a first-class tensor by binding
+        the specified positional dimensions to Dim objects.
+
+        Args:
+            positions: Tuple of dimension positions to bind
+            dims: Dim objects or tuple of Dim objects to bind to
+
+        Returns:
+            First-class tensor with specified dimensions bound
+        """
+        # TODO: make it possible to dispatch on positions/dims
+        if has_torch_function_unary(self):
+            return handle_torch_function(
+                Tensor.index,
+                (self,),
+                self,
+                positions,
+                dims,
+            )
+
+        from functorch.dim import index
+
+        return index(self, positions, dims)
+
     def register_hook(self, hook):
         r"""Registers a backward hook.
 
