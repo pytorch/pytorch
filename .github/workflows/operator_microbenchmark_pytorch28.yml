@@ -1,0 +1,50 @@
+name: operator_microbenchmark_pytorch28
+
+on:
+  push:
+    tags:
+      - ciflow/op-benchmark/*
+  workflow_dispatch:
+  schedule:
+    # Run at 06:00 UTC every Sunday
+    - cron: 0 6 * * 0
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
+  cancel-in-progress: true
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  opmicrobenchmark-pytorch28-test:
+    name: opmicrobenchmark-pytorch28-test
+    runs-on: linux.aws.a100
+    timeout-minutes: 500
+    steps:
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run operator microbenchmarks with PyTorch 2.8
+        run: |
+          # Set environment variables to prevent segmentation faults
+          export CUDA_LAUNCH_BLOCKING=1
+          export TORCH_CUDNN_V8_API_ENABLED=0
+          export TORCH_CUDNN_SDPA_ENABLED=0
+          export PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:128
+          
+          # Run the PyTorch 2.8 operator microbenchmark test
+          .ci/pytorch/test.sh operator_microbenchmark_pytorch28_test

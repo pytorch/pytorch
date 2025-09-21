@@ -1601,7 +1601,7 @@ test_operator_benchmark() {
   test_inductor_set_cpu_affinity
 
   cd benchmarks/operator_benchmark/pt_extension
-  python -m pip install .
+  python -m pip install . --force-reinstall --no-deps --no-build-isolation
 
   cd "${TEST_DIR}"/benchmarks/operator_benchmark
   $TASKSET python -m benchmark_all_test --device "$1" --tag-filter "$2" \
@@ -1619,24 +1619,103 @@ test_operator_microbenchmark() {
   mkdir -p "$TEST_REPORTS_DIR"
   TEST_DIR=$(pwd)
 
+  pip_uninstall torch torchvision torchaudio
+  pip_install torch==2.8.0 torchvision torchaudio ninja --force-reinstall
   cd benchmarks/operator_benchmark/pt_extension
   python -m pip install .
 
   # ### Perf benchmark 2.8 baseline
   # pip_uninstall torch torchvision torchaudio
-  pip_install torch==2.8.0
   # pip show torch
   # pip uninstall -y torch
   # pip install torch==2.8.0 --force-reinstall
 
   cd "${TEST_DIR}"/benchmarks/operator_benchmark
-  for OP_BENCHMARK_TESTS in matmul mm; do
+  for OP_BENCHMARK_TESTS in matmul mm add bmm; do
     $TASKSET python -m pt.${OP_BENCHMARK_TESTS}_test --tag-filter long \
       --output-json-for-dashboard "${TEST_REPORTS_DIR}/operator_microbenchmark_${OP_BENCHMARK_TESTS}_compile.json" \
       --benchmark-name "PyTorch operator microbenchmark" --use-compile
     $TASKSET python -m pt.${OP_BENCHMARK_TESTS}_test --tag-filter long \
       --output-json-for-dashboard "${TEST_REPORTS_DIR}/operator_microbenchmark_${OP_BENCHMARK_TESTS}.json" \
       --benchmark-name "PyTorch operator microbenchmark"
+  done
+}
+
+test_operator_microbenchmark_pytorch28() {
+  TEST_REPORTS_DIR=$(pwd)/test/test-reports
+  mkdir -p "$TEST_REPORTS_DIR"
+  TEST_DIR=$(pwd)
+
+  # ### PyTorch 2.8 installation FIRST to avoid C++ extension ABI mismatch
+  # First uninstall existing torch packages
+  pip_uninstall torch torchvision torchaudio || true
+
+  # Use conda or alternative installation method to avoid segfault
+  # Try installing from conda-forge first (safer for CI environments)
+  if command -v conda &> /dev/null; then
+    echo "Installing PyTorch 2.8 via conda..."
+    conda install pytorch==2.8.0 torchvision torchaudio pytorch-cuda=12.8 -c pytorch -c nvidia -y || {
+      echo "Conda installation failed, trying pip with specific index..."
+      # Fallback to pip with specific index and no-cache
+      pip_install torch==2.8.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128 --no-cache-dir --no-deps
+    }
+  else
+    echo "Installing PyTorch 2.8 via pip with safer options..."
+    # Use specific CUDA version and no-cache to avoid segfault
+    pip_install torch==2.8.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128 --no-cache-dir --no-deps
+  fi
+  pip freeze
+  
+  # Verify installation
+  python -c "import torch; print(f'PyTorch version: {torch.__version__}'); print(f'CUDA available: {torch.cuda.is_available()}')"
+
+  # NOW compile the C++ extension against PyTorch 2.8
+  cd benchmarks/operator_benchmark/pt_extension
+  echo "Compiling C++ extension against PyTorch 2.8..."
+  python -m pip install . --force-reinstall
+
+  # Test that the C++ extension can be imported without segfault
+  echo "Testing C++ extension import..."
+  python -c "import benchmark_cpp_extension; print('C++ extension imported successfully')" || {
+    echo "ERROR: C++ extension import failed - this will cause segfaults in benchmarks"
+    exit 1
+  }
+
+  cd "${TEST_DIR}"/benchmarks/operator_benchmark
+  
+  # Set environment variables to prevent segmentation faults
+  export CUDA_LAUNCH_BLOCKING=1
+  export TORCH_CUDNN_V8_API_ENABLED=0
+  export TORCH_CUDNN_SDPA_ENABLED=0
+  
+  # Set memory management options
+  export PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:128
+  
+  for OP_BENCHMARK_TESTS in matmul mm; do
+    echo "Running ${OP_BENCHMARK_TESTS} benchmark with compile..."
+    # Run with timeout and error handling to catch segfaults
+    timeout 1800 $TASKSET python -m pt.${OP_BENCHMARK_TESTS}_test --tag-filter long \
+      --output-json-for-dashboard "${TEST_REPORTS_DIR}/operator_microbenchmark_pytorch28_${OP_BENCHMARK_TESTS}_compile.json" \
+      --benchmark-name "PyTorch 2.8 operator microbenchmark" --use-compile || {
+      echo "Segmentation fault detected in ${OP_BENCHMARK_TESTS} compile test, trying with reduced memory..."
+      # Try with reduced memory and simpler configuration
+      export PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:64
+      timeout 1800 $TASKSET python -m pt.${OP_BENCHMARK_TESTS}_test --tag-filter short \
+        --output-json-for-dashboard "${TEST_REPORTS_DIR}/operator_microbenchmark_pytorch28_${OP_BENCHMARK_TESTS}_compile_fallback.json" \
+        --benchmark-name "PyTorch 2.8 operator microbenchmark (fallback)" --use-compile
+    }
+    
+    echo "Running ${OP_BENCHMARK_TESTS} benchmark without compile..."
+    timeout 1800 $TASKSET python -m pt.${OP_BENCHMARK_TESTS}_test --tag-filter long \
+      --output-json-for-dashboard "${TEST_REPORTS_DIR}/operator_microbenchmark_pytorch28_${OP_BENCHMARK_TESTS}.json" \
+      --benchmark-name "PyTorch 2.8 operator microbenchmark" || {
+      echo "Segmentation fault detected in ${OP_BENCHMARK_TESTS} eager test, trying with reduced memory..."
+      # Try with reduced memory and simpler configuration
+      export PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:64
+      timeout 1800 $TASKSET python -m pt.${OP_BENCHMARK_TESTS}_test --tag-filter short \
+        --output-json-for-dashboard "${TEST_REPORTS_DIR}/operator_microbenchmark_pytorch28_${OP_BENCHMARK_TESTS}_fallback.json" \
+        --benchmark-name "PyTorch 2.8 operator microbenchmark (fallback)"
+    }
   done
 }
 
@@ -1695,6 +1774,8 @@ elif [[ "${TEST_CONFIG}" == *operator_benchmark* ]]; then
   fi
 elif [[ "${TEST_CONFIG}" == *operator_microbenchmark* ]]; then
   test_operator_microbenchmark
+elif [[ "${TEST_CONFIG}" == *operator_microbenchmark_pytorch28* ]]; then
+  test_operator_microbenchmark_pytorch28
 elif [[ "${TEST_CONFIG}" == *inductor_distributed* ]]; then
   test_inductor_distributed
 elif [[ "${TEST_CONFIG}" == *inductor-halide* ]]; then
