@@ -2598,11 +2598,12 @@ def forward(self, arg0_1, arg1_1):
         from torch._inductor.utils import run_and_get_code
 
         @torch.compile(mode="max-autotune")
-        def fn(x):
-            return x @ x
+        def fn(a, b):
+            return a @ b
 
         t1 = torch.rand(512, 512, device=GPU_TYPE)
-        _, (code,) = run_and_get_code(fn, t1)
+        t2 = torch.rand(512, 512, device=GPU_TYPE)
+        _, (code,) = run_and_get_code(fn, t1, t2)
         self.assertTrue("enable_fp_fusion" not in code)
 
 
