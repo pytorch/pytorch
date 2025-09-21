@@ -427,7 +427,7 @@ def check_model(
     grad_rtol=None,
     check_lowp=True,
     exact_dtype=True,
-    nopython=True,
+    fullgraph=True,
     copy_to_gpu=True,
     reference_in_float=True,
     assert_equal=True,
@@ -502,7 +502,7 @@ def check_model(
     def run(*ex, **kwargs):
         return model(*ex, **kwargs)
 
-    run = torch.compile(run, backend=compile_fx_wrapper, fullgraph=nopython)
+    run = torch.compile(run, backend=compile_fx_wrapper, fullgraph=fullgraph)
 
     torch.manual_seed(0)
     actual = run(*example_inputs, **kwargs)
@@ -664,7 +664,7 @@ def check_model_gpu(
     grad_rtol=None,
     check_lowp=True,
     exact_dtype=True,
-    nopython=True,
+    fullgraph=True,
     copy_to_gpu=True,
     reference_in_float=True,
     assert_equal=True,
@@ -693,7 +693,7 @@ def check_model_gpu(
         grad_atol=grad_atol,
         grad_rtol=grad_rtol,
         exact_dtype=exact_dtype,
-        nopython=nopython,
+        fullgraph=fullgraph,
         reference_in_float=reference_in_float,
         assert_equal=assert_equal,
         check_gradient=check_gradient,
@@ -726,7 +726,7 @@ def check_model_gpu(
             grad_atol=grad_atol,
             grad_rtol=grad_rtol,
             exact_dtype=exact_dtype,
-            nopython=nopython,
+            fullgraph=fullgraph,
             reference_in_float=reference_in_float,
             assert_equal=assert_equal,
             check_gradient=check_gradient,

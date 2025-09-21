@@ -2294,7 +2294,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # outputs of the op can be represented with StableIValue.  This avoids the
         # overhead of calling back into Python, and covers most remaining fallback ops.
         if self._compatible_with_stableivalue(op_overload):
-            self.generate_fallback_kernel_with_runtime_lookup_nopython(
+            self.generate_fallback_kernel_with_runtime_lookup_fullgraph(
                 get_args,
                 op_overload,
                 output_args,  # type: ignore[arg-type]
@@ -2457,7 +2457,7 @@ if (!custom_op_wrapper) {
             )
         return "".join(lines)
 
-    def generate_fallback_kernel_with_runtime_lookup_nopython(
+    def generate_fallback_kernel_with_runtime_lookup_fullgraph(
         self,
         get_args: Callable[[], Sequence[str]],
         op_overload: torch._ops.OpOverload,

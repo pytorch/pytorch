@@ -3334,7 +3334,7 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase, NestedTensorTestCase):
                 guards_failed.extend(guards)
 
             compiled = torch._dynamo.optimize(
-                nopython=True,
+                fullgraph=True,
                 backend="aot_eager",
                 guard_export_fn=append_guard_export,
                 guard_fail_fn=append_guard_fail,

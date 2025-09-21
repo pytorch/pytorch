@@ -2635,7 +2635,7 @@ def compile(
 
     return torch._dynamo.optimize(
         backend=backend,
-        nopython=fullgraph,
+        fullgraph=fullgraph,
         dynamic=dynamic,
         disable=disable,
         guard_filter_fn=guard_filter_fn,

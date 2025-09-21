@@ -4698,7 +4698,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
             return x
 
         opt_fn = torch.compile(fn, backend="eager")
-        nopython_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        fullgraph_fn = torch.compile(fn, backend="eager", fullgraph=True)
 
         x = torch.ones(3)
         ys = [1.0, 2.0, 3.0]
@@ -4706,12 +4706,12 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(opt_fn(x, ys, zs), fn(x, ys, zs))
 
-        # If nopython, should raise UserError
+        # If fullgraph, should raise UserError
         with self.assertRaisesRegex(torch._dynamo.exc.UserError, "zip()"):
-            nopython_fn(x, ys[:1], zs)
+            fullgraph_fn(x, ys[:1], zs)
 
         with self.assertRaisesRegex(torch._dynamo.exc.UserError, "zip()"):
-            nopython_fn(x, ys, zs[:1])
+            fullgraph_fn(x, ys, zs[:1])
 
         # Should cause fallback if allow graph break
         with self.assertRaisesRegex(ValueError, "zip()"):

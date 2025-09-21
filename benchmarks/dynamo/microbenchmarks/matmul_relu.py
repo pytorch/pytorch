@@ -8,7 +8,7 @@ import torch._inductor.config as inductor_config
 inductor_config.triton.mm = "triton"
 
 
-@torch._dynamo.optimize("inductor", nopython=True)
+@torch._dynamo.optimize("inductor", fullgraph=True)
 def inductor_mm(a, b):
     return torch.mm(a, b)
 

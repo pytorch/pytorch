@@ -1092,14 +1092,14 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             self.assertExpectedInline(cnt.frame_count, """1""")
             self.assertExpectedInline(cnt.op_count, """2""")
 
-    def _reformer(self, nopython):
+    def _reformer(self, fullgraph):
         input = torch.randn([1, 64, 256])
         model = ReformerEncoder()
         torch.manual_seed(1337)
         correct = copy.deepcopy(model)(input)
         cnt = torch._dynamo.testing.CompileCounter()
         torch.manual_seed(1337)
-        opt_model = torch.compile(model, backend=cnt, fullgraph=nopython)
+        opt_model = torch.compile(model, backend=cnt, fullgraph=fullgraph)
         self.assertTrue(same(opt_model(input), correct))
         return cnt
 
@@ -1279,13 +1279,13 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
     def test_reformer_eval(self):
         with torch.no_grad():
-            cnt = self._reformer(nopython=True)
+            cnt = self._reformer(fullgraph=True)
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, 10)
 
     def test_reformer_train(self):
         with torch.enable_grad():
-            cnt = self._reformer(nopython=False)
+            cnt = self._reformer(fullgraph=False)
         expected_op_count = (
             """10""" if torch._dynamo.config.inline_inbuilt_nn_modules else """4"""
         )

@@ -2812,7 +2812,7 @@ class InstructionTranslatorBase(
                 return False
         return (
             all(b.can_restore() for b in self.block_stack)
-            and not self.one_graph
+            and not self.fullgraph
             and not self.error_on_graph_break
             and not self.is_tracing_resume_prologue
             and not self.active_generic_context_managers
@@ -3748,13 +3748,13 @@ class InstructionTranslatorBase(
         self.num_calls: dict[str, int] = {}
         # Flag to indicate whether tracing is used for export.
         self.export = export
-        # NOTE: one_graph is used for export/fullgraph=True to always force errors on graph breaks.
+        # NOTE: fullgraph is used for export/fullgraph=True to always force errors on graph breaks.
         # To toggle erroring/resuming on graph breaks during fullgraph=False compile, self.error_on_graph_break
         # is used instead. Every step(), its value is updated to the global tls.error_on_graph_break.
         # We mirror this value since cleanup may (correctly) inadvertently change tls.error_on_graph_break.
         # This assumes that we cannot both trace a change to tls.error_on_graph_break and graph break on
         # the same instruction.
-        self.one_graph = False
+        self.fullgraph = False
         self.error_on_graph_break = False
         # Also do not graph break when tracing resume function prologues
         self.is_tracing_resume_prologue = False
@@ -3822,7 +3822,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         torch_function_mode_stack: Any,
         code_options: dict[str, Any],
         compiler_fn: Any,
-        one_graph: bool,
+        fullgraph: bool,
         export: bool,
         export_constraints: Any,
         frame_state: Any,
@@ -3873,10 +3873,10 @@ class InstructionTranslator(InstructionTranslatorBase):
         # as soon as we create the tracing context we should keep it active, so any calls
         # into dynamo apis can rely on finding it
         with tracing(self.output.tracing_context), self.set_current_tx():
-            self.one_graph: bool = one_graph
+            self.fullgraph: bool = fullgraph
             self.export = export
             if self.export:
-                assert self.one_graph, (
+                assert self.fullgraph, (
                     "Export without one graph - something has gone wrong."
                 )
 
@@ -4041,7 +4041,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             and not self.inconsistent_side_effects
             and not self.symbolic_locals_contain_module_class()
             and not self.export
-            and not self.one_graph
+            and not self.fullgraph
             and not self.error_on_graph_break
             and not self.is_tracing_resume_prologue
         ):
@@ -4421,7 +4421,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         self.num_calls = parent.num_calls
         self.symbolic_result = None
         self.nn_module_stack = parent.nn_module_stack.copy()
-        self.one_graph = parent.one_graph
+        self.fullgraph = parent.fullgraph
 
     @property
     def fake_mode(self) -> Optional[FakeTensorMode]:

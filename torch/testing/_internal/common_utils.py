@@ -1717,18 +1717,18 @@ def unMarkDynamoStrictTest(cls=None):
         return decorator(cls)
 
 
-def markDynamoStrictTest(cls_or_func=None, nopython=False):
+def markDynamoStrictTest(cls_or_func=None, fullgraph=False):
     """
     Marks the test as 'strict'. In strict mode, we reset before and after the
     test, and run without suppress errors.
 
     Args:
-    - nopython: if we should run torch._dynamo.optimize with nopython={True/False}.
+    - fullgraph: if we should run torch._dynamo.optimize with fullgraph={True/False}.
     """
     def decorator(cls_or_func):
         if inspect.isclass(cls_or_func):
             cls_or_func.dynamo_strict = True
-            cls_or_func.dynamo_strict_nopython = nopython
+            cls_or_func.dynamo_strict_fullgraph = fullgraph
             return cls_or_func
 
         fn = cls_or_func
@@ -3229,9 +3229,9 @@ class TestCase(expecttest.TestCase):
     def _dynamo_test_key(self):
         return f"{self.__class__.__name__}.{self._testMethodName}"
 
-    def compile_fn(self, fn, backend, nopython):
+    def compile_fn(self, fn, backend, fullgraph):
         # Allows subclasses to control compilation
-        return torch._dynamo.optimize(backend, nopython=nopython)(fn)
+        return torch._dynamo.optimize(backend, fullgraph=fullgraph)(fn)
 
     def _run_custom(self, result=None):
         using_unittest = isinstance(result, unittest.TestResult)
@@ -3285,7 +3285,7 @@ class TestCase(expecttest.TestCase):
                 strict_mode = test_cls.dynamo_strict
             else:
                 strict_mode = strict_default
-        nopython = getattr(test_cls, "dynamo_strict_nopython", False) and compiled
+        fullgraph = getattr(test_cls, "dynamo_strict_fullgraph", False) and compiled
 
         if strict_mode or should_reset_dynamo:
             torch._dynamo.reset()
@@ -3308,14 +3308,14 @@ class TestCase(expecttest.TestCase):
 
         with unittest.mock.patch("torch._dynamo.config.suppress_errors", suppress_errors), maybe_disable_size_asserts:
             if TEST_WITH_AOT_EAGER:
-                super_run = self.compile_fn(super_run, "aot_eager_decomp_partition", nopython)
+                super_run = self.compile_fn(super_run, "aot_eager_decomp_partition", fullgraph)
             elif TEST_WITH_TORCHDYNAMO or TEST_WITH_TORCHINDUCTOR:
                 if TEST_WITH_TORCHINDUCTOR:
-                    super_run = self.compile_fn(super_run, "inductor", nopython)
+                    super_run = self.compile_fn(super_run, "inductor", fullgraph)
                 else:
                     # Assume eager-generated GraphModules will not error out.
                     # If we do, this is probably a Dynamo bug!
-                    super_run = self.compile_fn(super_run, "eager_noexcept", nopython)
+                    super_run = self.compile_fn(super_run, "eager_noexcept", fullgraph)
 
                 key = self._dynamo_test_key()
 
