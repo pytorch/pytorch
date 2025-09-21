@@ -56,9 +56,8 @@ class TestOpaqueObject(TestCase):
         @torch.library.custom_op(
             "_TestOpaqueObject::queue_size",
             mutates_args=[],
-            schema="(__torch__.torch.classes.aten.OpaqueObject a) -> int",
         )
-        def size_impl(q: torch._C.ScriptObject) -> int:
+        def size_impl(q: torch.library.OpaqueType) -> int:
             queue = get_payload(q)
             assert isinstance(queue, OpaqueQueue)
             return queue.size()
