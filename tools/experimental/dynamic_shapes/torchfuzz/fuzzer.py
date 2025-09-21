@@ -3,9 +3,9 @@ import logging
 import random
 from typing import Any, Optional, Union
 
-from codegen import convert_stack_to_python_code, execute_python_code
-from ops_fuzzer import fuzz_operation_stack, fuzz_spec
-from visualize_stack import visualize_operation_stack
+from codegen import convert_graph_to_python_code, execute_python_code
+from ops_fuzzer import fuzz_operation_graph, fuzz_spec
+from visualize_stack import visualize_operation_graph
 
 import torch
 
@@ -102,9 +102,8 @@ def fuzz_and_execute(
                     )
 
             # Generate visualization in the iteration folder
-
-            visualize_operation_stack(
-                operation_stack, "Operation Stack", iteration_folder
+            visualize_operation_graph(
+                operation_graph, "Operation Graph", iteration_folder
             )
 
         if python_code:
@@ -130,11 +129,14 @@ def fuzz_and_execute(
             "   Completed in %.3fs - %s", time.time() - start_time, target_spec
         )
 
-        logger.debug("⏱️  Step 2: Generating operation stack...")
+        logger.debug("⏱️  Step 2: Generating operation graph...")
         start_time = time.time()
-        operation_stack = fuzz_operation_stack(
+        operation_graph = fuzz_operation_graph(
             target_spec, max_depth=max_depth, seed=seed
         )
+        # Convert graph to topologically ordered stack for codegen compatibility
+        topo_order = operation_graph.get_topological_order()
+        operation_stack = [operation_graph.nodes[node_id] for node_id in topo_order]
         logger.debug(
             "   Completed in %.3fs - %d operations",
             time.time() - start_time,
@@ -143,9 +145,7 @@ def fuzz_and_execute(
 
         logger.debug("⏱️  Step 3: Converting to Python code...")
         start_time = time.time()
-        python_code = convert_stack_to_python_code(
-            operation_stack, target_spec, seed=seed
-        )
+        python_code = convert_graph_to_python_code(operation_graph, seed=seed)
         logger.debug(
             "   Completed in %.3fs - %d chars",
             time.time() - start_time,
