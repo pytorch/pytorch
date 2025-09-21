@@ -9,6 +9,8 @@ import torch
 from torch import device, dtype, Tensor, types
 from torch.utils._exposed_in import exposed_in
 
+from .opaque_object import OpaqueType, OpaqueTypeStr
+
 
 # This is used as a negative test for
 # test_custom_ops.py::TestTypeConversion::test_type_eval.
@@ -247,6 +249,7 @@ def get_supported_param_types():
         (types.Number, "Scalar", True, False, False),
         (dtype, "ScalarType", False, False, False),
         (device, "Device", False, False, False),
+        (OpaqueType, OpaqueTypeStr, False, False, False),
     ]
     result = []
     for line in data:
