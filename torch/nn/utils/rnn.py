@@ -122,18 +122,17 @@ class PackedSequence(PackedSequence_):
             _device, _dtype, non_blocking, convert_to_format = torch._C._nn._parse_to(
                 *args, **kwargs
             )
-            new_kwargs = {
-                "non_blocking": non_blocking,
-                "memory_format": convert_to_format,
-            }
 
             # Does not forward device or dtype arg/kwargs, device is set from data.device
-            sorted_indices = bind(
-                self.sorted_indices, lambda t: t.to(data.device, **new_kwargs)
-            )
-            unsorted_indices = bind(
-                self.unsorted_indices, lambda t: t.to(data.device, **new_kwargs)
-            )
+            def call_to(t: _T) -> _T:
+                return t.to(
+                    data.device,
+                    non_blocking=non_blocking,
+                    memory_format=convert_to_format,
+                )
+
+            sorted_indices = bind(self.sorted_indices, call_to)
+            unsorted_indices = bind(self.unsorted_indices, call_to)
             return type(self)(data, self.batch_sizes, sorted_indices, unsorted_indices)
 
     @copy_method_params(torch.Tensor.cuda)
