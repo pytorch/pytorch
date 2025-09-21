@@ -11,9 +11,9 @@ class BmmOperator(Operator):
     def __init__(self):
         super().__init__("bmm")
 
-    def can_produce(self, tensor):
-        """BMM can produce tensors that are 3D."""
-        return len(tensor.size) == 3
+    def can_produce(self, tensor, max_numel=1_000_000):
+        """BMM can produce tensors that are 3D and not too large."""
+        return len(tensor.size) == 3 and (tensor.size[0] * tensor.size[1] * tensor.size[2] <= max_numel)
 
     def decompose(self, tensor, num_inputs=2):
         """Decompose tensor into input tensors for batch matrix multiplication."""

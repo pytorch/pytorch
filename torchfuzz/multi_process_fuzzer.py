@@ -36,6 +36,8 @@ IGNORE_PATTERNS: List[re.Pattern] = [
     re.compile(r"Dynamo failed to run FX node with fake tensors: call_method fill_diagonal_"),
     re.compile(r"zuf\d+ is not defined"),
     re.compile(r"‘zuf\d+’ was not declared in this scope"),
+    re.compile(r"out_eager_sum: 0\.0"),
+    re.compile(r"error: operand #\d+ does not dominate this use"),
     # Add more patterns here as needed, e.g.:
     # re.compile(r"Some other error message"),
 ]
