@@ -465,6 +465,8 @@ class AsyncCompile:
                 kernel.set_compile_info(compile_id, is_backward)
                 CompiledTritonKernels.remove_future(source_code)
 
+                kernel.restore_after_unpickle(old_values=None)
+
                 kernel.precompile(
                     warm_cache_only=False,
                     reload_kernel=reload_kernel_in_parent,

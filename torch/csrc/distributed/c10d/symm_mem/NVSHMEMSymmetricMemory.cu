@@ -240,7 +240,7 @@ class NVSHMEMSymmetricMemory : public SymmetricMemory {
     return pai_->rank_to_global_rank_dev_;
   };
 
-  bool world_within_direct_access() {
+  bool world_within_direct_access() override {
     return pai_->world_within_cuda_p2p_;
   }
 
