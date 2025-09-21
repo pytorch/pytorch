@@ -3940,7 +3940,9 @@ def run(runner, args, original_dir=None):
         disable_output = True
 
     if args.overhead:
-        optimize_ctx = torch._dynamo.optimize(dummy_fx_compile, fullgraph=args.fullgraph)
+        optimize_ctx = torch._dynamo.optimize(
+            dummy_fx_compile, fullgraph=args.fullgraph
+        )
         experiment = speedup_experiment
         output_filename = "overheads.csv"
     elif args.inductor:
@@ -4039,7 +4041,9 @@ def run(runner, args, original_dir=None):
             runner.model_iter_fn = model_iter_fn_and_mark_step
             optimize_ctx = torchao_optimize_ctx(args.quantization)
         else:
-            optimize_ctx = torch._dynamo.optimize(args.backend, fullgraph=args.fullgraph)
+            optimize_ctx = torch._dynamo.optimize(
+                args.backend, fullgraph=args.fullgraph
+            )
         experiment = (
             speedup_experiment if not args.backend == "torchao" else latency_experiment
         )
