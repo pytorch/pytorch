@@ -137,6 +137,73 @@ class TestUtilityFuns(_BaseTestCase):
         )
         self.assertEqual(len(messages), 2)
 
+    def test_dynamic_axes_invalid_keys_segfault_fix(self):
+        """Test fix for segfault when dynamic_axes keys don't match input/output names."""
+        import os
+        import tempfile
+
+        import torch.nn as nn
+
+        class BaseModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = nn.Linear(3, 1)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        class MyModel(BaseModule):
+            def __init__(self):
+                super().__init__()
+                self.gather_mod = nn.Identity()
+                self.index_add_mod = nn.Identity()
+                self.batch_norm = nn.BatchNorm1d(1)
+
+            def forward(self, *inputs):
+                x = super().forward(inputs[0])
+                index = inputs[1]
+                source = inputs[2]
+
+                # Intentionally exercise an op that may raise
+                try:
+                    x = torch.index_add(x, 0, index, source)
+                except RuntimeError:
+                    pass
+                return self.batch_norm(x)
+
+        model = MyModel()
+        inputs = (
+            torch.randn(2, 3),  # x
+            torch.tensor([0, 1]),  # index
+            torch.randn(2, 5),  # source
+        )
+
+        # Run model once to initialize
+        _ = model(*inputs)
+
+        with tempfile.NamedTemporaryFile(suffix=".onnx", delete=False) as f:
+            try:
+                # This should throw RuntimeError instead of segfault
+                with self.assertRaises(RuntimeError) as context:
+                    torch.onnx.export(
+                        model,
+                        inputs,
+                        f.name,
+                        opset_version=self.opset_version,
+                        dynamic_axes={"input": {0: "batch"}, "output": {0: "batch"}},
+                        dynamo=False,  # keys don't match real names
+                    )
+
+                # Verify the error message
+                self.assertIn(
+                    "TracingState is null or env_stack is empty in getOutput",
+                    str(context.exception),
+                )
+
+            finally:
+                if os.path.exists(f.name):
+                    os.unlink(f.name)
+
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_split_to_slice(self):
         class SplitModule(torch.nn.Module):

@@ -242,6 +242,10 @@ bool TracingState::hasValue(const IValue& var) const {
 }
 
 Value* TracingState::getOutput(const IValue& iv, size_t i) {
+  const auto& state = getTracingState();
+  TORCH_CHECK(
+      state && !state->env_stack.empty(),
+      "TracingState is null or env_stack is empty in getOutput");
   bool tracing_mode_strict = getTracingState()->strict;
   if (iv.isTensor()) {
     const at::Tensor& var = iv.toTensor();
