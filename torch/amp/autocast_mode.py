@@ -230,9 +230,7 @@ class autocast:
             raise ValueError(
                 f"Expected `device_type` of type `str`, got: `{type(device_type)}`"
             )
-        if dtype is None:
-            dtype = torch.get_autocast_dtype(device_type)
-        self.fast_dtype = dtype
+        self.fast_dtype = torch.get_autocast_dtype(device_type) if not dtype else dtype
         if torch._jit_internal.is_scripting():
             self._enabled = enabled
             self.device = device_type
@@ -273,80 +271,37 @@ class autocast:
         if cache_enabled is not None:
             self._cache_enabled = cache_enabled
 
-        if self.device == "cpu":
-            supported_dtype = [torch.bfloat16, torch.float16]
+        device_supported_dtypes = {
+            "cpu": [torch.bfloat16, torch.float16],
+            "mtia": [torch.bfloat16, torch.float16],
+            "maia": [torch.bfloat16, torch.float16],
+            "xpu": [torch.bfloat16, torch.float16],
+            "ipu": [torch.bfloat16, torch.float16],
+            "hpu": [torch.bfloat16, torch.float16],
+            "mps": [torch.bfloat16, torch.float16],
+            "xla": [torch.bfloat16, torch.float16],
+            self.custom_backend_name: self.custom_device_mod.get_amp_supported_dtype(),
+        }
+
+        if self.device in device_supported_dtypes:
+            supported_dtype = device_supported_dtypes[self.device]
+            device_name = (
+                self.device
+                if self.device == self.custom_backend_name
+                else self.device.upper()
+            )
+
             if self.fast_dtype not in supported_dtype and enabled:
-                error_message = "In CPU autocast, but the target dtype is not supported. Disabling autocast.\n"
-                error_message += "CPU Autocast only supports dtype of "
-                error_message += (
-                    ", ".join(str(dtype) for dtype in supported_dtype) + " currently."
-                )
-                warnings.warn(error_message)
-                enabled = False
-        elif self.device == "mtia":
-            supported_dtype = [torch.bfloat16, torch.float16]
-            if self.fast_dtype not in supported_dtype:
-                error_message = "In MTIA autocast, but the target dtype is not supported. Disabling autocast.\n"
-                error_message += "MTIA Autocast only supports dtypes of torch.bfloat16 and torch.float16 currently."
-                warnings.warn(error_message)
-                enabled = False
-        elif self.device == "maia":
-            supported_dtype = [torch.bfloat16, torch.float16]
-            if self.fast_dtype not in supported_dtype:
-                error_message = "In MAIA autocast, but the target dtype is not supported. Disabling autocast.\n"
-                error_message += "MAIA Autocast only supports dtypes of torch.bfloat16 and torch.float16 currently."
-                warnings.warn(error_message)
-                enabled = False
-        elif self.device == "xpu":
-            supported_dtype = [torch.bfloat16, torch.float16]
-            if self.fast_dtype not in supported_dtype:
-                error_message = "In XPU autocast, but the target dtype is not supported. Disabling autocast.\n"
-                error_message += "XPU Autocast only supports dtypes of torch.bfloat16 and torch.float16 currently."
-                warnings.warn(error_message)
-                enabled = False
-        elif self.device == "ipu":
-            supported_dtypes = [torch.bfloat16, torch.float16]
-            if self.fast_dtype not in supported_dtypes:
-                error_message = "In IPU autocast, but the target dtype is not supported. Disabling autocast.\n"
-                error_message += "IPU Autocast only supports dtypes of torch.bfloat16 and torch.float16 currently."
-                warnings.warn(error_message)
-                enabled = False
-        elif self.device == "hpu":
-            supported_dtype = [torch.bfloat16, torch.float16]
-            if self.fast_dtype not in supported_dtype:
-                error_message = "In HPU autocast, but the target dtype is not supported. Disabling autocast.\n"
-                error_message += "HPU Autocast only supports dtypes of torch.bfloat16 and torch.float16 currently."
-                warnings.warn(error_message)
-                enabled = False
-        elif self.device == self.custom_backend_name:
-            supported_dtype = self.custom_device_mod.get_amp_supported_dtype()
-            if self.fast_dtype not in supported_dtype:
-                error_message = f"In {self.custom_backend_name} autocast, but the target dtype {self.fast_dtype} is not supported. "
-                error_message += f"Disabling autocast.\n {self.custom_backend_name} Autocast only supports dtypes of "
-                error_message += (
-                    ", ".join(str(dtype) for dtype in supported_dtype) + " currently."
-                )
-                warnings.warn(error_message)
-                enabled = False
-        elif self.device == "cuda":
-            if (
-                enabled
-                and self.fast_dtype == torch.bfloat16
-                and not torch.cuda.is_bf16_supported()
-            ):
-                raise RuntimeError(
-                    "Current CUDA Device does not support bfloat16. Please switch dtype to float16."
-                )
-        elif self.device == "mps":
-            supported_dtype = [torch.bfloat16, torch.float16]
-            if self.fast_dtype not in supported_dtype:
                 error_message = (
-                    "In MPS autocast, but the target dtype is not supported. Disabling autocast.\n"
-                    "MPS Autocast only supports dtype of torch.bfloat16 and torch.float16 currently."
+                    f"In {device_name} autocast, but the target dtype is not supported. Disabling autocast.\n"
+                    f"{device_name} Autocast only supports dtypes of "
+                    + ", ".join(str(dtype) for dtype in supported_dtype)
+                    + " currently."
                 )
                 warnings.warn(error_message)
                 enabled = False
-            elif self.fast_dtype == torch.bfloat16:
+            # Special case for MPS bfloat16 support on macOS < 14
+            elif self.device == "mps" and self.fast_dtype == torch.bfloat16 and enabled:
                 if not torch.backends.mps.is_macos_or_newer(14, 0):
                     error_message = (
                         "In MPS autocast, but the target dtype torch.bfloat16 is not supported "
@@ -354,15 +309,15 @@ class autocast:
                     )
                     warnings.warn(error_message)
                     enabled = False
-        elif self.device == "xla":
-            supported_dtype = [torch.float16, torch.bfloat16]
-            if self.fast_dtype not in supported_dtype:
-                error_message = "In XLA autocast, but the target dtype is not supported. Disabling autocast.\n"
-                error_message += (
-                    "XLA Autocast only supports dtype of torch.bfloat16 currently."
-                )
-                warnings.warn(error_message)
-                enabled = False
+        elif (
+            self.device == "cuda"
+            and self.fast_dtype == torch.bfloat16
+            and not torch.cuda.is_bf16_supported()
+            and enabled
+        ):
+            raise RuntimeError(
+                "Current CUDA Device does not support bfloat16. Please switch dtype to float16."
+            )
         self._enabled = enabled
 
     def __enter__(self):
