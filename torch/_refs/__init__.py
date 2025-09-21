@@ -5578,6 +5578,13 @@ def empty_strided(
     )
 
 
+def _strength_reduce_integer(val: int) -> torch.dtype:
+    for possible_dtype in (torch.uint8, torch.uint16, torch.int32):
+        if val <= torch.iinfo(possible_dtype).max:
+            return possible_dtype
+    return torch.int64
+
+
 @register_decomposition(aten.eye)
 @out_wrapper()
 def eye(
@@ -5601,11 +5608,7 @@ def eye(
 
     range_dtype = torch.int64
     if isinstance(n, utils.IntWithoutSymInt) and isinstance(m, utils.IntWithoutSymInt):
-        # strength reduction optimization
-        for possible_dtype in (torch.int8, torch.int16, torch.int32):
-            if max(n, m) <= torch.iinfo(possible_dtype).max:
-                range_dtype = possible_dtype
-                break
+        range_dtype = _strength_reduce_integer(max(n, m))
     range_n = torch.arange(n, dtype=range_dtype, device=device, requires_grad=False)
     range_m = torch.arange(m, dtype=range_dtype, device=device, requires_grad=False)
 
