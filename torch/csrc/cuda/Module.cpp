@@ -1053,9 +1053,6 @@ static void registerCudaDeviceProperties(PyObject* module) {
       .def_readonly("warp_size", &cudaDeviceProp::warpSize)
 #ifndef USE_ROCM
       // NVIDIA-only properties
-      .def_readonly("clock_rate", &cudaDeviceProp::clockRate)
-      .def_readonly("memory_clock_rate", &cudaDeviceProp::memoryClockRate)
-      .def_readonly("memory_bus_width", &cudaDeviceProp::memoryBusWidth)
       .def_readonly(
           "shared_memory_per_block", &cudaDeviceProp::sharedMemPerBlock)
       .def_readonly(
@@ -1277,14 +1274,16 @@ static void registerCudaPluggableAllocator(PyObject* module) {
             self.set_release_pool(func);
           });
   m.def("_cuda_customAllocator", [](uint64_t malloc_ptr, uint64_t free_ptr) {
-    using namespace torch::cuda::CUDAPluggableAllocator;
+    using MallocFuncType = void*(size_t, int, cudaStream_t);
+    using FreeFuncType = void(void*, size_t, int, cudaStream_t);
     std::function<MallocFuncType> malloc_fn =
         // NOLINTNEXTLINE(performance-no-int-to-ptr)
         reinterpret_cast<MallocFuncType*>(malloc_ptr);
     std::function<FreeFuncType> free_fn =
         // NOLINTNEXTLINE(performance-no-int-to-ptr)
         reinterpret_cast<FreeFuncType*>(free_ptr);
-    return createCustomAllocator(malloc_fn, free_fn);
+    return torch::cuda::CUDAPluggableAllocator::createCustomAllocator(
+        malloc_fn, free_fn);
   });
 
   // NOLINTNEXTLINE(bugprone-unused-raii)
