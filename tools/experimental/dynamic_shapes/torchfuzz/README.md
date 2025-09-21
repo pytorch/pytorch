@@ -103,7 +103,7 @@ python fuzzer.py --single --log-level DEBUG --seed 42
 2. **`ops_fuzzer.py`** - Creates operation graphs with type-aware operations and dependency tracking
 3. **`codegen.py`** - Converts operation graphs to executable Python code using topological ordering
 4. **`fuzzer.py`** - Main orchestrator and CLI interface
-5. **`visualize_stack.py`** - Creates visual diagrams of operation graphs and dependency structures
+5. **`visualize_graph.py`** - Creates visual diagrams of operation graphs and dependency structures
 
 ### Operation Types
 

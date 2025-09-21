@@ -5,7 +5,7 @@ from typing import Any, Optional, Union
 
 from codegen import convert_graph_to_python_code, execute_python_code
 from ops_fuzzer import fuzz_operation_graph, fuzz_spec
-from visualize_stack import visualize_operation_graph
+from visualize_graph import visualize_operation_graph
 
 import torch
 
@@ -40,10 +40,10 @@ def fuzz_and_execute(
     if seed is None:
         seed = random.randint(0, 2**31 - 1)
 
-    # Generate max_depth if not provided (range 1-10)
+    # Generate max_depth if not provided (range 3-12)
     if max_depth is None:
         random.seed(seed + 999)  # Use seed offset for consistent depth selection
-        max_depth = random.randint(1, 20)
+        max_depth = random.randint(3, 12)
     else:
         # Clamp max_depth to valid range
         max_depth = max(1, max_depth)

@@ -441,7 +441,7 @@ def _get_arg_args_specs(target_spec: Spec) -> tuple[str, list[Spec]]:
 
 def fuzz_operation_graph(
     target_spec: Spec,
-    max_depth: int = 3,
+    max_depth: int = 7,
     seed: Optional[int] = None,
 ) -> OperationGraph:
     """
