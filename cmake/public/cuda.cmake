@@ -68,6 +68,7 @@ endif()
 
 message(STATUS "PyTorch: CUDA detected: " ${CUDA_VERSION})
 message(STATUS "PyTorch: CUDA toolkit directory: " ${CUDA_TOOLKIT_ROOT_DIR})
+message(STATUS "PyTorch: CUDA nvcc is: " ${CUDAToolkit_NVCC_EXECUTABLE})
 if(CUDA_VERSION VERSION_LESS 12.0)
   message(FATAL_ERROR "PyTorch requires CUDA 12.0 or above.")
 endif()
