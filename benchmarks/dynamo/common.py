@@ -3580,18 +3580,10 @@ def process_caching_precompile():
     )
     from torch._dynamo.precompile_context import PrecompileContext
 
-    # Serialize all callables, clear PrecompileContext
-    # TODO: put this under torch.compiler API once ready
-    serialized = PrecompileContext.serialize()
-    PrecompileContext.clear()
-    if serialized is not None:
-        artifacts, info = serialized
-        print(
-            f"Saving {len(info.precompile_dynamo_artifacts)} Precompile Artifact(s)..."
-        )
-        results = PrecompileContext.deserialize(artifacts)
-        assert results is not None
-        PrecompileContext.populate_caches(results)
+    debug_info = PrecompileContext.save_to_dynamo_cache()
+    print(
+        f"Saved {len(debug_info['dynamo'])} precompile artifacts with {len(debug_info['backends'])} backends"
+    )
 
 
 def process_entry(rank, runner, original_dir, args):
