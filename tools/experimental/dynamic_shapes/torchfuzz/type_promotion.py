@@ -1,7 +1,7 @@
 """Type promotion utilities for torchfuzz operators."""
 
 import random
-from typing import List, Tuple
+
 import torch
 
 
@@ -67,7 +67,7 @@ PROMOTION_CHAINS = {
 }
 
 
-def get_promoted_dtypes(target_dtype: torch.dtype) -> List[torch.dtype]:
+def get_promoted_dtypes(target_dtype: torch.dtype) -> list[torch.dtype]:
     """
     Generate two dtypes that will promote to target_dtype via PyTorch's type promotion rules.
     """
@@ -156,29 +156,39 @@ def get_dtype_map() -> dict:
     }
 
 
-def get_scalar_promotion_pairs(target_dtype: torch.dtype) -> List[Tuple[torch.dtype, torch.dtype]]:
+def get_scalar_promotion_pairs(
+    target_dtype: torch.dtype,
+) -> list[tuple[torch.dtype, torch.dtype]]:
     """
     Get promotion pairs for scalar operations.
     Returns list of (dtype1, dtype2) tuples that promote to target_dtype.
     """
-    return [
-        (torch.float32, torch.float32),
-        (torch.float16, torch.float32),
-        (torch.float32, torch.float16),
-        (torch.int32, torch.float32),
-        (torch.float32, torch.int32),
-    ] if target_dtype == torch.float32 else [
-        (torch.float64, torch.float64),
-        (torch.float32, torch.float64),
-        (torch.float64, torch.float32),
-    ] if target_dtype == torch.float64 else [
-        (torch.int32, torch.int32),
-        (torch.int64, torch.int32),
-        (torch.int32, torch.int64),
-    ] if target_dtype == torch.int32 else [
-        (torch.int64, torch.int64),
-        (torch.int32, torch.int64),
-        (torch.int64, torch.int32),
-    ] if target_dtype == torch.int64 else [
-        (target_dtype, target_dtype)
-    ]
+    return (
+        [
+            (torch.float32, torch.float32),
+            (torch.float16, torch.float32),
+            (torch.float32, torch.float16),
+            (torch.int32, torch.float32),
+            (torch.float32, torch.int32),
+        ]
+        if target_dtype == torch.float32
+        else [
+            (torch.float64, torch.float64),
+            (torch.float32, torch.float64),
+            (torch.float64, torch.float32),
+        ]
+        if target_dtype == torch.float64
+        else [
+            (torch.int32, torch.int32),
+            (torch.int64, torch.int32),
+            (torch.int32, torch.int64),
+        ]
+        if target_dtype == torch.int32
+        else [
+            (torch.int64, torch.int64),
+            (torch.int32, torch.int64),
+            (torch.int64, torch.int32),
+        ]
+        if target_dtype == torch.int64
+        else [(target_dtype, target_dtype)]
+    )

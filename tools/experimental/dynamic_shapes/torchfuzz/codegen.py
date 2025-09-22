@@ -9,11 +9,11 @@ from queue import Empty, Queue
 from threading import Thread
 from typing import Any, Optional, Union
 
+import torch
+
+from torchfuzz.operators import get_operator
 from torchfuzz.ops_fuzzer import OperationGraph
 from torchfuzz.tensor_fuzzer import ScalarSpec, Spec, TensorSpec
-from torchfuzz.operators import get_operator
-
-import torch
 
 
 def convert_graph_to_python_code(

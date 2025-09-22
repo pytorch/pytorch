@@ -1,8 +1,7 @@
 """Arg operator implementation."""
 
-from typing import List
 from torchfuzz.operators.base import Operator
-from torchfuzz.tensor_fuzzer import TensorSpec, ScalarSpec, Spec
+from torchfuzz.tensor_fuzzer import Spec
 
 
 class ArgOperator(Operator):
@@ -19,11 +18,13 @@ class ArgOperator(Operator):
         """Arg operator does not require inputs."""
         return False
 
-    def decompose(self, output_spec: Spec, num_inputs: int = 0) -> List[Spec]:
+    def decompose(self, output_spec: Spec, num_inputs: int = 0) -> list[Spec]:
         """Arg requires no inputs."""
         return []
 
-    def codegen(self, output_name: str, input_names: List[str], output_spec: Spec) -> str:
+    def codegen(
+        self, output_name: str, input_names: list[str], output_spec: Spec
+    ) -> str:
         """Generate code for arg operation."""
         # The actual argument name assignment will be handled separately
         # in the codegen.py when processing arg operations

@@ -1,10 +1,14 @@
 """Add operator implementation."""
 
 import random
-from typing import List
+
 from torchfuzz.operators.base import Operator
-from torchfuzz.tensor_fuzzer import TensorSpec, Spec
-from torchfuzz.type_promotion import get_promotion_table_for_strings, get_dtype_name, get_dtype_map
+from torchfuzz.tensor_fuzzer import Spec, TensorSpec
+from torchfuzz.type_promotion import (
+    get_dtype_map,
+    get_dtype_name,
+    get_promotion_table_for_strings,
+)
 
 
 class AddOperator(Operator):
@@ -21,7 +25,7 @@ class AddOperator(Operator):
         """Add operator supports variable number of inputs."""
         return True
 
-    def decompose(self, output_spec: Spec, num_inputs: int = 2) -> List[Spec]:
+    def decompose(self, output_spec: Spec, num_inputs: int = 2) -> list[Spec]:
         """Decompose tensor into input tensors for addition with type promotion."""
         if not isinstance(output_spec, TensorSpec):
             raise ValueError("AddOperator can only produce TensorSpec outputs")
@@ -50,12 +54,14 @@ class AddOperator(Operator):
             TensorSpec(
                 size=output_spec.size,
                 stride=output_spec.stride,
-                dtype=dtype_map.get(dt, output_spec.dtype)
+                dtype=dtype_map.get(dt, output_spec.dtype),
             )
             for dt in dtypes
         ]
 
-    def codegen(self, output_name: str, input_names: List[str], output_spec: Spec) -> str:
+    def codegen(
+        self, output_name: str, input_names: list[str], output_spec: Spec
+    ) -> str:
         """Generate code for addition operation."""
         if len(input_names) == 2:
             return f"{output_name} = torch.ops.aten.add({input_names[0]}, {input_names[1]})"

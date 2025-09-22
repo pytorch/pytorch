@@ -1,7 +1,7 @@
 """Scalar multiply operator implementation."""
 
 import random
-from typing import List
+
 from torchfuzz.operators.base import Operator
 from torchfuzz.tensor_fuzzer import ScalarSpec, Spec
 
@@ -20,10 +20,12 @@ class ScalarMultiplyOperator(Operator):
         """Scalar multiply operator does not support variable number of inputs."""
         return False
 
-    def decompose(self, output_spec: Spec, num_inputs: int = 2) -> List[Spec]:
+    def decompose(self, output_spec: Spec, num_inputs: int = 2) -> list[Spec]:
         """Decompose scalar into input scalars for multiplication with type promotion."""
         if not isinstance(output_spec, ScalarSpec):
-            raise ValueError("ScalarMultiplyOperator can only produce ScalarSpec outputs")
+            raise ValueError(
+                "ScalarMultiplyOperator can only produce ScalarSpec outputs"
+            )
 
         # Use shared type promotion utility
         from torchfuzz.type_promotion import get_scalar_promotion_pairs
@@ -31,12 +33,11 @@ class ScalarMultiplyOperator(Operator):
         supported_types = get_scalar_promotion_pairs(output_spec.dtype)
         dtypes = random.choice(supported_types)
 
-        return [
-            ScalarSpec(dtype=dtypes[0]),
-            ScalarSpec(dtype=dtypes[1])
-        ]
+        return [ScalarSpec(dtype=dtypes[0]), ScalarSpec(dtype=dtypes[1])]
 
-    def codegen(self, output_name: str, input_names: List[str], output_spec: Spec) -> str:
+    def codegen(
+        self, output_name: str, input_names: list[str], output_spec: Spec
+    ) -> str:
         """Generate code for scalar multiplication operation."""
         if len(input_names) != 2:
             raise ValueError("ScalarMultiplyOperator requires exactly two inputs")

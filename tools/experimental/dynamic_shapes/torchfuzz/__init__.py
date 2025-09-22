@@ -1,9 +1,10 @@
 """Torchfuzz package for generating and testing random PyTorch operations."""
 
 # Make key classes available at package level
-from .tensor_fuzzer import TensorSpec, ScalarSpec, Spec
-from .ops_fuzzer import OperationGraph, fuzz_operation_graph, fuzz_spec
-from .operators import get_operator, register_operator, list_operators
+from .operators import get_operator, list_operators, register_operator
+from .ops_fuzzer import fuzz_operation_graph, fuzz_spec, OperationGraph
+from .tensor_fuzzer import ScalarSpec, Spec, TensorSpec
+
 
 __all__ = [
     "TensorSpec",

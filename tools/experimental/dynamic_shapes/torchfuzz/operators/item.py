@@ -1,8 +1,7 @@
 """Item operator implementation."""
 
-from typing import List
 from torchfuzz.operators.base import Operator
-from torchfuzz.tensor_fuzzer import TensorSpec, ScalarSpec, Spec
+from torchfuzz.tensor_fuzzer import ScalarSpec, Spec, TensorSpec
 
 
 class ItemOperator(Operator):
@@ -19,22 +18,20 @@ class ItemOperator(Operator):
         """Item operator does not support variable number of inputs."""
         return False
 
-    def decompose(self, output_spec: Spec, num_inputs: int = 1) -> List[Spec]:
+    def decompose(self, output_spec: Spec, num_inputs: int = 1) -> list[Spec]:
         """Decompose scalar into a single-element tensor for item operation."""
         if not isinstance(output_spec, ScalarSpec):
             raise ValueError("ItemOperator can only produce ScalarSpec outputs")
 
         # Create a tensor spec that can produce a scalar via .item()
         # Use a 1-D tensor with 1 element
-        tensor_spec = TensorSpec(
-            size=(1,),
-            stride=(1,),
-            dtype=output_spec.dtype
-        )
+        tensor_spec = TensorSpec(size=(1,), stride=(1,), dtype=output_spec.dtype)
 
         return [tensor_spec]
 
-    def codegen(self, output_name: str, input_names: List[str], output_spec: Spec) -> str:
+    def codegen(
+        self, output_name: str, input_names: list[str], output_spec: Spec
+    ) -> str:
         """Generate code for item operation."""
         if len(input_names) != 1:
             raise ValueError("ItemOperator requires exactly one input")

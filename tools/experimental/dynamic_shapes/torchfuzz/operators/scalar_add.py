@@ -1,7 +1,7 @@
 """Scalar add operator implementation."""
 
 import random
-from typing import List
+
 from torchfuzz.operators.base import Operator
 from torchfuzz.tensor_fuzzer import ScalarSpec, Spec
 
@@ -20,7 +20,7 @@ class ScalarAddOperator(Operator):
         """Scalar add operator does not support variable number of inputs."""
         return False
 
-    def decompose(self, output_spec: Spec, num_inputs: int = 2) -> List[Spec]:
+    def decompose(self, output_spec: Spec, num_inputs: int = 2) -> list[Spec]:
         """Decompose scalar into input scalars for addition with type promotion."""
         if not isinstance(output_spec, ScalarSpec):
             raise ValueError("ScalarAddOperator can only produce ScalarSpec outputs")
@@ -31,12 +31,11 @@ class ScalarAddOperator(Operator):
         supported_types = get_scalar_promotion_pairs(output_spec.dtype)
         dtypes = random.choice(supported_types)
 
-        return [
-            ScalarSpec(dtype=dtypes[0]),
-            ScalarSpec(dtype=dtypes[1])
-        ]
+        return [ScalarSpec(dtype=dtypes[0]), ScalarSpec(dtype=dtypes[1])]
 
-    def codegen(self, output_name: str, input_names: List[str], output_spec: Spec) -> str:
+    def codegen(
+        self, output_name: str, input_names: list[str], output_spec: Spec
+    ) -> str:
         """Generate code for scalar addition operation."""
         if len(input_names) != 2:
             raise ValueError("ScalarAddOperator requires exactly two inputs")

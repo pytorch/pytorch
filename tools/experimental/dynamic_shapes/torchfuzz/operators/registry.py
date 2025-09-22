@@ -1,14 +1,15 @@
 """Operator registry for mapping operation names to operator instances."""
 
-from typing import Dict, Optional
-from torchfuzz.operators.base import Operator
+from typing import Optional
+
 from torchfuzz.operators.add import AddOperator
-from torchfuzz.operators.mul import MulOperator
+from torchfuzz.operators.arg import ArgOperator
+from torchfuzz.operators.base import Operator
+from torchfuzz.operators.constant import ConstantOperator
 from torchfuzz.operators.item import ItemOperator
+from torchfuzz.operators.mul import MulOperator
 from torchfuzz.operators.scalar_add import ScalarAddOperator
 from torchfuzz.operators.scalar_multiply import ScalarMultiplyOperator
-from torchfuzz.operators.constant import ConstantOperator
-from torchfuzz.operators.arg import ArgOperator
 
 
 class OperatorRegistry:
@@ -16,7 +17,7 @@ class OperatorRegistry:
 
     def __init__(self):
         """Initialize the registry with default operators."""
-        self._operators: Dict[str, Operator] = {}
+        self._operators: dict[str, Operator] = {}
         self._register_default_operators()
 
     def _register_default_operators(self):
@@ -37,7 +38,7 @@ class OperatorRegistry:
         """Get an operator by name."""
         return self._operators.get(op_name)
 
-    def list_operators(self) -> Dict[str, Operator]:
+    def list_operators(self) -> dict[str, Operator]:
         """List all registered operators."""
         return self._operators.copy()
 
@@ -56,6 +57,6 @@ def register_operator(operator: Operator):
     _global_registry.register(operator)
 
 
-def list_operators() -> Dict[str, Operator]:
+def list_operators() -> dict[str, Operator]:
     """List all operators in the global registry."""
     return _global_registry.list_operators()

@@ -4,6 +4,9 @@ import random
 from dataclasses import dataclass
 from typing import Optional
 
+import torch
+
+from torchfuzz.operators import get_operator, list_operators
 from torchfuzz.tensor_fuzzer import (
     fuzz_tensor_size,
     fuzz_torch_tensor_type,
@@ -13,9 +16,6 @@ from torchfuzz.tensor_fuzzer import (
     specs_compatible,
     TensorSpec,
 )
-from torchfuzz.operators import list_operators, get_operator
-
-import torch
 
 
 @dataclass
@@ -222,11 +222,15 @@ def fuzz_op(target_spec: Spec, depth, stack_size) -> tuple[str, list[Spec]]:
             if random.random() < 0.8:
                 chosen_op_name, chosen_operator = random.choice(non_leaf_ops)
             else:
-                chosen_op_name, chosen_operator = random.choice(leaf_ops) if leaf_ops else random.choice(non_leaf_ops)
+                chosen_op_name, chosen_operator = (
+                    random.choice(leaf_ops) if leaf_ops else random.choice(non_leaf_ops)
+                )
         else:
             # Normal probability distribution
             all_ops = non_leaf_ops + leaf_ops
-            chosen_op_name, chosen_operator = random.choice(all_ops) if all_ops else ("arg", get_operator("arg"))
+            chosen_op_name, chosen_operator = (
+                random.choice(all_ops) if all_ops else ("arg", get_operator("arg"))
+            )
 
     # Use the operator to decompose the target spec into input specs
     try:
