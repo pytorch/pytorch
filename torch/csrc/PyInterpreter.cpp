@@ -1,5 +1,4 @@
 #include <ATen/core/PythonFallbackKernel.h>
-#include <ATen/core/PythonOpRegistrationTrampoline.h>
 #include <torch/csrc/PyInterpreter.h>
 #include <torch/csrc/THP.h>
 #include <torch/csrc/autograd/generated/VariableType.h>
@@ -157,10 +156,7 @@ class PyInterpreterHolder {
  public:
   PyInterpreterHolder()
       : impl_(new c10::impl::PyInterpreter(
-            ConcretePyInterpreterVTable::instance())) {
-    // Register the single interpreter
-    at::impl::PythonOpRegistrationTrampoline::registerInterpreter(impl_);
-  }
+            ConcretePyInterpreterVTable::instance())) {}
   PyInterpreterHolder(const PyInterpreterHolder&) = delete;
   PyInterpreterHolder(PyInterpreterHolder&&) = delete;
   PyInterpreterHolder& operator=(const PyInterpreterHolder&) = delete;

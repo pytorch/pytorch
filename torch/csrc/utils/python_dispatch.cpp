@@ -8,7 +8,6 @@
 #include <ATen/TensorSubclassLikeUtils.h>
 #include <ATen/autocast_mode.h>
 #include <ATen/core/NestedIntSymNodeImpl.h>
-#include <ATen/core/PythonOpRegistrationTrampoline.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 
 #include <ATen/functorch/BatchedTensorImpl.h>
