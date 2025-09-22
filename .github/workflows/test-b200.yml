@@ -58,9 +58,9 @@ jobs:
       cuda-arch-list: '10.0'
       test-matrix: |
         { include: [
-          { config: "smoke", shard: 1, num_shards: 1, runner: "linux.dgx.b200" },
+          { config: "smoke_b200", shard: 1, num_shards: 1, runner: "linux.dgx.b200" },
         ]}
-      # config: "smoke" maps to test_python_smoke() in .ci/pytorch/test.sh
+      # config: "smoke_b200" maps to test_python_smoke_b200() in .ci/pytorch/test.sh
     secrets: inherit
 
   linux-jammy-cuda12_8-py3_10-gcc11-sm100-test:
