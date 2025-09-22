@@ -354,6 +354,8 @@ class OverlapScheduler:
 
         if is_wait_tensor(node):
             info = self.collective_info[self.wait_to_start[node]]
+            # TODO: we could consider even deferring waits that are not potentially hidden
+            # so as to overlap comm with itself. although exposed comms should bucketed with each other.
             overlappable = info.is_exposed and node in self.potentially_hidden_waits
         else:
             overlappable = self.in_overlappable_collective_unary_chain(node)
