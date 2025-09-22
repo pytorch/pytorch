@@ -283,8 +283,6 @@ if not IS_WINDOWS:
             expected_p = t.data_ptr()
 
             p = libtorch_agnostic.ops.get_any_data_ptr(t, True)
-            # p == 0 would correspond to a dtype case that support is
-            # not implemented in get_any_data_ptr@kernel.cpp
             self.assertEqual(p, expected_p)
 
             p = libtorch_agnostic.ops.get_any_data_ptr(t, False)
