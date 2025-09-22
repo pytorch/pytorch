@@ -8603,13 +8603,8 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         self.assertEqual(seen_frames[0].line, "r, r2 = uwu_inline_me(x, y, z)")
 
     def test_fullgraph_capture(self):
-        from torch._dynamo.convert_frame import (
-            FrameInfo,
-            fullgraph_capture,
-            get_compile_id,
-        )
+        from torch._dynamo.convert_frame import fullgraph_capture
         from torch._dynamo.utils import dynamo_timed, get_metrics_context
-        from torch._guards import compile_context, CompileContext
 
         def foo(x):
             if x.shape[1] >= 3:
@@ -8618,21 +8613,11 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
                 return x - x.shape[0]
 
         x = torch.randn(4, 3)
-        f_locals = {"x": x}
         with (
-            compile_context(CompileContext(get_compile_id({}))),
-            dynamo_timed(""),
             get_metrics_context(),
+            dynamo_timed(""),
         ):
-            capture_output = fullgraph_capture(
-                FrameInfo(
-                    foo.__code__,
-                    foo.__globals__,
-                    f_locals,
-                    builtins,
-                    (),
-                )
-            )
+            capture_output = fullgraph_capture(foo, (x,), {})
             graph_capture_output = capture_output.graph_capture_output
             fn = graph_capture_output.build_guards(foo.__code__)
 
@@ -8666,7 +8651,7 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
                     break
 
             backend_input = capture_output.backend_input
-            self.assertTrue(fn.guard_manager.check(f_locals))
+            self.assertTrue(fn.guard_manager.check({"x": x}))
         import_sources = {
             alias: importlib.import_module(module_name)
             for alias, module_name in graph_capture_output.import_sources.items()
