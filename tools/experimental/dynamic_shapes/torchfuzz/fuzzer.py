@@ -3,9 +3,9 @@ import logging
 import random
 from typing import Any, Optional, Union
 
-from codegen import convert_stack_to_python_code, execute_python_code
-from ops_fuzzer import fuzz_operation_stack, fuzz_spec
-from visualize_stack import visualize_operation_stack
+from codegen import convert_graph_to_python_code, execute_python_code
+from ops_fuzzer import fuzz_operation_graph, fuzz_spec
+from visualize_graph import visualize_operation_graph
 
 import torch
 
@@ -40,10 +40,10 @@ def fuzz_and_execute(
     if seed is None:
         seed = random.randint(0, 2**31 - 1)
 
-    # Generate max_depth if not provided (range 1-10)
+    # Generate max_depth if not provided (range 3-12)
     if max_depth is None:
         random.seed(seed + 999)  # Use seed offset for consistent depth selection
-        max_depth = random.randint(1, 20)
+        max_depth = random.randint(3, 12)
     else:
         # Clamp max_depth to valid range
         max_depth = max(1, max_depth)
@@ -102,9 +102,8 @@ def fuzz_and_execute(
                     )
 
             # Generate visualization in the iteration folder
-
-            visualize_operation_stack(
-                operation_stack, "Operation Stack", iteration_folder
+            visualize_operation_graph(
+                operation_graph, "Operation Graph", iteration_folder
             )
 
         if python_code:
@@ -130,22 +129,14 @@ def fuzz_and_execute(
             "   Completed in %.3fs - %s", time.time() - start_time, target_spec
         )
 
-        logger.debug("⏱️  Step 2: Generating operation stack...")
+        logger.debug("⏱️  Step 2: Generating operation graph...")
         start_time = time.time()
-        operation_stack = fuzz_operation_stack(
+        operation_graph = fuzz_operation_graph(
             target_spec, max_depth=max_depth, seed=seed
         )
-        logger.debug(
-            "   Completed in %.3fs - %d operations",
-            time.time() - start_time,
-            len(operation_stack),
-        )
-
         logger.debug("⏱️  Step 3: Converting to Python code...")
         start_time = time.time()
-        python_code = convert_stack_to_python_code(
-            operation_stack, target_spec, seed=seed
-        )
+        python_code = convert_graph_to_python_code(operation_graph, seed=seed)
         logger.debug(
             "   Completed in %.3fs - %d chars",
             time.time() - start_time,

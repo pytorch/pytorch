@@ -260,7 +260,8 @@ PyObject* THPVariable_Wrap(const at::TensorBase& var) {
   }
 
   std::optional<PyObject*> mb_obj =
-      var.unsafeGetTensorImpl()->pyobj_slot()->check_pyobj();
+      var.unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
+          /*ignore_hermetic_tls=*/false);
   if (mb_obj.has_value()) {
     auto obj = *mb_obj;
     if (obj) {
@@ -323,8 +324,8 @@ static bool isResurrectable(THPVariable* self) {
     return false;
   }
   // Check if this is hermetic. If it is, no resurrection.
-  if (tensor.unsafeGetTensorImpl()->pyobj_slot()->check_pyobj() !=
-      (PyObject*)self) {
+  if (tensor.unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
+          /*ignore_hermetic_tls=*/false) != (PyObject*)self) {
     return false;
   }
   return true;
@@ -349,7 +350,8 @@ static bool THPVariable_tryResurrect(THPVariable* self) {
       !tensor.unsafeGetTensorImpl()->pyobj_slot()->owns_pyobj());
 
   c10::TensorImpl* tensor_impl = tensor.unsafeGetTensorImpl();
-  auto maybe_pyobj = tensor_impl->pyobj_slot()->check_pyobj();
+  auto maybe_pyobj = tensor_impl->pyobj_slot()->check_pyobj(
+      /*ignore_hermetic_tls=*/false);
 
   TORCH_INTERNAL_ASSERT(
       maybe_pyobj.has_value(),
@@ -2215,8 +2217,8 @@ static int THPVariable_subclass_clear(THPVariable* self) {
     //        because Tensor asked us to (it's already destructing).
 
     if (!self->cdata.unsafeIsBorrowed() &&
-        tensor.unsafeGetTensorImpl()->pyobj_slot()->check_pyobj() ==
-            (PyObject*)self) {
+        tensor.unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
+            /*ignore_hermetic_tls=*/false) == (PyObject*)self) {
       // TODO: empirically, on OS X this assert appears to be untrue
       // In test_py_tensors_multi_async_call - ProcessGroupRpcTestWithSpawn
       // distributed/rpc/test_process_group_agent.py
@@ -2402,7 +2404,8 @@ static PyObject* THPVariable_NewWithVar(
 
   // This function overwrite the Tensor's pyobj field without extra checks
   // Make sure it is not set otherwise we would leak memory
-  auto mb_obj = _var.unsafeGetTensorImpl()->pyobj_slot()->check_pyobj();
+  auto mb_obj = _var.unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
+      /*ignore_hermetic_tls=*/false);
 
   // Under some circumstances, we may attempt to create a new Python
   // object for a variable that already has a Python object.  The most common
