@@ -25,8 +25,8 @@
 
 // This file contains functorch's Python bindings.
 
-TORCH_MAKE_PYBIND_ENUM_FASTER(TransformType)
-TORCH_MAKE_PYBIND_ENUM_FASTER(RandomnessType)
+TORCH_MAKE_PYBIND_ENUM_FASTER(at::functorch::TransformType)
+TORCH_MAKE_PYBIND_ENUM_FASTER(at::functorch::RandomnessType)
 
 namespace torch::functorch::impl {
 
