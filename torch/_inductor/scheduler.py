@@ -2203,6 +2203,7 @@ def pick_loop_order(
         order.sort(key=index_cmp)
     return order
 
+
 def replace_operation_buffer(
     orig_node: ir.MultiTemplateBuffer, new_node: ir.OperationBuffer
 ) -> None:
@@ -2359,6 +2360,11 @@ class Scheduler:
         self.logged_slow_fusion = OrderedSet[tuple[str, str]]()
         if config._pre_fusion_custom_pass is not None:
             self.nodes = config._pre_fusion_custom_pass(self.nodes)
+
+        if config.distributed_autotune:
+            from . import distributed_autotune
+
+            distributed_autotune.schedule(self)
 
         self.nodes = self.fuse_nodes(self.nodes)
         if config._post_fusion_custom_pass is not None:
