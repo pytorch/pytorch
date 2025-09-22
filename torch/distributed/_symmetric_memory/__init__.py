@@ -322,6 +322,7 @@ def _pipelined_produce_and_all2all(
     chunk_producer: Callable[[int, torch.Tensor], None],
     output: torch.Tensor,
     group_name: str,
+    out_chunk_dim=0,
 ) -> None:
     """
     Perform the following logic with micro-pipelined computation and
@@ -333,7 +334,9 @@ def _pipelined_produce_and_all2all(
         ]
         dist.all_to_all_single(output=output, input=torch.cat(chunks))
     """
-    out_chunks = output.chunk(c10d._get_group_size_by_name(group_name))
+    out_chunks = output.chunk(
+        c10d._get_group_size_by_name(group_name), dim=out_chunk_dim
+    )
     p2p_workspace_size_req = out_chunks[0].numel() * out_chunks[0].element_size() * 2
     symm_mem = get_symm_mem_workspace(group_name, min_size=p2p_workspace_size_req)
     group_size = symm_mem.world_size
@@ -1075,32 +1078,34 @@ def _fused_matmul_reduce_scatter_impl(
     out_shape[scatter_dim] //= group.size()
 
     if scatter_dim == A.ndim - 1:
-        Bt = B.t()
-        Bt_shards = Bt.chunk(group.size())
-        x = A.flatten(0, -2)
+        B_shards = B.chunk(group.size(), dim=B.ndim - 1)
+        A_flat = A.flatten(0, -2)
 
         def _chunk_producer(rank: int, out: torch.Tensor) -> None:
-            mm_out_op(A, Bt_shards[rank].t(), **kwargs, out=out)
+            mm_out_op(A_flat, B_shards[rank], **kwargs, out=out)
 
-        leading_dims = [group.size()] + list(x.shape[:-1])
+        leading_dims = list(A.shape[:-1])
 
-        stacked_partials = x.new_empty(
-            x.shape[0], B.shape[1], dtype=out_dtype or A.dtype
+        stacked_partials = torch.empty_strided(
+            (A_flat.shape[0], B.shape[1]),
+            (1, A_flat.shape[0]),
+            dtype=out_dtype or A.dtype,
+            device=A.device,
         )
 
         _pipelined_produce_and_all2all(
             _chunk_producer,
             stacked_partials,
             group_name,
+            out_chunk_dim=1,
         )
 
-        # Ensures that the transpose and reduction produce contiguous result
-        # in a single reduction kernel.
-        stacked_partials_view = stacked_partials.view(*leading_dims, -1)
-        stacked_partials_view = stacked_partials_view.movedim(0, scatter_dim)
+        stacked_partials_view = stacked_partials.reshape(
+            *leading_dims, group.size(), -1
+        )
         return reduce_fn(
             stacked_partials_view,
-            dim=scatter_dim,
+            dim=-2,
         )
 
     # Move the scatter_dim to the front and flatten the tensor into a 2D matrix
