@@ -529,7 +529,11 @@ def in_kernel_invocation_manager(
     # See: note [Fake Tensor Dispatch Keys]
     prev_in_kernel = fake_mode.in_kernel_invocation
     meta_in_tls = torch._C._meta_in_tls_dispatch_include()
-    assert meta_in_tls == prev_in_kernel, f"{meta_in_tls}, {prev_in_kernel}"
+    try:
+        assert meta_in_tls == prev_in_kernel, f"{meta_in_tls}, {prev_in_kernel}"
+    except:
+        breakpoint()
+
 
     with torch._C._DisableTorchDispatch():
         fake_mode.in_kernel_invocation = True
