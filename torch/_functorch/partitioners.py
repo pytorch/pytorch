@@ -9,6 +9,7 @@ import math
 import operator
 import os
 import os.path
+import re
 from collections import defaultdict
 from dataclasses import dataclass, replace
 from typing import Any, Callable, Optional, TYPE_CHECKING, Union
@@ -341,6 +342,7 @@ def calculate_quantization_scaling(
     node: torch.fx.Node,
     max: float = 57344.0,
     min: float = 1e-12,
+    position: int = 0,
 ):
     with graph.inserting_after(node):
         abs_node = graph.call_function(
@@ -404,7 +406,7 @@ def calculate_quantization_scaling(
         scale_node = graph.call_function(
             torch.ops.prims.convert_element_type.default,
             args=(mul_node, torch.float32),
-            name="fp8_scale_" + str(node.name),
+            name=f"fp8_scale_pos_{position}_{node.name}",
         )
         scale_node.meta["val"] = torch.ops.prims.convert_element_type.default(
             mul_node.meta["val"], torch.float32
@@ -420,6 +422,7 @@ def perform_quantization(
     quant_type: torch.dtype,
     clamp_min: float,
     clamp_max: float,
+    position: int,
 ) -> torch.fx.Node:
     with graph.inserting_after(scale_node):
         target_node_32 = graph.call_function(
@@ -469,7 +472,7 @@ def perform_quantization(
         quant_activation_node = graph.call_function(
             torch.ops.prims.convert_element_type.default,
             args=(clamp_max_scaled_node, quant_type),
-            name="fp8_quant_" + str(node.name),
+            name=f"fp8_quant_pos_{position}_{node.name}",
         )
         quant_activation_node.meta["val"] = (
             torch.ops.prims.convert_element_type.default(
@@ -560,9 +563,9 @@ def quantize_activation_fw(graph: torch.fx.Graph) -> None:
     fwd_outputs = output.args[0]
     quant_type = get_quant_type()
     clamp_min, clamp_max = calculate_range(quant_type)
-    node_to_quant = dict()
+    position_to_quant = dict()
     tensor_scale_nodes, sym_scale_nodes = [], []
-    for node in fwd_outputs:
+    for position, node in enumerate(fwd_outputs):
         # check if the activation node is the node saved for quantization
         if node.meta.get("saved_for_quantization", False):
             # case: use scaling
@@ -571,11 +574,12 @@ def quantize_activation_fw(graph: torch.fx.Graph) -> None:
             ].get("use_scaling", True):
                 # calculating the scale
                 scale_node = calculate_quantization_scaling(
-                    graph, node, clamp_max, 1e-12
+                    graph, node, clamp_max, 1e-12, position
                 )
+
                 # converting to fp8
                 quant_node = perform_quantization(
-                    graph, node, scale_node, quant_type, clamp_min, clamp_max
+                    graph, node, scale_node, quant_type, clamp_min, clamp_max, position
                 )
                 if not is_sym_node(scale_node):
                     tensor_scale_nodes.append(scale_node)
@@ -587,7 +591,7 @@ def quantize_activation_fw(graph: torch.fx.Graph) -> None:
                     quant_node = graph.call_function(
                         torch.ops.prims.convert_element_type.default,
                         args=(node, quant_type),
-                        name="fp8_quant_" + str(node.name),
+                        name=f"fp8_quant_pos_{position}_{node.name}",
                     )
                     quant_node.meta["val"] = (
                         torch.ops.prims.convert_element_type.default(
@@ -597,10 +601,14 @@ def quantize_activation_fw(graph: torch.fx.Graph) -> None:
                     quant_node.meta["tensor_meta"] = extract_tensor_metadata(
                         quant_node.meta["val"]
                     )
-            node_to_quant[node] = quant_node
+
+            position_to_quant[position] = quant_node
+
+    # Use position-based lookup for building output
     # only update the return node args, and remain all other users unchanged
     output_updated_args = [
-        node_to_quant[node] if node in node_to_quant else node for node in fwd_outputs
+        position_to_quant[i] if i in position_to_quant else node
+        for i, node in enumerate(fwd_outputs)
     ]
     # add the scale nodes to the output find the first sym_node in the output
     idx = find_first_sym_node(output_updated_args)
@@ -738,7 +746,9 @@ def perform_fp8_activation_quantization(
     # update the corresponding bwd_inputs due to the fwd_outputs quantization
     for fwd_node in quant_fwd_module_outputs:
         if "fp8_quant_" in fwd_node.name:
-            bwd_input = bwd_module_inputs[fwd_node.name.replace("fp8_quant_", "")]
+            bwd_input = bwd_module_inputs[
+                re.sub(r"^fp8_quant_pos_\d+_", "", fwd_node.name)
+            ]
             with bwd_module.graph.inserting_after(bwd_input):
                 quant_bwd_input = bwd_module.graph.placeholder(name=fwd_node.name)
             dequant_type = bwd_input.meta["dequant_type"]
