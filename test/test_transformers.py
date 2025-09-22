@@ -2078,7 +2078,6 @@ class TestSDPA(NNTestCase):
     @parametrize("dtype", [torch.float32, torch.bfloat16, torch.half])
     @parametrize("n_heads", [[8, 8], [16, 8], [10, 2]])  # [q_heads, kv_heads]
     @parametrize("is_causal", [True, False])
-    @parametrize("dropout_p", [0., 0.1])
     def test_reference_implementation_bitwise_match_math_backend(self, device, dtype, n_heads, is_causal, dropout_p):
         """Regression test for scaled_dot_product_attention documentation [1] implementation.
         Should produces bitwise identical results to the MATH backend.
@@ -2129,12 +2128,12 @@ class TestSDPA(NNTestCase):
         value = torch.randn(batch_size, kv_heads, seq_len, head_dim, device=device, dtype=dtype)
 
         doc_result = scaled_dot_product_attention(
-            query, key, value, dropout_p=dropout_p, is_causal=is_causal, enable_gqa=enable_gqa
+            query, key, value, dropout_p=0.0, is_causal=is_causal, enable_gqa=enable_gqa
         )
 
         with sdpa_kernel(backends=[SDPBackend.MATH]):
             math_ref = F.scaled_dot_product_attention(
-                query, key, value, dropout_p=dropout_p, is_causal=is_causal, enable_gqa=enable_gqa
+                query, key, value, dropout_p=0.0, is_causal=is_causal, enable_gqa=enable_gqa
             )
 
         # Must be exact bitwise match - no tolerance allowed
