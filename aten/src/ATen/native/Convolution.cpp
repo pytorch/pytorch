@@ -421,6 +421,16 @@ struct ConvParams {
                         " Consider upgrading cuDNN and/or enabling the V8 API for better efficiency.");
         return false;
       }
+      // broken on cuDNN 9.8 - 9.10
+      if (cudnn_version >= 90800 && cudnn_version < 91300) {
+        if (input.scalar_type() == at::kBFloat16 || input.scalar_type() == at::kHalf) {
+          for (auto it = weight.sizes().begin(); it != weight.sizes().end(); it++) {
+            if (*it != 1) {
+              return false;
+            }
+          }
+        }
+      }
     }
     if (!input.is_cuda() || !cudnn_enabled) {
       return false;
