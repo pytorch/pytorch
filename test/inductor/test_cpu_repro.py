@@ -4719,7 +4719,7 @@ class CPUReproTests(TestCase):
             self.assertEqual(expected, actual)
             # 1 generated vec kernel
             self.assertEqual(metrics.generated_cpp_vec_kernel_count, 1)
-            # check that there are main/tail loop vectorization
+            # Check that both main and tail loops are vectorized
             FileCheck().check_count(
                 "at::vec::VectorizedN<double,2>::loadu", 2, exactly=True
             ).run(code)
@@ -4744,7 +4744,7 @@ class CPUReproTests(TestCase):
             self.assertEqual(expected, actual)
             # 1 generated vec kernel
             self.assertEqual(metrics.generated_cpp_vec_kernel_count, 1)
-            # check that there are main/tail loop vectorization
+            # Check that both main and tail loops are vectorized
             FileCheck().check_count(
                 "at::vec::VectorizedN<double,2>::loadu", 2, exactly=True
             ).run(code)
@@ -4769,7 +4769,7 @@ class CPUReproTests(TestCase):
             self.assertEqual(expected, actual)
             # 1 generated vec kernel
             self.assertEqual(metrics.generated_cpp_vec_kernel_count, 1)
-            # check that there are main/tail loop vectorization
+            # Check that both main and tail loops are vectorized
             FileCheck().check_count(
                 "at::vec::convert<double,2,float,1>", 2, exactly=True
             ).run(code)
@@ -4794,7 +4794,7 @@ class CPUReproTests(TestCase):
             self.assertEqual(expected, actual)
             # 1 generated vec kernel
             self.assertEqual(metrics.generated_cpp_vec_kernel_count, 1)
-            # check that there are main/tail loop vectorization
+            # Check that both main and tail loops are vectorized
             FileCheck().check_count(
                 "at::vec::convert<float,1,double,2>", 2, exactly=True
             ).run(code)
