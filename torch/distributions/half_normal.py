@@ -1,12 +1,13 @@
+# mypy: allow-untyped-defs
 import math
-from typing import cast, Optional, Union
+from typing import Optional, Union
 
+import torch
 from torch import inf, Tensor
 from torch.distributions import constraints
 from torch.distributions.normal import Normal
 from torch.distributions.transformed_distribution import TransformedDistribution
 from torch.distributions.transforms import AbsTransform
-from torch.types import _size
 
 
 __all__ = ["HalfNormal"]
@@ -43,9 +44,7 @@ class HalfNormal(TransformedDistribution):
         base_dist = Normal(0, scale, validate_args=False)
         super().__init__(base_dist, AbsTransform(), validate_args=validate_args)
 
-    def expand(
-        self, batch_shape: _size, _instance: Optional["HalfNormal"] = None
-    ) -> "HalfNormal":
+    def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(HalfNormal, _instance)
         return super().expand(batch_shape, _instance=new)
 
@@ -55,34 +54,30 @@ class HalfNormal(TransformedDistribution):
 
     @property
     def mean(self) -> Tensor:
-        # Cast the result to ensure mypy sees it as Tensor
-        return cast(Tensor, self.scale * math.sqrt(2 / math.pi))
+        return self.scale * math.sqrt(2 / math.pi)
 
     @property
     def mode(self) -> Tensor:
-        # Cast the result to ensure mypy sees it as Tensor
-        return cast(Tensor, self.scale * 0.0)
+        return torch.zeros_like(self.scale)
 
     @property
     def variance(self) -> Tensor:
         return self.scale.pow(2) * (1 - 2 / math.pi)
 
-    def log_prob(self, value: Tensor) -> Tensor:
+    def log_prob(self, value):
         if self._validate_args:
             self._validate_sample(value)
         log_prob = self.base_dist.log_prob(value) + math.log(2)
-        # Conditional assignment equivalent to torch.where
-        mask = value >= 0
-        log_prob = log_prob * mask + (-inf) * (~mask)
+        log_prob = torch.where(value >= 0, log_prob, -inf)
         return log_prob
 
-    def cdf(self, value: Tensor) -> Tensor:
+    def cdf(self, value):
         if self._validate_args:
             self._validate_sample(value)
         return 2 * self.base_dist.cdf(value) - 1
 
-    def icdf(self, prob: Tensor) -> Tensor:
+    def icdf(self, prob):
         return self.base_dist.icdf((prob + 1) / 2)
 
-    def entropy(self) -> Tensor:
+    def entropy(self):
         return self.base_dist.entropy() - math.log(2)
