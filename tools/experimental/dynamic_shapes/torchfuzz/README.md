@@ -62,7 +62,7 @@ arg_1 = fuzz_tensor_simple((2, 3), (3, 1), torch.float32, seed=10001)
 ```
 
 ## Graph Visualization
-![Operation Graph](operation_graph.png)
+![Operation Graph](image.png)
 
 ## Quick Start
 

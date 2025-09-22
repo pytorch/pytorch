@@ -2,7 +2,7 @@
 
 import random
 from dataclasses import dataclass
-from typing import Dict, List, Optional
+from typing import Optional
 
 from tensor_fuzzer import (
     fuzz_tensor_size,
@@ -64,7 +64,7 @@ class OperationGraph:
         target_spec: The specification that the root node should produce
     """
 
-    nodes: Dict[str, OperationNode]
+    nodes: dict[str, OperationNode]
     root_node_id: str  # The output node - produces the final result of the graph
     target_spec: Spec
 
@@ -73,7 +73,7 @@ class OperationGraph:
         if self.root_node_id not in self.nodes:
             raise ValueError(f"Root node {self.root_node_id} not found in nodes")
 
-    def get_topological_order(self) -> List[str]:
+    def get_topological_order(self) -> list[str]:
         """
         Get nodes in topological order (dependencies before dependents).
 
@@ -109,11 +109,11 @@ class OperationGraph:
 
         return result
 
-    def get_leaf_nodes(self) -> List[str]:
+    def get_leaf_nodes(self) -> list[str]:
         """Get all leaf nodes (nodes with no inputs)."""
         return [node_id for node_id, node in self.nodes.items() if not node.input_nodes]
 
-    def get_node_dependencies(self, node_id: str) -> List[str]:
+    def get_node_dependencies(self, node_id: str) -> list[str]:
         """Get all nodes that this node depends on (transitive closure)."""
         visited = set()
         dependencies = []
@@ -470,7 +470,7 @@ def fuzz_operation_graph(
     node_counter = 0
 
     # Dictionary to store all nodes: node_id -> OperationNode
-    nodes: Dict[str, OperationNode] = {}
+    nodes: dict[str, OperationNode] = {}
 
     def _generate_node(spec: Spec, depth: int, stack_size: int = 0) -> str:
         """
