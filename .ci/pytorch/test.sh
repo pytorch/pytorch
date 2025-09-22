@@ -1620,15 +1620,10 @@ test_operator_microbenchmark() {
   TEST_DIR=$(pwd)
 
   pip_uninstall torch torchvision torchaudio
-  pip_install torch==2.8.0 torchvision torchaudio ninja --force-reinstall
+  pip install torch==2.9.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/test/cu128 --force-reinstall
+  pip install ninja --force-reinstall
   cd benchmarks/operator_benchmark/pt_extension
   python -m pip install .
-
-  # ### Perf benchmark 2.8 baseline
-  # pip_uninstall torch torchvision torchaudio
-  # pip show torch
-  # pip uninstall -y torch
-  # pip install torch==2.8.0 --force-reinstall
 
   cd "${TEST_DIR}"/benchmarks/operator_benchmark
   for OP_BENCHMARK_TESTS in matmul mm add bmm; do
