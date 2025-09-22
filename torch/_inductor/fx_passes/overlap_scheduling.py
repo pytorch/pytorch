@@ -548,6 +548,8 @@ class OverlapScheduler:
     def reorder_graph(self) -> None:
         output_node = self.graph.output_node()
         for node in self.scheduled:
+            if node.op == "placeholder":
+                continue
             output_node.prepend(node)
         self.graph.lint()
 
