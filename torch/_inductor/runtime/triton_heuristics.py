@@ -911,11 +911,7 @@ class CachingAutotuner(KernelInterface):
             return {}
 
         copies = {}
-        try:
-            budget = torch.cuda.max_memory_allocated() - torch.cuda.memory_allocated()
-        except RuntimeError:
-            # Possibly a custom CUDA allocator, see https://github.com/pytorch/pytorch/issues/163257
-            return {}
+        budget = torch.cuda.max_memory_allocated() - torch.cuda.memory_allocated()
 
         def maybe_copy(name, arg):
             if name in self.mutated_arg_names and arg.is_cuda:
