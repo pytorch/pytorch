@@ -1215,9 +1215,9 @@ def scaled_dot_product_fused_attention_overrideable_backward_strategy(
     # This strategy is based on scaled_dot_product_flash_attention_backward_strategy
     mesh = op_schema.get_mesh_from_args(validate=False)
 
-    assert len(op_schema.args_schema) >= 15
-    has_attn_bias = op_schema.args_schema[8] is not None
-    has_scale = len(op_schema.args_schema) >= 16 and False
+    assert len(op_schema.args_schema) >= 16
+    has_attn_bias = op_schema.args_schema[4] is not None
+    has_scale = len(op_schema.args_schema) >= 17 and op_schema.args_schema[16] is not None
 
     query_strategy = op_schema.args_schema[1]
     assert isinstance(query_strategy, OpStrategy)
@@ -1227,18 +1227,31 @@ def scaled_dot_product_fused_attention_overrideable_backward_strategy(
 
     # case 1: we can always accept full replication for both inputs and outputs
     all_replicate_out: PlacementList = [
-        Replicate(),  # dq
-        Replicate(),  # dk
-        Replicate(),  # dv
+        Replicate(),  # grad_query
+        Replicate(),  # grad_key
+        Replicate(),  # grad_value
+        Replicate() if has_attn_bias else None,  # grad_attn_bias
     ]
-    all_replicate_inp: PlacementList = [Replicate()] * 6
-    all_replicate_inp += [
-        Replicate()
-    ] * 2  # philox_seed, philox_offset is casted to Replicate() in DTensor
-    all_replicate_inp += [Replicate() if has_attn_bias else None]
-    all_replicate_inp += [None] * 6
+    all_replicate_inp: PlacementList = [
+        Replicate(),  # grad_out
+        Replicate(),  # query
+        Replicate(),  # key
+        Replicate(),  # value
+        Replicate() if has_attn_bias else None,  # attn_bias
+        None,  # grad_input_mask
+        Replicate(),  # out
+        Replicate(),  # logsumexp
+        None,  # cum_seq_q
+        None,  # cum_seq_k
+        None,  # max_q
+        None,  # max_k
+        None,  # dropout_p
+        None,  # is_causal
+        Replicate(),  # philox_seed
+        Replicate(),  # philox_offset
+    ]
     if has_scale:
-        all_replicate_inp.append(None)
+        all_replicate_inp.append(None)  # scale
 
     all_replicate: PlacementList = all_replicate_out + all_replicate_inp
     single_mesh_dim_strategies.append(all_replicate)
@@ -1249,31 +1262,63 @@ def scaled_dot_product_fused_attention_overrideable_backward_strategy(
     output_sharding = Shard(1)  # num head dim
     logsumexp_sharding = Shard(1)  # num head dim
 
-    num_heads_dim_sharding_out: PlacementList = [qkv_sharding] * 3
-    num_heads_dim_sharding_inp: PlacementList = [qkv_sharding] * 4
-    num_heads_dim_sharding_inp += [output_sharding]
-    num_heads_dim_sharding_inp += [logsumexp_sharding]
-    num_heads_dim_sharding_inp += [
-        Replicate()
-    ] * 2  # philox_seed, philox_offset is casted to Replicate() in DTensor
-    num_heads_dim_sharding_inp += [Shard(1) if has_attn_bias else None]
-    num_heads_dim_sharding_inp += [None] * 6
+    num_heads_dim_sharding_out: PlacementList = [
+        qkv_sharding,  # grad_query
+        qkv_sharding,  # grad_key
+        qkv_sharding,  # grad_value
+        Shard(1) if has_attn_bias else None,  # grad_attn_bias
+    ]
+    num_heads_dim_sharding_inp: PlacementList = [
+        qkv_sharding,  # grad_out
+        qkv_sharding,  # query
+        qkv_sharding,  # key
+        qkv_sharding,  # value
+        Shard(1) if has_attn_bias else None,  # attn_bias
+        None,  # grad_input_mask
+        output_sharding,  # out
+        logsumexp_sharding,  # logsumexp
+        None,  # cum_seq_q
+        None,  # cum_seq_k
+        None,  # max_q
+        None,  # max_k
+        None,  # dropout_p
+        None,  # is_causal
+        Replicate(),  # philox_seed
+        Replicate(),  # philox_offset
+    ]
     if has_scale:
-        num_heads_dim_sharding_inp.append(None)
+        num_heads_dim_sharding_inp.append(None)  # scale
 
     num_heads_dim_sharding = num_heads_dim_sharding_out + num_heads_dim_sharding_inp
     single_mesh_dim_strategies.append(num_heads_dim_sharding)
 
     # case 3: Context Parallelism which shards on the sequence dim
-    context_parallel_sharding_out: PlacementList = [Shard(2)] * 3
-    context_parallel_sharding_inp: PlacementList = [Shard(2)] * 6
-    context_parallel_sharding_inp += [
-        Replicate()
-    ] * 2  # philox_seed, philox_offset is casted to Replicate() in DTensor
-    context_parallel_sharding_inp += [Shard(2) if has_attn_bias else None]
-    context_parallel_sharding_inp += [None] * 6
+    context_parallel_sharding_out: PlacementList = [
+        Shard(2),  # grad_query
+        Shard(2),  # grad_key
+        Shard(2),  # grad_value
+        Shard(1) if has_attn_bias else None,  # grad_attn_bias - note: heads dim for bias
+    ]
+    context_parallel_sharding_inp: PlacementList = [
+        Shard(2),  # grad_out
+        Shard(2),  # query
+        Shard(2),  # key
+        Shard(2),  # value
+        Shard(1) if has_attn_bias else None,  # attn_bias - note: heads dim for bias
+        None,  # grad_input_mask
+        Shard(2),  # out
+        Shard(2),  # logsumexp
+        None,  # cum_seq_q
+        None,  # cum_seq_k
+        None,  # max_q
+        None,  # max_k
+        None,  # dropout_p
+        None,  # is_causal
+        Replicate(),  # philox_seed
+        Replicate(),  # philox_offset
+    ]
     if has_scale:
-        context_parallel_sharding_inp.append(None)
+        context_parallel_sharding_inp.append(None)  # scale
 
     context_parallel_sharding = (
         context_parallel_sharding_out + context_parallel_sharding_inp
@@ -1286,21 +1331,36 @@ def scaled_dot_product_fused_attention_overrideable_backward_strategy(
     output_sharding = Shard(0)
     logsumexp_sharding = Shard(0)
 
-    batch_dim_sharding_out: PlacementList = [qkv_sharding] * 3
-    batch_dim_sharding_inp: PlacementList = [qkv_sharding] * 4
-    batch_dim_sharding_inp += [output_sharding]
-    batch_dim_sharding_inp += [logsumexp_sharding]
-    batch_dim_sharding_inp += [
-        Replicate()
-    ] * 2  # philox_seed, philox_offset is casted to Replicate() in DTensor
-    batch_dim_sharding_inp += [Shard(0) if has_attn_bias else None]
-    batch_dim_sharding_inp += [None] * 6
+    batch_dim_sharding_out: PlacementList = [
+        qkv_sharding,  # grad_query
+        qkv_sharding,  # grad_key
+        qkv_sharding,  # grad_value
+        Shard(0) if has_attn_bias else None,  # grad_attn_bias
+    ]
+    batch_dim_sharding_inp: PlacementList = [
+        qkv_sharding,  # grad_out
+        qkv_sharding,  # query
+        qkv_sharding,  # key
+        qkv_sharding,  # value
+        Shard(0) if has_attn_bias else None,  # attn_bias
+        None,  # grad_input_mask
+        output_sharding,  # out
+        logsumexp_sharding,  # logsumexp
+        None,  # cum_seq_q
+        None,  # cum_seq_k
+        None,  # max_q
+        None,  # max_k
+        None,  # dropout_p
+        None,  # is_causal
+        Replicate(),  # philox_seed
+        Replicate(),  # philox_offset
+    ]
     if has_scale:
-        batch_dim_sharding_inp.append(None)
+        batch_dim_sharding_inp.append(None)  # scale
 
     batch_dim_sharding = batch_dim_sharding_out + batch_dim_sharding_inp
     single_mesh_dim_strategies.append(batch_dim_sharding)
 
     return expand_to_full_mesh_op_strategy(
-        mesh, op_schema, single_mesh_dim_strategies, input_index=3
+        mesh, op_schema, single_mesh_dim_strategies, input_index=4
     )
