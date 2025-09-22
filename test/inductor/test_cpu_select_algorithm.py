@@ -2897,7 +2897,9 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @dtypes(torch.bfloat16, torch.half)
     @torch.fx.experimental._config.patch(use_duck_shape=False)
     @torch._dynamo.config.patch(specialize_float=True)
-    def test_linear_with_gelu_erf_u20(self,batch_size,in_features,out_features,bias, dtype):
+    def test_linear_with_gelu_erf_u20(
+        self, batch_size, in_features, out_features, bias, dtype
+    ):
 
         class M(torch.nn.Module):
             def __init__(self, bias):
@@ -2912,7 +2914,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         v = torch.randn(batch_size, in_features).to(dtype=dtype)
         mod = M(bias=bias).to(dtype=dtype).eval()
         with verify(dtype) as (atol, rtol):
-            model=self.common(mod, (v,), atol=atol, rtol=rtol)
+            model = self.common(mod, (v,), atol=atol, rtol=rtol)
             self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
             _, code = run_and_get_code(model, v)
             self.assertRegex("".join(code), "erf_u20")

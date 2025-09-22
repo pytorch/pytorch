@@ -25,6 +25,207 @@ class Vectorized<float> {
  private:
   static constexpr __m512i zero_vec{0, 0, 0, 0, 0, 0, 0, 0};
 
+  static constexpr __at_align__ uint32_t gelu_erf_minmax_polynomial[6 * 32] = {
+      // coefficients of degree  0
+      0xa6f2cb94, // -0x1.e59728p-50
+      0x32827792, // 0x1.04ef24p-26
+      0x3381cc0c, // 0x1.039818p-24
+      0x34523d4a, // 0x1.a47a94p-23
+      0x351ac44d, // 0x1.35889ap-21
+      0x35f36d88, // 0x1.e6db1p-20
+      0x36ee8229, // 0x1.dd0452p-18
+      0x37b8a3bb, // 0x1.714776p-16
+      0x3867a213, // 0x1.cf4426p-15
+      0x3940033b, // 0x1.800676p-13
+      0x3a2a5a1d, // 0x1.54b43ap-11
+      0x3ae35863, // 0x1.c6b0c6p-10
+      0x3b7828f2, // 0x1.f051e4p-9
+      0x3c08b14b, // 0x1.116296p-7
+      0x3c515ed3, // 0x1.a2bda6p-7
+      0xbb503236, // -0x1.a0646cp-9
+      0xbd8d8e5e, // -0x1.1b1cbcp-4
+      0xbe8abcd9, // -0x1.1579b2p-2
+      0xbf0c19a2, // -0x1.183344p-1
+      0xbeccb328, // -0x1.99665p-2
+      0x3e176ced, // 0x1.2ed9dap-3
+      0x3f470d99, // 0x1.8e1b32p-1
+      0x3f7abb28, // 0x1.f5765p-1
+      0x3f800000, // 0x1p0
+      0x00000000, // 0
+      0x00000000, // 0 padd
+      0x00000000, // 0 padd
+      0x00000000, // 0 padd
+      0x00000000, // 0 padd
+      0x00000000, // 0 padd
+      0x00000000, // 0 padd
+      0x00000000, // 0 padd
+      // coefficients of degree 1
+      0x3f4c422a, // 0x1.988454p-1
+      0x3f4c421f, // 0x1.98843ep-1
+      0x3f4c4207, // 0x1.98840ep-1
+      0x3f4c41cb, // 0x1.988396p-1
+      0x3f4c413b, // 0x1.988276p-1
+      0x3f4c3fad, // 0x1.987f5ap-1
+      0x3f4c3a2f, // 0x1.98745ep-1
+      0x3f4c2d40, // 0x1.985a8p-1
+      0x3f4c146a, // 0x1.9828d4p-1
+      0x3f4bc341, // 0x1.978682p-1
+      0x3f4ad08c, // 0x1.95a118p-1
+      0x3f48f8cf, // 0x1.91f19ep-1
+      0x3f45fac7, // 0x1.8bf58ep-1
+      0x3f404e07, // 0x1.809c0ep-1
+      0x3f3b980f, // 0x1.77301ep-1
+      0x3f48dff3, // 0x1.91bfe6p-1
+      0x3f78b21b, // 0x1.f16436p-1
+      0x3fbb0704, // 0x1.760e08p0
+      0x40019c32, // 0x1.033864p1
+      0x3fe536d6, // 0x1.ca6dacp0
+      0x3f81331e, // 0x1.02663cp0
+      0x3e6c8684, // 0x1.d90d08p-3
+      0x3c98f936, // 0x1.31f26cp-6
+      0x00000000, // 0
+      0x3f800000, // 0x1p0
+      0x00000000, // 0 padd
+      0x00000000, // 0 padd
+      0x00000000, // 0 padd
+      0x00000000, // 0 padd
+      0x00000000, // 0 padd
+      0x00000000, // 0 padd
+      0x00000000, // 0 padd
+      // coefficients of degree 2
+      0xb62173f4, // -0x1.42e7e8p-19
+      0x3735e4cf, // 0x1.6bc99ep-17
+      0x37f2ff89, // 0x1.e5ff12p-16
+      0x388c23be, // 0x1.18477cp-14
+      0x3917535c, // 0x1.2ea6b8p-13
+      0x39ab2ab0, // 0x1.56556p-12
+      0x3a60fadb, // 0x1.c1f5b6p-11
+      0x3af9b960, // 0x1.f372cp-10
+      0x3b6e5491, // 0x1.dca922p-9
+      0x3c0a4ec5, // 0x1.149d8ap-7
+      0x3ca5aa8c, // 0x1.4b5518p-6
+      0x3d2138d9, // 0x1.4271b2p-5
+      0x3d8737d4, // 0x1.0e6fa8p-4
+      0x3ddfb660, // 0x1.bf6ccp-4
+      0x3e0f27ab, // 0x1.1e4f56p-3
+      0x3d94004b, // 0x1.280096p-4
+      0xbe0efdeb, // -0x1.1dfbd6p-3
+      0xbf1d96c3, // -0x1.3b2d86p-1
+      0xbf89db58, // -0x1.13b6bp0
+      0xbf6d9897, // -0x1.db312ep-1
+      0xbef69fb8, // -0x1.ed3f7p-2
+      0xbdc4f8a8, // -0x1.89f15p-4
+      0xbbde6422, // -0x1.bcc844p-8
+      0x00000000, // 0
+      0x00000000, // 0
+      0x00000000, // 0 padd
+      0x00000000, // 0 padd
+      0x00000000, // 0 padd
+      0x00000000, // 0 padd
+      0x00000000, // 0 padd
+      0x00000000, // 0 padd
+      0x00000000, // 0 padd
+      // coefficients of degree 3
+      0xbe081a19, // -0x1.103432p-3
+      0xbe084570, // -0x1.108aep-3
+      0xbe08639b, // -0x1.10c736p-3
+      0xbe089837, // -0x1.11306ep-3
+      0xbe08f409, // -0x1.11e812p-3
+      0xbe09ab95, // -0x1.13572ap-3
+      0xbe0b66d0, // -0x1.16cdap-3
+      0xbe0e400a, // -0x1.1c8014p-3
+      0xbe124df8, // -0x1.249bfp-3
+      0xbe1bde02, // -0x1.37bc04p-3
+      0xbe2f19c9, // -0x1.5e3392p-3
+      0xbe4931bf, // -0x1.92637ep-3
+      0xbe685fbc, // -0x1.d0bf78p-3
+      0xbe89c95f, // -0x1.1392bep-2
+      0xbe96cbca, // -0x1.2d9794p-2
+      0xbe8044aa, // -0x1.008954p-2
+      0xbe0550f2, // -0x1.0aa1e4p-3
+      0x3dcfd6a1, // 0x1.9fad42p-4
+      0x3e94c826, // 0x1.29904cp-2
+      0x3e79345f, // 0x1.f268bep-3
+      0x3decec91, // 0x1.d9d922p-4
+      0x3ca46568, // 0x1.48cadp-6
+      0x3aa1e00a, // 0x1.43c014p-10
+      0x00000000, // 0
+      0x00000000, // 0
+      0x00000000, // 0 padd
+      0x00000000, // 0 padd
+      0x00000000, // 0 padd
+      0x00000000, // 0 padd
+      0x00000000, // 0 padd
+      0x00000000, // 0 padd
+      0x00000000, // 0 padd
+      // coefficients of degree 4
+      0xba3d61db, // -0x1.7ac3b6p-11
+      0x39f097a3, // 0x1.e12f46p-12
+      0x3a5845dc, // 0x1.b08bb8p-11
+      0x3ab1fa35, // 0x1.63f46ap-10
+      0x3b0cefb8, // 0x1.19df7p-9
+      0x3b653ab6, // 0x1.ca756cp-9
+      0x3bcae527, // 0x1.95ca4ep-8
+      0x3c221712, // 0x1.442e24p-7
+      0x3c6c5840, // 0x1.d8b08p-7
+      0x3cc0a703, // 0x1.814e06p-6
+      0x3d1dcc19, // 0x1.3b9832p-5
+      0x3d63656d, // 0x1.c6cadap-5
+      0x3d955907, // 0x1.2ab20ep-4
+      0x3dbf9910, // 0x1.7f322p-4
+      0x3dd53f69, // 0x1.aa7ed2p-4
+      0x3db7dcef, // 0x1.6fb9dep-4
+      0x3d639ebe, // 0x1.c73d7cp-5
+      0xba6ede48, // -0x1.ddbc9p-11
+      0xbd22be69, // -0x1.457cd2p-5
+      0xbd041cf1, // -0x1.0839e2p-5
+      0xbc64f5ab, // -0x1.c9eb56p-7
+      0xbb097a32, // -0x1.12f464p-9
+      0xb8ebf380, // -0x1.d7e7p-14
+      0x00000000, // 0
+      0x00000000, // 0
+      0x00000000, // 0 padd
+      0x00000000, // 0 padd
+      0x00000000, // 0 padd
+      0x00000000, // 0 padd
+      0x00000000, // 0 padd
+      0x00000000, // 0 padd
+      0x00000000, // 0 padd
+      // coefficients of degree 5
+      0x3cb7d80c, // 0x1.6fb018p-6
+      0x3c9b6050, // 0x1.36c0ap-6
+      0x3c978d11, // 0x1.2f1a22p-6
+      0x3c92e850, // 0x1.25d0ap-6
+      0x3c8d058b, // 0x1.1a0b16p-6
+      0x3c848454, // 0x1.0908a8p-6
+      0x3c6cd623, // 0x1.d9ac46p-7
+      0x3c4c824b, // 0x1.990496p-7
+      0x3c2a7935, // 0x1.54f26ap-7
+      0x3be0b390, // 0x1.c1672p-8
+      0x3b0651ac, // 0x1.0ca358p-9
+      0xbb232f53, // -0x1.465ea6p-9
+      0xbbd42fa0, // -0x1.a85f4p-8
+      0xbc2c5366, // -0x1.58a6ccp-7
+      0xbc492c9e, // -0x1.92593cp-7
+      0xbc2a7aa6, // -0x1.54f54cp-7
+      0xbbd55d04, // -0x1.aaba08p-8
+      0xba823a76, // -0x1.0474ecp-10
+      0x3b102aa8, // 0x1.20555p-9
+      0x3ae25a7e, // 0x1.c4b4fcp-10
+      0x3a31f792, // 0x1.63ef24p-11
+      0x38b84375, // 0x1.7086eap-14
+      0x3689bb5a, // 0x1.1376b4p-18
+      0x00000000, // 0
+      0x00000000, // 0
+      0x00000000, // 0 padd
+      0x00000000, // 0 padd
+      0x00000000, // 0 padd
+      0x00000000, // 0 padd
+      0x00000000, // 0 padd
+      0x00000000, // 0 padd
+      0x00000000, // 0 padd
+  };
+
  public:
   __m512 values;
   using value_type = float;
@@ -266,36 +467,52 @@ class Vectorized<float> {
     return Vectorized<float>(Sleef_copysignf16(values, sign));
   }
   Vectorized<float> erf_u20() const {
-    // constants
-    const auto neg_zero_vec = _mm512_set1_ps(-0.f);
-    const auto one_vec = _mm512_set1_ps(1.0f);
-    const auto p = _mm512_set1_ps(0.3275911f);
-    const auto p1 = _mm512_set1_ps(0.254829592f);
-    const auto p2 = _mm512_set1_ps(-0.284496736f);
-    const auto p3 = _mm512_set1_ps(1.421413741f);
-    const auto p4 = _mm512_set1_ps(-1.453152027f);
-    const auto p5 = _mm512_set1_ps(1.061405429f);
-    // sign(x)
-    auto sign_mask = _mm512_and_ps(neg_zero_vec, values);
-    auto abs_vec = _mm512_abs_ps(values);
-    // t = 1 / (p * abs(x) + 1)
-    auto tmp0 = _mm512_fmadd_ps(p, abs_vec, one_vec);
-    auto t = _mm512_div_ps(one_vec, tmp0);
-    // r = p5 * t ^ 4 + p4 * t ^ 3 + p3 * t ^ 2 + p2 * t + p1
-    auto tmp1 = _mm512_fmadd_ps(p5, t, p4);
-    auto tmp2 = _mm512_fmadd_ps(tmp1, t, p3);
-    auto tmp3 = _mm512_fmadd_ps(tmp2, t, p2);
-    auto r = _mm512_fmadd_ps(tmp3, t, p1);
-    // - exp(- x * x)
-    auto pow_2 = _mm512_mul_ps(values, values);
-    auto neg_pow_2 = _mm512_xor_ps(neg_zero_vec, pow_2);
-    // auto tmp4 = exp(neg_pow_2);
-    auto tmp4 = Vectorized<float>(neg_pow_2).exp_u20().values;
-    auto tmp5 = _mm512_xor_ps(neg_zero_vec, tmp4);
-    // erf(x) = sign(x) * (1 - r * t * exp(- x * x))
-    auto tmp6 = _mm512_mul_ps(tmp5, t);
-    auto tmp7 = _mm512_fmadd_ps(tmp6, r, one_vec);
-    return _mm512_xor_ps(sign_mask, tmp7);
+    // we use the erf function symmetry erf(-x) = -erf(x)
+    // So we make x positive, we will reapply the sign after erf evaluation
+    __m512 src_pos = _mm512_and_ps(
+        values, _mm512_castsi512_ps(_mm512_set1_epi32(0x7fffffff)));
+    // we compute indices for table lookup.
+    const auto idx_bias = _mm512_set1_epi32(0xc21fffff);
+    __m512i indices = _mm512_add_epi32(_mm512_castps_si512(src_pos), idx_bias);
+    // An arithmetic shift is needed to properly map denormals to
+    // their polynomial. we shift by 21 as we use 2 bits of mantissa
+    // for indexing.
+    indices = _mm512_srai_epi32(indices, 21);
+    // we need to apply special rules
+    indices = _mm512_max_epi32(indices, _mm512_set1_epi32(1));
+    indices = _mm512_min_epi32(indices, _mm512_set1_epi32(18));
+    // We have to check
+    //     index = x_pos > rbound ? 23 : index;
+    // for erf to return -1/1 when we should.
+    __m512 tmp = _mm512_castsi512_ps(_mm512_set1_epi32(0x40b15cee));
+    auto mask = _mm512_cmplt_ps_mask(tmp, src_pos);
+    indices = _mm512_mask_blend_epi32(mask, indices, _mm512_set1_epi32(23));
+    // we can now evaluate the polynomial
+    auto gather_coefficient = [&](__m512& coeff,
+                                  int coeff_idx,
+                                  __m512i pol_idx) {
+      const auto mask_1 = _cvtu32_mask16(0x0000ffff);
+      coeff = _mm512_load_ps(&gelu_erf_minmax_polynomial[coeff_idx * 32 + 0]);
+      coeff = _mm512_mask_permutex2var_ps(
+          coeff,
+          mask_1,
+          pol_idx,
+          _mm512_load_ps(&gelu_erf_minmax_polynomial[coeff_idx * 32 + 16]));
+    };
+    __m512 pol;
+    gather_coefficient(pol, 5, indices);
+    for (int deg = 4; deg >= 0; --deg) {
+      gather_coefficient(tmp, deg, indices);
+      pol = _mm512_fmadd_ps(pol, src_pos, tmp);
+    }
+    // we set the sign of vmm_pol properly
+    tmp = _mm512_and_ps(
+        values, _mm512_castsi512_ps(_mm512_set1_epi32(0x80000000)));
+    pol = _mm512_xor_ps(pol, tmp);
+    // we compute the final output
+    pol = _mm512_add_ps(pol, _mm512_set1_ps(1.0f));
+    tmp = _mm512_mul_ps(values, pol);
+    return _mm512_mul_ps(tmp, _mm512_set1_ps(0.5f));
   }
   Vectorized<float> erf() const {
     // constants
