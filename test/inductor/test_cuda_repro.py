@@ -189,9 +189,9 @@ class CudaReproTests(TestCase):
             # padded bias should have an expanded dim
             FileCheck().check("buf0 =").check_same(", 0, ").run(code[0])
             # single fused padded kernel
-            FileCheck().check("def call").check_count(
-                "empty_strided_cuda", 1, exactly=True
-            ).check("return").run(code[0])
+            FileCheck().check_count("empty_strided_cuda(", 1, exactly=True).check(
+                "return"
+            ).run(code[0])
 
             self.assertEqual(out, f(*inputs))
 
@@ -935,7 +935,7 @@ class CudaReproTests(TestCase):
 
         inp = inp.to(torch.float)
         out, code = run_and_get_code(torch.compile(foo), inp)
-        FileCheck().check_not("libdevice.exp").check("tl_math.exp").run(code[0])
+        FileCheck().check_not("tl_math.exp").check("libdevice.exp").run(code[0])
         self.assertEqual(foo(inp), out)
 
         def foo(x):

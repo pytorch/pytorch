@@ -15,11 +15,11 @@ import torch._prims_common as utils
 from torch._dispatch.python import no_python_dispatcher
 from torch._ops import OpOverload
 from torch._prims_common import (
-    contiguous_for_memory_format_or_false,
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     is_boolean_dtype,
     is_contiguous,
+    is_contiguous_for_memory_format_or_false,
     is_contiguous_or_false,
     is_float_dtype,
     is_integer_dtype,
@@ -513,6 +513,8 @@ def _compute_stride(old_shape, old_stride, new_shape, size_oblivious=False):
 
 def _view_has_unbacked_input(a, shape):
     from torch.fx.experimental.symbolic_shapes import has_hint
+
+    shape = utils.extract_shape_from_varargs(shape, validate=False)
 
     return (
         any(not has_hint(s) for s in a.size())
@@ -1254,13 +1256,13 @@ def make_fast_binary_impl(
                     continue
                 definitely_contiguous = (
                     definitely_contiguous
-                    and contiguous_for_memory_format_or_false(
+                    and is_contiguous_for_memory_format_or_false(
                         op, memory_format=torch.contiguous_format
                     )
                 )
                 definitely_channels_last = (
                     definitely_channels_last
-                    and contiguous_for_memory_format_or_false(
+                    and is_contiguous_for_memory_format_or_false(
                         op, memory_format=torch.channels_last
                     )
                 )

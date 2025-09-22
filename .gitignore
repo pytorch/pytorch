@@ -32,6 +32,7 @@ coverage.xml
 aten/build/
 aten/src/ATen/Config.h
 aten/src/ATen/cuda/CUDAConfig.h
+aten/src/ATen/hip/HIPConfig.h
 benchmarks/.data
 caffe2/cpp_test/
 dist/
@@ -146,6 +147,9 @@ merge_record.json
 torchgen/packaged/*
 !torchgen/packaged/README.md
 
+# This file is injected by ROCm build scripts to bootstrap in torch/__init__.py.
+torch/_rocm_init.py
+
 # IPython notebook checkpoints
 .ipynb_checkpoints
 
@@ -254,6 +258,9 @@ gen
 .setuptools-cmake-build
 .pytest_cache
 aten/build/*
+
+# Linker scripts for prioritized text optimization
+cmake/linker_script.ld
 
 # Bram
 plsdontbreak
@@ -385,3 +392,5 @@ android/pytorch_android_torchvision/.cxx
 
 # Claude Code local configuration
 CLAUDE.local.md
+/test_*.py
+/debug_*.py

@@ -106,6 +106,7 @@ from ._aot_autograd.logging_utils import (  # noqa: F401
 from ._aot_autograd.runtime_wrappers import (  # noqa: F401
     AOTDedupeWrapper,
     AOTSyntheticBaseWrapper,
+    SerializableCompiledFunction,
 )
 from ._aot_autograd.schemas import (  # noqa: F401
     AOTConfig,
@@ -672,6 +673,7 @@ fw_metadata={str(fw_metadata)}"""
                 ]
             )
             != 0
+            and aot_config.export_trace_joint
         ):
             raise RuntimeError(
                 f"""\
@@ -1071,6 +1073,7 @@ def aot_module_simplified(
             boxed_forward_device_index,
             ignore_shape_env,
             flatten=False,
+            force_non_lazy_backward_lowering=config.force_non_lazy_backward_lowering,
         )
 
         compiled_fn = None
@@ -1109,6 +1112,7 @@ def aot_module_simplified(
         # the inputs so that they can be freed before the end of this scope.
         # For overhead reasons, this is not the default wrapper, see comment:
         # https://github.com/pytorch/pytorch/pull/122535/files#r1560096481
+        @simple_wraps(compiled_fn)
         def forward(runtime_args: list[Any]):
             flat_args = []
             flat_args.extend(params_buffers_flat)
@@ -1122,6 +1126,7 @@ def aot_module_simplified(
         # historically returned a function that was not the boxed calling
         # convention.  This should get fixed...
         # NB: GraphModule/nn.Module rely on the non-boxed calling convention here
+        @simple_wraps(compiled_fn)
         def forward(*runtime_args: tuple[Any]):
             full_args = []
             full_args.extend(params_buffers_flat)
@@ -1133,6 +1138,16 @@ def aot_module_simplified(
     forward.named_parameters = mod.named_parameters
     forward.named_buffers = mod.named_buffers
 
+    # Add a serialize function
+    def grab_serialize_fn(fn):
+        if isinstance(fn, SerializableCompiledFunction):
+            return fn.serialize_fn
+        elif hasattr(fn, "__wrapped__"):
+            return grab_serialize_fn(fn.__wrapped__)
+        else:
+            return None
+
+    forward.serialize = grab_serialize_fn(forward)  # type: ignore[attr-defined]
     return forward
 
 
@@ -1448,6 +1463,7 @@ We require the output marked as the loss (at index {output_loss_index}) to be a 
             no_tangents=True,
             pre_dispatch=pre_dispatch,
             dynamic_shapes=dynamic_shapes,
+            trace_joint=trace_joint,
             kwargs=kwargs,
         )
 
@@ -1550,6 +1566,7 @@ def aot_export_joint_simple(
             func,
             args,
             decompositions=decompositions,
+            trace_joint=trace_joint,
         )
         in_spec, _kw_in_spec = in_spec.children_specs
     # At this point, we can just directly return the (joint or inference graph) that we traced.
@@ -1631,6 +1648,8 @@ def _aot_export_function(
     # If None, `dynamic_shapes` will be inferred from inputs, but the inferred result might be wrong.
     dynamic_shapes: Optional[bool] = None,
     keep_input_mutations: bool = False,
+    # Under export, configures whether we are getting inference or training IR
+    trace_joint: bool = False,
     kwargs=None,
 ) -> tuple[torch.fx.GraphModule, ViewAndMutationMeta, pytree.TreeSpec, pytree.TreeSpec]:
     kwargs = kwargs or {}
@@ -1675,6 +1694,7 @@ def _aot_export_function(
         is_export=True,
         no_tangents=no_tangents,
         pre_dispatch=pre_dispatch,
+        export_trace_joint=trace_joint,
     )
     if fake_mode is None:
         fake_mode, shape_env = construct_fake_mode(flat_args, aot_config)

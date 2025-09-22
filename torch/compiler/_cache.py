@@ -48,9 +48,6 @@ class CacheArtifact(ABC):
     def populate_cache(self) -> None:
         pass
 
-    def precompile_compatible(self) -> bool:
-        return False
-
     @staticmethod
     def type() -> str:
         """
@@ -129,14 +126,6 @@ class CacheInfo:
 
     @property
     def pgo_artifacts(self) -> list[str]:  # type: ignore[empty-body]
-        ...
-
-    @property
-    def precompile_aot_autograd_artifacts(self) -> list[str]:  # type: ignore[empty-body]
-        ...
-
-    @property
-    def precompile_dynamo_artifacts(self) -> list[str]:  # type: ignore[empty-body]
         ...
 
     def add(self, artifact: CacheArtifact) -> None:
