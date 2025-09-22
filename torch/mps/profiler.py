@@ -1,5 +1,5 @@
-# mypy: allow-untyped-defs
 import contextlib
+from typing import Iterator, cast
 
 import torch
 
@@ -35,16 +35,18 @@ def start(mode: str = "interval", wait_until_completed: bool = False) -> None:
        https://developer.apple.com/documentation/os/logging/recording_performance_data
     """
     mode_normalized = mode.lower().replace(" ", "")
-    torch._C._mps_profilerStartTrace(mode_normalized, wait_until_completed)
+    torch._C._mps_profilerStartTrace(  # type: ignore[attr-defined]
+        mode_normalized, wait_until_completed
+    )
 
 
-def stop():
+def stop() -> None:
     r"""Stops generating OS Signpost tracing from MPS backend."""
-    torch._C._mps_profilerStopTrace()
+    torch._C._mps_profilerStopTrace()  # type: ignore[attr-defined]
 
 
 @contextlib.contextmanager
-def profile(mode: str = "interval", wait_until_completed: bool = False):
+def profile(mode: str = "interval", wait_until_completed: bool = False) -> Iterator[None]:
     r"""Context Manager to enabling generating OS Signpost tracing from MPS backend.
 
     Args:
@@ -72,16 +74,16 @@ def is_metal_capture_enabled() -> bool:
     """Checks if `metal_capture` context manager is usable
     To enable metal capture, set MTL_CAPTURE_ENABLED envvar
     """
-    return torch._C._mps_isCaptureEnabled()  # type: ignore[attr-defined]
+    return cast(bool, torch._C._mps_isCaptureEnabled())  # type: ignore[attr-defined]
 
 
 def is_capturing_metal() -> bool:
     """Checks if metal capture is in progress"""
-    return torch._C._mps_isCapturing()  # type: ignore[attr-defined]
+    return cast(bool, torch._C._mps_isCapturing())  # type: ignore[attr-defined]
 
 
 @contextlib.contextmanager
-def metal_capture(fname: str):
+def metal_capture(fname: str) -> Iterator[None]:
     """Context manager that enables capturing of Metal calls into gputrace"""
     try:
         torch._C._mps_startCapture(fname)  # type: ignore[attr-defined]
