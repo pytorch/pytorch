@@ -14,12 +14,12 @@ torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
 
 
-@torch._dynamo.optimize("inductor", nopython=True)
+@torch._dynamo.optimize("inductor", fullgraph=True)
 def inductor_aten_mm(a, b):
     return torch.mm(a, b)
 
 
-@torch._dynamo.optimize("inductor", nopython=True)
+@torch._dynamo.optimize("inductor", fullgraph=True)
 def inductor_triton_mm(a, b):
     return torch.mm(a, b)
 
