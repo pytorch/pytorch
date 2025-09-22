@@ -1,14 +1,9 @@
 # Owner(s): ["module: linear algebra"]
 
 import contextlib
-import json
-import math
-import re
-import tempfile
 import unittest
 from itertools import product
 from functools import partial
-from typing import Optional
 
 import torch
 
@@ -22,17 +17,10 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_BF16,
     SM53OrLater,
     SM80OrLater,
-    SM89OrLater,
     SM90OrLater,
     xfailIfSM100OrLater,
     xfailIfSM120OrLater,
     _get_torch_cuda_version,
-    PLATFORM_SUPPORTS_FP8,
-    PLATFORM_SUPPORTS_FP8_GROUPED_GEMM,
-    PLATFORM_SUPPORTS_MX_GEMM,
-    PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM,
-    IS_SM90,
-    with_tf32_off,
 )
 from torch.testing._internal.common_device_type import (
     dtypes,
@@ -40,10 +28,6 @@ from torch.testing._internal.common_device_type import (
     onlyCUDA,
     tol as xtol,
     toleranceOverride,
-    e4m3_type,
-    e5m2_type,
-    E4M3_MAX_POS,
-    E5M2_MAX_POS,
 )
 
 from torch.testing._internal.common_utils import (
@@ -56,13 +40,6 @@ from torch.testing._internal.common_utils import (
     TEST_CUDA,
     TEST_WITH_ROCM,
     TestCase,
-)
-from torch.testing._internal.common_quantized import (
-    _f32_to_floatx_unpacked,
-    _floatx_unpacked_to_f32,
-    ceil_div, to_blocked,
-    to_mxfp8,
-    generate_jagged_offs,
 )
 
 _IS_SM8X = False
