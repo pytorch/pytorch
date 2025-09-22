@@ -1,16 +1,11 @@
-from typing import Callable, Optional
+# mypy: allow-untyped-defs
 
 from torch.ao.quantization.pt2e.utils import _is_sym_size_node
-from torch.ao.quantization.quantizer.quantizer import (
-    QuantizationAnnotation,
-    QuantizationSpecBase,
-)
+from torch.ao.quantization.quantizer.quantizer import QuantizationAnnotation
 from torch.fx import Node
 
 
-def _annotate_input_qspec_map(
-    node: Node, input_node: Node, qspec: Optional[QuantizationSpecBase]
-) -> None:
+def _annotate_input_qspec_map(node: Node, input_node: Node, qspec):
     quantization_annotation = node.meta.get(
         "quantization_annotation", QuantizationAnnotation()
     )
@@ -20,7 +15,7 @@ def _annotate_input_qspec_map(
     node.meta["quantization_annotation"] = quantization_annotation
 
 
-def _annotate_output_qspec(node: Node, qspec: Optional[QuantizationSpecBase]) -> None:
+def _annotate_output_qspec(node: Node, qspec):
     quantization_annotation = node.meta.get(
         "quantization_annotation", QuantizationAnnotation()
     )
@@ -28,7 +23,7 @@ def _annotate_output_qspec(node: Node, qspec: Optional[QuantizationSpecBase]) ->
     node.meta["quantization_annotation"] = quantization_annotation
 
 
-def _node_only_used_for_sym_size(node: Node, partition_nodes: list[Node]) -> bool:
+def _node_only_used_for_sym_size(node: Node, partition_nodes: list[Node]):
     """
     This utility is used to handle cases when dynami_shape=True tracing leads
     to symint nodes in the pattern of linear module. In those cases, we need to
@@ -53,7 +48,7 @@ def _node_only_used_for_sym_size(node: Node, partition_nodes: list[Node]) -> boo
     )
 
 
-def _get_module_name_filter(module_name: str) -> Callable[[Node], bool]:
+def _get_module_name_filter(module_name: str):
     """Get the module_name_filter function for a given module name, the filter accepts
     a node and checks if the node comes from a module that has certain module name
 
@@ -74,7 +69,7 @@ def _get_module_name_filter(module_name: str) -> Callable[[Node], bool]:
         # get_attr nodes doesn't have nn_module_stack?
         nn_module_stack = n.meta.get("nn_module_stack", {})
 
-        def _normalize_path(n: str) -> str:
+        def _normalize_path(n):
             prefix = 0
             # TODO This is non standard behavior and should be removed when we migrate off capture_pre_autograd_graph.
             if n.startswith("L['self']."):
