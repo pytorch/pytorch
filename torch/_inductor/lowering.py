@@ -1208,11 +1208,10 @@ def as_strided(x, size, stride, storage_offset=None):
         # Note: Merging views
         # When we use as_strided, we can rewrite the size/stride/offset
         # of the incoming buffer x. If x is a view, we would overwrite
-        # its metadata. Except for device type and dtype, which we need
-        # to propagate.
+        # its metadata. Except for dtype, which we need to propagate.
 
-        # Technically device is not needed because it is handled as a copy
-        # instead of a view today.
+        # Technically device is not needed because it is not possible
+        # to have a cross-device view today.
         new_device = x.get_device()
         new_dtype = x.dtype
         x = x.data.unwrap_view()
