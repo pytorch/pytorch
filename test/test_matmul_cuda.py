@@ -56,6 +56,7 @@ from torch.testing._internal.common_utils import (
     TEST_CUDA,
     TEST_WITH_ROCM,
     TestCase,
+    decorateIf,
 )
 from torch.testing._internal.common_quantized import (
     _f32_to_floatx_unpacked,
@@ -73,6 +74,16 @@ if TEST_CUDA:
 
 # Protects against includes accidentally setting the default dtype
 assert torch.get_default_dtype() is torch.float32
+
+def xfailIfSM100OrLaterAndCondition(condition_fn):
+    """
+    Conditionally xfail tests on SM100+ based on a condition function.
+    The condition function receives the test parameters dict and returns True to xfail.
+    """
+    return decorateIf(
+        unittest.expectedFailure,
+        lambda params: SM100OrLater and condition_fn(params)
+    )
 
 
 @contextlib.contextmanager
@@ -169,6 +180,7 @@ class TestMatmulCuda(InductorTestCase):
             self.cublas_addmm(size, dtype, False)
 
     @onlyCUDA
+    @xfailIfSM100OrLaterAndCondition(lambda params: params.get('dtype') == torch.bfloat16 and params.get('size') == 10000)
     @skipIfRocmVersionLessThan((5, 2))
     # imported 'tol' as 'xtol' to avoid aliasing in code above
     @toleranceOverride({torch.float16: xtol(atol=7e-1, rtol=2e-1),
