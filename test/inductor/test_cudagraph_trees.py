@@ -1756,25 +1756,19 @@ if HAS_CUDA_AND_TRITON:
                     args.clear()
                     return (x + 3,)
 
-                inp = torch.rand([20, 20], device="cuda:1")
+                inp = torch.rand([20, 20], device=f"cuda:{self.device_idx}")
 
                 inp_list = [inp]
-                foo_cg = tree_cudagraphify_impl(
-                    foo,
-                    inp_list,
-                    (),
-                    device_index=1,
-                    is_backward=False,
-                    is_inference=True,
-                )
+                foo_cg = self.cudagraphify_impl(foo, inp_list, ())
                 for _ in range(3):
                     self.assertEqual(foo_cg([inp]), foo([inp]))
 
-                self.assertTrue(self.get_manager(device_index=0) is None)
-                self.assertFalse(self.get_manager(device_index=1) is None)
+                next_idx = (self.device_idx + 1) % torch.cuda.device_count()
+                self.assertTrue(self.get_manager(device_index=next_idx) is None)
+                self.assertFalse(self.get_manager(device_index=self.device_idx) is None)
 
             test()
-            self.assertTrue(self.get_manager(device_index=1) is None)
+            self.assertTrue(self.get_manager(device_index=self.device_idx) is None)
 
         def test_error_on_dealloc_use(self):
             @torch.compile()
