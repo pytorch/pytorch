@@ -43,8 +43,6 @@ runs:
             sudo git clean -ffdx
           else
             git clean -ffdx
-            # Do the same for submodules, should cleanup stale submodule dirs
-            git submodule foreach --recursive git clean -ffdx
           fi
         fi
 
@@ -58,6 +56,21 @@ runs:
         fetch-depth: ${{ inputs.fetch-depth }}
         submodules: ${{ inputs.submodules }}
         show-progress: false
+
+    - name: Clean submodules post checkout
+      id: clean-submodules
+      if: ${{ steps.check_container_runner.outputs.IN_CONTAINER_RUNNER == 'false' }}
+      shell: bash
+      env:
+        NO_SUDO: ${{ inputs.no-sudo }}
+      run: |
+        cd "${GITHUB_WORKSPACE}"
+        # Clean stale submodule dirs
+        if [ -z "${NO_SUDO}" ]; then
+          sudo git submodule foreach --recursive git clean -ffdx
+        else
+          git submodule foreach --recursive git clean -ffdx
+        fi
 
     - name: Clean workspace (try again)
       if: ${{ steps.check_container_runner.outputs.IN_CONTAINER_RUNNER == 'false' &&

@@ -243,14 +243,14 @@ __global__ void CatArrayBatchedCopy_vectorized(
     const char * data = (char*)inputs.input[blockIdx.y];
     IndexType offset = inputs.offset[blockIdx.y] * trailingSize / elems_per_vec;
     IndexType dimSize = inputs.dimSize[blockIdx.y] * trailingSize / elems_per_vec;
-    IndexType dataOffset = offset  * alignment; // in bytes
+    int64_t dataOffset = (int64_t)offset  * alignment; // in bytes
 
     IndexType stride = gridDim.x * blockDim.x;
 
     while( tid < nElements){
-      IndexType elementOffset = CatArrIndexToOffset<IndexType, Dims>::compute(
+      int64_t elementOffset = (int64_t)CatArrIndexToOffset<IndexType, Dims>::compute(
                     os.tensorSize, os.tensorStride, dimSize, concatDim, tid) * alignment; // in bytes
-      auto vec = at::native::memory::ld_vec<alignment>(data + alignment * tid);
+      auto vec = at::native::memory::ld_vec<alignment>(data + (int64_t)alignment * tid);
       at::native::memory::st_vec<alignment>(output + dataOffset + elementOffset, vec);
       tid += stride;
     }
@@ -464,6 +464,7 @@ void parallel_cat(const Tensor &out, const MaterializedITensorListRef& inputs, i
     }
 #endif
     int32_t trailingSize;
+    TensorSizeStride<unsigned int, CAT_ARRAY_MAX_INPUT_DIMS> kernelOutputParam;
     if (isInOutAligned) {
       // in this case we can and should flatten the tensors after the cat dim
       // we want to view the tensors as if consisting of `alignment`-sized elements
@@ -475,16 +476,15 @@ void parallel_cat(const Tensor &out, const MaterializedITensorListRef& inputs, i
       // then we need to divide last out size by elems_per_vec,
       // and divide all strides except last by elems_per_vec (last stride is 1 always)
       // for input, we will fix up the sizes and strides in the kernel directly
+      kernelOutputParam = outputParam;
       nDims = dimension + 1;
       constexpr auto elems_per_vec = alignment / sizeof(scalar_t);
-      auto out_size = dimension == 0 ? out.numel() : outputParam.tensorStride[dimension-1];
-      outputParam.tensorSize[dimension] = out_size / elems_per_vec;
+      auto out_size = dimension == 0 ? out.numel() : kernelOutputParam.tensorStride[dimension-1];
+      kernelOutputParam.tensorSize[dimension] = out_size / elems_per_vec;
       trailingSize = outputParam.tensorStride[dimension];
-      outputParam.tensorStride[dimension] = 1;
-      for (int i = 0; i < nDims; ++i) {
-        if (i!=dimension) {
-          outputParam.tensorStride[i] /= elems_per_vec;
-        }
+      kernelOutputParam.tensorStride[dimension] = 1;
+      for (int i = 0; i < dimension; ++i) {
+        kernelOutputParam.tensorStride[i] /= elems_per_vec;
       }
     }
 
@@ -505,7 +505,7 @@ void parallel_cat(const Tensor &out, const MaterializedITensorListRef& inputs, i
       constexpr auto elems_per_vec = alignment / sizeof(scalar_t); \
       CatArrayBatchedCopy_vectorized<scalar_t, unsigned int, DIMS, batch_size, stride_size, alignment, elems_per_vec><<<\
       catGrid, applyBlock, 0, stream.stream()>>>(\
-        (char*)data, catMetaData, outputParam, dimension, trailingSize);\
+        (char*)data, catMetaData, kernelOutputParam, dimension, trailingSize);\
     } else if (isContig && isAligned && sizeof(scalar_t) > 2 && sizeof(scalar_t) <= 8) {\
       CatArrayBatchedCopy_alignedK_contig<scalar_t, unsigned int, DIMS, batch_size, stride_size, ALIGNED_VEC_LOAD_BYTES_16><<<\
           catGrid, applyBlock, 0, stream.stream()>>>(\

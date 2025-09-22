@@ -209,7 +209,7 @@ class OverlapScheduler:
         self.graph = gm.graph
         self.compute_overlap_multipler = compute_overlap_multipler
         self.max_node_distance = max_coll_distance
-        self.max_in_flight_bytes: int = int(max_in_flight_gb * 1e9)
+        self.max_in_flight_bytes: int = int(max_in_flight_gb * 1024 * 1024 * 1024)
 
         # Build structures
         stable_topological_sort(self.graph)
@@ -260,8 +260,7 @@ class OverlapScheduler:
         for node in self.nodes:
             if is_wait_tensor(node):
                 start = node.args[0]
-                coll_time_us = estimate_collective_time(start)
-                coll_time_ms = coll_time_us / 1000000
+                coll_time_ms = estimate_collective_time(start)
 
                 info = CollectiveInfo(
                     start_node=start,

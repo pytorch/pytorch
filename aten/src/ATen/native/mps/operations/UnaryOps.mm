@@ -2,8 +2,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/UnaryOps.h>
 #include <ATen/native/mps/Copy.h>
-#include <ATen/native/mps/MPSGraphSonomaOps.h>
-#include <ATen/native/mps/MPSGraphVenturaOps.h>
 #include <ATen/native/mps/OperationUtils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -417,6 +415,7 @@ TORCH_IMPL_FUNC(sgn_out_mps)(const Tensor& self, const Tensor& output) {
 
 Tensor& conj_physical_out_mps(const Tensor& self, Tensor& result) {
   TORCH_CHECK(self.is_complex());
+  TORCH_CHECK(self.dtype() != at::kComplexDouble);
   mps::unary_op(self, result, "conj", ^MPSGraphTensor*(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
     return [mpsGraph conjugateWithTensor:inputTensor name:nil];
   });
