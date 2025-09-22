@@ -17,8 +17,6 @@ const char placement_class_docstring[] =
 } // namespace
 
 void initPlacementBindings(PyObject* module) {
-  // TODO: Consider porting to nanobind instead since these types are
-  // isolated and don't touch anything else.
   auto py_module = py::reinterpret_borrow<py::module>(module);
   auto distributed_module = py_module.def_submodule("_distributed");
   py::class_<Placement>(

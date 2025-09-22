@@ -74,14 +74,14 @@ class _NormPartial(Partial):
 
     def __init__(self, norm_type: Union[int, float, str] = 2):
         reduce_op = None
-        if self.norm_type in (float("inf"), "inf"):
+        if norm_type in (float("inf"), "inf"):
             reduce_op = "max"
-        elif self.norm_type in (float("-inf"), "-inf"):
+        elif norm_type in (float("-inf"), "-inf"):
             reduce_op = "min"
-        elif isinstance(self.norm_type, (int, float)):
+        elif isinstance(norm_type, (int, float)):
             reduce_op = "sum"
         else:
-            raise NotImplementedError(f"Unsupported norm type: {self.norm_type}")
+            raise NotImplementedError(f"Unsupported norm type: {norm_type}")
 
         super().__init__(reduce_op)
         object.__setattr__(self, "norm_type", norm_type)
