@@ -568,13 +568,14 @@ class OverlapScheduler:
 
         counters["inductor"]["overlap_scheduling_exposed"] += len(exposed)
         counters["inductor"]["overlap_scheduling_bad_exposed"] += len(bad_exposed)
+        counters["inductor"]["overlap_scheduling_potentially_hidden"] += len(
+            potentially_hidden_collectives
+        )
 
-        print(
-            "Total exposed",
+        log.info(
+            "Overlap scheduling: total exposed %s, total bad exposed %s, total potentially hidden %s",
             len(exposed),
-            "Total bad exposed",
             len(bad_exposed),
-            "total potential",
             len(potentially_hidden_collectives),
         )
 
