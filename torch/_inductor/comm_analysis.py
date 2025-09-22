@@ -54,7 +54,9 @@ def get_collective_type(node: ir.IRNode) -> NCCL_COLL:
     if not isinstance(node, ir._CollectiveKernel):
         raise ValueError(f"node is not a collective kernel: {node}")
 
-    return get_collective_type_from_kernel_name(node.python_kernel_name)
+    name = node.python_kernel_name
+    assert name is not None
+    return get_collective_type_from_kernel_name(name)
 
 
 def get_collective_input_size_bytes(node: ir.IRNode) -> int:
@@ -315,14 +317,18 @@ def estimate_nccl_collective_runtime_from_fx_node(fx_node: torch.fx.Node) -> flo
 
     tensor_storage_size_bytes = estimate_fx_collective_size(fx_node)
 
-    _, kwargs = normalize_function(
+    assert not isinstance(fx_node.target, str)
+    opt_args_kwargs = normalize_function(
         fx_node.target,
         args=fx_node.args,
         kwargs=fx_node.kwargs,
         normalize_to_only_use_kwargs=True,
     )
+    assert opt_args_kwargs is not None
+    _, kwargs = opt_args_kwargs
 
     group_size = _get_group_size_by_name(kwargs["group_name"])
+    assert isinstance(fx_node.target, torch._ops.OpOverload)
     coll = get_collective_type_from_kernel_name(fx_node.target.name())
 
     return estimate_nccl_collective_runtime_impl(

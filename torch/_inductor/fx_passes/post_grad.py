@@ -197,13 +197,6 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
                 pass_name = "custom_backend_passes_" + device
                 GraphTransformObserver(gm, pass_name).apply_gm_pass(custom_backend_pass)
 
-    if torch._inductor.config.test_configs.aten_fx_overlap_scheduling:
-        from torch._inductor.fx_passes.overlap_scheduling import (
-            schedule_overlap_bucketing,
-        )
-
-        schedule_overlap_bucketing(gm)
-
     collectives_bucketing: bool = False
 
     if config.bucket_reduce_scatters_fx != "none":

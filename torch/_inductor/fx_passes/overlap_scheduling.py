@@ -1,46 +1,24 @@
-import collections
 import dataclasses
 import functools
 import heapq
 import itertools
-import math
-import operator
+import logging
 import sys
-from collections import Counter, defaultdict, deque
+from collections import Counter, defaultdict
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import (
-    Any,
-    Callable,
-    Counter as CounterType,
-    Deque,
-    Dict,
-    Iterable,
-    List,
-    Optional,
-    Set,
-    Union,
-)
+from typing import Any, Callable, Optional, Union
 
 import torch
 import torch.fx as fx
-from torch import fx
 from torch._dynamo.utils import counters, dynamo_timed
-from torch._inductor import utils
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._ordered_set import OrderedSet
 
+
+log = logging.getLogger(__name__)
+
 from ..pattern_matcher import stable_topological_sort
-
-
-def bucket_key(node: torch.fx.Node) -> Optional[object]:
-    from torch._inductor.fx_passes.bucketing import _ag_group_key, _rs_group_key
-
-    if node.target == torch.ops._c10d_functional.all_gather_into_tensor.default:
-        return _ag_group_key(node)
-    elif node.target == torch.ops._c10d_functional.reduce_scatter_tensor.default:
-        return _rs_group_key(node)
-    else:
-        return None
 
 
 def is_all_gather_into_tensor(node: torch.fx.Node) -> bool:  # type: ignore[arg-type]
@@ -68,7 +46,19 @@ def is_wait_tensor_from_all_gather_into_tensor(node: torch.fx.Node) -> bool:
     return is_wait_tensor(node) and is_all_gather_into_tensor(node.args[0])  # type: ignore[arg-type]
 
 
-def estimate_collective_time(n):
+def get_custom_estimation(n: fx.Node) -> Optional[float]:
+    runtime_estimation = torch._inductor.config.test_configs.estimate_aten_runtime
+    if runtime_estimation == "default":
+        return None
+
+    assert callable(runtime_estimation)
+    return runtime_estimation(n)
+
+
+def estimate_collective_time(n: fx.Node) -> float:
+    if (est := get_custom_estimation(n)) is not None:
+        return est
+
     return torch._inductor.comm_analysis.estimate_nccl_collective_runtime_from_fx_node(
         n
     )
@@ -84,7 +74,7 @@ def estimate_fx_collective_size(fx_node: torch.fx.Node) -> int:
     return size
 
 
-def is_compute_node(n):
+def is_compute_node(n: fx.Node) -> bool:
     return (
         getattr(n.target, "overloadpacket", None)
         in torch.utils.flop_counter.flop_registry
@@ -94,7 +84,7 @@ def is_compute_node(n):
 def get_hint(x: Union[int, torch.SymInt]) -> Optional[int]:
     if isinstance(x, int):
         return x
-    assert utils.is_symbolic(x)
+    assert isinstance(x, torch.SymInt)
     if not x.node.has_hint():
         return None
     return x.node.hint
@@ -108,7 +98,10 @@ def get_collective_do_bench() -> Callable[[Callable[[], Any]], float]:
         )
 
 
-def benchmark_node(n):
+def benchmark_node(n: fx.Node) -> float:
+    if (est := get_custom_estimation(n)) is not None:
+        return est
+
     from torch._dynamo.testing import rand_strided
 
     # todo - skip unbacked, symbolic
@@ -132,7 +125,7 @@ def benchmark_node(n):
 
         nonlocal key
         key += f"T: {shape, stride, t.dtype} "
-        return rand_strided(shape, stride, device=t.device, dtype=t.dtype)
+        return rand_strided(shape, stride, device=t.device, dtype=t.dtype)  # type: ignore[arg-type]
 
     with no_dispatch():
         args, kwargs = torch.utils._pytree.tree_map_only(
@@ -148,7 +141,7 @@ def benchmark_node(n):
             return 0
 
         bench = get_collective_do_bench()
-        out = bench(lambda: n.target(*args, **kwargs))
+        out = bench(lambda: n.target(*args, **kwargs))  # type: ignore[operator]
         set_cached_node_time(key, out)
         return out
 
@@ -181,35 +174,45 @@ class CollectiveInfo:
     )  # Nodes that are in flight with this collective
 
     @property
-    def is_exposed(self):
+    def is_exposed(self) -> bool:
         return self.exposed_time_ms != 0
 
 
 class OverlapScheduler:
+    """
+    Scheduler that reorders operations to maximize compute-collective overlap.
+
+    This scheduler analyzes a graph to identify opportunities where collective
+    communication operations can be overlapped with compute operations, reducing
+    overall execution time by hiding communication latency.
+    """
+
     def __init__(
         self,
         gm: torch.fx.GraphModule,
-        compute_overlap_multipler: float = 1.,
-        max_node_distance: int = 1000,
-        max_in_flight_gb: float = 2,
+        compute_overlap_multipler: float = 1.0,
+        max_in_flight_gb: float = 2.0,
+        max_coll_distance: int = 1000,
     ):
         self.gm = gm
         self.graph = gm.graph
         self.compute_overlap_multipler = compute_overlap_multipler
-        self.max_node_distance = max_node_distance
+        self.max_node_distance = max_coll_distance
         self.max_in_flight_bytes: int = int(max_in_flight_gb * 1e9)
 
         # Build structures
         stable_topological_sort(self.graph)
         self.nodes = list(self.graph.nodes)
         self.node_idx = {n: i for i, n in enumerate(self.nodes)}
-        self.node_ancestors = self._collect_node_ancestors()
+        self.node_ancestors: dict[fx.Node, OrderedSet[fx.Node]] = (
+            self._collect_node_ancestors()
+        )
 
         # Identify collectives and compute nodes
-        self.collective_info: Dict[fx.Node, CollectiveInfo] = {}
+        self.collective_info: dict[fx.Node, CollectiveInfo] = {}
         self.unscheduled_collectives: OrderedSet[fx.Node] = OrderedSet()
 
-        self.wait_to_start: Dict[fx.Node, fx.Node] = {}
+        self.wait_to_start: dict[fx.Node, fx.Node] = {}
         self._identify_collectives()
 
         self.compute_depth = self._calculate_compute_node_depth()
@@ -221,19 +224,19 @@ class OverlapScheduler:
         )
         self.potentially_hidden_waits = self.compute_potential_hidden_waits()
         self.in_degree = Counter(user for node in self.nodes for user in node.users)
-        self.ready = []
+        self.ready: list[tuple[object, fx.Node]] = []
 
         for node in self.nodes:
             if self.in_degree[node] == 0:
                 heapq.heappush(self.ready, (self._compute_score(node), node))
 
-        self.in_flight: Dict[fx.Node, CollectiveInfo] = {}  # start -> info
+        self.in_flight: dict[fx.Node, CollectiveInfo] = {}  # start -> info
         self.in_flight_bytes = 0
-        self.scheduled = OrderedSet()
+        self.scheduled: OrderedSet[fx.Node] = OrderedSet()
 
-    def _collect_node_ancestors(self) -> Dict[fx.Node, OrderedSet[fx.Node]]:
+    def _collect_node_ancestors(self) -> dict[fx.Node, OrderedSet[fx.Node]]:
         """Collect all ancestors for each node."""
-        ancestors = defaultdict(OrderedSet)
+        ancestors: dict[fx.Node, OrderedSet[fx.Node]] = defaultdict(OrderedSet)
         for node in self.nodes:
             for input_node in node.all_input_nodes:
                 ancestors[node].add(input_node)
@@ -241,7 +244,7 @@ class OverlapScheduler:
 
         return ancestors
 
-    def _identify_collectives(self):
+    def _identify_collectives(self) -> None:
         """Identify all collective operations."""
         for node in self.nodes:
             if is_wait_tensor(node):
@@ -260,7 +263,7 @@ class OverlapScheduler:
                 self.wait_to_start[node] = start
                 self.unscheduled_collectives.add(start)
 
-    def _calculate_compute_node_depth(self):
+    def _calculate_compute_node_depth(self) -> dict[fx.Node, int]:
         """Compute forward depth and minimum dominance depth (infinity if blocks no compute)."""
 
         # First pass: forward compute depth
@@ -289,7 +292,7 @@ class OverlapScheduler:
                     queue.append(use)
 
         # Second pass: minimum dominance (what's the earliest compute this blocks)
-        compute_depth_dominance = {}
+        compute_depth_dominance: dict[fx.Node, int] = {}
 
         for node in reversed(self.graph.nodes):
             if is_compute_node(node):
@@ -346,14 +349,14 @@ class OverlapScheduler:
             if self.in_degree[user] == 0:
                 heapq.heappush(self.ready, (self._compute_score(user), user))
 
-    def _compute_score(self, node: fx.Node) -> tuple:
+    def _compute_score(self, node: fx.Node) -> object:
         """Compute priority score for a node"""
 
         if is_wait_tensor(node):
             info = self.collective_info[self.wait_to_start[node]]
             overlappable = info.is_exposed and node in self.potentially_hidden_waits
         else:
-            overlappable = 1 if self.in_overlappable_collective_unary_chain(node) else 0
+            overlappable = self.in_overlappable_collective_unary_chain(node)
 
         return (
             self.compute_depth[node],  # what depth compute it blocks
@@ -394,7 +397,7 @@ class OverlapScheduler:
         """Schedule the oldest in flight wait"""
         self._handle_wait(self._get_oldest_wait())
 
-    def _handle_collective_start(self, node: fx.Node):
+    def _handle_collective_start(self, node: fx.Node) -> None:
         """Handle scheduling a collective start."""
         info = self.collective_info[node]
         self.in_flight[node] = info
@@ -402,7 +405,7 @@ class OverlapScheduler:
         self.unscheduled_collectives.discard(node)
         self._schedule(node)
 
-    def _handle_wait(self, node: fx.Node):
+    def _handle_wait(self, node: fx.Node) -> None:
         """Handle scheduling a wait."""
         assert node in self.wait_to_start
         coll_start = self.wait_to_start[node]
@@ -412,7 +415,7 @@ class OverlapScheduler:
         del self.in_flight[coll_start]
         self._schedule(node)
 
-    def _handle_compute(self, node: fx.Node):
+    def _handle_compute(self, node: fx.Node) -> None:
         """Handle scheduling compute and finding overlaps."""
 
         compute_time = benchmark_node(node)
@@ -490,7 +493,7 @@ class OverlapScheduler:
             self._handle_collective_start(collective)
 
     def _find_schedulable_path(
-        self, target: fx.Node, compute_node
+        self, target: fx.Node, curr_compute_node: Optional[fx.Node]
     ) -> Optional[OrderedSet[fx.Node]]:
         """Find path to target by collecting unscheduled dependencies."""
 
@@ -513,7 +516,7 @@ class OverlapScheduler:
             # it's fine to schedule it
             if is_wait_tensor(node):
                 info = self.collective_info[self.wait_to_start[node]]
-                if info.hiding_node and info.hiding_node != compute_node:
+                if info.hiding_node and info.hiding_node != curr_compute_node:
                     continue
                 elif node not in self.potentially_hidden_waits:
                     continue
@@ -526,34 +529,40 @@ class OverlapScheduler:
         oldest_start = next(iter(self.in_flight))
         return self.collective_info[oldest_start].wait_node
 
-    def _wait_is_hidden(self, wait_node, compute_node: Optional[fx.Node] = None):
+    def _wait_is_hidden(
+        self, wait_node: fx.Node, compute_node: Optional[fx.Node] = None
+    ) -> bool:
         assert is_wait_tensor(wait_node)
         info = self.collective_info[self.wait_to_start[wait_node]]
         return not info.is_exposed and info.hiding_node != compute_node
 
-    def _schedule_path_to_collective(self, path: OrderedSet[fx.Node], compute_node):
+    def _schedule_path_to_collective(
+        self, path: OrderedSet[fx.Node], curr_compute_node: fx.Node
+    ) -> None:
         """Schedule all nodes needed to reach a collective."""
         for node in sorted(path, key=lambda n: self.node_idx[n]):
             assert not (is_compute_node(node) or node in self.unscheduled_collectives)
 
             if is_wait_tensor(node):
                 info = self.collective_info[self.wait_to_start[node]]
-                assert not info.hiding_node == compute_node
+                assert not info.hiding_node == curr_compute_node
                 self._handle_wait(node)
                 continue
 
             self._schedule(node)
 
-    def reorder_graph(self):
+    def reorder_graph(self) -> None:
         output_node = self.graph.output_node()
         for node in self.scheduled:
             output_node.prepend(node)
+        self.graph.lint()
 
-    def _reorder_graph(self):
+    def _reorder_graph(self) -> None:
         """Reorder graph based on schedule."""
-        exposed = [c for c in self.collective_info.values() if c.exposed_time_ms != 0]
-        nonexposed = [
-            c for c in self.collective_info.values() if c.exposed_time_ms == 0
+        exposed = [
+            c
+            for c in self.collective_info.values()
+            if c.exposed_time_ms == c.estimated_time_ms
         ]
 
         potentially_hidden_collectives = self.compute_potential_hidden_collectives(
@@ -562,6 +571,10 @@ class OverlapScheduler:
         bad_exposed = [
             c for c in exposed if c.start_node in potentially_hidden_collectives
         ]
+
+        counters["inductor"]["overlap_scheduling_exposed"] += len(exposed)
+        counters["inductor"]["overlap_scheduling_bad_exposed"] += len(bad_exposed)
+
         print(
             "Total exposed",
             len(exposed),
@@ -571,22 +584,18 @@ class OverlapScheduler:
             len(potentially_hidden_collectives),
         )
 
-        # this is not actually required
-        # we could just bucket
         self.reorder_graph()
-        # TODO :add 
-        # self._bucket_collectives()
 
     def compute_potential_hidden_nodes(
-        self, nodes_to_check: Iterable[fx.Node], limit_coll_per_compute=False
+        self, nodes_to_check: Iterable[fx.Node], limit_coll_per_compute: bool = False
     ) -> dict[fx.Node, fx.Node]:
         """
         Returns a dict containing a mapping of nodes which could potentially be hidden to their hiding node
         """
 
-        used_compute_nodes = OrderedSet()
+        used_compute_nodes: OrderedSet[fx.Node] = OrderedSet()
 
-        def could_be_hidden(start) -> Optional[fx.Node]:
+        def could_be_hidden(start: fx.Node) -> Optional[fx.Node]:
             for compute_node in self.compute_nodes:
                 if limit_coll_per_compute and compute_node in used_compute_nodes:
                     continue
@@ -611,145 +620,39 @@ class OverlapScheduler:
 
         return potentially_hidden
 
-    def compute_potential_hidden_collectives(self, limit_coll_per_compute=False):
-        """Compute which collective operations could be hidden by matrix multiplications."""
+    def compute_potential_hidden_collectives(
+        self, limit_coll_per_compute: bool = False
+    ) -> dict[fx.Node, fx.Node]:
+        """Compute which collective operations could be hidden by compute."""
         return self.compute_potential_hidden_nodes(
             self.collective_info.keys(), limit_coll_per_compute
         )
 
-    def compute_potential_hidden_waits(self, limit_coll_per_compute=False):
-        """Compute which wait operations could be hidden by matrix multiplications."""
+    def compute_potential_hidden_waits(
+        self, limit_coll_per_compute: bool = False
+    ) -> dict[fx.Node, fx.Node]:
+        """Compute which wait operations could be hidden by compte."""
         wait_nodes = [info.wait_node for info in self.collective_info.values()]
         return self.compute_potential_hidden_nodes(wait_nodes, limit_coll_per_compute)
 
-    def _bucket_collectives(self):
-        from torch._inductor.fx_passes.bucketing import (
-            merge_all_gather_bucket,
-            merge_reduce_scatter_bucket,
-        )
-
-        """Bucket collectives based on scheduling results."""
-
-        node_idx = {n: i for i, n in enumerate(self.scheduled)}
-
-        # Group collectives by type and exposure
-        grouped_exposed_collectives: dict[Any, OrderedSet] = defaultdict(OrderedSet)
-        grouped_hidden_collectives: dict[Any, OrderedSet] = defaultdict(OrderedSet)
-
-        for start, info in self.scheduled_collectives.items():
-            key = bucket_key(start)
-            if key is None:
-                continue
-
-            if info.is_exposed:
-                grouped_exposed_collectives[key].add(start)
-            else:
-                grouped_hidden_collectives[key].add(start)
-
-        all_buckets = []
-        for hidden_bucket_group in grouped_hidden_collectives.values():
-            all_buckets.extend(self._bucket_group(hidden_bucket_group, node_idx, False))
-
-        for exposed_bucket_group in grouped_exposed_collectives.values():
-            all_buckets.extend(self._bucket_group(exposed_bucket_group, node_idx, True))
-
-        for bucket in all_buckets:
-            if len(bucket) <= 1:
-                continue
-
-            # put wait after first wait of bucekt
-            waits = [next(iter(n.users)) for n in bucket]
-            first_wait = min(waits, key=lambda w: node_idx[w])
-
-            if is_all_gather_into_tensor(bucket[0]):
-                merge_all_gather_bucket(
-                    self.graph, bucket, wait_insertion_point=first_wait
-                )
-            elif is_reduce_scatter_tensor(bucket[0]):
-                info = self.scheduled_collectives[bucket[0]]
-                if not info.is_exposed:
-                    f = open("my_graph_old.txt", "a")
-                    f.write(str(self.graph))
-                    f.close()
-                    merge_reduce_scatter_bucket(
-                        self.graph, bucket, wait_insertion_point=first_wait
-                    )
-                    f = open("my_graph_new.txt", "a")
-                    f.write(str(self.graph))
-                    f.close()
-                    breakpoint()
-                    pass
-
-        stable_topological_sort(self.graph)
-        self.graph.lint()
-        breakpoint()
-
-        pass
-
-    def _bucket_group(
-        self,
-        grouped_collectives: OrderedSet[fx.Node],
-        node_idx: dict[fx.Node, int],
-        exposed_group: bool,
-    ):
-        """Bucket hidden collectives based on in-flight relationships."""
-        buckets: list[list[fx.Node]] = []
-        processed = OrderedSet()
-
-        for start in grouped_collectives:
-            if start in processed:
-                continue
-
-            bucket = [start]
-            bucket_descendants = self.node_descendants[start].copy()
-            processed.add(start)
-            info = self.scheduled_collectives[start]
-            first_wait = info.wait_node
-            first_hiding_node = info.hiding_node
-
-            # Only look at collectives that were in-flight with this one
-            for candidate_start in info.in_flight_with:
-                if (
-                    candidate_start in processed
-                    or candidate_start not in grouped_collectives
-                ):
-                    continue
-
-                # if they were in flight together, there should be no way for them
-                # to depend on each other. nonetheless we can be extra safe initially.
-                if candidate_start in bucket_descendants:
-                    continue
-
-                # collective overlap node should be subsequent to the earliest wait in the bucket
-                # or we will force exposure
-                if not exposed_group:
-                    candidate_info = self.scheduled_collectives[candidate_start]
-                    hiding_node = candidate_info.hiding_node
-                    assert first_hiding_node is not None
-                    assert hiding_node is not None
-                    if node_idx[first_wait] > node_idx[hiding_node]:
-                        continue
-
-                    if node_idx[candidate_info.wait_node] > node_idx[first_hiding_node]:
-                        continue
-
-                    # since we're iterating in order the first hiding node is the earliest
-                    first_wait = min(
-                        first_wait, candidate_info.wait_node, key=lambda n: node_idx[n]
-                    )
-
-                bucket.append(candidate_start)
-                bucket_descendants |= self.node_descendants[candidate_start]
-                processed.add(candidate_start)
-
-            if len(bucket) > 1:
-                buckets.append(bucket)
-
-        return buckets
-
 
 def schedule_overlap_bucketing(
-    gm: torch.fx.GraphModule, **kwargs
+    gm: torch.fx.GraphModule,
+    compute_overlap_multipler: float = 1.0,
+    max_in_flight_gb: float = 2.0,
+    max_coll_distance: int = 1000,
 ) -> torch.fx.GraphModule:
-    """Schedule nodes to maximize compute-collective overlap, then bucket."""
-    return OverlapScheduler(gm, **kwargs).run()
+    """Schedule nodes to maximize compute-collective overlap.
+
+    Args:
+        gm: Input graph module to optimize.
+        compute_overlap_multipler: Scale factor for compute time used to hide collectives.
+        max_in_flight_gb: Maximum GB of concurrent collective data.
+        max_coll_distance: Maximum node distance for overlap consideration.
+    """
+    return OverlapScheduler(
+        gm,
+        compute_overlap_multipler=compute_overlap_multipler,
+        max_in_flight_gb=max_in_flight_gb,
+        max_coll_distance=max_coll_distance,
+    ).run()
