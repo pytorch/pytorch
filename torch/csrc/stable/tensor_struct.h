@@ -82,20 +82,18 @@ class Tensor {
     return data_ptr;
   }
 
-  template <typename T>
-  T* mutable_data_ptr() const {
+  void* mutable_data_ptr() const {
     void* data_ptr{};
     TORCH_ERROR_CODE_CHECK(
         aoti_torch_get_mutable_data_ptr(ath_.get(), &data_ptr));
-    return reinterpret_cast<T*>(data_ptr);
+    return data_ptr;
   }
 
-  template <typename T>
-  const T* const_data_ptr() const {
+  const void* const_data_ptr() const {
     const void* data_ptr{};
     TORCH_ERROR_CODE_CHECK(
         aoti_torch_get_const_data_ptr(ath_.get(), &data_ptr));
-    return reinterpret_cast<const T*>(data_ptr);
+    return data_ptr;
   }
 
   int64_t dim() const {

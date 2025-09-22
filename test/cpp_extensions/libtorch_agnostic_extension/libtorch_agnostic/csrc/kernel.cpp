@@ -477,16 +477,10 @@ void boxed_test_default_constructor(
 }
 
 uint64_t get_any_data_ptr(Tensor t, bool mutable_) {
-  switch (t.scalar_type()) {
-  case at::ScalarType::Float:
-    if (mutable_) {
-      return reinterpret_cast<uint64_t>(t.mutable_data_ptr<float>());
-    } else {
-      return reinterpret_cast<uint64_t>(t.const_data_ptr<float>());
-    }
-    break;
-  default:
-    return 0;  // dtype support not implemented
+  if (mutable_) {
+    return reinterpret_cast<uint64_t>(t.mutable_data_ptr());
+  } else {
+    return reinterpret_cast<uint64_t>(t.const_data_ptr());
   }
 }
 
