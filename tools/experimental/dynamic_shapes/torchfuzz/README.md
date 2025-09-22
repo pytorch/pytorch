@@ -144,16 +144,8 @@ Using max_depth: 3
 ✅ SUCCESS - artifacts saved to: /tmp/fuzzing_seed_42_1695123456789_success
 ```
 
-## Generated Artifacts
 
-Each test run creates artifacts in `/tmp/fuzzing_seed_{seed}_{timestamp}_{status}/`:
-
-- **`summary.txt`** - Test run metadata
-- **`operation_stack.txt`** - Human-readable operation sequence
-- **`generated_code.py`** - Executable Python code
-- **`operation_stack_diagram.png`** - Visual operation stack diagram
-
-### Known Issues Handling
+## Known Issues Handling
 
 TorchFuzz automatically skips known PyTorch issues or previously found, you should add them to the list known_issues.
 
@@ -192,30 +184,6 @@ print(f"Topological order: {operation_graph.get_topological_order()}")
 print(f"Leaf nodes: {operation_graph.get_leaf_nodes()}")
 ```
 
-## Testing Strategies
-
-### Systematic Testing
-
-```bash
-# Test specific seed range
-for i in {1000..1100}; do
-    python fuzzer.py --single --seed $i --max-depth 5
-done
-```
-
-### Continuous Integration
-
-```bash
-# Run 100 tests with timeout
-timeout 300 python fuzzer.py --test --seed 42 --max-depth 3
-```
-
-### Regression Testing
-
-```bash
-# Test known problematic seeds
-python fuzzer.py --single --seed 12345  # Known to trigger specific issue
-```
 
 ## Contributing
 
