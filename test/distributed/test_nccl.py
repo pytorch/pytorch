@@ -66,9 +66,6 @@ class TestNCCL(TestCase):
         self.assertIsInstance(uid, bytes)
         self.assertGreater(len(uid), 1)
 
-    @skip_but_pass_in_sandcastle_if(
-        TEST_WITH_ROCM and HIP_VERSION < 3.5, "Skip NCCL tests for ROCm"
-    )
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "only one GPU detected")
     @dtypes(*broadcast_dtypes)
@@ -91,9 +88,6 @@ class TestNCCL(TestCase):
         for i in range(torch.cuda.device_count()):
             self.assertEqual(tensors[i], expected)
 
-    @skip_but_pass_in_sandcastle_if(
-        TEST_WITH_ROCM and HIP_VERSION < 3.5, "Skip NCCL tests for ROCm"
-    )
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "only one GPU detected")
     @dtypes(*datatypes)
@@ -118,10 +112,6 @@ class TestNCCL(TestCase):
 
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "only one GPU detected")
-    @skip_but_pass_in_sandcastle_if(
-        TEST_WITH_ROCM and HIP_VERSION < 3.5 and dtype == torch.bfloat16,  # noqa: F821
-        "Skip bfloat16 test for ROCm < 3.5",
-    )
     @dtypes(*datatypes)
     def test_all_reduce(self, device, dtype):
         cpu_tensors = [
@@ -151,9 +141,6 @@ class TestNCCL(TestCase):
         for tensor in tensors:
             self.assertEqual(tensor, expected)
 
-    @skip_but_pass_in_sandcastle_if(
-        TEST_WITH_ROCM and HIP_VERSION < 3.5, "Skip NCCL tests for ROCm"
-    )
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
     def test_collective_errors(self, device):
         t = torch.rand(10).cuda(0)
@@ -182,9 +169,6 @@ class TestNCCL(TestCase):
         ):
             nccl.reduce_scatter(t, t)
 
-    @skip_but_pass_in_sandcastle_if(
-        TEST_WITH_ROCM and HIP_VERSION < 3.5, "Skip NCCL tests for ROCm"
-    )
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "only one GPU detected")
     @dtypes(*datatypes)
@@ -211,9 +195,6 @@ class TestNCCL(TestCase):
         for tensor in outputs:
             self.assertEqual(tensor, expected)
 
-    @skip_but_pass_in_sandcastle_if(
-        TEST_WITH_ROCM and HIP_VERSION < 3.5, "Skip NCCL tests for ROCm"
-    )
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "only one GPU detected")
     @dtypes(*datatypes)
