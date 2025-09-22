@@ -22,9 +22,6 @@ ignore =
     # TorchFix codes that don't make sense for PyTorch itself:
     # removed and deprecated PyTorch functions.
     TOR001,TOR101,
-    # TODO(kit1980): fix all TOR102 issues
-    # `torch.load` without `weights_only` parameter is unsafe
-    TOR102,
     # TODO(kit1980): resolve all TOR003 issues
     # pass `use_reentrant` explicitly to `checkpoint`.
     TOR003

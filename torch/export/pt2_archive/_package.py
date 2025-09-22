@@ -1136,7 +1136,7 @@ def load_pt2(
                     len(WEIGHTS_DIR) :
                 ]  # remove data/weights/ prefix
                 weight_bytes = archive_reader.read_bytes(file)
-                loaded_weight = torch.load(io.BytesIO(weight_bytes))
+                loaded_weight = torch.load(io.BytesIO(weight_bytes), weights_only=True)
                 weights[weight_file_name] = loaded_weight
 
     if isinstance(f, (io.IOBase, IO)):

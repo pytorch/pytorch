@@ -1352,7 +1352,7 @@ class QuantizationTestCase(TestCase):
         b = io.BytesIO()
         torch.save(emb_dict, b)
         b.seek(0)
-        loaded_dict = torch.load(b)
+        loaded_dict = torch.load(b, weights_only=True)
         embedding_unpack = torch.ops.quantized.embedding_bag_unpack
         # Check unpacked weight values explicitly
         for key in emb_dict:

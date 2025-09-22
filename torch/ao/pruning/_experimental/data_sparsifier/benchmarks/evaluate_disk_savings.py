@@ -112,7 +112,7 @@ def sparsify_model(path_to_model, sparsified_model_dump_path):
     print("Running for norms - ", norms)
 
     orig_model = get_dlrm_model()
-    saved_state = torch.load(path_to_model, map_location=device)
+    saved_state = torch.load(path_to_model, map_location=device, weights_only=True)
     orig_model.load_state_dict(saved_state["state_dict"])
 
     orig_model = orig_model.to(device)

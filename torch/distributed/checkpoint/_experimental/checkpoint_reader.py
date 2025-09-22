@@ -78,7 +78,7 @@ class CheckpointReader:
 
         if state_dict is None:
             result: tuple[STATE_DICT, list[str]] = (
-                torch.load(file_path, map_location=map_location),
+                torch.load(file_path, map_location=map_location, weights_only=True),
                 [],
             )
         else:
@@ -115,7 +115,9 @@ class CheckpointReader:
         """
 
         with FakeTensorMode():
-            metadata_dict = torch.load(file_path, map_location=map_location)
+            metadata_dict = torch.load(
+                file_path, map_location=map_location, weights_only=True
+            )
 
         missing_keys = []
 
