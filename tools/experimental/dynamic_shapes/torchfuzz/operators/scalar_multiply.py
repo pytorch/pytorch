@@ -16,10 +16,6 @@ class ScalarMultiplyOperator(Operator):
         """Scalar multiply can only produce scalars."""
         return isinstance(output_spec, ScalarSpec)
 
-    def supports_variable_inputs(self) -> bool:
-        """Scalar multiply operator does not support variable number of inputs."""
-        return False
-
     def decompose(self, output_spec: Spec, num_inputs: int = 2) -> list[Spec]:
         """Decompose scalar into input scalars for multiplication with type promotion."""
         if not isinstance(output_spec, ScalarSpec):

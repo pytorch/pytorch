@@ -17,10 +17,6 @@ class Operator(ABC):
         """Check if this operator can produce the given output spec."""
 
     @abstractmethod
-    def supports_variable_inputs(self) -> bool:
-        """Check if this operator supports variable number of inputs."""
-
-    @abstractmethod
     def decompose(self, output_spec: Spec, num_inputs: int = 2) -> list[Spec]:
         """Decompose output spec into input specs."""
 

@@ -14,10 +14,6 @@ class ArgOperator(Operator):
         """Arg can produce any type of output."""
         return True
 
-    def supports_variable_inputs(self) -> bool:
-        """Arg operator does not require inputs."""
-        return False
-
     def decompose(self, output_spec: Spec, num_inputs: int = 0) -> list[Spec]:
         """Arg requires no inputs."""
         return []
