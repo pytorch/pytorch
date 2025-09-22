@@ -4,8 +4,8 @@
 // code for better UX.
 
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
-#include <torch/headeronly/util/Metaprogramming.h>
 #include <torch/headeronly/core/CompileTimeFunctionPointer.h>
+#include <torch/headeronly/util/Metaprogramming.h>
 
 // Technically, this file doesn't use anything from stableivalue_conversions.h,
 // but we need to include it here as the contents of stableivalue_conversions.h
@@ -173,74 +173,107 @@ class StableTorchLibraryInit final {
 
 namespace {
 
-template<class... T, std::size_t... I>
-std::tuple<T...> unbox_to_tuple_impl(StableIValue* stack, std::index_sequence<I...>)
-{
-    return std::make_tuple(to<T>(stack[I])...);
+template <class... T, std::size_t... I>
+std::tuple<T...> unbox_to_tuple_impl(
+    StableIValue* stack,
+    std::index_sequence<I...>) {
+  return std::make_tuple(to<T>(stack[I])...);
 }
 
-template<class... T>
-std::tuple<T...> unbox_to_tuple(StableIValue* stack)
-{
-    return unbox_to_tuple_impl<T...>(stack, std::make_index_sequence<sizeof...(T)>());
+template <class... T>
+std::tuple<T...> unbox_to_tuple(StableIValue* stack) {
+  return unbox_to_tuple_impl<T...>(
+      stack, std::make_index_sequence<sizeof...(T)>());
 }
 
-template<class... T, std::size_t... I>
-void box_from_tuple_impl(StableIValue* stack, std::tuple<T...> vals, std::index_sequence<I...>)
-{
-    (stack[I] = from<T>(std::get<I>(vals)), ...);
+template <class... T, std::size_t... I>
+void box_from_tuple_impl(
+    StableIValue* stack,
+    std::tuple<T...> vals,
+    std::index_sequence<I...>) {
+  ((stack[I] = from<T>(std::get<I>(vals))), ...);
 }
 
-template<class... T>
-void box_from_tuple(StableIValue* stack, std::tuple<T...> vals)
-{
-    box_from_tuple_impl<T...>(stack, vals, std::make_index_sequence<sizeof...(T)>());
+template <class... T>
+void box_from_tuple(StableIValue* stack, std::tuple<T...> vals) {
+  box_from_tuple_impl<T...>(
+      stack, vals, std::make_index_sequence<sizeof...(T)>());
 }
 
-template <typename ReturnType, typename ParameterTypeList, typename FuncT, FuncT* func>
+template <
+    typename ReturnType,
+    typename ParameterTypeList,
+    typename FuncT,
+    FuncT* func>
 struct boxer_impl {
-  static_assert(false_t<ReturnType>::value, "Unsupported");
+  static_assert(c10::guts::false_t<ReturnType>::value, "Unsupported");
 };
 
-template <typename... ReturnTypes, typename... ParameterTypes, typename FuncT, FuncT* func>
-struct boxer_impl<std::tuple<ReturnTypes...>, c10::guts::typelist::typelist<ParameterTypes...>, FuncT, func> {
+template <
+    typename... ReturnTypes,
+    typename... ParameterTypes,
+    typename FuncT,
+    FuncT* func>
+struct boxer_impl<
+    std::tuple<ReturnTypes...>,
+    c10::guts::typelist::typelist<ParameterTypes...>,
+    FuncT,
+    func> {
   void operator()(
-    StableIValue* stack,
-    uint64_t num_args,
-    uint64_t num_outputs
-  ) {
+      StableIValue* stack,
+      uint64_t num_args,
+      uint64_t num_outputs) {
     assert(num_args == sizeof...(ParameterTypes));
     assert(num_outputs == sizeof...(ReturnTypes));
-    std::tuple<ParameterTypes...> args = unbox_to_tuple<ParameterTypes...>(stack);
+    std::tuple<ParameterTypes...> args =
+        unbox_to_tuple<ParameterTypes...>(stack);
     auto res = std::apply(func, args);
     box_from_tuple<ReturnTypes...>(stack, res);
   }
 };
 
-template <typename ReturnType, typename... ParameterTypes, typename FuncT, FuncT* func>
-struct boxer_impl<ReturnType, c10::guts::typelist::typelist<ParameterTypes...>, FuncT, func> {
+template <
+    typename ReturnType,
+    typename... ParameterTypes,
+    typename FuncT,
+    FuncT* func>
+struct boxer_impl<
+    ReturnType,
+    c10::guts::typelist::typelist<ParameterTypes...>,
+    FuncT,
+    func> {
   void operator()(
-    StableIValue* stack,
-    uint64_t num_args,
-    uint64_t num_outputs
-  ) {
+      StableIValue* stack,
+      uint64_t num_args,
+      uint64_t num_outputs) {
     assert(num_args == sizeof...(ParameterTypes));
     assert(num_outputs == 1);
-    std::tuple<ParameterTypes...> args = unbox_to_tuple<ParameterTypes...>(stack);
+    std::tuple<ParameterTypes...> args =
+        unbox_to_tuple<ParameterTypes...>(stack);
     auto res = std::apply(func, args);
     box_from_tuple<std::tuple<ReturnType>>(stack, std::make_tuple(res));
   }
 };
 
-template<typename FuncT, FuncT* func>
+template <typename FuncT, FuncT* func>
 struct boxer {
-    using FunctionTrait = c10::guts::infer_function_traits_t<FuncT>;
+  using FunctionTrait = c10::guts::infer_function_traits_t<FuncT>;
 
-    static void boxed_fn(StableIValue* stack, uint64_t num_args, uint64_t num_outputs) {
-        boxer_impl<typename FunctionTrait::return_type, typename FunctionTrait::parameter_types, FuncT, func>();
-    }
+  static void boxed_fn(
+      StableIValue* stack,
+      uint64_t num_args,
+      uint64_t num_outputs) {
+    boxer_impl<
+        typename FunctionTrait::return_type,
+        typename FunctionTrait::parameter_types,
+        FuncT,
+        func>();
+  }
 };
 
 } // namespace
 
-#define TORCH_BOXED_FN(func) TORCH_FN(boxer<std::remove_pointer_t<std::remove_reference_t<decltype(func)>>, (func)>::boxed_fn)
+#define TORCH_BOXED_FN(func)                                               \
+  TORCH_FN(boxer<                                                          \
+           std::remove_pointer_t<std::remove_reference_t<decltype(func)>>, \
+           (func)>::boxed_fn)
