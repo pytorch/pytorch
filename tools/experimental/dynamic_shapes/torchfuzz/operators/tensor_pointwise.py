@@ -1,4 +1,4 @@
-"""Add operator implementation."""
+"""Tensor pointwise operator implementation."""
 
 import random
 
@@ -11,25 +11,45 @@ from torchfuzz.type_promotion import (
 )
 
 
-class AddOperator(Operator):
-    """Operator for element-wise addition."""
+class TensorPointwiseOperator(Operator):
+    """Operator for element-wise pointwise operations (add, mul, sub, div)."""
 
     def __init__(self):
-        super().__init__("torch.ops.aten.add")
+        super().__init__("tensor_pointwise")
+        self.operations = {
+            "add": {
+                "torch_op": "torch.ops.aten.add",
+                "symbol": "+",
+            },
+            "mul": {
+                "torch_op": "torch.ops.aten.mul",
+                "symbol": "*",
+            },
+            "sub": {
+                "torch_op": "torch.ops.aten.sub",
+                "symbol": "-",
+            },
+            "div": {
+                "torch_op": "torch.ops.aten.div",
+                "symbol": "/",
+            },
+        }
 
     def can_produce(self, output_spec: Spec) -> bool:
-        """Add can produce tensors but not scalars."""
+        """Tensor pointwise operations can produce tensors but not scalars."""
         return isinstance(output_spec, TensorSpec)
 
     def fuzz_inputs_specs(self, output_spec: Spec, num_inputs: int = 2) -> list[Spec]:
-        """Decompose tensor into input tensors for addition with type promotion."""
+        """Decompose tensor into input tensors for pointwise operation with type promotion."""
         if not isinstance(output_spec, TensorSpec):
-            raise ValueError("AddOperator can only produce TensorSpec outputs")
+            raise ValueError(
+                "TensorPointwiseOperator can only produce TensorSpec outputs"
+            )
 
         # Use shared type promotion table
         promotion_table = get_promotion_table_for_strings()
 
-        # If num_inputs > 2, promote left-to-right (e.g. (((a + b) + c) + d))
+        # If num_inputs > 2, promote left-to-right (e.g. (((a op b) op c) op d))
         # For simplicity, we generate the first two with promotion, rest match output dtype
         dtype_str = get_dtype_name(output_spec.dtype)
         supported_types = promotion_table.get(dtype_str, [(dtype_str, dtype_str)])
@@ -58,10 +78,14 @@ class AddOperator(Operator):
     def codegen(
         self, output_name: str, input_names: list[str], output_spec: Spec
     ) -> str:
-        """Generate code for addition operation."""
+        """Generate code for pointwise operation."""
+        # Randomly choose an operation
+        op_name = random.choice(list(self.operations.keys()))
+        op_info = self.operations[op_name]
+
         if len(input_names) == 2:
-            return f"{output_name} = torch.ops.aten.add({input_names[0]}, {input_names[1]})"
+            return f"{output_name} = {op_info['torch_op']}({input_names[0]}, {input_names[1]})"
         else:
-            # Sum all input tensors
-            expr = " + ".join(input_names)
+            # Chain operations using symbols for readability
+            expr = f" {op_info['symbol']} ".join(input_names)
             return f"{output_name} = {expr}"
