@@ -11,6 +11,12 @@
 #include <torch/csrc/profiler/standalone/execution_trace_observer.h>
 #include <torch/csrc/utils/pybind.h>
 
+TORCH_MAKE_PYBIND_ENUM_FASTER(at::RecordScope)
+TORCH_MAKE_PYBIND_ENUM_FASTER(ProfilerState)
+TORCH_MAKE_PYBIND_ENUM_FASTER(ActiveProfilerType)
+TORCH_MAKE_PYBIND_ENUM_FASTER(ActivityType)
+TORCH_MAKE_PYBIND_ENUM_FASTER(EventType)
+
 struct THPCapturedTraceback {
   PyObject_HEAD
   std::shared_ptr<torch::CapturedTraceback> data;
