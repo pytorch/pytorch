@@ -1141,7 +1141,7 @@ class TestInductorDynamic(TestCase):
         compiled_fn = torch.compile(reduce_bounded)
         result, source_codes = run_and_get_code(compiled_fn, x, y)
 
-        FileCheck().check_not("@triton_heuristics.reduction").run(source_codes[0])
+        FileCheck().check_not("@triton_heuristics.persistent").run(source_codes[0])
         expected = reduce_bounded(x, y)
 
         assert torch.allclose(result, expected, atol=1e-3, rtol=1e-3)
