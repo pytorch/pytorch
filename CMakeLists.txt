@@ -1391,10 +1391,6 @@ endif()
 include(cmake/Summary.cmake)
 caffe2_print_configuration_summary()
 
-if(BUILD_FUNCTORCH)
-  add_subdirectory(functorch)
-endif()
-
 # Parse custom debug info
 if(DEFINED USE_CUSTOM_DEBINFO)
   string(REPLACE ";" " " SOURCE_FILES "${USE_CUSTOM_DEBINFO}")
