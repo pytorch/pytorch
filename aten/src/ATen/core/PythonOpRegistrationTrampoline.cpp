@@ -20,9 +20,7 @@ bool PythonOpRegistrationTrampoline::registerInterpreter(
   c10::impl::PyInterpreter* expected = nullptr;
   interpreter_.compare_exchange_strong(expected, interp);
   if (expected != nullptr) {
-    // This is the second (or later) Python interpreter, which means we need
-    // non-trivial hermetic PyObject TLS
-    c10::impl::HermeticPyObjectTLS::init_state();
+    // This is the second (or later) Python interpreter
     return false;
   } else {
     return true;
