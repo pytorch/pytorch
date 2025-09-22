@@ -26,11 +26,12 @@ jobs:
             # Get the PR number from the github context
             PR_NUMBER="${{ github.event.number }}"
 
-            # Check if the PR has the lint-all-files label
-            HAS_LINT_ALL_LABEL=$(gh api repos/${{ github.repository }}/pulls/$PR_NUMBER --jq '.labels[] | select(.name == "lint-all-files") | .name')
+            # Check if the PR has the lint-all-files or Reverted label
+            # Reverted PRs probably have a high likelihood of needing to have all files linted, so we should lint all files
+            HAS_LINT_ALL_LABEL=$(gh api repos/${{ github.repository }}/pulls/$PR_NUMBER --jq '.labels[] | select(.name == "lint-all-files" or .name == "Reverted") | .name')
 
             if [ -n "$HAS_LINT_ALL_LABEL" ]; then
-              echo "Found 'lint-all-files' label, linting all files"
+              echo "Found 'lint-all-files' or 'Reverted' label, linting all files"
               echo "changed-files=*" >> "$GITHUB_OUTPUT"
             else
               # Use gh CLI to get changed files in the PR with explicit repo
