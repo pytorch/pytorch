@@ -882,7 +882,7 @@ def speedup_experiment_fx2trt(args, model_iter_fn, model, example_inputs):
 # TODO: CompilerProfiler is deprecated, remove this
 def recompile_profiler_experiment(args, model_iter_fn, model, example_inputs):
     prof = torch._dynamo.utils.CompilerProfiler()
-    opt_model_iter_fn = torch._dynamo.optimize(prof, nopython=args.nopython)(
+    opt_model_iter_fn = torch._dynamo.optimize(prof, fullgraph=args.fullgraph)(
         model_iter_fn
     )
     opt_model_iter_fn(model, example_inputs)
@@ -3054,7 +3054,7 @@ def parse_args(args=None):
         help="number of threads to use for eager and inductor",
     )
     parser.add_argument(
-        "--nopython", action="store_true", help="Turn graph breaks into errors"
+        "--fullgraph", action="store_true", help="Turn graph breaks into errors"
     )
     parser.add_argument(
         "--no-skip",
@@ -3940,7 +3940,9 @@ def run(runner, args, original_dir=None):
         disable_output = True
 
     if args.overhead:
-        optimize_ctx = torch._dynamo.optimize(dummy_fx_compile, nopython=args.nopython)
+        optimize_ctx = torch._dynamo.optimize(
+            dummy_fx_compile, fullgraph=args.fullgraph
+        )
         experiment = speedup_experiment
         output_filename = "overheads.csv"
     elif args.inductor:
@@ -3951,7 +3953,7 @@ def run(runner, args, original_dir=None):
         optimize_ctx = functools.partial(
             torch.compile,
             backend="inductor",
-            fullgraph=args.nopython,
+            fullgraph=args.fullgraph,
             mode=args.inductor_compile_mode,
         )
         experiment = speedup_experiment
@@ -3975,23 +3977,23 @@ def run(runner, args, original_dir=None):
         experiment = xla
         output_filename = "xla.csv"
     elif args.speedup_dynamo_ts:
-        optimize_ctx = torch._dynamo.optimize("ts", nopython=args.nopython)
+        optimize_ctx = torch._dynamo.optimize("ts", fullgraph=args.fullgraph)
         experiment = speedup_experiment
         output_filename = "speedup_dynamo_ts.csv"
     elif args.prims_nvfuser:
-        optimize_ctx = torch._dynamo.optimize("prims_nvfuser", nopython=args.nopython)
+        optimize_ctx = torch._dynamo.optimize("prims_nvfuser", fullgraph=args.fullgraph)
         experiment = speedup_experiment
         backend_str = "prims_nvfuser"
         output_filename = f"accuracy_aot_{backend_str}.csv"
     elif args.print_fx:
         optimize_ctx = torch._dynamo.optimize(
             print_fx,
-            nopython=args.nopython,
+            fullgraph=args.fullgraph,
         )
     elif args.print_aten_ops:
         optimize_ctx = torch._dynamo.optimize(
             print_aten_ops,
-            nopython=args.nopython,
+            fullgraph=args.fullgraph,
         )
     elif args.nothing:
         optimize_ctx = nothing
@@ -4025,7 +4027,7 @@ def run(runner, args, original_dir=None):
             baseline_ctx = functools.partial(
                 torch.compile,
                 backend="inductor",
-                fullgraph=args.nopython,
+                fullgraph=args.fullgraph,
                 mode=args.inductor_compile_mode,
             )
             model_iter_fn = baseline_ctx(runner.model_iter_fn)
@@ -4039,7 +4041,9 @@ def run(runner, args, original_dir=None):
             runner.model_iter_fn = model_iter_fn_and_mark_step
             optimize_ctx = torchao_optimize_ctx(args.quantization)
         else:
-            optimize_ctx = torch._dynamo.optimize(args.backend, nopython=args.nopython)
+            optimize_ctx = torch._dynamo.optimize(
+                args.backend, fullgraph=args.fullgraph
+            )
         experiment = (
             speedup_experiment if not args.backend == "torchao" else latency_experiment
         )
@@ -4054,7 +4058,7 @@ def run(runner, args, original_dir=None):
         experiment = recompile_profiler_experiment
     else:
         optimize_ctx = torch._dynamo.optimize(
-            fx_insert_profiling, nopython=args.nopython
+            fx_insert_profiling, fullgraph=args.fullgraph
         )
         experiment = coverage_experiment
         output_filename = "coverage.csv"
