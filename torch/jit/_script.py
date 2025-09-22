@@ -15,6 +15,7 @@ import inspect
 import pickle
 import warnings
 from typing import Any, Callable, Union
+from typing_extensions import deprecated
 
 import torch
 import torch._jit_internal as _jit_internal
@@ -750,6 +751,10 @@ if _enabled:
             """
             return self._c.save(str(f), **kwargs)
 
+        @deprecated(
+            "Lite Interpreter is deprecated. Please consider switching to ExecuTorch. \
+            https://docs.pytorch.org/executorch/stable/getting-started.html"
+        )
         def _save_for_lite_interpreter(self, *args, **kwargs):
             r"""Add (or update) the bytecode session to the script model.
 
@@ -763,9 +768,23 @@ if _enabled:
                 _extra_files: Map from filename to contents which will be stored as part of 'f'.
 
             """
+            warnings.warn(
+                "Lite Interpreter is deprecated. Please consider switching to ExecuTorch. \
+                https://docs.pytorch.org/executorch/stable/getting-started.html",
+                DeprecationWarning,
+            )
             return self._c._save_for_mobile(*args, **kwargs)
 
+        @deprecated(
+            "Lite Interpreter is deprecated. Please consider switching to ExecuTorch. \
+            https://docs.pytorch.org/executorch/stable/getting-started.html"
+        )
         def _save_to_buffer_for_lite_interpreter(self, *args, **kwargs):
+            warnings.warn(
+                "Lite Interpreter is deprecated. Please consider switching to ExecuTorch. \
+                https://docs.pytorch.org/executorch/stable/getting-started.html",
+                DeprecationWarning,
+            )
             return self._c._save_to_buffer_for_mobile(*args, **kwargs)
 
         def save_to_buffer(self, *args, **kwargs):
