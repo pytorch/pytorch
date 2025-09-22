@@ -134,15 +134,6 @@ def fuzz_and_execute(
         operation_graph = fuzz_operation_graph(
             target_spec, max_depth=max_depth, seed=seed
         )
-        # Convert graph to topologically ordered stack for codegen compatibility
-        topo_order = operation_graph.get_topological_order()
-        operation_stack = [operation_graph.nodes[node_id] for node_id in topo_order]
-        logger.debug(
-            "   Completed in %.3fs - %d operations",
-            time.time() - start_time,
-            len(operation_stack),
-        )
-
         logger.debug("⏱️  Step 3: Converting to Python code...")
         start_time = time.time()
         python_code = convert_graph_to_python_code(operation_graph, seed=seed)

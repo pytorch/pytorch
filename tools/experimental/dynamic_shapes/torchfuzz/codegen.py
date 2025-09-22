@@ -58,7 +58,6 @@ def convert_graph_to_python_code(
     for node_id in topo_order:
         node = operation_graph.nodes[node_id]
         op_name = node.op_name
-        input_specs = node.input_specs
         output_spec = node.output_spec
 
         # Generate comment for this operation
