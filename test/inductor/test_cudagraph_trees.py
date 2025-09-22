@@ -2078,19 +2078,19 @@ if HAS_CUDA_AND_TRITON:
                 device = x.untyped_storage()
 
         def test_side_stream_memory_allocation(self):
-            from torch._inductor.cudagraph_trees import cudagraphify_impl
+            device = f"cuda:{self.device_idx}"
 
             def multi_stream_allocation(args):
                 side_stream = torch.cuda.Stream()
                 side_stream.wait_stream(torch.cuda.current_stream())
                 with torch.cuda.stream(side_stream):
                     side_stream_buffer = torch.ones(
-                        *args, device="cuda:0", dtype=torch.float32
+                        *args, device=device, dtype=torch.float32
                     )
                 torch.cuda.current_stream().wait_stream(side_stream)
 
                 main_stream_buffer = torch.ones(
-                    *args, device="cuda:0", dtype=torch.float32
+                    *args, device=device, dtype=torch.float32
                 )
 
                 if isinstance(args, list):
@@ -2098,17 +2098,17 @@ if HAS_CUDA_AND_TRITON:
 
                 return main_stream_buffer, side_stream_buffer
 
-            graphed_multi_stream_func = cudagraphify_impl(
+            graphed_multi_stream_func = tree_cudagraphify_impl(
                 multi_stream_allocation,
                 inputs=[],
                 static_input_idxs=[],
                 is_backward=False,
                 is_inference=False,
-                device_index=0,
+                device_index=self.device_idx,
                 stack_traces=["dummy stack trace1", "dummy stack trace2"],
             )
 
-            ref_out = torch.ones((2, 3), device="cuda:0", dtype=torch.float32)
+            ref_out = torch.ones((2, 3), device=device, dtype=torch.float32)
 
             for _ in range(3):
                 torch.compiler.cudagraph_mark_step_begin()
