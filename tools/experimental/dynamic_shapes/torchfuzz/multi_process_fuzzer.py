@@ -4,14 +4,15 @@ Multi-process fuzzer library that uses worker processes to execute fuzzer.py wit
 """
 
 import multiprocessing as mp
+import re
 import subprocess
 import sys
 import time
-import re
-from typing import Tuple, List, Dict
+
 
 try:
     from tqdm import tqdm
+
     HAS_TQDM = True
 except ImportError:
     HAS_TQDM = False
@@ -27,19 +28,24 @@ def persist_print(msg):
             print(msg, file=sys.stderr, flush=True)
     except BrokenPipeError:
         import os
+
         os.makedirs("/tmp/torchfuzz", exist_ok=True)
         with open("/tmp/torchfuzz/crash.log", "a") as f:
             f.write(f"BrokenPipeError: {msg}\n")
 
 
 # List of regex patterns for ignore bucket
-IGNORE_PATTERNS: List[re.Pattern] = [
-    re.compile(r"Dynamo failed to run FX node with fake tensors: call_method fill_diagonal_"),
+IGNORE_PATTERNS: list[re.Pattern] = [
+    re.compile(
+        r"Dynamo failed to run FX node with fake tensors: call_method fill_diagonal_"
+    ),
     re.compile(r"zuf\d+ is not defined"),
     re.compile(r"'zuf\d+' was not declared in this scope"),
     re.compile(r"out_eager_sum: 0\.0"),
     re.compile(r"error: operand #\d+ does not dominate this use"),
-    re.compile(r"TypeError: unsupported operand type\(s\) for divmod\(\): 'SymInt' and 'int'"),
+    re.compile(
+        r"TypeError: unsupported operand type\(s\) for divmod\(\): 'SymInt' and 'int'"
+    ),
     re.compile(r"RuntimeError: self\.stride\(-1\) must be 1 to view ComplexDouble as"),
     re.compile(r"BooleanAtom not allowed in this context"),
     # Add more patterns here as needed, e.g.:
@@ -63,7 +69,7 @@ def is_ignored_output(output: str) -> int:
     return -1
 
 
-def run_fuzzer_with_seed(seed: int) -> Tuple[int, bool, str, float, int]:
+def run_fuzzer_with_seed(seed: int) -> tuple[int, bool, str, float, int]:
     """
     Run fuzzer.py with a specific seed.
 
@@ -108,7 +114,7 @@ def run_fuzzer_with_seed(seed: int) -> Tuple[int, bool, str, float, int]:
 
     except subprocess.TimeoutExpired:
         duration = time.time() - start_time
-        return seed, False, f"Process timed out after 300 seconds", duration, -1
+        return seed, False, "Process timed out after 300 seconds", duration, -1
 
     except Exception as e:
         duration = time.time() - start_time
@@ -119,7 +125,7 @@ def run_multi_process_fuzzer(
     num_processes: int = 2,
     seed_start: int = 1,
     seed_count: int = 10,
-    verbose: bool = False
+    verbose: bool = False,
 ) -> None:
     """
     Run the multi-process fuzzer.
@@ -133,8 +139,10 @@ def run_multi_process_fuzzer(
     seeds = list(range(seed_start, seed_start + seed_count))
 
     persist_print(f"🚀 Starting multi-process fuzzer with {num_processes} processes")
-    persist_print(f"📊 Processing seeds {seed_start} to {seed_start + seed_count - 1} ({len(seeds)} total)")
-    persist_print(f"🔧 Command template: python fuzzer.py --seed {{seed}}")
+    persist_print(
+        f"📊 Processing seeds {seed_start} to {seed_start + seed_count - 1} ({len(seeds)} total)"
+    )
+    persist_print("🔧 Command template: python fuzzer.py --seed {seed}")
     persist_print("=" * 60)
 
     start_time = time.time()
@@ -143,7 +151,9 @@ def run_multi_process_fuzzer(
     failed_count = 0
     ignored_count = 0
     ignored_seeds = []
-    ignored_pattern_counts: Dict[int, int] = {i: 0 for i in range(len(IGNORE_PATTERNS))}
+    ignored_pattern_counts: dict[int, int] = dict.fromkeys(
+        range(len(IGNORE_PATTERNS)), 0
+    )
 
     try:
         # Use multiprocessing Pool to distribute work
@@ -161,9 +171,11 @@ def run_multi_process_fuzzer(
                     desc="Processing seeds",
                     file=sys.stdout,
                     bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}] ✅/❌/❓={postfix}",
-                    dynamic_ncols=True
+                    dynamic_ncols=True,
                 )
-                pbar.set_postfix_str(f"{successful_count}/{failed_count}/{ignored_count} | throughput: 0.00 seeds/hr")
+                pbar.set_postfix_str(
+                    f"{successful_count}/{failed_count}/{ignored_count} | throughput: 0.00 seeds/hr"
+                )
             else:
                 persist_print("Progress: (install tqdm for better progress bar)")
                 pbar = None
@@ -172,7 +184,9 @@ def run_multi_process_fuzzer(
             for i, future in enumerate(future_results):
                 try:
                     seed, success, output, duration, ignored_pattern_idx = future.get()
-                    results.append((seed, success, output, duration, ignored_pattern_idx))
+                    results.append(
+                        (seed, success, output, duration, ignored_pattern_idx)
+                    )
 
                     if ignored_pattern_idx != -1:
                         ignored_seeds.append(seed)
@@ -190,23 +204,31 @@ def run_multi_process_fuzzer(
 
                     # Update progress bar
                     if HAS_TQDM and pbar:
-                        pbar.set_postfix_str(f"{successful_count}/{failed_count}/{ignored_count} | throughput: {throughput:.2f} seeds/hr")
+                        pbar.set_postfix_str(
+                            f"{successful_count}/{failed_count}/{ignored_count} | throughput: {throughput:.2f} seeds/hr"
+                        )
                         # tqdm automatically shows ETA (estimated time remaining) in the bar_format above
                         pbar.update(1)
                     else:
-                        persist_print(f"Completed {i+1}/{len(seeds)} - Seed {seed}: {'✅' if success else '❌'}{' (IGNORED)' if ignored_pattern_idx != -1 else ''}")
+                        persist_print(
+                            f"Completed {i + 1}/{len(seeds)} - Seed {seed}: {'✅' if success else '❌'}{' (IGNORED)' if ignored_pattern_idx != -1 else ''}"
+                        )
 
                     # Only show detailed output for failures (unless verbose)
                     if not success and ignored_pattern_idx == -1:
                         if HAS_TQDM and pbar:
-                            pbar.write(f"❌ FAILURE - Seed {seed} (duration: {duration:.2f}s):")
-                            for line in output.split('\n'):
+                            pbar.write(
+                                f"❌ FAILURE - Seed {seed} (duration: {duration:.2f}s):"
+                            )
+                            for line in output.split("\n"):
                                 if line.strip():
                                     pbar.write(f"   {line}")
                             pbar.write("")  # Empty line
                         else:
-                            persist_print(f"❌ FAILURE - Seed {seed} (duration: {duration:.2f}s):")
-                            for line in output.split('\n'):
+                            persist_print(
+                                f"❌ FAILURE - Seed {seed} (duration: {duration:.2f}s):"
+                            )
+                            for line in output.split("\n"):
                                 if line.strip():
                                     persist_print(f"   {line}")
                             persist_print("")
@@ -214,29 +236,37 @@ def run_multi_process_fuzzer(
                         # Optionally, print ignored failures if desired
                         if verbose:
                             if HAS_TQDM and pbar:
-                                pbar.write(f"🚫 IGNORED - Seed {seed} (duration: {duration:.2f}s):")
-                                for line in output.split('\n'):
+                                pbar.write(
+                                    f"🚫 IGNORED - Seed {seed} (duration: {duration:.2f}s):"
+                                )
+                                for line in output.split("\n"):
                                     if line.strip():
                                         pbar.write(f"   {line}")
                                 pbar.write("")
                             else:
-                                persist_print(f"🚫 IGNORED - Seed {seed} (duration: {duration:.2f}s):")
-                                for line in output.split('\n'):
+                                persist_print(
+                                    f"🚫 IGNORED - Seed {seed} (duration: {duration:.2f}s):"
+                                )
+                                for line in output.split("\n"):
                                     if line.strip():
                                         persist_print(f"   {line}")
                                 persist_print("")
                     elif verbose:
                         if HAS_TQDM and pbar:
-                            pbar.write(f"✅ SUCCESS - Seed {seed} (duration: {duration:.2f}s){' [IGNORED]' if ignored_pattern_idx != -1 else ''}")
+                            pbar.write(
+                                f"✅ SUCCESS - Seed {seed} (duration: {duration:.2f}s){' [IGNORED]' if ignored_pattern_idx != -1 else ''}"
+                            )
                             if output.strip():
-                                for line in output.split('\n'):
+                                for line in output.split("\n"):
                                     if line.strip():
                                         pbar.write(f"   {line}")
                                 pbar.write("")
                         else:
-                            persist_print(f"✅ SUCCESS - Seed {seed} (duration: {duration:.2f}s){' [IGNORED]' if ignored_pattern_idx != -1 else ''}")
+                            persist_print(
+                                f"✅ SUCCESS - Seed {seed} (duration: {duration:.2f}s){' [IGNORED]' if ignored_pattern_idx != -1 else ''}"
+                            )
                             if output.strip():
-                                for line in output.split('\n'):
+                                for line in output.split("\n"):
                                     if line.strip():
                                         persist_print(f"   {line}")
                                 persist_print("")
@@ -248,14 +278,16 @@ def run_multi_process_fuzzer(
                         pbar.update(1)
                         pbar.write(f"❌ POOL ERROR - Seed {seeds[i]}: {str(e)}")
                     else:
-                        persist_print(f"Completed {i+1}/{len(seeds)} - Seed {seeds[i]}: ❌ POOL ERROR")
+                        persist_print(
+                            f"Completed {i + 1}/{len(seeds)} - Seed {seeds[i]}: ❌ POOL ERROR"
+                        )
                         persist_print(f"❌ POOL ERROR - Seed {seeds[i]}: {str(e)}")
                     results.append((seeds[i], False, f"Pool error: {str(e)}", 0.0, -1))
 
             # Close progress bar
             if HAS_TQDM and pbar:
                 pbar.close()
-    except KeyboardInterrupt as e:
+    except KeyboardInterrupt:
         persist_print("\n🛑 Interrupted by user (Ctrl+C)")
         # Print summary up to this point
         total_time = time.time() - start_time
@@ -268,11 +300,19 @@ def run_multi_process_fuzzer(
         failed = [r for r in results if not r[1] and r[4] == -1]
         ignored = [r for r in results if r[4] != -1]
 
-        persist_print(f"✅ Successful: {len(successful)}/{len(results)} ({(len(successful)/len(results)*100 if results else 0):.1f}%)")
-        persist_print(f"❌ Failed:     {len(failed)}/{len(results)} ({(len(failed)/len(results)*100 if results else 0):.1f}%)")
+        persist_print(
+            f"✅ Successful: {len(successful)}/{len(results)} ({(len(successful) / len(results) * 100 if results else 0):.1f}%)"
+        )
+        persist_print(
+            f"❌ Failed:     {len(failed)}/{len(results)} ({(len(failed) / len(results) * 100 if results else 0):.1f}%)"
+        )
         persist_print(f"⏱️  Total time: {total_time:.2f}s")
         if results:
-            persist_print(f"⚡ Throughput: {(len(results) / (total_time / 3600)):.2f} seeds/hr" if total_time > 0 else "⚡ Throughput: N/A")
+            persist_print(
+                f"⚡ Throughput: {(len(results) / (total_time / 3600)):.2f} seeds/hr"
+                if total_time > 0
+                else "⚡ Throughput: N/A"
+            )
         if failed:
             persist_print(f"\n❌ Failed seeds: {[r[0] for r in failed]}")
         if successful:
@@ -287,7 +327,9 @@ def run_multi_process_fuzzer(
             for idx, pattern in enumerate(IGNORE_PATTERNS):
                 count = ignored_pattern_counts[idx]
                 percent = (count / total_ignored * 100) if total_ignored else 0
-                persist_print(f"  Pattern {idx}: {pattern.pattern!r} - {count} ({percent:.1f}%)")
+                persist_print(
+                    f"  Pattern {idx}: {pattern.pattern!r} - {count} ({percent:.1f}%)"
+                )
 
         sys.exit(130)
 
@@ -303,10 +345,18 @@ def run_multi_process_fuzzer(
     failed = [r for r in results if not r[1] and r[4] == -1]
     ignored = [r for r in results if r[4] != -1]
 
-    persist_print(f"✅ Successful: {len(successful)}/{len(results)} ({len(successful)/len(results)*100:.1f}%)")
-    persist_print(f"❌ Failed:     {len(failed)}/{len(results)} ({len(failed)/len(results)*100:.1f}%)")
+    persist_print(
+        f"✅ Successful: {len(successful)}/{len(results)} ({len(successful) / len(results) * 100:.1f}%)"
+    )
+    persist_print(
+        f"❌ Failed:     {len(failed)}/{len(results)} ({len(failed) / len(results) * 100:.1f}%)"
+    )
     persist_print(f"⏱️  Total time: {total_time:.2f}s")
-    persist_print(f"⚡ Throughput: {(len(results) / (total_time / 3600)):.2f} seeds/hr" if total_time > 0 else "⚡ Throughput: N/A")
+    persist_print(
+        f"⚡ Throughput: {(len(results) / (total_time / 3600)):.2f} seeds/hr"
+        if total_time > 0
+        else "⚡ Throughput: N/A"
+    )
 
     if failed:
         persist_print(f"\n❌ Failed seeds: {[r[0] for r in failed]}")
@@ -324,4 +374,6 @@ def run_multi_process_fuzzer(
         for idx, pattern in enumerate(IGNORE_PATTERNS):
             count = ignored_pattern_counts[idx]
             percent = (count / total_ignored * 100) if total_ignored else 0
-            persist_print(f"  Pattern {idx}: {pattern.pattern!r} - {count} ({percent:.1f}%)")
+            persist_print(
+                f"  Pattern {idx}: {pattern.pattern!r} - {count} ({percent:.1f}%)"
+            )

@@ -178,16 +178,16 @@ def fuzz_and_execute(
         return seed, False, error_message
 
 
-
-
 if __name__ == "__main__":
     import argparse
+
     try:
         from multi_process_fuzzer import run_multi_process_fuzzer
     except ImportError:
         # If importing as a module fails, import from the same directory
-        import sys
         import os
+        import sys
+
         current_dir = os.path.dirname(os.path.abspath(__file__))
         sys.path.insert(0, current_dir)
         from multi_process_fuzzer import run_multi_process_fuzzer
@@ -196,15 +196,13 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="PyTorch Fuzzer - Generate and test random PyTorch operations"
     )
-    
+
     # Single seed execution arguments
-    parser.add_argument(
-        "--seed", type=int, help="Random seed for single execution"
-    )
+    parser.add_argument("--seed", type=int, help="Random seed for single execution")
     parser.add_argument(
         "--max-depth", type=int, help="Maximum depth for operation stack (1-20)"
     )
-    
+
     # Multi-process fuzzing arguments
     parser.add_argument(
         "--start", type=int, help="Starting seed value for multi-process fuzzing"
@@ -213,17 +211,23 @@ if __name__ == "__main__":
         "--count", type=int, help="Number of seeds to run in multi-process fuzzing"
     )
     parser.add_argument(
-        "--processes", "-p", type=int, 
-        help="Number of worker processes to use (default: auto-detected)"
+        "--processes",
+        "-p",
+        type=int,
+        help="Number of worker processes to use (default: auto-detected)",
     )
     parser.add_argument(
-        "--verbose", "-v", action="store_true",
-        help="Print detailed output for all runs (not just failures)"
+        "--verbose",
+        "-v",
+        action="store_true",
+        help="Print detailed output for all runs (not just failures)",
     )
-    
+
     # Legacy arguments
     parser.add_argument(
-        "--single", action="store_true", help="Run a single fuzz_and_execute (deprecated, use --seed)"
+        "--single",
+        action="store_true",
+        help="Run a single fuzz_and_execute (deprecated, use --seed)",
     )
     parser.add_argument(
         "--log-level",
@@ -259,31 +263,32 @@ if __name__ == "__main__":
         if args.count is None:
             print("❌ Error: --count is required when --start is specified")
             sys.exit(1)
-        
+
         # Validate arguments
         if args.count < 1:
             print("❌ Error: --count must be at least 1")
             sys.exit(1)
-        
+
         # Default number of processes
         if args.processes is None:
             cpu_count = mp.cpu_count()
             args.processes = max(1, min(16, int(cpu_count * 0.75)))
-        
+
         if args.processes < 1:
             print("❌ Error: Number of processes must be at least 1")
             sys.exit(1)
-        
+
         try:
             run_multi_process_fuzzer(
                 num_processes=args.processes,
                 seed_start=args.start,
                 seed_count=args.count,
-                verbose=args.verbose
+                verbose=args.verbose,
             )
         except Exception as e:
             print(f"❌ Unexpected error: {str(e)}")
             import traceback
+
             traceback.print_exc()
             sys.exit(1)
     else:
@@ -291,5 +296,7 @@ if __name__ == "__main__":
         parser.print_help()
         print("\nExamples:")
         print("  python fuzzer.py --seed 42                    # Run single seed")
-        print("  python fuzzer.py --start 0 --count 1000       # Run multi-process fuzzing")
+        print(
+            "  python fuzzer.py --start 0 --count 1000       # Run multi-process fuzzing"
+        )
         print("  python fuzzer.py --start 100 --count 50 -p 8  # Use 8 processes")
