@@ -13,7 +13,13 @@ namespace torch::distributed {
 
 class Placement {
  public:
+  Placement() = default;
   virtual ~Placement() = default;
+
+  Placement(const Placement&) = default;
+  Placement& operator=(const Placement&) = default;
+  Placement(Placement&&) noexcept = default;
+  Placement& operator=(Placement&&) noexcept = default;
 
   virtual bool is_shard(std::optional<std::int64_t> dim) const {
     return false;
@@ -23,7 +29,8 @@ class Placement {
     return false;
   }
 
-  virtual bool is_partial(std::optional<std::string_view> reduce_op) const {
+  virtual bool is_partial(
+      std::optional<std::string_view> reduce_op = std::nullopt) const {
     return false;
   }
 };
@@ -92,9 +99,13 @@ class Partial : public Placement {
 
   Partial() : Partial("sum") {}
 
-  explicit Partial(std::string reduce_op_) : reduce_op(std::move(reduce_op_)) {}
+  explicit Partial(std::optional<std::string> reduce_op_)
+      : reduce_op(
+            reduce_op_.has_value() ? std::move(*reduce_op_)
+                                   : std::string("sum")) {}
 
-  bool is_partial(std::optional<std::string_view> op) const override {
+  bool is_partial(
+      std::optional<std::string_view> op = std::nullopt) const override {
     return !op.has_value() || *op == reduce_op;
   }
 
