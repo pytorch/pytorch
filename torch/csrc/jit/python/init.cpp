@@ -1885,16 +1885,6 @@ void initJITBindings(PyObject* module) {
         return customObj->getPayload();
       },
       R"doc(Returns the Python object stored on the given opaque object.)doc");
-  m.def(
-      "_set_opaque_object_payload",
-      [](py::object obj, py::object payload) {
-        auto typePtr =
-            torch::getCustomClass("__torch__.torch.classes.aten.OpaqueObject");
-        auto ivalue = torch::jit::toIValue(std::move(obj), typePtr);
-        auto customObj = ivalue.toCustomClass<OpaqueObject>();
-        customObj->setPayload(std::move(payload));
-      },
-      R"doc(Sets the payload of the given opaque object with the given Python object.)doc");
   m.def("unify_type_list", [](const std::vector<TypePtr>& types) {
     std::ostringstream s;
     auto type = unifyTypeList(types, s);

@@ -2,7 +2,7 @@
 
 import torch
 from torch._dynamo.test_case import run_tests, TestCase
-from torch._library.opaque_object import get_payload, make_opaque, set_payload
+from torch._library.opaque_object import get_payload, make_opaque
 
 
 class OpaqueQueue:
@@ -74,8 +74,7 @@ class TestOpaqueObject(TestCase):
 
     def test_ops(self):
         queue = OpaqueQueue([], torch.zeros(3))
-        obj = make_opaque()
-        set_payload(obj, queue)
+        obj = make_opaque(queue)
 
         torch.ops._TestOpaqueObject.queue_push(obj, torch.ones(3) + 1)
         self.assertEqual(queue.size(), 1)
