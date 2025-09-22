@@ -209,6 +209,8 @@ class LRScheduler:
             :attr:`~torch.optim.Optimizer.param_groups` with the same types as their current ``group["lr"]``s.
 
         .. note:: If you're trying to inspect the most recent learning rate, use :meth:`get_last_lr()` instead.
+
+        .. note:: The returned :class:`~torch.Tensor`s are copies, and never alias the optimizer's ``group["lr"]``s.
         """
         raise NotImplementedError
 
@@ -411,6 +413,8 @@ class LambdaLR(LRScheduler):
             :attr:`~torch.optim.Optimizer.param_groups` with the same types as their current ``group["lr"]``s.
 
         .. note:: If you're trying to inspect the most recent learning rate, use :meth:`get_last_lr()` instead.
+
+        .. note:: The returned :class:`~torch.Tensor`s are copies, and never alias the optimizer's ``group["lr"]``s.
         """
         _warn_get_lr_called_within_step(self)
 
@@ -520,6 +524,8 @@ class MultiplicativeLR(LRScheduler):
             :attr:`~torch.optim.Optimizer.param_groups` with the same types as their current ``group["lr"]``s.
 
         .. note:: If you're trying to inspect the most recent learning rate, use :meth:`get_last_lr()` instead.
+
+        .. note:: The returned :class:`~torch.Tensor`s are copies, and never alias the optimizer's ``group["lr"]``s.
         """
         _warn_get_lr_called_within_step(self)
 
@@ -584,6 +590,8 @@ class StepLR(LRScheduler):
             :attr:`~torch.optim.Optimizer.param_groups` with the same types as their current ``group["lr"]``s.
 
         .. note:: If you're trying to inspect the most recent learning rate, use :meth:`get_last_lr()` instead.
+
+        .. note:: The returned :class:`~torch.Tensor`s are copies, and never alias the optimizer's ``group["lr"]``s.
         """
         _warn_get_lr_called_within_step(self)
 
@@ -658,6 +666,8 @@ class MultiStepLR(LRScheduler):
             :attr:`~torch.optim.Optimizer.param_groups` with the same types as their current ``group["lr"]``s.
 
         .. note:: If you're trying to inspect the most recent learning rate, use :meth:`get_last_lr()` instead.
+
+        .. note:: The returned :class:`~torch.Tensor`s are copies, and never alias the optimizer's ``group["lr"]``s.
 
         .. note:: If the current epoch appears in :attr:`milestones` ``n`` times, we scale by :attr:`gamma` to the power
         of ``n``
@@ -750,6 +760,8 @@ class ConstantLR(LRScheduler):
             :attr:`~torch.optim.Optimizer.param_groups` with the same types as their current ``group["lr"]``s.
 
         .. note:: If you're trying to inspect the most recent learning rate, use :meth:`get_last_lr()` instead.
+
+        .. note:: The returned :class:`~torch.Tensor`s are copies, and never alias the optimizer's ``group["lr"]``s.
         """
         _warn_get_lr_called_within_step(self)
 
@@ -851,6 +863,8 @@ class LinearLR(LRScheduler):
             :attr:`~torch.optim.Optimizer.param_groups` with the same types as their current ``group["lr"]``s.
 
         .. note:: If you're trying to inspect the most recent learning rate, use :meth:`get_last_lr()` instead.
+
+        .. note:: The returned :class:`~torch.Tensor`s are copies, and never alias the optimizer's ``group["lr"]``s.
         """
         _warn_get_lr_called_within_step(self)
 
@@ -939,6 +953,8 @@ class ExponentialLR(LRScheduler):
             :attr:`~torch.optim.Optimizer.param_groups` with the same types as their current ``group["lr"]``s.
 
         .. note:: If you're trying to inspect the most recent learning rate, use :meth:`get_last_lr()` instead.
+
+        .. note:: The returned :class:`~torch.Tensor`s are copies, and never alias the optimizer's ``group["lr"]``s.
         """
         _warn_get_lr_called_within_step(self)
 
@@ -1169,6 +1185,8 @@ class PolynomialLR(LRScheduler):
             :attr:`~torch.optim.Optimizer.param_groups` with the same types as their current ``group["lr"]``s.
 
         .. note:: If you're trying to inspect the most recent learning rate, use :meth:`get_last_lr()` instead.
+
+        .. note:: The returned :class:`~torch.Tensor`s are copies, and never alias the optimizer's ``group["lr"]``s.
         """
         _warn_get_lr_called_within_step(self)
 
@@ -1278,6 +1296,8 @@ class CosineAnnealingLR(LRScheduler):
             :attr:`~torch.optim.Optimizer.param_groups` with the same types as their current ``group["lr"]``s.
 
         .. note:: If you're trying to inspect the most recent learning rate, use :meth:`get_last_lr()` instead.
+
+        .. note:: The returned :class:`~torch.Tensor`s are copies, and never alias the optimizer's ``group["lr"]``s.
         """
         _warn_get_lr_called_within_step(self)
 
@@ -1845,6 +1865,8 @@ class CyclicLR(LRScheduler):
 
         .. note:: If you're trying to inspect the most recent learning rate, use :meth:`get_last_lr()` instead.
 
+        .. note:: The returned :class:`~torch.Tensor`s are copies, and never alias the optimizer's ``group["lr"]``s.
+
         .. note:: This method treats :attr:`last_epoch` as the index of the previous batch.
 
         .. note:: When :attr:`cycle_momentum` is ``True``, this method has a side effect of updating the optimizer's
@@ -2006,6 +2028,8 @@ class CosineAnnealingWarmRestarts(LRScheduler):
             :attr:`~torch.optim.Optimizer.param_groups` with the same types as their current ``group["lr"]``s.
 
         .. note:: If you're trying to inspect the most recent learning rate, use :meth:`get_last_lr()` instead.
+
+        .. note:: The returned :class:`~torch.Tensor`s are copies, and never alias the optimizer's ``group["lr"]``s.
         """
         _warn_get_lr_called_within_step(self)
 
@@ -2362,6 +2386,8 @@ class OneCycleLR(LRScheduler):
             :attr:`~torch.optim.Optimizer.param_groups` with the same types as their current ``group["lr"]``s.
 
         .. note:: If you're trying to inspect the most recent learning rate, use :meth:`get_last_lr()` instead.
+
+        .. note:: The returned :class:`~torch.Tensor`s are copies, and never alias the optimizer's ``group["lr"]``s.
 
         .. note:: When :attr:`cycle_momentum` is ``True``, this method has a side effect of updating the optimizer's
         momentum.
