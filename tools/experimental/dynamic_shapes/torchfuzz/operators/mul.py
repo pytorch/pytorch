@@ -1,0 +1,72 @@
+"""Multiply operator implementation."""
+
+import random
+
+from torchfuzz.operators.base import Operator
+from torchfuzz.tensor_fuzzer import Spec, TensorSpec
+
+
+class MulOperator(Operator):
+    """Operator for element-wise multiplication."""
+
+    def __init__(self):
+        super().__init__("torch.ops.aten.mul")
+
+    def can_produce(self, output_spec: Spec) -> bool:
+        """Mul can produce tensors but not scalars."""
+        return isinstance(output_spec, TensorSpec)
+
+    def supports_variable_inputs(self) -> bool:
+        """Mul operator supports variable number of inputs."""
+        return True
+
+    def decompose(self, output_spec: Spec, num_inputs: int = 2) -> list[Spec]:
+        """Decompose tensor into input tensors for multiplication with type promotion."""
+        if not isinstance(output_spec, TensorSpec):
+            raise ValueError("MulOperator can only produce TensorSpec outputs")
+
+        # Use shared type promotion table
+        from torchfuzz.type_promotion import (
+            get_dtype_map,
+            get_dtype_name,
+            get_promotion_table_for_strings,
+        )
+
+        promotion_table = get_promotion_table_for_strings()
+
+        # If num_inputs > 2, promote left-to-right (e.g. (((a * b) * c) * d))
+        # For simplicity, we generate the first two with promotion, rest match output dtype
+        dtype_str = get_dtype_name(output_spec.dtype)
+        supported_types = promotion_table.get(dtype_str, [(dtype_str, dtype_str)])
+
+        # Pick a random promotion pattern for the first two inputs
+        if num_inputs >= 2:
+            dtypes = list(random.choice(supported_types))
+            # For >2 inputs, fill with output dtype
+            while len(dtypes) < num_inputs:
+                dtypes.append(dtype_str)
+        else:
+            dtypes = [dtype_str] * num_inputs
+
+        # Convert dtype strings back to torch dtypes
+        dtype_map = get_dtype_map()
+
+        return [
+            TensorSpec(
+                size=output_spec.size,
+                stride=output_spec.stride,
+                dtype=dtype_map.get(dt, output_spec.dtype),
+            )
+            for dt in dtypes
+        ]
+
+    def codegen(
+        self, output_name: str, input_names: list[str], output_spec: Spec
+    ) -> str:
+        """Generate code for multiplication operation."""
+        if len(input_names) == 2:
+            return f"{output_name} = torch.ops.aten.mul({input_names[0]}, {input_names[1]})"
+        else:
+            # Multiply all input tensors
+            expr = " * ".join(input_names)
+            return f"{output_name} = {expr}"

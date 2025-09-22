@@ -1,13 +1,21 @@
 # mypy: ignore-errors
 import logging
+import os
 import random
+import sys
 from typing import Any, Optional, Union
 
-from codegen import convert_graph_to_python_code, execute_python_code
-from ops_fuzzer import fuzz_operation_graph, fuzz_spec
-from visualize_graph import visualize_operation_graph
+
+# Add parent directory to path so we can import torchfuzz as a module
+current_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(current_dir)
+if parent_dir not in sys.path:
+    sys.path.insert(0, parent_dir)
 
 import torch
+from torchfuzz.codegen import convert_graph_to_python_code, execute_python_code
+from torchfuzz.ops_fuzzer import fuzz_operation_graph, fuzz_spec
+from torchfuzz.visualize_graph import visualize_operation_graph
 
 
 def fuzz_and_execute(
