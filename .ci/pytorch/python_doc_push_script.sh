@@ -83,6 +83,10 @@ rm -rf pytorch || true
 pushd "$pt_checkout"
 pushd docs
 
+# Profile the docs build to see what is taking the longest
+python -m cProfile -o docs_build.prof -m sphinx.cmd.build -b html -d build/doctrees source build/html
+python -c "import pstats; p = pstats.Stats('docs_build.prof'); p.sort_stats('cumtime').print_stats(50)"
+
 # Build the docs
 if [ "$is_main_doc" = true ]; then
   build_docs html || exit $?
