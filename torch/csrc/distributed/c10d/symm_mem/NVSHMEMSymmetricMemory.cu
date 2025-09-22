@@ -51,7 +51,7 @@ struct NVSHMEMAllocation {
 class NVSHMEMPeerAllocInfo : public c10::intrusive_ptr_target {
  public:
   NVSHMEMPeerAllocInfo(
-      std::shared_ptr<NVSHMEMAllocation> allocation,
+      NVSHMEMAllocation* allocation,
       const std::string& group_name)
       : base_ptr_(allocation->ptr),
         buffer_size_(allocation->buffer_size) {
@@ -79,9 +79,16 @@ class NVSHMEMPeerAllocInfo : public c10::intrusive_ptr_target {
     }
     TORCH_INTERNAL_ASSERT(!group_info.rank_to_global_rank.empty());
     rank_to_global_rank_ = group_info.rank_to_global_rank;
+
+    world_within_cuda_p2p_ = true;
     for (int r = 0; r < world_size_; ++r) {
-      buffers_.push_back(nvshmem_ptr(
-          base_ptr_, rank_to_global_rank_[r]));
+      auto peer_ptr = nvshmem_ptr(
+          base_ptr_, rank_to_global_rank_[r]);
+      buffers_.push_back(peer_ptr);
+      // If a peer is over network, `nvshmem_ptr` returns null
+      if (peer_ptr == nullptr) {
+        world_within_cuda_p2p_ = false;
+      }
     }
 
     // TODO: use the same allocation for signal pad
@@ -128,6 +135,8 @@ class NVSHMEMPeerAllocInfo : public c10::intrusive_ptr_target {
   void** signal_pads_dev_;
   std::vector<int> rank_to_global_rank_;
   int* rank_to_global_rank_dev_;
+  // Whether the world is within CUDA P2P only, not network
+  bool world_within_cuda_p2p_;
 
   friend class NVSHMEMSymmetricMemory;
 };
@@ -135,10 +144,9 @@ class NVSHMEMPeerAllocInfo : public c10::intrusive_ptr_target {
 class NVSHMEMSymmetricMemory : public SymmetricMemory {
  public:
   NVSHMEMSymmetricMemory(
-      std::shared_ptr<NVSHMEMAllocation> allocation,
+      NVSHMEMAllocation* allocation,
       const std::string& group_name)
-      : allocation_(allocation),
-        device_idx_(allocation->device_idx),
+      : device_idx_(allocation->device_idx),
         group_name_(group_name) {
     // A handle stores two types of info:
     // (i) allocation's base ptrs and base signal pads, ours and peers'
@@ -153,7 +161,7 @@ class NVSHMEMSymmetricMemory : public SymmetricMemory {
   // Copy with offset is allowed
   // This is mostly a shallow copy that shares the pointer to `NVSHMEMPeerAllocInfo` which has been created by `other`
   NVSHMEMSymmetricMemory(const NVSHMEMSymmetricMemory& other, size_t offset)
-      : allocation_(other.allocation_), device_idx_(other.device_idx_), group_name_(other.group_name_), pai_(other.pai_) {
+      : device_idx_(other.device_idx_), group_name_(other.group_name_), pai_(other.pai_) {
     offset_ = offset;
   }
 
@@ -231,8 +239,11 @@ class NVSHMEMSymmetricMemory : public SymmetricMemory {
     return pai_->rank_to_global_rank_dev_;
   };
 
+  bool world_within_direct_access() override {
+    return pai_->world_within_cuda_p2p_;
+  }
+
  private:
-  std::shared_ptr<NVSHMEMAllocation> allocation_;
   int device_idx_;
   std::string group_name_;
   c10::intrusive_ptr<NVSHMEMPeerAllocInfo> pai_;
@@ -241,7 +252,7 @@ class NVSHMEMSymmetricMemory : public SymmetricMemory {
 
 // Bootstrap based on user's setting for NCCL
 // Long term, this may be a bit unclean; short term, it improves UX
-void maybe_initialize_env_vars() {
+static void maybe_initialize_env_vars() {
   auto nccl_socket_if_name = c10::utils::get_env("NCCL_SOCKET_IFNAME");
   auto nccl_hca_list = c10::utils::get_env("NCCL_IB_HCA");
   auto nccl_ib_gid_index = c10::utils::get_env("NCCL_IB_GID_INDEX");
@@ -263,16 +274,20 @@ void maybe_initialize_env_vars() {
   }
 }
 
-void initialize_nvshmem_with_store(
+static void initialize_nvshmem_with_store(
     c10::intrusive_ptr<c10d::Store> store,
     int rank,
-    int world_size) {
+    int world_size,
+    int device_idx) {
   static bool is_initialized = false;
   if (is_initialized) {
     return;
   }
 
+  c10::cuda::CUDAGuard guard(device_idx);
   maybe_initialize_env_vars();
+  // Make sure the CUDA runtime is initialized.
+  cudaFree(nullptr);
 
   nvshmemx_uniqueid_t unique_id;
   NVSHMEM_CHECK(
@@ -307,20 +322,21 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
         group_name == std::nullopt,
         "NVSHMEMSymmetricMemoryAllocator::alloc "
         "must not be called with a group_name");
+    c10::cuda::CUDAGuard guard(device_idx);
 
     auto group_info = get_group_info("0");
     auto store = group_info.store;
     int rank = group_info.rank;
     int world_size = group_info.world_size;
 
-    initialize_nvshmem_with_store(store, rank, world_size);
+    initialize_nvshmem_with_store(store, rank, world_size, device_idx);
     auto ptr = nvshmem_malloc(size);
     // If size is 0 (which is legal allocation request) we shouldn't error out
     TORCH_CHECK(ptr != nullptr || size == 0, "nvshmem_malloc failed");
-    auto allocation =
-        std::make_shared<NVSHMEMAllocation>(ptr, size, device_idx);
     // TODO: thread safety
-    allocations_.try_emplace(ptr, std::move(allocation));
+    allocations_.try_emplace(
+      ptr,
+      std::make_unique<NVSHMEMAllocation>(ptr, size, device_idx));
     return ptr;
   }
 
@@ -372,7 +388,7 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
     } else {
       // Create a new rendezvous
       symm_mem =
-          c10::make_intrusive<NVSHMEMSymmetricMemory>(allocation, *group_name);
+          c10::make_intrusive<NVSHMEMSymmetricMemory>(allocation.get(), *group_name);
     }
 
     // Cache rendezvous using allocation's base address as key
@@ -406,7 +422,7 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
   }
 
  private:
-  std::unordered_map<void*, std::shared_ptr<NVSHMEMAllocation>> allocations_;
+  std::unordered_map<void*, std::unique_ptr<NVSHMEMAllocation>> allocations_;
   std::map<std::tuple<void*, std::string>, c10::intrusive_ptr<NVSHMEMSymmetricMemory>>
       symm_mems_;
 };

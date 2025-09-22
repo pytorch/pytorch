@@ -210,10 +210,6 @@ templates_path = [
 coverage_ignore_functions = [
     # torch
     "typename",
-    # torch.cuda
-    "check_error",
-    "cudart",
-    "is_bf16_supported",
     # torch.cuda._sanitizer
     "zip_arguments",
     "zip_by_key",
@@ -513,10 +509,6 @@ coverage_ignore_functions = [
     "custom_fwd",
     # torch.cuda.amp.common
     "amp_definitely_not_available",
-    # torch.cuda.graphs
-    "graph_pool_handle",
-    "is_current_stream_capturing",
-    "make_graphed_callables",
     # torch.mtia.memory
     "reset_peak_memory_stats",
     # torch.cuda.nccl
@@ -528,25 +520,11 @@ coverage_ignore_functions = [
     "reduce_scatter",
     "unique_id",
     "version",
-    # torch.cuda.nvtx
-    "range",
-    "range_end",
-    "range_start",
     # torch.cuda.profiler
     "init",
     "profile",
     "start",
     "stop",
-    # torch.cuda.random
-    "get_rng_state",
-    "get_rng_state_all",
-    "initial_seed",
-    "manual_seed",
-    "manual_seed_all",
-    "seed",
-    "seed_all",
-    "set_rng_state",
-    "set_rng_state_all",
     # torch.distributed.algorithms.ddp_comm_hooks.ddp_zero_hook
     "hook_with_zero_step",
     "hook_with_zero_step_interleaved",
@@ -2176,8 +2154,6 @@ coverage_ignore_classes = [
     "EventHandler",
     "SynchronizationError",
     "UnsynchronizedAccessError",
-    # torch.cuda.memory
-    "MemPool",
     # torch.distributed.elastic.multiprocessing.errors
     "ChildFailedError",
     "ProcessFailure",
@@ -2483,10 +2459,6 @@ coverage_ignore_classes = [
     # torch.amp.grad_scaler
     "GradScaler",
     "OptState",
-    # torch.cuda.graphs
-    "CUDAGraph",
-    # torch.cuda.streams
-    "Event",
     # torch.distributed.algorithms.ddp_comm_hooks.post_localSGD_hook
     "PostLocalSGDState",
     # torch.distributed.algorithms.ddp_comm_hooks.powerSGD_hook
@@ -2514,6 +2486,8 @@ coverage_ignore_classes = [
     # torch.distributed.checkpoint.hf_storage
     "HuggingFaceStorageReader",
     "HuggingFaceStorageWriter",
+    # torch.distributed.checkpoint.quantized_hf_storage
+    "QuantizedHuggingFaceStorageReader",
     # torch.distributed.checkpoint.metadata
     "BytesStorageMetadata",
     "ChunkStorageMetadata",
@@ -3178,6 +3152,8 @@ coverage_ignore_classes = [
     "WeakIdKeyDictionary",
     "WeakIdRef",
     "WeakTensorKeyDictionary",
+    # torch.utils.debug_mode
+    "DebugMode",
 ]
 
 # The suffix(es) of source filenames.
@@ -3330,13 +3306,6 @@ def coverage_post_process(app, exception):
     # Only run this test for the coverage build
     if not isinstance(app.builder, CoverageBuilder):
         return
-
-    if not torch.distributed.is_available():
-        raise RuntimeError(
-            "The coverage tool cannot run with a version "
-            "of PyTorch that was built with USE_DISTRIBUTED=0 "
-            "as this module's API changes."
-        )
 
     # These are all the modules that have "automodule" in an rst file
     # These modules are the ones for which coverage is checked

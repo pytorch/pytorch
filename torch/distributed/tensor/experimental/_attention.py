@@ -2,27 +2,18 @@ import contextlib
 import itertools
 import logging
 import types
-import weakref
 from abc import ABC, abstractmethod
 from collections.abc import Generator
 from dataclasses import dataclass
 from enum import auto, Enum
-from typing import Any, Callable, Optional, Protocol, Union
+from typing import Any, Callable, Optional, Protocol
 
 import torch
 import torch.distributed as dist
 import torch.distributed._functional_collectives as ft_c
 import torch.nn.functional as F
-from torch import nn
 from torch.distributed.device_mesh import DeviceMesh
-from torch.distributed.tensor import (
-    distribute_module,
-    distribute_tensor,
-    DTensor,
-    Replicate,
-    Shard,
-)
-from torch.distributed.tensor.parallel.style import ParallelStyle
+from torch.distributed.tensor import distribute_tensor, DTensor, Shard
 from torch.nn.attention.flex_attention import (
     _mask_mod_signature,
     BlockMask,
@@ -49,25 +40,6 @@ aten = torch.ops.aten
 logger = logging.getLogger(__name__)
 
 
-def _need_scaling() -> bool:
-    if hasattr(torch.version, "hip") and torch.version.hip is not None:
-        gcn_arch_name = torch.cuda.get_device_properties("cuda").gcnArchName
-        _is_ck_supported = False
-        for arch in ["gfx942", "gfx950"]:
-            if arch in gcn_arch_name:
-                _is_ck_supported = True
-        # Check the function exists
-        _preferred_rocm_fa_library = torch.backends.cuda.preferred_rocm_fa_library
-        _CK_BACKEND = torch.backends.cuda._ROCmFABackends["ck"]
-        # Note: it is possible that CK is selected but not compiled in the binary.
-        if _is_ck_supported and _preferred_rocm_fa_library() == _CK_BACKEND:
-            # Unsure about CK's behavior, keep logsumexp untouched
-            return False
-        return True
-    else:
-        return False
-
-
 class _DispatchMode(Enum):
     MONKEY_PATCH = auto()
     TORCH_FUNCTION = auto()
@@ -83,7 +55,7 @@ class _ContextParallelOptions:
     # errors. It is likely this is always True but we currently keep this variable
     # for the experimental purpose.
     convert_to_f32: bool = True
-    enable_load_balance = True
+    enable_load_balance: bool = True
     rotate_method: _RotateMethod = _RotateMethod.ALL_GATHER
 
 
@@ -92,21 +64,12 @@ _cp_options = _ContextParallelOptions()
 
 @dataclass
 class _ContextParallelGlobalVars:
-    # The current context parallel impl requires a record of some info
-    # as global vars. This dataclass stores those variables.
-    # TODO: this var should be able to stored in CP context
-    cp_shard_dim: int = 0
     # This variable stores the TorchFunctionMode singleton because using multiple TF
     # instances for dispatching may trigger recompilations
     torch_function_mode: Optional[TorchFunctionMode] = None
 
 
 _cp_global_vars = _ContextParallelGlobalVars()
-
-
-def _set_cp_global_var(name: str, value: Any) -> None:
-    """Set a global variable for context parallelism."""
-    setattr(_cp_global_vars, name, value)
 
 
 def _is_causal_behavior(
@@ -171,6 +134,7 @@ class _SDPAMerger:
         self._seq_dim = seq_dim
         self._out: Optional[torch.Tensor] = None
         self._lse: Optional[torch.Tensor] = None
+        self._should_lse_squeeze = False
         self._convert_to_f32 = convert_to_f32
         self._out_dtype = torch.float32
         self._lse_dtype = torch.float32
@@ -178,7 +142,14 @@ class _SDPAMerger:
     def _merge_one(
         self, block_out: torch.Tensor, block_lse: torch.Tensor, partial: bool
     ) -> None:
-        block_lse = block_lse.unsqueeze(dim=-1)
+        # The cuDNN backend preserves the last dimension for LSE.
+        # Apply unsqueeze only if the input does not already have
+        # the required dimensionality.
+        if len(block_lse.shape) < len(block_out.shape):
+            block_lse = block_lse.unsqueeze(dim=-1)
+            self._should_lse_squeeze = True
+        assert len(block_lse.shape) == len(block_out.shape)
+
         if self._lse is None:
             self._lse = block_lse
             self._out = block_out
@@ -236,8 +207,12 @@ class _SDPAMerger:
     def results(self) -> tuple[torch.Tensor, torch.Tensor]:
         assert self._out is not None
         assert self._lse is not None
-        out, lse = self._out, self._lse.squeeze(-1)
-        return out.to(self._out_dtype), lse.to(self._lse_dtype)
+        out = self._out.to(self._out_dtype)
+        if self._should_lse_squeeze:
+            lse = self._lse.squeeze(-1).to(self._lse_dtype)
+        else:
+            lse = self._lse.to(self._lse_dtype)
+        return out, lse
 
 
 class _AttentionOp(Protocol):
@@ -388,7 +363,7 @@ def _templated_ring_attention(
     (k0, k3). For rank0, no computation is needed for q0. However, computations for
     q3k1 and q3k2 are required, so only q3 is used for SDPA. This corresponds to the
     `else` of the (`if`, `elif`, `else`) in the implementation.
-    For rank1, k0 is not needed for q1 and q2, so only k3 is used for SDPA. This
+    For rank1, k3 is not needed for q1 and q2, so only k0 is used for SDPA. This
     corresponds to the `elif` of (`if`, `elif`, `else`) in the implementation.
 
     Parameters
@@ -476,7 +451,7 @@ def _templated_ring_attention(
         else:
             # Round-robin load balancing case, and i > rank.
             # We need to do SPDA with only the second half of the q, and update
-            # only the the second part of  logsumexp. So partial is True.
+            # only the second part of  logsumexp. So partial is True.
             # Note that q, k, v, each contains two chunks.
             q, k, v, partial = query.chunk(2, dim=2)[1], key, value, True
 
@@ -489,8 +464,6 @@ def _templated_ring_attention(
             is_causal=is_causal_behavior.value,
             **kwargs,
         )
-        if _need_scaling():
-            logsumexp *= 0.6931471805599453
         sdpa_merger.step(out, logsumexp, partial)
 
     return *sdpa_merger.results(), *rest
@@ -963,18 +936,10 @@ def _distribute_function(
     output_fn: Optional[Callable] = None,
 ) -> None:
     """
-    ``distribute_function`` is an experimental API that allows users to "distribute"
-    the inputs and outputs of a function. Similar to ``distribute_module``, this API
-    installs hooks to the ``fn`` to convert the inputs and outputs. There are two
-    major differences between ``distribute_function`` and ``distribute_module``.
-    First, a function does not have parameters and buffers, as a result,
-    ``distribute_function`` itself won't convert any parameters/buffers but simply
-    install the input and output hooks.  The tensor conversion will happen in the hooks.
-    Another difference is an nn.Module subclass can have several instances and each
-    instance be fed into ``distribute_module`` independently with affecting other
-    instance. On the other hand, function is a singleton object. So if a function
-    is distributed by ``distribute_function`` all subsequent calls to the function
-    will invoke the installed hooks.
+    A helper function to replace a function with a distributed version by
+    using the monkey patching approach.
+
+    This function is for the CP internal usage only.
 
     Args:
         fn (Callable): the function to be distributed.
@@ -1025,7 +990,7 @@ def _restore_function(fn: Callable, fn_module: types.ModuleType) -> None:
 
 
 @contextlib.contextmanager
-def _enable_cp_dispatcher() -> Generator[None, None, None]:
+def _enable_cp_dtensor_dispatcher() -> Generator[None, None, None]:
     """Enables DTensor dispatcher to dispatch SDPA to CP."""
     old_handlers = DTensor._op_dispatcher._custom_op_handlers
     DTensor._op_dispatcher._custom_op_handlers = {**old_handlers, **customized_ops}
@@ -1035,106 +1000,350 @@ def _enable_cp_dispatcher() -> Generator[None, None, None]:
     DTensor._op_dispatcher._custom_op_handlers = old_handlers
 
 
-class _AttentionContextParallel(ParallelStyle):
-    """
-    Applies context parallel optimizations to the attention layer.
+@contextlib.contextmanager
+def _context_parallel_dispatcher(
+    seq_dim: int, mesh: DeviceMesh
+) -> Generator[None, None, None]:
+    """Replace SDPA with the CP-wrapped version and enable DTensor CP dispatcher."""
 
-    This will work for nn.MultiHeadedAttention and custom attention layers that
-    call F.scaled_dotproduct_attention with a similar signature.
+    def attention_input_fn(
+        mesh: DeviceMesh, *args: tuple[Any, ...], **kwargs: dict[str, Any]
+    ) -> tuple[tuple[Any, ...], dict[str, Any]]:
+        placement = [Shard(seq_dim)]
+        all_args = []
 
-    This expects the `forward` method consumes either:
+        for arg in itertools.chain(args, kwargs.values()):
+            if isinstance(arg, torch.Tensor) and not isinstance(arg, DTensor):
+                arg = DTensor.from_local(arg, mesh, placement, run_check=False)
 
-    * a single tensor for self attention
-    * one argument for each of: query, key, value
+            all_args.append(arg)
 
-    This currently only supports ring attention and the
-    SDPBackend.FLASH_ATTENTION backend. See sdpa_kernel.
+        new_args = tuple(all_args[0 : len(args)])
+        new_kwargs = dict(zip(kwargs.keys(), all_args[len(args) :]))
+        return new_args, new_kwargs
 
-    Non-flash attention backends will result in incorrect results.
-    """
-
-    # use a weakref dictionary to store context managers for each nn.Module
-    _CONTEXT_MANAGERS: "weakref.WeakKeyDictionary[nn.Module, Any]" = (
-        weakref.WeakKeyDictionary()
-    )
-
-    def _apply(self, module: nn.Module, device_mesh: DeviceMesh) -> nn.Module:
-        if not device_mesh.ndim == 1:
-            raise ValueError("CP only supports single dimension device mesh")
-
-        return distribute_module(
-            module,
-            device_mesh,
-            input_fn=self._input_fn,  # type: ignore[arg-type]
-            output_fn=self._output_fn,  # type: ignore[arg-type]
-        )
-
-    @classmethod
-    def _input_fn(
-        cls,
-        module: nn.Module,
-        inputs: tuple[Union[torch.Tensor, int, float], ...],
-        device_mesh: DeviceMesh,
-    ) -> tuple[Union[torch.Tensor, int, float], ...]:
-        # TODO(d4l3k); this should be Shard(2), need to fix Linear layer rules
-        placement = [Replicate()]
-
-        def backward_hook(grad: torch.Tensor) -> None:
-            if module in cls._CONTEXT_MANAGERS:
-                cls._CONTEXT_MANAGERS[module].__exit__(None, None, None)
-                del cls._CONTEXT_MANAGERS[module]
-
-        # convert inputs to DTensor
-        inp = []
-        for input in inputs:
-            if isinstance(input, torch.Tensor) and not isinstance(input, DTensor):
-                input = DTensor.from_local(
-                    input.contiguous(), device_mesh, placement, run_check=False
-                )
-
-            if isinstance(input, torch.Tensor) and input.requires_grad:
-                input.register_hook(backward_hook)
-
-            inp.append(input)
-
-        manager = _enable_cp_dispatcher()
-        manager.__enter__()
-        cls._CONTEXT_MANAGERS[module] = manager
-
-        return tuple(inp)
-
-    @classmethod
-    def _output_fn(
-        cls,
-        module: nn.Module,
-        outputs: Union[torch.Tensor, tuple[Union[torch.Tensor, int, float], ...]],
-        device_mesh: DeviceMesh,
-    ) -> Union[
-        Union[torch.Tensor, int, float], tuple[Union[torch.Tensor, int, float], ...]
-    ]:
-        cls._CONTEXT_MANAGERS[module].__exit__(None, None, None)
-        del cls._CONTEXT_MANAGERS[module]
-
-        def backward_hook(grad: torch.Tensor) -> None:
-            if module not in cls._CONTEXT_MANAGERS:
-                manager = _enable_cp_dispatcher()
-                manager.__enter__()
-                cls._CONTEXT_MANAGERS[module] = manager
-
-        # back to local tensor
-        out = []
+    def attention_output_fn(mesh: DeviceMesh, outputs: Any) -> Any:
+        new_outputs = []
         for output in [outputs] if isinstance(outputs, torch.Tensor) else outputs:
             output = output.to_local() if isinstance(output, DTensor) else output
-
-            if isinstance(output, torch.Tensor) and output.requires_grad:
-                output.register_hook(backward_hook)
-
-            out.append(output)
+            new_outputs.append(output)
 
         if isinstance(outputs, torch.Tensor):
-            return out[0]
+            return new_outputs[0]
 
-        return tuple(out)
+        return tuple(new_outputs)
+
+    class DistributeFunction(TorchFunctionMode):
+        def __init__(
+            self,
+            fn: Callable,
+            device_mesh: DeviceMesh,
+            input_fn: Optional[Callable] = None,
+            output_fn: Optional[Callable] = None,
+        ):
+            self._device_mesh = device_mesh
+            self._input_fn = input_fn
+            self._output_fn = output_fn
+            self._fn = fn
+
+        def __torch_function__(
+            self,
+            func: Callable,
+            types: Any,
+            args: tuple[Any, ...] = (),
+            kwargs: Optional[dict[str, Any]] = None,
+        ) -> Any:
+            kwargs = kwargs or {}
+
+            # special handler for flex_attention
+            if func == torch._higher_order_ops.flex_attention:
+                query, key, value, score_mod, block_mask = args[:5]
+                assert isinstance(query, torch.Tensor)
+                assert isinstance(key, torch.Tensor)
+                assert isinstance(value, torch.Tensor)
+                assert isinstance(block_mask, tuple)
+
+                global_key = ft_c.all_gather_tensor_autograd(
+                    key, seq_dim, self._device_mesh
+                )
+                global_value = ft_c.all_gather_tensor_autograd(
+                    value, seq_dim, self._device_mesh
+                )
+
+                # shape rewrite: because torch.nn.flex_attention() checks
+                # the QKV shape against the block_mask object, we need to
+                # manually rewrite the shape info in block_mask tuple to
+                # make it compatible with q_shard, k_global, v_global
+                if block_mask[1] != global_key.size(-2):
+                    block_mask = (block_mask[0], global_key.size(-2), *block_mask[2:])
+
+                return func(
+                    query,
+                    global_key,
+                    global_value,
+                    score_mod,
+                    block_mask,
+                    *args[5:],
+                    **kwargs,
+                )
+
+            if func != self._fn:
+                return func(*args, **kwargs)
+
+            if self._input_fn is not None:
+                args, kwargs = self._input_fn(self._device_mesh, *args, **kwargs)
+            output = func(*args, **kwargs)
+            if self._output_fn is not None:
+                output = self._output_fn(self._device_mesh, output)
+            return output
+
+    if _dispatch_mode == _DispatchMode.MONKEY_PATCH:
+        _distribute_function(
+            F.scaled_dot_product_attention,
+            F,
+            mesh,
+            attention_input_fn,
+            attention_output_fn,
+        )
+        with _enable_cp_dtensor_dispatcher():
+            yield
+        _restore_function(F.scaled_dot_product_attention, F)
+    elif _dispatch_mode == _DispatchMode.TORCH_FUNCTION:
+        tf_mode = _cp_global_vars.torch_function_mode
+        if tf_mode is None:
+            tf_mode = DistributeFunction(
+                F.scaled_dot_product_attention,
+                mesh,
+                attention_input_fn,
+                attention_output_fn,
+            )
+            _cp_global_vars.torch_function_mode = tf_mode
+
+        with tf_mode:
+            with _enable_cp_dtensor_dispatcher():
+                yield
+    else:
+        raise NotImplementedError("torch dispatch mode is not supported yet.")
+
+
+def _generate_round_robin_indices(
+    seq_length: int,
+    cp_world_size: int,
+    device: torch.device,
+    restore: bool = False,
+) -> torch.Tensor:
+    """
+    Generate round-robin load balancing indices or restore indices.
+    Args:
+        seq_length: Total sequence length
+        cp_world_size: Context parallel world size
+        device: Device to place the tensor on
+        restore: If True, generate restore indices that map round-robin reordered
+                positions back to original positions. If False, generate load
+                balance indices that reorder original positions to round-robin pattern.
+    Returns:
+        Index tensor of shape (seq_length,) with the requested mapping.
+    """
+    assert seq_length % (cp_world_size * 2) == 0
+    chunk_size = seq_length // (cp_world_size * 2)
+    all_indices = []
+
+    for cp_rank in range(cp_world_size):
+        # Generate indices for first chunk of the cp rank
+        first_chunk_start = cp_rank * chunk_size
+        first_chunk_indices = list(
+            range(first_chunk_start, first_chunk_start + chunk_size)
+        )
+
+        # Second chunk: positions from the complementary chunk
+        second_chunk_idx = cp_world_size * 2 - cp_rank - 1
+        second_chunk_start = second_chunk_idx * chunk_size
+        second_chunk_indices = list(
+            range(second_chunk_start, second_chunk_start + chunk_size)
+        )
+        # combine the indices for this rank
+        all_indices.extend(first_chunk_indices + second_chunk_indices)
+    all_indices_tensor = torch.tensor(all_indices, dtype=torch.int, device=device)
+    if restore:
+        all_indices_tensor = torch.argsort(all_indices_tensor)
+    return all_indices_tensor
+
+
+def _context_parallel_buffers(
+    mesh: DeviceMesh,
+    buffers: list[torch.Tensor],
+    buffer_seq_dims: list[int],
+    load_balance_indices: Optional[torch.Tensor] = None,
+) -> list[torch.Tensor]:
+    """Shard the buffers along the sequence dimensions according to CP rules."""
+    new_buffers = []
+    for buffer, seq_dim in zip(buffers, buffer_seq_dims):
+        if load_balance_indices is not None:
+            buffer = torch.index_select(buffer, dim=seq_dim, index=load_balance_indices)
+
+        # use DTensor to shard the buffer on sequence dimension, retain the local tensor
+        sharded_buffer = distribute_tensor(
+            buffer, mesh, [Shard(seq_dim)], src_data_rank=None
+        ).to_local()
+        new_buffers.append(sharded_buffer)
+
+    return new_buffers
+
+
+#####################################################
+# Current public APIs, but are also subject to change
+#####################################################
+@contextlib.contextmanager
+@torch.no_grad()
+def context_parallel(
+    mesh: DeviceMesh,
+    *,
+    buffers: Optional[list[torch.Tensor]] = None,
+    buffer_seq_dims: Optional[list[int]] = None,
+    no_restore_buffers: Optional[set[torch.Tensor]] = None,
+) -> Generator[None, None, None]:
+    """
+
+    ``context_parallel`` is an experimental API to enable context
+    parallelism (CP). This API performs two actions: 1) patch the SDPA
+    (``torch.nn.functional.scaled_dot_product_attention``) with the CP-enabled
+    one, 2) shard ``buffers`` along the sequence dimension and each rank will
+    preserve the corresponding shard according ``mesh``.
+
+    Args:
+        mesh (:class:`DeviceMesh`): the device mesh for the context parallelism.
+        buffers (Optional[List[torch.Tensor]]): buffers that the usage depend
+            on the sequence dimension. Examples are input batch, labels and
+            positional embedding buffers. These buffers must be sharded along
+            the sequence dimension to ensure the accuracy. The sharding will
+            happen in-place, the buffer's shape will change within the context.
+            The buffers will be restored after the context finishes.
+            ``no_restore_buffers`` can be used to specify which buffers don't
+            need to be restored. Note that ``buffers`` should not contain any
+            nn.Parameter.
+        buffer_seq_dims (Optional[List[int]]): the sequence dimensions of ``buffers``.
+        no_restore_buffers (Optional[Set[torch.Tensor]]): buffers in these set
+            won't be restored after the context exits. This set must be a subset
+            of ``buffers``. If the buffers won't be used after the context exits,
+            these buffers can be put in this list to avoid extra restore time.
+
+    .. warning::
+        `torch.distributed.tensor.experimental.context_parallel` is a
+        prototype feature in PyTorch. The API is subject to change.
+    """
+    buffers = [] if buffers is None else buffers
+    buffer_seq_dims = [] if buffer_seq_dims is None else buffer_seq_dims
+    no_restore_buffers = set() if no_restore_buffers is None else no_restore_buffers
+
+    if len(buffers) != len(buffer_seq_dims):
+        raise ValueError(
+            "`seq_dims` must have the same number of elements as `buffers`."
+        )
+
+    for buffer in no_restore_buffers:
+        # Cannot use `if not buffer in buffers` which will incur tensor comparison.
+        if not any(b is buffer for b in buffers):
+            raise ValueError("`no_restore_buffers` must be a subset of `buffers`.")
+
+    original_buffers = [None if b in no_restore_buffers else b.clone() for b in buffers]
+
+    device = buffers[0].device
+    seq_length = buffers[0].shape[buffer_seq_dims[0]]
+    cp_world_size = mesh.size()
+    if _cp_options.enable_load_balance:
+        load_balance_indices = _generate_round_robin_indices(
+            seq_length=seq_length,
+            cp_world_size=cp_world_size,
+            device=device,
+        )
+    else:
+        load_balance_indices = None
+    shards = _context_parallel_buffers(
+        mesh, buffers, buffer_seq_dims, load_balance_indices
+    )
+    for buffer, shard in zip(buffers, shards):
+        shard = shard.clone()
+        buffer.resize_(shard.shape)
+        buffer.copy_(shard)
+
+    with _context_parallel_dispatcher(seq_dim=2, mesh=mesh):
+        yield
+
+    for buffer, original_buffer in zip(buffers, original_buffers):
+        if original_buffer is not None:
+            buffer.resize_(original_buffer.shape)
+            buffer.copy_(original_buffer)
+
+
+@torch.no_grad()
+def context_parallel_unshard(
+    mesh: DeviceMesh,
+    buffers: list[torch.Tensor],
+    seq_dims: list[int],
+) -> list[torch.Tensor]:
+    """
+    Unshard the tensors (e.g., output) that are sharded due to context parallelism.
+
+    Args:
+        mesh (:class:`DeviceMesh`): the device mesh for the context parallelism.
+        buffers (List[torch.Tensor]): the buffers to be unsharded.
+        seq_dims (List[int]): the sequence dimensions of ``buffers``. This list
+            must have the same length as ``buffers``.
+
+    Returns:
+        List[torch.Tensor]: the unsharded buffers.
+    """
+    if _cp_options.enable_load_balance:
+        device = buffers[0].device
+        cp_world_size = mesh.size()
+        seq_length = buffers[0].shape[seq_dims[0]] * cp_world_size
+        restore_indices = _generate_round_robin_indices(
+            seq_length=seq_length,
+            cp_world_size=cp_world_size,
+            device=device,
+            restore=True,
+        )
+    else:
+        restore_indices = None
+    unsharded_buffers = []
+    for b, dim in zip(buffers, seq_dims):
+        b = b.contiguous()
+        unsharded_b = _maybe_wait(ft_c.all_gather_tensor(b, dim, mesh))
+
+        if restore_indices is not None:
+            unsharded_b = torch.index_select(
+                unsharded_b, dim=dim, index=restore_indices
+            )
+
+        unsharded_buffers.append(unsharded_b)
+    return unsharded_buffers
+
+
+def set_rotate_method(rotate_method: str) -> None:
+    """
+    Context Parallel SDPA requires the rotation of kv shards. Users can call this
+    API to specify which rotation method to use. "alltoall" shuffles the kv shards
+    using all-to-all collective. While "allgather" gathers the kv shards using
+    all-gather collective after the first sub-SDPA computation. If this API has not
+    been called, the default rotate method is "allgather".
+
+    Args:
+        rotate_method (str): the rotate method to use. Currently only supports
+        "allgather" and "alltoall". If a different string other than these two
+        is passed in, the function will raise an error.
+
+    Returns:
+        None
+    """
+    if rotate_method == "allgather":
+        _cp_options.rotate_method = _RotateMethod.ALL_GATHER
+    elif rotate_method == "alltoall":
+        _cp_options.rotate_method = _RotateMethod.ALL_TO_ALL
+    else:
+        raise NotImplementedError(
+            "Context Parallel does not support "
+            f"using {rotate_method} for kv shards rotation"
+        )
 
 
 def create_cp_block_mask(
@@ -1221,350 +1430,3 @@ def create_cp_block_mask(
     seq_lengths = block_mask.seq_lengths
     block_mask.seq_lengths = (seq_lengths[0], seq_lengths[1] // cp_group_size)
     return block_mask
-
-
-@contextlib.contextmanager
-def _context_parallel(seq_dim: int, mesh: DeviceMesh) -> Generator[None, None, None]:
-    """Replace SDPA with the CP-wrapped version and enable DTensor CP dispatcher."""
-
-    def attention_input_fn(
-        mesh: DeviceMesh, *args: tuple[Any, ...], **kwargs: dict[str, Any]
-    ) -> tuple[tuple[Any, ...], dict[str, Any]]:
-        placement = [Shard(seq_dim)]
-        all_args = []
-
-        for arg in itertools.chain(args, kwargs.values()):
-            if isinstance(arg, torch.Tensor) and not isinstance(arg, DTensor):
-                arg = DTensor.from_local(arg, mesh, placement, run_check=False)
-
-            all_args.append(arg)
-
-        new_args = tuple(all_args[0 : len(args)])
-        new_kwargs = dict(zip(kwargs.keys(), all_args[len(args) :]))
-        return new_args, new_kwargs
-
-    def attention_output_fn(mesh: DeviceMesh, outputs: Any) -> Any:
-        new_outputs = []
-        for output in [outputs] if isinstance(outputs, torch.Tensor) else outputs:
-            output = output.to_local() if isinstance(output, DTensor) else output
-            new_outputs.append(output)
-
-        if isinstance(outputs, torch.Tensor):
-            return new_outputs[0]
-
-        return tuple(new_outputs)
-
-    def unshard(x: torch.Tensor, mesh: DeviceMesh, shard_dim: int) -> torch.Tensor:
-        x = x.contiguous()
-        all_xs = [torch.empty_like(x) for _ in range(mesh.size())]
-        ft_c.all_gather_inplace(all_xs, x, mesh)
-        return torch.cat(all_xs, dim=shard_dim)
-
-    class DistributeFunction(TorchFunctionMode):
-        def __init__(
-            self,
-            fn: Callable,
-            device_mesh: DeviceMesh,
-            input_fn: Optional[Callable] = None,
-            output_fn: Optional[Callable] = None,
-        ):
-            self._device_mesh = device_mesh
-            self._input_fn = input_fn
-            self._output_fn = output_fn
-            self._fn = fn
-
-        def __torch_function__(
-            self,
-            func: Callable,
-            types: Any,
-            args: tuple[Any, ...] = (),
-            kwargs: Optional[dict[str, Any]] = None,
-        ) -> Any:
-            kwargs = kwargs or {}
-
-            # special handler for flex_attention
-            if func == torch._higher_order_ops.flex_attention:
-                query, key, value, score_mod, block_mask = args[:5]
-                assert isinstance(query, torch.Tensor)
-                assert isinstance(key, torch.Tensor)
-                assert isinstance(value, torch.Tensor)
-                assert isinstance(block_mask, tuple)
-
-                global_key = ft_c.all_gather_tensor_autograd(
-                    key, _cp_global_vars.cp_shard_dim, self._device_mesh
-                )
-                global_value = ft_c.all_gather_tensor_autograd(
-                    value, _cp_global_vars.cp_shard_dim, self._device_mesh
-                )
-
-                # shape rewrite: because torch.nn.flex_attention() checks
-                # the QKV shape against the block_mask object, we need to
-                # manually rewrite the shape info in block_mask tuple to
-                # make it compatible with q_shard, k_global, v_global
-                if block_mask[1] != global_key.size(-2):
-                    block_mask = (block_mask[0], global_key.size(-2), *block_mask[2:])
-
-                return func(
-                    query,
-                    global_key,
-                    global_value,
-                    score_mod,
-                    block_mask,
-                    *args[5:],
-                    **kwargs,
-                )
-
-            if func != self._fn:
-                return func(*args, **kwargs)
-
-            if self._input_fn is not None:
-                args, kwargs = self._input_fn(self._device_mesh, *args, **kwargs)
-            output = func(*args, **kwargs)
-            if self._output_fn is not None:
-                output = self._output_fn(self._device_mesh, output)
-            return output
-
-    if _dispatch_mode == _DispatchMode.MONKEY_PATCH:
-        _distribute_function(
-            F.scaled_dot_product_attention,
-            F,
-            mesh,
-            attention_input_fn,
-            attention_output_fn,
-        )
-        with _enable_cp_dispatcher():
-            yield
-        _restore_function(F.scaled_dot_product_attention, F)
-    elif _dispatch_mode == _DispatchMode.TORCH_FUNCTION:
-        tf_mode = _cp_global_vars.torch_function_mode
-        if tf_mode is None:
-            tf_mode = DistributeFunction(
-                F.scaled_dot_product_attention,
-                mesh,
-                attention_input_fn,
-                attention_output_fn,
-            )
-            _set_cp_global_var("torch_function_mode", tf_mode)
-
-        with tf_mode:
-            with _enable_cp_dispatcher():
-                yield
-    else:
-        raise NotImplementedError("torch dispatch mode is not supported yet.")
-
-
-def _generate_round_robin_indices(
-    seq_length: int,
-    cp_world_size: int,
-    device: torch.device,
-    restore: bool = False,
-) -> torch.Tensor:
-    """
-    Generate round-robin load balancing indices or restore indices.
-    Args:
-        seq_length: Total sequence length
-        cp_world_size: Context parallel world size
-        device: Device to place the tensor on
-        restore: If True, generate restore indices that map round-robin reordered
-                positions back to original positions. If False, generate load
-                balance indices that reorder original positions to round-robin pattern.
-    Returns:
-        Index tensor of shape (seq_length,) with the requested mapping.
-    """
-    assert seq_length % (cp_world_size * 2) == 0
-    chunk_size = seq_length // (cp_world_size * 2)
-    all_indices = []
-
-    for cp_rank in range(cp_world_size):
-        # Generate indices for first chunk of the cp rank
-        first_chunk_start = cp_rank * chunk_size
-        first_chunk_indices = list(
-            range(first_chunk_start, first_chunk_start + chunk_size)
-        )
-
-        # Second chunk: positions from the complementary chunk
-        second_chunk_idx = cp_world_size * 2 - cp_rank - 1
-        second_chunk_start = second_chunk_idx * chunk_size
-        second_chunk_indices = list(
-            range(second_chunk_start, second_chunk_start + chunk_size)
-        )
-        # combine the indices for this rank
-        all_indices.extend(first_chunk_indices + second_chunk_indices)
-    all_indices_tensor = torch.tensor(all_indices, dtype=torch.int, device=device)
-    if restore:
-        all_indices_tensor = torch.argsort(all_indices_tensor)
-    return all_indices_tensor
-
-
-def _context_parallel_buffers(
-    mesh: DeviceMesh,
-    buffers: list[torch.Tensor],
-    buffer_seq_dims: list[int],
-    load_balance_indices: Optional[torch.Tensor] = None,
-) -> list[torch.Tensor]:
-    """Shard the buffers along the sequence dimensions according to CP rules."""
-    new_buffers = []
-    for buffer, seq_dim in zip(buffers, buffer_seq_dims):
-        if load_balance_indices is not None:
-            buffer = torch.index_select(buffer, dim=seq_dim, index=load_balance_indices)
-
-        # use DTensor to shard the buffer on sequence dimension, retain the local tensor
-        sharded_buffer = distribute_tensor(
-            buffer, mesh, [Shard(seq_dim)], src_data_rank=None
-        ).to_local()
-        new_buffers.append(sharded_buffer)
-
-    return new_buffers
-
-
-@contextlib.contextmanager
-@torch.no_grad()
-def context_parallel(
-    mesh: DeviceMesh,
-    *,
-    buffers: Optional[list[torch.Tensor]] = None,
-    buffer_seq_dims: Optional[list[int]] = None,
-    no_restore_buffers: Optional[set[torch.Tensor]] = None,
-) -> Generator[None, None, None]:
-    """
-
-    ``context_parallel`` is an experimental API to enable context
-    parallelism (CP). This API performs two actions: 1) patch the SDPA
-    (``torch.nn.functional.scaled_dot_product_attention``) with the CP-enabled
-    one, 2) shard ``buffers`` along the sequence dimension and each rank will
-    preserve the corresponding shard according ``mesh``.
-
-    Args:
-        mesh (:class:`DeviceMesh`): the device mesh for the context parallelism.
-        buffers (Optional[List[torch.Tensor]]): buffers that the usage depend
-            on the sequence dimension. Examples are input batch, labels and
-            positional embedding buffers. These buffers must be sharded along
-            the sequence dimension to ensure the accuracy. The sharding will
-            happen in-place, the buffer's shape will change within the context.
-            The buffers will be restored after the context finishes.
-            ``no_restore_buffers`` can be used to specify which buffers don't
-            need to be restored. Note that ``buffers`` should not contain any
-            nn.Parameter.
-        buffer_seq_dims (Optional[List[int]]): the sequence dimensions of ``buffers``.
-        no_restore_buffers (Optional[Set[torch.Tensor]]): buffers in these set
-            won't be restored after the context exits. This set must be a subset
-            of ``buffers``. If the buffers won't be used after the context exits,
-            these buffers can be put in this list to avoid extra restore time.
-
-    .. warning::
-        `torch.distributed.tensor.experimental.context_parallel` is a
-        prototype feature in PyTorch. The API is subject to change.
-    """
-    buffers = [] if buffers is None else buffers
-    buffer_seq_dims = [] if buffer_seq_dims is None else buffer_seq_dims
-    no_restore_buffers = set() if no_restore_buffers is None else no_restore_buffers
-
-    if len(buffers) != len(buffer_seq_dims):
-        raise ValueError(
-            "`seq_dims` must have the same number of elements as `buffers`."
-        )
-
-    for buffer in no_restore_buffers:
-        # Cannot use `if not buffer in buffers` which will incur tensor comparison.
-        if not any(b is buffer for b in buffers):
-            raise ValueError("`no_restore_buffers` must be a subset of `buffers`.")
-
-    original_buffers = [None if b in no_restore_buffers else b.clone() for b in buffers]
-
-    device = buffers[0].device
-    seq_length = buffers[0].shape[buffer_seq_dims[0]]
-    cp_world_size = mesh.size()
-    if _cp_options.enable_load_balance:
-        load_balance_indices = _generate_round_robin_indices(
-            seq_length=seq_length,
-            cp_world_size=cp_world_size,
-            device=device,
-        )
-    else:
-        load_balance_indices = None
-    shards = _context_parallel_buffers(
-        mesh, buffers, buffer_seq_dims, load_balance_indices
-    )
-    for buffer, shard in zip(buffers, shards):
-        shard = shard.clone()
-        buffer.resize_(shard.shape)
-        buffer.copy_(shard)
-
-    with _context_parallel(seq_dim=2, mesh=mesh):
-        yield
-
-    for buffer, original_buffer in zip(buffers, original_buffers):
-        if original_buffer is not None:
-            buffer.resize_(original_buffer.shape)
-            buffer.copy_(original_buffer)
-
-
-@torch.no_grad()
-def context_parallel_unshard(
-    mesh: DeviceMesh,
-    buffers: list[torch.Tensor],
-    seq_dims: list[int],
-) -> list[torch.Tensor]:
-    """
-    Unshard the tensors (e.g., output) that are sharded due to context parallelism.
-
-    Args:
-        mesh (:class:`DeviceMesh`): the device mesh for the context parallelism.
-        buffers (List[torch.Tensor]): the buffers to be unsharded.
-        seq_dims (List[int]): the sequence dimensions of ``buffers``. This list
-            must have the same length as ``buffers``.
-
-    Returns:
-        List[torch.Tensor]: the unsharded buffers.
-    """
-    if _cp_options.enable_load_balance:
-        device = buffers[0].device
-        cp_world_size = mesh.size()
-        seq_length = buffers[0].shape[seq_dims[0]] * cp_world_size
-        restore_indices = _generate_round_robin_indices(
-            seq_length=seq_length,
-            cp_world_size=cp_world_size,
-            device=device,
-            restore=True,
-        )
-    else:
-        restore_indices = None
-    unsharded_buffers = []
-    for b, dim in zip(buffers, seq_dims):
-        b = b.contiguous()
-        unsharded_b = _maybe_wait(ft_c.all_gather_tensor(b, dim, mesh))
-
-        if restore_indices is not None:
-            unsharded_b = torch.index_select(
-                unsharded_b, dim=dim, index=restore_indices
-            )
-
-        unsharded_buffers.append(unsharded_b)
-    return unsharded_buffers
-
-
-def set_rotate_method(rotate_method: str) -> None:
-    """
-    Context Parallel SDPA requires the rotation of kv shards. Users can call this
-    API to specify which rotation method to use. "alltoall" shuffles the kv shards
-    using all-to-all collective. While "allgather" gathers the kv shards using
-    all-gather collective after the first sub-SDPA computation. If this API has not
-    been called, the default rotate method is "allgather".
-
-    Args:
-        rotate_method (str): the rotate method to use. Currently only supports
-        "allgather" and "alltoall". If a different string other than these two
-        is passed in, the function will raise an error.
-
-    Returns:
-        None
-    """
-    if rotate_method == "allgather":
-        _cp_options.rotate_method = _RotateMethod.ALL_GATHER
-    elif rotate_method == "alltoall":
-        _cp_options.rotate_method = _RotateMethod.ALL_TO_ALL
-    else:
-        raise NotImplementedError(
-            "Context Parallel does not support "
-            f"using {rotate_method} for kv shards rotation"
-        )

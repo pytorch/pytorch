@@ -2390,7 +2390,10 @@ class GraphLowering(torch.fx.Interpreter):
         else:
             trace_structured(
                 "inductor_output_code",
-                lambda: {"filename": path},
+                lambda: {
+                    "filename": path,
+                    "file_path": os.path.abspath(path),
+                },
                 payload_fn=lambda: wrapper_code.value,
             )
         with dynamo_timed("PyCodeCache.load_by_key_path", log_pt2_compile_event=True):

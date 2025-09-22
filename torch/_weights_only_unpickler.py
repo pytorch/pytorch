@@ -520,7 +520,7 @@ class Unpickler:
             elif key[0] == BINPERSID[0]:
                 pid = self.stack.pop()
                 # Only allow persistent load of storage
-                if type(pid) is not tuple and not type(pid) is not int:
+                if type(pid) is not tuple and type(pid) is not int:
                     raise UnpicklingError(
                         f"persistent_load id must be tuple or int, but got {type(pid)}"
                     )

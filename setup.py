@@ -58,8 +58,8 @@
 #   USE_FBGEMM=0
 #     disables the FBGEMM build
 #
-#   USE_FBGEMM_GENAI=1
-#     enables the FBGEMM GenAI kernels to build
+#   USE_FBGEMM_GENAI=0
+#     disables the FBGEMM GenAI build
 #
 #   USE_KINETO=0
 #     disables usage of libkineto library for profiling
@@ -227,9 +227,6 @@
 #      Static link mimalloc into C10, and use mimalloc in alloc_cpu & alloc_free.
 #      By default, It is only enabled on Windows.
 #
-#   USE_PRIORITIZED_TEXT_FOR_LD
-#      Uses prioritized text form cmake/prioritized_text.txt for LD
-#
 #   BUILD_LIBTORCH_WHL
 #      Builds libtorch.so and its dependencies as a wheel
 #
@@ -323,7 +320,6 @@ from tools.setup_helpers.env import (
     IS_LINUX,
     IS_WINDOWS,
 )
-from tools.setup_helpers.generate_linker_script import gen_linker_script
 
 
 def str2bool(value: str | None) -> bool:
@@ -386,12 +382,6 @@ def _get_package_path(package_name: str) -> Path:
 BUILD_LIBTORCH_WHL = str2bool(os.getenv("BUILD_LIBTORCH_WHL"))
 BUILD_PYTHON_ONLY = str2bool(os.getenv("BUILD_PYTHON_ONLY"))
 
-# set up appropriate env variables
-if BUILD_LIBTORCH_WHL:
-    # Set up environment variables for ONLY building libtorch.so and not libtorch_python.so
-    # functorch is not supported without python
-    os.environ["BUILD_FUNCTORCH"] = "OFF"
-
 if BUILD_PYTHON_ONLY:
     os.environ["BUILD_LIBTORCHLESS"] = "ON"
     os.environ["LIBTORCH_LIB_PATH"] = (_get_package_path("torch") / "lib").as_posix()
@@ -420,6 +410,41 @@ for i, arg in enumerate(sys.argv):
     if arg == "rebuild" or arg == "build":
         arg = "build"  # rebuild is gone, make it build
         EMIT_BUILD_WARNING = True
+    if arg == "develop":
+        print(
+            (
+                "WARNING: Redirecting 'python setup.py develop' to 'pip install -e . -v --no-build-isolation',"
+                " for more info see https://github.com/pytorch/pytorch/issues/152276"
+            ),
+            file=sys.stderr,
+        )
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "pip",
+                "install",
+                "-e",
+                ".",
+                "-v",
+                "--no-build-isolation",
+            ],
+            env={**os.environ},
+        )
+        sys.exit(result.returncode)
+    if arg == "install":
+        print(
+            (
+                "WARNING: Redirecting 'python setup.py install' to 'pip install . -v --no-build-isolation',"
+                " for more info see https://github.com/pytorch/pytorch/issues/152276"
+            ),
+            file=sys.stderr,
+        )
+        result = subprocess.run(
+            [sys.executable, "-m", "pip", "install", ".", "-v", "--no-build-isolation"],
+            env={**os.environ},
+        )
+        sys.exit(result.returncode)
     if arg == "--":
         filtered_args += sys.argv[i:]
         break
@@ -1219,21 +1244,6 @@ class build_ext(setuptools.command.build_ext.build_ext):
     def build_extensions(self) -> None:
         self.create_compile_commands()
 
-        build_lib = Path(self.build_lib).resolve()
-
-        # Copy functorch extension
-        for ext in self.extensions:
-            if ext.name != "functorch._C":
-                continue
-            fullname = self.get_ext_fullname(ext.name)
-            filename = Path(self.get_ext_filename(fullname))
-            src = filename.with_stem("functorch")
-            dst = build_lib / filename
-            if src.exists():
-                report(f"Copying {ext.name} from {src} to {dst}")
-                dst.parent.mkdir(parents=True, exist_ok=True)
-                self.copy_file(src, dst)
-
         super().build_extensions()
 
     def get_outputs(self) -> list[str]:
@@ -1521,11 +1531,6 @@ def configure_extension_build() -> tuple[
     )
     ext_modules.append(C)
 
-    # These extensions are built by cmake and copied manually in build_extensions()
-    # inside the build_ext implementation
-    if cmake_cache_vars["BUILD_FUNCTORCH"]:
-        ext_modules.append(Extension(name="functorch._C", sources=[]))
-
     cmdclass = {
         "bdist_wheel": bdist_wheel,
         "build_ext": build_ext,
@@ -1591,26 +1596,6 @@ def main() -> None:
     ]
     if BUILD_PYTHON_ONLY:
         install_requires += [f"{LIBTORCH_PKG_NAME}=={TORCH_VERSION}"]
-
-    if str2bool(os.getenv("USE_PRIORITIZED_TEXT_FOR_LD")):
-        gen_linker_script(
-            filein="cmake/prioritized_text.txt", fout="cmake/linker_script.ld"
-        )
-        linker_script_path = os.path.abspath("cmake/linker_script.ld")
-        os.environ["LDFLAGS"] = os.getenv("LDFLAGS", "") + f" -T{linker_script_path}"
-        os.environ["CFLAGS"] = (
-            os.getenv("CFLAGS", "") + " -ffunction-sections -fdata-sections"
-        )
-        os.environ["CXXFLAGS"] = (
-            os.getenv("CXXFLAGS", "") + " -ffunction-sections -fdata-sections"
-        )
-    elif platform.system() == "Linux" and platform.processor() == "aarch64":
-        print_box(
-            """
-            WARNING: we strongly recommend enabling linker script optimization for ARM + CUDA.
-            To do so please export USE_PRIORITIZED_TEXT_FOR_LD=1
-            """
-        )
 
     # Parse the command line and check the arguments before we proceed with
     # building deps and setup. We need to set values so `--help` works.
