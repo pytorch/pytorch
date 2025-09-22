@@ -3,6 +3,7 @@ from collections.abc import Sequence
 from typing import cast, Optional
 
 import torch
+
 import torch.distributed._functional_collectives as funcol
 import torch.distributed.tensor._api as dtensor
 from torch._prims_common import ShapeType
@@ -17,7 +18,7 @@ from torch.distributed.tensor.placement_types import (
 )
 
 
-def _explicit_order_placements(
+def _explicit_order_placements(  # kick lint
     mesh_shape: ShapeType, placements: Sequence[Placement]
 ) -> Sequence[tuple[int, Placement]]:
     """
