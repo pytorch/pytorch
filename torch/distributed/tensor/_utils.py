@@ -17,7 +17,7 @@ from torch.distributed.tensor.placement_types import (
 )
 
 
-def _explicit_order_placements(
+def _explicit_order_placements(  # kick lint
     mesh_shape: ShapeType, placements: Sequence[Placement]
 ) -> Sequence[tuple[int, Placement]]:
     """
