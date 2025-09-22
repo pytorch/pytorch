@@ -1,5 +1,4 @@
 import abc
-import builtins
 import dataclasses
 import importlib
 import inspect
@@ -200,42 +199,15 @@ def aot_compile_fullgraph(
     from torch._dynamo.guards import CheckFunctionManager
     from torch._dynamo.package import SourceInfo
     from torch._dynamo.utils import dynamo_timed, get_metrics_context
-    from torch._guards import compile_context, CompileContext, TracingContext
+    from torch._guards import TracingContext
 
     args, kwargs = example_inputs
-    if hasattr(model, "__self__"):
-        fn = model.__func__
-        args = (model.__self__,) + args
-    elif inspect.isfunction(model):
-        fn = model
-    else:
-        raise RuntimeError(f"Unsupported model code type {model}")
-
-    signature = inspect.signature(fn)
-    f_locals = bind_locals(signature, *args, **kwargs)
-    if fn.__code__.co_freevars or fn.__closure__:
-        assert len(fn.__closure__) == len(fn.__code__.co_freevars)
-        f_locals.update(
-            {
-                name: cell.cell_contents
-                for name, cell in zip(fn.__code__.co_freevars, fn.__closure__)
-            }
-        )
 
     with (
-        compile_context(CompileContext(convert_frame.get_compile_id({}))),
         get_metrics_context(),
         dynamo_timed("fullgraph_capture"),
     ):
-        capture_output = convert_frame.fullgraph_capture(
-            convert_frame.FrameInfo(
-                fn.__code__,
-                fn.__globals__,
-                f_locals,
-                builtins.__dict__,
-                closure=fn.__closure__ or (),  # type: ignore[arg-type]
-            )
-        )
+        capture_output = convert_frame.fullgraph_capture(model, args, kwargs)
         graph_capture_output = capture_output.graph_capture_output
         assert graph_capture_output.output_graph is not None
 
@@ -258,6 +230,7 @@ def aot_compile_fullgraph(
 
             hooks.guard_filter_fn = new_guard_filter_fn
 
+        fn, _ = convert_frame.get_traced_fn(model)
         check_fn = graph_capture_output.build_guards(
             fn.__code__, hooks=hooks, save=True, strict_error=True
         )
@@ -300,7 +273,7 @@ def aot_compile_fullgraph(
             source_info.add_code(traced_code)
 
         artifacts = CompileArtifacts(
-            signature=signature,
+            signature=inspect.signature(fn),
             bytecode=graph_capture_output.bytecode,
             guard_manager=check_fn.guard_manager,
             guards_state=check_fn.guards_state,
