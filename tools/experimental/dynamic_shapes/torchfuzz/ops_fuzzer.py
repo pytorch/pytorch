@@ -246,18 +246,12 @@ def fuzz_op(target_spec: Spec, depth, stack_size) -> tuple[str, list[Spec]]:
                 random.choice(all_ops) if all_ops else ("arg", get_operator("arg"))
             )
 
-    # Use the operator to decompose the target spec into input specs
-    try:
-        if chosen_operator is None:
-            # If no operator found, fallback to arg
-            return _get_arg_args_specs(target_spec)
-
-        input_specs = chosen_operator.fuzz_inputs_specs(target_spec)
-        return chosen_op_name, input_specs
-    except Exception as e:
-        # Fallback to arg if decomposition fails
-        print(f"Warning: operator {chosen_op_name} decomposition failed: {e}")
+    if chosen_operator is None:
+        # If no operator found, fallback to arg
         return _get_arg_args_specs(target_spec)
+
+    input_specs = chosen_operator.fuzz_inputs_specs(target_spec)
+    return chosen_op_name, input_specs
 
 
 # Global counter for generating unique argument IDs
