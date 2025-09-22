@@ -240,6 +240,9 @@ class DeferredTritonCallWrapper:
             "kernel_args_",
             "stream_",
         ]
+        if wrapper.device == "xpu":
+            launch_kernel_args.append(str(params["threads_per_warp"]))
+
         enable_kernel_profile = config.cpp.enable_kernel_profile and sys.platform in [
             "linux",
             "win32",
