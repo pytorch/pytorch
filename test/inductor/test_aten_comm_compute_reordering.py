@@ -21,16 +21,6 @@ from torch.testing._internal.common_distributed import (
     requires_accelerator_dist_backend,
 )
 
-
-# hi = old_same
-
-# def same(*args, **kwargs):
-
-#     out = hi(*args, **kwargs)
-#     kf not o
-
-#     return True
-
 aten = torch.ops.aten
 import functools
 
