@@ -20,29 +20,11 @@ log = logging.getLogger(__name__)
 from ..pattern_matcher import stable_topological_sort
 
 
-def is_all_gather_into_tensor(node: torch.fx.Node) -> bool:  # type: ignore[arg-type]
-    return (
-        node.op == "call_function"
-        and node.target == torch.ops._c10d_functional.all_gather_into_tensor.default
-    )
-
-
-def is_reduce_scatter_tensor(node: torch.fx.Node) -> bool:
-    return (
-        node.op == "call_function"
-        and node.target == torch.ops._c10d_functional.reduce_scatter_tensor.default
-    )
-
-
 def is_wait_tensor(node: torch.fx.Node) -> bool:
     return (
         node.op == "call_function"
         and node.target == torch.ops._c10d_functional.wait_tensor.default
     )
-
-
-def is_wait_tensor_from_all_gather_into_tensor(node: torch.fx.Node) -> bool:
-    return is_wait_tensor(node) and is_all_gather_into_tensor(node.args[0])  # type: ignore[arg-type]
 
 
 def get_custom_estimation(n: fx.Node) -> Optional[float]:
@@ -146,16 +128,16 @@ def benchmark_node(n: fx.Node) -> float:
 
 
 @functools.cache
-def get_pad_cache() -> torch._inductor.codecache.LocalCache:
+def get_benchmark_cache() -> torch._inductor.codecache.LocalCache:
     return torch._inductor.codecache.LocalCache()
 
 
 def get_cached_node_time(key: str) -> float:
-    return get_pad_cache().lookup(key)  # type: ignore[return-value]
+    return get_benchmark_cache().lookup(key)  # type: ignore[return-value]
 
 
 def set_cached_node_time(key: str, value: float) -> None:
-    return get_pad_cache().set_value(key, value=value)
+    return get_benchmark_cache().set_value(key, value=value)
 
 
 @dataclass
