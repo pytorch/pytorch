@@ -2,14 +2,12 @@
 
 from typing import Optional
 
-from torchfuzz.operators.add import AddOperator
 from torchfuzz.operators.arg import ArgOperator
 from torchfuzz.operators.base import Operator
 from torchfuzz.operators.constant import ConstantOperator
 from torchfuzz.operators.item import ItemOperator
-from torchfuzz.operators.mul import MulOperator
-from torchfuzz.operators.scalar_add import ScalarAddOperator
-from torchfuzz.operators.scalar_multiply import ScalarMultiplyOperator
+from torchfuzz.operators.scalar_pointwise import ScalarPointwiseOperator
+from torchfuzz.operators.tensor_pointwise import TensorPointwiseOperator
 
 
 class OperatorRegistry:
@@ -22,11 +20,9 @@ class OperatorRegistry:
 
     def _register_default_operators(self):
         """Register the default set of operators."""
-        self.register(AddOperator())
-        self.register(MulOperator())
+        self.register(TensorPointwiseOperator())
+        self.register(ScalarPointwiseOperator())
         self.register(ItemOperator())
-        self.register(ScalarAddOperator())
-        self.register(ScalarMultiplyOperator())
         self.register(ConstantOperator())
         self.register(ArgOperator())
 
