@@ -3862,9 +3862,8 @@ if HAS_CUDA_AND_TRITON:
             self.assertEqual(eager_out, compiled_out)
             self.assertEqual(self.get_manager().new_graph_id().id, 1)
 
+        @torch._inductor.config.patch("triton.cudagraph_capture_sizes", (2, 5, 7))
         def test_cudagraph_capture_sizes(self):
-            torch._inductor.config.triton.cudagraph_capture_sizes = (2, 5, 7)
-
             def f(x):
                 return x + 1
 
@@ -3881,14 +3880,13 @@ if HAS_CUDA_AND_TRITON:
 
             self.assertEqual(self.get_manager().new_graph_id().id, 3)
 
-        def test_cudagraph_capture_sizes1(self):
-            torch._inductor.config.triton.cudagraph_capture_sizes = (
+        @torch._inductor.config.patch("triton.cudagraph_capture_sizes", (
                 (2, 3),
                 (4, 5),
                 (6, 2),
                 (7, 3),
-            )
-
+            ))
+        def test_cudagraph_capture_sizes1(self):
             def f(x):
                 return x + 1
 
@@ -3907,14 +3905,13 @@ if HAS_CUDA_AND_TRITON:
 
             self.assertEqual(self.get_manager().new_graph_id().id, 4)
 
-        def test_cudagraph_capture_sizes2(self):
-            torch._inductor.config.triton.cudagraph_capture_sizes = (
+        @torch._inductor.config.patch("triton.cudagraph_capture_sizes", (
                 (2, 3, 4),
                 (4, 4, 3),
                 (3, 4, 4),
                 (4, 2, 3),
-            )
-
+            ))
+        def test_cudagraph_capture_sizes2(self):
             def f(x):
                 return x + 1
 
