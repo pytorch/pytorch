@@ -7,12 +7,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Generic, Optional, TypeVar
 
 import torch
-from torch._dynamo.package import (
-    _BackendId,
-    _DynamoCacheEntry,
-    DynamoCache,
-    PrecompileCacheEntry,
-)
+from torch._dynamo.package import _DynamoCacheEntry, DynamoCache, PrecompileCacheEntry
 
 
 """
@@ -195,33 +190,11 @@ class PrecompileContext:
 
         for key, cache_entry in dynamo_entries.items():
             try:
-                backends = cache_entry.backend_ids
-                backend_content: dict[_BackendId, BackendCacheArtifact[Any]] = {}
-                for id_ in backends:
-                    if id_ not in backend_artifacts:
-                        debug_str = json.dumps(
-                            {
-                                "entry": cache_entry.debug_info,
-                                "key": key,
-                            }
-                        )
-                        logger.warning("Backend not found")
-                        torch._logging.trace_structured(
-                            "artifact",
-                            metadata_fn=lambda: {
-                                "name": "dynamo_cache_bypass",
-                                "encoding": "json",
-                            },
-                            payload_fn=lambda: debug_str,
-                            expect_trace_id=False,
-                        )
-                        continue
-                    artifact = backend_artifacts[id_]
-                    assert isinstance(artifact, BackendCacheArtifact)
-                    backend_content[id_] = artifact
-                precompile_cache_entries[key] = PrecompileCacheEntry(
-                    dynamo=cache_entry, backends=backend_content
+                result = PrecompileCacheEntry.from_cache_entry(
+                    cache_entry, backend_artifacts
                 )
+                if result is not None:
+                    precompile_cache_entries[key] = result
             except Exception as e:
                 logger.warning("Failed to create cache entry %s: %s", key, str(e))
 

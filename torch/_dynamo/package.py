@@ -16,6 +16,7 @@ import functools
 import hashlib
 import importlib
 import inspect
+import json
 import logging
 import os
 import pickle
@@ -418,6 +419,45 @@ class PrecompileCacheEntry:
 
     dynamo: _DynamoCacheEntry
     backends: dict[_BackendId, Any]
+
+    @staticmethod
+    def from_cache_entry(
+        cache_entry: _DynamoCacheEntry, backends: dict[_BackendId, Any]
+    ) -> "PrecompileCacheEntry":
+        serializable_codes = []
+        backend_content: dict[_BackendId, Any] = {}
+
+        for code in cache_entry.codes:
+            skip_code = False
+            for backend_id in code.backend_ids:
+                if backend_id not in backends:
+                    logger.warning("Backend not found")
+                    debug_str = json.dumps(
+                        {
+                            "entry": cache_entry.debug_info(),
+                            "missing_backend": backend_id,
+                        }
+                    )
+                    torch._logging.trace_structured(
+                        "artifact",
+                        metadata_fn=lambda: {
+                            "name": "dynamo_cache_bypass",
+                            "encoding": "json",
+                        },
+                        payload_fn=lambda: debug_str,
+                        expect_trace_id=False,
+                    )
+                    skip_code = True
+                    break
+                else:
+                    backend_content[backend_id] = backends[backend_id]
+            if not skip_code:
+                serializable_codes.append(code)
+        if serializable_codes:
+            cache_entry.codes = serializable_codes
+            return PrecompileCacheEntry(dynamo=cache_entry, backends=backend_content)
+        else:
+            return None
 
 
 def _hash_source(source: str) -> str:

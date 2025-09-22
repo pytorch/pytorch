@@ -533,6 +533,42 @@ def add(x, y):
 
     @parametrize("device", ("cpu", "cuda", "xpu"))
     @torch._dynamo.config.patch(caching_precompile=True)
+    def test_graph_break_partial_backend(self, device):
+        if device == "cuda" and not HAS_CUDA_AND_TRITON:
+            raise unittest.SkipTest("Requires CUDA/Triton")
+        if device == "xpu" and not HAS_XPU_AND_TRITON:
+            raise unittest.SkipTest("Requires XPU/Triton")
+
+        def fn(x):
+            y = x.sin()
+            torch._dynamo.graph_break()
+            return x.sin() + y
+
+        arg1 = torch.randn(3, 2, device=device, requires_grad=True)
+        arg2 = arg1.clone().detach_().requires_grad_(True)
+
+        compiled_fn = torch.compile(fn)
+        expected1 = compiled_fn(arg1)
+        expected1.sum().backward()
+        total_frames = torch._dynamo.convert_frame.FRAME_COUNTER
+
+        # Remove a random backend
+        backend = next(iter(PrecompileContext._backend_artifacts_by_key.keys()))
+        del PrecompileContext._backend_artifacts_by_key[backend]
+
+        self._save_and_reload(expected_backends=1, expected_dynamo=1)
+
+        compiled_fn = torch.compile(fn)
+        # Run it again. There will be a recompile because one of the backends is deleted, but it should
+        # still work.
+        expected2 = compiled_fn(arg2)
+        expected2.sum().backward()
+        self.assertEqual(expected1, expected2)
+
+        self.assertEqual(torch._dynamo.convert_frame.FRAME_COUNTER, total_frames)
+
+    @parametrize("device", ("cpu", "cuda", "xpu"))
+    @torch._dynamo.config.patch(caching_precompile=True)
     def test_call_function_from_resume(self, device):
         if device == "cuda" and not HAS_CUDA_AND_TRITON:
             raise unittest.SkipTest("Requires CUDA/Triton")
