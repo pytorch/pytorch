@@ -1241,7 +1241,7 @@ class TestInductorOpInfo(TestCase):
 
                 return func(*args, **kwargs)
 
-        def do_fullgraph_and_has_rng(fn, args, kwargs):
+        def do_nopython_and_has_rng(fn, args, kwargs):
             try:
                 mode = FakeTensorMode()
 
@@ -1311,7 +1311,7 @@ class TestInductorOpInfo(TestCase):
                 #     print(f"RUNNING OP {op_name} on {device_type} with {dtype}", flush=True, file=f)
                 #     print(f"RUNNING OP {op_name} on {device_type} with {dtype}", flush=True)
                 rtol, atol = _get_tolerances(dtype)
-                fullgraph, has_rng_op = do_fullgraph_and_has_rng(fn, args, kwargs)
+                no_python, has_rng_op = do_nopython_and_has_rng(fn, args, kwargs)
                 for context_fn, kwarg_overrides in get_contexts(
                     has_rng_op, args, kwargs
                 ):
@@ -1319,8 +1319,8 @@ class TestInductorOpInfo(TestCase):
                         # Base kwargs
                         adjusted_kwargs = {
                             "check_lowp": False,
-                            "fullgraph": fullgraph,
-                            "check_has_compiled": fullgraph,
+                            "nopython": no_python,
+                            "check_has_compiled": no_python,
                             "atol": atol,
                             "rtol": rtol,
                         }
