@@ -2,20 +2,16 @@
 
 namespace c10::impl {
 
-thread_local static std::atomic<bool> hermeticPyObjectState{false};
-
-std::atomic<bool> HermeticPyObjectTLS::haveState_{false};
+// In single-interpreter mode, these are simplified stubs
 
 void HermeticPyObjectTLS::set_state(bool state) {
-  hermeticPyObjectState = state;
+  // No-op in single-interpreter mode
+  // Kept for backward compatibility
 }
 
 bool HermeticPyObjectTLS::get_tls_state() {
-  return hermeticPyObjectState;
-}
-
-void HermeticPyObjectTLS::init_state() {
-  haveState_ = true;
+  // Always return false in single-interpreter mode
+  return false;
 }
 
 } // namespace c10::impl

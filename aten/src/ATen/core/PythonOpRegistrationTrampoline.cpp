@@ -1,32 +1,27 @@
 #include <ATen/core/PythonOpRegistrationTrampoline.h>
+#include <c10/core/impl/PyInterpreterHooks.h>
 
 namespace at::impl {
 
-// The strategy is that all python interpreters attempt to register themselves
-// as the main interpreter, but only one wins.  Only that interpreter is
-// allowed to interact with the C++ dispatcher.  Furthermore, when we execute
-// logic on that interpreter, we do so hermetically, never setting pyobj field
-// on Tensor.
+// Since torch/deploy and multipy are deprecated, we only support one Python
+// interpreter per process. This simplifies to just using the global interpreter.
 
-std::atomic<c10::impl::PyInterpreter*>
-    PythonOpRegistrationTrampoline::interpreter_{nullptr};
+c10::impl::PyInterpreter* PythonOpRegistrationTrampoline::interpreter_ = nullptr;
 
 c10::impl::PyInterpreter* PythonOpRegistrationTrampoline::getInterpreter() {
-  return PythonOpRegistrationTrampoline::interpreter_.load();
+  // Simply delegate to the global PyInterpreter
+  return c10::impl::getGlobalPyInterpreter();
 }
 
 bool PythonOpRegistrationTrampoline::registerInterpreter(
     c10::impl::PyInterpreter* interp) {
-  c10::impl::PyInterpreter* expected = nullptr;
-  interpreter_.compare_exchange_strong(expected, interp);
-  if (expected != nullptr) {
-    // This is the second (or later) Python interpreter, which means we need
-    // non-trivial hermetic PyObject TLS
-    c10::impl::HermeticPyObjectTLS::init_state();
+  // In single-interpreter mode, just track if we've already registered
+  if (interpreter_ != nullptr) {
+    // Already registered
     return false;
-  } else {
-    return true;
   }
+  interpreter_ = interp;
+  return true;
 }
 
 } // namespace at::impl
