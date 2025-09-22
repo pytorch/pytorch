@@ -650,7 +650,13 @@ class BlockMask:
         """
         index = (index,) if not isinstance(index, tuple) else index
         padded = (*index, slice(None), slice(None), slice(None))[:3]
-        index = tuple(slice(i, i + 1) if isinstance(i, int) else i for i in padded)
+        sizes = self.kv_num_blocks.shape[:3]
+        index = tuple(
+            (slice(i + n, i + n + 1) if -n <= i < 0 else slice(i, i + 1))
+            if isinstance(i, int)
+            else i
+            for i, n in zip(padded, sizes)
+        )
         new_kv_num_blocks = self.kv_num_blocks[index]
         new_kv_indices = self.kv_indices[index]
         if self.full_kv_num_blocks is not None:
