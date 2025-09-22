@@ -561,6 +561,43 @@ else
   DYNAMO_BENCHMARK_FLAGS+=(--device cuda)
 fi
 
+# Validate backend availability for dynamo_eager configs
+if [[ "${TEST_CONFIG}" == *dynamo_eager* ]]; then
+  echo "Validating eager backend availability for TEST_CONFIG: ${TEST_CONFIG}"
+  if ! python -c "import torch; backends = torch._dynamo.list_backends(); print('Available backends:', backends); assert 'eager' in backends, f'eager backend not available. Available: {backends}'"; then
+    echo "ERROR: eager backend not available in this environment"
+    echo "This might be due to missing dependencies or incorrect PyTorch installation"
+    exit 1
+  fi
+  echo "eager backend validation successful"
+  
+  # Additional validation: test that torch.compile works with eager backend
+  echo "Testing torch.compile with eager backend..."
+  if ! python -c "
+import torch
+import torch._dynamo as dynamo
+
+def test_func(x):
+    return x * 2
+
+# Test that eager backend works
+try:
+    compiled_func = torch.compile(test_func, backend='eager')
+    result = compiled_func(torch.tensor([1.0, 2.0]))
+    print('torch.compile with eager backend test successful')
+except Exception as e:
+    print(f'ERROR: torch.compile with eager backend failed: {e}')
+    exit(1)
+"; then
+    echo "ERROR: torch.compile with eager backend failed"
+    exit 1
+  fi
+fi
+
+# Debug logging for backend selection
+echo "TEST_CONFIG: ${TEST_CONFIG}"
+echo "DYNAMO_BENCHMARK_FLAGS: ${DYNAMO_BENCHMARK_FLAGS[*]}"
+
 test_cachebench() {
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
@@ -622,6 +659,16 @@ test_perf_for_dashboard() {
   shift
 
   local backend=inductor
+  # Allow surfacing eager metrics in CI by switching backend based on TEST_CONFIG
+  if [[ "${TEST_CONFIG}" == *dynamo_eager* ]]; then
+    backend=eager
+  elif [[ "${TEST_CONFIG}" == *aot_eager* ]]; then
+    backend=aot_eager
+  fi
+  
+  # Debug logging for backend selection in test_perf_for_dashboard
+  echo "test_perf_for_dashboard: TEST_CONFIG=${TEST_CONFIG}, selected backend=${backend}"
+  echo "DASHBOARD_TAG=${DASHBOARD_TAG}"
   local modes=()
   if [[ "$DASHBOARD_TAG" == *training-true* ]]; then
     modes+=(training)
@@ -675,20 +722,37 @@ test_perf_for_dashboard() {
       fi
 
       if [[ "$DASHBOARD_TAG" == *default-true* ]]; then
-        $TASKSET python "benchmarks/dynamo/$suite.py" \
+        echo "Running benchmark: ${backend}_no_cudagraphs_${suite}_${dtype}_${mode}_${device}_${target}"
+        echo "Command: $TASKSET python benchmarks/dynamo/$suite.py ${target_flag[*]} --$mode --$dtype --backend $backend --disable-cudagraphs $*"
+        if ! $TASKSET python "benchmarks/dynamo/$suite.py" \
             "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" --disable-cudagraphs "$@" \
-            --output "$TEST_REPORTS_DIR/${backend}_no_cudagraphs_${suite}_${dtype}_${mode}_${device}_${target}.csv"
+            --output "$TEST_REPORTS_DIR/${backend}_no_cudagraphs_${suite}_${dtype}_${mode}_${device}_${target}.csv"; then
+          echo "ERROR: Benchmark failed for ${backend}_no_cudagraphs_${suite}_${dtype}_${mode}_${device}_${target}"
+          echo "This might indicate an issue with the eager backend or benchmark configuration"
+          exit 1
+        fi
+        echo "Benchmark completed successfully: ${backend}_no_cudagraphs_${suite}_${dtype}_${mode}_${device}_${target}"
       fi
       if [[ "$DASHBOARD_TAG" == *cudagraphs-true* ]]; then
-        $TASKSET python "benchmarks/dynamo/$suite.py" \
+        echo "Running benchmark: ${backend}_with_cudagraphs_${suite}_${dtype}_${mode}_${device}_${target}"
+        if ! $TASKSET python "benchmarks/dynamo/$suite.py" \
             "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" "$@" \
-            --output "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_${suite}_${dtype}_${mode}_${device}_${target}.csv"
+            --output "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_${suite}_${dtype}_${mode}_${device}_${target}.csv"; then
+          echo "ERROR: Benchmark failed for ${backend}_with_cudagraphs_${suite}_${dtype}_${mode}_${device}_${target}"
+          exit 1
+        fi
+        echo "Benchmark completed successfully: ${backend}_with_cudagraphs_${suite}_${dtype}_${mode}_${device}_${target}"
       fi
       if [[ "$DASHBOARD_TAG" == *dynamic-true* ]]; then
-        $TASKSET python "benchmarks/dynamo/$suite.py" \
+        echo "Running benchmark: ${backend}_dynamic_${suite}_${dtype}_${mode}_${device}_${target}"
+        if ! $TASKSET python "benchmarks/dynamo/$suite.py" \
             "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" --dynamic-shapes \
             --dynamic-batch-only "$@" \
-            --output "$TEST_REPORTS_DIR/${backend}_dynamic_${suite}_${dtype}_${mode}_${device}_${target}.csv"
+            --output "$TEST_REPORTS_DIR/${backend}_dynamic_${suite}_${dtype}_${mode}_${device}_${target}.csv"; then
+          echo "ERROR: Benchmark failed for ${backend}_dynamic_${suite}_${dtype}_${mode}_${device}_${target}"
+          exit 1
+        fi
+        echo "Benchmark completed successfully: ${backend}_dynamic_${suite}_${dtype}_${mode}_${device}_${target}"
       fi
       if [[ "$DASHBOARD_TAG" == *cppwrapper-true* ]]; then
         TORCHINDUCTOR_CPP_WRAPPER=1 $TASKSET python "benchmarks/dynamo/$suite.py" \
