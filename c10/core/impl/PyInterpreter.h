@@ -49,9 +49,9 @@ struct C10_API PyInterpreter;
 // variable defined in libtorch), you may attempt to decref the object when
 // the Python interpreter has already been shutdown.
 //
-// SINGLE INTERPRETER MODE: Since torch/deploy and multipy are deprecated,
-// PyTorch now only supports a single Python interpreter per process.
-// This simplifies the design significantly.
+// In principle, this could be a list of all possible PyInterpreters, but in
+// practice we don't actually need this list.  Instead we just store a single
+// PyInterpreter, which is the GLOBAL interpreter.
 //
 // The PyInterpreter "tag" (object with a vtable) represents the single
 // Python interpreter:
@@ -92,12 +92,9 @@ struct C10_API PyInterpreter;
 // object.  This can be replaced with a no-op vtable from libc10.so, which
 // is guaranteed to stick around until the bitter end.
 //
-// NB: In single-interpreter mode, the PyInterpreter tag could theoretically
-// be eliminated entirely since there's only one interpreter. However, we
-// keep it for:
-// 1. Backward compatibility with existing code
-// 2. Clean abstraction between Python and C++ layers
-// 3. Future flexibility if we need to support multiple interpreters again
+// NB: The PyInterpreter pointer is analogous to ob_type on a PyObject.  On
+// PyObject, ob_type is tagged with Py_TPFLAGS_HEAPTYPE if it is on the heap,
+// and we copy this tagging strategy here.
 
 struct C10_API PyInterpreterVTable {
   virtual ~PyInterpreterVTable() = default;
