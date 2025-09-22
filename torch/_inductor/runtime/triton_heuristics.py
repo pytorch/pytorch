@@ -2884,7 +2884,6 @@ def _persistent_reduction_configs(
         "num_store", 0
     )
 
-
     MAX_PERSISTENT_BLOCK_NUMEL = 4096
 
     if "y" not in size_hints:
