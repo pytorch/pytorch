@@ -35,6 +35,12 @@ from torch.testing._internal.inductor_utils import (
     TRITON_HAS_CPU,
 )
 
+if HAS_GPU:
+    import triton
+    import triton.language as tl
+
+    from torch._library import capture_triton
+
 
 if HAS_GPU:
     import triton

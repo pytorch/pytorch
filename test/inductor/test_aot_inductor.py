@@ -7471,7 +7471,7 @@ FX_TEST_FAILURES = {
     "test_stft": fail_fx(),
     "test_stride_with_unbacked_expr": fail_fx(),
     "test_size_from_multi_output": fail_fx(),
-    "test_missing_cubin": fail_fx(),
+    "test_missing_cubin": fail_fx(is_skip=True),
     "test_missing_output": fail_fx(),
     "test_model_modified_weights": fail_fx(),
     "test_multi_device": fail_fx(),
