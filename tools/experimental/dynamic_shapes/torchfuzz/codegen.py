@@ -9,37 +9,25 @@ from queue import Empty, Queue
 from threading import Thread
 from typing import Any, Optional, Union
 
-from ops_fuzzer import Operation
-from tensor_fuzzer import (
-    fuzz_scalar,
-    fuzz_tensor_simple,
-    ScalarSpec,
-    Spec,
-    specs_compatible,
-    TensorSpec,
-)
+from ops_fuzzer import OperationGraph
+from tensor_fuzzer import fuzz_scalar, fuzz_tensor_simple, ScalarSpec, Spec, TensorSpec
 
 import torch
 
 
-def convert_stack_to_python_code(
-    operation_stack: list[Operation], target_spec: Spec, seed: Optional[int] = None
+def convert_graph_to_python_code(
+    operation_graph: OperationGraph, seed: Optional[int] = None
 ) -> str:
     """
-    Convert an operation stack to executable Python code using backward recursion.
+    Convert an operation graph to executable Python code using topological ordering.
 
-    The stack represents operations in LIFO order:
-    - operation_stack[0] is the TOP of the stack (final result we want)
-    - operation_stack[-1] is the BOTTOM of the stack (foundational dependencies)
-
-    Code generation uses backward recursion:
-    1. Start from the top operation (index 0) - what we want to compute
-    2. Recursively generate code for its dependencies
-    3. Generate code in proper execution order (dependencies first)
+    The graph-based approach generates code by:
+    1. Getting the topological order of nodes (dependencies before dependents)
+    2. Generating code for each node in that order
+    3. Properly handling input dependencies through node connections
 
     Args:
-        operation_stack: List of Operation dataclass instances in stack order (top to bottom)
-        target_spec: Expected output specification
+        operation_graph: OperationGraph instance containing the operation DAG
         seed: Random seed for reproducible code generation. If None, uses current random state.
 
     Returns:
@@ -50,87 +38,52 @@ def convert_stack_to_python_code(
     if seed is not None:
         import random
 
-        random.seed(
-            seed + 1000
-        )  # Offset to avoid conflicts with operation_stack generation
+        random.seed(seed + 1000)  # Offset to avoid conflicts with graph generation
         torch.manual_seed(seed + 1000)
 
-    if not operation_stack:
-        raise ValueError("Empty operation stack")
+    if not operation_graph.nodes:
+        raise ValueError("Empty operation graph")
 
-    # Track generated operations to avoid duplicates
-    generated_operations = set()
+    # Get topological order - this ensures dependencies are processed before dependents
+    topo_order = operation_graph.get_topological_order()
+
+    # Track generated variables and arg operations
     generated_code_lines = []
-    operation_variables: dict[
-        int, tuple[str, Spec]
-    ] = {}  # Maps operation index to (var_name, spec)
+    node_variables: dict[str, tuple[str, Spec]] = {}  # Maps node_id to (var_name, spec)
     arg_operations: list[
-        tuple[int, Spec]
-    ] = []  # List of (operation_index, spec) for arg operations
+        tuple[str, Spec]
+    ] = []  # List of (node_id, spec) for arg operations
 
-    def generate_operation_recursive(op_idx: int) -> tuple[str, int]:
-        """
-        Recursively generate code for operation at op_idx and its dependencies.
-        Returns (variable_name, subtree_size) where subtree_size is the number of operations processed.
-        """
-        # If already generated, return the variable name and size 1
-        if op_idx in generated_operations:
-            return operation_variables[op_idx][0], 1
+    # Process nodes in topological order
+    for node_id in topo_order:
+        node = operation_graph.nodes[node_id]
+        op_name = node.op_name
+        output_spec = node.output_spec
 
-        operation = operation_stack[op_idx]
-        op_name = operation.op_name
-        input_specs = operation.input_specs
-        output_spec = operation.output_spec
-
-        # Track total subtree size starting with this operation
-        total_subtree_size = 1
-
-        # Generate input variables by recursively processing dependencies FIRST
-        input_var_names = []
-        if input_specs:
-            # Calculate dependency indices based on stack generation pattern
-            current_dep_idx = op_idx + 1
-
-            for j, input_spec in enumerate(input_specs):
-                # Find the dependency that produces this input
-                dep_idx = current_dep_idx
-
-                if dep_idx >= len(operation_stack):
-                    raise ValueError(
-                        f"Operation {op_idx} ({op_name}) requires input {j} at index {dep_idx}, "
-                        f"but stack only has {len(operation_stack)} operations"
-                    )
-
-                # Verify the dependency produces the expected spec
-                dep_operation = operation_stack[dep_idx]
-                if not specs_compatible(dep_operation.output_spec, input_spec):
-                    raise ValueError(
-                        f"Operation {op_idx} ({op_name}) requires input {input_spec} at position {j}, "
-                        f"but operation {dep_idx} produces {dep_operation.output_spec}"
-                    )
-
-                # Recursively generate this dependency
-                dep_var_name, dependency_subtree_size = generate_operation_recursive(
-                    dep_idx
-                )
-                input_var_names.append(dep_var_name)
-
-                # Update indices and total size
-                current_dep_idx += dependency_subtree_size
-                total_subtree_size += dependency_subtree_size
-
-        # NOW add the comment for this operation (after dependencies are processed)
+        # Generate comment for this operation
         generated_code_lines.append(
-            f"    # Operation {op_idx}: {op_name} (stack position {op_idx})"
+            f"    # Node {node_id}: {op_name} (depth {node.depth})"
         )
 
         # Generate output variable name
-        output_var_name = f"tmp_{op_idx}"
+        output_var_name = f"var_{node_id}"
+
+        # Generate input variable names from input nodes
+        input_var_names = []
+        for input_node_id in node.input_nodes:
+            if input_node_id in node_variables:
+                input_var_name, _ = node_variables[input_node_id]
+                input_var_names.append(input_var_name)
+            else:
+                raise ValueError(
+                    f"Node {node_id} depends on {input_node_id}, but {input_node_id} "
+                    f"was not processed yet. Topological order may be incorrect."
+                )
 
         # Handle different operation types
         if op_name == "arg" or op_name.startswith("arg_"):
             # Track arg operations for later function signature generation
-            arg_operations.append((op_idx, output_spec))
+            arg_operations.append((node_id, output_spec))
             arg_name = f"arg_{len(arg_operations) - 1}"
             operation_lines = [f"{output_var_name} = {arg_name}"]
         else:
@@ -143,14 +96,15 @@ def convert_stack_to_python_code(
         generated_code_lines.extend(["    " + line for line in operation_lines])
         generated_code_lines.append("")
 
-        # Track this operation as generated
-        generated_operations.add(op_idx)
-        operation_variables[op_idx] = (output_var_name, output_spec)
+        # Track this node's variable
+        node_variables[node_id] = (output_var_name, output_spec)
 
-        return output_var_name, total_subtree_size
+    # The final result comes from the root node
+    root_node_id = operation_graph.root_node_id
+    if root_node_id not in node_variables:
+        raise ValueError(f"Root node {root_node_id} was not processed")
 
-    # Start backward recursion from the top operation (index 0)
-    final_var_name, _ = generate_operation_recursive(0)
+    final_var_name, _ = node_variables[root_node_id]
 
     # Generate function signature based on discovered arg operations
     if arg_operations:
@@ -171,8 +125,8 @@ def convert_stack_to_python_code(
         "    sys.path.insert(0, fuzzer_dir)",
         "from tensor_fuzzer import fuzz_scalar, fuzz_tensor_simple, ScalarSpec, TensorSpec",
         "",
-        "# Generated fuzzed program code (backward recursion from stack top)",
-        f"# Stack has {len(operation_stack)} operations",
+        "# Generated fuzzed program code (topological order from operation graph)",
+        f"# Graph has {len(operation_graph.nodes)} nodes",
         "",
         function_signature + ":",
     ]
@@ -183,7 +137,7 @@ def convert_stack_to_python_code(
     # Add return statement
     code_lines.extend(
         [
-            "    # Final result from top of stack (operation 0)",
+            "    # Final result from root node",
             f"    return {final_var_name}",
             "",
         ]
@@ -192,7 +146,7 @@ def convert_stack_to_python_code(
     # Generate argument creation code with deterministic seeds
     if arg_operations:
         code_lines.append("# Create arguments for the fuzzed program")
-        for i, (_, spec) in enumerate(arg_operations):
+        for i, (node_id, spec) in enumerate(arg_operations):
             arg_name = f"arg_{i}"
             # Use a deterministic seed based on the argument index and main seed
             arg_seed = (seed + 10000 + i) if seed is not None else None

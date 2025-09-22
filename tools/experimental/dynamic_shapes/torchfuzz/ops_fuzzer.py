@@ -18,32 +18,129 @@ import torch
 
 
 @dataclass
-class Operation:
+class OperationNode:
     """
-    Represents a single operation in the fuzzed operation stack.
+    Represents a node in the operation graph.
 
     Attributes:
+        node_id: Unique identifier for this node
         op_name: Name of the operation (e.g., 'torch.ops.aten.add', 'scalar_add', 'arg')
         input_specs: List of input specifications required by this operation
         output_spec: Output specification produced by this operation
-        depth: Depth level of this operation in the generation tree
+        input_nodes: List of node IDs that provide inputs to this operation
+        depth: Depth level of this node in the generation tree
     """
 
+    node_id: str
     op_name: str
     input_specs: list[Spec]
     output_spec: Spec
+    input_nodes: list[str]
     depth: int
 
     def __str__(self) -> str:
         """String representation for debugging."""
-        return f"{self.op_name} -> {self.output_spec} (depth {self.depth})"
+        return (
+            f"{self.node_id}: {self.op_name} -> {self.output_spec} (depth {self.depth})"
+        )
 
     def __repr__(self) -> str:
         """Detailed representation for debugging."""
         return (
-            f"Operation(op_name='{self.op_name}', input_specs={self.input_specs}, "
-            f"output_spec={self.output_spec}, depth={self.depth})"
+            f"OperationNode(node_id='{self.node_id}', op_name='{self.op_name}', "
+            f"input_specs={self.input_specs}, output_spec={self.output_spec}, "
+            f"input_nodes={self.input_nodes}, depth={self.depth})"
         )
+
+
+@dataclass
+class OperationGraph:
+    """
+    Represents a graph of operations.
+
+    Attributes:
+        nodes: Dictionary mapping node_id to OperationNode
+        root_node_id: ID of the root node that produces the final output (the output node)
+        target_spec: The specification that the root node should produce
+    """
+
+    nodes: dict[str, OperationNode]
+    root_node_id: str  # The output node - produces the final result of the graph
+    target_spec: Spec
+
+    def __post_init__(self):
+        """Validate the graph structure after initialization."""
+        if self.root_node_id not in self.nodes:
+            raise ValueError(f"Root node {self.root_node_id} not found in nodes")
+
+    def get_topological_order(self) -> list[str]:
+        """
+        Get nodes in topological order (dependencies before dependents).
+
+        Returns:
+            List of node IDs in topological order
+        """
+        visited = set()
+        temp_visited = set()
+        result = []
+
+        def visit(node_id: str):
+            if node_id in temp_visited:
+                raise ValueError(f"Cycle detected involving node {node_id}")
+            if node_id in visited:
+                return
+
+            temp_visited.add(node_id)
+            node = self.nodes[node_id]
+
+            # Visit all input nodes first
+            for input_node_id in node.input_nodes:
+                if input_node_id in self.nodes:  # Skip external inputs
+                    visit(input_node_id)
+
+            temp_visited.remove(node_id)
+            visited.add(node_id)
+            result.append(node_id)
+
+        # Start from all nodes to handle disconnected components
+        for node_id in self.nodes:
+            if node_id not in visited:
+                visit(node_id)
+
+        return result
+
+    def get_leaf_nodes(self) -> list[str]:
+        """Get all leaf nodes (nodes with no inputs)."""
+        return [node_id for node_id, node in self.nodes.items() if not node.input_nodes]
+
+    def get_node_dependencies(self, node_id: str) -> list[str]:
+        """Get all nodes that this node depends on (transitive closure)."""
+        visited = set()
+        dependencies = []
+
+        def collect_deps(current_id: str):
+            if current_id in visited or current_id not in self.nodes:
+                return
+            visited.add(current_id)
+
+            node = self.nodes[current_id]
+            for input_node_id in node.input_nodes:
+                dependencies.append(input_node_id)
+                collect_deps(input_node_id)
+
+        collect_deps(node_id)
+        return dependencies
+
+    def __str__(self) -> str:
+        """String representation for debugging."""
+        lines = [
+            f"OperationGraph (root: {self.root_node_id}, target: {self.target_spec})"
+        ]
+        for node_id in self.get_topological_order():
+            node = self.nodes[node_id]
+            inputs_str = f" <- {node.input_nodes}" if node.input_nodes else ""
+            lines.append(f"  {node}{inputs_str}")
+        return "\n".join(lines)
 
 
 def fuzz_spec() -> Spec:
@@ -330,9 +427,7 @@ def _get_constant_args_specs(target_spec: Spec) -> tuple[str, list[Spec]]:
 _next_arg_id = 0
 
 
-def _get_arg_args_specs(
-    target_spec: Spec, enable_reuse: bool = True
-) -> tuple[str, list[Spec]]:
+def _get_arg_args_specs(target_spec: Spec) -> tuple[str, list[Spec]]:
     """Get argument specifications for arg operation."""
     global _next_arg_id
 
@@ -344,15 +439,16 @@ def _get_arg_args_specs(
     return f"arg_{arg_id}", []
 
 
-def fuzz_operation_stack(
+def fuzz_operation_graph(
     target_spec: Spec,
-    max_depth: int = 3,
+    max_depth: int = 7,
     seed: Optional[int] = None,
-) -> list[Operation]:
+) -> OperationGraph:
     """
-    Recursively generate a stack of operations that produces the target specification.
+    Generate a graph of operations that produces the target specification.
 
-    The returned stack has the target-producing operation at index 0 (top of stack).
+    The graph-based approach allows for better visualization, debugging, and
+    potential optimizations like common subexpression elimination.
 
     Args:
         target_spec: The desired output specification (TensorSpec or ScalarSpec)
@@ -360,7 +456,7 @@ def fuzz_operation_stack(
         seed: Random seed for reproducible generation. If None, uses current random state.
 
     Returns:
-        List of Operation dataclass instances with target-producing operation at index 0
+        OperationGraph with nodes organized in a DAG structure
     """
 
     # Set seed for reproducible generation
@@ -370,49 +466,63 @@ def fuzz_operation_stack(
         random.seed(seed)
         torch.manual_seed(seed)
 
-    def _generate_recursive(
-        spec: Spec, depth: int, stack_size: int = 0
-    ) -> list[Operation]:
-        """
-        Recursively generate operations for the given spec at the given depth.
-        Returns list of operations with the spec-producing operation at index 0.
-        """
+    # Global counter for unique node IDs
+    node_counter = 0
 
-        # Generate new operation normally
+    # Dictionary to store all nodes: node_id -> OperationNode
+    nodes: dict[str, OperationNode] = {}
+
+    def _generate_node(spec: Spec, depth: int, stack_size: int = 0) -> str:
+        """
+        Generate a node for the given spec and return its node_id.
+        """
+        nonlocal node_counter
+
+        # Generate new operation
         op_name, input_specs = fuzz_op(spec, depth, stack_size)
 
-        # Create operation entry using dataclass
-        operation = Operation(
-            op_name=op_name, input_specs=input_specs, output_spec=spec, depth=depth
+        # Create unique node ID
+        node_id = f"node_{node_counter}"
+        node_counter += 1
+
+        # Generate input nodes
+        input_node_ids = []
+        if input_specs:  # Non-leaf operations
+            for input_spec in input_specs:
+                input_node_id = _generate_node(
+                    input_spec, max(0, depth - 1), stack_size + len(input_node_ids) + 1
+                )
+                input_node_ids.append(input_node_id)
+
+        # Create the operation node
+        node = OperationNode(
+            node_id=node_id,
+            op_name=op_name,
+            input_specs=input_specs,
+            output_spec=spec,
+            input_nodes=input_node_ids,
+            depth=depth,
         )
 
-        # Start with empty dependency list
-        all_dependencies: list[Operation] = []
+        # Store the node
+        nodes[node_id] = node
 
-        if input_specs:  # Non-leaf operations (not constant or arg)
-            for input_spec in input_specs:
-                # Generate operations for each input at depth-1
-                input_ops = _generate_recursive(
-                    input_spec,
-                    max(0, depth - 1),
-                    stack_size + len(all_dependencies) + 1,
-                )
-                # Add all input operations to dependencies
-                all_dependencies.extend(input_ops)
+        return node_id
 
-        # Return list with the target operation at index 0, followed by all dependencies
-        return [operation] + all_dependencies
+    # Generate the root node
+    root_node_id = _generate_node(target_spec, max_depth, 0)
 
-    # Generate the operation stack
-    operation_stack = _generate_recursive(target_spec, max_depth, 0)
+    # Create and return the operation graph
+    graph = OperationGraph(
+        nodes=nodes, root_node_id=root_node_id, target_spec=target_spec
+    )
 
-    # Verify that the operation at index 0 produces the target spec
-    if operation_stack and not specs_compatible(
-        operation_stack[0].output_spec, target_spec
-    ):
+    # Verify that the root node produces the target spec
+    root_node = nodes[root_node_id]
+    if not specs_compatible(root_node.output_spec, target_spec):
         raise ValueError(
-            f"Generated stack top operation produces {operation_stack[0].output_spec}, "
+            f"Generated graph root node produces {root_node.output_spec}, "
             f"but target spec is {target_spec}"
         )
 
-    return operation_stack
+    return graph
