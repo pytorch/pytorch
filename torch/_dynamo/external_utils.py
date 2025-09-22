@@ -65,30 +65,28 @@ def deepcopy_code(code: types.CodeType) -> types.CodeType:
     return code.replace(co_varnames=code.co_varnames)  # type: ignore[attr-defined]
 
 
-_wrap_inline_cache: weakref.WeakKeyDictionary[
-    Callable[..., Any], Callable[..., Any]
-] = weakref.WeakKeyDictionary()
+_wrap_inline_cache: weakref.WeakKeyDictionary[Callable[..., Any], types.CodeType] = (
+    weakref.WeakKeyDictionary()
+)
 
 
 def wrap_inline(fn: Callable[_P, _R]) -> Callable[_P, _R]:
     """
     Create an extra frame around fn that is not in skipfiles.
 
-    This extra frame has its own code object so that we don't recompile
+    This extra frame has its own per-fn code object so that we don't recompile
     due to multiple calls to wrap_inline with different fn's.
     """
 
+    @functools.wraps(fn)
+    def inner(*args: _P.args, **kwargs: _P.kwargs) -> _R:
+        return fn(*args, **kwargs)
+
     if fn not in _wrap_inline_cache:
+        _wrap_inline_cache[fn] = deepcopy_code(inner.__code__)  # type: ignore[attr-defined]
 
-        @functools.wraps(fn)
-        def inner(*args: _P.args, **kwargs: _P.kwargs) -> _R:
-            return fn(*args, **kwargs)
-
-        inner.__code__ = deepcopy_code(inner.__code__)  # type: ignore[attr-defined]
-        inner._torchdynamo_is_wrap_inline = True  # type: ignore[attr-defined]
-        _wrap_inline_cache[fn] = inner
-
-    return _wrap_inline_cache[fn]
+    inner.__code__ = _wrap_inline_cache[fn]  # type: ignore[attr-defined]
+    return inner
 
 
 def call_hook(
@@ -251,7 +249,7 @@ def call_accumulate_grad(
 
 
 _wrap_inline_with_error_on_graph_break_cache: weakref.WeakKeyDictionary[
-    Callable[..., Any], dict[bool, Callable[..., Any]]
+    Callable[..., Any], dict[bool, types.CodeType]
 ] = weakref.WeakKeyDictionary()
 
 
@@ -261,27 +259,27 @@ def wrap_inline_with_error_on_graph_break(
     # NB: need multiple definitions in order to prevent `fullgraph` from
     # being a freevar of wrapper
     # NOTE: do not functools.wraps(fn) because we don't ever want these wrappers to be skipped!
+    if error_on_graph_break:
+
+        def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _R:
+            with torch._dynamo.error_on_graph_break(True):
+                return fn(*args, **kwargs)
+
+    else:
+
+        def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _R:
+            with torch._dynamo.error_on_graph_break(False):
+                return fn(*args, **kwargs)
+
     if fn not in _wrap_inline_with_error_on_graph_break_cache:
         _wrap_inline_with_error_on_graph_break_cache[fn] = {}
     cache = _wrap_inline_with_error_on_graph_break_cache[fn]
-
     if error_on_graph_break not in cache:
-        if error_on_graph_break:
+        cache[error_on_graph_break] = deepcopy_code(wrapper.__code__)  # type: ignore[attr-defined]
 
-            def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _R:
-                with torch._dynamo.error_on_graph_break(True):
-                    return fn(*args, **kwargs)
+    wrapper.__code__ = cache[error_on_graph_break]  # type: ignore[attr-defined]
 
-        else:
-
-            def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _R:
-                with torch._dynamo.error_on_graph_break(False):
-                    return fn(*args, **kwargs)
-
-        wrapper.__code__ = deepcopy_code(wrapper.__code__)  # type: ignore[attr-defined]
-        cache[error_on_graph_break] = wrapper
-
-    return cache[error_on_graph_break]
+    return wrapper
 
 
 def filter_out_const_values(tup: tuple[Any, ...], masks: list[bool]) -> tuple[Any, ...]:
