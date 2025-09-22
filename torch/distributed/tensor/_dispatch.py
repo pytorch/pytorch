@@ -356,7 +356,7 @@ class OpDispatcher:
                 local_tensor = cast(torch.Tensor, op_info.local_args[i])
                 if arg_spec != reshard_arg_spec:
                     redistribute_context = (
-                        debug_mode.record_redistribute_calls(
+                        debug_mode.record_redistribute_calls(  # type: ignore[union-attr]
                             i, arg_spec, reshard_arg_spec
                         )
                         if in_debug_mode
