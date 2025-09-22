@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 # ruff: noqa: F841
 
+import copy
 import functools
 import gc
 import math
@@ -86,6 +87,19 @@ class CudaReproTests(TestCase):
     device = "cuda"
     common = check_model_cuda
 
+    def test_mm_out_dtype_compile(self):
+        a = torch.randn(1, 3, device="cuda", dtype=torch.float16)
+        b = torch.randn(3, 2, device="cuda", dtype=torch.float16)
+
+        def fn(x, y):
+            return torch.mm(x, y, out_dtype=torch.float32)
+
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True)
+        result = compiled(a, b)
+        expected = fn(a, b)
+        self.assertEqual(result.dtype, expected.dtype)
+        self.assertEqual(result, expected)
+
     def test_index_put_issue(self):
         def forward(
             self,
@@ -119,6 +133,47 @@ class CudaReproTests(TestCase):
         mod = make_fx(forward)(*inps)
         compiled = compile_fx_inner(mod, inps)
         compiled(inps)
+
+    def test_view_replay_padding_issue_163328(self):
+        class ReproModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.num_points_out = 120
+                self.lc_num = 2
+                input_channels = 16
+                self.linear_main = nn.Linear(input_channels, self.num_points_out * 2)
+                self.linear_lc = nn.Linear(input_channels, self.num_points_out * 2)
+
+            def forward(self, x: torch.Tensor):
+                bs, num_lat, num_lon, channels = x.shape
+                index = num_lat - self.lc_num
+
+                main_x = x[:, :index].reshape(bs * index * num_lon, channels)
+                lc_x = x[:, index:].reshape(bs * self.lc_num * num_lon, channels)
+
+                refline = self.linear_main(main_x).reshape(bs, index, num_lon, -1)
+                lc_refline = self.linear_lc(lc_x).reshape(bs, self.lc_num, num_lon, -1)
+
+                base = torch.cat([refline, lc_refline], dim=1).contiguous()
+                out0 = base.reshape(bs, num_lat, num_lon, self.num_points_out, 2)
+                out1 = base.reshape(bs, num_lat * num_lon, self.num_points_out * 2)
+                return {"ten0": out0, "ten1": out1}
+
+        torch.manual_seed(0)
+        model = ReproModule().cuda()
+        inputs = torch.randn(36, 9, 7, 16, device="cuda", requires_grad=True)
+
+        eager_out = model(inputs)
+        compiled_model = torch.compile(
+            copy.deepcopy(model),
+            backend="inductor",
+            mode="reduce-overhead",
+            fullgraph=True,
+        )
+        compiled_out = compiled_model(inputs)
+
+        self.assertEqual(compiled_out["ten0"], eager_out["ten0"])
+        self.assertEqual(compiled_out["ten1"], eager_out["ten1"])
 
     def test_effn_attn_bias_padding(self):
         batch_size, num_heads, seq_len, head_dim = 2, 32, 512, 128
@@ -923,6 +978,18 @@ class CudaReproTests(TestCase):
             out, torch.scatter_reduce(input_orig.clone(), 0, index, src, "sum")
         )
 
+    def test_normalize_norm_leq_one(self):
+        def fn(x: torch.Tensor) -> torch.Tensor:
+            return torch.nn.functional.normalize(x, dim=-1)
+
+        inp = torch.tensor([[3.799999, 0.0, 0.0]], device="cuda", dtype=torch.float32)
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True)
+        out = compiled(inp)
+        norm = out.norm(dim=-1)
+        self.assertTrue(
+            torch.all(norm <= 1.0), f"expected norm <= 1.0 but got {norm.item()}"
+        )
+
     def test_libdevice_routing(self):
         def foo(x):
             return x.exp()
@@ -1369,6 +1436,128 @@ class CudaReproTests(TestCase):
         res = opt_fn(x, y, z)
 
         self.assertEqual(ref, res)
+
+    @torch._inductor.config.patch(emulate_precision_casts=True)
+    def test_emulate_precision_casts_norm_rounding(self):
+        torch.manual_seed(0)
+        torch.cuda.manual_seed_all(0)
+
+        x = torch.rand(1000, device="cuda", dtype=torch.bfloat16)
+        scalar = torch.rand([], device="cuda", dtype=torch.float32)
+
+        def fn(inp, scale):
+            y = inp.norm()
+            return y, y + scale
+
+        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True, dynamic=True)
+
+        expected = fn(x, scalar)
+        actual = opt_fn(x, scalar)
+
+        self.assertEqual(expected, actual)
+
+    @torch._inductor.config.patch(emulate_precision_casts=True)
+    def test_emulate_precision_casts_min_pow_chain(self):
+        torch.manual_seed(0)
+        torch.cuda.manual_seed_all(0)
+
+        with dynamo_config.patch(
+            capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
+        ):
+            arg0 = torch.rand(
+                [383, 55, 2, 3],
+                dtype=torch.float16,
+                device="cuda",
+                requires_grad=True,
+            )
+            arg1 = torch.rand(
+                [383, 55], dtype=torch.bfloat16, device="cuda", requires_grad=True
+            )
+            arg2 = torch.rand(
+                [383, 55], dtype=torch.float32, device="cuda", requires_grad=True
+            )
+            arg3 = torch.rand(
+                [383, 55], dtype=torch.float32, device="cuda", requires_grad=True
+            )
+
+            def fn(a0, a1, a2, a3):
+                t1 = a0.min(dim=2).values
+                t2 = t1.sum(dim=2)
+                t6 = ((((a1) - a2) - a3) - a3) - a3
+                t7 = t6 + t2
+                t8 = torch.pow(torch.pow(torch.pow(torch.pow(t2, t7), t7), t7), t7)
+                return t7, t8
+
+            opt_fn = torch.compile(fn, backend="inductor", fullgraph=True, dynamic=True)
+
+            eager_out = fn(arg0, arg1, arg2, arg3)
+            compiled_args = [
+                arg0.clone().detach().requires_grad_(True),
+                arg1.clone().detach().requires_grad_(True),
+                arg2.clone().detach().requires_grad_(True),
+                arg3.clone().detach().requires_grad_(True),
+            ]
+            compiled_out = opt_fn(*compiled_args)
+
+            for eager_tensor, compiled_tensor in zip(eager_out, compiled_out):
+                torch.testing.assert_close(
+                    eager_tensor,
+                    compiled_tensor,
+                    rtol=1e-3,
+                    atol=1e-3,
+                )
+
+    @torch._inductor.config.patch(emulate_precision_casts=True)
+    def test_emulate_precision_casts_mean_ratio_chain(self):
+        torch.manual_seed(0)
+        torch.cuda.manual_seed_all(0)
+
+        with dynamo_config.patch(
+            capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
+        ):
+            arg0 = torch.rand(
+                [125070], dtype=torch.bfloat16, device="cuda", requires_grad=True
+            )
+            arg1 = torch.rand(
+                [1895, 3, 11], dtype=torch.float16, device="cuda", requires_grad=True
+            )
+            arg2 = torch.rand(
+                [1895, 3, 11], dtype=torch.float32, device="cuda", requires_grad=True
+            )
+            arg3 = torch.rand(
+                [1895, 3, 11], dtype=torch.float32, device="cuda", requires_grad=True
+            )
+            arg4 = torch.rand(
+                [1895, 3, 11], dtype=torch.float32, device="cuda", requires_grad=True
+            )
+            arg5 = torch.rand(
+                [5, 379, 165], dtype=torch.float32, device="cuda", requires_grad=True
+            )
+
+            def fn(a0, a1, a2, a3, a4, a5):
+                t2 = a0.view(379, 165, 2).mean(dim=2)
+                t7 = ((((a1) - a2) - a3) - a2) - a4
+                t8 = t7.view(379, 165)
+                t11 = torch.nn.functional.gelu(a5).mean(dim=0)
+                t12 = t2 - t11
+                t13 = (((t2) / t8) / t11) / t12
+                return t13
+
+            opt_fn = torch.compile(fn, backend="inductor", fullgraph=True, dynamic=True)
+
+            eager_out = fn(arg0, arg1, arg2, arg3, arg4, arg5)
+            compiled_args = [
+                tensor.clone().detach().requires_grad_(True)
+                for tensor in (arg0, arg1, arg2, arg3, arg4, arg5)
+            ]
+            compiled_out = opt_fn(*compiled_args)
+
+            torch.testing.assert_close(
+                eager_out,
+                compiled_out,
+                rtol=5e-3,
+                atol=1e-1,
+            )
 
     @torch._inductor.config.patch(emulate_precision_casts=True)
     def test_dont_inplace_disjoint_accesses(self):
