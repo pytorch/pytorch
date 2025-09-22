@@ -19,6 +19,7 @@ import operator
 import os
 import pickle
 import random
+import re
 import sys
 import tempfile
 import threading
@@ -956,7 +957,7 @@ class MiscTests(torch._inductor.test_case.TestCase):
             guard_failure = failure
 
         opt_fn = torch._dynamo.optimize(
-            "eager", nopython=True, guard_fail_fn=guard_failures
+            "eager", fullgraph=True, guard_fail_fn=guard_failures
         )(compare_shapes)
         opt_fn(torch.randn([3, 4]))
         opt_fn(torch.randn([4, 3]))
@@ -6777,7 +6778,7 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
             guard_failure = failure
 
         opt_fn = torch._dynamo.optimize(
-            "eager", nopython=True, guard_fail_fn=guard_failures
+            "eager", fullgraph=True, guard_fail_fn=guard_failures
         )(fn)
 
         x2 = torch.tensor([0.5, 0.5, 1.0])
@@ -6816,7 +6817,7 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
             guard_failure = failure
 
         opt_fn = torch._dynamo.optimize(
-            "eager", nopython=True, guard_fail_fn=guard_failures
+            "eager", fullgraph=True, guard_fail_fn=guard_failures
         )(fn)
 
         x2 = torch.randn([5, 5])
@@ -6851,7 +6852,7 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
             guard_failure = failure
 
         opt_fn = torch._dynamo.optimize(
-            "eager", nopython=True, guard_fail_fn=guard_failures
+            "eager", fullgraph=True, guard_fail_fn=guard_failures
         )(fn)
 
         x2 = torch.tensor([0.5, 0.5, 1.0])
@@ -6881,7 +6882,7 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
             guard_failure = failure
 
         opt_fn = torch._dynamo.optimize(
-            "eager", nopython=True, guard_fail_fn=guard_failures
+            "eager", fullgraph=True, guard_fail_fn=guard_failures
         )(fn)
 
         args1 = torch.randn(10, 10)
@@ -7954,6 +7955,33 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         torch._dynamo.mark_dynamic(y, 0)
         with self.assertRaises(ConstraintViolationError):
             torch.compile(my_dyn_fn, backend="eager")(y)
+
+    def test_mark_dynamic_with_name(self):
+        def fn(x, y):
+            return torch.randn(1) * x, torch.randn(1) * y
+
+        cnt = CompileCounterWithBackend("inductor")
+        fn_opt = torch.compile(fn, backend=cnt)
+
+        x = torch.randn(5)
+        x_shadow = torch.randn(5)
+        torch._dynamo.mark_dynamic(x, 0, name="x")
+        torch._dynamo.mark_dynamic(x_shadow, 0, name="x")
+
+        with self.assertLogs(
+            logger="torch.fx.experimental.symbolic_shapes", level="INFO"
+        ) as logs:
+            fn_opt(x, x_shadow)
+            self.assertEqual(
+                len(
+                    {
+                        re.search(r"create_symbol\s+(\w+)\s*=", line).group(1)
+                        for line in logs.output
+                        if re.search(r"create_symbol\s+(\w+)\s*=", line)
+                    }
+                ),
+                1,
+            )
 
     def test_raise_guard_indirect_full_constraint(self):
         y = torch.randn([3, 3, 3])
