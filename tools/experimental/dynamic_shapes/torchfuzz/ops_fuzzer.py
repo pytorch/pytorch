@@ -246,16 +246,12 @@ def fuzz_op(target_spec: Spec, depth, stack_size) -> tuple[str, list[Spec]]:
 
     # Use the operator to decompose the target spec into input specs
     try:
-        if chosen_op_name.startswith("arg_"):
-            # Handle special arg_ operations
-            return chosen_op_name, []
-        elif chosen_op_name in ["constant", "arg"]:
-            # Handle leaf operations
-            return chosen_op_name, []
-        else:
-            # Use the operator's decompose method
-            input_specs = chosen_operator.decompose(target_spec)
-            return chosen_op_name, input_specs
+        if chosen_operator is None:
+            # If no operator found, fallback to arg
+            return _get_arg_args_specs(target_spec)
+
+        input_specs = chosen_operator.fuzz_inputs_specs(target_spec)
+        return chosen_op_name, input_specs
     except Exception as e:
         # Fallback to arg if decomposition fails
         print(f"Warning: operator {chosen_op_name} decomposition failed: {e}")

@@ -21,7 +21,7 @@ class AddOperator(Operator):
         """Add can produce tensors but not scalars."""
         return isinstance(output_spec, TensorSpec)
 
-    def decompose(self, output_spec: Spec, num_inputs: int = 2) -> list[Spec]:
+    def fuzz_inputs_specs(self, output_spec: Spec, num_inputs: int = 2) -> list[Spec]:
         """Decompose tensor into input tensors for addition with type promotion."""
         if not isinstance(output_spec, TensorSpec):
             raise ValueError("AddOperator can only produce TensorSpec outputs")

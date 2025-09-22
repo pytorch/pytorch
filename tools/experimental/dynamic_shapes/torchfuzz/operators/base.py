@@ -16,9 +16,12 @@ class Operator(ABC):
     def can_produce(self, output_spec: Spec) -> bool:
         """Check if this operator can produce the given output spec."""
 
-    @abstractmethod
-    def decompose(self, output_spec: Spec, num_inputs: int = 2) -> list[Spec]:
-        """Decompose output spec into input specs."""
+    def fuzz_inputs_specs(self, output_spec: Spec) -> list[Spec]:
+        """
+        Get input specifications for fuzzing. By default, delegates to decompose.
+        Leaf operators should override this to return an empty list.
+        """
+        return self.decompose(output_spec)
 
     @abstractmethod
     def codegen(
