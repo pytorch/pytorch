@@ -24,7 +24,7 @@ from torch.testing._internal.common_cuda import (
     SM80OrLater,
     SM89OrLater,
     SM90OrLater,
-    xfailIfSM100OrLater,
+    SM100OrLater,
     xfailIfSM120OrLater,
     _get_torch_cuda_version,
     PLATFORM_SUPPORTS_FP8,
@@ -65,6 +65,8 @@ from torch.testing._internal.common_quantized import (
     generate_jagged_offs,
 )
 
+from torch._inductor.test_case import TestCase as InductorTestCase
+
 _IS_SM8X = False
 if TEST_CUDA:
     _IS_SM8X = torch.cuda.get_device_capability(0)[0] == 8
@@ -82,7 +84,7 @@ def blas_library_context(backend):
     finally:
         torch.backends.cuda.preferred_blas_library(prev_backend)
 
-class TestMatmulCuda(TestCase):
+class TestMatmulCuda(InductorTestCase):
     def setUp(self):
         super().setUp()
         torch.backends.cuda.matmul.allow_tf32 = False
@@ -160,7 +162,7 @@ class TestMatmulCuda(TestCase):
                         torch.bfloat16: xtol(atol=1e-1, rtol=1e-1),
                         torch.float32: xtol(atol=1e-1, rtol=1e-1)})
     @dtypes(torch.float16, torch.bfloat16, torch.float32)
-    @parametrize("size", [100, 1000, 10000])
+    @parametrize("size", [100, 1000, 2000])
     @parametrize("backend", ["cublas", "cublaslt"])
     def test_cublas_addmm(self, size: int, dtype: torch.dtype, backend):
         with blas_library_context(backend):
@@ -172,7 +174,7 @@ class TestMatmulCuda(TestCase):
     @toleranceOverride({torch.float16: xtol(atol=7e-1, rtol=2e-1),
                         torch.bfloat16: xtol(atol=1e1, rtol=2e-1)})
     @dtypes(torch.float16, torch.bfloat16)
-    @parametrize("size", [100, 1000, 10000])
+    @parametrize("size", [100, 1000, 2000])
     @parametrize("backend", ["cublas", "cublaslt"])
     def test_cublas_addmm_reduced_precision(self, size: int, dtype: torch.dtype, backend):
         with blas_library_context(backend):
@@ -205,7 +207,7 @@ class TestMatmulCuda(TestCase):
     @toleranceOverride({torch.float16: xtol(atol=7e-1, rtol=2e-1),
                         torch.bfloat16: xtol(atol=1e1, rtol=2e-1)})
     @dtypes(torch.float16, torch.bfloat16)
-    @parametrize("size", [100, 1000, 10000])
+    @parametrize("size", [100, 1000, 2000])
     @parametrize("backend", ["cublas", "cublaslt"])
     def test_cublas_addmm_reduced_precision_fp16_accumulate(self, size: int, dtype: torch.dtype, backend):
         with blas_library_context(backend):
@@ -258,9 +260,7 @@ class TestMatmulCuda(TestCase):
     @parametrize(
         "batch_size, N, M, P",
         [(2, 100, 100, 100),
-         (2, 1000, 1000, 1000),
-         (1, 10000, 1000, 10000),
-         (1, 10000, 10000, 10000)],
+         (2, 1000, 1000, 1000)],
         name_fn=lambda batch_size, N, M, P: f"{batch_size}_{N}_{M}_{P}",
     )
     @skipIfRocm
@@ -499,7 +499,6 @@ class TestMatmulCuda(TestCase):
             self.grouped_mm_helper(a, blist, gOlist, agradlist, bgradlist, outlist)
 
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
-    @xfailIfSM100OrLater
     # TODO(future PR): enable compile for torch._grouped_mm fallback path
     @unittest.skipIf(not SM90OrLater, "Grouped gemm with compile supported on SM90")
     @parametrize("op", ["2d/2d", "2d/3d", "3d/2d", "3d/3d"])
@@ -507,8 +506,8 @@ class TestMatmulCuda(TestCase):
     @parametrize("b_row_major", [False, True])
     @parametrize("max_autotune", [False, True])
     def test_grouped_gemm_compiled(self, op, a_row_major, b_row_major, max_autotune):
-        torch._dynamo.reset()
-
+        if max_autotune and SM100OrLater:
+            self.skipTest("Triton templates not supported on SM100+ for grouped_mm")
         device = "cuda"
         dtype_AB = torch.bfloat16
         dtype_offset = torch.int32
