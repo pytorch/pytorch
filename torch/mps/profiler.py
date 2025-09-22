@@ -79,12 +79,12 @@ def is_metal_capture_enabled() -> bool:
     """Checks if `metal_capture` context manager is usable
     To enable metal capture, set MTL_CAPTURE_ENABLED envvar
     """
-    return bool(torch._C._mps_isCaptureEnabled())  # type: ignore[attr-defined]
+    return torch._C._mps_isCaptureEnabled()  # type: ignore[attr-defined, no-any-return]
 
 
 def is_capturing_metal() -> bool:
     """Checks if metal capture is in progress"""
-    return bool(torch._C._mps_isCapturing())  # type: ignore[attr-defined]
+    return torch._C._mps_isCapturing()  # type: ignore[attr-defined, no-any-return]
 
 
 @contextlib.contextmanager
