@@ -206,6 +206,8 @@ def fuzz_op(target_spec: Spec, depth, stack_size) -> tuple[str, list[Spec]]:
         if operator.can_produce(target_spec):
             compatible_ops.append((op_name, operator))
 
+    random.shuffle(compatible_ops)
+
     if not compatible_ops:
         raise ValueError(f"No operators available that can produce {target_spec}")
 
