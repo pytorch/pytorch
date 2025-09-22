@@ -777,11 +777,11 @@ class record_function(_ContextDecorator):
         # TODO: TorchScript ignores standard type annotation here
         # self.record: Optional["torch.classes.profiler._RecordFunction"] = None
         self.record = torch.jit.annotate(
-            Optional["torch.classes.profiler._RecordFunction"], None
+            Optional["torch.classes.profiler._RecordFunctionFast"], None
         )
 
     def __enter__(self):
-        self.record = torch.ops.profiler._record_function_enter_new(
+        self.record = torch._C._profiler._RecordFunctionFast(
             self.name, self.args
         )
         return self
@@ -794,13 +794,7 @@ class record_function(_ContextDecorator):
         record = self.record
         assert record is not None
 
-        # TODO: Too slow with __torch_function__ handling enabled
-        # See https://github.com/pytorch/pytorch/issues/76410
-        if not torch.jit.is_scripting():
-            with torch._C.DisableTorchFunctionSubclass():
-                torch.ops.profiler._record_function_exit._RecordFunction(record)
-        else:
-            torch.ops.profiler._record_function_exit(record)
+        record.__exit__(exc_type, exc_value, traceback)
 
     def _call_end_callbacks_on_future(self, fut: Future[Any]) -> Future[Any]:
         """Use for profiling async calls that return a future.
