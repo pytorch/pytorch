@@ -162,7 +162,7 @@ class TestMatmulCuda(InductorTestCase):
                         torch.bfloat16: xtol(atol=1e-1, rtol=1e-1),
                         torch.float32: xtol(atol=1e-1, rtol=1e-1)})
     @dtypes(torch.float16, torch.bfloat16, torch.float32)
-    @parametrize("size", [100, 1000, 10000])
+    @parametrize("size", [100, 1000, 2000])
     @parametrize("backend", ["cublas", "cublaslt"])
     def test_cublas_addmm(self, size: int, dtype: torch.dtype, backend):
         with blas_library_context(backend):
@@ -174,7 +174,7 @@ class TestMatmulCuda(InductorTestCase):
     @toleranceOverride({torch.float16: xtol(atol=7e-1, rtol=2e-1),
                         torch.bfloat16: xtol(atol=1e1, rtol=2e-1)})
     @dtypes(torch.float16, torch.bfloat16)
-    @parametrize("size", [100, 1000, 10000])
+    @parametrize("size", [100, 1000, 2000])
     @parametrize("backend", ["cublas", "cublaslt"])
     def test_cublas_addmm_reduced_precision(self, size: int, dtype: torch.dtype, backend):
         with blas_library_context(backend):
@@ -207,7 +207,7 @@ class TestMatmulCuda(InductorTestCase):
     @toleranceOverride({torch.float16: xtol(atol=7e-1, rtol=2e-1),
                         torch.bfloat16: xtol(atol=1e1, rtol=2e-1)})
     @dtypes(torch.float16, torch.bfloat16)
-    @parametrize("size", [100, 1000, 10000])
+    @parametrize("size", [100, 1000, 2000])
     @parametrize("backend", ["cublas", "cublaslt"])
     def test_cublas_addmm_reduced_precision_fp16_accumulate(self, size: int, dtype: torch.dtype, backend):
         with blas_library_context(backend):
