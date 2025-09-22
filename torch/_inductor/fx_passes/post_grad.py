@@ -214,6 +214,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
                 config.bucket_reduce_scatters_fx_bucket_size_determinator,
             )
         )
+        collectives_bucketing = True
 
     # Fx all_gather bucketing introduces mutation op
     # Keeping it in the end to keep invariant of functional graph for previous passes.
