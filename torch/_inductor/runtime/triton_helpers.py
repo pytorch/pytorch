@@ -235,6 +235,42 @@ def device_assert_then(cond, msg, r):
     tl.device_assert(cond, msg)
     return r
 
+import pdb
+
+@triton.jit
+def _pick_lane(u0, u1, u2, u3, lane):
+    v = tl.where(lane == 0, u0, u1)
+    v = tl.where(lane == 1, u1, v)
+    v = tl.where(lane == 2, u2, v)
+    v = tl.where(lane == 3, u3, v)
+    return v
+
+@triton.jit
+def rand_eager(seed, offset_blocks, threads_per_round, tid, 
+               BLOCK: tl.constexpr, n_rounds: tl.constexpr = 10):
+    inv  = 1.0 / 4294967296.0 # 2^-32
+    half = inv * 0.5
+
+    subseq = (tid).to(tl.uint64) // 4
+    subseq = subseq % threads_per_round
+
+    r = tl.program_id(0) // (4 * (threads_per_round // BLOCK))
+    offblk = tl.full(subseq.shape, (offset_blocks + r), tl.uint64)
+    u0, u1, u2, u3 = tl.philox(
+        seed,
+        (offblk & 0xFFFFFFFF).to(tl.uint32),
+        ((offblk >> 32) & 0xFFFFFFFF).to(tl.uint32),
+        (subseq & 0xFFFFFFFF).to(tl.uint32),
+        ((subseq >> 32) & 0xFFFFFFFF).to(tl.uint32),
+    )
+
+    lanes = tl.arange(0, BLOCK)
+    lanes = lanes % 4
+    rand_int_res = _pick_lane(u0, u1, u2, u3, lanes)
+    rtn = 1.0 - (rand_int_res.to(tl.float32) * inv + half)
+    return rtn
+
+
 
 @triton.jit
 def randint64(seed, offset, low, high):

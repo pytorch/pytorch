@@ -2203,6 +2203,23 @@ def inductor_lookup_seed(seeds, index):
     )
 
 
+def _compute_grid_x(nelem: int, block: int, device_index: int) -> int:
+    prop = torch.cuda.get_device_properties(device_index)
+    blocks_per_sm = prop.max_threads_per_multi_processor // block
+    max_blocks = prop.multi_processor_count * blocks_per_sm
+    need_blocks = (nelem + block - 1) // block
+    return min(max_blocks, need_blocks)
+
+    
+
+def get_seed_and_threads_per_round(x_device_index: int, nelem: int):
+    block = 256
+    gen = torch.cuda.default_generators[x_device_index]
+    seed = int(gen.initial_seed())
+    grid_x = _compute_grid_x(nelem, block, x_device_index)
+    old_off = int(gen.get_offset())
+    return seed, block * grid_x
+
 @register_lowering(inductor_prims.random, type_promotion_kind=None)
 def inductor_random(size: list[int], seed: TensorBox, mode: str, *, offset: int = 0):
     assert not config.fallback_random
@@ -2215,11 +2232,22 @@ def inductor_random(size: list[int], seed: TensorBox, mode: str, *, offset: int 
     ).make_indexer()
     seed_loader = seed.make_loader()
 
-    def inner_fn(index):
-        return getattr(ops, mode)(
-            seed_loader([]),
-            ops.index_expr(random_pos(index), torch.int32),
-        )
+    if int(os.environ.get("ENV_ENABLE_RAND_EAGER", "0")) == 1:
+        nelem = math.prod(size)
+        seed_val, threads_per_round = get_seed_and_threads_per_round(device.index, nelem)
+        def inner_fn(index):
+            return getattr(ops, "rand_eager")(
+                seed_val,
+                seed_loader([]),
+                threads_per_round,
+                ops.index_expr(random_pos(index), torch.int32),
+            )
+    else:
+        def inner_fn(index):
+            return getattr(ops, mode)(
+                seed_loader([]),
+                ops.index_expr(random_pos(index), torch.int32),
+            )
 
     result = Pointwise.create(
         device=device,

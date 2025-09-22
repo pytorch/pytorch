@@ -1219,6 +1219,11 @@ class TritonOverrides(OpOverrides):
         return f"tl.rand({seed}, {offset})"
 
     @staticmethod
+    def rand_eager(seed, base_offset, threads_per_round, tid):
+        tid = f"({tid}).to(tl.uint32)"
+        return f"triton_helpers.rand_eager({seed}, {base_offset}, {threads_per_round}, {tid}, XBLOCK)"
+
+    @staticmethod
     def randn(seed, offset):
         offset = f"({offset}).to(tl.uint32)"
         return f"tl.randn({seed}, {offset})"
