@@ -2356,8 +2356,10 @@ def triton_config_reduction(
 
     if num_warps is None:
         num_warps = total_numel() // 128
+
+    max_num_warps = 16 if r <= 8192 else 32
     num_warps = _num_warps(
-        num_warps, max_num_warps=16, register_intensive=register_intensive
+        num_warps, max_num_warps=max_num_warps, register_intensive=register_intensive
     )
 
     x, _num_blocks = _check_max_grid_x(size_hints, x, num_warps)
@@ -2696,7 +2698,7 @@ def _reduction_configs(
         xnumel = max(4096 // rnumel, 1)
         c = make_config(
             xnumel,
-            rnumel,
+            min(rnumel, 32768),
             register_intensive=register_intensive,
             dynamic_scale_rblock=False,
         )
