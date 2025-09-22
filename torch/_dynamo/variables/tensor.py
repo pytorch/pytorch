@@ -1282,7 +1282,7 @@ class TensorVariable(VariableTracker):
                 # We *Must* be in compiled_autograd here because backward hooks can contain anything, and it is unsafe to run
                 # them in a compiled bwd without re-entering dynamo as compiled_autograd does.
                 #
-                # Discussion point 1 - Should we bypass this if nopython/fullgraph = True?
+                # Discussion point 1 - Should we bypass this if fullgraph = True?
                 #   No. Because this was going to be a graph break anyway - this check does not
                 # introduce new graph breaks where there were none.
                 #

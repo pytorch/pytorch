@@ -6,12 +6,12 @@ import torch._dynamo.config
 import torch._inductor.config as config
 
 
-@torch._dynamo.optimize("inductor", nopython=True)
+@torch._dynamo.optimize("inductor", fullgraph=True)
 def inductor_aten_bmm(a, b):
     return torch.bmm(a, b)
 
 
-@torch._dynamo.optimize("inductor", nopython=True)
+@torch._dynamo.optimize("inductor", fullgraph=True)
 def inductor_triton_bmm(a, b):
     return torch.bmm(a, b)
 
