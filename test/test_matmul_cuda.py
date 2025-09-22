@@ -56,6 +56,7 @@ from torch.testing._internal.common_utils import (
     TEST_CUDA,
     TEST_WITH_ROCM,
     TestCase,
+    decorateIf,
 )
 from torch.testing._internal.common_quantized import (
     _f32_to_floatx_unpacked,
@@ -73,6 +74,16 @@ if TEST_CUDA:
 
 # Protects against includes accidentally setting the default dtype
 assert torch.get_default_dtype() is torch.float32
+
+def xfailIfSM100OrLaterAndCondition(condition_fn):
+    """
+    Conditionally xfail tests on SM100+ based on a condition function.
+    The condition function receives the test parameters dict and returns True to xfail.
+    """
+    return decorateIf(
+        unittest.expectedFailure,
+        lambda params: SM100OrLater and condition_fn(params)
+    )
 
 
 @contextlib.contextmanager
@@ -162,19 +173,20 @@ class TestMatmulCuda(InductorTestCase):
                         torch.bfloat16: xtol(atol=1e-1, rtol=1e-1),
                         torch.float32: xtol(atol=1e-1, rtol=1e-1)})
     @dtypes(torch.float16, torch.bfloat16, torch.float32)
-    @parametrize("size", [100, 1000, 2000])
+    @parametrize("size", [100, 1000, 10000])
     @parametrize("backend", ["cublas", "cublaslt"])
     def test_cublas_addmm(self, size: int, dtype: torch.dtype, backend):
         with blas_library_context(backend):
             self.cublas_addmm(size, dtype, False)
 
     @onlyCUDA
+    @xfailIfSM100OrLaterAndCondition(lambda params: params.get('dtype') == torch.bfloat16 and params.get('size') == 10000)
     @skipIfRocmVersionLessThan((5, 2))
     # imported 'tol' as 'xtol' to avoid aliasing in code above
     @toleranceOverride({torch.float16: xtol(atol=7e-1, rtol=2e-1),
                         torch.bfloat16: xtol(atol=1e1, rtol=2e-1)})
     @dtypes(torch.float16, torch.bfloat16)
-    @parametrize("size", [100, 1000, 2000])
+    @parametrize("size", [100, 1000, 10000])
     @parametrize("backend", ["cublas", "cublaslt"])
     def test_cublas_addmm_reduced_precision(self, size: int, dtype: torch.dtype, backend):
         with blas_library_context(backend):
@@ -207,7 +219,7 @@ class TestMatmulCuda(InductorTestCase):
     @toleranceOverride({torch.float16: xtol(atol=7e-1, rtol=2e-1),
                         torch.bfloat16: xtol(atol=1e1, rtol=2e-1)})
     @dtypes(torch.float16, torch.bfloat16)
-    @parametrize("size", [100, 1000, 2000])
+    @parametrize("size", [100, 1000, 10000])
     @parametrize("backend", ["cublas", "cublaslt"])
     def test_cublas_addmm_reduced_precision_fp16_accumulate(self, size: int, dtype: torch.dtype, backend):
         with blas_library_context(backend):
@@ -260,7 +272,9 @@ class TestMatmulCuda(InductorTestCase):
     @parametrize(
         "batch_size, N, M, P",
         [(2, 100, 100, 100),
-         (2, 1000, 1000, 1000)],
+         (2, 1000, 1000, 1000),
+         (1, 10000, 1000, 10000),
+         (1, 10000, 10000, 10000)],
         name_fn=lambda batch_size, N, M, P: f"{batch_size}_{N}_{M}_{P}",
     )
     @skipIfRocm
