@@ -13,6 +13,7 @@ __all__ = [
     "scaled_mm",
 ]
 
+
 class ScalingType(Enum):
     Tensorwise = 0
     Rowwise = 1
