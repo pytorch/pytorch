@@ -1364,9 +1364,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
         debug_handle = None
         if config.trace.provenance_tracking_level != 0:
+            shim_fn = self.get_c_shim_func_name(fallback_kernel.cpp_kernel_name, device)  # type: ignore[arg-type]
             debug_handle = set_kernel_post_grad_provenance_tracing(
                 fallback_kernel,
-                fallback_kernel.cpp_kernel_name,  # type: ignore[arg-type]
+                shim_fn,
                 is_extern=True,
             )
         self.generate_c_shim_extern_kernel_call(
@@ -1438,7 +1439,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         line += ");"
         self.writeline(line)
 
-    def generate_index_put_fallback(self, kernel, x, indices, values, accumulate):
+    def _generate_index_put_fallback(self, kernel, x, indices, values, accumulate):
         # TODO: update aoti_torch_index_put_out in ir.py to use autogen out version
         # See the comment in codegen_reinterpret_view about why having something like
         # RAIIAtenTensorHandle(tmp_tensor_handle_2) in a tmp array can cause the corresponding

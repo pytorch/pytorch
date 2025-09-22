@@ -4973,6 +4973,10 @@ class ChoiceCaller:
         # knowing what autotuning is choosing)
         self.description = description
         self.failed: bool = False
+        # A place to store annotations that can be read post benchmarking
+        # Use this to shuttle information between ChoieCaller generation
+        # and the end of benchmarking
+        self.annotations: dict[Any, Any] = {}
 
     def benchmark(self, *args: Any, out: torch.Tensor) -> float:
         algo = self.to_callable()
@@ -5926,7 +5930,7 @@ class ExternKernel(InputsKernel):
         if is_storage_and_layout(x):
             if isinstance(x.get_layout(), FlexibleLayout):
                 if order:
-                    # If the the FlexibleLayout already has the size and stride in the required order,
+                    # If the FlexibleLayout already has the size and stride in the required order,
                     # freeze it to a FixedLayout by using its current size and stride.
                     # The behavior of using its current size and stride or the given order can be different
                     # if the size and stride has ambiguilty, for example for a 4D input where the iC = 1:
@@ -7115,19 +7119,7 @@ class IndexPutFallback(ExternKernel):
     """
 
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
-        assert is_node_sequence(self.inputs)
-        (x, values, *valid_indices) = (t.codegen_reference() for t in self.inputs)
-        indices = []
-        iter_valid_indices = iter(valid_indices)
-        for i, _ in enumerate(self.indices):
-            if self.indices[i] is not None:
-                indices.append(next(iter_valid_indices))
-            else:
-                indices.append(V.graph.wrapper_code.none_str)
-
-        wrapper.generate_index_put_fallback(
-            self.get_kernel_name(), x, indices, values, *self.codegen_const_args()
-        )
+        wrapper.generate_index_put_fallback(self)
 
     def should_allocate(self) -> bool:
         return False
@@ -7558,7 +7550,25 @@ class FallbackKernel(ExternKernelAlloc):
         return get_schema_info(self.op_overload).is_mutable()
 
     def get_inputs_that_alias_output(self) -> Sequence[str]:
-        return self.alias_names
+        assert isinstance(
+            self.op_overload, (torch._ops.OpOverload, torch._ops.HigherOrderOperator)
+        ), (
+            f"Fails to create FallbackKernel for {self.op_overload}: "
+            f"{type(self.op_overload)} not supported"
+        )
+
+        # See [Note: FallbackKernel supported operators]: for a mutating
+        # op that is auto-functionalizable, its outputs does NOT
+        # alias any of the inputs.
+        if (
+            not isinstance(self.op_overload, torch._ops.HigherOrderOperator)
+            and "_c10d_functional" not in self.op_overload.name()
+            and self.op_overload._schema.is_mutable
+            and can_auto_functionalize(self.op_overload)
+        ):
+            return []
+        else:
+            return self.alias_names
 
     def get_mutation_names(self) -> Sequence[str]:
         assert len(self.mutation_names) <= 1
@@ -8207,12 +8217,23 @@ class StorageBox(MutableBox):
             self.realize()
 
     def has_accumulated_enough_reads_by_size(self, threshold: int) -> bool:
-        size_of_reads = [V.graph.get_dep_size_hint(dep) for dep in self.get_reads()]
+        from torch._inductor.utils import is_nonfreeable_buffers
+
+        size_of_reads = [
+            V.graph.get_dep_size_hint(dep)
+            for dep in self.get_reads()
+            if not is_nonfreeable_buffers(dep)
+        ]
         if not size_of_reads:
             return False
         total_size = sum(size_of_reads)
         max_size = max(size_of_reads)
-        return total_size > threshold and total_size / max_size >= 2
+        min_size = min(size_of_reads)
+        return (
+            total_size >= threshold
+            and total_size / max_size >= 2
+            and max_size == min_size
+        )
 
     def has_exceeded_max_reads(self) -> bool:
         return isinstance(self.data, Pointwise) and (
