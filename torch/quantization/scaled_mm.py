@@ -7,6 +7,12 @@ import torch
 from torch import Tensor
 
 
+__all__ = [
+    "ScalingType",
+    "SwizzleType",
+    "scaled_mm",
+]
+
 class ScalingType(Enum):
     Tensorwise = 0
     Rowwise = 1
