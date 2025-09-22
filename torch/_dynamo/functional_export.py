@@ -1,4 +1,3 @@
-import builtins
 import inspect
 import logging
 import traceback
@@ -10,11 +9,10 @@ import sympy
 import torch
 import torch.fx
 import torch.utils._pytree as pytree
-from torch._dynamo.convert_frame import FrameInfo, fullgraph_capture, get_compile_id
+from torch._dynamo.convert_frame import fullgraph_capture, get_traced_fn
 from torch._dynamo.eval_frame import argument_names
 from torch._dynamo.utils import dynamo_timed, get_metrics_context
 from torch._export.utils import _compiling_state_context
-from torch._guards import compile_context, CompileContext
 from torch.export.dynamic_shapes import _RelaxedConstraint, Constraint
 from torch.fx import Node
 from torch.fx.experimental.symbolic_shapes import (
@@ -346,10 +344,6 @@ def _dynamo_graph_capture_for_export(
             flat_inputs, in_spec = pytree.tree_flatten((args, kwargs))
             module_to_trace = ModuleToTrace(mod, in_spec)
 
-            signature = inspect.signature(module_to_trace.forward)
-            bound_arguments = signature.bind(*flat_inputs)
-            bound_arguments.apply_defaults()
-
             constraints: Optional[list[Constraint]] = _constraints
             dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]] = (
                 _dynamic_shapes
@@ -358,15 +352,6 @@ def _dynamo_graph_capture_for_export(
             from . import reset  # type: ignore[attr-defined]
 
             reset()
-
-            f_locals = {"self": module_to_trace, **bound_arguments.arguments}
-            frame = FrameInfo(
-                module_to_trace.forward.__func__.__code__,  # type: ignore[attr-defined]
-                module_to_trace.forward.__func__.__globals__,  # type: ignore[attr-defined]
-                f_locals,
-                builtins,  # type: ignore[arg-type]
-                closure=(),  # type: ignore[arg-type]
-            )
 
             dynamo_config_ctx = torch._dynamo.config.patch(
                 specialize_int=True,
@@ -379,13 +364,14 @@ def _dynamo_graph_capture_for_export(
             )
 
             with (
-                compile_context(CompileContext(get_compile_id({}))),
                 get_metrics_context(),
                 dynamo_timed("fullgraph_capture"),
                 dynamo_config_ctx,
             ):
                 out = fullgraph_capture(
-                    frame,
+                    module_to_trace,
+                    tuple(flat_inputs),
+                    {},
                     constraints=_constraints,
                     _is_export_deprecated_do_not_use=True,
                 )
@@ -464,10 +450,8 @@ def _dynamo_graph_capture_for_export(
             constraint_violation_error = None
             try:
                 # Check if we have any constraint violations
-                check_fn = out.graph_capture_output.build_guards(
-                    module_to_trace.forward.__code__
-                ).guard_manager
-                check_fn.check(f_locals)
+                fn, _ = get_traced_fn(module_to_trace)
+                out.graph_capture_output.build_guards(fn.__code__)
             except ConstraintViolationError as e:
                 constraint_violation_error = e
 

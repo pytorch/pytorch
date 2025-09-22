@@ -945,6 +945,74 @@ class CaptureOutput:
     backend_input: Optional[BackendInput]
 
 
+def get_traced_fn(mod: Any) -> tuple[FunctionType, Optional[object]]:
+    import inspect
+
+    if isinstance(mod, torch.nn.Module):
+        mod = mod.forward
+    if hasattr(mod, "__self__"):
+        return mod.__func__, mod.__self__
+    elif inspect.isfunction(mod):
+        return mod, None
+    else:
+        raise RuntimeError(f"Unsupported model code type {mod}")
+
+
+def _get_traced_call(
+    mod: Any,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+) -> tuple[FunctionType, dict[str, Any]]:
+    import inspect
+
+    fn, self_opt = get_traced_fn(mod)
+    if self_opt is not None:
+        args = (self_opt,) + args
+
+    signature = inspect.signature(fn)
+    bound_arguments = signature.bind(*args, **kwargs)
+    bound_arguments.apply_defaults()
+    f_locals = bound_arguments.arguments
+
+    closure = fn.__closure__ or ()
+    freevars = fn.__code__.co_freevars
+    if freevars or closure:
+        assert len(closure) == len(freevars)
+        f_locals.update(
+            {name: cell.cell_contents for name, cell in zip(freevars, closure)}
+        )
+
+    return fn, f_locals
+
+
+def fullgraph_capture(
+    mod: Any,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+    *,
+    constraints: Optional[list[Constraint]] = None,
+    _is_export_deprecated_do_not_use: bool = False,
+) -> CaptureOutput:
+    import builtins
+
+    fn, f_locals = _get_traced_call(mod, args, kwargs)
+
+    frame = FrameInfo(
+        fn.__code__,
+        fn.__globals__,
+        f_locals,
+        builtins.__dict__,
+        closure=fn.__closure__ or (),  # type: ignore[arg-type]
+    )
+
+    with compile_context(CompileContext(get_compile_id({}))):
+        return _fullgraph_capture_frame(
+            frame,
+            constraints=constraints,
+            _is_export_deprecated_do_not_use=_is_export_deprecated_do_not_use,
+        )
+
+
 @dataclass
 class FrameInfo:
     code: types.CodeType
@@ -954,7 +1022,7 @@ class FrameInfo:
     closure: tuple[CellType]
 
 
-def fullgraph_capture(
+def _fullgraph_capture_frame(
     frame: FrameInfo,
     *,
     constraints: Optional[list[Constraint]] = None,
