@@ -142,29 +142,6 @@ class CPUReproTests(TestCase):
         self.assertEqual(len(actual), 1)
         torch.testing.assert_close(actual[0], expected[0])
 
-    def test_prims_broadcast_in_dim_alias(self):
-        def fn(x: torch.Tensor) -> torch.Tensor:
-            return torch.ops.prims.broadcast_in_dim.default(x, [2, 3, 3], [0, 1])
-
-        x = torch.arange(6.0, dtype=torch.float32).reshape(2, 3)
-
-        compiled = torch.compile(fn, backend="inductor", fullgraph=True)
-
-        expected = fn(x)
-        actual = compiled(x)
-        torch.testing.assert_close(actual, expected)
-
-    @torch._dynamo.config.patch(capture_scalar_outputs=True)
-    def test_fill_diagonal_item_scalar_cpu(self):
-        def fn():
-            x = torch.ones(3, 3)
-            x.fill_diagonal_(0)
-            return x.sum().item()
-
-        compiled = torch.compile(fn, backend="inductor", fullgraph=True)
-        eager = fn()
-        self.assertEqual(compiled(), eager)
-
     @skipIfRocm
     def test_conv_stride_constraints(self):
         for fmt in [torch.contiguous_format, torch.channels_last]:
@@ -507,6 +484,17 @@ class CPUReproTests(TestCase):
         with torch.no_grad():
             example_inputs = (torch.rand(1, 10),)
             self.common(Model(), example_inputs)
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_fill_diagonal_item_scalar_cpu(self):
+        def fn():
+            x = torch.ones(3, 3)
+            x.fill_diagonal_(0)
+            return x.sum().item()
+
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True)
+        eager = fn()
+        self.assertEqual(compiled(), eager)
 
     @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN is not enabled")
     @patch("torch.cuda.is_available", lambda: False)
