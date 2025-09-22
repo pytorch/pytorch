@@ -1,5 +1,5 @@
 import contextlib
-from typing import Iterator, cast
+from typing import Iterator, Literal
 
 import torch
 
@@ -14,7 +14,10 @@ __all__ = [
 ]
 
 
-def start(mode: str = "interval", wait_until_completed: bool = False) -> None:
+ProfilerMode = Literal["interval", "event", "interval,event"]
+
+
+def start(mode: ProfilerMode = "interval", wait_until_completed: bool = False) -> None:
     r"""Start OS Signpost tracing from MPS backend.
 
     The generated OS Signposts could be recorded and viewed in
@@ -46,7 +49,9 @@ def stop() -> None:
 
 
 @contextlib.contextmanager
-def profile(mode: str = "interval", wait_until_completed: bool = False) -> Iterator[None]:
+def profile(
+    mode: ProfilerMode = "interval", wait_until_completed: bool = False
+) -> Iterator[None]:
     r"""Context Manager to enabling generating OS Signpost tracing from MPS backend.
 
     Args:
@@ -74,12 +79,12 @@ def is_metal_capture_enabled() -> bool:
     """Checks if `metal_capture` context manager is usable
     To enable metal capture, set MTL_CAPTURE_ENABLED envvar
     """
-    return cast(bool, torch._C._mps_isCaptureEnabled())  # type: ignore[attr-defined]
+    return bool(torch._C._mps_isCaptureEnabled())  # type: ignore[attr-defined]
 
 
 def is_capturing_metal() -> bool:
     """Checks if metal capture is in progress"""
-    return cast(bool, torch._C._mps_isCapturing())  # type: ignore[attr-defined]
+    return bool(torch._C._mps_isCapturing())  # type: ignore[attr-defined]
 
 
 @contextlib.contextmanager
