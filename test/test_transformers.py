@@ -2078,7 +2078,7 @@ class TestSDPA(NNTestCase):
     @parametrize("dtype", [torch.float32, torch.bfloat16, torch.half])
     @parametrize("n_heads", [[8, 8], [16, 8], [10, 2]])  # [q_heads, kv_heads]
     @parametrize("is_causal", [True, False])
-    def test_reference_implementation_bitwise_match_math_backend(self, device, dtype, n_heads, is_causal, dropout_p):
+    def test_reference_implementation_bitwise_match_math_backend(self, device, dtype, n_heads, is_causal):
         """Regression test for scaled_dot_product_attention documentation [1] implementation.
         Should produces bitwise identical results to the MATH backend.
 
