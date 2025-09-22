@@ -107,9 +107,16 @@ XPUGeneratorImpl::XPUGeneratorImpl(
       state_(std::move(state)) {}
 
 void XPUGeneratorImpl::set_current_seed(uint64_t seed) {
-  at::xpu::assertNotCapturing("Cannot call XPUGeneratorImpl::set_current_seed");
-  state_->seed_ = seed;
-  state_->philox_offset_per_thread_ = 0;
+  if (C10_LIKELY(
+          at::xpu::currentStreamCaptureStatus() ==
+          at::xpu::CaptureStatus::Executing)) {
+    state_->seed_ = seed;
+    state_->philox_offset_per_thread_ = 0;
+  } else {
+    TORCH_CHECK(
+        state_->seed_ == seed,
+        "CUDAGeneratorImpl::set_current_seed can be called during stream capture only if new seed is the same as the original seed.");
+  }
 }
 
 void XPUGeneratorImpl::set_offset(uint64_t offset) {
