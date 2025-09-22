@@ -123,7 +123,7 @@ class CPythonTestCase(TestCase):
     """
 
     _stack: contextlib.ExitStack
-    dynamo_strict_fullgraph = True
+    dynamo_strict_nopython = True
 
     # Restore original unittest methods to simplify tracing CPython test cases.
     assertEqual = unittest.TestCase.assertEqual  # type: ignore[assignment]
@@ -165,12 +165,12 @@ class CPythonTestCase(TestCase):
         self,
         fn: Callable[..., Any],
         backend: Union[str, Callable[..., Any]],
-        fullgraph: bool,
+        nopython: bool,
     ) -> Callable[..., Any]:
         # We want to compile only the test function, excluding any setup code
         # from unittest
         method = getattr(self, self._testMethodName)
-        method = torch._dynamo.optimize(backend, error_on_graph_break=fullgraph)(method)
+        method = torch._dynamo.optimize(backend, error_on_graph_break=nopython)(method)
         setattr(self, self._testMethodName, method)
         return fn
 
