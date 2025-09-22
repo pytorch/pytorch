@@ -12,10 +12,10 @@
 #include <torch/csrc/utils/pybind.h>
 
 TORCH_MAKE_PYBIND_ENUM_FASTER(at::RecordScope)
-TORCH_MAKE_PYBIND_ENUM_FASTER(ProfilerState)
-TORCH_MAKE_PYBIND_ENUM_FASTER(ActiveProfilerType)
-TORCH_MAKE_PYBIND_ENUM_FASTER(ActivityType)
-TORCH_MAKE_PYBIND_ENUM_FASTER(EventType)
+TORCH_MAKE_PYBIND_ENUM_FASTER(torch::profiler::impl::ProfilerState)
+TORCH_MAKE_PYBIND_ENUM_FASTER(torch::profiler::impl::ActiveProfilerType)
+TORCH_MAKE_PYBIND_ENUM_FASTER(torch::profiler::impl::ActivityType)
+TORCH_MAKE_PYBIND_ENUM_FASTER(torch::profiler::impl::EventType)
 
 struct THPCapturedTraceback {
   PyObject_HEAD

@@ -40,10 +40,10 @@ PYBIND11_DECLARE_HOLDER_TYPE(T, c10::SingletonTypePtr<T>, true)
 // so the percentage may be higher after other optimizations for
 // py::enum_ happen).
 #ifdef PYBIND11_HAS_NATIVE_ENUM
-#define TORCH_MAKE_PYBIND_ENUM_FASTER(T)                                \
-  namespace pybind11::detail {                                          \
-  template <>                                                           \
-  struct type_caster_enum_type_enabled<T, void> : std::false_type {};   \
+#define TORCH_MAKE_PYBIND_ENUM_FASTER(T)                              \
+  namespace pybind11::detail {                                        \
+  template <>                                                         \
+  struct type_caster_enum_type_enabled<T, void> : std::false_type {}; \
   } // namespace pybind11::detail
 #else // PYBIND11_HAS_NATIVE_ENUM
 #define TORCH_MAKE_PYBIND_ENUM_FASTER(T)
