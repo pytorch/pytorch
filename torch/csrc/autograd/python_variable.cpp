@@ -22,6 +22,7 @@
 #include <torch/csrc/autograd/utils/error_messages.h>
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/distributed/Placement.h>
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/tensor/python_tensor.h>
@@ -841,11 +842,7 @@ static bool arg_type_tensor_or_tensor_list_like(py::handle arg) {
   _(_local_tensor)                                            \
   _(_spec)                                                    \
   _(args_schema)                                              \
-  _(dim)                                                      \
   _(has_symints)                                              \
-  _(is_partial)                                               \
-  _(is_replicate)                                             \
-  _(is_shard)                                                 \
   _(kwargs_schema)                                            \
   _(op)                                                       \
   _(schema_info)                                              \
@@ -875,14 +872,6 @@ static bool intern_dtensor_strings() {
   FOR_EACH_DTENSOR_INTERNED_STRING(INTERN_DTENSOR_STRING);
 #undef INTERN_DTENSOR_STRING
   return true;
-}
-
-static bool checked_is_true(PyObject* obj) {
-  int result = PyObject_IsTrue(obj);
-  if (result == -1) {
-    throw py::error_already_set();
-  }
-  return result;
 }
 
 static bool checked_not(PyObject* obj) {
@@ -1174,13 +1163,13 @@ static PyObject* DTensor_compute_global_tensor_info_impl(
   // apparently we can't rely on the bound method to stick around.
   py::object mesh_size;
   for (const auto& placement : placements) {
-    // TODO: C++ify Placement and DeviceMesh somehow; profiling seems
+    // TODO: C++ify DeviceMesh somehow; profiling seems
     // to say that nearly all our remaining time spent is spent
     // calling back into Python.
-    if (checked_is_true(
-            placement.attr(dtensor_interned_strings.is_shard)().ptr())) {
-      const auto shard_dim =
-          py::cast<int64_t>(placement.attr(dtensor_interned_strings.dim));
+    const auto& cpp_placement = placement.cast<const distributed::Placement&>();
+    if (const auto* cpp_shard =
+            dynamic_cast<const distributed::Shard*>(&cpp_placement)) {
+      const auto shard_dim = cpp_shard->dim;
       TORCH_CHECK(
           shard_dim >= 0,
           "Shard placements should have negative dims normalized in the user-facing APIs: ",
@@ -1206,11 +1195,7 @@ static PyObject* DTensor_compute_global_tensor_info_impl(
           tensor_strides[i] *= mesh_dim_size;
         }
       }
-    } else if (
-        checked_not(
-            placement.attr(dtensor_interned_strings.is_replicate)().ptr()) &&
-        checked_not(
-            placement.attr(dtensor_interned_strings.is_partial)().ptr())) {
+    } else if (!cpp_placement.is_replicate() && !cpp_placement.is_partial()) {
 #if IS_PYTHON_3_11_PLUS
       const auto placement_type_name =
           py::str(py::handle(PyType_GetName(Py_TYPE(placement.ptr()))));

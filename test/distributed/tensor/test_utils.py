@@ -11,7 +11,6 @@ from torch.distributed.tensor._utils import (
     _compute_local_shape_and_global_offset,
     _explicit_order_placements,
     compute_global_tensor_info,
-    compute_global_tensor_info_dynamo_polyfill,
     compute_global_tensor_shape,
     compute_local_shape_and_global_offset,
 )
@@ -23,12 +22,7 @@ from torch.distributed.tensor.placement_types import (
     Replicate,
     Shard,
 )
-from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
-    parametrize,
-    run_tests,
-    TestCase,
-)
+from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
@@ -456,15 +450,8 @@ class UtilTest(DTensorTestBase):
             )
 
 
-@instantiate_parametrized_tests
 class UtilSingleDeviceTest(TestCase):
-    @parametrize(
-        "compute_global_tensor_info",
-        [compute_global_tensor_info, compute_global_tensor_info_dynamo_polyfill],
-    )
-    def test_compute_global_tensor_info_unsupported_placement(
-        self, compute_global_tensor_info
-    ):
+    def test_compute_global_tensor_info_unsupported_placement(self):
         class MockDeviceMesh:
             def size(self, x):
                 return x
@@ -477,13 +464,7 @@ class UtilSingleDeviceTest(TestCase):
         with self.assertRaises(RuntimeError):
             compute_global_tensor_info(local_tensor, device_mesh, [FakePlacement()])
 
-    @parametrize(
-        "compute_global_tensor_info",
-        [compute_global_tensor_info, compute_global_tensor_info_dynamo_polyfill],
-    )
-    def test_compute_global_tensor_info_non_shard_placements(
-        self, compute_global_tensor_info
-    ):
+    def test_compute_global_tensor_info_non_shard_placements(self):
         class MockDeviceMesh:
             def size(self, x):
                 return x
@@ -496,13 +477,7 @@ class UtilSingleDeviceTest(TestCase):
         self.assertEqual(global_size, local_tensor.size())
         self.assertEqual(global_stride, local_tensor.stride())
 
-    @parametrize(
-        "compute_global_tensor_info",
-        [compute_global_tensor_info, compute_global_tensor_info_dynamo_polyfill],
-    )
-    def test_compute_global_tensor_info_shard_placement(
-        self, compute_global_tensor_info
-    ):
+    def test_compute_global_tensor_info_shard_placement(self):
         class MockDeviceMesh:
             def size(self, dim):
                 return dim + 2
