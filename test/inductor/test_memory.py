@@ -68,9 +68,16 @@ class TestOperatorReorderForPeakMemory(TestCase):
         outp_corr = self.model(self.inputs)
         compiled_model = torch.compile(self.model)
         code = run_and_get_triton_code(compiled_model, self.inputs)
+
+        call_str = (
+            "def call(self, args):"
+            if torch._inductor.config.graph_partition
+            else "def call(args):"
+        )
+
         (
             FileCheck()
-            .check("def call(args):")
+            .check(call_str)
             .check("buf1 = ")
             .check("buf0 = ")
             .check("buf2 = ")
@@ -105,6 +112,12 @@ class TestOperatorReorderForPeakMemory(TestCase):
                 methods=[memory.topological_sort_lpmf],
             )
 
+        call_str = (
+            "def call(self, args):"
+            if torch._inductor.config.graph_partition
+            else "def call(args):"
+        )
+
         with mock.patch.object(
             memory, "reorder_for_peak_memory", reorder_with_only_lpmf
         ):
@@ -113,7 +126,7 @@ class TestOperatorReorderForPeakMemory(TestCase):
             code = run_and_get_triton_code(compiled_model, self.inputs)
             (
                 FileCheck()
-                .check("def call(args):")
+                .check(call_str)
                 .check("buf1 = ")
                 .check("buf0 = ")
                 .check("buf2 = ")
@@ -148,15 +161,22 @@ class TestOperatorReorderForPeakMemory(TestCase):
                 methods=[memory.topological_sort_bfs],
             )
 
+        call_str = (
+            "def call(self, args):"
+            if torch._inductor.config.graph_partition
+            else "def call(args):"
+        )
+
         with mock.patch.object(
             memory, "reorder_for_peak_memory", reorder_with_only_bfs
         ):
             compiled_model = torch.compile(self.model)
 
             code = run_and_get_triton_code(compiled_model, self.inputs)
+
             (
                 FileCheck()
-                .check("def call(args):")
+                .check(call_str)
                 .check("buf0 = ")
                 .check("buf1 = ")
                 .check("buf2 = ")
@@ -191,6 +211,12 @@ class TestOperatorReorderForPeakMemory(TestCase):
                 methods=[memory.topological_sort_dfs],
             )
 
+        call_str = (
+            "def call(self, args):"
+            if torch._inductor.config.graph_partition
+            else "def call(args):"
+        )
+
         with mock.patch.object(
             memory, "reorder_for_peak_memory", reorder_with_only_dfs
         ):
@@ -199,7 +225,7 @@ class TestOperatorReorderForPeakMemory(TestCase):
             code = run_and_get_triton_code(compiled_model, self.inputs)
             (
                 FileCheck()
-                .check("def call(args):")
+                .check(call_str)
                 .check("buf0 = ")
                 .check("buf2 = ")
                 .check("buf4 = ")
@@ -327,6 +353,33 @@ class TestOperatorReorderForPeakMemory(TestCase):
         y = torch.rand(N, N, dtype=torch.float32, device=GPU_TYPE)
         z = torch.rand(N, N, dtype=torch.float32, device=GPU_TYPE)
 
+        from torch._inductor.choices import InductorChoices
+        from torch._inductor.scheduler import BaseSchedulerNode, Scheduler
+
+        class CustomInductorChoices(InductorChoices):
+            @staticmethod
+            def can_fuse(
+                scheduler: Scheduler,
+                node1: BaseSchedulerNode,
+                node2: BaseSchedulerNode,
+                shared_data_score: int,
+            ) -> bool:
+                can_fuse_default = InductorChoices.can_fuse(
+                    scheduler, node1, node2, shared_data_score
+                )
+                if (not can_fuse_default) or (
+                    not config.realize_acc_reads_size_threshold
+                ):
+                    return can_fuse_default
+
+                all_reads = (node1.read_writes.reads | node2.read_writes.reads) - (
+                    node1.read_writes.writes | node2.read_writes.writes
+                )
+                size_of_reads = [scheduler.dep_size_hint(dep) for dep in all_reads]
+                return sum(size_of_reads) < config.realize_acc_reads_size_threshold
+
+        torch._inductor.virtualized.V.set_choices_handler(CustomInductorChoices())
+
         # CASE 1: no restriction on the amount of accumulation
         with config.patch({"realize_acc_reads_size_threshold": float("inf")}):
             f_compiled = torch.compile(f)
@@ -355,13 +408,9 @@ class TestOperatorReorderForPeakMemory(TestCase):
             code = run_and_get_triton_code(f_compiled, x, y, z)
             (
                 FileCheck()
-                .check("triton_poi_fused_add_0.run(buf1, arg2_1,")
-                .check("triton_poi_fused_add_0.run(buf3, arg2_1,")
-                .check("triton_poi_fused_add_0.run(buf4, buf3,")
-                .check("triton_poi_fused_add_0.run(buf6, arg2_1,")
-                .check("triton_poi_fused_add_0.run(buf7, buf6,")
-                .check("triton_poi_fused_add_0.run(buf9, arg2_1,")
-                .check("triton_poi_fused_add_0.run(buf10, buf9,")
+                .check("triton_poi_fused_add_0.run(buf2, arg2_1, buf1,")
+                .check("triton_poi_fused_add_1.run(buf4, buf3, arg2_1")
+                .check("triton_poi_fused_add_1.run(buf6, buf5, arg2_1,")
                 .run(code)
             )
 

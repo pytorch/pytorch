@@ -4,7 +4,6 @@
 #include <ATen/TensorUtils.h>
 #include <ATen/native/Pool.h>
 #include <ATen/native/ReduceOpsUtils.h>
-#include <ATen/native/mps/MPSGraphVenturaOps.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <c10/util/irange.h>
 
@@ -456,7 +455,7 @@ static Tensor std_var_common_impl_mps(const Tensor& input_t,
     errMessage += ": reduction dim must be in the range of input shape";
     for (const auto dim : dim_value) {
       auto wrap_dim = maybe_wrap_dim(dim, num_input_dims);
-      TORCH_CHECK(wrap_dim < static_cast<decltype(wrap_dim)>(input_shape.size()), errMessage.c_str())
+      TORCH_CHECK(wrap_dim < (num_input_dims ? num_input_dims : 1), errMessage.c_str())
     }
   }
 
@@ -617,6 +616,7 @@ static Tensor median_common_mps(const Tensor& input_t, bool nanmedian) {
   // we allocate 1 here due to MacOS13 bug for gather MPSGraph op, look below for the error
   Tensor output_t = at::empty({1}, input_t.scalar_type(), std::nullopt, kMPS, std::nullopt, std::nullopt);
   if (output_t.numel() == 0 || num_in_elements == 0) {
+    output_t.fill_(std::numeric_limits<float>::quiet_NaN());
     return output_t;
   }
 

@@ -106,7 +106,7 @@ dlrm,pass,0
 
 
 
-doctr_det_predictor,pass,4
+doctr_det_predictor,pass,3
 
 
 
@@ -178,7 +178,7 @@ hf_T5_base,eager_fail_to_run,0
 
 
 
-hf_T5_generate,pass,3
+hf_T5_generate,pass,7
 
 
 

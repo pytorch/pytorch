@@ -6,6 +6,7 @@
 #
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
+import os
 import sys
 import uuid
 from dataclasses import dataclass, field
@@ -26,7 +27,7 @@ from torch.distributed.elastic.multiprocessing.errors import ChildFailedError
 from torch.distributed.elastic.rendezvous import RendezvousParameters
 from torch.distributed.elastic.rendezvous.utils import parse_rendezvous_endpoint
 from torch.distributed.elastic.utils.logging import get_logger
-from torch.distributed.numa.binding import NumaOptions
+from torch.numa.binding import NumaOptions
 
 
 __all__ = ["LaunchConfig", "elastic_launch", "launch_agent"]
@@ -95,6 +96,7 @@ class LaunchConfig:
     local_addr: Optional[str] = None
     event_log_handler: str = "null"
     numa_options: Optional[NumaOptions] = None
+    signals_to_handle: str = "SIGTERM,SIGINT,SIGHUP,SIGQUIT"
 
     def __post_init__(self):
         default_timeout = 900
@@ -107,7 +109,12 @@ class LaunchConfig:
         if self.logs_specs is None:
             self.logs_specs = DefaultLogsSpecs()
 
-        if self.numa_options is None and torch.cuda.is_available():
+        if (
+            self.numa_options is None
+            and torch.cuda.is_available()
+            # We assume local_rank n uses cuda device n.
+            and torch.cuda.device_count() == self.nproc_per_node
+        ):
             self.numa_options = get_default_numa_options()
             logger.info("Using default numa options = %r", self.numa_options)
 
@@ -235,6 +242,7 @@ def launch_agent(
             "metrics_cfg": config.metrics_cfg,
             "event_log_handler": config.event_log_handler,
             "numa_options": config.numa_options,
+            "signals_to_handle": config.signals_to_handle,
         },
     )
 
@@ -249,6 +257,9 @@ def launch_agent(
     )
 
     master_addr, master_port = _get_addr_and_port(rdzv_parameters)
+
+    # Set the signals to handle in the environment variable
+    os.environ["TORCHELASTIC_SIGNALS_TO_HANDLE"] = config.signals_to_handle
 
     spec = WorkerSpec(
         role=config.role,

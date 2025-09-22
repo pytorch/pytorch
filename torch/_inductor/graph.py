@@ -393,8 +393,6 @@ class GraphLowering(torch.fx.Interpreter):
         self.inplaced_to_remove: OrderedSet[str] = OrderedSet()
         self.device_ops: DeviceOpOverrides = None  # type: ignore[assignment]
         self.wrapper_code: PythonWrapperCodegen = None  # type: ignore[assignment]
-        # See `ProxyExecutor Design Note` in ir.py for more details
-        self.extern_kernel_nodes: list[ir.ExternKernelNode] = []
 
         from torch._inductor.extern_node_serializer import extern_node_json_serializer
 
@@ -1114,10 +1112,11 @@ class GraphLowering(torch.fx.Interpreter):
             return None
         # See note: Note: [Generator arguments in AOTDispatcher]
         elif isinstance(example, torch.Generator):
-            assert (
-                len(V.graph.current_node.users) == 1
-                and next(iter(V.graph.current_node.users)).target
-                is torch._prims.rng_prims.graphsafe_run_with_rng_state
+            assert len(V.graph.current_node.users) == 1 and next(
+                iter(V.graph.current_node.users)
+            ).target in (
+                torch._prims.rng_prims.graphsafe_run_with_rng_state,
+                torch.ops.higher_order.invoke_subgraph,
             )
             gen = ir.GeneratorState(name=target, device=example.device)
             self.graph_inputs[target] = gen  # type: ignore[assignment]
@@ -2391,7 +2390,10 @@ class GraphLowering(torch.fx.Interpreter):
         else:
             trace_structured(
                 "inductor_output_code",
-                lambda: {"filename": path},
+                lambda: {
+                    "filename": path,
+                    "file_path": os.path.abspath(path),
+                },
                 payload_fn=lambda: wrapper_code.value,
             )
         with dynamo_timed("PyCodeCache.load_by_key_path", log_pt2_compile_event=True):

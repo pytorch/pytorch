@@ -172,6 +172,20 @@ class TestCompiledAutograd(TestCase):
         except subprocess.CalledProcessError as e:
             self.fail(f"Subprocess exited with return code: {e.returncode}")
 
+    def test_hipify_not_loaded_with_import_torch(self):
+        script = """
+import torch
+assert globals().get("hipify", False) is False
+"""
+        self.run_as_subprocess(script)
+
+    def test_hipify_not_loaded_with_import_cpp_extension(self):
+        script = """
+import torch.utils.cpp_extension
+assert globals().get("hipify", False) is False
+"""
+        self.run_as_subprocess(script)
+
     def test_dynamo_flaky_segfault(self):
         script = """
 import torch
@@ -3085,7 +3099,16 @@ main()
         self.assertEqual(counters["compiled_autograd"]["captures"], 1)
         # Compiled autograd lifts custom autograd.Function bwd instead of tracing it.
         # Must skip since we do not know if the cpu scalar will be used only in ATen/prim ops.
-        self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
+        if inductor_config.graph_partition:
+            # instead of skipping cudagraph, graph partition splits off cpu inputs/outputs and ops
+            # and cudagraphify the remaining computation. So there is no cudagraph skip.
+            expected_cudagraph_skips = 0
+        else:
+            expected_cudagraph_skips = 1
+
+        self.assertEqual(
+            counters["inductor"]["cudagraph_skips"], expected_cudagraph_skips
+        )
 
     @scoped_load_inline
     @requires_cuda_and_triton
@@ -3150,9 +3173,18 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
         # into it. We must skip since we do not know if the cpu scalar will be used only in ATen/prim ops.
         # In the future, we can consider having a cpu scalar movement pass sometime after we trace
         # into the custom C++ autograd::Function (like in AOTDispatcher)
+        if inductor_config.graph_partition:
+            # instead of skipping cudagraph, graph partition splits off cpu inputs/outputs and ops
+            # and cudagraphify the remaining computation. So there is no cudagraph skip.
+            expected_cudagraph_skips = 0
+        elif inductor_config.cpp_wrapper:
+            expected_cudagraph_skips = 2
+        else:
+            expected_cudagraph_skips = 1
+
         self.assertEqual(
             counters["inductor"]["cudagraph_skips"],
-            2 if inductor_config.cpp_wrapper else 1,
+            expected_cudagraph_skips,
         )
 
     def test_logs(self):
@@ -5165,6 +5197,7 @@ known_graph_breaks_tests = {
     "test_nested_checkpoint_set_early_stop",  # dynamo disable
     "test_nested_checkpoint_two_children_early_stop_False",  # dynamo disable
     "test_nested_checkpoint_two_children_early_stop_True",  # dynamo disable
+    "test_custom_autograd_ac_early_stop",  # marked as skipped
     "test_dropout",  # dynamo disable
     "test_dropout_inductor",  # dynamo disable
     "test_function_with_kwargs",  # dynamo disable
@@ -5321,7 +5354,7 @@ if torch.distributed.is_available() and HAS_CUDA_AND_TRITON:
         test_dtensor.TestDTensorCompile
     )
 
-xfail_hops = {}
+xfail_hops = {"local_map_hop"}
 
 
 class TestCompiledAutogradOpInfo(TestCase):

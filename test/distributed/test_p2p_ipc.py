@@ -6,12 +6,8 @@
 
 import torch
 from torch.multiprocessing.reductions import reduce_tensor
-from torch.testing._internal.common_distributed import MultiProcContinousTest
-from torch.testing._internal.common_utils import (
-    requires_cuda_p2p_access,
-    run_tests,
-    skipIfRocm,
-)
+from torch.testing._internal.common_distributed import MultiProcContinuousTest
+from torch.testing._internal.common_utils import requires_cuda_p2p_access, run_tests
 
 
 # So that tests are written in device-agnostic way
@@ -20,7 +16,7 @@ device_module = torch.get_device_module(device_type)
 
 
 @requires_cuda_p2p_access()
-class P2PIpcTest(MultiProcContinousTest):
+class P2PIpcTest(MultiProcContinuousTest):
     @classmethod
     def backend_str(cls):
         return "gloo"
@@ -34,7 +30,6 @@ class P2PIpcTest(MultiProcContinousTest):
     def device(self) -> torch.device:
         return torch.device(device_type, self.rank)
 
-    @skipIfRocm
     def test_p2p_ipc(self) -> None:
         """
         Test that cross-process P2P access works, by reducing a tensor,
