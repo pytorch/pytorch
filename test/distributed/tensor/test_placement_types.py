@@ -4,6 +4,7 @@ import itertools
 import sys
 import unittest
 
+from torch._dynamo.variables.distributed import PlacementClassVariable
 from torch.distributed.tensor.placement_types import (
     _StridedShard,
     Partial,
@@ -70,6 +71,9 @@ class PlacementTypesTestCase(TestCase):
             _StridedShard(3, 4)
         _StridedShard(3, split_factor=4)
 
+    def test_strided_shard_isinstance_shard(self):
+        assert isinstance(_StridedShard(dim=3, split_factor=7), Shard)
+
     def test_deepcopy(self):
         for placement in (
             Shard(3),
@@ -78,6 +82,12 @@ class PlacementTypesTestCase(TestCase):
             Replicate(),
         ):
             copy.deepcopy(placement)
+
+    def test_dynamo_can_identify_placement_classes(self):
+        for cls in (Replicate, Shard, _StridedShard, Partial):
+            self.assertTrue(
+                PlacementClassVariable.is_placement_type(cls), msg=f"failed on {cls}"
+            )
 
 
 if __name__ == "__main__":
