@@ -32,6 +32,8 @@ _is_in_non_infra_torch_dispatch_mode = False
 _is_in_any_mode_without_ignore_compile_internals = False
 
 
+_entered_torch_dispatch_modes = set()
+
 def is_in_torch_dispatch_mode(include_infra_modes=True) -> bool:
     return (
         _is_in_torch_dispatch_mode
@@ -42,6 +44,37 @@ def is_in_torch_dispatch_mode(include_infra_modes=True) -> bool:
 
 def is_in_any_mode_without_ignore_compile_internals() -> bool:
     return _is_in_any_mode_without_ignore_compile_internals
+
+
+def any_torch_dispatch_mode_on_stack(
+    *, 
+    include_infra_modes=True, 
+    respect_ignore_compile_internals=False, 
+) -> bool:
+    """
+    Check if there are any ambient (non-entered) modes on the stack.
+    Returns True if there are modes that are on the stack but NOT entered.
+    """
+    stack_len = torch._C._len_torch_dispatch_stack()
+    ambient_mode_count = 0
+    
+    for idx in range(stack_len):
+        mode = _get_dispatch_stack_at(idx)
+            
+        # Apply filters first
+        if mode.is_infra_mode():
+            if not include_infra_modes:
+                continue
+        if mode.ignore_compile_internals():
+            if respect_ignore_compile_internals:
+                continue
+        
+        # Count this mode as relevant
+        # If it's NOT in _entered_torch_dispatch_modes, it's ambient
+        if mode not in _entered_torch_dispatch_modes:
+            ambient_mode_count += 1
+    
+    return ambient_mode_count > 0
 
 
 class TorchDispatchMode:
@@ -105,7 +138,7 @@ class TorchDispatchMode:
             self.old_without_ignore_compile_internals_dispatch_mode_flags: deque[  # type: ignore[no-redef]
                 bool
             ] = deque()
-
+    
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         raise NotImplementedError
 
@@ -134,6 +167,7 @@ class TorchDispatchMode:
             _is_in_any_mode_without_ignore_compile_internals
             or not self.ignore_compile_internals()
         )
+        _entered_torch_dispatch_modes.add(self)
         _push_mode(self)
         return self
 

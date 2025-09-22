@@ -89,7 +89,8 @@ struct EnableHermeticPyObject {
         old_python_(
             c10::impl::tls_is_dispatch_key_included(at::DispatchKey::Python)),
         old_python_snapshot_(c10::impl::tls_is_dispatch_key_included(
-            at::DispatchKey::PythonTLSSnapshot)) {
+            at::DispatchKey::PythonTLSSnapshot)),
+        old_mode_state_(c10::impl::TorchDispatchModeTLS::get_state()){
     c10::impl::HermeticPyObjectTLS::set_state(true);
     c10::impl::tls_set_dispatch_key_excluded(at::DispatchKey::Python, true);
     c10::impl::tls_set_dispatch_key_included(at::DispatchKey::Python, false);
@@ -104,6 +105,7 @@ struct EnableHermeticPyObject {
         at::DispatchKey::Python, old_python_);
     c10::impl::tls_set_dispatch_key_included(
         at::DispatchKey::PythonTLSSnapshot, old_python_snapshot_);
+    c10::impl::TorchDispatchModeTLS::set_state(old_mode_state_);
   }
   EnableHermeticPyObject(const EnableHermeticPyObject&) = delete;
   EnableHermeticPyObject(EnableHermeticPyObject&&) = delete;
@@ -113,6 +115,7 @@ struct EnableHermeticPyObject {
   bool old_excluded_python_;
   bool old_python_;
   bool old_python_snapshot_;
+  c10::impl::TorchDispatchModeTLS old_mode_state_;
 };
 
 class PythonKernelHolder : public c10::OperatorKernel {

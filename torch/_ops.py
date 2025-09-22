@@ -921,6 +921,9 @@ class OpOverload(OperatorBase, Generic[_P, _T]):
 
                 if curr_mode not in self.python_key_table:
                     if isinstance(self, TorchBindOpOverload):
+                        from torch.utils._python_dispatch import _get_current_dispatch_mode_stack
+                        stack = _get_current_dispatch_mode_stack()
+                        print("DISPATCH STACK:", [(type(mode), id(mode)) for mode in stack])
                         with (
                             torch.utils._python_dispatch._pop_mode_temporarily() as mode
                         ):
@@ -931,6 +934,7 @@ class OpOverload(OperatorBase, Generic[_P, _T]):
                         return self._op_dk(key, *args, **kwargs)
 
                 with torch.utils._python_dispatch._pop_mode_temporarily() as mode:
+                    print("MODEEEE", mode)
                     return self.python_key_table[curr_mode](mode, *args, **kwargs)
 
             self._dispatch_cache[key] = handler

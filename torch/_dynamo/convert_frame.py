@@ -73,8 +73,9 @@ from torch.monitor import _WaitCounter
 from torch.nn.parallel.distributed import DistributedDataParallel
 from torch.utils._python_dispatch import (
     _disable_current_modes,
-    is_in_any_mode_without_ignore_compile_internals,
+    any_torch_dispatch_mode_on_stack,
     is_in_torch_dispatch_mode,
+    is_in_any_mode_without_ignore_compile_internals,
 )
 from torch.utils._traceback import CapturedTraceback, format_traceback_short
 
@@ -684,6 +685,7 @@ class ConvertFrameAssert:
         if not code.co_name.startswith(TORCH_DYNAMO_RESUME_IN_PREFIX):
             info = f"{code.co_name} {code.co_filename}:{code.co_firstlineno}"
             dynamo_tls.traced_frame_infos.append(info)
+            
 
         with compile_context(CompileContext(compile_id)):
             result = _compile(
@@ -794,8 +796,22 @@ def trace_frame(
     def run_tracer() -> None:
         try:
             tracer.output.mark_bytecode_tracing_start()
-            with tracing(tracer.output.tracing_context), tracer.set_current_tx():
-                tracer.run()
+            # FIX: Re-enable Python dispatch key if it was excluded (e.g., by hermetic CompositeExplicitAutograd)
+            # Detect if we're in nested compilation (Python dispatch excluded by outer hermetic execution)
+            python_excluded = torch._C._dispatch_tls_local_exclude_set().has(torch._C.DispatchKey.Python)
+
+            if torch._C._dispatch_tls_local_exclude_set().has(torch._C.DispatchKey.Python):                                                                                                                                              
+                meta_in_tls = torch._C._meta_in_tls_dispatch_include()                                                                                                                                                                  
+                torch._C._set_meta_in_tls_dispatch_include(False)                                                                                                                                                                        
+                try: 
+                    with torch._C._EnablePythonDispatcher(), tracing(tracer.output.tracing_context), tracer.set_current_tx():                                                                                                                                                                                                               
+                        tracer.run()                                                                                                                                                                                                      
+                finally:                                                                                                                                                                                                                
+                    torch._C._set_meta_in_tls_dispatch_include(meta_in_tls)                                                                                                                                                              
+            else: 
+                with tracing(tracer.output.tracing_context), tracer.set_current_tx():                                                                                                                                                                                                                       
+                    tracer.run()  
+
         except exc.UnspecializeRestartAnalysis:
             speculation_log.clear()  # type: ignore[has-type]
             raise
@@ -1792,10 +1808,6 @@ class ConvertFrameProtocol(typing.Protocol):
     ) -> ConvertFrameReturn: ...
 
 
-def should_skip_due_to_torch_dispatch_mode() -> bool:
-    return is_in_any_mode_without_ignore_compile_internals()
-
-
 class CatchErrorsWrapper:
     def __init__(self, callback: ConvertFrameProtocol, hooks: Hooks) -> None:
         functools.wraps(callback)(self)
@@ -1810,19 +1822,21 @@ class CatchErrorsWrapper:
     ) -> ConvertFrameReturn:
         assert frame_state is not None
         input_codes.add(frame.f_code)
-
         is_skipfile = trace_rules.check(frame.f_code)
         if sys.version_info >= (3, 13):
             has_started_execution = frame.f_lasti > first_real_inst_idx(frame.f_code)
         else:
             has_started_execution = frame.f_lasti >= first_real_inst_idx(frame.f_code)
+
+        should_skip_due_to_torch_dispatch = any_torch_dispatch_mode_on_stack(include_infra_modes=False, respect_ignore_compile_internals=True)
         if (
             # TODO: the first condition is not covered by any test
             has_started_execution
             or is_skipfile
+            or frame.f_code.co_name == "__torch_dispatch__"
             or config.disable
             or (
-                should_skip_due_to_torch_dispatch_mode()
+                should_skip_due_to_torch_dispatch
                 and not getattr(self._torchdynamo_orig_backend, "_export", False)
             )
         ):
@@ -1831,7 +1845,7 @@ class CatchErrorsWrapper:
                     skip_reason = "traced frame already"
                 elif trace_rules.check(frame.f_code):
                     skip_reason = "in skipfiles"
-                elif is_in_torch_dispatch_mode(include_infra_modes=False):
+                elif should_skip_due_to_torch_dispatch:
                     skip_reason = "non-infra torch dispatch mode present, this is not supported today in torch.compile"
                 else:
                     skip_reason = "dynamo tracing is disabled"

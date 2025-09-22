@@ -498,6 +498,7 @@ class OutputGraph(OutputGraphGuardsState):
         import torch._functorch.config as _config
 
         with _config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
+            # Check if we're in nested compilation - reuse existing fake mode
             fake_mode = torch._subclasses.FakeTensorMode(
                 shape_env=shape_env,
                 # TODO (tmanlaibaatar) Remove this once we always lift params and buffers
