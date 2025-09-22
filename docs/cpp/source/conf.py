@@ -77,9 +77,7 @@ exhale_args = {
     "createTreeView": True,
     "exhaleExecutesDoxygen": True,
     "exhaleUseDoxyfile": True,
-    "verboseBuild": False,
-    # Reduce memory usage during parsing
-    "fullToctreeMaxDepth": 1,
+    "verboseBuild": True,
     ############################################################################
     # HTML Theme specific configurations.                                      #
     ############################################################################
@@ -95,15 +93,6 @@ exhale_args = {
     "kindsWithContentsDirectives": ["class", "file", "namespace", "struct"],
     # Exclude PIMPL files from class hierarchy tree and namespace pages.
     "listingExclude": [r".*Impl$"],
-    ############################################################################
-    # Performance optimizations for exhale 0.3.7                              #
-    ############################################################################
-    # Disable expensive operations for faster builds
-    "generateBreatheFileDirectives": False,
-    # Skip expensive cross-referencing for faster builds
-    "lexerMapping": {},
-    # Reduce file processing overhead
-    "customSpecificationsMapping": {},
     ############################################################################
     # Main library page layout example configuration.                          #
     ############################################################################
