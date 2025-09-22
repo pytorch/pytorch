@@ -515,13 +515,12 @@ class TestMatmulCuda(InductorTestCase):
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
     # TODO(future PR): enable compile for torch._grouped_mm fallback path
     @unittest.skipIf(not SM90OrLater, "Grouped gemm with compile supported on SM90")
+    @unittest.skipIf(SM100OrLater, "Grouped gemm is inconsistently raising numeric issues see: #163462 ")
     @parametrize("op", ["2d/2d", "2d/3d", "3d/2d", "3d/3d"])
     @parametrize("a_row_major", [False, True])
     @parametrize("b_row_major", [False, True])
     @parametrize("max_autotune", [False, True])
     def test_grouped_gemm_compiled(self, op, a_row_major, b_row_major, max_autotune):
-        if max_autotune and SM100OrLater:
-            self.skipTest("Triton templates not supported on SM100+ for grouped_mm")
         device = "cuda"
         dtype_AB = torch.bfloat16
         dtype_offset = torch.int32
