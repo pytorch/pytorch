@@ -45,14 +45,9 @@ struct C10_API PyObjectSlot {
   // a non-nullopt (but possibly null) PyObject.  If (possibly) untagged,
   // returns a nullopt.  If it is definitely invalid, raises an error.
   //
-  // NB: this function is only kept for backward compatibility.
-  // With single-interpreter mode, the interpreter check is simplified.
-  //
   // NB: this lives in header so that we can avoid actually creating the
   // std::optional
 
-  // @todo alban: I'm not too sure what's going on here, we can probably delete
-  // it but it's worthwhile making sure
   std::optional<PyObject*> check_pyobj() const {
     impl::PyInterpreter* interpreter = getGlobalPyInterpreter();
     if (interpreter == nullptr || pyobj_ == nullptr) {

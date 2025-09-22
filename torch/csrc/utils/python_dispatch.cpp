@@ -81,7 +81,6 @@ inline static torch::CppFunction dispatch_str(const char* key, Func&& raw_f) {
   }
 }
 
-
 class PythonKernelHolder : public c10::OperatorKernel {
   c10::SafePyObject func_;
   c10::DispatchKey dispatch_key_;

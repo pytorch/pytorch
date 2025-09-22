@@ -175,6 +175,7 @@ class PyInterpreterHolder {
     return impl_;
   }
   // In single-interpreter mode, this is always true
+  // TODO: delete this
   bool is_main_interpreter() const noexcept {
     return true;
   }

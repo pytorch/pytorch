@@ -49,18 +49,24 @@ struct C10_API PyInterpreter;
 // variable defined in libtorch), you may attempt to decref the object when
 // the Python interpreter has already been shutdown.
 //
-// In principle, this could be a list of all possible PyInterpreters, but in
-// practice we don't actually need this list.  Instead we just store a single
-// PyInterpreter, which is the GLOBAL interpreter.
+// BUT WAIT, IT GETS WORSE.  With torchdeploy, there may be multiple Python
+// interpreters in a single process. If a C++ object is accessible from
+// multiple interpreters, we must take care not to accidentally pass a
+// PyObject from one interpreter with another interpreter.
 //
-// The PyInterpreter "tag" (object with a vtable) represents the single
-// Python interpreter:
+// To prevent these mixups, we introduce a PyInterpreter "tag" (object with
+// a vtable), which specifies a specific Python interpreter.
 //
-//  - All objects are associated with the same single Python interpreter.
+//  - Any given object can be associated with AT MOST one Python interpreter.
 //    We represent the interpreter tag as a memory address to an instance of
-//    a virtual class that is allocated once for the interpreter (this is so
-//    that we can request the interpreter to perform operations for us, if
+//    a virtual class that is allocated once per interpreter (this is so that
+//    we can request the interpreter to perform operations for us, if
 //    necessary).
+//
+//  - It can be recorded with a PyObject (PyInterpreterObject) so that
+//    we know what interpreter the object is associated with, and we can
+//    raise an error if you try to use the PyObject from the wrong
+//    interpreter context.
 //
 //  - It contains a vtable that can be used to perform various Python
 //    operations from ordinary C++ code that ordinarily wouldn't be accessible
@@ -92,9 +98,25 @@ struct C10_API PyInterpreter;
 // object.  This can be replaced with a no-op vtable from libc10.so, which
 // is guaranteed to stick around until the bitter end.
 //
-// NB: The PyInterpreter pointer is analogous to ob_type on a PyObject.  On
-// PyObject, ob_type is tagged with Py_TPFLAGS_HEAPTYPE if it is on the heap,
-// and we copy this tagging strategy here.
+// NB: The downside with representing PyInterpreter tags as full objects is that
+// it takes an extra word on TensorImpl.  If tags were instead just integer
+// indices, on 64-bit architectures we could pack the tag and PyObject together
+// into a single atomic word.  On 32-bit architectures we could simply say that
+// only one Python interpreter is supported (erroring if a nontrivial
+// interpreter tag is attempted to be set).
+//
+// The difficulty with this scheme is we need to maintain an out-of-line table
+// to get at the PyInterpreters so that we can do virtual method calls on them,
+// and registration/deregistration to this table must be done in a thread safe
+// manner.  This can be easily done if the number of possible PyInterpreters is
+// small enough (e.g., 8-bit integer) by simply preallocating an array of
+// sufficient size to hold all possible interpreters.  Surely 128 threads is
+// more than enough for anyone!
+//
+// I didn't decide to do this technique at the moment, because the extra word
+// added by the PyInterpreter tag takes us to 24 words, which means that we
+// still fit inside three eight word cache lines.  If you need to penny pinch
+// another word consider doing this!
 
 struct C10_API PyInterpreterVTable {
   virtual ~PyInterpreterVTable() = default;
@@ -121,9 +143,10 @@ struct C10_API PyInterpreterVTable {
   virtual void reportErrorCallback(PyObject* callback, DispatchKey key)
       const = 0;
 
-  // This method bridges Python operator registration with C++ dispatch.
-  // It allows the C++ dispatcher to call back into Python for ops
-  // that are implemented in Python (e.g., custom operators, torch.compile).
+  // This is only invoked in the multipy/torchdeploy // codespell:ignore multipy
+  // situation from pythonOpRegistrationTrampoline; this lets us get to the
+  // Python interpreter to actually find the appropriate Python op registration
+  // entry to call.
   virtual void python_op_registration_trampoline(
       const c10::OperatorHandle& op,
       c10::DispatchKey,

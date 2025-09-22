@@ -2468,7 +2468,6 @@ static PyObject* THPVariable_NewWithVar(
     auto v = (THPVariable*)obj;
     // TODO: named constructor to avoid default initialization
     new (&v->cdata) MaybeOwned<Variable>();
-    // Normal codepath
     v->cdata = MaybeOwned<Variable>::owned(Variable(_var));
     const auto& var = THPVariable_Unpack(v);
     var.unsafeGetTensorImpl()->pyobj_slot()->init_pyobj(obj);
