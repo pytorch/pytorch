@@ -2075,6 +2075,70 @@ class TestSDPA(NNTestCase):
         y = torch.nn.functional.scaled_dot_product_attention(x, x, x)
         self.assertFalse(y.isnan().any().item())
 
+    @parametrize("dtype", [torch.float32, torch.bfloat16, torch.half])
+    @parametrize("n_heads", [[8, 8], [16, 8], [10, 2]])  # [q_heads, kv_heads]
+    @parametrize("is_causal", [True, False])
+    @parametrize("dropout_p", [0., 0.1])
+    def test_reference_implementation_bitwise_match_math_backend(self, device, dtype, n_heads, is_causal, dropout_p):
+        """Regression test for scaled_dot_product_attention documentation [1] implementation.
+        Should produces bitwise identical results to the MATH backend.
+
+        [1] https://docs.pytorch.org/docs/stable/generated/torch.nn.functional.scaled_dot_product_attention.html
+
+        If you modify the reference implementation, update this test.
+        """
+        # Efficient implementation equivalent to the following:
+        def scaled_dot_product_attention(query, key, value, attn_mask=None, dropout_p=0.0,
+                is_causal=False, scale=None, enable_gqa=False) -> torch.Tensor:
+            L, S = query.size(-2), key.size(-2)
+            scale_factor = 1 / math.sqrt(query.size(-1)) if scale is None else scale
+            origin_dtype = query.dtype
+            query, key, value = query.float(), key.float(), value.float()
+            query, key = query * math.sqrt(scale_factor), key * math.sqrt(scale_factor)
+            attn_bias = torch.zeros(L, S, dtype=query.dtype, device=query.device)
+            if is_causal:
+                assert attn_mask is None
+                temp_mask = torch.ones(L, S, dtype=torch.bool).tril(diagonal=0)
+                attn_bias.masked_fill_(temp_mask.logical_not(), float("-inf"))
+
+            if attn_mask is not None:
+                if attn_mask.dtype == torch.bool:
+                    attn_bias.masked_fill_(attn_mask.logical_not(), float("-inf"))
+                else:
+                    attn_bias = attn_mask + attn_bias
+
+            if enable_gqa:
+                key = key.repeat_interleave(query.size(-3)//key.size(-3), -3)
+                value = value.repeat_interleave(query.size(-3)//value.size(-3), -3)
+
+            attn_weight = query @ key.transpose(-2, -1)
+            attn_weight += attn_bias
+            attn_weight = torch.softmax(attn_weight, dim=-1)
+            attn_weight = torch.dropout(attn_weight, dropout_p, train=True)
+            out = attn_weight @ value
+            return out.to(origin_dtype)
+
+        torch.manual_seed(42)
+        q_heads, kv_heads = n_heads
+        enable_gqa = q_heads != kv_heads
+        batch_size, seq_len, head_dim = 2, 8, 32
+
+        query = torch.randn(batch_size, q_heads, seq_len, head_dim, device=device, dtype=dtype)
+        key = torch.randn(batch_size, kv_heads, seq_len, head_dim, device=device, dtype=dtype)
+        value = torch.randn(batch_size, kv_heads, seq_len, head_dim, device=device, dtype=dtype)
+
+        doc_result = scaled_dot_product_attention(
+            query, key, value, dropout_p=dropout_p, is_causal=is_causal, enable_gqa=enable_gqa
+        )
+
+        with sdpa_kernel(backends=[SDPBackend.MATH]):
+            math_ref = F.scaled_dot_product_attention(
+                query, key, value, dropout_p=dropout_p, is_causal=is_causal, enable_gqa=enable_gqa
+            )
+
+        # Must be exact bitwise match - no tolerance allowed
+        self.assertEqual(doc_result, math_ref, atol=0., rtol=0.)
+
 class TestSDPACpuOnly(NNTestCase):
     """ Used to test CPU only functionality of scaled_dot_product_attention """
 
