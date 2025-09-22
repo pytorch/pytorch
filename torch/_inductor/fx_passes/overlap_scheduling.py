@@ -190,8 +190,8 @@ class OverlapScheduler:
     def __init__(
         self,
         gm: torch.fx.GraphModule,
-        compute_overlap_multipler: float = 1.0,
         max_in_flight_gb: float = 2.0,
+        compute_overlap_multipler: float = 1.0,
         max_coll_distance: int = 1000,
     ):
         self.gm = gm
@@ -638,16 +638,16 @@ class OverlapScheduler:
 
 def schedule_overlap_bucketing(
     gm: torch.fx.GraphModule,
-    compute_overlap_multipler: float = 1.0,
     max_in_flight_gb: float = 2.0,
+    compute_overlap_multipler: float = 1.0,
     max_coll_distance: int = 1000,
 ) -> torch.fx.GraphModule:
     """Schedule nodes to maximize compute-collective overlap.
 
     Args:
         gm: Input graph module to optimize.
-        compute_overlap_multipler: Scale factor for compute time used to hide collectives.
         max_in_flight_gb: Maximum GB of concurrent collective data.
+        compute_overlap_multipler: Scale factor for compute time used to hide collectives.
         max_coll_distance: Maximum node distance for overlap consideration.
     """
     return OverlapScheduler(
