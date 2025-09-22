@@ -8,10 +8,13 @@ import re
 import sys
 import time
 import warnings
-import weakref
 from contextlib import contextmanager, nullcontext
-from typing import Any, Callable, Optional, Union
+from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 from typing_extensions import TypeAlias
+
+
+if TYPE_CHECKING:
+    import weakref
 
 import torch
 import torch._dynamo
