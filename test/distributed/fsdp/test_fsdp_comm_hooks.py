@@ -34,7 +34,11 @@ device_type = (
     acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
 )
 
-BFLOAT16_AVAILABLE = torch.cuda.is_bf16_supported() or torch.xpu.is_bf16_supported()
+# bfloat16 is only supported by CUDA 11+ or XPU
+BFLOAT16_AVAILABLE = (
+    torch.cuda.is_available()
+    and (torch.version.cuda is not None or torch.version.hip is not None)
+) or torch.xpu.is_available()
 
 
 class Net(nn.Module):
