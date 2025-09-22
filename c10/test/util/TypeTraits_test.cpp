@@ -1,4 +1,4 @@
-#include <c10/util/TypeTraits.h>
+#include <torch/headeronly/util/TypeTraits.h>
 #include <gtest/gtest.h>
 
 using namespace c10::guts;

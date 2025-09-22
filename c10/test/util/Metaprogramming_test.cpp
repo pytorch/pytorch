@@ -1,5 +1,5 @@
 #include <c10/test/util/Macros.h>
-#include <c10/util/Metaprogramming.h>
+#include <torch/headeronly/util/Metaprogramming.h>
 #include <gtest/gtest.h>
 #include <cstdlib>
 

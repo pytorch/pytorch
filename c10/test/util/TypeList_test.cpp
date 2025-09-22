@@ -1,4 +1,4 @@
-#include <c10/util/TypeList.h>
+#include <torch/headeronly/util/TypeList.h>
 #include <gtest/gtest.h>
 #include <memory>
 

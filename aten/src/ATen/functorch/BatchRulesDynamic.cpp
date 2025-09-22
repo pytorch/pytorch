@@ -8,7 +8,7 @@
 #include <ATen/functorch/BatchRulesHelper.h>
 #include <ATen/functorch/BatchedFallback.h>
 #include <ATen/core/dispatch/Dispatcher.h>
-#include <c10/util/Metaprogramming.h>
+#include <torch/headeronly/util/Metaprogramming.h>
 
 // This file contains batching rules for operations that return Tensors of
 // dynamic shape. We generally don't support those with vmap so we raise

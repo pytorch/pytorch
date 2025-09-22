@@ -17,7 +17,7 @@
 #include <c10/util/Half.h>
 #include <c10/util/IdWrapper.h>
 #include <c10/util/TypeIndex.h>
-#include <c10/util/TypeTraits.h>
+#include <torch/headeronly/util/TypeTraits.h>
 #include <c10/util/irange.h>
 
 #include <c10/core/ScalarType.h>

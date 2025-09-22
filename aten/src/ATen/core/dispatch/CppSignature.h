@@ -2,7 +2,7 @@
 
 #include <c10/core/DispatchKeySet.h>
 #include <c10/macros/Macros.h>
-#include <c10/util/Metaprogramming.h>
+#include <torch/headeronly/util/Metaprogramming.h>
 #include <c10/util/Type.h>
 #include <typeindex>
 

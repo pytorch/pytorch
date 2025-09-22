@@ -2,7 +2,7 @@
 
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/Parallel.h>
-#include <c10/util/TypeList.h>
+#include <torch/headeronly/util/TypeList.h>
 #include <c10/core/Scalar.h>
 #include <c10/util/irange.h>
 

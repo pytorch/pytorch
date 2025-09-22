@@ -1,4 +1,4 @@
-#include <c10/core/CompileTimeFunctionPointer.h>
+#include <torch/headeronly/core/CompileTimeFunctionPointer.h>
 #include <gtest/gtest.h>
 
 namespace test_is_compile_time_function_pointer {

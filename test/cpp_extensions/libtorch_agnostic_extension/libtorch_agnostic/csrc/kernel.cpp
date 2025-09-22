@@ -154,17 +154,12 @@ Tensor my_ones_like(Tensor t, StableIValue device) {
   return to<Tensor>(stack[0]);
 }
 
-void boxed_my_ones_like(StableIValue* stack, uint64_t num_args, uint64_t num_outputs) {
-  Tensor res = my_ones_like(to<Tensor>(stack[0]), stack[1]);
-  stack[0] = from(res);
-}
-
 STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
   m.def("my_ones_like(Tensor t, Device d) -> Tensor");
 }
 
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
-  m.impl("my_ones_like", &boxed_my_ones_like);
+  m.impl("my_ones_like", TORCH_BOXED_FN(&my_ones_like));
 }
 
 std::tuple<Tensor, Tensor, bool> exp_neg_is_leaf(Tensor t1, Tensor t2, Tensor t3) {

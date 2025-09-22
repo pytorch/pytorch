@@ -1,6 +1,6 @@
 #pragma once
 
-#include <c10/util/TypeTraits.h>
+#include <torch/headeronly/util/TypeTraits.h>
 
 namespace c10::impl {
 
