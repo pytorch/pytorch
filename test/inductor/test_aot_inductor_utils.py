@@ -253,6 +253,13 @@ def check_model_fx(
         )
         options = options or {}
         options["fx_wrapper"] = True
+        options |= {
+            "compile_threads": 1,
+            "alignment_asserts": False,
+            "size_asserts": False,
+            "scalar_asserts": False,
+            "nan_asserts": False,
+        }
         gm = torch._inductor.aot_compile(ep.module(), example_inputs, options=options)
         gm.print_readable()
         actual = gm(*example_inputs)
