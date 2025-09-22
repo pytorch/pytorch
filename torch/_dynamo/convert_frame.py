@@ -1005,7 +1005,10 @@ def fullgraph_capture(
         closure=fn.__closure__ or (),  # type: ignore[arg-type]
     )
 
-    with compile_context(CompileContext(get_compile_id({}))):
+    with (
+        compile_context(CompileContext(get_compile_id({}))),
+        CompileTimeInstructionCounter.record(),
+    ):
         return _fullgraph_capture_frame(
             frame,
             constraints=constraints,
