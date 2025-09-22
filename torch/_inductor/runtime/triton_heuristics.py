@@ -2656,9 +2656,8 @@ def _reduction_configs(
             register_intensive=register_intensive,
         )
 
-
     contiguous_config = make_config(
-        1 if rnumel > 2048 else 2, # 1024 or less is persistent
+        1 if rnumel > 2048 else 2,  # 1024 or less is persistent
         min(rnumel, MAX_R0_BLOCK),
         register_intensive=register_intensive,
     )
@@ -2893,7 +2892,7 @@ def _persistent_reduction_configs(
                 xblock,
                 rnumel,
                 register_intensive=True,
-                reduction_hint=reduction_hint
+                reduction_hint=reduction_hint,
             )
             for xblock in (1, 8, 32, 128)
             if xblock == 1
