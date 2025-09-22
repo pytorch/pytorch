@@ -330,7 +330,8 @@ class Shard(torch._C._distributed.Shard):
         return f"S({self.dim})"
 
 
-class _StridedShard(torch._C._distributed.StridedShard):
+# Need to inherit from Shard here so that isinstance(some_strided_shard, Shard) will work.
+class _StridedShard(torch._C._distributed.StridedShard, Shard):
     """
     _StridedShard is only introduced to support 2D FSDP2 + TP sharding where the tensor
     is sharded on the TP mesh dimension first, then sharded on the FSDP mesh dimension.
