@@ -781,7 +781,8 @@ class record_function(_ContextDecorator):
         )
 
     def __enter__(self):
-        self.record = torch._C._profiler._RecordFunctionFast(self.name)
+        self.record = torch._C._profiler._RecordFunctionFast(self.name, (self.args,))
+        self.record.__enter__()
         return self
 
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any):
