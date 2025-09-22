@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import collections
+import contextlib
 import dataclasses
 import functools
 import inspect
@@ -19,8 +20,10 @@ from typing_extensions import ParamSpec, TypeAlias
 
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Iterator, Sequence
     from types import ModuleType
+
+import weakref
 
 import sympy
 
@@ -89,6 +92,28 @@ compute_dependencies_log = torch._logging.getArtifactLogger(
 PartitionType: TypeAlias = list["BaseSchedulerNode"]
 _T = TypeVar("_T")
 _P = ParamSpec("_P")
+
+
+_custom_should_partition_fns: weakref.WeakKeyDictionary[
+    torch._ops.OpOverload, Callable[..., bool]
+] = weakref.WeakKeyDictionary()
+
+
+def register_should_partition_rule(
+    op: torch._ops.OpOverload,
+    func: Callable[..., bool],
+) -> None:
+    """Register a function that says if Inductor should partition the graph on this op.
+
+    The function should be have the same signature as the operator.
+    Inductor will invoke the function with FakeTensors when it needs to decide
+    if the graph should be partitioned.
+
+    `register_should_partition_rule` is currently private and experimental.
+    Use at your own risk.
+    """
+    assert isinstance(op, torch._ops.OpOverload)
+    _custom_should_partition_fns[op] = func
 
 
 @dataclasses.dataclass
@@ -1087,7 +1112,11 @@ def _prune_redundant_deps(
     def should_prune(dep: Dep) -> bool:
         if isinstance(dep, WeakDep):
             op_name = name_to_buf[dep.name].defining_op_name()
-            is_redundant = name_to_dep_count[name_to_fused_node[op_name].get_name()] > 0
+            is_redundant = name_to_dep_count[
+                name_to_fused_node[op_name].get_name()
+            ] > 0 and node.scheduler.fusable_weak_dep(
+                dep, name_to_fused_node[op_name], node
+            )
             # These can occur because fused nodes always gather deps from their snodes
             # If B has a weakdep on A
             # B gets fused with C, then any time BC is fused, the weakdep will reappear
@@ -2275,6 +2304,9 @@ class Scheduler:
         for node in self.nodes:
             node.prune_deps()
 
+        # See [Note: Graph Partition Device Contexts]
+        self.default_device_context: Optional[torch.device] = None
+
         self.name_to_donated_buffer: dict[str, SchedulerDonatedBuffer] = (
             self.get_donated_buffers()
         )
@@ -3001,7 +3033,7 @@ class Scheduler:
                     i + 1,
                     old_len,
                 )
-                nodes = self.fuse_nodes_once(nodes)
+                nodes = self.fuse_nodes_once(nodes, is_reorder_round=False)
                 new_len = len(nodes)
                 fusion_log.debug(
                     "completed fusion round (%d/10): fused %d nodes into %d nodes\n",
@@ -3014,6 +3046,9 @@ class Scheduler:
                         "===== fusion complete (%d iterations) =====", i + 1
                     )
                     break
+
+            if config.loop_ordering_after_fusion:
+                nodes = self.fuse_nodes_once(nodes, is_reorder_round=True)
             return nodes
 
     def process_grouped_nodes(self) -> None:
@@ -3493,7 +3528,9 @@ class Scheduler:
         return self.name_to_fused_node[node.get_first_name()]
 
     def fuse_nodes_once(
-        self, nodes: list[BaseSchedulerNode]
+        self,
+        nodes: list[BaseSchedulerNode],
+        is_reorder_round: bool,
     ) -> list[BaseSchedulerNode]:
         """
         Combine eligible nodes into FusedSchedulerNodes.
@@ -3502,6 +3539,7 @@ class Scheduler:
             - self.can_fuse(): checks if a fusion is legal
             - self.score_fusion(): assigns priority to a given fusion
         """
+        self.prune_redundant_deps(nodes)
         fused_nodes = OrderedSet(nodes)
         if fusion_log.isEnabledFor(logging.DEBUG):
             fusion_log.debug("fuse_nodes_once, candidates:")
@@ -3556,7 +3594,7 @@ class Scheduler:
 
                 fuse_two_nodes(node_key1, node_key2)
 
-        for node1, node2 in self.get_possible_fusions(nodes):
+        for node1, node2 in self.get_possible_fusions(nodes, is_reorder_round):
             # if either node is in a pending fusion, resolve it.
             # since we iterate on potential fusions based on profitability
             # the first potential fusion should take precedence.
@@ -3564,9 +3602,9 @@ class Scheduler:
             node1 = self.get_fused_node(node1)
             node2 = self.get_fused_node(node2)
 
-            if self.can_fuse(node1, node2) and not self.will_fusion_create_cycle(
-                node1, node2
-            ):
+            if self.can_fuse(
+                node1, node2, is_reorder_round
+            ) and not self.will_fusion_create_cycle(node1, node2):
                 speedup = self.speedup_by_fusion(node1, node2)
                 if callable(speedup):
                     pending_fusions[node1] = (speedup, node1, node2)
@@ -3595,7 +3633,6 @@ class Scheduler:
 
         nodes = sorted(fused_nodes, key=lambda x: x.min_order)
         nodes = self.topological_sort_schedule(nodes)
-        self.prune_redundant_deps(nodes)
         return nodes
 
     def create_combo_kernel_nodes(self, num_ck_nodes: Optional[int] = None) -> None:
@@ -3651,7 +3688,9 @@ class Scheduler:
             node.prune_redundant_deps(self.name_to_fused_node)
 
     def get_possible_fusions(
-        self, nodes: list[BaseSchedulerNode]
+        self,
+        nodes: list[BaseSchedulerNode],
+        is_reorder_round: bool,
     ) -> list[tuple[BaseSchedulerNode, BaseSchedulerNode]]:
         """
         Helper to find all legal fusion opportunities, sorted by self.score_fusion()
@@ -3671,10 +3710,10 @@ class Scheduler:
                         continue
                     seen.add(key)
 
-                    if self.can_fuse(node1, node2):
+                    if self.can_fuse(node1, node2, is_reorder_round):
                         possible_fusions.append(key)
                     elif (node2.is_template() or node2.is_foreach()) and self.can_fuse(
-                        node2, node1
+                        node2, node1, is_reorder_round
                     ):
                         # foreach fusions and epilogue fusions are order dependent
                         possible_fusions.append((node2, node1))
@@ -4144,7 +4183,12 @@ class Scheduler:
         else:
             return None
 
-    def can_fuse(self, node1: BaseSchedulerNode, node2: BaseSchedulerNode) -> bool:
+    def can_fuse(
+        self,
+        node1: BaseSchedulerNode,
+        node2: BaseSchedulerNode,
+        can_reorder: bool = False,
+    ) -> bool:
         """
         Determine if it is possible to combine node1 and node2 into a
         single fused node.
@@ -4261,7 +4305,8 @@ class Scheduler:
 
         shared_data_score = self.score_fusion_memory(node1, node2)
         if (
-            shared_data_score < config.score_fusion_memory_threshold
+            can_reorder
+            and shared_data_score < config.score_fusion_memory_threshold
             and config.loop_ordering_after_fusion
         ):
             new_shared_data_score = self.shared_data_after_reordering_loop(node1, node2)
@@ -4367,22 +4412,36 @@ class Scheduler:
         if len(mutating_writes) != 1:
             return False
         write = mutating_writes[0]
+        if isinstance(write, StarDep):
+            return False
         assert isinstance(write, MemoryDep)
 
         if free_symbol_is_type(write.index, SymT.TMP):
             return False
 
         real_name = self.mutation_real_name[weak_dep.mutating_buf]
-        relevant_reads = [
-            read for read in node1.read_writes.reads if read.name == real_name
-        ]
-        return all(
-            isinstance(read, MemoryDep)
-            and not free_symbol_is_type(read.index, SymT.TMP)
-            and read.index == write.index
-            and read.size == write.size
-            for read in relevant_reads
-        )
+        relevant_reading_nodes = [node1]
+        if isinstance(node1, ForeachKernelSchedulerNode):
+            relevant_reading_nodes = node1.snodes
+        num_concurrent_reads = 0
+        for reading_node in relevant_reading_nodes:
+            relevant_reads = [
+                read
+                for read in reading_node.read_writes.reads
+                if read.name == real_name
+            ]
+            if not relevant_reads:
+                continue
+            num_concurrent_reads += 1
+            if not all(
+                isinstance(read, MemoryDep)
+                and not free_symbol_is_type(read.index, SymT.TMP)
+                and read.index == write.index
+                and read.size == write.size
+                for read in relevant_reads
+            ):
+                return False
+        return num_concurrent_reads <= 1
 
     # StarDep doesn't match MemoryDep, different indices don't match
     # However, broadcasting sometimes strips dimensions, and if that's the case
@@ -4614,6 +4673,25 @@ class Scheduler:
         self, node: BaseSchedulerNode, should_log: bool = False
     ) -> bool:
         """Return True if we should partition the inductor graph on this node"""
+
+        # Allow users to manually specify if a node should be partitioned
+        # Can only do this for FallbackKernels
+        ir_node = node.node
+        if isinstance(ir_node, torch._inductor.ir.FallbackKernel):
+            operator = ir_node.op_overload
+            if operator is not None and operator in _custom_should_partition_fns:
+                assert isinstance(operator, torch._ops.OpOverload)
+                should_partition_fn = _custom_should_partition_fns[operator]
+                fx_node = ir_node.get_origin_node()
+                assert fx_node is not None
+                success, fake_args, fake_kwargs = (
+                    torch._inductor.fx_utils.get_fake_args_kwargs(fx_node)
+                )
+                assert success, (
+                    "If this op came from a custom inductor pass, make sure to run FakeTensorUpdator"
+                )
+                should_partition = should_partition_fn(*fake_args, **fake_kwargs)
+                return should_partition
 
         # When not using cudagraphs, keep all kernels in the `call` function
         # instead of graph partition functions, since graph partition only brings
@@ -5185,14 +5263,89 @@ class Scheduler:
             V.graph.wrapper_code.partition_signatures = signature
             V.graph.wrapper_code.write_prefix()
 
+            graph_name = V.graph.name
             partition_code, _ = V.graph.wrapper_code.generate(V.graph.is_inference)
 
-        V.graph.wrapper_code.define_subgraph_launcher_fn(partition_code.value)
+        V.graph.wrapper_code.define_subgraph_launcher_fn(graph_name, partition_code)
 
         V.graph.wrapper_code.codegen_partition_call(graph_partition_id, signature)
         V.graph.wrapper_code.allocated.update(  # type: ignore[has-type]
             [node.get_name() for node in signature.output_nodes]
         )
+
+    def use_default_device_context(
+        self, partitions: list[PartitionType], signatures: list[GraphPartitionSignature]
+    ) -> contextlib.AbstractContextManager[None]:
+        @contextlib.contextmanager
+        def ctx() -> Iterator[None]:
+            self.update_graph_partition_default_device(partitions, signatures)
+            if self.default_device_context and device_need_guard(
+                self.default_device_context.type
+            ):
+                assert self.default_device_context.index is not None, (
+                    "device should have an index"
+                )
+                V.graph.wrapper_code.codegen_device_guard_enter(
+                    self.default_device_context.index
+                )
+
+            try:
+                yield
+            finally:
+                if self.default_device_context and device_need_guard(
+                    self.default_device_context.type
+                ):
+                    V.graph.wrapper_code.codegen_device_guard_exit()
+                self.default_device_context = None
+
+        return ctx()
+
+    def update_graph_partition_default_device(
+        self, partitions: list[PartitionType], signatures: list[GraphPartitionSignature]
+    ) -> None:
+        # Note: [Graph Partition Device Contexts]
+        # Entering a device context takes 60 microseconds and exiting a device
+        # context takes 20 microseconds. If all graph partitions and
+        # cudagraph-unsafe ops happen on the same device, we can share the
+        # device context.
+
+        if len(partitions) == 1 and not signatures[0].skip_cudagraph:
+            # If there is only 1 cudagraph partition, the device context
+            # should happen within the cudagraph partition, which
+            # would be removed by cudagraph.
+            return
+
+        def get_cudagraph_partition_device(partition: PartitionType) -> torch.device:
+            partition_device = partition[0].get_device()
+            assert partition_device is not None
+            return partition_device
+
+        def all_on_target_device(
+            partition: PartitionType, target_device: torch.device
+        ) -> bool:
+            for node in partition:
+                device = node.get_device()
+                if device != target_device:
+                    return False
+            return True
+
+        cudagraph_partition_device = None
+        for partition, signature in zip(partitions, signatures):
+            if not signature.skip_cudagraph:
+                cudagraph_partition_device = get_cudagraph_partition_device(partition)
+                break
+
+        # all partitions skip cudagraph
+        if cudagraph_partition_device is None:
+            return
+
+        for partition, signature in zip(partitions, signatures):
+            if signature.skip_cudagraph and not all_on_target_device(
+                partition, cudagraph_partition_device
+            ):
+                return
+
+        self.default_device_context = cudagraph_partition_device
 
     def _codegen_partitions(self) -> None:
         """
@@ -5206,15 +5359,16 @@ class Scheduler:
             msg = f"cudagraph partition into {len(partitions)} partitions"
             maybe_log_cudagraph_partition(msg=msg, prefix="")
 
-        for partition, signature in zip(partitions, signatures):
-            assert len(partition) >= 1, (
-                f"Each partition must have at least one node but found {len(partition)}"
-            )
+        with self.use_default_device_context(partitions, signatures):
+            for partition, signature in zip(partitions, signatures):
+                assert len(partition) >= 1, (
+                    f"Each partition must have at least one node but found {len(partition)}"
+                )
 
-            if signature.skip_cudagraph:
-                self._codegen(partition)
-            else:
-                self._codegen_partition_wrapper(partition, signature)
+                if signature.skip_cudagraph:
+                    self._codegen(partition)
+                else:
+                    self._codegen_partition_wrapper(partition, signature)
 
         num_partitions = next(self._graph_partition_counter)
         V.graph.wrapper_code.set_all_partition_names(num_partitions)
@@ -5247,7 +5401,11 @@ class Scheduler:
                 )
                 seen.add(key)
 
-        self.current_device = None
+        self.current_device = self.default_device_context
+
+        if self.default_device_context and config.triton.autotune_at_compile_time:
+            V.graph.wrapper_code.write_get_raw_stream_header()
+
         for node in nodes:
             if log.isEnabledFor(logging.DEBUG):
                 try:
@@ -5326,10 +5484,15 @@ class Scheduler:
                 ):
                     self.flush()
 
-        if self.current_device and device_need_guard(self.current_device.type):
-            # exit the outermost CUDA device guard. this is
-            # important for nested indentation codegen-ing.
-            V.graph.wrapper_code.codegen_device_guard_exit()
+        if self.current_device != self.default_device_context:
+            # when default_device_context is not None, we are codegen
+            # for graph partitions and all nodes must be on
+            # the same default device.
+            assert self.current_device is not None
+            if device_need_guard(self.current_device.type):
+                # exit the outermost CUDA device guard. this is
+                # important for nested indentation codegen-ing.
+                V.graph.wrapper_code.codegen_device_guard_exit()
 
         self.flush()
 
