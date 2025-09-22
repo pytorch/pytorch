@@ -92,57 +92,6 @@ void XPUGeneratorState::increase(uint64_t increment) {
   }
 }
 
-// XPUGeneratorState used by multiple XPUGraph
-void XPUGeneratorState::register_graph(xpu::XPUGraph* graph) {
-  at::xpu::assertNotCapturing(
-      "Cannot register the state during capturing stage.");
-
-  if (registered_graphs_.empty()) {
-    auto options = at::TensorOptions().device(at::kXPU).dtype(at::kLong);
-    seed_extragraph_ = at::empty({1}, options);
-    offset_extragraph_ = at::empty({1}, options);
-  }
-
-  if (registered_graphs_.find(graph) == registered_graphs_.end()) {
-    registered_graphs_.insert(graph);
-  }
-}
-
-void XPUGeneratorState::unregister_graph(xpu::XPUGraph* graph) {
-  TORCH_CHECK(
-      registered_graphs_.find(graph) != registered_graphs_.end(),
-      "The graph should be registered to the state");
-
-  registered_graphs_.erase(graph);
-
-  if (registered_graphs_.empty()) {
-    seed_extragraph_.reset();
-    offset_extragraph_.reset();
-  }
-}
-
-void XPUGeneratorState::capture_prologue() {
-  capturing_ = true;
-  offset_intragraph_ = 0;
-  seed_extragraph_.fill_(int64_t(seed_));
-  offset_extragraph_.fill_(int64_t(0));
-}
-
-uint64_t XPUGeneratorState::capture_epilogue() {
-  capturing_ = false;
-  return offset_intragraph_;
-}
-
-void XPUGeneratorState::replay_prologue(uint64_t wholegraph_increment) {
-  at::xpu::assertNotCapturing(
-      "Cannot prepare for replay during capturing stage.");
-  if (wholegraph_increment) {
-    seed_extragraph_.fill_(int64_t(seed_));
-    offset_extragraph_.fill_(int64_t(philox_offset_per_thread_));
-    increase(wholegraph_increment);
-  }
-}
-
 XPUGeneratorImpl::XPUGeneratorImpl(DeviceIndex device_index)
     : GeneratorImpl{
           Device(DeviceType::XPU, device_index),
@@ -234,20 +183,6 @@ void XPUGeneratorImpl::set_state(const c10::TensorImpl& new_state) {
     memcpy(&philox_offset, new_rng_state + seed_size, offset_size);
   }
   this->set_philox_offset_per_thread(philox_offset);
-}
-
-void XPUGeneratorImpl::graphsafe_set_state(
-    const c10::intrusive_ptr<GeneratorImpl>& gen) {
-  c10::intrusive_ptr<XPUGeneratorImpl> xpu_gen =
-      dynamic_intrusive_pointer_cast<XPUGeneratorImpl>(gen);
-  TORCH_CHECK(xpu_gen, "Expected a XPU Generator");
-  state_ = xpu_gen->state_;
-}
-
-c10::intrusive_ptr<c10::GeneratorImpl> XPUGeneratorImpl::graphsafe_get_state()
-    const {
-  auto gen = make_intrusive<XPUGeneratorImpl>(device().index(), state_);
-  return gen;
 }
 
 void XPUGeneratorImpl::set_philox_offset_per_thread(uint64_t offset) {
