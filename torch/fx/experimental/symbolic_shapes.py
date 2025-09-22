@@ -2064,6 +2064,8 @@ class StatelessSymbolicContext(Generic[_P1, _T1], SymbolicContext):
     constraint_sizes: DimList[DimConstraint] = None  # type: ignore[assignment]
     constraint_strides: DimList[DimConstraint] = None  # type: ignore[assignment]
     specialize_on: Optional[list[list[Callable[_P1, _T1]]]] = None
+    # Maps dimension indices to dynamic names for symbol sharing
+    dynamic_names: Optional[dict[int, str]] = None
     # If the tensor is a view, this should be populated for the base. It contains
     # information on how to allocate symbols when recursively fakeifying the base
     # during view fake-ification.
@@ -3702,6 +3704,7 @@ class ShapeEnv:
         # Maps symbolic ints to their original concrete values
         # Currently populated from tensors
         self.var_to_val: dict[sympy.Symbol, sympy.Integer] = {}
+
         # Like var_to_val, but only set when propagate_real_tensors is on.
         # Used as last resort to avoid GuardOnDataDependent error
         self.unbacked_var_to_val: dict[sympy.Symbol, sympy.Integer] = {}
@@ -3734,6 +3737,7 @@ class ShapeEnv:
         # Duck-shaping says that if two input tensors have the same size,
         # they get assigned the same symbolic variable
         self.val_to_var: dict[int, sympy.Symbol] = {}
+        self.name_to_var: dict[str, sympy.Symbol] = {}
         self.unbacked_symfloat_counter = itertools.count()
         self.unbacked_symint_counter = itertools.count()
         # Similar to guards, but these MUST evaluate to true and can
@@ -5008,12 +5012,24 @@ class ShapeEnv:
             raise AssertionError(f"unhandled dynamic_dim {dynamic_dim}")
 
         sloc = self._get_sloc()
+        name = None
+        if (
+            symbolic_context
+            and hasattr(source, "idx")
+            and symbolic_context.dynamic_names is not None
+            and source.idx in symbolic_context.dynamic_names
+        ):
+            name = symbolic_context.dynamic_names[source.idx]
 
         if val in (0, 1) and specialize_zero_one:
             if val == 0:
                 return sympy.S.Zero
             else:
                 return sympy.S.One
+        elif name and name in self.name_to_var:
+            r = self.name_to_var[name]
+            self.source_to_var[source_name] = r
+            self.log.debug("create_symbol %s shared via name %s", r, name)
         elif not duck or val not in self.val_to_var:
             # If we're not duck shaping, we always create a new symbol
             # Even if we're duck shaping, if we haven't seen this particular
@@ -5117,6 +5133,8 @@ class ShapeEnv:
                     'TORCHDYNAMO_EXTENDED_ADVICE="0"'
                 )
             sloc, maybe_extra_debug = self._get_stack_summary(is_debug)
+            if name:
+                self.name_to_var[name] = sympy_expr
             self.log.info(
                 "create_symbol %s = %s for %s %s %s%s%s",
                 sympy_expr,
