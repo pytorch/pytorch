@@ -359,6 +359,25 @@ def xfailIfSM89(func):
 def xfailIfSM100OrLater(func):
     return func if not SM100OrLater else unittest.expectedFailure(func)
 
+def xfailIfSM100Condition(condition_fn):
+    """
+    XFail parametrized test on SM100+ when condition is met.
+
+    Args:
+        condition_fn: Function that takes params dict and returns True to xfail
+
+    Example:
+        @xfailIfSM100Condition(lambda params: params["dtype"] == torch.float16)
+        @parametrize("dtype", [torch.float32, torch.float16])
+        def test_foo(self, dtype):
+            ...
+    """
+    from torch.testing._internal.common_utils import decorateIf
+    return decorateIf(
+        unittest.expectedFailure,
+        lambda params: SM100OrLater and condition_fn(params)
+    )
+
 def xfailIfSM120OrLater(func):
     return func if not SM120OrLater else unittest.expectedFailure(func)
 
