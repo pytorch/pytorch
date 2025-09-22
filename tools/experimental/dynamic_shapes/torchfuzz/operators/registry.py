@@ -36,6 +36,9 @@ class OperatorRegistry:
 
     def get(self, op_name: str) -> Optional[Operator]:
         """Get an operator by name."""
+        # Handle special arg_ operations by mapping them to the ArgOperator
+        if op_name.startswith("arg_"):
+            return self._operators.get("arg")
         return self._operators.get(op_name)
 
     def list_operators(self) -> dict[str, Operator]:

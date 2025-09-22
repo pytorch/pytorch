@@ -16,7 +16,7 @@ class ScalarMultiplyOperator(Operator):
         """Scalar multiply can only produce scalars."""
         return isinstance(output_spec, ScalarSpec)
 
-    def decompose(self, output_spec: Spec, num_inputs: int = 2) -> list[Spec]:
+    def fuzz_inputs_specs(self, output_spec: Spec, num_inputs: int = 2) -> list[Spec]:
         """Decompose scalar into input scalars for multiplication with type promotion."""
         if not isinstance(output_spec, ScalarSpec):
             raise ValueError(

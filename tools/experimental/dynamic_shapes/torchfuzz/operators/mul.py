@@ -16,7 +16,7 @@ class MulOperator(Operator):
         """Mul can produce tensors but not scalars."""
         return isinstance(output_spec, TensorSpec)
 
-    def decompose(self, output_spec: Spec, num_inputs: int = 2) -> list[Spec]:
+    def fuzz_inputs_specs(self, output_spec: Spec, num_inputs: int = 2) -> list[Spec]:
         """Decompose tensor into input tensors for multiplication with type promotion."""
         if not isinstance(output_spec, TensorSpec):
             raise ValueError("MulOperator can only produce TensorSpec outputs")

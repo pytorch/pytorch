@@ -14,7 +14,7 @@ class ItemOperator(Operator):
         """Item can only produce scalars."""
         return isinstance(output_spec, ScalarSpec)
 
-    def decompose(self, output_spec: Spec, num_inputs: int = 1) -> list[Spec]:
+    def fuzz_inputs_specs(self, output_spec: Spec, num_inputs: int = 1) -> list[Spec]:
         """Decompose scalar into a single-element tensor for item operation."""
         if not isinstance(output_spec, ScalarSpec):
             raise ValueError("ItemOperator can only produce ScalarSpec outputs")
