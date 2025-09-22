@@ -1,5 +1,5 @@
+#include <c10/core/CompileTimeFunctionPointer.h>
 #include <gtest/gtest.h>
-#include <torch/headeronly/core/CompileTimeFunctionPointer.h>
 
 namespace test_is_compile_time_function_pointer {
 static_assert(!c10::is_compile_time_function_pointer<void()>::value);

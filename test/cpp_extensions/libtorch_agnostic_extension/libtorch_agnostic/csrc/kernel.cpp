@@ -80,7 +80,7 @@ STABLE_TORCH_LIBRARY(libtorch_agnostic, m) {
 }
 
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CPU, m) {
-  m.impl("sgd_out_of_place", TORCH_BOXED_FN(&sgd_out_of_place));
+  m.impl("sgd_out_of_place", TORCH_BOX(&sgd_out_of_place));
 }
 
 Tensor identity(Tensor t) {
@@ -92,11 +92,11 @@ STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
 }
 
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CUDA, m) {
-  m.impl("identity", TORCH_BOXED_FN(&identity));
+  m.impl("identity", TORCH_BOX(&identity));
 }
 
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CPU, m) {
-  m.impl("identity", TORCH_BOXED_FN(&identity));
+  m.impl("identity", TORCH_BOX(&identity));
 }
 
 Tensor my_abs(Tensor t) {
@@ -112,7 +112,7 @@ STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
 }
 
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
-  m.impl("my_abs", TORCH_BOXED_FN(&my_abs));
+  m.impl("my_abs", TORCH_BOX(&my_abs));
 }
 
 Tensor my_ones_like(Tensor t, StableIValue device) {
@@ -138,7 +138,7 @@ STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
 }
 
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
-  m.impl("my_ones_like", TORCH_BOXED_FN(&my_ones_like));
+  m.impl("my_ones_like", TORCH_BOX(&my_ones_like));
 }
 
 std::tuple<Tensor, Tensor, bool> exp_neg_is_leaf(Tensor t1, Tensor t2, Tensor t3) {
@@ -165,7 +165,7 @@ STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
 }
 
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
-  m.impl("exp_neg_is_leaf", TORCH_BOXED_FN(&exp_neg_is_leaf));
+  m.impl("exp_neg_is_leaf", TORCH_BOX(&exp_neg_is_leaf));
 }
 
 Tensor neg_exp(Tensor t) {
@@ -181,7 +181,7 @@ STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
 }
 
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
-  m.impl("neg_exp", TORCH_BOXED_FN(&neg_exp));
+  m.impl("neg_exp", TORCH_BOX(&neg_exp));
 }
 
 Tensor divide_neg_exp(Tensor t) {
@@ -205,7 +205,7 @@ STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
 }
 
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
-  m.impl("divide_neg_exp", TORCH_BOXED_FN(&divide_neg_exp));
+  m.impl("divide_neg_exp", TORCH_BOX(&divide_neg_exp));
 }
 
 bool is_contiguous(Tensor t) {
@@ -217,7 +217,7 @@ STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
 }
 
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
-  m.impl("is_contiguous", TORCH_BOXED_FN(&is_contiguous));
+  m.impl("is_contiguous", TORCH_BOX(&is_contiguous));
 }
 
 Tensor my_transpose(Tensor t, int64_t dim0, int64_t dim1) {
@@ -276,18 +276,18 @@ STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
 }
 
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
-  m.impl("my_transpose", TORCH_BOXED_FN(&my_transpose));
-  m.impl("my_empty_like", TORCH_BOXED_FN(&empty_like));
-  m.impl("fill_infinity", TORCH_BOXED_FN(&fill_infinity));
-  m.impl("my_is_cpu", TORCH_BOXED_FN(&my_is_cpu));
-  m.impl("my_new_empty_dtype_variant", TORCH_BOXED_FN(&my_new_empty_dtype_variant));
-  m.impl("my_new_zeros_dtype_variant", TORCH_BOXED_FN(&my_new_zeros_dtype_variant));
-  m.impl("my_copy_", TORCH_BOXED_FN(&my_copy_));
+  m.impl("my_transpose", TORCH_BOX(&my_transpose));
+  m.impl("my_empty_like", TORCH_BOX(&empty_like));
+  m.impl("fill_infinity", TORCH_BOX(&fill_infinity));
+  m.impl("my_is_cpu", TORCH_BOX(&my_is_cpu));
+  m.impl("my_new_empty_dtype_variant", TORCH_BOX(&my_new_empty_dtype_variant));
+  m.impl("my_new_zeros_dtype_variant", TORCH_BOX(&my_new_zeros_dtype_variant));
+  m.impl("my_copy_", TORCH_BOX(&my_copy_));
 }
 
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeImplicitAutograd, m) {
-  m.impl("my_pad", TORCH_BOXED_FN(&my_pad));
-  m.impl("my_narrow", TORCH_BOXED_FN(&my_narrow));
+  m.impl("my_pad", TORCH_BOX(&my_pad));
+  m.impl("my_narrow", TORCH_BOX(&my_narrow));
 }
 
 Tensor my_zero_(Tensor t) {
@@ -311,7 +311,7 @@ STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
 }
 
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CPU, m) {
-  m.impl("my_zero_", TORCH_BOXED_FN(&my_zero_));
+  m.impl("my_zero_", TORCH_BOX(&my_zero_));
 }
 
 bool test_default_constructor(bool defined) {
@@ -338,9 +338,9 @@ STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
 }
 
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
-  m.impl("test_default_constructor", TORCH_BOXED_FN(&test_default_constructor));
-  m.impl("my_amax", TORCH_BOXED_FN(&my_amax));
-  m.impl("my_amax_vec", TORCH_BOXED_FN(&my_amax_vec));
+  m.impl("test_default_constructor", TORCH_BOX(&test_default_constructor));
+  m.impl("my_amax", TORCH_BOX(&my_amax));
+  m.impl("my_amax_vec", TORCH_BOX(&my_amax_vec));
 }
 
 // Test functions for torch::stable::accelerator APIs
@@ -393,9 +393,9 @@ STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
 }
 
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
-  m.impl("test_device_guard", TORCH_BOXED_FN(&test_device_guard));
-  m.impl("test_device_guard_set_index", TORCH_BOXED_FN(&test_device_guard_set_index));
-  m.impl("test_stream", TORCH_BOXED_FN(&test_stream));
-  m.impl("test_get_current_device_index", TORCH_BOXED_FN(&test_get_current_device_index));
+  m.impl("test_device_guard", TORCH_BOX(&test_device_guard));
+  m.impl("test_device_guard_set_index", TORCH_BOX(&test_device_guard_set_index));
+  m.impl("test_stream", TORCH_BOX(&test_stream));
+  m.impl("test_get_current_device_index", TORCH_BOX(&test_get_current_device_index));
 }
 #endif // LAE_USE_CUDA

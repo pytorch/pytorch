@@ -4,7 +4,6 @@
 // code for better UX.
 
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
-#include <torch/headeronly/core/CompileTimeFunctionPointer.h>
 #include <torch/headeronly/util/Metaprogramming.h>
 
 // Technically, this file doesn't use anything from stableivalue_conversions.h,
@@ -257,15 +256,15 @@ struct boxer_impl<
 
 template <typename FuncT, FuncT* func>
 struct boxer {
-  using FunctionTrait = c10::guts::infer_function_traits_t<FuncT>;
+  using FunctionTraits = c10::guts::infer_function_traits_t<FuncT>;
 
   static void boxed_fn(
       StableIValue* stack,
       uint64_t num_args,
       uint64_t num_outputs) {
     boxer_impl<
-        typename FunctionTrait::return_type,
-        typename FunctionTrait::parameter_types,
+        typename FunctionTraits::return_type,
+        typename FunctionTraits::parameter_types,
         FuncT,
         func>();
   }
@@ -273,7 +272,7 @@ struct boxer {
 
 } // namespace
 
-#define TORCH_BOXED_FN(func)                                               \
-  TORCH_FN(boxer<                                                          \
-           std::remove_pointer_t<std::remove_reference_t<decltype(func)>>, \
-           (func)>::boxed_fn)
+#define TORCH_BOX(func)                                               \
+  boxer<                                                              \
+      std::remove_pointer_t<std::remove_reference_t<decltype(func)>>, \
+      (func)>::boxed_fn

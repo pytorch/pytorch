@@ -7,7 +7,7 @@
 
 #include <c10/core/DispatchKey.h>
 #include <c10/core/DispatchKeySet.h>
-#include <torch/headeronly/core/CompileTimeFunctionPointer.h>
+#include <c10/core/CompileTimeFunctionPointer.h>
 #include <ATen/core/boxing/KernelFunction.h>
 #include <ATen/core/dispatch/CppSignature.h>
 #include <ATen/core/dispatch/RegistrationHandleRAII.h>

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <torch/headeronly/core/CompileTimeFunctionPointer.h>
+#include <c10/core/CompileTimeFunctionPointer.h>
 
 namespace c10::impl {
 namespace detail {
