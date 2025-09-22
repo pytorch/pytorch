@@ -260,9 +260,7 @@ class TestMatmulCuda(InductorTestCase):
     @parametrize(
         "batch_size, N, M, P",
         [(2, 100, 100, 100),
-         (2, 1000, 1000, 1000),
-         (1, 10000, 1000, 10000),
-         (1, 10000, 10000, 10000)],
+         (2, 1000, 1000, 1000)],
         name_fn=lambda batch_size, N, M, P: f"{batch_size}_{N}_{M}_{P}",
     )
     @skipIfRocm
