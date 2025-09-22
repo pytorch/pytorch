@@ -262,10 +262,13 @@ case "$tag" in
     TRITON_CPU=yes
     ;;
   pytorch-linux-jammy-linter)
-    PYTHON_VERSION=3.10
+    # TODO: Use 3.9 here because of this issue https://github.com/python/mypy/issues/13627.
+    # We will need to update mypy version eventually, but that's for another day. The task
+    # would be to upgrade mypy to 1.0.0 with Python 3.11
+    PYTHON_VERSION=3.9
     ;;
-  pytorch-linux-jammy-cuda12.8-cudnn9-py3.10-linter)
-    PYTHON_VERSION=3.10
+  pytorch-linux-jammy-cuda12.8-cudnn9-py3.9-linter)
+    PYTHON_VERSION=3.9
     CUDA_VERSION=12.8.1
     ;;
   pytorch-linux-jammy-aarch64-py3.10-gcc11)
