@@ -2925,7 +2925,7 @@ def _persistent_reduction_configs(
         if rnumel > 1024:
             configs = configs[:1]
         else:
-            x_block = 8 if rnumel < 1024 else 4
+            x_block = 8
             if xnumel // x_block < 128 or (loads_and_stores >= 5 and rnumel >= 256):
                 # If loads/stores greater than 5, a lot of register pressure
                 # rnumel < 256 means no vectorized loads if we split up r dim
