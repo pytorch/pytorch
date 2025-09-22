@@ -84,12 +84,6 @@ from .base import (
 from .constant import ConstantVariable
 
 
-try:
-    from torch.distributed.fsdp._fully_shard import _fsdp_param_group
-except ModuleNotFoundError:
-    _fsdp_param_group = None
-
-
 if TYPE_CHECKING:
     from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.symbolic_convert import InstructionTranslator
@@ -1141,13 +1135,19 @@ class UserMethodVariable(UserFunctionVariable):
                 return self.obj.call_method(
                     tx, self.fn.__name__, args, kwargs, constant=self.is_constant
                 )
-        elif (
-            _fsdp_param_group is not None
-            and self.fn is _fsdp_param_group.FSDPParamGroup.use_training_state
-        ):
-            return variables.TorchCtxManagerClassVariable(self.fn).call_function(
-                tx, (self.obj, *args), kwargs
-            )
+        else:
+            try:
+                from torch.distributed.fsdp._fully_shard import _fsdp_param_group
+            except ModuleNotFoundError:
+                _fsdp_param_group = None
+
+            if (
+                _fsdp_param_group is not None
+                and self.fn is _fsdp_param_group.FSDPParamGroup.use_training_state
+            ):
+                return variables.TorchCtxManagerClassVariable(self.fn).call_function(
+                    tx, (self.obj, *args), kwargs
+                )
         if self.is_constant:
             fn = getattr(self.obj.value, self.fn.__name__)
             return invoke_and_store_as_constant(tx, fn, self.get_name(), args, kwargs)

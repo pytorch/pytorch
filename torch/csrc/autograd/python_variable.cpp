@@ -1153,10 +1153,10 @@ static PyObject* DTensor_OpSchema_post_init(PyObject* mod, PyObject* self) {
   END_HANDLE_TH_ERRORS
 }
 
-static py::list int_array_to_list(IntArrayRef arr) {
+static py::list symint_array_to_list(SymIntArrayRef arr) {
   py::list result(arr.size());
   for (const auto idx : c10::irange(arr.size())) {
-    result[idx] = arr[idx];
+    result[idx] = py::cast(arr[idx]);
   }
   return result;
 }
@@ -1166,8 +1166,10 @@ static PyObject* DTensor_compute_global_tensor_info_impl(
     py::handle mesh,
     const py::sequence& placements) {
   Py_ssize_t idx = 0;
-  DimVector tensor_shape(tensor.sizes().begin(), tensor.sizes().end());
-  DimVector tensor_strides(tensor.strides().begin(), tensor.strides().end());
+  c10::SymDimVector tensor_shape(
+      tensor.sym_sizes().begin(), tensor.sym_sizes().end());
+  c10::SymDimVector tensor_strides(
+      tensor.sym_strides().begin(), tensor.sym_strides().end());
   // NOTE: if this is a py::handle then this code stops working;
   // apparently we can't rely on the bound method to stick around.
   py::object mesh_size;
@@ -1225,7 +1227,8 @@ static PyObject* DTensor_compute_global_tensor_info_impl(
     idx++;
   }
   return py::make_tuple(
-             int_array_to_list(tensor_shape), int_array_to_list(tensor_strides))
+             symint_array_to_list(tensor_shape),
+             symint_array_to_list(tensor_strides))
       .release()
       .ptr();
 }
