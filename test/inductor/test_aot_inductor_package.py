@@ -16,7 +16,7 @@ from parameterized import parameterized_class
 
 import torch
 import torch._inductor.config
-from torch._inductor.codecache import get_kernel_bin_format
+from torch._inductor.codecache import get_kernel_bin_format, WritableTempFile
 from torch._inductor.package import load_package, package_aoti
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import fresh_cache
@@ -119,7 +119,7 @@ class TestAOTInductorPackage(TestCase):
             inductor_configs["aot_inductor.package_cpp_only"] = self.package_cpp_only
 
             torch.manual_seed(0)
-            with tempfile.NamedTemporaryFile(suffix=".pt2") as f:
+            with WritableTempFile(suffix=".pt2") as f:
                 compiled_model = compile(
                     model,
                     example_inputs,
