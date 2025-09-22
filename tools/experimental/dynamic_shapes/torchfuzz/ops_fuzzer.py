@@ -18,6 +18,18 @@ from torchfuzz.tensor_fuzzer import (
 )
 
 
+# Cache operators at module level to avoid repeated calls to list_operators()
+_CACHED_OPERATORS = None
+
+
+def _get_cached_operators():
+    """Get cached operators, initializing if necessary."""
+    global _CACHED_OPERATORS
+    if _CACHED_OPERATORS is None:
+        _CACHED_OPERATORS = list_operators()
+    return _CACHED_OPERATORS
+
+
 @dataclass
 class OperationNode:
     """
@@ -185,8 +197,8 @@ def fuzz_op(target_spec: Spec, depth, stack_size) -> tuple[str, list[Spec]]:
         Tuple of (operation_name, list_of_argument_specs) where each argument spec
         describes the layout requirements for the operation's inputs
     """
-    # Get all available operators
-    available_operators = list_operators()
+    # Get all available operators (cached)
+    available_operators = _get_cached_operators()
 
     # Filter operators that can produce the target spec
     compatible_ops = []
