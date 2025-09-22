@@ -4,11 +4,12 @@ from __future__ import annotations
 import pickle
 from concurrent.futures import ThreadPoolExecutor
 from inspect import isclass
+from itertools import chain
 from os import environ
 from pathlib import Path
 from random import randint
 from tempfile import gettempdir
-from typing import Any, Callable, Sequence
+from typing import Any, Callable, Iterable, Sequence
 from typing_extensions import Self
 from unittest.mock import patch
 
@@ -94,7 +95,7 @@ class TestMixin:
         cache: icache.Cache[icache.Key, icache.Value],
         key_fn: Callable[[], icache.Key],
         num: int,
-    ) -> list[icache.Key]:
+    ) -> Sequence[icache.Key]:
         keys = []
         while len(keys) < num:
             if (key := self.key_not_in(cache, key_fn)) not in keys:
@@ -113,7 +114,7 @@ class TestMixin:
 
     def values_unalike(
         self: Self, value_fn: Callable[[], icache.Value], num: int
-    ) -> list[icache.Value]:
+    ) -> Sequence[icache.Value]:
         values = []
         while len(values) < num:
             if (value := value_fn()) not in values:
@@ -145,7 +146,31 @@ class TestMixin:
         # multi on disk caches might exist at any time, and the tests
         # assume they are isolated so we should randomize their base dir
         if isinstance(cache, icache.OnDiskCache):
-            cache.base_dir = cache.base_dir / f"{hash(cache)}"
+            cache._base_dir = cache._base_dir / f"{hash(cache)}"
+    
+    def assert_keys_with_values(
+        self: Self,
+        cache: icache.Cache,
+        keys: Iterable[icache.Key],
+        values: Iterable[icache.Value],
+    ) -> None:
+        for key, value in zip(keys, values):
+            self.assertEqual(cache.get(key), value)
+    
+    def assert_keys_without_values(
+        self: Self, cache: icache.Cache, keys: Iterable[icache.Key]) -> None:
+        for key in keys:
+            self.assertIsNone(cache.get(key)) 
+    
+    def assert_inserted_keys_with_values(
+        self: Self,
+        cache: icache.Cache,
+        keys: Iterable[icache.Key],
+        values: Iterable[icache.Value],
+    ) -> None:
+        for key, value in zip(keys, values):
+            self.assertTrue(cache.insert(key, value))
+        self.assert_keys_with_values(cache, keys, values)
 
 
 @instantiate_parametrized_tests
@@ -231,9 +256,8 @@ class CacheTest(TestMixin, TestCase):
         keys = self.keys_not_in(cache, lambda: self.key(key_type), iters)
         values = self.values_unalike(lambda: self.value(value_type), iters)
 
-        for key, value in zip(keys, values):
-            self.assertIsNone(cache.get(key))
-            self.assertTrue(cache.insert(key, value))
+        self.assert_keys_without_values(cache, keys)
+        self.assert_inserted_keys_with_values(cache, keys, values)
 
         gets = executor.map(cache.get, keys)
         for value, get in zip(values, gets):
@@ -264,8 +288,7 @@ class CacheTest(TestMixin, TestCase):
         keys = self.keys_not_in(cache, lambda: self.key(key_type), iters) * 2
         values = self.values_unalike(lambda: self.value(value_type), iters * 2)
 
-        for key in keys:
-            self.assertIsNone(cache.get(key))
+        self.assert_keys_without_values(cache, keys)
 
         inserts = executor.map(cache.insert, keys, values)
         inserted = {}
@@ -276,8 +299,7 @@ class CacheTest(TestMixin, TestCase):
                 inserted[key] = value
 
         self.assertTrue(set(keys) == set(inserted.keys()))
-        for key, value in inserted.items():
-            self.assertEqual(cache.get(key), value)
+        self.assert_keys_with_values(cache, inserted.keys(), inserted.values())
 
         executor.shutdown()
 
@@ -306,8 +328,7 @@ class CacheTest(TestMixin, TestCase):
         keys = self.keys_not_in(cache, lambda: self.key(key_type), iters) * 2
         values = self.values_unalike(lambda: self.value(value_type), iters * 2)
 
-        for key in keys:
-            self.assertIsNone(cache.get(key))
+        self.assert_keys_without_values(cache, keys)
 
         get_futures, insert_futures = [], []
         for key, value in zip(keys, values):
@@ -333,8 +354,7 @@ class CacheTest(TestMixin, TestCase):
                     inserted[key] = value
 
         self.assertTrue(set(keys) == set(inserted.keys()))
-        for key, value in inserted.items():
-            self.assertEqual(cache.get(key), value)
+        self.assert_keys_with_values(cache, inserted.keys(), inserted.values())
 
         executor.shutdown()
 
@@ -443,9 +463,7 @@ class AsyncCacheTest(TestMixin, TestCase):
         keys = self.keys_not_in(async_cache, lambda: self.key(key_type), iters)
         values = self.values_unalike(lambda: self.value(value_type), iters)
 
-        for key, value in zip(keys, values):
-            self.assertIsNone(async_cache.get(key))
-            self.assertTrue(async_cache.insert(key, value))
+        self.assert_inserted_keys_with_values(async_cache, keys, values)
 
         gets = executor.map(lambda key: async_cache.get_async(key, executor), keys)
         for value, get in zip(values, gets):
@@ -492,8 +510,7 @@ class AsyncCacheTest(TestMixin, TestCase):
                 inserted[key] = value
 
         self.assertTrue(set(keys) == set(inserted.keys()))
-        for key, value in inserted.items():
-            self.assertTrue(async_cache.get(key), value)
+        self.assert_keys_with_values(async_cache, inserted.keys(), inserted.values())
 
         executor.shutdown()
 
@@ -550,8 +567,7 @@ class AsyncCacheTest(TestMixin, TestCase):
                     inserted[key] = value
 
         self.assertTrue(set(keys) == set(inserted.keys()))
-        for key, value in inserted.items():
-            self.assertEqual(async_cache.get(key), value)
+        self.assert_keys_with_values(async_cache, inserted.keys(), inserted.values())
 
         executor.shutdown()
 
@@ -586,8 +602,7 @@ class OtherTest(TestMixin, TestCase):
         environ[env_var] = env_val
 
         cache = icache.InMemoryCache.from_env_var(env_var)
-        for key, value in zip(keys, values):
-            self.assertEqual(cache.get(key), value)
+        self.assert_keys_with_values(cache, keys, values)
 
     @parametrize("key_type", TestMixin.key_types())
     @parametrize("value_type", TestMixin.value_types())
@@ -679,8 +694,7 @@ class OtherTest(TestMixin, TestCase):
 
         # duplicate key => value entries are okay, as long as value is consistent
         cache = icache.InMemoryCache.from_env_var(env_var)
-        for key, value in zip(keys, values):
-            self.assertEqual(cache.get(key), value)
+        self.assert_keys_with_values(cache, keys, values)
 
         keys = (
             self.keys_not_in(icache.InMemoryCache(), lambda: self.key(key_type), 3) * 2
@@ -712,8 +726,7 @@ class OtherTest(TestMixin, TestCase):
 
         cache = icache.InMemoryCache()
 
-        for key, value in zip(keys, values):
-            self.assertTrue(cache.insert(key, value))
+        self.assert_inserted_keys_with_values(cache, keys, values)
 
         fpath = Path(gettempdir()) / "IN_MEMORY_CACHE_FROM_FILE_PATH_TEST"
         with open(fpath, "wb") as fp:
@@ -736,8 +749,7 @@ class OtherTest(TestMixin, TestCase):
 
         cache = icache.InMemoryCache()
 
-        for key, value in zip(keys, values):
-            self.assertTrue(cache.insert(key, value))
+        self.assert_inserted_keys_with_values(cache, keys, values)
 
         fpath = (
             Path(gettempdir())
@@ -808,6 +820,277 @@ class OtherTest(TestMixin, TestCase):
         self.assertIsNone(cache.get(key))
         self.assertTrue(cache.insert(key, value))
         self.assertEqual(cache.get(key), value)
+    
+    @parametrize("cache_type", TestMixin.cache_types())
+    def test_global_with_fresh_cache(self: Self, cache_type: type[icache.Cache]) -> None:
+        """
+        Test that entering a global fresh cache context resets the cache for all keys.
+        - Verifies that keys inserted before the context are not present inside the context.
+        - Checks that new keys inserted inside the context are only visible within it.
+        - Ensures that after exiting the context, the original cache values are restored.
+        """
+        cache = cache_type()
+        self.maybe_randomize_base_dir(cache)
+
+        keys_1 = self.keys_not_in(cache, lambda: self.key(str), 3)
+        values_1 = self.values_unalike(lambda: self.value(str), 3)
+
+        for key in keys_1:
+            self.assertIsNone(cache.get(key))
+        
+        for key, value in zip(keys_1, values_1):
+            self.assertTrue(cache.insert(key, value))
+            self.assertEqual(cache.get(key), value)
+        
+        keys_2 = self.keys_not_in(cache, lambda: self.key(str), 3)
+        values_2 = self.values_unalike(lambda: self.value(str), 3)
+
+        with icache.with_fresh_cache():
+            self.assert_keys_without_values(cache, chain(keys_1, keys_2))
+            self.assert_inserted_keys_with_values(cache, keys_2, values_2)
+
+        self.assert_keys_with_values(cache, keys_1, values_1)
+        self.assert_keys_without_values(cache, keys_2)
+
+    @parametrize("cache_type", TestMixin.cache_types())
+    def test_global_with_fresh_cache_nested(self: Self, cache_type: type[icache.Cache]) -> None:
+        """
+        Test nested global fresh cache contexts.
+        - Verifies that keys inserted before the context are not present inside nested contexts.
+        - Checks that keys inserted in inner contexts are only visible within those contexts.
+        - Ensures correct restoration of cache state after exiting nested contexts.
+        """
+        cache = cache_type()
+        self.maybe_randomize_base_dir(cache)
+
+        keys_1 = self.keys_not_in(cache, lambda: self.key(str), 3)
+        values_1 = self.values_unalike(lambda: self.value(str), 3)
+
+        for key in keys_1:
+            self.assertIsNone(cache.get(key))
+        
+        for key, value in zip(keys_1, values_1):
+            self.assertTrue(cache.insert(key, value))
+            self.assertEqual(cache.get(key), value)
+        
+        keys_2 = self.keys_not_in(cache, lambda: self.key(str), 3)
+        values_2 = self.values_unalike(lambda: self.value(str), 3)
+
+        with icache.with_fresh_cache():
+            self.assert_keys_without_values(cache, chain(keys_1, keys_2))
+            self.assert_inserted_keys_with_values(cache, keys_2, values_2)
+            
+            keys_3 = self.keys_not_in(cache, lambda: self.key(str), 3)
+            values_3 = self.values_unalike(lambda: self.value(str), 3)
+            
+            with icache.with_fresh_cache():
+                for key in chain(keys_1, keys_2, keys_3):
+                    self.assertIsNone(cache.get(key))
+                
+                for key, value in zip(keys_3, values_3):
+                    self.assertTrue(cache.insert(key, value))
+                    self.assertEqual(cache.get(key), value)
+            
+            for key in keys_3:
+                self.assertIsNone(cache.get(key))
+
+            for key, value in zip(keys_2, values_2):
+                self.assertEqual(cache.get(key), value)
+        
+        self.assert_keys_without_values(cache, keys_2)    
+        self.assert_keys_with_values(cache, keys_1, values_1)
+    
+    @parametrize("cache_type", TestMixin.cache_types())
+    def test_local_with_fresh_cache(self: Self, cache_type: type[icache.Cache]) -> None:
+        """
+        Test that entering a local fresh cache context resets the cache for the current instance.
+        - Verifies that keys inserted before the context are not present inside the context.
+        - Checks that new keys inserted inside the context are only visible within it.
+        - Ensures that after exiting the context, the original cache values are restored.
+        """
+        cache = cache_type()
+        self.maybe_randomize_base_dir(cache)
+
+        keys_1 = self.keys_not_in(cache, lambda: self.key(str), 3)
+        values_1 = self.values_unalike(lambda: self.value(str), 3)
+
+        for key in keys_1:
+            self.assertIsNone(cache.get(key))
+        
+        for key, value in zip(keys_1, values_1):
+            self.assertTrue(cache.insert(key, value))
+            self.assertEqual(cache.get(key), value)
+        
+        keys_2 = self.keys_not_in(cache, lambda: self.key(str), 3)
+        values_2 = self.values_unalike(lambda: self.value(str), 3)
+
+        with cache.with_fresh_cache():
+            self.assert_keys_without_values(cache, chain(keys_1, keys_2))
+            self.assert_inserted_keys_with_values(cache, keys_2, values_2)
+
+        self.assert_keys_with_values(cache, keys_1, values_1)
+        self.assert_keys_without_values(cache, keys_2)
+
+    @parametrize("cache_type", TestMixin.cache_types())
+    def test_local_with_fresh_cache_nested(self: Self, cache_type: type[icache.Cache]) -> None:
+        """
+        Test nested local fresh cache contexts.
+        - Verifies that keys inserted before the context are not present inside nested contexts.
+        - Checks that keys inserted in inner contexts are only visible within those contexts.
+        - Ensures correct restoration of cache state after exiting nested contexts.
+        """
+        cache = cache_type()
+        self.maybe_randomize_base_dir(cache)
+
+        keys_1 = self.keys_not_in(cache, lambda: self.key(str), 3)
+        values_1 = self.values_unalike(lambda: self.value(str), 3)
+        
+        self.assert_inserted_keys_with_values(cache, keys_1, values_1)
+        
+        keys_2 = self.keys_not_in(cache, lambda: self.key(str), 3)
+        values_2 = self.values_unalike(lambda: self.value(str), 3)
+
+        with cache.with_fresh_cache():
+            self.assert_keys_without_values(cache, chain(keys_1, keys_2))
+            self.assert_inserted_keys_with_values(cache, keys_2, values_2)
+            
+            keys_3 = self.keys_not_in(cache, lambda: self.key(str), 3)
+            values_3 = self.values_unalike(lambda: self.value(str), 3)
+            
+            with cache.with_fresh_cache():
+                self.assert_keys_without_values(cache, chain(keys_1, keys_2, keys_3))
+                self.assert_inserted_keys_with_values(cache, keys_3, values_3)
+
+            self.assert_keys_without_values(cache, keys_3)
+            self.assert_keys_with_values(cache, keys_2, values_2)
+        
+        self.assert_keys_without_values(cache, keys_2)
+        self.assert_keys_with_values(cache, keys_1, values_1)
+    
+    @parametrize("cache_type", TestMixin.cache_types())
+    def test_local_in_global_with_fresh_cache(self: Self, cache_type: type[icache.Cache]) -> None:
+        """
+        Test local fresh cache context inside a global fresh cache context.
+        - Verifies that local context only affects the targeted cache instance.
+        - Checks that global context affects all cache instances.
+        - Ensures correct cache state restoration after exiting both contexts.
+        """
+        cache_1, cache_2 = cache_type(), cache_type()
+        self.maybe_randomize_base_dir(cache_1)
+        self.maybe_randomize_base_dir(cache_2)
+
+        keys_1_1 = self.keys_not_in(cache_1, lambda: self.key(str), 3)
+        keys_2_1 = self.keys_not_in(cache_2, lambda: self.key(str), 3)
+        values_1_1 = self.values_unalike(lambda: self.value(str), 3)
+        values_2_1 = self.values_unalike(lambda: self.value(str), 3)
+
+        self.assert_keys_without_values(cache_1, keys_1_1)
+        self.assert_keys_without_values(cache_2, keys_2_1)
+
+        self.assert_inserted_keys_with_values(cache_1, keys_1_1, values_1_1)
+        self.assert_inserted_keys_with_values(cache_2, keys_2_1, values_2_1)
+        
+        keys_1_2 = self.keys_not_in(cache_1, lambda: self.key(str), 3)
+        keys_2_2 = self.keys_not_in(cache_2, lambda: self.key(str), 3)
+        values_1_2 = self.values_unalike(lambda: self.value(str), 3)
+        values_2_2 = self.values_unalike(lambda: self.value(str), 3)
+
+        # global fresh cache context
+        with icache.with_fresh_cache():
+            # keys_1_1 inserted outside global fresh cache context, should miss
+            # keys_1_2 not yet inserted, should miss
+            self.assert_keys_without_values(cache_1, chain(keys_1_1, keys_1_2))
+            # same as above
+            self.assert_keys_without_values(cache_2, chain(keys_2_1, keys_2_2))
+
+            self.assert_inserted_keys_with_values(cache_1, keys_1_2, values_1_2)
+            self.assert_inserted_keys_with_values(cache_2, keys_2_2, values_2_2)
+            
+            keys_1_3 = self.keys_not_in(cache_1, lambda: self.key(str), 3)
+            values_1_3 = self.values_unalike(lambda: self.value(str), 3)
+            
+            # local fresh cache context, should affect cache_1 only
+            with cache_1.with_fresh_cache():
+                # keys_1_1 inserted outside global and local fresh cache context
+                # keys_1_2 inserted outside local fresh cache context
+                # keys_1_3 not yet inserted
+                self.assert_keys_without_values(cache_1, chain(keys_1_1, keys_1_2, keys_1_3))
+                self.assert_inserted_keys_with_values(cache_1, keys_1_3, values_1_3)
+
+                # cache_2 should be unaffected by the local fresh cache context
+                self.assert_keys_with_values(cache_2, keys_2_2, values_2_2)
+            
+            self.assert_keys_without_values(cache_1, keys_1_3)
+            self.assert_keys_with_values(cache_1, keys_1_2, values_1_2)
+            self.assert_keys_with_values(cache_2, keys_2_2, values_2_2)
+
+        self.assert_keys_without_values(cache_1, chain(keys_1_2, keys_1_3))
+        self.assert_keys_without_values(cache_2, keys_2_2)
+        
+        self.assert_keys_with_values(cache_1, keys_1_1, values_1_1)
+        self.assert_keys_with_values(cache_2, keys_2_1, values_2_1)
+    
+    @parametrize("cache_type", TestMixin.cache_types())
+    def test_global_in_local_with_fresh_cache(self: Self, cache_type: type[icache.Cache]) -> None:
+        """
+        Test global fresh cache context inside a local fresh cache context.
+        - Verifies that global context affects all cache instances, even when inside a local context.
+        - Checks that local context only affects the targeted cache instance.
+        - Ensures correct cache state restoration after exiting both contexts.
+        """
+        cache_1, cache_2 = cache_type(), cache_type()
+        self.maybe_randomize_base_dir(cache_1)
+        self.maybe_randomize_base_dir(cache_2)
+
+        keys_1_1 = self.keys_not_in(cache_1, lambda: self.key(str), 3)
+        keys_2_1 = self.keys_not_in(cache_2, lambda: self.key(str), 3)
+        values_1_1 = self.values_unalike(lambda: self.value(str), 3)
+        values_2_1 = self.values_unalike(lambda: self.value(str), 3)
+
+        self.assert_keys_without_values(cache_1, keys_1_1)
+        self.assert_keys_without_values(cache_2, keys_2_1)
+
+        self.assert_inserted_keys_with_values(cache_1, keys_1_1, values_1_1)
+        self.assert_inserted_keys_with_values(cache_2, keys_2_1, values_2_1)
+        
+        keys_1_2 = self.keys_not_in(cache_1, lambda: self.key(str), 3)
+        keys_2_2 = self.keys_not_in(cache_2, lambda: self.key(str), 3)
+        values_1_2 = self.values_unalike(lambda: self.value(str), 3)
+        values_2_2 = self.values_unalike(lambda: self.value(str), 3)
+
+        # local fresh cache context
+        with cache_1.with_fresh_cache():
+            # keys_1_1 inserted outside local fresh cache context, should miss
+            # keys_1_2 not yet inserted, should miss
+            self.assert_keys_without_values(cache_1, chain(keys_1_1, keys_1_2))
+            # cache_2 should not be affected by the local fresh cache context
+            self.assert_keys_with_values(cache_2, keys_2_1, values_2_1)
+            self.assert_keys_without_values(cache_2, keys_2_2)
+
+            self.assert_inserted_keys_with_values(cache_1, keys_1_2, values_1_2)
+            self.assert_inserted_keys_with_values(cache_2, keys_2_2, values_2_2)
+            
+            keys_1_3 = self.keys_not_in(cache_1, lambda: self.key(str), 3)
+            values_1_3 = self.values_unalike(lambda: self.value(str), 3)
+            
+            # global fresh cache context, should affect both caches
+            with icache.with_fresh_cache():
+                # keys_1_1 inserted outside local and global fresh cache context
+                # keys_1_2 inserted outside global fresh cache context
+                # keys_1_3 not yet inserted
+                self.assert_keys_without_values(cache_1, chain(keys_1_1, keys_1_2, keys_1_3))
+                self.assert_inserted_keys_with_values(cache_1, keys_1_3, values_1_3)
+
+                self.assert_keys_without_values(cache_2, chain(keys_2_1, keys_2_2))
+            
+            self.assert_keys_without_values(cache_1, keys_1_3)
+            self.assert_keys_with_values(cache_1, keys_1_2, values_1_2)
+            self.assert_keys_with_values(cache_2, chain(keys_2_1, keys_2_2), chain(values_2_1, values_2_2))
+
+        self.assert_keys_without_values(cache_1, chain(keys_1_2, keys_1_3))
+        
+        self.assert_keys_with_values(cache_1, keys_1_1, values_1_1)
+        self.assert_keys_with_values(cache_2, chain(keys_2_1, keys_2_2), chain(values_2_1, values_2_2))
 
 
 if __name__ == "__main__":

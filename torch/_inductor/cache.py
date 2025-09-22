@@ -3,13 +3,15 @@ from __future__ import annotations
 import pickle
 from abc import ABC, abstractmethod
 from ast import literal_eval
+from contextlib import contextmanager
 from functools import cached_property
 from hashlib import sha256
 from os import getenv
 from pathlib import Path
+from shutil import rmtree
 from tempfile import gettempdir
 from threading import Lock
-from typing import Any, Generic, TYPE_CHECKING, TypeVar
+from typing import Any, Generic, Iterator, TYPE_CHECKING, TypeVar
 from typing_extensions import assert_never, override, Self
 
 from torch.utils._filelock import FileLock
@@ -26,6 +28,52 @@ if TYPE_CHECKING:
 Key = TypeVar("Key", str, int, tuple[Any, ...])
 Value = TypeVar("Value", str, int, tuple[Any, ...], bytes, dict[Any, Any], list[Any])
 
+# controls the global fresh cache context index; entering a global
+# fresh cache context triggers an increment of GLOBAL_FC_IDX; exiting
+# a global fresh cache context triggers a decrement of GLOBAL_FC_IDX
+GLOBAL_FC_IDX: int = 0
+GLOBAL_FC_IDX_LOCK: Lock = Lock()
+# it is particularly important for global fresh cache context that we
+# register all cache instances, such that when we exit a global fresh
+# cache context we can iterate through those instances and update their
+# fc idx => cache mapping (i.e. remove the now unused fresh cache)
+GLOBAL_CACHE_REGISTRY: list["Cache"[Any, Any]] = []
+GLOBAL_CACHE_REGISTRY_LOCK: Lock = Lock()
+
+@contextmanager
+def with_fresh_cache() -> Iterator[None]:
+    """
+    Context manager for a global fresh cache context.
+    Increments the global fresh cache index upon entry and decrements it upon exit.
+    Ensures that all cache instances are updated and unused fresh cache instances
+    are removed from the global registry when the context is exited.
+    """
+    global GLOBAL_FC_IDX
+    with GLOBAL_FC_IDX_LOCK:
+        GLOBAL_FC_IDX += 1
+    try:
+        yield
+    finally:
+        with GLOBAL_FC_IDX_LOCK, GLOBAL_CACHE_REGISTRY_LOCK:
+            # we need to 1) remove unreferenced fresh cache
+            # instances from all cache instances and 2) update
+            # the global cache registry to remove the now deleted
+            # fresh cache instances
+            _fc_to_del: list["Cache"[Any, Any]] = []
+            for cache in GLOBAL_CACHE_REGISTRY:
+                if cache._fc_idx not in cache._fc_idx_to_cache:
+                    continue
+                _fc = cache._fc_idx_to_cache[cache._fc_idx]
+                del cache._fc_idx_to_cache[cache._fc_idx]
+                _fc_to_del.append(_fc)
+            for _fc in _fc_to_del:
+                try:
+                    GLOBAL_CACHE_REGISTRY.remove(_fc)
+                except ValueError:
+                    pass
+                del _fc
+            GLOBAL_FC_IDX -= 1
+
 
 class CacheError(ValueError):
     """
@@ -36,13 +84,94 @@ class CacheError(ValueError):
 class Cache(ABC, Generic[Key, Value]):
     """
     Abstract base class for cache implementations.
-    Provides the interface for cache operations.
+    Provides the interface for cache operations, including support for
+    fresh cache contexts and thread safety.
     """
 
-    @abstractmethod
-    def get(self: Self, key: Key) -> Value | None:
+    def __new__(cls) -> Self:
         """
-        Retrieve a value from the cache.
+        Create a new cache instance and register it in the global cache registry.
+        Returns:
+            Self: The newly created cache instance.
+        """
+        global GLOBAL_CACHE_REGISTRY
+        self = super().__new__(cls)
+        with GLOBAL_CACHE_REGISTRY_LOCK:
+            GLOBAL_CACHE_REGISTRY.append(self)
+        return self
+    
+    def __del__(self: Self) -> None:
+        """
+        Remove the cache instance from the global cache registry upon deletion.
+        """
+        global GLOBAL_CACHE_REGISTRY
+        with GLOBAL_CACHE_REGISTRY_LOCK:
+            try:
+                GLOBAL_CACHE_REGISTRY.remove(self)
+            except ValueError:
+                pass
+
+    def __init__(self: Self) -> None:
+        """
+        Initialize the cache instance with thread lock and fresh cache context tracking.
+        """
+        self._lock = Lock()
+        # is similar to GLOBAL_FC_IDX, but tracks the fresh
+        # cache context index for per-cache fresh cache contexts
+        self._local_fc_idx = 0
+        # overall fresh cache index is calculated as a tuple
+        # of the local and global fresh cache indices; using a
+        # tuple allows arbitrary depth nesting of both local
+        # and global fresh cache contexts. if we simply used
+        # local + global as the fresh cache index we could have
+        # surprising bugs, for example local=1, global=0 and
+        # local=0, global=1 would resolve to the same cache instance
+        # which would be decidedly incorrect
+        self._fc_idx_to_cache = {
+            self._fc_idx: self
+        }
+    
+    def _construct_fc(self: Self) -> Self:
+        """
+        Construct a new fresh cache instance.
+        Subclasses may override this method to provide custom behavior
+        for fresh cache instantiation.
+        Returns:
+            Self: A new fresh cache instance.
+        """
+        return type(self)()
+    
+    @property
+    def _fc_idx(self: Self) -> tuple[int, int]:
+        """
+        Get the current fresh cache index as a tuple of local and global indices.
+        Returns:
+            tuple[int, int]: The (local, global) fresh cache index.
+        """
+        return (self._local_fc_idx, GLOBAL_FC_IDX)
+    
+    def _get_fc(self: Self) -> Self:
+        """
+        Retrieve the correct fresh cache instance for the current context.
+        Returns:
+            Self: The cache instance for the current fresh cache context.
+        """
+        _cache = self._fc_idx_to_cache.get(self._fc_idx, None)
+        if _cache is None:
+            _cache = self._construct_fc()
+            self._fc_idx_to_cache[self._fc_idx] = _cache
+        return _cache
+    
+    def _on_fresh_cache_exit(self: Self) -> None:
+        """
+        Hook called when exiting a fresh cache context.
+        Subclasses may override to perform cleanup.
+        """
+
+    @abstractmethod
+    def _get(self: Self, key: Key) -> Value | None:
+        """
+        Retrieve a value from the cache (to be implemented by subclasses).
         Args:
             key (Key): The key to look up.
         Returns:
@@ -50,15 +179,78 @@ class Cache(ABC, Generic[Key, Value]):
         """
 
     @abstractmethod
-    def insert(self: Self, key: Key, value: Value) -> bool:
+    def _insert(self: Self, key: Key, value: Value) -> bool:
         """
-        Insert a value into the cache.
+        Insert a value into the cache (to be implemented by subclasses).
         Args:
             key (Key): The key to insert.
             value (Value): The value to associate with the key.
         Returns:
             bool: True if the value was inserted, False if the key already exists.
         """
+
+    def get(self: Self, key: Key) -> Value | None:
+        """
+        Retrieve a value from the cache. Entry point for typical users,
+        and goes through various checks related to the fresh cache context
+        for example.
+        Args:
+            key (Key): The key to look up.
+        Returns:
+            Value | None: The cached value if present, else None.
+        """
+        with self._lock:
+            _cache = self._get_fc()
+            return _cache._get(key)
+
+    def insert(self: Self, key: Key, value: Value) -> bool:
+        """
+        Insert a value into the cache. Entry point for typical users,
+        and goes through various checks related to the fresh cache context
+        for example.
+        Args:
+            key (Key): The key to insert.
+            value (Value): The value to associate with the key.
+        Returns:
+            bool: True if the value was inserted, False if the key already exists.
+        """
+        with self._lock:
+            _cache = self._get_fc()
+            return _cache._insert(key, value)
+
+    @contextmanager
+    def with_fresh_cache(self: Self) -> Iterator[None]:
+        """
+        Context manager for a per-cache fresh cache context.
+        Increments the local fresh cache index upon entry and decrements it upon exit.
+        Ensures that unused fresh cache instances are removed from the registry.
+        """
+        with self._lock:
+            self._local_fc_idx += 1
+        try:
+            yield
+        finally:
+            with self._lock:
+                self._on_fresh_cache_exit()
+                if self._fc_idx not in self._fc_idx_to_cache:
+                    # and don't forget to decrement the local
+                    # fresh cache context idx on early exit
+                    self._local_fc_idx -= 1
+                    return
+                global GLOBAL_CACHE_REGISTRY
+                # we should delete now out-of-context fresh
+                # cache instances, remove their entry in our
+                # fresh cache instance mapping, and their
+                # reference in the global cache registry
+                _fc = self._fc_idx_to_cache[self._fc_idx]
+                del self._fc_idx_to_cache[self._fc_idx]
+                try:
+                    with GLOBAL_CACHE_REGISTRY_LOCK:
+                        GLOBAL_CACHE_REGISTRY.remove(_fc)
+                except ValueError:
+                    pass
+                del _fc
+                self._local_fc_idx -= 1
 
 
 class InMemoryCache(Cache[Key, Value]):
@@ -70,37 +262,22 @@ class InMemoryCache(Cache[Key, Value]):
         """
         Initialize an empty in-memory cache.
         """
+        super().__init__()
         self._cache: dict[Key, Value] = {}
-        self._lock: Lock = Lock()
 
-    def get(self: Self, key: Key) -> Value | None:
-        """
-        Retrieve a value from the cache.
-        Args:
-            key (Key): The key to look up.
-        Returns:
-            Value | None: The cached value if present, else None.
-        """
-        with self._lock:
-            if (value := self._cache.get(key)) is not None:
-                return value
-            return None
+    @override
+    def _get(self: Self, key: Key) -> Value | None:
+        if (value := self._cache.get(key)) is not None:
+            return value
+        return None
 
-    def insert(self: Self, key: Key, value: Value) -> bool:
-        """
-        Insert a value into the cache.
-        Args:
-            key (Key): The key to insert.
-            value (Value): The value to associate with the key.
-        Returns:
-            bool: True if the value was inserted, False if the key already exists.
-        """
-        with self._lock:
-            if key in self._cache:
-                # no overwrites for insert!
-                return False
-            self._cache[key] = value
-            return True
+    @override
+    def _insert(self: Self, key: Key, value: Value) -> bool:
+        if key in self._cache:
+            # no overwrites for insert!
+            return False
+        self._cache[key] = value
+        return True
 
     @classmethod
     def from_env_var(cls, env_var: str) -> Self:
@@ -218,7 +395,7 @@ class AsyncCache(Cache[Key, Value]):
     Asynchronous cache implementation using ThreadPoolExecutor.
     """
 
-    def get_async(
+    def _get_async(
         self: Self, key: Key, executor: ThreadPoolExecutor
     ) -> Future[Value | None]:
         """
@@ -229,9 +406,18 @@ class AsyncCache(Cache[Key, Value]):
         Returns:
             Future[Value | None]: Future for the cached value or None.
         """
-        return executor.submit(self.get, key)
+        # careful here, we definitely want to call self._get;
+        # if we instead were to call self.get, when the thread
+        # executed the method we'd check the fc again which could
+        # cause weird issues. for example, if you were to enter a
+        # fresh context and call self.get_async before immediately
+        # exiting the context it could theoretically be possible
+        # that the context closure happens before the thread has
+        # finished processing the request which could act as the
+        # self.get_async call having happened outside of the context
+        return executor.submit(self._get, key)
 
-    def insert_async(
+    def _insert_async(
         self: Self, key: Key, value: Value, executor: ThreadPoolExecutor
     ) -> Future[bool]:
         """
@@ -243,7 +429,22 @@ class AsyncCache(Cache[Key, Value]):
         Returns:
             Future[bool]: Future for the result of insertion.
         """
-        return executor.submit(self.insert, key, value)
+        # see self._get_async for why we use self._insert
+        return executor.submit(self._insert, key, value)
+
+    def get_async(
+        self: Self, key: Key, executor: ThreadPoolExecutor
+    ) -> Future[Value | None]:
+        with self._lock:
+            _cache = self._get_fc()
+            return _cache._get_async(key, executor)
+
+    def insert_async(
+        self: Self, key: Key, value: Value, executor: ThreadPoolExecutor
+    ) -> Future[bool]:
+        with self._lock:
+            _cache = self._get_fc()
+            return _cache._insert_async(key, value, executor)
 
 
 class OnDiskCache(AsyncCache[Key, Value]):
@@ -265,10 +466,29 @@ class OnDiskCache(AsyncCache[Key, Value]):
             name (str | None, optional): The name of the cache directory. If None,
                 defaults to "on_disk_cache".
         """
+        super().__init__()
         self.name = name or "on_disk_cache"
 
+    def _construct_fc(self: Self) -> Self:
+        """
+        Construct a new fresh cache instance for on-disk cache.
+        Returns:
+            Self: A new fresh cache instance with a subdirectory for the context.
+        """
+        _cache = type(self)()
+        _cache._base_dir = self._base_dir / str(self._fc_idx)
+        return _cache
+
+    def _on_fresh_cache_exit(self: Self) -> None:
+        """
+        Delete the contents of the fresh cache on fresh cache
+        context exit.
+        """
+        _cache = self._get_fc()
+        rmtree(_cache._base_dir)
+    
     @cached_property
-    def base_dir(self: Self) -> Path:
+    def _base_dir(self: Self) -> Path:
         """
         Get the base directory for the cache.
         Returns:
@@ -287,7 +507,7 @@ class OnDiskCache(AsyncCache[Key, Value]):
             CacheError: If the key is not pickle-able.
         """
         try:
-            return self.base_dir / sha256(pickle.dumps(key)).hexdigest()[:32]
+            return self._base_dir / sha256(pickle.dumps(key)).hexdigest()[:32]
         except (AttributeError, pickle.PicklingError) as err:
             raise CacheError(
                 f"Failed to get fpath for key {key!r}, key is not pickle-able."
@@ -309,7 +529,7 @@ class OnDiskCache(AsyncCache[Key, Value]):
         return FileLock(str(fpath.parent / "locks" / fpath.name[:4]) + ".lock")
 
     @property
-    def version_prefix(self: Self) -> bytes:
+    def _version_prefix(self: Self) -> bytes:
         """
         Get the version prefix for the cache.
         Returns:
@@ -318,7 +538,7 @@ class OnDiskCache(AsyncCache[Key, Value]):
         return sha256(str(OnDiskCache.version).encode()).digest()[:4]
 
     @override
-    def get(self: Self, key: Key) -> Value | None:
+    def _get(self: Self, key: Key) -> Value | None:
         """
         Retrieve a value from the cache.
         Args:
@@ -338,13 +558,13 @@ class OnDiskCache(AsyncCache[Key, Value]):
                 return None
 
             value_bytes = None
-            prefix_length = len(self.version_prefix)
+            prefix_length = len(self._version_prefix)
             with open(fpath, "rb") as fp:
-                if fp.read(prefix_length) == self.version_prefix:
+                if fp.read(prefix_length) == self._version_prefix:
                     value_bytes = fp.read()
 
             if value_bytes is None:
-                # version_prefix did not match, so we can't read the stale
+                # _version_prefix did not match, so we can't read the stale
                 # cached value; we should also remove the stale cached value,
                 # so that key can be re-cached by the newer version
                 fpath.unlink()
@@ -360,7 +580,7 @@ class OnDiskCache(AsyncCache[Key, Value]):
             return value
 
     @override
-    def insert(self: Self, key: Key, value: Value) -> bool:
+    def _insert(self: Self, key: Key, value: Value) -> bool:
         """
         Insert a value into the cache.
         Args:
@@ -381,7 +601,7 @@ class OnDiskCache(AsyncCache[Key, Value]):
             # iff the file does not already exist (atomic w/o overwrite); use
             # flock for added atomicity guarantee and to prevent partial writes
             with flock as _, open(fpath, "xb") as fp:
-                fp.write(self.version_prefix)
+                fp.write(self._version_prefix)
                 pickle.dump(value, fp)
         except pickle.PicklingError as err:
             raise CacheError(
@@ -406,7 +626,7 @@ class InductorOnDiskCache(OnDiskCache[Key, Value]):
         super().__init__("inductor_on_disk_cache")
 
     @cached_property
-    def base_dir(self: Self) -> Path:
+    def _base_dir(self: Self) -> Path:
         """
         Get the base directory for the Inductor cache.
         Returns:
