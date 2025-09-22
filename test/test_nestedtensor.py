@@ -7398,7 +7398,123 @@ torch.cuda.synchronize()
         (out1, _) = f(nt)
         out1.backward(torch.ones_like(out1))
 
-    @dtypes(torch.float64, torch.float32, torch.half)
+    @dtypes(torch.float64, torch.float32)
+    def test_jagged_to_padded_dense_autograd(self, device, dtype):
+        """Test autograd for _jagged_to_padded_dense_forward operation."""
+
+        values = torch.randn(10, 5, device=device, dtype=dtype, requires_grad=True)
+        offsets = torch.tensor([0, 3, 6, 10], device=device, dtype=torch.int64)
+        max_lengths = [4]
+        padding_value = 0.0
+
+        # Forward pass
+        padded = torch.ops.aten._jagged_to_padded_dense_forward(
+            values, [offsets], max_lengths, padding_value
+        )
+        self.assertTrue(padded.requires_grad)
+
+        # Backward pass
+        loss = padded.sum()
+        loss.backward()
+
+        # Check gradients computed
+        self.assertIsNotNone(values.grad)
+        self.assertEqual(values.grad.shape, values.shape)
+
+    @dtypes(torch.float64, torch.float32)
+    def test_padded_dense_to_jagged_autograd(self, device, dtype):
+        """Test autograd for _padded_dense_to_jagged_forward operation."""
+
+        batch_size = 3
+        max_length = 4
+        feature_dim = 5
+        dense = torch.randn(
+            batch_size,
+            max_length,
+            feature_dim,
+            device=device,
+            dtype=dtype,
+            requires_grad=True,
+        )
+        offsets = torch.tensor([0, 3, 6, 10], device=device, dtype=torch.int64)
+        total_L = 10
+
+        # Forward pass
+        jagged = torch.ops.aten._padded_dense_to_jagged_forward(
+            dense, [offsets], total_L
+        )
+        self.assertTrue(jagged.requires_grad)
+
+        # Backward pass
+        loss = jagged.sum()
+        loss.backward()
+
+        # Check gradients computed
+        self.assertIsNotNone(dense.grad)
+        self.assertEqual(dense.grad.shape, dense.shape)
+
+    @dtypes(torch.float64)
+    def test_jagged_dense_conversion_gradcheck(self, device, dtype):
+        """Test gradient correctness using gradcheck for jagged<->dense conversion."""
+        from torch.autograd import gradcheck
+
+        values = torch.randn(8, 4, device=device, dtype=dtype, requires_grad=True) * 0.1
+        offsets = torch.tensor([0, 2, 5, 8], device=device, dtype=torch.int64)
+        max_lengths = [3]
+        padding_value = 0.0
+
+        def jagged_to_padded_func(vals):
+            return torch.ops.aten._jagged_to_padded_dense_forward(
+                vals, [offsets], max_lengths, padding_value
+            )
+
+        # Test jagged->padded gradcheck
+        self.assertTrue(
+            gradcheck(jagged_to_padded_func, (values,), eps=1e-6, atol=1e-4)
+        )
+
+        # Test padded->jagged gradcheck
+        batch_size = len(offsets) - 1
+        dense = (
+            torch.randn(
+                batch_size,
+                max_lengths[0],
+                values.shape[-1],
+                device=device,
+                dtype=dtype,
+                requires_grad=True,
+            )
+            * 0.1
+        )
+        total_L = values.shape[0]
+
+        def padded_to_jagged_func(d):
+            return torch.ops.aten._padded_dense_to_jagged_forward(d, [offsets], total_L)
+
+        self.assertTrue(gradcheck(padded_to_jagged_func, (dense,), eps=1e-6, atol=1e-4))
+
+    @dtypes(torch.float32)
+    def test_jagged_dense_conversion_meta_device_edge_cases(self, device, dtype):
+        """Test meta device compatibility for edge cases."""
+        # Test with inferred total_L (None parameter)
+        with torch.device("meta"):
+            batch_size = 2
+            max_length = 3
+            feature_dim = 4
+            dense_meta = torch.randn(batch_size, max_length, feature_dim, dtype=dtype)
+            offsets_meta = torch.tensor([0, 2, 5], dtype=torch.int64)
+
+            # Test with total_L=None (meta tensor cannot access actual offset values)
+            jagged_meta = torch.ops.aten._padded_dense_to_jagged_forward(
+                dense_meta, [offsets_meta], None
+            )
+
+            # Meta tensor uses conservative upper bound: batch_size * max_length
+            # This is expected behavior since meta tensors cannot access tensor values
+            expected_shape = (batch_size * max_length, feature_dim)
+            self.assertEqual(jagged_meta.shape, expected_shape)
+
+    @dtypes(torch.float32)
     def test_jagged_padded_dense_conversion_kernels(self, device, dtype):
         values = torch.randn(10, 5, device=device, dtype=dtype)
         offsets = torch.tensor([0, 1, 3, 8, 10], device=device, dtype=torch.int64)

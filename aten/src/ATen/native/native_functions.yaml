@@ -14928,6 +14928,18 @@
     CUDA: _fbgemm_dense_to_jagged_forward_symint
     CPU: _padded_dense_to_jagged_forward_cpu
 
+- func: _jagged_to_padded_dense_backward(Tensor grad_output, Tensor[] offsets, SymInt total_L) -> Tensor
+  variants: function
+  dispatch:
+    CUDA: _fbgemm_jagged_to_padded_dense_backward
+    CPU: _jagged_to_padded_dense_backward_cpu
+
+- func: _padded_dense_to_jagged_backward(Tensor grad_output, Tensor[] offsets, SymInt[] max_lengths, float padding_value=0.0) -> Tensor
+  variants: function
+  dispatch:
+    CUDA: _fbgemm_padded_dense_to_jagged_backward
+    CPU: _padded_dense_to_jagged_backward_cpu
+
 - func: _nested_from_padded_tensor(Tensor padded, Tensor offsets, Tensor dummy, int ragged_idx=1, Tensor? min_seqlen=None, Tensor? max_seqlen=None, SymInt? sum_S=None) -> Tensor
   variants: function
   device_check: NoCheck

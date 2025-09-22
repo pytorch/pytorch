@@ -3245,3 +3245,12 @@
 - name: _foreach_norm.Scalar(Tensor[] self, Scalar ord=2, ScalarType? dtype=None) -> Tensor[]
   self: norm_backward(grads[i], self[i], ord, result[i])
   result: norm_jvp(self_p, self_t, ord, result[i])
+
+# Jagged tensor operations autograd support
+- name: _jagged_to_padded_dense_forward(Tensor values, Tensor[] offsets, SymInt[] max_lengths, float padding_value=0.0) -> Tensor
+  values: _jagged_to_padded_dense_backward_symint(grad, offsets, values.sym_size(0))
+  result: auto_linear
+
+- name: _padded_dense_to_jagged_forward(Tensor dense, Tensor[] offsets, SymInt? total_L=None) -> Tensor
+  dense: _padded_dense_to_jagged_backward_symint(grad, offsets, {dense.sym_size(1)}, 0.0)
+  result: auto_linear

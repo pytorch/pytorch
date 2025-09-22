@@ -7769,6 +7769,60 @@ def meta__jagged_to_padded_dense_forward(
     return values.new_empty(output_shape)
 
 
+@register_meta(aten._padded_dense_to_jagged_forward.default)
+def meta__padded_dense_to_jagged_forward(
+    dense: Tensor,
+    offsets: list[Tensor],
+    total_L: Optional[int] = None,
+):
+    # Compute the output size
+    computed_size: Union[int, torch.SymInt]
+    if total_L is None:
+        # Cannot access offsets[-1].item() on meta tensors
+        ctx = torch.library.get_ctx()
+        if ctx is not None:
+            computed_size = ctx.new_dynamic_size()
+        else:
+            # Conservative fallback for meta device testing
+            computed_size = dense.shape[0] * dense.shape[1]
+    else:
+        computed_size = total_L
+    # Build output shape: [total_L, ...feature_dims]
+    feature_dims = dense.shape[2:] if dense.dim() > 2 else []
+    output_shape = [computed_size] + list(feature_dims)
+    return dense.new_empty(output_shape)
+
+
+@register_meta(aten._jagged_to_padded_dense_backward.default)
+def meta__jagged_to_padded_dense_backward(
+    grad_output: Tensor,
+    offsets: list[Tensor],
+    total_L: int,
+):
+    # Output shape should match the original values tensor: [total_L, ...feature_dims]
+    batch_size = offsets[0].shape[0] - 1
+    if len(grad_output.shape) == batch_size + 1:
+        # D dimension was folded
+        return grad_output.new_empty([total_L])
+    else:
+        # D dimension preserved
+        feature_dims = grad_output.shape[2:]
+        return grad_output.new_empty([total_L] + list(feature_dims))
+
+
+@register_meta(aten._padded_dense_to_jagged_backward.default)
+def meta__padded_dense_to_jagged_backward(
+    grad_output: Tensor,
+    offsets: list[Tensor],
+    max_lengths: list[int],
+    padding_value: float = 0.0,
+):
+    # Output shape should match the original dense tensor
+    batch_size = offsets[0].shape[0] - 1
+    output_shape = [batch_size] + max_lengths + list(grad_output.shape[1:])
+    return grad_output.new_empty(output_shape)
+
+
 def _create_unary_float_meta_func(func):
     @register_meta(func)
     @out_wrapper()
