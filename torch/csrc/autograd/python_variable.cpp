@@ -22,6 +22,7 @@
 #include <torch/csrc/autograd/utils/error_messages.h>
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/distributed/Placement.h>
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/tensor/python_tensor.h>
@@ -1141,10 +1142,10 @@ static PyObject* DTensor_OpSchema_post_init(PyObject* mod, PyObject* self) {
   END_HANDLE_TH_ERRORS
 }
 
-static py::list int_array_to_list(IntArrayRef arr) {
+static py::list symint_array_to_list(SymIntArrayRef arr) {
   py::list result(arr.size());
   for (const auto idx : c10::irange(arr.size())) {
-    result[idx] = arr[idx];
+    result[idx] = py::cast(arr[idx]);
   }
   return result;
 }
@@ -1154,8 +1155,10 @@ static PyObject* DTensor_compute_global_tensor_info_impl(
     py::handle mesh,
     const py::sequence& placements) {
   Py_ssize_t idx = 0;
-  DimVector tensor_shape(tensor.sizes().begin(), tensor.sizes().end());
-  DimVector tensor_strides(tensor.strides().begin(), tensor.strides().end());
+  c10::SymDimVector tensor_shape(
+      tensor.sym_sizes().begin(), tensor.sym_sizes().end());
+  c10::SymDimVector tensor_strides(
+      tensor.sym_strides().begin(), tensor.sym_strides().end());
   // NOTE: if this is a py::handle then this code stops working;
   // apparently we can't rely on the bound method to stick around.
   py::object mesh_size;
@@ -1163,8 +1166,9 @@ static PyObject* DTensor_compute_global_tensor_info_impl(
     // TODO: C++ify DeviceMesh somehow; profiling seems
     // to say that nearly all our remaining time spent is spent
     // calling back into Python.
-    const auto& cpp_placement = placement.cast<const Placement&>();
-    if (const auto* cpp_shard = dynamic_cast<const Shard*>(&cpp_placement)) {
+    const auto& cpp_placement = placement.cast<const distributed::Placement&>();
+    if (const auto* cpp_shard =
+            dynamic_cast<const distributed::Shard*>(&cpp_placement)) {
       const auto shard_dim = cpp_shard->dim;
       TORCH_CHECK(
           shard_dim >= 0,
@@ -1208,7 +1212,8 @@ static PyObject* DTensor_compute_global_tensor_info_impl(
     idx++;
   }
   return py::make_tuple(
-             int_array_to_list(tensor_shape), int_array_to_list(tensor_strides))
+             symint_array_to_list(tensor_shape),
+             symint_array_to_list(tensor_strides))
       .release()
       .ptr();
 }
