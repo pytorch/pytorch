@@ -184,6 +184,13 @@ ignore = [
     "UP007", # keep-runtime-typing
     "UP045", # keep-runtime-typing
     "TC006",
+    # TODO: Remove Python-3.10 specific suppressions
+    "B905",
+    "UP035",
+    "UP036",
+    "UP038",
+    "UP041",
+    "FURB161",
 ]
 select = [
     "B",
