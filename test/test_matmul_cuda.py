@@ -26,7 +26,6 @@ from torch.testing._internal.common_cuda import (
     SM90OrLater,
     SM100OrLater,
     xfailIfSM120OrLater,
-    xfailIfSM100Condition,
     _get_torch_cuda_version,
     PLATFORM_SUPPORTS_FP8,
     PLATFORM_SUPPORTS_FP8_GROUPED_GEMM,
@@ -502,7 +501,6 @@ class TestMatmulCuda(InductorTestCase):
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
     # TODO(future PR): enable compile for torch._grouped_mm fallback path
     @unittest.skipIf(not SM90OrLater, "Grouped gemm with compile supported on SM90")
-    @xfailIfSM100Condition(lambda params: params["op"] == "2d/2d" and not params["max_autotune"])
     @parametrize("op", ["2d/2d", "2d/3d", "3d/2d", "3d/3d"])
     @parametrize("a_row_major", [False, True])
     @parametrize("b_row_major", [False, True])
