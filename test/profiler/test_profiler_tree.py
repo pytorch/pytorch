@@ -191,6 +191,16 @@ class ProfilerTree:
                 name,
             )
 
+        # HACK: this patches around the fact that PyBind11 improperly sets the
+        # __qualname__ attribute on functions and methods; see
+        # https://github.com/pybind/pybind11/issues/5774.  This should be removed if
+        # that issue is fixed.
+        name = re.sub(
+            r"pybind11_builtins\.pybind11_detail_function_record_v[^ .]+",
+            "PyCapsule",
+            name,
+        )
+
         return re.sub("object at 0x[0-9a-fA-F]+>", "object at 0xXXXXXXXXXXXX>", name)
 
     @classmethod
@@ -754,6 +764,7 @@ class TestProfilerTree(TestCase):
               aten::add
                 torch/_library/simple_registry.py(...): find_torch_dispatch_rule
                   torch/_library/simple_registry.py(...): find
+                    <built-in method get of dict object at 0xXXXXXXXXXXXX>
                   torch/_library/simple_registry.py(...): find
                     <built-in method get of dict object at 0xXXXXXXXXXXXX>
                 test_profiler_tree.py(...): __torch_dispatch__

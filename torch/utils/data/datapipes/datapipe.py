@@ -99,7 +99,9 @@ class IterDataPipe(IterableDataset[_T_co], metaclass=_IterDataPipeMeta):
             >>> from torchdata.datapipes.iter import IterableWrapper, Mapper
             >>> dp = IterableWrapper(range(10))
             >>> map_dp_1 = Mapper(dp, lambda x: x + 1)  # Using class constructor
-            >>> map_dp_2 = dp.map(lambda x: x + 1)  # Using functional form (recommended)
+            >>> map_dp_2 = dp.map(
+            ...     lambda x: x + 1
+            ... )  # Using functional form (recommended)
             >>> list(map_dp_1)
             [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
             >>> list(map_dp_2)
@@ -114,7 +116,9 @@ class IterDataPipe(IterableDataset[_T_co], metaclass=_IterDataPipeMeta):
             >>> list(it1)
             [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
             >>> it1 = iter(source_dp)
-            >>> it2 = iter(source_dp)  # The creation of a new iterator invalidates `it1`
+            >>> it2 = iter(
+            ...     source_dp
+            ... )  # The creation of a new iterator invalidates `it1`
             >>> next(it2)
             0
             >>> next(it1)  # Further usage of `it1` will raise a `RunTimeError`

@@ -378,9 +378,9 @@ inline static std::optional<ResultVec> computeStride_impl(
         (TORCH_GUARD_OR_TRUE(sym_ne(oldshape[tensor_d - 1], 1)) &&
         TORCH_GUARD_OR_TRUE(sym_ne(oldstride[tensor_d - 1], tensor_numel * chunk_base_stride)))) {
      // We want to accumulate stuff in view_numel until view_numel == tensor_numel, if we do not
-     // know if that is satisfied we keep accumalating. For example if view_numel = 1 and tensor_numel = u1,
+     // know if that is satisfied we keep accumulating. For example if view_numel = 1 and tensor_numel = u1,
      // we want to take that path, view_numel will become u0. Next iteration if u0==u1 we want to stop.
-     // Thats why we use TORCH_GUARD_OR_TRUE below.
+     // That's why we use TORCH_GUARD_OR_TRUE below.
 
      // we use TORCH_GUARD_OR_FALSE and not TORCH_GUARD_OR_TRUE when comparing newshape[view_d] ==1 because
      // if we know view_numel < tensor_numel is false, we want to stop. Unless we know for sure newshape[view_d]==1

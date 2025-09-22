@@ -658,13 +658,6 @@
     "Iterable",
     "Optional"
   ],
-  "torch.onnx": [
-    "Dict",
-    "OperatorExportTypes",
-    "Optional",
-    "TensorProtoDataType",
-    "TrainingMode"
-  ],
   "torch.overrides": [
     "BaseTorchFunctionMode",
     "TorchFunctionMode",
@@ -2007,8 +2000,6 @@
     "cast_symbool_to_symint_guardless",
     "constrain_range",
     "constrain_unify",
-    "guard_or_true",
-    "guard_or_false",
     "error",
     "eval_guards",
     "eval_is_non_overlapping_and_dense",
@@ -2208,21 +2199,6 @@
     "Iterable",
     "Tuple",
     "abstractmethod"
-  ],
-  "torch.onnx.verification": [
-    "Any",
-    "Callable",
-    "Collection",
-    "Dict",
-    "FrozenSet",
-    "List",
-    "Mapping",
-    "Number",
-    "Optional",
-    "Sequence",
-    "Set",
-    "Tuple",
-    "Union"
   ],
   "torch.quantization.fx": [
     "convert",
@@ -2650,11 +2626,6 @@
   "torch.export.graph_signature": [
     "TokenArgument"
   ],
-  "torch.export.pt2_archive": [
-    "PT2ArchiveWriter",
-    "PT2ArchiveReader",
-    "is_pt2_package"
-  ],
   "torch.fx.experimental.shape_inference.infer_shape": [
     "DimDynamic",
     "FakeTensorMode",
@@ -2691,35 +2662,6 @@
   "torch.mtia": [
     "DeferredMtiaCallError",
     "StreamContext"
-  ],
-  "torch.onnx.symbolic_helper": [
-    "Any",
-    "Callable",
-    "List",
-    "Literal",
-    "NoReturn",
-    "Number",
-    "Optional",
-    "Sequence",
-    "Set",
-    "Tuple",
-    "Union"
-  ],
-  "torch.onnx.symbolic_opset18": [
-    "amax",
-    "amin",
-    "aminmax",
-    "embedding_bag",
-    "linalg_vector_norm",
-    "max",
-    "maximum",
-    "min",
-    "minimum"
-  ],
-  "torch.onnx.symbolic_opset20": [
-    "_affine_grid_generator",
-    "_grid_sampler",
-    "convert_grid_sample_mode"
   ],
   "torch.utils.data.datapipes.dataframe.dataframe_wrapper": [
     "Any",

@@ -31,7 +31,7 @@ from .partitioners import (
 log = logging.getLogger(__name__)
 
 
-# These canonicalizations are needed here (and not decompositions), as the ops
+# These canonicalization are needed here (and not decompositions), as the ops
 # we're trying to canonicalize to CompositeImplicitAutograd.
 def _canonicalize(fx_g):
     for node in fx_g.graph.find_nodes(
@@ -249,7 +249,7 @@ def memory_efficient_fusion(
 
     Args:
         fn (Union[Callable, nn.Module]): A Python function or a ``nn.Module``
-            that takes one ore more arguments. Must return one or more Tensors.
+            that takes one or more arguments. Must return one or more Tensors.
         **kwargs: Any other overrides you want to make to the settings
 
     Returns:

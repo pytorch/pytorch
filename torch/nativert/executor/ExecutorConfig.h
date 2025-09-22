@@ -9,7 +9,7 @@ namespace torch::nativert {
 struct ExecutorConfig {
   bool validateInputs = false;
   bool debugNan = false;
-  bool enableStaticCPUKernels = false;
+  bool enableStaticCPUKernels = true;
   bool runConstFolding = false;
   bool doExecutionFrameCleanup = true;
   bool tryFreeUnmanagedValuesAfterUse = true;

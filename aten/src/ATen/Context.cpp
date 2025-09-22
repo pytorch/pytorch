@@ -14,7 +14,9 @@
 #include <ATen/cpu/FlushDenormal.h>
 
 #ifdef USE_FBGEMM
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wextra-semi")
 #include <fbgemm/Fbgemm.h>
+C10_DIAGNOSTIC_POP()
 #endif // USE_FBGEMM
 #if defined(__aarch64__) && !defined(C10_MOBILE)
 #include <cpuinfo.h>
@@ -27,7 +29,7 @@ namespace {
   These const variables defined the fp32 precisions for different backend
   We have "generic", "cuda", "mkldnn" backend now and we can choose fp32
   prevision from "ieee", "tf32", "bf16" and "none". The "ieee" precision means
-  IEEE standard floating point format "tf32" and "bf16" means we are allowed to
+  IEEE standard floating point format, "tf32" and "bf16" means we are allowed to
   use "tf32" or "bf16" as internal computation data types for fp32 computations.
   And "none" means it is override-able by parent's node
 
@@ -40,7 +42,7 @@ namespace {
 */
 const std::map<std::string, std::vector<std::string>> _fp32_precisions = {
     {"generic", {{"ieee", "tf32", "bf16", "none"}}},
-    {"mkldnn", {{"ieee", "bf16", "none"}}},
+    {"mkldnn", {{"ieee", "tf32", "bf16", "none"}}},
     {"cuda", {{"ieee", "tf32", "none"}}}};
 
 // Check whether the backend and op are legal
@@ -76,7 +78,9 @@ void check_fp32_prec_backend_and_op(
 
   C10_ALWAYS_INLINE void warn_deprecated_fp32_precision_api(){
     TORCH_WARN_ONCE(
-      "This API is going to be deprecated, please see "
+      "Please use the new API settings to control TF32 behavior, such as torch.backends.cudnn.conv.fp32_precision = 'tf32' "
+      "or torch.backends.cuda.matmul.fp32_precision = 'ieee'. Old settings, e.g, torch.backends.cuda.matmul.allow_tf32 = True, "
+      "torch.backends.cudnn.allow_tf32 = True, allowTF32CuDNN() and allowTF32CuBLAS() will be deprecated after Pytorch 2.9. Please see "
       "https://pytorch.org/docs/main/notes/cuda.html#tensorfloat-32-tf32-on-ampere-and-later-devices"
     );
   }
@@ -176,7 +180,7 @@ void Context::setUserEnabledNNPACK(bool e) {
 }
 
 bool Context::allowTF32CuDNN(const std::string& op) const {
-  if (op.size() == 0){
+  if (op.empty()){
     bool allow_tf32_rnn = float32Precision("cuda", "rnn") == "tf32";
     bool allow_tf32_conv = float32Precision("cuda", "conv") == "tf32";
     TORCH_CHECK(
@@ -277,9 +281,6 @@ bool Context::userEnabledOverrideableSDP() const {
 
 static constexpr const auto cublas_config_var_name = "CUBLAS_WORKSPACE_CONFIG";
 static constexpr const std::array<const char*, 2> cublas_deterministic_configs = {":4096:8", ":16:8"};
-#ifdef USE_ROCM
-static constexpr const auto hipblaslt_allow_tf32 = "HIPBLASLT_ALLOW_TF32";
-#endif
 
 bool Context::checkCuBLASConfigDeterministic() {
   // If using CUDA 10.2 or greater, need to make sure CuBLAS workspace config
@@ -330,13 +331,15 @@ void Context::setBenchmarkLimitCuDNN(int b) {
   benchmark_limit_cudnn = b;
 }
 
+bool Context::immediateMiopen() const {
+  return immediate_miopen;
+}
+
+void Context::setImmediateMiopen(bool b) {
+  immediate_miopen = b;
+}
+
 bool Context::allowTF32CuBLAS() const {
-#ifdef USE_ROCM
-    const auto allow_tf32 = c10::utils::check_env(hipblaslt_allow_tf32);
-    if (allow_tf32 != true) {
-      return false;
-    }
-#endif
   bool legacy_allow_tf32 = float32_matmul_precision != at::Float32MatmulPrecision::HIGHEST;
   bool allow_tf32_new = float32Precision("cuda", "matmul") == "tf32";
   TORCH_CHECK(
@@ -350,14 +353,6 @@ bool Context::allowTF32CuBLAS() const {
 }
 
 void Context::setAllowTF32CuBLAS(bool b) {
-#ifdef USE_ROCM
-  const auto allow_tf32 = c10::utils::check_env(hipblaslt_allow_tf32);
-  if (allow_tf32 != true) {
-    C10_LOG_FIRST_N(INFO, 10) << "torch.backends.cuda.matmul.allow_tf32 is not supported on ROCm by default. "
-                              << "Please set environment variable HIPBLASLT_ALLOW_TF32=1 to enable it.";
-    return;
-  }
-#endif
   float32_matmul_precision = b ? at::Float32MatmulPrecision::HIGH : at::Float32MatmulPrecision::HIGHEST;
   setFloat32Precision("cuda", "matmul", b ? "tf32" : "ieee");
 }
@@ -368,6 +363,9 @@ Float32MatmulPrecision Context::float32MatmulPrecision() const {
   invalid = invalid ||
       (float32Precision("mkldnn", "matmul") == "bf16" &&
        float32_matmul_precision != at::Float32MatmulPrecision::MEDIUM);
+  invalid = invalid ||
+      (float32Precision("mkldnn", "matmul") == "tf32" &&
+       float32_matmul_precision != at::Float32MatmulPrecision::HIGH);
   TORCH_CHECK(
       !invalid,
       "PyTorch is checking the matmul precision without a specific backend name,",
@@ -401,7 +399,7 @@ void Context::setFloat32MatmulPrecision(const std::string &s) {
     } else if (s_ == "high") {
       float32_matmul_precision = at::Float32MatmulPrecision::HIGH;
       setFloat32Precision("cuda", "matmul", "tf32");
-      setFloat32Precision("mkldnn", "matmul", "ieee");
+      setFloat32Precision("mkldnn", "matmul", "tf32");
       return true;
     } else if (s_ == "medium") {
       float32_matmul_precision = at::Float32MatmulPrecision::MEDIUM;
@@ -428,7 +426,7 @@ void Context::setFloat32Precision(const std::string& backend, const std::string&
     std::string msg;
     auto iterp = _fp32_precisions.find(backend);
     TORCH_CHECK(iterp != _fp32_precisions.end());
-    for (auto p : iterp->second) {
+    for (const auto& p : iterp->second) {
       msg += p;
       msg += " ";
     }
@@ -465,6 +463,9 @@ at::BlasBackend Context::blasPreferredBackend() {
   // call site for blasPreferredBackend(), we set it to an actual value.
   if (blas_preferred_backend == at::BlasBackend::Default) {
     blas_preferred_backend = at::BlasBackend::Cublas;
+    // This logic sits in the getter because it needs to validate
+    // values set via env vars such as TORCH_BLAS_PREFER_CUBLASLT
+    // which initialize the backend without calling the setter
 #ifdef USE_ROCM
     // AMD Instinct targets prefer hipblaslt
     static const bool hipblaslt_preferred = []() {
@@ -494,10 +495,14 @@ at::BlasBackend Context::blasPreferredBackend() {
   // hipblaslt support for all archs is not as complete as hipblas
   if (blas_preferred_backend == at::BlasBackend::Cublaslt) {
     static const bool hipblaslt_unsupported = []() {
+      if(!hasCuBLASLt())
+      {
+          return true;
+      }
       static const std::vector<std::string> archs = {
           "gfx90a", "gfx942",
 #if ROCM_VERSION >= 60300
-          "gfx1100", "gfx1101", "gfx1200", "gfx1201",
+          "gfx1100", "gfx1101", "gfx1200", "gfx1201", "gfx908",
 #endif
 #if ROCM_VERSION >= 60500
           "gfx950"
@@ -519,6 +524,24 @@ at::BlasBackend Context::blasPreferredBackend() {
   return blas_preferred_backend;
 }
 
+bool Context::ckSupported() {
+#ifdef USE_ROCM
+  static const std::vector<std::string> supported_archs = {
+    "gfx90a", "gfx942", "gfx950"
+  };
+  for (auto index : c10::irange(detail::getCUDAHooks().deviceCount())) {
+    if(!detail::getCUDAHooks().isGPUArch(supported_archs, index)) {
+      TORCH_WARN_ONCE(
+        "Attempting to use CK on an unsupported architecture! Cannot set backend to CK");
+      return false;
+    }
+  }
+  return true;
+#else
+  return false;
+#endif
+}
+
 void Context::setBlasPreferredBackend(at::BlasBackend b) {
 #ifdef _MSC_VER
   TORCH_WARN_ONCE(
@@ -528,8 +551,14 @@ void Context::setBlasPreferredBackend(at::BlasBackend b) {
 #else
   TORCH_CHECK((b != at::BlasBackend::Cublaslt) || hasCuBLASLt(),
       "Cannot set preferred backend to cuBLASLt if PyTorch has not been compiled with cuBLASLt.");
-  TORCH_CHECK((b != at::BlasBackend::Ck) || hasROCM(),
-      "Cannot set preferred backend to Ck if PyTorch has not been compiled for ROCm.");
+#ifdef USE_ROCM
+  static const bool ckSupportedFlag = ckSupported();
+  static const bool hasCKGEMMFlag = hasCKGEMM();
+  TORCH_CHECK((b != at::BlasBackend::Ck) || (ckSupportedFlag && hasCKGEMMFlag),
+      "Cannot set preferred blas backend to CK since following conditions are not true: ",
+      "architecture supported for CK: ", ckSupportedFlag,
+      ", PyTorch built with CK GEMM support: ", hasCKGEMMFlag);
+#endif
   if (b != at::BlasBackend::Default && b != at::BlasBackend::Cublas) {
     TORCH_WARN_ONCE(
       "torch.backends.cuda.preferred_blas_library is an experimental feature. "
@@ -541,35 +570,40 @@ void Context::setBlasPreferredBackend(at::BlasBackend b) {
 #endif
 }
 
-at::ROCmFABackend Context::getROCmFAPreferredBackend() const {
+at::ROCmFABackend Context::getROCmFAPreferredBackend() {
+#ifdef USE_ROCM
+  // Set potential "Default" value so we don't have to interpret at call sites.
+  // We use aotriton backend as the default, for now.
+  if(rocm_fa_preferred_backend == at::ROCmFABackend::Default) {
+    rocm_fa_preferred_backend = at::ROCmFABackend::AOTriton;
+  } else if (rocm_fa_preferred_backend == at::ROCmFABackend::Ck) {
+    // This logic sits in the getter because it needs to validate
+    // values set via env vars such as TORCH_ROCM_FA_PREFER_CK
+    // which initialize the backend without calling the setter
+    // Perform validity checking
+    static const bool hasCKSDPAFlag = hasCKSDPA();
+    static const bool ckSupportedFlag = ckSupported();
+    if(!(hasCKSDPAFlag && ckSupportedFlag)){
+      TORCH_WARN_ONCE(
+        "Cannot set preferred SDPA backend to CK since following conditions are not true: ",
+        "architecture supported for CK: ", ckSupportedFlag,
+        ", PyTorch built with CK SDPA support: ", hasCKSDPAFlag);
+      rocm_fa_preferred_backend = at::ROCmFABackend::AOTriton;
+    }
+  }
+#endif
+
   return rocm_fa_preferred_backend;
 }
 
 void Context::setROCmFAPreferredBackend(at::ROCmFABackend b) {
-
-  // TODO: add plumbing for hasCK for validity checking
-  TORCH_CHECK((b != at::ROCmFABackend::Ck) || hasROCM(),
-      "Cannot set preferred flash attention backend to Ck if PyTorch has not been compiled for ROCm.");
 #ifdef USE_ROCM
-  if(b == at::ROCmFABackend::Ck) {
-    static const bool ck_unsupported = []() {
-      static const std::vector<std::string> archs = {
-          "gfx90a",  "gfx942"
-      };
-      for (auto index: c10::irange(detail::getCUDAHooks().deviceCount())) {
-        if (!detail::getCUDAHooks().isGPUArch(archs, index)) {
-          TORCH_WARN_ONCE(
-            "Attempting to use CK on an unsupported architecture! Cannot set backend to CK");
-          return true;
-        }
-      }
-      return false;
-    }();
-    if(!ck_unsupported) rocm_fa_preferred_backend = b;
-  }
-  else {
-     rocm_fa_preferred_backend = b;
-  }
+  static const bool hasCKSDPAFlag = hasCKSDPA();
+  static const bool ckSupportedFlag = ckSupported();
+  TORCH_CHECK((b != at::ROCmFABackend::Ck) || (hasCKSDPAFlag && ckSupportedFlag),
+      "Cannot set preferred SDPA backend to CK since following conditions are not true: ",
+      "architecture supported for CK: ", ckSupportedFlag,
+      ", PyTorch built with CK SDPA support: ", hasCKSDPAFlag);
 #endif
   rocm_fa_preferred_backend = b;
 }
@@ -641,6 +675,14 @@ bool Context::hasOpenMP() {
 
 bool Context::hasLAPACK() {
 #if AT_BUILD_WITH_LAPACK()
+  return true;
+#else
+  return false;
+#endif
+}
+
+bool Context::hasEigenSparse() {
+#if AT_USE_EIGEN_SPARSE()
   return true;
 #else
   return false;

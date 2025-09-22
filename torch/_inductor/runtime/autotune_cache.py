@@ -125,6 +125,7 @@ class AutotuneCache:
     ) -> Optional[AutotuneCache]:
         cache = AutotuneCache(configs_hash)
         key = AutotuneCache._prepare_key(filename)
+
         cache._setup_local_cache(inductor_meta, os.path.dirname(filename), key)
         cache._setup_remote_autotune_cache(inductor_meta, key)
         if cache.local_cache or cache.remote_cache:

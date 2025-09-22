@@ -47,15 +47,15 @@ class Adafactor(Optimizer):
             raise ValueError(f"Clipping threshold d should be >= 1 but is: {d}")
         if not 0.0 <= weight_decay:
             raise ValueError(f"weight_decay should be >= 0 but is: {weight_decay}")
-        defaults = dict(
-            lr=lr,
-            beta2_decay=beta2_decay,
-            eps=eps,
-            d=d,
-            weight_decay=weight_decay,
-            foreach=foreach,
-            maximize=maximize,
-        )
+        defaults = {
+            "lr": lr,
+            "beta2_decay": beta2_decay,
+            "eps": eps,
+            "d": d,
+            "weight_decay": weight_decay,
+            "foreach": foreach,
+            "maximize": maximize,
+        }
         super().__init__(params, defaults)
 
     def __setstate__(self, state):

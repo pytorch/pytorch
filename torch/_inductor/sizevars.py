@@ -8,7 +8,11 @@ from typing import Any, Callable, cast, Optional, Union
 import sympy
 from sympy import Expr
 
-from torch.fx.experimental.symbolic_shapes import has_free_unbacked_symbols, ShapeEnv
+from torch.fx.experimental.symbolic_shapes import (
+    free_symbols,
+    has_free_unbacked_symbols,
+    ShapeEnv,
+)
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 from torch.utils._sympy.symbol import symbol_is_type, SymT
@@ -55,12 +59,24 @@ def statically_known_true(
 # lifting and in some cases we should be directly passing through to ShapeEnv,
 # but there is some extra inductor logic that needs to be handled here
 class SizeVarAllocator:
+    """
+    A class that manages symbolic size variables and their relationships.
+
+    This class works with the ShapeEnv to handle symbolic shape expressions,
+    simplify them, and provide utilities for guarding, checking, and evaluating
+    symbolic expressions. It also manages precomputed replacements and stride
+    calculations for tensor operations.
+    """
+
     def __init__(self, shape_env=None) -> None:
         super().__init__()
+        # Note: this can lead to bugs. Reasoning APIs depends on existing information in
+        # in the shape_env. For example! var_to_ranges can't be empty!
         if shape_env is None:
             shape_env = ShapeEnv()
         self.shape_env = shape_env
         self.var_to_val = self.shape_env.var_to_val
+        self.var_to_hint_override = self.shape_env.var_to_hint_override
         self.replacements: dict[sympy.Symbol, Expr] = self.shape_env.replacements
         self.unbacked_replacements: Optional[dict[Expr, Expr]] = None
         # Maps of dynamic sizes that have to be precomputed on the host to the kernel args.
@@ -367,11 +383,16 @@ class SizeVarAllocator:
         """
         Return a bool indicating if it is sound to optimize for the numerator being a multiple of the denominator.
         """
-        # The reason we skip unbacked here is that we want to avoid the cost of trying to eval this symbolically.
+        # The reason we skip compute here is to avoid the cost of trying to eval this symbolically.
+        # see https://github.com/sympy/sympy/issues/28200
         if has_free_unbacked_symbols(numerator) or has_free_unbacked_symbols(
             denominator
         ):
             return False
+
+        if len(free_symbols(numerator)) > 20:
+            return False
+
         expr = sympy.Eq(numerator % denominator, 0)
         return self.statically_known_true(expr)  # type: ignore[arg-type]
 
@@ -458,6 +479,13 @@ class SizeVarAllocator:
             fallback_value=fallback_value,
         )
 
+    def is_size_one_or_false(self, size: Expr) -> bool:
+        """Return True if size equals 1.
+
+        Unbacked symbolic sizes return False without introducing a guard.
+        """
+        return self.guard_or_false(sympy.Eq(size, 1))
+
     def evaluate_min(self, left: Expr, right: Expr) -> Expr:
         """return the smaller of left and right, and guard on that choice"""
         if isinstance(left, Expr):
@@ -518,7 +546,15 @@ class SizeVarAllocator:
             return sympy_subs(expr, self.inv_precomputed_replacements)  # type: ignore[arg-type]
         return expr
 
-    def symbolic_hint(self, expr: Union[Expr, int]) -> Union[Expr, int]:
+    def symbolic_hint(
+        self,
+        expr: Union[Expr, int],
+        hint_override: Optional[int] = None,
+        # Only flip this flag if you don't plan on guarding/adding runtime
+        # asserts based on this value and promise to only use this value
+        # in a heuristic nature.
+        use_user_provided_hint_override: bool = False,
+    ) -> Union[Expr, int]:
         if isinstance(expr, int):
             return expr
         # Substitute all hints into expr, but leave unbacked symints alone
@@ -532,13 +568,29 @@ class SizeVarAllocator:
                 return int(expr)  # type: ignore[return-value]
             except TypeError:
                 return expr  # inf/nan/I
+
+        if hint_override:
+            return hint_override
+
         expr = self.remove_precomputed_replacements(expr)
+
+        if use_user_provided_hint_override:
+            expr = sympy_subs(expr, self.var_to_hint_override)
+
         return sympy_subs(expr, self.var_to_val)
 
     def size_hint(
-        self, expr: Union[Expr, int], *, fallback: Optional[int] = None
+        self,
+        expr: Union[Expr, int],
+        *,
+        fallback: Optional[int] = None,
+        hint_override: Optional[int] = None,
     ) -> int:
-        out = self.symbolic_hint(expr)
+        out = self.symbolic_hint(
+            expr,
+            hint_override=hint_override,
+            use_user_provided_hint_override=fallback is not None,
+        )
         if not isinstance(out, (int, sympy.Integer)) and fallback is not None:
             # Use the provided heuristic fallback hint
             unbacked_sym_vrs = {
@@ -559,6 +611,7 @@ class SizeVarAllocator:
             raise
 
     def size_hint_or_throw(self, expr: Union[Expr, int]) -> int:
+        # Like size_hint but there's no fallback for unbacked symints, so it throws.
         out = self.symbolic_hint(expr)
         try:
             return int(out)
@@ -571,8 +624,23 @@ class SizeVarAllocator:
         exprs: Iterable[Union[Expr, int]],
         *,
         fallback: Optional[int] = None,
+        hint_override: Optional[int] = None,
     ) -> tuple[int, ...]:
-        return tuple(self.size_hint(x, fallback=fallback) for x in exprs)
+        return tuple(
+            self.size_hint(
+                x,
+                fallback=fallback,
+                hint_override=hint_override,
+            )
+            for x in exprs
+        )
+
+    def size_hints_or_throw(
+        self,
+        exprs: Iterable[Union[Expr, int]],
+    ) -> tuple[int, ...]:
+        # Like size_hints but there's no fallback for unbacked symints, so it throws.
+        return tuple(self.size_hint_or_throw(x) for x in exprs)
 
     def _lru_cache(self, fn, maxsize=None):
         """

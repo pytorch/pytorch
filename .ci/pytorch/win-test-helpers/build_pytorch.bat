@@ -42,7 +42,7 @@ call choco upgrade -y cmake --no-progress --installargs 'ADD_CMAKE_TO_PATH=Syste
 if errorlevel 1 goto fail
 if not errorlevel 0 goto fail
 
-call pip install mkl-include==2021.4.0 mkl-devel==2021.4.0
+call pip install mkl==2024.2.0 mkl-static==2024.2.0 mkl-include==2024.2.0
 if errorlevel 1 goto fail
 if not errorlevel 0 goto fail
 
@@ -61,9 +61,10 @@ if "%USE_XPU%"=="1" (
   call "C:\Program Files (x86)\Intel\oneAPI\compiler\latest\env\vars.bat"
   call "C:\Program Files (x86)\Intel\oneAPI\ocloc\latest\env\vars.bat"
   if errorlevel 1 exit /b 1
-  :: Reduce build time. Only have MTL self-hosted runner now
-  SET TORCH_XPU_ARCH_LIST=xe-lpg
-  SET USE_KINETO=0
+  :: Reduce build time
+  SET TORCH_XPU_ARCH_LIST=bmg
+  :: Re-setup python env for build
+  call pip install -r requirements.txt
 )
 
 @echo on
@@ -136,7 +137,7 @@ sccache --show-stats
 python -c "import os, glob; os.system('python -mpip install --no-index --no-deps ' + glob.glob('dist/*.whl')[0])"
 (
   if "%BUILD_ENVIRONMENT%"=="" (
-    echo NOTE: To run `import torch`, please make sure to activate the conda environment by running `call %CONDA_PARENT_DIR%\Miniconda3\Scripts\activate.bat %CONDA_PARENT_DIR%\Miniconda3` in Command Prompt before running Git Bash.
+    echo NOTE: To run `import torch`, please make sure to activate the conda environment by running `call %CONDA_ROOT_DIR%\Scripts\activate.bat %CONDA_ROOT_DIR%\envs\py_tmp` in Command Prompt before running Git Bash.
   ) else (
     copy /Y "dist\*.whl" "%PYTORCH_FINAL_PACKAGE_DIR%"
 

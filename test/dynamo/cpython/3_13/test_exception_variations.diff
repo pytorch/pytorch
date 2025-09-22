@@ -1,13 +1,16 @@
 diff --git a/test/dynamo/cpython/3_13/test_exception_variations.py b/test/dynamo/cpython/3_13/test_exception_variations.py
-index a83a41d2975..be432089e3a 100644
+index a83a41d2975..c2d6eb3a41a 100644
 --- a/test/dynamo/cpython/3_13/test_exception_variations.py
 +++ b/test/dynamo/cpython/3_13/test_exception_variations.py
-@@ -1,7 +1,59 @@
+@@ -1,7 +1,62 @@
 +# ======= BEGIN Dynamo patch =======
 +# Owner(s): ["module: dynamo"]
  
 +# ruff: noqa
 +# flake8: noqa
++
++# Test copied from
++# https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.5/Lib/test/test_exception_variations.py
 +
 +import sys
 +import torch
@@ -53,17 +56,17 @@ index a83a41d2975..be432089e3a 100644
 +# Add the custom finder to sys.meta_path
 +sys.meta_path.insert(0, RedirectImportFinder())
 +
-+
-+# ======= END DYNAMO PATCH =======
  
 -class ExceptTestCases(unittest.TestCase):
++# ======= END DYNAMO PATCH =======
++
 +import unittest
 +
 +class ExceptTestCases(__TestCase):
      def test_try_except_else_finally(self):
          hit_except = False
          hit_else = False
-@@ -294,282 +346,5 @@ class ExceptTestCases(unittest.TestCase):
+@@ -294,282 +349,5 @@ class ExceptTestCases(unittest.TestCase):
          self.assertTrue(hit_except)
  
  

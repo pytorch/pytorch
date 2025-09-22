@@ -46,8 +46,8 @@ class ThreadPoolExecutor {
   void add(SessionState* session, WorkUnit* unit);
   void add(
       SessionState* session,
-      std::vector<WorkUnit*>::const_iterator&& begin,
-      const std::vector<WorkUnit*>::const_iterator&& end);
+      std::vector<WorkUnit*>::const_iterator begin,
+      const std::vector<WorkUnit*>::const_iterator& end);
 
   C10_ALWAYS_INLINE moodycamel::ProducerToken& ptok();
   C10_ALWAYS_INLINE moodycamel::ConsumerToken& ctok();

@@ -1,13 +1,16 @@
 diff --git a/test/dynamo/cpython/3_13/test_raise.py b/test/dynamo/cpython/3_13/test_raise.py
-index 6d26a61bee4..8a52b9bfc82 100644
+index 6d26a61bee4..042d1ae3d7c 100644
 --- a/test/dynamo/cpython/3_13/test_raise.py
 +++ b/test/dynamo/cpython/3_13/test_raise.py
-@@ -1,3 +1,55 @@
+@@ -1,3 +1,58 @@
 +# ======= BEGIN Dynamo patch =======
 +# Owner(s): ["module: dynamo"]
 +
 +# ruff: noqa
 +# flake8: noqa
++
++# Test copied from
++# https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.5/Lib/test/test_raise.py
 +
 +import sys
 +import torch
@@ -58,7 +61,7 @@ index 6d26a61bee4..8a52b9bfc82 100644
  # Copyright 2007 Google, Inc. All Rights Reserved.
  # Licensed to PSF under a Contributor Agreement.
  
-@@ -23,7 +75,7 @@ class Context:
+@@ -23,7 +78,7 @@ class Context:
          return True
  
  
@@ -67,7 +70,7 @@ index 6d26a61bee4..8a52b9bfc82 100644
      def test_invalid_reraise(self):
          try:
              raise
-@@ -148,7 +200,7 @@ class TestRaise(unittest.TestCase):
+@@ -148,7 +203,7 @@ class TestRaise(unittest.TestCase):
  
  
  
@@ -76,7 +79,7 @@ index 6d26a61bee4..8a52b9bfc82 100644
  
      def testCauseSyntax(self):
          try:
-@@ -221,7 +273,7 @@ class TestCause(unittest.TestCase):
+@@ -221,7 +276,7 @@ class TestCause(unittest.TestCase):
              self.fail("No exception raised")
  
  
@@ -85,7 +88,7 @@ index 6d26a61bee4..8a52b9bfc82 100644
  
      def test_sets_traceback(self):
          try:
-@@ -242,7 +294,7 @@ class TestTraceback(unittest.TestCase):
+@@ -242,7 +297,7 @@ class TestTraceback(unittest.TestCase):
              self.fail("No exception raised")
  
  
@@ -94,7 +97,7 @@ index 6d26a61bee4..8a52b9bfc82 100644
  
      def raiser(self):
          raise ValueError
-@@ -308,7 +360,7 @@ class TestTracebackType(unittest.TestCase):
+@@ -308,7 +363,7 @@ class TestTracebackType(unittest.TestCase):
              types.TracebackType(other_tb, frame, 1, "nuh-uh")
  
  
@@ -103,7 +106,7 @@ index 6d26a61bee4..8a52b9bfc82 100644
      def test_instance_context_instance_raise(self):
          context = IndexError()
          try:
-@@ -498,7 +550,7 @@ class TestContext(unittest.TestCase):
+@@ -498,7 +553,7 @@ class TestContext(unittest.TestCase):
              self.assertEqual(ZeroDivisionError, cm.unraisable.exc_type)
  
  
@@ -112,7 +115,7 @@ index 6d26a61bee4..8a52b9bfc82 100644
      def test_tuples(self):
          try:
              raise (IndexError, KeyError) # This should be a tuple!
-@@ -517,4 +569,4 @@ class TestRemovedFunctionality(unittest.TestCase):
+@@ -517,4 +572,4 @@ class TestRemovedFunctionality(unittest.TestCase):
  
  
  if __name__ == "__main__":

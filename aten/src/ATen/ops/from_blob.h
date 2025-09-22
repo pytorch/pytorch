@@ -5,7 +5,7 @@ namespace at {
 
 namespace detail {
 
-TORCH_API inline void noopDelete(void*) {}
+inline void noopDelete(void*) {}
 
 } // namespace detail
 

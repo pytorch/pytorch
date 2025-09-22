@@ -889,6 +889,11 @@ class FakeTensor(Tensor):
             aten._foreach_copy.default,
         )
 
+        # list of ops not using zero dim cpu tensor logic to align with the eager mode.
+        bypass_zero_dim_cpu_tensor_check_ops = ordered_set(
+            aten.nextafter.default,
+        )
+
         def check_cpu_device(device: torch.device) -> bool:
             return device.type == "cpu"
 
@@ -912,13 +917,17 @@ class FakeTensor(Tensor):
                     is_cpu_zero_dim = t_is_cpu_zero_dim
                 return
 
+            is_bypass_zero_dim_cpu_tensor_check_op = (
+                func in bypass_zero_dim_cpu_tensor_check_ops
+            )
+
             # mismatching devices !
             # if current tensor is cpu 0 dim, defer to existing device
-            if t_is_cpu_zero_dim:
+            if t_is_cpu_zero_dim and not is_bypass_zero_dim_cpu_tensor_check_op:
                 return
 
             # current device is from cpu 0 dim tensor, overwrite
-            if is_cpu_zero_dim:
+            if is_cpu_zero_dim and not is_bypass_zero_dim_cpu_tensor_check_op:
                 common_device = t.device
                 is_cpu_zero_dim = t_is_cpu_zero_dim
                 return
@@ -929,6 +938,21 @@ class FakeTensor(Tensor):
             # throwing an error
             if func in mixed_device_fns:
                 if any(map(check_cpu_device, (common_device, t.device))):
+                    return
+
+            # if prefer_device_type is set, prefer that device type over others
+            prefer_device_type = torch._functorch.config.fake_tensor_prefer_device_type
+            if prefer_device_type is not None:
+                common_has_preferred = prefer_device_type in common_device.type
+                t_has_preferred = prefer_device_type in t.device.type
+
+                if not common_has_preferred and t_has_preferred:
+                    # Switch to the preferred device type
+                    common_device = t.device
+                    is_cpu_zero_dim = t_is_cpu_zero_dim
+                    return
+                elif common_has_preferred and not t_has_preferred:
+                    # Keep the existing preferred device type
                     return
 
             # mismatching devices of non-zero dim tensors, throw
@@ -1363,6 +1387,12 @@ class FakeTensorMode(TorchDispatchMode):
             # See NOTE: [torch.tensor, lift_fresh, and device movement]
             prev_only_lift_cpu_tensors = torch._C._only_lift_cpu_tensors()
             torch._C._set_only_lift_cpu_tensors(True)
+
+            # In the case of CPU-only build or cuda device unavailable,
+            # we patch the cuda device guard to use NoOpDeviceGuardImpl.
+            # This enables us to trace over cuda kernels under FakeTensorMode.
+            torch._C._ensureCUDADeviceGuardSet()
+
         maybe_prev_fake_mode = torch._C._unset_dispatch_mode(self._mode_key)
         if self is not maybe_prev_fake_mode:
             self.enter_stack.append(
@@ -1373,6 +1403,7 @@ class FakeTensorMode(TorchDispatchMode):
             # no-op (still need to re-set the fake mode though since we unset it)
             torch._C._set_dispatch_mode(self)
             self.enter_stack.append((False, None, prev_only_lift_cpu_tensors))
+
         return self
 
     def __exit__(
@@ -1652,6 +1683,10 @@ class FakeTensorMode(TorchDispatchMode):
             FunctionalCallableWithEpilogue,
         )
         from torch._higher_order_ops.utils import FunctionalizeCtxWrapper
+
+        if isinstance(args, (list, tuple, dict)):
+            result.append(type(args))
+            result.append(f"length_{len(args)}")
 
         if isinstance(args, dict):
             self._prep_args_for_hash(result, args.keys(), state, id_hashed_objects)
@@ -2292,11 +2327,28 @@ class FakeTensorMode(TorchDispatchMode):
         converter = self.fake_tensor_converter
 
         is_lift_func = func in self.lift_fns
+
+        # If we are trying to avoid device init, then we need to avoid constant
+        # prop on constant tensors for ops that change devices.
+        avoiding_device_init = False
+        if self.avoid_device_init:
+            if (
+                func == torch.ops.aten._to_copy.default
+                and "device" in kwargs
+                and kwargs["device"].type != "cpu"  # type: ignore[attr-defined]
+            ):
+                avoiding_device_init = True
+            if func == torch.ops.prims.device_put.default:
+                avoiding_device_init = True
+
+        # skip const prop for aten._to_copy if
+        # 1. input tensor is on "meta" device
+        # 2. destination device is unavailable, captured by `avoiding_device_init`
         device_conversion_skip_const_prop = (
             func is torch.ops.aten._to_copy.default
             and isinstance(args[0], torch.Tensor)
             and args[0].device.type == "meta"
-        )
+        ) or avoiding_device_init
 
         # To constant propagate through these functions:
         # 1, If this is a lift due to a torch.tensor call,
@@ -2342,19 +2394,6 @@ class FakeTensorMode(TorchDispatchMode):
             if type(args[0]) is Tensor:
                 return converter.from_real_tensor(self, args[0])
 
-        # If we are trying to avoid device init, then we need to avoid constant
-        # prop on constant tensors for ops that change devices.
-        avoiding_device_init = False
-        if self.avoid_device_init:
-            if (
-                func == torch.ops.aten._to_copy.default
-                and "device" in kwargs
-                and kwargs["device"] != "cpu"
-            ):
-                avoiding_device_init = True
-            if func == torch.ops.prims.device_put.default:
-                avoiding_device_init = True
-
         # Recompute flat_arg_fake_tensors here again in case some of the inputs
         # were real tensors and fakified in validate_and_convert_non_fake_tensors
         (flat_args, flat_arg_fake_tensors) = self.validate_and_convert_non_fake_tensors(
@@ -2366,7 +2405,7 @@ class FakeTensorMode(TorchDispatchMode):
         # (aot autograd, torchdynamo) where each operation is run consecutively.
         # Because each operation is run in order, we can trace out and support
         # sequences like: x = torch.tensor(0.); y = x.add_(1)
-        # Whenver a constant is written to but with inputs that cannot be evaluated
+        # Whenever a constant is written to but with inputs that cannot be evaluated
         # statically, such as random_(), we invalidate all constants that alias the input
         # We will rely on functionalization for use of fake tensors constants as persistent
         # objects on an FX Graph.
@@ -2589,7 +2628,11 @@ class FakeTensorMode(TorchDispatchMode):
         # If there's a Python meta, prefer that over the decomposition
         from torch._decomp import meta_table as meta_table
 
-        if func not in meta_table and not self.cpp_meta_supports_symint(func):
+        if (
+            func not in meta_table
+            and not self.cpp_meta_supports_symint(func)
+            and not (has_symbolic_sizes and func in self._view_fake_tensor_impl_ops)
+        ):
             from torch._decomp import decomposition_table
 
             # Prefer Python decompositions over C++ ones
@@ -2895,6 +2938,10 @@ class FakeTensorMode(TorchDispatchMode):
         aten.view_as_complex.default,
         aten.set_.source_Storage_storage_offset,
         aten._sparse_coo_tensor_with_dims_and_tensors.default,
+    )
+
+    _view_fake_tensor_impl_ops = ordered_set(
+        aten.view.default, aten._unsafe_view.default
     )
 
     def cpp_meta_supports_symint(self, func: OpOverload) -> bool:

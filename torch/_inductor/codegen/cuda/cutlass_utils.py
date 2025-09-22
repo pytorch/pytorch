@@ -15,6 +15,7 @@ import sympy
 import torch
 from torch._inductor.runtime.runtime_utils import dynamo_timed
 from torch._inductor.utils import clear_on_fresh_cache
+from torch.utils._ordered_set import OrderedSet
 
 from ... import config
 from ...ir import Layout
@@ -27,6 +28,10 @@ from .cuda_env import get_cuda_arch, get_cuda_version
 log = logging.getLogger(__name__)
 
 CUTLASS_OPERATION_KIND: str = "gemm"
+ACCUMULATOR_DTYPES: OrderedSet[torch.dtype] = OrderedSet([torch.float, torch.int32])
+XW_DTYPES: OrderedSet[torch.dtype] = OrderedSet(
+    [torch.half, torch.bfloat16, torch.float8_e4m3fn, torch.int8]
+)
 
 
 @atexit.register
@@ -36,11 +41,14 @@ def move_cutlass_compiled_cache() -> None:
         return
 
     if config.is_fbcode():
-        import python_cutlass  # type: ignore[import-not-found]
+        import cutlass_cppgen as python_cutlass  # type: ignore[import-not-found]
     else:
-        import cutlass as python_cutlass  # type: ignore[import-not-found]  # noqa: F401
+        import cutlass_cppgen as python_cutlass  # type: ignore[import-not-found]  # noqa: F401
 
-    if not os.path.exists(python_cutlass.CACHE_FILE):
+    # Check if the CACHE_FILE attribute exists in python_cutlass and if the file exists
+    if not hasattr(python_cutlass, "CACHE_FILE") or not os.path.exists(
+        python_cutlass.CACHE_FILE
+    ):
         return
 
     try:
@@ -70,8 +78,8 @@ def try_import_cutlass() -> bool:
     """
     if config.is_fbcode():
         try:
+            import cutlass_cppgen  # type: ignore[import-not-found]  # noqa: F401
             import cutlass_library  # type: ignore[import-not-found]
-            import python_cutlass  # type: ignore[import-not-found]  # noqa: F401
         except ImportError as e:
             log.warning(
                 "Failed to import CUTLASS packages in fbcode: %s, ignoring the CUTLASS backend.",
@@ -110,7 +118,7 @@ def try_import_cutlass() -> bool:
     tmp_cutlass_full_path = os.path.abspath(os.path.join(cache_dir(), "torch_cutlass"))
 
     dst_link_library = path_join(tmp_cutlass_full_path, "cutlass_library")
-    dst_link_cutlass = path_join(tmp_cutlass_full_path, "cutlass")
+    dst_link_cutlass = path_join(tmp_cutlass_full_path, "cutlass_cppgen")
     dst_link_pycute = path_join(tmp_cutlass_full_path, "pycute")
 
     # mock modules to import cutlass
@@ -120,7 +128,7 @@ def try_import_cutlass() -> bool:
         if tmp_cutlass_full_path not in sys.path:
 
             def link_and_append(dst_link, src_path, parent_dir):
-                if os.path.exists(dst_link):
+                if os.path.lexists(dst_link):
                     assert os.path.islink(dst_link), (
                         f"{dst_link} is not a symlink. Try to remove {dst_link} manually and try again."
                     )
@@ -148,7 +156,7 @@ def try_import_cutlass() -> bool:
                 )
 
         try:
-            import cutlass  # noqa: F401, F811
+            import cutlass_cppgen  # noqa: F401, F811
             import cutlass_library.generator  # noqa: F401
             import cutlass_library.library  # noqa: F401
             import cutlass_library.manifest  # noqa: F401
@@ -348,6 +356,10 @@ def get_accumulator_dtype(
     Given a pair of input torch dtypes, returns the inferred accumulator torch dtype.
     """
 
+    assert OrderedSet(input_torch_dtypes) <= XW_DTYPES, (
+        f"{input_torch_dtypes=} is not supported"
+    )
+
     if len(input_torch_dtypes) != 2:
         return None
 
@@ -368,10 +380,16 @@ def get_accumulator_dtype(
             torch_dtype = dtype0
 
     if torch_dtype in (torch.float16, torch.bfloat16, torch.float, torch.float8_e4m3fn):
-        return torch.float
-    if torch_dtype == torch.int8:
-        return torch.int32
-    raise NotImplementedError(f"Unsupported data types: {input_torch_dtypes=}")
+        accumulator_dtype = torch.float
+    elif torch_dtype == torch.int8:
+        accumulator_dtype = torch.int32
+    else:
+        raise NotImplementedError(f"Unsupported data types: {input_torch_dtypes=}")
+
+    assert accumulator_dtype in ACCUMULATOR_DTYPES, (
+        f"{accumulator_dtype=} is not supported"
+    )
+    return accumulator_dtype
 
 
 @functools.lru_cache(32)
@@ -403,7 +421,7 @@ def get_max_alignment(inductor_layout: Layout) -> int:
     offset = inductor_layout.offset
 
     def is_static_int(number):
-        return isinstance(number, (int, sympy.Integer))
+        return isinstance(number, (int | sympy.Integer))
 
     def a_factor_of(x, alignment):
         if is_static_int(x) and is_static_int(alignment):

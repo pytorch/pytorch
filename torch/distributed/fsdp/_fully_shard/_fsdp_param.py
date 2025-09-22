@@ -140,8 +140,7 @@ def copy__functionalize(tensor, data):
         torch.ops.fsdp.copy_.default(tensor_inner, data_inner)
 
 
-if not torch._running_with_deploy():
-    torch.fx.node.has_side_effect(torch.ops.fsdp.copy_.default)
+torch.fx.node.has_side_effect(torch.ops.fsdp.copy_.default)
 
 
 class ShardedState(Enum):
@@ -292,21 +291,22 @@ class FSDPParam:
                 dp_global_mesh is None or tp_global_mesh is None
             ):
                 raise AssertionError(
-                    "FSDP requires the DP and TP mesh to have the same parent mesh but got: \n"
-                    f"DP's global mesh: {dp_global_mesh}\nTP's global mesh: {tp_global_mesh}"
+                    "FSDP requires the DP and model parallel TP/EP mesh to have the same parent mesh but got: \n"
+                    f"DP's global mesh: {dp_global_mesh}\nTP/EP's global mesh: {tp_global_mesh}"
                 )
             name_dims_error = "FSDP requires named DeviceMesh dims for ND parallelism"
             assert dp_mesh.mesh_dim_names is not None, name_dims_error
             assert tp_mesh.mesh_dim_names is not None, name_dims_error
             submesh_names = dp_mesh.mesh_dim_names + tp_mesh.mesh_dim_names
             self._spmd_mesh = dp_global_mesh[submesh_names]
-            if len(self._tp_spec.placements) != 1:
+            if len(self._tp_spec.placements) > 2:
                 raise NotImplementedError(
-                    f"FSDP only supports 1D TP, not {self._tp_spec.placements}"
+                    f"FSDP only supports 1D TP/EP or 2D EP+TP, not {self._tp_spec.placements}"
                 )
             split_factor = self._tp_spec.num_shards_map[shard_dim]
-            assert 2 <= self._spmd_mesh.ndim <= 3, (
-                f"_spmd_mesh.ndim can only be 2 or 3 but got {self._spmd_mesh.ndim}."
+            assert 2 <= self._spmd_mesh.ndim <= 4, (
+                "_spmd_mesh.ndim can only be 2 (FSDP+TP/EP), 3 (FSDP+EP+TP, HSDP+TP/EP), "
+                f"or 4 (HSDP+EP+TP) but got {self._spmd_mesh.ndim}."
             )
             self._spmd_placements: tuple[Placement, ...]
             dp_shard_tp_placement = (
@@ -315,11 +315,11 @@ class FSDPParam:
                     if split_factor > 1
                     else fsdp_placement
                 ),
-                self._tp_spec.placements[0],
+                *self._tp_spec.placements,
             )
-            if self._spmd_mesh.ndim == 2:
+            if dp_mesh.ndim == 1:  # FSDP
                 self._spmd_placements = dp_shard_tp_placement
-            else:
+            else:  # HSDP
                 assert self.mesh_info.replicate_mesh_dim == 0
                 self._spmd_placements = (Replicate(),) + dp_shard_tp_placement
             self._sharding_spec = DTensorSpec(
@@ -694,6 +694,7 @@ class FSDPParam:
                 ), (
                     f"Invalid fsdp_pre_all_gather: {pre_all_gather_signature}\n"
                     "Expects fsdp_pre_all_gather(self, mesh: DeviceMesh, "
+                    "outer_size: torch.Size, outer_stride: tuple[int, ...], "
                     "module: nn.Module, mp_policy: MixedPrecisionPolicy)"
                 )
                 if num_fn_params == 1:
@@ -832,10 +833,24 @@ class FSDPParam:
         if local_tensor.is_meta:
             return
         updated_local_tensor = False
+        # local_tensor can be padded twice
+        # 1st time in fully_shard(model)
+        # 2nd time in model(input) lazy_init
+        # 2nd time should be no-op if parameters remain unchanged
+        # 2nd time shouldn't be no-op if people call model.load_state_dict(...) before lazy_init
+        # this makes it possible for trainer to call `sd = model.state_dict()` before the training loop
+        # and use `sd` without calling .state_dict() per iteration
+        same_local_tensor = False
+        # TODO: need to support tensor subclass
+        if type(self._sharded_param_data) is torch.Tensor:
+            same_local_tensor = (
+                self._sharded_param_data.untyped_storage().data_ptr()
+                == local_tensor.untyped_storage().data_ptr()
+            )
         padded_sharded_size = self.padded_sharded_param_size
         shard_dim = self.fsdp_placement.dim
         length = local_tensor.size(shard_dim) if local_tensor.numel() > 0 else 0
-        if local_tensor.size() != padded_sharded_size:
+        if local_tensor.size() != padded_sharded_size and not same_local_tensor:
             assert shard_dim == 0, (
                 f"Shard({shard_dim}) requires even sharding: {local_tensor.size()=}"
             )
@@ -848,7 +863,8 @@ class FSDPParam:
         if self.pin_memory and not local_tensor.is_pinned():
             local_tensor = local_tensor.cpu().pin_memory()
             updated_local_tensor = True
-        self._sharded_param_data = local_tensor.view(-1)
+        if not same_local_tensor:
+            self._sharded_param_data = local_tensor.view(-1)
         assert isinstance(self.sharded_param, DTensor)  # mypy
         if updated_local_tensor:
             # Only change the local tensor object if needed

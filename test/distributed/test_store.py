@@ -54,6 +54,8 @@ DEFAULT_HOSTNAME = "localhost"
 
 torch.backends.cuda.matmul.allow_tf32 = False
 
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+
 
 def gpus_for_rank(world_size):
     """Multigpu tests are designed to simulate the multi nodes with multi
@@ -61,8 +63,8 @@ def gpus_for_rank(world_size):
     On a single node, all visible GPUs are evenly
     divided to subsets, each process only uses a subset.
     """
-    visible_devices = list(range(torch.cuda.device_count()))
-    gpus_per_process = torch.cuda.device_count() // world_size
+    visible_devices = list(range(torch.accelerator.device_count()))
+    gpus_per_process = torch.accelerator.device_count() // world_size
     gpus_for_rank = []
     for rank in range(world_size):
         gpus_for_rank.append(
@@ -837,9 +839,9 @@ class RendezvousTCPTest(TestCase):
         # not respected, it will take much longer to timeout.
         start = time.time()
         with self.assertRaisesRegex(
-            DistStoreError, "wait timeout after 100ms, keys: /nonexistant key"
+            DistStoreError, "wait timeout after 100ms, keys: /nonexistent key"
         ):
-            store0.get("nonexistant key")
+            store0.get("nonexistent key")
 
         end = time.time()
         time_diff = end - start
@@ -1066,7 +1068,7 @@ class TimeoutTest(TestCase):
             wait_for_workers=False,
         )
 
-        ths = []
+        threads = []
         for i in range(2):
             t = threading.Thread(
                 target=run,
@@ -1076,16 +1078,16 @@ class TimeoutTest(TestCase):
                 ),
             )
             t.start()
-            ths.append(t)
+            threads.append(t)
 
         def handler(a, b):
             pass
 
         signal.signal(signal.SIGUSR1, handler)
         time.sleep(1)
-        signal.pthread_kill(ths[1].ident, signal.SIGUSR1)
+        signal.pthread_kill(threads[1].ident, signal.SIGUSR1)
 
-        for t in ths:
+        for t in threads:
             t.join()
         self.assertTrue(rank_res[0], "rank0")
         self.assertTrue(rank_res[1], "rank1")
@@ -1174,8 +1176,8 @@ class TestClientProtocol(TestCase):
 
 
 if __name__ == "__main__":
-    assert not torch.cuda._initialized, (
-        "test_distributed must not have initialized CUDA context on main process"
-    )
-
+    if device_type != "cpu":
+        assert not torch.get_device_module()._initialized, (
+            "test_distributed must not have initialized {device_type} context on main process"
+        )
     run_tests()

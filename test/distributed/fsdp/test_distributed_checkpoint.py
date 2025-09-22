@@ -31,10 +31,10 @@ if TEST_WITH_DEV_DBG_ASAN:
     sys.exit(0)
 
 
-_DISTRIBUTED_STATE_DICT_IMPLS = {
+_DISTRIBUTED_STATE_DICT_IMPLS = (
     StateDictType.LOCAL_STATE_DICT,
     StateDictType.SHARDED_STATE_DICT,
-}
+)
 
 
 class TestDistributedCheckpoint(FSDPTest):

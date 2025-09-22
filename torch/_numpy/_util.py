@@ -204,7 +204,7 @@ def _coerce_to_tensor(obj, dtype=None, copy=False, ndmin=0):
 
     Notes
     -----
-    This is almost a "tensor_like" coersion function. Does not handle wrapper
+    This is almost a "tensor_like" coercive function. Does not handle wrapper
     ndarrays (those should be handled in the ndarray-aware layer prior to
     invoking this function).
     """

@@ -30,7 +30,6 @@ from .graph import (
 __all__ = [
     "reduce_graph_module",
     "reduce_package_graph_module",
-    "reduce_deploy_graph_module",
     "GraphModule",
 ]
 
@@ -144,18 +143,6 @@ def reduce_package_graph_module(
     importer: PackageImporter, body: dict[Any, Any], generated_module_name: str
 ) -> torch.nn.Module:
     forward = importer.import_module(generated_module_name).forward
-    return _deserialize_graph_module(forward, body)
-
-
-@compatibility(is_backward_compatible=True)
-def reduce_deploy_graph_module(
-    importer: PackageImporter, body: dict[Any, Any], import_block: str
-) -> torch.nn.Module:
-    ns = {}
-    ns["__builtins__"] = importer.patched_builtins
-    fn_src = body.get("_code")
-    assert fn_src is not None
-    forward = _forward_from_src(import_block + fn_src, ns)
     return _deserialize_graph_module(forward, body)
 
 
@@ -322,6 +309,7 @@ def _print_readable(
     include_stride=False,
     include_device=False,
     colored=False,
+    expanded_def=False,
 ):
     graph = module.graph
     assert graph is not None and isinstance(graph, torch.fx.Graph), (
@@ -334,6 +322,7 @@ def _print_readable(
         include_stride=include_stride,
         include_device=include_device,
         colored=colored,
+        expanded_def=expanded_def,
     )
     module_code = verbose_python_code.src
     module_code = module_code.lstrip("\n")
@@ -557,6 +546,7 @@ class GraphModule(torch.nn.Module):
         self._erase_node_hooks: list[Callable] = []
         # Used to remove hooks from deepcopied graph modules within a context manager.
         self._deepcopy_hooks: list[Callable] = []
+        self.shape_env = None  # optional not always set even when dynamic shapes exist.
 
     # TorchScript breaks trying to compile the graph setter because of the
     # continued string literal. Issue here: https://github.com/pytorch/pytorch/issues/44842
@@ -853,14 +843,6 @@ class {module_name}(torch.nn.Module):
 
     # Passing Tracer as argument allows subclasses extending fx.GraphModule
     # define their own Tracer (extending fx.Tracer).
-    def __reduce_deploy__(self, importer: Importer):
-        dict_without_graph = self.__dict__.copy()
-        dict_without_graph["_graphmodule_cls_name"] = self.__class__.__name__
-        del dict_without_graph["_graph"]
-
-        python_code = self.recompile()
-        import_block = _format_import_block(python_code.globals, importer)
-        return (reduce_deploy_graph_module, (dict_without_graph, import_block))
 
     def __reduce_package__(self, exporter: PackageExporter):
         dict_without_graph = self.__dict__.copy()
@@ -956,6 +938,7 @@ class {module_name}(torch.nn.Module):
         # If `fast_sympy_print` is True then we use a sympy printer which is faster
         # but may result in less-readable output.
         fast_sympy_print: bool = False,
+        expanded_def: bool = False,
     ):
         """
         Return the Python code generated for current GraphModule and its children GraphModules
@@ -977,6 +960,7 @@ class {module_name}(torch.nn.Module):
                 include_stride,
                 include_device,
                 colored,
+                expanded_def,
             )
             return r
 

@@ -8,7 +8,28 @@ namespace at {
 namespace {
 template <typename scalar_t>
 inline void fill_inplace(Tensor& self, const Scalar& value_scalar) {
-  auto value = value_scalar.to<scalar_t>();
+  scalar_t value{};
+
+  if constexpr (std::is_same_v<scalar_t, at::Half> ||
+                std::is_same_v<scalar_t, at::BFloat16> ||
+                std::is_same_v<scalar_t, at::Float8_e5m2> ||
+                std::is_same_v<scalar_t, at::Float8_e5m2fnuz> ||
+                std::is_same_v<scalar_t, at::Float8_e4m3fn> ||
+                std::is_same_v<scalar_t, at::Float8_e4m3fnuz> ||
+                std::is_same_v<scalar_t, at::Float8_e8m0fnu>) {
+    // relaxed float cast: allow inf similar to the torch.tensor constructor
+    //
+    // without this, we had the following divergence:
+    //   torch.tensor(1123581321.0, dtype=torch.float16)
+    //     => tensor(inf, dtype=torch.float16)
+    //   torch.ops.aten.scalar_tensor.default(1123581321, dtype=torch.float16)
+    //     => RuntimeError: value cannot be converted to type at::Half without overflow
+
+    value = static_cast<scalar_t>(value_scalar.to<double>());
+  } else {
+    value = value_scalar.to<scalar_t>();
+  }
+
   scalar_t* dptr = static_cast<scalar_t*>(self.data_ptr());
   *dptr = value;
 }

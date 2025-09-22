@@ -56,9 +56,9 @@ class ReturnValueHandler:
     r"""
     When ltc_sync_multi is called on multi tensors, the compiled graph
     will contain output only for unique tensors - if a tensor appears multiple
-    times in the input to _ltc_sync_multi, only the first occurance matters.
+    times in the input to _ltc_sync_multi, only the first occurrence matters.
 
-    However from python level, we still expect multi tensors returned with duplciation
+    However from python level, we still expect multi tensors returned with duplication
     even if the TS graph dedup the output. e.g. for method:
 
       def forward(self, a):
@@ -123,7 +123,7 @@ def force_lazy_device(model: fx.GraphModule):
         # To force those tensors on the lazy device, we can not simply override
         # the device argument since there is no explicit device argument.
         # What we are doing here is, for the list of covered tensor factory methods
-        # we add a lazy device argument explicity.
+        # we add a lazy device argument explicitly.
         #
         # TODO: This solution is no ideal since we may miss some factory methods. In future
         # when we support lazy mode, this method can be replaced by that.
@@ -170,7 +170,7 @@ def extract_compiled_graph(model: fx.GraphModule, example_inputs) -> Callable:
 
     if len(fallback_ops) > 0:
         raise RuntimeError(
-            f"Fail to extact the compiled graph because of fallback: {','.join(fallback_ops)}"
+            f"Fail to extract the compiled graph because of fallback: {','.join(fallback_ops)}"
         )
 
     if not isinstance(lazy_out, (tuple, list)):

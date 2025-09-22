@@ -11,7 +11,7 @@ export USE_MKL=1
 CMAKE_ONLY=1 python setup.py build
 ccmake build  # or cmake-gui build
 
-python setup.py install
+python -m pip install --no-build-isolation -v .
 
 cd benchmarks
 echo "!! SPARSE SPMM TIME BENCHMARK!! " >> $OUTFILE
@@ -28,7 +28,7 @@ echo "----- USE_MKL=0 ------" >> $OUTFILE
 rm -rf build
 
 export USE_MKL=0
-python setup.py install
+python -m pip install --no-build-isolation -v .
 
 cd benchmarks
 for dim0 in 1000 5000 10000; do

@@ -300,7 +300,7 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
 namespace functionalization {
 namespace impl {
 
-TORCH_API inline FunctionalTensorWrapper* unsafeGetFunctionalWrapper(
+inline FunctionalTensorWrapper* unsafeGetFunctionalWrapper(
     const Tensor& tensor) {
   auto functional_impl =
       static_cast<FunctionalTensorWrapper*>(tensor.unsafeGetTensorImpl());

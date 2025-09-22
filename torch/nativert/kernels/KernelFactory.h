@@ -24,17 +24,14 @@ class KernelFactoryHandler {
  public:
   using OpKernelPtr = std::unique_ptr<OpKernel>;
   using DelegateExecutorPtr = std::unique_ptr<DelegateExecutor>;
-  using Matcher = c10::function_ref<bool(
-      const Node& node,
-      const torch::nativert::ExecutorConfig&,
-      c10::Device)>;
+  using Matcher = c10::function_ref<
+      bool(const Node& node, const torch::nativert::ExecutorConfig&)>;
   using Callback =
       c10::function_ref<std::pair<OpKernelPtr, DelegateExecutorPtr>(
           const Node&,
           std::shared_ptr<Weights> weights,
           const torch::nativert::ExecutorConfig& executorConfig,
-          caffe2::serialize::PyTorchStreamReader* pytorchStreamReader,
-          c10::Device targetDevice)>;
+          caffe2::serialize::PyTorchStreamReader* pytorchStreamReader)>;
 
   KernelFactoryHandler(Matcher matcher, Callback callback)
       : matcher_(matcher), callback_(callback) {}
@@ -46,21 +43,17 @@ class KernelFactoryHandler {
   KernelFactoryHandler& operator=(KernelFactoryHandler&&) = default;
   ~KernelFactoryHandler() = default;
 
-  bool match(
-      const Node& node,
-      const torch::nativert::ExecutorConfig& config,
-      c10::Device device) const {
-    return matcher_(node, config, device);
+  bool match(const Node& node, const torch::nativert::ExecutorConfig& config)
+      const {
+    return matcher_(node, config);
   }
 
   std::pair<OpKernelPtr, DelegateExecutorPtr> operator()(
       const Node& node,
       std::shared_ptr<Weights> weights,
       const torch::nativert::ExecutorConfig& executorConfig,
-      caffe2::serialize::PyTorchStreamReader* pytorchStreamReader,
-      c10::Device targetDevice) const {
-    return callback_(
-        node, weights, executorConfig, pytorchStreamReader, targetDevice);
+      caffe2::serialize::PyTorchStreamReader* pytorchStreamReader) const {
+    return callback_(node, weights, executorConfig, pytorchStreamReader);
   }
 
  private:
@@ -70,20 +63,20 @@ class KernelFactoryHandler {
 
 class KernelFactory {
  public:
-  explicit KernelFactory() {}
+  KernelFactory() = default;
 
   ExecutionKernels initializeNodeKernels(
       const Graph& graph,
-      std::shared_ptr<Weights> weights,
+      const std::shared_ptr<Weights>& weights,
       const torch::nativert::ExecutorConfig& executorConfig,
-      const Placement& placement,
-      std::shared_ptr<caffe2::serialize::PyTorchStreamReader>
-          pytorchStreamReader = nullptr,
-      const MakeProxyExecutorFn& makeProxyExecutorFunc = nullptr);
+      const std::shared_ptr<caffe2::serialize::PyTorchStreamReader>&
+          pytorchStreamReader = nullptr);
 
   static void registerHandler(
       const std::string& name,
       KernelFactoryHandler handler);
+
+  static bool isHandlerRegistered(const std::string& handler);
 };
 
 } // namespace torch::nativert

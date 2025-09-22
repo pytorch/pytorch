@@ -11,6 +11,7 @@ import math
 import operator
 import random
 import sys
+import types
 import typing
 import unittest
 from dataclasses import dataclass, field
@@ -30,7 +31,7 @@ from torch._dynamo.testing import (
     EagerAndRecordGraphs,
     normalize_gm,
 )
-from torch._dynamo.utils import ifdynstaticdefault, same
+from torch._dynamo.utils import ifdynstaticdefault, range_iterator, same
 from torch._dynamo.variables import ConstantVariable, SkipFunctionVariable
 from torch._dynamo.variables.lists import RangeVariable
 from torch.nn import functional as F
@@ -39,10 +40,15 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
 )
+from torch.testing._internal.inductor_utils import HAS_GPU
 
 # Defines all the kernels for tests
 from torch.testing._internal.triton_utils import *  # noqa: F403
 
+
+device_type = (
+    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
+)
 
 T = TypeVar("T")
 
@@ -266,6 +272,54 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         for x, i in itertools.product([a, b], [1, 2]):
             v = v + x * i
         return v
+
+    def test_itertools_product_args(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(*args, **kwargs):
+            return torch.tensor(list(itertools.product(*args, **kwargs)))
+
+        self.assertRaises(Unsupported, fn, [1, 2, 3], fake_arg=1)
+
+    @make_test
+    def test_itertools_product_various_iterators(a, b):
+        itertools.product(
+            [a, b],
+            zip([1, 2], [3, 4]),
+            map(lambda x: x, [1, 2]),
+            filter(lambda x: True, [1, 2]),
+        )
+        return a
+
+    def test_itertools_permutations_basic(self):
+        def fn():
+            return torch.tensor(list(itertools.permutations([1, 2, 3], 2)))
+
+        actual = torch.compile(fn, backend="eager", fullgraph=True)()
+        expected = fn()
+        self.assertEqual(actual, expected)
+
+    def test_itertools_permutations_args(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(*args, **kwargs):
+            return torch.tensor(list(itertools.permutations(*args, **kwargs)))
+
+        self.assertRaises(Unsupported, fn)
+        self.assertRaises(Unsupported, fn, [1, 2, 3], 1, 2)
+        self.assertRaises(Unsupported, fn, [1, 2, 3], fake_arg=1)
+
+    @make_test
+    def test_itertools_permutations_various_iterators(a, b):
+        itertools.permutations([a, b])
+        itertools.permutations(zip([1, 2], [3, 4]))
+        itertools.permutations(map(lambda x: x, [1, 2]))
+        itertools.permutations(filter(lambda x: True, [1, 2]))
+        return a
+
+    @make_test
+    def test_itertools_filterfalse_basic(a, b):
+        for x in itertools.filterfalse(lambda x: x > 0, [-0.5, 0, 0.5]):
+            a += x
+        return a
 
     @make_test
     def test_itertools_chain(a, b):
@@ -518,6 +572,11 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     def test_tuple2(a, b):
         args = [a, b]
         return sub(*args)
+
+    @make_test
+    def test_tuple_map(a, b):
+        t = tuple(map(torch.sin, [a, b]))
+        return t[0] + t[1]
 
     def test_size_tuple_add(self):
         def fn():
@@ -1096,10 +1155,10 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         m = a.to(torch.float16)
         return b.type(m.type())
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @unittest.skipIf(not HAS_GPU, "requires gpu")
     @make_test
     def test_tensor_type2(a, b):
-        m = a.to("cuda")
+        m = a.to(device_type)
         return m + b.type(m.type())
 
     @make_test
@@ -1240,7 +1299,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
 
     @make_test
     def test_inline_softmax(x, y):
-        # This is common in sme huggingface models
+        # This is common in some huggingface models
         return torch.nn.Softmax(dim=-1)(x + y * 2)
 
     @make_test
@@ -1702,7 +1761,6 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             return a + b
         return a - b
 
-    @unittest.expectedFailure
     @make_test
     def test_set_in_frozenset(x):
         var = set("abc")
@@ -1973,6 +2031,21 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         tmp = mytuple(a, xy=b)
         return mytuple(tmp.x, tmp[1], tmp.xy + b)
 
+    @make_test
+    def test_namedtuple_replace(a, b):
+        mytuple = collections.namedtuple("mytuple", ["x", "y"])
+        t = mytuple(a, b)
+        t._replace(x=b)
+        return t.x + t.y
+
+    @make_test
+    def test_namedtuple_fields(a, b):
+        mytuple = collections.namedtuple("mytuple", ["x", "y"])
+        if mytuple._fields == ("x", "y"):
+            return a + b
+        else:
+            return a - b
+
     class MyNamedTuple(NamedTuple):
         first: torch.Tensor
         second: torch.Tensor
@@ -2013,6 +2086,12 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     def test_namedtuple_user_methods(a, b):
         mytuple = FunctionTests.MyNamedTuple(a, b)
         return mytuple.add(), mytuple.static_method(), mytuple.class_method()
+
+    @make_test
+    def test_namedtuple_replace(a, b):
+        mytuple = FunctionTests.MyNamedTuple(a, b)
+        replaced = mytuple._replace(first=b)
+        return mytuple.first + mytuple.second + replaced.first + replaced.second
 
     @make_test
     def test_generic_namedtuple_user_methods(a, b):
@@ -3423,6 +3502,51 @@ class GraphModule(torch.nn.Module):
             args[2] = 1
         return args
 
+    def test_range_iterator_graph_break(self):
+        @torch.compile(backend="eager")
+        def fn(x):
+            it = range(1, 7, 2).__iter__()
+            y = x + next(it)
+            torch._dynamo.graph_break()
+            return y + next(it) + next(it)
+
+        x = torch.tensor([1.0])
+        y = fn(x)
+        self.assertEqual(y, x + 1 + 3 + 5)
+
+    def test_range_iterator_graph_break_2(self):
+        @torch.compiler.disable
+        def g(y, it):
+            return y + next(it) + next(it)
+
+        @torch.compile(backend="eager")
+        def fn(x):
+            it = range(1, 10, 2).__iter__()
+            y = x + next(it)
+            z = g(y, it)
+            k = next(it)
+            assert k == 7
+            return z + k
+
+        x = torch.tensor([1.0])
+        z = fn(x)
+        self.assertEqual(z, x + 1 + 3 + 5 + 7)
+
+    @make_test
+    def test_range_iterator(a, b):
+        it = range(5).__iter__()
+        if isinstance(it, range_iterator):
+            return a + b
+        return a - b
+
+    @make_test
+    def test_range_iterator_2(a, b):
+        # should pass once we stop having three different paths on call_iter
+        it = iter(range(5))
+        if isinstance(it, range_iterator):
+            return a + b
+        return a - b
+
     def test_range_length(self):
         def test(*args, expected=None):
             r = range(*args)
@@ -3923,6 +4047,85 @@ class GraphModule(torch.nn.Module):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(fn(x), opt_fn(x))
 
+    def test_torch_get_device_module(self):
+        def f1():
+            mod1 = torch.get_device_module()
+            mod2 = torch.get_device_module("cpu")
+            mod3 = torch.get_device_module(torch.device(device_type))
+            return mod1, mod2, mod3
+
+        self.assertEqual(f1(), torch.compile(f1, backend="eager", fullgraph=True)())
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f2():
+            torch.get_device_module(foo="cpu")
+
+        with self.assertRaises(Unsupported):
+            f2()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f3():
+            torch.get_device_module("cpu", device="cpu")
+
+        with self.assertRaises(Unsupported):
+            f3()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f4():
+            torch.get_device_module("asdf")
+
+        with self.assertRaises(Unsupported):
+            f4()
+
+        # test for changing torch.get_device_module() (super rare case due to lru_cache)
+        @torch.compile(backend="eager", fullgraph=True)
+        def f5():
+            return torch.get_device_module()
+
+        f5()
+        new_device = (
+            "cpu" if torch._C._get_accelerator() == torch.device("cuda") else "cuda"
+        )
+
+        old_get_device_module = torch.get_device_module
+
+        def new_get_device_module(device=None):
+            if device:
+                return old_get_device_module(device)
+            return getattr(torch, new_device)
+
+        # NOTE: torch.get_device_module.__wrapped__ is guarded on, but not
+        # torch.get_device_module
+        with patch("torch.get_device_module", new_get_device_module):
+            print(torch.get_device_module())
+            self.assertEqual(f5(), getattr(torch, new_device))
+
+        # synchronize causes a graph break, so no fullgraph=True
+        @torch.compile(backend="eager")
+        def f6():
+            mod = torch.get_device_module()
+            mod.synchronize()
+            return mod
+
+        f6()
+
+    def test_torch_source(self):
+        global torch
+
+        g = torch.get_device_module
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f():
+            return g()
+
+        try:
+            old_torch = torch
+            torch = 1
+            self.assertEqual(torch, 1)
+            self.assertIsInstance(f(), types.ModuleType)
+        finally:
+            torch = old_torch
+
 
 def udf_mul(x, y):
     return x * y
@@ -4016,6 +4219,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 3)
         self.assertEqual(cnts.op_count, 6)
 
+    @torch._dynamo.config.patch(assume_dunder_attributes_remain_unchanged=False)
     def test_meth_default_tensor_args(self):
         """
         Tests that we indeed reference (and mutate) "the one" default tensor arg
@@ -4529,10 +4733,12 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
             opt_fn(x, ys, zs[:1])
 
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
-    def test_cuda_current_device(self):
+    def test_gpu_current_device(self):
         def fn(x):
             y = torch.empty(
-                (2, 3), dtype=torch.float32, device=torch.cuda.current_device()
+                (2, 3),
+                dtype=torch.float32,
+                device=torch.accelerator.current_device_index(),
             )
             y.copy_(x)
             return torch.sin(y + y.device.index)
@@ -4540,11 +4746,11 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         counter = torch._dynamo.testing.CompileCounter()
         opt_fn = torch.compile(backend=counter, fullgraph=True)(fn)
 
-        with torch.cuda.device(0):
+        with torch.accelerator.device_index(0):
             x = torch.randn(2, 3)
             self.assertEqual(opt_fn(x), fn(x))
             self.assertEqual(counter.frame_count, 1)
-            with torch.cuda.device(1):
+            with torch.accelerator.device_index(1):
                 self.assertEqual(opt_fn(x), fn(x))
                 self.assertEqual(counter.frame_count, 2)
 
@@ -4951,6 +5157,29 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         a = SkipFunctionVariable(value=w)
         with self.assertRaises(Unsupported):
             a.call_function(None, [], {})
+
+    def test_inspect_method_source(self):
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def check(self, x):
+                return x * 2
+
+            def forward(self, x):
+                return x * 2
+
+        mod = Mod()
+
+        def fn(x):
+            inspect.signature(mod.check).parameters.items()
+            return mod(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
 
 
 instantiate_parametrized_tests(FunctionTests)

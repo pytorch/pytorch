@@ -13,11 +13,7 @@ T = TypeVar("T")
 S = TypeVar("S")
 
 
-class _PyFutureMeta(type(torch._C.Future), type(Generic)):  # type: ignore[misc, no-redef]
-    pass
-
-
-class Future(torch._C.Future, Generic[T], metaclass=_PyFutureMeta):
+class Future(torch._C.Future, Generic[T]):
     r"""
     Wrapper around a ``torch._C.Future`` which encapsulates an asynchronous
     execution of a callable, e.g. :meth:`~torch.distributed.rpc.rpc_async`. It

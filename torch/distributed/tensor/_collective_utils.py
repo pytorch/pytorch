@@ -25,26 +25,17 @@ from torch.distributed.distributed_c10d import (
 logger = logging.getLogger(__name__)
 
 
-if not torch._running_with_deploy():
+@torch.library.register_fake("_dtensor::shard_dim_alltoall")
+def _shard_dim_alltoall_meta(input, gather_dim, shard_dim, group_name):
+    group_size = _get_group_size_by_name(group_name)
+    stacked_list = [torch.empty_like(input) for _ in range(group_size)]
+    group = _resolve_process_group(group_name)
+    group_rank = get_group_rank(group, get_rank())
 
-    @torch.library.register_fake("_dtensor::shard_dim_alltoall")
-    def _shard_dim_alltoall_meta(input, gather_dim, shard_dim, group_name):
-        group_size = _get_group_size_by_name(group_name)
-        stacked_list = [torch.empty_like(input) for _ in range(group_size)]
-        group = _resolve_process_group(group_name)
-        group_rank = get_group_rank(group, get_rank())
-
-        return (
-            torch.cat(stacked_list, dim=gather_dim)
-            .chunk(group_size, dim=shard_dim)[group_rank]
-            .contiguous()
-        )
-
-else:
-    import warnings
-
-    warnings.warn(
-        "PyTorch Distributed functional collectives do not work with torch::deploy."
+    return (
+        torch.cat(stacked_list, dim=gather_dim)
+        .chunk(group_size, dim=shard_dim)[group_rank]
+        .contiguous()
     )
 
 
@@ -325,7 +316,7 @@ def redistribute_cost(
 
     NOTE:
     1. Only consider communication cost here, since computation costs for redistribute
-       are quite trival (i.e. we only need to narrow or simple division)
+       are quite trivial (i.e. we only need to narrow or simple division)
     2. Only consider redistribute cost on same mesh, cross mesh communication cost is
        not quite needed for operator strategy estimation/selection.
     """

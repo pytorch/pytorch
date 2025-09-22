@@ -199,7 +199,7 @@ class TestKernelBenchmark(TestCase):
             def triton_(in_out_ptr0, xnumel, XBLOCK : tl.constexpr):
 
         Note the in_out_ptr0 argument. It's for a 1000x1000 tensor, but it's
-        inplace udpated, so when computing the bandwidth, we should count
+        inplace updated, so when computing the bandwidth, we should count
         the total memory access as 2 * 1000 * 1000 * 4 = 8MB. This amount is
         what this test asserts.
         """
@@ -386,6 +386,9 @@ class TestKernelBenchmark(TestCase):
         max_autotune=True, max_autotune_gemm_backends="TRITON", force_shape_pad=True
     )
     def test_slice_mm_bandwidth_computation(self):
+        if GPU_TYPE == "xpu" and not torch._inductor.utils.is_big_gpu():
+            raise unittest.SkipTest("unsupported device")
+
         M, N, K = 1000, 2000, 3000
 
         @torch.compile

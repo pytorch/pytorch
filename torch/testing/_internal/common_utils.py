@@ -68,7 +68,6 @@ import torch.backends.xnnpack
 import torch.cuda
 from torch import Tensor
 from torch._C import ScriptDict, ScriptList  # type: ignore[attr-defined]
-from torch._dynamo.trace_rules import _as_posix_path
 from torch._utils_internal import get_writable_path
 from torch._logging.scribe import open_source_signpost
 from torch.nn import (
@@ -103,7 +102,7 @@ except ImportError:
 
 
 MI300_ARCH = ("gfx942",)
-
+MI200_ARCH = ("gfx90a")
 
 def freeze_rng_state(*args, **kwargs):
     return torch.testing._utils.freeze_rng_state(*args, **kwargs)
@@ -297,7 +296,7 @@ if os.getenv("SLOW_TESTS_FILE", ""):
 if os.getenv("DISABLED_TESTS_FILE", ""):
     disabled_tests_dict = maybe_load_json(os.getenv("DISABLED_TESTS_FILE", ""))
 
-NATIVE_DEVICES = ('cpu', 'cuda', 'xpu', 'meta', torch._C._get_privateuse1_backend_name())
+NATIVE_DEVICES = ('cpu', 'cuda', 'xpu', 'meta', 'mps', torch._C._get_privateuse1_backend_name())
 
 # used for managing devices testing for torch profiler UTs
 # for now cpu, cuda and xpu are added for testing torch profiler UTs
@@ -329,9 +328,10 @@ def extract_test_fn() -> Optional[Callable]:
             self_val = frame.f_locals["self"]
             if isinstance(self_val, unittest.TestCase):
                 test_id = self_val.id()
-                test_name = test_id.split('.')[2]
-                test_fn = getattr(self_val, test_name).__func__
-                return test_fn
+                *_, cls_name, test_name = test_id.rsplit('.', 2)
+                if cls_name == type(self_val).__name__ and test_name.startswith("test"):
+                    test_fn = getattr(self_val, test_name).__func__
+                    return test_fn
     except Exception:
         pass
     return None
@@ -1957,6 +1957,14 @@ def runOnRocmArch(arch: tuple[str, ...]):
 def xfailIfS390X(func):
     return unittest.expectedFailure(func) if IS_S390X else func
 
+def xfailIf(condition):
+    def wrapper(func):
+        if condition:
+            return unittest.expectedFailure(func)
+        else:
+            return func
+    return wrapper
+
 def skipIfXpu(func=None, *, msg="test doesn't currently work on the XPU stack"):
     def dec_fn(fn):
         reason = f"skipIfXpu: {msg}"
@@ -2008,7 +2016,7 @@ def skipIfRocmVersionLessThan(version=None):
         def wrap_fn(self, *args, **kwargs):
             if TEST_WITH_ROCM:
                 rocm_version = str(torch.version.hip)
-                rocm_version = rocm_version.split("-")[0]    # ignore git sha
+                rocm_version = rocm_version.split("-", maxsplit=1)[0]    # ignore git sha
                 rocm_version_tuple = tuple(int(x) for x in rocm_version.split("."))
                 if rocm_version_tuple is None or version is None or rocm_version_tuple < tuple(version):
                     reason = f"ROCm {rocm_version_tuple} is available but {version} required"
@@ -3316,7 +3324,7 @@ class TestCase(expecttest.TestCase):
                     def wrapper(*args, **kwargs):
                         try:
                             f(*args, **kwargs)
-                        except BaseException as e:
+                        except BaseException as e:  # noqa: B036
                             self.skipTest(e)
                         raise RuntimeError(f"Unexpected success, please remove `{file_name}`")
                     return wrapper
@@ -3338,7 +3346,7 @@ class TestCase(expecttest.TestCase):
                     def wrapper(*args, **kwargs):
                         try:
                             f(*args, **kwargs)
-                        except BaseException as e:
+                        except BaseException as e:  # noqa: B036
                             self.skipTest(e)
                         method = getattr(self, self._testMethodName)
                         if getattr(method, "__unittest_expecting_failure__", False):
@@ -3368,6 +3376,8 @@ class TestCase(expecttest.TestCase):
 
         if strict_mode or should_reset_dynamo:
             torch._dynamo.reset()
+        elif torch._dynamo.config.compiled_autograd:
+            torch._dynamo.compiled_autograd.reset()
 
         # Early terminate test if necessary.  If using pytest, use the -x flag instead
         if using_unittest and self._should_stop_test_suite():
@@ -5595,6 +5605,8 @@ class LazyVal:
 
 
 def munge_exc(e, *, suppress_suffix=True, suppress_prefix=True, file=None, skip=0):
+    from torch._dynamo.trace_rules import _as_posix_path
+
     if file is None:
         file = inspect.stack()[1 + skip].filename  # skip one frame
 
@@ -5754,3 +5766,16 @@ def recover_orig_fp32_precision(fn):
             torch.backends.cuda.matmul.fp32_precision = old_cuda_matmul_p
 
     return recover()(fn)
+
+def skipIfPythonVersionMismatch(predicate):
+    vi = sys.version_info
+
+    def dec_fn(fn):
+        @wraps(fn)
+        def wrap_fn(self, *args, **kwargs):
+            if predicate(vi.major, vi.minor, vi.micro):
+                return fn(self, *args, **kwargs)
+            else:
+                raise unittest.SkipTest("Python version mismatch")
+        return wrap_fn
+    return dec_fn

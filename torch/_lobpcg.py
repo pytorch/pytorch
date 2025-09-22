@@ -57,7 +57,7 @@ def _polynomial_coefficients_given_roots(roots):
         # So the code below tries to circumvent the explicit root finding by series
         # of operations on memory copies imitating the Horner's method.
         # The memory copies are required to construct nodes in the computational graph
-        # by exploting the explicit (not in-place, separate node for each step)
+        # by exploiting the explicit (not in-place, separate node for each step)
         # recursion of the Horner's method.
         # Needs more memory, O(... * k^2), but with only O(... * k^2) complexity.
         poly_coeffs_new = poly_coeffs.clone() if roots.requires_grad else poly_coeffs
@@ -80,7 +80,7 @@ def _polynomial_value(poly, x, zero_power, transition):
                      poly[..., i] = (a_{i_0}, ..., a{i_n} (==1)), and
                      poly(x) = poly[..., 0] * zero_power + ... + poly[..., n] * x^n
 
-      x (Tensor): the value (possible batched) to evalate the polynomial `poly` at.
+      x (Tensor): the value (possible batched) to evaluate the polynomial `poly` at.
 
       zero_power (Tensor): the representation of `x^0`. It is application-specific.
 
@@ -168,7 +168,7 @@ def _symeig_backward_partial_eigenspace(D_grad, U_grad, A, D, U, largest):
     # of the characteristic polynomial.
     chr_poly_D = _polynomial_coefficients_given_roots(D)
 
-    # the code belows finds the explicit solution to the Sylvester equation
+    # the code below finds the explicit solution to the Sylvester equation
     # U_ortho^T A U_ortho dX - dX D = -U_ortho^T A U
     # and incorporates it into the whole gradient stored in the `res` variable.
     #

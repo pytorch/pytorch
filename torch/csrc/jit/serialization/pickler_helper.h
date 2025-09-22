@@ -112,7 +112,7 @@ getWriteableTensorData(const at::Tensor& tensor, bool to_cpu = true);
 // if the cls has __getstate__/__setstate__
 // assert they have the right schema and return true,
 // otherwise return false
-bool checkHasValidSetGetState(const std::shared_ptr<c10::ClassType>& cls);
+bool checkHasValidSetGetState(const c10::ClassType& cls);
 
 // Declare BackendMeta serialization and deserialization function pointer types.
 using BackendMetaPtr = std::function<
@@ -202,7 +202,7 @@ inline void setTensorMetadata(
 }
 
 // Register function pointer of Tensor BackendMetadata for serialization.
-TORCH_API inline void TensorBackendMetaRegistry(
+inline void TensorBackendMetaRegistry(
     c10::DeviceType t,
     const BackendMetaPtr& get_fptr,
     const BackendMetaPtr& set_fptr) {

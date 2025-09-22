@@ -50,8 +50,8 @@ _IS_SM9X = False
 _IS_HIPSPARSELT_AVAILABLE = False
 
 if torch.cuda.is_available():
-    _IS_SM8X = torch.cuda.get_device_capability(0)[0] == 8
-    _IS_SM9X = torch.cuda.get_device_capability(0)[0] == 9
+    _IS_SM8X = torch.version.cuda is not None and (torch.cuda.get_device_capability(0)[0] == 8)
+    _IS_SM9X = torch.version.cuda is not None and (torch.cuda.get_device_capability(0)[0] == 9)
     _IS_HIPSPARSELT_AVAILABLE = torch.version.hip is not None and tuple(int(v) for v in torch.version.hip.split('.')[:2]) > (6, 4)
     # CUTLASS kernels only work for Ampere
     if _IS_SM8X:
@@ -714,16 +714,18 @@ class TestSparseSemiStructuredTraining(TestCase):
         max_diff = (ref_gemm - pack_gemm).abs().argmax()
         torch.testing.assert_close(
             ref_gemm, pack_gemm,
-            **atol_rtol_kw[dtype]
-        ), f"packed is wrong at pos: ({max_diff // N}, {max_diff % N})"
+            **atol_rtol_kw[dtype],
+            msg=f"packed is wrong at pos: ({max_diff // N}, {max_diff % N})",
+        )
         # Test A.t@B
         pack_gemm = torch._sparse_semi_structured_linear(b.t(), packed_t, meta_t)
         max_diff = (ref_gemm - pack_gemm).abs().argmax()
 
         torch.testing.assert_close(
             ref_gemm, pack_gemm,
-            **atol_rtol_kw[dtype]
-        ), f"packed_t is wrong at pos: ({max_diff // N}, {max_diff % N})"
+            **atol_rtol_kw[dtype],
+            msg=f"packed_t is wrong at pos: ({max_diff // N}, {max_diff % N})",
+        )
 
     @training_dtypes
     @unittest.skipIf(TEST_WITH_ROCM, "Not supported on ROCm")
