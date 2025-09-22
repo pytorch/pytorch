@@ -11628,6 +11628,9 @@ class TestAdvancedIndexing(TestCaseMPS):
     def test_empty_reduce(self, device="mps"):
         x = torch.rand(0, 3, device=device)
         self.assertTrue(x.mean().isnan())
+        self.assertTrue(x.nanmean().isnan())
+        self.assertTrue(x.median().isnan())
+        self.assertTrue(x.nanmedian().isnan())
         self.assertEqual(x.count_nonzero(), 0)
         self.assertEqual(x.sum(), 0)
         self.assertEqual(x.nansum(), 0)
@@ -12231,7 +12234,7 @@ class TestConsistency(TestCaseMPS):
         'arange', 'linspace',
         'special.xlog1py',
 
-        # CPU accumulates sequantially, but GPU does in in parallel
+        # CPU accumulates sequantially, but GPU does in parallel
         '_unsafe_masked_index_put_accumulate',
     }
 

@@ -128,6 +128,20 @@ class LstmModule(torch.nn.Module):
 class CPUReproTests(TestCase):
     common = check_model
 
+    def test_torch_linalg_qr_tuple_slice(self):
+        def fn(x):
+            return torch.linalg.qr(x)[:1]
+
+        x = torch.randn(4, 4)
+        compiled = torch.compile(fn, backend="inductor")
+
+        expected = fn(x)
+        actual = compiled(x)
+
+        self.assertIsInstance(actual, tuple)
+        self.assertEqual(len(actual), 1)
+        torch.testing.assert_close(actual[0], expected[0])
+
     @skipIfRocm
     def test_conv_stride_constraints(self):
         for fmt in [torch.contiguous_format, torch.channels_last]:
@@ -1131,7 +1145,6 @@ class CPUReproTests(TestCase):
             (300, 400, torch.float16, (0,)),
         )
 
-    @unittest.skip("Unskip once https://github.com/pytorch/pytorch/pull/162316 is in")
     def test_index_put(self):
         # https://github.com/pytorch/pytorch/issues/138908
         def fn(x, y):
@@ -1147,7 +1160,6 @@ class CPUReproTests(TestCase):
             torch.compile(fn)(x_clone, y_clone)
             self.assertEqual(y, y_clone, atol=1e-3, rtol=1e-3)
 
-    @unittest.skip("Unskip once https://github.com/pytorch/pytorch/pull/162316 is in")
     def test_index_put2(self):
         # https://github.com/pytorch/pytorch/issues/138908
         def fn(y, index0, index1):
@@ -1164,7 +1176,6 @@ class CPUReproTests(TestCase):
             torch.compile(fn)(y_clone, index0_clone, index1_clone)
             self.assertEqual(y, y_clone, atol=1e-3, rtol=1e-3)
 
-    @unittest.skip("Unskip once https://github.com/pytorch/pytorch/pull/162316 is in")
     def test_index_add(self):
         # https://github.com/pytorch/pytorch/issues/138908
         def fn(x, y, scale_y, index):

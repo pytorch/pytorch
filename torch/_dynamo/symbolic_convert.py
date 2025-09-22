@@ -167,7 +167,7 @@ from .variables.misc import (
     PythonModuleVariable,
     UnknownVariable,
 )
-from .variables.nn_module import NNModuleVariable
+from .variables.nn_module import NNModuleVariable, UnspecializedNNModuleVariable
 from .variables.tensor import supported_comparison_ops, SymNodeVariable, TensorVariable
 from .variables.torch_function import (
     SymbolicTorchFunctionState,
@@ -1055,7 +1055,7 @@ class ExceptionStack:
     """
 
     # Exception handling in CPython is a bit confusing and some of the bytecode
-    # have a slightly different behavior than what is is documented. While reading
+    # have a slightly different behavior than what is documented. While reading
     # the documentation, is important to notice that the terms "current exception"
     # and "stack" sometimes refers to a C variable with the same name and the
     # exception stack, respectively.
@@ -3847,6 +3847,7 @@ class InstructionTranslator(InstructionTranslatorBase):
                 global_scope=f_globals,
                 f_code=f_code,
                 torch_function_mode_stack=torch_function_mode_stack,
+                one_graph=one_graph,
                 package=package,
             ),
             instructions=instructions,
@@ -4271,6 +4272,15 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 code_context.get_context(module.forward.__code__)[
                     "orig_graphmodule"
                 ] = weakref.ref(module)
+        # When we have inline_nn_module turned on, modules resolve to UnspecializedNNModuleVariable
+        if args and isinstance(args[0], UnspecializedNNModuleVariable):
+            module = args[0].value
+            if isinstance(module, torch.fx.GraphModule):
+                # The inline call might not actually be a call to `forward`,
+                # but it is enough to add a context for `forward` in case it is called.
+                code_context.get_context(module.forward.__code__)[
+                    "orig_graphmodule"
+                ] = weakref.ref(module)
 
         tracer: InliningInstructionTranslator
         if is_generator(code):
@@ -4384,7 +4394,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         # because we dont mutate them in transform_code_object (those
         # instructions are for the top most Instruction translator).  Also, we
         # have to be careful about not using _cached_cleaned_instructions here
-        # because that function is global, while we want the the cache to be
+        # because that function is global, while we want the cache to be
         # alive only during a compmilation.
         tracing_ctx = parent.output.tracing_context
         instructions = None

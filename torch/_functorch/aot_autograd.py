@@ -106,6 +106,7 @@ from ._aot_autograd.logging_utils import (  # noqa: F401
 from ._aot_autograd.runtime_wrappers import (  # noqa: F401
     AOTDedupeWrapper,
     AOTSyntheticBaseWrapper,
+    SerializableCompiledFunction,
 )
 from ._aot_autograd.schemas import (  # noqa: F401
     AOTConfig,
@@ -1072,6 +1073,7 @@ def aot_module_simplified(
             boxed_forward_device_index,
             ignore_shape_env,
             flatten=False,
+            force_non_lazy_backward_lowering=config.force_non_lazy_backward_lowering,
         )
 
         compiled_fn = None
@@ -1110,6 +1112,7 @@ def aot_module_simplified(
         # the inputs so that they can be freed before the end of this scope.
         # For overhead reasons, this is not the default wrapper, see comment:
         # https://github.com/pytorch/pytorch/pull/122535/files#r1560096481
+        @simple_wraps(compiled_fn)
         def forward(runtime_args: list[Any]):
             flat_args = []
             flat_args.extend(params_buffers_flat)
@@ -1123,6 +1126,7 @@ def aot_module_simplified(
         # historically returned a function that was not the boxed calling
         # convention.  This should get fixed...
         # NB: GraphModule/nn.Module rely on the non-boxed calling convention here
+        @simple_wraps(compiled_fn)
         def forward(*runtime_args: tuple[Any]):
             full_args = []
             full_args.extend(params_buffers_flat)
@@ -1134,6 +1138,16 @@ def aot_module_simplified(
     forward.named_parameters = mod.named_parameters
     forward.named_buffers = mod.named_buffers
 
+    # Add a serialize function
+    def grab_serialize_fn(fn):
+        if isinstance(fn, SerializableCompiledFunction):
+            return fn.serialize_fn
+        elif hasattr(fn, "__wrapped__"):
+            return grab_serialize_fn(fn.__wrapped__)
+        else:
+            return None
+
+    forward.serialize = grab_serialize_fn(forward)  # type: ignore[attr-defined]
     return forward
 
 
