@@ -1227,6 +1227,24 @@ class TestNestedTensorDeviceType(NestedTensorTestCase):
         is_cuda = "cuda" in str(device)
         self.assertEqual(nt.is_cuda, is_cuda)
 
+    @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
+    def test_share_memory(self, device):
+        a = torch.randn(3, 4, device=device)
+        b = torch.randn(5, 4, device=device)
+        nt = torch.nested.nested_tensor([a, b], layout=torch.jagged)
+
+        # Guard CUDA tensors
+        if "cuda" in device:
+            result = nt.share_memory_()
+            self.assertIs(result, nt)
+            return
+
+        result = nt.share_memory_()
+        self.assertIs(result, nt)
+
+        # Verify in shared memory
+        self.assertTrue(nt.is_shared())
+
     @dtypes(torch.float, torch.float16, torch.double)
     def test_nested_tensor_indexing(self, device, dtype):
         # edge case: empty nested tensor
