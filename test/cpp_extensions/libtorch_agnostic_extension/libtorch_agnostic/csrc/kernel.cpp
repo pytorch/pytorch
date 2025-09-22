@@ -75,32 +75,16 @@ Tensor sgd_out_of_place(
   return out;
 }
 
-void boxed_sgd_out_of_place(StableIValue* stack, uint64_t num_args, uint64_t num_outputs) {
-  Tensor res = sgd_out_of_place(
-    to<Tensor>(stack[0]),
-    to<Tensor>(stack[1]),
-    float(to<double>(stack[2])),
-    to<double>(stack[3]),
-    to<bool>(stack[4]));
-
-  stack[0] = from(res);
-}
-
 STABLE_TORCH_LIBRARY(libtorch_agnostic, m) {
   m.def("sgd_out_of_place(Tensor param, Tensor grad, float weight_decay, float lr, bool maximize) -> Tensor");
 }
 
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CPU, m) {
-  m.impl("sgd_out_of_place", &boxed_sgd_out_of_place);
+  m.impl("sgd_out_of_place", TORCH_BOXED_FN(&sgd_out_of_place));
 }
 
 Tensor identity(Tensor t) {
   return t;
-}
-
-void boxed_identity(StableIValue* stack, uint64_t num_args, uint64_t num_outputs) {
-  Tensor res = identity(to<Tensor>(stack[0]));
-  stack[0] = from(res);
 }
 
 STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
@@ -108,11 +92,11 @@ STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
 }
 
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CUDA, m) {
-  m.impl("identity", &boxed_identity);
+  m.impl("identity", TORCH_BOXED_FN(&identity));
 }
 
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CPU, m) {
-  m.impl("identity", &boxed_identity);
+  m.impl("identity", TORCH_BOXED_FN(&identity));
 }
 
 Tensor my_abs(Tensor t) {
@@ -123,17 +107,12 @@ Tensor my_abs(Tensor t) {
   return to<Tensor>(stack[0]);
 }
 
-void boxed_my_abs(StableIValue* stack, uint64_t num_args, uint64_t num_outputs) {
-  Tensor tensor_res = my_abs(to<Tensor>(stack[0]));
-  stack[0] = from(tensor_res);
-}
-
 STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
   m.def("my_abs(Tensor t) -> Tensor");
 }
 
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
-  m.impl("my_abs", &boxed_my_abs);
+  m.impl("my_abs", TORCH_BOXED_FN(&my_abs));
 }
 
 Tensor my_ones_like(Tensor t, StableIValue device) {
@@ -181,19 +160,12 @@ std::tuple<Tensor, Tensor, bool> exp_neg_is_leaf(Tensor t1, Tensor t2, Tensor t3
     to<bool>(stack_is_leaf[0]));
 }
 
-void boxed_exp_neg_is_leaf(StableIValue* stack, uint64_t num_args, uint64_t num_outputs) {
-  auto tuple = exp_neg_is_leaf(to<Tensor>(stack[0]), to<Tensor>(stack[1]), to<Tensor>(stack[2]));
-  stack[0] = from(std::get<0>(tuple));
-  stack[1] = from(std::get<1>(tuple));
-  stack[2] = from(std::get<2>(tuple));
-}
-
 STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
   m.def("exp_neg_is_leaf(Tensor t1, Tensor t2, Tensor t3) -> (Tensor, Tensor, bool)");
 }
 
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
-  m.impl("exp_neg_is_leaf", &boxed_exp_neg_is_leaf);
+  m.impl("exp_neg_is_leaf", TORCH_BOXED_FN(&exp_neg_is_leaf));
 }
 
 Tensor neg_exp(Tensor t) {
@@ -204,17 +176,12 @@ Tensor neg_exp(Tensor t) {
   return to<Tensor>(stack[0]);
 }
 
-void boxed_neg_exp(StableIValue* stack, uint64_t num_args, uint64_t num_outputs) {
-  Tensor res = neg_exp(to<Tensor>(stack[0]));
-  stack[0] = from(res);
-}
-
 STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
   m.def("neg_exp(Tensor t) -> Tensor");
 }
 
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
-  m.impl("neg_exp", &boxed_neg_exp);
+  m.impl("neg_exp", TORCH_BOXED_FN(&neg_exp));
 }
 
 Tensor divide_neg_exp(Tensor t) {
@@ -233,26 +200,16 @@ Tensor divide_neg_exp(Tensor t) {
   return to<Tensor>(stack_div[0]);
 }
 
-void boxed_divide_neg_exp(StableIValue* stack, uint64_t num_args, uint64_t num_outputs) {
-  Tensor res = divide_neg_exp(to<Tensor>(stack[0]));
-  stack[0] = from(res);
-}
-
 STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
   m.def("divide_neg_exp(Tensor t) -> Tensor");
 }
 
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
-  m.impl("divide_neg_exp", &boxed_divide_neg_exp);
+  m.impl("divide_neg_exp", TORCH_BOXED_FN(&divide_neg_exp));
 }
 
 bool is_contiguous(Tensor t) {
   return t.is_contiguous();
-}
-
-void boxed_is_contiguous(StableIValue* stack, uint64_t num_args, uint64_t num_outputs) {
-  bool res = is_contiguous(to<Tensor>(stack[0]));
-  stack[0] = from(res);
 }
 
 STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
@@ -260,49 +217,24 @@ STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
 }
 
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
-  m.impl("is_contiguous", &boxed_is_contiguous);
+  m.impl("is_contiguous", TORCH_BOXED_FN(&is_contiguous));
 }
 
 Tensor my_transpose(Tensor t, int64_t dim0, int64_t dim1) {
   return transpose(t, dim0, dim1);
 }
 
-void boxed_my_transpose(StableIValue* stack, uint64_t num_args, uint64_t num_outputs) {
-  auto res = my_transpose(to<Tensor>(stack[0]), to<int64_t>(stack[1]), to<int64_t>(stack[2]));
-
-  stack[0] = from(res);
-}
-
 Tensor my_empty_like(Tensor t) {
   return empty_like(t);
-}
-
-void boxed_empty_like(StableIValue* stack, uint64_t num_args, uint64_t num_outputs) {
-  auto res = my_empty_like(to<Tensor>(stack[0]));
-  stack[0] = from(res);
 }
 
 bool my_is_cpu(Tensor t) {
   return t.is_cpu();
 }
 
-
-void boxed_my_is_cpu(StableIValue* stack, uint64_t num_args, uint64_t num_outputs) {
-  auto res = my_is_cpu(to<Tensor>(stack[0]));
-  stack[0] = from(res);
-}
-
 Tensor fill_infinity(Tensor t) {
   auto value = std::numeric_limits<float>::infinity();
   return fill_(t, value);
-}
-
-void boxed_fill_infinity(
-    StableIValue* stack,
-    uint64_t num_args,
-    uint64_t num_outputs) {
-  auto res = fill_infinity(to<Tensor>(stack[0]));
-  stack[0] = from(res);
 }
 
 Tensor my_pad(Tensor t) {
@@ -312,28 +244,8 @@ Tensor my_pad(Tensor t) {
   return pad(t, padding, mode, value);
 }
 
-void boxed_my_pad(
-    StableIValue* stack,
-    uint64_t num_args,
-    uint64_t num_outputs) {
-  auto res = my_pad(to<Tensor>(stack[0]));
-  stack[0] = from(res);
-}
-
 Tensor my_narrow(Tensor t, int64_t dim, int64_t start, int64_t length) {
   return narrow(t, dim, start, length);
-}
-
-void boxed_my_narrow(
-    StableIValue* stack,
-    uint64_t num_args,
-    uint64_t num_outputs) {
-  auto res = my_narrow(
-      to<Tensor>(stack[0]),
-      to<int64_t>(stack[1]),
-      to<int64_t>(stack[2]),
-      to<int64_t>(stack[3]));
-  stack[0] = from(res);
 }
 
 Tensor my_new_empty_dtype_variant(Tensor t) {
@@ -342,29 +254,14 @@ Tensor my_new_empty_dtype_variant(Tensor t) {
   return new_empty(t, sizes, dtype);
 }
 
-void boxed_my_new_empty_dtype_variant(StableIValue* stack, uint64_t num_args, uint64_t num_outputs) {
-  auto res = my_new_empty_dtype_variant(to<Tensor>(stack[0]));
-  stack[0] = from(res);
-}
-
 Tensor my_new_zeros_dtype_variant(Tensor t) {
   std::vector<int64_t> sizes = {2, 5};
   auto dtype = std::make_optional(at::ScalarType::Float);
   return new_zeros(t, sizes, dtype);
 }
 
-void boxed_my_new_zeros_dtype_variant(StableIValue* stack, uint64_t num_args, uint64_t num_outputs) {
-  auto res = my_new_zeros_dtype_variant(to<Tensor>(stack[0]));
-  stack[0] = from(res);
-}
-
 Tensor my_copy_(Tensor dst, Tensor src, bool non_blocking) {
   return copy_(dst, src, non_blocking);
-}
-
-void boxed_my_copy_(StableIValue* stack, uint64_t num_args, uint64_t num_outputs) {
-  Tensor tensor_res = my_copy_(to<Tensor>(stack[0]), to<Tensor>(stack[1]), to<bool>(stack[2]));
-  stack[0] = from(tensor_res);
 }
 
 STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
@@ -379,46 +276,31 @@ STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
 }
 
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
-  m.impl("my_transpose", &boxed_my_transpose);
-  m.impl("my_empty_like", &boxed_empty_like);
-  m.impl("fill_infinity", &boxed_fill_infinity);
-  m.impl("my_is_cpu", &boxed_my_is_cpu);
-  m.impl("my_new_empty_dtype_variant", &boxed_my_new_empty_dtype_variant);
-  m.impl("my_new_zeros_dtype_variant", &boxed_my_new_zeros_dtype_variant);
-  m.impl("my_copy_", &boxed_my_copy_);
+  m.impl("my_transpose", TORCH_BOXED_FN(&my_transpose));
+  m.impl("my_empty_like", TORCH_BOXED_FN(&empty_like));
+  m.impl("fill_infinity", TORCH_BOXED_FN(&fill_infinity));
+  m.impl("my_is_cpu", TORCH_BOXED_FN(&my_is_cpu));
+  m.impl("my_new_empty_dtype_variant", TORCH_BOXED_FN(&my_new_empty_dtype_variant));
+  m.impl("my_new_zeros_dtype_variant", TORCH_BOXED_FN(&my_new_zeros_dtype_variant));
+  m.impl("my_copy_", TORCH_BOXED_FN(&my_copy_));
 }
 
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeImplicitAutograd, m) {
-  m.impl("my_pad", &boxed_my_pad);
-  m.impl("my_narrow", &boxed_my_narrow);
+  m.impl("my_pad", TORCH_BOXED_FN(&my_pad));
+  m.impl("my_narrow", TORCH_BOXED_FN(&my_narrow));
 }
 
 Tensor my_zero_(Tensor t) {
   return zero_(t);
 }
 
-void boxed_my_zero_(StableIValue* stack, uint64_t num_args, uint64_t num_outputs) {
-  auto res = my_zero_(to<Tensor>(stack[0]));
-  stack[0] = from(res);
-}
-
 Tensor my_amax(Tensor t) {
   return amax(t, 0, false);
-}
-
-void boxed_my_amax(StableIValue* stack, uint64_t num_args, uint64_t num_outputs) {
-  auto res = my_amax(to<Tensor>(stack[0]));
-  stack[0] = from(res);
 }
 
 Tensor my_amax_vec(Tensor t) {
   std::vector<int64_t> v = {0,1};
   return amax(t, v, false);
-}
-
-void boxed_my_amax_vec(StableIValue* stack, uint64_t num_args, uint64_t num_outputs) {
-  auto res = my_amax_vec(to<Tensor>(stack[0]));
-  stack[0] = from(res);
 }
 
 STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
@@ -429,7 +311,7 @@ STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
 }
 
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CPU, m) {
-  m.impl("my_zero_", &boxed_my_zero_);
+  m.impl("my_zero_", TORCH_BOXED_FN(&my_zero_));
 }
 
 bool test_default_constructor(bool defined) {
@@ -451,22 +333,14 @@ bool test_default_constructor(bool defined) {
   return out.defined();
 }
 
-void boxed_test_default_constructor(
-    StableIValue* stack,
-    uint64_t num_args,
-    uint64_t num_outputs) {
-  bool res = test_default_constructor(to<bool>(stack[0]));
-  stack[0] = from(res);
-}
-
 STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
   m.def("test_default_constructor(bool undefined) -> bool");
 }
 
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
-  m.impl("test_default_constructor", &boxed_test_default_constructor);
-  m.impl("my_amax", &boxed_my_amax);
-  m.impl("my_amax_vec", &boxed_my_amax_vec);
+  m.impl("test_default_constructor", TORCH_BOXED_FN(&test_default_constructor));
+  m.impl("my_amax", TORCH_BOXED_FN(&my_amax));
+  m.impl("my_amax_vec", TORCH_BOXED_FN(&my_amax_vec));
 }
 
 // Test functions for torch::stable::accelerator APIs
@@ -487,14 +361,6 @@ int64_t test_device_guard(int64_t device_index) {
   return currentDevice;
 }
 
-void boxed_test_device_guard(
-    StableIValue* stack,
-    uint64_t num_args,
-    uint64_t num_outputs) {
-  int res = test_device_guard(static_cast<int64_t>(to<int64_t>(stack[0])));
-  stack[0] = from(res);
-}
-
 int64_t test_device_guard_set_index() {
   using torch::stable::accelerator::DeviceGuard;
 
@@ -506,14 +372,6 @@ int64_t test_device_guard_set_index() {
   return currentDevice;
 }
 
-void boxed_test_device_guard_set_index(
-    StableIValue* stack,
-    uint64_t num_args,
-    uint64_t num_outputs) {
-  int64_t res = test_device_guard_set_index();
-  stack[0] = from(res);
-}
-
 int64_t test_stream(int32_t device_index) {
   STD_TORCH_CHECK(
       device_index >= std::numeric_limits<int32_t>::min() &&
@@ -523,24 +381,8 @@ int64_t test_stream(int32_t device_index) {
   return torch::stable::accelerator::getCurrentStream(device_index).id();
 }
 
-void boxed_test_stream(
-    StableIValue* stack,
-    uint64_t num_args,
-    uint64_t num_outputs) {
-  int64_t res = test_stream(static_cast<int64_t>(to<int64_t>(stack[0])));
-  stack[0] = from(res);
-}
-
 int64_t test_get_current_device_index() {
   return torch::stable::accelerator::getCurrentDeviceIndex();
-}
-
-void boxed_test_get_current_device_index(
-    StableIValue* stack,
-    uint64_t num_args,
-    uint64_t num_outputs) {
-  int64_t res = test_get_current_device_index();
-  stack[0] = from(res);
 }
 
 STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
@@ -551,9 +393,9 @@ STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
 }
 
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
-  m.impl("test_device_guard", &boxed_test_device_guard);
-  m.impl("test_device_guard_set_index", &boxed_test_device_guard_set_index);
-  m.impl("test_stream", &boxed_test_stream);
-  m.impl("test_get_current_device_index", &boxed_test_get_current_device_index);
+  m.impl("test_device_guard", TORCH_BOXED_FN(&test_device_guard));
+  m.impl("test_device_guard_set_index", TORCH_BOXED_FN(&test_device_guard_set_index));
+  m.impl("test_stream", TORCH_BOXED_FN(&test_stream));
+  m.impl("test_get_current_device_index", TORCH_BOXED_FN(&test_get_current_device_index));
 }
 #endif // LAE_USE_CUDA
