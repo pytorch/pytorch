@@ -165,7 +165,6 @@ class TestLinalg(TestCase):
             # loop through a list of potentially used
             # environment variables.
             env_list = ["PYTORCH_TUNABLEOP_BLAS_LOG",
-                        "PYTORCH_TUNABLEOP_NUMERICAL_CHECK",
                         "PYTORCH_TUNABLEOP_UNTUNED_FILENAME"]
             for env in env_list:
                 try:
@@ -185,6 +184,7 @@ class TestLinalg(TestCase):
         torch.cuda.tunable.set_max_tuning_duration(30)
         torch.cuda.tunable.set_max_tuning_iterations(100)
         torch.cuda.tunable.set_rotating_buffer_size(-1)
+        torch.cuda.tunable.set_numerical_check_tolerances(False, 1e-5, 1e-5)
         ordinal = torch.cuda.current_device()
 
         # Set filenames to be unique on a per test basis
@@ -5982,6 +5982,28 @@ class TestLinalg(TestCase):
 
     @onlyCUDA
     @skipCUDAIfNotRocm
+    @dtypes(torch.float16)
+    def test_numerical_check_python_binding_tunableop(self, device, dtype):
+        with self._tunableop_ctx():
+            torch.cuda.tunable.enable(True)
+            torch.cuda.tunable.set_numerical_check_tolerances(True, 1e-5, 1e-5)
+
+            a = torch.randn(128, 128, device='cuda')
+            b = torch.randn(128, 128, device='cuda')
+
+            _ = a @ b
+
+        with self._tunableop_ctx():
+            torch.cuda.tunable.enable(True)
+            with self.assertRaisesRegex(RuntimeError, r"positive"):
+                torch.cuda.tunable.set_numerical_check_tolerances(True, -1e-5, 1e5)
+            with self.assertRaisesRegex(RuntimeError, r"positive"):
+                torch.cuda.tunable.set_numerical_check_tolerances(True, 1e-5, -1e5)
+            with self.assertRaisesRegex(RuntimeError, r"positive"):
+                torch.cuda.tunable.set_numerical_check_tolerances(True, -1e-5, -1e5)
+
+    @onlyCUDA
+    @skipCUDAIfNotRocm
     @dtypes(torch.float16, torch.float32)
     def test_numerical_check_accuracy_tunableop(self, device, dtype):
         import os
@@ -5993,11 +6015,11 @@ class TestLinalg(TestCase):
             b = torch.randn(k, n, device='cuda')
             with self._tunableop_ctx():
                 torch.cuda.tunable.enable(False)
-                os.environ["PYTORCH_TUNABLEOP_NUMERICAL_CHECK"] = "0"
+                torch.cuda.tunable.set_numerical_check_tolerances(False, 1e-5, 1e-5)
                 C_baseline = a @ b
             with self._tunableop_ctx():
                 torch.cuda.tunable.enable(True)
-                os.environ["PYTORCH_TUNABLEOP_NUMERICAL_CHECK"] = f"{atol}_{rtol}"
+                torch.cuda.tunable.set_numerical_check_tolerances(True, atol, rtol)
                 C_numeric = a @ b
             self.assertTrue(torch.allclose(C_baseline, C_numeric, atol=atol, rtol=rtol))
 

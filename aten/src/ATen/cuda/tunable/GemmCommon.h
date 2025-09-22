@@ -137,7 +137,7 @@ inline std::string ScalarTypeToBLASType(c10::ScalarType scalar_type) {
     }
     case c10::ScalarType::Float8_e5m2fnuz: {
       BLASType = "bf8_fnuz_r";
-      break;
+      break;  
     }
     case c10::ScalarType::ComplexFloat:{
       BLASType = "f32_c";

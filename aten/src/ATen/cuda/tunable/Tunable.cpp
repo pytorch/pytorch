@@ -523,42 +523,45 @@ void TuningContext::EnableNumericsCheck(bool value) {
 
 NumericalCheckConfig TuningContext::GetNumericalCheckConfig() const {
   const auto env_opt = c10::utils::get_env("PYTORCH_TUNABLEOP_NUMERICAL_CHECK");
-
-  // Default: OFF
+  
   if (!env_opt.has_value()) {
-    return NumericalCheckConfig(false, 1e-5, 1e-5);
+    return numerics_cfg_;
   }
 
   const std::string& env = env_opt.value();
 
-  // Explicit OFF
   if (env == "0") {
     return NumericalCheckConfig(false, 1e-5, 1e-5);
   }
 
-  // Expected: "atol_rtol"
   const size_t underscore = env.find('_');
-  if (underscore == std::string::npos) {
-    TORCH_WARN("Invalid PYTORCH_TUNABLEOP_NUMERICAL_CHECK format. Expected 'atol_rtol', got: ", env);
-    return NumericalCheckConfig(false, 1e-5, 1e-5);
-  }
+
+  TORCH_CHECK(
+      underscore != std::string::npos,
+      "Invalid PYTORCH_TUNABLEOP_NUMERICAL_CHECK format. "
+      "Expected 'atol_rtol', got: ",
+      env);
+
+  double atol = 0.0;
+  double rtol = 0.0;
 
   try {
-    const double atol = std::stod(env.substr(0, underscore));
-    const double rtol = std::stod(env.substr(underscore + 1));
-    if (atol <= 0.0 || rtol <= 0.0) {
-      TORCH_WARN("Tolerance values must be positive. atol=", atol, ", rtol=", rtol);
-      return NumericalCheckConfig(false, 1e-5, 1e-5);
-    }
-    return NumericalCheckConfig(true, atol, rtol);
+    atol = std::stod(env.substr(0, underscore));
+    rtol = std::stod(env.substr(underscore + 1));
   } catch (const std::exception& e) {
-    TORCH_WARN("Failed to parse PYTORCH_TUNABLEOP_NUMERICAL_CHECK: ", e.what());
-    return NumericalCheckConfig(false, 1e-5, 1e-5);
+    TORCH_CHECK(false, "Failed to parse PYTORCH_TUNABLEOP_NUMERICAL_CHECK: ", e.what());
   }
+
+  TORCH_CHECK( atol > 0.0 && rtol > 0.0, "Tolerance values must be positive. atol=", atol, ", rtol=", rtol);
+  return NumericalCheckConfig(true, atol, rtol);
+}
+
+void TuningContext::SetNumericalCheckConfig(bool enabled, double atol, double rtol) {
+  TORCH_CHECK(atol > 0.0 && rtol > 0.0, "Numerical check tolerances must be positive");
+  numerics_cfg_ = {enabled, atol, rtol};
 }
 
 bool TuningContext::IsNumericsCheckEnabled() const {
-  // Preserve the old boolean as a fallback; 
   const auto cfg = GetNumericalCheckConfig();
   return cfg.enabled || numerics_check_enable_;
 }

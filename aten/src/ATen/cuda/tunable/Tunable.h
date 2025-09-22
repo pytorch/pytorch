@@ -165,8 +165,9 @@ class TORCH_CUDA_CPP_API TuningContext {
 
     void EnableNumericsCheck(bool value);
     bool IsNumericsCheckEnabled() const;
+    void SetNumericalCheckConfig(bool enabled, double atol, double rtol);
     NumericalCheckConfig GetNumericalCheckConfig() const;
-
+    
     void SetMaxTuningDurationMs(int max_duration_ms);
     int GetMaxTuningDurationMs() const;
 
@@ -233,6 +234,8 @@ class TORCH_CUDA_CPP_API TuningContext {
     std::ofstream untuned_file_;
     size_t results_count_from_input_file_;
     bool is_shutting_down_;
+
+    NumericalCheckConfig numerics_cfg_{};
 };
 
 TORCH_CUDA_CPP_API TuningContext* getTuningContext();
