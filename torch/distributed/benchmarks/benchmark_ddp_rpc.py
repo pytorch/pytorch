@@ -115,7 +115,7 @@ def _run_printable(cmd):
 
     output = []
     buffer = io.BytesIO(np.asarray(input_tensor).tobytes())
-    output.append(torch.load(buffer))
+    output.append(torch.load(buffer, weights_only=True))
     return output
 
 
