@@ -253,7 +253,7 @@ class TestConvolutionNN(NNTestCase):
         )
         stride = [5, 5, 5]
 
-        with self.assertRaisesRegex(RuntimeError, "Padding height too large"):
+        with self.assertRaisesRegex(ValueError, "Padding height too large"):
             torch.ops.aten.slow_conv3d(
                 input,
                 weight,

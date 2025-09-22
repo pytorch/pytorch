@@ -175,19 +175,19 @@ static inline void slow_conv3d_shape_check(
   const int64_t input_height = input.size(dim_height);
   const int64_t input_width = input.size(dim_width);
 
-  const int64_t MAX_SAFE_PAD = (1LL << 61);
+  constexpr int64_t MAX_SAFE_PAD = (1LL << 61);
 
-  TORCH_CHECK(
+  TORCH_CHECK_VALUE(
     pad_height <= MAX_SAFE_PAD,
     "Padding height too large: pad_height=",
     pad_height);
 
-  TORCH_CHECK(
+  TORCH_CHECK_VALUE(
     pad_width <= MAX_SAFE_PAD,
     "Padding width too large: pad_width=",
     pad_width);
 
-  TORCH_CHECK(
+  TORCH_CHECK_VALUE(
     pad_depth <= MAX_SAFE_PAD,
     "Padding depth too large: pad_depth=",
     pad_depth);
