@@ -277,7 +277,7 @@ STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
 
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
   m.impl("my_transpose", TORCH_BOX(&my_transpose));
-  m.impl("my_empty_like", TORCH_BOX(&empty_like));
+  m.impl("my_empty_like", TORCH_BOX(&my_empty_like));
   m.impl("fill_infinity", TORCH_BOX(&fill_infinity));
   m.impl("my_is_cpu", TORCH_BOX(&my_is_cpu));
   m.impl("my_new_empty_dtype_variant", TORCH_BOX(&my_new_empty_dtype_variant));
