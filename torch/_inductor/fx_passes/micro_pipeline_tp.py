@@ -515,6 +515,7 @@ class _ScaledMatmul(_Matmul):
             use_fast_accum=get_arg(mm_node, 7, False),
             pre_mm_reshape=pre_mm_reshape,
             post_mm_reshape=post_mm_reshape,
+            pre_mm_B_transpose=None,
         )
 
 
