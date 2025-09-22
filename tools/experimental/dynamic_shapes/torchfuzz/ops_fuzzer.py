@@ -4,7 +4,7 @@ import random
 from dataclasses import dataclass
 from typing import Optional
 
-from tensor_fuzzer import (
+from torchfuzz.tensor_fuzzer import (
     fuzz_tensor_size,
     fuzz_torch_tensor_type,
     fuzz_valid_stride,
@@ -13,6 +13,7 @@ from tensor_fuzzer import (
     specs_compatible,
     TensorSpec,
 )
+from torchfuzz.operators import list_operators, get_operator
 
 import torch
 
@@ -172,11 +173,7 @@ def fuzz_spec() -> Spec:
 def fuzz_op(target_spec: Spec, depth, stack_size) -> tuple[str, list[Spec]]:
     """
     Given an output specification, returns an operation that can
-    produce a tensor with that layout.
-
-    Supports:
-    - For scalars: scalar_add, scalar_multiply, item, constant, arg
-    - For tensors: aten.add, aten.mul, constant, arg
+    produce a tensor with that layout using the operator class system.
 
     Args:
         target_spec: Desired output specification (TensorSpec or ScalarSpec)
@@ -188,93 +185,65 @@ def fuzz_op(target_spec: Spec, depth, stack_size) -> tuple[str, list[Spec]]:
         Tuple of (operation_name, list_of_argument_specs) where each argument spec
         describes the layout requirements for the operation's inputs
     """
-    if isinstance(target_spec, ScalarSpec):
-        if target_spec.constant is not None:
-            # At depth 0, only allow constant operation
-            return _get_constant_args_specs(target_spec)
-        if depth == 0:
-            # At depth 0, only allow leaf operations
-            ops = ["constant", "arg"]
-            chosen_op = random.choice(ops)
+    # Get all available operators
+    available_operators = list_operators()
+
+    # Filter operators that can produce the target spec
+    compatible_ops = []
+    for op_name, operator in available_operators.items():
+        if operator.can_produce(target_spec):
+            compatible_ops.append((op_name, operator))
+
+    if not compatible_ops:
+        raise ValueError(f"No operators available that can produce {target_spec}")
+
+    # Categorize operators into leaf and non-leaf
+    leaf_ops = []
+    non_leaf_ops = []
+
+    for op_name, operator in compatible_ops:
+        if op_name in ["constant", "arg"] or op_name.startswith("arg_"):
+            leaf_ops.append((op_name, operator))
         else:
-            # At higher depths, allow all scalar operations
-            non_leaf_ops = ["scalar_add", "scalar_multiply", "torch.ops.aten.item"]
-            leaf_ops = ["constant", "arg"]
+            non_leaf_ops.append((op_name, operator))
 
-            # Reduce probability of leaf operations when stack_size < 10
-            if stack_size < 10 or depth > 7:
-                # 80% chance of non-leaf, 20% chance of leaf
-                if random.random() < 0.8:
-                    chosen_op = random.choice(non_leaf_ops)
-                else:
-                    chosen_op = random.choice(leaf_ops)
-            else:
-                # Normal probability distribution
-                all_ops = non_leaf_ops + leaf_ops
-                chosen_op = random.choice(all_ops)
-
-        if chosen_op == "scalar_add":
-            return _get_scalar_add_args_specs(target_spec)
-        elif chosen_op == "scalar_multiply":
-            return _get_scalar_multiply_args_specs(target_spec)
-        elif chosen_op == "torch.ops.aten.item":
-            return _get_item_args_specs(target_spec)
-        elif chosen_op == "constant":
-            return _get_constant_args_specs(target_spec)
-        else:  # arg
+    # Choose operation based on depth and stack size constraints
+    if depth == 0:
+        # At depth 0, only allow leaf operations
+        if not leaf_ops:
+            # If no leaf ops can produce this spec, fallback to arg
             return _get_arg_args_specs(target_spec)
-
-    elif isinstance(target_spec, TensorSpec):
-        if depth == 0:
-            # At depth 0, only allow leaf operations
-            ops = ["arg"]
-            chosen_op = random.choice(ops)
-        else:
-            # At higher depths, allow all tensor operations
-            non_leaf_ops = [
-                "torch.ops.aten.add",
-                "torch.ops.aten.mul",
-            ]
-
-            leaf_ops = ["arg"]
-
-            # Reduce probability of leaf operations when stack_size < 10
-            if stack_size < 10:
-                # 80% chance of non-leaf, 20% chance of leaf
-                if random.random() < 0.8:
-                    chosen_op = random.choice(non_leaf_ops)
-                else:
-                    chosen_op = random.choice(leaf_ops)
-            else:
-                # Normal probability distribution
-                all_ops = non_leaf_ops + leaf_ops
-                chosen_op = random.choice(all_ops)
-
-        if chosen_op == "torch.ops.aten.add":
-            return _get_aten_add_args_specs(target_spec)
-        elif chosen_op == "torch.ops.aten.mul":
-            return _get_aten_mul_args_specs(target_spec)
-        elif chosen_op == "constant":
-            return _get_constant_args_specs(target_spec)
-        else:  # arg
-            return _get_arg_args_specs(target_spec)
-
+        chosen_op_name, chosen_operator = random.choice(leaf_ops)
     else:
-        raise ValueError(f"Unknown target spec type: {type(target_spec)}")
+        # At higher depths, choose between leaf and non-leaf operations
+        # Reduce probability of leaf operations when stack_size < 10
+        if (stack_size < 10 or depth > 7) and non_leaf_ops:
+            # 80% chance of non-leaf, 20% chance of leaf
+            if random.random() < 0.8:
+                chosen_op_name, chosen_operator = random.choice(non_leaf_ops)
+            else:
+                chosen_op_name, chosen_operator = random.choice(leaf_ops) if leaf_ops else random.choice(non_leaf_ops)
+        else:
+            # Normal probability distribution
+            all_ops = non_leaf_ops + leaf_ops
+            chosen_op_name, chosen_operator = random.choice(all_ops) if all_ops else ("arg", get_operator("arg"))
 
-
-def _get_scalar_add_args_specs(target_spec: ScalarSpec) -> tuple[str, list[Spec]]:
-    """Get argument specifications for scalar_add operation using type promotion rules."""
-    # Use PyTorch's implicit type promotion rules to generate diverse input types
-    arg_specs = _get_promoted_scalar_args(target_spec.dtype)
-    return "scalar_add", arg_specs
-
-
-def _get_scalar_multiply_args_specs(target_spec: ScalarSpec) -> tuple[str, list[Spec]]:
-    """Get argument specifications for scalar_multiply operation using type promotion rules."""
-    # Use PyTorch's implicit type promotion rules to generate diverse input types
-    arg_specs = _get_promoted_scalar_args(target_spec.dtype)
-    return "scalar_multiply", arg_specs
+    # Use the operator to decompose the target spec into input specs
+    try:
+        if chosen_op_name.startswith("arg_"):
+            # Handle special arg_ operations
+            return chosen_op_name, []
+        elif chosen_op_name in ["constant", "arg"]:
+            # Handle leaf operations
+            return chosen_op_name, []
+        else:
+            # Use the operator's decompose method
+            input_specs = chosen_operator.decompose(target_spec)
+            return chosen_op_name, input_specs
+    except Exception as e:
+        # Fallback to arg if decomposition fails
+        print(f"Warning: operator {chosen_op_name} decomposition failed: {e}")
+        return _get_arg_args_specs(target_spec)
 
 
 # Define promotion chains - types that can promote to the target
@@ -380,6 +349,20 @@ def _get_promoted_scalar_args(target_dtype: torch.dtype) -> list[Spec]:
     # For ScalarSpec output, both inputs must be ScalarSpec
     # (mixing with 0-D TensorSpec would produce 0-D TensorSpec output)
     return [ScalarSpec(arg_dtypes[0]), ScalarSpec(arg_dtypes[1])]
+
+
+def _get_scalar_add_args_specs(target_spec: ScalarSpec) -> tuple[str, list[Spec]]:
+    """Get argument specifications for scalar_add operation using type promotion rules."""
+    # Use PyTorch's implicit type promotion rules to generate diverse input types
+    arg_specs = _get_promoted_scalar_args(target_spec.dtype)
+    return "scalar_add", arg_specs
+
+
+def _get_scalar_multiply_args_specs(target_spec: ScalarSpec) -> tuple[str, list[Spec]]:
+    """Get argument specifications for scalar_multiply operation using type promotion rules."""
+    # Use PyTorch's implicit type promotion rules to generate diverse input types
+    arg_specs = _get_promoted_scalar_args(target_spec.dtype)
+    return "scalar_multiply", arg_specs
 
 
 def _get_item_args_specs(target_spec: ScalarSpec) -> tuple[str, list[Spec]]:
