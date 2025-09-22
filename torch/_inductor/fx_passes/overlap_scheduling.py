@@ -1,4 +1,3 @@
-import dataclasses
 import functools
 import heapq
 import itertools
@@ -169,9 +168,6 @@ class CollectiveInfo:
     estimated_time_ms: float
     exposed_time_ms: float  # How much of this collective is still exposed
     hiding_node: Optional[fx.Node] = None  # Node that hides this collective
-    in_flight_with: OrderedSet[fx.Node] = dataclasses.field(
-        default_factory=OrderedSet
-    )  # Nodes that are in flight with this collective
 
     @property
     def is_exposed(self) -> bool:
@@ -182,9 +178,24 @@ class OverlapScheduler:
     """
     Scheduler that reorders operations to maximize compute-collective overlap.
 
-    This scheduler analyzes a graph to identify opportunities where collective
-    communication operations can be overlapped with compute operations, reducing
-    overall execution time by hiding communication latency.
+    The reordering is done as a scheduling pass. We maintain a priority queue of
+    schedulable nodes. The nodes are ranked by:
+
+    1) the compute node depth they dominate. this allows reordering locally, such as with
+    parallel mms, and also allows overlapping reduce scatter nodes outputs in the backward
+    with compute by deferring their waits.
+
+    2) whether the current node is a collective or wait that is currently exposed but has a compute
+    node which it could be overlapped with.
+
+    3) original order in the graph for stability.
+
+    When we schedule compute nodes, we first overlap exposed in-flight collectives, then look for unscheduled
+    collectives that can be scheduled concurrently.
+
+    TODO:
+        - experiment with other priority scores / allow other mechanisms of reorder / more strict adherence to original graph
+        - memory limit for deferred scheduling of reduce_scatter nodes.
     """
 
     def __init__(
