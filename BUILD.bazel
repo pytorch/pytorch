@@ -833,6 +833,36 @@ pybind_extension(
     ],
 )
 
+cc_library(
+    name = "functorch",
+    hdrs = glob([
+        "functorch/csrc/dim/*.h",
+    ]),
+    srcs = glob([
+        "functorch/csrc/dim/*.cpp",
+    ]),
+    deps = [
+        ":aten_nvrtc",
+        ":torch_python",
+        "@pybind11",
+    ],
+)
+
+pybind_extension(
+    name = "functorch/_C",
+    copts=[
+        "-DTORCH_EXTENSION_NAME=_C"
+    ],
+    srcs = [
+        "functorch/csrc/init_dim_only.cpp",
+    ],
+    deps = [
+        ":functorch",
+        ":torch_python",
+        ":aten_nvrtc",
+    ],
+)
+
 cc_binary(
     name = "torch/bin/torch_shm_manager",
     srcs = [
@@ -873,6 +903,7 @@ py_library(
     ],
     data = [
         ":torch/_C.so",
+        ":functorch/_C.so",
         ":torch/bin/torch_shm_manager",
     ],
 )
