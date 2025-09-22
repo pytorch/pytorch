@@ -11,6 +11,7 @@ import builtins
 import collections
 import contextlib
 import copy
+import functools
 import itertools
 import pprint
 from contextlib import AbstractContextManager, nullcontext
@@ -307,6 +308,7 @@ def _create_runtime_wrapper(
         if cm is not None:
             cm.__exit__(None, None, None)
 
+    @simple_wraps(compiled_fn)
     def runtime_wrapper(args: list[Any]):
         # Create context manager for profiler
         cm = record_runtime_wrapper_prologue_enter()
@@ -465,6 +467,7 @@ def _create_runtime_wrapper(
         return runtime_wrapper
 
     # Disabling saved tensors hooks
+    @simple_wraps(runtime_wrapper)
     def _runtime_wrapper(*args, **kwargs):
         with _disable_saved_tensors_hooks():
             return runtime_wrapper(*args, **kwargs)
@@ -1929,6 +1932,33 @@ def _disable_saved_tensors_hooks():
             )
 
 
+@dataclass
+class SerializableCompiledFunction:
+    """
+    Represents a result of AOTDispatch after calling the inner compiler
+    that can be serialized
+    """
+
+    compiled_fn: Callable
+    serialize_fn: Callable
+
+    def __init__(self, compiled_fn: Callable, serialize_fn: Callable):
+        self.compiled_fn = compiled_fn
+        self.serialize_fn = serialize_fn
+        # Equivalent to functools.wraps
+        functools.update_wrapper(
+            self,
+            compiled_fn,
+            assigned=("__doc__", "__annotations__", "__type_params__"),
+        )
+
+    def serialize(self) -> Any:
+        return self.serialize_fn()
+
+    def __call__(self, *args, **kwargs):
+        return self.compiled_fn(*args, **kwargs)
+
+
 # This is wrapped in a class just for namespacing purposes
 # No need to make it into an actual CompilerWrapper because it doesn't fit the abstract as cleanly
 class AOTDispatchAutograd:
@@ -2037,7 +2067,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
         aot_config: AOTConfig,
         *,
         fw_metadata: ViewAndMutationMeta,  # runtime metadata
-        try_save_cache_entry: Optional[Callable],  # Save cache entry after compilation
+        try_save_cache_entry: Optional[Callable],  # Serialization function
     ):
         # For additional context see Note [CUDA Graph Safe RNG Functionalization]
         # Each pair forward, backward rng states must be equal prior to its invocation on any
@@ -2346,6 +2376,44 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     assert isinstance(
                         lazy_backward_info, AutogradLazyBackwardCompileInfo
                     )
+
+                    if (
+                        hasattr(lazy_backward_info, "saved_context")
+                        and lazy_backward_info.saved_context is not None
+                    ):
+                        assert isinstance(
+                            lazy_backward_info.saved_context, TracingContext
+                        )
+                        ddp_ctx = lazy_backward_info.saved_context.ddp_optimizer_ctx
+                        if ddp_ctx is not None:
+                            assert ddp_ctx.curr_bucket >= 0, (
+                                f"expected same # of fw and bw compiles, but found bucket {ddp_ctx.curr_bucket}"
+                            )
+                            curr_fw_meta = ddp_ctx.metadata_per_bucket[
+                                ddp_ctx.curr_bucket
+                            ]
+                            # Note [DDPOptimizer and fw_metadata]
+                            # When using the DDPOptimizer, we have a single dynamo graph (and TracingContext),
+                            # but multiple AOTDispatcher graph.
+                            #
+                            # One consequence is that there will be **multiple** fw_metadata objects, one per AOT graph,
+                            # which we stash the fw_metadata on the TracingContext.
+                            #
+                            # Normally what happens is that as we compile AOT graphs 1...N, we clobber the fw_metadata
+                            # for graph i-1 when we start running AOT for graph i.
+                            # Ordinarily this is fine, because inductor no longer needs the metadata from graph i-1.
+                            #
+                            # However, this is a problem for lazy compilation of the backward. During backward compilation,
+                            # we compile the backward lazily at backward runtime, meaning that we will first compile
+                            # backward graph N, N-1, ..., 1.
+                            # We need to ensure that at the time inductor compiles bw graph N-1, it can access
+                            # the corresponding fw_metadta for graph N-1.
+                            #
+                            # We do this by stashing a DDPOptimizerContext, which tracks:
+                            # - the metadata of all N graphs
+                            # - the graph we are currently compiling in our DDPOptimizer region.
+                            ddp_ctx.curr_bucket -= 1
+                            lazy_backward_info.saved_context.fw_metadata = curr_fw_meta
 
                     if not saved_tensors_use_once:
                         fw_metadata.bw_donated_idxs = []

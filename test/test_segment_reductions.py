@@ -14,7 +14,6 @@ from torch.testing._internal.common_utils import (
     run_tests,
     gradcheck,
     parametrize,
-    skipIfRocm,
 )
 
 
@@ -231,7 +230,6 @@ class TestSegmentReductions(TestCase):
                             length_type,
                         )
 
-    @skipIfRocm
     @dtypes(
         *product(
             (torch.half, torch.bfloat16, torch.float, torch.double),

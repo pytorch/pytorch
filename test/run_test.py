@@ -38,6 +38,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
     TEST_WITH_SLOW_GRADCHECK,
+    TEST_XPU,
 )
 
 
@@ -171,10 +172,12 @@ ROCM_BLOCKLIST = [
     "distributed/rpc/test_tensorpipe_agent",
     "distributed/rpc/test_share_memory",
     "distributed/rpc/cuda/test_tensorpipe_agent",
+    "inductor/test_max_autotune",  # taking excessive time, many tests >30 min
     "test_determination",
     "test_jit_legacy",
     "test_cuda_nvml_based_avail",
     "test_jit_cuda_fuser",
+    "test_openreg",
 ]
 
 S390X_BLOCKLIST = [
@@ -240,6 +243,7 @@ S390X_BLOCKLIST = [
     # depend on z3-solver
     "fx/test_z3_gradual_types",
     "test_proxy_tensor",
+    "test_openreg",
 ]
 
 XPU_BLOCKLIST = [
@@ -840,8 +844,9 @@ def _test_cpp_extensions_aot(test_directory, options, use_ninja):
         exts_to_build = [
             (install_cmd, "no_python_abi_suffix_test"),
         ]
-        if TEST_CUDA:
+        if TEST_CUDA or TEST_XPU:
             exts_to_build.append((wheel_cmd, "python_agnostic_extension"))
+        if TEST_CUDA:
             exts_to_build.append((install_cmd, "libtorch_agnostic_extension"))
         for cmd, extension_dir in exts_to_build:
             return_code = shell(
@@ -917,7 +922,12 @@ def _test_autoload(test_directory, options, enable=True):
         os.environ.pop("TORCH_DEVICE_BACKEND_AUTOLOAD")
 
 
-def run_test_with_openreg(test_module, test_directory, options):
+# test_openreg is designed to run all tests under torch_openreg, which
+# is an torch backend similar to CUDA or MPS and implemented by using
+# third-party accelerator integration mechanism. Therefore, if all the
+# tests under torch_openreg are passing, it can means that the mechanism
+# mentioned above is working as expected.
+def test_openreg(test_module, test_directory, options):
     openreg_dir = os.path.join(
         test_directory, "cpp_extensions", "open_registration_extension", "torch_openreg"
     )
@@ -926,7 +936,16 @@ def run_test_with_openreg(test_module, test_directory, options):
         return return_code
 
     with extend_python_path([install_dir]):
-        return run_test(test_module, test_directory, options)
+        cmd = [
+            sys.executable,
+            "-m",
+            "unittest",
+            "discover",
+            "-s",
+            os.path.join(openreg_dir, "tests"),
+            "-v",
+        ]
+        return shell(cmd, cwd=test_directory, env=os.environ)
 
 
 def test_distributed(test_module, test_directory, options):
@@ -1173,12 +1192,14 @@ def handle_log_file(
 
 
 def get_pytest_args(options, is_cpp_test=False, is_distributed_test=False):
-    if RERUN_DISABLED_TESTS:
-        # Distributed tests are too slow, so running them x50 will cause the jobs to timeout after
+    if is_distributed_test:
+        # Distributed tests do not support rerun, see https://github.com/pytorch/pytorch/issues/162978
+        rerun_options = ["-x", "--reruns=0"]
+    elif RERUN_DISABLED_TESTS:
+        # ASAN tests are too slow, so running them x50 will cause the jobs to timeout after
         # 3+ hours. So, let's opt for less number of reruns. We need at least 150 instances of the
-        # test every 2 weeks to satisfy the SQL query (15 x 14 = 210). The same logic applies
-        # to ASAN, which is also slow
-        count = 15 if is_distributed_test or TEST_WITH_ASAN else 50
+        # test every 2 weeks to satisfy the SQL query (15 x 14 = 210).
+        count = 15 if TEST_WITH_ASAN else 50
         # When under rerun-disabled-tests mode, run the same tests multiple times to determine their
         # flakiness status. Default to 50 re-runs
         rerun_options = ["--flake-finder", f"--flake-runs={count}"]
@@ -1255,8 +1276,7 @@ CUSTOM_HANDLERS = {
     "test_ci_sanity_check_fail": run_ci_sanity_check,
     "test_autoload_enable": test_autoload_enable,
     "test_autoload_disable": test_autoload_disable,
-    "test_openreg": run_test_with_openreg,
-    "test_transformers_privateuse1": run_test_with_openreg,
+    "test_openreg": test_openreg,
 }
 
 

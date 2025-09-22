@@ -1,8 +1,8 @@
-#include <filesystem>
 #include <sstream>
 #include <unordered_map>
 
 #include <ATen/core/interned_strings.h>
+#include <c10/util/FileSystem.h>
 #include <c10/util/thread_name.h>
 #include <caffe2/utils/threadpool/WorkersPool.h>
 #include <torch/csrc/distributed/c10d/control_plane/WorkerServer.hpp>
@@ -145,7 +145,7 @@ WorkerServer::WorkerServer(const std::string& hostOrFile, int port) {
     // using unix sockets
     server_.set_address_family(AF_UNIX);
 
-    if (std::filesystem::exists(hostOrFile)) {
+    if (c10::filesystem::exists(hostOrFile)) {
       throw std::runtime_error(fmt::format("{} already exists", hostOrFile));
     }
 

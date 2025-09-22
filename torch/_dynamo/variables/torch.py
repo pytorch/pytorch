@@ -149,7 +149,6 @@ constant_fold_functions_need_guards = [
     torch.cuda.is_initialized,
     torch.xpu.current_device,
     torch.xpu.is_initialized,
-    torch.autograd._profiler_enabled,
 ]
 
 constant_fold_functions = [

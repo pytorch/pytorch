@@ -129,7 +129,7 @@ source venv/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
       git clean -xdf
       python setup.py clean
       git submodule update --init --recursive
-      python -m pip install -r requirements.txt
+      python -m pip install --group dev
       python -m pip install --no-build-isolation -v -e .
       ```
   4. The main step within `python -m pip install -e . -v --no-build-isolation` is running `make` from the `build` directory. If you want to
@@ -259,6 +259,7 @@ dependencies as well as the nightly binaries into the repo directory.
       support for PyTorch.
 * [tools](tools) - Code generation scripts for the PyTorch library.
   See [README](tools/README.md) of this directory for more details.
+* [torchgen](torchgen) - contains the logic and tooling for generating PyTorch's low-level C++ and Python bindings from operator definitions, typically specified in native_functions.yaml
 * [test](test) - Python unit tests for PyTorch Python frontend.
   * [test_torch.py](test/test_torch.py) - Basic tests for PyTorch
     functionality.
@@ -294,7 +295,7 @@ The following packages should be installed with `pip`:
 - `pytest` - recommended to run tests more selectively
 Running
 ```
-pip install -r requirements.txt
+pip install --group dev
 ```
 will install these dependencies for you.
 

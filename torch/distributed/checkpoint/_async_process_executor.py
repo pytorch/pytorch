@@ -4,6 +4,7 @@ import logging
 import os
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
+from datetime import timedelta
 from enum import Enum
 from typing import Any, Optional, Union
 from uuid import uuid4
@@ -113,9 +114,16 @@ class _AsyncCheckpointProcess:
 
     def __del__(self) -> None:
         if self._save_process.is_alive():
-            logger.info("Terminating the checkpoint background process...")
-            self._send(_CheckpointSaveProcessControlOpts.TERMINATE)
-            self._save_process.join()
+            try:
+                logger.info("Terminating the checkpoint background process.")
+                self._send(_CheckpointSaveProcessControlOpts.TERMINATE)
+                self._save_process.join(timeout=5)
+            finally:
+                if self._save_process.is_alive():
+                    logger.warning(
+                        "Checkpoint background process is still alive after termination request. Sending SIGTERM."
+                    )
+                    self._save_process.terminate()
 
     def _send(self, data: Any) -> None:
         self._process_pipe.send(data)
@@ -215,7 +223,9 @@ class _AsyncCheckpointProcess:
                 "Initializing dist.ProcessGroup in checkpoint background process"
             )
             # NOTE: GLOO backend is enforced here.
-            dist.init_process_group(backend=dist.Backend.GLOO)
+            dist.init_process_group(
+                backend=dist.Backend.GLOO, timeout=timedelta(seconds=600)
+            )
             dist.barrier()
 
             logger.info("Checkpoint background process is running...")

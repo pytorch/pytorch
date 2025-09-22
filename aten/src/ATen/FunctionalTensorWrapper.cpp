@@ -133,7 +133,7 @@ FunctionalTensorWrapper::FunctionalTensorWrapper(const Tensor& view_value, const
   : c10::TensorImpl(
       c10::DispatchKeySet(DispatchKey::Functionalize),
       view_value.dtype(),
-      view_value.device()
+      base->storage().data_ptr().device()
     ),
     value_(view_value),
     is_multi_output_view_(base->is_multi_output_view_ || meta.is_multi_output),
@@ -485,7 +485,10 @@ void FunctionalTensorWrapper::shallow_copy_from(const c10::intrusive_ptr<TensorI
 
 
 c10::Device FunctionalTensorWrapper::device_custom() const {
-  return value_.unsafeGetTensorImpl()->device();
+  // The storage pointer already uses the underlying tensor custom device (if
+  // applicable) to extract the device. So, we dont have to recurse again by
+  // doing value_.unsafeGetTensorImpl()->device().
+  return storage().data_ptr().device();
 }
 at::IntArrayRef FunctionalTensorWrapper::sizes_custom() const {
   return value_.unsafeGetTensorImpl()->sizes();

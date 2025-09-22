@@ -7,7 +7,6 @@ import torch.nn as nn
 from torch.distributed._tools.mem_tracker import MemTracker
 from torch.testing._internal.common_utils import (
     run_tests,
-    skipIfRocm,
     skipIfTorchDynamo,
     TEST_CUDA,
     TEST_XPU,
@@ -34,7 +33,6 @@ class TestMemTracker(TestCase):
     @unittest.skipIf(
         not TEST_CUDA and not TEST_XPU, "Neither CUDA or XPU is not available"
     )
-    @skipIfRocm()
     def test_accelerator_tracker_equivalence(
         self,
     ):

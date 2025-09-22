@@ -1201,7 +1201,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Returns the global rank of the device. This function assumes that users
   // always create a default global process group(PG) which includes all
   // devices. It is called in the constructor of ProcessGroupNCCL, so it always
-  // return the rank_ of the the very first PG created, aka, default global PG.
+  // return the rank_ of the very first PG created, aka, default global PG.
   const int& globalRank() const;
 
   const c10::intrusive_ptr<Store>& globalStore() const;

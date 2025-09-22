@@ -9,7 +9,7 @@ import math
 import operator
 import warnings
 from enum import Enum
-from typing import Any, Callable, Optional, Union
+from typing import Any, Callable, NamedTuple, Optional, Union
 
 import torch
 from torch import Tensor
@@ -69,10 +69,11 @@ def _warn_once(
 __all__ = [
     "BlockMask",
     "flex_attention",
+    "AuxOutput",
+    "AuxRequest",
     "FlexKernelOptions",
     "create_block_mask",
     "create_mask",
-    "create_nested_block_mask",
     "or_masks",
     "and_masks",
     "noop_mask",
@@ -197,6 +198,26 @@ class FlexKernelOptions(TypedDict, total=False):
 
     waves_per_eu: NotRequired[int]
     """ROCm-specific waves per execution unit."""
+
+
+class AuxRequest(NamedTuple):
+    """Request which auxiliary outputs to compute from flex_attention.
+
+    Each field is a boolean indicating whether that auxiliary output should be computed.
+    """
+
+    lse: bool = False
+    max_scores: bool = False
+
+
+class AuxOutput(NamedTuple):
+    """Auxiliary outputs from flex_attention operation.
+
+    Fields will be None if not requested, or contain the tensor if requested.
+    """
+
+    lse: Optional[Tensor] = None
+    max_scores: Optional[Tensor] = None
 
 
 class _ModificationType(Enum):
@@ -1089,181 +1110,13 @@ def _create_empty_block_mask(query: Tensor, key: Tensor) -> BlockMask:
     )
 
 
-def _nested_mod_func_adapter(
-    orig_mod_func: Union[_score_mod_signature, _mask_mod_signature],
-    q_nt: torch.Tensor,
-    kv_nt: torch.Tensor,
-    is_score_mod: bool,
-) -> Union[_score_mod_signature, _mask_mod_signature]:
-    r"""Adapter to convert a score_mod / mask_mod to be NJT-compatible. The given mod func
-    should be written as if operating over a single sequence at a item. This adapter will
-    handle conversion from indices operating over a "stacked sequence" of length ``sum(S)``
-    for sequence length ``S`` in the NJT to "sequence relative" indices in range ``[0, S)``.
-
-    Args:
-        orig_mod_func (Callable): Function to modify attention scores. It takes four or five
-            arguments, depending on whether a mask_mod or score_mod func is passed.
-        q_nt (torch.Tensor): Jagged layout nested tensor (NJT) that defines the sequence length
-            structure for query.
-        kv_nt (torch.Tensor): Jagged layout nested tensor (NJT) that defines the sequence length
-            structure for key / value.
-        is_score_mod (bool): Indicates whether the mod function is a score_mod.
-
-    Returns:
-        nt_score_mod: An NJT-compatible version of orig_score_mod
-    """
-
-    # Used to convert indices within the "stacked" sequence (range [0, sum(*)))
-    # to "sequence local" indices (range [0, S) for each S).
-    def _build_seq_idx(offsets, total_length):
-        range_tensor = torch.arange(
-            total_length, device=offsets.device, dtype=torch.int32
-        )
-
-        # Use searchsorted to find the index for each position
-        # NB: This assumes offsets[0] to offsets[-1] spans the packed dim of values.
-        # If we ever loosen this restriction, this logic will need to be updated.
-        seq_idx = torch.searchsorted(offsets, range_tensor, right=True) - 1
-        return seq_idx
-
-    q_offsets = q_nt._offsets  # type: ignore[attr-defined]
-    kv_offsets = kv_nt._offsets  # type: ignore[attr-defined]
-    q_seq_idx = _build_seq_idx(q_offsets, q_nt._values.shape[q_nt._ragged_idx - 1])  # type: ignore[attr-defined]
-    if q_nt is kv_nt:
-        kv_seq_idx = q_seq_idx
-    else:
-        # cross attention case
-        kv_seq_idx = _build_seq_idx(
-            kv_offsets,
-            kv_nt._values.shape[kv_nt._ragged_idx - 1],  # type: ignore[attr-defined]
-        )
-
-    # Converts q_idx / kv_idx from [0, total_length) -> [0, S), where S refers
-    # to the sequence length for each sequence in the NJT, for use in given
-    # score_mod. This allows the user to write a score_mod as if it were
-    # operating on a single sequence and the "stacked sequence" is split
-    # automatically into individual sequences for them.
-    if is_score_mod:
-
-        def nt_score_mod(score, b, h, q_idx, kv_idx):
-            b_nested = q_seq_idx[q_idx]
-            q_nested = q_idx - q_offsets[q_seq_idx[q_idx]]
-            kv_nested = kv_idx - kv_offsets[kv_seq_idx[kv_idx]]
-            is_same_sequence = q_seq_idx[q_idx] == kv_seq_idx[kv_idx]
-            return torch.where(
-                is_same_sequence,
-                orig_mod_func(score, b_nested, h, q_nested, kv_nested),  # type: ignore[call-arg]
-                # don't allow inter-sequence attention
-                float("-inf"),
-            )
-
-        return nt_score_mod
-    else:
-
-        def nt_mask_mod(b, h, q_idx, kv_idx):
-            b_nested = q_seq_idx[q_idx]
-            q_nested = q_idx - q_offsets[q_seq_idx[q_idx]]
-            kv_nested = kv_idx - kv_offsets[kv_seq_idx[kv_idx]]
-            # don't allow inter-sequence attention
-            is_same_sequence = q_seq_idx[q_idx] == kv_seq_idx[kv_idx]
-            return orig_mod_func(b_nested, h, q_nested, kv_nested) & is_same_sequence  # type: ignore[call-arg]
-
-        return nt_mask_mod
-
-
-def create_nested_block_mask(
-    mask_mod: _mask_mod_signature,
-    B: Optional[int],
-    H: Optional[int],
-    q_nt: torch.Tensor,
-    kv_nt: Optional[torch.Tensor] = None,
-    BLOCK_SIZE: Union[int, tuple[int, int]] = _DEFAULT_SPARSE_BLOCK_SIZE,
-    _compile=False,
-) -> BlockMask:
-    r"""This function creates a nested tensor compatible block mask tuple from a mask_mod
-    function. The returned BlockMask will be on the device specified by the input nested tensor.
-
-    Args:
-        mask_mod (Callable): mask_mod function. This is a callable that defines the
-            masking pattern for the attention mechanism. It takes four arguments:
-            b (batch size), h (number of heads), q_idx (query index), and kv_idx (key/value index).
-            It should return a boolean tensor indicating which attention connections are allowed
-            (True) or masked out (False).
-        B (int): Batch size.
-        H (int): Number of query heads.
-        q_nt (torch.Tensor): Jagged layout nested tensor (NJT) that defines the sequence length
-            structure for query. The block mask will be constructed to operate on a "stacked
-            sequence" of length ``sum(S)`` for sequence length ``S`` from the NJT.
-        kv_nt (torch.Tensor): Jagged layout nested tensor (NJT) that defines the sequence length
-            structure for key / value, allowing for cross attention. The block mask will be
-            constructed to operate on a "stacked sequence" of length ``sum(S)`` for sequence
-            length ``S`` from the NJT. If this is None, ``q_nt`` is used to define the structure
-            for key / value as well. Default: None
-        BLOCK_SIZE (int or tuple[int, int]): Block size for the block mask. If a single int is
-            provided it is used for both query and key/value.
-
-    Returns:
-        BlockMask:  A BlockMask object that contains the block mask information.
-
-    Example Usage:
-        .. code-block:: python
-
-            # shape (B, num_heads, seq_len*, D) where seq_len* varies across the batch
-            query = torch.nested.nested_tensor(..., layout=torch.jagged)
-            key = torch.nested.nested_tensor(..., layout=torch.jagged)
-            value = torch.nested.nested_tensor(..., layout=torch.jagged)
-
-
-            def causal_mask(b, h, q_idx, kv_idx):
-                return q_idx >= kv_idx
-
-
-            block_mask = create_nested_block_mask(
-                causal_mask, 1, 1, query, _compile=True
-            )
-            output = flex_attention(query, key, value, block_mask=block_mask)
-
-        .. code-block:: python
-
-            # shape (B, num_heads, seq_len*, D) where seq_len* varies across the batch
-            query = torch.nested.nested_tensor(..., layout=torch.jagged)
-            key = torch.nested.nested_tensor(..., layout=torch.jagged)
-            value = torch.nested.nested_tensor(..., layout=torch.jagged)
-
-
-            def causal_mask(b, h, q_idx, kv_idx):
-                return q_idx >= kv_idx
-
-
-            # cross attention case: pass both query and key/value NJTs
-            block_mask = create_nested_block_mask(
-                causal_mask, 1, 1, query, key, _compile=True
-            )
-            output = flex_attention(query, key, value, block_mask=block_mask)
-    """
-    # use same structure for kv as for q by default
-    if kv_nt is None:
-        kv_nt = q_nt
-    if q_nt.device != kv_nt.device:
-        raise ValueError(
-            "create_nested_block_mask(): Expected q_nt and kv_nt to be on the same device"
-        )
-    return create_block_mask(
-        _nested_mod_func_adapter(mask_mod, q_nt, kv_nt, is_score_mod=False),  # type: ignore[arg-type]
-        B,
-        H,
-        q_nt._values.shape[q_nt._ragged_idx - 1],  # type: ignore[attr-defined]
-        kv_nt._values.shape[kv_nt._ragged_idx - 1],  # type: ignore[attr-defined]
-        device=q_nt.device,  # type: ignore[arg-type]
-        # compile is important so we don't materialize a mask_tensor of
-        # shape (1, 1, total_seqlen, total_seqlen)
-        BLOCK_SIZE=BLOCK_SIZE,
-        _compile=_compile,
-    )
-
-
 def _apply_kernel_options(
-    query: Tensor, key: Tensor, value: Tensor, return_lse: bool, kernel_options
+    query: Tensor,
+    key: Tensor,
+    value: Tensor,
+    return_lse: bool,
+    kernel_options,
+    return_aux: Optional[AuxRequest] = None,
 ):
     kernel_options = {} if kernel_options is None else dict(kernel_options)
 
@@ -1273,23 +1126,41 @@ def _apply_kernel_options(
     # This forces all biases grad scatters to be done in the DQ iteration loop of the backwards
     kernel_options.setdefault("WRITE_DQ", True)
 
+    any_inputs_on_cpu_device = (
+        query.device.type == "cpu"
+        or key.device.type == "cpu"
+        or value.device.type == "cpu"
+    )
+
+    # Determine what auxiliary outputs are needed
+    output_lse = return_lse
+    output_max = False
+
+    if return_aux is not None:
+        # New API takes precedence over legacy parameters
+        output_lse = return_aux.lse
+        output_max = return_aux.max_scores
+
     # If forward kernel needs to return logsumexp is decided by this rule internally.
     assert "OUTPUT_LOGSUMEXP" not in kernel_options
     kernel_options["OUTPUT_LOGSUMEXP"] = True
-    if not return_lse:
+    if not output_lse:
         # We used to check if q,k,v required grads but since captured buffers can require grad
         # we always write unless in no_grad
-        output_logsumexp = torch.is_grad_enabled()
-        kernel_options["OUTPUT_LOGSUMEXP"] = output_logsumexp
-        any_inputs_on_cpu_device = (
-            query.device.type == "cpu"
-            or key.device.type == "cpu"
-            or value.device.type == "cpu"
-        )
+        kernel_options["OUTPUT_LOGSUMEXP"] = torch.is_grad_enabled()
         if any_inputs_on_cpu_device:
-            # CPU with torch.compile now supports infernece, and will not return lse
+            # CPU with torch.compile now supports inference, and will not return lse
             # TODO: support CPU for training and return lse
             kernel_options["OUTPUT_LOGSUMEXP"] = False
+
+    # If forward kernel needs to return max is decided by this rule internally.
+    assert "OUTPUT_MAX" not in kernel_options
+    kernel_options["OUTPUT_MAX"] = output_max
+    if any_inputs_on_cpu_device and output_max:
+        # CPU doesn't support returning max yet
+        # TODO: support CPU for returning max
+        raise NotImplementedError("Returning max scores is not supported on CPU.")
+        kernel_options["OUTPUT_MAX"] = False
 
     return kernel_options
 
@@ -1311,25 +1182,6 @@ def _validate_device(query: Tensor, key: Tensor, value: Tensor):
         raise ValueError(
             "FlexAttention is only supported on CUDA, CPU or HPU devices. "
             f"Found input tensors on {query.device.type} device."
-        )
-
-
-def _validate_nestedness(query: Tensor, key: Tensor, value: Tensor):
-    # Currently, inputs can only be all nested or no nested.
-    if query.is_nested != key.is_nested or key.is_nested != value.is_nested:
-        raise ValueError(
-            "FlexAttention does not support mixed nested tensor / non-nested tensor inputs. "
-            "Please file an issue requesting this if it is important to you."
-        )
-
-    if (
-        (query.is_nested and query._lengths is not None)  # type: ignore[attr-defined]
-        or (key.is_nested and key._lengths is not None)  # type: ignore[attr-defined]
-        or (value.is_nested and value._lengths is not None)  # type: ignore[attr-defined]
-    ):
-        raise ValueError(
-            "FlexAttention does not support nested tensors that are non-contiguous with holes. "
-            "Please file an issue requesting this if it is important to you."
         )
 
 
@@ -1402,7 +1254,9 @@ def flex_attention(
     enable_gqa: bool = False,
     return_lse: bool = False,
     kernel_options: Optional[FlexKernelOptions] = None,
-) -> Union[Tensor, tuple[Tensor, Tensor]]:
+    *,
+    return_aux: Optional[AuxRequest] = None,
+) -> Union[Tensor, tuple[Tensor, Tensor], tuple[Tensor, AuxOutput]]:
     r"""This function implements scaled dot product attention with an arbitrary attention score modification function.
 
     This function computes the scaled dot product attention between query, key, and value tensors with a user-defined
@@ -1436,13 +1290,22 @@ def flex_attention(
         block_mask (Optional[BlockMask]): BlockMask object that controls the blocksparsity pattern of the attention.
         scale (Optional[float]): Scaling factor applied prior to softmax. If none, the default value is set to :math:`\frac{1}{\sqrt{E}}`.
         enable_gqa (bool): If set to True, enables Grouped Query Attention (GQA) and broadcasts key/value heads to query heads.
-        return_lse (bool): Whether to return the logsumexp of the attention scores. Default is False.
+        return_lse (bool): Whether to return the logsumexp of the attention scores. Default is False. **Deprecated**: Use ``return_aux=AuxRequest(lse=True)`` instead.
         kernel_options (Optional[FlexKernelOptions]):
             Options to control the behavior of the underlying Triton kernels.
             See :class:`FlexKernelOptions` for available options and usage examples.
+        return_aux (Optional[AuxRequest]): Specifies which auxiliary outputs to compute and return.
+            If None, only the attention output is returned. Use ``AuxRequest(lse=True, max_scores=True)``
+            to request both auxiliary outputs.
 
     Returns:
         output (Tensor): Attention output; shape :math:`(B, Hq, L, Ev)`.
+
+        When ``return_aux`` is not None:
+            aux (AuxOutput): Auxiliary outputs with requested fields populated.
+
+        When ``return_aux`` is None (deprecated paths):
+            lse (Tensor): Log-sum-exp of attention scores; shape :math:`(B, Hq, L)`. Only returned if ``return_lse=True``.
 
     Shape legend:
         - :math:`N: \text{Batch size} ... : \text{Any number of other batch dimensions (optional)}`
@@ -1461,7 +1324,6 @@ def flex_attention(
     _validate_sdpa_input(query, key, value)
     _validate_embed_dim(query, key, value)
     _validate_device(query, key, value)
-    _validate_nestedness(query, key, value)
     query, key, value = _enforce_mem_layouts(query, key, value)
     if query.dim() != 4 or key.dim() != 4 or value.dim() != 4:
         raise NotImplementedError("NYI: query, key, and value must be 4D tensors")
@@ -1496,14 +1358,6 @@ def flex_attention(
 
     if score_mod is None:
         score_mod = _identity
-    elif query.is_nested:
-        # use same NJT if the ragged structures for sequence lengths match between q and kv
-        kv = (
-            query
-            if query.size(query._ragged_idx) == key.size(query._ragged_idx)  # type: ignore[attr-defined]
-            else key
-        )
-        score_mod = _nested_mod_func_adapter(score_mod, query, kv, is_score_mod=True)  # type: ignore[assignment]
 
     if block_mask is None:
         block_mask = _create_empty_block_mask(query, key)
@@ -1514,12 +1368,6 @@ def flex_attention(
     ):
         # This corresponds to the case where we essentially have a "no-op" block mask.
         pass
-    elif query.is_nested:
-        if block_mask.shape[-2] != query._values.size(query._ragged_idx - 1):  # type: ignore[attr-defined]
-            raise RuntimeError(
-                f"block_mask of shape {block_mask.shape} is not compatible with nested tensor input "
-                f"with total sequence length of {query._values.size(query._ragged_idx - 1)}"  # type: ignore[attr-defined]
-            )
     else:
         block_mask_q_len = block_mask.shape[-2]
         block_mask_kv_len = block_mask.shape[-1]
@@ -1547,13 +1395,57 @@ def flex_attention(
             f"but got {query.device} and {block_mask.kv_num_blocks.device}."  # type: ignore[union-attr]
         )
 
+    # Handle deprecation warnings for old parameters
+    if return_lse and return_aux is not None:
+        raise ValueError(
+            "Cannot specify both return_lse and return_aux. "
+            "return_lse is deprecated, please use return_aux=AuxRequest(lse=True) instead."
+        )
+    elif return_lse and return_aux is None:
+        _warn_once(
+            "deprecated_return_lse",
+            "return_lse is deprecated and will be removed in v2.7. "
+            "Please use return_aux=AuxRequest(lse=True) instead.",
+            category=FutureWarning,
+        )
+
     kernel_options = _apply_kernel_options(
         query,
         key,
         value,
         return_lse,
         kernel_options,
+        return_aux,
     )
+
+    def _finalize_outputs(
+        out,
+        lse,
+        max_scores,
+        *,
+        return_aux: Optional[AuxRequest],
+        return_lse: bool,
+    ):
+        """Normalize stats and build return value (aux-aware, legacy-compatible)."""
+        ln2 = math.log(2.0)
+        return_lse = return_lse or return_aux is not None and return_aux.lse
+        return_max = return_aux is not None and return_aux.max_scores
+
+        lse_scaled = lse * ln2 if (return_lse and lse.numel() > 0) else None
+        max_scaled = (
+            max_scores * ln2 if (return_max and max_scores.numel() > 0) else None
+        )
+
+        if return_aux is not None:
+            return out, AuxOutput(
+                lse=lse_scaled,
+                max_scores=max_scaled,
+            )
+
+        if return_lse:
+            return out, lse_scaled
+
+        return out
 
     if torch.compiler.is_dynamo_compiling():
         # mark head_dim and number of heads to be static
@@ -1561,7 +1453,7 @@ def flex_attention(
             torch._dynamo.mark_static(x, -3)
             torch._dynamo.mark_static(x, -1)
 
-        out, lse = flex_attention_hop(
+        out, lse, max_scores = flex_attention_hop(
             query,
             key,
             value,
@@ -1570,10 +1462,9 @@ def flex_attention(
             scale,
             kernel_options,  # type: ignore[union-attr]
         )
-        if return_lse:
-            return out, lse * math.log(2)
-        else:
-            return out
+        return _finalize_outputs(
+            out, lse, max_scores, return_aux=return_aux, return_lse=return_lse
+        )
 
     if not _FLEX_ATTENTION_DISABLE_COMPILE_DEBUG:
         _warn_once(
@@ -1617,7 +1508,7 @@ def flex_attention(
                             _flex_attention_hop_wrapper, backend=backend, fullgraph=True
                         )
 
-                    out, lse = flex_fn(
+                    out, lse, max_scores = flex_fn(
                         query,
                         key,
                         value,
@@ -1626,7 +1517,6 @@ def flex_attention(
                         scale,
                         kernel_options,
                     )
-    if return_lse:
-        return out, lse * math.log(2)
-    else:
-        return out
+    return _finalize_outputs(
+        out, lse, max_scores, return_aux=return_aux, return_lse=return_lse
+    )

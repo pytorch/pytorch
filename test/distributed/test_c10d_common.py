@@ -297,6 +297,23 @@ class ConvNet(nn.Module):
         return self.conv3(x)
 
 
+# A model involving FFTs, used to test DDP with complex tensors
+class FFTModel(nn.Module):
+    def __init__(self, hin, win, n_features):
+        super().__init__()
+        self.hin = hin
+        self.win = win
+        self.weight = nn.Parameter(
+            torch.ones((n_features, n_features, hin, win // 2 + 1), dtype=torch.cfloat)
+        )
+
+    def forward(self, x):
+        xc = torch.fft.rfft2(x, s=(self.hin, self.win), dim=(-2, -1), norm="ortho")
+        xcw = torch.einsum("nchw,cohw->nohw", xc, self.weight)
+        x = torch.fft.irfft2(xcw, dim=(-2, -1), norm="ortho")
+        return x
+
+
 class Task(nn.Module):
     def __init__(self) -> None:
         super().__init__()

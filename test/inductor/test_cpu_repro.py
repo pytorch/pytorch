@@ -128,6 +128,20 @@ class LstmModule(torch.nn.Module):
 class CPUReproTests(TestCase):
     common = check_model
 
+    def test_torch_linalg_qr_tuple_slice(self):
+        def fn(x):
+            return torch.linalg.qr(x)[:1]
+
+        x = torch.randn(4, 4)
+        compiled = torch.compile(fn, backend="inductor")
+
+        expected = fn(x)
+        actual = compiled(x)
+
+        self.assertIsInstance(actual, tuple)
+        self.assertEqual(len(actual), 1)
+        torch.testing.assert_close(actual[0], expected[0])
+
     @skipIfRocm
     def test_conv_stride_constraints(self):
         for fmt in [torch.contiguous_format, torch.channels_last]:

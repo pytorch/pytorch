@@ -79,6 +79,16 @@ def _format_param(name: str, optimizer: Optimizer, param):
     return list(map(_copy, param))
 
 
+def _update_param_group_val(param_group: dict[str, Any], key: str, val: float | Tensor):
+    """Set param_group[key] to val without aliasing or assignment when they're both tensors.
+    Raises a KeyError if param_group[key] does not exist.
+    """
+    if isinstance(param_group[key], Tensor):
+        param_group[key].fill_(_to_scalar(val))
+    else:
+        param_group[key] = val
+
+
 class LRScheduler:
     r"""Adjusts the learning rate during optimization."""
 
@@ -106,8 +116,10 @@ class LRScheduler:
             for i, group in enumerate(optimizer.param_groups):
                 if "initial_lr" not in group:
                     raise KeyError(
-                        "param 'initial_lr' is not specified "
-                        f"in param_groups[{i}] when resuming an optimizer"
+                        f"param 'initial_lr' is not specified in param_groups[{i}] when resuming scheduler with last_epoch >= 0.\n"
+                        "This typically happens when:\n"
+                        "1. You're trying to resume training from a checkpoint but haven't properly loaded the optimizer state\n"
+                        "2. You're using last_epoch >= 0 for a fresh training run (not recommended)"
                     )
         self.base_lrs: list[float] = [
             group["initial_lr"] for group in optimizer.param_groups
@@ -217,10 +229,7 @@ class LRScheduler:
                     values = self.get_lr()
 
         for param_group, lr in zip(self.optimizer.param_groups, values):
-            if isinstance(param_group["lr"], Tensor):
-                param_group["lr"].fill_(_to_scalar(lr))
-            else:
-                param_group["lr"] = lr
+            _update_param_group_val(param_group, "lr", lr)
 
         self._last_lr: list[float] = [
             group["lr"] for group in self.optimizer.param_groups
@@ -887,7 +896,7 @@ class SequentialLR(LRScheduler):
 
         # Reset learning rates back to initial values
         for group in self.optimizer.param_groups:
-            group["lr"] = group["initial_lr"]
+            _update_param_group_val(group, "lr", group["initial_lr"])
 
         # "Undo" the step performed by other schedulers
         self.recursive_undo()
@@ -1383,7 +1392,7 @@ class ReduceLROnPlateau(LRScheduler):
             old_lr = float(param_group["lr"])
             new_lr = max(old_lr * self.factor, self.min_lrs[i])
             if old_lr - new_lr > self.eps:
-                param_group["lr"] = new_lr
+                _update_param_group_val(param_group, "lr", new_lr)
 
     @property
     def in_cooldown(self):  # noqa: D102
@@ -1858,7 +1867,7 @@ class CosineAnnealingWarmRestarts(LRScheduler):
 
         with _enable_get_lr_call(self):
             for param_group, lr in zip(self.optimizer.param_groups, self.get_lr()):
-                param_group["lr"] = lr
+                _update_param_group_val(param_group, "lr", lr)
 
         self._last_lr = [group["lr"] for group in self.optimizer.param_groups]
 

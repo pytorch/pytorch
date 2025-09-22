@@ -95,6 +95,72 @@
 #endif
 #endif
 
+#if defined(USE_ROCM) && (defined(USE_FLASH_ATTENTION) || defined(USE_MEM_EFF_ATTENTION))
+namespace pytorch_flash
+{
+std::tuple<
+    at::Tensor,
+    at::Tensor,
+    at::Tensor,
+    at::Tensor,
+    at::Tensor,
+    at::Tensor,
+    at::Tensor,
+    at::Tensor>
+mha_fwd(
+    const at::Tensor& q, // batch_size x seqlen_q x num_heads x head_size
+    const at::Tensor& k, // batch_size x seqlen_k x num_heads_k x head_size
+    const at::Tensor& v, // batch_size x seqlen_k x num_heads_k x head_size
+    std::optional<at::Tensor>&
+        out_, // batch_size x seqlen_q x num_heads x head_size
+    std::optional<at::Tensor>&
+        alibi_slopes_, // num_heads or batch_size x num_heads
+    const float p_dropout,
+    const float softmax_scale,
+    bool is_causal,
+    std::optional<int64_t> window_size_left,
+    std::optional<int64_t> window_size_right,
+    const float softcap,
+    const bool return_softmax,
+    std::optional<at::Generator> gen_) {
+#if defined(USE_ROCM_CK_SDPA)
+  if (at::globalContext().getROCmFAPreferredBackend() ==
+      at::ROCmFABackend::Ck) {
+    const int non_null_window_left = window_size_left.value_or(-1);
+    const int non_null_window_right = window_size_right.value_or(-1);
+    std::optional<at::Tensor> dummy_attn_bias = std::nullopt;
+    return mha_fwd_ck(
+        q,
+        k,
+        v,
+        out_,
+        p_dropout,
+        softmax_scale,
+        is_causal,
+        non_null_window_left,
+        non_null_window_right,
+        return_softmax,
+        gen_,
+        dummy_attn_bias); // Not used in flash attention
+  }
+#endif
+  return mha_fwd_aot(
+      q,
+      k,
+      v,
+      out_,
+      alibi_slopes_,
+      p_dropout,
+      softmax_scale,
+      is_causal,
+      window_size_left,
+      window_size_right,
+      return_softmax,
+      gen_);
+}
+}
+#endif
+
 namespace at {
 
 namespace cuda::philox {

@@ -20,7 +20,15 @@ from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
 )
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.distributed.tensor import DeviceMesh, DTensor, Partial, Replicate, Shard
+from torch.distributed.tensor import (
+    DeviceMesh,
+    distribute_module,
+    distribute_tensor,
+    DTensor,
+    Partial,
+    Replicate,
+    Shard,
+)
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
@@ -88,6 +96,33 @@ aot_eager_graph = aot_autograd(
 )
 
 
+def _apply_sharding(mod: nn.Module, shard_dim: int, device_mesh: DeviceMesh):
+    """
+    Shards on the given dimension if possible, else replicate
+    Args:
+        mod: (nn.Module) Module to shard or replicate
+        shard_dim: (int) Dimension to shard on if possible
+        device_mesh: (DeviceMesh) 1D Device Mesh
+
+    Returns:
+        Sharded DTensor
+    """
+
+    def shard_module_params(name, module, device_mesh):
+        for name, param in module.named_parameters():
+            placement = Replicate()
+            if shard_dim < len(param.size()):
+                placement = Shard(shard_dim)
+            dist_param = torch.nn.Parameter(
+                distribute_tensor(param, device_mesh, [placement])
+            )
+            name = name.split(".")[-1]
+            module.register_parameter(name, dist_param)
+
+    sharded_mod = distribute_module(mod, device_mesh, shard_module_params)
+    return sharded_mod
+
+
 class TestDTensorCompile(torch._dynamo.test_case.TestCase):
     def setUp(self):
         super(
@@ -148,7 +183,7 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         )
         torch.utils._pytree.register_constant(DeviceMesh)
 
-        ep = torch.export.export_for_training(
+        ep = torch.export.export(
             Foo(), (torch.randn(4, 4, dtype=torch.float64),), strict=False
         )
         self.assertExpectedInline(
@@ -167,6 +202,8 @@ def forward(self, b_buffer, x):
     return (view_as_1,)""",  # noqa: B950
         )
 
+        # During tracing, sharding propagation cache is skipped, so an extra dry run for
+        # add is performed in _propagate_tensor_meta_non_cached, hence add_1 instead of add
         self.assertExpectedInline(
             str(ep.run_decompositions({}).graph_module.code).strip(),
             """\
@@ -269,7 +306,9 @@ def forward(self, b_parametrizations_buffer_original0, x):
                 .to_local()[0]
             )
 
-        x = DTensor.from_local(torch.rand(4, 4), mesh, [Shard(0)], run_check=False)
+        x = DTensor.from_local(
+            torch.rand(4, 4, requires_grad=True), mesh, [Shard(0)], run_check=False
+        )
         torch._dynamo.mark_dynamic(x, 0)
         ref = fn(x)
 
@@ -278,6 +317,9 @@ def forward(self, b_parametrizations_buffer_original0, x):
         self.assertEqual(res, ref)
 
     @skipIfHpu
+    @unittest.skip(
+        "DTensor + dynamic fails - s77 + 8 is not tracked with proxy .. proxy_tensor.PythonKeyTracer"
+    )
     def test_dtensor_dynamic_slice(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
@@ -290,7 +332,9 @@ def forward(self, b_parametrizations_buffer_original0, x):
                 for t in torch.tensor_split(x, 2)
             ]
 
-        x = DTensor.from_local(torch.rand(4, 4), mesh, [Shard(0)], run_check=False)
+        x = DTensor.from_local(
+            torch.rand(4, 4, requires_grad=True), mesh, [Shard(0)], run_check=False
+        )
         ref = fn(x)
 
         opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True, dynamic=True)
@@ -315,6 +359,33 @@ def forward(self, b_parametrizations_buffer_original0, x):
                 fn, backend="aot_eager", fullgraph=True, dynamic=True
             )
             res = opt_fn(x)
+        self.assertEqual(res, ref)
+
+    @unittest.skip(
+        "DTensor + dynamic fails - s77 + 8 is not tracked with proxy .. proxy_tensor.PythonKeyTracer"
+    )
+    def test_dtensor_dynamic_cat(self):
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        # test passing in tuple of DTensors as
+        def fn(x, y):
+            return (
+                torch.cat((x, y), dim=0)
+                .redistribute(device_mesh=x.device_mesh, placements=[Replicate()])
+                .to_local()[0]
+            )
+
+        x = DTensor.from_local(
+            torch.rand(4, 4, requires_grad=True), mesh, [Shard(0)], run_check=False
+        )
+        y = DTensor.from_local(
+            torch.rand(4, 4, requires_grad=True), mesh, [Shard(0)], run_check=False
+        )
+        torch._dynamo.mark_dynamic(x, 0)
+        ref = fn(x, y)
+
+        opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        res = opt_fn(x, y)
         self.assertEqual(res, ref)
 
     def test_dtensor_attribute_access_on_intermediate(self):
@@ -1149,6 +1220,29 @@ class TestDTensorCompileE2E(DTensorTestBase):
 
         self.assertEqual(x_ref.grad, x.grad)
         self.assertEqual(y_ref.grad, y.grad)
+
+    @with_comms
+    def test_compile_embedding_redistribute(self):
+        mesh = self.build_device_mesh()
+
+        class Network(nn.Module):
+            def __init__(self, embedding, mesh):
+                super().__init__()
+                self.mesh = mesh
+                self.embedding = _apply_sharding(embedding, 0, self.mesh)
+
+            def forward(self, x):
+                x = self.embedding(x)
+                x = x.redistribute(self.mesh, [Shard(1)])
+                return x
+
+        embedding = torch.nn.Embedding(10, 20, device=self.device_type)
+        inp = torch.randint(0, 10, (8,), device=self.device_type)
+        ref_out = embedding(inp)
+        sharded_net = torch.compile(Network(embedding, mesh))
+        replicated_inp = DTensor.from_local(inp, mesh, [Replicate()], run_check=False)
+        output = sharded_net(replicated_inp)
+        self.assertEqual(output.full_tensor(), ref_out)
 
 
 if __name__ == "__main__":

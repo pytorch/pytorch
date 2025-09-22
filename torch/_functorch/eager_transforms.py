@@ -1593,7 +1593,7 @@ def functionalize(func: Callable, *, remove: str = "mutations") -> Callable:
           If you call `functionalize(f)` on a function that takes views / mutations of
           non-local state, functionalization will simply no-op and pass the view/mutation
           calls directly to the backend.
-          One way to work around this is is to ensure that any non-local state creation
+          One way to work around this is to ensure that any non-local state creation
           is wrapped into a larger function, which you then call functionalize on.
       (3) `resize_()` has some limitations: functionalize will only work on programs
           that use resize_()` as long as the tensor being resized is not a view.

@@ -551,6 +551,32 @@ std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
 
 static std::atomic<size_t> process_group_id = 0;
 
+c10::intrusive_ptr<ProcessGroupGloo::Options> ProcessGroupGloo::Options::
+    create_default(std::chrono::milliseconds timeout) {
+  auto options = ::c10d::ProcessGroupGloo::Options::create();
+  bool lazyInit = ::c10d::getDefaultGlooLazyInit();
+
+  // Use interfaces listed in "GLOO_SOCKET_IFNAME", if set.
+  auto ifnameEnv = c10::utils::get_env("GLOO_SOCKET_IFNAME");
+  if (ifnameEnv && ifnameEnv->size() > 1) {
+    for (const auto& iface : ::c10d::split(',', ifnameEnv->c_str())) {
+      options->devices.push_back(
+          ::c10d::ProcessGroupGloo::createDeviceForInterface(iface, lazyInit));
+    }
+  } else {
+    // If no hostname is specified, this function looks up
+    // the machine's hostname and returns a device instance
+    // associated with the address that the hostname resolves to.
+    options->devices.push_back(
+        ::c10d::ProcessGroupGloo::createDefaultDevice(lazyInit));
+  }
+
+  options->timeout = timeout;
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
+  options->threads = options->devices.size() * 2;
+  return options;
+}
+
 ProcessGroupGloo::ProcessGroupGloo(
     const c10::intrusive_ptr<Store>& store,
     int rank,
@@ -710,7 +736,12 @@ c10::intrusive_ptr<Backend> ProcessGroupGloo::split(
   }
 
   auto glooOpts = c10::dynamic_intrusive_pointer_cast<Options>(opts);
-  TORCH_CHECK(glooOpts != nullptr, "opts not a ProcessGroupGloo::Options.");
+  if (glooOpts == nullptr) {
+    TORCH_WARN_ONCE(
+        "Tried to pass options to ProcessGroupGloo::split that are not ProcessGroupGloo::Options."
+        "Falling back to default options.");
+    glooOpts = ProcessGroupGloo::Options::create_default();
+  }
 
   // TODO: we need to get rid of globalRanksInGroup eventually.
   std::vector<uint64_t> globalRanksInGroup;
@@ -729,7 +760,12 @@ c10::intrusive_ptr<Backend> ProcessGroupGloo::merge(
     const int& rank,
     const int& size) {
   auto glooOpts = c10::dynamic_intrusive_pointer_cast<Options>(opts);
-  TORCH_CHECK(glooOpts != nullptr, "opts not a ProcessGroupGloo::Options.");
+  if (glooOpts == nullptr) {
+    TORCH_WARN_ONCE(
+        "Tried to pass options to ProcessGroupGloo::merge that are not ProcessGroupGloo::Options."
+        "Falling back to default options.");
+    glooOpts = ProcessGroupGloo::Options::create_default();
+  }
   auto pg = c10::make_intrusive<ProcessGroupGloo>(
       store->clone(), rank, size, glooOpts);
   return c10::static_intrusive_pointer_cast<Backend>(pg);
@@ -797,7 +833,10 @@ class AsyncBroadcastWork : public ProcessGroupGloo::AsyncWork {
   const int rootTensor;
   const uint32_t tag;
 
-  void broadcast(at::Tensor& tensor) {
+  void broadcast(at::Tensor tensor) {
+    if (tensor.is_complex()) {
+      tensor = at::view_as_real(tensor);
+    }
     const auto& scalarType = tensor.scalar_type();
     gloo::BroadcastOptions opts(context_);
     opts.setRoot(rootRank);
@@ -1128,13 +1167,22 @@ class AsyncReduceWork : public ProcessGroupGloo::AsyncWork {
   const uint32_t tag;
 
   void reduce(std::vector<at::Tensor>& tensors) {
-    const auto& scalarType = tensors[0].scalar_type();
+    auto tensor = tensors[0];
+    if (tensor.is_complex()) {
+      TORCH_CHECK(
+          c10d::isComplexViewAsRealAllowed(reduceOp),
+          "reduce does not support",
+          reduceOp,
+          "on complex tensors");
+      tensor = at::view_as_real(tensor);
+    }
     gloo::ReduceOptions opts(context_);
+    const auto& scalarType = tensor.scalar_type();
     opts.setRoot(rootRank);
     opts.setTag(tag);
     opts.setReduceFunction(getFunction(scalarType, reduceOp));
     opts.setTimeout(timeout_);
-    GENERATE_ALL_TYPES(scalarType, setOutput, opts, tensors[0]);
+    GENERATE_ALL_TYPES(scalarType, setOutput, opts, tensor);
     gloo::reduce(opts);
 
     // Gloo doesn't support AVG so we use SUM + division.

@@ -65,6 +65,7 @@ from torch._inductor.cudagraph_utils import (
     log_cudagraph_skip_and_bump_counter,
     PlaceholderInfo,
 )
+from torch._inductor.custom_graph_pass import CustomPartitionerFn
 from torch._inductor.debug import (
     create_mapping_pre_post_grad_nodes,
     save_args_for_compile_fx_inner,
@@ -1226,7 +1227,9 @@ class _InProcessFxCompile(FxCompile):
             # structured logs...
             # trace_structured("inductor_input_graph", payload_fn=lambda: gm.print_readable(print_output=False))
 
-            shape_env = shape_env_from_inputs(example_inputs)
+            shape_env = gm.shape_env
+            if shape_env is None:
+                shape_env = shape_env_from_inputs(example_inputs)
 
             # Convert view to reshape in the graph. This is necessary primarily for
             # layout optimization. Do it unconditionally for uniformity.
@@ -2110,16 +2113,30 @@ def partition_fn(
         "static_lifetime_input_indices", None
     )
 
-    with dynamo_utils.dynamo_timed(
-        "min_cut_rematerialization_partition", log_pt2_compile_event=True
-    ):
-        return min_cut_rematerialization_partition(
-            gm,
-            joint_inputs,
-            compiler="inductor",
-            static_lifetime_input_indices=static_lifetime_input_indices,
-            **kwargs,
-        )
+    if config.custom_partitioner_fn is None:
+        with dynamo_utils.dynamo_timed(
+            "min_cut_rematerialization_partition", log_pt2_compile_event=True
+        ):
+            return min_cut_rematerialization_partition(
+                gm,
+                joint_inputs,
+                compiler="inductor",
+                static_lifetime_input_indices=static_lifetime_input_indices,
+                **kwargs,
+            )
+    else:
+        assert isinstance(config.custom_partitioner_fn, CustomPartitionerFn)
+        with dynamo_utils.dynamo_timed(
+            config.custom_partitioner_fn.__class__.__name__,
+            log_pt2_compile_event=True,
+        ):
+            return config.custom_partitioner_fn(
+                gm,
+                joint_inputs,
+                compiler="inductor",
+                static_lifetime_input_indices=static_lifetime_input_indices,
+                **kwargs,
+            )
 
 
 def get_num_model_outputs(model: GraphModule) -> int:

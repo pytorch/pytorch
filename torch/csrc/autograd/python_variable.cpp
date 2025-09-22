@@ -209,7 +209,8 @@ PyObject* ParameterClass = nullptr;
 static PyObject* THPVariable_NewWithVar(
     PyTypeObject* type,
     const at::TensorBase& _var,
-    bool allow_preexisting_pyobj = false);
+    bool allow_preexisting_pyobj = false,
+    std::optional<bool> has_torch_dispatch_if_known = std::nullopt);
 
 // clang-tidy gets confused by static const
 static const char* VOLATILE_WARNING =
@@ -626,6 +627,64 @@ static PyObject* THPVariable_make_subclass(
   END_HANDLE_TH_ERRORS
 }
 
+// Shared code factored out of THPVariable_make_wrapper_subclass and
+// THPVariable_dtensor__new__.
+static Tensor make_tensor_for_subclass_helper(
+    SymIntArrayRef sym_sizes,
+    OptionalSymIntArrayRef sym_strides,
+    const std::optional<c10::SymInt>& sym_storage_offset,
+    const TensorOptions& options,
+    const std::optional<c10::SymInt>& storage_size,
+    std::optional<DispatchKeySet> extra_dispatch_keys) {
+  AutoDispatchBelowADInplaceOrView guard{}; // TODO: Remove.
+  tracer::impl::NoTracerDispatchMode tracer_guard{};
+
+  c10::SymInt size_bytes;
+  auto dtype_itemsize = static_cast<int64_t>(options.dtype().itemsize());
+
+  if (storage_size.has_value()) {
+    size_bytes = storage_size.value();
+  } else if (sym_strides.has_value()) {
+    size_bytes = at::detail::computeStorageNbytes(
+        sym_sizes,
+        sym_strides.value(),
+        dtype_itemsize,
+        sym_storage_offset.value_or(0));
+  } else {
+    size_bytes = at::detail::computeStorageNbytesContiguous(
+        sym_sizes, dtype_itemsize, sym_storage_offset.value_or(0));
+  }
+
+  // We use storages **only** to track aliasing of subclasses during tracing.
+  // The actual data pointers are not valid.
+  Storage storage{
+      Storage::use_byte_size_t{},
+      size_bytes,
+      at::DataPtr{nullptr, options.device()},
+      /*allocator=*/c10::GetAllocator(c10::kMeta),
+      /*resizable=*/true};
+
+  auto keys = c10::DispatchKeySet({options.computeDispatchKey()});
+  if (extra_dispatch_keys.has_value()) {
+    keys = keys | *extra_dispatch_keys;
+  }
+  Tensor tensor = at::detail::make_tensor<TensorImpl>(
+      std::move(storage), keys, options.dtype());
+
+  TensorImpl* tensor_impl = tensor.unsafeGetTensorImpl();
+
+  if (sym_strides.has_value()) {
+    tensor_impl->set_sizes_and_strides(
+        sym_sizes, sym_strides.value(), sym_storage_offset);
+  } else {
+    TORCH_CHECK(
+        !sym_storage_offset.has_value(),
+        "setting storage offset without stride not supported");
+    tensor_impl->generic_set_sizes_contiguous(sym_sizes);
+  }
+  return tensor;
+}
+
 static PyObject* THPVariable_make_wrapper_subclass(
     PyObject*,
     PyObject* args,
@@ -693,69 +752,20 @@ static PyObject* THPVariable_make_wrapper_subclass(
 
   // don't bother releasing GIL here, as we are not allocating any nontrivial
   // data
-  Tensor tensor;
+  auto sym_sizes = r.symintlist(1);
+  auto sym_strides_own = r.symintlistOptional(2);
+  Tensor tensor = make_tensor_for_subclass_helper(
+      /*sym_sizes=*/r.symintlist(1),
+      /*sym_strides=*/r.symintlistOptional(2),
+      /*sym_storage_offset=*/r.toSymIntOptional(3),
+      options,
+      /*storage_size=*/r.toSymIntOptional(14),
+      r.toDispatchKeySetOptional(13));
 
-  {
-    AutoDispatchBelowADInplaceOrView guard{}; // TODO: Remove.
-    tracer::impl::NoTracerDispatchMode tracer_guard{};
-
-    auto sym_sizes = r.symintlist(1);
-    auto sym_strides_own = r.symintlistOptional(2);
-    auto sym_strides =
-        static_cast<std::optional<c10::SymIntArrayRef>>(sym_strides_own);
-    auto sym_storage_offset = r.toSymIntOptional(3);
-
-    c10::SymInt size_bytes;
-    auto dtype_itemsize = static_cast<int64_t>(options.dtype().itemsize());
-    auto storage_size = r.toSymIntOptional(14);
-
-    if (storage_size.has_value()) {
-      size_bytes = storage_size.value();
-    } else if (sym_strides.has_value()) {
-      size_bytes = at::detail::computeStorageNbytes(
-          sym_sizes,
-          sym_strides.value(),
-          dtype_itemsize,
-          sym_storage_offset.value_or(0));
-    } else {
-      size_bytes = at::detail::computeStorageNbytesContiguous(
-          sym_sizes, dtype_itemsize, sym_storage_offset.value_or(0));
-    }
-
-    // We use storages **only** to track aliasing of subclasses during tracing.
-    // The actual data pointers are not valid.
-    Storage storage{
-        Storage::use_byte_size_t{},
-        size_bytes,
-        /*allocator=*/c10::GetAllocator(c10::kMeta),
-        /*resizable=*/true};
-    // TODO: constructor should probably accept data pointer
-    storage.set_data_ptr_noswap(at::DataPtr{nullptr, r.device(7)});
-
-    auto keys = c10::DispatchKeySet({options.computeDispatchKey()});
-    if (auto mb_extra_keys = r.toDispatchKeySetOptional(13)) {
-      keys = keys | *mb_extra_keys;
-    }
-    tensor = at::detail::make_tensor<TensorImpl>(
-        std::move(storage), keys, options.dtype());
-
-    TensorImpl* tensor_impl = tensor.unsafeGetTensorImpl();
-
-    if (sym_strides.has_value()) {
-      tensor_impl->set_sizes_and_strides(
-          sym_sizes, sym_strides.value(), sym_storage_offset);
-    } else {
-      TORCH_CHECK(
-          !sym_storage_offset.has_value(),
-          "setting storage offset without stride not supported");
-      tensor_impl->generic_set_sizes_contiguous(sym_sizes);
-    }
-
-    const auto sizes_strides_policy = r.stringViewOptional(10);
-    if (sizes_strides_policy.has_value()) {
-      tensor.unsafeGetTensorImpl()->set_python_custom_sizes_strides(
-          parseSizesStridesPolicyArgument(*sizes_strides_policy));
-    }
+  const auto sizes_strides_policy = r.stringViewOptional(10);
+  if (sizes_strides_policy.has_value()) {
+    tensor.unsafeGetTensorImpl()->set_python_custom_sizes_strides(
+        parseSizesStridesPolicyArgument(*sizes_strides_policy));
   }
 
   tensor.set_requires_grad(r.toBool(9));
@@ -767,7 +777,358 @@ static PyObject* THPVariable_make_wrapper_subclass(
     tensor.unsafeGetTensorImpl()->set_python_custom_layout(true);
   }
 
-  return THPVariable_NewWithVar((PyTypeObject*)cls, tensor);
+  return THPVariable_NewWithVar(
+      (PyTypeObject*)cls,
+      tensor,
+      // false is the default
+      /*allow_preexisting_pyobj=*/false,
+      // we checked __torch_dispatch__ above; avoid checking again.
+      /*has_torch_dispatch_if_known=*/true);
+  END_HANDLE_TH_ERRORS
+}
+
+static py::handle get_dtensor_spec_class() {
+#if IS_PYBIND_2_13_PLUS
+  PYBIND11_CONSTINIT static py::gil_safe_call_once_and_store<py::object>
+      storage;
+  return storage
+      .call_once_and_store_result([]() -> py::object {
+        return py::module::import("torch")
+            .attr("distributed")
+            .attr("tensor")
+            .attr("_dtensor_spec")
+            .attr("DTensorSpec");
+      })
+      .get_stored();
+#else
+  static py::handle dtensor_spec_class = py::object(py::module::import("torch")
+                                                        .attr("distributed")
+                                                        .attr("tensor")
+                                                        .attr("_dtensor_spec")
+                                                        .attr("DTensorSpec"))
+                                             .release();
+  return dtensor_spec_class;
+#endif
+}
+
+static bool arg_type_tensor_or_tensor_list_like(py::handle arg) {
+  const auto dtensor_spec_class = get_dtensor_spec_class();
+  if (py::isinstance(arg, dtensor_spec_class)) {
+    return true;
+  }
+  if (!PyList_Check(arg.ptr())) {
+    return false;
+  }
+  py::list arg_list = py::reinterpret_borrow<py::list>(arg);
+  for (const auto e : arg_list) {
+    if (!e.is_none() && !py::isinstance(e, dtensor_spec_class)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+#define FOR_EACH_DTENSOR_INTERNED_STRING(_) \
+  _(_comparison_key)                        \
+  _(_local_tensor)                          \
+  _(_spec)                                  \
+  _(args_schema)                            \
+  _(has_symints)                            \
+  _(kwargs_schema)                          \
+  _(op)                                     \
+  _(schema_info)                            \
+  _(shape)                                  \
+  _(static_argnum)                          \
+  _(static_kwargkey)                        \
+  _(stride)                                 \
+  _(tensor_meta)
+
+struct DTensorInternedStrings {
+#define DECLARE_INTERNED_STRING_VARIABLE(s) PyObject* s;
+  FOR_EACH_DTENSOR_INTERNED_STRING(DECLARE_INTERNED_STRING_VARIABLE)
+#undef DECLARE_INTERNED_STRING_VARIABLE
+};
+
+static DTensorInternedStrings dtensor_interned_strings;
+
+static bool intern_dtensor_strings() {
+#define INTERN_DTENSOR_STRING(s)                                           \
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(dtensor_interned_strings.s == nullptr); \
+  dtensor_interned_strings.s = PyUnicode_InternFromString(#s);             \
+  if (dtensor_interned_strings.s == nullptr) {                             \
+    return false;                                                          \
+  }
+
+  FOR_EACH_DTENSOR_INTERNED_STRING(INTERN_DTENSOR_STRING);
+#undef INTERN_DTENSOR_STRING
+  return true;
+}
+
+static bool checked_not(PyObject* obj) {
+  int result = PyObject_Not(obj);
+  if (result == -1) {
+    throw py::error_already_set();
+  }
+  return result;
+}
+
+static c10::SymDimVector tuple_to_symintlist(PyObject* obj) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(PyTuple_Check(obj));
+  c10::SymDimVector res;
+  const auto size = PyTuple_GET_SIZE(obj);
+  res.reserve(size);
+  for (const auto idx : c10::irange(size)) {
+    PyObject* item = PyTuple_GET_ITEM(obj, idx);
+    if (THPUtils_checkLongExact(item)) {
+      res.emplace_back(THPUtils_unpackLong(item));
+    } else if (torch::is_symint(py::handle(item))) {
+      res.push_back(py::handle(item).cast<c10::SymInt>());
+    } else {
+      // N.B. torch.Tensor.__index__ exists, so this should handle
+      // scalar Tensors fine.
+      res.emplace_back(THPUtils_unpackIndex(item));
+    }
+  }
+  return res;
+}
+
+// DTensor-specific variant of make_wrapper_subclass to minimize DTensor
+// overhead.
+static PyObject* THPVariable_dtensor_new(
+    PyObject*,
+    PyObject* args,
+    PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({
+      "_dtensor__new__(PyObject* cls, Tensor local_tensor, PyObject* spec, bool requires_grad)",
+  });
+  ParsedArgs<4> parsed_args{};
+  auto r = parser.parse(args, kwargs, parsed_args);
+  PyObject* cls = r.pyobject(0);
+
+  TORCH_CHECK_TYPE(
+      PyType_Check(cls),
+      "cls must be a type (got ",
+      Py_TYPE(cls)->tp_name,
+      ")");
+
+#ifndef NDEBUG
+  // This is specifically for making a DTensor, which we know defines
+  // __torch_dispatch__. Check anyway in debug builds in case somebody
+  // removes it.
+  py::object attr = PyObject_FastGetAttrString(cls, "__torch_dispatch__");
+  TORCH_CHECK_TYPE(
+      attr.ptr() != nullptr &&
+          attr.ptr() != torch::disabled_torch_dispatch_impl(),
+      ((PyTypeObject*)cls)->tp_name,
+      " must define __torch_dispatch__");
+#endif
+
+  const auto& local_tensor = r.tensor(1);
+  const bool requires_grad = r.toBool(3);
+  if (local_tensor.requires_grad() && !requires_grad) {
+    TORCH_WARN(
+        "To construct DTensor from torch.Tensor, it's recommended to use "
+        "local_tensor.detach() and make requires_grad consistent.");
+  }
+  const auto options = TensorOptions()
+                           .dtype(local_tensor.dtype())
+                           .device(local_tensor.device())
+                           .layout(local_tensor.layout());
+
+  DispatchKeySet extra_dispatch_keys;
+  const auto tensor_keys = local_tensor.key_set();
+  if (tensor_keys.has(c10::DispatchKey::Conjugate)) {
+    extra_dispatch_keys = extra_dispatch_keys.add(c10::DispatchKey::Conjugate);
+  }
+  if (tensor_keys.has(c10::DispatchKey::Negative)) {
+    extra_dispatch_keys = extra_dispatch_keys.add(c10::DispatchKey::Negative);
+  }
+
+  py::handle spec = py::handle(r.pyobject(2));
+  const auto tensor_meta = spec.attr(dtensor_interned_strings.tensor_meta);
+  TORCH_CHECK(!tensor_meta.is_none());
+  const auto sizes = tensor_meta.attr(dtensor_interned_strings.shape);
+  TORCH_CHECK(
+      PyTuple_Check(sizes.ptr()), "spec.tensor_meta.shape must be a tuple");
+  const auto stride = tensor_meta.attr(dtensor_interned_strings.stride);
+  TORCH_CHECK(
+      PyTuple_Check(stride.ptr()), "spec.tensor_meta.stride must be a tuple");
+
+  Tensor tensor = make_tensor_for_subclass_helper(
+      /*sym_sizes=*/tuple_to_symintlist(sizes.ptr()),
+      /*sym_strides=*/tuple_to_symintlist(stride.ptr()),
+      /*sym_storage_offset=*/std::nullopt,
+      options,
+      /*storage_size=*/std::nullopt,
+      extra_dispatch_keys);
+  tensor.set_requires_grad(requires_grad);
+  py::object py_tensor =
+      py::reinterpret_steal<py::object>(THPVariable_NewWithVar(
+          (PyTypeObject*)cls,
+          tensor,
+          // false is the default
+          /*allow_preexisting_pyobj=*/false,
+          // we know DTensor has __torch_dispatch__; avoid checking again.
+          /*has_torch_dispatch_if_known=*/true));
+  py_tensor.attr(dtensor_interned_strings._spec) = spec;
+  py_tensor.attr(dtensor_interned_strings._local_tensor) = local_tensor;
+  return py_tensor.release().ptr();
+  END_HANDLE_TH_ERRORS
+}
+
+static bool DTensor_OpSchema_recompute_comparison_key_impl(
+    PyObject* self,
+    const py::tuple& args_schema) {
+  py::object static_kwargkey;
+  size_t static_argnum = 0;
+  const py::handle self_handle = py::handle(self);
+  const py::handle schema_info =
+      self_handle.attr(dtensor_interned_strings.schema_info);
+  if (checked_not(schema_info.ptr())) {
+    static_argnum = args_schema.size();
+    static_kwargkey = py::none();
+  } else {
+    static_argnum = py::cast<size_t>(
+        schema_info.attr(dtensor_interned_strings.static_argnum));
+    static_kwargkey =
+        schema_info.attr(dtensor_interned_strings.static_kwargkey);
+  }
+  c10::SmallVector<py::object, 8> args_to_hash;
+  size_t idx = 0;
+  for (const auto& e : args_schema) {
+    if (idx >= static_argnum || arg_type_tensor_or_tensor_list_like(e)) {
+      if (PyList_Check(e.ptr())) {
+        args_to_hash.push_back(
+            py::reinterpret_steal<py::object>(PyList_AsTuple(e.ptr())));
+      } else {
+        args_to_hash.push_back(py::reinterpret_borrow<py::object>(e));
+      }
+    }
+    idx++;
+  }
+  py::tuple args_to_hash_tup(args_to_hash.size());
+  for (const auto idx : c10::irange(args_to_hash.size())) {
+    args_to_hash_tup[idx] = std::move(args_to_hash[idx]);
+  }
+  PyObject* comparison_key = nullptr;
+  if (!static_kwargkey.is_none()) {
+    if (!PyList_Check(static_kwargkey.ptr())) {
+      PyErr_SetString(
+          PyExc_TypeError, "self.schema_info.static_kwargkey must be a list!");
+      return false;
+    }
+    py::list static_kwargkey_list =
+        py::reinterpret_borrow<py::list>(static_kwargkey);
+    auto raw_kwargs_schema =
+        self_handle.attr(dtensor_interned_strings.kwargs_schema);
+    if (!PyDict_Check(raw_kwargs_schema.ptr())) {
+      PyErr_SetString(PyExc_TypeError, "self.kwargs_schema must be a dict!");
+      return false;
+    }
+    py::tuple kwargs_to_hash(static_kwargkey_list.size());
+    int idx = 0;
+    auto kwargs_schema = py::reinterpret_borrow<py::dict>(raw_kwargs_schema);
+    for (const auto& k : static_kwargkey_list) {
+      PyObject* item = PyDict_GetItemWithError(kwargs_schema.ptr(), k.ptr());
+      if (item) {
+        kwargs_to_hash[idx++] = py::reinterpret_borrow<py::object>(item);
+      } else if (PyErr_Occurred()) {
+        return false;
+      } else {
+        kwargs_to_hash[idx++] = py::none();
+      }
+    }
+    comparison_key = PyTuple_Pack(
+        3,
+        self_handle.attr(dtensor_interned_strings.op).ptr(),
+        args_to_hash_tup.ptr(),
+        kwargs_to_hash.ptr());
+  } else {
+    comparison_key = PyTuple_Pack(
+        2,
+        self_handle.attr(dtensor_interned_strings.op).ptr(),
+        args_to_hash_tup.release().ptr());
+  }
+  if (!comparison_key) {
+    return false;
+  }
+  self_handle.attr(dtensor_interned_strings._comparison_key) =
+      py::reinterpret_steal<py::object>(comparison_key);
+
+  return true;
+}
+
+static PyObject* DTensor_OpSchema_recompute_comparison_key(
+    PyObject* mod,
+    PyObject* self) {
+  HANDLE_TH_ERRORS
+  const py::handle self_handle = py::handle(self);
+  const py::handle raw_args_schema =
+      self_handle.attr(dtensor_interned_strings.args_schema);
+  if (!PyTuple_Check(raw_args_schema.ptr())) {
+    PyErr_SetString(PyExc_TypeError, "DTensor.args_schema must be a tuple!");
+    return nullptr;
+  }
+  py::tuple args_schema = py::reinterpret_borrow<py::tuple>(raw_args_schema);
+  if (!DTensor_OpSchema_recompute_comparison_key_impl(self, args_schema)) {
+    return nullptr;
+  }
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* DTensor_OpSchema_post_init(PyObject* mod, PyObject* self) {
+  HANDLE_TH_ERRORS
+  const py::handle self_handle = py::handle(self);
+  const py::handle raw_args_schema =
+      self_handle.attr(dtensor_interned_strings.args_schema);
+  if (!PyTuple_Check(raw_args_schema.ptr())) {
+    PyErr_SetString(
+        PyExc_TypeError,
+        "DTensor_OpSchema_post_init requires self.args_schema to be a tuple!");
+    return nullptr;
+  }
+  py::tuple args_schema = py::reinterpret_borrow<py::tuple>(raw_args_schema);
+  if (!DTensor_OpSchema_recompute_comparison_key_impl(self, args_schema)) {
+    return nullptr;
+  }
+
+  const auto dtensor_spec_class = get_dtensor_spec_class();
+  bool has_symints = false;
+  for (const auto& a : args_schema) {
+    if (Py_TYPE(a.ptr()) != (PyTypeObject*)(dtensor_spec_class.ptr()) &&
+        !py::isinstance(a, dtensor_spec_class)) {
+      continue;
+    }
+    const py::handle tensor_meta = a.attr(dtensor_interned_strings.tensor_meta);
+    if (tensor_meta.is_none()) {
+      continue;
+    }
+    const auto contains_any_symint = [](const py::tuple& sequence) {
+      for (const auto& s : sequence) {
+        if (THPUtils_checkLong(s.ptr())) {
+          continue;
+        }
+        if (torch::is_symint(s)) {
+          return true;
+        }
+      }
+      return false;
+    };
+    // Specifically it's supposed to be torch.Size.
+    py::object raw_shape = tensor_meta.attr(dtensor_interned_strings.shape);
+    if (!PyTuple_Check(raw_shape.ptr())) {
+      PyErr_SetString(PyExc_TypeError, "OpSchema.shape must be a tuple!");
+      return nullptr;
+    }
+    const auto shape = py::reinterpret_steal<py::tuple>(raw_shape.release());
+    if (contains_any_symint(shape)) {
+      has_symints = true;
+    }
+  }
+  self_handle.attr(dtensor_interned_strings.has_symints) = has_symints;
+  Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 
@@ -1661,6 +2022,10 @@ static PyMethodDef extra_methods[] = {
      castPyCFunctionWithKeywords(THPVariable_make_wrapper_subclass),
      METH_STATIC | METH_VARARGS | METH_KEYWORDS,
      nullptr},
+    {"_dtensor__new__",
+     castPyCFunctionWithKeywords(THPVariable_dtensor_new),
+     METH_STATIC | METH_VARARGS | METH_KEYWORDS,
+     nullptr},
     {"_fix_weakref", THPVariable_fix_weakref, METH_NOARGS, nullptr},
     {"_view_func",
      castPyCFunctionWithKeywords(THPVariable_view_func),
@@ -1675,6 +2040,18 @@ static PyMethodDef extra_methods[] = {
      METH_O,
      nullptr},
     {"_use_count", THPVariable__use_count, METH_NOARGS, nullptr},
+    {nullptr}};
+
+// NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
+static PyMethodDef extra_functions[] = {
+    {"_DTensor_OpSchema_post_init",
+     DTensor_OpSchema_post_init,
+     METH_O,
+     nullptr},
+    {"_DTensor_OpSchema_recompute_comparison_key",
+     DTensor_OpSchema_recompute_comparison_key,
+     METH_O,
+     nullptr},
     {nullptr}};
 
 struct THPVariableMeta {
@@ -2023,10 +2400,11 @@ static void THPVariable_subclass_dealloc(PyObject* self) {
 static PyObject* THPVariable_NewWithVar(
     PyTypeObject* type,
     const at::TensorBase& _var,
-    bool allow_preexisting_pyobj) {
+    bool allow_preexisting_pyobj,
+    std::optional<bool> has_torch_dispatch_if_known) {
   // Make sure that the reinterpret into a THPVariable* will be valid
   TORCH_CHECK(
-      PyType_IsSubtype(type, &THPVariableType),
+      type == &THPVariableType || PyType_IsSubtype(type, &THPVariableType),
       "Creating a Tensor subclass from a class ",
       "that does not inherit from Tensor is not possible. Make sure your class inherits from Tensor.");
 
@@ -2116,7 +2494,9 @@ static PyObject* THPVariable_NewWithVar(
       v->cdata = MaybeOwned<Variable>::owned(Variable(_var));
       const auto& var = THPVariable_Unpack(v);
       var.unsafeGetTensorImpl()->pyobj_slot()->init_pyobj(obj);
-      if (check_has_torch_dispatch(obj)) {
+      if (has_torch_dispatch_if_known.has_value()
+              ? *has_torch_dispatch_if_known
+              : check_has_torch_dispatch(obj)) {
         var.unsafeGetTensorImpl()->set_python_dispatch(true);
       }
     }
@@ -2401,5 +2781,10 @@ bool THPVariable_initModule(PyObject* module) {
   torch::autograd::initTorchFunctions(module);
   torch::autograd::initTensorImplConversion(module);
   torch::utils::validate_numpy_for_dlpack_deleter_bug();
+
+  if (!intern_dtensor_strings()) {
+    return false;
+  }
+  PyModule_AddFunctions(module, extra_functions);
   return true;
 }

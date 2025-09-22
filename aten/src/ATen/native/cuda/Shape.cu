@@ -243,14 +243,14 @@ __global__ void CatArrayBatchedCopy_vectorized(
     const char * data = (char*)inputs.input[blockIdx.y];
     IndexType offset = inputs.offset[blockIdx.y] * trailingSize / elems_per_vec;
     IndexType dimSize = inputs.dimSize[blockIdx.y] * trailingSize / elems_per_vec;
-    IndexType dataOffset = offset  * alignment; // in bytes
+    int64_t dataOffset = (int64_t)offset  * alignment; // in bytes
 
     IndexType stride = gridDim.x * blockDim.x;
 
     while( tid < nElements){
-      IndexType elementOffset = CatArrIndexToOffset<IndexType, Dims>::compute(
+      int64_t elementOffset = (int64_t)CatArrIndexToOffset<IndexType, Dims>::compute(
                     os.tensorSize, os.tensorStride, dimSize, concatDim, tid) * alignment; // in bytes
-      auto vec = at::native::memory::ld_vec<alignment>(data + alignment * tid);
+      auto vec = at::native::memory::ld_vec<alignment>(data + (int64_t)alignment * tid);
       at::native::memory::st_vec<alignment>(output + dataOffset + elementOffset, vec);
       tid += stride;
     }

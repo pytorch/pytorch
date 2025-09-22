@@ -1701,6 +1701,93 @@ class LAMBDA_GUARD : public LeafGuard {
   py::function _guard_check_fn;
 };
 
+/*
+Similar to LAMBDA_GUARD but where lambda does not take any arguments. This
+ensures that we don't need to construct a dictionary from framelocals even if
+the guard is at the root. These guards are for root guards like GlobalState.
+*/
+class LAMBDA_GUARD_NO_ARGS : public LeafGuard {
+ public:
+  LAMBDA_GUARD_NO_ARGS(
+      RootGuardManager* root_guard_manager,
+      py::object guard_check_fn,
+      py::object verbose_code_parts)
+      : LeafGuard(root_guard_manager, std::move(verbose_code_parts)) {
+    if (py::isinstance<py::function>(guard_check_fn)) {
+      _guard_check_fn = py::cast<py::function>(std::move(guard_check_fn));
+    } else {
+      throw py::type_error("LAMBDA_GUARD_NO_ARGS expects (callable, str)");
+    }
+  }
+
+  bool _check() {
+    PyObject* x = PyObject_CallNoArgs(_guard_check_fn.ptr()); // new ref
+    if (x == nullptr) {
+      // An exception is caught in the lambda function.
+      PyErr_Clear();
+      return false;
+    }
+    bool result = PyObject_IsTrue(x);
+    Py_DECREF(x);
+    return result;
+  }
+
+  bool check_nopybind(PyObject* value) override { // borrowed ref
+    return _check();
+  }
+
+  GuardDebugInfo check_verbose_nopybind(PyObject* value) override {
+    PyObject* x = PyObject_CallNoArgs(_guard_check_fn.ptr()); // new ref
+    if (x == nullptr) {
+      // An exception is caught in the lambda function.
+      std::string exc_message = get_exception_message();
+      PyErr_Clear();
+      return GuardDebugInfo(false, exc_message, 0);
+    }
+    bool result = PyObject_IsTrue(x);
+    Py_DECREF(x);
+    if (result) {
+      return GuardDebugInfo(true, 0);
+    }
+    return GuardDebugInfo(false, verbose_code_parts(), 0);
+  }
+
+  // Ensure that framelocals dict is not constructed.
+  bool check_nopybind(FrameLocalsMapping* map) override {
+    return _check();
+  }
+
+ private:
+  // The user provided lambda function for check_fn.
+  py::function _guard_check_fn;
+};
+
+/*
+Similar to LAMBDA_GUARD but disallows running on a FrameLocalsMapping input.
+These guards are at trunk or leaf, and not at the root.
+*/
+class LAMBDA_GUARD_NO_FRAMELOCALS : public LAMBDA_GUARD {
+ public:
+  LAMBDA_GUARD_NO_FRAMELOCALS(
+      RootGuardManager* root_guard_manager,
+      py::object guard_check_fn,
+      py::object verbose_code_parts)
+      : LAMBDA_GUARD(root_guard_manager, guard_check_fn, verbose_code_parts) {}
+
+  bool check_nopybind(PyObject* value) override { // borrowed ref
+    return LAMBDA_GUARD::check_nopybind(value);
+  }
+
+  GuardDebugInfo check_verbose_nopybind(PyObject* value) override {
+    return LAMBDA_GUARD::check_verbose_nopybind(value);
+  }
+
+  bool check_nopybind(FrameLocalsMapping* map) override {
+    throw std::runtime_error(
+        "FramelocalsMapping input to LAMBDA_GUARD_NO_FRAMELOCALS, use LAMBDA_GUARD instead");
+  }
+};
+
 class TYPE_MATCH : public LeafGuard {
  public:
   // type_id = id(type(obj))
@@ -2136,11 +2223,89 @@ class SET_CONTAINS : public LeafGuard {
   py::object _item;
 };
 
+// Check if the float is nan
+class FLOAT_IS_NAN : public LeafGuard {
+ public:
+  FLOAT_IS_NAN(
+      RootGuardManager* root_guard_manager,
+      py::object verbose_code_parts)
+      : LeafGuard(root_guard_manager, std::move(verbose_code_parts)) {}
+
+  bool check_nopybind(PyObject* value) override { // borrowed ref
+    if (!PyFloat_CheckExact(value)) {
+      return false;
+    }
+    return std::isnan(PyFloat_AsDouble(value));
+  }
+};
+
+// Check if the float is nan
+class COMPLEX_IS_NAN : public LeafGuard {
+ public:
+  COMPLEX_IS_NAN(
+      RootGuardManager* root_guard_manager,
+      py::object verbose_code_parts)
+      : LeafGuard(root_guard_manager, std::move(verbose_code_parts)) {}
+
+  bool check_nopybind(PyObject* value) override { // borrowed ref
+    if (!PyComplex_CheckExact(value)) {
+      return false;
+    }
+    Py_complex c_value = PyComplex_AsCComplex(value);
+    return std::isnan(c_value.real) || std::isnan(c_value.imag);
+  }
+};
+
+// Check if the dual level is the same as the one in fx graph
+class DUAL_LEVEL_MATCH : public LeafGuard {
+ public:
+  DUAL_LEVEL_MATCH(
+      RootGuardManager* root_guard_manager,
+      int64_t level,
+      py::object verbose_code_parts)
+      : LeafGuard(root_guard_manager, std::move(verbose_code_parts)),
+        _level(level) {
+    forward_ad_module = py::module_::import("torch.autograd.forward_ad");
+  }
+
+  bool check_nopybind(PyObject* value) override { // borrowed ref
+    // Ignore value arg, this is just to satisfy the interface.
+    return _check();
+  }
+
+  bool check_nopybind(FrameLocalsMapping* value) override {
+    // Ignore value arg, this is just to satisfy the interface.
+    return _check();
+  }
+
+  bool _check() {
+    PyObject* current_level = PyObject_GetAttrString(
+        forward_ad_module.ptr(), "_current_level"); // new ref
+    if (current_level == nullptr) {
+      // Attribute absent, clear the exception and return false.
+      PyErr_Clear();
+      return false;
+    }
+    if (!PyLong_CheckExact(current_level)) {
+      Py_DECREF(current_level);
+      return false;
+    } else {
+      int64_t current_level_int = PyLong_AsLongLong(current_level);
+      Py_DECREF(current_level);
+      return current_level_int == _level;
+    }
+  }
+
+ private:
+  int64_t _level;
+  py::object forward_ad_module;
+};
+
 /**
  * Relational guards compare more than one value. We implement Relational
  * guards by capturing some state in the guard object. For example for tensor
  * aliasing guards - tensor X is not tensor Y - we construct one leaf guard
- * and and install it at as a leaf of two guard managers (one for X and
+ * and install it at as a leaf of two guard managers (one for X and
  * another for Y). Therefore, this guard is run twice. In the first
  * invocation, it saves the first value (state) and returns True. In the
  * second invocation, it compares the saved value with the new value and
@@ -5556,6 +5721,11 @@ class GlobalsGuardAccessor : public GuardAccessor {
     return "GlobalsGuardAccessor";
   }
 
+  bool check_nopybind(FrameLocalsMapping* map, bool matches_dict_tag) override {
+    // Ensure that we don't construct the framelocals to dict here.
+    return _guard_manager->check_nopybind(_globals_dict);
+  }
+
  public: // cloning functions
   GlobalsGuardAccessor(GuardManager* guard_manager, GlobalsGuardAccessor* from)
       : GuardAccessor(guard_manager, from) {
@@ -6605,6 +6775,19 @@ PyObject* torch_c_dynamo_guards_init() {
       py_m, "LAMBDA_GUARD")
       .def(py::init<RootGuardManager*, py::function, py::list>())
       .def("__call__", &LAMBDA_GUARD::check);
+  py::class_<
+      LAMBDA_GUARD_NO_ARGS,
+      LeafGuard,
+      std::shared_ptr<LAMBDA_GUARD_NO_ARGS>>(py_m, "LAMBDA_GUARD_NO_ARGS")
+      .def(py::init<RootGuardManager*, py::function, py::list>())
+      .def("__call__", &LAMBDA_GUARD_NO_ARGS::check);
+  py::class_<
+      LAMBDA_GUARD_NO_FRAMELOCALS,
+      LeafGuard,
+      std::shared_ptr<LAMBDA_GUARD_NO_FRAMELOCALS>>(
+      py_m, "LAMBDA_GUARD_NO_FRAMELOCALS")
+      .def(py::init<RootGuardManager*, py::function, py::list>())
+      .def("__call__", &LAMBDA_GUARD_NO_FRAMELOCALS::check);
   py::class_<TYPE_MATCH, LeafGuard, std::shared_ptr<TYPE_MATCH>>(
       py_m, "TYPE_MATCH")
       .def(py::init<RootGuardManager*, py::object, py::list>())
@@ -6691,6 +6874,18 @@ PyObject* torch_c_dynamo_guards_init() {
       py_m, "SET_CONTAINS")
       .def(py::init<RootGuardManager*, bool, py::object, py::list>())
       .def("__call__", &SET_CONTAINS::check);
+  py::class_<DUAL_LEVEL_MATCH, LeafGuard, std::shared_ptr<DUAL_LEVEL_MATCH>>(
+      py_m, "DUAL_LEVEL_MATCH")
+      .def(py::init<RootGuardManager*, int64_t, py::list>())
+      .def("__call__", &DUAL_LEVEL_MATCH::check);
+  py::class_<FLOAT_IS_NAN, LeafGuard, std::shared_ptr<FLOAT_IS_NAN>>(
+      py_m, "FLOAT_IS_NAN")
+      .def(py::init<RootGuardManager*, py::list>())
+      .def("__call__", &FLOAT_IS_NAN::check);
+  py::class_<COMPLEX_IS_NAN, LeafGuard, std::shared_ptr<COMPLEX_IS_NAN>>(
+      py_m, "COMPLEX_IS_NAN")
+      .def(py::init<RootGuardManager*, py::list>())
+      .def("__call__", &COMPLEX_IS_NAN::check);
   py::class_<DYNAMIC_INDICES, LeafGuard, std::shared_ptr<DYNAMIC_INDICES>>(
       py_m, "DYNAMIC_INDICES")
       .def(py::init<RootGuardManager*, py::set, py::list>())
@@ -6908,6 +7103,26 @@ PyObject* torch_c_dynamo_guards_init() {
                 std::move(verbose_code_parts)));
           })
       .def(
+          "add_lambda_guard_no_args",
+          [](GuardManager& self,
+             py::object lambda,
+             py::object verbose_code_parts) -> void {
+            self.add_leaf_guard(std::make_shared<LAMBDA_GUARD_NO_ARGS>(
+                self.get_root(),
+                std::move(lambda),
+                std::move(verbose_code_parts)));
+          })
+      .def(
+          "add_lambda_guard_no_framelocals",
+          [](GuardManager& self,
+             py::object lambda,
+             py::object verbose_code_parts) -> void {
+            self.add_leaf_guard(std::make_shared<LAMBDA_GUARD_NO_FRAMELOCALS>(
+                self.get_root(),
+                std::move(lambda),
+                std::move(verbose_code_parts)));
+          })
+      .def(
           "add_type_match_guard",
           [](GuardManager& self,
              py::object value,
@@ -7099,6 +7314,26 @@ PyObject* torch_c_dynamo_guards_init() {
                 contains,
                 std::move(item),
                 std::move(verbose_code_parts)));
+          })
+      .def(
+          "add_dual_level_match_guard",
+          [](GuardManager& self,
+             int64_t level,
+             py::object verbose_code_parts) -> void {
+            self.add_leaf_guard(std::make_shared<DUAL_LEVEL_MATCH>(
+                self.get_root(), level, std::move(verbose_code_parts)));
+          })
+      .def(
+          "add_float_is_nan_guard",
+          [](GuardManager& self, py::object verbose_code_parts) -> void {
+            self.add_leaf_guard(std::make_shared<FLOAT_IS_NAN>(
+                self.get_root(), std::move(verbose_code_parts)));
+          })
+      .def(
+          "add_complex_is_nan_guard",
+          [](GuardManager& self, py::object verbose_code_parts) -> void {
+            self.add_leaf_guard(std::make_shared<COMPLEX_IS_NAN>(
+                self.get_root(), std::move(verbose_code_parts)));
           })
       .def(
           "add_dynamic_indices_guard",

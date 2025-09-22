@@ -49,7 +49,7 @@ log = logging.getLogger(__name__)
 sym_node_log = torch._logging.getArtifactLogger(__name__, "sym_node")
 
 
-__all__ = ["SymNode", "method_to_operator", "magic_methods"]
+__all__ = ["SymNode", "method_to_operator", "magic_methods", "DynamicInt"]
 
 
 from torch.types import py_sym_types as SymTypes
@@ -623,6 +623,40 @@ class SymNode:
 
     def is_constant(self):
         return False
+
+
+class _DynamicScalar:
+    def __new__(cls, *args):
+        if cls is _DynamicScalar:
+            raise TypeError("_DynamicScalar is an abstract base class, use DynamicInt.")
+        return super().__new__(cls, *args)
+
+
+class DynamicInt(_DynamicScalar, int):
+    """
+    User API for marking dynamic integers in `torch.compile`.
+    Intended to be compatible with both compile and eager mode.
+
+    Example usage::
+
+        fn = torch.compile(f)
+        x = DynamicInt(4)
+        fn(x)  # compiles x as a dynamic integer input; returns f(4)
+    """
+
+    def __new__(cls, val):
+        assert isinstance(val, int)
+        obj = super().__new__(cls, int(val))
+        return obj
+
+    def __repr__(self):
+        return f"DynamicInt({self.real})"
+
+    def __floordiv__(self, other):  # // was casting to int without these overrides?
+        return DynamicInt(self.real // other)
+
+    def __rfloordiv__(self, other):
+        return DynamicInt(other // self.real)
 
 
 # TODO: this probably needs the sizes-strides eval functions
@@ -1650,7 +1684,6 @@ for method, func in sizes_strides_methods.items():
 def _make_user_magic(method, user_type):
     # User magic takes care of wrapping the other operand into a node,
     # so that our internal logic can assume everything is nodes
-
     if method in magic_methods_on_operator_with_trailing_underscore:
         method_attr = f"sym_{method}"
     else:
@@ -1781,7 +1814,7 @@ def _make_user_magic(method, user_type):
         other = promote(other)
         self, other = promote2(self, other)
         if is_constant(self):
-            return (method_to_operator(method))(get_constant(self), other)
+            return (method_to_operator(method))(other, get_constant(self))
         if is_constant(other):
             other = get_constant(other)
         other_node = to_node(self.node, other)
@@ -1790,11 +1823,31 @@ def _make_user_magic(method, user_type):
         ret = wrap_node(getattr(other_node, method_attr)(self.node))
         return get_constant(ret) if is_constant(ret) else ret
 
+    def setattrs(user_type, attr, symnode_impl):
+        """
+        Registers the SymNode magic method on SymInt/Float/Bool,
+        and optionally registers a corresponding wrapped method on DynamicInt.
+        """
+
+        # SymInt/Float/Bool
+        setattr(user_type, attr, symnode_impl)
+
+        # DynamicInt impl
+        def dynamic_int_impl(*args):
+            args = [x.real if isinstance(x, DynamicInt) else x for x in args]
+            out = getattr(int, attr)(*args)
+            if isinstance(out, int) and not isinstance(out, bool):
+                return DynamicInt(out)
+            return out
+
+        if user_type is SymInt:
+            setattr(DynamicInt, attr, dynamic_int_impl)
+
     if method in unary_magic_methods:
-        setattr(user_type, f"__{method}__", unary_magic_impl)
+        setattrs(user_type, f"__{method}__", unary_magic_impl)
     elif method in unary_nonmagic_methods:
         orig = getattr(user_type, method)
-        setattr(user_type, method, update_wrapper(unary_magic_impl, orig))
+        setattrs(user_type, method, update_wrapper(unary_magic_impl, orig))
     elif method == "sym_ite":
 
         def sym_ite_magic_impl(pred, then_val, else_val):
@@ -1811,7 +1864,7 @@ def _make_user_magic(method, user_type):
             ret = wrap_node(getattr(pred.node, method_attr)(then_node, else_node))
             return get_constant(ret) if ret.node.is_constant() else ret
 
-        setattr(user_type, f"__{method}__", sym_ite_magic_impl)
+        setattrs(user_type, f"__{method}__", sym_ite_magic_impl)
     elif method == "round":
 
         def round_magic_impl(self, ndigits=None):
@@ -1820,14 +1873,14 @@ def _make_user_magic(method, user_type):
 
             return wrap_node(getattr(self.node, method)(ndigits))
 
-        setattr(user_type, f"__{method}__", round_magic_impl)
+        setattrs(user_type, f"__{method}__", round_magic_impl)
     else:
         method_name = method
         if method in bitwise_ops:
             method_name = bitwise_ops[method]
-        setattr(user_type, f"__{method_name}__", binary_magic_impl)
+        setattrs(user_type, f"__{method_name}__", binary_magic_impl)
         if method in reflectable_magic_methods:
-            setattr(user_type, f"__r{method_name}__", rbinary_magic_impl)
+            setattrs(user_type, f"__r{method_name}__", rbinary_magic_impl)
 
 
 for method, func in magic_methods.items():  # type: ignore[assignment]

@@ -134,6 +134,13 @@ class MPSBasicTests(TestCase):
         # inductor test do not validate that max of say 16K half elements can be computed
         self.common(torch.max, (torch.rand(16384, dtype=torch.half),), check_lowp=False)
 
+    def test_linalg_inv(self):
+        def fn(x):
+            return torch.linalg.inv(torch.linalg.cholesky(x))
+
+        A = torch.diag(torch.tensor([20.0, 0.5, 5.0], dtype=torch.float32) ** 2)
+        self.common(fn, (A,), check_lowp=False)
+
 
 class MPSBasicTestsAOTI(TestCase):
     def check_model(self, m, inp, dynamic_shapes=None):

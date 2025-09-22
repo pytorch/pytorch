@@ -2,6 +2,11 @@
 
 set -ex
 
+# for pip_install function
+source "$(dirname "${BASH_SOURCE[0]}")/common_utils.sh"
+
+ROCM_COMPOSABLE_KERNEL_VERSION="$(cat $(dirname $0)/../ci_commit_pins/rocm-composable-kernel.txt)"
+
 ver() {
     printf "%3d%03d%03d%03d" $(echo "$1" | tr '.' ' ');
 }
@@ -113,6 +118,8 @@ EOF
         rm -rf HIP clr
     fi
 
+    pip_install "git+https://github.com/rocm/composable_kernel@$ROCM_COMPOSABLE_KERNEL_VERSION"
+
     # Cleanup
     apt-get autoclean && apt-get clean
     rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
@@ -175,6 +182,8 @@ install_centos() {
   do
       sqlite3 $kdb "PRAGMA journal_mode=off; PRAGMA VACUUM;"
   done
+
+  pip_install "git+https://github.com/rocm/composable_kernel@$ROCM_COMPOSABLE_KERNEL_VERSION"
 
   # Cleanup
   yum clean all

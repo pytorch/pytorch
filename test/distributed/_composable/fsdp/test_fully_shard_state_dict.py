@@ -118,6 +118,49 @@ class TestFullyShardStateDictMultiProcess(FSDPTest):
             self.assertEqual(value, sharded_sd[key])
 
     @skip_if_lt_x_gpu(2)
+    def test_cached_state_dict(self):
+        self.run_subtests(
+            {"mlp_dim": [2, 3, 4, 5], "mutate_after_state_dict": [True, False]},
+            self._test_cached_state_dict,
+        )
+
+    def _test_cached_state_dict(self, mlp_dim: int, mutate_after_state_dict: bool):
+        torch.manual_seed(42)
+        model = nn.Linear(mlp_dim, mlp_dim, bias=False)
+        fully_shard(model, reshard_after_forward=True)
+        optim = torch.optim.AdamW(model.parameters(), lr=1e-2)
+
+        # call .state_dict() once and use `sd` directly to reduce cpu overhead
+        sd = model.state_dict()
+        assert isinstance(model.weight, DTensor)
+
+        if not mutate_after_state_dict:
+            self.assertTrue(
+                sd["weight"]._local_tensor.untyped_storage().data_ptr()
+                == model.weight._local_tensor.untyped_storage().data_ptr()
+            )
+        else:
+            model = model.cpu()
+            model = model.cuda()
+            self.assertTrue(
+                sd["weight"]._local_tensor.untyped_storage().data_ptr()
+                != model.weight._local_tensor.untyped_storage().data_ptr()
+            )
+
+        torch.manual_seed(42 + self.rank)
+        inp = torch.rand(mlp_dim, mlp_dim, device="cuda")
+        for _ in range(5):
+            optim.zero_grad()
+            loss = model(inp).sum()
+            loss.backward()
+            optim.step()
+            if not mutate_after_state_dict:
+                self.assertTrue(
+                    sd["weight"]._local_tensor.untyped_storage().data_ptr()
+                    == model.weight._local_tensor.untyped_storage().data_ptr()
+                )
+
+    @skip_if_lt_x_gpu(2)
     def test_dp_state_dict_cpu_offload(self):
         self.run_subtests(
             {

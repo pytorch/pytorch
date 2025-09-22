@@ -4,12 +4,13 @@ import copy
 import unittest
 
 import torch._dynamo as torchdynamo
+from torch._export import config
 from torch._export.db.case import ExportCase, SupportLevel
 from torch._export.db.examples import (
     filter_examples_by_support_level,
     get_rewrite_cases,
 )
-from torch.export import export_for_training
+from torch.export import export
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_WINDOWS,
@@ -35,13 +36,14 @@ class ExampleTests(TestCase):
         kwargs_export = case.example_kwargs
         args_model = copy.deepcopy(args_export)
         kwargs_model = copy.deepcopy(kwargs_export)
-        exported_program = export_for_training(
-            model,
-            args_export,
-            kwargs_export,
-            dynamic_shapes=case.dynamic_shapes,
-            strict=True,
-        )
+        with config.patch(use_new_tracer_experimental=True):
+            exported_program = export(
+                model,
+                case.example_args,
+                case.example_kwargs,
+                dynamic_shapes=case.dynamic_shapes,
+                strict=True,
+            )
         exported_program.graph_module.print_readable()
 
         self.assertEqual(
@@ -68,13 +70,14 @@ class ExampleTests(TestCase):
         with self.assertRaises(
             (torchdynamo.exc.Unsupported, AssertionError, RuntimeError)
         ):
-            export_for_training(
-                model,
-                case.example_args,
-                case.example_kwargs,
-                dynamic_shapes=case.dynamic_shapes,
-                strict=True,
-            )
+            with config.patch(use_new_tracer_experimental=True):
+                _ = export(
+                    model,
+                    case.example_args,
+                    case.example_kwargs,
+                    dynamic_shapes=case.dynamic_shapes,
+                    strict=True,
+                )
 
     exportdb_not_supported_rewrite_cases = [
         (name, rewrite_case)
@@ -94,7 +97,7 @@ class ExampleTests(TestCase):
             self, name: str, rewrite_case: ExportCase
         ) -> None:
             # pyre-ignore
-            export_for_training(
+            export(
                 rewrite_case.model,
                 rewrite_case.example_args,
                 rewrite_case.example_kwargs,

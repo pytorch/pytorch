@@ -610,6 +610,168 @@ def gen_nn_functional(fm: FileManager) -> None:
                     "Tensor",
                 )
             ],
+            "cross_entropy_loss": [
+                defs(
+                    "cross_entropy_loss",
+                    [
+                        INPUT,
+                        "target: Tensor",
+                        "weight: Tensor | None = None",
+                        "reduction: str = ...",
+                        "ignore_index: int = -100",
+                        "label_smoothing: float = 0.0",
+                    ],
+                    "Tensor",
+                )
+            ],
+            "hardsigmoid_": [
+                defs(
+                    "hardsigmoid_",
+                    [
+                        INPUT,
+                    ],
+                    "Tensor",
+                )
+            ],
+            "hardswish": [
+                defs(
+                    "hardswish",
+                    [
+                        INPUT,
+                    ],
+                    "Tensor",
+                )
+            ],
+            "hardswish_": [
+                defs(
+                    "hardswish_",
+                    [
+                        INPUT,
+                    ],
+                    "Tensor",
+                )
+            ],
+            "huber_loss": [
+                defs(
+                    "huber_loss",
+                    [
+                        INPUT,
+                        "target: Tensor",
+                        "reduction: str = ...",
+                        "delta: float = 1.0",
+                    ],
+                    "Tensor",
+                )
+            ],
+            "im2col": [
+                defs(
+                    "im2col",
+                    [
+                        INPUT,
+                        KERNEL_SIZE,
+                        "dilation: _int | _size",
+                        "padding: _int | _size",
+                        "stride: _int | _size",
+                    ],
+                    "Tensor",
+                )
+            ],
+            "l1_loss": [
+                defs(
+                    "l1_loss",
+                    [
+                        INPUT,
+                        "target: Tensor",
+                        "reduction: str = ...",
+                    ],
+                    "Tensor",
+                )
+            ],
+            "mish": [
+                defs(
+                    "mish",
+                    [
+                        INPUT,
+                    ],
+                    "Tensor",
+                )
+            ],
+            "mish_": [
+                defs(
+                    "mish_",
+                    [
+                        INPUT,
+                    ],
+                    "Tensor",
+                )
+            ],
+            "mse_loss": [
+                defs(
+                    "mse_loss",
+                    [
+                        INPUT,
+                        "target: Tensor",
+                        "reduction: str = ...",
+                    ],
+                    "Tensor",
+                )
+            ],
+            "multilabel_margin_loss": [
+                defs(
+                    "multilabel_margin_loss",
+                    [
+                        INPUT,
+                        "target: Tensor",
+                        "reduction: str = ...",
+                    ],
+                    "Tensor",
+                )
+            ],
+            "multi_margin_loss": [
+                defs(
+                    "multi_margin_loss",
+                    [
+                        INPUT,
+                        "target: Tensor",
+                        "p: float = 1.0",
+                        "margin: float = 1.0",
+                        "weight: Tensor | None = None",
+                        "reduction: str = ...",
+                    ],
+                    "Tensor",
+                )
+            ],
+            "nll_loss_nd": [
+                defs(
+                    "nll_loss_nd",
+                    [
+                        INPUT,
+                        "target: Tensor",
+                        "weight: Tensor | None = None",
+                        "reduction: str = ...",
+                        "ignore_index: int = -100",
+                    ],
+                    "Tensor",
+                )
+            ],
+            "relu6": [
+                defs(
+                    "relu6",
+                    [
+                        INPUT,
+                    ],
+                    "Tensor",
+                )
+            ],
+            "relu6_": [
+                defs(
+                    "relu6_",
+                    [
+                        INPUT,
+                    ],
+                    "Tensor",
+                )
+            ],
         }
     )
 
@@ -1377,6 +1539,19 @@ def gen_pyi(
                     "S",
                 )
             ],
+            "_dtensor__new__": [
+                "@staticmethod\n"
+                + defs(
+                    "_dtensor__new__",
+                    [
+                        "cls: type[S]",
+                        "local_tensor: Tensor",
+                        "spec: torch.distributed.tensor._dtensor_spec.DTensorSpec",
+                        "requires_grad: _bool",
+                    ],
+                    "S",
+                )
+            ],
             "__contains__": [defs("__contains__", ["self", "item: Any", "/"], "_bool")],
             "__getitem__": [defs("__getitem__", ["self", INDICES, "/"], "Tensor")],
             "__setitem__": [
@@ -1885,8 +2060,15 @@ def main() -> None:
         default=".",
         help="path to output directory",
     )
+    parser.add_argument(
+        "--template-dir",
+        default=".",
+        help="path to template directory",
+    )
     args = parser.parse_args()
-    fm = FileManager(install_dir=args.out, template_dir=".", dry_run=False)
+    fm = FileManager(
+        install_dir=args.out, template_dir=args.template_dir, dry_run=False
+    )
     gen_pyi(
         args.native_functions_path,
         args.tags_path,

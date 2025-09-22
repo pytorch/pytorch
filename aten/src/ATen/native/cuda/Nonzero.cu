@@ -317,6 +317,17 @@ void nonzero_static_cuda_out_impl(
     out_temp =
         Tensor(at::detail::empty_cuda({self.dim(), size}, out.options())).t();
   }
+  // If input has zero elements, avoid kernel grid calculations (which can
+  // produce zero divisors) and just fill the output with fill_value.
+  if (self.numel() == 0) {
+    if (need_to_copy) {
+      out_temp.fill_(fill_value);
+      out.copy_(out_temp);
+    } else {
+      out.fill_(fill_value);
+    }
+    return;
+  }
   int64_t* out_data_ptr = need_to_copy ? out_temp.mutable_data_ptr<int64_t>()
                                        : out.mutable_data_ptr<int64_t>();
 

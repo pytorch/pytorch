@@ -131,7 +131,7 @@ class TestUtils(TestCase):
                 (
                     torch.ops.aten.convolution,
                     (
-                        torch.Tensor(2, 3, 3),
+                        torch.Tensor(2, 2, 3),
                         torch.Tensor(2, 2, 2),
                         torch.Tensor(2),
                         (1, 1),

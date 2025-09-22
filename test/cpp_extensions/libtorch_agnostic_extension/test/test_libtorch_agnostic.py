@@ -345,6 +345,17 @@ if not IS_WINDOWS:
             ref_out = t.new_zeros((2, 5), dtype=torch.float)
             self.assertEqual(out, ref_out, exact_device=True)
 
+        def test_my_copy_(self, device):
+            import libtorch_agnostic
+
+            dst = torch.empty(2, 5, device=device)
+            src = torch.randn(2, 5, device=device)
+
+            result = libtorch_agnostic.ops.my_copy_(dst, src, False)
+            expected = src
+            self.assertEqual(result, expected)
+            self.assertEqual(result.data_ptr(), dst.data_ptr())
+
     instantiate_device_type_tests(TestLibtorchAgnostic, globals(), except_for=None)
 
 if __name__ == "__main__":
