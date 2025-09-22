@@ -2087,7 +2087,9 @@ _scaled_rowwise_rowwise(
   TORCH_CHECK(scale_a.numel() == mat_a.size(0) && scale_a.scalar_type() == kFloat, "scale_a must have ", mat_a.size(0), " Float elements, got ", scale_a.numel())
   TORCH_CHECK(scale_b.numel() == mat_b.size(1) && scale_b.scalar_type() == kFloat, "scale_b must have ", mat_b.size(1), " Float elements, got ", scale_b.numel())
 
-  //at::native::resize_output(out, {mat_a.sizes()[0], mat_b.sizes()[1]});
+  auto scaling_choice_a = ScalingType::RowWise;
+  auto scaling_choice_b = ScalingType::RowWise;
+  //
   // NVIDIA's cuBLAS only started supporting row-wise scaling in version 12.9,
   // and only for compute capability 9.0+. In other cases we use CUTLASS.
 #ifndef USE_ROCM
@@ -2110,7 +2112,7 @@ _scaled_rowwise_rowwise(
 #else
   if (scaling_choice_a == ScalingType::RowWise && scaling_choice_b == ScalingType::RowWise) {
     // For ROCm, match behavior of f8f8bf16_rowwise type checking, for unit test purposes.
-    Tensor b = mat2;
+    Tensor b = mat_b;
     if (_scaled_mm_is_fnuz()) {
       TORCH_CHECK(b.dtype() == at::kFloat8_e4m3fnuz);
     }
@@ -2121,25 +2123,8 @@ _scaled_rowwise_rowwise(
     TORCH_CHECK(out.scalar_type() == ScalarType::BFloat16,
          "hipblaslt rowwise _scaled_mm only supports BFloat16 output but got ", out.scalar_type());
   }
-  else if (scaling_choice_a == ScalingType::BlockWise1x32 && scaling_choice_b == ScalingType::BlockWise1x32) {
-    #if ROCM_VERSION >= 70000
-    TORCH_CHECK(at::detail::getCUDAHooks().isGPUArch({"gfx950"}),
-                "Block-wise scaling for Float8_e8m0fnu is only supported on gfx950");
-
-    TORCH_CHECK(mat1.size(0) % 32 == 0 && mat1.size(1) % 32 == 0 &&
-                mat2.size(0) % 32 == 0 && mat2.size(1) % 32 == 0,
-                "Matrix dimensions must be multiples of 32 for block-wise scaling");
-
-    TORCH_CHECK(out.scalar_type() == ScalarType::BFloat16 ||
-                out.scalar_type() == ScalarType::Half,
-                "Block-wise scaling only supports BFloat16 or Half output types");
-#else
-    TORCH_CHECK(false, "Block-wise scaling for Float8_e8m0fnu requires ROCm 7.0 or later");
-#endif
   }
 #endif
-  auto scaling_choice_a = ScalingType::RowWise;
-  auto scaling_choice_b = ScalingType::RowWise;
 
   _cutlass_scaled_gemm(mat_a, mat_b, scale_a, scale_b, scaling_choice_a, scaling_choice_b, bias, use_fast_accum, out);
 
@@ -2259,6 +2244,23 @@ _scaled_mxfp8_mxfp8(
   auto scaling_choice_a = ScalingType::BlockWise1x32;
   auto scaling_choice_b = ScalingType::BlockWise1x32;
 
+#ifdef USE_ROCM
+#if ROCM_VERSION >= 70000
+  TORCH_CHECK(at::detail::getCUDAHooks().isGPUArch({"gfx950"}),
+              "Block-wise scaling for Float8_e8m0fnu is only supported on gfx950");
+
+  TORCH_CHECK(mat_a.size(0) % 32 == 0 && mat_a.size(1) % 32 == 0 &&
+              mat_b.size(0) % 32 == 0 && mat_b.size(1) % 32 == 0,
+              "Matrix dimensions must be multiples of 32 for block-wise scaling");
+
+  TORCH_CHECK(out.scalar_type() == ScalarType::BFloat16 ||
+              out.scalar_type() == ScalarType::Half,
+              "Block-wise scaling only supports BFloat16 or Half output types");
+#else
+    TORCH_CHECK(false, "Block-wise scaling for Float8_e8m0fnu requires ROCm 7.0 or later");
+#endif
+#endif
+
   return _cutlass_scaled_gemm(mat_a, mat_b, scale_a, scale_b, scaling_choice_a, scaling_choice_b, bias, false /* use_fast_accum */, out);
 }
 
@@ -2271,6 +2273,9 @@ _scaled_nvfp4_nvfp4(
           const c10::ScalarType out_dtype,
           const bool single_scale,
           Tensor& out) {
+#ifdef USE_ROCM
+  TORCH_CHECK(false, "NVFP4 scaling not supported on ROCM");
+#endif
   TORCH_CHECK(single_scale, "Only single-scaled NVFP4 currently supported");
   // Restrictions:
   // A, B are FP4, scales are e8m0, A: shape K//32, B: K, N//32
