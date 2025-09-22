@@ -31,6 +31,8 @@ jobs:
     if: github.repository_owner == 'pytorch'
     name: Get changed files
     uses: ./.github/workflows/_get-changed-files.yml
+    with:
+      all_files: ${{ contains(github.event.pull_request.labels.*.name, 'lint-all-files') || contains(github.event.pull_request.labels.*.name, 'Reverted') }}
 
   lintrunner-clang:
     uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
