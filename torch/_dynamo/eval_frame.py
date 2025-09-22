@@ -1312,7 +1312,7 @@ def optimize(*args: Any, **kwargs: Any) -> Union[OptimizeContext, _NullDecorator
             assert set(ca_kwargs_override.keys()) == {"fullgraph"}, (
                 f"Only `fullgraph` kwarg override is supported for now, but got {ca_kwargs_override.keys()}"
             )
-            kwargs["nopython"] = ca_kwargs_override["fullgraph"]
+            kwargs["fullgraph"] = ca_kwargs_override["fullgraph"]
         return optimize(*args, **kwargs)
 
     return _optimize(rebuild_ctx, *args, **kwargs)
@@ -1322,7 +1322,7 @@ def _optimize(
     rebuild_ctx: Callable[[], Union[OptimizeContext, _NullDecorator]],
     backend: Union[str, Callable[..., Any]] = "inductor",
     *,
-    nopython: bool = False,
+    fullgraph: bool = False,
     error_on_graph_break: Optional[bool] = None,
     guard_export_fn: Optional[Callable[[_guards.GuardsSet], None]] = None,
     guard_fail_fn: Optional[Callable[[GuardFail], None]] = None,
@@ -1344,13 +1344,13 @@ def _optimize(
             torch.jit.fuser("fuser2"), by setting the backend_ctx_ctor attribute.
             See AOTAutogradMemoryEfficientFusionWithContext for the usage.
             - Or, a string backend name in `torch._dynamo.list_backends()`
-        nopython: If True, graph breaks will be errors and there will
+        fullgraph: If True, graph breaks will be errors and there will
             be a single whole-program graph.
         error_on_graph_break: If not None, the current `error_on_graph_break` setting is set to the given value.
             See `torch._dynamo.error_on_graph_break()` for more details on what `error_on_graph_break` means.
 
-            Unlike `nopython=True` (i.e. `fullgraph=True`), there is no guarantee of a single whole-program graph.
-            If `nopython` is True, `error_on_graph_break` does nothing.
+            Unlike `fullgraph=True`, there is no guarantee of a single whole-program graph.
+            If `fullgraph` is True, `error_on_graph_break` does nothing.
         disable: If True, turn this decorator into a no-op
         dynamic: If True, upfront compile as dynamic a kernel as possible.  If False,
             disable all dynamic shapes support (always specialize).  If None, automatically
@@ -1381,7 +1381,7 @@ def _optimize(
     ):
         return _NullDecorator()
 
-    if nopython and not config.debug_force_graph_break_on_leaf_return:
+    if fullgraph and not config.debug_force_graph_break_on_leaf_return:
         return optimize_assert(
             backend,
             dynamic=dynamic,
@@ -1467,7 +1467,7 @@ def explain(f: Callable[..., Any], *extra_args: Any, **extra_kwargs: Any) -> Any
 
         opt_f = optimize(
             dynamo_graph_accumulating_compiler,
-            nopython=False,
+            fullgraph=False,
             guard_export_fn=guard_export_print,
         )(f)
         # TODO(voz): We may have instances of `f` that mutate inputs, we should track sideeffects and reject.
