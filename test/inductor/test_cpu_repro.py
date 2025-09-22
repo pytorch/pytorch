@@ -154,6 +154,17 @@ class CPUReproTests(TestCase):
         actual = compiled(x)
         torch.testing.assert_close(actual, expected)
 
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_fill_diagonal_item_scalar_cpu(self):
+        def fn():
+            x = torch.ones(3, 3)
+            x.fill_diagonal_(0)
+            return x.sum().item()
+
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True)
+        eager = fn()
+        self.assertEqual(compiled(), eager)
+
     @skipIfRocm
     def test_conv_stride_constraints(self):
         for fmt in [torch.contiguous_format, torch.channels_last]:
