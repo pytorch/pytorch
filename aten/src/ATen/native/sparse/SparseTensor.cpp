@@ -468,7 +468,7 @@ Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values, IntArrayRe
       !options.has_layout() || options.layout() == kSparse,
       "expected sparse layout, but got layout ",
       options.layout());
-  
+
   if (indices.numel() > 0) {
     Tensor min_indices =
         std::get</* values */ 0>(indices.min(/* dim */ 1, /* keepdim */ false));
@@ -489,7 +489,7 @@ Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values, IntArrayRe
           d);
     }
   }
-  
+
   return at::native::_sparse_coo_tensor_unsafe(
       indices,
       values,
