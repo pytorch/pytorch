@@ -1,5 +1,7 @@
 # PyTorch release scripts performing branch cut and applying release only changes
 
+dummy change
+
 These are a collection of scripts that are to be used for release activities.
 
 > NOTE: All scripts should do no actual work unless the `DRY_RUN` environment variable is set
