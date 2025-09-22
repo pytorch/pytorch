@@ -40,7 +40,8 @@ from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import (
     run_tests, 
     skipIfRocm, 
-    TEST_HPU
+    TEST_HPU,
+    TEST_CUDA
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
@@ -70,7 +71,10 @@ rotater_enum_to_str = {
 class RingAttentionTest(DTensorTestBase):
     @property
     def world_size(self) -> int:
-        return torch.cuda.device_count()
+        if TEST_HPU:
+            return torch.hpu.device_count()
+        elif TEST_CUDA:
+            return torch.cuda.device_count()
 
     @property
     def destroy_pg_upon_exit(self) -> bool:
@@ -79,7 +83,7 @@ class RingAttentionTest(DTensorTestBase):
     @skip_if_lt_x_gpu(2)
     @skipIfRocm  # Missing _c10d_functional_autograd::all_to_all_single
     @unittest.skipIf(
-        not PLATFORM_SUPPORTS_FUSED_ATTENTION or PLATFORM_SUPPORTS_OVERRIDEABLE_ATTENTION,
+        not PLATFORM_SUPPORTS_FUSED_ATTENTION and not PLATFORM_SUPPORTS_OVERRIDEABLE_ATTENTION,
         "Does not support flash nor efficient attention",
     )
     @with_comms
@@ -110,6 +114,12 @@ class RingAttentionTest(DTensorTestBase):
         test_forward_only: bool,
         dispatch_mode: _DispatchMode,
     ) -> None:
+
+        if (
+            backend == SDPBackend.OVERRIDEABLE and TEST_HPU and not test_forward_only):
+            self.skipTest(
+                "Backward pass is not supported for OVERRIDEABLE backend on HPU"
+            )
         torch.distributed.tensor.experimental._attention._dispatch_mode = dispatch_mode
 
         def fn_eval(fn, *args, **kwargs):
@@ -138,7 +148,6 @@ class RingAttentionTest(DTensorTestBase):
             torch.bfloat16
             if backend == SDPBackend.FLASH_ATTENTION
             or backend == SDPBackend.CUDNN_ATTENTION
-            or backend == SDPBackend.OVERRIDEABLE
             else torch.float32
         )
 
