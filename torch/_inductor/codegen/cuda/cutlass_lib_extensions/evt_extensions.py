@@ -38,7 +38,7 @@ if try_import_cutlass():
     if config.is_fbcode():
         import python_cutlass  # type: ignore[import-untyped, import-not-found]  # noqa: F401
     else:
-        import cutlass as python_cutlass  # type: ignore[import-untyped, import-not-found]  # noqa: F401
+        import cutlass_cppgen as python_cutlass  # type: ignore[import-untyped, import-not-found]  # noqa: F401
 
     from torch._inductor.codegen.cuda import cuda_env
     from torch._inductor.utils import IndentedBuffer
@@ -174,7 +174,7 @@ non-contiguous layout, received stride: {stride} and shape: {shape}"
         def is_nested_visitor_type(t: type) -> bool:
             return ".".join([t.__module__, t.__qualname__]) in {
                 "python_cutlass.backend.c_types.visitor_factory.<locals>.VisitorType",
-                "cutlass.backend.c_types.visitor_factory.<locals>.VisitorType",
+                "cutlass_cppgen.backend.c_types.visitor_factory.<locals>.VisitorType",
             }
 
         buffer = IndentedBuffer()
@@ -235,7 +235,7 @@ non-contiguous layout, received stride: {stride} and shape: {shape}"
         # Once again, need to check for local class type for stride tuple
         if str(arg_ty) in {
             "<class 'python_cutlass.backend.c_types.tuple_factory_.<locals>.TupleType'>",
-            "<class 'cutlass.backend.c_types.tuple_factory_.<locals>.TupleType'>",
+            "<class 'cutlass_cppgen.backend.c_types.tuple_factory_.<locals>.TupleType'>",
         }:
             DEFAULT_STRIDE_LEN = 3
             assert len(node.get_layout().stride) <= DEFAULT_STRIDE_LEN
