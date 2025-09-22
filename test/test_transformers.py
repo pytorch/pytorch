@@ -2088,8 +2088,9 @@ class TestSDPA(NNTestCase):
         If you modify the reference implementation, update this test.
         """
         # Efficient implementation equivalent to the following:
-        def scaled_dot_product_attention(query, key, value, attn_mask=None, dropout_p=0.0,
-                is_causal=False, scale=None, enable_gqa=False) -> torch.Tensor:
+        def scaled_dot_product_attention(
+            query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False, scale=None, enable_gqa=False
+        ) -> torch.Tensor:
             L, S = query.size(-2), key.size(-2)
             scale_factor = 1 / math.sqrt(query.size(-1)) if scale is None else scale
             origin_dtype = query.dtype
@@ -2108,8 +2109,8 @@ class TestSDPA(NNTestCase):
                     attn_bias = attn_mask + attn_bias
 
             if enable_gqa:
-                key = key.repeat_interleave(query.size(-3)//key.size(-3), -3)
-                value = value.repeat_interleave(query.size(-3)//value.size(-3), -3)
+                key = key.repeat_interleave(query.size(-3) // key.size(-3), -3)
+                value = value.repeat_interleave(query.size(-3) // value.size(-3), -3)
 
             attn_weight = query @ key.transpose(-2, -1)
             attn_weight += attn_bias
