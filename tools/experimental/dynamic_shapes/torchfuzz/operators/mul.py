@@ -25,31 +25,14 @@ class MulOperator(Operator):
         if not isinstance(output_spec, TensorSpec):
             raise ValueError("MulOperator can only produce TensorSpec outputs")
 
-        # Type promotion table for realistic LLM/diffusion model types
-        # Each output dtype maps to possible input dtype pairs (in order of preference)
-        promotion_table = {
-            "float32": [
-                ("float32", "float32"),
-                ("bfloat16", "float32"),
-                ("float32", "bfloat16"),
-                ("float16", "float32"),
-                ("float32", "float16"),
-            ],
-            "bfloat16": [
-                ("bfloat16", "bfloat16"),
-                ("float32", "bfloat16"),
-                ("bfloat16", "float32"),
-            ],
-            "float16": [
-                ("float16", "float16"),
-                ("float32", "float16"),
-                ("float16", "float32"),
-            ],
-        }
+        # Use shared type promotion table
+        from torchfuzz.type_promotion import get_promotion_table_for_strings, get_dtype_name, get_dtype_map
+
+        promotion_table = get_promotion_table_for_strings()
 
         # If num_inputs > 2, promote left-to-right (e.g. (((a * b) * c) * d))
         # For simplicity, we generate the first two with promotion, rest match output dtype
-        dtype_str = str(output_spec.dtype).split(".")[-1]  # Get dtype name
+        dtype_str = get_dtype_name(output_spec.dtype)
         supported_types = promotion_table.get(dtype_str, [(dtype_str, dtype_str)])
 
         # Pick a random promotion pattern for the first two inputs
@@ -62,14 +45,7 @@ class MulOperator(Operator):
             dtypes = [dtype_str] * num_inputs
 
         # Convert dtype strings back to torch dtypes
-        import torch
-        dtype_map = {
-            "float32": torch.float32,
-            "float16": torch.float16,
-            "bfloat16": torch.bfloat16,
-            "int32": torch.int32,
-            "int64": torch.int64,
-        }
+        dtype_map = get_dtype_map()
 
         return [
             TensorSpec(

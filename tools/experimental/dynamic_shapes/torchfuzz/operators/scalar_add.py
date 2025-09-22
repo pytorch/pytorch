@@ -25,34 +25,10 @@ class ScalarAddOperator(Operator):
         if not isinstance(output_spec, ScalarSpec):
             raise ValueError("ScalarAddOperator can only produce ScalarSpec outputs")
 
-        # Type promotion rules for scalars
-        import torch
-        promotion_table = {
-            torch.float32: [
-                (torch.float32, torch.float32),
-                (torch.float16, torch.float32),
-                (torch.float32, torch.float16),
-                (torch.int32, torch.float32),
-                (torch.float32, torch.int32),
-            ],
-            torch.float64: [
-                (torch.float64, torch.float64),
-                (torch.float32, torch.float64),
-                (torch.float64, torch.float32),
-            ],
-            torch.int32: [
-                (torch.int32, torch.int32),
-                (torch.int64, torch.int32),
-                (torch.int32, torch.int64),
-            ],
-            torch.int64: [
-                (torch.int64, torch.int64),
-                (torch.int32, torch.int64),
-                (torch.int64, torch.int32),
-            ],
-        }
+        # Use shared type promotion utility
+        from torchfuzz.type_promotion import get_scalar_promotion_pairs
 
-        supported_types = promotion_table.get(output_spec.dtype, [(output_spec.dtype, output_spec.dtype)])
+        supported_types = get_scalar_promotion_pairs(output_spec.dtype)
         dtypes = random.choice(supported_types)
 
         return [

@@ -1,0 +1,13 @@
+{
+    "template_id": "mm",
+    "ACC_TYPE": "tl.float32',",
+    "ALLOW_TF32": "False,",
+    "BLOCK_K": "32,",
+    "BLOCK_M": "128,",
+    "BLOCK_N": "64,",
+    "EVEN_K": "False,",
+    "GROUP_M": "8,",
+    "USE_FAST_ACCUM": "False,",
+    "num_stages": "4,",
+    "num_warps": 8
+}
