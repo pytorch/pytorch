@@ -2,21 +2,18 @@
 
 #include <ATen/core/dispatch/Dispatcher.h>
 
-// TODO: this can probably live in c10
+// TODO: We can get rid of this
 
 
 namespace at::impl {
 
 // Manages the single Python interpreter instance for PyTorch.
-// Since torch/deploy and multipy are deprecated, we now only support
-// one Python interpreter per process.
 class TORCH_API PythonOpRegistrationTrampoline final {
   static c10::impl::PyInterpreter* interpreter_;
 
 public:
   // Register the Python interpreter. Returns true on first registration,
   // false if an interpreter was already registered.
-  // In single-interpreter mode, only the first registration succeeds.
   static bool registerInterpreter(c10::impl::PyInterpreter*);
 
   // Returns the registered interpreter via the global PyInterpreter hooks.
