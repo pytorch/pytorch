@@ -165,7 +165,7 @@ def check_dynamo(backend, device, err_msg) -> None:
 
         dynamo.reset()
 
-        @dynamo.optimize(backend, nopython=True)
+        @dynamo.optimize(backend, fullgraph=True)
         def fn(x):
             return x + x
 
@@ -174,7 +174,7 @@ def check_dynamo(backend, device, err_msg) -> None:
                 return x + x
 
         mod = Module()
-        opt_mod = dynamo.optimize(backend, nopython=True)(mod)
+        opt_mod = dynamo.optimize(backend, fullgraph=True)(mod)
 
         for f in (fn, opt_mod):
             x = torch.randn(10, 10).to(device)
