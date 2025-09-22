@@ -444,7 +444,10 @@ use_experimental_benchmarker: bool = Config(
     justknob="pytorch/inductor:use_experimental_benchmarker",
 )
 
-# Enable distributed autotuning
+# Enable distributed autotuning. When this is enabled we will distribute the
+# autotuning across distributed ranks in the same program group - so instead of
+# each rank autotuning every kernel they only autotune 1/world size kernels and
+# then share the results.
 distributed_autotune = os.environ.get("TORCHINDUCTOR_DISTRIBUTED_AUTOTUNE") == "1"
 
 # enable slow autotuning passes to select algorithms
@@ -468,6 +471,11 @@ max_autotune_report_choices_stats = (
 max_autotune_prune_choices_based_on_shared_mem = (
     os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_PRUNE_CHOICES_BASED_ON_SHARED_MEM", "1")
     == "1"
+)
+
+# Disable triton from trying to initialize and detect devices on the host
+triton_disable_device_detection = (
+    os.environ.get("TORCHINDUCTOR_TRITON_DISABLE_DEVICE_DETECTION", "0") == "1"
 )
 
 # enable inductor graph partition to allow multiple inductor graphs for the same dynamo graph
@@ -1435,6 +1443,9 @@ class triton:
     enable_persistent_tma_matmul = (
         os.environ.get("ENABLE_PERSISTENT_TMA_MATMUL", "0") == "1"
     )
+    # Should TMA store be enable from templates. TODO: Remove once we
+    # can autotune over the result.
+    enable_template_tma_store = os.environ.get("ENABLE_TEMPLATE_TMA_STORE", "0") == "1"
     # Skip L1 cache for buffers that are used only once.  Disabled by default
     skip_l1_cache = os.environ.get("TORCHINDUCTOR_SKIP_L1", "0") == "1"
 
@@ -1454,6 +1465,9 @@ class triton:
     decompose_k_threshold = int(
         os.environ.get("TORCHINDUCTOR_DECOMPOSE_K_THRESHOLD", "32")
     )
+
+    # Programmatic Dependent Launch improves launch latency on Nvidia Hopper+ devices
+    enable_pdl = False
 
 
 class aot_inductor:

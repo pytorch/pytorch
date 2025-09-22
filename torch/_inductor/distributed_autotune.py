@@ -3,7 +3,6 @@ from __future__ import annotations
 import contextlib
 import itertools
 from typing import Any, Optional, TYPE_CHECKING, Union
-from typing_extensions import override
 from unittest.mock import patch
 
 import sympy
@@ -24,7 +23,7 @@ from .ir import (
     StorageBox,
     TensorBox,
 )
-from .kernel_inputs import MMKernelInputs
+from .kernel_inputs import KernelInputs, MMKernelInputs
 from .scheduler import Dep, replace_operation_buffer, SchedulerNode
 from .virtualized import V
 
@@ -35,6 +34,7 @@ if TYPE_CHECKING:
 
 _DISTRIBUTED_AUTOTUNE_INDEX = "distributed_autotune_index"
 _autotuned_index: Optional[int] = None
+_autotuned_local_count: int = 0
 
 
 def schedule(scheduler: torch._inductor.scheduler.Scheduler) -> None:
@@ -43,9 +43,9 @@ def schedule(scheduler: torch._inductor.scheduler.Scheduler) -> None:
     between the ranks and then replacing the placeholder with the real Buffer.
     """
     assert config.distributed_autotune
-    autotune_results = _autotune_local(scheduler)
+    autotune_results = _autotune_local_nodes(scheduler)
     choices_by_index = _sync(autotune_results)
-    _autotune_remote(scheduler, choices_by_index)
+    _autotune_remote_nodes(scheduler, choices_by_index)
 
 
 @contextlib.contextmanager
@@ -54,17 +54,19 @@ def graph_context() -> Generator[None, None, None]:
     Wrapped around processing a graph, sets up figuring out which ranks tune
     which shapes.
     """
-    global _autotuned_index
+    global _autotuned_index, _autotuned_local_count
     assert _autotuned_index is None
     _autotuned_index = 0
+    _autotuned_local_count = 0
     try:
         yield
     finally:
         _autotuned_index = None
+        _autotuned_local_count = -1
 
 
 def maybe_autotune_remote(
-    name: str, inputs: list[Buffer], layout: Layout
+    name: str, choices: list[ChoiceCaller], inputs: list[Buffer], layout: Layout
 ) -> Optional[TensorBox | ShapeAsConstantBuffer]:
     """
     Used by an op (like `mm`) to determine if the op should be autotuned
@@ -73,16 +75,20 @@ def maybe_autotune_remote(
     if not config.distributed_autotune:
         return None
 
+    if len(choices) == 1:
+        return None
+
     if not (compile_pg := get_compile_pg()):
         return None
 
-    global _autotuned_index
+    global _autotuned_index, _autotuned_local_count
     assert _autotuned_index is not None
     index = _autotuned_index
     _autotuned_index += 1
 
     V.current_node.meta[_DISTRIBUTED_AUTOTUNE_INDEX] = index
     if index % compile_pg.size() == compile_pg.rank():
+        _autotuned_local_count += 1
         return None
 
     return torch._inductor.ir.TensorBox.create(
@@ -91,6 +97,12 @@ def maybe_autotune_remote(
 
 
 class _DistributedAutotuneBuffer(MultiTemplateBuffer):
+    """
+    A MultiTemplateBuffer which represents a kernel being autotuned on a
+    different rank. When `schedule` is called this will be replaced by the
+    "real" buffer.
+    """
+
     # Name of the kernel being autotuned.
     _kernel_name: str
 
@@ -115,22 +127,21 @@ class _DistributedAutotuneBuffer(MultiTemplateBuffer):
     ) -> dict[ChoiceCaller, float]:
         raise NotImplementedError
 
-    def autotune(self, choice: _DistributedChoice) -> TensorBox:
+    def autotune(self, ser_choice: _SerializedChoice) -> TensorBox:
+        """
+        Given a _SerializedChoice (autotune results from another rank)
+        compute the final TensorBox.
+        """
+
         from .select_algorithm import autotune_select_algorithm
 
         with patch.object(V.graph, "scheduler", None):
-            # Original inputs with StorageBox
             kernel_inputs = MMKernelInputs([*self.original_inputs])
-
-            choices: list[Any] = []
-            choice.maybe_append_choice(
-                choices,
-                input_nodes=kernel_inputs.nodes(),
-                layout=self.layout,
-            )
+            assert isinstance(self.layout, Layout)
+            choice = ser_choice.get_choice(self.layout, kernel_inputs)
             buffer = autotune_select_algorithm(
                 self._kernel_name,
-                choices,
+                [choice],
                 kernel_inputs.nodes(),
                 self.layout,
             )
@@ -139,115 +150,143 @@ class _DistributedAutotuneBuffer(MultiTemplateBuffer):
 
 
 # Can we make this async?
-def _sync(autotune_results: list[_DistributedChoice]) -> Sequence[_DistributedChoice]:
-    if not (compile_pg := get_compile_pg()):
-        return ()
+def _sync(autotune_results: list[_SerializedChoice]) -> Sequence[_SerializedChoice]:
+    """
+    Perform the all_gather to collect the autotune results from all the ranks.
+    """
+
+    compile_pg = get_compile_pg()
+    assert compile_pg
 
     # Perform allgather
-    # We should spin this up when we are done autotuning
-    # Currently we do autotuning synchronously and
-    # For each sent over result {mm1024,1024,...: (128, 128, 64, 5, 8)}
-    # do maybe_append_choice
-    # "[('cuda', 'torch.bfloat16', 1024, 1024, 1024, 1, 0), ('cuda', 'torch.bfloat16', 1024, 2048, 2048, 1, 0)]"
-    all_states: list[list[_DistributedChoice]] = [None] * compile_pg.size()  # type: ignore[list-item]
+    all_states: list[list[_SerializedChoice]] = [None] * compile_pg.size()  # type: ignore[list-item]
     torch.distributed.all_gather_object(all_states, autotune_results, group=compile_pg)
 
     node_count = sum(len(x) for x in all_states)
-    choices_by_index: list[_DistributedChoice] = [None] * node_count  # type: ignore[list-item]
+    # It's faster to briefly lie about the type than to unzip the results and append.
+    choices_by_index: list[_SerializedChoice] = [None] * node_count  # type: ignore[list-item]
 
-    # Technically we could figure this out via "unzipping" but it's safer to do it this way.
+    check_count = 0
     for i, other_results in enumerate(all_states):
-        assert other_results is not None
         for choice in other_results:
-            assert isinstance(choice, _DistributedChoice)
+            assert isinstance(choice, _SerializedChoice)
+            assert choices_by_index[choice.index] is None
             choices_by_index[choice.index] = choice
+            check_count += 1
 
-    assert all(x is not None for x in choices_by_index)
+    assert node_count == check_count, f"count mismatch: {node_count} != {check_count}"
     return choices_by_index
 
 
-class _DistributedChoice:
+class _SerializedChoice:
     """
-    This is a serializer for the autotune choice.
+    This is a serializer for the autotune choice. KernelTemplateChoice can't
+    be serialized directly (the template and inputs prevent this) so we need to
+    serialize it by parts and reconstruct later on.
     """
 
-    # TODO: Maybe there's a better way to do this?
-
-    index: int
-
-    def __init__(self, index: int) -> None:
+    def __init__(self, index: int, choice: ChoiceCaller) -> None:
         self.index = index
+        self.template_uid = _SerializedChoice._template_uid_from_choice(choice)
+        self.kwargs = self._compute_kwargs(choice.description)
 
-    def maybe_append_choice(self, choices: list[Any], **kwargs: Any) -> None:
-        raise NotImplementedError
+    def get_choice(
+        self, layout: Layout, inputs: KernelInputs
+    ) -> Optional[ChoiceCaller]:
+        """
+        Deserialize the ChoiceCaller and return it.
+        """
+
+        template = self._template_from_uid()
+
+        kwargs = {**self.kwargs}
+        if "BLOCK_K" in kwargs:
+            # TODO: Do we really need to externally compute this value? If it's
+            # needed I'm surprised it's not just part of the original template
+            # description.
+            # This needs the actual 'k' to figure out the value.
+            k = inputs.nodes()[0].get_size()[1]
+            kwargs["EVEN_K"] = sympy.gcd(k, kwargs["BLOCK_K"]) == kwargs["BLOCK_K"]
+
+        extra_kwargs: dict[str, Any] = {}
+        from .kernel_template_choice import (
+            DictKernelTemplateParams,
+            KernelTemplateChoice,
+        )
+
+        params = DictKernelTemplateParams(kwargs)
+        ktc = KernelTemplateChoice(template, params, extra_kwargs, layout, inputs)
+        return ktc.choice
 
     @staticmethod
-    def serialize_choice(index: int, choice: ChoiceCaller) -> _DistributedChoice:
-        # We need a better way to do this
+    def _compute_kwargs(description: str) -> dict[str, Union[int, str, bool]]:
+        """
+        Given a template description turn it into input kwargs.
+        """
+
+        # TODO: It seems like it would be better if the template could provide
+        # this directly instead of having to parse a string.
+        kwargs: dict[str, Union[int, str, bool]] = {}
+        for cfg in description.split(","):
+            key, val = cfg.split("=", 1)
+            key, val = key.strip(), val.strip()
+            if val == "True":
+                kwargs[key] = True
+            elif val == "False":
+                kwargs[key] = False
+            elif val.isdigit():
+                kwargs[key] = int(val)
+            else:
+                assert val.startswith("'") and val.endswith("'")
+                kwargs[key] = val[1:-1]
+        return kwargs
+
+    @staticmethod
+    def _template_uid_from_choice(choice: ChoiceCaller) -> str:
+        """
+        Given a ChoiceCaller figure out which template represents it. This
+        is reversed by _template_from_uid().
+        """
+
+        # We need a better way to do this - right now we need to add each
+        # supported template directly.
         if isinstance(choice, select_algorithm.ExternKernelCaller):
-            return _ExternKernelDistributedChoice(index, choice)
+            if choice.choice.name == "mm":
+                return "torch._inductor.kernel.mm.aten_mm"
+            else:
+                raise RuntimeError(f"TODO: kernel {choice.choice.name!r}")
         elif isinstance(choice, select_algorithm.TritonTemplateCaller):
-            return _TritonTemplateDistributedChoice(index, choice)
+            return "torch._inductor.kernel.mm.mm_template"
         else:
             raise RuntimeError(f"TODO: {type(choice)}")
 
-
-class _ExternKernelDistributedChoice(_DistributedChoice):
-    def __init__(
-        self, index: int, choice: torch._inductor.select_algorithm.ExternKernelCaller
-    ) -> None:
-        super().__init__(index)
-        self.name = choice.choice.name
-
-    @override
-    def maybe_append_choice(self, choices: list[Any], **kwargs: Any) -> None:
-        if self.name == "mm":
-            torch._inductor.kernel.mm.aten_mm.maybe_append_choice(choices, **kwargs)
-        else:
-            raise RuntimeError(f"UNIMPLEMENTED kernel {self.name}")
+    def _template_from_uid(self) -> Any:
+        """
+        See _template_uid_from_choice().
+        """
+        parts = self.template_uid.split(".")
+        obj = globals()[parts[0]]
+        for k in parts[1:]:
+            obj = getattr(obj, k)
+        return obj
 
 
-class _TritonTemplateDistributedChoice(_DistributedChoice):
-    def __init__(
-        self, index: int, choice: torch._inductor.select_algorithm.TritonTemplateCaller
-    ) -> None:
-        super().__init__(index)
-        self.kwargs: dict[str, Union[int, str, bool]] = {}
-        cfgs = choice.description.split(",")
-        for cfg in cfgs:
-            key, val = cfg.split("=")
-            key, val = key.strip(), val.strip()
-            if val == "True":
-                self.kwargs[key] = True
-            elif val == "False":
-                self.kwargs[key] = False
-            elif val.isdigit():
-                self.kwargs[key] = int(val)
-            else:
-                self.kwargs[key] = val.replace("'", "")
-        k = choice.input_nodes[0].get_size()[1]
-        self.kwargs["EVEN_K"] = (
-            sympy.gcd(k, self.kwargs["BLOCK_K"]) == self.kwargs["BLOCK_K"]
-        )
-
-    @override
-    def maybe_append_choice(self, choices: list[Any], **kwargs: Any) -> None:
-        from .kernel.mm import mm_template
-
-        mm_template.maybe_append_choice(choices, **kwargs, **self.kwargs)
-
-
-def _autotune_local(
+def _autotune_local_nodes(
     scheduler: torch._inductor.scheduler.Scheduler,
-) -> list[_DistributedChoice]:
-    autotune_results: list[_DistributedChoice] = []
+) -> list[_SerializedChoice]:
+    """
+    Go through the nodes in the scheduler and autotune the kernels which
+    should be autotuned by this rank.
+    """
+
+    autotune_results: list[_SerializedChoice] = []
 
     for node in scheduler.nodes:
         if not isinstance(node, SchedulerNode):
             continue
-        if not isinstance(node.node, MultiTemplateBuffer):
-            continue
         if isinstance(node.node, _DistributedAutotuneBuffer):
+            continue
+        if not isinstance(node.node, MultiTemplateBuffer):
             continue
 
         # We force autotuning here
@@ -259,16 +298,24 @@ def _autotune_local(
         assert node.node.origin_node is not None
         index = node.node.origin_node.meta[_DISTRIBUTED_AUTOTUNE_INDEX]
 
-        choice = _DistributedChoice.serialize_choice(index, min_choice)
+        choice = _SerializedChoice(index, min_choice)
         autotune_results.append(choice)
 
+    assert len(autotune_results) == _autotuned_local_count, (
+        f"not enough local autotuned nodes found ({len(autotune_results)} != {_autotuned_local_count})"
+    )
     return autotune_results
 
 
-def _autotune_remote(
+def _autotune_remote_nodes(
     scheduler: torch._inductor.scheduler.Scheduler,
-    choices_by_index: Sequence[_DistributedChoice],
+    choices_by_index: Sequence[_SerializedChoice],
 ) -> None:
+    """
+    Go through the nodes in the scheduler and autotune the nodes that were
+    autotuned on remote ranks.
+    """
+
     for i, node in enumerate(scheduler.nodes):
         if isinstance(node, SchedulerNode) and isinstance(
             node.node, _DistributedAutotuneBuffer
