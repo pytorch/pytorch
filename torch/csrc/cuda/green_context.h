@@ -48,9 +48,7 @@ class GreenContext {
             0, // default flags
             num_sms));
 
-    if (nb_groups != 1) {
-      throw std::runtime_error("Failed to create single resource group");
-    }
+    TORCH_CHECK(nb_groups == 1, "Failed to create single resource group");
 
     // Generate resource descriptor
     CUdevResourceDesc desc;
@@ -59,6 +57,8 @@ class GreenContext {
             &desc, result_data, 1));
 
     // Create green context
+    // CU_GREEN_CTX_DEFAULT_STREAM is required per docs:
+    // https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__GREEN__CONTEXTS.html
     C10_CUDA_DRIVER_CHECK(c10::cuda::DriverAPI::get()->cuGreenCtxCreate_(
         &green_ctx_, desc, device, CU_GREEN_CTX_DEFAULT_STREAM));
 
@@ -139,9 +139,10 @@ class GreenContext {
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 12080
     auto current_stream = c10::cuda::getCurrentCUDAStream();
     parent_stream_ = current_stream.stream();
-    cudaEvent_t ev;
-    C10_CUDA_CHECK(cudaEventCreate(&ev));
-    C10_CUDA_CHECK(cudaEventRecord(ev, current_stream));
+
+    at::cuda::CUDAEvent ev;
+    ev.record(current_stream);
+
     CUcontext current = nullptr;
     C10_CUDA_DRIVER_CHECK(
         c10::cuda::DriverAPI::get()->cuCtxGetCurrent_(&current));
@@ -155,9 +156,9 @@ class GreenContext {
     // currently hardcodes the new green context to use the default stream
     // TODO(eqy): consider creating a new stream if e.g., it allows interop
     // with CUDA Graph captures etc.
-    C10_CUDA_CHECK(cudaStreamWaitEvent(NULL, ev, 0));
-    c10::cuda::setCurrentCUDAStream(c10::cuda::getDefaultCUDAStream());
-    C10_CUDA_CHECK(cudaEventDestroy(ev));
+    auto default_stream = c10::cuda::getDefaultCUDAStream();
+    ev.block(default_stream);
+    c10::cuda::setCurrentCUDAStream(default_stream);
 #else
     TORCH_CHECK(false, "Green Context is only supported on CUDA 12.8+!");
 #endif
