@@ -349,7 +349,7 @@ class LoadPlanner:
     >>>         state_dict = {"foo_" + k: v for k, v in state_dict.items()}
     >>>
     >>>         if self.flatten_sharded_tensors:
-    >>>             state_dict = _flatten_sharded_tensors(state_dict)
+    >>>             state_dict, _ = _flatten_sharded_tensors(state_dict)
     >>>
     >>>         if self.flatten_state_dict:
     >>>             state_dict, self.mappings = flatten_state_dict(state_dict)

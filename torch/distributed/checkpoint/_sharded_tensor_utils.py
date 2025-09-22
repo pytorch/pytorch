@@ -11,15 +11,19 @@ from torch.distributed.remote_device import _remote_device
 from ._traverse import OBJ_PATH, set_element, STATE_DICT_ITEM, traverse_state_dict
 from .utils import _element_wise_add, _normalize_device_info
 
+from typing import Tuple
+
 
 if TYPE_CHECKING:
     from torch.distributed._shard.sharded_tensor.metadata import ShardedTensorMetadata
 
 
 # TODO: We need to refactor this code.
-def _flatten_sharded_tensors(state_dict: STATE_DICT_TYPE) -> STATE_DICT_TYPE:
+def _flatten_sharded_tensors(state_dict: STATE_DICT_TYPE) -> Tuple[STATE_DICT_TYPE, set[str]]:
     r"""
     Transform ``state_dict`` by flattening all nested ShardedTensor instances found.
+
+    This also returns a set of all paths that were removed because they had zero local shards.
 
     The resulting ShardedTensor instances are only correct regarding the local shard and
     MUST not be used for any other purpose but checkpointing, as no operator will work with them.
@@ -28,6 +32,7 @@ def _flatten_sharded_tensors(state_dict: STATE_DICT_TYPE) -> STATE_DICT_TYPE:
     StateDictType.SHARDED_STATE_DICT methods.
     """
     new_state_dict: STATE_DICT_TYPE = {}
+    zero_shards_removed = set()
 
     def rewrite_dict(path: OBJ_PATH, value: STATE_DICT_ITEM) -> None:
         if not isinstance(value, ShardedTensor):
@@ -36,6 +41,7 @@ def _flatten_sharded_tensors(state_dict: STATE_DICT_TYPE) -> STATE_DICT_TYPE:
         shards = value.local_shards()
 
         if len(shards) == 0:
+            zero_shards_removed.add(".".join(map(str, path)))
             return
         if len(shards) != 1:
             set_element(new_state_dict, path, value)
@@ -104,4 +110,4 @@ def _flatten_sharded_tensors(state_dict: STATE_DICT_TYPE) -> STATE_DICT_TYPE:
         set_element(new_state_dict, path, st)
 
     traverse_state_dict(state_dict, rewrite_dict)
-    return new_state_dict
+    return new_state_dict, zero_shards_removed
