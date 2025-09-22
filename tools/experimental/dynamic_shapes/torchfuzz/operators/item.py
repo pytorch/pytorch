@@ -14,10 +14,6 @@ class ItemOperator(Operator):
         """Item can only produce scalars."""
         return isinstance(output_spec, ScalarSpec)
 
-    def supports_variable_inputs(self) -> bool:
-        """Item operator does not support variable number of inputs."""
-        return False
-
     def decompose(self, output_spec: Spec, num_inputs: int = 1) -> list[Spec]:
         """Decompose scalar into a single-element tensor for item operation."""
         if not isinstance(output_spec, ScalarSpec):

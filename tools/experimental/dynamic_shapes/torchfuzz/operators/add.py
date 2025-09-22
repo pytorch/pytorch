@@ -21,10 +21,6 @@ class AddOperator(Operator):
         """Add can produce tensors but not scalars."""
         return isinstance(output_spec, TensorSpec)
 
-    def supports_variable_inputs(self) -> bool:
-        """Add operator supports variable number of inputs."""
-        return True
-
     def decompose(self, output_spec: Spec, num_inputs: int = 2) -> list[Spec]:
         """Decompose tensor into input tensors for addition with type promotion."""
         if not isinstance(output_spec, TensorSpec):

@@ -20,10 +20,6 @@ class ConstantOperator(Operator):
         """Constant can produce any type of output."""
         return True
 
-    def supports_variable_inputs(self) -> bool:
-        """Constant operator does not require inputs."""
-        return False
-
     def decompose(self, output_spec: Spec, num_inputs: int = 0) -> list[Spec]:
         """Constant requires no inputs."""
         return []
