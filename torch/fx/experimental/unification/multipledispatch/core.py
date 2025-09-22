@@ -1,15 +1,17 @@
-# mypy: allow-untyped-defs
 import inspect
+from typing import Any, Callable, Union
 
 from .dispatcher import Dispatcher, MethodDispatcher
 
 
-global_namespace = {}  # type: ignore[var-annotated]
+global_namespace: dict[str, Dispatcher] = {}
 
 __all__ = ["dispatch", "ismethod"]
 
 
-def dispatch(*types, **kwargs):
+def dispatch(
+    *types: type[Any], **kwargs: Any
+) -> Callable[[Callable[..., Any]], Union[Dispatcher, MethodDispatcher]]:
     """Dispatch function on the types of the inputs
     Supports dispatch on all non-keyword arguments.
     Collects implementations based on the function name.  Ignores namespaces.
@@ -52,7 +54,7 @@ def dispatch(*types, **kwargs):
 
     types = tuple(types)
 
-    def _df(func):
+    def _df(func: Callable[..., Any]) -> Union[Dispatcher, MethodDispatcher]:
         name = func.__name__
 
         if ismethod(func):
@@ -71,7 +73,7 @@ def dispatch(*types, **kwargs):
     return _df
 
 
-def ismethod(func):
+def ismethod(func: Callable[..., Any]) -> bool:
     """Is func a method?
     Note that this has to work as the method is defined but before the class is
     defined.  At this stage methods look like functions.
@@ -81,4 +83,4 @@ def ismethod(func):
         return signature.parameters.get("self", None) is not None
     else:
         spec = inspect.getfullargspec(func)  # type: ignore[union-attr, assignment]
-        return spec and spec.args and spec.args[0] == "self"
+        return bool(spec and spec.args and spec.args[0] == "self")
