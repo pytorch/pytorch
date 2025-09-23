@@ -23,7 +23,6 @@ if torch.distributed.is_available():
     from torch.distributed.tensor.placement_types import Replicate, Shard
 
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_CROSSREF, TestCase
-from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
 
 nested_compile_region = torch.compiler.nested_compile_region
@@ -149,7 +148,6 @@ class TestLocalMap(TestCase):
     def tearDown(self):
         self.exit_stack.close()
 
-    @requires_cuda_and_triton
     @unittest.skipIf(
         not torch.distributed.is_available(), "Torch distributed not available."
     )
@@ -165,14 +163,14 @@ class TestLocalMap(TestCase):
 
         backend = EagerAndRecordGraphs()
 
-        model = create_model(cp_decorated, nheads, dim1, dim2).cuda()
-        inputs = (torch.randn(bs, seq_len, dim1, requires_grad=True).cuda(),)
+        model = create_model(cp_decorated, nheads, dim1, dim2)
+        inputs = (torch.randn(bs, seq_len, dim1, requires_grad=True),)
         with LocalMapWrappedHigherOrderVariable.enable():
             out = torch.compile(model, backend=backend)(*inputs)
         out.sum().backward()
 
-        model = create_model(cp_function, nheads, dim1, dim2).cuda()
-        inputs = (torch.randn(bs, seq_len, dim1, requires_grad=True).cuda(),)
+        model = create_model(cp_function, nheads, dim1, dim2)
+        inputs = (torch.randn(bs, seq_len, dim1, requires_grad=True),)
         with LocalMapWrappedHigherOrderVariable.enable():
             out = torch.compile(model, backend=backend)(*inputs)
         out.sum().backward()
@@ -238,7 +236,6 @@ class GraphModule(torch.nn.Module):
 """,
             )
 
-    @requires_cuda_and_triton
     @unittest.skipIf(
         not torch.distributed.is_available(), "Torch distributed not available."
     )
@@ -256,16 +253,16 @@ class GraphModule(torch.nn.Module):
 
         model = create_model(
             cp_decorated, nheads, dim1, dim2, sac_policy=save_scalar_muls
-        ).cuda()
-        inputs = (torch.randn(bs, seq_len, dim1, requires_grad=True).cuda(),)
+        )
+        inputs = (torch.randn(bs, seq_len, dim1, requires_grad=True),)
         with LocalMapWrappedHigherOrderVariable.enable():
             out = torch.compile(model, backend=backend)(*inputs)
         out.sum().backward()
 
         model = create_model(
             cp_function, nheads, dim1, dim2, sac_policy=save_scalar_muls
-        ).cuda()
-        inputs = (torch.randn(bs, seq_len, dim1, requires_grad=True).cuda(),)
+        )
+        inputs = (torch.randn(bs, seq_len, dim1, requires_grad=True),)
         with LocalMapWrappedHigherOrderVariable.enable():
             out = torch.compile(model, backend=backend)(*inputs)
         out.sum().backward()
@@ -314,7 +311,6 @@ class GraphModule(torch.nn.Module):
                         # can still be in fw_outs for post-graph bytecode
                         self.assertFalse(node.name in bw_ins)
 
-    @requires_cuda_and_triton
     @unittest.skipIf(
         not torch.distributed.is_available(), "Torch distributed not available."
     )
@@ -336,8 +332,8 @@ class GraphModule(torch.nn.Module):
 
         model = create_model(
             cp_decorated, nheads, dim1, dim2, sac_policy=save_scalar_muls
-        ).cuda()
-        inputs = (torch.randn(bs, seq_len, dim1, requires_grad=True).cuda(),)
+        )
+        inputs = (torch.randn(bs, seq_len, dim1, requires_grad=True),)
         try:
             with (
                 LocalMapWrappedHigherOrderVariable.enable(),
@@ -354,8 +350,8 @@ class GraphModule(torch.nn.Module):
 
         model = create_model(
             cp_function, nheads, dim1, dim2, sac_policy=save_scalar_muls
-        ).cuda()
-        inputs = (torch.randn(bs, seq_len, dim1, requires_grad=True).cuda(),)
+        )
+        inputs = (torch.randn(bs, seq_len, dim1, requires_grad=True),)
         try:
             with (
                 LocalMapWrappedHigherOrderVariable.enable(),
