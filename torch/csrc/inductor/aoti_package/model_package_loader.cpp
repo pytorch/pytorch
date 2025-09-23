@@ -544,9 +544,9 @@ class RAIIMinizArchive {
     if (!mz_zip_reader_extract_file_to_file(
             &_zip_archive, zip_filename.c_str(), dest_filename.c_str(), 0)) {
       throw std::runtime_error(fmt::format(
-          "Failed to extract zip file {} to destination file {}",
+          "Failed to extract zip file {} to destination file {}, error info {}",
           zip_filename,
-          dest_filename));
+          dest_filename,  mz_zip_get_error_string(mz_zip_get_last_error(&_zip_archive))));
     }
   }
 
