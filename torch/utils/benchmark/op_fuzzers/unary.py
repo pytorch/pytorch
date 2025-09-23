@@ -1,6 +1,17 @@
-# mypy: allow-untyped-defs
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Optional
+
 import numpy as np
 import torch
+
+if TYPE_CHECKING:
+    from torch.types import _dtype
+    # For type checking, assume torch.float32 exists
+    _DEFAULT_DTYPE = torch.float32  # type: ignore[attr-defined]
+else:
+    # At runtime, use a fallback if torch.float32 is not available
+    _DEFAULT_DTYPE = getattr(torch, 'float32', None)
 
 from torch.utils.benchmark import Fuzzer, FuzzedParameter, ParameterAlias, FuzzedTensor
 
@@ -14,7 +25,9 @@ _POW_TWO_SIZES = tuple(2 ** i for i in range(
 
 
 class UnaryOpFuzzer(Fuzzer):
-    def __init__(self, seed, dtype=torch.float32, cuda=False):
+    def __init__(self, seed: Optional[int], dtype: _dtype | None = None, cuda: bool = False) -> None:
+        if dtype is None:
+            dtype = _DEFAULT_DTYPE
         super().__init__(
             parameters=[
                 # Dimensionality of x. (e.g. 1D, 2D, or 3D.)
