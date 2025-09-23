@@ -42,14 +42,29 @@ extensions = [
 
 intersphinx_mapping = {"pytorch": ("https://pytorch.org/docs/main", None)}
 
+# Configure Sphinx warnings and error handling
+suppress_warnings = [
+    "ref.citation",
+    "ref.footnote",
+    "ref.doc",
+    "toc.excluded",
+    "toc.not_readable",
+    "misc.highlighting_failure",
+]
+
+# Configure Breathe
+breathe_show_define_initializer = True
+breathe_show_enumvalue_initializer = True
+breathe_default_members = ("members", "undoc-members")
+
 
 # Fix for Python 3.10+ compatibility with exhale 2.3.0
 # MutableMapping was moved from collections to collections.abc in Python 3.10
-import sys
 try:
-    from collections.abc import MutableMapping
     import collections
-    if not hasattr(collections, 'MutableMapping'):
+    from collections.abc import MutableMapping
+
+    if not hasattr(collections, "MutableMapping"):
         collections.MutableMapping = MutableMapping
 except ImportError:
     pass
@@ -113,6 +128,32 @@ exhale_args = {
         Welcome to the developer reference for the PyTorch C++ API.
     """
     ),
+    ############################################################################
+    # Duplicate handling and error management.                                 #
+    ############################################################################
+    # Reduce duplicate warnings by cleaning build directory
+    "exhaleDoxygenStdin": textwrap.dedent(
+        """
+        GENERATE_XML = YES
+        GENERATE_HTML = NO
+        GENERATE_LATEX = NO
+        EXTRACT_ALL = YES
+        QUIET = YES
+        WARN_IF_UNDOCUMENTED = NO
+        JAVADOC_AUTOBRIEF = YES
+        EXCLUDE_SYMBOLS = caffe2::* cereal* DL* TH* cudnn* std::*
+    """
+    ),
+    # Handle unresolved references more gracefully
+    "unabridgedOrphanKinds": {
+        "function",
+        "define",
+        "enum",
+        "enumvalue",
+        "typedef",
+        "variable",
+    },
+    "fullToctreeMaxDepth": 2,
 }
 
 # Tell sphinx what the primary language being documented is.
