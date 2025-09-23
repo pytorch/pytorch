@@ -22,10 +22,26 @@ if torch.distributed.is_available():
     from torch.distributed._tensor.experimental import local_map
     from torch.distributed.tensor.placement_types import Replicate, Shard
 
-from torch.testing._internal.common_utils import run_tests, TEST_WITH_CROSSREF, TestCase
+from torch.testing._internal.common_utils import (
+    run_tests,
+    TEST_WITH_CROSSREF,
+    TEST_WITH_TORCHDYNAMO,
+    TEST_WITH_TORCHINDUCTOR,
+    TestCase,
+)
 
 
 nested_compile_region = torch.compiler.nested_compile_region
+
+
+def get_skip_reasons():
+    msg = ""
+    if not torch.distributed.is_available():
+        msg += "Torch distributed not available. "
+    if TEST_WITH_TORCHINDUCTOR or TEST_WITH_TORCHDYNAMO:
+        msg += "Already manually torch.compile'd. "
+
+    return msg != "", msg
 
 
 class MyTransform(torch.autograd.Function):
@@ -148,9 +164,7 @@ class TestLocalMap(TestCase):
     def tearDown(self):
         self.exit_stack.close()
 
-    @unittest.skipIf(
-        not torch.distributed.is_available(), "Torch distributed not available."
-    )
+    @unittest.skipIf(*get_skip_reasons())
     def test_simple(self):
         cp_decorated, cp_function = get_local_mapped_functions()
         bs = 8 * 1
@@ -236,9 +250,7 @@ class GraphModule(torch.nn.Module):
 """,
             )
 
-    @unittest.skipIf(
-        not torch.distributed.is_available(), "Torch distributed not available."
-    )
+    @unittest.skipIf(*get_skip_reasons())
     def test_sac(self):
         cp_decorated, cp_function = get_local_mapped_functions()
         bs = 8 * 1
@@ -311,9 +323,7 @@ class GraphModule(torch.nn.Module):
                         # can still be in fw_outs for post-graph bytecode
                         self.assertFalse(node.name in bw_ins)
 
-    @unittest.skipIf(
-        not torch.distributed.is_available(), "Torch distributed not available."
-    )
+    @unittest.skipIf(*get_skip_reasons())
     def test_sac_deferred(self):
         # This test is in a bit of a weird state, it needs compositional compile API
         # so that we can defer inlining for up until AOTAutograd stage 1.
