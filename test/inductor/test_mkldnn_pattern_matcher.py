@@ -4133,26 +4133,30 @@ class TestPatternMatcher(TestPatternMatcherBase):
             (256, 32, 1),  # linear dispatching to bmm
         ]
         is_permutes = [False, True]
-        for x_stride, is_permute in itertools.product(x_strides, is_permutes):
-            mod = M(is_permute=is_permute).eval()
-            x = torch.randn(x_shape, dtype=torch.bfloat16).as_strided(x_shape, x_stride)
-            w_shape = (12, 256)
-            w = torch.randint(-128, 127, w_shape, dtype=torch.int8)
-            s = torch.randn(s_shape, dtype=torch.bfloat16)
-
-            def matcher_check_fn():
-                self.assertEqual(
-                    counters["inductor"]["woq_matcher_count"], 0 if TEST_ACL else 1
+        devices = ["cpu", "xpu"]
+        for device in devices:
+            for x_stride, is_permute in itertools.product(x_strides, is_permutes):
+                mod = M(is_permute=is_permute).eval()
+                x = torch.randn(x_shape, dtype=torch.bfloat16).as_strided(
+                    x_shape, x_stride
                 )
+                w_shape = (12, 256)
+                w = torch.randint(-128, 127, w_shape, dtype=torch.int8)
+                s = torch.randn(s_shape, dtype=torch.bfloat16)
 
-            self._test_common(
-                mod,
-                (x, w, s),
-                matcher_check_fn,
-                check_quantization=False,
-                atol=0.001,
-                rtol=0.07,
-            )
+                def matcher_check_fn():
+                    self.assertEqual(
+                        counters["inductor"]["woq_matcher_count"], 0 if TEST_ACL else 1
+                    )
+
+                self._test_common(
+                    mod,
+                    (x.to(device), w.to(device), s.to(device)),
+                    matcher_check_fn,
+                    check_quantization=False,
+                    atol=0.001,
+                    rtol=0.07,
+                )
 
     @skipIfNoDynamoSupport
     def test_woq_int4_cpu(self):
