@@ -324,9 +324,6 @@ IF(USE_FBGEMM_GENAI)
       if("gfx942" IN_LIST PYTORCH_ROCM_ARCH)
         list(APPEND FILTERED_HIP_CLANG_FLAGS --offload-arch=gfx942;)
       endif()
-      if("gfx950" IN_LIST PYTORCH_ROCM_ARCH)
-        list(APPEND FILTERED_HIP_CLANG_FLAGS --offload-arch=gfx950;)
-      endif()
       set(HIP_CLANG_FLAGS ${FILTERED_HIP_CLANG_FLAGS})
 
       hip_add_library(
