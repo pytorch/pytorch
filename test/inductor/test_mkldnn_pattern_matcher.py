@@ -4703,7 +4703,6 @@ class TestDynamicPatternMatcher(TestPatternMatcherBase):
                 self.k_proj = torch.nn.Linear(input_dim, input_dim, bias=False)
                 self.v_proj = torch.nn.Linear(input_dim, input_dim, bias=False)
                 self.softmax = torch.nn.Softmax(dim=-1)
-                self.transpose_for_score = transpose_for_score
                 self.num_attention_heads = num_attention_heads
                 self.attention_head_size = attention_head_size
                 self.all_head_size = self.num_attention_heads * self.attention_head_size
