@@ -2864,6 +2864,8 @@ def _worker_compile_cpp(
 # Customized Python binding for cpp kernels
 @clear_on_fresh_cache
 class CppPythonBindingsCodeCache(CppCodeCache):
+    """Compile and cache CPU C++ kernels together with lightweight Python bindings."""
+
     cache: dict[str, Callable[[], Union[CDLL, ModuleType]]] = {}
     cache_clear = staticmethod(cache.clear)
     cpp_compile_command_flags = {
@@ -2873,7 +2875,28 @@ class CppPythonBindingsCodeCache(CppCodeCache):
     }
     entry_function = "kernel"
     call_entry_function = "kernel({}); Py_RETURN_NONE;"
-    extra_parse_arg = ""
+    extra_parse_arg = textwrap.dedent(
+        """
+        template <> inline double parse_arg<double>(PyObject* args, size_t n) {{
+            auto result = PyFloat_AsDouble(PyTuple_GET_ITEM(args, n));
+            if(unlikely(result == -1.0 && PyErr_Occurred()))
+                throw std::runtime_error("expected float arg");
+            return result;
+        }}
+        template <> inline float parse_arg<float>(PyObject* args, size_t n) {{
+            auto result = PyFloat_AsDouble(PyTuple_GET_ITEM(args, n));
+            if(unlikely(result == -1.0 && PyErr_Occurred()))
+                throw std::runtime_error("expected float arg");
+            return static_cast<float>(result);
+        }}
+        template <> inline bool parse_arg<bool>(PyObject* args, size_t n) {{
+            int result = PyObject_IsTrue(PyTuple_GET_ITEM(args, n));
+            if(unlikely(result == -1 && PyErr_Occurred()))
+                throw std::runtime_error("expected bool arg");
+            return result;
+        }}
+        """
+    )
     suffix_template = textwrap.dedent(
         """
         // Python bindings to call {entry_func}():
