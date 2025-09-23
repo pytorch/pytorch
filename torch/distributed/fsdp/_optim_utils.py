@@ -224,7 +224,7 @@ def _communicate_optim_state(
                 value = value.to(fsdp_state.compute_device)
             # Assume that positive-dimension tensor optimizer state
             # has the same shape as the sharded flat parameter
-            buffer_size = flat_param._full_param_padded.size()  # type: ignore[attr-defined]
+            buffer_size = flat_param._full_param_padded.size()
             tensor_buffer = value.new_zeros(*buffer_size)
             dist.all_gather_into_tensor(
                 tensor_buffer, value, group=fsdp_state.process_group
@@ -334,7 +334,7 @@ def _broadcast_processed_state(
     if dist.get_rank(group) == 0:
         objects[0] = tree_map_only(
             torch.Tensor,
-            lambda v: v.cpu() if v.dim() == 0 else _PosDimTensorInfo(v.shape, v.dtype),  # type: ignore[union-attr]
+            lambda v: v.cpu() if v.dim() == 0 else _PosDimTensorInfo(v.shape, v.dtype),
             optim_state,
         )
     dist.broadcast_object_list(objects, src=0, group=group)
@@ -382,7 +382,7 @@ def _shard_orig_param_state(
     fsdp_state = fsdp_param_info.state
     flat_param = fsdp_param_info.handle.flat_param
     param_idx = fsdp_param_info.param_indices[fqn]
-    shard_param_info = flat_param._shard_param_infos[param_idx]  # type: ignore[attr-defined]
+    shard_param_info = flat_param._shard_param_infos[param_idx]
     optim_state = _gather_state_dict(
         optim_state, pg=fsdp_state.process_group, device=fsdp_state.compute_device
     )
@@ -501,7 +501,7 @@ def _flatten_optim_state_dict(
                         f"use_orig_params is True but there are multiple FQNs, {fqns}."
                     )
                 if optim is not None:  # NamedOptimizer or KeyedOptimizer case.
-                    state = optim.state.get(param, None)  # type: ignore[call-overload]
+                    state = optim.state.get(param, None)
                     if state is not None:
                         flat_osd_state[key] = copy.deepcopy(state)
                     else:
@@ -773,7 +773,7 @@ def _flatten_tensor_optim_state(
         for state_value, shape in zip(pos_dim_tensors, unflat_param_shapes)
     ]
     flat_tensor = handle.flatten_tensors(tensors_to_flatten, handle._aligned_numel)
-    flat_param_shape = flat_param._unpadded_unsharded_size  # type: ignore[attr-defined]
+    flat_param_shape = flat_param._unpadded_unsharded_size
     if flat_tensor.shape != flat_param_shape:
         raise AssertionError(
             f"tensor optim state: {flat_tensor.shape} flat parameter: {flat_param_shape}"
@@ -1012,7 +1012,7 @@ def _get_param_id_to_param_from_optim_input(
         raise AssertionError(f"Expected all_dicts to be True, got {all_dicts}")
     param_id_to_param: list[nn.Parameter] = []
     for param_group in params:
-        has_params_key = "params" in param_group  # type: ignore[operator]
+        has_params_key = "params" in param_group
         if not has_params_key:
             raise AssertionError(
                 'A parameter group should map "params" to a list of the parameters in the group'

@@ -37,7 +37,7 @@ from torch.utils import _pytree as pytree
 from torch.utils._pytree import tree_map
 
 
-DispatchKey = torch._C.DispatchKey  # type: ignore[attr-defined]
+DispatchKey = torch._C.DispatchKey
 
 # None of these functions are publicly accessible; get at them
 # from torch._decomps
@@ -65,7 +65,7 @@ def type_casts(
     def inner(*args, **kwargs):
         allowed_types = (
             (Tensor, torch.types._Number) if include_non_tensor_args else (Tensor,)
-        )  # type: ignore[arg-type]
+        )
         flat_args = [
             x
             for x in pytree.arg_tree_leaves(*args, **kwargs)
@@ -1294,7 +1294,7 @@ def embedding_dense_backward(
         grad_output, type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     )
     grad_output = grad_output.to(computation_dtype)
-    indices = _maybe_convert_to_dtype(indices, torch.long)  # type: ignore[assignment]
+    indices = _maybe_convert_to_dtype(indices, torch.long)
     if scale_grad_by_freq:
         counts = indices.new_zeros((num_weights,))
         ones = torch.ones_like(indices)
@@ -1925,7 +1925,7 @@ def _fused_rms_norm_backward(
             input.new_zeros(input_shape[axis:]) if output_mask[1] else None,
         )
 
-    rstd = _unsqueeze_to_dim(rstd, input_cast.dim())  # type: ignore[union-attr]
+    rstd = _unsqueeze_to_dim(rstd, input_cast.dim())
     if weight_cast is not None:
         grad_x_hat = grad_out_cast * weight_cast
     else:
@@ -2214,7 +2214,7 @@ def _get_batch_norm_reserve_tensor(
     the correct shape in the traced graph if we detect that will call the cudnn kernel,
     and rely on DCE to avoid materializing this tensor.
     """
-    backend = torch._C._select_batch_norm_backend(  # type: ignore[attr-defined]
+    backend = torch._C._select_batch_norm_backend(
         input, weight, bias, running_mean, running_var, True, eps
     )
     reserve_size = 0
@@ -2541,26 +2541,26 @@ def native_batch_norm_backward(
         if i != axis:
             reduction_axes.append(i)
 
-    mean = _broadcast_batch_norm_backward(mean, broadcast_mask)  # type: ignore[arg-type]
+    mean = _broadcast_batch_norm_backward(mean, broadcast_mask)
     norm = 1.0 / num_features
     grad_output_sum = torch.sum(grad_out_cast, reduction_axes)  # type: ignore[arg-type]
-    dot_p = torch.sum(grad_out_cast * (input_cast - mean), reduction_axes)  # type: ignore[operator]
+    dot_p = torch.sum(grad_out_cast * (input_cast - mean), reduction_axes)
 
     grad_mean = _broadcast_batch_norm_backward(grad_output_sum * norm, broadcast_mask)
     proj_scale = _broadcast_batch_norm_backward(
-        torch.mul(dot_p * norm, invstd * invstd),  # type: ignore[operator]
+        torch.mul(dot_p * norm, invstd * invstd),
         broadcast_mask,
     )
 
     if weight_cast is None:
-        grad_scale = _broadcast_batch_norm_backward(invstd, broadcast_mask) * 1.0  # type: ignore[arg-type]
+        grad_scale = _broadcast_batch_norm_backward(invstd, broadcast_mask) * 1.0
     else:
         grad_scale = _broadcast_batch_norm_backward(
             invstd * weight_cast, broadcast_mask
         )
 
     if train:
-        proj = (input_cast - mean) * proj_scale  # type: ignore[operator]
+        proj = (input_cast - mean) * proj_scale
         grad_input = ((grad_out_cast - proj) - grad_mean) * grad_scale
     else:
         grad_input = grad_out_cast * grad_scale
@@ -5389,8 +5389,8 @@ def multi_margin_loss(
     if weight is not None:
         weight = torch.atleast_1d(weight)
         torch._check(
-            weight.ndim == 1 and weight.numel() == dim,  # type: ignore[union-attr]
-            lambda: f"inconsistent weight size, expected {dim} but got {weight.shape}",  # type: ignore[union-attr]
+            weight.ndim == 1 and weight.numel() == dim,
+            lambda: f"inconsistent weight size, expected {dim} but got {weight.shape}",
         )
     target = target.unsqueeze(1)
     u = torch.gather(input, dim=1, index=target)

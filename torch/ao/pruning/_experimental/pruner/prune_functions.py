@@ -71,7 +71,7 @@ def _get_adjusted_next_layer_bias(
     elif (
         not parametrize.is_parametrized(next_layer) and next_layer.bias is not None
     ):  # next_layer not parametrized & has .bias
-        adjusted_bias = nn.Parameter(scaled_biases + next_layer.bias)  # type: ignore[operator]
+        adjusted_bias = nn.Parameter(scaled_biases + next_layer.bias)
     else:  # next_layer has no bias
         adjusted_bias = nn.Parameter(scaled_biases)
     return adjusted_bias

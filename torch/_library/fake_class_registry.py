@@ -272,7 +272,7 @@ def maybe_to_fake_obj(
         # Otherwise, for example, the fake tensor modes will error out when the tensors inside
         # script object execute some operations like clone if allow_non_fake_input flag is set.
         with _disable_current_modes():
-            flat_x = x.__obj_flatten__()  # type: ignore[attr-defined]
+            flat_x = x.__obj_flatten__()
 
         _check_valid_flat_script_obj(flat_x)
 
@@ -318,20 +318,20 @@ def maybe_to_fake_obj(
 
         fake_x = _find_fake_class_for_script_object(x).__obj_unflatten__(fake_flattened)
 
-    fake_x_wrapped = FakeScriptObject(fake_x, x._type().qualified_name(), x)  # type: ignore[attr-defined]
+    fake_x_wrapped = FakeScriptObject(fake_x, x._type().qualified_name(), x)
 
-    for name in x._method_names():  # type: ignore[attr-defined]
+    for name in x._method_names():
         attr = getattr(fake_x, name, None)
         if attr is not None:
             if not callable(attr):
                 raise RuntimeError(f"Expect {name} to be a callable but got {attr}.")
 
-            real_attr = getattr(x, name)  # type: ignore[attr-defined]
+            real_attr = getattr(x, name)
 
             # real attr sometimes is not torch.ScriptMethod thus doesn't have schema e.g. __init___ or __eq__
             method_schema: torch.FunctionSchema | None = None
             if isinstance(real_attr, torch.ScriptMethod):
-                method_schema = real_attr.schema  # type: ignore[attr-defined]
+                method_schema = real_attr.schema
 
             # Bypasses our custom setattr function
             object.__setattr__(
@@ -460,7 +460,7 @@ def _full_qual_class_name(qualname: str) -> str:
 def _is_script_object(obj: Any) -> bool:
     return isinstance(
         obj, torch.ScriptObject
-    ) and obj._type().qualified_name().startswith(  # type: ignore[attr-defined]
+    ) and obj._type().qualified_name().startswith(
         "__torch__.torch.classes"
     )
 
@@ -475,7 +475,7 @@ def _ns_and_class_name(full_qualname: str) -> tuple[str, str]:
 
 
 def _find_fake_class_for_script_object(x: torch.ScriptObject) -> Any:
-    full_qualname = x._type().qualified_name()  # type: ignore[attr-defined]
+    full_qualname = x._type().qualified_name()
     ns, class_name = _ns_and_class_name(full_qualname)
     fake_class = find_fake_class(full_qualname)
     if fake_class is None:

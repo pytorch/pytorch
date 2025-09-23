@@ -61,7 +61,7 @@ class Pattern:
             # If benchmark summary is not empty, use it.
             return (
                 self.benchmark_summary(events)
-                if hasattr(self, "benchmark")  # type: ignore[attr-defined]
+                if hasattr(self, "benchmark")
                 else default_summary
             )
         return default_summary
@@ -77,7 +77,7 @@ class Pattern:
 
         if not hasattr(self, "benchmark"):
             raise AssertionError("Please implement benchmark()")
-        shapes_factor_map = self.benchmark(events)  # type: ignore[attr-defined]
+        shapes_factor_map = self.benchmark(events)
         original_time = sum(event.duration_time_ns for event in events)
         new_time = sum(
             shapes_factor_map[input_shapes(event)] * event.duration_time_ns

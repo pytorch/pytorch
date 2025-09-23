@@ -285,7 +285,7 @@ class LazyLinear(LazyModuleMixin, Linear):
 
     """
 
-    cls_to_become = Linear  # type: ignore[assignment]
+    cls_to_become = Linear
     # pyrefly: ignore [bad-override]
     weight: UninitializedParameter
     bias: UninitializedParameter  # type: ignore[assignment]
@@ -313,7 +313,7 @@ class LazyLinear(LazyModuleMixin, Linear):
         if not self.has_uninitialized_params() and self.in_features != 0:
             super().reset_parameters()
 
-    def initialize_parameters(self, input) -> None:  # type: ignore[override]
+    def initialize_parameters(self, input) -> None:
         """
         Infers ``in_features`` based on ``input`` and initializes parameters.
         """

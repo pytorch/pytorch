@@ -396,14 +396,14 @@ class _MinimizerBase:
         self.results[result_key] = numeric_result  # type: ignore[possibly-undefined]
         report.append(f"Numerical accuracy = {numeric_result}")
         if not bool_result:
-            report.append(f"Result mismatch for {result_key}")  # type: ignore[possibly-undefined]
+            report.append(f"Result mismatch for {result_key}")
             if self.module_exporter:
-                if isinstance(result_key, tuple):  # type: ignore[possibly-undefined]
+                if isinstance(result_key, tuple):
                     # pyrefly: ignore [unbound-name]
                     result_key = result_key[-1]
                 # If the result is still a tuple (happens in non-sequential mode),
                 # we only use the first element as name.
-                if isinstance(result_key, tuple):  # type: ignore[possibly-undefined]
+                if isinstance(result_key, tuple):
                     # pyrefly: ignore [unbound-name]
                     result_key = str(result_key[0])
                 # pyre-ignore[29]: not a function
@@ -420,7 +420,7 @@ class _MinimizerBase:
                     # pyrefly: ignore [unbound-name]
                     result_key + "_acc",
                 )
-            raise FxNetMinimizerResultMismatchError(f"Result mismatch for {result_key}")  # type: ignore[possibly-undefined]
+            raise FxNetMinimizerResultMismatchError(f"Result mismatch for {result_key}")
 
     def _binary_search_impl(
         self, all_nodes: NodeList, start_idx: int, end_idx: int

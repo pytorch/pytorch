@@ -381,7 +381,7 @@ class LazyIrSchema:
                             )
                         self.generator_arg = NamedCType(
                             arg.name,
-                            arg.type,  # type:ignore[arg-type]
+                            arg.type,
                         )
                 keyword_args.extend(
                     LazyArgument(arg, self.properties, symint=symint)

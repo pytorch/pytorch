@@ -404,7 +404,7 @@ class PackageImporter(Importer):
                 )
             # preemptively install the source in `linecache` so that stack traces,
             # `inspect`, etc. work.
-            if filename in linecache.cache:  # type: ignore[attr-defined]
+            if filename in linecache.cache:
                 raise AssertionError(f"filename {filename} already in linecache.cache")
             linecache.lazycache(mangled_filename, ns)
 
@@ -485,7 +485,7 @@ class PackageImporter(Importer):
             parent_module = self.modules[parent]
 
             try:
-                parent_module.__path__  # type: ignore[attr-defined]
+                parent_module.__path__
 
             except AttributeError:
                 # when we attempt to import a package only containing pybinded files,

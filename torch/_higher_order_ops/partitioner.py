@@ -323,7 +323,7 @@ def create_hop_joint_graph(
         raise AssertionError(
             "all fw_gm output nodes must be torch.fx.Node with 'val' in meta"
         )
-    fw_gm_output_vals = tuple(n.meta["val"] for n in fw_gm_output_nodes)  # type: ignore[arg-type]
+    fw_gm_output_vals = tuple(n.meta["val"] for n in fw_gm_output_nodes)
 
     if not all(isinstance(val, torch.Tensor) for val in fw_gm_output_vals):
         raise AssertionError(

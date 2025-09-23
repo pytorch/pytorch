@@ -139,7 +139,7 @@ def wait_tensor(tensor):
 
     Waiting follows device semantics, which means blocking on CPU and synchronizing streams on CUDA.
     """
-    return torch.ops._c10d_functional.wait_tensor(tensor)  # type: ignore[attr-defined]
+    return torch.ops._c10d_functional.wait_tensor(tensor)
 
 
 def broadcast(self: torch.Tensor, src: int, group: RANK_TYPES, tag: str = ""):
@@ -362,7 +362,7 @@ def all_reduce_coalesced(
     that information and perform collective algebraic optimization. Use other forms of input for that.
     """
     group = _resolve_group(group, tag)
-    tensor_list = torch.ops._c10d_functional.all_reduce_coalesced(  # type: ignore[attr-defined]
+    tensor_list = torch.ops._c10d_functional.all_reduce_coalesced(
         self,
         reduceOp.lower(),
         _group_or_group_name(group),
@@ -391,7 +391,7 @@ def all_gather_into_tensor_coalesced(
     """
     group = _resolve_group(group, tag)
     group_size = c10d._get_group_size_by_name(group)
-    tensor_list = torch.ops._c10d_functional.all_gather_into_tensor_coalesced(  # type: ignore[attr-defined]
+    tensor_list = torch.ops._c10d_functional.all_gather_into_tensor_coalesced(
         self,
         group_size,
         _group_or_group_name(group),
@@ -437,7 +437,7 @@ def reduce_scatter_tensor_coalesced(
             tensor_list = torch.chunk(tensor, group_size, dim=dim)
             inputs[idx] = torch.cat(tensor_list)
 
-    tensor_list = torch.ops._c10d_functional.reduce_scatter_tensor_coalesced(  # type: ignore[attr-defined]
+    tensor_list = torch.ops._c10d_functional.reduce_scatter_tensor_coalesced(
         inputs,
         reduceOp.lower(),
         group_size,
@@ -509,7 +509,7 @@ def all_to_all_single(
             )
         output_split_sizes = [self.shape[0] // group_size] * group_size
         input_split_sizes = output_split_sizes
-    tensor = torch.ops._c10d_functional.all_to_all_single(  # type: ignore[attr-defined]
+    tensor = torch.ops._c10d_functional.all_to_all_single(
         self,
         output_split_sizes,
         input_split_sizes,
@@ -551,7 +551,7 @@ def all_to_all_single_autograd(
             )
         output_split_sizes = [self.shape[0] // group_size] * group_size
         input_split_sizes = output_split_sizes
-    tensor = torch.ops._c10d_functional_autograd.all_to_all_single(  # type: ignore[attr-defined]
+    tensor = torch.ops._c10d_functional_autograd.all_to_all_single(
         self,
         output_split_sizes,
         input_split_sizes,
@@ -1266,7 +1266,7 @@ class _FromTorchTensor(torch.autograd.Function):
     """
 
     @staticmethod
-    def forward(  # type: ignore[override]
+    def forward(
         ctx,  # pyre-ignore[2]: Parameter must be annotated.
         input: torch.Tensor,
     ) -> torch.Tensor:
@@ -1568,14 +1568,14 @@ lib_impl.impl("broadcast_", _broadcast__meta, "Meta")
 
 # Mark these ops as side effectful so that DCE does not remove communication
 # whose result tensors are ignored by user code.
-torch.fx.node.has_side_effect(torch.ops._c10d_functional.wait_tensor.default)  # type: ignore[has-type]
-torch.fx.node.has_side_effect(torch.ops._c10d_functional.wait_tensor)  # type: ignore[has-type]
-torch.fx.node.has_side_effect(torch.ops._c10d_functional.isend.default)  # type: ignore[has-type]
-torch.fx.node.has_side_effect(torch.ops._c10d_functional.isend)  # type: ignore[has-type]
-torch.fx.node.has_side_effect(torch.ops._c10d_functional.irecv.default)  # type: ignore[has-type]
-torch.fx.node.has_side_effect(torch.ops._c10d_functional.irecv)  # type: ignore[has-type]
-torch.fx.node.has_side_effect(torch.ops._c10d_functional.batch_p2p_ops.default)  # type: ignore[has-type]
-torch.fx.node.has_side_effect(torch.ops._c10d_functional.batch_p2p_ops)  # type: ignore[has-type]
+torch.fx.node.has_side_effect(torch.ops._c10d_functional.wait_tensor.default)
+torch.fx.node.has_side_effect(torch.ops._c10d_functional.wait_tensor)
+torch.fx.node.has_side_effect(torch.ops._c10d_functional.isend.default)
+torch.fx.node.has_side_effect(torch.ops._c10d_functional.isend)
+torch.fx.node.has_side_effect(torch.ops._c10d_functional.irecv.default)
+torch.fx.node.has_side_effect(torch.ops._c10d_functional.irecv)
+torch.fx.node.has_side_effect(torch.ops._c10d_functional.batch_p2p_ops.default)
+torch.fx.node.has_side_effect(torch.ops._c10d_functional.batch_p2p_ops)
 
 
 # Register legacy ops for backward compatibility

@@ -151,7 +151,7 @@ class ShapeEnvEvent:
             # we are tracking node names at shape_env.name_to_node.
             if not hasattr(shape_env, "name_to_node"):
                 raise AssertionError("shape_env missing name_to_node attribute")
-            name_to_node = shape_env.name_to_node  # type: ignore[attr-defined]
+            name_to_node = shape_env.name_to_node
             if x.name not in name_to_node:
                 raise AssertionError(f"Node {x.name} not found in name_to_node")
             return name_to_node[x.name]
@@ -288,7 +288,7 @@ def record_shapeenv_event(
             shape_env = args[0]
 
             try:
-                if not shape_env.should_record_events or shape_env.is_recording:  # type: ignore[has-type]
+                if not shape_env.should_record_events or shape_env.is_recording:
                     # If ShapeEnv is already recording an event, call the wrapped
                     # function directly.
                     #

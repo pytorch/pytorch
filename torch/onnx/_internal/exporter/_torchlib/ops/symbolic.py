@@ -49,8 +49,8 @@ def _call_symbolic_op(
     # Construct and filter out None attributes
     attributes = [
         attr
-        for attr in ir_convenience.convert_attributes(kwargs)  # type: ignore[arg-type]
-        if attr.value is not None  # type: ignore[union-attr]
+        for attr in ir_convenience.convert_attributes(kwargs)
+        if attr.value is not None
     ]
     tracer.nodes.append(
         node := ir.Node(

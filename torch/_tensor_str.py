@@ -143,7 +143,7 @@ class _Formatter:
                 self.max_width = max(self.max_width, len(value_str))
 
         else:
-            if tensor.dtype == torch.float4_e2m1fn_x2:  # type: ignore[attr-defined]
+            if tensor.dtype == torch.float4_e2m1fn_x2:
                 # torch.float4_e2m1fn_x2 is special and does not support the casts necessary
                 # to print it, we choose to display the uint8 representation here for
                 # convenience of being able to print a tensor.
@@ -159,7 +159,7 @@ class _Formatter:
                 # no valid number, do nothing
                 return
 
-            if tensor.dtype == torch.float8_e8m0fnu:  # type: ignore[attr-defined]
+            if tensor.dtype == torch.float8_e8m0fnu:
                 # float8_e8m0fnu is special and does not define arithmetic ops,
                 # and printing code further in this file assumes the existence
                 # of various arithmetic ops to figure out what to print. We hack
@@ -262,7 +262,7 @@ def _vector_str(self, indent, summarize, formatter1, formatter2=None):
         else:
             return formatter1.format(val)
 
-    if self.dtype == torch.float4_e2m1fn_x2:  # type: ignore[attr-defined]
+    if self.dtype == torch.float4_e2m1fn_x2:
         # torch.float4_e2m1fn_x2 is special and does not support the casts necessary
         # to print it, we choose to display the uint8 representation here for
         # convenience of being able to print a tensor.

@@ -390,7 +390,7 @@ class ExportGraphSignature:
     @property
     def inputs_to_buffers(self) -> Mapping[str, str]:
         return _immutable_dict(
-            (s.arg.name, s.target)  # type: ignore[union-attr, misc]
+            (s.arg.name, s.target)
             for s in self.input_specs
             if s.kind == InputKind.BUFFER
             and isinstance(s.arg, TensorArgument)
@@ -614,7 +614,7 @@ def _make_argument_spec(node, token_names) -> ArgumentSpec:
     elif isinstance(val, SymBool):
         return SymBoolArgument(name=node.name)
     elif isinstance(val, ScriptObject):
-        return CustomObjArgument(name=node.name, class_fqn=val._type().qualified_name())  # type: ignore[attr-defined]
+        return CustomObjArgument(name=node.name, class_fqn=val._type().qualified_name())
     elif isinstance(val, FakeScriptObject):
         return CustomObjArgument(
             name=node.name, class_fqn=val.script_class_name, fake_val=val

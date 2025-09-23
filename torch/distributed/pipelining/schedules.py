@@ -288,7 +288,7 @@ class _PipelineSchedule(ABC):
         self, stage, output, target_mbs, mb_index, loss_kwargs=None
     ):
         if stage.is_last and self._loss_fn is not None:
-            loss = self._compute_loss(output, target_mbs[mb_index], loss_kwargs)  # type: ignore[index]
+            loss = self._compute_loss(output, target_mbs[mb_index], loss_kwargs)
             self._internal_losses.append(loss)
 
     def _maybe_get_loss(self, stage, mb_index):
@@ -831,7 +831,7 @@ class _ScheduleForwardOnly(PipelineScheduleSingle):
                 for work in works.values():
                     _wait_batch_p2p(work)
 
-                self._stage.forward_one_chunk(i, arg_mbs[i], kwarg_mbs[i])  # type: ignore[index]
+                self._stage.forward_one_chunk(i, arg_mbs[i], kwarg_mbs[i])
 
                 ops = self._stage.get_fwd_send_ops(i)
                 works = _sorted_batch_p2p(ops, desc="fwd_send")
@@ -888,7 +888,7 @@ class ScheduleGPipe(PipelineScheduleSingle):
 
                 output = self._stage.forward_one_chunk(
                     i, arg_mbs[i], kwarg_mbs[i], save_forward_output=return_outputs
-                )  # type: ignore[index]
+                )
 
                 ops = self._stage.get_fwd_send_ops(i)
                 works = _sorted_batch_p2p(ops, desc="fwd_send")
@@ -966,7 +966,7 @@ class ScheduleGPipe(PipelineScheduleSingle):
 
             pipeline_order[rank] = _add_reduce_grad(actions, self._n_microbatches)
 
-        return pipeline_order  # type: ignore[return-value]
+        return pipeline_order
 
 
 class Schedule1F1B(PipelineScheduleSingle):
@@ -1049,7 +1049,7 @@ or equal to the number of stages ({self._num_stages})."
                 arg_mbs[fwd_mb_index],
                 kwarg_mbs[fwd_mb_index],
                 save_forward_output=return_outputs,
-            )  # type: ignore[index]
+            )
 
             # Clear previous chunk's forward sends (hopefully they have well
             # finished, otherwise, we are heavily communication bound, in which
@@ -1109,7 +1109,7 @@ or equal to the number of stages ({self._num_stages})."
                 arg_mbs[fwd_mb_index],
                 kwarg_mbs[fwd_mb_index],
                 save_forward_output=return_outputs,
-            )  # type: ignore[index]
+            )
 
             # Compute loss
             self._maybe_compute_loss(

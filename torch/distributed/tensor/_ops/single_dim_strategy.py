@@ -603,7 +603,7 @@ def _expand_single_dim_strategy_to_mesh(
             # Fused ops or unknown: keep original op, no translation
             target_op = op_schema.op
             op_schema = OpSchema(
-                target_op,  # type: ignore[arg-type]
+                target_op,
                 args_schema=tuple(target_args),
                 kwargs_schema=op_schema.kwargs_schema,
             )
@@ -635,7 +635,7 @@ def _expand_single_dim_strategy_to_mesh(
         )
 
         op_schema = OpSchema(
-            target_op,  # type: ignore[arg-type]
+            target_op,
             args_schema=tuple(target_args),
             kwargs_schema=op_schema.kwargs_schema,
         )

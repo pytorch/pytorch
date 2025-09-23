@@ -925,8 +925,8 @@ def _sdpa_handler(
     if op_call in call_maps:
         local_results = call_maps[op_call](
             op_info.compute_mesh,
-            *op_info.local_args,  # type: ignore[arg-type]
-            **op_info.local_kwargs,  # type: ignore[arg-type]
+            *op_info.local_args,
+            **op_info.local_kwargs,
         )
     else:
         raise NotImplementedError(

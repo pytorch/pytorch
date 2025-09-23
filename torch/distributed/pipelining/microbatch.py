@@ -218,7 +218,7 @@ def _split_tensor(
             out_placements=(placements,) * num_chunks,
             in_placements=(placements,),
         )
-        chunk_tensors: Sequence[torch.Tensor] = split_fn(tensor)  # type: ignore[assignment]
+        chunk_tensors: Sequence[torch.Tensor] = split_fn(tensor)
     else:
         chunk_tensors = torch.tensor_split(tensor, num_chunks, spec.split_dim)
 
@@ -255,7 +255,7 @@ def _split_tensor(
             out_placements=(placements,) * n,
             in_placements=(placements,) + (placements,) * n,
         )
-        return list(expand_fn(tensor, *chunk_tensors))  # type: ignore[arg-type]
+        return list(expand_fn(tensor, *chunk_tensors))
     else:
         return list(_expand_chunks(tensor, *chunk_tensors))
 

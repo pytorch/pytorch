@@ -30,19 +30,19 @@ class PandasWrapper:
     def create_dataframe(cls, data, columns):
         if not _with_pandas():
             raise RuntimeError("DataFrames prototype requires pandas to function")
-        return _pandas.DataFrame(data, columns=columns)  # type: ignore[union-attr]
+        return _pandas.DataFrame(data, columns=columns)
 
     @classmethod
     def is_dataframe(cls, data):
         if not _with_pandas():
             return False
-        return isinstance(data, _pandas.core.frame.DataFrame)  # type: ignore[union-attr]
+        return isinstance(data, _pandas.core.frame.DataFrame)
 
     @classmethod
     def is_column(cls, data):
         if not _with_pandas():
             return False
-        return isinstance(data, _pandas.core.series.Series)  # type: ignore[union-attr]
+        return isinstance(data, _pandas.core.series.Series)
 
     @classmethod
     def iterate(cls, data):
@@ -54,7 +54,7 @@ class PandasWrapper:
     def concat(cls, buffer):
         if not _with_pandas():
             raise RuntimeError("DataFrames prototype requires pandas to function")
-        return _pandas.concat(buffer)  # type: ignore[union-attr]
+        return _pandas.concat(buffer)
 
     @classmethod
     def get_item(cls, data, idx):

@@ -770,7 +770,7 @@ def allclose_impl(
     # pyrefly: ignore [bad-return]
     return torch.all(
         torch.isclose(input, other, rtol=rtol, atol=atol, equal_nan=equal_nan)
-    ).item()  # type: ignore[bad-return]
+    ).item()
 
 
 @register_complex(aten.stack)

@@ -7,7 +7,7 @@ from torch.fx.graph import Graph
 from torch.fx.graph_module import GraphModule
 from torch.fx.node import Node
 from torch.fx.passes.tools_common import legalize_graph, NodeList, NodeSet  # noqa: F401
-from torch.fx.passes.utils import lift_subgraph_as_module  # type: ignore[attr-defined]
+from torch.fx.passes.utils import lift_subgraph_as_module
 
 
 @compatibility(is_backward_compatible=False)
@@ -201,7 +201,7 @@ def fuse_as_graphmodule(
         subgraph.output(outs[0] if len(outs) == 1 else outs)
 
     # lint to ensure correctness
-    subgraph.lint()  # type: ignore[no-untyped-call]
+    subgraph.lint()
     fused_gm: GraphModule
     fused_gm, _ = lift_subgraph_as_module(
         gm, subgraph, comp_name="", class_name=module_name

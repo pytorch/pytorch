@@ -387,7 +387,7 @@ class Guard:
 
     def create_fn_name(self) -> str:
         if isinstance(self.create_fn, functools.partial):
-            create_fn = self.create_fn.func  # type: ignore[attr-defined]
+            create_fn = self.create_fn.func
         else:
             create_fn = self.create_fn
         return create_fn.__name__

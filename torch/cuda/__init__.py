@@ -84,7 +84,7 @@ try:
             # of the .so.
             class _amdsmi_cdll_hook:
                 def __init__(self) -> None:
-                    self.original_CDLL = ctypes.CDLL  # type: ignore[misc,assignment]
+                    self.original_CDLL = ctypes.CDLL
                     paths = ["libamd_smi.so"]
                     if rocm_home := os.getenv("ROCM_HOME", os.getenv("ROCM_PATH")):
                         paths = [os.path.join(rocm_home, "lib/libamd_smi.so")] + paths

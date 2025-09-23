@@ -824,7 +824,7 @@ class Node(_NodeBase):
                 )
             return normalize_function(
                 self.target,
-                self.args,  # type: ignore[arg-type]
+                self.args,
                 self.kwargs,
                 arg_types,
                 kwarg_types,

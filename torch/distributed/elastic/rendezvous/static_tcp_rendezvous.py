@@ -64,7 +64,7 @@ class StaticTCPRendezvous(RendezvousHandler):
         logger.info("Creating TCPStore as the c10d::Store implementation")
         is_master = self.rank == 0
         if not self._store:
-            self._store = TCPStore(  # type: ignore[call-arg]
+            self._store = TCPStore(
                 self.master_addr,
                 self.master_port,
                 self.world_size,

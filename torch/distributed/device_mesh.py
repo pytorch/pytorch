@@ -537,7 +537,7 @@ else:
                     and get_backend(default_group) == "gloo"
                     else default_group
                 )
-                return dim_group.group_name  # type: ignore[union-attr]
+                return dim_group.group_name
 
             # If bound_device_id exists, it means the nccl communicator has been eagerly initialized
             # so that we can use `split_group` to create subgroups through `ncclCommSplit`.
@@ -1040,8 +1040,8 @@ else:
                     mesh_dim_names=(mesh_dim_name,),
                     _init_backend=False,
                 )
-                submesh._dim_group_names = (  # type: ignore[has-type]
-                    [self._dim_group_names[mesh_dim]]  # type: ignore[has-type]
+                submesh._dim_group_names = (
+                    [self._dim_group_names[mesh_dim]]
                     if cur_rank in mesh_1d
                     else []
                 )

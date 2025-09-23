@@ -43,7 +43,7 @@ class Partition:
 
 def _get_attr_from_qualname(mod: torch.nn.Module, qualname: str) -> Any:
     attr_val = mod
-    for atom in qualname.split("."):  # type: ignore[union-attr]
+    for atom in qualname.split("."):
         if not hasattr(attr_val, atom):
             raise AttributeError(f"Node target {qualname} not found!")
         attr_val = getattr(attr_val, atom)
@@ -204,7 +204,7 @@ def split_module(
             if not isinstance(node.target, str):
                 raise AssertionError(f"Expected str target, got {type(node.target)}")
             attr_val = _get_attr_from_qualname(m, node.target)
-            base_mod_attrs[node.target] = attr_val  # type: ignore[index]
+            base_mod_attrs[node.target] = attr_val
         return base_mod_env, base_mod_attrs
 
     import sympy
@@ -647,7 +647,7 @@ def split_module(
                 already_constructed_attr_nodes.add(node)
 
             # Construct GraphModule for this partition
-            for node in orig_mod_attr_nodes:  # type: ignore[attr-defined]
+            for node in orig_mod_attr_nodes:
                 if node in already_constructed_attr_nodes:
                     continue
                 base_mod_env, base_mod_attrs = construct_graph(

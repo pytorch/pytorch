@@ -248,7 +248,7 @@ if has_triton():
     import triton.language as tl
     from triton.language import core
 
-    @triton.jit  # type: ignore[misc]
+    @triton.jit
     def put(dest, source, nelems, pe):  # type: ignore[no-untyped-def]
         """
         Put tensor data from local PE to a remote PE.
@@ -302,7 +302,7 @@ if has_triton():
             _semantic=_semantic,
         )
 
-    @triton.jit  # type: ignore[misc]
+    @triton.jit
     def get(dest, source, nelems, pe):  # type: ignore[no-untyped-def]
         """
         Get tensor data from a remote PE to local PE.
@@ -355,7 +355,7 @@ if has_triton():
             _semantic=_semantic,
         )
 
-    @triton.jit  # type: ignore[misc]
+    @triton.jit
     def get_nbi(dest, source, nelems, pe):  # type: ignore[no-untyped-def]
         """
         Get tensor data from a remote PE to local PE, non-blocking.
@@ -409,7 +409,7 @@ if has_triton():
             _semantic=_semantic,
         )
 
-    @triton.jit  # type: ignore[misc]
+    @triton.jit
     def putmem_signal_block(  # type: ignore[no-untyped-def]
         dst,
         src,
@@ -418,7 +418,7 @@ if has_triton():
         sig_val,
         sig_op,
         pe,
-    ):  # type: ignore[no-untyped-def]
+    ):
         """
         Put data to remote PE with atomic signal operation using block-scoped operation.
 
@@ -480,7 +480,7 @@ if has_triton():
         sig_op,
         pe,
         _semantic=None,
-    ):  # type: ignore[no-untyped-def]
+    ):
         return core.extern_elementwise(
             "",
             "",
@@ -502,7 +502,7 @@ if has_triton():
 
     # Wait and Signal Operations
 
-    @triton.jit  # type: ignore[misc]
+    @triton.jit
     def wait_until(ivar, cmp_op, cmp_val):  # type: ignore[no-untyped-def]
         """
         Wait until a tensor variable meets a specified condition.
@@ -557,7 +557,7 @@ if has_triton():
             _semantic=_semantic,
         )
 
-    @triton.jit  # type: ignore[misc]
+    @triton.jit
     def signal_wait_until(signal, cmp, cmp_val):  # type: ignore[no-untyped-def]
         """
         Wait until a signal variable meets a specified condition.
@@ -948,7 +948,7 @@ if has_triton():
         )
 
     # Collective Operations (mem-based APIs - sizes in bytes)
-    @triton.jit  # type: ignore[misc]
+    @triton.jit
     def alltoall(team, dest, source, nelems_per_pe):  # type: ignore[no-untyped-def]
         """
         All-to-all tensor exchange between PEs in a team.
@@ -1002,7 +1002,7 @@ if has_triton():
             _semantic=_semantic,
         )
 
-    @triton.jit  # type: ignore[misc]
+    @triton.jit
     def broadcast(team, dest, source, nelems, pe_root):  # type: ignore[no-untyped-def]
         """
         Broadcast tensor data from a root PE to all other PEs in a team.

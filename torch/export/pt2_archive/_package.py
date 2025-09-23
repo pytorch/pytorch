@@ -1064,7 +1064,7 @@ def load_pt2(
     num_runners: int = 1,
     device_index: int = -1,
     load_weights_from_disk: bool = False,
-) -> PT2ArchiveContents:  # type: ignore[type-arg]
+) -> PT2ArchiveContents:
     """
     Loads all the artifacts previously saved with ``package_pt2``.
 

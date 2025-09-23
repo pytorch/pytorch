@@ -369,7 +369,7 @@ def _push_mode(mode: TorchDispatchMode) -> None:
 
 
 def _pop_mode(k: DispatchKey | torch._C._TorchDispatchModeKey | None = None):
-    if k == torch._C.DispatchKey.PreDispatch:  # type: ignore[attr-defined]
+    if k == torch._C.DispatchKey.PreDispatch:
         from torch._ops import _pop_mode_from_pre_dispatch
 
         return _pop_mode_from_pre_dispatch()

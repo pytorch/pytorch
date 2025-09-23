@@ -583,7 +583,7 @@ def _handle_call_function_node_with_lowering(
         if len(onnx_node.outputs) == 1:
             outputs = onnx_node.outputs[0]
         else:
-            outputs = onnx_node.outputs  # type: ignore[assignment]
+            outputs = onnx_node.outputs
     else:
         # Find the matching ONNX overload for the node
         # TODO: Log the message here to expose false positives
@@ -896,7 +896,7 @@ def _get_inputs_and_attributes(
             } or isinstance(kwarg, torch.device):
                 attr = str(kwarg)
             elif isinstance(kwarg, torch.dtype):
-                attr = torch_dtype_to_onnx_dtype(kwarg)  # type: ignore[assignment]
+                attr = torch_dtype_to_onnx_dtype(kwarg)
             else:
                 attr = kwarg  # type: ignore[assignment]
 
@@ -1243,7 +1243,7 @@ def _exported_program_to_onnx_program(
         exported_program.named_buffers(),
         exported_program.constants.items(),
     ):
-        initializer = model.graph.initializers.get(name)  # type: ignore[assignment]
+        initializer = model.graph.initializers.get(name)
         if initializer is None:
             logger.warning("Tensor '%s' is not one of the initializers", name)
             continue
@@ -1362,7 +1362,7 @@ def export(
         # Try everything 🐰 (all paths for getting an ExportedProgram)
         result: _capture_strategies.Result | None = None
         for strategy_class in _capture_strategies.CAPTURE_STRATEGIES:
-            strategy = strategy_class(  # type: ignore[abstract]
+            strategy = strategy_class(
                 verbose=verbose is not False,  # Treat None as verbose
                 dump=dump_exported_program,
                 artifacts_dir=artifacts_dir,

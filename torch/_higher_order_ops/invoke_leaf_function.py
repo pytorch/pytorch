@@ -532,7 +532,7 @@ class InvokeLeafFunction(HigherOrderOperator):
         requires_grad_indices: comma-separated string of flat-arg indices that
             require grad (e.g. "0,1"), or "" for none.
         """
-        return super().__call__(  # type: ignore[attr-defined]
+        return super().__call__(
             real_fn_callable,
             fake_fn_callable,
             input_spec,

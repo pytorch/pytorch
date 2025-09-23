@@ -80,7 +80,7 @@ def onnx_impl(
                         skip_signature_inference=no_compile,
                     )
                 )
-        return processed_func  # type: ignore[return-value]
+        return processed_func
 
     return wrapper
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from .core import reify, unify  # type: ignore[attr-defined]
+from .core import reify, unify
 
 
 if TYPE_CHECKING:
@@ -10,7 +10,7 @@ if TYPE_CHECKING:
 
     from .variable import Var
 
-from .unification_tools import first, groupby  # type: ignore[import]
+from .unification_tools import first, groupby
 from .utils import _toposort, freeze
 from .variable import isvar
 

@@ -331,12 +331,12 @@ class _ConvNd(WeightedQuantizedModule):
         qconv = cls(
             ref_qconv.in_channels,
             ref_qconv.out_channels,
-            ref_qconv.kernel_size,  # type: ignore[arg-type]
-            ref_qconv.stride,  # type: ignore[arg-type]
-            ref_qconv.padding,  # type: ignore[arg-type]
-            ref_qconv.dilation,  # type: ignore[arg-type]
+            ref_qconv.kernel_size,
+            ref_qconv.stride,
+            ref_qconv.padding,
+            ref_qconv.dilation,
             ref_qconv.groups,
-            ref_qconv.bias is not None,  # type: ignore[arg-type]
+            ref_qconv.bias is not None,
             ref_qconv.padding_mode,
             device=ref_qconv.weight.device,
             dtype=ref_qconv.weight.dtype,
@@ -805,7 +805,7 @@ class _ConvTransposeNd(_ConvNd):
             " nnq."
             + cls.__name__
             + ".from_float only works for "
-            + cls._FLOAT_MODULE.__name__  # type: ignore[attr-defined]
+            + cls._FLOAT_MODULE.__name__
         )
         if type(mod) is not cls._FLOAT_MODULE:
             raise AssertionError(msg)
@@ -856,13 +856,13 @@ class _ConvTransposeNd(_ConvNd):
         qconv = cls(
             ref_qconvt.in_channels,
             ref_qconvt.out_channels,
-            ref_qconvt.kernel_size,  # type: ignore[arg-type]
-            ref_qconvt.stride,  # type: ignore[arg-type]
-            ref_qconvt.padding,  # type: ignore[arg-type]
-            ref_qconvt.output_padding,  # type: ignore[arg-type]
+            ref_qconvt.kernel_size,
+            ref_qconvt.stride,
+            ref_qconvt.padding,
+            ref_qconvt.output_padding,
             ref_qconvt.groups,
-            ref_qconvt.bias is not None,  # type: ignore[arg-type]
-            ref_qconvt.dilation,  # type: ignore[arg-type]
+            ref_qconvt.bias is not None,
+            ref_qconvt.dilation,
             ref_qconvt.padding_mode,
             device=ref_qconvt.weight.device,
             dtype=ref_qconvt.weight.dtype,

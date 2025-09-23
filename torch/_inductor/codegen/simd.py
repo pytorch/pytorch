@@ -769,13 +769,13 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         for length_group in lengths:
             return_getters = []
             for size in length_group:
-                if sv.statically_known_equals(size, 1):  # type: ignore[arg-type]
+                if sv.statically_known_equals(size, 1):
                     return_getters.append(lambda _: sympy.S.Zero)
                     continue
 
                 while current_group < len(remaining) and sv.statically_known_equals(
                     remaining[current_group],
-                    1,  # type: ignore[arg-type]
+                    1,
                 ):
                     # scroll to next group with remaining elements
                     current_group += 1
@@ -986,7 +986,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
             if symbol not in self.range_tree_nodes:
                 # Non-iterated variables, e.g. strides
                 continue
-            entry = self.range_tree_nodes[symbol]  # type: ignore[index]
+            entry = self.range_tree_nodes[symbol]
             assert isinstance(entry.parent, IterationRangesRoot)
             index_numels[entry.parent.index] *= entry.length
 
@@ -994,7 +994,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         # numels, then it must be broadcasted.
         simplify = V.graph.sizevars.simplify
         return any(
-            simplify(idx_range) != simplify(iter_range)  # type: ignore[arg-type]
+            simplify(idx_range) != simplify(iter_range)
             for idx_range, iter_range in zip(index_numels, self.numels.values())
         )
 
@@ -1009,7 +1009,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         """
         if isinstance(index, list):
             return f"[{', '.join(map(self.index_to_str, index))}]"
-        return self.kexpr(self.rename_indexing(index))  # type: ignore[call-arg]
+        return self.kexpr(self.rename_indexing(index))
 
     def prepare_indexing(
         self,
@@ -1061,14 +1061,14 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                 # if indexing expression is complicated, we precompute it on the host side
                 # and send the result as a kernel argument
                 replacements = {}
-                for ps in self.range_tree_nodes[sym].precomputed_args():  # type: ignore[index]
+                for ps in self.range_tree_nodes[sym].precomputed_args():
                     replacements[ps] = V.graph.sizevars.lookup_precomputed_size(ps)
                 if len(replacements) > 0:
-                    self.range_tree_nodes[sym].expr = sympy_subs(  # type: ignore[index]
+                    self.range_tree_nodes[sym].expr = sympy_subs(
                         self.range_tree_nodes[sym].expr,
-                        replacements,  # type: ignore[index]
+                        replacements,
                     )
-                self.range_tree_nodes[sym].codegen()  # type: ignore[index]
+                self.range_tree_nodes[sym].codegen()
         return expr
 
     def codegen_nan_check(self) -> None:
@@ -1119,7 +1119,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         index_to_tile_indexes = {k: v.expr for k, v in self.range_tree_nodes.items()}
         if isinstance(index, sympy.Expr):
             index = index.expand(identity=True)
-        index_in_tile_vars = sympy_subs(index, index_to_tile_indexes)  # type: ignore[arg-type]
+        index_in_tile_vars = sympy_subs(index, index_to_tile_indexes)
         strides = {}
         for range_tree in self.range_trees:
             s = sympy_index_symbol(range_tree.name)
@@ -1903,9 +1903,9 @@ class SIMDScheduling(BaseScheduling):
 
         # Only install guards for 32-bit indexing as there is no correctness
         # issue with using 64-bit for everything
-        V.graph.sizevars.check_leq(numel, int_max)  # type: ignore[arg-type]
+        V.graph.sizevars.check_leq(numel, int_max)
         for size in buf_sizes:
-            V.graph.sizevars.check_leq(size, int_max)  # type: ignore[arg-type]
+            V.graph.sizevars.check_leq(size, int_max)
         return True
 
     def process_kernel(
@@ -1992,7 +1992,7 @@ class SIMDScheduling(BaseScheduling):
             V.graph.wrapper_code.write_kernel_context_guard_begin()
             V.graph.wrapper_code.write_kernel_context_guard(
                 final_kernel.kernel_name,
-                base_scheduler_nodes,  # type: ignore[arg-type]
+                base_scheduler_nodes,
             )
         final_kernel.call_kernel(final_kernel.kernel_name)
         if config.cpp.enable_kernel_profile:
@@ -2007,7 +2007,7 @@ class SIMDScheduling(BaseScheduling):
         V.graph.inplaced_to_remove |= final_kernel.inplaced_to_remove
 
         if (
-            V.graph.wrapper_code.supports_intermediate_hooks  # type: ignore[has-type]
+            V.graph.wrapper_code.supports_intermediate_hooks
             and config.generate_intermediate_hooks
         ):
             # Not every node in the schedule will actually be live on output;

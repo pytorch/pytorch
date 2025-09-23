@@ -250,7 +250,7 @@ class RNNBase(Module):
         # Short-circuits if any tensor in self._flat_weights is not acceptable to cuDNN
         # or the tensors in _flat_weights are of different dtypes
 
-        first_fw = self._flat_weights[0]  # type: ignore[union-attr]
+        first_fw = self._flat_weights[0]
         dtype = first_fw.dtype  # type: ignore[union-attr]
         for fw in self._flat_weights:
             if (
@@ -1057,7 +1057,7 @@ class LSTM(RNNBase):
         )
 
     # Same as above, see torch/nn/modules/module.py::_forward_unimplemented
-    @overload  # type: ignore[override]
+    @overload
     @torch._jit_internal._overload_method
     def forward(
         self,
@@ -1355,7 +1355,7 @@ class GRU(RNNBase):
             )
         super().__init__("GRU", *args, **kwargs)
 
-    @overload  # type: ignore[override]
+    @overload
     @torch._jit_internal._overload_method
     def forward(
         self,

@@ -9,7 +9,7 @@ import binascii
 from base64 import b64decode, b64encode
 from typing import cast
 
-import urllib3.exceptions  # type: ignore[import]
+import urllib3.exceptions
 
 
 try:

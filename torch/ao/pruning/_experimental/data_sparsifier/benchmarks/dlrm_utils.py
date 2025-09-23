@@ -2,7 +2,7 @@
 import os
 import zipfile
 
-import numpy as np  # type: ignore[import]
+import numpy as np
 from dlrm_data_pytorch import (  # type: ignore[import]
     collate_wrapper_criteo_offset,
     CriteoDataset,

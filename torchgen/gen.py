@@ -134,7 +134,7 @@ T = TypeVar("T")
 # of each entry in the YAML file
 class LineLoader(YamlLoader):
     def construct_mapping(self, node, deep=False):  # type: ignore[no-untyped-def]
-        mapping = super().construct_mapping(node, deep=deep)  # type: ignore[no-untyped-call]
+        mapping = super().construct_mapping(node, deep=deep)
         # Add 1 so line numbering starts at 1
         mapping["__line__"] = node.start_mark.line + 1
         return mapping
@@ -1053,17 +1053,17 @@ C10_ALWAYS_INLINE
 
 def format_yaml(data: object) -> str:
     # Ignore alias in Dumper
-    YamlDumper.ignore_aliases = lambda self, data: True  # type: ignore[assignment]
+    YamlDumper.ignore_aliases = lambda self, data: True
 
     # Support serializing OrderedDict
     def dict_representer(dumper: Any, data: Any) -> Any:
         return dumper.represent_dict(data.items())
 
-    YamlDumper.add_representer(OrderedDict, dict_representer)  # type: ignore[no-untyped-call]
+    YamlDumper.add_representer(OrderedDict, dict_representer)
     # Some yaml parsers (e.g. Haskell's) don't understand line breaks.
     # width=1e9 turns off optional line breaks and improves
     # the portability of the outputted yaml.
-    return yaml.dump(data, default_flow_style=False, Dumper=YamlDumper, width=1e9)  # type: ignore[no-any-return, call-overload]
+    return yaml.dump(data, default_flow_style=False, Dumper=YamlDumper, width=1e9)
 
 
 # For some reason, some defaults we write to YAML are written as native
@@ -2588,7 +2588,7 @@ def gen_source_files(
     all_groups: list[
         NativeFunction | NativeFunctionsGroup | NativeFunctionsViewGroup
     ] = list(structured_native_functions) + list(
-        view_groups  # type: ignore[assignment, arg-type, operator]
+        view_groups
     )
     # Note: all operators that functionalization needs to handle (mutable and aliasing ops) should be grouped properly.
     # The only reason we really need to deal with direct NativeFunctions here (instead of the groups) is because:

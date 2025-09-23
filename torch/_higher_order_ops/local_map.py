@@ -220,7 +220,7 @@ def create_hop_fw_bw(
     from torch._subclasses.functional_tensor import disable_functional_mode
     from torch.fx.experimental.proxy_tensor import disable_proxy_modes_tracing, make_fx
 
-    local_map_kwargs = fw_gm.meta["local_map_kwargs"]  # type: ignore[attr-defined]
+    local_map_kwargs = fw_gm.meta["local_map_kwargs"]
     if "in_placements" not in local_map_kwargs:
         raise AssertionError("'in_placements' not found in local_map_kwargs")
     if "out_placements" not in local_map_kwargs:
@@ -233,9 +233,9 @@ def create_hop_fw_bw(
         )
 
     dummy_aot_config = AOTConfig(
-        fw_compiler=None,  # type: ignore[arg-type]
-        bw_compiler=None,  # type: ignore[arg-type]
-        partition_fn=None,  # type: ignore[arg-type]
+        fw_compiler=None,
+        bw_compiler=None,
+        partition_fn=None,
         decompositions={},
         num_params_buffers=0,
         aot_id=0,
@@ -528,7 +528,7 @@ def autograd_key(
     *args: Any,
     **kwargs: Any,
 ) -> Any:
-    local_map_kwargs = fw_gm.meta["local_map_kwargs"]  # type: ignore[attr-defined]
+    local_map_kwargs = fw_gm.meta["local_map_kwargs"]
     if local_map_kwargs.get("in_grad_placements", None) is not None:
         raise AssertionError("local_map in_grad_placements are not yet supported.")
     if _DEFER_INLINING:

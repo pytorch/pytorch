@@ -121,7 +121,7 @@ def hash_storage(storage: torch.UntypedStorage, *, stable_hash: bool = False) ->
     state = generator.get_state()
     try:
         generator.manual_seed(0)
-        x = torch.empty(0, dtype=torch.uint8, device=storage.device).set_(storage)  # type: ignore[call-overload]
+        x = torch.empty(0, dtype=torch.uint8, device=storage.device).set_(storage)
         # The dtype-casting view cannot be compiled, and so the
         # padding/reshaping also needs to be done externally even
         # though it could be profitably fused

@@ -251,13 +251,13 @@ def install_config_module(module: ModuleType) -> None:
     module._hash_dirty_var = ContextVar(f"{module.__name__}._hash_dirty", default=True)  # type: ignore[attr-defined]  # pyrefly: ignore[missing-attribute]
     module._hash_cache_var = ContextVar(  # pyrefly: ignore[missing-attribute]
         f"{module.__name__}._hash_cache", default=None
-    )  # type: ignore[attr-defined]
+    )
     module._get_dict_dirty_keys_var = ContextVar(  # pyrefly: ignore[missing-attribute]
         f"{module.__name__}._get_dict_dirty_keys", default=None
-    )  # type: ignore[attr-defined]
+    )
     module._get_dict_cache_var = ContextVar(  # pyrefly: ignore[missing-attribute]
         f"{module.__name__}._get_dict_cache", default=None
-    )  # type: ignore[attr-defined]
+    )
 
 
 COMPILE_IGNORED_MARKER = "@compile_ignored"

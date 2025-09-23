@@ -283,12 +283,12 @@ def create_type_hint(x: object) -> object:
             if isinstance(x, list):
 
                 def ret_type(x: Any) -> Any:
-                    return list[x]  # type: ignore[valid-type]
+                    return list[x]
 
             else:
 
                 def ret_type(x: Any) -> Any:
-                    return tuple[x, ...]  # type: ignore[valid-type]
+                    return tuple[x, ...]
 
             if len(x) == 0:
                 return ret_type(Any)

@@ -437,8 +437,8 @@ class _LinearNodeList:
                 name=node.name,
                 op=node.op,
                 target=node.target,
-                args=node_args,  # type: ignore[arg-type]
-                kwargs=node_kwargs,  # type: ignore[arg-type]
+                args=node_args,
+                kwargs=node_kwargs,
                 return_type=node.type,
             )
             serialize_node.meta = copy.copy(node.meta)
@@ -461,8 +461,8 @@ class _LinearNodeList:
             deser_node = graph.create_node(
                 op=node.op,
                 target=node.target,
-                args=node_args,  # type: ignore[arg-type]
-                kwargs=node_kwargs,  # type: ignore[arg-type]
+                args=node_args,
+                kwargs=node_kwargs,
                 name=node.name,
                 type_expr=node.type,
             )
@@ -703,35 +703,35 @@ class Pipe(torch.nn.Module):
 
         if split_policy is not None:
             logger.info("Auto-splitting model")
-            traced = split_policy(traced)  # type: ignore[arg-type]
+            traced = split_policy(traced)
 
-        logger.debug(traced.print_readable(print_output=False))  # type: ignore[operator]
+        logger.debug(traced.print_readable(print_output=False))
 
         # Deduplicate `get_attr` nodes that refer to the same parameter . Downstream code for moving
         # parameters relies on the invariant that parameter accesses happen once. This is not necessarily
         # the case (especially with custom tracers), so fix that up here.
         get_attr_nodes: dict[str, fx.Node] = {}
-        for node in traced.graph.nodes:  # type: ignore[union-attr]
+        for node in traced.graph.nodes:
             if node.op == "get_attr":
                 get_attr_nodes.setdefault(node.target, node)
 
                 if get_attr_nodes[node.target] != node:
                     node.replace_all_uses_with(get_attr_nodes[node.target])
-                    traced.graph.erase_node(node)  # type: ignore[operator, union-attr]
+                    traced.graph.erase_node(node)
 
         # avoid looking at next node by keeping track of previous pipe_split
         prev_pipe_split_idx = -1
         pipe_split_nodes_to_erase = set()
-        for i, node in enumerate(traced.graph.nodes):  # type: ignore[arg-type, union-attr]
+        for i, node in enumerate(traced.graph.nodes):
             if (node.op, node.target) == ("call_function", pipe_split):
                 if prev_pipe_split_idx == i - 1:
                     pipe_split_nodes_to_erase.add(node)
                 prev_pipe_split_idx = i
 
         for node in pipe_split_nodes_to_erase:
-            traced.graph.erase_node(node)  # type: ignore[operator, union-attr]
+            traced.graph.erase_node(node)
 
-        traced.recompile()  # type: ignore[operator]
+        traced.recompile()
 
         part_idx = 0
 
@@ -747,7 +747,7 @@ class Pipe(torch.nn.Module):
 
         # TODO: what does split do with module invocations? does it move the modules
         # into the submodules?
-        split = split_module(traced, mod, split_callback, partition_affix="pp")  # type: ignore[arg-type]
+        split = split_module(traced, mod, split_callback, partition_affix="pp")
         # a (custom) tracer can produce dead code like orphan get_attr nodes
         split.graph.eliminate_dead_code()
 
@@ -1100,12 +1100,12 @@ class Pipe(torch.nn.Module):
             )
         else:
             # Support kwargs for the first stage
-            submod0.graph._codegen = copy.deepcopy(traced.graph._codegen)  # type: ignore[union-attr]
+            submod0.graph._codegen = copy.deepcopy(traced.graph._codegen)
             # `_replace` is actually not "private" or internal. based on this doc:
             # To prevent conflicts with field names, the method and attribute names
             # start with an underscore
             submod0.graph._codegen.pytree_info = (  # type: ignore[union-attr]
-                submod0.graph._codegen.pytree_info._replace(out_spec=None)  # type: ignore[operator, union-attr]
+                submod0.graph._codegen.pytree_info._replace(out_spec=None)
             )
             submod0.recompile()
 

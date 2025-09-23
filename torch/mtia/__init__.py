@@ -22,7 +22,7 @@ Event = torch.Event
 Stream = torch.Stream
 
 # Default generators are initialized inside _mtia_init
-default_generators: tuple[torch._C.Generator, ...] = ()  # type: ignore[assignment]
+default_generators: tuple[torch._C.Generator, ...] = ()
 
 
 _initialized = False

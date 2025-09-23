@@ -69,7 +69,7 @@ def dispatch(
 
         if ismethod(func):
             dispatcher = inspect.currentframe().f_back.f_locals.get(  # type: ignore[union-attr]
-                name,  # type: ignore[union-attr]
+                name,
                 MethodDispatcher(name),
             )
         else:
@@ -80,7 +80,7 @@ def dispatch(
         dispatcher.add(types_tuple, func)
         return dispatcher
 
-    return _df  # type: ignore[return-value]
+    return _df
 
 
 def ismethod(func: Callable[..., object]) -> bool:
@@ -92,5 +92,5 @@ def ismethod(func: Callable[..., object]) -> bool:
         signature = inspect.signature(func)
         return signature.parameters.get("self", None) is not None
     else:
-        spec = inspect.getfullargspec(func)  # type: ignore[union-attr, assignment]
+        spec = inspect.getfullargspec(func)
         return bool(spec and spec.args and spec.args[0] == "self")

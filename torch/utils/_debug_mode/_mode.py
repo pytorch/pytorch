@@ -95,7 +95,7 @@ def _ensure_annotate_decorated():
     """
     global _annotate_decorated
     if not _annotate_decorated:
-        DebugMode._annotate = torch._dynamo.dont_skip_tracing(DebugMode._annotate)  # type: ignore[has-type]
+        DebugMode._annotate = torch._dynamo.dont_skip_tracing(DebugMode._annotate)
 
         # Mark annotate as side-effectful so aot_eager doesn't DCE it.
         from torch.fx.node import _side_effectful_functions
@@ -930,7 +930,7 @@ class DebugMode(TorchDispatchMode):
                     )
 
                 def compare_triton_hashes(hashes1, hashes2, is_input):
-                    if set(hashes1.keys()) != set(hashes2.keys()):  # type: ignore[union-attr]
+                    if set(hashes1.keys()) != set(hashes2.keys()):
                         raise AssertionError(
                             f"hash key mismatch: {set(hashes1.keys())} vs {set(hashes2.keys())}"
                         )

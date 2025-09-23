@@ -2804,7 +2804,7 @@ def _get_num_workers(verbose: bool) -> int | None:
 
 def _get_vc_env(vc_arch: str) -> dict[str, str]:
     try:
-        from setuptools import distutils  # type: ignore[attr-defined]
+        from setuptools import distutils
 
         return distutils._msvccompiler._get_vc_env(vc_arch)
     except AttributeError:
@@ -2823,7 +2823,7 @@ def _run_ninja_build(build_directory: str, verbose: bool, error_prefix: str) -> 
     env = os.environ.copy()
     # Try to activate the vc env for the users
     if IS_WINDOWS and 'VSCMD_ARG_TGT_ARCH' not in env:
-        from setuptools import distutils  # type: ignore[attr-defined]
+        from setuptools import distutils
 
         plat_name = distutils.util.get_platform()
         plat_spec = PLAT_TO_VCVARS[plat_name]

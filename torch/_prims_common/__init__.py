@@ -87,7 +87,7 @@ torch_function_passthrough = {
     torch.Tensor.dtype.__get__,  # type: ignore[attr-defined]
     torch.Tensor.is_sparse.__get__,  # type: ignore[attr-defined]
     torch.Tensor.shape.__get__,  # type: ignore[attr-defined]
-    torch.Tensor.device.__get__,  # type: ignore[attr-defined]
+    torch.Tensor.device.__get__,
     torch.Tensor.requires_grad.__get__,  # type: ignore[attr-defined]
     torch.Tensor.layout.__get__,  # type: ignore[attr-defined]
     torch.Tensor.is_contiguous,
@@ -431,7 +431,7 @@ def is_channels_last_contiguous_or_false_3d(a: Tensor) -> bool:
 
 
 # similar to is_contiguous_for_memory_format but return false on data dependency.
-def is_contiguous_for_memory_format_or_false(  # type: ignore[return]
+def is_contiguous_for_memory_format_or_false(
     a: Tensor, *, memory_format: torch.memory_format
 ) -> bool:
     return is_contiguous_for_memory_format(
@@ -1222,7 +1222,7 @@ def dtype_to_type_ctor(dtype: torch.dtype) -> Callable[[NumberType], NumberType]
         return sym_float
     if dtype in _complex_dtypes:
         # TODO: type error here is real, replace with sym_complex
-        return lambda x: complex(x)  # type: ignore[arg-type]
+        return lambda x: complex(x)
 
     raise ValueError("Invalid dtype!")
 
@@ -1564,7 +1564,7 @@ def expr_type(x: sympy.Basic) -> type:
 
     if x.kind is sympy.core.kind.BooleanKind:
         return bool
-    elif x.is_integer:  # type: ignore[attr-defined]
+    elif x.is_integer:
         return int
     else:
         # NB: Not strictly correct, but we don't support SymPy complex or bool.

@@ -362,7 +362,7 @@ class FlatParameter(nn.Parameter, metaclass=_FlatParameterMeta):
     def __new__(cls, data=None, requires_grad=True):
         if cls is not FlatParameter:
             raise AssertionError("subclasses FlatParameter not supported")
-        r = nn.Parameter.__new__(nn.Parameter, data, requires_grad)  # type: ignore[call-arg]
+        r = nn.Parameter.__new__(nn.Parameter, data, requires_grad)
         r._is_flat_param = True  # type: ignore[attr-defined]
         return r
 
@@ -616,7 +616,7 @@ class FlatParamHandle:
             params,
             fully_sharded_module,
             self._aligned_numel,
-            use_orig_params,  # type: ignore[arg-type]
+            use_orig_params,
         )
         self._use_unsharded_views(as_params=False)
 
@@ -998,7 +998,7 @@ class FlatParamHandle:
         parameter.
         """
         flat_param = self.flat_param
-        flat_param._sharded_size = flat_param.size()  # type: ignore[attr-defined]
+        flat_param._sharded_size = flat_param.size()
         sharded_flat_param_numel = flat_param.numel()  # includes `numel_padded`
         _p_assert(
             unsharded_start_idx >= 0 and unsharded_start_idx <= unsharded_end_idx,
@@ -1016,8 +1016,8 @@ class FlatParamHandle:
             raise AssertionError(
                 f"Expects length {flat_param._num_params} but got {len(shard_param_infos)}"
             )
-        flat_param._shard_param_infos = shard_param_infos  # type: ignore[attr-defined]
-        flat_param._shard_numel_padded = numel_padded  # type: ignore[attr-defined]
+        flat_param._shard_param_infos = shard_param_infos
+        flat_param._shard_numel_padded = numel_padded
 
     def _get_shard_metadata(
         self,
@@ -1345,16 +1345,16 @@ class FlatParamHandle:
         flat_param = self.flat_param
         _alloc_storage(
             flat_param._mp_shard,
-            flat_param._local_shard.size(),  # type: ignore[attr-defined]
+            flat_param._local_shard.size(),
         )
         # `copy_()` implicitly casts to the low precision
-        flat_param._mp_shard.copy_(  # type: ignore[attr-defined]
-            flat_param._local_shard.to(  # type: ignore[attr-defined]
+        flat_param._mp_shard.copy_(
+            flat_param._local_shard.to(
                 self.device, non_blocking=True
             )
         )
         # Invariant: `_mp_shard` is always on the compute device.
-        flat_param.data = flat_param._mp_shard  # type: ignore[attr-defined]
+        flat_param.data = flat_param._mp_shard
 
     def unshard(self):
         """
@@ -1405,7 +1405,7 @@ class FlatParamHandle:
         flat_param = self.flat_param
         unsharded_flat_param = self._get_padded_unsharded_flat_param()
         self._check_storage_freed(unsharded_flat_param)
-        _alloc_storage(unsharded_flat_param, flat_param._padded_unsharded_size)  # type: ignore[attr-defined]
+        _alloc_storage(unsharded_flat_param, flat_param._padded_unsharded_size)
         return unsharded_flat_param
 
     def _get_padded_unsharded_flat_param(self) -> torch.Tensor:
@@ -1420,7 +1420,7 @@ class FlatParamHandle:
             # When parameter mixed precision is enabled, we use a different
             # tensor as the all-gather destination to preserve the invariant
             # that  `_full_param_padded` is in the low precision
-            unsharded_flat_param = flat_param._full_prec_full_param_padded  # type: ignore[attr-defined]
+            unsharded_flat_param = flat_param._full_prec_full_param_padded
             _p_assert(
                 unsharded_flat_param.dtype != self._fwd_bwd_param_dtype,
                 f"Expects full precision but got {self._fwd_bwd_param_dtype}",
@@ -1434,7 +1434,7 @@ class FlatParamHandle:
             if flat_param._full_param_padded.untyped_storage().size() > 0:
                 _free_storage(flat_param._full_param_padded)
         else:
-            unsharded_flat_param = flat_param._full_param_padded  # type: ignore[attr-defined]
+            unsharded_flat_param = flat_param._full_param_padded
         return unsharded_flat_param
 
     def _all_gather_flat_param(
@@ -1464,7 +1464,7 @@ class FlatParamHandle:
         )
 
         # HACK this should be handled by C10D
-        if sharded_flat_param.is_cpu:  # type: ignore[attr-defined]
+        if sharded_flat_param.is_cpu:
             tensor_list = list(
                 torch.chunk(
                     padded_unsharded_flat_param,
@@ -1542,9 +1542,9 @@ class FlatParamHandle:
         # unshard stream.
         _no_dispatch_record_stream(
             self.flat_param._mp_shard,
-            self._device_handle.current_stream(),  # type: ignore[attr-defined]
+            self._device_handle.current_stream(),
         )
-        _free_storage(self.flat_param._mp_shard)  # type: ignore[attr-defined]
+        _free_storage(self.flat_param._mp_shard)
 
     @torch.no_grad()
     def unshard_grad(self):
@@ -1586,13 +1586,13 @@ class FlatParamHandle:
                     stacklevel=2,
                 )
             flat_param._saved_grad_shard = None  # type: ignore[assignment]
-            sharded_grad = torch.zeros(flat_param._sharded_size, device=self.device)  # type: ignore[attr-defined]
+            sharded_grad = torch.zeros(flat_param._sharded_size, device=self.device)
         else:
             self._check_sharded(flat_param.grad)
-            flat_param._saved_grad_shard = flat_param.grad  # type: ignore[attr-defined]
-            sharded_grad = flat_param._saved_grad_shard  # type: ignore[attr-defined]
+            flat_param._saved_grad_shard = flat_param.grad
+            sharded_grad = flat_param._saved_grad_shard
         padded_unsharded_grad = torch.empty(
-            flat_param._padded_unsharded_size,  # type: ignore[attr-defined]
+            flat_param._padded_unsharded_size,
             device=self.device,
             dtype=sharded_grad.dtype,
         )
@@ -1610,7 +1610,7 @@ class FlatParamHandle:
             self._use_sharded_grad_views()
         if not self.uses_sharded_strategy:
             return
-        self.flat_param.grad = self.flat_param._saved_grad_shard  # type: ignore[attr-defined]
+        self.flat_param.grad = self.flat_param._saved_grad_shard
         delattr(self.flat_param, "_saved_grad_shard")
 
     def prepare_gradient_for_backward(self):
@@ -1638,7 +1638,7 @@ class FlatParamHandle:
                 f"but got {flat_param.grad.device}",
             )
             prev_iter_synced_gradients = (
-                flat_param.grad.size() == flat_param._local_shard.size()  # type: ignore[attr-defined]
+                flat_param.grad.size() == flat_param._local_shard.size()
             )
             if prev_iter_synced_gradients:
                 # TODO (awgu): Gradient accumulation outside `no_sync()`
@@ -1647,14 +1647,14 @@ class FlatParamHandle:
                 # between a CPU tensor (the existing sharded gradient) and
                 # a GPU tensor (the new sharded gradient).
                 if not grad_offloaded:
-                    flat_param._saved_grad_shard = flat_param.grad.data  # type: ignore[attr-defined]
-                    sharded_grad = flat_param._saved_grad_shard  # type: ignore[attr-defined]
+                    flat_param._saved_grad_shard = flat_param.grad.data
+                    sharded_grad = flat_param._saved_grad_shard
                 else:
                     _p_assert(
                         hasattr(flat_param, "_cpu_grad"),
                         "`_cpu_grad` should be defined if the gradient is on CPU",
                     )
-                    sharded_grad = flat_param._cpu_grad  # type: ignore[attr-defined]
+                    sharded_grad = flat_param._cpu_grad
                 # If user specified to keep the gradient in low precision, then
                 # the gradient may still be of the low precision dtype if the
                 # user did not set the gradient to `None` after the previous
@@ -1662,14 +1662,14 @@ class FlatParamHandle:
                 # precision dtype so that FSDP can accumulate in that dtype in
                 # the post-backward hook and assign to `.grad` in that dtype in
                 # the post-backward callback.
-                local_shard_dtype = flat_param._local_shard.dtype  # type: ignore[attr-defined]
+                local_shard_dtype = flat_param._local_shard.dtype
                 if (
                     self._keep_low_precision_grads
                     and sharded_grad.dtype != local_shard_dtype
                 ):
                     sharded_grad.data = sharded_grad.to(local_shard_dtype)
             else:
-                padded_unsharded_size = flat_param._padded_unsharded_size  # type: ignore[attr-defined]
+                padded_unsharded_size = flat_param._padded_unsharded_size
                 _p_assert(
                     flat_param.grad.size() == padded_unsharded_size,
                     "Expects `.grad` to be the unsharded gradient in "
@@ -1697,17 +1697,17 @@ class FlatParamHandle:
             # NOTE: This branch includes `NO_SHARD`.
             self._check_sharded(flat_param)
             self._check_on_cpu(flat_param)
-            flat_param.grad = flat_param._cpu_grad  # type: ignore[attr-defined]
+            flat_param.grad = flat_param._cpu_grad
             cast_grad_to_param_dtype_if_needed(flat_param)
         elif hasattr(flat_param, "_saved_grad_shard"):
             self._check_sharded(flat_param)
             self._check_on_compute_device(flat_param)
             if flat_param._saved_grad_shard is not None:
-                self._check_on_compute_device(flat_param._saved_grad_shard)  # type: ignore[attr-defined]
+                self._check_on_compute_device(flat_param._saved_grad_shard)
             # If no sharded gradient was computed this iteration, then there is
             # no need to forward `_saved_grad_shard` to `grad`
             if flat_param._post_backward_called:  # type: ignore[attr-defined]
-                flat_param.grad = flat_param._saved_grad_shard  # type: ignore[attr-defined]
+                flat_param.grad = flat_param._saved_grad_shard
                 if flat_param.grad is not None:
                     cast_grad_to_param_dtype_if_needed(flat_param)
         else:
@@ -1837,12 +1837,12 @@ class FlatParamHandle:
             if skip_use_sharded_views:
                 unsharded_flat_param = flat_param.data
         if self._offload_params:
-            device = flat_param._local_shard.device  # type: ignore[attr-defined]
+            device = flat_param._local_shard.device
             _p_assert(
                 device == torch.device("cpu"),
                 f"Expects the local shard to be on CPU but got {device}",
             )
-        flat_param.data = flat_param._local_shard  # type: ignore[attr-defined]
+        flat_param.data = flat_param._local_shard
         if self._use_orig_params:
             if skip_use_sharded_views:  # type: ignore[possibly-undefined]
                 self._unsharded_flat_param_for_skipped_views = unsharded_flat_param  # type: ignore[possibly-undefined]
@@ -2516,7 +2516,7 @@ class FlatParamHandle:
         ):
             # `_sharded_size` is defined iff `handle.shard()` has been called
             return False
-        sharded_size = self.flat_param._sharded_size  # type: ignore[attr-defined]
+        sharded_size = self.flat_param._sharded_size
         return tensor.size() == sharded_size
 
     def param_module_names(self) -> Iterator[tuple[str, str]]:
@@ -2532,7 +2532,7 @@ class FlatParamHandle:
             ) in self.flat_param._shared_param_infos
         ]
         for param_info in chain(self.flat_param._param_infos, shared_param_infos):
-            param_name, _, module_name = param_info  # type: ignore[misc]
+            param_name, _, module_name = param_info
             yield (param_name, module_name)
 
     def shared_param_module_names(self) -> Iterator[tuple[str, str]]:
@@ -2555,7 +2555,7 @@ class FlatParamHandle:
         fqns_in_shard: list[str] = []
         for fqn, shard_param_info in zip(
             self.flat_param._fqns,
-            self.flat_param._shard_param_infos,  # type: ignore[attr-defined]
+            self.flat_param._shard_param_infos,
         ):
             if shard_param_info.in_shard:
                 fqns_in_shard.append(fqn)
@@ -2571,11 +2571,11 @@ class FlatParamHandle:
         # - No CPU offloading + `NO_SHARD`: `grad`
         grad: Tensor | None
         if hasattr(flat_param, "_cpu_grad"):
-            grad = flat_param._cpu_grad  # type: ignore[attr-defined]
+            grad = flat_param._cpu_grad
         elif hasattr(flat_param, "_saved_grad_shard"):
             # In the post-backward hook, the sharded gradient is still in
             # `_saved_grad_shard`.
-            grad = flat_param._saved_grad_shard  # type: ignore[attr-defined]
+            grad = flat_param._saved_grad_shard
         else:
             # If in IDLE or in FORWARD states, then there may be an
             # (accumulated) gradient. If accessed in IDLE, then this should
@@ -2610,7 +2610,7 @@ class FlatParamHandle:
         flat_param = self.flat_param
         if flat_param._params is None:
             raise AssertionError("Expected _params to be not None")  # mypy
-        for i, param in enumerate(flat_param._params):  # type: ignore[arg-type]
+        for i, param in enumerate(flat_param._params):
             # As long as the parameter requires gradient, it should receive a
             # meaningful gradient (even if the gradient happens to be zeros)
             if param.requires_grad:
@@ -2660,7 +2660,7 @@ class FlatParamHandle:
             getattr(self.flat_param, "_mp_shard", None) is not None,
             "Expects `_mp_shard` to exist",
         )
-        device = self.flat_param._mp_shard.device  # type: ignore[attr-defined]
+        device = self.flat_param._mp_shard.device
         _p_assert(
             device == self.device,
             f"Expects the low precision shard to be on {self.device} but got {device}",
@@ -2678,7 +2678,7 @@ class FlatParamHandle:
     def _check_sharded(self, tensor: Tensor):
         msg_prefix = "Expects tensor to be sharded "
         _p_assert(tensor is not None, msg_prefix + "but got `None`")
-        sharded_size = self.flat_param._sharded_size  # type: ignore[attr-defined]
+        sharded_size = self.flat_param._sharded_size
         _p_assert(
             tensor.size() == sharded_size,
             msg_prefix + f"with size {sharded_size} but got {tensor.size()}",

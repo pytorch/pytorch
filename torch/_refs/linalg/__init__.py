@@ -141,7 +141,7 @@ def vector_norm(
     check_fp_or_complex(x.dtype, "linalg.vector_norm")
 
     if isinstance(dim, Dim):
-        dim = [dim]  # type: ignore[assignment]
+        dim = [dim]
 
     _check_vector_norm_args(x, ord, dim)
 
@@ -162,7 +162,7 @@ def vector_norm(
         return to_result_dtype(torch.amin(torch.abs(x), dim=dim, keepdim=keepdim))  # type: ignore[return-value,arg-type]
     else:
         # From here on the computation dtype is important as the reduction is non-trivial
-        x = _maybe_convert_to_dtype(x, computation_dtype)  # type: ignore[assignment]
+        x = _maybe_convert_to_dtype(x, computation_dtype)
         reduce_sum = partial(torch.sum, dim=dim, keepdim=keepdim)
 
         is_ord_even = ord % 2 == 0 if isinstance(ord, IntLike) else ord % 2.0 == 0.0
@@ -190,7 +190,7 @@ def vector_norm(
 
         if not (is_ord_even and utils.is_float_dtype(x.dtype)):
             x = torch.abs(x)
-        return to_result_dtype(torch.pow(reduce_sum(torch.pow(x, ord)), 1.0 / ord))  # type: ignore[return-value]
+        return to_result_dtype(torch.pow(reduce_sum(torch.pow(x, ord)), 1.0 / ord))
 
 
 def _backshift_permutation(dim0, dim1, ndim):
@@ -222,7 +222,7 @@ def matrix_norm(
 
     dim = utils.canonicalize_dims(A.ndim, dim)
     if isinstance(dim, Dim):
-        dim = (dim,)  # type: ignore[assignment]
+        dim = (dim,)
     torch._check(
         len(dim) == 2, lambda: f"linalg.matrix_norm: dim must be a 2-tuple. Got {dim}"
     )
@@ -251,7 +251,7 @@ def matrix_norm(
             return vector_norm(A, 2, dim, keepdim, dtype=dtype)
         else:  # ord == "nuc"
             if dtype is not None:
-                A = _maybe_convert_to_dtype(A, dtype)  # type: ignore[assignment]
+                A = _maybe_convert_to_dtype(A, dtype)
             # pyrefly: ignore [bad-index, index-error]
             perm = _backshift_permutation(dim[0], dim[1], A.ndim)
             result = torch.sum(svdvals(prims.transpose(A, perm)), -1, keepdim)
@@ -287,7 +287,7 @@ def matrix_norm(
 
         if abs_ord == 2.0:
             if dtype is not None:
-                A = _maybe_convert_to_dtype(A, dtype)  # type: ignore[assignment]
+                A = _maybe_convert_to_dtype(A, dtype)
             # pyrefly: ignore [bad-index, index-error]
             perm = _backshift_permutation(dim[0], dim[1], A.ndim)
             result = _max_min_wrapper(svdvals(prims.transpose(A, perm)), dim=-1)
@@ -319,7 +319,7 @@ def norm(
 ) -> TensorLikeType:
     if dim is not None:
         if isinstance(dim, Dim):
-            dim = (dim,)  # type: ignore[assignment]
+            dim = (dim,)
         torch._check(
             len(dim) in (1, 2),
             lambda: f"linalg.norm: If dim is specified, it must be of length 1 or 2. Got {dim}",

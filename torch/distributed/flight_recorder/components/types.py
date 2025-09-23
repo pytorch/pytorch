@@ -44,7 +44,7 @@ class Ref(Generic[T]):
 
 class TypeInfo(NamedTuple):
     name: str
-    fields: list[tuple[str, type]]  # type: ignore[type-arg]
+    fields: list[tuple[str, type]]
 
     @classmethod
     def from_type(cls, c: T) -> "TypeInfo":
@@ -393,7 +393,7 @@ class EntryState:
                 NCCLCall(
                     id=nccl_call_id,
                     collective_id=collective_id,
-                    group_id=self.pg_name,  # type: ignore[arg-type]
+                    group_id=self.pg_name,
                     global_rank=i,
                     traceback_id=0,  # type: ignore[arg-type]
                     collective_type=self.profiling_name,

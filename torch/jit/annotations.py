@@ -462,7 +462,7 @@ def try_ann_to_type(ann, loc, rcb=None):
                     f"{repr(a)} could not be resolved. At\n{repr(loc)}"
                 )
             inner.append(maybe_type)
-        return UnionType(inner)  # type: ignore[arg-type]
+        return UnionType(inner)
     if torch.distributed.rpc.is_available() and is_rref(ann):
         return RRefType(try_ann_to_type(ann_args[0], loc))
     if is_future(ann):

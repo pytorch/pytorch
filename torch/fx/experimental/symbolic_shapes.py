@@ -183,7 +183,7 @@ class _ShapeEnvGuardError(RuntimeError):
     """Raised when a guard is attempted while the ShapeEnv is in error-on-guard mode."""
 
 
-aten = torch._ops.ops.aten  # type: ignore[has-type]
+aten = torch._ops.ops.aten
 
 __all__ = [
     "optimization_hint",
@@ -342,7 +342,7 @@ def lru_cache(
             prev_misses += cur.misses
             old_cache_clear()
 
-        wrapped_f.cache_clear = new_cache_clear  # type: ignore[attr-defined, method-assign]
+        wrapped_f.cache_clear = new_cache_clear
         wrapped_f.cumulative_cache_info = cumulative_cache_info  # type: ignore[attr-defined, method-assign]
         if log.isEnabledFor(logging.DEBUG):
             atexit.register(log_lru_cache_stats, wrapped_f)  # type: ignore[arg-type]
@@ -414,7 +414,7 @@ Int: TypeAlias = torch.SymInt | int
 def create_contiguous(shape: Sequence[Int]) -> list[Int]:
     strides: list[Int] = [1]
     for dim in reversed(shape[:-1]):
-        strides.append(dim * strides[-1])  # type: ignore[operator]
+        strides.append(dim * strides[-1])
     return list(reversed(strides))
 
 
@@ -509,17 +509,17 @@ def has_static_value(a: SymBool | SymFloat | SymInt | bool | float | int) -> boo
         raise AssertionError(f"Expected BoolLike/FloatLike/IntLike, got {type(a)}")
     if (
         isinstance(a, BoolLike)
-        and is_concrete_bool(a)  # type: ignore[arg-type]
+        and is_concrete_bool(a)
         or isinstance(a, FloatLike)
-        and is_concrete_float(a)  # type: ignore[arg-type]
+        and is_concrete_float(a)
         or isinstance(a, IntLike)
-        and is_concrete_int(a)  # type: ignore[arg-type]
+        and is_concrete_int(a)
     ):
         return True
 
     if not isinstance(a, py_sym_types):
         raise AssertionError(f"Expected py_sym_types, got {type(a)}")
-    return a.node.shape_env.bound_sympy(a.node.expr).is_singleton()  # type: ignore[union-attr]
+    return a.node.shape_env.bound_sympy(a.node.expr).is_singleton()
 
 
 @deprecated(
@@ -792,7 +792,7 @@ def canonicalize_bool_expr(expr: _T) -> _T:
 
     if isinstance(expr, (sympy.And, sympy.Or, sympy.Not)):
         expr = sympy.logic.boolalg.to_cnf(expr)
-    return _canonicalize_bool_expr_impl(expr)  # type: ignore[arg-type, return-value]
+    return _canonicalize_bool_expr_impl(expr)
 
 
 def _sympy_from_args(
@@ -822,7 +822,7 @@ def _sympy_from_args(
     """
 
     if not args:
-        return cls.identity  # type: ignore[union-attr]
+        return cls.identity
 
     # These args are already in canonical form, so we avoid calling
     # Add(*args) to avoid expensive Add.flatten operation
@@ -840,14 +840,14 @@ def _sympy_from_args(
         if args[0].is_Number:
             rest = args[1:]
             sort_fn(rest)
-            return cls._from_args([args[0]] + rest, is_commutative=is_commutative)  # type: ignore[attr-defined]
+            return cls._from_args([args[0]] + rest, is_commutative=is_commutative)
         else:
             args = args.copy()
             sort_fn(args)
-            return cls._from_args(args, is_commutative=is_commutative)  # type: ignore[attr-defined]
+            return cls._from_args(args, is_commutative=is_commutative)
     else:
         # if the args are already sorted, we create directly
-        return cls._from_args(args, is_commutative=is_commutative)  # type: ignore[attr-defined]
+        return cls._from_args(args, is_commutative=is_commutative)
 
 
 def _canonicalize_bool_expr_impl(expr: SympyBoolean) -> SympyBoolean:
@@ -861,8 +861,8 @@ def _canonicalize_bool_expr_impl(expr: SympyBoolean) -> SympyBoolean:
     opposite = {sympy.Gt: sympy.Lt, sympy.Ge: sympy.Le}
     t: type[Any]
     if isinstance(expr, tuple(opposite.keys())):
-        rhs = expr.lhs - expr.rhs  # type: ignore[attr-defined]
-        t = opposite[type(expr)]  # type: ignore[index]
+        rhs = expr.lhs - expr.rhs
+        t = opposite[type(expr)]
     else:
         if not isinstance(expr, (sympy.Lt, sympy.Le, sympy.Eq, sympy.Ne)):
             raise AssertionError(f"Expected Lt/Le/Eq/Ne, got {type(expr)}")
@@ -910,7 +910,7 @@ def _reduce_to_lowest_terms(expr: sympy.Expr) -> sympy.Expr:
         elif x.is_Mul:
             # If one of the args of a Mul is an Integer, it is the
             # first arg. eg: args(2*x*3*y) == (6, x, y)
-            return abs(int(x.args[0])) if x.args[0].is_Integer else 1  # type: ignore[call-overload]
+            return abs(int(x.args[0])) if x.args[0].is_Integer else 1
         else:
             return 1
 
@@ -1061,7 +1061,7 @@ def free_symbols(val: IterateExprs) -> OrderedSet[sympy.Symbol]:
 
     # TODO: Apparently, returning an OrderedSet here breaks
     # python test/distributed/tensor/test_dtensor_compile.py TestDTensorCompile.test_dtensor_dynamic
-    return first_expr.free_symbols.union(*(e.free_symbols for e in itr))  # type: ignore[return-value]
+    return first_expr.free_symbols.union(*(e.free_symbols for e in itr))
 
 
 def has_free_symbols(val: IterateExprs) -> bool:
@@ -1951,7 +1951,7 @@ def eval_guards(
 ) -> bool:
     if gm.shape_env is None:
         raise AssertionError("gm.shape_env must not be None")
-    return gm.shape_env.evaluate_guards_for_args(  # type: ignore[operator, union-attr]
+    return gm.shape_env.evaluate_guards_for_args(
         fx_placeholder_vals(gm),
         args,
         ignore_static=ignore_static,
@@ -1961,7 +1961,7 @@ def eval_guards(
 def bind_symbols(gm: torch.fx.GraphModule, *args: Tensor) -> dict[sympy.Symbol, int]:
     if gm.shape_env is None:
         raise AssertionError("gm.shape_env must not be None")
-    return gm.shape_env.bind_symbols(fx_placeholder_vals(gm), args)  # type: ignore[operator, union-attr]
+    return gm.shape_env.bind_symbols(fx_placeholder_vals(gm), args)
 
 
 class DimDynamic(Enum):
@@ -2473,9 +2473,9 @@ def _fast_expand(expr: _SympyT) -> _SympyT:
         # pyrefly: ignore [missing-attribute]
         for arg in expr.args:
             if arg.is_Pow and arg.args[1] == -1:
-                den.append(S.One / arg)  # type: ignore[operator, arg-type]
+                den.append(S.One / arg)
             else:
-                num.append(arg)  # type: ignore[arg-type]
+                num.append(arg)
 
         num, num_changed = _expandsums(num)
         den, den_changed = _expandsums(den)
@@ -2757,7 +2757,7 @@ def _lru_cache(
     else:
 
         @functools.wraps(fn)
-        def wrapper(self: ShapeEnv, *args: Any, **kwargs: Any) -> _T:  # type: ignore[misc]
+        def wrapper(self: ShapeEnv, *args: Any, **kwargs: Any) -> _T:
             nonlocal prior_version
             if prior_version != self._version_counter:
                 fn_cache.cache_clear()
@@ -3323,7 +3323,7 @@ class DimConstraints:
                 f"{self._dcp.symbol_to_source[s][0].name} == {val}"
             )
             # add this as a substitution to simplify other constraints
-            self._substitutions[s] = val  # type: ignore[assignment]
+            self._substitutions[s] = val
 
             # simplify multivariate inequalities: some of them will now become univariate!
             multivariate_inequalities = self._multivariate_inequalities
@@ -3490,9 +3490,9 @@ class DimConstraints:
                 self._is_dim(dim)
                 and ("min" in c or "max" in c)
                 and (
-                    (dim.min < 2 and c.get("min", 2) == 2) or dim.min == c.get("min", 2)  # type: ignore[attr-defined]
+                    (dim.min < 2 and c.get("min", 2) == 2) or dim.min == c.get("min", 2)
                 )  # let pass if analysis min = 2 and specified min = 0/1
-                and dim.max == c.get("max", int_oo)  # type: ignore[attr-defined]
+                and dim.max == c.get("max", int_oo)
             )
 
         # 1) newly introduced roots
@@ -3599,9 +3599,9 @@ class DimConstraints:
                             }
                             if not _check_same_range(
                                 result,
-                                name_to_dim[mroot],  # type: ignore[index, arg-type]
+                                name_to_dim[mroot],
                             ):  # ignore if unchanged
-                                modified_root_values[mroot] = result  # type: ignore[index]
+                                modified_root_values[mroot] = result
                                 break
 
         # filter out results where the key is a derived dim (e.g. {"dx - 1" : 4})
@@ -3708,7 +3708,7 @@ class DimConstraints:
             for k in forced_specializations:
                 dim = name_to_dim[k.split(" = ")[0]]
                 if self._is_derived_dim(dim):
-                    debug_names.add(dim.root.__name__)  # type: ignore[attr-defined]
+                    debug_names.add(dim.root.__name__)
                 else:
                     debug_names.add(dim.__name__)
 
@@ -4785,7 +4785,7 @@ class ShapeEnv:
             if is_symbolic(s):
                 if not has_guarding_hint(s):
                     return None
-                return guarding_hint_or_throw(s.node)  # type: ignore[union-attr]
+                return guarding_hint_or_throw(s.node)
             return s  # type: ignore[return-value]
 
         if symbolic_context is None:
@@ -4805,9 +4805,9 @@ class ShapeEnv:
             hint_overrides = {}
         for i, sz in enumerate(sizes):
             if dynamic_sizes[i] is DimDynamic.UNBACKED and is_symbolic(sz):
-                foreign_env = sz.node.shape_env  # type: ignore[union-attr]
+                foreign_env = sz.node.shape_env
                 if foreign_env is not None:
-                    opt_hint = foreign_env.var_to_hint_override.get(sz.node.expr)  # type: ignore[union-attr]
+                    opt_hint = foreign_env.var_to_hint_override.get(sz.node.expr)
                     if opt_hint is not None:
                         hint_overrides[i] = opt_hint
 
@@ -4849,7 +4849,7 @@ class ShapeEnv:
         new_size_exprs: list[sympy.Expr] = []
         for i, old_sz in enumerate(sizes):
             if is_symbolic(old_sz):
-                old_expr = old_sz.node.expr  # type: ignore[union-attr]
+                old_expr = old_sz.node.expr
                 new_expr = old_expr.xreplace(old_to_new)
                 if new_expr.free_symbols - set(old_to_new.values()):
                     # Still has unmapped foreign symbols — create fresh symbol
@@ -4859,7 +4859,7 @@ class ShapeEnv:
                         dynamic_sizes[i],
                         symbolic_context.constraint_sizes[i]
                         if hasattr(symbolic_context, "constraint_sizes")
-                        else None,  # type: ignore[attr-defined]
+                        else None,
                         symbolic_context=symbolic_context,
                     )
                     old_to_new[old_expr] = sym
@@ -4875,7 +4875,7 @@ class ShapeEnv:
         new_stride_exprs: list[sympy.Expr] = []
         for sd in strides:
             if is_symbolic(sd):
-                new_expr = sd.node.expr.xreplace(old_to_new)  # type: ignore[union-attr]
+                new_expr = sd.node.expr.xreplace(old_to_new)
                 if new_expr.free_symbols - set(old_to_new.values()):
                     # Stride references a foreign symbol not in any size dim.
                     new_expr = self.create_unbacked_symint().node.expr
@@ -4885,7 +4885,7 @@ class ShapeEnv:
 
         # 4. Storage offset.
         if is_symbolic(storage_offset):
-            new_offset_expr = storage_offset.node.expr.xreplace(old_to_new)  # type: ignore[union-attr]
+            new_offset_expr = storage_offset.node.expr.xreplace(old_to_new)
             if new_offset_expr.free_symbols - set(old_to_new.values()):
                 new_offset_expr = self.create_unbacked_symint().node.expr
         else:
@@ -6007,7 +6007,7 @@ class ShapeEnv:
                     return sympy.Integer(symint)
 
             for src1, src2 in equalities_inputs.source_pairs:
-                expr1, expr2 = get_expression(src1), get_expression(src2)  # type: ignore[]
+                expr1, expr2 = get_expression(src1), get_expression(src2)
                 # Check whether given input shape values satisfy a specified equation s = s'.
                 # - Raise when the equation was violated by the given input shape values.
                 # - Otherwise issue a guard to constrain them.
@@ -6943,7 +6943,7 @@ class ShapeEnv:
         elif isinstance(e, sympy.Lt):
             add_expr(sympy.Le(e.lhs, e.rhs, evaluate=False))
             add_expr(sympy.Ne(e.lhs, e.rhs, evaluate=False))
-            if e.lhs.is_integer and e.rhs.is_integer:  # type: ignore[attr-defined]
+            if e.lhs.is_integer and e.rhs.is_integer:
                 add_expr(sympy.Le(e.lhs, e.rhs - 1, evaluate=False))
         elif isinstance(e, sympy.Le):
             add_expr(sympy.Lt(e.lhs, e.rhs + 1, evaluate=False))
@@ -7155,7 +7155,7 @@ class ShapeEnv:
         # expression when creating contiguous strides.
         if not size_oblivious:
             min_max_replacements: dict[sympy.Basic, sympy.Basic] = {}
-            for atom in expr.atoms(Max):  # type: ignore[has-type]
+            for atom in expr.atoms(Max):
                 if len(atom.args) > 2:
                     continue
                 a, b = atom.args
@@ -7336,7 +7336,7 @@ class ShapeEnv:
                 size_like_symbols.append(s)
         size_oblivious_result_msg = ""
         sloc, maybe_extra_debug = self._get_stack_summary(True)
-        if expr.is_integer:  # type: ignore[attr-defined]
+        if expr.is_integer:
             desc = (
                 "Could not extract specialized integer from data-dependent expression"
             )
@@ -7687,7 +7687,7 @@ class ShapeEnv:
             # 1 puts ephemeral sourced symbols first when sorting in reverse
             return (1 if has_only_ephemeral_sources else 0, size, name)
 
-        free = sorted(free, key=_smart_symbol_sort, reverse=True)  # type: ignore[attr-defined]
+        free = sorted(free, key=_smart_symbol_sort, reverse=True)
         lhs = expr.lhs
         rhs = expr.rhs
 
@@ -7925,10 +7925,10 @@ class ShapeEnv:
                 )
             elif isinstance(x, (SymBool, SymInt, SymFloat)):
                 for s in x.node.expr.free_symbols:
-                    if str(s) in frame_symbols:  # type: ignore[operator]
+                    if str(s) in frame_symbols:
                         continue
                     if s in self.var_to_sources:
-                        frame_symbols[str(s)] = self.var_to_sources[s][0].name  # type: ignore[assignment]
+                        frame_symbols[str(s)] = self.var_to_sources[s][0].name
                 return str(x)
             return None
 
@@ -7949,7 +7949,7 @@ class ShapeEnv:
             return _FrameLocalResult()
 
         indent = len(locs[0]) - len(locs[0].lstrip())
-        frame_loc = "".join([loc[indent:] for loc in locs]).strip()  # type: ignore[assignment]
+        frame_loc = "".join([loc[indent:] for loc in locs]).strip()
         return _FrameLocalResult(
             loc=frame_loc, locals=frame_locals, symbols=frame_symbols
         )
@@ -8398,7 +8398,7 @@ class ShapeEnv:
             elif concrete_val is sympy.false:
                 g = sympy.Not(expr)
             else:
-                g = sympy.Eq(expr, concrete_val)  # type: ignore[arg-type]
+                g = sympy.Eq(expr, concrete_val)
 
             if transmute_into_runtime_assert:
                 self.guard_or_defer_runtime_assert(

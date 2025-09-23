@@ -594,7 +594,7 @@ def flex_attention_functionalize(
             score_mod_other_buffers_unwrapped,
             mask_mod_other_buffers_unwrapped,
         )
-    return ctx.wrap_tensors(out)  # type: ignore[return-value, arg-type]
+    return ctx.wrap_tensors(out)
 
 
 @register_fake(flex_attention)
@@ -656,9 +656,9 @@ def create_fw_bw_graph(
     from torch.fx.experimental.proxy_tensor import disable_proxy_modes_tracing
 
     dummy_aot_config = AOTConfig(
-        fw_compiler=None,  # type: ignore[arg-type]
-        bw_compiler=None,  # type: ignore[arg-type]
-        partition_fn=None,  # type: ignore[arg-type]
+        fw_compiler=None,
+        bw_compiler=None,
+        partition_fn=None,
         decompositions={},
         num_params_buffers=0,
         aot_id=0,
@@ -1381,7 +1381,7 @@ def flex_attention_backward_functionalize(
             logsumexp_unwrapped,
             grad_out_unwrapped,
             grad_logsumexp_unwrapped,
-            functional_fw_graph,  # type: ignore[arg-type]
+            functional_fw_graph,
             functional_joint_graph,  # type: ignore[arg-type]
             block_mask_unwrapped,
             scale,
@@ -1390,7 +1390,7 @@ def flex_attention_backward_functionalize(
             mask_mod_other_buffers_unwrapped,
         )
 
-    return ctx.wrap_tensors((grad_query, grad_key, grad_value, grad_score_mod_captured))  # type: ignore[return-value,arg-type]
+    return ctx.wrap_tensors((grad_query, grad_key, grad_value, grad_score_mod_captured))
 
 
 @register_fake(flex_attention_backward)

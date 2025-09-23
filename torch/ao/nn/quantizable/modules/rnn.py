@@ -256,7 +256,7 @@ class _LSTMSingleLayer(torch.nn.Module):
         seq_len = x.shape[0]
         for i in range(seq_len):
             hidden = self.cell(x[i], hidden)
-            result.append(hidden[0])  # type: ignore[index]
+            result.append(hidden[0])
         result_tensor = torch.stack(result, 0)
         return result_tensor, hidden
 
@@ -345,11 +345,11 @@ class _LSTMLayer(torch.nn.Module):
             elif hidden_bw is None:
                 (h, c) = torch.jit._unwrap_optional(hidden_fw)
             else:
-                h = torch.stack([hidden_fw[0], hidden_bw[0]], 0)  # type: ignore[list-item]
-                c = torch.stack([hidden_fw[1], hidden_bw[1]], 0)  # type: ignore[list-item]
+                h = torch.stack([hidden_fw[0], hidden_bw[0]], 0)
+                c = torch.stack([hidden_fw[1], hidden_bw[1]], 0)
         else:
             result = result_fw
-            h, c = torch.jit._unwrap_optional(hidden_fw)  # type: ignore[assignment]
+            h, c = torch.jit._unwrap_optional(hidden_fw)
 
         if self.batch_first:
             result.transpose_(0, 1)

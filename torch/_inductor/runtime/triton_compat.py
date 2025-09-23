@@ -85,10 +85,10 @@ if triton is not None:
         knobs = None
 
     try:
-        from triton.runtime.cache import triton_key  # type: ignore[attr-defined]
+        from triton.runtime.cache import triton_key
     except ImportError:
         from triton.compiler.compiler import (
-            triton_key,  # type: ignore[attr-defined,no-redef]
+            triton_key,
         )
 
     try:

@@ -166,11 +166,11 @@ def _dump_dynamic_shapes(
             raise AssertionError(f"expected Dim, got {type(val)}")
 
         # track root dim
-        root = val.root if isinstance(val, _DerivedDim) else val  # type: ignore[attr-defined]
+        root = val.root if isinstance(val, _DerivedDim) else val
         if root.__name__ not in dims:
             dims[root.__name__] = {
-                "min": root.min,  # type: ignore[attr-defined,union-attr]
-                "max": root.max,  # type: ignore[attr-defined,union-attr]
+                "min": root.min,
+                "max": root.max,
                 "derived": set(),
             }
 
@@ -294,9 +294,9 @@ def _load_dynamic_shapes(
             modulus, remainder = sympy.polys.polytools.div(expr, symbol)
             ddim = dim_cache[name]
             if modulus != 1:
-                ddim = int(modulus) * ddim  # type: ignore[assignment, operator]
+                ddim = int(modulus) * ddim
             if remainder != 0:
-                ddim = ddim + int(remainder)  # type: ignore[assignment, operator]
+                ddim = ddim + int(remainder)
             dim_cache[_expr] = ddim  # cache derived dims
 
     def deserialize_shape(
@@ -322,6 +322,6 @@ def _load_dynamic_shapes(
                 "Expected dims in `spec['dynamic_shapes']` to be tracked in `spec['dims']`, "
                 f"got {val} which is not in {dims.keys()}",
             )
-        return dim_cache[val]  # type: ignore[return-value]
+        return dim_cache[val]
 
     return tree_map(deserialize_shape, dynamic_shapes)

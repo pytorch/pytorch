@@ -204,7 +204,7 @@ def supports_tensorlist(cls: Any) -> Any:
     def new_apply(*args):
         flat_args, input_spec = _pytree.tree_flatten(args, is_leaf=not_list_of_tensor)
         metadata = TensorListMetadata(input_spec)
-        result = orig_apply(*flat_args, metadata)  # type: ignore[misc]
+        result = orig_apply(*flat_args, metadata)
         if metadata.output_spec is None:
             raise AssertionError("metadata.output_spec must not be None")
         result = _pytree.tree_unflatten(list(result), metadata.output_spec)

@@ -430,7 +430,7 @@ class Shard(torch._C._distributed.Shard):
 
         if is_padded:
             full_chunk_size = (logical_dim_size + num_chunks - 1) // num_chunks
-            unpad_size = full_chunk_size * num_chunks - logical_dim_size  # type: ignore[possibly-undefined]
+            unpad_size = full_chunk_size * num_chunks - logical_dim_size
             local_tensor = unpad_tensor(local_tensor, self.dim, unpad_size)
 
         # Bind derived symbolic sizes (e.g. 2*(s//2)) back to the original
@@ -586,16 +586,16 @@ class Shard(torch._C._distributed.Shard):
         if old_dim_padding:
             old_dim_unpad_size = (
                 old_dim_full_chunk_size * num_chunks
-                - current_logical_shape[old_shard_dim]  # type: ignore[possibly-undefined]
+                - current_logical_shape[old_shard_dim]
             )
-            local_tensor = unpad_tensor(local_tensor, old_shard_dim, old_dim_unpad_size)  # type: ignore[possibly-undefined]
+            local_tensor = unpad_tensor(local_tensor, old_shard_dim, old_dim_unpad_size)
 
         if new_dim_padding:
             local_shard_size_on_new_dim = Shard.local_shard_size_and_offset(
                 new_dim_logical_size, num_chunks, local_rank
             )[0]
-            new_dim_unpad_size = new_dim_full_chunk_size - local_shard_size_on_new_dim  # type: ignore[possibly-undefined]
-            local_tensor = unpad_tensor(local_tensor, new_shard_dim, new_dim_unpad_size)  # type: ignore[possibly-undefined]
+            new_dim_unpad_size = new_dim_full_chunk_size - local_shard_size_on_new_dim
+            local_tensor = unpad_tensor(local_tensor, new_shard_dim, new_dim_unpad_size)
 
         return local_tensor
 

@@ -147,7 +147,7 @@ def print_func(ctx, format_str: str, *args: object, **kwargs: object):
     return handle_effects(
         ctx.mode._allow_token_discovery,
         ctx.mode._tokens,
-        print,  # type: ignore[arg-type]
+        print,
         (format_str, *args),
-        kwargs,  # type: ignore[arg-type]
+        kwargs,
     )

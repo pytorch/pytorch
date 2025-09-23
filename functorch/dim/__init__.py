@@ -527,7 +527,7 @@ class _Tensor:
         if (
             func is torch.Tensor.split
             or func is torch._VF.split  # type: ignore[attr-defined]
-            or func is torch._VF.split_with_sizes  # type: ignore[attr-defined]
+            or func is torch._VF.split_with_sizes
             or func is torch.split
         ):
             return split(*args, **kwargs)
@@ -755,8 +755,8 @@ class _Tensor:
 
         if lhs_list and rhs_list:
             # Type narrowing: we know dims and indices are sequences here
-            dims_seq = dims  # type: ignore[assignment]
-            indices_seq = indices  # type: ignore[assignment]
+            dims_seq = dims
+            indices_seq = indices
             if len(dims_seq) != len(indices_seq):  # type: ignore[arg-type]
                 raise TypeError(
                     f"dims ({len(dims_seq)}) and indices ({len(indices_seq)}) must have the same length"  # type: ignore[arg-type]

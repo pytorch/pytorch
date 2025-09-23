@@ -21,7 +21,7 @@ try:
     HAS_TABULATE = True
 except ModuleNotFoundError:
     HAS_TABULATE = False
-    tabulate = None  # type: ignore[assignment]
+    tabulate = None
     print("tabulate is not installed, please pip install tabulate to use this utility")
 
 if HAS_TABULATE:

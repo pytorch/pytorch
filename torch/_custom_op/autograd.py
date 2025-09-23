@@ -70,7 +70,7 @@ def mark_non_differentiable(ctx, output, output_differentiability):
         if not isinstance(output, tuple):
             tuple_output = (output,)
         else:
-            tuple_output = output  # type: ignore[assignment]
+            tuple_output = output
         if len(output_differentiability) != len(tuple_output):
             raise AssertionError(
                 f"output_differentiability length {len(output_differentiability)} "

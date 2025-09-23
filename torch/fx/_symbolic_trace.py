@@ -15,7 +15,7 @@ from typing import Any, get_args, NamedTuple, overload, ParamSpec, TypeAlias, Ty
 
 import torch
 import torch.utils._pytree as pytree
-from torch._C import ScriptObject  # type: ignore[attr-defined]
+from torch._C import ScriptObject
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_opaque_reference_type, is_opaque_type
 
@@ -168,10 +168,10 @@ def _patch_function(fn: FunctionType, nargs: int) -> FunctionType:
             co.co_varnames,
             co.co_filename,
             co.co_name,
-            co.co_qualname,  # type: ignore[attr-defined]
+            co.co_qualname,
             co.co_firstlineno,
             co.co_linetable,
-            co.co_exceptiontable,  # type: ignore[attr-defined]
+            co.co_exceptiontable,
             co.co_freevars,
             co.co_cellvars,
         )
@@ -740,7 +740,7 @@ class Tracer(TracerBase):
             # In the case that we have pytree-flattened inputs in
             # `concrete_args`, generate a flattening wrapper around the
             # original root function and return that.
-            self.graph._codegen = _PyTreeCodeGen(  # type: ignore[has-type]
+            self.graph._codegen = _PyTreeCodeGen(
                 _PyTreeInfo(orig_args[:total_args], in_spec, None)
             )
 
@@ -752,7 +752,7 @@ class Tracer(TracerBase):
                 tree_args = pytree.tree_unflatten(list(args), in_spec)
                 tree_out = root_fn(*tree_args)
                 out_args, out_spec = pytree.tree_flatten(tree_out)
-                if not isinstance(self.graph._codegen, _PyTreeCodeGen):  # type: ignore[has-type]
+                if not isinstance(self.graph._codegen, _PyTreeCodeGen):
                     raise AssertionError(
                         f"Expected _codegen to be _PyTreeCodeGen, got "
                         f"{type(self.graph._codegen)}"
@@ -881,7 +881,7 @@ class Tracer(TracerBase):
                     return _orig_module_call(mod, *args, **kwargs)
 
                 _autowrap_check(
-                    patcher,  # type: ignore[has-type]
+                    patcher,
                     getattr(getattr(mod, "forward", mod), "__globals__", {}),
                     self._autowrap_function_ids,
                 )
@@ -1007,7 +1007,7 @@ class Tracer(TracerBase):
             default: tuple[Any, ...] = ()
         else:
             param = sig.parameters[name]
-            default = (  # type: ignore[assignment]
+            default = (
                 () if param.default is inspect.Parameter.empty else (param.default,)
             )
         return self.create_proxy(

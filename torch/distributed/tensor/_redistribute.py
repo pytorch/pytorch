@@ -223,7 +223,7 @@ def _update_shard_order_and_placements(
         mesh_dims = (transform_info.mesh_dim,)
 
     if isinstance(src_placement, Shard | _StridedShard):
-        src_dim = src_placement.dim  # type: ignore[attr-defined]
+        src_dim = src_placement.dim
         removed_dim = set()
         for _ in mesh_dims:
             if len(shard_order_dict[src_dim]) == 0:
@@ -245,7 +245,7 @@ def _update_shard_order_and_placements(
                 f"shard_order={shard_order_dict}"
             )
     if isinstance(dst_placement, Shard | _StridedShard):
-        dst_dim = dst_placement.dim  # type: ignore[attr-defined]
+        dst_dim = dst_placement.dim
         if dst_dim not in shard_order_dict:
             shard_order_dict[dst_dim] = []
         for mesh_dim in mesh_dims:
@@ -1554,7 +1554,7 @@ def redistribute_local_tensor(
     debug_mode = get_active_debug_mode()
 
     redistribute_context = (
-        debug_mode.record_redistribute_calls(  # type: ignore[union-attr]
+        debug_mode.record_redistribute_calls(
             local_tensor,
             current_spec.placements,
             target_spec.placements,
@@ -1844,7 +1844,7 @@ class _DtypeConfig(TypedDict):
 
 class Redistribute(torch.autograd.Function):
     @staticmethod
-    def forward(  # type: ignore[override]
+    def forward(
         # pyre-fixme[2]: Parameter must be annotated.
         ctx,
         input: "dtensor.DTensor",
@@ -1948,7 +1948,7 @@ class NestedRedistribute(torch.autograd.Function):
     """
 
     @staticmethod
-    def forward(  # type: ignore[override]
+    def forward(
         # pyre-fixme[2]: Parameter must be annotated.
         ctx,
         grad_output: "dtensor.DTensor",

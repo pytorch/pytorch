@@ -116,7 +116,7 @@ def inner(mode, *args, **kwargs):
     obj, method, *_rest_args = args
     if isinstance(obj, torch.ScriptObject):
         ns, class_name = _ns_and_class_name(
-            obj._type().qualified_name()  # type: ignore[attr-defined]
+            obj._type().qualified_name()
         )
         log.warning(
             "Tracing torchbind method %s.%s with real ScriptObject. This may"

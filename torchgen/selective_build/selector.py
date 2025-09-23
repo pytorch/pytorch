@@ -159,8 +159,8 @@ class SelectiveBuilder:
             operators,
             kernel_metadata,
             et_kernel_metadata,
-            custom_classes,  # type: ignore[arg-type]
-            build_features,  # type: ignore[arg-type]
+            custom_classes,
+            build_features,
             include_all_non_op_selectives,
         )
 

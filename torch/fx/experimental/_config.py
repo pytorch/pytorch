@@ -103,7 +103,7 @@ backed_size_oblivious = False
 skip_dtype_check_in_meta_registrations = False
 
 # Experimental: If True, graph module will register fx metadata during recompile()
-enrich_profiler_metadata: bool = Config(  # type: ignore[var-annotated]
+enrich_profiler_metadata: bool = Config(
     default=False,
     env_name_default="TORCH_ENRICH_RPOFILER_STACK_TRACE",
 )

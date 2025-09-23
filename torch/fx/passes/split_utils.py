@@ -269,7 +269,7 @@ def split_by_tags(
             return comp.input_placeholders[comp.orig_inputs.index(x)]
 
         n = comp.graph.node_copy(node, remap_func)
-        n.tag = node.tag  # type: ignore[attr-defined]
+        n.tag = node.tag
         node_remapping[node] = n
         node_to_component[n] = comp
 

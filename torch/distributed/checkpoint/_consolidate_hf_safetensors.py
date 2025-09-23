@@ -291,7 +291,7 @@ def _process_output_file(
                     fqn_custom_metadata = dcp_metadata[safetensors_file][tensor_fqn]  # type: ignore[index]
                     offsets_of_tensor_being_read = fqn_custom_metadata[
                         SAVED_OFFSETS_KEY
-                    ]  # type: ignore[index]
+                    ]
 
                     # Write this tensor shard to the appropriate position in the output file
                     _write_sub_tensor_to_file_optimized(

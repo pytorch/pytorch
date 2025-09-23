@@ -39,14 +39,14 @@ def start(mode: ProfilerMode = "interval", wait_until_completed: bool = False) -
        https://developer.apple.com/documentation/os/logging/recording_performance_data
     """
     mode_normalized = mode.lower().replace(" ", "")
-    torch._C._mps_profilerStartTrace(  # type: ignore[attr-defined]
+    torch._C._mps_profilerStartTrace(
         mode_normalized, wait_until_completed
     )
 
 
 def stop() -> None:
     r"""Stops generating OS Signpost tracing from MPS backend."""
-    torch._C._mps_profilerStopTrace()  # type: ignore[attr-defined]
+    torch._C._mps_profilerStopTrace()
 
 
 @contextlib.contextmanager
@@ -80,21 +80,21 @@ def is_metal_capture_enabled() -> bool:
     """Checks if `metal_capture` context manager is usable
     To enable metal capture, set MTL_CAPTURE_ENABLED envvar
     """
-    return torch._C._mps_isCaptureEnabled()  # type: ignore[attr-defined, no-any-return]
+    return torch._C._mps_isCaptureEnabled()
 
 
 def is_capturing_metal() -> bool:
     """Checks if metal capture is in progress"""
-    return torch._C._mps_isCapturing()  # type: ignore[attr-defined, no-any-return]
+    return torch._C._mps_isCapturing()
 
 
 @contextlib.contextmanager
 def metal_capture(fname: str) -> Iterator[None]:
     """Context manager that enables capturing of Metal calls into gputrace"""
     try:
-        torch._C._mps_startCapture(fname)  # type: ignore[attr-defined]
+        torch._C._mps_startCapture(fname)
         yield
         # Drain all the work that were enqueued during the context call
         torch.mps.synchronize()
     finally:
-        torch._C._mps_stopCapture()  # type: ignore[attr-defined]
+        torch._C._mps_stopCapture()

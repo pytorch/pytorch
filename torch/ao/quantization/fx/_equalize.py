@@ -373,7 +373,7 @@ def get_op_node_and_weight_eq_obs(
                 "Expected 'equalization_node_name_to_qconfig' attribute in observed graph module"
             )
         equalization_node_name_to_qconfig: dict[str, Any] = (
-            maybe_equalization_node_name_to_config  # type: ignore[assignment]
+            maybe_equalization_node_name_to_config
         )
         if equalization_node_name_to_qconfig.get(op_node.name) is None:
             raise AssertionError(

@@ -22,7 +22,7 @@ def use_tangent(node: Node) -> bool:
     """
 
     return any(
-        is_tangent_node(arg)  # type: ignore[operator]
+        is_tangent_node(arg)
         for arg in get_args_of_node_type(node)
     )
 

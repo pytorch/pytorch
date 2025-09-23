@@ -51,7 +51,7 @@ class LSTM(torch.ao.nn.quantizable.LSTM):
 
     @classmethod
     def from_observed(cls: type["LSTM"], other: torch.ao.nn.quantizable.LSTM) -> "LSTM":
-        if not isinstance(other, cls._FLOAT_MODULE):  # type: ignore[has-type]
+        if not isinstance(other, cls._FLOAT_MODULE):
             raise AssertionError(
                 f"Expected module type {cls._FLOAT_MODULE}, got {type(other)}"
             )

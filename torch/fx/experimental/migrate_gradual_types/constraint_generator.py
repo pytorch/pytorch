@@ -622,7 +622,7 @@ def view_inference_rule(
             num_constraints.append(BinConstraintD(t, Dyn, op_neq))
             t2_type.append(t)  # type: ignore[arg-type]
 
-    t2_type = TensorType(t2_type)  # type: ignore[assignment]
+    t2_type = TensorType(t2_type)
 
     c1 = BinConstraintT(my_view, t2_type, op_eq)
     c2 = CanReshape(src_var, t2_type)  # pyrefly: ignore[bad-argument-type]
@@ -787,7 +787,7 @@ def getitem_inference_rule(
     # tensor output case
     elif isinstance(n.args[1], tuple):
         # create and store the new tensor variable
-        get_item_output, counter = gen_tvar(counter)  # type: ignore[arg-type,assignment]
+        get_item_output, counter = gen_tvar(counter)
         symbols[n] = get_item_output
 
         # retrieve arg variables
@@ -1114,7 +1114,7 @@ def full_inference_rule(
             arg if isinstance(arg, int) else symbols[arg]  # pyrefly: ignore[bad-index]
         )
         res.append(dim)
-    c = BinConstraintT(full, TensorType(list(res)), op_eq)  # type: ignore[arg-type]
+    c = BinConstraintT(full, TensorType(list(res)), op_eq)
     return [c], counter
 
 
@@ -1220,7 +1220,7 @@ def broadcasting_inference_rule(
             e1 = symbols[n.args[0]]
             return [BinConstraintT(my_output, e1, op_eq)], counter
         elif isinstance(symbols[n.args[0]], DVar):
-            my_output, counter = gen_dvar(counter)  # type: ignore[arg-type,assignment]
+            my_output, counter = gen_dvar(counter)
             symbols[n] = my_output
             e1 = symbols[n.args[0]]
 
@@ -1242,7 +1242,7 @@ def broadcasting_inference_rule(
             e2 = symbols[n.args[1]]
             return [BinConstraintT(my_output, e2, op_eq)], counter
         elif isinstance(symbols[n.args[1]], DVar):
-            my_output, counter = gen_dvar(counter)  # type: ignore[arg-type,assignment]
+            my_output, counter = gen_dvar(counter)
             symbols[n] = my_output
             e2 = symbols[n.args[1]]
 
@@ -1557,7 +1557,7 @@ def reshape_inference_rule(
     src_var = symbols[n.args[0]]
     t2 = n.args[1]
     t2_type = TensorType([Dyn if elem == -1 else elem for elem in t2])  # type: ignore[union-attr]
-    c1 = BinConstraintT(my_reshape, t2_type, op_eq)  # type: ignore[union-attr]
+    c1 = BinConstraintT(my_reshape, t2_type, op_eq)
     c2 = CanReshape(src_var, t2_type)  # pyrefly: ignore[bad-argument-type]
 
     return [c1, c2], counter

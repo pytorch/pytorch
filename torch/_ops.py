@@ -208,7 +208,7 @@ class OperatorBase:
 
 
 # Equivalent to computeDispatchTableEntryWithDebug
-def resolve_key(op: OperatorBase, k: DispatchKey):  # type: ignore[valid-type]
+def resolve_key(op: OperatorBase, k: DispatchKey):
     # 1. (Direct) operator registration
     if op.has_kernel_for_dispatch_key(k):
         return k
@@ -264,12 +264,12 @@ def resolve_key(op: OperatorBase, k: DispatchKey):  # type: ignore[valid-type]
 _higher_order_ops: dict[str, "HigherOrderOperator"] = {}
 
 _HIGHER_ORDER_OP_DEFAULT_FALLTHROUGH_DISPATCH_KEYS = [
-    DispatchKey.PythonDispatcher,  # type: ignore[attr-defined]
-    DispatchKey.PythonTLSSnapshot,  # type: ignore[attr-defined]
+    DispatchKey.PythonDispatcher,
+    DispatchKey.PythonTLSSnapshot,
     DispatchKey.ADInplaceOrView,
     DispatchKey.BackendSelect,
-    DispatchKey.AutocastCPU,  # type: ignore[attr-defined]
-    DispatchKey.AutocastCUDA,  # type: ignore[attr-defined]
+    DispatchKey.AutocastCPU,
+    DispatchKey.AutocastCUDA,
     DispatchKey.AutocastXPU,  # type: ignore[attr-defined]
 ]
 
@@ -329,7 +329,7 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
         def maybe_run_autograd(*args: _P.args, **kwargs: _P.kwargs) -> _T:
             if not torch.is_grad_enabled() or pytree.tree_all_only(
                 torch.Tensor,
-                lambda t: not t.requires_grad,  # type: ignore[union-attr]
+                lambda t: not t.requires_grad,
                 (*args, kwargs),
             ):
                 with torch._C._AutoDispatchBelowAutograd():
@@ -875,7 +875,7 @@ class OpOverload(OperatorBase, Generic[_P, _T]):
     def redispatch(
         self, /, keyset: torch._C.DispatchKeySet, *args: _P.args, **kwargs: _P.kwargs
     ) -> _T:
-        return self._handle.redispatch_boxed(keyset, *args, **kwargs)  # type: ignore[return-value]
+        return self._handle.redispatch_boxed(keyset, *args, **kwargs)
 
     def __hash__(self):
         return hash(self._op)

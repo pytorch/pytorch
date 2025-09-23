@@ -52,7 +52,7 @@ class ActivationWrapper(torch.nn.Module, ABC):
 
     def __getitem__(self, key: int) -> Any:
         """Forward indexing calls in case the module is a nn.Sequential."""
-        return self._checkpoint_wrapped_module.__getitem__(key)  # type: ignore[operator]
+        return self._checkpoint_wrapped_module.__getitem__(key)
 
     @copy_method_params(torch.nn.Module.named_parameters)
     def named_parameters(
@@ -305,7 +305,7 @@ def apply_activation_checkpointing(
 
     _recursive_wrap(
         module=model,
-        auto_wrap_policy=policy,  # type: ignore[arg-type]
+        auto_wrap_policy=policy,
         wrapper_cls=checkpoint_wrapper_fn,
         ignored_modules=set(),
         ignored_params=set(),

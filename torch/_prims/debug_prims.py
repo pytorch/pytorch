@@ -59,5 +59,5 @@ def register_debug_prims() -> None:
             # Unlike the other properties, we will do coercions for dtype
             # mismatch
             if r.dtype != dtype:
-                r = clone_input(r, dtype=dtype)  # type: ignore[no-untyped-call]
+                r = clone_input(r, dtype=dtype)
             return r

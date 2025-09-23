@@ -408,7 +408,7 @@ def annotate_fn(
             with annotate(annotation_dict):
                 return func(*args, **kwargs)
 
-        return wrapper  # type: ignore[return-value]
+        return wrapper
 
     return decorator
 

@@ -5,7 +5,7 @@ import pickle
 from .importer import Importer
 
 
-class PackageUnpickler(pickle._Unpickler):  # type: ignore[name-defined]
+class PackageUnpickler(pickle._Unpickler):
     """Package-aware unpickler.
 
     This behaves the same as a normal unpickler, except it uses `importer` to

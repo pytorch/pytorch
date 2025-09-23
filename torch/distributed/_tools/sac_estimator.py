@@ -27,8 +27,8 @@ __all__ = ["SACEstimator", "SACStats", "MSPS", "SACTradeOffStats", "SACGreedyOrd
 aten = torch.ops.aten
 
 _ADDITIONAL_IGNORED_OPS = {
-    aten.lift_fresh.default,  # type: ignore[attr-defined]
-    torch.ops.profiler._record_function_exit._RecordFunction,  # type: ignore[attr-defined]
+    aten.lift_fresh.default,
+    torch.ops.profiler._record_function_exit._RecordFunction,
     aten.clone.default,  # type: ignore[attr-defined] # seems needed for torch.compile
 }
 OPS_TO_ALWAYS_SKIP = SAC_IGNORED_OPS | _ADDITIONAL_IGNORED_OPS
@@ -552,7 +552,7 @@ class SACEstimator(TorchDispatchMode):
         filename: str = "ac_tradeoff",
     ) -> SACTradeOffStats:
         try:
-            import numpy as np  # type: ignore[import-not-found]
+            import numpy as np
             import pwlf  # type: ignore[import-untyped, import-not-found]
         except ImportError as err:
             raise ImportError("Please install pwlf and numpy package.") from err
@@ -623,8 +623,8 @@ class SACEstimator(TorchDispatchMode):
             pwlf_: pwlf.PiecewiseLinFit, x: list[float], y: list[float], filename: str
         ) -> None:
             try:
-                import matplotlib.pyplot as plt  # type: ignore[import-not-found]
-                import numpy as np  # type: ignore[import-not-found]
+                import matplotlib.pyplot as plt
+                import numpy as np
             except ImportError as err:
                 raise ImportError(
                     "Install matplotlib and numpy using pip: pip install matplotlib numpy"
@@ -666,8 +666,8 @@ class SACEstimator(TorchDispatchMode):
         return SACTradeOffStats(
             n_segments=n_segments,
             slopes=slopes,
-            intercepts=intercepts,  # type: ignore[arg-type]
-            fit_breaks=fit_breaks,  # type: ignore[arg-type]
+            intercepts=intercepts,
+            fit_breaks=fit_breaks,
             tradeoff_curve=tradeoff_curve,
             sac_memory=sac_memory,
             sac_runtime=sac_runtime,
@@ -946,7 +946,7 @@ class SACEstimator(TorchDispatchMode):
             )
         return self
 
-    def __enter__(self) -> Self:  # type: ignore[no-untyped-def]
+    def __enter__(self) -> Self:
         fake_mode = active_fake_mode()
         if not isinstance(fake_mode, FakeTensorMode):
             raise AssertionError("SAC Estimator should be called in FakeTensorMode")

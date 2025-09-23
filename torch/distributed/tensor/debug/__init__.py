@@ -17,7 +17,7 @@ def _get_python_sharding_prop_cache_info():
     from torch.distributed.tensor._api import DTensor
 
     return (
-        DTensor._op_dispatcher.sharding_propagator.propagate_op_sharding.cache_info()  # type:ignore[attr-defined]
+        DTensor._op_dispatcher.sharding_propagator.propagate_op_sharding.cache_info()
     )
 
 
@@ -36,7 +36,7 @@ def _clear_python_sharding_prop_cache():
     from torch.distributed.tensor._api import DTensor
 
     return (
-        DTensor._op_dispatcher.sharding_propagator.propagate_op_sharding.cache_clear()  # type:ignore[attr-defined]
+        DTensor._op_dispatcher.sharding_propagator.propagate_op_sharding.cache_clear()
     )
 
 

@@ -452,7 +452,7 @@ def _swap_modules(
 
     gm = ep.module()
     gm.validate_inputs = False  # type: ignore[assignment]
-    gm.graph.eliminate_dead_code()  # type: ignore[operator, union-attr]
+    gm.graph.eliminate_dead_code()
     if not isinstance(gm, torch.fx.GraphModule):
         raise AssertionError(
             f"Expected gm to be a torch.fx.GraphModule, but got {type(gm)}"

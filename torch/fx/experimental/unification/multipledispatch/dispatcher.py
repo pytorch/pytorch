@@ -180,7 +180,7 @@ class Dispatcher:
         """
 
         def _df(func: Callable[..., _T]) -> Callable[..., _T]:
-            self.add(types, func, **kwargs)  # type: ignore[call-arg]
+            self.add(types, func, **kwargs)
             return func
 
         return _df

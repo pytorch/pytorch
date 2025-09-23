@@ -813,7 +813,7 @@ def _sparse_csr_segment_reduction_helper(
             )
             new_nnz = new_crow_indices[-1]
             new_col_indices = col_indices.new_zeros(new_nnz)  # type: ignore[call-overload]
-            new_values = torch._segment_reduce(values, reduce, offsets=crow_indices)  # type: ignore[attr-defined]
+            new_values = torch._segment_reduce(values, reduce, offsets=crow_indices)
             new_shape = [mask_input.size(0), 1]
     else:
         if len(dims) != 2:
@@ -1054,7 +1054,7 @@ def _combine_input_and_mask(op, input: MaskedTensor | Tensor, mask, *args) -> Te
             return result, None
 
     return (
-        Combine.apply(input.get_data(), input.get_mask())  # type: ignore[union-attr]
+        Combine.apply(input.get_data(), input.get_mask())
         if is_masked_tensor(input)
         else helper(input, mask)
     )

@@ -223,7 +223,7 @@ class OpSupports:
 def _get_arg_dtype(arg: torch.fx.Node) -> torch.dtype:
     if not isinstance(arg, torch.fx.Node):
         raise AssertionError(f"Expected torch.fx.Node, got {type(arg)}")
-    tensor_meta = arg.meta.get("tensor_meta")  # type: ignore[union-attr]
+    tensor_meta = arg.meta.get("tensor_meta")
     dtype = (
         tensor_meta.dtype
         if isinstance(tensor_meta, TensorMetadata)

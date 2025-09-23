@@ -378,7 +378,7 @@ def _make_prim(
 
     for p in (_prim_packet, _prim):
         p.__doc__ = doc
-        p.return_type = return_type  # type: ignore[attr-defined]
+        p.return_type = return_type
 
         p.schema = schema
         p.prim_impl = _prim_impl
@@ -1585,9 +1585,9 @@ def expand_dims(
     """
     if ndim is not None:
         # TODO: this is only here to support the unsqueeze ref
-        dims = sorted(utils.canonicalize_dims(ndim, dimensions))  # type: ignore[arg-type]
+        dims = sorted(utils.canonicalize_dims(ndim, dimensions))
     else:
-        dims = sorted(utils.canonicalize_dims(a.ndim, dimensions))  # type: ignore[arg-type]
+        dims = sorted(utils.canonicalize_dims(a.ndim, dimensions))
     if len(set(dims)) != len(dims):
         msg = f"Received duplicate dimensions to expand in {str(dimensions)}"
         raise ValueError(msg)
@@ -2609,7 +2609,7 @@ def _full_aten(
         fill_value,
         dtype=dtype,
         device=device,
-        requires_grad=requires_grad,  # type: ignore[arg-type]
+        requires_grad=requires_grad,
     )
 
 
@@ -2656,7 +2656,7 @@ def _full_like_aten(
         fill_value,
         dtype=dtype,
         device=device,
-        requires_grad=requires_grad,  # type: ignore[arg-type]
+        requires_grad=requires_grad,
     )
 
 
@@ -2697,7 +2697,7 @@ def _scalar_tensor_aten(
     ):
         raise TypeError("Complex scalar requires complex tensor dtype.")
     # Note that Mypy thinks torch.scalar can't accept a complex scalar
-    return torch.scalar_tensor(scalar, dtype=dtype, device=device)  # type: ignore[arg-type]
+    return torch.scalar_tensor(scalar, dtype=dtype, device=device)
 
 
 _scalar_tensor_doc = """

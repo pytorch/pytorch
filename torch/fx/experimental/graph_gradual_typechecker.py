@@ -9,7 +9,7 @@ import sympy
 
 import torch
 from torch.fx.experimental.refinement_types import Equality
-from torch.fx.experimental.unification import Var  # type: ignore[attr-defined]
+from torch.fx.experimental.unification import Var
 from torch.fx.node import Node, Target
 from torch.fx.tensor_type import Dyn, is_consistent, is_more_precise, TensorType
 from torch.nn.modules.batchnorm import BatchNorm2d

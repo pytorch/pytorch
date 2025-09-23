@@ -242,7 +242,7 @@ class MetaTracer(torch.fx.Tracer):
                 meta_out = meta_target(*args_metas, **kwargs_metas)
             elif kind == "call_method":
                 meta_target = getattr(args_metas[0], target)  # type: ignore[index]
-                meta_out = meta_target(*args_metas[1:], **kwargs_metas)  # type: ignore[index]
+                meta_out = meta_target(*args_metas[1:], **kwargs_metas)
             elif kind == "call_module":
                 if not hasattr(self, "orig_forward"):
                     raise AssertionError("orig_forward not set for call_module")
@@ -254,7 +254,7 @@ class MetaTracer(torch.fx.Tracer):
                     if mod_type in manual_meta_overrides:
                         meta_out = manual_meta_overrides[mod_type](
                             mod, *args_metas, **kwargs_metas
-                        )  # type: ignore[misc, arg-type]
+                        )
                     else:
                         meta_out = self.orig_forward(*args_metas, **kwargs_metas)
                 finally:

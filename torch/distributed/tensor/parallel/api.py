@@ -11,7 +11,7 @@ from torch.distributed.tensor.parallel.style import ParallelStyle
 __all__ = ["parallelize_module"]
 
 
-def parallelize_module(  # type: ignore[return]
+def parallelize_module(
     module: nn.Module,
     device_mesh: DeviceMesh | None = None,
     parallelize_plan: ParallelStyle | dict[str, ParallelStyle] | None = None,

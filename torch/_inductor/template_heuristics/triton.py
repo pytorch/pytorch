@@ -2602,7 +2602,7 @@ class CUDAPersistentTMATemplateConfigHeuristic(
 )
 class PersistentMMTemplateConfigHeuristic(
     MMTemplateConfigMixin,
-    ROCmConfigHeuristic,  # type: ignore[misc]
+    ROCmConfigHeuristic,
 ):
     """Persistent MM template heuristic (no TMA, standard pointer loads)"""
 

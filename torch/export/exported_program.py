@@ -584,7 +584,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
 
     # TODO(zhxhchen17) Return the new graph_signature directly.
     fake_mode_det = detect_fake_mode(fake_args)
-    fake_mode_ctx = contextlib.nullcontext() if fake_mode_det is None else fake_mode_det  # type: ignore[assignment]
+    fake_mode_ctx = contextlib.nullcontext() if fake_mode_det is None else fake_mode_det
     custom_triton_ops_decomposition_ctx = (
         contextlib.nullcontext
         if decompose_custom_triton_ops

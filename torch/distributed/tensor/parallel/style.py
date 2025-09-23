@@ -586,11 +586,11 @@ class PrepareModuleInput(ParallelStyle):
                     inputs, kwargs, device_mesh
                 ),
                 with_kwargs=True,
-            )  # type: ignore[misc]
+            )
         else:
             module.register_forward_pre_hook(
                 lambda _, inputs: self._prepare_input_fn(inputs, device_mesh)
-            )  # type: ignore[misc, call-arg]
+            )
         return module
 
     def __repr__(self) -> str:
@@ -702,7 +702,7 @@ class PrepareModuleOutput(ParallelStyle):
     def _apply(self, module: nn.Module, device_mesh: DeviceMesh) -> nn.Module:
         module.register_forward_hook(
             lambda _, inputs, outputs: self._prepare_out_fn(outputs, device_mesh)
-        )  # type: ignore[misc, call-arg]
+        )
         return module
 
     def __repr__(self) -> str:

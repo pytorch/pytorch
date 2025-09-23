@@ -526,7 +526,7 @@ class OpDispatcher:
         else:
             if op_call != aten.equal.default:
                 raise AssertionError(op_call)
-            ret = self.wrap(local_results, output_sharding.output_spec)  # type: ignore[possibly-undefined]
+            ret = self.wrap(local_results, output_sharding.output_spec)
             if participating and op_call._schema._is_view_op():
                 return return_and_correct_aliasing(op_call, args, kwargs, ret)
             else:
@@ -555,7 +555,7 @@ class OpDispatcher:
                 local_tensor = cast(torch.Tensor, op_info.local_args[i])
                 if arg_spec != reshard_arg_spec:
                     redistribute_context = (
-                        debug_mode.record_redistribute_calls(  # type: ignore[union-attr]
+                        debug_mode.record_redistribute_calls(
                             i, arg_spec, reshard_arg_spec
                         )
                         if debug_mode is not None
@@ -709,7 +709,7 @@ class OpDispatcher:
                 schema_info=runtime_schema_info,
             )
             if create_schema
-            else None,  # type: ignore[arg-type]
+            else None,
             args_schema,
             tuple(local_args),
             local_kwargs,

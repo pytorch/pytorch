@@ -226,7 +226,7 @@ class BasicEvaluation:
                 if event in kernel_mapping and kernel_mapping[event] is not None:
                     spawned_kernel_index = kernel_mapping[event]
             elif hasattr(event, "start_time_ns"):
-                start_time = event.start_time_ns  # type: ignore[attr-defined]
+                start_time = event.start_time_ns
                 end_time = event.end_time_ns  # type: ignore[attr-defined]
 
             while (

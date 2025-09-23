@@ -925,8 +925,8 @@ def _export_to_torch_ir(
                 else:
                     gm_torch_level, _ = torch._dynamo.export(
                         f,
-                        dynamic_shapes=dynamic_shapes,  # type: ignore[arg-type]
-                        constraints=constraints,  # type: ignore[arg-type]
+                        dynamic_shapes=dynamic_shapes,
+                        constraints=constraints,
                         assume_static_by_default=True,
                         tracing_mode="symbolic",
                         disable_constraint_solver=disable_constraint_solver,
@@ -1158,7 +1158,7 @@ def _rewrite_dynamo_tensor_constants(
                 # Convert it into a constant in the graph signature, and add its
                 # value to the constants table.
                 spec.kind = InputKind.CONSTANT_TENSOR
-                constants[spec.target] = value  # type: ignore[arg-type]
+                constants[spec.target] = value
 
 
 def _move_non_persistent_buffers_to_tensor_constants(
@@ -1179,7 +1179,7 @@ def _move_non_persistent_buffers_to_tensor_constants(
                 raise AssertionError(
                     f"spec.target {spec.target!r} should not already be in constants"
                 )
-            constants[spec.target] = orig_mod.get_buffer(spec.target)  # type: ignore[arg-type]
+            constants[spec.target] = orig_mod.get_buffer(spec.target)
 
 
 def _verify_nn_module_stack(graph_module: torch.fx.GraphModule) -> None:
@@ -1439,12 +1439,12 @@ def _process_export_inputs(
     verify_additional_inputs: Callable[[ExportedProgram], None]
     out_dynamic_shapes: _DynamicShapesSpec | None
     if isinstance(dynamic_shapes, torch.export.AdditionalInputs):
-        verify_additional_inputs = dynamic_shapes.verify  # type: ignore[assignment]
-        out_dynamic_shapes = dynamic_shapes.dynamic_shapes(mod, args, kwargs)  # type: ignore[assignment]
+        verify_additional_inputs = dynamic_shapes.verify
+        out_dynamic_shapes = dynamic_shapes.dynamic_shapes(mod, args, kwargs)
     else:
         verify_additional_inputs = lambda ep: None  # noqa: E731
         if isinstance(dynamic_shapes, torch.export.ShapesCollection):
-            out_dynamic_shapes = dynamic_shapes.dynamic_shapes(mod, args, kwargs)  # type: ignore[assignment]
+            out_dynamic_shapes = dynamic_shapes.dynamic_shapes(mod, args, kwargs)
         else:
             out_dynamic_shapes = dynamic_shapes
 
@@ -1644,7 +1644,7 @@ def _strict_export(
     # TODO: Fix recompile() in  _LazyGraphModule. T207713214
     if isinstance(gm_torch_level.graph._codegen, torch.fx.graph._PyTreeCodeGen):
         out_spec = orig_out_spec = gm_torch_level.graph._codegen.pytree_info.out_spec
-        orig_arg_names = gm_torch_level.graph._codegen.pytree_info.orig_args  # type: ignore[attr-defined]
+        orig_arg_names = gm_torch_level.graph._codegen.pytree_info.orig_args
 
         # Used to get rid of lint type error.
         if out_spec is None:
@@ -1873,7 +1873,7 @@ def _export_to_aten_ir_make_fx(
                             # Query subclass specific attrs
                             attrs_to_proxy = set(dir(instance)) - set(dir(torch.Tensor))
                             tensor_type_to_old_getattribute[subclass_type] = (
-                                subclass_type.__getattribute__,  # type: ignore[attr-defined]
+                                subclass_type.__getattribute__,
                                 attrs_to_proxy,
                             )
 
@@ -1891,7 +1891,7 @@ def _export_to_aten_ir_make_fx(
                     yield
                 finally:
                     for k, (old_getattr, _) in tensor_type_to_old_getattribute.items():
-                        k.__getattribute__ = old_getattr  # type: ignore[method-assign, attr-defined]
+                        k.__getattribute__ = old_getattr
 
             @contextmanager
             def _maybe_restore_grad_state():
@@ -2534,7 +2534,7 @@ def _export(
     # Call the appropriate export function based on the strictness of tracing.
     export_func = _strict_export if strict else _non_strict_export
 
-    export_artifact = export_func(  # type: ignore[operator]
+    export_artifact = export_func(
         mod=mod,
         args=args,
         kwargs=kwargs,

@@ -60,7 +60,7 @@ class FakeClass:
         return FakeObject(self.module, self.name, args[1:])
 
 
-class DumpUnpickler(pickle._Unpickler):  # type: ignore[name-defined]
+class DumpUnpickler(pickle._Unpickler):
     def __init__(
             self,
             file,
@@ -76,7 +76,7 @@ class DumpUnpickler(pickle._Unpickler):  # type: ignore[name-defined]
     def persistent_load(self, pid):
         return FakeObject("pers", "obj", (pid,))
 
-    dispatch = dict(pickle._Unpickler.dispatch)  # type: ignore[attr-defined]
+    dispatch = dict(pickle._Unpickler.dispatch)
 
     # Custom objects in TorchScript are able to return invalid UTF-8 strings
     # from their pickle (__getstate__) functions.  Install a custom loader

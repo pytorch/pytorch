@@ -148,7 +148,7 @@ def aot_compile(
             )
 
     with torch.no_grad():
-        so_path = torch._inductor.aot_compile(gm, args, kwargs, options=options)  # type: ignore[arg-type]
+        so_path = torch._inductor.aot_compile(gm, args, kwargs, options=options)
 
     if not isinstance(so_path, (str, list)):
         raise AssertionError(f"expected str or list, got {type(so_path)}")

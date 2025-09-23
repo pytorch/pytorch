@@ -335,7 +335,7 @@ def get_intel_gpu_driver_version(run_lambda):
     lst = []
     platform = get_platform()
     if platform == "linux":
-        pkgs = {  # type: ignore[var-annotated]
+        pkgs = {
             "dpkg": {
                 "intel-opencl-icd",
                 "libze1",
@@ -736,7 +736,7 @@ def get_env_info():
             cuda_version_str = "N/A"
             hip_compiled_version = torch.version.hip
     else:
-        version_str = debug_mode_str = cuda_available_str = cuda_version_str = xpu_available_str = "N/A"  # type: ignore[assignment]
+        version_str = debug_mode_str = cuda_available_str = cuda_version_str = xpu_available_str = "N/A"
         hip_compiled_version = hip_runtime_version = miopen_runtime_version = "N/A"
 
     sys_version = sys.version.replace("\n", " ")

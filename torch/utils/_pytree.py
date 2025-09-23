@@ -386,7 +386,7 @@ def register_dataclass(
         )
 
     def _flatten_fn_with_keys(obj: Any) -> tuple[list[Any], Context]:
-        flattened, (flat_names, _none_names) = _flatten_fn(obj)  # type: ignore[misc]
+        flattened, (flat_names, _none_names) = _flatten_fn(obj)
         return [
             (GetAttrKey(k), v) for k, v in zip(flat_names, flattened, strict=True)
         ], flat_names
@@ -450,14 +450,14 @@ def register_constant(cls: type[Any]) -> None:
         >>> assert len(values) == 0
 
     """
-    if cls.__eq__ is object.__eq__:  # type: ignore[comparison-overlap]
+    if cls.__eq__ is object.__eq__:
         raise TypeError(
             "register_constant(cls) expects `cls` to have a non-default `__eq__` implementation."
         )
 
     # Class with a custom `__eq__` without `__hash__` won't inherit the default
     # `__hash__` from object; see https://stackoverflow.com/a/1608907.
-    if cls.__hash__ is None:  # type: ignore[comparison-overlap]
+    if cls.__hash__ is None:
         raise TypeError(
             "register_constant(cls) expects `cls` to have a non-default `__hash__` implementation."
         )
@@ -1675,7 +1675,7 @@ def map_only(
     if isinstance(type_or_types_or_pred, (type, tuple, types.UnionType)):
 
         def pred(x: Any) -> bool:
-            return isinstance(x, type_or_types_or_pred)  # type: ignore[arg-type]
+            return isinstance(x, type_or_types_or_pred)
 
     elif callable(type_or_types_or_pred):
         pred = type_or_types_or_pred  # type: ignore[assignment]

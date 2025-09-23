@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Sequence, TYPE_CHECKING  # noqa: UP035
 
-from onnxscript.onnx_opset import (  # type: ignore[attr-defined]
+from onnxscript.onnx_opset import (
     opset20 as op20,
     opset21 as op21,
     opset23 as op23,

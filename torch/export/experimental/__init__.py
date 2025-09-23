@@ -32,7 +32,7 @@ def _copy_graph_module_and_signature(
     new_graph_signature = copy.deepcopy(ep.graph_signature)
 
     # iterate over old/new graph modules
-    for old_gm, new_gm in zip(ep.graph_module.modules(), gm.modules()):  # type: ignore[union-attr]
+    for old_gm, new_gm in zip(ep.graph_module.modules(), gm.modules()):
         old_phs = [node for node in old_gm.graph.nodes if node.op == "placeholder"]
         new_phs = [node for node in new_gm.graph.nodes if node.op == "placeholder"]
         # iterate over placeholders
@@ -381,7 +381,7 @@ class _ExportPackage:
             model_names.append(name)
             options["aot_inductor.model_name_for_generated_files"] = name
             aoti_files = torch._inductor.aot_compile(
-                ep.module(),  # type: ignore[arg-type]
+                ep.module(),
                 ep.example_inputs[0],
                 kwargs=ep.example_inputs[1],
                 options=options,

@@ -41,7 +41,7 @@ def _make_conversion_method(name: str, dtype: torch.dtype):
     def fn(
         self: TensorLikeType, memory_format: torch.memory_format = torch.preserve_format
     ) -> TensorLikeType:
-        return self.to(dtype, memory_format=memory_format)  # type: ignore[call-overload]
+        return self.to(dtype, memory_format=memory_format)
 
     fn.__name__ = name
     return fn
@@ -94,7 +94,7 @@ def complex(real: TensorLikeType, imag: TensorLikeType) -> TensorLikeType:
             f"scalar type {imag.dtype} for second argument"
         ),
     )
-    result_dtype = utils.corresponding_complex_dtype(real.dtype)  # type: ignore[arg-type]
+    result_dtype = utils.corresponding_complex_dtype(real.dtype)
     common_shape = _broadcast_shapes(real.shape, imag.shape)
     result = real.new_empty(
         common_shape,

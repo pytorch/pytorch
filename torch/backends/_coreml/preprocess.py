@@ -113,15 +113,15 @@ def preprocess(script_module: torch._C.ScriptObject, compile_spec: dict[str, tup
         mlmodel = ct.models.MLModel(quant_model_spec)
 
     spec = mlmodel.get_spec()
-    if len(spec.description.output) != len(output_specs):  # type: ignore[attr-defined]
+    if len(spec.description.output) != len(output_specs):
         raise AssertionError(
-            f"Number of outputs in spec ({len(spec.description.output)}) "  # type: ignore[attr-defined]
+            f"Number of outputs in spec ({len(spec.description.output)}) "
             f"does not match output_specs ({len(output_specs)})"
         )
     outputs = []
     for index, output in enumerate(output_specs):
         shape, dtype = output
-        name = spec.description.output[index].name  # type: ignore[attr-defined]
+        name = spec.description.output[index].name
         outputs.append([name, str(dtype), str(shape)])
     mlmodel = ct.models.model.MLModel(spec)
     print(mlmodel)
@@ -131,7 +131,7 @@ def preprocess(script_module: torch._C.ScriptObject, compile_spec: dict[str, tup
         mlmodel.save(mlmodel_export_path)
 
     config = {
-        "spec_ver": str(spec.specificationVersion),  # type: ignore[attr-defined]
+        "spec_ver": str(spec.specificationVersion),
         "backend": backend,
         "allow_low_precision": str(allow_low_precision),
     }
@@ -145,7 +145,7 @@ def preprocess(script_module: torch._C.ScriptObject, compile_spec: dict[str, tup
         "config": config,
         "metadata": metadata,
     }
-    mlmodel = spec.SerializeToString()  # type: ignore[attr-defined]
+    mlmodel = spec.SerializeToString()
 
     return {
         "model": mlmodel,

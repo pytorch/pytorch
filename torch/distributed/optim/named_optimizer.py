@@ -90,7 +90,7 @@ class _NamedOptimizer(optim.Optimizer):
                 "initialize the optimizer, not all parameters of the module.",
                 stacklevel=2,
             )
-            param_to_key = {param: key for key, param in self.named_parameters.items()}  # type: ignore[misc, has-type]
+            param_to_key = {param: key for key, param in self.named_parameters.items()}
             ordered_param_keys = []
             for group in param_groups:
                 for param in group["params"]:
@@ -251,7 +251,7 @@ class _NamedOptimizer(optim.Optimizer):
         for new_group in new_param_groups:
             param_keys = []
             for param_key in new_group["params"]:
-                param_keys.append(self.ordered_param_keys[param_key])  # type: ignore[call-overload]
+                param_keys.append(self.ordered_param_keys[param_key])
             new_group_map[_gen_param_group_key(param_keys)] = new_group
         for group_key, new_group in new_group_map.items():
             # When not all parameters are used in training or receive gradient, aka., not all parameters
@@ -288,7 +288,7 @@ class _NamedOptimizer(optim.Optimizer):
         else:
             param_group["params"] = list(params)
 
-        param_to_key = {param: key for key, param in self.named_parameters.items()}  # type: ignore[misc, has-type]
+        param_to_key = {param: key for key, param in self.named_parameters.items()}
         for param in param_group["params"]:
             if param not in param_to_key:
                 raise ValueError("some parameters are not in the module")

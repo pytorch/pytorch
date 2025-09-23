@@ -46,8 +46,8 @@ def _sympy_subs(expr: sympy.Basic, replacements: dict[sympy.Expr, Any]) -> sympy
         if isinstance(replacement, str):
             return sympy.Symbol(
                 replacement,
-                integer=replaced.is_integer,  # type: ignore[attr-defined]
-                nonnegative=replaced.is_nonnegative,  # type: ignore[attr-defined]
+                integer=replaced.is_integer,
+                nonnegative=replaced.is_nonnegative,
             )
         else:
             return replacement
@@ -150,7 +150,7 @@ def _guarding_hint_or_throw_base(
     if not isinstance(expr, sympy.Basic):
         raise RuntimeError("isinstance(expr, sympy.Basic)", expr, type(expr))
 
-    if any(symbol_is_type(s, SymT.PRECOMPUTED_SIZE) for s in expr.free_symbols):  # type: ignore[attr-defined]
+    if any(symbol_is_type(s, SymT.PRECOMPUTED_SIZE) for s in expr.free_symbols):
         expr = _sympy_subs(expr, precomputed_replacements)
 
     # TODO do we need sympy_subs, or just xreplace
@@ -376,7 +376,7 @@ def _optimization_hint_base(
     if not isinstance(expr, sympy.Expr):
         raise RuntimeError("isinstance(expr, sympy.Expr)", expr)
 
-    if any(symbol_is_type(s, SymT.PRECOMPUTED_SIZE) for s in expr.free_symbols):  # type: ignore[attr-defined]
+    if any(symbol_is_type(s, SymT.PRECOMPUTED_SIZE) for s in expr.free_symbols):
         expr = _sympy_subs(expr, precomputed_replacements)
 
     expr = _sympy_subs(expr, shape_env.backed_var_to_val)

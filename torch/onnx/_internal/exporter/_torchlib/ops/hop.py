@@ -46,7 +46,7 @@ def call_op(
     attributes = [
         attr
         for attr in ir_convenience.convert_attributes(kwargs)
-        if attr.value is not None  # type: ignore[union-attr]
+        if attr.value is not None
     ]
     tracer.nodes.append(
         node := ir.Node(
@@ -109,7 +109,7 @@ def higher_order_scan(
             ir.Value(
                 name=f"{inp.name}_{body_func.name}__subgraph_in",
                 shape=inp.shape,
-                type=ir.TensorType(inp.dtype),  # type: ignore[arg-type]
+                type=ir.TensorType(inp.dtype),
             )
             for inp in scan_inits
         ],
@@ -118,8 +118,8 @@ def higher_order_scan(
                 name=f"{inp.name}_{body_func.name}__subgraph_in",
                 # The iterated element passed to the body subgraph does not have a sequence axis.
                 # It will have a rank one less than the rank of the corresponding scan_input.
-                shape=ir.Shape(inp.shape[1:]),  # type: ignore[index]
-                type=ir.TensorType(inp.dtype),  # type: ignore[arg-type]
+                shape=ir.Shape(inp.shape[1:]),
+                type=ir.TensorType(inp.dtype),
             )
             for inp in scan_inputs
         ],
@@ -198,7 +198,7 @@ def higher_order_while_loop(
                 ir.Value(
                     name=f"{inp.name}_{body_func.name}__subgraph_in",
                     shape=inp.shape,
-                    type=ir.TensorType(inp.dtype),  # type: ignore[arg-type]
+                    type=ir.TensorType(inp.dtype),
                 )
             )
         elif isinstance(inp, int):

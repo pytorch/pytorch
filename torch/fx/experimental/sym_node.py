@@ -496,7 +496,7 @@ class SymNode:
     ) -> SymNode:
         return self.is_non_overlapping_and_dense_indicator(sizes, strides).eq(
             to_node(self, 1)
-        )  # type: ignore[attr-defined]
+        )
 
     def int_(self) -> int:
         return self.guard_int("", 0)  # NB: uses Python backtrace
@@ -1577,7 +1577,7 @@ def _make_node_magic(method: str, func: Callable[..., sympy.Basic]) -> None:
             out,
             self.shape_env,
             pytype,
-            out_hint,  # type: ignore[arg-type]
+            out_hint,
             fx_node=fx_node,
             optimized_summation=optimized_summation,  # see Note [optimized_summation]
         )
@@ -1620,7 +1620,7 @@ def _make_node_magic(method: str, func: Callable[..., sympy.Basic]) -> None:
             pytype = self.pytype
 
         fx_node, _ = self.shape_env._create_fx_call_function(op, (self.fx_node,))
-        return SymNode(out, self.shape_env, pytype, out_hint, fx_node=fx_node)  # type: ignore[arg-type]
+        return SymNode(out, self.shape_env, pytype, out_hint, fx_node=fx_node)
 
     if method in unary_methods:
         setattr(SymNode, f"_{method_attr}", unary_magic_impl)
@@ -2047,7 +2047,7 @@ def _make_user_magic(method: str, user_type: type) -> None:
             setattrs(user_type, f"__r{method_name}__", rbinary_magic_impl)
 
 
-for method in magic_methods:  # type: ignore[assignment]
+for method in magic_methods:
     if method in only_bool_magic_methods:
         _make_user_magic(method, SymBool)
         continue

@@ -61,7 +61,7 @@ class LinearReLU(nnqat.Linear, _FusedModule):
         mod: torch.nn.Module,
         use_precomputed_fake_quant: bool = False,
     ) -> LinearReLU:
-        return super().from_float(mod, use_precomputed_fake_quant)  # type: ignore[no-untyped-call,no-any-return]
+        return super().from_float(mod, use_precomputed_fake_quant)
 
     def to_float(self) -> nni.LinearReLU:
         linear = torch.nn.Linear(
@@ -71,4 +71,4 @@ class LinearReLU(nnqat.Linear, _FusedModule):
         if self.bias is not None:
             linear.bias = torch.nn.Parameter(self.bias.detach())
         relu = torch.nn.ReLU()
-        return torch.ao.nn.intrinsic.LinearReLU(linear, relu)  # type: ignore[no-untyped-call]
+        return torch.ao.nn.intrinsic.LinearReLU(linear, relu)

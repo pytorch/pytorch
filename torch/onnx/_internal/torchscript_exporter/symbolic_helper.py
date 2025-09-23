@@ -366,7 +366,7 @@ def parse_args(
                 fn_name = None
             # pyrefly: ignore [bad-assignment]
             args = [
-                _parse_arg(arg, arg_desc, arg_name, fn_name)  # type: ignore[method-assign]
+                _parse_arg(arg, arg_desc, arg_name, fn_name)
                 for arg, arg_desc, arg_name in zip(args, arg_descriptors, arg_names)
             ]
             # only support _outputs in kwargs
@@ -1314,11 +1314,11 @@ def _unbind_helper(g: jit_utils.GraphContext, self, dim, _outputs):
         from torch.onnx._internal.torchscript_exporter.symbolic_opset9 import unbind
     elif g.opset <= 12:
         from torch.onnx._internal.torchscript_exporter.symbolic_opset11 import (
-            unbind,  # type: ignore[no-redef]
+            unbind,
         )
     else:
         from torch.onnx._internal.torchscript_exporter.symbolic_opset13 import (
-            unbind,  # type: ignore[no-redef]
+            unbind,
         )
     return unbind(g, self, dim, _outputs)
 
@@ -1329,7 +1329,7 @@ def _scatter_helper(g: jit_utils.GraphContext, self, dim, index, src):
     else:
         # for mypy, scatter was imported two lines above
         from torch.onnx._internal.torchscript_exporter.symbolic_opset11 import (
-            scatter,  # type: ignore[no-redef]
+            scatter,
         )
     return scatter(g, self, dim, index, src)
 
@@ -1438,7 +1438,7 @@ def _arange_helper(g: jit_utils.GraphContext, *args):
         from torch.onnx._internal.torchscript_exporter.symbolic_opset9 import arange
     else:
         from torch.onnx._internal.torchscript_exporter.symbolic_opset11 import (
-            arange,  # type: ignore[no-redef]
+            arange,
         )
     return arange(g, *args)
 
@@ -1463,7 +1463,7 @@ def _index_fill_reshape_helper(g: jit_utils.GraphContext, self, dim, index):
     else:
         # for mypy, scatter was imported two lines above
         from torch.onnx._internal.torchscript_exporter.symbolic_opset11 import (
-            scatter,  # type: ignore[no-redef]
+            scatter,
         )
 
     if self.type().dim() is None:

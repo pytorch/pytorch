@@ -1161,7 +1161,7 @@ class _LocalContiguous(torch.autograd.Function):
     """Autograd function for LocalTensor.contiguous() that preserves gradient flow."""
 
     @staticmethod
-    def forward(  # type: ignore[override]
+    def forward(
         ctx: torch.autograd.function.FunctionCtx,
         input: LocalTensor,
         memory_format: torch.memory_format,
@@ -1623,7 +1623,7 @@ class _LocalDeviceMesh:
             # The output contains coordinates for each of the ranks with respect to
             # their meshes formed from root mesh and selecting the same dimensions
             # as the current mesh.
-            return out  # type: ignore[return-value]
+            return out
 
     @staticmethod
     def _is_current_rank_part_of_mesh(self: DeviceMesh) -> bool:
@@ -2042,7 +2042,7 @@ class _LocalPhiloxState:
 
     @property
     def state(self):
-        return LocalTensor(self._per_rank_states)  # type: ignore[name-defined]
+        return LocalTensor(self._per_rank_states)
 
     @property
     def offset(self) -> int | SymInt:

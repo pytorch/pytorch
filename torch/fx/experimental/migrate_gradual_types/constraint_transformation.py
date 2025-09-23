@@ -264,7 +264,7 @@ def transform_get_item_tensor(
     # where "slice" does not contribute to the rank and "None" does
     none_c = constraint.index_tuple.count(None)
     # list invariance: [None] * n types as list[None], but elements are reassigned to int/DVar
-    resulting_tensor_dims: list[int | DVar | None] = [None] * (none_c + len(dims))  # type: ignore[assignment]
+    resulting_tensor_dims: list[int | DVar | None] = [None] * (none_c + len(dims))
 
     dim_index = 0
     for i in range(len(constraint.index_tuple)):
@@ -1096,7 +1096,7 @@ def broadcast_dim(
         # then the inputs are the same length so they all have dimensions at "index"
         return Conj(
             [
-                BinConstraintD(tensor_input1[index], 1, op_eq),  # type: ignore[arg-type]
+                BinConstraintD(tensor_input1[index], 1, op_eq),
                 BinConstraintD(res1[index], res2[index], op_eq),
                 BinConstraintD(res2[index], tensor_input2[index], op_eq),
             ]

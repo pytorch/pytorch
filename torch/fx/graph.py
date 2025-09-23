@@ -793,8 +793,8 @@ class CodeGen:
                                 "dtensorspec_format_shard_order_str is None for DTensor"
                             )
                         dtensor_meta = dtensorspec_format_shard_order_str(
-                            meta_val._spec.placements,  # type: ignore[attr-defined]
-                            meta_val._spec.shard_order,  # type: ignore[attr-defined]
+                            meta_val._spec.placements,
+                            meta_val._spec.shard_order,
                         )
                         cls = meta_val.__class__.__name__
                         maybe_type_annotation = (

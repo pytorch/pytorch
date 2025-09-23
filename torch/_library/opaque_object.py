@@ -221,7 +221,7 @@ def register_opaque_type(
 
     if typ == "value":
         # Enums use identity-based equality (singletons), which is fine for guarding.
-        if not issubclass(cls, Enum) and cls.__eq__ is object.__eq__:  # type: ignore[comparison-overlap]
+        if not issubclass(cls, Enum) and cls.__eq__ is object.__eq__:
             raise TypeError(
                 f"Value-type opaque object of type {cls} is "
                 "expected to have a non-default `__eq__` "
@@ -231,7 +231,7 @@ def register_opaque_type(
 
         # Class with a custom `__eq__` without `__hash__` won't inherit the default
         # `__hash__` from object; see https://stackoverflow.com/a/1608907.
-        if cls.__hash__ is None:  # type: ignore[comparison-overlap]
+        if cls.__hash__ is None:
             raise TypeError(
                 f"Value-type opaque object of type {cls} is "
                 "expected to have a non-default `__hash__` "

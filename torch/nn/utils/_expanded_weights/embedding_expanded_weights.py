@@ -54,7 +54,7 @@ class EmbeddingPerSampleGrad(torch.autograd.Function):
                 .expand(*input.shape, embedding_dim)
                 .reshape(batch_size, -1, embedding_dim)
             )
-            grad_sample = torch.zeros(  # type: ignore[attr-defined]
+            grad_sample = torch.zeros(
                 batch_size, *weight.shape, device=weight.device, dtype=grad_output.dtype
             )
             return grad_sample.scatter_add_(

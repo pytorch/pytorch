@@ -9,7 +9,7 @@ import ast
 import copy
 import os
 import sys
-from typing import Any  # type: ignore[attr-defined]
+from typing import Any
 
 from torch.distributed.flight_recorder.components.fr_logger import FlightRecorderLogger
 from torch.distributed.flight_recorder.components.types import (
@@ -56,7 +56,7 @@ except ModuleNotFoundError:
     logger.warning("tabulate is not installed. Proceeding without it.")
 
     # Define a no-op tabulate function
-    def tabulate(data: Any, headers: Any = None) -> Any:  # type: ignore[misc]
+    def tabulate(data: Any, headers: Any = None) -> Any:
         return data
 
 
@@ -242,8 +242,8 @@ def build_collectives(
                 curr = candidate_ranks.pop()
                 done_ranks.add(curr)
                 grp = (
-                    find_coalesced_group(pg_name, all_entries[curr], _pg_guids, curr)  # type: ignore[index]
-                    if curr in all_entries  # type: ignore[comparison-overlap]
+                    find_coalesced_group(pg_name, all_entries[curr], _pg_guids, curr)
+                    if curr in all_entries
                     else []
                 )
                 all_coalesced_entries[curr] = grp

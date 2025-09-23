@@ -253,7 +253,7 @@ def _symeig_backward(D_grad, U_grad, A, D, U, largest):
 
 class LOBPCGAutogradFunction(torch.autograd.Function):
     @staticmethod
-    def forward(  # type: ignore[override]
+    def forward(
         ctx,
         A: Tensor,
         k: int | None = None,

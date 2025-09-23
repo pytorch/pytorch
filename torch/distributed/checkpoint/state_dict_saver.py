@@ -83,7 +83,7 @@ def save_state_dict(
         )
 
 
-@_dcp_method_logger(log_exceptions=True)  # type: ignore[arg-type]
+@_dcp_method_logger(log_exceptions=True)
 @_api_bc_check
 def save(
     state_dict: STATE_DICT_TYPE,

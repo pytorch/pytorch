@@ -48,7 +48,7 @@ try:
         runtime as _cuda_runtime,
     )
 except ImportError:
-    _cuda_runtime = None  # type: ignore[assignment]
+    _cuda_runtime = None
 
 
 logger = getLogger(__name__)
@@ -164,7 +164,7 @@ _capture_graph: Any = None
 _last_capture_graph_id: int | None = None
 
 
-@contextmanager  # type: ignore[arg-type]
+@contextmanager
 def mark_kernels(annotation: str | dict[str, Any]):
     """Context manager that records node index ranges for later annotation.
 
@@ -408,7 +408,7 @@ def get_stream_for_pg(pg_key: str) -> int:
     return _stream_id_map[pg_key]  # type: ignore[return-value]
 
 
-@contextmanager  # type: ignore[arg-type]
+@contextmanager
 def mark_stream(stream: torch.cuda.Stream, annotation: str | dict[str, Any]):
     """Switch to stream, inject its ID into annotation, and mark kernels.
 

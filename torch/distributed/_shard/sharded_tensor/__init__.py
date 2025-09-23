@@ -238,7 +238,7 @@ def full(
         process_group=process_group,
         init_rrefs=init_rrefs,
     )
-    torch.nn.init.constant_(sharded_tensor, fill_value)  # type: ignore[arg-type]
+    torch.nn.init.constant_(sharded_tensor, fill_value)
     return sharded_tensor
 
 
@@ -294,7 +294,7 @@ def rand(
         process_group=process_group,
         init_rrefs=init_rrefs,
     )
-    torch.nn.init.uniform_(sharded_tensor, 0, 1)  # type: ignore[arg-type]
+    torch.nn.init.uniform_(sharded_tensor, 0, 1)
     return sharded_tensor
 
 
@@ -351,7 +351,7 @@ def randn(
         process_group=process_group,
         init_rrefs=init_rrefs,
     )
-    torch.nn.init.normal_(sharded_tensor, 0, 1)  # type: ignore[arg-type]
+    torch.nn.init.normal_(sharded_tensor, 0, 1)
     return sharded_tensor
 
 

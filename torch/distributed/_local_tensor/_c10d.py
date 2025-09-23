@@ -551,7 +551,7 @@ def _local_allgather_base_(
     return output_tensor, work_so
 
 
-def _local_reduce_scatter_base_(  # type: ignore[no-untyped-def]
+def _local_reduce_scatter_base_(
     output_tensor: torch.Tensor,
     input_tensor: torch.Tensor,
     process_group_so: ScriptObject,

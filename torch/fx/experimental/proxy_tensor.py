@@ -1522,7 +1522,7 @@ class PythonKeyTracer(Tracer):
 
     def unwrap_proxy(self, e: T) -> object:
         if isinstance(e, Tensor):
-            return get_proxy_slot(e, self, e, lambda x: x.proxy)  # type: ignore[attr-defined]
+            return get_proxy_slot(e, self, e, lambda x: x.proxy)
         elif isinstance(e, py_sym_types):
             return get_proxy_slot(e, self, e, lambda e: e.force())
         elif isinstance(e, _AnyScriptObject) or is_opaque_value(e):
@@ -1539,7 +1539,7 @@ class PythonKeyTracer(Tracer):
         name: str | None = None,
         type_expr: Any | None = None,
     ) -> torch.fx.Node:
-        node = super().create_node(kind, target, args, kwargs, name, type_expr)  # type: ignore[arg-type]
+        node = super().create_node(kind, target, args, kwargs, name, type_expr)
 
         if node.op in ["placeholder", "output"] and "stack_trace" in node.meta:
             del node.meta["stack_trace"]
@@ -1734,9 +1734,9 @@ def wrap_key(
             ]
 
         def get_tensor_proxy_slot(t: Tensor) -> Tensor | Proxy:
-            return get_proxy_slot(t, tracer, t, lambda x: x.proxy)  # type: ignore[attr-defined]
+            return get_proxy_slot(t, tracer, t, lambda x: x.proxy)
 
-        out = f(*tensors)  # type:ignore[call-arg]
+        out = f(*tensors)
         out = pytree.tree_map_only(Tensor, get_tensor_proxy_slot, out)
         out = pytree.tree_map_only(
             _AnyScriptObject, lambda t: get_proxy_slot(t, tracer, t, lambda x: x), out
@@ -2926,7 +2926,7 @@ class _MakefxTracer:
         if self.tracing_mode == "symbolic":
             if self.fake_tensor_mode is None:
                 raise AssertionError("fake_tensor_mode should not be None")
-            t.shape_env = self.fake_tensor_mode.shape_env  # type: ignore[assignment]
+            t.shape_env = self.fake_tensor_mode.shape_env
         return t
 
     def trace(self, f: Callable[..., Any], *args: object) -> fx.GraphModule:

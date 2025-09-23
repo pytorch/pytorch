@@ -1648,9 +1648,9 @@ def _set_pg_timeout(timeout: timedelta, group: ProcessGroup | None = None) -> No
         if is_nccl_available() and isinstance(backend, ProcessGroupNCCL):
             backends.add(backend)  # type: ignore[arg-type]
         elif is_gloo_available() and isinstance(backend, ProcessGroupGloo):
-            backends.add(backend)  # type: ignore[arg-type]
+            backends.add(backend)
         elif _use_torchcomms_enabled() and isinstance(backend, _BackendWrapper):
-            backends.add(backend)  # type: ignore[arg-type]
+            backends.add(backend)
     if len(backends) == 0:
         warnings.warn(
             "Set timeout is now only supported for either nccl or gloo.", stacklevel=2
@@ -3390,7 +3390,7 @@ def _object_to_tensor(obj, device, group):
     with _WaitCounter("pytorch.wait_counter.c10d._object_to_tensor").guard():
         f = io.BytesIO()
         _pickler(f).dump(obj)
-        byte_storage = torch.ByteStorage._from_buffer(f.getvalue())  # type: ignore[attr-defined]
+        byte_storage = torch.ByteStorage._from_buffer(f.getvalue())
         # Do not replace `torch.ByteTensor` or `torch.LongTensor` with torch.tensor and specifying dtype.
         # Otherwise, it will cause 100X slowdown.
         # See: https://github.com/pytorch/pytorch/issues/65696
@@ -3753,7 +3753,7 @@ def send_object_list(
     # Concatenate and send serialized object tensors
     # Note: torch.cat will do an extra memory copy to the current device, if the tensor_list
     # has only one element, we can skip the copy.
-    if len(tensor_list) == 1:  # type: ignore[possibly-undefined]
+    if len(tensor_list) == 1:
         object_tensor = tensor_list[0]
     else:
         object_tensor = torch.cat(tensor_list)
@@ -4141,8 +4141,8 @@ def scatter_object_list(
 
         # Src rank broadcasts the maximum tensor size. This is because all ranks are
         # expected to call into scatter() with equal-sized tensors.
-        max_tensor_size = max(tensor_sizes)  # type: ignore[possibly-undefined]
-        for tensor in tensor_list:  # type: ignore[possibly-undefined]
+        max_tensor_size = max(tensor_sizes)
+        for tensor in tensor_list:
             tensor.resize_(max_tensor_size)
     else:
         max_tensor_size = torch.tensor([0], dtype=torch.long, device=pg_device)
@@ -5564,7 +5564,7 @@ def split_group(
 
     # set the group_desc before the color or no_cloor split
     if hasattr(parent_backend, "comm_split_count") and group_desc is None:
-        group_desc = f"{parent_pg.group_desc}:split:{parent_backend.comm_split_count()}"  # type: ignore[attr-defined]
+        group_desc = f"{parent_pg.group_desc}:split:{parent_backend.comm_split_count()}"
 
     parent_backend_str, _ = _world.pg_map[parent_pg]
     # same type of backend as the parent process group
@@ -5647,7 +5647,7 @@ def split_group(
         return None
 
     global_ranks_in_my_group = [parent_group_to_global_ranks[rank] for rank in my_group]
-    split_pg.bound_device_id = device_id  # type: ignore[union-attr]
+    split_pg.bound_device_id = device_id
 
     if torch.accelerator.is_available():
         split_backend_class = split_pg._get_backend(

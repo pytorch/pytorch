@@ -49,7 +49,7 @@ class LambdaSL(BaseScheduler):
                     f"Expected {len(sparsifier.groups)} lr_lambdas, but got {len(sl_lambda)}"
                 )
             self.sl_lambdas = list(sl_lambda)
-        super().__init__(sparsifier, last_epoch, verbose)  # type: ignore[no-untyped-call]
+        super().__init__(sparsifier, last_epoch, verbose)
 
     def get_sl(self) -> list[float]:
         if not self._get_sl_called_within_step:

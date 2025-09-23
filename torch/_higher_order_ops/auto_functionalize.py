@@ -547,7 +547,7 @@ def do_auto_functionalize(
     with ctx.redispatch_to_next():
         unwrapped_outs = auto_functionalized(
             op,
-            **unwrapped_kwargs,  # type: ignore[arg-type]
+            **unwrapped_kwargs,
         )
 
     # List of the name of args that get mutated (according to the schema)
@@ -722,13 +722,13 @@ def _do_auto_functionalize_v2_for_out_operator(
         normalized_kwargs[f"_{arg_name}_device"] = arg.device
         del normalized_kwargs[arg_name]
 
-    unwrapped_kwargs = ctx.unwrap_tensors(normalized_kwargs)  # type: ignore[arg-type]
+    unwrapped_kwargs = ctx.unwrap_tensors(normalized_kwargs)
     auto_func_kwargs = dict(unwrapped_kwargs, _all_bases=[])
 
     with ctx.redispatch_to_next():
         unwrapped_outs = auto_functionalized_v2(
             op,
-            **auto_func_kwargs,  # type: ignore[arg-type]
+            **auto_func_kwargs,
         )
 
     # For out= ops, the functional HOP returns exactly the out tensors.
@@ -740,7 +740,7 @@ def _do_auto_functionalize_v2_for_out_operator(
         ctx.commit_update(orig_arg)
         ctx.sync(orig_arg)
 
-    return ctx.wrap_tensors(unwrapped_outs)  # type: ignore[arg-type]
+    return ctx.wrap_tensors(unwrapped_outs)
 
 
 def _do_auto_functionalize_v2_for_inplace_operator(
@@ -769,14 +769,14 @@ def _do_auto_functionalize_v2_for_inplace_operator(
     )
     del normalized_kwargs[self_arg_name]
 
-    unwrapped_kwargs = ctx.unwrap_tensors(normalized_kwargs)  # type: ignore[arg-type]
+    unwrapped_kwargs = ctx.unwrap_tensors(normalized_kwargs)
     all_bases_unwrapped = ctx.unwrap_tensors([base])
     auto_func_kwargs = dict(unwrapped_kwargs, _all_bases=all_bases_unwrapped)
 
     with ctx.redispatch_to_next():
         unwrapped_outs = auto_functionalized_v2(
             op,
-            **auto_func_kwargs,  # type: ignore[arg-type]
+            **auto_func_kwargs,
         )
 
     # HOP returns (op_result, mutated_self_base).
@@ -788,7 +788,7 @@ def _do_auto_functionalize_v2_for_inplace_operator(
     ctx.commit_update(base)
     ctx.sync(base)
 
-    return ctx.wrap_tensors(unwrapped_result)  # type: ignore[arg-type]
+    return ctx.wrap_tensors(unwrapped_result)
 
 
 def _do_auto_functionalize_v2_for_generic_mutable_operator(
@@ -851,9 +851,9 @@ def _do_auto_functionalize_v2_for_generic_mutable_operator(
 
     # remove mutated args from the kwargs (its a function of _all_bases now)
     for arg_name in mutable_args_names:
-        del normalized_kwargs[arg_name]  # type: ignore[arg-type]
+        del normalized_kwargs[arg_name]
 
-    unwrapped_kwargs = ctx.unwrap_tensors(normalized_kwargs)  # type: ignore[arg-type]
+    unwrapped_kwargs = ctx.unwrap_tensors(normalized_kwargs)
     if "self" in unwrapped_kwargs or "self_" in unwrapped_kwargs:
         warnings.warn(
             "Using `self` or `self_` as an argument in the definition of custom ops may lead to ambiguous parsing. "
@@ -876,7 +876,7 @@ def _do_auto_functionalize_v2_for_generic_mutable_operator(
     with ctx.redispatch_to_next():
         unwrapped_outs = auto_functionalized_v2(
             op,
-            **auto_func_kwargs,  # type: ignore[arg-type]
+            **auto_func_kwargs,
         )
 
     unwrapped_actual_out: Any | tuple[Any] = (
@@ -942,7 +942,7 @@ def _do_auto_functionalize_v2_for_generic_mutable_operator(
                 f"unsupported type for auto-functionalization: {unwrapped_out}"
             )
 
-    return ctx.wrap_tensors(unwrapped_actual_out)  # type: ignore[arg-type]
+    return ctx.wrap_tensors(unwrapped_actual_out)
 
 
 # auto_functionalize functions
@@ -976,9 +976,9 @@ def auto_functionalized_dense(
     out = _mutable_op(**new_kwargs)
 
     if isinstance(out, tuple):
-        return (*out, *result)  # type: ignore[return-value]
+        return (*out, *result)
     else:
-        return (out, *result)  # type: ignore[return-value]
+        return (out, *result)
 
 
 @auto_functionalized.py_impl(FakeTensorMode)
@@ -1064,12 +1064,12 @@ def auto_functionalized_v2_dense(
     )
 
     if _is_out:
-        return out  # type: ignore[return-value]
+        return out
 
     if isinstance(out, tuple):
-        return (*out, *all_bases_new)  # type: ignore[return-value]
+        return (*out, *all_bases_new)
     else:
-        return (out, *all_bases_new)  # type: ignore[return-value]
+        return (out, *all_bases_new)
 
 
 def _generate_new_op_kwargs_from_bases(

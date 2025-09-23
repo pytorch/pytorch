@@ -12,7 +12,7 @@ try:
 
     _HAS_CUDA_BINDINGS = True
 except ImportError:
-    _cuda_bindings_runtime = None  # type: ignore[assignment]
+    _cuda_bindings_runtime = None
     _HAS_CUDA_BINDINGS = False
 
 # The _get_device_index has been moved to torch.utils._get_device_index

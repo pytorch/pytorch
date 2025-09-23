@@ -449,7 +449,7 @@ def gen_slice_strategy(op_schema: OpSchema) -> StrategyType:
         raise AssertionError(f"Expected IntLike, got {type(step)}")
 
     # normalize args
-    slice_dim = normalize_dim(dim, input_ndim)  # type: ignore[arg-type]
+    slice_dim = normalize_dim(dim, input_ndim)
     start = normalize_dim(start, input_shape[dim])  # type: ignore[arg-type]
     end = normalize_dim(end, input_shape[dim])  # type: ignore[arg-type]
 

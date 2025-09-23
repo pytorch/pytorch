@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 from typing_extensions import TypeVarTuple, Unpack
 
 from .dispatch import dispatch
-from .unification_tools import assoc  # type: ignore[import]
+from .unification_tools import assoc
 from .utils import transitive_get as walk
 from .variable import isvar
 
@@ -86,7 +86,7 @@ def reify(e: object, s: dict[Var, object]) -> object:
 seq = tuple, list, Iterator
 
 
-@dispatch(seq, seq, dict)  # type: ignore[arg-type]
+@dispatch(seq, seq, dict)
 def _unify(
     u: Sequence[object], v: Sequence[object], s: dict[Var, object]
 ) -> dict[Var, object] | bool:

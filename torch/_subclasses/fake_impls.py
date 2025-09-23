@@ -681,7 +681,7 @@ def _view_unbacked_meta(
         if _a is a:
             return view_of(a)
         else:
-            return _a  # type: ignore[return-value]
+            return _a
 
     # Special-cases reshaping to zero dim tensors
     if len(shape) == 0:
@@ -692,7 +692,7 @@ def _view_unbacked_meta(
         if _a is a:
             return view_of(a)
         else:
-            return _a  # type: ignore[return-value]
+            return _a
 
     shape_numel = reduce(operator.mul, shape, 1)
 
@@ -706,14 +706,14 @@ def _view_unbacked_meta(
 
     if is_contiguous_or_false(a) if size_oblivious_enabled else is_contiguous(a):
         strides = make_contiguous_strides_for(shape)
-        return a.as_strided(shape, strides)  # type: ignore[return-value]
+        return a.as_strided(shape, strides)
 
     new_strides = _compute_stride(
         a.size(), a.stride(), shape, size_oblivious=size_oblivious_enabled
     )
 
     if new_strides is not None:
-        return a.as_strided(shape, new_strides)  # type: ignore[return-value]
+        return a.as_strided(shape, new_strides)
 
     # If we fail to do size oblivious view, and backed_size_oblivious was on,
     # then we redo everything by looking at hints and guarding instead of failing.
@@ -1584,7 +1584,7 @@ def make_fast_binary_impl(
                 isinstance(op, torch.Tensor)
                 and len(op.shape) == len(final_shape)
                 # take the slow path if result is not determined.
-                and guard_or_false(sym_eq(op.shape, final_shape))  # type: ignore[arg-type]
+                and guard_or_false(sym_eq(op.shape, final_shape))
             ):
                 break
         else:
@@ -1711,7 +1711,7 @@ def get_fast_op_impls() -> dict[OpOverload, Callable[..., Any]]:
     )
     register_fast_op_impl(torch.ops.aten.mul.Tensor)(
         make_fast_binary_impl(torch._refs.mul)
-    )  # type: ignore[has-type]
+    )
     register_fast_op_impl(torch.ops.aten.div.Tensor)(
         make_fast_binary_impl(
             torch._refs.div,

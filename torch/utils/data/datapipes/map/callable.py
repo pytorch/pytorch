@@ -57,7 +57,7 @@ class MapperMapDataPipe(MapDataPipe[_T_co]):
         super().__init__()
         self.datapipe = datapipe
         _check_unpickable_fn(fn)
-        self.fn = fn  # type: ignore[assignment]
+        self.fn = fn
 
     def __len__(self) -> int:
         # pyrefly: ignore [bad-argument-type]

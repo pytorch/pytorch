@@ -155,7 +155,7 @@ def match_coalesced_groups(
             i += 1
         title = "Match" if match else "MISMATCH"
         logger.info("%s \n", title)
-        logger.info("%s", tabulate(table))  # type: ignore[operator]
+        logger.info("%s", tabulate(table))
 
     # TODO can't verify seq_id bc there might have been valid seq deltas between ranks even within a pg.
     for op_list in all_ops.values():
@@ -291,7 +291,7 @@ def match_coalesced_groups_with_non_p2p(
             i += 1
         title = "Match" if match else "MISMATCH"
         logger.info("%s \n", title)
-        logger.info("%s", tabulate(table))  # type: ignore[operator]
+        logger.info("%s", tabulate(table))
 
     # TODO Need to verify no seq_id deltas for P2P ops.
     for rank, op_list in all_ops.items():
@@ -433,7 +433,7 @@ def check_current_entry_match(
 ) -> None:
     pg_name, desc = pg_info[0], pg_info[1]
     for o in match_record.expected_ranks.intersection(set(match_record.other_ranks)):
-        for i, e in enumerate(all_entries[o]):  # type: ignore[index]
+        for i, e in enumerate(all_entries[o]):
             # step over ops from other PGs
             # only check match state when seq_id matches
             if (

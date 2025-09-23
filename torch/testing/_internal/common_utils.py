@@ -58,7 +58,7 @@ from unittest.mock import MagicMock
 import expecttest
 import numpy as np
 
-import __main__  # type: ignore[import]
+import __main__
 import torch
 import torch.backends.cudnn
 import torch.backends.mkl
@@ -66,7 +66,7 @@ import torch.backends.mps
 import torch.backends.xnnpack
 import torch.cuda
 from torch import Tensor
-from torch._C import ScriptDict, ScriptList  # type: ignore[attr-defined]
+from torch._C import ScriptDict, ScriptList
 from torch._utils_internal import get_writable_path
 from torch._logging.scribe import open_source_signpost
 from torch.nn import (
@@ -96,7 +96,7 @@ import torch.utils._pytree as pytree
 from torch.utils import cpp_extension
 from torch._utils import _is_privateuse1_backend_available
 try:
-    import pytest  # type: ignore[import-not-found]
+    import pytest
     has_pytest = True
 except ImportError:
     has_pytest = False
@@ -757,7 +757,7 @@ class parametrize(_TestParametrizer):
                 else:
                     gen_test = test
 
-                values = list(values) if len(self.arg_names) > 1 else [values]  # type: ignore[call-overload]
+                values = list(values) if len(self.arg_names) > 1 else [values]
                 if len(values) != len(self.arg_names):
                     raise RuntimeError(f'Expected # values == # arg names, but got: {len(values)} '
                                        f'values and {len(self.arg_names)} names for test "{test.__name__}"')
@@ -2670,7 +2670,7 @@ def to_gpu(obj, type_map=None):
             res.requires_grad = obj.requires_grad
         return res
     elif torch.is_storage(obj):
-        return obj.new().resize_(obj.size()).copy_(obj)  # type: ignore[attr-defined, union-attr]
+        return obj.new().resize_(obj.size()).copy_(obj)
     elif isinstance(obj, list):
         return [to_gpu(o, type_map) for o in obj]
     elif isinstance(obj, tuple):
@@ -2885,17 +2885,17 @@ class CudaMemoryLeakCheck:
                 # NOTE: this may be a problem with how the caching allocator collects its
                 #   statistics or a leak too small to trigger the allocation of an
                 #   additional block of memory by the CUDA driver
-                msg = ("CUDA caching allocator reports a memory leak not "  # type: ignore[possibly-undefined]
+                msg = ("CUDA caching allocator reports a memory leak not "
                        f"verified by the driver API in {self.name}! "
                        f"Caching allocator allocated memory was {self.caching_allocator_befores[i]} "
                        f"and is now reported as {caching_allocator_mem_allocated} "  # type: ignore[possibly-undefined]
                        f"on device {i}. "
                        f"CUDA driver allocated memory was {self.driver_befores[i]} and is now {driver_mem_allocated}.")  # type: ignore[possibly-undefined]
                 warnings.warn(msg, stacklevel=2)
-            elif caching_allocator_discrepancy and driver_discrepancy:  # type: ignore[possibly-undefined]
+            elif caching_allocator_discrepancy and driver_discrepancy:
                 # A caching allocator discrepancy validated by the driver API is a
                 #   failure (except on ROCm, see below)
-                msg = (f"CUDA driver API confirmed a leak in {self.name}! "  # type: ignore[possibly-undefined]
+                msg = (f"CUDA driver API confirmed a leak in {self.name}! "
                        f"Caching allocator allocated memory was {self.caching_allocator_befores[i]} "
                        f"and is now reported as {caching_allocator_mem_allocated} "  # type: ignore[possibly-undefined]
                        f"on device {i}. "
@@ -3295,7 +3295,7 @@ class ObjectPair(UnittestPair):
 class AssertRaisesContextIgnoreNotImplementedError(unittest.case._AssertRaisesContext):
     def __exit__(self, exc_type, exc_value, tb):
         if exc_type is not None and issubclass(exc_type, NotImplementedError):
-            self.test_case.skipTest(f"not_implemented: {exc_value}")  # type: ignore[attr-defined]
+            self.test_case.skipTest(f"not_implemented: {exc_value}")
         return super().__exit__(exc_type, exc_value, tb)
 
 
@@ -3697,11 +3697,11 @@ class TestCase(expecttest.TestCase):
                 if TEST_SAVE_XML is not None:
                     # This is a big hacky, XMLRunner modifies expected type from TestCase to TestInfo
                     # Create dummy TestInfo to record results correctly
-                    from xmlrunner.result import _TestInfo  # type: ignore[import]
+                    from xmlrunner.result import _TestInfo
                     case = _TestInfo(result, case)
-                    case.output = _TestInfo.ERROR  # type: ignore[attr-defined]
-                    case.elapsed_time = 0.0  # type: ignore[attr-defined]
-                    case.test_description = "TestSuiteEarlyFailure"  # type: ignore[attr-defined]
+                    case.output = _TestInfo.ERROR
+                    case.elapsed_time = 0.0
+                    case.test_description = "TestSuiteEarlyFailure"
                 # This shouldn't really happen, but if does add fake failure
                 # For more details see https://github.com/pytorch/pytorch/issues/71973
                 result.failures.append((case, "TestSuite execution was aborted early"))
@@ -4578,7 +4578,7 @@ class TestCase(expecttest.TestCase):
     def assertRaises(self, expected_exception, *args, **kwargs):
         if self._ignore_not_implemented_error:
             context: AssertRaisesContextIgnoreNotImplementedError | None = \
-                AssertRaisesContextIgnoreNotImplementedError(expected_exception, self)  # type: ignore[call-arg]
+                AssertRaisesContextIgnoreNotImplementedError(expected_exception, self)
             try:
                 return context.handle('assertRaises', args, kwargs)  # type: ignore[union-attr, arg-type]
             finally:
@@ -4598,14 +4598,14 @@ class TestCase(expecttest.TestCase):
         # Checks whether the test is instantiated for a device type by testing
         # if the test class has defined the device_type attribute and,
         # if so, tests whether the instantiated device type is native or not
-        if hasattr(self, 'device_type') and self.device_type not in NATIVE_DEVICES and self.device_type != "mps":  # type: ignore[attr-defined]
+        if hasattr(self, 'device_type') and self.device_type not in NATIVE_DEVICES and self.device_type != "mps":
             # empty string matches any string
             expected_regex = ''
 
         if self._ignore_not_implemented_error:
-            context = AssertRaisesContextIgnoreNotImplementedError(  # type: ignore[call-arg]
+            context = AssertRaisesContextIgnoreNotImplementedError(
                 expected_exception, self, expected_regex)
-            return context.handle('assertRaisesRegex', args, kwargs)  # type: ignore[attr-defined, arg-type]
+            return context.handle('assertRaisesRegex', args, kwargs)
         else:
             return super().assertRaisesRegex(expected_exception, expected_regex, *args, **kwargs)
 
@@ -6118,7 +6118,7 @@ def check_leaked_tensors(limit=1, matched_type=torch.Tensor):
                 f"{num_garbage_objs} tensors were found in the garbage. Did you introduce a reference cycle?", stacklevel=2
             )
             try:
-                import objgraph  # type: ignore[import-not-found,import-untyped]
+                import objgraph
                 warnings.warn(
                     f"Dumping first {limit} objgraphs of leaked {matched_type}s rendered to png", stacklevel=2
                 )

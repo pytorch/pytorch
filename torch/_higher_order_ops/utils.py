@@ -359,7 +359,7 @@ def _maybe_fake_tracing(fn, inputs: list[Any], pre_dispatch):
                 gm,
                 fake_mode.shape_env,  # type: ignore[attr-defined]
                 "hoo_maybe_fake_tracing",
-                export=True,  # type: ignore[attr-defined]
+                export=True,
             )
         return gm
 
@@ -689,9 +689,9 @@ def create_fw_bw_graph(fn, use_output_and_grad_bw, fw_inputs, fw_outputs):
     # Instead, it will create _tensor_constant as output.
 
     dummy_aot_config = AOTConfig(
-        fw_compiler=None,  # type: ignore[arg-type]
-        bw_compiler=None,  # type: ignore[arg-type]
-        partition_fn=None,  # type: ignore[arg-type]
+        fw_compiler=None,
+        bw_compiler=None,
+        partition_fn=None,
         decompositions={},
         num_params_buffers=0,
         aot_id=0,
@@ -893,9 +893,9 @@ def create_bw_fn(
     from torch._higher_order_ops.utils import prepare_fw_with_masks_all_requires_grad
 
     dummy_aot_config = AOTConfig(
-        fw_compiler=None,  # type: ignore[arg-type]
-        bw_compiler=None,  # type: ignore[arg-type]
-        partition_fn=None,  # type: ignore[arg-type]
+        fw_compiler=None,
+        bw_compiler=None,
+        partition_fn=None,
         decompositions={},
         num_params_buffers=0,
         aot_id=0,
@@ -937,9 +937,9 @@ def get_dummy_aot_autograd_config():
     from torch._functorch.aot_autograd import AOTConfig
 
     return AOTConfig(
-        fw_compiler=None,  # type: ignore[arg-type]
-        bw_compiler=None,  # type: ignore[arg-type]
-        partition_fn=None,  # type: ignore[arg-type]
+        fw_compiler=None,
+        bw_compiler=None,
+        partition_fn=None,
         decompositions={},
         num_params_buffers=0,
         aot_id=0,

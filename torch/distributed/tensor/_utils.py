@@ -402,7 +402,7 @@ def compute_global_tensor_shape(
         @maybe_run_for_local_tensor
         def _validate_and_compute_global_shape(local_shape, gathered_shaped_tensors):
             sharded_dim_sum = 0
-            shard_dim = placements[0].dim  # type: ignore[union-attr]
+            shard_dim = placements[0].dim
             other_dims = [d for d in range(len(shape)) if d != shard_dim]
             for shape_tensor in gathered_shaped_tensors:
                 if not torch.equal(local_shape[other_dims], shape_tensor[other_dims]):

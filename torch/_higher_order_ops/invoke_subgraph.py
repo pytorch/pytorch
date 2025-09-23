@@ -321,9 +321,9 @@ def mark_compile_region(
             return invoke_subgraph_placeholder(inner_func, *args, **kwargs)
 
         inner.__marked_compile_region_fn__ = func  # type: ignore[attr-defined]
-        func.__marked_compile_region_config__ = options  # type: ignore[attr-defined]
-        func.__marked_compile_region_max_reuse_entries__ = max_reuse_entries  # type: ignore[attr-defined]
-        func.__marked_compile_region_reuse_hash_fn__ = reuse_hash_fn  # type: ignore[attr-defined]
+        func.__marked_compile_region_config__ = options
+        func.__marked_compile_region_max_reuse_entries__ = max_reuse_entries
+        func.__marked_compile_region_reuse_hash_fn__ = reuse_hash_fn
 
         return inner
 
@@ -1083,7 +1083,7 @@ def _(proxy_mode: ProxyTorchDispatchMode, subgraph, identifier, *operands):
                 proxy_mode.tracer.root.register_module(qualname, arg)  # type: ignore[union-attr]
         return proxy_mode.tracer.unwrap_proxy(arg)  # type: ignore[union-attr]
 
-    proxy_args = pytree.tree_map(_unwrap_proxy, node_args)  # type: ignore[union-attr]
+    proxy_args = pytree.tree_map(_unwrap_proxy, node_args)
     out_proxy = proxy_mode.tracer.create_proxy(
         "call_function", invoke_subgraph, proxy_args, {}
     )

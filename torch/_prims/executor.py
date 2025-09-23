@@ -65,4 +65,4 @@ def make_traced(fn: Callable[P, T]) -> Callable[P, T]:
             gm = make_fx(wrapped)(all_args)
         return execute(gm, all_args, executor=executor)
 
-    return _traced  # type: ignore[return-value]
+    return _traced

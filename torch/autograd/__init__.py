@@ -195,7 +195,7 @@ def _make_grads(
                 )
             new_grads.append(grad)
         elif grad is None:
-            if isinstance(out, graph.GradientEdge) or out.requires_grad:  # type: ignore[attr-defined]
+            if isinstance(out, graph.GradientEdge) or out.requires_grad:
                 if isinstance(out, graph.GradientEdge):
                     if out_size is None:
                         raise AssertionError("Expected out_size to be set.")

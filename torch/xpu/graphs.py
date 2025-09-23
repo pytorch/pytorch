@@ -425,7 +425,7 @@ def make_graphed_callables(
                 grad_idx += 1
             else:
                 static_grad_inputs.append(None)  # type: ignore[arg-type]
-        static_grad_inputs = tuple(static_grad_inputs)  # type: ignore[assignment]
+        static_grad_inputs = tuple(static_grad_inputs)
 
         per_callable_static_grad_outputs.append(static_grad_outputs)
         per_callable_static_grad_inputs.append(static_grad_inputs)

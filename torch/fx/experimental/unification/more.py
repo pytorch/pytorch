@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from .core import (  # type: ignore[attr-defined]
+from .core import (
     _reify as core_reify,
     _unify as core_unify,
     reify,

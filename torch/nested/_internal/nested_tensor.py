@@ -160,7 +160,7 @@ class NestedTensor(torch.Tensor):
         # so dynamism propagation still works.
         # See [Note: Dimension Marking Guards] in torch/_dynamo/guards.py.
         # Inlined here to avoid circular import from runtime_wrappers.
-        self._dynamo_propagated_dynamic_indices = {self._ragged_idx}  # type: ignore[attr-defined]
+        self._dynamo_propagated_dynamic_indices = {self._ragged_idx}
         self._values._dynamo_propagated_dynamic_indices = {self._ragged_idx - 1}  # type: ignore[attr-defined]
 
         # min / max sequence length should be dynamic if present
@@ -173,7 +173,7 @@ class NestedTensor(torch.Tensor):
 
     def values(self):
         # dispatch to get proper view relationship
-        return torch._nested_get_values(self)  # type: ignore[attr-defined]
+        return torch._nested_get_values(self)
 
     def offsets(self):
         return self._offsets
@@ -408,7 +408,7 @@ class NestedTensor(torch.Tensor):
 # Not actually a view!
 class ViewBufferFromNested(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, x: NestedTensor):  # type: ignore[override]
+    def forward(ctx, x: NestedTensor):
         ctx.save_for_backward(x.offsets())
         ctx.metadata_cache = x._metadata_cache
         ctx.ragged_idx = x._ragged_idx
@@ -433,7 +433,7 @@ class ViewNestedFromBuffer(torch.autograd.Function):
         values: torch.Tensor,
         offsets: torch.Tensor,
         metadata_cache: Optional[Dict[str, Any]] = None,
-    ):  # type: ignore[override]
+    ):
         # maintain BC with this usages of this where the seqlens are stuffed
         # directly into the metadata cache as non-Tensors / ints
         if metadata_cache is not None:
@@ -542,7 +542,7 @@ def jagged_from_list(
         max_seqlen=max_seqlen,
         ragged_idx=ragged_idx,
     )
-    return (ret_nt, offsets)  # type: ignore[return-value]
+    return (ret_nt, offsets)
 
 
 def jagged_from_tensor_and_lengths(
@@ -644,7 +644,7 @@ def nested_view_from_values_offsets(
     if max_seqlen is not None:
         max_seqlen_tensor = _store_val_in_tensor(max_seqlen)
 
-    return torch._nested_view_from_jagged(  # type: ignore[attr-defined]
+    return torch._nested_view_from_jagged(
         values,
         offsets,
         _nt_view_dummy(),
@@ -652,7 +652,7 @@ def nested_view_from_values_offsets(
         ragged_idx,
         min_seqlen_tensor,
         max_seqlen_tensor,
-    )  # type: ignore[return-value]
+    )
 
 
 def nested_view_from_values_offsets_lengths(
@@ -666,7 +666,7 @@ def nested_view_from_values_offsets_lengths(
     if max_seqlen is not None:
         max_seqlen_tensor = _store_val_in_tensor(max_seqlen)
 
-    return torch._nested_view_from_jagged(  # type: ignore[attr-defined]
+    return torch._nested_view_from_jagged(
         values,
         offsets,
         _nt_view_dummy(),
@@ -674,7 +674,7 @@ def nested_view_from_values_offsets_lengths(
         ragged_idx,
         min_seqlen_tensor,
         max_seqlen_tensor,
-    )  # type: ignore[return-value]
+    )
 
 
 def nested_from_padded(

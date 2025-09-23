@@ -273,11 +273,11 @@ class _StaticDim(Dim):
 
     @property
     def min(self):  # type: ignore[override]
-        return self.value  # type: ignore[attr-defined]
+        return self.value
 
     @property
     def max(self):  # type: ignore[override]
-        return self.value  # type: ignore[attr-defined]
+        return self.value
 
 
 class _DerivedDim(Dim):
@@ -309,11 +309,11 @@ class _DerivedDim(Dim):
 
         from torch.utils._sympy.numbers import int_oo
 
-        if self.root.min is -int_oo:  # type: ignore[attr-defined]
+        if self.root.min is -int_oo:
             return -int_oo  # fn not needed cuz increasing
 
-        _min_symint = self.fn(Integer(self.root.min))  # type: ignore[attr-defined]
-        root = self.root  # type: ignore[attr-defined]
+        _min_symint = self.fn(Integer(self.root.min))
+        root = self.root
         if _min_symint < 0:
             raise AssertionError(
                 f"Expected derived min value of {self.__name__} to be >= 0. "
@@ -330,11 +330,11 @@ class _DerivedDim(Dim):
 
         from torch.utils._sympy.numbers import int_oo
 
-        if self.root.max is int_oo:  # type: ignore[attr-defined]
+        if self.root.max is int_oo:
             return int_oo  # fn not needed cuz increasing
 
-        _max_symint = self.fn(Integer(self.root.max))  # type: ignore[attr-defined]
-        root = self.root  # type: ignore[attr-defined]
+        _max_symint = self.fn(Integer(self.root.max))
+        root = self.root
         if _max_symint > sys.maxsize - 1:
             raise AssertionError(
                 f"Expected derived max value of {self.__name__} to be <= {sys.maxsize - 1}. "
@@ -366,7 +366,7 @@ def dims(
     Returns:
         A tuple of :func:`Dim` types.
     """
-    return tuple(Dim(name, min=min, max=max) for name in names)  # type: ignore[misc]
+    return tuple(Dim(name, min=min, max=max) for name in names)
 
 
 @dataclasses.dataclass
@@ -1128,7 +1128,7 @@ def _process_dynamic_shapes(
             # generate a _DerivedConstraint where the root is:
             # - either a _ConstraintTarget (if dim.root directly describes an input shape)
             # - or a _PhantomRoot (otherwise)
-            dim_root = dim.root  # type: ignore[attr-defined]
+            dim_root = dim.root
             if dim_root.__name__ in symbols:
                 # root represents an input shape dimension
                 root_constraint = symbols[dim_root.__name__][0]
@@ -1158,7 +1158,7 @@ def _process_dynamic_shapes(
                     warn_only=False,
                 ),
                 root,
-                dim.fn,  # type: ignore[attr-defined]
+                dim.fn,
             )
             if isinstance(root, _PhantomRoot):
                 # NOTE(avik): since we have not processed all inputs yet, we may replace this
@@ -1170,7 +1170,7 @@ def _process_dynamic_shapes(
                 i,
                 dim.__name__,
                 StrictMinMaxConstraint(
-                    vr=ValueRanges(lower=dim.value, upper=dim.value),  # type: ignore[attr-defined]
+                    vr=ValueRanges(lower=dim.value, upper=dim.value),
                     warn_only=False,
                 ),
             )
@@ -1182,7 +1182,7 @@ def _process_dynamic_shapes(
                 i,
                 dim.__name__,
                 StrictMinMaxConstraint(
-                    vr=ValueRanges(lower=dim.min, upper=dim.max),  # type: ignore[attr-defined]
+                    vr=ValueRanges(lower=dim.min, upper=dim.max),
                     warn_only=False,
                 ),
             )
@@ -1271,7 +1271,7 @@ def _get_dim_name_mapping(
         elif isinstance(dim, Dim):
             name_to_dim[dim.__name__] = dim
             if isinstance(dim, _DerivedDim):
-                name_to_dim[dim.root.__name__] = dim.root  # type: ignore[attr-defined]
+                name_to_dim[dim.root.__name__] = dim.root
         else:
             if not isinstance(dim, _DimHint):
                 raise AssertionError(f"expected dim to be _DimHint, got {type(dim)}")
@@ -1362,7 +1362,7 @@ def refine_dynamic_shapes_from_suggested_fixes(
             shape_fixes[k] = c
             roots.add(str(next(iter(c.free_symbols))))
         if isinstance(c, _DerivedDim):
-            roots.add(c.root.__name__)  # type: ignore[attr-defined]
+            roots.add(c.root.__name__)
 
     # check keys are existing dims or new roots
     for k in shape_fixes:
@@ -1405,11 +1405,11 @@ def refine_dynamic_shapes_from_suggested_fixes(
                     return dim
             else:
                 return fix
-        elif isinstance(dim, _DerivedDim) and dim.root.__name__ in shape_fixes:  # type: ignore[attr-defined]
+        elif isinstance(dim, _DerivedDim) and dim.root.__name__ in shape_fixes:
             if dim.__name__ in derived_dim_cache:
                 return derived_dim_cache[dim.__name__]
             else:  # evaluate new derived value based on root
-                _dim = dim.fn(shape_fixes[dim.root.__name__])  # type: ignore[attr-defined]
+                _dim = dim.fn(shape_fixes[dim.root.__name__])
                 derived_dim_cache[dim.__name__] = _dim
                 return _dim
         return dim  # unchanged dim

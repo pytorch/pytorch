@@ -69,7 +69,7 @@ class ComplexTensor(Tensor):
                 f"Expected imag pinning {pin_memory}, got {imag.is_pinned()}"
             )
 
-        res = Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
+        res = Tensor._make_wrapper_subclass(
             cls,
             shape,
             device=device,
@@ -161,7 +161,7 @@ class ComplexTensor(Tensor):
 
 class Complex(Function):
     @staticmethod
-    def forward(ctx: FunctionCtx, real: Tensor, imag: Tensor) -> ComplexTensor:  # type: ignore[bad-override]
+    def forward(ctx: FunctionCtx, real: Tensor, imag: Tensor) -> ComplexTensor:
         return ComplexTensor(real, imag)
 
     @staticmethod

@@ -76,9 +76,9 @@ class NormalizeArgs(Transformer):
             raise AssertionError(f"Expected callable target, got {type(target)}")
         new_args_and_kwargs = normalize_function(
             target,
-            args,  # type: ignore[arg-type]
+            args,
             kwargs,
-            arg_types,  # type: ignore[arg-type]
+            arg_types,
             kwarg_types,
             self.normalize_to_only_use_kwargs,
         )

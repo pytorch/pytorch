@@ -591,13 +591,13 @@ def _multi_tensor_nadam(
                 grouped_params,
                 grouped_grads,
                 exp_avg_sq_sqrt,
-                step_size_grads,  # type: ignore[arg-type]
+                step_size_grads,
             )
             torch._foreach_addcdiv_(
                 grouped_params,
                 grouped_exp_avgs,
                 exp_avg_sq_sqrt,
-                step_size_expavg,  # type: ignore[arg-type]
+                step_size_expavg,
             )
 
 

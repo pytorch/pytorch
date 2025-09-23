@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, TYPE_CHECKING
 
-from torch.fx.experimental.unification import Var  # type: ignore[attr-defined]
+from torch.fx.experimental.unification import Var
 
 from ._compatibility import compatibility
 

@@ -158,6 +158,6 @@ def ordering(signatures: Iterable[tuple[type, ...]]) -> list[tuple[type, ...]]:
         tuple[type, ...], list[tuple[type, ...]]
     ] = {  # pyrefly: ignore[bad-assignment]
         k: [b for a, b in v]
-        for k, v in edges.items()  # type: ignore[attr-defined]
+        for k, v in edges.items()
     }
     return _toposort(topo_edges)

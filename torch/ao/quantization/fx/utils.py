@@ -506,7 +506,7 @@ def _is_custom_module_lstm(
     if qconfig is not None and qhandler is not None:
         if not isinstance(
             qhandler, torch.ao.quantization.fx.quantize_handler.QuantizeHandler
-        ):  # type: ignore[attr-defined]
+        ):
             raise AssertionError("qhandler must be a QuantizeHandler when provided")
         return (
             isinstance(mod, torch.nn.LSTM)
@@ -531,7 +531,7 @@ def _is_custom_module_mha(
     if qconfig is not None and qhandler is not None:
         if not isinstance(
             qhandler, torch.ao.quantization.fx.quantize_handler.QuantizeHandler
-        ):  # type: ignore[attr-defined]
+        ):
             raise AssertionError("qhandler must be a QuantizeHandler when provided")
         return (
             isinstance(mod, torch.nn.MultiheadAttention)

@@ -1093,7 +1093,7 @@ class ShardingPropagator:
             target_dims = (dim,) if is_singleton(dim) else ()
         else:
             dims = cast(Sequence[int], schema.args_schema[1])
-            target_dims = tuple(  # type: ignore[union-attr]
+            target_dims = tuple(
                 normalize(d) for d in dims if is_singleton(d)
             )
 

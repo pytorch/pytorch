@@ -42,7 +42,7 @@ from torch.utils._triton import has_triton
 
 from ..utils import remove_proxy_from_state_dict
 from . import schema
-from .schema import (  # type: ignore[attr-defined]
+from .schema import (
     Argument,
     ArgumentKind,
     BufferMutationSpec,
@@ -498,8 +498,8 @@ def serialize_range_constraints(
 ) -> dict[str, RangeConstraint]:
     return {
         str(k): RangeConstraint(
-            _sympy_int_to_int(v.lower, "ceil"),  # type: ignore[arg-type]
-            _sympy_int_to_int(v.upper, "floor"),  # type: ignore[arg-type]
+            _sympy_int_to_int(v.lower, "ceil"),
+            _sympy_int_to_int(v.upper, "floor"),
         )
         for k, v in range_constraints.items()
     }
@@ -839,7 +839,7 @@ class GraphModuleSerializer(metaclass=Final):
                     raise AssertionError(
                         f"owning_module does not have attribute {lowered_module_name}"
                     )
-                lowered_module = getattr(node.graph.owning_module, lowered_module_name)  # type: ignore[no-untyped-def]
+                lowered_module = getattr(node.graph.owning_module, lowered_module_name)
                 serializable_args[0] = lowered_module.aoti_path
 
                 # AOTI compiled graph module in node.args[0] is stateful, and will fail the verifier check
@@ -1396,7 +1396,7 @@ class GraphModuleSerializer(metaclass=Final):
             if len(arg) == 0:
                 if arg_type is not None:
                     if isinstance(arg_type, torch.OptionalType):
-                        arg_type = arg_type.getElementType()  # type: ignore[assignment]
+                        arg_type = arg_type.getElementType()
                     if not isinstance(arg_type, torch.ListType):
                         raise AssertionError(
                             f"expected ListType, got {type(arg_type).__name__}"
@@ -1581,7 +1581,7 @@ class GraphModuleSerializer(metaclass=Final):
             # serialize/deserialize function.
             custom_obj_name = f"_custom_obj_{len(self.custom_objs)}"
             self.custom_objs[custom_obj_name] = arg
-            class_fqn = arg._type().qualified_name()  # type: ignore[attr-defined]
+            class_fqn = arg._type().qualified_name()
             return Argument.create(
                 as_custom_obj=CustomObjArgument(custom_obj_name, class_fqn)
             )
@@ -2393,8 +2393,8 @@ class GraphModuleDeserializer(metaclass=Final):
                 if vr := self.symbol_name_to_range.get(expr_str):
                     self.shape_env.constrain_symbol_range(
                         sym,
-                        compiler_min=vr.lower,  # type: ignore[arg-type]
-                        compiler_max=vr.upper,  # type: ignore[arg-type]
+                        compiler_min=vr.lower,
+                        compiler_max=vr.upper,
                     )
                 # ShapeEnv meta
                 if isinstance(sym, sympy.Symbol):
@@ -2467,8 +2467,8 @@ class GraphModuleDeserializer(metaclass=Final):
             return cast(
                 FakeTensor,
                 torch.empty_strided(
-                    tuple(self.deserialize_sym_int(val) for val in tensor_meta.sizes),  # type: ignore[misc]
-                    tuple(self.deserialize_sym_int(val) for val in tensor_meta.strides),  # type: ignore[misc]
+                    tuple(self.deserialize_sym_int(val) for val in tensor_meta.sizes),
+                    tuple(self.deserialize_sym_int(val) for val in tensor_meta.strides),
                     device=deserialize_device(tensor_meta.device),
                     dtype=_SERIALIZE_TO_TORCH_DTYPE[tensor_meta.dtype],
                     requires_grad=tensor_meta.requires_grad,
@@ -3550,7 +3550,7 @@ class ExportedProgramDeserializer(metaclass=Final):
         for k, v in symbol_name_to_range.items():
             if symbol := symbol_name_to_symbol.get(k):
                 log.debug("[deserialize_range_constraints] %s -> %s", k, v)
-                range_constraints[symbol] = v  # type: ignore[arg-type]
+                range_constraints[symbol] = v
             else:
                 log.warning(
                     "Symbol %s did not appear in the graph that was deserialized", k
@@ -3607,7 +3607,7 @@ class ExportedProgramDeserializer(metaclass=Final):
             root=res.graph_module,
             graph=res.graph_module.graph,
             graph_signature=res.signature,
-            state_dict=res.state_dict,  # type: ignore[arg-type]
+            state_dict=res.state_dict,
             range_constraints=range_constraints,
             module_call_graph=res.module_call_graph,
             example_inputs=res.example_inputs,
@@ -4204,7 +4204,7 @@ def canonicalize(
     )
 
     if len(sorted_ins) > 0:
-        sorted_inputs, input_specs = zip(*(i for idx, i in sorted_ins))  # type: ignore[assignment]
+        sorted_inputs, input_specs = zip(*(i for idx, i in sorted_ins))
     else:
         sorted_inputs = ()
         input_specs = ()
@@ -4212,7 +4212,7 @@ def canonicalize(
     sorted_outs = sorted(
         enumerate(zip(graph.outputs, signature.output_specs)), key=rank_output
     )
-    sorted_outputs, output_specs = zip(*(i for idx, i in sorted_outs))  # type: ignore[assignment]
+    sorted_outputs, output_specs = zip(*(i for idx, i in sorted_outs))
 
     sorted_graph, replace_table = _canonicalize_graph(
         sorted_inputs, sorted_outputs, graph, constants

@@ -655,7 +655,7 @@ class ScanAutogradImpl:
     def call_forward(self):
         fw_outputs_and_intermediates: tuple[Any] = scan_op(
             self.hop_partitioned_graph.fw_gm, self.init, self.xs, self.additional_inputs
-        )  # type: ignore[return-type]
+        )
         fw_outs = fw_outputs_and_intermediates[
             : self.hop_partitioned_graph.n_fw_outputs
         ]
@@ -761,7 +761,7 @@ class ScanAutogradImpl:
             )
 
             next_grad_carry, grad_xs, grad_addi = split_into_chunks(
-                flat_out,  # type: ignore[arg-type]
+                flat_out,
                 [len(self.init), len(self.xs), len(self.additional_inputs)],
             )
 

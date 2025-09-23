@@ -271,7 +271,7 @@ ONNXProgram(
             k.name: _to_numpy_array(v)
             for k, v in zip(self.model.graph.inputs, flatten_args)
         }
-        outputs = evaluator.run(None, ref_input)  # type: ignore[arg-type]
+        outputs = evaluator.run(None, ref_input)
         if not isinstance(outputs, Sequence):
             raise AssertionError(f"Expected Sequence, got {type(outputs)}")
         return tuple(_from_numpy_array(output) for output in outputs)
@@ -369,7 +369,7 @@ ONNXProgram(
         if not include_initializers:
             self.model.graph.initializers.clear()
         if keep_initializers_as_inputs:
-            self.model.graph.inputs.extend(original_initializers.values())  # type: ignore[arg-type]
+            self.model.graph.inputs.extend(original_initializers.values())
 
         try:
             # Save the model to disk
@@ -435,7 +435,7 @@ ONNXProgram(
             self.save(model_path, external_data=True)
             model = model_path
         else:
-            model = self.model_proto.SerializeToString()  # type: ignore[assignment]
+            model = self.model_proto.SerializeToString()
 
         self._inference_session = initializer(model)
         logger.debug("Inference session initialized.")

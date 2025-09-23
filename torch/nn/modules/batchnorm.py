@@ -186,8 +186,8 @@ class _BatchNorm(_NormBase):
 
         if self.training and self.track_running_stats:
             # TODO: if statement only here to tell the jit to skip emitting this when it is None
-            if self.num_batches_tracked is not None:  # type: ignore[has-type]
-                self.num_batches_tracked.add_(1)  # type: ignore[has-type]
+            if self.num_batches_tracked is not None:
+                self.num_batches_tracked.add_(1)
                 if self.momentum is None:  # use cumulative moving average
                     exponential_average_factor = 1.0 / float(self.num_batches_tracked)
                 else:  # use exponential moving average
@@ -277,7 +277,7 @@ class _LazyNormBase(LazyModuleMixin, _NormBase):
         if not self.has_uninitialized_params() and self.num_features != 0:
             super().reset_parameters()
 
-    def initialize_parameters(self, input) -> None:  # type: ignore[override]
+    def initialize_parameters(self, input) -> None:
         # pyrefly: ignore [bad-argument-type]
         if self.has_uninitialized_params():
             self.num_features = input.shape[1]
@@ -410,7 +410,7 @@ class LazyBatchNorm1d(_LazyNormBase, _BatchNorm):
             :attr:`affine` is ``True``). Default: ``True``
     """
 
-    cls_to_become = BatchNorm1d  # type: ignore[assignment]
+    cls_to_become = BatchNorm1d
 
     def _check_input_dim(self, input) -> None:
         if input.dim() != 2 and input.dim() != 3:
@@ -525,7 +525,7 @@ class LazyBatchNorm2d(_LazyNormBase, _BatchNorm):
             :attr:`affine` is ``True``). Default: ``True``
     """
 
-    cls_to_become = BatchNorm2d  # type: ignore[assignment]
+    cls_to_become = BatchNorm2d
 
     def _check_input_dim(self, input) -> None:
         if input.dim() != 4:
@@ -640,7 +640,7 @@ class LazyBatchNorm3d(_LazyNormBase, _BatchNorm):
             :attr:`affine` is ``True``). Default: ``True``
     """
 
-    cls_to_become = BatchNorm3d  # type: ignore[assignment]
+    cls_to_become = BatchNorm3d
 
     def _check_input_dim(self, input) -> None:
         if input.dim() != 5:

@@ -84,7 +84,7 @@ def try_solve(
             # Stop if there was no change in this trial.
             if trial == e:
                 break
-            e = trial  # type: ignore[assignment]
+            e = trial
 
         # Return if we were able to isolate 'thing' on the left-hand side.
         if isinstance(e, sympy.Rel) and e.lhs == thing:
@@ -106,7 +106,7 @@ def _try_isolate_lhs(
             if isinstance(e.lhs, sympy.Add)
             else 0
         )
-        e = op(e.lhs - lhs_not_thing, e.rhs - lhs_not_thing)  # type: ignore[attr-defined]
+        e = op(e.lhs - lhs_not_thing, e.rhs - lhs_not_thing)
 
     # Divide both sides by the factors that don't contain thing.
     if isinstance(e, sympy.Rel) and isinstance(e.lhs, sympy.Mul):

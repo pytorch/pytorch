@@ -137,8 +137,8 @@ def quantize_per_tensor_tensor(
         input,
         scale.item(),
         zero_point.item(),  # type: ignore[arg-type]
-        quant_min,  # type: ignore[arg-type]
-        quant_max,  # type: ignore[arg-type]
+        quant_min,
+        quant_max,
         dtype,
     )
 
@@ -222,7 +222,7 @@ def quantize_per_tensor_tensor2_meta(
     return quantize_per_tensor_tensor_meta(
         input,
         scale,
-        zero_point,  # type: ignore[arg-type]
+        zero_point,
         quant_min,  # type: ignore[arg-type]
         quant_max,  # type: ignore[arg-type]
         dtype,

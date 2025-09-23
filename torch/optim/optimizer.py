@@ -556,7 +556,7 @@ class Optimizer:
         if torch.compiler.is_compiling():
             return {(None, None): (tensorlistlist, list(range(len(tensorlistlist[0]))))}
         else:
-            return _group_tensors_by_device_and_dtype(tensorlistlist, with_indices)  # type: ignore[return-value, arg-type]
+            return _group_tensors_by_device_and_dtype(tensorlistlist, with_indices)
 
     def _patch_step_function(self) -> None:
         self._zero_grad_profile_name = (
@@ -874,7 +874,7 @@ class Optimizer:
         if prepend:
             self._optimizer_load_state_dict_post_hooks.move_to_end(
                 handle.id, last=False
-            )  # type: ignore[attr-defined]
+            )
         return handle
 
     @torch._disable_dynamo

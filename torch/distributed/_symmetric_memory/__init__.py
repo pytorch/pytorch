@@ -1892,7 +1892,7 @@ if TYPE_CHECKING:
     from torch.types import _device, _dtype, _int
 
 
-_use_implicit_mempool: bool | None = None  # type: ignore[assignment]
+_use_implicit_mempool: bool | None = None
 
 
 def _should_use_implicit_mempool() -> bool:

@@ -2,7 +2,7 @@
 import argparse
 import time
 
-import numpy as np  # type: ignore[import]
+import numpy as np
 import pandas as pd  # type: ignore[import]
 from dlrm_s_pytorch import unpack_batch  # type: ignore[import]
 from dlrm_utils import (  # type: ignore[import]

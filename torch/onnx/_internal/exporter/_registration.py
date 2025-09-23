@@ -121,7 +121,7 @@ def _get_overload(qualified_name: str) -> torch._ops.OpOverload | None:
             )
             return None
 
-        return getattr(op_packet, overload)  # type: ignore[call-overload]
+        return getattr(op_packet, overload)
     except AttributeError:
         if qualified_name.endswith("getitem"):
             # This is a special case where we registered the function incorrectly,

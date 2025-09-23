@@ -168,8 +168,8 @@ def _emit_flat_apply_call(
 ):
     # Flatten to graphable form and record the spec on the FX root
     flat_args, in_spec = to_graphable(graphable_args)
-    qualname = tracer.get_fresh_qualname(spec_name)  # type: ignore[union-attr]
-    setattr(tracer.root, qualname, in_spec)  # type: ignore[union-attr]
+    qualname = tracer.get_fresh_qualname(spec_name)
+    setattr(tracer.root, qualname, in_spec)
     spec_proxy = tracer.create_proxy("get_attr", qualname, (), {})
 
     # Reuse/cached ConstantFunction spec on the root

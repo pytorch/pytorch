@@ -338,7 +338,7 @@ def lift_constants_pass(
                         const_placeholder_node.meta["val"] = constant_val
                     input_spec_arg = TensorArgument(name=const_placeholder_node.name)
                 elif isinstance(constant_val, torch._C.ScriptObject):
-                    class_fqn = constant_val._type().qualified_name()  # type: ignore[attr-defined]
+                    class_fqn = constant_val._type().qualified_name()
                     const_placeholder_node.meta["val"] = CustomObjArgument(
                         constant_fqn, class_fqn
                     )
@@ -425,13 +425,13 @@ def rewrite_script_object_meta(
         old_meta = node.meta["val"]
 
         if isinstance(old_meta, torch.ScriptObject):
-            class_fqn = old_meta._type().qualified_name()  # type: ignore[attr-defined]
+            class_fqn = old_meta._type().qualified_name()
             new_meta = CustomObjArgument(node.name, class_fqn)
             constants[node.name] = old_meta
             node.meta["val"] = new_meta
 
         elif isinstance(old_meta, FakeScriptObject):
-            class_fqn = old_meta.script_class_name  # type: ignore[attr-defined]
+            class_fqn = old_meta.script_class_name
             new_meta = CustomObjArgument(node.name, class_fqn, old_meta)
             constants[node.name] = old_meta
             node.meta["val"] = new_meta

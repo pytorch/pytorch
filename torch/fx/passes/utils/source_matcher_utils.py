@@ -52,7 +52,7 @@ class SourcePartition:
     params: list[Node] = field(default_factory=list)
 
 
-@compatibility(is_backward_compatible=False)  # type: ignore[misc]
+@compatibility(is_backward_compatible=False)
 def get_source_partitions(
     graph: Graph,
     wanted_sources: list[Any],
@@ -150,7 +150,7 @@ def get_source_partitions(
             module_type,
             list(input_nodes),
             list(output_nodes),
-            list(params),  # type: ignore[arg-type]
+            list(params),
         )
 
     ret: dict[type[Any], list[SourcePartition]] = {}
@@ -174,7 +174,7 @@ def get_source_partitions(
     return ret
 
 
-@compatibility(is_backward_compatible=False)  # type: ignore[misc]
+@compatibility(is_backward_compatible=False)
 def check_subgraphs_connected(
     subgraph1: SourcePartition, subgraph2: SourcePartition
 ) -> bool:

@@ -160,7 +160,7 @@ class ParametrizationList(ModuleList):
         # Compute new
         with torch.no_grad():
             new = original
-            for module in reversed(self):  # type: ignore[call-overload]
+            for module in reversed(self):
                 if hasattr(module, "right_inverse"):
                     try:
                         new = module.right_inverse(new)  # type: ignore[operator]
@@ -268,7 +268,7 @@ class ParametrizationList(ModuleList):
 
         with torch.no_grad():
             # See https://github.com/pytorch/pytorch/issues/53103
-            for module in reversed(self):  # type: ignore[call-overload]
+            for module in reversed(self):
                 if hasattr(module, "right_inverse"):
                     value = module.right_inverse(value)  # type: ignore[operator]
                 else:
