@@ -1753,7 +1753,7 @@ def _compile_kernel(
                                            If None, will detect from current device.
         cuda_include_dirs (list, optional): List of directories containing CUDA headers
         nvcc_options (list, optional): Additional options to pass to NVRTC
-        nvrtc_path (str, optional): Path to the NVRTC library. If provided, this will skip the 
+        nvrtc_path (str, optional): Path to the NVRTC library. If provided, this will skip the
                                    automatic discovery logic and use the specified library directly.
         auto_pch (bool, optional): Whether to automatically use precompiled headers. Default is False.
 
