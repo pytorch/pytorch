@@ -16,7 +16,6 @@ from typing import (
     Literal,
     NamedTuple,
     overload,
-    Sequence,
     SupportsIndex,
     TypeVar,
 )
@@ -42,9 +41,7 @@ from torch._C import (
 from torch._prims_common import DeviceLikeType
 from torch.autograd.graph import Node as _Node
 from torch.cuda import _POOL_HANDLE
-from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._op_schema import OpSchema
-from torch.distributed.tensor.placement_types import Placement
 from torch.fx.node import Node as FxNode
 from torch.package import PackageExporter
 from torch.storage import TypedStorage, UntypedStorage
@@ -2667,9 +2664,6 @@ class Def(TreeView):
     def name(self) -> Ident: ...
 
 class Decl(TreeView): ...
-
-# Defined in torch/csrc/autograd/python_variable.cpp
-def _DTensor_compute_global_tensor_info(tensor: Tensor, mesh: DeviceMesh, placements: Sequence[Placement]) -> tuple[list[_int], list[_int]]: ...
 
 # Defined in torch/csrc/distributed/rpc/init.cpp
 def _rpc_init() -> _bool: ...
