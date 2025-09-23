@@ -3152,8 +3152,6 @@ coverage_ignore_classes = [
     "WeakIdKeyDictionary",
     "WeakIdRef",
     "WeakTensorKeyDictionary",
-    # torch.utils.debug_mode
-    "DebugMode",
 ]
 
 # The suffix(es) of source filenames.
