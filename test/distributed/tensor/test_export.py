@@ -32,6 +32,7 @@ from torch.utils.debug_mode import DebugMode
 
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
+import torch.export._trace
 
 
 torch.utils._pytree.register_constant(DTensorSpec)
@@ -153,20 +154,20 @@ class DTensorExportTest(DTensorTestBase):
         with DebugMode(record_torchfunction=False) as debug_mode:
             out = tp_model(x)
 
-        ep = torch.export.export(tp_model, (x,), strict=True)
-
-        if self.rank == 0:
-            print(debug_mode.debug_string())
-            print(ep)
+        # ep = torch.export.export(tp_model, (x,), strict=True)
+        # ep = torch.export._trace._export(tp_model, (x,), strict=True, pre_dispatch=True)
+        
+        # if self.rank == 0:
+        #     print(debug_mode.debug_string())
+        #     print(ep)
 
         # this works! 
-        # with contextlib.ExitStack() as stack:
-        #     self.joint_with_descriptors = aot_export_joint_with_descriptors(
-        #         stack,
-        #         tp_model,
-        #         (inp,),
-        #     )
-        #     gm = self.joint_with_descriptors.graph_module
-
-        # if self.rank == 0:
-        #     gm.print_readable()
+        with contextlib.ExitStack() as stack:
+            self.joint_with_descriptors = aot_export_joint_with_descriptors(
+                stack,
+                tp_model,
+                (inp,),
+            )
+            gm = self.joint_with_descriptors.graph_module
+        if self.rank == 0:
+            gm.print_readable()
