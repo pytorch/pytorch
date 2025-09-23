@@ -2603,8 +2603,15 @@ def forward(self, arg0_1, arg1_1):
 
         t1 = torch.rand(512, 512, device=GPU_TYPE)
         t2 = torch.rand(512, 512, device=GPU_TYPE)
-        _, (code,) = run_and_get_code(fn, t1, t2)
-        self.assertTrue("enable_fp_fusion" not in code)
+        try:
+            _, (code,) = run_and_get_code(fn, t1, t2)
+            self.assertTrue("enable_fp_fusion" not in code)
+        except Exception as e:
+            if "NoValidChoicesError" in str(e):
+                raise unittest.SkipTest(
+                    "where inductor has no triton mm kernels available, this test is meaningless"
+                ) from e
+            raise
 
 
 def make_mutation_test(fn):
