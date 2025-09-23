@@ -1119,10 +1119,6 @@ class CppOverrides(OpOverrides):
         code.writeline("()")
         return code
 
-    @staticmethod
-    def device_assert_async(cond, msg):
-        return f'({cond} ? 0 : (throw std::runtime_error("{msg}"), 0))'
-
 
 CppOverrides._initialize_pointwise_overrides("cpp")
 
@@ -2137,6 +2133,11 @@ class CppKernel(Kernel):
         else:
             raise NotImplementedError(f"store mode={mode}")
         self.stores.writeline(DeferredLine(name, line))
+
+    def device_assert_async(self, cond, msg):
+        self.compute.writeline(
+            f'({cond} ? 0 : (throw std::runtime_error("{msg}"), 0));'
+        )
 
     def _gen_reduction_prefix(
         self,

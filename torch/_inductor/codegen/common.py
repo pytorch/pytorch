@@ -1016,6 +1016,11 @@ class OpOverrides(BasicMathOpsMixin, OpDecompositions, OpsHandler[Any]):
             f"{type(self).__name__}: store should be handled by CSEProxy"
         )
 
+    def device_assert_async(self, cond: CSEVariable, msg: str) -> None:
+        raise NotImplementedError(
+            f"{type(self).__name__}: device_assert_async should be handled by CSEProxy"
+        )
+
     def store_reduction(self, name: str, index: sympy.Expr, value: OpVarT) -> None:
         raise NotImplementedError(
             f"{type(self).__name__}: store_reduction should be handled by CSEProxy"
@@ -2118,6 +2123,9 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
     ) -> None:
         raise NotImplementedError
 
+    def device_assert_async(self, cond: CSEVariable, msg: str) -> None:
+        raise NotImplementedError
+
     def reduction(
         self,
         dtype: torch.dtype,
@@ -2701,6 +2709,9 @@ class CSEProxy(DefaultHandler):
             self._update_store_cache(name, value)
         if name not in V.graph.removed_buffers:
             self.kernel.store(name, index, value, mode=mode)
+
+    def device_assert_async(self, cond: CSEVariable, msg: str) -> None:
+        self.kernel.device_assert_async(cond, msg)
 
     def store_reduction(self, name: str, index: sympy.Expr, value: CSEVariable) -> None:
         self.kernel.store_buffer_names.add(name)
