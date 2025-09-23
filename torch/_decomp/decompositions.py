@@ -1543,9 +1543,9 @@ def native_group_norm_backward(
         lambda: f"Expect gamma to have {C} elements but got {gamma.numel() if gamma is not None else -1}",
     )
 
-    cpg = C // group
+    cpg, _rem = divmod(C, group)
     torch._check(
-        C == cpg * group,
+        _rem == 0,
         lambda: f"Expect number of channels {C} to be evenly-divisible by number of groups {group}",
     )
 
