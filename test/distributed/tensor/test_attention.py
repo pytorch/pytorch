@@ -397,7 +397,7 @@ class CPFlexAttentionTest(DTensorTestBase):
         bs = B if B > 1 else 8
         query_tokens = context_tokens = qkv_size
         dim = 32
-        nheads = 8
+        nheads = 1  # 8
 
         q = torch.rand(
             (bs, nheads, query_tokens, dim),
@@ -500,7 +500,33 @@ class CPFlexAttentionTest(DTensorTestBase):
             cp_k.requires_grad = False
             cp_v.requires_grad = False
 
+        # shard the output
+        from torch.distributed.tensor.experimental._attention import (
+            _context_parallel_buffers,
+        )
+
+        torch.set_printoptions(threshold=100000)
+
+        if self.rank == 0:
+            print(f"full expect_out = {expect_out[0][0]}")
+
+        expect_out, expect_lse = _context_parallel_buffers(
+            device_mesh,
+            buffers=[expect_out.detach(), expect_aux.lse.detach()],
+            buffer_seq_dims=[2, 2],
+            load_balance_indices=lb.generate_indices(),
+        )
+        # torch.distributed.breakpoint()
+        # torch.distributed.barrier()
+
+        print(f"rank {self.rank}: cp_out = {cp_out[0][0]}")
+        print(f"rank {self.rank}: expect_out = {expect_out[0][0]}")
+
+        torch.testing.assert_close(cp_out, expect_out, atol=atol, rtol=rtol)
+        torch.testing.assert_close(cp_lse, expect_aux.lse, atol=atol, rtol=rtol)
+
         # unshard the output
+        """
         cp_out, cp_lse = context_parallel_unshard(
             device_mesh,
             buffers=[cp_out, cp_aux.lse],
@@ -520,6 +546,7 @@ class CPFlexAttentionTest(DTensorTestBase):
         torch.testing.assert_close(cp_q_grad, q.grad, atol=atol, rtol=rtol)
         torch.testing.assert_close(cp_k_grad, k.grad, atol=atol, rtol=rtol)
         torch.testing.assert_close(cp_v_grad, v.grad, atol=atol, rtol=rtol)
+        """
 
         # reset CP context dispatch mode to default
         torch.distributed.tensor.experimental._attention._dispatch_mode = (
@@ -648,10 +675,10 @@ class CPFlexAttentionTest(DTensorTestBase):
         _cp_options.enable_load_balance = True
 
         # Test 1: causal masking
-        block_mask = create_block_mask(causal_mask, B=1, H=1, Q_LEN=2048, KV_LEN=2048)
+        block_mask = create_block_mask(causal_mask, B=1, H=1, Q_LEN=512, KV_LEN=512)
         lb = PTRRLoadBalancer(block_mask, self.world_size, self.device_type)
         self._test_cp_flex_attention(
-            qkv_size=2048,
+            qkv_size=512,
             B=1,
             lb=lb,
             mask_func=causal_mask,

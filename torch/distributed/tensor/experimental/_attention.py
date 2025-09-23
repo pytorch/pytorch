@@ -239,9 +239,7 @@ class PTRRLoadBalancer(LoadBalancer):
         self.device = device
 
     @staticmethod
-    def ptrr_scheduling(
-        process_time: Tensor, group_size: int, return_block_idx: bool = True
-    ) -> Tensor:
+    def ptrr_scheduling(process_time: Tensor, group_size: int) -> Tensor:
         """
         Separate the tasks into ``group_size`` groups using PTRR scheduling.
         process_time:
@@ -274,20 +272,9 @@ class PTRRLoadBalancer(LoadBalancer):
         )  # (group_size, n // group_size)
 
         # sort each group
-        # TODO: see if this makes difference in performance
+        # TODO: see if sorting makes difference regarding performance
         tasks_in_group, _ = torch.sort(tasks_in_group, dim=1)
-        tasks_in_group = tasks_in_group.reshape(-1)
-
-        if return_block_idx:
-            return tasks_in_group
-
-        # NOTE: assume the block size is 128!!
-        indices = torch.arange(128 * num_tasks, device=device).view(
-            -1, 128
-        )  # (NUM_BLOCKS, 128)
-        indices = indices[tasks_in_group]  # (group_size, -1)
-
-        return indices.view(-1)
+        return tasks_in_group
 
     def generate_indices(self, restore: bool = False) -> Tensor:
         """
@@ -303,18 +290,42 @@ class PTRRLoadBalancer(LoadBalancer):
         )
         B, H, Q = non_sparse_kv_num_blocks.shape
         # assumption: the masking is identical across heads
-        non_sparse_kv_num_blocks = non_sparse_kv_num_blocks.view(-1, Q)  # (B, Q)
+        non_sparse_kv_num_blocks = non_sparse_kv_num_blocks.view(-1, Q)  # (B, Q_BLK)
+        # torch.distributed.breakpoint()
+        # torch.distributed.barrier()
         batch_ptrr = torch.vmap(
             functools.partial(
-                PTRRLoadBalancer.ptrr_scheduling, group_size=self.world_size
+                PTRRLoadBalancer.ptrr_scheduling,
+                group_size=self.world_size,
             )
         )
-        ptrr_indices = batch_ptrr(non_sparse_kv_num_blocks)  # (B, Q)
+        ptrr_indices = batch_ptrr(
+            non_sparse_kv_num_blocks
+        )  # (B, group_size, num_blks_in_group)
+        ptrr_indices = ptrr_indices.reshape(B, -1)  # (B, num_blocks)
+
+        # NOTE: only support the case where the qkv block size are equal
+        q_blk_size, kv_blk_size = block_mask.BLOCK_SIZE
+        assert (
+            q_blk_size == kv_blk_size
+        ), "for now only support q_blk_size == kv_blk_size"
+
+        # print(f"indices shape = {ptrr_indices.shape}, indices = {ptrr_indices}")
+        indices = torch.arange(
+            q_blk_size * ptrr_indices.size(1), device=ptrr_indices.device
+        ).view(
+            -1, q_blk_size
+        )  # (NUM_BLOCKS, BLOCK_SIZE)
+        indices = indices[ptrr_indices].view(B, -1)  # (B, qkv_size)
+        # print(f"indices shape = {indices.shape}, indices = {indices}")
+
+        # torch.distributed.breakpoint()
+        # torch.distributed.barrier()
 
         if restore:
-            ptrr_indices = torch.vmap(torch.argsort)(ptrr_indices)
+            indices = torch.vmap(torch.argsort)(indices)
 
-        return ptrr_indices
+        return indices
 
 
 def _create_default_load_balancer(
