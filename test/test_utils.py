@@ -41,10 +41,14 @@ from torch.utils._traceback import (
     report_compile_source_on_error,
 )
 from torch.utils.checkpoint import (
+    _allowed_determinism_checks_to_fns,
     _infer_device_type,
     checkpoint,
     checkpoint_sequential,
+    get_determinism_check_names,
     get_device_states,
+    register_determinism_check,
+    unregister_determinism_check,
 )
 from torch.utils.data import DataLoader
 
@@ -1018,6 +1022,49 @@ class TestDeprecate(TestCase):
             deprecated_api(1, y=2)  # noqa: F821
         _deprecated_api(1, 2)
         _deprecated_api(1, y=2)
+
+
+class TestDeterminismCheck(TestCase):
+    def setUp(self):
+        self.original_checks = _allowed_determinism_checks_to_fns.copy()
+        self.test_func = lambda x: x.shape
+
+    def tearDown(self):
+        _allowed_determinism_checks_to_fns.clear()
+        _allowed_determinism_checks_to_fns.update(self.original_checks)
+
+    def test_reset_determinism_check(self):
+        check_name = "test_shape_check"
+        self.assertNotIn(check_name, get_determinism_check_names())
+        register_determinism_check(check_name, self.test_func)
+        self.assertIn(check_name, get_determinism_check_names())
+
+    def test_register_non_callable(self):
+        check_name = "invalid_check"
+        non_callable = "not a function"
+
+        with self.assertRaises(TypeError) as context:
+            register_determinism_check(check_name, non_callable)  # type: ignore[arg-type]
+
+        self.assertIn("The check function must be callable", str(context.exception))
+
+    def test_unregister_existing_check(self):
+        check_name = "test_to_unregister"
+        register_determinism_check(check_name, self.test_func)
+        self.assertIn(check_name, get_determinism_check_names())
+        unregister_determinism_check(check_name)
+        self.assertNotIn(check_name, get_determinism_check_names())
+
+    def test_get_check_names(self):
+        initial_names = set(get_determinism_check_names())
+        new_names = ["check1", "check2"]
+        for name in new_names:
+            register_determinism_check(name, self.test_func)
+
+        updated_names = set(get_determinism_check_names())
+        self.assertTrue(initial_names.issubset(updated_names))
+        self.assertTrue(set(new_names).issubset(updated_names))
+        self.assertEqual(len(updated_names), len(initial_names) + len(new_names))
 
 
 if __name__ == "__main__":

@@ -1070,6 +1070,20 @@ _allowed_determinism_checks_to_fns: Dict[str, Callable[[torch.Tensor], Any]] = {
     "none": lambda _: None,
 }
 
+def register_determinism_check(name: str, func: Callable[[torch.Tensor], Any]) -> None:
+    if name in _allowed_determinism_checks_to_fns:
+        raise ValueError(f"Determinism check '{name}' already exists")
+    if not callable(func):
+        raise TypeError("The check function must be callable")
+    _allowed_determinism_checks_to_fns[name] = func
+
+def unregister_determinism_check(name: str) -> None:
+    if name in _allowed_determinism_checks_to_fns:
+        del _allowed_determinism_checks_to_fns[name]
+
+def get_determinism_check_names() -> list[str]:
+    return list(_allowed_determinism_checks_to_fns.keys())
+
 # See Rule 5
 class _StopRecomputationError(Exception):
     pass
