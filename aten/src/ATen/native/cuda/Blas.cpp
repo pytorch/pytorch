@@ -2117,7 +2117,7 @@ _scaled_rowwise_rowwise(
     TORCH_CHECK(mat_b.dtype() == at::kFloat8_e4m3fnuz);
   }
   else {
-    TORCH_CHECK(mat_bb.dtype() == at::kFloat8_e4m3fn);
+    TORCH_CHECK(mat_b.dtype() == at::kFloat8_e4m3fn);
   }
   // Until more than bf16 is supported.
   TORCH_CHECK(out.scalar_type() == ScalarType::BFloat16,
