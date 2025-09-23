@@ -123,7 +123,7 @@ def create_model(attention_fn, nheads, dim1, dim2, sac_policy=None):
     return LocalMapTransformerBlock(nheads, dim1, dim2)
 
 
-def get_local_mapped_functions():
+def get_local_mapped_functions(mesh):
     assert torch.distributed.is_available()
 
     @local_map(
@@ -135,14 +135,14 @@ def get_local_mapped_functions():
         ),
         redistribute_inputs=True,
         in_grad_placements=None,
-        device_mesh=None,
+        device_mesh=mesh,
     )
     def cp_decorated(query, key, value):
         return context_parallel_attention(query, key, value)
 
     cp_function = local_map(
         context_parallel_attention,
-        out_placements=(Shard(0), Shard(1), Shard(2)),
+        out_placements=((Shard(0), Shard(1), Shard(2)),),
         in_placements=(
             (Shard(0), Shard(1), Shard(2)),  # query
             (Shard(0), Shard(1), Replicate()),  # key
@@ -150,7 +150,7 @@ def get_local_mapped_functions():
         ),
         redistribute_inputs=True,
         in_grad_placements=None,
-        device_mesh=None,
+        device_mesh=mesh,
     )
 
     return cp_decorated, cp_function
@@ -160,13 +160,32 @@ class TestLocalMap(TestCase):
     def setUp(self):
         self.exit_stack = contextlib.ExitStack()
         self.exit_stack.enter_context(sdpa_kernel(backends=[SDPBackend.MATH]))
+        if torch.distributed.is_available():
+            from torch.testing._internal.distributed.fake_pg import FakeStore
+
+            self.fake_store = FakeStore()
+            self.world_size = 256
+            torch.distributed.init_process_group(
+                "fake", store=self.fake_store, rank=0, world_size=self.world_size
+            )
+            self.mesh = torch.distributed.device_mesh.init_device_mesh(
+                "cpu",
+                (self.world_size // 32, 8, 4),
+                mesh_dim_names=(
+                    "dp",
+                    "tp",
+                    "cp",
+                ),
+            )
 
     def tearDown(self):
         self.exit_stack.close()
+        if torch.distributed.is_available():
+            torch.distributed.destroy_process_group()
 
     @unittest.skipIf(*get_skip_reasons())
     def test_simple(self):
-        cp_decorated, cp_function = get_local_mapped_functions()
+        cp_decorated, cp_function = get_local_mapped_functions(self.mesh)
         bs = 8 * 1
         dim1 = 96
         dim2 = dim1 * 4
@@ -244,15 +263,15 @@ class GraphModule(torch.nn.Module):
         return (o_6,)
 
     class subgraph_0(torch.nn.Module):
-        def forward(self, q_1: "f32[8, 16, 16, 6]", k_1: "f32[8, 16, 16, 6]", v_1: "f32[8, 16, 16, 6]"):
-            out: "f32[8, 16, 16, 6]" = torch._C._nn.scaled_dot_product_attention(query = q_1, key = k_1, value = v_1, is_causal = False);  q_1 = k_1 = v_1 = None
+        def forward(self, q_1: "f32[1, 2, 4, 6]", k_1: "f32[1, 2, 16, 6]", v_1: "f32[1, 2, 16, 6]"):
+            out: "f32[1, 2, 4, 6]" = torch._C._nn.scaled_dot_product_attention(query = q_1, key = k_1, value = v_1, is_causal = False);  q_1 = k_1 = v_1 = None
             return (out,)
 """,
             )
 
     @unittest.skipIf(*get_skip_reasons())
     def test_sac(self):
-        cp_decorated, cp_function = get_local_mapped_functions()
+        cp_decorated, cp_function = get_local_mapped_functions(self.mesh)
         bs = 8 * 1
         dim1 = 96
         dim2 = dim1 * 4
@@ -329,7 +348,7 @@ class GraphModule(torch.nn.Module):
         # so that we can defer inlining for up until AOTAutograd stage 1.
         # Then we should be inlined by stage 2. But we can't do that today.
 
-        cp_decorated, cp_function = get_local_mapped_functions()
+        cp_decorated, cp_function = get_local_mapped_functions(self.mesh)
         bs = 8 * 1
         dim1 = 96
         dim2 = dim1 * 4

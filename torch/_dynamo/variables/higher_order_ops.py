@@ -3569,6 +3569,50 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
             *user_args,
         ) = args
 
+        local_map_kwargs = {
+            "out_placements": out_placements.value,
+            "in_placements": in_placements.value,
+            "redistribute_inputs": redistribute_inputs.value,
+            "in_grad_placements": in_grad_placements.value,
+            "device_mesh": device_mesh.value,
+        }
+        assert local_map_kwargs["device_mesh"] is not None
+        mesh = local_map_kwargs["device_mesh"]
+
+        # For Autoparallel, the initial trace is done with global shapes, then we decide model weights sharding,
+        # and reuse the graph. Since the sharding decision is after the initial trace, we can't trace with local shapes.
+        # For local_map however, since we specify all placements, we can trace with local shapes.
+        assert len(in_placements.value) == len(user_args)
+        from torch.distributed._tensor import distribute_tensor
+
+        priors = {}
+        for placements, vt in zip(in_placements.value, user_args):
+            if isinstance(vt, variables.lazy.LazyVariableTracker):
+                vt = variables.lazy.LazyVariableTracker.realize_all(vt)
+
+            if not isinstance(vt, variables.TensorVariable):
+                assert placements is None
+                continue
+
+            # 1. Convert inputs to local shapes
+            global_tensor = vt.as_proxy().node.meta["example_value"]
+            # NOTE: We don't support local_map region relying on exact grad_fn information
+            # This is okay since accessing grad_fn is a graph break.
+            temp = distribute_tensor(
+                global_tensor.detach().requires_grad_(global_tensor.requires_grad),
+                mesh,
+                placements,
+                src_data_rank=None,
+            )
+            local_tensor = temp._local_tensor
+            del temp
+
+            priors[vt] = global_tensor
+            vt.as_proxy().node.meta["example_value"] = local_tensor
+
+            vt.synchronize_attributes(tx)
+
+        # 2. Trace trace local_map subgraph with local tensors
         (
             p_args,
             p_kwargs,
@@ -3580,16 +3624,6 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
         ) = self.create_wrapped_node(
             tx, user_func, user_args, kwargs, self.value._name, subgraph_name="subgraph"
         )
-
-        # Treat as const, so we don't have to deal with Placement types in fx IR
-        # Guarded with EQUALS_MATCH on local_map call's arguments
-        body_gmod.meta["local_map_kwargs"] = {
-            "out_placements": out_placements.value,
-            "in_placements": in_placements.value,
-            "redistribute_inputs": redistribute_inputs.value,
-            "in_grad_placements": in_grad_placements.value,
-            "device_mesh": device_mesh.value,
-        }
 
         assert len(p_kwargs) == 0
 
@@ -3603,6 +3637,46 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
         out = _call_function_and_unflatten_output(
             tx, self.value, p_args, p_kwargs, flat_example_value, treespec
         )
+
+        # 3. Restore inputs and outputs to global shapes
+        for vt, global_tensor in priors.items():
+            vt.as_proxy().node.meta["example_value"] = global_tensor
+            vt.synchronize_attributes(tx)
+
+        from . import TensorVariable
+
+        outs = out if isinstance(out, TupleVariable) else [out]
+        assert len(outs) == len(out_placements.value)
+        for placements, vt in zip(out_placements.value, outs):
+            if not isinstance(vt, TensorVariable):
+                assert placements is None
+                continue
+
+            local_tensor = vt.as_proxy().node.meta["example_value"]
+
+            # NOTE: We don't support code after the local_map region relying on exact grad_fn information
+            # This is okay since accessing grad_fn is a graph break.
+            from torch.distributed.tensor._utils import compute_global_tensor_info
+
+            global_shape, global_stride = compute_global_tensor_info(
+                local_tensor, mesh, placements
+            )
+            assert tx.fake_mode is not None
+            with tx.fake_mode:
+                global_tensor = torch.empty_strided(
+                    global_shape,
+                    global_stride,
+                    dtype=local_tensor.dtype,
+                    device=local_tensor.device,
+                    requires_grad=local_tensor.requires_grad,
+                )
+
+            vt.as_proxy().node.meta["example_value"] = global_tensor
+            vt.synchronize_attributes(tx)
+
+        # Treat as const, so we don't have to deal with Placement types in fx IR
+        # Guarded with EQUALS_MATCH on local_map call's arguments
+        body_gmod.meta["local_map_kwargs"] = local_map_kwargs
 
         return out
 
