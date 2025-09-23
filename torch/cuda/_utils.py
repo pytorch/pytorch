@@ -44,7 +44,6 @@ def _get_nvrtc_library(nvrtc_path: Optional[str] = None) -> ctypes.CDLL:
         nvrtc_libs = [
             "nvrtc64_130_0.dll",
             "nvrtc64_120_0.dll",
-            "nvrtc64_112_0.dll",
         ]
     else:
         nvrtc_libs = [
