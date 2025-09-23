@@ -25,7 +25,8 @@ python test/run_test.py --cpp --verbose -i \
   cpp/NamedTensor_test \
   cpp/cpu_generator_test \
   cpp/legacy_vmap_test \
-  cpp/operators_test
+  cpp/operators_test \
+  cpp/cuda_allocator_test
 
 run_if_exists() {
   local test_name="$1"
