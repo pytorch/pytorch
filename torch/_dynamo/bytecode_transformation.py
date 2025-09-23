@@ -24,7 +24,6 @@ import uuid
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from typing import Any, Callable, cast, Optional, TYPE_CHECKING, Union
 
-from ..utils._backport_slots import dataclass_slots
 from . import config
 from .bytecode_analysis import (
     get_indexof,
@@ -39,8 +38,7 @@ if TYPE_CHECKING:
     from .output_graph import DynamoTracerOutput
 
 
-@dataclass_slots
-@dataclasses.dataclass
+@dataclasses.dataclass(slots=True)
 class InstructionExnTabEntry:
     start: "Instruction"
     end: "Instruction"
@@ -68,8 +66,7 @@ class InstructionExnTabEntry:
         )
 
 
-@dataclass_slots
-@dataclasses.dataclass
+@dataclasses.dataclass(slots=True)
 class Instruction:
     """A mutable version of dis.Instruction"""
 
@@ -642,8 +639,7 @@ def linetable_311_writer(
     return linetable, update
 
 
-@dataclass_slots
-@dataclasses.dataclass
+@dataclasses.dataclass(slots=True)
 class ExceptionTableEntry:
     start: int
     end: int
