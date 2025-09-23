@@ -106,18 +106,6 @@ jobs:
         with:
           cuda-version: ${{ inputs.cuda-version }}
 
-      # TODO: Move to a requirements.txt file for windows
-      - name: Install pip dependencies
-        uses: nick-fields/retry@7152eba30c6575329ac0576536151aca5a72780e # v3.0.0
-        with:
-          shell: bash
-          timeout_minutes: 5
-          max_attempts: 5
-          retry_wait_seconds: 30
-          command: |
-            set -eu
-            python3 -m pip install 'xdoctest>=1.1.0'
-
       - name: Get workflow job id
         id: get-job-id
         uses: ./.github/actions/get-workflow-job-id
