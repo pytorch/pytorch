@@ -4,6 +4,8 @@
 // code for better UX.
 
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
+#include <torch/headeronly/util/Exception.h>
+#include <torch/headeronly/util/Metaprogramming.h>
 
 // Technically, this file doesn't use anything from stableivalue_conversions.h,
 // but we need to include it here as the contents of stableivalue_conversions.h
@@ -168,3 +170,126 @@ class StableTorchLibraryInit final {
       __LINE__);                                                            \
   void STABLE_CONCATENATE(                                                  \
       STABLE_TORCH_LIBRARY_FRAGMENT_init_##ns##_, uid)(StableLibrary & m)
+
+namespace {
+
+template <class... T, std::size_t... I>
+std::tuple<T...> unbox_to_tuple_impl(
+    StableIValue* stack,
+    std::index_sequence<I...>) {
+  return std::make_tuple(to<T>(stack[I])...);
+}
+
+template <class... T>
+std::tuple<T...> unbox_to_tuple(StableIValue* stack) {
+  return unbox_to_tuple_impl<T...>(
+      stack, std::make_index_sequence<sizeof...(T)>());
+}
+
+template <class... T, std::size_t... I>
+void box_from_tuple_impl(
+    StableIValue* stack,
+    std::tuple<T...> vals,
+    std::index_sequence<I...>) {
+  ((stack[I] = from<T>(std::get<I>(vals))), ...);
+}
+
+template <class... T>
+void box_from_tuple(StableIValue* stack, std::tuple<T...> vals) {
+  box_from_tuple_impl<T...>(
+      stack, vals, std::make_index_sequence<sizeof...(T)>());
+}
+
+template <
+    typename ReturnType,
+    typename ParameterTypeList,
+    typename FuncT,
+    FuncT* func>
+struct boxer_impl {
+  static_assert(c10::guts::false_t<ReturnType>::value, "Unsupported");
+};
+
+template <
+    typename... ReturnTypes,
+    typename... ParameterTypes,
+    typename FuncT,
+    FuncT* func>
+struct boxer_impl<
+    std::tuple<ReturnTypes...>,
+    c10::guts::typelist::typelist<ParameterTypes...>,
+    FuncT,
+    func> {
+  static void boxed_fn(
+      StableIValue* stack,
+      uint64_t num_args,
+      uint64_t num_outputs) {
+    STD_TORCH_CHECK(
+        num_args == sizeof...(ParameterTypes),
+        "Expected ",
+        num_args,
+        " args, got ",
+        sizeof...(ParameterTypes));
+    STD_TORCH_CHECK(
+        num_outputs == sizeof...(ReturnTypes),
+        "Expected ",
+        num_outputs,
+        " outputs, got ",
+        sizeof...(ReturnTypes));
+    std::tuple<ParameterTypes...> args =
+        unbox_to_tuple<ParameterTypes...>(stack);
+    auto res = std::apply(func, args);
+    box_from_tuple<ReturnTypes...>(stack, res);
+  }
+};
+
+template <
+    typename ReturnType,
+    typename... ParameterTypes,
+    typename FuncT,
+    FuncT* func>
+struct boxer_impl<
+    ReturnType,
+    c10::guts::typelist::typelist<ParameterTypes...>,
+    FuncT,
+    func> {
+  static void boxed_fn(
+      StableIValue* stack,
+      uint64_t num_args,
+      uint64_t num_outputs) {
+    STD_TORCH_CHECK(
+        num_args == sizeof...(ParameterTypes),
+        "Expected ",
+        num_args,
+        " args, got ",
+        sizeof...(ParameterTypes));
+    STD_TORCH_CHECK(
+        num_outputs == 1, "Expected ", num_outputs, " outputs, got ", 1);
+    std::tuple<ParameterTypes...> args =
+        unbox_to_tuple<ParameterTypes...>(stack);
+    auto res = std::apply(func, args);
+    stack[0] = from<ReturnType>(res);
+  }
+};
+
+template <typename FuncT, FuncT* func>
+struct boxer {
+  using FunctionTraits = c10::guts::infer_function_traits_t<FuncT>;
+
+  static void boxed_fn(
+      StableIValue* stack,
+      uint64_t num_args,
+      uint64_t num_outputs) {
+    boxer_impl<
+        typename FunctionTraits::return_type,
+        typename FunctionTraits::parameter_types,
+        FuncT,
+        func>::boxed_fn(stack, num_args, num_outputs);
+  }
+};
+
+} // namespace
+
+#define TORCH_BOX(func)                                               \
+  boxer<                                                              \
+      std::remove_pointer_t<std::remove_reference_t<decltype(func)>>, \
+      (func)>::boxed_fn
