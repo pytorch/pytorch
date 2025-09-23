@@ -485,6 +485,17 @@ class CPUReproTests(TestCase):
             example_inputs = (torch.rand(1, 10),)
             self.common(Model(), example_inputs)
 
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_fill_diagonal_item_scalar_cpu(self):
+        def fn():
+            x = torch.ones(3, 3)
+            x.fill_diagonal_(0)
+            return x.sum().item()
+
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True)
+        eager = fn()
+        self.assertEqual(compiled(), eager)
+
     @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN is not enabled")
     @patch("torch.cuda.is_available", lambda: False)
     def test_linear_packed(self):
