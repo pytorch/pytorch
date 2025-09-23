@@ -1829,7 +1829,7 @@ class AOTInductorTestsTemplate:
                 self.user_float_feature_idx = user_float_feature_idx
                 self.register_buffer(
                     "_tensor_constant0",
-                    torch.ones(1, device=device, dtype=torch.float32),
+                    torch.ones(5, device=device, dtype=torch.float32),
                     persistent=True,
                 )
                 self.register_buffer(
@@ -1840,6 +1840,7 @@ class AOTInductorTestsTemplate:
                 self.sub_mod = SubModule(device)
 
             def forward(self, x):
+                self._tensor_constant0[1:2] = 1
                 return (
                     torch.index_select(
                         x, 1, torch.tensor(self.user_float_feature_idx, device=x.device)
@@ -7291,8 +7292,6 @@ MPS_TEST_FAILURES = {
     "test_index_put_with_none_index": fail_mps(),
     # Error device may not be nil
     "test_zero_size_weight": fail_mps(is_skip=True),
-    # RuntimeError: Cannot compare two tensors on different devices. Got: cpu and mps:0
-    "test_aoti_constant_tensor_name_collision": fail_mps(is_skip=True),
     # MPSGraph does not support tensor dims > INT_MAX
     "test_upper_bound_i64": fail_mps(is_skip=True),
     # MPS doesn't support triton

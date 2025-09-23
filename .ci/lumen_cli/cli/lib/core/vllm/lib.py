@@ -72,7 +72,7 @@ def sample_vllm_test_library():
                     ]
                 ),
                 "pytest -v -s entrypoints/llm/test_generate.py",
-                "VLLM_USE_V1=0 pytest -v -s entrypoints/offline_mode",
+                "pytest -v -s entrypoints/offline_mode",
             ],
         },
         "vllm_regression_test": {
