@@ -139,7 +139,7 @@ class DeferredTritonCallWrapper:
                 prefix.splice(self.kernel_name_to_body[self.kernel_name])
                 prefix.writeline("*/")
             self.generate_grid(prefix, inductor_meta, params)
-            self.generate_load_kernel(prefix, kernel_var_name, params)
+            self.generate_load_kernel(prefix, kernel_var_name, params, wrapper.device)
             self.generate_launch_kernel(prefix, wrapper, kernel_var_name, params)
         prefix.writeline("}")
 
@@ -169,11 +169,11 @@ class DeferredTritonCallWrapper:
         )
         prefix.writeline("if (grid_0 == 0 || grid_1 == 0 || grid_2 == 0) return;")
 
-    def generate_load_kernel(self, prefix, kernel_var_name, params):
+    def generate_load_kernel(self, prefix, kernel_var_name, params, device_type):
         prefix.writeline(f"if ({kernel_var_name} == nullptr) {{")
         with prefix.indent():
             embed_kernel_args = [f"__{params['inductor_meta']['kernel_name']}_start"]
-            if torch.xpu.is_available():
+            if device_type == "xpu":
                 # XPU needs the end address of the kernel to calculate the size of the kernel binary.
                 embed_kernel_args.append(
                     f"__{params['inductor_meta']['kernel_name']}_end"
@@ -193,6 +193,9 @@ class DeferredTritonCallWrapper:
                     "cubin_dir_",
                 ]
             )
+            if device_type == "xpu":
+                load_kernel_args.append(cpp_string_literal(str(params["build_flags"])))
+
             prefix.writeline(
                 f"{kernel_var_name} = loadKernel({', '.join(load_kernel_args)}); "
             )
@@ -236,6 +239,7 @@ class DeferredTritonCallWrapper:
         ]
         if wrapper.device == "xpu":
             launch_kernel_args.append(str(params["threads_per_warp"]))
+
         prefix.writeline(f"launchKernel({', '.join(launch_kernel_args)});")
 
 

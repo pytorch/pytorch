@@ -19,7 +19,8 @@
 
 static ze_module_handle_t _createModule(
     const uint8_t* binaryPtr,
-    size_t binarySize) {
+    size_t binarySize,
+    const char* buildFlags) {
   sycl::device& syclDevice =
       c10::xpu::get_raw_device(c10::xpu::current_device());
   auto& syclContext = c10::xpu::get_device_context();
@@ -27,8 +28,6 @@ static ze_module_handle_t _createModule(
       sycl::get_native<sycl::backend::ext_oneapi_level_zero>(syclDevice);
   auto context =
       sycl::get_native<sycl::backend::ext_oneapi_level_zero>(syclContext);
-
-  const char* buildFlags = "";
   const ze_module_format_t format = ZE_MODULE_FORMAT_IL_SPIRV;
   ze_module_desc_t moduleDescription = {};
   moduleDescription.stype = ZE_STRUCTURE_TYPE_MODULE_DESC;
@@ -87,7 +86,8 @@ static std::unique_ptr<sycl::kernel> _createKernel(
     std::string filePath,
     const std::string& funcName,
     uint32_t sharedMemBytes,
-    const std::optional<std::string>& binDir = std::nullopt) {
+    const std::optional<std::string>& binDir,
+    const std::string& buildFlags) {
   if (binDir) {
     std::filesystem::path p1{*binDir};
     std::filesystem::path p2{filePath};
@@ -100,7 +100,7 @@ static std::unique_ptr<sycl::kernel> _createKernel(
   std::string data(OSS.str());
 
   auto mod = _createModule(
-      reinterpret_cast<const uint8_t*>(data.c_str()), data.size());
+      reinterpret_cast<const uint8_t*>(data.c_str()), data.size(), buildFlags.c_str());
 
   return _createKernel(mod, funcName.c_str());
 }
@@ -110,11 +110,12 @@ static std::unique_ptr<sycl::kernel> _createKernel(
     const void* start,
     const void* end,
     const std::string& funcName,
-    uint32_t sharedMemBytes) {
+    uint32_t sharedMemBytes,
+    const std::string& buildFlags) {
   size_t size = reinterpret_cast<const uint8_t*>(end) -
       reinterpret_cast<const uint8_t*>(start);
 
-  auto mod = _createModule(reinterpret_cast<const uint8_t*>(start), size);
+  auto mod = _createModule(reinterpret_cast<const uint8_t*>(start), size, buildFlags.c_str());
 
   return _createKernel(mod, funcName.c_str());
 }
