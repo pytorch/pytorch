@@ -400,7 +400,6 @@ std::string compile_so(
 
   std::string compile_flags_path =
       normalize_path_separator(filename + "_compile_flags.json");
-  printf("compile_flags_path: %s\n", compile_flags_path.c_str());
   const nlohmann::json compile_flags = load_json_file(compile_flags_path);
 
   auto [compile_cmd, output_o] =
@@ -408,7 +407,6 @@ std::string compile_so(
 
   std::string linker_flags_path = normalize_path_separator(
       cpp_filename.substr(0, lastindex) + "_linker_flags.json");
-  printf("linker_flags_path: %s\n", linker_flags_path.c_str());
   const nlohmann::json linker_flags = load_json_file(linker_flags_path);
 
   obj_filenames.push_back(output_o);
@@ -416,12 +414,10 @@ std::string compile_so(
       get_cpp_compile_command(filename, obj_filenames, linker_flags);
 
   // Run the commands to generate a .so file
-  printf("build command: %s\n", compile_cmd.c_str());
   int status = system(compile_cmd.c_str());
   if (status != 0) {
     throw std::runtime_error("Failed to compile cpp file.");
   }
-  printf("link command: %s\n", link_cmd.c_str());
   status = system(link_cmd.c_str());
   if (status != 0) {
     throw std::runtime_error("Failed to link files.");
