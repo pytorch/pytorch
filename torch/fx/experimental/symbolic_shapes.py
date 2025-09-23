@@ -5467,7 +5467,7 @@ class ShapeEnv:
         def track_symint(
             source: Source, val: IntLikeType, constraint: DimConstraint = None
         ) -> None:
-            # Do not track unbacked inputs ! we do not generates guards on unbacked.
+            # We should not generate guards for unbacked inputs.
             if isinstance(val, SymInt) and self.is_unbacked_symint(val.node.expr):
                 return
 
