@@ -45,6 +45,25 @@ def scaled_mm(
     use_fast_accum: bool = False,
     **kwargs: Any,
 ) -> Tensor:
+    r"""
+    scaled_mm(mat_a, mat_b, scale_a, scale_recipe_a, scale_b, scale_recipe_b, swizzle_a, swizzle_b, bias, output_dtype,
+              contraction_dim, use_fast_accum)
+
+    Applies a scaled matrix-multiply, mm(mat_a, mat_b) where the scaling of mat_a and mat_b are described by
+    scale_recipe_a and scale_recipe_b respectively.
+
+    Args:
+        scale_a: Tensor containing decoding scaling factors for mat_a
+        scale_recipe_a: Enum describing how mat_a has been scaled
+        scale_b: Tensor containing decoding scaling factors for mat_b
+        scale_recipe_b: Enum describing how mat_b has been scaled
+        swizzle_a: Enum describing the swizzling pattern (if any) of scale_a
+        swizzle_b: Enum describing the swizzling pattern (if any) of scale_b
+        bias: optional bias term to be added to the output
+        output_dtype: dtype used for the output tensor
+        contraction_dim: describe which dimensions are :math:`K` in the matmul.
+        use_fast_accum: enable/disable tensor-core fast accumulation (Hopper-GPUs only)
+    """
     use_deprecated_api = kwargs.pop("use_deprecated_scaled_mm", False)
     if len(kwargs) > 0:
         raise RuntimeError("kwargs contains unexpected entries, ", kwargs.keys())

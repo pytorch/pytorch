@@ -2110,20 +2110,18 @@ _scaled_rowwise_rowwise(
     return out;
   }
 #else
-  if (scaling_choice_a == ScalingType::RowWise && scaling_choice_b == ScalingType::RowWise) {
-    // For ROCm, match behavior of f8f8bf16_rowwise type checking, for unit test purposes.
-    Tensor b = mat_b;
-    if (_scaled_mm_is_fnuz()) {
-      TORCH_CHECK(b.dtype() == at::kFloat8_e4m3fnuz);
-    }
-    else {
-      TORCH_CHECK(b.dtype() == at::kFloat8_e4m3fn);
-    }
-    // Until more than bf16 is supported.
-    TORCH_CHECK(out.scalar_type() == ScalarType::BFloat16,
-         "hipblaslt rowwise _scaled_mm only supports BFloat16 output but got ", out.scalar_type());
+
+  // For ROCm, match behavior of f8f8bf16_rowwise type checking, for unit test purposes.
+  //Tensor b = mat_b;
+  if (_scaled_mm_is_fnuz()) {
+    TORCH_CHECK(mat_b.dtype() == at::kFloat8_e4m3fnuz);
   }
+  else {
+    TORCH_CHECK(mat_bb.dtype() == at::kFloat8_e4m3fn);
   }
+  // Until more than bf16 is supported.
+  TORCH_CHECK(out.scalar_type() == ScalarType::BFloat16,
+       "hipblaslt rowwise _scaled_mm only supports BFloat16 output but got ", out.scalar_type());
 #endif
 
   _cutlass_scaled_gemm(mat_a, mat_b, scale_a, scale_b, scaling_choice_a, scaling_choice_b, bias, use_fast_accum, out);
