@@ -965,6 +965,18 @@ class CudaReproTests(TestCase):
             out, torch.scatter_reduce(input_orig.clone(), 0, index, src, "sum")
         )
 
+    def test_normalize_norm_leq_one(self):
+        def fn(x: torch.Tensor) -> torch.Tensor:
+            return torch.nn.functional.normalize(x, dim=-1)
+
+        inp = torch.tensor([[3.799999, 0.0, 0.0]], device="cuda", dtype=torch.float32)
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True)
+        out = compiled(inp)
+        norm = out.norm(dim=-1)
+        self.assertTrue(
+            torch.all(norm <= 1.0), f"expected norm <= 1.0 but got {norm.item()}"
+        )
+
     def test_libdevice_routing(self):
         def foo(x):
             return x.exp()
