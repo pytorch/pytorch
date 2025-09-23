@@ -500,6 +500,11 @@ c10::intrusive_ptr<TensorImpl> TensorImpl::shallow_copy_and_detach_core(
   c10::intrusive_ptr<TensorImpl> r;
   const auto mode_stack_len = c10::impl::TorchDispatchModeTLS::stack_len();
   // TODO: do we have to exclude after Python dispatch key set?
+
+  // These first two if/else if conditions are duplicated in detach()
+  // in VariableTypeManual.cpp because it is trying to avoid
+  // double-dispatching to Python. If you change them, please also
+  // coordinate with that logic.
   if (mode_stack_len > 0 &&
       !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Python)) {
     const auto& cur_torch_dispatch_mode_state =
