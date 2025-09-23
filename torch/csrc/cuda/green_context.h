@@ -174,8 +174,7 @@ class GreenContext {
         c10::cuda::DriverAPI::get()->cuCtxPopCurrent_(&popped));
     TORCH_INTERNAL_ASSERT(
         popped == context_, "expected popped context to be the current ctx");
-    C10_CUDA_CHECK(cudaStreamWaitEvent(parent_stream_, ev, 0));
-    C10_CUDA_CHECK(cudaEventDestroy(ev));
+    ev.block(parent_stream);
 #else
     TORCH_CHECK(false, "Green Context is only supported on CUDA 12.8+!");
 #endif
