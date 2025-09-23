@@ -1132,8 +1132,12 @@ class TestInductorDynamic(TestCase):
         features = 5536
         reduction_dim = 6  # Actual size is small
 
-        x = torch.randn(reduction_dim, batch, features, device=GPU_TYPE).permute(1, 2, 0)
-        y = torch.randn(reduction_dim, batch, features, device=GPU_TYPE).permute(1, 2, 0)
+        x = torch.randn(reduction_dim, batch, features, device=GPU_TYPE).permute(
+            1, 2, 0
+        )
+        y = torch.randn(reduction_dim, batch, features, device=GPU_TYPE).permute(
+            1, 2, 0
+        )
 
         torch._dynamo.mark_dynamic(x, 2, min=6, max=64)
         torch._dynamo.mark_dynamic(y, 2, min=6, max=64)

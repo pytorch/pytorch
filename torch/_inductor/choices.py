@@ -309,7 +309,7 @@ class InductorChoices:
 
             # If we are are coalescing on xblock (not ReductionHint.INNER) and this is not a tiny kernel
             # (not ReductionHint.OUTER_TINY), do not use persistent reduction if it induces tile
-            # quantization. Peristent reduction forces rblock == rnumel, if the bounds between lower
+            # quantization. Persistent reduction forces rblock == rnumel, if the bounds between lower
             # and upper are large, for the lower values we will be masking off large % of read/writes,
             # when we could expand the coalescing xblock instead.
             if lower != upper:
