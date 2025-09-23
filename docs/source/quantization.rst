@@ -3,10 +3,7 @@
 Quantization
 ============
 
-# .. automodule:: torch.quantization
-#    :noindex:
-# .. automodule:: torch.quantization.scaled_mm
-#    :members:
+.. automodule:: torch.quantization.scaled_mm
 
 .. automodule:: torch.ao.quantization
 .. automodule:: torch.ao.quantization.fx
