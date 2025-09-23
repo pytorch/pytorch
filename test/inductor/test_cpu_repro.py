@@ -4401,6 +4401,39 @@ class CPUReproTests(TestCase):
                 actual = compiled_m(x)
                 self.assertEqual(expected, actual)
 
+    @torch._dynamo.config.patch(
+        capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
+    )
+    @config.patch(emulate_precision_casts=True)
+    def test_group_norm_backward_symint_divisible_channels(self):
+        def fn(x, weight, bias):
+            y = torch.nn.functional.group_norm(x, 1, weight=weight, bias=bias)
+            return torch.sigmoid(y.max(dim=0).values)
+
+        torch._dynamo.reset()
+        metrics.reset()
+
+        shape = (2, 33, 4, 5)
+        x_ref = torch.rand(shape, dtype=torch.float32, requires_grad=True)
+        weight_ref = torch.rand((33,), dtype=torch.float32, requires_grad=True)
+        bias_ref = torch.rand((33,), dtype=torch.float32, requires_grad=True)
+
+        x_cmp = x_ref.clone().detach().requires_grad_(True)
+        weight_cmp = weight_ref.clone().detach().requires_grad_(True)
+        bias_cmp = bias_ref.clone().detach().requires_grad_(True)
+
+        eager_out = fn(x_ref, weight_ref, bias_ref)
+        eager_out.sum().backward()
+
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True, dynamic=True)
+        compiled_out = compiled(x_cmp, weight_cmp, bias_cmp)
+        compiled_out.sum().backward()
+
+        torch.testing.assert_close(compiled_out, eager_out)
+        torch.testing.assert_close(x_cmp.grad, x_ref.grad)
+        torch.testing.assert_close(weight_cmp.grad, weight_ref.grad)
+        torch.testing.assert_close(bias_cmp.grad, bias_ref.grad)
+
     def test_int_div_vec(self):
         def fn(x, y, mode):
             return torch.div(x, y, rounding_mode=mode)
