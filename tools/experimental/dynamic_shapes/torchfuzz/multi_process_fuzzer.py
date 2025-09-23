@@ -214,6 +214,7 @@ def run_multi_process_fuzzer(
                 pbar.set_postfix_str(
                     f"{successful_count}/{failed_count}/{ignored_count} | throughput: 0.00 seeds/hr"
                 )
+
                 def write_func(msg):
                     pbar.write(msg)
             else:
