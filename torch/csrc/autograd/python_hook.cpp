@@ -11,7 +11,6 @@
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_strings.h>
 
-#include <fmt/format.h>
 #include <iostream>
 #include <sstream>
 
@@ -290,9 +289,7 @@ static variable_list unwrap_variables(PyObject* py_variables) {
       results[i] = THPVariable_Unpack(item);
     } else {
       // this should never happen, but just in case...
-      auto error_msg =
-          fmt::format("expected variable but got {}", Py_TYPE(item)->tp_name);
-      TORCH_CHECK(false, error_msg);
+      TORCH_CHECK(false, "expected variable but got ", Py_TYPE(item)->tp_name);
     }
   }
   return results;
@@ -309,14 +306,16 @@ static void check_result(PyObject* prev, PyObject* result, PyObject* hook) {
 
   auto prev_size = PyTuple_GET_SIZE(prev);
   auto result_size = PyTuple_GET_SIZE(result);
-  if (prev_size != result_size) {
-    auto error_msg = fmt::format(
-        "hook '{}' has returned an incorrect number of values (got {}, but expected {})",
-        hook_name(hook),
-        result_size,
-        prev_size);
-    TORCH_CHECK(false, error_msg);
-  }
+
+  TORCH_CHECK(
+      prev_size == result_size,
+      "hook '",
+      hook_name(hook),
+      "' has returned an incorrect number of values (got ",
+      result_size,
+      ", but expected ",
+      prev_size,
+      ")");
 
   for (const auto i : c10::irange(prev_size)) {
     check_single_result(

@@ -188,14 +188,15 @@ auto PyNode::apply(variable_list&& inputs) -> variable_list {
   }
 
   // Now the number of gradients should match
-  if (num_outputs != num_forward_inputs) {
-    auto error_msg = fmt::format(
-        "function {} returned an incorrect number of gradients (expected {}, got {})",
-        name(),
-        num_forward_inputs,
-        num_outputs);
-    TORCH_CHECK(false, error_msg);
-  }
+  TORCH_CHECK(
+      num_outputs == num_forward_inputs,
+      "function ",
+      name(),
+      " returned an incorrect number of gradients (expected ",
+      num_forward_inputs,
+      ", got ",
+      num_outputs,
+      ")");
 
   // Massage the Python results tuple back into a C++ variable_list
   return to_variable_list(r.get(), is_variable_input);
@@ -436,23 +437,24 @@ variable_list PyNode::to_variable_list(
     PyObject* output = PyTuple_GET_ITEM(outputs, i);
     bool was_variable = is_variable_input[i];
     if (!was_variable) {
-      if (output != Py_None) {
-        auto error_msg = fmt::format(
-            "function {} returned a gradient different than None at position {}, but the corresponding forward input was not a Variable",
-            name(),
-            i + 1);
-        TORCH_CHECK(false, error_msg);
-      }
+      TORCH_CHECK(
+          output == Py_None,
+          "function ",
+          name(),
+          " returned a gradient different than None at position ",
+          i + 1,
+          ", but the corresponding forward input was not a Variable");
       continue;
     }
     if (output == Py_None) {
       results.emplace_back();
     } else {
-      if (!THPVariable_Check(output)) {
-        auto error_msg = fmt::format(
-            "expected Variable or None (got {})", THPUtils_typename(output));
-        TORCH_CHECK(false, error_msg);
-      }
+      TORCH_CHECK(
+          THPVariable_Check(output),
+          "expected Variable or None (got ",
+          THPUtils_typename(output),
+          ")");
+
       results.emplace_back(THPVariable_Unpack(output));
     }
   }

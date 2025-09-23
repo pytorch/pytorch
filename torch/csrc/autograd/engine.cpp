@@ -31,7 +31,6 @@
 #include <c10/util/ThreadLocal.h>
 #include <c10/util/irange.h>
 #include <c10/util/thread_name.h>
-#include <fmt/format.h>
 
 #include <atomic>
 #include <chrono>
@@ -1149,13 +1148,13 @@ void Engine::evaluate_function(
     for (const auto i : c10::irange(num_outputs)) {
       auto& output = outputs[i];
       at::OptionalDeviceGuard guard(device_of(output));
-      if (output.defined() && isnan(output)._is_any_true().item<bool>()) {
-        auto error_msg = fmt::format(
-            "Function '{}' returned nan values in its {}th output.",
-            fn.name(),
-            i);
-        TORCH_CHECK(false, error_msg);
-      }
+      TORCH_CHECK(
+          !output.defined() || !isnan(output)._is_any_true().item<bool>(),
+          "Function '",
+          fn.name(),
+          "' returned nan values in its ",
+          i,
+          "th output.");
     }
   }
 
