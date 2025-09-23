@@ -80,7 +80,7 @@ def _get_nvrtc_library() -> ctypes.CDLL:
         nvrtc_libs = [
             "libnvrtc.so.13",
             "libnvrtc.so.12",
-            "libnvrtc.so",  # Fallback to unversioned
+            "libnvrtc.so",
         ]
 
     for lib_name in nvrtc_libs:
@@ -88,8 +88,8 @@ def _get_nvrtc_library() -> ctypes.CDLL:
             return ctypes.CDLL(lib_name)
         except OSError:
             continue
-    
-    raise OSError(f"Could not find any NVRTC library")
+
+    raise OSError("Could not find any NVRTC library")
 
 
 def _get_gpu_rtc_library(rtc_path: Optional[str] = None) -> ctypes.CDLL:
@@ -97,9 +97,10 @@ def _get_gpu_rtc_library(rtc_path: Optional[str] = None) -> ctypes.CDLL:
     if rtc_path:
         try:
             return ctypes.CDLL(rtc_path)
-        except OSError as e:
-            raise OSError(f"Could not load RTC library from specified path '{rtc_path}': {e}")
-    
+
+        except OSError:
+            (f"Could not load RTC library from specified path {rtc_path}")
+
     # Otherwise use auto-discovery based on GPU vendor
     if torch.version.hip:
         return _get_hiprtc_library()
@@ -150,7 +151,7 @@ def _nvrtc_compile(
                                            If None, will detect from current device.
         cuda_include_dirs (list, None): List of directories containing CUDA headers
         nvcc_options (list, None): Additional options to pass to NVRTC
-        rtc_path (str, optional): Path to the RTC library (NVRTC/HIPRTC). If provided, this will skip the 
+        rtc_path (str, optional): Path to the RTC library (NVRTC/HIPRTC). If provided, this will skip the
                                    automatic discovery logic and use the specified library directly.
         auto_pch (bool): Enable automatic precompiled headers (CUDA 12.8+)
 
