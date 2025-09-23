@@ -264,33 +264,34 @@ struct AddGenericMetadata : public MetadataBase {
         continue;
       }
 
-      // Until needed, lets limit the kwargs to only ints, doubles, strings and
-      // bools
-      if (!val.isInt() && !val.isDouble() && !val.isString() && !val.isBool() &&
-          !val.isList()) {
-        LOG(WARNING) << "Inputted kwarg: " << key
-                     << " is not an int, double, string, bool, list for op: "
-                     << op_event.name_ << " skipping";
+      // Until needed, lets limit the kwargs to only ints, doubles, strings,
+      // bools, and list of strings
+      bool isValidType =
+          val.isInt() || val.isDouble() || val.isString() || val.isBool();
+      bool isStringList = false;
+
+      if (!isValidType && val.isList()) {
+        // Check if it's a list of strings
+        auto list = val.toListRef();
+        isStringList =
+            std::all_of(list.begin(), list.end(), [](const c10::IValue& item) {
+              return item.isString();
+            });
+      }
+
+      if (!isValidType && !isStringList) {
+        LOG(WARNING)
+            << "Inputted kwarg: " << key
+            << " is not an int, double, string, bool, or list of strings for op: "
+            << op_event.name_ << " skipping";
         continue;
       }
-      if (val.isList()) {
-        bool allStr = true;
-        c10::List<c10::IValue> valList = val.toList();
 
-        for (size_t i = 0; i < valList.size(); i++) {
-          if (!valList.get(i).isString()) {
-            allStr = false;
-            break;
-          }
-        }
-        if (allStr) {
-          addMetadata(key, ivalueListToStr(valList.vec()));
-        } else {
-          LOG(WARNING) << "Inputted kwarg: " << key
-                       << " is a list but not list of str for op: "
-                       << op_event.name_ << " skipping";
-          continue;
-        }
+      if (isStringList) {
+        // For list of strings, use ivalueListToStr
+        auto list = val.toListRef();
+        std::vector<c10::IValue> stringList(list.begin(), list.end());
+        addMetadata(key, ivalueListToStr(stringList));
       } else {
         bool isString = val.isString();
         addMetadata(key, ivalueToStr(val, isString));
