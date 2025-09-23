@@ -107,7 +107,9 @@ class PrecompileContext:
         """
         Records a backend artifact to be used with dynamo cache entries
         """
-        cls._backend_artifacts_by_key[artifact.key] = copy.deepcopy(artifact)
+        cls._backend_artifacts_by_key[_BackendId(artifact.key)] = copy.deepcopy(
+            artifact
+        )
 
     @classmethod
     def record_dynamo_cache_entry(
@@ -121,7 +123,7 @@ class PrecompileContext:
         Edit the content of an existing artifact
         """
         assert key in cls._backend_artifacts_by_key, f"Key {key} not found in artifacts"
-        artifact = cls._backend_artifacts_by_key[key]
+        artifact = cls._backend_artifacts_by_key[_BackendId(key)]
         artifact.edit_contents(edit_fn)
 
     @classmethod
@@ -129,12 +131,12 @@ class PrecompileContext:
         """
         Return the backend cache artifact with the associated key
         """
-        return cls._backend_artifacts_by_key.get(key, None)
+        return cls._backend_artifacts_by_key.get(_BackendId(key), None)
 
     @staticmethod
     def dump_debug_info(
         dynamo_entries: dict[str, _DynamoCacheEntry],
-        backend_artifacts: dict[str, BackendCacheArtifact[Any]],
+        backend_artifacts: dict[_BackendId, BackendCacheArtifact[Any]],
     ) -> dict[str, Any]:
         """
         Return a JSON serializable debug dump of all entries in the precompile context
