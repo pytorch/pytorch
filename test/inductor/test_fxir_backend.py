@@ -990,6 +990,31 @@ def forward(self, arg0_1, arg1_1, arg2_1):
     return [buf1, buf2]""",  # noqa: B950
         )
 
+    @parametrize("pred", (False, True))
+    def test_cond_dynamic_closure(self, pred: bool):
+        """
+        Test control flow using dynamic shapes and a closure.
+        """
+
+        class M(torch.nn.Module):
+            def forward(self, pred, x, y):
+                def true_fn(x):
+                    return x + y
+
+                def false_fn(x):
+                    return true_fn(x) / 2
+
+                return torch.cond(pred, true_fn, false_fn, (x,))
+
+        pred = torch.tensor([True], device=self.device)
+        (x, y) = tuple(torch.randn(8, device=self.device) for _ in range(2))
+        dynamic_shapes = {
+            "pred": {0: Dim.STATIC},
+            "x": {0: Dim.DYNAMIC},
+            "y": {0: Dim.DYNAMIC},
+        }
+        self.check(M(), (pred, x, y), dynamic_shapes=dynamic_shapes)
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests

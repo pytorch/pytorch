@@ -386,6 +386,13 @@ class FxConverter:
         else:
             raise NotImplementedError(f"Unable to extract buffer from node: {node}")
 
+    def _generate_size_proxy(
+        self, node: torch.fx.Node, expr: sympy.Expr
+    ) -> torch.fx.Proxy:
+        proxy = torch.fx.Proxy(node, tracer=self.tracer)
+        self.expr_to_proxy[expr] = proxy
+        return proxy
+
     def _generate_graph_inputs(self) -> None:
         """
         Converts graph inputs to FX placeholders.
@@ -407,6 +414,10 @@ class FxConverter:
             placeholder_node.meta["val"] = buffer.get_example()
             self._record_allocation(buffer, placeholder_node)
 
+            # Record dynamic shapes for tracing.
+            if isinstance(ir_node, sympy.Symbol):
+                self._generate_size_proxy(placeholder_node, ir_node)
+
     def _generate_graph_input_shapes(self) -> None:
         """
         Generate nodes creating symints that are part of graph input
@@ -421,8 +432,7 @@ class FxConverter:
         ) -> None:
             def codegen_proxy() -> torch.fx.Proxy:
                 size_node = self.gm.graph.call_function(target, (base_node, dim))
-                size_proxy = torch.fx.Proxy(size_node, tracer=self.tracer)
-                self.expr_to_proxy[sym_or_exp] = size_proxy
+                size_proxy = self._generate_size_proxy(size_node, sym_or_exp)
                 return size_proxy
 
             if isinstance(sym_or_exp, sympy.Symbol):
@@ -475,9 +485,7 @@ class FxConverter:
                     undefined_symbol_expr
                 ]
 
-        for node in V.graph.module.graph.find_nodes(op="placeholder"):  # type: ignore[operator, union-attr]
-            name = node.name
-            ir_node = self.graph_inputs.get(name)
+        for ir_node in self.graph_inputs.values():
             if isinstance(ir_node, ir.TensorBox):
                 buffer = self._get_buffer(ir_node)
                 placeholder_node = self.buffer_to_node[buffer.get_name()]
