@@ -146,6 +146,7 @@ class TestLocalMap(TestCase):
         self.exit_stack.enter_context(sdpa_kernel(backends=[SDPBackend.MATH]))
         if torch.distributed.is_available():
             from torch.testing._internal.distributed.fake_pg import FakeStore
+
             self.fake_store = FakeStore()
             self.world_size = 256
             torch.distributed.init_process_group(
