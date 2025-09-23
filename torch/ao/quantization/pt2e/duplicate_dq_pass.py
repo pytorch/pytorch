@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import logging
 import operator
 
@@ -30,7 +31,7 @@ _DEQUANTIZE_OPS = [
 
 def _maybe_duplicate_dq(
     gm: torch.fx.GraphModule, dq_node: torch.fx.Node, user: torch.fx.Node
-) -> None:
+):
     annotation = user.meta.get("quantization_annotation", None)
     if not _is_valid_annotation(annotation):  # type: ignore[arg-type]
         return
