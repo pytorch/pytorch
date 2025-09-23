@@ -210,8 +210,10 @@ def run_multi_process_fuzzer(
                         # tqdm automatically shows ETA (estimated time remaining) in the bar_format above
                         pbar.update(1)
                     else:
+                        status_emoji = "✅" if success else "❌"
+                        ignored_text = " (IGNORED)" if ignored_pattern_idx != -1 else ""
                         persist_print(
-                            f"Completed {i + 1}/{len(seeds)} - Seed {seed}: {'✅' if success else '❌'}{' (IGNORED)' if ignored_pattern_idx != -1 else ''}"
+                            f"Completed {i + 1}/{len(seeds)} - Seed {seed}: {status_emoji}{ignored_text}"
                         )
 
                     # Only show detailed output for failures (unless verbose)
@@ -253,8 +255,11 @@ def run_multi_process_fuzzer(
                                 persist_print("")
                     elif verbose:
                         if HAS_TQDM and pbar:
+                            ignored_text = (
+                                " [IGNORED]" if ignored_pattern_idx != -1 else ""
+                            )
                             pbar.write(
-                                f"✅ SUCCESS - Seed {seed} (duration: {duration:.2f}s){' [IGNORED]' if ignored_pattern_idx != -1 else ''}"
+                                f"✅ SUCCESS - Seed {seed} (duration: {duration:.2f}s){ignored_text}"
                             )
                             if output.strip():
                                 for line in output.split("\n"):
@@ -262,8 +267,11 @@ def run_multi_process_fuzzer(
                                         pbar.write(f"   {line}")
                                 pbar.write("")
                         else:
+                            ignored_text = (
+                                " [IGNORED]" if ignored_pattern_idx != -1 else ""
+                            )
                             persist_print(
-                                f"✅ SUCCESS - Seed {seed} (duration: {duration:.2f}s){' [IGNORED]' if ignored_pattern_idx != -1 else ''}"
+                                f"✅ SUCCESS - Seed {seed} (duration: {duration:.2f}s){ignored_text}"
                             )
                             if output.strip():
                                 for line in output.split("\n"):
