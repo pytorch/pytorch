@@ -1175,6 +1175,38 @@ class TestIndexInversion(TestCase):
         cls._exit_stack = contextlib.ExitStack()
         cls._exit_stack.enter_context(V.set_graph_handler(graph))
 
+    def _check_expr(self, expr, reconstruction, val_range):
+        import numpy as np
+        from sympy import lambdify
+
+        assert len(expr.free_symbols) == 1
+        p0 = next(iter(expr.free_symbols))
+
+        def floordiv_replacement(a, b):
+            """Replace FloorDiv(a, b) with a // b"""
+            return a // b
+
+        def modularindexing_replacement(x, base, divisor):
+            """Replace ModularIndexing(x, base, divisor) with (x // base) % divisor"""
+            return (x // base) % divisor
+
+        # Replace custom functions with sympy equivalents
+        expr_numpy_ready = expr.replace(FloorDiv, floordiv_replacement).replace(
+            ModularIndexing, modularindexing_replacement
+        )
+        reconstruction_numpy_ready = reconstruction.replace(
+            FloorDiv, floordiv_replacement
+        ).replace(ModularIndexing, modularindexing_replacement)
+
+        # Now lambdify with standard numpy
+        forward_func = lambdify(p0, expr_numpy_ready, modules="numpy")
+        inverse_func = lambdify(p0, reconstruction_numpy_ready, modules="numpy")
+
+        test_values = np.arange(0, val_range, dtype=np.int64)
+        forward_values = forward_func(test_values).astype(np.int64)
+        recovered_values = inverse_func(forward_values).astype(np.int64)
+        torch.testing.assert_close(test_values, recovered_values)
+
     @classmethod
     def tearDownClass(cls):
         super().tearDownClass()
@@ -1193,12 +1225,7 @@ class TestIndexInversion(TestCase):
 
         reconstruction = generate_inverse_formula(expr, p0)
         self.assertIsNotNone(reconstruction)
-
-        # Test sample of values across range
-        for val in range(0, 2097152, 1000):
-            forward = int(expr.subs(p0, val))
-            recovered = int(reconstruction.subs(p0, forward))
-            self.assertEqual(val, recovered)
+        self._check_expr(expr, reconstruction, 2097152)
 
     def test_inversion_cases(self):
         """Test various expressions for correct inversion behavior."""
@@ -1239,11 +1266,7 @@ class TestIndexInversion(TestCase):
             if should_invert:
                 self.assertIsNotNone(reconstruction, f"Expected invertible: {expr}")
                 # Test correctness on sample values
-                test_vals = [0, 1, test_range - 1] if test_range else []
-                for val in test_vals:
-                    forward = int(expr.subs(p, val))
-                    recovered = int(reconstruction.subs(p, forward))
-                    self.assertEqual(val, recovered)
+                self._check_expr(expr, reconstruction, test_range)
             else:
                 self.assertIsNone(reconstruction, f"Expected non-invertible: {expr}")
 
