@@ -274,7 +274,9 @@ PyObject* RecordFunctionFast_enter(PyObject* selfGeneric, PyObject* unused) {
               c10::List<std::string> string_ivalue_list(string_list);
               ivalue = at::IValue(string_ivalue_list);
             } else {
-              TORCH_WARN("Unable to infer type of value in the List for keyword: ", key_str);
+              TORCH_WARN(
+                  "Unable to infer type of value in the List for keyword: ",
+                  key_str);
             }
           } else {
             TORCH_WARN("Unable to infer type of value for keyword: ", key_str);

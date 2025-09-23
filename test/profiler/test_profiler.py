@@ -1838,7 +1838,7 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
                     self.assertTrue("string_param" in args)
                     # Check that the list of strings is properly serialized
                     # The list should be formatted as a JSON array by ivalueListToStr
-                    self.assertEqual(args["string_list"], ['hello', 'world', 'test'])
+                    self.assertEqual(args["string_list"], ["hello", "world", "test"])
                     self.assertEqual(args["int_param"], 42)
                     self.assertEqual(args["string_param"], "single_string")
                     self.assertTrue(e["cat"] == "cpu_op")
@@ -1877,7 +1877,7 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
                     self.assertTrue("mixed_list" not in args)
                     self.assertTrue("non_string_list" not in args)
                     # Check values
-                    self.assertEqual(args["valid_string_list"], ['valid1', 'valid2'])
+                    self.assertEqual(args["valid_string_list"], ["valid1", "valid2"])
                     self.assertEqual(args["valid_int"], 100)
                     self.assertTrue(e["cat"] == "cpu_op")
 
