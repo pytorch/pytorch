@@ -1,9 +1,7 @@
 import dataclasses
 import functools
 import itertools
-import sys
 from collections import Counter, defaultdict
-from collections.abc import Iterable, Iterator
 from typing import Callable, Literal, Optional, overload, TYPE_CHECKING, TypeVar, Union
 
 import sympy
@@ -373,19 +371,8 @@ class NodeSplitGetter:
         return pw, red
 
 
-if sys.version_info >= (3, 10):
-    # On Python 3.10+ we can use zip(strict=True)
-    zip_equal = functools.partial(zip, strict=True)
-else:
-    # Fallback for older versions
-    def zip_equal(it1: Iterable[T], it2: Iterable[U]) -> Iterator[tuple[T, U]]:
-        """
-        Zip two iterables, raising ValueError if their lengths differ.
-        """
-        if len(it1) != len(it2):
-            raise ValueError(f"Lengths differ: {len(it1)} != {len(it2)}")
-        return zip(it1, it2)
-
+# On Python 3.10+ we can use zip(strict=True)
+zip_equal = functools.partial(zip, strict=True)
 
 def apply_var_mapping(
     iter_vars: list[sympy.Symbol],

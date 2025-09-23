@@ -50,7 +50,6 @@ from torch._dynamo.testing import (
     CompileCounter,
     CompileCounterWithBackend,
     expectedFailureDynamic,
-    requiresPy310,
     same,
     skipIfNotPy311,
     unsupported,
@@ -10615,7 +10614,6 @@ def ___make_guard_fn():
 
         self.assertEqual(actual, expected)
 
-    @requiresPy310
     def test_frozen_dataclass_kw_only(self):
         @dataclasses.dataclass(frozen=True)
         class TestDataClass:
