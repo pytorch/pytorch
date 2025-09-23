@@ -5608,6 +5608,7 @@ class ShapeEnv:
             if is_traceable_wrapper_subclass(t):
                 from torch._dynamo.source import AttrSource
 
+                # torch.distributed.breakpoint()
                 assert isinstance(context, SubclassSymbolicContext)
 
                 # For subclasses, we need to track symints on BOTH the outer

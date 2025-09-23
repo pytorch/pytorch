@@ -1691,8 +1691,46 @@ class MetaConverter(Generic[_TensorT]):
                     # If we have a subclass that desugars into dense tensors,
                     # perform our callback on each inner tensor.
                     if t.is_traceable_wrapper_subclass:
+
+                        from torch._dynamo.source import AttrSource
+                        from torch.fx.experimental.symbolic_shapes import (
+                            DimDynamic,
+                            StatelessSymbolicContext,
+                            SubclassSymbolicContext,
+                        )
+
+                        view_base_context: Optional[
+                            torch.fx.experimental.symbolic_shapes.SymbolicContext
+                        ] = None
+                        if t.is_view:
+                            assert t.base is not None
+                            view_base_context = all_dynamic_symbolic_context(
+                                t.base, AttrSource(source, "_base"), shape_env, callback
+                            )
+
+                        t_symbolic_context: torch.fx.experimental.symbolic_shapes.SymbolicContext
+                        t_dynamic_sizes = [DimDynamic.DYNAMIC] * t.ndim
+
+                        assert t.attrs is not None
+                        inner_contexts: dict[
+                            str, torch.fx.experimental.symbolic_shapes.SymbolicContext
+                        ] = {}
+                        for attr, inner in t.attrs.items():
+                            assert isinstance(attr, str)
+                            inner_contexts[attr] = all_dynamic_symbolic_context(
+                                inner, AttrSource(source, attr), shape_env, callback
+                            )
+                        t_symbolic_context = SubclassSymbolicContext(
+                            dynamic_sizes=t_dynamic_sizes,
+                            constraint_sizes=[None] * t.ndim,
+                            inner_contexts=inner_contexts,  # type: ignore[arg-type]
+                            tensor_source=source,
+                            view_base_context=view_base_context,
+                        )
+
+
                         r = empty_create_subclass(
-                            t, outer_size=sizes, outer_stride=strides
+                            t, outer_size=sizes, outer_stride=strides, symbolic_context=t_symbolic_context,
                         )
                     else:
                         r = callback(

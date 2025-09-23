@@ -2019,7 +2019,8 @@ def _non_strict_export(
                 new_fake_kwargs,
                 fake_params_buffers,
                 new_fake_constant_attrs,
-                produce_guards_callback=_produce_guards_callback,
+                produce_guards_callback=None,
+                # produce_guards_callback=_produce_guards_callback,
                 transform=_tuplify_outputs,
             )
             # aten_export_artifact.constants contains only fake script objects, we need to map them back
