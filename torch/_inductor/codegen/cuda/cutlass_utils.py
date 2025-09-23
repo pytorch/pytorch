@@ -41,9 +41,9 @@ def move_cutlass_compiled_cache() -> None:
         return
 
     if config.is_fbcode():
-        import python_cutlass  # type: ignore[import-not-found]
+        import cutlass_cppgen as python_cutlass  # type: ignore[import-not-found]
     else:
-        import cutlass as python_cutlass  # type: ignore[import-not-found]  # noqa: F401
+        import cutlass_cppgen as python_cutlass  # type: ignore[import-not-found]  # noqa: F401
 
     # Check if the CACHE_FILE attribute exists in python_cutlass and if the file exists
     if not hasattr(python_cutlass, "CACHE_FILE") or not os.path.exists(
@@ -78,8 +78,8 @@ def try_import_cutlass() -> bool:
     """
     if config.is_fbcode():
         try:
+            import cutlass_cppgen  # type: ignore[import-not-found]  # noqa: F401
             import cutlass_library  # type: ignore[import-not-found]
-            import python_cutlass  # type: ignore[import-not-found]  # noqa: F401
         except ImportError as e:
             log.warning(
                 "Failed to import CUTLASS packages in fbcode: %s, ignoring the CUTLASS backend.",
@@ -118,7 +118,7 @@ def try_import_cutlass() -> bool:
     tmp_cutlass_full_path = os.path.abspath(os.path.join(cache_dir(), "torch_cutlass"))
 
     dst_link_library = path_join(tmp_cutlass_full_path, "cutlass_library")
-    dst_link_cutlass = path_join(tmp_cutlass_full_path, "cutlass")
+    dst_link_cutlass = path_join(tmp_cutlass_full_path, "cutlass_cppgen")
     dst_link_pycute = path_join(tmp_cutlass_full_path, "pycute")
 
     # mock modules to import cutlass
@@ -156,7 +156,7 @@ def try_import_cutlass() -> bool:
                 )
 
         try:
-            import cutlass  # noqa: F401, F811
+            import cutlass_cppgen  # noqa: F401, F811
             import cutlass_library.generator  # noqa: F401
             import cutlass_library.library  # noqa: F401
             import cutlass_library.manifest  # noqa: F401
@@ -421,7 +421,7 @@ def get_max_alignment(inductor_layout: Layout) -> int:
     offset = inductor_layout.offset
 
     def is_static_int(number):
-        return isinstance(number, (int, sympy.Integer))
+        return isinstance(number, (int | sympy.Integer))
 
     def a_factor_of(x, alignment):
         if is_static_int(x) and is_static_int(alignment):
