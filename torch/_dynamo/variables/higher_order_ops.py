@@ -3610,10 +3610,7 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
             priors[vt] = global_tensor
             vt.as_proxy().node.meta["example_value"] = local_tensor
 
-            print(f"local map input i, {global_tensor.shape=} -> {local_tensor.shape=}")
             vt.synchronize_attributes(tx)
-
-        print("running LocalMapWrappedHigherOrderVariable")
 
         # 2. Trace trace local_map subgraph with local tensors
         (
@@ -3650,7 +3647,6 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
 
         outs = out if isinstance(out, TupleVariable) else [out]
         assert len(outs) == len(out_placements.value)
-        # all_replicate = (Replicate(),) * mesh.ndim
         for placements, vt in zip(out_placements.value, outs):
             if not isinstance(vt, TensorVariable):
                 assert placements is None
