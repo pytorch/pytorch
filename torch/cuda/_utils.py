@@ -55,7 +55,7 @@ def _get_nvrtc_library(nvrtc_path: Optional[str] = None) -> ctypes.CDLL:
         except OSError:
             continue
     
-    raise OSError(f"Could not find any NVRTC library
+    raise OSError(f"Could not find any NVRTC library")
 
 
 def _nvrtc_compile(
