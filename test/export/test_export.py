@@ -1388,21 +1388,23 @@ graph():
         if is_strict_v2_test(self._testMethodName):
             with self.assertWarnsRegex(
                 UserWarning,
-                "L\['self']\._export_root.forward\.__func__\.__closure__\[1\]\.cell_contents\.bank",
+                r"(L\['self']\._export_root\.forward\.__func__\.__closure__\[1\]\.cell_contents\.bank"
+                r"|L\['self']\._export_root\.forward\.__func__\.__closure__\[1\]\.cell_contents\.bank_dict"
+                r"|L\['self']\._export_root\.forward\.__func__\.__closure__\[0\]\.cell_contents)",
             ):
                 ref(torch.randn(4, 4), torch.randn(4, 4))
         elif is_inline_and_install_strict_test(self._testMethodName):
             with self.assertWarnsRegex(
                 UserWarning,
-                "L\['self'\]\._modules\['_export_root'\]\.forward\.__func__\.__closure__\[0\]\.cell_contents",
+                r"(L\['self']\._modules\['_export_root']\.forward\.__func__\.__closure__\[1\]\.cell_contents\.bank"
+                r"|L\['self']\._modules\['_export_root']\.forward\.__func__\.__closure__\[1\]\.cell_contents\.bank_dict"
+                r"|L\['self']\._modules\['_export_root']\.forward\.__func__\.__closure__\[0\]\.cell_contents)",
             ):
                 ref(torch.randn(4, 4), torch.randn(4, 4))
         else:
             with self.assertWarnsRegex(
                 UserWarning,
-                "While exporting, we found certain side effects happened in the model.forward. "
-                "Here are the list of potential sources you can double check: "
-                "\[\"L\['global_list'\]\", \"L\['self'\].bank\", \"L\['self'\].bank_dict\"",
+                r"(L\['global_list'\]|L\['self'\]\.bank|L\['self'\]\.bank_dict)",
             ):
                 ref(torch.randn(4, 4), torch.randn(4, 4))
 
