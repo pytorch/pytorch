@@ -126,6 +126,23 @@ const char* extension_file_ext() {
 #endif
 }
 
+const char* get_output_flags(bool compile_only) {
+if(compile_only)
+{
+#ifdef _WIN32
+  return "/c /Fo";
+#else
+  return "-c -o";
+#endif
+}
+
+#ifdef _WIN32
+  return "/Fe";
+#else
+  return "-o";
+#endif
+}
+
 bool _is_windows_os() {
 #ifdef _WIN32
   return true;
@@ -231,20 +248,29 @@ std::tuple<std::string, std::string> get_cpp_compile_command(
     passthrough_parameters_args += arg_str + " ";
   }
 
+  #if 0
+  std::string compile_only_arg =
+    compile_only ? (_is_windows_os() ? "/c" : "-c") : ""; 
+  #endif
+
+  std::string output_flags =  get_output_flags(compile_only);
+
   std::string cmd;
   /*
   Format command as python frontend cpp_builder:
+  https://github.com/pytorch/pytorch/blob/3ef1bef36c73b4def0e1b71847e27fde1556c0fb/torch/_inductor/cpp_builder.py#L1780-L1790
   https://github.com/pytorch/pytorch/blob/3ef1bef36c73b4def0e1b71847e27fde1556c0fb/torch/_inductor/cpp_builder.py#L1959-L1976
   */
   if (_is_windows_os()) {
     cmd = fmt::format(
-        "{} {} {} {} {} {} {}",
+        "{} {} {} {} {} {} {}{}",
         compiler,
         include_dirs_args,
         definitions_args,
         cflags_args,
         source_args,
         passthrough_parameters_args,
+        output_flags,
         target_file);
     if (compile_only == false) {
       cmd += fmt::format(
@@ -256,13 +282,14 @@ std::tuple<std::string, std::string> get_cpp_compile_command(
     cmd = normalize_path_separator(cmd);
   } else {
     cmd = fmt::format(
-        "{} {} {} {} {} {} {}",
+        "{} {} {} {} {} {} {} {}",
         compiler,
         source_args,
         definitions_args,
         cflags_args,
         include_dirs_args,
         passthrough_parameters_args,
+        output_flags,
         target_file);
     if (compile_only == false) {
       cmd += fmt::format(
