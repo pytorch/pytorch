@@ -7,6 +7,8 @@
 #include <c10/util/CallOnce.h>
 #include <c10/xpu/XPUFunctions.h>
 
+constexpr uint64_t PHILOX_ROUND_SIZE = 4;
+
 namespace at {
 namespace xpu::detail {
 namespace {
@@ -69,10 +71,11 @@ c10::intrusive_ptr<XPUGeneratorState> XPUGeneratorState::clone() {
 
 // Function to increase the internal offset based on the specified increment.
 void XPUGeneratorState::increase(uint64_t increment) {
-  increment = ((increment + 3) / 4) * 4;
+  increment = ((increment + PHILOX_ROUND_SIZE - 1) / PHILOX_ROUND_SIZE) *
+      PHILOX_ROUND_SIZE;
   if (at::xpu::currentStreamCaptureStatus() !=
       at::xpu::CaptureStatus::Executing) {
-    TORCH_CHECK(
+    TORCH_INTERNAL_ASSERT(
         capturing_,
         "Attempt to increase offset for a XPU generator not in capture mode.");
     TORCH_INTERNAL_ASSERT(
@@ -82,7 +85,7 @@ void XPUGeneratorState::increase(uint64_t increment) {
         "Increment causes overflow in the offset value.");
     offset_intragraph_ += increment;
   } else {
-    TORCH_CHECK(
+    TORCH_INTERNAL_ASSERT(
         !capturing_,
         "Offset increment outside graph capture encountered unexpectedly.");
     TORCH_INTERNAL_ASSERT(
@@ -115,7 +118,7 @@ void XPUGeneratorImpl::set_current_seed(uint64_t seed) {
   } else {
     TORCH_CHECK(
         state_->seed_ == seed,
-        "CUDAGeneratorImpl::set_current_seed can be called during stream capture only if new seed is the same as the original seed.");
+        "XPUGeneratorImpl::set_current_seed can be called during stream capture only if new seed is the same as the original seed.");
   }
 }
 

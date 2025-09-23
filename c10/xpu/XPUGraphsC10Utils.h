@@ -8,15 +8,15 @@ using namespace sycl::ext::oneapi::experimental;
 namespace c10::xpu {
 
 static_assert(
-    int(queue_state::executing) == 0,
+    int8_t(queue_state::executing) == 0,
     "unexpected int(queue_state::executing) value");
 static_assert(
-    int(queue_state::recording) == 1,
+    int8_t(queue_state::recording) == 1,
     "unexpected int(queue_state::recording) value");
 
-enum class CaptureStatus : int {
-  Executing = int(queue_state::executing),
-  Recording = int(queue_state::recording)
+enum class CaptureStatus : int8_t {
+  Executing = int8_t(queue_state::executing),
+  Recording = int8_t(queue_state::recording)
 };
 
 inline std::ostream& operator<<(std::ostream& os, CaptureStatus status) {

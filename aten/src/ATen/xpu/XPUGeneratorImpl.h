@@ -16,7 +16,6 @@ struct XPUGeneratorState : public c10::intrusive_ptr_target {
   uint64_t philox_offset_per_thread_;
   uint32_t offset_intragraph_;
   bool capturing_{};
-  std::unordered_set<xpu::XPUGraph*> registered_graphs_;
   at::TensorBase seed_extragraph_{};
   at::TensorBase offset_extragraph_{};
 
