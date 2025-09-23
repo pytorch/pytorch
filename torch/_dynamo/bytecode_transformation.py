@@ -251,22 +251,6 @@ def create_rot_n(n: int) -> list[Instruction]:
         # e.g. rotate 3 is equivalent to swap 3, swap 2
         return [create_instruction("SWAP", arg=i) for i in range(n, 1, -1)]
 
-    # ROT_N does not exist in Python <= 3.9, but we can simulate it
-    if sys.version_info < (3, 10) and n >= 5:
-        """
-        0 1 2 3 4
-        [0 1 2 3 4]
-        4 3 2 1 0
-        4 [3 2 1 0]
-        4 0 1 2 3
-        """
-        return [
-            create_instruction("BUILD_TUPLE", arg=n),
-            create_instruction("UNPACK_SEQUENCE", arg=n),
-            create_instruction("BUILD_TUPLE", arg=n - 1),
-            create_instruction("UNPACK_SEQUENCE", arg=n - 1),
-        ]
-
     if n <= 4:
         return [create_instruction("ROT_" + ["TWO", "THREE", "FOUR"][n - 2])]
     return [create_instruction("ROT_N", arg=n)]
