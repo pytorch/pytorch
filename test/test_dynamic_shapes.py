@@ -214,7 +214,7 @@ def create_fake_tensor_with_dynamic_size(x, shape_env, dynamic_sizes, dynamic_st
 def create_symtype(cls, pytype, shape_env, val, duck=True, **kwargs):
     from torch._dynamo.source import ConstantSource
 
-    symbol = shape_env.create_symbol(
+    symbol = shape_env.create_non_data_dependent_symbol(
         val,
         source=ConstantSource(f"__testing_only{len(shape_env.var_to_val)}"),
         dynamic_dim=DimDynamic.DUCK if duck else DimDynamic.DYNAMIC,
@@ -3231,7 +3231,8 @@ class TestUnbacked(TestCase):
         with self.assertRaises(RuntimeError):
             func(a, torch.rand(2, 1))
 
-    def test_div_unabacked_eq_inputs(self):
+    @skipIfTorchDynamo("mark_unbacked is not traceable")
+    def test_div_unabacked_eq_input_tensors(self):
         @torch.compile(fullgraph=True)
         def func(a, b):
             x = a.size()[0]
@@ -3249,6 +3250,40 @@ class TestUnbacked(TestCase):
         torch._dynamo.decorators.mark_unbacked(a, 0)
         torch._dynamo.decorators.mark_unbacked(b, 0)
         func(a, b)
+
+    @torch.compiler.config.patch(unbacked_sources="L['x'],L['y']")
+    def test_div_unabacked_eq_input_ints(self):
+        @torch.compile(fullgraph=True)
+        def func(x, y):
+            a = torch.rand(1)
+            torch._check(x == y)
+            if x // y == 1:
+                a = a * 10
+            if 2 * x // y == 2:
+                a = a * 20
+            return a
+
+        func(10, 10)
+
+    @skipIfTorchDynamo("mark_unbacked is not traceable")
+    @torch.compiler.config.patch(unbacked_sources="L['y']")
+    def test_div_unabacked_eq_globals(self):
+        tensor = torch.rand(10, 44)
+        y = 10
+
+        @torch.compile(fullgraph=True, dynamic=True)
+        def func():
+            a = torch.rand(1)
+            x = tensor.size()[0]
+            torch._check(x == y)
+            if x // y == 1:
+                a = a * 10
+            if 2 * x // y == 2:
+                a = a * 20
+            return a
+
+        torch._dynamo.decorators.mark_unbacked(tensor, 0)
+        func()
 
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
     def test_div_unabacked_eq_item(self):

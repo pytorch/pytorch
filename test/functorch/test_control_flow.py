@@ -9103,7 +9103,7 @@ class TestHopSchema(TestCase):
         def create_symtype(cls, pytype, shape_env, val):
             from torch._dynamo.source import ConstantSource
 
-            symbol = shape_env.create_symbol(
+            symbol = shape_env.create_non_data_dependent_symbol(
                 val,
                 source=ConstantSource(
                     f"__testing_hop_schema{len(shape_env.var_to_val)}"

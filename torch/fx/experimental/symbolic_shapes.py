@@ -4387,7 +4387,7 @@ class ShapeEnv:
         constraint_dims = symbolic_context.constraint_sizes  # type: ignore[attr-defined]
         size = []
         for i, val in enumerate(tensor_size):
-            sym = self.create_symbol(
+            sym = self.create_non_data_dependent_symbol(
                 val if i not in hint_overrides else hint_overrides[i],
                 TensorPropertySource(source, TensorProperty.SIZE, i),
                 dynamic_dims[i],
@@ -4607,7 +4607,7 @@ class ShapeEnv:
                 )
             )
         sym_storage_offset = self.create_symintnode(
-            self.create_symbol(
+            self.create_non_data_dependent_symbol(
                 ex_storage_offset,
                 TensorPropertySource(source, TensorProperty.STORAGE_OFFSET),
                 dynamic_dim=dynamic_offset,
@@ -4664,7 +4664,7 @@ class ShapeEnv:
                         dyn_stride = (
                             DimDynamic.STATIC if are_sizes_static else DimDynamic.DUCK
                         )
-                    out_stride = self.create_symbol(
+                    out_stride = self.create_non_data_dependent_symbol(
                         val,
                         TensorPropertySource(source, TensorProperty.STRIDE, i),
                         dynamic_dim=dyn_stride,
@@ -4914,7 +4914,7 @@ class ShapeEnv:
 
         # We don't want to specialize zero one val for unspecified symbol
         # so that we can always get a new symbol despite val.
-        return self.create_symbol(
+        return self.create_non_data_dependent_symbol(
             val,
             source,
             dynamic_dim,
@@ -4924,8 +4924,17 @@ class ShapeEnv:
             symbolic_context=symbolic_context,
         )
 
+    @deprecated(
+        "`create_symbol` is deprecated and will be removed in a future version. "
+        "Please use `create_non_data_dependent_symbol` instead.",
+        category=FutureWarning,
+    )
     @record_shapeenv_event()
-    def create_symbol(
+    def create_symbol(self, *args, **kwargs) -> sympy.Expr:
+        return self.create_non_data_dependent_symbol(*args, **kwargs)
+
+    @record_shapeenv_event()
+    def create_non_data_dependent_symbol(
         self,
         val: int,
         source: Source,
@@ -4936,8 +4945,6 @@ class ShapeEnv:
         symbolic_context: Optional[StatelessSymbolicContext] = None,
     ) -> sympy.Expr:
         """Create a new symbol which is tracked by this ShapeEnv"""
-        import fbvscode
-        fbvscode.set_trace()
         # check if constraint_dim is actually static integer
         if (
             isinstance(constraint_dim, StrictMinMaxConstraint)
@@ -4982,10 +4989,8 @@ class ShapeEnv:
         if dynamic_dim in (DimDynamic.SIZE_LIKE_UNBACKED, DimDynamic.OBLIVIOUS_SIZE):
             out = self.create_unbacked_symint(source).node.expr
             self._constrain_range_for_size(out)
-            from torch._dynamo.source import LocalSource
 
-            if isinstance(source.base, LocalSource) and source.base.is_input:
-                self.unbacked_inputs.add(out)
+            self.unbacked_inputs.add(out)
 
             if isinstance(symbolic_context, StatefulSymbolicContext) and source_name:
                 symbolic_context.shape_env_to_source_to_symbol_cache[id(self)][

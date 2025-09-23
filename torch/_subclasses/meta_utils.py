@@ -1227,7 +1227,9 @@ class MetaConverter(Generic[_TensorT]):
                     # which will hard error.
                     sym_source = EphemeralSource("symint_visitor_fn")
 
-                    symbol = shape_env.create_symbol(s, sym_source, positive=None)
+                    symbol = shape_env.create_non_data_dependent_symbol(
+                        s, sym_source, positive=None
+                    )
                     return shape_env.create_symintnode(
                         symbol, hint=s, source=sym_source
                     )

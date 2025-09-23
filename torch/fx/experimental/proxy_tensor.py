@@ -2258,7 +2258,7 @@ class _MakefxTracer:
                         "shape_env should be set if tracing with 'symbolic'"
                     )
                     return self.fake_tensor_mode.shape_env.create_symintnode(
-                        self.fake_tensor_mode.shape_env.create_symbol(
+                        self.fake_tensor_mode.shape_env.create_non_data_dependent_symbol(
                             x, source, positive=None
                         ),
                         hint=x,

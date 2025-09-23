@@ -365,7 +365,7 @@ def forward(self):
         x = torch.randn((4, 8, 16, 16), requires_grad=False)
         index = 2
         shape_env = ShapeEnv()
-        symbol = shape_env.create_symbol(index, source=ConstantSource(
+        symbol = shape_env.create_non_data_dependent_symbol(index, source=ConstantSource(
             f"__testing_only{len(shape_env.var_to_val)}"))
         sym_index = torch.SymInt(SymNode(symbol, shape_env, int, hint=index))
 
