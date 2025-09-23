@@ -143,7 +143,8 @@ case $desired_python in
         RENAME_WHEEL=false
         ;;
     3.13t)
-        echo "Using 3.13 deps"
+        echo "Using 3.13t deps"
+        mac_version='macosx-11.0-arm64'
         NUMPY_PINNED_VERSION="==2.1.0"
         RENAME_WHEEL=false
         ;;

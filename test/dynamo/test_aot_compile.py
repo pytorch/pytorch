@@ -146,6 +146,22 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
             actual = compiled_fn(*example_inputs)
             self.assertEqual(expected, actual)
 
+    def test_aot_compile_disable_guard_check(self):
+        def fn(x, y):
+            return x + y
+
+        with torch.no_grad():
+            compiled_fn = torch.compile(fn, fullgraph=True).aot_compile(
+                ((torch.randn(3, 4), torch.randn(3, 4)), {})
+            )
+        inputs = (torch.randn(3, 4), torch.randn(3, 4))
+        expected = fn(*inputs)
+        with self.assertRaisesRegex(RuntimeError, "GuardManager check failed"):
+            compiled_fn(*inputs)
+        compiled_fn.disable_guard_check()
+        actual = compiled_fn(*inputs)
+        self.assertEqual(expected, actual)
+
     def test_aot_compile_source_info(self):
         from torch._dynamo.package import SourceInfo
 

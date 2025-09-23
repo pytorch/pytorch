@@ -2718,5 +2718,13 @@
       "Explanation": "Dyanmo does not support tracing mutations on a class when its __dict__ is materialized",
       "Hints": []
     }
+  ],
+  "GB0272": [
+    {
+      "Gb_type": "Failed to make weakref to User Object",
+      "Context": "user_objected: {obj}",
+      "Explanation": "Object does not allow us to make a weakref to it",
+      "Hints": []
+    }
   ]
 }
