@@ -31,7 +31,9 @@ class TestCudaPrimaryCtx(TestCase):
                 TestCudaPrimaryCtx.CTX_ALREADY_CREATED_ERR_MSG,
             )
 
-    @skipIfRocm(msg="last checked in ROCm 7, HIP runtime doesn't create context for hipSetDevice()")
+    @skipIfRocm(
+        msg="last checked in ROCm 7, HIP runtime doesn't create context for hipSetDevice()"
+    )
     def test_set_device_0(self):
         # In CUDA 12 the behavior of cudaSetDevice has changed. It eagerly creates context on target.
         # The behavior of `torch.cuda.set_device(0)` should also create context on the device 0.
