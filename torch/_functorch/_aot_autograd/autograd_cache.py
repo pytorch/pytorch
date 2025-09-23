@@ -1211,7 +1211,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
                 cache_state = "miss"
                 if (
                     config.strict_autograd_cache
-                    or torch._dynamo.config.caching_precompile
+                    or torch._dynamo.config.strict_precompile
                 ):
                     raise e
             # Most often this is BypassAOTAutogradCache, but
@@ -1244,7 +1244,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
                     log_cache_bypass("bypass_aot_autograd", str(e))
                 if (
                     config.strict_autograd_cache
-                    or torch._dynamo.config.caching_precompile
+                    or torch._dynamo.config.strict_precompile
                 ):
                     raise e
             if compiled_fn is None:
