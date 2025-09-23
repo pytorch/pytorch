@@ -270,6 +270,22 @@ AOTITorchError aoti_torch_delete_tensor_object(AtenTensorHandle tensor) {
   });
 }
 
+AOTITorchError aoti_torch_delete_c10_value_object(C10IValueHandle handle) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    c10::IValue* t = reinterpret_cast<c10::IValue*>(handle);
+    delete t;
+  });
+}
+
+AOTITorchError aoti_torch_int64_to_ivalue(
+    int64_t val,
+    C10IValueHandle* ivalue) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    c10::IValue* t = new c10::IValue(val);
+    *ivalue = reinterpret_cast<C10IValueHandle>(t);
+  });
+}
+
 AOTITorchError aoti_torch_get_data_ptr(
     AtenTensorHandle tensor,
     void** ret_data_ptr) {
