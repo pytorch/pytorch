@@ -370,9 +370,12 @@ def _resolve_name_collision(mod: GraphModule, gm: GraphModule) -> None:
                 ):
                     continue
             elif (
-                torch.equal(gm_target, model_target)
+                gm_target.device == model_target.device
                 and gm_target.dtype == model_target.dtype
+                and torch.equal(gm_target, model_target)
             ):
+                # If tensors with same name from gm and model are indeed the same, we don't need to rename
+                # Check device first, to avoid torch.equal(wrapper_CUDA__equal) raise when different device
                 continue
 
             prefix = (
