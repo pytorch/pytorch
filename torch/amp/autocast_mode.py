@@ -258,40 +258,27 @@ class autocast:
                     message + f"But the func `{func}` is missing. \n"
                 )
 
-        self._cache_enabled = torch.is_autocast_cache_enabled()
-        if (
-            enabled
-            and self.device == "cuda"
-            and torch.cuda.amp.common.amp_definitely_not_available()
-        ):
-            warnings.warn(
-                "User provided device_type of 'cuda', but CUDA is not available. Disabling"
-            )
-            enabled = False
-        if cache_enabled is not None:
-            self._cache_enabled = cache_enabled
+        self._cache_enabled = (
+            torch.is_autocast_cache_enabled()
+            if cache_enabled is None
+            else cache_enabled
+        )
+        device_supported_dtypes = collections.defaultdict(
+            lambda: [torch.bfloat16, torch.float16],  # default supported dtypes
+            {
+                # Add special cases here (device that not supports both torch.bfloat16 and torch.float16)
+                self.custom_backend_name: self.custom_device_mod.get_amp_supported_dtype()
+            },
+        )
 
-        device_supported_dtypes = {
-            "cpu": [torch.bfloat16, torch.float16],
-            "mtia": [torch.bfloat16, torch.float16],
-            "maia": [torch.bfloat16, torch.float16],
-            "xpu": [torch.bfloat16, torch.float16],
-            "ipu": [torch.bfloat16, torch.float16],
-            "hpu": [torch.bfloat16, torch.float16],
-            "mps": [torch.bfloat16, torch.float16],
-            "xla": [torch.bfloat16, torch.float16],
-            self.custom_backend_name: self.custom_device_mod.get_amp_supported_dtype(),
-        }
-
-        if self.device in device_supported_dtypes:
-            supported_dtypes = device_supported_dtypes[self.device]
-            device_name = (
-                self.device
-                if self.device == self.custom_backend_name
-                else self.device.upper()
-            )
-
-            if self.fast_dtype not in supported_dtypes and enabled:
+        supported_dtypes = device_supported_dtypes[self.device]
+        device_name = (
+            self.device
+            if self.device == self.custom_backend_name
+            else self.device.upper()
+        )
+        if enabled:
+            if self.fast_dtype not in supported_dtypes:
                 error_message = (
                     f"In {device_name} autocast, but the target dtype is not supported. Disabling autocast.\n"
                     f"{device_name} Autocast only supports dtypes of "
@@ -301,23 +288,31 @@ class autocast:
                 warnings.warn(error_message)
                 enabled = False
             # Special case for MPS bfloat16 support on macOS < 14
-            elif self.device == "mps" and self.fast_dtype == torch.bfloat16 and enabled:
-                if not torch.backends.mps.is_macos_or_newer(14, 0):
-                    error_message = (
-                        "In MPS autocast, but the target dtype torch.bfloat16 is not supported "
-                        "on macOS versions below 14. Disabling autocast."
+            if (
+                self.device == "mps"
+                and self.fast_dtype == torch.bfloat16
+                and not torch.backends.mps.is_macos_or_newer(14, 0)
+            ):
+                error_message = (
+                    "In MPS autocast, but the target dtype torch.bfloat16 is not supported "
+                    "on macOS versions below 14. Disabling autocast."
+                )
+                warnings.warn(error_message)
+                enabled = False
+            # Special case for CUDA AMP and bfloat16 support
+            elif self.device == "cuda":
+                if torch.cuda.amp.common.amp_definitely_not_available():
+                    warnings.warn(
+                        "CUDA is not available or torch_xla is imported. AMP disabled."
                     )
-                    warnings.warn(error_message)
                     enabled = False
-        elif (
-            self.device == "cuda"
-            and self.fast_dtype == torch.bfloat16
-            and not torch.cuda.is_bf16_supported()
-            and enabled
-        ):
-            raise RuntimeError(
-                "Current CUDA Device does not support bfloat16. Please switch dtype to float16."
-            )
+                elif (
+                    self.fast_dtype == torch.bfloat16
+                    and not torch.cuda.is_bf16_supported()
+                ):
+                    raise RuntimeError(
+                        "Current CUDA Device does not support bfloat16. Please switch dtype to float16."
+                    )
         self._enabled = enabled
 
     def __enter__(self):
