@@ -139,7 +139,7 @@ class DeferredTritonCallWrapper:
                 prefix.splice(self.kernel_name_to_body[self.kernel_name])
                 prefix.writeline("*/")
             self.generate_grid(prefix, inductor_meta, params)
-            self.generate_load_kernel(prefix, kernel_var_name, params, wrapper.device_type)
+            self.generate_load_kernel(prefix, kernel_var_name, params, wrapper.device)
             self.generate_launch_kernel(prefix, wrapper, kernel_var_name, params)
         prefix.writeline("}")
 
