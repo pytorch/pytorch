@@ -189,7 +189,6 @@ disable = os.environ.get("TORCH_COMPILE_DISABLE", "0") == "1"
 cprofile = os.environ.get("TORCH_COMPILE_CPROFILE", False)
 
 # Legacy config, does nothing now!
-#
 # This is a deprecated configuration option that is no longer used.
 skipfiles_inline_module_allowlist: dict[Any, Any] = {}
 
@@ -618,7 +617,6 @@ compiled_autograd = False
 graph_break_on_nn_param_ctor = True
 
 # Overrides torch.compile() kwargs for Compiled Autograd
-#
 # This dictionary allows overriding specific torch.compile() keyword arguments
 # when using Compiled Autograd.
 compiled_autograd_kwargs_override: dict[str, Any] = {}
