@@ -283,21 +283,24 @@ if sys.platform == "win32":
 
 
 def _get_cuda_dep_paths(
-    path: str, lib_folder: str, lib_name: str, maj_cuda_version: str
+    path: str, lib_folder: str, lib_name: str
 ) -> list[str]:
     # Libraries can either be in
     # path/nvidia/lib_folder/lib or
     # path/nvidia/cuXX/lib (since CUDA 13.0) or
     # path/lib_folder/lib
+    from torch.version import cuda as cuda_version
     nvidia_lib_paths = glob.glob(
         os.path.join(path, "nvidia", lib_folder, "lib", lib_name)
     )
-    nvidia_lib_paths_alt = glob.glob(
-        os.path.join(path, "nvidia", f"cu{maj_cuda_version}", "lib", lib_name)
-    )
+    if cuda_version is not None:
+        maj_cuda_version = int(cuda_version.split(".")[0])
+        nvidia_lib_paths += glob.glob(
+            os.path.join(path, "nvidia", f"cu{maj_cuda_version}", "lib", lib_name)
+        )
     lib_paths = glob.glob(os.path.join(path, lib_folder, "lib", lib_name))
 
-    return nvidia_lib_paths + nvidia_lib_paths_alt + lib_paths
+    return nvidia_lib_paths + lib_paths
 
 
 def _preload_cuda_deps(lib_folder: str, lib_name: str) -> None:
@@ -305,14 +308,10 @@ def _preload_cuda_deps(lib_folder: str, lib_name: str) -> None:
     # Should only be called on Linux if default path resolution have failed
     assert platform.system() == "Linux", "Should only be called on Linux"
 
-    from torch.version import cuda as cuda_version
-
-    maj_cuda_version = int(cuda_version.split(".")[0])  # type: ignore[union-attr]
-
     lib_path = None
     for path in sys.path:
         candidate_lib_paths = _get_cuda_dep_paths(
-            path, lib_folder, lib_name, maj_cuda_version
+            path, lib_folder, lib_name
         )
         if candidate_lib_paths:
             lib_path = candidate_lib_paths[0]
@@ -349,8 +348,8 @@ def _load_global_deps() -> None:
             if "libcudart.so" not in _maps:
                 return
             # If all above-mentioned conditions are met, preload nvrtc and nvjitlink
-            # Please note that order are important for CUDA-11.8 , as nvjitlink does not exist there
             _preload_cuda_deps("cuda_nvrtc", "libnvrtc.so.*[0-9]")
+            _preload_cuda_deps("cuda_nvrtc", "libnvrtc-builtins.*[0-9]")
             _preload_cuda_deps("nvjitlink", "libnvJitLink.so.*[0-9]")
         except Exception:
             pass
