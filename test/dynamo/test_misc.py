@@ -13380,6 +13380,14 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
         # we expect to no longer raise here
         torch.compile(fn, fullgraph=True)(*example_inputs)
 
+    def test_dynamic_fill_diagonal_(self):
+        @torch.compile(dynamic=True)
+        def f(x):
+            x.fill_diagonal_(True)
+
+        x = torch.zeros(4, 4)
+        f(x)
+
     def test_dynamic_float_scalar_tensor_coersion(self):
         # Minified version of https://github.com/pytorch/pytorch/issues/158376#issuecomment-3079591367
         class Foo:
