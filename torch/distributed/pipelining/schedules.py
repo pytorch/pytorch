@@ -558,8 +558,8 @@ class PipelineScheduleSingle(_PipelineSchedule):
         # Self attributes
         self._stage = stage
         self._num_stages = stage.num_stages
-        self._forward_stage_initialized = False
-        self._backward_stage_initialized = False
+        self._stage_forward_initialized = False
+        self._stage_backward_initialized = False
 
         if n_microbatches < self._num_stages:
             raise ValueError(
@@ -572,7 +572,7 @@ or equal to the number of stages ({self._num_stages})."
         )
 
     def _initialize_stage(self, args, kwargs):
-        if not self._forward_stage_initialized:
+        if not self._stage_forward_initialized:
             # Prepare the communication needed for the pipeline schedule execution
             # This is needed because during execution we always perform a series of batch P2P ops
             # The first call of the batched P2P needs to involve the global group
@@ -581,11 +581,11 @@ or equal to the number of stages ({self._num_stages})."
             _wait_batch_p2p(_batch_p2p(all_ops))
 
             self._stage._prepare_forward_infra(self._n_microbatches, args, kwargs)
-            self._forward_stage_initialized = True
+            self._stage_forward_initialized = True
 
-        if self._has_backward and not self._backward_stage_initialized:
+        if self._has_backward and not self._stage_backward_initialized:
             self._stage._prepare_backward_infra(self._n_microbatches)
-            self._backward_stage_initialized = True
+            self._stage_backward_initialized = True
 
     def step(self, *args, target=None, losses: Optional[list] = None, **kwargs):
         """
@@ -1435,8 +1435,8 @@ class PipelineScheduleMulti(_PipelineSchedule):
         for stage in self._stages:
             stage.stage_index_to_group_rank = self.stage_index_to_group_rank
 
-        self._forward_stages_initialized = False
-        self._backward_stages_initialized = False
+        self._stages_forward_initialized = False
+        self._stages_backward_initialized = False
 
         # avoid putting a reference to 'self' inside the lambda, it creates a ref cycle
         has_loss: bool = self._loss_fn is not None
@@ -1452,7 +1452,7 @@ class PipelineScheduleMulti(_PipelineSchedule):
             )
 
     def _initialize_stages(self, args: tuple[Any, ...], kwargs):
-        if not self._forward_stages_initialized:
+        if not self._stages_forward_initialized:
             # Prepare the communication needed for the pipeline schedule execution
             # This is needed because during execution we always perform a series of batch P2P ops
             # The first call of the batched P2P needs to involve the global group
@@ -1473,12 +1473,12 @@ class PipelineScheduleMulti(_PipelineSchedule):
                     next_stage_args = stage._prepare_forward_infra(
                         self._n_microbatches, next_stage_args, kwargs
                     )
-            self._forward_stages_initialized = True
+            self._stages_forward_initialized = True
 
-        if self._has_backward and not self._backward_stages_initialized:
+        if self._has_backward and not self._stages_backward_initialized:
             for stage in self._stages:
                 stage._prepare_backward_infra(self._n_microbatches)
-            self._backward_stages_initialized = True
+            self._stages_backward_initialized = True
 
     def _validate_and_set_stage_mapping(
         self, actions: dict[int, list[Optional[_Action]]]
