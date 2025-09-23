@@ -2300,6 +2300,27 @@ _scaled_nvfp4_nvfp4(
 }
 
 
+// V2: Computes matrix multiply + bias while applying scaling to input and output matrices
+// Scales are only applicable when matrices are of Float8 type and assumed to be equal to 1.0 by default.
+// If output matrix type is 16 or 32-bit type, scale_result is not applied.
+// Known limitations:
+//  - Only works if mat1 is row-major and mat2 is column-major
+//  - Only works if matrices sizes are divisible by 32
+//  - If 1-dimensional tensors are used then scale_a should be size = mat1.size(0)
+//    and scale_b should have size = to mat2.size(1)
+//  Arguments:
+//    - `mat1`: the first operand of the matrix multiply, can be type `torch.float8_e4m3fn` or `torch.float8_e5m2`
+//    - `mat2`: the second operand of the matrix multiply, can be type `torch.float8_e4m3fn` or `torch.float8_e5m2`
+//    - `scale_a`: a tensor with the inverse scale of `mat1`, whose shape/strides/dtype depend on the scaling scheme
+//    - `scale_recipe_a`: An integer corresponding to an enum describing the scaling scheme used for `scale_a`
+//    - `swizzle_a`: An integer corresponding to a `SwizzleType` enum describing the swizzling scheme for `scale_a`
+//    - `scale_b`: a tensor with the inverse scale of `mat2`, whose shape/strides/dtype depend on the scaling scheme
+//    - `scale_recipe_b`: An integer corresponding to an enum describing the scaling scheme used for `scale_b`
+//    - `swizzle_b`: An integer corresponding to a `SwizzleType` enum describing the swizzling scheme for `scale_b`
+//    - `bias`: the bias, can be type `torch.float16` or `torch.bfloat16`
+//    - `out_dtype`: the output dtype, can either be a float8 or a higher precision floating point type
+//    - `use_fast_accum`: if true, enables fast float8 accumulation. Backends may ignore this option if not applicable.
+//    - `out`: a reference to the output tensor
 Tensor&
 _scaled_mm_cuda_v2_out(
           const Tensor& mat_a, const Tensor& mat_b,
