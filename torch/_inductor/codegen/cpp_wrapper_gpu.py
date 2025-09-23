@@ -297,7 +297,7 @@ class DeferredTritonCallWrapper:
                 total_args = []
                 ordered_argsname = []
 
-                def write_scalar_ivalue(arg_name):
+                def write_dummy_scalar_ivalue(arg_name):
                     # We only care about the shape, therefore we create a dummy scalar here.
                     prefix.writelines(
                         [
@@ -318,7 +318,7 @@ class DeferredTritonCallWrapper:
                     if isinstance(
                         arg_type, UnwrapUnspecArg
                     ) and not signature_is_tma_desc(arg_signature):
-                        write_scalar_ivalue(arg_name)
+                        write_dummy_scalar_ivalue(arg_name)
                     elif isinstance(
                         arg_type, torch_dtype
                     ) and not signature_is_tma_desc(arg_signature):
@@ -337,12 +337,12 @@ class DeferredTritonCallWrapper:
                         and arg_signature is not None
                         and arg_signature in signature2dtype.keys()
                     ) or arg_type in (sympy.Integer, int, sympy.Float, float):
-                        write_scalar_ivalue(arg_name)
+                        write_dummy_scalar_ivalue(arg_name)
                     elif arg_signature and arg_signature.startswith("tensordesc<"):
                         # Skip tma related args
                         pass
                     else:
-                        write_scalar_ivalue(arg_name)
+                        write_dummy_scalar_ivalue(arg_name)
 
                 # Add input name and shape information
                 for arg, arg_type, arg_signature in zip_longest(
