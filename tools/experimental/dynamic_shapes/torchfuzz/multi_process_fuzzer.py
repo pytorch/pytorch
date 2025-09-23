@@ -38,16 +38,16 @@ def persist_print(msg):
 IGNORE_PATTERNS: list[re.Pattern] = [
     re.compile(
         r"Dynamo failed to run FX node with fake tensors: call_method fill_diagonal_"
-    ),
-    re.compile(r"zuf\d+ is not defined"),
-    re.compile(r"'zuf\d+' was not declared in this scope"),
-    re.compile(r"out_eager_sum: 0\.0"),
-    re.compile(r"error: operand #\d+ does not dominate this use"),
+    ),  # https://github.com/pytorch/pytorch/issues/163420
     re.compile(
         r"TypeError: unsupported operand type\(s\) for divmod\(\): 'SymInt' and 'int'"
-    ),
-    re.compile(r"RuntimeError: self\.stride\(-1\) must be 1 to view ComplexDouble as"),
-    re.compile(r"BooleanAtom not allowed in this context"),
+    ),  # https://github.com/pytorch/pytorch/issues/163457
+    re.compile(
+        r"RuntimeError: self\.stride\(-1\) must be 1 to view ComplexDouble as"
+    ),  # https://github.com/pytorch/pytorch/issues/162561
+    re.compile(
+        r"BooleanAtom not allowed in this context"
+    ),  # https://github.com/pytorch/pytorch/issues/160726
     # Add more patterns here as needed, e.g.:
     # re.compile(r"Some other error message"),
 ]
@@ -84,7 +84,7 @@ def run_fuzzer_with_seed(seed: int) -> tuple[int, bool, str, float, int]:
 
     try:
         # Run fuzzer.py with the specified seed
-        cmd = [sys.executable, "fuzzer.py", "--seed", str(seed)]
+        cmd = [sys.executable, "fuzzer.py", "--single", "--seed", str(seed)]
 
         result = subprocess.run(
             cmd,
