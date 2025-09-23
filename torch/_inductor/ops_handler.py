@@ -19,7 +19,7 @@ from .utils import IndentedBuffer, reduction_num_outputs, sympy_index_symbol, sy
 
 
 T = TypeVar("T")
-StoreMode = Optional[Literal["atomic_add"]]
+StoreMode = Optional[Literal["atomic_add", "tma"]]
 ReductionType = Literal[
     "argmax",
     "argmin",
