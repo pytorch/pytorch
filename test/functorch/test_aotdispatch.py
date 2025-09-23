@@ -8031,9 +8031,6 @@ symbolic_aot_autograd_failures = {
     xfail(
         "nn.functional.fractional_max_pool3d", ""
     ),  # rand() received an invalid combination of arguments - g...
-    xfail(
-        "nn.functional.group_norm", ""
-    ),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail("trace", ""),  # Cannot call sizes() on tensor with symbolic sizes/strides
     decorate(
         "linalg.householder_product",

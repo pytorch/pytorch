@@ -1362,6 +1362,16 @@ broadcast_in_dim = _make_prim(
 )
 
 
+@broadcast_in_dim.py_functionalize_impl
+def _broadcast_in_dim_functionalize(ctx, a, shape, broadcast_dimensions):
+    (unwrapped_a,) = ctx.unwrap_tensors((a,))
+    with ctx.redispatch_to_next():
+        out = torch.ops.prims.broadcast_in_dim.default(
+            unwrapped_a, shape, broadcast_dimensions
+        )
+    return ctx.wrap_tensors(out)
+
+
 def _validate_collapse_args(a: Tensor, start: int, end: int) -> None:
     # Special-case for zero dimensional tensors
     ndim = max(1, a.dim())
