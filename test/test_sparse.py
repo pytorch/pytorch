@@ -1635,7 +1635,7 @@ class TestSparse(TestSparseBase):
     @expectedFailureMPS
     @precisionOverride({torch.bfloat16: 5e-2, torch.float16: 5e-2})
     @dtypes(torch.double, torch.cdouble, torch.bfloat16, torch.float16)
-    @dtypesIfMPS(torch.float32, torch.complex64)
+    @dtypesIfMPS(torch.float32, torch.complex64, torch.bfloat16, torch.float16)
     def test_sparse_addmm(self, device, dtype, coalesced):
         if (dtype is torch.bfloat16 or dtype is torch.float16) and device.startswith("cuda"):
             self.skipTest('addmm_sparse_cuda is not implemented for BFloat16 and Half')
