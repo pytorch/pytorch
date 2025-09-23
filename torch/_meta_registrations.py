@@ -2454,7 +2454,9 @@ def meta_conv(
             return False
         if ndim == 3 and weight.dim() == 3:
             # Unsqueeze to reuse conv2d heuristics.
-            return utils.suggest_memory_format(weight.unsqueeze(-1)) == torch.channels_last
+            return (
+                utils.suggest_memory_format(weight.unsqueeze(-1)) == torch.channels_last
+            )
         if ndim == 4 and weight.dim() == 4:
             return is_channels_last(weight)
         if ndim == 5 and weight.dim() == 5:
@@ -2483,13 +2485,10 @@ def meta_conv(
 
     def make_channels_last_strides_1d(shape):
         assert len(shape) == 3
-        strides = [None, None, None]
-        strides[1] = 1
-        running = shape[1]
-        strides[2] = running
-        running = running * shape[2]
-        strides[0] = running
-        return tuple(strides)
+        stride_c = 1
+        stride_w = shape[1]
+        stride_n = stride_w * shape[2]
+        return (stride_n, stride_c, stride_w)
 
     ndim = input_tensor.dim()
     prefers_channels_last = weight_prefers_channels_last(ndim)
@@ -3555,7 +3554,10 @@ def meta_convolution_backward(
         if weight_.dim() != max(0, ndim - 2) + 2:
             return False
         if ndim == 3 and weight_.dim() == 3:
-            return utils.suggest_memory_format(weight_.unsqueeze(-1)) == torch.channels_last
+            return (
+                utils.suggest_memory_format(weight_.unsqueeze(-1))
+                == torch.channels_last
+            )
         if ndim == 4 and weight_.dim() == 4:
             return is_channels_last(weight_)
         if ndim == 5 and weight_.dim() == 5:
@@ -3563,13 +3565,10 @@ def meta_convolution_backward(
         return False
 
     def make_channels_last_strides_1d(shape):
-        strides = [None, None, None]
-        strides[1] = 1
-        running = shape[1]
-        strides[2] = running
-        running = running * shape[2]
-        strides[0] = running
-        return tuple(strides)
+        stride_c = 1
+        stride_w = shape[1]
+        stride_n = stride_w * shape[2]
+        return (stride_n, stride_c, stride_w)
 
     use_channels_last = prefers_channels_last_for_grad_input()
 
@@ -3587,9 +3586,13 @@ def meta_convolution_backward(
                 elif ndim == 5:
                     memory_format = torch.channels_last_3d
                 if memory_format is not None:
-                    backend_grad_input = backend_grad_input.to(memory_format=memory_format)
+                    backend_grad_input = backend_grad_input.to(
+                        memory_format=memory_format
+                    )
     if output_mask[1]:
-        backend_grad_weight = grad_output_.new_empty_strided(tuple(weight_.size()), tuple(weight_.stride()))
+        backend_grad_weight = grad_output_.new_empty_strided(
+            tuple(weight_.size()), tuple(weight_.stride())
+        )
     if output_mask[2]:
         backend_grad_bias = grad_output_.new_empty(bias_sizes_opt)
 
