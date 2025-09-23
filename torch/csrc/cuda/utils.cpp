@@ -11,10 +11,11 @@ std::vector<std::optional<at::cuda::CUDAStream>>
 THPUtils_PySequence_to_CUDAStreamList(PyObject* obj) {
   TORCH_CHECK(PySequence_Check(obj), "Expected a sequence in THPUtils_PySequence_to_CUDAStreamList");
   THPObjectPtr seq = THPObjectPtr(PySequence_Fast(obj, nullptr));
-  TORCH_CHECK(seq.get(), "expected PySequence, but got " + std::string(THPUtils_typename(obj)));
+  TORCH_CHECK(seq.get() != nullptr, "expected PySequence, but got " + std::string(THPUtils_typename(obj)));
 
   std::vector<std::optional<at::cuda::CUDAStream>> streams;
   Py_ssize_t length = PySequence_Fast_GET_SIZE(seq.get());
+  streams.reserve(length);
   for (Py_ssize_t i = 0; i < length; i++) {
     PyObject* stream = PySequence_Fast_GET_ITEM(seq.get(), i);
 
