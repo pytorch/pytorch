@@ -240,21 +240,34 @@ def set_stack_trace(stack: list[str]):
     if should_preserve_node_meta and stack:
         current_meta["stack_trace"] = "".join(stack)
 
+
 @contextmanager
-def set_annotation(key, value):
+def set_custom_annotation(key, value):
     global current_meta
 
-    has_old_value = key in current_meta
-    old_value = current_meta.get(key, None)
+    has_custom = "custom" in current_meta
+    old_custom = copy.copy(current_meta.get("custom", {}))
+
+    has_key = False
+    old_value = None
+    if has_custom:
+        assert isinstance(current_meta["custom"], dict)
+        has_key = key in old_custom
+        old_value = old_custom.get(key, None)
 
     try:
-        current_meta[key] = value
+        if not has_custom:
+            current_meta["custom"] = {}
+        current_meta["custom"][key] = value
         yield
     finally:
-        if has_old_value:
-            current_meta[key] = old_value
+        if has_custom:
+            if has_key:
+                current_meta["custom"][key] = old_value
+            else:
+                del current_meta["custom"][key]
         else:
-            del current_meta[key]
+            del current_meta["custom"]
 
 
 @compatibility(is_backward_compatible=False)

@@ -21,6 +21,7 @@ from unittest.mock import MagicMock, patch
 
 import torch
 import torch._dynamo as torchdynamo
+import torch.fx.traceback as fx_traceback
 import torch.nn.functional as F
 import torch.utils._pytree as pytree
 from functorch.experimental.control_flow import cond, map
@@ -16103,6 +16104,41 @@ def forward(self, q, k, v):
             r"Number of heads in key and value must divide the number of heads",
         ):
             export(Foo(), (torch.randn(1, 33, 256, 128), k, v))
+
+    def test_preserve_custom_annotation(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                with fx_traceback.set_custom_annotation("pp_stage", 0):
+                    with fx_traceback.set_custom_annotation("fdsp_bucket", 0):
+                        x = x + 1
+                    x = x - 2
+                    with (
+                        fx_traceback.set_custom_annotation("cuda_stream", 2),
+                        fx_traceback.set_custom_annotation("fsdp_bucket", 1),
+                    ):
+                        x = x * 2
+                x = x / 3
+                return x
+
+        m = M()
+
+        with fx_traceback.preserve_node_meta():
+            ep = torch.export.export(m, (torch.randn(10),))
+            # TODO: following line is failing
+            # ep = ep.run_decompositions({})
+
+        for node in ep.graph.nodes:
+            if node.target == torch.ops.aten.add.default:
+                self.assertTrue(node.meta["custom"], {"pp_stage": 0, "fdsp_bucket": 0})
+            if node.target == torch.ops.aten.sub.default:
+                self.assertTrue(node.meta["custom"], {"pp_stage": 0})
+            if node.target == torch.ops.aten.mul.default:
+                self.assertTrue(
+                    node.meta["custom"],
+                    {"pp_stage": 0, "cuda_stream": 2, "fsdp_bucket": 1},
+                )
+            if node.target == torch.ops.aten.div.default:
+                self.assertTrue(node.meta["custom"], {})
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
