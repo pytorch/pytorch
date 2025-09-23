@@ -163,17 +163,17 @@ class InductorChoices:
             kernel_inputs,
             op_name,
         )
-        extra_kwargs = heuristic.get_extra_kwargs(kernel_inputs, op_name)
         # adjust the kernel inputs to the template-specific heuristic, if needed
         # default here is to just return the kernel_inputs as is
         inputs_val = heuristic.adjust_kernel_inputs(kernel_inputs, op_name)
+        extra_kwargs = heuristic.get_extra_kwargs(kernel_inputs, op_name)
         # Create KernelTemplateChoice generator using the moved function
         overrides = kwarg_overrides or {}
         return make_ktc_generator(
             template=template,
             cs=cs,
-            overrides=overrides,
             extra_kwargs=extra_kwargs,
+            overrides=overrides,
             layout=kernel_inputs.output_layout(),
             inputs=inputs_val,
         )
