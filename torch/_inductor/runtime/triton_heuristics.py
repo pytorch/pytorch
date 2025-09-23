@@ -2558,8 +2558,11 @@ def pointwise(
                     waves_per_eu=1
                 )) # 20% improvement
     if len(size_hints) == 2:
+        # Only avoiding tuning on TileHint.SQUARE if not on ROCm builds
+        # ROCm has observed improvement by diverging here
         if (
-            disable_pointwise_autotuning(inductor_meta) # or tile_hint == TileHint.SQUARE
+            disable_pointwise_autotuning(inductor_meta) 
+            or (torch.version.hip is None and tile_hint == TileHint.SQUARE) 
         ) and not (
             inductor_meta.get("max_autotune")
             or inductor_meta.get("max_autotune_pointwise")
@@ -2568,13 +2571,13 @@ def pointwise(
         else:
             configs = [
                 triton_config_with_settings(size_hints, 32, 32),
-                triton_config_with_settings(size_hints, 64, 32), # wrt: better for some kernels
+                triton_config_with_settings(size_hints, 64, 32),  # better for some kernels
                 triton_config_with_settings(size_hints, 64, 64),  # ~8% better for fp16
                 triton_config_with_settings(size_hints, 256, 16),
                 triton_config_with_settings(size_hints, 16, 256),
-                triton_config_with_settings(size_hints, 128, 16), # wrt: +10% for some kernels
-                triton_config_with_settings(size_hints, 128, 32), # wrt: ..additional 10% more
-                triton_config_with_settings(size_hints, 32, 512), # wrt: +30% for some kernels
+                triton_config_with_settings(size_hints, 128, 16), # +10% for some kernels
+                triton_config_with_settings(size_hints, 128, 32), # additional 10% more
+                triton_config_with_settings(size_hints, 32, 512), # +30% for some kernels
                 triton_config_with_settings(size_hints, bs, 1),
                 triton_config_with_settings(size_hints, 1, bs),
                 *hinted_configs,
