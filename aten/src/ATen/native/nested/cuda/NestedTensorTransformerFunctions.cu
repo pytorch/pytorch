@@ -1531,21 +1531,21 @@ Tensor _fbgemm_dense_to_jagged_forward_symint(
   return output;
 }
 
-} // namespace native
-} // namespace at
-
 // Backward operation for _jagged_to_padded_dense_forward
-at::Tensor _fbgemm_jagged_to_padded_dense_backward(
+Tensor _fbgemm_jagged_to_padded_dense_backward(
     const Tensor& grad_output,
     TensorList offsets,
     int64_t total_L) {
-  // Convert TensorList to vector<Tensor> for FBGEMM interface
-  std::vector<Tensor> offsets_vec(offsets.begin(), offsets.end());
-  return fbgemm_gpu::jagged_to_padded_dense_backward(grad_output, offsets_vec, total_L);
+  // Mathematical identity: backward(jagged_to_padded_dense) = dense_to_jagged_forward
+  // Reuse the existing optimized implementation
+  return _fbgemm_dense_to_jagged_forward_symint(
+      grad_output,
+      offsets,
+      at::SymInt(total_L));
 }
 
 // Backward operation for _padded_dense_to_jagged_forward
-at::Tensor _fbgemm_padded_dense_to_jagged_backward(
+Tensor _fbgemm_padded_dense_to_jagged_backward(
     const Tensor& grad_output,
     TensorList offsets,
     c10::IntArrayRef max_lengths,
@@ -1553,3 +1553,6 @@ at::Tensor _fbgemm_padded_dense_to_jagged_backward(
   // Mathematical identity: backward(padded_dense_to_jagged) = jagged_to_padded_dense_forward
   return _fbgemm_jagged_to_padded_dense_forward(grad_output, offsets, max_lengths, padding_value);
 }
+
+} // namespace native
+} // namespace at
