@@ -122,10 +122,10 @@ class MultiKernelTest(TestCase):
                 "max_autotune": True,
                 "max_autotune_gemm_backends": "TRITON",
             },
-            dynamic=True,
         )
         x = torch.randn(4096, 4096, device=GPU_TYPE)
         y = torch.randn(4096, 4096, device=GPU_TYPE)
+        torch._dynamo.mark_dynamic(x, 0)
         act, wrapper_code = run_and_get_code(compiled_fn, x, y)
         ref = fn(x, y)
 
@@ -150,10 +150,10 @@ class MultiKernelTest(TestCase):
                 "max_autotune": True,
                 "max_autotune_gemm_backends": "TRITON",
             },
-            dynamic=True,
         )
         x = torch.randn(4096, 4096, device=GPU_TYPE)
         y = torch.randn(4096, 4096, device=GPU_TYPE)
+        torch._dynamo.mark_dynamic(x, 0)
         act, wrapper_code = run_and_get_code(compiled_fn, x, y)
         ref = fn(x, y)
 

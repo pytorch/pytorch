@@ -97,7 +97,7 @@ class MultiKernelState:
             for i in range(len(kernels)):
                 arg_index[i] = [slice(0, len(call_args))]
 
-        shape_specialize = kernel_shape_keys is not None
+        keyed_by_sizes = kernel_shape_keys is not None
         buf = self.kernel_defs
         buf.writeline("")
         buf.writeline("arg_index = {")
@@ -106,7 +106,7 @@ class MultiKernelState:
             buf.writeline(f"    {key}: [{slice_reprs}],")
         buf.writeline("}")
 
-        if not shape_specialize:  # no size hint keys, just call with list of kernels
+        if not keyed_by_sizes:  # no size hint keys, just call with list of kernels
             buf.writeline(
                 f"{multi_kernel_name} = async_compile.multi_kernel({multi_kernel_name!r}, ["
             )
@@ -515,25 +515,16 @@ class SizeHintMultiKernelCall(MultiKernelCall):
     """
     Runtime class for size-hint multi-kernels.
     Instead of having a plain list of kernels to benchmark over, keys them by input & output shapes,
-    and optionally perform shape-based selection, based on config option `multi_kernel_shape_heuristic`.
-
-    If `multi_kernel_shape_heuristic` == "benchmark", acts like a plain multi-kernel, performing full
-    benchmarking over all pre-generated kernels, caching the selection for each particular runtime shape key.
-
-    If `multi_kernel_shape_heuristic` == "l1", the pre-generated kernel is chosen based on the shape keys,
-    with the heuristic being l1 distance between the pre-generated / runtime input & output shapes.
+    and optionally perform shape-based selection. The pre-generated kernel is chosen based on the shape keys,
+    with the heuristic being log2 l1 distance between the pre-generated / runtime input & output shapes.
     """
 
-    def __init__(self, multi_kernel_name, kernels, arg_index, selection_method="l1"):
+    def __init__(self, multi_kernel_name, kernels, arg_index):
         super().__init__(multi_kernel_name, list(kernels.values()), arg_index)
         self._kernel_hints = list(kernels.keys())
 
         # Caches results for unique shapes.
-        # If `selection_method` == "benchmark", we do a separate assessment for each shape (full benchmarking).
-        # If `selection_method` == "l1", this result is a pre-generated kernel selected on the basis of shape l1-similarity.
         self._shape_cache = {}
-
-        self.selection_method = config.multi_kernel_shape_heuristic
 
     def _get_shape_cache_key(self, *args, **kwargs):
         """
@@ -557,9 +548,9 @@ class SizeHintMultiKernelCall(MultiKernelCall):
         """
         self._shape_cache[cache_key] = kernel_idx
 
-    def _l1_dist(self, k1, k2):
+    def _dist_heuristic(self, k1, k2):
         """
-        L1 distance heuristic for kernel selection.
+        log2 L1 distance heuristic for kernel selection.
         """
 
         def dist(x, y):
@@ -604,13 +595,9 @@ class SizeHintMultiKernelCall(MultiKernelCall):
         best kernel for this shape.
         """
         shape_key = self._get_shape_cache_key(*args, **kwargs)
-        if self.selection_method == "benchmark":
-            timings = self.benchmark_sub_kernels(*args, **kwargs)
-            self.picked_kernel = timings.index(min(timings))
-        else:
-            dists = [
-                self._l1_dist(shape_key, key) if key is not None else 2**62
-                for key in self._kernel_hints
-            ]
-            self.picked_kernel = dists.index(min(dists))
+        dists = [
+            self._dist_heuristic(shape_key, key) if key is not None else 2**62
+            for key in self._kernel_hints
+        ]
+        self.picked_kernel = dists.index(min(dists))
         self._cache_shape_choice(shape_key, self.picked_kernel)

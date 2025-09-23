@@ -1785,11 +1785,8 @@ class SIMDScheduling(BaseScheduling):
                     assert isinstance(src_code, str)
                     src_codes.append(src_code)
                 else:
-                    if (
-                        config.multi_kernel_shape_heuristic != "benchmark"
-                        and size_hint is None
-                    ):  # without full benchmarking, skip kernel generation based on real runtime value; only use hints
-                        continue
+                    if size_hint is None:
+                        continue  # skip kernel generation based on real runtime value; only use hints
                     kernel = self._codegen_single_template(
                         kernel,
                         render,
