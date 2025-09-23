@@ -3235,7 +3235,7 @@ class TestUnbacked(TestCase):
         @torch.compile(fullgraph=True)
         def func(a, b):
             x = a.size()[0]
-            y = a.size()[1]
+            y = b.size()[0]
             torch._check(x == y)
             if x // y == 1:
                 a = a * 10
