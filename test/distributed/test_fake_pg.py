@@ -273,15 +273,27 @@ class TestFakePG(TestCase):
                 return func(*args, **kwargs)
 
         fake_pg = FakeProcessGroup(rank=0, world_size=3)
+
         with SimpleTensorMode():
             tensor = torch.tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
             with self.assertRaisesRegex(
                 RuntimeError,
-                r"FakeProcessGroup is not supported for direct use\. "
+                r"FakeProcessGroup requires distributed to be initialized first\. "
                 r"Call torch\.distributed\.init_process_group\(backend='fake'\) first to ensure "
                 r"proper dispatch system integration\.",
             ):
                 dist.all_reduce(tensor, group=fake_pg)
+
+            input_tensor = torch.randn(6, 2)
+            output_tensor = torch.zeros_like(input_tensor)
+
+            with self.assertRaisesRegex(
+                RuntimeError,
+                r"FakeProcessGroup requires distributed to be initialized first\. "
+                r"Call torch\.distributed\.init_process_group\(backend='fake'\) first to ensure "
+                r"proper dispatch system integration\.",
+            ):
+                dist.all_to_all_single(output_tensor, input_tensor, group=fake_pg)
 
 
 if __name__ == "__main__":
