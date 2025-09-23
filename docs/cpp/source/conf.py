@@ -40,7 +40,7 @@ extensions = [
     "sphinx.ext.intersphinx",
 ] + (["breathe", "exhale"] if run_doxygen else [])
 
-intersphinx_mapping = {"pytorch": ("https://pytorch.org/docs/main", None)}
+intersphinx_mapping = {"pytorch": ("https://docs.pytorch.org/docs/main", None)}
 
 # Configure Sphinx warnings and error handling
 suppress_warnings = [
@@ -131,19 +131,8 @@ exhale_args = {
     ############################################################################
     # Duplicate handling and error management.                                 #
     ############################################################################
-    # Reduce duplicate warnings by cleaning build directory
-    "exhaleDoxygenStdin": textwrap.dedent(
-        """
-        GENERATE_XML = YES
-        GENERATE_HTML = NO
-        GENERATE_LATEX = NO
-        EXTRACT_ALL = YES
-        QUIET = YES
-        WARN_IF_UNDOCUMENTED = NO
-        JAVADOC_AUTOBRIEF = YES
-        EXCLUDE_SYMBOLS = caffe2::* cereal* DL* TH* cudnn* std::*
-    """
-    ),
+    # Note: Using Doxyfile instead of stdin configuration
+    # "exhaleDoxygenStdin" is not compatible with "exhaleUseDoxyfile"
     # Handle unresolved references more gracefully
     "unabridgedOrphanKinds": {
         "function",
