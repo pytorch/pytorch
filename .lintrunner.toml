@@ -123,6 +123,7 @@ is_formatter = true
 code = 'MYPY'
 include_patterns = [
     'setup.py',
+    'functorch/dim/**/*.py',
     'torch/**/*.py',
     'torch/**/*.pyi',
     'caffe2/**/*.py',
@@ -195,6 +196,7 @@ exclude_patterns = [
     'tools/test/gen_operators_yaml_test.py',
     'tools/test/gen_oplist_test.py',
     'tools/test/test_selective_build.py',
+    'tools/experimental/dynamic_shapes/torchfuzz/**',
 ]
 command = [
     'python3',

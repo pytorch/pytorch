@@ -6,6 +6,7 @@ import torch
 OpaqueTypeStr = "__torch__.torch.classes.aten.OpaqueObject"
 
 OpaqueType = NewType("OpaqueType", torch._C.ScriptObject)
+OpaqueType.__module__ = "torch.library"
 
 
 def make_opaque(payload: Any = None) -> torch._C.ScriptObject:
