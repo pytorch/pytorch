@@ -411,6 +411,10 @@ def _should_pad_bench(
     op: torch._ops.OpOverloadPacket,
     input: Optional[Tensor] = None,
 ) -> bool:
+    if torch._inductor.config.deterministic:
+        # In deterministic mode, don't benchmark for pad-mm and assumes
+        # no padding.
+        return False
     do_bench = get_do_bench()
 
     m_padded_length = 0
@@ -615,6 +619,8 @@ def _should_pad_bench(
             set_cached_base_mm_benchmark_time(ori_time_key, ori_time)
 
         pad_time = do_bench(pad_bench_fn)
+
+        counters["inductor"]["pad_mm_bench"] += 1
         return should_pad(key, ori_time, pad_time)
 
 
