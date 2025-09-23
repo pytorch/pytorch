@@ -35,10 +35,6 @@ from typing import (
 from typing_extensions import ParamSpec as _ParamSpec, TypeIs as _TypeIs
 
 
-if TYPE_CHECKING:
-    from .types import Device, IntLikeType
-
-
 # As a bunch of torch.packages internally still have this check
 # we need to keep this. @todo: Remove tests that rely on this check as
 # they are likely stale.
@@ -59,6 +55,10 @@ from torch._utils_internal import (
     USE_RTLD_GLOBAL_WITH_LIBTORCH,
 )
 from torch.torch_version import __version__ as __version__
+
+
+if TYPE_CHECKING:
+    from torch.types import Device, IntLikeType
 
 
 __all__ = [
@@ -244,7 +244,7 @@ if sys.platform == "win32":
                 textwrap.dedent(
                     """
                     Microsoft Visual C++ Redistributable is not installed, this may lead to the DLL load failure.
-                    It can be downloaded at https://aka.ms/vs/16/release/vc_redist.x64.exe
+                    It can be downloaded at https://aka.ms/vs/17/release/vc_redist.x64.exe
                     """
                 ).strip()
             )
@@ -1129,6 +1129,14 @@ def is_storage(obj: _Any, /) -> _TypeIs[_Union["TypedStorage", "UntypedStorage"]
 
     Args:
         obj (Object): Object to test
+    Example::
+
+        >>> x = torch.tensor([1, 2, 3])
+        >>> torch.is_storage(x)
+        False
+        >>> torch.is_storage(x.untyped_storage())
+        True
+
     """
     return type(obj) in _storage_classes
 
@@ -2218,6 +2226,7 @@ from torch import (
     testing as testing,
     types as types,
     utils as utils,
+    version as version,
     xpu as xpu,
 )
 from torch.signal import windows as windows
@@ -2498,7 +2507,8 @@ def compile(
        fullgraph (bool): If False (default), torch.compile attempts to discover compilable regions
         in the function that it will optimize. If True, then we require that the entire function be
         capturable into a single graph. If this is not possible (that is, if there are graph breaks),
-        then this will raise an error.
+        then this will raise an error. This also opts into unbacked semantics, notably it will turn on
+        capture_scalar_outputs and capture_dynamic_output_shape_ops on by default.
        dynamic (bool or None): Use dynamic shape tracing.  When this is True, we will up-front attempt
         to generate a kernel that is as dynamic as possible to avoid recompilations when
         sizes change.  This may not always work as some operations/optimizations will

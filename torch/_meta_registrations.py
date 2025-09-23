@@ -646,16 +646,14 @@ def meta__cslt_sparse_mm(
     assert len(dense_B.shape) == 2, "_cslt_sparse_mm only supports 2d inputs"
 
     is_8bit_input_type = compressed_A.dtype in [torch.int8, torch.float8_e4m3fn]
-    compression_factor = 10 if is_8bit_input_type else 9
 
     if is_8bit_input_type:
         assert not dense_B.is_contiguous(), (
             "dense input must be transposed for 8bit dtypes"
         )
 
-    k = dense_B.size(0)
     n = dense_B.size(1)
-    m = (compressed_A.numel() * 16) // (compression_factor * k)
+    m = compressed_A.size(0)
     if bias is not None:
         assert m == bias.size(0)
 
@@ -2373,9 +2371,10 @@ def calc_conv_nd_return_shape(
             ret_shape.append(
                 _formula(dims[i], padding[i], dilation[i], kernel_size[i], stride[i])
             )
+    from torch.fx.experimental.symbolic_shapes import sym_or
 
     torch._check(
-        any(x > 0 for x in ret_shape[2:]),
+        sym_or(*[x > 0 for x in ret_shape[2:]]),
         lambda: f"Given input size per channel: {list(dims)}. "
         f"Calculated output size per channel: {ret_shape[2:]}. "
         f"Output size is too small",
@@ -3464,7 +3463,7 @@ def meta_index_Tensor(self, indices):
     # Note that perm here is the reverse of the 'perm_' decided by
     # TensorIteratorBase::reorder_dimensions
     restrided_self = _restride_src(self)
-    perm = utils.compute_elementwise_output_logical_to_physical_perm(restrided_self)
+    perm, _ = utils.compute_elementwise_output_logical_to_physical_perm(restrided_self)
 
     # Follow TensorIteratorBase::allocate_or_resize_outputs
     if list(perm) != list(range(len(perm))):
@@ -5709,7 +5708,7 @@ def meta__scaled_dot_product_cudnn_attention(
     res = alloc_with_matching_layout(query, res_shape)
 
     logsum_exp = torch.empty(
-        (B, H, S_Q),
+        (B, H, S_Q, 1),
         dtype=torch.float,
         device=query.device,
     )
@@ -7423,17 +7422,17 @@ def _meta_grouped_mm_common(
         fp8_dtype = torch.float8_e4m3fnuz if torch.version.hip else torch.float8_e4m3fn
         torch._check(
             mat_a.dtype == fp8_dtype and mat_b.dtype == fp8_dtype,
-            lambda: f"Expected inputs of E4M3 FP8 type but got mat_a.dtype={mat_a.dtype} and mat_b.dtype={mat_b.dtype}.",
+            lambda: f"Expected inputs of E4M3 FP8 type but got mat_a.dtype={mat_a.dtype} and mat_b.dtype={mat_b.dtype}.",  # noqa: B950
         )
     else:
         torch._check(
             mat_a.dtype == torch.bfloat16 and mat_b.dtype == torch.bfloat16,
-            lambda: f"Expected inputs of BF16 type but got mat_a.dtype={mat_a.dtype} and mat_b.dtype={mat_b.dtype}.",
+            lambda: f"Expected inputs of BF16 type but got mat_a.dtype={mat_a.dtype} and mat_b.dtype={mat_b.dtype}.",  # noqa: B950
         )
 
     torch._check(
         mat_a.dim() in [2, 3] and mat_b.dim() in [2, 3],
-        lambda: f"Multiplicands must be 2D or 3D but got mat_a.dim()={mat_a.dim()} and mat_b.dim()={mat_b.dim()}",
+        lambda: f"Multiplicands must be 2D or 3D but got mat_a.dim()={mat_a.dim()} and mat_b.dim()={mat_b.dim()}",  # noqa: B950
     )
 
     mat_a_is_2d = mat_a.dim() == 2
@@ -7457,11 +7456,11 @@ def _meta_grouped_mm_common(
 
         torch._check(
             is_row_major(mat_a),
-            lambda: f"Expected mat_a tensor to be row major in the last two dimensions, got strides {mat_a.stride()[-2:]}",
+            lambda: f"Expected mat_a tensor to be row major in the last two dimensions, got strides {mat_a.stride()[-2:]}",  # noqa: B950
         )
         torch._check(
             is_col_major(mat_b),
-            lambda: f"Expected mat_b tensor to be column major in the last two dimensions, got strides {mat_b.stride()[-2:]}",
+            lambda: f"Expected mat_b tensor to be column major in the last two dimensions, got strides {mat_b.stride()[-2:]}",  # noqa: B950
         )
 
     def check_valid_strides(mat_name, mat):
@@ -7473,7 +7472,7 @@ def _meta_grouped_mm_common(
         ):
             torch._check(
                 mat_stride[end_dim] % alignment == 0,
-                lambda: f"Expected {mat_name} stride along {end_dim} dim to be multiple of 16 bytes, got {mat_stride[end_dim]}.",
+                lambda: f"Expected {mat_name} stride along {end_dim} dim to be multiple of 16 bytes, got {mat_stride[end_dim]}.",  # noqa: B950
             )
         elif mat_stride[end_dim] == 1 and mat_stride[end_dim - 1] >= max(
             1, mat.shape[end_dim]
@@ -7493,41 +7492,81 @@ def _meta_grouped_mm_common(
 
     if scale_a is not None and scale_b is not None:
         torch._check(
-            scale_a.dtype == torch.float32 and scale_b.dtype == torch.float32,
-            lambda: "Both scale_a and scale_b must be float (fp32) tensors, but got scale_a.dtype={scale_a.dtype} and scale_b.dtype={scale_b.dtype}.",  # noqa: B950
+            (scale_a.dtype == torch.float32 and scale_b.dtype == torch.float32)
+            or (
+                scale_a.dtype == torch.float8_e8m0fnu
+                and scale_b.dtype == torch.float8_e8m0fnu
+            ),
+            lambda: f"For FP8 scales must both be float32, or for MXFP8 both scales must be float8_e8m0fnu. Got scale_a.dtype={scale_a.dtype} and scale_b.dtype={scale_b.dtype}.",  # noqa: B950
         )
+        is_mxfp8 = (
+            scale_a.dtype == torch.float8_e8m0fnu
+            and scale_b.dtype == torch.float8_e8m0fnu
+        )
+
+        def round_up(x, y):
+            """Rounds up x to nearest multiple of y"""
+            return ((x + y - 1) // y) * y
 
         def check_scale(scale_name, scale, mat, scaled_dim, scale_multiplier=1):
             if mat.dim() == 2:
                 torch._check(
-                    scale.dim() == 1,
-                    lambda: f"Expected {scale_name} to be 1D tensor, but got {scale.dim()}D tensor.",
-                )
-                torch._check(
                     scale.is_contiguous(),
                     lambda: f"Expected {scale_name} to be contiguous.",
                 )
-                torch._check(
-                    scale.shape[0] == mat.shape[scaled_dim] * scale_multiplier,
-                    lambda: f"Expected {scale_name} to have {mat.shape[scaled_dim] * scale_multiplier} elements, got {scale.shape[0]} elements.",  # noqa: B950
-                )
+                # For MXFP8, 2d tensors have variable size groups represented as subtensors,
+                # that are converted to blocked padded format individually. At compile time we don't know
+                # the group sizes yet, so we don't know the expect size of the blocked format scale.
+                # This limits what we can check here.
+                if is_mxfp8:
+                    torch._check(
+                        scale.dim() == mat.dim(),
+                        lambda: f"For MXFP8, scale must have same number of dimensions as target tensor, but {scale_name} has mat.ndim={mat.ndim} and scale.ndim={scale.ndim}",  # noqa: B950
+                    )
+                else:
+                    torch._check(
+                        scale.dim() == 1,
+                        lambda: f"Expected {scale_name} to be 1D tensor, but got {scale.dim()}D tensor.",
+                    )
+                    torch._check(
+                        scale.shape[0] == mat.shape[scaled_dim] * scale_multiplier,
+                        lambda: f"Expected {scale_name} to have {mat.shape[scaled_dim] * scale_multiplier} elements, got {scale.shape[0]} elements.",  # noqa: B950
+                    )
             else:
                 torch._check(
-                    scale.dim() == 2,
-                    lambda: f"Expected {scale_name} to be 2D tensor, but got {scale.dim()}D tensor.",
-                )
-                torch._check(
-                    scale.stride(1) == 1,
+                    scale.stride(-1) == 1,
                     lambda: f"Expected {scale_name} to be contiguous in the last dimension.",
                 )
                 torch._check(
                     scale.shape[0] == mat.shape[0],
                     lambda: f"Expected {scale_name} batch dimension to be {mat.shape[0]}, got {scale.shape[0]}.",
                 )
-                torch._check(
-                    scale.shape[1] == mat.shape[1 + scaled_dim],
-                    lambda: f"Expected {scale_name} non-batch dimension to be {mat.shape[1 + scaled_dim]}, got {scale.shape[1]}.",
-                )
+                # For MXFP8, 3d tensors have static 'groups' (stack of 2d tensors) so we can know the expected blocked
+                # scale sizes at compile time.
+                if is_mxfp8:
+                    torch._check(
+                        scale.ndim == mat.ndim - 1,
+                        lambda: f"For MXFP8, 3d tensor should have 2d scales, but {scale_name} has mat.ndim={mat.ndim} and scale.ndim={scale.ndim}",  # noqa: B950
+                    )
+                    # TODO: This logic only holds for RHS tensor in 2d-3d case.
+                    # We'll need to update it to handle LHS 3d tensor in 3d-2d and 3d-3d cases.
+                    G, K, N = mat.shape
+                    block_size = 32
+                    blocked_K = round_up(K / block_size, 4)
+                    blocked_N = round_up(N, 128)
+                    torch._check(
+                        scale.shape[0] == G and scale.shape[1] == blocked_K * blocked_N,
+                        lambda: f"For MXFP8, expected mat.shape={mat.shape} to have scale shape of ({G},{blocked_K * blocked_N}), but got {scale.shape}",  # noqa: B950
+                    )
+                else:
+                    torch._check(
+                        scale.dim() == 2,
+                        lambda: f"Expected {scale_name} to be 2D tensor, but got {scale.dim()}D tensor.",
+                    )
+                    torch._check(
+                        scale.shape[1] == mat.shape[1 + scaled_dim],
+                        lambda: f"Expected {scale_name} non-batch dimension to be {mat.shape[1 + scaled_dim]}, got {scale.shape[1]}.",  # noqa: B950
+                    )
 
         scale_multiplier = (
             offs.shape[0] if offs is not None and mat_a_is_2d and mat_b_is_2d else 1
@@ -7739,6 +7778,56 @@ def _create_unary_float_meta_func(func):
         )
 
     return _f
+
+
+# Implementation follows cuda implementation native_multi_head_attention_cuda
+@register_meta(aten._native_multi_head_attention.default)
+def native_multi_head_attention_fake(
+    query,
+    key,
+    value,
+    embed_dim,
+    num_head,
+    qkv_weight,
+    qkv_bias,
+    proj_weight,
+    proj_bias,
+    mask=None,
+    need_weights=True,
+    average_attn_weights=True,
+    mask_type=None,
+):
+    if query.is_nested or key.is_nested or value.is_nested:
+        raise NotImplementedError(
+            "_native_multi_head_attention fake implementation does not support nested tensors"
+        )
+
+    if query.numel() == 0:
+        return (query.new_empty(query.shape), query.new_empty(0))
+
+    B = query.size(0)  # B: batch size
+    T = query.size(1)  # T: target sequence length
+
+    # In native_multi_head_attention_cuda,
+    # we have proj = transform0213_gemm_nt_bias(attn_ctx, proj_weight, proj_bias, query)
+    # , which does attn_ctx @ proj_weight.T + proj_bias
+    # so the last dim of output shape is proj_weight.size(0)
+    output_dim = proj_weight.size(0)
+    output = query.new_empty(B, T, output_dim)
+
+    if need_weights:
+        if average_attn_weights:
+            # When averaging attention weights, shape is [B, T, T] (averaged over heads)
+            # T = query seq len, S = key/value seq len
+            attn_weights = query.new_empty(B, T, T)
+        else:
+            # When not averaging, shape is [B, num_head, T, T]
+            # T = query seq len, S = key/value seq len
+            attn_weights = query.new_empty(B, num_head, T, T)
+    else:
+        attn_weights = query.new_empty(0)
+
+    return (output, attn_weights)
 
 
 def _create_binary_float_meta_func(func):

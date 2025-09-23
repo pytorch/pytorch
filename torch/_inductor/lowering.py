@@ -47,7 +47,13 @@ from torch.fx.experimental.symbolic_shapes import (
     resolve_unbacked_bindings,
 )
 from torch.utils._ordered_set import OrderedSet
-from torch.utils._sympy.functions import CeilDiv, FloorDiv, Identity, ModularIndexing
+from torch.utils._sympy.functions import (
+    CeilDiv,
+    FloorDiv,
+    Identity,
+    Mod,
+    ModularIndexing,
+)
 
 from .._dynamo.utils import import_submodule
 from . import config, inductor_prims, ir, test_operators  # NOQA: F401
@@ -314,6 +320,26 @@ def in_namespace(op, namespace):
     return False
 
 
+def maybe_copy_cpu_scalar(x: TensorBox, device: torch.device) -> TensorBox:
+    """
+    Copy cpu scalar if doesn't not match with given `device`
+    """
+    if not isinstance(x.data, ir.ReinterpretView) or has_free_unbacked_symbols(
+        x.get_size()
+    ):
+        return x
+    size = [V.graph.sizevars.size_hint_or_throw(s) for s in x.get_size()]
+    cur_device = x.get_device()
+    if (
+        cur_device is not None
+        and cur_device.type == "cpu"
+        and cur_device != device
+        and (len(size) == 0 or (len(size) == 1 and size[0] == 1))
+    ):
+        return TensorBox(ir.StorageBox(ir.DeviceCopy.create(x, cur_device, False)))
+    return x
+
+
 def transform_args(
     args: list[Any],
     kwargs: dict[str, Any],
@@ -321,6 +347,10 @@ def transform_args(
     type_promotion_kind: Optional[ELEMENTWISE_TYPE_PROMOTION_KIND],
     convert_input_to_bool: bool,
 ) -> tuple[list[Any], dict[str, Any]]:
+    """
+    Transforms arguments for broadcasting and type promotion
+    """
+
     args_indices = [i for i, x in enumerate(args) if isinstance(x, TensorBox)]
     kwargs_indices = [k for k, v in kwargs.items() if isinstance(v, TensorBox)]
     # check that there's something to transform
@@ -347,6 +377,12 @@ def transform_args(
         device = (
             args[args_indices[0]] if args_indices else kwargs[kwargs_indices[0]]
         ).get_device()
+
+        for i in args_indices:
+            args[i] = maybe_copy_cpu_scalar(args[i], device)
+
+        for k in kwargs_indices:
+            kwargs[k] = maybe_copy_cpu_scalar(kwargs[k], device)
 
         # sometimes args are an immutable list so we can't mutate them
         def promote(arg):
@@ -497,13 +533,9 @@ def broadcast_symbolic_shapes(a, b):
     """
     output = []
     for x, y in itertools.zip_longest(reversed(a), reversed(b), fillvalue=sympy.S.One):
-        if V.graph.sizevars.shape_env.evaluate_expr(
-            sympy.Eq(y, 1), fallback_value=False
-        ):
+        if V.graph.sizevars.is_size_one_or_false(y):
             output.append(x)
-        elif V.graph.sizevars.shape_env.evaluate_expr(
-            sympy.Eq(x, 1), fallback_value=False
-        ):
+        elif V.graph.sizevars.is_size_one_or_false(x):
             output.append(y)
         else:
             V.graph.sizevars.check_equals(x, y)
@@ -949,13 +981,10 @@ def broadcast_tensors(*inputs):
     for x in inputs:
         sizes = x.get_size()
 
-        def is_length_one(size: sympy.Expr):
-            return V.graph.sizevars.shape_env.evaluate_expr(
-                sympy.Eq(size, 1), fallback_value=False
-            )
-
         if len(sizes) != len(target) or any(
-            is_length_one(a) != is_length_one(b) for a, b in zip(sizes, target)
+            V.graph.sizevars.is_size_one_or_false(a)
+            != V.graph.sizevars.is_size_one_or_false(b)
+            for a, b in zip(sizes, target)
         ):
             x = expand(x, target)
         outputs.append(x)
@@ -1179,16 +1208,26 @@ def slice_(x, dim=0, start=0, end=2**63, step=1, clamp=True):
 
 @register_lowering(aten.as_strided, type_promotion_kind=None)
 def as_strided(x, size, stride, storage_offset=None):
+    new_device = None
+    new_dtype = None
     if isinstance(x, TensorBox) and isinstance(x.data, ir.BaseView):
-        # as_strided ignores views
+        # Note: Merging views
+        # When we use as_strided, we can rewrite the size/stride/offset
+        # of the incoming buffer x. If x is a view, we would overwrite
+        # its metadata. Except for dtype, which we need to propagate.
+
+        # Technically device is not needed because it is not possible
+        # to have a cross-device view today.
+        new_device = x.get_device()
+        new_dtype = x.dtype
         x = x.data.unwrap_view()
     x.realize()
     if not ir.is_storage_and_layout(x):
         raise NotImplementedError(f"unrealized as_strided({x}, ...)")
     storage, old_layout = ir.as_storage_and_layout(x)
     new_layout = ir.FixedLayout(
-        old_layout.device,
-        old_layout.dtype,
+        new_device if new_device else old_layout.device,
+        new_dtype if new_dtype else old_layout.dtype,
         [sympy.expand(s) for s in size],
         [sympy.expand(s) for s in stride],
         sympy.expand(storage_offset or 0),
@@ -2612,7 +2651,7 @@ def sdpa_constraint(fx_node, *args, **kwargs):
         if len(arg.get_size()) not in (3, 4):
             return arg
 
-        is_aligned_tensor = ir.is_aligned_realized_tensor_hint(arg, ALIGNMENT)
+        is_aligned_tensor = ir.is_aligned_realized_tensor(arg, ALIGNMENT)
         if is_aligned_tensor:
             return ir.try_match_insignificant_strides(
                 ir.ExternKernel.realize_input(arg), meta_stride_expr
@@ -2680,7 +2719,9 @@ def sdpa_constraint(fx_node, *args, **kwargs):
             )
 
         def is_aligned(x):
-            return (V.graph.sizevars.size_hint(x.get_size()[-1]) % ALIGNMENT) == 0
+            return V.graph.sizevars.guard_or_false(
+                sympy.Eq(Mod(x.get_size()[-1], ALIGNMENT), 0)
+            )
 
         if isinstance(arg.data, ir.BaseView):
             if not is_aligned(arg):
@@ -2772,7 +2813,7 @@ make_fallback(aten.replication_pad2d_backward)
 make_fallback(aten.upsample_linear1d_backward)
 make_fallback(aten.upsample_bicubic2d_backward, require_contiguous)
 make_fallback(aten.upsample_trilinear3d_backward)
-make_fallback(aten.grid_sampler_2d_backward, require_dense)
+make_fallback(aten.grid_sampler_2d_backward)
 make_fallback(aten._pdist_backward)
 
 
@@ -3014,7 +3055,7 @@ def select_scatter(x, src, dim: int, index: int):
 
 @register_lowering(aten.slice_scatter, type_promotion_kind=None)
 def slice_scatter(x, src, dim=0, start=None, end=None, step=1):
-    assert x.get_dtype() == src.get_dtype()
+    src = to_dtype(src, x.get_dtype())
     x_loader = x.make_loader()
     dim = _validate_dim(x, dim, 0)
     dim_size = x.get_size()[dim]
@@ -3694,8 +3735,8 @@ def index_put_as_masked_fill(self, indices, value, accumulate):
 
 
 def index_put_fallback(self, indices, values, accumulate):
-    assert isinstance(V.graph.current_node.target, torch._ops.OpOverload)
-    ir.IndexPutFallback(V.graph.current_node.target, self, indices, values, accumulate)
+    op_overload = getattr(aten.index_put_, V.graph.current_node.target._overloadname)  # type: ignore[union-attr]
+    ir.IndexPutFallback(op_overload, self, indices, values, accumulate)
     return self
 
 
@@ -4758,11 +4799,11 @@ def max_pool2d_with_indices_backward(
     new_size = list(x.get_size())
 
     h_window_size = max(
-        max(h // stride[0] - max(0, (h - kernel_size[0]) // stride[0]), 1)
+        max(FloorDiv(h, stride[0]) - max(0, FloorDiv(h - kernel_size[0], stride[0])), 1)
         for h in range(kernel_size[0] * 2)
     )
     w_window_size = max(
-        max(w // stride[1] - max(0, (w - kernel_size[1]) // stride[1]), 1)
+        max(FloorDiv(w, stride[1]) - max(0, FloorDiv(w - kernel_size[1], stride[1])), 1)
         for w in range(kernel_size[1] * 2)
     )
 
@@ -5008,7 +5049,7 @@ def _adaptive_avg_pool2d(x, output_size):
         o_size = [*batch, h_out, w_out]
         return empty(o_size, dtype=x.get_dtype(), device=x.get_device())
     if h_in % h_out == 0 and w_in % w_out == 0:
-        kernel_size = [h_in // h_out, w_in // w_out]
+        kernel_size = [FloorDiv(h_in, h_out), FloorDiv(w_in, w_out)]
         return avg_pool2d(x, kernel_size)
 
     h_kernel_max = ceildiv((h_in + h_out - 1), h_out)
@@ -5276,7 +5317,9 @@ def upsample_nearest2d_backward(
     *_batch, out_h, out_w = input_size
 
     if inp_h % out_h == 0 and inp_w % out_w == 0:
-        return avg_pool2d(x, [inp_h // out_h, inp_w // out_w], divisor_override=1)
+        return avg_pool2d(
+            x, [FloorDiv(inp_h, out_h), FloorDiv(inp_w, out_w)], divisor_override=1
+        )
 
     h_kernel_max = ceildiv(inp_h, out_h)
     w_kernel_max = ceildiv(inp_w, out_w)
@@ -5530,11 +5573,11 @@ def avg_pool2d_backward(
     dtype = x.get_dtype()
 
     h_window_size = max(
-        max(h // stride[0] - max(0, (h - kernel_size[0]) // stride[0]), 1)
+        max(FloorDiv(h, stride[0]) - max(0, FloorDiv(h - kernel_size[0], stride[0])), 1)
         for h in range(kernel_size[0] * 2)
     )
     w_window_size = max(
-        max(w // stride[1] - max(0, (w - kernel_size[1]) // stride[1]), 1)
+        max(FloorDiv(w, stride[1]) - max(0, FloorDiv(w - kernel_size[1], stride[1])), 1)
         for w in range(kernel_size[1] * 2)
     )
 
@@ -7042,7 +7085,7 @@ def cond(pred, true_fn, false_fn, operands):
 
 
 @register_lowering(torch.ops.higher_order.while_loop, type_promotion_kind=None)
-def while_loop(cond_fn, body_fn, carried_inputs, additional_inputs):
+def while_loop(cond_fn, body_fn, carried_inputs, additional_inputs, stack_output=False):
     if any(
         isinstance(x, IRNode) and is_triton(x)
         for x in carried_inputs + additional_inputs
@@ -7062,9 +7105,16 @@ def while_loop(cond_fn, body_fn, carried_inputs, additional_inputs):
         else:
             raise RuntimeError(f"NYI unsupported output type: {type(out)}")
 
-    result = ir.WhileLoop.create(cond_fn, body_fn, carried_inputs, additional_inputs)
+    result = ir.WhileLoop.create(
+        cond_fn, body_fn, carried_inputs, additional_inputs, stack_output
+    )
     assert isinstance(result, Sequence)
     return list(map(_map_output, result))
+
+
+register_lowering(
+    torch.ops.higher_order.while_loop_stack_output, type_promotion_kind=None
+)(functools.partial(while_loop, stack_output=True))
 
 
 @register_lowering(torch.ops.higher_order.invoke_subgraph, type_promotion_kind=None)
@@ -7188,9 +7238,8 @@ def prepare_softmax_online(x, dim):
         reduction_numel=rnumel,
     )
 
-    if (
-        num_split == 1
-        and V.graph.sizevars.size_hint(rnumel) >= config.unroll_reductions_threshold
+    if num_split == 1 and V.graph.sizevars.statically_known_geq(
+        rnumel, config.unroll_reductions_threshold
     ):
         max_tensor, sum_tensor = OnlineSoftmaxReduction.create(
             input_node=x, num_output=2, reduction_hint=hint, **kwargs
