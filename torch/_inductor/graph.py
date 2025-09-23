@@ -955,10 +955,7 @@ class GraphLowering(torch.fx.Interpreter):
     ) -> None:
         existing = self.dynamic_scalar_dtypes.get(sym)
         if existing is not None and existing != dtype:
-            try:
-                dtype = torch.promote_types(existing, dtype)
-            except TypeError:
-                pass
+            dtype = torch.promote_types(existing, dtype)
         self.dynamic_scalar_dtypes[sym] = dtype
 
     def get_dynamic_scalar_dtype(self, sym: sympy.Symbol) -> torch.dtype:
