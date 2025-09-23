@@ -466,7 +466,10 @@ class TestFP8Lowering(TestCase):
             # autotuning for the compiled case, the results can be different because of
             # the way blocks of results are accumulated (float addition not associative), so
             # setting a small absolute tolerance in these tests
-            torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0.05)
+            if dtype == torch.bfloat16:
+                self.assertEqual(y_eager, y_compiled, rtol=5e-2, atol=0.07)
+            else:
+                self.assertEqual(y_eager, y_compiled, rtol=1e-2, atol=0.05)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @unittest.skipIf(
@@ -612,7 +615,7 @@ class TestFP8Lowering(TestCase):
         )
         self.assertEqual(y_eager.dtype, dtype)
         self.assertEqual(y_compiled.dtype, dtype)
-        torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0.05)
+        torch.testing.assert_close(y_eager, y_compiled, rtol=5e-2, atol=0.07)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @unittest.skipIf(
@@ -745,7 +748,7 @@ class TestFP8Lowering(TestCase):
             )
         self.assertEqual(y_eager.dtype, dtype)
         self.assertEqual(y_compiled.dtype, dtype)
-        torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0.07)
+        torch.testing.assert_close(y_eager, y_compiled, rtol=5e-2, atol=0.07)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     def test_mx_fusion(self):

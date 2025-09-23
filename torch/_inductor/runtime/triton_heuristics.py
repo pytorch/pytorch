@@ -374,6 +374,9 @@ class CachingAutotuner(KernelInterface):
         self.compile_id: Optional[CompileId] = None
         self.is_backward = False
 
+        # Mode for launch grid calculation
+        self.grid_mode: Literal["python", "python_slow", "cpp"] = "python"
+
     def is_statically_launchable(self):
         """
         Checks if every compiled kernel is statically launchable, which
@@ -637,6 +640,23 @@ class CachingAutotuner(KernelInterface):
         self.fn._hash_lock = None
         return old_values
 
+    def restore_after_unpickle(
+        self, old_values: Optional[tuple[Any, Any, Any, Any, Any, Any]]
+    ) -> None:
+        if old_values:
+            (
+                self.fn.fn,
+                self.fn.__globals__,
+                self.fn.used_global_vals,
+                self.fn.repr,
+                self.launchers,
+                self.fn._hash_lock,
+            ) = old_values
+        else:
+            # even if we don't need/have specific values, we do need the
+            # _hash_lock to be a valid RLock
+            self.fn._hash_lock = threading.RLock()
+
     def prepare_for_caching(self) -> None:
         """
         Statically Launched CUDA Kernels have a raw cubin on them
@@ -744,6 +764,15 @@ class CachingAutotuner(KernelInterface):
                     ),
                 }
             )
+        if self.device_props.type == "cuda":
+            options.update(
+                {
+                    "launch_cooperative_grid": compile_meta.get(
+                        "launch_cooperative_grid", False
+                    ),
+                    "launch_pdl": compile_meta.get("launch_pdl", False),  # True
+                }
+            )
         if self.device_props.type == "hip":
             if "waves_per_eu" in compile_meta:
                 options["waves_per_eu"] = compile_meta["waves_per_eu"]
@@ -772,7 +801,10 @@ class CachingAutotuner(KernelInterface):
             and getattr(knobs.runtime, "jit_post_compile_hook", None)
         ):
             try:
-                knobs.runtime.jit_post_compile_hook(
+                hook = knobs.runtime.jit_post_compile_hook
+
+                # base args everyone should get
+                call_kwargs = dict(
                     key=getattr(self.fn, "cache_key", self.kernel_hash or str(self.fn)),
                     repr=getattr(self.fn, "src", None),
                     fn=self.fn,
@@ -780,6 +812,14 @@ class CachingAutotuner(KernelInterface):
                     is_manual_warmup=False,
                     already_compiled=True,
                 )
+
+                # only add inductor_args if the hook takes it
+                sig = inspect.signature(hook)
+                params = sig.parameters
+                if "inductor_args" in params:
+                    call_kwargs["inductor_args"] = self.inductor_meta["config_args"]
+
+                hook(**call_kwargs)
             except Exception:
                 log.exception("jit_post_compile_hook failed")
 
@@ -1069,6 +1109,15 @@ class CachingAutotuner(KernelInterface):
             "global_scratch": launcher.global_scratch,
             "profile_scratch": launcher.profile_scratch,
         }
+        if self.device_props.type == "xpu":
+            # On the XPU backend, threads_per_warp is not always 32.
+            # For Intel GEMM Triton kernels, it can be 16.
+            # This information must be preserved so that the Cpp wrapper
+            # can launch the kernel with the correct configuration.
+            params["threads_per_warp"] = getattr(
+                launcher.bin.metadata, "threads_per_warp", 32
+            )
+
         from torch._inductor.codecache import CudaKernelParamCache
 
         bin_type = {"hip": "hsaco", "xpu": "spv"}.get(self.device_props.type, "cubin")
@@ -1280,17 +1329,31 @@ class CachingAutotuner(KernelInterface):
 
             def filtered_signature() -> list[str]:
                 # constexprs are not passed in as args
-                return [
-                    x
-                    for x in self.triton_meta["signature"].keys()
-                    if x not in cfg.kwargs.keys()
-                ]
+                new_signature: list[str] = []
+                from triton.runtime.interpreter import InterpretedFunction
+
+                for i, x in enumerate(self.triton_meta["signature"].keys()):
+                    if isinstance(self.fn, InterpretedFunction):
+                        # These are torch compiled triton kernels that definitely
+                        # have block size configs. Dynamo does not currently
+                        # trace user defined triton kernels when TRITON_INTERPRET=1
+                        if x not in cfg.kwargs.keys():
+                            new_signature.append(x)
+                    elif i not in self.fn.constexprs:
+                        # use constexprs rather than just configs since user
+                        # defined triton kernels may not have any configs
+                        new_signature.append(x)
+
+                return new_signature
+
         else:
 
             def filtered_signature() -> list[str]:
                 return list(self.triton_meta["signature"].keys())
 
-        grid = GridExpr.from_meta(self.inductor_meta, cfg).eval_slow(
+        grid = GridExpr.from_meta(
+            self.inductor_meta, cfg, mode=self.grid_mode
+        ).eval_slow(
             dict(
                 zip(
                     [
@@ -1468,6 +1531,13 @@ class StaticTritonCompileResult(CompileResult[StaticallyLaunchedCudaKernel]):
             if inductor_meta.get("store_cubin", None):
                 # Requires storing the entire binary
                 raise CannotStaticallyLaunchKernel("store_cubin is enabled")
+
+            if getattr(kernel.metadata, "launch_pdl", False) or getattr(
+                kernel.metadata, "launch_cooperative_grid", False
+            ):
+                raise CannotStaticallyLaunchKernel(
+                    "static launch does not support launch attributes"
+                )
 
             cubin_location = os.path.join(
                 triton_cache_dir(triton_meta.get("device", 0)),
@@ -2286,8 +2356,10 @@ def triton_config_reduction(
 
     if num_warps is None:
         num_warps = total_numel() // 128
+
+    max_num_warps = 16 if r <= 8192 else 32
     num_warps = _num_warps(
-        num_warps, max_num_warps=16, register_intensive=register_intensive
+        num_warps, max_num_warps=max_num_warps, register_intensive=register_intensive
     )
 
     x, _num_blocks = _check_max_grid_x(size_hints, x, num_warps)
@@ -2626,7 +2698,7 @@ def _reduction_configs(
         xnumel = max(4096 // rnumel, 1)
         c = make_config(
             xnumel,
-            rnumel,
+            min(rnumel, 32768),
             register_intensive=register_intensive,
             dynamic_scale_rblock=False,
         )
@@ -3079,14 +3151,14 @@ class GridExpr:
     """Generate code for grid size expressions in launcher"""
 
     inductor_meta: dict[str, Any]
-    mode: Literal["python", "cpp"] = "python"
+    mode: Literal["python", "cpp", "python_slow"] = "python"
     prefix: list[str] = dataclasses.field(default_factory=list)
     x_grid: Union[str, int] = 1
     y_grid: Union[str, int] = 1
     z_grid: Union[str, int] = 1
 
     def __post_init__(self) -> None:
-        assert self.mode in ("python", "cpp")
+        assert self.mode in ("python", "cpp", "python_slow")
 
     def generate(self, meta: dict[str, int]) -> None:
         raise NotImplementedError
@@ -3098,9 +3170,15 @@ class GridExpr:
             return numel
         if isinstance(numel, int) and isinstance(block, int):
             return ceildiv(numel, block)  # constant fold
+        # This trick only works in python, where
+        # negative integer division is floored
         if self.mode == "python":
             return f"-(({numel}) // -({block}))"
-        # trick above doesn't work in C++ due to rounding differences
+        # This is more generic than above, and works in languages where
+        # positive integer division is floored/truncated
+        elif self.mode == "python_slow":
+            return f"(({numel} + {block} - 1) // ({block}))"
+        # For cpp code gen
         return f"(({numel} + ({block} - 1)) / ({block}))"
 
     def maximum(self, seq: list[Union[int, str]]) -> Union[int, str]:
@@ -3108,7 +3186,7 @@ class GridExpr:
         items = self._constant_fold(max, seq)
         if len(items) <= 1:
             return items[0]
-        if self.mode == "python":
+        if self.mode in ("python", "python_slow"):
             return f"max({', '.join(map(str, items))})"
         return functools.reduce(lambda x, y: f"std::max({x}, {y})", items)
 
@@ -3131,7 +3209,7 @@ class GridExpr:
 
     def assign_tmp(self, name: str, expr: Union[str, int]) -> str:
         # Grid functions are one per kernel, so name collisions are fine
-        if self.mode == "python":
+        if self.mode in ("python", "python_slow"):
             return f"{name} = {expr}"
         if self.mode == "cpp":
             return f"uint32_t {name} = {expr};"
@@ -3141,7 +3219,7 @@ class GridExpr:
     def from_meta(
         inductor_meta: dict[str, Any],
         cfg: Union[Config, dict[str, int]],
-        mode: Literal["python", "cpp"] = "python",
+        mode: Literal["python", "cpp", "python_slow"] = "python",
     ) -> GridExpr:
         grid_cls = globals()[inductor_meta["grid_type"]]
         assert issubclass(grid_cls, GridExpr)

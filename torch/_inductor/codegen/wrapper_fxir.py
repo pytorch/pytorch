@@ -28,13 +28,14 @@ from torch._inductor.virtualized import V
 from torch._library.triton import wrap_triton
 from torch.fx import GraphModule
 from torch.utils import _pytree as pytree
-from torch.utils._sympy.functions import CeilDiv
+from torch.utils._sympy.functions import FloorDiv
 from torch.utils._sympy.interp import _run_sympy_handler, sympy_interp
 from torch.utils._sympy.reference import OptimizedPythonReferenceAnalysis
+from torch.utils._sympy.solve import try_solve
 
 from .. import config, ir
 from ..runtime.triton_compat import Config
-from ..utils import LineContext
+from ..utils import cache_property_on_self, LineContext, ValueWithLineMap
 from .common import (
     CodegenSymbol,
     FileBackedGraphModule,
@@ -47,6 +48,7 @@ from .wrapper import (
     CommBufferAllocateLine,
     CommBufferFreeLine,
     CommentLine,
+    ConditionalLine,
     EnterDeviceContextManagerLine,
     EnterSubgraphLine,
     ExitDeviceContextManagerLine,
@@ -55,6 +57,7 @@ from .wrapper import (
     ExternKernelOutLine,
     FreeIfNotReusedLine,
     FreeLine,
+    IndexPutFallbackLine,
     KernelCallLine,
     KernelDefinitionLine,
     Line,
@@ -63,6 +66,8 @@ from .wrapper import (
     PythonWrapperCodegen,
     ReinterpretLine,
     ReuseLine,
+    ScatterFallbackLine,
+    SubgraphPythonWrapperCodegen,
     SymbolicCallArg,
     SymbolicCallArgLine,
     WrapperLine,
@@ -101,12 +106,96 @@ class TritonKernel:
     wrapped: TraceableTritonKernelWrapper
 
 
+def replace_floor_div(expr: sympy.Expr) -> sympy.Expr:
+    """
+    Replace sympy.floor with FloorDiv.
+    """
+
+    def replace(expr: sympy.Expr) -> sympy.Expr:
+        expr = sympy.together(expr)
+
+        # Find division operations in the sympy.floor expression
+        # Div is either represented as Mul with:
+        # Rational denominator or Pow with negative exponent
+        if not isinstance(expr, sympy.core.mul.Mul):
+            return sympy.floor(expr)
+
+        if isinstance(expr.args[0], sympy.Rational):
+            frac = expr.args[0]
+            numerator = sympy_product(expr.args[1:]) * frac.numerator
+            denominator = frac.denominator
+
+            return FloorDiv(numerator, denominator)
+        elif isinstance(expr.args[0], sympy.Pow):
+            base = expr.args[0].base
+            exp = expr.args[0].exp
+            numerator = sympy_product(expr.args[1:])
+            if exp < 0:
+                denominator = base ** (-exp)
+            else:
+                numerator = numerator * (base**exp)
+                denominator = 1
+            return FloorDiv(numerator, denominator)
+        else:
+            return sympy.floor(expr)
+
+    return expr.replace(sympy.floor, replace)
+
+
 class WrapperFxCodegen(PythonWrapperCodegen):
     """
     Backend to generate wrapper code as an FX IR graph.
     """
 
     supports_caching = False
+
+    def __init__(self, *args: Any, **kwargs: Any):
+        super().__init__(*args, **kwargs)
+        self.subgms: dict[str, torch.fx.GraphModule] = {}
+
+    def codegen_inputs(self) -> None:
+        """
+        This would generate code for symbolic input shapes, strides, etc.
+        Since the FX converter handles this, do nothing here.
+        """
+
+    def codegen_conditional(self, conditional: ir.Conditional) -> None:
+        """
+        Conditional codegen normally emits a number of different wrapper lines.
+        Instead, FX conversion uses a dedicated line for the whole conditional.
+        """
+        self.writeline(ConditionalLine(self, conditional))
+        for subgraph in (conditional.true_subgraph, conditional.false_subgraph):
+            self.codegen_subgraph_common(subgraph)
+
+    def define_subgraph_launcher_fn(
+        self, name: str, subgraph_code: Union[ValueWithLineMap, FileBackedGraphModule]
+    ) -> None:
+        """
+        Record subgms as they're generated.
+        """
+        assert isinstance(subgraph_code, FileBackedGraphModule)
+        self.subgms[name] = subgraph_code.gm
+
+    @property
+    @cache_property_on_self
+    def is_subgraph(self) -> bool:
+        return isinstance(self, SubgraphPythonWrapperCodegen)
+
+    def get_fx_graph_inputs(
+        self,
+    ) -> dict[str, Union[ir.TensorBox, ir.TorchBindObject, sympy.Expr, None]]:
+        """
+        Get the input nodes corresponding to FX graph placeholders.
+        """
+        if V.aot_compilation and not self.is_subgraph:
+            # AOT graphs must match the signature of the input module.
+            return {
+                node.name: V.graph.graph_inputs.get(node.name)
+                for node in V.graph.module.graph.find_nodes(op="placeholder")  # type: ignore[operator, union-attr]
+            }
+
+        return self.get_graph_inputs()
 
     def _generate(self, is_inference: bool) -> tuple[FileBackedGraphModule, None]:
         self.run_wrapper_ir_passes(is_inference)
@@ -117,7 +206,15 @@ class WrapperFxCodegen(PythonWrapperCodegen):
                 self.header.getvalue(),
             ]
         )
-        gm = FxConverter(lines=self.lines, prologue=prologue).generate()
+        gm = FxConverter(
+            lines=self.lines,
+            prologue=prologue,
+            graph_inputs=self.get_fx_graph_inputs(),
+            graph_outputs=self.get_graph_outputs(),
+            subgms=self.subgms,
+            is_subgraph=self.is_subgraph,
+        ).generate()
+
         compiled_fn = self.compile_graph(gm)
 
         return FileBackedGraphModule(gm, compiled_fn), None
@@ -130,20 +227,43 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         """
         return gm.forward
 
+    def write_header(self) -> None:
+        """
+        Python subgraphs normally lack headers.
+        Override this behavior to generate prologues for FX subgraphs.
+        """
+        PythonWrapperCodegen.write_header(self)
+
     @classmethod
     def create(
-        cls,
+        cls: type["WrapperFxCodegen"],
         is_subgraph: bool,
         subgraph_name: Optional[str],
         parent_wrapper: Optional[PythonWrapperCodegen],
         partition_signatures: Optional[ir.GraphPartitionSignature] = None,
     ) -> "WrapperFxCodegen":
         if is_subgraph:
-            raise NotImplementedError(
-                "Subgraphs are not yet supported by FX conversion"
+            assert subgraph_name is not None
+            assert parent_wrapper is not None
+
+            # Subgraphs override some methods of PythonWrapperCodegen.
+            # Apply these overrides to the user-provided class, with priority given to
+            # user-provided methods.
+            class SubgraphFxWrapperCodegen(cls, SubgraphPythonWrapperCodegen):  # type: ignore[misc,valid-type]
+                def compile_graph(self, gm: GraphModule) -> Callable[..., Any]:
+                    """
+                    Skip graph compilation for subgraphs.
+                    """
+
+                    def crash_if_run(*args: Any) -> None:
+                        raise NotImplementedError("Cannot run a subgraph in isolation!")
+
+                    return crash_if_run
+
+            return SubgraphFxWrapperCodegen(
+                subgraph_name, parent_wrapper, partition_signatures
             )
 
-        # For derived backends, this could be a subclass.
         return cls()
 
 
@@ -155,7 +275,11 @@ class FxConverter:
     """
 
     lines: list[Line]
-    prologue: str = ""
+    prologue: str
+    graph_inputs: dict[str, Union[ir.TensorBox, ir.TorchBindObject, sympy.Expr, None]]
+    graph_outputs: list[ir.IRNode]
+    subgms: dict[str, torch.fx.GraphModule]
+    is_subgraph: bool
 
     def __post_init__(self) -> None:
         graph = torch.fx.Graph()
@@ -267,24 +391,21 @@ class FxConverter:
         Converts graph inputs to FX placeholders.
         """
 
-        for node in V.graph.module.graph.find_nodes(op="placeholder"):  # type: ignore[operator, union-attr]
-            name = node.name
-            if name in V.graph.graph_inputs:
-                ir_node = V.graph.graph_inputs[name]
-
-                # Introduce a new symbol for constant inputs.
-                buffer = (
-                    SymbolBuffer(sympy.Symbol(name, is_integer=True))
-                    if isinstance(ir_node, (int, float, sympy.Integer, sympy.Float))
-                    else self._get_buffer(ir_node)
-                )
-                placeholder_node = self.gm.graph.placeholder(buffer.get_name())
-                placeholder_node.meta["val"] = buffer.get_example()
-                self._record_allocation(buffer, placeholder_node)
-
-            elif V.aot_compilation:
+        for name, ir_node in self.graph_inputs.items():
+            if ir_node is None:
                 # Create dummy input nodes to match the input signature
                 self.gm.graph.placeholder(name)
+                continue
+
+            # Introduce a new symbol for constant inputs.
+            buffer = (
+                SymbolBuffer(sympy.Symbol(name, is_integer=True))
+                if isinstance(ir_node, (int, float, sympy.Integer, sympy.Float))
+                else self._get_buffer(ir_node)
+            )
+            placeholder_node = self.gm.graph.placeholder(buffer.get_name())
+            placeholder_node.meta["val"] = buffer.get_example()
+            self._record_allocation(buffer, placeholder_node)
 
     def _generate_graph_input_shapes(self) -> None:
         """
@@ -298,37 +419,77 @@ class FxConverter:
             target: torch._ops.OpOverload,
             dim: int,
         ) -> None:
+            def codegen_proxy() -> torch.fx.Proxy:
+                size_node = self.gm.graph.call_function(target, (base_node, dim))
+                size_proxy = torch.fx.Proxy(size_node, tracer=self.tracer)
+                self.expr_to_proxy[sym_or_exp] = size_proxy
+                return size_proxy
+
             if isinstance(sym_or_exp, sympy.Symbol):
                 if sym_or_exp in self.expr_to_proxy:
                     return
-
-                size_node = self.gm.graph.call_function(target, (base_node, dim))
-                size_proxy = torch.fx.Proxy(size_node, tracer=self.tracer)
-
-                self.expr_to_proxy[sym_or_exp] = size_proxy
+                codegen_proxy()
 
             elif isinstance(sym_or_exp, sympy.Integer):
                 return
 
             elif isinstance(sym_or_exp, sympy.Expr):
-                self._sympy_interp(sym_or_exp)
+                # Check if we need to solve for an undefined symbol.
+                undefined_symbols = [
+                    sym
+                    for sym in sym_or_exp.free_symbols
+                    if sym not in self.expr_to_proxy
+                ]
+                if len(undefined_symbols) == 0:
+                    self._sympy_interp(sym_or_exp)
+                    return
+                elif len(undefined_symbols) > 1:
+                    raise ValueError(f"Underdetermined input expression: {sym_or_exp}")
+
+                # Define a new symbol for the input size.
+                size_proxy = codegen_proxy()
+                size_symbol = sympy.Symbol(
+                    size_proxy.node.name, integer=True, nonnegative=True
+                )
+                self.expr_to_proxy[size_symbol] = size_proxy
+
+                # Solve for the undefined symbol.
+                undefined_symbol = undefined_symbols[0]
+                solution = try_solve(
+                    sympy.Eq(sym_or_exp, size_symbol), undefined_symbol
+                )
+                if solution is None:
+                    raise ValueError(f"Cannot solve input expression: {sym_or_exp}")
+
+                # Since the symbol is a size, it must be an integer.
+                # Therefore, we can convert division to FloorDiv.
+                undefined_symbol_expr = solution[1]
+                if undefined_symbol.is_integer:
+                    undefined_symbol_expr = replace_floor_div(
+                        sympy.floor(undefined_symbol_expr)
+                    )
+
+                # Generate FX for the symbol.
+                self._sympy_interp(undefined_symbol_expr)
+                self.expr_to_proxy[undefined_symbol] = self.expr_to_proxy[
+                    undefined_symbol_expr
+                ]
 
         for node in V.graph.module.graph.find_nodes(op="placeholder"):  # type: ignore[operator, union-attr]
             name = node.name
-            if name in V.graph.graph_inputs:
-                ir_node = V.graph.graph_inputs[name]
-                if isinstance(ir_node, ir.TensorBox):
-                    buffer = self._get_buffer(ir_node)
-                    placeholder_node = self.buffer_to_node[buffer.get_name()]
+            ir_node = self.graph_inputs.get(name)
+            if isinstance(ir_node, ir.TensorBox):
+                buffer = self._get_buffer(ir_node)
+                placeholder_node = self.buffer_to_node[buffer.get_name()]
 
-                    for dim, size in enumerate(ir_node.get_size()):
-                        _codegen_symbol(
-                            size, placeholder_node, torch.ops.aten.sym_size.int, dim
-                        )
-                    for dim, stride in enumerate(ir_node.get_stride()):
-                        _codegen_symbol(
-                            stride, placeholder_node, torch.ops.aten.sym_stride.int, dim
-                        )
+                for dim, size in enumerate(ir_node.get_size()):
+                    _codegen_symbol(
+                        size, placeholder_node, torch.ops.aten.sym_size.int, dim
+                    )
+                for dim, stride in enumerate(ir_node.get_stride()):
+                    _codegen_symbol(
+                        stride, placeholder_node, torch.ops.aten.sym_stride.int, dim
+                    )
 
     def _generate_graph_constants(self) -> None:
         for name, value in V.graph.constants.items():
@@ -383,14 +544,40 @@ class FxConverter:
         Generate FX IR for graph outputs.
         """
         output_nodes = [
-            self._generate_buffer(node)
-            for idx, node in enumerate(V.graph.graph_outputs)
+            self._generate_buffer(node) for idx, node in enumerate(self.graph_outputs)
         ]
 
-        # Single return elements don't use a tuple.
-        output_value = output_nodes[0] if len(output_nodes) == 1 else output_nodes
+        # Parent graphs with single return elements don't use a tuple.
+        output_value = (
+            output_nodes[0]
+            if len(output_nodes) == 1 and not self.is_subgraph
+            else output_nodes
+        )
 
         self.gm.graph.output(output_value)
+
+    def _generate_subgm_getattrs(self) -> None:
+        """
+        Generate getattr nodes for subgms.
+        """
+
+        def generate_getattr(name: str, subgm: torch.fx.GraphModule) -> torch.fx.Node:
+            self.gm.add_submodule(name, subgm)
+            node = self.gm.graph.get_attr(name)
+            node.meta["val"] = subgm
+            return node
+
+        self.subgm_getattrs = {
+            name: generate_getattr(name, subgm) for name, subgm in self.subgms.items()
+        }
+
+    def _get_subgm_attr(self, subgraph: ir.Subgraph) -> torch.fx.Node:
+        """
+        Look up the getattr node for a subgraph.
+        """
+        graph = subgraph.graph
+        assert graph is not None
+        return self.subgm_getattrs[graph.name]
 
     def generate(self) -> torch.fx.GraphModule:
         """
@@ -398,6 +585,7 @@ class FxConverter:
         """
         self._generate_graph_inputs()
         self._generate_graph_constants()
+        self._generate_subgm_getattrs()
 
         fake_mode = _detect_fake_mode_from_gm(self.gm)
 
@@ -467,31 +655,6 @@ class FxConverter:
             )
             return self.expr_to_proxy[s].node
         elif isinstance(s, sympy.Expr):
-
-            def replace_floor_div(orig_expr: sympy.Expr) -> sympy.Expr:
-                """
-                Converts floor(x / c) to x // c.
-                """
-                expr = sympy.together(orig_expr, deep=False)
-                if isinstance(expr, sympy.core.mul.Mul) and isinstance(
-                    expr.args[0], sympy.Rational
-                ):
-                    # Only the first argument of a Mul can be a Rational.
-                    frac = expr.args[0]
-                    numerator = sympy_product(expr.args[1:]) * frac.numerator
-                    denominator = frac.denominator
-
-                    # Sanity check the results.
-                    new_expr = numerator / denominator
-                    assert V.graph.sizevars.statically_known_equals(new_expr, expr), (
-                        f"Unsound replacement: '{new_expr}' != '{expr}'"
-                    )
-                    # Undo the python division trick and replace with explicit CeilDiv
-                    return -CeilDiv(-numerator, denominator)
-                else:
-                    return sympy.floor(orig_expr)
-
-            s = s.replace(sympy.floor, replace_floor_div)
             return self._sympy_interp(s).node
 
         elif isinstance(s, torch.fx.Node):
@@ -525,6 +688,33 @@ class FxConverter:
         node.name = name
         self._record_allocation(buffer, node)
 
+    def _generate_conditional(self, line: WrapperLine) -> None:
+        assert isinstance(line, ConditionalLine)
+
+        def get_subgm_attr(subgraph: Optional[ir.Subgraph]) -> torch.fx.Node:
+            assert subgraph is not None
+            return self._get_subgm_attr(subgraph)
+
+        # Access the subgraphs as getattrs.
+        ir_node = line.node
+        (true_subgm, false_subgm) = [
+            get_subgm_attr(subgraph)
+            for subgraph in (ir_node.true_subgraph, ir_node.false_subgraph)
+        ]
+
+        def generate_buffer(node: Optional[ir.IRNode]) -> Optional[torch.fx.Node]:
+            assert node is not None
+            return self._generate_buffer(node)
+
+        predicate = generate_buffer(ir_node.predicate)
+        assert ir_node.operands is not None
+        operands = tuple(generate_buffer(arg) for arg in ir_node.operands)
+        fx_node = self.gm.graph.call_function(
+            torch.ops.higher_order.cond,
+            args=(predicate, true_subgm, false_subgm, operands),
+        )
+        self._record_allocation(ir_node, fx_node)
+
     def _generate_comment(self, line: WrapperLine) -> None:
         assert isinstance(line, CommentLine)
         # We ignore comments in FX IR.
@@ -539,11 +729,11 @@ class FxConverter:
 
     def _generate_enter_subgraph(self, line: WrapperLine) -> None:
         assert isinstance(line, EnterSubgraphLine)
-        raise NotImplementedError("Subgraphs are not yet supported by FX conversion")
+        # We ignore memory planning lines in FX IR.
 
     def _generate_exit_subgraph(self, line: WrapperLine) -> None:
         assert isinstance(line, ExitSubgraphLine)
-        raise NotImplementedError("Subgraphs are not yet supported by FX conversion")
+        # We ignore memory planning lines in FX IR.
 
     def _generate_free(self, line: WrapperLine) -> None:
         assert isinstance(line, FreeLine)
@@ -646,6 +836,56 @@ class FxConverter:
         node.name = line.result_name
         self.buffer_to_node[line.result_name] = node
 
+    def _generate_fallback_call(
+        self,
+        ir_node: ir.ExternKernel,
+        args: Optional[tuple[Any, ...]] = None,
+        kwargs: Optional[dict[str, Any]] = None,
+    ) -> None:
+        fx_node = self.gm.graph.call_function(
+            ir_node.op_overload,  # type: ignore[arg-type]
+            args=args,
+            kwargs=kwargs,
+        )
+        result_buffer = ir_node.codegen_reference()
+        self.buffer_to_node[result_buffer] = fx_node
+
+    def _generate_index_put_fallback(self, line: WrapperLine) -> None:
+        assert isinstance(line, IndexPutFallbackLine)
+        ir_node = line.node
+
+        def generate_buffer_or_none(
+            x: Union[ir.IRNode, Sequence[ir.IRNode], None],
+        ) -> Optional[torch.fx.Node]:
+            """
+            Handles None before calling _generate_buffer.
+            """
+            if x is None:
+                return None
+
+            assert isinstance(x, ir.IRNode)
+            return self._generate_buffer(x)
+
+        (x, values) = [generate_buffer_or_none(t) for t in ir_node.inputs[:2]]
+        indices = tuple(generate_buffer_or_none(t) for t in line.indices)
+        accumulate = ir_node.constant_args[0]
+        args = (x, indices, values, accumulate)
+        self._generate_fallback_call(ir_node, args)
+
+    def _generate_scatter_fallback(self, line: WrapperLine) -> None:
+        assert isinstance(line, ScatterFallbackLine)
+        ir_node = line.node
+        assert ir.is_node_sequence(ir_node.inputs)
+        (x, index, src) = [self._generate_buffer(t) for t in ir_node.inputs] + (
+            [] if ir_node.src_is_tensor else [ir_node.constant_args[1]]
+        )
+        args = (x, ir_node.constant_args[0], index, src)
+        kwargs = {}
+        if reduce := ir_node.kwargs.get("reduce"):
+            kwargs["reduce"] = reduce
+
+        self._generate_fallback_call(ir_node, args, kwargs)
+
     def _generate_null(self, line: WrapperLine) -> None:
         assert isinstance(line, NullLine)
         # Does nothing.
@@ -665,6 +905,10 @@ class FxConverter:
         call_args = self._lookup_args(line.call_args)
         kernel = self.kernels[line.kernel_name]
         tuner = kernel.tuner
+        # Use python_slow mode instead of python mode to avoid
+        # the round to neginf behaviour, which is not the convention
+        # in other languages.
+        tuner.grid_mode = "python_slow"
 
         # Optionally autotune the kernels.
         # The FX backend currently only supports compile-time tuning.
@@ -738,6 +982,9 @@ class FxConverter:
         call_kwargs = dict(zip(signature, call_args))
         call_kwargs.update(kernel_config.kwargs)
 
+        # Replace all sympy.floor with FloorDiv
+        # _generate_sym_node does not support sympy.floor
+        grid = [replace_floor_div(x) if isinstance(x, sympy.Expr) else x for x in grid]
         wrapper_grid = [tuple(self._generate_sym_nodes(grid))]
         call_kwargs = {
             name: self._generate_sym_node(val) for name, val in call_kwargs.items()
