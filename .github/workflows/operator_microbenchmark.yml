@@ -6,7 +6,7 @@ on:
       - ciflow/op-benchmark/*
   workflow_dispatch:
   schedule:
-    # Run at 06:00 UTC every Sunday
+    # Run at 06:00 UTC everyday
     - cron: 0 6 * * *
 
 concurrency:
