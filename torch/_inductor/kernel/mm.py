@@ -1,3 +1,6 @@
+warning: The following rules have been removed and ignoring them has no effect:
+    - UP038
+
 # mypy: allow-untyped-defs
 import functools
 import logging
