@@ -23,7 +23,11 @@ from torch.distributed.tensor._tp_conv import (
 )
 from torch.distributed.tensor._utils import try_find_mesh_from_args
 from torch.distributed.tensor.placement_types import Partial, Placement, Replicate
-from torch.utils._python_dispatch import return_and_correct_aliasing
+from torch.utils._debug_mode import DebugMode
+from torch.utils._python_dispatch import (
+    _get_current_dispatch_mode,
+    return_and_correct_aliasing,
+)
 
 
 try:
@@ -121,11 +125,17 @@ class OpDispatcher:
             aten._amp_foreach_non_finite_check_and_unscale_.default: found_inf_reduce_handler,
         }
 
-        # This flag is used internally to control whether we treat the torch.Tensor(non-DTensor)
-        # as implicitly replicated or we throw error to user.
-        # NOTE: It is EXTREMELY UNSAFE to turn this flag on by default so we intentionally leave
-        # it as False by default.
-        self._allow_implicit_replication = False
+    # This flag is used internally to control whether we treat the torch.Tensor(non-DTensor)
+    # as implicitly replicated or we throw error to user.
+    # NOTE: It is EXTREMELY UNSAFE to turn this flag on by default so we intentionally leave
+    # it as False by default.
+    @property
+    def _allow_implicit_replication(self) -> bool:
+        return torch._C._get_dtensor_allow_implicit_replication()
+
+    @_allow_implicit_replication.setter
+    def _allow_implicit_replication(self, value: bool) -> None:
+        return torch._C._set_dtensor_allow_implicit_replication(value)
 
     def dispatch(
         self,
@@ -144,7 +154,6 @@ class OpDispatcher:
 
         # extract local tensor and sharding infos to a OpInfo
         op_info = self.unwrap_to_op_info(op_call, args, kwargs)
-        logger.debug("Dispatching op_call: %s", op_info.schema)
 
         try:
             self.sharding_propagator.propagate(op_info)
@@ -165,7 +174,6 @@ class OpDispatcher:
             ) from e
 
         output_sharding = op_info.output_sharding
-        logger.debug("output_sharding for %s: %s", op_call, output_sharding)
         assert output_sharding is not None, "output sharding should not be None"
 
         mesh = op_info.compute_mesh
@@ -330,6 +338,9 @@ class OpDispatcher:
         suggested_input_schema: OpSchema,
         use_val_from_redistribute_schema: bool,
     ) -> None:
+        debug_mode = _get_current_dispatch_mode()
+        in_debug_mode = isinstance(debug_mode, DebugMode)
+
         # NOTE: it's very rare that we need to reshard kwargs so we intentionally skip it
         if op_info.args_tree_spec is not None:
             flatten_args_schema_to_reshard = tuple(
@@ -344,9 +355,18 @@ class OpDispatcher:
             if isinstance(arg_spec, DTensorSpec):
                 local_tensor = cast(torch.Tensor, op_info.local_args[i])
                 if arg_spec != reshard_arg_spec:
-                    resharded_local_tensor = redistribute_local_tensor(
-                        local_tensor, arg_spec, reshard_arg_spec
+                    redistribute_context = (
+                        debug_mode.record_redistribute_calls(  # type: ignore[union-attr]
+                            i, arg_spec, reshard_arg_spec
+                        )
+                        if in_debug_mode
+                        else contextlib.nullcontext()
                     )
+
+                    with redistribute_context:
+                        resharded_local_tensor = redistribute_local_tensor(
+                            local_tensor, arg_spec, reshard_arg_spec
+                        )
                     new_local_args.append(resharded_local_tensor)
                 else:
                     new_local_args.append(local_tensor)
@@ -501,5 +521,7 @@ class OpDispatcher:
             raise RuntimeError(
                 f"{op_call}: got mixed torch.Tensor and DTensor, need to convert all"
                 " torch.Tensor to DTensor before calling distributed operators!"
+                " Please see https://docs.pytorch.org/docs/main/distributed.tensor.html#mixed-tensor-and-dtensor-operations"
+                " for more details."
             )
         return replication_spec
