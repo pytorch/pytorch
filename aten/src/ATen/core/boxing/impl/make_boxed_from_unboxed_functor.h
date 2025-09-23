@@ -4,9 +4,9 @@
 #include <ATen/core/boxing/OperatorKernel.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/stack.h>
-#include <c10/util/Metaprogramming.h>
-#include <c10/util/TypeList.h>
 #include <c10/util/intrusive_ptr.h>
+#include <torch/headeronly/util/Metaprogramming.h>
+#include <torch/headeronly/util/TypeList.h>
 
 #include <utility>
 

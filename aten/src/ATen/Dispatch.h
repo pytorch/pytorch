@@ -4,8 +4,8 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Half.h>
-#include <c10/util/Metaprogramming.h>
 #include <c10/util/complex.h>
+#include <torch/headeronly/util/Metaprogramming.h>
 
 #ifdef __CUDACC__
 #include <cuda.h> // For CUDA_VERSION
