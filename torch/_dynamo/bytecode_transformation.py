@@ -537,7 +537,7 @@ def linetable_310_writer(
     See https://github.com/python/cpython/blob/main/Objects/lnotab_notes.txt
     This is the internal format of the line number table for Python 3.10
     """
-    assert sys.version_info < (3, 11)
+    assert sys.version_info[:2] == (3, 10)
     linetable: list[int] = []
     lineno = first_lineno
     lineno_delta = 0
