@@ -1778,7 +1778,6 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
                 **template_kwargs,
                 **base_ops,
                 "WARP_SPECIALIZE": ws,
-                # TODO: Tune properly or set in the default configs directly.
                 "EPILOGUE_SUBTILE": config.triton.enable_epilogue_subtiling,
             }
 

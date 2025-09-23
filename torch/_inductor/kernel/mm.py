@@ -646,6 +646,7 @@ _blackwell_ws_persistent_device_tma = r"""
         offs_cm = pid_m * BLOCK_M
         offs_cn = pid_n * BLOCK_N
         {%- if EPILOGUE_SUBTILE %}
+        tl.static_assert(BLOCK_N % 2 == 0)
         acc = tl.reshape(accumulator, (BLOCK_M, 2, BLOCK_N // 2))
         acc = tl.permute(acc, (0, 2, 1))
         acc0, acc1 = tl.split(acc)
