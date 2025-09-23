@@ -1,4 +1,5 @@
-from typing import Any, Callable, Union
+from collections.abc import Callable
+from typing import Any, Union
 
 from sympy import Expr
 
@@ -36,7 +37,7 @@ if try_import_cutlass():
     )
 
     if config.is_fbcode():
-        import python_cutlass  # type: ignore[import-untyped, import-not-found]  # noqa: F401
+        import cutlass_cppgen as python_cutlass  # type: ignore[import-untyped, import-not-found]  # noqa: F401
     else:
         import cutlass_cppgen as python_cutlass  # type: ignore[import-untyped, import-not-found]  # noqa: F401
 
@@ -173,7 +174,6 @@ non-contiguous layout, received stride: {stride} and shape: {shape}"
         # Fragile, but this is the only way to guarantee t is expected type because t is a local class
         def is_nested_visitor_type(t: type) -> bool:
             return ".".join([t.__module__, t.__qualname__]) in {
-                "python_cutlass.backend.c_types.visitor_factory.<locals>.VisitorType",
                 "cutlass_cppgen.backend.c_types.visitor_factory.<locals>.VisitorType",
             }
 
@@ -234,7 +234,6 @@ non-contiguous layout, received stride: {stride} and shape: {shape}"
         # node's memory, a stride tuple, the datatype
         # Once again, need to check for local class type for stride tuple
         if str(arg_ty) in {
-            "<class 'python_cutlass.backend.c_types.tuple_factory_.<locals>.TupleType'>",
             "<class 'cutlass_cppgen.backend.c_types.tuple_factory_.<locals>.TupleType'>",
         }:
             DEFAULT_STRIDE_LEN = 3
