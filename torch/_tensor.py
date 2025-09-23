@@ -1671,7 +1671,7 @@ class Tensor(torch._C.TensorBase):
     def __dlpack__(
         self,
         *,
-        stream: Optional[Any] = None,
+        stream: Optional[Any] = -1,
         max_version: Optional[tuple[int, int]] = None,
         dl_device: Optional[tuple[enum.IntEnum, int]] = None,
         copy: Optional[bool] = None,
@@ -1689,7 +1689,7 @@ class Tensor(torch._C.TensorBase):
                 pointer to a CUDA stream. The current stream is synchronized with
                 this stream before the capsule is created, and since the capsule
                 shares its storage with the tensor this make it safe to access from
-                both streams.  If None or -1 is passed then no synchronization is performed.
+                both streams.  If -1 is passed then no synchronization is performed.
                 If 1 (on CUDA) or 0 (on ROCM) then the default stream is used for
                 synchronization.
 
@@ -1749,9 +1749,7 @@ class Tensor(torch._C.TensorBase):
             is_rocm = torch.version.hip is not None
             is_cuda = not is_rocm
 
-            if stream is None:
-                stream = torch.cuda.current_stream()
-            elif (is_rocm and stream == 0) or (is_cuda and stream == 1):
+            if stream is None or (is_rocm and stream == 0) or (is_cuda and stream == 1):
                 stream = torch.cuda.default_stream()
             else:
                 if is_cuda and stream == 2:
