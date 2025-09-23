@@ -5,6 +5,7 @@
 # LICENSE file in the root directory of this source tree.
 
 import logging
+from importlib.metadata import entry_points
 
 from .api import (
     rendezvous_handler_registry as handler_registry,
@@ -13,7 +14,6 @@ from .api import (
 )
 from .dynamic_rendezvous import create_handler
 
-from importlib.metadata import entry_points
 
 log = logging.getLogger(__name__)
 
