@@ -87,6 +87,19 @@ class CudaReproTests(TestCase):
     device = "cuda"
     common = check_model_cuda
 
+    def test_mm_out_dtype_compile(self):
+        a = torch.randn(1, 3, device="cuda", dtype=torch.float16)
+        b = torch.randn(3, 2, device="cuda", dtype=torch.float16)
+
+        def fn(x, y):
+            return torch.mm(x, y, out_dtype=torch.float32)
+
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True)
+        result = compiled(a, b)
+        expected = fn(a, b)
+        self.assertEqual(result.dtype, expected.dtype)
+        self.assertEqual(result, expected)
+
     def test_index_put_issue(self):
         def forward(
             self,
