@@ -1083,6 +1083,93 @@ graph():
         args = (torch.randn(15, 3, 256, 256), torch.ones(15, 32, 256, 256))
         self.assertEqual(gm(*args), m(*args))
 
+    # stride() is called for an undefined tensor
+    @testing.expectedFailureCppRuntimeNonStrict
+    def test_native_multi_attention_head(self):
+        embed_dim = 64
+        num_heads = 4
+        bs = 16
+        sl = 8
+        device = "cpu"
+
+        q = 6 * torch.rand(bs, sl, embed_dim, device=device, dtype=torch.float32) - 3
+        k = q
+        v = q
+
+        qkv = torch.nn.Linear(
+            embed_dim, 3 * embed_dim, device=device, dtype=torch.float32
+        )
+        proj = torch.nn.Linear(embed_dim, embed_dim, device=device, dtype=torch.float32)
+
+        class NativeMHA(torch.nn.Module):
+            def __init__(
+                self,
+                embed_dim,
+                num_heads,
+                qkv,
+                proj,
+                need_weights,
+                average_attn_weights,
+                mask_type,
+            ):
+                super().__init__()
+                self.qkv = qkv
+                self.proj = proj
+                self.embed_dim = embed_dim
+                self.num_heads = num_heads
+                self.need_weights = need_weights
+                self.average_attn_weights = average_attn_weights
+                self.mask_type = mask_type
+
+            def forward(self, q, k, v, key_padding_mask):
+                return torch._native_multi_head_attention(
+                    q,
+                    k,
+                    v,
+                    self.embed_dim,
+                    self.num_heads,
+                    self.qkv.weight,
+                    self.qkv.bias,
+                    self.proj.weight,
+                    self.proj.bias,
+                    key_padding_mask,
+                    need_weights=False,
+                    average_attn_weights=False,
+                    mask_type=1,  # mask_type = 1 => src_key_padding_mask, mask_type = 0 => src_mask
+                )
+
+        for mask_type in (0, 1):
+            for need_weights in (True, False):
+                for average_attn_weights in (True, False):
+                    npt = NativeMHA(
+                        embed_dim=embed_dim,
+                        num_heads=num_heads,
+                        qkv=qkv,
+                        proj=proj,
+                        need_weights=need_weights,
+                        average_attn_weights=average_attn_weights,
+                        mask_type=mask_type,
+                    )
+                    sample_input = (q, k, v, None)
+
+                    ep = export(
+                        npt,
+                        args=sample_input,
+                        dynamic_shapes={
+                            "q": {
+                                0: Dim("dim0_q", max=1024),
+                            },
+                            "k": {
+                                0: Dim("dim0_k", max=1024),
+                            },
+                            "v": {
+                                0: Dim("dim0_v", max=1024),
+                            },
+                            "key_padding_mask": None,
+                        },
+                    )
+                    self.assertEqual(ep.module()(*sample_input), npt(*sample_input))
+
     def test_unused_constant(self):
         class M(torch.nn.Module):
             def forward(self, x):
@@ -1457,6 +1544,40 @@ graph():
         args = ([torch.randn(1, 3)], torch.randn(1, 3))
         ep = export(f, args, strict=False)
         self.assertEqual(ep.module()(*args), f(*args))
+
+    def test_where_decomp(self):
+        class TestModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return torch.ops.aten.where.default(x > 0)
+
+        test_module = TestModule()
+        sample_input = (torch.randn(2, 3),)
+
+        def auto_dynamic_shapes_from_args(args):  # pyre-ignore
+            """
+            This function creates dynamic shapes specification with Dim.AUTO
+            in all dimensions of all tensors for given argument list.
+            """
+            if isinstance(args, list):
+                return [auto_dynamic_shapes_from_args(arg) for arg in args]
+            elif isinstance(args, tuple):
+                return tuple(auto_dynamic_shapes_from_args(arg) for arg in args)
+            elif isinstance(args, dict):
+                return {k: auto_dynamic_shapes_from_args(v) for k, v in args.items()}
+            elif isinstance(args, torch.Tensor):
+                return {j: Dim.AUTO for j in range(args.dim())}
+            else:
+                print(f"args type: {type(args)}")
+                return None
+
+        ep = torch.export.export(
+            test_module,
+            sample_input,
+            dynamic_shapes=auto_dynamic_shapes_from_args(sample_input),
+        ).run_decompositions({})
 
     def test_basic_non_strict_fake_tensor(self):
         class Basic(torch.nn.Module):
@@ -4423,17 +4544,8 @@ def forward(self, x):
                 global_storage.append(closure)
                 return x.sin()
 
-        prev_os_env = os.environ.copy()
-        from torch.export._trace import NONSTRICT_EXPORT_SANITIZE_TRACE
-
-        prev_os_env[NONSTRICT_EXPORT_SANITIZE_TRACE] = "1"
-
         with (
-            patch.dict(
-                os.environ,
-                prev_os_env,
-                clear=True,
-            ),
+            torch._export.config.patch(detect_non_strict_fake_tensor_leaks=True),
             self.assertWarnsRegex(
                 UserWarning, "Detected 1 fake tensors that are still alive after export"
             ),
@@ -4479,17 +4591,8 @@ def forward(self, x):
             isinstance(ref.bank[0], torch._subclasses.fake_tensor.FakeTensor)
         )
 
-        prev_os_env = os.environ.copy()
-        from torch.export._trace import NONSTRICT_EXPORT_SANITIZE_TRACE
-
-        prev_os_env[NONSTRICT_EXPORT_SANITIZE_TRACE] = "1"
-
         with (
-            patch.dict(
-                os.environ,
-                prev_os_env,
-                clear=True,
-            ),
+            torch._export.config.patch(detect_non_strict_fake_tensor_leaks=True),
             self.assertWarnsRegex(
                 UserWarning, "Detected 3 fake tensors that are still alive after export"
             ),
@@ -4514,16 +4617,7 @@ def forward(self, x):
             isinstance(global_list[0], torch._subclasses.fake_tensor.FakeTensor)
         )
 
-        prev_os_env = os.environ.copy()
-        from torch.export._trace import NONSTRICT_EXPORT_SANITIZE_TRACE
-
-        prev_os_env[NONSTRICT_EXPORT_SANITIZE_TRACE] = "1"
-
-        with patch.dict(
-            os.environ,
-            prev_os_env,
-            clear=True,
-        ):
+        with torch._export.config.patch(detect_non_strict_fake_tensor_leaks=True):
             warn_re = re.compile(
                 r"Detected\s+\d+\s+fake\s+tensors?"
                 r".*test_export\.py.*global_list\.append\(x \+ y\)",
@@ -4570,16 +4664,7 @@ def forward(self, x):
         self.assertIsNotNone(node1_ref(), "node1 should still be alive due to cycle")
         self.assertIsNotNone(node2_ref(), "node2 should still be alive due to cycle")
 
-        prev_os_env = os.environ.copy()
-        from torch.export._trace import NONSTRICT_EXPORT_SANITIZE_TRACE
-
-        prev_os_env[NONSTRICT_EXPORT_SANITIZE_TRACE] = "1"
-
-        with patch.dict(
-            os.environ,
-            prev_os_env,
-            clear=True,
-        ):
+        with torch._export.config.patch(detect_non_strict_fake_tensor_leaks=True):
             warn_re = re.compile(
                 r"Detected\s+\d+\s+fake\s+tensors?"
                 r'.*?[/\\]test_export\.py",\s+line\s+\d+,\s+in\s+forward'
@@ -10055,7 +10140,7 @@ graph():
                 return (torch.full((i0,), 0.0),)
 
         f = M()
-        ep = torch.export.export(f, ())
+        ep = export(f, ())
         a = ep.module()()[0]
         self.assertEqual(a.size(), torch.Size([11]))
         self.assertEqual(a, torch.zeros(11))
@@ -13057,6 +13142,8 @@ def forward(self, x, b_t, y):
         _test(MyModule(), "foo")
         _test(MyOuterModule(), "inner.foo")
 
+    @testing.expectedFailureTrainingIRToRunDecomp  # set_grad disappears after decomp
+    @testing.expectedFailureTrainingIRToRunDecompNonStrict  # set_grad disappears after decomp
     def test_export_with_set_grad_enabled(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
@@ -13069,18 +13156,9 @@ def forward(self, x, b_t, y):
 
         model = Model()
         ep = export(model, (torch.randn(4, 4),), {})
-        # _export_for_traininig is using pre_dispatch=False
-        # Therefore the set_grad calls are not replaced with a hop.
-        if not is_training_ir_test(self._testMethodName):
-            self.assertIn(
-                "torch.ops.higher_order.wrap_with_set_grad_enabled",
-                ep.graph_module.code,
-            )
-        gm = torch.export.export(model, (torch.randn(4, 4),)).module()
-        self.assertIn(
-            "set_grad_enabled",
-            gm.code,
-        )
+        FileCheck().check_count(
+            "torch.ops.higher_order.wrap_with_set_grad_enabled", 1, exactly=True
+        ).run(ep.graph_module.code)
 
     def test_export_with_autocast(self):
         class Model(torch.nn.Module):
