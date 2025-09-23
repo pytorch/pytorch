@@ -215,9 +215,7 @@ class CPUReproTests(TestCase):
 
         x_comp = x_eager.detach().requires_grad_(True)
         w_comp = w_eager.detach().requires_grad_(True)
-        compiled = torch.compile(
-            fn, backend="inductor", fullgraph=True, dynamic=True
-        )
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True, dynamic=True)
         out_comp = compiled(x_comp, w_comp)
         out_comp_val = out_comp.detach()
         out_comp.backward(grad)
