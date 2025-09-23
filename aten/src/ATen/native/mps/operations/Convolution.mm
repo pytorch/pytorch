@@ -198,7 +198,7 @@ static Tensor _mps_convolution_impl(const Tensor& input_t_,
 
     if (input_t.is_contiguous(memory_format) && output_t.is_contiguous(memory_format) && is_macOS_15_0_or_newer) {
       inputNDArray = getMPSNDArray(input_t, inputShape);
-      outputNDArray = getMPSNDArray(*output, outputShape);
+      outputNDArray = getMPSNDArray(output_t, outputShape);
     }
 
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
@@ -302,7 +302,7 @@ static Tensor _mps_convolution_impl(const Tensor& input_t_,
       }
     }
     auto outputPlaceholder = outputNDArray ? Placeholder(cachedGraph->outputTensor_, outputNDArray)
-                                           : Placeholder(cachedGraph->outputTensor_, *output);
+                                           : Placeholder(cachedGraph->outputTensor_, output_t);
 
     NSMutableDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds =
         [[[NSMutableDictionary alloc] initWithCapacity:3] autorelease];
@@ -315,7 +315,7 @@ static Tensor _mps_convolution_impl(const Tensor& input_t_,
     runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
   }
 
-  return *output;
+  return output_t;
 }
 
 Tensor _mps_convolution(const Tensor& input_t,
