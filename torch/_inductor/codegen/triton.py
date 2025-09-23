@@ -4334,17 +4334,27 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         # Bail on 3d tiling, which has more complicated coalesce patterns
         looped_red = V.kernel.features.is_reduction() and not self.persistent_reduction
         tiling_scores = self.tiling_scores
-        two_d_red = (
-            len(self.tiling) == 2 and tiling_scores is not None and "x" in tiling_scores
-        )
+        two_d_red = len(self.tiling) == 2
         if looped_red and two_d_red:
-            assert tiling_scores is not None
             memory_stats = self.features.memory_stats(self.tiling)
             dim_stats = memory_stats.persistent.memory.dim[0]
             mem_ops_per_thread = dim_stats.count_per_thread
 
-            # check if majority of reads are coalesced by the rblock
-            r_coalesce_ratio = tiling_scores["r0_"] / max(tiling_scores["x"], 1)
+            if (
+                tiling_scores is not None
+                and "x" in tiling_scores
+                and "r0_" in tiling_scores
+            ):
+                # large rblock inhibits xblock size, dont attempt if there is a decent amount of
+                # reads coalesced by xblock
+                r_coalesce_ratio = tiling_scores["r0_"] / max(tiling_scores["x"], 1)
+                contiguous_red = r_coalesce_ratio >= 8.0
+            else:
+                from torch._inductor.runtime.hints import ReductionHint
+
+                contiguous_red = (
+                    self.features.get_reduction_hint() == ReductionHint.INNER
+                )
 
             looped_mem = memory_stats.looped.memory.bytes
             persistent_mem = memory_stats.persistent.memory.bytes
@@ -4362,10 +4372,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             if (
                 # significant memory bandwidth savings
                 saved_bytes_ratio >= 1.3
-                # large rblock inhibits xblock size, dont attempt if there is a decent amount of
-                # reads coalesced by xblock
-                and r_coalesce_ratio >= 8.0
-                # # TODO - need more detailed register analysis
+                and contiguous_red
+                # TODO - need more detailed register analysis
+                and V.graph.sizevars.statically_known_leq(
+                    self.features.reduction_numel, 32768
+                )
                 # We will already generate a persistent config in this case
                 and V.graph.sizevars.statically_known_gt(
                     self.features.reduction_numel, 2048
