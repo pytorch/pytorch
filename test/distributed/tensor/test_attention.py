@@ -23,6 +23,7 @@ from torch.distributed.tensor.experimental._attention import (
     context_parallel_unshard,
     LoadBalancer,
     PerDocumentHeadTailLoadBalancer,
+    PTRRLoadBalancer,
     set_rotate_method,
 )
 from torch.nn.attention import sdpa_kernel, SDPBackend
@@ -634,6 +635,28 @@ class CPFlexAttentionTest(DTensorTestBase):
             )
 
             test_func()
+
+        _cp_options.enable_load_balance = restore_enable_load_balance
+
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support flash attention"
+    )
+    def test_cp_flex_attention_proc_time_round_robin(self) -> None:
+        restore_enable_load_balance = _cp_options.enable_load_balance
+        _cp_options.enable_load_balance = True
+
+        # Test 1: causal masking
+        block_mask = create_block_mask(causal_mask, B=1, H=1, Q_LEN=2048, KV_LEN=2048)
+        lb = PTRRLoadBalancer(block_mask, self.world_size, self.device_type)
+        self._test_cp_flex_attention(
+            qkv_size=2048,
+            B=1,
+            lb=lb,
+            mask_func=causal_mask,
+            atol=1e-6,
+        )
 
         _cp_options.enable_load_balance = restore_enable_load_balance
 
