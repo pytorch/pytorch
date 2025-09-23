@@ -34,7 +34,6 @@ from typing import (
 )
 from typing_extensions import ParamSpec as _ParamSpec, TypeIs as _TypeIs
 
-
 # As a bunch of torch.packages internally still have this check
 # we need to keep this. @todo: Remove tests that rely on this check as
 # they are likely stale.
@@ -282,14 +281,20 @@ if sys.platform == "win32":
     del _load_dll_libraries
 
 
-def _get_cuda_dep_paths(path: str, lib_folder: str, lib_name: str) -> list[str]:
-    # Libraries can either be in path/nvidia/lib_folder/lib or path/lib_folder/lib
+def _get_cuda_dep_paths(path: str, lib_folder: str, lib_name: str, maj_cuda_version: str) -> list[str]:
+    # Libraries can either be in 
+    # path/nvidia/lib_folder/lib or 
+    # path/nvidia/cuXX/lib (since CUDA 13.0) or
+    # path/lib_folder/lib
     nvidia_lib_paths = glob.glob(
         os.path.join(path, "nvidia", lib_folder, "lib", lib_name)
     )
+    nvidia_lib_paths_alt = glob.glob(
+        os.path.join(path, "nvidia", f"cu{maj_cuda_version}", "lib", lib_name)
+    )
     lib_paths = glob.glob(os.path.join(path, lib_folder, "lib", lib_name))
 
-    return nvidia_lib_paths + lib_paths
+    return nvidia_lib_paths + nvidia_lib_paths_alt + lib_paths
 
 
 def _preload_cuda_deps(lib_folder: str, lib_name: str) -> None:
@@ -297,9 +302,12 @@ def _preload_cuda_deps(lib_folder: str, lib_name: str) -> None:
     # Should only be called on Linux if default path resolution have failed
     assert platform.system() == "Linux", "Should only be called on Linux"
 
+    from torch.version import cuda as cuda_version
+    maj_cuda_version = int(cuda_version.split(".")[0]) 
+
     lib_path = None
     for path in sys.path:
-        candidate_lib_paths = _get_cuda_dep_paths(path, lib_folder, lib_name)
+        candidate_lib_paths = _get_cuda_dep_paths(path, lib_folder, lib_name, maj_cuda_version)
         if candidate_lib_paths:
             lib_path = candidate_lib_paths[0]
             break
