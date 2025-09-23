@@ -231,38 +231,43 @@ std::tuple<std::string, std::string> get_cpp_compile_command(
     passthrough_parameters_args += arg_str + " ";
   }
 
-  std::string compile_only_arg =
-      compile_only ? (_is_windows_os() ? "/c" : "-c") : "";
-
   std::string cmd;
+  /*
+  Format command as python frontend cpp_builder:
+  https://github.com/pytorch/pytorch/blob/3ef1bef36c73b4def0e1b71847e27fde1556c0fb/torch/_inductor/cpp_builder.py#L1959-L1976
+  */
   if (_is_windows_os()) {
-    cmd = normalize_path_separator(fmt::format(
-        "{} {} {} {} {} {} /LD /Fe{} {} /link {} {} {}",
+    cmd = fmt::format(
+        "{} {} {} {} {} {} {}",
         compiler,
         include_dirs_args,
         definitions_args,
         cflags_args,
         source_args,
         passthrough_parameters_args,
-        target_file,
-        compile_only_arg,
-        libraries_dirs_args,
-        libraries_args,
-        ldflags_args));
+        target_file);
+    if (compile_only == false) {
+      cmd += fmt::format(
+          " /LD /link {} {} {}",
+          libraries_dirs_args,
+          libraries_args,
+          ldflags_args);
+    }
+    cmd = normalize_path_separator(cmd);
   } else {
-    cmd = normalize_path_separator(fmt::format(
-        "{} {} {} {} {} {} {} {} {} {} -o {}",
+    cmd = fmt::format(
+        "{} {} {} {} {} {} {}",
         compiler,
         source_args,
         definitions_args,
         cflags_args,
         include_dirs_args,
         passthrough_parameters_args,
-        ldflags_args,
-        libraries_args,
-        libraries_dirs_args,
-        compile_only_arg,
-        target_file));
+        target_file);
+    if (compile_only == false) {
+      cmd += fmt::format(
+          " {} {} {}", ldflags_args, libraries_args, libraries_dirs_args);
+    }
   }
 
   return std::make_tuple(cmd, target_file);
