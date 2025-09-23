@@ -30,7 +30,6 @@ def _check_cuda(result: int) -> None:
 
 
 def _get_nvrtc_library(nvrtc_path: Optional[str] = None) -> ctypes.CDLL:
-    # If a custom path is provided, try to load it directly
     if nvrtc_path is not None:
         try:
             return ctypes.CDLL(nvrtc_path)
@@ -38,8 +37,6 @@ def _get_nvrtc_library(nvrtc_path: Optional[str] = None) -> ctypes.CDLL:
             raise OSError(f"Failed to load NVRTC library from provided path: {nvrtc_path}") from e
     
     # Try to load versioned NVRTC libraries in order from newest to oldest
-    # This matches how cuda-python does it
-    # https://github.com/NVIDIA/cuda-python/tree/90096d270d795b9295545e25dc84e1bcd0ca2765/cuda_pathfinder/cuda/pathfinder/_dynamic_libs
     if sys.platform == "win32":
         nvrtc_libs = [
             "nvrtc64_130_0.dll",
@@ -52,19 +49,13 @@ def _get_nvrtc_library(nvrtc_path: Optional[str] = None) -> ctypes.CDLL:
             "libnvrtc.so",  # Fallback to unversioned
         ]
 
-    last_error = None
     for lib_name in nvrtc_libs:
         try:
             return ctypes.CDLL(lib_name)
-        except OSError as e:
-            last_error = e
+        except OSError:
             continue
-
-    # If none of the versioned libraries could be loaded, raise the last error
-    if last_error:
-        raise last_error
-    else:
-        raise OSError("Could not find any NVRTC library")
+    
+    raise OSError(f"Could not find any NVRTC library
 
 
 def _nvrtc_compile(
