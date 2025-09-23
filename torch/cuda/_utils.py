@@ -71,7 +71,7 @@ def _get_hiprtc_library() -> ctypes.CDLL:
 
 
 def _get_nvrtc_library() -> ctypes.CDLL:
-    major_version = int(torch.version.cuda.split(".")[0])
+    major_version = int(torch.version.cuda.split(".")[0])  # type: ignore[union-attr]
     if sys.platform == "win32":
         nvrtc_libs = [
             f"nvrtc64_{major_version}0_0.dll",
