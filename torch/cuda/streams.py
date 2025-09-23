@@ -117,9 +117,7 @@ class Stream(torch._C._CudaStreamBase):
         return f"<torch.cuda.Stream device={self.device} cuda_stream={self.cuda_stream:#x}>"
 
     def __cuda_stream__(self):
-        """Return the CUDA/ROCm stream handle for interoperability.
-        
-        Implements the CUDA Stream Protocol:
+        """Implements the CUDA Stream Protocol:
         https://nvidia.github.io/cuda-python/cuda-core/latest/interoperability.html#cuda-stream-protocol
         
         Returns:
