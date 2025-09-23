@@ -1774,7 +1774,13 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
             ws = (
                 template_kwargs["num_warps"] >= 4 and template_kwargs["num_stages"] >= 2
             )
-            yield {**template_kwargs, **base_ops, "WARP_SPECIALIZE": ws}
+            yield {
+                **template_kwargs,
+                **base_ops,
+                "WARP_SPECIALIZE": ws,
+                # TODO: Tune properly or set in the default configs directly.
+                "EPILOGUE_SUBTILE": config.triton.enable_epilogue_subtiling,
+            }
 
 
 # Scaled MM-specific mixin for scaled MM templates
