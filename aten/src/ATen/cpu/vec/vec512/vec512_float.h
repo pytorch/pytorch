@@ -509,10 +509,7 @@ class Vectorized<float> {
     tmp = _mm512_and_ps(
         values, _mm512_castsi512_ps(_mm512_set1_epi32(0x80000000)));
     pol = _mm512_xor_ps(pol, tmp);
-    // we compute the final output
-    pol = _mm512_add_ps(pol, _mm512_set1_ps(1.0f));
-    tmp = _mm512_mul_ps(values, pol);
-    return _mm512_mul_ps(tmp, _mm512_set1_ps(0.5f));
+    return pol
   }
   Vectorized<float> erf() const {
     // constants
