@@ -822,7 +822,7 @@ test_dynamo_benchmark() {
 
   ### Perf benchmark 2.9 RC3
   pip_uninstall torch torchvision torchaudio torchrec fbgemm-gpu
-  pip_install torch==2.9.0 --index-url https://download.pytorch.org/whl/test/cu128
+  pip_install torch==2.9.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/test/cu128
   # Rebuild torchrec and fbgemm because they don't have RC for 2.9 yet
   if [[ "${TEST_CONFIG}" == *torchbench* ]] && [[ "${TEST_CONFIG}" != *cpu* ]]; then
     rm -rf dist/torchrec
