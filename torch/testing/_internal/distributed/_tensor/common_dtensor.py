@@ -37,7 +37,12 @@ from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
     TEST_SKIPS,
 )
-from torch.testing._internal.common_utils import TEST_CUDA, TEST_HPU, TEST_XPU, TEST_PRIVATEUSE1
+from torch.testing._internal.common_utils import (
+    TEST_CUDA,
+    TEST_HPU,
+    TEST_PRIVATEUSE1,
+    TEST_XPU,
+)
 from torch.utils._pytree import tree_flatten, tree_unflatten, TreeSpec
 
 
@@ -332,7 +337,10 @@ class DTensorContinuousTestBase(MultiProcContinuousTest):
     @classmethod
     def device_type(cls) -> str:
         # if enough GPU/XPU/HPU we can use those devices, otherwise we fallback to CPU
-        if not (TEST_CUDA or TEST_XPU or TEST_HPU or TEST_PRIVATEUSE1) or DEVICE_COUNT < cls.world_size:
+        if (
+            not (TEST_CUDA or TEST_XPU or TEST_HPU or TEST_PRIVATEUSE1)
+            or DEVICE_COUNT < cls.world_size
+        ):
             return "cpu"
         else:
             return DEVICE_TYPE
@@ -351,7 +359,10 @@ class DTensorTestBase(MultiProcessTestCase):
     @property
     def device_type(self) -> str:
         # if enough GPU/XPU/HPU we can use those devices, otherwise we fallback to CPU
-        if not (TEST_CUDA or TEST_XPU or TEST_HPU or TEST_PRIVATEUSE1) or DEVICE_COUNT < self.world_size:
+        if (
+            not (TEST_CUDA or TEST_XPU or TEST_HPU or TEST_PRIVATEUSE1)
+            or DEVICE_COUNT < self.world_size
+        ):
             return "cpu"
         else:
             return DEVICE_TYPE
