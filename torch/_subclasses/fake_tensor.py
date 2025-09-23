@@ -135,9 +135,11 @@ class FakeTensorTLS(threading.local):
     # Default to None, otherwise it'll be used to override _all_
     # `FakeTensorMode.allow_non_fake_inputs` in this thread.
     allow_non_fake_inputs_override: Optional[bool]
+    non_strict_export_fake_tensor_tracker: weakref.WeakSet
 
     def __init__(self) -> None:
         self.allow_non_fake_inputs_override = None
+        self.non_strict_export_fake_tensor_tracker = weakref.WeakSet()
 
 
 fake_tensor_tls = FakeTensorTLS()
@@ -791,6 +793,11 @@ class FakeTensor(Tensor):
     #
     def __init__(self, *args: object, **kwargs: object) -> None:
         super().__init__()
+        if (
+            torch.compiler.is_exporting()
+            and torch._export.config.detect_non_strict_fake_tensor_leaks
+        ):
+            fake_tensor_tls.non_strict_export_fake_tensor_tracker.add(self)
 
     @staticmethod
     def from_tensor(t: Tensor, fake_mode: FakeTensorMode) -> FakeTensor:
