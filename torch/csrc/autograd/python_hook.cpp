@@ -291,7 +291,7 @@ static variable_list unwrap_variables(PyObject* py_variables) {
       // this should never happen, but just in case...
       std::stringstream ss;
       ss << "expected variable but got " << Py_TYPE(item)->tp_name;
-      throw std::runtime_error(ss.str());
+      TORCH_CHECK(false, ss.str());
     }
   }
   return results;
@@ -314,7 +314,7 @@ static void check_result(PyObject* prev, PyObject* result, PyObject* hook) {
     ss << "hook '" << name << "' has returned an incorrect number ";
     ss << "of values (got " << result_size << ", but expected ";
     ss << prev_size << ")";
-    throw std::runtime_error(ss.str());
+    TORCH_CHECK(false, ss.str());
   }
 
   for (const auto i : c10::irange(prev_size)) {
@@ -330,10 +330,9 @@ static void check_single_result(
   if (_result == Py_None)
     return;
 
-  if (_original == Py_None) {
-    throw std::runtime_error(
-        "can't replace a None gradient with a non-None value");
-  }
+  TORCH_CHECK(
+    _oringinal != Py_None, "can't replace a None gradient with a non-None value"
+  )
 
   if (!PyObject_IsInstance(_result, THPVariableClass)) {
     PyErr_Format(
