@@ -232,7 +232,10 @@ class VariableTrackerMeta(type):
         VariableTrackerMeta.all_subclasses.append(cls)
 
 
-class VariableTracker(metaclass=VariableTrackerMeta):
+from torch._C._dynamo import VariableTrackerMeta as C_VariableTrackerMeta
+
+# class VariableTracker(metaclass=VariableTrackerMeta):
+class VariableTracker(metaclass=C_VariableTrackerMeta):
     """
     Base class for tracked locals and stack values
 

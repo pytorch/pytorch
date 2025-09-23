@@ -32,6 +32,10 @@ std::vector<uint8_t> _PyOpcode_Caches_vec;
 
 #endif
 
+std::map<std::pair<PyTypeObject*, PyTypeObject*>, bool> _isinstance_cache;
+PyTypeObject* VT_tp = nullptr;
+PyTypeObject* LazyVT_tp = nullptr;
+
 using torch::dynamo::autograd::torch_c_dynamo_compiled_autograd_init;
 
 namespace {
@@ -152,6 +156,95 @@ struct IsValidVarName {
   }
 };
 
+PyObject* _fast_isinstance_check(PyObject* cls, PyObject* obj) {
+  if (LazyVT_tp == nullptr || VT_tp == nullptr) {
+    PyObject* base_mod = PyImport_ImportModule("torch._dynamo.variables.base");
+    PyObject* VT = PyObject_GetAttrString(base_mod, "VariableTracker");
+    VT_tp = (PyTypeObject*)VT;
+
+    PyObject* Lazy_mod = PyImport_ImportModule("torch._dynamo.variables.lazy");
+    PyObject* LazyVT = PyObject_GetAttrString(Lazy_mod, "LazyVariableTracker");
+    LazyVT_tp = (PyTypeObject*)LazyVT;
+  }
+
+  PyTypeObject* cls_tp = (PyTypeObject*)cls;
+
+  if (PyObject_TypeCheck(obj, LazyVT_tp) && !(cls_tp == VT_tp || cls_tp == LazyVT_tp)){
+    // Realize the lazy object if cls is a VariableTracker subclass but not
+    // VariableTracker or LazyVariableTracker itself
+    obj = PyObject_CallMethodNoArgs(obj, PyUnicode_FromString("realize"));
+  }
+
+  PyTypeObject* obj_tp = Py_TYPE(obj);
+
+  auto key = std::make_pair(cls_tp, obj_tp);
+  if (_isinstance_cache.count(key) == 0){
+    _isinstance_cache[key] = PyObject_TypeCheck(obj, cls_tp);
+  }
+  int r = _isinstance_cache[key] ? 1 : 0;
+
+  if (r == 1){
+    Py_RETURN_TRUE;
+  } else if (r == 0) {
+    Py_RETURN_FALSE;
+  } else {
+    PyErr_SetString(PyExc_TypeError, "Unexpected result from isinstance check");
+    return nullptr;
+  }
+
+}
+
+
+static PyMethodDef VariableTrackerMetaMethods[] = {
+    {"__instancecheck__", (PyCFunction)_fast_isinstance_check, METH_O, NULL},
+    {nullptr},  // sentinel
+};
+
+
+static int VariableTrackerMeta_init_fn(PyObject* cls, PyObject* args, PyObject* kwargs) {
+  if (PyType_Type.tp_init((PyObject*)cls, args, kwargs) < 0) {
+    return -1;
+  }
+  return 0;
+}
+
+
+static PyType_Slot VariableTrackerMetaSlots[] = {
+    {Py_tp_methods, VariableTrackerMetaMethods},
+    {Py_tp_init, (void*)VariableTrackerMeta_init_fn},
+    {0, NULL}
+};
+
+
+static PyType_Spec VariableTrackerMetaSpec = {
+  .name = "torch._C.VariableTrackerMeta",
+  .basicsize = PyType_Type.tp_basicsize,
+  .flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+  .slots = VariableTrackerMetaSlots,
+};
+
+
+static PyObject* new_VariableTrackerMetaType() {
+  PyObject* bases = PyTuple_Pack(1, (PyObject*)&PyType_Type);
+  PyObject* type = PyType_FromSpecWithBases(&VariableTrackerMetaSpec, bases);
+  Py_DECREF(bases);
+  return type;
+}
+
+
+// static PyTypeObject C_VariableTrackerMetaType = {
+//     PyVarObject_HEAD_INIT(nullptr, 0)
+//     .tp_name = "torch._C.VariableTrackerMeta",
+//     .tp_basicsize = sizeof(VariableTrackerMeta),
+//     .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+//     .tp_doc = "Class for VariableTrackerMeta meta type",
+//     .tp_methods = VariableTrackerMetaMethods,
+//     .tp_base = DEFERRED_ADDRESS(&PyType_Type),
+//     .tp_init = VariableTrackerMeta_init_fn,
+//     .tp_new = PyType_Type.tp_new,
+// };
+
+
 PyObject* _strip_function_call(
     PyObject* self,
     PyObject* const* args,
@@ -177,7 +270,12 @@ PyObject* _is_valid_var_name(
 #define PYC_FN(x) ((PyCFunction)(void (*)()) & x)
 
 void _register_functions(PyObject* mod) {
-  static std::array<PyMethodDef, 3> fns = {
+  static std::array<PyMethodDef, 4> fns = {
+      PyMethodDef{
+          "_fast_isinstance_check",
+          PYC_FN(_fast_isinstance_check),
+          METH_FASTCALL,
+          nullptr},
       PyMethodDef{
           "strip_function_call",
           PYC_FN(_strip_function_call),
@@ -203,6 +301,18 @@ void initDynamoBindings(PyObject* torch) {
 #ifdef Py_GIL_DISABLED
   PyUnstable_Module_SetGIL(dynamo, Py_MOD_GIL_NOT_USED);
 #endif
+
+  PyObject* vt_meta = new_VariableTrackerMetaType();
+  if (vt_meta == NULL){
+    throw python_error();
+  }
+  if (PyType_Ready((PyTypeObject*)vt_meta) < 0) {
+    std::cout << "error!!!!!" << std::endl;
+    Py_DECREF(vt_meta);
+  }
+
+  PyModule_AddObject(dynamo, "VariableTrackerMeta", vt_meta);
+  // PyModule_AddType(dynamo, &C_VariableTrackerMetaType);
 
   PyObject* eval_frame = torch_c_dynamo_eval_frame_init();
   if (eval_frame == nullptr ||
