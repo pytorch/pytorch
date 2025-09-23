@@ -78,7 +78,7 @@ def _get_nvrtc_library() -> ctypes.CDLL:
         ]
     else:
         nvrtc_libs = [
-            "libnvrtc.so.{major_version}",
+            f"libnvrtc.so.{major_version}",
             "libnvrtc.so",  # Fallback to unversioned
         ]
     for lib_name in nvrtc_libs:
