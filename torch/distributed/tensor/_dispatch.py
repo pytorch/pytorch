@@ -356,7 +356,7 @@ class OpDispatcher:
                 local_tensor = cast(torch.Tensor, op_info.local_args[i])
                 if arg_spec != reshard_arg_spec:
                     redistribute_context = (
-                        debug_mode.record_redistribute_calls(
+                        debug_mode.record_redistribute_calls(  # type: ignore[union-attr]
                             i, arg_spec, reshard_arg_spec
                         )
                         if in_debug_mode
@@ -521,5 +521,7 @@ class OpDispatcher:
             raise RuntimeError(
                 f"{op_call}: got mixed torch.Tensor and DTensor, need to convert all"
                 " torch.Tensor to DTensor before calling distributed operators!"
+                " Please see https://docs.pytorch.org/docs/main/distributed.tensor.html#mixed-tensor-and-dtensor-operations"
+                " for more details."
             )
         return replication_spec
