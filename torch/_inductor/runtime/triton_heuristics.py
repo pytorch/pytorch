@@ -2905,10 +2905,19 @@ def _persistent_reduction_configs(
 
     MAX_PERSISTENT_BLOCK_NUMEL = 4096
 
+    max_autotune_enabled = not disable_pointwise_autotuning(inductor_meta) or (
+        inductor_meta.get("max_autotune") or inductor_meta.get("max_autotune_pointwise")
+    )
+
+    if torch.version.hip:
+        xblock_vals = [1, 4, 8, 16, 32, 64, 128, 256]
+    else:
+        xblock_vals = [1, 8, 32, 128]
+
     if "y" not in size_hints:
         configs = [
             triton_config_reduction(size_hints, xblock, rnumel, register_intensive=True)
-            for xblock in (1, 8, 32, 128)
+            for xblock in xblock_vals
             if xblock == 1
             or (rnumel * xblock <= MAX_PERSISTENT_BLOCK_NUMEL and xblock <= xnumel)
         ]
@@ -2916,7 +2925,7 @@ def _persistent_reduction_configs(
         configs = []
         assert "tiling_scores" in inductor_meta
         x_y_scores = {dim: inductor_meta["tiling_scores"][dim] for dim in ("x", "y")}
-        for target_block_size in (1, 8, 32, 64, 128):
+        for target_block_size in xblock_vals:
             if target_block_size * rnumel > MAX_PERSISTENT_BLOCK_NUMEL:
                 continue
 
@@ -2929,22 +2938,31 @@ def _persistent_reduction_configs(
                 )
             )
 
+    tiny_configs = [
+        triton_config_reduction(
+            size_hints,
+            2 * (256 // rnumel) if rnumel <= 256 else 1,
+            rnumel,
+        )
+    ]
+
     # defer to more autotuning, initially
     if "y" in size_hints:
         pass
     # TODO(jansel): we should be able to improve these heuristics
-    elif reduction_hint == ReductionHint.INNER and rnumel >= 256:
-        configs = configs[:1]
-    elif reduction_hint == ReductionHint.OUTER:
-        configs = configs[-1:]
-    elif reduction_hint == ReductionHint.OUTER_TINY:
-        configs = [
-            triton_config_reduction(
-                size_hints,
-                2 * (256 // rnumel) if rnumel <= 256 else 1,
-                rnumel,
-            )
-        ]
+    elif not max_autotune_enabled:  # Do not filter configs when tuning
+        if reduction_hint == ReductionHint.INNER and rnumel >= 256:
+            configs = configs[:1]
+        elif reduction_hint == ReductionHint.OUTER:
+            configs = configs[-1:]
+        elif reduction_hint == ReductionHint.OUTER_TINY:
+            configs = tiny_configs
+    else:
+        # If autotune is enabled append tiny configs
+        for conf in tiny_configs:
+            if conf not in configs:
+                configs.append(conf)
+
     for c in configs:
         # we don't need Rn_BLOCK for persistent reduction
         for prefix in size_hints:
