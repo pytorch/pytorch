@@ -1,0 +1,28 @@
+# Dynamic shapes benchmark configuration for PyTorch transformer benchmarks
+# Usage: python run_benchmark.py --config configs/config_dynamic.yaml
+
+# Core parameters
+dynamic: true  # Enable dynamic shapes for FlexAttention
+calculate_bwd: true
+dtype: "bfloat16"
+
+# Shape parameters - focus on dynamic shape scenarios
+b: [1, 2, 4, 8]  # batch sizes
+nh: ["16,16", "16,2"]  # [query_heads,key_value_heads]
+s: [512, 1024, 2048, 4096]  # sequence lengths
+d: [64, 128]  # head dimensions
+
+# Attention types that work well with dynamic shapes
+mods: ["causal", "alibi", "sliding_window"]
+
+# Backends that support dynamic shapes
+backend: ["efficient", "fav2"]
+max_autotune: true  # Enable torch.compile with max-autotune for optimal performance
+
+# Decoding and cache settings
+decoding: false
+kv_size: null
+
+# Metrics and output
+throughput: true  # Calculate memory bandwidth & TFLOPS
+save_path: "dynamic_results.csv"
