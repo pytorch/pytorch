@@ -4926,7 +4926,6 @@ Running aten.expand.default from within SumBackward0
 Running aten.div.Tensor from within DivBackward0
 Running aten.mul.Tensor from within MulBackward0
 Running aten.detach.default from within AccumulateGrad
-Running aten.detach.default from within AccumulateGrad
 Done""",
         )
 
@@ -7200,7 +7199,7 @@ for shape in [(1,), ()]:
         )
         out.backward()
         self.assertEqual(
-            verbose_mode.operators, ["exp.default", "detach.default", "detach.default"]
+            verbose_mode.operators, ["exp.default", "detach.default"]
         )
 
         with self.assertRaisesRegex(

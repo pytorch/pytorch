@@ -450,6 +450,17 @@ static const Tensor& resize_as_(
 static Tensor detach(c10::DispatchKeySet ks, const Tensor& self) {
   auto out = ([&]() {
     at::AutoDispatchBelowADInplaceOrView guard;
+    // HACK: avoid doubling cost if we're going to dispatch to Python,
+    // because shallow_copy_and_detach (specifically
+    // shallow_copy_and_detach_core, as called by as_view) will do
+    // that. This needs to be kept coordinated with
+    // shallow_copy_and_detach_core.
+    const auto next_ks = ks & c10::after_ADInplaceOrView_keyset;
+    if ((next_ks.highestPriorityTypeId() == DispatchKey::Python ||
+         c10::impl::TorchDispatchModeTLS::stack_len() > 0) &&
+        !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Python)) {
+      return self;
+    }
     return at::_ops::detach::redispatch(
         ks & c10::after_ADInplaceOrView_keyset, self);
   })();
