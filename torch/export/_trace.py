@@ -2,18 +2,19 @@
 # mypy: allow-untyped-defs
 import dataclasses
 import functools
-import gc
 import inspect
 import logging
-import os
 import re
 import sys
 import time
 import warnings
-import weakref
 from contextlib import contextmanager, nullcontext
-from typing import Any, Callable, Optional, Union
+from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 from typing_extensions import TypeAlias
+
+
+if TYPE_CHECKING:
+    import weakref
 
 import torch
 import torch._dynamo
@@ -110,9 +111,6 @@ from .graph_signature import _convert_to_export_graph_signature, ExportGraphSign
 
 
 log = logging.getLogger(__name__)
-
-NONSTRICT_EXPORT_SANITIZE_TRACE = "NONSTRICT_EXPORT_SANITIZE_TRACE"
-
 
 # Type alias for dynamic shapes specification
 _DynamicShapesSpec: TypeAlias = Union[dict[str, Any], tuple[Any, ...], list[Any]]
@@ -2072,15 +2070,10 @@ def _export_for_training(
     # Call the appropriate export function based on the strictness of tracing.
     export_func = _strict_export if strict else _non_strict_export
 
-    alive_fake_input_ids_before_export: list[int] = []
+    if not strict and torch._export.config.detect_non_strict_fake_tensor_leaks:
+        from torch._subclasses.fake_tensor import fake_tensor_tls
 
-    if not strict and os.environ.get(NONSTRICT_EXPORT_SANITIZE_TRACE, "0") == "1":
-        gc.collect()
-        alive_fake_input_ids_before_export = [
-            id(i)
-            for i in gc.get_objects()
-            if isinstance(i, torch._subclasses.fake_tensor.FakeTensor)
-        ]
+        fake_tensor_tls.non_strict_export_fake_tensor_tracker.clear()
 
     export_artifact = export_func(
         mod=mod,
@@ -2138,26 +2131,14 @@ def _export_for_training(
 
     verify_additional_inputs(exported_program)
 
-    if not strict and os.environ.get(NONSTRICT_EXPORT_SANITIZE_TRACE, "0") == "1":
+    if not strict and torch._export.config.detect_non_strict_fake_tensor_leaks:
         # See NOTE [export non-strict fake tensor leak detection]
+        from torch._subclasses.fake_tensor import fake_tensor_tls
         from torch.fx.experimental.proxy_tensor import (
             _FAKE_TENSOR_ID_TO_PROXY_MAP_FOR_EXPORT,
         )
 
-        fakes_after: list[torch._subclasses.fake_tensor.FakeTensor] = [
-            i
-            for i in gc.get_objects()
-            if isinstance(i, torch._subclasses.fake_tensor.FakeTensor)
-        ]
-
-        active_fakes: weakref.WeakSet = weakref.WeakSet()
-        for fake_tensor in fakes_after:
-            if id(fake_tensor) not in alive_fake_input_ids_before_export:
-                active_fakes.add(fake_tensor)
-
-        del fakes_after
-        del alive_fake_input_ids_before_export
-
+        active_fakes = fake_tensor_tls.non_strict_export_fake_tensor_tracker
         legit_leak: weakref.WeakSet = find_legit_leaks_from_referrers(active_fakes)
         leak_sources: list[str] = []
         if len(legit_leak) > 0:

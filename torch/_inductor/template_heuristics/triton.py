@@ -1532,6 +1532,23 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
     ]
     _filter_configs: Callable[[list[BaseConfig]], list[BaseConfig]]
 
+    def get_extra_kwargs(
+        self,
+        kernel_inputs: KernelInputs,
+        op_name: str,
+    ) -> dict[str, Any]:
+        assert isinstance(kernel_inputs, MMKernelInputs)
+        m, n, k = kernel_inputs.mnk_symbolic()
+        # Calculate allow_tf32
+        allow_tf32 = torch.backends.cuda.matmul.allow_tf32 and (
+            not inductor_config.force_same_precision
+            or ((m % 16) == 0 and (n % 16) == 0 and (k % 8) == 0)
+        )
+
+        return {
+            "ALLOW_TF32": allow_tf32,
+        }
+
     def _valid(self, kernel_inputs: KernelInputs) -> bool:
         return True
 
@@ -1605,16 +1622,9 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
             == triton_config.kwargs["BLOCK_K"]
         )
 
-        # Calculate allow_tf32
-        allow_tf32 = torch.backends.cuda.matmul.allow_tf32 and (
-            not inductor_config.force_same_precision
-            or ((m % 16) == 0 and (n % 16) == 0 and (k % 8) == 0)
-        )
-
         # Build options dict
         options_dict = dict(
             EVEN_K=even_k_symbolic,
-            ALLOW_TF32=allow_tf32,
             USE_FAST_ACCUM=False,  # Option for _scaled_mm
             ACC_TYPE=self._get_acc_type(out_dtype),
             num_stages=triton_config.num_stages,
