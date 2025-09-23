@@ -259,18 +259,6 @@ static PyObject* new_VariableTrackerMetaType() {
   return type;
 }
 
-// static PyTypeObject C_VariableTrackerMetaType = {
-//     PyVarObject_HEAD_INIT(nullptr, 0)
-//     .tp_name = "torch._C.VariableTrackerMeta",
-//     .tp_basicsize = sizeof(VariableTrackerMeta),
-//     .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
-//     .tp_doc = "Class for VariableTrackerMeta meta type",
-//     .tp_methods = VariableTrackerMetaMethods,
-//     .tp_base = DEFERRED_ADDRESS(&PyType_Type),
-//     .tp_init = VariableTrackerMeta_init_fn,
-//     .tp_new = PyType_Type.tp_new,
-// };
-
 PyObject* _strip_function_call(
     PyObject* self,
     PyObject* const* args,
@@ -296,12 +284,7 @@ PyObject* _is_valid_var_name(
 #define PYC_FN(x) ((PyCFunction)(void (*)()) & x)
 
 void _register_functions(PyObject* mod) {
-  static std::array<PyMethodDef, 4> fns = {
-      PyMethodDef{
-          "_fast_isinstance_check",
-          PYC_FN(_fast_isinstance_check),
-          METH_FASTCALL,
-          nullptr},
+  static std::array<PyMethodDef, 3> fns = {
       PyMethodDef{
           "strip_function_call",
           PYC_FN(_strip_function_call),
