@@ -232,8 +232,8 @@ if has_triton():
         dst,
         src,
         size_bytes,
-        sig_addr,
         signal,
+        sig_val,
         sig_op,
         pe,
     ):  # type: ignore[no-untyped-def]
@@ -245,10 +245,10 @@ if has_triton():
         This enables efficient point-to-point synchronization between PEs.
 
         Args:
-            dst (int64): Symmetric address of the destination data object on the remote PE.
-            src (int64): Local address of the source data object containing data to be copied.
+            dst (tensor): A tensor on calling PE symmetric to the destination tensor on remote PE.
+            src (tensor): Local tensor containing the source data.
             size_bytes (int64): Number of bytes to transfer. Must be positive.
-            sig_addr (int64): Symmetric address of the signal variable (uint64_t) on the remote PE.
+            signal (tensor): Symmetric signal pad with remote PE.
                              Must be 8-byte aligned symmetric memory.
             signal (int64): Value to be used in the signal operation.
             sig_op (int32): Signal operation type. Common values:
@@ -276,13 +276,14 @@ if has_triton():
             )
             ```
         """
-        signal_64 = 0 << 32 | signal
+        # Ensure sig_val is 64 bits
+        sig_val = 0 << 32 | sig_val
         return putmem_signal_block_extern_wrapper(
-            dst,
-            src,
+            dst.to(tl.int64),
+            src.to(tl.int64),
             size_bytes.to(tl.int64),
-            sig_addr,
-            signal_64.to(tl.uint64),
+            signal.to(tl.int64),
+            sig_val.to(tl.uint64),
             sig_op,
             pe,
         )
@@ -292,8 +293,8 @@ if has_triton():
         dst,
         src,
         size_bytes,
-        sig_addr,
         signal,
+        sig_val,
         sig_op,
         pe,
         _semantic=None,
@@ -301,7 +302,7 @@ if has_triton():
         return core.extern_elementwise(
             "",
             "",
-            [dst, src, size_bytes, sig_addr, signal, sig_op, pe],
+            [dst, src, size_bytes, signal, sig_val, sig_op, pe],
             {
                 (
                     core.dtype("int64"),
@@ -375,7 +376,7 @@ if has_triton():
         )
 
     @triton.jit  # type: ignore[misc]
-    def signal_wait_until(sig_addr, cmp, cmp_val):  # type: ignore[no-untyped-def]
+    def signal_wait_until(signal, cmp, cmp_val):  # type: ignore[no-untyped-def]
         """
         Wait until a signal variable meets a specified condition.
 
@@ -385,7 +386,7 @@ if has_triton():
         with signal operations.
 
         Args:
-            sig_addr (int64): Symmetric address of the signal variable (uint64_t).
+            signal (tensor): Symmetric signal tensor with remote PE.
                              Must be 8-byte aligned symmetric memory.
             cmp (int32): Comparison operator. Common values:
                         - NVSHMEM_CMP_EQ (0): Wait until signal == cmp_val
@@ -414,14 +415,16 @@ if has_triton():
             ```
         """
         cmp_val = 0 << 32 | cmp_val
-        return signal_wait_until_extern_wrapper(sig_addr, cmp, cmp_val.to(tl.uint64))
+        return signal_wait_until_extern_wrapper(
+            signal.to(tl.int64), cmp, cmp_val.to(tl.uint64)
+        )
 
     @core.extern
-    def signal_wait_until_extern_wrapper(sig_addr, cmp, cmp_val, _semantic=None):  # type: ignore[no-untyped-def]
+    def signal_wait_until_extern_wrapper(signal, cmp, cmp_val, _semantic=None):  # type: ignore[no-untyped-def]
         return core.extern_elementwise(
             "",
             "",
-            [sig_addr, cmp, cmp_val],
+            [signal, cmp, cmp_val],
             {
                 (
                     core.dtype("int64"),
