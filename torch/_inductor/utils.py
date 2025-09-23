@@ -1534,6 +1534,19 @@ class DelayReplaceLine(DeferredLineBase):
     def _new_line(self, line: str) -> DelayReplaceLine:
         return DelayReplaceLine(self.key, self.value_fn, line)
 
+class DelayMaybeLine(DeferredLineBase):
+    """At end of codegen return `line if `pred_fn() else None`"""
+
+    def __init__(self, pred_fn: Callable[[], bool], line: str):
+        super().__init__(line)
+        self.pred_fn = pred_fn
+
+    def __call__(self) -> str:
+        return self.line if self.pred_fn() else None
+
+    def _new_line(self, line: str) -> DelayReplaceLine:
+        return DelayMaybeLine(self.pred_fn, line)
+
 
 @functools.cache
 def is_big_gpu(index_or_device: Union[int, torch.device] = 0) -> bool:

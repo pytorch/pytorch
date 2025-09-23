@@ -48,6 +48,7 @@ from ..scheduler import BaseSchedulerNode, FusedSchedulerNode, Scheduler, Schedu
 from ..utils import (
     cache_on_self,
     DelayReplaceLine,
+    DelayMaybeLine,
     get_bounds_index_expr,
     get_fused_kernel_name,
     get_kernel_metadata,
@@ -2636,10 +2637,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             launch_buffer = self.post_loop_combine
         if enable_pdl_codegen():
             current_load_index = self._load_index
-            launch_if_last_load = DelayReplaceLine(
-                "<LAUNCH>",
-                lambda: GDC_LAUNCH if current_load_index == self._load_index else "",
-                "0; <LAUNCH> # maybe gdc launch for " + str(result_var),
+            launch_if_last_load = DelayMaybeLine(
+                lambda: current_load_index == self._load_index,
+                f"0; {GDC_LAUNCH} # gdc launch for {result_var}",
             )
             self.cse.generate(launch_buffer, launch_if_last_load, dtype=torch.int32)
 
