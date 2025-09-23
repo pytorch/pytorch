@@ -49,8 +49,13 @@ def _check_cuda(result: int) -> None:
     raise RuntimeError(f"CUDA error: {error_message}")
 
 
-def _get_hiprtc_library() -> ctypes.CDLL:
-    if sys.platform == "win32":
+def _get_hiprtc_library(rtc_path: Optional[str] = None) -> ctypes.CDLL:
+    if rtc_path:
+        try:
+            lib = ctypes.CDLL(rtc_path)
+        except OSError as e:
+            raise OSError(f"Could not load HIPRTC library from specified path '{rtc_path}': {e}")
+    elif sys.platform == "win32":
         version_str = "".join(["0", torch.version.hip[0], "0", torch.version.hip[2]])
         lib = ctypes.CDLL(f"hiprtc{version_str}.dll")
     else:
@@ -70,7 +75,13 @@ def _get_hiprtc_library() -> ctypes.CDLL:
     return lib
 
 
-def _get_nvrtc_library() -> ctypes.CDLL:
+def _get_nvrtc_library(rtc_path: Optional[str] = None) -> ctypes.CDLL:
+    if rtc_path:
+        try:
+            return ctypes.CDLL(rtc_path)
+        except OSError as e:
+            raise OSError(f"Could not load NVRTC library from specified path '{rtc_path}': {e}")
+    
     if sys.platform == "win32":
         nvrtc_libs = [
             "nvrtc64_130_0.dll",
@@ -92,13 +103,13 @@ def _get_nvrtc_library() -> ctypes.CDLL:
     raise OSError(f"Could not find any NVRTC library")
 
 
-def _get_gpu_rtc_library() -> ctypes.CDLL:
+def _get_gpu_rtc_library(rtc_path: Optional[str] = None) -> ctypes.CDLL:
     # Since PyTorch already loads the GPU RTC library, we can use the system library
     # which should be compatible with PyTorch's version
     if torch.version.hip:
-        return _get_hiprtc_library()
+        return _get_hiprtc_library(rtc_path)
     else:
-        return _get_nvrtc_library()
+        return _get_nvrtc_library(rtc_path)
 
 
 def _get_gpu_rtc_compatible_flags() -> list[str]:
@@ -131,7 +142,7 @@ def _nvrtc_compile(
     compute_capability: Optional[str] = None,
     cuda_include_dirs: Optional[list] = None,
     nvcc_options: Optional[list] = None,
-    nvrtc_path: Optional[str] = None,
+    rtc_path: Optional[str] = None,
     auto_pch: bool = False,
 ) -> tuple[bytes, str]:
     """
@@ -144,7 +155,7 @@ def _nvrtc_compile(
                                            If None, will detect from current device.
         cuda_include_dirs (list, None): List of directories containing CUDA headers
         nvcc_options (list, None): Additional options to pass to NVRTC
-        nvrtc_path (str, optional): Path to the NVRTC library. If provided, this will skip the 
+        rtc_path (str, optional): Path to the RTC library (NVRTC/HIPRTC). If provided, this will skip the 
                                    automatic discovery logic and use the specified library directly.
         auto_pch (bool): Enable automatic precompiled headers (CUDA 12.8+)
 
@@ -158,7 +169,7 @@ def _nvrtc_compile(
         torch.cuda.init()
 
     # Load NVRTC library
-    libnvrtc = _get_nvrtc_library(nvrtc_path)
+    libnvrtc = _get_gpu_rtc_library(rtc_path)
 
     # NVRTC constants
     NVRTC_SUCCESS = 0

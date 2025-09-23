@@ -1735,7 +1735,7 @@ def _compile_kernel(
     compute_capability: Optional[str] = None,
     cuda_include_dirs: Optional[list] = None,
     nvcc_options: Optional[list] = None,
-    nvrtc_path: Optional[str] = None,
+    rtc_path: Optional[str] = None,
     auto_pch: bool = False,
 ):
     """
@@ -1753,7 +1753,7 @@ def _compile_kernel(
                                            If None, will detect from current device.
         cuda_include_dirs (list, optional): List of directories containing CUDA headers
         nvcc_options (list, optional): Additional options to pass to NVRTC
-        nvrtc_path (str, optional): Path to the NVRTC library. If provided, this will skip the
+        rtc_path (str, optional): Path to the RTC library (NVRTC/HIPRTC). If provided, this will skip the
                                    automatic discovery logic and use the specified library directly.
         auto_pch (bool, optional): Whether to automatically use precompiled headers. Default is False.
 
@@ -1785,7 +1785,7 @@ def _compile_kernel(
         compute_capability,
         cuda_include_dirs,
         nvcc_options,
-        nvrtc_path,
+        rtc_path,
         auto_pch,
     )
 
