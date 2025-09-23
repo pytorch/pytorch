@@ -34,6 +34,7 @@ from typing import (
 )
 from typing_extensions import ParamSpec as _ParamSpec, TypeIs as _TypeIs
 
+
 # As a bunch of torch.packages internally still have this check
 # we need to keep this. @todo: Remove tests that rely on this check as
 # they are likely stale.
@@ -281,9 +282,11 @@ if sys.platform == "win32":
     del _load_dll_libraries
 
 
-def _get_cuda_dep_paths(path: str, lib_folder: str, lib_name: str, maj_cuda_version: str) -> list[str]:
-    # Libraries can either be in 
-    # path/nvidia/lib_folder/lib or 
+def _get_cuda_dep_paths(
+    path: str, lib_folder: str, lib_name: str, maj_cuda_version: str
+) -> list[str]:
+    # Libraries can either be in
+    # path/nvidia/lib_folder/lib or
     # path/nvidia/cuXX/lib (since CUDA 13.0) or
     # path/lib_folder/lib
     nvidia_lib_paths = glob.glob(
@@ -303,11 +306,15 @@ def _preload_cuda_deps(lib_folder: str, lib_name: str) -> None:
     assert platform.system() == "Linux", "Should only be called on Linux"
 
     from torch.version import cuda as cuda_version
-    maj_cuda_version = int(cuda_version.split(".")[0]) 
+    from torch.utils._typing_utils import not_none
+
+    maj_cuda_version = int(not_none(cuda_version.split(".")[0]))
 
     lib_path = None
     for path in sys.path:
-        candidate_lib_paths = _get_cuda_dep_paths(path, lib_folder, lib_name, maj_cuda_version)
+        candidate_lib_paths = _get_cuda_dep_paths(
+            path, lib_folder, lib_name, maj_cuda_version
+        )
         if candidate_lib_paths:
             lib_path = candidate_lib_paths[0]
             break
@@ -338,8 +345,9 @@ def _load_global_deps() -> None:
         try:
             with open("/proc/self/maps") as f:
                 _maps = f.read()
-            # libtorch_global_deps.so always depends in cudart, check if its installed via wheel
-            if "nvidia/cuda_runtime/lib/libcudart.so" not in _maps:
+
+            # libtorch_global_deps.so always depends in cudart, check if its installed and loaded
+            if "libcudart.so" not in _maps:
                 return
             # If all above-mentioned conditions are met, preload nvrtc and nvjitlink
             # Please note that order are important for CUDA-11.8 , as nvjitlink does not exist there
