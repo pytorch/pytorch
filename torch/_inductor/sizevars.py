@@ -751,11 +751,19 @@ class SizeVarAllocator:
     def _sub_unbacked_exprs(self, expr: Expr) -> Expr:
         # it's fine to cache this fn since self is a singleton
         replacements = self._get_unbacked_replacements()
-        while True:
+
+        # consider making this threshold configurable
+        sub_cnt_limit = 30
+        sub_cnt = 0
+        while sub_cnt < sub_cnt_limit:
             new_expr = expr.subs(replacements)
             if new_expr == expr:
                 return new_expr
             expr = sympy.factor(new_expr)
+            sub_cnt += 1
+
+        log.warning(f"Substitution limit ({sub_cnt_limit}) reached w/ {expr}")
+        return expr
 
     def atomically_apply_size_hint(
         self, expr: Union[Expr, int], *, fallback: Optional[int] = None
