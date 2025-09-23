@@ -9562,6 +9562,87 @@ class TestSDPA(TestCaseMPS):
         q, k, v = self.generate_qkv(batch, NH, q_len, s_len, head_dim, contiguous, dtype)
         self.run_fast_attention_test(q, k, v, with_mask)
 
+    def generate_transpose_layout_qkv(self, batch, NH, q_len, s_len, head_dim, dtype, layout="transpose"):
+        if layout == "transpose":
+            # Original transpose bug - transpose seq_len and num_heads dimensions
+            q = torch.randn(batch, q_len, NH, head_dim, dtype=dtype, device="mps").transpose(1, 2)
+            k = torch.randn(batch, s_len, NH, head_dim, dtype=dtype, device="mps").transpose(1, 2)
+            v = torch.randn(batch, s_len, NH, head_dim, dtype=dtype, device="mps").transpose(1, 2)
+        elif layout == "permute":
+            # Different permutation to create non-contiguous layout
+            q = torch.randn(batch, head_dim, NH, q_len, dtype=dtype, device="mps").permute(0, 2, 3, 1)
+            k = torch.randn(batch, head_dim, NH, s_len, dtype=dtype, device="mps").permute(0, 2, 3, 1)
+            v = torch.randn(batch, head_dim, NH, s_len, dtype=dtype, device="mps").permute(0, 2, 3, 1)
+        elif layout == "view_transpose":
+            # Create via view + transpose for different stride pattern
+            q = torch.randn(batch * q_len, NH, head_dim, dtype=dtype, device="mps").view(batch, q_len, NH, head_dim).transpose(1, 2)
+            k = torch.randn(batch * s_len, NH, head_dim, dtype=dtype, device="mps").view(batch, s_len, NH, head_dim).transpose(1, 2)
+            v = torch.randn(batch * s_len, NH, head_dim, dtype=dtype, device="mps").view(batch, s_len, NH, head_dim).transpose(1, 2)
+        else:
+            # Contiguous baseline
+            q = torch.randn(batch, NH, q_len, head_dim, dtype=dtype, device="mps")
+            k = torch.randn(batch, NH, s_len, head_dim, dtype=dtype, device="mps")
+            v = torch.randn(batch, NH, s_len, head_dim, dtype=dtype, device="mps")
+        
+        return q, k, v
+
+    def run_noncontiguous_attention_test(self, q, k, v, with_mask=False, is_causal=False):
+        # Ensure tensors are actually non-contiguous for the test
+        if not q.is_contiguous():
+            y_mps = F.scaled_dot_product_attention(q, k, v, is_causal=is_causal)
+            y_cpu = F.scaled_dot_product_attention(q.cpu(), k.cpu(), v.cpu(), is_causal=is_causal)
+            self._compare_tensors(y_mps.cpu(), y_cpu)
+            
+            # Test against contiguous MPS version
+            q_contig = q.contiguous()
+            k_contig = k.contiguous() 
+            v_contig = v.contiguous()
+            y_mps_contig = F.scaled_dot_product_attention(q_contig, k_contig, v_contig, is_causal=is_causal)
+            self._compare_tensors(y_mps, y_mps_contig)
+            
+            # Test with mask
+            if with_mask:
+                seq_len = q.shape[2]
+                kv_len = k.shape[2]
+                mask = torch.tril(torch.ones(seq_len, kv_len, dtype=torch.bool, device="mps"))
+                
+                y_mps_mask = F.scaled_dot_product_attention(q, k, v, attn_mask=mask, is_causal=is_causal)
+                y_cpu_mask = F.scaled_dot_product_attention(q.cpu(), k.cpu(), v.cpu(), attn_mask=mask.cpu(), is_causal=is_causal)
+                y_mps_contig_mask = F.scaled_dot_product_attention(q_contig, k_contig, v_contig, attn_mask=mask, is_causal=is_causal)
+                
+                self._compare_tensors(y_mps_mask.cpu(), y_cpu_mask)
+                self._compare_tensors(y_mps_mask, y_mps_contig_mask)
+
+    @parametrize("dtype", [torch.float16, torch.float32])
+    @parametrize("head_dim", [64, 96, 128]) # 64, 96, 128 are for the fast kernel
+    @parametrize("with_mask", [True, False])
+    @parametrize("layout", ["transpose", "permute", "view_transpose"])
+    def test_fast_vector_attention_noncontiguous_query(self, dtype, head_dim, with_mask, layout):
+        """Test fast vector attention (one-pass) with non-contiguous query tensor layouts."""
+        torch.manual_seed(1729)
+        batch = 1
+        NH = 2
+        q_len = 4  # <8 so that vector fast is eligible
+        s_len = 16  # smaller than 1024 so that we use the one–pass variant
+        
+        q, k, v = self.generate_transpose_layout_qkv(batch, NH, q_len, s_len, head_dim, dtype, layout)
+        self.run_noncontiguous_attention_test(q, k, v, with_mask)
+
+    @parametrize("dtype", [torch.float32]) # float16 underflows sometimes, which leads to flaky tests
+    @parametrize("with_mask", [True, False])
+    @parametrize("layout", ["transpose", "permute"])
+    def test_fast_vector_attention_2pass_noncontiguous_query(self, dtype, with_mask, layout):
+        """Test fast vector attention (two-pass) with non-contiguous query tensor layouts."""
+        torch.manual_seed(1729)
+        batch = 1
+        NH = 32
+        q_len = 8
+        s_len = 1024  # large enough to trigger the two–pass path
+        head_dim = 64  # supported head dimension for vector attention
+        
+        q, k, v = self.generate_transpose_layout_qkv(batch, NH, q_len, s_len, head_dim, dtype, layout)
+        self.run_noncontiguous_attention_test(q, k, v, with_mask)
+
 
 
 

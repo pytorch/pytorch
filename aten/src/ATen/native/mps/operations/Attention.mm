@@ -182,6 +182,8 @@ static std::tuple<Tensor, Tensor> sdpa_vector_fast_mps(const Tensor& q_,
   uint maxSeqLength = k_.size(2);
   uint N = k_.size(2);
   uint B = q_.size(0) * q_.size(1);
+  uint q_head_stride = q_.stride(1);
+  uint q_seq_stride = q_.stride(2);
   uint k_head_stride = k_.stride(1);
   uint k_seq_stride = k_.stride(2);
   uint v_head_stride = v_.stride(1);
@@ -209,6 +211,7 @@ static std::tuple<Tensor, Tensor> sdpa_vector_fast_mps(const Tensor& q_,
                   out,
                   1,
                   N,
+                  std::array<uint32_t, 2>{q_head_stride, q_seq_stride},
                   std::array<uint32_t, 2>{k_head_stride, k_seq_stride},
                   std::array<uint32_t, 2>{v_head_stride, v_seq_stride},
                   scale_factor);
@@ -218,10 +221,10 @@ static std::tuple<Tensor, Tensor> sdpa_vector_fast_mps(const Tensor& q_,
         uint kv_seq_stride = (nd >= 1 && mask_.value().size(nd - 1) > 1) ? mask_.value().stride(nd - 1) : 0;
         uint q_seq_stride = (nd >= 2 && mask_.value().size(nd - 2) > 1) ? mask_.value().stride(nd - 2) : 0;
         uint head_stride = (nd >= 3 && mask_.value().size(nd - 3) > 1) ? mask_.value().stride(nd - 3) : 0;
-        mtl_setArgs<9>(
+        mtl_setArgs<10>(
             computeEncoder, mask_.value(), std::array<uint32_t, 3>{kv_seq_stride, q_seq_stride, head_stride});
       }
-      mtl_setArgs<11>(computeEncoder, has_mask);
+      mtl_setArgs<12>(computeEncoder, has_mask);
       [computeEncoder dispatchThreadgroups:grid_dims threadsPerThreadgroup:group_dims];
     }
   });
@@ -257,6 +260,8 @@ static std::tuple<Tensor, Tensor> sdpa_vector_2pass_mps(const Tensor& q_,
   uint B = batchSize * num_heads;
   uint gqa_factor = q_.size(1) / k_.size(1);
 
+  uint q_head_stride = q_.stride(1);
+  uint q_seq_stride = q_.stride(2);
   uint k_head_stride = k_.stride(1);
   uint k_seq_stride = k_.stride(2);
   uint v_head_stride = v_.stride(1);
@@ -294,6 +299,7 @@ static std::tuple<Tensor, Tensor> sdpa_vector_2pass_mps(const Tensor& q_,
                   maxs,
                   gqa_factor,
                   N,
+                  std::array<uint32_t, 2>{q_head_stride, q_seq_stride},
                   std::array<uint32_t, 2>{k_head_stride, k_seq_stride},
                   std::array<uint32_t, 2>{v_head_stride, v_seq_stride},
                   scale_factor);
@@ -304,9 +310,9 @@ static std::tuple<Tensor, Tensor> sdpa_vector_2pass_mps(const Tensor& q_,
         uint kv_seq_stride = (nd >= 1 && mask.size(nd - 1) > 1) ? mask.stride(nd - 1) : 0;
         uint q_seq_stride = (nd >= 2 && mask.size(nd - 2) > 1) ? mask.stride(nd - 2) : 0;
         uint head_stride = (nd >= 3 && mask.size(nd - 3) > 1) ? mask.stride(nd - 3) : 0;
-        mtl_setArgs<11>(computeEncoder, mask, std::array<uint32_t, 3>{kv_seq_stride, q_seq_stride, head_stride});
+        mtl_setArgs<12>(computeEncoder, mask, std::array<uint32_t, 3>{kv_seq_stride, q_seq_stride, head_stride});
       }
-      mtl_setArgs<13>(computeEncoder, has_mask);
+      mtl_setArgs<14>(computeEncoder, has_mask);
       [computeEncoder dispatchThreadgroups:grid_dims threadsPerThreadgroup:group_dims];
       // 2nd pass
       [computeEncoder setComputePipelineState:sdpa_vector_pass2PSO];
