@@ -20,7 +20,7 @@ from torch.testing._internal.common_device_type import \
      largeTensorTest)
 from torch.testing._internal.common_methods_invocations import \
     (op_db, sparse_csr_unary_ufuncs, ReductionOpInfo)
-from torch.testing._internal.common_cuda import _get_torch_cuda_version, TEST_CUDA
+from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_dtype import (
     floating_types, all_types_and_complex_and, floating_and_complex_types, floating_types_and,
     all_types_and_complex, floating_and_complex_types_and)
@@ -40,23 +40,11 @@ load_tests = load_tests
 
 no_mkl_sparse = IS_WINDOWS or not TEST_MKL
 
-def _check_cusparse_triangular_solve_available():
-    version = _get_torch_cuda_version()
-    # cusparseSpSM was added in 11.3.1 but we don't have access to patch version
-    min_supported_version = (11, 4)
-    return version >= min_supported_version
 
 def _check_cusparse_spgemm_available():
     # cusparseSpGEMM was added in 11.0
     return not TEST_WITH_ROCM
 
-def _check_cusparse_sddmm_available():
-    if TEST_WITH_ROCM:
-        return True
-    version = _get_torch_cuda_version()
-    # cusparseSDDMM was added in 11.2.1 but we don't have access to patch version
-    min_supported_version = (11, 3)
-    return version >= min_supported_version
 
 _sparse_csr_ops = list(filter(lambda op: op.supports_sparse_csr, op_db))
 _sparse_compressed_ops = list(filter(lambda op: (op.supports_sparse_csr or op.supports_sparse_csc
@@ -2347,10 +2335,6 @@ class TestSparseCSR(TestCase):
             run_test(index_dtype)
 
     @skipCPUIfNoMklSparse
-    @skipCUDAIf(
-        not _check_cusparse_triangular_solve_available(),
-        "cuSparse Generic API SpSV is not available"
-    )
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3,
                         torch.float64: 1e-8, torch.complex128: 1e-8})
@@ -2427,10 +2411,6 @@ class TestSparseCSR(TestCase):
                                                                                  itertools.product([True, False], repeat=4)):
             run_test(n, k, upper, unitriangular, transpose, zero)
 
-    @skipCUDAIf(
-        not _check_cusparse_sddmm_available(),
-        "cuSparse Generic API SDDMM is not available"
-    )
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3,
                         torch.float64: 1e-8, torch.complex128: 1e-8})
@@ -2481,10 +2461,6 @@ class TestSparseCSR(TestCase):
                 for op_a, op_b in itertools.product([True, False], repeat=2):
                     run_test(c, a, b, op_a, op_b)
 
-    @skipCUDAIf(
-        not _check_cusparse_sddmm_available(),
-        "cuSparse Generic API SDDMM is not available"
-    )
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_sampled_addmm_autograd(self, device, dtype):
         from torch.testing._internal.common_methods_invocations import sample_inputs_sparse_sampled_addmm
@@ -2514,10 +2490,6 @@ class TestSparseCSR(TestCase):
     @onlyCUDA
     # It works on ROCm and CUDA issue is currently active
     @skipCUDAIf(not TEST_WITH_ROCM, "Causes CUDA memory exception, see https://github.com/pytorch/pytorch/issues/72177")
-    @skipCUDAIf(
-        not _check_cusparse_sddmm_available(),
-        "cuSparse Generic API SDDMM is not available"
-    )
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3,
                         torch.float64: 1e-8, torch.complex128: 1e-8})
@@ -2533,10 +2505,6 @@ class TestSparseCSR(TestCase):
             run_test(c, a, b)
 
     @onlyCUDA
-    @skipCUDAIf(
-        not _check_cusparse_sddmm_available(),
-        "cuSparse Generic API SDDMM is not available"
-    )
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_sampled_addmm_errors(self, device, dtype):
         # test that the errors are the same for dense and sparse sampled versions
@@ -2816,10 +2784,6 @@ class TestSparseCSR(TestCase):
             dense_output.backward(dense_covector)
             self.assertEqual(sparse_input.grad, dense_input.grad)
 
-    @skipCUDAIf(
-        not _check_cusparse_sddmm_available(),
-        "cuSparse Generic API SDDMM is not available"
-    )
     @dtypes(torch.float64)
     def test_autograd_dense_output_addmm(self, device, dtype):
         from torch.testing._internal.common_methods_invocations import sample_inputs_addmm
