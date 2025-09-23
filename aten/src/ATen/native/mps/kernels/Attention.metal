@@ -58,7 +58,8 @@ template <typename T, int D, int V = D>
   const int Q = tpg.y;
   const int group_offset = head_idx * Q + q_seq_idx;
   const int o_offset = group_offset;
-  queries += head_idx * q_head_stride + q_seq_idx * q_seq_stride + simd_lid * qk_per_thread;
+  queries += head_idx * q_head_stride + q_seq_idx * q_seq_stride +
+      simd_lid * qk_per_thread;
   keys += kv_head_idx * k_head_stride + simd_gid * k_seq_stride +
       simd_lid * qk_per_thread;
   values += kv_head_idx * v_head_stride + simd_gid * v_seq_stride +
@@ -203,7 +204,8 @@ template <typename T, int D, int V = D>
   const int o_offset = head_idx * tpg.y + q_seq_idx;
   const int kv_head_idx = head_idx / gqa_factor;
 
-  queries += head_idx * q_head_stride + q_seq_idx * q_seq_stride + simd_lid * qk_per_thread;
+  queries += head_idx * q_head_stride + q_seq_idx * q_seq_stride +
+      simd_lid * qk_per_thread;
   keys += kv_head_idx * k_head_stride +
       (block_idx * BN + simd_gid) * k_seq_stride + simd_lid * qk_per_thread;
   values += kv_head_idx * v_head_stride +
