@@ -7,7 +7,7 @@ import warnings
 import torch
 import torch.distributed as dist
 import torch.testing._internal.common_methods_invocations as common_ops
-from torch.distributed.tensor import DeviceMesh, DTensor
+from torch.distributed.tensor import distribute_tensor, DTensor, init_device_mesh, Shard
 from torch.overrides import resolve_name
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
@@ -21,6 +21,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 )
 from torch.utils import _pytree as pytree
 from torch.utils._pytree import tree_map
+from torch.utils.debug_mode import DebugMode
 
 
 # rewrite common size variables to sth can be sharded evenly
@@ -117,7 +118,6 @@ dtensor_fails = {
     xfail("cholesky"),
     xfail("cholesky_inverse"),
     xfail("cholesky_solve"),
-    xfail("chunk"),
     xfail("combinations"),
     xfail("complex"),
     xfail("count_nonzero"),
@@ -159,7 +159,6 @@ dtensor_fails = {
     xfail("geometric"),
     xfail("geqrf"),
     xfail("grid_sampler_2d"),
-    xfail("gradient"),
     xfail("heaviside"),
     xfail("histogram"),
     xfail("histogramdd"),
@@ -194,7 +193,6 @@ dtensor_fails = {
     xfail("linalg.lu_factor_ex"),
     xfail("linalg.lu_solve"),
     xfail("linalg.matrix_power"),
-    xfail("linalg.multi_dot"),
     xfail("linalg.pinv"),
     xfail("linalg.pinv", "hermitian"),
     xfail("linalg.slogdet"),
@@ -418,8 +416,6 @@ dtensor_fails = {
     xfail("tensor_split"),
     xfail("to_sparse"),
     xfail("trace"),
-    xfail("trapezoid"),
-    xfail("trapz"),
     xfail("triangular_solve"),
     xfail("unbind"),
     xfail("unbind_copy"),
@@ -511,7 +507,7 @@ class TestDTensorOps(DTensorOpTestBase):
     def run_opinfo_test(
         self, dtype, op, requires_grad=True, sample_inputs_filter=lambda s: True
     ):
-        self.mesh = DeviceMesh(DEVICE_TYPE, torch.arange(self.world_size))
+        self.mesh = init_device_mesh(DEVICE_TYPE, (self.world_size,))
 
         # test each op with dist tensor inputs and normal inputs
         def test():
@@ -663,6 +659,36 @@ class TestDTensorOps(DTensorOpTestBase):
             requires_grad=False,
             sample_inputs_filter=lambda s: s.kwargs["num_classes"] != -1,
         )
+
+    def test_mean(self):
+        self.mesh = init_device_mesh(DEVICE_TYPE, (self.world_size,))
+
+        shape = [2 * self.world_size + 1, 2 * self.world_size]
+        tensor = (
+            torch.arange(shape[0] * shape[1], dtype=torch.float32)
+            .reshape(shape)
+            .to(DEVICE_TYPE)
+        )
+
+        for is_evenly_shardable in [True]:
+            if is_evenly_shardable:
+                placement = [Shard(1)]
+                reduce_dim = 1
+            else:
+                placement = [Shard(0)]
+                reduce_dim = 0
+            dtensor = distribute_tensor(tensor, self.mesh, placement)
+
+            with DebugMode(record_torchfunction=False) as debug_mode:
+                mean = dtensor.mean(dim=reduce_dim)
+                full_tensor = mean.full_tensor()
+
+            self.assertEqual(full_tensor, tensor.mean(dim=reduce_dim))
+
+            if is_evenly_shardable:
+                self.assertFalse("redistribute_input" in debug_mode.debug_string())
+            else:
+                self.assertTrue("redistribute_input" in debug_mode.debug_string())
 
 
 # only instantiate tests for DEVICE_TYPE alone (i.e. either CPU or GPU)

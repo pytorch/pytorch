@@ -1,5 +1,4 @@
 import abc
-import builtins
 import dataclasses
 import importlib
 import inspect
@@ -8,15 +7,20 @@ import pickle
 import types
 from contextlib import AbstractContextManager, ExitStack
 from dataclasses import dataclass
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, TYPE_CHECKING
 
 import torch
 import torch.fx
-from torch._dynamo.graph_utils import _graph_uses_non_cpu
-from torch._dynamo.precompile_context import SystemInfo
+from torch._dynamo.graph_utils import _graph_device_type
+from torch._dynamo.package import SystemInfo
 
 from . import convert_frame
 from .hooks import Hooks
+
+
+if TYPE_CHECKING:
+    from .guards import GuardManagerWrapper
+    from .package import SourceInfo
 
 
 log = logging.getLogger(__name__)
@@ -46,19 +50,20 @@ def bind_locals(
 class CompileArtifacts:
     signature: inspect.Signature
     bytecode: types.CodeType
-    guard_manager: Optional[torch._dynamo.guards.GuardManagerWrapper]
+    guard_manager: Optional["GuardManagerWrapper"]
     guards_state: bytes
     import_sources: dict[str, str]
     backend_id: str
     compiled_fn: SerializableCallable
     original_code: types.CodeType
     closure: Optional[tuple[Any, ...]]
-    use_cuda: bool
+    source_info: "SourceInfo"
+    device_type: str
     system_info: SystemInfo = dataclasses.field(default_factory=SystemInfo.current)
 
     def check_compatibility(self) -> None:
         current_system = SystemInfo.current()
-        current_system.check_compatibility(self.system_info, self.use_cuda)
+        current_system.check_compatibility(self.system_info, self.device_type)
 
 
 @dataclass
@@ -101,6 +106,9 @@ class AOTCompiledFunction:
             reason = str(self._artifacts.guard_manager.check_verbose(f_locals))
             raise RuntimeError(f"GuardManager check failed, reason: {reason}")
         return self.fn(*args, **kwargs)
+
+    def source_info(self) -> "SourceInfo":
+        return self._artifacts.source_info
 
     def save_compiled_function(self, path: str) -> None:
         with open(path, "wb") as f:
@@ -173,7 +181,9 @@ class BundledAOTAutogradSerializableCallable(SerializableCallable):
             deserialize_bundled_cache_entry,
         )
 
-        compiled_fn = deserialize_bundled_cache_entry(data)
+        entry = pickle.loads(data)
+
+        compiled_fn = deserialize_bundled_cache_entry(entry)
         return cls(compiled_fn)
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
@@ -187,44 +197,19 @@ def aot_compile_fullgraph(
     backend: Callable[[torch.fx.GraphModule, list[torch.Tensor]], SerializableCallable],
 ) -> AOTCompiledFunction:
     from torch._dynamo.guards import CheckFunctionManager
+    from torch._dynamo.package import SourceInfo
     from torch._dynamo.utils import dynamo_timed, get_metrics_context
-    from torch._guards import compile_context, CompileContext, TracingContext
+    from torch._guards import TracingContext
 
     args, kwargs = example_inputs
-    if hasattr(model, "__self__"):
-        fn = model.__func__
-        args = (model.__self__,) + args
-    elif inspect.isfunction(model):
-        fn = model
-    else:
-        raise RuntimeError(f"Unsupported model code type {model}")
-
-    signature = inspect.signature(fn)
-    f_locals = bind_locals(signature, *args, **kwargs)
-    if fn.__code__.co_freevars or fn.__closure__:
-        assert len(fn.__closure__) == len(fn.__code__.co_freevars)
-        f_locals.update(
-            {
-                name: cell.cell_contents
-                for name, cell in zip(fn.__code__.co_freevars, fn.__closure__)
-            }
-        )
 
     with (
-        compile_context(CompileContext(convert_frame.get_compile_id({}))),
         get_metrics_context(),
         dynamo_timed("fullgraph_capture"),
     ):
-        capture_output = convert_frame.fullgraph_capture(
-            convert_frame.FrameInfo(
-                fn.__code__,
-                fn.__globals__,
-                f_locals,
-                builtins.__dict__,
-                closure=fn.__closure__ or (),  # type: ignore[arg-type]
-            )
-        )
-        dynamo_output = capture_output.dynamo_output
+        capture_output = convert_frame.fullgraph_capture(model, args, kwargs)
+        graph_capture_output = capture_output.graph_capture_output
+        assert graph_capture_output.output_graph is not None
 
         if not hooks.guard_filter_fn:
             from torch._dynamo.types import GuardFilterEntry
@@ -245,7 +230,8 @@ def aot_compile_fullgraph(
 
             hooks.guard_filter_fn = new_guard_filter_fn
 
-        check_fn = dynamo_output.build_guards(
+        fn, _ = convert_frame.get_traced_fn(model)
+        check_fn = graph_capture_output.build_guards(
             fn.__code__, hooks=hooks, save=True, strict_error=True
         )
 
@@ -254,10 +240,7 @@ def aot_compile_fullgraph(
         backend_input = capture_output.backend_input
         assert backend_input is not None
         backend_input.graph_module._backend_id = backend_input.backend_id  # type: ignore[assignment]
-        output_graph = dynamo_output.tracer_output.output_graph
-        assert output_graph is not None
-        use_cuda = _graph_uses_non_cpu(output_graph.current_tracer.graph)
-        import_sources = output_graph.import_sources
+        device_type = _graph_device_type(backend_input.graph_module.graph)
         with (
             torch._guards.tracing(TracingContext(backend_input.fake_mode)),
             torch._functorch.config.patch(
@@ -285,17 +268,22 @@ def aot_compile_fullgraph(
                 + f"from backend {compiler_fn}) does not implement SerializableCallable."
             )
 
+        source_info = SourceInfo(inlined_sources=set())
+        for traced_code in graph_capture_output.traced_code:
+            source_info.add_code(traced_code)
+
         artifacts = CompileArtifacts(
-            signature=signature,
-            bytecode=dynamo_output.bytecode,
+            signature=inspect.signature(fn),
+            bytecode=graph_capture_output.bytecode,
             guard_manager=check_fn.guard_manager,
             guards_state=check_fn.guards_state,
-            import_sources=import_sources,
+            import_sources=graph_capture_output.import_sources,
             backend_id=backend_input.backend_id,
             compiled_fn=compiled_fn,
             original_code=fn.__code__,
             closure=fn.__closure__,
-            use_cuda=use_cuda,
+            source_info=source_info,
+            device_type=device_type,
         )
         aot_compiled_fn = AOTCompiledFunction(_artifacts=artifacts)
 
