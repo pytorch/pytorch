@@ -541,12 +541,14 @@ class RAIIMinizArchive {
   void extract_file(
       const std::string& zip_filename,
       const std::string& dest_filename) {
+    // Can't normalize_path_separator zip_filename, as it is zip index.
+    std::string path_dest_filename = normalize_path_separator(dest_filename);
     if (!mz_zip_reader_extract_file_to_file(
-            &_zip_archive, zip_filename.c_str(), dest_filename.c_str(), 0)) {
+            &_zip_archive, zip_filename.c_str(), path_dest_filename.c_str(), 0)) {
       throw std::runtime_error(fmt::format(
           "Failed to extract zip file {} to destination file {}, error info {}",
           zip_filename,
-          dest_filename,  mz_zip_get_error_string(mz_zip_get_last_error(&_zip_archive))));
+          path_dest_filename,  mz_zip_get_error_string(mz_zip_get_last_error(&_zip_archive))));
     }
   }
 
