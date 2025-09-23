@@ -6,6 +6,7 @@ from typing import Union
 
 import torch
 from torch import Tensor
+from torch._C import FileCheck
 from torch._inductor import config, utils
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
@@ -748,6 +749,333 @@ class TestFP8Lowering(TestCase):
         self.assertEqual(y_eager.dtype, dtype)
         self.assertEqual(y_compiled.dtype, dtype)
         torch.testing.assert_close(y_eager, y_compiled, rtol=5e-2, atol=0.07)
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    def test_mx_fusion(self):
+        def forward(
+            arg0_1: "f32[8192, 8192][8192, 1]cuda:0",
+            arg1_1: "f32[8192, 8192][8192, 1]cuda:0",
+        ):
+            view: "f32[8192, 256, 32][8192, 32, 1]cuda:0" = (
+                torch.ops.aten.reshape.default(arg0_1, [8192, 256, 32])
+            )
+            arg0_1 = None
+            abs_1: "f32[8192, 256, 32][8192, 32, 1]cuda:0" = torch.ops.aten.abs.default(
+                view
+            )
+            amax: "f32[8192, 256][256, 1]cuda:0" = torch.ops.aten.amax.default(
+                abs_1, [-1]
+            )
+            abs_1 = None
+            unsqueeze: "f32[8192, 256, 1][256, 1, 1]cuda:0" = (
+                torch.ops.aten.unsqueeze.default(amax, -1)
+            )
+            amax = None
+            view_1: "i32[8192, 256, 1][256, 1, 1]cuda:0" = torch.ops.aten.view.dtype(
+                unsqueeze, torch.int32
+            )
+            bitwise_right_shift: "i32[8192, 256, 1][256, 1, 1]cuda:0" = (
+                torch.ops.aten.bitwise_right_shift.Tensor_Scalar(view_1, 23)
+            )
+            view_1 = None
+            bitwise_and: "i32[8192, 256, 1][256, 1, 1]cuda:0" = (
+                torch.ops.aten.bitwise_and.Scalar(bitwise_right_shift, 255)
+            )
+            bitwise_right_shift = None
+            sub: "i32[8192, 256, 1][256, 1, 1]cuda:0" = torch.ops.aten.sub.Tensor(
+                bitwise_and, 127
+            )
+            bitwise_and = None
+            sub_1: "i32[8192, 256, 1][256, 1, 1]cuda:0" = torch.ops.aten.sub.Tensor(
+                sub, 8
+            )
+            sub = None
+            clamp_min: "i32[8192, 256, 1][256, 1, 1]cuda:0" = (
+                torch.ops.aten.clamp_min.default(sub_1, -127)
+            )
+            sub_1 = None
+            clamp_max: "i32[8192, 256, 1][256, 1, 1]cuda:0" = (
+                torch.ops.aten.clamp_max.default(clamp_min, 128)
+            )
+            clamp_min = None
+            add: "i32[8192, 256, 1][256, 1, 1]cuda:0" = torch.ops.aten.add.Tensor(
+                clamp_max, 127
+            )
+            clamp_max = None
+            convert_element_type: "u8[8192, 256, 1][256, 1, 1]cuda:0" = (
+                torch.ops.prims.convert_element_type.default(add, torch.uint8)
+            )
+            add = None
+            isnan: "b8[8192, 256, 1][256, 1, 1]cuda:0" = torch.ops.aten.isnan.default(
+                unsqueeze
+            )
+            unsqueeze = None
+            scalar_tensor: "u8[][]cuda:0" = torch.ops.aten.scalar_tensor.default(
+                255, dtype=torch.uint8, layout=torch.strided, device="cuda"
+            )
+            where: "u8[8192, 256, 1][256, 1, 1]cuda:0" = torch.ops.aten.where.self(
+                isnan, scalar_tensor, convert_element_type
+            )
+            isnan = scalar_tensor = convert_element_type = None
+            convert_element_type_1: "i32[8192, 256, 1][256, 1, 1]cuda:0" = (
+                torch.ops.prims.convert_element_type.default(where, torch.int32)
+            )
+            bitwise_left_shift: "i32[8192, 256, 1][256, 1, 1]cuda:0" = (
+                torch.ops.aten.bitwise_left_shift.Tensor_Scalar(
+                    convert_element_type_1, 23
+                )
+            )
+            convert_element_type_1 = None
+            view_2: "f32[8192, 256, 1][256, 1, 1]cuda:0" = torch.ops.aten.view.dtype(
+                bitwise_left_shift, torch.float32
+            )
+            bitwise_left_shift = None
+            clamp_min_1: "f32[8192, 256, 1][256, 1, 1]cuda:0" = (
+                torch.ops.aten.clamp_min.default(view_2, 1.1754943508222875e-38)
+            )
+            view_2 = None
+            div: "f32[8192, 256, 32][8192, 32, 1]cuda:0" = torch.ops.aten.div.Tensor(
+                view, clamp_min_1
+            )
+            view = clamp_min_1 = None
+            clamp_min_2: "f32[8192, 256, 32][8192, 32, 1]cuda:0" = (
+                torch.ops.aten.clamp_min.default(div, -448.0)
+            )
+            div = None
+            clamp_max_1: "f32[8192, 256, 32][8192, 32, 1]cuda:0" = (
+                torch.ops.aten.clamp_max.default(clamp_min_2, 448.0)
+            )
+            clamp_min_2 = None
+            convert_element_type_2: "f8e4m3fn[8192, 256, 32][8192, 32, 1]cuda:0" = (
+                torch.ops.prims.convert_element_type.default(
+                    clamp_max_1, torch.float8_e4m3fn
+                )
+            )
+            clamp_max_1 = None
+            view_3: "f8e4m3fn[8192, 8192][8192, 1]cuda:0" = (
+                torch.ops.aten.reshape.default(convert_element_type_2, [8192, 8192])
+            )
+            convert_element_type_2 = None
+            view_4: "f8e8m0fnu[8192, 256, 1][256, 1, 1]cuda:0" = (
+                torch.ops.aten.view.dtype(where, torch.float8_e8m0fnu)
+            )
+            where = None
+            squeeze: "f8e8m0fnu[8192, 256][256, 1]cuda:0" = torch.ops.aten.squeeze.dim(
+                view_4, -1
+            )
+            view_4 = None
+
+            view_5: "f32[8192, 256, 32][8192, 32, 1]cuda:0" = (
+                torch.ops.aten.reshape.default(arg1_1, [8192, 256, 32])
+            )
+            arg1_1 = None
+            abs_2: "f32[8192, 256, 32][8192, 32, 1]cuda:0" = torch.ops.aten.abs.default(
+                view_5
+            )
+            amax_1: "f32[8192, 256][256, 1]cuda:0" = torch.ops.aten.amax.default(
+                abs_2, [-1]
+            )
+            abs_2 = None
+            unsqueeze_1: "f32[8192, 256, 1][256, 1, 1]cuda:0" = (
+                torch.ops.aten.unsqueeze.default(amax_1, -1)
+            )
+            amax_1 = None
+            view_6: "i32[8192, 256, 1][256, 1, 1]cuda:0" = torch.ops.aten.view.dtype(
+                unsqueeze_1, torch.int32
+            )
+            bitwise_right_shift_1: "i32[8192, 256, 1][256, 1, 1]cuda:0" = (
+                torch.ops.aten.bitwise_right_shift.Tensor_Scalar(view_6, 23)
+            )
+            view_6 = None
+            bitwise_and_1: "i32[8192, 256, 1][256, 1, 1]cuda:0" = (
+                torch.ops.aten.bitwise_and.Scalar(bitwise_right_shift_1, 255)
+            )
+            bitwise_right_shift_1 = None
+            sub_2: "i32[8192, 256, 1][256, 1, 1]cuda:0" = torch.ops.aten.sub.Tensor(
+                bitwise_and_1, 127
+            )
+            bitwise_and_1 = None
+            sub_3: "i32[8192, 256, 1][256, 1, 1]cuda:0" = torch.ops.aten.sub.Tensor(
+                sub_2, 8
+            )
+            sub_2 = None
+            clamp_min_3: "i32[8192, 256, 1][256, 1, 1]cuda:0" = (
+                torch.ops.aten.clamp_min.default(sub_3, -127)
+            )
+            sub_3 = None
+            clamp_max_2: "i32[8192, 256, 1][256, 1, 1]cuda:0" = (
+                torch.ops.aten.clamp_max.default(clamp_min_3, 128)
+            )
+            clamp_min_3 = None
+            add_1: "i32[8192, 256, 1][256, 1, 1]cuda:0" = torch.ops.aten.add.Tensor(
+                clamp_max_2, 127
+            )
+            clamp_max_2 = None
+            convert_element_type_3: "u8[8192, 256, 1][256, 1, 1]cuda:0" = (
+                torch.ops.prims.convert_element_type.default(add_1, torch.uint8)
+            )
+            add_1 = None
+            isnan_1: "b8[8192, 256, 1][256, 1, 1]cuda:0" = torch.ops.aten.isnan.default(
+                unsqueeze_1
+            )
+            unsqueeze_1 = None
+            scalar_tensor_1: "u8[][]cuda:0" = torch.ops.aten.scalar_tensor.default(
+                255, dtype=torch.uint8, layout=torch.strided, device="cuda"
+            )
+            where_1: "u8[8192, 256, 1][256, 1, 1]cuda:0" = torch.ops.aten.where.self(
+                isnan_1, scalar_tensor_1, convert_element_type_3
+            )
+            isnan_1 = scalar_tensor_1 = convert_element_type_3 = None
+            convert_element_type_4: "i32[8192, 256, 1][256, 1, 1]cuda:0" = (
+                torch.ops.prims.convert_element_type.default(where_1, torch.int32)
+            )
+            bitwise_left_shift_1: "i32[8192, 256, 1][256, 1, 1]cuda:0" = (
+                torch.ops.aten.bitwise_left_shift.Tensor_Scalar(
+                    convert_element_type_4, 23
+                )
+            )
+            convert_element_type_4 = None
+            view_7: "f32[8192, 256, 1][256, 1, 1]cuda:0" = torch.ops.aten.view.dtype(
+                bitwise_left_shift_1, torch.float32
+            )
+            bitwise_left_shift_1 = None
+            clamp_min_4: "f32[8192, 256, 1][256, 1, 1]cuda:0" = (
+                torch.ops.aten.clamp_min.default(view_7, 1.1754943508222875e-38)
+            )
+            view_7 = None
+            div_1: "f32[8192, 256, 32][8192, 32, 1]cuda:0" = torch.ops.aten.div.Tensor(
+                view_5, clamp_min_4
+            )
+            view_5 = clamp_min_4 = None
+            clamp_min_5: "f32[8192, 256, 32][8192, 32, 1]cuda:0" = (
+                torch.ops.aten.clamp_min.default(div_1, -448.0)
+            )
+            div_1 = None
+            clamp_max_3: "f32[8192, 256, 32][8192, 32, 1]cuda:0" = (
+                torch.ops.aten.clamp_max.default(clamp_min_5, 448.0)
+            )
+            clamp_min_5 = None
+            convert_element_type_5: "f8e4m3fn[8192, 256, 32][8192, 32, 1]cuda:0" = (
+                torch.ops.prims.convert_element_type.default(
+                    clamp_max_3, torch.float8_e4m3fn
+                )
+            )
+            clamp_max_3 = None
+            view_8: "f8e4m3fn[8192, 8192][8192, 1]cuda:0" = (
+                torch.ops.aten.reshape.default(convert_element_type_5, [8192, 8192])
+            )
+            convert_element_type_5 = None
+            view_9: "f8e8m0fnu[8192, 256, 1][256, 1, 1]cuda:0" = (
+                torch.ops.aten.view.dtype(where_1, torch.float8_e8m0fnu)
+            )
+            where_1 = None
+            squeeze_1: "f8e8m0fnu[8192, 256][256, 1]cuda:0" = (
+                torch.ops.aten.squeeze.dim(view_9, -1)
+            )
+            view_9 = None
+
+            permute: "f8e4m3fn[8192, 8192][1, 8192]cuda:0" = (
+                torch.ops.aten.permute.default(view_8, [1, 0])
+            )
+            view_8 = None
+
+            view_13: "f8e8m0fnu[64, 128, 64, 4][32768, 256, 4, 1]cuda:0" = (
+                torch.ops.aten.reshape.default(squeeze, [64, 128, 64, 4])
+            )
+            squeeze = None
+            permute_2: "f8e8m0fnu[64, 64, 128, 4][32768, 4, 256, 1]cuda:0" = (
+                torch.ops.aten.permute.default(view_13, [0, 2, 1, 3])
+            )
+            view_13 = None
+            clone: "f8e8m0fnu[64, 64, 128, 4][32768, 512, 4, 1]cuda:0" = (
+                torch.ops.aten.clone.default(
+                    permute_2, memory_format=torch.contiguous_format
+                )
+            )
+            permute_2 = None
+            view_14: "f8e8m0fnu[4096, 4, 32, 4][512, 128, 4, 1]cuda:0" = (
+                torch.ops.aten.reshape.default(clone, [4096, 4, 32, 4])
+            )
+            clone = None
+            permute_3: "f8e8m0fnu[4096, 32, 4, 4][512, 4, 128, 1]cuda:0" = (
+                torch.ops.aten.permute.default(view_14, [0, 2, 1, 3])
+            )
+            view_14 = None
+            clone_1: "f8e8m0fnu[4096, 32, 4, 4][512, 16, 4, 1]cuda:0" = (
+                torch.ops.aten.clone.default(
+                    permute_3, memory_format=torch.contiguous_format
+                )
+            )
+            permute_3 = None
+            view_15: "f8e8m0fnu[4096, 32, 16][512, 16, 1]cuda:0" = (
+                torch.ops.aten.reshape.default(clone_1, [4096, 32, 16])
+            )
+            clone_1 = None
+
+            view_16: "f8e8m0fnu[2097152][1]cuda:0" = torch.ops.aten.reshape.default(
+                view_15, [2097152]
+            )
+            view_15 = None
+
+            view_18: "f8e8m0fnu[64, 128, 64, 4][32768, 256, 4, 1]cuda:0" = (
+                torch.ops.aten.reshape.default(squeeze_1, [64, 128, 64, 4])
+            )
+            squeeze_1 = None
+            permute_5: "f8e8m0fnu[64, 64, 128, 4][32768, 4, 256, 1]cuda:0" = (
+                torch.ops.aten.permute.default(view_18, [0, 2, 1, 3])
+            )
+            view_18 = None
+            clone_2: "f8e8m0fnu[64, 64, 128, 4][32768, 512, 4, 1]cuda:0" = (
+                torch.ops.aten.clone.default(
+                    permute_5, memory_format=torch.contiguous_format
+                )
+            )
+            permute_5 = None
+            view_19: "f8e8m0fnu[4096, 4, 32, 4][512, 128, 4, 1]cuda:0" = (
+                torch.ops.aten.reshape.default(clone_2, [4096, 4, 32, 4])
+            )
+            clone_2 = None
+            permute_6: "f8e8m0fnu[4096, 32, 4, 4][512, 4, 128, 1]cuda:0" = (
+                torch.ops.aten.permute.default(view_19, [0, 2, 1, 3])
+            )
+            view_19 = None
+            clone_3: "f8e8m0fnu[4096, 32, 4, 4][512, 16, 4, 1]cuda:0" = (
+                torch.ops.aten.clone.default(
+                    permute_6, memory_format=torch.contiguous_format
+                )
+            )
+            permute_6 = None
+            view_20: "f8e8m0fnu[4096, 32, 16][512, 16, 1]cuda:0" = (
+                torch.ops.aten.reshape.default(clone_3, [4096, 32, 16])
+            )
+            clone_3 = None
+
+            view_21: "f8e8m0fnu[2097152][1]cuda:0" = torch.ops.aten.reshape.default(
+                view_20, [2097152]
+            )
+            view_20 = None
+
+            _scaled_mm: "bf16[8192, 8192][8192, 1]cuda:0" = (
+                torch.ops.aten._scaled_mm.default(
+                    view_3, permute, view_16, view_21, None, None, torch.bfloat16
+                )
+            )
+            view_3 = permute = view_16 = view_21 = None
+            return (_scaled_mm,)
+
+        # Run with largest shape
+        M, K, N = 8192, 8192, 8192
+        device = "cuda"
+
+        torch.manual_seed(42)
+        A = torch.randn(M, K, dtype=torch.float32, device=device)
+        B = torch.randn(K, N, dtype=torch.float32, device=device)
+
+        f_c = torch.compile(fullgraph=True)(forward)
+
+        out, code = run_and_get_code(f_c, A, B)
+        self.assertEqual(out, forward(A, B))
+        FileCheck().check("call").check_count(".run(", 2, exactly=True).run(code[0])
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @parametrize("M", (1, 3, 33, 257, 1024))

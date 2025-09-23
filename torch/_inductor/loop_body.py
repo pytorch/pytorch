@@ -94,7 +94,6 @@ class LoopBody:
     """
 
     indexing_exprs: dict[str, sympy.Expr]
-    indexing_exprs_name: dict[sympy.Expr, str]
     submodules: dict[str, Any]
     subblocks: dict[str, LoopBodyBlock]
     indirect_vars: list[sympy.Symbol]
@@ -102,6 +101,9 @@ class LoopBody:
     root_block: LoopBodyBlock
     memory_usage: dict[MemoryUsageType, list[MemoryEntry]]
     op_counts: collections.Counter[str]
+
+    # defined only temporarily
+    indexing_exprs_name: dict[sympy.Expr, str]
 
     def __init__(
         self,
