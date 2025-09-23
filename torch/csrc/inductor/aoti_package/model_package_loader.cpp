@@ -127,14 +127,13 @@ const char* extension_file_ext() {
 }
 
 const char* get_output_flags(bool compile_only) {
-if(compile_only)
-{
+  if (compile_only) {
 #ifdef _WIN32
-  return "/c /Fo";
+    return "/c /Fo"; // codespell:ignore
 #else
-  return "-c -o";
+    return "-c -o";
 #endif
-}
+  }
 
 #ifdef _WIN32
   return "/Fe";
@@ -248,12 +247,7 @@ std::tuple<std::string, std::string> get_cpp_compile_command(
     passthrough_parameters_args += arg_str + " ";
   }
 
-  #if 0
-  std::string compile_only_arg =
-    compile_only ? (_is_windows_os() ? "/c" : "-c") : ""; 
-  #endif
-
-  std::string output_flags =  get_output_flags(compile_only);
+  std::string output_flags = get_output_flags(compile_only);
 
   std::string cmd;
   /*
