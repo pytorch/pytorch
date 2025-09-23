@@ -1448,6 +1448,39 @@ class CommonTemplate:
                 code.count("view_dtype" if config.cpp_wrapper else "aten.view"), 3
             )
 
+    def test_add_complex_strided_fallback(self):
+        @torch.compile
+        def fn(a, b):
+            return a + b
+
+        if not self.is_dtype_supported(torch.complex64):
+            raise unittest.SkipTest("complex64 not supported on device")
+
+        base = torch.randn(3, 4, dtype=torch.complex64, device=self.device)
+        x = base.transpose(0, 1)
+        y = base.transpose(0, 1)
+
+        torch._inductor.metrics.reset()
+        _, code = run_and_get_code(fn, x, y)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 0)
+
+        code = " ".join(code)
+        fallback_markers = [
+            "extern_kernels.add",
+            "torch.ops.aten.add.Tensor",
+        ]
+        if config.cpp_wrapper:
+            fallback_markers.extend(
+                [
+                    "aoti_torch_cuda_add_Tensor",
+                    "aoti_torch_cpu_add_Tensor",
+                ]
+            )
+        self.assertTrue(
+            any(code.count(marker) >= 1 for marker in fallback_markers),
+            msg=f"Expected complex add with strided inputs to fall back to extern kernels, got:\n{code}",
+        )
+
     def test_add_complex5(self):
         def fn(a, b, alpha):
             return torch.add(a, b, alpha=alpha)
@@ -5470,6 +5503,28 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(1, 1),))
 
+    def test_as_strided_on_views(self):
+        # https://github.com/pytorch/pytorch/issues/163286
+        def fn(a):
+            c = a.view(-1)
+            # convert to float16
+            d = c.view(torch.float16)
+            e = d.as_strided((2, 5), (1, 1))
+            # convert back to bfloat16
+            f = e.view(torch.bfloat16)
+            g = f.as_strided((10, 10), (1, 1))
+            return g
+
+        a = torch.randn(10, 10, dtype=torch.bfloat16)
+        self.common(fn, (a,), reference_in_float=False)
+
+        # test dtype separately
+        out = fn(a)
+        assert out.dtype == torch.bfloat16
+
+        out = torch.compile(fn)(a)
+        assert out.dtype == torch.bfloat16
+
     def test_repeat_interleave(self):
         def fn(x):
             return (
@@ -5868,6 +5923,16 @@ class CommonTemplate:
 
             a = torch.rand((1, 1000000), device=self.device)
             self.common(f, (a,))
+
+    def test_inplace_flip(self):
+        def f(x, y):
+            x.copy_(x.flip(1))
+            y = y.sum(dim=1, keepdim=True) + y
+            return x + y
+
+        x = torch.randn(20, 1024 * 1024)
+        y = torch.randn(20, 1024 * 1024)
+        self.common(f, (x, y), atol=1e-3, rtol=1e-3)
 
     def test_gather_scatter(self):
         def fn(node_feat, edge_index):
@@ -7365,6 +7430,56 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             atol=0.0002,
             rtol=1.3e-06,
         )
+
+    @requires_gpu()
+    def test_grid_sampler_expand_preserves_view(self):
+        if not self.device.startswith("cuda"):
+            self.skipTest("requires CUDA")
+
+        torch.manual_seed(0)
+        torch._dynamo.reset()
+
+        repeats = 9000
+        batch = 48
+        channels = 3
+        img = 224
+        grid_size = 13
+        device = self.device
+
+        class ExpandGridSampler(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.grid = torch.nn.Parameter(
+                    torch.randn(repeats, grid_size, grid_size, 2, device=device)
+                )
+                self.fc = torch.nn.Linear(grid_size * grid_size * channels, 16).to(
+                    device
+                )
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                per_channel = []
+                for i in range(channels):
+                    channel = x[:, i, ...].expand(repeats, -1, -1, -1)
+                    patch = torch.nn.functional.grid_sample(
+                        channel,
+                        self.grid,
+                        mode="bilinear",
+                        align_corners=False,
+                        padding_mode="border",
+                    )
+                    patch = patch.transpose(0, 1).flatten(start_dim=2)
+                    per_channel.append(patch)
+                x = torch.cat(per_channel, dim=2)
+                return self.fc(x)
+
+        model = ExpandGridSampler().to(device)
+        compiled = torch.compile(model, backend="inductor")
+        inp = torch.randn(batch, channels, img, img, device=device)
+
+        out = compiled(inp)
+        out.sum().backward()
+
+        self.assertIsNotNone(model.grid.grad)
 
     def test_upsample_bicubic2d(self):
         def fn(a):

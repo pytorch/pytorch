@@ -4457,17 +4457,8 @@ def forward(self, x):
                 global_storage.append(closure)
                 return x.sin()
 
-        prev_os_env = os.environ.copy()
-        from torch.export._trace import NONSTRICT_EXPORT_SANITIZE_TRACE
-
-        prev_os_env[NONSTRICT_EXPORT_SANITIZE_TRACE] = "1"
-
         with (
-            patch.dict(
-                os.environ,
-                prev_os_env,
-                clear=True,
-            ),
+            torch._export.config.patch(detect_non_strict_fake_tensor_leaks=True),
             self.assertWarnsRegex(
                 UserWarning, "Detected 1 fake tensors that are still alive after export"
             ),
@@ -4513,17 +4504,8 @@ def forward(self, x):
             isinstance(ref.bank[0], torch._subclasses.fake_tensor.FakeTensor)
         )
 
-        prev_os_env = os.environ.copy()
-        from torch.export._trace import NONSTRICT_EXPORT_SANITIZE_TRACE
-
-        prev_os_env[NONSTRICT_EXPORT_SANITIZE_TRACE] = "1"
-
         with (
-            patch.dict(
-                os.environ,
-                prev_os_env,
-                clear=True,
-            ),
+            torch._export.config.patch(detect_non_strict_fake_tensor_leaks=True),
             self.assertWarnsRegex(
                 UserWarning, "Detected 3 fake tensors that are still alive after export"
             ),
@@ -4548,16 +4530,7 @@ def forward(self, x):
             isinstance(global_list[0], torch._subclasses.fake_tensor.FakeTensor)
         )
 
-        prev_os_env = os.environ.copy()
-        from torch.export._trace import NONSTRICT_EXPORT_SANITIZE_TRACE
-
-        prev_os_env[NONSTRICT_EXPORT_SANITIZE_TRACE] = "1"
-
-        with patch.dict(
-            os.environ,
-            prev_os_env,
-            clear=True,
-        ):
+        with torch._export.config.patch(detect_non_strict_fake_tensor_leaks=True):
             warn_re = re.compile(
                 r"Detected\s+\d+\s+fake\s+tensors?"
                 r".*test_export\.py.*global_list\.append\(x \+ y\)",
@@ -4604,16 +4577,7 @@ def forward(self, x):
         self.assertIsNotNone(node1_ref(), "node1 should still be alive due to cycle")
         self.assertIsNotNone(node2_ref(), "node2 should still be alive due to cycle")
 
-        prev_os_env = os.environ.copy()
-        from torch.export._trace import NONSTRICT_EXPORT_SANITIZE_TRACE
-
-        prev_os_env[NONSTRICT_EXPORT_SANITIZE_TRACE] = "1"
-
-        with patch.dict(
-            os.environ,
-            prev_os_env,
-            clear=True,
-        ):
+        with torch._export.config.patch(detect_non_strict_fake_tensor_leaks=True):
             warn_re = re.compile(
                 r"Detected\s+\d+\s+fake\s+tensors?"
                 r'.*?[/\\]test_export\.py",\s+line\s+\d+,\s+in\s+forward'
@@ -10089,7 +10053,7 @@ graph():
                 return (torch.full((i0,), 0.0),)
 
         f = M()
-        ep = torch.export.export(f, ())
+        ep = export(f, ())
         a = ep.module()()[0]
         self.assertEqual(a.size(), torch.Size([11]))
         self.assertEqual(a, torch.zeros(11))
@@ -13091,6 +13055,8 @@ def forward(self, x, b_t, y):
         _test(MyModule(), "foo")
         _test(MyOuterModule(), "inner.foo")
 
+    @testing.expectedFailureTrainingIRToRunDecomp  # set_grad disappears after decomp
+    @testing.expectedFailureTrainingIRToRunDecompNonStrict  # set_grad disappears after decomp
     def test_export_with_set_grad_enabled(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
@@ -13103,18 +13069,9 @@ def forward(self, x, b_t, y):
 
         model = Model()
         ep = export(model, (torch.randn(4, 4),), {})
-        # _export_for_traininig is using pre_dispatch=False
-        # Therefore the set_grad calls are not replaced with a hop.
-        if not is_training_ir_test(self._testMethodName):
-            self.assertIn(
-                "torch.ops.higher_order.wrap_with_set_grad_enabled",
-                ep.graph_module.code,
-            )
-        gm = torch.export.export(model, (torch.randn(4, 4),)).module()
-        self.assertIn(
-            "set_grad_enabled",
-            gm.code,
-        )
+        FileCheck().check_count(
+            "torch.ops.higher_order.wrap_with_set_grad_enabled", 1, exactly=True
+        ).run(ep.graph_module.code)
 
     def test_export_with_autocast(self):
         class Model(torch.nn.Module):

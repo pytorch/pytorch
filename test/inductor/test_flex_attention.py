@@ -4672,8 +4672,8 @@ class TestBlockMask(InductorTestCase):
 
         block_mask = create_block_mask(causal_mask, 4, 2, 2048, 2048, device=device)
         self.assertEqual(block_mask.shape, (4, 2, 2048, 2048))
-        self.assertEqual(block_mask[0].shape, (2, 2048, 2048))
-        self.assertEqual(block_mask[0, 0].shape, (2048, 2048))
+        self.assertEqual(block_mask[0].shape, (1, 2, 2048, 2048))
+        self.assertEqual(block_mask[0, 0].shape, (1, 1, 2048, 2048))
         self.assertEqual(block_mask.numel(), 4 * 2 * 2048 * 2048)
         self.assertEqual(block_mask.sparsity(), 46.875)
         self.assertEqual(block_mask[0].sparsity(), 46.875)
@@ -4717,13 +4717,26 @@ class TestBlockMask(InductorTestCase):
 
         # Index on batch dimension
         new_block_mask = block_mask[0]
-        assert new_block_mask.kv_num_blocks.shape == (2, 4)
-        assert new_block_mask.kv_indices.shape == (2, 4, 4)
+        assert new_block_mask.kv_num_blocks.shape == (1, 2, 4)
+        assert new_block_mask.kv_indices.shape == (1, 2, 4, 4)
 
         # Index on batch and head dimension
         new_block_mask = block_mask[0, 1]
-        assert new_block_mask.kv_num_blocks.shape == (4,)
-        assert new_block_mask.kv_indices.shape == (4, 4)
+        assert new_block_mask.kv_num_blocks.shape == (
+            1,
+            1,
+            4,
+        )
+        assert new_block_mask.kv_indices.shape == (1, 1, 4, 4)
+
+        # Index on batch and head dimension with -1 semantics
+        new_block_mask = block_mask[-1, -2]
+        assert new_block_mask.kv_num_blocks.shape == (
+            1,
+            1,
+            4,
+        )
+        assert new_block_mask.kv_indices.shape == (1, 1, 4, 4)
 
         # slicing on batch and head dimension
         new_block_mask = block_mask[0:2, 1:2]
@@ -5408,7 +5421,7 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
         self.assertEqual(block_mask.BLOCK_SIZE, (128, 128))
 
         sliced_mask = block_mask[0]
-        self.assertEqual(sliced_mask.shape, (1, 128, 512))
+        self.assertEqual(sliced_mask.shape, (1, 1, 128, 512))
         self.assertIsNone(sliced_mask.q_indices)
         self.assertIsNone(sliced_mask.q_num_blocks)
 
@@ -5417,6 +5430,66 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
             cpu_mask = block_mask.to("cpu")
             self.assertEqual(cpu_mask.kv_num_blocks.device.type, "cpu")
             self.assertIsNone(cpu_mask.q_indices)
+
+    @supported_platform
+    @skip_on_cpu
+    def test_broadcasted_head_block_mask(self, device):
+        torch.manual_seed(42)
+
+        def causal_mask(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+
+        def get_mask_mod_with_offset(mask_mod, offset_tensor):
+            def _mask_mod(b, h, q, kv):
+                return mask_mod(b, h, q + offset_tensor, kv)
+
+            return _mask_mod
+
+        B, T, H, D, current_pos = 4, 512, 8, 64, 128
+        dtype = torch.float32
+
+        q = torch.randn(B, H, 1, D, device=device, dtype=dtype)
+        k_cache = torch.randn(B, H, T, D, device=device, dtype=dtype)
+        v_cache = torch.randn(B, H, T, D, device=device, dtype=dtype)
+
+        # Keep future tokens tiny to avoid numerical issues when using full caches
+        k_cache[:, :, current_pos + 1 :, :] = (
+            torch.randn_like(k_cache[:, :, current_pos + 1 :, :]) * 1e-10
+        )
+        v_cache[:, :, current_pos + 1 :, :] = (
+            torch.randn_like(v_cache[:, :, current_pos + 1 :, :]) * 1e-10
+        )
+
+        k_cropped = k_cache[:, :, : current_pos + 1, :]
+        v_cropped = v_cache[:, :, : current_pos + 1, :]
+        sdpa_output = torch.nn.functional.scaled_dot_product_attention(
+            q, k_cropped, v_cropped, attn_mask=None
+        )
+
+        base_mask = create_block_mask(
+            causal_mask,
+            B=B,
+            H=None,  # broadcast across heads
+            Q_LEN=T,
+            KV_LEN=T,
+            device=device,
+            _compile=True,
+        )
+
+        q_block_size = base_mask.BLOCK_SIZE[0]
+        block_offset = current_pos // q_block_size
+        mask_slice = base_mask[:, :, block_offset]
+
+        offset_tensor = torch.tensor(current_pos, device=device)
+        mask_slice.mask_mod = get_mask_mod_with_offset(
+            base_mask.mask_mod, offset_tensor
+        )
+        mask_slice.seq_lengths = (1, mask_slice.seq_lengths[1])
+
+        fa = torch.compile(flex_attention, dynamic=True)
+        flex_output = fa(q, k_cache, v_cache, block_mask=mask_slice)
+
+        self.assertEqual(flex_output, sdpa_output, atol=1e-3, rtol=1e-3)
 
 
 @large_tensor_test_class("2GB", device=test_device[0])
