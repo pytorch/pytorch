@@ -242,30 +242,23 @@ def set_stack_trace(stack: list[str]):
 
 
 @contextmanager
-def set_custom_annotation(key, value):
+def annotate(annotation_dict: dict):
     global current_meta
 
     has_custom = "custom" in current_meta
     old_custom = copy.copy(current_meta.get("custom", {}))
 
-    has_key = False
-    old_value = None
-    if has_custom:
-        assert isinstance(current_meta["custom"], dict)
-        has_key = key in old_custom
-        old_value = old_custom.get(key, None)
-
     try:
         if not has_custom:
             current_meta["custom"] = {}
-        current_meta["custom"][key] = value
+
+        # Update with all key-value pairs from the input dict
+        current_meta["custom"].update(annotation_dict)
         yield
     finally:
         if has_custom:
-            if has_key:
-                current_meta["custom"][key] = old_value
-            else:
-                del current_meta["custom"][key]
+            # Restore the original custom dict
+            current_meta["custom"] = old_custom
         else:
             del current_meta["custom"]
 

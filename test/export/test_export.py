@@ -15138,6 +15138,38 @@ def forward(self, x):
             test_serdes=True,
         )
 
+    def test_preserve_annotation(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                with fx_traceback.annotate({"pp_stage": 0}):
+                    with fx_traceback.annotate({"fdsp_bucket": 0}):
+                        x = x + 1
+                    x = x - 2
+                    with fx_traceback.annotate({"cuda_stream": 2, "fsdp_bucket": 1}):
+                        x = x * 2
+                x = x / 3
+                return x
+
+        m = M()
+
+        with fx_traceback.preserve_node_meta():
+            ep = export(m, (torch.randn(10),))
+            # TODO: following line is failing
+            # ep = ep.run_decompositions({})
+
+        for node in ep.graph.nodes:
+            if node.target == torch.ops.aten.add.default:
+                self.assertTrue(node.meta["custom"], {"pp_stage": 0, "fdsp_bucket": 0})
+            if node.target == torch.ops.aten.sub.default:
+                self.assertTrue(node.meta["custom"], {"pp_stage": 0})
+            if node.target == torch.ops.aten.mul.default:
+                self.assertTrue(
+                    node.meta["custom"],
+                    {"pp_stage": 0, "cuda_stream": 2, "fsdp_bucket": 1},
+                )
+            if node.target == torch.ops.aten.div.default:
+                self.assertTrue(node.meta["custom"], {})
+
     def test_dynamic_shapes_serdes_generic(self):
         from torch._export.serde.dynamic_shapes import (
             _dump_dynamic_shapes,
@@ -16104,41 +16136,6 @@ def forward(self, q, k, v):
             r"Number of heads in key and value must divide the number of heads",
         ):
             export(Foo(), (torch.randn(1, 33, 256, 128), k, v))
-
-    def test_preserve_custom_annotation(self):
-        class M(torch.nn.Module):
-            def forward(self, x):
-                with fx_traceback.set_custom_annotation("pp_stage", 0):
-                    with fx_traceback.set_custom_annotation("fdsp_bucket", 0):
-                        x = x + 1
-                    x = x - 2
-                    with (
-                        fx_traceback.set_custom_annotation("cuda_stream", 2),
-                        fx_traceback.set_custom_annotation("fsdp_bucket", 1),
-                    ):
-                        x = x * 2
-                x = x / 3
-                return x
-
-        m = M()
-
-        with fx_traceback.preserve_node_meta():
-            ep = torch.export.export(m, (torch.randn(10),))
-            # TODO: following line is failing
-            # ep = ep.run_decompositions({})
-
-        for node in ep.graph.nodes:
-            if node.target == torch.ops.aten.add.default:
-                self.assertTrue(node.meta["custom"], {"pp_stage": 0, "fdsp_bucket": 0})
-            if node.target == torch.ops.aten.sub.default:
-                self.assertTrue(node.meta["custom"], {"pp_stage": 0})
-            if node.target == torch.ops.aten.mul.default:
-                self.assertTrue(
-                    node.meta["custom"],
-                    {"pp_stage": 0, "cuda_stream": 2, "fsdp_bucket": 1},
-                )
-            if node.target == torch.ops.aten.div.default:
-                self.assertTrue(node.meta["custom"], {})
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
