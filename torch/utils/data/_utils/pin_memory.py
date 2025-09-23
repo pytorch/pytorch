@@ -64,14 +64,10 @@ def pin_memory(data):
                 # use `type(data)(...)` to create the new sequence.
                 # Create a clone and update it if the sequence type is mutable.
                 clone = copy.copy(data)
-                clone.update(
-                    {k: pin_memory(sample) for k, sample in data.items()}
-                )
+                clone.update({k: pin_memory(sample) for k, sample in data.items()})
                 return clone
             else:
-                return type(data)(
-                    {k: pin_memory(sample) for k, sample in data.items()}
-                )  # type: ignore[call-arg]
+                return type(data)({k: pin_memory(sample) for k, sample in data.items()})  # type: ignore[call-arg]
         except TypeError:
             # The mapping type may not support `copy()` / `update(mapping)`
             # or `__init__(iterable)`.
@@ -79,9 +75,7 @@ def pin_memory(data):
     elif isinstance(data, tuple) and hasattr(data, "_fields"):  # namedtuple
         return type(data)(*(pin_memory(sample) for sample in data))
     elif isinstance(data, tuple):
-        return [
-            pin_memory(sample) for sample in data
-        ]  # Backwards compatibility.
+        return [pin_memory(sample) for sample in data]  # Backwards compatibility.
     elif isinstance(data, collections.abc.Sequence):
         try:
             if isinstance(data, collections.abc.MutableSequence):
