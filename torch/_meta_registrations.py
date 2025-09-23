@@ -2447,17 +2447,52 @@ def meta_conv(
     output_padding: list[int],
     groups: int,
 ):
-    def pick_memory_format():
-        if device_hint(input_tensor) == "cuda":
-            if is_channels_last(input_tensor) or is_channels_last(weight):
-                return torch.channels_last
-        else:
-            if is_channels_last(input_tensor):
-                return torch.channels_last
+    def weight_prefers_channels_last(ndim: int) -> bool:
+        if is_transposed or weight is None:
+            return False
+        if weight.dim() != max(0, input_tensor.dim() - 2) + 2:
+            return False
+        if ndim == 3 and weight.dim() == 3:
+            # Unsqueeze to reuse conv2d heuristics.
+            return utils.suggest_memory_format(weight.unsqueeze(-1)) == torch.channels_last
+        if ndim == 4 and weight.dim() == 4:
+            return is_channels_last(weight)
+        if ndim == 5 and weight.dim() == 5:
+            return utils.suggest_memory_format(weight) == torch.channels_last_3d
+        return False
+
+    def pick_memory_format(ndim: int, prefers_channels_last: bool):
+        target_channels_last = None
+        if ndim == 4:
+            target_channels_last = torch.channels_last
+        elif ndim == 5:
+            target_channels_last = torch.channels_last_3d
+
+        if target_channels_last is not None:
+            if device_hint(input_tensor) == "cuda":
+                if is_channels_last(input_tensor) or prefers_channels_last:
+                    return target_channels_last
+            else:
+                if is_channels_last(input_tensor) or prefers_channels_last:
+                    return target_channels_last
         if input_tensor.is_contiguous(memory_format=torch.contiguous_format):
             return torch.contiguous_format
-        elif input_tensor.is_contiguous(memory_format=torch.preserve_format):
+        if input_tensor.is_contiguous(memory_format=torch.preserve_format):
             return torch.preserve_format
+        return None
+
+    def make_channels_last_strides_1d(shape):
+        assert len(shape) == 3
+        strides = [None, None, None]
+        strides[1] = 1
+        running = shape[1]
+        strides[2] = running
+        running = running * shape[2]
+        strides[0] = running
+        return tuple(strides)
+
+    ndim = input_tensor.dim()
+    prefers_channels_last = weight_prefers_channels_last(ndim)
 
     shape_out = calc_conv_nd_return_shape(
         input_tensor,
@@ -2475,8 +2510,16 @@ def meta_conv(
     if input_tensor.size(input_channels_dim) == 0:
         shape_out[output_channels_dim] = 0
 
-    out = input_tensor.new_empty(shape_out)
-    out = out.to(memory_format=pick_memory_format())  # type: ignore[call-overload]
+    shape_out_tuple = tuple(shape_out)
+
+    if ndim == 3 and prefers_channels_last:
+        strides = make_channels_last_strides_1d(shape_out_tuple)
+        return input_tensor.new_empty_strided(shape_out_tuple, strides)
+
+    out = input_tensor.new_empty(shape_out_tuple)
+    memory_format = pick_memory_format(ndim, prefers_channels_last)
+    if memory_format is not None:
+        out = out.to(memory_format=memory_format)  # type: ignore[call-overload]
     return out
 
 
@@ -3504,10 +3547,49 @@ def meta_convolution_backward(
     backend_grad_weight = None
     backend_grad_bias = None
 
+    ndim = input_.dim()
+
+    def prefers_channels_last_for_grad_input():
+        if transposed or weight_ is None:
+            return False
+        if weight_.dim() != max(0, ndim - 2) + 2:
+            return False
+        if ndim == 3 and weight_.dim() == 3:
+            return utils.suggest_memory_format(weight_.unsqueeze(-1)) == torch.channels_last
+        if ndim == 4 and weight_.dim() == 4:
+            return is_channels_last(weight_)
+        if ndim == 5 and weight_.dim() == 5:
+            return utils.suggest_memory_format(weight_) == torch.channels_last_3d
+        return False
+
+    def make_channels_last_strides_1d(shape):
+        strides = [None, None, None]
+        strides[1] = 1
+        running = shape[1]
+        strides[2] = running
+        running = running * shape[2]
+        strides[0] = running
+        return tuple(strides)
+
+    use_channels_last = prefers_channels_last_for_grad_input()
+
     if output_mask[0]:
-        backend_grad_input = grad_output_.new_empty(input_.size())
+        input_size = tuple(input_.size())
+        if ndim == 3 and use_channels_last:
+            strides = make_channels_last_strides_1d(input_size)
+            backend_grad_input = grad_output_.new_empty_strided(input_size, strides)
+        else:
+            backend_grad_input = grad_output_.new_empty(input_size)
+            if use_channels_last:
+                memory_format = None
+                if ndim == 4:
+                    memory_format = torch.channels_last
+                elif ndim == 5:
+                    memory_format = torch.channels_last_3d
+                if memory_format is not None:
+                    backend_grad_input = backend_grad_input.to(memory_format=memory_format)
     if output_mask[1]:
-        backend_grad_weight = grad_output_.new_empty(weight_.size())
+        backend_grad_weight = grad_output_.new_empty_strided(tuple(weight_.size()), tuple(weight_.stride()))
     if output_mask[2]:
         backend_grad_bias = grad_output_.new_empty(bias_sizes_opt)
 

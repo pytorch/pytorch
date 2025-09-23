@@ -142,6 +142,18 @@ class CPUReproTests(TestCase):
         self.assertEqual(len(actual), 1)
         torch.testing.assert_close(actual[0], expected[0])
 
+    def test_prims_broadcast_in_dim_alias(self):
+        def fn(x: torch.Tensor) -> torch.Tensor:
+            return torch.ops.prims.broadcast_in_dim.default(x, [2, 3, 3], [0, 1])
+
+        x = torch.arange(6.0, dtype=torch.float32).reshape(2, 3)
+
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True)
+
+        expected = fn(x)
+        actual = compiled(x)
+        torch.testing.assert_close(actual, expected)
+
     @skipIfRocm
     def test_conv_stride_constraints(self):
         for fmt in [torch.contiguous_format, torch.channels_last]:
@@ -184,6 +196,35 @@ class CPUReproTests(TestCase):
                 fn_compiled(inps)
 
             self.assertTrue(conv_seen)
+
+    def test_conv1d_strided_weight_torch_compile(self):
+        def fn(x, w):
+            wt = w.transpose(2, 1)
+            y = F.conv1d(x, wt)
+            return y.clone()
+
+        x_eager = torch.randn(2, 3, 5, requires_grad=True)
+        w_eager = torch.randn(4, 2, 3, requires_grad=True)
+
+        out_eager = fn(x_eager, w_eager)
+        grad = torch.randn_like(out_eager)
+        out_eager_val = out_eager.detach()
+        out_eager.backward(grad)
+        grad_x_eager = x_eager.grad.detach().clone()
+        grad_w_eager = w_eager.grad.detach().clone()
+
+        x_comp = x_eager.detach().requires_grad_(True)
+        w_comp = w_eager.detach().requires_grad_(True)
+        compiled = torch.compile(
+            fn, backend="inductor", fullgraph=True, dynamic=True
+        )
+        out_comp = compiled(x_comp, w_comp)
+        out_comp_val = out_comp.detach()
+        out_comp.backward(grad)
+
+        torch.testing.assert_close(out_comp_val, out_eager_val)
+        torch.testing.assert_close(x_comp.grad, grad_x_eager)
+        torch.testing.assert_close(w_comp.grad, grad_w_eager)
 
     @patch("torch.cuda.is_available", lambda: False)
     def test_conv2d_bn_mixed_dtype(self):
