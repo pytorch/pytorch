@@ -2743,6 +2743,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 dtype = torch.bool
 
         load_buffer = self.get_load_buffer(indexing)
+        if config.triton.enable_pdl:
+            load_buffer.writeline("tl.extra.cuda.gdc_wait()")
         result_var = self.cse.generate(
             load_buffer, make_line(line), dtype=dtype, shape=shape
         )
@@ -4362,10 +4364,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 # large rblock inhibits xblock size, dont attempt if there is a decent amount of
                 # reads coalesced by xblock
                 and r_coalesce_ratio >= 8.0
-                # TODO - need more detailed register analysis
-                and V.graph.sizevars.statically_known_leq(
-                    self.features.reduction_numel, 32768
-                )
+                # # TODO - need more detailed register analysis
                 # We will already generate a persistent config in this case
                 and V.graph.sizevars.statically_known_gt(
                     self.features.reduction_numel, 2048
@@ -4394,6 +4393,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 inductor_meta["kernel_flop"] = flops
 
         triton_meta["configs"] = [config_of(signature)]
+
+        if config.triton.enable_pdl:
+            triton_meta["launch_pdl"] = True
 
         # Triton compiler includes equal_to_1 args into constants even
         # when they are not constexpr. otherwise there may be a segfault
