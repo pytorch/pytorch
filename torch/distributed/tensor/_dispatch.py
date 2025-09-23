@@ -23,11 +23,11 @@ from torch.distributed.tensor._tp_conv import (
 )
 from torch.distributed.tensor._utils import try_find_mesh_from_args
 from torch.distributed.tensor.placement_types import Partial, Placement, Replicate
+from torch.utils._debug_mode import DebugMode
 from torch.utils._python_dispatch import (
     _get_current_dispatch_mode,
     return_and_correct_aliasing,
 )
-from torch.utils.debug_mode import DebugMode
 
 
 try:
@@ -356,7 +356,7 @@ class OpDispatcher:
                 local_tensor = cast(torch.Tensor, op_info.local_args[i])
                 if arg_spec != reshard_arg_spec:
                     redistribute_context = (
-                        debug_mode.record_redistribute_calls(
+                        debug_mode.record_redistribute_calls(  # type: ignore[union-attr]
                             i, arg_spec, reshard_arg_spec
                         )
                         if in_debug_mode
