@@ -112,7 +112,7 @@ def _propagate_tensor_meta(
     kwargs: dict[str, object],
 ) -> TensorMeta:
     op_info = DTensor._op_dispatcher.unwrap_to_op_info(op_call, args, kwargs)
-    tensor_meta = DTensor._op_dispatcher.sharding_propagator._propagate_tensor_meta(
+    tensor_meta = DTensor._op_dispatcher.sharding_propagator.propagate_tensor_meta(
         op_info.schema
     )
     if isinstance(tensor_meta, TensorMeta):
