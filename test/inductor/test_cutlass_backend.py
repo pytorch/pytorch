@@ -8,9 +8,10 @@ import sysconfig
 import time
 import unittest
 import unittest.mock as mock
+from collections.abc import Callable
 from enum import Enum
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Optional
 
 from torch._dynamo.exc import BackendCompilerFailed
 from torch._inductor.codegen.cuda.serialization import get_cutlass_operation_serializer
@@ -84,7 +85,7 @@ def _check_if_instances_equal(op1, op2) -> bool:
     Utility function to check if two instances of a class are equal.
     """
     # cutlass uses list and tuple inconsistently
-    if isinstance(op1, (list, tuple)):
+    if isinstance(op1, (list | tuple)):
         return tuple(op1) == tuple(op2)
 
     if type(op1) != type(op2):
@@ -107,12 +108,14 @@ def _check_if_instances_equal(op1, op2) -> bool:
     return True
 
 
-un_ops_under_test = [torch.relu]
+un_ops_under_test = [torch.relu, torch.tanh, torch.exp, torch.sigmoid]
 bin_ops_under_test = [torch.add, torch.mul, torch.sub, torch.div]
 
 evt_all_ops = parametrize(
     "op", un_ops_under_test + bin_ops_under_test, name_fn=lambda f: f.__name__
 )
+
+evt_un_ops = parametrize("op", un_ops_under_test, name_fn=lambda f: f.__name__)
 
 evt_bin_ops = parametrize("op", bin_ops_under_test, name_fn=lambda f: f.__name__)
 
@@ -253,9 +256,9 @@ class TestCutlassBackend(TestCase):
         self.assertTrue(try_import_cutlass())
 
         if config.is_fbcode():
-            import python_cutlass
+            import cutlass_cppgen  # noqa: F401
         else:
-            import cutlass as python_cutlass  # noqa: F401
+            import cutlass_cppgen as python_cutlass  # noqa: F401
         import cutlass_library  # noqa: F401
 
     def test_cutlass_key(self):
@@ -1978,6 +1981,30 @@ class TestCutlassBackend(TestCase):
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @use_evt_config
+    @evt_un_ops
+    def test_evt_activations(self, op):
+        class TestModel(torch.nn.Module):
+            def forward(self, a, b, extra_args):
+                acc = a @ b
+                return acc, op(acc, *extra_args)
+
+        M = 1024
+        N = 512
+        a = torch.ones(M, N).cuda().half()
+        b = torch.ones(N, N).cuda().half().t()
+        extra_args = gen_args(op, (M, N))
+        model = TestModel().cuda()
+
+        result = torch.compile(model)(a, b, extra_args)
+        ref_result = model(a, b, extra_args)
+
+        self.assertEqual(
+            torch._dynamo.utils.counters["inductor"]["cuda_epilogue_fusion_counter"], 1
+        )
+        torch.testing.assert_close(result, ref_result)
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @use_evt_config
     @evt_all_ops
     def test_evt_mixed_dtypes(self, op):
         M = 1024
@@ -2124,7 +2151,7 @@ class TestCutlassBackend(TestCase):
         deserialized_ops = [
             serializer.deserialize(serialized_op) for serialized_op in serialized_ops
         ]
-        for op, deserialized_op in zip(ops, deserialized_ops):
+        for op, deserialized_op in zip(ops, deserialized_ops, strict=False):
             self.assertTrue(_check_if_instances_equal(op, deserialized_op))
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, "FP8 is only supported on H100+")
