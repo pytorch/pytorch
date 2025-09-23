@@ -7,7 +7,12 @@ from dataclasses import dataclass
 from typing import Any, Callable, Generic, Optional, TypeVar
 
 import torch
-from torch._dynamo.package import _DynamoCacheEntry, DynamoCache, PrecompileCacheEntry
+from torch._dynamo.package import (
+    _BackendId,
+    _DynamoCacheEntry,
+    DynamoCache,
+    PrecompileCacheEntry,
+)
 
 
 """
@@ -83,7 +88,7 @@ class PrecompileContext:
     # Protected by the compile_lock
     # _backend_artifacts_by_key organizes results by the key of each artifact.
     # Each object here must be serializable
-    _backend_artifacts_by_key: dict[str, BackendCacheArtifact[Any]] = {}
+    _backend_artifacts_by_key: dict[_BackendId, BackendCacheArtifact[Any]] = {}
 
     # On call to `serialize()`, all cache artifacts in _dynamo_cache_entries are converted
     # into DynamoCacheArtifacts and added to _new_cache_artifacts for serialization

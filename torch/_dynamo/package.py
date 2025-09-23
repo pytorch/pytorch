@@ -417,11 +417,11 @@ from torch.compiler._cache import (
 
 @CacheArtifactFactory.register
 class PrecompileCacheArtifact(CacheArtifact):
-    def populate_cache(self):
+    def populate_cache(self) -> None:
         DynamoCache._write_to_local_cache(self.content, self.key)
 
     @staticmethod
-    def type():
+    def type() -> str:
         return "precompile"
 
 
@@ -440,7 +440,7 @@ class PrecompileCacheEntry:
     @staticmethod
     def from_cache_entry(
         cache_entry: _DynamoCacheEntry, backends: dict[_BackendId, Any]
-    ) -> "PrecompileCacheEntry":
+    ) -> Optional["PrecompileCacheEntry"]:
         serializable_codes = []
         backend_content: dict[_BackendId, Any] = {}
 
