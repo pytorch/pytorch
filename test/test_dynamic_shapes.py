@@ -3231,20 +3231,43 @@ class TestUnbacked(TestCase):
         with self.assertRaises(RuntimeError):
             func(a, torch.rand(2, 1))
 
-    def test_div_unabacked_inputs(self):
+    def test_div_unabacked_eq_inputs(self):
         @torch.compile(fullgraph=True)
         def func(a, b):
-            torch._check(a.size()[0] == b.size()[0])
-            if a.size()[0] // b.size()[0] == 1:
-                return a * 10
-            else:
-                return b * 100
+            x = a.size()[0]
+            y = a.size()[1]
+            torch._check(x == y)
+            if x // y == 1:
+                a = a * 10
+            if 2 * x // y == 2:
+                a = a * 20
+            return a
 
         a = torch.randn(10, 10)
         b = torch.randn(10, 20)
 
         torch._dynamo.decorators.mark_unbacked(a, 0)
         torch._dynamo.decorators.mark_unbacked(b, 0)
+        func(a, b)
+
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_div_unabacked_eq_item(self):
+        @torch.compile(fullgraph=True)
+        def func(a, b):
+            x = a.item()
+            y = b.item()
+            torch._check(x == y)
+            # TODO we should not need those torch checks.
+            torch._check(x // y == 1)
+            torch._check(2 * x // y == 2)
+            if x // y == 1:
+                a = a * 10
+            if 2 * x // y == 2:
+                a = a * 20
+            return a
+
+        a = torch.tensor([1])
+        b = torch.tensor([1])
         func(a, b)
 
 
