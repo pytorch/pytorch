@@ -1693,7 +1693,6 @@ def main() -> None:
         "_inductor/codegen/*.h",
         "_inductor/codegen/aoti_runtime/*.h",
         "_inductor/codegen/aoti_runtime/*.cpp",
-        "_inductor/codegen/aoti_runtime/windows_symbol_exports.def",
         "_inductor/script.ld",
         "_inductor/kernel/flex/templates/*.jinja",
         "_export/serde/*.yaml",

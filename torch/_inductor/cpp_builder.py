@@ -66,6 +66,7 @@ _LINKER_SCRIPT = os.path.join(_TORCH_PATH, "_inductor/script.ld")
 _IS_LINUX = sys.platform.startswith("linux")
 _IS_MACOS = sys.platform.startswith("darwin")
 _IS_WINDOWS = sys.platform == "win32"
+AOTI_SHIM_LIB = os.environ.get("AOTI_SHIM_LIB")  # used for AOTI cross-compilation
 
 SUBPROCESS_DECODE_ARGS = ("utf-8",) if _IS_WINDOWS else ()
 
@@ -1107,6 +1108,11 @@ def _get_torch_related_args(
                 libraries.append("torch_python")
     else:
         libraries_dirs = []
+        if config.aot_inductor.cross_target_platform == "windows":
+            assert config.aot_inductor.aoti_shim_library
+            assert AOTI_SHIM_LIB
+            libraries.append(config.aot_inductor.aoti_shim_library)
+            libraries_dirs.append(AOTI_SHIM_LIB)
 
     if _IS_WINDOWS:
         libraries.append("sleef")
@@ -2043,7 +2049,7 @@ class CppBuilder:
         _create_if_dir_not_exist(_build_tmp_dir)
 
         build_cmd = self.get_command_line()
-        print(build_cmd)
+        # print(build_cmd)
         # breakpoint()
         run_compile_cmd(build_cmd, cwd=_build_tmp_dir)
         _remove_dir(_build_tmp_dir)

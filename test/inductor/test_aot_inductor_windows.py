@@ -48,6 +48,7 @@ class TestAOTInductorWindowsCrossCompilation(TestCase):
                     "aot_inductor.model_name_for_generated_files": "model",
                     "aot_inductor.cross_target_platform": "windows",
                     "aot_inductor.link_libtorch": False,
+                    "aot_inductor.aoti_shim_library": "executorch",
                     # no fallback ops
                     "max_autotune": True,
                     "max_autotune_gemm_backends": "TRITON,CPP",

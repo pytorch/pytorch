@@ -2373,26 +2373,6 @@ end
             )
 
             obj_srcs = [wrapper_o, kernel_o, consts_o, *gpu_kernels_o, *cubins_o]
-            if config.aot_inductor.cross_target_platform == "windows":
-                windows_shim_lib_path = os.path.join(output_dir, "libshim.lib")
-                def_file_path = os.path.join(
-                    os.path.dirname(os.path.dirname(__file__)),
-                    "csrc",
-                    "inductor",
-                    "aoti_runtime",
-                    "windows_symbol_exports.def",
-                )
-                subprocess.run(
-                    [
-                        "x86_64-w64-mingw32-dlltool",
-                        "-d",
-                        def_file_path,
-                        "-l",
-                        windows_shim_lib_path,
-                    ]
-                )
-                # windows_shim_lib must be after the .o files
-                obj_srcs.append(windows_shim_lib_path)
             so_builder = CppBuilder(
                 name=output_name,
                 sources=obj_srcs,
