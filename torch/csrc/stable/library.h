@@ -4,6 +4,7 @@
 // code for better UX.
 
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
+#include <torch/headeronly/util/Exception.h>
 #include <torch/headeronly/util/Metaprogramming.h>
 
 // Technically, this file doesn't use anything from stableivalue_conversions.h,
@@ -218,12 +219,22 @@ struct boxer_impl<
     c10::guts::typelist::typelist<ParameterTypes...>,
     FuncT,
     func> {
-  void operator()(
+  static void boxed_fn(
       StableIValue* stack,
       uint64_t num_args,
       uint64_t num_outputs) {
-    assert(num_args == sizeof...(ParameterTypes));
-    assert(num_outputs == sizeof...(ReturnTypes));
+    STD_TORCH_CHECK(
+        num_args == sizeof...(ParameterTypes),
+        "Expected ",
+        num_args,
+        " args, got ",
+        sizeof...(ParameterTypes));
+    STD_TORCH_CHECK(
+        num_outputs == sizeof...(ReturnTypes),
+        "Expected ",
+        num_outputs,
+        " outputs, got ",
+        sizeof...(ReturnTypes));
     std::tuple<ParameterTypes...> args =
         unbox_to_tuple<ParameterTypes...>(stack);
     auto res = std::apply(func, args);
@@ -241,16 +252,22 @@ struct boxer_impl<
     c10::guts::typelist::typelist<ParameterTypes...>,
     FuncT,
     func> {
-  void operator()(
+  static void boxed_fn(
       StableIValue* stack,
       uint64_t num_args,
       uint64_t num_outputs) {
-    assert(num_args == sizeof...(ParameterTypes));
-    assert(num_outputs == 1);
+    STD_TORCH_CHECK(
+        num_args == sizeof...(ParameterTypes),
+        "Expected ",
+        num_args,
+        " args, got ",
+        sizeof...(ParameterTypes));
+    STD_TORCH_CHECK(
+        num_outputs == 1, "Expected ", num_outputs, " outputs, got ", 1);
     std::tuple<ParameterTypes...> args =
         unbox_to_tuple<ParameterTypes...>(stack);
     auto res = std::apply(func, args);
-    box_from_tuple<std::tuple<ReturnType>>(stack, std::make_tuple(res));
+    stack[0] = from<ReturnType>(res);
   }
 };
 
@@ -266,7 +283,7 @@ struct boxer {
         typename FunctionTraits::return_type,
         typename FunctionTraits::parameter_types,
         FuncT,
-        func>();
+        func>::boxed_fn(stack, num_args, num_outputs);
   }
 };
 

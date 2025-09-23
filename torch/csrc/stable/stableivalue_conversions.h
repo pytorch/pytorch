@@ -314,6 +314,14 @@ struct ToImpl<torch::stable::Tensor> {
   }
 };
 
+// Specialization for StableIValue => float
+template <>
+struct ToImpl<float> {
+  static float call(StableIValue val) {
+    return float(to<double>(val));
+  }
+};
+
 } // namespace detail
 
 // Expose the partially templated class functions through single functions
