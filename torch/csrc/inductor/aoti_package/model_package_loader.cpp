@@ -42,16 +42,18 @@ const std::string k_separator = "/";
 
 std::string remove_duplicate_separator_of_path(const std::string& path) {
   /*
+  On Windows, temp file path maybe has duplicate separator.
+  Need to remove the duplication:
   Origin: C:/Users/Xuhan/AppData/Local/Temp//tmpl10jfwef/filename
   Processed: C:/Users/Xuhan/AppData/Local/Temp/tmpl10jfwef/filename
   */
   std::string result = path;
   size_t pos = 0;
-  
+
   while ((pos = result.find("//", pos)) != std::string::npos) {
-      result.replace(pos, 2, "/");
+    result.replace(pos, 2, "/");
   }
-  
+
   return result;
 }
 
@@ -71,8 +73,8 @@ std::string normalize_path_separator(const std::string& orig_path) {
   std::string normalized_path = orig_path;
 #ifdef _WIN32
   std::replace(normalized_path.begin(), normalized_path.end(), '\\', '/');
-  normalized_path = remove_duplicate_separator_of_path(normalized_path);
 #endif
+  normalized_path = remove_duplicate_separator_of_path(normalized_path);
   return normalized_path;
 }
 
@@ -176,25 +178,28 @@ std::tuple<std::string, std::string> get_cpp_compile_command(
 
   std::string cflags_args;
   for (auto& arg : compile_options["cflags"]) {
-    // [Windows compiler need it] convert first char arg to std::string, for following plus(+) strings.
-    cflags_args += std::string(_is_windows_os() ? "/" : "-") + arg.get<std::string>() + " ";
+    // [Windows compiler need it] convert first char arg to std::string, for
+    // following plus(+) strings.
+    cflags_args += std::string(_is_windows_os() ? "/" : "-") +
+        arg.get<std::string>() + " ";
   }
 
   std::string definitions_args;
   for (auto& arg : compile_options["definitions"]) {
-    definitions_args +=
-        std::string(_is_windows_os() ? "/D" : "-D ") + arg.get<std::string>() + " ";
+    definitions_args += std::string(_is_windows_os() ? "/D" : "-D ") +
+        arg.get<std::string>() + " ";
   }
 
   std::string include_dirs_args;
   for (auto& arg : compile_options["include_dirs"]) {
-    include_dirs_args +=
-        std::string(_is_windows_os() ? "/I" : "-I") + arg.get<std::string>() + " ";
+    include_dirs_args += std::string(_is_windows_os() ? "/I" : "-I") +
+        arg.get<std::string>() + " ";
   }
 
   std::string ldflags_args;
   for (auto& arg : compile_options["ldflags"]) {
-    ldflags_args += std::string(_is_windows_os() ? "/" : "-") + arg.get<std::string>() + " ";
+    ldflags_args += std::string(_is_windows_os() ? "/" : "-") +
+        arg.get<std::string>() + " ";
   }
 
   std::string libraries_dirs_args;
@@ -367,15 +372,16 @@ std::string compile_so(
   size_t lastindex = cpp_filename.find_last_of('.');
   std::string filename = cpp_filename.substr(0, lastindex);
 
-  std::string compile_flags_path = normalize_path_separator(filename + "_compile_flags.json");
+  std::string compile_flags_path =
+      normalize_path_separator(filename + "_compile_flags.json");
   printf("compile_flags_path: %s\n", compile_flags_path.c_str());
   const nlohmann::json compile_flags = load_json_file(compile_flags_path);
 
   auto [compile_cmd, output_o] =
       get_cpp_compile_command(filename, {cpp_filename}, compile_flags);
 
-  std::string linker_flags_path =
-      normalize_path_separator(cpp_filename.substr(0, lastindex) + "_linker_flags.json");
+  std::string linker_flags_path = normalize_path_separator(
+      cpp_filename.substr(0, lastindex) + "_linker_flags.json");
   printf("linker_flags_path: %s\n", linker_flags_path.c_str());
   const nlohmann::json linker_flags = load_json_file(linker_flags_path);
 
@@ -384,12 +390,12 @@ std::string compile_so(
       get_cpp_compile_command(filename, obj_filenames, linker_flags);
 
   // Run the commands to generate a .so file
-  printf_s("build command: %s\n", compile_cmd.c_str());
+  printf("build command: %s\n", compile_cmd.c_str());
   int status = system(compile_cmd.c_str());
   if (status != 0) {
     throw std::runtime_error("Failed to compile cpp file.");
   }
-  printf_s("link command: %s\n", link_cmd.c_str());
+  printf("link command: %s\n", link_cmd.c_str());
   status = system(link_cmd.c_str());
   if (status != 0) {
     throw std::runtime_error("Failed to link files.");
