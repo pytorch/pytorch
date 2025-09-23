@@ -3235,10 +3235,10 @@ class TestUnbacked(TestCase):
         @torch.compile(fullgraph=True)
         def func(a, b):
             torch._check(a.size()[0] == b.size()[0])
-            if(a.size()[0]//b.size()[0] ==1):
-                return a*10
+            if a.size()[0] // b.size()[0] == 1:
+                return a * 10
             else:
-                return b*100
+                return b * 100
 
         a = torch.randn(10, 10)
         b = torch.randn(10, 20)
@@ -3246,6 +3246,7 @@ class TestUnbacked(TestCase):
         torch._dynamo.decorators.mark_unbacked(a, 0)
         torch._dynamo.decorators.mark_unbacked(b, 0)
         func(a, b)
+
 
 class TestUbackedOps(TestCase):
     @fresh_cache()

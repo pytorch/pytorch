@@ -4939,8 +4939,6 @@ class ShapeEnv:
         symbolic_context: Optional[StatelessSymbolicContext] = None,
     ) -> sympy.Expr:
         """Create a new symbol which is tracked by this ShapeEnv"""
-        # import fbvscode
-        # fbvscode.set_trace()
         # check if constraint_dim is actually static integer
         if (
             isinstance(constraint_dim, StrictMinMaxConstraint)
@@ -6923,8 +6921,8 @@ class ShapeEnv:
                     raise NotImplementedError
 
                 # Never replace unbacked symbols that with other unbacked symbols that are
-                # not function arguments. (mark_unbacked symbols are fine to replace other unbacked
-                # not those cominf from .item() calls for example).
+                # not function arguments. (ex:mark_unbacked symbols are fine to replace other
+                # unbacked, but not those coming from .item() calls).
 
                 # This is error prone because you can cause references to
                 # unbacked symbols to time travel backwards.  E.g.,
@@ -7433,8 +7431,6 @@ class ShapeEnv:
         forcing_spec: bool = False,
     ) -> sympy.Basic:
         # TODO: split conjunctions and evaluate them separately
-        # import fbvscode
-        # fbvscode.set_trace()
         if isinstance(
             orig_expr,
             (sympy.logic.boolalg.BooleanTrue, sympy.logic.boolalg.BooleanFalse),
@@ -7779,7 +7775,6 @@ class ShapeEnv:
             expr = canonicalize_bool_expr(expr)
             stack = CapturedTraceback.extract(skip=1)
             ra = RuntimeAssert(expr, msg, stack)
-            print("laith", ra)
 
             # TODO: Do this in a way that is less janky than int(s.name[1:])
             cands = sorted(
