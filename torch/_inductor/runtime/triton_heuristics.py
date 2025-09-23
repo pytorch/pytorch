@@ -2906,9 +2906,9 @@ def _persistent_reduction_configs(
     )
 
     if torch.version.hip:
-        xblock_vals = (1, 4, 8, 16, 32, 64, 128, 256)
+        xblock_vals = [1, 4, 8, 16, 32, 64, 128, 256]
     else:
-        xblock_vals = (1, 8, 32, 128)
+        xblock_vals = [1, 8, 32, 128]
 
     if "y" not in size_hints:
         configs = [
