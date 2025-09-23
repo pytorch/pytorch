@@ -3,8 +3,6 @@ import copy
 
 import torch
 from torch._dynamo.test_case import run_tests, TestCase
-from torch._functorch.aot_autograd import aot_export_module
-from torch._higher_order_ops.effects import _deregister_effectful_op
 from torch._library.opaque_object import get_payload, make_opaque, set_payload
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import (
@@ -68,9 +66,7 @@ class TestOpaqueObject(TestCase):
 
         @torch.library.register_fake("_TestOpaqueObject::queue_push", lib=self.lib)
         def push_impl_fake(q: torch._C.ScriptObject, b: torch.Tensor) -> None:
-            queue = get_payload(q)
-            assert isinstance(queue, OpaqueQueue)
-            queue.push(b)
+            pass
 
         self.lib.define(
             "queue_pop(__torch__.torch.classes.aten.OpaqueObject a) -> Tensor",
@@ -82,23 +78,30 @@ class TestOpaqueObject(TestCase):
             return queue.pop()
 
         self.lib.impl("queue_pop", pop_impl, "CompositeExplicitAutograd")
-        self.lib._register_fake("queue_pop", pop_impl)
+
+        def pop_impl_fake(q: torch._C.ScriptObject) -> torch.Tensor:
+            # This is not accurate
+            ctx = torch._custom_op.impl.get_ctx()
+            u0 = ctx.create_unbacked_symint()
+            return torch.empty(u0)
+
+        self.lib._register_fake("queue_pop", pop_impl_fake)
 
         @torch.library.custom_op(
             "_TestOpaqueObject::queue_size",
             mutates_args=[],
-            schema="(__torch__.torch.classes.aten.OpaqueObject a) -> int",
         )
-        def size_impl(q: torch._C.ScriptObject) -> int:
+        def size_impl(q: torch.library.OpaqueType) -> int:
             queue = get_payload(q)
             assert isinstance(queue, OpaqueQueue)
             return queue.size()
 
         @size_impl.register_fake
         def size_impl_fake(q: torch._C.ScriptObject) -> int:
-            queue = get_payload(q)
-            assert isinstance(queue, OpaqueQueue)
-            return queue.size()
+            ctx = torch._custom_op.impl.get_ctx()
+            u0 = ctx.create_unbacked_symint()
+            torch._check_is_size(u0)
+            return u0
 
         super().setUp()
 
@@ -136,6 +139,7 @@ class TestOpaqueObject(TestCase):
     def test_make_fx(self, make_fx_tracing_mode):
         class M(torch.nn.Module):
             def forward(self, queue, x):
+                torch.ops._TestOpaqueObject.queue_push(queue, x.tan())
                 torch.ops._TestOpaqueObject.queue_push(queue, x.cos())
                 torch.ops._TestOpaqueObject.queue_push(queue, x.sin())
                 pop1 = torch.ops._TestOpaqueObject.queue_pop(queue)
@@ -148,34 +152,36 @@ class TestOpaqueObject(TestCase):
 
         q1 = OpaqueQueue([], torch.empty(0).fill_(-1))
         obj1 = make_opaque(q1)
-        obj2 = make_opaque(q1)
+        q2 = OpaqueQueue([], torch.empty(0).fill_(-1))
+        obj2 = make_opaque(q2)
 
         x = torch.ones(2, 3)
         gm = make_fx(M(), tracing_mode=make_fx_tracing_mode)(obj1, x)
-        self.assertEqual(q1._push_counter, 2)
+        self.assertTrue(torch.allclose(gm(obj1, x), M()(obj2, x)))
+        self.assertEqual(q1._push_counter, 3)
         self.assertEqual(q1._pop_counter, 2)
         self.assertEqual(q1._size_counter, 2)
-        self.assertEqual(q1.size(), 0)
+        self.assertEqual(q1.size(), 1)
         self.assertExpectedInline(
             gm.code.strip("\n"),
             """\
 def forward(self, arg0_1, arg1_1):
+    tan = torch.ops.aten.tan.default(arg1_1)
+    queue_push = torch.ops._TestOpaqueObject.queue_push.default(arg0_1, tan);  tan = queue_push = None
     cos = torch.ops.aten.cos.default(arg1_1)
-    queue_push = torch.ops._TestOpaqueObject.queue_push.default(arg0_1, cos);  cos = queue_push = None
+    queue_push_1 = torch.ops._TestOpaqueObject.queue_push.default(arg0_1, cos);  cos = queue_push_1 = None
     sin = torch.ops.aten.sin.default(arg1_1);  arg1_1 = None
-    queue_push_1 = torch.ops._TestOpaqueObject.queue_push.default(arg0_1, sin);  sin = queue_push_1 = None
+    queue_push_2 = torch.ops._TestOpaqueObject.queue_push.default(arg0_1, sin);  sin = queue_push_2 = None
     queue_pop = torch.ops._TestOpaqueObject.queue_pop.default(arg0_1)
-    queue_size = torch.ops._TestOpaqueObject.queue_size.default(arg0_1);  queue_size = None
+    queue_size = torch.ops._TestOpaqueObject.queue_size.default(arg0_1)
     queue_pop_1 = torch.ops._TestOpaqueObject.queue_pop.default(arg0_1)
-    queue_size_1 = torch.ops._TestOpaqueObject.queue_size.default(arg0_1);  arg0_1 = queue_size_1 = None
-    add = torch.ops.aten.add.Tensor(queue_pop, 1);  queue_pop = None
-    sub = torch.ops.aten.sub.Tensor(queue_pop_1, 0);  queue_pop_1 = None
+    queue_size_1 = torch.ops._TestOpaqueObject.queue_size.default(arg0_1);  arg0_1 = None
+    add = torch.ops.aten.add.Tensor(queue_pop, queue_size);  queue_pop = queue_size = None
+    sub = torch.ops.aten.sub.Tensor(queue_pop_1, queue_size_1);  queue_pop_1 = queue_size_1 = None
     add_1 = torch.ops.aten.add.Tensor(sub, add);  sub = add = None
     return add_1
     """,
         )
-
-        self.assertTrue(torch.allclose(gm(obj1, x), M()(obj2, x)))
 
     def test_eq(self):
         self.assertTrue(make_opaque("moo") == make_opaque("moo"))
@@ -198,103 +204,6 @@ def forward(self, arg0_1, arg1_1):
 
         self.assertTrue(q1 is not q2)
         self.assertTrue(q1 == q2)
-
-    def test_aot_export_tensor_queue_operators(self):
-        class Model(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-
-            def forward(self, tq, x):
-                torch.ops._TestOpaqueObject.queue_push(tq, x.cos())
-                torch.ops._TestOpaqueObject.queue_push(tq, x.sin())
-                x_sin = torch.ops._TestOpaqueObject.queue_pop(
-                    tq
-                ) - torch.ops._TestOpaqueObject.queue_size(tq)
-                x_cos = torch.ops._TestOpaqueObject.queue_pop(
-                    tq
-                ) + torch.ops._TestOpaqueObject.queue_size(tq)
-                return x_sin, x_cos, tq
-
-        mod = Model()
-
-        tq1 = OpaqueQueue([], torch.empty(0).fill_(-1))
-        obj1 = make_opaque(tq1)
-        x = torch.ones(2, 3)
-
-        fake_mode = torch._subclasses.fake_tensor.FakeTensorMode()
-        # fake_tq1 = torch._library.fake_class_registry.maybe_to_fake_obj(fake_mode, tq1)
-        fake_x = fake_mode.from_tensor(x)
-        gm = aot_export_module(mod, (obj1, fake_x), trace_joint=False)[0]
-
-        # inputs: token, tq, x
-        # return: token, x_sin, x_cos, tq
-        self.assertExpectedInline(
-            gm.code.strip(),
-            """\
-def forward(self, arg0_1, arg1_1, arg2_1):
-    cos = torch.ops.aten.cos.default(arg2_1)
-    with_effects = torch.ops.higher_order.with_effects(arg0_1, torch.ops._TestOpaqueObject.queue_push.default, arg1_1, cos);  arg0_1 = cos = None
-    getitem = with_effects[0];  with_effects = None
-    sin = torch.ops.aten.sin.default(arg2_1);  arg2_1 = None
-    with_effects_1 = torch.ops.higher_order.with_effects(getitem, torch.ops._TestOpaqueObject.queue_push.default, arg1_1, sin);  getitem = sin = None
-    getitem_2 = with_effects_1[0];  with_effects_1 = None
-    with_effects_2 = torch.ops.higher_order.with_effects(getitem_2, torch.ops._TestOpaqueObject.queue_pop.default, arg1_1);  getitem_2 = None
-    getitem_4 = with_effects_2[0]
-    getitem_5 = with_effects_2[1];  with_effects_2 = None
-    with_effects_3 = torch.ops.higher_order.with_effects(getitem_4, torch.ops._TestOpaqueObject.queue_size.default, arg1_1);  getitem_4 = None
-    getitem_6 = with_effects_3[0];  with_effects_3 = None
-    sub = torch.ops.aten.sub.Tensor(getitem_5, 1);  getitem_5 = None
-    with_effects_4 = torch.ops.higher_order.with_effects(getitem_6, torch.ops._TestOpaqueObject.queue_pop.default, arg1_1);  getitem_6 = None
-    getitem_8 = with_effects_4[0]
-    getitem_9 = with_effects_4[1];  with_effects_4 = None
-    with_effects_5 = torch.ops.higher_order.with_effects(getitem_8, torch.ops._TestOpaqueObject.queue_size.default, arg1_1);  getitem_8 = None
-    getitem_10 = with_effects_5[0];  with_effects_5 = None
-    add = torch.ops.aten.add.Tensor(getitem_9, 0);  getitem_9 = None
-    return (getitem_10, sub, add, arg1_1)""",  # noqa: B950
-        )
-
-        # If we register with None, this should mean the ops do not have effect
-        # since by default ops with ScriptObjects have effect
-        torch.library.register_effectful_op(
-            "_TestOpaqueObject::queue_push.default", None
-        )
-        torch.library.register_effectful_op(
-            "_TestOpaqueObject::queue_pop.default", None
-        )
-        torch.library.register_effectful_op(
-            "_TestOpaqueObject::queue_size.default", None
-        )
-        gm = aot_export_module(mod, (obj1, fake_x), trace_joint=False)[0]
-
-        # inputs: token, tq, x
-        # return: token, x_sin, x_cos, tq
-        self.assertExpectedInline(
-            gm.code.strip(),
-            """\
-def forward(self, arg0_1, arg1_1, arg2_1):
-    cos = torch.ops.aten.cos.default(arg2_1)
-    with_effects = torch.ops.higher_order.with_effects(arg0_1, torch.ops._TestOpaqueObject.queue_push.default, arg1_1, cos);  arg0_1 = cos = None
-    getitem = with_effects[0];  with_effects = None
-    sin = torch.ops.aten.sin.default(arg2_1);  arg2_1 = None
-    with_effects_1 = torch.ops.higher_order.with_effects(getitem, torch.ops._TestOpaqueObject.queue_push.default, arg1_1, sin);  getitem = sin = None
-    getitem_2 = with_effects_1[0];  with_effects_1 = None
-    with_effects_2 = torch.ops.higher_order.with_effects(getitem_2, torch.ops._TestOpaqueObject.queue_pop.default, arg1_1);  getitem_2 = None
-    getitem_4 = with_effects_2[0]
-    getitem_5 = with_effects_2[1];  with_effects_2 = None
-    with_effects_3 = torch.ops.higher_order.with_effects(getitem_4, torch.ops._TestOpaqueObject.queue_size.default, arg1_1);  getitem_4 = None
-    getitem_6 = with_effects_3[0];  with_effects_3 = None
-    sub = torch.ops.aten.sub.Tensor(getitem_5, 1);  getitem_5 = None
-    with_effects_4 = torch.ops.higher_order.with_effects(getitem_6, torch.ops._TestOpaqueObject.queue_pop.default, arg1_1);  getitem_6 = None
-    getitem_8 = with_effects_4[0]
-    getitem_9 = with_effects_4[1];  with_effects_4 = None
-    with_effects_5 = torch.ops.higher_order.with_effects(getitem_8, torch.ops._TestOpaqueObject.queue_size.default, arg1_1);  getitem_8 = None
-    getitem_10 = with_effects_5[0];  with_effects_5 = None
-    add = torch.ops.aten.add.Tensor(getitem_9, 0);  getitem_9 = None
-    return (getitem_10, sub, add, arg1_1)""",  # noqa: B950
-        )
-        _deregister_effectful_op("_TestOpaqueObject::queue_push.default")
-        _deregister_effectful_op("_TestOpaqueObject::queue_pop.default")
-        _deregister_effectful_op("_TestOpaqueObject::queue_size.default")
 
 
 instantiate_parametrized_tests(TestOpaqueObject)

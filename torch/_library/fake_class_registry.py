@@ -136,14 +136,11 @@ def maybe_to_fake_obj(
         return x
 
     if str(x._type()) == "__torch__.torch.classes.aten.OpaqueObject":
-        from torch._library.opaque_object import FakeOpaqueObject, get_payload
+        from torch._library.opaque_object import FakeOpaqueObject
 
-        # We can't implement an __obj_flatten__ function because
-        # CustomClassHolder only allow us to register function signatures for
-        # objs that are valid IValues, and arbitrary py::objects/handles are not
-        # valid IValues (they need to be a CustomClassHolder).
-        payload = get_payload(x)
-        fake_x = FakeOpaqueObject(payload)
+        # In order to make OpaqueObjects truly opaque, the fake kernel should
+        # not depend on the contents of the OpaqueObject at all.
+        fake_x = FakeOpaqueObject()
 
     else:
         # x.__obj_flatten__() could be calling some tensor operations inside but we don't

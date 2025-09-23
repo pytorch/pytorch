@@ -931,7 +931,7 @@ class OpOverload(OperatorBase, Generic[_P, _T]):
                         return self._op_dk(key, *args, **kwargs)
 
                 with torch.utils._python_dispatch._pop_mode_temporarily() as mode:
-                    return self.python_key_table[curr_mode](mode, *args, **kwargs)
+                    return self.python_key_table[curr_mode](mode, *args, **kwargs)  # type: ignore[index]
 
             self._dispatch_cache[key] = handler
             add_cached_op(self)
@@ -1050,7 +1050,6 @@ class TorchBindOpOverload(OpOverload[_P, _T]):
     @contextlib.contextmanager
     def _register_as_effectful_op_temporarily(self):
         from torch._higher_order_ops.effects import (
-            _deregister_effectful_op,
             _EffectType,
             _register_effectful_op,
             SIDE_EFFECTS,
@@ -1061,12 +1060,14 @@ class TorchBindOpOverload(OpOverload[_P, _T]):
             # registration, especially if the registration is None (explicitly
             # no effect)
             registered_op = SIDE_EFFECTS.contains(self)
+            handle = None
             if not registered_op:
-                _register_effectful_op(self, _EffectType.ORDERED)
+                handle = _register_effectful_op(self, _EffectType.ORDERED)
             yield
         finally:
             if not registered_op:
-                _deregister_effectful_op(self)
+                assert handle is not None
+                handle.destroy()
 
     # Use positional-only argument to avoid naming collision with aten ops arguments
     # that are named "self". This way, all the aten ops can be called by kwargs.

@@ -374,7 +374,7 @@ static inline std::vector<c10::IValue> makeStack(Inputs&&... inputs) {
 template <class... Args>
 static inline std::vector<c10::IValue> callOpByHandle(
     const c10::OperatorHandle& op,
-    Args&&... args) {
+    Args... args) {
   auto stack = makeStack(std::forward<Args>(args)...);
   c10::Dispatcher::singleton().callBoxed(op, &stack);
   return stack;
@@ -384,7 +384,7 @@ template <class... Args>
 static inline std::vector<c10::IValue> callOpByName(
     const char* func_name,
     const char* overload_name,
-    Args&&... args) {
+    Args... args) {
   const std::optional<c10::OperatorHandle> op_handle =
       c10::Dispatcher::singleton().findSchema({func_name, overload_name});
   assert(op_handle.has_value());

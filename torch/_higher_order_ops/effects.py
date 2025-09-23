@@ -1,13 +1,14 @@
 # mypy: allow-untyped-defs
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._higher_order_ops.torchbind import call_torchbind
 from torch._library.custom_ops import CustomOpDef
-from torch._library.effects import _EffectType, _op_identifier
+from torch._library.effects import EffectType
 from torch._library.fake_class_registry import FakeScriptObject
+from torch._library.utils import RegistrationHandle
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
@@ -17,23 +18,36 @@ from torch.fx.experimental.proxy_tensor import (
 )
 
 
+_op_identifier = Union[
+    str,
+    "torch._ops.OpOverload",
+    "torch._library.custom_ops.CustomOpDef",
+    "torch._ops.HigherOrderOperator",
+]
+OpType = Union["torch._ops.HigherOrderOperator", "torch._ops.OpOverload"]
+
+_EffectType = EffectType
+
+
 class SideEffectRegistry:
     def __init__(self):
         self._data = {}
 
     def get_key(self, op: _op_identifier) -> str:
         if isinstance(op, torch._ops.OpOverload):
-            if op._overloadname == "default":
-                op = f"{op._name}.{op._overloadname}"
-            else:
-                op = op._name
+            op = op._name
+            if len(op.split(".")) == 1:
+                op = f"{op}.default"
         elif isinstance(op, torch._ops.HigherOrderOperator):
-            # Give a dummy overload
-            op = f"{op.namespace}::{op.name()}.dummy"
+            op = f"{op.namespace}::{op.name()}.default"
         elif isinstance(op, CustomOpDef):
-            op = f"{op._qualname}"
+            op = op._qualname
+            if len(op.split(".")) == 1:
+                op = f"{op}.default"
 
-        assert isinstance(op, str)
+        assert isinstance(op, str), (
+            f"Expected op to be a string or an OpOverload, but got {op}"
+        )
         assert len(op.split("::")) == 2, (
             f'Expected op to be of the form "namespace::name.overload", but got {op}'
         )
@@ -70,16 +84,24 @@ class SideEffectRegistry:
 
 SIDE_EFFECTS = SideEffectRegistry()
 
-SIDE_EFFECTS.register(torch.ops.aten._print.default, _EffectType.ORDERED)
+SIDE_EFFECTS.register("aten::_print.default", _EffectType.ORDERED)
 SIDE_EFFECTS.register(call_torchbind, _EffectType.ORDERED)
 
 
-def _register_effectful_op(op: _op_identifier, effect: Optional[_EffectType]):
+def _register_effectful_op(
+    op: _op_identifier, effect: Optional[EffectType]
+) -> RegistrationHandle:
     SIDE_EFFECTS.register(op, effect)
+
+    def _deregister_effect():
+        _deregister_effectful_op(op)
+
+    return RegistrationHandle(_deregister_effect)
 
 
 def _deregister_effectful_op(op: _op_identifier):
-    SIDE_EFFECTS.delete(op)
+    if SIDE_EFFECTS.contains(op):
+        SIDE_EFFECTS.delete(op)
 
 
 class WithEffects(HigherOrderOperator):
@@ -102,7 +124,7 @@ class WithEffects(HigherOrderOperator):
     def __call__(
         self,
         token,
-        op: _op_identifier,
+        op: OpType,
         *args: tuple[Any, ...],
         **kwargs: dict[str, Any],
     ) -> tuple[Any, ...]:
@@ -116,7 +138,7 @@ class WithEffects(HigherOrderOperator):
 with_effects = WithEffects()
 
 
-def has_aliasing(op: _op_identifier):
+def has_aliasing(op: OpType):
     # NOT FOR PUBLIC USE
     if isinstance(op, torch._ops.HigherOrderOperator):
         return SIDE_EFFECTS.find(op) is not None
@@ -248,7 +270,7 @@ def _get_schema(op, args) -> torch.FunctionSchema:
 def handle_effects(
     allow_token_discovery: bool,
     tokens: dict[_EffectType, torch.Tensor],
-    op: _op_identifier,
+    op: OpType,
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
 ) -> Any:

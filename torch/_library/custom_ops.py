@@ -5,7 +5,7 @@ import logging
 import weakref
 from collections.abc import Iterable, Sequence
 from contextlib import contextmanager
-from typing import Any, Callable, Literal, Optional, overload, Union
+from typing import Any, Callable, Optional, overload, Union
 
 import torch
 from torch import _C, _ops, Tensor
@@ -13,7 +13,7 @@ from torch.types import _dtype
 from torch.utils._exposed_in import exposed_in
 
 from . import autograd, utils
-from .effects import _EffectType, register_effectful_op
+from .effects import EffectType
 
 
 device_types_t = Optional[Union[str, Sequence[str]]]
@@ -23,12 +23,13 @@ log = logging.getLogger(__name__)
 @overload
 def custom_op(
     name: str,
-    fn: Literal[None] = None,
+    fn: None = None,
     /,
     *,
     mutates_args: Union[str, Iterable[str]],
     device_types: device_types_t = None,
     schema: Optional[str] = None,
+    tags: Optional[Sequence[_C.Tag]] = None,
 ) -> Callable[[Callable[..., object]], "CustomOpDef"]: ...
 
 
@@ -41,6 +42,7 @@ def custom_op(
     mutates_args: Union[str, Iterable[str]],
     device_types: device_types_t = None,
     schema: Optional[str] = None,
+    tags: Optional[Sequence[_C.Tag]] = None,
 ) -> "CustomOpDef": ...
 
 
@@ -54,7 +56,6 @@ def custom_op(
     device_types: device_types_t = None,
     schema: Optional[str] = None,
     tags: Optional[Sequence[_C.Tag]] = None,
-    effect: Optional[_EffectType] = None,
 ) -> Union[Callable[[Callable[..., object]], "CustomOpDef"], "CustomOpDef"]:
     """Wraps a function into custom operator.
 
@@ -153,7 +154,6 @@ def custom_op(
 
         namespace, opname = name.split("::")
         result = CustomOpDef(namespace, opname, schema_str, fn, tags)
-
         if schema is not None:
             # Check that schema's alias annotations match those of `mutates_args`.
             expected = set()
@@ -167,10 +167,6 @@ def custom_op(
                     f"which is different from what was provided to us in `mutates_args`. "
                     f"Please make these consistent."
                 )
-
-        if effect is not None:
-            register_effectful_op(name, effect)
-
         result.register_kernel(device_types)(fn)
         return result
 
@@ -473,6 +469,11 @@ class CustomOpDef:
         """
         self._abstract_fn = fn
         return fn
+
+    def register_effect(self, effect: Optional[EffectType]) -> None:
+        from torch._higher_order_ops.effects import _register_effectful_op
+
+        _ = _register_effectful_op(self, effect)
 
     def register_torch_dispatch(
         self, torch_dispatch_class: Any, fn: Optional[Callable] = None, /

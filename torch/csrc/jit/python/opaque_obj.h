@@ -6,11 +6,12 @@
 #include <c10/macros/Macros.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/pytypes.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/custom_class.h>
 
 namespace torch::jit {
-struct TORCH_API OpaqueObject : public CustomClassHolder {
+struct OpaqueObject : public CustomClassHolder {
   OpaqueObject(py::object payload) : payload_(std::move(payload)) {}
 
   void setPayload(py::object payload) {
