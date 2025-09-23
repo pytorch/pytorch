@@ -1,5 +1,5 @@
 import math
-from typing import cast, Optional, Union
+from typing import Optional, Union
 
 from torch import inf, Tensor
 from torch.distributions import constraints
@@ -55,13 +55,11 @@ class HalfNormal(TransformedDistribution):
 
     @property
     def mean(self) -> Tensor:
-        # Cast the result to ensure mypy sees it as Tensor
-        return cast(Tensor, self.scale * math.sqrt(2 / math.pi))
+        return self.scale * math.sqrt(2 / math.pi)
 
     @property
     def mode(self) -> Tensor:
-        # Cast the result to ensure mypy sees it as Tensor
-        return cast(Tensor, self.scale * 0.0)
+        return self.scale * 0.0
 
     @property
     def variance(self) -> Tensor:
@@ -70,11 +68,11 @@ class HalfNormal(TransformedDistribution):
     def log_prob(self, value: Tensor) -> Tensor:
         if self._validate_args:
             self._validate_sample(value)
-        log_prob = self.base_dist.log_prob(value) + math.log(2)
-        # Conditional assignment equivalent to torch.where
+        # For half-normal: log_prob(x) = log(2) + base_dist.log_prob(x) for x >= 0
+        # But we need to handle negative values properly
         mask = value >= 0
-        log_prob = log_prob * mask + (-inf) * (~mask)
-        return log_prob
+        log_prob = self.base_dist.log_prob(value.abs()) + math.log(2)
+        return log_prob * mask + (-inf) * (~mask)
 
     def cdf(self, value: Tensor) -> Tensor:
         if self._validate_args:
