@@ -7,16 +7,7 @@ import sys
 import traceback
 import weakref
 from collections.abc import Sequence
-from typing import (
-    Any,
-    Callable,
-    Literal,
-    Optional,
-    overload,
-    TYPE_CHECKING,
-    TypeVar,
-    Union,
-)
+from typing import Any, Callable, Optional, overload, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import deprecated, ParamSpec
 
 import torch
@@ -29,6 +20,7 @@ from torch._library.custom_ops import (
     device_types_t,
 )
 from torch._library.infer_schema import infer_schema  # noqa: F401
+from torch._library.opaque_object import OpaqueType
 from torch._library.triton import triton_op, wrap_triton
 from torch._ops import OpOverload
 from torch.types import _dtype
@@ -50,6 +42,7 @@ __all__ = [
     "triton_op",
     "wrap_triton",
     "infer_schema",
+    "OpaqueType",
 ]
 
 _T = TypeVar("_T")
@@ -562,7 +555,7 @@ def _(lib: Library, schema, alias_analysis=""):
 def impl(
     qualname: str,
     types: Union[str, Sequence[str]],
-    func: Literal[None] = None,
+    func: None = None,
     *,
     lib: Optional[Library] = None,
 ) -> Callable[[Callable[..., object]], None]: ...
@@ -674,7 +667,7 @@ if not TYPE_CHECKING:
 def _impl(
     qualname: str,
     types: Union[str, Sequence[str]],
-    func: Literal[None] = None,
+    func: None = None,
     *,
     lib: Optional[Library] = None,
     disable_dynamo: bool = False,

@@ -1,13 +1,14 @@
-from typing import Any, Union
+from typing import Any, NewType
 
 import torch
-from torch._library.fake_class_registry import FakeScriptObject
+
+from .fake_class_registry import FakeScriptObject, register_fake_class
 
 
-@torch._library.register_fake_class("aten::OpaqueObject")
+@register_fake_class("aten::OpaqueObject")
 class FakeOpaqueObject:
-    def __init__(self, payload: Any) -> None:
-        self.payload: Any = payload
+    def __init__(self) -> None:
+        pass
 
     @classmethod
     def __obj_unflatten__(cls, flattened_ctx: dict[str, Any]) -> None:
@@ -15,6 +16,12 @@ class FakeOpaqueObject:
             "FakeOpaqueObject should not be created through __obj_unflatten__ "
             "and should be special handled. Please file an issue to Github."
         )
+
+
+OpaqueTypeStr = "__torch__.torch.classes.aten.OpaqueObject"
+
+OpaqueType = NewType("OpaqueType", torch._C.ScriptObject)
+OpaqueType.__module__ = "torch.library"
 
 
 def make_opaque(payload: Any = None) -> torch._C.ScriptObject:
@@ -35,6 +42,7 @@ def make_opaque(payload: Any = None) -> torch._C.ScriptObject:
 
     Example:
 
+        >>> import random
         >>> import torch
         >>> from torch._library.opaque_object import (
         ...     make_opaque,
@@ -42,53 +50,42 @@ def make_opaque(payload: Any = None) -> torch._C.ScriptObject:
         ...     set_payload,
         ... )
         >>>
-        >>> class OpaqueQueue:
-        >>>     def __init__(self, queue: list[torch.Tensor], init_tensor_: torch.Tensor) -> None:
-        >>>         super().__init__()
-        >>>         self.queue = queue
-        >>>         self.init_tensor_ = init_tensor_
+        >>> class RNGState:
+        >>>     def __init__(self, seed):
+        >>>         self.rng = random.Random(seed)
         >>>
-        >>>     def push(self, tensor: torch.Tensor) -> None:
-        >>>         self.queue.append(tensor)
-        >>>
-        >>>     def pop(self) -> torch.Tensor:
-        >>>         if len(self.queue) > 0:
-        >>>             return self.queue.pop(0)
-        >>>         return self.init_tensor_
-        >>>
-        >>>     def size(self) -> int:
-        >>>         return len(self.queue)
-        >>>
-        >>> queue = OpaqueQueue([], torch.zeros(2, 2))
+        >>> rng = RNGState(0)
         >>> obj = make_opaque()
-        >>> set_payload(obj, queue)
+        >>> set_payload(obj, rng)
         >>>
-        >>> assert get_payload(obj) == queue
+        >>> assert get_payload(obj) == rng
         >>>
         >>> lib = torch.library.Library("mylib", "FRAGMENT")
         >>>
         >>> torch.library.define(
-        >>>     "mylib::queue_push",
-        >>>     "(__torch__.torch.classes.aten.OpaqueObject a, Tensor b) -> ()",
+        >>>     "mylib::noisy_inject",
+        >>>     "(Tensor x, __torch__.torch.classes.aten.OpaqueObject obj) -> Tensor",
         >>>     tags=torch.Tag.pt2_compliant_tag,
         >>>     lib=lib,
         >>> )
         >>>
         >>> @torch.library.impl(
-        >>>     "mylib::queue_push", "CompositeExplicitAutograd", lib=lib
+        >>>     "mylib::noisy_inject", "CompositeExplicitAutograd", lib=lib
         >>> )
-        >>> def push_impl(q: torch._C.ScriptObject, b: torch.Tensor) -> None:
-        >>>     queue = get_payload(q)
-        >>>     assert isinstance(queue, OpaqueQueue)
-        >>>     queue.push(b)
+        >>> def noisy_inject(x: torch.Tensor, obj: torch._C.ScriptObject) -> torch.Tensor:
+        >>>     rng_state = get_payload(obj)
+        >>>     assert isinstance(rng_state, RNGState)
+        >>>     out = x.clone()
+        >>>     for i in range(out.numel()):
+        >>>         out.view(-1)[i] += rng_state.rng.random()
+        >>>     return out
         >>>
-        >>> torch.ops.mylib.queue_push(obj, torch.ones(3) + 1)
-        >>> assert get_payload(obj).size() == 1
+        >>> print(torch.ops.mylib.noisy_inject(torch.ones(3), obj))
     """
     return torch._C._make_opaque_object(payload)
 
 
-def get_payload(opaque_object: Union[torch._C.ScriptObject, FakeScriptObject]) -> Any:
+def get_payload(opaque_object: torch._C.ScriptObject) -> Any:
     """
     Retrieves the Python object stored in the given opaque object.
 
@@ -100,16 +97,24 @@ def get_payload(opaque_object: Union[torch._C.ScriptObject, FakeScriptObject]) -
         be set with `set_payload()`.
     """
     if isinstance(opaque_object, FakeScriptObject):
-        return opaque_object.wrapped_obj.payload
-    elif isinstance(opaque_object, torch._C.ScriptObject):
-        if str(opaque_object._type()) == "__torch__.torch.classes.aten.OpaqueObject":
-            return torch._C._get_opaque_object_payload(opaque_object)  # type: ignore[attr-defined]
-        else:
-            raise RuntimeError(
-                f"Unable to get payload of ScriptObject object of type {str(opaque_object._type())}"
-            )
-    else:
-        raise RuntimeError(f"Unable to get payload of object {opaque_object}")
+        raise ValueError(
+            "OpaqueObjects are opaque, so therefore the contents should not be "
+            "visible to torch.compile, and the fake kernel should not depend "
+            "on the contents of the OpaqueObject at all."
+        )
+    if not (
+        isinstance(opaque_object, torch._C.ScriptObject)
+        and opaque_object._type().qualified_name() == OpaqueTypeStr
+    ):
+        type_ = (
+            opaque_object._type().qualified_name()
+            if isinstance(opaque_object, torch._C.ScriptObject)
+            else type(opaque_object)
+        )
+        raise ValueError(
+            f"Tried to get the payload from a non-OpaqueObject of type `{type_}`"
+        )
+    return torch._C._get_opaque_object_payload(opaque_object)
 
 
 def set_payload(opaque_object: torch._C.ScriptObject, payload: Any) -> None:
@@ -120,4 +125,23 @@ def set_payload(opaque_object: torch._C.ScriptObject, payload: Any) -> None:
         torch._C.ScriptObject: The opaque object that stores the given Python object.
         payload (Any): The Python object to store in the opaque object.
     """
+    if isinstance(opaque_object, FakeScriptObject):
+        raise ValueError(
+            "OpaqueObjects are opaque, so therefore the contents should not be "
+            "visible to torch.compile, and the fake kernel should not depend "
+            "on the contents of the OpaqueObject at all."
+        )
+
+    if not (
+        isinstance(opaque_object, torch._C.ScriptObject)
+        and opaque_object._type().qualified_name() == OpaqueTypeStr
+    ):
+        type_ = (
+            opaque_object._type().qualified_name()
+            if isinstance(opaque_object, torch._C.ScriptObject)
+            else type(opaque_object)
+        )
+        raise ValueError(
+            f"Tried to get the payload from a non-OpaqueObject of type `{type_}`"
+        )
     torch._C._set_opaque_object_payload(opaque_object, payload)
