@@ -49,13 +49,8 @@ def _check_cuda(result: int) -> None:
     raise RuntimeError(f"CUDA error: {error_message}")
 
 
-def _get_hiprtc_library(rtc_path: Optional[str] = None) -> ctypes.CDLL:
-    if rtc_path:
-        try:
-            lib = ctypes.CDLL(rtc_path)
-        except OSError as e:
-            raise OSError(f"Could not load HIPRTC library from specified path '{rtc_path}': {e}")
-    elif sys.platform == "win32":
+def _get_hiprtc_library() -> ctypes.CDLL:
+    if sys.platform == "win32":
         version_str = "".join(["0", torch.version.hip[0], "0", torch.version.hip[2]])
         lib = ctypes.CDLL(f"hiprtc{version_str}.dll")
     else:
@@ -75,13 +70,7 @@ def _get_hiprtc_library(rtc_path: Optional[str] = None) -> ctypes.CDLL:
     return lib
 
 
-def _get_nvrtc_library(rtc_path: Optional[str] = None) -> ctypes.CDLL:
-    if rtc_path:
-        try:
-            return ctypes.CDLL(rtc_path)
-        except OSError as e:
-            raise OSError(f"Could not load NVRTC library from specified path '{rtc_path}': {e}")
-    
+def _get_nvrtc_library() -> ctypes.CDLL:
     if sys.platform == "win32":
         nvrtc_libs = [
             "nvrtc64_130_0.dll",
@@ -104,12 +93,18 @@ def _get_nvrtc_library(rtc_path: Optional[str] = None) -> ctypes.CDLL:
 
 
 def _get_gpu_rtc_library(rtc_path: Optional[str] = None) -> ctypes.CDLL:
-    # Since PyTorch already loads the GPU RTC library, we can use the system library
-    # which should be compatible with PyTorch's version
+    # If custom path provided, use it directly
+    if rtc_path:
+        try:
+            return ctypes.CDLL(rtc_path)
+        except OSError as e:
+            raise OSError(f"Could not load RTC library from specified path '{rtc_path}': {e}")
+    
+    # Otherwise use auto-discovery based on GPU vendor
     if torch.version.hip:
-        return _get_hiprtc_library(rtc_path)
+        return _get_hiprtc_library()
     else:
-        return _get_nvrtc_library(rtc_path)
+        return _get_nvrtc_library()
 
 
 def _get_gpu_rtc_compatible_flags() -> list[str]:
