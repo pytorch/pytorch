@@ -116,7 +116,7 @@ Tensor& fill_diagonal_(Tensor& self, const Scalar& fill_value, bool wrap) {
     stride += self.stride(i);
   }
   std::vector<SymInt> strides{stride};
-  std::vector<SymInt> sizes{std::move(size)};
+  std::vector<SymInt> sizes{size};
 
   auto main_diag = self.as_strided_symint(sizes, strides, storage_offset);
   main_diag.fill_(fill_value);
