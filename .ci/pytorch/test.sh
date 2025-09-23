@@ -334,8 +334,14 @@ test_python() {
 }
 
 test_python_smoke() {
-  # Smoke tests for H100
+  # Smoke tests for H100/B200
   time python test/run_test.py --include test_matmul_cuda inductor/test_fp8 inductor/test_max_autotune $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  assert_git_not_dirty
+}
+
+test_python_smoke_b200() {
+  # Targeted smoke tests for B200 - staged approach to avoid too many failures
+  time python test/run_test.py --include test_matmul_cuda inductor/test_fp8 $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   assert_git_not_dirty
 }
 
@@ -1773,6 +1779,8 @@ elif [[ "${BUILD_ENVIRONMENT}" == *xpu* ]]; then
   test_xpu_bin
 elif [[ "${TEST_CONFIG}" == smoke ]]; then
   test_python_smoke
+elif [[ "${TEST_CONFIG}" == smoke_b200 ]]; then
+  test_python_smoke_b200
 elif [[ "${TEST_CONFIG}" == h100_distributed ]]; then
   test_h100_distributed
 elif [[ "${TEST_CONFIG}" == "h100-symm-mem" ]]; then
