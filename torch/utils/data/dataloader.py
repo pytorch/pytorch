@@ -672,7 +672,7 @@ class _BaseDataLoaderIter:
         self._pin_memory = loader.pin_memory and torch.accelerator.is_available()
 
         # Set pin memory device based on the current accelerator.
-        self._pin_memory_device = (
+        pin_memory_device = (
             acc.type
             if self._pin_memory
             and (acc := torch.accelerator.current_accelerator()) is not None
@@ -683,7 +683,7 @@ class _BaseDataLoaderIter:
         # https://github.com/pytorch/pytorch/issues/86060), so forcibly
         # disable pin_memory on MPS. Remove this restriction once pinned
         # memory allocation for MPS is fixed.
-        if self._pin_memory_device == "mps":
+        if pin_memory_device == "mps":
             self._pin_memory = False
             warn_msg = (
                 "'pin_memory' argument is set as true but not supported on MPS now, "

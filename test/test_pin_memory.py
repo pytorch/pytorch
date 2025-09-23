@@ -1,6 +1,10 @@
+# Owner(s): ["module: tests"]
+
 import pytest
+
 import torch
 import torch.utils.data._utils.pin_memory as pm
+from torch.testing._internal.common_utils import run_tests
 from torch.utils.data import DataLoader, TensorDataset
 
 
@@ -41,7 +45,7 @@ def test_dataloader_pin_memory_enabled():
     ds = TensorDataset(torch.randn(8, 4))
     dl = DataLoader(ds, batch_size=2, pin_memory=True, num_workers=0)
 
-    for batch, in dl:
+    for (batch,) in dl:
         assert batch.is_pinned()
 
 
@@ -49,7 +53,7 @@ def test_dataloader_pin_memory_disabled():
     ds = TensorDataset(torch.randn(8, 4))
     dl = DataLoader(ds, batch_size=2, pin_memory=False, num_workers=0)
 
-    for batch, in dl:
+    for (batch,) in dl:
         assert not batch.is_pinned()
 
 
@@ -59,3 +63,6 @@ def test_pin_memory_does_not_accept_device_arg():
     with pytest.raises(TypeError):
         pm.pin_memory(x, device="cuda:0")
 
+
+if __name__ == "__main__":
+    run_tests()
