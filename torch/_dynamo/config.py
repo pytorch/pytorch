@@ -189,8 +189,21 @@ disable = os.environ.get("TORCH_COMPILE_DISABLE", "0") == "1"
 cprofile = os.environ.get("TORCH_COMPILE_CPROFILE", False)
 
 # Legacy config, does nothing now!
-# This is a deprecated configuration option that is no longer used.
 skipfiles_inline_module_allowlist: dict[Any, Any] = {}
+"""Allowlist of inline modules to skip during compilation.
+
+Legacy configuration that previously controlled which modules could be
+inlined during tracing. This configuration is deprecated and no longer used.
+
+Type:
+    dict[Any, Any]
+Default:
+    {}
+Usage:
+    This configuration is deprecated and does nothing now
+Notes:
+    DEPRECATED: This setting has no effect on current behavior.
+"""
 
 # If a string representing a PyTorch module is in this ignorelist,
 # the `allowed_functions.is_allowed` function will not consider it
