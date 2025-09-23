@@ -45,16 +45,11 @@ def _get_nvrtc_library(nvrtc_path: Optional[str] = None) -> ctypes.CDLL:
             "nvrtc64_130_0.dll",
             "nvrtc64_120_0.dll",
             "nvrtc64_112_0.dll",
-            "nvrtc64_111_0.dll",
-            "nvrtc64_110_0.dll",
         ]
     else:
         nvrtc_libs = [
             "libnvrtc.so.13",
             "libnvrtc.so.12",
-            "libnvrtc.so.11.2",
-            "libnvrtc.so.11.1",
-            "libnvrtc.so.11.0",
             "libnvrtc.so",  # Fallback to unversioned
         ]
 
