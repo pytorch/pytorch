@@ -8,17 +8,17 @@ import torch
 __all__ = ["autocast"]
 
 
+@deprecated(
+    "`torch.cpu.amp.autocast(args...)` is deprecated. "
+    "Please use `torch.amp.autocast('cpu', args...)` instead.",
+    category=FutureWarning,
+)
 class autocast(torch.amp.autocast_mode.autocast):
     r"""
     See :class:`torch.autocast`.
     ``torch.cpu.amp.autocast(args...)`` is deprecated. Please use ``torch.amp.autocast("cpu", args...)`` instead.
     """
 
-    @deprecated(
-        "`torch.cpu.amp.autocast(args...)` is deprecated. "
-        "Please use `torch.amp.autocast('cpu', args...)` instead.",
-        category=FutureWarning,
-    )
     def __init__(
         self,
         enabled: bool = True,

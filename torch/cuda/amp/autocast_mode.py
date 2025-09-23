@@ -9,17 +9,17 @@ import torch
 __all__ = ["autocast", "custom_fwd", "custom_bwd"]
 
 
+@deprecated(
+    "`torch.cuda.amp.autocast(args...)` is deprecated. "
+    "Please use `torch.amp.autocast('cuda', args...)` instead.",
+    category=FutureWarning,
+)
 class autocast(torch.amp.autocast_mode.autocast):
     r"""See :class:`torch.autocast`.
 
     ``torch.cuda.amp.autocast(args...)`` is deprecated. Please use ``torch.amp.autocast("cuda", args...)`` instead.
     """
 
-    @deprecated(
-        "`torch.cuda.amp.autocast(args...)` is deprecated. "
-        "Please use `torch.amp.autocast('cuda', args...)` instead.",
-        category=FutureWarning,
-    )
     def __init__(
         self,
         enabled: bool = True,
