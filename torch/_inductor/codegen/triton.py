@@ -27,6 +27,7 @@ from torch._dynamo.utils import identity, preserve_rng_state
 from torch._prims_common import is_integer_dtype
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import CeilDiv, FloorDiv, ModularIndexing
+from torch.utils._sympy.value_ranges import bound_sympy
 from torch.utils._triton import has_triton_package, has_triton_stable_tma_api, get_triton_version
 
 from ...utils._sympy.symbol import free_symbol_is_type, prefix_str, symbol_is_type, SymT
