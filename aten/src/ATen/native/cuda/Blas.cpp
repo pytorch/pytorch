@@ -20,6 +20,7 @@
 #include <ATen/native/cuda/RowwiseScaledMM.h>
 #include <ATen/native/cuda/ScaledGroupMM.h>
 #include <ATen/native/cuda/GroupMM.h>
+#include <ATen/native/hip/ck_group_gemm.h>
 #include <ATen/ceil_div.h>
 
 #ifdef USE_FBGEMM_GENAI
@@ -1798,13 +1799,17 @@ std::optional<c10::ScalarType> out_dtype) {
 #else
   // _scaled_mm_allowed_device is used here within _grouped_mm_cuda which seems incorrect since scale is not used.
   // the _grouped_mm_fallback should be safe for any ROCm GPU since it's just calling typical mm/bmm
-  bool use_fast_path = false;
+  bool use_fast_path = true;
 #endif
   const auto out_dtype_ = _resolve_grouped_mm_out_dtype(mat_a, mat_b, out_dtype);
   Tensor out = create_grouped_gemm_output_tensor(mat_a, mat_b, offs, out_dtype_);
   if (use_fast_path) {
     // fast path, no d2h sync needed
+#ifndef USE_ROCM
     at::cuda::detail::bf16bf16_grouped_mm(mat_a, mat_b, offs, bias, out);
+#else
+    at::hip::detail::bf16bf16_grouped_mm_ck(mat_a, mat_b, offs, bias, out);
+#endif
   } else {
     _grouped_mm_fallback(mat_a, mat_b, offs, bias, out_dtype, out);
   }
