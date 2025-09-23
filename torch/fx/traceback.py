@@ -240,6 +240,22 @@ def set_stack_trace(stack: list[str]):
     if should_preserve_node_meta and stack:
         current_meta["stack_trace"] = "".join(stack)
 
+@contextmanager
+def set_annotation(key, value):
+    global current_meta
+
+    has_old_value = key in current_meta
+    old_value = current_meta.get(key, None)
+
+    try:
+        current_meta[key] = value
+        yield
+    finally:
+        if has_old_value:
+            current_meta[key] = old_value
+        else:
+            del current_meta[key]
+
 
 @compatibility(is_backward_compatible=False)
 def set_grad_fn_seq_nr(seq_nr):
