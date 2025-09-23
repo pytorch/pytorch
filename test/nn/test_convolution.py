@@ -4041,7 +4041,8 @@ class TestConvolutionNNDeviceType(NNTestCase):
     def test_conv3d_cudnn_broken(self, device):
         for dtype in (torch.half, torch.bfloat16):
             x = torch.rand(1, 16, 124, 1282, 722, dtype=dtype, device=device)
-            m = torch.nn.Conv3d(16,
+            m = torch.nn.Conv3d(
+                16,
                 16,
                 kernel_size=(1, 3, 3),
                 padding=0,
