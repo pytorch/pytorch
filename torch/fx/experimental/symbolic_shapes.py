@@ -5490,6 +5490,10 @@ class ShapeEnv:
         def track_symint(
             source: Source, val: IntLikeType, constraint: DimConstraint = None
         ) -> None:
+            # We should not generate guards for unbacked inputs.
+            if isinstance(val, SymInt) and self.is_unbacked_symint(val.node.expr):
+                return
+
             log.debug("track_symint %s %s %s", LazyString(source.name), val, constraint)
             assert not isinstance(val, SymInt) or is_symbolic(val)
 
