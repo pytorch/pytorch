@@ -1,6 +1,3 @@
-warning: The following rules have been removed and ignoring them has no effect:
-    - UP038
-
 from __future__ import annotations
 
 import dataclasses
@@ -2078,6 +2075,7 @@ class CUDAAddmmPersistentTMATemplateConfigHeuristic(
     blackwell_ws_persistent_device_tma_mm_template.uid,
     "cuda",
     register=torch.version.hip is None,
+    op_name="addmm",
 )
 class CUDABlackwellAddmmPersistentTMATemplateConfigHeuristic(
     AddMMConfigMixin, CUDABlackwellPersistentTMATemplateConfigHeuristic
@@ -2124,6 +2122,7 @@ class CUDAScaledTMATemplateConfigHeuristic(ScaledTMAConfigMixin, CUDAConfigHeuri
     blackwell_ws_persistent_device_tma_mm_template.uid,  # regular Blackwell MM template + scaling epilogue from ScaledMMConfigMixin
     "cuda",
     register=torch.version.hip is None,
+    op_name="scaled_mm",
 )
 class CUDAScaledBlackwellTMATemplateConfigHeuristic(
     ScaledBlackwellTMAConfigMixin, CUDAConfigHeuristic

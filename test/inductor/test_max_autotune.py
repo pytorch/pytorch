@@ -1,3 +1,6 @@
+warning: The following rules have been removed and ignoring them has no effect:
+    - UP038
+
 # Owner(s): ["module: inductor"]
 import contextlib
 import functools
@@ -326,9 +329,11 @@ class TestMaxAutotune(TestCase):
             write_api = "tma_descriptor0.store"
         else:
             write_api = "tl.store"
-        FileCheck().check_count("triton_tem_fused_mm").check(
+        FileCheck().check("triton_tem_fused_mm").check(
             "triton.language.make_tensor_descriptor"
-        ).check("tl.load_tensor_descriptor").check_count(write_api, write_count).run(code[0])
+        ).check("tl.load_tensor_descriptor").check_count(write_api, write_count).run(
+            code[0]
+        )
 
     @unittest.skipIf(
         not has_triton_tma_device(), "Need device-side TMA support in Triton"

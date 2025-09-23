@@ -1,6 +1,3 @@
-warning: The following rules have been removed and ignoring them has no effect:
-    - UP038
-
 import os
 import sys
 from typing import Any, Callable, Literal, Optional, TYPE_CHECKING, Union
