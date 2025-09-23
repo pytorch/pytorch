@@ -629,10 +629,28 @@ compiled_autograd = False
 # See https://github.com/pytorch/pytorch/issues/157452 for more context
 graph_break_on_nn_param_ctor = True
 
-# Overrides torch.compile() kwargs for Compiled Autograd
-# This dictionary allows overriding specific torch.compile() keyword arguments
-# when using Compiled Autograd.
+# Overrides torch.compile() kwargs for Compiled Autograd:
 compiled_autograd_kwargs_override: dict[str, Any] = {}
+"""Overrides torch.compile() kwargs for Compiled Autograd.
+
+This dictionary allows overriding specific torch.compile() keyword arguments
+when using Compiled Autograd. Only certain overrides are currently supported.
+
+Type:
+    dict[str, Any]
+Default:
+    {}
+Example:
+    .. code-block:: python
+
+        torch._dynamo.config.compiled_autograd_kwargs_override = {
+            "fullgraph": True
+        }
+Notes:
+    Currently only the "fullgraph" kwarg override is supported. Other kwargs
+    may be added in future versions.
+"""
+
 
 # Enables use of collectives *during* compilation to synchronize behavior
 # across ranks.  Today, this is used solely to modify automatic_dynamic_shapes
