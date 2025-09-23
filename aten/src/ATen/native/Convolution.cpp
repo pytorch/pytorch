@@ -424,8 +424,8 @@ struct ConvParams {
       // broken on cuDNN 9.8
       if (cudnn_version >= 90800) {
         if (input.scalar_type() == at::kBFloat16 || input.scalar_type() == at::kHalf) {
-          for (auto it = weight.sizes().begin(); it != weight.sizes().end(); it++) {
-            if (*it != 1) {
+          for (auto val : weight.sizes()) {
+            if (val != 1) {
               return false;
             }
           }
