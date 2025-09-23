@@ -403,6 +403,7 @@ class DTensorTest(DTensorTestBase):
             local_tensor.grad,
         )
 
+    # making changes to pytorch
     @with_comms
     def test_dtensor_async_output(self):
         # Tests that if the output of some dtensor operations  isn't used in any compute,
