@@ -306,9 +306,8 @@ def _preload_cuda_deps(lib_folder: str, lib_name: str) -> None:
     assert platform.system() == "Linux", "Should only be called on Linux"
 
     from torch.version import cuda as cuda_version
-    from torch.utils._typing_utils import not_none
 
-    maj_cuda_version = int(not_none(cuda_version.split(".")[0]))
+    maj_cuda_version = int(cuda_version.split(".")[0])  # type: ignore[union-attr]
 
     lib_path = None
     for path in sys.path:
