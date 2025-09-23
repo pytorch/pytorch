@@ -201,7 +201,7 @@ class RAIIAtenTensorHandle {
   std::unique_ptr<AtenTensorOpaque, DeleterFnPtr> handle_;
 };
 
-// RAIIC10IValueHandle steals the tensor objects created by the libtorch C ABI
+// RAIIC10IValueHandle steals the IValue objects created by the libtorch C ABI
 class RAIIC10IValueHandle {
  public:
   RAIIC10IValueHandle() : handle_(nullptr, noop_deleter) {}

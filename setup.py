@@ -256,7 +256,7 @@ import platform
 
 
 # Also update `project.requires-python` in pyproject.toml when changing this
-python_min_version = (3, 9, 0)
+python_min_version = (3, 10, 0)
 python_min_version_str = ".".join(map(str, python_min_version))
 if sys.version_info < python_min_version:
     print(
