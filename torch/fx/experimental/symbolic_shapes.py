@@ -973,6 +973,16 @@ def free_unbacked_symbols(x: IterateExprs) -> OrderedSet[sympy.Symbol]:
     )
 
 
+def free_non_source_unbacked_symbols(
+    x: IterateExprs, unbacked_inputs: OrderedSet[sympy.Symbol]
+) -> OrderedSet[sympy.Symbol]:
+    """Unbacked symbols that are not inputs to the graph. These are symbols that originated from
+    data-dependent operations as opposed to mark_unbacked calls."""
+    unbacked_symbols = free_unbacked_symbols(x)
+    non_source_symbols = unbacked_symbols - unbacked_inputs
+    return non_source_symbols
+
+
 # WARNING: Don't use this on Dynamo produced graphs, they don't have meta
 # setup!
 def is_symbol_binding_fx_node(node: torch.fx.Node) -> Optional[sympy.Symbol]:
@@ -3717,6 +3727,8 @@ class ShapeEnv:
         self.var_to_range_sloc: dict[sympy.Symbol, ValueRangesSLoc] = {}
         self.source_name_to_debug_name: dict[str, str] = {}
         self.var_to_sources: dict[sympy.Symbol, list[Source]] = {}
+        # A set of unabcked symbols that are inputs (i.e: not data dependent).
+        self.unbacked_inputs: OrderedSet[sympy.Symbol] = OrderedSet()
         self.var_to_stack: dict[sympy.Symbol, CapturedTraceback] = {}
         # Maps a source to the *original* symbol that was assigned to it
         self.source_to_var: dict[str, sympy.Symbol] = {}
@@ -4851,6 +4863,8 @@ class ShapeEnv:
         self._log_create_unbacked_symbol(
             "create_unbacked_symint", symbol, vr, source, sym_node=sym_node
         )
+        if "u96" in str(symbol):
+            pass
 
         return SymInt(sym_node)
 
@@ -4925,6 +4939,8 @@ class ShapeEnv:
         symbolic_context: Optional[StatelessSymbolicContext] = None,
     ) -> sympy.Expr:
         """Create a new symbol which is tracked by this ShapeEnv"""
+        # import fbvscode
+        # fbvscode.set_trace()
         # check if constraint_dim is actually static integer
         if (
             isinstance(constraint_dim, StrictMinMaxConstraint)
@@ -4969,6 +4985,11 @@ class ShapeEnv:
         if dynamic_dim in (DimDynamic.SIZE_LIKE_UNBACKED, DimDynamic.OBLIVIOUS_SIZE):
             out = self.create_unbacked_symint(source).node.expr
             self._constrain_range_for_size(out)
+            from torch._dynamo.source import LocalSource
+
+            if isinstance(source.base, LocalSource) and source.base.is_input:
+                self.unbacked_inputs.add(out)
+
             if isinstance(symbolic_context, StatefulSymbolicContext) and source_name:
                 symbolic_context.shape_env_to_source_to_symbol_cache[id(self)][
                     source_name
@@ -6643,6 +6664,7 @@ class ShapeEnv:
         Adds or updates a replacement for a symbol.
         Use this instead of `self.replacements[a] = tgt`.
         """
+
         if tgt == self.replacements.get(a, None):
             return
 
@@ -6900,7 +6922,10 @@ class ShapeEnv:
                 ):
                     raise NotImplementedError
 
-                # Never replace unbacked symbols with other unbacked symbols.
+                # Never replace unbacked symbols that with other unbacked symbols that are
+                # not function arguments. (mark_unbacked symbols are fine to replace other unbacked
+                # not those cominf from .item() calls for example).
+
                 # This is error prone because you can cause references to
                 # unbacked symbols to time travel backwards.  E.g.,
                 #
@@ -6916,8 +6941,10 @@ class ShapeEnv:
                 # dependencies for substitutions, so ban it entirely.
                 def trivial_solve(lhs: sympy.Expr, rhs: sympy.Expr) -> bool:
                     if isinstance(lhs, sympy.Symbol):
-                        if free_unbacked_symbols(lhs) and not free_unbacked_symbols(
-                            rhs
+                        if free_unbacked_symbols(
+                            lhs
+                        ) and not free_non_source_unbacked_symbols(
+                            rhs, self.unbacked_inputs
                         ):
                             return True
                         if symbol_is_type(lhs, SymT.FLOAT):
@@ -7406,7 +7433,8 @@ class ShapeEnv:
         forcing_spec: bool = False,
     ) -> sympy.Basic:
         # TODO: split conjunctions and evaluate them separately
-
+        # import fbvscode
+        # fbvscode.set_trace()
         if isinstance(
             orig_expr,
             (sympy.logic.boolalg.BooleanTrue, sympy.logic.boolalg.BooleanFalse),
@@ -7751,6 +7779,8 @@ class ShapeEnv:
             expr = canonicalize_bool_expr(expr)
             stack = CapturedTraceback.extract(skip=1)
             ra = RuntimeAssert(expr, msg, stack)
+            print("laith", ra)
+
             # TODO: Do this in a way that is less janky than int(s.name[1:])
             cands = sorted(
                 (s for s in expr.free_symbols if symbol_is_type(s, SymT.UNBACKED_INT)),
