@@ -999,6 +999,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 
         class M(torch.nn.Module):
             def forward(self, x, y):
+                z = x.reshape(-1)
                 a = y.shape[0]
 
                 def true_fn(x):
@@ -1007,9 +1008,12 @@ def forward(self, arg0_1, arg1_1, arg2_1):
                 def false_fn(x):
                     return true_fn(x) / 2
 
-                return torch.cond(x.shape[0] > 5, true_fn, false_fn, (x,))
+                return torch.cond(x.shape[0] > 5, true_fn, false_fn, (z,))
 
-        (x, y) = [torch.randn(length, device=self.device) for _ in range(2)]
+        (x, y) = [
+            torch.randn(shape, device=self.device)
+            for shape in [(length / 2,) * 2, (length,)]
+        ]
         dynamic_shapes = {
             "x": {0: Dim.DYNAMIC},
             "y": {0: Dim.DYNAMIC},
