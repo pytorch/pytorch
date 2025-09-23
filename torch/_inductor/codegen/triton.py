@@ -706,7 +706,7 @@ class TritonPrinter(PythonPrinter):
         return f"libdevice.ceil({self._print(expr.args[0])}).to({V.kernel.index_dtype})"
 
     def _helper_sqrt(self, expr: sympy.Expr) -> str:
-        return f"libdevice.sqrt(({self._print(expr)}).to(tl.float32))"
+        return f"tl.sqrt_rn(({self._print(expr)}).to(tl.float32))"
 
     def _print_FloatPow(self, expr: sympy.Expr) -> str:
         return (
@@ -1098,7 +1098,7 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     @maybe_upcast_float32()
     def sqrt(x):
-        return f"libdevice.sqrt({x})"
+        return f"tl.sqrt_rn({x})"
 
     @staticmethod
     def relu(x):

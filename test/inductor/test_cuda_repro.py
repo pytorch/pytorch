@@ -87,6 +87,19 @@ class CudaReproTests(TestCase):
     device = "cuda"
     common = check_model_cuda
 
+    def test_mm_out_dtype_compile(self):
+        a = torch.randn(1, 3, device="cuda", dtype=torch.float16)
+        b = torch.randn(3, 2, device="cuda", dtype=torch.float16)
+
+        def fn(x, y):
+            return torch.mm(x, y, out_dtype=torch.float32)
+
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True)
+        result = compiled(a, b)
+        expected = fn(a, b)
+        self.assertEqual(result.dtype, expected.dtype)
+        self.assertEqual(result, expected)
+
     def test_index_put_issue(self):
         def forward(
             self,
@@ -963,6 +976,18 @@ class CudaReproTests(TestCase):
         ).run(code[0])
         self.assertEqual(
             out, torch.scatter_reduce(input_orig.clone(), 0, index, src, "sum")
+        )
+
+    def test_normalize_norm_leq_one(self):
+        def fn(x: torch.Tensor) -> torch.Tensor:
+            return torch.nn.functional.normalize(x, dim=-1)
+
+        inp = torch.tensor([[3.799999, 0.0, 0.0]], device="cuda", dtype=torch.float32)
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True)
+        out = compiled(inp)
+        norm = out.norm(dim=-1)
+        self.assertTrue(
+            torch.all(norm <= 1.0), f"expected norm <= 1.0 but got {norm.item()}"
         )
 
     def test_libdevice_routing(self):
