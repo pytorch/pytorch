@@ -3,9 +3,9 @@
 #include <c10/macros/Export.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
-#include <c10/util/Metaprogramming.h>
-#include <c10/util/TypeList.h>
 #include <c10/util/llvmMathExtras.h>
+#include <torch/headeronly/util/Metaprogramming.h>
+#include <torch/headeronly/util/TypeList.h>
 #include <array>
 #include <cstddef>
 #include <cstdint>

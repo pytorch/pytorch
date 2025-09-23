@@ -4,8 +4,8 @@
 #include <ATen/core/jit_type_base.h>
 #include <c10/macros/Macros.h>
 #include <c10/macros/Export.h>
-#include <c10/util/TypeTraits.h>
-#include <c10/util/TypeList.h>
+#include <torch/headeronly/util/TypeTraits.h>
+#include <torch/headeronly/util/TypeList.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/ArrayRef.h>
 #include <optional>
