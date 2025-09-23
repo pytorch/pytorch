@@ -640,7 +640,7 @@ Tensor einsum(std::string_view equation, TensorList operands, at::OptionalIntArr
     }
   }
 
-  return ops[0];
+  return std::move(ops[0]);
 }
 
 // _trilinear computes a trilinear einstein sum with an unrolled dimension
