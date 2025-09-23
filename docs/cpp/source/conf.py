@@ -42,6 +42,18 @@ extensions = [
 
 intersphinx_mapping = {"pytorch": ("https://pytorch.org/docs/main", None)}
 
+
+# Fix for Python 3.10+ compatibility with exhale 2.3.0
+# MutableMapping was moved from collections to collections.abc in Python 3.10
+import sys
+try:
+    from collections.abc import MutableMapping
+    import collections
+    if not hasattr(collections, 'MutableMapping'):
+        collections.MutableMapping = MutableMapping
+except ImportError:
+    pass
+
 # Setup absolute paths for communicating with breathe / exhale where
 # items are expected / should be trimmed by.
 # This file is {repo_root}/docs/cpp/source/conf.py
