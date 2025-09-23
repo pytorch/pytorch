@@ -8,6 +8,9 @@ from torch.ao.quantization.quantizer.quantizer import (
 from torch.fx import Node
 
 
+__all__: list[str] = []
+
+
 def _annotate_input_qspec_map(
     node: Node, input_node: Node, qspec: Optional[QuantizationSpecBase]
 ) -> None:
