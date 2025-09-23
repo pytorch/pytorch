@@ -1,5 +1,4 @@
 import dataclasses
-import functools
 import itertools
 from collections import Counter, defaultdict
 from typing import Callable, Literal, Optional, overload, TYPE_CHECKING, TypeVar, Union
