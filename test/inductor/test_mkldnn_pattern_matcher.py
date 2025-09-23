@@ -4280,14 +4280,19 @@ class TestPatternMatcher(TestPatternMatcherBase):
             def matcher_check_fn():
                 self.assertEqual(counters["inductor"]["woq_matcher_count"], 1)
 
-            self._test_common(
-                mod,
-                (x, w, s),
-                matcher_check_fn,
-                check_quantization=False,
-                atol=0.001,
-                rtol=0.07,
-            )
+                def matcher_check_fn():
+                    self.assertEqual(
+                        counters["inductor"]["woq_matcher_count"], 0 if TEST_ACL else 1
+                    )
+
+                self._test_common(
+                    mod,
+                    (x.to(device), w.to(device), s.to(device)),
+                    matcher_check_fn,
+                    check_quantization=False,
+                    atol=0.001,
+                    rtol=0.07,
+                )
 
     @skipIfNoDynamoSupport
     def test_woq_int4_cpu(self):
