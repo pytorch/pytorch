@@ -4228,7 +4228,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             dim_stats = memory_stats.persistent.memory.dim[0]
             mem_ops_per_thread = dim_stats.count_per_thread
 
-            if tiling_scores is not None:
+            if (
+                tiling_scores is not None
+                and "x" in tiling_scores
+                and "r0_" in tiling_scores
+            ):
                 # large rblock inhibits xblock size, dont attempt if there is a decent amount of
                 # reads coalesced by xblock
                 r_coalesce_ratio = tiling_scores["r0_"] / max(tiling_scores["x"], 1)
@@ -4236,7 +4240,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             else:
                 from torch._inductor.runtime.hints import ReductionHint
 
-                contiugous_red = (
+                contiguous_red = (
                     self.features.get_reduction_hint() == ReductionHint.INNER
                 )
 
@@ -4256,7 +4260,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             if (
                 # significant memory bandwidth savings
                 saved_bytes_ratio >= 1.3
-                and contiugous_red
+                and contiguous_red
                 # TODO - need more detailed register analysis
                 and V.graph.sizevars.statically_known_leq(
                     self.features.reduction_numel, 32768
