@@ -423,7 +423,7 @@ class PrecompileCacheEntry:
     @staticmethod
     def from_cache_entry(
         cache_entry: _DynamoCacheEntry, backends: dict[_BackendId, Any]
-    ) -> "PrecompileCacheEntry":
+    ) -> Optional["PrecompileCacheEntry"]:
         serializable_codes = []
         backend_content: dict[_BackendId, Any] = {}
 
