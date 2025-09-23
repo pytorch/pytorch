@@ -1,6 +1,6 @@
 #include <c10/test/util/Macros.h>
-#include <c10/util/Metaprogramming.h>
 #include <gtest/gtest.h>
+#include <torch/headeronly/util/Metaprogramming.h>
 #include <cstdlib>
 
 using namespace c10::guts;

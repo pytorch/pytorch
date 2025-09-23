@@ -6,7 +6,7 @@
  */
 
 #include <ATen/core/function_schema.h>
-#include <c10/util/Metaprogramming.h>
+#include <torch/headeronly/util/Metaprogramming.h>
 
 namespace c10 {
 namespace detail::infer_schema {

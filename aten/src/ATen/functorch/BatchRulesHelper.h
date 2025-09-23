@@ -5,7 +5,7 @@
 // LICENSE file in the root directory of this source tree.
 #pragma once
 
-#include <c10/util/TypeList.h>
+#include <torch/headeronly/util/TypeList.h>
 
 #include <ATen/ATen.h>
 #include <ATen/Operators.h>

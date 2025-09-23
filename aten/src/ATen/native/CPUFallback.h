@@ -4,7 +4,7 @@
 #include <ATen/core/stack.h>
 #include <ATen/core/boxing/KernelFunction.h>
 #include <ATen/core/dispatch/Dispatcher.h>
-#include <c10/util/Metaprogramming.h>
+#include <torch/headeronly/util/Metaprogramming.h>
 #include <torch/library.h>
 
 namespace at::native {

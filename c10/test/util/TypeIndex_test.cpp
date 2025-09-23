@@ -1,6 +1,6 @@
-#include <c10/util/Metaprogramming.h>
 #include <c10/util/TypeIndex.h>
 #include <gtest/gtest.h>
+#include <torch/headeronly/util/Metaprogramming.h>
 
 using c10::util::get_fully_qualified_type_name;
 using c10::util::get_type_index;

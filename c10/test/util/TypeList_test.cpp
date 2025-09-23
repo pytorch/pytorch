@@ -1,5 +1,5 @@
-#include <c10/util/TypeList.h>
 #include <gtest/gtest.h>
+#include <torch/headeronly/util/TypeList.h>
 #include <memory>
 
 using namespace c10::guts::typelist;
