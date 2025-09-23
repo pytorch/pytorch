@@ -138,20 +138,22 @@ def clean_export_root(graph_module: torch.fx.GraphModule) -> None:
             old_target = node.target
             new_target = clean_name(old_target)
             new_name = clean_name(node.name)
-            if new_target != old_target:
-                new_name = clean_name(node.name)
-                if old_target in clean_named_module_map:
-                    node.target = clean_named_module_map[old_target]
-                    node.name = new_name
-                    continue
-                assert isinstance(old_target, str)
-                assert isinstance(new_target, str)
-                target = graph_module.get_submodule(old_target)
-                graph_module.delete_submodule(old_target)
-                graph_module.add_submodule(new_target, target)
-                node.target = new_target
+            if new_target == old_target:
+                continue
+
+            # if this module has already been cleaned before, just lookup from map.
+            if old_target in clean_named_module_map:
+                node.target = clean_named_module_map[old_target]
                 node.name = new_name
-                clean_named_module_map[old_target] = new_target
+                continue
+            assert isinstance(old_target, str)
+            assert isinstance(new_target, str)
+            target = graph_module.get_submodule(old_target)
+            graph_module.delete_submodule(old_target)
+            graph_module.add_submodule(new_target, target)
+            node.target = new_target
+            node.name = new_name
+            clean_named_module_map[old_target] = new_target
 
 
 class ModuleToTrace(torch.nn.Module):
