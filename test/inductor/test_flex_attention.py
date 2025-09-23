@@ -21,6 +21,7 @@ from torch._inductor import metrics
 from torch._inductor.runtime.triton_compat import HAS_WARP_SPEC
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
+from torch.nn.attention import SDPBackend
 from torch.nn.attention.experimental._paged_attention import PagedAttention
 from torch.nn.attention.flex_attention import (
     _create_empty_block_mask,
@@ -4362,6 +4363,89 @@ class GraphModule(torch.nn.Module):
 
     @supported_platform
     @skip_on_cpu
+    def test_custom_score_mod_layout_freeze(self, device):
+        torch.manual_seed(0)
+
+        class FlexAttentionCPB(nn.Module):
+            def __init__(self, N: int, R: int, H: int = 4, hidden: int = 32):
+                super().__init__()
+                self.mlp = nn.Sequential(
+                    nn.Linear(2, hidden),
+                    nn.GELU(),
+                    nn.Linear(hidden, H, bias=False),
+                )
+                self.gamma = nn.Parameter(torch.zeros(H))
+                self.H = H
+                self._init_tables(N, R)
+                self.register_buffer(
+                    "r_cutoff", torch.tensor(R, dtype=torch.long), persistent=False
+                )
+
+            def _init_tables(self, N: int, R: int) -> None:
+                P = N - R
+                S = int(P**0.5)
+                assert S * S == P
+                rng = torch.arange(-(S - 1), S, dtype=torch.float32)
+                dY, dX = torch.meshgrid(rng, rng, indexing="ij")
+                rel = torch.stack(
+                    [dY / max(S - 1, 1), dX / max(S - 1, 1)], dim=-1
+                ).reshape(-1, 2)
+                rel_table = torch.sign(rel) * torch.log1p(rel.abs())
+                self.register_buffer("rel_table", rel_table, persistent=False)
+
+                yy, xx = torch.arange(S), torch.arange(S)
+                Y, X = torch.meshgrid(yy, xx, indexing="ij")
+                flat = torch.stack([Y, X], 0).flatten(1)
+                d = flat[:, :, None] - flat[:, None, :]
+                d = d.permute(1, 2, 0).contiguous()
+                d[:, :, 0] += S - 1
+                d[:, :, 1] += S - 1
+                d[:, :, 0] *= 2 * S - 1
+                l_idx = d.sum(-1).to(torch.long)
+                idx = torch.full((N, N), 0, dtype=torch.long)
+                idx[R:, R:] = l_idx
+                self.register_buffer("idx_table", idx, persistent=False)
+
+            def _score_mod(self, mu: torch.Tensor):
+                bt = self.mlp(self.rel_table)
+                idx = self.idx_table
+                mu_q, mu_k = mu.unbind(2)
+                gam_sig = torch.sigmoid(self.gamma)
+
+                def score_mod(score, b, h, q, kv):
+                    has_bias = (q >= self.r_cutoff) & (kv >= self.r_cutoff)
+                    l2 = idx[q, kv]
+                    bias = bt[l2, h]
+                    w_gate = gam_sig[h] * (mu_q[b, h, q] + mu_k[b, h, kv])
+                    return score + has_bias.to(score.dtype) * w_gate * bias
+
+                return score_mod
+
+            def forward(self, q, k, v, mu):
+                return flex_attention(q, k, v, score_mod=self._score_mod(mu))
+
+        dtype = torch.bfloat16 if PLATFORM_SUPPORTS_BF16 else torch.float16
+        device_obj = torch.device(device)
+        module = FlexAttentionCPB(N=18, R=2).to(device_obj)
+        compiled_module = torch.compile(module, backend="inductor", dynamic=False)
+
+        q = torch.randn(2, 4, 18, 32, device=device_obj, dtype=dtype)
+        k = torch.randn_like(q)
+        v = torch.randn_like(q)
+        mu = torch.randn(2, 4, 2, 18, device=device_obj)
+
+        with torch.no_grad():
+            with torch.nn.attention.sdpa_kernel(SDPBackend.FLASH_ATTENTION):
+                eager_out = module(q, k, v, mu)
+                compiled_out = compiled_module(q, k, v, mu)
+
+        self.assertEqual(compiled_out.shape, eager_out.shape)
+        torch.testing.assert_close(
+            compiled_out.float(), eager_out.float(), atol=2e-2, rtol=2e-2
+        )
+
+    @supported_platform
+    @skip_on_cpu
     @common_utils.parametrize(
         "ops_to_save",
         [
@@ -4672,8 +4756,8 @@ class TestBlockMask(InductorTestCase):
 
         block_mask = create_block_mask(causal_mask, 4, 2, 2048, 2048, device=device)
         self.assertEqual(block_mask.shape, (4, 2, 2048, 2048))
-        self.assertEqual(block_mask[0].shape, (2, 2048, 2048))
-        self.assertEqual(block_mask[0, 0].shape, (2048, 2048))
+        self.assertEqual(block_mask[0].shape, (1, 2, 2048, 2048))
+        self.assertEqual(block_mask[0, 0].shape, (1, 1, 2048, 2048))
         self.assertEqual(block_mask.numel(), 4 * 2 * 2048 * 2048)
         self.assertEqual(block_mask.sparsity(), 46.875)
         self.assertEqual(block_mask[0].sparsity(), 46.875)
@@ -4717,13 +4801,26 @@ class TestBlockMask(InductorTestCase):
 
         # Index on batch dimension
         new_block_mask = block_mask[0]
-        assert new_block_mask.kv_num_blocks.shape == (2, 4)
-        assert new_block_mask.kv_indices.shape == (2, 4, 4)
+        assert new_block_mask.kv_num_blocks.shape == (1, 2, 4)
+        assert new_block_mask.kv_indices.shape == (1, 2, 4, 4)
 
         # Index on batch and head dimension
         new_block_mask = block_mask[0, 1]
-        assert new_block_mask.kv_num_blocks.shape == (4,)
-        assert new_block_mask.kv_indices.shape == (4, 4)
+        assert new_block_mask.kv_num_blocks.shape == (
+            1,
+            1,
+            4,
+        )
+        assert new_block_mask.kv_indices.shape == (1, 1, 4, 4)
+
+        # Index on batch and head dimension with -1 semantics
+        new_block_mask = block_mask[-1, -2]
+        assert new_block_mask.kv_num_blocks.shape == (
+            1,
+            1,
+            4,
+        )
+        assert new_block_mask.kv_indices.shape == (1, 1, 4, 4)
 
         # slicing on batch and head dimension
         new_block_mask = block_mask[0:2, 1:2]
@@ -5408,7 +5505,7 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
         self.assertEqual(block_mask.BLOCK_SIZE, (128, 128))
 
         sliced_mask = block_mask[0]
-        self.assertEqual(sliced_mask.shape, (1, 128, 512))
+        self.assertEqual(sliced_mask.shape, (1, 1, 128, 512))
         self.assertIsNone(sliced_mask.q_indices)
         self.assertIsNone(sliced_mask.q_num_blocks)
 
@@ -5417,6 +5514,66 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
             cpu_mask = block_mask.to("cpu")
             self.assertEqual(cpu_mask.kv_num_blocks.device.type, "cpu")
             self.assertIsNone(cpu_mask.q_indices)
+
+    @supported_platform
+    @skip_on_cpu
+    def test_broadcasted_head_block_mask(self, device):
+        torch.manual_seed(42)
+
+        def causal_mask(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+
+        def get_mask_mod_with_offset(mask_mod, offset_tensor):
+            def _mask_mod(b, h, q, kv):
+                return mask_mod(b, h, q + offset_tensor, kv)
+
+            return _mask_mod
+
+        B, T, H, D, current_pos = 4, 512, 8, 64, 128
+        dtype = torch.float32
+
+        q = torch.randn(B, H, 1, D, device=device, dtype=dtype)
+        k_cache = torch.randn(B, H, T, D, device=device, dtype=dtype)
+        v_cache = torch.randn(B, H, T, D, device=device, dtype=dtype)
+
+        # Keep future tokens tiny to avoid numerical issues when using full caches
+        k_cache[:, :, current_pos + 1 :, :] = (
+            torch.randn_like(k_cache[:, :, current_pos + 1 :, :]) * 1e-10
+        )
+        v_cache[:, :, current_pos + 1 :, :] = (
+            torch.randn_like(v_cache[:, :, current_pos + 1 :, :]) * 1e-10
+        )
+
+        k_cropped = k_cache[:, :, : current_pos + 1, :]
+        v_cropped = v_cache[:, :, : current_pos + 1, :]
+        sdpa_output = torch.nn.functional.scaled_dot_product_attention(
+            q, k_cropped, v_cropped, attn_mask=None
+        )
+
+        base_mask = create_block_mask(
+            causal_mask,
+            B=B,
+            H=None,  # broadcast across heads
+            Q_LEN=T,
+            KV_LEN=T,
+            device=device,
+            _compile=True,
+        )
+
+        q_block_size = base_mask.BLOCK_SIZE[0]
+        block_offset = current_pos // q_block_size
+        mask_slice = base_mask[:, :, block_offset]
+
+        offset_tensor = torch.tensor(current_pos, device=device)
+        mask_slice.mask_mod = get_mask_mod_with_offset(
+            base_mask.mask_mod, offset_tensor
+        )
+        mask_slice.seq_lengths = (1, mask_slice.seq_lengths[1])
+
+        fa = torch.compile(flex_attention, dynamic=True)
+        flex_output = fa(q, k_cache, v_cache, block_mask=mask_slice)
+
+        self.assertEqual(flex_output, sdpa_output, atol=1e-3, rtol=1e-3)
 
 
 @large_tensor_test_class("2GB", device=test_device[0])
