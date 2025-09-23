@@ -189,7 +189,6 @@ ignore = [
     "UP035",
     "UP036",
     "UP038",
-    "UP041",
     "FURB161",
 ]
 select = [
