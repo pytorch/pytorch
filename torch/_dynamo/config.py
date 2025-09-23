@@ -195,14 +195,14 @@ skipfiles_inline_module_allowlist: dict[Any, Any] = {}
 Legacy configuration that previously controlled which modules could be
 inlined during tracing. This configuration is deprecated and no longer used.
 
-Type:
-    dict[Any, Any]
-Default:
-    {}
-Usage:
-    This configuration is deprecated and does nothing now
-Notes:
-    DEPRECATED: This setting has no effect on current behavior.
+:type: dict[Any, Any]
+:default: {}
+
+.. deprecated:: 
+   This configuration is deprecated and does nothing now.
+
+.. note::
+   DEPRECATED: This setting has no effect on current behavior.
 """
 
 # If a string representing a PyTorch module is in this ignorelist,
@@ -636,19 +636,18 @@ compiled_autograd_kwargs_override: dict[str, Any] = {}
 This dictionary allows overriding specific torch.compile() keyword arguments
 when using Compiled Autograd. Only certain overrides are currently supported.
 
-Type:
-    dict[str, Any]
-Default:
-    {}
-Example:
-    .. code-block:: python
+:type: dict[str, Any]
+:default: {}
 
-        torch._dynamo.config.compiled_autograd_kwargs_override = {
-            "fullgraph": True
-        }
-Notes:
-    Currently only the "fullgraph" kwarg override is supported. Other kwargs
-    may be added in future versions.
+Example::
+
+    torch._dynamo.config.compiled_autograd_kwargs_override = {
+        "fullgraph": True
+    }
+
+.. note::
+   Currently only the "fullgraph" kwarg override is supported. Other kwargs
+   may be added in future versions.
 """
 
 
