@@ -3,6 +3,8 @@
 Quantization
 ============
 
+.. automodule:: torch.quantization.scaled_mm
+
 .. automodule:: torch.ao.quantization
 .. automodule:: torch.ao.quantization.fx
 
@@ -34,7 +36,6 @@ and supported quantized modules and functions.
     :hidden:
 
     quantization-support
-
 
 .. torch.ao is missing documentation. Since part of it is mentioned here, adding them here for now.
 .. They are here for tracking purposes until they are more permanently fixed.
@@ -216,3 +217,8 @@ and supported quantized modules and functions.
 .. autofunction:: torch.ao.ns.fx.utils.compute_sqnr(x, y)
 .. autofunction:: torch.ao.ns.fx.utils.compute_normalized_l2_error(x, y)
 .. autofunction:: torch.ao.ns.fx.utils.compute_cosine_similarity(x, y)
+
+.. currentmodule:: torch.quantization.scaled_mm
+.. autofunction:: torch.quantization.scaled_mm.scaled_mm
+.. autoclass:: torch.quantization.scaled_mm.ScalingType
+.. autoclass:: torch.quantization.scaled_mm.SwizzleType
