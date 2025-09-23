@@ -16029,7 +16029,7 @@ def forward(self, q, k, v):
 
         inp = PointNT(torch.ones(3), torch.ones(3))
 
-        ep_non_strict = export(M(), inp, strict=False)
+        ep_non_strict = export(M(), inp)
         result_non_strict = ep_non_strict.module()(*inp)
 
         ep_strict = export(M(), inp, strict=True)
