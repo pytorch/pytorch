@@ -1,5 +1,4 @@
 cmake_minimum_required(VERSION 3.27 FATAL_ERROR)
-# cmake_policy(SET CMP0022 NEW) cmake_policy(SET CMP0023 NEW)
 
 # Use compiler ID "AppleClang" instead of "Clang" for XCode. Not setting this
 # sometimes makes XCode C compiler gets detected as "Clang", even when the C++
@@ -1390,6 +1389,10 @@ endif()
 
 include(cmake/Summary.cmake)
 caffe2_print_configuration_summary()
+
+if(BUILD_FUNCTORCH)
+  add_subdirectory(functorch)
+endif()
 
 # Parse custom debug info
 if(DEFINED USE_CUSTOM_DEBINFO)
