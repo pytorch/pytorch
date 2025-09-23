@@ -1008,23 +1008,17 @@ print(t.is_pinned())
         self.assertTrue("torch.cuda.Event" in e.__repr__())
 
     def test_cuda_stream_protocol(self):
-        # Test the __cuda_stream__ protocol for interoperability
-        # https://github.com/pytorch/pytorch/issues/163359
         stream = torch.cuda.Stream()
         
-        # Check that __cuda_stream__ method exists
         self.assertTrue(hasattr(stream, "__cuda_stream__"))
         
-        # Get the stream handle using the protocol
         result = stream.__cuda_stream__()
         
-        # Verify the format is correct (version, handle) tuple
         self.assertIsInstance(result, tuple)
         self.assertEqual(len(result), 2)
         self.assertEqual(result[0], 0)  # Protocol version
         self.assertEqual(result[1], stream.cuda_stream)  # Stream handle
         
-        # Test with ExternalStream as well
         external_stream = torch.cuda.ExternalStream(stream.cuda_stream)
         external_result = external_stream.__cuda_stream__()
         
