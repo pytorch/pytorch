@@ -4,6 +4,7 @@
 // code for better UX.
 
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
+#include <torch/csrc/stable/version.h>
 
 // Technically, this file doesn't use anything from stableivalue_conversions.h,
 // but we need to include it here as the contents of stableivalue_conversions.h
