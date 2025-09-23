@@ -1683,7 +1683,8 @@ class TritonOverrides(OpOverrides):
     @maybe_upcast_float32()
     def tanh(x):
         if (get_triton_version() > (3, 4) and torch.version.hip):
-            return f"libdevice.fast_tanhf({x})"
+            if config.use_fast_math:
+                return f"libdevice.fast_tanhf({x})"
         else:
             return f"libdevice.tanh({x})"
 
