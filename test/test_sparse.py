@@ -1677,7 +1677,7 @@ class TestSparse(TestSparseBase):
     @coalescedonoff
     @expectedFailureMPS
     @dtypes(torch.double)
-    @dtypesIfMPS(torch.float32, torch.complex64)
+    @dtypesIfMPS(torch.float32)
     @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupported triggers assertion error")
     def test_sparse_mm(self, device, dtype, coalesced):
         def test_shape(d1, d2, d3, nnz, transposed):
@@ -1885,7 +1885,7 @@ class TestSparse(TestSparseBase):
     @coalescedonoff
     @expectedFailureMPS
     @dtypes(torch.double)
-    @dtypesIfMPS(torch.float32, torch.complex64)
+    @dtypesIfMPS(torch.float32)
     @unittest.skipIf(TEST_WITH_CROSSREF, "fallback triggers cuda device error")
     def test_sparse_sum(self, device, dtype, coalesced):
 
