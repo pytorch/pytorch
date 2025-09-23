@@ -346,7 +346,7 @@ def _load_global_deps() -> None:
                 return
             # If all above-mentioned conditions are met, preload nvrtc and nvjitlink
             _preload_cuda_deps("cuda_nvrtc", "libnvrtc.so.*[0-9]")
-            _preload_cuda_deps("cuda_nvrtc", "libnvrtc-builtins.*[0-9]")
+            _preload_cuda_deps("cuda_nvrtc", "libnvrtc-builtins.so.*[0-9]")
             _preload_cuda_deps("nvjitlink", "libnvJitLink.so.*[0-9]")
         except Exception:
             pass
