@@ -17,8 +17,7 @@ from torch.distributed.tensor.placement_types import (
     Replicate,
     Shard,
 )
-from torch.utils._debug_mode import DebugMode
-from torch.utils._python_dispatch import _get_current_dispatch_mode_stack
+from torch.utils._debug_mode import get_active_debug_mode
 
 
 logger = logging.getLogger(__name__)
@@ -171,13 +170,6 @@ def redistribute_local_tensor(
     the local shard of the DTensor from its current spec to the target spec.
     """
 
-    debug_mode = None
-    for mode in _get_current_dispatch_mode_stack():
-        if isinstance(mode, DebugMode):
-            debug_mode = mode
-            break
-
-
     if current_spec.mesh != target_spec.mesh:
         # TODO: alltoall/permute reshuffling to change device_mesh if they are not the same
         raise NotImplementedError("Cross device mesh comm not supported yet!")
@@ -196,7 +188,8 @@ def redistribute_local_tensor(
         transform_infos = _gen_transform_infos_non_cached(current_spec, target_spec)
     else:
         transform_infos = _gen_transform_infos(current_spec, target_spec)
-    
+
+    debug_mode = get_active_debug_mode()
     redistribute_context = (
         debug_mode.record_redistribute_calls(  # type: ignore[union-attr]
             local_tensor, current_spec, target_spec
