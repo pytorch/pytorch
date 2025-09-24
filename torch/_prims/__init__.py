@@ -30,6 +30,7 @@ from torch._prims_common import (
 )
 from torch._prims_common.wrappers import backwards_not_supported
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+from torch._subclasses.functional_tensor import CppFunctionalizeAPI
 from torch.overrides import handle_torch_function, has_torch_function
 from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
 
@@ -1364,12 +1365,90 @@ broadcast_in_dim = _make_prim(
 
 @broadcast_in_dim.py_functionalize_impl
 def _broadcast_in_dim_functionalize(ctx, a, shape, broadcast_dimensions):
+    if isinstance(ctx, CppFunctionalizeAPI):
+        return _broadcast_in_dim_functionalize_cpp(ctx, a, shape, broadcast_dimensions)
+    return _broadcast_in_dim_functionalize_python(ctx, a, shape, broadcast_dimensions)
+
+
+def _broadcast_in_dim_functionalize_python(ctx, a, shape, broadcast_dimensions):
     (unwrapped_a,) = ctx.unwrap_tensors((a,))
-    with ctx.redispatch_to_next():
-        out = torch.ops.prims.broadcast_in_dim.default(
-            unwrapped_a, shape, broadcast_dimensions
+
+    def _broadcast(a_unwrapped):
+        s = list(shape)
+        dims_set = set(broadcast_dimensions)
+
+        new_strides = _compute_broadcast_in_dim_strides(a_unwrapped, s, dims_set)
+
+        # When reapply_views is disabled, we should materialize the view to avoid
+        # creating an alias. We emulate the as_strided/view behavior explicitly.
+        reapply_views = torch._C._functionalization_reapply_views_tls()
+
+        if reapply_views:
+            return torch.ops.aten.as_strided.default(
+                a_unwrapped, s, new_strides, a_unwrapped.storage_offset()
+            )
+        return torch.ops.aten.as_strided_copy.default(
+            a_unwrapped, s, new_strides, a_unwrapped.storage_offset()
         )
+
+    with ctx.redispatch_to_next():
+        functional_broadcast = ctx.functionalize(_broadcast)
+        out = functional_broadcast(unwrapped_a)
     return ctx.wrap_tensors(out)
+
+
+def _broadcast_in_dim_functionalize_cpp(ctx, a, shape, broadcast_dimensions):
+    (unwrapped_a,) = ctx.unwrap_tensors((a,))
+    dims_set = set(broadcast_dimensions)
+    shape_list = list(shape)
+    new_strides = _compute_broadcast_in_dim_strides(unwrapped_a, shape_list, dims_set)
+    storage_offset = unwrapped_a.storage_offset()
+
+    reapply_views = torch._C._functionalization_reapply_views_tls()
+
+    with ctx.redispatch_to_next():
+        if reapply_views:
+            out = torch.ops.aten.as_strided.default(
+                unwrapped_a, shape_list, new_strides, storage_offset
+            )
+        else:
+            out = torch.ops.aten.as_strided_copy.default(
+                unwrapped_a, shape_list, new_strides, storage_offset
+            )
+    return ctx.wrap_tensors(out)
+
+
+def _compute_broadcast_in_dim_strides(tensor, shape, broadcast_dims_set):
+    result = []
+    tensor_sizes = tensor.shape
+    tensor_strides = tensor.stride()
+
+    original_idx = 0
+    for idx in range(len(shape)):
+        if idx in broadcast_dims_set:
+            size = tensor_sizes[original_idx]
+            target = shape[idx]
+            if size == 1 and target != 1:
+                result.append(0)
+            else:
+                result.append(tensor_strides[original_idx])
+            original_idx += 1
+        else:
+            target = shape[idx]
+            if target != 1:
+                result.append(0)
+            elif original_idx == len(tensor_sizes):
+                result.append(1)
+            else:
+                result.append(tensor_strides[original_idx] * tensor_sizes[original_idx])
+    return result
+
+
+@torch.library.impl(prim, "broadcast_in_dim", "Functionalize")
+def _broadcast_in_dim_cpp_functionalize(a, shape, broadcast_dimensions):
+    return _broadcast_in_dim_functionalize(
+        CppFunctionalizeAPI(), a, shape, broadcast_dimensions
+    )
 
 
 def _validate_collapse_args(a: Tensor, start: int, end: int) -> None:
