@@ -251,22 +251,6 @@ def create_rot_n(n: int) -> list[Instruction]:
         # e.g. rotate 3 is equivalent to swap 3, swap 2
         return [create_instruction("SWAP", arg=i) for i in range(n, 1, -1)]
 
-    # ROT_N does not exist in Python <= 3.9, but we can simulate it
-    if sys.version_info < (3, 10) and n >= 5:
-        """
-        0 1 2 3 4
-        [0 1 2 3 4]
-        4 3 2 1 0
-        4 [3 2 1 0]
-        4 0 1 2 3
-        """
-        return [
-            create_instruction("BUILD_TUPLE", arg=n),
-            create_instruction("UNPACK_SEQUENCE", arg=n),
-            create_instruction("BUILD_TUPLE", arg=n - 1),
-            create_instruction("UNPACK_SEQUENCE", arg=n - 1),
-        ]
-
     if n <= 4:
         return [create_instruction("ROT_" + ["TWO", "THREE", "FOUR"][n - 2])]
     return [create_instruction("ROT_N", arg=n)]
@@ -545,30 +529,6 @@ def create_print_value(value: Any) -> list[Instruction]:
     ]
 
 
-def lnotab_writer(
-    lineno: int, byteno: int = 0
-) -> tuple[list[int], Callable[[int, int], None]]:
-    """
-    Used to create typing.CodeType.co_lnotab
-    See https://github.com/python/cpython/blob/main/Objects/lnotab_notes.txt
-    This is the internal format of the line number table if Python < 3.10
-    """
-    assert sys.version_info < (3, 10)
-    lnotab: list[int] = []
-
-    def update(lineno_new: int, byteno_new: int) -> None:
-        nonlocal byteno, lineno
-        while byteno_new != byteno or lineno_new != lineno:
-            byte_offset = max(0, min(byteno_new - byteno, 255))
-            line_offset = max(-128, min(lineno_new - lineno, 127))
-            assert byte_offset != 0 or line_offset != 0
-            byteno += byte_offset
-            lineno += line_offset
-            lnotab.extend((byte_offset, line_offset & 0xFF))
-
-    return lnotab, update
-
-
 def linetable_310_writer(
     first_lineno: int,
 ) -> tuple[list[int], Callable[[int, int], None], Callable[[int], None]]:
@@ -577,7 +537,7 @@ def linetable_310_writer(
     See https://github.com/python/cpython/blob/main/Objects/lnotab_notes.txt
     This is the internal format of the line number table for Python 3.10
     """
-    assert sys.version_info >= (3, 10) and sys.version_info < (3, 11)
+    assert sys.version_info[:2] == (3, 10)
     linetable: list[int] = []
     lineno = first_lineno
     lineno_delta = 0
@@ -799,10 +759,7 @@ def assemble(instructions: list[Instruction], firstlineno: int) -> tuple[bytes, 
             for _ in range(instruction_size(inst) // 2 - 1):
                 code.extend((0, 0))
     else:
-        if sys.version_info < (3, 10):
-            lnotab, update_lineno = lnotab_writer(firstlineno)
-        else:
-            lnotab, update_lineno, end = linetable_310_writer(firstlineno)
+        lnotab, update_lineno, end = linetable_310_writer(firstlineno)
 
         for inst in instructions:
             if inst.starts_line is not None:
@@ -810,8 +767,7 @@ def assemble(instructions: list[Instruction], firstlineno: int) -> tuple[bytes, 
             arg = inst.arg or 0
             code.extend((inst.opcode, arg & 0xFF))
 
-        if sys.version_info >= (3, 10):
-            end(len(code))
+        end(len(code))
 
     return bytes(code), bytes(lnotab)
 
@@ -903,9 +859,7 @@ def devirtualize_jumps(instructions: list[Instruction]) -> None:
             assert inst.target is not None
             target = _get_instruction_front(instructions, indexof[inst.target])
             if inst.opcode in dis.hasjabs:
-                if sys.version_info < (3, 10):
-                    inst.arg = target.offset
-                elif sys.version_info < (3, 11):
+                if sys.version_info < (3, 11):
                     # `arg` is expected to be bytecode offset, whereas `offset` is byte offset.
                     # Divide since bytecode is 2 bytes large.
                     inst.arg = int(target.offset / 2)
@@ -917,9 +871,8 @@ def devirtualize_jumps(instructions: list[Instruction]) -> None:
                 inst.arg = abs(
                     int(target.offset - inst.offset - instruction_size(inst))
                 )
-                if sys.version_info >= (3, 10):
-                    # see bytecode size comment in the absolute jump case above
-                    inst.arg //= 2
+                # see bytecode size comment in the absolute jump case above
+                inst.arg //= 2
             inst.argval = target.offset
             inst.argrepr = f"to {target.offset}"
 
@@ -1558,10 +1511,7 @@ def get_code_keys() -> list[str]:
     if sys.version_info >= (3, 11):
         keys.append("co_qualname")
     keys.append("co_firstlineno")
-    if sys.version_info >= (3, 10):
-        keys.append("co_linetable")
-    else:
-        keys.append("co_lnotab")
+    keys.append("co_linetable")
     if sys.version_info >= (3, 11):
         # not documented, but introduced in https://github.com/python/cpython/issues/84403
         keys.append("co_exceptiontable")
@@ -1618,11 +1568,8 @@ def clean_and_assemble_instructions(
 
     remove_extra_line_nums(instructions)
     bytecode, lnotab = assemble(instructions, code_options["co_firstlineno"])
-    if sys.version_info < (3, 10):
-        code_options["co_lnotab"] = lnotab
-    else:
-        code_options["co_linetable"] = lnotab
 
+    code_options["co_linetable"] = lnotab
     code_options["co_code"] = bytecode
     code_options["co_stacksize"] = stacksize_analysis(instructions)
     assert set(keys) - {"co_posonlyargcount"} == set(code_options.keys()) - {

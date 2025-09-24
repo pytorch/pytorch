@@ -1,5 +1,6 @@
 # mypy: ignore-errors
 import logging
+import multiprocessing as mp
 import os
 import random
 import sys
@@ -177,63 +178,56 @@ def fuzz_and_execute(
         return seed, False, error_message
 
 
-def fuzz_and_test(seed: Optional[int] = None, max_depth: Optional[int] = None) -> None:
-    """
-    Test the new fuzz_and_execute function with seed and max_depth arguments.
-
-    Args:
-        seed: Starting seed for the test loop. If provided, each iteration uses seed + i
-        max_depth: Maximum depth for operation stack to use in all iterations
-    """
-    known_issues = {
-        "RuntimeError: self.stride(-1) must be 1 to view ComplexDouble as": "https://github.com/pytorch/pytorch/issues/162561",
-        "BooleanAtom not allowed in this context": "https://github.com/pytorch/pytorch/issues/160726",
-    }
-
-    def known_issue(error_message: str) -> bool:
-        return any(issue in error_message for issue in known_issues.keys())
-
-    print("=== Testing fuzz_and_execute with arguments ===")
-    if seed is not None:
-        print(f"Using starting seed: {seed}")
-    if max_depth is not None:
-        print(f"Using max_depth: {max_depth}")
-
-    for i in range(1000):
-        print(f"------------------ TEST iteration {i} ---------------")
-
-        # Use starting seed + iteration number for reproducible but varied results
-        iteration_seed = seed + i if seed is not None else None
-
-        iteration_seed, success, error_message = fuzz_and_execute(
-            seed=iteration_seed, max_depth=max_depth
-        )
-        if not success:
-            assert error_message is not None
-            if known_issue(error_message):
-                print("Known issue skipped")
-                continue
-
-            print(f"Test failed with error: {error_message}")
-            return
-
-
 if __name__ == "__main__":
     import argparse
+
+    try:
+        from multi_process_fuzzer import run_multi_process_fuzzer
+    except ImportError:
+        # If importing as a module fails, import from the same directory
+        import os
+        import sys
+
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        sys.path.insert(0, current_dir)
+        from multi_process_fuzzer import run_multi_process_fuzzer
 
     # Set up command-line argument parsing
     parser = argparse.ArgumentParser(
         description="PyTorch Fuzzer - Generate and test random PyTorch operations"
     )
-    parser.add_argument(
-        "--seed", type=int, help="Random seed for reproducible generation"
-    )
+
+    # Single seed execution arguments
+    parser.add_argument("--seed", type=int, help="Random seed for single execution")
     parser.add_argument(
         "--max-depth", type=int, help="Maximum depth for operation stack (1-20)"
     )
-    parser.add_argument("--test", action="store_true", help="Run the fuzzing test loop")
+
+    # Multi-process fuzzing arguments
     parser.add_argument(
-        "--single", action="store_true", help="Run a single fuzz_and_execute"
+        "--start", type=int, help="Starting seed value for multi-process fuzzing"
+    )
+    parser.add_argument(
+        "--count", type=int, help="Number of seeds to run in multi-process fuzzing"
+    )
+    parser.add_argument(
+        "--processes",
+        "-p",
+        type=int,
+        help="Number of worker processes to use (default: auto-detected)",
+    )
+    parser.add_argument(
+        "--verbose",
+        "-v",
+        action="store_true",
+        help="Print detailed output for all runs (not just failures)",
+    )
+
+    # Legacy arguments
+    parser.add_argument(
+        "--single",
+        action="store_true",
+        help="Run a single fuzz_and_execute (deprecated, use --seed)",
     )
     parser.add_argument(
         "--log-level",
@@ -250,8 +244,9 @@ if __name__ == "__main__":
     )
     logger = logging.getLogger(__name__)
 
-    if args.single:
-        # Run a single execution with optional seed and max_depth
+    # Determine execution mode
+    if args.seed is not None or args.single:
+        # Single seed execution mode
         print("Running single fuzz_and_execute...")
         seed, success, error_message = fuzz_and_execute(
             seed=args.seed, max_depth=args.max_depth
@@ -259,6 +254,49 @@ if __name__ == "__main__":
         print(f"Result: seed={seed}, success={success}")
         if not success:
             print(f"Error: {error_message}")
+            sys.exit(1)
+    elif args.start is not None or args.count is not None:
+        # Multi-process fuzzing mode
+        if args.start is None:
+            print("❌ Error: --start is required when --count is specified")
+            sys.exit(1)
+        if args.count is None:
+            print("❌ Error: --count is required when --start is specified")
+            sys.exit(1)
+
+        # Validate arguments
+        if args.count < 1:
+            print("❌ Error: --count must be at least 1")
+            sys.exit(1)
+
+        # Default number of processes
+        if args.processes is None:
+            cpu_count = mp.cpu_count()
+            args.processes = max(1, min(16, int(cpu_count * 0.75)))
+
+        if args.processes < 1:
+            print("❌ Error: Number of processes must be at least 1")
+            sys.exit(1)
+
+        try:
+            run_multi_process_fuzzer(
+                num_processes=args.processes,
+                seed_start=args.start,
+                seed_count=args.count,
+                verbose=args.verbose,
+            )
+        except Exception as e:
+            print(f"❌ Unexpected error: {str(e)}")
+            import traceback
+
+            traceback.print_exc()
+            sys.exit(1)
     else:
-        # Default behavior - run the test loop (--test is now the default)
-        fuzz_and_test(seed=args.seed, max_depth=args.max_depth)
+        # Show help when no arguments are provided
+        parser.print_help()
+        print("\nExamples:")
+        print("  python fuzzer.py --seed 42                    # Run single seed")
+        print(
+            "  python fuzzer.py --start 0 --count 1000       # Run multi-process fuzzing"
+        )
+        print("  python fuzzer.py --start 100 --count 50 -p 8  # Use 8 processes")
