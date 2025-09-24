@@ -1044,10 +1044,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 
         inputs = [
             torch.tensor([pred], device=self.device),
-        ] + [
-            torch.randn(10, 20, device=self.device) + pred_offset
-            for _ in range(3)
-        ]
+        ] + [torch.randn(10, 20, device=self.device) + pred_offset for _ in range(3)]
         dim0_a = Dim("s0", min=4, max=1024)
         dim0_b = Dim("s1", min=4, max=1024)
         dynamic_shapes = {

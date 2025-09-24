@@ -1020,28 +1020,6 @@ class PythonWrapperCodegen(CodeGen):
         self.imports = IndentedBuffer()
         self.header = IndentedBuffer()
         self.prefix = IndentedBuffer()
-
-
-BufferName = str
-Line = Union[MemoryPlanningLine, LineContext]
-
-
-class PythonWrapperCodegen(CodeGen):
-    """
-    Generate outer wrapper in Python that calls the kernels.
-    """
-
-    supports_caching = True  # Whether the output code is cacheable.
-
-    def __init__(self):
-        super().__init__()
-        self._names_iter: Iterator[int] = count()
-        self.args_to_buffers: dict[
-            str, Union[None, ir.TensorBox, ir.Buffer, ir.TorchBindObject]
-        ] = {}
-        self.imports = IndentedBuffer()
-        self.header = IndentedBuffer()
-        self.prefix = IndentedBuffer()
         self.suffix = IndentedBuffer()
         self.kernel_declarations = IndentedBuffer()
         self.wrapper_call = IndentedBuffer()
