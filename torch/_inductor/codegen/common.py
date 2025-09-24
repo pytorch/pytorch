@@ -45,6 +45,7 @@ from .. import config, metrics
 from ..dtype_propagation import DtypePropagationOpsHandler
 from ..ops_handler import BasicMathOpsMixin, DefaultHandler
 from ..shape_propagation import ShapePropagationOpsHandler
+from ..template_heuristics.registry import register_template
 from ..utils import (
     boolean_ops,
     DeferredLineBase,
@@ -2411,6 +2412,8 @@ class KernelTemplate:
     def __init__(self, name: str, hash: Optional[str] = None) -> None:
         self.name = name
         self._hash = hash
+        # Register this template instance in the global registry
+        register_template(self)
 
     @property
     def uid(self) -> str:
