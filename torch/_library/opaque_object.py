@@ -2,6 +2,21 @@ from typing import Any, NewType
 
 import torch
 
+from .fake_class_registry import FakeScriptObject, register_fake_class
+
+
+@register_fake_class("aten::OpaqueObject")
+class FakeOpaqueObject:
+    def __init__(self) -> None:
+        pass
+
+    @classmethod
+    def __obj_unflatten__(cls, flattened_ctx: dict[str, Any]) -> None:
+        raise RuntimeError(
+            "FakeOpaqueObject should not be created through __obj_unflatten__ "
+            "and should be special handled. Please file an issue to Github."
+        )
+
 
 OpaqueTypeStr = "__torch__.torch.classes.aten.OpaqueObject"
 
@@ -81,6 +96,12 @@ def get_payload(opaque_object: torch._C.ScriptObject) -> Any:
         payload (Any): The Python object stored in the opaque object. This can
         be set with `set_payload()`.
     """
+    if isinstance(opaque_object, FakeScriptObject):
+        raise ValueError(
+            "OpaqueObjects are opaque, so therefore the contents should not be "
+            "visible to torch.compile, and the fake kernel should not depend "
+            "on the contents of the OpaqueObject at all."
+        )
     if not (
         isinstance(opaque_object, torch._C.ScriptObject)
         and opaque_object._type().qualified_name() == OpaqueTypeStr
@@ -104,6 +125,13 @@ def set_payload(opaque_object: torch._C.ScriptObject, payload: Any) -> None:
         torch._C.ScriptObject: The opaque object that stores the given Python object.
         payload (Any): The Python object to store in the opaque object.
     """
+    if isinstance(opaque_object, FakeScriptObject):
+        raise ValueError(
+            "OpaqueObjects are opaque, so therefore the contents should not be "
+            "visible to torch.compile, and the fake kernel should not depend "
+            "on the contents of the OpaqueObject at all."
+        )
+
     if not (
         isinstance(opaque_object, torch._C.ScriptObject)
         and opaque_object._type().qualified_name() == OpaqueTypeStr

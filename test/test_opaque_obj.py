@@ -4,6 +4,11 @@ import copy
 import torch
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._library.opaque_object import get_payload, make_opaque, set_payload
+from torch.fx.experimental.proxy_tensor import make_fx
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+)
 
 
 class OpaqueQueue:
@@ -12,15 +17,23 @@ class OpaqueQueue:
         self.queue = queue
         self.init_tensor_ = init_tensor_
 
+        # For testing purposes
+        self._push_counter = 0
+        self._pop_counter = 0
+        self._size_counter = 0
+
     def push(self, tensor: torch.Tensor) -> None:
+        self._push_counter += 1
         self.queue.append(tensor)
 
     def pop(self) -> torch.Tensor:
+        self._pop_counter += 1
         if len(self.queue) > 0:
             return self.queue.pop(0)
         return self.init_tensor_
 
     def size(self) -> int:
+        self._size_counter += 1
         return len(self.queue)
 
     def __eq__(self, other):
@@ -51,6 +64,10 @@ class TestOpaqueObject(TestCase):
             assert isinstance(queue, OpaqueQueue)
             queue.push(b)
 
+        @torch.library.register_fake("_TestOpaqueObject::queue_push", lib=self.lib)
+        def push_impl_fake(q: torch._C.ScriptObject, b: torch.Tensor) -> None:
+            pass
+
         self.lib.define(
             "queue_pop(__torch__.torch.classes.aten.OpaqueObject a) -> Tensor",
         )
@@ -62,6 +79,14 @@ class TestOpaqueObject(TestCase):
 
         self.lib.impl("queue_pop", pop_impl, "CompositeExplicitAutograd")
 
+        def pop_impl_fake(q: torch._C.ScriptObject) -> torch.Tensor:
+            # This is not accurate
+            ctx = torch._custom_op.impl.get_ctx()
+            u0 = ctx.create_unbacked_symint()
+            return torch.empty(u0)
+
+        self.lib._register_fake("queue_pop", pop_impl_fake)
+
         @torch.library.custom_op(
             "_TestOpaqueObject::queue_size",
             mutates_args=[],
@@ -70,6 +95,13 @@ class TestOpaqueObject(TestCase):
             queue = get_payload(q)
             assert isinstance(queue, OpaqueQueue)
             return queue.size()
+
+        @size_impl.register_fake
+        def size_impl_fake(q: torch._C.ScriptObject) -> int:
+            ctx = torch._custom_op.impl.get_ctx()
+            u0 = ctx.create_unbacked_symint()
+            torch._check_is_size(u0)
+            return u0
 
         super().setUp()
 
@@ -125,6 +157,56 @@ class TestOpaqueObject(TestCase):
         self.assertTrue(q1 is not q2)
         self.assertTrue(q1 == q2)
 
+    @parametrize("make_fx_tracing_mode", ["fake", "symbolic"])
+    def test_make_fx(self, make_fx_tracing_mode):
+        class M(torch.nn.Module):
+            def forward(self, queue, x):
+                torch.ops._TestOpaqueObject.queue_push(queue, x.tan())
+                torch.ops._TestOpaqueObject.queue_push(queue, x.cos())
+                torch.ops._TestOpaqueObject.queue_push(queue, x.sin())
+                pop1 = torch.ops._TestOpaqueObject.queue_pop(queue)
+                size1 = torch.ops._TestOpaqueObject.queue_size(queue)
+                pop2 = torch.ops._TestOpaqueObject.queue_pop(queue)
+                size2 = torch.ops._TestOpaqueObject.queue_size(queue)
+                x_cos = pop1 + size1
+                x_sin = pop2 - size2
+                return x_sin + x_cos
+
+        q1 = OpaqueQueue([], torch.empty(0).fill_(-1))
+        obj1 = make_opaque(q1)
+        q2 = OpaqueQueue([], torch.empty(0).fill_(-1))
+        obj2 = make_opaque(q2)
+
+        x = torch.ones(2, 3)
+        gm = make_fx(M(), tracing_mode=make_fx_tracing_mode)(obj1, x)
+        self.assertTrue(torch.allclose(gm(obj1, x), M()(obj2, x)))
+        self.assertEqual(q1._push_counter, 3)
+        self.assertEqual(q1._pop_counter, 2)
+        self.assertEqual(q1._size_counter, 2)
+        self.assertEqual(q1.size(), 1)
+        self.assertExpectedInline(
+            gm.code.strip("\n"),
+            """\
+def forward(self, arg0_1, arg1_1):
+    tan = torch.ops.aten.tan.default(arg1_1)
+    queue_push = torch.ops._TestOpaqueObject.queue_push.default(arg0_1, tan);  tan = queue_push = None
+    cos = torch.ops.aten.cos.default(arg1_1)
+    queue_push_1 = torch.ops._TestOpaqueObject.queue_push.default(arg0_1, cos);  cos = queue_push_1 = None
+    sin = torch.ops.aten.sin.default(arg1_1);  arg1_1 = None
+    queue_push_2 = torch.ops._TestOpaqueObject.queue_push.default(arg0_1, sin);  sin = queue_push_2 = None
+    queue_pop = torch.ops._TestOpaqueObject.queue_pop.default(arg0_1)
+    queue_size = torch.ops._TestOpaqueObject.queue_size.default(arg0_1)
+    queue_pop_1 = torch.ops._TestOpaqueObject.queue_pop.default(arg0_1)
+    queue_size_1 = torch.ops._TestOpaqueObject.queue_size.default(arg0_1);  arg0_1 = None
+    add = torch.ops.aten.add.Tensor(queue_pop, queue_size);  queue_pop = queue_size = None
+    sub = torch.ops.aten.sub.Tensor(queue_pop_1, queue_size_1);  queue_pop_1 = queue_size_1 = None
+    add_1 = torch.ops.aten.add.Tensor(sub, add);  sub = add = None
+    return add_1
+    """,
+        )
+
+
+instantiate_parametrized_tests(TestOpaqueObject)
 
 if __name__ == "__main__":
     run_tests()
