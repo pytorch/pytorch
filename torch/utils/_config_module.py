@@ -37,7 +37,7 @@ T = TypeVar("T", bound=Union[int, float, bool, None, str, list, set, tuple, dict
 _UNSET_SENTINEL = object()
 
 
-@dataclass
+@dataclass(kw_only=True)
 class _Config(Generic[T]):
     """Represents a config with richer behaviour than just a default value.
     ::
@@ -81,32 +81,23 @@ class _Config(Generic[T]):
     justknob: Optional[str] = None
     env_name_default: Optional[list[str]] = None
     env_name_force: Optional[list[str]] = None
+    value_type: Optional[type] = None
     alias: Optional[str] = None
 
-    def __init__(
-        self,
-        default: Union[T, object] = _UNSET_SENTINEL,
-        justknob: Optional[str] = None,
-        env_name_default: Optional[Union[str, list[str]]] = None,
-        env_name_force: Optional[Union[str, list[str]]] = None,
-        value_type: Optional[type] = None,
-        alias: Optional[str] = None,
-    ):
-        # python 3.9 does not support kw_only on the dataclass :(.
-        self.default = default
-        self.justknob = justknob
+    def __post_init__(self) -> None:
         self.env_name_default = _Config.string_or_list_of_string_to_list(
-            env_name_default
+            self.env_name_default
         )
-        self.env_name_force = _Config.string_or_list_of_string_to_list(env_name_force)
-        self.value_type = value_type
-        self.alias = alias
+        self.env_name_force = _Config.string_or_list_of_string_to_list(
+            self.env_name_force
+        )
+
         if self.alias is not None:
             assert (
-                default is _UNSET_SENTINEL
-                and justknob is None
-                and env_name_default is None
-                and env_name_force is None
+                self.default is _UNSET_SENTINEL
+                and self.justknob is None
+                and self.env_name_default is None
+                and self.env_name_force is None
             ), "if alias is set, none of {default, justknob and env var} can be set"
 
     @staticmethod
@@ -147,7 +138,12 @@ else:
         alias: Optional[str] = None,
     ) -> _Config[T]:
         return _Config(
-            default, justknob, env_name_default, env_name_force, value_type, alias
+            default=default,
+            justknob=justknob,
+            env_name_default=env_name_default,
+            env_name_force=env_name_force,
+            value_type=value_type,
+            alias=alias,
         )
 
 
