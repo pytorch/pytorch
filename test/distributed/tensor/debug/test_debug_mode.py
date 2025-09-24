@@ -41,7 +41,7 @@ class TestDTensorDebugMode(TestCase):
         x_dtensor = DTensor.from_local(x, mesh, [Shard(0)], run_check=False)
         y_dtensor = DTensor.from_local(y, mesh, [Shard(0)], run_check=False)
 
-        with DebugMode() as debug_mode:
+        with DebugMode(record_torchfunction=True) as debug_mode:
             torch.mm(x_dtensor, y_dtensor).sum()
 
         self.assertExpectedInline(
@@ -80,7 +80,7 @@ class TestDTensorDebugMode(TestCase):
         x_dtensor = DTensor.from_local(x, mesh, [Shard(0)], run_check=False)
         y_dtensor = DTensor.from_local(y, mesh, [Shard(1)], run_check=False)
 
-        with DebugMode() as debug_mode:
+        with DebugMode(record_torchfunction=True) as debug_mode:
             z = x_dtensor + y_dtensor
             z.sum().backward()
 
@@ -121,7 +121,7 @@ class TestDTensorDebugMode(TestCase):
         b_dt = DTensor.from_local(b, mesh, [Replicate(), Partial()], run_check=False)
 
         # Capture the operator decomposition
-        with DebugMode() as debug_mode:
+        with DebugMode(record_torchfunction=True) as debug_mode:
             torch.einsum("bld,dnh->blnh", a_dt, b_dt)
 
         self.assertExpectedInline(
@@ -176,7 +176,7 @@ class TestDTensorDebugMode(TestCase):
         x = torch.randn(8, 8, 8)
         linear = torch.nn.Linear(8, 8)
 
-        with DebugMode() as debug_mode:
+        with DebugMode(record_torchfunction=True) as debug_mode:
             linear(x).sum()
 
         self.assertExpectedInline(
@@ -196,7 +196,7 @@ class TestDTensorDebugMode(TestCase):
             x = torch.randn(8, 8)
             y = torch.randn(8, 8, 8)
 
-        with DebugMode(record_faketensor=True) as debug_mode:
+        with DebugMode(record_torchfunction=True, record_faketensor=True) as debug_mode:
             torch.matmul(y, x)
 
         self.assertExpectedInline(
