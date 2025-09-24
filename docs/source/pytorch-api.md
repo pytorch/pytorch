@@ -1,9 +1,16 @@
 (pytorch_api)=
-# Python API
+# Reference API
+
+```{toctree}
+:maxdepth: 1
+
+C++ <https://docs.pytorch.org/cppdocs/>
+```
 
 ```{toctree}
 :glob:
 :maxdepth: 1
+:caption: Python API
 
 torch
 nn

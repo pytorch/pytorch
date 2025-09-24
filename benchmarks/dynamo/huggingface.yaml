@@ -31,8 +31,6 @@ batch_size:
     BlenderbotSmallForCausalLM: 4
     BlenderbotSmallForConditionalGeneration: 2
     CamemBert: 2
-    DebertaForMaskedLM: 4
-    DebertaForQuestionAnswering: 2
     DebertaV2ForMaskedLM: 4
     DebertaV2ForQuestionAnswering: 8
     DistilBertForMaskedLM: 2
@@ -63,7 +61,6 @@ batch_size:
     PegasusForConditionalGeneration: 2
     RobertaForCausalLM: 2
     RobertaForQuestionAnswering: 2
-    Speech2Text2ForCausalLM: 4
     T5ForConditionalGeneration: 2
     T5Small: 2
     TrOCRForCausalLM: 2

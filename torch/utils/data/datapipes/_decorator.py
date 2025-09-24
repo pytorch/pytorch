@@ -109,8 +109,7 @@ class non_deterministic:
 
         # Decorate with a functional argument
         if not (
-            isinstance(args[0], type)
-            and issubclass(args[0], IterDataPipe)  # type: ignore[arg-type]
+            isinstance(args[0], type) and issubclass(args[0], IterDataPipe)  # type: ignore[arg-type]
         ):
             raise TypeError(
                 f"Only `IterDataPipe` can be decorated, but {args[0].__name__} is found"

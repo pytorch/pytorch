@@ -341,6 +341,7 @@ void initPythonBindings(PyObject* module) {
               bool /* disable_external_correlation*/,
               bool /* profile_all_threads */,
               bool /* capture_overload_names */,
+              bool /* record_python_gc_info */,
               std::string /* custom_profiler_config*/
               >(),
           "An experimental config for Kineto features. Please note that"
@@ -360,6 +361,7 @@ void initPythonBindings(PyObject* module) {
           "    disable_external_correlation (bool) : whether to disable external correlation\n"
           "    profile_all_threads (bool) : whether to profile all threads\n"
           "    capture_overload_names (bool) : whether to include ATen overload names in the profile\n"
+          "    record_python_gc_info (bool) : adds python gc events to profile\n"
           "    custom_profiler_config (string) : Used to pass some configurations to the custom profiler backend.\n",
           py::arg("profiler_metrics") = std::vector<std::string>(),
           py::arg("profiler_measure_per_kernel") = false,
@@ -370,6 +372,7 @@ void initPythonBindings(PyObject* module) {
           py::arg("disable_external_correlation") = false,
           py::arg("profile_all_threads") = false,
           py::arg("capture_overload_names") = false,
+          py::arg("record_python_gc_info") = false,
           py::arg("custom_profiler_config") = "")
       .def(py::pickle(
           [](const ExperimentalConfig& p) { // __getstate__
@@ -393,6 +396,7 @@ void initPythonBindings(PyObject* module) {
                 p.disable_external_correlation,
                 p.profile_all_threads,
                 p.capture_overload_names,
+                p.record_python_gc_info,
                 p.custom_profiler_config,
                 p.performance_events);
           },

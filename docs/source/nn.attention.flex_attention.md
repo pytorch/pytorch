@@ -14,6 +14,12 @@
 ```{eval-rst}
 .. autofunction:: flex_attention
 ```
+```{eval-rst}
+.. autoclass:: AuxOutput
+```
+```{eval-rst}
+.. autoclass:: AuxRequest
+```
 
 ## BlockMask Utilities
 

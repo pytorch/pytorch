@@ -4,6 +4,7 @@
 # mypy: disable-error-code=attr-defined
 from __future__ import annotations
 
+import io
 import logging
 import warnings
 from collections.abc import Mapping, Sequence
@@ -11,8 +12,9 @@ from typing import Any, Callable, TYPE_CHECKING
 
 import torch
 from torch.onnx import _constants as onnx_constants
-from torch.onnx._internal._lazy_import import onnxscript_apis, onnxscript_ir as ir
+from torch.onnx._internal._lazy_import import onnx, onnxscript_apis, onnxscript_ir as ir
 from torch.onnx._internal.exporter import (
+    _constants,
     _core,
     _dynamic_shapes,
     _onnx_program,
@@ -60,12 +62,12 @@ def export_compat(
     keep_initializers_as_inputs: bool = False,
     external_data: bool = True,
     report: bool = False,
-    optimize: bool = False,
+    optimize: bool = True,
     verify: bool = False,
     profile: bool = False,
     dump_exported_program: bool = False,
     artifacts_dir: str | os.PathLike = ".",
-    fallback: bool = False,
+    fallback: bool = True,
     # Legacy export parameters for fallback
     legacy_export_kwargs: dict[str, Any] | None = None,
 ) -> _onnx_program.ONNXProgram:
@@ -107,7 +109,27 @@ def export_compat(
     dynamic_shapes_with_export_dim, need_axis_mapping = (
         _dynamic_shapes.convert_str_to_export_dim(dynamic_shapes)
     )
-    registry = _registration.ONNXRegistry().from_torchlib(opset_version=opset_version)
+
+    if opset_version < _constants.TORCHLIB_OPSET:
+        logger.warning(
+            "Setting ONNX exporter to use operator set version %s because "
+            "the requested opset_version %s is a lower version than we have implementations for. "
+            "Automatic version conversion will be performed, which may not be successful "
+            "at converting to the requested version. If version conversion is unsuccessful, "
+            "the opset version of the exported model will be kept at %s. "
+            "Please consider setting opset_version >=%s to leverage latest ONNX features",
+            _constants.TORCHLIB_OPSET,
+            opset_version,
+            _constants.TORCHLIB_OPSET,
+            _constants.TORCHLIB_OPSET,
+        )
+        registry_opset_version = _constants.TORCHLIB_OPSET
+    else:
+        registry_opset_version = opset_version
+
+    registry = _registration.ONNXRegistry().from_torchlib(
+        opset_version=registry_opset_version
+    )
     if custom_translation_table is not None:
         for torch_op, onnx_ops in custom_translation_table.items():
             # TODO(justinchuby): Support complex inputs with annotations
@@ -190,11 +212,23 @@ def export_compat(
         onnx_program.optimize()
 
     if f is not None:
-        onnx_program.save(
-            f,
-            include_initializers=export_params,
-            keep_initializers_as_inputs=keep_initializers_as_inputs,
-            external_data=external_data,
-        )
+        if isinstance(f, io.BytesIO):
+            # For legacy export compatibility, we allow f to be a BytesIO object.
+            # This is not explicitly supported but we may need to maintain the
+            # behavior indefinitely.
+            warnings.warn(
+                "Saving ONNX model to a BytesIO object is deprecated. "
+                "Please use a file path instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            onnx.save(onnx_program.model_proto, f)
+        else:
+            onnx_program.save(
+                f,
+                include_initializers=export_params,
+                keep_initializers_as_inputs=keep_initializers_as_inputs,
+                external_data=external_data,
+            )
 
     return onnx_program

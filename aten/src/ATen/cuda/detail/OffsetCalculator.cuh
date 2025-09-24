@@ -49,12 +49,12 @@ struct OffsetCalculator {
 #if defined(USE_ROCM)
     if ((dims > 0) && (dims <= 2)) {
       auto divmod = sizes_[0].divmod(linear_idx);
-      #pragma unroll
+#pragma unroll
       for (int arg = 0; arg < NARGS; arg++)
         offsets[arg] = divmod.mod * strides_[0][arg];
       if (dims >= 2) {
         divmod = sizes_[1].divmod(divmod.div);
-        #pragma unroll
+#pragma unroll
         for (int arg = 0; arg < NARGS; arg++)
           offsets[arg] += divmod.mod * strides_[1][arg];
       }

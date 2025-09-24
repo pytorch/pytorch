@@ -116,7 +116,7 @@ inline py::object PyObject_FastGetAttrString(PyObject* obj, const char* name) {
   }
   /* Attribute referenced by (PyObject *)name */
   else if (tp->tp_getattro != nullptr) {
-    auto w = py::reinterpret_steal<py::object>(THPUtils_internString(name));
+    auto w = py::reinterpret_steal<py::object>(PyUnicode_FromString(name));
     if (w.ptr() == nullptr) {
       return py::object();
     }

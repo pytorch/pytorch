@@ -528,16 +528,16 @@ std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
   // use. Note: if the hostname does not resolve to an address (e.g.
   // because of misconfigured /etc/hosts file), this will not work.
   const auto hostNameMax = sysconf(_SC_HOST_NAME_MAX);
-  auto hostname = std::unique_ptr<char[]>(new char[hostNameMax]);
-  auto rv = gethostname(hostname.get(), hostNameMax);
+  std::string hostname(hostNameMax, '\0');
+  auto rv = gethostname(hostname.data(), hostNameMax);
   if (rv != 0) {
     C10_THROW_ERROR(DistBackendError, c10::utils::str_error(errno));
   }
 
   // Use this machine's hostname if it resolves to an address.
-  if (doesHostnameResolveToUsableAddress(hostname.get())) {
+  if (doesHostnameResolveToUsableAddress(hostname.data())) {
     return ::c10d::GlooDeviceFactory::makeDeviceForHostname(
-        hostname.get(), lazyInit);
+        hostname.data(), lazyInit);
   }
 
   // Otherwise, use the loopback address.
@@ -797,7 +797,10 @@ class AsyncBroadcastWork : public ProcessGroupGloo::AsyncWork {
   const int rootTensor;
   const uint32_t tag;
 
-  void broadcast(at::Tensor& tensor) {
+  void broadcast(at::Tensor tensor) {
+    if (tensor.is_complex()) {
+      tensor = at::view_as_real(tensor);
+    }
     const auto& scalarType = tensor.scalar_type();
     gloo::BroadcastOptions opts(context_);
     opts.setRoot(rootRank);
@@ -1128,13 +1131,22 @@ class AsyncReduceWork : public ProcessGroupGloo::AsyncWork {
   const uint32_t tag;
 
   void reduce(std::vector<at::Tensor>& tensors) {
-    const auto& scalarType = tensors[0].scalar_type();
+    auto tensor = tensors[0];
+    if (tensor.is_complex()) {
+      TORCH_CHECK(
+          c10d::isComplexViewAsRealAllowed(reduceOp),
+          "reduce does not support",
+          reduceOp,
+          "on complex tensors");
+      tensor = at::view_as_real(tensor);
+    }
     gloo::ReduceOptions opts(context_);
+    const auto& scalarType = tensor.scalar_type();
     opts.setRoot(rootRank);
     opts.setTag(tag);
     opts.setReduceFunction(getFunction(scalarType, reduceOp));
     opts.setTimeout(timeout_);
-    GENERATE_ALL_TYPES(scalarType, setOutput, opts, tensors[0]);
+    GENERATE_ALL_TYPES(scalarType, setOutput, opts, tensor);
     gloo::reduce(opts);
 
     // Gloo doesn't support AVG so we use SUM + division.

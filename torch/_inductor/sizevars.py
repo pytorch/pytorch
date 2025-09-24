@@ -476,6 +476,13 @@ class SizeVarAllocator:
             fallback_value=fallback_value,
         )
 
+    def is_size_one_or_false(self, size: Expr) -> bool:
+        """Return True if size equals 1.
+
+        Unbacked symbolic sizes return False without introducing a guard.
+        """
+        return self.guard_or_false(sympy.Eq(size, 1))
+
     def evaluate_min(self, left: Expr, right: Expr) -> Expr:
         """return the smaller of left and right, and guard on that choice"""
         if isinstance(left, Expr):

@@ -208,3 +208,22 @@ inline c10::DeviceIndex THPUtils_unpackDeviceIndex(PyObject* obj) {
   }
   return (c10::DeviceIndex)value;
 }
+
+template <typename T>
+inline T THPUtils_unpackInteger(PyObject* obj) {
+  int overflow = -1;
+  const auto value = PyLong_AsLongLongAndOverflow(obj, &overflow);
+  if (value == -1 && PyErr_Occurred()) {
+    throw python_error();
+  }
+  if (!overflow) {
+    return static_cast<int64_t>(value);
+  }
+  // try unsigned
+  const auto uvalue = PyLong_AsUnsignedLongLong(obj);
+  if (uvalue == static_cast<std::decay_t<decltype(uvalue)>>(-1) &&
+      PyErr_Occurred()) {
+    throw python_error();
+  }
+  return static_cast<uint64_t>(uvalue);
+}

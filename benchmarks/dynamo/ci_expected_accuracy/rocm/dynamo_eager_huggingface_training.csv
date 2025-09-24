@@ -46,14 +46,6 @@ CamemBert,pass,5
 
 
 
-DebertaForMaskedLM,pass,5
-
-
-
-DebertaForQuestionAnswering,pass,5
-
-
-
 DebertaV2ForMaskedLM,pass_due_to_skip,0
 
 
@@ -70,7 +62,7 @@ DistilBertForQuestionAnswering,pass,5
 
 
 
-DistillGPT2,pass,5
+DistillGPT2,pass,7
 
 
 
@@ -130,7 +122,7 @@ MobileBertForQuestionAnswering,pass,3
 
 
 
-OPTForCausalLM,pass,6
+OPTForCausalLM,pass,8
 
 
 
@@ -155,10 +147,6 @@ RobertaForCausalLM,pass,5
 
 
 RobertaForQuestionAnswering,pass,5
-
-
-
-Speech2Text2ForCausalLM,pass,6
 
 
 
