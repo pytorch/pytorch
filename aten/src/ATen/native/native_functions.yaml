@@ -9470,6 +9470,14 @@
   dispatch:
     CompositeImplicitAutograd: cross_entropy_loss_symint
 
+- func: linear_cross_entropy(Tensor input, Tensor weight, Tensor target, Tensor? bias=None, int reduction=Mean, SymInt ignore_index=-100, float label_smoothing=0.0, str chunking_strategy="auto") -> Tensor
+  dispatch:
+    CPU: linear_cross_entropy_cpu
+
+- func: linear_cross_entropy_backward(Tensor grad_output, Tensor input, Tensor weight, Tensor target, Tensor? bias=None, int reduction=Mean, SymInt ignore_index=-100, float label_smoothing=0.0, str chunking_strategy="auto") -> (Tensor, Tensor, Tensor?)
+  dispatch:
+    CPU: linear_cross_entropy_backward_cpu
+
 - func: triangular_solve.X(Tensor self, Tensor A, bool upper=True, bool transpose=False, bool unitriangular=False, *, Tensor(a!) X, Tensor(b!) M) -> (Tensor(a!) solution, Tensor(b!) cloned_coefficient)
   structured: True
   dispatch:
