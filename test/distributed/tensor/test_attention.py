@@ -62,6 +62,26 @@ rotater_enum_to_str = {
 }  # mapping from _RotateMethod enum to string
 
 
+def save_tensor_to_file(tensor, filename):
+    with open(filename, "w") as f:
+        f.write(pretty_print_tensor(tensor))
+
+
+def pretty_print_tensor(tensor, indent=0) -> str:
+    """
+    Recursively prints an N-dimensional PyTorch tensor as nested lists,
+    with each sub-list on a new line and proper indentation.
+    """
+    space = " " * indent
+    if tensor.ndim == 1:
+        return space + str(tensor.tolist())
+    else:
+        head = space + "[\n"
+        body = ",\n".join([pretty_print_tensor(t, indent + 2) for t in tensor])
+        tail = space + "]\n"
+        return head + body + tail
+
+
 class RingAttentionTest(DTensorTestBase):
     @property
     def world_size(self) -> int:
@@ -505,10 +525,11 @@ class CPFlexAttentionTest(DTensorTestBase):
             _context_parallel_buffers,
         )
 
-        torch.set_printoptions(threshold=100000)
-
         if self.rank == 0:
-            print(f"full expect_out = {expect_out[0][0]}")
+            save_tensor_to_file(
+                expect_out[0][0],
+                "torch/distributed/tensor/examples/output/full_expect_out.txt",
+            )
 
         expect_out, expect_lse = _context_parallel_buffers(
             device_mesh,
@@ -519,11 +540,23 @@ class CPFlexAttentionTest(DTensorTestBase):
         # torch.distributed.breakpoint()
         # torch.distributed.barrier()
 
-        print(f"rank {self.rank}: cp_out = {cp_out[0][0]}")
-        print(f"rank {self.rank}: expect_out = {expect_out[0][0]}")
+        save_tensor_to_file(
+            cp_out[0][0][:128],
+            f"torch/distributed/tensor/examples/output/cp_out_{self.rank}_0.txt",
+        )
+        save_tensor_to_file(
+            cp_out[0][0][128:],
+            f"torch/distributed/tensor/examples/output/cp_out_{self.rank}_1.txt",
+        )
+        save_tensor_to_file(
+            expect_out[0][0],
+            f"torch/distributed/tensor/examples/output/expect_out_{self.rank}.txt",
+        )
 
-        torch.testing.assert_close(cp_out, expect_out, atol=atol, rtol=rtol)
-        torch.testing.assert_close(cp_lse, expect_aux.lse, atol=atol, rtol=rtol)
+        torch.testing.assert_close(cp_out[0][0], expect_out[0][0], atol=atol, rtol=rtol)
+        torch.testing.assert_close(
+            cp_aux.lse[0][0], expect_lse[0][0], atol=atol, rtol=rtol
+        )
 
         # unshard the output
         """
