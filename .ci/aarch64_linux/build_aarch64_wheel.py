@@ -241,7 +241,7 @@ def wait_for_connection(addr, port, timeout=15, attempt_cnt=5):
         try:
             with socket.create_connection((addr, port), timeout=timeout):
                 return
-        except (ConnectionRefusedError, socket.timeout):  # noqa: PERF203
+        except (ConnectionRefusedError, TimeoutError):  # noqa: PERF203
             if i == attempt_cnt - 1:
                 raise
             time.sleep(timeout)
