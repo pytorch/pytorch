@@ -1601,7 +1601,7 @@ test_operator_benchmark() {
   test_inductor_set_cpu_affinity
 
   cd benchmarks/operator_benchmark/pt_extension
-  python -m pip install . --force-reinstall --no-deps --no-build-isolation
+  python -m pip install .
 
   cd "${TEST_DIR}"/benchmarks/operator_benchmark
   $TASKSET python -m benchmark_all_test --device "$1" --tag-filter "$2" \
@@ -1626,7 +1626,7 @@ test_operator_microbenchmark() {
   python -m pip install .
 
   cd "${TEST_DIR}"/benchmarks/operator_benchmark
-  for OP_BENCHMARK_TESTS in matmul mm add bmm; do
+  for OP_BENCHMARK_TESTS in matmul mm addmm bmm; do
     $TASKSET python -m pt.${OP_BENCHMARK_TESTS}_test --tag-filter long \
       --output-json-for-dashboard "${TEST_REPORTS_DIR}/operator_microbenchmark_${OP_BENCHMARK_TESTS}_compile.json" \
       --benchmark-name "PyTorch operator microbenchmark" --use-compile
