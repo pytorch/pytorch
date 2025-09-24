@@ -1,6 +1,6 @@
 # mypy: ignore-errors
 import os
-from typing import Optional, Union
+from typing import Optional
 
 import torch
 
