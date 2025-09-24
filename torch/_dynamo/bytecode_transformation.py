@@ -537,7 +537,7 @@ def linetable_writer(
     See https://github.com/python/cpython/blob/main/Objects/lnotab_notes.txt
     This is the internal format of the line number table for Python 3.10
     """
-    assert sys.version_info >= (3, 10) and sys.version_info < (3, 11)
+    assert sys.version_info[:2] == (3, 10)
     linetable: list[int] = []
     lineno = first_lineno
     lineno_delta = 0
@@ -1567,8 +1567,8 @@ def clean_and_assemble_instructions(
 
     remove_extra_line_nums(instructions)
     bytecode, lnotab = assemble(instructions, code_options["co_firstlineno"])
-    code_options["co_linetable"] = lnotab
 
+    code_options["co_linetable"] = lnotab
     code_options["co_code"] = bytecode
     code_options["co_stacksize"] = stacksize_analysis(instructions)
     assert set(keys) - {"co_posonlyargcount"} == set(code_options.keys()) - {

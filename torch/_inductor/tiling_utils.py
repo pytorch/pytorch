@@ -1,5 +1,4 @@
 import dataclasses
-import functools
 import itertools
 from collections import Counter, defaultdict
 from typing import Callable, Literal, Optional, overload, TYPE_CHECKING, TypeVar, Union
@@ -371,9 +370,6 @@ class NodeSplitGetter:
         return pw, red
 
 
-zip_equal = functools.partial(zip, strict=True)
-
-
 def apply_var_mapping(
     iter_vars: list[sympy.Symbol],
     red_vars: list[sympy.Symbol],
@@ -411,7 +407,7 @@ def apply_var_mapping(
 
     iter_vars_to_flat_vars = {}
     for i, (group, var_group) in enumerate(
-        zip_equal(apply_groups, ((iter_vars, red_vars)))
+        zip(apply_groups, (iter_vars, red_vars), strict=True)
     ):
         # if the node has sizes (p0, 1) and the fused node is (p0, r0)
         # the reduction var gets filled in for split_iteration_range
@@ -424,7 +420,9 @@ def apply_var_mapping(
 
     count = 0
     flat_vars_to_new_vars = {}
-    for new_range, new_var in zip_equal(new_ranges, norm_pw_vars + norm_red_vars):
+    for new_range, new_var in zip(
+        new_ranges, norm_pw_vars + norm_red_vars, strict=True
+    ):
         range_vars = []
         for i in range(len(new_range)):
             range_vars.append(flat_vars[count])

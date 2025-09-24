@@ -8616,7 +8616,7 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
             get_metrics_context(),
             dynamo_timed(""),
         ):
-            capture_output = fullgraph_capture(foo, (x,), {})
+            capture_output = fullgraph_capture(foo, (x,))
             graph_capture_output = capture_output.graph_capture_output
             fn = graph_capture_output.build_guards(foo.__code__)
 
@@ -13377,6 +13377,14 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
         example_inputs = (torch.randn(1, 1, 1, 1),)
         # we expect to no longer raise here
         torch.compile(fn, fullgraph=True)(*example_inputs)
+
+    def test_dynamic_fill_diagonal_(self):
+        @torch.compile(dynamic=True)
+        def f(x):
+            x.fill_diagonal_(True)
+
+        x = torch.zeros(4, 4)
+        f(x)
 
     def test_dynamic_float_scalar_tensor_coersion(self):
         # Minified version of https://github.com/pytorch/pytorch/issues/158376#issuecomment-3079591367
