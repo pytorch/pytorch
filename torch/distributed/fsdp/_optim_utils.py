@@ -372,6 +372,12 @@ def _shard_orig_param_state(
     Shard the optimizer state for the original parameter with the name ``fqn``.
     This API should only be used when ``use_orig_params`` is True.
     """
+    # NEW: Skip optimizer state for frozen parameters
+    if hasattr(fsdp_param_info.handle, '_skip_optimizer_state') and \
+       fsdp_param_info.handle._skip_optimizer_state:
+        return {}
+    
+    # EXISTING CODE CONTINUES BELOW...
     if not optim_state:
         return {}
     fsdp_state = fsdp_param_info.state
