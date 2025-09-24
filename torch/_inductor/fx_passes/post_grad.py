@@ -365,12 +365,9 @@ def prepare_softmax_extra_check(match):
     """
     We only have triton online softmax kernels currently.
     """
-    return (
-        config.online_softmax
-        and (
-            (match.kwargs["x"].meta["val"].device.type == "cuda" and config.cuda_backend == "triton")
-            or (match.kwargs["x"].meta["val"].device.type == "xpu" and config.xpu_backend == "triton")
-        )
+    return config.online_softmax and (
+        match.kwargs["x"].meta["val"].device.type in ["cuda", "xpu"]
+        and "triton" in [config.cuda_backend, config.xpu_backend]
     )
 
 

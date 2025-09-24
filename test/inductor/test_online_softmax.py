@@ -14,7 +14,11 @@ from torch.testing._internal.common_utils import (
     IS_LINUX,
     parametrize,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CUDA_AND_TRITON, HAS_XPU_AND_TRITON
+from torch.testing._internal.inductor_utils import (
+    GPU_TYPE,
+    HAS_GPU,
+    HAS_TRITON
+)
 
 
 DO_PERF_TEST = os.environ.get("DO_PERF_TEST") == "1"
@@ -312,5 +316,5 @@ class TestOnlineSoftmax(TestCase):
 instantiate_parametrized_tests(TestOnlineSoftmax)
 
 if __name__ == "__main__":
-    if IS_LINUX and (HAS_CUDA_AND_TRITON or HAS_XPU_AND_TRITON):
+    if IS_LINUX and HAS_GPU and HAS_TRITON:
         run_tests()
