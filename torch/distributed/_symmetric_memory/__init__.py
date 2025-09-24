@@ -322,7 +322,7 @@ def _pipelined_produce_and_all2all(
     chunk_producer: Callable[[int, torch.Tensor], None],
     output: torch.Tensor,
     group_name: str,
-    out_chunk_dim=0,
+    out_chunk_dim: int = 0,
 ) -> None:
     """
     Perform the following logic with micro-pipelined computation and
@@ -1086,9 +1086,8 @@ def _fused_matmul_reduce_scatter_impl(
 
         leading_dims = list(A.shape[:-1])
 
-        stacked_partials = torch.empty_strided(
+        stacked_partials = torch.empty(
             (A_flat.shape[0], B.shape[1]),
-            (1, A_flat.shape[0]),
             dtype=out_dtype or A.dtype,
             device=A.device,
         )
@@ -1322,7 +1321,7 @@ def _fused_scaled_matmul_reduce_scatter_impl(
     def chunk_producer(rank: int, out: torch.Tensor) -> None:
         mm_out_op(A_shards[rank], B, scale_a=A_scale_shards[rank], **kwargs, out=out)
 
-    # Stacked partials will be the 2D outputs of the the pipelined scaled mm, and will
+    # Stacked partials will be the 2D outputs of the pipelined scaled mm, and will
     # have the shape (A_with_scatter_dim_0_tensor.shape[0], B.shape[1]) to align with the formula:
     # (a*b,c) @ (c,d) = (a*b,d)
     stacked_partials = A_with_scatter_dim_0.new_empty(
