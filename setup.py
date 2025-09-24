@@ -1435,9 +1435,13 @@ def configure_extension_build() -> tuple[
         ]
 
     main_compile_args: list[str] = []
+    if cmake_cache_vars["CMAKE_C_FLAGS"]:
+        main_compile_args.extend(cmake_cache_vars["CMAKE_C_FLAGS"].split())
     main_libraries: list[str] = ["torch_python"]
 
     main_link_args: list[str] = []
+    if cmake_cache_vars["CMAKE_EXE_LINKER_FLAGS"]:
+        main_link_args.extend(cmake_cache_vars["CMAKE_EXE_LINKER_FLAGS"].split())
     main_sources: list[str] = ["torch/csrc/stub.c"]
 
     if BUILD_LIBTORCH_WHL:
