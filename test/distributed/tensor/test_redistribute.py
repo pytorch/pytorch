@@ -26,7 +26,6 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
 )
-from torch.utils._debug_mode import DebugMode
 
 
 funcol = torch.ops.c10d_functional
@@ -608,16 +607,16 @@ class RedistributeTest(DTensorTestBase):
         srcs = [Shard(1), Replicate(), Partial()]
         dsts = [Shard(0), Shard(1), Replicate()]
 
+        comm_mode = CommDebugMode()
+
         for src, dst in itertools.product(srcs, dsts):
             tensor = torch.randn(16, 8, device=self.device_type)
             dt = DTensor.from_local(tensor, mesh, [Shard(0), src])
 
-            with DebugMode() as debug_mode:
+            with comm_mode:
                 out = dt.redistribute(mesh, [Shard(0), dst])
-            
-            print(debug_mode.debug_string())
 
-            self.assertTrue("redistribute_input" not in debug_mode.debug_string())
+            self.assertEqual(comm_mode.get_total_counts(), 0)
             self.assertEqual(out.placements, [Shard(0), dst])
 
 

@@ -188,11 +188,11 @@ def redistribute_local_tensor(
         transform_infos = _gen_transform_infos_non_cached(current_spec, target_spec)
     else:
         transform_infos = _gen_transform_infos(current_spec, target_spec)
-    
+
     debug_mode = get_active_debug_mode()
     redistribute_context = (
         debug_mode.record_redistribute_calls(  # type: ignore[union-attr]
-            local_tensor, current_spec, target_specExpand commentComment on line R195Code has comments. Press enter to view.
+            local_tensor, current_spec, target_spec
         )
         if debug_mode is not None
         else contextlib.nullcontext()
