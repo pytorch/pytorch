@@ -312,6 +312,11 @@ class FSDPParamGroup:
             self._wait_all_gather_streams_on_event(self._reshard_after_forward_event)
             self._reshard_after_forward_event = None
 
+        # if torch.distributed.get_rank() == 0:
+        #     logger.error(f"unshard {self}")
+        #     import fbvscode
+        #     fbvscode.set_trace()
+
         world_size = self._all_gather_process_group.size()
         if world_size == 1:
             # can't skip due to early return in wait_for_unshard if
@@ -417,6 +422,10 @@ class FSDPParamGroup:
             self.comm_ctx.all_gather_stream.wait_event(event)
 
     def reshard(self):
+        # if torch.distributed.get_rank() == 0:
+        #     logger.error(f"reshard {self}")
+        #     import fbvscode
+        #     fbvscode.set_trace()
         if self._training_state == TrainingState.FORWARD:
             if not self._reshard_after_forward:
                 return
@@ -444,8 +453,11 @@ class FSDPParamGroup:
         if not compiled_autograd_enabled():
             logger.debug("%s", self._with_fqn("FSDP::post_forward"))
         with record_function(self._with_fqn("FSDP::post_forward")):
-            self.reshard()
-            self._record_post_forward()
+            # for AC(fully_shard(model)), AC runs fsdp's _pre_forward
+            # it shouldn't change post_forward_order
+            if self not in self.comm_ctx.post_forward_order:
+                self.reshard()
+                self._record_post_forward()
             self._training_state = TrainingState.IDLE
             return output
 
@@ -453,10 +465,6 @@ class FSDPParamGroup:
         # Since a group has one pre-backward unshard for each forward call
         # before the backward, we record each usage (with multiplicity)
 
-        # for AC(fully_shard(model)), AC runs fsdp's _pre_forward
-        # it shouldn't change post_forward_order
-        if self in self.comm_ctx.post_forward_order:
-            return
         post_forward_index = len(self.comm_ctx.post_forward_order)
         self.comm_ctx.post_forward_order.append(self)
         self._post_forward_indices.append(post_forward_index)
