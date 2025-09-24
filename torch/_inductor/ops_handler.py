@@ -1151,4 +1151,6 @@ class SimpleCSEHandler(WrapperHandler):
         return val
 
     def device_assert_async(self, *args, **kwargs) -> None:
-        raise NotImplementedError("device_assert_async not implemented")
+        raise NotImplementedError(
+            f"{type(self).__name__}: device_assert_async should be handled by CSEProxy"
+        )

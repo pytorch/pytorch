@@ -2124,7 +2124,9 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
         raise NotImplementedError
 
     def device_assert_async(self, cond: CSEVariable, msg: str) -> None:
-        raise NotImplementedError
+        raise NotImplementedError(
+            f"{type(self).__name__}: device_assert_async should be handled by CSEProxy"
+        )
 
     def reduction(
         self,
