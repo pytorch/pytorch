@@ -107,6 +107,32 @@ class HeadTailLoadBalancer(LoadBalancer):
         self.world_size = world_size
         self.device = device
 
+    @classmethod
+    def _generate_indices(
+        cls, seq_length: int, world_size: int, device: Union[str, torch.device]
+    ) -> torch.Tensor:
+        assert seq_length % (world_size * 2) == 0
+        chunk_size = seq_length // (world_size * 2)
+        all_indices = []
+
+        for rank in range(world_size):
+            # Generate indices for first chunk of the cp rank
+            first_chunk_start = rank * chunk_size
+            first_chunk_indices = list(
+                range(first_chunk_start, first_chunk_start + chunk_size)
+            )
+
+            # Second chunk: positions from the complementary chunk
+            second_chunk_idx = world_size * 2 - rank - 1
+            second_chunk_start = second_chunk_idx * chunk_size
+            second_chunk_indices = list(
+                range(second_chunk_start, second_chunk_start + chunk_size)
+            )
+            # combine the indices for this rank
+            all_indices.extend(first_chunk_indices + second_chunk_indices)
+
+        return torch.tensor(all_indices, dtype=torch.int, device=device)
+
     def generate_indices(self, restore: bool = False) -> torch.Tensor:
         """
         Generate round-robin load balancing indices or restore indices.
