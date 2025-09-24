@@ -3274,6 +3274,39 @@ class TestUnbacked(TestCase):
         guards = "\n".join(log_stream.getvalue().strip().split("\n")[4:]).strip()
         self.assertFalse("SYMBOLIC_SHAPE_GUARD" in guards)
 
+    @skipIfTorchDynamo("mark_unbacked is not traceable")
+    def test_do_not_guard_unbacked_inputs3(self):
+        cnt = CompileCounterWithBackend("inductor")
+
+        @torch.compile(fullgraph=True, dynamic=True, backend=cnt)
+        def func(a):
+            # this should generate runtime assertio and no guard.
+            torch._check(a.size()[0] == a.size()[1])
+            # This should generate guard
+            torch._check(a.size()[1] < 10)
+            return a * 10
+
+           # no reocmpile if we pass 9, 8
+        # recompile if we pass 11
+        a = torch.rand(4,4)
+        torch._dynamo.decorators.mark_unbacked(a, 0)
+        torch._dynamo.mark_dynamic(a, 1)
+        func(a)
+
+        # no recompile
+        try :
+            func(torch.rand(4, 7))
+        except:
+            pass
+        # recompile
+        try :
+            func(torch.rand(100, 100))
+        except:
+            pass
+
+
+
+
 
 class TestUbackedOps(TestCase):
     @fresh_cache()
