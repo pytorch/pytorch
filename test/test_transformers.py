@@ -426,8 +426,7 @@ class TestTransformers(NNTestCase):
         # remove hook
         handle.remove()
 
-    @skipIfRocm
-    @tf32_on_and_off(0.001)
+    @tf32_on_and_off(0.0021 if TEST_WITH_ROCM else 0.001)
     @parametrize("use_torchscript", [False])
     @parametrize("enable_nested_tensor", [True, False])
     @parametrize("use_autocast", [True, False])
