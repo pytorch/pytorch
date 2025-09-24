@@ -1444,6 +1444,23 @@ graph():
             ep = export(m, (x, y))
         self.assertEqual(ep.module()(x, y), m(x, y))
 
+    def test_subclass_context(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        input = TwoTensor(torch.randn(4, 4), torch.rand(4, 4))
+        for val in [True, False]:
+            ep = torch.export.export(Foo(), (input,), strict=val)
+            self.assertExpectedInline(
+                str(ep.graph).strip(),
+                """\
+graph():
+    %x : [num_users=1] = placeholder[target=x]
+    %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, 1), kwargs = {})
+    return (add,)""",
+            )
+
     def test_basic_non_strict_real_tensor(self):
         class Basic(torch.nn.Module):
             def __init__(self) -> None:
