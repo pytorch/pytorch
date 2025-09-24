@@ -5675,7 +5675,6 @@ class CommonTemplate:
             (torch.randn([2, 4, 4, 8]),),
         )
 
-    @xfail_if_mps_unimplemented
     def test_embedding_bag(self):
         def fn(w, i, o):
             return aten._embedding_bag(w, i, o, False, 0, False, None)
@@ -14196,6 +14195,20 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         with self.assertRaises(RuntimeError):
             compiled = torch.compile(fn, backend="inductor")(a, b)
+
+    @requires_cuda_and_triton
+    @config.patch(emulate_precision_casts=True)
+    def test_emulate_precision_triton_fp_fusion(self):
+        def fn(a, b):
+            return 2.001 * a + b
+
+        a = torch.full([256], 0.5001, device=GPU_TYPE, dtype=torch.float16)
+        b = torch.full([256], -1, device=GPU_TYPE, dtype=torch.float16)
+
+        compiled = torch.compile(fn)
+        out, (code,) = run_and_get_code(compiled, a, b)
+        self.assertTrue("'enable_fp_fusion': False" in code)
+        torch.testing.assert_close(out, fn(a, b), atol=0, rtol=0)
 
     # end of class CommonTemplate - add new tests here
 

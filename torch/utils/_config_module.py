@@ -6,7 +6,6 @@ import inspect
 import io
 import os
 import pickle
-import sys
 import tokenize
 import unittest
 from dataclasses import dataclass
@@ -178,10 +177,7 @@ def install_config_module(module: ModuleType) -> None:
         prefix: str,
     ) -> None:
         """Walk the module structure and move everything to module._config"""
-        if sys.version_info[:2] < (3, 10):
-            type_hints = getattr(source, "__annotations__", {})
-        else:
-            type_hints = inspect.get_annotations(source)
+        type_hints = inspect.get_annotations(source)
         for key, value in list(source.__dict__.items()):
             if (
                 key.startswith("__")
