@@ -5525,7 +5525,7 @@ class ShapeEnv:
 
                 # We do not want to guard on unbacked symbols. All replacements and
                 # bounds should have originated from torch._checks, so runtime
-                # assertions should be there to covor those guards.
+                # assertions should be there to cover those guards.
                 if not has_free_unbacked_symbols(s):
                     input_guards.append((source, s))
             else:
@@ -5852,7 +5852,7 @@ class ShapeEnv:
         for symbol, sources in symbol_to_source.items():
             # We do not want to guard on unbacked symbols. All replacements and
             # bounds should have originated from torch._checks, so runtime
-            # assertions should be there to covor those guards.
+            # assertions should be there to cover those guards.
             if self.is_unbacked_symint(symbol):
                 continue
 
