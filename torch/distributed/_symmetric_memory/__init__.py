@@ -795,7 +795,7 @@ def _fused_all_gather_matmul_fallback(
     )
     A = torch.ops._c10d_functional.wait_tensor(A)
     if gather_dim == A.ndim - 1:
-        A_splits = A.split(group_size)
+        A_splits = A.chunk(group_size)
         A_mm = torch.cat(A_splits, dim=-1)
         res = [torch.matmul(A_mm, B) for B in Bs]
         if return_A:
