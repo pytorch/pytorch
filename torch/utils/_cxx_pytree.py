@@ -570,10 +570,7 @@ def tree_map_(
 
 Type2 = tuple[type[T], type[S]]
 Type3 = tuple[type[T], type[S], type[U]]
-if sys.version_info >= (3, 10):
-    TypeAny = Union[type[Any], tuple[type[Any], ...], types.UnionType]
-else:
-    TypeAny = Union[type[Any], tuple[type[Any], ...]]
+TypeAny = Union[type[Any], tuple[type[Any], ...], types.UnionType]
 
 Fn2 = Callable[[Union[T, S]], R]
 Fn3 = Callable[[Union[T, S, U]], R]

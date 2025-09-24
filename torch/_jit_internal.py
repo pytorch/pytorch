@@ -52,15 +52,8 @@ from torch.futures import Future
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
 
-IS_PY310_PLUS: Final[bool] = sys.version_info >= (3, 10)
-
 BuiltinUnionType: Union[type, tuple[type, ...]]
-if sys.version_info >= (3, 10):
-    # NOTE: IS_PY310_PLUS doesn't work with mypy.
-    # cf. https://mypy.readthedocs.io/en/stable/common_issues.html#python-version-and-system-platform-checks
-    BuiltinUnionType = types.UnionType
-else:
-    BuiltinUnionType = ()  # trick: this makes isinstance short circuit.
+BuiltinUnionType = types.UnionType
 
 LockType: type
 try:
@@ -1257,12 +1250,9 @@ def _get_named_tuple_properties(
         defaults = []
     # In 3.10 recommended way to get annotations is to call `inspect.get_annotations` function
     # Also, annotations from base class are not inherited so they need to be queried explicitly
-    if sys.version_info[:2] < (3, 10):
-        obj_annotations = getattr(obj, "__annotations__", {})
-    else:
-        obj_annotations = inspect.get_annotations(obj)
-        if len(obj_annotations) == 0 and hasattr(obj, "__base__"):
-            obj_annotations = inspect.get_annotations(obj.__base__)
+    obj_annotations = inspect.get_annotations(obj)
+    if len(obj_annotations) == 0 and hasattr(obj, "__base__"):
+        obj_annotations = inspect.get_annotations(obj.__base__)
 
     annotations = []
     for field in obj._fields:
