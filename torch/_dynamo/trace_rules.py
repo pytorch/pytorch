@@ -51,8 +51,8 @@ from .resume_execution import TORCH_DYNAMO_RESUME_IN_PREFIX
 from .utils import (
     getfile,
     hashable,
-    is_lru_cache_wrapped_function,
     is_annotate_wrapped_function,
+    is_lru_cache_wrapped_function,
     NP_SUPPORTED_MODULES,
     unwrap_if_wrapper,
 )

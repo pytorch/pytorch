@@ -1100,12 +1100,14 @@ def is_lru_cache_wrapped_function(
         inspect.getattr_static(value, "__wrapped__")
     )
 
+
 def is_annotate_wrapped_function(
     value: Any,
 ) -> bool:
     return value == torch.fx.traceback.annotate and is_function(
         inspect.getattr_static(value, "__wrapped__")
     )
+
 
 _FuncTypes: TypeAlias = Union[
     types.FunctionType,
