@@ -366,35 +366,19 @@ Tensor binary_cross_entropy_with_logits(const Tensor& input, const Tensor& targe
 
   // Threshold when ln(sigma(x)) or ln(1-sigma(x)) < -100 to be consistent with binary_cross_entropy
   // Note: ln(sigma(x)) ~= x if x < -100 and ln(1-sigma(x)) ~= -x for x > 100
-  float thresh_value = 100.0;
+  constexpr float thresh_value = 100.0;
 
-  auto large_mask = input > thresh_value;
-  auto small_mask = input < -thresh_value;
+  const auto small_mask = input < -thresh_value;
+  const auto large_mask = input > thresh_value;
 
-  bool has_large_values = at::any(large_mask).item<bool>();
-  bool has_small_values = at::any(small_mask).item<bool>();
-
-  if (has_large_values || has_small_values) {
-    // Handle large values
-    if (has_large_values) {
-      auto large_target = at::where(large_mask, target, at::zeros_like(target));
-      auto large_loss = thresh_value * (1 - large_target);
-      // Note: pos_weight does not effect loss if log(sigma(x)) ~= 0.
-      loss = at::where(large_mask, large_loss, loss);
-    }
-
-    // Handle small values
-    if (has_small_values) {
-      auto small_target = at::where(small_mask, target, at::zeros_like(target));
-      auto small_loss = thresh_value * small_target;
-      // Apply pos_weight to extreme values
-      if (pos_weight_opt.has_value() && pos_weight_opt->defined()) {
-        small_loss.mul_(*pos_weight_opt);
-      }
-      loss = at::where(small_mask, small_loss, loss);
-    }
+  if (pos_weight_opt.has_value() && pos_weight_opt->defined()) {
+    loss = at::where(small_mask, pos_weight_opt->mul(target).mul_(thresh_value), loss);
+  } else {
+    loss = at::where(small_mask, thresh_value*target, loss);
   }
-
+  // Note: pos_weight does not effect loss if log(sigma(x)) ~= 0.
+  loss = at::where(large_mask, (1-target).mul_(thresh_value), loss);
+  
   if (weight_opt.has_value() && weight_opt->defined()) {
       loss.mul_(*weight_opt);
   }
