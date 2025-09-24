@@ -72,7 +72,6 @@ jobs:
       docker-image: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc11-sm90-build.outputs.docker-image }}
       role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_ossci_linux_windows_read_write
       s3-bucket: "gha-artifacts"
-    secrets: inherit
     permissions:
       id-token: write
       contents: read
