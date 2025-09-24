@@ -1735,6 +1735,8 @@ def _compile_kernel(
     compute_capability: Optional[str] = None,
     cuda_include_dirs: Optional[list] = None,
     nvcc_options: Optional[list] = None,
+    rtc_path: Optional[str] = None,
+    auto_pch: bool = False,
 ):
     """
     Compiles a CUDA kernel using NVRTC and returns a callable function.
@@ -1751,6 +1753,9 @@ def _compile_kernel(
                                            If None, will detect from current device.
         cuda_include_dirs (list, optional): List of directories containing CUDA headers
         nvcc_options (list, optional): Additional options to pass to NVRTC
+        rtc_path (str, optional): Path to the RTC library (NVRTC/HIPRTC). If provided, this will skip the
+                                   automatic discovery logic and use the specified library directly.
+        auto_pch (bool, optional): Whether to automatically use precompiled headers. Default is False.
 
     Returns:
         callable: A Python function that can be called with PyTorch tensor arguments to execute the kernel
@@ -1780,6 +1785,8 @@ def _compile_kernel(
         compute_capability,
         cuda_include_dirs,
         nvcc_options,
+        rtc_path,
+        auto_pch,
     )
 
     # Load the module and get the kernel
