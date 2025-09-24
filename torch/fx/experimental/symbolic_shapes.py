@@ -4930,7 +4930,8 @@ class ShapeEnv:
         category=FutureWarning,
     )
     @record_shapeenv_event()
-    def create_symbol(self, *args, **kwargs) -> sympy.Expr:
+    def create_symbol(self, *args: Any, **kwargs: Any) -> sympy.Expr:
+        """Create a new symbol which is tracked by this ShapeEnv"""
         return self.create_non_data_dependent_symbol(*args, **kwargs)
 
     @record_shapeenv_event()
