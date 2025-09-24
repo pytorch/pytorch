@@ -29,7 +29,13 @@ if not c10d.is_available() or not c10d.is_nccl_available():
 
 
 import test_c10d_common
-from test_c10d_common import ConvNet, DoubleGpuNet, gpus_for_rank, ModuleForDdpCommHook
+from test_c10d_common import (
+    ConvNet,
+    DoubleGpuNet,
+    FFTModel,
+    gpus_for_rank,
+    ModuleForDdpCommHook,
+)
 
 import torch.distributed as dist
 import torch.distributed.algorithms.ddp_comm_hooks.default_hooks as default
@@ -77,7 +83,6 @@ if TEST_WITH_DEV_DBG_ASAN:
     )
     sys.exit(0)
 
-# bfloat16 is only supported by CUDA 11+
 BFLOAT16_AVAILABLE = torch.cuda.is_available() and (
     torch.version.cuda is not None or torch.version.hip is not None
 )
@@ -1074,6 +1079,62 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         if dist.get_rank(ng1) >= 0:
             dist.broadcast(tensor, dist.get_global_rank(ng1, 0), group=ng1)
             self.assertEqual(tensor, torch.full((1,), 0))
+
+        ng2 = c10d.split_group(pg, [subg_ranks])
+        self.assertEqual(ng2.group_desc, "default_pg:split:1")
+        self.assertEqual(backend.comm_split_count(), 2)
+
+        dist.destroy_process_group()
+
+    @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    def test_comm_split_group_mixed_backend(self):
+        # Test `ncclCommSplit` for smaller subgroups of the world when
+        # we've passed a specific device_id to init_process_group.
+        store = c10d.FileStore(self.file_name, self.world_size)
+        device = torch.device(f"cuda:{self.rank}")
+        # pg = self._create_process_group_nccl(store, self.opts(), device_id=device)
+        # create nccl processgroup with opts
+        c10d.init_process_group(
+            "cpu:gloo,cuda:nccl",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+            pg_options=self.opts(),
+            device_id=device,
+        )
+        pg = c10d.distributed_c10d._get_default_group()
+        backend = pg._get_backend(torch.device(device))
+
+        cuda_tensor = torch.full((1,), self.rank).cuda(device)
+        cpu_tensor = torch.full((1,), self.rank)
+        # Create subgroup between ranks 0, 1
+        subg_ranks = [0, 1]
+        ng1 = c10d.split_group(pg, [subg_ranks])
+        backend1 = ng1._get_backend(torch.device(device))
+
+        # check basic options are the same between parent and child
+        self.assertEqual(backend.options._timeout, backend1.options._timeout)
+        self.assertEqual(
+            backend.options.is_high_priority_stream,
+            backend1.options.is_high_priority_stream,
+        )
+        self.assertEqual(ng1.group_desc, "default_pg:split:0")
+
+        # comm split happens eagerly since device_id is passed to init_process_group.
+        self.assertEqual(backend.comm_split_count(), 1)
+        # dist.get_process_group_ranks returns the global ranks in the subgroup.
+        self.assertEqual(
+            dist.get_process_group_ranks(ng1),
+            subg_ranks if self.rank in subg_ranks else [],
+        )
+
+        # is part of ng1; otherwise, -1
+        if dist.get_rank(ng1) >= 0:
+            dist.broadcast(cuda_tensor, dist.get_global_rank(ng1, 0), group=ng1)
+            self.assertEqual(cuda_tensor, torch.full((1,), 0))
+            dist.broadcast(cpu_tensor, dist.get_global_rank(ng1, 0), group=ng1)
+            self.assertEqual(cpu_tensor, torch.full((1,), 0))
 
         ng2 = c10d.split_group(pg, [subg_ranks])
         self.assertEqual(ng2.group_desc, "default_pg:split:1")
@@ -2552,25 +2613,6 @@ class DistributedDataParallelTest(
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_ddp_complex_params(self):
-        class FFTModel(nn.Module):
-            def __init__(self, hin, win, n_features):
-                super().__init__()
-                self.hin = hin
-                self.win = win
-                self.weight = nn.Parameter(
-                    torch.ones(
-                        (n_features, n_features, hin, win // 2 + 1), dtype=torch.cfloat
-                    )
-                )
-
-            def forward(self, x):
-                xc = torch.fft.rfft2(
-                    x, s=(self.hin, self.win), dim=(-2, -1), norm="ortho"
-                )
-                xcw = torch.einsum("nchw,cohw->nohw", xc, self.weight)
-                x = torch.fft.irfft2(xcw, dim=(-2, -1), norm="ortho")
-                return x
-
         process_group = self._get_process_group()
         device_id = gpus_for_rank(self.world_size)[self.rank][0]
         N, C, H, W = 1, 16, 64, 64
@@ -3102,19 +3144,24 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
 class NcclUserBufferRegistrationTest(MultiProcessTestCase):
     def setUp(self):
         super().setUp()
-        # TORCH_NCCL_BLOCKING_WAIT overrides TORCH_NCCL_ASYNC_ERROR_HANDLING hence tests
-        # that use TORCH_NCCL_BLOCKING_WAIT will test it as expected.
-        os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "1"
         nccl_debug_file = tempfile.NamedTemporaryFile()
-        os.environ["NCCL_ALGO"] = "NVLS"
-        os.environ["NCCL_DEBUG"] = "INFO"
-        os.environ["NCCL_DEBUG_SUBSYS"] = "NVLS"
+        nccl_env = {
+            # TORCH_NCCL_BLOCKING_WAIT overrides TORCH_NCCL_ASYNC_ERROR_HANDLING hence tests
+            # that use TORCH_NCCL_BLOCKING_WAIT will test it as expected.
+            "TORCH_NCCL_ASYNC_ERROR_HANDLING": "1",
+            "NCCL_ALGO": "NVLS",
+            "NCCL_DEBUG": "INFO",
+            "NCCL_DEBUG_SUBSYS": "NVLS",
+            "NCCL_DEBUG_FILE": nccl_debug_file.name,
+        }
         if torch.cuda.nccl.version() >= (2, 24, 3):
-            os.environ["NCCL_DEBUG_SUBSYS"] = "REG,TUNING"
-        os.environ["NCCL_DEBUG_FILE"] = nccl_debug_file.name
+            nccl_env["NCCL_DEBUG_SUBSYS"] = "REG,TUNING"
+        self.env_patcher = mock.patch.dict(os.environ, nccl_env)
+        self.env_patcher.start()
         self._spawn_processes()
 
     def tearDown(self):
+        self.env_patcher.stop()
         super().tearDown()
         try:
             os.remove(self.file_name)

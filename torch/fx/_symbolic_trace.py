@@ -5,6 +5,7 @@ import contextlib
 import copy
 import functools
 import inspect
+import logging
 import math
 import os
 import warnings
@@ -26,6 +27,8 @@ from .node import Argument, base_types, map_aggregate
 from .proxy import ParameterProxy, Proxy, Scope, ScopeContextManager, TracerBase
 
 
+log = logging.getLogger(__name__)
+
 HAS_VARSTUFF = inspect.CO_VARARGS | inspect.CO_VARKEYWORDS
 
 # These need to run in global scope to handle nested calls correctly
@@ -43,8 +46,24 @@ _ConstantAttributeType: TypeAlias = Union[
 _constant_attribute_types = get_args(_ConstantAttributeType)
 
 
+# We only want to print this once to avoid flooding logs
+@functools.lru_cache
+def is_fx_tracing_warning():
+    log.warning(
+        "is_fx_tracing will return true for both fx.symbolic_trace and "
+        "torch.export. Please use "
+        "is_fx_tracing_symbolic_tracing() for specifically fx.symbolic_trace "
+        "or torch.compiler.is_compiling() for specifically torch.export/compile."
+    )
+
+
 def is_fx_tracing():
+    is_fx_tracing_warning()
     return _is_fx_tracing_flag
+
+
+def is_fx_symbolic_tracing():
+    return _is_fx_tracing_flag and not torch.compiler.is_compiling()
 
 
 @compatibility(is_backward_compatible=True)
