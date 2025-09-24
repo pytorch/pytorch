@@ -444,7 +444,9 @@ inline at::Tensor newLikeFlat(
       sizes, strides, t.options().memory_format(std::nullopt));
 }
 
-inline at::Tensor newLikeFlat(std::vector<at::Tensor>& tensors) {
+inline at::Tensor newLikeFlat(
+    std::vector<at::Tensor>& tensors,
+    bool preserve_strides = true) {
   if (tensors.empty()) {
     TORCH_CHECK(false, "Received an empty list");
   }
@@ -452,8 +454,9 @@ inline at::Tensor newLikeFlat(std::vector<at::Tensor>& tensors) {
   at::DeviceGuard gpuGuard(t.device());
   std::vector<int64_t> sizes{static_cast<int64_t>(tensors.size())};
   sizes.insert(sizes.end(), t.sizes().begin(), t.sizes().end());
-  if (t.is_contiguous()) { // we are checking for memory format, so tensor might
-                           // not be contiguous
+  if (t.is_contiguous() ||
+      !preserve_strides) { // we are checking for memory format, so tensor might
+    // not be contiguous
     // TODO handle all non-overlapping-and-dense, although if the strides
     // disagree in ranks we are opening a door for more bugs than currently
     // where channels-last might disagree between ranks
