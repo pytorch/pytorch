@@ -47,7 +47,7 @@ LINTER_CODE = "IMPORT_LINTER"
 CURRENT_FILE_NAME = os.path.basename(__file__)
 _MODULE_NAME_ALLOW_LIST: set[str] = set()
 
-# Add standard library modules to the allow list.
+# Add builtin modules.
 _MODULE_NAME_ALLOW_LIST.update(sys.stdlib_module_names)
 
 # Add the allowed third party libraries. Please avoid updating this unless you

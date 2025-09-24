@@ -84,7 +84,7 @@ class _Config(Generic[T]):
     value_type: Optional[type] = None
     alias: Optional[str] = None
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         self.env_name_default = _Config.string_or_list_of_string_to_list(
             self.env_name_default
         )
@@ -138,7 +138,12 @@ else:
         alias: Optional[str] = None,
     ) -> _Config[T]:
         return _Config(
-            default, justknob, env_name_default, env_name_force, value_type, alias
+            default=default,
+            justknob=justknob,
+            env_name_default=env_name_default,
+            env_name_force=env_name_force,
+            value_type=value_type,
+            alias=alias,
         )
 
 
