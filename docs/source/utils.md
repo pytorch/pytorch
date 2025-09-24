@@ -78,7 +78,6 @@ for tracking purposes -->
 .. py:module:: torch.utils.data.graph
 .. py:module:: torch.utils.data.graph_settings
 .. py:module:: torch.utils.data.sampler
-.. py:module:: torch.utils.debug_mode
 .. py:module:: torch.utils.dlpack
 .. py:module:: torch.utils.file_baton
 .. py:module:: torch.utils.flop_counter
