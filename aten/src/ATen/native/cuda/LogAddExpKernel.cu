@@ -36,8 +36,8 @@ template <typename scalar_t>
 __host__ __device__ scalar_t _log_add_exp_helper(const scalar_t& x, const scalar_t& y) {
   // Reference : https://www.tensorflow.org/api_docs/python/tf/math/cumulative_logsumexp
   // Using the original expression: `at::_isnan(y) ? y : std::min(x, y)` causes an error in ROCM
-  auto isnan_x = at::_isnan(x);
-  auto isnan_y = at::_isnan(y);
+  const auto isnan_x = at::_isnan(x);
+  const auto isnan_y = at::_isnan(y);
   scalar_t min = isnan_y ? y : (isnan_x ? x : std::min(x, y));
   scalar_t max = isnan_y ? y : (isnan_x ? x : std::max(x, y));
   if (min != max || ::isfinite(min)) {
@@ -53,9 +53,9 @@ template <typename scalar_t>
 __host__ __device__ c10::complex<scalar_t> _fast_build_exp(const c10::complex<scalar_t>& x) {
   // complex exponential function, but implemented manually to get fast compilation time
   // this function only handles the case where the x is finite (not inf nor nan)
-  auto xreal = std::real(x);
-  auto ximag = std::imag(x);
-  auto exp_x_abs = std::exp(xreal);
+  const auto xreal = std::real(x);
+  const auto ximag = std::imag(x);
+  const auto exp_x_abs = std::exp(xreal);
   auto exp_x_real = exp_x_abs * std::cos(ximag);
   auto exp_x_imag = exp_x_abs * std::sin(ximag);
   return {exp_x_real, exp_x_imag};
@@ -65,10 +65,10 @@ template <typename scalar_t>
 __host__ __device__ c10::complex<scalar_t> _fast_build_exp_inf(const c10::complex<scalar_t>& x) {
   // complex exponential function, but implemented manually to get fast compilation time
   // this function only handles the case where the real part of x is infinite
-  auto ximag = std::imag(x);
-  auto exp_x_abs = std::numeric_limits<scalar_t>::infinity();
-  auto sin = std::sin(ximag);
-  auto cos = std::cos(ximag);
+  const auto ximag = std::imag(x);
+  const auto exp_x_abs = std::numeric_limits<scalar_t>::infinity();
+  const auto sin = std::sin(ximag);
+  const auto cos = std::cos(ximag);
   // special case if the angle is exactly the multiple of pi/2
   auto exp_x_real = (cos == 0) ? (scalar_t)0.0 : exp_x_abs * cos;
   auto exp_x_imag = (sin == 0) ? (scalar_t)0.0 : exp_x_abs * sin;
@@ -95,20 +95,20 @@ __host__ __device__ c10::complex<scalar_t> _log_add_exp_helper(const c10::comple
     } else {
       // handle the +inf case, we don't need the special precision for log1p for small values
       // and to avoid producing nan in case of real(max) == real(min) == +inf
-      auto exp_min = _fast_build_exp_inf(min);
-      auto exp_max = _fast_build_exp_inf(max);
+      const auto exp_min = _fast_build_exp_inf(min);
+      const auto exp_max = _fast_build_exp_inf(max);
       return ::log1p(exp_min + exp_max - 1);  // log1p(x - 1) builds faster than log
     }
   } else {
-    auto minmax = min - max;
-    auto exp_minmax = _fast_build_exp(minmax);
+    const auto minmax = min - max;
+    const auto exp_minmax = _fast_build_exp(minmax);
     return ::log1p(exp_minmax) + max;
   }
 }
 
 void logaddexp_kernel_cuda(TensorIteratorBase& iter) {
   if (at::isComplexType(iter.dtype())) {
-    AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "logaddexp_cuda", [&]() {
+    AT_DISPATCH_COMPLEX_TYPES_AND(at::ScalarType::ComplexHalf, iter.dtype(), "logaddexp_cuda", [&]() {
       using opmath_t = at::opmath_type<scalar_t>;
       gpu_kernel(iter, [] GPU_LAMBDA (scalar_t a_, scalar_t b_) -> scalar_t {
         const auto a = static_cast<opmath_t>(a_);
