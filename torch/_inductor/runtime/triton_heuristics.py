@@ -755,6 +755,8 @@ class CachingAutotuner(KernelInterface):
             "debug": compile_meta["debug"],
             "sanitize_overflow": False,  # turn off additional asserts added for overflow checks
         }
+        if "enable_fp_fusion" in compile_meta:
+            options["enable_fp_fusion"] = compile_meta["enable_fp_fusion"]
         if HAS_WARP_SPEC:
             options.update(
                 {
@@ -762,6 +764,15 @@ class CachingAutotuner(KernelInterface):
                     "num_buffers_warp_spec": compile_meta.get(
                         "num_buffers_warp_spec", 0
                     ),
+                }
+            )
+        if self.device_props.type == "cuda":
+            options.update(
+                {
+                    "launch_cooperative_grid": compile_meta.get(
+                        "launch_cooperative_grid", False
+                    ),
+                    "launch_pdl": compile_meta.get("launch_pdl", False),  # True
                 }
             )
         if self.device_props.type == "hip":
@@ -902,7 +913,11 @@ class CachingAutotuner(KernelInterface):
             return {}
 
         copies = {}
-        budget = torch.cuda.max_memory_allocated() - torch.cuda.memory_allocated()
+        try:
+            budget = torch.cuda.max_memory_allocated() - torch.cuda.memory_allocated()
+        except RuntimeError:
+            # Possibly a custom CUDA allocator, see https://github.com/pytorch/pytorch/issues/163257
+            return {}
 
         def maybe_copy(name, arg):
             if name in self.mutated_arg_names and arg.is_cuda:
@@ -1100,6 +1115,15 @@ class CachingAutotuner(KernelInterface):
             "global_scratch": launcher.global_scratch,
             "profile_scratch": launcher.profile_scratch,
         }
+        if self.device_props.type == "xpu":
+            # On the XPU backend, threads_per_warp is not always 32.
+            # For Intel GEMM Triton kernels, it can be 16.
+            # This information must be preserved so that the Cpp wrapper
+            # can launch the kernel with the correct configuration.
+            params["threads_per_warp"] = getattr(
+                launcher.bin.metadata, "threads_per_warp", 32
+            )
+
         from torch._inductor.codecache import CudaKernelParamCache
 
         bin_type = {"hip": "hsaco", "xpu": "spv"}.get(self.device_props.type, "cubin")
@@ -1513,6 +1537,13 @@ class StaticTritonCompileResult(CompileResult[StaticallyLaunchedCudaKernel]):
             if inductor_meta.get("store_cubin", None):
                 # Requires storing the entire binary
                 raise CannotStaticallyLaunchKernel("store_cubin is enabled")
+
+            if getattr(kernel.metadata, "launch_pdl", False) or getattr(
+                kernel.metadata, "launch_cooperative_grid", False
+            ):
+                raise CannotStaticallyLaunchKernel(
+                    "static launch does not support launch attributes"
+                )
 
             cubin_location = os.path.join(
                 triton_cache_dir(triton_meta.get("device", 0)),

@@ -114,9 +114,9 @@ def _nvrtc_compile(
     kernel_source: str,
     kernel_name: str,
     compute_capability: Optional[str] = None,
-    header_code: str = "",
     cuda_include_dirs: Optional[list] = None,
     nvcc_options: Optional[list] = None,
+    auto_pch: bool = False,
 ) -> tuple[bytes, str]:
     """
     Compiles a CUDA kernel using NVRTC and returns the PTX code.
@@ -126,9 +126,9 @@ def _nvrtc_compile(
         kernel_name (str): The name of the kernel function to compile
         compute_capability (str, None): The compute capability to target (e.g., "86").
                                            If None, will detect from current device.
-        header_code (str, optional): Additional header code to prepend to the kernel source
         cuda_include_dirs (list, None): List of directories containing CUDA headers
         nvcc_options (list, None): Additional options to pass to NVRTC
+        auto_pch (bool): Enable automatic precompiled headers (CUDA 12.8+)
 
     Returns:
         Tuple[bytes, str]: The compiled PTX code and mangled kernel name
@@ -154,14 +154,8 @@ def _nvrtc_compile(
             )
             raise RuntimeError(f"CUDA error: {error_message}")
 
-    # Combine header code and kernel source
-    if header_code:
-        full_source = header_code + "\n" + kernel_source
-    else:
-        full_source = kernel_source
-
     # Convert source to bytes
-    source_bytes = full_source.encode("utf-8")
+    source_bytes = kernel_source.encode("utf-8")
 
     # Get compute capability if not provided
     if compute_capability is None:
@@ -189,6 +183,13 @@ def _nvrtc_compile(
     if cuda_include_dirs:
         for directory in cuda_include_dirs:
             options.append(f"-I{directory}".encode())
+
+    # Enable automatic precompiled headers (CUDA 12.8+)
+    if auto_pch:
+        assert str(torch.version.cuda) >= "12.8", "PCH requires CUDA 12.8+"
+        if nvcc_options is None:
+            nvcc_options = []
+        nvcc_options.append("--pch")
 
     # Add custom NVCC options
     if nvcc_options:
