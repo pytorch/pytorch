@@ -356,6 +356,17 @@ if not IS_WINDOWS:
             self.assertEqual(result, expected)
             self.assertEqual(result.data_ptr(), dst.data_ptr())
 
+        def test_my_clone(self, device):
+            import libtorch_agnostic
+
+            t = torch.randn(2, 5, device=device)
+
+            result = libtorch_agnostic.ops.my_clone(t)
+            expected = t.clone()
+            self.assertEqual(result, expected)
+            self.assertNotEqual(result.data_ptr(), expected.data_ptr())
+            self.assertEqual(result.stride(), expected.stride())
+
     instantiate_device_type_tests(TestLibtorchAgnostic, globals(), except_for=None)
 
 if __name__ == "__main__":
