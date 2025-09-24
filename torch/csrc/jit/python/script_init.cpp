@@ -180,8 +180,8 @@ std::shared_ptr<PythonResolver> pythonResolver(const ResolutionCallback& rcb) {
 }
 std::shared_ptr<PythonResolver> pythonResolver(
     const ResolutionCallback& rcb,
-    std::string classname,
-    ClassTypePtr classType) {
+    const std::string& classname,
+    const ClassTypePtr& classType) {
   return std::make_shared<PythonResolver>(
       rcb, std::move(classname), std::move(classType));
 }
@@ -581,7 +581,7 @@ struct slot_dict_impl {
     return result;
   }
 
-  void setattr(const std::string& name, py::object value) {
+  void setattr(const std::string& name, const py::object& value) {
     const TypePtr& type = module_->type()->getAttribute(name);
     Module(module_).setattr(name, toIValue(std::move(value), type));
   }
@@ -758,7 +758,9 @@ void initJitScriptBindings(PyObject* module) {
               py::keep_alive<0, 1>())
           .def(
               "setattr",
-              [](Object& self, const std::string& name, py::object value) {
+              [](Object& self,
+                 const std::string& name,
+                 const py::object& value) {
                 if (self.type()->hasConstant(name)) {
                   TORCH_CHECK(
                       false,
@@ -1413,7 +1415,8 @@ void initJitScriptBindings(PyObject* module) {
 
       .def(
           "find_function",
-          [](std::shared_ptr<CompilationUnit> self, const std::string& name) {
+          [](const std::shared_ptr<CompilationUnit>& self,
+             const std::string& name) {
             auto fn = self->find_function(QualifiedName(name));
             if (fn) {
               return std::optional<StrongFunctionPtr>(
@@ -1424,7 +1427,8 @@ void initJitScriptBindings(PyObject* module) {
           })
       .def(
           "__getattr__",
-          [](std::shared_ptr<CompilationUnit> self, const std::string& name) {
+          [](const std::shared_ptr<CompilationUnit>& self,
+             const std::string& name) {
             auto fn = self->find_function(QualifiedName(name));
             if (fn) {
               return StrongFunctionPtr(std::move(self), fn);
@@ -1457,7 +1461,7 @@ void initJitScriptBindings(PyObject* module) {
           "create_function",
           [](std::shared_ptr<CompilationUnit>& self,
              const std::string& qualified_name,
-             std::shared_ptr<Graph> graph,
+             const std::shared_ptr<Graph>& graph,
              bool should_mangle) {
             Function* fn = self->create_function(
                 qualified_name, std::move(graph), should_mangle);
@@ -1483,7 +1487,7 @@ void initJitScriptBindings(PyObject* module) {
   py::class_<StrongFunctionPtr>(m, "ScriptFunction", py::dynamic_attr())
       .def(
           "__call__",
-          [](py::args args, const py::kwargs& kwargs) {
+          [](const py::args& args, const py::kwargs& kwargs) {
             HANDLE_TH_ERRORS
             auto strongPtr = py::cast<StrongFunctionPtr>(args[0]);
             if (py::module::import("torch")
@@ -1607,7 +1611,7 @@ void initJitScriptBindings(PyObject* module) {
   py::class_<Method>(m, "ScriptMethod", py::dynamic_attr())
       .def(
           "__call__",
-          [](py::args args, const py::kwargs& kwargs) {
+          [](const py::args& args, const py::kwargs& kwargs) {
             HANDLE_TH_ERRORS
             if (py::module::import("torch")
                     .attr("compiler")
@@ -1923,7 +1927,7 @@ void initJitScriptBindings(PyObject* module) {
   m.def("_test_only_remove_entry_to_op_version_map", &test_only_remove_entry);
   m.def(
       "import_ir_module",
-      [](std::shared_ptr<CompilationUnit> cu,
+      [](const std::shared_ptr<CompilationUnit>& cu,
          const std::string& filename,
          py::object map_location,
          const py::dict& extra_files,
@@ -1947,7 +1951,7 @@ void initJitScriptBindings(PyObject* module) {
       });
   m.def(
       "_import_ir_module_from_package",
-      [](std::shared_ptr<CompilationUnit> cu,
+      [](const std::shared_ptr<CompilationUnit>& cu,
          std::shared_ptr<caffe2::serialize::PyTorchStreamReader> reader,
          std::shared_ptr<torch::jit::DeserializationStorageContext>
              storage_context,
@@ -1968,7 +1972,7 @@ void initJitScriptBindings(PyObject* module) {
       });
   m.def(
       "import_ir_module_from_buffer",
-      [](std::shared_ptr<CompilationUnit> cu,
+      [](const std::shared_ptr<CompilationUnit>& cu,
          const std::string& buffer,
          py::object map_location,
          const py::dict& extra_files,
@@ -2125,7 +2129,7 @@ void initJitScriptBindings(PyObject* module) {
       "Retrieve the optimized graph that was run the last time the graph executor ran on this thread");
   m.def(
       "_create_function_from_graph",
-      [](const std::string& qualname, std::shared_ptr<Graph> graph) {
+      [](const std::string& qualname, const std::shared_ptr<Graph>& graph) {
         // TODO this should go in the global Python CU
         auto cu = std::make_shared<CompilationUnit>();
         c10::QualifiedName name(qualname);
@@ -2133,7 +2137,7 @@ void initJitScriptBindings(PyObject* module) {
         return StrongFunctionPtr(std::move(cu), fn);
       });
   m.def("_ivalue_tags_match", ivalue_tags_match);
-  m.def("_ivalue_debug_python_object", [](py::object py_obj) {
+  m.def("_ivalue_debug_python_object", [](const py::object& py_obj) {
     // convert to IValue first, IValue will incref via py::object
     IValue pyobj_ivalue = toIValue(std::move(py_obj), PyObjectType::get());
     // convert back to PyObject by borrowing the reference, which also
@@ -2231,8 +2235,8 @@ void initJitScriptBindings(PyObject* module) {
       .def(
           "add_constant",
           [](ConcreteModuleTypeBuilder& self,
-             std::string name,
-             py::object value) {
+             const std::string& name,
+             const py::object& value) {
             self.addConstant(std::move(name), std::move(value));
           })
       .def("add_attribute", &ConcreteModuleTypeBuilder::addAttribute)
