@@ -1861,10 +1861,12 @@ _IntLike: TypeAlias = Union[int, sympy.Expr]
 
 
 @functools.cache
-def use_decompose_k_choice(m: _IntLike, n: _IntLike, k: _IntLike) -> bool:
+def use_decompose_k_choice(
+    m: _IntLike, n: _IntLike, k: _IntLike, threshold_multiple: int = 1
+) -> bool:
     from torch._inductor.virtualized import V
 
-    decompose_k_threshold = config.triton.decompose_k_threshold
+    decompose_k_threshold = config.triton.decompose_k_threshold * threshold_multiple
 
     return (
         not torch.version.hip
