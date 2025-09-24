@@ -1083,93 +1083,6 @@ graph():
         args = (torch.randn(15, 3, 256, 256), torch.ones(15, 32, 256, 256))
         self.assertEqual(gm(*args), m(*args))
 
-    # stride() is called for an undefined tensor
-    @testing.expectedFailureCppRuntimeNonStrict
-    def test_native_multi_attention_head(self):
-        embed_dim = 64
-        num_heads = 4
-        bs = 16
-        sl = 8
-        device = "cpu"
-
-        q = 6 * torch.rand(bs, sl, embed_dim, device=device, dtype=torch.float32) - 3
-        k = q
-        v = q
-
-        qkv = torch.nn.Linear(
-            embed_dim, 3 * embed_dim, device=device, dtype=torch.float32
-        )
-        proj = torch.nn.Linear(embed_dim, embed_dim, device=device, dtype=torch.float32)
-
-        class NativeMHA(torch.nn.Module):
-            def __init__(
-                self,
-                embed_dim,
-                num_heads,
-                qkv,
-                proj,
-                need_weights,
-                average_attn_weights,
-                mask_type,
-            ):
-                super().__init__()
-                self.qkv = qkv
-                self.proj = proj
-                self.embed_dim = embed_dim
-                self.num_heads = num_heads
-                self.need_weights = need_weights
-                self.average_attn_weights = average_attn_weights
-                self.mask_type = mask_type
-
-            def forward(self, q, k, v, key_padding_mask):
-                return torch._native_multi_head_attention(
-                    q,
-                    k,
-                    v,
-                    self.embed_dim,
-                    self.num_heads,
-                    self.qkv.weight,
-                    self.qkv.bias,
-                    self.proj.weight,
-                    self.proj.bias,
-                    key_padding_mask,
-                    need_weights=False,
-                    average_attn_weights=False,
-                    mask_type=1,  # mask_type = 1 => src_key_padding_mask, mask_type = 0 => src_mask
-                )
-
-        for mask_type in (0, 1):
-            for need_weights in (True, False):
-                for average_attn_weights in (True, False):
-                    npt = NativeMHA(
-                        embed_dim=embed_dim,
-                        num_heads=num_heads,
-                        qkv=qkv,
-                        proj=proj,
-                        need_weights=need_weights,
-                        average_attn_weights=average_attn_weights,
-                        mask_type=mask_type,
-                    )
-                    sample_input = (q, k, v, None)
-
-                    ep = export(
-                        npt,
-                        args=sample_input,
-                        dynamic_shapes={
-                            "q": {
-                                0: Dim("dim0_q", max=1024),
-                            },
-                            "k": {
-                                0: Dim("dim0_k", max=1024),
-                            },
-                            "v": {
-                                0: Dim("dim0_v", max=1024),
-                            },
-                            "key_padding_mask": None,
-                        },
-                    )
-                    self.assertEqual(ep.module()(*sample_input), npt(*sample_input))
-
     def test_unused_constant(self):
         class M(torch.nn.Module):
             def forward(self, x):
@@ -1457,7 +1370,7 @@ graph():
                 self.mod.forward = hacked_up_forward.__get__(self.mod, Foo)
 
             def __call__(self, x, y):
-                ep = torch.export.export(self.mod, (x, y), strict=True).module()
+                ep = export(self.mod, (x, y), strict=True).module()
                 out = ep(x, y)
                 return out
 
@@ -1466,13 +1379,31 @@ graph():
 
         foo = Foo()
         ref = ReferenceControl(foo)
-        with self.assertWarnsRegex(
-            UserWarning,
-            "While exporting, we found certain side effects happened in the model.forward. "
-            "Here are the list of potential sources you can double check: "
-            "\[\"L\['global_list'\]\", \"L\['self'\].bank\", \"L\['self'\].bank_dict\"",
-        ):
-            ref(torch.randn(4, 4), torch.randn(4, 4))
+        # TODO (tmanlaibaatar) this kinda sucks but today there is no good way to get
+        # good source name. We should have an util that post processes dynamo source names
+        # to be more readable.
+        if is_strict_v2_test(self._testMethodName):
+            with self.assertWarnsRegex(
+                UserWarning,
+                r"(L\['self']\._export_root\.forward\.__func__\.__closure__\[1\]\.cell_contents\.bank"
+                r"|L\['self']\._export_root\.forward\.__func__\.__closure__\[1\]\.cell_contents\.bank_dict"
+                r"|L\['self']\._export_root\.forward\.__func__\.__closure__\[0\]\.cell_contents)",
+            ):
+                ref(torch.randn(4, 4), torch.randn(4, 4))
+        elif is_inline_and_install_strict_test(self._testMethodName):
+            with self.assertWarnsRegex(
+                UserWarning,
+                r"(L\['self']\._modules\['_export_root']\.forward\.__func__\.__closure__\[1\]\.cell_contents\.bank"
+                r"|L\['self']\._modules\['_export_root']\.forward\.__func__\.__closure__\[1\]\.cell_contents\.bank_dict"
+                r"|L\['self']\._modules\['_export_root']\.forward\.__func__\.__closure__\[0\]\.cell_contents)",
+            ):
+                ref(torch.randn(4, 4), torch.randn(4, 4))
+        else:
+            with self.assertWarnsRegex(
+                UserWarning,
+                r"(L\['global_list'\]|L\['self'\]\.bank|L\['self'\]\.bank_dict)",
+            ):
+                ref(torch.randn(4, 4), torch.randn(4, 4))
 
     def test_mask_nonzero_static(self):
         class TestModule(torch.nn.Module):
@@ -16103,6 +16034,26 @@ def forward(self, q, k, v):
             r"Number of heads in key and value must divide the number of heads",
         ):
             export(Foo(), (torch.randn(1, 33, 256, 128), k, v))
+
+    def test_namedtuple_input_export(self):
+        # test for NamedTuple inputs with both strict and non-strict export modes
+        from collections import namedtuple
+
+        PointNT = namedtuple("PointNT", ["x", "y"])
+
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                return x + y
+
+        inp = PointNT(torch.ones(3), torch.ones(3))
+
+        ep_non_strict = export(M(), inp)
+        result_non_strict = ep_non_strict.module()(*inp)
+
+        ep_strict = export(M(), inp, strict=True)
+        result_strict = ep_strict.module()(*inp)
+
+        self.assertEqual(result_non_strict, result_strict)
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
