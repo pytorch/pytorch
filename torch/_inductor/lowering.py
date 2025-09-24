@@ -3236,7 +3236,6 @@ def _local_scalar_dense(data):
     buffer = ir.DynamicScalar(binding_sym, keypath, data)
     buffer.name = V.graph.register_buffer(buffer)
     V.graph.register_operation(buffer)
-    V.graph.register_dynamic_scalar_dtype(binding_sym, data.get_dtype())
     # NB: the replaced expr is OK to use directly downstream, we want
     # simplifications in this case!
     val = V.graph.current_node.meta["val"]
