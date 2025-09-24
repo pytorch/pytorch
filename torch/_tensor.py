@@ -1772,7 +1772,7 @@ class Tensor(torch._C.TensorBase):
                 event.record(current_stream)
                 stream.wait_event(event)
         elif self.device.type == "cpu":
-            assert stream is None or stream == -1, "stream should be None or -1 on cpu."
+            assert stream is None or stream == -1, "stream should be None on cpu."
 
         if self.device.type == "xla":
             import torch_xla
