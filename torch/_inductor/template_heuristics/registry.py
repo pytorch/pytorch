@@ -18,6 +18,9 @@ from .base import TemplateConfigHeuristics
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
+    from ..codegen.common import KernelTemplate
+    from ..select_algorithm import ExternKernelChoice
+
 
 # Module-wide registry for template heuristics
 _TEMPLATE_HEURISTIC_REGISTRY: dict[
@@ -26,6 +29,9 @@ _TEMPLATE_HEURISTIC_REGISTRY: dict[
 
 # Manual cache for successful lookups only (fallback instances are not cached)
 _HEURISTIC_CACHE: dict[tuple[str, str, str], TemplateConfigHeuristics] = {}
+
+# Template registry for serialization/deserialization of kernel template choices
+_TEMPLATE_REGISTRY: dict[str, Union[KernelTemplate, ExternKernelChoice]] = {}
 
 log = logging.getLogger(__name__)
 
@@ -128,12 +134,68 @@ def get_template_heuristic(
 
 def clear_registry() -> None:
     """
-    Clear all registered template heuristics.
+    Clear all registered template heuristics and templates.
 
     This is primarily useful for testing purposes to ensure a clean state.
     """
     _TEMPLATE_HEURISTIC_REGISTRY.clear()
     _HEURISTIC_CACHE.clear()
+    _TEMPLATE_REGISTRY.clear()
+
+
+def register_template(template: Union[KernelTemplate, ExternKernelChoice]) -> None:
+    """
+    Register a template instance in the global template registry.
+
+    Args:
+        template: The template instance (KernelTemplate or ExternKernelChoice) to register
+
+    Raises:
+        AssertionError: If a template with the same UID is already registered
+    """
+    template_uid = template.uid
+    if template_uid in _TEMPLATE_REGISTRY:
+        existing_template = _TEMPLATE_REGISTRY[template_uid]
+        if existing_template is not template:
+            raise AssertionError(
+                f"Duplicate template UID '{template_uid}' detected. "
+                f"Existing: {existing_template}, New: {template}"
+            )
+        # Same instance re-registering is OK
+        return
+
+    _TEMPLATE_REGISTRY[template_uid] = template
+    log.debug("Registered template with UID: %s", template_uid)
+
+
+def get_template_by_uid(template_uid: str) -> Union[KernelTemplate, ExternKernelChoice]:
+    """
+    Retrieve a template instance by its UID.
+
+    Args:
+        template_uid: The unique identifier of the template
+
+    Returns:
+        The template instance
+
+    Raises:
+        KeyError: If no template with the given UID is found
+    """
+    if template_uid not in _TEMPLATE_REGISTRY:
+        raise KeyError(
+            f"Template with UID '{template_uid}' not found. "
+            f"Registered templates: {list(_TEMPLATE_REGISTRY.keys())}"
+        )
+    return _TEMPLATE_REGISTRY[template_uid]
+
+
+def clear_template_registry() -> None:
+    """
+    Clear all registered templates.
+
+    This is primarily useful for testing purposes to ensure a clean state.
+    """
+    _TEMPLATE_REGISTRY.clear()
 
 
 @contextlib.contextmanager
