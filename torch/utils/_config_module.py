@@ -6,7 +6,6 @@ import inspect
 import io
 import os
 import pickle
-import sys
 import tokenize
 import unittest
 from dataclasses import dataclass
@@ -85,7 +84,7 @@ class _Config(Generic[T]):
     value_type: Optional[type] = None
     alias: Optional[str] = None
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         self.env_name_default = _Config.string_or_list_of_string_to_list(
             self.env_name_default
         )
@@ -139,7 +138,12 @@ else:
         alias: Optional[str] = None,
     ) -> _Config[T]:
         return _Config(
-            default, justknob, env_name_default, env_name_force, value_type, alias
+            default=default,
+            justknob=justknob,
+            env_name_default=env_name_default,
+            env_name_force=env_name_force,
+            value_type=value_type,
+            alias=alias,
         )
 
 
@@ -169,10 +173,7 @@ def install_config_module(module: ModuleType) -> None:
         prefix: str,
     ) -> None:
         """Walk the module structure and move everything to module._config"""
-        if sys.version_info[:2] < (3, 10):
-            type_hints = getattr(source, "__annotations__", {})
-        else:
-            type_hints = inspect.get_annotations(source)
+        type_hints = inspect.get_annotations(source)
         for key, value in list(source.__dict__.items()):
             if (
                 key.startswith("__")
