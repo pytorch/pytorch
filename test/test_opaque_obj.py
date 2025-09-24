@@ -236,7 +236,7 @@ def forward(self, arg0_1, arg1_1):
     """,
         )
 
-    def test_aot_export_tensor_queue_operators(self):
+    def test_aot_export(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
