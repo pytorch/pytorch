@@ -1481,11 +1481,7 @@ class TestBinaryUfuncs(TestCase):
                 elif torch.can_cast(torch.result_type(base, exponent), base.dtype):
                     actual2 = actual.pow_(exponent)
                     self.assertEqual(actual, expected.to(actual))
-<<<<<<< HEAD
-                    self.assertEqual(actual2, expected.to(actual))
-=======
                     self.assertEqual(actual2, expected.to(actual2))
->>>>>>> upstream/main
                 else:
                     self.assertRaisesRegex(
                         RuntimeError,

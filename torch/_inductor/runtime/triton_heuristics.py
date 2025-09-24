@@ -2924,7 +2924,7 @@ def _persistent_reduction_configs(
         for xblock in (1, 8, 32, 128)
         if xblock == 1 or (xblock <= xnumel and (max_autotune_enabled or rnumel * xblock <= 4096))
     ]
-    
+
     if "y" not in size_hints:
         configs = [
             triton_config_reduction(
@@ -2958,17 +2958,6 @@ def _persistent_reduction_configs(
     # defer to more autotuning, initially
     if "y" in size_hints:
         pass
-<<<<<<< HEAD
-
-    if not max_autotune_enabled: # Don't filter if tuning enabled
-        if reduction_hint == ReductionHint.INNER and rnumel >= 256:
-            configs = configs[:1]
-        elif reduction_hint == ReductionHint.OUTER:
-            configs = configs[-1:]
-
-    if reduction_hint == ReductionHint.OUTER_TINY:
-        tiny_configs = [
-=======
     # TODO(jansel): we should be able to improve these heuristics
     elif reduction_hint == ReductionHint.INNER:
         if rnumel > 1024:
@@ -2995,7 +2984,6 @@ def _persistent_reduction_configs(
         configs = configs[-1:]
     elif reduction_hint == ReductionHint.OUTER_TINY:
         configs = [
->>>>>>> upstream/main
             triton_config_reduction(
                 size_hints,
                 2 * (256 // rnumel) if rnumel <= 256 else 1,

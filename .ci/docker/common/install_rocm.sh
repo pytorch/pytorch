@@ -114,12 +114,9 @@ EOF
         rm -rf HIP clr
     fi
 
-<<<<<<< HEAD
     # temporary hipblasLT dependency install
     apt install libmsgpackc2
-=======
     pip_install "git+https://github.com/rocm/composable_kernel@$ROCM_COMPOSABLE_KERNEL_VERSION"
->>>>>>> upstream/main
 
     # Cleanup
     apt-get autoclean && apt-get clean
@@ -131,8 +128,8 @@ install_centos() {
   yum update -y
   yum install -y kmod
   yum install -y wget
-  
-  if [[ $OS_VERSION == 9 ]]; then 
+
+  if [[ $OS_VERSION == 9 ]]; then
       dnf install -y openblas-serial
       dnf install -y dkms kernel-headers kernel-devel
   else
