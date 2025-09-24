@@ -270,28 +270,80 @@ cuda::blas::GEMMAndBiasActivationEpilogue activation_to_gemm_and_blas_arg(Activa
   }
 }
 
-static bool getDisableAddmmCudaLt() {
-    static const auto env_value = c10::utils::get_env("DISABLE_ADDMM_CUDA_LT");
-    if (env_value == "1") {
-      return true;
-    }
-    return false;
+/*
+ * Checks whether DISABLE_ADDMM_CUDA_LT is set.
+ * For ROCM we test whether the architecture supports the Lt.
+ */
+static bool isGloballyDisabledAddmmCudaLt(const at::Device& device) {
+  // When hipBLASLt is not supported on the architecture, return false
+  #ifdef USE_ROCM
+  static const std::array<std::string> archs = {
+        "gfx90a", "gfx942",
+    #if ROCM_VERSION >= 60300
+        "gfx1100", "gfx1101", "gfx1200", "gfx1201", "gfx908",
+    #endif
+    #if ROCM_VERSION >= 60500
+        "gfx950"
+    #endif
+  };
+  const auto is_hipblas_lt_arch_supported = at::detail::getCUDAHooks().isGPUArch(archs, device.index());
+  if (!is_hipblas_lt_arch_supported) {
+    return true;
+  }
+  #endif
+
+  // Check whether it is disabled in the env
+  static const auto is_addmm_cuda_lt_disabled = c10::utils::get_env("DISABLE_ADDMM_CUDA_LT");
+  if (is_addmm_cuda_lt_disabled == "1") {
+    return true;
+  }
+
+  return false;
 }
 
-#ifdef USE_ROCM
-static bool isSupportedHipLtROCmArch(int index) {
-    static const std::vector<std::string> archs = {
-        "gfx90a", "gfx942",
-#if ROCM_VERSION >= 60300
-        "gfx1100", "gfx1101", "gfx1200", "gfx1201", "gfx908",
-#endif
-#if ROCM_VERSION >= 60500
-        "gfx950"
-#endif
-    };
-    return at::detail::getCUDAHooks().isGPUArch(archs, index);
+/*
+ * Check whether for the given input we want to enable the Lt interface
+ */
+static bool isInputCompliesAddmmCudaLt(Tensor& result, const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha) {
+  // Previous conditions did not touch this case
+  if (result.is_same(self)) {
+    return true;
+  }
+
+  #if defined(USE_ROCM) && ROCM_VERSION == 60400
+  // hipblaslt TT fp32 regression on ROCm 6.4, cannot use
+  const auto args = cublasCommonArgs(mat1, mat2, result);
+  if (args.transa == 't' && args.transb == 't') {
+    return false;
+  }
+  #endif
+
+  // Strangely, if mat2 has only 1 row or column, we get
+  // CUBLAS_STATUS_INVALID_VALUE error from cublasLtMatmulAlgoGetHeuristic.
+  // self.dim() == 1 && result.dim() == 2 && self.sizes()[0] == mat2_sizes[1]
+  // is to use lt interface only when self is bias.
+  // for cuda 11.4, cublasLtMatmul is activated
+  #if defined(CUDA_VERSION) || defined(USE_ROCM)
+  const auto scalar_type = mat1.scalar_type();
+  return (beta.toComplexDouble() == 1.0
+    && self.dim() == 1 && self.sizes()[0] == mat2.sizes()[1] && self.is_contiguous()
+    && result.dim() == 2 && result.is_contiguous()
+    && ( // some dtype restrictions
+      #ifndef USE_ROCM
+      scalar_type == at::ScalarType::Double ||
+      #endif
+      scalar_type == at::ScalarType::Float ||
+      scalar_type == at::ScalarType::Half ||
+      scalar_type == at::ScalarType::BFloat16
+    )
+    && ( // some shape/stride restrictions
+      mat2.sizes()[0] > 1 && mat2.sizes()[1] > 1
+    )
+  );
+  #endif
+
+  return true;
 }
-#endif
 
 template <typename scalar_t>
 static void launchTunableGemmAndBias(cublasCommonArgs &args, const Scalar& alpha, const scalar_t* bias, cuda::blas::GEMMAndBiasActivationEpilogue activation) {
@@ -334,6 +386,7 @@ static void launchTunableGemmAndBias(cublasCommonArgs &args, const Scalar& alpha
 }
 
 Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha, Activation activation=Activation::None, bool disable_addmm_cuda_lt_override=false) {
+  // Shape checks {
   // Make sure to keep addmm_cuda below in sync with this code; it
   // preflights a check to try to avoid actually needing to call
   // expand().
@@ -343,46 +396,40 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
     "expected mat1 and mat2 to have the same dtype, but got: ", mat1.dtype(), " != ", mat2.dtype()
   )
 
+  if (result.is_same(self)) {
+    TORCH_CHECK(result.dim() == 2, "tensors must be 2-D");
+    TORCH_CHECK(self.sizes()[0] == mat1.sizes()[0], "self dim 0 must match mat1 dim 0");
+    TORCH_CHECK(self.sizes()[1] == mat2.sizes()[1], "self dim 1 must match mat2 dim 1");
+  }
+  // } Shape checks
+
   // NOLINTNEXTLINE(*c-array*)
   TensorArg targs[]{{result, "out", 0}, {self, "self", 1}, {mat1, "mat1", 2}, {mat2, "mat2", 3}};
   checkAllSameGPU(__func__, targs);
 
   IntArrayRef mat1_sizes = mat1.sizes();
   IntArrayRef mat2_sizes = mat2.sizes();
-  IntArrayRef self__sizes;
   bool useLtInterface = false;
-#if defined(USE_ROCM)
-  // When hipBLASLt is not supported on the architecture,
-  // disable_addmm_cuda_lt will always be to set to true
-  static bool disable_addmm_cuda_lt =
-    !isSupportedHipLtROCmArch(self.device().index()) || getDisableAddmmCudaLt();
-#else
-  static bool disable_addmm_cuda_lt = getDisableAddmmCudaLt();
-#endif
+
+  // Handle whether to use the Lt interface {
+  static bool persistent_disable_addmm_cuda_lt = isGloballyDisabledAddmmCudaLt(self.device());
   // if lt path fails, we recurse back into this function here and force the lt path to off
   // we cannot update varible disable_addmm_cuda_lt from above since it is static and would be permanent
-  bool disable_addmm_cuda_lt_final = disable_addmm_cuda_lt || disable_addmm_cuda_lt_override;
-#if defined(USE_ROCM) && ROCM_VERSION == 60400
-  // hipblaslt TT fp32 regression on ROCm 6.4, cannot use
-  cublasCommonArgs _args(mat1, mat2, result);
-  if (_args.transa == 't' && _args.transb == 't') {
-    disable_addmm_cuda_lt_final = true;
-  }
-#endif
+  bool disable_addmm_cuda_lt = persistent_disable_addmm_cuda_lt || disable_addmm_cuda_lt_override;
+  #ifdef USE_ROCM
+  // Conditioned on the device index, which is not persistent
+  disable_addmm_cuda_lt |= isGloballyDisabledAddmmCudaLt(self.device());
+  #endif
+  // Condition on the input
+  disable_addmm_cuda_lt |= isInputCompliesAddmmCudaLt(result, self, mat1, mat2, beta, alpha);
+  // }
+
   at::ScalarType scalar_type = mat1.scalar_type();
   bool is_float_output_with_half_input = (scalar_type == at::ScalarType::Half || scalar_type == at::ScalarType::BFloat16) && result.scalar_type() == at::ScalarType::Float;
   c10::MaybeOwned<Tensor> self_;
   if (&result != &self) {
 #if defined(CUDA_VERSION) || defined(USE_ROCM)
-    // Strangely, if mat2 has only 1 row or column, we get
-    // CUBLAS_STATUS_INVALID_VALUE error from cublasLtMatmulAlgoGetHeuristic.
-    // self.dim() == 1 && result.dim() == 2 && self.sizes()[0] == mat2_sizes[1]
-    // is to use lt interface only when self is bias.
-    // for cuda 11.4, cublasLtMatmul is activated
-    // the last two conditions is to skip 16b transA and non-trans-B having
-    // leading dim >> rows when they are sliced from a large tensor
-    // see fbcode/caffe2/test/test_linalg.py:test_corner_cases_of_cublasltmatmul
-    if (!disable_addmm_cuda_lt_final) {
+    if (!disable_addmm_cuda_lt) {
       useLtInterface = beta.toComplexDouble() == 1.0 && self.dim() == 1 &&
           result.dim() == 2 && self.sizes()[0] == mat2_sizes[1] &&
           self.is_contiguous() && result.is_contiguous() &&
@@ -417,13 +464,6 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
     if (!useLtInterface) {
       self_ = expand_size(self, {mat1_sizes[0], mat2_sizes[1]}, "addmm");
     }
-    self__sizes = self_->sizes();
-  } else {
-    self_ = c10::MaybeOwned<Tensor>::borrowed(self);
-    self__sizes = self_->sizes();
-    TORCH_CHECK(result.dim() == 2, "tensors must be 2-D");
-    TORCH_CHECK(self__sizes[0] == mat1_sizes[0], "self_ dim 0 must match mat1 dim 0");
-    TORCH_CHECK(self__sizes[1] == mat2_sizes[1], "self_ dim 1 must match mat2 dim 1");
   }
 
   if (&result != &self) {
