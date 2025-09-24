@@ -356,7 +356,7 @@ def should_exclude_padding_time(match: Match, arg_name: str) -> bool:
 
 
 def should_pad(key: str, ori_time: float, pad_time: float) -> bool:
-    multiplier = 1.1
+    multiplier = 1.2
     # Shape padding introduces additional memory ops. Based on microbenchmarks, 1.1x represents a reasonable
     # tradeoff between performance improvement from shape padding and overhead from additional memory ops
     # TODO: Build a learned model which would be better than this heuristic
