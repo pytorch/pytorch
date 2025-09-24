@@ -66,7 +66,7 @@ class ProgramRunner:
             print(e.stderr)
             print("===============================")
             print("=== Program Source ===")
-            with open(abs_path, "r") as f:
+            with open(abs_path) as f:
                 print(f.read())
             print("======================")
             print(f"Program exited with code: {e.returncode}")
