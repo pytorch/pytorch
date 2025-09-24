@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 # ruff: noqa: F841
 
+import copy
 import functools
 import gc
 import math
@@ -86,6 +87,19 @@ class CudaReproTests(TestCase):
     device = "cuda"
     common = check_model_cuda
 
+    def test_mm_out_dtype_compile(self):
+        a = torch.randn(1, 3, device="cuda", dtype=torch.float16)
+        b = torch.randn(3, 2, device="cuda", dtype=torch.float16)
+
+        def fn(x, y):
+            return torch.mm(x, y, out_dtype=torch.float32)
+
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True)
+        result = compiled(a, b)
+        expected = fn(a, b)
+        self.assertEqual(result.dtype, expected.dtype)
+        self.assertEqual(result, expected)
+
     def test_index_put_issue(self):
         def forward(
             self,
@@ -119,6 +133,47 @@ class CudaReproTests(TestCase):
         mod = make_fx(forward)(*inps)
         compiled = compile_fx_inner(mod, inps)
         compiled(inps)
+
+    def test_view_replay_padding_issue_163328(self):
+        class ReproModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.num_points_out = 120
+                self.lc_num = 2
+                input_channels = 16
+                self.linear_main = nn.Linear(input_channels, self.num_points_out * 2)
+                self.linear_lc = nn.Linear(input_channels, self.num_points_out * 2)
+
+            def forward(self, x: torch.Tensor):
+                bs, num_lat, num_lon, channels = x.shape
+                index = num_lat - self.lc_num
+
+                main_x = x[:, :index].reshape(bs * index * num_lon, channels)
+                lc_x = x[:, index:].reshape(bs * self.lc_num * num_lon, channels)
+
+                refline = self.linear_main(main_x).reshape(bs, index, num_lon, -1)
+                lc_refline = self.linear_lc(lc_x).reshape(bs, self.lc_num, num_lon, -1)
+
+                base = torch.cat([refline, lc_refline], dim=1).contiguous()
+                out0 = base.reshape(bs, num_lat, num_lon, self.num_points_out, 2)
+                out1 = base.reshape(bs, num_lat * num_lon, self.num_points_out * 2)
+                return {"ten0": out0, "ten1": out1}
+
+        torch.manual_seed(0)
+        model = ReproModule().cuda()
+        inputs = torch.randn(36, 9, 7, 16, device="cuda", requires_grad=True)
+
+        eager_out = model(inputs)
+        compiled_model = torch.compile(
+            copy.deepcopy(model),
+            backend="inductor",
+            mode="reduce-overhead",
+            fullgraph=True,
+        )
+        compiled_out = compiled_model(inputs)
+
+        self.assertEqual(compiled_out["ten0"], eager_out["ten0"])
+        self.assertEqual(compiled_out["ten1"], eager_out["ten1"])
 
     def test_effn_attn_bias_padding(self):
         batch_size, num_heads, seq_len, head_dim = 2, 32, 512, 128
@@ -923,6 +978,18 @@ class CudaReproTests(TestCase):
             out, torch.scatter_reduce(input_orig.clone(), 0, index, src, "sum")
         )
 
+    def test_normalize_norm_leq_one(self):
+        def fn(x: torch.Tensor) -> torch.Tensor:
+            return torch.nn.functional.normalize(x, dim=-1)
+
+        inp = torch.tensor([[3.799999, 0.0, 0.0]], device="cuda", dtype=torch.float32)
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True)
+        out = compiled(inp)
+        norm = out.norm(dim=-1)
+        self.assertTrue(
+            torch.all(norm <= 1.0), f"expected norm <= 1.0 but got {norm.item()}"
+        )
+
     def test_libdevice_routing(self):
         def foo(x):
             return x.exp()
@@ -1348,7 +1415,7 @@ class CudaReproTests(TestCase):
             out2 = model(input2)
             out3 = model(input3)
 
-        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.frame_count, 2)
 
     @config.patch({"triton.cudagraphs": True})
     def test_index_put_no_fallback_cudagraph(self):
@@ -2214,6 +2281,109 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
                     f"Results differ for input shape {(batch, channels, h, w)}. "
                     f"Max diff: {torch.max(torch.abs(eager_output - compiled_output)):.6f}",
                 )
+
+    def test_qwen2_7b_sdpa_input_alignment_requires_recompile(self):
+        # SDPA constraints ensures inputs have alignment (8).
+        device = "cuda"
+
+        def forward(q_proj, k_proj, attn_mask):
+            scale = 0.08838834764831845  # 1/sqrt(128)
+
+            B = attn_mask.size(0)
+            S = attn_mask.size(3)
+            D = 128
+            d_model = q_proj.size(1)
+
+            query_states = q_proj.view(B, S, -1, D).transpose(1, 2)  # [B, Hq, S, D]
+            q = query_states.contiguous()
+
+            Hkv = k_proj.size(1) // D
+            Hq = query_states.size(1)
+
+            nrepeats = Hq // Hkv
+            key_states = k_proj.view(B, S, -1, D).transpose(1, 2)  # [B, Hkv, S, D]
+            kv_repeated = key_states[:, :, None, :].expand(B, Hkv, nrepeats, S, D)
+            kv_repeated = kv_repeated.contiguous()
+            k = kv_repeated.reshape(B, Hq, S, D)
+            v = k.clone()  # value tensor
+
+            inf = torch.scalar_tensor(
+                float("-inf"), dtype=torch.bfloat16, device=device
+            )
+            zero = torch.scalar_tensor(0.0, dtype=torch.bfloat16, device=device)
+            where = torch.where(condition=attn_mask, input=zero, other=inf)
+            pad_amount = 8 - (S % 8)
+            padded = torch.nn.functional.pad(
+                where, (0, pad_amount), value=0.0
+            )  # pad last-dim
+            sliced = padded[..., :S]  # back to [B,1,S,S]
+            attn_bias = sliced.expand(B, Hq, S, S)
+
+            sdpa_out, logsumexp, seed, offset = (
+                torch.ops.aten._scaled_dot_product_efficient_attention.default(
+                    q,
+                    k,
+                    v,
+                    attn_bias,
+                    dropout_p=0.0,
+                    is_causal=True,
+                    scale=scale,
+                    compute_log_sumexp=True,
+                )
+            )
+
+            zeros = torch.zeros(B, S, d_model, device=device, dtype=torch.bfloat16)
+            zeros = zeros.reshape(B, S, Hq, D)
+            grad_out = zeros.permute(0, 2, 1, 3)
+
+            out = (
+                torch.ops.aten._scaled_dot_product_efficient_attention_backward.default(
+                    grad_out,
+                    q,
+                    k,
+                    v,
+                    attn_bias,
+                    sdpa_out,
+                    logsumexp,
+                    seed,
+                    offset,
+                    dropout_p=0.0,
+                    scale=scale,
+                    grad_input_mask=[True, True, True, False],
+                )
+            )
+            return out
+
+        B = 2
+        S = 6144
+        D = 128
+        Hq = 28
+        Hkv = 4
+
+        example_inputs = (
+            torch.randn((B * S, Hq * D), dtype=torch.bfloat16, device=device),  # q_proj
+            torch.randn(
+                (B * S, Hkv * D), dtype=torch.bfloat16, device=device
+            ),  # k_proj
+            torch.zeros((B, 1, S, S), dtype=torch.bool, device=device),  # attn_mask
+        )
+        correct = forward(*example_inputs)
+        compiled = torch.compile(forward, dynamic=True)
+        actual = compiled(*example_inputs)
+        self.assertEqual(actual, correct)
+
+        # run once more with seqlen that isn't divisible by 8
+        S = 6102
+        example_inputs = (
+            torch.randn((S * B, Hq * D), dtype=torch.bfloat16, device=device),  # q_proj
+            torch.randn(
+                (S * B, Hkv * D), dtype=torch.bfloat16, device=device
+            ),  # k_proj
+            torch.zeros((B, 1, S, S), dtype=torch.bool, device=device),  # attn_mask
+        )
+        correct = forward(*example_inputs)
+        actual = compiled(*example_inputs)
+        self.assertEqual(actual, correct)
 
 
 if __name__ == "__main__":
