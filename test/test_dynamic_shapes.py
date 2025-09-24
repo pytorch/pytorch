@@ -3232,7 +3232,7 @@ class TestUnbacked(TestCase):
             func(a, torch.rand(2, 1))
 
     @skipIfTorchDynamo("mark_unbacked is not traceable")
-    def test_do_no_guard_unbacked_inputs(self):
+    def test_do_not_guard_unbacked_inputs(self):
         @torch.compile(fullgraph=True, dynamic=True, backend="inductor")
         def func(a, b):
             a.expand(b.shape)
@@ -3256,6 +3256,8 @@ class TestUnbacked(TestCase):
         guards = "\n".join(line.split("#")[0].rstrip() for line in guards.split("\n"))
         # Remove the last line (Guard eval latency)
         guards = "\n".join(guards.split("\n")[:-1])
+        # Remove all lines containing ___check_type_id
+        guards = "\n".join(line for line in guards.split('\n') if '___check_type_id' not in line)
         self.assertExpectedInline(
             guards,
             """\
@@ -3268,7 +3270,6 @@ class TestUnbacked(TestCase):
 | | +- NO_HASATTR: hasattr(L['a'], '_dynamo_dynamic_indices') == False
 | | +- NO_TENSOR_ALIASING: check_no_aliasing(L['a'], L['b'])
 | +- GuardManager: source=L['b'], accessed_by=FrameLocalsGuardAccessor(key='b', framelocals_idx=1), type=<class 'torch.Tensor'>, tag_safe=(True, False)
-| | +- TYPE_MATCH: ___check_type_id(L['b'], 94515018331968)
 | | +- TENSOR_MATCH: check_tensor(L['b'], Tensor, DispatchKeySet(CPU, BackendSelect, ADInplaceOrView, AutogradCPU), torch.float32, device=None, requires_grad=False, size=[None, None], stride=[None, 1])
 | | +- NO_HASATTR: hasattr(L['b'], '_dynamo_dynamic_indices') == False
 | | +- NO_TENSOR_ALIASING""",  # noqa: B950

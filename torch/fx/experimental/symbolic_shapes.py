@@ -5492,11 +5492,7 @@ class ShapeEnv:
             source: Source, val: IntLikeType, constraint: DimConstraint = None
         ) -> None:
             # We should not generate guards for unbacked inputs.
-            if (
-                isinstance(val, SymInt)
-                and isinstance(val.node.expr, sympy.Symbol)
-                and self.is_unbacked_symint(val.node.expr)
-            ):
+            if isinstance(val, SymInt) and has_free_unbacked_symbols(val.node.expr):
                 return
 
             log.debug("track_symint %s %s %s", LazyString(source.name), val, constraint)
