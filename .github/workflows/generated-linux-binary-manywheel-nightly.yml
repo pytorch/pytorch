@@ -323,6 +323,7 @@ jobs:
       DOCKER_IMAGE_TAG_PREFIX: rocm6.3
       DESIRED_PYTHON: "3.10"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      timeout-minutes: 300
       build_name: manywheel-py3_10-rocm6_3
       build_environment: linux-binary-manywheel
     secrets:
@@ -433,6 +434,7 @@ jobs:
       DOCKER_IMAGE_TAG_PREFIX: rocm6.4
       DESIRED_PYTHON: "3.10"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      timeout-minutes: 300
       build_name: manywheel-py3_10-rocm6_4
       build_environment: linux-binary-manywheel
     secrets:
@@ -912,6 +914,7 @@ jobs:
       DOCKER_IMAGE_TAG_PREFIX: rocm6.3
       DESIRED_PYTHON: "3.11"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      timeout-minutes: 300
       build_name: manywheel-py3_11-rocm6_3
       build_environment: linux-binary-manywheel
     secrets:
@@ -1022,6 +1025,7 @@ jobs:
       DOCKER_IMAGE_TAG_PREFIX: rocm6.4
       DESIRED_PYTHON: "3.11"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      timeout-minutes: 300
       build_name: manywheel-py3_11-rocm6_4
       build_environment: linux-binary-manywheel
     secrets:
@@ -1501,6 +1505,7 @@ jobs:
       DOCKER_IMAGE_TAG_PREFIX: rocm6.3
       DESIRED_PYTHON: "3.12"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      timeout-minutes: 300
       build_name: manywheel-py3_12-rocm6_3
       build_environment: linux-binary-manywheel
     secrets:
@@ -1611,6 +1616,7 @@ jobs:
       DOCKER_IMAGE_TAG_PREFIX: rocm6.4
       DESIRED_PYTHON: "3.12"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      timeout-minutes: 300
       build_name: manywheel-py3_12-rocm6_4
       build_environment: linux-binary-manywheel
     secrets:
@@ -2090,6 +2096,7 @@ jobs:
       DOCKER_IMAGE_TAG_PREFIX: rocm6.3
       DESIRED_PYTHON: "3.13"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      timeout-minutes: 300
       build_name: manywheel-py3_13-rocm6_3
       build_environment: linux-binary-manywheel
     secrets:
@@ -2200,6 +2207,7 @@ jobs:
       DOCKER_IMAGE_TAG_PREFIX: rocm6.4
       DESIRED_PYTHON: "3.13"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      timeout-minutes: 300
       build_name: manywheel-py3_13-rocm6_4
       build_environment: linux-binary-manywheel
     secrets:
@@ -2679,6 +2687,7 @@ jobs:
       DOCKER_IMAGE_TAG_PREFIX: rocm6.3
       DESIRED_PYTHON: "3.13t"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      timeout-minutes: 300
       build_name: manywheel-py3_13t-rocm6_3
       build_environment: linux-binary-manywheel
     secrets:
@@ -2789,6 +2798,7 @@ jobs:
       DOCKER_IMAGE_TAG_PREFIX: rocm6.4
       DESIRED_PYTHON: "3.13t"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      timeout-minutes: 300
       build_name: manywheel-py3_13t-rocm6_4
       build_environment: linux-binary-manywheel
     secrets:
@@ -3268,6 +3278,7 @@ jobs:
       DOCKER_IMAGE_TAG_PREFIX: rocm6.3
       DESIRED_PYTHON: "3.14"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      timeout-minutes: 300
       build_name: manywheel-py3_14-rocm6_3
       build_environment: linux-binary-manywheel
     secrets:
@@ -3378,6 +3389,7 @@ jobs:
       DOCKER_IMAGE_TAG_PREFIX: rocm6.4
       DESIRED_PYTHON: "3.14"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      timeout-minutes: 300
       build_name: manywheel-py3_14-rocm6_4
       build_environment: linux-binary-manywheel
     secrets:
@@ -3857,6 +3869,7 @@ jobs:
       DOCKER_IMAGE_TAG_PREFIX: rocm6.3
       DESIRED_PYTHON: "3.14t"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      timeout-minutes: 300
       build_name: manywheel-py3_14t-rocm6_3
       build_environment: linux-binary-manywheel
     secrets:
@@ -3967,6 +3980,7 @@ jobs:
       DOCKER_IMAGE_TAG_PREFIX: rocm6.4
       DESIRED_PYTHON: "3.14t"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      timeout-minutes: 300
       build_name: manywheel-py3_14t-rocm6_4
       build_environment: linux-binary-manywheel
     secrets:
