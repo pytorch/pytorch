@@ -16,6 +16,7 @@ from .node import Node
 log = logging.getLogger(__name__)
 
 __all__ = [
+    "annotate",
     "preserve_node_meta",
     "has_preserved_node_meta",
     "set_stack_trace",
@@ -241,6 +242,7 @@ def set_stack_trace(stack: list[str]):
         current_meta["stack_trace"] = "".join(stack)
 
 
+@compatibility(is_backward_compatible=False)
 @contextmanager
 def annotate(annotation_dict: dict):
     global current_meta
