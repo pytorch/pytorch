@@ -9,10 +9,11 @@ from queue import Empty, Queue
 from threading import Thread
 from typing import Any, Optional, Union
 
-from ops_fuzzer import OperationGraph
-from tensor_fuzzer import fuzz_scalar, fuzz_tensor_simple, ScalarSpec, Spec, TensorSpec
-
 import torch
+
+from torchfuzz.operators import get_operator
+from torchfuzz.ops_fuzzer import OperationGraph
+from torchfuzz.tensor_fuzzer import ScalarSpec, Spec, TensorSpec
 
 
 def convert_graph_to_python_code(
@@ -268,7 +269,7 @@ def generate_simple_operation_code(
     output_spec,
 ) -> list:
     """
-    Generate code lines for executing a single operation (simplified version without arg_tracker).
+    Generate code lines for executing a single operation using class-based operators.
 
     Args:
         output_var: Name of the output variable
@@ -276,83 +277,15 @@ def generate_simple_operation_code(
         op_name: Name of the operation
         output_spec: Output specification for the operation
     """
-    if op_name == "scalar_add":
-        return [f"{output_var} = {input_vars[0]} + {input_vars[1]}"]
+    # Try to get the operator from the registry
+    operator = get_operator(op_name)
 
-    elif op_name == "scalar_multiply":
-        return [f"{output_var} = {input_vars[0]} * {input_vars[1]}"]
-
-    elif op_name == "torch.ops.aten.item":
-        return [f"{output_var} = {input_vars[0]}.item()"]
-
-    elif op_name == "torch.ops.aten.add":
-        return [f"{output_var} = torch.ops.aten.add({input_vars[0]}, {input_vars[1]})"]
-
-    elif op_name == "torch.ops.aten.mul":
-        return [f"{output_var} = torch.ops.aten.mul({input_vars[0]}, {input_vars[1]})"]
-
-    elif op_name == "constant":
-        # Create constant by calling fuzzing functions during codegen with deterministic seed
-        # Use a deterministic seed based on the variable name to ensure reproducibility
-        var_seed = hash(output_var) % (2**31)
-
-        if isinstance(output_spec, ScalarSpec):
-            # Call fuzz_scalar during codegen and embed the result
-            actual_value = fuzz_scalar(output_spec, seed=var_seed)
-
-            # Format the value for embedding in code
-            if isinstance(actual_value, bool):
-                value_str = str(actual_value)
-            elif isinstance(actual_value, (int, float)):
-                value_str = repr(actual_value)
-            elif isinstance(actual_value, complex):
-                value_str = f"complex({actual_value.real}, {actual_value.imag})"
-            else:
-                value_str = repr(actual_value)
-
-            return [f"{output_var} = {value_str}"]
-
-        elif isinstance(output_spec, TensorSpec):
-            # Call fuzz_tensor_simple during codegen and embed the result
-            actual_tensor = fuzz_tensor_simple(
-                output_spec.size, output_spec.stride, output_spec.dtype, seed=var_seed
-            )
-
-            # Convert tensor to code representation
-            size_str = str(output_spec.size)
-            dtype_str = f"torch.{output_spec.dtype}".replace("torch.torch.", "torch.")
-
-            # Handle empty tensors (with 0 elements)
-            if actual_tensor.numel() == 0:
-                # For empty tensors, use a default fill value based on dtype
-                default_values = {
-                    torch.float16: 0.0,
-                    torch.float32: 0.0,
-                    torch.float64: 0.0,
-                    torch.bfloat16: 0.0,
-                    torch.int8: 0,
-                    torch.int16: 0,
-                    torch.int32: 0,
-                    torch.int64: 0,
-                    torch.bool: False,
-                    torch.complex64: 0.0,
-                    torch.complex128: 0.0,
-                }
-                fill_value = default_values.get(output_spec.dtype, 0)
-                return [
-                    f"{output_var} = torch.full({size_str}, {fill_value}, dtype={dtype_str})"
-                ]
-            else:
-                # For non-empty tensors, use the first element as fill value
-                fill_value = actual_tensor.flatten()[0].item()
-                return [
-                    f"{output_var} = torch.full({size_str}, {fill_value}, dtype={dtype_str})"
-                ]
-
-        else:
-            return [f"# Unknown output spec type for constant: {type(output_spec)}"]
-
+    if operator is not None:
+        # Use the class-based operator to generate code
+        code_line = operator.codegen(output_var, input_vars, output_spec)
+        return [code_line]
     else:
+        # Fallback for unknown operations
         return [f"# Unknown operation: {op_name}"]
 
 

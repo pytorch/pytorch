@@ -47,7 +47,13 @@ from torch.fx.experimental.symbolic_shapes import (
     resolve_unbacked_bindings,
 )
 from torch.utils._ordered_set import OrderedSet
-from torch.utils._sympy.functions import CeilDiv, FloorDiv, Identity, ModularIndexing
+from torch.utils._sympy.functions import (
+    CeilDiv,
+    FloorDiv,
+    Identity,
+    Mod,
+    ModularIndexing,
+)
 
 from .._dynamo.utils import import_submodule
 from . import config, inductor_prims, ir, test_operators  # NOQA: F401
@@ -1202,16 +1208,26 @@ def slice_(x, dim=0, start=0, end=2**63, step=1, clamp=True):
 
 @register_lowering(aten.as_strided, type_promotion_kind=None)
 def as_strided(x, size, stride, storage_offset=None):
+    new_device = None
+    new_dtype = None
     if isinstance(x, TensorBox) and isinstance(x.data, ir.BaseView):
-        # as_strided ignores views
+        # Note: Merging views
+        # When we use as_strided, we can rewrite the size/stride/offset
+        # of the incoming buffer x. If x is a view, we would overwrite
+        # its metadata. Except for dtype, which we need to propagate.
+
+        # Technically device is not needed because it is not possible
+        # to have a cross-device view today.
+        new_device = x.get_device()
+        new_dtype = x.dtype
         x = x.data.unwrap_view()
     x.realize()
     if not ir.is_storage_and_layout(x):
         raise NotImplementedError(f"unrealized as_strided({x}, ...)")
     storage, old_layout = ir.as_storage_and_layout(x)
     new_layout = ir.FixedLayout(
-        old_layout.device,
-        old_layout.dtype,
+        new_device if new_device else old_layout.device,
+        new_dtype if new_dtype else old_layout.dtype,
         [sympy.expand(s) for s in size],
         [sympy.expand(s) for s in stride],
         sympy.expand(storage_offset or 0),
@@ -2635,7 +2651,7 @@ def sdpa_constraint(fx_node, *args, **kwargs):
         if len(arg.get_size()) not in (3, 4):
             return arg
 
-        is_aligned_tensor = ir.is_aligned_realized_tensor_hint(arg, ALIGNMENT)
+        is_aligned_tensor = ir.is_aligned_realized_tensor(arg, ALIGNMENT)
         if is_aligned_tensor:
             return ir.try_match_insignificant_strides(
                 ir.ExternKernel.realize_input(arg), meta_stride_expr
@@ -2703,7 +2719,9 @@ def sdpa_constraint(fx_node, *args, **kwargs):
             )
 
         def is_aligned(x):
-            return (V.graph.sizevars.size_hint(x.get_size()[-1]) % ALIGNMENT) == 0
+            return V.graph.sizevars.guard_or_false(
+                sympy.Eq(Mod(x.get_size()[-1], ALIGNMENT), 0)
+            )
 
         if isinstance(arg.data, ir.BaseView):
             if not is_aligned(arg):
@@ -2795,7 +2813,7 @@ make_fallback(aten.replication_pad2d_backward)
 make_fallback(aten.upsample_linear1d_backward)
 make_fallback(aten.upsample_bicubic2d_backward, require_contiguous)
 make_fallback(aten.upsample_trilinear3d_backward)
-make_fallback(aten.grid_sampler_2d_backward, require_dense)
+make_fallback(aten.grid_sampler_2d_backward)
 make_fallback(aten._pdist_backward)
 
 
