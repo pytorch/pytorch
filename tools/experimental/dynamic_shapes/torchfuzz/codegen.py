@@ -198,7 +198,6 @@ def convert_graph_to_python_code(
             f"args = {args_tuple}",
             "result_original = fuzzed_program(*args)",
             "print('✅ eager success')",
-            "sys.exit(1)",
             "compiled_program = torch.compile(fuzzed_program, fullgraph=False, dynamic=True)",
             "result_compiled = compiled_program(*args)",
             "print('✅ compile success')",

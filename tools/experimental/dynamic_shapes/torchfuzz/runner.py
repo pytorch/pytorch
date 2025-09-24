@@ -26,7 +26,7 @@ class ProgramRunner:
             bool: True if program ran successfully, False otherwise
         """
         abs_path = os.path.abspath(program_path)
-        print("Running generated program...")
+        print(f"Running: {abs_path}")
 
         # Select a random CUDA device if available
         cuda_visible_devices = os.environ.get("CUDA_VISIBLE_DEVICES")
@@ -59,6 +59,7 @@ class ProgramRunner:
             )
             print("=== Program Output ===")
             print(result.stdout)
+            print(result.stderr)
             return True
 
         except subprocess.CalledProcessError as e:
