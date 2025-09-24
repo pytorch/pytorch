@@ -2819,10 +2819,7 @@ def _import_device_backends():
     from importlib.metadata import entry_points
 
     group_name = "torch.backends"
-    if sys.version_info < (3, 10):
-        backend_extensions = entry_points().get(group_name, ())
-    else:
-        backend_extensions = entry_points(group=group_name)
+    backend_extensions = entry_points(group=group_name)
 
     for backend_extension in backend_extensions:
         try:
