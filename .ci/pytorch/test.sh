@@ -820,7 +820,7 @@ test_dynamo_benchmark() {
   shift
 
 
-  ### Perf benchmark 2.9 RC3
+  ### Perf benchmark 2.9 RC4
   pip_uninstall torch torchvision torchaudio torchrec fbgemm-gpu
   pip_install torch==2.9.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/test/cu128
   # Rebuild torchrec and fbgemm because they don't have RC for 2.9 yet
