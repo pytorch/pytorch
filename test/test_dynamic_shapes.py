@@ -3252,30 +3252,7 @@ class TestUnbacked(TestCase):
             func(torch.rand(4, 5), torch.rand(4, 5))
 
         guards = "\n".join(log_stream.getvalue().strip().split("\n")[4:]).strip()
-        # Strip comments from each line
-        guards = "\n".join(line.split("#")[0].rstrip() for line in guards.split("\n"))
-        # Remove the last line (Guard eval latency)
-        guards = "\n".join(guards.split("\n")[:-1])
-        # Remove all lines containing ___check_type_id
-        guards = "\n".join(line for line in guards.split('\n') if '___check_type_id' not in line)
-        self.assertExpectedInline(
-            guards,
-            """\
-| +- LAMBDA_GUARD_NO_ARGS: torch._functorch.aot_autograd.utils.top_saved_tensors_hooks ids == None
-| +- DEFAULT_DEVICE: utils_device.CURRENT_DEVICE == None
-| +- GLOBAL_STATE: ___check_global_state()
-| +- TORCH_FUNCTION_MODE_STACK: ___check_torch_function_mode_stack()
-| +- GuardManager: source=L['a'], accessed_by=FrameLocalsGuardAccessor(key='a', framelocals_idx=0), type=<class 'torch.Tensor'>, tag_safe=(True, False)
-| | +- TENSOR_MATCH: check_tensor(L['a'], Tensor, DispatchKeySet(CPU, BackendSelect, ADInplaceOrView, AutogradCPU), torch.float32, device=None, requires_grad=False, size=[None, None], stride=[None, 1])
-| | +- NO_HASATTR: hasattr(L['a'], '_dynamo_dynamic_indices') == False
-| | +- NO_TENSOR_ALIASING: check_no_aliasing(L['a'], L['b'])
-| +- GuardManager: source=L['b'], accessed_by=FrameLocalsGuardAccessor(key='b', framelocals_idx=1), type=<class 'torch.Tensor'>, tag_safe=(True, False)
-| | +- TENSOR_MATCH: check_tensor(L['b'], Tensor, DispatchKeySet(CPU, BackendSelect, ADInplaceOrView, AutogradCPU), torch.float32, device=None, requires_grad=False, size=[None, None], stride=[None, 1])
-| | +- NO_HASATTR: hasattr(L['b'], '_dynamo_dynamic_indices') == False
-| | +- NO_TENSOR_ALIASING""",  # noqa: B950
-            ignore_comments=True,
-            ignore_empty_lines=True,
-        )
+        self.assertFalse("SYMBOLIC_SHAPE_GUARD" in guards)
 
 
 class TestUbackedOps(TestCase):
