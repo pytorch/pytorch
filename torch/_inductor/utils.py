@@ -1534,6 +1534,7 @@ class DelayReplaceLine(DeferredLineBase):
     def _new_line(self, line: str) -> DelayReplaceLine:
         return DelayReplaceLine(self.key, self.value_fn, line)
 
+
 class DelayMaybeLine(DeferredLineBase):
     """At end of codegen return `line if `pred_fn() else None`"""
 
@@ -1541,10 +1542,10 @@ class DelayMaybeLine(DeferredLineBase):
         super().__init__(line)
         self.pred_fn = pred_fn
 
-    def __call__(self) -> str:
+    def __call__(self) -> str | None:
         return self.line if self.pred_fn() else None
 
-    def _new_line(self, line: str) -> DelayReplaceLine:
+    def _new_line(self, line: str) -> DelayMaybeLine:
         return DelayMaybeLine(self.pred_fn, line)
 
 
