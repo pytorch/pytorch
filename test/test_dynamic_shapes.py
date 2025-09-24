@@ -3231,7 +3231,6 @@ class TestUnbacked(TestCase):
         with self.assertRaises(RuntimeError):
             func(a, torch.rand(2, 1))
 
-
     @skipIfTorchDynamo("mark_unbacked is not traceable")
     def test_do_no_guard_unbacked_inputs(self):
         @torch.compile(fullgraph=True, dynamic=True, backend="inductor")
@@ -3247,17 +3246,16 @@ class TestUnbacked(TestCase):
         torch._dynamo.decorators.mark_unbacked(b, 0)
         torch._dynamo.decorators.mark_unbacked(b, 1)
 
-
-        log_stream, ctx = logs_to_string("torch._dynamo.guards","guards")
+        log_stream, ctx = logs_to_string("torch._dynamo.guards", "guards")
         with ctx():
             func(a, b)
             func(torch.rand(4, 5), torch.rand(4, 5))
 
         guards = "\n".join(log_stream.getvalue().strip().split("\n")[4:]).strip()
         # Strip comments from each line
-        guards = "\n".join(line.split('#')[0].rstrip() for line in guards.split('\n'))
+        guards = "\n".join(line.split("#")[0].rstrip() for line in guards.split("\n"))
         # Remove the last line (Guard eval latency)
-        guards = "\n".join(guards.split('\n')[:-1])
+        guards = "\n".join(guards.split("\n")[:-1])
         self.assertExpectedInline(
             guards,
             """\
@@ -3277,6 +3275,7 @@ class TestUnbacked(TestCase):
             ignore_comments=True,
             ignore_empty_lines=True,
         )
+
 
 class TestUbackedOps(TestCase):
     @fresh_cache()
