@@ -1,6 +1,6 @@
 # mypy: ignore-errors
 import os
-from typing import Optional, Union
+from typing import Optional
 
 import torch
 
@@ -55,10 +55,7 @@ def convert_graph_to_python_code(
         op_name = node.op_name
         output_spec = node.output_spec
 
-        # Generate comment for this operation
-        generated_code_lines.append(
-            f"    # Node {node_id}: {op_name} (depth {node.depth})"
-        )
+        # Skip generating useless Node comments
 
         # Generate output variable name
         output_var_name = f"var_{node_id}"
@@ -91,7 +88,6 @@ def convert_graph_to_python_code(
 
         # Add proper indentation for function body
         generated_code_lines.extend(["    " + line for line in operation_lines])
-        generated_code_lines.append("")
 
         # Track this node's variable
         node_variables[node_id] = (output_var_name, output_spec)
@@ -110,20 +106,10 @@ def convert_graph_to_python_code(
     else:
         function_signature = "def fuzzed_program()"
 
-    # Build the complete code
-    fuzzer_dir = os.path.dirname(os.path.abspath(__file__))
+    # Build the complete code - all imports at the top
     code_lines = [
         "import torch",
-        "import sys",
-        "import os",
-        "# Add fuzzer directory to path so we can import tensor_fuzzer",
-        f"fuzzer_dir = r'{fuzzer_dir}'",
-        "if fuzzer_dir not in sys.path:",
-        "    sys.path.insert(0, fuzzer_dir)",
-        "from tensor_fuzzer import fuzz_scalar, fuzz_tensor_simple, ScalarSpec, TensorSpec",
-        "",
-        "# Generated fuzzed program code (topological order from operation graph)",
-        f"# Graph has {len(operation_graph.nodes)} nodes",
+        "torch._dynamo.config.capture_scalar_outputs = True",
         "",
         function_signature + ":",
     ]
@@ -134,7 +120,6 @@ def convert_graph_to_python_code(
     # Add return statement
     code_lines.extend(
         [
-            "    # Final result from root node",
             f"    return {final_var_name}",
             "",
         ]
@@ -142,7 +127,6 @@ def convert_graph_to_python_code(
 
     # Generate argument creation code with deterministic seeds
     if arg_operations:
-        code_lines.append("# Create arguments for the fuzzed program")
         for i, (node_id, spec) in enumerate(arg_operations):
             arg_name = f"arg_{i}"
             # Use a deterministic seed based on the argument index and main seed
@@ -153,28 +137,40 @@ def convert_graph_to_python_code(
                 if arg_seed is not None:
                     code_lines.extend(
                         [
-                            f"scalar_spec = ScalarSpec(dtype={dtype_str})",
-                            f"{arg_name} = fuzz_scalar(scalar_spec, seed={arg_seed})",
+                            f"torch.manual_seed({arg_seed})",
+                            f"{arg_name} = torch.tensor(1.0, dtype={dtype_str}).item()",
                         ]
                     )
                 else:
-                    code_lines.extend(
-                        [
-                            f"scalar_spec = ScalarSpec(dtype={dtype_str})",
-                            f"{arg_name} = fuzz_scalar(scalar_spec)",
-                        ]
+                    code_lines.append(
+                        f"{arg_name} = torch.tensor(1.0, dtype={dtype_str}).item()"
                     )
             elif isinstance(spec, TensorSpec):
                 size_str = str(spec.size)
                 stride_str = str(spec.stride)
                 dtype_str = f"torch.{spec.dtype}".replace("torch.torch.", "torch.")
+
+                # Calculate storage size needed for the strided tensor
+                if spec.size:
+                    storage_size = 1
+                    for dim_size, stride in zip(spec.size, spec.stride):
+                        if dim_size > 1:
+                            storage_size = max(
+                                storage_size, (dim_size - 1) * abs(stride) + 1
+                            )
+                else:
+                    storage_size = 1
+
                 if arg_seed is not None:
-                    code_lines.append(
-                        f"{arg_name} = fuzz_tensor_simple({size_str}, {stride_str}, {dtype_str}, seed={arg_seed})"
+                    code_lines.extend(
+                        [
+                            f"torch.manual_seed({arg_seed})",
+                            f"{arg_name} = torch.as_strided(torch.randn({storage_size}).to({dtype_str}), {size_str}, {stride_str})",
+                        ]
                     )
                 else:
                     code_lines.append(
-                        f"{arg_name} = fuzz_tensor_simple({size_str}, {stride_str}, {dtype_str})"
+                        f"{arg_name} = torch.as_strided(torch.randn({storage_size}).to({dtype_str}), {size_str}, {stride_str})"
                     )
 
     # Generate the final execution with both normal and compiled versions
@@ -191,8 +187,6 @@ def convert_graph_to_python_code(
 
     code_lines.extend(
         [
-            "import torch",
-            "import sys",
             "torch._dynamo.config.capture_scalar_outputs = True",
             "",
             f"args = {args_tuple}",
@@ -201,7 +195,6 @@ def convert_graph_to_python_code(
             "compiled_program = torch.compile(fuzzed_program, fullgraph=False, dynamic=True)",
             "result_compiled = compiled_program(*args)",
             "print('✅ compile success')",
-            "",
         ]
     )
 
