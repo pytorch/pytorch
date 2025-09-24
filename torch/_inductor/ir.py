@@ -71,7 +71,7 @@ from torch.fx.experimental.symbolic_shapes import (
 )
 from torch.fx.node import Node
 from torch.utils._ordered_set import OrderedSet
-from torch.utils._sympy.functions import CleanDiv, FloorDiv, ModularIndexing
+from torch.utils._sympy.functions import CleanDiv, FloorDiv, Mod, ModularIndexing
 from torch.utils._sympy.symbol import SymT
 
 from . import config, dependencies
@@ -352,7 +352,7 @@ def get_stride_order(
 
 
 @overload
-def ir_node_to_tensor(x: Literal[None], guard_shape: bool = True) -> None: ...
+def ir_node_to_tensor(x: None, guard_shape: bool = True) -> None: ...
 
 
 @overload
@@ -433,10 +433,7 @@ def is_cpu(x: Union[IRNode, torch.device, None, str]) -> bool:
     return get_device_type(x) == "cpu"
 
 
-def is_aligned_realized_tensor_hint(
-    x: Union[Buffer, TensorBox], alignment: int
-) -> bool:
-    # Use this as a hint. This won't guard since size_hint doesn't guard.
+def is_aligned_realized_tensor(x: Union[Buffer, TensorBox], alignment: int) -> bool:
     if (
         not isinstance(x, IRNode)
         or x.maybe_get_stride() is None
@@ -445,16 +442,16 @@ def is_aligned_realized_tensor_hint(
     ):
         return False
 
-    aligned_strides = all(
-        (V.graph.sizevars.size_hint_or_throw(x.get_stride()[i]) % alignment) == 0
-        for i in range(len(x.get_stride()) - 1)
+    aligned_strides = sympy.And(
+        *(sympy.Eq(Mod(s, alignment), 0) for s in x.get_stride()[:-1])
     )
-    # if the last dim size is <= 1, stride doesn't matter
-    aligned_last_dim = (
-        V.graph.sizevars.size_hint_or_throw(x.get_stride()[-1]) == 1
-        or V.graph.sizevars.size_hint_or_throw(x.get_size()[-1]) <= 1
+    aligned_last_dim = sympy.Or(
+        sympy.Eq(x.get_stride()[-1], 1), sympy.Le(x.get_size()[-1], 1)
     )
-    return aligned_last_dim and aligned_strides
+    is_aligned = sympy.And(aligned_strides, aligned_last_dim)
+
+    # Make sure to guard to recompile when necessary.
+    return V.graph.sizevars.guard_or_false(is_aligned)
 
 
 def significant_strides_equal(
@@ -4223,7 +4220,7 @@ class Buffer(IRNode, CodegenSymbol):
         assert self.name, self
         return self.name
 
-    def get_example(self) -> Union[torch.Tensor, sympy.Symbol]:
+    def get_example(self) -> Union[torch.Tensor, torch.SymInt]:
         if isinstance(self.layout, Layout):
             return self.layout.get_example()
         raise NotImplementedError(type(self.layout).__name__)
@@ -4972,6 +4969,11 @@ class ChoiceCaller:
         # An additional description used to describe the choice (useful for
         # knowing what autotuning is choosing)
         self.description = description
+        self.failed: bool = False
+        # A place to store annotations that can be read post benchmarking
+        # Use this to shuttle information between ChoieCaller generation
+        # and the end of benchmarking
+        self.annotations: dict[Any, Any] = {}
 
     def benchmark(self, *args: Any, out: torch.Tensor) -> float:
         algo = self.to_callable()
@@ -5008,6 +5010,14 @@ class ChoiceCaller:
 
     def autoheuristic_id(self) -> str:
         return "unsupported_choice"
+
+    def mark_failed(self) -> None:
+        """
+        Mark the choice as failed so that it can be
+        removed later. Useful for when we decouple
+        compilation and tuning.
+        """
+        self.failed = True
 
 
 class TritonTemplateCallerBase(ChoiceCaller):
@@ -5917,7 +5927,7 @@ class ExternKernel(InputsKernel):
         if is_storage_and_layout(x):
             if isinstance(x.get_layout(), FlexibleLayout):
                 if order:
-                    # If the the FlexibleLayout already has the size and stride in the required order,
+                    # If the FlexibleLayout already has the size and stride in the required order,
                     # freeze it to a FixedLayout by using its current size and stride.
                     # The behavior of using its current size and stride or the given order can be different
                     # if the size and stride has ambiguilty, for example for a 4D input where the iC = 1:
@@ -7051,28 +7061,7 @@ class ScatterFallback(ExternKernel):
     """
 
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
-        reduce = self.kwargs["reduce"]
-        if V.graph.cpp_wrapper:
-            # Follow aten/src/ATen/native/ReductionType.h:get_operator_enum
-            get_operator_enum = {"add": "sum", "multiply": "prod"}
-            if reduce in get_operator_enum:
-                reduce = get_operator_enum[reduce]
-
-        assert is_node_sequence(self.inputs)
-        if self.src_is_tensor:
-            (x, index, src) = (t.codegen_reference() for t in self.inputs)
-        else:
-            (x, index) = (t.codegen_reference() for t in self.inputs)
-            src = self.constant_args[1]
-        wrapper.generate_scatter_fallback(
-            x,
-            [x, self.constant_args[0], index, src],
-            self.cpp_kernel_name,
-            self.python_kernel_name,
-            self.src_is_tensor,
-            reduce,
-            self.codegen_kwargs(),
-        )
+        wrapper.generate_scatter_fallback(self)
 
     def should_allocate(self) -> bool:
         return False
@@ -7127,19 +7116,7 @@ class IndexPutFallback(ExternKernel):
     """
 
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
-        assert is_node_sequence(self.inputs)
-        (x, values, *valid_indices) = (t.codegen_reference() for t in self.inputs)
-        indices = []
-        iter_valid_indices = iter(valid_indices)
-        for i, _ in enumerate(self.indices):
-            if self.indices[i] is not None:
-                indices.append(next(iter_valid_indices))
-            else:
-                indices.append(V.graph.wrapper_code.none_str)
-
-        wrapper.generate_index_put_fallback(
-            self.get_kernel_name(), x, indices, values, *self.codegen_const_args()
-        )
+        wrapper.generate_index_put_fallback(self)
 
     def should_allocate(self) -> bool:
         return False
@@ -7570,7 +7547,25 @@ class FallbackKernel(ExternKernelAlloc):
         return get_schema_info(self.op_overload).is_mutable()
 
     def get_inputs_that_alias_output(self) -> Sequence[str]:
-        return self.alias_names
+        assert isinstance(
+            self.op_overload, (torch._ops.OpOverload, torch._ops.HigherOrderOperator)
+        ), (
+            f"Fails to create FallbackKernel for {self.op_overload}: "
+            f"{type(self.op_overload)} not supported"
+        )
+
+        # See [Note: FallbackKernel supported operators]: for a mutating
+        # op that is auto-functionalizable, its outputs does NOT
+        # alias any of the inputs.
+        if (
+            not isinstance(self.op_overload, torch._ops.HigherOrderOperator)
+            and "_c10d_functional" not in self.op_overload.name()
+            and self.op_overload._schema.is_mutable
+            and can_auto_functionalize(self.op_overload)
+        ):
+            return []
+        else:
+            return self.alias_names
 
     def get_mutation_names(self) -> Sequence[str]:
         assert len(self.mutation_names) <= 1
@@ -8219,8 +8214,22 @@ class StorageBox(MutableBox):
             self.realize()
 
     def has_accumulated_enough_reads_by_size(self, threshold: int) -> bool:
+        from torch._inductor.utils import is_nonfreeable_buffers
+
+        size_of_reads = [
+            V.graph.get_dep_size_hint(dep)
+            for dep in self.get_reads()
+            if not is_nonfreeable_buffers(dep)
+        ]
+        if not size_of_reads:
+            return False
+        total_size = sum(size_of_reads)
+        max_size = max(size_of_reads)
+        min_size = min(size_of_reads)
         return (
-            sum(V.graph.get_dep_size_hint(dep) for dep in self.get_reads()) > threshold
+            total_size >= threshold
+            and total_size / max_size >= 2
+            and max_size == min_size
         )
 
     def has_exceeded_max_reads(self) -> bool:
