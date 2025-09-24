@@ -53,6 +53,7 @@ from torch.testing._internal.common_utils import (
     subtest,
     TEST_SCIPY,
     TEST_WITH_ROCM,
+    xfailIf,
 )
 
 
@@ -4087,35 +4088,26 @@ class TestConvolutionNNDeviceType(NNTestCase):
     @onlyCUDA
     @largeTensorTest("20GB")
     @largeTensorTest("64GB", "cpu")
+    # TODO(eqy): Remove this once it is fixed in cuDNN and we can dispatch to it again
+    @xfailIf(torch.backends.cudnn.version() > 91000)
     def test_depthwise_conv_64bit_indexing(self, device):
-        def test():
-            x = torch.randn(1, 2, 32800, 32800, dtype=torch.half).to(
-                memory_format=torch.channels_last
-            )
-            c = nn.Conv2d(
-                2, 2, kernel_size=3, stride=1, padding=1, groups=2, dtype=torch.half
-            ).to(memory_format=torch.channels_last)
-            yref = c(x)
-            y = c.to(device=device)(x.to(device=device))
-            self.assertEqual(yref, y, atol=1e-3, rtol=1e-4)
-            del y, yref
+        x = torch.randn(1, 2, 32800, 32800, dtype=torch.half).to(
+            memory_format=torch.channels_last
+        )
+        c = nn.Conv2d(
+            2, 2, kernel_size=3, stride=1, padding=1, groups=2, dtype=torch.half
+        ).to(memory_format=torch.channels_last)
+        yref = c(x)
+        y = c.to(device=device)(x.to(device=device))
+        self.assertEqual(yref, y, atol=1e-3, rtol=1e-4)
+        del y, yref
 
-            # try a batch-splittable case
-            x = x.reshape(100, 2, 3280, 3280)
-            x = x.contiguous(memory_format=torch.channels_last)
-            yref = c(x)
-            y = c.to(device=device)(x.to(device=device))
-            self.assertEqual(yref, y, atol=1e-3, rtol=1e-4)
-
-        cudnn_version = torch.backends.cudnn.version()
-
-        # TODO(eqy): Remove this once it is fixed in cuDNN and we can dispatch to it again
-        if cudnn_version > 91000:
-            with self.assertRaises(RuntimeError):
-                test()
-        else:
-            test()
-
+        # try a batch-splittable case
+        x = x.reshape(100, 2, 3280, 3280)
+        x = x.contiguous(memory_format=torch.channels_last)
+        yref = c(x)
+        y = c.to(device=device)(x.to(device=device))
+        self.assertEqual(yref, y, atol=1e-3, rtol=1e-4)
 
 instantiate_device_type_tests(TestConvolutionNNDeviceType, globals(), allow_mps=True)
 instantiate_parametrized_tests(TestConvolutionNN)
