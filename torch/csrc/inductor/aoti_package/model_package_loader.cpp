@@ -24,6 +24,7 @@ namespace fs = std::filesystem;
 
 // TODO: C++17 has the filesystem header, which may replace these
 #ifdef _WIN32
+#include <Windows.h>
 // On Windows, the POSIX implementations are considered deprecated. We simply
 // map to the newer variant.
 #include <direct.h>
@@ -559,11 +560,21 @@ class RAIIMinizArchive {
             zip_filename.c_str(),
             path_dest_filename.c_str(),
             0)) {
+#ifdef _WIN32
+      DWORD dwErrCode = GetLastError();
       throw std::runtime_error(fmt::format(
-          "Failed to extract zip file {} to destination file {}, error info {}",
+          "Failed to extract zip file {} to destination file {}, error code: {}, mz_zip error string: {}",
+          zip_filename,
+          path_dest_filename,
+          dwErrCode,
+          mz_zip_get_error_string(mz_zip_get_last_error(&_zip_archive))));
+#else
+      throw std::runtime_error(fmt::format(
+          "Failed to extract zip file {} to destination file {}, mz_zip error string: {}",
           zip_filename,
           path_dest_filename,
           mz_zip_get_error_string(mz_zip_get_last_error(&_zip_archive))));
+#endif
     }
   }
 
