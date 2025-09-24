@@ -248,7 +248,9 @@ def annotate(annotation_dict: dict):
     global current_meta
 
     has_custom = "custom" in current_meta
-    old_custom = copy.copy(current_meta.get("custom", {}))
+    old_custom = {}
+    for k, v in current_meta.items():
+        old_custom[k] = v
 
     try:
         if not has_custom:
