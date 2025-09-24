@@ -76,7 +76,6 @@ from .runtime.benchmarking import benchmarker
 from .runtime.hints import DeviceProperties
 from .runtime.triton_compat import HAS_WARP_SPEC
 from .runtime.triton_heuristics import FixedGrid
-from .template_heuristics.registry import register_template
 from .utils import (
     ceildiv,
     do_bench_using_profiling,
@@ -2106,6 +2105,7 @@ class ExternKernelChoice:
         # so we indicate this by returning None
         self.src_hash = None
         # Register this template instance in the global registry
+        from .template_heuristics.registry import register_template
 
         register_template(self)
 
