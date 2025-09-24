@@ -77,7 +77,7 @@ def reify(e, s):
 seq = tuple, list, Iterator
 
 
-@dispatch((tuple, list, Iterator), (tuple, list, Iterator), dict)  # type: ignore[arg-type]
+@dispatch(seq, seq, dict)
 def _unify(u, v, s):
     if len(u) != len(v):
         return False
