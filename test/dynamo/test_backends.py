@@ -312,7 +312,6 @@ class TestCustomBackendAPI(torch._dynamo.test_case.TestCase):
             mock_group = MagicMock()
             mock_group.names = [name]
             mock_group[name] = mock_3_10
-            # mock_group[name].load.return_value = lambda: "mocked 3.10"
             return mock_group
 
         with patch("importlib.metadata.entry_points", mock_eps):
