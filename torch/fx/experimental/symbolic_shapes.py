@@ -973,7 +973,7 @@ def free_unbacked_symbols(x: IterateExprs) -> OrderedSet[sympy.Symbol]:
     )
 
 
-def free_non_source_unbacked_symbols(
+def _free_non_source_unbacked_symbols(
     x: IterateExprs, unbacked_inputs: OrderedSet[sympy.Symbol]
 ) -> OrderedSet[sympy.Symbol]:
     """Unbacked symbols that are not inputs to the graph. These are symbols that originated from
@@ -6950,7 +6950,7 @@ class ShapeEnv:
                     if isinstance(lhs, sympy.Symbol):
                         if free_unbacked_symbols(
                             lhs
-                        ) and not free_non_source_unbacked_symbols(
+                        ) and not _free_non_source_unbacked_symbols(
                             rhs, self.unbacked_inputs
                         ):
                             return True
