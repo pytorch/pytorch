@@ -133,7 +133,7 @@ html_static_path = ["_static"]
 html_theme_options = {
     "logo": {"text": "Home"},
     "analytics_id": "GTM-T8XT4PS",
-    "canonical_url": "https://pytorch.org/docs/stable/",
+    "canonical_url": "https://docs.pytorch.org/docs/stable/",
     "switcher": {
         "json_url": "https://docs.pytorch.org/docs/pytorch-versions.json",
         "version_match": switcher_version,
@@ -143,7 +143,7 @@ html_theme_options = {
     "external_links": [
         {
             "name": "Tutorials",
-            "url": "https://pytorch.org/tutorials/",
+            "url": "https://docs.pytorch.org/tutorials/",
         },
     ],
     "show_version_warning_banner": True,
@@ -509,10 +509,6 @@ coverage_ignore_functions = [
     "custom_fwd",
     # torch.cuda.amp.common
     "amp_definitely_not_available",
-    # torch.cuda.graphs
-    "graph_pool_handle",
-    "is_current_stream_capturing",
-    "make_graphed_callables",
     # torch.mtia.memory
     "reset_peak_memory_stats",
     # torch.cuda.nccl
@@ -524,25 +520,11 @@ coverage_ignore_functions = [
     "reduce_scatter",
     "unique_id",
     "version",
-    # torch.cuda.nvtx
-    "range",
-    "range_end",
-    "range_start",
     # torch.cuda.profiler
     "init",
     "profile",
     "start",
     "stop",
-    # torch.cuda.random
-    "get_rng_state",
-    "get_rng_state_all",
-    "initial_seed",
-    "manual_seed",
-    "manual_seed_all",
-    "seed",
-    "seed_all",
-    "set_rng_state",
-    "set_rng_state_all",
     # torch.distributed.algorithms.ddp_comm_hooks.ddp_zero_hook
     "hook_with_zero_step",
     "hook_with_zero_step_interleaved",
@@ -2172,8 +2154,6 @@ coverage_ignore_classes = [
     "EventHandler",
     "SynchronizationError",
     "UnsynchronizedAccessError",
-    # torch.cuda.memory
-    "MemPool",
     # torch.distributed.elastic.multiprocessing.errors
     "ChildFailedError",
     "ProcessFailure",
@@ -2479,10 +2459,6 @@ coverage_ignore_classes = [
     # torch.amp.grad_scaler
     "GradScaler",
     "OptState",
-    # torch.cuda.graphs
-    "CUDAGraph",
-    # torch.cuda.streams
-    "Event",
     # torch.distributed.algorithms.ddp_comm_hooks.post_localSGD_hook
     "PostLocalSGDState",
     # torch.distributed.algorithms.ddp_comm_hooks.powerSGD_hook
@@ -3176,8 +3152,6 @@ coverage_ignore_classes = [
     "WeakIdKeyDictionary",
     "WeakIdRef",
     "WeakTensorKeyDictionary",
-    # torch.utils.debug_mode
-    "DebugMode",
 ]
 
 # The suffix(es) of source filenames.
