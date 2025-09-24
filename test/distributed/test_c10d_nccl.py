@@ -83,7 +83,6 @@ if TEST_WITH_DEV_DBG_ASAN:
     )
     sys.exit(0)
 
-# bfloat16 is only supported by CUDA 11+
 BFLOAT16_AVAILABLE = torch.cuda.is_available() and (
     torch.version.cuda is not None or torch.version.hip is not None
 )
@@ -2895,6 +2894,25 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
         os.environ["TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC"] = "1000"
 
     @requires_nccl()
+    @skip_if_lt_x_gpu(3)
+    @skip_if_rocm_multiprocess
+    def test_send_recv_non_dense_tensor(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        device = torch.device("cuda", self.rank % torch.cuda.device_count())
+        dist.init_process_group(
+            rank=self.rank, world_size=self.world_size, store=store, device_id=device
+        )
+        full = torch.empty((64, 64), device=device).fill_(self.rank)
+        # Take a slice in col dimension, making it non-dense
+        block = full[:, 16:32]
+        if self.rank == 0:
+            with self.assertRaises(ValueError):
+                dist.send(block, dst=1)
+        elif self.rank == 1:
+            with self.assertRaises(ValueError):
+                dist.recv(block, src=0)
+
+    @requires_nccl()
     @requires_nccl_version((2, 4, 0), "Need NCCL 2.4+ for error checking")
     @skip_if_lt_x_gpu(3)
     @skip_if_rocm_multiprocess
@@ -3145,19 +3163,24 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
 class NcclUserBufferRegistrationTest(MultiProcessTestCase):
     def setUp(self):
         super().setUp()
-        # TORCH_NCCL_BLOCKING_WAIT overrides TORCH_NCCL_ASYNC_ERROR_HANDLING hence tests
-        # that use TORCH_NCCL_BLOCKING_WAIT will test it as expected.
-        os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "1"
         nccl_debug_file = tempfile.NamedTemporaryFile()
-        os.environ["NCCL_ALGO"] = "NVLS"
-        os.environ["NCCL_DEBUG"] = "INFO"
-        os.environ["NCCL_DEBUG_SUBSYS"] = "NVLS"
+        nccl_env = {
+            # TORCH_NCCL_BLOCKING_WAIT overrides TORCH_NCCL_ASYNC_ERROR_HANDLING hence tests
+            # that use TORCH_NCCL_BLOCKING_WAIT will test it as expected.
+            "TORCH_NCCL_ASYNC_ERROR_HANDLING": "1",
+            "NCCL_ALGO": "NVLS",
+            "NCCL_DEBUG": "INFO",
+            "NCCL_DEBUG_SUBSYS": "NVLS",
+            "NCCL_DEBUG_FILE": nccl_debug_file.name,
+        }
         if torch.cuda.nccl.version() >= (2, 24, 3):
-            os.environ["NCCL_DEBUG_SUBSYS"] = "REG,TUNING"
-        os.environ["NCCL_DEBUG_FILE"] = nccl_debug_file.name
+            nccl_env["NCCL_DEBUG_SUBSYS"] = "REG,TUNING"
+        self.env_patcher = mock.patch.dict(os.environ, nccl_env)
+        self.env_patcher.start()
         self._spawn_processes()
 
     def tearDown(self):
+        self.env_patcher.stop()
         super().tearDown()
         try:
             os.remove(self.file_name)
