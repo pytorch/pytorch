@@ -15,6 +15,10 @@ class PowOperator(Operator):
         """Pow can always produce a tensor by raising a tensor to a power."""
         return True
 
+    def supports_variable_inputs(self):
+        """Pow operator supports variable number of inputs."""
+        return True
+
     def decompose(self, tensor, num_inputs=2):
         """Decompose tensor into input tensors for power operation with type promotion."""
         # Type promotion table for realistic LLM/diffusion model types

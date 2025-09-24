@@ -51,7 +51,7 @@ class Fuzzer:
                     chosen_op = random.choice(candidates)
                     # Get the "ideal" input tensors for this op
                     # --- CHANGED: pass random number of inputs to decompose ---
-                    if isinstance(chosen_op, (AddOperator, MulOperator, SubOperator, DivOperator, PowOperator, CatOperator)):
+                    if chosen_op.supports_variable_inputs():
                         min_inputs = 2
                         max_inputs = 5
                         num_inputs = random.randint(min_inputs, max_inputs)

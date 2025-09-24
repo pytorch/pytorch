@@ -17,3 +17,7 @@ class Operator:
     def codegen(self, output_name, input_names, output_tensor):
         """Generate code for this operator."""
         raise NotImplementedError
+
+    def supports_variable_inputs(self) -> bool:
+        """Return True if this operator supports a variable number of inputs."""
+        return False
