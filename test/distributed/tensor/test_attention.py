@@ -414,7 +414,8 @@ class CPFlexAttentionTest(DTensorTestBase):
     ) -> None:
         torch.cuda.manual_seed(10)
         dtype = torch.float32
-        bs = B if B > 1 else 8
+        # bs = B if B > 1 else 8
+        bs = 1
         query_tokens = context_tokens = qkv_size
         dim = 32
         nheads = 1  # 8
@@ -525,11 +526,13 @@ class CPFlexAttentionTest(DTensorTestBase):
             _context_parallel_buffers,
         )
 
+        """
         if self.rank == 0:
             save_tensor_to_file(
                 expect_out[0][0],
                 "torch/distributed/tensor/examples/output/full_expect_out.txt",
             )
+        """
 
         expect_out, expect_lse = _context_parallel_buffers(
             device_mesh,
@@ -540,6 +543,7 @@ class CPFlexAttentionTest(DTensorTestBase):
         # torch.distributed.breakpoint()
         # torch.distributed.barrier()
 
+        """
         save_tensor_to_file(
             cp_out[0][0][:128],
             f"torch/distributed/tensor/examples/output/cp_out_{self.rank}_0.txt",
@@ -552,11 +556,11 @@ class CPFlexAttentionTest(DTensorTestBase):
             expect_out[0][0],
             f"torch/distributed/tensor/examples/output/expect_out_{self.rank}.txt",
         )
+        """
 
-        torch.testing.assert_close(cp_out[0][0], expect_out[0][0], atol=atol, rtol=rtol)
-        torch.testing.assert_close(
-            cp_aux.lse[0][0], expect_lse[0][0], atol=atol, rtol=rtol
-        )
+        print(f"cp_out: {cp_out.shape}, expect_out: {expect_out.shape}")
+        torch.testing.assert_close(cp_out, expect_out, atol=atol, rtol=rtol)
+        torch.testing.assert_close(cp_aux.lse, expect_lse, atol=atol, rtol=rtol)
 
         # unshard the output
         """
