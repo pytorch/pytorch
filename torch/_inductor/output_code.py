@@ -607,9 +607,12 @@ class CompiledFxGraph(OutputCode):
                 }
             )
         try:
-            with record_function(
-                f"## Call CompiledFxGraph {self._fx_graph_cache_key} ##"
-            ):
+            if torch.autograd.profiler._is_profiler_enabled:
+                with record_function(
+                    f"## Call CompiledFxGraph {self._fx_graph_cache_key} ##"
+                ):
+                    return self.current_callable(inputs)
+            else:
                 return self.current_callable(inputs)
         finally:
             get_runtime_metrics_context().finish()
