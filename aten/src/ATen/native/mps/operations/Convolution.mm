@@ -142,6 +142,8 @@ static Tensor _mps_convolution_impl(const Tensor& input_t,
     return output_t;
   }
   TensorArg output{output_t, "result", 0};
+
+  // TODO: Remove me when MacOS-14 is no longer supported
   std::optional<Tensor> output_c;
   if (!is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS) && is_channels_last) {
     output_c = at::empty_like(output_t, output_t.options().memory_format(MemoryFormat::Contiguous));
@@ -334,16 +336,18 @@ static Tensor mps_convolution_backward_input(IntArrayRef input_size,
   checkAllSameGPU(c, {grad_output, weight});
   constexpr auto kChannelsLast = at::MemoryFormat::ChannelsLast;
   bool is_channels_last = mps_conv_use_channels_last(grad_output_t, weight_t) && !is3DConv;
-  const bool needs_copy = !is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS) && is_channels_last;
   auto grad_input_t =
       at::empty(input_size, grad_output_t.options(), is_channels_last ? std::optional(kChannelsLast) : std::nullopt);
-  auto grad_input_c = needs_copy
-      ? at::empty_like(grad_input_t, grad_input_t.options().memory_format(MemoryFormat::Contiguous))
-      : Tensor();
 
   // Avoid "grad_input" when this is being used as transposed convolution
   TensorArg grad_input{grad_input_t, "result", 0};
   convolution_shape_check(c, grad_input, weight, grad_output, padding, stride, dilation, groups);
+
+  // TODO: Remove me when MacOS-14 is no longer supported
+  std::optional<Tensor> grad_input_c;
+  if (!is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS) && is_channels_last) {
+    grad_input_c = at::empty_like(grad_input_t, grad_input_t.options().memory_format(MemoryFormat::Contiguous));
+  }
 
   // Derive from MPSCachedGraph
   struct CachedGraph : public MPSCachedGraph {
@@ -440,15 +444,15 @@ static Tensor mps_convolution_backward_input(IntArrayRef input_size,
     });
 
     auto gradOutputPlaceholder =
-        Placeholder(cachedGraph->gradOutputTensor_, needs_copy ? grad_output_t.contiguous() : grad_output_t);
-    auto weightsPlaceholder = Placeholder(cachedGraph->weightTensor_, needs_copy ? weight_t.contiguous() : weight_t);
-    auto outputPlaceholder = Placeholder(cachedGraph->gradInputTensor_, needs_copy ? grad_input_c : grad_input_t);
+        Placeholder(cachedGraph->gradOutputTensor_, grad_input_c ? grad_output_t.contiguous() : grad_output_t);
+    auto weightsPlaceholder = Placeholder(cachedGraph->weightTensor_, grad_input_c ? weight_t.contiguous() : weight_t);
+    auto outputPlaceholder = Placeholder(cachedGraph->gradInputTensor_, grad_input_c ? *grad_input_c : grad_input_t);
 
     auto feeds = dictionaryFromPlaceholders(gradOutputPlaceholder, weightsPlaceholder);
     runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
   }
-  if (needs_copy) {
-    grad_input_t.copy_(grad_input_c);
+  if (grad_input_c) {
+    grad_input_t.copy_(*grad_input_c);
   }
   return grad_input_t;
 }
@@ -463,12 +467,11 @@ static Tensor mps_convolution_backward_weights(IntArrayRef weight_size,
                                                bool bias_defined) {
   using namespace at::native::mps;
   using namespace mps;
-  bool is3DConv = input_t.dim() == 5;
+  const bool is3DConv = input_t.dim() == 5;
   TORCH_CHECK(isFloatingType(grad_output_t.scalar_type()), "Convolution is supported only for Floating types");
   CheckedFrom c = "mps_convolution_backward_weights";
   constexpr auto kChannelsLast = at::MemoryFormat::ChannelsLast;
   bool is_channels_last = mps_conv_use_channels_last(input_t, grad_output_t) && !is3DConv;
-  const bool needs_copy = !is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS) && is_channels_last;
 
   // For uniformity with everything else, although it seems grad_weight
   // would be unambiguous too.
@@ -480,9 +483,7 @@ static Tensor mps_convolution_backward_weights(IntArrayRef weight_size,
 
   auto grad_weight_t =
       at::empty(weight_size, grad_output_t.options(), is_channels_last ? std::optional(kChannelsLast) : std::nullopt);
-  auto grad_weight_c = needs_copy
-      ? at::empty_like(grad_weight_t, grad_weight_t.options().memory_format(MemoryFormat::Contiguous))
-      : Tensor();
+
   TensorArg grad_weight{grad_weight_t, "result", 0};
 
   convolution_shape_check(c, input, grad_weight, grad_output, padding, stride, dilation, groups);
@@ -494,6 +495,12 @@ static Tensor mps_convolution_backward_weights(IntArrayRef weight_size,
     MPSGraphTensor* inputTensor_ = nil;
     MPSGraphTensor* gradWeightTensor_ = nil;
   };
+
+  // TODO: Remove me when MacOS-14 is no longer supported
+  std::optional<Tensor> grad_weight_c;
+  if (!is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS) && is_channels_last) {
+    grad_weight_c = at::empty_like(grad_weight_t, grad_weight_t.options().memory_format(MemoryFormat::Contiguous));
+  }
 
   @autoreleasepool {
     MPSStream* stream = getCurrentMPSStream();
@@ -580,16 +587,17 @@ static Tensor mps_convolution_backward_weights(IntArrayRef weight_size,
     });
 
     auto gradOutputPlaceholder =
-        Placeholder(cachedGraph->gradOutputTensor_, needs_copy ? grad_output_t.contiguous() : grad_output_t);
-    auto inputPlaceholder = Placeholder(cachedGraph->inputTensor_, needs_copy ? input_t.contiguous() : input_t);
-    auto outputPlaceholder = Placeholder(cachedGraph->gradWeightTensor_, needs_copy ? grad_weight_c : grad_weight_t);
+        Placeholder(cachedGraph->gradOutputTensor_, grad_weight_c ? grad_output_t.contiguous() : grad_output_t);
+    auto inputPlaceholder = Placeholder(cachedGraph->inputTensor_, grad_weight_c ? input_t.contiguous() : input_t);
+    auto outputPlaceholder =
+        Placeholder(cachedGraph->gradWeightTensor_, grad_weight_c ? *grad_weight_c : grad_weight_t);
 
     auto feeds = dictionaryFromPlaceholders(gradOutputPlaceholder, inputPlaceholder);
     runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
   }
 
-  if (needs_copy) {
-    grad_weight_t.copy_(grad_weight_c);
+  if (grad_weight_c) {
+    grad_weight_t.copy_(*grad_weight_c);
   }
   return grad_weight_t;
 }
