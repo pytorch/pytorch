@@ -418,7 +418,7 @@ class CPFlexAttentionTest(DTensorTestBase):
         bs = 1
         query_tokens = context_tokens = qkv_size
         dim = 32
-        nheads = 1  # 8
+        nheads = 1
 
         q = torch.rand(
             (bs, nheads, query_tokens, dim),
@@ -526,44 +526,19 @@ class CPFlexAttentionTest(DTensorTestBase):
             _context_parallel_buffers,
         )
 
-        """
-        if self.rank == 0:
-            save_tensor_to_file(
-                expect_out[0][0],
-                "torch/distributed/tensor/examples/output/full_expect_out.txt",
-            )
-        """
-
-        expect_out, expect_lse = _context_parallel_buffers(
+        # check `restore=False` correctness
+        sharded_expect_out, sharded_expect_lse = _context_parallel_buffers(
             device_mesh,
             buffers=[expect_out.detach(), expect_aux.lse.detach()],
             buffer_seq_dims=[2, 2],
-            load_balance_indices=lb.generate_indices(),
+            load_balance_indices=lb.generate_indices() if lb is not None else None,
         )
-        # torch.distributed.breakpoint()
-        # torch.distributed.barrier()
 
-        """
-        save_tensor_to_file(
-            cp_out[0][0][:128],
-            f"torch/distributed/tensor/examples/output/cp_out_{self.rank}_0.txt",
-        )
-        save_tensor_to_file(
-            cp_out[0][0][128:],
-            f"torch/distributed/tensor/examples/output/cp_out_{self.rank}_1.txt",
-        )
-        save_tensor_to_file(
-            expect_out[0][0],
-            f"torch/distributed/tensor/examples/output/expect_out_{self.rank}.txt",
-        )
-        """
-
-        print(f"cp_out: {cp_out.shape}, expect_out: {expect_out.shape}")
-        torch.testing.assert_close(cp_out, expect_out, atol=atol, rtol=rtol)
-        torch.testing.assert_close(cp_aux.lse, expect_lse, atol=atol, rtol=rtol)
+        torch.testing.assert_close(cp_out, sharded_expect_out, atol=atol, rtol=rtol)
+        torch.testing.assert_close(cp_aux.lse, sharded_expect_lse, atol=atol, rtol=rtol)
 
         # unshard the output
-        """
+        # check `restore=True` correctness
         cp_out, cp_lse = context_parallel_unshard(
             device_mesh,
             buffers=[cp_out, cp_aux.lse],
@@ -583,7 +558,6 @@ class CPFlexAttentionTest(DTensorTestBase):
         torch.testing.assert_close(cp_q_grad, q.grad, atol=atol, rtol=rtol)
         torch.testing.assert_close(cp_k_grad, k.grad, atol=atol, rtol=rtol)
         torch.testing.assert_close(cp_v_grad, v.grad, atol=atol, rtol=rtol)
-        """
 
         # reset CP context dispatch mode to default
         torch.distributed.tensor.experimental._attention._dispatch_mode = (
