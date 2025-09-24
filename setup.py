@@ -1704,7 +1704,15 @@ def main() -> None:
     package_data = {
         "torch": torch_package_data,
     }
-    exclude_package_data = {}
+    # windows libraries *.lib are excluded
+    # these are statically linked
+    exclude_package_data = {
+        "lib/dnnl.lib",
+        "lib/kineto.lib",
+        "lib/libprotobuf-lite.lib",
+        "lib/libprotobuf.lib",
+        "lib/libprotoc.lib",
+    }
 
     if not BUILD_LIBTORCH_WHL:
         package_data["torchgen"] = torchgen_package_data
