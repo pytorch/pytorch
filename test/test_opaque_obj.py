@@ -1,4 +1,5 @@
 # Owner(s): ["module: custom-operators"]
+import copy
 
 import torch
 from torch._dynamo.test_case import run_tests, TestCase
@@ -21,6 +22,14 @@ class OpaqueQueue:
 
     def size(self) -> int:
         return len(self.queue)
+
+    def __eq__(self, other):
+        if len(self.queue) != len(other.queue):
+            return False
+        for q1, q2 in zip(self.queue, other.queue):
+            if not torch.allclose(q1, q2):
+                return False
+        return torch.allclose(self.init_tensor_, other.init_tensor_)
 
 
 class TestOpaqueObject(TestCase):
@@ -94,6 +103,30 @@ class TestOpaqueObject(TestCase):
         self.assertEqual(popped, torch.ones(3) + 1)
         self.assertEqual(queue.size(), 0)
 
+    def test_eq(self):
+        self.assertTrue(make_opaque("moo") == make_opaque("moo"))
+        self.assertFalse(make_opaque("moo") == make_opaque("mop"))
+
+        q1 = OpaqueQueue([torch.ones(3)], torch.zeros(3))
+        q2 = OpaqueQueue([torch.ones(3)], torch.zeros(3))
+        obj1 = make_opaque(q1)
+        obj2 = make_opaque(q2)
+        self.assertTrue(obj1 == obj1)
+        self.assertTrue(q1 == q2)
+        self.assertTrue(obj1 == obj2)
+
+    def test_deepcopy(self):
+        q1 = OpaqueQueue([torch.ones(3), torch.ones(3) * 2], torch.zeros(3))
+        obj1 = make_opaque(q1)
+
+        obj2 = copy.deepcopy(obj1)
+        q2 = get_payload(obj2)
+
+        self.assertTrue(q1 is not q2)
+        self.assertTrue(q1 == q2)
+
+
+instantiate_parametrized_tests(TestOpaqueObject)
 
 if __name__ == "__main__":
     run_tests()
