@@ -136,8 +136,9 @@ def convert_graph_to_python_code(
             if isinstance(spec, ScalarSpec):
                 dtype_str = f"torch.{spec.dtype}".replace("torch.torch.", "torch.")
                 code_lines.append(
-                    f"{arg_name} = torch.tensor(1.0, dtype={dtype_str}).item()"
+                    f"{arg_name} = torch.tensor(torch.randn(()), dtype={dtype_str}).item()"
                 )
+
             elif isinstance(spec, TensorSpec):
                 size_str = str(spec.size)
                 stride_str = str(spec.stride)
