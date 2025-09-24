@@ -3167,7 +3167,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                                                 [2.42240309, 0.0354595, -0.60659063, -0.05378816]]]))
             torch.testing.assert_close(result, ref_output, rtol=1e-5, atol=0)
 
-    @skipIfRocm(msg='Large numerical errors')
     def test_transformerdecoder(self):
         def get_a_test_layer(use_cuda, activation, batch_first=False):
             d_model = 4
