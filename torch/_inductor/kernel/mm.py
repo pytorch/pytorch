@@ -930,16 +930,20 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
         and is_nonzero
         and use_triton_template(layout, check_max_autotune=True)
     ):
-        templates_to_use.append(mm_template)
-
-        if use_triton_tma_template(mat1, mat2, output_layout=layout):
-            templates_to_use.append(persistent_tma_mm_template)
-
-        if use_triton_blackwell_tma_template(mat1, mat2, output_layout=layout):
-            templates_to_use.append(blackwell_ws_persistent_device_tma_mm_template)
-
-        if use_decompose_k_choice(m, n, k):
+        uses_decompose_k = use_decompose_k_choice(m, n, k)
+        # Triton Templates typically perform very poorly for large K.
+        # Its highly unlikely that if we want to use decompose_k, then
+        # Triton will ever win.
+        if uses_decompose_k:
             templates_to_use.append(decompose_k_subgraph_template)
+        else:
+            templates_to_use.append(mm_template)
+
+            if use_triton_tma_template(mat1, mat2, output_layout=layout):
+                templates_to_use.append(persistent_tma_mm_template)
+
+            if use_triton_blackwell_tma_template(mat1, mat2, output_layout=layout):
+                templates_to_use.append(blackwell_ws_persistent_device_tma_mm_template)
 
         templates_to_use.append(mm_contiguous_subgraph_template)
 
