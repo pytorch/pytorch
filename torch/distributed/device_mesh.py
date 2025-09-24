@@ -236,7 +236,7 @@ if True:  # just to temporarily avoid reindentation
                     orig_mesh_dim_names[:dim]
                     + mesh_dim_names
                     + orig_mesh_dim_names[dim + 1 :]
-                ), # mesh_dim_names
+                ),  # mesh_dim_names
                 _init_backend=False,
                 _layout=unflattened_layout,
             )
