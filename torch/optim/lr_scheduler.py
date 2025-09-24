@@ -295,7 +295,9 @@ class LRScheduler:
             else:
                 self.last_epoch = epoch
                 if hasattr(self, "_get_closed_form_lr"):
-                    values = cast(list[float | Tensor], self._get_closed_form_lr())
+                    values = cast(
+                        list[Union[float, Tensor]], self._get_closed_form_lr()
+                    )
                 else:
                     values = self.get_lr()
 
