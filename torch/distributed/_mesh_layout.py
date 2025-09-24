@@ -145,9 +145,9 @@ class _MeshLayout(Layout):
         layout = complement(self, world_size)
         return _MeshLayout(layout.shape, layout.stride)
 
-    def member_ranks(self) -> list[int]:
+    def all_ranks_from_zero(self) -> list[int]:
         """
-        This function computes the all ranks specified by the layout.
+        This function computes the all ranks specified by the layout staring from zero.
 
         How it works:
         1. we enumerates every possible coordinate (like a nested for-loop).
@@ -155,7 +155,7 @@ class _MeshLayout(Layout):
             (0,0), (0,1), (0,2), (1,0), (1,1), (1,2)
 
         2. For each coordinate, we compute a linear rank index as:
-            member_ranks = sum(coord[i] * strides[i] for i in range(ndim))
+            all_ranks_from_zero = sum(coord[i] * strides[i] for i in range(ndim))
 
         Example A:
         sizes = (2, 3)        # 2 rows, 3 cols
@@ -188,17 +188,18 @@ class _MeshLayout(Layout):
         """
         Build global ranks specified by the layout via two-level ranks composition.
 
-        The nested list forms the Cartesian product of group ranks and group offset
-        and the final global ranks are the addition of these two. The result is a
-        list of lists: one sublist per group. This rank list will be used to build
-        the communicator underlying the layout.
+        The nested list forms the Cartesian product of all ranks for one layout and offset
+        regarding filling up the world_size with the layout.
+        The final global ranks are the addition of these two. The result is a
+        list of lists: one sublist per layout. This rank list will be used to build
+        the communicator underlying the layout and the given `world_size`.
 
         Example:
         world_size = 16
         self.size = 4
         self.stride = 1
-        group ranks = [0, 1, 2, 3]
-        group offsets = [0, 4, 8, 12]
+        ranks = [0, 1, 2, 3]
+        offsets = [0, 4, 8, 12]
         result = [
             [0+0, 0+1, 0+2, 0+3],  # → [0, 1, 2, 3]
             [4+0, 4+1, 4+2, 4+3],  # → [4, 5, 6, 7]
@@ -207,6 +208,6 @@ class _MeshLayout(Layout):
         ]
         """
         return [
-            [group_offset + group_rank for group_rank in self.member_ranks()]
-            for group_offset in self.complement(world_size).member_ranks()
+            [offset + rank for rank in self.all_ranks_from_zero()]
+            for offset in self.complement(world_size).all_ranks_from_zero()
         ]

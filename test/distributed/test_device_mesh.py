@@ -1316,11 +1316,12 @@ class CuTeLayoutTest(TestCase):
         outer = pg_layout.complement(world_size=8)
         self.assertEqual(list(outer.sizes_and_strides), [(2, 1)])
         self.assertEqual(
-            pg_layout.member_ranks(),
+            pg_layout.all_ranks_from_zero(),
             [0, 2, 4, 6],
         )
         groups = [
-            [o + i for i in pg_layout.member_ranks()] for o in outer.member_ranks()
+            [o + i for i in pg_layout.all_ranks_from_zero()]
+            for o in outer.all_ranks_from_zero()
         ]
         self.assertEqual(
             groups,
@@ -1340,7 +1341,7 @@ class CuTeLayoutTest(TestCase):
         outer = pg_layout.complement(world_size=16)
         self.assertEqual(list(outer.sizes_and_strides), [(2, 8), (2, 1)])
         self.assertEqual(
-            outer.member_ranks(),
+            outer.all_ranks_from_zero(),
             [0, 1, 8, 9],
         )
         self.assertEqual(
@@ -1356,13 +1357,13 @@ class CuTeLayoutTest(TestCase):
         # Complement ((2,4), (2,1)) under world_size=16 → complement ((2,8), (2,2))
         pg_layout = _Layout((2, 2), (4, 1))
         self.assertEqual(
-            pg_layout.member_ranks(),
+            pg_layout.all_ranks_from_zero(),
             [0, 1, 4, 5],
         )
         outer = pg_layout.complement(world_size=16)
         self.assertEqual(list(outer.sizes_and_strides), [(2, 8), (2, 2)])
         self.assertEqual(
-            outer.member_ranks(),
+            outer.all_ranks_from_zero(),
             [0, 2, 8, 10],
         )
         self.assertEqual(
@@ -1375,10 +1376,10 @@ class CuTeLayoutTest(TestCase):
             ],
         )
 
-        # Test layout_to_global_ranks and layout_to_member_ranks
+        # Test layout_to_global_ranks and layout_to_all_ranks_from_zero
         pg_layout = _Layout((2, 2), (4, 2))
         self.assertEqual(
-            pg_layout.member_ranks(),
+            pg_layout.all_ranks_from_zero(),
             [0, 2, 4, 6],
         )
         self.assertEqual(
@@ -1407,10 +1408,10 @@ class CuTeLayoutTest(TestCase):
             ],
         )
 
-        # Test just member_ranks and global_ranks.
+        # Test just all_ranks_from_zero and global_ranks.
         pg_layout = _Layout((4,), (2,))
         self.assertEqual(
-            pg_layout.member_ranks(),
+            pg_layout.all_ranks_from_zero(),
             [0, 2, 4, 6],
         )
         self.assertEqual(
