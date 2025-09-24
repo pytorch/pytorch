@@ -2104,6 +2104,10 @@ class ExternKernelChoice:
         # There is no src hash for ExternKernelChoice in the traditional sense
         # so we indicate this by returning None
         self.src_hash = None
+        # Register this template instance in the global registry
+        from .template_heuristics.registry import register_template
+
+        register_template(self)
 
     def to_callable(self):
         return getattr(extern_kernels, self.name)

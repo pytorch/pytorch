@@ -2411,6 +2411,10 @@ class KernelTemplate:
     def __init__(self, name: str, hash: Optional[str] = None) -> None:
         self.name = name
         self._hash = hash
+        # Register this template instance in the global registry
+        from ..template_heuristics.registry import register_template
+
+        register_template(self)
 
     @property
     def uid(self) -> str:
