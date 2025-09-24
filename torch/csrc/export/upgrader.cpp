@@ -108,7 +108,7 @@ void registerUpgrader(
     throw std::invalid_argument("Empty keypath provided");
   }
 
-  registerUpgrader(version, keypath_vector, upgrade_func);
+  registerUpgrader(version, std::move(keypath_vector), upgrade_func);
 }
 
 bool deregisterUpgrader(int version, const std::vector<std::string>& keypath) {
