@@ -2078,7 +2078,8 @@ class TestSDPA(NNTestCase):
     @parametrize("dtype", [torch.float32, torch.bfloat16, torch.half])
     @parametrize("n_heads", [[8, 8], [16, 8], [10, 2]])  # [q_heads, kv_heads]
     @parametrize("is_causal", [True, False])
-    def test_reference_implementation_bitwise_match_math_backend(self, device, dtype, n_heads, is_causal):
+    @parametrize("allow_reduced_precision", [True, False])
+    def test_reference_implementation_bitwise_match_math_backend(self, device, dtype, n_heads, is_causal, allow_reduced_precision):
         """Regression test for scaled_dot_product_attention documentation [1] implementation.
         Should produces bitwise identical results to the MATH backend.
 
@@ -2093,7 +2094,10 @@ class TestSDPA(NNTestCase):
             L, S = query.size(-2), key.size(-2)
             scale_factor = 1 / math.sqrt(query.size(-1)) if scale is None else scale
             origin_dtype = query.dtype
-            query, key, value = query.float(), key.float(), value.float()
+            if not torch.backends.cuda.fp16_bf16_reduction_math_sdp_allowed():
+                # Convert to float32 for numerical stability (default behavior)
+                # Note: This flag affects the math backend globally (CPU and CUDA)
+                query, key, value = query.float(), key.float(), value.float()
             query, key = query * math.sqrt(scale_factor), key * math.sqrt(scale_factor)
             attn_bias = torch.zeros(L, S, dtype=query.dtype, device=query.device)
             if is_causal:
@@ -2127,17 +2131,22 @@ class TestSDPA(NNTestCase):
         key = torch.randn(batch_size, kv_heads, seq_len, head_dim, device=device, dtype=dtype)
         value = torch.randn(batch_size, kv_heads, seq_len, head_dim, device=device, dtype=dtype)
 
-        doc_result = scaled_dot_product_attention(
-            query, key, value, dropout_p=0.0, is_causal=is_causal, enable_gqa=enable_gqa
-        )
 
-        with sdpa_kernel(backends=[SDPBackend.MATH]):
-            math_ref = F.scaled_dot_product_attention(
+        origin_flag = torch.backends.cuda.fp16_bf16_reduction_math_sdp_allowed()
+        try:
+            torch.backends.cuda.allow_fp16_bf16_reduction_math_sdp(allow_reduced_precision)
+            doc_result = scaled_dot_product_attention(
                 query, key, value, dropout_p=0.0, is_causal=is_causal, enable_gqa=enable_gqa
             )
-
-        # Must be exact bitwise match - no tolerance allowed
-        self.assertEqual(doc_result, math_ref, atol=0., rtol=0.)
+            with sdpa_kernel(backends=[SDPBackend.MATH]):
+                math_ref = F.scaled_dot_product_attention(
+                    query, key, value, dropout_p=0.0, is_causal=is_causal, enable_gqa=enable_gqa
+                )
+            # Must be exact bitwise match - no tolerance allowed
+            self.assertEqual(doc_result, math_ref, atol=0., rtol=0.)
+        finally:
+            # Restore flag
+            torch.backends.cuda.allow_fp16_bf16_reduction_math_sdp(origin_flag)
 
 class TestSDPACpuOnly(NNTestCase):
     """ Used to test CPU only functionality of scaled_dot_product_attention """
