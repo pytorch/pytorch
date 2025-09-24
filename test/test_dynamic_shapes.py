@@ -3271,7 +3271,7 @@ class TestUnbacked(TestCase):
 | | +- TYPE_MATCH: ___check_type_id(L['b'], 94515018331968)
 | | +- TENSOR_MATCH: check_tensor(L['b'], Tensor, DispatchKeySet(CPU, BackendSelect, ADInplaceOrView, AutogradCPU), torch.float32, device=None, requires_grad=False, size=[None, None], stride=[None, 1])
 | | +- NO_HASATTR: hasattr(L['b'], '_dynamo_dynamic_indices') == False
-| | +- NO_TENSOR_ALIASING""",
+| | +- NO_TENSOR_ALIASING""",  # noqa: B950
             ignore_comments=True,
             ignore_empty_lines=True,
         )
