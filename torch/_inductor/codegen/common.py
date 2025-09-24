@@ -2036,6 +2036,7 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
         self.stores = IndentedBuffer()
 
         self.num_load = 0
+        self.num_store = 0
         self.num_reduction = 0
 
         self.cse: CSE[CSEVariableType, Any] = CSE(self.newvar_prefix, self.suffix)
@@ -2701,6 +2702,7 @@ class CSEProxy(DefaultHandler):
             self._update_store_cache(name, value)
         if name not in V.graph.removed_buffers:
             self.kernel.store(name, index, value, mode=mode)
+            self.kernel.num_store += 1
 
     def store_reduction(self, name: str, index: sympy.Expr, value: CSEVariable) -> None:
         self.kernel.store_buffer_names.add(name)
