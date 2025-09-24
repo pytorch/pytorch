@@ -174,7 +174,7 @@ class Fuzzer:
         if ndim == 0:
             size = ()
         else:
-            size = tuple(random.randint(1, 512) for _ in range(ndim))
+            size = tuple(random.randint(1, 128) for _ in range(ndim))
 
         stride = []
         acc = 1

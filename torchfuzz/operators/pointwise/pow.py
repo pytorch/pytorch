@@ -62,3 +62,6 @@ class PowOperator(Operator):
             for name in input_names[1:]:
                 expr = f"torch.pow({expr}, {name})"
             return f"{output_name} = {expr}"
+
+    def supports_variable_inputs(self) -> bool:
+        return True

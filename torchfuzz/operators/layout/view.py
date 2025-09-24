@@ -12,7 +12,7 @@ class ViewOperator(Operator):
         super().__init__("view")
 
     def can_produce(self, tensor):
-        """View can always target any shape with the same numel."""
+        """View can target any shape with the same numel, but requires contiguous input."""
         return True
 
     def decompose(self, tensor):
@@ -59,5 +59,5 @@ class ViewOperator(Operator):
 
     def codegen(self, output_name, input_names, output_tensor):
         """Generate code for view operation."""
-        # Always view to the output's shape
-        return f"{output_name} = {input_names[0]}.view({tuple(output_tensor.size)})"
+        # Always view to the output's shape - ensure input is contiguous first
+        return f"{output_name} = {input_names[0]}.contiguous().view({tuple(output_tensor.size)})"

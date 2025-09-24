@@ -11,7 +11,10 @@ class GeluOperator(Operator):
         super().__init__("gelu")
 
     def can_produce(self, tensor):
-        """GELU can be applied to any tensor (elementwise op)."""
+        """GELU can be applied to floating point tensors (elementwise op)."""
+        # GELU only supports floating point and complex dtypes
+        if tensor.dtype in ["int8", "int16", "int32", "int64", "uint8", "bool"]:
+            return False
         return True
 
     def decompose(self, tensor):

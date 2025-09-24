@@ -38,6 +38,7 @@ IGNORE_PATTERNS: List[re.Pattern] = [
     re.compile(r"‘zuf\d+’ was not declared in this scope"),
     re.compile(r"out_eager_sum: 0\.0"),
     re.compile(r"error: operand #\d+ does not dominate this use"),
+    re.compile(r"TypeError: unsupported operand type\(s\) for divmod\(\): 'SymInt' and 'int'"),
     # Add more patterns here as needed, e.g.:
     # re.compile(r"Some other error message"),
 ]

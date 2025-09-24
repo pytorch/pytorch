@@ -12,7 +12,10 @@ class BaddbmmOperator(Operator):
         super().__init__("baddbmm")
 
     def can_produce(self, tensor):
-        """Baddbmm can produce tensors that are 3D."""
+        """Baddbmm can produce tensors that are 3D and floating point."""
+        # baddbmm only supports floating point tensors
+        if tensor.dtype in ["int8", "int16", "int32", "int64", "uint8", "bool"]:
+            return False
         return len(tensor.size) == 3
 
     def decompose(self, tensor, num_inputs=3):

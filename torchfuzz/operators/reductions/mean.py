@@ -16,7 +16,11 @@ class MeanOperator(Operator):
         We construct inputs by inserting at most one extra dimension,
         so we need room to add a dim and stay within a reasonable cap.
         Your generator uses up to 5 dims, so keep input_dim <= 5.
+        Also, mean only supports floating point and complex dtypes.
         """
+        # Check dtype compatibility
+        if tensor.dtype in ["int8", "int16", "int32", "int64", "uint8", "bool"]:
+            return False
         return len(tensor.size) < 5
 
     def decompose(self, tensor):

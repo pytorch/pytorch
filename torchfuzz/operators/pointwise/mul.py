@@ -55,3 +55,6 @@ class MulOperator(Operator):
         # Multiply all input tensors
         expr = " * ".join(input_names)
         return f"{output_name} = {expr}"
+
+    def supports_variable_inputs(self) -> bool:
+        return True
