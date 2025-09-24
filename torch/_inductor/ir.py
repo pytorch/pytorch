@@ -4220,7 +4220,7 @@ class Buffer(IRNode, CodegenSymbol):
         assert self.name, self
         return self.name
 
-    def get_example(self) -> Union[torch.Tensor, sympy.Symbol]:
+    def get_example(self) -> Union[torch.Tensor, torch.SymInt]:
         if isinstance(self.layout, Layout):
             return self.layout.get_example()
         raise NotImplementedError(type(self.layout).__name__)
