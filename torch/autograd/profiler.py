@@ -782,8 +782,10 @@ class record_function(_ContextDecorator):
 
     def __enter__(self):
         # If args is empty, then pass an empty tuple
+        # if "TEST" in self.name or "LOOP" in self.name:
+        #     breakpoint()
         args = (self.args,) if self.args else tuple()
-        self.record = torch._C._profiler._RecordFunctionFast(self.name, args)
+        self.record = torch._C._profiler._RecordFunctionFast(self.name, args, {"scope": "user_scope"})
         self.record.__enter__()
         return self
 

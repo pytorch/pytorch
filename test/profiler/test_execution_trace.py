@@ -328,6 +328,7 @@ class TestExecutionTrace(TestCase):
         found_root_node = False
         for n in nodes:
             assert "name" in n
+            print(n["name"])
             if "[pytorch|profiler|execution_trace|process]" in n["name"]:
                 found_root_node = True
             if n["name"].startswith("## LOOP "):
