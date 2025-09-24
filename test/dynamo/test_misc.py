@@ -8146,6 +8146,18 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         torch._dynamo.reset()
         torch.compile(my_dyn_fn, backend="eager")(y, y)
 
+    @torch._dynamo.config.patch(capture_scalar_outputs=False)
+    def test_tolist(self):
+        # This should compile with no faluire.
+        cnt =  CompileCounterWithBackend("inductor")
+        @torch.compile(fullgraph=False, backend=cnt)
+        def func(a):
+            u0, u1, u2, u3, u4 = a.tolist()
+            return a*u0*u1
+        func(torch.tensor([1, 2, 3, 4, 5]))
+        self.assert_equals(cnt, 2)
+
+
     # Sadly, this does not throw - we do not prop correctly across the graph break
     @unittest.expectedFailure
     def test_raise_guard_partial_constraint_across_break(self):
@@ -9763,12 +9775,12 @@ def ___make_guard_fn():
             new_list = []
             i = x.tolist()
             new_list.append(i * 4)
-            return new_list
+            return new_list, x*10
 
         x = torch.randint(3, 5, [5, 5])
         eager = fn(x)
         counter = CompileCounter()
-        compiled_fn = torch.compile(fn, backend=counter, fullgraph=True)
+        compiled_fn = torch.compile(fn, backend=counter, fullgraph=False)
         compiled = compiled_fn(x)
         self.assertEqual(eager, compiled)
         self.assertEqual(counter.frame_count, 1)
