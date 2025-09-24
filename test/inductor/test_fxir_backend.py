@@ -1012,7 +1012,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 
         (x, y) = [
             torch.randn(shape, device=self.device)
-            for shape in [(length / 2,) * 2, (length,)]
+            for shape in [(length // 2,) * 2, (length,)]
         ]
         dynamic_shapes = {
             "x": {0: Dim.DYNAMIC},
