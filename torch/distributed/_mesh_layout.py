@@ -3,6 +3,7 @@ Definition of CuTe inspired Layouts for DeviceMesh internal bookkeeping and func
 """
 
 import math
+import operator
 from collections.abc import Iterator
 from dataclasses import dataclass
 from itertools import product
@@ -146,9 +147,9 @@ class _MeshLayout(Layout):
         layout = complement(self, world_size)
         return _MeshLayout(layout.shape, layout.stride)
 
-    def member_ranks(self) -> list[int]:
+    def all_ranks_from_zero(self) -> list[int]:
         """
-        This function computes the all ranks specified by the layout.
+        This function computes the all ranks specified by the layout staring from zero.
 
         How it works:
         1. we enumerates every possible coordinate (like a nested for-loop).
@@ -156,7 +157,7 @@ class _MeshLayout(Layout):
             (0,0), (0,1), (0,2), (1,0), (1,1), (1,2)
 
         2. For each coordinate, we compute a linear rank index as:
-            member_ranks = sum(coord[i] * strides[i] for i in range(ndim))
+            all_ranks_from_zero = sum(coord[i] * strides[i] for i in range(ndim))
 
         Example A:
         sizes = (2, 3)        # 2 rows, 3 cols
@@ -189,17 +190,18 @@ class _MeshLayout(Layout):
         """
         Build global ranks specified by the layout via two-level ranks composition.
 
-        The nested list forms the Cartesian product of group ranks and group offset
-        and the final global ranks are the addition of these two. The result is a
-        list of lists: one sublist per group. This rank list will be used to build
-        the communicator underlying the layout.
+        The nested list forms the Cartesian product of all ranks for one layout and offset
+        regarding filling up the world_size with the layout.
+        The final global ranks are the addition of these two. The result is a
+        list of lists: one sublist per layout. This rank list will be used to build
+        the communicator underlying the layout and the given `world_size`.
 
         Example:
         world_size = 16
         self.size = 4
         self.stride = 1
-        group ranks = [0, 1, 2, 3]
-        group offsets = [0, 4, 8, 12]
+        ranks = [0, 1, 2, 3]
+        offsets = [0, 4, 8, 12]
         result = [
             [0+0, 0+1, 0+2, 0+3],  # → [0, 1, 2, 3]
             [4+0, 4+1, 4+2, 4+3],  # → [4, 5, 6, 7]
@@ -208,8 +210,8 @@ class _MeshLayout(Layout):
         ]
         """
         return [
-            [group_offset + group_rank for group_rank in self.member_ranks()]
-            for group_offset in self.complement(world_size).member_ranks()
+            [offset + rank for rank in self.all_ranks_from_zero()]
+            for offset in self.complement(world_size).all_ranks_from_zero()
         ]
 
     def check_non_overlap(self) -> bool:
@@ -217,7 +219,8 @@ class _MeshLayout(Layout):
         Check if the layout has any overlap between the ranks it generates. If there is overlap,
         we return False, otherwise True.
 
-        Aside from indice 0, indices from each dim of the layout must be non-overlapping.
+        The layout is supposed to be injective i.e, aside from indice 0, indices from each
+        dim of the layout must be non-overlapping.
 
         Here is how it works:
         1. Sort dimensions by stride (smallest stride first)
@@ -243,64 +246,60 @@ class _MeshLayout(Layout):
             bool: True if no overlap exists (valid layout), False if overlap detected
         """
         previous_span = -1
-        previous_stride = -1
-        for size, stride in sorted(self.sizes_and_strides, key=lambda x: x[1]):
-            if size == 1:
+        for size, stride in sorted(self.sizes_and_strides, key=operator.itemgetter(1)):
+            if size == 0 or size == 1:
                 continue
-            if previous_stride == stride or stride < previous_span:
+            if stride < previous_span:
                 return False
-            previous_stride = stride
             previous_span = size * stride
         return True
 
-    def to_remapping_tensor(
+    def remap_to_tensor(
         self,
         original_mesh_tensor: torch.Tensor,
         world_size: int,
     ) -> torch.Tensor:
         """
-        Convert this layout into a tensor representation that maps the logical mesh
-        structure to actual device ranks, handling cases where the mesh doesn't use
-        consecutive ranks or doesn't span the full world size (Neither is CuTe representible).
+        Leverage layout as an index for mesh tensor that re-maps the indexes after layout
+        transformation to actual device ranks.
 
         With this method, the cute layout serves as the backend of indices bookkeeping for the
         mesh tensor when it comes to flatten, unflatten and slicing operations. The actual mesh
         tensor still represents the actual device assignment and ranks. We need this function
         to specify device allocation and create backend for a mesh.
 
-        Overview:
-        1. Generate logical process groups using this layout's structure
-        2. Check if the original mesh uses consecutive ranks (0,1,2,...)
-        3. If consecutive: return the logical groups directly
-        4. If non-consecutive or partial world: map logical indices to actual ranks
+        When the layout span is larger than the size of actual tensor, we need to clamp the stride
+        to the size of tensor to avoid out of boundary error. Although any transform of mesh tensors
+        can be treated as a view or subset of original tensor, we do need to use the actual view or
+        sub-tensor for DeviceMesh and its backend creation.
 
         Examples:
 
         Case 1 - Consecutive ranks, full world:
-        original_mesh_tensor = [[0,1],[2,3]]  # 2x2 mesh, ranks 0-3
-        world_size = 4
-        layout = Layout(2:2)
-        → Returns logical groups directly: [[0,2],[1,3]]
+            original_mesh_tensor = [[0,1],[2,3]]  # 2x2 mesh, ranks 0-3
+            world_size = 4
+            layout = Layout(2:2)
+            Return: [[0,2],[1,3]]
 
         Case 2 - Non-consecutive ranks:
-        original_mesh_tensor = [[10,20],[30,40]]  # custom rank assignment
-        world_size = 4
-        layout = Layout(2:2)
-        → Maps logical indices to actual ranks: [[[10,30],[20,40]]]
+            original_mesh_tensor = [[10,20],[30,40]]  # custom rank assignment
+            world_size = 4
+            layout = Layout(2:2)
+            Return: [[[10,30],[20,40]]]
 
         Case 3 - Partial world (stride scaling needed):
-        original_mesh_tensor = [[0,1]]  # 1x2 mesh in world_size=8
-        world_size = 8
-        layout = Layout((2,), (4,))  # every 4th rank
-        → Scale down stride: (4,) → (1,) to fit mesh size
-        → Map scaled indices to actual ranks: [[0,1]]
+            original_mesh_tensor = [[0,1]]  # 1x2 mesh in world_size=8
+            world_size = 8
+            layout = Layout((2,), (4,))  # every 4th rank
+            We need first scale down stride: (4,) → (1,) to fit mesh size
+            Return: [[0,1]]
 
         Args:
             original_mesh_tensor: The concrete mesh tensor with actual device ranks
             world_size: Total number of ranks in the distributed system
 
         Returns:
-            torch.Tensor: A tensor representing the actual device rank from original_mesh_tensor
+            torch.Tensor: A tensor representing the actual device allocation from original_mesh_tensor
         """
 
         def scale_stride(scale: int, strides: IntTuple) -> IntTuple:
@@ -317,27 +316,7 @@ class _MeshLayout(Layout):
             else:
                 return tuple(scale_stride(scale, stride) for stride in strides)
 
-        # Create tensor representation of the mesh
-        pg_ranks_by_dim = self.global_ranks(original_mesh_tensor.numel())
-        sizes = flatten(self.sizes)
-        tensor = torch.tensor(pg_ranks_by_dim, device="cpu", dtype=torch.int).view(
-            -1,
-            *sizes,  # type: ignore[arg-type]
-        )
-
-        # When the mesh tensor value can be represented as a cute layout, we can use the global ranks
-        # generated by the layout directly for the mesh tensor. Otherwise, the ranks generated by the layout
-        # will be used as indices to get the actual ranks from the original mesh tensor.
-        if torch.equal(
-            original_mesh_tensor.flatten().sort().values,
-            torch.arange(
-                original_mesh_tensor.numel(),
-                device=original_mesh_tensor.device,
-                dtype=original_mesh_tensor.dtype,
-            ),
-        ):
-            return tensor
-
+        mesh_layout = self
         # This is important because the indices generated by the layout will be larger than the original mesh tensor
         # when the original mesh tensor does not contain all ranks in the world. So we need to scale the layout's stride
         # by world_size // mesh_tensor.numel() so that the indices generated by the layout will be within the range of
@@ -345,10 +324,14 @@ class _MeshLayout(Layout):
         if original_mesh_tensor.numel() != world_size:
             scale_factor = world_size // original_mesh_tensor.numel()
             scaled_strides = scale_stride(scale_factor, self.strides)
-            scaled_layout = _MeshLayout(self.sizes, scaled_strides)
-            pg_ranks_by_dim = scaled_layout.global_ranks(original_mesh_tensor.numel())
-            tensor = torch.tensor(pg_ranks_by_dim, device="cpu", dtype=torch.int).view(
-                -1,
-                *sizes,  # type: ignore[arg-type]
-            )
+            mesh_layout = _MeshLayout(self.sizes, scaled_strides)
+
+        # Create indexing tensor of the mesh mesh
+        pg_ranks_by_dim = mesh_layout.global_ranks(original_mesh_tensor.numel())
+        sizes = flatten(mesh_layout.sizes)
+        tensor = torch.tensor(pg_ranks_by_dim, device="cpu", dtype=torch.int).view(
+            -1,
+            *sizes,  # type: ignore[arg-type]
+        )
+
         return original_mesh_tensor.flatten()[tensor]
