@@ -20,6 +20,7 @@ from torch._library.custom_ops import (
     device_types_t,
 )
 from torch._library.infer_schema import infer_schema  # noqa: F401
+from torch._library.opaque_object import OpaqueType
 from torch._library.triton import triton_op, wrap_triton
 from torch._ops import OpOverload
 from torch.types import _dtype
@@ -41,6 +42,7 @@ __all__ = [
     "triton_op",
     "wrap_triton",
     "infer_schema",
+    "OpaqueType",
 ]
 
 _T = TypeVar("_T")
