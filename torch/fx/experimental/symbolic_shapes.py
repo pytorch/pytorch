@@ -5543,11 +5543,7 @@ class ShapeEnv:
                             hint=functools.partial(hint, s),
                         )
 
-                # We do not want to guard on unbacked symbols. All replacements and
-                # bounds should have originated from torch._checks, so runtime
-                # assertions should be there to covor those guards.
-                if not has_free_unbacked_symbols(s):
-                    input_guards.append((source, s))
+                input_guards.append((source, s))
             else:
                 s = sympy.Integer(val)
                 input_guards.append((source, s))
@@ -5873,12 +5869,6 @@ class ShapeEnv:
         # 3. Every symbol must be within its value range (this handles 0/1
         # specialization too).
         for symbol, sources in symbol_to_source.items():
-            # We do not want to guard on unbacked symbols. All replacements and
-            # bounds should have originated from torch._checks, so runtime
-            # assertions should be there to covor those guards.
-            if self.is_unbacked_symint(symbol):
-                continue
-
             r = self.var_to_range.get(symbol)
             if r is None:
                 continue

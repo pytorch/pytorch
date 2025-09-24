@@ -3228,7 +3228,9 @@ class TestUnbacked(TestCase):
         torch._dynamo.decorators.mark_unbacked(b, 0)
         func(a, b)
 
-        with self.assertRaises(AssertionError):
+        # inductor adds the check sometimes itself so it will be reflected
+        # as AssertionError.
+        with self.assertRaises((AssertionError, RuntimeError)):
             func(a, torch.rand(2, 1))
 
     @skipIfTorchDynamo("mark_unbacked is not traceable")
