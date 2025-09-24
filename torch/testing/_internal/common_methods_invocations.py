@@ -1168,6 +1168,8 @@ def sample_inputs_addmm(op_info, device, dtype, requires_grad, **kwargs):
         ((3, 3), (3, 3), (3, 3), False),
     ]
     tests_with_lhs_broadcasting = [
+        ((5,), (5, 3), (3, 5), True),
+        ((5,), (5, 10), (10, 5), True),
         ((1,), (2, 2), (2, 3), True),
         ((), (2, 2), (2, 3), True),
     ]
