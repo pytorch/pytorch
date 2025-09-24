@@ -4089,7 +4089,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
     @largeTensorTest("20GB")
     @largeTensorTest("64GB", "cpu")
     # TODO(eqy): Remove this once it is fixed in cuDNN and we can dispatch to it again
-    @xfailIf(torch.backends.cudnn.version() > 91000)
+    @xfailIf(torch.backends.cudnn.version() is not None and torch.backends.cudnn.version() > 91000)
     def test_depthwise_conv_64bit_indexing(self, device):
         x = torch.randn(1, 2, 32800, 32800, dtype=torch.half).to(
             memory_format=torch.channels_last
