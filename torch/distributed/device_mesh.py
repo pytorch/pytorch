@@ -174,7 +174,7 @@ if True:  # just to temporarily avoid reindentation
             self.flatten_name_to_root_dims.setdefault(root_mesh, {})
             invalid_dim_names = not_none(root_mesh.mesh_dim_names)
             if mesh_dim_name in invalid_dim_names:
-                raise RuntimeError(
+                raise ValueError(
                     f"{mesh_dim_name} already exists for submesh of the {root_mesh}. ",
                     f"The mesh_dim_names of submesh and flattened mesh are {invalid_dim_names}. "
                     f"Please specify another valid mesh_dim_name.",
@@ -191,7 +191,7 @@ if True:  # just to temporarily avoid reindentation
                 ):
                     return self.root_to_flatten_mapping[root_mesh][mesh_dim_name]
                 else:
-                    raise RuntimeError(
+                    raise ValueError(
                         f"Flatten mesh with mesh_dim_name {mesh_dim_name} has been created before, "
                         f"Please specify another valid mesh_dim_name.",
                     )
