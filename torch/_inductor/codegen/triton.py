@@ -706,7 +706,7 @@ class TritonPrinter(PythonPrinter):
         return f"libdevice.ceil({self._print(expr.args[0])}).to({V.kernel.index_dtype})"
 
     def _helper_sqrt(self, expr: sympy.Expr) -> str:
-        return f"libdevice.sqrt(({self._print(expr)}).to(tl.float32))"
+        return f"tl.sqrt_rn(({self._print(expr)}).to(tl.float32))"
 
     def _print_FloatPow(self, expr: sympy.Expr) -> str:
         return (
@@ -1098,7 +1098,7 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     @maybe_upcast_float32()
     def sqrt(x):
-        return f"libdevice.sqrt({x})"
+        return f"tl.sqrt_rn({x})"
 
     @staticmethod
     def relu(x):
@@ -1944,6 +1944,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self.fixed_config = fixed_config
         super().__init__(tiling, **kwargs)
         self.cse = TritonCSE(self.newvar_prefix, self.suffix)
+        # Cache of values that can be reused for the prologue.
+        self.prologue_cache: dict[str, str] = {}
         self.prologue: IndentedBuffer = IndentedBuffer()
         self.post_loop_combine: IndentedBuffer = IndentedBuffer()
         self.post_loop_store: IndentedBuffer = IndentedBuffer()
@@ -2435,7 +2437,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         if expand_shape is None:
             if need_dense or have_dense:
-                expand_shape = None if copy_shape else tuple(self.dense_size_list())
+                _, expand_shape = _get_expand_str()
             else:
                 expand_shape = ()
 
@@ -2485,42 +2487,49 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             and self.range_trees[-1].is_loop
             and indexing.has_rindex()
         ) or indexing.can_lift:
-            block_descriptor_id = next(self.block_ptr_id)
-            if isinstance(indexing, BlockPtrOptions):
-                block_descriptor = f"block_ptr{block_descriptor_id}"
+            if indexing.can_lift and var in self.prologue_cache:
+                # Check for epilogue subtiling to reuse the same
+                # tensor descriptor.
+                block_descriptor = self.prologue_cache[var]
             else:
-                block_descriptor = f"tma_descriptor{block_descriptor_id}"
-            line_body = DeferredLine(
-                name, f"{block_descriptor} = {indexing.format(var, roffset=False)}"
-            )
-            if indexing.can_lift:
-                self.prologue.writeline(line_body)
-            else:
-                self.body.writeline(line_body)
+                block_descriptor_id = next(self.block_ptr_id)
+                if isinstance(indexing, BlockPtrOptions):
+                    block_descriptor = f"block_ptr{block_descriptor_id}"
+                else:
+                    block_descriptor = f"tma_descriptor{block_descriptor_id}"
+                line_body = DeferredLine(
+                    name, f"{block_descriptor} = {indexing.format(var, roffset=False)}"
+                )
+                if indexing.can_lift:
+                    self.prologue.writeline(line_body)
+                    # Cache the descriptor for epilogue subtiling
+                    self.prologue_cache[var] = block_descriptor
+                else:
+                    self.body.writeline(line_body)
 
-            if isinstance(indexing, BlockPtrOptions):
-                # Store for later use. If the buffer is removed the below advancements
-                # are no longer necessary
-                self.block_ptr_to_buffer[block_descriptor] = name
+                if isinstance(indexing, BlockPtrOptions):
+                    # Store for later use. If the buffer is removed the below advancements
+                    # are no longer necessary
+                    self.block_ptr_to_buffer[block_descriptor] = name
 
-                # Generate block pointer advancements, for later use.
-                for symt in TritonSymbols.reduction_types:
-                    advance_offsets = indexing.advance_roffset(symt)
+                    # Generate block pointer advancements, for later use.
+                    for symt in TritonSymbols.reduction_types:
+                        advance_offsets = indexing.advance_roffset(symt)
 
-                    # Ignore identity advancements.
-                    if all(
-                        V.graph.sizevars.statically_known_equals(
-                            offset, sympy.Integer(0)
+                        # Ignore identity advancements.
+                        if all(
+                            V.graph.sizevars.statically_known_equals(
+                                offset, sympy.Integer(0)
+                            )
+                            for offset in advance_offsets
+                        ):
+                            continue
+
+                        advancements = self.pointer_advancements[symt]
+                        assert block_descriptor not in advancements, (
+                            f"duplicate advancement for pointer '{block_descriptor}' at type '{symt}'"
                         )
-                        for offset in advance_offsets
-                    ):
-                        continue
-
-                    advancements = self.pointer_advancements[symt]
-                    assert block_descriptor not in advancements, (
-                        f"duplicate advancement for pointer '{block_descriptor}' at type '{symt}'"
-                    )
-                    advancements[block_descriptor] = advance_offsets
+                        advancements[block_descriptor] = advance_offsets
         else:
             block_descriptor = indexing.format(var)
         return block_descriptor, other
@@ -2743,6 +2752,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 dtype = torch.bool
 
         load_buffer = self.get_load_buffer(indexing)
+        if config.triton.enable_pdl:
+            load_buffer.writeline("tl.extra.cuda.gdc_wait()")
         result_var = self.cse.generate(
             load_buffer, make_line(line), dtype=dtype, shape=shape
         )
@@ -3877,6 +3888,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         code.splice(self.prologue)
         self.prologue.clear()
+        self.prologue_cache.clear()
 
     def codegen_body(self):
         """
@@ -4324,6 +4336,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             "optimize_mem": optimize_mem,
             "no_x_dim": self.no_x_dim,
             "num_load": self.num_load,
+            "num_store": self.num_store,
             "num_reduction": self.num_reduction,
             **self.inductor_meta_common(),
         }
@@ -4331,17 +4344,27 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         # Bail on 3d tiling, which has more complicated coalesce patterns
         looped_red = V.kernel.features.is_reduction() and not self.persistent_reduction
         tiling_scores = self.tiling_scores
-        two_d_red = (
-            len(self.tiling) == 2 and tiling_scores is not None and "x" in tiling_scores
-        )
+        two_d_red = len(self.tiling) == 2
         if looped_red and two_d_red:
-            assert tiling_scores is not None
             memory_stats = self.features.memory_stats(self.tiling)
             dim_stats = memory_stats.persistent.memory.dim[0]
             mem_ops_per_thread = dim_stats.count_per_thread
 
-            # check if majority of reads are coalesced by the rblock
-            r_coalesce_ratio = tiling_scores["r0_"] / max(tiling_scores["x"], 1)
+            if (
+                tiling_scores is not None
+                and "x" in tiling_scores
+                and "r0_" in tiling_scores
+            ):
+                # large rblock inhibits xblock size, dont attempt if there is a decent amount of
+                # reads coalesced by xblock
+                r_coalesce_ratio = tiling_scores["r0_"] / max(tiling_scores["x"], 1)
+                contiguous_red = r_coalesce_ratio >= 8.0
+            else:
+                from torch._inductor.runtime.hints import ReductionHint
+
+                contiguous_red = (
+                    self.features.get_reduction_hint() == ReductionHint.INNER
+                )
 
             looped_mem = memory_stats.looped.memory.bytes
             persistent_mem = memory_stats.persistent.memory.bytes
@@ -4359,9 +4382,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             if (
                 # significant memory bandwidth savings
                 saved_bytes_ratio >= 1.3
-                # large rblock inhibits xblock size, dont attempt if there is a decent amount of
-                # reads coalesced by xblock
-                and r_coalesce_ratio >= 8.0
+                and contiguous_red
                 # TODO - need more detailed register analysis
                 and V.graph.sizevars.statically_known_leq(
                     self.features.reduction_numel, 32768
@@ -4395,6 +4416,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         triton_meta["configs"] = [config_of(signature)]
 
+        if config.triton.enable_pdl:
+            triton_meta["launch_pdl"] = True
+
         # Triton compiler includes equal_to_1 args into constants even
         # when they are not constexpr. otherwise there may be a segfault
         # during launching the Inductor-compiled Triton kernel.
@@ -4402,6 +4426,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         # https://github.com/triton-lang/triton/blob/231efe9ed2d200be0f69a07c298e4342b08efe3d/python/triton/runtime/jit.py#L384
         for arg_num in equal_1_arg_indices(signature):  # type: ignore[index]
             triton_meta["constants"][signature[arg_num].name] = 1  # type: ignore[index,union-attr]
+        triton_meta["enable_fp_fusion"] = not config.emulate_precision_casts
 
         self.triton_meta = triton_meta
 
