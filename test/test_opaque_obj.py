@@ -135,6 +135,28 @@ class TestOpaqueObject(TestCase):
         self.assertEqual(popped, torch.ones(3) + 1)
         self.assertEqual(queue.size(), 0)
 
+    def test_eq(self):
+        self.assertTrue(make_opaque("moo") == make_opaque("moo"))
+        self.assertFalse(make_opaque("moo") == make_opaque("mop"))
+
+        q1 = OpaqueQueue([torch.ones(3)], torch.zeros(3))
+        q2 = OpaqueQueue([torch.ones(3)], torch.zeros(3))
+        obj1 = make_opaque(q1)
+        obj2 = make_opaque(q2)
+        self.assertTrue(obj1 == obj1)
+        self.assertTrue(q1 == q2)
+        self.assertTrue(obj1 == obj2)
+
+    def test_deepcopy(self):
+        q1 = OpaqueQueue([torch.ones(3), torch.ones(3) * 2], torch.zeros(3))
+        obj1 = make_opaque(q1)
+
+        obj2 = copy.deepcopy(obj1)
+        q2 = get_payload(obj2)
+
+        self.assertTrue(q1 is not q2)
+        self.assertTrue(q1 == q2)
+
     @parametrize("make_fx_tracing_mode", ["fake", "symbolic"])
     def test_make_fx(self, make_fx_tracing_mode):
         class M(torch.nn.Module):
@@ -182,28 +204,6 @@ def forward(self, arg0_1, arg1_1):
     return add_1
     """,
         )
-
-    def test_eq(self):
-        self.assertTrue(make_opaque("moo") == make_opaque("moo"))
-        self.assertFalse(make_opaque("moo") == make_opaque("mop"))
-
-        q1 = OpaqueQueue([torch.ones(3)], torch.zeros(3))
-        q2 = OpaqueQueue([torch.ones(3)], torch.zeros(3))
-        obj1 = make_opaque(q1)
-        obj2 = make_opaque(q2)
-        self.assertTrue(obj1 == obj1)
-        self.assertTrue(q1 == q2)
-        self.assertTrue(obj1 == obj2)
-
-    def test_deepcopy(self):
-        q1 = OpaqueQueue([torch.ones(3), torch.ones(3) * 2], torch.zeros(3))
-        obj1 = make_opaque(q1)
-
-        obj2 = copy.deepcopy(obj1)
-        q2 = get_payload(obj2)
-
-        self.assertTrue(q1 is not q2)
-        self.assertTrue(q1 == q2)
 
 
 instantiate_parametrized_tests(TestOpaqueObject)

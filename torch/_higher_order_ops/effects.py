@@ -141,7 +141,7 @@ with_effects = WithEffects()
 def has_aliasing(op: OpType):
     # NOT FOR PUBLIC USE
     if isinstance(op, torch._ops.HigherOrderOperator):
-        return SIDE_EFFECTS.find(op) is not None
+        return not SIDE_EFFECTS.contains(op)
 
     for arg in op._schema.arguments:
         if arg.alias_info is not None:
