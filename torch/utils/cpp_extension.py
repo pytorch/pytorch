@@ -25,7 +25,6 @@ from ._cpp_extension_versioner import ExtensionVersioner
 from typing import Optional, Union
 from typing_extensions import deprecated
 from torch.torch_version import TorchVersion, Version
-from torch._inductor import config
 
 
 from setuptools.command.build_ext import build_ext
@@ -1538,7 +1537,7 @@ def include_paths(device_type: str = "cpu", torch_include_dirs=True) -> list[str
     return paths
 
 
-def library_paths(device_type: str = "cpu", torch_include_dirs=True) -> list[str]:
+def library_paths(device_type: str = "cpu", torch_include_dirs: bool = True, cross_target_platform: Optional[str] = None) -> list[str]:
     """
     Get the library paths required to build a C++ or CUDA extension.
 
@@ -1561,11 +1560,10 @@ def library_paths(device_type: str = "cpu", torch_include_dirs=True) -> list[str
         if HIP_HOME is not None:
             paths.append(os.path.join(HIP_HOME, 'lib'))
     elif device_type == "cuda":
-        if config.aot_inductor.cross_target_platform == "windows":
+        if cross_target_platform == "windows":
             lib_dir = os.path.join('lib', 'x64')
             if WINDOWS_CUDA_HOME is None:
                 raise RuntimeError("Need to set WINDOWS_CUDA_HOME for windows cross-compilation")
-            assert WINDOWS_CUDA_HOME is not None
             paths.append(os.path.join(WINDOWS_CUDA_HOME, lib_dir))
         else:
             if IS_WINDOWS:

@@ -1605,9 +1605,9 @@ class aot_inductor:
 
     # Currently the only valid option is "windows".
     # We'll use x86_64-w64-mingw32-gcc to cross-compile a .dll file
-    # If using cuda, you also need to set WINDOWS_CUDNN_HOME env var
+    # If using cuda, you also need to set WINDOWS_CUDA_HOME env var
     # to point to windows CUDA toolkit.
-    # Example: WINDOWS_CUDNN_HOME=cuda-windows-base/cuda_cudart/cudart/
+    # Example: WINDOWS_CUDA_HOME=cuda-windows-base/cuda_cudart/cudart/
     # The path should contain lib cuda and lib cudart
     cross_target_platform: Optional[str] = None
 

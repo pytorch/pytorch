@@ -1109,8 +1109,12 @@ def _get_torch_related_args(
     else:
         libraries_dirs = []
         if config.aot_inductor.cross_target_platform == "windows":
-            assert config.aot_inductor.aoti_shim_library
-            assert AOTI_SHIM_LIB
+            assert config.aot_inductor.aoti_shim_library, (
+                "'config.aot_inductor.aoti_shim_library' must be set when 'cross_target_platform' is 'windows'."
+            )
+            assert AOTI_SHIM_LIB, (
+                "'AOTI_SHIM_LIB' must be set to the path of the AOTI shim library when 'cross_target_platform' is 'windows'."
+            )
             libraries.append(config.aot_inductor.aoti_shim_library)
             libraries_dirs.append(AOTI_SHIM_LIB)
 
@@ -1590,7 +1594,9 @@ def get_cpp_torch_device_options(
     )
     link_libtorch = config.aot_inductor.link_libtorch
     libraries_dirs = cpp_extension.library_paths(
-        device_type, torch_include_dirs=link_libtorch
+        device_type,
+        torch_include_dirs=link_libtorch,
+        cross_target_platform=config.aot_inductor.cross_target_platform,
     )
     if not config.is_fbcode() and link_libtorch:
         libraries += ["c10"]
@@ -2049,8 +2055,6 @@ class CppBuilder:
         _create_if_dir_not_exist(_build_tmp_dir)
 
         build_cmd = self.get_command_line()
-        # print(build_cmd)
-        # breakpoint()
         run_compile_cmd(build_cmd, cwd=_build_tmp_dir)
         _remove_dir(_build_tmp_dir)
 

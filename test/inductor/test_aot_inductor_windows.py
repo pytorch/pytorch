@@ -1,5 +1,4 @@
 # Owner(s): ["module: inductor"]
-import sys
 import tempfile
 import unittest
 import zipfile
@@ -66,5 +65,5 @@ class TestAOTInductorWindowsCrossCompilation(TestCase):
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if HAS_GPU or sys.platform == "darwin":
+    if HAS_GPU:
         run_tests(needs="filelock")
