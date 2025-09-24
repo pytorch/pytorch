@@ -1118,7 +1118,6 @@ coverage_ignore_functions = [
     "is_consistent",
     "is_more_precise",
     # torch.fx.traceback
-    "annotate",
     "format_stack",
     "get_current_meta",
     "has_preserved_node_meta",

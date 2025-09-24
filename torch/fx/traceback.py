@@ -245,6 +245,35 @@ def set_stack_trace(stack: list[str]):
 @compatibility(is_backward_compatible=False)
 @contextmanager
 def annotate(annotation_dict: dict):
+    """
+    Temporarily adds custom annotations to the current tracing context.
+    The fx_node produced from this tracing context will have the
+    custom annotations in node.metadata["custom"] field.
+
+    This context manager allows you to insert arbitrary metadata into the PT2
+    tracing system by updating the global `current_meta["custom"]` dictionary.
+    The annotations are automatically reverted after the context exits.
+
+    This is intended for advanced users who need to attach additional metadata to the fx nodes
+    (e.g., for debugging, analysis, or external tooling) during export tracing.
+
+    Note:
+        This API is **not backward compatible** and may evolve in future releases.
+
+    Note:
+        This API is not compatible with fx.symbolic_trace or jit.trace. It's intended
+        to be used with PT2 family of tracers, e.g. torch.export and dynamo.
+
+    Args:
+        annotation_dict (dict): A dictionary of custom key-value pairs to inject
+            into the FX trace metadata.
+
+    Example:
+        >>> with annotate({"source": "custom_pass", "tag": 42}):
+        ...     # compute here
+        # After exiting the context, custom annotations are removed.
+    """
+
     global current_meta
 
     has_custom = "custom" in current_meta
