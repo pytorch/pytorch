@@ -169,12 +169,8 @@ class Fuzzer:
         return depends_on(candidate_input, output_tensor)
 
     def generate_random_tensor(self):
-        # Allow ndim=0 to generate a scalar tensor
-        ndim = random.randint(0, 3)
-        if ndim == 0:
-            size = ()
-        else:
-            size = tuple(random.randint(1, 128) for _ in range(ndim))
+        ndim = random.randint(1, 3)
+        size = tuple(random.randint(1, 128) for _ in range(ndim))
 
         stride = []
         acc = 1
