@@ -15,7 +15,6 @@ from torch.testing._internal.common_cuda import (
 )
 from torch.testing._internal.common_utils import (
     run_tests,
-    skipIfRocm,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
 )
