@@ -50,7 +50,7 @@ from .spawn import (
 )
 
 
-if sys.platform == "darwin" or sys.platform == "win32":
+if sys.platform == "win32":
     _sharing_strategy = "file_system"
     _all_sharing_strategies = {"file_system"}
 else:
