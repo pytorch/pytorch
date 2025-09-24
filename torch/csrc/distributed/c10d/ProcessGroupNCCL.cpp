@@ -3220,6 +3220,9 @@ void check_gpu_single_tensor(
   // Skip the following requirements for P2P operations
   if (!tensor.is_contiguous(tensor.suggest_memory_format())) {
     if (p2p) {
+      TORCH_CHECK(
+          tensor.is_non_overlapping_and_dense(),
+          "Tensors for P2P must be non-overlapping and dense")
       TORCH_WARN_ONCE(
           "Detected non-contiguous tensor in P2P operations. It is user "
           "responsibility to guarantee that source and destination tensors have "
