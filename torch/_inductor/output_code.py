@@ -607,6 +607,7 @@ class CompiledFxGraph(OutputCode):
                 }
             )
         try:
+            # Checking the profiler directly is faster than nullcontext
             if torch.autograd.profiler._is_profiler_enabled:
                 with record_function(
                     f"## Call CompiledFxGraph {self._fx_graph_cache_key} ##"
