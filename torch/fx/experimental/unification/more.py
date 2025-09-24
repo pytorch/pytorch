@@ -1,5 +1,10 @@
 # mypy: allow-untyped-defs
-from .core import reify, unify  # type: ignore[attr-defined]
+from .core import (  # type: ignore[attr-defined]
+    _reify as core_reify,
+    _unify as core_unify,
+    reify,
+    unify,
+)
 from .dispatch import dispatch
 
 
@@ -21,8 +26,8 @@ def unifiable(cls):
     >>> unify(a, b, {})
     {~x: 2}
     """
-    _unify.add((cls, cls, dict), unify_object)
-    _reify.add((cls, dict), reify_object)
+    core_unify.add((cls, cls, dict), unify_object)  # type: ignore[attr-defined]
+    core_reify.add((cls, dict), reify_object)  # type: ignore[attr-defined]
 
     return cls
 
