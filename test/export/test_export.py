@@ -15774,6 +15774,15 @@ class GraphModule(torch.nn.Module):
             ]
             self.assertEqual(len(shift_op), 1)
 
+    def test_lstm_export(self):
+        mod = torch.nn.LSTM(input_size=2, hidden_size=4, num_layers=1, batch_first=True)
+        sample_inputs = (torch.ones(1, 2, 2),)
+        ep = export(mod, sample_inputs)
+
+        eager_out = mod(*sample_inputs)
+        ep_out = ep.module()(*sample_inputs)
+        self.assertEqual(eager_out, ep_out)
+
     @contextmanager
     def distributed_env(self, world_size):
         try:

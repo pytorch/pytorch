@@ -205,10 +205,12 @@ class RNNBase(Module):
         self.reset_parameters()
 
     def _init_flat_weights(self) -> None:
-        self._flat_weights = [
-            getattr(self, wn) if hasattr(self, wn) else None
-            for wn in self._flat_weights_names
-        ]
+        self._flat_weights = torch.nn.ParameterList(
+            [
+                getattr(self, wn) if hasattr(self, wn) else None
+                for wn in self._flat_weights_names
+            ]
+        )
         self._flat_weight_refs = [
             weakref.ref(w) if w is not None else None for w in self._flat_weights
         ]
@@ -270,7 +272,7 @@ class RNNBase(Module):
                     if self.proj_size > 0:
                         num_weights += 1
                     torch._cudnn_rnn_flatten_weight(
-                        self._flat_weights,  # type: ignore[arg-type]
+                        list(self._flat_weights),  # type: ignore[arg-type]
                         num_weights,
                         self.input_size,
                         rnn.get_cudnn_mode(self.mode),
@@ -442,10 +444,12 @@ class RNNBase(Module):
                         else:
                             self._all_weights += [weights[:2]]
                             self._flat_weights_names.extend(weights[:2])
-            self._flat_weights = [
-                getattr(self, wn) if hasattr(self, wn) else None
-                for wn in self._flat_weights_names
-            ]
+            self._flat_weights = torch.nn.ParameterList(
+                [
+                    getattr(self, wn) if hasattr(self, wn) else None
+                    for wn in self._flat_weights_names
+                ]
+            )
 
         self._flat_weight_refs = [
             weakref.ref(w) if w is not None else None for w in self._flat_weights
@@ -655,8 +659,6 @@ class RNN(RNNBase):
         """
         Runs the forward pass.
         """
-        self._update_flat_weights()
-
         num_directions = 2 if self.bidirectional else 1
         orig_input = input
 
@@ -721,7 +723,7 @@ class RNN(RNNBase):
                 result = _VF.rnn_tanh(
                     input,
                     hx,
-                    self._flat_weights,  # type: ignore[arg-type]
+                    list(self._flat_weights),  # type: ignore[arg-type]
                     self.bias,
                     self.num_layers,
                     self.dropout,
@@ -733,7 +735,7 @@ class RNN(RNNBase):
                 result = _VF.rnn_relu(
                     input,
                     hx,
-                    self._flat_weights,  # type: ignore[arg-type]
+                    list(self._flat_weights),  # type: ignore[arg-type]
                     self.bias,
                     self.num_layers,
                     self.dropout,
@@ -747,7 +749,7 @@ class RNN(RNNBase):
                     input,
                     batch_sizes,
                     hx,
-                    self._flat_weights,  # type: ignore[arg-type]
+                    list(self._flat_weights),  # type: ignore[arg-type]
                     self.bias,
                     self.num_layers,
                     self.dropout,
@@ -759,7 +761,7 @@ class RNN(RNNBase):
                     input,
                     batch_sizes,
                     hx,
-                    self._flat_weights,  # type: ignore[arg-type]
+                    list(self._flat_weights),  # type: ignore[arg-type]
                     self.bias,
                     self.num_layers,
                     self.dropout,
@@ -1043,8 +1045,6 @@ class LSTM(RNNBase):
         pass
 
     def forward(self, input, hx=None):  # noqa: F811
-        self._update_flat_weights()
-
         orig_input = input
         # xxx: isinstance check needs to be in conditional for TorchScript to compile
         batch_sizes = None
@@ -1127,7 +1127,7 @@ class LSTM(RNNBase):
             result = _VF.lstm(
                 input,
                 hx,
-                self._flat_weights,  # type: ignore[arg-type]
+                list(self._flat_weights),  # type: ignore[arg-type]
                 self.bias,
                 self.num_layers,
                 self.dropout,
@@ -1140,7 +1140,7 @@ class LSTM(RNNBase):
                 input,
                 batch_sizes,
                 hx,
-                self._flat_weights,  # type: ignore[arg-type]
+                list(self._flat_weights),  # type: ignore[arg-type]
                 self.bias,
                 self.num_layers,
                 self.dropout,
@@ -1331,8 +1331,6 @@ class GRU(RNNBase):
         pass
 
     def forward(self, input, hx=None):  # noqa: F811
-        self._update_flat_weights()
-
         orig_input = input
         # xxx: isinstance check needs to be in conditional for TorchScript to compile
         if isinstance(orig_input, PackedSequence):
@@ -1394,7 +1392,7 @@ class GRU(RNNBase):
             result = _VF.gru(
                 input,
                 hx,
-                self._flat_weights,  # type: ignore[arg-type]
+                list(self._flat_weights),  # type: ignore[arg-type]
                 self.bias,
                 self.num_layers,
                 self.dropout,
@@ -1407,7 +1405,7 @@ class GRU(RNNBase):
                 input,
                 batch_sizes,
                 hx,
-                self._flat_weights,  # type: ignore[arg-type]
+                list(self._flat_weights),  # type: ignore[arg-type]
                 self.bias,
                 self.num_layers,
                 self.dropout,
