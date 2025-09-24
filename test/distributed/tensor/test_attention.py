@@ -414,11 +414,10 @@ class CPFlexAttentionTest(DTensorTestBase):
     ) -> None:
         torch.cuda.manual_seed(10)
         dtype = torch.float32
-        # bs = B if B > 1 else 8
-        bs = 1
+        bs = B if B > 1 else 8
         query_tokens = context_tokens = qkv_size
         dim = 32
-        nheads = 1
+        nheads = 8
 
         q = torch.rand(
             (bs, nheads, query_tokens, dim),
@@ -529,7 +528,7 @@ class CPFlexAttentionTest(DTensorTestBase):
         # check `restore=False` correctness
         sharded_expect_out, sharded_expect_lse = _context_parallel_buffers(
             device_mesh,
-            buffers=[expect_out.detach(), expect_aux.lse.detach()],
+            buffers=[expect_out.clone().detach(), expect_aux.lse.clone().detach()],
             buffer_seq_dims=[2, 2],
             load_balance_indices=lb.generate_indices() if lb is not None else None,
         )
@@ -686,10 +685,10 @@ class CPFlexAttentionTest(DTensorTestBase):
         _cp_options.enable_load_balance = True
 
         # Test 1: causal masking
-        block_mask = create_block_mask(causal_mask, B=1, H=1, Q_LEN=512, KV_LEN=512)
+        block_mask = create_block_mask(causal_mask, B=1, H=1, Q_LEN=2048, KV_LEN=2048)
         lb = PTRRLoadBalancer(block_mask, self.world_size, self.device_type)
         self._test_cp_flex_attention(
-            qkv_size=512,
+            qkv_size=2048,
             B=1,
             lb=lb,
             mask_func=causal_mask,

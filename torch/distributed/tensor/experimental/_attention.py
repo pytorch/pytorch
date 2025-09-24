@@ -291,8 +291,7 @@ class PTRRLoadBalancer(LoadBalancer):
         B, H, Q = non_sparse_kv_num_blocks.shape
         # assumption: the masking is identical across heads
         non_sparse_kv_num_blocks = non_sparse_kv_num_blocks.view(-1, Q)  # (B, Q_BLK)
-        # torch.distributed.breakpoint()
-        # torch.distributed.barrier()
+
         batch_ptrr = torch.vmap(
             functools.partial(
                 PTRRLoadBalancer.ptrr_scheduling,
@@ -310,17 +309,12 @@ class PTRRLoadBalancer(LoadBalancer):
             q_blk_size == kv_blk_size
         ), "for now only support q_blk_size == kv_blk_size"
 
-        # print(f"indices shape = {ptrr_indices.shape}, indices = {ptrr_indices}")
         indices = torch.arange(
             q_blk_size * ptrr_indices.size(1), device=ptrr_indices.device
         ).view(
             -1, q_blk_size
         )  # (NUM_BLOCKS, BLOCK_SIZE)
         indices = indices[ptrr_indices].view(B, -1)  # (B, qkv_size)
-        # print(f"indices shape = {indices.shape}, indices = {indices}")
-
-        # torch.distributed.breakpoint()
-        # torch.distributed.barrier()
 
         if restore:
             indices = torch.vmap(torch.argsort)(indices)
@@ -1631,8 +1625,6 @@ def context_parallel_unshard(
                 lb_indices_batch_size = restore_indices.size(dim=0)
                 buffer_batch_size = unsharded_b.size(dim=0)
 
-                torch.distributed.breakpoint()
-                torch.distributed.barrier()
                 if lb_indices_batch_size == buffer_batch_size:
                     for i in range(buffer_batch_size):
                         # NOTE: assuming batch dim is 0
@@ -1653,9 +1645,6 @@ def context_parallel_unshard(
                         f"restore_indices has shape {restore_indices.shape}, "
                         f"but unsharded_b has shape {unsharded_b.shape}."
                     )
-
-        torch.distributed.breakpoint()
-        torch.distributed.barrier()
 
         unsharded_buffers.append(unsharded_b)
 
