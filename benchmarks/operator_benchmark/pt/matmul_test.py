@@ -61,7 +61,7 @@ class MatMulBenchmark(op_bench.TorchBenchmarkBase):
 
 
 op_bench.generate_pt_test(mm_long_configs + mm_short_configs, MatMulBenchmark)
-op_bench.generate_pt_gradient_test(mm_long_configs + mm_short_configs, MatMulBenchmark)
+op_bench.generate_pt_gradient_test(mm_long_configs, MatMulBenchmark)
 
 
 if __name__ == "__main__":
