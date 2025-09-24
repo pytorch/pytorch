@@ -107,6 +107,23 @@ void nvshmem_put(at::Tensor& tensor, const int64_t peer) {
   nvshmemx_putmem_on_stream(buffer_ptr, tensor.data_ptr(), buffer_size, peer, stream);
 }
 
+void nvshmem_wait_for_signal(at::Tensor& sigpad, int64_t signal, int64_t peer) {
+  c10::cuda::CUDAGuard guard(sigpad.device());
+  auto stream = at::cuda::getCurrentCUDAStream();
+  nvshmemx_signal_wait_until_on_stream(static_cast<uint64_t*>(sigpad.data_ptr()), NVSHMEM_CMP_EQ, signal, stream);
+}
+
+void nvshmem_put_with_signal(at::Tensor& tensor, at::Tensor& sigpad, int64_t signal, int64_t peer) {
+  auto hdl = c10d::symmetric_memory::rendezvous(tensor, "0");
+  auto rank = hdl->get_rank();
+  void* buffer_ptr = hdl->get_buffer_ptrs()[rank];
+  auto buffer_size = tensor.numel() * tensor.element_size();
+
+  c10::cuda::CUDAGuard guard(tensor.device());
+  auto stream = at::cuda::getCurrentCUDAStream();
+  nvshmemx_putmem_signal_on_stream(buffer_ptr, tensor.data_ptr(), buffer_size, static_cast<uint64_t*>(sigpad.data_ptr()), NVSHMEM_SIGNAL_SET, signal, peer, stream);
+}
+
 void nvshmem_get(at::Tensor& tensor, const int64_t peer) {
   // TODO: support non-contiguous tensors
   TORCH_CHECK(tensor.is_contiguous(),
@@ -847,6 +864,8 @@ TORCH_LIBRARY_IMPL(symm_mem, CUDA, m) {
   m.impl("nvshmem_broadcast", c10d::nvshmem_extension::nvshmem_broadcast);
   m.impl("nvshmem_put", c10d::nvshmem_extension::nvshmem_put);
   m.impl("nvshmem_get", c10d::nvshmem_extension::nvshmem_get);
+  m.impl("nvshmem_wait_for_signal", c10d::nvshmem_extension::nvshmem_wait_for_signal);
+  m.impl("nvshmem_put_with_signal", c10d::nvshmem_extension::nvshmem_put_with_signal);
   m.impl("nvshmem_all_to_all", c10d::nvshmem_extension::nvshmem_all_to_all);
   m.impl("all_to_all_vdev", c10d::nvshmem_extension::all_to_all_vdev);
   m.impl("all_to_all_vdev_2d", c10d::nvshmem_extension::all_to_all_vdev_2d);
