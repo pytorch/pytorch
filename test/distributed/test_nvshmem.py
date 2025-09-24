@@ -704,5 +704,77 @@ class DispatchCombineInSubgroups(MultiProcContinuousTest):
         dispatch_then_combine(self.device, align=8, group=subgroup)
 
 
+@requires_nvshmem()
+@requires_cuda_p2p_access()
+class HierarchicalTest(MultiProcContinuousTest):
+    def _init_device(self) -> None:
+        # TODO: relieve this (seems to hang if without)
+        device_module.set_device(self.device)
+        # Set NVSHMEM as SymmMem backend
+        symm_mem.set_backend("NVSHMEM")
+
+    def init_mesh(self) -> None:
+        # Test on 4 "nodes"
+        nnodes = 4
+        ranks_per_node = torch.cuda.device_count() // nnodes
+        self.dm = init_device_mesh(
+            device_type, (nnodes, ranks_per_node), mesh_dim_names=("inter", "intra")
+        )
+        self.inter_group = self.dm.get_group("inter")
+        self.intra_group = self.dm.get_group("intra")
+        symm_mem.enable_symm_mem_for_group(dist.group.WORLD.group_name)
+        symm_mem.enable_symm_mem_for_group(self.inter_group.group_name)
+        symm_mem.enable_symm_mem_for_group(self.intra_group.group_name)
+
+    @property
+    def device(self) -> torch.device:
+        return torch.device(device_type, self.rank)
+
+    def test_rail_dispatch(self) -> None:
+        """
+        Test rail-wise dispatch
+        """
+        self._init_device()
+        self.init_mesh()
+        torch.manual_seed(42)
+        dtype = torch.float
+
+        nnodes = self.inter_group.size()
+
+        # Number of tokens for a peer node is random between [0, split_node_max)
+        split_node_max = 10
+        inp_splits = torch.randint(
+            split_node_max, (nnodes,), dtype=torch.int64, device=self.device
+        )
+
+        # Max number of input tokens (must be a constant across ranks for symmetric memory allocation)
+        seqlen = split_node_max * nnodes
+        # Max number of output tokens (must be a constant across ranks for symmetric memory allocation)
+        overflow_factor = nnodes  # worst case: one rank receives all data
+        max_out_len = seqlen * overflow_factor
+
+        hid_dim = 1024
+
+        inp = symm_mem.empty((seqlen, hid_dim), dtype=dtype, device=self.device).copy_(
+            torch.randn((seqlen, hid_dim), dtype=dtype, device=self.device)
+        )
+        out = symm_mem.empty(
+            (max_out_len, hid_dim), dtype=dtype, device=self.device
+        ).fill_(-1)
+        in_splits = symm_mem.empty(nnodes, dtype=torch.int64, device=self.device)
+        out_splits_offsets = symm_mem.empty(
+            (2, nnodes), dtype=torch.int64, device=self.device
+        )
+        # Row 0 is input splits
+        in_splits.copy_(inp_splits)
+
+        # Sync all ranks to ensure remote tensors are allocated
+        dist.barrier()
+
+        torch.ops.symm_mem.all_to_all_vdev(
+            inp, out, in_splits, out_splits_offsets, self.inter_group.group_name
+        )
+
+
 if __name__ == "__main__":
     run_tests()
