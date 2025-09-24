@@ -260,30 +260,3 @@ def create_program_file(python_code: str) -> str:
         f.write(python_code)
 
     return generated_file_path
-
-
-def execute_python_code(
-    python_code: str, timeout: int = 300
-) -> Union[torch.Tensor, float, int, bool, complex]:
-    """
-    Execute the generated Python code by writing it to a file and running it.
-
-    NOTE: This function is deprecated in favor of using ProgramRunner directly.
-    It's kept for backwards compatibility only.
-
-    Args:
-        python_code: String containing Python code to execute
-        timeout: Maximum time in seconds to wait for execution (default: 300)
-
-    Returns:
-        Placeholder return value (0) for backwards compatibility
-
-    Raises:
-        RuntimeError: With full stdout/stderr output if execution fails
-        TimeoutError: If execution exceeds the timeout
-    """
-    # Create the program file (for backwards compatibility)
-    create_program_file(python_code)
-
-    # Return placeholder value - actual execution should use ProgramRunner
-    return 0
