@@ -34,7 +34,9 @@ class EmbeddingPerSampleGrad(torch.autograd.Function):
         return output
 
     @staticmethod
-    def backward(ctx: Any, grad_output: torch.Tensor) -> tuple[Optional[torch.Tensor], ...]:
+    def backward(
+        ctx: Any, grad_output: torch.Tensor
+    ) -> tuple[Optional[torch.Tensor], ...]:
         input, weight = ctx.input, ctx.weight
         padding_idx, scale_grad_by_freq, sparse = (
             ctx.padding_idx,

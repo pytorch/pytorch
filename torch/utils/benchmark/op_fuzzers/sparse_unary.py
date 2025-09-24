@@ -15,6 +15,7 @@ else:
 
 from torch.utils.benchmark import Fuzzer, FuzzedParameter, ParameterAlias, FuzzedSparseTensor
 
+__all__ = ["UnaryOpSparseFuzzer"]
 
 _MIN_DIM_SIZE = 16
 _MAX_DIM_SIZE = 16 * 1024 ** 2
