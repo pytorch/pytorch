@@ -15,6 +15,10 @@ class AddOperator(Operator):
         """Add can always produce a tensor by adding two tensors of the same shape, dtype, etc."""
         return True
 
+    def supports_variable_inputs(self):
+        """Add operator supports variable number of inputs."""
+        return True
+
     def decompose(self, tensor, num_inputs=2):
         """Decompose tensor into input tensors for addition with type promotion."""
         # Type promotion table for realistic LLM/diffusion model types

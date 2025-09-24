@@ -15,6 +15,10 @@ class CatOperator(Operator):
         """Can only cat if there is at least one dimension with size >= 2."""
         return any(s >= 2 for s in tensor.size)
 
+    def supports_variable_inputs(self):
+        """Cat operator supports variable number of inputs."""
+        return True
+
     def decompose(self, tensor, num_inputs=2):
         """Decompose tensor into input tensors for concatenation."""
         # Find all candidate dimensions where size is at least 2

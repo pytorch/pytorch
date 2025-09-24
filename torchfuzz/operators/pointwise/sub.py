@@ -15,6 +15,10 @@ class SubOperator(Operator):
         """Sub can always produce a tensor by subtracting two tensors of the same shape, dtype, etc."""
         return True
 
+    def supports_variable_inputs(self):
+        """Sub operator supports variable number of inputs."""
+        return True
+
     def decompose(self, tensor, num_inputs=2):
         """Decompose tensor into input tensors for subtraction with type promotion."""
         # Type promotion table for realistic LLM/diffusion model types
