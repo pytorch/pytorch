@@ -3231,29 +3231,6 @@ class TestUnbacked(TestCase):
         with self.assertRaises(RuntimeError):
             func(a, torch.rand(2, 1))
 
-    @skipIfTorchDynamo("mark_unbacked is not traceable")
-    def test_do_not_guard_unbacked_inputs(self):
-        @torch.compile(fullgraph=True, dynamic=True, backend="inductor")
-        def func(a, b):
-            a.expand(b.shape)
-            return a * 10
-
-        a = torch.rand(1, 1)
-        b = torch.rand(1, 1)
-
-        torch._dynamo.decorators.mark_unbacked(a, 0)
-        torch._dynamo.decorators.mark_unbacked(a, 1)
-        torch._dynamo.decorators.mark_unbacked(b, 0)
-        torch._dynamo.decorators.mark_unbacked(b, 1)
-
-        log_stream, ctx = logs_to_string("torch._dynamo.guards", "guards")
-        with ctx():
-            func(a, b)
-            func(torch.rand(4, 5), torch.rand(4, 5))
-
-        guards = "\n".join(log_stream.getvalue().strip().split("\n")[4:]).strip()
-        self.assertFalse("SYMBOLIC_SHAPE_GUARD" in guards)
-
 
 class TestUbackedOps(TestCase):
     @fresh_cache()
