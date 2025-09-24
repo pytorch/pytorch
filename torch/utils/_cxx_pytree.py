@@ -13,7 +13,6 @@ collection support for PyTorch APIs.
 """
 
 import functools
-import sys
 import types
 from collections.abc import Iterable
 from typing import Any, Callable, Optional, overload, TypeVar, Union
@@ -628,10 +627,7 @@ def map_only(
 
     You can also directly use 'tree_map_only'
     """
-    if isinstance(type_or_types_or_pred, (type, tuple)) or (
-        sys.version_info >= (3, 10)
-        and isinstance(type_or_types_or_pred, types.UnionType)
-    ):
+    if isinstance(type_or_types_or_pred, (type, tuple, types.UnionType)):
 
         def pred(x: Any) -> bool:
             return isinstance(x, type_or_types_or_pred)  # type: ignore[arg-type]

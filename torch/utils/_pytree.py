@@ -20,7 +20,6 @@ import functools
 import importlib
 import importlib.metadata
 import json
-import sys
 import threading
 import types
 import warnings
@@ -1470,10 +1469,7 @@ def map_only(
 
     You can also directly use 'tree_map_only'
     """
-    if isinstance(type_or_types_or_pred, (type, tuple)) or (
-        sys.version_info >= (3, 10)
-        and isinstance(type_or_types_or_pred, types.UnionType)
-    ):
+    if isinstance(type_or_types_or_pred, (type, tuple, types.UnionType)):
 
         def pred(x: Any) -> bool:
             return isinstance(x, type_or_types_or_pred)  # type: ignore[arg-type]

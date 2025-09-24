@@ -7,9 +7,10 @@ import os
 import re
 import sys
 import textwrap
-from dataclasses import fields, is_dataclass
+from dataclasses import is_dataclass
 from enum import auto, Enum
 from pathlib import Path
+from pprint import pformat
 from typing import Any, Callable, Generic, Literal, NoReturn, TYPE_CHECKING, TypeVar
 from typing_extensions import assert_never, deprecated, Self
 
@@ -354,45 +355,7 @@ def dataclass_repr(
     indent: int = 0,
     width: int = 80,
 ) -> str:
-    # built-in pprint module support dataclasses from python 3.10
-    from pprint import pformat
-
     return pformat(obj, indent, width)
-
-
-def _pformat(
-    obj: Any,
-    indent: int,
-    width: int,
-    curr_indent: int = 0,
-) -> str:
-    assert is_dataclass(obj), f"obj should be a dataclass, received: {type(obj)}"
-
-    class_name = obj.__class__.__name__
-    # update current indentation level with class name
-    curr_indent += len(class_name) + 1
-
-    fields_list = [(f.name, getattr(obj, f.name)) for f in fields(obj) if f.repr]
-
-    fields_str = []
-    for name, attr in fields_list:
-        # update the current indent level with the field name
-        # dict, list, set and tuple also add indent as done in pprint
-        _curr_indent = curr_indent + len(name) + 1
-        if is_dataclass(attr):
-            str_repr = _pformat(attr, indent, width, _curr_indent)
-        elif isinstance(attr, dict):
-            str_repr = _format_dict(attr, indent, width, _curr_indent)
-        elif isinstance(attr, (list, set, tuple)):
-            str_repr = _format_list(attr, indent, width, _curr_indent)
-        else:
-            str_repr = repr(attr)
-
-        fields_str.append(f"{name}={str_repr}")
-
-    indent_str = curr_indent * " "
-    body = f",\n{indent_str}".join(fields_str)
-    return f"{class_name}({body})"
 
 
 def _format_dict(
@@ -406,7 +369,7 @@ def _format_dict(
     for k, v in attr.items():
         k_repr = repr(k)
         v_str = (
-            _pformat(v, indent, width, curr_indent + len(k_repr))
+            pformat(v, indent, width, curr_indent + len(k_repr))
             if is_dataclass(v)
             else repr(v)
         )
@@ -423,7 +386,7 @@ def _format_list(
 ) -> str:
     curr_indent += indent + 1
     list_repr = [
-        _pformat(l, indent, width, curr_indent) if is_dataclass(l) else repr(l)
+        pformat(l, indent, width, curr_indent) if is_dataclass(l) else repr(l)
         for l in attr
     ]
     start, end = ("[", "]") if isinstance(attr, list) else ("(", ")")

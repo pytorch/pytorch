@@ -28,7 +28,6 @@ import itertools
 import logging
 import math
 import operator
-import sys
 import types
 import typing
 import unittest
@@ -2115,9 +2114,7 @@ class BuiltinVariable(VariableTracker):
             getattr(isinstance_type, "__instancecheck__", None)
         ):
             isinstance_type_tuple = (isinstance_type,)
-        elif sys.version_info >= (3, 10) and isinstance(
-            isinstance_type, types.UnionType
-        ):
+        elif isinstance(isinstance_type, types.UnionType):
             isinstance_type_tuple = isinstance_type.__args__
         elif isinstance(isinstance_type, tuple) and all(
             isinstance(tp, type) or callable(getattr(tp, "__instancecheck__", None))
