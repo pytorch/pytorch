@@ -177,13 +177,6 @@ def redistribute_local_tensor(
             debug_mode = mode
             break
 
-    redistribute_context = (
-        debug_mode.record_redistribute_calls(  # type: ignore[union-attr]
-            local_tensor, current_spec, target_spec
-        )
-        if debug_mode is not None
-        else contextlib.nullcontext()
-    )
 
     if current_spec.mesh != target_spec.mesh:
         # TODO: alltoall/permute reshuffling to change device_mesh if they are not the same
@@ -203,6 +196,14 @@ def redistribute_local_tensor(
         transform_infos = _gen_transform_infos_non_cached(current_spec, target_spec)
     else:
         transform_infos = _gen_transform_infos(current_spec, target_spec)
+    
+    redistribute_context = (
+        debug_mode.record_redistribute_calls(  # type: ignore[union-attr]
+            local_tensor, current_spec, target_spec
+        )
+        if debug_mode is not None
+        else contextlib.nullcontext()
+    )
 
     with redistribute_context:
         for transform_info in transform_infos:
