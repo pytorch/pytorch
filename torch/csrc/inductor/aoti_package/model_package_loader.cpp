@@ -335,16 +335,6 @@ bool recursive_mkdir(const std::string& dir) {
   return ret == 0;
 }
 
-bool recursive_make_parent_dir(const std::string& file_path) {
-  std::string str_file_path = normalize_path_separator(file_path);
-  const size_t found = str_file_path.find_last_of(k_separator);
-  std::string str_parent_path = (found == std::string::npos)
-      ? str_file_path
-      : str_file_path.substr(found + 1);
-
-  return recursive_mkdir(str_parent_path);
-}
-
 bool recursive_rmdir(const std::string& path) {
 #ifdef _WIN32
   std::error_code ec;
@@ -554,7 +544,6 @@ class RAIIMinizArchive {
       const std::string& dest_filename) {
     // Can't normalize_path_separator zip_filename, as it is zip index.
     std::string path_dest_filename = normalize_path_separator(dest_filename);
-    recursive_make_parent_dir(path_dest_filename);
     if (!mz_zip_reader_extract_file_to_file(
             &_zip_archive,
             zip_filename.c_str(),
