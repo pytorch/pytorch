@@ -66,7 +66,6 @@ _LINKER_SCRIPT = os.path.join(_TORCH_PATH, "_inductor/script.ld")
 _IS_LINUX = sys.platform.startswith("linux")
 _IS_MACOS = sys.platform.startswith("darwin")
 _IS_WINDOWS = sys.platform == "win32"
-AOTI_SHIM_LIB = os.environ.get("AOTI_SHIM_LIB")  # used for AOTI cross-compilation
 
 SUBPROCESS_DECODE_ARGS = ("utf-8",) if _IS_WINDOWS else ()
 
@@ -332,6 +331,26 @@ def check_msvc_cl_language_id(compiler: str) -> None:
         )
 
 
+@functools.cache
+def check_mingw_win32_flavor(compiler: str) -> None:
+    """
+    Check if MinGW `compiler` exists and whether it is the win32 flavor (instead of posix flavor).
+    """
+    try:
+        out = subprocess.check_output(
+            [compiler, "-v"], stderr=subprocess.STDOUT, text=True
+        )
+    except FileNotFoundError as e:
+        raise RuntimeError(f"Compiler: {compiler} is not found.") from e
+    except Exception as e:
+        raise RuntimeError(f"Failed to run {compiler} -v") from e
+
+    for line in out.splitlines():
+        if "Thread model" in line:
+            if line.split(":")[1].strip().lower() != "win32":
+                raise RuntimeError(f"Compiler: {compiler} is not win32 flavor.")
+
+
 def get_cpp_compiler() -> str:
     if (
         config.aot_inductor.cross_target_platform == "windows"
@@ -340,7 +359,7 @@ def get_cpp_compiler() -> str:
         # we're doing cross-compilation
         compiler = "x86_64-w64-mingw32-g++"
         if not config.aot_inductor.package_cpp_only:
-            check_compiler_exist_windows(compiler)
+            check_mingw_win32_flavor(compiler)
         return compiler
 
     if _IS_WINDOWS:
@@ -899,12 +918,17 @@ def _get_shared_cflags(do_link: bool) -> list[str]:
         https://learn.microsoft.com/en-us/cpp/c-runtime-library/crt-library-features?view=msvc-170
         """
         return ["DLL", "MD"]
-    if not do_link:
-        return ["fPIC"]
     if platform.system() == "Darwin" and "clang" in get_cpp_compiler():
         # This causes undefined symbols to behave the same as linux
         return ["shared", "fPIC", "undefined dynamic_lookup"]
-    return ["shared", "fPIC"]
+    flags = []
+    if config.aot_inductor.cross_target_platform == "windows":
+        flags.extend(["static-libstdc++", "static-libgcc", "fPIC"])
+    if do_link:
+        flags.append("shared")
+
+    flags.append("fPIC")
+    return flags
 
 
 def get_cpp_options(
@@ -1112,11 +1136,12 @@ def _get_torch_related_args(
             assert config.aot_inductor.aoti_shim_library, (
                 "'config.aot_inductor.aoti_shim_library' must be set when 'cross_target_platform' is 'windows'."
             )
-            assert AOTI_SHIM_LIB, (
-                "'AOTI_SHIM_LIB' must be set to the path of the AOTI shim library when 'cross_target_platform' is 'windows'."
+            assert config.aot_inductor.aoti_shim_library_path, (
+                "'config.aot_inductor.aoti_shim_library_path' must be set to the path of the AOTI shim library",
+                " when 'cross_target_platform' is 'windows'.",
             )
             libraries.append(config.aot_inductor.aoti_shim_library)
-            libraries_dirs.append(AOTI_SHIM_LIB)
+            libraries_dirs.append(config.aot_inductor.aoti_shim_library_path)
 
     if _IS_WINDOWS:
         libraries.append("sleef")
