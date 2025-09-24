@@ -209,7 +209,7 @@ def redistribute_local_tensor(
                 new_local_tensor = local_tensor
                 continue
 
-            if num_shards == 1:
+            if num_chunks == 1:
                 # short cut, if there's only one shard, we don't need to do any collective
                 # comm, just use the original local tensor
                 new_local_tensor = local_tensor
