@@ -1997,9 +1997,13 @@ def clamp_max(
 
 
 # https://pytorch.org/docs/stable/generated/torch.where.html
-# TODO: implement alternate where
-@register_decomposition(aten.where)
-@out_wrapper()
+# TODO: implement where.default
+@register_decomposition(aten.where.self)
+@register_decomposition(aten.where.ScalarSelf)
+@register_decomposition(aten.where.ScalarOther)
+@register_decomposition(aten.where.Scalar)
+@register_decomposition(aten.where.self_out)
+@out_wrapper(exact_dtype=True)
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a", "b"),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH,
@@ -2259,11 +2263,14 @@ def _reduction(
         dims = (dims,)  # type: ignore[assignment]
     dims = utils.reduction_dims(a.shape, dims)
     if not has_identity:
-        valid_shape = a.ndim == 0 or builtins.all(a.shape[i] for i in dims)
-        if not valid_shape:
-            raise RuntimeError(
-                "reducing over zero-size dimension for reduction operation without identity"
-            )
+        from torch.fx.experimental.symbolic_shapes import sym_and
+
+        valid_shape = a.ndim == 0 or sym_and(*(a.shape[i] > 0 for i in dims))
+        torch._check(
+            valid_shape,
+            lambda: "reducing over zero-size dimension for reduction operation without identity",
+        )
+
     computation_dtype, result_dtype = utils.reduction_dtypes(
         a, output_dtype_kind, dtype
     )
@@ -2988,7 +2995,7 @@ def constant_pad_nd(
         pad_idx = len(pad) - ((i + 1) * 2)
         new_dim = input_sizes[l_diff + i] + pad[pad_idx] + pad[pad_idx + 1]
         torch._check(
-            new_dim > 0,
+            new_dim >= 0,
             lambda: f"The input size {input_sizes[l_diff + i]}, plus negative padding "
             f"{pad[pad_idx]} and {pad[pad_idx + 1]} resulted in a negative output size, "
             f"which is invalid. Check dimension {l_diff + i} of your input.",
@@ -3132,7 +3139,10 @@ def flatten(a: TensorLikeType, start_dim: int = 0, end_dim: int = -1) -> TensorL
 
     # Tries to take a view
     # TODO: we could look at directing collapse_view to skip its meta function here (unsafe_collapse_view)
-    new_shape, _new_strides = prims._collapse_view_helper(a, start_dim, end_dim)
+    # Unbacked semnatics: if validty of in-place flattening is undecided we copy.
+    new_shape, _new_strides = prims._collapse_view_helper(
+        a, start_dim, end_dim, must_be_valid=None
+    )
     if new_shape is not None:
         return prims.collapse_view(a, start_dim, end_dim)
 
@@ -3840,7 +3850,9 @@ def _reshape_view_helper_core_alg(
             # may return a view of a copy
 
             # Checks if collapse can be a view and short-circuits to copying reshape if it can't
-            new_shape, _new_strides = prims._collapse_view_helper(a_, idx, end)
+            new_shape, _new_strides = prims._collapse_view_helper(
+                a_, idx, end, must_be_valid=None
+            )
             if new_shape is None:
                 if allow_copy:
                     return prims.reshape(a, shape)
@@ -5106,7 +5118,7 @@ def empty_like(
         )
 
     # memory_format == torch.preserve_format
-    logical_to_physical_perm = (
+    logical_to_physical_perm, _ = (
         utils.compute_elementwise_output_logical_to_physical_perm(a)
     )
     # identity perm is [2, 1, 0]
@@ -5573,6 +5585,13 @@ def empty_strided(
     )
 
 
+def _strength_reduce_integer(val: int) -> torch.dtype:
+    for possible_dtype in (torch.uint8, torch.uint16, torch.int32):
+        if val <= torch.iinfo(possible_dtype).max:
+            return possible_dtype
+    return torch.int64
+
+
 @register_decomposition(aten.eye)
 @out_wrapper()
 def eye(
@@ -5594,12 +5613,15 @@ def eye(
     torch._check(n >= 0, lambda: f"n must be greater or equal to 0, got {n}")
     torch._check(m >= 0, lambda: f"m must be greater or equal to 0, got {m}")
 
-    range_n = torch.arange(n, dtype=torch.int64, device=device, requires_grad=False)
-    range_m = torch.arange(m, dtype=torch.int64, device=device, requires_grad=False)
+    range_dtype = torch.int64
+    if isinstance(n, utils.IntWithoutSymInt) and isinstance(m, utils.IntWithoutSymInt):
+        range_dtype = _strength_reduce_integer(max(n, m))
+    range_n = torch.arange(n, dtype=range_dtype, device=device, requires_grad=False)
+    range_m = torch.arange(m, dtype=range_dtype, device=device, requires_grad=False)
 
     cond = range_n.unsqueeze(-1) == range_m
-    if dtype is torch.bool:
-        return cond
+    if layout in (torch.strided, None) and not pin_memory:
+        return cond.to(dtype or torch.get_default_dtype())
     else:
         one = torch.ones(
             (1,),
