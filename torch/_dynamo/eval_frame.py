@@ -67,7 +67,7 @@ from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.types import ConvertFrameReturn, FrameAction, FrameExecStrategy
 from torch._export.utils import _compiling_state_context
 from torch._subclasses.fake_tensor import unset_fake_temporarily
-from torch._utils_internal import justknobs_check, log_export_usage
+from torch._utils_internal import DISABLE_JUSTKNOBS, justknobs_check, log_export_usage
 from torch.export.dynamic_shapes import (
     _combine_args,
     _DimHint,
@@ -145,16 +145,20 @@ cached_backends: dict[int, CompilerFn] = {}
 unset = Unset.token
 
 
-def _maybe_set_eval_frame(callback: DynamoCallback) -> DynamoCallback:
-    # A wrapper on set_eval_frame that is guarded by a Justknob.
-    # Users can disable torchDynamo by setting the JK to False.
-    if not justknobs_check("pytorch/compiler:enable_compiler_set_eval_frame"):
-        torch._dynamo.utils.warn_once(
-            "Dynamo disabled by Justknob: enable_compiler_set_eval_frame, skipping set_eval_frame"
-        )
-        return callback
-    else:
-        return set_eval_frame(callback)
+if DISABLE_JUSTKNOBS:
+    _maybe_set_eval_frame = set_eval_frame
+else:
+
+    def _maybe_set_eval_frame(callback: DynamoCallback) -> DynamoCallback:
+        # A wrapper on set_eval_frame that is guarded by a Justknob.
+        # Users can disable torchDynamo by setting the JK to False.
+        if not justknobs_check("pytorch/compiler:enable_compiler_set_eval_frame"):
+            torch._dynamo.utils.warn_once(
+                "Dynamo disabled by Justknob: enable_compiler_set_eval_frame, skipping set_eval_frame"
+            )
+            return callback
+        else:
+            return set_eval_frame(callback)
 
 
 @dataclass
@@ -743,12 +747,11 @@ class _TorchDynamoContext:
                     # Create a fresh CompilePackage
                     self._package.initialize(fn, None, ignore_inlined_sources=False)
                 else:
-                    cache_entry, backends = result
                     try:
                         self._package.initialize(
-                            fn, cache_entry, ignore_inlined_sources=False
+                            fn, result.dynamo, ignore_inlined_sources=False
                         )
-                        self._package.install(backends)
+                        self._package.install(result.backends)
                     except RuntimeError as e:
                         log.warning("Failed to load entry from dynamo cache: %s", e)
                         self._package.initialize(fn, None, ignore_inlined_sources=False)

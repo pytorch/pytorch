@@ -60,7 +60,7 @@ import sympy
 
 import torch
 import torch.utils._pytree as pytree
-from torch._inductor.analysis.device_info import DeviceInfo
+from torch._inductor.analysis.device_info import datasheet_tops
 from torch._inductor.runtime.hints import DeviceProperties
 from torch.utils._dtype_abbrs import dtype_abbrs
 from torch.utils._ordered_set import OrderedSet
@@ -664,6 +664,13 @@ def cache_on_self(fn: Callable[Concatenate[Any, P], RV]) -> CachedMethod[P, RV]:
 
     wrapper.clear_cache = clear_cache  # type: ignore[attr-defined]
     return wrapper  # type: ignore[return-value]
+
+
+def cache_property_on_self(fn: Callable[P, RV]) -> CachedMethod[P, RV]:
+    """
+    Variant of cache_on_self for properties. The only difference is the type signature.
+    """
+    return cache_on_self(fn)
 
 
 def aggregate_origins(
@@ -1460,6 +1467,9 @@ class IndentedBuffer:
         res.writelines(other._lines)
         return res
 
+    def contains(self, new_line: Union[DeferredLineBase, LineContext, str]) -> bool:
+        return new_line in self._lines
+
 
 class FakeIndentedBuffer(IndentedBuffer):
     def __init__(self) -> None:
@@ -1788,6 +1798,22 @@ def use_triton_tma_template(
         and can_use_tma(*matrices, output_layout=layout, add_guards=add_guards)
         and config.triton.enable_persistent_tma_matmul
     )
+
+
+def use_triton_blackwell_tma_template(
+    *matrices: IRNode, output_layout: Layout, add_guards: bool = False
+) -> bool:
+    if not use_triton_tma_template(
+        *matrices, output_layout=output_layout, add_guards=add_guards
+    ):
+        return False
+
+    from torch.utils._triton import has_triton_tensor_descriptor_host_tma
+
+    from .codegen.cuda.cuda_env import is_datacenter_blackwell_arch
+
+    # Blackwell template require the tensor descriptor API, not the experimental API.
+    return has_triton_tensor_descriptor_host_tma() and is_datacenter_blackwell_arch()
 
 
 def use_cutlass_template(layout: Layout, m: int, n: int, k: int) -> bool:
@@ -2397,9 +2423,7 @@ def get_device_tflops(dtype: torch.dtype) -> float:
     We don't want to throw errors in this function. First check to see if the device is in device_info.py,
     then fall back to the inaccurate triton estimation.
     """
-    ds_tops = DeviceInfo.lookup_tops_current_device(
-        dtype, is_tf32=torch.backends.cuda.matmul.allow_tf32
-    )
+    ds_tops = datasheet_tops(dtype, is_tf32=torch.backends.cuda.matmul.allow_tf32)
     if ds_tops is not None:
         return ds_tops
 
@@ -2949,6 +2973,15 @@ def shape_env_from_inputs(inputs: Sequence[InputType]) -> Optional[ShapeEnv]:
         if isinstance(input, torch.SymInt):
             return input.node.shape_env
 
+        # Check tensor sizes and strides for SymInt values
+        if isinstance(input, torch.Tensor):
+            for size in input.size():
+                if isinstance(size, torch.SymInt):
+                    return size.node.shape_env
+            for stride in input.stride():
+                if isinstance(stride, torch.SymInt):
+                    return stride.node.shape_env
+
     # TODO(voz): Should we always have one anyway?
     return None
 
@@ -3302,12 +3335,7 @@ class ScopedDict(MutableMapping[KeyType, ValType]):
 @dataclass_transform(frozen_default=True)
 def ir_dataclass(cls: Optional[type[Any]] = None, /, *, frozen: bool = True) -> Any:
     def wrap(cls: _T) -> _T:
-        if sys.version_info >= (3, 10):
-            return dataclasses.dataclass(cls, kw_only=True, frozen=frozen)  # type: ignore[call-overload]
-        else:
-            # Polyfill for python=3.9. kw_only simply introduces an extra check
-            # that only kwargs are used (and is not available on 3.9)
-            return dataclasses.dataclass(cls, frozen=frozen)
+        return dataclasses.dataclass(cls, kw_only=True, frozen=frozen)  # type: ignore[call-overload]
 
     if cls is None:
         return wrap
@@ -3721,4 +3749,6 @@ def is_nonfreeable_buffers(dep: Dep) -> bool:
     # before checking for known strings.
     if V.graph.name:
         dep_name = dep_name.removeprefix(V.graph.name + "_")
-    return dep_name.startswith(("primals_", "arg", "fwd_rng_state", "bwd_rng_state"))
+    return dep_name.startswith(
+        ("primals_", "arg", "fwd_rng_state", "bwd_rng_state", "tangents")
+    )

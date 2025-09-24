@@ -25,7 +25,7 @@ import torch._C
 from torch import device as _device
 from torch._utils import _dummy_type, _LazySeedTracker, classproperty
 
-from . import gds
+from . import _device_limits, gds
 from ._utils import _get_device_index
 from .graphs import (
     CUDAGraph,
@@ -259,7 +259,7 @@ def _check_capability():
     CUDA_ARCHES_SUPPORTED = {
         "12.6": {"min": 50, "max": 90},
         "12.8": {"min": 70, "max": 120},
-        "12.9": {"min": 70, "max": 120},
+        "13.0": {"min": 75, "max": 120},
     }
 
     if (
@@ -500,6 +500,7 @@ class CudaError(RuntimeError):
 
 
 def check_error(res: int) -> None:
+    r"""Raise an error if the result of a CUDA runtime API call is not success."""
     if res != _cudart.cudaError.success:
         raise CudaError(res)
 
@@ -1732,7 +1733,6 @@ def _compile_kernel(
     kernel_source: str,
     kernel_name: str,
     compute_capability: Optional[str] = None,
-    header_code: str = "",
     cuda_include_dirs: Optional[list] = None,
     nvcc_options: Optional[list] = None,
 ):
@@ -1749,7 +1749,6 @@ def _compile_kernel(
         kernel_name (str): The name of the kernel function to compile
         compute_capability (str, optional): The compute capability to target (e.g., "86").
                                            If None, will detect from current device.
-        header_code (str, optional): Additional header code to prepend to the kernel source
         cuda_include_dirs (list, optional): List of directories containing CUDA headers
         nvcc_options (list, optional): Additional options to pass to NVRTC
 
@@ -1779,7 +1778,6 @@ def _compile_kernel(
         kernel_source,
         kernel_name,
         compute_capability,
-        header_code,
         cuda_include_dirs,
         nvcc_options,
     )
