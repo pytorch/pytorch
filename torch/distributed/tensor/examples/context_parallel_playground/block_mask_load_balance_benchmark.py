@@ -1,37 +1,24 @@
 """
 To run the example, use the following command:
 python block_mask_load_balance_benchmark.py
-
-Pre-requisite:
-pip install jsonargparse
 """
 
-import os
 import random
-
-from typing import Union
+from typing import Optional, Union
 
 import torch
-import torch.distributed as dist
-import torch.distributed.tensor.experimental._attention as cp_attn
-
 from torch import Tensor
 from torch._prims_common import DeviceLikeType
-from torch.autograd.grad_mode import no_grad
-from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor.experimental._attention import (
-    _cp_options,
-    _DispatchMode,
-    _set_cp_global_var,
-    context_parallel,
-    create_cp_block_mask,
-    PerDocumentHeadTailLoadBalancer,
+    HeadTailLoadBalancer,
+    PTRRLoadBalancer,
 )
 from torch.nn.attention.flex_attention import (
     _mask_mod_signature,
+    BlockMask,
     create_block_mask,
-    flex_attention,
 )
+
 
 # Compile the flex_attention function
 compiled_create_block_mask = torch.compile(
@@ -172,6 +159,8 @@ def _create_cp_block_mask(
     H: int,
     Q_LEN: int,
     KV_LEN: int,
+    rank: int,
+    world_size: int,
     qkv_shuffle_indices: Optional[Tensor] = None,
     device: DeviceLikeType = "cuda",
 ) -> BlockMask:
@@ -240,6 +229,9 @@ def _create_cp_block_mask(
         BLOCK_SIZE=(block_size, block_size),
     )
 
+    # unlike the original create_cp_block_mask, we don't need to modify seq_lengths
+    return block_mask
+
 
 # benchmark:
 #   Head-tail load balance vs. Sparsity-based load balance on Document Mask
@@ -273,93 +265,59 @@ def benchmark_load_balance_document_mask(
 
     print(f"Full BlockMask sparsity={compute_block_mask_sparsity(block_mask)}")
 
+    print("Head-Tail Load Balance:")
+    load_balancer = HeadTailLoadBalancer
+    load_balance_indices = load_balancer._generate_indices(S, world_size, device_type)
     # simulate context parallel block_mask sharding:
     for rank in range(world_size):
         print(f"rank: {rank} / {world_size}")
-        load_balancer = HeadTailLoadBalancer
-
+        cp_block_mask = _create_cp_block_mask(
+            document_causal_mask,
+            B=B,
+            H=H,
+            Q_LEN=S,
+            KV_LEN=S,
+            rank=rank,
+            world_size=world_size,
+            qkv_shuffle_indices=load_balance_indices,
+            device=device_type,
+        )
+        print(
+            f"rank ({rank} / {world_size}) Context Parallel BlockMask sparsity={compute_block_mask_sparsity(cp_block_mask)}"
+        )
         print("\n")
 
-    cp_block_mask = _create_cp_block_mask(
-        document_causal_mask,
-        B=B,
-        H=H,
-        Q_LEN=S,
-        KV_LEN=S,
-        qkv_shuffle_indices=,
-        device=device_type,
+    print("Sparsity-based Load Balance:")
+    load_balancer = PTRRLoadBalancer
+    load_balance_indices = load_balancer._generate_indices(
+        block_mask, world_size, device_type
     )
-
-    # prepare input buffer
-    cp_q = q.detach().clone()
-    cp_k = k.detach().clone()
-    cp_v = v.detach().clone()
-
-    with no_grad():
-        with context_parallel(
-            device_mesh,
-            buffers=[cp_q, cp_k, cp_v],
-            buffer_seq_dims=[seq_dim] * 3,
-            load_balancer=load_balancer,
-        ):
-            # TODO: compiled flex_attention doesn't work with reuse of block_mask
-            import torch.nn.attention.flex_attention as fa
-
-            fa._FLEX_ATTENTION_DISABLE_COMPILE_DEBUG = True
-            forward_compiled_time = benchmark_torch_function_in_microseconds(
-                # compiled_flex_attention,
-                flex_attention,
-                cp_q,
-                cp_k,
-                cp_v,
-                block_mask=cp_block_mask,
-                enable_gqa=True,
-            )
-            backward_compiled_time = None
-
-            cp_q.requires_grad = False
-            cp_k.requires_grad = False
-            cp_v.requires_grad = False
-
-    # compute sparsity for cp block_mask
-    total_size = cp_block_mask.numel() * world_size
-    computed_blocks = cp_block_mask.kv_num_blocks.sum()
-    if cp_block_mask.full_kv_num_blocks is not None:
-        computed_blocks += cp_block_mask.full_kv_num_blocks.sum()
-
-    computed_size = (
-        computed_blocks.item()
-        * cp_block_mask.BLOCK_SIZE[0]
-        * cp_block_mask.BLOCK_SIZE[1]
-    )
-    dense_ratio = computed_size / total_size
-    sparsity = 1 - dense_ratio
-
-    exp_result = ExperimentResults(
-        fwd_time=forward_compiled_time,
-        bwd_time=backward_compiled_time,
-        sparsity=sparsity,
-    )
-    result = add_metrics_to_result(cp_exp_config, exp_result)
-
-    print(f"rank: {rank} / {world_size}, sparsity={sparsity}")
-    print_results(
-        [Experiment(cp_exp_config, {"cp_flex_attn": result})],
-        save_path=None,
-        show_speedups=False,
-    )
-    print("\n\n")
+    # simulate context parallel block_mask sharding:
+    for rank in range(world_size):
+        print(f"rank: {rank} / {world_size}")
+        cp_block_mask = _create_cp_block_mask(
+            document_causal_mask,
+            B=B,
+            H=H,
+            Q_LEN=S,
+            KV_LEN=S,
+            rank=rank,
+            world_size=world_size,
+            qkv_shuffle_indices=load_balance_indices,
+            device=device_type,
+        )
+        print(
+            f"rank ({rank} / {world_size}) Context Parallel BlockMask sparsity={compute_block_mask_sparsity(cp_block_mask)}"
+        )
+        print("\n")
 
 
 if __name__ == "__main__":
-    # this script is launched via torchrun which automatically manages ProcessGroup
-    rank = int(os.environ["RANK"])
-    world_size = int(os.environ["WORLD_SIZE"])
-    # assert world_size == 4  # our example uses 4 worker ranks
-
-    try:
-        # flex_attn_causal_masking(world_size, rank)
-        flex_attn_document_causal_masking(world_size, rank)
-    finally:
-        dist.barrier()
-        dist.destroy_process_group()
+    benchmark_load_balance_document_mask(
+        world_size=4,
+        B=1,
+        H=1,
+        S=8192,
+        D=32,
+        document_count=3,
+    )
