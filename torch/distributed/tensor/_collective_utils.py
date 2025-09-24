@@ -9,6 +9,7 @@ import torch
 import torch.distributed._functional_collectives as funcol
 import torch.distributed.tensor._dtensor_spec as dtensor_spec
 from torch._logging import warning_once
+from torch.distributed import _functional_collectives
 
 # Import from centralized fallback module - no conditional imports needed
 from torch.distributed._distributed_c10d import _resolve_process_group
@@ -18,6 +19,7 @@ from torch.distributed.distributed_c10d import (
     broadcast,
     get_group_rank,
     get_rank,
+    get_world_size,
     ProcessGroup,
     scatter,
     Work,
@@ -62,6 +64,58 @@ def shard_dim_alltoall(input, gather_dim, shard_dim, mesh, mesh_dim):
     return torch.ops._dtensor.shard_dim_alltoall(
         input, gather_dim, shard_dim, group_name
     )
+
+
+def all_permute_mesh_dim(
+    input: torch.Tensor,
+    full_tensor_shape: torch.Size,
+    src_distribution: list[list[int]],
+    tgt_distribution: list[list[int]],
+    mesh: DeviceMesh,
+):
+    # applies only when source and target placement both local and global shapes match
+    # find the target rank to send the `input` to
+    # comments below are based on 3d mesh [X, Y, U]
+    # DTensor make be local tensor to proceed
+    # assert not isinstance(input, dtensor.DTensor)
+    assert len(src_distribution) == input.ndim
+    assert len(tgt_distribution) == input.ndim
+    # recover the original tensor shape before sharding
+    orig_tensor_shape = list(input.shape)
+    for tensor_dim, shard_tensor_on_mesh_dims in enumerate(src_distribution):
+        for mesh_dim in shard_tensor_on_mesh_dims:
+            orig_tensor_shape[tensor_dim] *= mesh.size(mesh_dim)
+
+    # map current rank to global coordinate [x, y, u]
+    src_coordinate = mesh.get_coordinate()
+    assert src_coordinate is not None
+
+    # get target coordinate
+    tgt_coordinate = [0] * mesh.ndim
+    for tensor_dim, (
+        src_distribute_to_mesh_dims,
+        tgt_distribute_to_mesh_dims,
+    ) in enumerate(zip(src_distribution, tgt_distribution)):
+        dividend_size = 0  # 分子
+        # map back from src_distribution
+        prev_size = full_tensor_shape[tensor_dim]
+        for mesh_dim in src_distribute_to_mesh_dims:
+            cur_size = math.ceil(prev_size / mesh.size(mesh_dim))
+            dividend_size += src_coordinate[mesh_dim] * cur_size
+            prev_size = cur_size
+        divisor_size = full_tensor_shape[tensor_dim]  # 分母
+        for mesh_dim in tgt_distribute_to_mesh_dims:
+            divisor_size = math.ceil(divisor_size / mesh.size(mesh_dim))
+            tgt_coordinate[mesh_dim] = dividend_size // divisor_size
+    tgt_rank = mesh.get_rank(tgt_coordinate)
+    src_rank = mesh.get_rank()
+    permuted_rank = list(range(0, get_world_size()))
+    permuted_rank[src_rank], permuted_rank[tgt_rank] = (
+        permuted_rank[tgt_rank],
+        permuted_rank[src_rank],
+    )
+    output = _functional_collectives.permute_tensor(input, permuted_rank, mesh)
+    return output
 
 
 def mesh_scatter(

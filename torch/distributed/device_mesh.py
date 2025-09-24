@@ -933,11 +933,34 @@ if True:  # just to temporarily avoid reindentation
         def shape(self) -> tuple[int, ...]:
             return tuple(self.mesh.shape)
 
-        def get_rank(self) -> int:
+        def get_rank(self, coordinate: Optional[list[int]] = None) -> int:
             """
-            Returns the current global rank.
+            Returns the rank at the specified ``coordinate``.
+
+            If no coordinate is provided, returns the current global rank.
+
+            Args:
+                coordinate (list[int], optional): The coordinate in the mesh to query the rank for.
+                    If not provided, returns the current global rank.
+
+            Returns:
+                int: The rank at the specified coordinate, or the current global rank if coordinate is None.
             """
-            return get_rank()
+            if coordinate is None:
+                return get_rank()
+
+            # Assert that coordinate doesn't exceed mesh dimensions
+            if len(coordinate) != self.mesh.ndim:
+                raise ValueError(
+                    f"Coordinate length {len(coordinate)} must match mesh dimensions {self.mesh.ndim}"
+                )
+
+            for i, coord in enumerate(coordinate):
+                if coord < 0 or coord >= self.mesh.size(i):
+                    raise ValueError(
+                        f"Coordinate {coord} at dimension {i} is out of bounds [0, {self.mesh.size(i)})"
+                    )
+            return int(self.mesh[tuple(coordinate)].item())
 
         def get_local_rank(self, mesh_dim: Optional[Union[int, str]] = None) -> int:
             """

@@ -555,10 +555,16 @@ def permute_tensor(
     input_split_sizes = [0] * group_size
     for src, dst in enumerate(src_dst):
         if src == dist.get_rank(local_pg):
-            input_split_sizes[dst] = self.numel()
+            input_split_sizes[dst] = self.size(0)
         if dst == dist.get_rank(local_pg):
-            output_split_sizes[src] = self.numel()
-
+            output_split_sizes[src] = self.size(0)
+    print(
+        torch.distributed.get_rank(),
+        dist.get_rank(local_pg),
+        input_split_sizes,
+        output_split_sizes,
+    )
+    print(input_split_sizes, output_split_sizes)
     return all_to_all_single(self, output_split_sizes, input_split_sizes, group, tag)
 
 
@@ -725,14 +731,19 @@ def _expand_group(group: RANK_TYPES, tag: str = "") -> tuple[str, list[int], int
         group_size = len(rankset)
         tag = tag or c10d._get_group_tag(group)
     elif isinstance(group, DeviceMesh):
-        assert group.ndim == 1, (
-            "Only 1D mesh is supported, pass in (DeviceMesh, int) together if mesh > 1D"
-        )
-        # TODO: it should run collective in the whole mesh instead of dim 0
-        pg = group.get_group()
-        rankset = dist.get_process_group_ranks(pg)
-        group_size = len(rankset)
-        tag = tag or c10d._get_group_tag(pg)
+        if group.ndim == 1:
+            # For 1D mesh, use the single dimension
+            pg = group.get_group()
+            rankset = dist.get_process_group_ranks(pg)
+            group_size = len(rankset)
+            tag = tag or c10d._get_group_tag(pg)
+        else:
+            # For multi-dimensional mesh, use all ranks in the global mesh
+            all_ranks = group.mesh.flatten().tolist()
+            rankset = all_ranks
+            group_size = len(rankset)
+            # Create a tag that represents the entire mesh
+            tag = tag or f"global_mesh_{id(group)}"
     elif isinstance(group, tuple):
         if (
             len(group) == 2
@@ -766,10 +777,16 @@ def _resolve_group_name(group: RANK_TYPES, tag: str = "") -> str:
     elif isinstance(group, str):
         return group
     elif isinstance(group, DeviceMesh):
-        assert group.ndim == 1, (
-            "Only 1D mesh is supported, pass in (DeviceMesh, int) together if mesh > 1D"
-        )
-        return group._dim_group_names[0]
+        if group.ndim == 1:
+            # For 1D mesh, use the single dimension group name
+            return group._dim_group_names[0]
+        else:
+            # For multi-dimensional mesh, create a group name for the global mesh
+            # We need to create a process group for all ranks in the mesh
+            all_ranks = group.mesh.flatten().tolist()
+            return c10d._resolve_group_name_by_ranks_and_tag(
+                all_ranks, tag or f"global_mesh_{id(group)}"
+            )
     elif isinstance(group, tuple):
         if (
             len(group) == 2
