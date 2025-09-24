@@ -322,7 +322,7 @@ def _pipelined_produce_and_all2all(
     chunk_producer: Callable[[int, torch.Tensor], None],
     output: torch.Tensor,
     group_name: str,
-    out_chunk_dim=0,
+    out_chunk_dim: int = 0,
 ) -> None:
     """
     Perform the following logic with micro-pipelined computation and
@@ -530,9 +530,6 @@ def _fused_all_gather_matmul_impl(
     group = c10d._resolve_process_group(group_name)
 
     if gather_dim == A_shard.ndim - 1:
-        # Implementation for gathering on last dimension of matmul (N)
-        # A_shard splitted column wise
-        # A_shard: [A0, A1, ... , Ags]
         return _fused_all_gather_matmul_last_gather_dim_impl(
             mm_out_op,
             A_shard,
@@ -728,9 +725,6 @@ def _fused_all_gather_matmul_last_gather_dim_impl(
     assert gather_dim == A_shard.ndim - 1
     group = c10d._resolve_process_group(group_name)
 
-    # A_shard splitted column wise
-    # A_shard: [A0, A1, ... , Ags]
-    # A0 * B is Partial of the same size as output
     B_shards = [B.chunk(group.size()) for B in Bs]
 
     leading_dims = list(A_shard.shape[:-1])
@@ -740,7 +734,7 @@ def _fused_all_gather_matmul_last_gather_dim_impl(
         return t.view(*leading_dims, -1)
 
     A_out_leading_dims = list(A_shard.shape[:-1])
-    A_out_leading_dims[0] *= 4
+    A_out_leading_dims[0] *= group.size()
 
     def unflatten_A_out(t: torch.Tensor) -> torch.Tensor:
         return t.view(*A_out_leading_dims, -1)
@@ -801,21 +795,20 @@ def _fused_all_gather_matmul_fallback(
     )
     A = torch.ops._c10d_functional.wait_tensor(A)
     if gather_dim == A.ndim - 1:
-        A_mm_shape = list(A_shard.shape)
-        A_mm_shape[-1] *= group_size
-        A_mm = A.new_empty(A_mm_shape)
+        A_splits = A.split(group_size)
+        A_mm = torch.cat(A_splits, dim=-1)
         res = [torch.matmul(A_mm, B) for B in Bs]
         if return_A:
             return A, res
         else:
             return None, res
+
+    A = A.view(group_size, *A_shard.shape).movedim(gather_dim + 1, 1).flatten(0, 1)
+    res = [torch.matmul(A, B).movedim(0, gather_dim) for B in Bs]
+    if return_A:
+        return A.movedim(0, gather_dim), res
     else:
-        A = A.view(group_size, *A_shard.shape).movedim(gather_dim + 1, 1).flatten(0, 1)
-        res = [torch.matmul(A, B).movedim(0, gather_dim) for B in Bs]
-        if return_A:
-            return A.movedim(0, gather_dim), res
-        else:
-            return None, res
+        return None, res
 
 
 @torch.library.impl(lib, "fused_all_gather_matmul", "CUDA")
@@ -1253,9 +1246,8 @@ def _fused_matmul_reduce_scatter_impl(
 
         leading_dims = list(A.shape[:-1])
 
-        stacked_partials = torch.empty_strided(
+        stacked_partials = torch.empty(
             (A_flat.shape[0], B.shape[1]),
-            (1, A_flat.shape[0]),
             dtype=out_dtype or A.dtype,
             device=A.device,
         )
@@ -1489,7 +1481,7 @@ def _fused_scaled_matmul_reduce_scatter_impl(
     def chunk_producer(rank: int, out: torch.Tensor) -> None:
         mm_out_op(A_shards[rank], B, scale_a=A_scale_shards[rank], **kwargs, out=out)
 
-    # Stacked partials will be the 2D outputs of the the pipelined scaled mm, and will
+    # Stacked partials will be the 2D outputs of the pipelined scaled mm, and will
     # have the shape (A_with_scatter_dim_0_tensor.shape[0], B.shape[1]) to align with the formula:
     # (a*b,c) @ (c,d) = (a*b,d)
     stacked_partials = A_with_scatter_dim_0.new_empty(

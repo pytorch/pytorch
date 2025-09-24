@@ -611,11 +611,10 @@ def _find_consumer_matmuls(node: torch.fx.Node) -> list[_Matmul]:
                 if not matmuls:
                     matmuls.extend(permute_matmuls)
                 else:
-                    has_not_permute_matmul = False
-                    for matmul in matmuls:
-                        if matmul.pre_mm_B_transpose:
-                            has_not_permute_matmul = True
-                    if not has_not_permute_matmul:
+                    has_pre_mm_B_transpose = any(
+                        matmul.pre_mm_B_transpose is not None for matmul in matmuls
+                    )
+                    if not has_pre_mm_B_transpose:
                         matmuls.extend(permute_matmuls)
 
     return matmuls
@@ -681,7 +680,7 @@ def graph_call_function_contiguous(graph, n):
 # mat_A_t = mat_A.t()
 # mat_B = ag(shard)
 # res_mm_t = mm(mat_B, mat_A_t)
-# return res_mm_t
+# return res_mm_t.t()
 def _insert_fused_all_gather_transpose_matmul(
     graph: torch.fx.Graph,
     matmuls: list[_Matmul],
@@ -746,11 +745,16 @@ def fuse_all_gather_matmul(all_gather: _AllGatherMatch) -> None:
     if not is_symm_mem_enabled_for_group(group_name):
         return
 
-    if (
-        not config._micro_pipeline_tp_ag_mm_last_dim_enabled
-        and gather_dim == _get_tensor(shard_node).ndim - 1
-    ):
-        return
+    filter_matmul = None
+    if gather_dim == _get_tensor(shard_node).ndim - 1:
+        if not config._micro_pipeline_tp_ag_mm_last_dim_enabled:
+            return
+
+        # scaled_mm is not supported yet for last dim
+        def _filter_out_scaled_matmul(matmul: _Matmul):
+            return not isinstance(matmul, _ScaledMatmul)
+
+        filter_matmul = _filter_out_scaled_matmul
 
     # Find consumer matmuls
     matmuls = _find_consumer_matmuls(ag_res_node)
@@ -766,10 +770,17 @@ def fuse_all_gather_matmul(all_gather: _AllGatherMatch) -> None:
     if len(matmuls) == 0 or len(OrderedSet(map(type, matmuls))) != 1:
         return
 
+    if filter_matmul and not filter_matmul(matmuls[0]):
+        return
+
     # Fuse the all_gather_tensor with the eligible matmuls
     graph = ag_node.graph
     with graph.inserting_before(ag_node):
         if matmuls[0].pre_mm_B_transpose is not None:
+            if gather_dim != 0:
+                # Not supported yet
+                return
+
             if "val" in shard_node.meta:
                 restrided = restride_A_shard_for_fused_all_gather_matmul(
                     _get_tensor(shard_node),
@@ -779,6 +790,7 @@ def fuse_all_gather_matmul(all_gather: _AllGatherMatch) -> None:
                     inductor_prims.force_stride_order,
                     args=(shard_node, restrided.stride()),
                 )
+
             fused_node = _insert_fused_all_gather_transpose_matmul(
                 graph, matmuls, shard_node, gather_dim, group_name
             )
@@ -806,6 +818,18 @@ def fuse_all_gather_matmul(all_gather: _AllGatherMatch) -> None:
             for matmul, new_out_node in zip(matmuls, new_out_nodes):
                 matmul.replace_with(new_out_node)
                 matmul.erase()
+
+            all_gather.replace_with(new_ag_node)
+            all_gather.erase()
+
+            # If the new_ag_node has no users, we tell the fused op to not return
+            # it. This creates more optimization opportunities.
+            if len(new_ag_node.users) == 0:
+                graph.erase_node(new_ag_node)
+                kwargs = dict(fused_node.kwargs)
+                if "return_A" in kwargs:
+                    kwargs["return_A"] = False
+                    fused_node.kwargs = kwargs
         else:
             if "val" in shard_node.meta:
                 restrided = restride_A_shard_for_fused_all_gather_matmul(
@@ -823,7 +847,7 @@ def fuse_all_gather_matmul(all_gather: _AllGatherMatch) -> None:
                 operator.getitem,
                 args=(fused_node, 0),
             )
-            new_out_nodes = graph.call_function(
+            new_out_nodes_node = graph.call_function(
                 operator.getitem,
                 args=(fused_node, 1),
             )
@@ -831,7 +855,7 @@ def fuse_all_gather_matmul(all_gather: _AllGatherMatch) -> None:
             for idx, matmul in enumerate(matmuls):
                 new_out_node = graph.call_function(
                     operator.getitem,
-                    args=(new_out_nodes, idx),
+                    args=(new_out_nodes_node, idx),
                 )
                 matmul.replace_with(new_out_node)
                 matmul.erase()
@@ -1022,11 +1046,16 @@ def fuse_matmul_reduce_scatter(reduce_scatter: _ReduceScatterMatch) -> None:
     if not is_symm_mem_enabled_for_group(group_name):
         return
 
-    if (
-        not config._micro_pipeline_tp_mm_rs_last_dim_enabled
-        and orig_scatter_dim == _get_tensor(input_node).ndim - 1
-    ):
-        return
+    filter_matmul = None
+    if orig_scatter_dim == _get_tensor(input_node).ndim - 1:
+        if not config._micro_pipeline_tp_mm_rs_last_dim_enabled:
+            return
+
+        # scaled_mm is not supported yet for last dim mm+rs
+        def _filter_out_scaled_matmul(matmul: _Matmul):
+            return not isinstance(matmul, _ScaledMatmul)
+
+        filter_matmul = _filter_out_scaled_matmul
 
     # Currently fused_matmul_reduce_scatter doesn't return the matmul result,
     # so we can't apply the fusion if the matmul result is used by multiple
@@ -1039,10 +1068,14 @@ def fuse_matmul_reduce_scatter(reduce_scatter: _ReduceScatterMatch) -> None:
         return
 
     matmul = _find_producer_matmul(input_node)
+
     if matmul is None:
         log.warning(
             "no producer matmul found for reduce scatter, skipping fuse_matmul_reduce_scatter fusion"
         )
+        return
+
+    if filter_matmul and not filter_matmul(matmul):
         return
 
     if rs_wait_tensor_node in matmul.arg_ancestor_nodes:
@@ -1220,8 +1253,8 @@ def micro_pipeline_tp_pass(graph: torch.fx.Graph):
             "async TP found no matching all-gather/reduce-scatter patterns for fusion"
         )
 
-    for reduce_scatter in reduce_scatters:
-        fuse_matmul_reduce_scatter(reduce_scatter)
-
     for all_gather in all_gathers:
         fuse_all_gather_matmul(all_gather)
+
+    for reduce_scatter in reduce_scatters:
+        fuse_matmul_reduce_scatter(reduce_scatter)
