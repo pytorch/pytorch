@@ -5819,7 +5819,10 @@ scaled_dot_product_attention = _add_docstr(
             L, S = query.size(-2), key.size(-2)
             scale_factor = 1 / math.sqrt(query.size(-1)) if scale is None else scale
             origin_dtype = query.dtype
-            query, key, value = query.float(), key.float(), value.float()
+            if not torch.backends.cuda.fp16_bf16_reduction_math_sdp_allowed():
+                # Convert to float32 for numerical stability (default behavior)
+                # Note: This flag affects the math backend globally (CPU and CUDA)
+                query, key, value = query.float(), key.float(), value.float()
             query, key = query * math.sqrt(scale_factor), key * math.sqrt(scale_factor)
             attn_bias = torch.zeros(L, S, dtype=query.dtype, device=query.device)
             if is_causal:
