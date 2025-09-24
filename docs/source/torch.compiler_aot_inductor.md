@@ -68,6 +68,7 @@ with torch.no_grad():
         # [Optional] Specify the generated shared library path. If not specified,
         # the generated artifact is stored in your system temp directory.
         package_path=os.path.join(os.getcwd(), "model.pt2"),
+        # [Optional] Specify Inductor configs
         # This specific max_autotune option will turn on more extensive kernel autotuning for
         # better performance.
         inductor_configs={"max_autotune": True,},
