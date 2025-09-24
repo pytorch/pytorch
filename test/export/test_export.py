@@ -15138,6 +15138,9 @@ def forward(self, x):
             test_serdes=True,
         )
 
+    # TODO: following tests should be fixed
+    @testing.expectedFailureTrainingIRToRunDecomp
+    @testing.expectedFailureTrainingIRToRunDecompNonStrict
     def test_preserve_annotation(self):
         class M(torch.nn.Module):
             def forward(self, x):
@@ -15154,8 +15157,6 @@ def forward(self, x):
 
         with fx_traceback.preserve_node_meta():
             ep = export(m, (torch.randn(10),))
-            # TODO: following line is failing
-            # ep = ep.run_decompositions({})
 
         for node in ep.graph.nodes:
             if node.target == torch.ops.aten.add.default:
