@@ -645,6 +645,17 @@ def fuse_all_gather_matmul(all_gather: _AllGatherMatch) -> None:
     if not is_symm_mem_enabled_for_group(group_name):
         return
 
+    filter_matmul = None
+    if gather_dim == _get_tensor(shard_node).ndim - 1:
+        if not config._micro_pipeline_tp_ag_mm_last_dim_enabled:
+            return
+
+        # scaled_mm is not supported yet for last dim
+        def _filter_out_scaled_matmul(matmul: _Matmul):
+            return not isinstance(matmul, _ScaledMatmul)
+
+        filter_matmul = _filter_out_scaled_matmul
+
     # Find consumer matmuls
     matmuls = _find_consumer_matmuls(ag_res_node)
 
@@ -657,6 +668,9 @@ def fuse_all_gather_matmul(all_gather: _AllGatherMatch) -> None:
     ]
 
     if len(matmuls) == 0 or len(OrderedSet(map(type, matmuls))) != 1:
+        return
+
+    if filter_matmul and not filter_matmul(matmuls[0]):
         return
 
     # Fuse the all_gather_tensor with the eligible matmuls
@@ -876,6 +890,17 @@ def fuse_matmul_reduce_scatter(reduce_scatter: _ReduceScatterMatch) -> None:
     if not is_symm_mem_enabled_for_group(group_name):
         return
 
+    filter_matmul = None
+    if orig_scatter_dim == _get_tensor(input_node).ndim - 1:
+        if not config._micro_pipeline_tp_mm_rs_last_dim_enabled:
+            return
+
+        # scaled_mm is not supported yet for last dim mm+rs
+        def _filter_out_scaled_matmul(matmul: _Matmul):
+            return not isinstance(matmul, _ScaledMatmul)
+
+        filter_matmul = _filter_out_scaled_matmul
+
     # Currently fused_matmul_reduce_scatter doesn't return the matmul result,
     # so we can't apply the fusion if the matmul result is used by multiple
     # users. This is not a fundamental limitation of the fused op and can be
@@ -887,10 +912,14 @@ def fuse_matmul_reduce_scatter(reduce_scatter: _ReduceScatterMatch) -> None:
         return
 
     matmul = _find_producer_matmul(input_node)
+
     if matmul is None:
         log.warning(
             "no producer matmul found for reduce scatter, skipping fuse_matmul_reduce_scatter fusion"
         )
+        return
+
+    if filter_matmul and not filter_matmul(matmul):
         return
 
     if rs_wait_tensor_node in matmul.arg_ancestor_nodes:
