@@ -12,10 +12,11 @@ from collections import defaultdict, deque
 from contextlib import contextmanager
 from dataclasses import dataclass, fields, is_dataclass
 from enum import auto, Enum
-from typing import Any, Callable, Optional, TYPE_CHECKING
+from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch.distributed as dist
+from torch import device
 from torch._utils import _get_device_index
 from torch.autograd import Function, Variable
 from torch.distributed.algorithms.join import Join, Joinable, JoinHook
@@ -29,6 +30,7 @@ if dist.is_available():
     from torch.distributed.distributed_c10d import (
         _get_default_group,
         _rank_not_in_group,
+        ProcessGroup,
         ReduceOp,
     )
     from torch.distributed.utils import (
@@ -44,6 +46,7 @@ if dist.rpc.is_available():
     from torch.distributed.rpc import RRef
 
 if TYPE_CHECKING:
+    from torch.distributed.device_mesh import DeviceMesh
     from torch.utils.hooks import RemovableHandle
 
 
@@ -648,26 +651,30 @@ class DistributedDataParallel(Module, Joinable):
     # used to track whether the given thread is inside ddp forward for torchdynamo purposes
     _active_ddp_module: Optional["DistributedDataParallel"] = None
 
+    reducer: "dist.Reducer"
+
     def __init__(
         self,
-        module,
-        device_ids=None,
-        output_device=None,
-        dim=0,
-        broadcast_buffers=True,
-        init_sync=True,
-        process_group=None,
-        bucket_cap_mb=None,
-        find_unused_parameters=False,
-        check_reduction=False,
-        gradient_as_bucket_view=False,
-        static_graph=False,
+        module: Module,
+        device_ids: Optional[
+            Union[list[int], list[str], list[device], list[Union[int, str, device]]]
+        ] = None,
+        output_device: Optional[Union[int, str, device]] = None,
+        dim: int = 0,
+        broadcast_buffers: bool = True,
+        init_sync: bool = True,
+        process_group: "Optional[ProcessGroup]" = None,
+        bucket_cap_mb: float = 25,
+        find_unused_parameters: bool = False,
+        check_reduction: bool = False,
+        gradient_as_bucket_view: bool = False,
+        static_graph: bool = False,
         delay_all_reduce_named_params=None,
         param_to_hook_all_reduce=None,
         mixed_precision: Optional[_MixedPrecision] = None,
-        device_mesh=None,
-        skip_all_reduce_unused_params=False,
-    ):
+        device_mesh: "Optional[DeviceMesh]" = None,
+        skip_all_reduce_unused_params: bool = False,
+    ) -> None:
         super().__init__()
         Joinable.__init__(self)
         self._use_python_reducer = (
@@ -690,7 +697,7 @@ class DistributedDataParallel(Module, Joinable):
         elif process_group is None and device_mesh is None:
             self.process_group = _get_default_group()
         elif device_mesh is None:
-            self.process_group = process_group
+            self.process_group = process_group  # type: ignore[assignment]
         else:
             if device_mesh.ndim != 1:
                 raise RuntimeError(
@@ -716,7 +723,7 @@ class DistributedDataParallel(Module, Joinable):
 
         self._delay_all_reduce_params = []
         if hasattr(module, "_ddp_params_and_buffers_to_ignore"):
-            self.parameters_to_ignore = set(module._ddp_params_and_buffers_to_ignore)
+            self.parameters_to_ignore = set(module._ddp_params_and_buffers_to_ignore)  # type: ignore[arg-type]
         else:
             self.parameters_to_ignore = set()
         if delay_all_reduce_named_params is not None:
@@ -824,7 +831,7 @@ class DistributedDataParallel(Module, Joinable):
         if bucket_cap_mb is None:
             # default case (bucket cap is 25 MiB)
             bucket_cap_mb = 25
-            self.bucket_bytes_cap_default = True
+            self.bucket_bytes_cap_default: bool = True
         else:
             self.bucket_bytes_cap_default = False
         self.bucket_bytes_cap = int(bucket_cap_mb * 1024 * 1024)
@@ -933,7 +940,7 @@ class DistributedDataParallel(Module, Joinable):
         self._accum_grad_hooks: list[RemovableHandle] = []
         if self._use_python_reducer:
             torch._inductor.config._fuse_ddp_communication = True
-            torch._inductor.config._fuse_ddp_bucket_size = bucket_cap_mb
+            torch._inductor.config._fuse_ddp_bucket_size = bucket_cap_mb  # type: ignore[assignment]
             # Directly adding this to the trace rule will disturb the users
             # who are using DDPOptimizer.
             torch._dynamo.trace_rules.LEGACY_MOD_INLINELIST.add(
@@ -1099,6 +1106,7 @@ class DistributedDataParallel(Module, Joinable):
                     # Do not cast DDP ignored parameters.
                     if hasattr(param, "_ddp_ignored") and param._ddp_ignored:
                         continue
+                    assert hasattr(param, "_mp_param")
                     _alloc_storage(param._mp_param, param.size())
                     # copy() implicitly casts to low precision
                     with torch.no_grad():
