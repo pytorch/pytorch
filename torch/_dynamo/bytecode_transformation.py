@@ -529,7 +529,7 @@ def create_print_value(value: Any) -> list[Instruction]:
     ]
 
 
-def linetable_310_writer(
+def linetable_writer(
     first_lineno: int,
 ) -> tuple[list[int], Callable[[int, int], None], Callable[[int], None]]:
     """
@@ -759,7 +759,7 @@ def assemble(instructions: list[Instruction], firstlineno: int) -> tuple[bytes, 
             for _ in range(instruction_size(inst) // 2 - 1):
                 code.extend((0, 0))
     else:
-        lnotab, update_lineno, end = linetable_310_writer(firstlineno)
+        lnotab, update_lineno, end = linetable_writer(firstlineno)
 
         for inst in instructions:
             if inst.starts_line is not None:
@@ -871,7 +871,6 @@ def devirtualize_jumps(instructions: list[Instruction]) -> None:
                 inst.arg = abs(
                     int(target.offset - inst.offset - instruction_size(inst))
                 )
-                # see bytecode size comment in the absolute jump case above
                 inst.arg //= 2
             inst.argval = target.offset
             inst.argrepr = f"to {target.offset}"
