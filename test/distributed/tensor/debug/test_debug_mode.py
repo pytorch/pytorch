@@ -242,6 +242,36 @@ class TestDTensorDebugMode(TestCase):
             "redistribute_input(1, [S(0)] -> [R])" in debug_mode.debug_string()
         )
 
+    def test_debug_mode_higher_order_cond(self):
+        """Test DebugMode with torch.cond higher order operation."""
+        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+
+        # Create test tensors
+        x = torch.randn(1, 8, requires_grad=True)
+        y = torch.randn(1, 8, requires_grad=True)
+        x_dtensor = DTensor.from_local(x, mesh, [Shard(0)], run_check=False)
+        y_dtensor = DTensor.from_local(y, mesh, [Shard(0)], run_check=False)
+        
+        # Define predicate and branch functions
+        pred = torch.tensor(True)
+        
+        def true_fn(x, y):
+            return x + y
+            
+        def false_fn(x, y):
+            return x - y
+
+        with DebugMode(record_torchfunction=True) as debug_mode:
+            # Use torch.cond with DTensors
+            result = torch.cond(pred, true_fn, false_fn, [x_dtensor, y_dtensor])
+            result.sum()
+
+        debug_output = debug_mode.debug_string()
+        # Verify that cond operations are captured in debug mode
+        self.assertIn("torch.cond", debug_output)
+        # Should contain the branch operation that was executed (true_fn in this case)
+        self.assertIn("aten::add", debug_output)
+
 
 instantiate_parametrized_tests(TestDTensorDebugMode)
 
