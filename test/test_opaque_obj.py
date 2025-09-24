@@ -126,7 +126,5 @@ class TestOpaqueObject(TestCase):
         self.assertTrue(q1 == q2)
 
 
-instantiate_parametrized_tests(TestOpaqueObject)
-
 if __name__ == "__main__":
     run_tests()
