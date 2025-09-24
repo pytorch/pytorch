@@ -414,6 +414,8 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         )
         self.no_x_dim = self.want_no_x_dim()
         self.code_hash: Optional[str] = None
+        # Info to enable multiple store_output calls for epilogue subtiling
+        self.store_output_ctr = itertools.count()
 
         # define this in a closure to make cache local to object
         @functools.cache
@@ -426,6 +428,14 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
 
         self.simplify_indexing = simplify_indexing
         self.initialize_range_tree(pid_cache)
+
+    def _get_store_output_subgraph_name(self, i: int) -> str:
+        return f"<STORE_OUTPUT_{i}>"
+
+    def get_store_output_count(self):
+        total = next(self.store_output_ctr)
+        self.store_output_ctr = itertools.count(start=total - 1, step=1)
+        return total
 
     @property
     @cache_property_on_self
@@ -1605,10 +1615,13 @@ class SIMDScheduling(BaseScheduling):
 
             partial_code = render()
 
-            with kernel.set_subgraph_body("<STORE_OUTPUT>"):
-                for node in epilogue_nodes:
-                    node.codegen(kernel.split_and_set_ranges(node.get_ranges()))
-                kernel.cse.invalidate(OrderedSet())
+            num_store_subgraphs = kernel.get_store_output_count()
+            for i in range(num_store_subgraphs):
+                subgraph_name = kernel._get_store_output_subgraph_name(i)
+                with kernel.set_subgraph_body(subgraph_name):
+                    for node in epilogue_nodes:
+                        node.codegen(kernel.split_and_set_ranges(node.get_ranges()))
+                    kernel.cse.invalidate(OrderedSet())
 
             for input_name, buffer in kernel.named_input_nodes.items():
                 subgraph_name = f"<LOAD_INPUT_{input_name}>"
@@ -1656,9 +1669,10 @@ class SIMDScheduling(BaseScheduling):
                 subgraph_name = f"<LOAD_INPUT_{input_name}>"
                 partial_code.finalize_hook(subgraph_name, strict=False)
 
-            with kernel.set_subgraph_body("<STORE_OUTPUT>"):
-                if not isinstance(partial_code, str):
-                    partial_code.finalize_hook("<STORE_OUTPUT>")
+            num_store_subgraphs = kernel.get_store_output_count()
+            for i in range(num_store_subgraphs):
+                subgraph_name = kernel._get_store_output_subgraph_name(i)
+                partial_code.finalize_hook(subgraph_name)
 
             if isinstance(partial_code, str):
                 src_code = partial_code
