@@ -4930,9 +4930,26 @@ class ShapeEnv:
         category=FutureWarning,
     )
     @record_shapeenv_event()
-    def create_symbol(self, *args: Any, **kwargs: Any) -> sympy.Expr:
+    def create_symbol(
+        self,
+        val: int,
+        source: Source,
+        dynamic_dim: DimDynamic = DimDynamic.DUCK,
+        constraint_dim: DimConstraint = None,  # NB: includes None
+        positive: Optional[bool] = True,
+        do_not_specialize_zero_one: bool = False,
+        symbolic_context: Optional[StatelessSymbolicContext] = None,
+    ) -> sympy.Expr:
         """Create a new symbol which is tracked by this ShapeEnv"""
-        return self.create_non_data_dependent_symbol(*args, **kwargs)
+        return self.create_non_data_dependent_symbol(
+            val,
+            source,
+            dynamic_dim,
+            constraint_dim,
+            positive,
+            do_not_specialize_zero_one,
+            symbolic_context,
+        )
 
     @record_shapeenv_event()
     def create_non_data_dependent_symbol(
