@@ -14,6 +14,9 @@ class CodeGenerator:
 
     def tensor_repr(self, tensor):
         """Generate tensor creation code representation."""
+        if tensor.dtype == "bool":
+            # torch.rand does not support bool, use torch.randint for boolean tensors
+            return f"torch.randint(0, 2, {tuple(tensor.size)}, dtype=torch.bool, device='{tensor.device}')"
         return f"torch.rand({list(tensor.size)}, dtype=torch.{tensor.dtype}, device='{tensor.device}', requires_grad=True)"
 
     def generate_code(self, target_tensor, all_nodes, output_path):

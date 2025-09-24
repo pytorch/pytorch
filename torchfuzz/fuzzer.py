@@ -6,6 +6,8 @@ import argparse
 import os
 from codegen import CodeGenerator
 from runner import ProgramRunner
+from operators import *  # Import everything from operators
+from tensor import Tensor
 
 class Fuzzer:
     def __init__(self, supported_ops, max_depth, seed):
@@ -49,7 +51,7 @@ class Fuzzer:
                     chosen_op = random.choice(candidates)
                     # Get the "ideal" input tensors for this op
                     # --- CHANGED: pass random number of inputs to decompose ---
-                    if isinstance(chosen_op, AddOperator) or isinstance(chosen_op, CatOperator):
+                    if isinstance(chosen_op, (AddOperator, MulOperator, SubOperator, DivOperator, PowOperator, CatOperator)):
                         min_inputs = 2
                         max_inputs = 5
                         num_inputs = random.randint(min_inputs, max_inputs)
@@ -172,7 +174,7 @@ class Fuzzer:
         if ndim == 0:
             size = ()
         else:
-            size = tuple(random.randint(1, 1024) for _ in range(ndim))
+            size = tuple(random.randint(1, 512) for _ in range(ndim))
 
         stride = []
         acc = 1
@@ -188,347 +190,6 @@ class Fuzzer:
 
         return Tensor(size, stride, dtype, device, self.supported_ops)
 
-class Tensor:
-    def __init__(self, size, stride, dtype, device, supported_ops):
-        self.size = size
-        self.stride = stride
-        self.dtype = dtype
-        self.device = device
-        self.supported_ops = supported_ops
-        # Add optional attributes for cat operation - allow int values
-        self._cat_dim = None  # type: int | None
-        self._cat_sizes = None  # type: tuple | None
-        # For view/sum
-        self._view_shape = None  # type: tuple | None
-        self._sum_dim = None  # type: int | tuple | None
-
-    def decompose(self):
-        candidates = []
-        for op in self.supported_ops:
-            if op.can_produce(self):
-                candidates.append(op)
-        if not candidates:
-            return []
-        candidate = random.choice(candidates)
-        # --- CHANGED: pass random number of inputs for Add/Cat ---
-        if isinstance(candidate, AddOperator) or isinstance(candidate, CatOperator):
-            min_inputs = 2
-            max_inputs = 5
-            num_inputs = random.randint(min_inputs, max_inputs)
-            return candidate.decompose(self, num_inputs=num_inputs)
-        return candidate.decompose(self)
-
-class Operator:
-    def __init__(self, name):
-        self.name = name
-
-    def can_produce(self, tensor):
-        raise NotImplementedError
-
-    def decompose(self, tensor):
-        raise NotImplementedError
-
-    def codegen(self, output_name, input_names, output_tensor):
-        raise NotImplementedError
-
-class AddOperator(Operator):
-    def __init__(self):
-        super().__init__("add")
-
-    def can_produce(self, tensor):
-        # Add can always produce a tensor by adding two tensors of the same shape, dtype, etc.
-        return True
-
-    def decompose(self, tensor, num_inputs=2):
-        # Type promotion table for realistic LLM/diffusion model types
-        # Each output dtype maps to possible input dtype pairs (in order of preference)
-        promotion_table = {
-            "float32": [
-                ("float32", "float32"),
-                ("bfloat16", "float32"),
-                ("float32", "bfloat16"),
-                ("bfloat16", "bfloat16"),
-                ("float16", "float32"),
-                ("float32", "float16"),
-                ("float16", "float16"),
-            ],
-            "bfloat16": [
-                ("bfloat16", "bfloat16"),
-                ("float16", "bfloat16"),
-                ("bfloat16", "float16"),
-            ],
-            "float16": [
-                ("float16", "float16"),
-            ],
-        }
-        # If num_inputs > 2, promote left-to-right (e.g. (((a + b) + c) + d))
-        # For simplicity, we generate the first two with promotion, rest match output dtype
-        dtype = tensor.dtype
-        supported_types = promotion_table.get(dtype, [(dtype, dtype)])
-        # Pick a random promotion pattern for the first two inputs
-        if num_inputs >= 2:
-            dtypes = list(random.choice(supported_types))
-            # For >2 inputs, fill with output dtype
-            while len(dtypes) < num_inputs:
-                dtypes.append(dtype)
-        else:
-            dtypes = [dtype] * num_inputs
-
-        return [
-            Tensor(tensor.size, tensor.stride, dt, tensor.device, tensor.supported_ops)
-            for dt in dtypes
-        ]
-
-
-    def codegen(self, output_name, input_names, output_tensor):
-        # Sum all input tensors
-        expr = " + ".join(input_names)
-        return f"{output_name} = {expr}"
-
-class CatOperator(Operator):
-    def __init__(self):
-        super().__init__("cat")
-
-    def can_produce(self, tensor):
-        # Can only cat if there is at least one dimension with size >= 2
-        return any(s >= 2 for s in tensor.size)
-
-    def decompose(self, tensor, num_inputs=2):
-        # Find all candidate dimensions where size is at least 2
-        candidate_dims = [i for i, s in enumerate(tensor.size) if s >= 2]
-        if not candidate_dims:
-            # No suitable dimension to split, fallback to single tensor
-            return [
-                Tensor(tensor.size, tensor.stride, tensor.dtype, tensor.device, tensor.supported_ops)
-                for _ in range(num_inputs)
-            ]
-
-        # Randomly select one of the candidate dimensions
-        dim = random.choice(candidate_dims)
-
-        # Randomly choose split points to divide the dimension into num_inputs parts
-        total = tensor.size[dim]
-        # Ensure each part has at least size 1
-        if num_inputs > total:
-            num_inputs = total
-        # Generate split points
-        splits = sorted(random.sample(range(1, total), num_inputs - 1))
-        sizes = []
-        prev = 0
-        for s in splits + [total]:
-            sizes.append(s - prev)
-            prev = s
-
-        # Build size tuples for each input tensor
-        input_sizes = [
-            tensor.size[:dim] + (sz,) + tensor.size[dim+1:]
-            for sz in sizes
-        ]
-
-        # Calculate proper strides for the split tensors
-        def calculate_stride(size):
-            stride = []
-            acc = 1
-            for s in reversed(size):
-                stride.insert(0, acc)
-                acc *= s
-            return tuple(stride)
-
-        input_strides = [calculate_stride(sz) for sz in input_sizes]
-
-        tensors = [
-            Tensor(sz, st, tensor.dtype, tensor.device, tensor.supported_ops)
-            for sz, st in zip(input_sizes, input_strides)
-        ]
-
-        # Store the cat dimension on the output tensor instead of input tensors
-        tensor._cat_dim = dim
-        tensor._cat_sizes = tuple(input_sizes)
-
-        return tensors
-
-    def codegen(self, output_name, input_names, output_tensor):
-        # Try to find the dimension along which to cat
-        # If the tensor has attribute _cat_dim, use it; else, pick the first valid
-        dim = getattr(output_tensor, "_cat_dim", None)
-        if dim is None:
-            dim = next((i for i, s in enumerate(output_tensor.size) if s >= 2), 0)
-        return f"{output_name} = torch.cat([{', '.join(input_names)}], dim={dim})"
-
-class ViewOperator(Operator):
-    def __init__(self):
-        super().__init__("view")
-
-    def can_produce(self, tensor):
-        # View can always target any shape with the same numel.
-        return True
-
-    def decompose(self, tensor):
-        # Pick an input shape with the same numel as tensor.size
-        numel = 1
-        for s in tensor.size:
-            numel *= s
-
-        # Try to factor numel into 1-3 dims
-        for _ in range(10):
-            ndims = random.randint(1, 3)
-
-            def random_shape(n, d):
-                if d == 1:
-                    return (n,)
-                factors = []
-                rem = n
-                for i in range(d - 1):
-                    divisors = [f for f in range(1, rem + 1) if rem % f == 0]
-                    f = random.choice(divisors)
-                    factors.append(f)
-                    rem //= f
-                factors.append(rem)
-                return tuple(factors)
-
-            shape = random_shape(numel, ndims)
-            if all(isinstance(x, int) and x > 0 for x in shape):
-                break
-        else:
-            shape = (numel,)
-
-        # contiguous stride for input
-        stride = []
-        acc = 1
-        for s in reversed(shape):
-            stride.insert(0, acc)
-            acc *= s
-        stride = tuple(stride)
-
-        t_in = Tensor(shape, stride, tensor.dtype, tensor.device, tensor.supported_ops)
-        # No metadata needed on inputs. Codegen will view to the output size.
-        return [t_in]
-
-    def codegen(self, output_name, input_names, output_tensor):
-        # Always view to the output's shape
-        return f"{output_name} = {input_names[0]}.view({tuple(output_tensor.size)})"
-
-class SumOperator(Operator):
-    def __init__(self):
-        super().__init__("sum")
-
-    def can_produce(self, tensor):
-        # We construct inputs by inserting at most one extra dimension,
-        # so we need room to add a dim and stay within a reasonable cap.
-        # Your generator uses up to 5 dims, so keep input_dim <= 5.
-        return len(tensor.size) < 5
-
-    def decompose(self, tensor):
-        """
-        Construct an input shape that reduces to tensor.size via a sum.
-        Store the chosen reduction dims on the OUTPUT tensor so codegen can read it.
-        """
-        if len(tensor.size) == 0:
-            # Scalar output, pick an arbitrary input and reduce all dims.
-            input_ndim = random.randint(1, 3)
-            input_shape = tuple(random.randint(2, 5) for _ in range(input_ndim))
-            # Mark 'all' to emit .sum() with no dim argument.
-            tensor._sum_dim = "all"
-        else:
-            # Insert a new dimension of size >= 2 at a random position,
-            # then reduce over that single dimension.
-            dim = random.randint(0, len(tensor.size))
-            expand_size = random.randint(2, 5)
-            input_shape = list(tensor.size)
-            input_shape.insert(dim, expand_size)
-            input_shape = tuple(input_shape)
-            tensor._sum_dim = dim
-
-        # contiguous stride for input
-        stride = []
-        acc = 1
-        for s in reversed(input_shape):
-            stride.insert(0, acc)
-            acc *= s
-        stride = tuple(stride)
-
-        t_in = Tensor(input_shape, stride, tensor.dtype, tensor.device, tensor.supported_ops)
-        return [t_in]
-
-    def codegen(self, output_name, input_names, output_tensor):
-        sd = getattr(output_tensor, "_sum_dim", None)
-        src = input_names[0]
-        if sd == "all":
-            return f"{output_name} = {src}.sum()"
-        elif isinstance(sd, tuple):
-            # If you later extend to multi-dim reductions, this handles it.
-            return f"{output_name} = {src}.sum(dim={sd})"
-        elif isinstance(sd, int):
-            return f"{output_name} = {src}.sum(dim={sd})"
-        else:
-            # Safe default for legacy cases: reduce all dims
-            return f"{output_name} = {src}.sum()"
-
-class GeluOperator(Operator):
-    def __init__(self):
-        super().__init__("gelu")
-
-    def can_produce(self, tensor):
-        # GELU can be applied to any tensor (elementwise op)
-        return True
-
-    def decompose(self, tensor):
-        # The input to GELU must have the same shape, dtype, and device as the output
-        return [
-            Tensor(tensor.size, tensor.stride, tensor.dtype, tensor.device, tensor.supported_ops)
-        ]
-
-    def codegen(self, output_name, input_names, output_tensor):
-        # Use torch.nn.functional.gelu for the GELU activation
-        return f"{output_name} = torch.nn.functional.gelu({input_names[0]})"
-
-class FillDiagonalOperator_(Operator):
-    def __init__(self):
-        super().__init__("fill_diagonal_")
-
-    def can_produce(self, tensor):
-        # PyTorch's fill_diagonal_ requires all dimensions to be of equal length
-        # Only produce for tensors where all dimensions have the same size
-        if len(tensor.size) < 2:
-            return False
-        # Check if all dimensions have the same size
-        first_size = tensor.size[0]
-        return all(s == first_size for s in tensor.size)
-
-    def decompose(self, tensor):
-        # Import here to avoid circular import
-        from tensor import Tensor
-
-        # Find two dimensions with equal size
-        dims = None
-        for i in range(len(tensor.size)):
-            for j in range(i + 1, len(tensor.size)):
-                if tensor.size[i] == tensor.size[j]:
-                    dims = (i, j)
-                    break
-            if dims is not None:
-                break
-        if dims is None:
-            # Fallback: just return a tensor of the same shape and a scalar
-            return [
-                Tensor(tensor.size, tensor.stride, tensor.dtype, tensor.device, tensor.supported_ops),
-                Tensor((), (), tensor.dtype, tensor.device, tensor.supported_ops)
-            ]
-
-        # Input 0: tensor to fill (same shape as output)
-        # Input 1: value to fill (scalar)
-        t_in = Tensor(tensor.size, tensor.stride, tensor.dtype, tensor.device, tensor.supported_ops)
-        t_val = Tensor((), (), tensor.dtype, tensor.device, tensor.supported_ops)
-        # Store dims for codegen
-        tensor._fill_diag_dims = dims
-        return [t_in, t_val]
-
-    def codegen(self, output_name, input_names, output_tensor):
-        # PyTorch's fill_diagonal_ expects a scalar number, so use .item() to extract from tensor
-        fill_value = f"{input_names[1]}.item()"
-        # Since all dimensions are equal now, we can just use fill_diagonal_ directly
-        return f"{output_name} = {input_names[0]}.clone(); {output_name}.fill_diagonal_({fill_value})"
-
 def main():
     parser = argparse.ArgumentParser(description="Fuzzer for generating PyTorch programs.")
     parser.add_argument("--max-depth", type=int, default=3, help="Maximum depth of the operation tree.")
@@ -536,7 +197,13 @@ def main():
     parser.add_argument("--output", type=str, default=None, help="Output file path.")
     args = parser.parse_args()
 
-    supported_ops = [AddOperator(), CatOperator(), ViewOperator(), SumOperator(), GeluOperator(), FillDiagonalOperator_()]
+    # Dynamically initialize all operator classes imported from operators
+    import operators
+    supported_ops = []
+    for name in dir(operators):
+        obj = getattr(operators, name)
+        if isinstance(obj, type) and name != "Operator":
+            supported_ops.append(obj())
     max_depth = args.max_depth
     if args.seed is not None:
         seed = args.seed
