@@ -1,9 +1,22 @@
 # Owner(s): ["oncall: distributed"]
+from typing import Any, List
+
 import torch
+import torch.distributed as dist
 import torch.distributed.checkpoint as dist_cp
 from torch.distributed.checkpoint._extension import ZStandard
+from torch.distributed.checkpoint.metadata import (
+    ChunkStorageMetadata,
+    MetadataIndex,
+    TensorProperties,
+)
+from torch.distributed.checkpoint.planner import (
+    TensorWriteData,
+    WriteItem,
+    WriteItemType,
+)
 from torch.distributed.device_mesh import init_device_mesh
-from torch.distributed.tensor import distribute_tensor, Replicate, Shard, zeros
+from torch.distributed.tensor import distribute_tensor, DTensor, Replicate, Shard, zeros
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -278,6 +291,167 @@ class TestDTensorReshardMeshChange(DTensorTestBase):
             state_dict=state_dict,
             storage_reader=dist_cp.FileSystemReader(self.temp_dir),
         )
+
+    @with_comms
+    @with_temp_dir
+    @skip_if_lt_x_gpu(2)
+    def test_dtensor_checkpoint_with_uneven_shards(self) -> None:
+        """
+        Saving a dtensor with uneven shards.
+        rank 0  -> [[0], [1], [2], [3]]
+        rank 1  -> [[4], [5], [6], [7]]
+        rank 2  -> [[8], [9], [10], [11]]
+        rank 3  -> [[12], [13]]
+        """
+        CHECKPOINT_DIR = self.temp_dir
+        mesh_shape = (self.world_size,)
+        mesh_1 = init_device_mesh(self.device_type, mesh_shape)
+        my_rank = dist.get_rank()
+        # Make the last shard uneven
+        if (my_rank == self.world_size - 1):
+            local_tensor = torch.arange(start = my_rank * 4, end = (my_rank * 4) + 2, dtype=torch.float).view(2, 1)
+        else:
+            local_tensor = torch.arange(start = my_rank * 4, end = (my_rank +1) * 4, dtype=torch.float).view(4, 1)   
+        dtensor = DTensor.from_local(local_tensor, mesh_1,[Shard(0)], run_check = True, shape = [14, 1],stride = [1,1] )        
+        state_dict_to_save = {"uneven_sharded_dtensor": dtensor}
+
+        dist_cp.save(
+            state_dict=state_dict_to_save,
+            storage_writer=dist_cp.FileSystemWriter(path=CHECKPOINT_DIR),
+            planner=dist_cp.DefaultSavePlanner(),
+        )
+
+        #loading_shard_plan = [(4,1),(4,1),(2,1), (4,1)] 
+        #loading_local_tensor = torch.rand(loading_shard_plan[my_rank], dtype=torch.float)
+        #print(f"rank {my_rank} local_tensor for load :\n {loading_local_tensor}")        
+        #loading_dtensor = DTensor.from_local(loading_local_tensor, mesh_1,[Shard(0)], run_check = True, shape = [14, 1],stride = [1,1] )        
+        loading_full_tensor = torch.rand([14,1], dtype=torch.float, device = 'cpu')        
+        print(f"rank {my_rank} loading_dtensor for load :\n {loading_full_tensor}")        
+        state_dict_to_load = {"uneven_sharded_dtensor": loading_full_tensor} # re-sharding load.
+        dist_cp.load(
+            state_dict=state_dict_to_load,
+            storage_reader=dist_cp.FileSystemReader(self.temp_dir),
+        )
+
+
+class CheckpointableDistTensor(torch.Tensor):
+    """
+    A distributed checkpointable tensor representation. Unlike Dtensor, this representation
+    cannot be used for distributed training. 
+
+    Supports distributed tensor save/loads that has uneven shards. (DTensor cannot support the same)
+    """
+    _local_tensor: torch.Tensor
+    _shard_offsets: torch.Size
+    _overall_size: torch.Size
+
+     
+    @staticmethod
+    def __new__(cls,fqn: str, local_tensor: torch.Tensor, shard_offsets: List[int], overall_size: List[int]) -> "CheckpointableDistTensor":
+        r = torch.Tensor._make_wrapper_subclass(
+            cls,
+            overall_size,
+            dtype=local_tensor.dtype,
+            device=local_tensor.device,
+            layout = local_tensor.layout
+        )
+
+        r._fqn = fqn
+        r._local_tensor = local_tensor
+        r._shard_offsets = torch.Size(shard_offsets)
+        r._overall_size = torch.Size(overall_size)
+
+        return r
+
+    def __init__(self, *args, **kwargs):
+        super().__init__()
+
+    @classmethod
+    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):  # type: ignore[override]
+        raise NotImplementedError(
+                f"{func} is not supported for CheckpointableDistTensor!"
+            )
+
+    def __create_chunk_list__(self):
+       return [ChunkStorageMetadata(offsets = self._shard_offsets, sizes = self._local_tensor.size())]
+
+    def __create_write_items__(self, fqn: str, object: Any) -> list[WriteItem]:
+       return [WriteItem(
+        index=MetadataIndex(fqn = self._fqn, offset= self._shard_offsets), 
+        type=WriteItemType.SHARD, 
+        tensor_data = TensorWriteData(
+            chunk=ChunkStorageMetadata(
+                offsets=self._shard_offsets, 
+                sizes=self._local_tensor.size()), 
+            properties=TensorProperties.create_from_tensor(self._local_tensor), 
+            size = self._overall_size),
+            )]
+
+    def __get_tensor_shard__(self, index: MetadataIndex) -> torch.Tensor:
+        assert self._fqn == index.fqn and  self._shard_offsets == index.offset
+        return self._local_tensor
+
+    def __repr__(self):
+        return f"CheckpointableDistributedTensor(fqn={self._fqn}, local_tensor={self._local_tensor},shard_offset = {self._shard_offsets} , overall_size = {self._overall_size})"
+
+
+
+
+class TestCheckpointableReshard(DTensorTestBase):
+    """
+    Test DCP reshard for DTensor with placements changes and mesh_tensor change.
+    """
+    @with_comms
+    @with_temp_dir
+    @skip_if_lt_x_gpu(2)
+    def test_checkpointable_reshard(self) -> None:
+        """
+        Saves a 1d distributed tensor that has shards with uneven sizes using Checkpointable API. 
+        Loads them back with a different shard plan (resharding).
+        """
+        saving_1d_shard_plan = [(0,4),(4,3),(7,4), (11,5)] # offset, length tuples.
+        loading_1d_shard_plan = [(0,2),(2,4),(6,6), (12,4)] 
+        CHECKPOINT_DIR = self.temp_dir
+        my_rank = dist.get_rank() 
+        saving_shard_offset, saving_shard_length = saving_1d_shard_plan[my_rank]
+        saving_local_tensor = torch.arange(
+            start=saving_shard_offset, 
+            end = saving_shard_offset + saving_shard_length, 
+            dtype=torch.float).view(saving_shard_length, 1)
+        saving_cp_dist_tensor = CheckpointableDistTensor(
+            fqn="checkpointable_tensor", 
+            local_tensor=saving_local_tensor, 
+            shard_offsets=[saving_shard_offset,0] , 
+            overall_size=[16,1])
+        state_dict_to_save = {"checkpointable_tensor": saving_cp_dist_tensor}
+
+        dist_cp.save(
+                state_dict=state_dict_to_save,
+                storage_writer=dist_cp.FileSystemWriter(path=CHECKPOINT_DIR),
+                planner=dist_cp.DefaultSavePlanner(),
+            )
+
+        loading_shard_offset, loading_shard_length = loading_1d_shard_plan[my_rank]
+        loading_local_tensor = torch.rand([loading_shard_length,1], dtype=torch.float)
+        expected_loaded_local_val_tensor = torch.arange(
+            start=loading_shard_offset, 
+            end = loading_shard_offset + loading_shard_length, 
+            dtype=torch.float).view(loading_shard_length, 1) 
+        loading_cp_dist_tensor = CheckpointableDistTensor(
+            fqn="checkpointable_tensor", 
+            local_tensor=loading_local_tensor, 
+            shard_offsets=[loading_shard_offset,0] , 
+            overall_size=[16,1])
+        state_dict_to_load = {"checkpointable_tensor": loading_cp_dist_tensor}
+        print(f"[{my_rank}]before dcp load : {loading_local_tensor}")
+        dist_cp.load(
+            state_dict=state_dict_to_load,
+            storage_reader=dist_cp.FileSystemReader(self.temp_dir),
+        )
+        assert torch.equal(loading_local_tensor, expected_loaded_local_val_tensor)
+
+       
+
 
     # TODO: Add a assertEqual for ref_state_dict["dtensor"].full_tensor()
     # and state_dict["dtensor"].full_tensor() after we fix the size mismatch
