@@ -5,6 +5,7 @@ import functools
 import gc
 import importlib
 import itertools
+import re
 import sys
 import unittest
 import warnings
@@ -913,6 +914,67 @@ if HAS_CUDA_AND_TRITON:
             self._test_unaligned_static_input_impl(expected_clones=0)
 
         @torch._inductor.config.patch("graph_partition", True)
+        @torch._inductor.config.patch("implicit_fallbacks", True)
+        def test_graph_partition_custom_rule(self):
+            def get_num_partitions(code):
+                code = "".join(code)
+                found = re.search(r"partitions=\[(.*)\]", code)
+                assert found is not None
+                partitions = found.group(1)
+                num_partitions = len([p for p in partitions.split(",") if p])
+                return num_partitions
+
+            @torch.library.custom_op("mylib::bar", mutates_args=())
+            def bar(x: torch.Tensor, flag: int) -> torch.Tensor:
+                return x.clone()
+
+            @bar.register_fake
+            def _(x, flag):
+                return x.clone()
+
+            def f(x, flag):
+                x = x + 1
+                x = bar(x, flag)
+                x = x + 1
+                return x
+
+            x = torch.randn(2, device="cuda")
+            f_compiled = torch.compile(f, mode="reduce-overhead", fullgraph=True)
+            _, code = run_and_get_code(f_compiled, x, True)
+            num_partitions = get_num_partitions(code)
+            self.assertEqual(num_partitions, 1)
+
+            @torch.library.custom_op("mylib::baz", mutates_args=())
+            def baz(x: torch.Tensor, flag: int) -> torch.Tensor:
+                return x.clone()
+
+            @baz.register_fake
+            def _(x, flag):
+                return x.clone()
+
+            def should_partition(x, flag):
+                return flag
+
+            torch._inductor.scheduler.register_should_partition_rule(
+                torch.ops.mylib.baz.default, should_partition
+            )
+
+            def f(x, flag):
+                x = x + 1
+                x = baz(x, flag)
+                x = x + 1
+                return x
+
+            f_compiled = torch.compile(f, mode="reduce-overhead", fullgraph=True)
+            _, code = run_and_get_code(f_compiled, x, True)
+            num_partitions = get_num_partitions(code)
+            self.assertEqual(num_partitions, 2)
+
+            _, code = run_and_get_code(f_compiled, x, False)
+            num_partitions = get_num_partitions(code)
+            self.assertEqual(num_partitions, 1)
+
+        @torch._inductor.config.patch("graph_partition", True)
         @torch._inductor.config.patch("triton.cudagraph_trees", False)
         def test_graph_partition_gc(self):
             def _test_dummy():
@@ -1756,25 +1818,19 @@ if HAS_CUDA_AND_TRITON:
                     args.clear()
                     return (x + 3,)
 
-                inp = torch.rand([20, 20], device="cuda:1")
+                inp = torch.rand([20, 20], device=f"cuda:{self.device_idx}")
 
                 inp_list = [inp]
-                foo_cg = tree_cudagraphify_impl(
-                    foo,
-                    inp_list,
-                    (),
-                    device_index=1,
-                    is_backward=False,
-                    is_inference=True,
-                )
+                foo_cg = self.cudagraphify_impl(foo, inp_list, ())
                 for _ in range(3):
                     self.assertEqual(foo_cg([inp]), foo([inp]))
 
-                self.assertTrue(self.get_manager(device_index=0) is None)
-                self.assertFalse(self.get_manager(device_index=1) is None)
+                next_idx = (self.device_idx + 1) % torch.cuda.device_count()
+                self.assertTrue(self.get_manager(device_index=next_idx) is None)
+                self.assertFalse(self.get_manager(device_index=self.device_idx) is None)
 
             test()
-            self.assertTrue(self.get_manager(device_index=1) is None)
+            self.assertTrue(self.get_manager(device_index=self.device_idx) is None)
 
         def test_error_on_dealloc_use(self):
             @torch.compile()
@@ -2084,19 +2140,19 @@ if HAS_CUDA_AND_TRITON:
                 device = x.untyped_storage()
 
         def test_side_stream_memory_allocation(self):
-            from torch._inductor.cudagraph_trees import cudagraphify_impl
+            device = f"cuda:{self.device_idx}"
 
             def multi_stream_allocation(args):
                 side_stream = torch.cuda.Stream()
                 side_stream.wait_stream(torch.cuda.current_stream())
                 with torch.cuda.stream(side_stream):
                     side_stream_buffer = torch.ones(
-                        *args, device="cuda:0", dtype=torch.float32
+                        *args, device=device, dtype=torch.float32
                     )
                 torch.cuda.current_stream().wait_stream(side_stream)
 
                 main_stream_buffer = torch.ones(
-                    *args, device="cuda:0", dtype=torch.float32
+                    *args, device=device, dtype=torch.float32
                 )
 
                 if isinstance(args, list):
@@ -2104,17 +2160,17 @@ if HAS_CUDA_AND_TRITON:
 
                 return main_stream_buffer, side_stream_buffer
 
-            graphed_multi_stream_func = cudagraphify_impl(
+            graphed_multi_stream_func = tree_cudagraphify_impl(
                 multi_stream_allocation,
                 inputs=[],
                 static_input_idxs=[],
                 is_backward=False,
                 is_inference=False,
-                device_index=0,
+                device_index=self.device_idx,
                 stack_traces=["dummy stack trace1", "dummy stack trace2"],
             )
 
-            ref_out = torch.ones((2, 3), device="cuda:0", dtype=torch.float32)
+            ref_out = torch.ones((2, 3), device=device, dtype=torch.float32)
 
             for _ in range(3):
                 torch.compiler.cudagraph_mark_step_begin()
@@ -3916,9 +3972,8 @@ if HAS_CUDA_AND_TRITON:
             self.assertEqual(eager_out, compiled_out)
             self.assertEqual(self.get_manager().new_graph_id().id, 1)
 
+        @torch._inductor.config.patch("triton.cudagraph_capture_sizes", (2, 5, 7))
         def test_cudagraph_capture_sizes(self):
-            torch._inductor.config.triton.cudagraph_capture_sizes = (2, 5, 7)
-
             def f(x):
                 return x + 1
 
@@ -3935,14 +3990,16 @@ if HAS_CUDA_AND_TRITON:
 
             self.assertEqual(self.get_manager().new_graph_id().id, 3)
 
-        def test_cudagraph_capture_sizes1(self):
-            torch._inductor.config.triton.cudagraph_capture_sizes = (
+        @torch._inductor.config.patch(
+            "triton.cudagraph_capture_sizes",
+            (
                 (2, 3),
                 (4, 5),
                 (6, 2),
                 (7, 3),
-            )
-
+            ),
+        )
+        def test_cudagraph_capture_sizes1(self):
             def f(x):
                 return x + 1
 
@@ -3961,14 +4018,16 @@ if HAS_CUDA_AND_TRITON:
 
             self.assertEqual(self.get_manager().new_graph_id().id, 4)
 
-        def test_cudagraph_capture_sizes2(self):
-            torch._inductor.config.triton.cudagraph_capture_sizes = (
+        @torch._inductor.config.patch(
+            "triton.cudagraph_capture_sizes",
+            (
                 (2, 3, 4),
                 (4, 4, 3),
                 (3, 4, 4),
                 (4, 2, 3),
-            )
-
+            ),
+        )
+        def test_cudagraph_capture_sizes2(self):
             def f(x):
                 return x + 1
 
