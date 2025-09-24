@@ -462,6 +462,14 @@ class TransformerEncoder(Module):
             )
         elif src_key_padding_mask is None:
             why_not_sparsity_fast_path = "src_key_padding_mask was None"
+        # This check avoids a call to torch._nested_tensor_from_mask_left_aligned() that
+        # breaks in torch.compile.
+        elif (
+            (not hasattr(self, "mask_check")) or self.mask_check
+        ) and torch.compiler.is_compiling():
+            why_not_sparsity_fast_path = (
+                "mask_check enabled with torch.compile or torch.export"
+            )
         elif (
             (not hasattr(self, "mask_check")) or self.mask_check
         ) and not torch._nested_tensor_from_mask_left_aligned(
