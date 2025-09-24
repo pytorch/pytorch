@@ -9,7 +9,7 @@ from typing import Any, Callable, Optional, Union
 import torch
 import torch.utils._pytree as pytree
 from torch._C import _functionalization_reapply_views_tls as _reapply_views
-from torch._ops import _get_dispatch_mode_pre_dispatch
+from torch._ops import _get_dispatch_mode_pre_dispatch, TorchBindOpOverload
 from torch._subclasses.meta_utils import is_sparse_any
 from torch.utils._python_dispatch import (
     _detect_infra_mode,
@@ -508,11 +508,25 @@ class FunctionalTensorMode(TorchDispatchMode):
                     # FunctionalTensorMode. If we call func() directly, we would need to exclude PreDispatch
                     # from the TLS in order to avoid infinite looping, but this would prevent us from coming
                     # back to PreDispatch later
-                    outs_unwrapped = func._op_dk(
-                        torch._C.DispatchKey.Functionalize,
-                        *args_unwrapped,
-                        **kwargs_unwrapped,
-                    )
+                    if isinstance(func, TorchBindOpOverload):
+                        with (
+                            torch.utils._python_dispatch._pop_mode_temporarily() as mode
+                        ):
+                            ctx = PythonFunctionalizeAPI()
+                            fully_unwrapped_args = ctx.unwrap_tensors(args)
+                            fully_unwrapped_kwargs = ctx.unwrap_tensors(kwargs)
+                            outs_unwrapped = torch._library.utils.handle_dispatch_mode(
+                                mode,
+                                func,
+                                *fully_unwrapped_args,
+                                **fully_unwrapped_kwargs,
+                            )
+                    else:
+                        outs_unwrapped = func._op_dk(
+                            torch._C.DispatchKey.Functionalize,
+                            *args_unwrapped,
+                            **kwargs_unwrapped,
+                        )
 
                     if self.export:
                         if func == torch.ops.aten.dropout.default:
