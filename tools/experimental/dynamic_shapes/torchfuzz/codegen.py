@@ -107,6 +107,7 @@ def convert_graph_to_python_code(
     # Build the complete code - all imports at the top
     code_lines = [
         "import torch",
+        "torch._dynamo.config.capture_scalar_outputs = True",
         "",
     ]
 
@@ -173,7 +174,6 @@ def convert_graph_to_python_code(
 
     code_lines.extend(
         [
-            "torch._dynamo.config.capture_scalar_outputs = True",
             "",
             f"args = {args_tuple}",
             "result_original = fuzzed_program(*args)",
