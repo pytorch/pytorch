@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any, Optional, TYPE_CHECKING, Union
 
+from torch.utils._ordered_set import OrderedSet
+
 from .template_heuristics.params import DictKernelTemplateParams
 
 
@@ -62,6 +64,75 @@ class KernelTemplateChoice:
             if self._choice is not None:
                 self._choice.annotations = self.annotations
         return self._choice
+
+    def to_bundle_dict(self) -> dict[str, Any]:
+        """
+        Serialize the KernelTemplateChoice to a bundle dictionary.
+
+        Returns:
+            Dictionary with 3 keys:
+            - template_id: The UID of the template
+            - params: Serializable dictionary from params.to_serializeable_dict()
+            - extra_kwargs: The extra kwargs dictionary
+
+        Note:
+            This method only serializes the core template choice information.
+            The layout and inputs are not included as they are expected to be
+            available when deserializing (e.g., from the calling context).
+        """
+        return {
+            "template_id": self.template.uid,
+            "params": self.params.to_serializeable_dict(),
+            "extra_kwargs": self.extra_kwargs.copy(),
+        }
+
+    @classmethod
+    def from_bundle_dict(
+        cls,
+        bundle_dict: dict[str, Any],
+        layout: Layout,
+        inputs: KernelInputs,
+    ) -> KernelTemplateChoice:
+        """
+        Deserialize a KernelTemplateChoice from a bundle dictionary.
+
+        Args:
+            bundle_dict: Dictionary with keys 'template_id', 'params', 'extra_kwargs'
+            layout: Layout object for the template choice
+            inputs: KernelInputs object for the template choice
+
+        Returns:
+            Reconstructed KernelTemplateChoice instance
+
+        Raises:
+            KeyError: If the template_id is not found in the registry
+            KeyError: If required keys are missing from bundle_dict
+        """
+        from .template_heuristics.params import DictKernelTemplateParams
+        from .template_heuristics.registry import get_template_by_uid
+
+        # Validate bundle_dict keys
+        required_keys = OrderedSet(["template_id", "params", "extra_kwargs"])
+        missing_keys = required_keys - bundle_dict.keys()
+        if missing_keys:
+            raise KeyError(f"Missing required keys in bundle_dict: {missing_keys}")
+
+        # Retrieve template from registry
+        template = get_template_by_uid(bundle_dict["template_id"])
+
+        # Reconstruct params - we use DictKernelTemplateParams as a fallback
+        # since we don't know the original params class type from serialization
+        # TODO(coconutruben): when we have more than DictKernelTemplateParams
+        # we need to a way to find the right params again (likely a registry + type hint when serializing)
+        params = DictKernelTemplateParams(bundle_dict["params"])
+
+        return cls(
+            template=template,
+            params=params,
+            extra_kwargs=bundle_dict["extra_kwargs"],
+            layout=layout,
+            inputs=inputs,
+        )
 
 
 def make_ktc_generator(
