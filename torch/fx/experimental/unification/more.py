@@ -8,6 +8,9 @@ from .core import (  # type: ignore[attr-defined]
 from .dispatch import dispatch
 
 
+__all__ = ["unifiable", "reify_object", "unify_object"]
+
+
 def unifiable(cls):
     """Register standard unify and reify operations on class
     This uses the type and __dict__ or __slots__ attributes to define the
