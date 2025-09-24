@@ -449,8 +449,8 @@ def _should_pad_bench(
         ):
             return False
 
-        if torch._inductor.config.force_shape_pad:
-            return True
+        if torch._inductor.config.force_shape_pad is not None:
+            return torch._inductor.config.force_shape_pad
 
         if (
             "pad_aten_mm_pass" in torch._inductor.config.post_grad_fusion_options
