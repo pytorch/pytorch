@@ -3,10 +3,10 @@ Program runner utilities for PyTorch fuzzer.
 This module handles running and testing generated PyTorch programs.
 """
 
-import subprocess
-import sys
 import os
 import random
+import subprocess
+import sys
 
 
 class ProgramRunner:
@@ -36,6 +36,7 @@ class ProgramRunner:
             # Default to all GPUs if not set
             try:
                 import torch
+
                 num_gpus = torch.cuda.device_count()
                 devices = [str(i) for i in range(num_gpus)]
             except ImportError:
@@ -54,7 +55,7 @@ class ProgramRunner:
                 capture_output=True,
                 text=True,
                 check=True,
-                env=env
+                env=env,
             )
             print("=== Program Output ===")
             print(result.stdout)
@@ -91,6 +92,7 @@ class ProgramRunner:
         else:
             try:
                 import torch
+
                 num_gpus = torch.cuda.device_count()
                 devices = [str(i) for i in range(num_gpus)]
             except ImportError:
@@ -109,19 +111,19 @@ class ProgramRunner:
                 capture_output=True,
                 text=True,
                 check=True,
-                env=env
+                env=env,
             )
             return {
-                'success': True,
-                'stdout': result.stdout,
-                'stderr': result.stderr,
-                'returncode': result.returncode
+                "success": True,
+                "stdout": result.stdout,
+                "stderr": result.stderr,
+                "returncode": result.returncode,
             }
 
         except subprocess.CalledProcessError as e:
             return {
-                'success': False,
-                'stdout': e.stdout,
-                'stderr': e.stderr,
-                'returncode': e.returncode
+                "success": False,
+                "stdout": e.stdout,
+                "stderr": e.stderr,
+                "returncode": e.returncode,
             }
