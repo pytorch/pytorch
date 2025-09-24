@@ -23,6 +23,7 @@ from torch.distributed.tensor.experimental._attention import (
     context_parallel_unshard,
     LoadBalancer,
     PerDocumentHeadTailLoadBalancer,
+    PTRRLoadBalancer,
     set_rotate_method,
 )
 from torch.nn.attention import sdpa_kernel, SDPBackend
@@ -59,6 +60,26 @@ rotater_enum_to_str = {
     _RotateMethod.ALL_GATHER: "allgather",
     _RotateMethod.ALL_TO_ALL: "alltoall",
 }  # mapping from _RotateMethod enum to string
+
+
+def save_tensor_to_file(tensor, filename):
+    with open(filename, "w") as f:
+        f.write(pretty_print_tensor(tensor))
+
+
+def pretty_print_tensor(tensor, indent=0) -> str:
+    """
+    Recursively prints an N-dimensional PyTorch tensor as nested lists,
+    with each sub-list on a new line and proper indentation.
+    """
+    space = " " * indent
+    if tensor.ndim == 1:
+        return space + str(tensor.tolist())
+    else:
+        head = space + "[\n"
+        body = ",\n".join([pretty_print_tensor(t, indent + 2) for t in tensor])
+        tail = space + "]\n"
+        return head + body + tail
 
 
 class RingAttentionTest(DTensorTestBase):
@@ -499,7 +520,24 @@ class CPFlexAttentionTest(DTensorTestBase):
             cp_k.requires_grad = False
             cp_v.requires_grad = False
 
+        # shard the output
+        from torch.distributed.tensor.experimental._attention import (
+            _context_parallel_buffers,
+        )
+
+        # check `restore=False` correctness
+        sharded_expect_out, sharded_expect_lse = _context_parallel_buffers(
+            device_mesh,
+            buffers=[expect_out.clone().detach(), expect_aux.lse.clone().detach()],
+            buffer_seq_dims=[2, 2],
+            load_balance_indices=lb.generate_indices() if lb is not None else None,
+        )
+
+        torch.testing.assert_close(cp_out, sharded_expect_out, atol=atol, rtol=rtol)
+        torch.testing.assert_close(cp_aux.lse, sharded_expect_lse, atol=atol, rtol=rtol)
+
         # unshard the output
+        # check `restore=True` correctness
         cp_out, cp_lse = context_parallel_unshard(
             device_mesh,
             buffers=[cp_out, cp_aux.lse],
@@ -634,6 +672,28 @@ class CPFlexAttentionTest(DTensorTestBase):
             )
 
             test_func()
+
+        _cp_options.enable_load_balance = restore_enable_load_balance
+
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support flash attention"
+    )
+    def test_cp_flex_attention_proc_time_round_robin(self) -> None:
+        restore_enable_load_balance = _cp_options.enable_load_balance
+        _cp_options.enable_load_balance = True
+
+        # Test 1: causal masking
+        block_mask = create_block_mask(causal_mask, B=1, H=1, Q_LEN=2048, KV_LEN=2048)
+        lb = PTRRLoadBalancer(block_mask, self.world_size, self.device_type)
+        self._test_cp_flex_attention(
+            qkv_size=2048,
+            B=1,
+            lb=lb,
+            mask_func=causal_mask,
+            atol=1e-6,
+        )
 
         _cp_options.enable_load_balance = restore_enable_load_balance
 

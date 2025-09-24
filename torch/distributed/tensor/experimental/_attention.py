@@ -1,7 +1,9 @@
 import contextlib
+import functools
 import itertools
 import logging
 import types
+
 from abc import ABC, abstractmethod
 from collections.abc import Generator
 from dataclasses import dataclass
@@ -12,6 +14,7 @@ import torch
 import torch.distributed as dist
 import torch.distributed._functional_collectives as ft_c
 import torch.nn.functional as F
+from torch import nn, Tensor
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor import distribute_tensor, DTensor, Shard
 from torch.nn.attention.flex_attention import (
@@ -218,6 +221,105 @@ class PerDocumentHeadTailLoadBalancer(LoadBalancer):
             indices_tensor = torch.argsort(indices_tensor)
 
         return indices_tensor
+
+
+class PTRRLoadBalancer(LoadBalancer):
+    """
+    processing-time based Round-robin (PTRR) load balancer.
+    """
+
+    def __init__(
+        self,
+        block_mask: BlockMask,
+        world_size: int,
+        device: Union[str, torch.device],
+    ):
+        self.block_mask = block_mask
+        self.world_size = world_size
+        self.device = device
+
+    @staticmethod
+    def ptrr_scheduling(process_time: Tensor, group_size: int) -> Tensor:
+        """
+        Separate the tasks into ``group_size`` groups using PTRR scheduling.
+        process_time:
+            1D tensor of size n, where n is the number of tasks. The value
+            is the process time of the task. Size `n` must be divisible by
+            `group_size`.
+        group_size:
+            the number of groups
+        """
+        assert process_time.ndim == 1
+
+        num_tasks = process_time.size(0)
+
+        assert num_tasks % group_size == 0
+
+        device = process_time.device
+        _, sorted_indices_descending = torch.sort(
+            process_time, descending=True, stable=True
+        )  # if process time is tied, the order is preserved
+        sorted_indices_descending_reversed = torch.flip(
+            sorted_indices_descending.view(-1, group_size), dims=[1]
+        ).view(-1)
+        tasks_in_group = torch.where(
+            torch.arange(num_tasks, device=device) // group_size % 2 == 0,
+            sorted_indices_descending,
+            sorted_indices_descending_reversed,
+        )
+        tasks_in_group = tasks_in_group.view(-1, group_size).transpose(
+            0, 1
+        )  # (group_size, n // group_size)
+
+        # sort each group
+        # TODO: see if sorting makes difference regarding performance
+        tasks_in_group, _ = torch.sort(tasks_in_group, dim=1)
+        return tasks_in_group
+
+    def generate_indices(self, restore: bool = False) -> Tensor:
+        """
+        Generate the LPT shuffle indices
+        """
+        block_mask = self.block_mask
+        kv_num_blocks = block_mask.kv_num_blocks
+        full_kv_num_blocks = block_mask.full_kv_num_blocks
+        non_sparse_kv_num_blocks = (
+            kv_num_blocks + full_kv_num_blocks
+            if full_kv_num_blocks is not None
+            else kv_num_blocks
+        )
+        B, H, Q = non_sparse_kv_num_blocks.shape
+        # assumption: the masking is identical across heads
+        non_sparse_kv_num_blocks = non_sparse_kv_num_blocks.view(-1, Q)  # (B, Q_BLK)
+
+        batch_ptrr = torch.vmap(
+            functools.partial(
+                PTRRLoadBalancer.ptrr_scheduling,
+                group_size=self.world_size,
+            )
+        )
+        ptrr_indices = batch_ptrr(
+            non_sparse_kv_num_blocks
+        )  # (B, group_size, num_blks_in_group)
+        ptrr_indices = ptrr_indices.reshape(B, -1)  # (B, num_blocks)
+
+        # NOTE: only support the case where the qkv block size are equal
+        q_blk_size, kv_blk_size = block_mask.BLOCK_SIZE
+        assert (
+            q_blk_size == kv_blk_size
+        ), "for now only support q_blk_size == kv_blk_size"
+
+        indices = torch.arange(
+            q_blk_size * ptrr_indices.size(1), device=ptrr_indices.device
+        ).view(
+            -1, q_blk_size
+        )  # (NUM_BLOCKS, BLOCK_SIZE)
+        indices = indices[ptrr_indices].view(B, -1)  # (B, qkv_size)
+
+        if restore:
+            indices = torch.vmap(torch.argsort)(indices)
+
+        return indices
 
 
 def _create_default_load_balancer(
@@ -1349,12 +1451,29 @@ def _context_parallel_buffers(
                 # load_balance_indices has shape (batch_size, seq_length)
                 # TODO: add shape check
                 # TODO: this for-looop can be done in a smarter way
-                for i in range(load_balance_indices.size(dim=0)):
-                    # NOTE: assuming batch dim is 0
-                    buffer_batch_i = torch.index_select(
-                        buffer[i], dim=seq_dim - 1, index=load_balance_indices[i]
+                lb_indices_batch_size = load_balance_indices.size(dim=0)
+                buffer_batch_size = buffer.size(dim=0)
+
+                if lb_indices_batch_size == buffer_batch_size:
+                    for i in range(buffer_batch_size):
+                        # NOTE: assuming batch dim is 0
+                        buffer_batch_i = torch.index_select(
+                            buffer[i], dim=seq_dim - 1, index=load_balance_indices[i]
+                        )
+                        buffer[i] = buffer_batch_i
+                elif lb_indices_batch_size == 1:
+                    for i in range(buffer_batch_size):
+                        # NOTE: assuming batch dim is 0
+                        buffer_batch_i = torch.index_select(
+                            buffer[i], dim=seq_dim - 1, index=load_balance_indices[0]
+                        )
+                        buffer[i] = buffer_batch_i
+                else:
+                    raise RuntimeError(
+                        "Cannot shuffle buffer: "
+                        f"load_balance_indices has shape {load_balance_indices.shape}, "
+                        f"but buffer has shape {buffer.shape}."
                     )
-                    buffer[i] = buffer_batch_i
 
         # use DTensor to shard the buffer on sequence dimension, retain the local tensor
         sharded_buffer = distribute_tensor(
@@ -1503,12 +1622,29 @@ def context_parallel_unshard(
                 # restore_indices has shape (batch_size, seq_length)
                 # TODO: add shape check
                 # TODO: this for-looop can be done in a smarter way
-                for i in range(restore_indices.size(dim=0)):
-                    # NOTE: assuming batch dim is 0
-                    unsharded_b_batch_i = torch.index_select(
-                        unsharded_b[i], dim=dim - 1, index=restore_indices[i]
+                lb_indices_batch_size = restore_indices.size(dim=0)
+                buffer_batch_size = unsharded_b.size(dim=0)
+
+                if lb_indices_batch_size == buffer_batch_size:
+                    for i in range(buffer_batch_size):
+                        # NOTE: assuming batch dim is 0
+                        unsharded_b_batch_i = torch.index_select(
+                            unsharded_b[i], dim=dim - 1, index=restore_indices[i]
+                        )
+                        unsharded_b[i] = unsharded_b_batch_i
+                elif lb_indices_batch_size == 1:
+                    for i in range(buffer_batch_size):
+                        # NOTE: assuming batch dim is 0
+                        unsharded_b_batch_i = torch.index_select(
+                            unsharded_b[i], dim=dim - 1, index=restore_indices[0]
+                        )
+                        unsharded_b[i] = unsharded_b_batch_i
+                else:
+                    raise RuntimeError(
+                        "Cannot restore buffer: "
+                        f"restore_indices has shape {restore_indices.shape}, "
+                        f"but unsharded_b has shape {unsharded_b.shape}."
                     )
-                    unsharded_b[i] = unsharded_b_batch_i
 
         unsharded_buffers.append(unsharded_b)
 
