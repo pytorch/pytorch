@@ -26,6 +26,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
 )
+from torch.utils._debug_mode import DebugMode
 
 
 funcol = torch.ops.c10d_functional
@@ -598,6 +599,23 @@ class RedistributeTest(DTensorTestBase):
 
         self.assertEqual(new_tensor.shape, new_meta_tensor.shape)
         self.assertEqual(new_tensor.stride(), new_meta_tensor.stride())
+
+    @with_comms
+    def test_one_shard_mesh(self):
+        mesh = init_device_mesh(self.device_type, (4, 1))
+
+        srcs = [Shard(1), Replicate(), Partial()]
+        dsts = [Shard(0), Shard(1), Replicate()]
+
+        for src, dst in itertools.product(srcs, dsts):
+            tensor = torch.randn(16, 8, device=self.device_type)
+            dt = DTensor.from_local(tensor, mesh, [Shard(0), src])
+
+            with DebugMode() as debug_mode:
+                out = dt.redistribute(mesh, [Shard(0), dst])
+
+            self.assertTrue("redistribute_input" not in debug_mode.debug_string())
+            self.assertEqual(out.placements, [Shard(0), dst])
 
 
 instantiate_parametrized_tests(RedistributeTest)
