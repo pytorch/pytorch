@@ -56,8 +56,6 @@
 #include <ATen/ops/where.h>
 #include <ATen/ops/xlogy.h>
 #include <ATen/ops/zeros_like.h>
-#include <ATen/ops/ones_like.h>
-#include <ATen/ops/any.h>
 #endif
 
 constexpr float EPSILON = 1e-12;
