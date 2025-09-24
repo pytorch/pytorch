@@ -19,6 +19,7 @@ from torch._library.custom_ops import (
     CustomOpDef,
     device_types_t,
 )
+from torch._library.effects import EffectType
 from torch._library.infer_schema import infer_schema  # noqa: F401
 from torch._library.opaque_object import OpaqueType
 from torch._library.triton import triton_op, wrap_triton
@@ -32,6 +33,7 @@ __all__ = [
     "define",
     "fallthrough_kernel",
     "impl_abstract",
+    "register_effectful_op",
     "register_autocast",
     "register_fake",
     "register_torch_dispatch",
@@ -398,6 +400,12 @@ class Library:
         assert self.m is not None
 
         self.m.fallback(dispatch_key, fn, with_keyset)
+
+    def _register_effectful_op(self, op_name: str, effect: Optional[EffectType]):
+        from torch._higher_order_ops.effects import _register_effectful_op
+
+        handle = _register_effectful_op(op_name, effect)
+        self._registration_handles.append(handle)
 
     def _destroy(self):
         if self.m is not None:
@@ -1063,6 +1071,48 @@ def register_fake(
     else:
         stacklevel += 1
         return register(func)
+
+
+def register_effectful_op(
+    op: _op_identifier,
+    effect: Optional[EffectType],
+    *,
+    lib: Optional[Library] = None,
+) -> None:
+    r"""
+    To specify that an operator has side-effects, we must register an effect
+    type for the operator. This will prevent graph passes in torch.compile from
+    reordering operations with the same effect type.
+
+    Args:
+        op_name: Operator name (along with the overload) or OpOverload object.
+        effect: Effect type to register. None means the operator is not effectful.
+    """
+    if not isinstance(
+        op, (str, torch._ops.OpOverload, torch._library.custom_ops.CustomOpDef)
+    ):
+        raise ValueError(
+            f"register_effectful_op({op}): got unexpected type for op: {type(op)}"
+        )
+
+    if isinstance(op, torch._ops.OpOverload):
+        if op._overloadname == "default":
+            # for some reason they don't add "default" to the name
+            op = f"{op._name}.{op._overloadname}"
+        else:
+            op = op._name
+    opdef = _maybe_get_opdef(op)
+    if opdef is not None:
+        opdef.register_effect(effect)
+    assert isinstance(op, str)
+
+    namespace, _ = torch._library.utils.parse_namespace(op)
+    if lib is None:
+        use_lib = Library(namespace, "FRAGMENT")
+        _keep_alive.append(use_lib)
+    else:
+        use_lib = lib
+    use_lib._register_effectful_op(op, effect)
 
 
 def register_autograd(
