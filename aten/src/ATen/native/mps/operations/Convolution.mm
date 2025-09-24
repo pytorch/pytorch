@@ -103,7 +103,7 @@ static void fill_conv_desc(MPSGraphConvolution2DOpDescriptor* descriptor_,
   descriptor_.groups = groups;
 }
 
-static Tensor _mps_convolution_impl(const Tensor& input_t_,
+static Tensor _mps_convolution_impl(const Tensor& input_t,
                                     const Tensor& weight_t,
                                     const std::optional<Tensor>& bias_opt,
                                     IntArrayRef padding,
@@ -111,11 +111,8 @@ static Tensor _mps_convolution_impl(const Tensor& input_t_,
                                     IntArrayRef dilation,
                                     int64_t groups,
                                     std::optional<IntArrayRef> input_shape) {
-  Tensor input_t = input_t_;
-  bool is3DConv = input_t.dim() == 5;
-  if (is3DConv) {
-    input_t = input_t.contiguous();
-  }
+  const bool is3DConv = input_t.dim() == 5;
+  const bool is_channels_last = mps_conv_use_channels_last(input_t, weight_t) && !is3DConv;
 
   TORCH_CHECK(isFloatingType(input_t.scalar_type()), "Convolution is supported only for Floating types");
 
@@ -125,7 +122,7 @@ static Tensor _mps_convolution_impl(const Tensor& input_t_,
   checkAllSameType(c, {input, weight});
   checkAllSameGPU(c, {input, weight});
 
-  bool bias_defined;
+  bool bias_defined = false;
 
   if (bias_opt == std::nullopt)
     bias_defined = false;
@@ -133,8 +130,6 @@ static Tensor _mps_convolution_impl(const Tensor& input_t_,
     bias_defined = bias_opt->defined();
 
   auto memory_format = input_t.suggest_memory_format();
-  const bool is_channels_last = mps_conv_use_channels_last(input_t, weight_t) && !is3DConv;
-  const bool needs_copy = !is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS) && is_channels_last;
   auto output_t =
       at::empty(input_shape.has_value() ? input_shape.value()
                                         : conv_output_size(input->sizes(), weight->sizes(), padding, stride, dilation),
@@ -147,8 +142,10 @@ static Tensor _mps_convolution_impl(const Tensor& input_t_,
     return output_t;
   }
   TensorArg output{output_t, "result", 0};
-  auto output_c =
-      needs_copy ? at::empty_like(output_t, output_t.options().memory_format(MemoryFormat::Contiguous)) : Tensor();
+  std::optional<Tensor> output_c;
+  if (!is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS) && is_channels_last) {
+    output_c = at::empty_like(output_t, output_t.options().memory_format(MemoryFormat::Contiguous));
+  }
 
   if (!is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_1_PLUS)) {
     // On macOS < 15.1, MPS convolution kernel does not support output channels > 2^16
@@ -193,19 +190,15 @@ static Tensor _mps_convolution_impl(const Tensor& input_t_,
                                   bias_defined,
                                   bias_shape_key);
 
-    MPSShape* inputShape = mps::getMPSShape(input_t, memory_format);
-    MPSShape* outputShape = mps::getMPSShape(output_t, memory_format);
-
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      MPSShape* weightShape = mps::getMPSShape(weight_t);
-      bool isDepthwiseConv = ((groups > 1 && (weightShape[1].intValue == 1)) && inputShape.count >= 4 &&
-                              weightShape.count >= 4 && !is_channels_last);
+      bool isDepthwiseConv =
+          (groups > 1 && weight_t.size(1) == 1) && input_t.dim() >= 4 && weight_t.dim() >= 4 && !is_channels_last;
 
       MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input_t);
       MPSGraphTensor* weightTensor = mpsGraphRankedPlaceHolder(mpsGraph, weight_t);
-      MPSGraphTensor* outputTensor;
+      MPSGraphTensor* outputTensor = nil;
       if (is3DConv) {
-        MPSGraphConvolution3DOpDescriptor* conv3dDescriptor_ = [[MPSGraphConvolution3DOpDescriptor new] autorelease];
+        auto conv3dDescriptor_ = [[MPSGraphConvolution3DOpDescriptor new] autorelease];
         fill_conv3d_desc(conv3dDescriptor_,
                          stride[2],
                          stride[1],
@@ -223,8 +216,7 @@ static Tensor _mps_convolution_impl(const Tensor& input_t_,
                                                     descriptor:conv3dDescriptor_
                                                           name:nil];
       } else if (isDepthwiseConv) {
-        MPSGraphDepthwiseConvolution3DOpDescriptor* depthWiseConv3dDescriptor_ =
-            [[MPSGraphDepthwiseConvolution3DOpDescriptor new] autorelease];
+        auto depthWiseConv3dDescriptor_ = [[MPSGraphDepthwiseConvolution3DOpDescriptor new] autorelease];
         fill_depthwise_conv_desc(depthWiseConv3dDescriptor_,
                                  stride[1],
                                  stride[0],
@@ -275,8 +267,9 @@ static Tensor _mps_convolution_impl(const Tensor& input_t_,
       newCachedGraph->outputTensor_ = outputTensor;
     });
 
-    auto inputPlaceholder = Placeholder(cachedGraph->inputTensor_, needs_copy ? input_t.contiguous() : input_t);
-    auto weightsPlaceholder = Placeholder(cachedGraph->weightTensor_, needs_copy ? weight_t.contiguous() : weight_t);
+    auto inputPlaceholder =
+        Placeholder(cachedGraph->inputTensor_, output_c || is3DConv ? input_t.contiguous() : input_t);
+    auto weightsPlaceholder = Placeholder(cachedGraph->weightTensor_, output_c ? weight_t.contiguous() : weight_t);
     auto biasPlaceholder = Placeholder();
     // Reshape the bias to be broadcastable with output of conv2d or conv3d
     if (bias_defined) {
@@ -286,7 +279,7 @@ static Tensor _mps_convolution_impl(const Tensor& input_t_,
         biasPlaceholder = Placeholder(cachedGraph->biasTensor_, (bias_opt.value()).view({1, bias_shape[0], 1, 1}));
       }
     }
-    auto outputPlaceholder = Placeholder(cachedGraph->outputTensor_, needs_copy ? output_c : output_t);
+    auto outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output_c ? *output_c : output_t);
 
     NSMutableDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds =
         [[[NSMutableDictionary alloc] initWithCapacity:3] autorelease];
@@ -299,8 +292,8 @@ static Tensor _mps_convolution_impl(const Tensor& input_t_,
     runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
   }
 
-  if (needs_copy) {
-    output_t.copy_(output_c);
+  if (output_c) {
+    output_t.copy_(*output_c);
   }
 
   return output_t;
