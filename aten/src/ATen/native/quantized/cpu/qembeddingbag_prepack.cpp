@@ -164,6 +164,10 @@ namespace at::native {
 // and packs the float weight tensor. In the next step it will be replaced by a
 // quantize and pack function once we support FP scale and FP zero_point
 //
+// The optional rowwise_min_max argument is to support callers to pass in the min/max
+// values of the weight tensor. If the rowwise_min_max is not provided, the min/max
+// values will be computed from the weight tensor.
+//
 // Python example examining a packed 8bit zero_point and scale:
 //
 // >> x = torch.from_numpy(np.array([[[10, 20], [30, 40]],[[50, 60], [70, 80]]],
@@ -221,7 +225,10 @@ namespace at::native {
 //
 //        [[50.        , 60.00000035],
 //         [70.        , 80.00000035]]])
-Tensor& qembeddingbag_byte_prepack_out(Tensor& output, const Tensor& weight) {
+Tensor& qembeddingbag_byte_prepack_out(
+    Tensor& output,
+    const Tensor& weight,
+    const std::optional<Tensor>& rowwise_min_max_opt) {
   // The "last" dimension of an N-Dimensioned batch of embedding bags is
   // quantization channel. E.g. for a 2D embedding bag, this has
   // [ row, col ] dimensions, for batched of embedding bags, dimensions might be
@@ -240,6 +247,15 @@ Tensor& qembeddingbag_byte_prepack_out(Tensor& output, const Tensor& weight) {
           weight.scalar_type() == at::ScalarType::Half,
       "'embedding_bag_byte_prepack' only support float32 or float16.");
 
+  const auto is_valid_rowwise_min_max = rowwise_min_max_opt.has_value();
+  if (is_valid_rowwise_min_max) {
+      TORCH_CHECK(
+        (rowwise_min_max_opt->dim() == 2 &&
+        rowwise_min_max_opt->size(0) == weight.size(0) &&
+        rowwise_min_max_opt->size(1) == 2),
+        "'rowwise_min_max' must be a 2D tensor with shape [num_rows(weight), 2].");
+  }
+
   const auto weight_sizes = weight.sizes();
   const auto cols_dim = weight_sizes.size() - 1;
   const int64_t embedding_rows = c10::size_to_dim_(static_cast<int>(cols_dim), weight_sizes);
@@ -255,10 +271,17 @@ Tensor& qembeddingbag_byte_prepack_out(Tensor& output, const Tensor& weight) {
   at::native::resize_(output, output_shape, std::nullopt);
   auto* output_data = output.data_ptr<uint8_t>();
 
+  const auto rowwise_min_max_contig = is_valid_rowwise_min_max
+      ? rowwise_min_max_opt->expect_contiguous(rowwise_min_max_opt->suggest_memory_format()) 
+      : at::borrow_from_optional_tensor(rowwise_min_max_opt);
+
 #ifdef USE_FBGEMM
   if (weight_contig->scalar_type() == at::ScalarType::Half) {
     const auto weight_data =
         static_cast<fbgemm::float16*>(weight_contig->data_ptr());
+    const auto rowwise_min_max_data = is_valid_rowwise_min_max
+        ? static_cast<fbgemm::float16*>(rowwise_min_max_contig->data_ptr())
+        : nullptr;
     at::parallel_for(
         0, embedding_rows, 1, [&](int64_t start_idx, int64_t end_idx) {
           fbgemm::FloatOrHalfToFused8BitRowwiseQuantizedSBFloat<
@@ -266,17 +289,21 @@ Tensor& qembeddingbag_byte_prepack_out(Tensor& output, const Tensor& weight) {
               weight_data + start_idx * embedding_cols,
               end_idx - start_idx,
               embedding_cols,
-              output_data + start_idx * output_columns);
+              output_data + start_idx * output_columns,
+              (is_valid_rowwise_min_max ? (rowwise_min_max_data + start_idx * 2) : nullptr));
         });
   } else {
     const auto weight_data = weight_contig->data_ptr<float>();
+    const auto rowwise_min_max_data = 
+        is_valid_rowwise_min_max ? rowwise_min_max_contig->data_ptr<float>() : nullptr;
     at::parallel_for(
         0, embedding_rows, 1, [&](int64_t start_idx, int64_t end_idx) {
           fbgemm::FloatOrHalfToFused8BitRowwiseQuantizedSBFloat<float>(
               weight_data + start_idx * embedding_cols,
               end_idx - start_idx,
               embedding_cols,
-              output_data + start_idx * output_columns);
+              output_data + start_idx * output_columns,
+              (is_valid_rowwise_min_max ? (rowwise_min_max_data + start_idx * 2) : nullptr));
         });
   }
 
@@ -326,6 +353,22 @@ Tensor qembeddingbag_byte_prepack(const Tensor& weight) {
   return output;
 }
 
+static Tensor qembeddingbag_byte_prepack_with_rowwise_min_max(
+    const Tensor& weight,
+    const Tensor& rowwise_min_max) {
+  const auto weight_contig =
+      weight.expect_contiguous(weight.suggest_memory_format());
+  Tensor output = at::detail::empty_cpu(
+      {0},
+      at::kByte,
+      weight_contig->layout(),
+      weight_contig->device(),
+      std::nullopt,
+      std::nullopt);
+  qembeddingbag_byte_prepack_out(output, weight, rowwise_min_max);
+  return output;
+}
+
 Tensor qembeddingbag_byte_prepack_meta(const Tensor& weight) {
   const auto weight_contig =
       weight.expect_contiguous(weight.suggest_memory_format());
@@ -335,7 +378,7 @@ Tensor qembeddingbag_byte_prepack_meta(const Tensor& weight) {
       "'embedding_bag_byte_prepack' only support float32 or float16.");
   const auto weight_sizes = weight.sym_sizes();
   const auto cols_dim = weight.ndimension() - 1;
-  const auto embedding_cols = weight_sizes[cols_dim];
+  const auto& embedding_cols = weight_sizes[cols_dim];
   // Add 8 bytes per column to store FP32 scale and zero_point per row.
   const auto output_columns = embedding_cols + 2 * sizeof(float);
 
@@ -542,6 +585,9 @@ TORCH_LIBRARY_IMPL(quantized, CPU, m) {
   m.impl(
       TORCH_SELECTIVE_NAME("quantized::embedding_bag_byte_prepack"),
       TORCH_FN(qembeddingbag_byte_prepack));
+  m.impl(
+      TORCH_SELECTIVE_NAME("quantized::embedding_bag_byte_prepack_with_rowwise_min_max"),
+      TORCH_FN(qembeddingbag_byte_prepack_with_rowwise_min_max));
   m.impl(
       TORCH_SELECTIVE_NAME("quantized::embedding_bag_4bit_prepack"),
       TORCH_FN(qembeddingbag_4bit_prepack));
