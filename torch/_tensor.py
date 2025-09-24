@@ -1691,7 +1691,10 @@ class Tensor(torch._C.TensorBase):
                 shares its storage with the tensor this make it safe to access from
                 both streams.  If -1 is passed then no synchronization is performed.
                 If 1 (on CUDA) or 0 (on ROCM) then the default stream is used for
-                synchronization.
+                synchronization. This API intentionally slightly deviates from the DLPack
+                guidance: the default stream is -1 (stream-preserving; no cross-stream sync),
+                because many from_dlpack implementations intend stream preservation.
+                For non-CUDA devices, -1 is treated the same as None.
 
             max_version (tuple[int, int] or None): An optional Python tuple with
                 2 integers, representing the maximum version the caller supports. If
@@ -1769,7 +1772,7 @@ class Tensor(torch._C.TensorBase):
                 event.record(current_stream)
                 stream.wait_event(event)
         elif self.device.type == "cpu":
-            assert stream is None, "stream should be None on cpu."
+            assert stream is None or stream == -1, "stream should be None or -1 on cpu."
 
         if self.device.type == "xla":
             import torch_xla
