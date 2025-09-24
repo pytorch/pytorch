@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import inspect
 from typing import Any, Callable, TypeVar
 from typing_extensions import TypeVarTuple, Unpack
@@ -5,12 +6,13 @@ from typing_extensions import TypeVarTuple, Unpack
 from .dispatcher import Dispatcher, MethodDispatcher
 
 
-global_namespace: dict[str, Dispatcher] = {}
+global_namespace = {}  # type: ignore[var-annotated]
 
 __all__ = ["dispatch", "ismethod"]
 
 T = TypeVar("T")
 Ts = TypeVarTuple("Ts")
+
 
 def dispatch(
     *types: Unpack[Ts], **kwargs: Any
@@ -57,7 +59,7 @@ def dispatch(
 
     types_tuple: tuple[type, ...] = tuple(types)  # type: ignore[arg-type]
 
-    def _df(func: Callable[..., Any]) -> Union[Dispatcher, MethodDispatcher]:
+    def _df(func):
         name = func.__name__
 
         if ismethod(func):
@@ -76,7 +78,7 @@ def dispatch(
     return _df
 
 
-def ismethod(func: Callable[..., Any]) -> bool:
+def ismethod(func):
     """Is func a method?
     Note that this has to work as the method is defined but before the class is
     defined.  At this stage methods look like functions.
@@ -86,4 +88,4 @@ def ismethod(func: Callable[..., Any]) -> bool:
         return signature.parameters.get("self", None) is not None
     else:
         spec = inspect.getfullargspec(func)  # type: ignore[union-attr, assignment]
-        return bool(spec and spec.args and spec.args[0] == "self")
+        return spec and spec.args and spec.args[0] == "self"
