@@ -1704,7 +1704,7 @@ def main() -> None:
     package_data = {
         "torch": torch_package_data,
     }
-    # windows libraries *.lib are excluded
+    # some win libraries are excluded
     # these are statically linked
     exclude_windows_libs = [
         "lib/dnnl.lib",
