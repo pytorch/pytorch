@@ -3232,7 +3232,7 @@ class TestUnbacked(TestCase):
             func(a, torch.rand(2, 1))
 
     @skipIfTorchDynamo("mark_unbacked is not traceable")
-    def test_do_not_guard_unbacked_inputs(self):
+    def test_do_not_guard_unbacked_inputs1(self):
         @torch.compile(fullgraph=True, dynamic=True, backend="inductor")
         def func(a, b):
             a.expand(b.shape)
@@ -3251,6 +3251,26 @@ class TestUnbacked(TestCase):
             func(a, b)
             func(torch.rand(4, 5), torch.rand(4, 5))
 
+        guards = "\n".join(log_stream.getvalue().strip().split("\n")[4:]).strip()
+        self.assertFalse("SYMBOLIC_SHAPE_GUARD" in guards)
+
+    @skipIfTorchDynamo("mark_unbacked is not traceable")
+    def test_do_not_guard_unbacked_inputs2(self):
+        cnt = CompileCounterWithBackend("inductor")
+
+        @torch.compile(fullgraph=True, dynamic=True, backend=cnt)
+        def func(a):
+            torch._check(a.size()[0] < 6)
+            return a * 10
+
+        a = torch.rand(4, 10)
+        torch._dynamo.decorators.mark_unbacked(a, 0)
+        torch._dynamo.decorators.mark_unbacked(a, 1)
+        log_stream, ctx = logs_to_string("torch._dynamo.guards", "guards")
+        with ctx():
+            func(a)
+            with self.assertRaises(RuntimeError):
+                func(torch.rand(9, 10))
         guards = "\n".join(log_stream.getvalue().strip().split("\n")[4:]).strip()
         self.assertFalse("SYMBOLIC_SHAPE_GUARD" in guards)
 
