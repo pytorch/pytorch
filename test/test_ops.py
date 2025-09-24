@@ -190,7 +190,6 @@ meta_consistency_out_dtype_mismatch_xfails = {
     xfail("tril"),
     xfail("triu"),
     xfail("unfold_copy"),
-    xfail("where"),
     # Output has dynamic shape.
     # Does not have a meta kernel implementation.
     skip("linalg.lstsq"),

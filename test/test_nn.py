@@ -62,6 +62,7 @@ AMPERE_OR_ROCM = TEST_WITH_ROCM or torch.cuda.is_tf32_supported()
 
 if TEST_WITH_ROCM:
     os.environ["PYTORCH_MIOPEN_SUGGEST_NHWC"] = "1"
+    os.environ["PYTORCH_MIOPEN_SUGGEST_NHWC_BATCHNORM"] = "1"
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -3514,7 +3515,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             self.assertRaisesRegex(RuntimeError, re.escape("input.size(-1) must be equal to input_size"), rnn, x_wrong)
 
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
-    @skipIfRocm
     def test_cudnn_weight_format(self):
         rnns = [
             nn.LSTM(10, 20, batch_first=True),
@@ -3522,7 +3522,8 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             nn.GRU(10, 20, batch_first=True),
             nn.RNN(10, 20, batch_first=True)
         ]
-        first_warn = True
+        # ROCm RNN does not issue warning about single contig chunk of memory, so don't assert it
+        first_warn = False if torch.version.hip else True
         for rnn in rnns:
             rnn.cuda()
             input = torch.randn(5, 4, 10, requires_grad=True, device="cuda")
@@ -5198,6 +5199,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         name_fn=lambda f, b, m, t: f"{f}_vs_{b}{'_mixed' if m else ''}_{dtype_name(t)}"
     )
     def test_batchnorm(self, dims, mode, memory_format, ref_backend, mixed, dtype):
+<<<<<<< HEAD
         if self._testMethodName == "test_batchnorm_3D_train_NCHW_vs_native_mixed_float16":
            self.skipTest("3D float16 NCHW train failed on CUDA and ROCm due to Native batchnorm accuracy issue SWDEV-541024")
         if torch.version.hip:
@@ -5214,6 +5216,35 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                                         "test_batchnorm_3D_train_NCHW_vs_native_mixed_bfloat16"
                                         ) and _get_torch_rocm_version() >= (6, 4):
                 self.skipTest("bfloat16 NCHW train failed due to native tolerance issue SWDEV-507600")
+=======
+        if torch.version.cuda:
+            if self._testMethodName in ("test_batchnorm_2D_train_NCHW_vs_cpu_mixed_bfloat16",
+                                        "test_batchnorm_3D_train_NCHW_vs_cpu_mixed_bfloat16",
+                                        "test_batchnorm_2D_train_NHWC_vs_NCHW_mixed_bfloat16",
+                                        "test_batchnorm_3D_train_NHWC_vs_NCHW_mixed_bfloat16",
+                                        "test_batchnorm_3D_train_NCHW_vs_native_mixed_float16"):
+                self.skipTest("Failed on CUDA")
+
+        if torch.version.hip:
+            if self._testMethodName in ("test_batchnorm_2D_train_NCHW_vs_cpu_mixed_bfloat16",
+                                        "test_batchnorm_3D_train_NCHW_vs_cpu_mixed_bfloat16",
+                                        "test_batchnorm_2D_train_NHWC_vs_NCHW_mixed_bfloat16",
+                                        "test_batchnorm_3D_train_NHWC_vs_NCHW_mixed_bfloat16") \
+                    and _get_torch_rocm_version() < (6, 4):
+                # NCHW bfloat16 path uses native kernels for rocm<=6.3
+                # train failed on rocm<=6.3 due to native accuracy issue
+                # https://github.com/pytorch/pytorch/issues/156513
+                self.skipTest("bfloat16 NHWC train failed on ROCm <= 6.3")
+
+            if self._testMethodName in ("test_batchnorm_2D_train_NCHW_vs_native_mixed_bfloat16",
+                                        "test_batchnorm_3D_train_NCHW_vs_native_mixed_bfloat16") \
+                    and _get_torch_rocm_version() >= (6, 4):
+                # https://github.com/pytorch/pytorch/issues/156513
+                self.skipTest("bfloat16 NCHW train failed due to native tolerance issue")
+
+            if self._testMethodName == "test_batchnorm_3D_train_NCHW_vs_native_mixed_float16":
+                self.skipTest("3D float16 NCHW train failed on ROCm")
+>>>>>>> upstream/main
 
         if dims == 3 and memory_format in ("NHWC", "NCHW"):
             memory_format = memory_format + "3D"
@@ -7127,6 +7158,14 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         with self.assertRaisesRegex(RuntimeError, r"its components must be at least one"):
             unfold = nn.Unfold(kernel_size=(1, 3), padding=(1, 1), dilation=(1, 2))
             unfold(torch.randn(1, 2, 2, 2))
+
+        with self.assertRaisesRegex(RuntimeError, r"the product of kernel_width and kernel_height overflowed"):
+            tensor_data = torch.tensor([
+                [1.4009e-03, -1.3341e-32, -1.3334e-32, -1.3341e-32, 1.2723e-38, 3.6334e+00, 1.5374e-02],
+                [-1.5525e-02, 9.2391e-29, -2.5615e-13, -1.3322e-32, -1.3341e-32, -1.3341e-32, -1.3341e-32],
+                [-1.3341e-32, -1.3341e-32, -1.3341e-32, 3.0466e+14, 2.3677e+14, 2.3677e+14, 2.3677e+14],
+            ])
+            F.fold(tensor_data, 16, 7318349394477056)
 
     def test_softmin(self):
         x = torch.randn(2, 16)

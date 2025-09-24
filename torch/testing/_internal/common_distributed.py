@@ -1,6 +1,7 @@
 # mypy: ignore-errors
 
 import faulthandler
+import functools
 import itertools
 import logging
 import multiprocessing
@@ -36,6 +37,7 @@ from torch.testing._internal.common_utils import (
     FILE_SCHEMA,
     find_free_port,
     IS_SANDCASTLE,
+    LazyVal,
     retry_on_connect_failures,
     skip_but_pass_in_sandcastle,
     skip_but_pass_in_sandcastle_if,
@@ -338,26 +340,17 @@ def requires_gloo():
 
 
 def requires_nccl_version(version, msg):
-    if TEST_CUDA:
-        if not c10d.is_nccl_available():
-            return skip_but_pass_in_sandcastle(
-                "c10d was not compiled with the NCCL backend",
-            )
-        else:
-            return skip_but_pass_in_sandcastle_if(
-                torch.cuda.nccl.version() < version,
-                f"Requires NCCL version greater than or equal to: {version}, found: {torch.cuda.nccl.version()}, reason: {msg}",
-            )
+    if not TEST_CUDA:
+        return lambda f: f
+    if not c10d.is_nccl_available():
+        return skip_but_pass_in_sandcastle(
+            "c10d was not compiled with the NCCL backend",
+        )
     else:
-
-        def decorator(func):
-            @wraps(func)
-            def wrapper(*args, **kwargs):
-                return func(*args, **kwargs)
-
-            return wrapper
-
-        return decorator
+        return skip_but_pass_in_sandcastle_if(
+            torch.cuda.nccl.version() < version,
+            f"Requires NCCL version greater than or equal to: {version}, found: {torch.cuda.nccl.version()}, reason: {msg}",
+        )
 
 
 def requires_nccl():
@@ -421,17 +414,64 @@ def requires_multicast_support():
     )
 
 
+def evaluate_platform_supports_symm_mem():
+    if TEST_CUDA:
+        if TEST_WITH_ROCM:
+            arch_list = ["gfx942", "gfx950"]
+            for arch in arch_list:
+                if arch in torch.cuda.get_device_properties(0).gcnArchName:
+                    return True
+            return False
+        else:
+            return True
+    else:
+        return False
+
+
+PLATFORM_SUPPORTS_SYMM_MEM: bool = LazyVal(
+    lambda: evaluate_platform_supports_symm_mem()
+)
+
+
 def skip_if_rocm_multiprocess(func):
-    """Skips a test for ROCm"""
-    func.skip_if_rocm_multiprocess = True
+    """Skips a test for ROCm multiprocess UTs"""
+    return unittest.skipIf(TEST_WITH_ROCM, TEST_SKIPS["skipIfRocm"].message)(func)
 
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        if not TEST_WITH_ROCM:
-            return func(*args, **kwargs)
-        sys.exit(TEST_SKIPS["skipIfRocm"].exit_code)
 
-    return wrapper
+def skip_if_rocm_arch_multiprocess(arch: tuple[str, ...]):
+    """Skips a test for given ROCm archs - multiprocess UTs"""
+
+    def decorator(func):
+        prop = torch.cuda.get_device_properties(0).gcnArchName.split(":")[0]
+        arch_match = prop in arch
+        reason = None
+        if TEST_WITH_ROCM and arch_match:
+            reason = f"skip_if_rocm_arch_multiprocess: test skipped on {arch}"
+
+        return unittest.skipIf(reason is not None, reason)(func)
+
+    return decorator
+
+
+def skip_if_rocm_ver_lessthan_multiprocess(version=None):
+    """Skips a test for ROCm based on ROCm ver - multiprocess UTs"""
+
+    def decorator(func):
+        reason = None
+        if TEST_WITH_ROCM:
+            rocm_version = str(torch.version.hip)
+            rocm_version = rocm_version.split("-", maxsplit=1)[0]  # ignore git sha
+            rocm_version_tuple = tuple(int(x) for x in rocm_version.split("."))
+            if (
+                rocm_version_tuple is None
+                or version is None
+                or rocm_version_tuple < tuple(version)
+            ):
+                reason = f"skip_if_rocm_ver_lessthan_multiprocess: ROCm {rocm_version_tuple} is available but {version} required"
+
+        return unittest.skipIf(reason is not None, reason)(func)
+
+    return decorator
 
 
 def skip_if_win32():
@@ -1101,30 +1141,24 @@ def run_subtests(
         c10d.barrier()
 
 
-# Cannot use functools.cache as it requires python 3.9
-EFA_PROBE_RESULT = None
-
-
+@functools.cache
 def has_efa() -> bool:
     """
     If shell command `fi_info -p efa -t FI_EP_RDM` returns exit code 0 then we assume that the machine has
     Libfabric EFA interfaces and EFA software components installed,
     see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/efa-start.html.
     """
-    global EFA_PROBE_RESULT
-    if EFA_PROBE_RESULT is not None:
-        return EFA_PROBE_RESULT
 
     try:
-        EFA_PROBE_RESULT = (
+        return (
             subprocess.run(
                 ["fi_info", "-p", "efa", "-t", "FI_EP_RDM"], check=False
             ).returncode
             == 0
         )
     except FileNotFoundError:
-        EFA_PROBE_RESULT = False
-    return EFA_PROBE_RESULT
+        pass
+    return False
 
 
 def tp_transports():

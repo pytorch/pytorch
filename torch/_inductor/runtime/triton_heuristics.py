@@ -755,6 +755,8 @@ class CachingAutotuner(KernelInterface):
             "debug": compile_meta["debug"],
             "sanitize_overflow": False,  # turn off additional asserts added for overflow checks
         }
+        if "enable_fp_fusion" in compile_meta:
+            options["enable_fp_fusion"] = compile_meta["enable_fp_fusion"]
         if HAS_WARP_SPEC:
             options.update(
                 {
@@ -762,6 +764,15 @@ class CachingAutotuner(KernelInterface):
                     "num_buffers_warp_spec": compile_meta.get(
                         "num_buffers_warp_spec", 0
                     ),
+                }
+            )
+        if self.device_props.type == "cuda":
+            options.update(
+                {
+                    "launch_cooperative_grid": compile_meta.get(
+                        "launch_cooperative_grid", False
+                    ),
+                    "launch_pdl": compile_meta.get("launch_pdl", False),  # True
                 }
             )
         if self.device_props.type == "hip":
@@ -902,7 +913,11 @@ class CachingAutotuner(KernelInterface):
             return {}
 
         copies = {}
-        budget = torch.cuda.max_memory_allocated() - torch.cuda.memory_allocated()
+        try:
+            budget = torch.cuda.max_memory_allocated() - torch.cuda.memory_allocated()
+        except RuntimeError:
+            # Possibly a custom CUDA allocator, see https://github.com/pytorch/pytorch/issues/163257
+            return {}
 
         def maybe_copy(name, arg):
             if name in self.mutated_arg_names and arg.is_cuda:
@@ -1100,6 +1115,15 @@ class CachingAutotuner(KernelInterface):
             "global_scratch": launcher.global_scratch,
             "profile_scratch": launcher.profile_scratch,
         }
+        if self.device_props.type == "xpu":
+            # On the XPU backend, threads_per_warp is not always 32.
+            # For Intel GEMM Triton kernels, it can be 16.
+            # This information must be preserved so that the Cpp wrapper
+            # can launch the kernel with the correct configuration.
+            params["threads_per_warp"] = getattr(
+                launcher.bin.metadata, "threads_per_warp", 32
+            )
+
         from torch._inductor.codecache import CudaKernelParamCache
 
         bin_type = {"hip": "hsaco", "xpu": "spv"}.get(self.device_props.type, "cubin")
@@ -1311,11 +1335,23 @@ class CachingAutotuner(KernelInterface):
 
             def filtered_signature() -> list[str]:
                 # constexprs are not passed in as args
-                return [
-                    x
-                    for x in self.triton_meta["signature"].keys()
-                    if x not in cfg.kwargs.keys()
-                ]
+                new_signature: list[str] = []
+                from triton.runtime.interpreter import InterpretedFunction
+
+                for i, x in enumerate(self.triton_meta["signature"].keys()):
+                    if isinstance(self.fn, InterpretedFunction):
+                        # These are torch compiled triton kernels that definitely
+                        # have block size configs. Dynamo does not currently
+                        # trace user defined triton kernels when TRITON_INTERPRET=1
+                        if x not in cfg.kwargs.keys():
+                            new_signature.append(x)
+                    elif i not in self.fn.constexprs:
+                        # use constexprs rather than just configs since user
+                        # defined triton kernels may not have any configs
+                        new_signature.append(x)
+
+                return new_signature
+
         else:
 
             def filtered_signature() -> list[str]:
@@ -1501,6 +1537,13 @@ class StaticTritonCompileResult(CompileResult[StaticallyLaunchedCudaKernel]):
             if inductor_meta.get("store_cubin", None):
                 # Requires storing the entire binary
                 raise CannotStaticallyLaunchKernel("store_cubin is enabled")
+
+            if getattr(kernel.metadata, "launch_pdl", False) or getattr(
+                kernel.metadata, "launch_cooperative_grid", False
+            ):
+                raise CannotStaticallyLaunchKernel(
+                    "static launch does not support launch attributes"
+                )
 
             cubin_location = os.path.join(
                 triton_cache_dir(triton_meta.get("device", 0)),
@@ -1938,7 +1981,6 @@ class DebugAutotuner(CachingAutotuner):
             kernel_name = f"{max(possible_names, key=len)}"
             if not re.match(self.regex_filter, kernel_name):
                 return
-
             if len(self.launchers) != 1:
                 if len(self.launchers) == 0:
                     start_time = time.time_ns()
@@ -2291,6 +2333,7 @@ def triton_config_reduction(
     num_warps=None,
     register_intensive=False,
     dynamic_scale_rblock=True,
+    reduction_hint=None,
 ) -> Config:
     """
     Construct a reduction triton config with some adjustment heuristics
@@ -2318,9 +2361,16 @@ def triton_config_reduction(
             rnumels[prefix] *= 2
 
     if num_warps is None:
-        num_warps = total_numel() // 128
+        if reduction_hint == ReductionHint.INNER:
+            # r is contiguous, so ensure that each thread has 8 elements for
+            # vectorized loads, assuming bf16/fp16
+            num_warps = r // (32 * 8)
+        else:
+            num_warps = total_numel() // 128
+
+    max_num_warps = 16 if r <= 8192 else 32
     num_warps = _num_warps(
-        num_warps, max_num_warps=16, register_intensive=register_intensive
+        num_warps, max_num_warps=max_num_warps, register_intensive=register_intensive
     )
 
     x, _num_blocks = _check_max_grid_x(size_hints, x, num_warps)
@@ -2586,6 +2636,7 @@ def _reduction_configs(
                 num_stages=num_stages,
                 register_intensive=register_intensive,
                 dynamic_scale_rblock=dynamic_scale_rblock,
+                reduction_hint=reduction_hint,
             )
 
     def outer_config_opt():
@@ -2637,7 +2688,7 @@ def _reduction_configs(
         )
 
     contiguous_config = make_config(
-        1,
+        1 if rnumel > 2048 else 2,  # 1024 or less is persistent
         min(rnumel, MAX_R0_BLOCK),
         register_intensive=register_intensive,
     )
@@ -2659,7 +2710,7 @@ def _reduction_configs(
         xnumel = max(4096 // rnumel, 1)
         c = make_config(
             xnumel,
-            rnumel,
+            min(rnumel, 32768),
             register_intensive=register_intensive,
             dynamic_scale_rblock=False,
         )
@@ -2859,6 +2910,9 @@ def _persistent_reduction_configs(
 ):
     xnumel = size_hints["x"]
     rnumel = get_total_reduction_numel(size_hints)
+    loads_and_stores = inductor_meta.get("num_load", 0) + inductor_meta.get(
+        "num_store", 0
+    )
 
     max_autotune_enabled = not disable_pointwise_autotuning(inductor_meta) or (
         inductor_meta.get("max_autotune")
@@ -2873,7 +2927,13 @@ def _persistent_reduction_configs(
     
     if "y" not in size_hints:
         configs = [
-            triton_config_reduction(size_hints, xblock, rnumel, register_intensive=True)
+            triton_config_reduction(
+                size_hints,
+                xblock,
+                rnumel,
+                register_intensive=True,
+                reduction_hint=reduction_hint,
+            )
             for xblock in (1, 8, 32, 128)
             if xblock == 1
             or (rnumel * xblock <= 4096 and xblock <= xnumel)
@@ -2898,6 +2958,7 @@ def _persistent_reduction_configs(
     # defer to more autotuning, initially
     if "y" in size_hints:
         pass
+<<<<<<< HEAD
 
     if not max_autotune_enabled: # Don't filter if tuning enabled
         if reduction_hint == ReductionHint.INNER and rnumel >= 256:
@@ -2907,10 +2968,39 @@ def _persistent_reduction_configs(
 
     if reduction_hint == ReductionHint.OUTER_TINY:
         tiny_configs = [
+=======
+    # TODO(jansel): we should be able to improve these heuristics
+    elif reduction_hint == ReductionHint.INNER:
+        if rnumel > 1024:
+            configs = configs[:1]
+        else:
+            x_block = 8
+            if xnumel // x_block < 128 or (loads_and_stores >= 5 and rnumel >= 256):
+                # If loads/stores greater than 5, a lot of register pressure
+                # rnumel < 256 means no vectorized loads if we split up r dim
+                # so xblock still needs to be larger
+                x_block = 1
+
+            configs = [
+                triton_config_reduction(
+                    size_hints,
+                    x_block,
+                    rnumel,
+                    register_intensive=True,
+                    reduction_hint=reduction_hint,
+                )
+            ]
+
+    elif reduction_hint == ReductionHint.OUTER:
+        configs = configs[-1:]
+    elif reduction_hint == ReductionHint.OUTER_TINY:
+        configs = [
+>>>>>>> upstream/main
             triton_config_reduction(
                 size_hints,
                 2 * (256 // rnumel) if rnumel <= 256 else 1,
                 rnumel,
+                reduction_hint=reduction_hint,
             )
         ]
         if max_autotune_enabled:

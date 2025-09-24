@@ -671,7 +671,13 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
       std::cout << "PYTORCH_MIOPEN_EXTRA_LOGGING: ********************* _batch_norm_impl_index (calling miopen_batch_norm)" << std::endl;
     return std::tuple_cat(
              at::miopen_batch_norm(
+<<<<<<< HEAD
                input.contiguous(input.suggest_memory_format()), weight.contiguous(), bias.contiguous(),
+=======
+               input.contiguous(input.suggest_memory_format()),
+               weight.contiguous(),
+               bias.contiguous(),
+>>>>>>> upstream/main
                running_mean.defined() ? running_mean.contiguous() : running_mean,
                running_var.defined() ? running_var.contiguous() : running_var,
                training, momentum, eps),
