@@ -1,7 +1,7 @@
 """Batch matrix multiplication operator implementation."""
 
 import random
-from ..base import Operator
+from ..base.operator import Operator
 from torchfuzz.tensor import Tensor
 
 
@@ -9,14 +9,15 @@ class BmmOperator(Operator):
     """Operator for batch matrix multiplication (torch.bmm)."""
 
     def __init__(self):
-        super().__init__("bmm")
+        super().__init__(supports_dtensor=False)
+        self.name = "bmm"
 
-    def can_produce(self, tensor, max_numel=1_000_000):
+    def _can_produce_impl(self, output_tensor, max_numel=1_000_000):
         """BMM can produce tensors that are 3D, floating point, and not too large."""
         # bmm only supports floating point tensors
-        if tensor.dtype in ["int8", "int16", "int32", "int64", "uint8", "bool"]:
+        if output_tensor.dtype in ["int8", "int16", "int32", "int64", "uint8", "bool"]:
             return False
-        return len(tensor.size) == 3 and (tensor.size[0] * tensor.size[1] * tensor.size[2] <= max_numel)
+        return len(output_tensor.size) == 3 and (output_tensor.size[0] * output_tensor.size[1] * output_tensor.size[2] <= max_numel)
 
     def decompose(self, tensor, num_inputs=2):
         """Decompose tensor into input tensors for batch matrix multiplication."""

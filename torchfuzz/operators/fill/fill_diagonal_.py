@@ -8,9 +8,9 @@ class FillDiagonalOperator_(Operator):
     """Operator for filling tensor diagonal with a value."""
 
     def __init__(self):
-        super().__init__("fill_diagonal_")
+        super().__init__(supports_dtensor=False)
 
-    def can_produce(self, tensor):
+    def _can_produce_impl(self, tensor):
         """
         PyTorch's fill_diagonal_ requires all dimensions to be of equal length.
         Only produce for tensors where all dimensions have the same size.

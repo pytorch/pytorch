@@ -1,7 +1,7 @@
 """Group normalization operator implementation."""
 
 import random
-from ..base import Operator
+from ..base.operator import Operator
 from torchfuzz.tensor import Tensor
 
 
@@ -9,19 +9,19 @@ class GroupNormOperator(Operator):
     """Operator for group normalization (torch.nn.functional.group_norm)."""
 
     def __init__(self):
-        super().__init__("group_norm")
+        super().__init__(supports_dtensor=False)
 
-    def can_produce(self, tensor):
+    def _can_produce_impl(self, output_tensor):
         """GroupNorm can produce tensors that are at least 3D (N, C, ...) with sufficient elements for normalization."""
-        if len(tensor.size) < 3:
+        if len(output_tensor.size) < 3:
             return False
 
         # Group normalization requires more than 1 value per channel when training
         # Since we generate tensors with requires_grad=True, we need to ensure
         # that the spatial dimensions (after batch and channel) have more than 1 element total
-        batch_size = tensor.size[0]
-        num_channels = tensor.size[1]
-        spatial_dims = tensor.size[2:]
+        batch_size = output_tensor.size[0]
+        num_channels = output_tensor.size[1]
+        spatial_dims = output_tensor.size[2:]
 
         # Calculate total spatial elements
         spatial_elements = 1

@@ -1,7 +1,7 @@
 """Add matrix multiplication operator implementation."""
 
 import random
-from ..base import Operator
+from ..base.operator import Operator
 from torchfuzz.tensor import Tensor
 
 
@@ -9,14 +9,14 @@ class AddmmOperator(Operator):
     """Operator for addmm (torch.addmm): bias + mat1 @ mat2."""
 
     def __init__(self):
-        super().__init__("addmm")
+        super().__init__(supports_dtensor=False)
 
-    def can_produce(self, tensor):
+    def _can_produce_impl(self, output_tensor):
         """Addmm can produce tensors that are 2D and floating point."""
         # addmm only supports floating point tensors
-        if tensor.dtype in ["int8", "int16", "int32", "int64", "uint8", "bool"]:
+        if output_tensor.dtype in ["int8", "int16", "int32", "int64", "uint8", "bool"]:
             return False
-        return len(tensor.size) == 2
+        return len(output_tensor.size) == 2
 
     def decompose(self, tensor, num_inputs=3):
         """Decompose tensor into input tensors for addmm."""

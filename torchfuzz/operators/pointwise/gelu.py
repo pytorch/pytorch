@@ -5,15 +5,15 @@ from torchfuzz.tensor import Tensor
 
 
 class GeluOperator(Operator):
-    """Operator for GELU activation function."""
+    """Operator for GELU activation function. DTensor-safe operation."""
 
     def __init__(self):
-        super().__init__("gelu")
+        super().__init__(supports_dtensor=True)
 
-    def can_produce(self, tensor):
+    def _can_produce_impl(self, output_tensor):
         """GELU can be applied to floating point tensors (elementwise op)."""
         # GELU only supports floating point and complex dtypes
-        if tensor.dtype in ["int8", "int16", "int32", "int64", "uint8", "bool"]:
+        if output_tensor.dtype in ["int8", "int16", "int32", "int64", "uint8", "bool"]:
             return False
         return True
 

@@ -1,7 +1,7 @@
 """Argmin operator implementation."""
 
 import random
-from ..base import Operator
+from ..base.operator import Operator
 from torchfuzz.tensor import Tensor
 
 
@@ -9,9 +9,9 @@ class ArgminOperator(Operator):
     """Operator for tensor argmin reduction."""
 
     def __init__(self):
-        super().__init__("argmin")
+        super().__init__("argmin", supports_dtensor=True)
 
-    def can_produce(self, tensor):
+    def _can_produce_impl(self, tensor):
         """
         Argmin returns indices, so output dtype must be int64.
         We construct inputs by inserting at most one extra dimension,

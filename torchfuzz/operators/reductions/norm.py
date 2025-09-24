@@ -1,7 +1,7 @@
 """Norm operator implementation."""
 
 import random
-from ..base import Operator
+from ..base.operator import Operator
 from torchfuzz.tensor import Tensor
 
 
@@ -9,9 +9,9 @@ class NormOperator(Operator):
     """Operator for tensor norm reduction."""
 
     def __init__(self):
-        super().__init__("norm")
+        super().__init__(supports_dtensor=False)
 
-    def can_produce(self, tensor):
+    def _can_produce_impl(self, tensor):
         """
         We construct inputs by inserting at most one extra dimension,
         so we need room to add a dim and stay within a reasonable cap.

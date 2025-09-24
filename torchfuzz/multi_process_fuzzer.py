@@ -73,7 +73,7 @@ def run_fuzzer_with_seed(seed: int) -> Tuple[int, bool, str, float, int]:
 
     try:
         # Run fuzzer.py with the specified seed
-        cmd = [sys.executable, "fuzzer.py", "--seed", str(seed)]
+        cmd = [sys.executable, "fuzzer.py", "--dtensor", "--seed", str(seed)]
 
         result = subprocess.run(
             cmd,

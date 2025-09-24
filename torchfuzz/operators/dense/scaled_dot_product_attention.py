@@ -1,7 +1,7 @@
 """Scaled dot product attention operator implementation."""
 
 import random
-from ..base import Operator
+from ..base.operator import Operator
 from torchfuzz.tensor import Tensor
 
 
@@ -9,16 +9,16 @@ class ScaledDotProductAttentionOperator(Operator):
     """Operator for scaled dot product attention (torch.nn.functional.scaled_dot_product_attention)."""
 
     def __init__(self):
-        super().__init__("scaled_dot_product_attention")
+        super().__init__(supports_dtensor=False)
 
-    def can_produce(self, tensor):
+    def _can_produce_impl(self, output_tensor):
         """SDPA can produce tensors that are 4D (batch_size, num_heads, seq_len, head_dim) and total elements < 1M."""
         # Check if tensor has 4 dimensions
-        if len(tensor.size) != 4:
+        if len(output_tensor.size) != 4:
             return False
         # Calculate the product of all dimensions (total number of elements)
         num_elements = 1
-        for dim in tensor.size:
+        for dim in output_tensor.size:
             num_elements *= dim
         # Return True only if total elements is less than 1,000,000
         return num_elements < 1_000_000

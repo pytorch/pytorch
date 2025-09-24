@@ -8,9 +8,9 @@ class ReluOperator(Operator):
     """Operator for ReLU activation function."""
 
     def __init__(self):
-        super().__init__("relu")
+        super().__init__(supports_dtensor=True)
 
-    def can_produce(self, tensor):
+    def _can_produce_impl(self, output_tensor):
         """ReLU can be applied to any tensor (elementwise op)."""
         return True
 

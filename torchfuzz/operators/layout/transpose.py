@@ -1,7 +1,7 @@
 """Transpose operator implementation."""
 
 import random
-from ..base import Operator
+from ..base.operator import Operator
 from torchfuzz.tensor import Tensor
 
 
@@ -9,12 +9,12 @@ class TransposeOperator(Operator):
     """Operator for tensor transpose operations."""
 
     def __init__(self):
-        super().__init__("transpose")
+        super().__init__(supports_dtensor=True)
 
-    def can_produce(self, tensor):
+    def _can_produce_impl(self, output_tensor):
         """Transpose can always produce any tensor by transposing another tensor."""
         # Can only transpose tensors with at least 2 dimensions
-        return len(tensor.size) >= 2
+        return len(output_tensor.size) >= 2
 
     def decompose(self, tensor):
         """Decompose tensor into input tensor for transpose operation."""

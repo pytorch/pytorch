@@ -8,9 +8,9 @@ class ZeroOperator_(Operator):
     """Operator for filling tensor with zeros."""
 
     def __init__(self):
-        super().__init__("zero_")
+        super().__init__(supports_dtensor=False)
 
-    def can_produce(self, tensor):
+    def _can_produce_impl(self, tensor):
         """Zero can always produce a tensor by filling with zeros."""
         return True
 

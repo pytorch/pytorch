@@ -6,12 +6,12 @@ from torchfuzz.tensor import Tensor
 
 
 class DivOperator(Operator):
-    """Operator for element-wise division."""
+    """Operator for element-wise division (DTensor-safe)."""
 
     def __init__(self):
-        super().__init__("div")
+        super().__init__(supports_dtensor=True)
 
-    def can_produce(self, tensor):
+    def _can_produce_impl(self, output_tensor):
         """Div can always produce a tensor by dividing two tensors of the same shape, dtype, etc."""
         return True
 
@@ -60,6 +60,3 @@ class DivOperator(Operator):
             for name in input_names[1:]:
                 expr = f"({expr}) / {name}"
             return f"{output_name} = {expr}"
-
-    def supports_variable_inputs(self) -> bool:
-        return True

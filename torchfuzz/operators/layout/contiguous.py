@@ -1,7 +1,7 @@
 """Contiguous operator implementation."""
 
 import random
-from ..base import Operator
+from ..base.operator import Operator
 from torchfuzz.tensor import Tensor
 
 
@@ -9,9 +9,9 @@ class ContiguousOperator(Operator):
     """Operator for tensor contiguous operations."""
 
     def __init__(self):
-        super().__init__("contiguous")
+        super().__init__(supports_dtensor=True)
 
-    def can_produce(self, tensor):
+    def _can_produce_impl(self, output_tensor):
         """Contiguous can produce any tensor (as it makes tensor contiguous)."""
         return True
 

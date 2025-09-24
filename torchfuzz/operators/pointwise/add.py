@@ -6,12 +6,12 @@ from torchfuzz.tensor import Tensor
 
 
 class AddOperator(Operator):
-    """Operator for element-wise addition."""
+    """Operator for element-wise addition (DTensor-safe)."""
 
     def __init__(self):
-        super().__init__("add")
+        super().__init__(supports_dtensor=True)
 
-    def can_produce(self, tensor):
+    def _can_produce_impl(self, output_tensor):
         """Add can always produce a tensor by adding two tensors of the same shape, dtype, etc."""
         return True
 
@@ -55,6 +55,3 @@ class AddOperator(Operator):
         # Sum all input tensors
         expr = " + ".join(input_names)
         return f"{output_name} = {expr}"
-
-    def supports_variable_inputs(self) -> bool:
-        return True

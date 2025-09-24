@@ -1,7 +1,7 @@
 """1D convolution operator implementation."""
 
 import random
-from ..base import Operator
+from ..base.operator import Operator
 from torchfuzz.tensor import Tensor
 
 
@@ -9,11 +9,12 @@ class Conv1dOperator(Operator):
     """Operator for 1D convolution (torch.nn.functional.conv1d)."""
 
     def __init__(self):
-        super().__init__("conv1d")
+        super().__init__(supports_dtensor=False)
+        self.name = "conv1d"
 
-    def can_produce(self, tensor):
+    def _can_produce_impl(self, output_tensor):
         """Conv1d can produce 3D tensors (batch, out_channels, length)."""
-        return len(tensor.size) == 3
+        return len(output_tensor.size) == 3
 
     def decompose(self, tensor):
         """Decompose tensor into input tensors for conv1d operation."""

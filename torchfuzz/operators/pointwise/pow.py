@@ -6,12 +6,12 @@ from torchfuzz.tensor import Tensor
 
 
 class PowOperator(Operator):
-    """Operator for element-wise power operation."""
+    """Operator for element-wise power operation. DTensor-safe operation."""
 
     def __init__(self):
-        super().__init__("pow")
+        super().__init__(supports_dtensor=True)
 
-    def can_produce(self, tensor):
+    def _can_produce_impl(self, output_tensor):
         """Pow can always produce a tensor by raising a tensor to a power."""
         return True
 
@@ -62,6 +62,3 @@ class PowOperator(Operator):
             for name in input_names[1:]:
                 expr = f"torch.pow({expr}, {name})"
             return f"{output_name} = {expr}"
-
-    def supports_variable_inputs(self) -> bool:
-        return True
