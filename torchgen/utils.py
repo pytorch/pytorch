@@ -355,12 +355,9 @@ def dataclass_repr(
     width: int = 80,
 ) -> str:
     # built-in pprint module support dataclasses from python 3.10
-    if sys.version_info >= (3, 10):
-        from pprint import pformat
+    from pprint import pformat
 
-        return pformat(obj, indent, width)
-
-    return _pformat(obj, indent=indent, width=width)
+    return pformat(obj, indent, width)
 
 
 def _pformat(

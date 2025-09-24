@@ -637,8 +637,8 @@ def make_pointwise(
             and getattr(V.graph, "current_node", None) is not None
             and V.graph.current_node.meta is not None
             and V.graph.current_node.meta.get("low_precision_pointwise_barrier", False)
-            and dtype in low_pr_fp
         )
+        emulate_output_cast = emulate_precision_casts and dtype in low_pr_fp
 
         def inner_fn(index):
             assert len(index) == len(ranges), f"wrong ndim {index} {ranges}"
@@ -655,7 +655,7 @@ def make_pointwise(
                     inputs_loaded.append(out)
 
                 out = fn(*inputs_loaded)
-                if emulate_precision_casts:
+                if emulate_output_cast:
                     # fp16/bf16 kernels are computed in fp32. Casting down to fp16/bf16 here,
                     # then upcasting again, to emulate casts that eager would do.
                     downcast = ops.to_dtype(out, dtype, use_compute_types=False)
@@ -1208,16 +1208,26 @@ def slice_(x, dim=0, start=0, end=2**63, step=1, clamp=True):
 
 @register_lowering(aten.as_strided, type_promotion_kind=None)
 def as_strided(x, size, stride, storage_offset=None):
+    new_device = None
+    new_dtype = None
     if isinstance(x, TensorBox) and isinstance(x.data, ir.BaseView):
-        # as_strided ignores views
+        # Note: Merging views
+        # When we use as_strided, we can rewrite the size/stride/offset
+        # of the incoming buffer x. If x is a view, we would overwrite
+        # its metadata. Except for dtype, which we need to propagate.
+
+        # Technically device is not needed because it is not possible
+        # to have a cross-device view today.
+        new_device = x.get_device()
+        new_dtype = x.dtype
         x = x.data.unwrap_view()
     x.realize()
     if not ir.is_storage_and_layout(x):
         raise NotImplementedError(f"unrealized as_strided({x}, ...)")
     storage, old_layout = ir.as_storage_and_layout(x)
     new_layout = ir.FixedLayout(
-        old_layout.device,
-        old_layout.dtype,
+        new_device if new_device else old_layout.device,
+        new_dtype if new_dtype else old_layout.dtype,
         [sympy.expand(s) for s in size],
         [sympy.expand(s) for s in stride],
         sympy.expand(storage_offset or 0),
@@ -3226,6 +3236,7 @@ def _local_scalar_dense(data):
     buffer = ir.DynamicScalar(binding_sym, keypath, data)
     buffer.name = V.graph.register_buffer(buffer)
     V.graph.register_operation(buffer)
+    V.graph.register_dynamic_scalar_dtype(binding_sym, data.get_dtype())
     # NB: the replaced expr is OK to use directly downstream, we want
     # simplifications in this case!
     val = V.graph.current_node.meta["val"]
