@@ -55,8 +55,6 @@ def convert_graph_to_python_code(
         op_name = node.op_name
         output_spec = node.output_spec
 
-        # Skip generating useless Node comments
-
         # Generate output variable name
         output_var_name = f"var_{node_id}"
 
@@ -109,10 +107,15 @@ def convert_graph_to_python_code(
     # Build the complete code - all imports at the top
     code_lines = [
         "import torch",
-        "torch._dynamo.config.capture_scalar_outputs = True",
         "",
-        function_signature + ":",
     ]
+
+    # Add single seed at the top if seed is provided
+    if seed is not None:
+        code_lines.append(f"torch.manual_seed({seed})")
+        code_lines.append("")
+
+    code_lines.append(function_signature + ":")
 
     # Add the generated operation code
     code_lines.extend(generated_code_lines)
@@ -125,26 +128,16 @@ def convert_graph_to_python_code(
         ]
     )
 
-    # Generate argument creation code with deterministic seeds
+    # Generate argument creation code without individual seeds
     if arg_operations:
         for i, (node_id, spec) in enumerate(arg_operations):
             arg_name = f"arg_{i}"
-            # Use a deterministic seed based on the argument index and main seed
-            arg_seed = (seed + 10000 + i) if seed is not None else None
 
             if isinstance(spec, ScalarSpec):
                 dtype_str = f"torch.{spec.dtype}".replace("torch.torch.", "torch.")
-                if arg_seed is not None:
-                    code_lines.extend(
-                        [
-                            f"torch.manual_seed({arg_seed})",
-                            f"{arg_name} = torch.tensor(1.0, dtype={dtype_str}).item()",
-                        ]
-                    )
-                else:
-                    code_lines.append(
-                        f"{arg_name} = torch.tensor(1.0, dtype={dtype_str}).item()"
-                    )
+                code_lines.append(
+                    f"{arg_name} = torch.tensor(1.0, dtype={dtype_str}).item()"
+                )
             elif isinstance(spec, TensorSpec):
                 size_str = str(spec.size)
                 stride_str = str(spec.stride)
@@ -161,17 +154,9 @@ def convert_graph_to_python_code(
                 else:
                     storage_size = 1
 
-                if arg_seed is not None:
-                    code_lines.extend(
-                        [
-                            f"torch.manual_seed({arg_seed})",
-                            f"{arg_name} = torch.as_strided(torch.randn({storage_size}).to({dtype_str}), {size_str}, {stride_str})",
-                        ]
-                    )
-                else:
-                    code_lines.append(
-                        f"{arg_name} = torch.as_strided(torch.randn({storage_size}).to({dtype_str}), {size_str}, {stride_str})"
-                    )
+                code_lines.append(
+                    f"{arg_name} = torch.as_strided(torch.randn({storage_size}).to({dtype_str}), {size_str}, {stride_str})"
+                )
 
     # Generate the final execution with both normal and compiled versions
     if arg_operations:
