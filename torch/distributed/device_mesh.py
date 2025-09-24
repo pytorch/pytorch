@@ -47,13 +47,13 @@ if True:  # just to temporarily avoid reindentation
                 "DeviceMesh requires numpy >= 1.21 to be installed for type checking"
             )
 
+    BackendConfig = tuple[Optional[str], Optional[C10dBackend.Options]]
+
     class _MeshEnv(threading.local):
         def __init__(self) -> None:
             self.mesh_stack: list[DeviceMesh] = []
             self.child_to_root_mapping: dict[DeviceMesh, DeviceMesh] = {}
-            self.mesh_dim_group_options: dict[
-                int, tuple[Optional[str], Optional[C10dBackend.Options]]
-            ] = {}
+            self.mesh_dim_group_options: dict[int, BackendConfig] = {}
             self.root_to_flatten_mapping: dict[DeviceMesh, dict[str, DeviceMesh]] = {}
             # Record flatten mesh name to its flattened layout in root mesh.
             self.flatten_name_to_root_layout: dict[
@@ -87,21 +87,19 @@ if True:  # just to temporarily avoid reindentation
                         ]
                     )
             cur_rank = device_mesh.get_rank()
-            pg_ranks_by_dim = layout.to_remapping_tensor(
+            pg_ranks_by_dim = layout.remap_to_tensor(
                 device_mesh.mesh,
                 get_world_size(),
             )
-            for mesh_nd in pg_ranks_by_dim:
-                submesh = DeviceMesh(
-                    device_mesh.device_type,
-                    mesh_nd,
-                    mesh_dim_names=submesh_dim_names,
-                    _init_backend=False,
-                    _layout=layout,
-                )
-                if cur_rank in mesh_nd:
-                    res_submesh = submesh
-            res_submesh._dim_group_names = slice_dim_group_name  # type: ignore[possibly-undefined]
+            res_submesh = DeviceMesh._create_mesh_from_ranks(
+                device_mesh.device_type,
+                pg_ranks_by_dim,
+                cur_rank,
+                submesh_dim_names,
+                _init_backend=False,
+                _layout=layout,
+            )
+            res_submesh._dim_group_names = slice_dim_group_name
             self.child_to_root_mapping[res_submesh] = self.get_root_mesh(device_mesh)
             return res_submesh
 
@@ -109,10 +107,7 @@ if True:  # just to temporarily avoid reindentation
             self,
             device_mesh: "DeviceMesh",
             mesh_dim_name: Optional[str] = None,
-            backend_override: tuple[Optional[str], Optional[C10dBackend.Options]] = (
-                None,
-                None,
-            ),
+            backend_override: BackendConfig = (None, None),
         ) -> "DeviceMesh":
             root_mesh = _mesh_resources.get_root_mesh(device_mesh)
 
@@ -129,7 +124,7 @@ if True:  # just to temporarily avoid reindentation
             self.flatten_name_to_root_layout.setdefault(root_mesh, {})
             invalid_dim_names = not_none(root_mesh.mesh_dim_names)
             if mesh_dim_name in invalid_dim_names:
-                raise RuntimeError(
+                raise ValueError(
                     f"{mesh_dim_name} already exists for submesh of the {root_mesh}. ",
                     f"The mesh_dim_names of submesh and flattened mesh are {invalid_dim_names}. "
                     f"Please specify another valid mesh_dim_name.",
@@ -147,7 +142,7 @@ if True:  # just to temporarily avoid reindentation
                 ):
                     return self.root_to_flatten_mapping[root_mesh][mesh_dim_name]
                 else:
-                    raise RuntimeError(
+                    raise ValueError(
                         f"Flatten mesh with mesh_dim_name {mesh_dim_name} has been created before, "
                         f"Please specify another valid mesh_dim_name."
                     )
@@ -155,24 +150,26 @@ if True:  # just to temporarily avoid reindentation
             cur_rank = root_mesh.get_rank()
             # Due to the limitation of ProcessGroup api, we need to start from root mesh so that all ranks call the
             # new_group api to avoid potential hang.
-            pg_ranks_by_dim = flattened_mesh_layout.to_remapping_tensor(
+            pg_ranks_by_dim = flattened_mesh_layout.remap_to_tensor(
                 root_mesh.mesh,
                 get_world_size(),
             )
-            for mesh_nd in pg_ranks_by_dim:
-                # need to init backend here since the flattened pg doesn't exist in root mesh.
-                flattened_mesh = DeviceMesh(
-                    root_mesh.device_type,
-                    mesh_nd.flatten(),  # Flatten is needed for non-contiguous dim flatten.
-                    mesh_dim_names=(mesh_dim_name,),
-                    backend_override=(backend_override,),
-                    _layout=device_mesh._layout.coalesce(),
-                )
-                if cur_rank in mesh_nd:
-                    res_flattened_mesh = flattened_mesh
-            self.child_to_root_mapping[res_flattened_mesh] = root_mesh  # type: ignore[possibly-undefined]
+            # Flatten each mesh_nd tensor before passing to the helper method
+            # this is needed for flatten non-contiguous mesh dims.
+            flattened_pg_ranks_by_dim = torch.stack(
+                [mesh_nd.flatten() for mesh_nd in pg_ranks_by_dim]
+            )
+            res_flattened_mesh = DeviceMesh._create_mesh_from_ranks(
+                root_mesh.device_type,
+                flattened_pg_ranks_by_dim,
+                cur_rank,
+                (mesh_dim_name,),
+                (backend_override,),
+                _layout=device_mesh._layout.coalesce(),
+            )
+            self.child_to_root_mapping[res_flattened_mesh] = root_mesh
             self.root_to_flatten_mapping.setdefault(root_mesh, {})[mesh_dim_name] = (
-                res_flattened_mesh  # type: ignore[possibly-undefined]
+                res_flattened_mesh
             )
             self.flatten_name_to_root_layout[root_mesh][mesh_dim_name] = (
                 res_flattened_mesh._layout
@@ -227,47 +224,40 @@ if True:  # just to temporarily avoid reindentation
                     + original_strides[dim + 1 :]
                 ),
             )
-            pg_ranks_by_dim = unflattened_layout.to_remapping_tensor(
+            pg_ranks_by_dim = unflattened_layout.remap_to_tensor(
                 device_mesh.mesh,
                 get_world_size(),
             )
-            for mesh_nd in pg_ranks_by_dim:
-                submesh = DeviceMesh(
-                    device_mesh.device_type,
-                    mesh_nd,
-                    mesh_dim_names=tuple(
-                        orig_mesh_dim_names[:dim]
-                        + mesh_dim_names
-                        + orig_mesh_dim_names[dim + 1 :]
-                    ),
-                    _init_backend=False,
-                    _layout=unflattened_layout,
-                )
-                if cur_rank in mesh_nd:
-                    res_mesh = submesh
+            res_mesh = DeviceMesh._create_mesh_from_ranks(
+                device_mesh.device_type,
+                pg_ranks_by_dim,
+                cur_rank,
+                tuple(
+                    orig_mesh_dim_names[:dim]
+                    + mesh_dim_names
+                    + orig_mesh_dim_names[dim + 1 :]
+                ), # mesh_dim_names
+                _init_backend=False,
+                _layout=unflattened_layout,
+            )
 
             # If original mesh has initiated its backend, we need to initialize the backend
             # of unflatten dims as well.
             # TODO: To make backend init more efficient with cute layout representation and support
             # per dim backend init.
             if hasattr(device_mesh, "_dim_group_names"):
-                pg_ranks_by_dim = unflatten_layout.to_remapping_tensor(
+                unflatten_pg_ranks_by_dim = unflatten_layout.remap_to_tensor(
                     root_mesh.mesh,
                     get_world_size(),
                 )
-                for mesh_nd in pg_ranks_by_dim:
-                    submesh = DeviceMesh(
-                        device_mesh.device_type,
-                        mesh_nd,
-                        mesh_dim_names=mesh_dim_names,
-                        backend_override=backend_override,
-                        # _layout=unflatten_layout,
-                    )
-                    if cur_rank in mesh_nd:
-                        unflatten_submesh = submesh
-
+                unflatten_submesh = DeviceMesh._create_mesh_from_ranks(
+                    device_mesh.device_type,
+                    unflatten_pg_ranks_by_dim,
+                    cur_rank,
+                    mesh_dim_names,
+                )
                 dim_group_names = []
-                for idx in range(0, res_mesh.ndim):  # type: ignore[possibly-undefined]
+                for idx in range(0, res_mesh.ndim):
                     if idx < dim:
                         dim_group_names.append(device_mesh._dim_group_names[idx])
                     elif idx >= dim + unflatten_length:
@@ -276,11 +266,11 @@ if True:  # just to temporarily avoid reindentation
                         )
                     else:
                         dim_group_names.append(
-                            unflatten_submesh._dim_group_names[idx - dim]  # type: ignore[possibly-undefined]
+                            unflatten_submesh._dim_group_names[idx - dim]
                         )
                 res_mesh._dim_group_names = dim_group_names
 
-            self.child_to_root_mapping[res_mesh] = root_mesh  # type: ignore[possibly-undefined]
+            self.child_to_root_mapping[res_mesh] = root_mesh
             return res_mesh
 
         def get_root_mesh(self, device_mesh: "DeviceMesh") -> "DeviceMesh":
@@ -407,9 +397,9 @@ if True:  # just to temporarily avoid reindentation
             """
             mesh_dim = self.get_mesh_dim_by_name(device_mesh, mesh_dim_name)
             layout = device_mesh._layout[mesh_dim]
-            pg_ranks_by_dim = layout.to_remapping_tensor(
-                device_mesh.mesh, get_world_size()
-            )  # type: ignore[arg-type]
+            pg_ranks_by_dim = layout.remap_to_tensor(
+                device_mesh.mesh, not_none(get_world_size())
+            )
             cur_rank = device_mesh.get_rank()
             res_submeshes = []
             for mesh_1d in pg_ranks_by_dim:
@@ -499,9 +489,7 @@ if True:  # just to temporarily avoid reindentation
             mesh: Union[torch.Tensor, "ArrayLike"],
             *,
             mesh_dim_names: Optional[tuple[str, ...]] = None,
-            backend_override: Optional[
-                tuple[tuple[Optional[str], Optional[C10dBackend.Options]], ...]
-            ] = None,
+            backend_override: Optional[tuple[BackendConfig, ...]] = None,
             _init_backend: bool = True,
             _rank: Optional[int] = None,
             _layout: Optional[_MeshLayout] = None,
@@ -612,9 +600,7 @@ if True:  # just to temporarily avoid reindentation
 
         def _init_process_groups(
             self,
-            backend_override: tuple[
-                tuple[Optional[str], Optional[C10dBackend.Options]], ...
-            ],
+            backend_override: tuple[BackendConfig, ...],
         ):
             # group_name associated with each mesh dimension, each
             # mesh dimension should have one sub-group per rank
@@ -916,6 +902,56 @@ if True:  # just to temporarily avoid reindentation
             return [self.get_group(i) for i in range(self.mesh.ndim)]
 
         @staticmethod
+        def _create_mesh_from_ranks(
+            device_type: str,
+            pg_ranks_by_dim: torch.Tensor,
+            cur_rank: int,
+            mesh_dim_names: tuple[str, ...],
+            backend_override: Optional[tuple[BackendConfig, ...]] = None,
+            _init_backend: bool = True,
+            _layout: Optional[_MeshLayout] = None,
+        ) -> "DeviceMesh":
+            """
+            Helper method to create a DeviceMesh from tensor `pg_ranks_by_dim`. This is due to
+            the constraint of ProcessGroup API that all ranks have to call the PG creation API.
+            We will create a potentially very large number of DeviceMesh objects
+            (e.g., on 1024 GPUs with TP=2, this could be up to 512 DeviceMeshes), only to throw
+            them all away except when the mesh contains the current rank.
+
+            #TODO: Further refactor this method once we relax the ProcessGroup API constraint.
+
+            Args:
+                device_type: The device type of the mesh.
+                pg_ranks_by_dim: all ranks within the worlds organized by dimensions.
+                cur_rank: The current global rank in the mesh.
+                mesh_dim_names: Mesh dimension names.
+                backend_override: Optional backend override for the mesh.
+                _init_backend: Whether to initialize the backend of the mesh.
+                _layout: Optional layout for the mesh.
+
+            Returns:
+                The DeviceMesh containing the current rank.
+            """
+            res_mesh = None
+            for mesh_nd in pg_ranks_by_dim:
+                mesh = DeviceMesh(
+                    device_type,
+                    mesh_nd,
+                    mesh_dim_names=mesh_dim_names,
+                    backend_override=backend_override,
+                    _init_backend=_init_backend,
+                    _layout=_layout,
+                )
+                if cur_rank in mesh_nd:
+                    res_mesh = mesh
+            if res_mesh is None:
+                raise RuntimeError(
+                    f"Current rank {cur_rank} not found in any mesh, "
+                    f"input {pg_ranks_by_dim} does not contain all ranks in the world"
+                )
+            return res_mesh
+
+        @staticmethod
         def from_group(
             group: Union[ProcessGroup, list[ProcessGroup]],
             device_type: str,
@@ -1166,7 +1202,7 @@ if True:  # just to temporarily avoid reindentation
         ],
         ndim: int,
         mesh_dim_names: Optional[tuple[str, ...]] = None,
-    ) -> Iterator[tuple[Optional[str], Optional[C10dBackend.Options]]]:
+    ) -> Iterator[BackendConfig]:
         if mesh_dim_names is None:
             mesh_dim_names = ()
         for dim_idx, dim_name in zip_longest(range(ndim), mesh_dim_names):
