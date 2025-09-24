@@ -5491,10 +5491,6 @@ class ShapeEnv:
         def track_symint(
             source: Source, val: IntLikeType, constraint: DimConstraint = None
         ) -> None:
-            # We should not generate guards for unbacked inputs.
-            if isinstance(val, SymInt) and has_free_unbacked_symbols(val.node.expr):
-                return
-
             log.debug("track_symint %s %s %s", LazyString(source.name), val, constraint)
             assert not isinstance(val, SymInt) or is_symbolic(val)
 
@@ -5547,7 +5543,11 @@ class ShapeEnv:
                             hint=functools.partial(hint, s),
                         )
 
-                input_guards.append((source, s))
+                # We do not want to guard on unbacked symbols. All replacements and
+                # bounds should have originated from torch._checks, so runtime
+                # assertions should be there to covor those guards.
+                if not has_free_unbacked_symbols(s):
+                    input_guards.append((source, s))
             else:
                 s = sympy.Integer(val)
                 input_guards.append((source, s))
@@ -5678,6 +5678,7 @@ class ShapeEnv:
         #    if we have an input (2, 3), we must show s0*2 == 2 and s1 == 3.
         #    This does a lot of work: it covers duck sizing and equality guards.
         all_exprs: list[list[str]] = [[] for _ in langs]
+
         self.dim_constraints = DimConstraints(
             symbol_to_source,
             self.var_to_val,
@@ -5854,6 +5855,7 @@ class ShapeEnv:
                 is not None
             ):
                 continue
+
             issue_guard(guard)
 
         # Because there are guards that export's constraint solver can suggest good fixes for, that we may have
@@ -5865,11 +5867,18 @@ class ShapeEnv:
             if self._maybe_evaluate_static(ra.expr, axioms=()) is not None:
                 continue
             expr = self.simplify(ra.expr)
+
             self.dim_constraints.add(expr)
 
         # 3. Every symbol must be within its value range (this handles 0/1
         # specialization too).
         for symbol, sources in symbol_to_source.items():
+            # We do not want to guard on unbacked symbols. All replacements and
+            # bounds should have originated from torch._checks, so runtime
+            # assertions should be there to covor those guards.
+            if self.is_unbacked_symint(symbol):
+                continue
+
             r = self.var_to_range.get(symbol)
             if r is None:
                 continue
