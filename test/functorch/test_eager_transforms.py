@@ -71,7 +71,6 @@ from torch.testing._internal.common_utils import (
     markDynamoStrictTest,
     parametrize,
     run_tests,
-    skipIfRocm,
     skipIfTorchDynamo,
     subtest,
     TEST_CUDA_MEM_LEAK_CHECK,
@@ -5163,7 +5162,6 @@ def traceable(f):
 
 @markDynamoStrictTest
 class TestCompileTransforms(TestCase):
-    @skipIfRocm(msg="test leaks memory on ROCm")
     # torch.compile is not supported on Windows CUDA.
     # Triton only supports GPU with SM70 or later.
     @expectedFailureIf((IS_WINDOWS and TEST_CUDA) or (TEST_CUDA and not SM70OrLater))

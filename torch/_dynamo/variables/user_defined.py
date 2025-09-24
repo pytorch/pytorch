@@ -716,7 +716,12 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
                 assert all(x is not None for x in items)
 
-            return variables.NamedTupleVariable(items, self.value)
+            # Modify mutability of namedtuple for sourcelesss instantiations.
+            from .base import AttributeMutationNew
+
+            return variables.NamedTupleVariable(
+                items, self.value, mutation_type=AttributeMutationNew()
+            )
         elif self.value is torch.Size:
             # This simulates `THPSize_pynew`, the C impl for `Size.__new__`.
             tup = variables.BuiltinVariable(tuple).call_function(tx, args, kwargs)
