@@ -259,7 +259,7 @@ import platform
 
 
 # Also update `project.requires-python` in pyproject.toml when changing this
-python_min_version = (3, 9, 0)
+python_min_version = (3, 10, 0)
 python_min_version_str = ".".join(map(str, python_min_version))
 if sys.version_info < python_min_version:
     print(
@@ -1033,7 +1033,7 @@ def build_deps() -> None:
         CWD / "third_party/valgrind-headers/callgrind.h",
         CWD / "third_party/valgrind-headers/valgrind.h",
     ]
-    for sym_file, orig_file in zip(sym_files, orig_files):
+    for sym_file, orig_file in zip(sym_files, orig_files, strict=True):
         same = False
         if sym_file.exists():
             if filecmp.cmp(sym_file, orig_file):
