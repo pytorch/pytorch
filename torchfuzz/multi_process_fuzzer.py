@@ -36,6 +36,9 @@ IGNORE_PATTERNS: List[re.Pattern] = [
     re.compile(r"Dynamo failed to run FX node with fake tensors: call_method fill_diagonal_"),
     re.compile(r"zuf\d+ is not defined"),
     re.compile(r"‘zuf\d+’ was not declared in this scope"),
+    re.compile(r"out_eager_sum: 0\.0"),
+    re.compile(r"error: operand #\d+ does not dominate this use"),
+    re.compile(r"TypeError: unsupported operand type\(s\) for divmod\(\): 'SymInt' and 'int'"),
     # Add more patterns here as needed, e.g.:
     # re.compile(r"Some other error message"),
 ]
@@ -109,7 +112,8 @@ def run_fuzzer_with_seed(seed: int) -> Tuple[int, bool, str, float, int]:
 
 def run_multi_process_fuzzer(
     num_processes: int = 2,
-    seed_range: Tuple[int, int] = (1, 10),
+    seed_start: int = 1,
+    seed_count: int = 10,
     verbose: bool = False
 ) -> None:
     """
@@ -117,14 +121,14 @@ def run_multi_process_fuzzer(
 
     Args:
         num_processes: Number of worker processes to use
-        seed_range: Tuple of (start_seed, end_seed) inclusive
+        seed_start: Starting seed value (inclusive)
+        seed_count: Number of seeds to run
         verbose: Whether to print detailed output
     """
-    start_seed, end_seed = seed_range
-    seeds = list(range(start_seed, end_seed + 1))
+    seeds = list(range(seed_start, seed_start + seed_count))
 
     persist_print(f"🚀 Starting multi-process fuzzer with {num_processes} processes")
-    persist_print(f"📊 Processing seeds {start_seed} to {end_seed} ({len(seeds)} total)")
+    persist_print(f"📊 Processing seeds {seed_start} to {seed_start + seed_count - 1} ({len(seeds)} total)")
     persist_print(f"🔧 Command template: python fuzzer.py --seed {{seed}}")
     persist_print("=" * 60)
 
@@ -326,9 +330,7 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
 
-    # Auto-detect optimal number of processes
     cpu_count = mp.cpu_count()
-    # Use 75% of available CPUs, minimum 1, maximum 16 (for reasonable resource usage)
     default_processes = max(1, min(16, int(cpu_count * 0.75)))
 
     parser.add_argument(
@@ -346,10 +348,10 @@ def main():
     )
 
     parser.add_argument(
-        "--end",
+        "--count",
         type=int,
         default=10,
-        help="Ending seed value (inclusive, default: 10)"
+        help="Number of seeds to run (default: 10)"
     )
 
     parser.add_argument(
@@ -365,33 +367,27 @@ def main():
         persist_print("❌ Error: Number of processes must be at least 1")
         sys.exit(1)
 
-    if args.start > args.end:
-        persist_print("❌ Error: Start seed must be <= end seed")
+    if args.count < 1:
+        persist_print("❌ Error: Count must be at least 1")
         sys.exit(1)
 
-    # Check if fuzzer.py exists
     import os
     if not os.path.exists("fuzzer.py"):
         persist_print("❌ Error: fuzzer.py not found in current directory")
-        persist_print("Make sure you're running this script from the correct directory")
         sys.exit(1)
 
     try:
         run_multi_process_fuzzer(
             num_processes=args.processes,
-            seed_range=(args.start, args.end),
+            seed_start=args.start,
+            seed_count=args.count,
             verbose=args.verbose
         )
-    except KeyboardInterrupt as e:
-        persist_print("\n🛑 Interrupted by user (Ctrl+C)")
-        # No need to print summary here, as it's handled in run_multi_process_fuzzer
-        sys.exit(130)
     except Exception as e:
         persist_print(f"❌ Unexpected error: {str(e)}")
         import traceback
         traceback.print_exc()
         sys.exit(1)
-
 
 if __name__ == "__main__":
     main()
