@@ -10,12 +10,15 @@ from torch._inductor.codegen.cuda.cutlass_utils import (
     torch_dtype_to_cutlass_type,
     try_import_cutlass,
 )
-from torch._inductor.graph import GraphLowering
 from torch._inductor.ir import ComputedBuffer, FixedLayout, PermuteView, Pointwise
 from torch._inductor.scheduler import BaseSchedulerNode
 from torch._inductor.utils import OrderedSet
 from torch.testing._internal.common_cuda import SM90OrLater
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA_AND_TRITON
+from torch.testing._internal.inductor_utils import (
+    HAS_CPU,
+    HAS_CUDA_AND_TRITON,
+    MockGraphHandler,
+)
 
 
 if try_import_cutlass():
@@ -33,7 +36,7 @@ if try_import_cutlass():
     if config.is_fbcode():
         import python_cutlass  # type: ignore[import-untyped, import-not-found]  # noqa: F401
     else:
-        import cutlass as python_cutlass  # type: ignore[import-untyped, import-not-found]  # noqa: F401
+        import cutlass_cppgen as python_cutlass  # type: ignore[import-untyped, import-not-found]  # noqa: F401
     CutlassTensor = python_cutlass.backend.evt.ir.tensor.Tensor
 
     BIAS_CODE = """def example_epilogue(accum, C, aux, bias):
@@ -103,17 +106,6 @@ class MockComputedBuffer(ComputedBuffer):
     def num_reads(self):
         # Needed to not inline in ComputedBuffer
         return 1
-
-
-class MockGraphHandler(GraphLowering):
-    def __init__(self, name_to_buffer):
-        import torch._inductor.sizevars
-
-        self.sizevars = torch._inductor.sizevars.SizeVarAllocator()
-        self.name_to_buffer = name_to_buffer
-        self.graph_inputs = dict()
-        self.mutated_buffers = OrderedSet()
-        self.constants = dict()
 
 
 class TestCutlassEVT(TestCase):

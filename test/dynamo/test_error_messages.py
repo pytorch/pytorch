@@ -47,28 +47,7 @@ class GenericCtxMgr:
         pass
 
 
-class GraphBreakMessagesTest(LoggingTestCase):
-    def test_dynamic_shape_operator(self):
-        def fn():
-            return torch.nonzero(torch.rand([10, 10]))
-
-        self.assertExpectedInlineMunged(
-            Unsupported,
-            lambda: torch.compile(fn, backend="eager", fullgraph=True)(),
-            """\
-Dynamic shape operator
-  Explanation: Operator `aten.nonzero.default`'s output shape depends on input Tensor data.
-  Hint: Enable tracing of dynamic shape operators with `torch._dynamo.config.capture_dynamic_output_shape_ops = True`
-
-  Developer debug context: aten.nonzero.default
-
- For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0036.html
-
-from user code:
-   File "test_error_messages.py", line N, in fn
-    return torch.nonzero(torch.rand([10, 10]))""",
-        )
-
+class ErrorMessagesTest(LoggingTestCase):
     def test_dynamic_shape_operator_no_meta_kernel(self):
         def fn():
             return torch.linalg.lstsq(torch.rand(10, 10), torch.rand(10, 10))
@@ -90,29 +69,6 @@ from user code:
    File "test_error_messages.py", line N, in fn
     return torch.linalg.lstsq(torch.rand(10, 10), torch.rand(10, 10))""",
             )
-
-    def test_data_dependent_operator(self):
-        def fn(x):
-            return x.item()
-
-        self.assertExpectedInlineMunged(
-            Unsupported,
-            lambda: torch.compile(fn, backend="eager", fullgraph=True)(
-                torch.Tensor([1])
-            ),
-            """\
-Unsupported Tensor.item() call with capture_scalar_outputs=False
-  Explanation: Dynamo does not support tracing `Tensor.item()` with config.capture_scalar_outputs=False.
-  Hint: Set `torch._dynamo.config.capture_scalar_outputs = True` or `export TORCHDYNAMO_CAPTURE_SCALAR_OUTPUTS=1` to include these operations in the captured graph.
-
-  Developer debug context: call_method TensorVariable() item () {}
-
- For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0124.html
-
-from user code:
-   File "test_error_messages.py", line N, in fn
-    return x.item()""",
-        )
 
     def test_data_dependent_operator2(self):
         def fn(x):
@@ -726,14 +682,14 @@ Call to `torch._dynamo.graph_break()`
             Unsupported,
             lambda: torch.compile(fn, backend="eager", fullgraph=True)(),
             """\
-LOAD_BUILD_CLASS bytecode not supported
-  Explanation: Dynamo does not support tracing classes that are defined in the compiled region.
-  Hint: Move the class definition out of the compiled region.
-  Hint: It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues.
+Attempted to call function marked as skipped
+  Explanation: Dynamo does not know how to trace the builtin `builtins.__build_class__.` This function is either a Python builtin (e.g. _warnings.warn) or a third-party C/C++ Python extension (perhaps created with pybind).
+  Hint: If it is a Python builtin, please file an issue on GitHub so the PyTorch team can add support for it and see the next case for a workaround.
+  Hint: If it is a third-party C/C++ Python extension, please either wrap it into a PyTorch-understood custom operator (see https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html for more details) or, if it is traceable, use `torch.compiler.allow_in_graph`.
 
-  Developer debug context:
+  Developer debug context: module: builtins, qualname: __build_class__, skip reason: <missing reason>
 
- For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0075.html
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0007.html
 
 from user code:
    File "test_error_messages.py", line N, in fn
@@ -790,12 +746,12 @@ from user code:
             lambda: torch.compile(fn, backend="eager", fullgraph=True)(),
             """\
 Reconstruction failure
-  Explanation: Dynamo has no bytecode reconstruction implemented for sourceless variable UserMethodVariable(<function GraphBreakMessagesTest.test_reconstruction_failure.<locals>.Foo.meth at 0xmem_addr>, UserDefinedObjectVariable(Foo)).
+  Explanation: Dynamo has no bytecode reconstruction implemented for sourceless variable UserMethodVariable(<function ErrorMessagesTest.test_reconstruction_failure.<locals>.Foo.meth at 0xmem_addr>, UserDefinedObjectVariable(Foo)).
   Hint: If Dynamo is attempting to trace a return statement and your code is attempting to return a variable that Dynamo cannot reconstruct, then remove it from the return statement.
   Hint: This graph break may have been caused by an earlier graph break. Resolving the earlier graph break may resolve this one.
   Hint: Report an issue to PyTorch if you need reconstrtuction support. Note that objects that don't have reconstruction rules may be fundamentally unreconstructable.
 
-  Developer debug context: UserMethodVariable(<function GraphBreakMessagesTest.test_reconstruction_failure.<locals>.Foo.meth at 0xmem_addr>, UserDefinedObjectVariable(Foo))
+  Developer debug context: UserMethodVariable(<function ErrorMessagesTest.test_reconstruction_failure.<locals>.Foo.meth at 0xmem_addr>, UserDefinedObjectVariable(Foo))
 
  For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0092.html
 
@@ -846,12 +802,12 @@ User code traceback:
             post_munge(munge_exc(records[1].exc_info[1], suppress_suffix=True, skip=0)),
             """\
 Reconstruction failure
-  Explanation: Dynamo has no bytecode reconstruction implemented for sourceless variable UserMethodVariable(<function GraphBreakMessagesTest.test_reconstruction_failure_gb.<locals>.Foo.meth at 0xmem_addr>, UserDefinedObjectVariable(Foo)).
+  Explanation: Dynamo has no bytecode reconstruction implemented for sourceless variable UserMethodVariable(<function ErrorMessagesTest.test_reconstruction_failure_gb.<locals>.Foo.meth at 0xmem_addr>, UserDefinedObjectVariable(Foo)).
   Hint: If Dynamo is attempting to trace a return statement and your code is attempting to return a variable that Dynamo cannot reconstruct, then remove it from the return statement.
   Hint: This graph break may have been caused by an earlier graph break. Resolving the earlier graph break may resolve this one.
   Hint: Report an issue to PyTorch if you need reconstrtuction support. Note that objects that don't have reconstruction rules may be fundamentally unreconstructable.
 
-  Developer debug context: UserMethodVariable(<function GraphBreakMessagesTest.test_reconstruction_failure_gb.<locals>.Foo.meth at 0xmem_addr>, UserDefinedObjectVariable(Foo))
+  Developer debug context: UserMethodVariable(<function ErrorMessagesTest.test_reconstruction_failure_gb.<locals>.Foo.meth at 0xmem_addr>, UserDefinedObjectVariable(Foo))
 
  For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0092.html
 
@@ -1305,10 +1261,10 @@ call to a lru_cache wrapped function at: test_error_messages.py:N
             lambda: outer(f, torch.randn(3)),
             """\
 Skip calling `torch.compiler.disable()`d function
-  Explanation: Skip calling function `<function GraphBreakMessagesTest.test_disable_message.<locals>.f at 0xmem_addr>` since it was wrapped with `torch.compiler.disable` (reason: None)
+  Explanation: Skip calling function `<function ErrorMessagesTest.test_disable_message.<locals>.f at 0xmem_addr>` since it was wrapped with `torch.compiler.disable` (reason: None)
   Hint: Remove the `torch.compiler.disable` call
 
-  Developer debug context: <function GraphBreakMessagesTest.test_disable_message.<locals>.f at 0xmem_addr>
+  Developer debug context: <function ErrorMessagesTest.test_disable_message.<locals>.f at 0xmem_addr>
 
  For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0098.html
 
@@ -1327,10 +1283,10 @@ from user code:
             lambda: outer(g, torch.randn(3)),
             """\
 Skip calling `torch.compiler.disable()`d function
-  Explanation: Skip calling function `<function GraphBreakMessagesTest.test_disable_message.<locals>.g at 0xmem_addr>` since it was wrapped with `torch.compiler.disable` (reason: test message)
+  Explanation: Skip calling function `<function ErrorMessagesTest.test_disable_message.<locals>.g at 0xmem_addr>` since it was wrapped with `torch.compiler.disable` (reason: test message)
   Hint: Remove the `torch.compiler.disable` call
 
-  Developer debug context: <function GraphBreakMessagesTest.test_disable_message.<locals>.g at 0xmem_addr>
+  Developer debug context: <function ErrorMessagesTest.test_disable_message.<locals>.g at 0xmem_addr>
 
  For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0098.html
 

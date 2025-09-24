@@ -862,7 +862,7 @@ def _record_memory_history_legacy(
 
 
 def _record_memory_history(
-    enabled: Literal[None, "state", "all"] = "all", *args, **kwargs
+    enabled: Optional[Literal["state", "all"]] = "all", *args, **kwargs
 ) -> None:
     """Enable recording of stack traces associated with memory
     allocations, so you can tell what allocated any piece of memory in
@@ -1075,8 +1075,8 @@ def _save_memory_usage(filename="output.svg", snapshot=None):
         f.write(_memory(snapshot))
 
 
-# Keep for BC only
-_set_allocator_settings = torch._C._accelerator_setAllocatorSettings
+def _set_allocator_settings(env: str):
+    return torch._C._cuda_cudaCachingAllocator_set_allocator_settings(env)
 
 
 def get_allocator_backend() -> str:
