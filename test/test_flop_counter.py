@@ -682,7 +682,6 @@ class TestFlopCounter(TestCase):
             ),
         )
 
-    @skipIfRocm  # Nested tensor
     @unittest.skipIf(not HAS_CUDA, "CUDA not available")
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION,
