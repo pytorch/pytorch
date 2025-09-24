@@ -1708,7 +1708,7 @@ class TestSDPAFailureModes(NNTestCase):
         make_tensor = partial(torch.rand, size, device=device, dtype=dtype)
         q, k, v = make_tensor(), make_tensor(), make_tensor()
         with sdpa_kernel(backends=[SDPBackend.EFFICIENT_ATTENTION]):
-            ctxmgr = self.assertRaises(RuntimeError) if not TEST_WITH_ROCM else contextlib.nullcontext()
+            ctxmgr = self.assertRaises(RuntimeError)
             with ctxmgr:
                 torch.nn.functional.scaled_dot_product_attention(q, k, v, None, 0.0, False)
 
