@@ -189,31 +189,21 @@ def redistribute_local_tensor(
     else:
         transform_infos = _gen_transform_infos(current_spec, target_spec)
 
-    debug_mode = get_active_debug_mode()
-    redistribute_context = (
-        debug_mode.record_redistribute_calls(  # type: ignore[union-attr]
-            local_tensor, current_spec, target_spec
-        )
-        if debug_mode is not None
-        else contextlib.nullcontext()
-    )
-
-    with redistribute_context:
-        for transform_info in transform_infos:
-            i = transform_info.mesh_dim
-            current, target = transform_info.src_dst_placements
-            num_shards = device_mesh.size(mesh_dim=i)
+    for transform_info in transform_infos:
+        i = transform_info.mesh_dim
+        current, target = transform_info.src_dst_placements
+        num_shards = device_mesh.size(mesh_dim=i)
 
             if current == target:
                 # short cut, just use the original local tensor
                 new_local_tensor = local_tensor
                 continue
 
-            if num_shards == 1:
-                # short cut, if there's only one shard, we don't need to do any collective
-                # comm, just use the original local tensor
-                new_local_tensor = local_tensor
-                continue
+        if num_shards == 1:
+            # short cut, if there's only one shard, we don't need to do any collective
+            # comm, just use the original local tensor
+            new_local_tensor = local_tensor
+            continue
 
             logger.debug(
                 "redistribute from %s to %s on mesh dim %s", current, target, i

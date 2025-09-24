@@ -601,7 +601,8 @@ class RedistributeTest(DTensorTestBase):
         self.assertEqual(new_tensor.stride(), new_meta_tensor.stride())
 
     @with_comms
-    def test_one_shard_mesh(self):
+    def test_one_chunk_mesh(self):
+        # mesh size is 1 on second dim
         mesh = init_device_mesh(self.device_type, (4, 1))
 
         srcs = [Shard(1), Replicate(), Partial()]
@@ -613,6 +614,8 @@ class RedistributeTest(DTensorTestBase):
 
             with DebugMode() as debug_mode:
                 out = dt.redistribute(mesh, [Shard(0), dst])
+            
+            print(debug_mode.debug_string())
 
             self.assertTrue("redistribute_input" not in debug_mode.debug_string())
             self.assertEqual(out.placements, [Shard(0), dst])
