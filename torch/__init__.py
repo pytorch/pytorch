@@ -283,10 +283,20 @@ if sys.platform == "win32":
 
 
 def _get_cuda_dep_paths(path: str, lib_folder: str, lib_name: str) -> list[str]:
-    # Libraries can either be in path/nvidia/lib_folder/lib or path/lib_folder/lib
+    # Libraries can either be in
+    # path/nvidia/lib_folder/lib or
+    # path/nvidia/cuXX/lib (since CUDA 13.0) or
+    # path/lib_folder/lib
+    from torch.version import cuda as cuda_version
+
     nvidia_lib_paths = glob.glob(
         os.path.join(path, "nvidia", lib_folder, "lib", lib_name)
     )
+    if cuda_version is not None:
+        maj_cuda_version = cuda_version.split(".")[0]
+        nvidia_lib_paths += glob.glob(
+            os.path.join(path, "nvidia", f"cu{maj_cuda_version}", "lib", lib_name)
+        )
     lib_paths = glob.glob(os.path.join(path, lib_folder, "lib", lib_name))
 
     return nvidia_lib_paths + lib_paths
@@ -330,12 +340,13 @@ def _load_global_deps() -> None:
         try:
             with open("/proc/self/maps") as f:
                 _maps = f.read()
-            # libtorch_global_deps.so always depends in cudart, check if its installed via wheel
-            if "nvidia/cuda_runtime/lib/libcudart.so" not in _maps:
+
+            # libtorch_global_deps.so always depends in cudart, check if its installed and loaded
+            if "libcudart.so" not in _maps:
                 return
             # If all above-mentioned conditions are met, preload nvrtc and nvjitlink
-            # Please note that order are important for CUDA-11.8 , as nvjitlink does not exist there
             _preload_cuda_deps("cuda_nvrtc", "libnvrtc.so.*[0-9]")
+            _preload_cuda_deps("cuda_nvrtc", "libnvrtc-builtins.so.*[0-9]")
             _preload_cuda_deps("nvjitlink", "libnvJitLink.so.*[0-9]")
         except Exception:
             pass
