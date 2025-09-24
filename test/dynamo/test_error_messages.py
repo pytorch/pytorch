@@ -1077,6 +1077,25 @@ User code traceback:
 
     @torch._dynamo.config.patch(verbose=True)
     @make_logging_test(graph_breaks=True)
+    def test_variable_tracker_bytecode_to_graph_break(self, records):
+        @torch.compile(backend="eager")
+        def fn(x):
+            y = x + 1
+            z = x + y
+            torch._dynamo.graph_break()
+            return z
+
+        fn(torch.ones(3))
+        self.assertIn("Graph break in user code at", records[-1].getMessage())
+        self.assertIn("please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0025.html\n", records[-1].getMessage())
+        self.assertIn("Most recent 50 bytecode instructions traced:", records[-1].getMessage())
+        self.assertIn("RESUME 0 []", records[-1].getMessage())
+        self.assertIn("LOAD_FAST x []", records[-1].getMessage())
+        self.assertIn("CALL 0 [LazyVariableTracker(), NullVariable]", records[-1].getMessage())
+
+
+    @torch._dynamo.config.patch(verbose=True)
+    @make_logging_test(graph_breaks=True)
     def test_graph_break_traceback_above_dynamo_shows_user_code(self, records):
         @torch.compile(backend="eager")
         # NOTE: comments in this test are used to differentiate lines!
