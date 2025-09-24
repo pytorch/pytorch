@@ -345,7 +345,7 @@ static Tensor mps_convolution_backward_input(IntArrayRef input_size,
   auto grad_input_t =
       at::empty(input_size, grad_output_t.options(), is_channels_last ? std::optional(kChannelsLast) : std::nullopt);
   auto grad_input_c = needs_copy
-      ? at::empty_like(grad_output_t, grad_output_t.options().memory_format(MemoryFormat::Contiguous))
+      ? at::empty_like(grad_input_t, grad_input_t.options().memory_format(MemoryFormat::Contiguous))
       : Tensor();
 
   // Avoid "grad_input" when this is being used as transposed convolution
