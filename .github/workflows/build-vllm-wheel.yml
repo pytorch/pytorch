@@ -178,12 +178,12 @@ jobs:
       contents: read
     container:
       image: continuumio/miniconda3:4.12.0
-    environment: ${{ (github.event_name == 'push' && github.event.ref == 'refs/heads/main') && 'nightly-wheel-upload' || '' }}
+    environment: ${{ ((github.event_name == 'push' && github.event.ref == 'refs/heads/main') || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && 'nightly-wheel-upload' || '' }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Configure AWS credentials(PyTorch account) for main
-        if: ${{ github.event_name == 'push' && github.event.ref == 'refs/heads/main' }}
+        if: ${{ (github.event_name == 'push' && github.event.ref == 'refs/heads/main') || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
         uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
         with:
           role-to-assume: arn:aws:iam::749337293305:role/gha_workflow_nightly_build_wheels

@@ -400,6 +400,7 @@ AOT_DISPATCH_TESTS = [
 ]
 FUNCTORCH_TESTS = [test for test in TESTS if test.startswith("functorch")]
 ONNX_TESTS = [test for test in TESTS if test.startswith("onnx")]
+QUANTIZATION_TESTS = [test for test in TESTS if test.startswith("test_quantization")]
 
 
 def _is_cpp_test(test):
@@ -1192,12 +1193,14 @@ def handle_log_file(
 
 
 def get_pytest_args(options, is_cpp_test=False, is_distributed_test=False):
-    if RERUN_DISABLED_TESTS:
-        # Distributed tests are too slow, so running them x50 will cause the jobs to timeout after
+    if is_distributed_test:
+        # Distributed tests do not support rerun, see https://github.com/pytorch/pytorch/issues/162978
+        rerun_options = ["-x", "--reruns=0"]
+    elif RERUN_DISABLED_TESTS:
+        # ASAN tests are too slow, so running them x50 will cause the jobs to timeout after
         # 3+ hours. So, let's opt for less number of reruns. We need at least 150 instances of the
-        # test every 2 weeks to satisfy the SQL query (15 x 14 = 210). The same logic applies
-        # to ASAN, which is also slow
-        count = 15 if is_distributed_test or TEST_WITH_ASAN else 50
+        # test every 2 weeks to satisfy the SQL query (15 x 14 = 210).
+        count = 15 if TEST_WITH_ASAN else 50
         # When under rerun-disabled-tests mode, run the same tests multiple times to determine their
         # flakiness status. Default to 50 re-runs
         rerun_options = ["--flake-finder", f"--flake-runs={count}"]
@@ -1469,6 +1472,11 @@ def parse_args():
         help="exclude inductor tests",
     )
     parser.add_argument(
+        "--exclude-quantization-tests",
+        action="store_true",
+        help="exclude quantization tests",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Only list the test that will run.",
@@ -1640,6 +1648,9 @@ def get_selected_tests(options) -> list[str]:
 
     if options.exclude_aot_dispatch_tests:
         options.exclude.extend(AOT_DISPATCH_TESTS)
+
+    if options.exclude_quantization_tests:
+        options.exclude.extend(QUANTIZATION_TESTS)
 
     # these tests failing in CUDA 11.6 temporary disabling. issue https://github.com/pytorch/pytorch/issues/75375
     if torch.version.cuda is not None:

@@ -391,6 +391,19 @@ class EnterSubgraphLine(WrapperLine):
 
 
 @dataclasses.dataclass
+class ConditionalLine(WrapperLine):
+    wrapper: PythonWrapperCodegen
+    node: ir.Conditional
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        raise NotImplementedError("Only supports FX codegen")
+
+    @staticmethod
+    def codegen_fx(converter: FxConverter) -> FxConversionFunc:
+        return converter._generate_conditional
+
+
+@dataclasses.dataclass
 class CommentLine(WrapperLine):
     line: LineContext
 
@@ -909,6 +922,29 @@ class MultiOutputLine(WrapperLine):
 
 
 @dataclasses.dataclass
+class IndexPutFallbackLine(WrapperLine):
+    wrapper: PythonWrapperCodegen
+    node: ir.IndexPutFallback
+    indices: list[Optional[ir.IRNode]]
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        node = self.node
+        assert ir.is_node_sequence(node.inputs)
+        (x, values) = (t.codegen_reference() for t in node.inputs[:2])
+        indices = [
+            idx.codegen_reference() if idx else self.wrapper.none_str
+            for idx in self.indices
+        ]
+
+        self.wrapper._generate_index_put_fallback(
+            node.get_kernel_name(), x, indices, values, *node.codegen_const_args()
+        )
+
+    def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
+        return converter._generate_index_put_fallback
+
+
+@dataclasses.dataclass
 class ScatterFallbackLine(WrapperLine):
     wrapper: PythonWrapperCodegen
     node: ir.ScatterFallback
@@ -1179,14 +1215,15 @@ class PythonWrapperCodegen(CodeGen):
             )
 
     def write_get_raw_stream_header(self) -> None:
+        import_get_raw_stream_str = V.graph.device_ops.import_get_raw_stream_as(
+            "get_raw_stream"
+        )
         if config.triton.autotune_at_compile_time:
-            self.kernel_autotune_calls.writeline(
-                V.graph.device_ops.import_get_raw_stream_as("get_raw_stream")
-            )
+            if not self.kernel_autotune_calls.contains(import_get_raw_stream_str):
+                self.kernel_autotune_calls.writeline(import_get_raw_stream_str)
         if not V.graph.cpp_wrapper:
-            self.imports.writeline(
-                V.graph.device_ops.import_get_raw_stream_as("get_raw_stream")
-            )
+            if not self.imports.contains(import_get_raw_stream_str):
+                self.imports.writeline(import_get_raw_stream_str)
 
     @cache_on_self
     def write_get_raw_stream_header_once(self) -> None:
@@ -1333,7 +1370,7 @@ class PythonWrapperCodegen(CodeGen):
     # that stream caching happens per graph instance. this
     # is important for nested subgraph codegening.
     def write_get_raw_stream(self, device_idx: int, graph_name: str) -> str:
-        self.write_get_raw_stream_header_once()
+        self.write_get_raw_stream_header()
         name = f"stream{device_idx}"
         if config.triton.autotune_at_compile_time:
             self.kernel_autotune_calls.writeline(
@@ -1560,7 +1597,22 @@ class PythonWrapperCodegen(CodeGen):
         line += ")"
         self.writeline(line)
 
-    def generate_index_put_fallback(self, kernel, x, indices, values, accumulate):
+    def generate_index_put_fallback(self, node: ir.IndexPutFallback) -> None:
+        # Collect index tensors into a list.
+        indices: list[Optional[ir.IRNode]] = []
+        valid_indices = node.inputs[2:]
+        iter_valid_indices = iter(valid_indices)
+        for i, _ in enumerate(node.indices):
+            if node.indices[i] is not None:
+                index = next(iter_valid_indices)
+                assert isinstance(index, ir.IRNode)
+                indices.append(index)
+            else:
+                indices.append(None)
+
+        self.writeline(IndexPutFallbackLine(self, node, indices))
+
+    def _generate_index_put_fallback(self, kernel, x, indices, values, accumulate):
         indices_str = f"[{', '.join(indices)}]"
         args = [x, indices_str, values, accumulate]
         self.writeline(self.wrap_kernel_call(kernel, args))
@@ -2103,6 +2155,10 @@ class PythonWrapperCodegen(CodeGen):
     def _format_kernel_definition(
         kernel_name: str, kernel_body: str, metadata: Optional[str] = None
     ):
+        if config.triton.autotune_at_compile_time and metadata:
+            # Generating autotune block
+            # Need to replace C++ comment starter with Python comment starter
+            metadata = re.sub(r"^// ", "# ", metadata, flags=re.MULTILINE)
         metadata_comment = f"{metadata}\n" if metadata else ""
         body = f"\n\n{metadata_comment}{kernel_name} = {kernel_body}"
         return body
@@ -2116,9 +2172,8 @@ class PythonWrapperCodegen(CodeGen):
         cpp_definition: Optional[str] = None,
     ):
         if config.triton.autotune_at_compile_time:
-            # Skip inserting comments for the autotune block as they may contain cpp style comments
             body = self._format_kernel_definition(
-                kernel_name, kernel_body, metadata=None
+                kernel_name, kernel_body, metadata=metadata
             )
             self.kernel_autotune_defs.splice(body)
             if V.graph.cpp_wrapper:
@@ -2130,8 +2185,8 @@ class PythonWrapperCodegen(CodeGen):
         )
         self.header.splice(body)
 
-    def define_subgraph_launcher_fn(self, fn_code: str):
-        self.subgraph_definitions.splice(fn_code)
+    def define_subgraph_launcher_fn(self, name: str, subgraph_code):
+        self.subgraph_definitions.splice(subgraph_code.value)
 
     def define_user_defined_triton_kernel(
         self,
@@ -3323,11 +3378,12 @@ class PythonWrapperCodegen(CodeGen):
 
     def codegen_subgraph_common(self, subgraph):
         self.push_codegened_graph(subgraph.graph)
-        self.writeline("")
-        self.writeline(f"{self.comment} subgraph: {subgraph.name}")
+        self.make_comment("")
+        self.make_comment(f"{self.comment} subgraph: {subgraph.name}")
 
         parent_graph = V.graph
         subgraph.graph.cpp_wrapper = parent_graph.cpp_wrapper
+        subgraph.graph.fx_wrapper = parent_graph.fx_wrapper
 
         if subgraph.graph.name not in self.already_codegened_subgraphs:
             # If it is already codegened, the parent wrapper already has
@@ -3337,8 +3393,9 @@ class PythonWrapperCodegen(CodeGen):
                 with config.patch("graph_partition", False):
                     # Call the codegen of subgraph recursively
                     subgraph_code, _ = subgraph.graph.codegen()
-            self.already_codegened_subgraphs.add(subgraph.graph.name)
-            self.define_subgraph_launcher_fn(subgraph_code.value)
+            subgraph_name = subgraph.graph.name
+            self.already_codegened_subgraphs.add(subgraph_name)
+            self.define_subgraph_launcher_fn(subgraph_name, subgraph_code)
 
     def codegen_subgraph_with_flattened_outputs(
         self, subgraph, outer_inputs, outer_flattened_outputs
@@ -3370,7 +3427,7 @@ class PythonWrapperCodegen(CodeGen):
         else:
             self.codegen_subgraph(invoke_subgraph.subgraph, outer_inputs, name)
 
-    def codegen_conditional(self, conditional):
+    def codegen_conditional(self, conditional) -> None:
         name = conditional.get_name()
 
         outer_inputs = [buf.codegen_reference() for buf in conditional.operands]
@@ -3605,7 +3662,7 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
 
     def get_graph_inputs(
         self,
-    ) -> dict[str, Union[ir.TensorBox, ir.TorchBindObject, sympy.Expr]]:
+    ) -> dict[str, Union[ir.TensorBox, ir.TorchBindObject, sympy.Expr, None]]:
         if signature := self.partition_signatures:
             inputs = signature.input_nodes | {
                 str(s): s for s in signature.symbol_inputs
