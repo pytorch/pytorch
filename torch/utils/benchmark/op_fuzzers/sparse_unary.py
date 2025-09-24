@@ -7,11 +7,6 @@ import torch
 
 if TYPE_CHECKING:
     from torch.types import _dtype
-    # For type checking, assume torch.float32 exists
-    _DEFAULT_DTYPE = torch.float32  # type: ignore[attr-defined]
-else:
-    # At runtime, use a fallback if torch.float32 is not available
-    _DEFAULT_DTYPE = getattr(torch, 'float32', None)
 
 from torch.utils.benchmark import Fuzzer, FuzzedParameter, ParameterAlias, FuzzedSparseTensor
 
@@ -27,7 +22,7 @@ _POW_TWO_SIZES = tuple(2 ** i for i in range(
 class UnaryOpSparseFuzzer(Fuzzer):
     def __init__(self, seed: Optional[int], dtype: _dtype | None = None, cuda: bool = False) -> None:
         if dtype is None:
-            dtype = _DEFAULT_DTYPE
+            dtype = getattr(torch, 'float32', None)
         super().__init__(
             parameters=[
                 # Sparse dim parameter of x. (e.g. 1D, 2D, or 3D.)
