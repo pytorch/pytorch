@@ -8031,9 +8031,6 @@ symbolic_aot_autograd_failures = {
     xfail(
         "nn.functional.fractional_max_pool3d", ""
     ),  # rand() received an invalid combination of arguments - g...
-    xfail(
-        "nn.functional.group_norm", ""
-    ),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail("trace", ""),  # Cannot call sizes() on tensor with symbolic sizes/strides
     decorate(
         "linalg.householder_product",
@@ -8200,8 +8197,6 @@ symbolic_aot_autograd_module_failures = {
     torch.nn.Transformer,  # DataDependentOutputException: aten.equal compares a mask input to a mask producing a bool
     torch.nn.TransformerEncoder,  # DataDependentOutputException: aten.equal compares a mask input to a mask producing a bool
     torch.nn.GaussianNLLLoss,  # NotImplementedError: local_scalar_dense/item NYI for torch.bool
-    torch.nn.GroupNorm,  # in native_group_norm_backward cpg, _rem = divmod(C, group)
-    # TypeError: unsupported operand type(s) for divmod(): 'SymInt' and 'int'
     torch.nn.FractionalMaxPool3d,  # int() argument must be a string, a bytes-like object or a number, not 'SymFloat'
     torch.nn.BCELoss,  # new_size = _infer_size(target.size(), weight.size())
     # RuntimeError: expected int at position 0, but got: SymInt
