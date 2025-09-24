@@ -258,8 +258,8 @@ def forward(self, arg0_1, arg1_1):
         fake_x = fake_mode.from_tensor(x)
         gm = aot_export_module(mod, (fake_tq1, fake_x), trace_joint=False)[0]
 
-        # inputs: token, tq, x
-        # return: token, x_sin, x_cos, tq
+        # inputs: token, rng, x
+        # return: token, res
         self.assertExpectedInline(
             gm.code.strip(),
             """\
@@ -299,7 +299,6 @@ def forward(self, arg0_1, arg1_1):
         )
         _deregister_effectful_op("_TestOpaqueObject::noisy_inject.default")
 
->>>>>>> e72354d710d ([opaque obj] Allow non-effectful scriptobjs)
 
 instantiate_parametrized_tests(TestOpaqueObject)
 
