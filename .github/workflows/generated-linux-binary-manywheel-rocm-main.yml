@@ -44,7 +44,7 @@ jobs:
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
-  manywheel-py3_9-rocm6_4-build:
+  manywheel-py3_10-rocm6_4-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     needs: get-label-type
@@ -58,16 +58,16 @@ jobs:
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.4
-      DESIRED_PYTHON: "3.9"
+      DESIRED_PYTHON: "3.10"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build_name: manywheel-py3_9-rocm6_4
+      build_name: manywheel-py3_10-rocm6_4
       build_environment: linux-binary-manywheel-rocm
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_9-rocm6_4-test:  # Testing
+  manywheel-py3_10-rocm6_4-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
-      - manywheel-py3_9-rocm6_4-build
+      - manywheel-py3_10-rocm6_4-build
       - get-label-type
     runs-on: linux.rocm.gpu.mi250
     timeout-minutes: 240
@@ -82,14 +82,14 @@ jobs:
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.4
-      DESIRED_PYTHON: "3.9"
+      DESIRED_PYTHON: "3.10"
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
-          name: manywheel-py3_9-rocm6_4
+          name: manywheel-py3_10-rocm6_4
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
         uses: actions/checkout@v4
