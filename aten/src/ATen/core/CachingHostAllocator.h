@@ -50,6 +50,42 @@ namespace {
   constexpr size_t MAX_SIZE_INDEX = 64;
 }
 
+// A large reserved pinned memory segment that is created in advance which is used
+// to allocate small pinned memory requests to avoid calling into expensive APIs.
+// We never free this memory and move up the pointer as we allocate new blocks 
+// and when blocks are freed, they are cached in the free lists. 
+struct PinnedReserveSegment {
+  PinnedReserveSegment(void *start, size_t size) : start_(start), size_(size), 
+    current_ptr_(start_), initialized_(true) {}
+
+  PinnedReserveSegment() : start_(nullptr), size_(0), current_ptr_(nullptr), initialized_(false) {}
+  
+  bool initialized() {
+    return initialized_;
+  }
+
+  void* allocate(size_t bytes) {
+    std::lock_guard<std::mutex> guard(mutex_);
+    
+    // Round up the requested size to 4KB boundary for all including the small ones.
+    size_t rounded_bytes = (bytes + 4096 - 1) & ~(4096 - 1);
+
+    if (((uint8_t*)current_ptr_ + rounded_bytes) > ((uint8_t*)start_ + size_)) {
+      return nullptr;
+    }
+
+    void* ptr = current_ptr_;
+    current_ptr_ = (uint8_t*)current_ptr_ + rounded_bytes;
+    return ptr;
+  }
+
+  std::mutex mutex_;
+  void* start_;
+  size_t size_;
+  void* current_ptr_;
+  bool initialized_;
+};
+
 // Struct containing memory allocator summary statistics for host.
 struct TORCH_API HostStats {
   // COUNT: allocations requested by client code. Note that active
@@ -223,8 +259,6 @@ struct CachingHostAllocatorImpl {
       return {block->ptr_, reinterpret_cast<void*>(block)};
     }
 
-    // Slow path: if we can't allocate from the cached free list, we need
-    // to create a new block.
     void* ptr = nullptr;
     allocate_host_memory(roundSize, &ptr);
 

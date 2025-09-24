@@ -9,7 +9,6 @@
 
 #include <cuda_runtime_api.h>
 #include <future>
-#include <unordered_map>
 
 namespace at::cuda {
 namespace {
@@ -72,9 +71,20 @@ using Block = HostBlock<CUDAStream>;
 struct CUDACachingHostAllocatorImpl
     : public CachingHostAllocatorImpl<CUDAStream, EventPool::Event> {
  private:
-  std::unordered_map<void*, bool> use_host_register;
+  ska::flat_hash_map<void*, bool> use_host_register;
 
   void allocate_host_memory(size_t size, void** ptr) override {
+    // try allocating from reserve segment first before calling into expensive APIs
+    if (get_reserve_segment().initialized()) {
+      *ptr = get_reserve_segment().allocate(size);
+      if (*ptr != nullptr) {
+        return;
+      }
+    }
+    allocate_host_memory_slowpath(size, ptr);
+  }
+
+  void allocate_host_memory_slowpath(size_t size, void** ptr) {
     // Pinned memory pointers allocated by any device can be directly used by
     // any other device, regardless of the current device at the time of
     // allocation, since we assume unified addressing. So we grab any existing
@@ -170,6 +180,20 @@ struct CUDACachingHostAllocatorImpl
     // Leak the event pool to avoid shutdown issue.
     static auto* event_pool = new EventPool();
     return event_pool->get(idx);
+  }
+
+  PinnedReserveSegment& get_reserve_segment() {
+    static auto reserve_segment = [&]() {
+      if (c10::cuda::CUDACachingAllocator::CUDAAllocatorConfig::pinned_reserve_segment_size_mb() > 0) {
+        void *ptr;
+        size_t sz = c10::cuda::CUDACachingAllocator::CUDAAllocatorConfig::pinned_reserve_segment_size_mb() * 1024 * 1024;
+        allocate_host_memory_slowpath(sz, &ptr);
+        return PinnedReserveSegment(ptr, sz);
+      } else {
+        return PinnedReserveSegment();
+      }
+    } ();
+    return reserve_segment;
   }
 
   TaskThreadPool* getThreadPool() {
