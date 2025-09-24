@@ -509,31 +509,27 @@ class FunctionalTensorMode(TorchDispatchMode):
                     # from the TLS in order to avoid infinite looping, but this would prevent us from coming
                     # back to PreDispatch later
                     if isinstance(func, TorchBindOpOverload):
-                        with (
-                            torch.utils._python_dispatch._pop_mode_temporarily() as mode
-                        ):
-                            ctx = PythonFunctionalizeAPI()
-                            fully_unwrapped_args = ctx.unwrap_tensors(args)
-                            fully_unwrapped_kwargs = ctx.unwrap_tensors(kwargs)
-                            outs_unwrapped = torch._library.utils.handle_dispatch_mode(
-                                mode,
-                                func,
-                                *fully_unwrapped_args,
-                                **fully_unwrapped_kwargs,
-                            )
+                        ctx = PythonFunctionalizeAPI()
+                        fully_unwrapped_args = ctx.unwrap_tensors(args)
+                        fully_unwrapped_kwargs = ctx.unwrap_tensors(kwargs)
+                        outs_unwrapped = func(
+                            *fully_unwrapped_args,
+                            **fully_unwrapped_kwargs,
+                        )
+                        outs_wrapped = ctx.wrap_tensors(outs_unwrapped)
                     else:
                         outs_unwrapped = func._op_dk(
                             torch._C.DispatchKey.Functionalize,
                             *args_unwrapped,
                             **kwargs_unwrapped,
                         )
+                        outs_wrapped = pytree.tree_map_only(
+                            torch.Tensor, wrap, outs_unwrapped
+                        )
 
                     if self.export:
                         if func == torch.ops.aten.dropout.default:
                             torch._freeze_functional_tensor(outs_unwrapped)  # type: ignore[attr-defined]
-                    outs_wrapped = pytree.tree_map_only(
-                        torch.Tensor, wrap, outs_unwrapped
-                    )
             finally:
                 torch._disable_functionalization()
                 torch._functionalize_enable_reapply_views(old_apply_views)  # type: ignore[attr-defined]
