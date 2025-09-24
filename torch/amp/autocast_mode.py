@@ -278,6 +278,20 @@ class autocast:
             else self.device.upper()
         )
         if enabled:
+            # Special case for CUDA AMP and bfloat16 support
+            if self.device == "cuda":
+                if torch.cuda.amp.common.amp_definitely_not_available():
+                    warnings.warn(
+                        "CUDA is not available or torch_xla is imported. AMP disabled."
+                    )
+                    enabled = False
+                elif (
+                    self.fast_dtype == torch.bfloat16
+                    and not torch.cuda.is_bf16_supported()
+                ):
+                    raise RuntimeError(
+                        "Current CUDA Device does not support bfloat16. Please switch dtype to float16."
+                    )
             if self.fast_dtype not in supported_dtypes:
                 error_message = (
                     f"In {device_name} autocast, but the target dtype is not supported. Disabling autocast.\n"
@@ -299,20 +313,6 @@ class autocast:
                 )
                 warnings.warn(error_message)
                 enabled = False
-            # Special case for CUDA AMP and bfloat16 support
-            elif self.device == "cuda":
-                if torch.cuda.amp.common.amp_definitely_not_available():
-                    warnings.warn(
-                        "CUDA is not available or torch_xla is imported. AMP disabled."
-                    )
-                    enabled = False
-                elif (
-                    self.fast_dtype == torch.bfloat16
-                    and not torch.cuda.is_bf16_supported()
-                ):
-                    raise RuntimeError(
-                        "Current CUDA Device does not support bfloat16. Please switch dtype to float16."
-                    )
         self._enabled = enabled
 
     def __enter__(self):
