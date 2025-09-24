@@ -210,10 +210,15 @@ class TracerBase:
 
         if self.record_stack_traces and not node.stack_trace:
             # Use the new filtering approach
-            raw_stack_trace = ''.join(CapturedTraceback.extract().format())
-            filtered_stack_trace = self._find_user_frame_2_4(raw_stack_trace)
-            if filtered_stack_trace.strip():
-                node.stack_trace = filtered_stack_trace.strip()
+            try:
+                raw_stack_trace = ''.join(CapturedTraceback.extract().format())
+                if raw_stack_trace:
+                    filtered_stack_trace = self._filter_user_frames(raw_stack_trace)
+                    if filtered_stack_trace.strip():
+                        node.stack_trace = filtered_stack_trace.strip()
+            except Exception:
+                # Fallback to original behavior if our method fails
+                pass
 
         log.debug("create_node %s", node)
         return node
@@ -330,11 +335,19 @@ class TracerBase:
 
         return frame
 
-    def _find_user_frame_2_4(self, stack_trace_str):
+    def _filter_user_frames(self, stack_trace_str: str) -> str:
         """
-        Find user frames by filtering out internal PyTorch frames.
-        This is a more robust version that works with PyTorch 2.4.
+        Filter out internal PyTorch frames from stack trace string.
+
+        Args:
+            stack_trace_str: Raw stack trace string
+
+        Returns:
+            Filtered stack trace string containing only user frames
         """
+        if not stack_trace_str:
+            return ""
+
         stack_lines = stack_trace_str.split('\n')
         user_lines = []
 
