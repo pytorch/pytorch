@@ -1713,9 +1713,9 @@ def main() -> None:
         "lib/libprotobuf.lib",
         "lib/libprotoc.lib",
     ]
-    exclude_package_data = [
+    exclude_package_data = {
         "torch": exclude_windows_libs,
-    ]
+    }
 
     if not BUILD_LIBTORCH_WHL:
         package_data["torchgen"] = torchgen_package_data
