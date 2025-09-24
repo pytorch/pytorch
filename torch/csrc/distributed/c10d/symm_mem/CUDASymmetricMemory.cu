@@ -727,11 +727,11 @@ c10::intrusive_ptr<CUDASymmetricMemory> make_symm_mem(
   std::vector<c10::intrusive_ptr<AllocationRef>> alloc_refs;
   for (int r = 0; r < world_size; ++r) {
     if (r == rank) {
-      alloc_refs.emplace_back(block->alloc_ref);
       if (mc_addr != nullptr) {
         alloc_refs.push_back(c10::make_intrusive<AllocationRef>(
             mc_addr, mc_handle, block->block_size, block->device_idx, true));
       }
+      alloc_refs.emplace_back(block->alloc_ref);
       continue;
     }
     alloc_refs.push_back(c10::make_intrusive<AllocationRef>(
