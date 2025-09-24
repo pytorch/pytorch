@@ -12,7 +12,10 @@ class BmmOperator(Operator):
         super().__init__("bmm")
 
     def can_produce(self, tensor, max_numel=1_000_000):
-        """BMM can produce tensors that are 3D and not too large."""
+        """BMM can produce tensors that are 3D, floating point, and not too large."""
+        # bmm only supports floating point tensors
+        if tensor.dtype in ["int8", "int16", "int32", "int64", "uint8", "bool"]:
+            return False
         return len(tensor.size) == 3 and (tensor.size[0] * tensor.size[1] * tensor.size[2] <= max_numel)
 
     def decompose(self, tensor, num_inputs=2):

@@ -60,3 +60,6 @@ class DivOperator(Operator):
             for name in input_names[1:]:
                 expr = f"({expr}) / {name}"
             return f"{output_name} = {expr}"
+
+    def supports_variable_inputs(self) -> bool:
+        return True

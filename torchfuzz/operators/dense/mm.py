@@ -12,7 +12,10 @@ class MmOperator(Operator):
         super().__init__("mm")
 
     def can_produce(self, tensor):
-        """MM can produce tensors that are 2D."""
+        """MM can produce tensors that are 2D and floating point."""
+        # mm only supports floating point tensors
+        if tensor.dtype in ["int8", "int16", "int32", "int64", "uint8", "bool"]:
+            return False
         return len(tensor.size) == 2
 
     def decompose(self, tensor, num_inputs=2):

@@ -11,7 +11,10 @@ class SigmoidOperator(Operator):
         super().__init__("sigmoid")
 
     def can_produce(self, tensor):
-        """Sigmoid can be applied to any tensor (elementwise op)."""
+        """Sigmoid can be applied to floating point tensors (elementwise op)."""
+        # Sigmoid only supports floating point and complex dtypes
+        if tensor.dtype in ["int8", "int16", "int32", "int64", "uint8", "bool"]:
+            return False
         return True
 
     def decompose(self, tensor):
