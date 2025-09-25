@@ -249,6 +249,26 @@ AOTIRuntimeError AOTInductorModelContainerUpdateUserManagedConstantBuffer(
   })
 }
 
+AOTIRuntimeError AOTInductorModelContainerUpdateUserManagedConstantBufferPairs(
+    AOTInductorModelContainerHandle container_handle,
+    const AOTInductorConstantMapEntry* pairs,
+    size_t num_pairs,
+    bool use_inactive,
+    bool validate_full_update) {
+  auto* container =
+      reinterpret_cast<torch::aot_inductor::AOTInductorModelContainer*>(container_handle);
+  // Build a local unordered_map inside
+  std::unordered_map<std::string, AtenTensorHandle> input_map;
+  input_map.reserve(num_pairs);
+  for (size_t i = 0; i < num_pairs; ++i) {
+      input_map.emplace(pairs[i].name, pairs[i].handle);
+  }
+  CONVERT_EXCEPTION_TO_ERROR_CODE({
+    container->update_constant_buffer(
+        input_map, use_inactive, validate_full_update, /*user_managed=*/true);
+  })
+}
+
 AOTIRuntimeError AOTInductorModelContainerUpdateConstantBuffer(
     AOTInductorModelContainerHandle container_handle,
     AOTInductorConstantMapHandle constant_map_handle,
