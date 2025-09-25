@@ -1499,6 +1499,91 @@ class CuTeLayoutTest(TestCase):
             right_l = _Layout((2,), (3,))
             orig_l.composition(right_l)
 
+    def test_check_non_overlap(self):
+        """Test the check_non_overlap method for various layout configurations."""
+        # Test 1: Valid layout - no overlap
+        # sizes=(2,3), strides=(6,1) - stride 6 > span 3, so no overlap
+        layout1 = _Layout((2, 3), (6, 1))
+        self.assertTrue(layout1.check_non_overlap())
+
+        # Test 2: Invalid layout - overlap due to stride < previous span
+        # sizes=(2,3), strides=(2,1) - stride 2 < span 3, causes overlap
+        layout2 = _Layout((2, 3), (2, 1))
+        self.assertFalse(layout2.check_non_overlap())
+
+        # Test 3: Invalid layout - duplicate strides
+        # sizes=(2,3), strides=(1,1) - same stride, causes overlap
+        layout3 = _Layout((2, 3), (1, 1))
+        self.assertFalse(layout3.check_non_overlap())
+
+        # Test 4: Valid layout - single dimension
+        layout4 = _Layout((4,), (1,))
+        self.assertTrue(layout4.check_non_overlap())
+
+        # Test 5: Valid layout - exact boundary case
+        # sizes=(2,3), strides=(3,1) - stride 3 == span 3, valid
+        layout5 = _Layout((2, 3), (3, 1))
+        self.assertTrue(layout5.check_non_overlap())
+
+        # Test 6: Valid layout - multi-dimensional with proper spacing
+        layout6 = _Layout((2, 2, 2), (8, 4, 1))
+        self.assertTrue(layout6.check_non_overlap())
+
+        # Test 7: Invalid layout - middle dimension overlaps
+        layout7 = _Layout((2, 2, 2), (4, 1, 2))
+        self.assertTrue(layout7.check_non_overlap())
+
+    def test_remap_to_tensor(self):
+        """Test the remap_to_tensor method for various scenarios."""
+        # Test 1: Consecutive ranks, full world - should return logical groups directly
+        original_mesh = torch.tensor([[0, 1], [2, 3]], dtype=torch.int)
+        layout1 = _Layout((2, 2), (2, 1))  # row-major 2x2
+        result1 = layout1.remap_to_tensor(original_mesh, world_size=4)
+        expected1 = torch.tensor([[[0, 1], [2, 3]]], dtype=torch.int)
+        self.assertEqual(result1, expected1)
+
+        # Test 2: Non-consecutive ranks - should map to actual ranks
+        original_mesh = torch.tensor([[10, 20], [30, 40]], dtype=torch.int)
+        layout2 = _Layout((2, 2), (2, 1))
+        result2 = layout2.remap_to_tensor(original_mesh, world_size=4)
+        expected2 = torch.tensor([[[10, 20], [30, 40]]], dtype=torch.int)
+        self.assertEqual(result2, expected2)
+
+        # Test 3: Partial world (mesh smaller than world_size) - requires stride scaling
+        original_mesh = torch.tensor([1, 2], dtype=torch.int)
+        layout3 = _Layout((2,), (4,))  # stride=4 for world_size=8
+        result3 = layout3.remap_to_tensor(original_mesh, world_size=8)
+        expected3 = torch.tensor([[1, 2]], dtype=torch.int)
+        self.assertEqual(result3, expected3)
+
+        # Test 4: 1D layout with consecutive ranks
+        original_mesh = torch.tensor([0, 1, 2, 3], dtype=torch.int)
+        layout4 = _Layout((4,), (1,))
+        result4 = layout4.remap_to_tensor(original_mesh, world_size=4)
+        expected4 = torch.tensor([[0, 1, 2, 3]], dtype=torch.int)
+        self.assertEqual(result4, expected4)
+
+        # Test 5: Complex strided layout with non-consecutive ranks
+        original_mesh = torch.tensor([5, 10, 15, 20], dtype=torch.int)
+        layout5 = _Layout((2, 2), (2, 1))
+        result5 = layout5.remap_to_tensor(original_mesh, world_size=4)
+        expected5 = torch.tensor([[[5, 10], [15, 20]]], dtype=torch.int)
+        self.assertEqual(result5, expected5)
+
+        # Test 6: Tensor Cute representation of a 2D mesh
+        original_mesh = torch.tensor([[0, 2], [1, 3]], dtype=torch.int)
+        layout6 = _Layout((2, 2), (1, 2))  # column-major style
+        result6 = layout6.remap_to_tensor(original_mesh, world_size=4)
+        expected6 = torch.tensor([[[0, 1], [2, 3]]], dtype=torch.int)
+        self.assertEqual(result6, expected6)
+
+        # Test 7: Layout with different stride pattern
+        original_mesh = torch.tensor([0, 2, 1, 4], dtype=torch.int)
+        layout7 = _Layout((2, 2), (1, 2))  # column-major style
+        result7 = layout7.remap_to_tensor(original_mesh, world_size=4)
+        expected7 = torch.tensor([[[0, 1], [2, 4]]], dtype=torch.int)
+        self.assertEqual(result7, expected7)
+
 
 if __name__ == "__main__":
     run_tests()
