@@ -195,7 +195,7 @@ else:
             self.flatten_name_to_root_dims.setdefault(root_mesh, {})
             invalid_dim_names = not_none(root_mesh.mesh_dim_names)
             if mesh_dim_name in invalid_dim_names:
-                raise RuntimeError(
+                raise ValueError(
                     f"{mesh_dim_name} already exists for submesh of the {root_mesh}. ",
                     f"The mesh_dim_names of submesh and flattened mesh are {invalid_dim_names}. "
                     f"Please specify another valid mesh_dim_name.",
@@ -206,7 +206,16 @@ else:
                 root_mesh in self.root_to_flatten_mapping
                 and mesh_dim_name in self.root_to_flatten_mapping[root_mesh]
             ):
-                return self.root_to_flatten_mapping[root_mesh][mesh_dim_name]
+                if (
+                    tuple(flatten_dims_in_root)
+                    == self.flatten_name_to_root_dims[root_mesh][mesh_dim_name]
+                ):
+                    return self.root_to_flatten_mapping[root_mesh][mesh_dim_name]
+                else:
+                    raise ValueError(
+                        f"Flatten mesh with mesh_dim_name {mesh_dim_name} has been created before, "
+                        f"Please specify another valid mesh_dim_name.",
+                    )
 
             flattened_mesh_dim_size = math.prod(device_mesh.mesh.size())
 
