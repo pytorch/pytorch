@@ -69,7 +69,9 @@ def raise_unhashable(arg, tx=None):
 
         tx = InstructionTranslator.current_tx()
     raise_observed_exception(
-        TypeError, tx, args=[ConstantVariable(f"unhashable type: {type(arg)}")]
+        TypeError,
+        tx,
+        args=[ConstantVariable(f"unhashable type: {type(arg.realize())}")],
     )
 
 
@@ -743,17 +745,13 @@ class ConstDictVariable(VariableTracker):
         return [x.vt for x in self.items.keys()]
 
     def call_obj_hasattr(self, tx, name):
-        # dict not allow setting arbitrary attributes. To check for hasattr, we can just check the __dict__ of the dict.
-        # OrderedDict though requires side effects tracking because it supports arbitrary setattr.
-        if self.user_cls is dict:
-            if name in self.user_cls.__dict__:
+        # dict not allow setting arbitrary attributes.  OrderedDict and
+        # defaultdict allow arbitrary setattr, but not deletion of default attrs
+        if self.user_cls in (dict, collections.OrderedDict, collections.defaultdict):
+            if hasattr(self.user_cls, name):
                 return ConstantVariable.create(True)
-            return ConstantVariable.create(False)
-        elif (
-            self.user_cls in (collections.OrderedDict, collections.defaultdict)
-            and name == "__iter__"
-        ):
-            return ConstantVariable.create(True)
+            if self.user_cls is dict:
+                return ConstantVariable.create(False)
 
         msg = f"hasattr on {self.user_cls} is not supported"
         unimplemented_v2(

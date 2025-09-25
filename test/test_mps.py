@@ -6940,6 +6940,70 @@ class TestMPS(TestCaseMPS):
         with self.assertRaisesRegex(RuntimeError, "Index to scalar can have only 1 value"):
             helper(22, 0, [])
 
+    # TODO: This test can be removed once the backward pass of embedding_bag is
+    # implemented and tested
+    @parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32])
+    @parametrize("idx_dtype", [torch.long, torch.int])
+    @parametrize("padding_idx", [-1, 1])
+    @parametrize("include_last_offset", [True, False])
+    @parametrize("mode", ['sum', 'mean', 'max'])
+    def test__embedding_bag(self, dtype, idx_dtype, padding_idx, include_last_offset, mode):
+        import time
+        torch.manual_seed(time.time() * 1000)
+        mode_num = {'sum': 0, 'mean': 1, 'max': 2}[mode]
+        num_words = 10
+        feature_size = 7
+        num_indices = 40
+        num_bags = 5
+
+        weight_cpu = torch.randn(num_words, feature_size, dtype=dtype)
+
+        # Test nan value behavior.
+        # Set second element of each word to nan.
+        weight_cpu[:, 1] = float('nan')
+        # Set third element of a randomized half of the words to nan.
+        weight_cpu[torch.randperm(num_words)[:num_words // 2], 2] = float('nan')
+        # Set fourth element of one randomized word to nan.
+        weight_cpu[torch.randint(0, num_words, ()), 3] = float('nan')
+
+        input_cpu = torch.randint(0, num_words, (num_indices,), dtype=idx_dtype)
+        offsets_cpu = torch.tensor(
+            [0] + (torch.randperm(num_indices - 1)[:num_bags - 1].sort()[0] + 1).tolist(),
+            dtype=idx_dtype)
+
+        if include_last_offset:
+            offsets_cpu[-1] = input_cpu.numel()
+
+        per_sample_weights_cpu = torch.randn(num_indices, dtype=dtype) if mode == 'sum' else None
+
+        r_cpu, offset2bag_cpu, bag_size_cpu, max_indices_cpu = torch._embedding_bag(
+            weight_cpu,
+            input_cpu,
+            offsets_cpu,
+            per_sample_weights=per_sample_weights_cpu,
+            mode=mode_num,
+            padding_idx=padding_idx,
+            include_last_offset=include_last_offset,
+        )
+        r_mps, offset2bag_mps, bag_size_mps, max_indices_mps = torch._embedding_bag(
+            weight_cpu.to('mps'),
+            input_cpu.to('mps'),
+            offsets_cpu.to('mps'),
+            per_sample_weights=per_sample_weights_cpu.to('mps') if per_sample_weights_cpu is not None else None,
+            mode=mode_num,
+            padding_idx=padding_idx,
+            include_last_offset=include_last_offset,
+        )
+
+        self.assertEqual(r_cpu, r_mps)
+
+        if mode != 'sum':
+            self.assertEqual(offset2bag_cpu, offset2bag_mps)
+            self.assertEqual(bag_size_cpu, bag_size_mps)
+
+        if mode == 'max':
+            self.assertEqual(max_indices_cpu, max_indices_mps)
+
     def test_embedding_dense_backward(self):
         def helper(n, d, m, idx):
             embeddingMPS = nn.Embedding(n, d, max_norm=True, device='mps')
@@ -8957,9 +9021,9 @@ class TestPad(TestCaseMPS):
         # pad dims == input dims
         helper((1, 3), (0, 2, 0, 1), nn.ConstantPad2d)
         # input.numel() == 0 but output.numel() > 0
-        helper((0, 3, 3), 1, nn.ConstantPad2d)
+        helper((0, 3, 3), (1, 1, 1, 1, 1, 1), nn.ConstantPad2d)
         # pad dims < input dims - 2
-        helper((1, 2, 3, 4, 5), (1, 2, 0, 0), nn.ConstantPad2d)
+        helper((1, 2, 3, 4), (1, 2), nn.ConstantPad2d)
 
         # 3D Padding
         helper((2, 4, 6, 8, 4), (1, 3, 3, 5, 3, 4), nn.ReflectionPad3d)
@@ -8972,7 +9036,7 @@ class TestPad(TestCaseMPS):
         # input size < pad size
         helper((2, 4, 6), (1, 3, 3, 5, 3, 4), nn.ConstantPad3d)
         # check the workaround for the right padding bug in Monterey
-        helper((1, 2, 2, 2, 2), (0, 1, 0, 1, 0, 1), nn.ConstantPad3d)
+        helper((1, 2, 2, 2, 2), (0, 1), nn.ConstantPad3d)
 
     def test_constant_pad_nd_preserves_memory_format(self):
         nchw_tensor = torch.rand((1, 2, 5, 3))
@@ -11628,6 +11692,9 @@ class TestAdvancedIndexing(TestCaseMPS):
     def test_empty_reduce(self, device="mps"):
         x = torch.rand(0, 3, device=device)
         self.assertTrue(x.mean().isnan())
+        self.assertTrue(x.nanmean().isnan())
+        self.assertTrue(x.median().isnan())
+        self.assertTrue(x.nanmedian().isnan())
         self.assertEqual(x.count_nonzero(), 0)
         self.assertEqual(x.sum(), 0)
         self.assertEqual(x.nansum(), 0)
@@ -12231,7 +12298,7 @@ class TestConsistency(TestCaseMPS):
         'arange', 'linspace',
         'special.xlog1py',
 
-        # CPU accumulates sequantially, but GPU does in in parallel
+        # CPU accumulates sequantially, but GPU does in parallel
         '_unsafe_masked_index_put_accumulate',
     }
 

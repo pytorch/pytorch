@@ -28,7 +28,6 @@ import itertools
 import logging
 import math
 import operator
-import sys
 import types
 import typing
 import unittest
@@ -1817,24 +1816,38 @@ class BuiltinVariable(VariableTracker):
         else:
             return self._call_iter_tuple_list(tx, obj, *args, **kwargs)
 
-    # TODO use substitute_in_graph on polyfill instead
     def call_iter(self, tx: "InstructionTranslator", obj, *args, **kwargs):
-        # If the object doesn't implement a __iter__ method, it will be an error in eager mode when calling iter on it anyway.
-        # If the object implements a __iter__ method, inlining effectively forwards the call to another iter call
-        # (e.g. when __iter__ just returns iter(self.list)) or return a user-defined iterator.
-        # If the object implements a __getitem__ method, iter(...) will call obj.__getitem__()
-        # with an integer argument starting at 0, until __getitem__ raises IndexError
-        ret = variables.UserFunctionVariable(polyfills.builtins.iter_).call_function(
-            tx, [obj, *args], {}
-        )
+        # avoid the overhead of tracing the polyfill if we already know the class implemented __iter__
+        if isinstance(
+            obj,
+            (
+                variables.ListVariable,
+                variables.IteratorVariable,
+                variables.ConstDictVariable,
+                variables.NNModuleVariable,
+            ),
+        ):
+            return obj.call_method(tx, "__iter__", [], {})
+        elif isinstance(obj, variables.TensorVariable):
+            m = obj.var_getattr(tx, "__iter__")
+            return m.call_function(tx, [], {})
+        else:
+            # If the object doesn't implement a __iter__ method, it will be an error in eager mode when calling iter on it anyway.
+            # If the object implements a __iter__ method, inlining effectively forwards the call to another iter call
+            # (e.g. when __iter__ just returns iter(self.list)) or return a user-defined iterator.
+            # If the object implements a __getitem__ method, iter(...) will call obj.__getitem__()
+            # with an integer argument starting at 0, until __getitem__ raises IndexError
+            ret = variables.UserFunctionVariable(
+                polyfills.builtins.iter_
+            ).call_function(tx, [obj, *args], {})
 
-        if len(args):
-            # iter(obj, sentinel) returns an object that implements
-            # __iter__ and __next__ methods (UserDefinedObjectVariable)
-            # Wrap the return value in a IteratorVariable subclass (LazyObjectIteratorVariable)
-            # that forwards the next_variable call to the object.
-            ret = variables.ObjectIteratorVariable(ret)
-        return ret
+            if len(args):
+                # iter(obj, sentinel) returns an object that implements
+                # __iter__ and __next__ methods (UserDefinedObjectVariable)
+                # Wrap the return value in a IteratorVariable subclass (LazyObjectIteratorVariable)
+                # that forwards the next_variable call to the object.
+                ret = variables.ObjectIteratorVariable(ret)
+            return ret
 
     call_tuple = _call_tuple_list
     call_list = _call_tuple_list
@@ -2107,9 +2120,7 @@ class BuiltinVariable(VariableTracker):
             getattr(isinstance_type, "__instancecheck__", None)
         ):
             isinstance_type_tuple = (isinstance_type,)
-        elif sys.version_info >= (3, 10) and isinstance(
-            isinstance_type, types.UnionType
-        ):
+        elif isinstance(isinstance_type, types.UnionType):
             isinstance_type_tuple = isinstance_type.__args__
         elif isinstance(isinstance_type, tuple) and all(
             isinstance(tp, type) or callable(getattr(tp, "__instancecheck__", None))
