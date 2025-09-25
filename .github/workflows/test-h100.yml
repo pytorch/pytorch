@@ -111,12 +111,6 @@ jobs:
         id: check_container_runner
         run: echo "IN_CONTAINER_RUNNER=$(if [ -f /.inarc ] || [ -f /.incontainer ]; then echo true ; else echo false; fi)" >> "$GITHUB_OUTPUT"
 
-      - name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
-        id: install-nvidia-driver
-        uses: pytorch/test-infra/.github/actions/setup-nvidia@main
-        with:
-          driver-version: 580.82.07
-
       - name: Setup GPU_FLAG for docker run
         id: setup-gpu-flag
         run: echo "GPU_FLAG=--gpus all -e NVIDIA_DRIVER_CAPABILITIES=all" >> "${GITHUB_ENV}"
