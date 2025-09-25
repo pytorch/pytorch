@@ -507,7 +507,7 @@ def autograd_cache_key(
 TOut = TypeVar("TOut", bound=OutputCode)
 
 
-class InductorOutput(ABC, Generic[TOut]):
+class InductorOutput(Generic[TOut], ABC):
     """
     Class representing a single inductor output
     """
