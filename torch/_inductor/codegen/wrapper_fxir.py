@@ -944,7 +944,7 @@ class FxConverter:
         class UnbackedSymintsError(Exception):
             pass
 
-        def tune_kernel(tuner: CachingAutotuner, call_args: Sequence[Any]):
+        def tune_kernel(tuner: CachingAutotuner, call_args: Sequence[Any]) -> None:
             from triton.runtime import driver
 
             log.info("Autotuning Triton kernel %s at compile time.", kernel_name)
@@ -957,7 +957,7 @@ class FxConverter:
                 for dynamic shapes.
                 """
 
-                def to_size_hint(arg):
+                def to_size_hint(arg: Any) -> Any:
                     if len(free_unbacked_symbols(arg)) > 0:
                         # NYI: tuning args require backed symints.
                         raise UnbackedSymintsError
@@ -1156,6 +1156,7 @@ class FxConverter:
                     "stride": aten.sym_stride.int,
                     "storage_offset": aten.sym_storage_offset,
                 }[entry.name]
+                assert callable(target)
                 node = graph.call_function(
                     target,
                     args=(
@@ -1177,7 +1178,9 @@ class FxConverter:
                 raise NotImplementedError(f"Unrecognized entry type: {type(entry)}")
 
         root_node = self.buffer_to_node[line.output_name]
-        for s, keypath in line.unbacked_bindings.items():
+        unbacked_bindings = line.unbacked_bindings
+        assert unbacked_bindings is not None
+        for s, keypath in unbacked_bindings.items():
             # Check if we already generated this symbol.
             if s.name in self.buffer_to_node:
                 continue

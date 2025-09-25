@@ -35,8 +35,13 @@ from torch.testing._internal.inductor_utils import (
     TRITON_HAS_CPU,
 )
 
-from .test_control_flow import CondModels
 
+try:
+    from .test_control_flow import CondModels
+except ImportError:
+    from test_control_flow import (
+        CondModels,  # @manual=fbcode//caffe2/test/inductor:control_flow-library
+    )
 
 if HAS_GPU:
     import triton
@@ -1039,6 +1044,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         """
         Test cond branches with mismatched dynamic shapes.
         """
+
         # Apply an offset to guarantee the truith of the predicate.
         pred_offset = 1 if pred else -1
 
@@ -1054,7 +1060,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             "z": {0: dim0_a, 1: None},
         }
 
-        gm = self.check(
+        self.check(
             CondModels.MismatchedOutputSize(),
             tuple(inputs),
             dynamic_shapes=dynamic_shapes,
