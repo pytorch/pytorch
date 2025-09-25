@@ -68,17 +68,6 @@ AOTITorchError aoti_torch_mps_get_kernel_function(
   });
 }
 
-// MetalKernelFunction functions (pure C++)
-AOTITorchError aoti_torch_mps_run_command_block(
-    AOTIMetalKernelFunctionHandle func,
-    std::function<void(AOTIMetalKernelFunctionHandle)> command_block) {
-  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
-    auto* function_ptr = reinterpret_cast<at::native::mps::MetalKernelFunction*>(func);
-    function_ptr->runCommandBlock([&command_block, func]() {
-      command_block(func);
-    });
-  });
-}
 
 AOTITorchError aoti_torch_mps_start_encoding(
     AOTIMetalKernelFunctionHandle func) {
@@ -138,5 +127,26 @@ AOTITorchError aoti_torch_mps_synchronize_stream() {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     auto* stream = at::mps::getCurrentMPSStream();
     stream->synchronize(at::mps::SyncType::COMMIT_AND_WAIT);
+  });
+}
+
+// Shared callback function for std::function trampoline
+void aoti_torch_mps_shared_callback(
+    AOTIMetalKernelFunctionHandle func,
+    void* user_data) {
+  auto* function_wrapper = static_cast<std::function<void(AOTIMetalKernelFunctionHandle)>*>(user_data);
+  (*function_wrapper)(func);
+}
+
+// Pure C version using function pointer and user data for trampoline pattern
+AOTITorchError aoti_torch_mps_run_command_block(
+    AOTIMetalKernelFunctionHandle func,
+    aoti_torch_mps_command_block_callback_t callback,
+    void* user_data) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    auto* function_ptr = reinterpret_cast<at::native::mps::MetalKernelFunction*>(func);
+    function_ptr->runCommandBlock([callback, func, user_data]() {
+      callback(func, user_data);
+    });
   });
 }

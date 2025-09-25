@@ -168,14 +168,20 @@ class CppWrapperMps(CppWrapperGpu):
             self.write_mps_kernel_call(kernel_name, new_args)
 
     def write_mps_kernel_call(self, name: str, call_args: list[str]) -> None:
-        # Use shimified functions that don't require linking to libtorch
-        self.writeline(f"aoti_torch_mps_run_command_block(get_{name}_handle(), [&](AOTIMetalKernelFunctionHandle handle) {{")
+        # Generate the function call code (in current location)
+        # Create lambda that captures by reference and pass its pointer through void*
+        self.writeline(f"auto {name}_lambda = [&](AOTIMetalKernelFunctionHandle handle) {{")
         self.writeline(f"    aoti_torch_mps_start_encoding(handle);")
 
-        # Output the call args directly - they should already be correctly formatted
+        # Output call args directly since we're capturing by reference
         for call_arg in call_args:
             self.writeline(f"    {call_arg}")
-        self.writeline("});")
+        self.writeline("};")
+        self.writeline("")
+
+        # Pass lambda pointer through void*
+        self.writeline(f"std::function<void(AOTIMetalKernelFunctionHandle)> {name}_func_wrapper = {name}_lambda;")
+        self.writeline(f"aoti_torch_mps_run_command_block(get_{name}_handle(), aoti_torch_mps_shared_callback, &{name}_func_wrapper);")
 
     @staticmethod
     def get_device_include_path(device: str) -> str:

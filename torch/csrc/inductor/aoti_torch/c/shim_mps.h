@@ -85,16 +85,24 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_mps_copy_buffer(
 
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_mps_synchronize_stream();
 
-#ifdef __cplusplus
-} // extern "C"
+// C callback function type for command block execution
+typedef void (*aoti_torch_mps_command_block_callback_t)(
+    AOTIMetalKernelFunctionHandle func,
+    void* user_data);
 
-// C++ only functions that can use std::function and C++ types
-#include <functional>
+// Shared callback function for std::function trampoline
+AOTI_TORCH_EXPORT void aoti_torch_mps_shared_callback(
+    AOTIMetalKernelFunctionHandle func,
+    void* user_data);
 
+// Pure C version using function pointer and user data for trampoline pattern
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_mps_run_command_block(
     AOTIMetalKernelFunctionHandle func,
-    std::function<void(AOTIMetalKernelFunctionHandle)> command_block);
+    aoti_torch_mps_command_block_callback_t callback,
+    void* user_data);
 
+#ifdef __cplusplus
+} // extern "C"
 #endif
 
 #endif // AOTI_TORCH_SHIM_MPS
