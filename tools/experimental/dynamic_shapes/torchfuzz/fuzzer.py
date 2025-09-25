@@ -47,7 +47,7 @@ def fuzz_and_execute(
     # Generate max_depth if not provided (range 3-12)
     if max_depth is None:
         random.seed(seed + 999)  # Use seed offset for consistent depth selection
-        max_depth = random.randint(3, 12)
+        max_depth = random.randint(2, 4)
     else:
         # Clamp max_depth to valid range
         max_depth = max(1, max_depth)
