@@ -2889,6 +2889,5 @@ bool THPVariable_initModule(PyObject* module) {
     return false;
   }
   PyModule_AddFunctions(module, extra_functions);
-
   return true;
 }
