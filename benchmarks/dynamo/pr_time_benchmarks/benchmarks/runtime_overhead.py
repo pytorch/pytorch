@@ -7,9 +7,12 @@ from torch.autograd.grad_mode import inference_mode
 
 
 class Benchmark(BenchmarkBase):
-    def __init__(self, requires_grad, inference_mode, dynamic):
+    def __init__(self, requires_grad, inference_mode, backward, dynamic):
+        assert not (inference_mode and backward), "inference_mode and backward cannot be both True"
+
         self._requires_grad = requires_grad
         self._inference_mode = inference_mode
+        self._backward = backward
 
         super().__init__(
             category="runtime_overhead",
@@ -24,6 +27,8 @@ class Benchmark(BenchmarkBase):
             prefix += "_requires_grad"
         if self._inference_mode:
             prefix += "_inference_mode"
+        if self._backward:
+            prefix += "_backward"
         if self.is_dynamic():
             prefix += "_dynamic"
         return prefix
@@ -46,28 +51,36 @@ class Benchmark(BenchmarkBase):
         self._add1 = add1
 
         # warmup
-        self._work()
+        if self._backward:
+            self.forward_val = self._add1(self.a).sum()
+            self.forward_val.backward()
+        else:
+            self._work()
 
     def _prepare(self):
-        pass
+        if self._backward:
+            self.forward_val = self._add1(self.a).sum()
 
     def _work(self):
         if self._inference_mode:
             with inference_mode():
                 self._add1(self.a)
+        elif self._backward:
+            self.forward_val.backward()
         else:
             self._add1(self.a)
-
 
 def main():
     result_path = sys.argv[1]
     all = [
-        Benchmark(False, False, False),
-        Benchmark(False, True, False),
-        Benchmark(True, False, False),
-        Benchmark(False, False, True),
-        Benchmark(False, True, True),
-        Benchmark(True, False, True),
+        Benchmark(requires_grad=False, inference_mode=False, backward=False, dynamic=False),
+        Benchmark(requires_grad=False, inference_mode=True, backward=False, dynamic=False),
+        Benchmark(requires_grad=True, inference_mode=False, backward=False, dynamic=False),
+        Benchmark(requires_grad=True, inference_mode=False, backward=True, dynamic=False),
+        Benchmark(requires_grad=False, inference_mode=False, backward=False, dynamic=True),
+        Benchmark(requires_grad=False, inference_mode=True, backward=False, dynamic=True),
+        Benchmark(requires_grad=True, inference_mode=False, backward=False, dynamic=True),
+        Benchmark(requires_grad=True, inference_mode=False, backward=True, dynamic=True),
     ]
 
     for benchmark in all:
