@@ -220,8 +220,7 @@ PyObject* RecordFunctionFast_enter(PyObject* selfGeneric, PyObject* unused) {
     TORCH_INTERNAL_ASSERT(
         !self->guard,
         "Trying to enter a new record_function_fast context but the guard is unexpectedly already set");
-    self->guard =
-        std::make_unique<at::RecordFunction>(at::RecordScope::FUNCTION);
+    auto scope = at::RecordScope::FUNCTION;
     std::vector<at::IValue> args;
     std::unordered_map<std::string, at::IValue> kwargs;
     bool profiler_need_input = torch::autograd::profiler::profilerEnabled() &&
@@ -251,9 +250,34 @@ PyObject* RecordFunctionFast_enter(PyObject* selfGeneric, PyObject* unused) {
         if (THPUtils_checkString(value)) {
           ivalue = at::IValue(THPUtils_unpackString(value));
         } else {
+          // Handle other types (not strings, not lists)
           auto match = torch::jit::tryToInferPrimitiveType(value);
           if (match.success()) {
             ivalue = torch::jit::toIValue(value, match.type());
+          } else if (PyList_Check(value)) {
+            // Handle list of strings
+            bool all_strings = true;
+            std::vector<std::string> string_list;
+            Py_ssize_t list_size = PyList_Size(value);
+
+            for (Py_ssize_t i = 0; i < list_size; i++) {
+              PyObject* item = PyList_GetItem(value, i);
+              if (THPUtils_checkString(item)) {
+                string_list.push_back(THPUtils_unpackString(item));
+              } else {
+                all_strings = false;
+                break;
+              }
+            }
+
+            if (all_strings) {
+              c10::List<std::string> string_ivalue_list(string_list);
+              ivalue = at::IValue(string_ivalue_list);
+            } else {
+              TORCH_WARN(
+                  "Unable to infer type of value in the List for keyword: ",
+                  key_str);
+            }
           } else {
             TORCH_WARN("Unable to infer type of value for keyword: ", key_str);
             ivalue = at::IValue("NULL");
@@ -262,6 +286,17 @@ PyObject* RecordFunctionFast_enter(PyObject* selfGeneric, PyObject* unused) {
         kwargs[key_str] = ivalue;
       }
     }
+    auto it = kwargs.find("scope");
+    if (it != kwargs.end()) {
+      auto value = it->second;
+      if (value.isString()) {
+        auto value_str = value.toStringRef();
+        if (value_str == "user_scope") {
+          scope = at::RecordScope::USER_SCOPE;
+        }
+      }
+    }
+    self->guard = std::make_unique<at::RecordFunction>(scope);
     self->guard->before(THPUtils_unpackString(self->name), &args, &kwargs);
   }
   Py_RETURN_NONE;

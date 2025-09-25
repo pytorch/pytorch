@@ -55,6 +55,14 @@ def check_graph_breaks(actual_csv, expected_csv, expected_filename):
                 "timm_nfnet",
                 "torchrec_dlrm",
                 "vgg16",
+                # LLM
+                "meta-llama/Llama-3.2-1B",
+                "google/gemma-2-2b",
+                "google/gemma-3-4b-it",
+                "openai/whisper-tiny",
+                "Qwen/Qwen3-0.6B",
+                "mistralai/Mistral-7B-Instruct-v0.3",
+                "openai/gpt-oss-20b",
             }
         )
 

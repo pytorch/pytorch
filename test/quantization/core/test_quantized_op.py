@@ -4,56 +4,67 @@
 
 import copy
 import itertools
-import numpy as np
 import operator
 import random
 import unittest
-from packaging.version import Version
-from typing import NamedTuple
+from typing import NamedTuple, TYPE_CHECKING
+
+import numpy as np
 
 import torch
-from torch import _VF
 import torch.jit
 import torch.nn.functional as F
-from torch.nn.modules.utils import _single, _pair
-
-from hypothesis import settings, HealthCheck
-from hypothesis import assume, given, note
-from hypothesis import strategies as st
 import torch.testing._internal.hypothesis_utils as hu
+
+from hypothesis import assume, given, HealthCheck, note, settings, strategies as st
+from packaging.version import Version
+from torch import _VF
+if TYPE_CHECKING:
+    from torch._ops import OpOverloadPacket
+from torch.nn.modules.utils import _pair, _single
+
 hu.assert_deadline_disabled()
-
-from torch.testing._internal.common_cuda import SM80OrLater
-from torch.testing._internal.common_utils import (
-    raise_on_run_directly,
-    TestCase,
-    IS_PPC,
-    IS_MACOS,
-    IS_SANDCASTLE,
-    IS_FBCODE,
-    IS_ARM64
-)
-from torch.testing._internal.common_quantization import skipIfNoFBGEMM, skipIfNoQNNPACK, skipIfNoONEDNN
-from torch.testing._internal.common_quantized import _quantize, _dequantize, _calculate_dynamic_qparams, \
-    override_quantized_engine, supported_qengines, override_qengines, _snr
-from torch.testing._internal.common_quantized import (
-    qengine_is_qnnpack,
-    qengine_is_onednn,
-)
-from torch.ao.quantization import PerChannelMinMaxObserver
-from torch.testing._internal.common_cuda import TEST_CUDNN, TEST_CUDNN_VERSION, TEST_CUDA
-from torch.testing._internal.optests import opcheck
-import torch.backends.xnnpack
-
-from torch.utils.cpp_extension import ROCM_HOME
 
 from typing import Optional
 
-np_dtype = {
-    torch.quint8 : np.uint8,
-    torch.qint8 : np.int8,
-    torch.qint32 : np.int32
-}
+import torch.backends.xnnpack
+from torch.ao.quantization import PerChannelMinMaxObserver
+from torch.testing._internal.common_cuda import (
+    SM80OrLater,
+    TEST_CUDA,
+    TEST_CUDNN,
+    TEST_CUDNN_VERSION,
+)
+from torch.testing._internal.common_quantization import (
+    skipIfNoFBGEMM,
+    skipIfNoONEDNN,
+    skipIfNoQNNPACK,
+)
+from torch.testing._internal.common_quantized import (
+    _calculate_dynamic_qparams,
+    _dequantize,
+    _quantize,
+    _snr,
+    override_qengines,
+    override_quantized_engine,
+    qengine_is_onednn,
+    qengine_is_qnnpack,
+    supported_qengines,
+)
+from torch.testing._internal.common_utils import (
+    IS_ARM64,
+    IS_FBCODE,
+    IS_MACOS,
+    IS_PPC,
+    IS_SANDCASTLE,
+    raise_on_run_directly,
+    TestCase,
+)
+from torch.testing._internal.optests import opcheck
+
+from torch.utils.cpp_extension import ROCM_HOME
+
+np_dtype = {torch.quint8: np.uint8, torch.qint8: np.int8, torch.qint32: np.int32}
 
 TEST_ROCM = TEST_CUDA and torch.version.hip is not None and ROCM_HOME is not None
 
@@ -8794,6 +8805,67 @@ class TestComparatorOps(TestCase):
             note(f"result 3: {result}")
             self.assertEqual(result_ref, result,
                              msg=f"'tensor.{op}(scalar)'' failed")
+
+"""Tests the correctness of the quantized::embedding_bag_(byte|4bit|2bit)_prepack_with_rowwise_min_max ops."""
+class TestQuantizedWithMinMax(TestCase):
+    """Validates that the *rowwsie_min_max* quantization functions are equivalent to the ones without it."""
+    def test_quantize_tensor_with_min_max(self):
+        num_rows_list = [1, 2, 10, 100]
+        num_cols_list = [4, 8, 16, 32, 64, 128]
+        # Map of quantization bit rate to tuple of quantize function (with rowwise_min_max) and
+        # quantize function (without rowwise_min_max)
+        bit_rate_to_quant_fn: dict[
+            int,
+            tuple[
+                OpOverloadPacket,
+                OpOverloadPacket,
+            ],
+        ] = {
+            8: (
+                torch.ops.quantized.embedding_bag_byte_prepack_with_rowwise_min_max,
+                torch.ops.quantized.embedding_bag_byte_prepack,
+            ),
+            4: (
+                torch.ops.quantized.embedding_bag_4bit_prepack_with_rowwise_min_max,
+                torch.ops.quantized.embedding_bag_4bit_prepack,
+            ),
+            2: (
+                torch.ops.quantized.embedding_bag_2bit_prepack_with_rowwise_min_max,
+                torch.ops.quantized.embedding_bag_2bit_prepack,
+            ),
+        }
+
+        for quant_fn_with_rowwise_min_max, quant_fn in bit_rate_to_quant_fn.values():
+            for torch_dtype in [torch.float16, torch.float32]:
+                for num_rows, num_cols in itertools.product(num_rows_list, num_cols_list):
+                    weight = torch.rand(num_rows, num_cols, dtype=torch_dtype)
+                    rowwise_min_max = torch.stack(
+                        [weight.min(dim=1).values, weight.max(dim=1).values], dim=1
+                    )
+
+                    # Perform the quantization with rowwise_min_max
+                    weight_quantized = quant_fn_with_rowwise_min_max(
+                        weight, rowwise_min_max
+                    )
+                    assert weight_quantized.dtype == torch.uint8
+
+                    # Confirm that the quantization is matching the one without rowwise_min_max
+                    weight_quantized_no_rowwise_min_max = quant_fn(weight)
+                    assert torch.equal(
+                        weight_quantized, weight_quantized_no_rowwise_min_max
+                    )
+
+                    # Confirtm that incorrect rowwise_min_max will result in different quantization output
+                    incorrect_rowwise_min_max = torch.stack(
+                        [weight.max(dim=1).values, weight.max(dim=1).values], dim=1
+                    )
+                    weight_incorrectly_quantized = quant_fn_with_rowwise_min_max(
+                        weight, incorrect_rowwise_min_max
+                    )
+                    assert weight_incorrectly_quantized.dtype == torch.uint8
+                    assert not torch.equal(
+                        weight_incorrectly_quantized, weight_quantized_no_rowwise_min_max
+                    )
 
 if __name__ == "__main__":
     raise_on_run_directly("test/test_quantization.py")
