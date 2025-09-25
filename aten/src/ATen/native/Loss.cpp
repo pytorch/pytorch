@@ -1,5 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
+#include <ATen/ops/clamp.h>
 #include <ATen/core/Reduction.h>
 #include <ATen/Dispatch.h>
 #include <ATen/TensorIterator.h>
@@ -353,29 +354,18 @@ Tensor binary_cross_entropy_with_logits(const Tensor& input, const Tensor& targe
   // L = -w (x (1-y) - ln(sigma(x))(1+y(p-1))
   // => L = -w (x (1-y) - ln(sigma(x)), when p==1.
 
-  auto log_sigmoid_input = at::log_sigmoid(input);
+  // // Threshold when ln(sigma(x)) or ln(1-sigma(x)) < -100 to be consistent with binary_cross_entropy
+  // // Note: ln(sigma(x)) ~= x if x < -100 and ln(1-sigma(x)) ~= -x for x > 100
+  Tensor input_clamped = at::clamp(input, -100, 100);
+
+  auto log_sigmoid_input = at::log_sigmoid(input_clamped);
 
   if (pos_weight_opt.has_value() && pos_weight_opt->defined()) {
       // pos_weight need to be broadcasted, thus mul(target) is not inplace.
       auto log_weight = (*pos_weight_opt- 1).mul(target).add_(1);
       log_sigmoid_input.mul_(log_weight);
   }
-  Tensor loss = (1 - target).mul_(input).sub_(log_sigmoid_input);
-
-  // Threshold when ln(sigma(x)) or ln(1-sigma(x)) < -100 to be consistent with binary_cross_entropy
-  // Note: ln(sigma(x)) ~= x if x < -100 and ln(1-sigma(x)) ~= -x for x > 100
-  constexpr float thresh_value = 100.0;
-
-  const auto small_mask = input < -thresh_value;
-  const auto large_mask = input > thresh_value;
-
-  if (pos_weight_opt.has_value() && pos_weight_opt->defined()) {
-    loss = at::where(small_mask, pos_weight_opt->mul(target).mul_(thresh_value), loss);
-  } else {
-    loss = at::where(small_mask, thresh_value*target, loss);
-  }
-  // Note: pos_weight does not effect loss if log(sigma(x)) ~= 0.
-  loss = at::where(large_mask, (1-target).mul_(thresh_value), loss);
+  Tensor loss = (1 - target).mul_(input_clamped).sub_(log_sigmoid_input);
   
   if (weight_opt.has_value() && weight_opt->defined()) {
       loss.mul_(*weight_opt);
