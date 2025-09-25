@@ -120,38 +120,25 @@ def replace_floor_div(expr: sympy.Expr) -> sympy.Expr:
         if not isinstance(expr, sympy.core.mul.Mul):
             return sympy.floor(expr)
 
-        first_pow_idx = None
-        for idx, arg in enumerate(expr.args):
-            if isinstance(arg, sympy.Pow):
-                first_pow_idx = idx
-                break
-
-        if isinstance(expr.args[0], sympy.Rational):
+        if isinstance(expr.args[0], sympy.Rational) and not isinstance(
+            expr.args[0], sympy.Integer
+        ):
             # Only the first argument of a Mul can be a Rational.
             frac = expr.args[0]
             numerator = sympy_product(expr.args[1:]) * frac.numerator
             denominator = frac.denominator
 
             return FloorDiv(numerator, denominator)
-        elif first_pow_idx is not None:
-            # There could be multiple Pow args. Eliminate the first one.
-            pow_arg = expr.args[first_pow_idx]
-            other_args = [
-                expr.args[idx] for idx in range(len(expr.args)) if idx != first_pow_idx
-            ]
-            base = pow_arg.base
-            exp = pow_arg.exp
-            numerator = sympy_product(other_args)
-            if exp < 0:
-                denominator = base ** (-exp)
-            else:
-                numerator = numerator * (base**exp)
-                denominator = 1
+        elif any(isinstance(arg, sympy.Pow) for arg in expr.args):
+            # Group negative exponents into the denominator.
+            (numerator, denominator) = (sympy.S.One,) * 2
+            for arg in expr.args:
+                if isinstance(arg, sympy.Pow) and arg.exp < 0:
+                    denominator *= arg.base**-arg.exp
+                else:
+                    numerator *= arg
 
-            # If the denominator is an integer, recurse to eliminate other Pow args.
-            if denominator.is_integer:
-                denominator = sympy.floor(denominator)
-            return FloorDiv(numerator, replace_floor_div(denominator))
+            return FloorDiv(numerator, denominator)
         else:
             return sympy.floor(expr)
 
