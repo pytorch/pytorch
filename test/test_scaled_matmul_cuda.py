@@ -1461,7 +1461,7 @@ class TestFP8Matmul(TestCase):
     def scaled_grouped_mm_helper(self, alist, blist, ascalelist, bscalelist, outlist, use_fast_accum):
         for a, b, ascale, bscale, out in zip(alist, blist, ascalelist, bscalelist, outlist):
             out_ref = scaled_mm_wrap(a, b.t(), ascale.view(-1, 1), bscale.view(1, -1),
-                                       out_dtype=torch.bfloat16, use_fast_accum=use_fast_accum)
+                                     out_dtype=torch.bfloat16, use_fast_accum=use_fast_accum)
             self.assertEqual(out, out_ref, atol=5e-2, rtol=5e-4)
 
     # Testing only _scaled_grouped_mm() with multiple shapes, as
