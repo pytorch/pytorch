@@ -2,9 +2,11 @@
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/EmptyTensor.h>
 #include <ATen/FunctionalTensorWrapper.h>
+#include <ATen/FunctionalInverses.h>
 #include <ATen/InferSize.h>
 #include <ATen/TensorUtils.h>
 #include <torch/library.h>
+#include <algorithm>
 #include <c10/util/irange.h>
 #include <c10/util/strides.h>
 #include <ATen/EmptyTensor.h>
@@ -24,6 +26,9 @@
 #include <ATen/ops/as_strided_copy.h>
 #include <ATen/ops/empty_strided_native.h>
 #include <ATen/ops/_unsafe_view.h>
+#include <ATen/ops/expand_ops.h>
+#include <ATen/ops/expand_copy_ops.h>
+#include <ATen/ops/unsqueeze_ops.h>
 
 #include <utility>
 #endif
@@ -373,6 +378,113 @@ static at::Tensor& set__functionalize(at::Tensor& self, const at::Tensor& src) {
   return self;
 }
 
+static at::Tensor prims_broadcast_in_dim_functionalize(
+    c10::DispatchKeySet dispatchKeySet [[maybe_unused]],
+    const at::Tensor& self,
+    c10::SymIntArrayRef shape,
+    at::IntArrayRef broadcast_dimensions) {
+  const auto output_rank = static_cast<int64_t>(shape.size());
+  const auto input_rank = self.dim();
+
+  if (output_rank == 0) {
+    TORCH_CHECK(
+        broadcast_dimensions.empty(),
+        "prims.broadcast_in_dim: broadcast_dimensions must be empty when output shape is scalar");
+  }
+  TORCH_CHECK(
+      static_cast<int64_t>(broadcast_dimensions.size()) == input_rank,
+      "prims.broadcast_in_dim: broadcast_dimensions must have length equal to self.dim()");
+
+  int64_t prev = -1;
+  for (const auto dim : broadcast_dimensions) {
+    TORCH_CHECK(dim >= 0 && dim < output_rank, "prims.broadcast_in_dim: invalid broadcast dimension", dim);
+    TORCH_CHECK(dim > prev, "prims.broadcast_in_dim: broadcast dimensions must be in increasing order");
+    prev = dim;
+  }
+
+  const auto size_vec = shape.vec();
+  std::vector<bool> is_broadcast(output_rank, false);
+  for (const auto dim : broadcast_dimensions) {
+    is_broadcast[dim] = true;
+  }
+
+  const bool input_is_functional = at::functionalization::impl::isFunctionalTensor(self);
+  at::Tensor self_unwrapped;
+  if (input_is_functional) {
+    self_unwrapped = at::functionalization::impl::from_functional_tensor(self);
+  } else {
+    self_unwrapped = self;
+  }
+
+  auto reapply_views = at::functionalization::impl::getFunctionalizationReapplyViewsTLS();
+  auto inverse_return_mode = (
+      reapply_views ? at::functionalization::InverseReturnMode::ViewOrScatterInverse
+                    : at::functionalization::InverseReturnMode::NeverView);
+
+  at::Tensor view_output;
+  at::Tensor copy_output;
+  {
+    at::AutoDispatchSkipFunctionalize guard;
+    auto base_unsqueezed = self_unwrapped;
+    for (const auto idx : c10::irange(output_rank)) {
+      if (!is_broadcast[idx]) {
+        base_unsqueezed = at::_ops::unsqueeze::call(base_unsqueezed, static_cast<int64_t>(idx));
+      }
+    }
+    view_output = at::_ops::expand::call(base_unsqueezed, size_vec, /*implicit=*/false);
+    if (input_is_functional && !reapply_views) {
+      copy_output = at::_ops::expand_copy::call(base_unsqueezed, size_vec, /*implicit=*/false);
+    }
+  }
+
+  if (!input_is_functional) {
+    return view_output;
+  }
+
+  auto stride_vec = view_output.sym_strides().vec();
+  auto storage_offset_opt = ::std::optional<c10::SymInt>(view_output.sym_storage_offset());
+
+  bool has_symbolic_inputs = std::any_of(
+      size_vec.begin(), size_vec.end(), [](const c10::SymInt& s) { return s.is_symbolic(); });
+  has_symbolic_inputs = has_symbolic_inputs || std::any_of(
+      stride_vec.begin(), stride_vec.end(), [](const c10::SymInt& s) { return s.is_symbolic(); });
+  has_symbolic_inputs = has_symbolic_inputs || (storage_offset_opt.has_value() && storage_offset_opt->is_symbolic());
+
+  const auto functional_result = (input_is_functional && !reapply_views) ? copy_output : view_output;
+
+  at::functionalization::ViewMeta view_meta(
+      [reapply_views,
+       size_vec,
+       stride_vec,
+       storage_offset_opt](const at::Tensor& base, int64_t mutated_view_idx) -> at::Tensor {
+        auto size_ref = c10::SymIntArrayRef(size_vec);
+        auto stride_ref = c10::SymIntArrayRef(stride_vec);
+        if (reapply_views) {
+          return at::_ops::as_strided::call(base, size_ref, stride_ref, storage_offset_opt);
+        }
+        return at::_ops::as_strided_copy::call(base, size_ref, stride_ref, storage_offset_opt);
+      },
+      [inverse_return_mode,
+       size_vec,
+       stride_vec,
+       storage_offset_opt](const at::Tensor& base, const at::Tensor& mutated_view, int64_t mutated_view_idx) -> at::Tensor {
+        return at::functionalization::FunctionalInverses::as_strided_inverse(
+            base,
+            mutated_view,
+            inverse_return_mode,
+            c10::SymIntArrayRef(size_vec),
+            c10::SymIntArrayRef(stride_vec),
+            storage_offset_opt);
+      },
+      /*has_symbolic_inputs=*/has_symbolic_inputs,
+      /*is_multi_output=*/false,
+      /*is_as_strided=*/true);
+
+  auto out = at::functionalization::impl::create_functional_tensor_with_view_meta(
+      functional_result, self, view_meta);
+  return out;
+}
+
 TORCH_LIBRARY_IMPL(_, Functionalize, m) {
   m.fallback(torch::CppFunction::makeFromBoxedFunction<&functionalizeFallback>());
 }
@@ -387,4 +499,8 @@ TORCH_LIBRARY_IMPL(aten, Functionalize, m) {
   // The overloads of set_() that take in a storage should never
   // appear with torch.compile, because dynamo graph breaks
   m.impl("set_.source_Tensor", TORCH_FN(set__functionalize));
+}
+
+TORCH_LIBRARY_IMPL(prims, Functionalize, m) {
+  m.impl("broadcast_in_dim", TORCH_FN(prims_broadcast_in_dim_functionalize));
 }

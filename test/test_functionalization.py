@@ -1619,6 +1619,100 @@ def forward(self, arg0_1):
     """,
         )
 
+    def test_prims_broadcast_in_dim_mutated_input(self):
+        def f(x):
+            y = torch.ops.prims.broadcast_in_dim.default(x, [2, 3, 3], [0, 1])
+            x.add_(1)
+            return y
+
+        self.assert_functionalization(f, torch.ones(2, 3), reapply_views=self.crossref)
+        if self.crossref:
+            return
+
+        logs = self.get_logs(f, torch.ones(2, 3))
+        self.assertExpectedInline(
+            logs,
+            """\
+
+
+
+def forward(self, arg0_1):
+    unsqueeze = torch.ops.aten.unsqueeze.default(arg0_1, 2)
+    expand = torch.ops.aten.expand.default(unsqueeze, [2, 3, 3]);  expand = None
+    expand_copy = torch.ops.aten.expand_copy.default(unsqueeze, [2, 3, 3]);  unsqueeze = expand_copy = None
+    add = torch.ops.aten.add.Tensor(arg0_1, 1)
+    copy_ = torch.ops.aten.copy_.default(arg0_1, add);  arg0_1 = copy_ = None
+    as_strided_copy = torch.ops.aten.as_strided_copy.default(add, [2, 3, 3], [3, 1, 0], 0);  add = None
+    return as_strided_copy
+    """,
+        )
+
+        reapply_logs = self.get_logs(
+            f, torch.ones(2, 3), reapply_views=True, run_reinplace=False
+        )
+        self.assertExpectedInline(
+            reapply_logs,
+            """\
+
+
+
+def forward(self, arg0_1):
+    unsqueeze = torch.ops.aten.unsqueeze.default(arg0_1, 2)
+    expand = torch.ops.aten.expand.default(unsqueeze, [2, 3, 3]);  unsqueeze = expand = None
+    add = torch.ops.aten.add.Tensor(arg0_1, 1)
+    copy_ = torch.ops.aten.copy_.default(arg0_1, add);  arg0_1 = copy_ = None
+    as_strided = torch.ops.aten.as_strided.default(add, [2, 3, 3], [3, 1, 0], 0);  add = None
+    return as_strided
+    """,
+        )
+
+        x = torch.randn(2, 3)
+        out = torch.ops.prims.broadcast_in_dim.default(x, [2, 3, 3], [0, 1])
+        self.assertTrue(are_aliased(out.select(2, 0), x))
+
+    def test_prims_broadcast_in_dim_dimension_order(self):
+        def f(x):
+            return torch.ops.prims.broadcast_in_dim.default(x, [2, 5, 3], [0, 2])
+
+        self.assert_functionalization(f, torch.ones(2, 3), reapply_views=self.crossref)
+        if self.crossref:
+            return
+
+        logs = self.get_logs(f, torch.ones(2, 3))
+        self.assertExpectedInline(
+            logs,
+            """\
+
+
+
+def forward(self, arg0_1):
+    unsqueeze = torch.ops.aten.unsqueeze.default(arg0_1, 1);  arg0_1 = None
+    expand = torch.ops.aten.expand.default(unsqueeze, [2, 5, 3]);  expand = None
+    expand_copy = torch.ops.aten.expand_copy.default(unsqueeze, [2, 5, 3]);  unsqueeze = None
+    return expand_copy
+    """,
+        )
+
+        reapply_logs = self.get_logs(
+            f, torch.ones(2, 3), reapply_views=True, run_reinplace=False
+        )
+        self.assertExpectedInline(
+            reapply_logs,
+            """\
+
+
+
+def forward(self, arg0_1):
+    unsqueeze = torch.ops.aten.unsqueeze.default(arg0_1, 1);  arg0_1 = None
+    expand = torch.ops.aten.expand.default(unsqueeze, [2, 5, 3]);  unsqueeze = None
+    return expand
+    """,
+        )
+
+        x = torch.randn(2, 3)
+        expanded = torch.ops.prims.broadcast_in_dim.default(x, [2, 5, 3], [0, 2])
+        self.assertTrue(are_aliased(expanded.select(1, 0), x))
+
     def test_fill_(self):
         def f(x):
             y = x + x

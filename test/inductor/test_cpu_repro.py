@@ -142,6 +142,18 @@ class CPUReproTests(TestCase):
         self.assertEqual(len(actual), 1)
         torch.testing.assert_close(actual[0], expected[0])
 
+    def test_prims_broadcast_in_dim_alias(self):
+        def fn(x: torch.Tensor) -> torch.Tensor:
+            return torch.ops.prims.broadcast_in_dim.default(x, [2, 3, 3], [0, 1])
+
+        x = torch.arange(6.0, dtype=torch.float32).reshape(2, 3)
+
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True)
+
+        expected = fn(x)
+        actual = compiled(x)
+        torch.testing.assert_close(actual, expected)
+
     @skipIfRocm
     def test_conv_stride_constraints(self):
         for fmt in [torch.contiguous_format, torch.channels_last]:
