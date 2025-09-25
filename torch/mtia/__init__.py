@@ -8,14 +8,12 @@ import warnings
 from typing import Any, Callable, Optional, Union
 
 import torch
-from torch import device as _device, Tensor
+from torch import Tensor
 from torch._utils import _dummy_type, _LazySeedTracker, classproperty
 from torch.types import Device
 
 from ._utils import _get_device_index
 
-
-_device_t = Union[_device, str, int]
 
 # torch.mtia.Event/Stream is alias of torch.Event/Stream
 Event = torch.Event
@@ -131,7 +129,7 @@ def is_available() -> bool:
     return device_count() > 0
 
 
-def synchronize(device: Optional[_device_t] = None) -> None:
+def synchronize(device: Optional[Device] = None) -> None:
     r"""Waits for all jobs in all streams on a MTIA device to complete."""
     with torch.mtia.device(device):
         return torch._C._mtia_deviceSynchronize()
@@ -148,7 +146,7 @@ def current_device() -> int:
     return torch._C._accelerator_hooks_get_current_device()
 
 
-def current_stream(device: Optional[_device_t] = None) -> Stream:
+def current_stream(device: Optional[Device] = None) -> Stream:
     r"""Return the currently selected :class:`Stream` for a given device.
 
     Args:
@@ -160,7 +158,7 @@ def current_stream(device: Optional[_device_t] = None) -> Stream:
     return torch._C._mtia_getCurrentStream(_get_device_index(device, optional=True))
 
 
-def default_stream(device: Optional[_device_t] = None) -> Stream:
+def default_stream(device: Optional[Device] = None) -> Stream:
     r"""Return the default :class:`Stream` for a given device.
 
     Args:
@@ -209,7 +207,7 @@ def is_bf16_supported(including_emulation: bool = True):
     return True
 
 
-def get_device_capability(device: Optional[_device_t] = None) -> tuple[int, int]:
+def get_device_capability(device: Optional[Device] = None) -> tuple[int, int]:
     r"""Return capability of a given device as a tuple of (major version, minor version).
 
     Args:
@@ -239,7 +237,7 @@ def set_stream(stream: Stream):
     torch._C._mtia_setCurrentStream(stream)
 
 
-def set_device(device: _device_t) -> None:
+def set_device(device: Device) -> None:
     r"""Set the current device.
 
     Args:
@@ -251,7 +249,7 @@ def set_device(device: _device_t) -> None:
         torch._C._accelerator_hooks_set_current_device(device)
 
 
-def get_device_properties(device: Optional[_device_t] = None) -> dict[str, Any]:
+def get_device_properties(device: Optional[Device] = None) -> dict[str, Any]:
     r"""Return a dictionary of MTIA device properties
 
     Args:
