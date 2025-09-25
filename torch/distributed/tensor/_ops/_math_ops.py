@@ -1234,6 +1234,7 @@ def histc_strategy(op_schema: OpSchema) -> OpStrategy:
         input_strategy.mesh, op_schema, single_mesh_dim_strategies
     )
 
+
 @register_op_strategy(
     [aten.logsumexp.default],
     schema_info=RuntimeSchemaInfo(
