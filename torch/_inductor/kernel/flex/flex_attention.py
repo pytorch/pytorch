@@ -1,16 +1,17 @@
 # mypy: allow-untyped-defs
 """Triton Implementation of the flex_attention Kernel"""
 
+from __future__ import annotations
+
 import logging
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, Optional, Union
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 import sympy
 
 import torch
-from torch._inductor.utils import can_use_tma
 from torch._inductor.virtualized import V
 
 from ...ir import ComputedBuffer, ExternKernel, FixedLayout, TensorBox
@@ -25,6 +26,7 @@ from .common import (
     create_indices_fake,
     create_num_blocks_fake_generator,
     create_placeholder,
+    freeze_irnodes,
     get_fwd_subgraph_outputs,
     infer_dense_strides,
     load_template,
@@ -34,6 +36,10 @@ from .common import (
 )
 from .flex_cpu import lower_cpu
 from .flex_decoding import _use_flex_decoding, create_flex_decoding_kernel
+
+
+if TYPE_CHECKING:
+    from ...template_heuristics.triton import FlexBwDConfig, FlexConfig
 
 
 log = logging.getLogger(__name__)
@@ -144,6 +150,7 @@ def flex_attention(
     subgraph_buffer = build_subgraph_buffer(
         placeholder_inps + list(score_mod_other_buffers), subgraph
     )
+    freeze_irnodes(subgraph_buffer)
 
     mask_graph_placeholder_inps = [
         create_placeholder(name, dtype, query.get_device())
@@ -157,6 +164,7 @@ def flex_attention(
     mask_graph_buffer = build_subgraph_buffer(
         mask_graph_placeholder_inps + list(mask_mod_other_buffers), mask_graph
     )
+    freeze_irnodes(mask_graph_buffer)
 
     kernel_options = dict(kernel_options)
     # Mark symbols in custom kernel options as static shapes and add guards.
@@ -212,6 +220,9 @@ def flex_attention(
 
     score_mod_other_buffers = maybe_realize(score_mod_other_buffers)
     mask_mod_other_buffers = maybe_realize(mask_mod_other_buffers)
+
+    freeze_irnodes(score_mod_other_buffers)
+    freeze_irnodes(mask_mod_other_buffers)
 
     Bq, Hq, seq_len_q, qk_head_dim = query.get_size()
     Bkv, Hkv, seq_len_kv, v_head_dim = value.get_size()
@@ -280,7 +291,7 @@ def flex_attention(
 
     dtype = query.get_dtype()
     head_dim = V.graph.sizevars.guard_int(query.get_size()[-1])
-    configs = V.choices.get_flex_attention_fwd_configs(
+    configs: list[FlexConfig] = V.choices.get_flex_attention_fwd_configs(
         head_dim, dtype, query.get_device().type
     )
 
@@ -316,9 +327,6 @@ def flex_attention(
 
         # USE TMA = false by default
         cur_kernel_options.setdefault("USE_TMA", False)
-
-        if cur_kernel_options["USE_TMA"] and can_use_tma(query, key, value):
-            cur_kernel_options["USE_TMA"] = True
 
         cur_kernel_options.setdefault("BLOCK_M", conf.block_m)
         cur_kernel_options.setdefault("BLOCK_N", conf.block_n)
@@ -623,6 +631,7 @@ def flex_attention_backward(*args, **kwargs):
     fw_subgraph_buffer = build_subgraph_buffer(
         fwd_placeholder_inps + list(score_mod_other_buffers), fw_graph
     )
+    freeze_irnodes(fw_subgraph_buffer)
 
     joint_placeholder_inps = fwd_placeholder_inps + [
         create_placeholder("grad_score_mod", dtype, device)
@@ -638,6 +647,7 @@ def flex_attention_backward(*args, **kwargs):
         joint_placeholder_inps + list(score_mod_other_buffers),
         joint_graph,
     )
+    freeze_irnodes(all_joint_outputs)
 
     joint_outputs = process_joint_outputs(
         all_joint_outputs, len(joint_placeholder_inps)
@@ -655,8 +665,7 @@ def flex_attention_backward(*args, **kwargs):
     mask_graph_buffer = build_subgraph_buffer(
         mask_graph_placeholder_inps + list(mask_mod_other_buffers), mask_graph
     )
-
-    mask_graph_buffer = mask_graph_buffer
+    freeze_irnodes(mask_graph_buffer)
 
     # Construct layout with stride order matching K
     key_size = [Bq, Hkv, seq_len_kv, qk_head_dim]
@@ -723,7 +732,7 @@ def flex_attention_backward(*args, **kwargs):
 
     dtype = query.get_dtype()
     head_dim = V.graph.sizevars.guard_int(query.get_size()[-1])
-    configs = V.choices.get_flex_attention_bwd_configs(
+    configs: list[FlexBwDConfig] = V.choices.get_flex_attention_bwd_configs(
         head_dim, dtype, query.get_device().type
     )
 
@@ -731,12 +740,13 @@ def flex_attention_backward(*args, **kwargs):
     num_consumer_groups, num_buffers_warp_spec = 0, 0
 
     original_kernel_options = kernel_options.copy()
+
     for conf in configs:
         if (
-            SPARSE_KV_BLOCK_SIZE % conf.block_m != 0
-            or SPARSE_Q_BLOCK_SIZE % conf.block_m != 0
-            or SPARSE_KV_BLOCK_SIZE % conf.block_n != 0
-            or SPARSE_Q_BLOCK_SIZE % conf.block_n != 0
+            SPARSE_KV_BLOCK_SIZE % conf.block_n1 != 0
+            or SPARSE_Q_BLOCK_SIZE % conf.block_m1 != 0
+            or SPARSE_KV_BLOCK_SIZE % conf.block_n2 != 0
+            or SPARSE_Q_BLOCK_SIZE % conf.block_m2 != 0
         ):
             continue
 
@@ -759,10 +769,10 @@ def flex_attention_backward(*args, **kwargs):
                 "num_buffers_warp_spec", num_buffers_warp_spec
             )
 
-        cur_kernel_options.setdefault("BLOCK_M1", conf.block_m)
-        cur_kernel_options.setdefault("BLOCK_N1", conf.block_n)
-        cur_kernel_options.setdefault("BLOCK_M2", conf.block_n)
-        cur_kernel_options.setdefault("BLOCK_N2", conf.block_m)
+        cur_kernel_options.setdefault("BLOCK_M1", conf.block_m1)
+        cur_kernel_options.setdefault("BLOCK_N1", conf.block_n1)
+        cur_kernel_options.setdefault("BLOCK_M2", conf.block_m2)
+        cur_kernel_options.setdefault("BLOCK_N2", conf.block_n2)
 
         # Blocksparse options
         cur_kernel_options.setdefault("SPARSE_Q_BLOCK_SIZE", SPARSE_Q_BLOCK_SIZE)
