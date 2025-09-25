@@ -47,7 +47,8 @@ inline void infer_size_impl(
 
   if (infer_dim) {
     // numel is the product of known sizes, it has to be divisible by newsize.
-    // newsize can't be zero.
+    // and newsize should be positive unless newsize == numel (we throw
+    // different) error message in that case.
     if constexpr (std::is_same_v<NumelType, c10::SymInt>) {
       auto v = newsize.maybe_as_int();
       if (v and *v == 0) {
