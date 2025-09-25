@@ -408,8 +408,6 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   TensorArg targs[]{{result, "out", 0}, {self, "self", 1}, {mat1, "mat1", 2}, {mat2, "mat2", 3}};
   checkAllSameGPU(__func__, targs);
 
-  bool useLtInterface = false;
-
   // Handle whether to use the Lt interface {
   static bool persistent_disable_addmm_cuda_lt = isGloballyDisabledAddmmCudaLt(self.device());
   // if lt path fails, we recurse back into this function here and force the lt path to off
@@ -421,7 +419,6 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   #endif
   // Condition on the input
   disable_addmm_cuda_lt = !isInputCompliesAddmmCudaLt(result, self, mat1, mat2, beta, alpha) || disable_addmm_cuda_lt;
-  useLtInterface = isInputCompliesAddmmCudaLt(result, self, mat1, mat2, beta, alpha) && !disable_addmm_cuda_lt;
   // }
 
   at::ScalarType scalar_type = mat1.scalar_type();
@@ -464,7 +461,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
 
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!args.result->is_conj());
 
-  if (useLtInterface) {
+  if (!disable_addmm_cuda_lt) {
 #if defined(USE_ROCM)
     bool okay = true;
     if (is_float_output_with_half_input) {
@@ -654,7 +651,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
 // performing a post-GELU because we weren't able to use the GELU
 // epilogue above.
 #if !defined(CUDA_VERSION) && !defined(USE_ROCM)
-  if (useLtInterface && activation == Activation::GELU) {
+  if (!disable_addmm_cuda_lt && activation == Activation::GELU) {
     at::gelu_(const_cast<Tensor&>(*args.result), "tanh");
   }
 #endif
