@@ -61,31 +61,31 @@ jobs:
       docker-image: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc11-sm90-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc11-sm90-build.outputs.test-matrix }}
     secrets: inherit
-  
+
   linux-jammy-cuda12_8-py3_10-gcc11-sm90-FA3-ABI-stable-test:
-    name: linux-jammy-cuda12.8-py3.10-gcc11-sm90
-    if: github.repository_owner == 'pytorch' 
+    name: linux-jammy-cuda12_8-py3_10-gcc11-sm90-FA3-ABI-stable-test
+    if: github.repository_owner == 'pytorch'
     needs:
       - linux-jammy-cuda12_8-py3_10-gcc11-sm90-build
     permissions:
       id-token: write
       contents: read
-    runs-on: linux.aws.h100
+    runs-on: linux.aws.h100.4
     steps:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
         with:
           no-sudo: true
-      
+
       - name: Checkout flash-attention as a secondary repository
         uses: actions/checkout@v4
         with:
           repository: Dao-AILab/flash-attention
           path: flash-attention
-      
+
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
-     
+
       - name: Calculate docker image
         id: calculate-docker-image
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
@@ -179,7 +179,7 @@ jobs:
           VLLM_TEST_HUGGING_FACE_TOKEN: ${{ secrets.VLLM_TEST_HUGGING_FACE_TOKEN }}
           HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
           SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
-          ARTIFACTS_FILE_SUFFIX: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}_${{ steps.get-job-id.outputs.job-id }}
+          ARTIFACTS_FILE_SUFFIX: ${{ github.job }}-${{ steps.get-job-id.outputs.job-id }}
         run: |
           set -x
 
