@@ -386,6 +386,53 @@ static void launchTunableGemmAndBias(cublasCommonArgs &args, const Scalar& alpha
   }
 }
 
+template <typename scalar_t, typename res_scalar_t = scalar_t>
+bool tryLaunchGemmAndBiasCudaLt(
+    // args contains result which is modified
+    cublasCommonArgs& args,
+    const Tensor& self,
+    const Scalar& alpha,
+    Activation activation = Activation::None
+) {
+  const auto* self_ptr = [&]() -> const scalar_t* {
+    auto* bias_ptr = self.data_ptr<scalar_t>();
+    #ifdef USE_ROCM
+    // This condition is needed for mm case on ROCm for hipblasLt path.
+    // Passing the bias ptr as null to avoid accuracy issues for mm case.
+    if (!args.result->is_same(self)) {
+      bias_ptr = nullptr;
+    }
+    #endif
+    return const_cast<scalar_t*>(bias_ptr);
+  }();
+
+  const auto tuning_ctx = at::cuda::tunable::getTuningContext();
+  if (tuning_ctx->IsTunableOpEnabled()) {
+    launchTunableGemmAndBias<scalar_t>(
+      args, alpha, self_ptr, activation_to_gemm_and_blas_arg(activation)
+    );
+    return true;
+  }
+
+  return at::cuda::blas::gemm_and_bias<scalar_t, res_scalar_t>(
+    args.transa == 't',
+    args.transb == 't',
+    args.m,
+    args.n,
+    args.k,
+    alpha.to<at::opmath_type<scalar_t>>(),
+    args.mata->const_data_ptr<scalar_t>(),
+    args.lda,
+    args.matb->const_data_ptr<scalar_t>(),
+    args.ldb,
+    self_ptr,
+    args.result->data_ptr<res_scalar_t>(),
+    args.result_ld,
+    activation_to_gemm_and_blas_arg(activation)
+  );
+}
+
+
 Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha, Activation activation=Activation::None, bool disable_addmm_cuda_lt_override=false) {
   // Shape checks {
   // Make sure to keep addmm_cuda below in sync with this code; it
@@ -545,32 +592,8 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
         scalar_type,
         "addmm_cuda_lt",
         [&] {
-        auto tuning_ctx = at::cuda::tunable::getTuningContext();
-        if (tuning_ctx->IsTunableOpEnabled()) {
-          launchTunableGemmAndBias<scalar_t>(
-              args,
-              alpha,
-              self.const_data_ptr<scalar_t>(),
-              activation_epilogue);
-        }
-        else {
-          okay = at::cuda::blas::gemm_and_bias<scalar_t>(
-              args.transa == 't',
-              args.transb == 't',
-              args.m,
-              args.n,
-              args.k,
-              alpha.to<at::opmath_type<scalar_t>>(),
-              args.mata->const_data_ptr<scalar_t>(),
-              args.lda,
-              args.matb->const_data_ptr<scalar_t>(),
-              args.ldb,
-              self.const_data_ptr<scalar_t>(),
-              args.result->data_ptr<scalar_t>(),
-              args.result_ld,
-              activation_epilogue
-          );
-      }});
+        okay = tryLaunchGemmAndBiasCudaLt<scalar_t>(args, self, alpha, activation);
+      });
     }
     if (!okay) {
       // lt path failed; recurse but disable lt path
