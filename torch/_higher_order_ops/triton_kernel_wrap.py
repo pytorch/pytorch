@@ -373,8 +373,21 @@ def generate_ttir(
                 get_triton_attrs_descriptor_version()
                 == TritonAttrsDescriptorVersion.V4_DICT
             )
-            # specialize_impl switched to create_specialize_impl in https://github.com/triton-lang/triton/pull/6099
-            if hasattr(triton.runtime.jit, "create_specialize_impl"):
+
+            if hasattr(triton._C.libtriton, "native_specialize_impl"):
+                # native_specialize_impl was introduced in https://github.com/triton-lang/triton/pull/7771
+                #
+                # Named arguments are used for these bool values below, but the C function does not
+                # accept keyword arguments. Create a Python wrapper function instead of using
+                # `functools.partial` to allow use of either keyword or positional arguments.
+                def specialize_impl(
+                    arg: Any, is_const: bool, specialize_value: bool, align: bool
+                ) -> tuple[str | tuple[str, ...], Any]:
+                    return triton._C.libtriton.native_specialize_impl(
+                        backend, arg, is_const, specialize_value, align
+                    )
+            elif hasattr(triton.runtime.jit, "create_specialize_impl"):
+                # specialize_impl switched to create_specialize_impl in https://github.com/triton-lang/triton/pull/6099
                 try:
                     # Latest versions of Triton take specialize_extra as an arg to create_specialize_impl
                     specialize_impl = triton.runtime.jit.create_specialize_impl(
