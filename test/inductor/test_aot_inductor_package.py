@@ -579,14 +579,39 @@ class TestAOTInductorPackage(TestCase):
             torch.randn(10, 10, device=self.device),
         )
         metadata = {"dummy": "moo"}
-        compiled_model = self.check_model(
-            Model(),
-            example_inputs,
-            inductor_configs={"aot_inductor.metadata": metadata},
-        )
+
+        with torch.no_grad():
+            torch.manual_seed(0)
+            model = Model().to(device=self.device)
+            ref_model = copy.deepcopy(model)
+            ref_inputs = copy.deepcopy(example_inputs)
+            expected = ref_model(*ref_inputs)
+
+            inductor_configs = {
+                "aot_inductor.package_cpp_only": self.package_cpp_only,
+                "aot_inductor.metadata": metadata,
+            }
+
+            with WritableTempFile(suffix=".pt2") as f:
+                ep = torch.export.export(model, example_inputs, strict=False)
+                package_path = torch._inductor.aoti_compile_and_package(
+                    ep, package_path=f.name, inductor_configs=inductor_configs
+                )  # type: ignore[arg-type]
+
+                # We can load the metadata w/o loading the actual package
+                loaded_metadata = (
+                    torch._C._aoti.AOTIModelPackageLoader.load_metadata_from_package(
+                        package_path, "model"
+                    )
+                )
+                self.assertEqual(loaded_metadata.get("dummy"), "moo")
+
+                compiled_model = torch._inductor.aoti_load_package(package_path)
+
+            actual = compiled_model(*example_inputs)
+            self.assertEqual(actual, expected)
 
         loaded_metadata = compiled_model.get_metadata()  # type: ignore[attr-defined]
-
         self.assertEqual(loaded_metadata.get("dummy"), "moo")
 
     def test_bool_input(self):
