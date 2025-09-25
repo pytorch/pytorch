@@ -689,6 +689,14 @@ bool can_use_cudnn_attention(const sdp_params& params, bool debug) {
   }
   return false;
 #endif
+#if defined(CUDNN_VERSION) && CUDNN_VERSION > 91000 && CUDNN_VERSION < 91400
+  if (params.dropout > 0.0) {
+    if (debug) {
+      TORCH_WARN(CUDNN_VERSION, " cuDNN version does not support droppout in SDPA (9.11 - 9.13).");
+    }
+    return false;
+  }
+#endif
   // Define gate functions that determine if a flash kernel can be ran
   // Replace with std::to_array when we migrate to c++20
   constexpr auto general_constraints =
