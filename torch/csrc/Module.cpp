@@ -121,14 +121,10 @@
 #endif
 #endif
 
-#ifdef USE_DISTRIBUTED
-#ifdef USE_C10D
 #include <torch/csrc/distributed/autograd/python_autograd.h>
 #include <torch/csrc/distributed/c10d/c10d.h>
 #include <torch/csrc/distributed/rpc/rpc.h>
 #include <torch/csrc/distributed/rpc/testing/testing.h>
-#endif
-#endif
 
 #if defined(USE_VALGRIND)
 #include <callgrind.h>
@@ -553,11 +549,7 @@ static PyObject* THPModule_getBackcompatKeepdimWarn(
 }
 
 static PyObject* THPModule_hasDistributed(PyObject* _unused, PyObject* noargs) {
-#ifdef USE_DISTRIBUTED
   Py_RETURN_TRUE;
-#else
-  Py_RETURN_FALSE;
-#endif
 }
 
 static PyObject* THPModule_showConfig(PyObject* module, PyObject* noargs) {
@@ -2009,7 +2001,6 @@ PyObject* initModule() {
 #ifdef USE_XPU
   THPUtils_addPyMethodDefs(methods, THXPModule_methods());
 #endif
-#if defined(USE_DISTRIBUTED) && defined(USE_C10D)
   THPUtils_addPyMethodDefs(
       methods, torch::distributed::c10d::python_functions());
 #ifndef _WIN32
@@ -2019,7 +2010,6 @@ PyObject* initModule() {
       methods, torch::distributed::autograd::python_functions());
   THPUtils_addPyMethodDefs(
       methods, torch::distributed::rpc::testing::python_functions());
-#endif
 #endif
 
   static struct PyModuleDef torchmodule = {
