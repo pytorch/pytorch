@@ -1007,6 +1007,24 @@ print(t.is_pinned())
         s.record_event(e)
         self.assertTrue("torch.cuda.Event" in e.__repr__())
 
+    def test_cuda_stream_protocol(self):
+        stream = torch.cuda.Stream()
+
+        self.assertTrue(hasattr(stream, "__cuda_stream__"))
+
+        result = stream.__cuda_stream__()
+
+        self.assertIsInstance(result, tuple)
+        self.assertEqual(len(result), 2)
+        self.assertEqual(result[0], 0)  # Protocol version
+        self.assertEqual(result[1], stream.cuda_stream)  # Stream handle
+
+        external_stream = torch.cuda.ExternalStream(stream.cuda_stream)
+        external_result = external_stream.__cuda_stream__()
+
+        self.assertEqual(external_result[0], 0)
+        self.assertEqual(external_result[1], external_stream.cuda_stream)
+
     def test_events(self):
         stream = torch.cuda.current_stream()
         event = torch.cuda.Event(enable_timing=True)
@@ -3104,6 +3122,54 @@ exit(2)
         g.replay()
 
         model(x)
+
+    @skipIfRocm
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @serialTest()
+    def test_graph_checkpoint_preserve_rng_state(self):
+        torch.cuda.manual_seed(42)
+
+        def fn(x):
+            return x * torch.sigmoid(torch.randn(1, device="cuda"))
+
+        fn(torch.ones(1, device="cuda"))
+
+        torch.cuda.manual_seed(42)
+        eager_in = torch.ones(1, device="cuda", requires_grad=True)
+        eager_out = torch.utils.checkpoint.checkpoint(
+            fn, eager_in, use_reentrant=False, preserve_rng_state=True
+        )
+        (eager_in_grad,) = torch.autograd.grad(eager_out, eager_in)
+
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(g):
+            graph_in = torch.ones(1, device="cuda", requires_grad=True)
+            graph_out = torch.utils.checkpoint.checkpoint(
+                fn, graph_in, use_reentrant=False, preserve_rng_state=True
+            )
+            (graph_in_grad,) = torch.autograd.grad(graph_out, graph_in)
+
+        torch.cuda.manual_seed(42)
+        g.replay()
+
+        self.assertEqual(eager_in_grad, graph_in_grad, rtol=0.0, atol=0.0)
+
+    @skipIfRocm
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @serialTest()
+    def test_graph_manual_seed_mismatch_raises(self):
+        torch.cuda.manual_seed(0)
+        g = torch.cuda.CUDAGraph()
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "CUDAGeneratorImpl::set_current_seed can be called during stream capture only if new seed is the same as the original seed.",  # noqa: B950
+        ):
+            with torch.cuda.graph(g):
+                torch.cuda.manual_seed(1)
 
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
@@ -6748,15 +6814,13 @@ class TestCompileKernel(TestCase):
         self.assertEqual(c_int, expected_int)
 
         # Test with header code
-        header_code = """
+        scale_kernel_source = """
         #define SCALE_FACTOR 2.0f
 
         __device__ float scale_value(float val) {
             return val * SCALE_FACTOR;
         }
-        """
 
-        scale_kernel_source = """
         __global__ void scale_tensors(const float* input, float* output, int n) {
             int i = threadIdx.x + blockIdx.x * blockDim.x;
             if (i < n)
@@ -6764,9 +6828,7 @@ class TestCompileKernel(TestCase):
         }
         """
 
-        scale_kernel = _compile_kernel(
-            scale_kernel_source, "scale_tensors", header_code=header_code
-        )
+        scale_kernel = _compile_kernel(scale_kernel_source, "scale_tensors")
 
         input_tensor = torch.rand(N, device="cuda")
         output_tensor = torch.empty_like(input_tensor)
@@ -6861,7 +6923,7 @@ class TestCompileKernel(TestCase):
         with self.assertRaises(RuntimeError):
             kernel.set_shared_memory_config(excessive_shared_mem)
 
-    @tf32_on_and_off(0.005)
+    @tf32_on_and_off(0.05 if TEST_WITH_ROCM else 0.005)
     @unittest.skipIf(not TEST_CUDA, "No CUDA")
     def test_compile_kernel_advanced(self):
         # Test matrix multiplication
@@ -7168,6 +7230,42 @@ class TestCompileKernel(TestCase):
         # Verify results
         expected = a + b
         self.assertEqual(c, expected)
+
+    @unittest.skipIf(not TEST_CUDA, "No CUDA")
+    def test_compile_kernel_dlpack(self):
+        """Test that compile_kernel works with tensors created via DLPack."""
+        kernel_source = """
+        __global__ void add_tensors(const float* a, const float* b, float* c, int n) {
+            int i = threadIdx.x + blockIdx.x * blockDim.x;
+            if (i < n)
+                c[i] = a[i] + b[i];
+        }
+        """
+
+        from torch.cuda import _compile_kernel
+
+        add_kernel = _compile_kernel(kernel_source, "add_tensors")
+
+        N = 512
+        a = torch.rand(N, device="cuda", dtype=torch.float32)
+        b = torch.rand(N, device="cuda", dtype=torch.float32)
+
+        a_dlpack = torch.utils.dlpack.from_dlpack(torch.utils.dlpack.to_dlpack(a))
+        b_dlpack = torch.utils.dlpack.from_dlpack(torch.utils.dlpack.to_dlpack(b))
+        c = torch.empty_like(a)
+
+        threads_per_block = 256
+        blocks_per_grid = (N + threads_per_block - 1) // threads_per_block
+
+        add_kernel(
+            grid=(blocks_per_grid, 1, 1),
+            block=(threads_per_block, 1, 1),
+            args=[a_dlpack, b_dlpack, c, N],
+        )
+
+        self.assertEqual(c, a + b)
+        a_dlpack[0] = 42.0
+        self.assertEqual(a[0].item(), 42.0, "DLPack tensors should share memory")
 
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
