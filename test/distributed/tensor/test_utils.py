@@ -700,7 +700,7 @@ class TestStridedSharding(DTensorTestBase):
         )
 
         for size in (2, 3, 5, 11):
-            tensor = torch.arange(size).view(1, -1).cuda()
+            tensor = torch.arange(size, device=self.device_type).view(1, -1)
             dtensor = distribute_tensor(
                 tensor,
                 device_mesh=mesh,
