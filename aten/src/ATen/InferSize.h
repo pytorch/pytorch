@@ -68,7 +68,7 @@ inline void infer_size_impl(
     // numel is the product of known sizes it has to be divisible by newsize.
     if constexpr (std::is_same_v<NumelType, c10::SymInt>) {
       TORCH_MAYBE_SYM_CHECK(
-          sym_gt(numel, newsize).sym_and(sym_eq(numel % newsize, 0)),
+          sym_gt(numel, 0).sym_and(sym_eq(numel % newsize, 0)),
           "shape '",
           shape,
           "' is invalid for input");
