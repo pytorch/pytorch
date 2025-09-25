@@ -1,16 +1,16 @@
 import sys
 
-import torch
-
 from benchmark_base import BenchmarkBase
+
+import torch
 from torch.autograd.grad_mode import inference_mode
 
 
 class Benchmark(BenchmarkBase):
     def __init__(self, requires_grad, inference_mode, backward, dynamic):
-        assert not (
-            inference_mode and backward
-        ), "inference_mode and backward cannot be both True"
+        assert not (inference_mode and backward), (
+            "inference_mode and backward cannot be both True"
+        )
 
         self._requires_grad = requires_grad
         self._inference_mode = inference_mode
