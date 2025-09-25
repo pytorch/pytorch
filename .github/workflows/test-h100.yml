@@ -73,7 +73,7 @@ jobs:
     runs-on: linux.aws.h100
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout_pytorch@main
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
         with:
           no-sudo: true
       
