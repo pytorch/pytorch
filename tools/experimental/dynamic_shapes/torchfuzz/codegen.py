@@ -83,20 +83,20 @@ class DefaultFuzzTemplate(FuzzTemplate):
 
                 elif isinstance(spec, TensorSpec):
                     size_str = str(spec.size)
-                    stride_str = str(spec.stride)
                     dtype_str = f"torch.{spec.dtype}".replace("torch.torch.", "torch.")
 
                     # Calculate storage size needed for the strided tensor
                     if spec.size:
-                        storage_size = 1
+                        # Calculate the maximum index that will be accessed
+                        max_offset = 0
                         for dim_size, stride in zip(spec.size, spec.stride):
                             if dim_size > 1:
-                                storage_size = max(
-                                    storage_size, (dim_size - 1) * abs(stride) + 1
-                                )
+                                max_offset += (dim_size - 1) * abs(stride)
+                        storage_size = max_offset + 1
                     else:
                         storage_size = 1
 
+                    stride_str = str(spec.stride)
                     code_lines.append(
                         f"{arg_name} = torch.as_strided(torch.randn({storage_size}).to({dtype_str}), {size_str}, {stride_str})"
                     )
@@ -110,7 +110,7 @@ class DefaultFuzzTemplate(FuzzTemplate):
         """Generate execution code for default template."""
         return [
             "",
-            f"args = {args_tuple}",
+            f"args = {args_tuple} + (sentinel,)",
             "result_original = fuzzed_program(*args)",
             "print('✅ eager success')",
             "compiled_program = torch.compile(fuzzed_program, fullgraph=False, dynamic=True)",
@@ -208,13 +208,31 @@ class DTensorFuzzTemplate(FuzzTemplate):
                     size_str = str(spec.size)
                     dtype_str = f"torch.{spec.dtype}".replace("torch.torch.", "torch.")
 
-                    # Create local tensor first, then convert to DTensor
-                    code_lines.extend(
-                        [
-                            f"{arg_name}_local = torch.rand({size_str}, dtype={dtype_str}, device='cuda', requires_grad=True)",
-                            f"{arg_name} = DTensor.from_local({arg_name}_local, mesh, placements)",
-                        ]
-                    )
+                    # Handle different dtypes appropriately for DTensor
+                    if spec.dtype in [torch.int32, torch.int64, torch.int8, torch.int16]:
+                        # Integer dtypes: use randint and no requires_grad
+                        code_lines.extend(
+                            [
+                                f"{arg_name}_local = torch.randint(1, 10, {size_str}, dtype={dtype_str}, device='cuda')",
+                                f"{arg_name} = DTensor.from_local({arg_name}_local, mesh, placements)",
+                            ]
+                        )
+                    elif spec.dtype == torch.bool:
+                        # Boolean dtype: use randint and cast to bool
+                        code_lines.extend(
+                            [
+                                f"{arg_name}_local = torch.randint(0, 2, {size_str}, device='cuda').bool()",
+                                f"{arg_name} = DTensor.from_local({arg_name}_local, mesh, placements)",
+                            ]
+                        )
+                    else:
+                        # Float dtypes: use randn and requires_grad
+                        code_lines.extend(
+                            [
+                                f"{arg_name}_local = torch.randn({size_str}, dtype={dtype_str}, device='cuda', requires_grad=True)",
+                                f"{arg_name} = DTensor.from_local({arg_name}_local, mesh, placements)",
+                            ]
+                        )
 
         return code_lines
 
@@ -225,7 +243,7 @@ class DTensorFuzzTemplate(FuzzTemplate):
         """Generate DTensor-specific execution code with backward passes and comparison."""
         return [
             "",
-            f"args = {args_tuple}",
+            f"args = {args_tuple} + (sentinel,)",
             "if __name__ == '__main__':",
             "    out_eager = fuzzed_program(*args)",
             "    out_eager.sum().backward()",
@@ -252,6 +270,121 @@ class DTensorFuzzTemplate(FuzzTemplate):
         ]
 
 
+class UnbackedFuzzTemplate(FuzzTemplate):
+    def __init__(self):
+        super().__init__(
+            supported_ops=[
+                "torch.ops.aten.item",
+                "torch.ops.aten.nonzero",
+                "torch.ops.aten.masked_select",
+                "torch.ops.aten.unique",
+                # Include basic operations for building up data
+                "torch.add",
+                "torch.sub",
+                "torch.mul",
+            ],
+            checks=[
+                "eager",
+                "compile+fullgraph+dynamic",
+            ],
+        )
+
+    def supported_dtypes(self):
+        """Return list of dtypes good for data-dependent operations."""
+        # Focus on dtypes that work well with data-dependent ops and arithmetic
+        # Exclude bool since arithmetic operations don't work with boolean tensors
+        return [
+            torch.float32,
+            torch.float64,
+            torch.int32,
+            torch.int64,
+        ]
+
+    def imports_codegen(self):
+        return [
+            "import torch",
+        ]
+
+    def flags_codegen(self):
+        return [
+            "torch._dynamo.config.capture_scalar_outputs = True",
+            "torch._dynamo.config.capture_dynamic_output_shape_ops = True",
+        ]
+
+    def args_codegen(self, arg_operations):
+        """Generate argument creation code for unbacked template."""
+        code_lines = []
+
+        # Add sentinel tensor that ensures gradient computation
+        code_lines.extend(
+            [
+                "# Sentinel tensor to ensure gradient computation",
+                "sentinel = torch.tensor(1.0, requires_grad=True)",
+                "",
+            ]
+        )
+
+        if arg_operations:
+            for i, (node_id, spec) in enumerate(arg_operations):
+                arg_name = f"arg_{i}"
+
+                if isinstance(spec, ScalarSpec):
+                    dtype_str = f"torch.{spec.dtype}".replace("torch.torch.", "torch.")
+                    code_lines.append(
+                        f"{arg_name} = torch.tensor(torch.randn(()), dtype={dtype_str}).item()"
+                    )
+
+                elif isinstance(spec, TensorSpec):
+                    size_str = str(spec.size)
+                    dtype_str = f"torch.{spec.dtype}".replace("torch.torch.", "torch.")
+
+                    # For unbacked operations, create tensors with specific patterns
+                    # that are likely to produce meaningful results
+                    if spec.dtype == torch.bool:
+                        # For boolean tensors, create a mix of True/False values
+                        code_lines.append(
+                            f"{arg_name} = torch.randint(0, 2, {size_str}, dtype={dtype_str}) > 0"
+                        )
+                    elif spec.dtype in [torch.int32, torch.int64]:
+                        # For integer tensors, create values that will have some duplicates
+                        # and some unique values for operations like unique()
+                        code_lines.append(
+                            f"{arg_name} = torch.randint(0, 3, {size_str}, dtype={dtype_str})"
+                        )
+                    else:
+                        # For float tensors, create values with some zeros and non-zeros
+                        code_lines.append(
+                            f"{arg_name} = (torch.randn({size_str}) * 2).to({dtype_str})"
+                        )
+                        # Zero out some values to make nonzero operations meaningful
+                        code_lines.append(f"{arg_name}[{arg_name}.abs() < 0.5] = 0")
+
+        return code_lines
+
+    def execution_codegen(self, args_tuple):
+        """Generate execution code for unbacked template - test both eager and compile."""
+        return [
+            "",
+            f"args = {args_tuple} + (sentinel,)",
+            "result_original = fuzzed_program(*args)",
+            "print('✅ eager success')",
+            "# Test compilation with unbacked operations - this should work!",
+            "compiled_program = torch.compile(fuzzed_program, fullgraph=True, dynamic=True)",
+            "result_compiled = compiled_program(*args)",
+            "print('✅ compile success with unbacked operations')",
+            "",
+            "# Compare results - shapes may differ due to data-dependent operations",
+            "print(f'Eager result: {result_original}')",
+            "print(f'Compiled result: {result_compiled}')",
+            "if hasattr(result_original, 'shape') and hasattr(result_compiled, 'shape'):",
+            "    print(f'Eager shape: {result_original.shape}')",
+            "    print(f'Compiled shape: {result_compiled.shape}')",
+        ]
+
+    def epilogue_codegen(self):
+        return []
+
+
 def convert_graph_to_python_code(
     operation_graph: OperationGraph,
     seed: Optional[int] = None,
@@ -276,6 +409,8 @@ def convert_graph_to_python_code(
     # Instantiate template
     if template == "dtensor":
         fuzz_template = DTensorFuzzTemplate()
+    elif template == "unbacked":
+        fuzz_template = UnbackedFuzzTemplate()
     else:
         fuzz_template = DefaultFuzzTemplate(None, None)
 
@@ -350,9 +485,9 @@ def convert_graph_to_python_code(
     # Generate function signature based on discovered arg operations
     if arg_operations:
         arg_names = [f"arg_{i}" for i in range(len(arg_operations))]
-        function_signature = f"def fuzzed_program({', '.join(arg_names)})"
+        function_signature = f"def fuzzed_program({', '.join(arg_names)}, sentinel)"
     else:
-        function_signature = "def fuzzed_program()"
+        function_signature = "def fuzzed_program(sentinel)"
 
     # Build the complete code - all imports at the top
     code_lines = []
@@ -389,8 +524,20 @@ def convert_graph_to_python_code(
                 "",
             ]
         )
+    elif template == "unbacked":
+        # For unbacked template, use passed-in sentinel
+        code_lines.extend(
+            [
+                "    # Ensure gradient computation by multiplying with sentinel",
+                f"    result = {final_var_name} * sentinel",
+                "    if result.is_complex():",
+                "        result = result.real",
+                "    return result",
+                "",
+            ]
+        )
     else:
-        # For default template, use .real which works fine
+        # For default template, use passed-in sentinel
         code_lines.extend(
             [
                 "    # Ensure gradient computation by multiplying with sentinel and taking real part",
@@ -403,9 +550,8 @@ def convert_graph_to_python_code(
         )
 
     # Generate argument creation code using template
-    if arg_operations:
-        arg_code_lines = fuzz_template.args_codegen(arg_operations)
-        code_lines.extend(arg_code_lines)
+    arg_code_lines = fuzz_template.args_codegen(arg_operations)
+    code_lines.extend(arg_code_lines)
 
     # Generate the final execution with both normal and compiled versions
     if arg_operations:

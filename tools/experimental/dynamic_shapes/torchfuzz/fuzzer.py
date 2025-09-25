@@ -184,7 +184,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--template",
-        choices=["default", "dtensor"],
+        choices=["default", "dtensor", "unbacked"],
         default="default",
         help="Template to use for code generation (default: default)",
     )
@@ -266,6 +266,7 @@ if __name__ == "__main__":
                 seed_start=args.start,
                 seed_count=args.count,
                 verbose=args.verbose,
+                template=args.template,
             )
         except Exception as e:
             print(f"❌ Unexpected error: {str(e)}")

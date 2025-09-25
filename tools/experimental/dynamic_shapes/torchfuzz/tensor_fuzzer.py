@@ -52,11 +52,11 @@ def fuzz_torch_tensor_type(template: str = "default") -> torch.dtype:
 
         fuzz_template = DTensorFuzzTemplate()
         tensor_dtypes = fuzz_template.supported_dtypes()
-    elif template != "default":
+    elif template == "unbacked":
         # Import here to avoid circular imports
-        from torchfuzz.codegen import DefaultFuzzTemplate
+        from torchfuzz.codegen import UnbackedFuzzTemplate
 
-        fuzz_template = DefaultFuzzTemplate(None, None)
+        fuzz_template = UnbackedFuzzTemplate()
         tensor_dtypes = fuzz_template.supported_dtypes()
     else:
         # Default behavior - all types

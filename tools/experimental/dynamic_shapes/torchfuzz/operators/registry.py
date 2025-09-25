@@ -6,8 +6,11 @@ from torchfuzz.operators.arg import ArgOperator
 from torchfuzz.operators.base import Operator
 from torchfuzz.operators.constant import ConstantOperator
 from torchfuzz.operators.item import ItemOperator
+from torchfuzz.operators.masked_select import MaskedSelectOperator
+from torchfuzz.operators.nonzero import NonzeroOperator
 from torchfuzz.operators.scalar_pointwise import ScalarPointwiseOperator
 from torchfuzz.operators.tensor_pointwise import TensorPointwiseOperator
+from torchfuzz.operators.unique import UniqueOperator
 
 
 class OperatorRegistry:
@@ -25,6 +28,10 @@ class OperatorRegistry:
         self.register(ItemOperator())
         self.register(ConstantOperator())
         self.register(ArgOperator())
+        # Data-dependent operators
+        self.register(NonzeroOperator())
+        self.register(MaskedSelectOperator())
+        self.register(UniqueOperator())
 
     def register(self, operator: Operator):
         """Register an operator in the registry."""

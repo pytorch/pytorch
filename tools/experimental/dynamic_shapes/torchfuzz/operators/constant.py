@@ -15,6 +15,11 @@ class ConstantOperator(Operator):
 
     def __init__(self):
         super().__init__("constant")
+        self.template = "default"  # Track template for DTensor compatibility
+
+    def set_template(self, template: str):
+        """Set the template for context-aware code generation."""
+        self.template = template
 
     def can_produce(self, output_spec: Spec) -> bool:
         """Constant can produce any type of output."""
@@ -77,11 +82,17 @@ class ConstantOperator(Operator):
                     torch.complex128: 0.0,
                 }
                 fill_value = default_values.get(output_spec.dtype, 0)
-                return f"{output_name} = torch.full({size_str}, {fill_value}, dtype={dtype_str})"
+                tensor_creation = f"torch.full({size_str}, {fill_value}, dtype={dtype_str})"
             else:
                 # For non-empty tensors, use the first element as fill value
                 fill_value = actual_tensor.flatten()[0].item()
-                return f"{output_name} = torch.full({size_str}, {fill_value}, dtype={dtype_str})"
+                tensor_creation = f"torch.full({size_str}, {fill_value}, dtype={dtype_str})"
+
+            # For DTensor template, convert to DTensor
+            if self.template == "dtensor":
+                return f"{output_name}_local = {tensor_creation}.to('cuda')\n    {output_name} = DTensor.from_local({output_name}_local, mesh, placements)"
+            else:
+                return f"{output_name} = {tensor_creation}"
 
         else:
             return f"# Unknown output spec type for constant: {type(output_spec)}"

@@ -20,8 +20,8 @@ class ItemOperator(Operator):
             raise ValueError("ItemOperator can only produce ScalarSpec outputs")
 
         # Create a tensor spec that can produce a scalar via .item()
-        # Use a 1-D tensor with 1 element
-        tensor_spec = TensorSpec(size=(1,), stride=(1,), dtype=output_spec.dtype)
+        # Use a 0-D tensor (scalar tensor) to ensure .item() works reliably
+        tensor_spec = TensorSpec(size=(), stride=(), dtype=output_spec.dtype)
 
         return [tensor_spec]
 
