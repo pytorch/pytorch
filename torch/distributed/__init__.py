@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 import logging
-import pdb
 import sys
 import traceback
 import typing
@@ -58,23 +57,27 @@ from torch.distributed._distributed_c10d import (
     Work as _Work,
 )
 
-
-class _DistributedPdb(pdb.Pdb):
+def _make_distributed_pdb():
     """
     Supports using PDB from inside a multiprocessing child process.
 
     Usage:
-    _DistributedPdb().set_trace()
+    _make_distributed_pdb().set_trace()
     """
 
-    def interaction(self, *args, **kwargs):
-        _stdin = sys.stdin
-        try:
-            sys.stdin = open("/dev/stdin")
-            pdb.Pdb.interaction(self, *args, **kwargs)
-        finally:
-            sys.stdin = _stdin
+    # Lazy import pdb only if we set breakpoints.
+    import pdb
 
+    class _DistributedPdb(pdb.Pdb):
+        def interaction(self, *args, **kwargs):
+            _stdin = sys.stdin
+            try:
+                sys.stdin = open("/dev/stdin")
+                pdb.Pdb.interaction(self, *args, **kwargs)
+            finally:
+                sys.stdin = _stdin
+
+    return _DistributedPdb()
 
 _breakpoint_cache: dict[int, typing.Any] = {}
 
@@ -104,7 +107,7 @@ def breakpoint(rank: int = 0, skip: int = 0, timeout_s=3600):
             )
 
     if get_rank() == rank:
-        pdb = _DistributedPdb()
+        pdb = _make_distributed_pdb()
         pdb.message(
             "\n!!! ATTENTION !!!\n\n"
             f"Type 'up' to get to the frame that called dist.breakpoint(rank={rank})\n"
