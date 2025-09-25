@@ -247,6 +247,14 @@ configure_file("${TORCH_SRC_DIR}/csrc/api/include/torch/version.h.in"
   "${TORCH_SRC_DIR}/csrc/api/include/torch/version.h"
   @ONLY)
 
+# Just trying this out
+# Copy generated version.h to headeronly directory for stable ABI infrastructure
+if(NOT NO_API)
+  configure_file("${TORCH_SRC_DIR}/csrc/api/include/torch/version.h"
+    "${TORCH_SRC_DIR}/headeronly/version.h"
+    COPYONLY)
+endif()
+
 set(GENERATED_CXX_TORCH
   "${TORCH_SRC_DIR}/csrc/autograd/generated/Functions.cpp"
   "${TORCH_SRC_DIR}/csrc/autograd/generated/ViewFuncs.cpp"

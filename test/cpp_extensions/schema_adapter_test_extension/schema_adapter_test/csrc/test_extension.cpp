@@ -49,7 +49,8 @@ torch::jit::Stack adapt_dummy_op_v1_to_v2(
   // Extension provides 1 arg (input), current schema expects 2 (input, a)
   // Convert the input StableIValue to IValue
   auto arg_type = current_schema.arguments()[0].type();
-  ivalue_stack.push_back(to_ivalue(arg_type, extension_stack[0]));
+  ivalue_stack.push_back(
+      to_ivalue(arg_type, extension_stack[0], extension_abi_version));
 
   // Add the missing 2nd argument (a=2 as default)
   ivalue_stack.push_back(c10::IValue(static_cast<int64_t>(2)));

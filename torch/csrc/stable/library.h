@@ -4,7 +4,7 @@
 // code for better UX.
 
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
-#include <torch/csrc/stable/version.h>
+#include <torch/headeronly/target_version.h>
 
 // Technically, this file doesn't use anything from stableivalue_conversions.h,
 // but we need to include it here as the contents of stableivalue_conversions.h
@@ -83,7 +83,7 @@ class StableLibrary final {
   StableLibrary& impl(
       const char* name,
       void (*fn)(StableIValue*, uint64_t, uint64_t)) {
-    aoti_torch_library_impl(lib_, name, fn);
+    aoti_torch_library_impl_v2(lib_, name, fn, TORCH_FEATURE_VERSION);
     return *this;
   }
 
