@@ -26,6 +26,7 @@
 #include <ATen/native/Normalization.h>
 #include <c10/core/Device.h>
 #include <c10/core/DispatchKeySet.h>
+#include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/util/AbortHandler.h>
 #include <c10/util/Backtrace.h>
 #include <c10/util/Logging.h>
@@ -403,9 +404,11 @@ static PyObject* THPModule_swap_tensor_impl(PyObject* _unused, PyObject* args) {
   // The TensorImpls contain PyObjectSlots that have a reference to the PyObject
   // associated with the TensorImpl. Swap this field as well.
   std::optional<PyObject*> mb_obj_a =
-      a->cdata->unsafeGetTensorImpl()->pyobj_slot()->check_pyobj();
+      a->cdata->unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
+          /*ignore_hermetic_tls=*/false);
   std::optional<PyObject*> mb_obj_b =
-      b->cdata->unsafeGetTensorImpl()->pyobj_slot()->check_pyobj();
+      b->cdata->unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
+          /*ignore_hermetic_tls=*/false);
   TORCH_INTERNAL_ASSERT(
       mb_obj_a.has_value() && mb_obj_b.has_value(),
       "Both tensors should have PyObjects tagged by the current python interpreter");
@@ -1548,6 +1551,15 @@ static PyObject* THPModule_are_vmap_fallback_warnings_enabled(
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THCPModule_ensureCUDADeviceGuardSet(
+    PyObject* self,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  c10::impl::ensureCUDADeviceGuardSet();
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 static std::initializer_list<PyMethodDef> TorchMethods = {
     {"_initExtension", THPModule_initExtension, METH_O, nullptr},
     {"_autograd_init", THPAutograd_initExtension, METH_NOARGS, nullptr},
@@ -1843,7 +1855,13 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
      (PyCFunction)(void (*)())THPModule_has_torch_function_variadic,
      METH_FASTCALL,
      nullptr},
-    {nullptr, nullptr, 0, nullptr}};
+    {"_ensureCUDADeviceGuardSet",
+     THCPModule_ensureCUDADeviceGuardSet,
+     METH_NOARGS,
+     nullptr},
+    {nullptr, nullptr, 0, nullptr}
+
+};
 
 #ifdef USE_CUDA
 // NOLINTBEGIN(misc-use-internal-linkage)
