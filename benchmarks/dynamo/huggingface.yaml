@@ -9,6 +9,9 @@ skip:
     # Fails with even batch size = 1
     - GPTJForCausalLM
     - GPTJForQuestionAnswering
+    # Model too big or the benchmark is taking too long (timeout)
+    - google/gemma-3-4b-it
+    - openai/gpt-oss-20b
 
   device:
     cpu:
