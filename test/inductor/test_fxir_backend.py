@@ -483,10 +483,11 @@ class FxirTestCase(InductorTestCase):
         )
         self.assertIn("ks0", triton_node.kwargs["kwargs"])
 
-    def test_dynamic_launch_grid_calc_python(self):
+    def test_dynamic_launch_grid_calc(self):
         """
-        Test the dyanmic launch grid calculation for Triton kernel wrapper using python mode
+        Test the dyanmic launch grid calculation.
         """
+
         func = torch.add
         args = [torch.randn(shape, device=self.device) for shape in [(7, 12), (7, 1)]]
         (gm,) = self._compile_and_check(func, args, compile_kwargs={"dynamic": True})
@@ -504,41 +505,6 @@ class FxirTestCase(InductorTestCase):
         self.assertEqual(grid[0].meta["val"], -(-xnumel // xblock))
         self.assertEqual(grid[1], 1)
         self.assertEqual(grid[2], 1)
-
-    def test_dynamic_launch_grid_calc_python_slow(self):
-        """
-        Test the dyanmic launch grid calculation for Triton kernel wrapper using python_slow mode
-        """
-        from torch._inductor.runtime.triton_heuristics import GridExpr
-
-        # Mock GridExpr.from_meta to use "python_slow" mode explicitly
-        original_from_meta = GridExpr.from_meta
-
-        def mocked_from_meta(inductor_meta, cfg, mode="python"):
-            return original_from_meta(inductor_meta, cfg, mode="python_slow")
-
-        with unittest.mock.patch.object(GridExpr, "from_meta", mocked_from_meta):
-            func = torch.add
-            args = [
-                torch.randn(shape, device=self.device) for shape in [(7, 12), (7, 1)]
-            ]
-            (gm,) = self._compile_and_check(
-                func, args, compile_kwargs={"dynamic": True}
-            )
-
-            # Check for the precomputed size arg.
-            (triton_node,) = gm.graph.find_nodes(
-                op="call_function", target=triton_kernel_wrapper_mutation
-            )
-            self.assertIn("grid", triton_node.kwargs)
-            self.assertIn("xnumel", triton_node.kwargs["kwargs"])
-            self.assertIn("XBLOCK", triton_node.kwargs["kwargs"])
-            grid = triton_node.kwargs["grid"][0]
-            xnumel = triton_node.kwargs["kwargs"]["xnumel"].meta["val"]
-            xblock = triton_node.kwargs["kwargs"]["XBLOCK"]
-            self.assertEqual(grid[0].meta["val"], ((xnumel + xblock - 1) // xblock))
-            self.assertEqual(grid[1], 1)
-            self.assertEqual(grid[2], 1)
 
     @config.patch({"trace.enabled": True})
     @unittest.mock.patch("torch._inductor.debug.DebugFormatter.output_code")

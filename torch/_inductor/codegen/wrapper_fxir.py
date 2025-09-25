@@ -905,10 +905,6 @@ class FxConverter:
         call_args = self._lookup_args(line.call_args)
         kernel = self.kernels[line.kernel_name]
         tuner = kernel.tuner
-        # Use python_slow mode instead of python mode to avoid
-        # the round to neginf behaviour, which is not the convention
-        # in other languages.
-        tuner.grid_mode = "python_slow"
 
         # Optionally autotune the kernels.
         # The FX backend currently only supports compile-time tuning.
@@ -982,8 +978,7 @@ class FxConverter:
         call_kwargs = dict(zip(signature, call_args))
         call_kwargs.update(kernel_config.kwargs)
 
-        # Replace all sympy.floor with FloorDiv
-        # _generate_sym_node does not support sympy.floor
+        # Replace sympy.floor with FloorDiv, to make the expression traceable.
         grid = [replace_floor_div(x) if isinstance(x, sympy.Expr) else x for x in grid]
         wrapper_grid = [tuple(self._generate_sym_nodes(grid))]
         call_kwargs = {
