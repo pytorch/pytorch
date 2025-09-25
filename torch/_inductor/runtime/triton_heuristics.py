@@ -17,7 +17,7 @@ import re
 import sys
 import threading
 import time
-from collections import namedtuple
+from collections import defaultdict, namedtuple
 from typing import (
     Any,
     Callable,
@@ -1198,7 +1198,7 @@ class CachingAutotuner(KernelInterface):
             config2launcher[config] = launcher
 
             out = self.bench(launcher, *args, **kwargs)
-            counters["inductor"]["coordest_tuning_bench"] += 1
+            counters["inductor"]["coordesc_tuning_bench"] += 1
             log.debug(
                 "COORDESC: %s: %f, nreg %d, nspill %d, #shared-mem %d",
                 launcher.config,
@@ -2829,8 +2829,22 @@ def filter_reduction_configs_for_determinism(configs: list[Config]) -> list[Conf
     Filter configs for reduction so the numerics can be deterministic.
     Simply return the first one for now.
     """
-    assert len(configs) > 0
-    return configs[:1]
+    groups: defaultdict[tuple[int, int, int], list[Config]] = defaultdict(
+        list
+    )  # group configs by RBLOCK, num_warps, num_ctas
+
+    for c in configs:
+        # persistent reduction does not have a RBLOCK, use -1 as a flag
+        rblk = c.kwargs.get("RBLOCK", -1)
+        nwarps = c.num_warps
+        nctas = c.num_ctas
+
+        groups[(rblk, nwarps, nctas)].append(c)
+
+    assert len(groups) > 0
+
+    # pick the group with smallest RBLOCK
+    return sorted(groups.items(), key=lambda item: item[0][0])[0][1]
 
 
 def reduction(
