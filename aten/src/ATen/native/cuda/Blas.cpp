@@ -305,9 +305,9 @@ static bool isGloballyDisabledAddmmCudaLt(const at::Device& device) {
  * Check whether for the given input we want to enable the Lt interface
  */
 static bool isInputCompliesAddmmCudaLt(Tensor& result, const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha) {
-  // Previous conditions did not touch this case
+  // This implies that self is 2D, but Lt needs 1D self
   if (result.is_same(self)) {
-    return true;
+    return false;
   }
 
   #if defined(USE_ROCM) && ROCM_VERSION == 60400
@@ -342,7 +342,8 @@ static bool isInputCompliesAddmmCudaLt(Tensor& result, const Tensor& self, const
   );
   #endif
 
-  return true;
+  // no compliance by default
+  return false;
 }
 
 template <typename scalar_t>
@@ -407,8 +408,6 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   TensorArg targs[]{{result, "out", 0}, {self, "self", 1}, {mat1, "mat1", 2}, {mat2, "mat2", 3}};
   checkAllSameGPU(__func__, targs);
 
-  IntArrayRef mat1_sizes = mat1.sizes();
-  IntArrayRef mat2_sizes = mat2.sizes();
   bool useLtInterface = false;
 
   // Handle whether to use the Lt interface {
@@ -418,61 +417,24 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   bool disable_addmm_cuda_lt = persistent_disable_addmm_cuda_lt || disable_addmm_cuda_lt_override;
   #ifdef USE_ROCM
   // Conditioned on the device index, which is not persistent
-  disable_addmm_cuda_lt |= isGloballyDisabledAddmmCudaLt(self.device());
+  disable_addmm_cuda_lt = isGloballyDisabledAddmmCudaLt(self.device()) || disable_addmm_cuda_lt;
   #endif
   // Condition on the input
-  disable_addmm_cuda_lt |= isInputCompliesAddmmCudaLt(result, self, mat1, mat2, beta, alpha);
+  disable_addmm_cuda_lt = !isInputCompliesAddmmCudaLt(result, self, mat1, mat2, beta, alpha) || disable_addmm_cuda_lt;
+  useLtInterface = isInputCompliesAddmmCudaLt(result, self, mat1, mat2, beta, alpha) && !disable_addmm_cuda_lt;
   // }
 
   at::ScalarType scalar_type = mat1.scalar_type();
   bool is_float_output_with_half_input = (scalar_type == at::ScalarType::Half || scalar_type == at::ScalarType::BFloat16) && result.scalar_type() == at::ScalarType::Float;
-  c10::MaybeOwned<Tensor> self_;
-  if (&result != &self) {
-#if defined(CUDA_VERSION) || defined(USE_ROCM)
-    if (!disable_addmm_cuda_lt) {
-      useLtInterface = beta.toComplexDouble() == 1.0 && self.dim() == 1 &&
-          result.dim() == 2 && self.sizes()[0] == mat2_sizes[1] &&
-          self.is_contiguous() && result.is_contiguous() &&
-#ifdef USE_ROCM
-          (scalar_type == at::ScalarType::Float ||
-           scalar_type == at::ScalarType::Half ||
-           scalar_type == at::ScalarType::BFloat16) &&
-#else
-          (scalar_type == at::ScalarType::Double ||
-           scalar_type == at::ScalarType::Float ||
-           scalar_type == at::ScalarType::Half ||
-           scalar_type == at::ScalarType::BFloat16) &&
-#endif
-#if (defined(CUDA_VERSION) && CUDA_VERSION >= 12010 || defined(USE_ROCM))
-          mat2_sizes[0] > 1 && mat2_sizes[1] > 1;
-#else
-          mat2_sizes[0] > 1 && mat2_sizes[1] > 1 &&
-          mat2_sizes[0] < 65535 * 32 && mat2_sizes[1] < 65535 * 32 &&
-          mat1_sizes[0] < 65535 * 32 && mat1_sizes[1] < 65535 * 32 &&
-          // avoid leading dim >> rows bugs
-          ((mat1.strides()[0] == 1 && mat1.strides()[1] == mat1_sizes[0]) ||
-           (mat1.strides()[1] == 1 && mat1.strides()[0] == mat1_sizes[1]) ||
-           (scalar_type != at::ScalarType::Half &&
-            scalar_type != at::ScalarType::BFloat16)) &&
-          ((mat2.strides()[0] == 1 && mat2.strides()[1] == mat2_sizes[0]) ||
-           (mat2.strides()[1] == 1 && mat2.strides()[0] == mat2_sizes[1]) ||
-           (scalar_type != at::ScalarType::Half &&
-            scalar_type != at::ScalarType::BFloat16));
-#endif
-    }
-#endif
-    if (!useLtInterface) {
-      self_ = expand_size(self, {mat1_sizes[0], mat2_sizes[1]}, "addmm");
+
+  if (!result.is_same(self)) {
+    at::native::resize_output(result, {mat1.sizes()[0], mat2.sizes()[1]});
+    // We copy bias when in the non-Lt path
+    if (beta.toComplexDouble() != 0.0 && disable_addmm_cuda_lt) {
+      // NOTE: copy broadcasts, and self.shape[-1] == result.shape[-1]
+      at::native::copy_(result, self);
     }
   }
-
-  if (&result != &self) {
-    at::native::resize_output(result, {mat1_sizes[0], mat2_sizes[1]});
-    if (beta.toComplexDouble() != 0.0 && !useLtInterface) {
-      at::native::copy_(result, *self_);
-    }
-  }
-
 
   IntArrayRef result_sizes = result.sizes();
   if ((result_sizes[0] == 0) || (result_sizes[1] == 0)) {
