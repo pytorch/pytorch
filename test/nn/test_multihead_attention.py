@@ -17,7 +17,6 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize as parametrize_test,
     run_tests,
-    skipIfRocm,
     TEST_NUMPY,
     TEST_WITH_CROSSREF,
 )
@@ -746,7 +745,6 @@ class TestMultiheadAttentionNN(NNTestCase):
 
 
 class TestMultiheadAttentionNNDeviceType(NNTestCase):
-    @skipIfRocm(msg="To investigate: yields NaN")
     def test_multihead_self_attn_two_masks_fast_path(self, device):
         """
         Multihead self-attention should give the same result on the fast path (BetterTransformer) as on the slow path

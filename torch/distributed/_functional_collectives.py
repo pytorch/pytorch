@@ -7,10 +7,6 @@ from typing import Any, cast, Optional, TYPE_CHECKING, Union
 import torch
 import torch.distributed as dist
 import torch.distributed.distributed_c10d as c10d
-from torch.distributed._distributed_c10d import (
-    _allow_inflight_collective_as_graph_input,
-    _set_allow_inflight_collective_as_graph_input,
-)
 from torch.distributed.device_mesh import DeviceMesh
 from torch.fx.experimental.proxy_tensor import get_proxy_mode
 
@@ -862,13 +858,15 @@ def allow_inflight_collective_as_graph_input_ctx(value: bool = True):
     will be registered in the work registry, and the wait_tensor() in compiled region called on
     the output tensor of the collective will wait on the correct work object.
     """
-    previous = _allow_inflight_collective_as_graph_input()
+    previous = torch._C._distributed_c10d._allow_inflight_collective_as_graph_input()
 
     try:
-        _set_allow_inflight_collective_as_graph_input(value)
+        torch._C._distributed_c10d._set_allow_inflight_collective_as_graph_input(value)
         yield
     finally:
-        _set_allow_inflight_collective_as_graph_input(previous)
+        torch._C._distributed_c10d._set_allow_inflight_collective_as_graph_input(
+            previous
+        )
 
 
 def _make_all_gather_out_tensor(input, group_size):

@@ -80,7 +80,7 @@ def enable_triton(lib_dir: Optional[str] = None) -> dict[str, str]:
     """
     import triton
 
-    from torch.distributed._distributed_c10d import _nvshmemx_cumodule_init
+    from torch._C._distributed_c10d import _nvshmemx_cumodule_init
 
     if lib_dir is not None:
         lib_path = os.path.join(lib_dir, "libnvshmem_device.bc")

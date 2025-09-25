@@ -18,9 +18,9 @@ cuda_supported_platforms = [
 
 def define_c10_ovrsource(name, is_mobile):
     if is_mobile:
-        pp_flags = ["-DC10_MOBILE=1", "-DC10_USE_GLOG"]
+        pp_flags = ["-DC10_MOBILE=1"]
     else:
-        pp_flags = ["-DC10_USE_GLOG"]
+        pp_flags = []
 
     oxx_static_library(
         name = name,
