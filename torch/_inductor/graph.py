@@ -1858,7 +1858,7 @@ class GraphLowering(torch.fx.Interpreter):
 
         shape_env = V.graph.sizevars.shape_env
 
-        # An input can be unbacked symint i.e.: when mark_unabcked is used.
+        # An input can be unbacked symint i.e.: when mark_unbacked is used.
         # in that case add it to new_unbacked_defs.
         if (
             n.op == "placeholder"
