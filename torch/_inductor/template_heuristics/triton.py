@@ -1774,7 +1774,12 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
             ws = (
                 template_kwargs["num_warps"] >= 4 and template_kwargs["num_stages"] >= 2
             )
-            yield {**template_kwargs, **base_ops, "WARP_SPECIALIZE": ws}
+            yield {
+                **template_kwargs,
+                **base_ops,
+                "WARP_SPECIALIZE": ws,
+                "EPILOGUE_SUBTILE": config.triton.enable_epilogue_subtiling,
+            }
 
 
 # Scaled MM-specific mixin for scaled MM templates
@@ -2070,6 +2075,7 @@ class CUDAAddmmPersistentTMATemplateConfigHeuristic(
     blackwell_ws_persistent_device_tma_mm_template.uid,
     "cuda",
     register=torch.version.hip is None,
+    op_name="addmm",
 )
 class CUDABlackwellAddmmPersistentTMATemplateConfigHeuristic(
     AddMMConfigMixin, CUDABlackwellPersistentTMATemplateConfigHeuristic
@@ -2116,6 +2122,7 @@ class CUDAScaledTMATemplateConfigHeuristic(ScaledTMAConfigMixin, CUDAConfigHeuri
     blackwell_ws_persistent_device_tma_mm_template.uid,  # regular Blackwell MM template + scaling epilogue from ScaledMMConfigMixin
     "cuda",
     register=torch.version.hip is None,
+    op_name="scaled_mm",
 )
 class CUDAScaledBlackwellTMATemplateConfigHeuristic(
     ScaledBlackwellTMAConfigMixin, CUDAConfigHeuristic
