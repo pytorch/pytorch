@@ -16,5 +16,5 @@ class OptionalInput(torch.nn.Module):
 
 example_args = (torch.randn(2, 3),)
 tags = {"python.object-model"}
-support_level = SupportLevel.NOT_SUPPORTED_YET
+support_level = SupportLevel.SUPPORTED
 model = OptionalInput()

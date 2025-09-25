@@ -254,19 +254,25 @@ class DeviceMeshTest(DTensorTestBase):
 
     @with_comms
     def test_device_mesh_init_backend(self):
-        mesh = DeviceMesh(self.device_type, [1], _init_backend=False)
+        mesh = DeviceMesh(
+            self.device_type, torch.arange(10), _init_backend=False, _rank=5
+        )
 
         with self.assertRaisesRegex(RuntimeError, "process groups not initialized!"):
             mesh.get_group()
 
         # coordinates should always been populated when init_backend is False, as whenever
         # we call init_backend we should make sure the default pg already created
-        mesh.get_coordinate()
+        self.assertEqual(mesh.get_coordinate(), [5])
 
-    @unittest.skipIf(not torch.accelerator.is_available(), "No accelerator available!")
     def test_fake_pg_device_mesh(self):
         fake_store = FakeStore()
         init_process_group("fake", store=fake_store, rank=0, world_size=self.world_size)
+        device_type = (
+            torch.accelerator.current_accelerator().type
+            if torch.accelerator.is_available()
+            else "cpu"
+        )
         mesh = DeviceMesh(device_type, torch.arange(self.world_size))
 
         local_tensor = torch.randn(2, 8)
@@ -331,6 +337,11 @@ class DeviceMeshTest(DTensorTestBase):
 
     @with_comms
     def test_set_mesh_dim_group_options(self):
+        device_type = (
+            torch.accelerator.current_accelerator().type
+            if torch.accelerator.is_available()
+            else "cpu"
+        )
         _mesh_resources._set_mesh_dim_group_options(1, "fake", None)
 
         mesh_tensor = torch.arange(4).reshape(2, 2)
@@ -833,12 +844,28 @@ class TestDeviceMeshGetItem(DTensorTestBase):
             mesh_3d["cp", "dp"]
 
     @with_comms
+    def test_flatten_mesh_1d(self):
+        mesh_shape = (4,)
+        mesh_dim_names = ("default",)
+        mesh_1d = init_device_mesh(
+            self.device_type, mesh_shape, mesh_dim_names=mesh_dim_names
+        )
+        mesh_1d._flatten()
+
+    @with_comms
     def test_flatten_mesh_3d(self):
         mesh_shape = (2, 2, 2)
         mesh_dim_names = ("dp", "cp", "tp")
         mesh_3d = init_device_mesh(
             self.device_type, mesh_shape, mesh_dim_names=mesh_dim_names
         )
+
+        # Test flatten into an existing mesh_dim_name inside the mesh
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "already exists for submesh of the DeviceMesh",
+        ):
+            mesh_3d._flatten("dp")
 
         # Test flatten contiguous dims
         dp_cp_mesh = mesh_3d["dp", "cp"]

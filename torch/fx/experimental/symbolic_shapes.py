@@ -213,7 +213,7 @@ _SympyT = TypeVar("_SympyT", sympy.Expr, SympyBoolean, sympy.Basic)
 class SymIntEqByExpr:
     """
     This is a wrapper around SymInt which has alternative semantics for
-    equality.  Specifically, instead of erroring or guarding, we
+    equality and pickling.  Specifically, instead of erroring or guarding, we
     instead will hash/compare equality based on the underlying sympy
     expression; e.g., s0 and s1 will always compare as False.
 
@@ -222,31 +222,25 @@ class SymIntEqByExpr:
     canonicalize to the same expression via regular simplification.
     """
 
-    val: Union[torch.SymInt, int]
+    @staticmethod
+    def _extract(val: Union[torch.SymInt, int]) -> sympy.Expr:
+        if isinstance(val, torch.SymInt):
+            return val.node.expr
+        else:
+            return sympy.Integer(val)
 
     def __init__(self, val: Union[torch.SymInt, int]) -> None:
-        self.val = val
+        self.val: sympy.Expr = SymIntEqByExpr._extract(val)
 
     def __repr__(self) -> str:
         return repr(self.val)
 
-    def _extract(self) -> sympy.Expr:
-        if isinstance(self.val, torch.SymInt):
-            return self.val.node.expr
-        else:
-            return sympy.Integer(self.val)
-
     def __eq__(self, other: object) -> bool:
         assert isinstance(other, SymIntEqByExpr)
-
-        # int equality fastpath
-        if type(self.val) is int and type(other.val) is int:
-            return self.val == other.val
-
-        return self._extract() == other._extract()
+        return self.val == other.val
 
     def __hash__(self) -> int:
-        return hash(self._extract())
+        return hash(self.val)
 
 
 def _nested_int_aware_sort(
@@ -594,7 +588,7 @@ def rebind_unbacked(
             # exist in the ShapeEnv but are never bound anywhere.  You might
             # like an invariant that unbacked symbols never get lost.  But
             # we do not have this invariant, so do not try to enforce it.
-            if isinstance(u1, int):
+            if isinstance(u1, (int, float)):
                 log.info(
                     "rebind_unbacked: discard %s %s %s -> %s",
                     n.target,
@@ -1756,12 +1750,14 @@ def fx_placeholder_targets(gm: torch.fx.GraphModule) -> list[str]:
 def eval_guards(
     gm: torch.fx.GraphModule, *args: Tensor, ignore_static: bool = True
 ) -> bool:
+    assert gm.shape_env is not None
     return gm.shape_env.evaluate_guards_for_args(  # type: ignore[operator, union-attr]
         fx_placeholder_vals(gm), args, ignore_static=ignore_static
     )
 
 
 def bind_symbols(gm: torch.fx.GraphModule, *args: Tensor) -> dict[sympy.Symbol, int]:
+    assert gm.shape_env is not None
     return gm.shape_env.bind_symbols(fx_placeholder_vals(gm), args)  # type: ignore[operator, union-attr]
 
 
@@ -1943,7 +1939,7 @@ class EqualityConstraint(Constraint):
         for source, root, fn in self.derived_equalities:
             # preprocess into a transitively-closed map
             # NOTE(avik): we reuse the union-find forest for canonicalizing input sources
-            if isinstance(root, sympy.Symbol):
+            if isinstance(root, (sympy.Symbol, sympy.Integer)):
                 self._defs[self._find(source)] = fn(root)
             else:
                 self._defs[self._find(source)] = fn(self._rewrite(root))
@@ -3718,6 +3714,7 @@ class ShapeEnv:
         self.source_name_to_debug_name: dict[str, str] = {}
         self.var_to_sources: dict[sympy.Symbol, list[Source]] = {}
         self.var_to_stack: dict[sympy.Symbol, CapturedTraceback] = {}
+        self.var_to_hint_override: dict[sympy.Symbol, int] = {}
         # Maps a source to the *original* symbol that was assigned to it
         self.source_to_var: dict[str, sympy.Symbol] = {}
         # Maps from sympy ints to expressions representing them
@@ -4582,6 +4579,11 @@ class ShapeEnv:
             )
             for i, (sym, hint) in enumerate(zip(size, ex_size))
         ]
+
+        for i, sym in enumerate(sym_sizes):
+            if isinstance(sym, torch.SymInt) and i in hint_overrides:
+                self.var_to_hint_override[sym.node.expr] = hint_overrides[i]
+
         sym_stride = []
         for i, stride_expr in enumerate(stride):
             # NB: Don't duck size the stride; instead use the expression
@@ -5427,11 +5429,12 @@ class ShapeEnv:
             for srcEq, root, fn in equalities_inputs.derived_equalities:
                 expr1 = get_expression(srcEq)
                 # recall that root is either a phantom symbol or an input source
-                expr2, debug_name = (
-                    (root, self.var_to_sources[root][0].name())
-                    if isinstance(root, sympy.Symbol)
-                    else (get_expression(root), self._debug_name(root))
-                )
+                if isinstance(root, sympy.Symbol):
+                    expr2, debug_name = root, self.var_to_sources[root][0].name()
+                elif isinstance(root, sympy.Integer):
+                    expr2, debug_name = root, str(root)
+                else:
+                    expr2, debug_name = get_expression(root), self._debug_name(root)
                 expr2_ = fn(expr2)
                 # Check whether given input shape values satisfy a specified equation s = fn(s').
                 # - Raise when the equation was violated by the given input shape values.
@@ -5446,10 +5449,11 @@ class ShapeEnv:
                     )
 
             for phantom_symbol in equalities_inputs.phantom_symbols:
-                # we created additional phantom symbols that are not input shape dimensions
-                symbol_to_source[phantom_symbol].extend(
-                    self.var_to_sources[phantom_symbol]
-                )
+                if isinstance(phantom_symbol, sympy.Symbol):
+                    # we created additional phantom symbols that are not input shape dimensions
+                    symbol_to_source[phantom_symbol].extend(
+                        self.var_to_sources[phantom_symbol]
+                    )
 
         # How do we know what the value of s0 is?  Fresh variables can only be
         # bound by inputs, so there MUST be some other input which binds the
@@ -6393,7 +6397,10 @@ class ShapeEnv:
                 if isinstance(atom.args[0], IntTrueDiv):
                     base, divisor = atom.args[0].args
                     if base % divisor == 0:
-                        trunc_replacements[atom] = base // divisor
+                        trunc_replacements[atom] = CleanDiv(base, divisor)
+                    else:
+                        # TruncToInt(IntTrueDiv(a,b)) == FloorDiv(a, b)
+                        trunc_replacements[atom] = FloorDiv(base, divisor)
             if trunc_replacements:
                 expr = expr.xreplace(trunc_replacements)
 
