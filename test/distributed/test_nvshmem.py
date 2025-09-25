@@ -714,9 +714,9 @@ class HierarchicalA2ATest(MultiProcContinuousTest):
         symm_mem.set_backend("NVSHMEM")
 
     def init_mesh(self) -> None:
-        # Test on 4 "nodes"
-        nnodes = 4
-        ranks_per_node = torch.cuda.device_count() // nnodes
+        # Arrange gpus into [nnodes, ranks_per_node] mesh
+        ranks_per_node = 2
+        nnodes = self.world_size // ranks_per_node
         self.dm = init_device_mesh(
             device_type, (nnodes, ranks_per_node), mesh_dim_names=("inter", "intra")
         )
