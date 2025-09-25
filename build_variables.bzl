@@ -1010,6 +1010,7 @@ libtorch_python_core_sources = [
     "torch/csrc/utils/disable_torch_function.cpp",
     "torch/csrc/utils/verbose.cpp",
     "torch/csrc/cpu/Module.cpp",
+    "torch/csrc/functionalization/Module.cpp",
     "torch/csrc/instruction_counter/Module.cpp",
     "torch/nativert/python/Bindings.cpp",
 ] + lazy_tensor_core_python_sources
@@ -1052,6 +1053,7 @@ def glob_libtorch_python_sources(gencode_pattern = ":generate-code[{}]"):
         "torch/csrc/autograd/generated/python_torch_functions_1.cpp",
         "torch/csrc/autograd/generated/python_torch_functions_2.cpp",
         "torch/csrc/autograd/generated/python_variable_methods.cpp",
+        "torch/csrc/functionalization/generated/ViewMetaClassesPythonBinding.cpp",
     ]]
 
     _libtorch_python_sources.extend(libtorch_python_core_sources)
