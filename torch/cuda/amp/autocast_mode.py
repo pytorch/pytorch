@@ -4,6 +4,7 @@ from typing import Any
 from typing_extensions import deprecated
 
 import torch
+import sys
 
 
 __all__ = ["autocast", "custom_fwd", "custom_bwd"]
@@ -19,6 +20,22 @@ class autocast(torch.amp.autocast_mode.autocast):
 
     ``torch.cuda.amp.autocast(args...)`` is deprecated. Please use ``torch.amp.autocast("cuda", args...)`` instead.
     """
+
+    # TODO: remove this conditional once we stop supporting Python < 3.13
+    # Prior to Python 3.13, inspect.signature could not retrieve the correct
+    # signature information for classes decorated with @deprecated (unless
+    # the __new__ static method was explicitly defined);
+    #
+    # However, this issue has been fixed in Python 3.13 and later versions.
+    if sys.version_info < (3, 13):
+
+        def __new__(
+            cls,
+            enabled: bool = True,
+            dtype: torch.dtype = torch.float16,
+            cache_enabled: bool = True,
+        ):
+            return super().__new__(cls)
 
     def __init__(
         self,
