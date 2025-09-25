@@ -3,7 +3,6 @@ import functools
 import itertools
 import logging
 import types
-
 from abc import ABC, abstractmethod
 from collections.abc import Generator
 from dataclasses import dataclass
@@ -14,7 +13,7 @@ import torch
 import torch.distributed as dist
 import torch.distributed._functional_collectives as ft_c
 import torch.nn.functional as F
-from torch import nn, Tensor
+from torch import Tensor
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor import distribute_tensor, DTensor, Shard
 from torch.nn.attention.flex_attention import (
@@ -106,6 +105,32 @@ class HeadTailLoadBalancer(LoadBalancer):
         self.seq_length = seq_length
         self.world_size = world_size
         self.device = device
+
+    @classmethod
+    def _generate_indices(
+        cls, seq_length: int, world_size: int, device: Union[str, torch.device]
+    ) -> torch.Tensor:
+        assert seq_length % (world_size * 2) == 0
+        chunk_size = seq_length // (world_size * 2)
+        all_indices = []
+
+        for rank in range(world_size):
+            # Generate indices for first chunk of the cp rank
+            first_chunk_start = rank * chunk_size
+            first_chunk_indices = list(
+                range(first_chunk_start, first_chunk_start + chunk_size)
+            )
+
+            # Second chunk: positions from the complementary chunk
+            second_chunk_idx = world_size * 2 - rank - 1
+            second_chunk_start = second_chunk_idx * chunk_size
+            second_chunk_indices = list(
+                range(second_chunk_start, second_chunk_start + chunk_size)
+            )
+            # combine the indices for this rank
+            all_indices.extend(first_chunk_indices + second_chunk_indices)
+
+        return torch.tensor(all_indices, dtype=torch.int, device=device)
 
     def generate_indices(self, restore: bool = False) -> torch.Tensor:
         """
@@ -276,6 +301,45 @@ class PTRRLoadBalancer(LoadBalancer):
         tasks_in_group, _ = torch.sort(tasks_in_group, dim=1)
         return tasks_in_group
 
+    @classmethod
+    def _generate_indices(
+        cls, block_mask: BlockMask, world_size: int, device: Union[str, torch.device]
+    ) -> Tensor:
+        kv_num_blocks = block_mask.kv_num_blocks
+        full_kv_num_blocks = block_mask.full_kv_num_blocks
+        non_sparse_kv_num_blocks = (
+            kv_num_blocks + full_kv_num_blocks
+            if full_kv_num_blocks is not None
+            else kv_num_blocks
+        )
+        B, H, Q = non_sparse_kv_num_blocks.shape
+        # assumption: the masking is identical across heads
+        non_sparse_kv_num_blocks = non_sparse_kv_num_blocks.view(-1, Q)  # (B, Q_BLK)
+
+        batch_ptrr = torch.vmap(
+            functools.partial(
+                PTRRLoadBalancer.ptrr_scheduling,
+                group_size=world_size,
+            )
+        )
+        ptrr_indices = batch_ptrr(
+            non_sparse_kv_num_blocks
+        )  # (B, group_size, num_blks_in_group)
+        ptrr_indices = ptrr_indices.reshape(B, -1)  # (B, num_blocks)
+
+        # NOTE: only support the case where the qkv block size are equal
+        q_blk_size, kv_blk_size = block_mask.BLOCK_SIZE
+        assert q_blk_size == kv_blk_size, (
+            "for now only support q_blk_size == kv_blk_size"
+        )
+
+        indices = torch.arange(q_blk_size * ptrr_indices.size(1), device=device).view(
+            -1, q_blk_size
+        )  # (NUM_BLOCKS, BLOCK_SIZE)
+        indices = indices[ptrr_indices].view(B, -1)  # (B, qkv_size)
+
+        return indices
+
     def generate_indices(self, restore: bool = False) -> Tensor:
         """
         Generate the LPT shuffle indices
@@ -305,15 +369,13 @@ class PTRRLoadBalancer(LoadBalancer):
 
         # NOTE: only support the case where the qkv block size are equal
         q_blk_size, kv_blk_size = block_mask.BLOCK_SIZE
-        assert (
-            q_blk_size == kv_blk_size
-        ), "for now only support q_blk_size == kv_blk_size"
+        assert q_blk_size == kv_blk_size, (
+            "for now only support q_blk_size == kv_blk_size"
+        )
 
         indices = torch.arange(
             q_blk_size * ptrr_indices.size(1), device=ptrr_indices.device
-        ).view(
-            -1, q_blk_size
-        )  # (NUM_BLOCKS, BLOCK_SIZE)
+        ).view(-1, q_blk_size)  # (NUM_BLOCKS, BLOCK_SIZE)
         indices = indices[ptrr_indices].view(B, -1)  # (B, qkv_size)
 
         if restore:
@@ -653,9 +715,9 @@ def _templated_ring_attention(
     if not is_causal and _cp_options.enable_load_balance:
         raise RuntimeError("Load balancing requires `is_causal=True`.")
 
-    assert isinstance(
-        group, dist.ProcessGroup
-    ), "process group must be single dimension"
+    assert isinstance(group, dist.ProcessGroup), (
+        "process group must be single dimension"
+    )
     rank = dist.get_rank(group)
     size = dist.get_world_size(group)
 
