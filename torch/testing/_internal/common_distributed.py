@@ -1,6 +1,7 @@
 # mypy: ignore-errors
 
 import faulthandler
+import functools
 import itertools
 import logging
 import multiprocessing
@@ -339,26 +340,17 @@ def requires_gloo():
 
 
 def requires_nccl_version(version, msg):
-    if TEST_CUDA:
-        if not c10d.is_nccl_available():
-            return skip_but_pass_in_sandcastle(
-                "c10d was not compiled with the NCCL backend",
-            )
-        else:
-            return skip_but_pass_in_sandcastle_if(
-                torch.cuda.nccl.version() < version,
-                f"Requires NCCL version greater than or equal to: {version}, found: {torch.cuda.nccl.version()}, reason: {msg}",
-            )
+    if not TEST_CUDA:
+        return lambda f: f
+    if not c10d.is_nccl_available():
+        return skip_but_pass_in_sandcastle(
+            "c10d was not compiled with the NCCL backend",
+        )
     else:
-
-        def decorator(func):
-            @wraps(func)
-            def wrapper(*args, **kwargs):
-                return func(*args, **kwargs)
-
-            return wrapper
-
-        return decorator
+        return skip_but_pass_in_sandcastle_if(
+            torch.cuda.nccl.version() < version,
+            f"Requires NCCL version greater than or equal to: {version}, found: {torch.cuda.nccl.version()}, reason: {msg}",
+        )
 
 
 def requires_nccl():
@@ -423,15 +415,17 @@ def requires_multicast_support():
 
 
 def evaluate_platform_supports_symm_mem():
-    if TEST_WITH_ROCM:
-        arch_list = ["gfx942", "gfx950"]
-        for arch in arch_list:
-            if arch in torch.cuda.get_device_properties(0).gcnArchName:
-                return True
     if TEST_CUDA:
-        return True
-
-    return False
+        if TEST_WITH_ROCM:
+            arch_list = ["gfx942", "gfx950"]
+            for arch in arch_list:
+                if arch in torch.cuda.get_device_properties(0).gcnArchName:
+                    return True
+            return False
+        else:
+            return True
+    else:
+        return False
 
 
 PLATFORM_SUPPORTS_SYMM_MEM: bool = LazyVal(
@@ -1147,30 +1141,24 @@ def run_subtests(
         c10d.barrier()
 
 
-# Cannot use functools.cache as it requires python 3.9
-EFA_PROBE_RESULT = None
-
-
+@functools.cache
 def has_efa() -> bool:
     """
     If shell command `fi_info -p efa -t FI_EP_RDM` returns exit code 0 then we assume that the machine has
     Libfabric EFA interfaces and EFA software components installed,
     see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/efa-start.html.
     """
-    global EFA_PROBE_RESULT
-    if EFA_PROBE_RESULT is not None:
-        return EFA_PROBE_RESULT
 
     try:
-        EFA_PROBE_RESULT = (
+        return (
             subprocess.run(
                 ["fi_info", "-p", "efa", "-t", "FI_EP_RDM"], check=False
             ).returncode
             == 0
         )
     except FileNotFoundError:
-        EFA_PROBE_RESULT = False
-    return EFA_PROBE_RESULT
+        pass
+    return False
 
 
 def tp_transports():

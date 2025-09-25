@@ -25,7 +25,7 @@ import torch._C
 from torch import device as _device
 from torch._utils import _dummy_type, _LazySeedTracker, classproperty
 
-from . import gds
+from . import _device_limits, gds
 from ._utils import _get_device_index
 from .graphs import (
     CUDAGraph,
@@ -259,7 +259,7 @@ def _check_capability():
     CUDA_ARCHES_SUPPORTED = {
         "12.6": {"min": 50, "max": 90},
         "12.8": {"min": 70, "max": 120},
-        "12.9": {"min": 70, "max": 120},
+        "13.0": {"min": 75, "max": 120},
     }
 
     if (
@@ -270,7 +270,7 @@ def _check_capability():
             major = capability[0]
             minor = capability[1]
             name = get_device_name(d)
-            current_arch = major * 10 + minor
+            cur_arch_major = major * 10
             min_arch = min(
                 (_extract_arch_version(arch) for arch in torch.cuda.get_arch_list()),
                 default=50,
@@ -279,7 +279,7 @@ def _check_capability():
                 (_extract_arch_version(arch) for arch in torch.cuda.get_arch_list()),
                 default=50,
             )
-            if current_arch < min_arch or current_arch > max_arch:
+            if cur_arch_major < min_arch or cur_arch_major > max_arch:
                 warnings.warn(
                     incompatible_gpu_warn
                     % (
@@ -295,10 +295,7 @@ def _check_capability():
                 )
                 matched_arches = ""
                 for arch, arch_info in CUDA_ARCHES_SUPPORTED.items():
-                    if (
-                        current_arch >= arch_info["min"]
-                        and current_arch <= arch_info["max"]
-                    ):
+                    if arch_info["min"] <= cur_arch_major <= arch_info["max"]:
                         matched_arches += f" {arch}"
                 if matched_arches != "":
                     warnings.warn(matched_cuda_warn.format(matched_arches))
@@ -1733,7 +1730,6 @@ def _compile_kernel(
     kernel_source: str,
     kernel_name: str,
     compute_capability: Optional[str] = None,
-    header_code: str = "",
     cuda_include_dirs: Optional[list] = None,
     nvcc_options: Optional[list] = None,
 ):
@@ -1750,7 +1746,6 @@ def _compile_kernel(
         kernel_name (str): The name of the kernel function to compile
         compute_capability (str, optional): The compute capability to target (e.g., "86").
                                            If None, will detect from current device.
-        header_code (str, optional): Additional header code to prepend to the kernel source
         cuda_include_dirs (list, optional): List of directories containing CUDA headers
         nvcc_options (list, optional): Additional options to pass to NVRTC
 
@@ -1780,7 +1775,6 @@ def _compile_kernel(
         kernel_source,
         kernel_name,
         compute_capability,
-        header_code,
         cuda_include_dirs,
         nvcc_options,
     )
