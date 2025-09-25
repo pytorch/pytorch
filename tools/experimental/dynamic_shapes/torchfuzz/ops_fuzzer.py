@@ -18,6 +18,18 @@ from torchfuzz.tensor_fuzzer import (
 )
 
 
+# Cache operators at module level to avoid repeated calls to list_operators()
+_CACHED_OPERATORS = None
+
+
+def _get_cached_operators():
+    """Get cached operators, initializing if necessary."""
+    global _CACHED_OPERATORS
+    if _CACHED_OPERATORS is None:
+        _CACHED_OPERATORS = list_operators()
+    return _CACHED_OPERATORS
+
+
 @dataclass
 class OperationNode:
     """
@@ -185,14 +197,16 @@ def fuzz_op(target_spec: Spec, depth, stack_size) -> tuple[str, list[Spec]]:
         Tuple of (operation_name, list_of_argument_specs) where each argument spec
         describes the layout requirements for the operation's inputs
     """
-    # Get all available operators
-    available_operators = list_operators()
+    # Get all available operators (cached)
+    available_operators = _get_cached_operators()
 
     # Filter operators that can produce the target spec
     compatible_ops = []
     for op_name, operator in available_operators.items():
         if operator.can_produce(target_spec):
             compatible_ops.append((op_name, operator))
+
+    random.shuffle(compatible_ops)
 
     if not compatible_ops:
         raise ValueError(f"No operators available that can produce {target_spec}")
@@ -232,22 +246,12 @@ def fuzz_op(target_spec: Spec, depth, stack_size) -> tuple[str, list[Spec]]:
                 random.choice(all_ops) if all_ops else ("arg", get_operator("arg"))
             )
 
-    # Use the operator to decompose the target spec into input specs
-    try:
-        if chosen_op_name.startswith("arg_"):
-            # Handle special arg_ operations
-            return chosen_op_name, []
-        elif chosen_op_name in ["constant", "arg"]:
-            # Handle leaf operations
-            return chosen_op_name, []
-        else:
-            # Use the operator's decompose method
-            input_specs = chosen_operator.decompose(target_spec)
-            return chosen_op_name, input_specs
-    except Exception as e:
-        # Fallback to arg if decomposition fails
-        print(f"Warning: operator {chosen_op_name} decomposition failed: {e}")
+    if chosen_operator is None:
+        # If no operator found, fallback to arg
         return _get_arg_args_specs(target_spec)
+
+    input_specs = chosen_operator.fuzz_inputs_specs(target_spec)
+    return chosen_op_name, input_specs
 
 
 # Global counter for generating unique argument IDs

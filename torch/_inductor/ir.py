@@ -3741,6 +3741,15 @@ class Layout(OutputSpec):
         ):
             return in_strides
 
+        # Skip padding the strides for dynamic shapes based on config.pad_dynamic_shape
+        # Checking both shape and strides, as there are cases where only one is dynamic
+        is_dynamic = not all(
+            isinstance(s, (int, sympy.Integer))
+            for s in itertools.chain(in_strides, size)
+        )
+        if not config.pad_dynamic_shapes and is_dynamic:
+            return in_strides
+
         shape_env = V.graph._shape_env if hasattr(V.graph, "_shape_env") else None
 
         def contains_unbacked_symints(expr: sympy.Expr | int) -> bool:
@@ -4220,7 +4229,7 @@ class Buffer(IRNode, CodegenSymbol):
         assert self.name, self
         return self.name
 
-    def get_example(self) -> Union[torch.Tensor, sympy.Symbol]:
+    def get_example(self) -> Union[torch.Tensor, torch.SymInt]:
         if isinstance(self.layout, Layout):
             return self.layout.get_example()
         raise NotImplementedError(type(self.layout).__name__)
