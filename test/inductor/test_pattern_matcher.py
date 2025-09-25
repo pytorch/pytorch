@@ -6,6 +6,7 @@ import unittest
 from typing import Callable, Optional
 
 import torch
+import torch.distributed.fsdp
 import torch._dynamo.config as dynamo_config
 import torch._inductor.config as inductor_config
 import torch._inductor.fx_passes.post_grad
