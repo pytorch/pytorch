@@ -73,10 +73,6 @@ del test
 unittest.expectedFailure(
     InlineAndInstallStrictExportTestExport.test_buffer_util_inline_and_install_strict  # noqa: F821
 )
-# this is because we can't preserve stacktrace
-unittest.expectedFailure(
-    InlineAndInstallStrictExportTestExport.test_stack_trace_make_fx_inline_and_install_strict  # noqa: F821
-)
 # this is because we marked unlift hooks to be dynamo skip traced
 unittest.expectedFailure(
     InlineAndInstallStrictExportTestExport.test_custom_tag_metadata_re_export_inline_and_install_strict  # noqa: F821
@@ -92,10 +88,6 @@ unittest.expectedFailure(
 )
 unittest.expectedFailure(
     InlineAndInstallStrictExportTestExport.test_retrace_pre_autograd_inline_and_install_strict  # noqa: F821
-)
-# this is because detect leak test has export root
-unittest.expectedFailure(
-    InlineAndInstallStrictExportTestExport.test_detect_leak_strict_inline_and_install_strict  # noqa: F821
 )
 
 if __name__ == "__main__":

@@ -16,7 +16,6 @@ handling of iterator operations during code transformation and optimization.
 """
 
 import itertools
-import sys
 from typing import TYPE_CHECKING, Union
 
 from .. import graph_break_hints, polyfills, variables
@@ -445,17 +444,14 @@ class ZipVariable(IteratorVariable):
         )
         self.reconstruct_items(codegen)
         codegen.append_output(create_build_tuple(len(self.iterables)))
-        if sys.version_info >= (3, 10):
-            codegen.extend_output(
-                [
-                    codegen.create_load_const("strict"),
-                    codegen.create_load_const(self.strict),
-                    create_instruction("BUILD_MAP", arg=1),
-                    *create_call_function_ex(True),
-                ]
-            )
-        else:
-            codegen.extend_output(create_call_function_ex(False))
+        codegen.extend_output(
+            [
+                codegen.create_load_const("strict"),
+                codegen.create_load_const(self.strict),
+                create_instruction("BUILD_MAP", arg=1),
+                *create_call_function_ex(True),
+            ]
+        )
 
 
 class MapVariable(ZipVariable):
