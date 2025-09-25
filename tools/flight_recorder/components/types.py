@@ -17,7 +17,6 @@ from typing import (  # type: ignore[attr-defined]
 )
 
 from tools.flight_recorder.components.fr_logger import FlightRecorderLogger
-from torch.distributed.distributed_c10d import broadcast
 
 
 T = TypeVar("T", bound=NamedTuple)
