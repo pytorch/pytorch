@@ -4696,7 +4696,18 @@ def get_user_object_from_id(obj_id: int) -> Any:
 
 def store_user_object_weakref(obj: object) -> None:
     obj_id = id(obj)
-    user_obj_id_to_weakref[obj_id] = weakref.ref(obj)
+    try:
+        user_obj_id_to_weakref[obj_id] = weakref.ref(obj)
+    except TypeError as e:
+        from .exc import unimplemented_v2
+
+        unimplemented_v2(
+            gb_type="Failed to make weakref to User Object",
+            context=f"user_objected: {obj}",
+            explanation="Object does not allow us to make a weakref to it",
+            hints=[],
+            from_exc=e,
+        )
 
 
 class CompileTimeInstructionCounter:
