@@ -37,6 +37,7 @@ if not is_available():
         "torch.distributed.device_mesh"
     ].init_device_mesh = _init_device_mesh_stub  # type: ignore[attr-defined]
 
+
 else:
     from torch._C._distributed_c10d import Backend as C10dBackend
     from torch.distributed.distributed_c10d import (
