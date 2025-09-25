@@ -2909,6 +2909,10 @@ def _persistent_reduction_configs(
 
     MAX_PERSISTENT_BLOCK_NUMEL = 4096
 
+    max_autotune_enabled = not disable_pointwise_autotuning(inductor_meta) or (
+        inductor_meta.get("max_autotune") or inductor_meta.get("max_autotune_pointwise")
+    )
+
     if "y" not in size_hints:
         configs = [
             triton_config_reduction(size_hints, xblock, rnumel, register_intensive=True)
