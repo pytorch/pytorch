@@ -2544,25 +2544,24 @@ def pointwise(
                     size_hints, TRITON_MAX_BLOCK["X"], waves_per_eu=2
                 ),
                 triton_config_with_settings(
-                    size_hints, 4096 # wrt: better than the max_block for some kernel
+                    size_hints,
+                    4096,  # wrt: better than the max_block for some kernel
                 ),
                 *hinted_configs,
             ]
             # Additional reduction configs appended for ROCm builds
             if torch.version.hip:
-                configs.append(triton_config_with_settings(
-                    size_hints,
-                    2048,
-                    num_warps=8,
-                    num_stages=2,
-                    waves_per_eu=1
-                )) # 20% improvement
+                configs.append(
+                    triton_config_with_settings(
+                        size_hints, 2048, num_warps=8, num_stages=2, waves_per_eu=1
+                    )
+                )  # 20% improvement
     if len(size_hints) == 2:
         # Only avoiding tuning on TileHint.SQUARE if not on ROCm builds
         # ROCm has observed improvement by diverging here
         if (
-            disable_pointwise_autotuning(inductor_meta) 
-            or (torch.version.hip is None and tile_hint == TileHint.SQUARE) 
+            disable_pointwise_autotuning(inductor_meta)
+            or (torch.version.hip is None and tile_hint == TileHint.SQUARE)
         ) and not (
             inductor_meta.get("max_autotune")
             or inductor_meta.get("max_autotune_pointwise")
@@ -2571,13 +2570,19 @@ def pointwise(
         else:
             configs = [
                 triton_config_with_settings(size_hints, 32, 32),
-                triton_config_with_settings(size_hints, 64, 32),  # better for some kernels
+                triton_config_with_settings(
+                    size_hints, 64, 32
+                ),  # better for some kernels
                 triton_config_with_settings(size_hints, 64, 64),  # ~8% better for fp16
                 triton_config_with_settings(size_hints, 256, 16),
                 triton_config_with_settings(size_hints, 16, 256),
-                triton_config_with_settings(size_hints, 128, 16), # +10% for some kernels
-                triton_config_with_settings(size_hints, 128, 32), # additional 10% more
-                triton_config_with_settings(size_hints, 32, 512), # +30% for some kernels
+                triton_config_with_settings(
+                    size_hints, 128, 16
+                ),  # +10% for some kernels
+                triton_config_with_settings(size_hints, 128, 32),  # additional 10% more
+                triton_config_with_settings(
+                    size_hints, 32, 512
+                ),  # +30% for some kernels
                 triton_config_with_settings(size_hints, bs, 1),
                 triton_config_with_settings(size_hints, 1, bs),
                 *hinted_configs,
