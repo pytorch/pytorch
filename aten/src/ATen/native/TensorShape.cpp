@@ -1898,9 +1898,11 @@ Tensor repeat(const Tensor& self, IntArrayRef repeats) {
   // expanded_view is non-contiguous because .expand set stride to 0.
   auto expanded_view = view.expand(expand_shape);
 
-  // Reshape to [s0 * r0, s1 * r1, ...].
-  // .contiguous() triggers a copy of data.
-  return expanded_view.contiguous().view(target_size);
+  // copy to result tensor with shape [s0 * r0, s1 * r1, ...].
+  auto result = at::empty(target_size, self.options());
+  result.copy_(expanded_view);
+
+  return result;
 }
 
 Tensor tile_symint(const Tensor& self, SymIntArrayRef reps) {
