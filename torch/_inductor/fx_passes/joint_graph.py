@@ -600,8 +600,7 @@ def canonicalize_aten_ir_passes(gm: torch.fx.GraphModule):
 
 
 def joint_graph_passes(
-        graph: torch.fx.GraphModule,
-        input_device: Optional[torch.device] = None
+    graph: torch.fx.GraphModule, input_device: Optional[torch.device] = None
 ):
     """
     Run FX transformations on the joint forwards+backwards graph.

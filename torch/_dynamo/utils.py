@@ -1102,6 +1102,7 @@ if sys.version_info >= (3, 12):
         typing.TypeAliasType,
     )
 
+
 def get_inputs_devices(
     inputs: collections.abc.Sequence[object],
     model: torch.fx.GraphModule,
