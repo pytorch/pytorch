@@ -6006,7 +6006,6 @@ class TestLinalg(TestCase):
     @skipCUDAIfNotRocm
     @dtypes(torch.float16, torch.float32)
     def test_numerical_check_accuracy_tunableop(self, device, dtype):
-        import os
         shapes = [(127,193,61), (251,317,73), (89,149,41)]
         atol, rtol = 1e-2, 1e-1
 
