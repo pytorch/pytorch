@@ -32,10 +32,6 @@
 #include <ATen/native/mkldnn/Utils.h>
 #endif
 
-#ifdef USE_MPS
-#include <ATen/mps/MPSDevice.h>
-#endif
-
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
@@ -1429,12 +1425,8 @@ static inline at::MemoryFormat determine_backend_memory_format(
       }
       break;
     case ConvBackend::Mps:
+    case ConvBackend::MpsTranspose:
       if (mps_conv_use_channels_last(input, weight)) {
-#ifdef USE_MPS
-        if (!mps::is_macos_13_or_newer(mps::MacOSVersion::MACOS_VER_15_0_PLUS)) {
-          break;
-        }
-#endif
         backend_memory_format = (k == 5) ? MemoryFormat::ChannelsLast3d : MemoryFormat::ChannelsLast;
       }
       break;
