@@ -6,6 +6,8 @@ python block_mask_load_balance_benchmark.py
 import random
 from typing import Optional, Union
 
+import pandas as pd
+
 import torch
 from torch import Tensor
 from torch._prims_common import DeviceLikeType
@@ -151,6 +153,22 @@ def compute_block_mask_sparsity(block_mask: BlockMask) -> float:
     return sparsity
 
 
+def report_stats(records: list[float]) -> dict[str, float]:
+    """
+    util function for reporting statistics:
+        size, min, max, mean, variance
+    """
+    mean = sum(records) / len(records)
+
+    return {
+        "size": len(records),
+        "min": min(records),
+        "max": max(records),
+        "mean": mean,
+        "variance": sum((x - mean) ** 2 for x in records),
+    }
+
+
 # same logic as in torch.distributed.tensor.experimental._attention.create_cp_block_mask
 # but doesn't rely on DeviceMesh
 def _create_cp_block_mask(
@@ -242,79 +260,110 @@ def benchmark_load_balance_document_mask(
     S: int,
     D: int,
     document_count: int,  # parameters for document generation
+    filename: Optional[str] = "./document_mask_load_balance_benchmark.csv",
 ) -> None:
     device_type = get_device_type()
 
     # random init
     random.seed(10)
 
-    # initialize document mask
-    lengths = [(generate_random_lengths(S, document_count)) for _ in range(B)]
-    offsets = length_to_offsets(lengths, device_type)
-    document_causal_mask = generate_doc_mask_mod(causal_mask, offsets)
+    exp_records = []  # (bm_sparsity, max_sparsity_base, max_sparsity_auto)
+    num_experiments = 1000
 
-    # full BlockMask
-    block_mask = compiled_create_block_mask(
-        document_causal_mask,
-        B=B,
-        H=1,
-        Q_LEN=S,
-        KV_LEN=S,
-        device=device_type,
-    )
+    for _ in range(num_experiments):
+        # initialize document mask
+        lengths = [(generate_random_lengths(S, document_count)) for _ in range(B)]
+        offsets = length_to_offsets(lengths, device_type)
+        document_causal_mask = generate_doc_mask_mod(causal_mask, offsets)
 
-    print(f"Full BlockMask sparsity={compute_block_mask_sparsity(block_mask)}")
-
-    print("Head-Tail Load Balance:")
-    load_balancer = HeadTailLoadBalancer
-    load_balance_indices = load_balancer._generate_indices(S, world_size, device_type)
-    # simulate context parallel block_mask sharding:
-    for rank in range(world_size):
-        print(f"rank: {rank} / {world_size}")
-        cp_block_mask = _create_cp_block_mask(
+        # full BlockMask
+        block_mask = compiled_create_block_mask(
             document_causal_mask,
             B=B,
-            H=H,
+            H=1,
             Q_LEN=S,
             KV_LEN=S,
-            rank=rank,
-            world_size=world_size,
-            qkv_shuffle_indices=load_balance_indices,
             device=device_type,
         )
-        print(
-            f"rank ({rank} / {world_size}) Context Parallel BlockMask sparsity={compute_block_mask_sparsity(cp_block_mask)}"
-        )
-        print("\n")
 
-    print("Sparsity-based Load Balance:")
-    load_balancer = PTRRLoadBalancer
-    load_balance_indices = load_balancer._generate_indices(
-        block_mask, world_size, device_type
+        full_block_mask_sparsity = compute_block_mask_sparsity(block_mask)
+
+        load_balancer = HeadTailLoadBalancer
+        load_balance_indices = load_balancer._generate_indices(
+            S, world_size, device_type
+        )
+        # simulate context parallel block_mask sharding:
+        base_line_context_parallel_block_mask_sparsity = []
+        for rank in range(world_size):
+            cp_block_mask = _create_cp_block_mask(
+                document_causal_mask,
+                B=B,
+                H=H,
+                Q_LEN=S,
+                KV_LEN=S,
+                rank=rank,
+                world_size=world_size,
+                qkv_shuffle_indices=load_balance_indices,
+                device=device_type,
+            )
+            block_mask_sparsity_on_rank = compute_block_mask_sparsity(cp_block_mask)
+            base_line_context_parallel_block_mask_sparsity.append(
+                block_mask_sparsity_on_rank
+            )
+
+        base_line_context_parallel_block_mask_sparsity_max = report_stats(
+            base_line_context_parallel_block_mask_sparsity
+        )["max"]
+
+        load_balancer = PTRRLoadBalancer
+        load_balance_indices = load_balancer._generate_indices(
+            block_mask, world_size, device_type
+        )
+        # simulate context parallel block_mask sharding:
+        auto_load_balance_context_parallel_block_mask_sparsity = []
+        for rank in range(world_size):
+            cp_block_mask = _create_cp_block_mask(
+                document_causal_mask,
+                B=B,
+                H=H,
+                Q_LEN=S,
+                KV_LEN=S,
+                rank=rank,
+                world_size=world_size,
+                qkv_shuffle_indices=load_balance_indices,
+                device=device_type,
+            )
+            auto_load_balance_context_parallel_block_mask_sparsity.append(
+                compute_block_mask_sparsity(cp_block_mask)
+            )
+
+        auto_load_balance_context_parallel_block_mask_sparsity_max = report_stats(
+            auto_load_balance_context_parallel_block_mask_sparsity
+        )["max"]
+
+        exp_records.append(
+            (
+                full_block_mask_sparsity,
+                base_line_context_parallel_block_mask_sparsity_max,
+                auto_load_balance_context_parallel_block_mask_sparsity_max,
+            )
+        )
+
+    # write to file
+    df = pd.DataFrame(
+        exp_records,
+        columns=[
+            "attn_sparsity",
+            "max_sparsity_base",
+            "max_sparsity_auto",
+        ],
     )
-    # simulate context parallel block_mask sharding:
-    for rank in range(world_size):
-        print(f"rank: {rank} / {world_size}")
-        cp_block_mask = _create_cp_block_mask(
-            document_causal_mask,
-            B=B,
-            H=H,
-            Q_LEN=S,
-            KV_LEN=S,
-            rank=rank,
-            world_size=world_size,
-            qkv_shuffle_indices=load_balance_indices,
-            device=device_type,
-        )
-        print(
-            f"rank ({rank} / {world_size}) Context Parallel BlockMask sparsity={compute_block_mask_sparsity(cp_block_mask)}"
-        )
-        print("\n")
+    df.to_csv(filename)
 
 
 if __name__ == "__main__":
     benchmark_load_balance_document_mask(
-        world_size=4,
+        world_size=8,
         B=1,
         H=1,
         S=8192,
