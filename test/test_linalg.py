@@ -6013,10 +6013,9 @@ class TestLinalg(TestCase):
         for (m, k, n) in shapes:
             a = torch.randn(m, k, device='cuda')
             b = torch.randn(k, n, device='cuda')
-            with self._tunableop_ctx():
-                torch.cuda.tunable.enable(False)
-                torch.cuda.tunable.set_numerical_check_tolerances(False, 1e-5, 1e-5)
-                C_baseline = a @ b
+            torch.cuda.tunable.enable(False)
+            torch.cuda.tunable.set_numerical_check_tolerances(False, 1e-5, 1e-5)
+            C_baseline = a @ b
             with self._tunableop_ctx():
                 torch.cuda.tunable.enable(True)
                 torch.cuda.tunable.set_numerical_check_tolerances(True, atol, rtol)
