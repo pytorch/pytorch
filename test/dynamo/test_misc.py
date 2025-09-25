@@ -8616,7 +8616,7 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
             get_metrics_context(),
             dynamo_timed(""),
         ):
-            capture_output = fullgraph_capture(foo, (x,), {})
+            capture_output = fullgraph_capture(foo, (x,))
             graph_capture_output = capture_output.graph_capture_output
             fn = graph_capture_output.build_guards(foo.__code__)
 
