@@ -49,18 +49,17 @@ inline void infer_size_impl(
     // numel is the product of known sizes, it has to be divisible by newsize.
     // newsize can't be zero.
     if constexpr (std::is_same_v<NumelType, c10::SymInt>) {
-      if (auto v = newsize.maybe_as_int()) {
-        if (*v == 0) {
-          // Avoid div by 0 when sym_eq(numel % newsize, 0) is constructed!
-          // which may happen when newsize is not a symbol! if its a symbol
-          // division wont happen anyway during compile.
-          TORCH_MAYBE_SYM_CHECK(
-              numel == newsize,
-              "shape '",
-              shape,
-              "' is invalid for input of size ",
-              numel);
-        }
+      auto v = newsize.maybe_as_int();
+      if (v and *v == 0) {
+        // Avoid div by 0 when sym_eq(numel % newsize, 0) is constructed!
+        // which may happen when newsize is not a symbol! if its a symbol
+        // division wont happen anyway during compile.
+        TORCH_MAYBE_SYM_CHECK(
+            numel == newsize,
+            "shape '",
+            shape,
+            "' is invalid for input of size ",
+            numel);
       } else {
         auto cond = sym_gt(newsize, 0)
                         .sym_and(sym_eq(numel % newsize, 0))
