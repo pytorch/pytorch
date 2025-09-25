@@ -42,7 +42,7 @@ class Benchmark(BenchmarkBase):
         )
         def add1(a):
             return a + 1
-        
+
         self._add1 = add1
 
         # warmup
