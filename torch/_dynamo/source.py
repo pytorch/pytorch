@@ -25,7 +25,11 @@ from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 from torch._guards import ChainedSource, Guard, GuardSource, Source
 
 from . import utils
-from .bytecode_transformation import create_call_function, create_instruction
+from .bytecode_transformation import (
+    create_binary_subscr,
+    create_call_function,
+    create_instruction,
+)
 
 
 if TYPE_CHECKING:
@@ -166,7 +170,7 @@ class RandomValueSource(Source):
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.append_output(codegen.create_load(codegen.tx.output.random_values_var))
         codegen.append_output(codegen.create_load_const(self.random_call_index))
-        codegen.append_output(create_instruction("BINARY_SUBSCR"))
+        codegen.append_output(create_binary_subscr())
 
     def name(self) -> str:
         return f"random_value_{self.random_call_index}"
@@ -618,7 +622,7 @@ class DefaultsSource(ChainedSource):
         codegen(self.base)
         codegen.extend_output(codegen.create_load_attrs(self.field))
         codegen.append_output(codegen.create_load_const(self.idx_key))
-        codegen.append_output(create_instruction("BINARY_SUBSCR"))
+        codegen.append_output(create_binary_subscr())
 
     def guard_source(self) -> GuardSource:
         return self.base.guard_source()
@@ -645,7 +649,7 @@ class GetItemSource(ChainedSource):
             codegen.append_output(codegen.create_load_const(self.unpack_slice()))
         else:
             codegen.append_output(codegen.create_load_const(self.index))
-        codegen.append_output(create_instruction("BINARY_SUBSCR"))
+        codegen.append_output(create_binary_subscr())
 
     def guard_source(self) -> GuardSource:
         return self.base.guard_source()
@@ -744,7 +748,7 @@ class DictGetItemSource(ChainedSource):
             codegen(self.index)
         else:
             codegen.append_output(codegen.create_load_const(self.index))
-        codegen.append_output(create_instruction("BINARY_SUBSCR"))
+        codegen.append_output(create_binary_subscr())
 
     def name(self) -> str:
         if isinstance(self.index, ConstDictKeySource):

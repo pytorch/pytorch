@@ -452,7 +452,7 @@ def create_swap(n: int) -> list[Instruction]:
         create_instruction("BUILD_LIST", arg=n - 1),
         create_instruction("DUP_TOP"),
         create_instruction("LOAD_CONST", argval=-1),
-        create_instruction("BINARY_SUBSCR"),
+        create_binary_subscr(),
         create_instruction("ROT_THREE"),
         create_instruction("DUP_TOP"),
         create_instruction("ROT_THREE"),
@@ -524,6 +524,13 @@ def create_print_value(value: Any) -> list[Instruction]:
         *create_call_function(1, False),
         create_instruction("POP_TOP"),
     ]
+
+
+def create_binary_subscr() -> Instruction:
+    if sys.version_info < (3, 14):
+        return create_instruction("BINARY_SUBSCR")
+    # https://github.com/python/cpython/blob/0e46c0499413bc5f9f8336fe76e2e67cf93f64d8/Include/opcode.h#L36
+    return create_instruction("BINARY_OP", arg=26)
 
 
 def linetable_writer(
@@ -1143,7 +1150,10 @@ def remove_binary_store_slice(instructions: list[Instruction]) -> None:
         new_insts.append(inst)
         if inst.opname in ("BINARY_SLICE", "STORE_SLICE"):
             # new instruction
-            subscr_inst = create_instruction(inst.opname.replace("SLICE", "SUBSCR"))
+            if sys.version_info >= (3, 14) and inst.opname == "BINARY_SLICE":
+                subscr_inst = create_binary_subscr()
+            else:
+                subscr_inst = create_instruction(inst.opname.replace("SLICE", "SUBSCR"))
             if inst.exn_tab_entry and inst.exn_tab_entry.end is inst:
                 inst.exn_tab_entry.end = subscr_inst
             subscr_inst.exn_tab_entry = copy.copy(inst.exn_tab_entry)
@@ -1159,6 +1169,7 @@ def remove_binary_store_slice(instructions: list[Instruction]) -> None:
 
 FUSED_INSTS = {
     "LOAD_FAST_LOAD_FAST": ("LOAD_FAST", "LOAD_FAST"),
+    "LOAD_FAST_BORROW_LOAD_FAST_BORROW": ("LOAD_FAST_BORROW", "LOAD_FAST_BORROW"),
     "STORE_FAST_STORE_FAST": ("STORE_FAST", "STORE_FAST"),
     "STORE_FAST_LOAD_FAST": ("STORE_FAST", "LOAD_FAST"),
 }
