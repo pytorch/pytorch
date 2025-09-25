@@ -103,10 +103,23 @@ class TORCH_CUDA_CPP_API TuningResultsManager {
 
     void RecordUntuned( std::ofstream& untuned_file, const std::string& op_signature,
       const std::string& params_signature, const std::string& blas_signature);
+
+    void InitRealtimeAppend(
+        const std::string& filename,
+        const std::unordered_map<std::string, std::string>& validators);
+        
+    void AppendResultLine(const std::string& op_sig,
+                         const std::string& param_sig,
+                         const ResultEntry& result);
+
+    void CloseRealtimeAppend();  // For clean shutdown
   private:
     std::mutex lock_;
     ResultsMap results_;
     UntunedMap untuned_results_;
+    std::mutex realtime_file_mutex_;
+    std::unique_ptr<std::ofstream> realtime_out_;
+    bool validators_written_ = false;
 
 };
 
@@ -152,6 +165,9 @@ class TORCH_CUDA_CPP_API TuningContext {
     void EnableRecordUntuned(bool value);
     bool IsRecordUntunedEnabled() const;
     std::ofstream& GetUntunedFile();
+
+    void SetOutputRealtime(bool value);
+    bool IsOutputRealtimeEnabled() const;
 
     void EnableNumericsCheck(bool value);
     bool IsNumericsCheckEnabled() const;
@@ -206,6 +222,7 @@ class TORCH_CUDA_CPP_API TuningContext {
     bool enable_;
     bool tuning_enable_;
     bool record_untuned_enable_;
+    bool output_realtime_enable_;
     bool manager_initialized_;
     bool write_file_on_exit_;
     bool numerics_check_enable_;
