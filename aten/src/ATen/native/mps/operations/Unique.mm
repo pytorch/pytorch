@@ -322,14 +322,11 @@ static Tensor lexsort_rows_perm_mps(const Tensor& mat_2d) {
     return arange(rows, mat_2d.options().dtype(kLong));
   }
 
-  Tensor perm;
-  for (int64_t c = cols - 1; c >= 0; --c) {
-    auto keys = mat_2d.select(1, c);
-    if (perm.defined()) {
-      keys = keys.index_select(0, perm);
-    }
-    Tensor idx = argsort(keys, /*dim=*/0, /*descending=*/false);
-    perm = perm.defined() ? perm.index_select(0, idx) : std::move(idx);
+  auto perm = arange(rows, mat_2d.options().dtype(kLong));
+  for (auto c = cols - 1; c >= 0; --c) {
+    auto keys = mat_2d.select(1, c).index_select(0, perm);
+    const auto idx = argsort(keys, /*dim=*/0, /*descending=*/false);
+    perm = perm.index_select(0, idx);
   }
   return perm;
 }
@@ -346,7 +343,7 @@ static std::tuple<Tensor, Tensor, Tensor> unique_dim_sorted_mps_impl(const Tenso
     auto output = at::empty(sizes, self.options());
     auto inverse_indices = at::empty({0}, self.options().dtype(kLong));
     auto counts = at::empty({0}, self.options().dtype(kLong));
-    return std::make_tuple(output, inverse_indices, counts);
+    return {output, inverse_indices, counts};
   }
 
   auto transposed = self.moveaxis(dim, 0);
