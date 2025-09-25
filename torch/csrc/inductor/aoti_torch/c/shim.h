@@ -527,7 +527,7 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_call_dispatcher(
 
 // Has the same semantic as aoti_torch_call_dispatcher, but takes an
 // additional argument for the extension abi version. This is needed for
-// forward/backward compatiblity when calling native functions via the
+// forward/backward compatibility when calling native functions via the
 // dispatcher. The caller should pass in its own TORCH_ABI_TAG as
 // extension_abi_version.
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_call_dispatcher_v2(

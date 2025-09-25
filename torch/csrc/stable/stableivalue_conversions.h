@@ -231,7 +231,8 @@ struct FromImpl<dummy_types::Dummy> {
   static StableIValue call(
       const dummy_types::Dummy& val,
       uint64_t extension_abi_version = 0) {
-    if (extension_abi_version != 0 && extension_abi_version < TORCH_VERSION_2_9_0) {
+    if (extension_abi_version != 0 &&
+        extension_abi_version < TORCH_VERSION_2_9_0) {
       // Pack only the id into the higher 32 bits
       uint64_t result = (static_cast<uint64_t>(val.id) & 0xFFFFFFFF) << 32;
       return static_cast<StableIValue>(result);
@@ -416,8 +417,10 @@ struct ToImpl<dummy_types::Dummy> {
   static dummy_types::Dummy call(
       StableIValue val,
       uint64_t extension_abi_version = 0) {
-    std::cout << "extension_abi_version: " << (int)extension_abi_version << "\n";
-    if (extension_abi_version != 0 && extension_abi_version < TORCH_VERSION_2_9_0) {
+    std::cout << "extension_abi_version: " << (int)extension_abi_version
+              << "\n";
+    if (extension_abi_version != 0 &&
+        extension_abi_version < TORCH_VERSION_2_9_0) {
       // Legacy decoding: extract id from higher 32 bits to match FromImpl
       uint64_t packed = static_cast<uint64_t>(val);
       int32_t id = static_cast<int32_t>((packed >> 32) & 0xFFFFFFFF);

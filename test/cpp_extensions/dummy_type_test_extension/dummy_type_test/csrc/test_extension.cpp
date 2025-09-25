@@ -25,7 +25,7 @@ void boxed_test_fn(
     StableIValue* stack,
     uint64_t num_args,
     uint64_t num_outputs) {
-  Tensor input_tensor = to<Tensor>(stack[0]); 
+  Tensor input_tensor = to<Tensor>(stack[0]);
   dummy_types::Dummy dummy_obj = to<dummy_types::Dummy>(stack[1]);
   Tensor result = test_fn_impl(input_tensor, dummy_obj);
   // Put result back on the stack
