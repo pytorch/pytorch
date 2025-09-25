@@ -220,7 +220,7 @@ class TestSparse(TestSparseBase):
         indices = torch.tensor([[0, 1, -1], [2, 0, 1]])
         values = torch.tensor([1, 2, 3])
         shape = torch.Size([3, 3])
-        self.assertRaises(RuntimeError, lambda: torch.sparse_coo_tensor(indices, values, shape))
+        self.assertRaisesRegex(RuntimeError, "found negative index", lambda: torch.sparse_coo_tensor(indices, values, shape))
 
     def randn(self, *args, **kwargs):
         """
