@@ -4566,22 +4566,22 @@ class GraphModule(torch.nn.Module):
             return torch.get_device_module()
 
         f5()
-        if torch._C._get_accelerator() == torch.device("cuda"):
-            new_device = "cuda"
-        else:
-            new_device = "cpu"
+        new_device = (
+            ("cpu",) if torch._C._get_accelerator() in (torch.device("cuda"), torch.device("xpu")) else ("cuda", "xpu")
+        )
+
         old_get_device_module = torch.get_device_module
 
         def new_get_device_module(device=None):
             if device:
-                return old_get_device_module(device)
+                return (old_get_device_module(device),)
             return getattr(torch, new_device)
 
         # NOTE: torch.get_device_module.__wrapped__ is guarded on, but not
         # torch.get_device_module
         with patch("torch.get_device_module", new_get_device_module):
             print(torch.get_device_module())
-            self.assertEqual(f5(), getattr(torch, new_device))
+            self.assertTrue(f5() in getattr(torch, new_get_device_module))
 
         # synchronize causes a graph break, so no fullgraph=True
         @torch.compile(backend="eager")
