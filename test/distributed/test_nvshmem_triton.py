@@ -543,8 +543,6 @@ class NVSHMEMTritonTest(MultiProcContinuousTest):
             [FLAG_FINAL_VALUE], dtype=torch.int32, device=self.device
         )
 
-        my_barrier_all_kernel[(1,)]()
-
         if rank == 0:
             # Rank 0 (the waiter)
             my_wait_until_kernel[(1,)](
