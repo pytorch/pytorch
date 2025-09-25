@@ -125,6 +125,7 @@ Please refer to [example](example/example.cpp) for example.
 The command to compile example.cpp is as follow:
 
 ```Shell
+# The same directory as the current README.md file.
 mkdir build
 
 pushd build
@@ -132,7 +133,7 @@ cmake ..
 make -j 32
 popd
 
-g++ -o out example/example.cpp -L ./build -lopenreg
+g++ -o out example/example.cpp -L ./build -lopenreg -I ./
 LD_LIBRARY_PATH=./build ./out
 ```
 

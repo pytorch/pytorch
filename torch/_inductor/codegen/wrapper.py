@@ -2155,6 +2155,10 @@ class PythonWrapperCodegen(CodeGen):
     def _format_kernel_definition(
         kernel_name: str, kernel_body: str, metadata: Optional[str] = None
     ):
+        if config.triton.autotune_at_compile_time and metadata:
+            # Generating autotune block
+            # Need to replace C++ comment starter with Python comment starter
+            metadata = re.sub(r"^// ", "# ", metadata, flags=re.MULTILINE)
         metadata_comment = f"{metadata}\n" if metadata else ""
         body = f"\n\n{metadata_comment}{kernel_name} = {kernel_body}"
         return body
@@ -2168,9 +2172,8 @@ class PythonWrapperCodegen(CodeGen):
         cpp_definition: Optional[str] = None,
     ):
         if config.triton.autotune_at_compile_time:
-            # Skip inserting comments for the autotune block as they may contain cpp style comments
             body = self._format_kernel_definition(
-                kernel_name, kernel_body, metadata=None
+                kernel_name, kernel_body, metadata=metadata
             )
             self.kernel_autotune_defs.splice(body)
             if V.graph.cpp_wrapper:
