@@ -53,11 +53,12 @@ class Benchmark(BenchmarkBase):
         self._add1 = add1
 
         # warmup
-        if self._backward:
-            self.forward_val = self._add1(self.a).sum()
-            self.forward_val.backward()
-        else:
-            self._work()
+        for _ in range(10):
+            if self._backward:
+                self.forward_val = self._add1(self.a).sum()
+                self.forward_val.backward()
+            else:
+                self._work()
 
     def _prepare(self):
         if self._backward:
