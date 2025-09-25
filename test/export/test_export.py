@@ -1370,7 +1370,7 @@ graph():
                 self.mod.forward = hacked_up_forward.__get__(self.mod, Foo)
 
             def __call__(self, x, y):
-                ep = torch.export.export(self.mod, (x, y), strict=True).module()
+                ep = export(self.mod, (x, y), strict=True).module()
                 out = ep(x, y)
                 return out
 
@@ -1379,13 +1379,31 @@ graph():
 
         foo = Foo()
         ref = ReferenceControl(foo)
-        with self.assertWarnsRegex(
-            UserWarning,
-            "While exporting, we found certain side effects happened in the model.forward. "
-            "Here are the list of potential sources you can double check: "
-            "\[\"L\['global_list'\]\", \"L\['self'\].bank\", \"L\['self'\].bank_dict\"",
-        ):
-            ref(torch.randn(4, 4), torch.randn(4, 4))
+        # TODO (tmanlaibaatar) this kinda sucks but today there is no good way to get
+        # good source name. We should have an util that post processes dynamo source names
+        # to be more readable.
+        if is_strict_v2_test(self._testMethodName):
+            with self.assertWarnsRegex(
+                UserWarning,
+                r"(L\['self']\._export_root\.forward\.__func__\.__closure__\[1\]\.cell_contents\.bank"
+                r"|L\['self']\._export_root\.forward\.__func__\.__closure__\[1\]\.cell_contents\.bank_dict"
+                r"|L\['self']\._export_root\.forward\.__func__\.__closure__\[0\]\.cell_contents)",
+            ):
+                ref(torch.randn(4, 4), torch.randn(4, 4))
+        elif is_inline_and_install_strict_test(self._testMethodName):
+            with self.assertWarnsRegex(
+                UserWarning,
+                r"(L\['self']\._modules\['_export_root']\.forward\.__func__\.__closure__\[1\]\.cell_contents\.bank"
+                r"|L\['self']\._modules\['_export_root']\.forward\.__func__\.__closure__\[1\]\.cell_contents\.bank_dict"
+                r"|L\['self']\._modules\['_export_root']\.forward\.__func__\.__closure__\[0\]\.cell_contents)",
+            ):
+                ref(torch.randn(4, 4), torch.randn(4, 4))
+        else:
+            with self.assertWarnsRegex(
+                UserWarning,
+                r"(L\['global_list'\]|L\['self'\]\.bank|L\['self'\]\.bank_dict)",
+            ):
+                ref(torch.randn(4, 4), torch.randn(4, 4))
 
     def test_mask_nonzero_static(self):
         class TestModule(torch.nn.Module):
@@ -1457,6 +1475,40 @@ graph():
         args = ([torch.randn(1, 3)], torch.randn(1, 3))
         ep = export(f, args, strict=False)
         self.assertEqual(ep.module()(*args), f(*args))
+
+    def test_where_decomp(self):
+        class TestModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return torch.ops.aten.where.default(x > 0)
+
+        test_module = TestModule()
+        sample_input = (torch.randn(2, 3),)
+
+        def auto_dynamic_shapes_from_args(args):  # pyre-ignore
+            """
+            This function creates dynamic shapes specification with Dim.AUTO
+            in all dimensions of all tensors for given argument list.
+            """
+            if isinstance(args, list):
+                return [auto_dynamic_shapes_from_args(arg) for arg in args]
+            elif isinstance(args, tuple):
+                return tuple(auto_dynamic_shapes_from_args(arg) for arg in args)
+            elif isinstance(args, dict):
+                return {k: auto_dynamic_shapes_from_args(v) for k, v in args.items()}
+            elif isinstance(args, torch.Tensor):
+                return {j: Dim.AUTO for j in range(args.dim())}
+            else:
+                print(f"args type: {type(args)}")
+                return None
+
+        ep = torch.export.export(
+            test_module,
+            sample_input,
+            dynamic_shapes=auto_dynamic_shapes_from_args(sample_input),
+        ).run_decompositions({})
 
     def test_basic_non_strict_fake_tensor(self):
         class Basic(torch.nn.Module):
@@ -4423,17 +4475,8 @@ def forward(self, x):
                 global_storage.append(closure)
                 return x.sin()
 
-        prev_os_env = os.environ.copy()
-        from torch.export._trace import NONSTRICT_EXPORT_SANITIZE_TRACE
-
-        prev_os_env[NONSTRICT_EXPORT_SANITIZE_TRACE] = "1"
-
         with (
-            patch.dict(
-                os.environ,
-                prev_os_env,
-                clear=True,
-            ),
+            torch._export.config.patch(detect_non_strict_fake_tensor_leaks=True),
             self.assertWarnsRegex(
                 UserWarning, "Detected 1 fake tensors that are still alive after export"
             ),
@@ -4479,17 +4522,8 @@ def forward(self, x):
             isinstance(ref.bank[0], torch._subclasses.fake_tensor.FakeTensor)
         )
 
-        prev_os_env = os.environ.copy()
-        from torch.export._trace import NONSTRICT_EXPORT_SANITIZE_TRACE
-
-        prev_os_env[NONSTRICT_EXPORT_SANITIZE_TRACE] = "1"
-
         with (
-            patch.dict(
-                os.environ,
-                prev_os_env,
-                clear=True,
-            ),
+            torch._export.config.patch(detect_non_strict_fake_tensor_leaks=True),
             self.assertWarnsRegex(
                 UserWarning, "Detected 3 fake tensors that are still alive after export"
             ),
@@ -4514,16 +4548,7 @@ def forward(self, x):
             isinstance(global_list[0], torch._subclasses.fake_tensor.FakeTensor)
         )
 
-        prev_os_env = os.environ.copy()
-        from torch.export._trace import NONSTRICT_EXPORT_SANITIZE_TRACE
-
-        prev_os_env[NONSTRICT_EXPORT_SANITIZE_TRACE] = "1"
-
-        with patch.dict(
-            os.environ,
-            prev_os_env,
-            clear=True,
-        ):
+        with torch._export.config.patch(detect_non_strict_fake_tensor_leaks=True):
             warn_re = re.compile(
                 r"Detected\s+\d+\s+fake\s+tensors?"
                 r".*test_export\.py.*global_list\.append\(x \+ y\)",
@@ -4570,16 +4595,7 @@ def forward(self, x):
         self.assertIsNotNone(node1_ref(), "node1 should still be alive due to cycle")
         self.assertIsNotNone(node2_ref(), "node2 should still be alive due to cycle")
 
-        prev_os_env = os.environ.copy()
-        from torch.export._trace import NONSTRICT_EXPORT_SANITIZE_TRACE
-
-        prev_os_env[NONSTRICT_EXPORT_SANITIZE_TRACE] = "1"
-
-        with patch.dict(
-            os.environ,
-            prev_os_env,
-            clear=True,
-        ):
+        with torch._export.config.patch(detect_non_strict_fake_tensor_leaks=True):
             warn_re = re.compile(
                 r"Detected\s+\d+\s+fake\s+tensors?"
                 r'.*?[/\\]test_export\.py",\s+line\s+\d+,\s+in\s+forward'
@@ -10055,7 +10071,7 @@ graph():
                 return (torch.full((i0,), 0.0),)
 
         f = M()
-        ep = torch.export.export(f, ())
+        ep = export(f, ())
         a = ep.module()()[0]
         self.assertEqual(a.size(), torch.Size([11]))
         self.assertEqual(a, torch.zeros(11))
@@ -13057,6 +13073,8 @@ def forward(self, x, b_t, y):
         _test(MyModule(), "foo")
         _test(MyOuterModule(), "inner.foo")
 
+    @testing.expectedFailureTrainingIRToRunDecomp  # set_grad disappears after decomp
+    @testing.expectedFailureTrainingIRToRunDecompNonStrict  # set_grad disappears after decomp
     def test_export_with_set_grad_enabled(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
@@ -13069,18 +13087,9 @@ def forward(self, x, b_t, y):
 
         model = Model()
         ep = export(model, (torch.randn(4, 4),), {})
-        # _export_for_traininig is using pre_dispatch=False
-        # Therefore the set_grad calls are not replaced with a hop.
-        if not is_training_ir_test(self._testMethodName):
-            self.assertIn(
-                "torch.ops.higher_order.wrap_with_set_grad_enabled",
-                ep.graph_module.code,
-            )
-        gm = torch.export.export(model, (torch.randn(4, 4),)).module()
-        self.assertIn(
-            "set_grad_enabled",
-            gm.code,
-        )
+        FileCheck().check_count(
+            "torch.ops.higher_order.wrap_with_set_grad_enabled", 1, exactly=True
+        ).run(ep.graph_module.code)
 
     def test_export_with_autocast(self):
         class Model(torch.nn.Module):
@@ -16025,6 +16034,26 @@ def forward(self, q, k, v):
             r"Number of heads in key and value must divide the number of heads",
         ):
             export(Foo(), (torch.randn(1, 33, 256, 128), k, v))
+
+    def test_namedtuple_input_export(self):
+        # test for NamedTuple inputs with both strict and non-strict export modes
+        from collections import namedtuple
+
+        PointNT = namedtuple("PointNT", ["x", "y"])
+
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                return x + y
+
+        inp = PointNT(torch.ones(3), torch.ones(3))
+
+        ep_non_strict = export(M(), inp)
+        result_non_strict = ep_non_strict.module()(*inp)
+
+        ep_strict = export(M(), inp, strict=True)
+        result_strict = ep_strict.module()(*inp)
+
+        self.assertEqual(result_non_strict, result_strict)
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
