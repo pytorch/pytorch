@@ -795,6 +795,20 @@ inline std::string friendlyTypeName(py::handle obj) {
     }
     ss << "))";
     return ss.str();
+  } else if (py::hasattr(obj, "__iter__")) {
+    std::stringstream ss;
+    ss << py::str(py::type::handle_of(obj).attr("__name__"));
+    ss << "(";
+    bool first = true;
+    for (auto item : obj) {
+      if (!first) {
+        ss << ", ";
+      }
+      ss << py::str(py::type::handle_of(item).attr("__name__"));
+      first = false;
+    }
+    ss << ")";
+    return ss.str();
   } else {
     return py::str(py::type::handle_of(obj).attr("__name__"));
   }
