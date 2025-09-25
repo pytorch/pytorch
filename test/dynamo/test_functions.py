@@ -410,10 +410,6 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             combs.append(torch.ones(size))
         return combs
 
-    @unittest.skipIf(
-        sys.version_info < (3, 10),
-        "itertools.pairwise was added at Python 3.10",
-    )
     @make_test
     def test_itertools_pairwise(a):
         pairs = []
@@ -4698,10 +4694,6 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(len(lst), 2)
         self.assertEqual(lst[0], lst[1])
 
-    @unittest.skipIf(
-        sys.version_info < (3, 10),
-        "zip strict kwargs not implemented for Python < 3.10",
-    )
     def test_zip_strict(self):
         def fn(x, ys, zs):
             x = x.clone()
