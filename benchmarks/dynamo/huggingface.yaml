@@ -9,10 +9,6 @@ skip:
     # Fails with even batch size = 1
     - GPTJForCausalLM
     - GPTJForQuestionAnswering
-    # Model too big
-    - google/gemma-3-4b-it
-    - openai/gpt-oss-20b
-    - mistralai/Mistral-7B-Instruct-v0.3
 
   device:
     cpu:
@@ -34,6 +30,8 @@ skip:
       - google/gemma-3-4b-it
       - openai/whisper-tiny
       - Qwen/Qwen3-0.6B
+      - mistralai/Mistral-7B-Instruct-v0.3
+      - openai/gpt-oss-20b
 
 batch_size:
   # TODO - Fails even after fake tensors
