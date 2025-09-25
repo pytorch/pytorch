@@ -5817,13 +5817,15 @@ scaled_dot_product_attention = _add_docstr(
         def scaled_dot_product_attention(query, key, value, attn_mask=None, dropout_p=0.0,
                 is_causal=False, scale=None, enable_gqa=False) -> torch.Tensor:
             L, S = query.size(-2), key.size(-2)
-            scale_factor = 1 / math.sqrt(query.size(-1)) if scale is None else scale
+
+            # Default float32 upcast across all backends
             origin_dtype = query.dtype
             if not torch.backends.cuda.fp16_bf16_reduction_math_sdp_allowed():
-                # Convert to float32 for numerical stability (default behavior)
-                # Note: This flag affects the math backend globally (CPU and CUDA)
                 query, key, value = query.float(), key.float(), value.float()
+
+            scale_factor = 1 / math.sqrt(query.size(-1)) if scale is None else scale
             query, key = query * math.sqrt(scale_factor), key * math.sqrt(scale_factor)
+
             attn_bias = torch.zeros(L, S, dtype=query.dtype, device=query.device)
             if is_causal:
                 assert attn_mask is None
