@@ -107,7 +107,7 @@ tolerance:
   higher_inference:
     - GPT2ForSequenceClassification
     - RobertaForQuestionAnswering
-benchmarks/dynamo/huggingface.yaml
+
   higher_inference_cpu:
     - LayoutLMForSequenceClassification
     - GPT2ForSequenceClassification
