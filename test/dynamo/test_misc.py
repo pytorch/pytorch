@@ -2592,6 +2592,7 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
             y = fn(x)
         self.assertTrue(y.flags.writeable)  # XXX: differs from numpy
 
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_numpy_tolist(self):
         def fn(x):
             return x.tolist()
@@ -9713,6 +9714,7 @@ def ___make_guard_fn():
         img2 = torch.randn(1, 3, 8, 15)
         self.assertRaises(AssertionError, lambda: fn(img2))
 
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_tolist_scalar(self):
         def fn(x):
             new_list = []
@@ -9727,6 +9729,7 @@ def ___make_guard_fn():
         self.assertEqual(eager, compiled)
         self.assertEqual(counter.frame_count, 1)
 
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_tolist_1d(self):
         def fn(x):
             new_list = []
@@ -9741,6 +9744,7 @@ def ___make_guard_fn():
         self.assertEqual(eager, compiled)
         self.assertEqual(counter.frame_count, 1)
 
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_tolist_kd(self):
         def fn(x):
             new_list = []
@@ -9755,6 +9759,7 @@ def ___make_guard_fn():
         self.assertEqual(eager, compiled)
         self.assertEqual(counter.frame_count, 1)
 
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
     @patch.object(torch._dynamo.config, "specialize_int", True)
     def test_tolist_0d(self):
         def fn(x):
