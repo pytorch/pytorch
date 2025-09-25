@@ -956,6 +956,29 @@ def forward(self, arg0_1, arg1_1, arg2_1):
     return [buf1, buf2]""",  # noqa: B950
         )
 
+    def test_dims_dynamic_outer_static_padded_inner(self):
+        """
+        Test padding on inner dimensions, with dynamic outer dimensions.
+        """
+
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                return x + y
+
+        def get_input_padded_inner(shape):
+            full_shape = shape[:-1] + (shape[-1] * 2,)
+            full = torch.randn(full_shape, dtype=torch.float32, device=self.device)
+            view = torch.as_strided(full, shape, full.stride())
+            return view
+
+        shape = (4, 4, 4)
+        args = tuple(get_input_padded_inner(shape) for _ in range(2))
+        self.check(
+            M(),
+            args,
+            dynamic_shapes=({0: Dim.DYNAMIC, 1: Dim.DYNAMIC, 2: Dim.STATIC},) * 2,
+        )
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
