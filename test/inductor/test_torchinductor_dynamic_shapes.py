@@ -1116,6 +1116,40 @@ class TestInductorDynamic(TestCase):
             self.assertEqual(fn(x), actual)
             FileCheck().check("R0_BLOCK: tl.constexpr = 64").run(source_codes[0])
 
+    def test_non_persistent_dynamic_rblock(self):
+        def reduce_bounded(x, y):
+            """Reduce over a dimension with bounded size."""
+            # x shape: [batch, features, reduction_dim]
+            # reduction_dim is dynamic but bounded to max 128
+            assert x.shape[2] <= 64, f"Reduction dim {x.shape[2]} exceeds max 128"
+
+            # Perform reduction (sum) over the last dimension
+            result = torch.sum(x * y, dim=2)
+            return result
+
+        # Create tensors where reduction dimension is 6 (but could be up to 128)
+        batch = 256
+        features = 5536
+        reduction_dim = 6  # Actual size is small
+
+        x = torch.randn(reduction_dim, batch, features, device=GPU_TYPE).permute(
+            1, 2, 0
+        )
+        y = torch.randn(reduction_dim, batch, features, device=GPU_TYPE).permute(
+            1, 2, 0
+        )
+
+        torch._dynamo.mark_dynamic(x, 2, min=6, max=64)
+        torch._dynamo.mark_dynamic(y, 2, min=6, max=64)
+
+        compiled_fn = torch.compile(reduce_bounded)
+        result, source_codes = run_and_get_code(compiled_fn, x, y)
+
+        FileCheck().check_not("@triton_heuristics.persistent").run(source_codes[0])
+        expected = reduce_bounded(x, y)
+
+        assert torch.allclose(result, expected, atol=1e-3, rtol=1e-3)
+
     def test_unspecialized_float_dynamic(self):
         def fn(x, y):
             return x * y
