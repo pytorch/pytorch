@@ -60,6 +60,7 @@ jobs:
       DOCKER_IMAGE_TAG_PREFIX: rocm6.4
       DESIRED_PYTHON: "3.10"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      timeout-minutes: 300
       build_name: manywheel-py3_10-rocm6_4
       build_environment: linux-binary-manywheel-rocm
     secrets:
