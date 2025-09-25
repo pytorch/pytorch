@@ -168,7 +168,7 @@ from .variables.misc import (
     PythonModuleVariable,
     UnknownVariable,
 )
-from .variables.nn_module import NNModuleVariable
+from .variables.nn_module import NNModuleVariable, UnspecializedNNModuleVariable
 from .variables.tensor import supported_comparison_ops, SymNodeVariable, TensorVariable
 from .variables.torch_function import (
     SymbolicTorchFunctionState,
@@ -466,9 +466,6 @@ def stack_op(fn: Callable[..., object]) -> Callable[..., Any]:
 
 
 def is_stdlib(mod: object) -> bool:
-    if sys.version_info < (3, 10):
-        # For < 3.10, no easy way to identify a stdlib module name.
-        return False
     if not isinstance(mod, types.ModuleType):
         return False
     return mod.__name__.split(".")[0] in sys.stdlib_module_names
@@ -2507,7 +2504,7 @@ class InstructionTranslatorBase(
         # NOTE: Debug CPython expects the stack to be empty after the return.
         # Expect the current stack to be in the state
         # [[]] (empty frame values), current frame stack (0 or 1 values)
-        assert meta.num_stack <= 1, breakpoint()
+        assert meta.num_stack <= 1
         if meta.num_stack == 1:
             insts.extend(create_swap(2))
         return_inst = (
@@ -3818,18 +3815,17 @@ class InstructionTranslatorBase(
 
         self.package = package
 
-        if sys.version_info >= (3, 10):
-            from .resume_execution import (
-                CO_ASYNC_GENERATOR,
-                CO_COROUTINE,
-                CO_GENERATOR,
-                CO_ITERABLE_COROUTINE,
-            )
+        from .resume_execution import (
+            CO_ASYNC_GENERATOR,
+            CO_COROUTINE,
+            CO_GENERATOR,
+            CO_ITERABLE_COROUTINE,
+        )
 
-            if f_code.co_flags & (
-                CO_GENERATOR | CO_COROUTINE | CO_ITERABLE_COROUTINE | CO_ASYNC_GENERATOR
-            ):
-                self.push(BuiltinVariable(None))
+        if f_code.co_flags & (
+            CO_GENERATOR | CO_COROUTINE | CO_ITERABLE_COROUTINE | CO_ASYNC_GENERATOR
+        ):
+            self.push(BuiltinVariable(None))
 
         self.inline_depth = inline_depth
         self.inconsistent_side_effects = False
@@ -3896,6 +3892,7 @@ class InstructionTranslator(InstructionTranslatorBase):
                 global_scope=f_globals,
                 f_code=f_code,
                 torch_function_mode_stack=torch_function_mode_stack,
+                one_graph=one_graph,
                 package=package,
             ),
             instructions=instructions,
@@ -4312,6 +4309,15 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         # by checking if the first argument (self) is a variable tracking a GraphModule.
         if args and isinstance(args[0], NNModuleVariable):
             module = parent.output.get_submodule(args[0].module_key)
+            if isinstance(module, torch.fx.GraphModule):
+                # The inline call might not actually be a call to `forward`,
+                # but it is enough to add a context for `forward` in case it is called.
+                code_context.get_context(module.forward.__code__)[
+                    "orig_graphmodule"
+                ] = weakref.ref(module)
+        # When we have inline_nn_module turned on, modules resolve to UnspecializedNNModuleVariable
+        if args and isinstance(args[0], UnspecializedNNModuleVariable):
+            module = args[0].value
             if isinstance(module, torch.fx.GraphModule):
                 # The inline call might not actually be a call to `forward`,
                 # but it is enough to add a context for `forward` in case it is called.
