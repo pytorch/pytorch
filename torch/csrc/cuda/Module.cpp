@@ -1931,7 +1931,7 @@ PyObject* THCPModule_cuda_tunableop_set_numerical_check_tolerances(
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THCPModule_isCurrentStreamCapturing_wrap(
+static PyObject* THCPModule_isCurrentStreamCapturing_wrap(
     PyObject* self,
     PyObject* noargs) {
   HANDLE_TH_ERRORS
@@ -2251,4 +2251,4 @@ void initModule(PyObject* module) {
   initCudaMethodBindings(module);
 }
 
-} // namespace torch::cuda     
+} // namespace torch::cuda
