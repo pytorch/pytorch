@@ -1878,6 +1878,7 @@ def use_decompose_k_choice(
         )
         and not V.graph.aot_mode  # TODO: Support AOTI for decomposeK
         and not V.graph.cpp_wrapper
+        and config.triton.num_decompose_k_splits > 0
     )
 
 
