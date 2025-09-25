@@ -1,5 +1,4 @@
 //  Copyright © 2022 Apple Inc.
-#include <optional>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/mps/OperationUtils.h>
@@ -116,7 +115,7 @@ static Tensor _mps_convolution_impl(const Tensor& input_t,
 
   const bool is3DConv = input_t.dim() == 5;
   const auto memory_format = input_t.suggest_memory_format();
-  const auto input_suggested_layout = memory_format== kChannelsLast && is_macos_15_plus ? kChannelsLast : kContiguous;
+  const auto input_suggested_layout = memory_format == kChannelsLast && is_macos_15_plus ? kChannelsLast : kContiguous;
   const bool is_channels_last = mps_conv_use_channels_last(input_t, weight_t) && !is3DConv;
   const bool bias_defined = bias_opt ? bias_opt->defined() : false;
 
@@ -127,7 +126,6 @@ static Tensor _mps_convolution_impl(const Tensor& input_t,
   TensorArg input{input_t, "input", 1}, weight{weight_t, "weight", 2};
   checkAllSameType(c, {input, weight});
   checkAllSameGPU(c, {input, weight});
-
 
   auto output_t =
       at::empty(input_shape.has_value() ? input_shape.value()
@@ -186,17 +184,19 @@ static Tensor _mps_convolution_impl(const Tensor& input_t,
                                   getArrayRefString(dilation),
                                   getArrayRefString(padding),
                                   groups,
-                                  is_channels_last,
+                                  input_suggested_layout == kChannelsLast,
                                   mps::getTensorsStringKey({input_t, weight_t}),
                                   bias_defined,
                                   bias_shape_key);
 
+    auto inputShape = mps::getMPSShape(input_t, input_suggested_layout);
+    auto outputShape = mps::getMPSShape(output_t, input_suggested_layout);
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       bool isDepthwiseConv =
           (groups > 1 && weight_t.size(1) == 1) && input_t.dim() >= 4 && weight_t.dim() >= 4 && !is_channels_last;
 
-      MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input_t);
-      MPSGraphTensor* weightTensor = mpsGraphRankedPlaceHolder(mpsGraph, weight_t);
+      auto inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSScalarType(input_t), inputShape);
+      auto weightTensor = mpsGraphRankedPlaceHolder(mpsGraph, weight_t);
       MPSGraphTensor* outputTensor = nil;
       if (is3DConv) {
         auto conv3dDescriptor_ = [[MPSGraphConvolution3DOpDescriptor new] autorelease];
@@ -218,13 +218,8 @@ static Tensor _mps_convolution_impl(const Tensor& input_t,
                                                           name:nil];
       } else if (isDepthwiseConv) {
         auto depthWiseConv3dDescriptor_ = [[MPSGraphDepthwiseConvolution3DOpDescriptor new] autorelease];
-        fill_depthwise_conv_desc(depthWiseConv3dDescriptor_,
-                                 stride[1],
-                                 stride[0],
-                                 dilation[1],
-                                 dilation[0],
-                                 padding[1],
-                                 padding[0]);
+        fill_depthwise_conv_desc(
+            depthWiseConv3dDescriptor_, stride[1], stride[0], dilation[1], dilation[0], padding[1], padding[0]);
 
         MPSGraphTensor* weightTransposeTensor = [mpsGraph transposeTensor:weightTensor
                                                                 dimension:-3
@@ -263,15 +258,20 @@ static Tensor _mps_convolution_impl(const Tensor& input_t,
       newCachedGraph->outputTensor_ = outputTensor;
     });
 
-    auto inputPlaceholder =
-        Placeholder(cachedGraph->inputTensor_, output_c || is3DConv ? input_t.contiguous() : input_t);
-    auto outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output_c ? *output_c : output_t);
+    auto inputPlaceholder = input_suggested_layout == kContiguous
+        ? Placeholder(cachedGraph->inputTensor_, output_c || is3DConv ? input_t.contiguous() : input_t)
+        : Placeholder(cachedGraph->inputTensor_, getMPSNDArray(input_t, inputShape));
+    auto outputPlaceholder = input_suggested_layout == kContiguous
+        ? Placeholder(cachedGraph->outputTensor_, output_c ? *output_c : output_t)
+        : Placeholder(cachedGraph->outputTensor_, getMPSNDArray(output_t, outputShape));
     auto weightsPlaceholder = Placeholder(cachedGraph->weightTensor_, output_c ? weight_t.contiguous() : weight_t);
     auto biasPlaceholder = Placeholder();
     // Reshape the bias to be broadcastable with output of conv2d or conv3d
     if (bias_defined) {
       if (is3DConv) {
         biasPlaceholder = Placeholder(cachedGraph->biasTensor_, bias_opt->view({1, bias_shape[0], 1, 1, 1}));
+      } else if (input_suggested_layout == kChannelsLast) {
+        biasPlaceholder = Placeholder(cachedGraph->biasTensor_, bias_opt->view({1, 1, 1, bias_shape[0]}));
       } else {
         biasPlaceholder = Placeholder(cachedGraph->biasTensor_, bias_opt->view({1, bias_shape[0], 1, 1}));
       }
@@ -393,13 +393,8 @@ static Tensor mps_convolution_backward_input(IntArrayRef input_size,
       } else if (isDepthwiseConv) {
         MPSGraphDepthwiseConvolution3DOpDescriptor* depthWiseConv3dDescriptor_ =
             [[MPSGraphDepthwiseConvolution3DOpDescriptor new] autorelease];
-        fill_depthwise_conv_desc(depthWiseConv3dDescriptor_,
-                                 stride[1],
-                                 stride[0],
-                                 dilation[1],
-                                 dilation[0],
-                                 padding[1],
-                                 padding[0]);
+        fill_depthwise_conv_desc(
+            depthWiseConv3dDescriptor_, stride[1], stride[0], dilation[1], dilation[0], padding[1], padding[0]);
         MPSGraphTensor* weightTransposeTensor = [mpsGraph transposeTensor:weightTensor
                                                                 dimension:-3
                                                             withDimension:-4
@@ -535,13 +530,8 @@ static Tensor mps_convolution_backward_weights(IntArrayRef weight_size,
       } else if (isDepthwiseConv) {
         MPSGraphDepthwiseConvolution3DOpDescriptor* depthWiseConv3dDescriptor_ =
             [[MPSGraphDepthwiseConvolution3DOpDescriptor new] autorelease];
-        fill_depthwise_conv_desc(depthWiseConv3dDescriptor_,
-                                 stride[1],
-                                 stride[0],
-                                 dilation[1],
-                                 dilation[0],
-                                 padding[1],
-                                 padding[0]);
+        fill_depthwise_conv_desc(
+            depthWiseConv3dDescriptor_, stride[1], stride[0], dilation[1], dilation[0], padding[1], padding[0]);
         NSNumber* outputFeatChannelDim = mps_weight_shape[0];
         MPSShape* weightShapeTranspose = @[ @1, outputFeatChannelDim, mps_weight_shape[2], mps_weight_shape[3] ];
         MPSGraphTensor* gradWeightTensorTranspose =
