@@ -1340,6 +1340,8 @@ struct TORCH_API IValue final {
         return true;
       case Tag::Enum:
         return true;
+      case Tag::Dummy:
+        return false;
     }
     return false;
   }
