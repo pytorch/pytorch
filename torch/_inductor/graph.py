@@ -1576,6 +1576,8 @@ class GraphLowering(torch.fx.Interpreter):
         def debug(msg: str) -> None:
             log.debug("lowering %s %s", LazyString(n.format_node), msg)  # type: ignore[arg-type]
 
+        shape_env = V.graph.sizevars.shape_env
+
         from torch._inductor.compiler_bisector import CompilerBisector
 
         buffer_watermark = len(self.buffers)
@@ -1727,7 +1729,7 @@ class GraphLowering(torch.fx.Interpreter):
                         ):
                             result = ir.ExternKernel.require_stride_order(
                                 result,
-                                ir.get_stride_order(strides),
+                                ir.get_stride_order(strides, shape_env),
                                 allow_padding=allow_padding,
                             )
                         else:
@@ -1855,8 +1857,6 @@ class GraphLowering(torch.fx.Interpreter):
             new_unbacked_defs |= buf.get_unbacked_symbol_defs()
         for op in self.operations[operation_watermark:]:
             new_unbacked_defs |= op.get_unbacked_symbol_defs()
-
-        shape_env = V.graph.sizevars.shape_env
 
         # An input can be unbacked symint i.e.: when mark_unabcked is used.
         # in that case add it to new_unbacked_defs.
