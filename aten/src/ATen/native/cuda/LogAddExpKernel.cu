@@ -66,7 +66,7 @@ __host__ __device__ c10::complex<scalar_t> _fast_build_exp_inf(const c10::comple
   // complex exponential function, but implemented manually to get fast compilation time
   // this function only handles the case where the real part of x is infinite
   const auto ximag = std::imag(x);
-  const auto exp_x_abs = std::numeric_limits<scalar_t>::infinity();
+  constexpr auto exp_x_abs = std::numeric_limits<scalar_t>::infinity();
   const auto sin = std::sin(ximag);
   const auto cos = std::cos(ximag);
   // special case if the angle is exactly the multiple of pi/2
