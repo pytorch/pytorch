@@ -21,6 +21,7 @@ from unittest.mock import MagicMock, patch
 
 import torch
 import torch._dynamo as torchdynamo
+import torch.fx.traceback as fx_traceback
 import torch.nn.functional as F
 import torch.utils._pytree as pytree
 from functorch.experimental.control_flow import cond, map
@@ -15070,6 +15071,39 @@ def forward(self, x):
             ],
             test_serdes=True,
         )
+
+    # TODO: following tests should be fixed
+    @testing.expectedFailureTrainingIRToRunDecomp
+    @testing.expectedFailureTrainingIRToRunDecompNonStrict
+    def test_preserve_annotation(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                with fx_traceback.annotate({"pp_stage": 0}):
+                    with fx_traceback.annotate({"fdsp_bucket": 0}):
+                        x = x + 1
+                    x = x - 2
+                    with fx_traceback.annotate({"cuda_stream": 2, "fsdp_bucket": 1}):
+                        x = x * 2
+                x = x / 3
+                return x
+
+        m = M()
+
+        with fx_traceback.preserve_node_meta():
+            ep = export(m, (torch.randn(10),))
+
+        for node in ep.graph.nodes:
+            if node.target == torch.ops.aten.add.default:
+                self.assertTrue(node.meta["custom"], {"pp_stage": 0, "fdsp_bucket": 0})
+            if node.target == torch.ops.aten.sub.default:
+                self.assertTrue(node.meta["custom"], {"pp_stage": 0})
+            if node.target == torch.ops.aten.mul.default:
+                self.assertTrue(
+                    node.meta["custom"],
+                    {"pp_stage": 0, "cuda_stream": 2, "fsdp_bucket": 1},
+                )
+            if node.target == torch.ops.aten.div.default:
+                self.assertTrue(node.meta["custom"], {})
 
     def test_dynamic_shapes_serdes_generic(self):
         from torch._export.serde.dynamic_shapes import (
