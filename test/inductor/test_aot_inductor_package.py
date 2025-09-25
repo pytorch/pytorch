@@ -16,7 +16,7 @@ from parameterized import parameterized_class
 
 import torch
 import torch._inductor.config
-from torch._inductor.codecache import get_kernel_bin_format
+from torch._inductor.codecache import get_kernel_bin_format, WritableTempFile
 from torch._inductor.package import load_package, package_aoti
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import fresh_cache
@@ -119,7 +119,7 @@ class TestAOTInductorPackage(TestCase):
             inductor_configs["aot_inductor.package_cpp_only"] = self.package_cpp_only
 
             torch.manual_seed(0)
-            with tempfile.NamedTemporaryFile(suffix=".pt2") as f:
+            with WritableTempFile(suffix=".pt2") as f:
                 compiled_model = compile(
                     model,
                     example_inputs,
@@ -242,7 +242,7 @@ class TestAOTInductorPackage(TestCase):
             expected = ref_model(*ref_inputs)
 
             torch.manual_seed(0)
-            with tempfile.NamedTemporaryFile(suffix=".pt2") as f:
+            with WritableTempFile(suffix=".pt2") as f:
                 ep = torch.export.export(model, example_inputs, strict=True)
                 with fresh_cache():
                     # cubin files are removed when exiting this context
@@ -644,7 +644,7 @@ class TestAOTInductorPackage(TestCase):
             ep2.module(), example_inputs2, options=options
         )
 
-        with tempfile.NamedTemporaryFile(suffix=".pt2") as f:
+        with WritableTempFile(suffix=".pt2") as f:
             package_path = package_aoti(
                 f.name, {"model1": aoti_files1, "model2": aoti_files2}
             )
@@ -696,7 +696,7 @@ class TestAOTInductorPackage(TestCase):
             ep2.module(), example_inputs2, options=options
         )
 
-        with tempfile.NamedTemporaryFile(suffix=".pt2") as f:
+        with WritableTempFile(suffix=".pt2") as f:
             package_path = package_aoti(
                 f.name, {"model1": aoti_files1, "model2": aoti_files2}
             )
@@ -732,7 +732,7 @@ class TestAOTInductorPackage(TestCase):
                 "aot_inductor.package_cpp_only": self.package_cpp_only,
             },
         )
-        with tempfile.NamedTemporaryFile(suffix=".pt2") as f:
+        with WritableTempFile(suffix=".pt2") as f:
             package_path = package_aoti(f.name, {"model1": aoti_files})
             loaded = load_package(package_path, "model1")
         self.assertTrue(
@@ -952,7 +952,7 @@ class TestAOTInductorPackage(TestCase):
         aoti_files1 = torch._inductor.aot_compile(ep1.module(), (), options=options)
         aoti_files2 = torch._inductor.aot_compile(ep2.module(), (), options=options)
 
-        with tempfile.NamedTemporaryFile(suffix=".pt2") as f:
+        with WritableTempFile(suffix=".pt2") as f:
             package_path = package_aoti(
                 f.name,
                 {"model1": aoti_files1, "model2": aoti_files2},
