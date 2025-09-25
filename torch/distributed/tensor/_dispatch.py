@@ -23,11 +23,8 @@ from torch.distributed.tensor._tp_conv import (
 )
 from torch.distributed.tensor._utils import try_find_mesh_from_args
 from torch.distributed.tensor.placement_types import Partial, Placement, Replicate
-from torch.utils._debug_mode import DebugMode
-from torch.utils._python_dispatch import (
-    _get_current_dispatch_mode,
-    return_and_correct_aliasing,
-)
+from torch.utils._debug_mode import get_active_debug_mode
+from torch.utils._python_dispatch import return_and_correct_aliasing
 
 
 try:
@@ -338,8 +335,7 @@ class OpDispatcher:
         suggested_input_schema: OpSchema,
         use_val_from_redistribute_schema: bool,
     ) -> None:
-        debug_mode = _get_current_dispatch_mode()
-        in_debug_mode = isinstance(debug_mode, DebugMode)
+        debug_mode = get_active_debug_mode()
 
         # NOTE: it's very rare that we need to reshard kwargs so we intentionally skip it
         if op_info.args_tree_spec is not None:
@@ -359,7 +355,7 @@ class OpDispatcher:
                         debug_mode.record_redistribute_calls(  # type: ignore[union-attr]
                             i, arg_spec, reshard_arg_spec
                         )
-                        if in_debug_mode
+                        if debug_mode is not None
                         else contextlib.nullcontext()
                     )
 

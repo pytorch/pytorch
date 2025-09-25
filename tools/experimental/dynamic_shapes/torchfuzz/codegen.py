@@ -13,6 +13,7 @@ import torch
 
 from torchfuzz.operators import get_operator
 from torchfuzz.ops_fuzzer import OperationGraph
+from torchfuzz.tensor_descriptor import format_tensor_descriptor
 from torchfuzz.tensor_fuzzer import ScalarSpec, Spec, TensorSpec
 
 
@@ -86,7 +87,9 @@ def convert_graph_to_python_code(
             # Track arg operations for later function signature generation
             arg_operations.append((node_id, output_spec))
             arg_name = f"arg_{len(arg_operations) - 1}"
-            operation_lines = [f"{output_var_name} = {arg_name}"]
+            # Add tensor descriptor comment for arg operations too
+            descriptor_comment = f"# {format_tensor_descriptor(output_spec)}"
+            operation_lines = [f"{output_var_name} = {arg_name} " + descriptor_comment]
         else:
             # Generate operation execution code
             operation_lines = generate_simple_operation_code(
@@ -283,7 +286,9 @@ def generate_simple_operation_code(
     if operator is not None:
         # Use the class-based operator to generate code
         code_line = operator.codegen(output_var, input_vars, output_spec)
-        return [code_line]
+        # Add tensor descriptor comment
+        descriptor_comment = f"# {format_tensor_descriptor(output_spec)}"
+        return [code_line + " " + descriptor_comment]
     else:
         # Fallback for unknown operations
         return [f"# Unknown operation: {op_name}"]
