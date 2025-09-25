@@ -214,7 +214,7 @@ def create_fake_tensor_with_dynamic_size(x, shape_env, dynamic_sizes, dynamic_st
 def create_symtype(cls, pytype, shape_env, val, duck=True, **kwargs):
     from torch._dynamo.source import ConstantSource
 
-    symbol = shape_env.create_non_data_dependent_symbol(
+    symbol = shape_env.create_symbol(
         val,
         source=ConstantSource(f"__testing_only{len(shape_env.var_to_val)}"),
         dynamic_dim=DimDynamic.DUCK if duck else DimDynamic.DYNAMIC,
