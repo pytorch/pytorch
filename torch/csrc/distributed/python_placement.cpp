@@ -4,6 +4,8 @@
 #include <torch/csrc/distributed/Placement.h>
 #include <torch/csrc/utils/pybind.h>
 
+using namespace pybind11::literals;
+
 namespace torch::distributed {
 namespace {
 // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
@@ -36,9 +38,13 @@ void initPlacementBindings(PyObject* module) {
           "__eq__",
           [](const Shard& lhs, const Shard& rhs) { return lhs == rhs; },
           py::is_operator())
+      // Note: we need to use dicts for pickling to match the old
+      // dataclasses.
       .def(py::pickle(
-          [](const Shard& shard) { return shard.dim; },
-          [](std::int64_t dim) { return Shard(dim); }));
+          [](const Shard& shard) { return py::dict("dim"_a = shard.dim); },
+          [](const py::dict& d) {
+            return Shard(py::cast<int64_t>(d["dim"]));
+          }));
   py::class_<StridedShard, Shard>(distributed_module, "StridedShard")
       .def(
           py::init<int64_t, int64_t>(),
@@ -53,14 +59,13 @@ void initPlacementBindings(PyObject* module) {
           py::is_operator())
       .def(py::pickle(
           [](const StridedShard& shard) {
-            return py::make_tuple(shard.dim, shard.split_factor);
+            return py::dict(
+                "dim"_a = shard.dim, "split_factor"_a = shard.split_factor);
           },
-          [](const py::tuple& tup) {
-            if (tup.size() != 2) {
-              throw std::runtime_error("invalid pickled StridedShard!");
-            }
+          [](const py::dict& d) {
             return StridedShard(
-                py::cast<int64_t>(tup[0]), py::cast<int64_t>(tup[1]));
+                py::cast<int64_t>(d["dim"]),
+                py::cast<int64_t>(d["split_factor"]));
           }));
   py::class_<Replicate, Placement>(distributed_module, "Replicate")
       .def(py::init())
@@ -83,7 +88,11 @@ void initPlacementBindings(PyObject* module) {
           [](const Partial& lhs, const Partial& rhs) { return lhs == rhs; },
           py::is_operator())
       .def(py::pickle(
-          [](const Partial& part) { return part.reduce_op; },
-          [](std::string op) { return Partial(std::move(op)); }));
+          [](const Partial& part) {
+            return py::dict("reduce_op"_a = part.reduce_op);
+          },
+          [](const py::dict& d) {
+            return Partial(py::cast<std::string>(d["reduce_op"]));
+          }));
 }
 } // namespace torch::distributed
