@@ -38,7 +38,7 @@ case ${DOCKER_TAG_PREFIX} in
     BASE_TARGET=rocm
     PYTORCH_ROCM_ARCH="gfx900;gfx906;gfx908;gfx90a;gfx942;gfx1030;gfx1100;gfx1101;gfx1102;gfx1200;gfx1201"
     # add gfx950 conditionally starting in ROCm 7.0
-    if [[ "$GPU_ARCH_VERSION" == *"7.0"* ]]; then
+    if [[ "$ROCM_VERSION" == *"7.0"* ]]; then
         PYTORCH_ROCM_ARCH="${PYTORCH_ROCM_ARCH};gfx950"
     fi
     EXTRA_BUILD_ARGS="${EXTRA_BUILD_ARGS} --build-arg PYTORCH_ROCM_ARCH=${PYTORCH_ROCM_ARCH}"
