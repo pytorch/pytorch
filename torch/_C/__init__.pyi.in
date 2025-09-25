@@ -2211,6 +2211,9 @@ class _CudaDeviceProperties:
     warp_size: _int
     uuid: str
     L2_cache_size: _int
+    clock_rate: _int
+    memory_clock_rate: _int
+    memory_bus_width: _int
 
 # Functions related to SDPA
 class _SDPAParams:

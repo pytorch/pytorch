@@ -371,7 +371,6 @@ def _dynamo_graph_capture_for_export(
                 out = fullgraph_capture(
                     module_to_trace,
                     tuple(flat_inputs),
-                    {},
                     constraints=_constraints,
                     _is_export_deprecated_do_not_use=True,
                 )
