@@ -134,6 +134,7 @@ class _SDPAMerger:
         self._seq_dim = seq_dim
         self._out: Optional[torch.Tensor] = None
         self._lse: Optional[torch.Tensor] = None
+        self._should_lse_squeeze = False
         self._convert_to_f32 = convert_to_f32
         self._out_dtype = torch.float32
         self._lse_dtype = torch.float32
@@ -141,7 +142,14 @@ class _SDPAMerger:
     def _merge_one(
         self, block_out: torch.Tensor, block_lse: torch.Tensor, partial: bool
     ) -> None:
-        block_lse = block_lse.unsqueeze(dim=-1)
+        # The cuDNN backend preserves the last dimension for LSE.
+        # Apply unsqueeze only if the input does not already have
+        # the required dimensionality.
+        if len(block_lse.shape) < len(block_out.shape):
+            block_lse = block_lse.unsqueeze(dim=-1)
+            self._should_lse_squeeze = True
+        assert len(block_lse.shape) == len(block_out.shape)
+
         if self._lse is None:
             self._lse = block_lse
             self._out = block_out
@@ -199,8 +207,12 @@ class _SDPAMerger:
     def results(self) -> tuple[torch.Tensor, torch.Tensor]:
         assert self._out is not None
         assert self._lse is not None
-        out, lse = self._out, self._lse.squeeze(-1)
-        return out.to(self._out_dtype), lse.to(self._lse_dtype)
+        out = self._out.to(self._out_dtype)
+        if self._should_lse_squeeze:
+            lse = self._lse.squeeze(-1).to(self._lse_dtype)
+        else:
+            lse = self._lse.to(self._lse_dtype)
+        return out, lse
 
 
 class _AttentionOp(Protocol):
@@ -351,7 +363,7 @@ def _templated_ring_attention(
     (k0, k3). For rank0, no computation is needed for q0. However, computations for
     q3k1 and q3k2 are required, so only q3 is used for SDPA. This corresponds to the
     `else` of the (`if`, `elif`, `else`) in the implementation.
-    For rank1, k0 is not needed for q1 and q2, so only k3 is used for SDPA. This
+    For rank1, k3 is not needed for q1 and q2, so only k0 is used for SDPA. This
     corresponds to the `elif` of (`if`, `elif`, `else`) in the implementation.
 
     Parameters

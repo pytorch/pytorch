@@ -45,10 +45,8 @@ class SamplerIterDataPipe(IterDataPipe[_T_co]):
         self.datapipe = datapipe
         self.sampler_args = () if sampler_args is None else sampler_args
         self.sampler_kwargs = {} if sampler_kwargs is None else sampler_kwargs
-        # https://github.com/python/mypy/pull/9629 will solve
-        self.sampler = sampler(
-            *self.sampler_args, data_source=self.datapipe, **self.sampler_kwargs
-        )  # type: ignore[misc]
+        self.sampler_kwargs["data_source"] = self.datapipe
+        self.sampler = sampler(*self.sampler_args, **self.sampler_kwargs)
 
     def __iter__(self) -> Iterator[_T_co]:
         return iter(self.sampler)
