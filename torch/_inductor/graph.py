@@ -385,7 +385,6 @@ class GraphLowering(torch.fx.Interpreter):
             const_module.device_idxs if const_module else OrderedSet()
         )
         self.device_type = "cpu"
-        self.dynamic_scalar_dtypes: dict[sympy.Symbol, torch.dtype] = {}
 
         # Inplace padding may require Inductor to allocate slightly larger
         # tensor for padding.
@@ -949,17 +948,6 @@ class GraphLowering(torch.fx.Interpreter):
         if m:
             return self.get_dtype(m.group(1))
         raise KeyError(f"could not find {buffer_name}")
-
-    def register_dynamic_scalar_dtype(
-        self, sym: sympy.Symbol, dtype: torch.dtype
-    ) -> None:
-        existing = self.dynamic_scalar_dtypes.get(sym)
-        if existing is not None and existing != dtype:
-            dtype = torch.promote_types(existing, dtype)
-        self.dynamic_scalar_dtypes[sym] = dtype
-
-    def get_dynamic_scalar_dtype(self, sym: sympy.Symbol) -> torch.dtype:
-        return self.dynamic_scalar_dtypes.get(sym, torch.float64)
 
     def get_numel(self, buffer_name: str) -> Union[int, Expr]:
         if buffer_name in self.constants:
