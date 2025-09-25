@@ -493,6 +493,16 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_library_impl(
     const char* name,
     void (*fn)(StableIValue*, uint64_t, uint64_t));
 
+// V2 version that also takes an extension_abi_version parameter. This is
+// needed for forward/backward compatibility when registering custom operators
+// that use StableIValue conversions. The caller should pass in its own
+// TORCH_ABI_VERSION as extension_abi_version.
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_library_impl_v2(
+    TorchLibraryHandle self,
+    const char* name,
+    void (*fn)(StableIValue*, uint64_t, uint64_t),
+    uint64_t extension_abi_version);
+
 // stable corollary to torch::Library method m.def(), should be
 // called from StableLibrary
 AOTI_TORCH_EXPORT AOTITorchError

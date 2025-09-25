@@ -1698,6 +1698,24 @@ private:
   : Type(TypeKind::PyObjectType) {}
 };
 
+struct DummyType;
+using DummyTypePtr = SingletonTypePtr<DummyType>;
+// This type represents a DummyType for testing version-aware conversions
+struct TORCH_API DummyType : public Type {
+  bool equals(const Type& rhs) const override {
+    return rhs.kind() == kind();
+  }
+  std::string str() const override {
+    return "Dummy";
+  }
+  static const TypeKind Kind = TypeKind::DummyType;
+  // global singleton
+  static DummyTypePtr get();
+
+ private:
+  DummyType() : Type(TypeKind::DummyType) {}
+};
+
 enum class TypeVerbosity {
   None,
   Type,

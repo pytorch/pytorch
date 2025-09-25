@@ -11,6 +11,7 @@
 #include <c10/core/QScheme.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/utils/python_arg_parser.h>
+#include <torch/headeronly/dummy.h>
 
 #include <limits>
 #include <optional>
@@ -559,6 +560,8 @@ IValue toIValue(py::handle obj, const TypePtr& type, std::optional<int32_t> N) {
     }
     case TypeKind::GeneratorType:
       return py::cast<at::Generator>(obj);
+    case TypeKind::DummyType:
+      return py::cast<dummy_types::Dummy>(obj);
     case TypeKind::DynamicType:
     case TypeKind::FunctionType:
     case TypeKind::QuantizerType:

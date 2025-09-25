@@ -11,14 +11,17 @@
 
 #ifdef __cplusplus
 
-// Convert from IValue to StableIValue
-AOTI_TORCH_EXPORT StableIValue
-from_ivalue(const c10::TypePtr& type, const c10::IValue& ivalue);
+// Convert from IValue to StableIValue with ABI version support
+AOTI_TORCH_EXPORT StableIValue from_ivalue(
+    const c10::TypePtr& type,
+    const c10::IValue& ivalue,
+    uint64_t extension_abi_version);
 
-// Convert from StableIValue to IValue
+// Convert from StableIValue to IValue with ABI version support
 AOTI_TORCH_EXPORT c10::IValue to_ivalue(
     const c10::TypePtr& type,
-    const StableIValue stable_ivalue);
+    const StableIValue stable_ivalue,
+    uint64_t extension_abi_version);
 
 // Schema adapter registration function
 AOTI_TORCH_EXPORT AOTITorchError register_schema_adapter(
