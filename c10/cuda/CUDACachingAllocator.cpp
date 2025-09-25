@@ -1188,6 +1188,7 @@ class DeviceCachingAllocator {
   struct GraphReuseContext {
     ska::flat_hash_map<cudaStream_t, ska::flat_hash_set<cudaGraphNode_t>>
         visited;
+    MempoolId_t mempool_id;
   };
   ska::flat_hash_map<CaptureId_t, GraphReuseContext> graph_reuse_context;
 
@@ -1806,6 +1807,24 @@ class DeviceCachingAllocator {
     // there is nothing to do.
     if (info.status == cudaStreamCaptureStatusNone || info.num_terminals == 0) {
       return;
+    }
+    if (graph_reuse_context.find(info.capture_id) ==
+        graph_reuse_context.end()) {
+      bool found = false;
+      for (auto& entry : captures_underway) {
+        if (entry.second(stream)) {
+          auto graph_pool = graph_pools.find(entry.first);
+          TORCH_INTERNAL_ASSERT(
+              graph_pool != graph_pools.end(),
+              "Could not find graph pool for capture.");
+          graph_reuse_context[info.capture_id] =
+              GraphReuseContext{.mempool_id = graph_pool->first};
+          found = true;
+          break;
+        }
+      }
+      TORCH_INTERNAL_ASSERT(
+          found, "Could not find memory pool id for capture.");
     }
     auto& graph_context = graph_reuse_context[info.capture_id];
     auto& visited = graph_context.visited[stream];
@@ -2479,17 +2498,21 @@ class DeviceCachingAllocator {
 
     if (CUDAAllocatorConfig::graph_capture_record_stream_reuse() &&
         !graph_reuse_context.empty()) {
-      TORCH_INTERNAL_ASSERT(
-          graph_reuse_context.size() == 1, "Expected only one graph context");
+      std::vector<CaptureId_t> capture_ids_to_remove;
       for (auto& [capture_id, graph_context] : graph_reuse_context) {
-        for (auto& [stream, _] : graph_context.visited) {
-          TORCH_INTERNAL_ASSERT(
-              stream_get_capture_info(stream).status ==
-                  cudaStreamCaptureStatusNone,
-              "This stream should not be capturing when the capture is ended");
+        if (graph_context.mempool_id == mempool_id) {
+          for (auto& [stream, _] : graph_context.visited) {
+            TORCH_INTERNAL_ASSERT(
+                stream_get_capture_info(stream).status ==
+                    cudaStreamCaptureStatusNone,
+                "This stream should not be capturing when the capture is ended");
+          }
+          capture_ids_to_remove.push_back(capture_id);
         }
       }
-      graph_reuse_context.clear();
+      for (auto& capture_id : capture_ids_to_remove) {
+        graph_reuse_context.erase(capture_id);
+      }
     }
 
     for (auto it = captures_underway.begin(); it != captures_underway.end();
