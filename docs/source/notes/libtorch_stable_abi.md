@@ -2,10 +2,13 @@
 
 ### Overview
 
-The stable ABI / API surface of libtorch consists of 3 components:
-1. Stable C headers implemented by libtorch (primarily `torch/csrc/inductor/aoti_torch/c/shim.h`)
-2. Header-only C++ library (`torch/headeronly/*`)
-3. C++ headers that provide convenience wrappers around the C shim.h (`torch/csrc/stable/*`)
+The LibTorch Stable ABI (Application Binary Interface) provides a stable interface for extending PyTorch functionality without being tightly coupled to specific PyTorch versions. This enables the development of custom operators and extensions that remain compatible across PyTorch releases.
+
+The stable ABI consists of three main components:
+
+1. **Stable C headers** - Low-level C API implemented by libtorch (primarily `torch/csrc/inductor/aoti_torch/c/shim.h`)
+2. **Header-only C++ library** - Standalone utilities (`torch/headeronly/*`)
+3. **Stable C++ wrappers** - High-level C++ convenience wrappers (`torch/csrc/stable/*`)
 
 We discuss each of these in detail
 
