@@ -1053,25 +1053,6 @@ static void registerCudaDeviceProperties(PyObject* module) {
       .def_readonly("warp_size", &cudaDeviceProp::warpSize)
 #ifndef USE_ROCM
       // NVIDIA-only properties
-      .def_property_readonly(
-          "clock_rate",
-          [](const cudaDeviceProp&) {
-            int clk = 0;
-            AT_CUDA_CHECK(cudaDeviceGetAttribute(
-                &clk, cudaDevAttrClockRate, c10::cuda::current_device()));
-            return clk;
-          })
-      .def_property_readonly(
-          "memory_clock_rate",
-          [](const cudaDeviceProp&) {
-            int mem_clk = 0;
-            AT_CUDA_CHECK(cudaDeviceGetAttribute(
-                &mem_clk,
-                cudaDevAttrMemoryClockRate,
-                c10::cuda::current_device()));
-            return mem_clk;
-          })
-      .def_readonly("memory_bus_width", &cudaDeviceProp::memoryBusWidth)
       .def_readonly(
           "shared_memory_per_block", &cudaDeviceProp::sharedMemPerBlock)
       .def_readonly(
@@ -1293,16 +1274,14 @@ static void registerCudaPluggableAllocator(PyObject* module) {
             self.set_release_pool(func);
           });
   m.def("_cuda_customAllocator", [](uint64_t malloc_ptr, uint64_t free_ptr) {
-    using MallocFuncType = void*(size_t, int, cudaStream_t);
-    using FreeFuncType = void(void*, size_t, int, cudaStream_t);
+    using namespace torch::cuda::CUDAPluggableAllocator;
     std::function<MallocFuncType> malloc_fn =
         // NOLINTNEXTLINE(performance-no-int-to-ptr)
         reinterpret_cast<MallocFuncType*>(malloc_ptr);
     std::function<FreeFuncType> free_fn =
         // NOLINTNEXTLINE(performance-no-int-to-ptr)
         reinterpret_cast<FreeFuncType*>(free_ptr);
-    return torch::cuda::CUDAPluggableAllocator::createCustomAllocator(
-        malloc_fn, free_fn);
+    return createCustomAllocator(malloc_fn, free_fn);
   });
 
   // NOLINTNEXTLINE(bugprone-unused-raii)
@@ -1931,6 +1910,7 @@ PyObject* THCPModule_cuda_tunableop_set_numerical_check_tolerances(
   END_HANDLE_TH_ERRORS
 }
 
+
 static PyObject* THCPModule_isCurrentStreamCapturing_wrap(
     PyObject* self,
     PyObject* noargs) {
@@ -2214,8 +2194,8 @@ static struct PyMethodDef _THCPModule_methods[] = {
      METH_NOARGS,
      nullptr},
     {"_cuda_tunableop_set_numerical_check_tolerances",
-    THCPModule_cuda_tunableop_set_numerical_check_tolerances,
-    METH_VARARGS,
+     THCPModule_cuda_tunableop_set_numerical_check_tolerances,
+     METH_VARARGS,
     nullptr},
     {nullptr}};
 
@@ -2224,6 +2204,7 @@ PyMethodDef* THCPModule_methods() {
 }
 
 namespace torch::cuda {
+
 namespace shared {
 
 void initCudartBindings(PyObject* module);
