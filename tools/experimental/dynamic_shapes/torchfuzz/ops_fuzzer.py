@@ -61,7 +61,7 @@ def _get_template_filtered_operators(template: str = "default"):
         # Always include core operations
         if any(op_name.startswith(core) for core in core_ops):
             # Set template on operators that support it
-            if hasattr(operator, 'set_template'):
+            if hasattr(operator, "set_template"):
                 operator.set_template(template)
             filtered_ops[op_name] = operator
             continue
@@ -99,7 +99,7 @@ def _get_template_filtered_operators(template: str = "default"):
 
         if should_include:
             # Set template on operators that support it
-            if hasattr(operator, 'set_template'):
+            if hasattr(operator, "set_template"):
                 operator.set_template(template)
             filtered_ops[op_name] = operator
 

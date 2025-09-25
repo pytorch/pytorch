@@ -11,9 +11,9 @@ from torchfuzz.tensor_fuzzer import ScalarSpec, Spec, TensorSpec
 
 
 class FuzzTemplate:
-    def __init__(self, supported_ops, checks):
+    def __init__(self, supported_ops, check):
         self.supported_ops = supported_ops
-        self.checks = checks
+        self.check = check  # Single Check instance
 
     def supported_dtypes(self):
         """Return list of supported dtypes for this template."""
@@ -34,7 +34,9 @@ class FuzzTemplate:
 
 
 class DefaultFuzzTemplate(FuzzTemplate):
-    def __init__(self, supported_ops, checks):
+    def __init__(self, supported_ops, check):
+        from torchfuzz.checks import EagerVsFullGraphDynamicCompileCheck
+
         super().__init__(
             supported_ops=supported_ops
             or [
@@ -43,11 +45,7 @@ class DefaultFuzzTemplate(FuzzTemplate):
                 "torch.mul",
                 "torch.div",
             ],
-            checks=checks
-            or [
-                "eager",
-                "compile+fullgraph+dynamic",
-            ],
+            check=check or EagerVsFullGraphDynamicCompileCheck(),
         )
 
     def imports_codegen(self):
@@ -106,21 +104,11 @@ class DefaultFuzzTemplate(FuzzTemplate):
     def epilogue_codegen(self):
         return []
 
-    def execution_codegen(self, args_tuple):
-        """Generate execution code for default template."""
-        return [
-            "",
-            f"args = {args_tuple} + (sentinel,)",
-            "result_original = fuzzed_program(*args)",
-            "print('✅ eager success')",
-            "compiled_program = torch.compile(fuzzed_program, fullgraph=False, dynamic=True)",
-            "result_compiled = compiled_program(*args)",
-            "print('✅ compile success')",
-        ]
-
 
 class DTensorFuzzTemplate(FuzzTemplate):
     def __init__(self):
+        from torchfuzz.checks import EagerVsFullGraphDynamicCompileCheck
+
         super().__init__(
             supported_ops=[
                 "torch.add",
@@ -128,7 +116,7 @@ class DTensorFuzzTemplate(FuzzTemplate):
                 "torch.mul",
                 "torch.div",
             ],
-            checks=[],
+            check=EagerVsFullGraphDynamicCompileCheck(),
         )
 
     def supported_dtypes(self):
@@ -209,7 +197,12 @@ class DTensorFuzzTemplate(FuzzTemplate):
                     dtype_str = f"torch.{spec.dtype}".replace("torch.torch.", "torch.")
 
                     # Handle different dtypes appropriately for DTensor
-                    if spec.dtype in [torch.int32, torch.int64, torch.int8, torch.int16]:
+                    if spec.dtype in [
+                        torch.int32,
+                        torch.int64,
+                        torch.int8,
+                        torch.int16,
+                    ]:
                         # Integer dtypes: use randint and no requires_grad
                         code_lines.extend(
                             [
@@ -239,39 +232,11 @@ class DTensorFuzzTemplate(FuzzTemplate):
     def epilogue_codegen(self):
         return ["torch.distributed.destroy_process_group()"]
 
-    def execution_codegen(self, args_tuple):
-        """Generate DTensor-specific execution code with backward passes and comparison."""
-        return [
-            "",
-            f"args = {args_tuple} + (sentinel,)",
-            "if __name__ == '__main__':",
-            "    out_eager = fuzzed_program(*args)",
-            "    out_eager.sum().backward()",
-            "    print('Eager Success! ✅')",
-            "    compiled_program = torch.compile(fuzzed_program, fullgraph=True, dynamic=True)",
-            "    out_compiled = compiled_program(*args)",
-            "    out_compiled.sum().backward()",
-            "    print('Compile Success! ✅')",
-            "    ",
-            "    # Compare outputs (forward)",
-            "    out_eager_sum = out_eager.sum()",
-            "    out_compiled_sum = out_compiled.sum()",
-            "    diff = (out_eager_sum - out_compiled_sum).abs().item()",
-            "    rel_diff = diff / (out_eager_sum.abs().item() + 1e-12) * 100",
-            "    print(f'Relative diff (sum): {rel_diff:.6f}%')",
-            "    if rel_diff > 5:",
-            "        print(f'❌ Forward output sums differ significantly (relative)!')",
-            "        print('out_eager_sum:', out_eager_sum.item())",
-            "        print('out_compiled_sum:', out_compiled_sum.item())",
-            "        print('Absolute diff:', diff)",
-            "        print('Relative diff (%):', rel_diff)",
-            "        import sys",
-            "        sys.exit(1)",
-        ]
-
 
 class UnbackedFuzzTemplate(FuzzTemplate):
     def __init__(self):
+        from torchfuzz.checks import EagerVsFullGraphDynamicCompileCheck
+
         super().__init__(
             supported_ops=[
                 "torch.ops.aten.item",
@@ -283,10 +248,7 @@ class UnbackedFuzzTemplate(FuzzTemplate):
                 "torch.sub",
                 "torch.mul",
             ],
-            checks=[
-                "eager",
-                "compile+fullgraph+dynamic",
-            ],
+            check=EagerVsFullGraphDynamicCompileCheck(),
         )
 
     def supported_dtypes(self):
@@ -360,26 +322,6 @@ class UnbackedFuzzTemplate(FuzzTemplate):
                         code_lines.append(f"{arg_name}[{arg_name}.abs() < 0.5] = 0")
 
         return code_lines
-
-    def execution_codegen(self, args_tuple):
-        """Generate execution code for unbacked template - test both eager and compile."""
-        return [
-            "",
-            f"args = {args_tuple} + (sentinel,)",
-            "result_original = fuzzed_program(*args)",
-            "print('✅ eager success')",
-            "# Test compilation with unbacked operations - this should work!",
-            "compiled_program = torch.compile(fuzzed_program, fullgraph=True, dynamic=True)",
-            "result_compiled = compiled_program(*args)",
-            "print('✅ compile success with unbacked operations')",
-            "",
-            "# Compare results - shapes may differ due to data-dependent operations",
-            "print(f'Eager result: {result_original}')",
-            "print(f'Compiled result: {result_compiled}')",
-            "if hasattr(result_original, 'shape') and hasattr(result_compiled, 'shape'):",
-            "    print(f'Eager shape: {result_original.shape}')",
-            "    print(f'Compiled shape: {result_compiled.shape}')",
-        ]
 
     def epilogue_codegen(self):
         return []
@@ -565,9 +507,9 @@ def convert_graph_to_python_code(
     else:
         args_tuple = "()"
 
-    # Generate execution code using template
-    execution_lines = fuzz_template.execution_codegen(args_tuple)
-    code_lines.extend(execution_lines)
+    # Generate execution code using template check
+    check_lines = fuzz_template.check.codegen(f"{args_tuple} + (sentinel,)")
+    code_lines.extend([""] + check_lines)
 
     # Add template epilogue
     epilogue_lines = fuzz_template.epilogue_codegen()

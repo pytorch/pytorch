@@ -82,15 +82,22 @@ class ConstantOperator(Operator):
                     torch.complex128: 0.0,
                 }
                 fill_value = default_values.get(output_spec.dtype, 0)
-                tensor_creation = f"torch.full({size_str}, {fill_value}, dtype={dtype_str})"
+                tensor_creation = (
+                    f"torch.full({size_str}, {fill_value}, dtype={dtype_str})"
+                )
             else:
                 # For non-empty tensors, use the first element as fill value
                 fill_value = actual_tensor.flatten()[0].item()
-                tensor_creation = f"torch.full({size_str}, {fill_value}, dtype={dtype_str})"
+                tensor_creation = (
+                    f"torch.full({size_str}, {fill_value}, dtype={dtype_str})"
+                )
 
             # For DTensor template, convert to DTensor
             if self.template == "dtensor":
-                return f"{output_name}_local = {tensor_creation}.to('cuda')\n    {output_name} = DTensor.from_local({output_name}_local, mesh, placements)"
+                return (
+                    f"{output_name}_local = {tensor_creation}.to('cuda')\n"
+                    f"    {output_name} = DTensor.from_local({output_name}_local, mesh, placements)"
+                )
             else:
                 return f"{output_name} = {tensor_creation}"
 
