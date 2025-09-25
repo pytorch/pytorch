@@ -6637,6 +6637,35 @@ class TestLearnableBiases(InductorTestCase):
         assert torch.any(bias.grad != 0), "Gradient for bias is 0"
 
     @skip_on_cpu
+    def test_backprop_error_case(self, device):
+        @torch.compile()
+        def test(x, y):
+            # Materialize a bias matrix
+            B, L, device = x.shape[0], x.shape[1], x.device
+            b = torch.arange(B, device=device, dtype=torch.long).view(B, 1, 1)
+            q_idx = torch.arange(L, device=device, dtype=torch.long).view(1, L, 1)
+            kv_idx = torch.arange(L, device=device, dtype=torch.long).view(1, 1, L)
+            bias_mat = y[b, q_idx] + y[b, kv_idx]  # (B, L, L)
+
+            # Dummy score_mod retrieving bias values
+            def score_mod(score, b, h, q_idx, kv_idx):
+                return score + bias_mat[b, q_idx, kv_idx]
+
+            x_ = x[:, :, None].repeat(1, 1, 16, 1)
+            # torch._dynamo.graph_break()
+            return flex_attention(x_, x_, x_, score_mod=score_mod)
+
+        B, L, D = 2, 16, 64
+
+        x = torch.randn(B, L, D, device=device, requires_grad=True)
+        y = torch.randn(B, L, device=device, requires_grad=True)
+
+        _ = test(x, y).mean().backward()
+
+        assert x.grad.norm() > 0
+        assert y.grad.norm() > 0
+
+    @skip_on_cpu
     @common_utils.parametrize(
         "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
     )
