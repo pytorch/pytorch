@@ -156,7 +156,7 @@ ROOT = "//" if IS_OSS else "//xplat/caffe2"
 # for targets in subfolders
 ROOT_PATH = "//" if IS_OSS else "//xplat/caffe2/"
 
-C10 = "//c10:c10" if IS_OSS else ("//xplat/caffe2/c10:c10_ovrsource" if is_arvr_mode() else "//xplat/caffe2/c10:c10")
+C10 = "//c10:c10" if IS_OSS else "//xplat/caffe2/c10:c10"
 
 # a dictionary maps third party library name to fbsource and oss target
 THIRD_PARTY_LIBS = {
@@ -391,6 +391,8 @@ def get_aten_generated_files(enabled_backends):
         "CompositeExplicitAutogradFunctions_inl.h",
         "CompositeExplicitAutogradNonFunctionalFunctions.h",
         "CompositeExplicitAutogradNonFunctionalFunctions_inl.h",
+        "ViewMetaClasses.h",
+        "ViewMetaClasses.cpp",
         "VmapGeneratedPlumbing.h",
         "core/ATenOpList.cpp",
         "core/TensorBody.h",
@@ -948,7 +950,6 @@ def define_buck_targets(
             [
                 ("torch/csrc/api/include", "torch/**/*.h"),
                 ("", "torch/csrc/**/*.h"),
-                ("", "torch/csrc/**/*.hpp"),
                 ("", "torch/nativert/**/*.h"),
                 ("", "torch/headeronly/**/*.h"),
                 ("", "torch/script.h"),
@@ -1193,6 +1194,7 @@ def define_buck_targets(
             "NativeMetaFunctions.h": ":gen_aten[NativeMetaFunctions.h]",
             "Operators.h": ":gen_aten[Operators.h]",
             "RedispatchFunctions.h": ":gen_aten[RedispatchFunctions.h]",
+            "ViewMetaClasses.h": ":gen_aten[ViewMetaClasses.h]",
             "core/TensorBody.h": ":gen_aten[core/TensorBody.h]",
             "core/aten_interned_strings.h": ":gen_aten[core/aten_interned_strings.h]",
             "core/enum_tag.h": ":gen_aten[core/enum_tag.h]",
@@ -2048,7 +2050,6 @@ def define_buck_targets(
                 ("", "caffe2/utils/*.h"),
                 ("", "caffe2/core/*.h"),
                 ("", "torch/csrc/*.h"),
-                ("", "torch/csrc/*.hpp"),
                 ("", "torch/csrc/api/include/torch/*.h"),
                 ("", "torch/csrc/autograd/*.h"),
                 ("", "torch/csrc/autograd/*/*.h"),
