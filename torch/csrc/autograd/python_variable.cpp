@@ -1504,8 +1504,9 @@ static int THPVariable_set_requires_grad(
   TORCH_CHECK(obj && PyBool_Check(obj), "requires_grad must be a bool");
   const auto& var = THPVariable_Unpack(self);
   auto requires_grad = (obj == Py_True);
-  if (!var.is_leaf() && !requires_grad) {
-    THPUtils_setError(autograd::utils::requires_grad_leaf_error().c_str());
+  if (!var.is_leaf()) {
+    THPUtils_setError(
+        autograd::utils::requires_grad_leaf_error(obj == Py_True).c_str());
     return -1;
   }
   if (requires_grad &&

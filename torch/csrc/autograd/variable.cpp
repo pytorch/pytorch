@@ -598,7 +598,8 @@ void VariableHooks::requires_grad_(
     const at::TensorBase& self,
     bool _requires_grad) const {
   if (!self.is_leaf() && !_requires_grad) {
-    throw std::runtime_error(autograd::utils::requires_grad_leaf_error());
+    throw std::runtime_error(
+        autograd::utils::requires_grad_leaf_error(_requires_grad));
   }
   self.set_requires_grad(_requires_grad);
 }

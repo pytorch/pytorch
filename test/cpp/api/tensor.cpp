@@ -1177,7 +1177,7 @@ TEST(TensorTest, RequiresGradInplace) {
   auto y = x * x;
   ASSERT_THROWS_WITH(
       y.requires_grad_(false),
-      "If you want to use a computed variable in a subgraph that doesn't require differentiation use var_no_grad = var.detach().");
+      "you can only change requires_grad flags of leaf variables.");
 
   x.requires_grad_(false);
   ASSERT_FALSE(x.requires_grad());
