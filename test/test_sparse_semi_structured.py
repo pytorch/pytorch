@@ -50,8 +50,8 @@ _IS_SM9X = False
 _IS_HIPSPARSELT_AVAILABLE = False
 
 if torch.cuda.is_available():
-    _IS_SM8X = torch.cuda.get_device_capability(0)[0] == 8
-    _IS_SM9X = torch.cuda.get_device_capability(0)[0] == 9
+    _IS_SM8X = torch.version.cuda is not None and (torch.cuda.get_device_capability(0)[0] == 8)
+    _IS_SM9X = torch.version.cuda is not None and (torch.cuda.get_device_capability(0)[0] == 9)
     _IS_HIPSPARSELT_AVAILABLE = torch.version.hip is not None and tuple(int(v) for v in torch.version.hip.split('.')[:2]) > (6, 4)
     # CUTLASS kernels only work for Ampere
     if _IS_SM8X:
@@ -1240,11 +1240,8 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
         version = _get_torch_cuda_version()
         assert torch.backends.cusparselt.is_available()
 
-        # CUDA 11.8 has cuSPARSELt v0.4.0 support
-        if version == (11, 8):
-            assert torch.backends.cusparselt.version() == 400
         # PyTorch CUDA 12.4+ using cuSPARSELt v0.6.2+
-        elif version >= (12, 4):
+        if version >= (12, 4):
             assert torch.backends.cusparselt.version() >= 602
         else:
             assert torch.backends.cusparselt.version() is None
