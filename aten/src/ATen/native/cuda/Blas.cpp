@@ -433,14 +433,13 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
     }
   }
 
-  IntArrayRef result_sizes = result.sizes();
-  if ((result_sizes[0] == 0) || (result_sizes[1] == 0)) {
+  // Short circuit on empty result
+  if (result.numel() == 0) {
     return result;
   }
 
-  cublasCommonArgs args(mat1, mat2, result);
-
-  if (mat1.numel() == 0) {
+  // Short circuit if the reduction dim is empty
+  if (mat1.sizes()[1] == 0) {
     // By definition, when beta==0, values in self should be ignored. nans and infs
     // should not propagate
     if (beta.toComplexDouble() == 0.) {
@@ -452,13 +451,16 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
         result,
         self.expand(result.sizes()),
         at::native::scalar_tensor(
-            beta,
-            self.scalar_type(),
-            std::nullopt /* layout */,
-            at::kCPU,
-            std::nullopt /* pin_memory */));
+          beta,
+          self.scalar_type(),
+          std::nullopt /* layout */,
+          at::kCPU,
+          std::nullopt /* pin_memory */
+        )
+    );
   }
 
+  cublasCommonArgs args(mat1, mat2, result);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!args.result->is_conj());
 
   if (!disable_addmm_cuda_lt) {
