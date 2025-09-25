@@ -1885,25 +1885,22 @@ Tensor repeat(const Tensor& self, IntArrayRef repeats) {
                                : at::empty(target_size, self.options());
   }
 
-  Tensor view = xtensor;
-  // Create view of shape [1, s0, 1, s1, ...]
-  // where si is self.size(i).
-  for (const auto i : c10::irange(xtensor.dim())) {
-    view = view.unsqueeze(2 * i);
-  }
-
   // Create view of shape [r0, s0, r1, s1, ...]
-  // where ri is repeat[i].
+  // where ri is repeat[i], si is self.size(i).
+  Tensor view = xtensor;
   auto expand_shape = std::vector<int64_t>();
   expand_shape.reserve(xtensor.dim() * 2);
   for (const auto i : c10::irange(xtensor.dim())) {
+    view = view.unsqueeze(2 * i);
     expand_shape.push_back(repeats[i]);
     expand_shape.push_back(xtensor.size(i));
   }
+  // expanded_view is non-contiguous because .expand set stride to 0.
   auto expanded_view = view.expand(expand_shape);
 
-  // Reshape to shape [s0 * r0, s1 * r1, ...].
-  return expanded_view.reshape(target_size);
+  // Reshape to [s0 * r0, s1 * r1, ...].
+  // .contiguous() triggers a copy of data.
+  return expanded_view.contiguous().view(target_size);
 }
 
 Tensor tile_symint(const Tensor& self, SymIntArrayRef reps) {
