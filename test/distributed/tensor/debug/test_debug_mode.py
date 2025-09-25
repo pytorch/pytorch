@@ -247,9 +247,7 @@ class TestDTensorDebugMode(TestCase):
         x = torch.randn(1, 8, requires_grad=True)
 
         with DebugMode(record_torchfunction=True) as debug_mode:
-            result = torch.cond(
-                torch.tensor(True), lambda x: x + 1, lambda x: x - 1, [x]
-            )
+            torch.cond(torch.tensor(True), lambda x: x + 1, lambda x: x - 1, [x])
 
         # Verify that cond operations are captured in debug mode
         self.assertIn("torch.ops.higher_order.cond", debug_mode.debug_string())
