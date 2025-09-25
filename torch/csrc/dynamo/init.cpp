@@ -157,50 +157,44 @@ struct IsValidVarName {
   }
 };
 
-PyObject* _fast_isinstance_check(PyObject* cls, PyObject* obj) {
+PyObject* _cached_isinstance_check(PyObject* cls, PyObject* obj) {
+  // We cache LazyVT and VT types here to avoid importing it every time.
+  // They are freed in the metaclass dealloc function.
   if (LazyVT_tp == nullptr || VT_tp == nullptr) {
-    PyObject* base_mod = PyImport_ImportModule("torch._dynamo.variables.base");
-    PyObject* VT = PyObject_GetAttrString(base_mod, "VariableTracker");
+    auto base_mod =
+        THPObjectPtr(PyImport_ImportModule("torch._dynamo.variables.base"));
+    PyObject* VT = PyObject_GetAttrString(base_mod.get(), "VariableTracker");
     VT_tp = (PyTypeObject*)VT;
 
-    PyObject* Lazy_mod = PyImport_ImportModule("torch._dynamo.variables.lazy");
-    PyObject* LazyVT = PyObject_GetAttrString(Lazy_mod, "LazyVariableTracker");
+    auto Lazy_mod =
+        THPObjectPtr(PyImport_ImportModule("torch._dynamo.variables.lazy"));
+    PyObject* LazyVT =
+        PyObject_GetAttrString(Lazy_mod.get(), "LazyVariableTracker");
     LazyVT_tp = (PyTypeObject*)LazyVT;
-
-    Py_DECREF(base_mod);
-    Py_DECREF(Lazy_mod);
   }
 
   PyTypeObject* cls_tp = (PyTypeObject*)cls;
-
-  int decref_obj = 0;
+  PyTypeObject* obj_tp = Py_TYPE(obj);
 
   if (PyObject_TypeCheck(obj, LazyVT_tp) &&
       !(cls_tp == VT_tp || cls_tp == LazyVT_tp)) {
     // Realize the lazy object if cls is a VariableTracker subclass but not
     // VariableTracker or LazyVariableTracker itself
-    PyObject* realize = PyUnicode_FromString("realize");
-    PyObject* new_obj = PyObject_CallMethodNoArgs(obj, realize);
+    auto realize = THPObjectPtr(PyUnicode_FromString("realize"));
+    auto new_obj = THPObjectPtr(PyObject_CallMethodNoArgs(obj, realize.get()));
 
-    Py_DECREF(realize);
-    if (new_obj == nullptr) {
+    if (!new_obj) {
       // possible graph break?
       return nullptr;
     }
-    decref_obj = 1;
-    obj = new_obj;
+    obj_tp = Py_TYPE(new_obj.get());
   }
-
-  PyTypeObject* obj_tp = Py_TYPE(obj);
 
   auto key = std::make_pair(cls_tp, obj_tp);
   if (_isinstance_cache.count(key) == 0) {
     _isinstance_cache[key] = PyObject_TypeCheck(obj, cls_tp);
   }
   int r = _isinstance_cache[key] ? 1 : 0;
-
-  if (decref_obj)
-    Py_DECREF(obj);
 
   if (r == 1) {
     Py_RETURN_TRUE;
@@ -224,15 +218,17 @@ static int VariableTrackerMeta_init_fn(
 }
 
 static PyObject* _get_all_subclasses(PyObject* unused, PyObject* noargs) {
-  PyObject* lst = PyList_New((int)_all_subclasses.size());
+  auto lst = THPObjectPtr(PyList_New((int)_all_subclasses.size()));
   for (size_t i = 0; i < _all_subclasses.size(); i++) {
     Py_INCREF(_all_subclasses[i]);
     PyList_SET_ITEM(lst, i, _all_subclasses[i]);
   }
-  return lst;
+  return lst.release();
 }
 
 static void VariableTrackerMeta_dealloc(PyObject* self) {
+  Py_XDECREF((PyObject*)VT_tp);
+  Py_XDECREF((PyObject*)LazyVT_tp);
   PyObject_GC_UnTrack(self);
   PyType_Type.tp_dealloc(self);
 }
@@ -254,7 +250,10 @@ static int VariableTrackerMeta_clear(PyObject* self) {
 
 // NOLINTNEXTLINE(*c-arrays)
 static PyMethodDef VariableTrackerMetaMethods[] = {
-    {"__instancecheck__", (PyCFunction)_fast_isinstance_check, METH_O, nullptr},
+    {"__instancecheck__",
+     (PyCFunction)_cached_isinstance_check,
+     METH_O,
+     nullptr},
     {"get_all_subclasses",
      (PyCFunction)_get_all_subclasses,
      METH_NOARGS | METH_CLASS,
@@ -280,9 +279,9 @@ static PyType_Spec VariableTrackerMetaSpec = {
 };
 
 static PyObject* new_VariableTrackerMetaType() {
-  PyObject* bases = PyTuple_Pack(1, (PyObject*)&PyType_Type);
-  PyObject* type = PyType_FromSpecWithBases(&VariableTrackerMetaSpec, bases);
-  Py_DECREF(bases);
+  auto bases = THPObjectPtr(PyTuple_Pack(1, (PyObject*)&PyType_Type));
+  PyObject* type =
+      PyType_FromSpecWithBases(&VariableTrackerMetaSpec, bases.get());
   return type;
 }
 
