@@ -46,6 +46,10 @@ case ${DOCKER_TAG_PREFIX} in
         BASE_TARGET=rocm
         GPU_IMAGE=rocm/dev-ubuntu-22.04:${GPU_ARCH_VERSION}-complete
         PYTORCH_ROCM_ARCH="gfx900;gfx906;gfx908;gfx90a;gfx942;gfx1030;gfx1100;gfx1101;gfx1102;gfx1200;gfx1201"
+        # add gfx950 conditionally starting in ROCm 7.0
+        if [[ $(ver $GPU_ARCH_VERSION) -eq $(ver 7.0) ]]; then
+            PYTORCH_ROCM_ARCH="${PYTORCH_ROCM_ARCH};gfx950"
+        fi
         DOCKER_GPU_BUILD_ARG="--build-arg PYTORCH_ROCM_ARCH=${PYTORCH_ROCM_ARCH} --build-arg ROCM_VERSION=${GPU_ARCH_VERSION}"
         ;;
     *)
