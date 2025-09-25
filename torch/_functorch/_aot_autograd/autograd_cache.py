@@ -22,7 +22,7 @@ from typing import Any, Callable, Generic, Optional, TYPE_CHECKING, TypeVar, Uni
 from typing_extensions import override
 
 import torch
-from torch._dynamo.precompile_context import PrecompileCacheArtifact, PrecompileContext
+from torch._dynamo.precompile_context import BackendCacheArtifact, PrecompileContext
 from torch._dynamo.trace_rules import torch_non_c_binding_in_graph_functions
 from torch._dynamo.utils import (
     chromium_event_log_active,
@@ -51,7 +51,7 @@ from torch._inductor.output_code import (
     OutputCode,
 )
 from torch._inductor.runtime.runtime_utils import cache_dir
-from torch._inductor.utils import should_use_remote_fx_graph_cache
+from torch._inductor.utils import BoxedBool, should_use_remote_fx_graph_cache
 from torch._logging import LazyString
 from torch._utils_internal import log_cache_bypass
 from torch.compiler._cache import (
@@ -81,7 +81,6 @@ from .utils import simple_wraps
 if TYPE_CHECKING:
     from torch._inductor.compile_fx import _CompileFxKwargs
     from torch._inductor.remote_cache import JsonDataTy, RemoteCache
-    from torch._inductor.utils import BoxedBool
     from torch.fx.node import Node
 
 log = logging.getLogger(__name__)
@@ -1059,15 +1058,14 @@ class AOTAutogradCacheArtifact(CacheArtifact):
         return "aot_autograd"
 
 
-def deserialize_bundled_cache_entry(data: bytes) -> Callable:
-    entry = pickle.loads(data)
+def deserialize_bundled_cache_entry(entry: BundledAOTAutogradCacheEntry) -> Callable:
     # In the precompile use case, guards are already serialized
     # by dynamo, so we don't need to add them to the environment
     entry.guards_expr = None
     # TODO: this isn't exactly right, because cudagraphs needs to be a shared config
     # which is set by compile_fx. But in precompile, we never actually call compile_fx
     # so we don't have a place to track cudagraphs here.
-    cudagraphs = torch._inductor.config.triton.cudagraphs
+    cudagraphs = BoxedBool(torch._inductor.config.triton.cudagraphs)
     boxed_forward_device_index = BoxedDeviceIndex(None)
     compiled_fn = entry.wrap_post_compile(
         [],
@@ -1090,14 +1088,8 @@ def deserialize_bundled_cache_entry(data: bytes) -> Callable:
     return forward
 
 
-@CacheArtifactFactory.register
-class BundledAOTAutogradCacheArtifact(PrecompileCacheArtifact[Callable]):
-    @override
-    @staticmethod
-    def type():
-        return "precompile_aot_autograd"
-
-    @override
+@dataclass
+class BundledAOTAutogradCacheArtifact(BackendCacheArtifact[Callable]):
     def after_deserialization(self) -> Callable:
         return deserialize_bundled_cache_entry(self.content)
 
@@ -1375,9 +1367,9 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
                     # 1. because we set it to None on save 2. even if we didn't, this new run
                     # that cache hit has a *new* backend id associated with it.
                     PrecompileContext.record_artifact(
-                        BundledAOTAutogradCacheArtifact.type(),
-                        aot_config.precompile_backend_id,
-                        pickled_content,
+                        BundledAOTAutogradCacheArtifact(
+                            aot_config.precompile_backend_id, entry
+                        ),
                     )
         except Exception as e:
             log.info("AOTAutograd cache unable to load compiled graph: %s", e)
@@ -1413,15 +1405,11 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
                 and entry.sanitized_aot_config.precompile_backend_id is not None
             ):
                 precompile_key = entry.sanitized_aot_config.precompile_backend_id
+                artifact = BundledAOTAutogradCacheArtifact(precompile_key, entry)
                 # Now that we're saving it, the precompile_backend_id field is no longer
                 # useful, remove it from the entry.
                 entry.sanitized_aot_config.precompile_backend_id = None
-                PrecompileContext.record_artifact(
-                    BundledAOTAutogradCacheArtifact.type(),
-                    precompile_key,
-                    entry,
-                    editable=True,
-                )
+                PrecompileContext.record_artifact(artifact)
             AOTAutogradCache._write_to_local_cache(key, content)
             counters["aot_autograd"]["autograd_cache_saved"] += 1
         except BypassAOTAutogradCache as e:
