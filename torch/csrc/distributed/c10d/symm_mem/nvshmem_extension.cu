@@ -299,7 +299,7 @@ at::Tensor all_to_all_vdev(
 
   void* input_ptr = input.data_ptr();
   void* output_ptr = out.mutable_data_ptr();
-  int64_t* in_splits_ptr = (int64_t*)(in_splits.data_ptr());
+  int64_t* in_splits_ptr = (int64_t*)(in_splits.const_data_ptr());
   int64_t* out_splits_offsets_ptr = (int64_t*)(out_splits_offsets.mutable_data_ptr());
 
   TORCH_CHECK_EQ(input.device(), out.device());
