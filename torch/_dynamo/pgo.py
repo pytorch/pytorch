@@ -952,9 +952,14 @@ def put_local_code_state(cache_key: str) -> None:
         )
 
 
-def put_remote_code_state(cache_key: str) -> None:
+def put_remote_code_state(cache_key: str, extra_code_state: bool = False) -> None:
+    event_name = (
+        "put_remote_code_state"
+        if not extra_code_state
+        else "put_extra_remote_code_state"
+    )
     with dynamo_timed(
-        name := "pgo.put_remote_code_state",
+        name := f"pgo.{event_name}",
         log_pt2_compile_event=True,
         dynamo_compile_column_us="pgo_put_remote_code_state_time_us",
     ):
@@ -964,7 +969,7 @@ def put_remote_code_state(cache_key: str) -> None:
         remote_cache = get_remote_cache()
 
         if remote_cache is None:
-            log.info("put_code_state: remote cache disabled")
+            log.info("%s: remote cache disabled", event_name)
             return
 
         content = pickle.dumps(_CODE_STATE)
@@ -974,11 +979,11 @@ def put_remote_code_state(cache_key: str) -> None:
         }
         remote_cache.put(cache_key, cache_data)
         log.info(
-            "put_code_state: wrote remote %s, %d entries", cache_key, len(_CODE_STATE)
+            "%s: wrote remote %s, %d entries", event_name, cache_key, len(_CODE_STATE)
         )
         # TODO: don't log this multiple times
         trace_structured_artifact(
-            "put_remote_code_state",
+            event_name,
             "string",
             lambda: render_code_state(_CODE_STATE),
         )
