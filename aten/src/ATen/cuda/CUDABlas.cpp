@@ -644,6 +644,8 @@ inline void bgemm_internal_cublas_half_helper(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYP
   void * beta_ptr = &fbeta;
 #ifdef USE_ROCM
   int flag = 0;
+  rocblas_datatype c_type = std::is_same<C_Dtype, float>::value ? rocblas_datatype_f32_r : rocblas_datatype_f16_r;
+  rocblas_datatype d_type = c_type;
 #if USE_GEMM_FLAGS_FP16_ALT_IMPL
   flag = at::ROCmBackwardPassGuard::is_backward_pass() ? rocblas_gemm_flags_fp16_alt_impl : 0;
 #endif
@@ -652,8 +654,8 @@ inline void bgemm_internal_cublas_half_helper(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYP
                                    hipOperationToRocOperation(opb), (int)m, (int)n, (int)k,
                                    (void*)alpha_ptr, a, rocblas_datatype_f16_r, (int)lda, stridea,
                                    b, rocblas_datatype_f16_r, (int)ldb, strideb,
-                                   (void*)beta_ptr, c, rocblas_datatype_f16_r, (int)ldc, stridec,
-                                   c, rocblas_datatype_f16_r, (int)ldc, stridec,
+                                   (void*)beta_ptr, c, c_type, (int)ldc, stridec,
+                                   c, d_type, (int)ldc, stridec,
                                    (int) num_batches, rocblas_datatype_f32_r, rocblas_gemm_algo_standard,
                                    0, flag)));
 #else
@@ -1096,6 +1098,8 @@ inline void gemm_internal_cublas_half_helper(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(
   GEMM_CHECK_ARGVALUES(at::Half);
 #ifdef USE_ROCM
   int flag = 0;
+  rocblas_datatype c_type = std::is_same<C_Dtype, float>::value ? rocblas_datatype_f32_r : rocblas_datatype_f16_r;
+  rocblas_datatype d_type = c_type;
 #if USE_GEMM_FLAGS_FP16_ALT_IMPL
   flag = at::ROCmBackwardPassGuard::is_backward_pass() ? rocblas_gemm_flags_fp16_alt_impl : 0;
 #endif
@@ -1115,10 +1119,10 @@ inline void gemm_internal_cublas_half_helper(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(
       ldb,
       beta_ptr,
       c,
-      rocblas_datatype_f16_r,
+      c_type,
       ldc,
       c,
-      rocblas_datatype_f16_r,
+      d_type,
       ldc,
       rocblas_datatype_f32_r,
       rocblas_gemm_algo_standard,
@@ -1633,9 +1637,7 @@ bool gemm_and_bias(
   if (activation == GEMMAndBiasActivationEpilogue::RELU) {
     epilogue = CUBLASLT_EPILOGUE_RELU_BIAS;
   } else if (activation == GEMMAndBiasActivationEpilogue::GELU) {
-#if CUDA_VERSION >= 11040 || defined(USE_ROCM)
     epilogue = CUBLASLT_EPILOGUE_GELU_BIAS;
-#endif
   }
 
   if (bias != nullptr) {
@@ -1927,7 +1929,6 @@ void scaled_gemm(
     bool use_fast_accum) {
   // Note: see `cublasCommonArgs` for various non-intuitive manupulations
   // of input arguments to this function.
-#if CUDA_VERSION >= 11080 || defined(USE_ROCM)
   const auto computeType = CUBLAS_COMPUTE_32F;
   const auto scaleType = CUDA_R_32F;
   const float alpha_val = 1.0;
@@ -1937,11 +1938,11 @@ void scaled_gemm(
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_TRANSB, _cublasOpFromChar(transb));
   cublasLtMatmulDescAttributes_t matmulDescA = CUBLASLT_MATMUL_DESC_A_SCALE_POINTER;
   cublasLtMatmulDescAttributes_t matmulDescB = CUBLASLT_MATMUL_DESC_B_SCALE_POINTER;
+#if defined(USE_ROCM) && !defined(HIPBLASLT_OUTER_VEC) && defined(HIPBLASLT_VEC_EXT)
   // hipblaslt supported row-wise before cublas, and did so their own way (via
   // the SCALE_POINTERSs), but then migrated to match how cublas does it (via
   // the SCALE_MODEs). Here we check for this early custom mode.
   bool use_rowwise = (mat1_scaling_type == ScalingType::RowWise && mat2_scaling_type == ScalingType::RowWise);
-#if defined(USE_ROCM) && !defined(HIPBLASLT_OUTER_VEC) && defined(HIPBLASLT_VEC_EXT)
   if (use_rowwise) {
     matmulDescA = HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER_VEC_EXT;
     matmulDescB = HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER_VEC_EXT;
@@ -1950,14 +1951,18 @@ void scaled_gemm(
   #if ROCM_VERSION >= 70000
             if (at::detail::getCUDAHooks().isGPUArch({"gfx950"})) {
                 // TODO: add constraints based on hipblaslt internals
-                TORCH_CHECK((m % 32 == 0) && (n % 32 == 0) && (k % 32 == 0),
-                           "Matrix dimensions must be multiples of 32 for MX format. "
+                TORCH_CHECK((m % 16 == 0) && (n % 16 == 0) && (k % 128 == 0),
+                           "M, N must be multiples of 16 and K should be multiple of 128 for MX format. "
                            "Got m=", m, ", n=", n, ", k=", k);
             }
   #endif
   }
-#else
-  // rowwise isn't supported using cublaslt or older hipblaslt
+#elif (CUDA_VERSION < 12090) && !defined(USE_ROCM)
+  // hipblaslt supported row-wise before cublas, and did so their own way (via
+  // the SCALE_POINTERSs), but then migrated to match how cublas does it (via
+  // the SCALE_MODEs). Here we check for this early custom mode.
+  bool use_rowwise = (mat1_scaling_type == ScalingType::RowWise && mat2_scaling_type == ScalingType::RowWise);
+  // rowwise isn't supported using older cublaslt or older hipblaslt
   TORCH_INTERNAL_ASSERT(use_rowwise == false, "rowwise scaled_gemm not supported with blaslt");
 #endif  // if defined(USE_ROCM) && !defined(HIPBLASLT_OUTER_VEC) && defined(HIPBLASLT_VEC_EXT)
   computeDesc.setAttribute(matmulDescA, mat1_scale_ptr);
@@ -2125,8 +2130,6 @@ void scaled_gemm(
       " scaleType ",
       scaleType);
   return;
-#endif // if CUDA_VERSION >= 11080 || defined(USE_ROCM)
-  TORCH_CHECK(false, "scaled_gemm is only supported for CUDA 11.8 and above");
 }
 
 void int8_gemm(
@@ -2573,8 +2576,6 @@ void vdot<c10::complex<double>>(CUDABLAS_DOT_ARGTYPES(c10::complex<double>)) {
                                    reinterpret_cast<cuDoubleComplex*>(result)));
 }
 
-// HIP on Windows does not support
-#if !(defined(USE_ROCM) && defined(_MSC_VER))
 template <>
 void getrsBatched<float>(CUDABLAS_GETRS_ARGTYPES(float)) {
   TORCH_CUDABLAS_CHECK(cublasSgetrsBatched(
@@ -2773,6 +2774,5 @@ void gelsBatched<c10::complex<float>>(CUDABLAS_GELS_BATCHED_ARGTYPES(c10::comple
       devInfoArray,
       batchSize));
 }
-#endif // !(defined(USE_ROCM) && defined(_MSC_VER))
 
 } // namespace at::cuda::blas
