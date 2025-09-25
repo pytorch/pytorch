@@ -269,6 +269,20 @@ def replicate(
     return module
 
 
+class Replicate(FSDPModule):
+    def __new__(cls, *args, **kwargs):
+        """
+        Override ``__new__`` to remove the FSDP class and directly construct
+        the original class for cases like indexing into a container module.
+        """
+        # Use index 2 since 0 is the dynamically constructed `FSDP<...>` class
+        # and index 1 is the `FSDPModule` class itself
+        orig_cls = cls.__mro__[3]
+        self = orig_cls.__new__(orig_cls, *args, **kwargs)
+        self.__init__(*args, **kwargs)
+        return self
+
+
 def _get_managed_modules(
     root_modules: tuple[nn.Module, ...],
     ignored_params: Optional[set[nn.Parameter]] = None,
