@@ -146,6 +146,10 @@ class CodeGenerator:
         code_lines.append("    out_eager.sum().backward()")
         code_lines.append("    print('Eager Success! ✅')")
 
+        # Zero out grads before running compiled version
+        for i in range(len(leaf_tensors)):
+            code_lines.append(f"    arg{i}.grad = None")
+
         # For DTensor, optionally test compilation (often fails, which is valuable for fuzzing)
         if self.use_dtensor:
             if self.test_compile:

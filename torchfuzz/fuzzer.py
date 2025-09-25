@@ -198,21 +198,17 @@ class Fuzzer:
         """
         Generate tensor with dimensions divisible by mesh size for DTensor sharding.
         """
-        # Allow ndim=0 to generate a scalar tensor
-        ndim = random.randint(0, 3)
-        if ndim == 0:
-            size = ()
-        else:
-            size = []
-            for i in range(ndim):
-                # Choose a base size and make it divisible by relevant mesh dimension
-                base_size = random.randint(16, 32)  # Reduced to avoid huge tensors
-                # Use modulo cycling through mesh dims to determine divisibility
-                mesh_div = self.fuzzed_mesh_dims[i % len(self.fuzzed_mesh_dims)] if self.fuzzed_mesh_dims else self.base_mesh_dims[i % len(self.base_mesh_dims)]
-                # Make size divisible by mesh dimension
-                divisible_size = base_size * mesh_div
-                size.append(divisible_size)
-            size = tuple(size)
+        ndim = random.randint(1, 3)
+        size = []
+        for i in range(ndim):
+            # Choose a base size and make it divisible by relevant mesh dimension
+            base_size = random.randint(16, 32)  # Reduced to avoid huge tensors
+            # Use modulo cycling through mesh dims to determine divisibility
+            mesh_div = self.fuzzed_mesh_dims[i % len(self.fuzzed_mesh_dims)] if self.fuzzed_mesh_dims else self.base_mesh_dims[i % len(self.base_mesh_dims)]
+            # Make size divisible by mesh dimension
+            divisible_size = base_size * mesh_div
+            size.append(divisible_size)
+        size = tuple(size)
 
         stride = []
         acc = 1
