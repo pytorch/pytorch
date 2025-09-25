@@ -491,7 +491,7 @@ def can_use_triton_kernel(
 ) -> bool:
     if not (
         torch.cuda.is_available()
-        and torch.cuda.get_device_capability() >= (9, 0)
+        and torch.cuda.get_device_capability() == (9, 0)
         and not torch.version.hip
     ):
         return False
