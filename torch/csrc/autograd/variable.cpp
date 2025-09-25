@@ -599,7 +599,7 @@ void VariableHooks::requires_grad_(
     bool _requires_grad) const {
   TORCH_CHECK(
       self.is_leaf() || _requires_grad,
-      autograd::utils::requires_grad_leaf_error());
+      autograd::utils::requires_grad_leaf_error(_requires_grad));
   self.set_requires_grad(_requires_grad);
 }
 
