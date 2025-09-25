@@ -1,13 +1,6 @@
 # mypy: ignore-errors
 import os
-import signal
-import subprocess
-import sys
-import tempfile
-import time
-from queue import Empty, Queue
-from threading import Thread
-from typing import Any, Optional, Union
+from typing import Optional
 
 import torch
 
@@ -198,66 +191,16 @@ def convert_graph_to_python_code(
 
     code_lines.extend(
         [
-            "",
-            "# Execute the fuzzed program both normally and with torch.compile",
             "import torch",
-            "import tempfile",
-            "import os",
             "import sys",
-            "import contextlib",
-            "from io import StringIO",
+            "torch._dynamo.config.capture_scalar_outputs = True",
             "",
-            "# Create arguments",
             f"args = {args_tuple}",
-            "",
-            "# Execute original version",
-            "print('=== Executing Original Program ===')",
-            "try:",
-            "    result_original = fuzzed_program(*args)",
-            "    print('✅ Original execution successful')",
-            "except Exception as e:",
-            "    print(f'❌ Original execution failed: {e}')",
-            "    raise",
-            "",
-            "# Execute compiled version",
-            "print('\\n=== Executing Compiled Program  fullgraph=False')",
-            "try:",
-            "    compiled_program = torch.compile(fuzzed_program, fullgraph=False)",
-            "    result_compiled = compiled_program(*args)",
-            "    print('✅ Compiled execution successful')",
-            "    print(f'Compiled result type: {type(result_compiled)}')",
-            "except Exception as e:",
-            "    print(f'❌ Compiled execution failed: {e}')",
-            "    # Exit with non-zero code to signal compile failure",
-            "    import sys",
-            "    sys.exit(1)",
-            "",
-            "# Execute compiled version 2",
-            "print('\\n=== Executing Compiled Program  fullgraph=False dynamic=True')",
-            "try:",
-            "    compiled_program = torch.compile(fuzzed_program, fullgraph=False, dynamic=True)",
-            "    result_compiled = compiled_program(*args)",
-            "    print('✅ Compiled execution successful')",
-            "    print(f'Compiled result type: {type(result_compiled)}')",
-            "except Exception as e:",
-            "    print(f'❌ Compiled execution failed: {e}')",
-            "    # Exit with non-zero code to signal compile failure",
-            "    import sys",
-            "    sys.exit(1)",
-            "",
-            "# Execute compiled version 3",
-            "print('\\n=== Executing Compiled Program  fullgraph=True dynamic=True')",
-            "try:",
-            "    with torch._dynamo.config.patch(capture_scalar_outputs=True):",
-            "       compiled_program = torch.compile(fuzzed_program, fullgraph=False, dynamic=True)",
-            "       result_compiled = compiled_program(*args)",
-            "       print('✅ Compiled execution successful')",
-            "       print(f'Compiled result type: {type(result_compiled)}')",
-            "except Exception as e:",
-            "    print(f'❌ Compiled execution failed: {e}')",
-            "    # Exit with non-zero code to signal compile failure",
-            "    import sys",
-            "    sys.exit(1)",
+            "result_original = fuzzed_program(*args)",
+            "print('✅ eager success')",
+            "compiled_program = torch.compile(fuzzed_program, fullgraph=False, dynamic=True)",
+            "result_compiled = compiled_program(*args)",
+            "print('✅ compile success')",
             "",
         ]
     )
@@ -294,223 +237,26 @@ def generate_simple_operation_code(
         return [f"# Unknown operation: {op_name}"]
 
 
-def execute_python_code(
-    python_code: str, target_spec, preserve_temp_file: bool = False, timeout: int = 60
-) -> Union[torch.Tensor, float, int, bool, complex]:
+def create_program_file(python_code: str) -> str:
     """
-    Execute the generated Python code by writing it to a file and running it.
-    Supports both real-time output printing and output capturing with proper process termination.
+    Create a temporary Python file from the generated code.
 
     Args:
-        python_code: String containing Python code to execute
-        target_spec: Expected output specification for validation
-        preserve_temp_file: If True, don't delete the temporary file after execution
-        timeout: Maximum time in seconds to wait for execution (default: 60)
+        python_code: String containing Python code to write
 
     Returns:
-        The actual result from executing the generated code
-
-    Raises:
-        RuntimeError: With full stdout/stderr output if execution fails
-        TimeoutError: If execution exceeds the timeout
+        Path to the created temporary file
     """
+    import random
 
-    # Write the generated code to a temporary file
-    with tempfile.NamedTemporaryFile(
-        mode="w", suffix="_generated.py", delete=False
-    ) as f:
+    # Generate a random nonce for the filename
+    nonce = random.randint(0, 1_000_000_000)
+    tmp_dir = "/tmp/torchfuzz"
+    os.makedirs(tmp_dir, exist_ok=True)
+    generated_file_path = os.path.join(tmp_dir, f"fuzz_{nonce}.py")
+
+    # Write the generated code to the specified file
+    with open(generated_file_path, "w") as f:
         f.write(python_code)
-        generated_file_path = f.name
 
-    print(f"📄 Generated code written to: {generated_file_path}")
-
-    process = None
-    stdout_thread = None
-    stderr_thread = None
-
-    def stream_reader(
-        stream: Any, queue: "Queue[tuple[str, str]]", stream_name: str
-    ) -> None:
-        """Read from stream and put lines in queue with stream identifier"""
-        try:
-            for line in iter(stream.readline, ""):
-                if line:
-                    queue.put((stream_name, line.rstrip("\n")))
-        except Exception:
-            pass
-        finally:
-            try:
-                stream.close()
-            except Exception:
-                pass
-
-    def kill_process_tree(process):
-        """Kill the process and all its children"""
-        try:
-            # Try to terminate gracefully first
-            if process.poll() is None:
-                process.terminate()
-                try:
-                    process.wait(timeout=5)
-                    print("🔄 Process terminated gracefully")
-                except subprocess.TimeoutExpired:
-                    # Force kill if it doesn't terminate gracefully
-                    print("💀 Force killing process...")
-                    process.kill()
-                    try:
-                        process.wait(timeout=5)
-                        print("💀 Process force killed")
-                    except subprocess.TimeoutExpired:
-                        print("⚠️  Process may still be running after force kill")
-
-            # Also try to kill process group if it was created
-            try:
-                pid = process.pid
-                os.killpg(os.getpgid(pid), signal.SIGTERM)
-                time.sleep(2)
-                os.killpg(os.getpgid(pid), signal.SIGKILL)
-            except OSError:
-                pass  # Process group might not exist or already killed
-
-        except Exception as e:
-            print(f"⚠️  Error killing process: {e}")
-
-    try:
-        # Execute the generated file with real-time output streaming
-        print(f"🚀 Executing: python {generated_file_path} (timeout: {timeout}s)")
-        print("=" * 50)
-
-        # Start process with new process group to enable killing child processes
-        process = subprocess.Popen(
-            [sys.executable, generated_file_path],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            bufsize=1,  # Line buffered
-            universal_newlines=True,
-            preexec_fn=os.setsid,  # Create new process group  # noqa: PLW1509
-        )
-
-        # Create queues and threads for reading stdout and stderr
-        output_queue = Queue()
-        stdout_thread = Thread(
-            target=stream_reader, args=(process.stdout, output_queue, "stdout")
-        )
-        stderr_thread = Thread(
-            target=stream_reader, args=(process.stderr, output_queue, "stderr")
-        )
-
-        stdout_thread.daemon = True
-        stderr_thread.daemon = True
-        stdout_thread.start()
-        stderr_thread.start()
-
-        # Collect output while printing in real-time
-        captured_stdout = []
-        captured_stderr = []
-        start_time = time.time()
-
-        # Read output until process finishes or timeout
-        while process.poll() is None:
-            # Check for timeout
-            if time.time() - start_time > timeout:
-                print(f"⏰ Execution timeout ({timeout}s) reached, killing process...")
-                kill_process_tree(process)
-                raise TimeoutError(f"Execution exceeded {timeout} seconds timeout")
-
-            try:
-                stream_name, line = output_queue.get(timeout=0.1)
-                if stream_name == "stdout":
-                    print(line)  # Print to console in real-time
-                    captured_stdout.append(line)
-                elif stream_name == "stderr":
-                    print(line, file=sys.stderr)  # Print to stderr in real-time
-                    captured_stderr.append(line)
-            except Empty:
-                continue
-
-        # Process has finished, collect any remaining output
-        timeout_remaining = max(0, timeout - (time.time() - start_time))
-        output_timeout = min(5, timeout_remaining)  # Max 5 seconds for remaining output
-
-        end_time = time.time() + output_timeout
-        while not output_queue.empty() and time.time() < end_time:
-            try:
-                stream_name, line = output_queue.get(timeout=0.1)
-                if stream_name == "stdout":
-                    print(line)
-                    captured_stdout.append(line)
-                elif stream_name == "stderr":
-                    print(line, file=sys.stderr)
-                    captured_stderr.append(line)
-            except Empty:
-                break
-
-        # Wait for threads to finish with timeout
-        if stdout_thread.is_alive():
-            stdout_thread.join(timeout=2)
-        if stderr_thread.is_alive():
-            stderr_thread.join(timeout=2)
-
-        # Get the return code
-        return_code = process.returncode
-
-        print("=" * 50)
-        print(f"🏁 Process finished with return code: {return_code}")
-
-        if return_code == 0:
-            # Success - we already printed output in real-time
-            if preserve_temp_file:
-                print(f"📁 Temporary file preserved at: {generated_file_path}")
-            return True
-        else:
-            # Failed execution
-            full_output = ""
-            if captured_stdout:
-                full_output += "STDOUT:\n" + "\n".join(captured_stdout) + "\n"
-            if captured_stderr:
-                full_output += "STDERR:\n" + "\n".join(captured_stderr) + "\n"
-            full_output += f"Return code: {return_code}\n"
-
-            print(f"❌ Generated file execution failed with return code {return_code}")
-            if preserve_temp_file:
-                print(f"📁 Failed execution file preserved at: {generated_file_path}")
-            raise RuntimeError(full_output)
-
-    except TimeoutError:
-        # Re-raise timeout error as-is
-        raise
-    except Exception as e:
-        if hasattr(e, "returncode"):
-            # This was a CalledProcessError-like exception
-            raise e
-        else:
-            # Some other error occurred
-            print(f"❌ Execution error: {e}")
-            if preserve_temp_file:
-                print(f"📁 Error execution file preserved at: {generated_file_path}")
-            raise RuntimeError(f"Execution failed: {e}") from e
-    finally:
-        # Ensure process and threads are properly cleaned up
-        try:
-            if process is not None:
-                kill_process_tree(process)
-        except Exception:
-            pass
-
-        # Force cleanup threads if they're still running
-        try:
-            if stdout_thread is not None and stdout_thread.is_alive():
-                stdout_thread.join(timeout=1)
-            if stderr_thread is not None and stderr_thread.is_alive():
-                stderr_thread.join(timeout=1)
-        except Exception:
-            pass
-
-        # Clean up the temporary file unless preservation is requested
-        if not preserve_temp_file:
-            try:
-                os.unlink(generated_file_path)
-                print(f"🗑️  Temporary file cleaned up: {generated_file_path}")
-            except Exception:
-                pass
+    return generated_file_path
