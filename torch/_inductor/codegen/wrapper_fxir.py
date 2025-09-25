@@ -120,33 +120,26 @@ def replace_floor_div(expr: sympy.Expr) -> sympy.Expr:
     def replace(expr: sympy.Expr) -> sympy.Expr:
         expr = sympy.together(expr)
 
-        # Find division operations in the sympy.floor expression
-        # Div is either represented as Mul with:
-        # Rational denominator or Pow with negative exponent
+        # Division is represented as a Mul with a Rational factor or a Pow with negative
+        # exponent. We convert floor(Mul(...)) to FloorDiv(numerator, denominator) by
+        # partitioning factors into the numerator and denominator.
         if not isinstance(expr, sympy.core.mul.Mul):
             return sympy.floor(expr)
 
-        if isinstance(expr.args[0], sympy.Rational) and not isinstance(
-            expr.args[0], sympy.Integer
-        ):
-            # Only the first argument of a Mul can be a Rational.
-            frac = expr.args[0]
-            numerator = sympy_product(expr.args[1:]) * frac.numerator
-            denominator = frac.denominator
-
-            return FloorDiv(numerator, denominator)
-        elif any(isinstance(arg, sympy.Pow) for arg in expr.args):
-            # Group negative exponents into the denominator.
-            (numerator, denominator) = (sympy.S.One,) * 2
-            for arg in expr.args:
-                if isinstance(arg, sympy.Pow) and arg.exp < 0:
-                    denominator *= arg.base**-arg.exp
-                else:
+        (numerator, denominator) = (sympy.S.One,) * 2
+        for arg in expr.args:
+            if isinstance(arg, sympy.Rational):
+                numerator *= arg.numerator
+                denominator *= arg.denominator
+            elif isinstance(arg, sympy.Pow):
+                if arg.exp > 0:
                     numerator *= arg
+                else:
+                    denominator *= arg.base**-arg.exp
+            else:
+                numerator *= arg
 
-            return FloorDiv(numerator, denominator)
-        else:
-            return sympy.floor(expr)
+        return FloorDiv(numerator, denominator)
 
     return expr.replace(sympy.floor, replace)
 
