@@ -1898,9 +1898,14 @@ Tensor repeat(const Tensor& self, IntArrayRef repeats) {
   // expanded_view is non-contiguous because .expand set stride to 0.
   auto expanded_view = view.expand(expand_shape);
 
-  // copy to contiguous tensor and reshape to [s0 * r0, s1 * r1, ...].
-  auto contiguous_copy = at::empty_like(expanded_view);
+  // copy to contiguous tensor.
+  auto contiguous_copy = at::empty(
+      expanded_view.sizes(),
+      expanded_view.options(),
+      at::MemoryFormat::Contiguous);
   contiguous_copy.copy_(expanded_view);
+
+  // Reshape to [s0 * r0, s1 * r1, ...].
   // No extra copy of data during reshape for a contiguous tensor.
   return contiguous_copy.reshape(target_size);
 }
