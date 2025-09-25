@@ -1,4 +1,4 @@
-from . import parametrizations, rnn, stateless, parametrize
+from . import parametrizations, parametrize, rnn, stateless
 from .clip_grad import (
     _clip_grads_with_norm_ as clip_grads_with_norm_,
     _get_total_norm as get_total_norm,
