@@ -606,6 +606,15 @@ class TestAOTInductorPackage(TestCase):
                 )
                 self.assertEqual(loaded_metadata.get("dummy"), "moo")
 
+                device = loaded_metadata["AOTI_DEVICE_KEY"]
+                current_device_info = torch._inductor.codecache.get_device_information(
+                    device
+                )
+
+                for k, v in current_device_info.items():
+                    self.assertTrue(k in loaded_metadata)
+                    self.assertEqual(v, loaded_metadata[k])
+
                 compiled_model = torch._inductor.aoti_load_package(package_path)
 
             actual = compiled_model(*example_inputs)
