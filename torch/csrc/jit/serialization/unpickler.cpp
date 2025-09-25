@@ -85,6 +85,7 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
       case AnyTupleType::Kind:
       case AnyClassType::Kind:
       case AnyEnumType::Kind:
+      case DummyType::Kind:
         // no op, there is nothing to tag
         break;
       case c10::SymIntType::Kind:

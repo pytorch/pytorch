@@ -1,9 +1,7 @@
 #pragma once
 
-#include <torch/csrc/stable/version.h>
+#include <torch/headeronly/target_version.h>
 #include <cstdint>
-
-#include <iostream>
 
 // ======================================================================
 // DUMMY TYPE FOR TESTING VERSION-AWARE CONVERSIONS WITH INLINE NAMESPACES
