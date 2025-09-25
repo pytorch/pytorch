@@ -645,9 +645,16 @@ def fuse_all_gather_matmul(all_gather: _AllGatherMatch) -> None:
     if not is_symm_mem_enabled_for_group(group_name):
         return
 
-    if gather_dim >= len(_get_tensor(shard_node).shape) - 1:
-        # Decomposing the matmul on the K dimension is not supported
-        return
+    filter_matmul = None
+    if gather_dim == _get_tensor(shard_node).ndim - 1:
+        if not config._micro_pipeline_tp_ag_mm_last_dim_enabled:
+            return
+
+        # scaled_mm is not supported yet for last dim
+        def _filter_out_scaled_matmul(matmul: _Matmul):
+            return not isinstance(matmul, _ScaledMatmul)
+
+        filter_matmul = _filter_out_scaled_matmul
 
     # Find consumer matmuls
     matmuls = _find_consumer_matmuls(ag_res_node)
@@ -661,6 +668,9 @@ def fuse_all_gather_matmul(all_gather: _AllGatherMatch) -> None:
     ]
 
     if len(matmuls) == 0 or len(OrderedSet(map(type, matmuls))) != 1:
+        return
+
+    if filter_matmul and not filter_matmul(matmuls[0]):
         return
 
     # Fuse the all_gather_tensor with the eligible matmuls

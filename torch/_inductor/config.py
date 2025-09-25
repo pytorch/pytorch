@@ -832,6 +832,11 @@ _fuse_ddp_communication_passes: list[Union[Callable[..., None], str]] = [
 ]
 
 _micro_pipeline_tp: bool = False
+_micro_pipeline_tp_mm_rs_last_dim_enabled = True
+# Disabling by default, as last dim decomposition results in partials,
+# requiring additional reduction. Needs investigation on additional conditions,
+# when pipelining wins will outweigh decomposition cost.
+_micro_pipeline_tp_ag_mm_last_dim_enabled = False
 
 
 class _collective:
