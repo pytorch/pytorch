@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import dataclasses
 import re
+import sys
 from itertools import count, zip_longest
 from typing import Any, Optional, Union
 from typing_extensions import Self
@@ -199,6 +200,11 @@ class DeferredTritonCallWrapper:
         prefix.writeline("}")
 
     def generate_launch_kernel(self, prefix, wrapper, kernel_var_name, params):
+        """
+        Generate the GPU kernel launching code.
+        This is where all the call args being sorted out and generated.
+        If enable_kernel_profile is enabled, all args related information would be packed in this function.
+        """
         triton_meta = params["triton_meta"]
         assert len(self.arg_types) == len(params["def_args"]), (
             self.arg_types,
@@ -236,7 +242,55 @@ class DeferredTritonCallWrapper:
         ]
         if wrapper.device == "xpu":
             launch_kernel_args.append(str(params["threads_per_warp"]))
-        prefix.writeline(f"launchKernel({', '.join(launch_kernel_args)});")
+
+        enable_kernel_profile = config.cpp.enable_kernel_profile and sys.platform in [
+            "linux",
+            "win32",
+        ]
+        if enable_kernel_profile:
+            normalized_kernel_name = re.sub(r"[^a-zA-Z0-9_]", "_", f"{kernel_var_name}")
+            prefix.writeline("{")
+            with prefix.indent():
+                prefix.writelines(
+                    [
+                        f"std::unordered_map<std::string, C10IValueHandle> kwargs_{normalized_kernel_name};",
+                        "",
+                    ]
+                )
+                record_launch_kernel_args = [
+                    ("grid_0", "grid_0"),
+                    ("grid_1", "grid_1"),
+                    ("grid_2", "grid_2"),
+                    ("num_warps", str(params["num_warps"])),
+                    ("shared_mem", str(params["shared_mem"])),
+                ]
+                for k, v in record_launch_kernel_args:
+                    arg_name = f"{normalized_kernel_name}_{k}"
+                    prefix.writelines(
+                        [
+                            f"// Create c10::IValue for {k}",
+                            f"C10IValueHandle tmp_{arg_name};",
+                            f"aoti_torch_int64_to_ivalue({v}, &tmp_{arg_name});",
+                            f"RAIIC10IValueHandle RAII_{arg_name}(tmp_{arg_name});",
+                            f'kwargs_{normalized_kernel_name}.emplace("{k}", RAII_{arg_name});',
+                        ]
+                    )
+
+                prefix.writelines(
+                    [
+                        "",
+                        (
+                            "torch::aot_inductor::RAIIAtenRecordFunctionHandle "
+                            f"record_{normalized_kernel_name}_"
+                            f'("{kernel_var_name}", reinterpret_cast<IValueMapHandle>(&kwargs_{normalized_kernel_name}));'
+                        ),
+                        "",
+                        f"launchKernel({', '.join(launch_kernel_args)});",
+                    ]
+                )
+            prefix.writeline("}")
+        else:
+            prefix.writeline(f"launchKernel({', '.join(launch_kernel_args)});")
 
 
 class CppWrapperGpu(CppWrapperCpu):

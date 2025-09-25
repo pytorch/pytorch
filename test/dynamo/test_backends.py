@@ -1,5 +1,4 @@
 # Owner(s): ["module: dynamo"]
-import sys
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -305,23 +304,15 @@ class TestCustomBackendAPI(torch._dynamo.test_case.TestCase):
         backends_group = "torch_dynamo_backends"
         name = "mycustombackend"
 
-        mock_3_9 = MagicMock()
-        mock_3_9.load.return_value = lambda: "mocked 3.9"
-        mock_3_9.name = name
-
         mock_3_10 = MagicMock()
         mock_3_10.load.return_value = lambda: "mocked 3.10"
 
         def mock_eps(group=None):
-            if sys.version_info < (3, 10):
-                return {backends_group: [mock_3_9]}
-            else:
-                assert group == backends_group, group
-                mock_group = MagicMock()
-                mock_group.names = [name]
-                mock_group[name] = mock_3_10
-                # mock_group[name].load.return_value = lambda: "mocked 3.10"
-                return mock_group
+            assert group == backends_group, group
+            mock_group = MagicMock()
+            mock_group.names = [name]
+            mock_group[name] = mock_3_10
+            return mock_group
 
         with patch("importlib.metadata.entry_points", mock_eps):
             from torch._dynamo.backends import registry
