@@ -7179,6 +7179,7 @@ class AOTInductorTestsTemplate:
         eager_outputs = model(*example_inputs)
         torch.testing.assert_close(eager_outputs, compiled_outputs)
 
+
 class AOTInductorLoggingTest(LoggingTestCase):
     @make_logging_test(dynamic=logging.DEBUG)
     def test_shape_env_reuse(self, records):

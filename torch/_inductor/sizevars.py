@@ -772,7 +772,7 @@ class SizeVarAllocator:
             expr = sympy.factor(new_expr)
             sub_cnt += 1
 
-        log.warning(f"Substitution limit ({sub_cnt_limit}) reached w/ {expr}")
+        log.warning("Substitution limit (%d) reached w/ %s", sub_cnt_limit, expr)
         return expr
 
     def atomically_apply_size_hint(
