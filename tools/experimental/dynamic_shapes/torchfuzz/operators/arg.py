@@ -14,8 +14,8 @@ class ArgOperator(Operator):
         """Arg can produce any type of output."""
         return True
 
-    def decompose(self, output_spec: Spec, num_inputs: int = 0) -> list[Spec]:
-        """Arg requires no inputs."""
+    def fuzz_inputs_specs(self, output_spec: Spec) -> list[Spec]:
+        """Arg requires no inputs for fuzzing."""
         return []
 
     def codegen(
