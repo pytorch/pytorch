@@ -832,7 +832,6 @@ _fuse_ddp_communication_passes: list[Union[Callable[..., None], str]] = [
 ]
 
 _micro_pipeline_tp: bool = False
-_micro_pipeline_tp_mm_rs_last_dim_enabled = True
 
 
 class _collective:
