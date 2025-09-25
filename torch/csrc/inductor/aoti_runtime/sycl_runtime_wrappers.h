@@ -47,7 +47,7 @@ static ze_module_handle_t _createModule(
     size_t szLog = 0;
     ZE_CHECK(zeModuleBuildLogGetString(buildLog, &szLog, nullptr));
     char* strLog = (char*)malloc(szLog);
-    TORCH_CHECK(strLog != nullptr, "Failed to allocate log buffer, size=", szLog);
+    TORCH_INTERNAL_ASSERT(strLog != nullptr, "Failed to allocate log buffer, size=", szLog);
     ZE_CHECK(zeModuleBuildLogGetString(buildLog, &szLog, strLog));
     std::cerr << "L0 build module failed. Log: " << strLog << std::endl;
     free(strLog);
