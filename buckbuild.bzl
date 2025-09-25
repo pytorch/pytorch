@@ -11,7 +11,7 @@ load("//tools/build_defs:glob_defs.bzl", "subdir_glob")
 load("//tools/build_defs:platform_defs.bzl", "APPLETVOS", "IOS", "MACOSX")
 load("//tools/build_defs:type_defs.bzl", "is_list", "is_string")
 load("//tools/build_defs/android:build_mode_defs.bzl", is_production_build_android = "is_production_build")
-load("//tools/build_defs/apple:build_mode_defs.bzl", is_production_build_ios = "is_production_build")
+load("//tools/build_defs/apple:build_mode_defs.bzl", is_production_build_ios = "is_production_build", is_profile_build_ios = "is_profile_build")
 load(
     ":build_variables.bzl",
     "aten_cpu_source_list",
@@ -74,7 +74,7 @@ def _is_build_mode_dev():
     if is_production_build_android():
         # Android Prod builds
         return False
-    if is_production_build_ios():
+    if is_production_build_ios() or is_profile_build_ios():
         # iOS Prod builds
         return False
 
@@ -156,7 +156,7 @@ ROOT = "//" if IS_OSS else "//xplat/caffe2"
 # for targets in subfolders
 ROOT_PATH = "//" if IS_OSS else "//xplat/caffe2/"
 
-C10 = "//c10:c10" if IS_OSS else "//xplat/caffe2/c10:c10"
+C10 = "//c10:c10" if IS_OSS else ("//xplat/caffe2/c10:c10_ovrsource" if is_arvr_mode() else "//xplat/caffe2/c10:c10")
 
 # a dictionary maps third party library name to fbsource and oss target
 THIRD_PARTY_LIBS = {
@@ -948,6 +948,7 @@ def define_buck_targets(
             [
                 ("torch/csrc/api/include", "torch/**/*.h"),
                 ("", "torch/csrc/**/*.h"),
+                ("", "torch/csrc/**/*.hpp"),
                 ("", "torch/nativert/**/*.h"),
                 ("", "torch/headeronly/**/*.h"),
                 ("", "torch/script.h"),
@@ -1997,7 +1998,21 @@ def define_buck_targets(
                     third_party("sleef_arm"),
                 ],
             }),
-            compiler_flags = get_aten_compiler_flags(),
+            compiler_flags = get_aten_compiler_flags() + select({
+                "DEFAULT": [],
+                "ovr_config//os:android-arm32": [
+                    "-mfpu=vfpv3-d16",
+                    "-march=armv7-a",
+                    "-mthumb",
+                    "-mfpu=neon",
+                ],
+                "ovr_config//os:android-x86_32": [
+                    "-mssse3",
+                ],
+                "ovr_config//os:android-x86_64": [
+                    "-mssse3",
+                ],
+            }),
             exported_preprocessor_flags = get_aten_preprocessor_flags(),
             exported_deps = [
                 ":aten_header",
@@ -2033,6 +2048,7 @@ def define_buck_targets(
                 ("", "caffe2/utils/*.h"),
                 ("", "caffe2/core/*.h"),
                 ("", "torch/csrc/*.h"),
+                ("", "torch/csrc/*.hpp"),
                 ("", "torch/csrc/api/include/torch/*.h"),
                 ("", "torch/csrc/autograd/*.h"),
                 ("", "torch/csrc/autograd/*/*.h"),
