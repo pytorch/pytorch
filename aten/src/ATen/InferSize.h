@@ -54,7 +54,7 @@ inline void infer_size_impl(
       if (v and *v == 0) {
         // Avoid div by 0 when sym_eq(numel % newsize, 0) is constructed!
         // which may happen when newsize is not a symbol! if its a symbol
-        // division wont happen anyway during compile.
+        // division won't happen anyway during compile.
         TORCH_MAYBE_SYM_CHECK(
             numel == newsize,
             "shape '",
