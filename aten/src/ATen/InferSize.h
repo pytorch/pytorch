@@ -64,7 +64,23 @@ inline void infer_size_impl(
     return;
   };
 
-  if (infer_dim && newsize > 0 && numel % newsize == 0) {
+  if (infer_dim) {
+    // numel is the product of known sizes it has to be divisible by newsize.
+    if constexpr (std::is_same_v<NumelType, c10::SymInt>) {
+      TORCH_MAYBE_SYM_CHECK(
+          sym_gt(numel, newsize).sym_and(sym_eq(numel % newsize, 0)),
+          "shape '",
+          shape,
+          "' is invalid for input");
+    } else {
+      TORCH_CHECK(
+          numel > 0 && numel % newsize == 0,
+          "shape '",
+          shape,
+          "' is invalid for input of size ",
+          numel);
+    }
+
     set_infer_dim();
     return;
   }
