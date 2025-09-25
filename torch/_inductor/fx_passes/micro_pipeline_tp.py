@@ -376,16 +376,22 @@ class _Matmul:
     B_node: torch.fx.Node
     pre_mm_reshape: Optional[torch.fx.Node]
     post_mm_reshape: Optional[torch.fx.Node]
+    pre_mm_B_transpose: Optional[torch.fx.Node]
 
     def __post_init__(self):
-        assert len(self.nodes) in (1, 3)
+        assert len(self.nodes) in (1, 2, 3)
         if len(self.nodes) == 1:
             assert self.nodes[0].target in (aten.mm.default, aten._scaled_mm.default)
+            self.arg_ancestor_nodes = _find_ancestors(self.B_node)
+        elif len(self.nodes) == 2:
+            assert self.nodes[0].target == aten.permute.default
+            assert self.nodes[1].target in (aten.mm.default, aten._scaled_mm.default)
+            self.arg_ancestor_nodes = _find_ancestors(self.A_node)
         else:
             assert self.nodes[0].target == aten.reshape.default
             assert self.nodes[1].target in (aten.mm.default, aten._scaled_mm.default)
             assert self.nodes[2].target == aten.reshape.default
-        self.arg_ancestor_nodes = _find_ancestors(self.B_node)
+            self.arg_ancestor_nodes = _find_ancestors(self.B_node)
 
     def replace_with(self, new_node: torch.fx.Node) -> None:
         """
@@ -401,6 +407,15 @@ class _Matmul:
             graph.erase_node(mm_node)
             return
 
+        if len(self.nodes) == 2:
+            permute_node = self.nodes[0]
+            mm_node = self.nodes[1]
+            assert mm_node.target in (aten.mm.default, aten._scaled_mm.default)
+            mm_node.replace_all_uses_with(new_node)
+            graph.erase_node(mm_node)
+            if len(permute_node.users) == 0:
+                graph.erase_node(permute_node)
+            return
         # An ND-matmul is reshape -> mm -> reshape sequence. We first replace
         # the second reshape node with `new_node`. Then, we ensure that the
         # original mm node in the sequence ends up with zero users by replacing
@@ -443,6 +458,7 @@ class _Matmul:
             # TODO: explore unifying the _Matmul and _ScaledMatmul approaches to handling reshapes.
             pre_mm_reshape=None,
             post_mm_reshape=None,
+            pre_mm_B_transpose=None,
         )
 
 
@@ -499,6 +515,7 @@ class _ScaledMatmul(_Matmul):
             use_fast_accum=get_arg(mm_node, 7, False),
             pre_mm_reshape=pre_mm_reshape,
             post_mm_reshape=post_mm_reshape,
+            pre_mm_B_transpose=None,
         )
 
 
@@ -550,6 +567,24 @@ def _find_reshape_mm_reshape(node: torch.fx.Node) -> list[_Matmul]:
     return matmuls
 
 
+def _find_permute_mm(permute_node: torch.fx.Node) -> list[_Matmul]:
+    for mm_node in permute_node.users:
+        if mm_node.target != aten.mm.default:
+            continue
+        if permute_node == mm_node.args[1]:
+            return [
+                _Matmul(
+                    nodes=[permute_node, mm_node],
+                    A_node=cast("torch.fx.Node", mm_node.args[0]),
+                    B_node=cast("torch.fx.Node", mm_node.args[1]),
+                    pre_mm_reshape=None,
+                    post_mm_reshape=None,
+                    pre_mm_B_transpose=permute_node,
+                )
+            ]
+    return []
+
+
 def _find_consumer_matmuls(node: torch.fx.Node) -> list[_Matmul]:
     """
     Find the matmuls that use `node` as the lhs argument.
@@ -566,6 +601,22 @@ def _find_consumer_matmuls(node: torch.fx.Node) -> list[_Matmul]:
         elif user.target == aten._scaled_mm.default:
             matmul = _ScaledMatmul.from_match([user])
             matmuls.append(matmul)
+        elif (
+            config._micro_pipeline_tp_ag_transpose_mm_enabled
+            and user.target == aten.permute.default
+            and (user.args[1] == [1, 0] or user.args[1] == [0, 1])
+        ):
+            permute_matmuls = _find_permute_mm(user)
+            if permute_matmuls:
+                if not matmuls:
+                    matmuls.extend(permute_matmuls)
+                else:
+                    has_pre_mm_B_transpose = any(
+                        matmul.pre_mm_B_transpose is not None for matmul in matmuls
+                    )
+                    if not has_pre_mm_B_transpose:
+                        matmuls.extend(permute_matmuls)
+
     return matmuls
 
 
@@ -603,6 +654,55 @@ def _insert_fused_all_gather_matmul(
                 [matmul.use_fast_accum for matmul in scaled_matmuls],
             ),
         )
+    else:
+        raise AssertionError(f"Unexpected matmul match type: {mm_type}")
+
+
+def graph_call_function_transpose(graph, n):
+    return graph.call_function(
+        torch.ops.aten.permute.default,
+        args=(n, [1, 0]),
+    )
+
+
+def graph_call_function_contiguous(graph, n):
+    return graph.call_function(
+        torch.ops.aten.clone.default,
+        args=(n,),
+        kwargs={"memory_format": torch.contiguous_format},
+    )
+
+
+# mat_B = ag(shard)
+# mat_B_t = mat_B.t()
+# return mm(mat_A, mat_B_t)
+# ->
+# mat_A_t = mat_A.t()
+# mat_B = ag(shard)
+# res_mm_t = mm(mat_B, mat_A_t)
+# return res_mm_t.t()
+def _insert_fused_all_gather_transpose_matmul(
+    graph: torch.fx.Graph,
+    matmuls: list[_Matmul],
+    shard_node: torch.fx.Node,
+    gather_dim: int,
+    group_name: str,
+) -> torch.fx.Node:
+    mm_types = OrderedSet(map(type, matmuls))
+    assert len(mm_types) == 1
+    mm_type = next(iter(mm_types))
+    if mm_type == _Matmul:
+        B_nodes = [
+            graph_call_function_transpose(graph, matmul.A_node) for matmul in matmuls
+        ]
+
+        res_fused_mm = graph.call_function(
+            torch.ops.symm_mem.fused_all_gather_matmul.default,
+            args=(shard_node, B_nodes, gather_dim, group_name),
+            kwargs={"return_A": True},
+        )
+
+        return res_fused_mm
     else:
         raise AssertionError(f"Unexpected matmul match type: {mm_type}")
 
@@ -676,45 +776,101 @@ def fuse_all_gather_matmul(all_gather: _AllGatherMatch) -> None:
     # Fuse the all_gather_tensor with the eligible matmuls
     graph = ag_node.graph
     with graph.inserting_before(ag_node):
-        if "val" in shard_node.meta:
-            restrided = restride_A_shard_for_fused_all_gather_matmul(
-                _get_tensor(shard_node),
-                gather_dim,
-            )
-            shard_node = graph.call_function(
-                inductor_prims.force_stride_order,
-                args=(shard_node, restrided.stride()),
-            )
+        if matmuls[0].pre_mm_B_transpose is not None:
+            if gather_dim != 0:
+                # Not supported yet
+                return
 
-        fused_node = _insert_fused_all_gather_matmul(
-            graph, matmuls, shard_node, gather_dim, group_name
-        )
-        new_ag_node = graph.call_function(
-            operator.getitem,
-            args=(fused_node, 0),
-        )
-        new_out_nodes = graph.call_function(
-            operator.getitem,
-            args=(fused_node, 1),
-        )
-        for idx, matmul in enumerate(matmuls):
-            new_out_node = graph.call_function(
+            if "val" in shard_node.meta:
+                restrided = restride_A_shard_for_fused_all_gather_matmul(
+                    _get_tensor(shard_node),
+                    gather_dim,
+                )
+                shard_node = graph.call_function(
+                    inductor_prims.force_stride_order,
+                    args=(shard_node, restrided.stride()),
+                )
+
+            fused_node = _insert_fused_all_gather_transpose_matmul(
+                graph, matmuls, shard_node, gather_dim, group_name
+            )
+            new_ag_node = graph.call_function(
                 operator.getitem,
-                args=(new_out_nodes, idx),
+                args=(fused_node, 0),
             )
-            matmul.replace_with(new_out_node)
-            matmul.erase()
-        all_gather.replace_with(new_ag_node)
-        all_gather.erase()
+            fused_out_1 = graph.call_function(
+                operator.getitem,
+                args=(fused_node, 1),
+            )
+            new_out_nodes = [
+                graph.call_function(operator.getitem, args=(fused_out_1, i))
+                for i in range(len(matmuls))
+            ]
+            new_out_nodes = [
+                graph_call_function_transpose(graph, out_node_t)
+                for out_node_t in new_out_nodes
+            ]
+            # Restride the inputs before fused that result will be contiguous (or pre pass stridenss)
+            new_out_nodes = [
+                graph_call_function_contiguous(graph, out_node)
+                for out_node in new_out_nodes
+            ]
+            for matmul, new_out_node in zip(matmuls, new_out_nodes):
+                matmul.replace_with(new_out_node)
+                matmul.erase()
 
-        # If the new_ag_node has no users, we tell the fused op to not return
-        # it. This creates more optimization opportunities.
-        if len(new_ag_node.users) == 0:
-            graph.erase_node(new_ag_node)
-            kwargs = dict(fused_node.kwargs)
-            if "return_A" in kwargs:
-                kwargs["return_A"] = False
-                fused_node.kwargs = kwargs
+            all_gather.replace_with(new_ag_node)
+            all_gather.erase()
+
+            # If the new_ag_node has no users, we tell the fused op to not return
+            # it. This creates more optimization opportunities.
+            if len(new_ag_node.users) == 0:
+                graph.erase_node(new_ag_node)
+                kwargs = dict(fused_node.kwargs)
+                if "return_A" in kwargs:
+                    kwargs["return_A"] = False
+                    fused_node.kwargs = kwargs
+        else:
+            if "val" in shard_node.meta:
+                restrided = restride_A_shard_for_fused_all_gather_matmul(
+                    _get_tensor(shard_node),
+                    gather_dim,
+                )
+                shard_node = graph.call_function(
+                    inductor_prims.force_stride_order,
+                    args=(shard_node, restrided.stride()),
+                )
+            fused_node = _insert_fused_all_gather_matmul(
+                graph, matmuls, shard_node, gather_dim, group_name
+            )
+            new_ag_node = graph.call_function(
+                operator.getitem,
+                args=(fused_node, 0),
+            )
+            new_out_nodes_node = graph.call_function(
+                operator.getitem,
+                args=(fused_node, 1),
+            )
+
+            for idx, matmul in enumerate(matmuls):
+                new_out_node = graph.call_function(
+                    operator.getitem,
+                    args=(new_out_nodes_node, idx),
+                )
+                matmul.replace_with(new_out_node)
+                matmul.erase()
+
+            all_gather.replace_with(new_ag_node)
+            all_gather.erase()
+
+            # If the new_ag_node has no users, we tell the fused op to not return
+            # it. This creates more optimization opportunities.
+            if len(new_ag_node.users) == 0:
+                graph.erase_node(new_ag_node)
+                kwargs = dict(fused_node.kwargs)
+                if "return_A" in kwargs:
+                    kwargs["return_A"] = False
+                    fused_node.kwargs = kwargs
 
     # Raise ancestors of non-A args that are topologically ordered between
     # ag_res_node and the matmul above fused_node.

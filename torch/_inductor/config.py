@@ -837,6 +837,7 @@ _micro_pipeline_tp_mm_rs_last_dim_enabled = True
 # requiring additional reduction. Needs investigation on additional conditions,
 # when pipelining wins will outweigh decomposition cost.
 _micro_pipeline_tp_ag_mm_last_dim_enabled = False
+_micro_pipeline_tp_ag_transpose_mm_enabled: bool = True
 
 
 class _collective:

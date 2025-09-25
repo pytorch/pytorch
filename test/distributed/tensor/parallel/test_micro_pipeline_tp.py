@@ -243,6 +243,50 @@ class MicroPipelineTPTest(TestCase):
             self.assertNotIn("all_gather_into_tensor", code)
             self.assertEqual("return_A=True" in code, return_A)
 
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @parametrize("A_dims", [2, 3])
+    @parametrize("gather_dim", [0])
+    @parametrize("return_A", [True, False])
+    @fresh_cache()
+    @torch._inductor.config.patch({"_micro_pipeline_tp_ag_transpose_mm_enabled": True})
+    @torch._inductor.config.patch({"_micro_pipeline_tp_ag_mm_last_dim_enabled": True})
+    def test_fuse_all_gather_transpose_B_matmul(self, A_dims, gather_dim, return_A):
+        if gather_dim >= A_dims:
+            return
+
+        group = dist.group.WORLD
+
+        def func(A: torch.Tensor, B_shard: torch.Tensor) -> torch.Tensor:
+            B = all_gather_tensor(B_shard, gather_dim=gather_dim, group=group)
+            B = B.t()
+            if return_A:
+                return B, A @ B
+            else:
+                return None, A @ B
+
+        if A_dims == 2:
+            A_shape = [64, 32]
+        elif A_dims == 3:
+            A_shape = [2, 64, 32]
+        else:
+            raise AssertionError(f"Invalid A_dims: {A_dims}")
+        B_shard_shape = [16, 32]
+        B_shard_shape[gather_dim] //= self.world_size
+        B_shard = torch.rand(*B_shard_shape, device="cuda")
+        A = torch.rand(*A_shape, device="cuda")
+
+        with _test_mode():
+            compiled = torch.compile(func)
+            code = run_and_get_triton_code(compiled, A, B_shard)
+
+            eager_stride = func(A, B_shard)[1].stride()
+            compiled_stride = compiled(A, B_shard)[1].stride()
+            self.assertEqual(eager_stride, compiled_stride)
+
+        self.assertIn("fused_all_gather_matmul", code)
+        self.assertNotIn("all_gather_into_tensor", code)
+        self.assertEqual("return_A=True" in code, return_A)
+
     @runOnRocmArch(MI300_ARCH)
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @parametrize("A_dims", [2, 3])
