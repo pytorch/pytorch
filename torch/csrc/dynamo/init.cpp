@@ -273,7 +273,7 @@ static PyMethodDef VariableTrackerMetaMethods[] = {
     {"__instancecheck__", (PyCFunction)_fast_isinstance_check, METH_O, nullptr},
     {"get_all_subclasses",
      (PyCFunction)_get_all_subclasses,
-     METH_NOARGS | METH_CLASS ,
+     METH_NOARGS | METH_CLASS,
      nullptr},
     {nullptr}, // sentinel
 };
