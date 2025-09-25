@@ -68,7 +68,7 @@ class StridedShard : public Shard {
       return operator==(*rhs_strided);
     }
     // TODO: this is to avoid extra all-gather in dtensor op dispatch
-    // note that sharding prop wouldnot produce _StridedShard and a
+    // note that sharding prop would not produce _StridedShard and a
     // placement inequality would introduce an all-gather for resharding
     return dim == rhs.dim;
   }
