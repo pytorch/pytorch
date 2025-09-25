@@ -15,6 +15,7 @@ from torch.distributed.tensor.placement_types import (
     Replicate,
     Shard,
 )
+from torch.utils._typing_utils import not_none
 
 
 def _explicit_order_placements(
@@ -182,7 +183,7 @@ def _compute_local_shape_and_global_offset(
                 # As we successively shard the same dimension, we keep
                 # advancing our pointer beyond our original offset until we
                 # get to the final chunk start.
-                global_offset[shard_dim] + shard_offset,
+                global_offset[shard_dim] + not_none(shard_offset),
             )
 
     # NOTE: the offset compute relies on the local shard index and it has no
