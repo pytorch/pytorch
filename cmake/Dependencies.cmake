@@ -1134,7 +1134,7 @@ if(USE_CUDA AND CUDA_VERSION VERSION_LESS 13.0)
   include_directories(SYSTEM ${CUB_INCLUDE_DIRS})
 endif()
 
-if(USE_TENSORPIPE)
+if(USE_DISTRIBUTED AND USE_TENSORPIPE)
   if(MSVC)
     message(WARNING "Tensorpipe cannot be used on Windows.")
   else()

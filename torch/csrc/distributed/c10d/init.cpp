@@ -46,7 +46,6 @@
 #include <fmt/format.h>
 #include <pybind11/chrono.h>
 #include <torch/csrc/distributed/c10d/PrefixStore.hpp>
-
 #include <torch/csrc/distributed/c10d/symm_mem/DMAConnectivity.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
 
