@@ -577,6 +577,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         min_block_size_k = 32 if (has_int8_tensor or self.has_int8_tensor) else 16
 
         scaled_configs = []
+        print("scaled_mm", m, n, k, config.multi_kernel_hints)
         for hint_override in [None] + config.multi_kernel_hints:
             m_hint = max(
                 next_power_of_2(

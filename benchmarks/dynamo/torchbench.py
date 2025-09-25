@@ -22,6 +22,10 @@ from torch._dynamo.testing import collect_results, reduce_to_scalar_loss
 from torch._dynamo.utils import clone_inputs
 
 
+BATCH_SIZES = [2, 8, 32]
+SEQ_LENS = [256, 1024, 2048]
+
+
 # We are primarily interested in tf32 datatype
 torch.backends.cuda.matmul.allow_tf32 = True
 
@@ -305,37 +309,50 @@ class TorchBenchmarkRunner(BenchmarkRunner):
             self.args.amp = True
             self.setup_amp()
 
-        if model_name == "vision_maskrcnn" and is_training:
-            # Output of vision_maskrcnn model is a list of bounding boxes,
-            # sorted on the basis of their scores. This makes accuracy
-            # comparison hard with torch.compile. torch.compile can cause minor
-            # divergences in the output because of how fusion works for amp in
-            # TorchInductor compared to eager.  Therefore, instead of looking at
-            # all the bounding boxes, we compare only top 4.
-            model_kwargs = {"box_detections_per_img": 4}
-            benchmark = benchmark_cls(
-                test="train",
-                device=device,
-                batch_size=batch_size,
-                extra_args=extra_args,
-                model_kwargs=model_kwargs,
-            )
-            use_eval_mode = True
-        elif is_training:
-            benchmark = benchmark_cls(
-                test="train",
-                device=device,
-                batch_size=batch_size,
-                extra_args=extra_args,
-            )
-        else:
-            benchmark = benchmark_cls(
-                test="eval",
-                device=device,
-                batch_size=batch_size,
-                extra_args=extra_args,
-            )
-        model, example_inputs = benchmark.get_module()
+        sizes = []
+        all_example_inputs = []
+        
+        model = None
+        for bs in BATCH_SIZES:
+            for sl in SEQ_LENS:
+                sizes.append((bs, sl))
+                extra_args += ['--seq_len', str(sl)]
+
+                if model_name == "vision_maskrcnn" and is_training:
+                    # Output of vision_maskrcnn model is a list of bounding boxes,
+                    # sorted on the basis of their scores. This makes accuracy
+                    # comparison hard with torch.compile. torch.compile can cause minor
+                    # divergences in the output because of how fusion works for amp in
+                    # TorchInductor compared to eager.  Therefore, instead of looking at
+                    # all the bounding boxes, we compare only top 4.
+                    model_kwargs = {"box_detections_per_img": 4}
+                    benchmark = benchmark_cls(
+                        test="train",
+                        device=device,
+                        batch_size=bs,
+                        extra_args=extra_args,
+                        model_kwargs=model_kwargs,
+                    )
+                    use_eval_mode = True
+                elif is_training:
+                    benchmark = benchmark_cls(
+                        test="train",
+                        device=device,
+                        batch_size=bs,
+                        extra_args=extra_args,
+                    )
+                else:
+                    benchmark = benchmark_cls(
+                        test="eval",
+                        device=device,
+                        batch_size=bs,
+                        extra_args=extra_args,
+                    )
+                _model, example_inputs = benchmark.get_module()
+                if model is None:
+                    model = _model
+                all_example_inputs.append(example_inputs)
+
         if model_name in [
             "basic_gnn_edgecnn",
             "basic_gnn_gcn",
@@ -398,8 +415,8 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         if model_name == "hf_T5_generate":
             model.model.config.use_cache = False
 
-        self.validate_model(model, example_inputs)
-        return device, benchmark.name, model, example_inputs, batch_size
+        self.validate_model(model, all_example_inputs[0])
+        return device, benchmark.name, model, all_example_inputs, sizes
 
     def iter_model_names(self, args):
         from torchbenchmark import _list_canary_model_paths, _list_model_paths
