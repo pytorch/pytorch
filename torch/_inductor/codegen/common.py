@@ -291,12 +291,6 @@ class SizeArg:
 
 
 @dataclasses.dataclass
-class ScalarArg:
-    name: str
-    dtype: torch.dtype
-
-
-@dataclasses.dataclass
 class ConstexprArg:
     name: str
 
@@ -317,14 +311,7 @@ class DeviceCodegen:
     fx_wrapper_codegen: Optional[WrapperConstructor] = None
 
 
-KernelArgType = Union[
-    WorkspaceArg,
-    TensorArg,
-    SizeArg,
-    ScalarArg,
-    TMADescriptorArg,
-    ConstexprArg,
-]
+KernelArgType = Union[WorkspaceArg, TensorArg, SizeArg, TMADescriptorArg, ConstexprArg]
 
 device_codegens: dict[str, DeviceCodegen] = {}
 
@@ -1480,7 +1467,6 @@ class KernelArgs:
         self.output_buffers: dict[str, Union[str, RemovedArg]] = {}
         self.inplace_buffers: dict[str, Union[InplacedBuffer, RemovedArg]] = {}
         self.sizevars: dict[sympy.Expr, str] = {}
-        self.scalar_vars: dict[sympy.Symbol, tuple[str, torch.dtype]] = {}
         self.workspace_args: list[WorkspaceArg] = []
 
     def __repr__(self) -> str:
@@ -1493,7 +1479,6 @@ class KernelArgs:
                         self.output_buffers,
                         self.inplace_buffers,
                         self.sizevars,
-                        self.scalar_vars,
                     ],
                 )
             )
@@ -1641,27 +1626,9 @@ class KernelArgs:
             return "seed"
         return self._lookup("ks", self.sizevars, name)
 
-    def scalar(self, name: sympy.Symbol, dtype: torch.dtype) -> str:
-        assert isinstance(name, sympy.Symbol), (type(name), name)
-        if name in self.scalar_vars:
-            inner, existing_dtype = self.scalar_vars[name]
-            if existing_dtype != dtype:
-                try:
-                    promoted = torch.promote_types(existing_dtype, dtype)
-                except TypeError:
-                    promoted = dtype
-                self.scalar_vars[name] = (inner, promoted)
-            return self.scalar_vars[name][0]
-        inner = f"kscalar{len(self.scalar_vars)}"
-        self.scalar_vars[name] = (inner, dtype)
-        return inner
-
     def call_names(self) -> Iterator[str]:
         return chain(
-            self.input_buffers.keys(),
-            self.output_buffers.keys(),
-            self.sizevars.keys(),
-            self.scalar_vars.keys(),
+            self.input_buffers.keys(), self.output_buffers.keys(), self.sizevars.keys()
         )
 
     def arg_name(self, name: str) -> Optional[str]:
@@ -1681,9 +1648,6 @@ class KernelArgs:
 
     def wrap_size_arg(self, size: SymbolLike) -> str:
         return str(size)
-
-    def wrap_scalar_arg(self, scalar: sympy.Symbol) -> str:
-        return str(scalar)
 
     def cpp_argdefs(
         self, dtype_to_cpp_type: Optional[dict[torch.dtype, str]] = None
@@ -1730,11 +1694,6 @@ class KernelArgs:
             arg_types.append(f"const {INDEX_TYPE}")
             if V.graph.wrapper_code:
                 V.graph.wrapper_code.ensure_size_computed(outer)
-        for outer, (inner, dtype) in self.scalar_vars.items():
-            cpp_dtype = dtype_to_cpp_type[dtype]
-            arg_defs.append(f"const {cpp_dtype} {inner}")
-            call_args.append(self.wrap_scalar_arg(outer))
-            arg_types.append(f"const {cpp_dtype}")
         assert not self.workspace_args, "Workspace not supported on CPU "
         return arg_defs, call_args, arg_types
 
@@ -1780,11 +1739,6 @@ class KernelArgs:
             precompile_args.append(SizeArg(inner, outer))
             if V.graph.wrapper_code:
                 V.graph.wrapper_code.ensure_size_computed(outer)
-        for outer, (inner, dtype) in self.scalar_vars.items():
-            arg_defs.append(ArgName(inner))
-            call_args.append(self.wrap_scalar_arg(outer))
-            arg_types.append(dtype)
-            precompile_args.append(ScalarArg(inner, dtype))
         for arg in self.workspace_args:
             arg_defs.append(ArgName(arg.inner_name))
             call_args.append(arg.outer_name)
@@ -2339,10 +2293,6 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
                 ),
             )
         }
-        for x in sorted_symbols:
-            if symbol_is_type(x, (SymT.FLOAT, SymT.UNBACKED_FLOAT)):
-                dtype = V.graph.get_dynamic_scalar_dtype(x)
-                replacements[x] = self.args.scalar(x, dtype)
         return sympy_subs(index, replacements)
 
     def create_cse_var(self, *args: Any, **kwargs: Any) -> CSEVariable:
