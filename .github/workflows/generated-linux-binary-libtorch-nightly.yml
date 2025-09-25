@@ -333,6 +333,7 @@ jobs:
       LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-with-deps
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      timeout-minutes: 300
       build_name: libtorch-rocm6_3-shared-with-deps-release
       build_environment: linux-binary-libtorch
     secrets:
@@ -447,6 +448,7 @@ jobs:
       LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-with-deps
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      timeout-minutes: 300
       build_name: libtorch-rocm6_4-shared-with-deps-release
       build_environment: linux-binary-libtorch
     secrets:
