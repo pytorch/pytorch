@@ -2954,30 +2954,31 @@ def _persistent_reduction_configs(
     if "y" in size_hints:
         pass
     # TODO(jansel): we should be able to improve these heuristics
-    elif reduction_hint == ReductionHint.INNER:
-        if rnumel > 1024:
-            configs = configs[:1]
-        else:
-            x_block = 8
-            if xnumel // x_block < 128 or (loads_and_stores >= 5 and rnumel >= 256):
-                # If loads/stores greater than 5, a lot of register pressure
-                # rnumel < 256 means no vectorized loads if we split up r dim
-                # so xblock still needs to be larger
-                x_block = 1
+    elif not max_autotune_enabled:  # Do not filter configs when tuning
+        if reduction_hint == ReductionHint.INNER:
+            if rnumel > 1024:
+                configs = configs[:1]
+            else:
+                x_block = 8
+                if xnumel // x_block < 128 or (loads_and_stores >= 5 and rnumel >= 256):
+                    # If loads/stores greater than 5, a lot of register pressure
+                    # rnumel < 256 means no vectorized loads if we split up r dim
+                    # so xblock still needs to be larger
+                    x_block = 1
 
-            configs = [
-                triton_config_reduction(
-                    size_hints,
-                    x_block,
-                    rnumel,
-                    register_intensive=True,
-                )
-            ]
+                configs = [
+                    triton_config_reduction(
+                        size_hints,
+                        x_block,
+                        rnumel,
+                        register_intensive=True,
+                    )
+                ]
 
-    elif reduction_hint == ReductionHint.OUTER:
-        configs = configs[-1:]
-    elif reduction_hint == ReductionHint.OUTER_TINY:
-        configs = tiny_configs
+        elif reduction_hint == ReductionHint.OUTER:
+            configs = configs[-1:]
+        elif reduction_hint == ReductionHint.OUTER_TINY:
+            configs = tiny_configs
     for c in configs:
         # we don't need Rn_BLOCK for persistent reduction
         for prefix in size_hints:
