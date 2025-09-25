@@ -2735,6 +2735,24 @@
   ],
   "GB0272": [
     {
+      "Gb_type": "Failed to make weakref to User Object",
+      "Context": "user_objected: {obj}",
+      "Explanation": "Object does not allow us to make a weakref to it",
+      "Hints": []
+    }
+  ],
+  "GB0273": [
+    {
+      "Gb_type": "Keyword args passed to exception constructor",
+      "Context": "{self} with kwargs {init_kwargs}",
+      "Explanation": "Dynamo does not know how to handle keyword args passed to an exception constructor",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB0274": [
+    {
       "Gb_type": "Attempted to reconstruct context manager's __enter__ method",
       "Context": "str(self.ctx)",
       "Explanation": "Attempted to reconstruct context manager {type_str} while tracing `with ...:`",

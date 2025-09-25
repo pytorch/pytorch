@@ -346,7 +346,7 @@ def _get_raw_tensor_bytes(value: torch.Tensor) -> bytes:
     if _is_fake_tensor(value):
         value_bytes = b""
     elif value.data_ptr():
-        cpu_tensor = value.cpu().contiguous()
+        cpu_tensor = value.cpu()
         value_untyped_storage = cpu_tensor.untyped_storage()
         # we store the raw bytes the untyped storage. Tensor metadata is stored separately
         value_bytes = bytes(
