@@ -366,7 +366,7 @@ Tensor binary_cross_entropy_with_logits(const Tensor& input, const Tensor& targe
       log_sigmoid_input.mul_(log_weight);
   }
   Tensor loss = (1 - target).mul_(input_clamped).sub_(log_sigmoid_input);
-  
+
   if (weight_opt.has_value() && weight_opt->defined()) {
       loss.mul_(*weight_opt);
   }
