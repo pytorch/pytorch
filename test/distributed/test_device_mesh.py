@@ -863,7 +863,7 @@ class TestDeviceMeshGetItem(DTensorTestBase):
 
         # Test flatten into an existing mesh_dim_name inside the mesh
         with self.assertRaisesRegex(
-            RuntimeError,
+            ValueError,
             "already exists for submesh of the DeviceMesh",
         ):
             mesh_3d._flatten("dp")
@@ -902,6 +902,18 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         cp_tp_mesh = mesh_3d["cp", "tp"]
         cp_tp_mesh._flatten("dummy")
         self.assertEqual(mesh_3d["dummy"].mesh_dim_names[0], "dummy")
+
+        # Test flatten into an existing mesh_dim_name inside the mesh
+        with self.assertRaisesRegex(
+            ValueError,
+            "dp already exists for submesh of the DeviceMesh",
+        ):
+            mesh_3d._flatten("dp")
+        with self.assertRaisesRegex(
+            ValueError,
+            "Flatten mesh with mesh_dim_name dp_tp has been created before",
+        ):
+            mesh_3d["cp", "tp"]._flatten("dp_tp")
 
     @with_comms(eager_init=True)
     def test_flatten_mesh_4d(self):
