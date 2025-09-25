@@ -28,8 +28,12 @@ FrameLocalsMapping::FrameLocalsMapping(FrameLocalsFrameType* frame)
   PyCodeObject* co = F_CODE(frame);
   _framelocals.resize(co->co_nlocalsplus, nullptr);
 
-#if IS_PYTHON_3_14_PLUS
-  TORCH_CHECK(false, "Python 3.14+ not supported");
+#if IS_PYTHON_3_15_PLUS
+  TORCH_CHECK(false, "Python 3.15+ not supported");
+#elif IS_PYTHON_3_14_PLUS
+  if (!frame->stackpointer) {
+    return;
+  }
 #else
   if (!frame->stacktop) {
     return;
@@ -59,8 +63,12 @@ FrameLocalsMapping::FrameLocalsMapping(FrameLocalsFrameType* frame)
   };
 
   auto offset = co->co_nlocalsplus - co->co_nfreevars;
-#if IS_PYTHON_3_14_PLUS
-  TORCH_CHECK(false, "Python 3.14+ not supported");
+#if IS_PYTHON_3_15_PLUS
+  TORCH_CHECK(false, "Python 3.15+ not supported");
+#elif IS_PYTHON_3_14_PLUS
+  for (int i = 0; i < offset; i++) {
+    update_framelocals(i, PyStackRef_AsPyObjectBorrow(frame->localsplus[i]));
+  }
 #else
   for (int i = 0; i < offset; i++) {
     update_framelocals(i, frame->localsplus[i]);
@@ -68,11 +76,11 @@ FrameLocalsMapping::FrameLocalsMapping(FrameLocalsFrameType* frame)
 #endif
 
   // Get references to closure variables
-#if IS_PYTHON_3_14_PLUS
+#if IS_PYTHON_3_15_PLUS
   PyObject* closure;
-  TORCH_CHECK(false, "Python 3.14+ not supported");
+  TORCH_CHECK(false, "Python 3.15+ not supported");
 #else
-  PyObject* closure = ((PyFunctionObject*)FUNC(frame))->func_closure;
+  PyObject* closure = FUNC(frame)->func_closure;
 #endif
   for (int i = 0; i < co->co_nfreevars; i++) {
     update_framelocals(offset + i, PyTuple_GET_ITEM(closure, i));
