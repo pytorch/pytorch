@@ -1048,9 +1048,6 @@ def fuse_matmul_reduce_scatter(reduce_scatter: _ReduceScatterMatch) -> None:
 
     filter_matmul = None
     if orig_scatter_dim == _get_tensor(input_node).ndim - 1:
-        if not config._micro_pipeline_tp_mm_rs_last_dim_enabled:
-            return
-
         # scaled_mm is not supported yet for last dim mm+rs
         def _filter_out_scaled_matmul(matmul: _Matmul):
             return not isinstance(matmul, _ScaledMatmul)
