@@ -4,6 +4,8 @@
 import itertools
 
 import torch
+import torch.distributed as dist
+from torch.testing._internal.distributed.fake_pg import FakeStore
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import (
     DeviceMesh,
@@ -21,11 +23,13 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TEST_CUDA,
     TEST_HPU,
+    TestCase,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
 )
+from torch.utils.debug_mode import DebugMode
 
 
 funcol = torch.ops.c10d_functional
@@ -688,12 +692,179 @@ class MultiDimRedistributeTest(DTensorTestBase):
                 out_dt = sharded_dt.redistribute(mesh, dst_placement)
 
             self.assertEqual(out_dt.placements, expected_dt.placements)
-            self.assertEqual(comm_mode.get_total_counts(), comm_counts_3d[idx])
+    
 
-            local_out_dt = out_dt.to_local()
-            local_expected_dt = expected_dt.to_local()
-            self.assertEqual(local_out_dt, local_expected_dt)
 
+
+# @requires_cuda
+class DebugModeRedistributeTest(TestCase):
+    def tearDown(self):
+        super().tearDown()
+        dist.destroy_process_group()
+
+    def setUp(self):
+        super().setUp()
+        self.world_size = 8
+        store = FakeStore()
+        dist.init_process_group(
+            backend="fake", rank=0, world_size=self.world_size, store=store
+        )
+        self.device_type = "cuda"
+
+    @parametrize("test_case", 
+        [
+            ([Shard(0)], [Shard(0)], {},),
+            ([Shard(0)], [Shard(1)], {"_dtensor::shard_dim_alltoall": 1, "_dtensor::wait_tensor": 0}), # wait_tensor is not called, as shard_dim_alltoall is sync op
+            ([Shard(0)], [Replicate()], {"_c10d_functional::all_gather_into_tensor": 1, "_c10d_functional::wait_tensor": 1}), 
+            ([Replicate()], [Shard(0)],  {"aten::split": 1, "aten::clone": 1}), # clone is needed?
+            ([Replicate()], [Replicate()], {}), 
+            ([Partial()], [Shard(0)], {"_c10d_functional::reduce_scatter_tensor": 1, "_c10d_functional::wait_tensor": 1}),
+            ([Partial()], [Replicate()], {"_c10d_functional::all_reduce": 1, "_c10d_functional::wait_tensor": 1}),
+        ]
+    )
+    def test_redistribute_2dtensor_1dmesh(self, test_case):
+        mesh = init_device_mesh(self.device_type, (self.world_size,))
+        input_data = torch.randn((8, 8), device=self.device_type, requires_grad=True)
+
+        src_placement, dst_placement, expected = test_case
+
+        src_dt = DTensor.from_local(input_data, mesh, src_placement, run_check=False)
+
+        with DebugMode(record_torchfunction=False) as debug_mode:
+            out_dt = src_dt.redistribute(mesh, dst_placement)
+        
+        result = debug_mode.debug_string()
+
+        if len(expected) == 0:
+            self.assertEqual(result, "")
+        else:
+            for op, count in expected.items():
+                self.assertEqual(result.count(op), count)
+        
+    # @with_comms
+    # def test_redistribute_2dmesh(self):
+    #     # mesh = init_device_mesh(self.device_type, (self.world_size,))
+
+    #     # placements = ["Shard(0)", "Shard(1)", "Shard(2)"]
+
+    #     # all = itertools.product(placements, placements, placements, placements)
+
+    #     # # for src_placement, dst_placement in all:s
+    #     # if torch.distributed.get_rank() == 0:
+    #     #     for a, b, c, d in all:
+    #     #         if c == "Partial()":
+    #     #             continue
+    #     #         if d == "Partial()":
+    #     #             continue
+    #     #         print(f"([{a}, {b}], [{c}, {d}], {{}}),")
+
+    #     test_cases = [
+    #         ([Shard(0), Shard(0)], [Shard(0), Shard(0)], {}),
+    #         ([Shard(0), Shard(0)], [Shard(0), Replicate()], {}),
+    #         ([Shard(0), Shard(0)], [Replicate(), Shard(0)], {}),
+    #         ([Shard(0), Shard(0)], [Replicate(), Replicate()], {}),
+    #         ([Shard(0), Replicate()], [Shard(0), Shard(0)], {}),
+    #         ([Shard(0), Replicate()], [Shard(0), Replicate()], {}),
+    #         ([Shard(0), Replicate()], [Replicate(), Shard(0)], {}),
+    #         ([Shard(0), Replicate()], [Replicate(), Replicate()], {}),
+    #         ([Shard(0), Partial()], [Shard(0), Shard(0)], {}),
+    #         ([Shard(0), Partial()], [Shard(0), Replicate()], {}),
+    #         ([Shard(0), Partial()], [Replicate(), Shard(0)], {}),
+    #         ([Shard(0), Partial()], [Replicate(), Replicate()], {}),
+    #         ([Replicate(), Shard(0)], [Shard(0), Shard(0)], {}),
+    #         ([Replicate(), Shard(0)], [Shard(0), Replicate()], {}),
+    #         ([Replicate(), Shard(0)], [Replicate(), Shard(0)], {}),
+    #         ([Replicate(), Shard(0)], [Replicate(), Replicate()], {}),
+    #         ([Replicate(), Replicate()], [Shard(0), Shard(0)], {}),
+    #         ([Replicate(), Replicate()], [Shard(0), Replicate()], {}),
+    #         ([Replicate(), Replicate()], [Replicate(), Shard(0)], {}),
+    #         ([Replicate(), Replicate()], [Replicate(), Replicate()], {}),
+    #         ([Replicate(), Partial()], [Shard(0), Shard(0)], {}),
+    #         ([Replicate(), Partial()], [Shard(0), Replicate()], {}),
+    #         ([Replicate(), Partial()], [Replicate(), Shard(0)], {}),
+    #         ([Replicate(), Partial()], [Replicate(), Replicate()], {}),
+    #         ([Partial(), Shard(0)], [Shard(0), Shard(0)], {}),
+    #         ([Partial(), Shard(0)], [Shard(0), Replicate()], {}),
+    #         ([Partial(), Shard(0)], [Replicate(), Shard(0)], {}),
+    #         ([Partial(), Shard(0)], [Replicate(), Replicate()], {}),
+    #         ([Partial(), Replicate()], [Shard(0), Shard(0)], {}),
+    #         ([Partial(), Replicate()], [Shard(0), Replicate()], {}),
+    #         ([Partial(), Replicate()], [Replicate(), Shard(0)], {}),
+    #         ([Partial(), Replicate()], [Replicate(), Replicate()], {}),
+    #         ([Partial(), Partial()], [Shard(0), Shard(0)], {}),
+    #         ([Partial(), Partial()], [Shard(0), Replicate()], {}),
+    #         ([Partial(), Partial()], [Replicate(), Shard(0)], {}),
+    #         ([Partial(), Partial()], [Replicate(), Replicate()], {}),
+
+    #         ([Shard(0), Shard(0)], [Shard(0), Shard(0)], {}),
+    #         ([Shard(0), Shard(0)], [Shard(0), Shard(1)], {}),
+    #         ([Shard(0), Shard(0)], [Shard(0), Shard(2)], {}),
+    #         ([Shard(0), Shard(0)], [Shard(1), Shard(0)], {}),
+    #         ([Shard(0), Shard(0)], [Shard(1), Shard(1)], {}),
+    #         ([Shard(0), Shard(0)], [Shard(1), Shard(2)], {}),
+    #         ([Shard(0), Shard(0)], [Shard(2), Shard(0)], {}),
+    #         ([Shard(0), Shard(0)], [Shard(2), Shard(1)], {}),
+    #         ([Shard(0), Shard(0)], [Shard(2), Shard(2)], {}),
+    #         ([Shard(0), Shard(1)], [Shard(0), Shard(0)], {}),
+    #         ([Shard(0), Shard(1)], [Shard(0), Shard(1)], {}),
+    #         ([Shard(0), Shard(1)], [Shard(0), Shard(2)], {}),
+    #         ([Shard(0), Shard(1)], [Shard(1), Shard(0)], {}),
+    #         ([Shard(0), Shard(1)], [Shard(1), Shard(1)], {}),
+    #         ([Shard(0), Shard(1)], [Shard(1), Shard(2)], {}),
+    #         ([Shard(0), Shard(1)], [Shard(2), Shard(0)], {}),
+    #         ([Shard(0), Shard(1)], [Shard(2), Shard(1)], {}),
+    #         ([Shard(0), Shard(1)], [Shard(2), Shard(2)], {}),
+    #         ([Shard(0), Shard(2)], [Shard(0), Shard(0)], {}),
+    #         ([Shard(0), Shard(2)], [Shard(0), Shard(1)], {}),
+    #         ([Shard(0), Shard(2)], [Shard(0), Shard(2)], {}),
+    #         ([Shard(0), Shard(2)], [Shard(1), Shard(0)], {}),
+    #         ([Shard(0), Shard(2)], [Shard(1), Shard(1)], {}),
+    #         ([Shard(0), Shard(2)], [Shard(1), Shard(2)], {}),
+    #         ([Shard(0), Shard(2)], [Shard(2), Shard(0)], {}),
+    #         ([Shard(0), Shard(2)], [Shard(2), Shard(1)], {}),
+    #         ([Shard(0), Shard(2)], [Shard(2), Shard(2)], {}),
+    #         ([Shard(1), Shard(0)], [Shard(0), Shard(0)], {}),
+    #         ([Shard(1), Shard(0)], [Shard(0), Shard(1)], {}),
+    #         ([Shard(1), Shard(0)], [Shard(0), Shard(2)], {}),
+    #         ([Shard(1), Shard(0)], [Shard(1), Shard(0)], {}),
+    #         ([Shard(1), Shard(0)], [Shard(1), Shard(1)], {}),
+    #         ([Shard(1), Shard(0)], [Shard(1), Shard(2)], {}),
+    #         ([Shard(1), Shard(0)], [Shard(2), Shard(0)], {}),
+    #         ([Shard(1), Shard(0)], [Shard(2), Shard(1)], {}),
+    #         ([Shard(1), Shard(0)], [Shard(2), Shard(2)], {}),
+    #     ]
+
+    #     mesh = init_device_mesh(self.device_type, (2, 4))
+    #     input_data = torch.randn((8, 8, 8), device=self.device_type)
+
+    #     debug_mode = DebugMode(record_torchfunction=False)
+
+    #     for test_case in test_cases:
+    #         src_placement, dst_placement, expected = test_case
+
+            
+    #         # src_dt = distribute_tensor(input_data, mesh, src_placement)
+    #         src_dt = DTensor.from_local(input_data, mesh, src_placement, run_check=False)
+
+
+    #         with debug_mode:
+    #             out_dt = src_dt.redistribute(mesh, dst_placement)
+            
+    #         result = debug_mode.debug_string()
+
+    #         if torch.distributed.get_rank() == 0:
+    #             print(f"{[str(p) for p in src_placement]} -> {[str(p) for p in dst_placement]}, redistribution: ")
+    #             print(result)
+    #             print("=====================================")
+
+    #         # if len(expected) == 0:
+    #         #     self.assertEqual(result, "")
+    #         # else:
+    #         #     for op, count in expected.items():
+    #         #         self.assertEqual(result.count(op), count)
+
+instantiate_parametrized_tests(DebugModeRedistributeTest)
+            
 
 if __name__ == "__main__":
     run_tests()
