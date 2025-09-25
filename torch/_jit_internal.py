@@ -52,8 +52,7 @@ from torch.futures import Future
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
 
-BuiltinUnionType: Union[type, tuple[type, ...]]
-BuiltinUnionType = types.UnionType
+BuiltinUnionType: Union[type, tuple[type, ...]] = types.UnionType
 
 LockType: type
 try:
@@ -1248,8 +1247,7 @@ def _get_named_tuple_properties(
         ]
     else:
         defaults = []
-    # In 3.10 recommended way to get annotations is to call `inspect.get_annotations` function
-    # Also, annotations from base class are not inherited so they need to be queried explicitly
+
     obj_annotations = inspect.get_annotations(obj)
     if len(obj_annotations) == 0 and hasattr(obj, "__base__"):
         obj_annotations = inspect.get_annotations(obj.__base__)

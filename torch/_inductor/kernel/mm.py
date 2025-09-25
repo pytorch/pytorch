@@ -645,7 +645,27 @@ _blackwell_ws_persistent_device_tma = r"""
         )
         offs_cm = pid_m * BLOCK_M
         offs_cn = pid_n * BLOCK_N
-        # TODO: Add EPILOGUE_SUBTILE
+        {%- if EPILOGUE_SUBTILE %}
+        tl.static_assert(BLOCK_N % 2 == 0)
+        acc = tl.reshape(accumulator, (BLOCK_M, 2, BLOCK_N // 2))
+        acc = tl.permute(acc, (0, 2, 1))
+        acc0, acc1 = tl.split(acc)
+        {{store_output(
+            ("offs_cm", "offs_cn"),
+            "acc0",
+            indent_width=8,
+            val_shape=("BLOCK_M", "BLOCK_N // 2"),
+            block_indexing=True
+        )}}
+        offs_cn2 = offs_cn + BLOCK_N // 2
+        {{store_output(
+            ("offs_cm", "offs_cn2"),
+            "acc1",
+            indent_width=8,
+            val_shape=("BLOCK_M", "BLOCK_N // 2"),
+            block_indexing=True
+        )}}
+        {%- else %}
         {{store_output(
             ("offs_cm", "offs_cn"),
             "accumulator",
@@ -653,6 +673,7 @@ _blackwell_ws_persistent_device_tma = r"""
             val_shape=("BLOCK_M", "BLOCK_N"),
             block_indexing=True
         )}}
+        {%- endif %}
 """
 
 blackwell_ws_persistent_device_tma_mm_template = TritonTemplate(
