@@ -105,7 +105,7 @@ class GreenContext {
 
   GreenContext& operator=(GreenContext&& other) noexcept {
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 12080 && !defined(USE_ROCM)
-  if (this != &other) {
+    if (this != &other) {
       // Clean up current resources
       if (green_ctx_) {
         CUcontext current = nullptr;
@@ -148,7 +148,6 @@ class GreenContext {
 #else
     TORCH_CHECK(false, "Green Context is only supported on CUDA 12.8+!");
 #endif
-
   }
 
   // Get the underlying green context
@@ -162,7 +161,7 @@ class GreenContext {
 
   // Make this context current
   void makeCurrent() {
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 12080  && !defined(USE_ROCM)
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 12080 && !defined(USE_ROCM)
     auto current_stream = c10::cuda::getCurrentCUDAStream();
     parent_stream_ = current_stream.stream();
 
