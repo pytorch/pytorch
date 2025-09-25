@@ -607,6 +607,27 @@ class TestUnbackedSymints(InductorTestCase):
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
 
+    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
+    def test_pixel_shuffle(self, device):
+        def fn(x, compressed):
+            nz = torch.nonzero(x)
+            unbacked = nz.size(0)
+            nchannels = unbacked + 1
+            repeated = compressed.repeat(1, 4 * nchannels, 1, 1).contiguous()
+            return torch.nn.functional.pixel_shuffle(repeated, upscale_factor=2)
+
+        B, H, W = 2, 16, 32
+        example_inputs = (
+            torch.randn(4, device=device),
+            torch.randn(B, 1, H, W, device=device).to(
+                memory_format=torch.channels_last
+            ),
+        )
+        actual = torch.compile(fn, fullgraph=True)(*example_inputs)
+        expected = fn(*example_inputs)
+        torch.testing.assert_close(actual, expected)
+
 
 instantiate_device_type_tests(TestUnbackedSymints, globals(), allow_xpu=True)
 

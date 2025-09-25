@@ -1,5 +1,6 @@
 #pragma once
-
+#include <c10/core/SymBool.h>
+#include <c10/core/SymInt.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Exception.h>
 
@@ -126,20 +127,20 @@ inline std::vector<int64_t> get_channels_last_strides_3d(IntArrayRef sizes) {
 // 3. All helper functions have similar comments, only 1st helper function is
 // commented here.
 template <typename T>
-inline bool is_channels_last_strides_2d_s4(
+inline bool is_channels_last_strides_2d_s4_or_false(
     const ArrayRef<T> sizes,
     const ArrayRef<T> strides) {
   T min = 0;
   // special case for trivial C dimension. default to NCHW
-  if (strides[1] == 0) {
+  if (TORCH_GUARD_OR_TRUE(sym_eq(strides[1], 0))) {
     return false;
   }
   // loop strides indices
   for (auto& d : {1, 3, 2, 0}) {
-    if (sizes[d] == 0) {
+    if (TORCH_GUARD_OR_TRUE(sym_eq(sizes[d], 0))) {
       return false;
     }
-    if (strides[d] < min) {
+    if (TORCH_GUARD_OR_TRUE(sym_lt(strides[d], min))) {
       return false;
     }
     // Fallback to NCHW as default layout for ambiguous cases
@@ -149,7 +150,7 @@ inline bool is_channels_last_strides_2d_s4(
     // a. N111 contiguous Tensor ([N,1,1,1]@[1,1,1,1])
     // b. N11W contiguous Tensor sliced on the W-dimension.
     // ([N,1,1,1]@[W,W,W,W])
-    if (d == 0 && min == strides[1]) {
+    if (d == 0 && TORCH_GUARD_OR_TRUE(sym_eq(min, strides[1]))) {
       return false;
     }
     // This is necessary to:
@@ -160,7 +161,7 @@ inline bool is_channels_last_strides_2d_s4(
     //     [1, C, 1, H]@[HC, H, H, 1] transpose(1, 3)
     //     [1, H, 1, C]@[HC, 1, H, H] shouldn't be identified as channels_last
     min = strides[d];
-    if (sizes[d] > 1) {
+    if (TORCH_GUARD_OR_TRUE(sym_gt(sizes[d], 1))) {
       min *= sizes[d];
     }
   }
@@ -249,7 +250,7 @@ inline bool is_channels_last_strides_2d(
     const ArrayRef<T> strides) {
   switch (sizes.size()) {
     case 4:
-      return is_channels_last_strides_2d_s4(sizes, strides);
+      return is_channels_last_strides_2d_s4_or_false(sizes, strides);
       // NOLINTNEXTLINE(bugprone-branch-clone)
     case 3:
       // TODO dim == 3 case will be enabled once it is fully tested
