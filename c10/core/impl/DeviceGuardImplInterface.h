@@ -179,7 +179,7 @@ struct C10_API DeviceGuardImplInterface {
    *  (2) the current version is marked as recorded.
    * Returns false otherwise.
    */
-  virtual bool queryEvent(void* /*event*/) const {
+  virtual bool queryEvent(void* /*event*/, const DeviceIndex /*device_index*/) const {
     TORCH_CHECK(false, "Backend doesn't support events.");
   }
 
@@ -210,7 +210,7 @@ struct C10_API DeviceGuardImplInterface {
    * Wait (by blocking the calling thread) until all the work previously
    * recorded on the event has completed running on the device.
    */
-  virtual void synchronizeEvent(void* /*event*/) const {
+  virtual void synchronizeEvent(void* /*event*/, const DeviceIndex /*device_index*/) const {
     TORCH_CHECK(false, "Backend doesn't support synchronizing events.");
   }
 
