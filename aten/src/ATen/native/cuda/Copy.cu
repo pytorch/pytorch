@@ -43,8 +43,13 @@ void bfloat16_copy_kernel_cuda(TensorIteratorBase &iter) {
 }
 
 #ifdef USE_ROCM
-void float32_copy_kernel_cuda(TensorIteratorBase &iter) {
+void bfloat16tofloat32_copy_kernel_cuda(TensorIteratorBase &iter) {
     gpu_kernel_nocast(iter, [] GPU_LAMBDA(at::BFloat16 value) {
+        return static_cast<float>(value);
+    });
+}
+void float16tofloat32_copy_kernel_cuda(TensorIteratorBase &iter) {
+    gpu_kernel_nocast(iter, [] GPU_LAMBDA(at::Half value) {
         return static_cast<float>(value);
     });
 }
@@ -198,7 +203,11 @@ void direct_copy_kernel_cuda(TensorIteratorBase &iter) {
   }
 #ifdef USE_ROCM
   else if ((iter.dtype(1) == kBFloat16 || iter.dtype(1) == kHalf) && dtype == kFloat) {
-    float32_copy_kernel_cuda(iter);
+    if (iter.dtype(1) == kBFloat16) {
+      bfloat16tofloat32_copy_kernel_cuda(iter);
+    } else {
+      float16tofloat32_copy_kernel_cuda(iter);
+    }
   }
 #endif
   else if (isBitsType(dtype)) {
