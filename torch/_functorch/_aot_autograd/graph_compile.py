@@ -1051,6 +1051,20 @@ def maybe_inline_graph_saved_tensors_hooks(
         if not isinstance(val, torch.Tensor):
             continue
 
+        # User may want to apply hooks selectively based on fx node meta
+        # E.g. to not apply hooks to specific nn.module
+        if hasattr(pack_hook_gm, "get_pack_hook_gm_by_fx_node"):
+            _pack_hook_gm = pack_hook_gm.get_pack_hook_gm_by_fx_node(saved)
+            assert isinstance(_pack_hook_gm, torch.fx.GraphModule)
+            pack_hook_gm = _pack_hook_gm
+        if hasattr(unpack_hook_gm, "get_pack_hook_gm_by_fx_node"):
+            _unpack_hook_gm = unpack_hook_gm.get_pack_hook_gm_by_fx_node(saved)
+            if _unpack_hook_gm is None:
+                continue
+
+            assert isinstance(_unpack_hook_gm, torch.fx.GraphModule)
+            unpack_hook_gm = _unpack_hook_gm
+
         pack_out_val = pack_hook_gm(val)
 
         requires_sc_handling = any(

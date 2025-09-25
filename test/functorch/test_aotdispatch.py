@@ -7931,6 +7931,75 @@ metadata incorrectly.
 
         FileCheck().check(expected_msg).run("\n".join(captured.output))
 
+    @torch._functorch.config.patch(saved_tensors_hooks_filtering_mode="all")
+    def test_saved_tensors_hooks_selective(self):
+        pack_gm, unpack_gm = saved_tensors_hooks_to_gm(
+            pack_fp8,
+            unpack_fp8,
+            "pack_hash_selective",
+            "unpack_hash_selective",
+        )
+        get_pack_hook_gm_called = False
+
+        def _pack_noop(t):
+            return t
+
+        pack_noop_gm = torch.fx.symbolic_trace(_pack_noop)
+        unpack_noop_gm = pack_noop_gm
+
+        def _pack_get_pack_hook_gm_by_fx_node(node):
+            nonlocal get_pack_hook_gm_called
+            get_pack_hook_gm_called = True
+            assert isinstance(node, torch.fx.Node)
+            # meta = node.meta
+            # nn_module_stack = node.meta["nn_module_stack"]
+            # E.g.:  nn_module_stack:
+            # {
+            # 'L__self__': ('', 'abc.DTypeCastTransformer'),
+            # 'L__self__layers.0': ('layers.0', 'autoparallel.cast_parametrization.DTypeCastTransformerBlock'),
+            # 'L__self__layers.0.ffn_norm': ('layers.0.ffn_norm', 'autoparallel.cast_parametrization.DTypeCastRMSNorm')
+            # }
+
+            return pack_noop_gm
+
+        def _unpack_get_pack_hook_gm_by_fx_node(node):
+            return unpack_noop_gm
+
+        pack_gm.get_pack_hook_gm_by_fx_node = _pack_get_pack_hook_gm_by_fx_node
+        unpack_gm.get_pack_hook_gm_by_fx_node = _unpack_get_pack_hook_gm_by_fx_node
+
+        class SAF(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.save_for_backward(x)
+                return x
+
+            @staticmethod
+            def backward(ctx, gx):
+                (saved_x,) = ctx.saved_tensors
+                return gx + saved_x
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(3, 3)
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                x = SAF.apply(x)
+                x = self.linear(x)
+                x - self.relu(x)
+                return x
+
+        m = M()
+        inp = torch.rand([3, 3], requires_grad=True)
+        with torch.autograd.graph.saved_tensors_hooks(pack_gm, unpack_gm):
+            out = torch.compile(m, backend="aot_eager", fullgraph=True, dynamic=False)(
+                inp
+            )
+            out.sum().backward()
+        self.assertTrue(get_pack_hook_gm_called)
+
 
 # entries in here don't work and need to be fixed.
 # Each one of these is a bug (or needs to be investigated)
