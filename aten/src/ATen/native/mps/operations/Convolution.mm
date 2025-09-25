@@ -1,4 +1,5 @@
 //  Copyright © 2022 Apple Inc.
+#include <optional>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/mps/OperationUtils.h>
@@ -52,9 +53,7 @@ static void fill_depthwise_conv_desc(MPSGraphDepthwiseConvolution3DOpDescriptor*
                                      NSUInteger dilationRateInX,
                                      NSUInteger dilationRateInY,
                                      NSUInteger paddingHorizontal,
-                                     NSUInteger paddingVertical,
-                                     c10::MemoryFormat memory_format,
-                                     NSUInteger groups) {
+                                     NSUInteger paddingVertical) {
   descriptor_.strides =
       @[ @1, [[NSNumber alloc] initWithInteger:strideInY], [[NSNumber alloc] initWithInteger:strideInX] ];
   descriptor_.dilationRates =
@@ -111,8 +110,15 @@ static Tensor _mps_convolution_impl(const Tensor& input_t,
                                     IntArrayRef dilation,
                                     int64_t groups,
                                     std::optional<IntArrayRef> input_shape) {
+  constexpr auto kChannelsLast = MemoryFormat::ChannelsLast;
+  constexpr auto kContiguous = MemoryFormat::Contiguous;
+  const bool is_macos_15_plus = is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS);
+
   const bool is3DConv = input_t.dim() == 5;
+  const auto memory_format = input_t.suggest_memory_format();
+  const auto input_suggested_layout = memory_format== kChannelsLast && is_macos_15_plus ? kChannelsLast : kContiguous;
   const bool is_channels_last = mps_conv_use_channels_last(input_t, weight_t) && !is3DConv;
+  const bool bias_defined = bias_opt ? bias_opt->defined() : false;
 
   TORCH_CHECK(isFloatingType(input_t.scalar_type()), "Convolution is supported only for Floating types");
 
@@ -122,14 +128,7 @@ static Tensor _mps_convolution_impl(const Tensor& input_t,
   checkAllSameType(c, {input, weight});
   checkAllSameGPU(c, {input, weight});
 
-  bool bias_defined = false;
 
-  if (bias_opt == std::nullopt)
-    bias_defined = false;
-  else
-    bias_defined = bias_opt->defined();
-
-  auto memory_format = input_t.suggest_memory_format();
   auto output_t =
       at::empty(input_shape.has_value() ? input_shape.value()
                                         : conv_output_size(input->sizes(), weight->sizes(), padding, stride, dilation),
@@ -137,7 +136,7 @@ static Tensor _mps_convolution_impl(const Tensor& input_t,
                 std::nullopt,
                 kMPS,
                 std::nullopt,
-                is_channels_last ? MemoryFormat::ChannelsLast : MemoryFormat::Contiguous);
+                is_channels_last ? kChannelsLast : kContiguous);
   if (output_t.numel() == 0) {
     return output_t;
   }
@@ -145,8 +144,8 @@ static Tensor _mps_convolution_impl(const Tensor& input_t,
 
   // TODO: Remove me when MacOS-14 is no longer supported
   std::optional<Tensor> output_c;
-  if (!is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS) && is_channels_last) {
-    output_c = at::empty_like(output_t, output_t.options().memory_format(MemoryFormat::Contiguous));
+  if (!is_macos_15_plus && is_channels_last) {
+    output_c = at::empty_like(output_t, output_t.options().memory_format(kContiguous));
   }
 
   if (!is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_1_PLUS)) {
@@ -225,9 +224,7 @@ static Tensor _mps_convolution_impl(const Tensor& input_t,
                                  dilation[1],
                                  dilation[0],
                                  padding[1],
-                                 padding[0],
-                                 memory_format,
-                                 groups);
+                                 padding[0]);
 
         MPSGraphTensor* weightTransposeTensor = [mpsGraph transposeTensor:weightTensor
                                                                 dimension:-3
@@ -246,7 +243,7 @@ static Tensor _mps_convolution_impl(const Tensor& input_t,
                        dilation[0],
                        padding[1],
                        padding[0],
-                       MemoryFormat::Contiguous,
+                       input_suggested_layout,
                        groups);
 
         outputTensor = [mpsGraph convolution2DWithSourceTensor:inputTensor
@@ -258,9 +255,6 @@ static Tensor _mps_convolution_impl(const Tensor& input_t,
       MPSGraphTensor* biasTensor = nil;
       if (bias_defined) {
         biasTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(bias_opt.value()));
-      }
-
-      if (bias_defined) {
         outputTensor = [mpsGraph additionWithPrimaryTensor:outputTensor secondaryTensor:biasTensor name:nil];
       }
       newCachedGraph->inputTensor_ = inputTensor;
@@ -271,20 +265,19 @@ static Tensor _mps_convolution_impl(const Tensor& input_t,
 
     auto inputPlaceholder =
         Placeholder(cachedGraph->inputTensor_, output_c || is3DConv ? input_t.contiguous() : input_t);
+    auto outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output_c ? *output_c : output_t);
     auto weightsPlaceholder = Placeholder(cachedGraph->weightTensor_, output_c ? weight_t.contiguous() : weight_t);
     auto biasPlaceholder = Placeholder();
     // Reshape the bias to be broadcastable with output of conv2d or conv3d
     if (bias_defined) {
       if (is3DConv) {
-        biasPlaceholder = Placeholder(cachedGraph->biasTensor_, (bias_opt.value()).view({1, bias_shape[0], 1, 1, 1}));
+        biasPlaceholder = Placeholder(cachedGraph->biasTensor_, bias_opt->view({1, bias_shape[0], 1, 1, 1}));
       } else {
-        biasPlaceholder = Placeholder(cachedGraph->biasTensor_, (bias_opt.value()).view({1, bias_shape[0], 1, 1}));
+        biasPlaceholder = Placeholder(cachedGraph->biasTensor_, bias_opt->view({1, bias_shape[0], 1, 1}));
       }
     }
-    auto outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output_c ? *output_c : output_t);
 
-    NSMutableDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds =
-        [[[NSMutableDictionary alloc] initWithCapacity:3] autorelease];
+    auto feeds = [[[NSMutableDictionary alloc] initWithCapacity:3] autorelease];
     feeds[inputPlaceholder.getMPSGraphTensor()] = inputPlaceholder.getMPSGraphTensorData();
     feeds[weightsPlaceholder.getMPSGraphTensor()] = weightsPlaceholder.getMPSGraphTensorData();
     if (bias_defined) {
@@ -406,9 +399,7 @@ static Tensor mps_convolution_backward_input(IntArrayRef input_size,
                                  dilation[1],
                                  dilation[0],
                                  padding[1],
-                                 padding[0],
-                                 at::MemoryFormat::Contiguous,
-                                 groups);
+                                 padding[0]);
         MPSGraphTensor* weightTransposeTensor = [mpsGraph transposeTensor:weightTensor
                                                                 dimension:-3
                                                             withDimension:-4
@@ -550,9 +541,7 @@ static Tensor mps_convolution_backward_weights(IntArrayRef weight_size,
                                  dilation[1],
                                  dilation[0],
                                  padding[1],
-                                 padding[0],
-                                 at::MemoryFormat::Contiguous,
-                                 groups);
+                                 padding[0]);
         NSNumber* outputFeatChannelDim = mps_weight_shape[0];
         MPSShape* weightShapeTranspose = @[ @1, outputFeatChannelDim, mps_weight_shape[2], mps_weight_shape[3] ];
         MPSGraphTensor* gradWeightTensorTranspose =
