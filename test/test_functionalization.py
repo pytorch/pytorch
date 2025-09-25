@@ -1625,7 +1625,10 @@ def forward(self, arg0_1):
             x.add_(1)
             return y
 
-        self.assert_functionalization(f, torch.ones(2, 3))
+        self.assert_functionalization(f, torch.ones(2, 3), reapply_views=self.crossref)
+        if self.crossref:
+            return
+
         logs = self.get_logs(f, torch.ones(2, 3))
         self.assertExpectedInline(
             logs,
@@ -1671,7 +1674,10 @@ def forward(self, arg0_1):
         def f(x):
             return torch.ops.prims.broadcast_in_dim.default(x, [2, 5, 3], [0, 2])
 
-        self.assert_functionalization(f, torch.ones(2, 3))
+        self.assert_functionalization(f, torch.ones(2, 3), reapply_views=self.crossref)
+        if self.crossref:
+            return
+
         logs = self.get_logs(f, torch.ones(2, 3))
         self.assertExpectedInline(
             logs,
@@ -2403,8 +2409,6 @@ def forward(self, arg0_1):
         "test_unbind",
         "test_view_clone_view_inplace",
         "test_view_inplace",
-        "test_prims_broadcast_in_dim_mutated_input",
-        "test_prims_broadcast_in_dim_dimension_order",
     ]
 )
 @unittest.skipIf(
