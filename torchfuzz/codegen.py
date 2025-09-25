@@ -9,8 +9,12 @@ import os
 class CodeGenerator:
     """Generates Python code from tensor operations and their dependencies."""
 
-    def __init__(self):
-        pass
+    def __init__(self, use_dtensor=False, mesh_dims=(8, 8, 4), world_size=256, placements=None, test_compile=False):
+        self.use_dtensor = use_dtensor
+        self.mesh_dims = mesh_dims
+        self.world_size = world_size
+        self.placements = placements or ("Shard(0)", "Shard(1)", "Shard(1)")
+        self.test_compile = test_compile  # Whether to test compilation for DTensor
 
     def tensor_repr(self, tensor):
         """Generate tensor creation code representation."""
@@ -35,12 +39,30 @@ class CodeGenerator:
         """
         # Generate Python code
         code_lines = []
-        code_lines.append("import torch")
-        code_lines.append("import sys")
-        code_lines.append("torch._dynamo.config.capture_scalar_outputs = True")
-        code_lines.append("torch._dynamo.config.capture_dynamic_output_shape_ops = True")
-        code_lines.append("torch._inductor.config.emulate_precision_casts = True")
-        code_lines.append("")
+
+        if self.use_dtensor:
+            # DTensor imports and setup
+            code_lines.extend([
+                "import torch",
+                "import sys",
+                "from torch.distributed.tensor.placement_types import Replicate, Shard",
+                "from torch.testing._internal.distributed.fake_pg import FakeStore",
+                "from torch.distributed.tensor import DTensor",
+                "torch._dynamo.config.capture_scalar_outputs = True",
+                "torch._dynamo.config.capture_dynamic_output_shape_ops = True",
+                "torch._inductor.config.emulate_precision_casts = True",
+                ""
+            ])
+        else:
+            code_lines.extend([
+                "import torch",
+                "import sys",
+                "torch._dynamo.config.capture_scalar_outputs = True",
+                "torch._dynamo.config.capture_dynamic_output_shape_ops = True",
+                "torch._inductor.config.emulate_precision_casts = True",
+                ""
+            ])
+
         tensor_names = {}
 
         # Identify leaf tensors (those with op is None and not produced by any op)
@@ -89,34 +111,84 @@ class CodeGenerator:
         code_lines.append(f"    return output")
         code_lines.append("")
 
+        if self.use_dtensor:
+            # DTensor setup
+            code_lines.extend([
+                "# FakeStore will mock collective results so that it can be ran on a single rank",
+                "# =============================================================================",
+                "",
+                f"world_size = {self.world_size}",
+                "fake_store = FakeStore()",
+                "torch.distributed.init_process_group(",
+                "    \"fake\", store=fake_store, rank=0, world_size=world_size",
+                ")",
+                "mesh = torch.distributed.device_mesh.init_device_mesh(",
+                "    \"cuda\",",
+                f"    {self.mesh_dims},",
+                "    mesh_dim_names=(",
+                "        " + ", ".join([f"\"dim{i+1}\"" for i in range(len(self.mesh_dims))]) + ",",
+                "    ),",
+                ")",
+                f"placements = ({', '.join(self.placements)})",
+                ""
+            ])
+
         # Emit code to create the leaf tensors before calling foo
         for i, tensor in enumerate(leaf_tensors):
             desc = f"# size={tensor.size}, stride={tensor.stride}, dtype={tensor.dtype}, device={tensor.device}"
             code_lines.append(f"arg{i} = {self.tensor_repr(tensor)} {desc}")
+            if self.use_dtensor:
+                code_lines.append(f"arg{i} = DTensor.from_local(arg{i}, mesh, placements)")
 
         # Harness: run foo in eager and with torch.compile, then do a realistic backward (sum().backward())
         code_lines.append("if __name__ == '__main__':")
         code_lines.append(f"    out_eager = foo({', '.join([f'arg{i}' for i in range(len(leaf_tensors))])})")
         code_lines.append("    out_eager.sum().backward()")
         code_lines.append("    print('Eager Success! ✅')")
-        code_lines.append("    compiled_foo = torch.compile(foo, fullgraph=True, dynamic=True)")
-        code_lines.append(f"    out_compiled = compiled_foo({', '.join([f'arg{i}' for i in range(len(leaf_tensors))])})")
-        code_lines.append("    out_compiled.sum().backward()")
-        code_lines.append("    print('Compile Success! ✅')")
-        # code_lines.append("    # Compare outputs (forward)")
-        # code_lines.append("    out_eager_sum = out_eager.sum()")
-        # code_lines.append("    out_compiled_sum = out_compiled.sum()")
-        # code_lines.append("    diff = (out_eager_sum - out_compiled_sum).abs().item()")
-        # code_lines.append("    rel_diff = diff / (out_eager_sum.abs().item() + 1e-12) * 100")
-        # code_lines.append("    print(f'Relative diff (sum): {rel_diff:.6f}%')")
-        # code_lines.append("    if rel_diff > 5:")  # 5% threshold, adjust as needed
-        # code_lines.append("        print(f'❌ Forward output sums differ significantly (relative)!')")
-        # code_lines.append("        print('out_eager_sum:', out_eager_sum.item())")
-        # code_lines.append("        print('out_compiled_sum:', out_compiled_sum.item())")
-        # code_lines.append("        print('Absolute diff:', diff)")
-        # code_lines.append("        print('Relative diff (%):', rel_diff)")
-        # code_lines.append("        sys.exit(1)")
 
+        # Zero out grads before running compiled version
+        for i in range(len(leaf_tensors)):
+            code_lines.append(f"    arg{i}.grad = None")
+
+        # For DTensor, optionally test compilation (often fails, which is valuable for fuzzing)
+        if self.use_dtensor:
+            if self.test_compile:
+                code_lines.extend([
+                    "    # DTensor compilation often fails - this is expected and valuable for fuzzing",
+                    "    compiled_foo = torch.compile(foo, fullgraph=True, dynamic=True)",
+                    f"    out_compiled = compiled_foo({', '.join([f'arg{i}' for i in range(len(leaf_tensors))])})",
+                    "    out_compiled.sum().backward()",
+                    "    print('Compile Success! ✅')",
+                    "    ",
+                    "    # Compare outputs (forward)",
+                    "    out_eager_sum = out_eager.sum()",
+                    "    out_compiled_sum = out_compiled.sum()",
+                    "    diff = (out_eager_sum - out_compiled_sum).abs().item()",
+                    "    rel_diff = diff / (out_eager_sum.abs().item() + 1e-12) * 100",
+                    "    print(f'Relative diff (sum): {rel_diff:.6f}%')",
+                    "    if rel_diff > 5:",
+                    "        print(f'❌ Forward output sums differ significantly (relative)!')",
+                    "        print('out_eager_sum:', out_eager_sum.item())",
+                    "        print('out_compiled_sum:', out_compiled_sum.item())",
+                    "        print('Absolute diff:', diff)",
+                    "        print('Relative diff (%):', rel_diff)",
+                    "        sys.exit(1)",
+                    "    torch.distributed.destroy_process_group()"
+                ])
+            else:
+                code_lines.extend([
+                    "    # Skipping compilation test for DTensor (use --test-compile to enable)",
+                    "    # This generates valid eager programs that may fail compilation - perfect for fuzzing!",
+                    "    torch.distributed.destroy_process_group()"
+                ])
+        else:
+
+            code_lines.extend([
+                "    compiled_foo = torch.compile(foo, fullgraph=True, dynamic=True)",
+                f"    out_compiled = compiled_foo({', '.join([f'arg{i}' for i in range(len(leaf_tensors))])})",
+                "    out_compiled.sum().backward()",
+                "    print('Compile Success! ✅')"
+            ])
 
         # Ensure the output directory exists
         os.makedirs(os.path.dirname(output_path), exist_ok=True)

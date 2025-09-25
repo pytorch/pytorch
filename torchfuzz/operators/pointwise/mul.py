@@ -6,12 +6,12 @@ from torchfuzz.tensor import Tensor
 
 
 class MulOperator(Operator):
-    """Operator for element-wise multiplication."""
+    """Operator for element-wise multiplication. DTensor-safe operation."""
 
     def __init__(self):
-        super().__init__("mul")
+        super().__init__(supports_dtensor=True)
 
-    def can_produce(self, tensor):
+    def _can_produce_impl(self, output_tensor):
         """Mul can always produce a tensor by multiplying two tensors of the same shape, dtype, etc."""
         return True
 
@@ -55,6 +55,3 @@ class MulOperator(Operator):
         # Multiply all input tensors
         expr = " * ".join(input_names)
         return f"{output_name} = {expr}"
-
-    def supports_variable_inputs(self) -> bool:
-        return True

@@ -1,7 +1,7 @@
 """Argmax operator implementation."""
 
 import random
-from ..base import Operator
+from ..base.operator import Operator
 from torchfuzz.tensor import Tensor
 
 
@@ -9,9 +9,9 @@ class ArgmaxOperator(Operator):
     """Operator for tensor argmax reduction."""
 
     def __init__(self):
-        super().__init__("argmax")
+        super().__init__("argmax", supports_dtensor=True)
 
-    def can_produce(self, tensor):
+    def _can_produce_impl(self, tensor):
         """
         Argmax returns indices, so output dtype must be int64.
         We construct inputs by inserting at most one extra dimension,

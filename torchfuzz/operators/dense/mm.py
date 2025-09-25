@@ -1,7 +1,7 @@
 """Matrix multiplication operator implementation."""
 
 import random
-from ..base import Operator
+from ..base.operator import Operator
 from torchfuzz.tensor import Tensor
 
 
@@ -9,9 +9,9 @@ class MmOperator(Operator):
     """Operator for matrix multiplication (torch.mm)."""
 
     def __init__(self):
-        super().__init__("mm")
+        super().__init__("mm", supports_dtensor=False)
 
-    def can_produce(self, tensor):
+    def _can_produce_impl(self, tensor):
         """MM can produce tensors that are 2D and floating point."""
         # mm only supports floating point tensors
         if tensor.dtype in ["int8", "int16", "int32", "int64", "uint8", "bool"]:

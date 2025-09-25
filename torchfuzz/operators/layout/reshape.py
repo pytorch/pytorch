@@ -1,7 +1,7 @@
 """Reshape operator implementation."""
 
 import random
-from ..base import Operator
+from ..base.operator import Operator
 from torchfuzz.tensor import Tensor
 
 
@@ -9,9 +9,9 @@ class ReshapeOperator(Operator):
     """Operator for tensor reshape operations."""
 
     def __init__(self):
-        super().__init__("reshape")
+        super().__init__(supports_dtensor=False)
 
-    def can_produce(self, tensor):
+    def _can_produce_impl(self, output_tensor):
         """Reshape can always target any shape with the same numel."""
         return True
 

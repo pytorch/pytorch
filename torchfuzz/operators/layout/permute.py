@@ -1,7 +1,7 @@
 """Permute operator implementation."""
 
 import random
-from ..base import Operator
+from ..base.operator import Operator
 from torchfuzz.tensor import Tensor
 
 
@@ -9,18 +9,18 @@ class PermuteOperator(Operator):
     """Operator for tensor permutation operations."""
 
     def __init__(self):
-        super().__init__("permute")
+        super().__init__("permute", supports_dtensor=True)
 
-    def can_produce(self, tensor):
+    def _can_produce_impl(self, output_tensor):
         """Permute can produce tensors with at least 1 dimension."""
         # Permute doesn't make sense for scalar tensors since they have no dimensions
-        return len(tensor.size) >= 1
+        return len(output_tensor.size) >= 1
 
     def decompose(self, tensor):
         """Decompose tensor into input tensor for permute operation."""
         ndims = len(tensor.size)
 
-        # Should never receive scalar tensors since can_produce returns False for them
+        # Should never receive scalar tensors since _can_produce_impl returns False for them
         assert ndims >= 1, "PermuteOperator should not receive scalar tensors"
 
         # Generate a random permutation of dimensions

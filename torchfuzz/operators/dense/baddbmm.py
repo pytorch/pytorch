@@ -1,7 +1,7 @@
 """Batch add matrix multiplication operator implementation."""
 
 import random
-from ..base import Operator
+from ..base.operator import Operator
 from torchfuzz.tensor import Tensor
 
 
@@ -9,14 +9,14 @@ class BaddbmmOperator(Operator):
     """Operator for baddbmm (torch.baddbmm): bias + batch1 @ batch2."""
 
     def __init__(self):
-        super().__init__("baddbmm")
+        super().__init__(supports_dtensor=False)
 
-    def can_produce(self, tensor):
+    def _can_produce_impl(self, output_tensor):
         """Baddbmm can produce tensors that are 3D and floating point."""
         # baddbmm only supports floating point tensors
-        if tensor.dtype in ["int8", "int16", "int32", "int64", "uint8", "bool"]:
+        if output_tensor.dtype in ["int8", "int16", "int32", "int64", "uint8", "bool"]:
             return False
-        return len(tensor.size) == 3
+        return len(output_tensor.size) == 3
 
     def decompose(self, tensor, num_inputs=3):
         """Decompose tensor into input tensors for baddbmm."""

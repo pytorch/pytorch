@@ -1,7 +1,7 @@
 """Layer normalization operator implementation."""
 
 import random
-from ..base import Operator
+from ..base.operator import Operator
 from torchfuzz.tensor import Tensor
 
 
@@ -9,9 +9,9 @@ class LayerNormOperator(Operator):
     """Operator for layer normalization (torch.nn.functional.layer_norm)."""
 
     def __init__(self):
-        super().__init__("layer_norm")
+        super().__init__("layer_norm", supports_dtensor=False)
 
-    def can_produce(self, tensor):
+    def _can_produce_impl(self, tensor):
         """LayerNorm can produce tensors of various dimensions and floating point types."""
         # LayerNorm only supports floating point and complex dtypes
         if tensor.dtype in ["int8", "int16", "int32", "int64", "uint8", "bool"]:

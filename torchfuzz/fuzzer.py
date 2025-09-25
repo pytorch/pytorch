@@ -1,4 +1,3 @@
-
 import time
 import secrets
 import random
@@ -10,11 +9,18 @@ from operators import *  # Import everything from operators
 from tensor import Tensor
 
 class Fuzzer:
-    def __init__(self, supported_ops, max_depth, seed):
+    def __init__(self, supported_ops, max_depth, seed, use_dtensor=False, mesh_dims=(8, 8, 4)):
         self.supported_ops = supported_ops  # List of Operator instances
         self.max_depth = max_depth
+        self.use_dtensor = use_dtensor
+        self.base_mesh_dims = mesh_dims  # Base mesh dims for fallback
         random.seed(seed)
         self.generated_nodes = []  # List of all nodes (for dependency tracking)
+
+        # Fuzzed parameters that will be generated per run
+        self.fuzzed_mesh_dims = None
+        self.fuzzed_placements = None
+        self.world_size = None
 
     def fuzz(self, output_path=None):
         # Generate a random nonce for the filename
@@ -27,6 +33,13 @@ class Fuzzer:
 
         # Ensure the output directory exists
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
+
+        # Fuzz DTensor parameters if enabled
+        if self.use_dtensor:
+            self.world_size, self.fuzzed_mesh_dims = self.fuzz_mesh_config()
+            print(f"Fuzzed mesh configuration: world_size={self.world_size}, mesh_dims={self.fuzzed_mesh_dims}")
+        else:
+            self.fuzzed_mesh_dims = self.base_mesh_dims
 
         target = self.generate_random_tensor()
         # Each node is a tuple: (output_tensor, op, input_tensors)
@@ -45,7 +58,7 @@ class Fuzzer:
                 # Only decompose leaf tensors (those not produced by an op)
                 if op is None and self.supported_ops:
                     # Decompose tensor into op and its input tensors
-                    candidates = [op for op in self.supported_ops if op.can_produce(output_tensor)]
+                    candidates = [op for op in self.supported_ops if op.can_produce(output_tensor, use_dtensor=self.use_dtensor)]
                     if not candidates:
                         continue
                     chosen_op = random.choice(candidates)
@@ -104,8 +117,21 @@ class Fuzzer:
         # Collect all nodes (including leaves) and perform proper topological sort
         all_nodes = self._topological_sort(target, tensor_to_node)
 
+        # Generate fuzzed placements for all leaf tensors if using DTensor
+        if self.use_dtensor:
+            # Find the minimum number of dimensions across all tensors to ensure safe sharding
+            leaf_nodes = [node for node in all_nodes if node[1] is None]
+            min_tensor_dims = min(len(node[0].size) for node in leaf_nodes) if leaf_nodes else 0
+            self.fuzzed_placements = self.fuzz_placements(self.fuzzed_mesh_dims, min_tensor_dims)
+
         # Generate and write code using CodeGenerator
-        codegen = CodeGenerator()
+        codegen = CodeGenerator(
+            use_dtensor=self.use_dtensor,
+            mesh_dims=self.fuzzed_mesh_dims,
+            world_size=self.world_size or 256,  # Default fallback
+            placements=self.fuzzed_placements,
+            test_compile=True  # Default to eager-only for DTensor
+        )
         codegen.generate_code(target, all_nodes, output_path)
         abs_path = os.path.abspath(output_path)
         print(f"Generated program written to: {abs_path}")
@@ -169,12 +195,20 @@ class Fuzzer:
         return depends_on(candidate_input, output_tensor)
 
     def generate_random_tensor(self):
-        # Allow ndim=0 to generate a scalar tensor
-        ndim = random.randint(0, 3)
-        if ndim == 0:
-            size = ()
-        else:
-            size = tuple(random.randint(1, 128) for _ in range(ndim))
+        """
+        Generate tensor with dimensions divisible by mesh size for DTensor sharding.
+        """
+        ndim = random.randint(1, 3)
+        size = []
+        for i in range(ndim):
+            # Choose a base size and make it divisible by relevant mesh dimension
+            base_size = random.randint(16, 32)  # Reduced to avoid huge tensors
+            # Use modulo cycling through mesh dims to determine divisibility
+            mesh_div = self.fuzzed_mesh_dims[i % len(self.fuzzed_mesh_dims)] if self.fuzzed_mesh_dims else self.base_mesh_dims[i % len(self.base_mesh_dims)]
+            # Make size divisible by mesh dimension
+            divisible_size = base_size * mesh_div
+            size.append(divisible_size)
+        size = tuple(size)
 
         stride = []
         acc = 1
@@ -190,11 +224,62 @@ class Fuzzer:
 
         return Tensor(size, stride, dtype, device, self.supported_ops)
 
+    def fuzz_mesh_config(self):
+        """
+        Fuzz the mesh dimensions and world size for DTensor.
+        Returns (world_size, mesh_dims)
+        """
+        # Common world sizes in distributed training
+        world_size_options = [64, 128, 256, 512, 1024]
+        world_size = random.choice(world_size_options)
+
+        # Generate mesh dimensions that multiply to world_size or a factor of it
+        # Common mesh patterns: 2D (DP x TP), 3D (DP x TP x PP)
+        mesh_patterns = []
+
+        # 2D mesh patterns
+        for dp in [2, 4, 8, 16, 32]:
+            for tp in [2, 4, 8, 16, 32]:
+                if dp * tp <= world_size and world_size % (dp * tp) == 0:
+                    mesh_patterns.append((dp, tp))
+
+        # 3D mesh patterns
+        for dp in [2, 4, 8, 16]:
+            for tp in [2, 4, 8]:
+                for pp in [2, 4, 8]:
+                    if dp * tp * pp <= world_size and world_size % (dp * tp * pp) == 0:
+                        mesh_patterns.append((dp, tp, pp))
+
+        if mesh_patterns:
+            mesh_dims = random.choice(mesh_patterns)
+        else:
+            # Fallback to base mesh dims
+            mesh_dims = self.base_mesh_dims
+
+        return world_size, mesh_dims
+
+    def fuzz_placements(self, mesh_dims, min_tensor_ndim):
+        """
+        Fuzz the placement strategy for tensors given mesh dimensions.
+        Uses the minimum tensor dimensionality to ensure compatibility across all tensors.
+        Returns tuple of placements (Shard(dim) or Replicate())
+        """
+        placements = []
+
+        # Start with all Replicate() to get basic DTensor functionality working
+        # TODO: Gradually introduce sharding once basic functionality is stable
+        for i, mesh_dim in enumerate(mesh_dims):
+            placements.append("Replicate()")
+
+        return tuple(placements)
+
 def main():
     parser = argparse.ArgumentParser(description="Fuzzer for generating PyTorch programs.")
     parser.add_argument("--max-depth", type=int, default=3, help="Maximum depth of the operation tree.")
     parser.add_argument("--seed", type=int, default=None, help="Random seed. If not set, a random seed will be generated.")
     parser.add_argument("--output", type=str, default=None, help="Output file path.")
+    parser.add_argument("--dtensor", action="store_true", help="Enable DTensor support for distributed tensors.")
+    parser.add_argument("--mesh-dims", nargs=3, type=int, default=[8, 8, 4], help="Mesh dimensions for DTensor (3 integers).")
     args = parser.parse_args()
 
     # Dynamically initialize all operator classes imported from operators
@@ -212,8 +297,11 @@ def main():
         seed = int(time.time() * 1000) ^ secrets.randbits(32)
         print(f"No seed provided, generated random seed: {seed}")
     output_path = args.output
-    print(f"Running fuzzer with max_depth={max_depth}, seed={seed}, output={output_path}")
-    fuzzer = Fuzzer(supported_ops, max_depth, seed)
+    mesh_dims = tuple(args.mesh_dims)
+
+    dtensor_str = " (DTensor enabled)" if args.dtensor else ""
+    print(f"Running fuzzer with max_depth={max_depth}, seed={seed}, output={output_path}, mesh_dims={mesh_dims}{dtensor_str}")
+    fuzzer = Fuzzer(supported_ops, max_depth, seed, use_dtensor=args.dtensor, mesh_dims=mesh_dims)
     fuzzer.fuzz(output_path=output_path)
 
 

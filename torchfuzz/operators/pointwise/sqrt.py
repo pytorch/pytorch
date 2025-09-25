@@ -8,9 +8,9 @@ class SqrtOperator(Operator):
     """Operator for square root operation."""
 
     def __init__(self):
-        super().__init__("sqrt")
+        super().__init__(supports_dtensor=True)
 
-    def can_produce(self, tensor):
+    def _can_produce_impl(self, output_tensor):
         """Sqrt can be applied to any tensor (elementwise op)."""
         return True
 

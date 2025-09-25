@@ -5,12 +5,12 @@ from torchfuzz.tensor import Tensor
 
 
 class ExpOperator(Operator):
-    """Operator for exponential function."""
+    """Operator for exponential function (DTensor-safe)."""
 
     def __init__(self):
-        super().__init__("exp")
+        super().__init__(supports_dtensor=True)
 
-    def can_produce(self, tensor):
+    def _can_produce_impl(self, output_tensor):
         """Exp can be applied to any tensor (elementwise op)."""
         return True
 

@@ -1,7 +1,7 @@
 """Max operator implementation."""
 
 import random
-from ..base import Operator
+from ..base.operator import Operator
 from torchfuzz.tensor import Tensor
 
 
@@ -9,15 +9,15 @@ class MaxOperator(Operator):
     """Operator for tensor max reduction."""
 
     def __init__(self):
-        super().__init__("max")
+        super().__init__(supports_dtensor=True)
 
-    def can_produce(self, tensor):
+    def _can_produce_impl(self, output_tensor):
         """
         We construct inputs by inserting at most one extra dimension,
         so we need room to add a dim and stay within a reasonable cap.
         Your generator uses up to 5 dims, so keep input_dim <= 5.
         """
-        return len(tensor.size) < 5
+        return len(output_tensor.size) < 5
 
     def decompose(self, tensor):
         """

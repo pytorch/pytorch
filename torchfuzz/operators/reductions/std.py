@@ -1,7 +1,7 @@
 """Std operator implementation."""
 
 import random
-from ..base import Operator
+from ..base.operator import Operator
 from torchfuzz.tensor import Tensor
 
 
@@ -9,9 +9,9 @@ class StdOperator(Operator):
     """Operator for tensor standard deviation reduction."""
 
     def __init__(self):
-        super().__init__("std")
+        super().__init__(supports_dtensor=False)
 
-    def can_produce(self, tensor):
+    def _can_produce_impl(self, tensor):
         """
         We construct inputs by inserting at most one extra dimension,
         so we need room to add a dim and stay within a reasonable cap.

@@ -1,7 +1,7 @@
 """View operator implementation."""
 
 import random
-from ..base import Operator
+from ..base.operator import Operator
 from torchfuzz.tensor import Tensor
 
 
@@ -9,9 +9,9 @@ class ViewOperator(Operator):
     """Operator for tensor view/reshape operations."""
 
     def __init__(self):
-        super().__init__("view")
+        super().__init__(supports_dtensor=False)
 
-    def can_produce(self, tensor):
+    def _can_produce_impl(self, output_tensor):
         """View can target any shape with the same numel, but requires contiguous input."""
         return True
 

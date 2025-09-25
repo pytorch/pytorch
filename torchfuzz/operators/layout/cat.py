@@ -1,7 +1,7 @@
 """Cat operator implementation."""
 
 import random
-from ..base import Operator
+from ..base.operator import Operator
 from torchfuzz.tensor import Tensor
 
 
@@ -9,11 +9,11 @@ class CatOperator(Operator):
     """Operator for tensor concatenation."""
 
     def __init__(self):
-        super().__init__("cat")
+        super().__init__(supports_dtensor=False)
 
-    def can_produce(self, tensor):
+    def _can_produce_impl(self, output_tensor):
         """Can only cat if there is at least one dimension with size >= 2."""
-        return any(s >= 2 for s in tensor.size)
+        return any(s >= 2 for s in output_tensor.size)
 
     def supports_variable_inputs(self):
         """Cat operator supports variable number of inputs."""
