@@ -237,22 +237,6 @@ static void VariableTrackerMeta_dealloc(PyObject* self) {
   PyType_Type.tp_dealloc(self);
 }
 
-// static void VariableTrackerMeta_dealloc(PyObject* self) {
-//   PyObject_GC_UnTrack(self);
-
-//   // Py_XDECREF((PyObject*)VT_tp);
-//   // Py_XDECREF((PyObject*)LazyVT_tp);
-
-//   // _all_subclasses.clear();
-//   // _isinstance_cache.clear();
-
-//   // PyTypeObject* base = Py_TYPE(self)->tp_base; // PyType_Type
-//   // std::cout << "comecou " << (self == nullptr) << std::endl;
-//   if (self != nullptr)
-//     PyType_Type.tp_dealloc(self);
-//   // std::cout << "terminou" << std::endl;
-// }
-
 static int VariableTrackerMeta_traverse(
     PyObject* self,
     visitproc visit,
