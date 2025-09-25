@@ -827,8 +827,8 @@ test_dynamo_benchmark() {
   shift
 
 
-  ### Perf benchmark 2.9 RC4
-  pip_uninstall torch torchvision torchaudio torchrec fbgemm-gpu triton pytorch-triton
+  ### Perf benchmark 2.9 RC4, need to reinstall detectron2 to avoid crashing when importing it
+  pip_uninstall torch torchvision torchaudio torchrec fbgemm-gpu triton pytorch-triton detectron2
   pip_install torch==2.9.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/test/cu128
   # Rebuild torchrec and fbgemm because they don't have RC for 2.9 yet
   if [[ "${TEST_CONFIG}" == *torchbench* ]] && [[ "${TEST_CONFIG}" != *cpu* ]]; then
@@ -836,6 +836,8 @@ test_dynamo_benchmark() {
     rm -rf dist/fbgemm_gpu
     install_torchrec_and_fbgemm
   fi
+  # Same pinned commit as used in TorchBench
+  pip_install git+https://github.com/facebookresearch/detectron2.git@0df2d73d0013db7de629602c23cc120219b4f2b8
   pip freeze
 
 
