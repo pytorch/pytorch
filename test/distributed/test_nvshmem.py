@@ -739,34 +739,39 @@ class HierarchicalTest(MultiProcContinuousTest):
         torch.manual_seed(42)
         dtype = torch.float
 
+        seqlen = 512
+        hid_dim = 1024
+        inp = torch.randn((seqlen, hid_dim), dtype=dtype, device=self.device)
+
         nnodes = self.inter_group.size()
-
-        # Number of tokens for a peer node is random between [0, split_node_max)
-        split_node_max = 10
-        inp_splits = torch.randint(
-            split_node_max, (nnodes,), dtype=torch.int64, device=self.device
+        # Limit token routing to half of the nodes
+        topk_nodes = nnodes // 2
+        # Create some synthetic token choices for sending to which nodes
+        topk_node_idx = torch.randint(
+            nnodes, (seqlen, topk_nodes), dtype=torch.int64, device=self.device
         )
+        # Convert indices to splits
+        splits = torch.histc(topk_node_idx, bins=nnodes, min=0, max=nnodes - 1)
+        sorted_indices = torch.argsort(topk_node_idx.view(-1))
+        expanded_inp = inp[sorted_indices // topk_nodes]
+        expanded_seqlen = seqlen * topk_nodes
 
-        # Max number of input tokens (must be a constant across ranks for symmetric memory allocation)
-        seqlen = split_node_max * nnodes
         # Max number of output tokens (must be a constant across ranks for symmetric memory allocation)
         overflow_factor = nnodes  # worst case: one rank receives all data
-        max_out_len = seqlen * overflow_factor
+        max_out_len = expanded_seqlen * overflow_factor
 
-        hid_dim = 1024
-
-        inp = symm_mem.empty((seqlen, hid_dim), dtype=dtype, device=self.device).copy_(
-            torch.randn((seqlen, hid_dim), dtype=dtype, device=self.device)
-        )
+        inp = symm_mem.empty(
+            (expanded_seqlen, hid_dim), dtype=dtype, device=self.device
+        ).copy_(expanded_inp)
         out = symm_mem.empty(
             (max_out_len, hid_dim), dtype=dtype, device=self.device
         ).fill_(-1)
-        in_splits = symm_mem.empty(nnodes, dtype=torch.int64, device=self.device)
+        in_splits = symm_mem.empty(nnodes, dtype=torch.int64, device=self.device).copy_(
+            splits
+        )
         out_splits_offsets = symm_mem.empty(
             (2, nnodes), dtype=torch.int64, device=self.device
         )
-        # Row 0 is input splits
-        in_splits.copy_(inp_splits)
 
         # Sync all ranks to ensure remote tensors are allocated
         dist.barrier()
