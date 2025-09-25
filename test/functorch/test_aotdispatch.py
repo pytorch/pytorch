@@ -7941,13 +7941,18 @@ metadata incorrectly.
         )
         get_pack_hook_gm_called = False
 
+        def _pack_noop(t):
+            return t
+
+        pack_noop_gm = torch.fx.symbolic_trace(_pack_noop)
+        unpack_noop_gm = pack_noop_gm
+
         def _pack_get_pack_hook_gm_by_fx_node(node):
             nonlocal get_pack_hook_gm_called
             get_pack_hook_gm_called = True
             assert isinstance(node, torch.fx.Node)
             # meta = node.meta
             # nn_module_stack = node.meta["nn_module_stack"]
-            print(f"XXX NODE.meta:{node.meta}")
             # E.g.:  nn_module_stack:
             # {
             # 'L__self__': ('', 'abc.DTypeCastTransformer'),
@@ -7955,10 +7960,10 @@ metadata incorrectly.
             # 'L__self__layers.0.ffn_norm': ('layers.0.ffn_norm', 'autoparallel.cast_parametrization.DTypeCastRMSNorm')
             # }
 
-            return pack_gm
+            return pack_noop_gm
 
         def _unpack_get_pack_hook_gm_by_fx_node(node):
-            return unpack_gm
+            return unpack_noop_gm
 
         pack_gm.get_pack_hook_gm_by_fx_node = _pack_get_pack_hook_gm_by_fx_node
         unpack_gm.get_pack_hook_gm_by_fx_node = _unpack_get_pack_hook_gm_by_fx_node

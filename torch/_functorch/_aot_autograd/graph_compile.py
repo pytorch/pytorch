@@ -1055,9 +1055,6 @@ def maybe_inline_graph_saved_tensors_hooks(
         # E.g. to not apply hooks to specific nn.module
         if hasattr(pack_hook_gm, "get_pack_hook_gm_by_fx_node"):
             _pack_hook_gm = pack_hook_gm.get_pack_hook_gm_by_fx_node(saved)
-            if _pack_hook_gm is None:
-                continue
-
             assert isinstance(_pack_hook_gm, torch.fx.GraphModule)
             pack_hook_gm = _pack_hook_gm
         if hasattr(unpack_hook_gm, "get_pack_hook_gm_by_fx_node"):
