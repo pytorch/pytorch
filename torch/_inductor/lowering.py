@@ -7095,21 +7095,11 @@ def while_loop(cond_fn, body_fn, carried_inputs, additional_inputs, stack_output
             msg = f"{msg} Found from : \n {stack_trace}"
         V.graph.disable_cudagraphs_reason = msg
 
-    def _map_output(out: Any):
-        if isinstance(out, TensorBox):
-            return out
-        elif isinstance(out, ir.StorageBox):
-            return TensorBox(out)
-        elif isinstance(out, ir.MultiOutput):
-            return TensorBox.create(out)
-        else:
-            raise RuntimeError(f"NYI unsupported output type: {type(out)}")
-
     result = ir.WhileLoop.create(
         cond_fn, body_fn, carried_inputs, additional_inputs, stack_output
     )
     assert isinstance(result, Sequence)
-    return list(map(_map_output, result))
+    return list(map(ir.WhileLoop._maybe_wrap_as_tensor_box, result))
 
 
 register_lowering(
