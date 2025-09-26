@@ -840,6 +840,9 @@ test_dynamo_benchmark() {
   pip_install git+https://github.com/facebookresearch/detectron2.git@0df2d73d0013db7de629602c23cc120219b4f2b8
   pip freeze
 
+  # Control TORCHINDUCTOR_GRAPH_PARTITION
+  export TORCHINDUCTOR_GRAPH_PARTITION=0
+
 
   if [[ "${TEST_CONFIG}" == *perf_compare* ]]; then
     test_single_dynamo_benchmark "training" "$suite" "$shard_id" --training --amp "$@"
