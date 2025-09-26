@@ -223,9 +223,6 @@ void grid_sampler_single_element(
     auto input_size = input_sizes[input_dim];
     auto coord = static_cast<opmath_t<T>>(coords[coord_dim]);
 
-    // Interpret nan as -1
-    coord = isnan(coord) ? -1 : coord;
-
     if (!align_corners) {
       // Map unaligned grid space to aligned grid space
       auto corner_alignment_factor = static_cast<opmath_t<T>>(input_size) /
