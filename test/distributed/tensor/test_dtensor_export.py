@@ -20,7 +20,8 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import MLPModule
 from torch.testing._internal.distributed.fake_pg import FakeStore
-from torch.utils._debug_mode import DebugMode
+
+from torch._functorch.partitioners import min_cut_rematerialization_partition
 
 
 class SimpleModel(torch.nn.Module):
@@ -42,8 +43,7 @@ def strict_export_and_aot_export_joint_with_descriptors(model, inputs):
     # joint_gm produced here is missing the backward region, due to incompatiblility
     # between ep.module() and aot_export_joint_with_descriptors.
     # Keeping this here to show the issue.
-    # return aot_export_joint_with_descriptors_alone(ep.module(), inputs)
-    return ep.graph_module
+    return aot_export_joint_with_descriptors_alone(ep.module(), inputs)
 
 
 def graph_capture_and_aot_export_joint_with_descriptors(model, inputs):
@@ -80,12 +80,12 @@ class DTensorExportTest(TestCase):
     @parametrize(
         "export_fn",
         [
-            strict_export_and_aot_export_joint_with_descriptors,
-            # graph_capture_and_aot_export_joint_with_descriptors,
-            # aot_export_joint_with_descriptors_alone,
+            # strict_export_and_aot_export_joint_with_descriptors,
+            graph_capture_and_aot_export_joint_with_descriptors,
+            aot_export_joint_with_descriptors_alone,
         ],
     )
-    def test_dtensor_module(
+    def test_parallelize_module_with_dtensor_input(
         self,
         export_fn,
     ):
@@ -111,11 +111,12 @@ class DTensorExportTest(TestCase):
         inputs = torch.rand(20, 10, device=self.device_type)
         inputs = distribute_tensor(inputs, mesh_2d["tp"], placements=[Replicate()])
 
-        # with DebugMode(record_torchfunction=False) as debug_mode:
-        #     out = tp_model(inputs)
-
         joint_gm = export_fn(tp_model, inputs)
+        fw_gm, bw_gm = min_cut_rematerialization_partition(joint_gm, None, num_fwd_outputs=1)
 
+        self.assertTrue(sum([1 for node in joint_gm.graph.nodes if node.target == torch.ops._c10d_functional.all_reduce.default]), 3)
+        self.assertTrue(sum([1 for node in fw_gm.graph.nodes if node.target == torch.ops._c10d_functional.all_reduce.default]), 2)
+        self.assertTrue(sum([1 for node in bw_gm.graph.nodes if node.target == torch.ops._c10d_functional.all_reduce.default]), 1)
 
 
 
