@@ -187,7 +187,7 @@ def scan(
     # Move scan dim to 0 and always perform scan on dim 0
     leaves_xs = []
     for elem in leaves_xs_orig:
-        leaves_xs.append(torch.movedim(elem, dim, 0))
+        leaves_xs.append(torch.movedim(elem, dim, 0) if dim != 0 else elem)
 
     if reverse:
         leaves_xs = [torch.flip(elem, [0]) for elem in leaves_xs]
@@ -777,7 +777,7 @@ class ScanAutogradImpl:
         )
         return (
             *grad_init,
-            *grad_xs,
+            *[torch.flip(elem, (0,)) for elem in grad_xs],
             *fill_none_with_masks(
                 grad_additional_inputs, additional_inputs_tensor_masks
             ),

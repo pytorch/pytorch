@@ -7,6 +7,8 @@ from torch._higher_order_ops.utils import create_bw_fn, materialize_as_graph
 
 logger: logging.Logger = logging.getLogger(__name__)
 
+logger.setLevel(logging.DEBUG)
+
 
 def _find_hop_subgraph_outputs(gm: torch.fx.GraphModule) -> tuple[torch.fx.Node]:
     output_node_args = gm.graph.find_nodes(op="output")[0].args
@@ -15,7 +17,7 @@ def _find_hop_subgraph_outputs(gm: torch.fx.GraphModule) -> tuple[torch.fx.Node]
 
 
 def is_complex_expr(expr: Any) -> bool:
-    return not expr.is_symbol
+    return not expr.is_symbol and not expr.is_constant()
 
 
 class HopPartitionedGraph:
@@ -53,7 +55,7 @@ class HopPartitionedGraph:
                 and self.no_complex_exprs_at_boundary
             ):
                 invalid_reasons.append(
-                    f"fw_gm output[{i}] must be of type SymInt with basic symbols or"
+                    f"fw_gm output[{i}] must be of type SymInt with basic symbols or "
                     f"Tensor but got {type(out.meta['val'])} {out.meta['val']}"
                 )
 
