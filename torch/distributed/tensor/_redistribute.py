@@ -235,6 +235,7 @@ def redistribute_local_tensor(
                     raise RuntimeError(
                         f"redistribute from {current} to {target} not supported yet"
                     )
+
             elif target.is_shard():
                 # Case 2: target is Shard
                 target_placement = cast(Shard, target)
