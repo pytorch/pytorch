@@ -771,16 +771,37 @@ def create_bw_fn(fn: Callable, args: tuple[Any]) -> Callable:
         grad_args = bw_fn(primals, tangents)[1]
         assert len(args) == len(grad_args)
 
-        maybe_clone = clone_outputs_aliasing_inputs(args_and_grad_outs)
-
-        return [
-            (
-                torch.zeros_like(arg)
-                if isinstance(arg, torch.Tensor) and grad is None
-                else maybe_clone(grad)
-            )
+        # For tensors whose grad is None, create zero tensors as gradients
+        # This invariant is useful for cudagraph.
+        grads = [
+            torch.zeros_like(arg)
+            if isinstance(arg, torch.Tensor) and grad is None
+            else grad
             for grad, arg in zip(grad_args, primals)
         ]
+
+        # Elimitate input-output, output-output aliasing
+        seen_input_storages = {
+            StorageWeakRef(t._typed_storage())
+            for t in args_and_grad_outs
+            if isinstance(t, torch.Tensor)
+        }
+        seen_output_storages = set()
+        final_grads = []
+        for grad, arg in zip(grads, primals):
+            if isinstance(arg, torch.Tensor):
+                assert isinstance(grad, torch.Tensor)
+                seen_input_storages.add(StorageWeakRef(arg._typed_storage()))
+                grad_storage = StorageWeakRef(grad._typed_storage())
+                if (
+                    grad_storage in seen_input_storages
+                    or grad_storage in seen_output_storages
+                ):
+                    grad = grad.clone()
+                seen_output_storages.add(StorageWeakRef(grad._typed_storage()))
+            final_grads.append(grad)
+
+        return final_grads
 
     return flat_fn
 
