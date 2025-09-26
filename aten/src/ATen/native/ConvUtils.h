@@ -465,8 +465,11 @@ inline bool mps_conv_use_channels_last(const at::Tensor& input, const at::Tensor
     return false;
   }
 
-  auto fmt = input.suggest_memory_format();
-  return fmt == at::MemoryFormat::ChannelsLast || fmt == at::MemoryFormat::ChannelsLast3d;
+  auto is_channel_last = [](const at::Tensor& t) {
+    auto fmt = t.suggest_memory_format();
+    return fmt == at::MemoryFormat::ChannelsLast || fmt == at::MemoryFormat::ChannelsLast3d;
+  };
+  return is_channel_last(input) || is_channel_last(weight);
 }
 
 } // namespace at::native
