@@ -3643,6 +3643,8 @@ def assert_no_fake_params_or_buffers(gm: torch.fx.GraphModule) -> None:
             return "Enable TORCH_FAKE_TENSOR_DEBUG=1 to get creation stack traces on fake tensors."
 
     for name, buffer in gm.named_buffers():
+        if is_fake(buffer):
+            torch.distributed.breakpoint()
         assert not is_fake(buffer), (
             f"Unexpected fake buffer {name} {stack_or_hint(buffer)}"
         )

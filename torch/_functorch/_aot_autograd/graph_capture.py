@@ -439,6 +439,21 @@ def aot_dispatch_autograd_graph(
         updated_joint_inputs_descs,
         aot_config=aot_config,
     )
+    from torch._logging import trace_structured
+    assert isinstance(fx_g, torch.fx.GraphModule)
+    trace_structured(
+        "artifact",
+        metadata_fn=lambda: {
+            "name": "aot_stage_1_gm",
+            "encoding": "string",
+        },
+        payload_fn=lambda: fx_g.print_readable(
+            print_output=False,
+            include_stride=True,
+            include_device=True,
+            expanded_def=True,
+        ),
+    )
 
     # There should be *NO* mutating ops in the graph at this point.
     assert_functional_graph(fx_g.graph)

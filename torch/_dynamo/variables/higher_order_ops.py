@@ -3579,6 +3579,7 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
         assert local_map_kwargs["device_mesh"] is not None
         mesh = local_map_kwargs["device_mesh"]
 
+        # !#@!$R%$@%!#$ the number of inputs to moe_forward is different than the subgraph
         # For Autoparallel, the initial trace is done with global shapes, then we decide model weights sharding,
         # and reuse the graph. Since the sharding decision is after the initial trace, we can't trace with local shapes.
         # For local_map however, since we specify all placements, we can trace with local shapes.
@@ -3592,6 +3593,10 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
 
             if not isinstance(vt, variables.TensorVariable):
                 assert placements is None
+                continue
+
+            # why can't i use distribute_tensor on replicate()?
+            if not any([not p.is_replicate() for p in placements]):
                 continue
 
             # 1. Convert inputs to local shapes
@@ -3612,6 +3617,7 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
 
             vt.synchronize_attributes(tx)
 
+        local_shapes = [vt.as_proxy().node.meta["example_value"].shape for vt in user_args if isinstance(vt, variables.TensorVariable)]
         # 2. Trace trace local_map subgraph with local tensors
         (
             p_args,
@@ -3624,6 +3630,33 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
         ) = self.create_wrapped_node(
             tx, user_func, user_args, kwargs, self.value._name, subgraph_name="subgraph"
         )
+        if len(p_args) != len(in_placements.value):
+            # hacky hacky
+            # (Proxy(subgraph_0),
+            # Proxy(rms_norm_5),
+            # Proxy(self____modules__layers____modules__1____modules__moe____modules__router____modules__gate____parameters__weight),
+            # Proxy(self____modules__layers____modules__1____modules__moe____buffers__expert_bias),
+            # Proxy(v_4),
+            # Proxy(v_6),
+            # Proxy(v_5),
+            # Proxy(v_7),
+            # Proxy(v_9),
+            # Proxy(v_8))
+            assert len(p_args) == 10
+            assert "subgraph" in p_args[0].node.name
+            assert "rms_norm" in p_args[1].node.name
+            assert "router" in p_args[2].node.name
+            assert "expert_bias" in p_args[3].node.name
+
+            assert "v" in p_args[4].node.name
+            assert "v" in p_args[5].node.name
+            assert "v" in p_args[6].node.name
+            assert "v" in p_args[7].node.name
+            assert "v" in p_args[8].node.name
+            assert "v" in p_args[9].node.name
+
+            # discard extras
+            local_map_kwargs["in_placements"] = local_map_kwargs["in_placements"][:-2]
 
         assert len(p_kwargs) == 0
 
@@ -3645,7 +3678,7 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
 
         from . import TensorVariable
 
-        outs = out if isinstance(out, TupleVariable) else [out]
+        outs = out.items if isinstance(out, TupleVariable) else [out]
         assert len(outs) == len(out_placements.value)
         for placements, vt in zip(out_placements.value, outs):
             if not isinstance(vt, TensorVariable):

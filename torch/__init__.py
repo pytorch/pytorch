@@ -1670,6 +1670,8 @@ def _check_with(
 
         message_evaluated = str(message())
 
+    print(message_evaluated)
+    torch.distributed.breakpoint()
     raise error_type(message_evaluated)
 
 

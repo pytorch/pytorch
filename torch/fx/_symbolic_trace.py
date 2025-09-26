@@ -429,6 +429,7 @@ class Tracer(TracerBase):
             if not qualname:
                 if isinstance(a, torch.Tensor):
                     base_name = "_tensor_constant"
+                    torch.distributed.breakpoint()
                 elif isinstance(a, (FakeScriptObject, ScriptObject)):
                     base_name = "_torchbind_obj"
                 elif isinstance(a, pytree.TreeSpec):

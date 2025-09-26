@@ -59,9 +59,10 @@ class ShardingPropagator:
         # op map to save static argnum to decide to reuse sharding prop cache or
         # re-run sharding prop
         self.op_to_schema_info: dict[OpOverload, RuntimeSchemaInfo] = {}
-        self.propagate_op_sharding = LocalLRUCache(
-            self.propagate_op_sharding_non_cached
-        )
+        # self.propagate_op_sharding = LocalLRUCache(
+        #     self.propagate_op_sharding_non_cached
+        # )
+        self.propagate_op_sharding = self.propagate_op_sharding_non_cached
         # op map to save indices of shape (and stride) args which may need to be
         # modified in sharding prop
         self.op_to_shape_and_stride_idx: dict[
