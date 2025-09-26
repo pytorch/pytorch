@@ -31,6 +31,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     skip_unless_torch_gpu,
     with_comms,
 )
+from torch.utils._typing_utils import not_none
 
 
 def get_generator_seed_for_device_type(device_type: str) -> int:
@@ -549,7 +550,9 @@ class DistTensorRandomOpTest(DTensorTestBase):
             # local_shard_list_on_dim[i] has the list of all shards on that dim
             # as a tuple (local_shard_offset, local_shard_size)
             dtensor_shape = dtensor.shape
-            local_shard_list_on_dim = [[(0, l)] for l in dtensor_shape]
+            local_shard_list_on_dim: list[list[tuple[int, int]]] = [
+                [(0, l)] for l in dtensor_shape
+            ]
             for idx, placement in enumerate(placements):
                 if isinstance(placement, Shard):
                     mesh_dim_size = device_mesh.size(idx)
@@ -565,7 +568,7 @@ class DistTensorRandomOpTest(DTensorTestBase):
                             shard_idx_on_dim,
                         )
                         local_shard_list_on_dim[shard_dim].append(
-                            (shard_offset, shard_size)
+                            (not_none(shard_offset), shard_size)
                         )
 
             local_shard_comb = itertools.product(*local_shard_list_on_dim)
