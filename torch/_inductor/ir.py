@@ -8945,7 +8945,6 @@ class TorchBindObject(NonTensorObj):
         if str(real_script_obj._type()) == OpaqueTypeStr:
             return 0
 
-        fake_x = FakeOpaqueObject()
         assert hasattr(real_script_obj, "__obj_flatten__")
         flat_dict = dict(real_script_obj.__obj_flatten__())
         flat_elems = pytree.tree_flatten(flat_dict)[0]
