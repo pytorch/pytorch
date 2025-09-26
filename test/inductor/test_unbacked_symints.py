@@ -490,6 +490,22 @@ class TestUnbackedSymints(InductorTestCase):
         torch.testing.assert_close(actual, expected)
 
     @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
+    def test_softmax(self, device):
+        def fn(x):
+            nz = x.nonzero().float()
+            soft = torch.softmax(nz, dim=0)
+            logsoft = torch.nn.functional.log_softmax(nz, dim=0)
+            return soft * logsoft
+
+        example_inputs = (
+            torch.randint(low=0, high=2, size=(32,), device=device, dtype=torch.int8),
+        )
+        actual = torch.compile(fn, fullgraph=True)(*example_inputs)
+        expected = fn(*example_inputs)
+        torch.testing.assert_close(actual, expected)
+
+    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
     @skipIfXpu(msg="_scaled_dot_product_flash_attention is not supported on XPU yet")
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     def test_sdpfa(self, device):
@@ -514,6 +530,35 @@ class TestUnbackedSymints(InductorTestCase):
 
         x = torch.tensor([1.0, 0.0, 1.0, 0.0], device=device)
         torch.compile(fn, fullgraph=True)(x)
+
+    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @skipIfXpu(msg="scaled_dot_product_attention is not supported on XPU yet")
+    @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
+    def test_sdfpa_unbacked_strides(self, device):
+        if device == "cpu":
+            raise unittest.SkipTest("scaled_dot_product_attention has no CPU backend")
+
+        def fn(x, y):
+            B, H, d_h = 2, 4, 16
+            nz = torch.nonzero(x)
+            seq_len = nz.size(0)
+            y = torch.nonzero(y).size(0)
+            strides = (H * seq_len * d_h, seq_len * d_h, d_h, y)
+
+            q = torch.randn(B, H, seq_len, d_h, device=device, dtype=torch.float16)
+            k = torch.randn(B, H, seq_len, d_h, device=device, dtype=torch.float16)
+            v = torch.randn(B, H, seq_len, d_h, device=device, dtype=torch.float16)
+            q = torch.as_strided(q, size=(B, H, seq_len, d_h), stride=strides)
+            k = torch.as_strided(k, size=(B, H, seq_len, d_h), stride=strides)
+            v = torch.as_strided(v, size=(B, H, seq_len, d_h), stride=strides)
+            result = torch.ops.aten._scaled_dot_product_flash_attention.default(
+                q, k, v, dropout_p=0.0, is_causal=False, scale=None
+            )
+            return result
+
+        x = torch.tensor([1.0, 0.0] * 8, device=device)
+        y = torch.tensor([1.0, 0.0], device=device)
+        torch.compile(fn, fullgraph=True)(x, y)
 
     @skipGPUIf(not HAS_GPU, "torch.compile for gpu requires triton")
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
