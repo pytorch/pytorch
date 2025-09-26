@@ -817,7 +817,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 isinstance(condition, variables.SymNodeVariable)
                 and condition.evaluate_expr()
             ):
-                return variables.constant_none
+                return ConstantVariable(None)
 
         @register(SDPAParams)
         def handle_sdpa_params(self, tx: "InstructionTranslator", *args, **kwargs):

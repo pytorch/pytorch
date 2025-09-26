@@ -1111,7 +1111,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
         # Emulate the standard setattr on instance dict.
         tx.output.side_effects.store_attr(self, name, value)
-        return variables.constant_none
+        return variables.ConstantVariable(None)
 
     def needs_slow_setattr(self):
         return not is_standard_setattr(
@@ -1820,7 +1820,7 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
         ):
             self.exc_vt.args = args
             self.value.args = args
-            return variables.constant_none
+            return variables.ConstantVariable(None)
         elif (
             name == "__setattr__"
             and len(args) == 2

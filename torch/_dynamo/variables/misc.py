@@ -298,7 +298,7 @@ class SuperVariable(VariableTracker):
             tx.output.side_effects.store_attr(
                 self.objvar, attr, variables.DeletedVariable()
             )
-            return variables.constant_none
+            return variables.ConstantVariable(None)
         elif (
             isinstance(self.objvar, variables.UserDefinedDictVariable)
             and inner_fn in self.objvar._dict_methods
@@ -395,15 +395,15 @@ class ExceptionVariable(VariableTracker):
         # When raising a new exception while another exception is already being
         # handled, the new exception's __context__ attribute is automatically
         # set to the handled exception.
-        self.__context__ = variables.constant_none
+        self.__context__ = ConstantVariable(None)
         # Set when user raised an exception from another:
         # raise ... from ...
-        self.__cause__ = variables.constant_none
+        self.__cause__ = ConstantVariable(None)
         # Boolean flag that controls whether the __context__ attribute is set
-        self.__suppress_context__ = variables.constant_false
+        self.__suppress_context__ = ConstantVariable(False)
         # Contains the call stack where the exception was raised. Dynamo does
         # not track traceback. So, this variable is always set to None
-        self.__traceback__ = variables.constant_none
+        self.__traceback__ = ConstantVariable(None)
 
     def set_context(self, context: "ExceptionVariable"):
         self.__context__ = context
@@ -455,7 +455,7 @@ class ExceptionVariable(VariableTracker):
                 ),
             ):
                 self.__cause__ = val
-                self.__suppress_context__ = variables.constant_true
+                self.__suppress_context__ = variables.ConstantVariable(True)
             else:
                 raise_error("exception cause must be None or derive from BaseException")
         elif name == "__suppress_context__":
@@ -487,14 +487,14 @@ class ExceptionVariable(VariableTracker):
                 "`__cause__`, `__suppress_context__`, and `__traceback__` are supported.",
                 hints=[*graph_break_hints.SUPPORTABLE],
             )
-        return variables.constant_none
+        return variables.ConstantVariable(None)
 
     def call_method(self, tx, name, args, kwargs):
         if name == "__setattr__":
             return self.call_setattr(tx, *args)
         elif name == "with_traceback":
             [tb] = args
-            self.call_setattr(tx, ConstantVariable.cache("__traceback__"), tb)
+            self.call_setattr(tx, ConstantVariable("__traceback__"), tb)
             return self
         else:
             return super().call_method(tx, name, args, kwargs)
@@ -507,7 +507,7 @@ class ExceptionVariable(VariableTracker):
         elif name == "__suppress_context__":
             return self.__suppress_context__
         elif name == "__traceback__":
-            return variables.constant_none
+            return variables.ConstantVariable(None)
         elif name == "args":
             return variables.ListVariable(self.args, source=self.source)
         return super().var_getattr(tx, name)
@@ -1146,7 +1146,7 @@ class GetAttrVariable(VariableTracker):
                 if len(args) == 2:
                     return args[1]
                 else:
-                    return variables.constant_none
+                    return variables.ConstantVariable(None)
 
         elif (
             name == "__contains__"
@@ -1166,9 +1166,9 @@ class GetAttrVariable(VariableTracker):
             obj = self.obj
             key = args[0].as_python_constant()
             if obj.has_key_in_generic_dict(tx, key):
-                return variables.constant_true
+                return variables.ConstantVariable(True)
             else:
-                return variables.constant_false
+                return variables.ConstantVariable(False)
 
         elif name == "__setitem__" and self.name == "__dict__" and not kwargs:
             if isinstance(self.obj, variables.UserDefinedObjectVariable):

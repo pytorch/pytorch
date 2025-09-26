@@ -1293,7 +1293,7 @@ class StreamVariable(VariableTracker):
             tx.output.create_proxy(
                 "call_method", name, *proxy_args_kwargs([self] + args, kwargs)
             )
-            return variables.constant_none
+            return variables.ConstantVariable(None)
         elif name == "query":
             return wrap_fx_proxy_cls(
                 target_cls=variables.ConstantVariable,
@@ -1362,7 +1362,7 @@ class EventVariable(VariableTracker):
             tx.output.create_proxy(
                 "call_method", name, *proxy_args_kwargs([self] + args, kwargs)
             )
-            return variables.constant_none
+            return variables.ConstantVariable(None)
         elif name == "query":
             return wrap_fx_proxy_cls(
                 target_cls=variables.ConstantVariable,
