@@ -5,6 +5,7 @@ import inspect
 import warnings
 from collections.abc import Sequence
 from typing import Any, Callable, cast, Optional
+from typing_extensions import deprecated
 
 import torch
 import torch.distributed.tensor._dispatch as op_dispatch
@@ -29,7 +30,6 @@ from torch.distributed.tensor.placement_types import (
     Replicate,
     Shard,
 )
-from typing_extensions import deprecated
 
 
 __all__ = [
@@ -600,7 +600,7 @@ class DTensor(torch.Tensor):
             if not isinstance(placement, Partial):
                 continue
 
-            raise RuntimeError(
+            raise ValueError(
                 "Any checkpointing related operations are not supported for "
                 "DTensor with partial placements!"
             )
@@ -711,7 +711,9 @@ def distribute_tensor(
                 xla_distribute_tensor,
             )
 
-            return xla_distribute_tensor(tensor, device_mesh, placements)  # type:ignore[return-value]
+            return xla_distribute_tensor(
+                tensor, device_mesh, placements
+            )  # type:ignore[return-value]
         except ImportError as e:
             msg = "To use DTensor API with xla, you must install the torch_xla package!"
             raise ImportError(msg) from e
