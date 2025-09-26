@@ -476,11 +476,11 @@ def is_stdlib(mod: object) -> bool:
 def get_assert_bytecode_sequence(with_msg: bool) -> list[str]:
     if with_msg:
 
-        def fn(x: Any) -> NoReturn:
+        def fn(x: Any) -> None:
             assert x, "msg"
     else:
 
-        def fn(x: Any) -> NoReturn:
+        def fn(x: Any) -> None:
             assert x
 
     insts = [inst.opname for inst in dis.get_instructions(fn)]
