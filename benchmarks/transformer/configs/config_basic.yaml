@@ -26,3 +26,4 @@ kv_size: null  # Use batch sizes instead
 # Metrics and output
 throughput: true  # Calculate memory bandwidth & TFLOPS
 save_path: "basic_results.csv"  # Save to CSV
+output_json_for_dashboard: "basic_dashboard.json"  # Save JSON for PyTorch OSS dashboard

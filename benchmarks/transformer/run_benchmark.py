@@ -75,7 +75,15 @@ def config_to_args(config):
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         default_path = f"benchmark_results_{timestamp}.csv"
         args.extend(['--save-path', default_path])
-    
+
+    # Add JSON dashboard output if specified
+    if config.get('output_json_for_dashboard'):
+        args.extend(['--output-json-for-dashboard', config['output_json_for_dashboard']])
+
+    # Add benchmark name if specified
+    if config.get('benchmark_name'):
+        args.extend(['--benchmark-name', config['benchmark_name']])
+
     return args
 
 
