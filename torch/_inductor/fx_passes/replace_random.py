@@ -29,9 +29,6 @@ import triton
 import triton.language as tl
 from torch.library import triton_op, wrap_triton, register_fake, register_kernel
 
-
-import pdb
-
 BLOCK  = 256
 
 @triton.jit
@@ -73,8 +70,6 @@ def _philox_fill_uniform_gridstride(out_ptr, n_elements, seed, offset_blocks, la
 
         base   = tid * 4
         stride = threads_per_round
-
-
         
         # k=0
         i0 = base + (r * UNROLL) * stride
@@ -125,38 +120,6 @@ def _reserve_seed_and_offset_gridstride(x_device_index: int, nelem: int, block: 
     gen.set_offset(old_off + used_32)  
     return seed, (old_off // 4), (old_off % 4), grid_x
 
-@triton_op("my_triton_op::philox_rand", mutates_args={})
-def philox_rand(
-    shape: Sequence[int], #*,
-    device: torch.device,
-    dtype: torch.dtype = torch.float32,
-    #seed: Optional[int] = None,
-    #start_offset: Optional[int] = None,
-) -> torch.Tensor:
-    #raise NotImplementedError("custom::philox_rand has no eager body; kernels are registered via register_kernel().")
-    out = torch.empty(tuple(int(x) for x in shape), dtype=dtype, device=device)
-    n = out.numel()
-    if n == 0:
-        return out
-
-    print(tuple(int(x) for x in shape))
-    dev_idx = out.device.index or 0
-    # sync to CUDAGenerator
-    seed_val, offset_blocks, lane_shift, grid_x = _reserve_seed_and_offset_gridstride(dev_idx, n, BLOCK)
-
-    buf = out if out.dtype == torch.float32 else torch.empty_like(out, dtype=torch.float32)
-
-
-    grid = lambda meta: (grid_x,)
-    wrap_triton(_philox_fill_uniform_gridstride)[grid](
-        buf, n, seed_val, offset_blocks, lane_shift,
-        threads_per_round=BLOCK * grid_x,
-        BLOCK=BLOCK,
-    )
-    if buf is not out:
-        out.copy_(buf.to(out.dtype))
-    return out
-
 def get_and_acc_base_offset():
     pass
 
@@ -170,7 +133,7 @@ def _write_offset(out_ptr, base_offset):
 
     tl.store(out_ptr + 0, base_offset, mask=True)
 
-@triton_op("my_triton_op::rand_eager_offset", mutates_args={})
+@triton_op("triton_op::rand_eager_offset", mutates_args={})
 def rand_eager_offset(
     shape: Sequence[int], #*,
     device: torch.device,
@@ -181,7 +144,6 @@ def rand_eager_offset(
     for d in shape:
         n *= d
 
-    
     seed_val, base_offset, lane_shift, grid_x = _reserve_seed_and_offset_gridstride(device.index, n, BLOCK)
 
     grid = lambda meta: (1,)
@@ -308,7 +270,7 @@ def replace_random(
     ]  # type: ignore[union-attr]
     device = get_device(device)
 
-    if mode == "rand" and int(os.environ.get("ENV_ENABLE_RAND_EAGER", "0")) == 1:
+    if mode == "rand" and config.align_random_eager:
         def replacement(size):
             result = inductor_prims.random(
                 size, inductor_prims.lookup_seed(torch.ops.my_triton_op.rand_eager_offset(size, device), 0), mode, **default_kwargs(device)
@@ -319,15 +281,6 @@ def replace_random(
 
         match.replace_by_example(replacement, [size])
         return
-
-    if mode == "rand" and int(os.environ.get("CCA_ENV_ENABLE_ERIC_RAND", "0")) == 1:
-        def replacement(size):
-            # dtype: keep caller's dtype if provided, else default fp32
-            use_dtype = dtype if dtype is not None else torch.float32
-            return torch.ops.my_triton_op.philox_rand(size, device, use_dtype)
-
-        match.replace_by_example(replacement, [size])
-        return    
 
     # Fallback (e.g., randn) keeps existing inductor behavior
     

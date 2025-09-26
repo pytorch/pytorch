@@ -2329,7 +2329,7 @@ def inductor_random(size: list[int], seed: TensorBox, mode: str, *, offset: int 
     ).make_indexer()
     seed_loader = seed.make_loader()
 
-    if int(os.environ.get("ENV_ENABLE_RAND_EAGER", "0")) == 1:
+    if config.align_random_eager:
         nelem = math.prod(size)
         seed_val, threads_per_round = get_seed_and_threads_per_round(device.index, nelem)
         def inner_fn(index):

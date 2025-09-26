@@ -242,8 +242,6 @@ def device_assert_then(cond, msg, r):
     tl.device_assert(cond, msg)
     return r
 
-import pdb
-
 @triton.jit
 def _pick_lane(u0, u1, u2, u3, lane):
     v = tl.where(lane == 0, u0, u1)
@@ -276,8 +274,6 @@ def rand_eager(seed, offset_blocks, threads_per_round, tid,
     rand_int_res = _pick_lane(u0, u1, u2, u3, lanes)
     rtn = 1.0 - (rand_int_res.to(tl.float32) * inv + half)
     return rtn
-
-
 
 @triton.jit
 def randint64(seed, offset, low, high):
