@@ -257,6 +257,7 @@ class DeferredTritonCallWrapper:
                         "",
                     ]
                 )
+                # Add launch args info
                 record_launch_kernel_args = [
                     ("grid_0", "grid_0"),
                     ("grid_1", "grid_1"),
@@ -276,13 +277,114 @@ class DeferredTritonCallWrapper:
                         ]
                     )
 
+                # Add input info (This copies the logic from args_decl)
+                signature2dtype = {
+                    "i32": "int32_t",
+                    "i64": "int64_t",
+                    "fp32": "float",
+                }
+
+                def signature_is_tma_desc(sig):
+                    if not sig:
+                        return False
+                    if sig == "nvTmaDesc":
+                        return True
+                    if sig.startswith("tensordesc<"):
+                        return True
+                    return False
+
+                curr_arg_id = -1
+                total_args = []
+                ordered_argsname = []
+
+                def write_dummy_scalar_ivalue(arg_name):
+                    # We only care about the shape, therefore we create a dummy scalar here.
+                    prefix.writelines(
+                        [
+                            f"// Create c10::IValue for arg_{curr_arg_id}",
+                            f"C10IValueHandle tmp_{arg_name};",
+                            f"aoti_torch_int64_to_ivalue(0, &tmp_{arg_name});",
+                            f"RAIIC10IValueHandle RAII_{arg_name}(tmp_{arg_name});",
+                        ]
+                    )
+                    total_args.append(f"tmp_{arg_name}")
+
+                def process_args_for_input_shape(arg, arg_type, arg_signature=None):
+                    nonlocal curr_arg_id
+                    curr_arg_id += 1
+                    arg_name = f"{normalized_kernel_name}_arg_{curr_arg_id}"
+                    # ignore tma descriptors, as host-side TMA descriptors need
+                    # to be passed to the compiled Triton kernel by value
+                    if isinstance(
+                        arg_type, UnwrapUnspecArg
+                    ) and not signature_is_tma_desc(arg_signature):
+                        write_dummy_scalar_ivalue(arg_name)
+                    elif isinstance(
+                        arg_type, torch_dtype
+                    ) and not signature_is_tma_desc(arg_signature):
+                        # This is an at::Tensor.
+                        prefix.writelines(
+                            [
+                                f"// Create c10::IValue for arg_{curr_arg_id}",
+                                f"C10IValueHandle tmp_{arg_name};",
+                                f"aoti_torch_tensor_to_ivalue({arg}, &tmp_{arg_name});",
+                                f"RAIIC10IValueHandle RAII_{arg_name}(tmp_{arg_name});",
+                            ]
+                        )
+                        total_args.append(f"tmp_{arg_name}")
+                    elif (
+                        isinstance(arg_type, type(SymbolicCallArg))
+                        and arg_signature is not None
+                        and arg_signature in signature2dtype.keys()
+                    ) or arg_type in (sympy.Integer, int, sympy.Float, float):
+                        write_dummy_scalar_ivalue(arg_name)
+                    elif arg_signature and arg_signature.startswith("tensordesc<"):
+                        # Skip tma related args
+                        pass
+                    else:
+                        write_dummy_scalar_ivalue(arg_name)
+
+                # Add input name and shape information
+                for arg, arg_type, arg_signature in zip_longest(
+                    call_args, arg_types, arg_signatures
+                ):
+                    ordered_argsname.append(f'"{arg}"')
+                    process_args_for_input_shape(arg, arg_type, arg_signature)
+
+                # Add input name into kwargs
+                name_var = f"{normalized_kernel_name}_input_names"
+                prefix.writelines(
+                    [
+                        "// Create c10::IValue for input names",
+                        f"C10IValueHandle tmp_{name_var};",
+                        f"std::vector<const char*> {name_var}({{{', '.join(ordered_argsname)}}});",
+                        f"aoti_torch_strlist_to_ivalue({name_var}.data(), {len(ordered_argsname)}, &tmp_{name_var});",
+                        f"RAIIC10IValueHandle RAII_{name_var}(tmp_{name_var});",
+                        f'kwargs_{normalized_kernel_name}.emplace("Input Args", RAII_{name_var});',
+                    ]
+                )
+
+                inputs_info_ = f"{normalized_kernel_name}_inputs_info_"
+                # We pass in the non-RAII handles, since C10 doesn't automatically free them.
+                # The RAII will make sure they get freed when they are out of scope.
+                tmp_args = ",".join(total_args)
+                prefix.writelines(
+                    [
+                        "// Aggregate all c10::IValue for inputs",
+                        f"std::vector<C10IValueHandle> {inputs_info_}({{{tmp_args}}});",
+                    ]
+                )
+
+                # Start recording Function
                 prefix.writelines(
                     [
                         "",
                         (
                             "torch::aot_inductor::RAIIAtenRecordFunctionHandle "
                             f"record_{normalized_kernel_name}_"
-                            f'("{kernel_var_name}", reinterpret_cast<IValueMapHandle>(&kwargs_{normalized_kernel_name}));'
+                            f'("{kernel_var_name}", '
+                            f"reinterpret_cast<IValueMapHandle>(&kwargs_{normalized_kernel_name}), "
+                            f"{inputs_info_});"
                         ),
                         "",
                         f"launchKernel({', '.join(launch_kernel_args)});",
