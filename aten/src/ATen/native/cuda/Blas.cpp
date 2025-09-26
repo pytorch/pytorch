@@ -617,7 +617,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
       );
     }
 
-    // Apply prologue
+    // Apply epilogue
     switch (activation) {
       case Activation::RELU:
         // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
