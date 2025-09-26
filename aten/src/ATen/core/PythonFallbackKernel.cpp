@@ -1,5 +1,6 @@
 #include <c10/core/impl/TorchDispatchModeTLS.h>
 #include <c10/core/impl/PythonDispatcherTLS.h>
+#include <c10/core/impl/PyInterpreterHooks.h>
 #include <ATen/core/PythonFallbackKernel.h>
 #include <c10/core/SafePyObject.h>
 
@@ -64,47 +65,24 @@ void pythonFallback(const c10::OperatorHandle& op, c10::DispatchKeySet dispatch_
     return;
   }
 
-  // Otherwise, find a PyInterpreter on a Tensor
+  // Use global PyInterpreter instead of searching through tensors
   const auto& schema = op.schema();
   const auto num_arguments = schema.arguments().size();
-  // It is safe to dispatch on the very first Tensor with a pyobj_interpreter
-  // without checking the interpreters of any of the arguments, because when
-  // we actually run dispatch(), we will take out PyObjects in the context
-  // of that interpreter, and this will ensure that everyone is on the same
-  // interpreter.
   bool tensors_with_python_key_present = false;
-  c10::impl::PyInterpreter* interpreter = nullptr;
+  c10::impl::PyInterpreter* interpreter = c10::impl::getGlobalPyInterpreter();
+
+  // Still need to check if any tensors have the Python key
   for (const auto& ivalue : torch::jit::last(*stack, num_arguments)) {
     if (ivalue.isTensor()) {
-      auto* t = ivalue.unsafeToTensorImpl();
-      if (t->key_set().has(c10::DispatchKey::Python)) {
+      if (ivalue.unsafeToTensorImpl()->key_set().has(c10::DispatchKey::Python)) {
         tensors_with_python_key_present = true;
-      }
-
-      if (!interpreter) {
-        auto* t_interpreter = t->pyobj_slot()->pyobj_interpreter();
-        if (t_interpreter) {
-          interpreter = t_interpreter;
-        }
+        break;
       }
     } else if (ivalue.isTensorList() || ivalue.isOptionalTensorList()) {
-      // NB: use toListRef as it doesn't induce refcount bumps (toTensorListRef
-      // is not a thing)
       for (const auto& nv : ivalue.toListRef()) {
-        if (nv.isNone()) {
-          continue;
-        }
-
-        auto* t = nv.unsafeToTensorImpl();
-        if (t->key_set().has(c10::DispatchKey::Python)) {
+        if (!nv.isNone() && nv.unsafeToTensorImpl()->key_set().has(c10::DispatchKey::Python)) {
           tensors_with_python_key_present = true;
-        }
-
-        if (!interpreter) {
-          auto* t_interpreter = t->pyobj_slot()->pyobj_interpreter();
-          if (t_interpreter) {
-            interpreter = t_interpreter;
-          }
+          break;
         }
       }
     }
