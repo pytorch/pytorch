@@ -3788,7 +3788,9 @@ class InstructionTranslatorBase(
         # used to keep cell/freevars alive after pruning symbolic_locals (prune_dead_locals)
         # in order to generate any nested closures
         self.post_prune_cell_and_freevars = None
-        self.stack: Stack = Stack(self.compute_stack_capacity(code_options))
+        # self.stack: Stack = Stack(self.compute_stack_capacity(code_options))
+        # self.stack: list[VariableTracker] = []
+        self.stack = torch._C._dynamo.Stack(self.compute_stack_capacity(code_options))
         self.instruction_pointer = 0
         self.start_point = None
         self.current_instruction = create_instruction("NOP")
