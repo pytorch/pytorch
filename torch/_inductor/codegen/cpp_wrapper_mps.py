@@ -154,15 +154,21 @@ class CppWrapperMps(CppWrapperGpu):
             threads_size = get_array_size(threads_str)
 
             if group_size is None:
-                new_args.append(
-                    f"{{ uint64_t {threads_var}[] = {threads}; aoti_torch_mps_dispatch_array(handle, {threads_var}, {threads_size}); }}"
-                )
+                new_args.append("{")
+                new_args.append(f"    uint64_t {threads_var}[] = {threads};")
+                new_args.append(f"    aoti_torch_mps_dispatch_array(handle, {threads_var}, {threads_size});")
+                new_args.append("}")
             else:
                 group_size_str = str(group_size)
                 group_size_size = get_array_size(group_size_str)
+                new_args.append("{")
+                new_args.append(f"    uint64_t {threads_var}[] = {threads};")
+                new_args.append(f"    uint64_t {group_size_var}[] = {group_size};")
+                dispatch_args = f"handle, {threads_var}, {threads_size}, {group_size_var}, {group_size_size}"
                 new_args.append(
-                    f"{{ uint64_t {threads_var}[] = {threads}; uint64_t {group_size_var}[] = {group_size}; aoti_torch_mps_dispatch_array_with_group_size(handle, {threads_var}, {threads_size}, {group_size_var}, {group_size_size}); }}"
+                    f"    aoti_torch_mps_dispatch_array_with_group_size({dispatch_args});"
                 )
+                new_args.append("}")
 
         # debug printer related logic for cpp kernel type.
         debug_printer_manager = V.graph.wrapper_code.debug_printer
@@ -229,7 +235,7 @@ class CppWrapperMps(CppWrapperGpu):
         """
 
         # Add shimified handles and functions
-        shader_libraries: set[str] = set()
+        shader_libraries: OrderedSet[str] = OrderedSet()
         for line in self.lines:
             if not isinstance(line, KernelCallLine):
                 continue
