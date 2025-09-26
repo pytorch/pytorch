@@ -4038,6 +4038,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         self.assertEqual(yref, y)
 
     @onlyCUDA
+    @largeTensorTest("40GB", "cuda")
     def test_conv3d_cudnn_broken(self, device):
         for dtype in (torch.half, torch.bfloat16):
             x = torch.rand(1, 16, 124, 1282, 722, dtype=dtype, device=device)
