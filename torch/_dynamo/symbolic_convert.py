@@ -138,6 +138,7 @@ from .variables.constant import ConstantVariable
 from .variables.ctx_manager import (
     ContextWrappingVariable,
     GenericContextWrappingVariable,
+    WithEnterFunctionVariable,
     WithExitFunctionVariable,
 )
 from .variables.dicts import ConstDictVariable, SetVariable
@@ -3445,41 +3446,16 @@ class InstructionTranslatorBase(
     def BEFORE_WITH(self, inst: Instruction) -> None:
         self.setup_or_before_with(inst)
 
-    def setup_or_before_with(self, inst: Instruction) -> None:
-        ctx = self.pop()
-        if not isinstance(
-            ctx, (ContextWrappingVariable, GenericContextWrappingVariable)
-        ):
-            unimplemented_v2(
-                gb_type="Unsupported context manager",
-                context=f"Attempted SETUP_WITH/BEFORE_WITH on {ctx}",
-                explanation=f"Dynamo does not know how to enter a `{ctx.python_type_name()}` context manager.",
-                hints=[
-                    "Avoid using the unsupported context manager.",
-                    "If the context manager seems like it should be supported (e.g. torch.set_grad_enabled), then "
-                    "it may be the case that it was created outside the compiled region, which Dynamo does not support. "
-                    "Supported context managers can cross graph break boundaries only if they are local non-closure "
-                    "variables, or are intermediate values.",
-                    "File an issue to PyTorch. Simple context managers can potentially be supported, "
-                    "but note that context managers can't be supported in general",
-                ],
-            )
-
+    def enter_ctx(
+        self,
+        ctx: Union[ContextWrappingVariable, GenericContextWrappingVariable],
+        inst: Instruction,
+    ) -> VariableTracker:
         if (
             isinstance(ctx, GenericContextWrappingVariable)
             and not ctx.supports_graph_breaks()
         ):
             self.active_generic_context_managers.append(ctx)
-
-        # Need this redundant check for mypy
-        assert isinstance(
-            ctx, (ContextWrappingVariable, GenericContextWrappingVariable)
-        )
-
-        exit = WithExitFunctionVariable(
-            ctx,
-            inst.target,
-        )
 
         if sys.version_info >= (3, 11):
             # See create_call_resume_at for block stack details.
@@ -3497,8 +3473,6 @@ class InstructionTranslatorBase(
         else:
             target = inst.target
 
-        self.push(exit)
-
         if target:
             if isinstance(self, InstructionTranslator) or config.nested_graph_breaks:
                 self.block_stack.append(
@@ -3507,7 +3481,39 @@ class InstructionTranslatorBase(
             else:
                 self.block_stack.append(BlockStackEntry(inst, target, len(self.stack)))
 
-        self.push(ctx.enter(self))
+        return ctx.enter(self)
+
+    @staticmethod
+    def unsupported_ctx_graph_break(ctx: VariableTracker) -> NoReturn:
+        unimplemented_v2(
+            gb_type="Unsupported context manager",
+            context=f"Attempted SETUP_WITH/BEFORE_WITH/LOAD_SPECIAL on {ctx}",
+            explanation=f"Dynamo does not know how to enter a `{ctx.python_type_name()}` context manager.",
+            hints=[
+                "Avoid using the unsupported context manager.",
+                "If the context manager seems like it should be supported (e.g. torch.set_grad_enabled), then "
+                "it may be the case that it was created outside the compiled region, which Dynamo does not support. "
+                "Supported context managers can cross graph break boundaries only if they are local non-closure "
+                "variables, or are intermediate values.",
+                "File an issue to PyTorch. Simple context managers can potentially be supported, "
+                "but note that context managers can't be supported in general",
+            ],
+        )
+
+    def setup_or_before_with(self, inst: Instruction) -> None:
+        ctx = self.pop()
+        if not isinstance(
+            ctx, (ContextWrappingVariable, GenericContextWrappingVariable)
+        ):
+            self.unsupported_ctx_graph_break(ctx)
+
+        # Need this redundant check for mypy
+        assert isinstance(
+            ctx, (ContextWrappingVariable, GenericContextWrappingVariable)
+        )
+
+        self.push(WithExitFunctionVariable(ctx, inst.target))
+        self.push(self.enter_ctx(ctx, inst))
 
     def append_prefix_inst(self, inst: Instruction) -> None:
         assert self.accept_prefix_inst
@@ -3648,12 +3654,32 @@ class InstructionTranslatorBase(
     )
 
     def LOAD_SPECIAL(self, inst: Instruction) -> None:
-        # Implementation is similar to LOAD_METHOD for 3.13+
-        assert isinstance(inst.arg, int)
-        self._load_attr(self._load_special_names[inst.arg])
-        obj = self.pop()
-        self.push(obj)
-        self.PUSH_NULL(inst)
+        assert isinstance(inst.arg, int), "expected LOAD_SPECIAL arg to be set to int"
+        attr = self._load_special_names[inst.arg]
+        if attr in ("__enter__", "__exit__"):
+            ctx = self.pop()
+            if not isinstance(
+                ctx, (ContextWrappingVariable, GenericContextWrappingVariable)
+            ):
+                self.unsupported_ctx_graph_break(ctx)
+
+            # Need this redundant check for mypy
+            assert isinstance(
+                ctx, (ContextWrappingVariable, GenericContextWrappingVariable)
+            )
+            if attr == "__enter__":
+                self.push(WithEnterFunctionVariable(ctx))
+                self.PUSH_NULL(inst)
+            else:
+                # WithExitFunctionVariable doesn't really do anything with target for 3.11+
+                self.push(WithExitFunctionVariable(ctx, None))
+                self.PUSH_NULL(inst)
+        else:
+            # Implementation is similar to LOAD_METHOD for 3.13+
+            self._load_attr(attr)
+            obj = self.pop()
+            self.push(obj)
+            self.PUSH_NULL(inst)
 
     def LOAD_SMALL_INT(self, inst: Instruction) -> None:
         self.push(ConstantVariable.create(inst.argval))
