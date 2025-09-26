@@ -38,11 +38,6 @@ EOF
         ROCM_VERSION="${ROCM_VERSION}.2"
     fi
 
-    # we want the patch version of 7.0 instead
-    if [[ $(ver $ROCM_VERSION) -eq $(ver 7.0) ]]; then
-        ROCM_VERSION="${ROCM_VERSION}.1"
-    fi
-
     # Default url values
     rocm_baseurl="http://repo.radeon.com/rocm/apt/${ROCM_VERSION}"
     amdgpu_baseurl="https://repo.radeon.com/amdgpu/${ROCM_VERSION}/ubuntu"
