@@ -689,8 +689,9 @@ bool can_use_cudnn_attention(const sdp_params& params, bool debug) {
   }
   return false;
 #endif
-#if defined(CUDNN_VERSION) && CUDNN_VERSION > 91000 && CUDNN_VERSION < 91400
-  if (params.dropout > 0.0) {
+#if defined(CUDNN_VERSION)
+  static auto cudnn_version = cudnnGetVersion();
+  if (params.dropout > 0.0 && cudnn_version > 91100 && cudnn_version < 91400) {
     if (debug) {
       TORCH_WARN(CUDNN_VERSION, " cuDNN version does not support droppout in SDPA (9.11 - 9.13).");
     }
