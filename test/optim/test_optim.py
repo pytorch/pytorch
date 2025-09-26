@@ -13,6 +13,7 @@ from torch.optim import (
     Adamax,
     AdamW,
     ASGD,
+    Muon,
     NAdam,
     Optimizer,
     RAdam,
@@ -752,6 +753,138 @@ class TestDifferentiableOptimizer(TestCase):
                 state,
                 SGD,
                 kwargs,  # includes lr & weight_decay
+                *state.values(),
+                *kwargs.values(),
+            ),
+        )
+
+    def test_muon(self):
+        # Test basic differentiation with 2D parameters
+        state = {}
+        p = torch.rand(4, 4, requires_grad=True, dtype=torch.float64)  # 2D parameter for Muon
+        grad = torch.rand(4, 4, requires_grad=True, dtype=torch.float64)
+        state["momentum_buffer"] = torch.rand(4, 4, requires_grad=True, dtype=torch.float64)
+        gradcheck(
+            _diff_fn,
+            (
+                p,
+                grad,
+                state,
+                Muon,
+                {"lr": 0.02, "momentum": 0.9, "differentiable": True},
+                *state.values(),
+            ),
+        )
+
+    def test_muon_1d_parameters(self):
+        # Test that 1D parameters work (should skip orthogonalization)
+        state = {}
+        p = torch.rand(10, requires_grad=True, dtype=torch.float64)  # 1D parameter
+        grad = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        state["momentum_buffer"] = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        gradcheck(
+            _diff_fn,
+            (
+                p,
+                grad,
+                state,
+                Muon,
+                {"lr": 0.02, "momentum": 0.9, "differentiable": True},
+                *state.values(),
+            ),
+        )
+
+    def test_muon_differentiable_lr(self):
+        params = torch.rand(4, 4, requires_grad=True, dtype=torch.float64)  # 2D for Muon
+        grad = torch.rand_like(params, requires_grad=True, dtype=torch.float64)
+        lr = torch.tensor(0.02, requires_grad=True, dtype=torch.float64)
+
+        state = {}
+        state["momentum_buffer"] = torch.rand_like(params, requires_grad=True, dtype=torch.float64)
+
+        kwargs: dict[str, Any] = {"lr": lr, "differentiable": True}
+        gradcheck(
+            _multistep_backprop_diff_hyperparams_fn,
+            (
+                params,
+                grad,
+                state,
+                Muon,
+                kwargs,
+                *state.values(),
+                *kwargs.values(),
+            ),
+        )
+
+    def test_muon_differentiable_weight_decay(self):
+        params = torch.rand(4, 4, requires_grad=True, dtype=torch.float64)
+        grad = torch.rand_like(params, requires_grad=True, dtype=torch.float64)
+        weight_decay = torch.tensor(0.01, requires_grad=True, dtype=torch.float64)
+
+        state = {}
+        state["momentum_buffer"] = torch.rand_like(params, requires_grad=True, dtype=torch.float64)
+
+        kwargs: dict[str, Any] = {"weight_decay": weight_decay, "differentiable": True}
+        gradcheck(
+            _multistep_backprop_diff_hyperparams_fn,
+            (
+                params,
+                grad,
+                state,
+                Muon,
+                kwargs,
+                *state.values(),
+                *kwargs.values(),
+            ),
+        )
+
+    def test_muon_differentiable_momentum(self):
+        params = torch.rand(4, 4, requires_grad=True, dtype=torch.float64)
+        grad = torch.rand_like(params, requires_grad=True, dtype=torch.float64)
+        momentum = torch.tensor(0.95, requires_grad=True, dtype=torch.float64)
+
+        state = {}
+        state["momentum_buffer"] = torch.rand_like(params, requires_grad=True, dtype=torch.float64)
+
+        kwargs: dict[str, Any] = {"momentum": momentum, "differentiable": True}
+        gradcheck(
+            _multistep_backprop_diff_hyperparams_fn,
+            (
+                params,
+                grad,
+                state,
+                Muon,
+                kwargs,
+                *state.values(),
+                *kwargs.values(),
+            ),
+        )
+
+    def test_muon_differentiable_all_hyperparams(self):
+        params = torch.rand(4, 4, requires_grad=True, dtype=torch.float64)
+        grad = torch.rand_like(params, requires_grad=True, dtype=torch.float64)
+
+        lr = torch.tensor(0.02, requires_grad=True, dtype=torch.float64)
+        weight_decay = torch.tensor(0.01, requires_grad=True, dtype=torch.float64)
+        momentum = torch.tensor(0.95, requires_grad=True, dtype=torch.float64)
+
+        state = {}
+        state["momentum_buffer"] = torch.rand_like(params, requires_grad=True, dtype=torch.float64)
+
+        kwargs: dict[str, Any] = {
+            "lr": lr,
+            "weight_decay": weight_decay,
+            "momentum": momentum,
+            "differentiable": True,
+        }
+        gradcheck(
+            _multistep_backprop_diff_hyperparams_fn,
+            (
+                params,
+                grad,
+                state,
+                Muon,
+                kwargs,
                 *state.values(),
                 *kwargs.values(),
             ),
