@@ -391,6 +391,8 @@ def get_aten_generated_files(enabled_backends):
         "CompositeExplicitAutogradFunctions_inl.h",
         "CompositeExplicitAutogradNonFunctionalFunctions.h",
         "CompositeExplicitAutogradNonFunctionalFunctions_inl.h",
+        "ViewMetaClasses.h",
+        "ViewMetaClasses.cpp",
         "VmapGeneratedPlumbing.h",
         "core/ATenOpList.cpp",
         "core/TensorBody.h",
@@ -1192,6 +1194,7 @@ def define_buck_targets(
             "NativeMetaFunctions.h": ":gen_aten[NativeMetaFunctions.h]",
             "Operators.h": ":gen_aten[Operators.h]",
             "RedispatchFunctions.h": ":gen_aten[RedispatchFunctions.h]",
+            "ViewMetaClasses.h": ":gen_aten[ViewMetaClasses.h]",
             "core/TensorBody.h": ":gen_aten[core/TensorBody.h]",
             "core/aten_interned_strings.h": ":gen_aten[core/aten_interned_strings.h]",
             "core/enum_tag.h": ":gen_aten[core/enum_tag.h]",
@@ -1997,7 +2000,21 @@ def define_buck_targets(
                     third_party("sleef_arm"),
                 ],
             }),
-            compiler_flags = get_aten_compiler_flags(),
+            compiler_flags = get_aten_compiler_flags() + select({
+                "DEFAULT": [],
+                "ovr_config//os:android-arm32": [
+                    "-mfpu=vfpv3-d16",
+                    "-march=armv7-a",
+                    "-mthumb",
+                    "-mfpu=neon",
+                ],
+                "ovr_config//os:android-x86_32": [
+                    "-mssse3",
+                ],
+                "ovr_config//os:android-x86_64": [
+                    "-mssse3",
+                ],
+            }),
             exported_preprocessor_flags = get_aten_preprocessor_flags(),
             exported_deps = [
                 ":aten_header",
