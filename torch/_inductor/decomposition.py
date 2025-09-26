@@ -460,6 +460,12 @@ def add(
     if not x_is_complex_tensor or not y_is_complex_tensor:
         return NotImplemented
 
+    def _requires_fallback(tensor: torch.Tensor) -> bool:
+        if tensor.ndim == 0:
+            return False
+        # Viewing complex tensors as their real dtype requires the last stride to be 1.
+        return tensor.stride()[-1] != 1
+
     output_size_zero = False
     if x.ndim == 0 and y.ndim == 0:
         output_size_zero = True
@@ -473,6 +479,9 @@ def add(
     if alpha is not None:
         z = alpha * y
     complex_type = torch.promote_types(x.dtype, y.dtype)
+
+    if _requires_fallback(x) or _requires_fallback(z):
+        return NotImplemented
 
     # For complex typed `x`, `x.view(x.real.dtype)` doubles the last dimension and can cause problem
     # when broadcasting the add.
@@ -875,6 +884,13 @@ def fast_random_decomps() -> dict[Any, Callable[..., Any]]:
 def select_decomp_table() -> dict[Any, Callable[..., Any]]:
     """decomps can change based on config"""
     if config.fallback_random:
+        return decompositions
+    if config.fallback_embedding_bag_byte_unpack is True:
+        # remove q_embedding_bag_byte_unpack_decomp from decompositions
+        for k in decompositions.keys():
+            if k == torch.ops.quantized.embedding_bag_byte_unpack.default:
+                del decompositions[k]
+                break
         return decompositions
     return fast_random_decomps()
 
