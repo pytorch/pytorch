@@ -5,7 +5,6 @@ import inspect
 import warnings
 from collections.abc import Sequence
 from typing import Any, Callable, cast, Optional
-from typing_extensions import deprecated
 
 import torch
 import torch.distributed.tensor._dispatch as op_dispatch
@@ -30,6 +29,7 @@ from torch.distributed.tensor.placement_types import (
     Replicate,
     Shard,
 )
+from typing_extensions import deprecated
 
 
 __all__ = [
@@ -288,9 +288,9 @@ class DTensor(torch.Tensor):
 
     @staticmethod
     def __tensor_unflatten__(inner_tensors, flatten_spec, outer_size, outer_stride):
-        assert flatten_spec is not None, (
-            "Expecting spec to be not None from `__tensor_flatten__` return value!"
-        )
+        assert (
+            flatten_spec is not None
+        ), "Expecting spec to be not None from `__tensor_flatten__` return value!"
         local_tensor = inner_tensors["_local_tensor"]
         spec, requires_grad = flatten_spec
         unflatten_tensor_meta = TensorMeta(
@@ -592,7 +592,21 @@ class DTensor(torch.Tensor):
         """
         return self._spec.placements
 
+    def _raise_if_contains_partial_placements(self) -> None:
+        """
+        Raise an error if the DTensor contains partial placements.
+        """
+        for placement in self._spec.placements:
+            if not isinstance(placement, Partial):
+                continue
+
+            raise RuntimeError(
+                "Any checkpointing related operations are not supported for "
+                "DTensor with partial placements!"
+            )
+
     def __create_write_items__(self, fqn: str, object: Any):
+        self._raise_if_contains_partial_placements()
         from torch.distributed.checkpoint.planner_helpers import (
             _create_write_items_for_dtensor,
         )
@@ -615,6 +629,7 @@ class DTensor(torch.Tensor):
         Returns:
             A List[:class:`ChunkStorageMetadata`] object that represents the shard size/offset on the current rank.
         """
+        self._raise_if_contains_partial_placements()
         from torch.distributed.checkpoint.planner_helpers import (
             _create_chunk_from_dtensor,
         )
@@ -627,6 +642,7 @@ class DTensor(torch.Tensor):
             raise RuntimeError("Unsupported tensor type!")
 
     def __get_tensor_shard__(self, index):
+        self._raise_if_contains_partial_placements()
         if hasattr(self._local_tensor, "__get_tensor_shard__"):
             return self._local_tensor.__get_tensor_shard__(index)  # type: ignore[attr-defined]
         elif isinstance(self._local_tensor, torch.Tensor):
@@ -989,9 +1005,9 @@ def _dtensor_init_helper(  # type: ignore[no-untyped-def]
     placements = placements or tuple(Replicate() for _ in range(device_mesh.ndim))
 
     # check device_mesh against placements
-    assert device_mesh.ndim == len(placements), (
-        "mesh dimension does not match the length of placements"
-    )
+    assert device_mesh.ndim == len(
+        placements
+    ), "mesh dimension does not match the length of placements"
 
     assert kwargs["layout"] == torch.strided, "layout value not supported!"
     torch_stride = torch._prims_common.make_contiguous_strides_for(size)
