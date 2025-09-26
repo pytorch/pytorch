@@ -121,8 +121,8 @@ if [[ $CUDA_VERSION == 12* || $CUDA_VERSION == 13* ]]; then
     # Compress the fatbin with -compress-mode=size for CUDA 13
     if [[ $CUDA_VERSION == 13* ]]; then
         export TORCH_NVCC_FLAGS="$TORCH_NVCC_FLAGS -compress-mode=size"
-	# Bundle ptxas into the cu13 wheel, see https://github.com/pytorch/pytorch/issues/163801
-	export BUILD_BUNDLE_PTXAS=1
+        # Bundle ptxas into the cu13 wheel, see https://github.com/pytorch/pytorch/issues/163801
+        export BUILD_BUNDLE_PTXAS=1
     fi
     if [[ -z "$PYTORCH_EXTRA_INSTALL_REQUIREMENTS" ]]; then
         echo "Bundling with cudnn and cublas."
