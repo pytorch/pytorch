@@ -1,6 +1,7 @@
 """Tensor pointwise operator implementation."""
 
 import random
+from typing import Optional
 
 from torchfuzz.operators.base import Operator
 from torchfuzz.tensor_fuzzer import Spec, TensorSpec
@@ -11,29 +12,18 @@ from torchfuzz.type_promotion import (
 )
 
 
-class TensorPointwiseOperator(Operator):
-    """Operator for element-wise pointwise operations (add, mul, sub, div)."""
+class PointwiseOperator(Operator):
+    """Base class for element-wise pointwise operations."""
 
-    def __init__(self):
-        super().__init__("tensor_pointwise")
-        self.operations = {
-            "add": {
-                "torch_op": "torch.ops.aten.add",
-                "symbol": "+",
-            },
-            "mul": {
-                "torch_op": "torch.ops.aten.mul",
-                "symbol": "*",
-            },
-            "sub": {
-                "torch_op": "torch.ops.aten.sub",
-                "symbol": "-",
-            },
-            "div": {
-                "torch_op": "torch.ops.aten.div",
-                "symbol": "/",
-            },
-        }
+    def __init__(self, name: str, torch_op: str, symbol: str):
+        super().__init__(name)
+        self._torch_op = torch_op
+        self.symbol = symbol
+
+    @property
+    def torch_op_name(self) -> Optional[str]:
+        """Return the torch operation name."""
+        return self._torch_op
 
     def can_produce(self, output_spec: Spec) -> bool:
         """Tensor pointwise operations can produce tensors but not scalars."""
@@ -43,7 +33,7 @@ class TensorPointwiseOperator(Operator):
         """Decompose tensor into input tensors for pointwise operation with type promotion."""
         if not isinstance(output_spec, TensorSpec):
             raise ValueError(
-                "TensorPointwiseOperator can only produce TensorSpec outputs"
+                f"{self.__class__.__name__} can only produce TensorSpec outputs"
             )
 
         # Use shared type promotion table
@@ -79,13 +69,39 @@ class TensorPointwiseOperator(Operator):
         self, output_name: str, input_names: list[str], output_spec: Spec
     ) -> str:
         """Generate code for pointwise operation."""
-        # Randomly choose an operation
-        op_name = random.choice(list(self.operations.keys()))
-        op_info = self.operations[op_name]
-
         if len(input_names) == 2:
-            return f"{output_name} = {op_info['torch_op']}({input_names[0]}, {input_names[1]})"
+            return (
+                f"{output_name} = {self._torch_op}({input_names[0]}, {input_names[1]})"
+            )
         else:
             # Chain operations using symbols for readability
-            expr = f" {op_info['symbol']} ".join(input_names)
+            expr = f" {self.symbol} ".join(input_names)
             return f"{output_name} = {expr}"
+
+
+class AddOperator(PointwiseOperator):
+    """Operator for element-wise addition."""
+
+    def __init__(self):
+        super().__init__("add", "torch.add", "+")
+
+
+class MulOperator(PointwiseOperator):
+    """Operator for element-wise multiplication."""
+
+    def __init__(self):
+        super().__init__("mul", "torch.mul", "*")
+
+
+class SubOperator(PointwiseOperator):
+    """Operator for element-wise subtraction."""
+
+    def __init__(self):
+        super().__init__("sub", "torch.sub", "-")
+
+
+class DivOperator(PointwiseOperator):
+    """Operator for element-wise division."""
+
+    def __init__(self):
+        super().__init__("div", "torch.div", "/")
