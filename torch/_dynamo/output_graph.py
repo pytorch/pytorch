@@ -1047,10 +1047,15 @@ class OutputGraph(OutputGraphCommon):
     def module_key_name(*names: Any) -> str:
         # create a new unique name
         name = "_".join(map(str, names))
-        # Strip _buffers[..] names
-        name = re.sub(r"\._buffers\[(['\"])([A-Za-z_]\w*)\1\]", r".\2", name)
-        # Strip _parameters[..] names
-        name = re.sub(r"\._parameters\[(['\"])([A-Za-z_]\w*)\1\]", r".\2", name)
+        # Strip _buffers[..]/_parmeters[..] names
+        name = re.sub(
+            r"\._(?:modules|parameters|buffers)\[(['\"])([^'\"\]]+)\1\]", r".\2", name
+        )
+
+        name = re.sub(
+            r"getattr\(\s*([^,]+?)\s*,\s*(['\"])([^'\"]+)\2\s*\)", r"\1.\3", name
+        )
+
         # Strip the guard lookup L/G access
         name = re.sub(r"^[GL]\['?(.*?)'?\]$", r"\1", name)
         # e.g. replace abc.xyz[123].qkv with abc.xyz_123.qkv
