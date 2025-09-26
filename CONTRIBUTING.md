@@ -473,7 +473,7 @@ In addition to the standard Google Style docstring formatting rules, the followi
 
 ### Building documentation
 
-Docs builds are tested with Python 3.10 and may fail with other Python versions. To build the documentation:
+Currently, the docs can only be built with Python 3.10. To build the documentation:
 
 1. Set up a Python 3.10 environment and install `pip`. We recommend using separate environments for PyTorch development and building the docs. For example:
 ```bash
@@ -491,15 +491,15 @@ uv pip install -U pip
 
 2. Install PyTorch in that environment.
 
-- If you're building the docs without changes, or only changed `.md`/`.rst` files in `docs/source`, install PyTorch nightly by [selecting "Preview (Nightly)" on this page](https://pytorch.org/get-started/locally/) and following its instructions. Be careful - you may need to replace `pip3` with `pip` to install `torch` in `.venv-docs` (and not system-wide).
-- If you created or modified Python files and want to build the docs with those changes, follow the [*Nightly Checkout & Pull*](#nightly-checkout--pull) instructions. When you run `tools/nightly.py`, use `--prefix .venv-docs` to use the environment created in step 1.
+- If you're building the docs without changes, or only changed `.md`/`.rst` files in `docs/source`, install PyTorch nightly by [selecting "Preview (Nightly)" on this page](https://pytorch.org/get-started/locally/) and following its instructions. Be careful - you may need to replace `pip3` with `pip` to install `torch` in your `.venv-docs` environment (and not system-wide).
+- If you created or modified Python files and want to build docs reflecting those changes, follow the [*Nightly Checkout & Pull*](#nightly-checkout--pull) instructions. When you run `tools/nightly.py`, use `--prefix .venv-docs` to use the environment created in step 1.
 - If your changes are more involved, or you run into errors when using the methods above, [install PyTorch from source](https://github.com/pytorch/pytorch#from-source).
 
 3. If `node` is not already on your system, [download and install Node.js](https://nodejs.org/en/download). Then, [install the KaTeX CLI](https://katex.org/docs/node) and ensure it's available in your `$PATH`:
 ```bash
 # Installs KaTeX globally:
 npm install -g katex
-# If you would prefer to avoid the global installation, use:
+# If you would prefer to avoid the global installation, you can use:
 npm install katex && export PATH="$PATH:$(pwd)/node_modules/.bin"
 ```
 
@@ -511,22 +511,22 @@ Note that:
 ```bash
 cd docs
 pip install -r requirements.txt
-pip install 'numpy<2'  # numpy>2 is incompatible with matplotlib 3.5.3
+pip install 'numpy<2'  # numpy>2 will error at runtime.
 ```
 
 5. Use `make` to build the docs. For example:
 ```bash
-make html  # Generate HTML documentation in docs/build/html
-make  # List available output formats
+make html  # Generate HTML documentation in docs/build/html.
+make  # List available output formats.
 ```
 
-Output formats may have additional dependencies. For example, `pdflatex` must be available in order to build a PDF with `make latexpdf`.
+Other output formats may have additional dependencies. For example, `pdflatex` must be available in order to build a PDF with `make latexpdf`.
 
 #### Building a PDF
 
-To build a PDF of all PyTorch documentation:
+To build a PDF of the PyTorch docs:
 
-1. Install a LaTeX distribution that provides `pdflatex` (for example, `brew install --cask mactex-no-gui` on MacOS).
+1. Install a LaTeX distribution that provides `pdflatex`. For example, you can use `brew install --cask mactex-no-gui` on MacOS.
 2. From the `docs` directory, run `make latexpdf`. This populates `docs/build/latex` with the LaTeX output.
 3. To build the PDF, `cd build/latex` and run `make LATEXOPTS="-interaction=nonstopmode"` twice. The first run builds a preliminary `pytorch.pdf`, and the second run resolves references and updates its table of contents and index.
 

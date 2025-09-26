@@ -436,9 +436,10 @@ make -f docker.Makefile
 Currently, the docs can only be built with Python 3.10.
 
 ```bash
-# Set up a Python 3.10 environment
+# Set up a Python 3.10 environment with pip
 python3.10 -m venv .venv-docs
 source .venv-docs/bin/activate  # or `& .\venv-docs\Scripts\Activate.ps1` on Windows
+python -m ensurepip --upgrade
 # Install PyTorch nightly
 pip install --pre torch --index-url https://download.pytorch.org/whl/nightly/cpu
 # Install the docs' dependencies
