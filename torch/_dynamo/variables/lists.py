@@ -27,6 +27,7 @@ import torch.fx
 
 from .. import graph_break_hints, polyfills, variables
 from ..bytecode_transformation import (
+    create_build_tuple,
     create_call_function,
     create_instruction,
     create_rot_n,
@@ -622,9 +623,11 @@ class CommonListMethodsVariable(BaseListVariable):
                 else:
                     items = slice(
                         *[
-                            s.evaluate_expr()
-                            if isinstance(s, SymNodeVariable)
-                            else s.as_python_constant()
+                            (
+                                s.evaluate_expr()
+                                if isinstance(s, SymNodeVariable)
+                                else s.as_python_constant()
+                            )
                             for s in key.items
                         ]
                     )
@@ -966,7 +969,7 @@ class TupleVariable(BaseListVariable):
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.foreach(self.items)
-        codegen.append_output(create_instruction("BUILD_TUPLE", arg=len(self.items)))
+        codegen.append_output(create_build_tuple(len(self.items)))
 
     def call_method(
         self,
@@ -1069,7 +1072,7 @@ class SizeVariable(TupleVariable):
         codegen.add_push_null(lambda: codegen.load_import_from("torch", "Size"))
         codegen.foreach(self.items)
         build_torch_size = [
-            create_instruction("BUILD_TUPLE", arg=len(self.items)),
+            create_build_tuple(len(self.items)),
         ] + create_call_function(1, False)
         codegen.extend_output(build_torch_size)
 
@@ -1219,7 +1222,7 @@ class NamedTupleVariable(TupleVariable):
         codegen.foreach(self.items)
         codegen.extend_output(
             [
-                create_instruction("BUILD_TUPLE", arg=len(self.items)),
+                create_build_tuple(len(self.items)),
             ]
             + create_call_function(1, False)
         )
@@ -1499,7 +1502,7 @@ class ListIteratorVariable(IteratorVariable):
         codegen.foreach(remaining_items)
         codegen.extend_output(
             [
-                create_instruction("BUILD_TUPLE", arg=len(remaining_items)),
+                create_build_tuple(len(remaining_items)),
                 create_instruction("GET_ITER"),
             ]
         )

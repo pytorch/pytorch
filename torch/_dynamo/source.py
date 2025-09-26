@@ -27,8 +27,8 @@ from torch._guards import ChainedSource, Guard, GuardSource, Source
 from . import utils
 from .bytecode_transformation import (
     create_binary_subscr,
+    create_build_tuple,
     create_call_function,
-    create_instruction,
 )
 
 
@@ -972,7 +972,7 @@ class TorchSource(Source):
         codegen.extend_output(
             [
                 codegen.create_load_const(0),  # level
-                create_instruction("BUILD_TUPLE", arg=0),  # fromlist
+                create_build_tuple(0),  # fromlist
                 codegen.create_import_name("torch"),
             ]
         )

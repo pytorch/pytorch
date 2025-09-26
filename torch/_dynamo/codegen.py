@@ -27,6 +27,7 @@ from .bytecode_transformation import (
     add_push_null,
     add_push_null_call_function_ex,
     create_binary_subscr,
+    create_build_tuple,
     create_call_function,
     create_call_function_ex,
     create_call_method,
@@ -515,7 +516,7 @@ class PyCodegen:
         except AttributeError:
             # desired rotate bytecode doesn't exist, generate equivalent bytecode
             return [
-                create_instruction("BUILD_TUPLE", arg=n),
+                create_build_tuple(n),
                 self.create_load_const_unchecked(rot_n_helper(n)),
                 *create_rot_n(2),
                 *create_call_function_ex(False),
@@ -563,7 +564,7 @@ class PyCodegen:
                     assert var in tx.cell_and_freevars()
                     assert tx.post_prune_cell_and_freevars
                     self(tx.post_prune_cell_and_freevars[var])
-            output.append(create_instruction("BUILD_TUPLE", arg=len(freevars)))
+            output.append(create_build_tuple(len(freevars)))
             output.append(self.create_load_const(code))
             if sys.version_info < (3, 11):
                 output.append(self.create_load_const(fn_name))
