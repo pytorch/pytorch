@@ -276,7 +276,7 @@ static int get_a2a_nblocks(size_t size, int world_size, bool intra_node) {
   return std::min(num_blocks, max_blocks);
 }
 
-at::Tensor all_to_all_vdev(
+void all_to_all_vdev(
     at::Tensor& input,
     at::Tensor& out,
     at::Tensor& in_splits,
@@ -347,7 +347,6 @@ at::Tensor all_to_all_vdev(
       args1,
       0,
       stream);
-  return out;
 }
 
 // Start of `all_to_all_vdev_2d`
