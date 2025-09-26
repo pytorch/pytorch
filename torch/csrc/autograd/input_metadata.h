@@ -38,7 +38,8 @@ struct TORCH_API InputMetadata {
       const at::TensorOptions& options,
       MetadataShape input_shape,
       bool is_tensor_subclass,
-      bool is_nested);
+      bool is_nested,
+      std::optional<at::ScalarType> grad_dtype);
   InputMetadata(const at::Tensor& t);
 
   const at::TensorOptions& options() const {
@@ -97,6 +98,16 @@ struct TORCH_API InputMetadata {
   // Danger: not thread safe, caller must protect with lock
   SymIntSmallVec& mutable_shape_as_dim_vector();
 
+  std::optional<at::ScalarType> grad_dtype() const {
+    TORCH_INTERNAL_ASSERT(!was_default_constructed_);
+    return grad_dtype_;
+  }
+
+  void set_grad_dtype(const std::optional<at::ScalarType>& grad_dtype) {
+    TORCH_INTERNAL_ASSERT(!was_default_constructed_);
+    grad_dtype_ = grad_dtype;
+  }
+
  private:
   at::Tensor shape_as_tensor() const;
   bool is_nestedness_same(const at::Tensor& grad) const;
@@ -109,5 +120,8 @@ struct TORCH_API InputMetadata {
   bool is_tensor_subclass_ = false;
   bool is_nested_ = false;
   bool was_default_constructed_ = true;
+
+  // When nullopt, grad_dtype_ is allowed to be any dtype.
+  std::optional<at::ScalarType> grad_dtype_;
 };
 } // namespace torch::autograd
