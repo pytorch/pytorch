@@ -123,7 +123,7 @@ popd
 
 
 export TH_BINARY_BUILD=1
-export INSTALL_TEST=0 # dont install test binaries into site-packages
+export BUILD_TEST=0 # don't build nor install test binaries
 export MACOSX_DEPLOYMENT_TARGET=11.0
 
 EXTRA_CONDA_INSTALL_FLAGS=""
