@@ -42,7 +42,9 @@ _ModuleToHandleDict = dict[nn.Module, RemovableHandle]  # for state dict
 
 def is_in_ac() -> bool:
     import inspect
-    return any(frame.function == 'recompute_fn' for frame in inspect.stack())
+
+    return any(frame.function == "recompute_fn" for frame in inspect.stack())
+
 
 """
 [Note: Overlapping all-gather copy-in and all-gather]
@@ -301,10 +303,6 @@ class FSDPParamGroup:
 
     # Runtime #
     def unshard(self, async_op: bool = False):
-        # if torch.distributed.get_rank() == 0:
-        #     logger.error(f"unshard {self}")
-        #     import fbvscode
-        #     fbvscode.set_trace()
         if self._all_gather_result is not None:  # already called, pending wait
             return
         if self.is_unsharded:
@@ -425,10 +423,6 @@ class FSDPParamGroup:
             self.comm_ctx.all_gather_stream.wait_event(event)
 
     def reshard(self):
-        # if torch.distributed.get_rank() == 0:
-        #     logger.error(f"reshard {self}")
-        #     import fbvscode
-        #     fbvscode.set_trace()
         if self._training_state == TrainingState.FORWARD:
             if not self._reshard_after_forward:
                 return
