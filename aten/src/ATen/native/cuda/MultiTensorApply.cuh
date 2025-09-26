@@ -17,9 +17,9 @@ static constexpr int64_t kBlockSize = 1024;
 
 // TODO(crcrpar): Add `n>5` for `low prec params & their higher prec copy`
 // TensorListMetadata has to be < 4KB - the limit for kernel launch argument
-static constexpr int depth_to_max_tensors[5] = {4000, 4000, 4000, 36, 30};
-static constexpr int depth_to_max_blocks[5] = {4000, 4000, 4000, 320, 320};
-static constexpr int depth_to_max_tensors_scalarlist[5] = {4000, 4000, 4000, 36, 30};
+static constexpr int depth_to_max_tensors[5] = {2048, 2048, 2048, 2048, 2048};
+static constexpr int depth_to_max_blocks[5] = {2048, 2048, 2048, 2048, 2048};
+static constexpr int depth_to_max_tensors_scalarlist[5] = {2048, 2048, 2048, 2048, 2048};
 #else
 static constexpr int64_t kILP = 4;
 static constexpr int64_t kChunkSize = 65536;
