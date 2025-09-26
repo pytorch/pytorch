@@ -14,15 +14,28 @@ class CodeGenerator:
 
     def tensor_repr(self, tensor):
         """Generate tensor creation code representation."""
+        # Use actual size for batch_norm buffer tensors
+        if hasattr(tensor, '_actual_size'):
+            tensor_size = tensor._actual_size
+        else:
+            tensor_size = tensor.size
+            
         if tensor.dtype == "bool":
             # torch.rand does not support bool, use torch.randint for boolean tensors
-            return f"torch.randint(0, 2, {tuple(tensor.size)}, dtype=torch.bool, device='{tensor.device}')"
+            return f"torch.randint(0, 2, {tuple(tensor_size)}, dtype=torch.bool, device='{tensor.device}')"
         elif tensor.dtype in ["int8", "int16", "int32", "int64", "uint8"]:
             # Integer tensors don't support requires_grad, use torch.randint instead
             # Use a reasonable range for integer tensors (0 to 1000 for most cases)
             max_val = 1000 if tensor.dtype == "int64" else 100
-            return f"torch.randint(0, {max_val}, {list(tensor.size)}, dtype=torch.{tensor.dtype}, device='{tensor.device}')"
-        return f"torch.rand({list(tensor.size)}, dtype=torch.{tensor.dtype}, device='{tensor.device}', requires_grad=True)"
+            return f"torch.randint(0, {max_val}, {list(tensor_size)}, dtype=torch.{tensor.dtype}, device='{tensor.device}')"
+        
+        # Handle requires_grad attribute
+        if hasattr(tensor, 'requires_grad') and tensor.requires_grad is not None:
+            requires_grad = tensor.requires_grad
+        else:
+            requires_grad = True  # Default behavior
+            
+        return f"torch.rand({list(tensor_size)}, dtype=torch.{tensor.dtype}, device='{tensor.device}', requires_grad={requires_grad})"
 
     def generate_code(self, target_tensor, all_nodes, output_path):
         """

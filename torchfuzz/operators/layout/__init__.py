@@ -6,6 +6,7 @@ from .transpose import TransposeOperator
 from .permute import PermuteOperator
 from .reshape import ReshapeOperator
 from .contiguous import ContiguousOperator
+from .pad import PadOperator
 
 __all__ = [
     'CatOperator',
@@ -13,5 +14,6 @@ __all__ = [
     'TransposeOperator',
     'PermuteOperator',
     'ReshapeOperator',
-    'ContiguousOperator'
+    'ContiguousOperator',
+    'PadOperator'
 ]
