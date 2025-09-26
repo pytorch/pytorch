@@ -4084,7 +4084,7 @@ class GraphModule(torch.nn.Module):
 
         f5()
         new_device = (
-            ("cpu",) if torch._C._get_accelerator() in (torch.device("cuda"), torch.device("xpu")) else ("cuda", "xpu")
+            "cpu" if torch._C._get_accelerator() in (torch.device("cuda"), torch.device("xpu")) else "cuda, xpu"
         )
 
         old_get_device_module = torch.get_device_module
