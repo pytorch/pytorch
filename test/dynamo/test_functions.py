@@ -4084,7 +4084,7 @@ class GraphModule(torch.nn.Module):
 
         f5()
         new_device = (
-            "cpu" if torch._C._get_accelerator() in (torch.device("cuda"), torch.device("xpu")) else "cuda, xpu"
+            "cpu" if torch._C._get_accelerator() == torch.device(device_type) else device_type
         )
 
         old_get_device_module = torch.get_device_module
@@ -4098,7 +4098,7 @@ class GraphModule(torch.nn.Module):
         # torch.get_device_module
         with patch("torch.get_device_module", new_get_device_module):
             print(torch.get_device_module())
-            self.assertTrue(f5() in getattr(torch, new_device))
+            self.assertEqual(f5(), getattr(torch, new_device))
 
         # synchronize causes a graph break, so no fullgraph=True
         @torch.compile(backend="eager")
