@@ -77,13 +77,9 @@ class CppWrapperMps(CppWrapperGpu):
         new_args = []
         for idx, (arg, arg_type) in enumerate(zip(call_args[:-2], arg_types[:-2])):
             if isinstance(arg_type, torch.dtype):
-                new_args.append(
-                    f"aoti_torch_mps_set_arg_tensor(handle, {idx}, {arg});"
-                )
+                new_args.append(f"aoti_torch_mps_set_arg_tensor(handle, {idx}, {arg});")
             elif arg_type in (int, sympy.core.symbol.Symbol):
-                new_args.append(
-                    f"aoti_torch_mps_set_arg_int(handle, {idx}, {arg});"
-                )
+                new_args.append(f"aoti_torch_mps_set_arg_int(handle, {idx}, {arg});")
             else:
                 raise NotImplementedError(
                     f"Unsupported arg type {arg_type} for arg {arg} for kernel {kernel_name}"
@@ -96,27 +92,32 @@ class CppWrapperMps(CppWrapperGpu):
         # Check if threads is a single value or an array-like structure
         threads_str = str(threads)
         is_single_value = (
-            threads_str.startswith('{') and threads_str.endswith('}') and
-            threads_str.count(',') == 0
-        ) or not (threads_str.startswith('{') or threads_str.startswith('['))
+            threads_str.startswith("{")
+            and threads_str.endswith("}")
+            and threads_str.count(",") == 0
+        ) or not threads_str.startswith(("{", "["))
 
         if is_single_value:
             # Extract single value from braces if present
-            if threads_str.startswith('{') and threads_str.endswith('}'):
+            if threads_str.startswith("{") and threads_str.endswith("}"):
                 single_value = threads_str[1:-1].strip()  # Remove braces
             else:
                 single_value = threads_str
 
             if group_size is None:
-                new_args.append(f"aoti_torch_mps_dispatch_single(handle, {single_value});")
+                new_args.append(
+                    f"aoti_torch_mps_dispatch_single(handle, {single_value});"
+                )
             else:
                 # Extract group size value if it's also in braces
                 group_size_str = str(group_size)
-                if group_size_str.startswith('{') and group_size_str.endswith('}'):
+                if group_size_str.startswith("{") and group_size_str.endswith("}"):
                     group_size_value = group_size_str[1:-1].strip()
                 else:
                     group_size_value = group_size_str
-                new_args.append(f"aoti_torch_mps_dispatch_single_with_group_size(handle, {single_value}, {group_size_value});")
+                new_args.append(
+                    f"aoti_torch_mps_dispatch_single_with_group_size(handle, {single_value}, {group_size_value});"
+                )
         else:
             # Handle array case - need to convert initializer list to array
             # Use kernel name to make variable names unique
@@ -124,10 +125,10 @@ class CppWrapperMps(CppWrapperGpu):
             group_size_var = f"{kernel_name}_group_size_array"
 
             # Extract array size from the initializer list string
-            def get_array_size(array_str):
+            def get_array_size(array_str: str) -> int:
                 # Remove braces and whitespace
                 content = array_str.strip()
-                if content.startswith('{') and content.endswith('}'):
+                if content.startswith("{") and content.endswith("}"):
                     content = content[1:-1].strip()
 
                 if not content:  # Empty array
@@ -137,11 +138,11 @@ class CppWrapperMps(CppWrapperGpu):
                 depth = 0
                 comma_count = 0
                 for char in content:
-                    if char in '({[<':
+                    if char in "({[<":
                         depth += 1
-                    elif char in ')}]>':
+                    elif char in ")}]>":
                         depth -= 1
-                    elif char == ',' and depth == 0:
+                    elif char == "," and depth == 0:
                         comma_count += 1
 
                 return comma_count + 1  # Number of elements = commas + 1
@@ -149,11 +150,15 @@ class CppWrapperMps(CppWrapperGpu):
             threads_size = get_array_size(threads_str)
 
             if group_size is None:
-                new_args.append(f"{{ uint64_t {threads_var}[] = {threads}; aoti_torch_mps_dispatch_array(handle, {threads_var}, {threads_size}); }}")
+                new_args.append(
+                    f"{{ uint64_t {threads_var}[] = {threads}; aoti_torch_mps_dispatch_array(handle, {threads_var}, {threads_size}); }}"
+                )
             else:
                 group_size_str = str(group_size)
                 group_size_size = get_array_size(group_size_str)
-                new_args.append(f"{{ uint64_t {threads_var}[] = {threads}; uint64_t {group_size_var}[] = {group_size}; aoti_torch_mps_dispatch_array_with_group_size(handle, {threads_var}, {threads_size}, {group_size_var}, {group_size_size}); }}")
+                new_args.append(
+                    f"{{ uint64_t {threads_var}[] = {threads}; uint64_t {group_size_var}[] = {group_size}; aoti_torch_mps_dispatch_array_with_group_size(handle, {threads_var}, {threads_size}, {group_size_var}, {group_size_size}); }}"
+                )
 
         # debug printer related logic for cpp kernel type.
         debug_printer_manager = V.graph.wrapper_code.debug_printer
@@ -170,8 +175,10 @@ class CppWrapperMps(CppWrapperGpu):
     def write_mps_kernel_call(self, name: str, call_args: list[str]) -> None:
         # Generate the function call code (in current location)
         # Create lambda that captures by reference and pass its pointer through void*
-        self.writeline(f"auto {name}_lambda = [&](AOTIMetalKernelFunctionHandle handle) {{")
-        self.writeline(f"    aoti_torch_mps_start_encoding(handle);")
+        self.writeline(
+            f"auto {name}_lambda = [&](AOTIMetalKernelFunctionHandle handle) {{"
+        )
+        self.writeline("    aoti_torch_mps_start_encoding(handle);")
 
         # Output call args directly since we're capturing by reference
         for call_arg in call_args:
@@ -180,8 +187,12 @@ class CppWrapperMps(CppWrapperGpu):
         self.writeline("")
 
         # Pass lambda pointer through void*
-        self.writeline(f"std::function<void(AOTIMetalKernelFunctionHandle)> {name}_func_wrapper = {name}_lambda;")
-        self.writeline(f"aoti_torch_mps_run_command_block(get_{name}_handle(), aoti_torch_mps_shared_callback, &{name}_func_wrapper);")
+        self.writeline(
+            f"std::function<void(AOTIMetalKernelFunctionHandle)> {name}_func_wrapper = {name}_lambda;"
+        )
+        self.writeline(
+            f"aoti_torch_mps_run_command_block(get_{name}_handle(), aoti_torch_mps_shared_callback, &{name}_func_wrapper);"
+        )
 
     @staticmethod
     def get_device_include_path(device: str) -> str:
@@ -214,7 +225,7 @@ class CppWrapperMps(CppWrapperGpu):
         """
 
         # Add shimified handles and functions
-        shader_libraries = set()
+        shader_libraries: set[str] = set()
         for line in self.lines:
             if not isinstance(line, KernelCallLine):
                 continue
@@ -237,18 +248,28 @@ class CppWrapperMps(CppWrapperGpu):
         # Generate shimified declarations and functions for each library
         for lib_name in shader_libraries:
             # Add handle declarations
-            self.prefix.writeline(f"AOTIMetalShaderLibraryHandle {lib_name}_handle = nullptr;")
-            self.prefix.writeline(f"AOTIMetalKernelFunctionHandle {lib_name}_kernel_handle = nullptr;")
+            self.prefix.writeline(
+                f"AOTIMetalShaderLibraryHandle {lib_name}_handle = nullptr;"
+            )
+            self.prefix.writeline(
+                f"AOTIMetalKernelFunctionHandle {lib_name}_kernel_handle = nullptr;"
+            )
             self.prefix.writeline("")
 
             # Add shimified getter function
-            self.prefix.writeline(f"AOTIMetalKernelFunctionHandle get_{lib_name}_handle() {{")
+            self.prefix.writeline(
+                f"AOTIMetalKernelFunctionHandle get_{lib_name}_handle() {{"
+            )
             self.prefix.writeline(f"    if ({lib_name}_kernel_handle == nullptr) {{")
             self.prefix.writeline(f"        if ({lib_name}_handle == nullptr) {{")
             # Use the source constant that should be generated by MPS shader codegen
-            self.prefix.writeline(f"            aoti_torch_mps_create_shader_library({lib_name}_source, &{lib_name}_handle);")
+            self.prefix.writeline(
+                f"            aoti_torch_mps_create_shader_library({lib_name}_source, &{lib_name}_handle);"
+            )
             self.prefix.writeline("        }")
-            self.prefix.writeline(f'        aoti_torch_mps_get_kernel_function({lib_name}_handle, "generated_kernel", &{lib_name}_kernel_handle);')
+            self.prefix.writeline(
+                f'        aoti_torch_mps_get_kernel_function({lib_name}_handle, "generated_kernel", &{lib_name}_kernel_handle);'
+            )
             self.prefix.writeline("    }")
             self.prefix.writeline(f"    return {lib_name}_kernel_handle;")
             self.prefix.writeline("}")

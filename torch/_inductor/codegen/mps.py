@@ -1059,10 +1059,7 @@ class MetalScheduling(SIMDScheduling):
 
             if V.graph.cpp_wrapper:
                 # For shimified version, generate source constant instead of direct instantiation
-                src_code = (
-                    f"const char* {mps_lib_name}_source = "
-                    + src_code
-                )
+                src_code = f"const char* {mps_lib_name}_source = " + src_code
 
             origins, detailed_origins = get_kernel_metadata(node_schedule, wrapper)
             metadata_comment = f"{origins}\n{detailed_origins}"
