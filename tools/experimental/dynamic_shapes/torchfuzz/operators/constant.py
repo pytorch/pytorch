@@ -76,19 +76,20 @@ class ConstantOperator(Operator):
                 import torch
 
                 default_values = {
-                    torch.float16: 0.0,
-                    torch.float32: 0.0,
-                    torch.float64: 0.0,
-                    torch.bfloat16: 0.0,
-                    torch.int8: 0,
-                    torch.int16: 0,
-                    torch.int32: 0,
-                    torch.int64: 0,
-                    torch.bool: False,
-                    torch.complex64: 0.0,
-                    torch.complex128: 0.0,
+                    torch.float16: 1.0,
+                    torch.float32: 1.0,
+                    torch.float64: 1.0,
+                    torch.bfloat16: 1.0,
+                    torch.int8: 1,
+                    torch.int16: 1,
+                    torch.int32: 1,
+                    torch.int64: 1,
+                    torch.bool: True,
+                    torch.complex64: 1.0,
+                    torch.complex128: 1.0,
                 }
-                fill_value = default_values.get(output_spec.dtype, 0)
+
+                fill_value = default_values.get(output_spec.dtype, 1)
                 tensor_creation = (
                     f"torch.full({size_str}, {fill_value}, dtype={dtype_str})"
                 )
