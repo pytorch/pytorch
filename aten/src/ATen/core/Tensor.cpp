@@ -174,19 +174,24 @@ unsigned TensorBase::_register_hook(std::function<TensorBase(const TensorBase&)>
 }
 
 std::optional<ScalarType> TensorBase::grad_dtype() const {
-  return impl::GetVariableHooks()->grad_dtype(*this);
+  auto variable_hooks = impl::GetVariableHooks();
+  if (variable_hooks->allow_grad_dtype_mismatch(*this)) {
+    return std::nullopt;
+  } else if (variable_hooks->grad_dtype(*this).has_value()) {
+    return variable_hooks->grad_dtype(*this);
+  } else {
+    return scalar_type();
+  }
 }
 
 void TensorBase::set_grad_dtype(const std::optional<ScalarType>& grad_dtype) const {
-  impl::GetVariableHooks()->set_grad_dtype(*this, grad_dtype);
-}
-
-bool TensorBase::allow_grad_dtype_mismatch() const {
-  return impl::GetVariableHooks()->allow_grad_dtype_mismatch(*this);
-}
-
-void TensorBase::set_allow_grad_dtype_mismatch(bool allow_mismatch) const {
-  impl::GetVariableHooks()->set_allow_grad_dtype_mismatch(*this, allow_mismatch);
+  auto variable_hooks = impl::GetVariableHooks();
+  if (grad_dtype.has_value()) {
+    variable_hooks->set_grad_dtype(*this, grad_dtype);
+    variable_hooks->set_allow_grad_dtype_mismatch(*this, false);
+  } else {
+    variable_hooks->set_allow_grad_dtype_mismatch(*this, true);
+  }
 }
 
 } // namespace at

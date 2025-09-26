@@ -38,7 +38,8 @@ struct TORCH_API InputMetadata {
       const at::TensorOptions& options,
       MetadataShape input_shape,
       bool is_tensor_subclass,
-      bool is_nested);
+      bool is_nested,
+      std::optional<at::ScalarType> grad_dtype);
   InputMetadata(const at::Tensor& t);
 
   const at::TensorOptions& options() const {
@@ -97,20 +98,14 @@ struct TORCH_API InputMetadata {
   // Danger: not thread safe, caller must protect with lock
   SymIntSmallVec& mutable_shape_as_dim_vector();
 
-  const std::optional<at::ScalarType>& grad_dtype() const {
+  std::optional<at::ScalarType> grad_dtype() const {
+    TORCH_INTERNAL_ASSERT(!was_default_constructed_);
     return grad_dtype_;
   }
 
   void set_grad_dtype(const std::optional<at::ScalarType>& grad_dtype) {
+    TORCH_INTERNAL_ASSERT(!was_default_constructed_);
     grad_dtype_ = grad_dtype;
-  }
-
-  bool allow_grad_dtype_mismatch() const {
-    return allow_grad_dtype_mismatch_;
-  }
-
-  void set_allow_grad_dtype_mismatch(bool allow_mismatch) {
-    allow_grad_dtype_mismatch_ = allow_mismatch;
   }
 
  private:
@@ -125,10 +120,8 @@ struct TORCH_API InputMetadata {
   bool is_tensor_subclass_ = false;
   bool is_nested_ = false;
   bool was_default_constructed_ = true;
-  // When nullopt, defer to the tensor's dtype; otherwise, use this dtype.
+
+  // When nullopt, grad_dtype_ is allowed to be any dtype.
   std::optional<at::ScalarType> grad_dtype_;
-  // When true, bypass dtype casting and validation in the engine.
-  // This is only used for accumulate grad.
-  bool allow_grad_dtype_mismatch_ = false;
 };
 } // namespace torch::autograd

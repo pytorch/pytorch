@@ -200,29 +200,18 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
       const at::TensorOptions& options,
       c10::SymIntArrayRef shape,
       bool is_tensor_subclass,
-      bool is_nested) noexcept {
+      bool is_nested,
+      std::optional<at::ScalarType> grad_dtype) noexcept {
     uint32_t input_nr = input_metadata_.size();
     auto meta_shape = MetadataShape{std::in_place_type<SymIntSmallVec>, shape};
     input_metadata_.emplace_back(
-        options, meta_shape, is_tensor_subclass, is_nested);
+        options, meta_shape, is_tensor_subclass, is_nested, grad_dtype);
     return input_nr;
   }
 
   uint32_t add_input_metadata(const at::Tensor& t) noexcept {
     uint32_t input_nr = input_metadata_.size();
     input_metadata_.emplace_back(t);
-    return input_nr;
-  }
-
-  uint32_t add_input_metadata(
-      const at::Tensor& t,
-      const std::optional<at::ScalarType>& grad_dtype,
-      bool allow_grad_dtype_mismatch) noexcept {
-    uint32_t input_nr = input_metadata_.size();
-    input_metadata_.emplace_back(t);
-    input_metadata_.back().set_grad_dtype(grad_dtype);
-    input_metadata_.back().set_allow_grad_dtype_mismatch(
-        allow_grad_dtype_mismatch);
     return input_nr;
   }
 

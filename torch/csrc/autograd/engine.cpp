@@ -952,18 +952,14 @@ static void validate_outputs_impl(
 
     // grad_dtype and allow_grad_dtype_mismatch can only be customized
     // on leaf tensors, defaulting to nullopt and false otherwise.
-    if (!metadata.allow_grad_dtype_mismatch()) {
-      at::ScalarType expected_dtype = metadata.grad_dtype().has_value()
-          ? metadata.grad_dtype().value()
-          : c10::typeMetaToScalarType(metadata.options().dtype());
-
-      if (grad.scalar_type() != expected_dtype) {
-        grad = grad.to(expected_dtype);
+    if (metadata.grad_dtype().has_value()) {
+      if (grad.scalar_type() != metadata.grad_dtype().value()) {
+        grad = grad.to(metadata.grad_dtype().value());
       }
-      if (grad.dtype() != expected_dtype) {
+      if (grad.dtype() != metadata.grad_dtype().value()) {
         std::stringstream ss;
         ss << "invalid gradient at index " << i << " - expected dtype ";
-        ss << expected_dtype << " but got " << grad.dtype();
+        ss << metadata.grad_dtype().value() << " but got " << grad.dtype();
         TORCH_CHECK(false, format_error(ss.str()));
       }
     }
