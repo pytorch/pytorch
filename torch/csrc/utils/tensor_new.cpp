@@ -1497,7 +1497,7 @@ Tensor tensor_ctor(
         pin_memory);
     auto names = r.toDimnameListOptional(5);
     if (names) {
-      at::namedinference::propagate_names_if_nonempty(
+      at::namedinference::propagate_names(
           new_tensor, *names, /*validate_names=*/true);
     }
     new_tensor.detach_(); // ensure new_tensor a leaf node
