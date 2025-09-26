@@ -137,7 +137,11 @@ class LoggingTests(LoggingTestCase):
         fn_opt = torch.compile(inductor_schedule_fn, backend="inductor")
         fn_opt(torch.ones(1000, 1000, device=device_type))
         self.assertGreater(len(records), 0)
-        self.assertLess(len(records), 8)
+
+        # LOAF will add an extra round of fusion and result in more logs
+        self.assertLess(
+            len(records), 8 * (1 + torch._inductor.config.loop_ordering_after_fusion)
+        )
 
     @requires_cuda_and_triton
     @make_logging_test(cudagraphs=True)
