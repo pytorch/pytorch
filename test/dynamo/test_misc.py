@@ -8159,7 +8159,7 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
             return a * u0 * u1
 
         func(torch.tensor([1, 2, 3, 4, 5]))
-        self.assertEquals(cnt.frame_count, 2)
+        self.assertEqual(cnt.frame_count, 2)
 
     # Sadly, this does not throw - we do not prop correctly across the graph break
     @unittest.expectedFailure
