@@ -1436,11 +1436,14 @@ class VariableBuilder:
             )
             # Install the guards on the content of the script object by setting the source
             # to be FlattenScriptObjectSource, which calls __obj_flatten__() to get the contents.
-            LazyVariableTracker.realize_all(
-                VariableBuilder(self.tx, FlattenScriptObjectSource(self.source))(
-                    value.__obj_flatten__()
+            from torch._library.opaque_object import OpaqueTypeStr
+
+            if str(value._type()) != OpaqueTypeStr:
+                LazyVariableTracker.realize_all(
+                    VariableBuilder(self.tx, FlattenScriptObjectSource(self.source))(
+                        value.__obj_flatten__()
+                    )
                 )
-            )
 
             fake_script_obj = torch._library.fake_class_registry.maybe_to_fake_obj(
                 self.tx.output.fake_mode, value
