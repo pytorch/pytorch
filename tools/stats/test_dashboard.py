@@ -145,7 +145,7 @@ def get_invoking_file_summary(
     for tests in grouped_tests:
         build_name = tests[0]["build_name"]
         test_config = tests[0]["test_config"]
-        clean_job_name = f"{build_name} / ({test_config})"
+        short_job_name = f"{build_name} / ({test_config})"
         file = tests[0].get("file", "NoFile")
 
         key = (build_name, test_config, file)
@@ -157,7 +157,7 @@ def get_invoking_file_summary(
                 "failures": 0,
                 "errors": 0,
                 "successes": 0,
-                "short_job_name": clean_job_name,
+                "short_job_name": short_job_name,
                 "file": file,
             }
         summary_flat[key]["count"] += 1
