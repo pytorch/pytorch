@@ -602,6 +602,22 @@ class SchemaInfo:
     # of overhead. Converting to int once and caching removes this per-op overhead.
     int_tags: list[int]
 
+    # Result of _get_write_alias(x) for x in self.outs. Guaranteed that no elements of
+    # the list are None; if all were None, we store None instead of a list. If some but
+    # not all were None, that's unsupported.
+    outs_write_aliases: list[str] | None
+
+
+def _get_write_alias(x) -> Optional[str]:
+    alias_set = x.alias_set
+    if not alias_set or not x.is_write:
+        return None
+    # torchscript allows for complicated alias sets, but our dispatcher ops only really involve simple aliasing
+    assert len(alias_set) == 1
+    # timeit says next(iter(alias_set)) is faster than list(alias_set)[0] even for
+    # set of size 1 on Python 3.13.
+    return next(iter(alias_set))
+
 
 # Given an OpOverload, returns schema information on it.
 # This is cached for efficiency, since it can involve running torchgen
@@ -668,8 +684,24 @@ def get_alias_info(func) -> SchemaInfo:
             )
             for a in func._schema.returns
         ]
+
+    out_schemas_write_aliases: list[Optional[str]] = [
+        _get_write_alias(r) for r in out_schemas
+    ]
+    outs_write_aliases: Optional[list[str]] = None
+    if not any(x is not None for x in out_schemas_write_aliases):
+        outs_write_aliases = None
+    # simplifying assumption: we don't have **any** ops with return types like "-> (Tensor(a!), Tensor)"
+    elif not all(x is not None for x in out_schemas_write_aliases):
+        raise RuntimeError("Unsupported schema: " + str(func._schema))
+    else:
+        outs_write_aliases = out_schemas_write_aliases  # type: ignore[assignment]
+
     schema_info = SchemaInfo(
-        args=arg_schemas, outs=out_schemas, int_tags=[int(x) for x in func.tags]
+        args=arg_schemas,
+        outs=out_schemas,
+        int_tags=[int(x) for x in func.tags],
+        outs_write_aliases=outs_write_aliases,
     )
     return schema_info
 
@@ -697,16 +729,6 @@ def return_and_correct_aliasing(func, args, kwargs, out):
     # Caching here because torchgen parsing is definitely not fast, and this function is called
     # once for every op in the graph during functionalization.
     schema_info = get_alias_info(func)
-
-    def get_write_alias(x):
-        alias_set = x.alias_set
-        if not alias_set or not x.is_write:
-            return None
-        # torchscript allows for complicated alias sets, but our dispatcher ops only really involve simple aliasing
-        assert len(alias_set) == 1
-        # timeit says next(iter(alias_set)) is faster than list(alias_set)[0] even for
-        # set of size 1 on Python 3.13.
-        return next(iter(alias_set))
 
     def get_arg_from_alias(output_alias, schema_info, args, kwargs):
         new_args, new_kwargs = torch.fx.operator_schemas.normalize_function(  # type: ignore[misc]
@@ -736,6 +758,7 @@ def return_and_correct_aliasing(func, args, kwargs, out):
     if _TORCH_TAG_INPLACE_VIEW_INT in schema_info.int_tags:
         # no_dispatch() to make sure that we secretly change the metadata on the wrapper,
         # but don't end up dispatching the op anywhere else.
+        get_write_alias = _get_write_alias
         mutated_args = [
             x
             for i, x in enumerate(args)
@@ -762,15 +785,11 @@ def return_and_correct_aliasing(func, args, kwargs, out):
 
     # Next: we need to make sure to return inputs directly, if the output is a mutable alias (e.g. add_()).
 
-    # Compute write aliases once instead of repeatedly.
-    schema_info_outs_write_aliases = [get_write_alias(r) for r in schema_info.outs]
-    # simple case: none of our outputs have mutable aliases, so we can return the output as-is
-    if not any(x is not None for x in schema_info_outs_write_aliases):
-        return out
+    schema_info_outs_write_aliases = schema_info.outs_write_aliases
 
-    # simplifying assumption: we don't have **any** ops with return types like "-> (Tensor(a!), Tensor)"
-    if not all(x is not None for x in schema_info_outs_write_aliases):
-        raise RuntimeError("Unsupported schema: " + str(func._schema))
+    # simple case: none of our outputs have mutable aliases, so we can return the output as-is
+    if schema_info_outs_write_aliases is None:
+        return out
 
     if len(schema_info_outs_write_aliases) == 1:
         return get_arg_from_alias(
