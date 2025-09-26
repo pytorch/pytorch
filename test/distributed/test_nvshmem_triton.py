@@ -2,6 +2,8 @@
 # To run:
 # python test/distributed/test_nvshmem_triton.py
 
+import sys
+
 import triton.language as tl
 
 import torch
@@ -9,6 +11,7 @@ import torch.distributed as dist
 import torch.distributed._symmetric_memory as symm_mem
 import torch.distributed._symmetric_memory._nvshmem_triton as nvshmem
 from torch._inductor.runtime.triton_compat import triton
+from torch.distributed._symmetric_memory._nvshmem_triton import requires_nvshmem
 from torch.testing._internal.common_distributed import MultiProcContinuousTest
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -20,12 +23,9 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.inductor_utils import IS_H100, requires_triton
 
 
-# Decorators
-def requires_nvshmem():
-    return skip_but_pass_in_sandcastle_if(
-        not symm_mem.is_nvshmem_available(),
-        "test_nvshmem requires NVSHMEM, skipping tests",
-    )
+if not symm_mem.is_nvshmem_available():
+    print("NVSHMEM not available, skipping tests")
+    sys.exit(0)
 
 
 def requires_h100():
@@ -41,8 +41,11 @@ device_module = torch.get_device_module(device_type)
 
 
 # Shared Triton JIT kernels
+
+
+@requires_nvshmem
 @triton.jit
-def nvshmem_put_kernel(
+def my_put_kernel(
     dest,
     src,
     nelems,
@@ -51,8 +54,9 @@ def nvshmem_put_kernel(
     nvshmem.put(dest, src, nelems, pe)
 
 
+@requires_nvshmem
 @triton.jit
-def nvshmem_get_kernel(
+def my_get_kernel(
     dest,
     src,
     nelems,
@@ -61,8 +65,9 @@ def nvshmem_get_kernel(
     nvshmem.get(dest, src, nelems, pe)
 
 
+@requires_nvshmem
 @triton.jit
-def nvshmem_putmem_signal_block_kernel(
+def my_putmem_signal_block_kernel(
     dst,
     src,
     size_bytes,
@@ -74,13 +79,15 @@ def nvshmem_putmem_signal_block_kernel(
     nvshmem.putmem_signal_block(dst, src, size_bytes, signal, sig_val, sig_op, peer)
 
 
+@requires_nvshmem
 @triton.jit
-def nvshmem_signal_wait_until_kernel(signal, cmp_op, cmp_val):
+def my_signal_wait_until_kernel(signal, cmp_op, cmp_val):
     nvshmem.signal_wait_until(signal, cmp_op, cmp_val)
 
 
+@requires_nvshmem
 @triton.jit
-def nvshmem_signal_op_kernel(
+def my_signal_op_kernel(
     sig_addr,
     signal,
     sig_op,
@@ -89,8 +96,9 @@ def nvshmem_signal_op_kernel(
     nvshmem.signal_op(sig_addr, signal, sig_op, peer)
 
 
+@requires_nvshmem
 @triton.jit
-def nvshmem_wait_until_kernel(
+def my_wait_until_kernel(
     ivar,
     cmp_op,
     cmp_val,
@@ -98,13 +106,15 @@ def nvshmem_wait_until_kernel(
     nvshmem.wait_until(ivar, cmp_op, cmp_val)
 
 
+@requires_nvshmem
 @triton.jit
-def nvshmem_fence_kernel():
+def my_fence_kernel():
     nvshmem.fence()
 
 
+@requires_nvshmem
 @triton.jit
-def nvshmem_put_with_fence_kernel(
+def my_put_with_fence_kernel(
     dst1,
     src1,
     dst2,
@@ -126,8 +136,9 @@ def nvshmem_put_with_fence_kernel(
     nvshmem.put(flag_dst, flag_src, 1, peer)
 
 
+@requires_nvshmem
 @triton.jit
-def nvshmem_put_with_quiet_kernel(
+def my_put_with_quiet_kernel(
     dst,
     src,
     flag_dst,
@@ -144,8 +155,9 @@ def nvshmem_put_with_quiet_kernel(
     nvshmem.put(flag_dst, flag_src, 1, peer)
 
 
+@requires_nvshmem
 @triton.jit
-def nvshmem_barrier_test_kernel(
+def my_barrier_test_kernel(
     dst,
     src,
     nelems,
@@ -178,13 +190,15 @@ def nvshmem_barrier_test_kernel(
         tl.store(p_dst, received + 1)
 
 
+@requires_nvshmem
 @triton.jit
-def nvshmem_barrier_all_kernel():
+def my_barrier_all_kernel():
     nvshmem.barrier_all()
 
 
+@requires_nvshmem
 @triton.jit
-def nvshmem_sync_test_kernel(
+def my_sync_test_kernel(
     local_data,
     remote_data,
     nelems,
@@ -210,8 +224,9 @@ def nvshmem_sync_test_kernel(
     # because sync_all() made those local stores visible
 
 
+@requires_nvshmem
 @triton.jit
-def nvshmem_alltoall_kernel(
+def my_alltoall_kernel(
     team_handle,
     dst,
     src,
@@ -220,8 +235,9 @@ def nvshmem_alltoall_kernel(
     nvshmem.alltoall(team_handle, dst, src, nelems_per_pe)
 
 
+@requires_nvshmem
 @triton.jit
-def nvshmem_broadcast_kernel(
+def my_broadcast_kernel(
     team_handle,
     dst,
     src,
@@ -231,8 +247,9 @@ def nvshmem_broadcast_kernel(
     nvshmem.broadcast(team_handle, dst, src, nelems, pe_root)
 
 
+@requires_nvshmem
 @triton.jit
-def nvshmem_reduce_kernel(
+def my_reduce_kernel(
     team_handle,
     dest_tensor,
     source_tensor,
@@ -243,7 +260,6 @@ def nvshmem_reduce_kernel(
 
 
 @instantiate_parametrized_tests
-@requires_nvshmem()
 class NVSHMEMTritonTest(MultiProcContinuousTest):
     def _init_device(self) -> None:
         # TODO: relieve this (seems to hang if without)
@@ -261,9 +277,6 @@ class NVSHMEMTritonTest(MultiProcContinuousTest):
     def test_triton_put(self) -> None:
         torch.manual_seed(42 + self.rank)
         self._init_device()
-
-        # Enable NVSHMEM for Triton
-        nvshmem_lib = nvshmem.enable_triton()
 
         group_name = dist.distributed_c10d._get_default_group().group_name
         symm_mem.enable_symm_mem_for_group(group_name)
@@ -294,12 +307,11 @@ class NVSHMEMTritonTest(MultiProcContinuousTest):
         peer = 1 - rank
         if rank == 0:
             # Rank 0 puts its data to Rank 1
-            nvshmem_put_kernel[(1,)](
+            my_put_kernel[(1,)](
                 dst,
                 src,
                 nelems,
                 peer,
-                extern_libs=nvshmem_lib,
             )
 
         # Synchronize after operation
@@ -319,7 +331,6 @@ class NVSHMEMTritonTest(MultiProcContinuousTest):
         torch.manual_seed(42 + self.rank)
         self._init_device()
 
-        nvshmem_lib = nvshmem.enable_triton()
         group_name = dist.distributed_c10d._get_default_group().group_name
         symm_mem.enable_symm_mem_for_group(group_name)
         rank = self.rank
@@ -341,12 +352,11 @@ class NVSHMEMTritonTest(MultiProcContinuousTest):
         peer = 1 - rank
         if rank == 1:
             # Rank 1 gets data from rank 0 using tensor-aware API
-            nvshmem_get_kernel[(1,)](
+            my_get_kernel[(1,)](
                 out,
                 inp,
                 numel,
                 peer,
-                extern_libs=nvshmem_lib,
             )
         if rank == 1:
             torch.testing.assert_close(
@@ -360,7 +370,6 @@ class NVSHMEMTritonTest(MultiProcContinuousTest):
         torch.manual_seed(42 + self.rank)
         self._init_device()
 
-        nvshmem_lib = nvshmem.enable_triton()
         group_name = dist.distributed_c10d._get_default_group().group_name
         symm_mem.enable_symm_mem_for_group(group_name)
         rank = self.rank
@@ -383,12 +392,11 @@ class NVSHMEMTritonTest(MultiProcContinuousTest):
         peer = (rank - 1) % world_size
 
         # All ranks execute the get operation using tensor-aware API
-        nvshmem_get_kernel[(1,)](
+        my_get_kernel[(1,)](
             out,
             inp,
             numel,
             peer,
-            extern_libs=nvshmem_lib,
         )
 
         expected_value = peer
@@ -402,8 +410,6 @@ class NVSHMEMTritonTest(MultiProcContinuousTest):
     def test_triton_put_signal_set(self) -> None:
         torch.manual_seed(42 + self.rank)
         self._init_device()
-
-        nvshmem_lib = nvshmem.enable_triton()
 
         group_name = dist.distributed_c10d._get_default_group().group_name
         symm_mem.enable_symm_mem_for_group(group_name)
@@ -431,7 +437,7 @@ class NVSHMEMTritonTest(MultiProcContinuousTest):
 
         if rank == 0:
             # Rank 0 puts into Rank 1
-            nvshmem_putmem_signal_block_kernel[(1, 1, 1)](
+            my_putmem_signal_block_kernel[(1, 1, 1)](
                 out,
                 inp,
                 size_bytes=msg_size_bytes,
@@ -439,16 +445,14 @@ class NVSHMEMTritonTest(MultiProcContinuousTest):
                 sig_val=SIGNAL_VAL,
                 sig_op=NVSHMEM_SIGNAL_SET,
                 peer=peer,
-                extern_libs=nvshmem_lib,
             )
 
         if rank == 1:
             # Wait until signal flag is set by Rank 0
-            nvshmem_signal_wait_until_kernel[(1,)](
+            my_signal_wait_until_kernel[(1,)](
                 flag,
                 cmp_op=NVSHMEM_CMP_EQ,
                 cmp_val=SIGNAL_VAL,
-                extern_libs=nvshmem_lib,
             )
             # After wait completes, verify data and flag contents
             torch.testing.assert_close(
@@ -464,8 +468,6 @@ class NVSHMEMTritonTest(MultiProcContinuousTest):
     def test_triton_put_signal_add(self) -> None:
         torch.manual_seed(42 + self.rank)
         self._init_device()
-
-        nvshmem_lib = nvshmem.enable_triton()
 
         group_name = dist.distributed_c10d._get_default_group().group_name
         symm_mem.enable_symm_mem_for_group(group_name)
@@ -493,7 +495,7 @@ class NVSHMEMTritonTest(MultiProcContinuousTest):
 
         if rank == 0:
             # Rank 0 puts into Rank 1
-            nvshmem_putmem_signal_block_kernel[(1, 1, 1)](
+            my_putmem_signal_block_kernel[(1, 1, 1)](
                 out,
                 inp,
                 size_bytes=msg_size_bytes,
@@ -501,15 +503,13 @@ class NVSHMEMTritonTest(MultiProcContinuousTest):
                 sig_val=SIGNAL_VAL,
                 sig_op=NVSHMEM_SIGNAL_ADD,
                 peer=peer,
-                extern_libs=nvshmem_lib,
             )
 
         if rank == 1:
-            nvshmem_signal_wait_until_kernel[(1, 1, 1)](
+            my_signal_wait_until_kernel[(1, 1, 1)](
                 flag,
                 cmp_op=NVSHMEM_CMP_EQ,
                 cmp_val=SIGNAL_VAL,
-                extern_libs=nvshmem_lib,
             )
             torch.testing.assert_close(
                 out, val * torch.ones(numel, dtype=dtype, device=self.device)
@@ -525,7 +525,6 @@ class NVSHMEMTritonTest(MultiProcContinuousTest):
         torch.manual_seed(42 + self.rank)
         self._init_device()
 
-        nvshmem_lib = nvshmem.enable_triton()
         group_name = dist.distributed_c10d._get_default_group().group_name
         symm_mem.enable_symm_mem_for_group(group_name)
 
@@ -546,11 +545,10 @@ class NVSHMEMTritonTest(MultiProcContinuousTest):
 
         if rank == 0:
             # Rank 0 (the waiter)
-            nvshmem_wait_until_kernel[(1,)](
+            my_wait_until_kernel[(1,)](
                 flag,
                 cmp_op=NVSHMEM_CMP_EQ,
                 cmp_val=FLAG_FINAL_VALUE,
-                extern_libs=nvshmem_lib,
             )
 
             # Verification
@@ -562,12 +560,11 @@ class NVSHMEMTritonTest(MultiProcContinuousTest):
         if rank == 1:
             # Rank 1 (the signaler)
             # Launch a kernel to put the value to Rank 0's flag tensor.
-            nvshmem_put_kernel[(1,)](
+            my_put_kernel[(1,)](
                 flag,  # Destination symmetric tensor on the remote PE
                 expected_flag,  # Source data tensor (local)
                 1,  # Number of elements
                 peer,  # The target PE (Rank 0)
-                extern_libs=nvshmem_lib,
             )
 
     @skipIfRocm
@@ -575,8 +572,6 @@ class NVSHMEMTritonTest(MultiProcContinuousTest):
     @requires_h100()
     def test_triton_signal_wait_until(self) -> None:
         self._init_device()
-        # Enable NVSHMEM for Triton
-        nvshmem_lib = nvshmem.enable_triton()
         group_name = dist.distributed_c10d._get_default_group().group_name
         symm_mem.enable_symm_mem_for_group(group_name)
         rank = self.rank
@@ -606,7 +601,7 @@ class NVSHMEMTritonTest(MultiProcContinuousTest):
 
         if rank == 0:
             # Producer (rank 0): Puts data into rank 1's `out` buffer and then sets the flag
-            nvshmem_putmem_signal_block_kernel[(1, 1, 1)](
+            my_putmem_signal_block_kernel[(1, 1, 1)](
                 out,
                 inp,
                 size_bytes=msg_size_bytes,
@@ -614,15 +609,13 @@ class NVSHMEMTritonTest(MultiProcContinuousTest):
                 sig_val=COMPLETION_FLAG_VAL,
                 sig_op=NVSHMEM_SIGNAL_SET,
                 peer=peer,
-                extern_libs=nvshmem_lib,
             )
         elif rank == 1:
             # Consumer (rank 1): Waits on the signal variable using `signal_wait_until`.
-            nvshmem_signal_wait_until_kernel[(1, 1, 1)](
+            my_signal_wait_until_kernel[(1, 1, 1)](
                 flag,
                 cmp_op=NVSHMEM_CMP_EQ,
                 cmp_val=COMPLETION_FLAG_VAL,
-                extern_libs=nvshmem_lib,
             )
             # After the wait returns, verify data and flag
             torch.testing.assert_close(
@@ -649,7 +642,6 @@ class NVSHMEMTritonTest(MultiProcContinuousTest):
         """
         torch.manual_seed(42 + self.rank)
         self._init_device()
-        nvshmem_lib = nvshmem.enable_triton()
         group_name = dist.distributed_c10d._get_default_group().group_name
         symm_mem.enable_symm_mem_for_group(group_name)
         rank = self.rank
@@ -680,7 +672,7 @@ class NVSHMEMTritonTest(MultiProcContinuousTest):
         NVSHMEM_CMP_EQ = 0  # compare equal
 
         if rank == 0:
-            nvshmem_put_with_fence_kernel[(1,)](
+            my_put_with_fence_kernel[(1,)](
                 out1,
                 inp1,
                 out2,
@@ -689,15 +681,13 @@ class NVSHMEMTritonTest(MultiProcContinuousTest):
                 flag_update_val,
                 nelems=numel,
                 peer=peer,
-                extern_libs=nvshmem_lib,
             )
         elif rank == 1:
             # Wait until flag is set by Rank 0
-            nvshmem_wait_until_kernel[(1,)](
+            my_wait_until_kernel[(1,)](
                 flag,
                 cmp_op=NVSHMEM_CMP_EQ,
                 cmp_val=flag_val,
-                extern_libs=nvshmem_lib,
             )
 
             # Verify ordered data arrival.
@@ -717,7 +707,6 @@ class NVSHMEMTritonTest(MultiProcContinuousTest):
     def test_triton_quiet(self) -> None:
         torch.manual_seed(42 + self.rank)
         self._init_device()
-        nvshmem_lib = nvshmem.enable_triton()
         group_name = dist.distributed_c10d._get_default_group().group_name
         symm_mem.enable_symm_mem_for_group(group_name)
         rank = self.rank
@@ -743,21 +732,19 @@ class NVSHMEMTritonTest(MultiProcContinuousTest):
 
         dist.barrier()
         if rank == 1:
-            nvshmem_put_with_quiet_kernel[(1,)](
+            my_put_with_quiet_kernel[(1,)](
                 out,
                 inp,
                 flag,
                 flag_update_val,
                 nelems=numel,
                 peer=peer,
-                extern_libs=nvshmem_lib,
             )
         elif rank == 0:
-            nvshmem_wait_until_kernel[(1,)](
+            my_wait_until_kernel[(1,)](
                 flag,
                 cmp_op=NVSHMEM_CMP_EQ,
                 cmp_val=flag_val,
-                extern_libs=nvshmem_lib,
             )
             torch.testing.assert_close(
                 out, val * torch.ones(numel, dtype=dtype, device=self.device)
@@ -770,7 +757,6 @@ class NVSHMEMTritonTest(MultiProcContinuousTest):
     def test_triton_barrier(self) -> None:
         torch.manual_seed(42 + self.rank)
         self._init_device()
-        nvshmem_lib = nvshmem.enable_triton()
         group_name = dist.distributed_c10d._get_default_group().group_name
         symm_mem.enable_symm_mem_for_group(group_name)
         rank = self.rank
@@ -782,11 +768,10 @@ class NVSHMEMTritonTest(MultiProcContinuousTest):
         symm_mem.rendezvous(src, group=group_name)
         symm_mem.rendezvous(dst, group=group_name)
 
-        nvshmem_barrier_test_kernel[(1,)](
+        my_barrier_test_kernel[(1,)](
             dst,
             src,
             nelems=numel,
-            extern_libs=nvshmem_lib,
             launch_cooperative_grid=True,
             num_ctas=1,
         )
@@ -808,7 +793,6 @@ class NVSHMEMTritonTest(MultiProcContinuousTest):
         torch.manual_seed(42 + self.rank)
         self._init_device()
 
-        nvshmem_lib = nvshmem.enable_triton()
         group_name = dist.distributed_c10d._get_default_group().group_name
         symm_mem.enable_symm_mem_for_group(group_name)
         rank = self.rank
@@ -822,11 +806,10 @@ class NVSHMEMTritonTest(MultiProcContinuousTest):
         symm_mem.rendezvous(remote_data, group=group_name)
 
         # Launch kernel with cooperative grid
-        nvshmem_sync_test_kernel[(1,)](
+        my_sync_test_kernel[(1,)](
             local_data,
             remote_data,
             nelems=numel,
-            extern_libs=nvshmem_lib,
             launch_cooperative_grid=True,
             num_ctas=1,
         )
@@ -853,7 +836,6 @@ class NVSHMEMTritonTest(MultiProcContinuousTest):
     def test_triton_alltoall(self) -> None:
         torch.manual_seed(42 + self.rank)
         self._init_device()
-        nvshmem_lib = nvshmem.enable_triton()
         group_name = dist.distributed_c10d._get_default_group().group_name
         symm_mem.enable_symm_mem_for_group(group_name)
         world_size = dist.get_world_size()
@@ -878,12 +860,11 @@ class NVSHMEMTritonTest(MultiProcContinuousTest):
         dist.barrier()
         team_handle = 0  # NVSHMEM_TEAM_WORLD handle is 0
         # Launch the kernel using new tensor-aware API
-        nvshmem_alltoall_kernel[(1,)](
+        my_alltoall_kernel[(1,)](
             team_handle,
             dst,
             src,
             nelems_per_pe,
-            extern_libs=nvshmem_lib,
             launch_cooperative_grid=True,
         )
         # Synchronize after alltoall
@@ -902,7 +883,6 @@ class NVSHMEMTritonTest(MultiProcContinuousTest):
     def test_triton_broadcast(self) -> None:
         torch.manual_seed(42 + self.rank)
         self._init_device()
-        nvshmem_lib = nvshmem.enable_triton()
         group_name = dist.distributed_c10d._get_default_group().group_name
         symm_mem.enable_symm_mem_for_group(group_name)
         rank = self.rank
@@ -933,13 +913,12 @@ class NVSHMEMTritonTest(MultiProcContinuousTest):
 
         # Execute broadcast
         team_handle = 0  # NVSHMEM_TEAM_WORLD
-        nvshmem_broadcast_kernel[(1,)](
+        my_broadcast_kernel[(1,)](
             team_handle,
             dst,
             src,
             nelems,
             pe_root,
-            extern_libs=nvshmem_lib,
             launch_cooperative_grid=True,
         )
 
@@ -972,7 +951,6 @@ class NVSHMEMTritonTest(MultiProcContinuousTest):
     def test_triton_sum_reduce(self, dtype) -> None:
         torch.manual_seed(42 + self.rank)
         self._init_device()
-        nvshmem_lib = nvshmem.enable_triton()
         group_name = dist.distributed_c10d._get_default_group().group_name
         symm_mem.enable_symm_mem_for_group(group_name)
         world_size = dist.get_world_size()
@@ -999,13 +977,12 @@ class NVSHMEMTritonTest(MultiProcContinuousTest):
 
         # Execute sum reduction across all ranks
         team_handle = 0  # NVSHMEM_TEAM_WORLD
-        nvshmem_reduce_kernel[(1,)](
+        my_reduce_kernel[(1,)](
             team_handle,
             dst,
             src,
             nreduce,
             operation="sum",
-            extern_libs=nvshmem_lib,
             launch_cooperative_grid=True,
         )
 
@@ -1036,7 +1013,6 @@ class NVSHMEMTritonTest(MultiProcContinuousTest):
     def test_triton_minmax_reduce(self, dtype) -> None:
         torch.manual_seed(42 + self.rank)
         self._init_device()
-        nvshmem_lib = nvshmem.enable_triton()
         group_name = dist.distributed_c10d._get_default_group().group_name
         symm_mem.enable_symm_mem_for_group(group_name)
         world_size = dist.get_world_size()
@@ -1078,23 +1054,21 @@ class NVSHMEMTritonTest(MultiProcContinuousTest):
         dist.barrier()
         # Execute MIN reduction
         team_handle = 0
-        nvshmem_reduce_kernel[(1,)](
+        my_reduce_kernel[(1,)](
             team_handle,
             dst_min,
             src_min,
             nreduce,
             operation="min",
-            extern_libs=nvshmem_lib,
             launch_cooperative_grid=True,
         )
         # Execute MAX reduction
-        nvshmem_reduce_kernel[(1,)](
+        my_reduce_kernel[(1,)](
             team_handle,
             dst_max,
             src_max,
             nreduce,
             operation="max",
-            extern_libs=nvshmem_lib,
             launch_cooperative_grid=True,
         )
         dist.barrier()
@@ -1125,7 +1099,6 @@ class NVSHMEMTritonTest(MultiProcContinuousTest):
     def test_triton_prod_reduce(self, dtype) -> None:
         torch.manual_seed(42 + self.rank)
         self._init_device()
-        nvshmem_lib = nvshmem.enable_triton()
         group_name = dist.distributed_c10d._get_default_group().group_name
         symm_mem.enable_symm_mem_for_group(group_name)
         world_size = dist.get_world_size()
@@ -1165,13 +1138,12 @@ class NVSHMEMTritonTest(MultiProcContinuousTest):
 
         # Execute product reduction across all ranks
         team_handle = 0  # NVSHMEM_TEAM_WORLD
-        nvshmem_reduce_kernel[(1,)](
+        my_reduce_kernel[(1,)](
             team_handle,
             dst,
             src,
             nreduce,
             operation="prod",
-            extern_libs=nvshmem_lib,
             launch_cooperative_grid=True,
         )
 
