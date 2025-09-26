@@ -718,6 +718,11 @@ class OutputGraph(OutputGraphCommon):
 
         self.export_metadata = ExportMetaData()
 
+        # Dict of inlined unspecialized modules to generate the
+        # dynamo_flat_name_to_original_fqn mapping. The code here follows what
+        # export was doing earlier.
+        self.inlined_unspecialized_modules: dict[str, torch.nn.Module] = {}
+
     def mark_bytecode_tracing_start(self) -> None:
         self.compiler_trace_stack.enter_context(
             dynamo_timed(
@@ -2564,6 +2569,7 @@ class OutputGraph(OutputGraphCommon):
         # some of the tensor objects to be held alive for longer than necessary.
         self.root_tx = None  # type: ignore[assignment]
         self.nn_modules.clear()
+        self.inlined_unspecialized_modules.clear()
         self.param_name_to_source = None
 
         for node in self.graph.nodes:
@@ -2591,6 +2597,34 @@ class OutputGraph(OutputGraphCommon):
             return node.meta["grapharg"].example
         assert node.op == "get_attr"
         return self.nn_modules[node.target]  # type: ignore[index]
+
+    def add_fqn_info_for_inlined_modules(
+        self, inlined_module: torch.nn.Module, source: Source
+    ) -> None:
+        name = OutputGraph.module_key_name(source.name())
+        name = get_unique_name_wrt(
+            name, self.inlined_unspecialized_modules, self.global_scope
+        )
+        self.inlined_unspecialized_modules[name] = inlined_module
+
+        def register_leaf_name(leaf_name: str) -> None:
+            assert self.param_name_to_source is not None
+            new_source = ParamBufferSource(source, leaf_name)
+            new_name = f"{name}.{leaf_name}"
+            self.param_name_to_source[new_name] = new_source
+            if isinstance(source, LocalSource):
+                self.dynamo_flat_name_to_original_fqn[
+                    OutputGraph.module_key_name(new_source.name())
+                ] = leaf_name
+
+        # annoying, but there are cases when we do not have parameters
+        # see test_nn_moduledict_contains
+        if hasattr(inlined_module, "_parameters"):
+            for leaf_name, _ in inlined_module.named_parameters():
+                register_leaf_name(leaf_name)
+        if hasattr(inlined_module, "_buffers"):
+            for leaf_name, _ in inlined_module.named_buffers():
+                register_leaf_name(leaf_name)
 
 
 class DynamoTracerOutput:
@@ -2952,9 +2986,20 @@ class SubgraphTracer(fx.Tracer):
             rv.node.meta["nn_module_stack"] = nn_module_stack.copy()
 
         if kind in {"call_function", "call_method"}:
-            rv.node.meta["source_fn_stack"] = self.source_fn_stack + [
-                (rv.node.name, target)
-            ]
+            if not nn_module_stack:
+                rv.node.meta["source_fn_stack"] = self.source_fn_stack + [
+                    (rv.node.name, target)
+                ]
+            else:
+                current_nn_module = list(rv.node.meta["nn_module_stack"].values())[-1][
+                    1
+                ]
+                rv.node.meta["source_fn_stack"] = self.source_fn_stack + [
+                    (
+                        rv.node.name,
+                        current_nn_module,
+                    )
+                ]
         elif kind == "call_module":
             if self.parent is not None:
                 # TODO can remove once inline_inbuilt_nn_modules is always True
