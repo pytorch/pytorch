@@ -124,11 +124,8 @@ def replace_floor_div(expr: sympy.Expr) -> sympy.Expr:
             if isinstance(arg, sympy.Rational):
                 numerator *= arg.numerator
                 denominator *= arg.denominator
-            elif isinstance(arg, sympy.Pow):
-                if arg.exp.is_negative:
-                    denominator *= arg.base**-arg.exp
-                else:
-                    numerator *= arg
+            elif isinstance(arg, sympy.Pow) and arg.exp.is_negative:
+                denominator *= arg.base**-arg.exp
             else:
                 numerator *= arg
 
