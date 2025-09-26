@@ -2361,7 +2361,7 @@ def triton_config_reduction(
             rnumels[prefix] *= 2
 
     if num_warps is None:
-        if reduction_hint == ReductionHint.INNER:
+        if reduction_hint == ReductionHint.INNER and not is_fbcode():
             # r is contiguous, so ensure that each thread has 8 elements for
             # vectorized loads, assuming bf16/fp16
             num_warps = r // (32 * 8)
@@ -2688,7 +2688,7 @@ def _reduction_configs(
         )
 
     contiguous_config = make_config(
-        1 if rnumel > 2048 else 2,  # 1024 or less is persistent
+        1 if rnumel > 2048 and not is_fbcode() else 2,  # 1024 or less is persistent
         min(rnumel, MAX_R0_BLOCK),
         register_intensive=register_intensive,
     )
