@@ -4091,14 +4091,14 @@ class GraphModule(torch.nn.Module):
 
         def new_get_device_module(device=None):
             if device:
-                return (old_get_device_module(device),)
+                return old_get_device_module(device)
             return getattr(torch, new_device)
 
         # NOTE: torch.get_device_module.__wrapped__ is guarded on, but not
         # torch.get_device_module
         with patch("torch.get_device_module", new_get_device_module):
             print(torch.get_device_module())
-            self.assertTrue(f5() in getattr(torch, new_get_device_module))
+            self.assertTrue(f5() in getattr(torch, new_device))
 
         # synchronize causes a graph break, so no fullgraph=True
         @torch.compile(backend="eager")
