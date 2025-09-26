@@ -373,7 +373,7 @@ def fuzz_tensor(
 
     # Handle empty tensor case
     if len(size) == 0:
-        return torch.zeros((), dtype=dtype), seed
+        return torch.ones((), dtype=dtype), seed
 
     # Calculate required storage size for the custom stride
     required_storage = _compute_storage_size_needed(size, stride)
@@ -400,7 +400,7 @@ def fuzz_tensor(
             base_tensor = torch.randint(-100, 100, (required_storage,), dtype=dtype)
     else:
         # Use zeros (default behavior)
-        base_tensor = torch.zeros(required_storage, dtype=dtype)
+        base_tensor = torch.ones(required_storage, dtype=dtype)
 
     # Create strided tensor view
     strided_tensor = torch.as_strided(base_tensor, size, stride)
