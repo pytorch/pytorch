@@ -204,6 +204,45 @@ class Tensor {
     return at::TensorAccessor<T, N>(ptr, sizes().data(), strides().data());
   }
 
+  template <
+      typename T,
+      size_t N,
+      template <typename U> class PtrTraits = at::DefaultPtrTraits,
+      typename index_t = int64_t>
+  at::GenericPackedTensorAccessor<T, N, PtrTraits, index_t>
+  generic_packed_accessor() const& {
+    static_assert(
+        N > 0,
+        "accessor is used for indexing tensor, for scalars use *data_ptr<T>()");
+    TORCH_CHECK(
+        dim() == N,
+        "TensorAccessor expected ",
+        N,
+        " dims but tensor has ",
+        dim());
+    T* ptr = nullptr;
+    if constexpr (std::is_const_v<T>) {
+      ptr = const_data_ptr<T>();
+    } else {
+      ptr = mutable_data_ptr<T>();
+    }
+    return at::GenericPackedTensorAccessor<T, N, PtrTraits, index_t>(
+        static_cast<typename PtrTraits<T>::PtrType>(ptr),
+        sizes().data(),
+        strides().data());
+  }
+
+  template <
+      typename T,
+      size_t N,
+      template <typename U> class PtrTraits = at::DefaultPtrTraits>
+  at::PackedTensorAccessor32<T, N, PtrTraits> packed_accessor32() const& {
+    STD_TORCH_CHECK(
+        numel() <= static_cast<int64_t>(std::numeric_limits<int32_t>::max()),
+        "numel needs to be smaller than int32_t max; otherwise, please use packed_accessor64");
+    return generic_packed_accessor<T, N, PtrTraits, int32_t>();
+  }
+
   bool defined() const {
     bool defined;
     TORCH_ERROR_CODE_CHECK(aoti_torch_is_defined(ath_.get(), &defined));
