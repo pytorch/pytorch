@@ -20,7 +20,7 @@ class FakeScriptObject:
         try:
             with _disable_current_modes():
                 self.real_obj = copy.deepcopy(x)
-        except RuntimeError as e:
+        except (TypeError, RuntimeError) as e:
             log.warning(
                 "Unable to deepcopy the custom object %s due to %s. "
                 "Defaulting to the user given object. This might be "
@@ -135,9 +135,9 @@ def maybe_to_fake_obj(
     if tracing_with_real(x):
         return x
 
-    if str(x._type()) == "__torch__.torch.classes.aten.OpaqueObject":
-        from torch._library.opaque_object import FakeOpaqueObject
+    from torch._library.opaque_object import FakeOpaqueObject, OpaqueTypeStr
 
+    if str(x._type()) == OpaqueTypeStr:
         # In order to make OpaqueObjects truly opaque, the fake kernel should
         # not depend on the contents of the OpaqueObject at all.
         fake_x = FakeOpaqueObject()
@@ -215,7 +215,7 @@ def maybe_to_fake_obj(
                 FakeScriptMethod(fake_x_wrapped, name, method_schema),
             )
         else:
-            override_skip_list = {"__obj_flatten__", "__get_state__", "__set_state__"}
+            override_skip_list = {"__obj_flatten__", "__getstate__", "__setstate__"}
             if name not in override_skip_list:
                 log.warning("fake object of %s doesn't implement method %s.", x, name)
     return fake_x_wrapped

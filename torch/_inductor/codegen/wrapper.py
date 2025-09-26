@@ -2038,7 +2038,16 @@ class PythonWrapperCodegen(CodeGen):
 
             assert isinstance(value, torch.ScriptObject)
 
-            output.writeline(f"{name} = pickle.loads({pickle.dumps(value)!r})")
+            try:
+                output.writeline(f"{name} = pickle.loads({pickle.dumps(value)!r})")
+            except (TypeError, RuntimeError) as e:
+                log.warning(
+                    "Unable to pickle the custom object %s due to %s. "
+                    "Therefore we are unable to generate sample input "
+                    "for benchmarking.",
+                    str(value._type()),
+                    str(e),
+                )
 
         output.writelines(
             ["", "", "def benchmark_compiled_module(times=10, repeat=10):"]

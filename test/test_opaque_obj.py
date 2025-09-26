@@ -299,6 +299,25 @@ def forward(self, arg0_1, arg1_1):
         )
         _deregister_effectful_op("_TestOpaqueObject::noisy_inject.default")
 
+    def test_compile(self):
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, rng_state, x):
+                x = torch.ops._TestOpaqueObject.noisy_inject(x, rng_state)
+                x = x * x
+                x = torch.ops._TestOpaqueObject.noisy_inject(x, rng_state)
+                x = x + x
+                return (x,)
+
+        mod = Model()
+        rng = RNGState(0)
+        obj1 = make_opaque(rng)
+        x = torch.ones(2, 3)
+
+        _ = torch.compile(mod)(obj1, x)
+
 
 instantiate_parametrized_tests(TestOpaqueObject)
 
