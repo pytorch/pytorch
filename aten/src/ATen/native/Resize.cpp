@@ -2,7 +2,6 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/ResizeCommon.h>
-#include <ATen/NamedTensorUtils.h>
 #include <ATen/TensorSubclassLikeUtils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS

@@ -1007,11 +1007,11 @@ struct TORCH_API IValue final {
     return static_cast<at::QScheme>(toInt());
   }
 
-  // Dimname
-  IValue(at::Dimname dimname) : IValue(dimname.symbol().toQualString()) {}
+  // Dimname - dummy implementation for removed named tensor functionality
+  IValue(at::Dimname dimname) : IValue(std::string("dummy")) {}
 
   at::Dimname toDimname() const {
-    return at::Dimname::fromSymbol(Symbol::fromQualString(toStringRef()));
+    return at::Dimname{};
   }
 
   // Generator

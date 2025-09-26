@@ -15,7 +15,6 @@
 #include <ATen/quantized/Quantizer.h>
 #include <ATen/vulkan/Context.h>
 #include <ATen/metal/Context.h>
-#include <ATen/NamedTensorUtils.h>
 #include <ATen/Parallel.h>
 #include <c10/util/irange.h>
 

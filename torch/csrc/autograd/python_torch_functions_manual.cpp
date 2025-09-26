@@ -30,7 +30,6 @@
 #include <vector>
 
 using at::DeviceGuard;
-using at::DimnameList;
 using at::IntArrayRef;
 using at::OptionalDeviceGuard;
 using at::Scalar;
@@ -248,7 +247,7 @@ static PyObject* THPVariable_tensor(
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
-      "tensor(PyObject* data, *, ScalarType dtype=None, Device? device=None, bool pin_memory=False, bool requires_grad=False, DimnameList? names=None)",
+      "tensor(PyObject* data, *, ScalarType dtype=None, Device? device=None, bool pin_memory=False, bool requires_grad=False)",
   });
 
   constexpr int ctor_num_args = 6;

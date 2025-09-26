@@ -49,8 +49,6 @@ static std::unordered_map<std::string, ParameterType> type_map = {
     {"c10::string_view", ParameterType::STRING},
     {"std::string_view", ParameterType::STRING},
     {"::std::string_view", ParameterType::STRING},
-    {"Dimname", ParameterType::DIMNAME},
-    {"DimnameList", ParameterType::DIMNAME_LIST},
     {"ScalarList", ParameterType::SCALAR_LIST},
     {"DispatchKeySet", ParameterType::DISPATCH_KEY_SET},
 };
@@ -1095,16 +1093,6 @@ auto FunctionParameter::_check(
         return true;
       }
       return false;
-    }
-    case ParameterType::DIMNAME:
-      return THPUtils_checkDimname(obj);
-    case ParameterType::DIMNAME_LIST: {
-      if (THPUtils_checkDimnameList(obj)) {
-        return true;
-      }
-      // if a size is specified (e.g. DimnameList[1]) we also allow passing a
-      // single Dimname
-      return size == 1 && THPUtils_checkDimname(obj);
     }
     case ParameterType::TENSOR_LIST: {
       return is_tensor_list_and_append_overloaded(

@@ -12,7 +12,6 @@
 #include <ATen/native/sparse/SparseStubs.h>
 #include <ATen/native/IndexingUtils.h>
 #include <ATen/native/NonSymbolicBC.h>
-#include <ATen/NamedTensorUtils.h>
 
 #include <ATen/native/Copy.h>
 #include <ATen/native/CPUBlas.h>

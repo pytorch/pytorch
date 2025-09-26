@@ -3,7 +3,6 @@
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/quantized/IndexKernel.h>
 #include <ATen/native/TensorAdvancedIndexingUtils.h>
-#include <ATen/NamedTensorUtils.h>
 #include <c10/core/QScheme.h>
 #include <ATen/native/TensorAdvancedIndexing.h>
 
