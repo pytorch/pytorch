@@ -246,7 +246,6 @@ dtensor_fails = {
     xfail("nn.functional.adaptive_max_pool1d"),
     xfail("nn.functional.adaptive_max_pool2d"),
     xfail("nn.functional.adaptive_max_pool3d"),
-    xfail("nn.functional.alpha_dropout"),
     xfail("nn.functional.avg_pool1d"),
     xfail("nn.functional.avg_pool2d"),
     xfail("nn.functional.avg_pool3d"),
@@ -264,9 +263,6 @@ dtensor_fails = {
     xfail("nn.functional.conv_transpose3d"),
     xfail("nn.functional.cosine_similarity"),
     xfail("nn.functional.ctc_loss"),
-    xfail("nn.functional.dropout"),
-    xfail("nn.functional.dropout2d"),
-    xfail("nn.functional.dropout3d"),
     xfail("nn.functional.elu"),
     xfail("nn.functional.fractional_max_pool2d"),
     xfail("nn.functional.fractional_max_pool3d"),
@@ -451,8 +447,6 @@ dtensor_fails = {
     skip("nn.functional.softmin"),
     skip("nn.functional.embedding"),
     skip("nn.functional.embedding_bag"),
-    skip("nn.functional.feature_alpha_dropout", "with_train"),
-    skip("nn.functional.feature_alpha_dropout", "without_train"),
     skip("nn.functional.hinge_embedding_loss"),
     skip("nn.functional.cosine_embedding_loss"),
     skip("fft.hfft"),
@@ -504,6 +498,32 @@ class TestDTensorOps(DTensorOpTestBase):
     def world_size(self) -> int:
         return OP_DB_WORLD_SIZE
 
+    def _remove_dropout_nondeterminism(self, op_name, args, kwargs):
+        if op_name == "nn.functional.multi_head_attention_forward":
+            args = list(args)
+            if len(args) > 10:
+                args[10] = 0.0
+            return args, kwargs
+
+        dropout_ops = {
+            "nn.functional.dropout",
+            "nn.functional.dropout2d",
+            "nn.functional.dropout3d",
+            "nn.functional.alpha_dropout",
+            "nn.functional.feature_alpha_dropout",
+        }
+
+        if op_name not in dropout_ops:
+            return args, kwargs
+
+        args = list(args)
+        kwargs = dict(kwargs)
+
+        # these ops in our set use "p" parameter - always set to 0.0
+        kwargs["p"] = 0.0
+
+        return args, kwargs
+
     def run_opinfo_test(
         self, dtype, op, requires_grad=True, sample_inputs_filter=lambda s: True
     ):
@@ -517,6 +537,10 @@ class TestDTensorOps(DTensorOpTestBase):
                     continue
                 args = [sample_input.input] + list(sample_input.args)
                 kwargs = sample_input.kwargs
+
+                args, kwargs = self._remove_dropout_nondeterminism(
+                    op.name, args, kwargs
+                )
 
                 self.run_dtensor_crossref(op.op, args, kwargs)
                 # we need to figure out a way to test the out variant, out variant testing
@@ -592,10 +616,6 @@ class TestDTensorOps(DTensorOpTestBase):
                 try:
                     if to_dtensor.successful():
                         # Handle special cases first if there's any
-                        # Suppress warnings, this doesn't matter for test_meta.py
-                        # but it does matter if you want to use this decorator
-                        # for cross-ref testing, as some tests may be looking at
-                        # errors
                         dtensor_rs = func(*dtensor_args, **dtensor_kwargs)
 
                         # we need to skip tests containing tensors of zero elements for now.
