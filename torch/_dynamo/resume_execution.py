@@ -56,11 +56,7 @@ IS_TRACING_RESUME_PROLOGUE_VARNAME = "__is_tracing_resume_prologue"
 
 
 # If is_resume - this codegen is for a resume function
-def _initial_push_null(insts: list[Instruction], is_resume: bool = True) -> None:
-    if sys.version_info >= (3, 14) and is_resume:
-        # Do not push NULL since the NULL should be on the symbolic stack.
-        # In fact, context manager `hooks` should be triggered by the appended NULL.
-        return
+def _initial_push_null(insts: list[Instruction]) -> None:
     if sys.version_info >= (3, 11):
         insts.append(create_instruction("PUSH_NULL"))
         if sys.version_info < (3, 13):
@@ -169,7 +165,7 @@ class ReenterWith:
                 code_options["co_names"] += (name,)
 
         create_ctx: list[Instruction] = []
-        _initial_push_null(create_ctx, False)
+        _initial_push_null(create_ctx)
         create_ctx.extend(
             [
                 *load_args,
@@ -205,7 +201,9 @@ class ReenterWith:
             load_args = [create_load_const(val) for val in self.target_values]
 
         create_ctx: list[Instruction] = []
-        _initial_push_null(create_ctx)
+        # Do not push NULL in Python 3.14+ since the NULL should be on the symbolic stack.
+        if sys.version_info < (3, 14):
+            _initial_push_null(create_ctx)
         create_ctx.extend(
             [
                 *load_args,
