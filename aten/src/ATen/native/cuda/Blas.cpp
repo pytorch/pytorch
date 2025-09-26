@@ -323,10 +323,15 @@ static bool isInputCompliesAddmmCudaLt(Tensor& result, const Tensor& self, const
   // self.dim() == 1 && result.dim() == 2 && self.sizes()[0] == mat2_sizes[1]
   // is to use lt interface only when self is bias.
   // for cuda 11.4, cublasLtMatmul is activated
+  // the last conditions is to skip 16b transA and non-trans-B having
+  // leading dim >> rows when they are sliced from a large tensor
+  // see fbcode/caffe2/test/test_linalg.py:test_corner_cases_of_cublasltmatmul
+  const auto mat1_sizes = mat1.sizes();
+  const auto mat2_sizes = mat2.sizes();
   #if defined(CUDA_VERSION) || defined(USE_ROCM)
   const auto scalar_type = mat1.scalar_type();
   return (beta.toComplexDouble() == 1.0
-    && self.dim() == 1 && self.sizes()[0] == mat2.sizes()[1] && self.is_contiguous()
+    && self.dim() == 1 && self.sizes()[0] == mat2_sizes[1] && self.is_contiguous()
     && result.dim() == 2 && result.is_contiguous()
     && ( // some dtype restrictions
       #ifndef USE_ROCM
@@ -337,7 +342,26 @@ static bool isInputCompliesAddmmCudaLt(Tensor& result, const Tensor& self, const
       scalar_type == at::ScalarType::BFloat16
     )
     && ( // some shape/stride restrictions
-      mat2.sizes()[0] > 1 && mat2.sizes()[1] > 1
+      mat1_sizes[0] > 1 && mat1_sizes[1] > 1 &&
+      mat2_sizes[0] > 1 && mat2_sizes[1] > 1
+      #if !(defined(CUDA_VERSION) && CUDA_VERSION >= 12010 || defined(USE_ROCM))
+      // Related to avoiding the leading stride >> leading dim problematic case
+      // with 16b dtypes described above. For such dtypes we only allow inputs
+      // which are either row- or col-major (i.e. non-overlapping, compact memory layout).
+      // In that case the leading stride will be equal to the outer dim len.
+      // Why do we catch this case here? The following `prepare_matrix_for_cublas` method
+      // does not modify inputs as long as there is a stride of length 1, so we might
+      // end up with contiguous rows but not columns and vice versa.
+      mat2_sizes[0] < 65535 * 32 && mat2_sizes[1] < 65535 * 32 &&
+      mat1_sizes[0] < 65535 * 32 && mat1_sizes[1] < 65535 * 32 &&
+      && (
+        // filter by dtype
+        (scalar_type != at::ScalarType::Half && scalar_type != at::ScalarType::BFloat16) ||
+        // check mat1/mat2 is row-/col-major
+        (mat1.is_contiguous() || mat1.mT().is_contiguous()) &&
+        (mat2.is_contiguous() || mat2.mT().is_contiguous())
+      )
+      #endif
     )
   );
   #endif
@@ -387,7 +411,7 @@ static void launchTunableGemmAndBias(cublasCommonArgs &args, const Scalar& alpha
 }
 
 template <typename scalar_t, typename res_scalar_t = scalar_t>
-bool tryLaunchGemmAndBiasCudaLt(
+bool launchGemmAndBiasCudaLt(
     // args contains result which is modified
     cublasCommonArgs& args,
     const Tensor& self,
@@ -592,7 +616,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
         scalar_type,
         "addmm_cuda_lt",
         [&] {
-        okay = tryLaunchGemmAndBiasCudaLt<scalar_t>(args, self, alpha, activation);
+        okay = launchGemmAndBiasCudaLt<scalar_t>(args, self, alpha, activation);
       });
     }
     if (!okay) {
