@@ -1,14 +1,19 @@
 # mypy: allow-untyped-defs
 import contextlib
+from typing import Optional
 
 import torch
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.utils._dtype_abbrs import dtype_abbrs
-from torch.utils._python_dispatch import _get_current_dispatch_mode, TorchDispatchMode
+from torch.utils._python_dispatch import (
+    _get_current_dispatch_mode,
+    _get_current_dispatch_mode_stack,
+    TorchDispatchMode,
+)
 from torch.utils._pytree import tree_map
 
 
-__all__ = ["DebugMode"]
+__all__ = ["DebugMode", "get_active_debug_mode"]
 
 REDISTRIBUTE_FUNC = "redistribute_input"
 
@@ -88,6 +93,7 @@ class DebugMode(TorchDispatchMode):
         super().__init__()
         import torch.distributed.tensor  # noqa: F401
 
+        self.supports_higher_order_operators = True
         self.record_torchfunction = record_torchfunction
         self.record_faketensor = record_faketensor
         self.record_realtensor = record_realtensor
@@ -168,3 +174,12 @@ class DebugMode(TorchDispatchMode):
                 for op, args, kwargs, depth in self.operators
             )
         return result
+
+
+def get_active_debug_mode() -> Optional[DebugMode]:
+    debug_mode = None
+    for mode in _get_current_dispatch_mode_stack():
+        if isinstance(mode, DebugMode):
+            debug_mode = mode
+            break
+    return debug_mode
