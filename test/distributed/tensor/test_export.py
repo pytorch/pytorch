@@ -1,79 +1,26 @@
-import torch 
-from torch.testing._internal.distributed._tensor.common_dtensor import (
-    DTensorTestBase,
-    MLPModule,
-    with_comms,
-)
 import contextlib
 
+import torch
+import torch.distributed as dist
+from torch._dynamo.functional_export import _dynamo_graph_capture_for_export
+from torch._functorch.aot_autograd import aot_export_joint_with_descriptors
 from torch.distributed.device_mesh import init_device_mesh
-from torch.distributed.tensor import (
-    DeviceMesh,
-    DTensor,
-    Shard,
-    Replicate,
-    distribute_tensor,
-)
+from torch.distributed.tensor import distribute_tensor, Replicate
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
     parallelize_module,
-    PrepareModuleInput,
-    PrepareModuleOutput,
     RowwiseParallel,
 )
-from torch._functorch.aot_autograd import (
-    aot_export_joint_with_descriptors,
-
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    requires_cuda,
+    run_tests,
+    TestCase,
 )
-from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.utils.debug_mode import DebugMode
-
-
-from torch.distributed.device_mesh import DeviceMesh
-import torch.export._trace
-
-
-# torch.utils._pytree.register_constant(DeviceMesh)
-
-
-class Block(torch.nn.Module):
-    def __init__(self, nheads, dim1, dim2):
-        super().__init__()
-        self.nheads = nheads
-        bias = False
-        self.wq = torch.nn.Linear(dim1, dim1, bias=bias)
-        self.wk = torch.nn.Linear(dim1, dim1, bias=bias)
-        self.wv = torch.nn.Linear(dim1, dim1, bias=bias)
-        self.wo = torch.nn.Linear(dim1, dim1, bias=bias)
-        self.w1 = torch.nn.Linear(dim1, dim2, bias=bias)
-        self.w2 = torch.nn.Linear(dim2, dim1, bias=bias)
-
-    def init_weights(self):
-        for lin in [self.wq, self.wk, self.wv, self.wo, self.w1, self.w2]:
-            torch.nn.init.normal_(lin.weight, std=0.02)
-
-    def _compute_attention(self, x):
-        q = self.wq(x)
-        k = self.wk(x)
-        v = self.wv(x)
-
-        q = q.unflatten(-1, (self.nheads, -1)).permute(0, 2, 1, 3)  # (B, H, T, Dh)
-        k = k.unflatten(-1, (self.nheads, -1)).permute(0, 2, 1, 3)
-        v = v.unflatten(-1, (self.nheads, -1)).permute(0, 2, 1, 3)
-
-        o = torch.nn.functional.scaled_dot_product_attention(q, k, v)
-        o = o.permute(0, 2, 1, 3).flatten(-2)  # (B, T, D)
-        o = self.wo(o)
-        return o
-
-    def forward(self, x):
-        o = self._compute_attention(x)
-        o0 = o + x
-        o = self.w1(o0)
-        o = torch.relu(o)
-        o = self.w2(o)
-        o = o0 + o
-        return o
+from torch.testing._internal.distributed._tensor.common_dtensor import MLPModule
+from torch.testing._internal.distributed.fake_pg import FakeStore
+from torch.utils._debug_mode import DebugMode
 
 
 class SimpleModel(torch.nn.Module):
@@ -86,49 +33,64 @@ class SimpleModel(torch.nn.Module):
         return self.mlp_1(self.mlp_0(input))
 
 
-def to_dtensor_params(module: torch.nn.Module, mesh: DeviceMesh):
-    """
-    Replace every registered Parameter with an nn.Parameter wrapping a DTensor
-    placed as Replicate(). Broadcast once to ensure identical replicas.
-    """
-    for mod in module.modules():
-        for pname, p in list(mod._parameters.items()):
-            if p is None:
-                continue
-            torch.distributed.broadcast(p.data, src=0)
+def strict_export_and_aot_export_joint_with_descriptors(model, inputs):
+    # install_free_tensors is required for dynamo to work
+    with torch._dynamo.config.patch(install_free_tensors=True):
+        with torch._export.utils._disable_aten_to_metadata_assertions():
+            ep = torch.export.export(model, (inputs,), strict=True)
 
-            local = p.data.to(torch.cuda.current_device())
-            dt = DTensor.from_local(local, mesh, placements=[Replicate()])
-
-            new_p = torch.nn.Parameter(dt, requires_grad=p.requires_grad)
-            mod.register_parameter(pname, new_p)
-    return module
+    # joint_gm produced here is missing the backward region, due to incompatiblility
+    # between ep.module() and aot_export_joint_with_descriptors.
+    # Keeping this here to show the issue.
+    # return aot_export_joint_with_descriptors_alone(ep.module(), inputs)
+    return ep.graph_module
 
 
-class DTensorExportTest(DTensorTestBase):
-    @with_comms
-    def test_dtensor_constructor(self):
-        mesh = self.build_device_mesh()
-        nheads, dim1, dim2 = 8, 512, 2048
-        model = Block(nheads, dim1, dim2).to(self.device_type)
-        model.init_weights()
-        model = to_dtensor_params(model, mesh)
+def graph_capture_and_aot_export_joint_with_descriptors(model, inputs):
+    # TODO: switch to use the official graph_capture API once it is ready
+    gm = _dynamo_graph_capture_for_export(model)(inputs)
+    return aot_export_joint_with_descriptors_alone(gm, inputs)
 
-        B_global, T = 32, 128
-        assert B_global % self.world_size == 0, "B must be divisible by world_size"
-        x_global = torch.randn(B_global, T, dim1, device=self.device_type)
-        x = distribute_tensor(x_global, mesh, placements=[Shard(0)])  # Shard along batch dim
 
-        ep = torch.export.export(model, (x,), strict=True)
+def aot_export_joint_with_descriptors_alone(model, inputs):
+    with contextlib.ExitStack() as stack:
+        joint_with_descriptors = aot_export_joint_with_descriptors(
+            stack,
+            model,
+            (inputs,),
+        )
+        return joint_with_descriptors.graph_module
 
-        if self.rank == 0:
-            print(ep)
 
-    @with_comms
-    def test_dtensor_module(self):
+@requires_cuda
+class DTensorExportTest(TestCase):
+    def tearDown(self):
+        super().tearDown()
+        dist.destroy_process_group()
+
+    def setUp(self):
+        super().setUp()
+        self.world_size = 8
+        store = FakeStore()
+        dist.init_process_group(
+            backend="fake", rank=0, world_size=self.world_size, store=store
+        )
+        self.device_type = "cuda"
+
+    @parametrize(
+        "export_fn",
+        [
+            strict_export_and_aot_export_joint_with_descriptors,
+            # graph_capture_and_aot_export_joint_with_descriptors,
+            # aot_export_joint_with_descriptors_alone,
+        ],
+    )
+    def test_dtensor_module(
+        self,
+        export_fn,
+    ):
         dp_degree = 2
         tp_degree = self.world_size // dp_degree
-        model = SimpleModel(self.device_type)
 
         # 2-D mesh is [dp, tp]
         mesh_2d = init_device_mesh(
@@ -137,7 +99,7 @@ class DTensorExportTest(DTensorTestBase):
             mesh_dim_names=["dp", "tp"],
         )
 
-        inp = torch.rand(20, 10, device=self.device_type)
+        model = SimpleModel(self.device_type)
         parallelize_plan = {
             "mlp_0.net1": ColwiseParallel(),
             "mlp_0.net2": RowwiseParallel(),
@@ -146,24 +108,19 @@ class DTensorExportTest(DTensorTestBase):
         }
         tp_model = parallelize_module(model, mesh_2d["tp"], parallelize_plan)
 
-        x = distribute_tensor(inp, mesh_2d["tp"], placements=[Replicate()]) 
+        inputs = torch.rand(20, 10, device=self.device_type)
+        inputs = distribute_tensor(inputs, mesh_2d["tp"], placements=[Replicate()])
 
-        with DebugMode(record_torchfunction=False) as debug_mode:
-            out = tp_model(x)
+        # with DebugMode(record_torchfunction=False) as debug_mode:
+        #     out = tp_model(inputs)
 
-        ep = torch.export.export(tp_model, (x,), strict=True)
-        
-        # if self.rank == 0:
-        #     print(debug_mode.debug_string())
-        #     print(ep)
+        joint_gm = export_fn(tp_model, inputs)
 
-        # this works! 
-        with contextlib.ExitStack() as stack:
-            self.joint_with_descriptors = aot_export_joint_with_descriptors(
-                stack,
-                tp_model,
-                (inp,),
-            )
-            gm = self.joint_with_descriptors.graph_module
-        if self.rank == 0:
-            gm.print_readable()
+
+
+
+instantiate_parametrized_tests(DTensorExportTest)
+
+
+if __name__ == "__main__":
+    run_tests()
