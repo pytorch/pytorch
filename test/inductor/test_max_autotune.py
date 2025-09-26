@@ -1562,7 +1562,9 @@ class TestMaxAutotune(TestCase):
         with mock.patch(
             "torch._inductor.kernel.mm.use_decompose_k_choice"
         ) as decomp_mock:
-            decomp_mock.return_value = True
+            decomp_mock.side_effect = (
+                lambda *args, **kwargs: kwargs.get("threshold_multiple", 1) == 1
+            )
 
             out, code = run_and_get_code(compiled_func, a, b)
             FileCheck().check("extern_kernels.bmm_dtype").check_regex(
@@ -1608,7 +1610,9 @@ class TestMaxAutotune(TestCase):
         with mock.patch(
             "torch._inductor.kernel.mm.use_decompose_k_choice"
         ) as decomp_mock:
-            decomp_mock.return_value = True
+            decomp_mock.side_effect = (
+                lambda *args, **kwargs: kwargs.get("threshold_multiple", 1) == 1
+            )
 
             out, code = run_and_get_code(compiled_func, a, b)
             out.backward()
