@@ -291,9 +291,9 @@ if not IS_WINDOWS:
         def test_dispatch_all_types(self, device):
             import libtorch_agnostic
 
-            all_dtypes = set(
-                [t for t in torch.__dict__.values() if isinstance(t, torch.dtype)]
-            )
+            all_dtypes = {
+                t for t in torch.__dict__.values() if isinstance(t, torch.dtype)
+            }
 
             dispatch_with_dtypes = dict(
                 STABLE_DISPATCH_INDEX_TYPES=(torch.int32, torch.int64),
