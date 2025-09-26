@@ -27,6 +27,25 @@ def is_wait_tensor(node: torch.fx.Node) -> bool:
     )
 
 
+def is_all_gather(node: torch.fx.Node) -> bool:
+    return node.target == torch.ops._c10d_functional.all_gather_into_tensor.default
+
+
+def is_reduce_scatter(node: torch.fx.Node) -> bool:
+    return node.target == torch.ops._c10d_functional.reduce_scatter_tensor.default
+
+
+def bucket_key(node: torch.fx.Node) -> Optional[object]:
+    from torch._inductor.fx_passes.bucketing import _ag_group_key, _rs_group_key
+
+    if is_all_gather(node):
+        return _ag_group_key(node)
+    elif is_reduce_scatter(node):
+        return _rs_group_key(node)
+    else:
+        return None
+
+
 def get_custom_estimation(n: fx.Node) -> Optional[float]:
     runtime_estimation = torch._inductor.config.test_configs.estimate_aten_runtime
     if runtime_estimation == "default":
@@ -156,6 +175,16 @@ class CollectiveInfo:
         return self.exposed_time_ms != 0
 
 
+@dataclass
+class CollBucket:
+    """Track information about a bucket of collectives."""
+
+    collectives: list[fx.Node]  # Original collective starts
+    bucketed_start: Optional[fx.Node] = None  # After bucketing
+    bucketed_wait: Optional[fx.Node] = None  # After bucketing
+    total_bytes: int = 0
+
+
 class OverlapScheduler:
     """
     Scheduler that reorders operations to maximize compute-collective overlap.
@@ -184,7 +213,7 @@ class OverlapScheduler:
         self,
         gm: torch.fx.GraphModule,
         max_in_flight_gb: float = 2.0,
-        compute_overlap_multipler: float = 1.0,
+        compute_overlap_multipler: float = 2.0,
         max_coll_distance: int = 1000,
     ):
         self.gm = gm
@@ -215,6 +244,7 @@ class OverlapScheduler:
         self.potentially_hidden_collectives = (
             self.compute_potential_hidden_collectives()
         )
+        # print(self.potentially_hidden_collectives)
         self.potentially_hidden_waits = self.compute_potential_hidden_waits()
         self.in_degree = Counter(user for node in self.nodes for user in node.users)
         self.ready: list[tuple[object, fx.Node]] = []
@@ -309,6 +339,9 @@ class OverlapScheduler:
                 self._force_oldest_wait()
                 continue
 
+            # if torch.distributed.distributed_c10d.get_rank() == 0:
+            #     print("queue", self.ready)
+
             _, node = heapq.heappop(self.ready)
 
             # we don't always remove nodes from the heap when we schedule them
@@ -325,6 +358,7 @@ class OverlapScheduler:
                 self._handle_other(node)
 
         self._reorder_graph()
+        self._bucket_collectives()
         return self.gm
 
     def _handle_other(self, node: fx.Node) -> None:
@@ -582,6 +616,183 @@ class OverlapScheduler:
         )
 
         self.reorder_graph()
+
+    def _bucket_collectives(self):
+        """Bucket collectives after overlap scheduling."""
+
+        node_idx = {n: i for i, n in enumerate(self.scheduled)}
+        # Group collectives by bucket key (type, group, etc.)
+        grouped_collectives = defaultdict(OrderedSet)
+        for start in self.collective_info:
+            key = bucket_key(start)
+            if key is not None:
+                grouped_collectives[key].add(start)
+
+        # Find buckets for each group
+        all_buckets: list[CollBucket] = []
+        for collective_group in grouped_collectives.values():
+            all_buckets.extend(self._find_buckets(collective_group, node_idx))
+
+        additional_deps = defaultdict(OrderedSet)
+
+        # Apply bucketing transformations
+        for coll_bucket in all_buckets:
+            if len(coll_bucket.collectives) <= 1:
+                continue
+
+            bucket_deps = self._apply_bucket(coll_bucket, node_idx)
+            additional_deps.update(bucket_deps)
+
+        from torch._dynamo.graph_deduplication import _stable_topological_sort
+
+        # print("before topo", self.graph)
+        # print("Additional deps", additional_deps)
+        nodes = set(self.graph.nodes)
+        for n, add_deps in additional_deps.items():
+            assert n in nodes
+            assert all(d in nodes for d in add_deps)
+
+        _stable_topological_sort(self.graph, additional_deps)
+        # print("after topo", self.graph)
+        self.graph.lint()
+
+    def _find_buckets(
+        self,
+        collective_group: OrderedSet[fx.Node],
+        node_idx: dict[fx.Node, int],
+        max_bucket_memory_gb: float = 1,
+    ) -> list[CollBucket]:
+        """Find valid buckets within a group of similar collectives."""
+
+        max_bucket_bytes = int(max_bucket_memory_gb * 1e9)
+
+        buckets = []
+        processed = OrderedSet()
+
+        for start_node in collective_group:
+            if start_node in processed:
+                continue
+
+            # Initialize bucket with first collective
+            bucket_info = CollBucket(
+                collectives=[start_node],
+                total_bytes=self.collective_info[start_node].size_bytes,
+            )
+
+            processed.add(start_node)
+
+            for candidate in collective_group:
+                if candidate in processed:
+                    continue
+
+                candidate_bytes = self.collective_info[candidate].size_bytes
+                if bucket_info.total_bytes + candidate_bytes > max_bucket_bytes:
+                    continue
+
+                if self._can_add_to_bucket(bucket_info, candidate, node_idx):
+                    bucket_info.collectives.append(candidate)
+                    bucket_info.total_bytes += candidate_bytes
+                    processed.add(candidate)
+
+            if len(bucket_info.collectives) > 1:
+                buckets.append(bucket_info)
+
+        return buckets
+
+    def _nodes_have_dependency(self, node1: fx.Node, node2: fx.Node) -> bool:
+        """Check if two nodes have any dependency relationship."""
+        return (
+            node1 in self.node_ancestors[node2] or node2 in self.node_ancestors[node1]
+        )
+
+    def _can_add_to_bucket(
+        self, bucket_info: CollBucket, candidate: fx.Node, node_idx: dict[fx.Node, int]
+    ) -> bool:
+        """Check if candidate can be added to bucket without violating constraints."""
+
+        # No dependencies between existing bucket and new collective, new collective hiding node
+        candidate_info = self.collective_info[candidate]
+        for coll in bucket_info.collectives:
+            if self._nodes_have_dependency(coll, candidate):
+                return False
+            coll_hiding = self.collective_info[coll].hiding_node
+            if coll_hiding and self._nodes_have_dependency(coll_hiding, candidate):
+                return False
+
+        # Check candidate's hiding node against existing collectives
+        if candidate_info.hiding_node and not candidate_info.is_exposed:
+            candidate_hiding = candidate_info.hiding_node
+            for coll in bucket_info.collectives:
+                if self._nodes_have_dependency(coll, candidate_hiding):
+                    return False
+
+        return True
+
+    def _apply_bucket(
+        self, bucket_info: CollBucket, node_idx: dict[fx.Node, int]
+    ) -> dict[fx.Node, OrderedSet[fx.Node]]:
+        """Apply bucketing transformation and add ordering barriers."""
+
+        from torch._inductor.fx_passes.bucketing import (
+            merge_all_gather_bucket,
+            merge_reduce_scatter_bucket,
+        )
+
+        bucket = bucket_info.collectives
+
+        # Find where to place the bucketed operations
+        next_node = bucket[0]
+        while next_node in bucket:
+            next_node = next_node.next
+        waits = [self.collective_info[n].wait_node for n in bucket]
+        first_wait = min(waits, key=lambda w: node_idx[w])
+
+        # Create bucketed collective
+        if is_all_gather(bucket[0]):
+            new_nodes, replacements = merge_all_gather_bucket(
+                self.graph,
+                bucket,
+                wait_insertion_point=first_wait,
+                insert_before=next_node,
+                mode="custom_ops",
+            )
+
+        elif is_reduce_scatter(bucket[0]):
+            new_nodes, replacements = merge_reduce_scatter_bucket(
+                self.graph,
+                bucket,
+                wait_insertion_point=first_wait,
+                insert_before=next_node,
+                mode="custom_ops",
+            )
+        else:
+            assert False
+
+        hiding_nodes = OrderedSet()
+        for coll in bucket:
+            info = self.collective_info[coll]
+            if info.hiding_node and not info.is_exposed:
+                hiding_nodes.add(info.hiding_node)
+
+        # Build dependencies to preserve overlap
+        # replacements maps old_start -> new_start, old_wait -> new_wait
+        new_waits = [n for n in new_nodes if is_wait_tensor(n)]
+        assert len(new_waits) == 1
+
+        new_wait = new_waits[0]
+        new_start = new_wait.args[0]
+
+        overlap_deps = defaultdict(OrderedSet)
+        # Create dependencies to preserve overlap
+        if new_start and new_wait and hiding_nodes:
+            for hiding in hiding_nodes:
+                if hiding in self.graph.nodes:
+                    # Compute depends on collective start
+                    overlap_deps[hiding].add(new_start)
+                    # Wait depends on compute
+                    overlap_deps[new_wait].add(hiding)
+
+        return overlap_deps
 
     def compute_potential_hidden_nodes(
         self, nodes_to_check: Iterable[fx.Node], limit_coll_per_compute: bool = False
