@@ -36,6 +36,11 @@ using torch::dynamo::autograd::torch_c_dynamo_compiled_autograd_init;
 
 namespace {
 
+std::map<std::pair<PyTypeObject*, PyTypeObject*>, bool> _isinstance_cache;
+std::vector<PyObject*> _all_subclasses;
+PyTypeObject* VT_tp = nullptr;
+PyTypeObject* LazyVT_tp = nullptr;
+
 struct StripFunctionCall {
   template <typename T>
   static bool unicode_is_literal_none(const T* start, const T* end) {
@@ -152,6 +157,141 @@ struct IsValidVarName {
   }
 };
 
+static int _isinstance_check(PyObject* obj, PyTypeObject* cls_tp) {
+  PyTypeObject* obj_tp = Py_TYPE(obj);
+
+  auto key = std::make_pair(cls_tp, obj_tp);
+  if (_isinstance_cache.count(key) == 0) {
+    _isinstance_cache[key] = PyObject_TypeCheck(obj, cls_tp);
+  }
+  return _isinstance_cache[key];
+}
+
+PyObject* _cached_isinstance_check(PyObject* cls, PyObject* obj) {
+  // We cache LazyVT and VT types here to avoid importing it every time.
+  // They are freed in the metaclass dealloc function.
+  if (LazyVT_tp == nullptr || VT_tp == nullptr) {
+    auto base_mod =
+        THPObjectPtr(PyImport_ImportModule("torch._dynamo.variables.base"));
+    PyObject* VT = PyObject_GetAttrString(base_mod.get(), "VariableTracker");
+    VT_tp = (PyTypeObject*)VT;
+
+    auto Lazy_mod =
+        THPObjectPtr(PyImport_ImportModule("torch._dynamo.variables.lazy"));
+    PyObject* LazyVT =
+        PyObject_GetAttrString(Lazy_mod.get(), "LazyVariableTracker");
+    LazyVT_tp = (PyTypeObject*)LazyVT;
+  }
+
+  PyTypeObject* cls_tp = (PyTypeObject*)cls;
+
+  int r = -1;
+
+  if (PyObject_TypeCheck(obj, LazyVT_tp) &&
+      !(cls_tp == VT_tp || cls_tp == LazyVT_tp)) {
+    // Realize the lazy object if cls is a VariableTracker subclass but not
+    // VariableTracker or LazyVariableTracker itself
+    auto realize = THPObjectPtr(PyUnicode_FromString("realize"));
+    auto new_obj = THPObjectPtr(PyObject_CallMethodNoArgs(obj, realize.get()));
+
+    if (!new_obj) {
+      // possible graph break?
+      return nullptr;
+    }
+    r = _isinstance_check(new_obj.get(), cls_tp);
+  } else {
+    r = _isinstance_check(obj, cls_tp);
+  }
+
+  if (r == 1) {
+    Py_RETURN_TRUE;
+  } else if (r == 0) {
+    Py_RETURN_FALSE;
+  } else {
+    PyErr_SetString(PyExc_TypeError, "Unexpected result from isinstance check");
+    return nullptr;
+  }
+}
+
+static int VariableTrackerMeta_init_fn(
+    PyObject* cls,
+    PyObject* args,
+    PyObject* kwargs) {
+  if (PyType_Type.tp_init((PyObject*)cls, args, kwargs) < 0) {
+    return -1;
+  }
+  _all_subclasses.push_back(cls);
+  return 0;
+}
+
+static PyObject* _get_all_subclasses(PyObject* unused, PyObject* noargs) {
+  auto lst = THPObjectPtr(PyList_New((int)_all_subclasses.size()));
+  for (size_t i = 0; i < _all_subclasses.size(); i++) {
+    Py_INCREF(_all_subclasses[i]);
+    PyList_SET_ITEM(lst.get(), i, _all_subclasses[i]);
+  }
+  return lst.release();
+}
+
+static void VariableTrackerMeta_dealloc(PyObject* self) {
+  Py_XDECREF((PyObject*)VT_tp);
+  Py_XDECREF((PyObject*)LazyVT_tp);
+  PyObject_GC_UnTrack(self);
+  PyType_Type.tp_dealloc(self);
+}
+
+static int VariableTrackerMeta_traverse(
+    PyObject* self,
+    visitproc visit,
+    void* arg) {
+  // Visit any PyObject* members this type contains
+  // Since you're a metaclass, you probably don't need this
+  return PyType_Type.tp_traverse(self, visit, arg);
+}
+
+static int VariableTrackerMeta_clear(PyObject* self) {
+  // Clear any PyObject* members this type contains
+  // Since you're a metaclass, you probably don't need this
+  return PyType_Type.tp_clear(self);
+}
+
+// NOLINTNEXTLINE(*c-arrays)
+static PyMethodDef VariableTrackerMetaMethods[] = {
+    {"__instancecheck__",
+     (PyCFunction)_cached_isinstance_check,
+     METH_O,
+     nullptr},
+    {"get_all_subclasses",
+     (PyCFunction)_get_all_subclasses,
+     METH_NOARGS | METH_CLASS,
+     nullptr},
+    {nullptr}, // sentinel
+};
+
+// NOLINTNEXTLINE(*c-arrays)
+static PyType_Slot VariableTrackerMetaSlots[] = {
+    {Py_tp_methods, VariableTrackerMetaMethods},
+    {Py_tp_dealloc, (void*)VariableTrackerMeta_dealloc},
+    {Py_tp_init, (void*)VariableTrackerMeta_init_fn},
+    {Py_tp_traverse, (void*)VariableTrackerMeta_traverse}, // Add this
+    {Py_tp_clear, (void*)VariableTrackerMeta_clear}, // Add this
+    {0, nullptr},
+};
+
+static PyType_Spec VariableTrackerMetaSpec = {
+    .name = "torch._C.VariableTrackerMeta",
+    .basicsize = sizeof(PyHeapTypeObject),
+    .flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .slots = VariableTrackerMetaSlots,
+};
+
+static PyObject* new_VariableTrackerMetaType() {
+  auto bases = THPObjectPtr(PyTuple_Pack(1, (PyObject*)&PyType_Type));
+  PyObject* type =
+      PyType_FromSpecWithBases(&VariableTrackerMetaSpec, bases.get());
+  return type;
+}
+
 PyObject* _strip_function_call(
     PyObject* self,
     PyObject* const* args,
@@ -203,6 +343,16 @@ void initDynamoBindings(PyObject* torch) {
 #ifdef Py_GIL_DISABLED
   PyUnstable_Module_SetGIL(dynamo, Py_MOD_GIL_NOT_USED);
 #endif
+
+  PyObject* vt_meta = new_VariableTrackerMetaType();
+  if (vt_meta == nullptr) {
+    throw python_error();
+  }
+  if (PyType_Ready((PyTypeObject*)vt_meta) < 0) {
+    Py_DECREF(vt_meta);
+  }
+
+  PyModule_AddObject(dynamo, "VariableTrackerMeta", vt_meta);
 
   PyObject* eval_frame = torch_c_dynamo_eval_frame_init();
   if (eval_frame == nullptr ||
