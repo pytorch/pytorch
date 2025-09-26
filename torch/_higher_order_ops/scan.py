@@ -242,16 +242,7 @@ class ScanOp(HigherOrderOperator):
             list(init) + [first_slice_copy(x) for x in xs] + list(additional_inputs)
         )
 
-        combine_gm: torch.fx.GraphModule = (
-            combine_fn
-            if isinstance(combine_fn, torch.fx.GraphModule)
-            else materialize_as_graph(combine_fn, all_inputs)
-        )
-
-        example_inputs = [
-            n.meta["val"] if "val" in n.meta else n.meta["example_value"]
-            for n in combine_gm.graph.find_nodes(op="placeholder")
-        ]
+        combine_gm: torch.fx.GraphModule = materialize_as_graph(combine_fn, all_inputs)
 
         (
             _,
@@ -259,7 +250,7 @@ class ScanOp(HigherOrderOperator):
             _,
             mutated_inputs,
             outputs,
-        ) = check_input_alias_and_mutation_return_outputs(combine_gm, example_inputs)
+        ) = check_input_alias_and_mutation_return_outputs(combine_gm)
         if len(mutated_inputs) > 0:
             raise RuntimeError(
                 "For scan, combine_fn cannot have in-place mutations but found "

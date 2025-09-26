@@ -8686,7 +8686,7 @@ class GraphModule(torch.nn.Module):
 
             rsub: "i64[]" = torch.ops.aten.rsub.Scalar(arg0_1, sym_size_int_1);  sym_size_int_1 = None
             sub_1: "i64[]" = torch.ops.aten.sub.Tensor(rsub, 1);  rsub = None
-            _local_scalar_dense: "Sym(u9)" = torch.ops.aten._local_scalar_dense.default(sub_1);  sub_1 = None
+            _local_scalar_dense: "Sym(u7)" = torch.ops.aten._local_scalar_dense.default(sub_1);  sub_1 = None
             select: "f32[3, 3]" = torch.ops.aten.select.int(arg4_1, 0, _local_scalar_dense);  arg4_1 = _local_scalar_dense = None
             t: "f32[3, 3]" = torch.ops.aten.t.default(arg6_1);  arg6_1 = None
             t_1: "f32[3, 3]" = torch.ops.aten.t.default(t);  t = None
