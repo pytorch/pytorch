@@ -110,6 +110,7 @@ class OverlapPreservingBucketer:
             )
             processed.add(start_node)
 
+            # TODO - limit within range
             for candidate in collective_group:
                 if candidate in processed:
                     continue
