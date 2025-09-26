@@ -444,6 +444,28 @@ class TestMisc(JitTestCase):
         ret = func()
         self.assertTrue(ret == float(-inf))
 
+    def test_parse_ir_bool_true(self):
+        ir = """
+        graph():
+          %12 : bool = prim::Constant[value=True]()
+          return (%12)
+        """
+        graph = torch._C.parse_ir(ir, True)
+        func = torch._C._create_function_from_graph("forward", graph)
+        ret = func()
+        self.assertTrue(ret == True)
+
+    def test_parse_ir_bool_false(self):
+        ir = """
+        graph():
+          %12 : bool = prim::Constant[value=False]()
+          return (%12)
+        """
+        graph = torch._C.parse_ir(ir, True)
+        func = torch._C._create_function_from_graph("forward", graph)
+        ret = func()
+        self.assertTrue(ret == False)
+
     def test_script_many_decorators(self):
         def no_op_decorator(f):
             return f

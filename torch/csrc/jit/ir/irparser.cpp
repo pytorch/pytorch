@@ -182,6 +182,16 @@ ParsedLiteral IRParser::parseScalarLiteral(Node* n) {
       r.s = parseStringLiteral(token.range, token.text());
       L.next();
       return r;
+    case TK_TRUE:
+      r.k = AttributeKind::i;
+      r.i = 1;
+      L.next();
+      return r;
+    case TK_FALSE:
+      r.k = AttributeKind::i;
+      r.i = 0;
+      L.next();
+      return r;
     case '-':
       str = "-";
       L.next();
