@@ -2545,14 +2545,27 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         #       described below.
         #
         # To prevent unintended side effects we will gate options 1-3 behind isinstance(indexing, TensorDescriptorOptions).
+        def stringify_shape(shape) -> tuple[str]:
+            output = []
+            for symt in shape:
+                if isinstance(symt, sympy.Symbol):
+                    output.append(symt.name)
+                else:
+                    output.append(symt)
+            return tuple(output)
+
         if isinstance(indexing, TensorDescriptorOptions) and value.shape:
-            str_final_shape = tuple([symt.name for symt in indexing.final_shape])
-            if value.shape[::-1] == str_final_shape:
-                value = f"tl.trans({value})"
-            elif value.shape != str_final_shape:
-                raise AssertionError(
-                    "TMA store requires no broadcasting when a shape is provided"
-                )
+            final_shape = stringify_shape(indexing.final_shape)
+            forward_shape = stringify_shape(value.shape)
+            reverse_shape = stringify_shape(value.shape[::-1])
+            # Don't attempt to tranpose for 1D shapes.
+            if final_shape != forward_shape:
+                if final_shape == reverse_shape:
+                    value = f"tl.trans({value})"
+                else:
+                    raise AssertionError(
+                        "TMA store requires no broadcasting when a shape is provided"
+                    )
         else:
             # Stores require an explicit broadcast. We do this in two phases:
             #  1. Broadcast the operand to the final shape of the range trees, e.g. [ZBLOCK,
