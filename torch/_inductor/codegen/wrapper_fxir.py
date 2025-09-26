@@ -1003,21 +1003,26 @@ class FxConverter:
             Add constant kwargs to the arg list.
             """
             # Add args from the proper Triton signature.
+            # Exclude constants and config kwargs, as those are tracked separately.
             new_call_args = []
             constants = triton_meta["constants"]
-            for call_arg_idx, arg_name in enumerate(signature):
-                # Config kwargs are tracked separately and come at the end.
-                if arg_name in cfg.kwargs:
-                    break
+            call_kwargs = {
+                key: val
+                for key, val in zip(signature, call_args)
+                if key not in constants and key not in cfg.kwargs
+            }
 
-                try:
-                    new_arg = constants[arg_name]
-                except KeyError:
-                    new_arg = call_args[call_arg_idx]
-                new_call_args.append(new_arg)
+            # Add constants stored as Triton metadata, in signature order.
+            call_kwargs |= constants
+            new_call_args = [
+                call_kwargs[key] for key in signature if key not in cfg.kwargs
+            ]
 
-            # Add Inductor's extra call args to the end.
-            new_call_args.extend(call_args[call_arg_idx:])
+            # Add Inductor's extra launcher args to the end.
+            if extra_launcher_args := tuner.inductor_meta.get("extra_launcher_args"):
+                new_call_args.extend(
+                    call_args[len(call_args) - len(extra_launcher_args) :]
+                )
 
             return tuple(new_call_args)
 
