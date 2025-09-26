@@ -547,7 +547,7 @@ def _process_equalities(
                 root = phantom_symbols[constraint.root.name]
             else:
                 # create a phantom symbol in the shape env based on the _PhantomRoot
-                root = shape_env.create_non_data_dependent_symbol(
+                root = shape_env.create_symbol(
                     val=constraint.root.val,
                     source=torch._dynamo.source.ConstantSource(constraint.root.name),
                     dynamic_dim=torch.fx.experimental.symbolic_shapes.DimDynamic.DYNAMIC,
