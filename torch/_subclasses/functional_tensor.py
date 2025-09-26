@@ -488,36 +488,40 @@ class FunctionalTensorMode(TorchDispatchMode):
             - FunctionalTensor._extra_dispatch_keys
         )
 
-        # All we want to do here is reuse the existing C++ functionalization logic.
-        # This requires swizzling our TLS dispatch keys so that the Functionalize key is active.
-        with torch._C._ForceDispatchKeyGuard(include_to_set, exclude_to_set):
-            try:
-                # By default for python functionalization (for AOTAutograd), we reapply views.
-                old_apply_views = torch._functionalize_enable_reapply_views(True)  # type: ignore[attr-defined]
+        if isinstance(func, TorchBindOpOverload):
+            # When the function is a TorchBindOpOverload, meaning some of the
+            # inputs are FakeScriptObjects, we need to skip c++ dispatcher and
+            # dispatch in python because C++ dispatcher will check the schema
+            # and cannot recognize FakeScriptObject.
+            ctx = PythonFunctionalizeAPI()
+            fully_unwrapped_args = ctx.unwrap_tensors(args)
+            fully_unwrapped_kwargs = ctx.unwrap_tensors(kwargs)
+            outs_unwrapped = func(
+                *fully_unwrapped_args,
+                **fully_unwrapped_kwargs,
+            )
+            outs_wrapped = ctx.wrap_tensors(outs_unwrapped)
+        else:
+            # All we want to do here is reuse the existing C++ functionalization logic.
+            # This requires swizzling our TLS dispatch keys so that the Functionalize key is active.
+            with torch._C._ForceDispatchKeyGuard(include_to_set, exclude_to_set):
+                try:
+                    # By default for python functionalization (for AOTAutograd), we reapply views.
+                    old_apply_views = torch._functionalize_enable_reapply_views(True)  # type: ignore[attr-defined]
 
-                # Sometimes these functions cannot be directly dispatched to functionalize key
-                # because args are sometimes not functional tensors for some reason?
-                if func in FunctionalTensor.metadata_fns:
-                    outs_unwrapped = func(*args_unwrapped, **kwargs_unwrapped)
-                    outs_wrapped = pytree.tree_map_only(
-                        torch.Tensor, wrap, outs_unwrapped
-                    )
-                else:
-                    # When we dispatch to the C++ functionalization kernel, we might need to jump back to the
-                    # PreDispatch mode stack afterwards, to handle any other PreDispatch modes underneath
-                    # FunctionalTensorMode. If we call func() directly, we would need to exclude PreDispatch
-                    # from the TLS in order to avoid infinite looping, but this would prevent us from coming
-                    # back to PreDispatch later
-                    if isinstance(func, TorchBindOpOverload):
-                        ctx = PythonFunctionalizeAPI()
-                        fully_unwrapped_args = ctx.unwrap_tensors(args)
-                        fully_unwrapped_kwargs = ctx.unwrap_tensors(kwargs)
-                        outs_unwrapped = func(
-                            *fully_unwrapped_args,
-                            **fully_unwrapped_kwargs,
+                    # Sometimes these functions cannot be directly dispatched to functionalize key
+                    # because args are sometimes not functional tensors for some reason?
+                    if func in FunctionalTensor.metadata_fns:
+                        outs_unwrapped = func(*args_unwrapped, **kwargs_unwrapped)
+                        outs_wrapped = pytree.tree_map_only(
+                            torch.Tensor, wrap, outs_unwrapped
                         )
-                        outs_wrapped = ctx.wrap_tensors(outs_unwrapped)
                     else:
+                        # When we dispatch to the C++ functionalization kernel, we might need to jump back to the
+                        # PreDispatch mode stack afterwards, to handle any other PreDispatch modes underneath
+                        # FunctionalTensorMode. If we call func() directly, we would need to exclude PreDispatch
+                        # from the TLS in order to avoid infinite looping, but this would prevent us from coming
+                        # back to PreDispatch later
                         outs_unwrapped = func._op_dk(
                             torch._C.DispatchKey.Functionalize,
                             *args_unwrapped,
@@ -527,12 +531,12 @@ class FunctionalTensorMode(TorchDispatchMode):
                             torch.Tensor, wrap, outs_unwrapped
                         )
 
-                    if self.export:
-                        if func == torch.ops.aten.dropout.default:
-                            torch._freeze_functional_tensor(outs_unwrapped)  # type: ignore[attr-defined]
-            finally:
-                torch._disable_functionalization()
-                torch._functionalize_enable_reapply_views(old_apply_views)  # type: ignore[attr-defined]
+                        if self.export:
+                            if func == torch.ops.aten.dropout.default:
+                                torch._freeze_functional_tensor(outs_unwrapped)  # type: ignore[attr-defined]
+                finally:
+                    torch._disable_functionalization()
+                    torch._functionalize_enable_reapply_views(old_apply_views)  # type: ignore[attr-defined]
 
         is_included = torch._C._dispatch_tls_is_dispatch_key_included(
             torch._C.DispatchKey.Functionalize
