@@ -14,6 +14,7 @@ from torch.testing._internal.common_utils import (
     install_cpp_extension,
     IS_WINDOWS,
     run_tests,
+    skipIfTorchDynamo,
     TestCase,
     xfailIfTorchDynamo,
 )
@@ -273,6 +274,19 @@ if not IS_WINDOWS:
             out0 = libtorch_agnostic.ops.my_narrow(t, dim0, start0, length0)
             expected0 = torch.narrow(t, dim0, start0, length0)
             self.assertEqual(out0, expected0)
+
+        @skipIfTorchDynamo("no data pointer defined for FakeTensor, FunctionalTensor")
+        def test_get_any_data_ptr(self, device):
+            import libtorch_agnostic
+
+            t = torch.randn(2, 5, device=device, dtype=torch.float32)
+            expected_p = t.data_ptr()
+
+            p = libtorch_agnostic.ops.get_any_data_ptr(t, True)
+            self.assertEqual(p, expected_p)
+
+            p = libtorch_agnostic.ops.get_any_data_ptr(t, False)
+            self.assertEqual(p, expected_p)
 
         @onlyCUDA
         @deviceCountAtLeast(2)

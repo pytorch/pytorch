@@ -215,6 +215,19 @@ def test_default_constructor(defined) -> bool:
     return torch.ops.libtorch_agnostic.test_default_constructor.default(defined)
 
 
+def get_any_data_ptr(t, mutable) -> int:
+    """
+    Return data pointer value of the tensor.
+
+    Args:
+        t: Input tensor
+        mutable: whether data pointer qualifier is mutable or const
+
+    Returns: int - pointer value
+    """
+    return torch.ops.libtorch_agnostic.get_any_data_ptr.default(t, mutable)
+
+
 def my_pad(t) -> Tensor:
     """
     Pads the input tensor with hardcoded padding parameters.
