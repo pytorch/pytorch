@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, Union
 
 from .. import graph_break_hints, polyfills, variables
 from ..bytecode_transformation import (
+    create_build_tuple,
     create_call_function,
     create_call_function_ex,
     create_instruction,
@@ -433,9 +434,7 @@ class ZipVariable(IteratorVariable):
             if isinstance(it, list):
                 remaining_items = it[self.index :]
                 codegen.foreach(remaining_items)
-                codegen.append_output(
-                    create_instruction("BUILD_TUPLE", arg=len(remaining_items))
-                )
+                codegen.append_output(create_build_tuple(len(remaining_items)))
             else:
                 codegen(it)
 
@@ -444,9 +443,7 @@ class ZipVariable(IteratorVariable):
             lambda: codegen.load_import_from("builtins", "zip"), call_function_ex=True
         )
         self.reconstruct_items(codegen)
-        codegen.append_output(
-            create_instruction("BUILD_TUPLE", arg=len(self.iterables))
-        )
+        codegen.append_output(create_build_tuple(len(self.iterables)))
         codegen.extend_output(
             [
                 codegen.create_load_const("strict"),
@@ -489,7 +486,7 @@ class MapVariable(ZipVariable):
         self.reconstruct_items(codegen)
         codegen.extend_output(
             [
-                create_instruction("BUILD_TUPLE", arg=len(self.iterables) + 1),
+                create_build_tuple(len(self.iterables) + 1),
                 *create_call_function_ex(False),
             ]
         )
@@ -562,9 +559,7 @@ class FilterVariable(IteratorVariable):
         if isinstance(self.iterable, list):
             remaining_items = self.iterable[self.index :]
             codegen.foreach(remaining_items)
-            codegen.append_output(
-                create_instruction("BUILD_TUPLE", arg=len(remaining_items))
-            )
+            codegen.append_output(create_build_tuple(len(remaining_items)))
         else:
             codegen(self.iterable)
 
