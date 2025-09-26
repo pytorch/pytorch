@@ -254,6 +254,13 @@ ParsedLiteral IRParser::parseScalarLiteral(Node* n) {
       L.next();
       return r;
     case TK_IDENT:
+      if (L.cur().text() == "inf") {
+        r.k = AttributeKind::f;
+        r.f = std::numeric_limits<double>::infinity();
+        L.next();
+        return r;
+      }
+
       // Type literal
       r.k = AttributeKind::ty;
       type_alias = type_parser.parseType();
