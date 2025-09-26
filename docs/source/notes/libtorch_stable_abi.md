@@ -128,3 +128,26 @@ The above is relevant in two places:
     ```cpp
     aoti_torch_call_dispatcher(const char* opName, const char* overloadName, StableIValue* stack)
     ```
+
+### Versioning and Forward/Backward compatibility guarantees
+
+We provide a `TORCH_ABI_VERSION` macro in `torch/headeronly/version.h` of the form
+
+```
+[ byte ][ byte ][ byte ][ byte ][ byte ][ byte ][ byte ][ byte ]
+[MAJ   ][ MIN  ][PATCH ][                 ABI TAG              ]
+```
+
+In the present phase of development, APIs in the C-shim will be versioned based on major.minor.patch release that they are first introduced in, with 2.10 being the first release where this will be enforced. The ABI tag is reserved for future use.
+
+Extensions can select the minimum abi version to be compatible with using:
+
+```
+#define TORCH_TARGET_VERSION …
+```
+
+before including any stable headers or by passing the equivalent `-D` option to the compiler. Otherwise, the default will be the current `TORCH_ABI_VERSION`.
+
+The above ensures that if a user defines TORCH_TARGET_VERSION as 2.9 and attempts to use a C shim API `foo` that was introduced in version 2.10 and  a compilation error will be raised. Similarly, C++ wrappers in `torch/csrc/stable` are compatible with older libtorch binaries up to the TORCH_FEATURE_VERSION they are exposed in and always forward compatible with newer libtorch binaries.
+
+The forward and backward compatibility of StableIValue conversions will be handled appropriately and a user need not consider this when choosing `TORCH_TARGET_VERSION`. This means that if, for example, the memory layout of a torch/headeronly struct T was changed from version 2.9 to 2.10 and the user builds with 2.10 targetting 2.9 when building, they can be assured that the StableIValue conversion will handle the conversion from the user extension T to libtorch T appropriately.
