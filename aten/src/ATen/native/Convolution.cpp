@@ -406,7 +406,7 @@ struct ConvParams {
   // cudnn and miopen are guaranteed not to be on mobile, and T102591915 / T110194934 suggest
   // that maybe the compiledWithCuDNN() check sometimes segfaults (though I can't imagine how)
 #if !defined(C10_MOBILE)
-    if (!detail::getCUDAHooks().compiledWithCuDNN()) {
+    if (!detail::getCUDAHooks().compiledWithCuDNN() || !input.is_cuda() || !cudnn_enabled) {
       return false;
     }
     if (needs_64bit_indexing_no_split(input, weight)) {
@@ -417,9 +417,6 @@ struct ConvParams {
                         " Consider upgrading cuDNN and/or enabling the V8 API for better efficiency.");
         return false;
       }
-    }
-    if (!input.is_cuda() || !cudnn_enabled) {
-      return false;
     }
     if (input.scalar_type() == at::kBFloat16 || weight.scalar_type() == at::kBFloat16) {
       if (!(detail::getCUDAHooks().supportsBFloat16ConvolutionWithCuDNNv8() && at::native::cudnnv8_enabled_check_debug())) {
@@ -439,16 +436,19 @@ struct ConvParams {
 
   // Use cudnn for FP16 depthwise convolutions
   bool use_cudnn_depthwise(const at::Tensor& input, const at::Tensor& weight) const  {
-    if (!detail::getCUDAHooks().compiledWithCuDNN()) {
+    if (!cudnn_enabled || !detail::getCUDAHooks().compiledWithCuDNN() || !input.is_cuda()) {
       return false;
     }
-    if (cudnn_conv_suggest_memory_format(input, weight) != at::MemoryFormat::Contiguous && use_cudnn(input, weight)) {
-      // always use cudnn_depthwise for channels_last format
-      return true;
-    }
     // native kernel doesn't support 64-bit non-splittable case
-    if (cudnn_enabled && !(canUse32BitIndexMath(input) && canUse32BitIndexMath(weight))) {
+    if (!(canUse32BitIndexMath(input) && canUse32BitIndexMath(weight))) {
       static long cudnn_version = detail::getCUDAHooks().compiledWithCuDNN() ? detail::getCUDAHooks().versionCuDNN() : -1;
+      // TODO(eqy): remove this once cuDNN fixes 64-bit depthwise support, first broken in 9.11x
+      if (cudnn_conv_suggest_memory_format(input, weight) != at::MemoryFormat::Contiguous) {
+        if (cudnn_version < 0 || cudnn_version > 91000) {
+          return false;
+        }
+      }
+
       if (!(cudnn_version >= 90300 && at::native::cudnnv8_enabled_check_debug())) {
         TORCH_WARN_ONCE("cuDNN cannot be used for large non-batch-splittable convolutions"
                         " if the V8 API is not enabled or before cuDNN version 9.3+."
@@ -457,6 +457,10 @@ struct ConvParams {
       } else {
         return true;
       }
+    }
+    if (cudnn_conv_suggest_memory_format(input, weight) != at::MemoryFormat::Contiguous) {
+      // always use cudnn_depthwise for channels_last format
+      return true;
     }
     if (detail::getCUDAHooks().supportsDepthwiseConvolutionWithCuDNN()) {
       bool kernel_cond =  (use_cudnn(input, weight) &&
