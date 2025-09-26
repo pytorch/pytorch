@@ -14,7 +14,6 @@ from dataclasses import dataclass, fields, is_dataclass
 from typing import Any, Optional, Tuple
 
 import torch
-import torch._dynamo.config
 import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch._functorch.config
