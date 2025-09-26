@@ -638,6 +638,17 @@ class TestMatmulCuda(InductorTestCase):
     @parametrize("batch_size", [None, 1, 16])
     @parametrize("backend", ["cublas", "cublaslt"])
     def test_mm_bmm_dtype_overload(self, input_dtype, M, N, K, batch_size, backend):
+        if torch.version.hip:
+            msg = "accuracy regression in hipblas and hipblaslt in ROCm 7.0 for certain shapes"
+            if input_dtype == torch.bfloat16 and N == 1 and K == 32 and batch_size:
+                raise unittest.SkipTest(msg)
+            if input_dtype == torch.bfloat16 and N == 1 and K == 64 and batch_size:
+                raise unittest.SkipTest(msg)
+            if input_dtype == torch.float16 and M == 32 and N == 1 and K == 64 and batch_size == 1:
+                raise unittest.SkipTest(msg)
+            if input_dtype == torch.float16 and M == 64 and N == 1 and K == 64 and batch_size == 1:
+                raise unittest.SkipTest(msg)
+
         device = "cuda"
         dtype = input_dtype
         with blas_library_context(backend):
@@ -692,6 +703,17 @@ class TestMatmulCuda(InductorTestCase):
     @parametrize("batch_size", [None, 1, 32])
     @parametrize("backend", ["cublas", "cublaslt"])
     def test_addmm_baddmm_dtype_overload(self, input_dtype, M, N, K, batch_size, backend):
+        if torch.version.hip:
+            msg = "accuracy regression in hipblas and hipblaslt in ROCm 7.0 for certain shapes"
+            if input_dtype == torch.bfloat16 and N == 1 and K == 32 and batch_size:
+                raise unittest.SkipTest(msg)
+            if input_dtype == torch.bfloat16 and N == 1 and K == 64 and batch_size:
+                raise unittest.SkipTest(msg)
+            if input_dtype == torch.float16 and M == 32 and N == 1 and K == 64 and batch_size == 1:
+                raise unittest.SkipTest(msg)
+            if input_dtype == torch.float16 and M == 64 and N == 1 and K == 64 and batch_size == 1:
+                raise unittest.SkipTest(msg)
+
         device = "cuda"
         dtype = input_dtype
         with blas_library_context(backend):
