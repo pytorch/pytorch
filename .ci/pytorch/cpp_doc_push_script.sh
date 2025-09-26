@@ -58,7 +58,7 @@ time python tools/setup_helpers/generate_code.py \
 
 # Build the docs
 pushd docs/cpp
-time make VERBOSE=1 html -j
+time make VERBOSE=1 html
 
 popd
 popd
