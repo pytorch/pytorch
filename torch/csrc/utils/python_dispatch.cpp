@@ -8,7 +8,6 @@
 #include <ATen/TensorSubclassLikeUtils.h>
 #include <ATen/autocast_mode.h>
 #include <ATen/core/NestedIntSymNodeImpl.h>
-#include <ATen/core/PythonOpRegistrationTrampoline.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 
 #include <ATen/functorch/BatchedTensorImpl.h>
@@ -147,9 +146,6 @@ class PythonKernelHolder : public c10::OperatorKernel {
     if (mode_stack_len > 0) {
       const auto& cur_torch_dispatch_mode_state =
           c10::impl::TorchDispatchModeTLS::get_stack_at(mode_stack_len - 1);
-      cur_torch_dispatch_mode_state->pyinterpreter()
-          ->python_op_registration_trampoline(
-              op, dispatch_key_, keyset, stack, with_keyset_, with_op_);
       return;
     }
 
@@ -181,9 +177,6 @@ class PythonKernelHolder : public c10::OperatorKernel {
     if (has_python_tensor) {
       auto* interpreter = c10::impl::getGlobalPyInterpreter();
       if (interpreter) {
-        (*interpreter)
-            ->python_op_registration_trampoline(
-                op, dispatch_key_, keyset, stack, with_keyset_, with_op_);
         return;
       }
     }
@@ -1057,39 +1050,6 @@ void initDispatchBindings(PyObject* module) {
       .value("FUNCTIONAL", TorchDispatchModeKey::FUNCTIONAL)
       .value("PROXY", TorchDispatchModeKey::PROXY)
       .value("FAKE", TorchDispatchModeKey::FAKE);
-}
-
-// TODO: dedupe with the kernel
-void python_op_registration_trampoline_impl(
-    const c10::OperatorHandle& op,
-    c10::DispatchKey key,
-    c10::DispatchKeySet keyset,
-    torch::jit::Stack* stack,
-    bool with_keyset,
-    bool with_op) {
-  auto arguments = torch::jit::pop(*stack, op.schema().arguments().size());
-  py::gil_scoped_acquire g;
-  auto args_kwargs = parseIValuesToPyArgsKwargs(op, arguments);
-  const auto& func = python_registrations_[op.operator_name()][key];
-  TORCH_INTERNAL_ASSERT(func != nullptr);
-  auto* pyobj = func->ptr(getPyInterpreter());
-  TORCH_INTERNAL_ASSERT(pyobj != nullptr);
-  auto callable = py::reinterpret_borrow<py::object>(pyobj);
-  auto obj = with_op ? with_keyset ? callable(
-                                         keyset,
-                                         torch::detail::getTorchApiFunction(op),
-                                         *args_kwargs.first,
-                                         **args_kwargs.second)
-                                   : callable(
-                                         torch::detail::getTorchApiFunction(op),
-                                         *args_kwargs.first,
-                                         **args_kwargs.second)
-      : with_keyset ? callable(keyset, *args_kwargs.first, **args_kwargs.second)
-                    : callable(*args_kwargs.first, **args_kwargs.second);
-  if (!obj) {
-    throw python_error();
-  }
-  pushPyOutToStack(op, stack, obj, "PythonKernelHolder");
 }
 
 } // namespace torch::impl::dispatch
