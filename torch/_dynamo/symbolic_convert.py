@@ -74,6 +74,7 @@ from .bytecode_transformation import (
     cleaned_instructions,
     create_binary_slice,
     create_call_function,
+    create_call_function_ex,
     create_copy,
     create_dup_top,
     create_instruction,
@@ -100,7 +101,7 @@ from .exc import (
 )
 from .funcname_cache import get_funcname
 from .guards import GuardBuilder, install_guard
-from .output_graph import GraphCompileReason, OutputGraph
+from .output_graph import GraphCompileReason, OutputGraph, StackLocalsMetadata
 from .polyfills import impl_CONTAINS_OP_fallback
 from .replay_record import DummyModule, ExecutionRecorder
 from .resume_execution import (
@@ -1807,7 +1808,7 @@ class InstructionTranslatorBase(
 
     def IMPORT_FROM(self, inst: Instruction) -> None:
         self.DUP_TOP(inst)
-        self._load_attr(inst)
+        self._load_attr(inst.argval)
 
     # Cache note: This cache only exists for the duration of this
     # InstructionTranslator - so it should be safe to do.
@@ -2322,8 +2323,11 @@ class InstructionTranslatorBase(
         if inst.argval == 0:
             kwargsvars = ConstDictVariable({})
             argsvars = self.pop()
-        elif inst.argval == 1:
+        elif inst.argval == 1 or sys.version_info >= (3, 14):
+            # Python 3.14+ removed the argval and replaced it with a possibly NULL kwargs
             kwargsvars = self.pop()
+            if isinstance(kwargsvars, NullVariable):
+                kwargsvars = ConstDictVariable({})
             argsvars = self.pop()
         else:
             unimplemented_v2(
@@ -2384,7 +2388,7 @@ class InstructionTranslatorBase(
         arg = inst.argval[0]
         argval = self.code_options["co_names"][arg]
         if sys.version_info < (3, 11):
-            self._load_attr(dataclasses.replace(inst, argval=argval))
+            self._load_attr(argval)
         else:
             self.LOAD_METHOD(dataclasses.replace(inst, argval=argval))
 
@@ -2392,10 +2396,10 @@ class InstructionTranslatorBase(
         self.CALL_FUNCTION(dataclasses.replace(inst, argval=2))
         arg = inst.argval[0]
         argval = self.code_options["co_names"][arg]
-        self._load_attr(dataclasses.replace(inst, argval=argval))
+        self._load_attr(argval)
 
     def LOAD_METHOD(self, inst: Instruction) -> None:
-        self._load_attr(inst)
+        self._load_attr(inst.argval)
         obj = self.pop()
         if sys.version_info >= (3, 13):
             self.push(obj)
@@ -2417,11 +2421,11 @@ class InstructionTranslatorBase(
         fn = self.pop()
         self.call_function(fn, args, {})
 
-    def _load_attr(self, inst: Instruction) -> None:
+    def _load_attr(self, attr: Any) -> None:
         obj = self.pop()
         result = BuiltinVariable(getattr).call_function(
             self,  # type: ignore[arg-type]
-            [obj, ConstantVariable.create(inst.argval)],
+            [obj, ConstantVariable.create(attr)],
             {},
         )
         self.push(result)
@@ -2431,7 +2435,7 @@ class InstructionTranslatorBase(
             if inst.arg % 2:
                 self.LOAD_METHOD(inst)
                 return
-        self._load_attr(inst)
+        self._load_attr(inst.argval)
 
     def STORE_ATTR(self, inst: Instruction) -> None:
         speculation = self.speculate()
@@ -2492,6 +2496,25 @@ class InstructionTranslatorBase(
             {},
         )
 
+    @staticmethod
+    def codegen_return_after_compile_subgraph(
+        inst: Instruction, meta: StackLocalsMetadata
+    ) -> list[Instruction]:
+        insts = []
+        # NOTE: Debug CPython expects the stack to be empty after the return.
+        # Expect the current stack to be in the state
+        # [[]] (empty frame values), current frame stack (0 or 1 values)
+        assert meta.num_stack <= 1
+        if meta.num_stack == 1:
+            insts.extend(create_swap(2))
+        return_inst = (
+            create_instruction("RETURN_VALUE")
+            if inst.opname == "RETURN_VALUE"
+            else create_instruction("RETURN_CONST", argval=inst.argval)
+        )
+        insts.extend([create_instruction("POP_TOP"), return_inst])
+        return insts
+
     def create_call_resume_at(
         self,
         inst: Instruction,
@@ -2520,18 +2543,19 @@ class InstructionTranslatorBase(
 
         self.instruction_pointer = None
 
-        if inst.opname == "RETURN_VALUE":
-            return [create_instruction("RETURN_VALUE")]
-        elif inst.opname == "RETURN_CONST":
-            return [create_instruction("RETURN_CONST", argval=inst.argval)]
-
-        cg = PyCodegen(self.output.root_tx)
-
-        # move frame N stack to the frame values list
         current_num_stack = len(self.stack) - len(
             all_stack_locals_metadata[0].stack_null_idxes
         )
         all_stack_locals_metadata[0].num_stack = current_num_stack
+
+        if inst.opname in ("RETURN_VALUE", "RETURN_CONST"):
+            return self.codegen_return_after_compile_subgraph(
+                inst, all_stack_locals_metadata[0]
+            )
+
+        cg = PyCodegen(self.output.root_tx)
+
+        # move frame N stack to the frame values list
         cg.extend_output(
             [
                 create_instruction("BUILD_LIST", arg=current_num_stack),
@@ -2793,7 +2817,7 @@ class InstructionTranslatorBase(
         # TOS: [resumes, frames, *(frame 1 stack + locals)]
         cg.extend_output(
             [
-                create_instruction("CALL_FUNCTION_EX", arg=0),
+                *create_call_function_ex(False),
                 create_instruction("RETURN_VALUE"),
             ]
         )
@@ -3539,7 +3563,7 @@ class InstructionTranslatorBase(
         if inst.arg & 1:
             self.LOAD_METHOD(inst)
         else:
-            self._load_attr(inst)
+            self._load_attr(inst.argval)
 
     def CALL_INTRINSIC_1(self, inst: Instruction) -> None:
         if inst.argval == 3:
@@ -3610,6 +3634,26 @@ class InstructionTranslatorBase(
 
     # 3.14 opcodes
     LOAD_FAST_BORROW = LOAD_FAST
+    NOT_TAKEN = NOP
+    POP_ITER = POP_TOP
+
+    # See
+    # https://github.com/python/cpython/blob/805e3368d6d07e58430654d1365283924fdf4143/Python/ceval.c#L559
+    # for the LOAD_SPECIAL table - make sure it matches for Python 3.14+
+    _load_special_names = (
+        "__enter__",
+        "__exit__",
+        "__aenter__",
+        "__aexit__",
+    )
+
+    def LOAD_SPECIAL(self, inst: Instruction) -> None:
+        # Implementation is similar to LOAD_METHOD for 3.13+
+        assert isinstance(inst.arg, int)
+        self._load_attr(self._load_special_names[inst.arg])
+        obj = self.pop()
+        self.push(obj)
+        self.PUSH_NULL(inst)
 
     def LOAD_SMALL_INT(self, inst: Instruction) -> None:
         self.push(ConstantVariable.create(inst.argval))
@@ -4068,23 +4112,10 @@ class InstructionTranslator(InstructionTranslatorBase):
         # we should only be tracing 1 frame, and there should not be any NULLs on the stack
         assert len(all_stack_locals_metadata) == 1
         assert not all_stack_locals_metadata[0].stack_null_idxes
-        return_inst = (
-            create_instruction("RETURN_VALUE")
-            if inst.opname == "RETURN_VALUE"
-            else create_instruction("RETURN_CONST", argval=inst.argval)
-        )
-        # NOTE: Debug CPython expects the stack to be empty after the return.
-        # Expect the current stack to be in the state
-        # [[]] (empty frame values), current frame stack (0 or 1 values)
-        assert all_stack_locals_metadata[0].num_stack <= 1
-        if all_stack_locals_metadata[0].num_stack == 1:
-            self.output.add_output_instructions(
-                [
-                    *create_swap(2),
-                ]
-            )
         self.output.add_output_instructions(
-            [create_instruction("POP_TOP"), return_inst]
+            self.codegen_return_after_compile_subgraph(
+                inst, all_stack_locals_metadata[0]
+            )
         )
         raise ReturnValueOp
 
