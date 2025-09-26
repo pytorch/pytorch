@@ -172,7 +172,7 @@ class TestStableABILayout(TestCase):
 
             # Skip test if compilation failed
             if success_count < 2:
-                self.skipTest("Failed to compile test files with clang")
+                raise RuntimeError("Failed to compile test files with clang")
 
             # Extract layout information for each version
             layout_contents = {}
