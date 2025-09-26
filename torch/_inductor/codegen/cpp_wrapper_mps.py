@@ -47,12 +47,16 @@ class CppWrapperMps(CppWrapperGpu):
         """
         Generates MPS kernel call code. It should look something like:
         ```
-        aoti_torch_mps_run_command_block(get_mps_lib_0_handle(), [&](AOTIMetalKernelFunctionHandle handle) {
+        auto mps_lib_0_lambda = [&](AOTIMetalKernelFunctionHandle handle) {
             aoti_torch_mps_start_encoding(handle);
             aoti_torch_mps_set_arg_tensor(handle, 0, buf0);
-            aoti_torch_mps_set_arg_tensor(handle, 1, arg1_1);
-            aoti_torch_mps_dispatch_single(handle, static_cast<uint64_t>(495LL));
-        });
+            aoti_torch_mps_set_arg_tensor(handle, 1, arg0_1);
+            aoti_torch_mps_set_arg_tensor(handle, 2, arg1_1);
+            aoti_torch_mps_dispatch_single(handle, static_cast<uint64_t>(10LL));
+        };
+
+        std::function<void(AOTIMetalKernelFunctionHandle)> mps_lib_0_func_wrapper = mps_lib_0_lambda;
+        aoti_torch_mps_run_command_block(get_mps_lib_0_handle(), aoti_torch_mps_shared_callback, &mps_lib_0_func_wrapper);
         ```
         """
         device = device or V.graph.get_current_device_or_throw()
