@@ -288,6 +288,7 @@ if not IS_WINDOWS:
             p = libtorch_agnostic.ops.get_any_data_ptr(t, False)
             self.assertEqual(p, expected_p)
 
+        @skipIfTorchDynamo("testing CPP macros only")
         def test_dispatch_all_types(self, device):
             import libtorch_agnostic
 
