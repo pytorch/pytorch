@@ -534,97 +534,43 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   cublasCommonArgs args(mat1, mat2, result);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!args.result->is_conj());
 
+  // The Lt path
   if (!disable_addmm_cuda_lt) {
-#if defined(USE_ROCM)
-    bool okay = true;
+    bool lt_success = false;
     if (is_float_output_with_half_input) {
+      #ifdef USE_ROCM
       TORCH_CHECK(false, "float output with half input is not enabled for ROCm");
-    } else {
-      AT_DISPATCH_FLOATING_TYPES_AND2(
-        at::ScalarType::Half,
-        at::ScalarType::BFloat16,
-        scalar_type,
-        "addmm_cuda_lt",
-        [&] {
-        auto tuning_ctx = at::cuda::tunable::getTuningContext();
-        if (tuning_ctx->IsTunableOpEnabled()) {
-          launchTunableGemmAndBias<scalar_t>(
-              args,
-              alpha,
-              (&result != &self) ? self.const_data_ptr<scalar_t>() : nullptr,
-              activation_to_gemm_and_blas_arg(activation));
-        } else {
-          okay = at::cuda::blas::gemm_and_bias<scalar_t>(
-            args.transa == 't',
-            args.transb == 't',
-            args.m,
-            args.n,
-            args.k,
-            alpha.to<at::opmath_type<scalar_t>>(),
-            args.mata->const_data_ptr<scalar_t>(),
-            args.lda,
-            args.matb->const_data_ptr<scalar_t>(),
-            args.ldb,
-            // This condition is needed for mm case on ROCm for hipblasLt path.
-            // Passing the bias ptr as null to avoid accuracy issues for mm case.
-            (&result != &self) ? self.const_data_ptr<scalar_t>() : nullptr,
-            args.result->data_ptr<scalar_t>(),
-            args.result_ld,
-            activation_to_gemm_and_blas_arg(activation)
-          );
-        }
-      });
-    }
-    if (!okay) {
-      // lt path failed; recurse but disable lt path
-      return addmm_out_cuda_impl(result, self, mat1, mat2, beta, alpha, activation, true);
-    }
-#else
-    auto activation_epilogue = activation_to_gemm_and_blas_arg(activation);
-    bool okay = true;
-    if (is_float_output_with_half_input) {
+      #else
+      if (at::cuda::tunable::getTuningContext()->IsTunableOpEnabled()) {
+       TORCH_CHECK(false, "Tunable GEMM is not supported for float output with reduced float input");
+      }
       AT_DISPATCH_REDUCED_FLOATING_TYPES(
         scalar_type,
         "addmm_cuda_lt",
         [&] {
-        auto tuning_ctx = at::cuda::tunable::getTuningContext();
-        if (tuning_ctx->IsTunableOpEnabled()) {
-          TORCH_CHECK(false, "Tunable GEMM is not supported for float output with reduced float input");
+          lt_success = launchGemmAndBiasCudaLt<scalar_t, float>(args, self, alpha, activation);
         }
-        else {
-          okay = at::cuda::blas::gemm_and_bias<scalar_t, float>(
-              args.transa == 't',
-              args.transb == 't',
-              args.m,
-              args.n,
-              args.k,
-              alpha.to<at::opmath_type<scalar_t>>(),
-              args.mata->const_data_ptr<scalar_t>(),
-              args.lda,
-              args.matb->const_data_ptr<scalar_t>(),
-              args.ldb,
-              self.const_data_ptr<scalar_t>(),
-              args.result->data_ptr<float>(),
-              args.result_ld,
-              activation_epilogue
-          );
-        }});
+      );
+      #endif
     } else {
+      // !is_float_output_with_half_input
       AT_DISPATCH_FLOATING_TYPES_AND2(
         at::ScalarType::Half,
         at::ScalarType::BFloat16,
         scalar_type,
         "addmm_cuda_lt",
         [&] {
-        okay = launchGemmAndBiasCudaLt<scalar_t>(args, self, alpha, activation);
-      });
-    }
-    if (!okay) {
-      // lt path failed; recurse but disable lt path
+          lt_success = launchGemmAndBiasCudaLt<scalar_t>(args, self, alpha, activation);
+        }
+      );
+    } // end is_float_output_with_half_input
+
+    if (!lt_success) {
+    // lt path failed; recurse but disable lt path
       return addmm_out_cuda_impl(result, self, mat1, mat2, beta, alpha, activation, true);
     }
-#endif
-  } else
+  } // end Lt path
+   else
   {
     if (is_float_output_with_half_input) {
       AT_DISPATCH_REDUCED_FLOATING_TYPES(
