@@ -50,7 +50,6 @@ from torch._dynamo.testing import (
     CompileCounter,
     CompileCounterWithBackend,
     expectedFailureDynamic,
-    requiresPy310,
     same,
     skipIfNotPy311,
     unsupported,
@@ -8006,8 +8005,11 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         torch._dynamo.decorators.mark_unbacked(b, 1)
         func(a, b)
         func(torch.rand(4, 5), torch.rand(4, 5))
-        with self.assertRaises(RuntimeError):
-            func(torch.rand(1, 1), torch.rand(2, 1))
+        # This does not raise an error right now because of a recompilation.
+        # https://github.com/pytorch/pytorch/issues/163785
+        # with self.assertRaises(AssertionError):
+        #     func(torch.rand(1, 1), torch.rand(2, 1))
+        func(torch.rand(1, 1), torch.rand(2, 1))
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_sym_constrain_range_on_replaced_unbacked_symbol(self):
@@ -8617,7 +8619,7 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
             get_metrics_context(),
             dynamo_timed(""),
         ):
-            capture_output = fullgraph_capture(foo, (x,), {})
+            capture_output = fullgraph_capture(foo, (x,))
             graph_capture_output = capture_output.graph_capture_output
             fn = graph_capture_output.build_guards(foo.__code__)
 
@@ -10615,7 +10617,6 @@ def ___make_guard_fn():
 
         self.assertEqual(actual, expected)
 
-    @requiresPy310
     def test_frozen_dataclass_kw_only(self):
         @dataclasses.dataclass(frozen=True)
         class TestDataClass:
@@ -13379,6 +13380,14 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
         example_inputs = (torch.randn(1, 1, 1, 1),)
         # we expect to no longer raise here
         torch.compile(fn, fullgraph=True)(*example_inputs)
+
+    def test_dynamic_fill_diagonal_(self):
+        @torch.compile(dynamic=True)
+        def f(x):
+            x.fill_diagonal_(True)
+
+        x = torch.zeros(4, 4)
+        f(x)
 
     def test_dynamic_float_scalar_tensor_coersion(self):
         # Minified version of https://github.com/pytorch/pytorch/issues/158376#issuecomment-3079591367
