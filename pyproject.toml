@@ -53,7 +53,7 @@ dev = [
 name = "torch"
 description = "Tensors and Dynamic neural networks in Python with strong GPU acceleration"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 license = "BSD-3-Clause"
 authors = [{ name = "PyTorch Team", email = "packages@pytorch.org" }]
 keywords = ["pytorch", "machine learning"]
@@ -70,7 +70,6 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Programming Language :: C++",
     "Programming Language :: Python :: 3 :: Only",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
@@ -181,6 +180,10 @@ ignore = [
     "UP007", # keep-runtime-typing
     "UP045", # keep-runtime-typing
     "TC006",
+    # TODO: Remove Python-3.10 specific suppressions
+    "B905",
+    "UP035",
+    "FURB161",
 ]
 select = [
     "B",

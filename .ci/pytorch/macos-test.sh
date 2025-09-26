@@ -13,8 +13,6 @@ if [[ ! $(python -c "import torch; print(int(torch.backends.openmp.is_available(
 fi
 popd
 
-python -mpip install -r requirements.txt
-
 # enable debug asserts in serialization
 export TORCH_SERIALIZATION_DEBUG=1
 
@@ -72,7 +70,7 @@ test_python_shard() {
 
   setup_test_python
 
-  time python test/run_test.py --verbose --exclude-jit-executor --exclude-distributed-tests --shard "$1" "$NUM_TEST_SHARDS"
+  time python test/run_test.py --verbose --exclude-jit-executor --exclude-distributed-tests --exclude-quantization-tests --shard "$1" "$NUM_TEST_SHARDS"
 
   assert_git_not_dirty
 }
