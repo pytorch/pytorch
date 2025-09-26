@@ -3,6 +3,7 @@
 #include <torch/csrc/stable/library.h>
 #include <torch/csrc/stable/tensor.h>
 #include <torch/csrc/stable/ops.h>
+#include <torch/csrc/stable/Dispatch.h>
 #include <torch/headeronly/util/Exception.h>
 #include <torch/headeronly/core/ScalarType.h>
 
@@ -492,9 +493,109 @@ void boxed_get_any_data_ptr(
   stack[0] = from(res);
 }
 
+Tensor test_dispatch_scalar_name(Tensor t, int dispatch_index) {
+  Tensor result;
+
+  auto get_dtype_name = [](const std::type_info& ti) -> std::string {
+    std::string name;
+    if (ti == typeid(c10::Half)) { name = "float16"; }
+    else if (ti == typeid(double)) { name = "float64"; }
+    else if (ti == typeid(float)) { name = "float32"; }
+    else if (ti == typeid(c10::BFloat16)) { name = "bfloat16";}
+    else if (ti == typeid(c10::complex<c10::Half>)) { name = "complex16";}
+    else if (ti == typeid(c10::complex<float>)) { name = "complex64";}
+    else if (ti == typeid(c10::complex<double>)) { name = "complex128";}
+    else if (ti == typeid(uint8_t)) { name = "uint8";}
+    else if (ti == typeid(uint16_t)) { name = "uint16";}
+    else if (ti == typeid(uint32_t)) { name = "uint32";}
+    else if (ti == typeid(uint64_t)) { name = "uint64";}
+    else if (ti == typeid(int8_t)) { name = "int8";}
+    else if (ti == typeid(int16_t)) { name = "int16";}
+    else if (ti == typeid(int32_t)) { name = "int32";}
+    else if (ti == typeid(int64_t)) { name = "int64";}
+    else if (ti == typeid(bool)) { name = "bool";}
+    else if (ti == typeid(c10::Float8_e5m2)) { name = "float8_e5m2"; }
+    else if (ti == typeid(c10::Float8_e5m2fnuz)) { name = "float8_e5m2fnuz"; }
+    else if (ti == typeid(c10::Float8_e4m3fn)) { name = "float8_e4m3fn"; }
+    else if (ti == typeid(c10::Float8_e4m3fnuz)) { name = "float8_e4m3fnuz"; }
+    else {
+      name = ti.name();  // the result of name() is implementation dependent!
+    }
+    return name;
+  };
+
+  // torch stable does not support returning strings, therefore we'll
+  // store the dtype name in a Tensor instance:
+  auto get_dtype_name_as_Tensor = [get_dtype_name](const std::type_info& ti) -> Tensor {
+    std::string name = get_dtype_name(ti);
+    AtenTensorHandle ath;
+    int64_t sizes[] = {static_cast<int64_t>(name.size())};
+    int64_t strides[] = {1};
+    aoti_torch_create_tensor_from_blob(name.data(), 1, sizes, strides, 0, aoti_torch_dtype_int8(), aoti_torch_device_type_cpu(), 0, &ath);
+    // cloning the Tensor instance because ath does not own the data
+    // when creating a tensor from blob:
+    return torch::stable::clone(Tensor(ath));
+  };
+
+  switch (dispatch_index) {
+  case 0: {
+    STABLE_DISPATCH_ALL_TYPES(t.scalar_type(), "dispatch_all_types", [&] { result = get_dtype_name_as_Tensor(typeid(scalar_t)); });
+    break;
+  }
+  case 1: {
+    STABLE_DISPATCH_INDEX_TYPES(t.scalar_type(), "dispatch_index_types", [&] { result = get_dtype_name_as_Tensor(typeid(index_t)); });
+    break;
+    }
+  case 2: {
+    STABLE_DISPATCH_INTEGRAL_TYPES(t.scalar_type(), "dispatch_integral_types", [&] { result = get_dtype_name_as_Tensor(typeid(scalar_t)); });
+    break;
+  }
+  case 3: {
+    STABLE_DISPATCH_FLOATING_TYPES(t.scalar_type(), "dispatch_floating_types", [&] { result = get_dtype_name_as_Tensor(typeid(scalar_t)); });
+    break;
+  }
+  case 4: {
+    STABLE_DISPATCH_FLOATING_TYPES_AND_HALF(t.scalar_type(), "dispatch_floating_types_and_half", [&] { result = get_dtype_name_as_Tensor(typeid(scalar_t)); });
+    break;
+  }
+  case 5: {
+    STABLE_DISPATCH_COMPLEX_TYPES(t.scalar_type(), "dispatch_complex_types", [&] { result = get_dtype_name_as_Tensor(typeid(scalar_t)); });
+    break;
+  }
+  case 6: {
+    STABLE_DISPATCH_FLOATING_AND_COMPLEX_TYPES(t.scalar_type(), "dispatch_floating_and_complex_types", [&] { result = get_dtype_name_as_Tensor(typeid(scalar_t)); });
+    break;
+  }
+  case 7: {
+    STABLE_DISPATCH_ALL_TYPES_AND_COMPLEX(t.scalar_type(), "dispatch_all_types_and_complex", [&] { result = get_dtype_name_as_Tensor(typeid(scalar_t)); });
+    break;
+  }
+  case 8: {
+    STABLE_DISPATCH_REDUCED_FLOATING_TYPES(t.scalar_type(), "dispatch_reduced_floating_types", [&] { result = get_dtype_name_as_Tensor(typeid(scalar_t)); });
+    break;
+  }
+  case 9: {
+    STABLE_DISPATCH_ALL_TYPES_AND(torch::headeronly::ScalarType::Bool, t.scalar_type(), "dispatch_all_types_and_bool", [&] { result = get_dtype_name_as_Tensor(typeid(scalar_t)); });
+    break;
+  }
+  default:
+    STD_TORCH_CHECK(false, "unexpected dispatch_index: ", dispatch_index);
+  }
+  return result;
+}
+
+void boxed_test_dispatch_scalar_name(
+    StableIValue* stack,
+    uint64_t num_args,
+    uint64_t num_outputs) {
+  Tensor res = test_dispatch_scalar_name(to<Tensor>(stack[0]), to<int>(stack[1]));
+  stack[0] = from(res);
+}
+
 STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
   m.def("test_default_constructor(bool undefined) -> bool");
   m.def("get_any_data_ptr(Tensor t, bool mutable_) -> int");
+  m.def("test_dispatch_scalar_name(Tensor t, int dispatch_index) -> Tensor");
 }
 
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
@@ -502,6 +603,7 @@ STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
   m.impl("my_amax", &boxed_my_amax);
   m.impl("my_amax_vec", &boxed_my_amax_vec);
   m.impl("get_any_data_ptr", &boxed_get_any_data_ptr);
+  m.impl("test_dispatch_scalar_name", &boxed_test_dispatch_scalar_name);
 }
 
 // Test functions for torch::stable::accelerator APIs

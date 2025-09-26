@@ -288,6 +288,80 @@ if not IS_WINDOWS:
             p = libtorch_agnostic.ops.get_any_data_ptr(t, False)
             self.assertEqual(p, expected_p)
 
+        @skipIfTorchDynamo("testing CPP macros only")
+        def test_dispatch_all_types(self, device):
+            import libtorch_agnostic
+
+            all_dtypes = {
+                t for t in torch.__dict__.values() if isinstance(t, torch.dtype)
+            }
+
+            dispatch_with_dtypes = dict(
+                STABLE_DISPATCH_INDEX_TYPES=(torch.int32, torch.int64),
+                STABLE_DISPATCH_INTEGRAL_TYPES=(
+                    torch.uint8,
+                    torch.int8,
+                    torch.int16,
+                    torch.int32,
+                    torch.int64,
+                ),
+                STABLE_DISPATCH_FLOATING_TYPES=(torch.float32, torch.float64),
+                STABLE_DISPATCH_COMPLEX_TYPES=(torch.complex64, torch.complex128),
+                STABLE_DISPATCH_REDUCED_FLOATING_TYPES=(torch.float16, torch.bfloat16),
+            )
+            dispatch_with_dtypes.update(
+                STABLE_DISPATCH_ALL_TYPES=dispatch_with_dtypes[
+                    "STABLE_DISPATCH_INTEGRAL_TYPES"
+                ]
+                + dispatch_with_dtypes["STABLE_DISPATCH_FLOATING_TYPES"]
+            )
+            dispatch_with_dtypes.update(
+                STABLE_DISPATCH_FLOATING_TYPES_AND_HALF=dispatch_with_dtypes[
+                    "STABLE_DISPATCH_FLOATING_TYPES"
+                ]
+                + (torch.float16,),
+                STABLE_DISPATCH_FLOATING_AND_COMPLEX_TYPES=dispatch_with_dtypes[
+                    "STABLE_DISPATCH_FLOATING_TYPES"
+                ]
+                + dispatch_with_dtypes["STABLE_DISPATCH_COMPLEX_TYPES"],
+                STABLE_DISPATCH_ALL_TYPES_AND_COMPLEX=dispatch_with_dtypes[
+                    "STABLE_DISPATCH_ALL_TYPES"
+                ]
+                + dispatch_with_dtypes["STABLE_DISPATCH_COMPLEX_TYPES"],
+                # STABLE_DISPATCH_ALL_TYPES_AND_BOOL tests STABLE_DISPATCH_ALL_TYPES_AND
+                STABLE_DISPATCH_ALL_TYPES_AND_BOOL=dispatch_with_dtypes[
+                    "STABLE_DISPATCH_ALL_TYPES"
+                ]
+                + (torch.bool,),
+            )
+
+            for dispatch_name, supported_dtypes in dispatch_with_dtypes.items():
+                for dtype in supported_dtypes:
+                    t = torch.zeros(2, 3, device=device, dtype=dtype)
+                    n = libtorch_agnostic.ops.test_dispatch_scalar_name(
+                        t, dispatch_name
+                    )
+                    assert getattr(torch, n) == dtype
+
+                for dtype in all_dtypes:
+                    if dtype not in supported_dtypes:
+                        t = torch.empty(2, 3, device=device, dtype=dtype)
+                        # A tensor with unsupported dtype will cause
+                        # runtime exception either because the dtype
+                        # support is not implemented (per
+                        # torch/stable/Dispatch.h) or not yet
+                        # supported in
+                        # torch/csrc/stable/stableivalue_conversions.h
+                        with self.assertRaisesRegex(
+                            RuntimeError, "not implemented for|Not yet supported"
+                        ):
+                            libtorch_agnostic.ops.test_dispatch_scalar_name(
+                                t, dispatch_name
+                            )
+                            print(
+                                f"UNEXPECTED SUCCESS: CPP macro {dispatch_name} accepts {dtype=}"
+                            )
+
         @onlyCUDA
         @deviceCountAtLeast(2)
         def test_device_guard(self, device):
