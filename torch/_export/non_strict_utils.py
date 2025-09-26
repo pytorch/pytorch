@@ -252,9 +252,7 @@ def _create_symbolic_context_for_tensor(t, source, t_constraints, sources, mode)
 
         symbolic_context = SubclassSymbolicContext(
             dynamic_sizes=dynamic_sizes,
-            dynamic_strides=[DimDynamic.INFER_STRIDE] * n_dims,
             constraint_sizes=constraint_sizes,  # type: ignore[arg-type]
-            constraint_strides=[None] * n_dims,
             view_base_context=None,
             tensor_source=source,
             shape_env_to_source_to_symbol_cache={},
