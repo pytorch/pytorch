@@ -634,6 +634,9 @@ realize_acc_reads_size_threshold: Optional[int] = (
 # fallback to eager for random/dropout, this is slow but useful for debugging
 fallback_random = False
 
+# fallback embedding_bag_byte_unpack to eager
+fallback_embedding_bag_byte_unpack = False
+
 # automatically create fallbacks when encountering an unhandled op
 implicit_fallbacks = True
 assume_unaligned_fallback_output = (

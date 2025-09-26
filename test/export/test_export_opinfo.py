@@ -57,7 +57,6 @@ fake_export_failures = {
     xfail("nn.functional.grid_sample"),
     xfail("to_sparse"),
     # cannot xfail as it is passing for cpu-only build
-    skip("nn.functional.conv2d"),
     skip("nn.functional.scaled_dot_product_attention"),
     # following are failing due to OptionalDeviceGuard
     xfail("__getitem__"),
@@ -81,7 +80,6 @@ def _test_export_helper(self, dtype, op):
     sample_inputs_itr = op.sample_inputs("cpu", dtype, requires_grad=False)
 
     mode = FakeTensorMode(allow_non_fake_inputs=True)
-    converter = mode.fake_tensor_converter
     # intentionally avoid cuda:0 to flush out some bugs
     target_device = "cuda:1"
 

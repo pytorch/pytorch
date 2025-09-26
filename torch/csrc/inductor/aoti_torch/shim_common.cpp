@@ -237,6 +237,39 @@ AOTITorchError aoti_torch_int64_to_ivalue(
   });
 }
 
+AOTITorchError aoti_torch_str_to_ivalue(
+    const char* val,
+    C10IValueHandle* ivalue) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    c10::IValue* t = new c10::IValue(val);
+    *ivalue = reinterpret_cast<C10IValueHandle>(t);
+  });
+}
+
+AOTITorchError aoti_torch_strlist_to_ivalue(
+    const char** val,
+    int64_t len,
+    C10IValueHandle* ivalue) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    c10::List<std::string> vec;
+    for (int64_t i = 0; i < len; i++) {
+      vec.push_back(std::string(val[i]));
+    }
+    c10::IValue* t = new c10::IValue(vec);
+    *ivalue = reinterpret_cast<C10IValueHandle>(t);
+  });
+}
+
+AOTITorchError aoti_torch_tensor_to_ivalue(
+    AtenTensorHandle tensor,
+    C10IValueHandle* ivalue) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* tmp_tensor = tensor_handle_to_tensor_pointer(tensor);
+    c10::IValue* tmp_ivalue = new c10::IValue(*tmp_tensor);
+    *ivalue = reinterpret_cast<C10IValueHandle>(tmp_ivalue);
+  });
+}
+
 AOTITorchError aoti_torch_get_data_ptr(
     AtenTensorHandle tensor,
     void** ret_data_ptr) {
@@ -1091,7 +1124,7 @@ AOTITorchError aoti_record_function_start(
 
     std::vector<c10::IValue> recordInputs(n_inputs);
     for (size_t i = 0; i < n_inputs; i++) {
-      recordInputs.push_back(*reinterpret_cast<c10::IValue*>(inputs[i]));
+      recordInputs[i] = *reinterpret_cast<c10::IValue*>(inputs[i]);
     }
 
     newGuard->before(name, &recordInputs, &recordKwargs);

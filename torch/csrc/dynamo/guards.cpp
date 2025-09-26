@@ -2,6 +2,7 @@
 #include <ATen/autocast_mode.h>
 #include <c10/core/SafePyObject.h>
 #include <c10/core/impl/PyInterpreter.h>
+#include <c10/util/Exception.h>
 #define PY_SSIZE_T_CLEAN
 #include <ATen/EmptyTensor.h>
 #include <ATen/SparseCsrTensorUtils.h>
@@ -64,8 +65,7 @@ int open_counter() {
 
 uint64_t count_instructions(const std::function<void()>& fn) {
   int fd = open_counter();
-  if (fd == -1)
-    throw std::runtime_error("perf_event_open failed");
+  TORCH_CHECK(fd != -1, "perf_event_open failed");
 
   ioctl(fd, PERF_EVENT_IOC_RESET, 0);
   ioctl(fd, PERF_EVENT_IOC_ENABLE, 0);
@@ -568,7 +568,7 @@ static PyMethodDef TensorGuards_methods[] = {
     {nullptr} /* Sentinel */
 };
 
-static PyTypeObject TensorGuardsType = { PyVarObject_HEAD_INIT(nullptr, 0)
+static PyTypeObject TensorGuardsType = {PyVarObject_HEAD_INIT(nullptr, 0)
 };
 
 struct AutocastState {
@@ -771,9 +771,8 @@ PyObject* GlobalStateGuard_load(
     PyObject* args,
     PyObject* kwargs) {
   char* json;
-  if (!PyArg_ParseTuple(args, "s", &json)) {
-    throw std::runtime_error("Cannot parse as json string.");
-  }
+  TORCH_CHECK(
+      PyArg_ParseTuple(args, "s", &json), "Cannot parse as json string.");
   nlohmann::json::parse(json).get_to(*self);
   Py_RETURN_NONE;
 }
@@ -797,7 +796,7 @@ static PyMethodDef GlobalStateGuard_methods[] = {
      METH_VARARGS,
      "Parse serialized json format"},
     {nullptr}};
-static PyTypeObject GlobalStateGuardType = { PyVarObject_HEAD_INIT(nullptr, 0)
+static PyTypeObject GlobalStateGuardType = {PyVarObject_HEAD_INIT(nullptr, 0)
 };
 
 static PyObject* check_type_id(PyObject* dummy, PyObject* args) {
@@ -854,9 +853,9 @@ static int dict_version_watch_callback(
 static uint64_t get_dict_version_unchecked(PyObject* dict) {
 #if IS_PYTHON_3_12_PLUS
 
-  if (PyDict_Watch(dict_version_watcher_id, dict)) {
-    throw std::runtime_error("failed to add version watcher to dict!");
-  }
+  TORCH_CHECK(
+      !PyDict_Watch(dict_version_watcher_id, dict),
+      "failed to add version watcher to dict!");
   if (!dict_version_map.count(dict)) {
     dict_version_map[dict] = global_dict_version_id++;
   }
@@ -1783,8 +1782,10 @@ class LAMBDA_GUARD_NO_FRAMELOCALS : public LAMBDA_GUARD {
   }
 
   bool check_nopybind(FrameLocalsMapping* map) override {
-    throw std::runtime_error(
-        "FramelocalsMapping input to LAMBDA_GUARD_NO_FRAMELOCALS, use LAMBDA_GUARD instead");
+    TORCH_CHECK(
+        false,
+        "FramelocalsMapping input to LAMBDA_GUARD_NO_FRAMELOCALS,"
+        "use LAMBDA_GUARD instead");
   }
 };
 
@@ -2882,9 +2883,8 @@ class GuardManager {
       return py::type::of(py::none());
     }
 
-    if (!PyCallable_Check(_weak_type.ptr())) {
-      throw std::runtime_error("_weak_type is not callable");
-    }
+    TORCH_CHECK_TYPE(
+        PyCallable_Check(_weak_type.ptr()), "_weak_type is not callable");
     return _weak_type();
   }
 
@@ -2896,10 +2896,8 @@ class GuardManager {
   }
 
   void mark_tag_safe_root() {
-    if (!_is_tag_safe) {
-      throw std::runtime_error(
-          "Marking a node tag_safe_root when its not tag safe");
-    }
+    TORCH_CHECK(
+        _is_tag_safe, "Marking a node tag_safe_root when its not tag safe");
     _is_tag_safe_root = true;
   }
 
@@ -3165,11 +3163,10 @@ class GuardManager {
     if (is_recording) {
       stop_recording_dict_pointers(_root, value, result);
       if (result) {
-        if (!register_weakref_callback(value)) {
-          // something bad happened, disable the dict tag optimization
-          throw std::runtime_error(
-              "Could not register a callback for recursive dict tag optimization");
-        }
+        // something bad happened, disable the dict tag optimization
+        TORCH_CHECK(
+            register_weakref_callback(value),
+            "Could not register a callback for recursive dict tag optimization");
 #if IS_PYTHON_3_12_PLUS
         // Ideally we don't need to even register a weakref callback for value.
         // But it does not hurt to be more cautious
@@ -4102,14 +4099,14 @@ class DictGuardManager : public GuardManager {
       const py::object& a,
       const std::string& source,
       const py::object& b) {
-    throw std::runtime_error("Can not add an accessor to DictGuardManager");
+    TORCH_CHECK(false, "Can not add an accessor to DictGuardManager");
   }
 
   void add_leaf_guard(std::shared_ptr<LeafGuard> leaf_guard) override {
     // If you are calling this, you probably want to go through a key, value
     // child manager and then add a leaf guard on them. DictGuardManager already
     // has TYPE_MATCH and LENGTH_CHECK built in.
-    throw std::runtime_error("DictGuardManager does not support a leaf_guard");
+    TORCH_CHECK(false, "DictGuardManager does not support a leaf_guard");
   }
 
   // Debug helper - Returning raw pointers because we can't return unique_ptr
@@ -4868,13 +4865,12 @@ class FrameLocalsGuardAccessor : public GuardAccessor {
   // NB: Intentional duplication between check_nopybind and
   // check_verbose_nopybind.
   bool check_nopybind(PyObject* obj, bool matches_dict_tag = false) override {
-    if (!PyDict_Check(obj)) {
-      // This should not cause guard failure.
-      // If this error is encountered, it probably means
-      // we did not convert FrameLocalsMapping to dict (using to_dict()).
-      throw std::runtime_error(
-          "FrameLocalsGuardAccessor check expected dict() input");
-    }
+    // This should not cause guard failure.
+    // If this error is encountered, it probably means
+    // we did not convert FrameLocalsMapping to dict (using to_dict()).
+    TORCH_CHECK_TYPE(
+        PyDict_Check(obj),
+        "FrameLocalsGuardAccessor check expected dict() input");
 
     if (matches_dict_tag && _is_immutable_object) {
       // immutable object and dict tag matches, we can skip the guard subtree.
@@ -5320,7 +5316,7 @@ class TensorPropertyGuardAccessor : public GuardAccessor {
     } else if (_prop == TensorProperty::STORAGE_OFFSET) {
       opt_value = tensor.sym_storage_offset().maybe_as_int();
     } else {
-      throw std::runtime_error("Unknown property");
+      TORCH_CHECK(false, "Unknown property");
     }
 
     if (!opt_value.has_value()) {
@@ -6663,12 +6659,9 @@ double profile_guard_manager(
 } // namespace
 
 static void* _torchinductor_pyobject_tensor_data_ptr(PyObject* obj) {
-  if (C10_UNLIKELY(
-          obj == nullptr ||
-          (!THPVariable_CheckExact(obj) && !THPVariable_Check(obj)))) {
-    throw std::runtime_error(
-        "_torchinductor_pyobject_tensor_data_ptr: non-tensor input");
-  }
+  TORCH_CHECK(
+      obj != nullptr && (THPVariable_CheckExact(obj) || THPVariable_Check(obj)),
+      "_torchinductor_pyobject_tensor_data_ptr: non-tensor input");
   return THPVariable_Unpack(obj).data_ptr();
 }
 
@@ -7895,10 +7888,9 @@ PyObject* torch_c_dynamo_guards_init() {
              std::string source,
              py::handle example_value,
              py::handle guard_manager_enum) -> GuardManager* {
-            if (self.is_exact_dict_type()) {
-              throw std::runtime_error(
-                  "getattr_manager on a DictGuardManager is supported only for dict subclasses");
-            }
+            TORCH_CHECK(
+                !self.is_exact_dict_type(),
+                "getattr_manager on a DictGuardManager is supported only for dict subclasses");
             return self.get_child_manager<GetAttrGuardAccessor>(
                 std::move(attr_name),
                 std::move(source),
@@ -7936,16 +7928,15 @@ PyObject* torch_c_dynamo_guards_init() {
 #if IS_PYTHON_3_12_PLUS
 
   dict_version_watcher_id = PyDict_AddWatcher(dict_version_watch_callback);
-  if (dict_version_watcher_id == -1) {
-    throw std::runtime_error("Failed to install dict_version_watch_callback");
-  }
+  TORCH_CHECK(
+      dict_version_watcher_id != -1,
+      "Failed to install dict_version_watch_callback");
 
   dict_recursive_tag_watcher_id =
       PyDict_AddWatcher(dict_recursive_tag_watch_callback);
-  if (dict_recursive_tag_watcher_id == -1) {
-    throw std::runtime_error(
-        "Failed to install dict_recursive_tag_watch_callback");
-  }
+  TORCH_CHECK(
+      dict_recursive_tag_watcher_id != -1,
+      "Failed to install dict_recursive_tag_watch_callback");
 
 #endif
 

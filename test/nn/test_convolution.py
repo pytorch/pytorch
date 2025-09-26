@@ -229,6 +229,52 @@ class TestConvolutionNN(NNTestCase):
         with self.assertRaisesRegex(ValueError, "groups must be a positive integer"):
             torch.nn.Conv3d(1, 1, kernel_size=3, dilation=2, stride=2, groups=-2)
 
+    def test_conv3d_overflow_values(self):
+        input = torch.full(
+            (
+                0,
+                7,
+                9,
+                1,
+                5,
+            ),
+            0,
+            dtype=torch.float32,
+            requires_grad=False,
+        )
+        weight = torch.full(
+            (
+                9,
+                1,
+            ),
+            4.14214e16,
+            dtype=torch.float32,
+            requires_grad=False,
+        )
+        stride = [5, 5, 5]
+
+        with self.assertRaisesRegex(ValueError, "Padding height too large"):
+            torch.ops.aten.slow_conv3d(
+                input,
+                weight,
+                kernel_size=[5, 5, 5],
+                bias=None,
+                stride=stride,
+                padding=[2**62, 2**62, 2**62],
+            )
+
+        with self.assertRaisesRegex(
+            RuntimeError, "Kernel height x width product is too large:"
+        ):
+            torch.ops.aten.slow_conv3d(
+                input,
+                weight,
+                kernel_size=[2**32, 2**32, 2**32],
+                bias=None,
+                stride=stride,
+                padding=[2**31, 2**31, 2**31],
+            )
+
     def test_Conv1d_module_same_padding(self):
         # Compare module against functional: without strides/dilation, asymmetric padding
         x = torch.rand(1, 1, 20)

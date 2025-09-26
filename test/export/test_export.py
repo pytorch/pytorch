@@ -2007,8 +2007,8 @@ class GraphModule(torch.nn.Module):
                 # z = 3
                 return x + y + z
 
-        with self.assertRaisesRegex(
-            ValueError,
+        with self.assertWarnsRegex(
+            UserWarning,
             "The tensor attribute self.buf was assigned during export",
         ):
             export(M(), (torch.randn(2, 3),), strict=False)
@@ -2065,8 +2065,8 @@ class GraphModule(torch.nn.Module):
                 # z = 3 + 3
                 return x + y + z
 
-        with self.assertRaisesRegex(
-            ValueError,
+        with self.assertWarnsRegex(
+            UserWarning,
             "The tensor attributes self.tensors\\[0\\], self.tensors\\[1\\] were assigned during export",
         ):
             export(M(), (torch.randn(2, 3),), strict=False)
@@ -15897,6 +15897,50 @@ class GraphModule(torch.nn.Module):
                 n for n in ep.graph.nodes if n.op == "call_function" and n.target == op
             ]
             self.assertEqual(len(shift_op), 1)
+
+    def test_export_rnn_variants_with_warning(self):
+        """
+        Test that when exporting RNN, LSTM, and GRU models in non-strict mode, it:
+
+        1. Produces expected warnings about tensor attributes being assigned during export
+        2. Does not leak fake tensors in the model's flat weights
+        3. Does not produce extra tensor constants in the graph signature
+        """
+        rnn_types = [
+            (torch.nn.RNN, "RNN"),
+            (torch.nn.LSTM, "LSTM"),
+            (torch.nn.GRU, "GRU"),
+        ]
+
+        for rnn_class, rnn_name in rnn_types:
+            with self.subTest(rnn_type=rnn_name):
+                m = rnn_class(
+                    input_size=2, hidden_size=4, num_layers=1, batch_first=True
+                )
+                sample_inputs = (torch.randn(1, 2, 2),)
+                eager_out = m(*sample_inputs)
+
+                # Verify that export produces the expected warning about tensor attributes
+                with self.assertWarnsRegex(
+                    UserWarning,
+                    r"The tensor attributes self\._flat_weights\[0\], self\._flat_weights\[1\], "
+                    r"self\._flat_weights\[2\], self\._flat_weights\[3\] were assigned during export.*",
+                ):
+                    ep = torch.export.export(m, sample_inputs, strict=False)
+
+                ep_out = ep.module()(*sample_inputs)
+                self.assertEqual(eager_out, ep_out)
+
+                # Verify no fake tensor leakage: flat weights should be real tensors
+                for flat_weight in m._flat_weights:
+                    self.assertTrue(
+                        not isinstance(
+                            flat_weight, torch._subclasses.fake_tensor.FakeTensor
+                        )
+                    )
+
+                # Verify no tensor constants in graph signature
+                self.assertEqual(len(ep.graph_signature.lifted_tensor_constants), 0)
 
     @contextmanager
     def distributed_env(self, world_size):
