@@ -444,8 +444,11 @@ class FSDPParamGroup:
         if not compiled_autograd_enabled():
             logger.debug("%s", self._with_fqn("FSDP::post_forward"))
         with record_function(self._with_fqn("FSDP::post_forward")):
-            self.reshard()
-            self._record_post_forward()
+            # for AC(fully_shard(model)), AC runs fsdp's _pre_forward
+            # it shouldn't change post_forward_order
+            if self not in self.comm_ctx.post_forward_order:
+                self.reshard()
+                self._record_post_forward()
             self._training_state = TrainingState.IDLE
             return output
 
