@@ -40,6 +40,10 @@ logger = logging.getLogger("torch.distributed.fsdp.fully_shard")
 _ModuleToHandleDict = dict[nn.Module, RemovableHandle]  # for state dict
 
 
+def is_in_ac() -> bool:
+    import inspect
+    return any(frame.function == 'recompute_fn' for frame in inspect.stack())
+
 """
 [Note: Overlapping all-gather copy-in and all-gather]
 For implicit forward prefetching, we want to overlap the next copy-in with the
@@ -297,6 +301,10 @@ class FSDPParamGroup:
 
     # Runtime #
     def unshard(self, async_op: bool = False):
+        # if torch.distributed.get_rank() == 0:
+        #     logger.error(f"unshard {self}")
+        #     import fbvscode
+        #     fbvscode.set_trace()
         if self._all_gather_result is not None:  # already called, pending wait
             return
         if self.is_unsharded:
@@ -311,11 +319,6 @@ class FSDPParamGroup:
             # used in the all-gather streams
             self._wait_all_gather_streams_on_event(self._reshard_after_forward_event)
             self._reshard_after_forward_event = None
-
-        # if torch.distributed.get_rank() == 0:
-        #     logger.error(f"unshard {self}")
-        #     import fbvscode
-        #     fbvscode.set_trace()
 
         world_size = self._all_gather_process_group.size()
         if world_size == 1:
@@ -455,7 +458,7 @@ class FSDPParamGroup:
         with record_function(self._with_fqn("FSDP::post_forward")):
             # for AC(fully_shard(model)), AC runs fsdp's _pre_forward
             # it shouldn't change post_forward_order
-            if self not in self.comm_ctx.post_forward_order:
+            if not is_in_ac():
                 self.reshard()
                 self._record_post_forward()
             self._training_state = TrainingState.IDLE
@@ -485,10 +488,8 @@ class FSDPParamGroup:
             self._training_state = TrainingState.PRE_BACKWARD
             self.unshard(self.unshard_async_op)  # no-op if prefetched
             self.wait_for_unshard()
-            # backward prefetch order is messed up with AC(fully_shard(model))
-            # remove it and check perf for implicit prefetch
-            # if default_prefetch and not compiled_autograd_enabled():
-            #     self._backward_prefetch()
+            if default_prefetch and not compiled_autograd_enabled():
+                self._backward_prefetch()
 
     def post_backward(self, *unused: Any):
         # This method should be idempotent and safe to call even when this
