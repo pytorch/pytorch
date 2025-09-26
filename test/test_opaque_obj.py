@@ -1,12 +1,21 @@
 # Owner(s): ["module: custom-operators"]
 import copy
 import random
+import unittest
+from typing import Optional
 
 import torch
+import torch._dynamo.testing
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._functorch.aot_autograd import aot_export_module
 from torch._higher_order_ops.effects import _deregister_effectful_op
-from torch._library.opaque_object import get_payload, make_opaque, set_payload
+from torch._library.effects import EffectType
+from torch._library.opaque_object import (
+    FakeOpaqueObject,
+    get_payload,
+    make_opaque,
+    set_payload,
+)
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -317,6 +326,69 @@ def forward(self, arg0_1, arg1_1):
         x = torch.ones(2, 3)
 
         _ = torch.compile(mod)(obj1, x)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "cuda not available")
+    def test_cuda_stream_test(self):
+        @torch.library.custom_op("_TestOpaqueObject::wait_stream", mutates_args=[])
+        def wait_stream(
+            s1: torch.library.OpaqueType, s2: torch.library.OpaqueType
+        ) -> None:
+            stream1 = get_payload(s1)
+            stream2 = get_payload(s2)
+            assert isinstance(stream1, torch.cuda.Stream) and isinstance(
+                stream2, torch.cuda.Stream
+            )
+            stream1.wait_stream(stream2)
+
+        @wait_stream.register_fake
+        def wait_stream_fake(
+            s1: torch.library.OpaqueType, s2: torch.library.OpaqueType
+        ) -> None:
+            pass
+
+        @torch.library.custom_op("_TestOpaqueObject::set_stream", mutates_args=[])
+        def set_stream(s: torch.library.OpaqueType) -> None:
+            stream = get_payload(s)
+            assert isinstance(stream, torch.cuda.Stream)
+            torch.cuda.set_stream(stream)
+
+        @set_stream.register_fake
+        def set_stream_fake(s: torch.library.OpaqueType) -> None:
+            pass
+
+        torch.library.register_effectful_op(
+            "_TestOpaqueObject::set_stream.default", EffectType.ORDERED
+        )
+        torch.library.register_effectful_op(
+            "_TestOpaqueObject::wait_stream.default", EffectType.ORDERED
+        )
+
+        def fn(x, s, current_stream):
+            x = torch.mul(x, 5)
+            x = torch.add(x, 2)
+            torch.ops._TestOpaqueObject.wait_stream(s, current_stream)
+
+            # Enter context
+            torch.ops._TestOpaqueObject.set_stream(s)
+
+            x = torch.relu(x)
+
+            # Exit context
+            torch.ops._TestOpaqueObject.set_stream(current_stream)
+            torch.ops._TestOpaqueObject.wait_stream(current_stream, s)
+
+            x = torch.add(x, 1)
+            x = torch.cos(x)
+            return x
+
+        s = make_opaque(torch.cuda.Stream())
+        current_stream = make_opaque(torch.cuda.current_stream())
+        x = torch.randn((2, 2), device="cuda")
+        inp = (x, s, current_stream)
+        ref = fn(*inp)
+        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        res = opt_fn(*inp)
+        self.assertEqual(ref, res)
 
 
 instantiate_parametrized_tests(TestOpaqueObject)
