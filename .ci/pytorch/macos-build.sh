@@ -33,6 +33,10 @@ if which sccache > /dev/null; then
   export PATH="${tmp_dir}:$PATH"
 fi
 
+# Install build-system requirements before running setup.py commands
+# We need to manage the build environment manually because we are not using build isolation
+python -m pip install -r requirements-build.txt
+
 print_cmake_info
 if [[ ${BUILD_ENVIRONMENT} == *"distributed"* ]]; then
   # Needed for inductor benchmarks, as lots of HF networks make `torch.distribtued` calls
