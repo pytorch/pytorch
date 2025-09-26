@@ -3,6 +3,7 @@
 import contextlib
 import dataclasses
 import logging
+import weakref
 from functools import cache
 from typing import cast, NamedTuple, Optional
 
@@ -23,8 +24,14 @@ from torch.utils._debug_mode import get_active_debug_mode
 
 logger = logging.getLogger(__name__)
 
-# jax style sharding representation: map from tensor dim to mesh dim
-print_jax_style_sharding = True
+from typing import TypeVar
+
+
+TOrder = TypeVar("TOrder", bound=tuple[tuple[int, ...], ...])
+
+# Print uses JAX-style sharding representation, which maps tensor dimensions to
+# mesh dimensions.
+use_jax_style_to_print_distribution = True
 
 
 class _TransformInfo(NamedTuple):
@@ -45,52 +52,25 @@ class DTensorRedistributePlanner:
 
     _instances: dict = {}
 
-    @dataclasses.dataclass(frozen=True)
+    @dataclasses.dataclass(frozen=True, slots=True)
     class DistState:
         placements: tuple[Placement, ...]
-        # device_order: tuple[int, ...]
         tensor_dim_to_mesh_dim: tuple[tuple[int, ...], ...]
         _hash: Optional[int] = dataclasses.field(
             default=None, init=False, repr=False, compare=False
         )
 
         def __str__(self):
-            out_str = ""
-            # jax style sharding representation: map from tensor dim to mesh dim
-            if globals().get("print_jax_style_sharding", True):
-                for tensor_dim, mesh_dims in enumerate(self.tensor_dim_to_mesh_dim):
-                    if len(mesh_dims) > 0:
-                        out_str += f"S({tensor_dim})"
-                        out_str += f"[{', '.join([str(m) for m in mesh_dims])}]"
-                # in addition, add the partial placement
-                partial_to_mesh_dim: dict[Partial, list[int]] = {}
-                for mesh_dim, p in enumerate(self.placements):
-                    if isinstance(p, Partial):
-                        if p not in partial_to_mesh_dim:
-                            partial_to_mesh_dim[p] = []
-                        partial_to_mesh_dim[p].append(mesh_dim)
-                for p, mesh_dims in partial_to_mesh_dim.items():
-                    out_str += f"P({p.reduce_op})"
-                    out_str += f"[{', '.join([str(m) for m in mesh_dims])}]"
-            else:
-                # native dtensor style sharding representation: map from mesh
-                # dim to tensor dim
-                for mesh_dim, placement in enumerate(self.placements):
-                    if isinstance(placement, Replicate):
-                        out_str += "R"
-                    elif isinstance(placement, Shard):
-                        assert mesh_dim in self.tensor_dim_to_mesh_dim[placement.dim]
-                        out_str += f"S({placement.dim})[{self.tensor_dim_to_mesh_dim[placement.dim].index(mesh_dim)}]"
-                    else:
-                        assert isinstance(placement, Partial)
-                        out_str += f"P({placement.reduce_op})"
-            return out_str
+            return DTensorSpec.format_shard_order_str(
+                self.placements,
+                self.tensor_dim_to_mesh_dim,
+                use_jax_style_to_print_distribution,
+            )
 
         def __repr__(self):
             return self.__str__()
 
         def __post_init__(self):
-            assert len(self.placements) == len(self.tensor_dim_to_mesh_dim)
             # precompute hash after all attributes are set
             object.__setattr__(
                 self,
@@ -124,7 +104,7 @@ class DTensorRedistributePlanner:
 
     @classmethod
     def _create_cache_key(cls, device_mesh, tensor_dimension):
-        return (id(device_mesh), tensor_dimension)
+        return (weakref.ref(device_mesh), tensor_dimension)
 
     def __new__(cls, device_mesh, tensor_dimension):
         cache_key = cls._create_cache_key(device_mesh, tensor_dimension)
@@ -180,18 +160,6 @@ class DTensorRedistributePlanner:
         self.reduce_scatter = reduce_scatter_cost
         self.chunk_cost = chunk_cost
 
-    def map_tensor_dim_to_mesh_dim(
-        self, placements: tuple[Placement, ...], device_order: tuple[int, ...]
-    ):
-        sorted_placements = sorted(
-            enumerate(placements), key=lambda x: device_order[x[0]]
-        )
-        tensor_dim_to_mesh_dim: list[list[int]] = [[] for _ in range(len(placements))]
-        for order, (mesh_dim, p) in enumerate(sorted_placements):
-            if isinstance(p, Shard):
-                tensor_dim_to_mesh_dim[p.dim].append(mesh_dim)
-        return tensor_dim_to_mesh_dim
-
     def _to_tuple(self, x):
         """Convert a nested list structure to a nested tuple structure."""
         if isinstance(x, (list, tuple)):
@@ -203,35 +171,44 @@ class DTensorRedistributePlanner:
         placements: tuple[Placement, ...],
         tensor_dim_mesh_dim: tuple[tuple[int, ...], ...],
     ):
-        # We map tensor dim to device mesh axis, similar to JAX way to represent
-        # the sharding. Notation S(<tensor dim>)[<list of device dims>] means
-        # <tensor dim> is sharded on <list of device dims>, where the <list of
-        # device dims> is sorted by device order.
-
-        # Below are possible transition from one sharding state to another. We
-        # use `S` for Shard, `R` for Replicate and `P` for Partial.
-
-        # case 1. Shard(a) -> Shard(b), use all-to-all (a2a), apply to case:
-        #   S(a)[x] -> S(b)[x] or S(a)[x,y]S(b)[z,k] -> S(a)[x]S(b)[z,k,y],
-        #   where device order of `y` > device order of `z` and `k`
-
-        # case 2. Shard() -> Replicate(), use all-gather, apply to case:
-        #   S(a)[x,y,z] -> S(a)[x,y]
-
-        # case 3. Partial() -> Replicate(), use all-reduce, apply to case:
-        #   P[x,y] -> P[y] or P[x]
-        # note: this case can be disabled because all-reduce technically is not
-        # a primitive since it combines a reduce-scatter + all-gather
-
-        # case 4. Replicate() -> Shard(), use chunk, apply to case:
-        #   S(a)[z] -> S(a)[z,y] (`a` can be any tensor dim). Note that
-        #   `y` must be after `z`.
-
-        # case 5. Partial() -> Shard(), use reduce-scatter, apply to case:
-        #   P[x] -> S(a)[x] or P[x,y] -> P[x]S(a)[y]
-
-        # case 6. Replicate() -> Partial(), local math op, apply to case:
-        #   *->P[x]
+        # We map tensor dimensions to device mesh axes, similar to JAX-style
+        # sharding representation. Notation:
+        # S(<tensor_dim>)[<list_of_device_dims>] means tensor dimension
+        # <tensor_dim> is sharded on the listed device mesh axes, where
+        # <list_of_device_dims> is sorted by device order.
+        #
+        # To generalize to arbitrary dimensionality, we use the following notation:
+        #   S(a)[x, ...]   : tensor dimension 'a' is sharded on device mesh axes x, ... (variadic, possibly empty)
+        #   R[...]         : replicated on the listed device mesh axes (possibly empty)
+        #   P[...]         : partial on the listed device mesh axes (possibly empty)
+        # The ellipsis '...' denotes a variadic wildcard, i.e., zero or more device mesh axes.
+        #
+        # Below are possible transitions from one sharding state to another.
+        # We use `S` for Shard, `R` for Replicate, and `P` for Partial.
+        #
+        # Case 1. Shard(a) -> Shard(b), use all-to-all (a2a), applies to:
+        #   S(a)[..., x] -> S(b)[..., x]
+        #   or
+        #   S(a)[..., x, y] S(b)[..., z, k] -> S(a)[..., x] S(b)[..., z, k, y]
+        #   where device order of 'y' > device order of 'z' and 'k'
+        #
+        # Case 2. Shard() -> Replicate(), use all-gather, applies to:
+        #   S(a)[..., x, y, z] -> S(a)[..., x, y]
+        #
+        # Case 3. Partial() -> Replicate(), use all-reduce, applies to:
+        #   P[..., x, y] -> P[..., y] or P[..., x]
+        #   Note: this case can be disabled because all-reduce technically is not
+        #   a primitive since it combines a reduce-scatter + all-gather.
+        #
+        # Case 4. Replicate() -> Shard(), use chunk, applies to:
+        #   S(a)[..., z] -> S(a)[..., z, y] (`a` can be any tensor dim). Note that
+        #   'y' must be after 'z'.
+        #
+        # Case 5. Partial() -> Shard(), use reduce-scatter, applies to:
+        #   P[..., x] -> S(a)[..., x] or P[..., x, y] -> P[..., x] S(a)[..., y]
+        #
+        # Case 6. Replicate() -> Partial(), local math op, applies to:
+        #   * -> P[..., x]
 
         # list of [DistState, cost]
         all_next_state: dict[DTensorRedistributePlanner.DistState, int] = {}
@@ -416,21 +393,9 @@ class DTensorRedistributePlanner:
         dst_spec: DTensorSpec,
         full_tensor_shape: tuple[int, ...],
     ) -> list[_TransformInfo]:
-        src_device_order = tuple(range(self.device_mesh.ndim))
-        dst_device_order = tuple(range(self.device_mesh.ndim))
-        if src_spec.device_order is not None:
-            src_device_order = src_spec.device_order
-        if dst_spec.device_order is not None:
-            dst_device_order = dst_spec.device_order
-        src_map = self.map_tensor_dim_to_mesh_dim(src_spec.placements, src_device_order)
-        dst_map = self.map_tensor_dim_to_mesh_dim(dst_spec.placements, dst_device_order)
-        src_state = self.DistState(
-            src_spec.placements, tuple(tuple(x) for x in src_map)
-        )
-        dst_state = self.DistState(
-            dst_spec.placements, tuple(tuple(x) for x in dst_map)
-        )
-
+        assert src_spec.shard_order is not None and dst_spec.shard_order is not None
+        src_state = self.DistState(src_spec.placements, src_spec.shard_order)
+        dst_state = self.DistState(dst_spec.placements, dst_spec.shard_order)
         transform_infos: list[_TransformInfo] = []
         state_path = self.find_min_cost_path(src_state, dst_state)
         logger.debug(
@@ -579,12 +544,19 @@ class DTensorRedistributePlanner:
         return transform_infos
 
 
-@cache
-def _get_dtensor_redistribute_planner(
-    device_mesh: DeviceMesh, tensor_dimension: int
-) -> DTensorRedistributePlanner:
-    """Factory function to create and cache DTensorRedistributePlanner instances."""
-    return DTensorRedistributePlanner(device_mesh, tensor_dimension)
+def _is_default_device_order(
+    placements: tuple[Placement, ...], shard_order: TOrder
+) -> bool:
+    """
+    Check if the device order is the default left-to-right order.
+    """
+    shard_order_index = [0] * len(shard_order)
+    for mesh_dim, p in enumerate(placements):
+        if isinstance(p, Shard):
+            if mesh_dim != shard_order[p.dim][shard_order_index[p.dim]]:
+                return False
+            shard_order_index[p.dim] += 1
+    return True
 
 
 def _gen_transform_infos_non_cached(
@@ -593,15 +565,18 @@ def _gen_transform_infos_non_cached(
 ) -> list[_TransformInfo]:
     transform_infos: list[_TransformInfo] = []
     device_mesh = src_spec.device_mesh
-
-    if src_spec.device_order == tuple(
-        range(src_spec.mesh.ndim)
-    ) and dst_spec.device_order == tuple(range(dst_spec.mesh.ndim)):
+    src_shard_order = src_spec.shard_order
+    dst_shard_order = dst_spec.shard_order
+    assert src_shard_order is not None and dst_shard_order is not None
+    assert len(src_shard_order) == len(dst_shard_order)
+    if _is_default_device_order(
+        src_spec.placements, src_shard_order
+    ) and _is_default_device_order(dst_spec.placements, dst_shard_order):
         use_greedy_transform = True
     else:
+        # switch to graph search algorithm if the device order is not the default
         use_greedy_transform = False
-
-    drp = _get_dtensor_redistribute_planner(device_mesh, len(src_spec.shape))
+    drp = DTensorRedistributePlanner(device_mesh, len(src_spec.shape))
     if use_greedy_transform:
         transform_infos = drp.generate_greedy_transform_infos(src_spec, dst_spec)
     else:
@@ -763,7 +738,7 @@ class Redistribute(torch.autograd.Function):
         input: "dtensor.DTensor",
         device_mesh: DeviceMesh,
         placements: tuple[Placement, ...],
-        device_order: Optional[tuple[int, ...]] = None,
+        shard_order: Optional[TOrder] = None,
         async_op: bool = False,
         forward_dtype: Optional[torch.dtype] = None,
         backward_dtype: Optional[torch.dtype] = None,
@@ -777,7 +752,7 @@ class Redistribute(torch.autograd.Function):
             current_spec = DTensorSpec(
                 mesh=device_mesh,
                 placements=input._spec.placements,
-                device_order=input._spec.device_order,
+                shard_order=input._spec.shard_order,
                 tensor_meta=TensorMeta(
                     shape=input.shape,
                     stride=input.stride(),
@@ -794,10 +769,9 @@ class Redistribute(torch.autograd.Function):
             target_spec = DTensorSpec(
                 device_mesh,
                 placements,
-                device_order=device_order,
+                shard_order=shard_order,
                 tensor_meta=current_spec.tensor_meta,
             )
-
             output = redistribute_local_tensor(
                 local_tensor,
                 current_spec,

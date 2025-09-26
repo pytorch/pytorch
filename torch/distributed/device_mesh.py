@@ -1024,6 +1024,17 @@ if True:  # just to temporarily avoid reindentation
                 self, mesh_dim_name, backend_override_tuple
             )
 
+        def get_mesh_dim_by_name(self, mesh_dim_name: str) -> int:
+            if self.mesh_dim_names is None:
+                raise KeyError("No `mesh_dim_names` found.")
+            try:
+                mesh_dim = self.mesh_dim_names.index(mesh_dim_name)
+            except ValueError as err:
+                raise KeyError(
+                    f"Mesh dimension name {mesh_dim_name} not found in device_mesh.mesh_dim_names {self.mesh_dim_names}"
+                ) from err
+            return mesh_dim
+
     def _normalize_backend_override(
         backend_override: dict[
             Union[int, str],
