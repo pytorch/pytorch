@@ -461,7 +461,6 @@ class FSDPParamGroup:
     def _record_post_forward(self) -> None:
         # Since a group has one pre-backward unshard for each forward call
         # before the backward, we record each usage (with multiplicity)
-
         post_forward_index = len(self.comm_ctx.post_forward_order)
         self.comm_ctx.post_forward_order.append(self)
         self._post_forward_indices.append(post_forward_index)
