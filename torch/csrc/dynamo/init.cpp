@@ -157,6 +157,16 @@ struct IsValidVarName {
   }
 };
 
+static int _isinstance_check(PyObject* obj, PyTypeObject* cls_tp) {
+  PyTypeObject* obj_tp = Py_TYPE(obj);
+
+  auto key = std::make_pair(cls_tp, obj_tp);
+  if (_isinstance_cache.count(key) == 0) {
+    _isinstance_cache[key] = PyObject_TypeCheck(obj, cls_tp);
+  }
+  return _isinstance_cache[key];
+}
+
 PyObject* _cached_isinstance_check(PyObject* cls, PyObject* obj) {
   // We cache LazyVT and VT types here to avoid importing it every time.
   // They are freed in the metaclass dealloc function.
@@ -174,7 +184,8 @@ PyObject* _cached_isinstance_check(PyObject* cls, PyObject* obj) {
   }
 
   PyTypeObject* cls_tp = (PyTypeObject*)cls;
-  PyTypeObject* obj_tp = Py_TYPE(obj);
+
+  int r = -1;
 
   if (PyObject_TypeCheck(obj, LazyVT_tp) &&
       !(cls_tp == VT_tp || cls_tp == LazyVT_tp)) {
@@ -187,14 +198,10 @@ PyObject* _cached_isinstance_check(PyObject* cls, PyObject* obj) {
       // possible graph break?
       return nullptr;
     }
-    obj_tp = Py_TYPE(new_obj.get());
+    r = _isinstance_check(new_obj.get(), cls_tp);
+  } else {
+    r = _isinstance_check(obj, cls_tp);
   }
-
-  auto key = std::make_pair(cls_tp, obj_tp);
-  if (_isinstance_cache.count(key) == 0) {
-    _isinstance_cache[key] = PyObject_TypeCheck(obj, cls_tp);
-  }
-  int r = _isinstance_cache[key] ? 1 : 0;
 
   if (r == 1) {
     Py_RETURN_TRUE;
@@ -221,7 +228,7 @@ static PyObject* _get_all_subclasses(PyObject* unused, PyObject* noargs) {
   auto lst = THPObjectPtr(PyList_New((int)_all_subclasses.size()));
   for (size_t i = 0; i < _all_subclasses.size(); i++) {
     Py_INCREF(_all_subclasses[i]);
-    PyList_SET_ITEM(lst, i, _all_subclasses[i]);
+    PyList_SET_ITEM(lst.get(), i, _all_subclasses[i]);
   }
   return lst.release();
 }
