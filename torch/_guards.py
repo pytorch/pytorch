@@ -1157,11 +1157,11 @@ def detect_fake_mode(inputs: Any = None) -> Optional[FakeTensorMode]:
         if isinstance(flat_input, FakeTensor):
             fake_modes.append((flat_input.fake_mode, "fake tensor input", i))
         if is_traceable_wrapper_subclass(flat_input):
-            out: list[torch.Tensor] = []
+            out: list[Union[torch.Tensor, int, torch.SymInt]] = []
             get_plain_tensors(flat_input, out=out)  # type: ignore[arg-type]
-            fake_tensors: list[FakeTensor] = filter(
-                lambda x: isinstance(x, FakeTensor), out
-            )
+            fake_tensors: list[FakeTensor] = [
+                x for x in out if isinstance(x, FakeTensor)
+            ]
             fake_modes.extend(
                 [
                     (tensor.fake_mode, f"subclass input {i}", ix)

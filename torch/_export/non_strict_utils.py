@@ -199,41 +199,10 @@ def fakify(
             "To register a constant input, use torch.utils._pytree.register_constant"
         )
 
-    # Handle traceable wrapper subclasses
-    # TODO tmanlaibaatar (this still doesn't faithfully reflect dynamo one)
-    from torch._dynamo.source import AttrSource
-    from torch.fx.experimental.symbolic_shapes import SubclassSymbolicContext
-    from torch.utils._python_dispatch import is_traceable_wrapper_subclass
-
-    if is_traceable_wrapper_subclass(t):
-        # Get symbolic context for outer tensor
-        outer_context = _create_symbolic_context_for_tensor(
-            t, source, t_constraints, sources, mode
-        )
-
-        # Get symbolic contexts for inner tensors
-        inner_contexts = {}  # mapping from attr -> symbolic context
-        attrs, _ = type(t).__tensor_flatten__(t)
-        for attr in attrs:
-            inner_tensor = getattr(t, attr)
-            inner_source = AttrSource(source, attr)
-            inner_contexts[attr] = _create_symbolic_context_for_tensor(
-                inner_tensor, inner_source, t_constraints, sources, mode
-            )
-
-        symbolic_context = SubclassSymbolicContext(
-            dynamic_sizes=outer_context.dynamic_sizes,
-            dynamic_strides=outer_context.dynamic_strides,
-            constraint_sizes=outer_context.constraint_sizes,
-            constraint_strides=outer_context.constraint_strides,
-            view_base_context=None,  # TODO: handle view base if needed
-            tensor_source=source,
-            inner_contexts=inner_contexts,
-        )
-    else:
-        symbolic_context = _create_symbolic_context_for_tensor(
-            t, source, t_constraints, sources, mode
-        )
+    # Create symbolic context (handles subclass recursion internally)
+    symbolic_context = _create_symbolic_context_for_tensor(
+        t, source, t_constraints, sources, mode
+    )
 
     fake = mode.from_tensor(t, source=source, symbolic_context=symbolic_context)
     mode.shape_env.tracked_fakes.append(TrackedFake(fake, source, symbolic_context))  # type: ignore[union-attr]
@@ -242,28 +211,64 @@ def fakify(
 
 def _create_symbolic_context_for_tensor(t, source, t_constraints, sources, mode):
     """Helper function to create symbolic context for a tensor."""
+    from torch._dynamo.source import AttrSource
     from torch.fx.experimental.symbolic_shapes import (
         DimDynamic,
         RelaxedUnspecConstraint,
+        SubclassSymbolicContext,
     )
+    from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
+    # Common dynamic dimension logic for both regular tensors and subclasses
     n_dims = len(t.shape)
     dynamic_sizes = []
     constraint_sizes = [None] * n_dims
+
     for i in range(n_dims):
         if i in getattr(t, "_dynamo_weak_dynamic_indices", {}):
             dynamic_sizes.append(DimDynamic.DYNAMIC)
         elif i in getattr(t, "_dynamo_dynamic_indices", {}):
+            # bit annoying, but we need to replicate process in _dynamo/variables/builder.py
+            # where a RelaxedUnspecConstraint is created for Dim.DYNAMIC, so constraint violations
+            # are raised when specializing.
             dynamic_sizes.append(DimDynamic.DYNAMIC)
             constraint_sizes[i] = RelaxedUnspecConstraint(warn_only=False)  # type: ignore[call-overload]
         else:
             dynamic_sizes.append(DimDynamic.STATIC)
 
-    symbolic_context = StatelessSymbolicContext(
-        dynamic_sizes=dynamic_sizes,
-        constraint_sizes=constraint_sizes,  # type: ignore[arg-type]
-    )  # type: ignore[var-annotated]
+    # Handle nested subclasses
+    if is_traceable_wrapper_subclass(t):
+        # Get inner contexts recursively
+        inner_contexts = {}
+        attrs, _ = type(t).__tensor_flatten__(t)
 
+        # Propagate outer tensor constraints to inner tensors if not already present
+        for attr in attrs:
+            inner_tensor = getattr(t, attr)
+            inner_source = AttrSource(source, attr)
+            inner_contexts[attr] = _create_symbolic_context_for_tensor(
+                inner_tensor, inner_source, t_constraints, sources, mode
+            )
+
+        symbolic_context = SubclassSymbolicContext(
+            dynamic_sizes=dynamic_sizes,
+            dynamic_strides=[DimDynamic.INFER_STRIDE] * n_dims,
+            constraint_sizes=constraint_sizes,  # type: ignore[arg-type]
+            constraint_strides=[None] * n_dims,
+            view_base_context=None,
+            tensor_source=source,
+            shape_env_to_source_to_symbol_cache={},
+            inner_contexts=inner_contexts,
+        )
+    else:
+        symbolic_context: StatelessSymbolicContext = (  # type: ignore[no-redef]
+            StatelessSymbolicContext(
+                dynamic_sizes=dynamic_sizes,
+                constraint_sizes=constraint_sizes,  # type: ignore[arg-type]
+            )
+        )
+
+    # Apply constraints (common logic)
     t_id = id(t)
     assert mode.shape_env is not None
     if t_id in t_constraints:

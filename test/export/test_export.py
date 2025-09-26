@@ -1449,9 +1449,20 @@ graph():
             def forward(self, x):
                 return x + 1
 
-        input = TwoTensor(torch.randn(4, 4), torch.rand(4, 4))
-        for val in [True, False]:
-            ep = torch.export.export(Foo(), (input,), strict=val)
+        input = TwoTensor(
+            TwoTensor(torch.randn(4, 4), torch.rand(4, 4)),
+            TwoTensor(torch.randn(4, 4), torch.rand(4, 4)),
+        )
+
+        input_test = TwoTensor(
+            TwoTensor(torch.randn(6, 6), torch.rand(6, 6)),
+            TwoTensor(torch.randn(6, 6), torch.rand(6, 6)),
+        )
+
+        for strict in [True, False]:
+            dim = torch.export.ShapesCollection()
+            dim[input] = [Dim.STATIC, Dim.AUTO]
+            ep = torch.export.export(Foo(), (input,), strict=strict, dynamic_shapes=dim)
             self.assertExpectedInline(
                 str(ep.graph).strip(),
                 """\
@@ -1460,6 +1471,11 @@ graph():
     %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, 1), kwargs = {})
     return (add,)""",
             )
+
+            with self.assertRaisesRegex(
+                AssertionError, escape("Guard failed: x.size()[0] == 4")
+            ):
+                ep.module()(input_test)
 
     def test_basic_non_strict_real_tensor(self):
         class Basic(torch.nn.Module):
