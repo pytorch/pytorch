@@ -482,7 +482,7 @@ class NamespaceHelper:
 
 
 class OrderedSet(Generic[T]):
-    storage: dict[T, Literal[None]]
+    storage: dict[T, None]
 
     def __init__(self, iterable: Iterable[T] | None = None) -> None:
         if iterable is None:
