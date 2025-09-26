@@ -15,6 +15,8 @@ fi
 # Compress the fatbin with -compress-mode=size for CUDA 13
 if [[ "$DESIRED_CUDA" == *"13"* ]]; then
     export TORCH_NVCC_FLAGS="-compress-mode=size"
+    # Bundle ptxas into the cu13 wheel, see https://github.com/pytorch/pytorch/issues/163801
+    export BUILD_BUNDLE_PTXAS=1
 fi
 
 SCRIPTPATH="$( cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
