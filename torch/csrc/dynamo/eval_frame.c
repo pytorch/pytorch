@@ -229,11 +229,7 @@ const char* get_frame_name(THP_EVAL_API_FRAME_OBJECT* frame) {
 
 #if IS_PYTHON_3_14_PLUS
 static void dup_obj(_PyStackRef* dst, _PyStackRef src) {
-  if (PyStackRef_IsNull(src)) {
-    *dst = (_PyStackRef){0};
-  } else {
-    *dst = PyStackRef_DUP(src);
-  }
+  *dst = PyStackRef_DUP(src);
 }
 #else
 static void dup_obj(PyObject** dst, PyObject* src) {
@@ -502,13 +498,19 @@ PyObject* dynamo_eval_custom_code(
     THP_EVAL_API_FRAME_OBJECT* frame,
     PyCodeObject* code,
     const char* trace_annotation,
-    int throw_flag) { return NULL; }
+    int throw_flag) {
+  return NULL;
+}
 THPPyInterpreterFrame* THPPyInterpreterFrame_New(
-    THP_EVAL_API_FRAME_OBJECT* frame) { return NULL; }
+    THP_EVAL_API_FRAME_OBJECT* frame) {
+  return NULL;
+}
 PyObject* dynamo_eval_frame_default(
     PyThreadState* tstate,
     THP_EVAL_API_FRAME_OBJECT* frame,
-    int throw_flag) { return NULL; }
+    int throw_flag) {
+  return NULL;
+}
 
 static struct PyGetSetDef THPPyInterpreterFrame_properties[] = {{NULL}};
 
@@ -565,9 +567,7 @@ static PyObject* decrement_working_threads(
   Py_RETURN_NONE;
 }
 
-static PyObject* set_eval_frame(
-    PyObject* new_callback,
-    PyObject* module) {
+static PyObject* set_eval_frame(PyObject* new_callback, PyObject* module) {
   // Change the eval frame callback and return the old one
   //  - None: disables TorchDynamo
   //  - False: run-only mode (reuse existing compiles)
@@ -587,8 +587,8 @@ static PyObject* set_eval_frame(
 
     Py_INCREF(new_callback);
 
-    // Set thread local callback. This will drive behavior of our shim, if/when it
-    // is installed.
+    // Set thread local callback. This will drive behavior of our shim, if/when
+    // it is installed.
     eval_frame_callback_set(new_callback);
 
     // Transfer owned reference from eval_frame_callback_get() to caller
