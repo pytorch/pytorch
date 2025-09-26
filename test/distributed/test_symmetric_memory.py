@@ -24,6 +24,7 @@ from torch.distributed._symmetric_memory import (
 )
 from torch.testing._internal.common_cuda import (
     _get_torch_cuda_version,
+    SM100OrLater,
     SM90OrLater,
     xfailIfSM100OrLater,
 )
@@ -333,7 +334,7 @@ class AsyncTPTest(MultiProcContinuousTest):
     @parametrize("symm_mem_input", [True, False])
     @parametrize("is_b_row_major", [True, False])
     @skipIf(
-        True,
+        SM100OrLater,
         "https://github.com/pytorch/pytorch/issues/162917",
     )
     def test_fused_all_gather_matmul_native(
