@@ -39,6 +39,12 @@ IGNORE_PATTERNS: List[re.Pattern] = [
     re.compile(r"out_eager_sum: 0\.0"),
     re.compile(r"error: operand #\d+ does not dominate this use"),
     re.compile(r"TypeError: unsupported operand type\(s\) for divmod\(\): 'SymInt' and 'int'"),
+    re.compile(r"torch\._inductor\.exc\.InductorError: CantSplit:"),
+    re.compile(r"Error in op: torch\.ops\.aten\.convolution_backward\.default"),
+    re.compile(r"RuntimeError: PassManager::run failed"),
+    re.compile(r"AttributeError: 'Infinity' object has no attribute '_mpf_'"),
+    re.compile(r"AssertionError: Node full_1 was invalid, but is output"),
+    re.compile(r"Error in op: torch\.ops\.aten\.convolution\.default"),
     # Add more patterns here as needed, e.g.:
     # re.compile(r"Some other error message"),
 ]

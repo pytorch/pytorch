@@ -19,7 +19,6 @@ class GroupNormOperator(Operator):
         # Group normalization requires more than 1 value per channel when training
         # Since we generate tensors with requires_grad=True, we need to ensure
         # that the spatial dimensions (after batch and channel) have more than 1 element total
-        batch_size = tensor.size[0]
         num_channels = tensor.size[1]
         spatial_dims = tensor.size[2:]
 
@@ -39,7 +38,7 @@ class GroupNormOperator(Operator):
         num_channels = input_size[1]
 
         # Choose number of groups (must divide num_channels)
-        possible_groups = [g for g in [1, 2, 4, 8, 16, 32] if num_channels % g == 0]
+        possible_groups = [g for g in [1, 2, 4, 8, 16, 32] if num_channels % g == 0 and g <= num_channels]
         if not possible_groups:
             possible_groups = [1]  # fallback
         num_groups = random.choice(possible_groups)
@@ -75,5 +74,15 @@ class GroupNormOperator(Operator):
 
         # Get the number of groups
         num_groups = getattr(self, '_num_groups', 1)
+
+        # Ensure num_groups divides the number of channels in the input tensor
+        # This prevents runtime errors in torch.nn.functional.group_norm
+        # Try to extract the number of channels from the output_tensor shape
+        num_channels = None
+        if hasattr(output_tensor, "size") and len(output_tensor.size) > 1:
+            num_channels = output_tensor.size[1]
+        if num_channels is not None and num_channels % num_groups != 0:
+            # Fallback to 1 group if not divisible
+            num_groups = 1
 
         return f"{output_name} = torch.nn.functional.group_norm({input_names[0]}, {num_groups})"

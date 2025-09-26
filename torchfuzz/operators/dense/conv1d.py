@@ -12,8 +12,11 @@ class Conv1dOperator(Operator):
         super().__init__("conv1d")
 
     def can_produce(self, tensor):
-        """Conv1d can produce 3D tensors (batch, out_channels, length)."""
-        return len(tensor.size) == 3
+        """Conv1d can produce 3D tensors (batch, out_channels, length) and only for floating point dtypes."""
+        # Only allow floating point types (e.g., float32, float64, bfloat16, float16)
+        allowed_dtypes = {"float32", "float64", "bfloat16", "float16"}
+        return len(tensor.size) == 3 and str(tensor.dtype).lower() in allowed_dtypes
+
 
     def decompose(self, tensor):
         """Decompose tensor into input tensors for conv1d operation."""
