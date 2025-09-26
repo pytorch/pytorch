@@ -433,6 +433,17 @@ class TestMisc(JitTestCase):
         self.assertTrue(ret.numel() == 1)
         self.assertTrue(len(ret.size()) == 1)
 
+    def test_parse_ir_single_minus_inf(self):
+        ir = """
+        graph():
+          %12 : float = prim::Constant[value=-inf]()
+          return (%12)
+        """
+        graph = torch._C.parse_ir(ir, True)
+        func = torch._C._create_function_from_graph("forward", graph)
+        ret = func()
+        self.assertTrue(ret == float(-inf))
+
     def test_script_many_decorators(self):
         def no_op_decorator(f):
             return f
