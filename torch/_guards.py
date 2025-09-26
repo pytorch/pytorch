@@ -26,7 +26,7 @@ from typing import (
 )
 
 import torch
-from torch.utils import _pytree as pytree 
+from torch.utils import _pytree as pytree
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils._traceback import CapturedTraceback, format_frame
 from torch.utils.weak import WeakTensorKeyDictionary
