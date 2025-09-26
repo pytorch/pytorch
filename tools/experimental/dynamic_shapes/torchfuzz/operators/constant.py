@@ -1,5 +1,7 @@
 """Constant operator implementation."""
 
+from typing import Optional
+
 from torchfuzz.operators.base import Operator
 from torchfuzz.tensor_fuzzer import (
     fuzz_scalar,
@@ -16,6 +18,11 @@ class ConstantOperator(Operator):
     def __init__(self):
         super().__init__("constant")
         self.template = "default"  # Track template for DTensor compatibility
+
+    @property
+    def torch_op_name(self) -> Optional[str]:
+        """Constant is not a torch operation, it generates constant values."""
+        return None
 
     def set_template(self, template: str):
         """Set the template for context-aware code generation."""

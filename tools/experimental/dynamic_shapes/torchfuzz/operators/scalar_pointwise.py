@@ -1,6 +1,7 @@
 """Scalar pointwise operator implementation."""
 
 import random
+from typing import Optional
 
 from torchfuzz.operators.base import Operator
 from torchfuzz.tensor_fuzzer import ScalarSpec, Spec
@@ -12,6 +13,11 @@ class ScalarPointwiseOperator(Operator):
     def __init__(self, name: str, symbol: str):
         super().__init__(name)
         self.symbol = symbol
+
+    @property
+    def torch_op_name(self) -> Optional[str]:
+        """Scalar operations don't have specific torch ops, they use Python operators."""
+        return None
 
     def can_produce(self, output_spec: Spec) -> bool:
         """Scalar pointwise operations can only produce scalars."""

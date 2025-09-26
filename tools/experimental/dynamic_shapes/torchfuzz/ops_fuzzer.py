@@ -69,17 +69,11 @@ def _get_template_filtered_operators(template: str = "default"):
         # Check if the operator supports any of the template's operations
         should_include = False
         for supported_op in fuzz_template.supported_ops:
-            # Handle individual pointwise operators (AddOperator, MulOperator, etc.)
-            if hasattr(operator, "torch_op"):
-                torch_op = getattr(operator, "torch_op", "")
-                # Match torch.add with torch.ops.aten.add
-                if supported_op.replace("torch.", "torch.ops.aten.") in torch_op:
-                    should_include = True
-                    break
-                # Match direct names like "add" with "torch.add"
-                if supported_op.endswith(f".{op_name}"):
-                    should_include = True
-                    break
+            # Use the new consistent torch_op_name property
+            torch_op = operator.torch_op_name
+            if torch_op and torch_op == supported_op:
+                should_include = True
+                break
 
             # Direct name matching as fallback
             if supported_op in op_name or op_name in supported_op:

@@ -1,6 +1,9 @@
 """Nonzero operator implementation."""
 
+from typing import Optional
+
 import torch
+
 from torchfuzz.operators.base import Operator
 from torchfuzz.tensor_fuzzer import Spec, TensorSpec
 
@@ -9,7 +12,12 @@ class NonzeroOperator(Operator):
     """Operator for finding nonzero elements in a tensor."""
 
     def __init__(self):
-        super().__init__("torch.ops.aten.nonzero")
+        super().__init__("nonzero")
+
+    @property
+    def torch_op_name(self) -> Optional[str]:
+        """Return the torch operation name."""
+        return "torch.nonzero"
 
     def can_produce(self, output_spec: Spec) -> bool:
         """Nonzero produces a tensor with shape (n_nonzero, n_dims)."""

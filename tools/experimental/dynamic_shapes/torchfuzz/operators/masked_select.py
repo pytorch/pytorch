@@ -1,6 +1,9 @@
 """Masked select operator implementation."""
 
+from typing import Optional
+
 import torch
+
 from torchfuzz.operators.base import Operator
 from torchfuzz.tensor_fuzzer import Spec, TensorSpec
 
@@ -9,7 +12,12 @@ class MaskedSelectOperator(Operator):
     """Operator for selecting elements from a tensor based on a mask."""
 
     def __init__(self):
-        super().__init__("torch.ops.aten.masked_select")
+        super().__init__("masked_select")
+
+    @property
+    def torch_op_name(self) -> Optional[str]:
+        """Return the torch operation name."""
+        return "torch.masked_select"
 
     def can_produce(self, output_spec: Spec) -> bool:
         """Masked select produces a 1D tensor with data-dependent size."""

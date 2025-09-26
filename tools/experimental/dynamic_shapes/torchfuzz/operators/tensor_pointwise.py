@@ -1,6 +1,7 @@
 """Tensor pointwise operator implementation."""
 
 import random
+from typing import Optional
 
 from torchfuzz.operators.base import Operator
 from torchfuzz.tensor_fuzzer import Spec, TensorSpec
@@ -16,8 +17,13 @@ class PointwiseOperator(Operator):
 
     def __init__(self, name: str, torch_op: str, symbol: str):
         super().__init__(name)
-        self.torch_op = torch_op
+        self._torch_op = torch_op
         self.symbol = symbol
+
+    @property
+    def torch_op_name(self) -> Optional[str]:
+        """Return the torch operation name."""
+        return self._torch_op
 
     def can_produce(self, output_spec: Spec) -> bool:
         """Tensor pointwise operations can produce tensors but not scalars."""
@@ -65,7 +71,7 @@ class PointwiseOperator(Operator):
         """Generate code for pointwise operation."""
         if len(input_names) == 2:
             return (
-                f"{output_name} = {self.torch_op}({input_names[0]}, {input_names[1]})"
+                f"{output_name} = {self._torch_op}({input_names[0]}, {input_names[1]})"
             )
         else:
             # Chain operations using symbols for readability
@@ -77,25 +83,25 @@ class AddOperator(PointwiseOperator):
     """Operator for element-wise addition."""
 
     def __init__(self):
-        super().__init__("add", "torch.ops.aten.add", "+")
+        super().__init__("add", "torch.add", "+")
 
 
 class MulOperator(PointwiseOperator):
     """Operator for element-wise multiplication."""
 
     def __init__(self):
-        super().__init__("mul", "torch.ops.aten.mul", "*")
+        super().__init__("mul", "torch.mul", "*")
 
 
 class SubOperator(PointwiseOperator):
     """Operator for element-wise subtraction."""
 
     def __init__(self):
-        super().__init__("sub", "torch.ops.aten.sub", "-")
+        super().__init__("sub", "torch.sub", "-")
 
 
 class DivOperator(PointwiseOperator):
     """Operator for element-wise division."""
 
     def __init__(self):
-        super().__init__("div", "torch.ops.aten.div", "/")
+        super().__init__("div", "torch.div", "/")

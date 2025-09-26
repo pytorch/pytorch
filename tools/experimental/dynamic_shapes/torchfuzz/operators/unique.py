@@ -1,6 +1,9 @@
 """Unique operator implementation."""
 
+from typing import Optional
+
 import torch
+
 from torchfuzz.operators.base import Operator
 from torchfuzz.tensor_fuzzer import Spec, TensorSpec
 
@@ -9,7 +12,12 @@ class UniqueOperator(Operator):
     """Operator for finding unique elements in a tensor."""
 
     def __init__(self):
-        super().__init__("torch.ops.aten.unique")
+        super().__init__("unique")
+
+    @property
+    def torch_op_name(self) -> Optional[str]:
+        """Return the torch operation name."""
+        return "torch.unique"
 
     def can_produce(self, output_spec: Spec) -> bool:
         """Unique produces a 1D tensor with data-dependent size."""
