@@ -459,7 +459,7 @@ def _dynamo_graph_capture_for_export(
                 and (dim_constraints := shape_env.dim_constraints) is not None
                 and not isinstance(
                     module_to_trace.forward,
-                    (torch._ops.OpOverloadPacket, torch._ops.OpOverload),
+                    torch._ops.OpOverloadPacket | torch._ops.OpOverload,
                 )
             ):
                 dim_constraints.solve()
