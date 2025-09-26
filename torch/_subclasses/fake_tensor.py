@@ -2906,7 +2906,7 @@ class FakeTensorMode(TorchDispatchMode):
         src = torch._dynamo.source.EphemeralSource("intermediate_offsets_or_lengths")
         assert self.shape_env is not None
         ret = self.shape_env.create_symintnode(
-            sym=self.shape_env.create_non_data_dependent_symbol(
+            sym=self.shape_env.create_symbol(
                 val=hint,
                 source=src,
             ),

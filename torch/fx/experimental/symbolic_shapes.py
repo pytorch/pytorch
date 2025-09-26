@@ -973,16 +973,6 @@ def free_unbacked_symbols(x: IterateExprs) -> OrderedSet[sympy.Symbol]:
     )
 
 
-def _free_non_source_unbacked_symbols(
-    x: IterateExprs, unbacked_inputs: OrderedSet[sympy.Symbol]
-) -> OrderedSet[sympy.Symbol]:
-    """Unbacked symbols that are not inputs to the graph. These are symbols that originated from
-    data-dependent operations as opposed to mark_unbacked calls."""
-    unbacked_symbols = free_unbacked_symbols(x)
-    non_source_symbols = unbacked_symbols - unbacked_inputs
-    return non_source_symbols
-
-
 # WARNING: Don't use this on Dynamo produced graphs, they don't have meta
 # setup!
 def is_symbol_binding_fx_node(node: torch.fx.Node) -> Optional[sympy.Symbol]:
@@ -3727,8 +3717,6 @@ class ShapeEnv:
         self.var_to_range_sloc: dict[sympy.Symbol, ValueRangesSLoc] = {}
         self.source_name_to_debug_name: dict[str, str] = {}
         self.var_to_sources: dict[sympy.Symbol, list[Source]] = {}
-        # A set of unbacked symbols that are inputs (i.e: not data dependent).
-        self.unbacked_inputs: OrderedSet[sympy.Symbol] = OrderedSet()
         self.var_to_stack: dict[sympy.Symbol, CapturedTraceback] = {}
         # Maps a source to the *original* symbol that was assigned to it
         self.source_to_var: dict[str, sympy.Symbol] = {}
@@ -4387,7 +4375,7 @@ class ShapeEnv:
         constraint_dims = symbolic_context.constraint_sizes  # type: ignore[attr-defined]
         size = []
         for i, val in enumerate(tensor_size):
-            sym = self.create_non_data_dependent_symbol(
+            sym = self.create_symbol(
                 val if i not in hint_overrides else hint_overrides[i],
                 TensorPropertySource(source, TensorProperty.SIZE, i),
                 dynamic_dims[i],
@@ -4607,7 +4595,7 @@ class ShapeEnv:
                 )
             )
         sym_storage_offset = self.create_symintnode(
-            self.create_non_data_dependent_symbol(
+            self.create_symbol(
                 ex_storage_offset,
                 TensorPropertySource(source, TensorProperty.STORAGE_OFFSET),
                 dynamic_dim=dynamic_offset,
@@ -4664,7 +4652,7 @@ class ShapeEnv:
                         dyn_stride = (
                             DimDynamic.STATIC if are_sizes_static else DimDynamic.DUCK
                         )
-                    out_stride = self.create_non_data_dependent_symbol(
+                    out_stride = self.create_symbol(
                         val,
                         TensorPropertySource(source, TensorProperty.STRIDE, i),
                         dynamic_dim=dyn_stride,
@@ -4863,6 +4851,7 @@ class ShapeEnv:
         self._log_create_unbacked_symbol(
             "create_unbacked_symint", symbol, vr, source, sym_node=sym_node
         )
+
         return SymInt(sym_node)
 
     def is_unbacked_symint(self, symbol: sympy.Symbol) -> bool:
@@ -4914,7 +4903,7 @@ class ShapeEnv:
 
         # We don't want to specialize zero one val for unspecified symbol
         # so that we can always get a new symbol despite val.
-        return self.create_non_data_dependent_symbol(
+        return self.create_symbol(
             val,
             source,
             dynamic_dim,
@@ -4924,35 +4913,8 @@ class ShapeEnv:
             symbolic_context=symbolic_context,
         )
 
-    @deprecated(
-        "`create_symbol` is deprecated and will be removed in a future version. "
-        "Please use `create_non_data_dependent_symbol` instead.",
-        category=FutureWarning,
-    )
     @record_shapeenv_event()
     def create_symbol(
-        self,
-        val: int,
-        source: Source,
-        dynamic_dim: DimDynamic = DimDynamic.DUCK,
-        constraint_dim: DimConstraint = None,  # NB: includes None
-        positive: Optional[bool] = True,
-        do_not_specialize_zero_one: bool = False,
-        symbolic_context: Optional[StatelessSymbolicContext] = None,
-    ) -> sympy.Expr:
-        """Create a new symbol which is tracked by this ShapeEnv"""
-        return self.create_non_data_dependent_symbol(
-            val,
-            source,
-            dynamic_dim,
-            constraint_dim,
-            positive,
-            do_not_specialize_zero_one,
-            symbolic_context,
-        )
-
-    @record_shapeenv_event()
-    def create_non_data_dependent_symbol(
         self,
         val: int,
         source: Source,
@@ -5007,9 +4969,6 @@ class ShapeEnv:
         if dynamic_dim in (DimDynamic.SIZE_LIKE_UNBACKED, DimDynamic.OBLIVIOUS_SIZE):
             out = self.create_unbacked_symint(source).node.expr
             self._constrain_range_for_size(out)
-
-            self.unbacked_inputs.add(out)
-
             if isinstance(symbolic_context, StatefulSymbolicContext) and source_name:
                 symbolic_context.shape_env_to_source_to_symbol_cache[id(self)][
                     source_name
@@ -5691,7 +5650,6 @@ class ShapeEnv:
         #    if we have an input (2, 3), we must show s0*2 == 2 and s1 == 3.
         #    This does a lot of work: it covers duck sizing and equality guards.
         all_exprs: list[list[str]] = [[] for _ in langs]
-
         self.dim_constraints = DimConstraints(
             symbol_to_source,
             self.var_to_val,
@@ -5868,7 +5826,6 @@ class ShapeEnv:
                 is not None
             ):
                 continue
-
             issue_guard(guard)
 
         # Because there are guards that export's constraint solver can suggest good fixes for, that we may have
@@ -5880,7 +5837,6 @@ class ShapeEnv:
             if self._maybe_evaluate_static(ra.expr, axioms=()) is not None:
                 continue
             expr = self.simplify(ra.expr)
-
             self.dim_constraints.add(expr)
 
         # 3. Every symbol must be within its value range (this handles 0/1
@@ -6687,7 +6643,6 @@ class ShapeEnv:
         Adds or updates a replacement for a symbol.
         Use this instead of `self.replacements[a] = tgt`.
         """
-
         if tgt == self.replacements.get(a, None):
             return
 
@@ -6945,10 +6900,7 @@ class ShapeEnv:
                 ):
                     raise NotImplementedError
 
-                # Never replace unbacked symbols with other unbacked symbols that are
-                # not function arguments. (ex:mark_unbacked symbols are fine to replace
-                # other unbacked, but not those coming from .item() calls).
-
+                # Never replace unbacked symbols with other unbacked symbols.
                 # This is error prone because you can cause references to
                 # unbacked symbols to time travel backwards.  E.g.,
                 #
@@ -6964,10 +6916,8 @@ class ShapeEnv:
                 # dependencies for substitutions, so ban it entirely.
                 def trivial_solve(lhs: sympy.Expr, rhs: sympy.Expr) -> bool:
                     if isinstance(lhs, sympy.Symbol):
-                        if free_unbacked_symbols(
-                            lhs
-                        ) and not _free_non_source_unbacked_symbols(
-                            rhs, self.unbacked_inputs
+                        if free_unbacked_symbols(lhs) and not free_unbacked_symbols(
+                            rhs
                         ):
                             return True
                         if symbol_is_type(lhs, SymT.FLOAT):
@@ -7456,6 +7406,7 @@ class ShapeEnv:
         forcing_spec: bool = False,
     ) -> sympy.Basic:
         # TODO: split conjunctions and evaluate them separately
+
         if isinstance(
             orig_expr,
             (sympy.logic.boolalg.BooleanTrue, sympy.logic.boolalg.BooleanFalse),
@@ -7800,7 +7751,6 @@ class ShapeEnv:
             expr = canonicalize_bool_expr(expr)
             stack = CapturedTraceback.extract(skip=1)
             ra = RuntimeAssert(expr, msg, stack)
-
             # TODO: Do this in a way that is less janky than int(s.name[1:])
             cands = sorted(
                 (s for s in expr.free_symbols if symbol_is_type(s, SymT.UNBACKED_INT)),
