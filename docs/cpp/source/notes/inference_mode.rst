@@ -46,8 +46,8 @@ silently bypass the check and returns wrong gradient to users.
 When current users of ``AutoNonVariableTypeMode`` think about migrating, the following
 steps might help you decide the best alternatives:
 
-1. Users trying to run workload in inference only mode (like loading a pretrained JIT model and
-   run inference in C++ runtime) should add ``c10::InferenceMode guard`` to guard all operations
+1. Users trying to run workload in inference only mode (like loading a pretrained :term:`JIT`
+  model and run inference in C++ runtime) should add ``c10::InferenceMode guard`` to guard all operations
    on tensors (including model loading). See an inference workload example below:
 
 .. code-block:: cpp
