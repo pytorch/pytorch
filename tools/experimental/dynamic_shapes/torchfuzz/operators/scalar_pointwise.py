@@ -1,6 +1,7 @@
 """Scalar pointwise operator implementation."""
 
 import random
+import torch
 from typing import Optional
 
 from torchfuzz.operators.base import Operator
@@ -21,6 +22,8 @@ class ScalarPointwiseOperator(Operator):
 
     def can_produce(self, output_spec: Spec) -> bool:
         """Scalar pointwise operations can only produce scalars."""
+        if output_spec.dtype == torch.bool:
+            return False
         return isinstance(output_spec, ScalarSpec)
 
     def fuzz_inputs_specs(self, output_spec: Spec, num_inputs: int = 2) -> list[Spec]:
@@ -54,13 +57,11 @@ class ScalarAddOperator(ScalarPointwiseOperator):
     def __init__(self):
         super().__init__("scalar_add", "+")
 
-
 class ScalarMulOperator(ScalarPointwiseOperator):
     """Operator for scalar multiplication."""
 
     def __init__(self):
         super().__init__("scalar_mul", "*")
-
 
 class ScalarSubOperator(ScalarPointwiseOperator):
     """Operator for scalar subtraction."""
