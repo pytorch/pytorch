@@ -74,9 +74,25 @@ class Tensor {
   // semantics as their counterparts in TensorBase.h.
   // =============================================================================
 
+  // Do not add new uses of data_ptr(), use const_data_ptr() if
+  // possible, mutable_data_ptr() otherwise.
   void* data_ptr() const {
     void* data_ptr;
     TORCH_ERROR_CODE_CHECK(aoti_torch_get_data_ptr(ath_.get(), &data_ptr));
+    return data_ptr;
+  }
+
+  void* mutable_data_ptr() const {
+    void* data_ptr{};
+    TORCH_ERROR_CODE_CHECK(
+        aoti_torch_get_mutable_data_ptr(ath_.get(), &data_ptr));
+    return data_ptr;
+  }
+
+  const void* const_data_ptr() const {
+    const void* data_ptr{};
+    TORCH_ERROR_CODE_CHECK(
+        aoti_torch_get_const_data_ptr(ath_.get(), &data_ptr));
     return data_ptr;
   }
 
