@@ -70,7 +70,11 @@ class Fuzzer:
                                     and tp.size == t.size
                                     and tp.stride == t.stride
                                     and tp.dtype == t.dtype
-                                    and tp.device == t.device):
+                                    and tp.device == t.device
+                                    and getattr(tp, 'requires_grad', None) == getattr(t, 'requires_grad', None)
+                                    # Don't share batch_norm buffer tensors
+                                    and not getattr(t, '_batch_norm_buffer', False)
+                                    and not getattr(tp, '_batch_norm_buffer', False)):
                                     # Check if using this tensor would create a circular dependency
                                     if not self._would_create_cycle(output_tensor, tp, tensor_to_node):
                                         candidates_for_sharing.append(tp)

@@ -1,12 +1,13 @@
 import random
 
 class Tensor:
-    def __init__(self, size, stride, dtype, device, supported_ops):
+    def __init__(self, size, stride, dtype, device, supported_ops, requires_grad=None):
         self.size = size
         self.stride = stride
         self.dtype = dtype
         self.device = device
         self.supported_ops = supported_ops
+        self.requires_grad = requires_grad  # None means use default behavior, True/False override
         # Add optional attributes for cat operation - allow int values
         self._cat_dim = None  # type: int | None
         self._cat_sizes = None  # type: tuple | None

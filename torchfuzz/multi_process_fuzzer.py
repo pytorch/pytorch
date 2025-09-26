@@ -276,10 +276,6 @@ def run_multi_process_fuzzer(
             persist_print(f"⚡ Throughput: {(len(results) / (total_time / 3600)):.2f} seeds/hr" if total_time > 0 else "⚡ Throughput: N/A")
         if failed:
             persist_print(f"\n❌ Failed seeds: {[r[0] for r in failed]}")
-        if successful:
-            persist_print(f"✅ Successful seeds: {[r[0] for r in successful]}")
-            avg_success_time = sum(r[3] for r in successful) / len(successful)
-            persist_print(f"⚡ Avg time for successful runs: {avg_success_time:.2f}s")
         if ignored:
             persist_print(f"\n🚫 Ignored seeds: {[r[0] for r in ignored]}")
             # Print ignore pattern stats
@@ -311,11 +307,6 @@ def run_multi_process_fuzzer(
 
     if failed:
         persist_print(f"\n❌ Failed seeds: {[r[0] for r in failed]}")
-
-    if successful:
-        persist_print(f"✅ Successful seeds: {[r[0] for r in successful]}")
-        avg_success_time = sum(r[3] for r in successful) / len(successful)
-        persist_print(f"⚡ Avg time for successful runs: {avg_success_time:.2f}s")
 
     if ignored:
         persist_print(f"\n🚫 Ignored seeds: {[r[0] for r in ignored]}")
