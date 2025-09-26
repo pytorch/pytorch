@@ -780,11 +780,11 @@ def return_and_correct_aliasing(func, args, kwargs, out):
 
     # Next: we need to make sure to return inputs directly, if the output is a mutable alias (e.g. add_()).
 
-    # simple case: none of our outputs have mutable aliases, so we can return the output as-is
     schema_info_outs_write_aliases = schema_info.outs_write_aliases
 
+    # simple case: none of our outputs have mutable aliases, so we can return the output as-is
     if schema_info_outs_write_aliases is None:
-        return None
+        return out
 
     if len(schema_info_outs_write_aliases) == 1:
         return get_arg_from_alias(
