@@ -1119,10 +1119,6 @@ class CppOverrides(OpOverrides):
         code.writeline("()")
         return code
 
-    @staticmethod
-    def device_assert_async(cond, msg):
-        return f'({cond} ? 0 : (throw std::runtime_error("{msg}"), 0))'
-
 
 CppOverrides._initialize_pointwise_overrides("cpp")
 
@@ -2137,6 +2133,11 @@ class CppKernel(Kernel):
         else:
             raise NotImplementedError(f"store mode={mode}")
         self.stores.writeline(DeferredLine(name, line))
+
+    def device_assert_async(self, cond, msg):
+        self.compute.writeline(
+            f'({cond} ? 0 : (throw std::runtime_error("{msg}"), 0));'
+        )
 
     def _gen_reduction_prefix(
         self,
@@ -5375,6 +5376,7 @@ class CppScheduling(BaseScheduling):
                 )
                 user.node.mark_run()
 
+        self.codegen_comment(node_schedule, kernel_name)
         kernel.call_kernel(kernel_name, ctb)
         V.graph.removed_buffers |= kernel.removed_buffers
         self.free_buffers_in_scheduler()
@@ -5390,42 +5392,48 @@ class CppScheduling(BaseScheduling):
 
     def define_kernel(self, src_code, nodes, kernel_args=None):
         wrapper = V.graph.wrapper_code
-        fused_name = (
-            get_fused_kernel_name(nodes, config.cpp.descriptive_names)
-            if config.cpp.descriptive_names
-            else ""
-        )
-        kernel_name = "_".join(["cpp", fused_name, wrapper.next_kernel_suffix()])
-        kernel_decl_name = kernel_name if V.graph.cpp_wrapper else "kernel"
-        src_code = src_code.replace(str(Placeholder.KERNEL_NAME), kernel_decl_name)
-        src_code = src_code.replace(str(Placeholder.DESCRIPTIVE_NAME), kernel_name)
-        # TODO(voz): Ostensibly, we should not need this. But there are cases where C++ codegen does
-        # not use BracesBuffer, so we have no good indicator of a C++ buffer atm.
-        src_code = src_code.replace("#pragma CMT", "//")
+        if src_code in wrapper.src_to_kernel:
+            kernel_name = wrapper.src_to_kernel[src_code]
+        else:
+            fused_name = (
+                get_fused_kernel_name(nodes, config.cpp.descriptive_names)
+                if config.cpp.descriptive_names
+                else ""
+            )
+            kernel_name = "_".join(["cpp", fused_name, wrapper.next_kernel_suffix()])
+            wrapper.src_to_kernel[src_code] = kernel_name
+            kernel_decl_name = kernel_name if V.graph.cpp_wrapper else "kernel"
+            src_code = src_code.replace(str(Placeholder.KERNEL_NAME), kernel_decl_name)
+            src_code = src_code.replace(str(Placeholder.DESCRIPTIVE_NAME), kernel_name)
+            # TODO(voz): Ostensibly, we should not need this. But there are cases where C++ codegen does
+            # not use BracesBuffer, so we have no good indicator of a C++ buffer atm.
+            src_code = src_code.replace("#pragma CMT", "//")
 
-        # Get the lines in the source code representing the function definition,
-        # excluding the the first line including cpp_prefix.h.
-        first_char = src_code.rfind('extern "C"')
-        last_char = src_code.find(")", first_char)
-        if _IS_WINDOWS:
-            # get_export_declaration introduced one more ')' in Windows
-            last_char = src_code.find(")", last_char + 1)
-        kernel_definition = f"{src_code[first_char : last_char + 1]};\n"
+            # Get the lines in the source code representing the function definition,
+            # excluding the first line including cpp_prefix.h.
+            first_char = src_code.rfind('extern "C"')
+            last_char = src_code.find(")", first_char)
+            if _IS_WINDOWS:
+                # get_export_declaration introduced one more ')' in Windows
+                last_char = src_code.find(")", last_char + 1)
+            kernel_definition = f"{src_code[first_char : last_char + 1]};\n"
 
-        compile_wrapper = IndentedBuffer()
-        args = self.kernel_group.args if kernel_args is None else kernel_args
-        _, _, arg_types = args.cpp_argdefs()
-        if not V.graph.cpp_wrapper:
-            compile_wrapper.writeline(f"async_compile.cpp_pybinding({arg_types!r}, '''")
-        compile_wrapper.splice(src_code, strip=True)
-        if not V.graph.cpp_wrapper:
-            compile_wrapper.writeline("''')")
-        wrapper.define_kernel(
-            kernel_name,
-            compile_wrapper.getvalue(),
-            gpu=False,
-            cpp_definition=kernel_definition,
-        )
+            compile_wrapper = IndentedBuffer()
+            args = self.kernel_group.args if kernel_args is None else kernel_args
+            _, _, arg_types = args.cpp_argdefs()
+            if not V.graph.cpp_wrapper:
+                compile_wrapper.writeline(
+                    f"async_compile.cpp_pybinding({arg_types!r}, r'''"
+                )
+            compile_wrapper.splice(src_code, strip=True)
+            if not V.graph.cpp_wrapper:
+                compile_wrapper.writeline("''')")
+            wrapper.define_kernel(
+                kernel_name,
+                compile_wrapper.getvalue(),
+                gpu=False,
+                cpp_definition=kernel_definition,
+            )
         return kernel_name
 
     def flush(self):
@@ -5434,17 +5442,19 @@ class CppScheduling(BaseScheduling):
             kernel_name = self.define_kernel(
                 src_code, self.kernel_group.scheduled_nodes
             )
-            # below add provenance tracing info for cpu CppKernel types
-            debug_handle: Optional[int] = None
-            if config.trace.provenance_tracking_level != 0:
-                debug_handle = set_kernel_post_grad_provenance_tracing(
-                    self.kernel_group.scheduled_nodes, kernel_name
-                )
-            self.kernel_group.call_kernel(
-                V.graph.wrapper_code, kernel_name, debug_handle=debug_handle
-            )
+            self.codegen_comment(self.kernel_group.scheduled_nodes, kernel_name)
+            self.kernel_group.call_kernel(V.graph.wrapper_code, kernel_name)
         self.reset_kernel_group()
         self._set_flush_status(False)
+
+    def codegen_comment(self, node_schedule, kernel_name=None):
+        # below add provenance tracing info for cpu CppKernel types
+        wrapper = V.graph.wrapper_code
+        debug_handle = set_kernel_post_grad_provenance_tracing(
+            node_schedule,  # type: ignore[arg-type]
+            kernel_name,
+        )
+        wrapper.write_provenance_debug_handle(kernel_name, debug_handle)
 
 
 class KernelGroup:
@@ -5517,14 +5527,13 @@ class KernelGroup:
             code.splice(self.loops_code)
         return code.getvalue()
 
-    def call_kernel(self, wrapper, kernel_name, debug_handle: Optional[int] = None):
+    def call_kernel(self, wrapper, kernel_name):
         _, call_args, arg_types = self.args.cpp_argdefs()
         wrapper.generate_kernel_call(
             kernel_name,
             call_args,
             triton=False,
             arg_types=arg_types,
-            debug_handle=debug_handle,
         )
 
 

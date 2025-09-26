@@ -102,7 +102,7 @@ except ImportError:
 
 
 MI300_ARCH = ("gfx942",)
-
+MI200_ARCH = ("gfx90a")
 
 def freeze_rng_state(*args, **kwargs):
     return torch.testing._utils.freeze_rng_state(*args, **kwargs)
@@ -1985,16 +1985,6 @@ def skipIfMPS(fn):
     def wrapper(*args, **kwargs):
         if TEST_MPS:
             raise unittest.SkipTest("test doesn't currently work with MPS")
-        else:
-            fn(*args, **kwargs)
-    return wrapper
-
-
-def skipIfMPSOnMacOS13(fn):
-    @wraps(fn)
-    def wrapper(*args, **kwargs):
-        if TEST_MPS and int(MACOS_VERSION) == 13:
-            raise unittest.SkipTest("Test crashes MPSGraph on MacOS13")
         else:
             fn(*args, **kwargs)
     return wrapper
