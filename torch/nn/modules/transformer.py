@@ -443,6 +443,7 @@ class TransformerEncoder(Module):
         str_first_layer = "self.layers[0]"
         batch_first = first_layer.self_attn.batch_first
         is_fastpath_enabled = torch.backends.mha.get_fastpath_enabled()
+        do_mask_check = getattr(self, "mask_check", True)
 
         if not is_fastpath_enabled:
             why_not_sparsity_fast_path = (
@@ -464,15 +465,11 @@ class TransformerEncoder(Module):
             why_not_sparsity_fast_path = "src_key_padding_mask was None"
         # This check avoids a call to torch._nested_tensor_from_mask_left_aligned() that
         # breaks in torch.compile.
-        elif (
-            (not hasattr(self, "mask_check")) or self.mask_check
-        ) and torch.compiler.is_compiling():
+        elif do_mask_check and torch.compiler.is_compiling():
             why_not_sparsity_fast_path = (
                 "mask_check enabled with torch.compile or torch.export"
             )
-        elif (
-            (not hasattr(self, "mask_check")) or self.mask_check
-        ) and not torch._nested_tensor_from_mask_left_aligned(
+        elif do_mask_check and not torch._nested_tensor_from_mask_left_aligned(
             src, src_key_padding_mask.logical_not()
         ):
             why_not_sparsity_fast_path = "mask_check enabled, and src and src_key_padding_mask was not left aligned"
