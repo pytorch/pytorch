@@ -410,9 +410,6 @@ autotune_fallback_to_aten = (
     os.environ.get("TORCHINDUCTOR_AUTOTUNE_FALLBACK_TO_ATEN", "1") == "1"
 )
 
-# DEPRECATED. This setting is ignored.
-autotune_fallback_to_aten = False
-
 # the value used as a fallback for the unbacked SymInts
 # that can appear in the input shapes (e.g., in autotuning)
 unbacked_symint_fallback = 8192
