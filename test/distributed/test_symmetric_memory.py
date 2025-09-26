@@ -505,7 +505,7 @@ class AsyncTPTest(MultiProcContinuousTest):
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
     @skip_if_lt_x_gpu(2)
-    @parametrize("scatter_dim", [0, 1])
+    @parametrize("scatter_dim", [0, 1, 2])
     def test_fused_matmul_reduce_scatter(self, scatter_dim: int) -> None:
         self._init_process()
 
