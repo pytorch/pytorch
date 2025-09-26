@@ -20,7 +20,11 @@ from torch._inductor import config
 from torch._inductor.codegen.cpp import CppScheduling
 from torch._inductor.codegen.triton import TritonScheduling
 from torch._inductor.codegen.wrapper import PythonWrapperCodegen
-from torch._inductor.codegen.wrapper_fxir import FxConverter, WrapperFxCodegen
+from torch._inductor.codegen.wrapper_fxir import (
+    FxConverter,
+    replace_floor_div,
+    WrapperFxCodegen,
+)
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch.export import Dim
 from torch.testing._internal.common_utils import (
@@ -34,6 +38,7 @@ from torch.testing._internal.inductor_utils import (
     requires_gpu,
     TRITON_HAS_CPU,
 )
+from torch.utils._sympy.functions import FloorDiv
 
 
 if HAS_GPU:
@@ -1020,6 +1025,132 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 
         x = torch.randn(7, device=self.device)
         self.check(M(), (x,), dynamic_shapes=({0: Dim.DYNAMIC},))
+
+
+class TestReplaceFloorDiv(InductorTestCase):
+    """
+    Tests for floor -> FloorDiv conversion.
+    """
+
+    def _check(self, expr: sympy.Expr) -> sympy.Expr:
+        # Check that we started with floor's.
+        num_floors = expr.count(sympy.floor)
+        self.assertGreater(num_floors, 0)
+
+        replaced = replace_floor_div(expr)
+
+        # Check that all floor's were replaced.
+        # We shoud have no more new FloorDiv's than floor's in the original expression,
+        # although we can have less due to simplification.
+        self.assertEqual(replaced.count(sympy.floor), 0)
+        self.assertLessEqual(
+            replaced.count(FloorDiv) - expr.count(FloorDiv), num_floors
+        )
+
+        def expand_floor_div(
+            numerator: sympy.Expr, denominator: sympy.Expr
+        ) -> sympy.Expr:
+            return sympy.floor(numerator / denominator)
+
+        # Expand FloorDiv back into floor and check for equality.
+        self.assertEqual(
+            *[
+                sympy.simplify(e.replace(FloorDiv, expand_floor_div))
+                for e in (replaced, expr)
+            ]
+        )
+
+        return replaced
+
+    def test_rewrite_floor_div_mul_pow(self):
+        x, y = sympy.symbols("x y")
+        expr = sympy.floor(x / y)
+        self.assertEqual(expr.count(FloorDiv), 0)
+        self.assertEqual(expr.count(sympy.core.mul.Mul), 1)
+        self.assertEqual(expr.count(sympy.Pow), 1)
+
+        rewritten = self._check(expr)
+        self.assertTrue(isinstance(rewritten, FloorDiv))
+        self.assertEqual(rewritten.args, (x, y))
+
+    def test_rewrite_floor_div_mul_rational(self):
+        x = sympy.Symbol("x")
+        expr = sympy.floor(x / 5)
+        self.assertEqual(expr.count(FloorDiv), 0)
+        self.assertEqual(expr.count(sympy.core.mul.Mul), 1)
+        self.assertEqual(expr.count(sympy.Rational), 1)
+
+        rewritten = self._check(expr)
+        self.assertTrue(isinstance(rewritten, FloorDiv))
+        self.assertEqual(rewritten.args, (x, 5))
+
+    def test_no_rewrite_div(self):
+        x, y = sympy.symbols("x y")
+        expr = x / y
+        self.assertEqual(expr.count(FloorDiv), 0)
+
+        rewritten = replace_floor_div(expr)
+        self.assertEqual(rewritten, expr)
+
+    def test_rewrite_floor_div_nested(self):
+        x, y = sympy.symbols("x y")
+        expr = sympy.floor((sympy.floor(x / 5) + 1) / y)
+        self.assertEqual(expr.count(FloorDiv), 0)
+
+        rewritten = self._check(expr)
+        self.assertEqual(rewritten.count(FloorDiv), 2)
+
+    def test_rewrite_floor_div_rational_const(self):
+        expr = sympy.floor(sympy.S.One / 5, evaluate=False)
+        self.assertEqual(expr.count(FloorDiv), 0)
+        self.assertEqual(expr.count(sympy.Mul), 0)
+        self.assertEqual(expr.count(sympy.Rational), 1)
+
+        # Expression evaluates to a compile time constant
+        rewritten = self._check(expr)
+        self.assertEqual(rewritten, sympy.S.Zero)
+
+    def test_no_distribute_mul_floordiv(self):
+        """
+        Test that multiplication doesn't distribute with floor division.
+        """
+        x = sympy.Symbol("x")
+        expr = 2 * sympy.floor(x / 2)
+        rewritten = self._check(expr)
+        self.assertEqual(rewritten.count(sympy.Mul), 1)
+        self.assertEqual(rewritten.count(FloorDiv), 1)
+
+    def test_rational_multi_pows(self):
+        """
+        Test an expression with a rational and multiple pows.
+        """
+        x, y, z = sympy.symbols("x y z")
+        expr = sympy.floor((x / 5) * (y**2) * (z**3))
+        mul = expr.args[0]
+        self.assertTrue(isinstance(mul, sympy.Mul))
+        self.assertTrue(isinstance(mul.args[0], sympy.Rational))
+        self.assertEqual(expr.count(sympy.Pow), 2)
+        rewritten = self._check(expr)
+        self.assertEqual(rewritten.count(FloorDiv), 1)
+
+    def test_variable_exp(self):
+        """
+        Test pow when the exponent is a variable.
+        """
+        x = sympy.Symbol("x", positive=True)
+        expr = sympy.floor(2**-x)
+        replaced = self._check(expr)
+
+        # Check that x went to the denominator.
+        self.assertEqual(replaced.args, (1, 2**x))
+
+    def test_launch_grid_dynamic_padding(self):
+        """
+        Test a complex launch grid expression arising from padding with dynamic shapes.
+        """
+        x, y = sympy.symbols("x y")
+        expr = sympy.floor(-FloorDiv(x * y, 2) / FloorDiv(-x * y, 131070))
+        self._check(expr)
 
 
 if __name__ == "__main__":

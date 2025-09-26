@@ -23,11 +23,7 @@ from torch._higher_order_ops.triton_kernel_wrap import (
 from torch._inductor.codecache import LambdaFuture, PyCodeCache
 from torch._inductor.runtime.triton_heuristics import CachingAutotuner
 from torch._inductor.select_algorithm import extern_kernels  # noqa: F401
-from torch._inductor.utils import (
-    convert_shape_to_symint,
-    convert_to_symint,
-    sympy_product,
-)
+from torch._inductor.utils import convert_shape_to_symint, convert_to_symint
 from torch._inductor.virtualized import V
 from torch._library.triton import wrap_triton
 from torch.fx import GraphModule
@@ -123,19 +119,16 @@ def replace_floor_div(expr: sympy.Expr) -> sympy.Expr:
         # Division is represented as a Mul with a Rational factor or a Pow with negative
         # exponent. We convert floor(Mul(...)) to FloorDiv(numerator, denominator) by
         # partitioning factors into the numerator and denominator.
-        if not isinstance(expr, sympy.core.mul.Mul):
-            return sympy.floor(expr)
-
         (numerator, denominator) = (sympy.S.One,) * 2
-        for arg in expr.args:
+        for arg in sympy.Mul.make_args(expr):
             if isinstance(arg, sympy.Rational):
                 numerator *= arg.numerator
                 denominator *= arg.denominator
             elif isinstance(arg, sympy.Pow):
-                if arg.exp > 0:
-                    numerator *= arg
-                else:
+                if arg.exp.is_negative:
                     denominator *= arg.base**-arg.exp
+                else:
+                    numerator *= arg
             else:
                 numerator *= arg
 
