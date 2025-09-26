@@ -219,7 +219,6 @@ class OverlapScheduler:
         self.potentially_hidden_collectives = (
             self.compute_potential_hidden_collectives()
         )
-        # print(self.potentially_hidden_collectives)
         self.potentially_hidden_waits = self.compute_potential_hidden_waits()
         self.in_degree = Counter(user for node in self.nodes for user in node.users)
         self.ready: list[tuple[object, fx.Node]] = []
@@ -313,9 +312,6 @@ class OverlapScheduler:
             if self._should_force_wait_for_memory():
                 self._force_oldest_wait()
                 continue
-
-            # if torch.distributed.distributed_c10d.get_rank() == 0:
-            #     print("queue", self.ready)
 
             _, node = heapq.heappop(self.ready)
 
