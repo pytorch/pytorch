@@ -417,7 +417,7 @@ struct ConvParams {
     // broken on cuDNN 9.8
     if (cudnn_version >= 90800) {
       if (cudnn_conv_suggest_memory_format(input, weight) == at::MemoryFormat::Contiguous &&
-          input.scalar_type() == at::kBFloat16 || input.scalar_type() == at::kHalf) {
+          (input.scalar_type() == at::kBFloat16 || input.scalar_type() == at::kHalf)) {
         for (int i = 2; i < weight.dim(); i++) {
           if (weight.size(i) != 1) {
             return false;
