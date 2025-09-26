@@ -1007,7 +1007,6 @@ def fullgraph_capture(
 
     with (
         compile_context(CompileContext(get_compile_id({}))),
-        CompileTimeInstructionCounter.record(),
     ):
         return _fullgraph_capture_frame(
             frame,

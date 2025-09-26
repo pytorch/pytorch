@@ -52,7 +52,8 @@ EXPORT_ROOT_REPLACEMENTS = [
     ("__export_root_", "_"),
     # when used as FQN name path
     ("._modules['_export_root']", ""),
-    ("._export_root.", "."),
+    ("_export_root.", ""),
+    ("._export_root", ""),
 ]
 
 
