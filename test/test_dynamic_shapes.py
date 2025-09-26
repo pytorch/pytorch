@@ -3889,6 +3889,20 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
         x = torch.rand(10)
         f(x, 4, 4096, 3920)
 
+    @skipIfTorchDynamo("not allowed to trace mark_unbacked")
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_unbacked_reshape3(self):
+        def func(x):
+            x = x.as_strided([x.size()[0], 1536], [2048, 1])
+            result1 = x.view(x.size()[0], -1, 128)
+            return result1 * 10
+
+        compiled = torch.compile(fullgraph=True, backend="inductor")(func)
+        x = torch.randn(10, 2048)
+
+        torch._dynamo.decorators.mark_unbacked(x, 0)
+        self.assertEqual(func(x), compiled(x))
+
 
 instantiate_parametrized_tests(TestUnbacked)
 
