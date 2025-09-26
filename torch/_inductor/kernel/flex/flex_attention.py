@@ -26,6 +26,7 @@ from .common import (
     create_indices_fake,
     create_num_blocks_fake_generator,
     create_placeholder,
+    freeze_irnodes,
     get_fwd_subgraph_outputs,
     infer_dense_strides,
     load_template,
@@ -149,6 +150,7 @@ def flex_attention(
     subgraph_buffer = build_subgraph_buffer(
         placeholder_inps + list(score_mod_other_buffers), subgraph
     )
+    freeze_irnodes(subgraph_buffer)
 
     mask_graph_placeholder_inps = [
         create_placeholder(name, dtype, query.get_device())
@@ -162,6 +164,7 @@ def flex_attention(
     mask_graph_buffer = build_subgraph_buffer(
         mask_graph_placeholder_inps + list(mask_mod_other_buffers), mask_graph
     )
+    freeze_irnodes(mask_graph_buffer)
 
     kernel_options = dict(kernel_options)
     # Mark symbols in custom kernel options as static shapes and add guards.
@@ -217,6 +220,9 @@ def flex_attention(
 
     score_mod_other_buffers = maybe_realize(score_mod_other_buffers)
     mask_mod_other_buffers = maybe_realize(mask_mod_other_buffers)
+
+    freeze_irnodes(score_mod_other_buffers)
+    freeze_irnodes(mask_mod_other_buffers)
 
     Bq, Hq, seq_len_q, qk_head_dim = query.get_size()
     Bkv, Hkv, seq_len_kv, v_head_dim = value.get_size()
@@ -625,6 +631,7 @@ def flex_attention_backward(*args, **kwargs):
     fw_subgraph_buffer = build_subgraph_buffer(
         fwd_placeholder_inps + list(score_mod_other_buffers), fw_graph
     )
+    freeze_irnodes(fw_subgraph_buffer)
 
     joint_placeholder_inps = fwd_placeholder_inps + [
         create_placeholder("grad_score_mod", dtype, device)
@@ -640,6 +647,7 @@ def flex_attention_backward(*args, **kwargs):
         joint_placeholder_inps + list(score_mod_other_buffers),
         joint_graph,
     )
+    freeze_irnodes(all_joint_outputs)
 
     joint_outputs = process_joint_outputs(
         all_joint_outputs, len(joint_placeholder_inps)
@@ -657,8 +665,7 @@ def flex_attention_backward(*args, **kwargs):
     mask_graph_buffer = build_subgraph_buffer(
         mask_graph_placeholder_inps + list(mask_mod_other_buffers), mask_graph
     )
-
-    mask_graph_buffer = mask_graph_buffer
+    freeze_irnodes(mask_graph_buffer)
 
     # Construct layout with stride order matching K
     key_size = [Bq, Hkv, seq_len_kv, qk_head_dim]
