@@ -2447,7 +2447,13 @@ class OutputGraph(OutputGraphCommon):
                     arg = node.meta["grapharg"]
                     if isinstance(arg, BackwardStateGraphArg):
                         continue
+
                     if isinstance(node.meta["grapharg"].example, torch.ScriptObject):
+                        from torch._library.opaque_object import OpaqueTypeStr
+
+                        if str(node.meta["grapharg"].example._type()) == OpaqueTypeStr:
+                            continue
+
                         real_script_obj = node.meta["grapharg"].example
                         fake_script_obj = node.meta["grapharg"].example_strong_ref
                         if not torch._library.fake_class_registry.tracing_with_real(
