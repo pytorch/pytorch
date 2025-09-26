@@ -13,11 +13,10 @@ from torchfuzz.tensor_fuzzer import ScalarSpec, Spec, TensorSpec
 class FuzzTemplate:
     def __init__(self, supported_ops, check):
         self.supported_ops = supported_ops
-        self.check = check  # Single Check instance
+        self.check = check
 
     def supported_dtypes(self):
         """Return list of supported dtypes for this template."""
-        # Default: support all dtypes
         return [
             torch.float32,
             torch.float64,
@@ -247,6 +246,7 @@ class UnbackedFuzzTemplate(FuzzTemplate):
                 "torch.add",
                 "torch.sub",
                 "torch.mul",
+                "torch.div",
             ],
             check=EagerVsFullGraphDynamicCompileCheck(),
         )
@@ -466,20 +466,7 @@ def convert_graph_to_python_code(
                 "",
             ]
         )
-    elif template == "unbacked":
-        # For unbacked template, use passed-in sentinel
-        code_lines.extend(
-            [
-                "    # Ensure gradient computation by multiplying with sentinel",
-                f"    result = {final_var_name} * sentinel",
-                "    if result.is_complex():",
-                "        result = result.real",
-                "    return result",
-                "",
-            ]
-        )
     else:
-        # For default template, use passed-in sentinel
         code_lines.extend(
             [
                 "    # Ensure gradient computation by multiplying with sentinel and taking real part",

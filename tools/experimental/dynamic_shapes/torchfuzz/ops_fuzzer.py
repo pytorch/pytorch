@@ -62,35 +62,24 @@ def _get_template_filtered_operators(template: str = "default"):
         if any(op_name.startswith(core) for core in core_ops):
             # Set template on operators that support it
             if hasattr(operator, "set_template"):
-                operator.set_template(template)
+                operator.set_template(template)  # type: ignore[attr-defined]
             filtered_ops[op_name] = operator
             continue
 
         # Check if the operator supports any of the template's operations
         should_include = False
         for supported_op in fuzz_template.supported_ops:
-            # Handle tensor_pointwise and scalar_pointwise operators
-            if hasattr(operator, "operations"):
-                # For pointwise operators, check if any of their operations match
-                try:
-                    operations = getattr(operator, "operations", {})
-                    if hasattr(operations, "keys"):
-                        for op_key in operations.keys():
-                            torch_op = operations[op_key].get("torch_op", "")
-                            # Match torch.add with torch.ops.aten.add
-                            if (
-                                supported_op.replace("torch.", "torch.ops.aten.")
-                                in torch_op
-                            ):
-                                should_include = True
-                                break
-                            # Also match direct names like "add" with "torch.add"
-                            if supported_op.endswith(f".{op_key}"):
-                                should_include = True
-                                break
-                except (AttributeError, TypeError):
-                    # If operator.operations doesn't work as expected, skip
-                    pass
+            # Handle individual pointwise operators (AddOperator, MulOperator, etc.)
+            if hasattr(operator, "torch_op"):
+                torch_op = getattr(operator, "torch_op", "")
+                # Match torch.add with torch.ops.aten.add
+                if supported_op.replace("torch.", "torch.ops.aten.") in torch_op:
+                    should_include = True
+                    break
+                # Match direct names like "add" with "torch.add"
+                if supported_op.endswith(f".{op_name}"):
+                    should_include = True
+                    break
 
             # Direct name matching as fallback
             if supported_op in op_name or op_name in supported_op:
@@ -100,7 +89,7 @@ def _get_template_filtered_operators(template: str = "default"):
         if should_include:
             # Set template on operators that support it
             if hasattr(operator, "set_template"):
-                operator.set_template(template)
+                operator.set_template(template)  # type: ignore[attr-defined]
             filtered_ops[op_name] = operator
 
     return filtered_ops

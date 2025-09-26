@@ -7,11 +7,11 @@ from torchfuzz.tensor_fuzzer import ScalarSpec, Spec
 
 
 class ScalarPointwiseOperator(Operator):
-    """Operator for pointwise operations on scalars (add, mul, sub, div)."""
+    """Base class for scalar pointwise operations."""
 
-    def __init__(self):
-        super().__init__("scalar_pointwise")
-        self.operations = ["+", "*", "-", "/"]
+    def __init__(self, name: str, symbol: str):
+        super().__init__(name)
+        self.symbol = symbol
 
     def can_produce(self, output_spec: Spec) -> bool:
         """Scalar pointwise operations can only produce scalars."""
@@ -21,7 +21,7 @@ class ScalarPointwiseOperator(Operator):
         """Decompose scalar into input scalars for pointwise operation with type promotion."""
         if not isinstance(output_spec, ScalarSpec):
             raise ValueError(
-                "ScalarPointwiseOperator can only produce ScalarSpec outputs"
+                f"{self.__class__.__name__} can only produce ScalarSpec outputs"
             )
 
         # Use shared type promotion utility
@@ -37,8 +37,34 @@ class ScalarPointwiseOperator(Operator):
     ) -> str:
         """Generate code for scalar pointwise operation."""
         if len(input_names) != 2:
-            raise ValueError("ScalarPointwiseOperator requires exactly two inputs")
+            raise ValueError(f"{self.__class__.__name__} requires exactly two inputs")
 
-        # Randomly choose an operation
-        op = random.choice(self.operations)
-        return f"{output_name} = {input_names[0]} {op} {input_names[1]}"
+        return f"{output_name} = {input_names[0]} {self.symbol} {input_names[1]}"
+
+
+class ScalarAddOperator(ScalarPointwiseOperator):
+    """Operator for scalar addition."""
+
+    def __init__(self):
+        super().__init__("scalar_add", "+")
+
+
+class ScalarMulOperator(ScalarPointwiseOperator):
+    """Operator for scalar multiplication."""
+
+    def __init__(self):
+        super().__init__("scalar_mul", "*")
+
+
+class ScalarSubOperator(ScalarPointwiseOperator):
+    """Operator for scalar subtraction."""
+
+    def __init__(self):
+        super().__init__("scalar_sub", "-")
+
+
+class ScalarDivOperator(ScalarPointwiseOperator):
+    """Operator for scalar division."""
+
+    def __init__(self):
+        super().__init__("scalar_div", "/")
