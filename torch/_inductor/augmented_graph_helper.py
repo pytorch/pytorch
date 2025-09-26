@@ -1,4 +1,4 @@
-from collections import defaultdict, deque
+from collections import defaultdict
 
 import torch
 import torch.fx as fx
@@ -22,13 +22,9 @@ class AugmentedGraphHelper:
         # Extra dependencies: node depends on dep (dep must come before node)
         self.extra_deps: dict[fx.Node, OrderedSet[fx.Node]] = defaultdict(OrderedSet)
 
-        # Extra uses: node is used by use (use must come after node)
-        self.extra_uses: dict[fx.Node, OrderedSet[fx.Node]] = defaultdict(OrderedSet)
-
-    def add_extra_dep(self, node: fx.Node, dep: fx.Node) -> None:
+    def add_extra_dep(self, *, n: fx.Node, dep: fx.Node) -> None:
         """Add extra dependency: node depends on dep."""
-        self.extra_deps[node].add(dep)
-        self.extra_uses[dep].add(node)
+        self.extra_deps[n].add(dep)
 
     def merge_to_set(self, existing_node: fx.Node, new_node: fx.Node) -> None:
         """
@@ -87,40 +83,22 @@ class AugmentedGraphHelper:
 
         return deps
 
-    def has_cycle(self):
+    def has_cycle(self) -> bool:
         merged_deps = {n: self.get_merged_deps(n) for n in self.graph.nodes}
         return torch._dynamo.graph_deduplication._has_cycle(self.graph, merged_deps)
-
-    def get_merged_uses(self, node: fx.Node) -> OrderedSet[fx.Node]:
-        """
-        Get all uses of a node considering merges and extra uses.
-        Combines:
-        1. Direct uses (users) of node and its merge equivalents
-        2. Extra uses of node and its merge equivalents
-        """
-        uses: OrderedSet[fx.Node] = OrderedSet()
-
-        # For each node in the merge set
-        for merged_node in self.merge_sets[node]:
-            # Add direct uses from users
-            uses.update(merged_node.users)
-            # Add extra uses
-            uses.update(self.extra_uses[merged_node])
-
-        return uses
 
     def has_path(self, source: fx.Node, target: fx.Node) -> bool:
         """Check if there's a path from source to target."""
         # we should not be checking path from node to itself
         assert self.merge_sets[source] is not self.merge_sets[target]
 
-        # BFS backwards from target to source
-        visited = OrderedSet()
-        queue = deque([target])
+        # search backwards from target to source
+        visited: OrderedSet[fx.Node] = OrderedSet()
+        queue = [target]
         visited.add(target)
 
         while queue:
-            current = queue.popleft()
+            current = queue.pop()
 
             # Get all dependencies
             for dep in self.get_merged_deps(current):
@@ -131,30 +109,5 @@ class AugmentedGraphHelper:
                 if dep not in visited:
                     visited.add(dep)
                     queue.append(dep)
-
-        return False
-
-    def has_path_forward(self, source: fx.Node, target: fx.Node) -> bool:
-        """Check if there's a forward path from source to target using uses."""
-        # we should not be checking path from node to itself
-        assert self.merge_sets[source] is not self.merge_sets[target]
-
-        # BFS forward from source to target
-        visited = OrderedSet()
-        queue = deque([source])
-        visited.add(source)
-
-        while queue:
-            current = queue.popleft()
-
-            # Get all uses
-            for use in self.get_merged_uses(current):
-                # Check if we reached target or its equivalent
-                if use in self.merge_sets[target]:
-                    return True
-
-                if use not in visited:
-                    visited.add(use)
-                    queue.append(use)
 
         return False
