@@ -133,6 +133,12 @@ def get_reruns(grouped_tests: list[list[dict[str, Any]]]) -> dict[str, Any]:
             file = tests[0].get("file", "NoFile")
             class_name = tests[0].get("classname", "NoClass")
             test_name = tests[0].get("name", "NoName")
+            if file in (
+                "distributed/test_distributed_spawn.py",
+                "onnx/test_fx_to_onnx_with_onnxruntime.py",
+                "distributed/algorithms/quantization/test_quantization.py",
+            ):
+                continue
             reruns[build_name][test_config][file][class_name][test_name] = tests
 
     return reruns
