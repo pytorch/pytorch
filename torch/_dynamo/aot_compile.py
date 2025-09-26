@@ -321,7 +321,8 @@ def aot_compile_fullgraph(
                 # TODO: take these fw/bwmodules and compile them with fancy eager mode
                 # then put them together with AOTDispatchAutograd.post_compile, allowing it
                 # to be serialized.
-
+                #compiled_fw = fancy_eager(fw_module, example_inputs)
+                #compiled_bw = fancy_eager(bw_module, example_inputs)
 
 
                 # For now, create a placeholder SerializableCallable (will be implemented later)
