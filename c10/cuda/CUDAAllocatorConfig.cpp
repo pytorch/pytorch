@@ -13,6 +13,7 @@ constexpr size_t kRoundUpPowerOfTwoIntervals = 16;
 CUDAAllocatorConfig::CUDAAllocatorConfig()
     : m_max_split_size(std::numeric_limits<size_t>::max()),
       m_max_non_split_rounding_size(kLargeBuffer),
+      m_per_process_memory_fraction(1.0),
       m_garbage_collection_threshold(0),
       m_pinned_num_register_threads(1),
       m_expandable_segments(false),
@@ -119,6 +120,23 @@ size_t CUDAAllocatorConfig::parseMaxNonSplitRoundingSize(
     m_max_non_split_rounding_size = val1 * 1024 * 1024;
   } else {
     TORCH_CHECK(false, "Error, expecting max_non_split_rounding_mb value", "");
+  }
+  return i;
+}
+
+size_t CUDAAllocatorConfig::parsePerProcessMemoryFraction(
+    const std::vector<std::string>& config,
+    size_t i) {
+  consumeToken(config, ++i, ':');
+  if (++i < config.size()) {
+    double fraction = stod(config[i]);
+    TORCH_CHECK_VALUE(
+        fraction >= 0.0 && fraction <= 1.0,
+        "per_process_memory_fraction is invalid, set it in (0.0, 1.0)");
+    m_per_process_memory_fraction = fraction;
+  } else {
+    TORCH_CHECK(
+        false, "Error, expecting per_process_memory_fraction value", "");
   }
   return i;
 }
@@ -322,6 +340,9 @@ void CUDAAllocatorConfig::parseArgs(const std::optional<std::string>& env) {
       used_native_specific_option = true;
     } else if (config_item_view == "max_non_split_rounding_mb") {
       i = parseMaxNonSplitRoundingSize(config, i);
+      used_native_specific_option = true;
+    } else if (config_item_view == "per_process_memory_fraction") {
+      i = parsePerProcessMemoryFraction(config, i);
       used_native_specific_option = true;
     } else if (config_item_view == "garbage_collection_threshold") {
       i = parseGarbageCollectionThreshold(config, i);
