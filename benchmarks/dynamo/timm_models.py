@@ -451,12 +451,9 @@ class TimmRunner(BenchmarkRunner):
 
 
 def timm_main():
-    # Turn on capture_scalar_outputs for timm models by default.
-    # see https://github.com/pytorch/pytorch/pull/163807
-    with torch._dynamo.config.patch("capture_scalar_outputs", True):
-        logging.basicConfig(level=logging.WARNING)
-        warnings.filterwarnings("ignore")
-        main(TimmRunner())
+    logging.basicConfig(level=logging.WARNING)
+    warnings.filterwarnings("ignore")
+    main(TimmRunner())
 
 
 if __name__ == "__main__":
