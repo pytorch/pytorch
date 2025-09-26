@@ -416,9 +416,10 @@ struct ConvParams {
     static long cudnn_version = detail::getCUDAHooks().versionCuDNN();
     // broken on cuDNN 9.8
     if (cudnn_version >= 90800) {
-      if (input.scalar_type() == at::kBFloat16 || input.scalar_type() == at::kHalf) {
-        for (auto val : weight.sizes()) {
-          if (val != 1) {
+      if (cudnn_conv_suggest_memory_format(input, weight) == at::MemoryFormat::Contiguous &&
+          input.scalar_type() == at::kBFloat16 || input.scalar_type() == at::kHalf) {
+        for (int i = 2; i < weight.dim(); i++) {
+          if (weight.size(i) != 1) {
             return false;
           }
         }
