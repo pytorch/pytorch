@@ -277,7 +277,7 @@ cuda::blas::GEMMAndBiasActivationEpilogue activation_to_gemm_and_blas_arg(Activa
 static bool isGloballyDisabledAddmmCudaLt(const at::Device& device) {
   // When hipBLASLt is not supported on the architecture, return false
   #ifdef USE_ROCM
-  static const std::array<std::string> archs = {
+  static const std::vector<std::string> archs = {
         "gfx90a", "gfx942",
     #if ROCM_VERSION >= 60300
         "gfx1100", "gfx1101", "gfx1200", "gfx1201", "gfx908",
