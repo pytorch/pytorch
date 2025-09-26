@@ -16,7 +16,6 @@ from torch.distributed.tensor import (
 )
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
-    loss_parallel,
     parallelize_module,
     PrepareModuleInput,
     PrepareModuleOutput,
@@ -31,12 +30,10 @@ from torch.utils.debug_mode import DebugMode
 
 
 from torch.distributed.device_mesh import DeviceMesh
-from torch.distributed.tensor._dtensor_spec import DTensorSpec
 import torch.export._trace
 
 
-torch.utils._pytree.register_constant(DTensorSpec)
-torch.utils._pytree.register_constant(DeviceMesh)
+# torch.utils._pytree.register_constant(DeviceMesh)
 
 
 class Block(torch.nn.Module):
@@ -154,8 +151,7 @@ class DTensorExportTest(DTensorTestBase):
         with DebugMode(record_torchfunction=False) as debug_mode:
             out = tp_model(x)
 
-        # ep = torch.export.export(tp_model, (x,), strict=True)
-        # ep = torch.export._trace._export(tp_model, (x,), strict=True, pre_dispatch=True)
+        ep = torch.export.export(tp_model, (x,), strict=True)
         
         # if self.rank == 0:
         #     print(debug_mode.debug_string())
