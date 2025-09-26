@@ -1260,6 +1260,7 @@ exclude_patterns = [
     'test/test_masked.py',
     'test/test_maskedtensor.py',
     'test/test_matmul_cuda.py',
+    'test/test_scaled_matmul_cuda.py',
     'test/test_meta.py',
     'test/test_metal.py',
     'test/test_mkl_verbose.py',
