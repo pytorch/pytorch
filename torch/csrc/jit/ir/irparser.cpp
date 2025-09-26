@@ -185,6 +185,12 @@ ParsedLiteral IRParser::parseScalarLiteral(Node* n) {
     case '-':
       str = "-";
       L.next();
+      if (L.cur().kind == TK_IDENT && L.cur().text() == "inf") {
+        r.k = AttributeKind::f;
+        r.f = -std::numeric_limits<double>::infinity();
+        L.next();
+        return r;
+      }
       if (L.cur().kind != TK_NUMBER) {
         throw(
             ErrorReport(token.range)
