@@ -40,12 +40,6 @@ logger = logging.getLogger("torch.distributed.fsdp.fully_shard")
 _ModuleToHandleDict = dict[nn.Module, RemovableHandle]  # for state dict
 
 
-def is_in_ac() -> bool:
-    import inspect
-
-    return any(frame.function == "recompute_fn" for frame in inspect.stack())
-
-
 """
 [Note: Overlapping all-gather copy-in and all-gather]
 For implicit forward prefetching, we want to overlap the next copy-in with the
@@ -452,7 +446,7 @@ class FSDPParamGroup:
         with record_function(self._with_fqn("FSDP::post_forward")):
             # for AC(fully_shard(model)), AC runs fsdp's _pre_forward
             # it shouldn't change post_forward_order
-            if not is_in_ac():
+            if self not in self.comm_ctx.post_forward_order:
                 self.reshard()
                 self._record_post_forward()
             self._training_state = TrainingState.IDLE
