@@ -249,7 +249,7 @@ class MPSBasicTestsAOTI(TestCase):
         ep = torch.export.export(model, example_inputs)
         package_path = torch._export.aot_compile(ep.module(), example_inputs)
 
-        target_str = 'aoti_torch_mps_get_kernel_function'
+        target_str = "aoti_torch_mps_get_kernel_function("
         target_count = 1
 
         with open(os.path.splitext(package_path)[0] + ".cpp") as cpp:

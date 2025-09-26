@@ -2773,7 +2773,7 @@ class AOTInductorTestsTemplate:
 
         if self.device == "mps":
             self.code_check_count(
-                model, example_inputs, 'aoti_torch_mps_get_kernel_function', 1
+                model, example_inputs, "aoti_torch_mps_get_kernel_function(", 1
             )
         elif self.device == GPU_TYPE:
             self.code_check_count(
