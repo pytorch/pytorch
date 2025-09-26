@@ -201,6 +201,26 @@ class FakeTensorTest(TestCase):
 
         self.assertEqual(torch.ones([10]), out[0])
 
+    def test_conv_nhwc(self):
+        x = torch.randn([1, 1024, 16, 16]).to(memory_format=torch.channels_last)
+        w = torch.randn([256, 1024, 4, 4]).to(memory_format=torch.channels_last)
+        b = torch.randn([256])
+
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, x, w, b):
+                return torch.ops.aten.convolution(
+                    x, w, b, [1, 1], [0, 0], [1, 1], False, [0, 0], 1
+                )
+
+        model = Model()
+        with FakeTensorMode(allow_non_fake_inputs=True) as mode:
+            fake_out = model.forward(x, w, b)
+        eager_out = model.forward(x, w, b)
+        self.assertEqual(fake_out.stride(), eager_out.stride())
+
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_zero_dim(self):
         with FakeTensorMode() as mode:
@@ -214,7 +234,7 @@ class FakeTensorTest(TestCase):
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_op_with_zero_dim_bypassed(self):
         if torch._functorch.config.fake_tensor_propagate_real_tensors:
-            return
+            self.skipTest("Propagate real tensor not supported")
         shape_env = ShapeEnv()
         mode = FakeTensorMode(shape_env=shape_env)
         x = torch.tensor(1.0, device="cuda")
@@ -1516,7 +1536,7 @@ class FakeTensorOperatorInvariants(TestCase):
         # Skip this test, we will try to run CUDA operations to real prop so
         # it clearly will not work on CPU runner
         if torch._functorch.config.fake_tensor_propagate_real_tensors:
-            return
+            self.skipTest("Propagate real tensor not supported")
 
         with FakeTensorMode(allow_non_fake_inputs=True):
             self.assertEqual(torch.empty(10, device=GPU_TYPE).device.type, GPU_TYPE)
@@ -1528,13 +1548,46 @@ class FakeTensorOperatorInvariants(TestCase):
                 torch.tensor([[3.14, 2], [1, 2]], device=GPU_TYPE).device.type, GPU_TYPE
             )
 
+    @unittest.skipIf(not torch.backends.cuda.is_built(), "requires CUDA build")
+    def test_move_module_under_fake(self):
+        if torch._functorch.config.fake_tensor_propagate_real_tensors:
+            self.skipTest("Propagate real tensor not supported")
+
+        class Module(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(2, 2)
+                self.buffer = torch.nn.Buffer(torch.rand(2, 2))
+                self.param = torch.nn.Parameter(torch.rand(2, 2))
+
+            def forward(self, x):
+                return self.linear(x) + self.buffer + self.param
+
+        m = Module()
+        input = torch.rand(2, 2)
+        gpu_device = torch.device(GPU_TYPE, 0)
+
+        with FakeTensorMode(allow_non_fake_inputs=True):
+            m.to(device=gpu_device)
+            arg = input.to(device=gpu_device)
+            out = m(arg)
+
+        for p in m.parameters():
+            self.assertTrue(isinstance(p, FakeTensor))
+            self.assertEqual(p.device, gpu_device)
+        for b in m.buffers():
+            self.assertTrue(isinstance(b, FakeTensor))
+            self.assertEqual(b.device, gpu_device)
+
+        self.assertTrue(isinstance(out, FakeTensor))
+        self.assertEqual(out.device, gpu_device)
+
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_move_meta_tensor(self):
         if torch._functorch.config.fake_tensor_propagate_real_tensors:
-            return
+            self.skipTest("Propagate real tensor not supported")
 
         meta_tensor = torch.ones(2, device="meta")
-        gpu_device = torch.device(GPU_TYPE)
         with FakeTensorMode(allow_non_fake_inputs=True):
             self.assertEqual(meta_tensor.to(device="cpu").device.type, "cpu")
             self.assertEqual(meta_tensor.to(device=GPU_TYPE).device.type, GPU_TYPE)
