@@ -3149,7 +3149,6 @@ def forward(self, x):
             gm, _ = torch._dynamo.export(f, aten_graph=True)(*example_inputs)
             self.assertEqual(gm(*example_inputs), f(*example_inputs))
 
-    @unittest.expectedFailure  # TODO: Not sure why dynamo creates a new inputs for self.a
     def test_sum_param(self):
         # Setting a new attribute inside forward()
         class Foo(torch.nn.Module):
