@@ -1127,6 +1127,10 @@ class GraphPatternEntry(PatternEntry):
 
 @dataclasses.dataclass
 class ReplacementPatternEntry(PatternEntry):
+    """
+    The replacement pattern for the graph
+    """
+
     normalize_args: Callable[..., list[Any]]
 
     @staticmethod
@@ -1136,6 +1140,12 @@ class ReplacementPatternEntry(PatternEntry):
         replacement_graph: Union[torch.fx.Graph, torch.fx.GraphModule],
         args: Sequence[torch.fx.Node],
     ) -> None:
+        """
+        Inserts the replacement graph into the toplevel graph at the match
+        """
+
+        added_replacement_nodes: list[torch.fx.Node] = []
+
         class Replacer(torch.fx.Interpreter):
             call_method = None  # type: ignore[assignment]
             call_module = None  # type: ignore[assignment]
@@ -1149,6 +1159,7 @@ class ReplacementPatternEntry(PatternEntry):
                 if node.op == "call_function":
                     assert callable(target)
                     result = graph.call_function(target, args, kwargs)
+                    added_replacement_nodes.append(result)
                     _transfer_meta(
                         new_meta=result.meta,
                         old_node=node,
@@ -1189,7 +1200,9 @@ class ReplacementPatternEntry(PatternEntry):
                             graph.owning_module, target
                         )
                         graph.owning_module.register_module(graph_name, sub_gm)
-                    return graph.get_attr(graph_name)
+                    getattr_node = graph.get_attr(graph_name)
+                    added_replacement_nodes.append(getattr_node)
+                    return getattr_node
 
                 raise NotImplementedError(f"unhandled {node}")
 
@@ -1245,13 +1258,22 @@ class ReplacementPatternEntry(PatternEntry):
                 old: Union[torch.fx.Node, None],
                 new: Union[torch.fx.Node, Sequence[torch.fx.Node], None],
             ) -> None:
+                def filter_nodes_in_newly_added_nodes(node: torch.fx.Node) -> bool:
+                    # Do not replace the use of a node if it is being used by
+                    # nodes in the replaced graph
+                    return node not in added_replacement_nodes
+
                 if old is None:
                     assert new is None
                     return
                 assert isinstance(old, torch.fx.Node)
                 if new is None:
-                    old.replace_all_uses_with(None)  # type: ignore[arg-type]
-                    graph.erase_node(old)
+                    old.replace_all_uses_with(
+                        None,  # type: ignore[arg-type]
+                        delete_user_cb=filter_nodes_in_newly_added_nodes,
+                    )
+                    if len(old.users) == 0:
+                        graph.erase_node(old)
                     return
                 if isinstance(new, torch.fx.Node):
                     if "val" not in new.meta:
@@ -1271,8 +1293,11 @@ class ReplacementPatternEntry(PatternEntry):
                                 new, tag_name, old.meta[tag_name], OrderedSet(args)
                             )
 
-                    old.replace_all_uses_with(new)
-                    graph.erase_node(old)
+                    old.replace_all_uses_with(
+                        new, delete_user_cb=filter_nodes_in_newly_added_nodes
+                    )
+                    if len(old.users) == 0:
+                        graph.erase_node(old)
                     return
 
                 # `new` is not a node: it's a list of nodes.
