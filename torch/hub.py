@@ -421,6 +421,7 @@ def set_dir(d: Union[str, os.PathLike]) -> None:
         d (str): path to a local folder to save downloaded models & weights.
     """
     global _hub_dir
+    # pyrefly: ignore  # no-matching-overload
     _hub_dir = os.path.expanduser(d)
 
 

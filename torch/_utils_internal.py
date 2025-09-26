@@ -83,6 +83,7 @@ def compile_time_strobelight_meta(
     ) -> Callable[_P, _T]:
         @functools.wraps(function)
         def wrapper_function(*args: _P.args, **kwargs: _P.kwargs) -> _T:
+            # pyrefly: ignore  # unsupported-operation
             if "skip" in kwargs and isinstance(skip := kwargs["skip"], int):
                 kwargs["skip"] = skip + 1
 
@@ -326,6 +327,7 @@ def deprecated():
 
         # public deprecated alias
         alias = typing_extensions.deprecated(
+            # pyrefly: ignore  # bad-argument-type
             warning_msg, category=UserWarning, stacklevel=1
         )(func)
 

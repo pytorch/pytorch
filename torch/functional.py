@@ -1784,6 +1784,7 @@ def norm(  # noqa: F811
 
         if isinstance(p, str):
             if p == "fro" and (
+                # pyrefly: ignore  # bad-argument-type
                 dim is None or isinstance(dim, (int, torch.SymInt)) or len(dim) <= 2
             ):
                 if out is None:
@@ -1950,6 +1951,7 @@ def _unravel_index(indices: Tensor, shape: Union[int, Sequence[int]]) -> Tensor:
     )
 
     if isinstance(shape, (int, torch.SymInt)):
+        # pyrefly: ignore  # bad-argument-type
         shape = torch.Size([shape])
     else:
         for dim in shape:

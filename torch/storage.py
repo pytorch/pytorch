@@ -618,6 +618,7 @@ def _get_storage_from_sequence(sequence, dtype, device):
 
 def _isint(x):
     if HAS_NUMPY:
+        # pyrefly: ignore  # missing-attribute
         return isinstance(x, (int, np.integer))
     else:
         return isinstance(x, int)
