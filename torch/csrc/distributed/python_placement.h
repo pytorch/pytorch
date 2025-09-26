@@ -1,6 +1,6 @@
 #pragma once
 
-#include <Python.h>
+#include <torch/csrc/utils/python_stub.h>
 
 namespace torch::distributed {
 void initPlacementBindings(PyObject* module);
