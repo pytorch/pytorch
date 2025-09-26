@@ -2556,7 +2556,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             final_shape = stringify_shape(indexing.final_shape)
             forward_shape = stringify_shape(value.shape)
             reverse_shape = stringify_shape(value.shape[::-1])
-            # Don't attempt to transpose for 1D shapes.
             if final_shape != forward_shape:
                 if final_shape == reverse_shape:
                     value = f"tl.trans({value})"
