@@ -59,28 +59,10 @@ def fuzz_torch_tensor_type(template: str = "default") -> torch.dtype:
         fuzz_template = UnbackedFuzzTemplate()
         tensor_dtypes = fuzz_template.supported_dtypes()
     else:
-        # Default behavior - all types
-        tensor_dtypes: list[torch.dtype] = [
-            torch.float32,
-            torch.float64,
-            torch.float16,
-            torch.bfloat16,
-            torch.int8,
-            torch.int16,
-            torch.int32,
-            torch.int64,
-            torch.bool,
-            torch.complex64,
-            torch.complex128,
-        ]
+        from torchfuzz.codegen import DefaultFuzzTemplate
 
-        # Legacy: Filter out complex dtypes if avoid_complex is enabled
-        if FuzzerConfig.avoid_complex:
-            tensor_dtypes = [
-                dtype
-                for dtype in tensor_dtypes
-                if dtype not in [torch.complex64, torch.complex128]
-            ]
+        fuzz_template = DefaultFuzzTemplate()
+        tensor_dtypes = fuzz_template.supported_dtypes()
 
     # Randomly select and return a data type
     return random.choice(tensor_dtypes)

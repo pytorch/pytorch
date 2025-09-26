@@ -27,24 +27,21 @@ class FuzzTemplate:
             torch.int32,
             torch.int64,
             torch.bool,
-            torch.complex64,
-            torch.complex128,
         ]
 
 
 class DefaultFuzzTemplate(FuzzTemplate):
-    def __init__(self, supported_ops, check):
+    def __init__(self):
         from torchfuzz.checks import EagerVsFullGraphDynamicCompileCheck
 
         super().__init__(
-            supported_ops=supported_ops
-            or [
+            supported_ops=[
                 "torch.add",
                 "torch.sub",
                 "torch.mul",
                 "torch.div",
             ],
-            check=check or EagerVsFullGraphDynamicCompileCheck(),
+            check=EagerVsFullGraphDynamicCompileCheck(),
         )
 
     def imports_codegen(self):
@@ -354,7 +351,7 @@ def convert_graph_to_python_code(
     elif template == "unbacked":
         fuzz_template = UnbackedFuzzTemplate()
     else:
-        fuzz_template = DefaultFuzzTemplate(None, None)
+        fuzz_template = DefaultFuzzTemplate()
 
     # Set seed for reproducible code generation
     if seed is not None:

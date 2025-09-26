@@ -44,7 +44,7 @@ def _get_template_filtered_operators(template: str = "default"):
     else:
         from torchfuzz.codegen import DefaultFuzzTemplate
 
-        fuzz_template = DefaultFuzzTemplate(None, None)
+        fuzz_template = DefaultFuzzTemplate()
 
     all_operators = _get_cached_operators()
 
