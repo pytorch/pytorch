@@ -48,7 +48,6 @@ class OverlapPreservingBucketer:
     def bucket_collectives(self) -> None:
         """Main entry point for bucketing collectives."""
 
-        # Initialize the augmented graph helper
         aug_graph = AugmentedGraphHelper(self.graph)
 
         # Add extra dependencies for hidden collectives
@@ -67,7 +66,6 @@ class OverlapPreservingBucketer:
             if key is not None:
                 grouped_collectives[key].add(start)
 
-        # Find buckets for each group
         all_buckets: list[CollBucket] = []
         for collective_group in grouped_collectives.values():
             buckets = self._find_buckets(collective_group, aug_graph)
@@ -97,7 +95,7 @@ class OverlapPreservingBucketer:
     ) -> list[CollBucket]:
         """Find valid buckets within a group of similar collectives."""
 
-        max_bucket_bytes = int(self.max_bucket_memory_gb * 1e9)
+        max_bucket_bytes = int(self.max_bucket_memory_gb * 1024 * 1024 * 1024)
         buckets = []
         processed: OrderedSet[fx.Node] = OrderedSet()
 
@@ -152,11 +150,9 @@ class OverlapPreservingBucketer:
         # This will not be fully up to date because bucketing changes ancestors,
         # however any ancestor at the start of bucketing will remain an ancestor.
         for coll in bucket_info.collectives:
-            # Check if there's a dependency between the collectives
             if self._ancestor_dep(coll, candidate):
                 return False
 
-            # Check if there's a dependency between waits
             coll_wait = self.collective_info[coll].wait_node
             if self._ancestor_dep(candidate_wait, coll_wait):
                 return False
