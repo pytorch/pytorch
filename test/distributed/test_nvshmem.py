@@ -706,7 +706,7 @@ class DispatchCombineInSubgroups(MultiProcContinuousTest):
 
 @requires_nvshmem()
 @requires_cuda_p2p_access()
-class HierarchicalTest(MultiProcContinuousTest):
+class HierarchicalA2ATest(MultiProcContinuousTest):
     def _init_device(self) -> None:
         # TODO: relieve this (seems to hang if without)
         device_module.set_device(self.device)
@@ -732,7 +732,7 @@ class HierarchicalTest(MultiProcContinuousTest):
 
     def test_rail_dispatch(self) -> None:
         """
-        Test rail-wise dispatch
+        Test rail-wise dispatch, this is a 1D all-to-all-v over "network"
         """
         self._init_device()
         self.init_mesh()
@@ -778,6 +778,78 @@ class HierarchicalTest(MultiProcContinuousTest):
 
         torch.ops.symm_mem.all_to_all_vdev(
             inp, out, in_splits, out_splits_offsets, self.inter_group.group_name
+        )
+
+    def test_intranode_dispatch(self) -> None:
+        """
+        Test intra-node dispatch, this is a 2D all-to-all-v intra "node"
+        """
+        self._init_device()
+        self.init_mesh()
+        torch.manual_seed(42)
+        dtype = torch.float
+
+        ranks_per_node = self.intra_group.size()
+        ne = 4  # number of experts per rank
+        experts_per_node = ne * ranks_per_node
+
+        # within a node, send each token to topk_per_node experts
+        topk_per_node = 4
+
+        # Tokens received from the rail dispatch
+        rail_seqlen = 1024
+        hid_dim = 1024
+        inp = torch.randn((rail_seqlen, hid_dim), dtype=dtype, device=self.device)
+
+        # Range of my node's experts
+        node_id = self.inter_group.rank()
+        min_expert_id = node_id * experts_per_node
+        max_expert_id = (node_id + 1) * experts_per_node
+        # Create some synthetic token choices
+        topk_idx_intranode = torch.randint(
+            min_expert_id,
+            max_expert_id,
+            (rail_seqlen, topk_per_node),
+            dtype=torch.int64,
+            device=self.device,
+        )
+        # Convert indices to splits
+        splits = torch.histc(
+            topk_idx_intranode,
+            bins=experts_per_node,
+            min=min_expert_id,
+            max=max_expert_id,
+        )
+
+        # Token sequence is inflated topk_per_node times
+        sorted_indices = torch.argsort(topk_idx_intranode.view(-1))
+        expanded_inp = inp[sorted_indices // topk_per_node]
+        expanded_seqlen = rail_seqlen * topk_per_node
+
+        # SymmMem buffers
+        symm_inp = symm_mem.empty(
+            (expanded_seqlen, hid_dim), dtype=dtype, device=self.device
+        ).copy_(expanded_inp)
+        overflow_factor = ranks_per_node  # worst case: one rank receives all data
+        max_out_len = expanded_seqlen * overflow_factor
+        symm_out = symm_mem.empty(
+            (max_out_len, hid_dim), dtype=dtype, device=self.device
+        )
+        in_splits = symm_mem.empty(
+            experts_per_node, dtype=torch.int64, device=self.device
+        ).copy_(splits)
+        out_splits_offsets = symm_mem.empty(
+            (2, experts_per_node), dtype=torch.int64, device=self.device
+        )
+
+        # Intra-node dispatch
+        torch.ops.symm_mem.all_to_all_vdev_2d(
+            symm_inp,
+            symm_out,
+            in_splits,
+            out_splits_offsets,
+            self.intra_group.group_name,
+            major_align=8,
         )
 
 
