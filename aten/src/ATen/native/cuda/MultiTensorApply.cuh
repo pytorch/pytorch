@@ -10,6 +10,17 @@ namespace at::native {
 
 namespace {
 
+#ifdef USE_ROCM
+static constexpr int64_t kILP = 8;
+static constexpr int64_t kChunkSize = 131072;
+static constexpr int64_t kBlockSize = 1024;
+
+// TODO(crcrpar): Add `n>5` for `low prec params & their higher prec copy`
+// TensorListMetadata has to be < 4KB - the limit for kernel launch argument
+static constexpr int depth_to_max_tensors[5] = {4000, 4000, 4000, 36, 30};
+static constexpr int depth_to_max_blocks[5] = {4000, 4000, 4000, 320, 320};
+static constexpr int depth_to_max_tensors_scalarlist[5] = {4000, 4000, 4000, 36, 30};
+#else
 static constexpr int64_t kILP = 4;
 static constexpr int64_t kChunkSize = 65536;
 static constexpr int64_t kBlockSize = 512;
@@ -19,6 +30,7 @@ static constexpr int64_t kBlockSize = 512;
 static constexpr int depth_to_max_tensors[5] = {110, 64, 48, 36, 30};
 static constexpr int depth_to_max_blocks[5] = {320, 320, 320, 320, 320};
 static constexpr int depth_to_max_tensors_scalarlist[5] = {96, 64, 48, 36, 30};
+#endif
 static constexpr int depth_to_max_tensors_scalarlist_of_complex_double[2] = {
     72,
     60};
