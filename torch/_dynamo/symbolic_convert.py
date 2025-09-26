@@ -3692,6 +3692,24 @@ class InstructionTranslatorBase(
     def LOAD_SMALL_INT(self, inst: Instruction) -> None:
         self.push(ConstantVariable.create(inst.argval))
 
+    # See
+    # https://github.com/python/cpython/blob/7519ac294fc5c4fd7fb9cb8dc0edc960688cf887/Python/pylifecycle.c#L814
+    # for the common constants - make sure it matches for Python 3.14+.
+    # The common constants are all attributes of `builtins`.
+    _common_constants = (
+        "AssertionError",
+        "NotImplementedError",
+        "tuple",
+        "all",
+        "any",
+    )
+
+    def LOAD_COMMON_CONSTANT(self, inst: Instruction) -> None:
+        assert isinstance(inst.arg, int), (
+            "expected LOAD_COMMON_CONSTANT arg to be set to int"
+        )
+        self.push(self.load_builtin_from_argval(self._common_constants[inst.arg]))
+
     def is_non_empty_graph(self) -> bool:
         if self.output.count_calls() > 1:
             # perf optimization only
