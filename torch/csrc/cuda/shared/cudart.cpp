@@ -10,6 +10,11 @@
 #include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDAGuard.h>
 
+TORCH_MAKE_PYBIND_ENUM_FASTER(cudaError_t)
+#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION < 12000
+TORCH_MAKE_PYBIND_ENUM_FASTER(cudaOutputMode_t)
+#endif
+
 namespace torch::cuda::shared {
 
 #ifdef USE_ROCM
