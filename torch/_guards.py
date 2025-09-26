@@ -26,8 +26,7 @@ from typing import (
 )
 
 import torch
-from torch.utils import _pytree as pytree
-from torch.utils._backport_slots import dataclass_slots
+from torch.utils import _pytree as pytree 
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils._traceback import CapturedTraceback, format_frame
 from torch.utils.weak import WeakTensorKeyDictionary
@@ -242,8 +241,7 @@ class ShapeGuard(NamedTuple):
     size_oblivious: bool
 
 
-@dataclass_slots
-@dataclasses.dataclass
+@dataclasses.dataclass(slots=True)
 class Guard:
     # originating_source is the source that called the make_guard method to
     # construct this guard object. The property name specifies what exactly it
