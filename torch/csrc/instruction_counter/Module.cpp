@@ -1,3 +1,4 @@
+#include <c10/util/Exception.h>
 #include <c10/util/error.h>
 #include <torch/csrc/instruction_counter/Module.h>
 #include <torch/csrc/utils/pybind.h>
@@ -20,7 +21,7 @@ namespace torch::instruction_counter {
 
 static long start() {
 #if !defined(__linux__)
-  throw std::runtime_error("This systems seems not to be Linux");
+  TORCH_CHECK(false, "This systems seems not to be Linux");
 #else
 
   // Construct base perf_event_attr struct
@@ -51,7 +52,7 @@ static long start() {
 
 static uint64_t end(int fd) {
 #if !defined(__linux__)
-  throw std::runtime_error("This systems seems not to be Linux");
+  TORCH_CHECK(false, "This systems seems not to be Linux");
 #else
   // Disable the event group
   if (ioctl(fd, PERF_EVENT_IOC_DISABLE, PERF_IOC_FLAG_GROUP) == -1) {
