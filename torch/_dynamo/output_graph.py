@@ -1047,6 +1047,10 @@ class OutputGraph(OutputGraphCommon):
     def module_key_name(*names: Any) -> str:
         # create a new unique name
         name = "_".join(map(str, names))
+        # Strip _buffers[..] names
+        name = re.sub(r"\._buffers\[(['\"])([A-Za-z_]\w*)\1\]", r".\2", name)
+        # Strip _parameters[..] names
+        name = re.sub(r"\._parameters\[(['\"])([A-Za-z_]\w*)\1\]", r".\2", name)
         # Strip the guard lookup L/G access
         name = re.sub(r"^[GL]\['?(.*?)'?\]$", r"\1", name)
         # e.g. replace abc.xyz[123].qkv with abc.xyz_123.qkv
@@ -2986,20 +2990,21 @@ class SubgraphTracer(fx.Tracer):
             rv.node.meta["nn_module_stack"] = nn_module_stack.copy()
 
         if kind in {"call_function", "call_method"}:
-            if not nn_module_stack:
-                rv.node.meta["source_fn_stack"] = self.source_fn_stack + [
-                    (rv.node.name, target)
-                ]
-            else:
+            stack = (rv.node.name, target)
+            if nn_module_stack:
+                # Current codebase assumes that the nn_module_stack has the
+                # builtin modules in the stack.
                 current_nn_module = list(rv.node.meta["nn_module_stack"].values())[-1][
                     1
                 ]
-                rv.node.meta["source_fn_stack"] = self.source_fn_stack + [
-                    (
-                        rv.node.name,
-                        current_nn_module,
-                    )
-                ]
+                if current_nn_module.__module__.startswith(
+                    ("torch.nn.modules", "torch.ao.")
+                ) and not current_nn_module.__module__.startswith(
+                    "torch.nn.modules.container"
+                ):
+                    stack = (rv.node.name, current_nn_module)
+
+            rv.node.meta["source_fn_stack"] = self.source_fn_stack + [stack]
         elif kind == "call_module":
             if self.parent is not None:
                 # TODO can remove once inline_inbuilt_nn_modules is always True
