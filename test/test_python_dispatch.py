@@ -2207,7 +2207,7 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
 
                     shape_env = ShapeEnv()
                     si = shape_env.create_symintnode(
-                        shape_env.create_non_data_dependent_symbol(
+                        shape_env.create_symbol(
                             123,
                             source=ConstantSource("abc"),
                             dynamic_dim=DimDynamic.DUCK,

@@ -18,7 +18,7 @@ class TestShapeInference(unittest.TestCase):
     def test_infer_symbol_values(self):
         def mksym(shape_env, value, source, dynamic_dim) -> None:
             return shape_env.create_symintnode(
-                shape_env.create_non_data_dependent_symbol(
+                shape_env.create_symbol(
                     value,
                     source=source,
                     dynamic_dim=dynamic_dim,
