@@ -35,7 +35,6 @@ Our trunk health (Continuous Integration signals) can be found at [hud.pytorch.o
     - [Using pre-built images](#using-pre-built-images)
     - [Building the image yourself](#building-the-image-yourself)
   - [Building the Documentation](#building-the-documentation)
-    - [Building a PDF](#building-a-pdf)
   - [Previous Versions](#previous-versions)
 - [Getting Started](#getting-started)
 - [Resources](#resources)
@@ -434,80 +433,23 @@ make -f docker.Makefile
 
 ### Building the Documentation
 
-To build documentation in various formats, you will need [Sphinx](http://www.sphinx-doc.org)
-and the pytorch_sphinx_theme2.
-
-Before you build the documentation locally, ensure `torch` is
-installed in your environment. For small fixes, you can install the
-nightly version as described in [Getting Started](https://pytorch.org/get-started/locally/).
-
-For more complex fixes, such as adding a new module and docstrings for
-the new module, you might need to install torch [from source](#from-source).
-See [Docstring Guidelines](https://github.com/pytorch/pytorch/wiki/Docstring-Guidelines)
-for docstring conventions.
+For detailed instructions on building the docs, see [CONTRIBUTING.md](https://github.com/pytorch/pytorch/blob/main/CONTRIBUTING.md#building-documentation). For example:
 
 ```bash
-cd docs/
-pip install -r requirements.txt
+# Set up a Python 3.10 environment with pip
+uv venv -p 3.10 .venv-docs
+source .venv-docs/bin/activate
+uv pip install -U pip
+# Install PyTorch nightly
+pip install --pre torch --index-url https://download.pytorch.org/whl/nightly/cpu
+# Install the docs' dependencies
+pip install -r docs/requirements.txt
+pip install 'numpy<2'
+npm install -g katex
+# Build the docs as HTML files in docs/build/html
+cd docs
 make html
-make serve
 ```
-
-Run `make` to get a list of all available output formats.
-
-If you get a katex error run `npm install katex`.  If it persists, try
-`npm install -g katex`
-
-> [!NOTE]
-> If you installed `nodejs` with a different package manager (e.g.,
-> `conda`) then `npm` will probably install a version of `katex` that is not
-> compatible with your version of `nodejs` and doc builds will fail.
-> A combination of versions that is known to work is `node@6.13.1` and
-> `katex@0.13.18`. To install the latter with `npm` you can run
-> ```npm install -g katex@0.13.18```
-
-> [!NOTE]
-> If you see a numpy incompatibility error, run:
-> ```
-> pip install 'numpy<2'
-> ```
-
-When you make changes to the dependencies run by CI, edit the
-`.ci/docker/requirements-docs.txt` file.
-
-#### Building a PDF
-
-To compile a PDF of all PyTorch documentation, ensure you have
-`texlive` and LaTeX installed. On macOS, you can install them using:
-
-```
-brew install --cask mactex
-```
-
-To create the PDF:
-
-1. Run:
-
-   ```
-   make latexpdf
-   ```
-
-   This will generate the necessary files in the `build/latex` directory.
-
-2. Navigate to this directory and execute:
-
-   ```
-   make LATEXOPTS="-interaction=nonstopmode"
-   ```
-
-   This will produce a `pytorch.pdf` with the desired content. Run this
-   command one more time so that it generates the correct table
-   of contents and index.
-
-> [!NOTE]
-> To view the Table of Contents, switch to the **Table of Contents**
-> view in your PDF viewer.
-
 
 ### Previous Versions
 
