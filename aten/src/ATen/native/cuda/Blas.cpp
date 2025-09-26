@@ -432,6 +432,7 @@ bool launchGemmAndBiasCudaLt(
 
   const auto tuning_ctx = at::cuda::tunable::getTuningContext();
   if (tuning_ctx->IsTunableOpEnabled()) {
+    // TODO: maybe also return some success state?
     launchTunableGemmAndBias<scalar_t>(
       args, alpha, self_ptr, activation_to_gemm_and_blas_arg(activation)
     );
@@ -456,6 +457,30 @@ bool launchGemmAndBiasCudaLt(
   );
 }
 
+template <typename scalar_t, typename res_scalar_t = scalar_t>
+bool launchGemm(
+    // args contains result which is modified
+    cublasCommonArgs& args,
+    const Scalar& alpha,
+    const Scalar& beta
+) {
+  at::cuda::blas::gemm<scalar_t, res_scalar_t>(
+    args.transa,
+    args.transb,
+    args.m,
+    args.n,
+    args.k,
+    alpha.to<at::opmath_type<scalar_t>>(),
+    args.mata->const_data_ptr<scalar_t>(),
+    args.lda,
+    args.matb->const_data_ptr<scalar_t>(),
+    args.ldb,
+    beta.to<at::opmath_type<scalar_t>>(),
+    args.result->data_ptr<res_scalar_t>(),
+    args.result_ld
+  );
+  return true; // success!
+}
 
 Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha, Activation activation=Activation::None, bool disable_addmm_cuda_lt_override=false) {
   // Shape checks {
@@ -569,36 +594,17 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
     // lt path failed; recurse but disable lt path
       return addmm_out_cuda_impl(result, self, mat1, mat2, beta, alpha, activation, true);
     }
-  } // end Lt path
-   else
-  {
+    // end Lt path
+  } else {
+    // No Lt, we use a GEMM instead
     if (is_float_output_with_half_input) {
       AT_DISPATCH_REDUCED_FLOATING_TYPES(
         scalar_type,
         "addmm_cuda",
         [&] {
-          using opmath_t = at::opmath_type<scalar_t>;
-          opmath_t alpha_val = alpha.to<opmath_t>();
-          opmath_t beta_val = beta.to<opmath_t>();
-          const scalar_t* mat1_ptr = args.mata->const_data_ptr<scalar_t>();
-          const scalar_t* mat2_ptr = args.matb->const_data_ptr<scalar_t>();
-
-          float* result_ptr = args.result->mutable_data_ptr<float>();
-          at::cuda::blas::gemm<scalar_t, float>(
-              args.transa,
-              args.transb,
-              args.m,
-              args.n,
-              args.k,
-              alpha_val,
-              mat1_ptr,
-              args.lda,
-              mat2_ptr,
-              args.ldb,
-              beta_val,
-              result_ptr,
-              args.result_ld);
-        });
+          launchGemm<scalar_t, float>(args, alpha, beta);
+        }
+      );
     } else {
       AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
         at::ScalarType::Half,
@@ -606,28 +612,12 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
         scalar_type,
         "addmm_cuda",
         [&] {
-          using opmath_t = at::opmath_type<scalar_t>;
-          opmath_t alpha_val = alpha.to<opmath_t>();
-          opmath_t beta_val = beta.to<opmath_t>();
-          const scalar_t* mat1_ptr = args.mata->const_data_ptr<scalar_t>();
-          const scalar_t* mat2_ptr = args.matb->const_data_ptr<scalar_t>();
-          scalar_t* result_ptr = args.result->mutable_data_ptr<scalar_t>();
-          at::cuda::blas::gemm<scalar_t>(
-              args.transa,
-              args.transb,
-              args.m,
-              args.n,
-              args.k,
-              alpha_val,
-              mat1_ptr,
-              args.lda,
-              mat2_ptr,
-              args.ldb,
-              beta_val,
-              result_ptr,
-              args.result_ld);
-        });
+          launchGemm<scalar_t>(args, alpha, beta);
+        }
+      );
     }
+
+    // Apply prologue
     switch (activation) {
       case Activation::RELU:
         // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
@@ -639,7 +629,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
         break;
       default: break;
     }
-  }
+  } // end GEMM path
 
 // Preprocessor gate here needs to match the inverse of the check
 // gating activation_to_gemm_and_blas_arg above; here we are manually
