@@ -11,7 +11,7 @@ from dataclasses import is_dataclass
 from enum import auto, Enum
 from pathlib import Path
 from pprint import pformat
-from typing import Any, Callable, Generic, Literal, NoReturn, TYPE_CHECKING, TypeVar
+from typing import Any, Callable, Generic, NoReturn, TYPE_CHECKING, TypeVar
 from typing_extensions import assert_never, deprecated, Self
 
 from torchgen.code_template import CodeTemplate
