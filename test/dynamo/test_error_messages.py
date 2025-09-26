@@ -6,6 +6,7 @@ import traceback
 import unittest
 import unittest.mock
 import warnings
+from collections import namedtuple
 from functools import lru_cache
 
 import torch
@@ -1625,10 +1626,9 @@ from user code:
             )
 
 class ErrorMessageClarityTest(TestCase):
-    def setUp(self):
-        super().setUp()
+    def opSetup(self, lib_name):
         torch.library.define(
-            "test_clarity::iterator_mismatch", "(Tensor input, int[] sizes) -> Tensor[]"
+            lib_name + "::iterator_mismatch", "(Tensor input, int[] sizes) -> Tensor[]"
         )
 
         def iterator_mismatch_fn(input, sizes):
@@ -1637,19 +1637,22 @@ class ErrorMessageClarityTest(TestCase):
             ]
 
         torch.library.impl(
-            "test_clarity::iterator_mismatch", "default", iterator_mismatch_fn
+            lib_name + "::iterator_mismatch", "default", iterator_mismatch_fn
         )
 
-        @torch.library.register_fake("test_clarity::iterator_mismatch")
+        @torch.library.register_fake(lib_name + "::iterator_mismatch")
         def iterator_mismatch_abstract(input, sizes):
             rs = torch.ops.aten.split_with_sizes.default(input, sizes)
             return [input.new_empty(r.size()) for r in rs]
 
     def test_list_iterator_contents_error_message(self):
+        lib_name = "test_clarity_list"
+        self.opSetup(lib_name)
+
         @torch.compile()
         def f(sz, x):
             s0, s1 = sz.tolist()
-            r0, r1 = torch.ops.test_clarity.iterator_mismatch.default(x, [s0, s1])
+            r0, r1 = torch.ops.test_clarity_list.iterator_mismatch.default(x, [s0, s1])
             return torch.ops.aten.sort.default(r1)
 
         N = 7312
@@ -1660,18 +1663,21 @@ class ErrorMessageClarityTest(TestCase):
             Exception,
             lambda: f(torch.tensor([S0, S1]), torch.randn(N)),
             """\
-Dynamo failed to run FX node with fake tensors: call_function test_clarity.iterator_mismatch.default(*(FakeTensor(..., size=(7312,)), [u0, u1]), **{}): got RuntimeError("test_clarity::iterator_mismatch() Expected a value of type 'List[int]' for argument 'sizes' but instead found type 'immutable_list(SymInt, SymInt)'.\\nPosition: 1\\nValue: [u0, u1]\\nDeclaration: test_clarity::iterator_mismatch(Tensor input, int[] sizes) -> Tensor[]\\nCast error details: Unable to cast Python instance of type <class 'torch.fx.immutable_collections.immutable_list'> to C++ type '?' (#define PYBIND11_DETAILED_ERROR_MESSAGES or compile in debug mode for details)")
+Dynamo failed to run FX node with fake tensors: call_function test_clarity_list.iterator_mismatch.default(*(FakeTensor(..., size=(7312,)), [u0, u1]), **{}): got RuntimeError("test_clarity_list::iterator_mismatch() Expected a value of type 'List[int]' for argument 'sizes' but instead found type 'immutable_list(SymInt, SymInt)'.\\nPosition: 1\\nValue: [u0, u1]\\nDeclaration: test_clarity_list::iterator_mismatch(Tensor input, int[] sizes) -> Tensor[]\\nCast error details: Unable to cast Python instance of type <class 'torch.fx.immutable_collections.immutable_list'> to C++ type '?' (#define PYBIND11_DETAILED_ERROR_MESSAGES or compile in debug mode for details)")
 
 from user code:
    File "test_error_messages.py", line N, in f
-    r0, r1 = torch.ops.test_clarity.iterator_mismatch.default(x, [s0, s1])""",
+    r0, r1 = torch.ops.test_clarity_list.iterator_mismatch.default(x, [s0, s1])""",
         )
 
     def test_tuple_iterator_contents_error_message(self):
+        lib_name = "test_clarity_tuple"
+        self.opSetup(lib_name)
+
         @torch.compile()
         def f(sz, x):
             s0, s1 = sz.tolist()
-            r0, r1 = torch.ops.test_clarity.iterator_mismatch.default(x, (s0, s1))
+            r0, r1 = torch.ops.test_clarity_tuple.iterator_mismatch.default(x, (s0, s1))
             return torch.ops.aten.sort.default(r1)
 
         N = 7312
@@ -1682,11 +1688,91 @@ from user code:
             Exception,
             lambda: f(torch.tensor((S0, S1)), torch.randn(N)),
             """\
-Dynamo failed to run FX node with fake tensors: call_function test_clarity.iterator_mismatch.default(*(FakeTensor(..., size=(7312,)), (u0, u1)), **{}): got RuntimeError("test_clarity::iterator_mismatch() Expected a value of type 'List[int]' for argument 'sizes' but instead found type 'tuple(SymInt, SymInt)'.\\nPosition: 1\\nValue: (u0, u1)\\nDeclaration: test_clarity::iterator_mismatch(Tensor input, int[] sizes) -> Tensor[]\\nCast error details: Unable to cast Python instance of type <class 'tuple'> to C++ type '?' (#define PYBIND11_DETAILED_ERROR_MESSAGES or compile in debug mode for details)")
+Dynamo failed to run FX node with fake tensors: call_function test_clarity_tuple.iterator_mismatch.default(*(FakeTensor(..., size=(7312,)), (u0, u1)), **{}): got RuntimeError("test_clarity_tuple::iterator_mismatch() Expected a value of type 'List[int]' for argument 'sizes' but instead found type 'tuple(SymInt, SymInt)'.\\nPosition: 1\\nValue: (u0, u1)\\nDeclaration: test_clarity_tuple::iterator_mismatch(Tensor input, int[] sizes) -> Tensor[]\\nCast error details: Unable to cast Python instance of type <class 'tuple'> to C++ type '?' (#define PYBIND11_DETAILED_ERROR_MESSAGES or compile in debug mode for details)")
 
 from user code:
    File "test_error_messages.py", line N, in f
-    r0, r1 = torch.ops.test_clarity.iterator_mismatch.default(x, (s0, s1))""",
+    r0, r1 = torch.ops.test_clarity_tuple.iterator_mismatch.default(x, (s0, s1))""",
+        )
+
+    def test_dict_iterator_contents_error_message(self):
+        lib_name = "test_clarity_dict"
+        self.opSetup(lib_name)
+
+        @torch.compile()
+        def f(sz, x):
+            s0, s1 = sz.tolist()
+            r0, r1 = torch.ops.test_clarity_dict.iterator_mismatch.default(
+                x, {1: s0, 2: s1}
+            )
+            return torch.ops.aten.sort.default(r1)
+
+        N = 7312
+        S0 = 420
+        S1 = N - S0
+
+        self.assertExpectedInlineMunged(
+            Exception,
+            lambda: f(torch.tensor((S0, S1)), torch.randn(N)),
+            """\
+Dynamo failed to run FX node with fake tensors: call_function test_clarity_dict.iterator_mismatch.default(*(FakeTensor(..., size=(7312,)), {1: u0, 2: u1}), **{}): got RuntimeError("test_clarity_dict::iterator_mismatch() Expected a value of type 'List[int]' for argument 'sizes' but instead found type 'immutable_dict(int, int)'.\\nPosition: 1\\nValue: {1: u0, 2: u1}\\nDeclaration: test_clarity_dict::iterator_mismatch(Tensor input, int[] sizes) -> Tensor[]\\nCast error details: Unable to cast Python instance of type <class 'torch.fx.immutable_collections.immutable_dict'> to C++ type '?' (#define PYBIND11_DETAILED_ERROR_MESSAGES or compile in debug mode for details)")
+
+from user code:
+   File "test_error_messages.py", line N, in f
+    r0, r1 = torch.ops.test_clarity_dict.iterator_mismatch.default(""",
+        )
+
+    def test_named_tuple_iterator_contents_error_message(self):
+        lib_name = "test_clarity_named_tuple"
+        self.opSetup(lib_name)
+
+        @torch.compile
+        def f(sz, x):
+            inSizes = namedtuple("inSizes", ["size_0", "size_1"])
+            s0, s1 = sz.tolist()
+            r0, r1 = torch.ops.test_clarity_named_tuple.iterator_mismatch.default(
+                x, inSizes(s0, s1)
+            )
+            return torch.ops.aten.sort.default(r1)
+
+        N = 7312
+        S0 = 420
+        S1 = N - S0
+
+        self.assertExpectedInlineMunged(
+            Exception,
+            lambda: f(torch.tensor([S0, S1]), torch.randn(N)),
+            """\
+Dynamo failed to run FX node with fake tensors: call_function test_clarity_named_tuple.iterator_mismatch.default(*(FakeTensor(..., size=(7312,)), inSizes(size_0=u0, size_1=u1)), **{}): got RuntimeError("test_clarity_named_tuple::iterator_mismatch() Expected a value of type 'List[int]' for argument 'sizes' but instead found type 'inSizes (aka NamedTuple(size_0, size_1))'.\\nPosition: 1\\nValue: inSizes(size_0=u0, size_1=u1)\\nDeclaration: test_clarity_named_tuple::iterator_mismatch(Tensor input, int[] sizes) -> Tensor[]\\nCast error details: Unable to cast Python instance of type <class 'torch._dynamo.variables.functions.inSizes'> to C++ type '?' (#define PYBIND11_DETAILED_ERROR_MESSAGES or compile in debug mode for details)")
+
+from user code:
+   File "test_error_messages.py", line N, in f
+    r0, r1 = torch.ops.test_clarity_named_tuple.iterator_mismatch.default(""",
+        )
+
+    def test_noniter_contents_error_message(self):
+        lib_name = "test_clarity_noniter"
+        self.opSetup(lib_name)
+
+        @torch.compile
+        def f(sz, x):
+            s0, s1 = sz.tolist()
+            r0, r1 = torch.ops.test_clarity_noniter.iterator_mismatch.default(x, s0)
+            return torch.ops.aten.sort.default(r1)
+
+        N = 7312
+        S0 = 420
+        S1 = N - S0
+
+        self.assertExpectedInlineMunged(
+            Exception,
+            lambda: f(torch.tensor([S0, S1]), torch.randn(N)),
+            """\
+Dynamo failed to run FX node with fake tensors: call_function test_clarity_noniter.iterator_mismatch.default(*(FakeTensor(..., size=(7312,)), u0), **{}): got RuntimeError("test_clarity_noniter::iterator_mismatch() Expected a value of type 'List[int]' for argument 'sizes' but instead found type 'SymInt'.\\nPosition: 1\\nValue: u0\\nDeclaration: test_clarity_noniter::iterator_mismatch(Tensor input, int[] sizes) -> Tensor[]\\nCast error details: Unable to cast Python instance of type <class 'torch.SymInt'> to C++ type '?' (#define PYBIND11_DETAILED_ERROR_MESSAGES or compile in debug mode for details)")
+
+from user code:
+   File "test_error_messages.py", line N, in f
+    r0, r1 = torch.ops.test_clarity_noniter.iterator_mismatch.default(""",
         )
 
 
