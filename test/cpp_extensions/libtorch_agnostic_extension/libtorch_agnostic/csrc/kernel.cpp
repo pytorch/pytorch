@@ -514,14 +514,6 @@ Tensor test_dispatch_scalar_name(Tensor t, int dispatch_index) {
     else if (ti == typeid(int32_t)) { name = "int32";}
     else if (ti == typeid(int64_t)) { name = "int64";}
     else if (ti == typeid(bool)) { name = "bool";}
-    else if (ti == typeid(int1)) { name = "int1"; }
-    else if (ti == typeid(int2)) { name = "int2"; }
-    else if (ti == typeid(int3)) { name = "int3"; }
-    else if (ti == typeid(int4)) { name = "int4"; }
-    else if (ti == typeid(uint1)) { name = "uint1"; }
-    else if (ti == typeid(uint2)) { name = "uint2"; }
-    else if (ti == typeid(uint3)) { name = "uint3"; }
-    else if (ti == typeid(uint4)) { name = "uint4"; }
     else if (ti == typeid(c10::Float8_e5m2)) { name = "float8_e5m2"; }
     else if (ti == typeid(c10::Float8_e5m2fnuz)) { name = "float8_e5m2fnuz"; }
     else if (ti == typeid(c10::Float8_e4m3fn)) { name = "float8_e4m3fn"; }
