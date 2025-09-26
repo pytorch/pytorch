@@ -409,8 +409,20 @@ struct ConvParams {
     if (!detail::getCUDAHooks().compiledWithCuDNN() || !input.is_cuda() || !cudnn_enabled) {
       return false;
     }
+    static long cudnn_version = detail::getCUDAHooks().versionCuDNN();
+    // broken on cuDNN 9.8
+    if (cudnn_version >= 90800) {
+      if (cudnn_conv_suggest_memory_format(input, weight) == at::MemoryFormat::Contiguous &&
+          (input.scalar_type() == at::kBFloat16 || input.scalar_type() == at::kHalf) &&
+          weight.dim() == 5) {
+        for (int i = 2; i < weight.dim(); i++) {
+          if (weight.size(i) != 1) {
+            return false;
+          }
+        }
+      }
+    }
     if (needs_64bit_indexing_no_split(input, weight)) {
-      static long cudnn_version = detail::getCUDAHooks().versionCuDNN();
       if (!(cudnn_version >= 90300 && at::native::cudnnv8_enabled_check_debug())) {
         TORCH_WARN_ONCE("cuDNN cannot be used for large non-batch-splittable convolutions"
                         " if the V8 API is not enabled or before cuDNN version 9.3+."
