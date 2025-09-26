@@ -157,7 +157,9 @@ class CppWrapperMps(CppWrapperGpu):
             if group_size is None:
                 new_args.append("{")
                 new_args.append(f"    uint64_t {threads_var}[] = {threads};")
-                new_args.append(f"    aoti_torch_mps_dispatch_array(handle, {threads_var}, {threads_size});")
+                new_args.append(
+                    f"    aoti_torch_mps_dispatch_array(handle, {threads_var}, {threads_size});"
+                )
                 new_args.append("}")
             else:
                 group_size_str = str(group_size)
