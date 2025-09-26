@@ -433,13 +433,12 @@ make -f docker.Makefile
 
 ### Building the Documentation
 
-For detailed instructions on building the docs, see [CONTRIBUTING.md](https://github.com/pytorch/pytorch/blob/main/CONTRIBUTING.md#building-documentation). For example:
+Currently, the docs can only be built with Python 3.10.
 
 ```bash
-# Set up a Python 3.10 environment with pip
-uv venv -p 3.10 .venv-docs
-source .venv-docs/bin/activate
-uv pip install -U pip
+# Set up a Python 3.10 environment
+python3.10 -m venv .venv-docs
+source .venv-docs/bin/activate  # or `& .\venv-docs\Scripts\Activate.ps1` on Windows
 # Install PyTorch nightly
 pip install --pre torch --index-url https://download.pytorch.org/whl/nightly/cpu
 # Install the docs' dependencies
@@ -450,6 +449,8 @@ npm install -g katex
 cd docs
 make html
 ```
+
+For detailed instructions on how to build the docs in other formats or reflecting changes in `torch/`, see [CONTRIBUTING.md](https://github.com/pytorch/pytorch/blob/main/CONTRIBUTING.md#building-documentation).
 
 ### Previous Versions
 
