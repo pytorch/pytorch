@@ -42,7 +42,7 @@ from ..pattern_matcher import (
     Match,
     MultiOutputPattern,
     MULTIPLE,
-    PatternMatcherPass,
+    PatternMatcherPass as PatternMatcherPassBase,
     register_graph_pattern,
     register_replacement,
     stable_topological_sort,
@@ -67,6 +67,10 @@ from .split_cat import POST_GRAD_PATTERNS
 
 _T = TypeVar("_T")
 _P = ParamSpec("_P")
+
+PatternMatcherPass = functools.partial(
+    PatternMatcherPassBase, subsystem="post_grad_passes"
+)
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
