@@ -176,6 +176,28 @@ bool check_head_dim_size_flash(sdp_params const& params, bool debug) {
     }
     return false;
   }
+  if constexpr(caller_is_meff) {
+    bool is_half = (params.query.dtype() == at::kHalf) ||
+      (params.query.dtype() == at::kBFloat16);
+    const int64_t alignment = is_half ? 8 : 4;
+    if (!(query_size_last % alignment == 0 && query_size_last > 0 &&
+          value_size_last % alignment == 0 && value_size_last > 0)) {
+      if (debug) {
+        TORCH_WARN(
+            "Mem efficient attention requires last dimension of inputs to be divisible by ",
+            alignment,
+            ". ",
+            "Got Query.size(-1): ",
+            query_size_last,
+            ", Key.size(-1): ",
+            params.key.sym_size(-1),
+            ", Value.size(-1): ",
+            params.value.sym_size(-1),
+            " instead.");
+      }
+      return false;
+    }
+  }
   return true;
 }
 
