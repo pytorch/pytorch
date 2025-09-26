@@ -1,4 +1,4 @@
-# Owner(s): ["module: inductor"]
+# Owner(s): ["module: inductor"] torc
 import operator
 
 import torch
@@ -67,7 +67,7 @@ class TestAugmentedGraphHelper(TestCase):
 
     def get_deps(self, node):
         """Helper to get dependencies for a node."""
-        return list(node.args) if hasattr(node, "args") else []
+        return list(getattr(node, "args", []))
 
     # ========== Basic Functionality Tests ==========
 
@@ -83,7 +83,7 @@ class TestAugmentedGraphHelper(TestCase):
         node_a = self.nodes["A"]
         node_b = self.nodes["B"]
 
-        self.tracker.merge_nodes([node_a, node_b])
+        self.merge_nodes(self.tracker, [node_a, node_b])
 
         # Both should be in same merge set
         self.assertEqual(self.tracker.merge_sets[node_a], {node_a, node_b})
@@ -100,15 +100,16 @@ class TestAugmentedGraphHelper(TestCase):
         node_d = self.nodes["D"]
 
         # Merge A-B and C-D separately
-        self.tracker.merge_nodes([node_a, node_b])
-        self.tracker.merge_nodes([node_c, node_d])
-
-        # Now merge B with C (should merge all 4)
-        self.tracker.merge_nodes([node_b, node_c])
+        for node in node_b, node_c, node_d:
+            self.tracker.merge_to_set(node_a, node)
 
         expected_set = {node_a, node_b, node_c, node_d}
         for node in [node_a, node_b, node_c, node_d]:
             self.assertEqual(self.tracker.merge_sets[node], expected_set)
+
+    def merge_nodes(self, tracker, nodes):
+        for n in nodes[1:]:
+            tracker.merge_to_set(nodes[0], n)
 
     def test_unmerge_node(self):
         """Test removing a node from its merge set."""
@@ -117,7 +118,7 @@ class TestAugmentedGraphHelper(TestCase):
         node_c = self.nodes["C"]
 
         # Merge all three
-        self.tracker.merge_nodes([node_a, node_b, node_c])
+        self.merge_nodes(self.tracker, [node_a, node_b, node_c])
         self.assertEqual(len(self.tracker.merge_sets[node_a]), 3)
 
         # Unmerge B
@@ -150,7 +151,7 @@ class TestAugmentedGraphHelper(TestCase):
         # C already depends on A (and y) from graph construction
 
         # Merge B and C
-        self.tracker.merge_nodes([node_b, node_c])
+        self.merge_nodes(self.tracker, [node_b, node_c])
 
         # Get merged deps for B - should include deps from both B and C
         deps = self.tracker.get_merged_deps(node_b)
@@ -171,7 +172,7 @@ class TestAugmentedGraphHelper(TestCase):
         self.tracker.add_extra_dep(n=node_a, dep=node_c)
 
         # Merge A and B
-        self.tracker.merge_nodes([node_a, node_b])
+        self.merge_nodes(self.tracker, [node_a, node_b])
 
         # Add extra dep from D to the merged node (via B)
         self.tracker.add_extra_dep(n=node_d, dep=node_b)
@@ -221,7 +222,7 @@ class TestAugmentedGraphHelper(TestCase):
         self.assertFalse(tracker2.has_path(b2, d2))
 
         # Merge B2 and C2
-        tracker2.merge_nodes([b2, c2])
+        tracker2.merge_to_set(b2, c2)
 
         # Now there should be a path B2/C2 -> D2
         self.assertTrue(tracker2.has_path(b2, d2))
@@ -293,7 +294,7 @@ class TestAugmentedGraphHelper(TestCase):
 
         # Now: a4 -> b4, c4 -> d4 -> a4
         # Merging b4 and c4 would create cycle
-        tracker4.merge_nodes([b4, c4])
+        tracker4.merge_to_set(b4, c4)
 
         self.assertTrue(tracker4.has_cycle())
 
@@ -313,26 +314,30 @@ class TestAugmentedGraphHelper(TestCase):
         nodes = [self.nodes[c] for c in ["A", "B", "C", "D", "E"]]
 
         # Merge A, B, C
-        self.tracker.merge_nodes(nodes[:3])
+        self.merge_nodes(self.tracker, nodes[:3])
         self.assertEqual(len(self.tracker.merge_sets[nodes[0]]), 3)
 
         # Merge D, E
-        self.tracker.merge_nodes(nodes[3:5])
+        self.merge_nodes(self.tracker, nodes[3:5])
         self.assertEqual(len(self.tracker.merge_sets[nodes[3]]), 2)
 
         # Merge the two groups via B and D
-        self.tracker.merge_nodes([nodes[1], nodes[3]])
-        self.assertEqual(len(self.tracker.merge_sets[nodes[0]]), 5)
+        try:
+            self.merge_nodes(self.tracker, [nodes[1], nodes[3]])
+            thrown = False
+        except AssertionError:
+            thrown = True
+        self.assertTrue(thrown)
 
         # Unmerge C
         self.tracker.unmerge_node(nodes[2])
-        self.assertEqual(len(self.tracker.merge_sets[nodes[0]]), 4)
+        self.assertEqual(len(self.tracker.merge_sets[nodes[0]]), 2)
         self.assertEqual(self.tracker.merge_sets[nodes[2]], {nodes[2]})
 
         # Unmerge A
         self.tracker.unmerge_node(nodes[0])
         self.assertEqual(self.tracker.merge_sets[nodes[0]], {nodes[0]})
-        self.assertEqual(len(self.tracker.merge_sets[nodes[1]]), 3)
+        self.assertEqual(len(self.tracker.merge_sets[nodes[1]]), 1)
 
 
 if __name__ == "__main__":

@@ -28,11 +28,11 @@ class AugmentedGraphHelper:
 
     def merge_to_set(self, existing_node: fx.Node, new_node: fx.Node) -> None:
         """
-        Merge new_node into existing_node's set.
-        Optimized for the common case where existing_node has a larger set than new_node
+        Merge new_node into existing_node's set. The new node must be a singleton set.
         """
         existing_set = self.merge_sets[existing_node]
         new_set = self.merge_sets[new_node]
+        assert len(new_set) == 1
 
         # Add all nodes from new_set to existing_set
         existing_set.update(new_set)
@@ -40,16 +40,6 @@ class AugmentedGraphHelper:
         # Update all nodes from new_set to point to existing_set
         for node in new_set:
             self.merge_sets[node] = existing_set
-
-    def merge_nodes(self, nodes: list[fx.Node]) -> None:
-        """
-        Merge nodes into a single set set.
-        """
-        if len(nodes) <= 1:
-            return
-        n1 = nodes[0]
-        for n2 in nodes[1:]:
-            self.merge_to_set(n1, n2)
 
     def unmerge_node(self, node: fx.Node) -> None:
         """Remove a node from its merge set, making it singleton."""
