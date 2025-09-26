@@ -1246,6 +1246,14 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
   TORCH_CHECK(
       mat1.sizes()[1] == mat2.sizes()[0], "mat1 and mat2 shapes cannot be multiplied (",
       mat1.sizes()[0], "x", mat1.sizes()[1], " and ", mat2.sizes()[0], "x", mat2.sizes()[1], ")");
+  
+  // DeepSeek blockwise scaling types
+  std::unordered_set<ScalingType> deepseek_recipes = {
+      ScalingType::BlockWise128x128,
+      ScalingType::BlockWise1x128,
+      ScalingType::BlockWise1x32,
+      ScalingType::BlockWise1x16
+  };
 
   // Check what type of scaling we are doing based on inputs. This list is sorted
   // by decreasing priority. We prefer "simpler" schemes as they are supported
@@ -1262,7 +1270,10 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
       std::make_pair(ScalingType::BlockWise1x16, ScalingType::BlockWise1x16)
     },
     mat1, mat2, scale_a, scale_b);
-
+  if (deepseek_recipes.count(scaling_choice_a) || deepseek_recipes.count(scaling_choice_b)) {
+    TORCH_CHECK(out_dtype.has_value(),
+                "When using DeepSeek recipes (e.g., BlockWise128x128, BlockWise1x128, BlockWise1x32, BlockWise1x16), you must specify the out_dtype (e.g., torch.float16 or torch.float32).");
+  }
   TORCH_CHECK(!scale_result || (scale_result->numel() == 1 && scale_result->scalar_type() == kFloat),
        "scale_result must be a float scalar");
   TORCH_CHECK(!bias || bias->numel() == mat2.sizes()[1], "Bias must be size ", mat2.sizes()[1],

@@ -1327,6 +1327,29 @@ class TestFP8Matmul(TestCase):
         torch.testing.assert_close(out_scaled_mm, out_emulated, atol=atol, rtol=rtol)
 
     @onlyCUDA
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @parametrize("base_dtype", [torch.float8_e4m3fn, torch.float8_e5m2])
+    def test_scaled_mm_deepseek_pattern_missing_out_dtype_error(self, device, base_dtype):
+       def ceil_div(a, b):
+           return (a + b - 1) // b
+       m = k = n = 256
+       a = torch.empty((m, k), device=device, dtype=base_dtype)
+       b = torch.empty((k, n), device=device, dtype=base_dtype)
+       scale_a_size = (m, ceil_div(k, 128))
+       scale_a_stride = (1, m)
+       scale_a_storage = torch.empty(scale_a_size[0] * scale_a_size[1], device=device, dtype=torch.float32)
+       scale_a = scale_a_storage.as_strided(scale_a_size, scale_a_stride)
+       scale_b_size = (n, ceil_div(k, 128)) 
+       scale_b_stride = (1, n) 
+       scale_b_storage = torch.empty(scale_b_size[0] * scale_b_size[1], device=device, dtype=torch.float32)
+       scale_b_temp = scale_b_storage.as_strided(scale_b_size, scale_b_stride)
+       scale_b = scale_b_temp.t().contiguous()
+
+
+       with self.assertRaisesRegex(RuntimeError, r"When using DeepSeek recipes"):
+           torch._scaled_mm(a, b, scale_a, scale_b)
+
+    @onlyCUDA
     def test_float8_bias(self, device) -> None:
         if device != "cpu" and torch.cuda.is_available() and not PLATFORM_SUPPORTS_FP8:
             raise unittest.SkipTest(f8_msg)
