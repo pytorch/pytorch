@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import argparse
+import email
 import os
 import re
 import subprocess
 from pathlib import Path
 
+from packaging.version import Version
 from setuptools import distutils  # type: ignore[import,attr-defined]
 
 
@@ -48,9 +50,28 @@ def get_tag(pytorch_root: str | Path) -> str:
 
 
 def get_torch_version(sha: str | None = None) -> str:
-    pytorch_root = Path(__file__).absolute().parent.parent
-    version = open(pytorch_root / "version.txt").read().strip()
+    """Determine the torch version string.
 
+    The version is determined from one of the following sources, in order of
+    precedence:
+    1. The PYTORCH_BUILD_VERSION and PYTORCH_BUILD_NUMBER environment variables.
+       These are set by the PyTorch build system when building official
+       releases. If built from an sdist, it is checked that the version matches
+       the sdist version.
+    2. The PKG-INFO file, if it exists. This file is included in source
+       distributions (sdist) and contains the version of the sdist.
+    3. The version.txt file, which contains the base version string. If the git
+       commit SHA is available, it is appended to the version string to
+       indicate that this is a development build.
+    """
+    pytorch_root = Path(__file__).absolute().parent.parent
+    pkg_info_path = pytorch_root / "PKG-INFO"
+    if pkg_info_path.exists():
+        with open(pkg_info_path) as f:
+            pkg_info = email.message_from_file(f)
+        sdist_version = pkg_info["Version"]
+    else:
+        sdist_version = None
     if os.getenv("PYTORCH_BUILD_VERSION"):
         assert os.getenv("PYTORCH_BUILD_NUMBER") is not None
         build_number = int(os.getenv("PYTORCH_BUILD_NUMBER", ""))

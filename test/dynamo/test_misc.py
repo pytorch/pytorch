@@ -50,7 +50,6 @@ from torch._dynamo.testing import (
     CompileCounter,
     CompileCounterWithBackend,
     expectedFailureDynamic,
-    requiresPy310,
     same,
     skipIfNotPy311,
     unsupported,
@@ -7207,9 +7206,7 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
             return x + 1
 
         guard_manager = torch._dynamo.guards.RootGuardManager()
-        guard_manager.add_lambda_guard(
-            lambda L: isinstance(L["x"], int), {"x": 0}, True, []
-        )
+        guard_manager.add_lambda_guard(lambda L: isinstance(L["x"], int), [])
 
         def injected(x):
             return x + 42
@@ -7234,33 +7231,27 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
             return x + 1
 
         guard_manager_bool = torch._dynamo.guards.RootGuardManager()
-        guard_manager_bool.add_lambda_guard(
-            lambda L: isinstance(L["x"], bool), {"x": 0}, True, []
-        )
+        guard_manager_bool.add_lambda_guard(lambda L: isinstance(L["x"], bool), [])
 
         def injected_bool(x: bool):
             return x + 102
 
         guard_manager_int = torch._dynamo.guards.RootGuardManager()
-        guard_manager_int.add_lambda_guard(
-            lambda L: isinstance(L["x"], int), {"x": 0}, True, []
-        )
+        guard_manager_int.add_lambda_guard(lambda L: isinstance(L["x"], int), [])
 
         def injected_int(x: int):
             return x + 42
 
         guard_manager_tensor = torch._dynamo.guards.RootGuardManager()
         guard_manager_tensor.add_lambda_guard(
-            lambda L: isinstance(L["x"], torch.Tensor), {"x": 0}, True, []
+            lambda L: isinstance(L["x"], torch.Tensor), []
         )
 
         def injected_tensor(x: torch.Tensor):
             return x + 100
 
         guard_manager_str = torch._dynamo.guards.RootGuardManager()
-        guard_manager_str.add_lambda_guard(
-            lambda L: isinstance(L["x"], str), {"x": 0}, True, []
-        )
+        guard_manager_str.add_lambda_guard(lambda L: isinstance(L["x"], str), [])
 
         def injected_str(x: str):
             return x + "1"
@@ -7337,10 +7328,7 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
 
         guard_manager_bool = torch._dynamo.guards.RootGuardManager()
         guard_manager_bool.add_lambda_guard(
-            lambda L: isinstance(L["x"], bool),
-            {"x": 0},
-            True,
-            ["isinstance(L['x'], bool)"],
+            lambda L: isinstance(L["x"], bool), ["isinstance(L['x'], bool)"]
         )
 
         def injected_bool(x: bool):
@@ -8017,8 +8005,11 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         torch._dynamo.decorators.mark_unbacked(b, 1)
         func(a, b)
         func(torch.rand(4, 5), torch.rand(4, 5))
-        with self.assertRaises(RuntimeError):
-            func(torch.rand(1, 1), torch.rand(2, 1))
+        # This does not raise an error right now because of a recompilation.
+        # https://github.com/pytorch/pytorch/issues/163785
+        # with self.assertRaises(AssertionError):
+        #     func(torch.rand(1, 1), torch.rand(2, 1))
+        func(torch.rand(1, 1), torch.rand(2, 1))
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_sym_constrain_range_on_replaced_unbacked_symbol(self):
@@ -8614,46 +8605,63 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         self.assertEqual(seen_frames[0].line, "r, r2 = uwu_inline_me(x, y, z)")
 
     def test_fullgraph_capture(self):
-        from torch._dynamo.convert_frame import (
-            FrameInfo,
-            fullgraph_capture,
-            get_compile_id,
-        )
+        from torch._dynamo.convert_frame import fullgraph_capture
         from torch._dynamo.utils import dynamo_timed, get_metrics_context
-        from torch._guards import compile_context, CompileContext
 
         def foo(x):
-            return x + x.shape[0]
+            if x.shape[1] >= 3:
+                return x + x.shape[0]
+            else:
+                return x - x.shape[0]
 
         x = torch.randn(4, 3)
-        f_locals = {"x": x}
         with (
-            compile_context(CompileContext(get_compile_id({}))),
-            dynamo_timed(""),
             get_metrics_context(),
+            dynamo_timed(""),
         ):
-            capture_output = fullgraph_capture(
-                FrameInfo(
-                    foo.__code__,
-                    foo.__globals__,
-                    f_locals,
-                    builtins,
-                    (),
-                )
-            )
-            dynamo_output = capture_output.dynamo_output
+            capture_output = fullgraph_capture(foo, (x,))
+            graph_capture_output = capture_output.graph_capture_output
+            fn = graph_capture_output.build_guards(foo.__code__)
+
+            for guard in graph_capture_output.output_graph.guards:
+                if guard.source == torch._guards.GuardSource.SHAPE_ENV:
+                    dynamic = guard.code_list is not None
+                    if dynamic:
+                        self.assertEqual(
+                            guard.code_list,
+                            [
+                                "L['x'].stride()[0] == L['x'].size()[1]",
+                                "2 <= L['x'].size()[0]",
+                                "3 <= L['x'].size()[1]",
+                            ],
+                        )
+                        self.assertTrue(
+                            fn.guard_manager.check({"x": torch.randn(3, 3)})
+                        )
+                        self.assertTrue(
+                            fn.guard_manager.check({"x": torch.randn(4, 4)})
+                        )
+                    else:
+                        self.assertFalse(
+                            fn.guard_manager.check({"x": torch.randn(3, 3)})
+                        )
+                        self.assertFalse(
+                            fn.guard_manager.check({"x": torch.randn(4, 4)})
+                        )
+                    self.assertFalse(fn.guard_manager.check({"x": torch.randn(4, 2)}))
+                    self.assertFalse(fn.guard_manager.check({"x": torch.randn(1, 3)}))
+                    break
+
             backend_input = capture_output.backend_input
-            self.assertTrue(
-                dynamo_output.build_guards(foo.__code__).guard_manager.check(f_locals)
-            )
+            self.assertTrue(fn.guard_manager.check({"x": x}))
         import_sources = {
             alias: importlib.import_module(module_name)
-            for alias, module_name in dynamo_output.tracer_output.output_graph.import_sources.items()
+            for alias, module_name in graph_capture_output.import_sources.items()
         }
         self.assertEqual(
             foo(x),
             types.FunctionType(
-                dynamo_output.bytecode,
+                graph_capture_output.bytecode,
                 {
                     **import_sources,
                     backend_input.backend_id: backend_input.graph_module,
@@ -10609,7 +10617,6 @@ def ___make_guard_fn():
 
         self.assertEqual(actual, expected)
 
-    @requiresPy310
     def test_frozen_dataclass_kw_only(self):
         @dataclasses.dataclass(frozen=True)
         class TestDataClass:
@@ -13373,6 +13380,14 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
         example_inputs = (torch.randn(1, 1, 1, 1),)
         # we expect to no longer raise here
         torch.compile(fn, fullgraph=True)(*example_inputs)
+
+    def test_dynamic_fill_diagonal_(self):
+        @torch.compile(dynamic=True)
+        def f(x):
+            x.fill_diagonal_(True)
+
+        x = torch.zeros(4, 4)
+        f(x)
 
     def test_dynamic_float_scalar_tensor_coersion(self):
         # Minified version of https://github.com/pytorch/pytorch/issues/158376#issuecomment-3079591367
