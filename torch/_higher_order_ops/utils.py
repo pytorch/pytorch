@@ -734,6 +734,31 @@ def split_into_chunks(iterable: Sequence[Any], chunk_sizes: list[int]) -> list[A
     return elements
 
 
+def _clone_aliasing_output(inputs: Sequence[Any], outputs: Sequence[Any]):
+    # For tensors whose grad is None, create zero tensors as gradients
+    # This invariant is useful for cudagraph.
+
+    # Elimitate input-output, output-output aliasing
+    seen_input_storages = {
+        StorageWeakRef(t._typed_storage())
+        for t in inputs
+        if isinstance(t, torch.Tensor)
+    }
+    seen_output_storages = set()
+    final_outputs = []
+    for out in outputs:
+        if isinstance(out, torch.Tensor):
+            out_storage = StorageWeakRef(out._typed_storage())
+            if (
+                out_storage in seen_input_storages
+                or out_storage in seen_output_storages
+            ):
+                out = out.clone()
+            seen_output_storages.add(StorageWeakRef(out._typed_storage()))
+        final_outputs.append(out)
+    return final_outputs
+
+
 def create_bw_fn(fn: Callable, args: tuple[Any]) -> Callable:
     """
     For a fn that accepts flat inputs and returns flat outputs:
@@ -773,34 +798,14 @@ def create_bw_fn(fn: Callable, args: tuple[Any]) -> Callable:
 
         # For tensors whose grad is None, create zero tensors as gradients
         # This invariant is useful for cudagraph.
-        grads = [
+        grad_args = [
             torch.zeros_like(arg)
             if isinstance(arg, torch.Tensor) and grad is None
             else grad
             for grad, arg in zip(grad_args, primals)
         ]
 
-        # Elimitate input-output, output-output aliasing
-        seen_input_storages = {
-            StorageWeakRef(t._typed_storage())
-            for t in args_and_grad_outs
-            if isinstance(t, torch.Tensor)
-        }
-        seen_output_storages = set()
-        final_grads = []
-        for grad, arg in zip(grads, primals):
-            if isinstance(arg, torch.Tensor):
-                assert isinstance(grad, torch.Tensor)
-                seen_input_storages.add(StorageWeakRef(arg._typed_storage()))
-                grad_storage = StorageWeakRef(grad._typed_storage())
-                if (
-                    grad_storage in seen_input_storages
-                    or grad_storage in seen_output_storages
-                ):
-                    grad = grad.clone()
-                seen_output_storages.add(StorageWeakRef(grad._typed_storage()))
-            final_grads.append(grad)
-
+        final_grads = _clone_aliasing_output(args_and_grad_outs, grad_args)
         return final_grads
 
     return flat_fn

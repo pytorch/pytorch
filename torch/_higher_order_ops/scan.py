@@ -12,6 +12,7 @@ from torch._higher_order_ops.utils import (
     check_input_alias_and_mutation_return_outputs,
     check_meta_consistency,
     create_bw_fn,
+    filter_with_masks,
     first_slice_copy,
     first_slice_copy_with_grad,
     get_tensor_mask,
@@ -591,11 +592,20 @@ class ScanAutogradOp(torch.autograd.Function):
                 *y,
             ]
 
+        # Materialize the ``combine_fn_with_carry_checkpoint`` with enable_grad
+        # we need enable_grad to support torch.func.grad_and_value
+        # in subgraph.
+        gm = materialize_as_graph(
+            combine_fn_with_carry_checkpoint,
+            (*init, *[x[0] for x in xs], *additional_inputs),
+            force_enable_grad=True,
+        )
+
         with torch._C._AutoDispatchBelowAutograd():
             # 2.) Compute the all carries, the last carry and all outputs using ``combine_fn_with_carry_checkpoint``
             c_T, carries_ys = _extract_carry_and_out(
                 scan_op(
-                    combine_fn_with_carry_checkpoint,
+                    gm,
                     init,
                     xs,
                     additional_inputs,
@@ -621,6 +631,7 @@ class ScanAutogradOp(torch.autograd.Function):
         Args:
             flat_grads (torch.Tensor): The tensor of flattened upstream gradients.
         """
+        from torch._higher_order_ops.utils import fill_none_with_masks
 
         # Collect the saved items from the forward
         num_leaves_init = ctx._num_leaves_init
@@ -640,10 +651,11 @@ class ScanAutogradOp(torch.autograd.Function):
         def initialize_g_additional_inputs(
             additional_inputs,
         ):
-            # The initial gradients for the additional_inputs are all zeros
             g_additional_inputs = [
-                torch.zeros_like(ai) if ai_tm else None
-                for ai_tm, ai in zip(additional_inputs_tensor_mask, additional_inputs)
+                torch.zeros_like(ai)
+                for ai in filter_with_masks(
+                    additional_inputs, additional_inputs_tensor_mask
+                )
             ]
             return g_additional_inputs
 
@@ -668,6 +680,11 @@ class ScanAutogradOp(torch.autograd.Function):
         )
         ctx._combine_fn_bw = create_bw_fn(ctx._combine_fn, fw_operands)
 
+        # Initialize the g_additional_inputs with zero-tensors.
+        # This step is necessary because the gradients of the additional inputs are accumulated in the
+        # ``wrapper_bwd_combine_fn`` and thus need a zero-initialized starting point
+        initial_g_additional_inputs = initialize_g_additional_inputs(additional_inputs)
+
         # 4.) Create the BW wrapper to accumulate the gradients for the additional_inputs
         def combine_fn_bw_grad_accumulation(*args):
             # Dissect args and re-order them for the ``ctx._combine_fn_bw``
@@ -680,7 +697,7 @@ class ScanAutogradOp(torch.autograd.Function):
             ) = split_into_chunks(
                 args,
                 [
-                    num_additional_inputs,
+                    len(initial_g_additional_inputs),
                     num_leaves_init + num_leaves_ys,
                     num_leaves_init + num_leaves_xs + num_additional_inputs,
                 ],
@@ -694,13 +711,15 @@ class ScanAutogradOp(torch.autograd.Function):
 
             new_g_additional_inputs = [
                 # If the additional inputs are ints or SymInts, those values are taken as is and no gradients are added
-                carr_g + curr_g if add_inp_tm else carr_g
-                for add_inp_tm, carr_g, curr_g in zip(
-                    additional_inputs_tensor_mask,
+                carr_g + curr_g
+                for carr_g, curr_g in zip(
                     carried_g_additional_input,
-                    g_additional_inputs_t,
+                    filter_with_masks(
+                        g_additional_inputs_t, additional_inputs_tensor_mask
+                    ),
                 )
             ]
+            assert all(isinstance(t, torch.Tensor) for t in new_g_additional_inputs)
 
             # The ``new_g_additional_inputs`` and the ``g_c_t`` are encoded in the carry of the backward scan operator
             # The ``g_xs_t`` is encoded as the output of the backward scan operator
@@ -718,9 +737,9 @@ class ScanAutogradOp(torch.autograd.Function):
             # Because only tensor elements of additional inputs can have requires_grad=True,
             # the values for non-tensor elements of additional inputs are None
             masked_additional_inputs = [
-                a.clone() if add_inp_tm else None
-                for add_inp_tm, a in zip(
-                    additional_inputs_tensor_mask, additional_inputs
+                a.clone()
+                for a in filter_with_masks(
+                    additional_inputs, additional_inputs_tensor_mask
                 )
             ]
 
@@ -771,11 +790,12 @@ class ScanAutogradOp(torch.autograd.Function):
 
         # Decompose the flat_grads into g_c_T, g_ys
         g_c_T, g_ys = split_into_chunks(flat_grads, [num_leaves_init, num_leaves_ys])
-
-        # Initialize the g_additional_inputs with zero-tensors.
-        # This step is necessary because the gradients of the additional inputs are accumulated in the
-        # ``wrapper_bwd_combine_fn`` and thus need a zero-initialized starting point
-        initial_g_additional_inputs = initialize_g_additional_inputs(additional_inputs)
+        assert all(
+            isinstance(t, torch.Tensor) and t.dtype.is_floating_point for t in g_c_T
+        )
+        assert all(
+            isinstance(t, torch.Tensor) and t.dtype.is_floating_point for t in g_ys
+        )
 
         # Prepend the inits to the carries.
         # This is needed, because when computing the gradients, the last carry is not needed
@@ -804,13 +824,19 @@ class ScanAutogradOp(torch.autograd.Function):
 
         # Unpack the computed gradients
         g_additional_inputs, g_init, g_xs = split_into_chunks(
-            gradients, [num_additional_inputs, num_leaves_init, num_leaves_xs]
+            gradients,
+            [len(initial_g_additional_inputs), num_leaves_init, num_leaves_xs],
         )
 
         # The flipping back along the scan dimension is required to get the gradients in the right order for ``xs``
         g_xs = [torch.flip(elem, [0]) for elem in g_xs]
 
-        return *[None] * 4, *g_init, *g_xs, *g_additional_inputs
+        return (
+            *[None] * 4,
+            *g_init,
+            *g_xs,
+            *fill_none_with_masks(g_additional_inputs, additional_inputs_tensor_mask),
+        )
 
 
 @scan_op.py_autograd_impl
