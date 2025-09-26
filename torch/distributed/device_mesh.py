@@ -65,13 +65,13 @@ else:
                 "DeviceMesh requires numpy >= 1.21 to be installed for type checking"
             )
 
+    BackendConfig = tuple[Optional[str], Optional[C10dBackend.Options]]
+
     class _MeshEnv(threading.local):
         def __init__(self) -> None:
             self.mesh_stack: list[DeviceMesh] = []
             self.child_to_root_mapping: dict[DeviceMesh, DeviceMesh] = {}
-            self.mesh_dim_group_options: dict[
-                int, tuple[Optional[str], Optional[C10dBackend.Options]]
-            ] = {}
+            self.mesh_dim_group_options: dict[int, BackendConfig] = {}
             self.root_to_flatten_mapping: dict[DeviceMesh, dict[str, DeviceMesh]] = {}
             # Record flatten mesh name to its mesh dim index in root mesh.
             self.flatten_name_to_root_dims: dict[
@@ -170,7 +170,7 @@ else:
             self,
             device_mesh: "DeviceMesh",
             mesh_dim_name: Optional[str] = None,
-            backend_override: tuple[Optional[str], Optional[C10dBackend.Options]] = (
+            backend_override: BackendConfig = (
                 None,
                 None,
             ),
@@ -460,9 +460,7 @@ else:
             mesh: Union[torch.Tensor, "ArrayLike"],
             *,
             mesh_dim_names: Optional[tuple[str, ...]] = None,
-            backend_override: Optional[
-                tuple[tuple[Optional[str], Optional[C10dBackend.Options]], ...]
-            ] = None,
+            backend_override: Optional[tuple[BackendConfig, ...]] = None,
             _init_backend: bool = True,
             _rank: Optional[int] = None,
         ) -> None:
@@ -557,9 +555,7 @@ else:
 
         def _init_process_groups(
             self,
-            backend_override: tuple[
-                tuple[Optional[str], Optional[C10dBackend.Options]], ...
-            ],
+            backend_override: tuple[BackendConfig, ...],
         ):
             # group_name associated with each mesh dimension, each
             # mesh dimension should have one sub-group per rank
@@ -1060,7 +1056,7 @@ else:
         ],
         ndim: int,
         mesh_dim_names: Optional[tuple[str, ...]] = None,
-    ) -> Iterator[tuple[Optional[str], Optional[C10dBackend.Options]]]:
+    ) -> Iterator[BackendConfig]:
         if mesh_dim_names is None:
             mesh_dim_names = ()
         for dim_idx, dim_name in zip_longest(range(ndim), mesh_dim_names):
