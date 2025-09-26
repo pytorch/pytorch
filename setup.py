@@ -256,7 +256,7 @@ import platform
 
 
 # Also update `project.requires-python` in pyproject.toml when changing this
-python_min_version = (3, 9, 0)
+python_min_version = (3, 10, 0)
 python_min_version_str = ".".join(map(str, python_min_version))
 if sys.version_info < python_min_version:
     print(
@@ -1704,7 +1704,18 @@ def main() -> None:
     package_data = {
         "torch": torch_package_data,
     }
-    exclude_package_data = {}
+    # some win libraries are excluded
+    # these are statically linked
+    exclude_windows_libs = [
+        "lib/dnnl.lib",
+        "lib/kineto.lib",
+        "lib/libprotobuf-lite.lib",
+        "lib/libprotobuf.lib",
+        "lib/libprotoc.lib",
+    ]
+    exclude_package_data = {
+        "torch": exclude_windows_libs,
+    }
 
     if not BUILD_LIBTORCH_WHL:
         package_data["torchgen"] = torchgen_package_data
