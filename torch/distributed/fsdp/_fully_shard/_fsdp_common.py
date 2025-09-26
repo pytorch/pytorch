@@ -171,3 +171,7 @@ def _cast_fp_tensor(dtype: torch.dtype, x: torch.Tensor) -> torch.Tensor:
     ):
         return x
     return x.to(dtype)
+
+
+def is_bw() -> bool:
+    return torch._C._current_graph_task_id() != -1
