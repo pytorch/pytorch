@@ -53,6 +53,7 @@ from torch.testing._internal.common_utils import (
     subtest,
     TEST_SCIPY,
     TEST_WITH_ROCM,
+    xfailIf,
 )
 
 
@@ -4087,6 +4088,11 @@ class TestConvolutionNNDeviceType(NNTestCase):
     @onlyCUDA
     @largeTensorTest("20GB")
     @largeTensorTest("64GB", "cpu")
+    # TODO(eqy): Remove this once it is fixed in cuDNN and we can dispatch to it again
+    @xfailIf(
+        torch.backends.cudnn.version() is not None
+        and torch.backends.cudnn.version() > 91000
+    )
     def test_depthwise_conv_64bit_indexing(self, device):
         x = torch.randn(1, 2, 32800, 32800, dtype=torch.half).to(
             memory_format=torch.channels_last
@@ -4100,7 +4106,8 @@ class TestConvolutionNNDeviceType(NNTestCase):
         del y, yref
 
         # try a batch-splittable case
-        x = x.reshape(100, 2, 3280, 3280).contiguous(memory_format=torch.channels_last)
+        x = x.reshape(100, 2, 3280, 3280)
+        x = x.contiguous(memory_format=torch.channels_last)
         yref = c(x)
         y = c.to(device=device)(x.to(device=device))
         self.assertEqual(yref, y, atol=1e-3, rtol=1e-4)
