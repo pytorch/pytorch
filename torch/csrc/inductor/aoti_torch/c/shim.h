@@ -176,6 +176,28 @@ AOTI_TORCH_EXPORT void aoti_torch_grad_mode_set_enabled(bool enabled);
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_delete_tensor_object(AtenTensorHandle tensor);
 
+// c10::IValue <int64_t> object conversion
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_int64_to_ivalue(int64_t val, C10IValueHandle* ivalue);
+
+// c10::IValue <const char** > object conversions
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_strlist_to_ivalue(
+    const char** val,
+    int64_t len,
+    C10IValueHandle* ivalue);
+
+// c10::IValue <const char* > object conversions
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_str_to_ivalue(const char* val, C10IValueHandle* ivalue);
+
+// c10::IValue <at::Tensor> object conversions
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_tensor_to_ivalue(AtenTensorHandle val, C10IValueHandle* ivalue);
+
+// Free the c10::IValue object
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_delete_c10_value_object(C10IValueHandle handle);
+
 // Get a pointer to the underlying storage data
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_get_data_ptr(
     AtenTensorHandle tensor,
