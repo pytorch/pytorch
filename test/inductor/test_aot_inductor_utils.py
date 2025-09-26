@@ -157,7 +157,10 @@ class AOTIRunnerUtil:
             # This should really be the default behavior of torch.export.export
             model = WrapperModule(model)
 
-        with torch.no_grad():
+        with (
+            torch.no_grad(),
+            torch._export.config.patch(use_new_tracer_experimental=True),
+        ):
             # strict=False needs extra migration work
             ep = torch.export.export(
                 model,

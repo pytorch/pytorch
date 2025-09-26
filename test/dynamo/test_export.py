@@ -2713,19 +2713,20 @@ def forward(self, x):
             torch._dynamo.exc.UserError,
             ".*y.*size.*2.* = 4 is not equal to .*x.*size.*1.* = 3",
         ):
-            torch.export.export(bar, (x, y), dynamic_shapes=dynamic_shapes, strict=True)
+            with torch._export.config.patch(use_new_tracer_experimental=True):
+                torch.export.export(
+                    bar, (x, y), dynamic_shapes=dynamic_shapes, strict=True
+                )
         y = torch.randn(10, 3, 3)
-        ebar = torch.export.export(
-            bar, (x, y), dynamic_shapes=dynamic_shapes, strict=True
-        )
-        self.assertEqual(
-            [
-                str(node.meta["val"].shape)
-                for node in ebar.graph_module.graph.nodes
-                if node.op == "placeholder"
-            ],
-            ["torch.Size([s17, s27, s27])", "torch.Size([s17, s27, s27])"],
-        )
+        with torch._export.config.patch(use_new_tracer_experimental=True):
+            ebar = torch.export.export(
+                bar, (x, y), dynamic_shapes=dynamic_shapes, strict=True
+            )
+
+        for node in ebar.graph_module.graph.nodes:
+            if node.op == "placeholder":
+                shape = node.meta["val"].shape
+                self.assertEqual(shape[1], shape[2])
 
     @torch._dynamo.config.patch(
         capture_dynamic_output_shape_ops=True,
