@@ -8664,6 +8664,17 @@ class WhileLoop(ExternKernel):
 
         return result
 
+    @staticmethod
+    def _maybe_wrap_as_tensor_box(out: IRNode) -> IRNode:
+        if isinstance(out, TensorBox):
+            return out
+        elif isinstance(out, (StorageBox, ReinterpretView)):
+            return TensorBox(out)
+        elif isinstance(out, MultiOutput):
+            return TensorBox.create(out)
+        else:
+            raise RuntimeError(f"NYI unsupported output type: {type(out)}")
+
     @classmethod
     def create(
         cls,
@@ -8686,9 +8697,21 @@ class WhileLoop(ExternKernel):
             ret = []
             for tb, fk in zip(tensor_boxes, fake_tensors):
                 if isinstance(fk, torch.Tensor):
+                    # Subgraph lowering always return StorageBox as graph_outputs because
+                    # it realizes the outputs.
+                    #
+                    # However, require_exact_strides is expecting TensorBox
+                    # e.g. in require_exact_strides when an expand happens,
+                    # the fake tensor's stride is (0, 0, 0) but the storage
+                    # box might have a different stride so lowering.slice_
+                    # is used to make the stride consistent and it expects input to
+                    # be TensorBox.
+                    #
+                    # So we wrap the inputs as tensor boxes if they're not yet.
+                    new_tb = WhileLoop._maybe_wrap_as_tensor_box(tb)
                     ret.append(
                         ExternKernel.require_exact_strides(
-                            tb, fk.stride(), allow_padding=False
+                            new_tb, fk.stride(), allow_padding=False
                         )
                     )
                 else:
