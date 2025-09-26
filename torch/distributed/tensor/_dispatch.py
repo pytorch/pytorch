@@ -152,6 +152,7 @@ class OpDispatcher:
         # extract local tensor and sharding infos to a OpInfo
         op_info = self.unwrap_to_op_info(op_call, args, kwargs)
 
+        # self.sharding_propagator.propagate(op_info)
         try:
             self.sharding_propagator.propagate(op_info)
         except NotImplementedError:
@@ -468,7 +469,8 @@ class OpDispatcher:
                 assert isinstance(spec, DTensorSpec), (
                     f"output spec does not match with output! Expected DTensorSpec, got {spec}."
                 )
-                return dtensor.DTensor(res, spec, requires_grad=res.requires_grad)
+                with torch.fx.experimental.proxy_tensor.disable_proxy_modes_tracing():
+                    return dtensor.DTensor(res, spec, requires_grad=res.requires_grad)
             else:
                 # if output does not have a DTensorSpec due to specific ops, it must be a scalar tensor
                 assert res.ndim == 0, "output tensor should be scalar!"
