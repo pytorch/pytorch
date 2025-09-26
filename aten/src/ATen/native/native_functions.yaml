@@ -2379,7 +2379,7 @@
 
 - func: _embedding_bag_backward(Tensor grad, Tensor indices, Tensor offsets, Tensor offset2bag, Tensor bag_size, Tensor maximum_indices, SymInt num_weights, bool scale_grad_by_freq, int mode, bool sparse, Tensor? per_sample_weights, int padding_idx=-1) -> Tensor
   dispatch:
-    CPU, CUDA: _embedding_bag_backward_symint
+    CPU, CUDA, MPS: _embedding_bag_backward_symint
 
 - func: _embedding_bag_sparse_backward(Tensor grad, Tensor indices, Tensor offsets, Tensor offset2bag, Tensor bag_size, SymInt num_weights, bool scale_grad_by_freq, int mode, Tensor? per_sample_weights, int padding_idx=-1) -> Tensor
   dispatch:
@@ -2389,12 +2389,14 @@
   dispatch:
     CPU: _embedding_bag_dense_backward_cpu
     CUDA: _embedding_bag_dense_backward_cuda
+    MPS: _embedding_bag_dense_backward_mps
   autogen: _embedding_bag_dense_backward.out
 
 - func: _embedding_bag_per_sample_weights_backward(Tensor grad, Tensor weight, Tensor indices, Tensor offsets, Tensor offset2bag, int mode, int padding_idx=-1) -> Tensor
   dispatch:
     CPU: _embedding_bag_per_sample_weights_backward_cpu
     CUDA: _embedding_bag_per_sample_weights_backward_cuda
+    MPS: _embedding_bag_per_sample_weights_backward_mps
   autogen: _embedding_bag_per_sample_weights_backward.out
 
 - func: empty.names(int[] size, *, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
