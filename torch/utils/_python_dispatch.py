@@ -608,7 +608,7 @@ class SchemaInfo:
     outs_write_aliases: list[str] | None
 
 
-def _get_write_alias(x):
+def _get_write_alias(x) -> Optional[str]:
     alias_set = x.alias_set
     if not alias_set or not x.is_write:
         return None
@@ -685,18 +685,23 @@ def get_alias_info(func) -> SchemaInfo:
             for a in func._schema.returns
         ]
 
-    out_schemas_write_aliases = [_get_write_alias(r) for r in out_schemas]
+    out_schemas_write_aliases: list[Optional[str]] = [
+        _get_write_alias(r) for r in out_schemas
+    ]
+    outs_write_aliases: Optional[list[str]] = None
     if not any(x is not None for x in out_schemas_write_aliases):
-        out_schemas_write_aliases = None
+        outs_write_aliases = None
     # simplifying assumption: we don't have **any** ops with return types like "-> (Tensor(a!), Tensor)"
     elif not all(x is not None for x in out_schemas_write_aliases):
         raise RuntimeError("Unsupported schema: " + str(func._schema))
+    else:
+        outs_write_aliases = out_schemas_write_aliases  # type: ignore[assignment]
 
     schema_info = SchemaInfo(
         args=arg_schemas,
         outs=out_schemas,
         int_tags=[int(x) for x in func.tags],
-        outs_write_aliases=out_schemas_write_aliases,
+        outs_write_aliases=outs_write_aliases,
     )
     return schema_info
 
