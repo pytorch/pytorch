@@ -4,6 +4,7 @@ import torch
 import torch.distributed as dist
 from torch._dynamo.functional_export import _dynamo_graph_capture_for_export
 from torch._functorch.aot_autograd import aot_export_joint_with_descriptors
+from torch._functorch.partitioners import min_cut_rematerialization_partition
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import distribute_tensor, Replicate
 from torch.distributed.tensor.parallel import (
@@ -20,8 +21,6 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import MLPModule
 from torch.testing._internal.distributed.fake_pg import FakeStore
-
-from torch._functorch.partitioners import min_cut_rematerialization_partition
 
 
 class SimpleModel(torch.nn.Module):
@@ -62,6 +61,10 @@ def aot_export_joint_with_descriptors_alone(model, inputs):
         return joint_with_descriptors.graph_module
 
 
+def _count_op(gm, target):
+    return sum(1 for node in gm.graph.nodes if node.target == target)
+
+
 @requires_cuda
 class DTensorExportTest(TestCase):
     def tearDown(self):
@@ -80,6 +83,7 @@ class DTensorExportTest(TestCase):
     @parametrize(
         "export_fn",
         [
+            # failing as bw missing from joint_gm
             # strict_export_and_aot_export_joint_with_descriptors,
             graph_capture_and_aot_export_joint_with_descriptors,
             aot_export_joint_with_descriptors_alone,
@@ -112,12 +116,22 @@ class DTensorExportTest(TestCase):
         inputs = distribute_tensor(inputs, mesh_2d["tp"], placements=[Replicate()])
 
         joint_gm = export_fn(tp_model, inputs)
-        fw_gm, bw_gm = min_cut_rematerialization_partition(joint_gm, None, num_fwd_outputs=1)
+        fw_gm, bw_gm = min_cut_rematerialization_partition(
+            joint_gm, None, num_fwd_outputs=1
+        )
 
-        self.assertTrue(sum([1 for node in joint_gm.graph.nodes if node.target == torch.ops._c10d_functional.all_reduce.default]), 3)
-        self.assertTrue(sum([1 for node in fw_gm.graph.nodes if node.target == torch.ops._c10d_functional.all_reduce.default]), 2)
-        self.assertTrue(sum([1 for node in bw_gm.graph.nodes if node.target == torch.ops._c10d_functional.all_reduce.default]), 1)
-
+        self.assertTrue(
+            _count_op(joint_gm, torch.ops._c10d_functional.all_reduce.default),
+            3,
+        )
+        self.assertTrue(
+            _count_op(fw_gm, torch.ops._c10d_functional.all_reduce.default),
+            2,
+        )
+        self.assertTrue(
+            _count_op(bw_gm, torch.ops._c10d_functional.all_reduce.default),
+            1,
+        )
 
 
 instantiate_parametrized_tests(DTensorExportTest)
