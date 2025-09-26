@@ -125,6 +125,10 @@ class TunableOp {
           if (ctx->IsTuningEnabled()) {
             result = FindFastest(params);
             mgr.Add(op_sig, params_sig, result);
+            if(ctx->IsOutputRealtimeEnabled() && result != ResultEntry::Null()) {
+              //if realtime output is enabled, then we write instantly.
+              mgr.AppendResultLine(op_sig, params_sig, result);
+            }
           }
           else if (ctx->IsRecordUntunedEnabled()) {
             // or record the gemm into file

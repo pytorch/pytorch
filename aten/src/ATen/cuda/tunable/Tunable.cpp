@@ -116,14 +116,6 @@ void TuningResultsManager::Add(const std::string& op_signature, const std::strin
 
   AddImpl(op_signature, params_signature, std::move(best), it->second);
 
-  auto* ctx = getTuningContext();
-
-  if(ctx->IsOutputRealtimeEnabled()) {
-    auto result_it = it->second.find(params_signature);
-    if(result_it != it->second.end()) {
-      AppendResultLine(op_signature, params_signature, result_it->second);
-    }
-  }
 }
 
 void TuningResultsManager::RecordUntuned( std::ofstream& untuned_file, const std::string& op_signature,
@@ -160,6 +152,8 @@ void TuningResultsManager::RecordUntuned( std::ofstream& untuned_file, const std
 }
 
 void TuningResultsManager::InitRealtimeAppend(const std::string& filename, const std::unordered_map<std::string, std::string>& validators) {
+  std::scoped_lock fl{realtime_file_mutex_};
+
   if(realtime_out_) {
     return;
   }
@@ -187,14 +181,16 @@ void TuningResultsManager::InitRealtimeAppend(const std::string& filename, const
   if(!file_exists || file_empty) {
     for(const auto& [key, val] : validators) {
       (*realtime_out_) << "Validator," << key << "," << val << std::endl;
+      realtime_out_->flush();
     }
     validators_written_ = true;
-    realtime_out_->flush();
+    
     TUNABLE_LOG2("Wrote validators to realtime output file");
   }
 }
 
 void TuningResultsManager::AppendResultLine(const std::string& op_sig, const std::string& param_sig, const ResultEntry& result) {
+  std::scoped_lock fl{realtime_file_mutex_};
 
   if(!realtime_out_ || !realtime_out_->good()) {
     return;
@@ -208,8 +204,10 @@ void TuningResultsManager::AppendResultLine(const std::string& op_sig, const std
 
 void TuningResultsManager::CloseRealtimeAppend() {
   std::scoped_lock fl{realtime_file_mutex_};
+  
 
   if(realtime_out_) {
+    realtime_out_->flush();
     realtime_out_->close();
     realtime_out_.reset();
     TUNABLE_LOG2("Closed realtime output file");
@@ -485,6 +483,9 @@ TuningContext::~TuningContext() {
     // This can happen in a DDP job where a python process spawns other workers
     // but doesn't do any computation itself.
     return;
+  }
+  if(IsOutputRealtimeEnabled()) {
+    GetTuningResultsManager().CloseRealtimeAppend();
   }
   auto filename = GetFilename();
   if (IsTunableOpEnabled() && IsTuningEnabled() && !filename.empty() && write_file_on_exit_) {
