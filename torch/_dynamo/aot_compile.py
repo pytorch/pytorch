@@ -250,13 +250,94 @@ def aot_compile_fullgraph(
                 }
             ),
         ):
-            compiled_fn = backend(
-                backend_input.graph_module, backend_input.example_inputs
+            from torch._functorch.aot_autograd import aot_export_joint_with_descriptors
+            # Check if backend is aot_eager and use aot_export_joint_with_descriptors instead
+            is_aot_eager_backend = (
+                isinstance(backend, torch._TorchCompileWrapper)
+                and hasattr(backend, "compiler_name")
+                and backend.compiler_name == "aot_eager"
             )
-            # If Inductor backend is used, grab the compiled_fn from PrecompileContext
-            # TODO: this should be replaced once we make the backend return the SerializableCallable directly.
-            if isinstance(backend, torch._TorchCompileInductorWrapper):
-                compiled_fn = BundledAOTAutogradSerializableCallable(compiled_fn)
+
+            if is_aot_eager_backend:
+                # For aot_eager backend, use aot_export_joint_with_descriptors instead of the backend directly
+                from contextlib import ExitStack
+                from torch._decomp import decomposition_table
+                from functorch.compile import min_cut_rematerialization_partition
+
+                stack = ExitStack()
+                joint_with_descriptors = aot_export_joint_with_descriptors(
+                    stack=stack,
+                    mod=backend_input.graph_module,
+                    args=backend_input.example_inputs,
+                    decompositions=decomposition_table,
+                    keep_inference_input_mutations=False,
+                    ignore_shape_env=False,
+                )
+
+                # Set breakpoint after getting the return value as requested in PLAN.md
+                breakpoint()
+
+                # Now partition the joint graph similar to aot_stage2_compile
+                aot_state = joint_with_descriptors._aot_state
+                aot_graph_capture = joint_with_descriptors._aot_graph_capture
+
+                # Get the joint graph module
+                fx_g = joint_with_descriptors.graph_module
+                joint_inputs = aot_graph_capture.updated_flat_args
+                fw_metadata = aot_state.fw_metadata
+
+                if aot_state.needs_autograd:
+                    # For autograd case, partition into forward and backward
+                    # Import OutputType to check output types
+                    from torch._functorch._aot_autograd.schemas import OutputType
+
+                    # Calculate number of forward outputs
+                    num_inner_fwd_outputs = len(
+                        [x for x in fw_metadata.output_info
+                         if x.output_type in (OutputType.non_alias, OutputType.alias_of_intermediate)]
+                    ) + fw_metadata.num_intermediate_bases
+
+                    # Add mutated inputs that show up as outputs
+                    num_inner_fwd_outputs += len([
+                        x for x in fw_metadata.input_info
+                        if x.mutates_data or x.mutates_metadata
+                    ])
+
+                    # Use the same partition function as aot_eager
+                    fw_module, bw_module = min_cut_rematerialization_partition(
+                        fx_g,
+                        joint_inputs,
+                        num_fwd_outputs=num_inner_fwd_outputs,
+                        static_lifetime_input_indices=fw_metadata.static_input_indices or [],
+                    )
+                else:
+                    # For inference case, no backward needed
+                    fw_module = fx_g
+                    bw_module = None
+
+                # Set breakpoint after getting fw and bw modules
+                breakpoint()
+
+                # TODO: take these fw/bwmodules and compile them with fancy eager mode
+                # then put them together with AOTDispatchAutograd.post_compile, allowing it
+                # to be serialized.
+                #compiled_fw = fancy_eager(fw_module, example_inputs)
+                #compiled_bw = fancy_eager(bw_module, example_inputs)
+
+
+                # For now, create a placeholder SerializableCallable (will be implemented later)
+                # The user said not to implement the SerializableCallable stuff yet
+                compiled_fn = None  # This will cause an error for now, but that's expected
+
+            else:
+                compiled_fn = backend(
+                    backend_input.graph_module, backend_input.example_inputs
+                )
+                # If Inductor backend is used, grab the compiled_fn from PrecompileContext
+                # TODO: this should be replaced once we make the backend return the SerializableCallable directly.
+                if isinstance(backend, torch._TorchCompileInductorWrapper):
+                    compiled_fn = BundledAOTAutogradSerializableCallable(compiled_fn)
+
 
         if not isinstance(compiled_fn, SerializableCallable):
             if hasattr(backend, "compiler_fn"):
