@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from enum import Enum
+from enum import Enum, member
 from functools import partial
 
 import torch.distributed as dist
@@ -51,45 +51,61 @@ class DDPCommHookType(Enum):
     ``DDPCommHookType.ALLREDUCE.value(model=model, state=process_group)``.
     """
 
-    ALLREDUCE = partial(_ddp_comm_hook_wrapper, comm_hook=default.allreduce_hook)
-    FP16_COMPRESS = partial(
-        _ddp_comm_hook_wrapper, comm_hook=default.fp16_compress_hook
+    ALLREDUCE = member(
+        partial(_ddp_comm_hook_wrapper, comm_hook=default.allreduce_hook)
     )
-    BF16_COMPRESS = partial(
-        _ddp_comm_hook_wrapper, comm_hook=default.bf16_compress_hook
+    FP16_COMPRESS = member(
+        partial(_ddp_comm_hook_wrapper, comm_hook=default.fp16_compress_hook)
     )
-    QUANTIZE_PER_TENSOR = partial(
-        _ddp_comm_hook_wrapper, comm_hook=quantization.quantization_pertensor_hook
+    BF16_COMPRESS = member(
+        partial(_ddp_comm_hook_wrapper, comm_hook=default.bf16_compress_hook)
     )
-    QUANTIZE_PER_CHANNEL = partial(
-        _ddp_comm_hook_wrapper, comm_hook=quantization.quantization_perchannel_hook
+    QUANTIZE_PER_TENSOR = member(
+        partial(
+            _ddp_comm_hook_wrapper, comm_hook=quantization.quantization_pertensor_hook
+        )
     )
-    POWER_SGD = partial(
-        _powerSGD_comm_hook_wrapper,
-        comm_hook=powerSGD.powerSGD_hook,
-        matrix_approximation_rank=1,
+    QUANTIZE_PER_CHANNEL = member(
+        partial(
+            _ddp_comm_hook_wrapper, comm_hook=quantization.quantization_perchannel_hook
+        )
+    )
+    POWER_SGD = member(
+        partial(
+            _powerSGD_comm_hook_wrapper,
+            comm_hook=powerSGD.powerSGD_hook,
+            matrix_approximation_rank=1,
+        )
     )
     # Rank-2 PowerSGD can give a higher accuracy than the default rank-1 version,
     # but it runs slower and consumes more memory.
-    POWER_SGD_RANK2 = partial(
-        _powerSGD_comm_hook_wrapper,
-        comm_hook=powerSGD.powerSGD_hook,
-        matrix_approximation_rank=2,
+    POWER_SGD_RANK2 = member(
+        partial(
+            _powerSGD_comm_hook_wrapper,
+            comm_hook=powerSGD.powerSGD_hook,
+            matrix_approximation_rank=2,
+        )
     )
     # Batching can lead to a faster training at the cost of accuracy.
-    BATCHED_POWER_SGD = partial(
-        _powerSGD_comm_hook_wrapper,
-        comm_hook=powerSGD.batched_powerSGD_hook,
-        matrix_approximation_rank=1,
+    BATCHED_POWER_SGD = member(
+        partial(
+            _powerSGD_comm_hook_wrapper,
+            comm_hook=powerSGD.batched_powerSGD_hook,
+            matrix_approximation_rank=1,
+        )
     )
-    BATCHED_POWER_SGD_RANK2 = partial(
-        _powerSGD_comm_hook_wrapper,
-        comm_hook=powerSGD.batched_powerSGD_hook,
-        matrix_approximation_rank=2,
+    BATCHED_POWER_SGD_RANK2 = member(
+        partial(
+            _powerSGD_comm_hook_wrapper,
+            comm_hook=powerSGD.batched_powerSGD_hook,
+            matrix_approximation_rank=2,
+        )
     )
-    NOOP = partial(
-        _ddp_comm_hook_wrapper,
-        comm_hook=debugging.noop_hook,
+    NOOP = member(
+        partial(
+            _ddp_comm_hook_wrapper,
+            comm_hook=debugging.noop_hook,
+        )
     )
 
 
