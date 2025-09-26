@@ -3,6 +3,8 @@
 
 import itertools
 
+import numpy as np
+
 import torch
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import (
@@ -701,68 +703,136 @@ class DeviceOrderRedistributeTest(DTensorTestBase):
         return 8
 
     @with_comms
-    def test_redistribute_mesh_dim_reorder(self):
-        mesh = init_device_mesh(self.device_type, (2, 2, 2))
+    def test_ordered_redistribute(self):
+        """Test ordered redistribution with various sharding syntaxes"""
+        torch.manual_seed(21)
+        mesh = init_device_mesh(
+            self.device_type, (2, 2, 2), mesh_dim_names=("dp", "tp", "xp")
+        )
         input_data = torch.randn((8, 8, 8), device=self.device_type)
         sharding_src_dst_pairs_with_order = [
-            # after reordering: S(0)S(0)S(0) -> RS(0)S(0) (S(0) to mesh axis
-            # I_{0,1,2}->I_{1,2}). 2: S0->R, 1: S0->R, 0: S0->R, 1: R->S0, 2:
-            # R->S0. Note that [0, 1, 2] device order will trigger the
-            # generate_greedy_transform_infos() without using the device_order
-            # information.
-            (
-                ([Shard(0), Shard(0), Shard(0)], [0, 1, 2]),
-                ([Replicate(), Shard(0), Shard(0)], [0, 1, 2]),
-            ),
-            # same as above, device order will be default to [0,1,2] if not
-            # specified
+            # without specifying the `shard_order`, it will trigger the default
+            # left-to-right device distribution
             (
                 ([Shard(0), Shard(0), Shard(0)], None),
                 ([Replicate(), Shard(0), Shard(0)], None),
             ),
-            # Below comments we use [x] to represent the sequence of mesh axis,
-            # e.g., S(0)[1]S(0)[0] means we Shard(0) on mesh axis 1, then
-            # Shard(0) on mesh axis 0.
-            # S(0)[1]S(0)[0]S(0)[2] -> S(0)[1]S(0)[0]S(1)[0] -> RS(0)[0]S(1)[0]
-            # -> RS(0)[0]S(0)[1]
+            # below placement is same as above with device order will be default
+            # to ["dp", "tp", "xp"], which is the same as [0,1,2].
             (
-                ([Shard(0), Shard(0), Shard(0)], [1, 0, 2]),
-                ([Replicate(), Shard(0), Shard(0)], [0, 1, 2]),
+                (None, {0: ["dp", "tp", "xp"]}),
+                (None, {0: [1, 2]}),
             ),
-            #  S(0)[0]S(0)[1]S(0)[2] -> S(0)[0]S(0)[1]S(1)[0] ->
-            #  S(0)[0]S(1)[1]S(1)[0] -> RS(1)[1]S(1)[0] -> RS(0)[0]S(1)[0] ->
-            #  RS(0)[0]S(0)[1]
+            # redistribution path: S(0)[1]S(0)[0]S(0)[2] -> S(0)[1]S(0)[0]S(1)[0] ->
+            # RS(0)[0]S(1)[0] -> RS(0)[0]S(0)[1]
             (
-                ([Shard(0), Shard(0), Shard(0)], [0, 1, 2]),
-                ([Replicate(), Shard(0), Shard(0)], [2, 0, 1]),
+                (None, {0: [1, 0, 2]}),
+                (None, {0: [1, 2]}),
             ),
-            # RS(0)[0]S(0)[1] -> S(1)[0]S(0)[0]S(0)[1] -> S(1)[0]S(0)[0]R
+            # redistribution path: S(0)[0]S(0)[1]S(0)[2] ->
+            # S(0)[0]S(0)[1]S(1)[0] -> S(0)[0]S(1)[1]S(1)[0] -> RS(1)[1]S(1)[0]
+            # -> RS(0)[0]S(1)[0] -> RS(0)[0]S(0)[1]
             (
-                ([Replicate(), Shard(0), Shard(0)], [0, 1, 2]),
-                ([Shard(1), Shard(0), Replicate()], [1, 2, 0]),
+                (None, {0: [1, 0, 2]}),
+                (None, {0: [0, 1]}),
+            ),
+            # If we use the graph search solution, the redistribution path will
+            # be S(0)[0, 1] -> S(0)[0]S(1)[1] -> S(1)[1] -> S(0)[2]S(1)[1],
+            # which takes only 1 comm count. However, this placement follows the
+            # default device order and the greedy solution will be triggered,
+            # which results in path: S(0)[0, 1] -> S(0)[0]S(1)[1] -> S(1)[1] ->
+            # S(0)[2]S(1)[1] with 2 comm count
+            (
+                (None, {0: ["dp", "tp"]}),
+                (None, {1: ["tp"], 0: [2]}),
             ),
         ]
-        excepted_comm_counts = [3, 3, 3, 5, 1]
+        expected_comm_counts = [3, 3, 3, 5, 2]
         comm_mode = CommDebugMode()
         for idx, ((src_placement, src_order), (dst_placement, dst_order)) in enumerate(
             sharding_src_dst_pairs_with_order
         ):
             sharded_dt = distribute_tensor(
-                input_data, mesh, src_placement, device_order=src_order
+                input_data.clone(), mesh, src_placement, shard_order=src_order
             )
             expected_dt = distribute_tensor(
-                input_data.clone(), mesh, dst_placement, device_order=dst_order
+                input_data.clone(), mesh, dst_placement, shard_order=dst_order
             )
+            self.assertEqual(sharded_dt.full_tensor(), expected_dt.full_tensor())
             with comm_mode:
                 out_dt = sharded_dt.redistribute(
-                    mesh, dst_placement, device_order=dst_order
+                    mesh, dst_placement, shard_order=dst_order
                 )
                 self.assertEqual(
-                    comm_mode.get_total_counts(), excepted_comm_counts[idx]
+                    comm_mode.get_total_counts(), expected_comm_counts[idx]
                 )
             local_out_dt = out_dt.to_local()
             local_expected_dt = expected_dt.to_local()
             self.assertEqual(local_out_dt, local_expected_dt)
+
+    @with_comms
+    def test_ordered_redistribute_all_combination(self):
+        """Exhaustively test all possible sharding combinations and verify correctness"""
+        torch.manual_seed(21)
+        mesh = init_device_mesh(self.device_type, (2, 2, 2))
+        input_tensor_shape = [
+            # even sharding
+            (16, 8),
+            (8, 16, 32),
+            (8, 32, 16, 16),
+            # uneven sharding with padding
+            (17, 5),
+            (13, 2, 13),
+            (33, 16, 8, 1),
+        ]
+
+        def _generate_shard_orders(mesh, tensor_rank):
+            # Generate all possible sharding placement of tensor with rank
+            # `tensor_rank` over mesh.
+            all_mesh = list(range(mesh.ndim))
+            all_device_order = list(itertools.permutations(all_mesh))
+            for device_order in all_device_order:
+                # split on device orders, and assign each device order segment to a tensor dim
+                for num_split in range(1, mesh.ndim + 1):
+                    possible_splits = np.array_split(device_order, num_split)
+                    for tensor_dims in itertools.permutations(
+                        range(tensor_rank), len(possible_splits)
+                    ):
+                        shard_order = {}
+                        assert len(tensor_dims) == len(possible_splits)
+                        for tensor_dim, mesh_dims in zip(tensor_dims, possible_splits):
+                            shard_order[tensor_dim] = mesh_dims.tolist()
+                        yield shard_order
+
+        # 1. Verify correctness of distribute_tensor from Tensor to DTensor.
+        for tensor_shape in input_tensor_shape:
+            input_data = torch.randn(tensor_shape, device=self.device_type)
+            tensor_rank = input_data.ndim
+            for shard_order in _generate_shard_orders(mesh, tensor_rank):
+                sharded_dt = distribute_tensor(
+                    input_data.clone(), mesh, shard_order=shard_order
+                )
+                self.assertEqual(sharded_dt.full_tensor(), input_data)
+
+        # 2. Verify the correctness of redistribution from DTensor to DTensor.
+        # This test repeatedly redistributes a DTensor to various ordered
+        # placements and checks that the resulting tensor matches the original
+        # full tensor.
+        for tensor_shape in input_tensor_shape:
+            input_data = torch.randn(tensor_shape, device=self.device_type)
+            tensor_rank = input_data.ndim
+            prev_sharded_dt = None
+            for shard_order in _generate_shard_orders(mesh, tensor_rank):
+                if prev_sharded_dt is None:
+                    prev_sharded_dt = distribute_tensor(
+                        input_data.clone(), mesh, shard_order=shard_order
+                    )
+                else:
+                    sharded_dt = prev_sharded_dt.redistribute(
+                        mesh, shard_order=shard_order
+                    )
+                    self.assertEqual(sharded_dt.full_tensor(), input_data)
+                    prev_sharded_dt = sharded_dt
 
 
 if __name__ == "__main__":
