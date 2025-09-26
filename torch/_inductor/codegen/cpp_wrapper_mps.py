@@ -20,6 +20,7 @@ class CppWrapperMps(CppWrapperGpu):
     def __init__(self) -> None:
         super().__init__()
         self._used_kernel_names: OrderedSet[str] = OrderedSet()
+        self._lambda_counter: int = 0
 
     @staticmethod
     def create(
@@ -183,10 +184,18 @@ class CppWrapperMps(CppWrapperGpu):
             self.write_mps_kernel_call(kernel_name, new_args)
 
     def write_mps_kernel_call(self, name: str, call_args: list[str]) -> None:
+        # Generate unique variable names to avoid duplicate declarations
+        # when the same MPS lib is used multiple times
+        unique_suffix = self._lambda_counter
+        self._lambda_counter += 1
+
+        lambda_name = f"{name}_lambda_{unique_suffix}"
+        wrapper_name = f"{name}_func_wrapper_{unique_suffix}"
+
         # Generate the function call code (in current location)
         # Create lambda that captures by reference and pass its pointer through void*
         self.writeline(
-            f"auto {name}_lambda = [&](AOTIMetalKernelFunctionHandle handle) {{"
+            f"auto {lambda_name} = [&](AOTIMetalKernelFunctionHandle handle) {{"
         )
         self.writeline("    aoti_torch_mps_start_encoding(handle);")
 
@@ -198,10 +207,10 @@ class CppWrapperMps(CppWrapperGpu):
 
         # Pass lambda pointer through void*
         self.writeline(
-            f"std::function<void(AOTIMetalKernelFunctionHandle)> {name}_func_wrapper = {name}_lambda;"
+            f"std::function<void(AOTIMetalKernelFunctionHandle)> {wrapper_name} = {lambda_name};"
         )
         self.writeline(
-            f"aoti_torch_mps_run_command_block(get_{name}_handle(), aoti_torch_mps_shared_callback, &{name}_func_wrapper);"
+            f"aoti_torch_mps_run_command_block(get_{name}_handle(), aoti_torch_mps_shared_callback, &{wrapper_name});"
         )
 
     @staticmethod
