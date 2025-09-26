@@ -53,13 +53,13 @@ def _get_template_filtered_operators(template: str = "default"):
         return all_operators
 
     # Filter operators based on supported_ops
-    # Include core operators that are always needed
-    core_ops = ["constant", "arg", "item"]
     filtered_ops = {}
 
     for op_name, operator in all_operators.items():
-        # Always include core operations
-        if any(op_name.startswith(core) for core in core_ops):
+        # Always include operations that don't have a specific torch operation
+        # (utility operations like arg, constant, item, scalar ops)
+        torch_op = operator.torch_op_name
+        if torch_op is None:
             # Set template on operators that support it
             if hasattr(operator, "set_template"):
                 operator.set_template(template)  # type: ignore[attr-defined]
@@ -69,9 +69,8 @@ def _get_template_filtered_operators(template: str = "default"):
         # Check if the operator supports any of the template's operations
         should_include = False
         for supported_op in fuzz_template.supported_ops:
-            # Use the new consistent torch_op_name property
-            torch_op = operator.torch_op_name
-            if torch_op and torch_op == supported_op:
+            # Direct torch operation matching
+            if torch_op == supported_op:
                 should_include = True
                 break
 
