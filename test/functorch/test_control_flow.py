@@ -869,9 +869,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
             """\
 def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1, arg6_1):
     add = torch.ops.aten.add.Tensor(arg0_1, arg1_1);  arg0_1 = arg1_1 = add = None
+    zeros_like = torch.ops.aten.zeros_like.default(arg4_1, pin_memory = False);  arg4_1 = None
     clone = torch.ops.aten.clone.default(arg6_1)
     clone_1 = torch.ops.aten.clone.default(arg6_1);  arg6_1 = None
-    zeros_like = torch.ops.aten.zeros_like.default(arg4_1, pin_memory = False);  arg4_1 = None
     return [clone, clone_1, zeros_like]""",
         )
 
@@ -6977,6 +6977,106 @@ def forward(self, arg0_1):
 
         # Ensure no error is thrown when not running backward
         res_compiled = torch.compile(f)(*example_inputs)
+        self.assertEqual(res, res_compiled)
+
+    @skipIfTorchDynamo("Skip because we're testing export")
+    def test_cond_autograd_backward_inp_out_aliasing(self):
+        from torch._dynamo.testing import AotEagerAndRecordGraphs
+
+        backend = AotEagerAndRecordGraphs()
+
+        def fn(x, y):
+            return x + y
+
+        def f(x, y):
+            return control_flow.cond(x.sum() > 4, fn, fn, (x, y))
+
+        example_inputs = (
+            torch.ones(3, 4, requires_grad=True),
+            torch.ones(3, 4, requires_grad=True),
+        )
+        res = f(*example_inputs)
+        res.sum().backward()
+        res_compiled = torch.compile(f, backend=backend)(*example_inputs)
+        res_compiled.sum().backward()
+        if not TEST_WITH_CROSSREF:
+            self.assertExpectedInline(
+                normalize_gm(backend.bw_graphs[0].print_readable(print_output=False)),
+                """\
+class GraphModule(torch.nn.Module):
+    def forward(self, primals_1: "f32[3, 4]", primals_2: "f32[3, 4]", gt: "b8[]", tangents_1: "f32[3, 4]"):
+        true_graph_1 = self.true_graph_1
+        false_graph_1 = self.false_graph_1
+        cond_1 = torch.ops.higher_order.cond(gt, true_graph_1, false_graph_1, (primals_1, primals_2, tangents_1));  gt = true_graph_1 = false_graph_1 = primals_1 = primals_2 = tangents_1 = None
+        getitem_1: "f32[3, 4]" = cond_1[0]
+        getitem_2: "f32[3, 4]" = cond_1[1];  cond_1 = None
+        return (getitem_1, getitem_2)
+
+    class true_graph_1(torch.nn.Module):
+        def forward(self, arg0_1: "f32[3, 4]", arg1_1: "f32[3, 4]", arg2_1: "f32[3, 4]"):
+            clone: "f32[3, 4]" = torch.ops.aten.clone.default(arg2_1)
+            clone_1: "f32[3, 4]" = torch.ops.aten.clone.default(arg2_1);  arg2_1 = None
+            return [clone, clone_1]
+
+    class false_graph_1(torch.nn.Module):
+        def forward(self, arg0_1: "f32[3, 4]", arg1_1: "f32[3, 4]", arg2_1: "f32[3, 4]"):
+            clone: "f32[3, 4]" = torch.ops.aten.clone.default(arg2_1)
+            clone_1: "f32[3, 4]" = torch.ops.aten.clone.default(arg2_1);  arg2_1 = None
+            return [clone, clone_1]
+""",  # noqa: B950
+            )
+        self.assertEqual(res, res_compiled)
+
+    @skipIfTorchDynamo("Skip because we're testing export")
+    def test_cond_autograd_backward_out_out_aliasing(self):
+        from torch._dynamo.testing import AotEagerAndRecordGraphs
+
+        backend = AotEagerAndRecordGraphs()
+
+        def fn(x, y):
+            return (x + y).sin()
+
+        def f(x, y):
+            return control_flow.cond(x.sum() > 4, fn, fn, (x, y))
+
+        example_inputs = (
+            torch.ones(3, 4, requires_grad=True),
+            torch.ones(3, 4, requires_grad=True),
+        )
+        res = f(*example_inputs)
+        res.sum().backward()
+        res_compiled = torch.compile(f, backend=backend)(*example_inputs)
+        res_compiled.sum().backward()
+        if not TEST_WITH_CROSSREF:
+            self.assertExpectedInline(
+                normalize_gm(backend.bw_graphs[0].print_readable(print_output=False)),
+                """\
+class GraphModule(torch.nn.Module):
+    def forward(self, primals_1: "f32[3, 4]", primals_2: "f32[3, 4]", gt: "b8[]", tangents_1: "f32[3, 4]"):
+        true_graph_1 = self.true_graph_1
+        false_graph_1 = self.false_graph_1
+        cond_1 = torch.ops.higher_order.cond(gt, true_graph_1, false_graph_1, (primals_1, primals_2, tangents_1));  gt = true_graph_1 = false_graph_1 = primals_1 = primals_2 = tangents_1 = None
+        getitem_1: "f32[3, 4]" = cond_1[0]
+        getitem_2: "f32[3, 4]" = cond_1[1];  cond_1 = None
+        return (getitem_1, getitem_2)
+
+    class true_graph_1(torch.nn.Module):
+        def forward(self, arg0_1: "f32[3, 4]", arg1_1: "f32[3, 4]", arg2_1: "f32[3, 4]"):
+            add: "f32[3, 4]" = torch.ops.aten.add.Tensor(arg0_1, arg1_1);  arg0_1 = arg1_1 = None
+            cos: "f32[3, 4]" = torch.ops.aten.cos.default(add);  add = None
+            mul: "f32[3, 4]" = torch.ops.aten.mul.Tensor(arg2_1, cos);  arg2_1 = cos = None
+            clone: "f32[3, 4]" = torch.ops.aten.clone.default(mul)
+            return [mul, clone]
+
+    class false_graph_1(torch.nn.Module):
+        def forward(self, arg0_1: "f32[3, 4]", arg1_1: "f32[3, 4]", arg2_1: "f32[3, 4]"):
+            add: "f32[3, 4]" = torch.ops.aten.add.Tensor(arg0_1, arg1_1);  arg0_1 = arg1_1 = None
+            cos: "f32[3, 4]" = torch.ops.aten.cos.default(add);  add = None
+            mul: "f32[3, 4]" = torch.ops.aten.mul.Tensor(arg2_1, cos);  arg2_1 = cos = None
+            clone: "f32[3, 4]" = torch.ops.aten.clone.default(mul)
+            return [mul, clone]
+""",  # noqa: B950
+            )
         self.assertEqual(res, res_compiled)
 
     def test_map_functionalized_elem_alias(self):
