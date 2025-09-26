@@ -34,36 +34,35 @@ class ScalarSpec(NamedTuple):
 Spec = Union[TensorSpec, ScalarSpec]
 
 
-def fuzz_torch_tensor_type() -> torch.dtype:
+def fuzz_torch_tensor_type(template: str = "default") -> torch.dtype:
     """
     Fuzzes PyTorch tensor data types by randomly selecting and returning different dtypes.
 
+    Args:
+        template: Template name to determine supported dtypes
+
     Returns:
-        torch.dtype: A randomly selected PyTorch tensor data type
+        torch.dtype: A randomly selected PyTorch tensor data type based on template constraints
     """
 
-    # Available PyTorch tensor data types (excluding unsigned types to avoid compatibility issues)
-    tensor_dtypes: list[torch.dtype] = [
-        torch.float32,
-        torch.float64,
-        torch.float16,
-        torch.bfloat16,
-        torch.int8,
-        torch.int16,
-        torch.int32,
-        torch.int64,
-        torch.bool,
-        torch.complex64,
-        torch.complex128,
-    ]
+    # Get template-specific dtypes
+    if template == "dtensor":
+        # Import here to avoid circular imports
+        from torchfuzz.codegen import DTensorFuzzTemplate
 
-    # Filter out complex dtypes if avoid_complex is enabled
-    if FuzzerConfig.avoid_complex:
-        tensor_dtypes = [
-            dtype
-            for dtype in tensor_dtypes
-            if dtype not in [torch.complex64, torch.complex128]
-        ]
+        fuzz_template = DTensorFuzzTemplate()
+        tensor_dtypes = fuzz_template.supported_dtypes()
+    elif template == "unbacked":
+        # Import here to avoid circular imports
+        from torchfuzz.codegen import UnbackedFuzzTemplate
+
+        fuzz_template = UnbackedFuzzTemplate()
+        tensor_dtypes = fuzz_template.supported_dtypes()
+    else:
+        from torchfuzz.codegen import DefaultFuzzTemplate
+
+        fuzz_template = DefaultFuzzTemplate()
+        tensor_dtypes = fuzz_template.supported_dtypes()
 
     # Randomly select and return a data type
     return random.choice(tensor_dtypes)
@@ -367,7 +366,7 @@ def fuzz_tensor(
         size = fuzz_tensor_size()
 
     if dtype is None:
-        dtype = fuzz_torch_tensor_type()
+        dtype = fuzz_torch_tensor_type("default")
 
     if stride is None:
         stride = fuzz_valid_stride(size)
@@ -445,7 +444,7 @@ def fuzz_non_contiguous_dense_tensor(
         torch.Tensor: A non-contiguous but dense tensor
     """
     if dtype is None:
-        dtype = fuzz_torch_tensor_type()
+        dtype = fuzz_torch_tensor_type("default")
 
     if size is None:
         size = fuzz_tensor_size()
