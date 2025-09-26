@@ -53,6 +53,7 @@ from torch.testing._internal.common_utils import (
     subtest,
     TEST_SCIPY,
     TEST_WITH_ROCM,
+    xfailIf,
 )
 
 
@@ -228,6 +229,52 @@ class TestConvolutionNN(NNTestCase):
             torch.nn.Conv2d(1, 1, kernel_size=3, dilation=2, stride=2, groups=-1)
         with self.assertRaisesRegex(ValueError, "groups must be a positive integer"):
             torch.nn.Conv3d(1, 1, kernel_size=3, dilation=2, stride=2, groups=-2)
+
+    def test_conv3d_overflow_values(self):
+        input = torch.full(
+            (
+                0,
+                7,
+                9,
+                1,
+                5,
+            ),
+            0,
+            dtype=torch.float32,
+            requires_grad=False,
+        )
+        weight = torch.full(
+            (
+                9,
+                1,
+            ),
+            4.14214e16,
+            dtype=torch.float32,
+            requires_grad=False,
+        )
+        stride = [5, 5, 5]
+
+        with self.assertRaisesRegex(ValueError, "Padding height too large"):
+            torch.ops.aten.slow_conv3d(
+                input,
+                weight,
+                kernel_size=[5, 5, 5],
+                bias=None,
+                stride=stride,
+                padding=[2**62, 2**62, 2**62],
+            )
+
+        with self.assertRaisesRegex(
+            RuntimeError, "Kernel height x width product is too large:"
+        ):
+            torch.ops.aten.slow_conv3d(
+                input,
+                weight,
+                kernel_size=[2**32, 2**32, 2**32],
+                bias=None,
+                stride=stride,
+                padding=[2**31, 2**31, 2**31],
+            )
 
     def test_Conv1d_module_same_padding(self):
         # Compare module against functional: without strides/dilation, asymmetric padding
@@ -3823,12 +3870,9 @@ class TestConvolutionNNDeviceType(NNTestCase):
                 nn.ConvTranspose2d, n, c, h, w, k, filter_size, device
             )
 
-    # torch.half is erroring out on Windows with CUDA 10.1 + cuDNN 7.6.4
-    # returning CUDNN_STATUS_BAD_PARAM
-    # Disabling that specific test for now [see issue # 33918]
     @onlyCUDA
     @skipCUDAIfNoCudnn
-    @dtypes(torch.float, torch.double)
+    @dtypes(torch.float, torch.double, torch.float16, torch.bfloat16)
     def test_conv_cudnn_nhwc_support(self, device, dtype):
         input = torch.randn(
             (1, 16, 1, 1), dtype=dtype, device="cuda", requires_grad=True
@@ -3865,6 +3909,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
     @onlyCUDA
     @skipCUDAIfNoCudnn
     @dtypes(torch.float, torch.float16)
+    @torch.backends.cudnn.flags(enabled=True, deterministic=True, benchmark=False)
     @precisionOverride({torch.half: 0.002, torch.float: 1e-4})
     def test_cudnn_convolution_relu(self, device, dtype):
         for batch, groups, image_size, kernel_size, memory_format in product(
@@ -3898,6 +3943,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
     @onlyCUDA
     @skipCUDAIfNoCudnn
     @dtypes(torch.float, torch.float16)
+    @torch.backends.cudnn.flags(enabled=True, deterministic=True, benchmark=False)
     @precisionOverride({torch.half: 0.002, torch.float: 1e-4})
     def test_cudnn_convolution_add_relu(self, device, dtype):
         for batch, groups, image_size, kernel_size, memory_format in product(
@@ -4042,6 +4088,11 @@ class TestConvolutionNNDeviceType(NNTestCase):
     @onlyCUDA
     @largeTensorTest("20GB")
     @largeTensorTest("64GB", "cpu")
+    # TODO(eqy): Remove this once it is fixed in cuDNN and we can dispatch to it again
+    @xfailIf(
+        torch.backends.cudnn.version() is not None
+        and torch.backends.cudnn.version() > 91000
+    )
     def test_depthwise_conv_64bit_indexing(self, device):
         x = torch.randn(1, 2, 32800, 32800, dtype=torch.half).to(
             memory_format=torch.channels_last
@@ -4055,7 +4106,8 @@ class TestConvolutionNNDeviceType(NNTestCase):
         del y, yref
 
         # try a batch-splittable case
-        x = x.reshape(100, 2, 3280, 3280).contiguous(memory_format=torch.channels_last)
+        x = x.reshape(100, 2, 3280, 3280)
+        x = x.contiguous(memory_format=torch.channels_last)
         yref = c(x)
         y = c.to(device=device)(x.to(device=device))
         self.assertEqual(yref, y, atol=1e-3, rtol=1e-4)
