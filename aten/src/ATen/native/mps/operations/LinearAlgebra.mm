@@ -20,6 +20,7 @@
 #include <ATen/ops/baddbmm_native.h>
 #include <ATen/ops/bmm_native.h>
 #include <ATen/ops/cholesky_native.h>
+#include <ATen/ops/eye_native.h>
 #include <ATen/ops/linalg_cholesky_ex_native.h>
 #include <ATen/ops/linalg_inv_ex_native.h>
 #include <ATen/ops/linalg_lu_factor_ex_native.h>
@@ -496,26 +497,24 @@ static void linalg_inv_ex_out_mps_impl(const Tensor& A, bool check_errors, const
   using namespace mps;
   TORCH_CHECK(result.is_mps(), "Output tensor is not MPS");
   TORCH_CHECK(!A.is_complex(), "linalg_inv: not supported for complex types yet!");
-  using CachedGraph = MPSUnaryCachedGraph;
 
-  MPSStream* stream = getCurrentMPSStream();
   info.zero_();
-
   if (A.numel() == 0) {
     return;
   }
 
-  if (!result.is_contiguous()) {
-    result.unsafeGetTensorImpl()->empty_tensor_restride(MemoryFormat::Contiguous);
-  }
   auto A_sizes = A.sizes();
   int ndim = A.dim();
 
-  Tensor LU = empty_like(A);
-  Tensor identity = zeros_like(A);
+  Tensor LU = empty_like(A, MemoryFormat::Contiguous);
+  Tensor identity = eye(A.size(-2), A.size(-1), A.scalar_type(), A.options().layout(), A.device()).expand_as(A);
   Tensor pivots = empty({A_sizes.begin(), A_sizes.end() - 1}, A.options().dtype(kInt));
-  (ndim == 2 ? identity.diagonal() : identity.diagonal(0, -2, -1)).fill_(1);
-  linalg_solve_out_mps_impl(A, identity, true, check_errors, result, LU, pivots, info);
+  // need to do this to keep the strides of the result tensor
+  // mps's solve expects row major layout, while inductor
+  // expects result to be column major
+  Tensor tmp = empty_like(A, MemoryFormat::Contiguous);
+  linalg_solve_out_mps_impl(A, identity, true, check_errors, tmp, LU, pivots, info);
+  result.copy_(tmp);
 }
 
 static Tensor& mm_out_mps_impl(const Tensor& self, const Tensor& other, Tensor& output) {

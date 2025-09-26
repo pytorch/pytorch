@@ -6,7 +6,7 @@ add_loop_eager_dynamic,compile_time_instruction_count,4432000000,0.1
 
 
 
-add_loop_inductor,compile_time_instruction_count,30280000000,0.1
+add_loop_inductor,compile_time_instruction_count,29660000000,0.1
 
 
 
@@ -50,27 +50,27 @@ symint_sum_loop,compile_time_instruction_count,4299000000,0.1
 
 
 
-aotdispatcher_inference_nosubclass_cpu,compile_time_instruction_count,2151000000,0.1
+aotdispatcher_inference_nosubclass_cpu,compile_time_instruction_count,1869000000,0.1
 
 
 
-aotdispatcher_inference_subclass_cpu,compile_time_instruction_count,6124000000,0.1
+aotdispatcher_inference_subclass_cpu,compile_time_instruction_count,5281000000,0.1
 
 
 
-aotdispatcher_partitioner_cpu,compile_time_instruction_count,9005000000,0.1
+aotdispatcher_partitioner_cpu,compile_time_instruction_count,8333000000,0.1
 
 
 
-aotdispatcher_partitioner_cpu2,compile_time_instruction_count,1989000000,0.1
+aotdispatcher_partitioner_cpu2,compile_time_instruction_count,1909000000,0.1
 
 
 
-aotdispatcher_training_nosubclass_cpu,compile_time_instruction_count,3959000000,0.1
+aotdispatcher_training_nosubclass_cpu,compile_time_instruction_count,3442000000,0.1
 
 
 
-aotdispatcher_training_subclass_cpu,compile_time_instruction_count,10650000000,0.1
+aotdispatcher_training_subclass_cpu,compile_time_instruction_count,9239000000,0.1
 
 
 
@@ -78,7 +78,7 @@ mm_loop_inductor_gpu,compile_time_instruction_count,4820968837,0.1
 
 
 
-mm_loop_inductor_dynamic_gpu,compile_time_instruction_count,8802129167,0.1
+mm_loop_inductor_dynamic_gpu,compile_time_instruction_count,9051000000,0.1
 
 
 
@@ -86,4 +86,4 @@ basic_NestedModule_eager,compile_time_instruction_count,9554000000,0.1
 
 
 
-basic_InlineMod_eager,compile_time_instruction_count,7464000000,0.1
+basic_InlineMod_eager,compile_time_instruction_count,7618000000,0.1
