@@ -9,6 +9,7 @@ import unittest
 from typing import Optional
 
 import torch
+from torch.quantization.scaled_mm import scaled_mm, ScalingType, SwizzleType
 from torch.testing._internal.common_cuda import (
     _get_torch_cuda_version,
     IS_SM90,
@@ -16,6 +17,7 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FP8_GROUPED_GEMM,
     PLATFORM_SUPPORTS_MX_GEMM,
     PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM,
+    SM100OrLater,
     SM89OrLater,
     SM90OrLater,
     with_tf32_off,
@@ -109,6 +111,114 @@ def tensor_to_scale_block(
     scale = scale.flatten(2, 3).flatten(0, 1)
     return x, scale
 
+
+def round_up(x: int, y: int) -> int:
+    return ((x + y - 1) // y) * y
+
+
+def infer_scale_swizzle(mat, scale):
+    # Tensor-wise
+    if scale.numel() == 1:
+        return ScalingType.Tensorwise, SwizzleType.NoSwizzle
+
+    # Row-wise
+    if (scale.shape[0] == mat.shape[0] and scale.shape[1] == 1) or (
+        scale.shape[0] == 1 and scale.shape[1] == mat.shape[1]
+    ):
+        return ScalingType.Rowwise, SwizzleType.NoSwizzle
+
+    # deepgemm 1x128 / 128x1
+    if len(scale.shape) > 1:
+        if (
+            scale.shape[0] == mat.shape[0]
+            and scale.shape[1] == math.ceil(mat.shape[1] // 128)
+            or scale.shape[1] == mat.shape[1]
+            and scale.shape[0] == math.ceil(mat.shape[0] // 128)
+        ):
+            return ScalingType.Blockwise_128x128, SwizzleType.NoSwizzle
+
+        # deepgemm 128x128
+        if scale.shape[0] == math.ceil(mat.shape[0] // 128) and scale.shape[
+            1
+        ] == math.ceil(mat.shape[1] // 128):
+            return ScalingType.Blockwise_128x128, SwizzleType.NoSwizzle
+
+    # NVFP4
+    if (
+        scale.numel()
+        == round_up(mat.shape[0], 128) * round_up(math.ceil(2 * mat.shape[1] // 16), 4)
+        or scale.numel()
+        == round_up(mat.shape[1], 128) * round_up(math.ceil(2 * mat.shape[0] // 16), 4)
+        and mat.dtype == torch.float4_e2m1fn_x2
+        and scale.dtype == torch.float8_e4m3fn
+    ):
+        return ScalingType.Blockwise_1x16, SwizzleType.Swizzle_32_4_4
+
+    # MX
+    if (
+        scale.numel()
+        == round_up(mat.shape[0], 128) * round_up(math.ceil(mat.shape[1] // 32), 4)
+        or scale.numel()
+        == round_up(mat.shape[1], 128) * round_up(math.ceil(mat.shape[0] // 32), 4)
+        and scale.dtype == torch.float8_e8m0fnu
+    ):
+        return ScalingType.Blockwise_1x32, SwizzleType.Swizzle_32_4_4
+
+    return None, None
+
+
+wrap: bool = True
+
+
+def scaled_mm_wrap(
+    a,
+    b,
+    scale_a,
+    scale_b,
+    scale_recipe_a=None,
+    scale_recipe_b=None,
+    swizzle_a=SwizzleType.NoSwizzle,
+    swizzle_b=SwizzleType.NoSwizzle,
+    scale_result=None,
+    out_dtype=torch.bfloat16,
+    use_fast_accum=False,
+    bias=None,
+    wrap_v2=True,
+    use_deprecated_api=False,
+):
+    if not wrap_v2:
+        return torch._scaled_mm(
+            a,
+            b,
+            scale_a,
+            scale_b,
+            scale_result=scale_result,
+            out_dtype=out_dtype,
+            bias=bias,
+            use_fast_accum=use_fast_accum,
+        )
+    else:
+        # infer scalingtype and swizzle from scales
+        if scale_recipe_a is None:
+            scale_recipe_a, swizzle_a = infer_scale_swizzle(a, scale_a)
+        if scale_recipe_b is None:
+            scale_recipe_b, swizzle_b = infer_scale_swizzle(b, scale_b)
+
+        out = scaled_mm(
+            a,
+            b,
+            scale_a,
+            scale_recipe_a,
+            scale_b,
+            scale_recipe_b,
+            swizzle_a=swizzle_a,
+            swizzle_b=swizzle_b,
+            bias=bias,
+            output_dtype=out_dtype,
+            use_deprecated_scaled_mm=use_deprecated_api,
+        )
+        return out
+
 def mm_float8_emulated(x, x_scale, y, y_scale, out_dtype) -> torch.Tensor:
     # naive implementation: dq -> op -> q
     x_fp32 = x.to(torch.float) / x_scale
@@ -141,7 +251,7 @@ def addmm_float8_unwrapped(
     b_inverse_scale = b_scale.reciprocal()
     if output_dtype == torch.float32 and bias is not None:
         # Bias is not supported by _scaled_mm when output is fp32
-        output = torch._scaled_mm(
+        output = scaled_mm_wrap(
             a_data,
             b_data,
             scale_a=a_inverse_scale,
@@ -151,7 +261,7 @@ def addmm_float8_unwrapped(
         )
         output += bias
         return output
-    output = torch._scaled_mm(
+    output = scaled_mm_wrap(
         a_data,
         b_data,
         bias=bias,
@@ -292,7 +402,7 @@ class TestFP8Matmul(TestCase):
         out_fp32 = torch.mm(x_fp8.to(torch.float), y_fp8.to(torch.float))
         scale_a = torch.tensor(1.0, device=device)
         scale_b = torch.tensor(1.0, device=device)
-        out_fp8 = torch._scaled_mm(x_fp8, y_fp8, scale_a, scale_b, out_dtype=out_dtype)
+        out_fp8 = scaled_mm_wrap(x_fp8, y_fp8, scale_a, scale_b, out_dtype=out_dtype)
         if out_dtype is not None:
             self.assertEqual(out_dtype, out_fp8.dtype)
         self.assertEqual(out_fp32, out_fp8.to(torch.float))
@@ -328,9 +438,9 @@ class TestFP8Matmul(TestCase):
         scale_one = torch.tensor(1.0, device=device)
         scale_a = torch.tensor(1.5, device=device)
         scale_b = torch.tensor(0.66, device=device)
-        out_fp8 = torch._scaled_mm(x, y, scale_a=scale_one, scale_b=scale_one)
+        out_fp8 = scaled_mm_wrap(x, y, scale_a=scale_one, scale_b=scale_one)
         self.assertEqual(out_fp8.to(torch.float), torch.full(size, 4., device=device))
-        out_fp8_s = torch._scaled_mm(x, y, scale_a=scale_a, scale_b=scale_b)
+        out_fp8_s = scaled_mm_wrap(x, y, scale_a=scale_a, scale_b=scale_b)
         self.assertEqual(out_fp8, out_fp8_s)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM, mxfp8_grouped_mm_skip_msg)
@@ -602,11 +712,11 @@ class TestFP8Matmul(TestCase):
         (k, l, m) = (16, 48, 32)
         x = torch.ones((k, l), device=device).to(e4m3_type)
         y = torch.full((m, l), .25, device=device, dtype=e4m3_type).t()
-        bias = torch.full((m,), 4.0, device=device, dtype=torch.half)
+        bias = torch.full((m,), 4.0, device=device, dtype=torch.bfloat16)
         scale_a = torch.tensor(1.0, device=device)
         scale_b = torch.tensor(1.0, device=device)
-        out_fp8 = torch._scaled_mm(x, y, scale_a=scale_a, scale_b=scale_b)
-        outb_fp8 = torch._scaled_mm(x, y, scale_a=scale_a, scale_b=scale_b, bias=bias)
+        out_fp8 = scaled_mm_wrap(x, y, scale_a=scale_a, scale_b=scale_b)
+        outb_fp8 = scaled_mm_wrap(x, y, scale_a=scale_a, scale_b=scale_b, bias=bias)
         # this fails on ROCm currently because hipblaslt doesn't have amax op
         out_fp32 = out_fp8.to(torch.float32)
         outb_fp32 = outb_fp8.to(torch.float32)
@@ -623,8 +733,8 @@ class TestFP8Matmul(TestCase):
         scale_b = torch.tensor(1.0, device=device)
         input_bias = None
         if bias:
-            input_bias = torch.rand((16,), device=device).to(torch.half)
-        _ = torch._scaled_mm(x, y, scale_a, scale_b, bias=input_bias)
+            input_bias = torch.rand((16,), device=device).to(torch.bfloat16)
+        _ = scaled_mm_wrap(x, y, scale_a, scale_b, bias=input_bias)
 
     @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
@@ -632,10 +742,10 @@ class TestFP8Matmul(TestCase):
         (k, l, m) = (16, 48, 32)
         x = torch.full((k, l), 0.0, device=device).to(e4m3_type)
         y = torch.full((m, l), 1.0, device=device, dtype=e4m3_type).t()
-        bias = torch.full((m,), -3.0, device=device, dtype=torch.half)
+        bias = torch.full((m,), -3.0, device=device, dtype=torch.bfloat16)
         scale_a = torch.tensor(1.0, device=device)
         scale_b = torch.tensor(1.0, device=device)
-        outb_fp8 = torch._scaled_mm(x, y, scale_a, scale_b, bias=bias)
+        outb_fp8 = scaled_mm_wrap(x, y, scale_a, scale_b, bias=bias)
         outb_fp32 = outb_fp8.to(torch.float32)
         self.assertEqual(outb_fp32, torch.tensor(-3.0, device=device).expand_as(outb_fp32))
 
@@ -651,7 +761,7 @@ class TestFP8Matmul(TestCase):
         self.assertRaisesRegex(
             RuntimeError,
             "Bias is not supported when out_dtype is set to Float32",
-            lambda: torch._scaled_mm(x, y, scale_a, scale_b, bias=bias, out_dtype=torch.float32),
+            lambda: scaled_mm_wrap(x, y, scale_a, scale_b, bias=bias, out_dtype=torch.float32),
         )
 
     @onlyCUDA
@@ -665,10 +775,11 @@ class TestFP8Matmul(TestCase):
         self.assertRaisesRegex(
             RuntimeError,
             r"torch\.\_scaled\_mm is only supported on CUDA devices with compute capability \>\= 9\.0 or 8\.9, or ROCm MI300\+",
-            lambda: torch._scaled_mm(x, y, scale_a, scale_b, out_dtype=torch.float32),
+            lambda: scaled_mm_wrap(x, y, scale_a, scale_b, out_dtype=torch.float32),
         )
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @unittest.skipIf(SM100OrLater, "fast_accum is SM90-only")
     def test_float8_scale_fast_accum(self, device) -> None:
         size = (16, 16)
         x = torch.full(size, .5, device=device, dtype=e4m3_type)
@@ -677,9 +788,9 @@ class TestFP8Matmul(TestCase):
         y = torch.full(size, .5, device=device, dtype=y_type).t()
         scale_a = torch.tensor(1.5, device=device)
         scale_b = torch.tensor(0.66, device=device)
-        out_fp8 = torch._scaled_mm(x, y, scale_a, scale_b, use_fast_accum=True)
+        out_fp8 = scaled_mm_wrap(x, y, scale_a, scale_b, use_fast_accum=True)
         self.assertEqual(out_fp8.to(torch.float), torch.full(size, 4., device=device))
-        out_fp8_s = torch._scaled_mm(x, y, scale_a=scale_a, scale_b=scale_b, use_fast_accum=True)
+        out_fp8_s = scaled_mm_wrap(x, y, scale_a=scale_a, scale_b=scale_b, use_fast_accum=True)
         self.assertEqual(out_fp8, out_fp8_s)
 
     @onlyCUDA
@@ -698,7 +809,7 @@ class TestFP8Matmul(TestCase):
         x_fp8 = x.to(e4m3_type)
         y_fp8 = y.to(e4m3_type).t()
 
-        out_fp8 = torch._scaled_mm(
+        out_fp8 = scaled_mm_wrap(
             x_fp8,
             y_fp8,
             scale_a=x_scales,
@@ -722,50 +833,58 @@ class TestFP8Matmul(TestCase):
         y_fp8 = y.to(e4m3_type).t()
 
         with self.assertRaisesRegex(
-            RuntimeError, re.escape("Invalid scaling configuration")
+            RuntimeError, re.escape("scale_b must have 1 Float element")
         ):
-            torch._scaled_mm(
+            scaled_mm_wrap(
                 x_fp8,
                 y_fp8,
                 scale_a=torch.ones((1, 1), device="cuda"),
                 scale_b=torch.ones((1, 2), device="cuda"),
+                scale_recipe_a=ScalingType.Tensorwise,
+                scale_recipe_b=ScalingType.Tensorwise,
                 out_dtype=torch.bfloat16,
             )
 
         with self.assertRaisesRegex(
-            RuntimeError, re.escape("Invalid scaling configuration")
+            RuntimeError, re.escape(f"scale_b must have {N} Float elements, got {N + 1}"),
         ):
-            torch._scaled_mm(
+            scaled_mm_wrap(
                 x_fp8,
                 y_fp8,
                 scale_a=torch.ones((M, 1), device="cuda"),
                 scale_b=torch.ones((1, N + 1), device="cuda"),
+                scale_recipe_a=ScalingType.Rowwise,
+                scale_recipe_b=ScalingType.Rowwise,
                 out_dtype=torch.bfloat16,
             )
         with self.assertRaisesRegex(
-            RuntimeError, re.escape("Invalid scaling configuration")
+            IndexError, re.escape("Dimension out of range")
         ):
-            torch._scaled_mm(
+            scaled_mm_wrap(
                 x_fp8,
                 y_fp8,
                 scale_a=torch.ones((M), device="cuda"),
                 scale_b=torch.ones((N, 1), device="cuda"),
+                scale_recipe_a=ScalingType.Rowwise,
+                scale_recipe_b=ScalingType.Rowwise,
                 out_dtype=torch.bfloat16,
             )
 
         with self.assertRaisesRegex(
-            RuntimeError, re.escape("Invalid scaling configuration")
+            RuntimeError, re.escape("Expected scale_b.stride(1) == 1 to be true, but got false."),
         ):
-            torch._scaled_mm(
+            scaled_mm_wrap(
                 x_fp8,
                 y_fp8,
                 scale_a=torch.ones((M, 1), device="cuda"),
                 scale_b=torch.ones((1, N * 2), device="cuda")[:, ::2],
+                scale_recipe_a=ScalingType.Rowwise,
+                scale_recipe_b=ScalingType.Rowwise,
                 out_dtype=torch.bfloat16,
             )
 
         def e5m2():
-            out = torch._scaled_mm(
+            out = scaled_mm_wrap(
                 x_fp8,
                 y_fp8.to(e5m2_type),
                 scale_a=torch.ones((M, 1), device="cuda"),
@@ -913,9 +1032,9 @@ class TestFP8Matmul(TestCase):
         out_fp32 = torch.mm(x_fp8.to(torch.float), y_fp8.to(torch.float))
         scale_a = torch.tensor(float('-inf'), device=device)
         scale_b = torch.tensor(float('-inf'), device=device)
-        f = torch._scaled_mm
+        f = scaled_mm_wrap
         if use_torch_compile:
-            f = torch.compile(torch._scaled_mm)
+            f = torch.compile(scaled_mm_wrap)
         out_fp8 = f(x_fp8, y_fp8, scale_a, scale_b, out_dtype=out_dtype)
         self.assertEqual(out_dtype, out_fp8.dtype)
         self.assertEqual(out_fp32, out_fp8.to(torch.float))
@@ -936,16 +1055,16 @@ class TestFP8Matmul(TestCase):
         with tempfile.NamedTemporaryFile() as f:
             with torch.profiler.profile(activities=[torch.profiler.ProfilerActivity.CUDA]) as prof:
                 self.assertIsNone(torch._C._get_sm_carveout_experimental())
-                torch._scaled_mm(x_fp8, y_fp8, scale_a=x_scales, scale_b=y_scales, out_dtype=torch.bfloat16)
+                scaled_mm_wrap(x_fp8, y_fp8, scale_a=x_scales, scale_b=y_scales, out_dtype=torch.bfloat16)
                 torch._C._set_sm_carveout_experimental(0)
                 self.assertEqual(torch._C._get_sm_carveout_experimental(), 0)
-                torch._scaled_mm(x_fp8, y_fp8, scale_a=x_scales, scale_b=y_scales, out_dtype=torch.bfloat16)
+                scaled_mm_wrap(x_fp8, y_fp8, scale_a=x_scales, scale_b=y_scales, out_dtype=torch.bfloat16)
                 torch._C._set_sm_carveout_experimental(66)
                 self.assertEqual(torch._C._get_sm_carveout_experimental(), 66)
-                torch._scaled_mm(x_fp8, y_fp8, scale_a=x_scales, scale_b=y_scales, out_dtype=torch.bfloat16)
+                scaled_mm_wrap(x_fp8, y_fp8, scale_a=x_scales, scale_b=y_scales, out_dtype=torch.bfloat16)
                 torch._C._set_sm_carveout_experimental(None)
                 self.assertIsNone(torch._C._get_sm_carveout_experimental())
-                torch._scaled_mm(x_fp8, y_fp8, scale_a=x_scales, scale_b=y_scales, out_dtype=torch.bfloat16)
+                scaled_mm_wrap(x_fp8, y_fp8, scale_a=x_scales, scale_b=y_scales, out_dtype=torch.bfloat16)
 
             prof.export_chrome_trace(f.name)
             if torch.version.hip:
@@ -1234,7 +1353,7 @@ class TestFP8Matmul(TestCase):
             A_scale = to_blocked(A_scale)
             B_scale = to_blocked(B_scale)
 
-        C = torch._scaled_mm(
+        C = scaled_mm_wrap(
             A,
             B.t(),
             A_scale,
@@ -1273,6 +1392,13 @@ class TestFP8Matmul(TestCase):
         expected_a_size = BLOCK_SIZE_MN * ceil_div(M, BLOCK_SIZE_MN) * padded_num_k_blocks
         expected_b_size = BLOCK_SIZE_MN * ceil_div(N, BLOCK_SIZE_MN) * padded_num_k_blocks
 
+        block = (
+            ScalingType.Blockwise_1x16
+            if recipe == "nvfp4"
+            else ScalingType.Blockwise_1x32
+        )
+        swizzle = SwizzleType.Swizzle_32_4_4
+
         # Test wrong scale tensor size for scale_a with correct dtype
         with self.assertRaisesRegex(
             RuntimeError,
@@ -1282,11 +1408,16 @@ class TestFP8Matmul(TestCase):
         ):
             incorrect_size_a = torch.ones(expected_a_size - 1, device=device, dtype=scale_dtype)
             correct_size_b = torch.ones(expected_b_size, device=device, dtype=scale_dtype)
-            torch._scaled_mm(
+
+            scaled_mm_wrap(
                 x_lowp,
                 y_lowp,
                 scale_a=incorrect_size_a,
+                scale_recipe_a=block,
                 scale_b=correct_size_b,
+                scale_recipe_b=block,
+                swizzle_a=swizzle,
+                swizzle_b=swizzle,
                 out_dtype=torch.bfloat16,
             )
 
@@ -1299,23 +1430,27 @@ class TestFP8Matmul(TestCase):
         ):
             correct_size_a = torch.ones(expected_a_size, device=device, dtype=scale_dtype)
             incorrect_size_b = torch.ones(expected_b_size + 1, device=device, dtype=scale_dtype)
-            torch._scaled_mm(
+            scaled_mm_wrap(
                 x_lowp,
                 y_lowp,
                 scale_a=correct_size_a,
+                scale_recipe_a=block,
                 scale_b=incorrect_size_b,
+                scale_recipe_b=block,
+                swizzle_a=swizzle,
+                swizzle_b=swizzle,
                 out_dtype=torch.bfloat16,
             )
 
         # Test non-contiguous scale tensors with correct dtype
         with self.assertRaisesRegex(
             RuntimeError,
-            "For Block[W,w]ise.*scaling.*both should be contiguous"
+            "For Block[W,w]ise.*scaling.*both scales should be contiguous"
             ,
         ):
             non_contiguous_a = torch.ones(expected_a_size * 2, device=device, dtype=scale_dtype)[::2]
             contiguous_b = torch.ones(expected_b_size, device=device, dtype=scale_dtype)
-            torch._scaled_mm(
+            scaled_mm_wrap(
                 x_lowp,
                 y_lowp,
                 scale_a=non_contiguous_a,
@@ -1325,8 +1460,8 @@ class TestFP8Matmul(TestCase):
 
     def scaled_grouped_mm_helper(self, alist, blist, ascalelist, bscalelist, outlist, use_fast_accum):
         for a, b, ascale, bscale, out in zip(alist, blist, ascalelist, bscalelist, outlist):
-            out_ref = torch._scaled_mm(a, b.t(), ascale.view(-1, 1), bscale.view(1, -1),
-                                       out_dtype=torch.bfloat16, use_fast_accum=use_fast_accum)
+            out_ref = scaled_mm_wrap(a, b.t(), ascale.view(-1, 1), bscale.view(1, -1),
+                                     out_dtype=torch.bfloat16, use_fast_accum=use_fast_accum)
             self.assertEqual(out, out_ref, atol=5e-2, rtol=5e-4)
 
     # Testing only _scaled_grouped_mm() with multiple shapes, as
@@ -1475,7 +1610,7 @@ class TestFP8Matmul(TestCase):
         B_scale = torch.full((N, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e8m0fnu)
         C_ref = A_ref @ B_ref.t()
 
-        compiled_scaled_mm = torch.compile(torch._scaled_mm, backend="inductor")
+        compiled_scaled_mm = torch.compile(scaled_mm_wrap, backend="inductor")
         C = compiled_scaled_mm(
             A,
             B.t(),
@@ -1503,8 +1638,8 @@ class TestFP8Matmul(TestCase):
         B_scale = torch.full((N, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e4m3fn)
         C_ref = A_ref @ B_ref.t()
 
-        compiled_scaled_mm = torch.compile(torch._scaled_mm, backend="inductor")
-        # C = torch._scaled_mm(
+        compiled_scaled_mm = torch.compile(scaled_mm_wrap, backend="inductor")
+        # C = scaled_mm_wrap(
         C = compiled_scaled_mm(
             A,
             B.t(),
