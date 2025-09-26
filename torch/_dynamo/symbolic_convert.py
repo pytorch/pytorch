@@ -3649,6 +3649,7 @@ class InstructionTranslatorBase(
 
     def LOAD_SPECIAL(self, inst: Instruction) -> None:
         # Implementation is similar to LOAD_METHOD for 3.13+
+        assert isinstance(inst.arg, int)
         self._load_attr(self._load_special_names[inst.arg])
         obj = self.pop()
         self.push(obj)
