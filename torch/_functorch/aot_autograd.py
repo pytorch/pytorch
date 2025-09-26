@@ -1279,6 +1279,21 @@ def aot_export_joint_with_descriptors(
         shape_env,
     )
 
+    from torch._logging import trace_structured
+    assert isinstance(mod, torch.fx.GraphModule)
+    trace_structured(
+        "artifact",
+        metadata_fn=lambda: {
+            "name": "aot_pre_stage_1_gm",
+            "encoding": "string",
+        },
+        payload_fn=lambda: mod.print_readable(
+            print_output=False,
+            include_stride=True,
+            include_device=True,
+            expanded_def=True,
+        ),
+    )
     # NB: no cache lookup!
     aot_graph_capture = aot_stage1_graph_capture(aot_state, functional_call)
 
