@@ -333,7 +333,8 @@ class OverlapScheduler:
                 self._handle_other(node)
 
         self._reorder_graph()
-        self._bucket_collectives()
+        if torch._inductor.config.test_configs.aten_fx_overlap_preserving_bucketing:
+            self._bucket_collectives()
         return self.gm
 
     def _handle_other(self, node: fx.Node) -> None:
@@ -592,7 +593,7 @@ class OverlapScheduler:
 
         self.reorder_graph()
 
-    def _bucket_collectives(self):
+    def _bucket_collectives(self) -> None:
         from torch._inductor.fx_passes.overlap_preserving_bucketer import (
             OverlapPreservingBucketer,
         )

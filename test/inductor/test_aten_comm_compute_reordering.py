@@ -336,6 +336,10 @@ graph():
             self.assertEqual(counters["inductor"]["overlap_scheduling_bad_exposed"], 0)
 
 
+@config.patch(
+    "test_configs.aten_fx_overlap_preserving_bucketing",
+    True,
+)
 class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_basic_all_gather_bucketing(self):
@@ -550,7 +554,7 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
         "test_configs.estimate_aten_runtime",
         functools.partial(estimate_aten_runtime, compute_multiplier=2.0),
     )
-    def test_bucketing_split_for_overlap(self):
+    def test_bucketing_split_for_overlap_blocking(self):
         """Test that 4 independent all-gathers split into 2+2 buckets for better overlap with compute."""
 
         def func(a, b, c, d, *, ranks):

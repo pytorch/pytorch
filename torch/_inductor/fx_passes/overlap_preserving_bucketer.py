@@ -56,12 +56,12 @@ class OverlapPreservingBucketer:
         for start_node, info in self.collective_info.items():
             if info.hiding_node and not info.is_exposed:
                 # Add edge: hiding_compute depends on start (start must come before compute)
-                aug_graph.add_extra_dep(info.hiding_node, start_node)
+                aug_graph.add_extra_dep(n=info.hiding_node, dep=start_node)
                 # Add edge: wait depends on hiding_compute (compute must come before wait)
-                aug_graph.add_extra_dep(info.wait_node, info.hiding_node)
+                aug_graph.add_extra_dep(n=info.wait_node, dep=info.hiding_node)
 
         # Group collectives by bucket key (type, group, etc.)
-        grouped_collectives = defaultdict(OrderedSet)
+        grouped_collectives: dict[object, OrderedSet[fx.Node]] = defaultdict(OrderedSet)
         for start in self.collective_info:
             key = bucket_key(start)
             if key is not None:
@@ -74,7 +74,7 @@ class OverlapPreservingBucketer:
             all_buckets.extend(buckets)
 
         # Collect all extra dependencies to preserve after bucketing
-        additional_deps = defaultdict(OrderedSet)
+        additional_deps: dict[fx.Node, OrderedSet[fx.Node]] = defaultdict(OrderedSet)
 
         # Apply bucketing transformations
         for coll_bucket in all_buckets:
@@ -99,7 +99,7 @@ class OverlapPreservingBucketer:
 
         max_bucket_bytes = int(self.max_bucket_memory_gb * 1e9)
         buckets = []
-        processed = OrderedSet()
+        processed: OrderedSet[fx.Node] = OrderedSet()
 
         for start_node in collective_group:
             if start_node in processed:
@@ -226,7 +226,8 @@ class OverlapPreservingBucketer:
                 insert_before=next_node,
                 mode="custom_ops",
             )
-        elif is_reduce_scatter(bucket[0]):
+        else:
+            assert is_reduce_scatter(bucket[0])
             new_nodes, replacements = merge_reduce_scatter_bucket(
                 self.graph,
                 bucket,
@@ -234,14 +235,6 @@ class OverlapPreservingBucketer:
                 insert_before=next_node,
                 mode="custom_ops",
             )
-        else:
-            assert False
-
-        hiding_nodes = OrderedSet()
-        for coll in bucket:
-            info = self.collective_info[coll]
-            if info.hiding_node and not info.is_exposed:
-                hiding_nodes.add(info.hiding_node)
 
         # Build dependencies to preserve overlap
         # replacements maps old_start -> new_start, old_wait -> new_wait
@@ -250,14 +243,17 @@ class OverlapPreservingBucketer:
 
         new_wait = new_waits[0]
         new_start = new_wait.args[0]
+        assert isinstance(new_start, fx.Node)
 
-        overlap_deps = defaultdict(OrderedSet)
+        overlap_deps: dict[fx.Node, OrderedSet[fx.Node]] = defaultdict(OrderedSet)
+
         # Create dependencies to preserve overlap
-        for hiding in hiding_nodes:
-            if hiding in self.graph.nodes:
+        for coll in bucket:
+            info = self.collective_info[coll]
+            if info.hiding_node and not info.is_exposed:
                 # Compute depends on collective start
-                overlap_deps[hiding].add(new_start)
+                overlap_deps[info.hiding_node].add(new_start)
                 # Wait depends on compute
-                overlap_deps[new_wait].add(hiding)
+                overlap_deps[new_wait].add(info.hiding_node)
 
         return overlap_deps
