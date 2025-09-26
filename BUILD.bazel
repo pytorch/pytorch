@@ -22,6 +22,7 @@ COMMON_COPTS = [
     "-DHAVE_SHM_UNLINK=1",
     "-D_FILE_OFFSET_BITS=64",
     "-DUSE_FBGEMM",
+    "-DUSE_DISTRIBUTED",
     "-DAT_PER_OPERATOR_HEADERS",
     "-DATEN_THREADING=NATIVE",
     "-DNO_CUDNN_DESTROY_HANDLE",
@@ -812,7 +813,7 @@ cc_library(
     name = "torch_python",
     srcs = libtorch_python_core_sources
         + if_cuda(libtorch_python_cuda_sources)
-        + libtorch_python_distributed_sources
+        + if_cuda(libtorch_python_distributed_sources)
         + GENERATED_AUTOGRAD_PYTHON,
     hdrs = glob([
         "torch/csrc/generic/*.cpp",

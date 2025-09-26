@@ -3305,6 +3305,13 @@ def coverage_post_process(app, exception):
     if not isinstance(app.builder, CoverageBuilder):
         return
 
+    if not torch.distributed.is_available():
+        raise RuntimeError(
+            "The coverage tool cannot run with a version "
+            "of PyTorch that was built with USE_DISTRIBUTED=0 "
+            "as this module's API changes."
+        )
+
     # These are all the modules that have "automodule" in an rst file
     # These modules are the ones for which coverage is checked
     # Here, we make sure that no module is missing from that list

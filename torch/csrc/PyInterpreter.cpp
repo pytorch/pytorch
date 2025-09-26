@@ -156,7 +156,10 @@ class PyInterpreterHolder {
  public:
   PyInterpreterHolder()
       : impl_(new c10::impl::PyInterpreter(
-            ConcretePyInterpreterVTable::instance())) {}
+            ConcretePyInterpreterVTable::instance())) {
+    // Register the single interpreter
+    at::impl::PythonOpRegistrationTrampoline::registerInterpreter(impl_);
+  }
   PyInterpreterHolder(const PyInterpreterHolder&) = delete;
   PyInterpreterHolder(PyInterpreterHolder&&) = delete;
   PyInterpreterHolder& operator=(const PyInterpreterHolder&) = delete;
