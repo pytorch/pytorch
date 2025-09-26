@@ -5,6 +5,7 @@ from typing import Any, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch.fx.traceback as fx_traceback
+from torch._logging import trace_structured
 from torch.hub import tqdm
 
 from . import config
@@ -32,7 +33,7 @@ class Interpreter:
     transformations as well as analysis passes.
 
     Methods in the Interpreter class can be overridden to customize
-    the behavior of execution. The map of overrideable methods
+    the behavior of execution. The map of overridable methods
     in terms of call hierarchy::
 
         run()
@@ -51,7 +52,9 @@ class Interpreter:
         method equivalents). We could subclass Interpreter like so::
 
             class NegSigmSwapInterpreter(Interpreter):
-                def call_function(self, target: Target, args: Tuple, kwargs: Dict) -> Any:
+                def call_function(
+                    self, target: Target, args: Tuple, kwargs: Dict
+                ) -> Any:
                     if target == torch.sigmoid:
                         return torch.neg(*args, **kwargs)
                     return super().call_function(target, args, kwargs)
@@ -173,13 +176,26 @@ class Interpreter:
                 if self.extra_traceback:
                     msg = f"While executing {node.format_node()}"
                     msg = f"{e.args[0]}\n\n{msg}" if e.args else str(msg)
+                    msg += f"\nOriginal traceback:\n{node.stack_trace}"
                     if (
                         isinstance(self.module, GraphModule)
                         and self.module.graph is not None
                         and isinstance(self.module.graph, torch.fx.Graph)
                     ):
-                        msg += f"\nGraphModule: {self.module.print_readable(print_output=False, include_stride=True)}\n"
-                    msg += f"\nOriginal traceback:\n{node.stack_trace}"
+                        trace_structured(
+                            "artifact",
+                            metadata_fn=lambda: {
+                                "name": "fx_interpreter_error",
+                                "encoding": "string",
+                            },
+                            payload_fn=lambda: (
+                                f"{msg}\nGraphModule: "
+                                f"{self.module.print_readable(print_output=False, include_stride=True)}"  # type: ignore[operator]
+                            ),
+                        )
+
+                    msg += "\nUse tlparse to see full graph. "
+                    msg += "(https://github.com/pytorch/tlparse?tab=readme-ov-file#tlparse-parse-structured-pt2-logs)"
                     e.args = (msg,) + e.args[1:]
                     if isinstance(e, KeyError):
                         raise RuntimeError(*e.args) from e
@@ -405,7 +421,7 @@ class Interpreter:
         for i, atom in enumerate(target_atoms):
             if not hasattr(attr_itr, atom):
                 raise RuntimeError(
-                    f"Node referenced nonexistent target {'.'.join(target_atoms[:i + 1])}"
+                    f"Node referenced nonexistent target {'.'.join(target_atoms[: i + 1])}"
                 )
             attr_itr = getattr(attr_itr, atom)
         return attr_itr
@@ -468,14 +484,20 @@ class Transformer(Interpreter):
 
             class NegSigmSwapXformer(Transformer):
                 def call_function(
-                    self, target: "Target", args: Tuple[Argument, ...], kwargs: Dict[str, Any]
+                    self,
+                    target: "Target",
+                    args: Tuple[Argument, ...],
+                    kwargs: Dict[str, Any],
                 ) -> Any:
                     if target == torch.sigmoid:
                         return torch.neg(*args, **kwargs)
                     return super().call_function(target, args, kwargs)
 
                 def call_method(
-                    self, target: "Target", args: Tuple[Argument, ...], kwargs: Dict[str, Any]
+                    self,
+                    target: "Target",
+                    args: Tuple[Argument, ...],
+                    kwargs: Dict[str, Any],
                 ) -> Any:
                     if target == "neg":
                         call_self, *args_tail = args

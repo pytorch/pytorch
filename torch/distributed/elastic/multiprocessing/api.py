@@ -37,6 +37,7 @@ from torch.distributed.elastic.multiprocessing.subprocess_handler import (
     SubprocessHandler,
 )
 from torch.distributed.elastic.multiprocessing.tail_log import TailLog
+from torch.numa.binding import NumaOptions
 
 
 IS_WINDOWS = sys.platform == "win32"
@@ -290,7 +291,7 @@ class DefaultLogsSpecs(LogsSpecs):
         - `<log_dir>/<rdzv_run_id>/attempt_<attempt>/<rank>/error.json`
         """
         nprocs = len(envs)
-        global_env = {}  # use only to query properies that are not dependent on a rank
+        global_env = {}  # use only to query properties that are not dependent on a rank
         if nprocs > 0:
             global_env = envs[0]
         else:
@@ -452,7 +453,7 @@ class PContext(abc.ABC):
         # all local ranks are accounted for
         nprocs = len(args)
 
-        # TODO log_line_prefixes can be exanded too
+        # TODO log_line_prefixes can be expanded too
         logs_dest = logs_specs.reify(envs)
 
         _validate_full_rank(logs_dest.stdouts, nprocs, "stdouts")
@@ -476,11 +477,35 @@ class PContext(abc.ABC):
     def start(self) -> None:
         """Start processes using parameters defined in the constructor."""
         if threading.current_thread() is threading.main_thread():
-            signal.signal(signal.SIGTERM, _terminate_process_handler)
-            signal.signal(signal.SIGINT, _terminate_process_handler)
-            if not IS_WINDOWS:
-                signal.signal(signal.SIGHUP, _terminate_process_handler)
-                signal.signal(signal.SIGQUIT, _terminate_process_handler)
+            # Register signal handlers for the signals specified in the environment variable
+            signals_to_handle = os.environ.get(
+                "TORCHELASTIC_SIGNALS_TO_HANDLE", "SIGTERM,SIGINT,SIGHUP,SIGQUIT"
+            )
+            signal_list = signals_to_handle.split(",")
+
+            for sig_name in signal_list:
+                try:
+                    sig = getattr(signal, sig_name.strip())
+                    signal.signal(sig, _terminate_process_handler)
+                    logger.info("Registered signal handler for %s", sig_name)
+                except (AttributeError, ValueError) as e:
+                    logger.warning(
+                        "Failed to register signal handler for %s: %s", sig_name, e
+                    )
+                except RuntimeError as e:
+                    if IS_WINDOWS and sig_name.strip() in [
+                        "SIGHUP",
+                        "SIGQUIT",
+                        "SIGUSR1",
+                        "SIGUSR2",
+                    ]:
+                        logger.info(
+                            "Signal %s is not supported on Windows, skipping", sig_name
+                        )
+                    else:
+                        logger.warning(
+                            "Failed to register signal handler for %s: %s", sig_name, e
+                        )
         else:
             logger.warning(
                 "Failed to register signal handlers since torchelastic is running on a child thread. "
@@ -630,6 +655,7 @@ class MultiprocessContext(PContext):
         start_method: str,
         logs_specs: LogsSpecs,
         log_line_prefixes: Optional[dict[int, str]] = None,
+        numa_options: Optional[NumaOptions] = None,
     ):
         super().__init__(
             name,
@@ -654,6 +680,8 @@ class MultiprocessContext(PContext):
         # successfully. If any process died on event.wait() calling set() method will deadlock.
         self._worker_finished_event = mp.get_context(self.start_method).Event()
 
+        self._numa_options: Optional[NumaOptions] = numa_options
+
     def _start(self):
         if self._pc:
             raise ValueError(
@@ -675,6 +703,7 @@ class MultiprocessContext(PContext):
             join=False,
             daemon=False,
             start_method=self.start_method,
+            numa_options=self._numa_options,
         )
 
     def _is_done(self) -> bool:
@@ -811,6 +840,7 @@ class SubprocessContext(PContext):
         envs: dict[int, dict[str, str]],
         logs_specs: LogsSpecs,
         log_line_prefixes: Optional[dict[int, str]] = None,
+        numa_options: Optional[NumaOptions] = None,
     ):
         super().__init__(
             name,
@@ -825,6 +855,7 @@ class SubprocessContext(PContext):
         self._running_local_ranks: set[int] = set(range(self.nprocs))
         self._failures: dict[int, ProcessFailure] = {}
         self.subprocess_handlers: dict[int, SubprocessHandler] = {}
+        self._numa_options: Optional[NumaOptions] = numa_options
 
     def _start(self):
         if self.subprocess_handlers:
@@ -839,12 +870,12 @@ class SubprocessContext(PContext):
                 stdout=self.stdouts[local_rank],
                 stderr=self.stderrs[local_rank],
                 local_rank_id=local_rank,
+                numa_options=self._numa_options,
             )
             for local_rank in range(self.nprocs)
         }
 
-    def _poll(self) -> Optional[RunProcsResult]:
-        done_local_ranks = set()
+    def _capture_process_failures(self, done_local_ranks: set[int]):
         for local_rank in self._running_local_ranks:
             handler = self.subprocess_handlers[local_rank]
             exitcode = handler.proc.poll()
@@ -859,11 +890,19 @@ class SubprocessContext(PContext):
                     )
                 # else: --> succeeded; nothing to do
 
+    def _poll(self) -> Optional[RunProcsResult]:
+        done_local_ranks: set[int] = set()
+        self._capture_process_failures(done_local_ranks)
+
         self._running_local_ranks.difference_update(done_local_ranks)
 
         # if ALL procs are finished or ANY have failed
         if not self._running_local_ranks or self._failures:
             self.close()  # terminate all running procs
+            self._capture_process_failures(
+                done_local_ranks
+            )  # log sigterms and sigkill exit codes in the self._failures for bookkeeping purposes
+
             result = RunProcsResult(
                 failures=self._failures,
                 stdouts=self.stdouts,

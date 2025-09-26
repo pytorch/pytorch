@@ -19,7 +19,7 @@ from .utils import IndentedBuffer, reduction_num_outputs, sympy_index_symbol, sy
 
 
 T = TypeVar("T")
-StoreMode = Optional[Literal["atomic_add"]]
+StoreMode = Optional[Literal["atomic_add", "tma"]]
 ReductionType = Literal[
     "argmax",
     "argmin",
@@ -31,6 +31,7 @@ ReductionType = Literal[
     "prod",
     "sum",
     "xor_sum",
+    "online_softmax_reduce",
 ]
 
 
@@ -681,40 +682,6 @@ class OpsHandler(Generic[T]):
     ) -> None:
         raise NotImplementedError
 
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # In CUDA, optimized implementations of other mathematical operations are
-    # offered separately via libdevice for double precision computation (in
-    # Triton, these go to tl.math rather than tl).  We lower to these
-    # operators when doing FP64 on CUDA.  Note that some operators
-    # unconditional go to tl.math.
-    #
-    # TODO(ezyang): Is this really the best way to do this?  What if we have
-    # abs internally route to tl.math automatically when given a double
-    # precision input?  One reason is that when doing codegen, we often don't
-    # know what the dtype of the inputs are!  (In principle we do know, but
-    # for many analyses it's not conveniently available.)
-
-    def libdevice_abs(self, x0: T) -> T:
-        raise NotImplementedError
-
-    def libdevice_exp(self, x0: T) -> T:
-        raise NotImplementedError
-
-    def libdevice_sqrt(self, x0: T) -> T:
-        raise NotImplementedError
-
-    def libdevice_cos(self, x0: T) -> T:
-        raise NotImplementedError
-
-    def libdevice_sin(self, x0: T) -> T:
-        raise NotImplementedError
-
-    def libdevice_sigmoid(self, x0: T) -> T:
-        raise NotImplementedError
-
-    def libdevice_log(self, x0: T) -> T:
-        raise NotImplementedError
-
     # halide-only
     def halide_clamp(self, value: T, size: sympy.Expr, check: bool) -> T:
         raise NotImplementedError
@@ -737,6 +704,9 @@ class OpsHandler(Generic[T]):
 
     def placeholder(self, index: int) -> T:
         """This is a fake op used in analysis but not codegen"""
+        raise NotImplementedError
+
+    def device_assert_async(self, cond: T, msg: str) -> T:
         raise NotImplementedError
 
 
@@ -1179,3 +1149,8 @@ class SimpleCSEHandler(WrapperHandler):
         val = getattr(self._inner, name)(*args, **kwargs)
         self.cse_cache[key] = val
         return val
+
+    def device_assert_async(self, *args, **kwargs) -> None:
+        raise NotImplementedError(
+            f"{type(self).__name__}: device_assert_async should be handled by CSEProxy"
+        )

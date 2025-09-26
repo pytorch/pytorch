@@ -2,7 +2,7 @@
 
 import torch
 from torch.fx.experimental._dynamism import track_dynamism_across_examples
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import TestCase
 
 
 class TestDynamism(TestCase):
@@ -148,4 +148,7 @@ class TestDynamism(TestCase):
 
 
 if __name__ == "__main__":
-    run_tests()
+    raise RuntimeError(
+        "This test is not currently used and should be "
+        "enabled in discover_tests.py if required."
+    )

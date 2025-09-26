@@ -4,7 +4,7 @@
 #include <ATen/autocast_mode.h>
 #include <c10/cuda/CUDAGuard.h>
 
-#if defined(USE_ROCM) || defined(_MSC_VER) || (defined(CUDA_VERSION) && CUDA_VERSION < 11080)
+#if defined(USE_ROCM) || defined(_MSC_VER)
 #else
 #include <ATen/native/sparse/cuda/ComputeSparseTile.h>
 #include <ATen/native/sparse/cuda/SparseSemiStructuredPack.h>
@@ -12,7 +12,7 @@
 
 namespace at::native {
 
-#if defined(USE_ROCM) || defined(_MSC_VER) || (defined(CUDA_VERSION) && CUDA_VERSION < 11080)
+#if defined(USE_ROCM) || defined(_MSC_VER)
 #else
 struct Params {
   uint64_t const* threads_masks;
@@ -123,7 +123,7 @@ Tensor _sparse_semi_structured_apply_dense(
     const Tensor& input,
     const Tensor& threads_masks) {
 
-#if defined(USE_ROCM) || defined(_MSC_VER) || (defined(CUDA_VERSION) && CUDA_VERSION < 11080)
+#if defined(USE_ROCM) || defined(_MSC_VER)
   TORCH_CHECK(false, "_sparse_semi_structured_apply_dense: not supported");
   return Tensor{};
 #else

@@ -2,15 +2,22 @@
 
 set -ex
 
+# for pip_install function
+source "$(dirname "${BASH_SOURCE[0]}")/common_utils.sh"
+
+ROCM_COMPOSABLE_KERNEL_VERSION="$(cat $(dirname $0)/../ci_commit_pins/rocm-composable-kernel.txt)"
+
 ver() {
     printf "%3d%03d%03d%03d" $(echo "$1" | tr '.' ' ');
 }
 
 install_ubuntu() {
     apt-get update
-    if [[ $UBUNTU_VERSION == 20.04 ]]; then
-      # gpg-agent is not available by default on 20.04
-      apt-get install -y --no-install-recommends gpg-agent
+    # gpg-agent is not available by default
+    apt-get install -y --no-install-recommends gpg-agent
+    if [[ $(ver $UBUNTU_VERSION) -ge $(ver 22.04) ]]; then
+        echo -e 'Package: *\nPin: release o=repo.radeon.com\nPin-Priority: 600' \
+            | sudo tee /etc/apt/preferences.d/rocm-pin-600
     fi
     apt-get install -y kmod
     apt-get install -y wget
@@ -19,13 +26,34 @@ install_ubuntu() {
     apt-get install -y libc++1
     apt-get install -y libc++abi1
 
+    # Make sure rocm packages from repo.radeon.com have highest priority
+    cat << EOF > /etc/apt/preferences.d/rocm-pin-600
+Package: *
+Pin: release o=repo.radeon.com
+Pin-Priority: 600
+EOF
+
+    # we want the patch version of 6.4 instead
+    if [[ $(ver $ROCM_VERSION) -eq $(ver 6.4) ]]; then
+        ROCM_VERSION="${ROCM_VERSION}.2"
+    fi
+
+    # Default url values
+    rocm_baseurl="http://repo.radeon.com/rocm/apt/${ROCM_VERSION}"
+    amdgpu_baseurl="https://repo.radeon.com/amdgpu/${ROCM_VERSION}/ubuntu"
+
+    # Special case for ROCM_VERSION == 7.0
+    if [[ $(ver "$ROCM_VERSION") -eq $(ver 7.0) ]]; then
+        rocm_baseurl="https://repo.radeon.com/rocm/apt/7.0_alpha2"
+        amdgpu_baseurl="https://repo.radeon.com/amdgpu/30.10_alpha2/ubuntu"
+    fi
+
     # Add amdgpu repository
     UBUNTU_VERSION_NAME=`cat /etc/os-release | grep UBUNTU_CODENAME | awk -F= '{print $2}'`
-    echo "deb [arch=amd64] https://repo.radeon.com/amdgpu/${ROCM_VERSION}/ubuntu ${UBUNTU_VERSION_NAME} main" > /etc/apt/sources.list.d/amdgpu.list
+    echo "deb [arch=amd64] ${amdgpu_baseurl} ${UBUNTU_VERSION_NAME} main" > /etc/apt/sources.list.d/amdgpu.list
 
     # Add rocm repository
     wget -qO - http://repo.radeon.com/rocm/rocm.gpg.key | apt-key add -
-    local rocm_baseurl="http://repo.radeon.com/rocm/apt/${ROCM_VERSION}"
     echo "deb [arch=amd64] ${rocm_baseurl} ${UBUNTU_VERSION_NAME} main" > /etc/apt/sources.list.d/rocm.list
     apt-get update --allow-insecure-repositories
 
@@ -59,20 +87,38 @@ install_ubuntu() {
     done
 
     # ROCm 6.3 had a regression where initializing static code objects had significant overhead
-    if [[ $(ver $ROCM_VERSION) -eq $(ver 6.3) ]]; then
+    # CI no longer builds for ROCm 6.3, but
+    # ROCm 6.4 did not yet fix the regression, also HIP branch names are different
+    if [[ $(ver $ROCM_VERSION) -ge $(ver 6.4) ]] && [[ $(ver $ROCM_VERSION) -lt $(ver 7.0) ]]; then
+        if [[ $(ver $ROCM_VERSION) -eq $(ver 6.4.2) ]]; then
+            HIP_TAG=rocm-6.4.2
+            CLR_HASH=74d78ba3ac4bac235d02bcb48511c30b5cfdd457  # branch release/rocm-rel-6.4.2-statco-hotfix
+        elif [[ $(ver $ROCM_VERSION) -eq $(ver 6.4.1) ]]; then
+            HIP_TAG=rocm-6.4.1
+            CLR_HASH=efe6c35790b9206923bfeed1209902feff37f386  # branch release/rocm-rel-6.4.1-statco-hotfix
+        elif [[ $(ver $ROCM_VERSION) -eq $(ver 6.4) ]]; then
+            HIP_TAG=rocm-6.4.0
+            CLR_HASH=600f5b0d2baed94d5121e2174a9de0851b040b0c  # branch release/rocm-rel-6.4-statco-hotfix
+        fi
         # clr build needs CppHeaderParser but can only find it using conda's python
-        /opt/conda/bin/python -m pip install CppHeaderParser
-        git clone https://github.com/ROCm/HIP -b rocm-6.3.x
+        python -m pip install CppHeaderParser
+        git clone https://github.com/ROCm/HIP -b $HIP_TAG
         HIP_COMMON_DIR=$(readlink -f HIP)
-        git clone https://github.com/jeffdaily/clr -b release/rocm-rel-6.3-statco-hotfix
+        git clone https://github.com/jeffdaily/clr
+        pushd clr
+        git checkout $CLR_HASH
+        popd
         mkdir -p clr/build
         pushd clr/build
-        cmake .. -DCLR_BUILD_HIP=ON -DHIP_COMMON_DIR=$HIP_COMMON_DIR
+        # Need to point CMake to the correct python installation to find CppHeaderParser
+        cmake .. -DPython3_EXECUTABLE=/opt/conda/envs/py_${ANACONDA_PYTHON_VERSION}/bin/python3 -DCLR_BUILD_HIP=ON -DHIP_COMMON_DIR=$HIP_COMMON_DIR
         make -j
-        cp hipamd/lib/libamdhip64.so.6.3.* /opt/rocm/lib/libamdhip64.so.6.3.*
+        cp hipamd/lib/libamdhip64.so.6.4.* /opt/rocm/lib/libamdhip64.so.6.4.*
         popd
         rm -rf HIP clr
     fi
+
+    pip_install "git+https://github.com/rocm/composable_kernel@$ROCM_COMPOSABLE_KERNEL_VERSION"
 
     # Cleanup
     apt-get autoclean && apt-get clean
@@ -136,6 +182,8 @@ install_centos() {
   do
       sqlite3 $kdb "PRAGMA journal_mode=off; PRAGMA VACUUM;"
   done
+
+  pip_install "git+https://github.com/rocm/composable_kernel@$ROCM_COMPOSABLE_KERNEL_VERSION"
 
   # Cleanup
   yum clean all

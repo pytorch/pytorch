@@ -1,25 +1,105 @@
+# Package ######################################################################
+
 [build-system]
 requires = [
-    # After 75.8.2 dropped dep disttools API. Please fix
-    # min version for recursive glob package data support
-    "setuptools>=62.3.0,<75.9",
-    "wheel",
-    "astunparse",
-    "numpy",
+    # 70.1.0: min version for integrated bdist_wheel command from wheel package
+    # 77.0.0: min version for SPDX expression support for project.license
+    "setuptools>=70.1.0,<80.0",
+    "cmake>=3.27",
     "ninja",
+    "numpy",
+    "packaging",
     "pyyaml",
-    "cmake",
-    "typing-extensions>=4.10.0",
     "requests",
+    "six",  # dependency chain: NNPACK -> PeachPy -> six
+    "typing-extensions>=4.10.0",
 ]
-# Use legacy backend to import local packages in setup.py
-build-backend = "setuptools.build_meta:__legacy__"
+build-backend = "setuptools.build_meta"
 
+[dependency-groups]
+dev = [
+    # This list should be kept in sync with the requirements-build.txt
+    # in PyTorch root until the project fully migrates to pyproject.toml
+    # after which this can be removed as it is already specified in the
+    # [build-system] section
+    "setuptools>=70.1.0,<80.0",  # setuptools develop deprecated on 80.0
+    "cmake>=3.27",
+    "ninja",
+    "numpy",
+    "packaging",
+    "pyyaml",
+    "requests",
+    "six",  # dependency chain: NNPACK -> PeachPy -> six
+    "typing-extensions>=4.10.0",
 
-[tool.black]
-line-length = 88
-target-version = ["py38"]
+    # This list should be kept in sync with the requirements.txt in
+    # PyTorch root until the project fully migrates to pyproject.toml
+    "build[uv]",
+    "expecttest>=0.3.0",
+    "filelock",
+    "fsspec>=0.8.5",
+    "hypothesis",
+    "jinja2",
+    "lintrunner; platform_machine != 's390x' and platform_machine != 'riscv64'",
+    "networkx>=2.5.1",
+    "optree>=0.13.0",
+    "psutil",
+    "sympy>=1.13.3",
+    "typing-extensions>=4.13.2",
+    "wheel",
+]
 
+[project]
+name = "torch"
+description = "Tensors and Dynamic neural networks in Python with strong GPU acceleration"
+readme = "README.md"
+requires-python = ">=3.10"
+# TODO: change to `license = "BSD-3-Clause"` and enable PEP 639 after pinning setuptools>=77
+# FIXME: As of 2025.06.20, it is hard to ensure the minimum version of setuptools in our CI environment.
+# TOML-table-based license deprecated in setuptools>=77, and the deprecation warning will be changed
+# to an error on 2026.02.18. See also: https://github.com/pypa/setuptools/issues/4903
+license = { text = "BSD-3-Clause" }
+authors = [{ name = "PyTorch Team", email = "packages@pytorch.org" }]
+keywords = ["pytorch", "machine learning"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Education",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Scientific/Engineering :: Mathematics",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Programming Language :: C++",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+]
+dynamic = [
+    "entry-points",
+    "dependencies",
+    "scripts",
+    "version",
+]
+
+[project.urls]
+Homepage = "https://pytorch.org"
+Repository = "https://github.com/pytorch/pytorch"
+Documentation = "https://pytorch.org/docs"
+"Issue Tracker" = "https://github.com/pytorch/pytorch/issues"
+Forum = "https://discuss.pytorch.org"
+
+[project.optional-dependencies]
+optree = ["optree>=0.13.0"]
+opt-einsum = ["opt-einsum>=3.3"]
+pyyaml = ["pyyaml"]
+
+# Linter tools #################################################################
 
 [tool.isort]
 src_paths = ["caffe2", "torch", "torchgen", "functorch", "test"]
@@ -35,14 +115,11 @@ multi_line_output = 3
 include_trailing_comma = true
 combine_as_imports = true
 
-
 [tool.usort.known]
 first_party = ["caffe2", "torch", "torchgen", "functorch", "test"]
 standard_library = ["typing_extensions"]
 
-
 [tool.ruff]
-target-version = "py39"
 line-length = 88
 src = ["caffe2", "torch", "torchgen", "functorch", "test"]
 
@@ -52,6 +129,23 @@ quote-style = "double"
 
 [tool.ruff.lint]
 # NOTE: Synchoronize the ignores with .flake8
+external = [
+    "B001",
+    "B902",
+    "B950",
+    "E121",
+    "E122",
+    "E128",
+    "E131",
+    "E704",
+    "E723",
+    "F723",
+    "F812",
+    "P201",
+    "P204",
+    "T484",
+    "TOR901",
+]
 ignore = [
     # these ignores are from flake8-bugbear; please fix!
     "B007", "B008", "B017",
@@ -65,6 +159,7 @@ ignore = [
     "E741",
     "EXE001",
     "F405",
+    "FURB122", # writelines
     # these ignores are from flake8-logging-format; please fix!
     "G101",
     # these ignores are from ruff NPY; please fix!
@@ -87,6 +182,13 @@ ignore = [
     "SIM117",
     "SIM118",
     "UP007", # keep-runtime-typing
+    "UP038", # Was removed from newer versions, results in slower code
+    "UP045", # keep-runtime-typing
+    "TC006",
+    # TODO: Remove Python-3.10 specific suppressions
+    "B905",
+    "UP035",
+    "FURB161",
 ]
 select = [
     "B",
@@ -127,10 +229,12 @@ select = [
     "PLW0406", # import self
     "PLW0711", # binary op exception
     "PLW1501", # bad open mode
+    "PLW1507", # shallow copy os.environ
     "PLW1509", # preexec_fn not safe with threads
     "PLW2101", # useless lock statement
     "PLW3301", # nested min max
     "PT006", # TODO: enable more PT rules
+    "PT014", # duplicate parameterize case
     "PT022",
     "PT023",
     "PT024",
@@ -147,24 +251,45 @@ select = [
     "RUF017",
     "RUF018", # no assignment in assert
     "RUF019", # unnecessary-key-check
+    "RUF020", # never union
     "RUF024", # from keys mutable
     "RUF026", # default factory kwarg
     "RUF030", # No print statement in assert
+    "RUF033", # default values __post_init__ dataclass
+    "RUF041", # simplify nested Literal
+    "RUF048", # properly parse `__version__`
+    "RUF200", # validate pyproject.toml
     "S324", # for hashlib FIPS compliance
     "SLOT",
-    "TCH",
+    "TC",
     "TRY002", # ban vanilla raise (todo fix NOQAs)
     "TRY203",
     "TRY401", # verbose-log-message
     "UP",
+    "YTT",
 ]
+
+[tool.ruff.lint.pyupgrade]
+# Preserve types, even if a file imports `from __future__ import annotations`.
+keep-runtime-typing = true
 
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = [
     "F401",
 ]
-"functorch/notebooks/**" = [
+"*.pyi" = [
+    "PYI011", # typed-argument-default-in-stub
+    "PYI021", # docstring-in-stub
+    "PYI053", # string-or-bytes-too-long
+]
+"functorch/docs/source/tutorials/**" = [
     "F401",
+]
+"test/export/**" = [
+    "PGH004"
+]
+"test/typing/**" = [
+    "PGH004"
 ]
 "test/typing/reveal/**" = [
     "F821",
@@ -179,6 +304,9 @@ select = [
 "test/dynamo/test_debug_utils.py" = [
     "UP037",
 ]
+"test/dynamo/test_misc.py" = [
+    "PGH004",
+]
 "test/jit/**" = [
     "PLR0133", # tests require this for JIT
     "PYI",
@@ -191,17 +319,21 @@ select = [
     "RUF015",
     "UP", # We don't want to modify the jit test as they test specify syntax
 ]
+"test/inductor/s429861_repro.py" = [
+    "PGH004",
+]
 "test/inductor/test_torchinductor.py" = [
     "UP037",
 ]
 # autogenerated #TODO figure out why file level noqa is ignored
+"torch/_appdirs.py" = ["PGH004"]
+"torch/jit/_shape_functions.py" = ["PGH004"]
 "torch/_inductor/fx_passes/serialized_patterns/**" = ["F401", "F501"]
 "torch/_inductor/autoheuristic/artifacts/**" = ["F401", "F501"]
-"torchgen/api/types/__init__.py" = [
-    "F401",
-    "F403",
+"torch/_inductor/codegen/**" = [
+    "PGH004"
 ]
-"torchgen/executorch/api/types/__init__.py" = [
+"torchgen/api/types/__init__.py" = [
     "F401",
     "F403",
 ]
@@ -211,3 +343,9 @@ select = [
 "torch/_vendor/**" = [
     "UP", # No need to mess with _vendor
 ]
+"tools/linter/**" = [
+    "LOG015" # please fix
+]
+
+[tool.codespell]
+ignore-words = "tools/linter/dictionary.txt"

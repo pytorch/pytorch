@@ -16,7 +16,6 @@
 #pragma once
 
 #include <c10/macros/Macros.h>
-#include <c10/util/Deprecated.h>
 #include <c10/util/Exception.h>
 #include <c10/util/SmallVector.h>
 
@@ -377,8 +376,8 @@ bool operator!=(c10::ArrayRef<T> a1, const std::vector<T>& a2) {
 
 using IntArrayRef = ArrayRef<int64_t>;
 
-// This alias is deprecated because it doesn't make ownership
-// semantics obvious.  Use IntArrayRef instead!
-C10_DEFINE_DEPRECATED_USING(IntList, ArrayRef<int64_t>)
+using IntList [[deprecated(
+    "This alias is deprecated because it doesn't make ownership semantics obvious. Use IntArrayRef instead!")]] =
+    ArrayRef<int64_t>;
 
 } // namespace c10

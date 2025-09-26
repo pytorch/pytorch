@@ -1,10 +1,8 @@
 # mypy: allow-untyped-defs
-import warnings
 from collections import defaultdict
 from collections.abc import Iterator, Sized
 from typing import Any, Callable, Optional, TypeVar
 
-import torch.utils.data.datapipes.iter.sharding
 from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data.datapipes.datapipe import DataChunk, IterDataPipe
 from torch.utils.data.datapipes.utils.common import _check_unpickable_fn
@@ -21,16 +19,6 @@ _T_co = TypeVar("_T_co", covariant=True)
 
 
 def __getattr__(name: str):
-    if name in ["SHARDING_PRIORITIES", "ShardingFilterIterDataPipe"]:
-        warnings.warn(
-            f"`{name}` from `torch.utils.data.datapipes.iter.grouping` is going to be removed in PyTorch 2.1"
-            f"Please use `{name}` from the `torch.utils.data.datapipes.iter.sharding`",
-            category=FutureWarning,
-            stacklevel=2,
-        )
-
-        return getattr(torch.utils.data.datapipes.iter.sharding, name)
-
     raise AttributeError(f"module {__name__} has no attribute {name}")
 
 
@@ -182,7 +170,9 @@ class GrouperIterDataPipe(IterDataPipe[DataChunk]):
         >>> from torchdata.datapipes.iter import IterableWrapper
         >>> def group_fn(file):
         ...     return os.path.basename(file).split(".")[0]
-        >>> source_dp = IterableWrapper(["a.png", "b.png", "a.json", "b.json", "a.jpg", "c.json"])
+        >>> source_dp = IterableWrapper(
+        ...     ["a.png", "b.png", "a.json", "b.json", "a.jpg", "c.json"]
+        ... )
         >>> dp0 = source_dp.groupby(group_key_fn=group_fn)
         >>> list(dp0)
         [['a.png', 'a.json', 'a.jpg'], ['b.png', 'b.json'], ['c.json']]
@@ -191,7 +181,12 @@ class GrouperIterDataPipe(IterDataPipe[DataChunk]):
         >>> list(dp1)
         [['a.png', 'a.json'], ['b.png', 'b.json'], ['a.jpg'], ['c.json']]
         >>> # Scenario where `buffer` is full, and group 'a' needs to be yielded since its size > `guaranteed_group_size`
-        >>> dp2 = source_dp.groupby(group_key_fn=group_fn, buffer_size=3, group_size=3, guaranteed_group_size=2)
+        >>> dp2 = source_dp.groupby(
+        ...     group_key_fn=group_fn,
+        ...     buffer_size=3,
+        ...     group_size=3,
+        ...     guaranteed_group_size=2,
+        ... )
         >>> list(dp2)
         [['a.png', 'a.json'], ['b.png', 'b.json'], ['a.jpg'], ['c.json']]
     """

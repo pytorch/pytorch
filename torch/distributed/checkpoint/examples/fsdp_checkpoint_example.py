@@ -20,7 +20,7 @@ from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.fully_sharded_data_parallel import StateDictType
 
 
-CHECKPOINT_DIR = f"/scratch/{os.environ['LOGNAME']}/checkpoint"
+CHECKPOINT_DIR = f"/scratch/{os.environ.get('LOGNAME', '')}/checkpoint"
 
 
 def opt_at(opt, idx):

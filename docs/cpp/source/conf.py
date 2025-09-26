@@ -22,8 +22,8 @@
 import os
 import textwrap
 
-
 # sys.path.insert(0, os.path.abspath('.'))
+import pytorch_sphinx_theme2
 
 
 # -- General configuration ------------------------------------------------
@@ -40,7 +40,34 @@ extensions = [
     "sphinx.ext.intersphinx",
 ] + (["breathe", "exhale"] if run_doxygen else [])
 
-intersphinx_mapping = {"pytorch": ("https://pytorch.org/docs/main", None)}
+intersphinx_mapping = {"pytorch": ("https://docs.pytorch.org/docs/main", None)}
+
+# Configure Sphinx warnings and error handling
+suppress_warnings = [
+    "ref.citation",
+    "ref.footnote",
+    "ref.doc",
+    "toc.excluded",
+    "toc.not_readable",
+    "misc.highlighting_failure",
+]
+
+# Configure Breathe
+breathe_show_define_initializer = True
+breathe_show_enumvalue_initializer = True
+breathe_default_members = ("members", "undoc-members")
+
+
+# Fix for Python 3.10+ compatibility with exhale 2.3.0
+# MutableMapping was moved from collections to collections.abc in Python 3.10
+try:
+    import collections
+    from collections.abc import MutableMapping
+
+    if not hasattr(collections, "MutableMapping"):
+        collections.MutableMapping = MutableMapping
+except ImportError:
+    pass
 
 # Setup absolute paths for communicating with breathe / exhale where
 # items are expected / should be trimmed by.
@@ -101,6 +128,21 @@ exhale_args = {
         Welcome to the developer reference for the PyTorch C++ API.
     """
     ),
+    ############################################################################
+    # Duplicate handling and error management.                                 #
+    ############################################################################
+    # Note: Using Doxyfile instead of stdin configuration
+    # "exhaleDoxygenStdin" is not compatible with "exhaleUseDoxyfile"
+    # Handle unresolved references more gracefully
+    "unabridgedOrphanKinds": {
+        "function",
+        "define",
+        "enum",
+        "enumvalue",
+        "typedef",
+        "variable",
+    },
+    "fullToctreeMaxDepth": 2,
 }
 
 # Tell sphinx what the primary language being documented is.
@@ -112,6 +154,12 @@ highlight_language = "cpp"
 # Add any paths that contain templates here, relative to this directory.
 # templates_path = ['_templates']
 
+theme_variables = pytorch_sphinx_theme2.get_theme_variables()
+
+templates_path = [
+    "_templates",
+    os.path.join(os.path.dirname(pytorch_sphinx_theme2.__file__), "templates"),
+]
 # The suffix(es) of source filenames.
 # You can specify multiple suffix as a list of string:
 #
@@ -142,7 +190,7 @@ release = "main"
 #
 # This is also used if you do content translation via gettext catalogs.
 # Usually you set "language" from the command line for these cases.
-language = None
+language = "en"
 
 # List of patterns, relative to source directory, that match files and
 # directories to ignore when looking for source files.
@@ -160,7 +208,7 @@ todo_include_todos = True
 # The theme to use for HTML and HTML Help pages.  See the documentation for
 # a list of builtin themes.
 #
-html_theme = "pytorch_sphinx_theme"
+html_theme = "pytorch_sphinx_theme2"
 
 # Theme options are theme-specific and customize the look and feel of a theme
 # further.  For a list of options available for each theme, see the
@@ -168,37 +216,58 @@ html_theme = "pytorch_sphinx_theme"
 #
 html_theme_options = {
     "canonical_url": "https://pytorch.org/docs/stable/",
-    "pytorch_project": "docs",
+    "analytics_id": "GTM-T8XT4PS",
     "collapse_navigation": False,
+    "logo": {"text": "Home"},
+    "icon_links": [
+        {
+            "name": "X",
+            "url": "https://x.com/PyTorch",
+            "icon": "fa-brands fa-x-twitter",
+        },
+        {
+            "name": "GitHub",
+            "url": "https://github.com/pytorch/pytorch",
+            "icon": "fa-brands fa-github",
+        },
+        {
+            "name": "PyTorch Forum",
+            "url": "https://discuss.pytorch.org/",
+            "icon": "fa-brands fa-discourse",
+        },
+        {
+            "name": "PyPi",
+            "url": "https://pypi.org/project/torch/",
+            "icon": "fa-brands fa-python",
+        },
+    ],
+    "navbar_start": ["pytorch_version"],
     "display_version": True,
-    "logo_only": True,
+}
+
+html_context = {
+    "theme_variables": theme_variables,
+    "github_url": "https://github.com",
+    "github_user": "pytorch",
+    "github_repo": "pytorch",
+    "feedback_url": "https://github.com/pytorch/pytorch",
+    "github_version": "main",
+    "doc_path": "docs/cpp/source",
+    "library_links": theme_variables.get("library_links", []),
+    "community_links": theme_variables.get("community_links", []),
+    "language_bindings_links": theme_variables.get("language_bindings_links", []),
 }
 
 # NOTE: sharing python docs resources
-html_logo = os.path.join(
-    repo_root, "docs", "source", "_static", "img", "pytorch-logo-dark-unstable.png"
-)
 
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,
 # so a file named "default.css" will overwrite the builtin "default.css".
 # NOTE: sharing python docs resources
 html_static_path = [os.path.join(repo_root, "docs", "cpp", "source", "_static")]
-
+html_css_files = ["cpp_theme.css"]
 
 # Called automatically by Sphinx, making this `conf.py` an "extension".
-def setup(app):
-    # NOTE: in Sphinx 1.8+ `html_css_files` is an official configuration value
-    # and can be moved outside of this function (and the setup(app) function
-    # can be deleted).
-    html_css_files = ["cpp_theme.css"]
-
-    # In Sphinx 1.8 it was renamed to `add_css_file`, 1.7 and prior it is
-    # `add_stylesheet` (deprecated in 1.8).
-    add_css = getattr(app, "add_css_file", app.add_stylesheet)
-    for css_file in html_css_files:
-        add_css(css_file)
-
 
 # -- Options for HTMLHelp output ------------------------------------------
 

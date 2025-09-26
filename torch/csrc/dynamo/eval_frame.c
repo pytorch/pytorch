@@ -11,6 +11,7 @@
 #include <torch/csrc/utils/python_compat.h>
 
 PyObject* guard_error_hook = NULL;
+PyObject* guard_complete_hook = NULL;
 
 typedef struct {
   int active_dynamo_threads;
@@ -221,17 +222,6 @@ const char* get_frame_name(THP_EVAL_API_FRAME_OBJECT* frame) {
   // Returns the C string name of the current frame.
   DEBUG_CHECK(PyUnicode_Check(F_CODE(frame)->co_name));
   return PyUnicode_AsUTF8(F_CODE(frame)->co_name);
-}
-
-void clear_old_frame_if_python_312_plus(
-    PyThreadState* tstate,
-    THP_EVAL_API_FRAME_OBJECT* frame) {
-#if IS_PYTHON_3_12_PLUS
-
-  THP_PyFrame_Clear(frame);
-  THP_PyThreadState_PopFrame(tstate, frame);
-
-#endif
 }
 
 static PyObject* dynamo_eval_custom_code_impl(
@@ -484,8 +474,20 @@ static PyObject* dynamo__custom_eval_frame_shim(
 
 static void enable_eval_frame_shim(PyThreadState* tstate) {}
 static void enable_eval_frame_default(PyThreadState* tstate) {}
+PyObject* dynamo_eval_custom_code(
+    PyThreadState* tstate,
+    THP_EVAL_API_FRAME_OBJECT* frame,
+    PyCodeObject* code,
+    const char* trace_annotation,
+    int throw_flag) { return NULL; }
+THPPyInterpreterFrame* THPPyInterpreterFrame_New(
+    THP_EVAL_API_FRAME_OBJECT* frame) { return NULL; }
+PyObject* dynamo_eval_frame_default(
+    PyThreadState* tstate,
+    THP_EVAL_API_FRAME_OBJECT* frame,
+    int throw_flag) { return NULL; }
 
-static struct PyGetSetDef THPPyInterpreterFrame_properties[] = {NULL};
+static struct PyGetSetDef THPPyInterpreterFrame_properties[] = {{NULL}};
 
 static PyTypeObject THPPyInterpreterFrameType = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -496,6 +498,17 @@ static PyTypeObject THPPyInterpreterFrameType = {
 };
 
 #endif // !(IS_PYTHON_3_14_PLUS)
+
+void clear_old_frame_if_python_312_plus(
+    PyThreadState* tstate,
+    THP_EVAL_API_FRAME_OBJECT* frame) {
+#if IS_PYTHON_3_12_PLUS
+
+  THP_PyFrame_Clear(frame);
+  THP_PyThreadState_PopFrame(tstate, frame);
+
+#endif
+}
 
 static PyObject* increment_working_threads(
     PyThreadState* tstate,
@@ -531,7 +544,6 @@ static PyObject* decrement_working_threads(
 
 static PyObject* set_eval_frame(
     PyObject* new_callback,
-    PyThreadState* tstate,
     PyObject* module) {
   // Change the eval frame callback and return the old one
   //  - None: disables TorchDynamo
@@ -539,21 +551,31 @@ static PyObject* set_eval_frame(
   //  - Python callable(): enables TorchDynamo
   PyObject* old_callback = eval_frame_callback_get();
 
-  // owned by caller
-  Py_INCREF(old_callback);
+  // Common case: if Dynamo is actually off, we might see a lot of
+  // traffic setting the callback to None when it was already
+  // None. Skip messing with threading, thread-local storage, and
+  // reference counts.
+  if (old_callback != new_callback) {
+    if (new_callback == Py_None) {
+      decrement_working_threads(PyThreadState_GET(), module);
+    } else {
+      increment_working_threads(PyThreadState_GET(), module);
+    }
 
-  if (old_callback != Py_None && new_callback == Py_None) {
-    decrement_working_threads(tstate, module);
-  } else if (old_callback == Py_None && new_callback != Py_None) {
-    increment_working_threads(tstate, module);
+    Py_INCREF(new_callback);
+
+    // Set thread local callback. This will drive behavior of our shim, if/when it
+    // is installed.
+    eval_frame_callback_set(new_callback);
+
+    // Transfer owned reference from eval_frame_callback_get() to caller
+    // without Py_DECREF/Py_INCREF.
+  } else {
+    // We retain a reference to old_callback because it's still the
+    // eval_frame_callback, so we need to give the caller their
+    // own reference.
+    Py_INCREF(old_callback);
   }
-
-  Py_INCREF(new_callback);
-  Py_DECREF(old_callback);
-
-  // Set thread local callback. This will drive behavior of our shim, if/when it
-  // is installed.
-  eval_frame_callback_set(new_callback);
 
   return old_callback;
 }
@@ -569,7 +591,7 @@ static PyObject* set_eval_frame_py(PyObject* module, PyObject* callback) {
       "python enabled=%d and is run_only=%d",
       callback != Py_None,
       callback == Py_False);
-  return set_eval_frame(callback, PyThreadState_GET(), module);
+  return set_eval_frame(callback, module);
 }
 
 static PyObject* set_skip_guard_eval_unsafe(
@@ -626,6 +648,22 @@ static PyObject* set_guard_error_hook(PyObject* dummy, PyObject* obj) {
   Py_RETURN_NONE;
 }
 
+static PyObject* set_guard_complete_hook(PyObject* dummy, PyObject* obj) {
+  PyObject* old_hook = guard_complete_hook;
+
+  if (obj == Py_None) {
+    obj = NULL;
+  }
+
+  guard_complete_hook = Py_XNewRef(obj);
+
+  if (old_hook == NULL) {
+    Py_RETURN_NONE;
+  } else {
+    return old_hook;
+  }
+}
+
 // Debugging function for GNU C only.
 // Used to set gdb breakpoints in hot CPython sites from Python.
 // Code example:
@@ -666,6 +704,7 @@ static PyMethodDef _methods[] = {
     {"unsupported", unsupported, METH_VARARGS, NULL},
     {"set_code_exec_strategy", set_code_exec_strategy, METH_VARARGS, NULL},
     {"set_guard_error_hook", set_guard_error_hook, METH_O, NULL},
+    {"set_guard_complete_hook", set_guard_complete_hook, METH_O, NULL},
     {"raise_sigtrap", raise_sigtrap, METH_NOARGS, NULL},
     {NULL, NULL, 0, NULL}};
 

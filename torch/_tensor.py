@@ -6,7 +6,8 @@ import warnings
 from collections import OrderedDict
 from copy import deepcopy
 from numbers import Number
-from typing import Any, Callable, cast, Optional, Union
+from typing import Any, Callable, cast, Optional, TypeVar, Union
+from typing_extensions import Concatenate, ParamSpec
 
 import torch
 import torch._C as _C
@@ -27,16 +28,21 @@ from torch.overrides import (
 )
 
 
-def _handle_torch_function_and_wrap_type_error_to_not_implemented(f):
-    assigned = functools.WRAPPER_ASSIGNMENTS
+_P = ParamSpec("_P")
+_TensorLike = TypeVar("_TensorLike", bound=_C.TensorBase)
 
-    @functools.wraps(f, assigned=assigned)
-    def wrapped(*args, **kwargs):
+
+def _handle_torch_function_and_wrap_type_error_to_not_implemented(
+    f: Callable[Concatenate[_TensorLike, _P], "Tensor"],
+) -> Callable[Concatenate[_TensorLike, _P], "Tensor"]:
+    @functools.wraps(f)
+    def wrapped(self: _TensorLike, *args: _P.args, **kwargs: _P.kwargs) -> "Tensor":
         try:
             # See https://github.com/pytorch/pytorch/issues/75462
-            if has_torch_function(args):
-                return handle_torch_function(wrapped, args, *args, **kwargs)
-            return f(*args, **kwargs)
+            sargs = self, *args
+            if has_torch_function(sargs):
+                return handle_torch_function(wrapped, sargs, *sargs, **kwargs)
+            return f(self, *args, **kwargs)
         except TypeError:
             return NotImplemented
 
@@ -324,7 +330,7 @@ class Tensor(torch._C.TensorBase):
             torch.serialization._serialization_tls.materialize_fake_tensors
         )
 
-        if self.device.type in ["xla", "maia"] or (
+        if self.device.type in ["xla", "maia", "mtia"] or (
             not torch._C._has_storage(self)
             and self.device.type == torch._C._get_privateuse1_backend_name()
         ):
@@ -336,34 +342,6 @@ class Tensor(torch._C.TensorBase):
             return (
                 torch._utils._rebuild_device_tensor_from_cpu_tensor,
                 (cpu_tensor, self.dtype, str(self.device), self.requires_grad),
-            )
-        # Legacy comment that does not hold anymore.
-        # Note: Numpy array is chosen to be the rebuild component for XLA, MTIA, MAIA Tensors.
-        # We considered a few options:
-        # 1. CPU tensor can't be used here.
-        #    Otherwise in torch.load CPU storage is reconstructed with randomly
-        #    initialized data, moved onto backend device, and then storage is updated
-        #    to the serialized content. This works perfectly for CPU/CUDA but not these backends;
-        #    their tensors are disconnected with storage so they don't get the update.
-        # 2. Python list is not a good fit due to performance reason.
-        #    `tolist()` converts every single element in the tensor into python objects
-        #    and serialize them one by one.
-        if self.device.type in ["mtia"]:
-            # Convert BFloat16 tesors to Float32 before conversion to numpy, as numpy doesn't
-            # support BFloat16. The rebuild tensor from numpy takes in the original self.dtype,
-            # this would reconstruct the BFloat16 tensor from numpy.
-            if skip_data:
-                raise RuntimeError(
-                    "Cannot serialize tensors on backends with no storage under skip_data context manager"
-                )
-            numpy_tensor = (
-                self.cpu().numpy()
-                if self.dtype != torch.bfloat16
-                else self.cpu().to(torch.float32).numpy()
-            )
-            return (
-                torch._utils._rebuild_device_tensor_from_numpy,
-                (numpy_tensor, self.dtype, str(self.device), self.requires_grad),
             )
         if self.device.type == "meta":
             # NB: This implementation BREAKS storage sharing.  Current
@@ -621,19 +599,18 @@ class Tensor(torch._C.TensorBase):
         Args:
             gradient (Tensor, optional): The gradient of the function
                 being differentiated w.r.t. ``self``.
-                This argument can be omitted if ``self`` is a scalar.
-            retain_graph (bool, optional): If ``False``, the graph used to compute
-                the grads will be freed. Note that in nearly all cases setting
-                this option to True is not needed and often can be worked around
-                in a much more efficient way. Defaults to the value of
-                ``create_graph``.
+                This argument can be omitted if ``self`` is a scalar. Defaults to ``None``.
+            retain_graph (bool, optional): If ``False``, the graph used to compute the grads will be freed;
+                If ``True``, it will be retained. The default is ``None``, in which case the value is inferred from ``create_graph``
+                (i.e., the graph is retained only when higher-order derivative tracking is requested). Note that in nearly all cases
+                setting this option to True is not needed and often can be worked around in a much more efficient way.
             create_graph (bool, optional): If ``True``, graph of the derivative will
                 be constructed, allowing to compute higher order derivative
                 products. Defaults to ``False``.
-            inputs (sequence of Tensor, optional): Inputs w.r.t. which the gradient will be
+            inputs (Sequence[Tensor], optional): Inputs w.r.t. which the gradient will be
                 accumulated into ``.grad``. All other tensors will be ignored. If not
                 provided, the gradient is accumulated into all the leaf Tensors that were
-                used to compute the :attr:`tensors`.
+                used to compute the :attr:`tensors`. Defaults to ``None``.
         """
         if has_torch_function_unary(self):
             return handle_torch_function(
@@ -648,6 +625,34 @@ class Tensor(torch._C.TensorBase):
         torch.autograd.backward(
             self, gradient, retain_graph, create_graph, inputs=inputs
         )
+
+    def index(self, positions, dims):
+        """
+        Index a regular tensor by binding specified positions to dims.
+
+        This converts a regular tensor to a first-class tensor by binding
+        the specified positional dimensions to Dim objects.
+
+        Args:
+            positions: Tuple of dimension positions to bind
+            dims: Dim objects or tuple of Dim objects to bind to
+
+        Returns:
+            First-class tensor with specified dimensions bound
+        """
+        # TODO: make it possible to dispatch on positions/dims
+        if has_torch_function_unary(self):
+            return handle_torch_function(
+                Tensor.index,
+                (self,),
+                self,
+                positions,
+                dims,
+            )
+
+        from functorch.dim import index
+
+        return index(self, positions, dims)
 
     def register_hook(self, hook):
         r"""Registers a backward hook.
@@ -1094,11 +1099,11 @@ class Tensor(torch._C.TensorBase):
         )
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
-    def __rsub__(self, other):
+    def __rsub__(self, other: Union["Tensor", int, float, bool, complex]) -> "Tensor":
         return _C._VariableFunctions.rsub(self, other)
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
-    def __rdiv__(self, other):
+    def __rdiv__(self, other: Union["Tensor", int, float, bool, complex]) -> "Tensor":
         return self.reciprocal() * other
 
     __rtruediv__ = __rdiv__
@@ -1113,43 +1118,52 @@ class Tensor(torch._C.TensorBase):
             _C.TensorBase.pow
         ),
     )
+
     __ipow__ = _handle_torch_function_and_wrap_type_error_to_not_implemented(
         _C.TensorBase.pow_
     )
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
-    def __rmod__(self, other):
+    def __rmod__(self, other: Union["Tensor", int, float, bool, complex]) -> "Tensor":
         return torch.remainder(other, self)
 
     def __format__(self, format_spec):
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.__format__, (self,), self, format_spec)
         if self.dim() == 0 and not self.is_meta and type(self) is Tensor:
-            return self.item().__format__(format_spec)
+            # Use detach() here to avoid the warning when converting a scalar Tensor that
+            # requires gradients to a python number. It is ok for formatting.
+            return self.detach().item().__format__(format_spec)
         return object.__format__(self, format_spec)
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
-    def __rpow__(self, other):
+    def __rpow__(self, other: Union["Tensor", int, float, bool, complex]) -> "Tensor":
         return torch.pow(other, self)
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
-    def __floordiv__(self, other):
+    def __floordiv__(self, other: Union["Tensor", int, float, bool]) -> "Tensor":  # type: ignore[override]
+        # TODO(rec): the superclass says it accepts complex here,
+        # but torch.floor_divide says it doesn't.
         return torch.floor_divide(self, other)
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
-    def __rfloordiv__(self, other):
+    def __rfloordiv__(self, other: Union["Tensor", int, float, bool]) -> "Tensor":  # type: ignore[override]
         return torch.floor_divide(other, self)
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
-    def __rlshift__(self, other):
+    def __rlshift__(
+        self, other: Union["Tensor", int, float, bool, complex]
+    ) -> "Tensor":
         return torch.bitwise_left_shift(other, self)
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
-    def __rrshift__(self, other):
+    def __rrshift__(
+        self, other: Union["Tensor", int, float, bool, complex]
+    ) -> "Tensor":
         return torch.bitwise_right_shift(other, self)
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
-    def __rmatmul__(self, other):
+    def __rmatmul__(self, other: "Tensor") -> "Tensor":
         return torch.matmul(other, self)
 
     __pos__ = _C.TensorBase.positive
@@ -1262,7 +1276,7 @@ class Tensor(torch._C.TensorBase):
         """Array view description for cuda tensors.
 
         See:
-        https://numba.pydata.org/numba-doc/latest/cuda/cuda_array_interface.html
+        https://numba.pydata.org/numba-doc/dev/cuda/cuda_array_interface.html
         """
         if has_torch_function_unary(self):
             # TODO mypy doesn't support @property, see: https://github.com/python/mypy/issues/6185
@@ -1599,17 +1613,19 @@ class Tensor(torch._C.TensorBase):
               If any two dimensions have the same stride, swapping these dimensions won't
               change how data is accessed, leading to multiple correct dimension orders.
             """
+            from torch.fx.experimental.symbolic_shapes import guard_or_false
 
             sizes = tensor.size()
             strides = tensor.stride()
 
             # Check if there are any duplicate strides
             has_duplicate_strides = any(
-                earlier == later for earlier, later in zip(strides, strides[1:])
+                guard_or_false(earlier == later)
+                for earlier, later in zip(strides, strides[1:])
             )
 
             # Check if there are any singleton dimensions
-            has_singleton_dims = any(size == 1 for size in sizes)
+            has_singleton_dims = any(guard_or_false(size == 1) for size in sizes)
 
             return has_duplicate_strides or has_singleton_dims
 
@@ -1629,7 +1645,14 @@ class Tensor(torch._C.TensorBase):
 
         import torch._prims_common as utils
 
-        return tuple(utils.compute_elementwise_output_logical_to_physical_perm(self))
+        out_perm, raise_ambiguity = (
+            utils.compute_elementwise_output_logical_to_physical_perm(
+                self, ambiguity_check=ambiguity_check
+            )
+        )
+        if raise_ambiguity:
+            raise RuntimeError("The tensor does not have unique dim order.")
+        return tuple(out_perm)
 
     def _update_names(self, names, inplace):
         if has_torch_function_unary(self):
@@ -1673,7 +1696,14 @@ class Tensor(torch._C.TensorBase):
 
     __torch_dispatch__ = _C._disabled_torch_dispatch_impl
 
-    def __dlpack__(self, stream=None):
+    def __dlpack__(
+        self,
+        *,
+        stream: Optional[Any] = -1,
+        max_version: Optional[tuple[int, int]] = None,
+        dl_device: Optional[tuple[enum.IntEnum, int]] = None,
+        copy: Optional[bool] = None,
+    ):
         """
         Creates a DLpack `capsule https://data-apis.org/array-api/latest/design_topics/data_interchange.html#data-interchange`_
         of the current tensor to be exported to other libraries.
@@ -1684,51 +1714,94 @@ class Tensor(torch._C.TensorBase):
 
         Args:
             stream (integer or None): An optional Python integer representing a
-            pointer to a CUDA stream. The current stream is synchronized with
-            this stream before the capsule is created, and since the capsule
-            shares its storage with the tensor this make it safe to access from
-            both streams.  If None or -1 is passed then no synchronization is performed.
-            If 1 (on CUDA) or 0 (on ROCM) then the default stream is used for
-            synchronization.
+                pointer to a CUDA stream. The current stream is synchronized with
+                this stream before the capsule is created, and since the capsule
+                shares its storage with the tensor this make it safe to access from
+                both streams.  If -1 is passed then no synchronization is performed.
+                If 1 (on CUDA) or 0 (on ROCM) then the default stream is used for
+                synchronization. This API intentionally slightly deviates from the DLPack
+                guidance: the default stream is -1 (stream-preserving; no cross-stream sync),
+                because many from_dlpack implementations intend stream preservation.
+                For non-CUDA devices, -1 is treated the same as None.
+
+            max_version (tuple[int, int] or None): An optional Python tuple with
+                2 integers, representing the maximum version the caller supports. If
+                None (default), PyTorch will fallback to DLPack 0.8.
+
+            dl_device (tuple[DLDeviceType, int] or None): An optional tuple specifying
+                in which device the exported DLPack capsule should be on. If None (default),
+                the exported DLPack capsule will be on the same device as ``self``.
+
+            copy (bool or None): An optional boolean indicating whether or not to copy
+                ``self``. If None, PyTorch will copy only if necessary.
         """
         if has_torch_function_unary(self):
-            return handle_torch_function(Tensor.__dlpack__, (self,), self, stream)
+            args = (self,)
+            kwargs = {
+                "stream": stream,
+                "max_version": max_version,
+                "dl_device": dl_device,
+                "copy": copy,
+            }
+            return handle_torch_function(Tensor.__dlpack__, (self,), *args, **kwargs)
 
         # DLPack capsules can't capture all of PyTorch's semantics,
         # so we prohibit exporting tensors that would lose their properties like
         # requires_grad and having the conjugate bit set.
         if self.requires_grad:
-            raise RuntimeError(
+            raise BufferError(
                 "Can't export tensors that require gradient, use tensor.detach()"
             )
         if self.is_conj():
-            raise RuntimeError("Can't export tensors with the conjugate bit set")
+            raise BufferError("Can't export tensors with the conjugate bit set")
         if self.layout != torch.strided:
-            raise RuntimeError(
+            raise BufferError(
                 "Can't export tensors with layout other than torch.strided"
+            )
+
+        if (
+            self.device.type == "cuda"
+            and self.device.index != torch.cuda.current_device()
+        ):
+            raise BufferError(
+                "Can't export tensors on a different CUDA device index. "
+                f"Expected: {self.device.index}. "
+                f"Current device: {torch.cuda.current_device()}."
             )
 
         if stream is not None and type(stream) is not int:
             # Stream pointers in CUDA/ROCm are uniquely numbered and can
             # be retrieved from their integer value.
             raise TypeError("stream must be ``int`` or ``none``")
-        elif stream is not None and stream != -1:
-            if self.device.type == "cuda":
-                # NB: This logic handles the special case values for default
-                # streams and must be kept in sync with from_dlpack in
-                # torch/utils/dlpack.py
-                if stream == 1 and torch.version.hip is None:
-                    stream = torch.cuda.default_stream()
-                elif stream == 0 and torch.version.hip is not None:
-                    stream = torch.cuda.default_stream()
-                else:
-                    stream = torch.cuda.ExternalStream(stream)
-                # Only synchronize on different streams
-                sync_stream = torch.cuda.current_stream()
-                if stream != sync_stream:
-                    event = torch.cuda.Event()
-                    event.record(sync_stream)
-                    stream.wait_event(event)
+        elif self.device.type == "cuda" and stream != -1:
+            # NB: This logic handles the special case values for default
+            # streams and must be kept in sync with from_dlpack in
+            # torch/utils/dlpack.py
+            is_rocm = torch.version.hip is not None
+            is_cuda = not is_rocm
+
+            if stream is None or (is_rocm and stream == 0) or (is_cuda and stream == 1):
+                stream = torch.cuda.default_stream()
+            else:
+                if is_cuda and stream == 2:
+                    raise BufferError("per-thread default stream is not supported.")
+
+                device_str = "CUDA" if is_cuda else "ROCm"
+                assert (is_cuda and stream != 0) or (
+                    is_rocm and stream not in (1, 2)
+                ), f"unsupported stream on {device_str}: {stream}."
+
+                stream = torch.cuda.ExternalStream(stream)
+
+            # Only synchronize on different streams
+            current_stream = torch.cuda.current_stream()
+            if stream != current_stream:
+                event = torch.cuda.Event()
+                event.record(current_stream)
+                stream.wait_event(event)
+        elif self.device.type == "cpu":
+            assert stream is None or stream == -1, "stream should be None on cpu."
+
         if self.device.type == "xla":
             import torch_xla
             import torch_xla.utils.dlpack as xla_dlpack
@@ -1740,8 +1813,15 @@ class Tensor(torch._C.TensorBase):
                 raise RuntimeError(
                     "Can't export to dlpack an XLA tensor that is not on CUDA."
                 )
+
+            # Does not support DLPack 1.0, yet.
             return xla_dlpack.to_dlpack(self)
-        return torch.to_dlpack(self)
+
+        if max_version is None or max_version[0] < 1:
+            # Fallback to the old, unversioned variant.
+            return _C._to_dlpack(self, dl_device=dl_device, copy=copy)
+
+        return _C._to_dlpack_versioned(self, dl_device=dl_device, copy=copy)
 
     def __dlpack_device__(self) -> tuple[enum.IntEnum, int]:
         if has_torch_function_unary(self):
@@ -1755,9 +1835,9 @@ class Tensor(torch._C.TensorBase):
         if torch_device_type == "cuda" and torch.version.hip is not None:
             device_type = DLDeviceType.kDLROCM
         elif torch_device_type == "cpu" and self.is_pinned():
-            device_type = DLDeviceType.kDLCPUPinned
+            device_type = DLDeviceType.kDLCUDAHost
         elif torch_device_type == "cuda":
-            device_type = DLDeviceType.kDLGPU
+            device_type = DLDeviceType.kDLCUDA
         elif torch_device_type == "cpu":
             device_type = DLDeviceType.kDLCPU
         elif torch_device_type == "xpu":
@@ -1773,7 +1853,9 @@ class Tensor(torch._C.TensorBase):
             ):
                 raise ValueError(f"Unknown device type {torch_device_type} for Dlpack")
 
-            device_type = DLDeviceType.kDLGPU
+            device_type = DLDeviceType.kDLCUDA
+        elif torch_device_type == "mps":
+            device_type = DLDeviceType.kDLMetal
         else:
             raise ValueError(f"Unknown device type {torch_device_type} for Dlpack")
         return (device_type, idx)

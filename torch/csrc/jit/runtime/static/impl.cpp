@@ -982,7 +982,8 @@ void check_type(const Argument& schema_arg, const IValue& arg) {
     return;
   }
   TORCH_CHECK(
-      arg.type()->isSubtypeOf(schema_arg.type()),
+      arg.type()->isSubtypeOf(schema_arg.type()) ||
+      arg.type()->isSubtypeOfExt(schema_arg.type(), /*why_not=*/nullptr),
       arg.type()->annotation_str(),
       " is not a subtype of ",
       schema_arg.type()->annotation_str(),

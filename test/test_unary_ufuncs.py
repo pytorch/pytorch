@@ -54,6 +54,8 @@ from torch.testing._internal.common_utils import (
 )
 from torch.utils import _pytree as pytree
 
+from torch.testing._internal.common_utils import IS_WINDOWS, slowTestIf
+
 if TEST_SCIPY:
     import scipy
 
@@ -271,6 +273,7 @@ class TestUnaryUfuncs(TestCase):
     #   and noncontiguities.
     @suppress_warnings
     @ops(reference_filtered_ops)
+    @slowTestIf(IS_WINDOWS)
     def test_reference_numerics_normal(self, device, dtype, op):
         tensors = generate_elementwise_unary_tensors(
             op, device=device, dtype=dtype, requires_grad=False
@@ -279,6 +282,7 @@ class TestUnaryUfuncs(TestCase):
 
     @suppress_warnings
     @ops(reference_filtered_ops)
+    @slowTestIf(IS_WINDOWS)
     def test_reference_numerics_small(self, device, dtype, op):
         if dtype in (torch.bool,):
             raise self.skipTest("bool has no small values")
@@ -290,6 +294,7 @@ class TestUnaryUfuncs(TestCase):
 
     @suppress_warnings
     @ops(reference_filtered_ops)
+    @slowTestIf(IS_WINDOWS)
     def test_reference_numerics_large(self, device, dtype, op):
         if dtype in (torch.bool, torch.uint8, torch.int8):
             raise self.skipTest("bool, uint8, and int8 dtypes have no large values")
@@ -304,6 +309,7 @@ class TestUnaryUfuncs(TestCase):
         reference_filtered_ops,
         allowed_dtypes=floating_and_complex_types_and(torch.bfloat16, torch.half),
     )
+    @slowTestIf(IS_WINDOWS)
     def test_reference_numerics_extremal(self, device, dtype, op):
         tensors = generate_elementwise_unary_extremal_value_tensors(
             op, device=device, dtype=dtype, requires_grad=False
@@ -312,6 +318,7 @@ class TestUnaryUfuncs(TestCase):
 
     # Tests for testing (non)contiguity consistency
     @ops(unary_ufuncs)
+    @slowTestIf(IS_WINDOWS)
     def test_contig_vs_every_other(self, device, dtype, op):
         contig = make_tensor(
             (1026,), device=device, dtype=dtype, low=op.domain[0], high=op.domain[1]
@@ -328,6 +335,7 @@ class TestUnaryUfuncs(TestCase):
         self.assertEqual(result, expected)
 
     @ops(unary_ufuncs)
+    @slowTestIf(IS_WINDOWS)
     def test_contig_vs_transposed(self, device, dtype, op):
         contig = make_tensor(
             (789, 357), device=device, dtype=dtype, low=op.domain[0], high=op.domain[1]
@@ -344,6 +352,7 @@ class TestUnaryUfuncs(TestCase):
         self.assertEqual(result, expected)
 
     @ops(unary_ufuncs)
+    @slowTestIf(IS_WINDOWS)
     def test_non_contig(self, device, dtype, op):
         shapes = [(5, 7), (1024,)]
         for shape in shapes:
@@ -360,6 +369,7 @@ class TestUnaryUfuncs(TestCase):
             self.assertEqual(op(contig, **torch_kwargs), op(non_contig, **torch_kwargs))
 
     @ops(unary_ufuncs)
+    @slowTestIf(IS_WINDOWS)
     def test_non_contig_index(self, device, dtype, op):
         contig = make_tensor(
             (2, 2, 1, 2),
@@ -378,6 +388,7 @@ class TestUnaryUfuncs(TestCase):
         self.assertEqual(op(contig, **torch_kwargs), op(non_contig, **torch_kwargs))
 
     @ops(unary_ufuncs)
+    @slowTestIf(IS_WINDOWS)
     def test_non_contig_expand(self, device, dtype, op):
         shapes = [(1, 3), (1, 7), (5, 7)]
         for shape in shapes:
@@ -399,6 +410,7 @@ class TestUnaryUfuncs(TestCase):
                 )
 
     @ops(unary_ufuncs)
+    @slowTestIf(IS_WINDOWS)
     def test_contig_size1(self, device, dtype, op):
         contig = make_tensor(
             (5, 100), dtype=dtype, device=device, low=op.domain[0], high=op.domain[1]
@@ -414,6 +426,7 @@ class TestUnaryUfuncs(TestCase):
         self.assertEqual(op(contig, **torch_kwargs), op(contig2, **torch_kwargs))
 
     @ops(unary_ufuncs)
+    @slowTestIf(IS_WINDOWS)
     def test_contig_size1_large_dim(self, device, dtype, op):
         contig = make_tensor(
             (5, 2, 3, 1, 4, 5, 3, 2, 1, 2, 3, 4),
@@ -435,6 +448,7 @@ class TestUnaryUfuncs(TestCase):
     # Tests that computation on a multiple batches is the same as
     # per-batch computation.
     @ops(unary_ufuncs)
+    @slowTestIf(IS_WINDOWS)
     def test_batch_vs_slicing(self, device, dtype, op):
         input = make_tensor(
             (1024, 512), dtype=dtype, device=device, low=op.domain[0], high=op.domain[1]
@@ -547,7 +561,7 @@ class TestUnaryUfuncs(TestCase):
         # sqrt Test Reference: https://github.com/pytorch/pytorch/pull/47424
         x = torch.tensor(0.0 - 1.0e20j, dtype=dtype, device=device)
         self.compare_with_numpy(torch.sqrt, np.sqrt, x)
-        # acos test reference: https://github.com/pytorch/pytorch/issue/42952
+        # acos test reference: https://github.com/pytorch/pytorch/issues/42952
         if not (dtype == torch.cdouble and "cuda" in device):
             self.compare_with_numpy(torch.acos, np.arccos, x)
 
@@ -1080,7 +1094,7 @@ class TestUnaryUfuncs(TestCase):
     def test_silu_complex(self, device, dtype):
         atol = 1e-6
         rtol = 1e-6
-        inouts = [
+        inp_outs = [
             (0.2 + 0.3j, 0.08775215595960617065 + 0.18024823069572448730j),
             (1e-19 + 1e-18j, 4.99999984132761269448e-20 + 5.00000022906852482872e-19j),
             (-1.0 + 2.0j, -0.78546208143234252930 + -0.44626939296722412109j),
@@ -1088,7 +1102,7 @@ class TestUnaryUfuncs(TestCase):
             (2.0j, -1.55740761756896972656 + 0.99999988079071044922j),
         ]
 
-        for inp, out in inouts:
+        for inp, out in inp_outs:
             res = torch.nn.functional.silu(
                 torch.tensor(inp, dtype=dtype, device=device)
             )
@@ -1096,7 +1110,7 @@ class TestUnaryUfuncs(TestCase):
             self.assertEqual(res.real, out.real, atol=atol, rtol=rtol)
             self.assertEqual(res.imag, out.imag, atol=atol, rtol=rtol)
 
-        for inp, out in inouts:
+        for inp, out in inp_outs:
             res = torch.nn.functional.silu(
                 torch.tensor(inp, dtype=dtype, device=device), inplace=True
             )
@@ -1104,7 +1118,7 @@ class TestUnaryUfuncs(TestCase):
             self.assertEqual(res.real, out.real, atol=atol, rtol=rtol)
             self.assertEqual(res.imag, out.imag, atol=atol, rtol=rtol)
 
-    # It is not obvious how to merge this into OpInfo becuase these inputs
+    # It is not obvious how to merge this into OpInfo because these inputs
     # succeed for gradcheck but are expected to fail for gradgradcheck
     @dtypes(torch.double)
     def test_sinc(self, device, dtype):
@@ -1170,7 +1184,7 @@ class TestUnaryUfuncs(TestCase):
         # Not using numpy's log1p here because by the time of writing this,
         # np.log1p has precision problems for small complex input values, see here:
         # https://github.com/numpy/numpy/issues/22609
-        inouts = [
+        inp_outs = [
             (0.2 + 0.3j, 0.21263386770217202 + 0.24497866312686414j),
             (1e-19 + 1e-18j, 1e-19 + 1e-18j),
             (1e-18 + 0.1j, 0.00497517 + 0.0996687j),
@@ -1184,7 +1198,7 @@ class TestUnaryUfuncs(TestCase):
         ]
         # test the extreme values
         if dtype == torch.complex128:
-            inouts += [
+            inp_outs += [
                 (-1 + 1e250j, 575.6462732485114 + 1.5707963267948966j),
                 (1e250 + 1j, 575.6462732485114 + 1e-250j),
                 (1e250 + 1e250j, 575.9928468387914 + 0.7853981633974483j),
@@ -1193,7 +1207,7 @@ class TestUnaryUfuncs(TestCase):
                 (1e250 + 1e-250j, 575.6462732485114 + 0.0j),
             ]
         elif dtype == torch.complex64:
-            inouts += [
+            inp_outs += [
                 (-1 + 1e30j, 69.07755278982137 + 1.5707963267948966j),
                 (1e30 + 1j, 69.07755278982137 + 1e-30j),
                 (1e30 + 1e30j, 69.42412638010134 + 0.7853981633974483j),
@@ -1203,7 +1217,7 @@ class TestUnaryUfuncs(TestCase):
             ]
 
         # test the log1p individually
-        for inp, out in inouts:
+        for inp, out in inp_outs:
             res = torch.log1p(torch.tensor(inp, dtype=dtype, device=device))
             self.assertFalse(torch.any(torch.isnan(res)))
             # setting up atol == 0.0 because some part has very small values
@@ -1211,7 +1225,7 @@ class TestUnaryUfuncs(TestCase):
             self.assertEqual(res.imag, out.imag, atol=0.0, rtol=1e-6)
 
         # test the log1p in tensor
-        inp_lst, out_lst = (list(elmt) for elmt in zip(*inouts))
+        inp_lst, out_lst = (list(elmt) for elmt in zip(*inp_outs))
         inp_tens = torch.tensor(inp_lst, dtype=dtype, device=device)
         out_tens = torch.tensor(out_lst, dtype=dtype, device=device)
         res_tens = torch.log1p(inp_tens)
@@ -1292,7 +1306,7 @@ class TestUnaryUfuncs(TestCase):
         zero_to_large = torch.tensor([0.0, 1.0, 1e3], **tkwargs)
         small_to_inf = torch.tensor([1e-3, 1.0, float("inf")], **tkwargs)
         nans = torch.zeros((3,), **tkwargs) + float("nan")
-        inpouts = [
+        inp_outs = [
             # (a    ,    x),       out
             ((zeros, small_to_inf), ones),
             ((small_to_inf, zeros), zeros),
@@ -1302,7 +1316,7 @@ class TestUnaryUfuncs(TestCase):
             ((infs, infs), nans),
             ((-small_to_inf, small_to_inf), nans),
         ]
-        for inputs, output in inpouts:
+        for inputs, output in inp_outs:
             input0, input1 = inputs
             calc = torch.igamma(input0, input1)
             if torch.all(torch.isnan(output)):
@@ -1321,7 +1335,7 @@ class TestUnaryUfuncs(TestCase):
         zero_to_large = torch.tensor([0.0, 1.0, 1e3], **tkwargs)
         small_to_inf = torch.tensor([1e-3, 1.0, float("inf")], **tkwargs)
         nans = torch.zeros((3,), **tkwargs) + float("nan")
-        inpouts = [
+        inp_outs = [
             # (a    ,    x),       out
             ((zeros, small_to_inf), zeros),
             ((small_to_inf, zeros), ones),
@@ -1331,7 +1345,7 @@ class TestUnaryUfuncs(TestCase):
             ((infs, infs), nans),
             ((-small_to_inf, small_to_inf), nans),
         ]
-        for inputs, output in inpouts:
+        for inputs, output in inp_outs:
             input0, input1 = inputs
             calc = torch.igammac(input0, input1)
             if torch.all(torch.isnan(output)):
@@ -1638,6 +1652,15 @@ class TestUnaryUfuncs(TestCase):
             torch.empty(
                 (static_size, input_tensor.dim()), device=device, dtype=torch.long
             ),
+        )
+
+        # empty input
+        # https://github.com/pytorch/pytorch/issues/162473
+        input_tensor = torch.tensor([], device=device)
+        static_size = 1
+        self.assertEqual(
+            torch.nonzero_static(input_tensor, size=static_size),
+            torch.tensor([[-1]], device=device),
         )
 
         # 1D input

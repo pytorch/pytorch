@@ -528,3 +528,9 @@ def create_submodule_forward_single_input_return_not_tupled():
     m.submodule.register_forward_hook(forward_hook)
 
     return m
+
+
+if __name__ == "__main__":
+    raise RuntimeError(
+        "This file is a collection of utils, it should be imported not executed directly"
+    )

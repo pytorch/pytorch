@@ -20,11 +20,6 @@ SYNTAX_ERROR = "E999"
 IS_WINDOWS: bool = os.name == "nt"
 
 
-def eprint(*args: Any, **kwargs: Any) -> None:
-    """Print to stderr."""
-    print(*args, file=sys.stderr, flush=True, **kwargs)
-
-
 class LintSeverity(str, enum.Enum):
     """Severity of a lint message."""
 

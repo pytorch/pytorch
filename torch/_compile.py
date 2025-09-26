@@ -4,7 +4,7 @@ circular dependencies.
 """
 
 import functools
-from typing import Callable, Literal, Optional, overload, TypeVar, Union
+from typing import Callable, Optional, overload, TypeVar, Union
 from typing_extensions import ParamSpec
 
 
@@ -20,7 +20,7 @@ def _disable_dynamo(
 
 @overload
 def _disable_dynamo(
-    fn: Literal[None] = None, recursive: bool = True
+    fn: None = None, recursive: bool = True
 ) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]: ...
 
 
@@ -45,7 +45,9 @@ def _disable_dynamo(
             if disable_fn is None:
                 import torch._dynamo
 
-                disable_fn = torch._dynamo.disable(fn, recursive)
+                # We can safely turn off functools.wraps here because the inner
+                # already wraps fn in the outer scope.
+                disable_fn = torch._dynamo.disable(fn, recursive, wrapping=False)
                 fn.__dynamo_disable = disable_fn  # type: ignore[attr-defined]
 
             return disable_fn(*args, **kwargs)

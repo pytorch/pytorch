@@ -157,7 +157,7 @@ class TestSACILP(TestCase):
         # Due to symmetry, the layer that has 0.7964 can be any of the first three layers. On CI,
         # due to machine variance and difference in flops, the results can be different -- e.g.,
         # the ratios are  0.672, 0.5646, 0.5646, 0.5646 for the four transformer layers for test
-        # linux-focal-cuda11.8-py3.10-gcc9 / test (distributed, 1, 3, lf.linux.8xlarge.nvidia.gpu).
+        # linux-jammy-cuda11.8-py3.10-gcc9 / test (distributed, 1, 3, lf.linux.8xlarge.nvidia.gpu).
         # and recomputation_time = 58.14; compute_time = 902.26
         modules_to_ac = set(ac_decisions.keys())
         sorted_discard_ratio = sorted(ac_decisions.values())
@@ -211,7 +211,7 @@ class TestSACILP(TestCase):
 
 
 class TestOptimalCheckpointingPolicy(TestCase):
-    # tests are adpated from tests in xformers
+    # tests are adapted from tests in xformers
     # https://github.com/facebookresearch/xformers/blob/c6c0ac31f1b08542a0bc27278c6ed10f825f6963/tests/test_checkpoint.py#L222
     def setUp(self):
         super().setUp()

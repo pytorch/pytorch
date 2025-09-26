@@ -18,13 +18,15 @@ _ASMoutput = namedtuple("_ASMoutput", ["output", "loss"])
 
 
 class AdaptiveLogSoftmaxWithLoss(Module):
-    """Efficient softmax approximation.
+    (
+        """Efficient softmax approximation.
 
     As described in
     `Efficient softmax approximation for GPUs by Edouard Grave, Armand Joulin,
     Moustapha Ciss\u00e9, David Grangier, and Herv\u00e9 J\u00e9gou
     <https://arxiv.org/abs/1609.04309>`__.
-""" r"""
+"""
+        r"""
     Adaptive softmax is an approximate strategy for training models with large
     output spaces. It is most effective when the label distribution is highly
     imbalanced, for example in natural language modelling, where the word
@@ -104,6 +106,7 @@ class AdaptiveLogSoftmaxWithLoss(Module):
 
     .. _Zipf's law: https://en.wikipedia.org/wiki/Zipf%27s_law
     """
+    )
 
     in_features: int
     n_classes: int
@@ -171,19 +174,24 @@ class AdaptiveLogSoftmaxWithLoss(Module):
             self.tail.append(projection)
 
     def reset_parameters(self) -> None:
+        """
+        Resets parameters based on their initialization used in ``__init__``.
+        """
         self.head.reset_parameters()
-        for i2h, h2o in self.tail:
-            i2h.reset_parameters()
-            h2o.reset_parameters()
+        for i2h, h2o in self.tail:  # type: ignore[misc]
+            i2h.reset_parameters()  # type: ignore[has-type]
+            h2o.reset_parameters()  # type: ignore[has-type]
 
     def forward(self, input_: Tensor, target_: Tensor) -> _ASMoutput:
+        """
+        Runs the forward pass.
+        """
         targ_dim = target_.dim()
 
         if targ_dim == 1:
             if input_.size(0) != target_.size(0):
                 raise RuntimeError(
-                    "Input and target should have the same size "
-                    "in the batch dimension."
+                    "Input and target should have the same size in the batch dimension."
                 )
             if input_.dim() != 2:
                 raise RuntimeError(

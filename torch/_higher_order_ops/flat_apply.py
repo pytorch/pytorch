@@ -108,7 +108,7 @@ def impl(func, in_spec, *flat_args):
     #
     # TODO: The following can be updated to support non-graphable outputs and pytrees.
     # For non-graphable constant outputs: the assumption would be that they are constant
-    # (everytime the function runs those MUST be the same)
+    # (every time the function runs those MUST be the same)
     # For pytree outputs:
     # I'm not sure if we need to return (flat_output, spec) or just (flat_output,):
     # in the latter case the tracers need to carry out the output specs

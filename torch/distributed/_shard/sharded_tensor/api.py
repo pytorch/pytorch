@@ -104,7 +104,7 @@ class ShardedTensorBase(torch.Tensor):
             sizes, tensor_properties=tensor_properties
         )
 
-        r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
+        r = torch.Tensor._make_wrapper_subclass(
             cls,
             sizes,
             dtype=dtype,
@@ -184,7 +184,7 @@ class ShardedTensorBase(torch.Tensor):
         return sharded_tensor_base
 
     @classmethod
-    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):  # type: ignore[override]
         raise RuntimeError(
             f"A {cls.__name__} object is being used from c++ while calling {func.__module__}.{func.__name__} "
             "but the there is no custom __torch_dispatch__ implementation for it."
@@ -470,7 +470,7 @@ class ShardedTensor(ShardedTensorBase):
                     warnings.warn(
                         "Gathering a tensor with zero elements on rank " + str(rank)
                     )
-                    return
+                    continue
                 shard_offset = shard_placement[shard.metadata][1]
                 data[shard_offset : shard_offset + src.numel()].copy_(src)
 
@@ -515,7 +515,7 @@ class ShardedTensor(ShardedTensorBase):
 
         .. note:: When moving a ShardedTensor from GPU to CPU, the ShardedTensor might
             need to be managed by a different type of ProcessGroup(i.e. ProcessGroupGloo),
-            it is the user's responsiblity to explicitly pass in a new process_group that
+            it is the user's responsibility to explicitly pass in a new process_group that
             is compatible with CPU.
         """
         # TODO: make this a __torch_function__ op once ShardedTensor becomes a
@@ -575,7 +575,7 @@ class ShardedTensor(ShardedTensorBase):
         metadata, but no underlying data movements are performed.
         .. note:: When moving a ShardedTensor from CPU to GPU, the ShardedTensor might
             need to be managed by a different type of ProcessGroup(i.e. ProcessGroupNCCL),
-            it is the user's responsiblity to explicitly pass in a new process_group that
+            it is the user's responsibility to explicitly pass in a new process_group that
             is compatible with GPU.
         """
         if (
@@ -735,6 +735,20 @@ class ShardedTensor(ShardedTensorBase):
         process_group=None,
         init_rrefs=False,
     ):
+        # recalc metadata handles special ST creation cases like each rank only has tensor available
+        # caller need to provide None on the unknown dimension of the global size
+        # We will change None into zeros and go through the same amount of checks as before to create ST
+        # and use all_gather to calculate the offsets and global size for metadata
+        # It is compatible with the current use case since, conventionally we don't pass None as global size
+        # Therefore the old path won't trigger the new feature
+        recalc_metadata = False
+        for dim in global_size:
+            if dim is None:
+                recalc_metadata = True
+        if recalc_metadata:
+            global_size = tuple(
+                0 if dim_size is None else dim_size for dim_size in global_size
+            )
         # STEP 1: Validate the Shardmetadatas locally
         process_group = cls._normalize_pg(process_group)
         current_rank = dist.get_rank()  # intentional to get global rank
@@ -760,7 +774,29 @@ class ShardedTensor(ShardedTensorBase):
         else:
             gathered_metadatas = [local_sharded_tensor_metadata]
 
-        global_sharded_tensor_metadata = build_global_metadata(gathered_metadatas)
+        global_sharded_tensor_metadata = build_global_metadata(
+            gathered_metadatas, recalc_metadata=recalc_metadata
+        )
+        if recalc_metadata:
+            # for recalc use cases, we only support rw for now, limit the blast radius
+            # will modify here once we support more sharding type
+            assert (
+                len(local_shards) > 0
+                and len(global_sharded_tensor_metadata.shards_metadata) > current_rank
+            ), (
+                f"# for metadata recalculation, local_shards must be larger than 0 "
+                f"actual:{len(local_shards)}, # glb metadata must be greater than any rank id, "
+                f"# metadata:{len(global_sharded_tensor_metadata.shards_metadata)}, rank id:{current_rank}"
+            )
+            local_md = [
+                shard_md
+                for shard_md in global_sharded_tensor_metadata.shards_metadata
+                if shard_md.placement.rank() == current_rank
+            ]
+            assert len(local_md) == 1, (
+                f"should has and only has one metadata for local rank, actual:{local_md}"
+            )
+            local_shards[0].metadata = local_md[0]
         tensor_properties = global_sharded_tensor_metadata.tensor_properties
 
         # STEP 3: Validation done, create the actual ShardedTensor and populate fields
@@ -1110,8 +1146,12 @@ class ShardedTensor(ShardedTensorBase):
             resharding_spec, shard_spec.ChunkShardingSpec
         ) or not isinstance(self._sharding_spec, shard_spec.ChunkShardingSpec):
             raise NotImplementedError("Only ChunkShardingSpec supported for reshard.")
-        if len(self.local_shards()) != 1:
-            raise NotImplementedError("Only single local shard supported for reshard.")
+
+        num_local_shards = len(self.local_shards())
+        if num_local_shards != 1:
+            raise NotImplementedError(
+                f"Only single local shard supported for reshard. Number of shards: {num_local_shards}"
+            )
 
         if self._sharding_spec.dim == resharding_spec.dim:  # type: ignore[attr-defined]
             if self._sharding_spec.placements == resharding_spec.placements:  # type: ignore[attr-defined]
@@ -1144,8 +1184,11 @@ class ShardedTensor(ShardedTensorBase):
         Returns:
             A :class:`torch.Tensor` of the local shard.
         """
-        if len(self.local_shards()) != 1:
-            raise NotImplementedError("Only single local shard is supported.")
+        num_local_shards = len(self.local_shards())
+        if num_local_shards != 1:
+            raise NotImplementedError(
+                f"Only single local shard is supported. Number of shards: {num_local_shards}"
+            )
         return self.local_shards()[0].tensor
 
     @classmethod

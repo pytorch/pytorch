@@ -23,7 +23,7 @@ on:
       vc-year:
         required: false
         type: string
-        default: "2019"
+        default: "2022"
         description: The Visual Studio year to use for building.
       build-with-debug:
         required: false
@@ -77,6 +77,7 @@ jobs:
         run: |
           git config --global core.longpaths true
           git config --global core.symlinks true
+          git config --global core.ignorecase false
 
           # https://git-scm.com/docs/git-fsmonitor--daemon.  The daemon could lock
           # the directory on Windows and prevent GHA from checking out as reported
@@ -98,7 +99,7 @@ jobs:
             To start build locally, change working folder to \actions-runner\_work\pytorch\pytorch,
             Activate miniconda and Visual Studio environment, by running:
               call C:\Jenkins\Miniconda3\Scripts\activate.bat C:\Jenkins\Miniconda3
-              call "C:\Program Files (x86)\Microsoft Visual Studio\2019\BuildTools\VC\Auxiliary\Build\vcvarsall.bat" x64
+              call "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvarsall.bat" x64
 
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
@@ -150,7 +151,7 @@ jobs:
           BUILD_WHEEL: 1
           MAX_JOBS: 8
           CUDA_VERSION: ${{ inputs.cuda-version }}
-          PYTHON_VERSION: "3.9"
+          PYTHON_VERSION: "3.10"
           SCCACHE_BUCKET: "ossci-compiler-cache"
           SCCACHE_S3_KEY_PREFIX: ${{ github.workflow }}
           SCCACHE_REGION: us-east-1
@@ -173,7 +174,7 @@ jobs:
       # Upload to github so that people can click and download artifacts
       - name: Upload artifacts to s3
         if: steps.build.outcome != 'skipped'
-        uses: seemethere/upload-artifact-s3@v5
+        uses: seemethere/upload-artifact-s3@baba72d0712b404f646cebe0730933554ebce96a # v5.1.0
         with:
           retention-days: 14
           if-no-files-found: error

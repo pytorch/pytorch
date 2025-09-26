@@ -137,7 +137,7 @@ about this by following `this
 API concerns itself with scenarios in which you would like to extend
 TorchScript with custom operators, which can similarly be serialized and
 invoked from C++ during inference. Lastly, the `torch::jit::compile
-<https://pytorch.org/cppdocs/api/function_namespacetorch_1_1jit_1a176d99fd5bf0233119a5f49c07a1d01d.html#exhale-function-namespacetorch-1-1jit-1a176d99fd5bf0233119a5f49c07a1d01d>`_
+<https://pytorch.org/cppdocs/api/function_namespacetorch_1_1jit_1a8660dc13a6b82336aadac667e6dccba1.html>`_
 function may be used to access the TorchScript compiler directly from C++.
 
 C++ Extensions

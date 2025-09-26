@@ -35,36 +35,8 @@ exit /b 1
 :wheel
 echo "install wheel package"
 
-set PYTHON_INSTALLER_URL=
-if "%DESIRED_PYTHON%" == "3.13t" set "PYTHON_INSTALLER_URL=https://www.python.org/ftp/python/3.13.0/python-3.13.0-amd64.exe"
-if "%DESIRED_PYTHON%" == "3.13" set "PYTHON_INSTALLER_URL=https://www.python.org/ftp/python/3.13.0/python-3.13.0-amd64.exe"
-if "%DESIRED_PYTHON%" == "3.12" set "PYTHON_INSTALLER_URL=https://www.python.org/ftp/python/3.12.0/python-3.12.0-amd64.exe"
-if "%DESIRED_PYTHON%" == "3.11" set "PYTHON_INSTALLER_URL=https://www.python.org/ftp/python/3.11.0/python-3.11.0-amd64.exe"
-if "%DESIRED_PYTHON%" == "3.10" set "PYTHON_INSTALLER_URL=https://www.python.org/ftp/python/3.10.0/python-3.10.0-amd64.exe"
-if "%DESIRED_PYTHON%" == "3.9" set "PYTHON_INSTALLER_URL=https://www.python.org/ftp/python/3.9.0/python-3.9.0-amd64.exe"
-if "%PYTHON_INSTALLER_URL%" == "" (
-    echo Python %DESIRED_PYTHON% not supported yet
-)
+call "internal\install_python.bat"
 
-set ADDITIONAL_OPTIONS=""
-set PYTHON_EXEC="python"
-if "%DESIRED_PYTHON%" == "3.13t" (
-    set ADDITIONAL_OPTIONS="Include_freethreaded=1"
-    set PYTHON_EXEC="python3.13t"
-)
-
-del python-amd64.exe
-curl --retry 3 -kL "%PYTHON_INSTALLER_URL%" --output python-amd64.exe
-if errorlevel 1 exit /b 1
-
-:: According to https://docs.python.org/3/using/windows.html, setting PrependPath to 1 will prepend
-:: the installed Python to PATH system-wide. Even calling set PATH=%ORIG_PATH% later on won't make
-:: a change. As the builder directory will be removed after the smoke test, all subsequent non-binary
-:: jobs will fail to find any Python executable there
-start /wait "" python-amd64.exe /quiet InstallAllUsers=1 PrependPath=0 Include_test=0 %ADDITIONAL_OPTIONS% TargetDir=%CD%\Python
-if errorlevel 1 exit /b 1
-
-set "PATH=%CD%\Python%PYTHON_VERSION%\Scripts;%CD%\Python;%PATH%"
 if "%DESIRED_PYTHON%" == "3.13t" %PYTHON_EXEC% -m pip install --pre numpy==2.2.1 protobuf
 if "%DESIRED_PYTHON%" == "3.13" %PYTHON_EXEC% -m pip install --pre numpy==2.1.2 protobuf
 if "%DESIRED_PYTHON%" == "3.12" %PYTHON_EXEC% -m pip install --pre numpy==2.0.2 protobuf
@@ -81,7 +53,7 @@ if "%PYTORCH_BUILD_VERSION:dev=%" NEQ "%PYTORCH_BUILD_VERSION%" (
 )
 
 set "EXTRA_INDEX= "
-if "%CUDA_VERSION%" == "xpu" set "EXTRA_INDEX=--index-url https://download.pytorch.org/whl/%CHANNEL%/xpu"
+if "%CUDA_VERSION%" == "xpu" set "EXTRA_INDEX=--index-url https://download.pytorch.org/whl/%CHANNEL%/xpu"  %= @lint-ignore =%
 
 for /F "delims=" %%i in ('where /R "%PYTORCH_FINAL_PACKAGE_DIR:/=\%" *.whl') do %PYTHON_EXEC% -m pip install "%%i" %EXTRA_INDEX%
 if errorlevel 1 exit /b 1
@@ -176,14 +148,7 @@ if "%NVIDIA_GPU_EXISTS%" == "0" (
     goto end
 )
 
-set BUILD_SPLIT_CUDA=
-if exist "%install_root%\lib\torch_cuda_cu.lib" if exist "%install_root%\lib\torch_cuda_cpp.lib" set BUILD_SPLIT_CUDA=ON
-
-if "%BUILD_SPLIT_CUDA%" == "ON" (
-    cl %PYTORCH_ROOT%\.ci\pytorch\test_example_code\check-torch-cuda.cpp torch_cpu.lib c10.lib torch_cuda_cu.lib torch_cuda_cpp.lib /EHsc /std:c++17 /link /INCLUDE:?warp_size@cuda@at@@YAHXZ /INCLUDE:?_torch_cuda_cu_linker_symbol_op_cuda@native@at@@YA?AVTensor@2@AEBV32@@Z
-) else (
-    cl %PYTORCH_ROOT%\.ci\pytorch\test_example_code\check-torch-cuda.cpp torch_cpu.lib c10.lib torch_cuda.lib /EHsc /std:c++17 /link /INCLUDE:?warp_size@cuda@at@@YAHXZ
-)
+cl %PYTORCH_ROOT%\.ci\pytorch\test_example_code\check-torch-cuda.cpp torch_cpu.lib c10.lib torch_cuda.lib /EHsc /std:c++17 /link /INCLUDE:?warp_size@cuda@at@@YAHXZ
 .\check-torch-cuda.exe
 if ERRORLEVEL 1 exit /b 1
 

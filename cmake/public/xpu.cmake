@@ -6,12 +6,12 @@ if(TARGET torch::xpurt)
 endif()
 
 set(XPU_HOST_CXX_FLAGS)
-set(XPU_DEVICE_CXX_FLAGS)
 
 # Find SYCL library.
 find_package(SYCLToolkit REQUIRED)
 if(NOT SYCL_FOUND)
   set(PYTORCH_FOUND_XPU FALSE)
+  # Exit early to avoid populating XPU_HOST_CXX_FLAGS.
   return()
 endif()
 set(PYTORCH_FOUND_XPU TRUE)
@@ -37,12 +37,8 @@ torch_xpu_get_arch_list(XPU_ARCH_FLAGS)
 # propagate to torch-xpu-ops
 set(TORCH_XPU_ARCH_LIST ${XPU_ARCH_FLAGS})
 
-if(CMAKE_SYSTEM_NAME MATCHES "Linux" AND SYCL_COMPILER_VERSION VERSION_LESS_EQUAL PYTORCH_2_5_SYCL_TOOLKIT_VERSION)
-  # for ABI compatibility on Linux
-  string(APPEND XPU_HOST_CXX_FLAGS " -D__INTEL_PREVIEW_BREAKING_CHANGES")
-  string(APPEND XPU_DEVICE_CXX_FLAGS " -fpreview-breaking-changes")
-endif()
-
+# Ensure USE_XPU is enabled.
+string(APPEND XPU_HOST_CXX_FLAGS " -DUSE_XPU")
 string(APPEND XPU_HOST_CXX_FLAGS " -DSYCL_COMPILER_VERSION=${SYCL_COMPILER_VERSION}")
 
 if(DEFINED ENV{XPU_ENABLE_KINETO})
@@ -51,6 +47,10 @@ else()
   set(XPU_ENABLE_KINETO FALSE)
 endif()
 
-if(NOT WIN32)
+if(WIN32)
+  if(${SYCL_COMPILER_VERSION} GREATER_EQUAL 20250101)
+    set(XPU_ENABLE_KINETO TRUE)
+  endif()
+else()
   set(XPU_ENABLE_KINETO TRUE)
 endif()

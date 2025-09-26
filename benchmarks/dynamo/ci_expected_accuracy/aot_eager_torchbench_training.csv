@@ -102,7 +102,7 @@ hf_DistilBert,pass,6
 
 
 
-hf_GPT2,pass,6
+hf_GPT2,pass,8
 
 
 
@@ -110,11 +110,11 @@ hf_GPT2_large,pass_due_to_skip,0
 
 
 
-hf_Reformer,pass,23
+hf_Reformer,pass,20
 
 
 
-hf_Roberta_base,fail_accuracy,6
+hf_Roberta_base,pass,6
 
 
 
@@ -286,7 +286,7 @@ vgg16,pass,6
 
 
 
-vision_maskrcnn,pass,35
+vision_maskrcnn,pass,39
 
 
 

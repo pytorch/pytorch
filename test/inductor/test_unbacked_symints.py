@@ -299,6 +299,26 @@ class TestUnbackedSymints(InductorTestCase):
 
     @skipGPUIf(not HAS_GPU, "requires gpu and triton")
     @dynamo_config.patch({"capture_scalar_outputs": True})
+    def test_unbacked_repeat(self, device):
+        def fn(x, a, b):
+            u0, u1 = a.item(), b.item()
+            torch._check_is_size(u0)
+            torch._check_is_size(u1)
+
+            return x.repeat(u0, 2).repeat(2, u1)
+
+        example_inputs = (
+            make_tensor(1, 16, dtype=torch.float32, device=device),
+            torch.scalar_tensor(2, dtype=torch.int32, device=device),
+            torch.scalar_tensor(4, dtype=torch.int32, device=device),
+        )
+
+        actual = torch.compile(fn, fullgraph=True)(*example_inputs)
+        expected = fn(*example_inputs)
+        torch.testing.assert_close(actual, expected)
+
+    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @dynamo_config.patch({"capture_scalar_outputs": True})
     @parametrize("dynamic", [False, True, None])
     def test_unbacked_slice_on_subclass(self, device, dynamic):
         from torch.testing._internal.common_subclass import WrapperTensor
@@ -441,6 +461,151 @@ class TestUnbackedSymints(InductorTestCase):
         )
         model = Model()
         self.assertEqual(torch.compile(model)(*example_inputs), model(*example_inputs))
+
+    @skipGPUIf(not HAS_GPU, "torch.compile for gpu requires triton")
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_einsum(self, device):
+        def fn(q, k, vector, scalar):
+            unbacked = scalar.item()
+            q = q.repeat(1, unbacked, 1, 1)
+            k = k.repeat(1, unbacked, 1, 1)
+
+            qk = torch.einsum("bcxd,bcyd->bcxy", (q, k))
+            qk2 = torch.einsum("b...,b...->b...", (q, k))
+            qvec = torch.einsum("b...,b->b...", (q, vector))
+            return qk, qk2, qvec
+
+        example_inputs = (
+            torch.empty_strided(
+                (12, 1, 512, 64), (64, 196608, 768, 1), device=device
+            ).uniform_(0, 1),
+            torch.empty_strided(
+                (12, 1, 512, 64), (64, 196608, 768, 1), device=device
+            ).uniform_(0, 1),
+            torch.randn((12,), device=device),
+            torch.scalar_tensor(10, device=device, dtype=torch.int8),
+        )
+        actual = torch.compile(fn, fullgraph=True)(*example_inputs)
+        expected = fn(*example_inputs)
+        torch.testing.assert_close(actual, expected)
+
+    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
+    def test_softmax(self, device):
+        def fn(x):
+            nz = x.nonzero().float()
+            soft = torch.softmax(nz, dim=0)
+            logsoft = torch.nn.functional.log_softmax(nz, dim=0)
+            return soft * logsoft
+
+        example_inputs = (
+            torch.randint(low=0, high=2, size=(32,), device=device, dtype=torch.int8),
+        )
+        actual = torch.compile(fn, fullgraph=True)(*example_inputs)
+        expected = fn(*example_inputs)
+        torch.testing.assert_close(actual, expected)
+
+    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @skipIfXpu(msg="_scaled_dot_product_flash_attention is not supported on XPU yet")
+    @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
+    def test_sdpfa(self, device):
+        if device == "cpu":
+            raise unittest.SkipTest(
+                "scaled_dot_product_flash_attention has no CPU backend"
+            )
+
+        def fn(x):
+            B, H, d_h = 2, 4, 8
+            nz = torch.nonzero(x)
+            seq_len = nz.size(0)
+
+            q = torch.randn(B, H, seq_len, d_h, device=device, dtype=torch.float16)
+            k = torch.randn(B, H, seq_len, d_h, device=device, dtype=torch.float16)
+            v = torch.randn(B, H, seq_len, d_h, device=device, dtype=torch.float16)
+
+            result = torch.ops.aten._scaled_dot_product_flash_attention.default(
+                q, k, v, dropout_p=0.0, is_causal=False, scale=None
+            )
+            return result
+
+        x = torch.tensor([1.0, 0.0, 1.0, 0.0], device=device)
+        torch.compile(fn, fullgraph=True)(x)
+
+    @skipGPUIf(not HAS_GPU, "torch.compile for gpu requires triton")
+    @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
+    def test_unbacked_linear_layer_norm_input(self, device):
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(387, 128, bias=True, device=device)
+                self.layer_norm1 = torch.nn.LayerNorm(387, device=device)
+                self.layer_norm2 = torch.nn.LayerNorm(128, device=device)
+
+            def forward(self, x, mask):
+                masked_select = x.masked_select(mask)
+                view = masked_select.view(-1, 387)
+
+                linear = self.linear(view)
+                layer_norm1 = self.layer_norm1(view)
+                layer_norm2 = self.layer_norm2(linear)
+                return linear, layer_norm1, layer_norm2
+
+        model = MyModel()
+        inputs = (
+            torch.randn((256, 387), dtype=torch.float, device=device),
+            torch.randint(
+                low=0, high=2, size=(256, 1), dtype=torch.bool, device=device
+            ),
+        )
+
+        actual = torch.compile(model, fullgraph=True)(*inputs)
+        expected = model(*inputs)
+        torch.testing.assert_close(actual, expected)
+
+    @skipGPUIf(not HAS_GPU, "torch.compile for gpu requires triton")
+    @dynamo_config.patch({"capture_scalar_outputs": True})
+    def test_to_int_with_unbacked_size(self, device):
+        def fn(x):
+            unbacked = x.item()
+            torch._check_is_size(unbacked)
+
+            # Transpose to avoid contig short-circuit.
+            unbacked_size = torch.ones(
+                size=(unbacked // 4, 10), device=device
+            ).transpose(0, 1)
+            return unbacked_size.int()
+
+        example_inputs = (torch.tensor(16, device=device),)
+        actual = torch.compile(fn, fullgraph=True)(*example_inputs)
+        expected = fn(*example_inputs)
+        torch.testing.assert_close(actual, expected)
+
+    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
+    @inductor_config.patch({"combo_kernels": True, "benchmark_combo_kernel": True})
+    def test_combo_kernel_size_hint_failure(self, device):
+        # A size hint failure is "TypeError: Cannot convert symbols to int"
+        if device == "cpu":
+            raise unittest.SkipTest("Combo kernels must be for GPU.")
+
+        def fn(x):
+            nz = torch.nonzero(x)
+            u0 = nz.size(0)
+            t1 = torch.ones(u0, device=device)
+            t2 = torch.zeros(u0 + 1, device=device)
+            t3 = torch.zeros(u0 * 2, device=device)
+            t4 = torch.zeros(u0 - x.size(0), device=device)
+            out1 = t1 - 1
+            out2 = t2 + 2
+            out3 = t3 * 3
+            out4 = t4 / 4
+            return out1, out2, out3, out4
+
+        example_inputs = (torch.randn(32, device=device, dtype=torch.float16),)
+        torch._dynamo.mark_dynamic(example_inputs[0], 0)
+        actual = torch.compile(fn, fullgraph=True)(*example_inputs)
+        expected = fn(*example_inputs)
+        torch.testing.assert_close(actual, expected)
 
 
 instantiate_device_type_tests(TestUnbackedSymints, globals(), allow_xpu=True)

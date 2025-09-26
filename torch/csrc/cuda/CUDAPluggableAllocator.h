@@ -11,32 +11,6 @@
 
 namespace torch::cuda::CUDAPluggableAllocator {
 
-using MallocFuncType = void*(size_t, int, cudaStream_t);
-using FreeFuncType = void(void*, size_t, int, cudaStream_t);
-
-// A CUDAPluggableAllocatorDeleterContext object is used as the `ctx`
-// argument for DataPtr. We need context because a user can use
-// multiple allocators in the same PyTorch program, and
-// the allocators can have different free functions, such as:
-// free, cudaFree, cudaFreeAsync, ncclMemFree etc.
-struct TORCH_CUDA_CPP_API CUDAPluggableAllocatorDeleterContext {
-  explicit CUDAPluggableAllocatorDeleterContext(
-      std::function<FreeFuncType> free_fn,
-      void* data,
-      size_t size,
-      int device,
-      cudaStream_t stream);
-
-  void free();
-
- private:
-  std::function<FreeFuncType> free_fn_;
-  void* data_;
-  size_t size_;
-  int device_;
-  cudaStream_t stream_{};
-};
-
 #if defined(USE_ROCM)
 using streamType = c10::hip::HIPStream;
 #else
@@ -49,8 +23,8 @@ getCurrentAllocator();
 TORCH_CUDA_CPP_API std::shared_ptr<
     c10::cuda::CUDACachingAllocator::CUDAAllocator>
 createCustomAllocator(
-    std::function<MallocFuncType> alloc_fn,
-    std::function<FreeFuncType> free_fn);
+    std::function<void*(size_t, int, cudaStream_t)> alloc_fn,
+    std::function<void(void*, size_t, int, cudaStream_t)> free_fn);
 TORCH_CUDA_CPP_API void changeCurrentAllocator(
     const std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator>&
         allocator);
@@ -69,8 +43,8 @@ struct _AllocationMetadata {
 struct TORCH_CUDA_CPP_API CUDAPluggableAllocator
     : public c10::cuda::CUDACachingAllocator::CUDAAllocator {
   CUDAPluggableAllocator(
-      std::function<MallocFuncType> alloc_fn,
-      std::function<FreeFuncType> free_fn);
+      std::function<void*(size_t, int, cudaStream_t)> alloc_fn,
+      std::function<void(void*, size_t, int, cudaStream_t)> free_fn);
 
   CUDAPluggableAllocator(CUDAPluggableAllocator& other);
   CUDAPluggableAllocator(CUDAPluggableAllocator&& other) = delete;
@@ -114,7 +88,7 @@ struct TORCH_CUDA_CPP_API CUDAPluggableAllocator
   bool initialized() override;
   double getMemoryFraction(c10::DeviceIndex device) override;
   void setMemoryFraction(double fraction, c10::DeviceIndex device) override;
-  void emptyCache() override;
+  void emptyCache(c10::cuda::MempoolId_t mempool_id = {0, 0}) override;
   void enable(bool) override {}
   bool isEnabled() const override {
     return true;
@@ -128,7 +102,8 @@ struct TORCH_CUDA_CPP_API CUDAPluggableAllocator
       c10::DeviceIndex device) override;
   void resetAccumulatedStats(c10::DeviceIndex device) override;
   void resetPeakStats(c10::DeviceIndex device) override;
-  c10::cuda::CUDACachingAllocator::SnapshotInfo snapshot() override;
+  c10::cuda::CUDACachingAllocator::SnapshotInfo snapshot(
+      c10::cuda::MempoolId_t mempool) override;
   void beginAllocateToPool(
       c10::DeviceIndex device,
       c10::cuda::MempoolId_t mempool_id,
@@ -172,8 +147,8 @@ struct TORCH_CUDA_CPP_API CUDAPluggableAllocator
   void copy_data(void* dest, const void* src, std::size_t count) const final;
 
  protected:
-  std::function<MallocFuncType> alloc_fn_;
-  std::function<FreeFuncType> free_fn_;
+  std::function<void*(size_t, int, cudaStream_t)> alloc_fn_;
+  std::function<void(void*, size_t, int, cudaStream_t)> free_fn_;
   std::function<void(int)> init_fn_;
   std::function<void()> reset_fn_;
   std::function<void(double, int)> memory_fraction_fn_;
@@ -185,7 +160,7 @@ struct TORCH_CUDA_CPP_API CUDAPluggableAllocator
   std::function<void(int, c10::cuda::MempoolId_t)> end_allocate_to_pool_fn_;
   std::function<void(int, c10::cuda::MempoolId_t)> relase_pool_fn_;
   std::mutex allocator_mutex_;
-  // We do the bookeeping here in order to simplify custom allocators
+  // We do the bookkeeping here in order to simplify custom allocators
   std::unordered_map<void*, _AllocationMetadata> allocation_metadata_;
 
   bool initialized_ = false;

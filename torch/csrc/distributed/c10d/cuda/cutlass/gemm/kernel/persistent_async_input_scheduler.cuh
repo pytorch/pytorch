@@ -3,7 +3,7 @@
  * that supports consuming asynchronous input. This tile scheduler introduces the following arguments:
  *
  * - tiles_per_chunk_m – Specifies the size of an M chunk. Chunks are the granularity at which the
- *   asynchronous input becomes ready. It must be an interger multiple of the size of an M tile.
+ *   asynchronous input becomes ready. It must be an integer multiple of the size of an M tile.
  *
  * - chunk_signals – chunk_signals[i] == 1 indicates that chunk i is ready. Before returning a work
  *   tile, get_current_work() waits for the signal to ensure that the corresponding chunk is ready.
@@ -137,6 +137,20 @@ public:
   using RasterOrder = typename Params::RasterOrder;
   using RasterOrderOptions = typename Params::RasterOrderOptions;
   static constexpr bool IsDynamicPersistent = false;
+
+  using Pipeline = PipelineEmpty;
+  using PipelineStorage = typename Pipeline::SharedStorage;
+  using ThrottlePipeline = PipelineEmpty;
+  using ThrottlePipelineStorage = typename ThrottlePipeline::SharedStorage;
+
+  struct CLCResponse {};
+
+  class SharedStorage {
+  public:
+    CUTLASS_DEVICE PipelineStorage pipeline() { return PipelineStorage{}; }
+    CUTLASS_DEVICE ThrottlePipelineStorage throttle_pipeline() { return ThrottlePipelineStorage{}; }
+    CUTLASS_DEVICE CLCResponse* data() { return nullptr; }
+  };
 
 public:
   // ==============================
@@ -313,7 +327,7 @@ public:
         wait_signal(scheduler_params.chunk_signals + chunk_idx);
       }
 
-      // An arbirary, non-default id
+      // An arbitrary, non-default id
       constexpr int barrier_id = 8;
       arch::NamedBarrier barrier(NumThreadsPerWarp, barrier_id);
       barrier.arrive_and_wait();
@@ -408,6 +422,17 @@ public:
 
     advance_to_next_work();
     return cute::make_tuple(get_current_work(), true);
+  }
+
+  // Kernel helper function to get next work tile
+  template <class TileSchedulerPipeline, class TileSchedulerPipelineState>
+  CUTLASS_DEVICE
+  auto
+  fetch_next_work(
+      WorkTileInfo work_tile_info,
+      TileSchedulerPipeline& scheduler_pipeline,
+      TileSchedulerPipelineState scheduler_pipe_consumer_state) {
+    return fetch_next_work(work_tile_info);
   }
 
   // Given the inputs, computes the total number of output blocks over which this problem will compute.
@@ -655,13 +680,17 @@ public:
 template <
   class KernelSchedule,
   class TileShape,
-  class ClusterShape
+  class ClusterShape,
+  uint32_t SchedulerPipelineStageCount,
+  class ProblemShapeType
 >
 struct TileSchedulerSelector<
   PersistentAsyncInputScheduler<KernelSchedule>,
   arch::Sm90,
   TileShape,
-  ClusterShape
+  ClusterShape,
+  SchedulerPipelineStageCount,
+  ProblemShapeType
   > {
   using Scheduler = PersistentTileSchedulerSm90AsyncInput;
 };

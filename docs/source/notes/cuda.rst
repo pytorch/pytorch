@@ -64,6 +64,49 @@ Below you can find a small example showcasing this::
 TensorFloat-32 (TF32) on Ampere (and later) devices
 ---------------------------------------------------
 
+After Pytorch 2.9, we provide a new sets of APIs to control the TF32 behavior in a more fine-grained way, and
+suggest to use the new APIs for better control.
+We can set float32 precision per backend and per operators. We can also override the global setting for a specific operator.
+
+.. code:: python
+
+  torch.backends.fp32_precision = "ieee"
+  torch.backends.cuda.matmul.fp32_precision = "ieee"
+  torch.backends.cudnn.fp32_precision = "ieee"
+  torch.backends.cudnn.conv.fp32_precision = "tf32"
+  torch.backends.cudnn.rnn.fp32_precision = "tf32"
+
+The fp32_precision can be set to `ieee` or `tf32` for `cuda/cudnn`.
+`ieee` fp32_precision indicate that we will use `FP32` as internal computation precision.
+`tf32` fp32_precision indicate that we will allow to use `TF32` as internal computation precision.
+
+We can override a generic setting for a specific operator if the fp32_precision is set to `ieee`.
+
+.. code:: python
+
+  torch.backends.cudnn.fp32_precision = "tf32"
+  torch.backends.cudnn.conv.fp32_precision = "ieee"
+  torch.backends.cudnn.rnn.fp32_precision = "ieee"
+
+We can also override a generic setting for a specific backend if the fp32_precision is set to `ieee`.
+
+.. code:: python
+
+  torch.backends.fp32_precision = "tf32"
+  torch.backends.cudnn.fp32_precision = "ieee"
+  torch.backends.cudnn.conv.fp32_precision = "ieee"
+  torch.backends.cudnn.rnn.fp32_precision = "ieee"
+
+For above 2 cases, both `torch.backends.cudnn.conv.fp32_precision` and `torch.backends.cudnn.rnn.fp32_precision`
+is overridden to `ieee`.
+
+We suggest to use the new settings for better control. And we do not support to use mix of old and new settings.
+
+.. warning::
+
+  Old settings with `allow_tf32` as follows is going to be deprecated. We suggest to use the above new settings for
+  better control. And we do not support to use mix of old and new settings.
+
 Starting in PyTorch 1.7, there is a new flag called `allow_tf32`. This flag
 defaults to True in PyTorch 1.7 to PyTorch 1.11, and False in PyTorch 1.12 and later.
 This flag controls whether PyTorch is allowed to use the TensorFloat32 (TF32) tensor cores,
@@ -85,7 +128,7 @@ matmuls and convolutions are controlled separately, and their corresponding flag
   # The flag below controls whether to allow TF32 on cuDNN. This flag defaults to True.
   torch.backends.cudnn.allow_tf32 = True
 
-The precision of matmuls can also be set more broadly (limited not just to CUDA) via :meth:`~torch.set_float_32_matmul_precision`.
+The precision of matmuls can also be set more broadly (limited not just to CUDA) via :meth:`~torch.set_float32_matmul_precision`.
 Note that besides matmuls and convolutions themselves, functions and nn modules that internally uses
 matmuls or convolutions are also affected. These include `nn.Linear`, `nn.Conv*`, cdist, tensordot,
 affine grid and grid sample, adaptive log softmax, GRU and LSTM.
@@ -481,7 +524,7 @@ Available options:
   the native CUDACachingAllocator, the sizes are rounded up in multiple
   of blocks size of 512, so this works fine for smaller sizes. However, this
   can be inefficient for large near-by allocations as each will go to different
-  size of blocks and re-use of those blocks are minimized. This might create
+  size of blocks and reuse of those blocks are minimized. This might create
   lots of unused blocks and will waste GPU memory capacity. This option enables
   the rounding of allocation size to nearest power-2 division. For example, if
   we need to round-up size of 1200 and if number of divisions is 4,
@@ -497,10 +540,10 @@ Available options:
   ``roundup_power2_divisions`` is only meaningful with ``backend:native``.
   With ``backend:cudaMallocAsync``, ``roundup_power2_divisions`` is ignored.
 * ``max_non_split_rounding_mb`` will allow non-split blocks for better reuse, eg,
-   a 1024MB cached block can be re-used for a 512MB allocation request. In the default
+   a 1024MB cached block can be reused for a 512MB allocation request. In the default
    case, we only allow up to 20MB of rounding of non-split blocks, so a 512MB block
    can only be served with between 512-532 MB size block. If we set the value of this
-   option to 1024, it will alow 512-1536 MB size blocks to be used for a 512MB block
+   option to 1024, it will allow 512-1536 MB size blocks to be used for a 512MB block
    which increases reuse of larger blocks. This will also help in reducing the stalls
    in avoiding expensive cudaMalloc calls.
 * ``garbage_collection_threshold`` helps actively reclaiming unused GPU memory to
@@ -511,6 +554,8 @@ Available options:
   80% of the total memory allocated to the GPU application). The algorithm prefers
   to free old & unused blocks first to avoid freeing blocks that are actively being
   reused. The threshold value should be between greater than 0.0 and less than 1.0.
+  The default value is set at 1.0.
+
   ``garbage_collection_threshold`` is only meaningful with ``backend:native``.
   With ``backend:cudaMallocAsync``, ``garbage_collection_threshold`` is ignored.
 * ``expandable_segments`` (experimental, default: `False`) If set to `True`, this setting instructs
@@ -546,22 +591,30 @@ Available options:
   appended to the end of the segment. This process does not create as many slivers
   of unusable memory, so it is more likely to succeed at finding this memory.
 
-  `pinned_use_cuda_host_register` option is a boolean flag that determines whether to
+* `pinned_use_cuda_host_register` option is a boolean flag that determines whether to
   use the CUDA API's cudaHostRegister function for allocating pinned memory instead
   of the default cudaHostAlloc. When set to True, the memory is allocated using regular
   malloc and then pages are mapped to the memory before calling cudaHostRegister.
   This pre-mapping of pages helps reduce the lock time during the execution
   of cudaHostRegister.
 
-  `pinned_num_register_threads` option is only valid when pinned_use_cuda_host_register
+* `pinned_num_register_threads` option is only valid when pinned_use_cuda_host_register
   is set to True. By default, one thread is used to map the pages. This option allows
   using more threads to parallelize the page mapping operations to reduce the overall
   allocation time of pinned memory. A good value for this option is 8 based on
   benchmarking results.
 
-  `pinned_use_background_threads` option is a boolean flag to enable background thread
+* `pinned_use_background_threads` option is a boolean flag to enable background thread
   for processing events. This avoids any slow path associated with querying/processing of
   events in the fast allocation path. This feature is disabled by default.
+
+* ``graph_capture_record_stream_reuse`` (experimental, default: `False`)
+  If set to `True`, the CUDA caching allocator will attempt to reclaim device memory during
+  CUDA Graph capture by using the graph topology (instead of CUDA events) to determine
+  when a freed block is safe to reuse. This can reduce peak memory during long captures that free
+  and reallocate buffers across multiple streams, especially when the capture DAG frequently
+  reaches joined frontiers. Note: Enabling this option can significantly increase the time spent
+  capturing the graph.
 
 .. note::
 
@@ -770,6 +823,21 @@ be called internally on deletion of the pool, hence returning all the memory to 
    del tensor, del pool
 
 
+Users can optionally specify a ``use_on_oom`` bool (which is False by default) during MemPool
+creation. If true, then the CUDACachingAllocator will be able to use memory in this pool as
+a last resort instead of OOMing.
+
+.. code:: python
+
+    pool = torch.cuda.MemPool(allocator, use_on_oom=True)
+    with torch.cuda.use_mem_pool(pool):
+        a = torch.randn(40 * 1024 * 1024, dtype=torch.uint8, device="cuda")
+    del a
+
+    # at the memory limit, this will succeed by using pool's memory in order to avoid the oom
+    b = torch.randn(40 * 1024 * 1024, dtype=torch.uint8, device="cuda")
+
+
 The following :meth:`torch.cuda.MemPool.use_count` and :meth:`torch.cuda.MemPool.snapshot`
 APIs can be used for debugging purposes:
 
@@ -808,7 +876,7 @@ APIs can be used for debugging purposes:
        out_2 = torch.randn(nelem_1mb, device="cuda")
 
        # pool now should have 2 segments since the CUDACachingAllocator had
-       # to make a new 2 MB buffer to accomodate out_2
+       # to make a new 2 MB buffer to accommodate out_2
        assert len(pool.snapshot()) == 2
 
 
@@ -834,6 +902,130 @@ APIs can be used for debugging purposes:
 
 .. _NCCL has specific requirements:
     https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/usage/bufferreg.html#memory-allocator
+
+
+Tuning NVLink Performance with Custom Memory Allocator on H100/H200 GPUs
+------------------------------------------------------------------------
+In rare cases, performance of NVLink on H100/H200 GPUs can be influenced by the physical memory
+layout of data, creating an opportunity for developers to tune their applications for optimal
+throughput.
+
+An example of how physical memory layout of data affects performance is when communication
+kernels issue unbalanced NVLink read/write operations. In the following figure, we can see
+that each warp accesses memory addresses with a consistent strided pattern in each single wave.
+We can have a more balanced load by tuning the stride size in the workload or we can implement
+a custom CUDA allocator.
+
+.. code::
+
+  _______________________________  _______________________________      _______________________________
+  | Warp 0 Reading | No-reading |  | Warp 1 Reading | No-reading |  ...  Warp N Reading | No-reading |
+  _______________________________  _______________________________      _______________________________
+  <----------------------------->
+          Stride size
+
+Such an allocator can maintain contiguous virtual memory addresses for the kernel while strategically
+arranging the mapping to physical memory addresses (e.g., through shuffling). This technique allows
+developers to explore different physical access patterns to find the most efficient one, unlocking
+higher performance without modifying the kernel's logic. A practical implementation of such an allocator
+can be achieved using PyTorch’s custom allocator support as mentioned before, where the malloc and free
+functions are:
+
+.. code:: C++
+
+  // assuming a system with 8 GPUs
+  struct CustomAllocInfo {
+    void** devPtr;  // This will be the usable virtual memory address
+    CUdeviceptr dptr;
+    size_t totalSize;  // Total size of the allocated memory
+    size_t padded_size;
+    int device_id;
+    std::vector<CUmemGenericAllocationHandle> handles;  // Handles to physical memory allocations
+  };
+
+  // loop over pages
+  cudaError_t customCudaMalloc(CustomAllocInfo* info) {
+      if (!info) return cudaErrorInvalidValue;
+
+      CUdeviceptr dptr;
+
+      // Handles to redundant physical memory allocations which help truncate stride pattern in physical memory
+      std::vector<CUmemGenericAllocationHandle> handles_redundant;
+
+      size_t granularity = 0;
+      CUmemAllocationProp prop = {};
+
+      int currentDev = info->device_id;
+      size_t totalSize = info->totalSize;
+
+      prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
+      prop.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
+      prop.location.id = currentDev;
+      cuMemGetAllocationGranularity(&granularity, &prop, CU_MEM_ALLOC_GRANULARITY_MINIMUM);
+      size_t padded_size = ROUND_UP(totalSize, granularity);
+
+      info->padded_size = padded_size;
+
+      // loop over pages
+      size_t iter_granularity = granularity * 64; // 64 * granularity with shift_size = 2 works
+      uint32_t iteration_count = (totalSize + iter_granularity - 1) / iter_granularity;
+
+      cuMemAddressReserve(&dptr, padded_size, 0ULL, 0ULL, 0ULL);
+
+      const int shift_size = 2;
+      for (size_t i = 0; i < iteration_count; i+=shift_size) {
+
+          CUmemGenericAllocationHandle allocHandle[shift_size];
+          for (int shift = 0; (shift < shift_size)&&(i+shift < iteration_count); shift++){
+              CHECK_CUDA(cuMemCreate(&allocHandle[shift], iter_granularity, &prop, 0));
+              info->handles.push_back(allocHandle[shift]);
+          }
+
+          for (int shift = 0; (shift < shift_size)&&(i+shift < iteration_count); shift++){
+
+              // mapping makes the shift (shift -> (shift+1)%shift_size  )
+              CHECK_CUDA(cuMemMap(dptr + (i+shift) * iter_granularity, iter_granularity, 0, allocHandle[(shift+1)%shift_size], 0));
+
+              setupMultiGPUAccess(dptr + (i+shift) * iter_granularity, iter_granularity, {0, 1, 2, 3, 4, 5, 6, 7}); // Enable access for all 8 GPUs
+          }
+
+          // std::cout << "Here we allocate one redundant page (2MB)..." << std::endl;
+          // this is an extra optimization on top of the swizzling. It helps "break"
+          // the physical access pattern even more. It can be left out if workload is already
+          // performing at SOL with just swizzling.
+          CUmemGenericAllocationHandle allocHandle_redundant;
+          CHECK_CUDA(cuMemCreate(&allocHandle_redundant, granularity, &prop, 0));
+          handles_redundant.push_back(allocHandle_redundant);
+      }
+
+      *info->devPtr = (void*)dptr;
+      info->dptr = dptr;
+
+      // Release each redundant allocation
+      for (auto handle : handles_redundant) {
+          // std::cout << "Here we release one redundant page (2MB)..." << std::endl;
+          CHECK_CUDA(cuMemRelease(handle));
+      }
+
+      return cudaSuccess;
+  }
+
+  void customCudaFree(CustomAllocInfo* info) {
+      if (!info) return;
+
+      // CHECK_CUDA(cudaSetDevice(info->device_id));
+
+      CHECK_CUDA(cuMemUnmap(info->dptr, info->padded_size));
+
+      // Unmap and release each allocation
+      for (auto handle : info->handles) {
+          CHECK_CUDA(cuMemRelease(handle));
+      }
+
+      // Unreserve the virtual address space
+      // CHECK_CUDA(cuMemAddressFree((CUdeviceptr)*info->devPtr, info->padded_size));
+      CHECK_CUDA(cuMemAddressFree(info->dptr, info->padded_size));
+  }
 
 
 cuBLAS workspaces

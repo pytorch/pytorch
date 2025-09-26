@@ -300,21 +300,3 @@ except RuntimeError as e:
     exit 1
   fi
 fi
-
-###############################################################################
-# Check for C++ ABI compatibility to GCC-11
-###############################################################################
-if [[ "$(uname)" == 'Linux' &&  "$PACKAGE_TYPE" == 'manywheel' ]]; then
-  pushd /tmp
-  # Per https://gcc.gnu.org/onlinedocs/gcc/C_002b_002b-Dialect-Options.html gcc-11 is ABI16
-  # Though manylinux_2.28 should have been build with gcc-14, per
-  # https://github.com/pypa/manylinux?tab=readme-ov-file#manylinux_2_28-almalinux-8-based
-  # On s390x gcc 14 is used because it contains fix for interaction
-  # between precompiled headers and vectorization builtins.
-  # This fix is not available in earlier gcc versions.
-  # gcc-14 uses ABI19.
-  if [[ "$(uname -m)" != "s390x" ]]; then
-    python -c "import torch; exit(0 if torch._C._PYBIND11_BUILD_ABI == '_cxxabi1016' else 1)"
-  fi
-  popd
-fi

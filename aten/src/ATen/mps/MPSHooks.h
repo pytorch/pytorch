@@ -18,6 +18,8 @@ struct MPSHooks : public at::MPSHooksInterface {
   bool hasMPS() const override;
   bool isOnMacOSorNewer(unsigned major, unsigned minor) const override;
 
+  Device getDeviceFromPtr(void* data) const override;
+
   // MPSGeneratorImpl interface
   const Generator& getDefaultGenerator(
       DeviceIndex device_index = -1) const override;

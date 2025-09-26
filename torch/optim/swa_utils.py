@@ -1,11 +1,13 @@
 # mypy: allow-untyped-defs
 r"""Implementation for Stochastic Weight Averaging implementation."""
+
 import itertools
 import math
 import warnings
 from collections.abc import Iterable
 from copy import deepcopy
-from typing import Any, Callable, Literal, Optional, Union
+from typing import Any, Callable, cast, Literal, Optional, Union
+from typing_extensions import override
 
 import torch
 from torch import Tensor
@@ -68,7 +70,9 @@ def get_swa_multi_avg_fn():
             averaged_param_list[0]
         ):
             torch._foreach_lerp_(
-                averaged_param_list, current_param_list, 1 / (num_averaged + 1)
+                averaged_param_list,
+                current_param_list,
+                cast(float, 1 / (num_averaged + 1)),
             )
         else:
             diffs = torch._foreach_sub(current_param_list, averaged_param_list)
@@ -225,9 +229,9 @@ class AveragedModel(Module):
         use_buffers=False,
     ):  # noqa: D107
         super().__init__()
-        assert (
-            avg_fn is None or multi_avg_fn is None
-        ), "Only one of avg_fn and multi_avg_fn should be provided"
+        assert avg_fn is None or multi_avg_fn is None, (
+            "Only one of avg_fn and multi_avg_fn should be provided"
+        )
         self.module = deepcopy(model)
         if device is not None:
             self.module = self.module.to(device)
@@ -256,11 +260,12 @@ class AveragedModel(Module):
         )
         self_param_detached: list[Optional[Tensor]] = []
         model_param_detached: list[Optional[Tensor]] = []
+        copy_param = bool(self.n_averaged == 0)
         for p_averaged, p_model in zip(self_param, model_param):
             p_model_ = p_model.detach().to(p_averaged.device)
             self_param_detached.append(p_averaged.detach())
             model_param_detached.append(p_model_)
-            if self.n_averaged == 0:
+            if copy_param:
                 p_averaged.detach().copy_(p_model_)
 
         if self.n_averaged > 0:
@@ -274,7 +279,9 @@ class AveragedModel(Module):
                 ) in grouped_tensors.items():
                     if self.multi_avg_fn:
                         self.multi_avg_fn(
-                            self_params, model_params, self.n_averaged.to(device)  # type: ignore[arg-type]
+                            self_params,  # type: ignore[arg-type]
+                            model_params,  # type: ignore[arg-type]
+                            self.n_averaged.to(device),
                         )
                     elif (
                         device is not None
@@ -425,10 +432,7 @@ class SWALR(LRScheduler):
                 "anneal_strategy must by one of 'cos' or 'linear', "
                 f"instead got {anneal_strategy}"
             )
-        elif anneal_strategy == "cos":
-            self.anneal_func = self._cosine_anneal
-        elif anneal_strategy == "linear":
-            self.anneal_func = self._linear_anneal
+        self._set_anneal_func(anneal_strategy)
         if not isinstance(anneal_epochs, int) or anneal_epochs < 0:
             raise ValueError(
                 f"anneal_epochs must be equal or greater than 0, got {anneal_epochs}"
@@ -450,8 +454,29 @@ class SWALR(LRScheduler):
             return swa_lr
         return (lr - alpha * swa_lr) / (1 - alpha)
 
+    @override
     def get_lr(self):
-        """Get learning rate."""
+        r"""Compute the next learning rate for each of the optimizer's
+        :attr:`~torch.optim.Optimizer.param_groups`.
+
+        Uses :attr:`anneal_func` to interpolate between each group's
+        ``group["lr"]`` and ``group["swa_lr"]`` over :attr:`anneal_epochs`
+        epochs. Once :attr:`anneal_epochs` is reached, keeps the learning rate
+        fixed at ``group["swa_lr"]``.
+
+        Returns:
+            list[float | Tensor]: A :class:`list` of learning rates for each of
+            the optimizer's :attr:`~torch.optim.Optimizer.param_groups` with the
+            same types as their current ``group["lr"]``\s.
+
+        .. note::
+            If you're trying to inspect the most recent learning rate, use
+            :meth:`get_last_lr()` instead.
+
+        .. note::
+            The returned :class:`~torch.Tensor`\s are copies, and never alias
+            the optimizer's ``group["lr"]``\s.
+        """
         # `_get_lr_called_within_step` is only available `_enable_get_lr_call`,
         # so we ignore the type error here. See `LRScheduler.step()` for more details.
         if not self._get_lr_called_within_step:
@@ -476,3 +501,34 @@ class SWALR(LRScheduler):
             group["swa_lr"] * alpha + lr * (1 - alpha)
             for group, lr in zip(self.optimizer.param_groups, prev_lrs)
         ]
+
+    def _set_anneal_func(self, anneal_strategy: Literal["cos", "linear"]):
+        self._anneal_strategy = anneal_strategy
+        if anneal_strategy == "cos":
+            self.anneal_func = self._cosine_anneal
+        else:
+            self.anneal_func = self._linear_anneal
+
+    @override
+    def state_dict(self) -> dict[str, Any]:
+        """Return the state of the scheduler as a :class:`dict`.
+
+        It contains an entry for every variable in self.__dict__ which
+        is not the optimizer or anneal_func.
+        """
+        return {
+            key: value
+            for key, value in self.__dict__.items()
+            if key not in ("optimizer", "anneal_func")
+        }
+
+    @override
+    def load_state_dict(self, state_dict: dict[str, Any]) -> None:
+        """Load the scheduler's state.
+
+        Args:
+            state_dict (dict): scheduler state. Should be an object returned
+                from a call to :meth:`state_dict`.
+        """
+        self.__dict__.update(state_dict)
+        self._set_anneal_func(self._anneal_strategy)

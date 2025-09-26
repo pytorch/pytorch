@@ -319,7 +319,7 @@ static void BatchMMTreeReduce(Block* block, AliasDb& alias_db) {
 }
 
 static bool shape_is_fast_for_side(const at::Tensor& other_side_input) {
-  // Cutoff chosed by benchmarking on a TITAN V
+  // Cutoff chose by benchmarking on a TITAN V
   return other_side_input.numel() <= 1024 * 2048;
 }
 

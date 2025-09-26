@@ -64,6 +64,7 @@ constexpr DynamicTypeBits kDynamicClassTypeBit = DYNAMIC_TYPE_BIT(10);
   _(ScalarType, kDynamicIntTypeBit, 1)                                \
   _(Layout, kDynamicIntTypeBit, 1)                                        \
   _(SymInt, kDynamicIntTypeBit, 1)                                        \
+  _(SymBool, kDynamicIntTypeBit, 1)                                        \
   _(MemoryFormat, kDynamicIntTypeBit, 1)
 
 #define FORWARD_DECL_TYPE(NAME, _, __) struct NAME ## Type;
@@ -187,7 +188,9 @@ class DynamicType : public SharedType {
     return false;
   }
   friend struct Type;
-  static std::shared_ptr<const DynamicType> create(const Type& ty);
+  // NOTE: Here we are using SingletonOrSharedTypePtr to mean
+  // "original-type-because-it-was-actually-a-DynamicType or shared".
+  static SingletonOrSharedTypePtr<const DynamicType> create(const Type& ty);
   DynamicType(const Type& other);
   bool equals(const DynamicType& other) const;
 

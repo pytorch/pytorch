@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 """Base optimizer."""
+
 import functools
 import warnings
 from collections import defaultdict, OrderedDict
@@ -27,9 +28,10 @@ _P = ParamSpec("_P")
 Args: TypeAlias = tuple[Any, ...]
 Kwargs: TypeAlias = dict[str, Any]
 StateDict: TypeAlias = dict[str, Any]
-DeviceDict = dict[Optional[torch.device], torch.Tensor]
-DeviceDtypeDict = dict[Optional[tuple[torch.device, torch.dtype]], torch.Tensor]
-
+DeviceDict: TypeAlias = dict[Optional[torch.device], torch.Tensor]
+DeviceDtypeDict: TypeAlias = dict[
+    Optional[tuple[torch.device, torch.dtype]], torch.Tensor
+]
 
 GlobalOptimizerPreHook: TypeAlias = Callable[
     ["Optimizer", Args, Kwargs], Optional[tuple[Args, Kwargs]]
@@ -56,10 +58,11 @@ class _RequiredParameter:
 required = _RequiredParameter()
 
 
-def _use_grad_for_differentiable(func):
-    def _use_grad(self, *args, **kwargs):
+def _use_grad_for_differentiable(func: Callable[_P, _T]) -> Callable[_P, _T]:
+    def _use_grad(*args: _P.args, **kwargs: _P.kwargs) -> _T:
         import torch._dynamo
 
+        self = cast(Optimizer, args[0])  # assume first positional arg is `self`
         prev_grad = torch.is_grad_enabled()
         try:
             # Note on graph break below:
@@ -76,7 +79,7 @@ def _use_grad_for_differentiable(func):
             # see https://github.com/pytorch/pytorch/issues/104053
             torch.set_grad_enabled(self.defaults["differentiable"])
             torch._dynamo.graph_break()
-            ret = func(self, *args, **kwargs)
+            ret = func(*args, **kwargs)
         finally:
             torch._dynamo.graph_break()
             torch.set_grad_enabled(prev_grad)
@@ -102,7 +105,7 @@ def _stack_if_compiling(x):
 
 
 def _disable_dynamo_if_unsupported(
-    single_tensor_fn: Optional[Callable[..., object]] = None
+    single_tensor_fn: Optional[Callable[..., object]] = None,
 ) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
     # workaround for torchscript BC
     # it requires all called functions to be in the
@@ -270,9 +273,10 @@ _fused_doc = r"""fused (bool, optional): whether the fused implementation is use
               implementation, pass False for either foreach or fused. """
 
 _capturable_doc = r"""capturable (bool, optional): whether this instance is safe to
-            capture in a CUDA graph. Passing True can impair ungraphed performance,
-            so if you don't intend to graph capture this instance, leave it False
-            (default: False)"""
+            capture in a graph, whether for CUDA graphs or for torch.compile support.
+            Tensors are only capturable when on supported :ref:`accelerators<accelerators>`.
+            Passing True can impair ungraphed performance, so if you don't intend to graph
+            capture this instance, leave it False (default: False)"""
 
 _differentiable_doc = r"""differentiable (bool, optional): whether autograd should
             occur through the optimizer step in training. Otherwise, the step()
@@ -347,15 +351,24 @@ class Optimizer:
             options (used when a parameter group doesn't specify them).
     """
 
-    OptimizerPreHook: TypeAlias = Callable[[Self, Args, Kwargs], Optional[tuple[Args, Kwargs]]]  # type: ignore[misc]
+    OptimizerPreHook: TypeAlias = Callable[
+        [Self, Args, Kwargs],  # type: ignore[misc]
+        Optional[tuple[Args, Kwargs]],
+    ]
     OptimizerPostHook: TypeAlias = Callable[[Self, Args, Kwargs], None]  # type: ignore[misc]
 
     _optimizer_step_pre_hooks: dict[int, OptimizerPreHook]
     _optimizer_step_post_hooks: dict[int, OptimizerPostHook]
     _optimizer_state_dict_pre_hooks: 'OrderedDict[int, Callable[["Optimizer"], None]]'
-    _optimizer_state_dict_post_hooks: 'OrderedDict[int, Callable[["Optimizer", StateDict], Optional[StateDict]]]'
-    _optimizer_load_state_dict_pre_hooks: 'OrderedDict[int, Callable[["Optimizer", StateDict], Optional[StateDict]]]'
-    _optimizer_load_state_dict_post_hooks: 'OrderedDict[int, Callable[["Optimizer"], None]]'
+    _optimizer_state_dict_post_hooks: (
+        'OrderedDict[int, Callable[["Optimizer", StateDict], Optional[StateDict]]]'
+    )
+    _optimizer_load_state_dict_pre_hooks: (
+        'OrderedDict[int, Callable[["Optimizer", StateDict], Optional[StateDict]]]'
+    )
+    _optimizer_load_state_dict_post_hooks: (
+        'OrderedDict[int, Callable[["Optimizer"], None]]'
+    )
 
     def __init__(self, params: ParamsT, defaults: dict[str, Any]) -> None:  # noqa: D107
         torch._C._log_api_usage_once("python.optimizer")
@@ -845,7 +858,9 @@ class Optimizer:
         handle = hooks.RemovableHandle(self._optimizer_load_state_dict_post_hooks)
         self._optimizer_load_state_dict_post_hooks[handle.id] = hook
         if prepend:
-            self._optimizer_load_state_dict_post_hooks.move_to_end(handle.id, last=False)  # type: ignore[attr-defined]
+            self._optimizer_load_state_dict_post_hooks.move_to_end(
+                handle.id, last=False
+            )  # type: ignore[attr-defined]
         return handle
 
     @torch._disable_dynamo
@@ -855,6 +870,10 @@ class Optimizer:
         Args:
             state_dict (dict): optimizer state. Should be an object returned
                 from a call to :meth:`state_dict`.
+
+        .. warning::
+            Make sure this method is called after initializing :class:`torch.optim.lr_scheduler.LRScheduler`,
+            as calling it beforehand will overwrite the loaded learning rates.
 
         .. note::
             The names of the parameters (if they exist under the "param_names" key of each param group
@@ -866,6 +885,31 @@ class Optimizer:
             If ``param_names`` exist in loaded state dict ``param_groups`` they will be saved and override
             the current names, if present, in the optimizer state. If they do not exist in loaded state dict,
             the optimizer ``param_names`` will remain unchanged.
+
+        Example:
+            >>> # xdoctest: +SKIP
+            >>> model = torch.nn.Linear(10, 10)
+            >>> optim = torch.optim.SGD(model.parameters(), lr=3e-4)
+            >>> scheduler1 = torch.optim.lr_scheduler.LinearLR(
+            ...     optim,
+            ...     start_factor=0.1,
+            ...     end_factor=1,
+            ...     total_iters=20,
+            ... )
+            >>> scheduler2 = torch.optim.lr_scheduler.CosineAnnealingLR(
+            ...     optim,
+            ...     T_max=80,
+            ...     eta_min=3e-5,
+            ... )
+            >>> lr = torch.optim.lr_scheduler.SequentialLR(
+            ...     optim,
+            ...     schedulers=[scheduler1, scheduler2],
+            ...     milestones=[20],
+            ... )
+            >>> lr.load_state_dict(torch.load("./save_seq.pt"))
+            >>> # now load the optimizer checkpoint after loading the LRScheduler
+            >>> optim.load_state_dict(torch.load("./save_optim.pt"))
+
         """
         # shallow copy, to be consistent with module API
         state_dict = state_dict.copy()
@@ -915,7 +959,10 @@ class Optimizer:
                     for k, v in value.items()
                 }
             elif isinstance(value, Iterable):
-                return type(value)(_cast(param, v, param_id=param_id, param_groups=param_groups) for v in value)  # type: ignore[call-arg]
+                return type(value)(
+                    _cast(param, v, param_id=param_id, param_groups=param_groups)
+                    for v in value
+                )  # type: ignore[call-arg]
             else:
                 return value
 
@@ -952,16 +999,18 @@ class Optimizer:
         r"""Reset the gradients of all optimized :class:`torch.Tensor` s.
 
         Args:
-            set_to_none (bool): instead of setting to zero, set the grads to None.
+            set_to_none (bool, optional): Instead of setting to zero, set the grads to None. Default: ``True``
+
                 This will in general have lower memory footprint, and can modestly improve performance.
                 However, it changes certain behaviors. For example:
+
                 1. When the user tries to access a gradient and perform manual ops on it,
-                a None attribute or a Tensor full of 0s will behave differently.
+                   a None attribute or a Tensor full of 0s will behave differently.
                 2. If the user requests ``zero_grad(set_to_none=True)`` followed by a backward pass, ``.grad``\ s
-                are guaranteed to be None for params that did not receive a gradient.
+                   are guaranteed to be None for params that did not receive a gradient.
                 3. ``torch.optim`` optimizers have a different behavior if the gradient is 0 or None
-                (in one case it does the step with a gradient of 0 and in the other it skips
-                the step altogether).
+                   (in one case it does the step with a gradient of 0 and in the other it skips
+                   the step altogether).
         """
         foreach = self.defaults.get("foreach", False) or self.defaults.get(
             "fused", False
@@ -1003,12 +1052,10 @@ class Optimizer:
                         torch._foreach_zero_(grads)
 
     @overload
-    def step(self, closure: None = ...) -> None:
-        ...
+    def step(self, closure: None = None) -> None: ...
 
     @overload
-    def step(self, closure: Callable[[], float]) -> float:
-        ...
+    def step(self, closure: Callable[[], float]) -> float: ...
 
     def step(self, closure: Optional[Callable[[], float]] = None) -> Optional[float]:
         r"""Perform a single optimization step to update parameter.

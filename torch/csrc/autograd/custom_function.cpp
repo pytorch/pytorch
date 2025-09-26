@@ -1,4 +1,5 @@
 #include <c10/util/irange.h>
+#include <torch/csrc/autograd/VariableTypeUtils.h>
 #include <torch/csrc/autograd/autograd.h>
 #include <torch/csrc/autograd/custom_function.h>
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
@@ -337,14 +338,14 @@ static optional_variable_list _process_backward_mode_ad(
         auto& grad_acc = dynamic_cast<AccumulateGrad&>(*grad_acc_fn);
         grad_acc.variable.reset();
       }
-      if (cdata) {
-        impl::rebase_history(var, {cdata, output_nr});
-      }
+      // This repeats the mutation of leaf variables check already done above
+      check_inplace(var, true);
+      impl::rebase_history(var, {cdata, output_nr});
     } else if (is_input) {
       TORCH_CHECK(!is_saved_and_setup_context, error_msg_input_returned_as_is)
       var = _view_as_self_with_no_grad(var, view_as_self_fn);
       impl::set_gradient_edge(var, {cdata, output_nr});
-    } else if (cdata) {
+    } else {
       impl::set_gradient_edge(var, {cdata, output_nr});
     }
   };
@@ -481,30 +482,31 @@ void check_variable_result(
     const at::TensorBase& original,
     const at::TensorBase& result,
     const std::string& hook_name) {
-  if (!original.options().type_equal(result.options())) {
-    std::stringstream ss;
-    ss << "hook '" << hook_name << "' has changed the type of value (";
-    ss << "was " << original.toString() << " got ";
-    ss << result.toString() << ")";
-    throw std::runtime_error(ss.str());
-  }
+  TORCH_CHECK(
+      original.options().type_equal(result.options()),
+      "hook '",
+      hook_name,
+      "' has changed the type of value (was ",
+      original.toString(),
+      " got ",
+      result.toString(),
+      ")");
 
-  if (original.is_cuda() != result.is_cuda()) {
-    std::stringstream ss;
-    ss << "hook '" << hook_name << "' has changed the type of value";
-    if (original.is_cuda()) {
-      ss << " (was CUDA tensor got CPU tensor)";
-    } else {
-      ss << " (was CPU tensor got CUDA tensor)";
-    }
-    throw std::runtime_error(ss.str());
-  }
+  TORCH_CHECK(
+      original.is_cuda() == result.is_cuda(),
+      "hook '",
+      hook_name,
+      "' has changed the type of value (was ",
+      original.is_cuda() ? "CUDA tensor" : "CPU tensor",
+      " got ",
+      result.is_cuda() ? "CUDA tensor" : "CPU tensor",
+      ")");
 
-  if (original.sym_sizes().vec() != result.sym_sizes().vec()) {
-    std::stringstream ss;
-    ss << "hook '" << hook_name << "' has changed the size of value";
-    throw std::runtime_error(ss.str());
-  }
+  TORCH_CHECK(
+      original.sym_sizes().vec() == result.sym_sizes().vec(),
+      "hook '",
+      hook_name,
+      "' has changed the size of value");
 }
 
 AutogradContext::AutogradContext(PackedArgs& packed_args) {

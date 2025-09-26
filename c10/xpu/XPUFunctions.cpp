@@ -133,8 +133,13 @@ inline void initGlobalDevicePoolState() {
 #else
   // The default context is utilized for each Intel GPU device, allowing the
   // retrieval of the context from any GPU device.
+  const auto& platform = gDevicePool.devices[0]->get_platform();
   gDevicePool.context = std::make_unique<sycl::context>(
-      gDevicePool.devices[0]->get_platform().ext_oneapi_get_default_context());
+#if SYCL_COMPILER_VERSION >= 20250200
+      platform.khr_get_default_context());
+#else
+      platform.ext_oneapi_get_default_context());
+#endif
 #endif
 }
 
@@ -152,9 +157,9 @@ void initDeviceProperties(DeviceProp* device_prop, DeviceIndex device) {
 #define ASSIGN_DEVICE_PROP(property) \
   device_prop->property = raw_device.get_info<device::property>();
 
-#define ASSIGN_EXT_DEVICE_PROP(property, default_value)                      \
-  device_prop->property = raw_device.has(sycl::aspect::ext_intel_##property) \
-      ? raw_device.get_info<intel::info::device::property>()                 \
+#define ASSIGN_EXT_DEVICE_PROP(property, aspect_tag, default_value)            \
+  device_prop->property = raw_device.has(sycl::aspect::ext_intel_##aspect_tag) \
+      ? raw_device.get_info<intel::info::device::property>()                   \
       : default_value;
 
 #define ASSIGN_DEVICE_ASPECT(member) \

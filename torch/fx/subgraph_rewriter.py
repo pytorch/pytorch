@@ -234,6 +234,7 @@ def replace_pattern_with_filters(
     replacement_callback: Optional[
         Callable[["InternalMatch", Graph, Graph], Graph]
     ] = None,
+    node_name_match: str = "",
 ) -> list[ReplacedPatterns]:
     """
     See replace_pattern for documentation. This function is an overload with an additional match_filter argument.
@@ -246,10 +247,17 @@ def replace_pattern_with_filters(
         ``replacement_callback``: A function that takes in a match and returns a
             Graph to be used as the replacement. This allows you to construct a
             replacement graph based on the match.
+        ``replacement_callback``: Node name to match. If not empty, it will try to match the node name.
     """
 
     return _replace_pattern(
-        gm, pattern, replacement, match_filters, ignore_literals, replacement_callback
+        gm,
+        pattern,
+        replacement,
+        match_filters,
+        ignore_literals,
+        replacement_callback,
+        node_name_match,
     )
 
 
@@ -265,6 +273,7 @@ def _replace_pattern(
     replacement_callback: Optional[
         Callable[["InternalMatch", Graph, Graph], Graph]
     ] = None,
+    node_name_match: str = "",
 ) -> list[ReplacedPatterns]:
     from torch.fx.passes.utils.matcher_utils import InternalMatch, SubgraphMatcher
 
@@ -288,7 +297,9 @@ def _replace_pattern(
         remove_overlapping_matches=True,
         ignore_literals=ignore_literals,
     )
-    _matches: list[InternalMatch] = matcher.match(original_graph)
+    _matches: list[InternalMatch] = matcher.match(
+        original_graph, node_name_match=node_name_match
+    )
 
     # Filter out matches that don't match the filter
     _matches = [
@@ -307,9 +318,9 @@ def _replace_pattern(
     elif callable(replacement):
         common_replacement_graph = symbolic_trace(replacement).graph
     else:
-        assert (
-            replacement_callback is not None
-        ), "Must provide either a replacement GraphModule or a replacement callback"
+        assert replacement_callback is not None, (
+            "Must provide either a replacement GraphModule or a replacement callback"
+        )
         common_replacement_graph = None
 
     # As we progressively replace nodes, we'll need to keep track of how the match results should change
@@ -322,9 +333,9 @@ def _replace_pattern(
                 match, original_graph, pattern_graph
             )
         else:
-            assert (
-                common_replacement_graph is not None
-            ), "Must provide either a replacement GraphModule or a replacement callback"
+            assert common_replacement_graph is not None, (
+                "Must provide either a replacement GraphModule or a replacement callback"
+            )
             replacement_graph = common_replacement_graph
         replacement_placeholders = [
             n for n in replacement_graph.nodes if n.op == "placeholder"

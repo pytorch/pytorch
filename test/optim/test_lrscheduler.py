@@ -77,7 +77,7 @@ class TestLRScheduler(TestCase):
         self.opt = SGD(
             [
                 {"params": self.net.conv1.parameters()},
-                {"params": self.net.conv2.parameters(), "lr": 0.5},
+                {"params": self.net.conv2.parameters(), "lr": torch.tensor(0.5)},
             ],
             lr=0.05,
         )
@@ -107,9 +107,7 @@ class TestLRScheduler(TestCase):
                     [0]
                     + [i + 1 for i, m in enumerate(self.milestones) if global_step >= m]
                 )[-1]
-                return [
-                    init_lr * (self.gamma**gamma_power) for init_lr in self.init_lr
-                ]
+                return [init_lr * (self.gamma**gamma_power) for init_lr in self.init_lr]
 
         optimizer = SGD([torch.rand(1)], lr=1)
 
@@ -370,6 +368,16 @@ class TestLRScheduler(TestCase):
         targets = [single_targets, [x * epochs for x in single_targets]]
         scheduler = MultiStepLR(self.opt, gamma=0.1, milestones=[2, 5, 9])
         self._test_get_last_lr(scheduler, targets, epochs)
+
+    def test_raise_error_when_last_epoch_is_greater_than_0_and_initial_lr_is_not_specified(
+        self,
+    ):
+        optimizer = SGD([Parameter(torch.randn(2, 2, requires_grad=True))], 0.1)
+        with self.assertRaisesRegex(
+            KeyError,
+            r"param \'initial_lr\' is not specified in param_groups\[0\] when resuming scheduler with last_epoch >= 0",
+        ):
+            StepLR(optimizer, step_size=3, gamma=0.1, last_epoch=1)
 
     def test_multi_step_lr(self):
         # lr = 0.05     if epoch < 2
@@ -702,6 +710,15 @@ class TestLRScheduler(TestCase):
             scheduler.get_last_lr(), [0.5 for param_group in self.opt.param_groups]
         )
 
+    def test_reduce_lr_on_plateau_preserves_lr_type(self):
+        # Ensures that tensor lrs are preserved, preventing recompilations.
+        types = [type(group["lr"]) for group in self.opt.param_groups]
+        scheduler = ReduceLROnPlateau(self.opt, mode="min", patience=0)
+        scheduler.step(1.0)
+        scheduler.step(2.0)  # Triggers scheduler._reduce_lr
+        for group, type_ in zip(self.opt.param_groups, types):
+            self.assertEqual(type(group["lr"]), type_)
+
     def test_sequentiallr1(self):
         epochs = 19
         schedulers = [None] * 2
@@ -786,6 +803,19 @@ class TestLRScheduler(TestCase):
         scheduler = SequentialLR(self.opt, schedulers=schedulers, milestones=milestones)
         self._test(scheduler, targets, epochs)
 
+    def test_sequentiallr_no_warnings(self):
+        scheduler1 = LinearLR(self.opt, start_factor=0.5, end_factor=0.1, total_iters=5)
+        scheduler2 = ExponentialLR(self.opt, gamma=0.9)
+        scheduler = SequentialLR(
+            self.opt, schedulers=[scheduler1, scheduler2], milestones=[5]
+        )
+
+        for _ in range(10):
+            self.opt.step()
+            with warnings.catch_warnings(record=True) as ws:
+                scheduler.step()
+                self.assertTrue(len(ws) == 0, "No warning should be raised")
+
     def test_get_last_lr_sequentiallr(self):
         epochs = 12
         milestones = [3, 6]
@@ -800,6 +830,27 @@ class TestLRScheduler(TestCase):
         single_targets = constant_lr_target + exponential_lr_target + step_lr_target
         targets = [single_targets, [x * 10 for x in single_targets]]
         self._test_get_last_lr(scheduler, targets, epochs)
+
+    def test_sequentiallr_does_not_alias_lr_and_initial_lr(self):
+        # The TestLRScheduler object uses self.opt to avoid instantiating a new optimizer for each test.
+        # self.opt has a float lr, and we need to use a Tensor lr to ensure that a former SequentialLR bug is fixed.
+        # For more context, see https://github.com/pytorch/pytorch/issues/162359
+        old_opt = self.opt
+        lr = torch.tensor(2.0)
+        self.opt = SGD(self.net.parameters(), lr=lr)
+        milestone = 4
+        epochs = 8
+        start, end = 0.1, 0.8
+
+        schedulers = [
+            LinearLR(self.opt, start, end, total_iters=milestone),
+            LinearLR(self.opt, end, start, total_iters=epochs - milestone),
+        ]
+        targets = [[0.2, 0.55, 0.9, 1.25, 1.6, 1.25, 0.9, 0.55]]
+
+        scheduler = SequentialLR(self.opt, schedulers, milestones=[milestone])
+        self._test(scheduler, targets, epochs)
+        self.opt = old_opt
 
     def test_chained_lr2_get_last_lr_before_step(self):
         schedulers = [
@@ -1837,6 +1888,15 @@ class TestLRScheduler(TestCase):
         )
         self._test(scheduler, targets, epochs)
 
+    def test_multiplicative_lr_with_lr_lambda(self):
+        lr_lambda = 0.95
+        with self.assertRaisesRegex(TypeError, "lr_lambda should be a function"):
+            MultiplicativeLR(self.opt, lr_lambda)
+
+        lr_lambda2 = 0.95
+        with self.assertRaisesRegex(TypeError, "lr_lambda should be a function"):
+            MultiplicativeLR(self.opt, [lr_lambda, lr_lambda2])
+
     @parametrize("T_mult", [1, 2, 4])
     def test_CosineAnnealingWarmRestarts_lr1(self, T_mult):
         iters = 100
@@ -1923,6 +1983,14 @@ class TestLRScheduler(TestCase):
             self._test_interleaved_CosineAnnealingWarmRestarts(
                 scheduler, targets, epochs
             )
+
+    def test_CosineAnnealingWarmRestarts_T_cur_reset(self):
+        sch = CosineAnnealingWarmRestarts(self.opt, T_0=4)
+        for epoch in [7, 8, 9]:
+            sch.T_cur = epoch
+            sch.step()
+            expect_T_cur = (epoch + 1) % sch.T_0
+            self.assertEqual(sch.T_cur, expect_T_cur)
 
     def test_swalr_no_anneal(self):
         epochs, swa_start, swa_lr = 10, 5, 0.01
@@ -2374,6 +2442,7 @@ class TestLRScheduler(TestCase):
             partial(CyclicLR, base_lr=0.01, max_lr=0.1),
             partial(OneCycleLR, max_lr=0.01, total_steps=10, anneal_strategy="linear"),
             partial(CosineAnnealingWarmRestarts, T_0=20),
+            partial(SWALR, swa_lr=0.01),
         ],
     )
     @parametrize("weights_only", [True, False])
@@ -2461,7 +2530,7 @@ class TestLRScheduler(TestCase):
         ],
     )
     def test_constant_initial_lr(self, LRClass):
-        # Test that the initial learning rate is constant
+        # Test that the initial learning rate is constant and that it does not alias base_lrs
         lr = torch.as_tensor(0.1)
         opt = SGD([torch.nn.Parameter(torch.randn(1))], lr=lr)
         sch = LRClass(opt)
@@ -2475,6 +2544,7 @@ class TestLRScheduler(TestCase):
             for group, ori_group in zip(opt.param_groups, ori_param_groups):
                 self.assertEqual(group["initial_lr"], ori_group["initial_lr"])
                 self.assertEqual(sch.base_lrs, [0.1])
+                self.assertIsNot(sch.base_lrs[0], group["initial_lr"])
 
     def test_constant_initial_params_cyclelr(self):
         # Test that the initial learning rate is constant
@@ -2557,6 +2627,56 @@ class TestLRScheduler(TestCase):
                 self.assertEqual(group["swa_lr"], ori_group["swa_lr"])
                 self.assertEqual(group["swa_lr"], 0.05)
                 self.assertEqual(sch.base_lrs, [0.1])
+
+    @parametrize(
+        "LRClass",
+        [
+            partial(ExponentialLR, gamma=0.999),
+            partial(LambdaLR, lr_lambda=lambda epoch: epoch // 30),
+            partial(MultiplicativeLR, lr_lambda=lambda epoch: 0.95),
+            partial(StepLR, step_size=30),
+            partial(MultiStepLR, milestones=[30, 80]),
+            ConstantLR,
+            LinearLR,
+            PolynomialLR,
+            partial(CosineAnnealingLR, T_max=10),
+            partial(CosineAnnealingWarmRestarts, T_0=20),
+            partial(CyclicLR, base_lr=0.01, max_lr=0.1),
+            partial(OneCycleLR, max_lr=0.01, total_steps=10),
+            partial(SWALR, swa_lr=0.01),
+        ],
+    )
+    def test_lr_scheduler_checkpoint(self, LRClass):
+        model = torch.nn.Linear(3, 3)
+        optim = torch.optim.AdamW(model.parameters())
+        sch = LRClass(optim)
+        optim.step()
+        sch.step()
+        optim2 = torch.optim.AdamW(model.parameters())
+        optim2.load_state_dict(optim.state_dict())
+        sch2 = LRClass(optim2, last_epoch=0)
+        self.assertEqual(
+            sch2._get_closed_form_lr()[0]
+            if hasattr(self, "_get_closed_form_lr")
+            else sch2.get_last_lr()[0],
+            optim.param_groups[0]["lr"],
+        )
+
+    def test_lr_scheduler_checkpoint_on_plateau(self):
+        model = torch.nn.Linear(3, 3)
+        optim = torch.optim.AdamW(model.parameters())
+        sch = ReduceLROnPlateau(optim, mode="min")
+        optim.step()
+        sch.step(1)
+        optim2 = torch.optim.AdamW(model.parameters())
+        optim2.load_state_dict(optim.state_dict())
+        sch2 = ReduceLROnPlateau(optim2, mode="min")
+        self.assertEqual(
+            sch2._get_closed_form_lr()[0]
+            if hasattr(self, "_get_closed_form_lr")
+            else sch2.get_last_lr()[0],
+            optim.param_groups[0]["lr"],
+        )
 
 
 instantiate_parametrized_tests(TestLRScheduler)

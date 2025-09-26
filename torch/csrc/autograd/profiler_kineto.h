@@ -37,6 +37,7 @@ struct TORCH_API KinetoEvent {
   bool hasConcreteInputs() const;
   const c10::ArrayRef<c10::IValue> concreteInputs() const;
   bool hasKwinputs() const;
+  bool isHiddenEvent() const;
   const std::unordered_map<std::string, c10::IValue> kwinputs() const;
   uint64_t flops() const;
   int64_t sequenceNr() const;
@@ -64,6 +65,7 @@ struct TORCH_API KinetoEvent {
   int64_t privateuse1ElapsedUs() const;
   void getPerfEventCounters(torch::profiler::perf_counters_t&) const;
   extra_meta_t extraMeta() const;
+  std::string metadataJson() const;
 
  private:
   torch::profiler::impl::ProfilerVoidEventStub fallbackStart() const;

@@ -4,11 +4,11 @@ from copy import deepcopy
 
 import torch
 import torch.distributed.checkpoint as dcp
-from torch.distributed._tensor import init_device_mesh
 from torch.distributed.checkpoint.default_planner import (
     DefaultLoadPlanner,
     DefaultSavePlanner,
 )
+from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
     parallelize_module,

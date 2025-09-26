@@ -10,9 +10,11 @@ from torch._dynamo.utils import counters, get_metrics_context
 from torch._inductor.utils import GraphPartitionMap, InputType
 from torch.utils._ordered_set import OrderedSet
 
+from .utils import is_using_cudagraph_partition
+
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Sequence, Set as AbstractSet
 
 
 perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
@@ -108,7 +110,8 @@ def format_default_skip_message(reason: str) -> str:
 
 
 def get_mutation_stack_trace(
-    placeholders: Sequence[PlaceholderInfo], mutation_indices: Sequence[int]
+    placeholders: Sequence[PlaceholderInfo],
+    mutation_indices: Union[AbstractSet[int], Sequence[int]],
 ) -> str:
     stack_trace: Optional[str] = ""
 
@@ -131,7 +134,7 @@ def check_for_mutation(
     inputs: list[InputType],
     is_cuda_graph_recorded_tensor: Callable[[torch.Tensor], bool],
 ) -> Optional[str]:
-    # doesnt work for non-trees because the warmup run would apply mutation twice
+    # doesn't work for non-trees because the warmup run would apply mutation twice
     if torch._inductor.config.triton.cudagraph_trees:
         # checking if mutation is only on parameters/static inputs
         mutation_indices: Sequence[int] = [
@@ -170,7 +173,8 @@ def check_multiple_devices_or_any_cpu_nodes(
     # meta tensors are supported since there is no compute
     device_node_mapping.pop(torch.device("meta"), None)
 
-    if torch._inductor.config.graph_partition:
+    # dynamo cudagraph does not support graph partition
+    if is_using_cudagraph_partition():
         # graph partition supports splitting on cpu op. So we can ignore cpu nodes.
         device_node_mapping.pop(torch.device("cpu"), None)
 
@@ -200,6 +204,10 @@ def check_lowering_disable_cudagraph(
 def log_cudagraph_skip_and_bump_counter(msg: str) -> None:
     perf_hint_log.warning(msg)
     counters["inductor"]["cudagraph_skips"] += 1
+
+    if torch._inductor.config.triton.cudagraph_or_error:
+        raise RuntimeError(msg)
+
     metrics_context = get_metrics_context()
     if metrics_context.in_progress():
         metrics_context.set("cudagraph_skip_reason", msg, overwrite=True)
@@ -222,7 +230,7 @@ def check_for_mutation_ignore_cuda_graph_managed_tensor(
 ) -> Optional[str]:
     default_msg = format_default_skip_message("mutated inputs")
 
-    # doesnt work for non-trees because the warmup run would apply mutation twice
+    # doesn't work for non-trees because the warmup run would apply mutation twice
     if torch._inductor.config.triton.cudagraph_trees:
         unique_idxs = OrderedSet(static_input_idxs)
         # checking if mutation is only on parameters/static inputs

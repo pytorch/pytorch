@@ -42,6 +42,8 @@ aten::add_.Scalar
 aten::add_.Tensor
 aten::addbmm_
 aten::addmm
+aten::addmm.dtype
+aten::addmm.dtype_out
 aten::addmm.out
 aten::addmm_
 aten::addmv

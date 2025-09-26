@@ -10,7 +10,9 @@ from torch import rand, randn, Tensor
 from torch.distributed.tensor import (
     DeviceMesh,
     distribute_tensor,
+    DTensor,
     init_device_mesh,
+    Partial,
     Replicate,
     Shard,
 )
@@ -25,7 +27,7 @@ from torch.distributed.tensor._ops._view_ops import (
     view_groups,
 )
 from torch.distributed.tensor.debug import CommDebugMode
-from torch.distributed.tensor.placement_types import Placement
+from torch.distributed.tensor.placement_types import _StridedShard, Placement
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
@@ -168,8 +170,34 @@ class TestViewOps(DTensorTestBase):
             *(device_mesh.ndim * [sharding_choices])
         )
 
-        for in_shard in all_sharding_choices:
-            in_dt = distribute_tensor(args[0], device_mesh, in_shard)
+        outer_mesh = device_mesh["outer"]
+        inner_mesh = device_mesh["inner"]
+        inner_mesh_size = inner_mesh.size()
+        strided_sharding_choices = [
+            (_StridedShard(i, split_factor=inner_mesh_size), Shard(i))
+            for i, s in enumerate(in_shape)
+            if s > 1 and i not in no_shard_dims
+        ]
+
+        for in_shard in itertools.chain(all_sharding_choices, strided_sharding_choices):
+            if isinstance(in_shard[0], _StridedShard):
+                if op != Tensor.view:
+                    continue
+                # cannot produce DTensor using ``distribute_tensor()``
+                # with ``_StridedShard``. Need to distribute the input
+                # over inner mesh dim first, then distribute the
+                # _local_tensor over the outer mesh dim.
+                in_dt = distribute_tensor(args[0], inner_mesh, (in_shard[1],))
+                in_dt = distribute_tensor(
+                    in_dt._local_tensor, outer_mesh, (Shard(in_shard[0].dim),)
+                )
+                in_dt = DTensor.from_local(
+                    in_dt._local_tensor,
+                    device_mesh,
+                    in_shard,
+                )
+            else:
+                in_dt = distribute_tensor(args[0], device_mesh, in_shard)
 
             comm_mode = CommDebugMode()
             with comm_mode:
@@ -190,9 +218,39 @@ class TestViewOps(DTensorTestBase):
         self.call_dt_test(op, args, {}, self.device_mesh)
 
     @with_comms
+    def test_illegal_views(self):
+        device_mesh = self.build_device_mesh()
+        # 1D mesh [6] (see above)
+        tensor = torch.randn((6, 256))
+        dtensor = distribute_tensor(tensor, device_mesh, [Replicate()])
+        shard = dtensor.redistribute(device_mesh=device_mesh, placements=[Shard(dim=0)])
+        # view should be legal, since sharding is even and flatten includes only one sharded dim
+        shard.view(-1)
+
+        shard = dtensor.redistribute(device_mesh=device_mesh, placements=[Shard(dim=1)])
+        with self.assertRaisesRegex(RuntimeError, "Sharding propagation failed"):
+            shard.view(-1)
+
+        # 8 is the uneven case since mesh dim is 6
+        tensor = torch.randn((8, 256))
+        dtensor = distribute_tensor(tensor, device_mesh, [Replicate()])
+        shard = dtensor.redistribute(device_mesh=device_mesh, placements=[Shard(dim=0)])
+        with self.assertRaisesRegex(RuntimeError, "Sharding propagation failed"):
+            shard.view(-1)
+
+        # assuming world size is 4+, tensor is shardable on dim 1 with size 256
+        # but not viewable when the resulting dim 1 has size 2
+        tensor = torch.randn((8, 256))
+        dtensor = distribute_tensor(tensor, device_mesh, [Replicate()])
+        shard = dtensor.redistribute(device_mesh=device_mesh, placements=[Shard(dim=1)])
+        with self.assertRaisesRegex(RuntimeError, "Sharding propagation failed"):
+            shard.view(8, 2, -1)
+
+    @with_comms
     def test_view_ops(self):
-        self.device_mesh = DeviceMesh(
-            self.device_type, torch.arange(dist.get_world_size()).view(-1, 2)
+        mesh_shape = (dist.get_world_size() // 2, 2)
+        self.device_mesh = init_device_mesh(
+            self.device_type, mesh_shape=mesh_shape, mesh_dim_names=("outer", "inner")
         )
         self.dimmap_test(torch.atleast_1d, (randn(()),), (Singleton(),))
         self.dimmap_test(torch.atleast_1d, (randn(24),), (InputDim(0),))
@@ -417,7 +475,6 @@ class TestViewOps(DTensorTestBase):
             (randn(42, 24, 36), 1),
             (InputDim(0), Singleton(), InputDim(1), InputDim(2)),
         )
-
         self.dimmap_test(
             Tensor.view,
             (randn(6, 12, 24), 72, 24),
@@ -578,22 +635,33 @@ class TestViewOps(DTensorTestBase):
     def test_view_redistribution(self):
         """
         This test is added to demonstrate "incorrect" view ops behavior if redistribution happens.
-        #TODO: we need to define the view ops behavior when view on the sharded dimension.
         """
 
         x = torch.randn(4, 4)
-        y = x.view(-1, 8)
-
         mesh = init_device_mesh(self.device_type, (self.world_size,))
         dtensor_x = distribute_tensor(x, mesh, (Shard(0),))
-        dtensor_y = dtensor_x.view(-1, 8)
 
-        self.assertEqual(y, dtensor_y.full_tensor())
-        # TODO: to match up with single device semantics, the data pointer of dtensor_x and dtensor_y
-        # should be the same.
-        self.assertNotEqual(
-            dtensor_x.to_local().data_ptr(), dtensor_y.to_local().data_ptr()
+        with self.assertRaisesRegex(RuntimeError, "Sharding propagation failed"):
+            dtensor_x.view(-1, 8)
+
+    @with_comms
+    def test_squeeze_(self):
+        mesh_2d = init_device_mesh(self.device_type, (3, 2), mesh_dim_names=("a", "b"))
+        torch.manual_seed(self.rank)
+        x = torch.randn((1, 4), device=self.device_type)
+        dist_x = DTensor.from_local(x, mesh_2d, [Partial(), Shard(1)])
+        self._test_op_on_dtensor(
+            torch.ops.aten.squeeze_.dim,
+            dist_x,
+            0,
         )
+        # check DTensor subclass metadata as well as placements
+        self.assertEqual(dist_x.shape, torch.Size([8]))
+        self.assertEqual(
+            dist_x.stride(),
+            (1,),
+        )
+        self.assertEqual(dist_x.placements, [Partial(), Shard(0)])
 
 
 if __name__ == "__main__":

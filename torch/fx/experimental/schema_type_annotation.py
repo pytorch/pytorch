@@ -103,7 +103,7 @@ class AnnotateTypesWithSchema(Transformer):
             for i, atom in enumerate(atoms):
                 if not hasattr(module_itr, atom):
                     raise RuntimeError(
-                        f'Node referenced nonextent target {".".join(atoms[:i])}!'
+                        f"Node referenced nonextent target {'.'.join(atoms[:i])}!"
                     )
                 module_itr = getattr(module_itr, atom)
 

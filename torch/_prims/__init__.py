@@ -302,7 +302,7 @@ def _make_prim(
         else:
             return _prim_impl(*args, **kwargs)
 
-    name = schema.split("(")[0]
+    name = schema.split("(", maxsplit=1)[0]
     schema = schema[len(name) :]
 
     # register non-functional ops with old custom ops API
@@ -404,7 +404,7 @@ def _prim_elementwise_meta(
     utils.check_same_device(*args_, allow_cpu_scalar_tensors=True)
     utils.check_same_shape(*args_, allow_cpu_scalar_tensors=True)
 
-    l2p_perm = utils.compute_elementwise_output_logical_to_physical_perm(*args_)
+    l2p_perm, _ = utils.compute_elementwise_output_logical_to_physical_perm(*args_)
     shape = utils.extract_shape(*args_, allow_cpu_scalar_tensors=True)
 
     # Acquires the dtype
@@ -692,16 +692,22 @@ def _clone_meta(
             device=input.device,
             memory_format=memory_format,
         )
+    else:
+        # Match eager behavior by preserving strides for non_overlapping_and_dense tensors
+        # If not, eager clone creates contiguous strides
+        computed_stride = None
+        if utils.is_non_overlapping_and_dense(input):
+            computed_stride = input.stride()
+        else:
+            computed_stride = utils.compute_elementwise_output_strides(input)
 
-    # memory_format == torch.preserve_format
-    strides = utils.compute_elementwise_output_strides(input)
-    return torch.empty_strided(
-        input.shape,
-        strides,
-        dtype=input.dtype,
-        layout=input.layout,
-        device=input.device,
-    )
+        return torch.empty_strided(
+            input.shape,
+            computed_stride,
+            dtype=input.dtype,
+            layout=input.layout,
+            device=input.device,
+        )
 
 
 clone = _make_prim(
@@ -1257,7 +1263,11 @@ as_strided = _make_prim(
 def _broadcast_in_dim_meta(
     a: TensorLikeType, shape: ShapeType, broadcast_dimensions: Sequence[int]
 ):
-    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+    from torch.fx.experimental.symbolic_shapes import (
+        guard_or_false,
+        guard_or_true,
+        sym_or,
+    )
 
     # Type checks
     assert isinstance(a, TensorLike)
@@ -1284,11 +1294,10 @@ def _broadcast_in_dim_meta(
 
     # shape must be broadcastable to
     for idx, new_idx in enumerate(broadcast_dimensions):
-        if not guard_size_oblivious(a.shape[idx] == 1):
-            torch._check(
-                a.shape[idx] == shape[new_idx],
-                lambda: f"{a.shape[idx]} must be broadcastable to {shape[new_idx]}",
-            )
+        torch._check(
+            sym_or(a.shape[idx] == 1, shape[new_idx] == a.shape[idx]),
+            lambda: f"{a.shape[idx]} must be broadcastable to {shape[new_idx]}",
+        )
 
     new_strides = []
     original_idx = 0
@@ -1296,13 +1305,21 @@ def _broadcast_in_dim_meta(
         if idx in broadcast_dimensions:
             # Assigns a stride of zero to dimensions
             # which were actually broadcast
-            if guard_size_oblivious(a.shape[original_idx] != shape[idx]):
-                new_strides.append(0)
+            if guard_or_false(a.shape[original_idx] == 1):
+                if guard_or_false(a.shape[original_idx] == shape[idx]):
+                    new_strides.append(a.stride()[original_idx])
+                else:
+                    new_strides.append(0)
             else:
+                torch._check(
+                    a.shape[original_idx] == shape[idx],
+                    lambda: f"non-broadcasting semantics require {a.shape[original_idx]} == {shape[idx]}",
+                )
                 new_strides.append(a.stride()[original_idx])
             original_idx = original_idx + 1
         else:
-            if guard_size_oblivious(shape[idx] != 1):
+            if guard_or_true(shape[idx] != 1):
+                # consistent with previous use of guard_size_oblivious
                 new_strides.append(0)
             elif original_idx == a.ndim:
                 new_strides.append(1)
@@ -1373,12 +1390,22 @@ def _collapsed_shape(shape: ShapeType, start: int, end: int) -> tuple[int, ...]:
     return shape[0:start] + (dim_length,) + shape[end + 1 :]
 
 
+# If the collapse is invalid or cannot be determined (because of unbacked data)
+# then `must_be_valid` determines the behavior:
+#   None: return None, None.
+#   str: Do a torch._check() to ensure the collapse is valid and if it isn't
+#   then fail with the provided string.
 def _collapse_view_helper(
-    a: TensorLikeType, start: int, end: int
+    a: TensorLikeType, start: int, end: int, must_be_valid: Optional[str]
 ) -> tuple[Optional[ShapeType], Optional[StrideType]]:
     assert isinstance(a, TensorLike)
 
-    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+    from torch.fx.experimental.symbolic_shapes import (
+        guard_or_false,
+        guard_or_true,
+        sym_and,
+        sym_or,
+    )
 
     _validate_collapse_args(a, start, end)
 
@@ -1393,52 +1420,69 @@ def _collapse_view_helper(
     if a.ndim == 0 or (end == start):
         return shape, strides
 
-    length = shape[end]
+    valid_op = True
+    if guard_or_false(a.numel() != 0):
+        for idx in range(end - 1, start - 1, -1):
+            valid_op = sym_and(
+                valid_op,
+                sym_or(
+                    shape[idx] == 1,
+                    shape[idx + 1] == 1,
+                    strides[idx] == strides[idx + 1] * shape[idx + 1],
+                ),
+            )  # type: ignore[assignment]
+
+            # early exit if we already know its invalid.
+            if guard_or_false(valid_op is False):
+                break
+
+    # for unbacked this become a runtime assertion.
+    valid_op = sym_or(valid_op, a.numel() == 0)
+
+    if must_be_valid:
+        torch._check(valid_op, lambda: must_be_valid)
+    else:
+        if not guard_or_false(valid_op):
+            return None, None
+
+    # compute stride
     stride = strides[end]
     for idx in range(end - 1, start - 1, -1):
-        if guard_size_oblivious(shape[idx] == 0) or guard_size_oblivious(
-            shape[idx + 1] == 0
-        ):
-            length = 0
-            stride = 0
-            break
+        if shape[idx] != 1:
+            # TODO with unbacked we should really exclude when shape[idx] == 1
+            # something like
+            # min(stride[end], torch.ite(shape[x]!=1,stride[idx], inf), ...)
+            stride = min(stride, strides[idx])
 
-        if guard_size_oblivious(shape[idx] == 1):
-            continue
-
-        length = length * shape[idx]
-        if guard_size_oblivious(stride < strides[idx]):
-            stride = stride
-        else:
-            stride = strides[idx]
-
-        if (
-            guard_size_oblivious(a.numel() > 0)
-            and guard_size_oblivious(shape[idx + 1] != 1)
-            and not guard_size_oblivious(
-                strides[idx] == strides[idx + 1] * shape[idx + 1]
-            )
-        ):
-            return None, None
+    # compute length
+    length = shape[end]
+    if guard_or_true(length != 0):
+        for idx in range(end - 1, start - 1, -1):
+            if guard_or_false(shape[idx] == 0):
+                length = 0
+                stride = 0
+                break
+            length = length * shape[idx]
+    else:
+        stride = 0
 
     new_shape = shape[:start] + (length,) + shape[end + 1 :]
     new_strides = strides[:start] + (stride,) + strides[end + 1 :]
 
     # NOTE: when the input has no elements it's restrided as if it were contiguous
-    if guard_size_oblivious(a.numel() == 0):
+    # except for unbacked.
+    if guard_or_false(a.numel() == 0):
         new_strides = utils.make_contiguous_strides_for(new_shape)
 
     return new_shape, new_strides
 
 
 def _collapse_view_meta(a: TensorLikeType, start: int, end: int) -> TensorLikeType:
-    new_shape, new_strides = _collapse_view_helper(a, start, end)
-
-    if new_shape is None:
-        msg = "Attempting to view a collapsed tensor, but no such view exists!"
-        raise ValueError(msg)
-
+    new_shape, new_strides = _collapse_view_helper(
+        a, start, end, "Attempting to view a collapsed tensor, but no such view exists!"
+    )
     assert new_strides is not None
+    assert new_shape is not None
     return a.as_strided(new_shape, new_strides, a.storage_offset())
 
 
@@ -2163,7 +2207,7 @@ def _resize_aten(a: Tensor, shape: ShapeType) -> Tensor:
 _resize_doc = """
   Gives a tensor with no elements a new shape, returning the modified tensor.
 
-  The tensor's strides are contiguous and its values are unitialized.
+  The tensor's strides are contiguous and its values are uninitialized.
   """
 
 # TODO: review support arbitrary resizes
@@ -2502,7 +2546,11 @@ def _full_aten(
 ) -> Tensor:
     # Note that Mypy thinks torch.full can't accept a complex fill_value
     return torch.full(
-        shape, fill_value, dtype=dtype, device=device, requires_grad=requires_grad  # type: ignore[arg-type]
+        shape,
+        fill_value,
+        dtype=dtype,
+        device=device,
+        requires_grad=requires_grad,  # type: ignore[arg-type]
     )
 
 
@@ -2545,7 +2593,11 @@ def _full_like_aten(
 ) -> Tensor:
     # Note that Mypy thinks torch.full can't accept a complex fill_value
     return torch.full_like(
-        a, fill_value, dtype=dtype, device=device, requires_grad=requires_grad  # type: ignore[arg-type]
+        a,
+        fill_value,
+        dtype=dtype,
+        device=device,
+        requires_grad=requires_grad,  # type: ignore[arg-type]
     )
 
 

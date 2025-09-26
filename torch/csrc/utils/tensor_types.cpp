@@ -39,6 +39,8 @@ const char* backend_to_string(const at::Backend& backend) {
       return "torch.cuda.sparse";
     case at::Backend::SparseXPU:
       return "torch.xpu.sparse";
+    case at::Backend::SparseMPS:
+      return "torch.mps.sparse";
     case at::Backend::QuantizedCPU:
       return "torch.quantized";
     case at::Backend::HPU:

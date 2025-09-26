@@ -2,9 +2,9 @@
 
 #include <ATen/core/jit_type.h>
 #include <ATen/core/type_factory.h>
-#include <c10/util/string_view.h>
 #include <torch/csrc/jit/frontend/parser_constants.h>
 #include <torch/custom_class.h>
+#include <string_view>
 
 using torch::jit::valid_single_char_tokens;
 
@@ -19,11 +19,7 @@ static constexpr const char* kTypeTorchbindCustomClass =
 static constexpr const char* kTypeNamedTuple = "NamedTuple";
 
 bool isSpecialChar(char a) {
-  for (const char* c = valid_single_char_tokens; *c; c++) {
-    if (a == *c)
-      return true;
-  }
-  return false;
+  return std::strchr(valid_single_char_tokens, a);
 }
 } // namespace
 
@@ -40,7 +36,7 @@ TypeParser::TypeParser(std::vector<std::string>& pythonStrs)
 // instruction. In nested type, the lowest level type will be at the beginning
 // of the type list. It is possible to parse it without worrying about
 // ordering, but it also introduces 1) extra cost to process nested type to
-// the correct order 2) lost the benifit that the instruction order is likely
+// the correct order 2) lost the benefit that the instruction order is likely
 // problematic if type list parsing fails.
 std::vector<TypePtr> TypeParser::parseList() {
   std::vector<TypePtr> typePtrs;

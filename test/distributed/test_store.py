@@ -54,6 +54,8 @@ DEFAULT_HOSTNAME = "localhost"
 
 torch.backends.cuda.matmul.allow_tf32 = False
 
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+
 
 def gpus_for_rank(world_size):
     """Multigpu tests are designed to simulate the multi nodes with multi
@@ -61,8 +63,8 @@ def gpus_for_rank(world_size):
     On a single node, all visible GPUs are evenly
     divided to subsets, each process only uses a subset.
     """
-    visible_devices = list(range(torch.cuda.device_count()))
-    gpus_per_process = torch.cuda.device_count() // world_size
+    visible_devices = list(range(torch.accelerator.device_count()))
+    gpus_per_process = torch.accelerator.device_count() // world_size
     gpus_for_rank = []
     for rank in range(world_size):
         gpus_for_rank.append(
@@ -149,13 +151,18 @@ class StoreTestBase:
     def test_append(self):
         self._test_append(self._create_store())
 
-    def test_queues(self):
+    def _create_store_or_skip_if_no_queues(self) -> dist.Store:
         store = self._create_store()
 
         try:
             store.queue_push("test_queue_support", "1")
         except NotImplementedError:
             self.skipTest("Store does not support queues")
+
+        return store
+
+    def test_queues(self) -> None:
+        store = self._create_store_or_skip_if_no_queues()
 
         self.assertFalse(store.check(["foo"]))
         self.assertEqual(store.queue_len("foo"), 0)
@@ -173,9 +180,17 @@ class StoreTestBase:
         self.assertFalse(store.check(["foo"]))
         self.assertEqual(store.queue_len("foo"), 0)
 
-        store.set_timeout(timedelta(seconds=0.01))
-        with self.assertRaisesRegex(DistStoreError, "timeout"):
-            store.queue_pop("non_existant")
+    def test_queues_nonblocking(self) -> None:
+        store = self._create_store_or_skip_if_no_queues()
+
+        with self.assertRaisesRegex(dist.QueueEmptyError, "empty"):
+            store.queue_pop("foo", block=False)
+
+        store.queue_push("foo", "a")
+        self.assertEqual(store.queue_pop("foo", block=False), b"a")
+
+    def test_queues_bidirectional(self) -> None:
+        store = self._create_store_or_skip_if_no_queues()
 
         def worker_a():
             local_store = store.clone()
@@ -197,6 +212,13 @@ class StoreTestBase:
             ]
             for fut in futures:
                 fut.result()
+
+    def test_queues_timeout(self) -> None:
+        store = self._create_store_or_skip_if_no_queues()
+
+        store.set_timeout(timedelta(seconds=0.01))
+        with self.assertRaisesRegex(DistStoreError, "timeout"):
+            store.queue_pop("non_existant")
 
     def _test_multi_set(self, store):
         if not store.has_extended_api():
@@ -352,12 +374,8 @@ class TCPStoreTest(TestCase, StoreTestBase):
             # Use noqa to silence flake8.
             # Need to store in an unused variable here to ensure the first
             # object is not destroyed before the second object is created.
-            store1 = dist.TCPStore(
-                addr, port, 1, True, use_libuv=self._use_libuv
-            )  # noqa: F841
-            store2 = dist.TCPStore(
-                addr, port, 1, True, use_libuv=self._use_libuv
-            )  # noqa: F841
+            store1 = dist.TCPStore(addr, port, 1, True, use_libuv=self._use_libuv)  # noqa: F841
+            store2 = dist.TCPStore(addr, port, 1, True, use_libuv=self._use_libuv)  # noqa: F841
             self.assertEqual(store1.libuvBackend, self._use_libuv)
             self.assertEqual(store2.libuvBackend, self._use_libuv)
 
@@ -747,7 +765,7 @@ class RendezvousFileTest(TestCase):
 
     def test_nominal(self):
         with tempfile.NamedTemporaryFile(delete=False) as file:
-            url = f'file:///{file.name.replace(os.path.sep, "/")}?world_size=2'
+            url = f"file:///{file.name.replace(os.path.sep, '/')}?world_size=2"
             gen0 = dist.rendezvous(url + "&rank=0")
             store0, rank0, size0 = next(gen0)
             self.assertEqual(0, rank0)
@@ -821,9 +839,9 @@ class RendezvousTCPTest(TestCase):
         # not respected, it will take much longer to timeout.
         start = time.time()
         with self.assertRaisesRegex(
-            DistStoreError, "wait timeout after 100ms, keys: /nonexistant key"
+            DistStoreError, "wait timeout after 100ms, keys: /nonexistent key"
         ):
-            store0.get("nonexistant key")
+            store0.get("nonexistent key")
 
         end = time.time()
         time_diff = end - start
@@ -1050,7 +1068,7 @@ class TimeoutTest(TestCase):
             wait_for_workers=False,
         )
 
-        ths = []
+        threads = []
         for i in range(2):
             t = threading.Thread(
                 target=run,
@@ -1060,16 +1078,16 @@ class TimeoutTest(TestCase):
                 ),
             )
             t.start()
-            ths.append(t)
+            threads.append(t)
 
         def handler(a, b):
             pass
 
         signal.signal(signal.SIGUSR1, handler)
         time.sleep(1)
-        signal.pthread_kill(ths[1].ident, signal.SIGUSR1)
+        signal.pthread_kill(threads[1].ident, signal.SIGUSR1)
 
-        for t in ths:
+        for t in threads:
             t.join()
         self.assertTrue(rank_res[0], "rank0")
         self.assertTrue(rank_res[1], "rank1")
@@ -1158,8 +1176,8 @@ class TestClientProtocol(TestCase):
 
 
 if __name__ == "__main__":
-    assert (
-        not torch.cuda._initialized
-    ), "test_distributed must not have initialized CUDA context on main process"
-
+    if device_type != "cpu":
+        assert not torch.get_device_module()._initialized, (
+            "test_distributed must not have initialized {device_type} context on main process"
+        )
     run_tests()

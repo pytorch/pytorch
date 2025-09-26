@@ -53,7 +53,7 @@ template <
     int res_arg_index = 0>
 struct LpMaxFunctor {
   __device__ __forceinline__ void operator()(
-      int chunk_size,
+      int64_t chunk_size,
       TensorListMetadata<depth>& tl,
       T* output_per_tensor_ptr,
       const int max_chunks_per_tensor) {
@@ -243,7 +243,7 @@ template <
 struct LpNormFunctor {
   using out_opmath_t = typename at::opmath_type<out_t>;
   __device__ __forceinline__ void operator()(
-      int chunk_size,
+      int64_t chunk_size,
       TensorListMetadata<depth>& tl,
       out_opmath_t* output_per_tensor_ptr,
       const int max_chunks_per_tensor) {

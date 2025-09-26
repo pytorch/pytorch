@@ -78,7 +78,18 @@ class TestCase(InductorTestCase):
             args = (sample_input.input,) + sample_input.args
             kwargs = sample_input.kwargs
             out = run(op.get_op(), args, kwargs)
-            out_c = torch.compile(run)(op.get_op(), args, kwargs)
+
+            # test_configs.runtime_triton_dtype_assert does not work well with dynamic shape so far.
+            # Consider the following cases for torch.add:
+            #   both lhs/rhs are int32 tensor, there is also a integer alpha argument.
+            #   In dynamic shape case, alpha is passed in as an ks0 argument. To be safe,
+            #   we use tl.int64 for ks0's dtype.
+            #   But the dtype for alpha is also decided as tl.int32 during lowering when
+            #   we promote alpha to a ir.Constant.
+            #   Ideally to resolve this problem, we should track assignment like
+            #     alpha = ks0
+            #   so that we know alpha is actually tl.int64 rather than tl.int32.
+            out_c = torch.compile(run, dynamic=False)(op.get_op(), args, kwargs)
             self.assertEqual(out, out_c)
 
     @requires_gpu()
@@ -193,6 +204,8 @@ class TestCase(InductorTestCase):
         # Edge case: torch.round maps to libdevice.nearbyint.
         triton_op_name_overrides = {
             "round": "nearbyint",
+            # torch.sqrt lowers to tl.sqrt_rn after switching away from libdevice.sqrt
+            "sqrt": "sqrt_rn",
         }
         override = triton_op_name_overrides.get(op_name)
         triton_op_name = override if override is not None else torch_op_name
@@ -249,7 +262,7 @@ class TestCase(InductorTestCase):
         def fn(x, y):
             return x % y, x / y
 
-        x, y = (torch.rand([8], dtype=torch.float16, device="cuda") for _ in range(2))
+        x, y = (torch.rand([8], dtype=torch.float16, device=GPU_TYPE) for _ in range(2))
 
         out, code = run_and_get_code(torch.compile(fn), x, y)
 
@@ -260,7 +273,7 @@ class TestCase(InductorTestCase):
     @config.patch("test_configs.runtime_triton_dtype_assert", True)
     def test_constant(self):
         def fn():
-            return (torch.full((2, 3), 3.1416, device="cuda", dtype=torch.float16),)
+            return (torch.full((2, 3), 3.1416, device=GPU_TYPE, dtype=torch.float16),)
 
         out, code = run_and_get_code(torch.compile(fn))
         FileCheck().check("static_assert").check_same(".dtype").run(code[0])
@@ -273,7 +286,7 @@ class TestCase(InductorTestCase):
         def fn(x):
             return torch.any(x)
 
-        x = torch.rand([40], device="cuda").to(torch.bool)
+        x = torch.rand([40], device=GPU_TYPE).to(torch.bool)
         out, code = run_and_get_code(torch.compile(fn), x)
         self.assertEqual(fn(x), out)
 
@@ -282,7 +295,7 @@ class TestCase(InductorTestCase):
     def test_assoc_scan(self):
         from torch._higher_order_ops.associative_scan import associative_scan
 
-        x = torch.randn(10, device="cuda")
+        x = torch.randn(10, device=GPU_TYPE)
         # dtype check correctly
         associative_scan(
             lambda acc, curr: acc + torch.abs(curr), x, dim=-1, combine_mode="pointwise"

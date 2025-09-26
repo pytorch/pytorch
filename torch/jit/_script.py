@@ -15,6 +15,7 @@ import inspect
 import pickle
 import warnings
 from typing import Any, Callable, Union
+from typing_extensions import deprecated
 
 import torch
 import torch._jit_internal as _jit_internal
@@ -318,10 +319,10 @@ class ScriptMeta(type):
                     else:
                         return infer_methods_to_compile(module)
 
-                self.__dict__[
-                    "_actual_script_module"
-                ] = torch.jit._recursive.create_script_module(
-                    self, make_stubs, share_types=not added_methods_in_init
+                self.__dict__["_actual_script_module"] = (
+                    torch.jit._recursive.create_script_module(
+                        self, make_stubs, share_types=not added_methods_in_init
+                    )
                 )
 
                 # Delete the Python attributes that now shadow the ScriptModule
@@ -704,10 +705,7 @@ if _enabled:
 
         @property
         def graph(self):
-            r"""Return a string representation of the internal graph for the ``forward`` method.
-
-            See :ref:`interpreting-graphs` for details.
-            """
+            r"""Return a string representation of the internal graph for the ``forward`` method."""
             return self._c._get_method("forward").graph
 
         @property
@@ -716,7 +714,6 @@ if _enabled:
             Return a string representation of the internal graph for the ``forward`` method.
 
             This graph will be preprocessed to inline all function and method calls.
-            See :ref:`interpreting-graphs` for details.
             """
             return self.forward.inlined_graph  # type: ignore[attr-defined]
 
@@ -725,7 +722,6 @@ if _enabled:
             r"""
             Return a pretty-printed representation (as valid Python syntax) of the internal graph for the ``forward`` method.
 
-            See :ref:`inspecting-code` for details.
             """
             return self.forward.code  # type: ignore[attr-defined]
 
@@ -740,7 +736,6 @@ if _enabled:
             [1] a ConstMap following the CONSTANT.cN format of the output in [0].
             The indices in the [0] output are keys to the underlying constant's values.
 
-            See :ref:`inspecting-code` for details.
             """
             r = self.forward.code_with_constants  # type: ignore[attr-defined]
             return (r[0], ConstMap(r[1]))
@@ -756,6 +751,10 @@ if _enabled:
             """
             return self._c.save(str(f), **kwargs)
 
+        @deprecated(
+            "Lite Interpreter is deprecated. Please consider switching to ExecuTorch. \
+            https://docs.pytorch.org/executorch/stable/getting-started.html"
+        )
         def _save_for_lite_interpreter(self, *args, **kwargs):
             r"""Add (or update) the bytecode session to the script model.
 
@@ -769,9 +768,23 @@ if _enabled:
                 _extra_files: Map from filename to contents which will be stored as part of 'f'.
 
             """
+            warnings.warn(
+                "Lite Interpreter is deprecated. Please consider switching to ExecuTorch. \
+                https://docs.pytorch.org/executorch/stable/getting-started.html",
+                DeprecationWarning,
+            )
             return self._c._save_for_mobile(*args, **kwargs)
 
+        @deprecated(
+            "Lite Interpreter is deprecated. Please consider switching to ExecuTorch. \
+            https://docs.pytorch.org/executorch/stable/getting-started.html"
+        )
         def _save_to_buffer_for_lite_interpreter(self, *args, **kwargs):
+            warnings.warn(
+                "Lite Interpreter is deprecated. Please consider switching to ExecuTorch. \
+                https://docs.pytorch.org/executorch/stable/getting-started.html",
+                DeprecationWarning,
+            )
             return self._c._save_to_buffer_for_mobile(*args, **kwargs)
 
         def save_to_buffer(self, *args, **kwargs):
@@ -1246,7 +1259,7 @@ def script(
     subsequently passed by reference between Python and TorchScript with zero copy overhead.
 
     ``torch.jit.script`` can be used as a function for modules, functions, dictionaries and lists
-     and as a decorator ``@torch.jit.script`` for :ref:`torchscript-classes` and functions.
+     and as a decorator ``@torch.jit.script`` for torchscript-classes and functions.
 
     Args:
         obj (Callable, class, or nn.Module):  The ``nn.Module``, function, class type,

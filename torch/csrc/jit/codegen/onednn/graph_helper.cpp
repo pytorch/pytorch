@@ -70,7 +70,7 @@ Operator LlgaGraphHelper::makeBinaryOp(Node* node, opkind kind) {
 // third_party/ideep/mkl-dnn/src/interface/op_def.hpp.
 Operator LlgaGraphHelper::createOperator(Node* node) {
   auto nodeKind = node->kind();
-  // we're using an if-else clause instead of a switch staement
+  // we're using an if-else clause instead of a switch statement
   // because we would soon be adding custom ops with function schemas.
   // We would have to use Symbol::fromQualString at that time anyway,
   // but we are okay with this choice, since this code is not in the hot-path.

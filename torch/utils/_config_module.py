@@ -6,7 +6,6 @@ import inspect
 import io
 import os
 import pickle
-import sys
 import tokenize
 import unittest
 from dataclasses import dataclass
@@ -38,7 +37,7 @@ T = TypeVar("T", bound=Union[int, float, bool, None, str, list, set, tuple, dict
 _UNSET_SENTINEL = object()
 
 
-@dataclass
+@dataclass(kw_only=True)
 class _Config(Generic[T]):
     """Represents a config with richer behaviour than just a default value.
     ::
@@ -52,17 +51,17 @@ class _Config(Generic[T]):
         alias: If set, the directly use the value of the alias.
         env_name_force: If set, this environment variable has precedence over
             everything after this.
-            If multiple env variables are given, the precendence order is from
+            If multiple env variables are given, the precedence order is from
             left to right.
         user_override: If a user sets a value (i.e. foo.bar=True), that
             has precedence over everything after this.
         env_name_default: If set, this environment variable will override everything
             after this.
-            If multiple env variables are given, the precendence order is from
+            If multiple env variables are given, the precedence order is from
             left to right.
         justknob: If this pytorch installation supports justknobs, that will
-            override defaults, but will not override the user_override precendence.
-        default: This value is the lowest precendance, and will be used if nothing is
+            override defaults, but will not override the user_override precedence.
+        default: This value is the lowest precedence, and will be used if nothing is
             set.
 
     Environment Variables:
@@ -82,37 +81,28 @@ class _Config(Generic[T]):
     justknob: Optional[str] = None
     env_name_default: Optional[list[str]] = None
     env_name_force: Optional[list[str]] = None
+    value_type: Optional[type] = None
     alias: Optional[str] = None
 
-    def __init__(
-        self,
-        default: Union[T, object] = _UNSET_SENTINEL,
-        justknob: Optional[str] = None,
-        env_name_default: Optional[Union[str, list[str]]] = None,
-        env_name_force: Optional[Union[str, list[str]]] = None,
-        value_type: Optional[type] = None,
-        alias: Optional[str] = None,
-    ):
-        # python 3.9 does not support kw_only on the dataclass :(.
-        self.default = default
-        self.justknob = justknob
+    def __post_init__(self) -> None:
         self.env_name_default = _Config.string_or_list_of_string_to_list(
-            env_name_default
+            self.env_name_default
         )
-        self.env_name_force = _Config.string_or_list_of_string_to_list(env_name_force)
-        self.value_type = value_type
-        self.alias = alias
+        self.env_name_force = _Config.string_or_list_of_string_to_list(
+            self.env_name_force
+        )
+
         if self.alias is not None:
             assert (
-                default is _UNSET_SENTINEL
-                and justknob is None
-                and env_name_default is None
-                and env_name_force is None
+                self.default is _UNSET_SENTINEL
+                and self.justknob is None
+                and self.env_name_default is None
+                and self.env_name_force is None
             ), "if alias is set, none of {default, justknob and env var} can be set"
 
     @staticmethod
     def string_or_list_of_string_to_list(
-        val: Optional[Union[str, list[str]]]
+        val: Optional[Union[str, list[str]]],
     ) -> Optional[list[str]]:
         if val is None:
             return None
@@ -135,8 +125,7 @@ if TYPE_CHECKING:
         env_name_force: Optional[Union[str, list[str]]] = None,
         value_type: Optional[type] = None,
         alias: Optional[str] = None,
-    ) -> T:
-        ...
+    ) -> T: ...
 
 else:
 
@@ -149,7 +138,12 @@ else:
         alias: Optional[str] = None,
     ) -> _Config[T]:
         return _Config(
-            default, justknob, env_name_default, env_name_force, value_type, alias
+            default=default,
+            justknob=justknob,
+            env_name_default=env_name_default,
+            env_name_force=env_name_force,
+            value_type=value_type,
+            alias=alias,
         )
 
 
@@ -179,10 +173,7 @@ def install_config_module(module: ModuleType) -> None:
         prefix: str,
     ) -> None:
         """Walk the module structure and move everything to module._config"""
-        if sys.version_info[:2] < (3, 10):
-            type_hints = getattr(source, "__annotations__", {})
-        else:
-            type_hints = inspect.get_annotations(source)
+        type_hints = inspect.get_annotations(source)
         for key, value in list(source.__dict__.items()):
             if (
                 key.startswith("__")
@@ -323,9 +314,9 @@ class _ConfigEntry:
 
         # Ensure justknobs and envvars are allowlisted types
         if self.justknob is not None and self.default is not None:
-            assert isinstance(
-                self.default, bool
-            ), f"justknobs only support booleans, {self.default} is not a boolean"
+            assert isinstance(self.default, bool), (
+                f"justknobs only support booleans, {self.default} is not a boolean"
+            )
         if self.value_type is not None and (
             config.env_name_default is not None or config.env_name_force is not None
         ):
@@ -334,7 +325,9 @@ class _ConfigEntry:
                 str,
                 Optional[bool],
                 Optional[str],
-            ), f"envvar configs only support (optional) booleans or strings, {self.value_type} is neither"
+            ), (
+                f"envvar configs only support (optional) booleans or strings, {self.value_type} is neither"
+            )
 
 
 class ConfigModule(ModuleType):
@@ -439,7 +432,7 @@ class ConfigModule(ModuleType):
     def _is_default(self, name: str) -> bool:
         """
         Returns true if the config is at its default value.
-        configs overriden by the env are not considered default.
+        configs overridden by the env are not considered default.
         """
         config_val = self._config[name]
         # The config is not overridden by the user, and the env_value_default
@@ -508,9 +501,13 @@ class ConfigModule(ModuleType):
             protocol=2,
         )
 
-    def save_config_portable(self) -> dict[str, Any]:
+    def save_config_portable(
+        self, *, ignore_private_configs: bool = True
+    ) -> dict[str, Any]:
         """Convert config to portable format"""
-        prefixes = ["_"]
+        prefixes = []
+        if ignore_private_configs:
+            prefixes.append("_")
         prefixes.extend(getattr(self, "_cache_config_ignore_prefix", []))
         return self._get_dict(ignored_prefixes=prefixes)
 
@@ -667,12 +664,15 @@ class ConfigModule(ModuleType):
         config = self
 
         class ConfigPatch(ContextDecorator):
+            def __init__(self) -> None:
+                self.changes = changes
+
             def __enter__(self) -> None:
                 assert not prior
-                for key in changes.keys():
+                for key in self.changes.keys():
                     # KeyError on invalid entry
                     prior[key] = config.__getattr__(key)
-                for k, v in changes.items():
+                for k, v in self.changes.items():
                     config.__setattr__(k, v)
 
             def __exit__(self, exc_type, exc_val, exc_tb):  # type: ignore[no-untyped-def]

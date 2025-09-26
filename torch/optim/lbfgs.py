@@ -231,15 +231,15 @@ class LBFGS(Optimizer):
             raise ValueError(f"Invalid learning rate: {lr}")
         if max_eval is None:
             max_eval = max_iter * 5 // 4
-        defaults = dict(
-            lr=lr,
-            max_iter=max_iter,
-            max_eval=max_eval,
-            tolerance_grad=tolerance_grad,
-            tolerance_change=tolerance_change,
-            history_size=history_size,
-            line_search_fn=line_search_fn,
-        )
+        defaults = {
+            "lr": lr,
+            "max_iter": max_iter,
+            "max_eval": max_eval,
+            "tolerance_grad": tolerance_grad,
+            "tolerance_change": tolerance_change,
+            "history_size": history_size,
+            "line_search_fn": line_search_fn,
+        }
         super().__init__(params, defaults)
 
         if len(self.param_groups) != 1:
@@ -299,7 +299,7 @@ class LBFGS(Optimizer):
         return loss, flat_grad
 
     @torch.no_grad()
-    def step(self, closure):
+    def step(self, closure):  # type: ignore[override]
         """Perform a single optimization step.
 
         Args:
@@ -442,7 +442,14 @@ class LBFGS(Optimizer):
                         return self._directional_evaluate(closure, x, t, d)
 
                     loss, flat_grad, t, ls_func_evals = _strong_wolfe(
-                        obj_func, x_init, t, d, loss, flat_grad, gtd
+                        obj_func,
+                        x_init,
+                        t,
+                        d,
+                        loss,
+                        flat_grad,
+                        gtd,
+                        max_ls=max_eval - current_evals,
                     )
                 self._add_grad(t, d)
                 opt_cond = flat_grad.abs().max() <= tolerance_grad
@@ -454,7 +461,8 @@ class LBFGS(Optimizer):
                     # the reason we do this: in a stochastic setting,
                     # no use to re-evaluate that function here
                     with torch.enable_grad():
-                        loss = float(closure())
+                        loss = closure()
+                    loss = float(loss)
                     flat_grad = self._gather_flat_grad()
                     opt_cond = flat_grad.abs().max() <= tolerance_grad
                     ls_func_evals = 1

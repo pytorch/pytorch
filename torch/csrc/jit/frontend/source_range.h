@@ -59,24 +59,25 @@ struct TORCH_API StringCordView {
     return pieces_[index];
   }
 
-  struct Iterator {
-    Iterator(
+  // General-case iterator implementation.
+  struct IteratorImpl {
+    IteratorImpl(
         const StringCordView* str,
         size_t start_line,
         size_t start_pos,
         size_t size)
         : line_(start_line), pos_(start_pos), str_(str), size_(size) {}
-    explicit Iterator(const StringCordView* str)
-        : Iterator(str, 0, 0, str->size()) {}
+    explicit IteratorImpl(const StringCordView* str)
+        : IteratorImpl(str, 0, 0, str->size()) {}
 
-    Iterator() : Iterator(nullptr, 0, 0, 0) {}
+    IteratorImpl() : IteratorImpl(nullptr, 0, 0, 0) {}
 
-    Iterator(const Iterator&) = default;
-    Iterator(Iterator&&) = default;
-    Iterator& operator=(const Iterator&) = default;
-    Iterator& operator=(Iterator&&) = default;
+    IteratorImpl(const IteratorImpl&) = default;
+    IteratorImpl(IteratorImpl&&) = default;
+    IteratorImpl& operator=(const IteratorImpl&) = default;
+    IteratorImpl& operator=(IteratorImpl&&) = default;
 
-    Iterator operator++() {
+    IteratorImpl& operator++() {
       if (size_ == 0) {
         return *this;
       }
@@ -89,42 +90,34 @@ struct TORCH_API StringCordView {
       return *this;
     }
 
-    Iterator operator++(int) {
-      Iterator prev(*this);
+    IteratorImpl operator++(int) {
+      IteratorImpl prev(*this);
       ++(*this);
       return prev;
     }
 
-    Iterator next_iter() const {
-      Iterator next(*this);
+    IteratorImpl next_iter() const {
+      IteratorImpl next(*this);
       ++next;
       return next;
     }
 
-    Iterator& operator+=(size_t num) {
-      if (!has_next()) {
-        return *this;
-      }
-      size_t target_pos = pos_ + num;
-      if (target_pos >= str_->accumulated_sizes_[line_] &&
-          (line_ + 1) < str_->accumulated_sizes_.size() &&
-          target_pos < str_->accumulated_sizes_[line_ + 1]) {
-        pos_ = target_pos;
-        return *this;
-      }
+    IteratorImpl& operator+=(size_t num);
 
-      size_t target_abs_pos = pos() + num;
-      *this = str_->iter_for_pos(target_abs_pos);
-      return *this;
+    IteratorImpl operator+(size_t num) const {
+      IteratorImpl it(*this);
+      it += num;
+      return it;
     }
 
-    bool operator==(const Iterator& rhs) const {
+    bool operator==(const IteratorImpl& rhs) const {
       if (!has_next() && !rhs.has_next()) {
         return true;
       }
       return (str_ == rhs.str_) && (line_ == rhs.line_) && (pos_ == rhs.pos_);
     }
-    bool operator!=(const Iterator& rhs) {
+
+    bool operator!=(const IteratorImpl& rhs) const {
       return !((*this) == rhs);
     }
     bool has_next() const {
@@ -162,6 +155,149 @@ struct TORCH_API StringCordView {
     friend struct StringCordView;
   };
 
+  // Either an IteratorImpl, or a simple std::string_view::iterator
+  // (which is faster) if possible.
+  struct Iterator {
+    Iterator() = default;
+
+    Iterator(
+        const StringCordView* str,
+        size_t start_line,
+        size_t start_pos,
+        size_t size)
+        : repr_(
+              str->pieces_.size() == 1
+                  ? repr_type(FastRepr(
+                        start_line ? str->pieces_[0].end()
+                                   : str->pieces_[0].begin() + start_pos,
+                        str))
+                  : repr_type(IteratorImpl(str, start_line, start_pos, size))) {
+    }
+
+    Iterator(const StringCordView* str) : Iterator(str, 0, 0, str->size()) {}
+
+    Iterator& operator++() {
+      if (auto* pit = std::get_if<IteratorImpl>(&repr_)) {
+        ++(*pit);
+      } else {
+        ++fast_repr().it;
+      }
+      return *this;
+    }
+
+    Iterator operator++(int) {
+      Iterator prev(*this);
+      ++(*this);
+      return prev;
+    }
+
+    Iterator next_iter() const {
+      Iterator next(*this);
+      ++next;
+      return next;
+    }
+
+    Iterator& operator+=(size_t num) {
+      if (auto* pit = std::get_if<IteratorImpl>(&repr_)) {
+        *pit += num;
+      } else {
+        fast_repr().it += num;
+      }
+      return *this;
+    }
+
+    Iterator operator+(size_t num) const {
+      Iterator it(*this);
+      it += num;
+      return it;
+    }
+
+    bool operator==(const Iterator& rhs) const {
+      return repr_ == rhs.repr_;
+    }
+
+    bool operator!=(const Iterator& rhs) const {
+      return repr_ != rhs.repr_;
+    }
+
+    bool has_next() const {
+      if (const auto* pit = std::get_if<IteratorImpl>(&repr_)) {
+        return pit->has_next();
+      } else {
+        return fast_repr().it != fast_repr().str->pieces_[0].end();
+      }
+    }
+
+    char operator*() const {
+      if (const auto* pit = std::get_if<IteratorImpl>(&repr_)) {
+        return **pit;
+      } else {
+        return *fast_repr().it;
+      }
+    }
+
+    std::string_view rest_line() const {
+      if (const auto* pit = std::get_if<IteratorImpl>(&repr_)) {
+        return pit->rest_line();
+      } else {
+        // NOTE: std::string_view(it, end) ctor wasn't added until C++20.
+        const auto fast_repr_end = fast_repr().str->pieces_[0].end();
+        if (fast_repr().it != fast_repr_end) {
+          return std::string_view(
+              &*fast_repr().it, fast_repr_end - fast_repr().it);
+        }
+        return std::string_view();
+      }
+    }
+
+    size_t pos() const {
+      if (const auto* pit = std::get_if<IteratorImpl>(&repr_)) {
+        return pit->pos();
+      } else {
+        return fast_repr().it - fast_repr().str->pieces_[0].begin();
+      }
+    }
+
+   private:
+    // When we have only one entry in pieces_ (importantly, such as
+    // when called from torch::Library::def during startup), we can
+    // skip extra complexity and just use string_view::iterator
+    // directly.
+    struct FastRepr {
+      std::string_view::iterator it;
+      const StringCordView* str;
+
+      FastRepr() : str(nullptr) {}
+
+      explicit FastRepr(
+          std::string_view::iterator it_,
+          const StringCordView* str_)
+          : it(it_), str(str_) {}
+
+      bool operator==(const FastRepr& rhs) const {
+        return it == rhs.it && str == rhs.str;
+      }
+
+      bool operator!=(const FastRepr& rhs) const {
+        return !operator==(rhs);
+      }
+    };
+    using repr_type = std::variant<FastRepr, IteratorImpl>;
+    repr_type repr_;
+
+    FastRepr& fast_repr() {
+      // -Oz refuses to inline std::get.
+      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(std::holds_alternative<FastRepr>(repr_));
+      return *std::get_if<FastRepr>(&repr_);
+    }
+
+    const FastRepr& fast_repr() const {
+      // -Oz refuses to inline std::get.
+      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(std::holds_alternative<FastRepr>(repr_));
+      return *std::get_if<FastRepr>(&repr_);
+    }
+  };
+
   Iterator begin() const {
     return Iterator(this, 0, 0, size());
   }
@@ -171,6 +307,13 @@ struct TORCH_API StringCordView {
   Iterator iter_for_pos(size_t pos) const;
 
  private:
+  IteratorImpl begin_impl() const {
+    return IteratorImpl(this, 0, 0, size());
+  }
+  IteratorImpl end_impl() const {
+    return IteratorImpl(this, pieces_.size(), 0, 0);
+  }
+  IteratorImpl iter_impl_for_pos(size_t pos) const;
   std::vector<std::string_view> pieces_;
   std::vector<size_t> accumulated_sizes_;
   std::vector<std::shared_ptr<std::string>> owned_strings_;
@@ -192,17 +335,10 @@ struct TORCH_API Source {
       size_t starting_line_no = 0,
       std::shared_ptr<SourceRangeUnpickler> gen_ranges = nullptr,
       CopiesString copies_str = COPIES_STRING)
-      : filename_(std::move(filename)),
+      : text_view_(create_text_view(copies_str, text_view)),
+        filename_(std::move(filename)),
         starting_line_no_(starting_line_no),
         gen_ranges_(std::move(gen_ranges)) {
-    if (copies_str == COPIES_STRING) {
-      std::shared_ptr<std::string> allocated_str =
-          std::make_shared<std::string>(text_view.data(), text_view.size());
-      text_view_ = StringCordView({*allocated_str}, {allocated_str});
-    } else {
-      text_view_ = StringCordView({text_view}, {});
-    }
-
     calc_line_start_offsets();
   }
 
@@ -284,6 +420,18 @@ struct TORCH_API Source {
     size_t pos = 0;
     while ((pos = text_view_.find("\n", pos)) != std::string::npos) {
       line_starting_offsets_.push_back(++pos);
+    }
+  }
+
+  static StringCordView create_text_view(
+      CopiesString copies_str,
+      std::string_view text_view) {
+    if (copies_str == COPIES_STRING) {
+      auto allocated_str =
+          std::make_shared<std::string>(text_view.data(), text_view.size());
+      return StringCordView({*allocated_str}, {allocated_str});
+    } else {
+      return StringCordView({text_view}, {});
     }
   }
 

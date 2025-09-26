@@ -1,0 +1,150 @@
+# A Pyrefly configuration for PyTorch
+# Based on https://github.com/pytorch/pytorch/blob/main/mypy.ini
+project-includes = [
+    "torch",
+    "caffe2",
+    "test/test_bundled_images.py",
+    "test/test_bundled_inputs.py",
+    "test/test_complex.py",
+    "test/test_datapipe.py",
+    # "test/test_futures.py", # uncomment when enabling pyrefly
+    "test/test_numpy_interop.py",
+    # We exclude test_torch.py because it is full of errors, but most functions lack type signatures,
+    # and mypy.ini specifies `check_untyped_defs = False` for this file.
+    # If you check even the unannotated stuff mypy produces 322 errors.
+    # "test/test_torch.py",
+    "test/test_type_hints.py",
+    "test/test_type_info.py",
+    # "test/test_utils.py", # uncomment when enabling pyrefly
+]
+project-excludes = [
+  # ==== below will be enabled directory by directory ====
+  # ==== to test Pyrefly on a specific directory, simply comment it out ====
+  "torch/_inductor/**",
+  "torch/distributed/**",
+  "torch/nn/**",
+  "torch/_dynamo/**",
+  "torch/utils/**",
+  "torch/ao/**",
+  "torch/fx/**",
+  "torch/distributions/**",
+  "torch/onnx/**",
+  "torch/_refs/**",
+  "torch/_export/**",
+  "torch/jit/**",
+  "torch/optim/**",
+  "torch/_higher_order_ops/**",
+  "torch/_functorch/**",
+  "torch/masked/**",
+  "torch/_subclasses/**",
+  "torch/autograd/**",
+  "torch/cuda/**",
+  "torch/export/**",
+  "torch/profiler/**",
+  "torch/_prims_common/**",
+  "torch/backends/**",
+  "torch/testing/**",
+  "torch/_C/**",
+  "torch/sparse/**",
+  "torch/_library/**",
+  "torch/_prims/**",
+  "torch/_decomp/**",
+  "torch/_meta_registrations.py",
+  # ====
+  "benchmarks/instruction_counts/main.py",
+  "benchmarks/instruction_counts/definitions/setup.py",
+  "benchmarks/instruction_counts/applications/ci.py",
+  "benchmarks/instruction_counts/core/api.py",
+  "benchmarks/instruction_counts/core/expand.py",
+  "benchmarks/instruction_counts/core/types.py",
+  "benchmarks/instruction_counts/core/utils.py",
+  "benchmarks/instruction_counts/definitions/standard.py",
+  "benchmarks/instruction_counts/definitions/setup.py",
+  "benchmarks/instruction_counts/execution/runner.py",
+  "benchmarks/instruction_counts/execution/work.py",
+  "torch/include/**",
+  "torch/csrc/**",
+  "torch/distributed/elastic/agent/server/api.py",
+  "torch/testing/_internal/**",
+  "torch/distributed/fsdp/fully_sharded_data_parallel.py",
+  "torch/ao/quantization/pt2e/_affine_quantization.py",
+  "torch/nn/modules/pooling.py",
+  "torch/nn/parallel/_functions.py",
+  "torch/_appdirs.py",
+  "torch/multiprocessing/pool.py",
+  "torch/overrides.py",
+  "*/__pycache__/**",
+  "*/.*",
+]
+ignore-missing-imports = [
+    "torch._C._jit_tree_views.*",
+    "torch.for_onnx.onnx.*",
+    "torch.ao.quantization.experimental.apot_utils.*",
+    "torch.ao.quantization.experimental.quantizer.*",
+    "torch.ao.quantization.experimental.observer.*",
+    "torch.ao.quantization.experimental.APoT_tensor.*",
+    "torch.ao.quantization.experimental.fake_quantize_function.*",
+    "torch.ao.quantization.experimental.fake_quantize.*",
+    "triton.*",
+    "tensorflow.*",
+    "tensorboard.*",
+    "matplotlib.*",
+    "numpy.*",
+    "sympy.*",
+    "hypothesis.*",
+    "tqdm.*",
+    "multiprocessing.*",
+    "setuptools.*",
+    "distutils.*",
+    "nvd3.*",
+    "future.utils.*",
+    "past.builtins.*",
+    "numba.*",
+    "PIL.*",
+    "moviepy.*",
+    "cv2.*",
+    "torchvision.*",
+    "pycuda.*",
+    "tensorrt.*",
+    "tornado.*",
+    "pydot.*",
+    "networkx.*",
+    "scipy.*",
+    "IPython.*",
+    "google.protobuf.textformat.*",
+    "lmdb.*",
+    "mpi4py.*",
+    "skimage.*",
+    "librosa.*",
+    "mypy.*",
+    "xml.*",
+    "boto3.*",
+    "dill.*",
+    "usort.*",
+    "cutlass_library.*",
+    "deeplearning.*",
+    "einops.*",
+    "libfb.*",
+    "torch.fb.*",
+    "torch.*.fb.*",
+    "torch_xla.*",
+    "onnx.*",
+    "onnxruntime.*",
+    "onnxscript.*",
+    "redis.*",
+]
+# By default, mypy does not check untyped definitions.
+# However, mypy has a configuration called check_untyped_defs which is used
+# to typecheck the interior of untyped functions.
+untyped-def-behavior = "check-and-infer-return-any"
+# In lots of places they define their attributes in `_init` or similar.
+# https://github.com/pytorch/pytorch/blob/75f3e5a88df60caef27fd9c9df3fd51161378fcc/torch/fx/experimental/symbolic_shapes.py#L3632C1-L3633C1
+errors.implicitly-defined-attribute = false
+# In many methods that are overridden, parameters are renamed.
+# We can come up with a codemod for this in the future
+errors.bad-param-name-override = false
+# Mypy doesn't require that imports are explicitly imported, so be compatible with that.
+# Might be a good idea to turn this on in future.
+errors.implicit-import = false
+permissive-ignores = true
+replace-imports-with-any = ["!sympy.printing.*", "sympy.*", "onnxscript.onnx_opset.*"]

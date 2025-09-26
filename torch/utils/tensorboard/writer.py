@@ -472,7 +472,7 @@ class SummaryWriter:
             values (torch.Tensor, numpy.ndarray, or string/blobname): Values to build histogram
             global_step (int): Global step value to record
             bins (str): One of {'tensorflow','auto', 'fd', ...}. This determines how the bins are made. You can find
-              other options in: https://docs.scipy.org/doc/numpy/reference/generated/numpy.histogram.html
+              other options in: https://numpy.org/doc/stable/reference/generated/numpy.histogram.html
             walltime (float): Optional override default walltime (time.time())
               seconds after epoch of event
 

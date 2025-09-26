@@ -2,7 +2,6 @@
 import functools
 import gc
 import itertools as it
-import sys
 import textwrap
 import unittest
 from collections.abc import Iterator
@@ -104,7 +103,6 @@ class RecordInputOutputDispatchMode(torch.utils._python_dispatch.TorchDispatchMo
         return out
 
 
-@unittest.skipIf(sys.version_info >= (3, 13), "many segfaults")
 @skipIfTorchDynamo("TorchDynamo changes Python calls that memory profiling relies on.")
 class TestIdentifyGradients(TestCase):
     def gradient_detected(
@@ -828,7 +826,6 @@ class TestDataFlow(TestCase):
         )
 
 
-@unittest.skipIf(sys.version_info >= (3, 13), "many segfaults")
 @skipIfTorchDynamo("TorchDynamo changes Python calls that memory profiling relies on.")
 class TestMemoryProfilerE2E(TestCase):
     @staticmethod
@@ -1327,13 +1324,13 @@ class TestMemoryProfilerE2E(TestCase):
             aten::detach                             7 (GRADIENT)                                  -> 7 (GRADIENT)
 
             -- Optimizer --------------------------------------------------------------------------------------------
+            aten::detach                             7 (GRADIENT)                                  -> 7 (GRADIENT)
+            aten::detach                             7 (GRADIENT)                                  -> 7 (GRADIENT)
             aten::clone                              7 (GRADIENT)                                  -> 10 (OPTIMIZER_STATE)
-            aten::detach                             10 (OPTIMIZER_STATE)                          -> 10 (OPTIMIZER_STATE)
-            aten::detach                             10 (OPTIMIZER_STATE)                          -> 10 (OPTIMIZER_STATE)
             aten::add_.Tensor                        2 (PARAMETER), 10 (OPTIMIZER_STATE)           -> 2 (PARAMETER)
+            aten::detach                             9 (GRADIENT)                                  -> 9 (GRADIENT)
+            aten::detach                             9 (GRADIENT)                                  -> 9 (GRADIENT)
             aten::clone                              9 (GRADIENT)                                  -> 11 (OPTIMIZER_STATE)
-            aten::detach                             11 (OPTIMIZER_STATE)                          -> 11 (OPTIMIZER_STATE)
-            aten::detach                             11 (OPTIMIZER_STATE)                          -> 11 (OPTIMIZER_STATE)
             aten::add_.Tensor                        3 (PARAMETER), 11 (OPTIMIZER_STATE)           -> 3 (PARAMETER)""",
         )
 
@@ -1495,7 +1492,7 @@ class TestMemoryProfilerE2E(TestCase):
             for _, action, (key, version), size in prof._memory_profile().timeline
             # We generally don't care about tiny allocations during memory
             # profiling and they add a lot of noise to the unit test.
-            if size > 1024
+            if size > 1024 and isinstance(key, _memory_profiler.TensorKey)
         ]
 
         self.assertExpectedInline(

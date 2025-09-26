@@ -32,8 +32,8 @@ class EventHandlers {
   }
 
   static EventHandlers& get() noexcept {
-    static auto ehsPtr = new EventHandlers();
-    return *ehsPtr;
+    static auto ehs = EventHandlers();
+    return ehs;
   }
 
  private:

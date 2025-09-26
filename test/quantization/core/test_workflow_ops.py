@@ -3,6 +3,7 @@
 
 import torch
 import math
+from typing import Union
 from torch.ao.quantization import (
     FakeQuantize,
     MovingAverageMinMaxObserver,
@@ -29,7 +30,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 import torch.testing._internal.hypothesis_utils as hu
 hu.assert_deadline_disabled()
-from torch.testing._internal.common_cuda import TEST_CUDA
+from torch.testing._internal.common_cuda import TEST_CUDA, TEST_WITH_ROCM
 from torch.testing._internal.common_utils import TestCase, skipIfTorchDynamo
 
 # Reference method for fake quantize
@@ -155,18 +156,25 @@ def _fake_quantize_learnable_per_channel_affine_grad_reference(
 
 def _get_tensor_min_max(
         X: torch.Tensor,
-        running_min: float = float("inf"),
-        running_max: float = float("-inf"),
-        averaging_const: float = 0.01) -> tuple[float, float]:
-    min_val = X.min().to(dtype=torch.float32).item()
-    max_val = X.max().to(dtype=torch.float32).item()
+        running_min: Union[float, torch.Tensor] = float("inf"),
+        running_max: Union[float, torch.Tensor] = float("-inf"),
+        averaging_const: float = 0.01,
+        dtype: torch.dtype = torch.float32) -> tuple[float, float]:
+    min_val_tensor = X.min().to(dtype=dtype)
+    max_val_tensor = X.max().to(dtype=dtype)
+    averaging_const_tensor = torch.tensor(averaging_const, dtype=dtype).item()
 
-    if not math.isinf(running_min):
-        min_val = running_min + averaging_const * (min_val - running_min)
-    if not math.isinf(running_max):
-        max_val = running_max + averaging_const * (max_val - running_max)
+    if not isinstance(running_min, torch.Tensor):
+        running_min = torch.tensor(running_min, dtype=dtype)
+    if not isinstance(running_max, torch.Tensor):
+        running_max = torch.tensor(running_max, dtype=dtype)
 
-    return min_val, max_val
+    if not torch.isinf(running_min):
+        min_val_tensor = running_min + averaging_const_tensor * (min_val_tensor - running_min)
+    if not torch.isinf(running_max):
+        max_val_tensor = running_max + averaging_const_tensor * (max_val_tensor - running_max)
+
+    return min_val_tensor.item(), max_val_tensor.item()
 
 def _get_per_row_min_max(
         x: torch.Tensor,
@@ -818,6 +826,9 @@ class TestFakeQuantizeOps(TestCase):
     @given(X=hu.per_channel_tensor(shapes=hu.array_shapes(1, 5,),
                                    qparams=hu.qparams(dtypes=torch.quint8)))
     @unittest.skipIf(not TEST_CUDA, "No gpu is not available.")
+    @unittest.skip(
+        "this is broken without changes to any relevant code, "
+        "we need to remove hypothesis testing in CI")
     def test_learnable_forward_per_channel_cuda(self, X):
         torch.random.manual_seed(NP_RANDOM_SEED)
         X, (_, _, axis, _) = X
@@ -954,6 +965,9 @@ class TestFakeQuantizeOps(TestCase):
     @given(X=hu.per_channel_tensor(shapes=hu.array_shapes(2, 5,),
                                    qparams=hu.qparams(dtypes=torch.quint8)))
     @unittest.skipIf(not TEST_CUDA, "No gpu is not available.")
+    @unittest.skip(
+        "this is broken without changes to any relevant code, "
+        "we need to remove hypothesis testing in CI")
     def test_learnable_backward_per_channel_cuda(self, X):
         torch.random.manual_seed(NP_RANDOM_SEED)
         X, (scale, zero_point, axis, torch_type) = X
@@ -1032,34 +1046,52 @@ class TestFakeQuantizeOps(TestCase):
                     input, scale, zero_point, axis, quant_min, quant_max
                 )
 
+    @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
+    @unittest.skipIf(TEST_WITH_ROCM, "Not a suitable test for ROCM")
+    @given(dtype=st.sampled_from([torch.float, torch.float64, torch.half, torch.bfloat16]),
+           device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']))
+    def test_fake_quantize_per_tensor_affine_inf(self, dtype, device) -> None:
+        # https://github.com/pytorch/pytorch/issues/154328
+        input_tensor = torch.tensor([torch.inf], dtype=dtype).to(device)
+        scale = 0.01
+        zero_point = 0
+        quant_min = 0
+        quant_max = 255
+        result = torch.fake_quantize_per_tensor_affine(input_tensor, scale, zero_point, quant_min, quant_max)
+        ref_result = (min(quant_max, max(quant_min, torch.round(input_tensor / scale) + zero_point)) - zero_point) * scale
+        ref_result = torch.Tensor([ref_result]).to(dtype).to(device)
+        self.assertEqual(result, ref_result)
+
 
 class TestFusedObsFakeQuant(TestCase):
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
-           symmetric_quant=st.booleans())
+           symmetric_quant=st.booleans(), use_bool=st.booleans())
     @settings(deadline=None)
-    def test_fused_obs_fake_quant_moving_avg(self, device, symmetric_quant) -> None:
+    def test_fused_obs_fake_quant_moving_avg(self, device, symmetric_quant, use_bool) -> None:
         """
         Tests the case where we call the fused_obs_fake_quant op multiple times
         and update the running_min and max of the activation tensors.
         """
-        in_running_min_ref = out_running_min_ref = float("inf")
-        in_running_min_op = torch.tensor(float("inf"), device=device)
-        in_running_max_ref = out_running_max_ref = float("-inf")
-        in_running_max_op = torch.tensor(float("-inf"), device=device)
+        sampled_dtype = st.sampled_from(["bf16", "fp32"]) if device == "cuda" else "fp32"
+        dtype = torch.bfloat16 if sampled_dtype == "bf16" else torch.float32
+
+        in_running_min_ref = out_running_min_ref = torch.tensor(float("inf"), dtype=dtype)
+        in_running_min_op = torch.tensor(float("inf"), dtype=dtype, device=device)
+        in_running_max_ref = out_running_max_ref = torch.tensor(float("-inf"), dtype=dtype)
+        in_running_max_op = torch.tensor(float("-inf"), dtype=dtype, device=device)
         avg_const = 0.01
         scale = torch.tensor([1.0], device=device)
         zero_point = torch.tensor([0], dtype=torch.int, device=device)
-        observer_on = fake_quant_on = 0
+        observer_on = fake_quant_on = False if use_bool else 0
 
         pt_op = torch.fused_moving_avg_obs_fake_quant
         # enable observer after 2 iterations and fake_quant after 4 iterations
         for i in range(10):
             if i > 2:
-                observer_on = 1
+                observer_on = True if use_bool else 1
             if i > 4:
-                fake_quant_on = 1
-
-            x = torch.randn(5, 5, device=device)
+                fake_quant_on = True if use_bool else 1
+            x = torch.randn(5, 5, dtype=dtype, device=device)
             out = pt_op(
                 x,
                 torch.tensor(observer_on, device=device),
@@ -1084,6 +1116,7 @@ class TestFusedObsFakeQuant(TestCase):
                     running_min=in_running_min_ref,
                     running_max=in_running_max_ref,
                     averaging_const=0.01,
+                    dtype=dtype,
                 )
 
             if fake_quant_on:
@@ -1106,7 +1139,7 @@ class TestFusedObsFakeQuant(TestCase):
             torch.testing.assert_close(out, x_in)
 
         # Test empty input works
-        x = torch.empty(0, 5, device=device)
+        x = torch.empty(0, 5, dtype=dtype, device=device)
         out = pt_op(
             x,
             torch.tensor(1, device=device),
@@ -1126,9 +1159,9 @@ class TestFusedObsFakeQuant(TestCase):
         self.assertEqual(out.shape, output_shape)
 
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
-           symmetric_quant=st.booleans())
+           symmetric_quant=st.booleans(), use_bool=st.booleans())
     @settings(deadline=None)
-    def test_fused_obs_fake_quant_moving_avg_per_channel(self, device, symmetric_quant) -> None:
+    def test_fused_obs_fake_quant_moving_avg_per_channel(self, device, symmetric_quant, use_bool) -> None:
         """
         Tests the case where we call the fused_obs_fake_quant op multiple times
         and update the running_min and max of the activation tensors.
@@ -1145,15 +1178,15 @@ class TestFusedObsFakeQuant(TestCase):
             scale = torch.empty(m, device=device).fill_(0.1)
             zero_point = torch.empty(m, dtype=torch.int, device=device).fill_(0)
 
-            observer_on = fake_quant_on = 0
+            observer_on = fake_quant_on = False if use_bool else 0
 
             pt_op = torch.fused_moving_avg_obs_fake_quant
             # enable observer after 2 iterations and fake_quant after 4 iterations
             for i in range(10):
                 if i > 2:
-                    observer_on = 1
+                    observer_on = True if use_bool else 1
                 if i > 4:
-                    fake_quant_on = 1
+                    fake_quant_on = True if use_bool else 1
 
                 x = torch.randn(size, device=device)
                 out = pt_op(

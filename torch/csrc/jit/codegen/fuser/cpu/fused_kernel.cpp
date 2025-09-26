@@ -3,6 +3,7 @@
 #include <ATen/DynamicLibrary.h>
 #include <ATen/code_template.h>
 #include <c10/util/Exception.h>
+#include <c10/util/env.h>
 #include <torch/csrc/jit/codegen/fuser/compiler.h>
 #include <torch/csrc/jit/codegen/fuser/cpu/temp_file.h>
 #include <optional>
@@ -171,9 +172,9 @@ static bool programExists(const std::string& program) {
 // of compilation attempts.
 struct CompilerConfig {
   CompilerConfig() {
-    const char* cxx_env = getenv("CXX");
-    if (cxx_env != nullptr) {
-      cxx = cxx_env;
+    const auto cxx_env = c10::utils::get_env("CXX");
+    if (cxx_env) {
+      cxx = cxx_env.value();
     }
 
 #ifdef _MSC_VER

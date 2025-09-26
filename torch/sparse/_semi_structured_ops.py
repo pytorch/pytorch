@@ -40,7 +40,7 @@ def semi_sparse_values(func, types, args=(), kwargs=None) -> torch.Tensor:
     if A.meta is None:
         m, k = A.shape
         num_kept_elements = m * k // 2
-        return A.packed[:num_kept_elements:].view(m, -1)
+        return A.packed.ravel()[:num_kept_elements:].view(m, -1)
     else:
         return A.packed.detach()
 
@@ -53,7 +53,7 @@ def semi_sparse_indices(func, types, args=(), kwargs=None) -> torch.Tensor:
     if A.meta is None:
         m, k = A.shape
         num_kept_elements = m * k // 2
-        metadata = A.packed[num_kept_elements:].view(m, -1)
+        metadata = A.packed.ravel()[num_kept_elements:].view(m, -1)
         return metadata.view(torch.int32 if A.dtype == torch.int32 else torch.int16)
     else:
         return A.meta
@@ -179,7 +179,7 @@ def semi_sparse_scaled_mm(func, types, args=(), kwargs=None) -> torch.Tensor:
 
     assert A.dtype == torch.float8_e4m3fn
     assert B.dtype == torch.float8_e4m3fn
-    # only cuSPARSELt supports float8_e4m3fn currentl
+    # only cuSPARSELt supports float8_e4m3fn currently
     assert isinstance(A, torch.sparse.SparseSemiStructuredTensorCUSPARSELT)
     assert A.packed is not None
     # Currently we only support per-tensor scaling, with float32 scales

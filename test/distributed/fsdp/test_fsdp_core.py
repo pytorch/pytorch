@@ -379,12 +379,15 @@ class TestHooks(FSDPTest):
             register_pre_backward_hooks_call_count += 1
             return orig_register_pre_backward_hooks(*args, **kwargs)
 
-        with mock.patch(
-            "torch.distributed.fsdp._runtime_utils._register_pre_backward_hooks",
-            _register_pre_backward_hooks_with_count,
-        ), mock.patch(
-            "torch.distributed.fsdp._runtime_utils._register_post_backward_hook"
-        ) as register_post_bwd_mock:
+        with (
+            mock.patch(
+                "torch.distributed.fsdp._runtime_utils._register_pre_backward_hooks",
+                _register_pre_backward_hooks_with_count,
+            ),
+            mock.patch(
+                "torch.distributed.fsdp._runtime_utils._register_post_backward_hook"
+            ) as register_post_bwd_mock,
+        ):
             self.assertEqual(register_pre_backward_hooks_call_count, 0)
             self.assertFalse(register_post_bwd_mock.called)
             fsdp_model(*input)

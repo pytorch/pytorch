@@ -7,7 +7,7 @@ import warnings
 import torch
 import torch.distributed as dist
 import torch.testing._internal.common_methods_invocations as common_ops
-from torch.distributed._tensor import DeviceMesh, DTensor
+from torch.distributed.tensor import distribute_tensor, DTensor, init_device_mesh, Shard
 from torch.overrides import resolve_name
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
@@ -20,6 +20,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorOpTestBase,
 )
 from torch.utils import _pytree as pytree
+from torch.utils._debug_mode import DebugMode
 from torch.utils._pytree import tree_map
 
 
@@ -103,7 +104,6 @@ dtensor_fails = {
     xfail("arange"),
     xfail("argmax"),
     xfail("argmin"),
-    xfail("argsort"),
     xfail("as_strided"),
     xfail("as_strided", "partial_views"),
     xfail("as_strided_copy"),
@@ -112,29 +112,20 @@ dtensor_fails = {
     xfail("_batch_norm_with_update"),
     xfail("block_diag"),
     xfail("broadcast_shapes"),
+    xfail("cartesian_prod"),
     xfail("cauchy"),
     xfail("cdist"),
     xfail("cholesky"),
     xfail("cholesky_inverse"),
     xfail("cholesky_solve"),
-    xfail("chunk"),
-    xfail("clamp"),
-    xfail("clamp_max"),
-    xfail("clamp_min"),
     xfail("combinations"),
     xfail("complex"),
-    xfail("constant_pad_nd"),
     xfail("count_nonzero"),
     xfail("cross"),
     xfail("cummax"),
     xfail("cummin"),
     xfail("diagonal_scatter"),
     xfail("dist"),
-    xfail("dot"),
-    xfail("empty"),
-    xfail("empty_strided"),
-    xfail("empty_like"),
-    xfail("empty_permuted"),
     xfail("expand_copy"),
     xfail("exponential"),
     xfail("equal"),
@@ -155,6 +146,7 @@ dtensor_fails = {
     xfail("fft.rfft"),
     xfail("fft.rfftn"),
     xfail("fill"),
+    xfail("flatten"),
     xfail("flip"),
     xfail("fliplr"),
     xfail("flipud"),
@@ -164,13 +156,10 @@ dtensor_fails = {
     xfail("frexp"),
     xfail("full"),
     xfail("full_like"),
-    xfail("gather"),
     xfail("geometric"),
     xfail("geqrf"),
     xfail("grid_sampler_2d"),
-    xfail("gradient"),
     xfail("heaviside"),
-    xfail("histc"),
     xfail("histogram"),
     xfail("histogramdd"),
     xfail("index_add"),
@@ -184,6 +173,7 @@ dtensor_fails = {
     xfail("index_select"),
     xfail("isin"),
     xfail("kthvalue"),
+    xfail("kron"),
     xfail("linalg.cholesky"),
     xfail("linalg.cholesky_ex"),
     xfail("linalg.cross"),
@@ -203,7 +193,6 @@ dtensor_fails = {
     xfail("linalg.lu_factor_ex"),
     xfail("linalg.lu_solve"),
     xfail("linalg.matrix_power"),
-    xfail("linalg.multi_dot"),
     xfail("linalg.pinv"),
     xfail("linalg.pinv", "hermitian"),
     xfail("linalg.slogdet"),
@@ -238,7 +227,6 @@ dtensor_fails = {
     xfail("median"),
     xfail("min", "reduction_with_dim"),
     xfail("mode"),
-    xfail("msort"),
     xfail("multinomial"),
     xfail("mv"),
     xfail("max_pool2d_with_indices_backward", ""),
@@ -247,7 +235,6 @@ dtensor_fails = {
     xfail("nanquantile"),
     xfail("nansum"),
     xfail("native_batch_norm"),
-    xfail("native_dropout_backward"),
     xfail("narrow_copy"),
     xfail("ne"),
     xfail("new_empty"),
@@ -296,7 +283,6 @@ dtensor_fails = {
     xfail("nn.functional.interpolate", "nearest"),
     xfail("nn.functional.interpolate", "nearest-exact"),
     xfail("nn.functional.leaky_relu"),
-    xfail("nn.functional.linear"),
     xfail("nn.functional.local_response_norm"),
     xfail("nn.functional.logsigmoid"),
     xfail("nn.functional.margin_ranking_loss"),
@@ -312,11 +298,8 @@ dtensor_fails = {
     xfail("nn.functional.mish"),
     xfail("nn.functional.mse_loss"),
     xfail("nn.functional.multi_margin_loss"),
-    xfail("nn.functional.multi_head_attention_forward"),
     xfail("nn.functional.multilabel_margin_loss"),
     xfail("nn.functional.multilabel_soft_margin_loss"),
-    xfail("nn.functional.normalize"),
-    xfail("nn.functional.pad", "constant"),
     xfail("nn.functional.pad", "reflect"),
     xfail("nn.functional.pad", "replicate"),
     xfail("nn.functional.pad", "replicate_negative"),
@@ -354,15 +337,17 @@ dtensor_fails = {
     xfail("randint"),
     xfail("randn"),
     xfail("randn_like"),
+    xfail("ravel"),
     xfail("renorm"),
     xfail("repeat_interleave"),
     xfail("resize_"),
     xfail("resize_as_"),
+    xfail("reshape"),
+    xfail("reshape_as"),
     xfail("roll"),
     xfail("rot90"),
     xfail("rsub"),
     xfail("scalar_tensor"),
-    xfail("scatter_add"),
     xfail("scatter_reduce", "amax"),
     xfail("scatter_reduce", "amin"),
     xfail("scatter_reduce", "mean"),
@@ -370,7 +355,6 @@ dtensor_fails = {
     xfail("scatter_reduce", "sum"),
     xfail("searchsorted"),
     xfail("select_scatter"),
-    xfail("sort"),
     xfail("sparse.sampled_addmm"),
     xfail("sparse.mm", "reduce"),
     xfail("special.airy_ai"),
@@ -380,6 +364,8 @@ dtensor_fails = {
     xfail("special.bessel_y1"),
     xfail("special.chebyshev_polynomial_t"),
     xfail("special.chebyshev_polynomial_u"),
+    xfail("special.chebyshev_polynomial_v"),
+    xfail("special.chebyshev_polynomial_w"),
     xfail("special.entr"),
     xfail("special.erfcx"),
     xfail("special.hermite_polynomial_h"),
@@ -388,6 +374,7 @@ dtensor_fails = {
     xfail("special.i1"),
     xfail("special.i1e"),
     xfail("special.laguerre_polynomial_l"),
+    xfail("special.legendre_polynomial_p"),
     xfail("special.log_ndtr"),
     xfail("special.modified_bessel_i0"),
     xfail("special.modified_bessel_i1"),
@@ -396,6 +383,10 @@ dtensor_fails = {
     xfail("special.ndtri"),
     xfail("special.scaled_modified_bessel_k0"),
     xfail("special.scaled_modified_bessel_k1"),
+    xfail("special.shifted_chebyshev_polynomial_t"),
+    xfail("special.shifted_chebyshev_polynomial_u"),
+    xfail("special.shifted_chebyshev_polynomial_v"),
+    xfail("special.shifted_chebyshev_polynomial_w"),
     xfail("special.spherical_bessel_j0"),
     xfail("special.xlog1py"),
     xfail("special.zeta"),
@@ -421,11 +412,10 @@ dtensor_fails = {
     xfail("svd_lowrank"),
     xfail("t_copy"),
     xfail("take"),
+    xfail("take_along_dim"),
     xfail("tensor_split"),
     xfail("to_sparse"),
     xfail("trace"),
-    xfail("trapezoid"),
-    xfail("trapz"),
     xfail("triangular_solve"),
     xfail("unbind"),
     xfail("unbind_copy"),
@@ -442,8 +432,11 @@ dtensor_fails = {
     xfail("var_mean"),
     xfail("var_mean", "unbiased"),
     xfail("vdot"),
+    xfail("view"),
+    xfail("view_as"),
     xfail("view_copy"),
     xfail("zeros"),
+    # /TODO(whc) debug/triage
     # ops inside this might even fail without dtensor
     # tests, as we rescale op db common test size factor (i.e. L, M, S)
     # which triggered the original function run failures with input
@@ -481,6 +474,11 @@ dtensor_fails = {
     skip("_segment_reduce", "offsets"),
     # TODO: fix the following ops
     skip("squeeze"),
+    # These must be skipped as their contents are nondeterministic
+    skip("empty"),
+    skip("empty_strided"),
+    skip("empty_like"),
+    skip("empty_permuted"),
 }
 
 
@@ -506,18 +504,17 @@ class TestDTensorOps(DTensorOpTestBase):
     def world_size(self) -> int:
         return OP_DB_WORLD_SIZE
 
-    # only allow float dytpe for now, we can relax this constraint
-    # when feel necessary later (i.e when adding quantization support).
-    @suppress_warnings
-    @ops(op_db, allowed_dtypes=(torch.float,))
-    @skipOps("TestDTensorOps", "test_dtensor_op_db", dtensor_fails)
-    def test_dtensor_op_db(self, dtype, op):
-        self.mesh = DeviceMesh(DEVICE_TYPE, torch.arange(self.world_size))
+    def run_opinfo_test(
+        self, dtype, op, requires_grad=True, sample_inputs_filter=lambda s: True
+    ):
+        self.mesh = init_device_mesh(DEVICE_TYPE, (self.world_size,))
 
         # test each op with dist tensor inputs and normal inputs
         def test():
-            samples = op.sample_inputs(DEVICE_TYPE, dtype, requires_grad=True)
+            samples = op.sample_inputs(DEVICE_TYPE, dtype, requires_grad=requires_grad)
             for sample_input in samples:
+                if not sample_inputs_filter(sample_input):
+                    continue
                 args = [sample_input.input] + list(sample_input.args)
                 kwargs = sample_input.kwargs
 
@@ -529,6 +526,14 @@ class TestDTensorOps(DTensorOpTestBase):
                 #     func(*args, **kwargs, out=expected)
 
         self.check_dtensor_func(test, op)
+
+    # only allow float dytpe for now, we can relax this constraint
+    # when feel necessary later (i.e when adding quantization support).
+    @suppress_warnings
+    @ops(op_db, allowed_dtypes=(torch.float,))
+    @skipOps("TestDTensorOps", "test_dtensor_op_db", dtensor_fails)
+    def test_dtensor_op_db(self, dtype, op):
+        self.run_opinfo_test(dtype, op)
 
     def assert_ref_dtensor_equal(self, dtensor_rs, rs):
         flat_dtensor_rs = pytree.tree_leaves(dtensor_rs)
@@ -573,18 +578,18 @@ class TestDTensorOps(DTensorOpTestBase):
         def to_replicate(e: object) -> object:
             return e.full_tensor() if isinstance(e, DTensor) else e
 
-        try:
-            # Suppress warnings, this doesn't matter for test_meta.py
-            # but it does matter if you want to use this decorator
-            # for cross-ref testing, as some tests may be looking at
-            # errors
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore")
-                # for every comb of sharding choices, we test if it works
-                for dtensor_args, dtensor_kwargs in to_dtensor:
-                    # Only attempt if we managed to convert all tensors to DTensor
-                    # (if any of them failed, we're in a mixed tensor situation and
-                    # this is not allowed in DTensor)
+        # Suppress warnings, this doesn't matter for test_meta.py
+        # but it does matter if you want to use this decorator
+        # for cross-ref testing, as some tests may be looking at
+        # errors
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            # for every comb of sharding choices, we test if it works
+            for dtensor_args, dtensor_kwargs in to_dtensor:
+                # Only attempt if we managed to convert all tensors to DTensor
+                # (if any of them failed, we're in a mixed tensor situation and
+                # this is not allowed in DTensor)
+                try:
                     if to_dtensor.successful():
                         # Handle special cases first if there's any
                         # Suppress warnings, this doesn't matter for test_meta.py
@@ -594,7 +599,7 @@ class TestDTensorOps(DTensorOpTestBase):
                         dtensor_rs = func(*dtensor_args, **dtensor_kwargs)
 
                         # we need to skip tests containing tensors of zero elements for now.
-                        # see issue: https://github.com/pytorch/tau/issues/470
+                        # see issue: https://github.com/pytorch/PiPPy/issues/470
                         # TODO remove this once issue above fixed.
                         flat_args = pytree.tree_leaves(dtensor_rs)
                         if any(
@@ -625,11 +630,10 @@ class TestDTensorOps(DTensorOpTestBase):
                             f"failed to convert args to DTensor; "
                             f"originally (*{args}, **{kwargs})"
                         )
-        except Exception as e:
-            raise RuntimeError(
-                f"failed to run: {resolve_name(func)}, with (*{args}, **{kwargs})"
-            ) from e
-
+                except Exception as e:
+                    raise RuntimeError(
+                        f"{str(e)}\n\nfailed to run: {resolve_name(func)}, with (*{dtensor_args}, **{dtensor_kwargs})"
+                    ) from e
         return rs
 
     def check_dtensor_func(self, test_func, opinfo, dry_run=False):
@@ -643,6 +647,48 @@ class TestDTensorOps(DTensorOpTestBase):
                     print(f"xfail('{opinfo.name}', '{opinfo.variant_test_name}'),")
                 else:
                     print(f"xfail('{opinfo.name}'),")
+
+    def test_one_hot(self):
+        ops = [op for op in op_db if op.name == "nn.functional.one_hot"]
+        assert len(ops) == 1
+        op = ops[0]
+        # num_classes = -1 appears to have a bug with dtensor.max().item()
+        self.run_opinfo_test(
+            torch.int64,
+            op,
+            requires_grad=False,
+            sample_inputs_filter=lambda s: s.kwargs["num_classes"] != -1,
+        )
+
+    def test_mean(self):
+        self.mesh = init_device_mesh(DEVICE_TYPE, (self.world_size,))
+
+        shape = [2 * self.world_size + 1, 2 * self.world_size]
+        tensor = (
+            torch.arange(shape[0] * shape[1], dtype=torch.float32)
+            .reshape(shape)
+            .to(DEVICE_TYPE)
+        )
+
+        for is_evenly_shardable in [True, False]:
+            if is_evenly_shardable:
+                placement = [Shard(1)]
+                reduce_dim = 1
+            else:
+                placement = [Shard(0)]
+                reduce_dim = 0
+            dtensor = distribute_tensor(tensor, self.mesh, placement)
+
+            with DebugMode(record_torchfunction=False) as debug_mode:
+                mean = dtensor.mean(dim=reduce_dim)
+                full_tensor = mean.full_tensor()
+
+            self.assertEqual(full_tensor, tensor.mean(dim=reduce_dim))
+
+            if is_evenly_shardable:
+                self.assertTrue("[P] -> [R]" in debug_mode.debug_string())
+            else:
+                self.assertTrue("[S(0)] -> [R])" in debug_mode.debug_string())
 
 
 # only instantiate tests for DEVICE_TYPE alone (i.e. either CPU or GPU)

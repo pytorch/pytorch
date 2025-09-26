@@ -16,8 +16,16 @@ CUDAAllocatorConfig::CUDAAllocatorConfig()
       m_garbage_collection_threshold(0),
       m_pinned_num_register_threads(1),
       m_expandable_segments(false),
+#if CUDA_VERSION >= 12030
+      m_expandable_segments_handle_type(
+          Expandable_Segments_Handle_Type::UNSPECIFIED),
+#else
+      m_expandable_segments_handle_type(
+          Expandable_Segments_Handle_Type::POSIX_FD),
+#endif
       m_release_lock_on_cudamalloc(false),
       m_pinned_use_cuda_host_register(false),
+      m_graph_capture_record_stream_reuse(false),
       m_pinned_use_background_threads(false) {
   m_roundup_power2_divisions.assign(kRoundUpPowerOfTwoIntervals, 0);
 }
@@ -42,20 +50,19 @@ size_t CUDAAllocatorConfig::roundup_power2_divisions(size_t size) {
 }
 
 void CUDAAllocatorConfig::lexArgs(
-    const char* env,
+    const std::string& env,
     std::vector<std::string>& config) {
   std::vector<char> buf;
 
-  size_t env_length = strlen(env);
-  for (size_t i = 0; i < env_length; i++) {
-    if (env[i] == ',' || env[i] == ':' || env[i] == '[' || env[i] == ']') {
+  for (char ch : env) {
+    if (ch == ',' || ch == ':' || ch == '[' || ch == ']') {
       if (!buf.empty()) {
         config.emplace_back(buf.begin(), buf.end());
         buf.clear();
       }
-      config.emplace_back(1, env[i]);
-    } else if (env[i] != ' ') {
-      buf.emplace_back(static_cast<char>(env[i]));
+      config.emplace_back(1, ch);
+    } else if (ch != ' ') {
+      buf.emplace_back(ch);
     }
   }
   if (!buf.empty()) {
@@ -157,7 +164,7 @@ size_t CUDAAllocatorConfig::parseRoundUpPower2Divisions(
         }
         TORCH_CHECK(
             val2 == 0 || llvm::isPowerOf2_64(val2),
-            "For roundups, the divisons has to be power of 2 or 0 to disable roundup ",
+            "For roundups, the divisions has to be power of 2 or 0 to disable roundup ",
             "");
 
         if (std::string_view(val1) == ">") {
@@ -203,7 +210,7 @@ size_t CUDAAllocatorConfig::parseRoundUpPower2Divisions(
       size_t val1 = stoi(config[i]);
       TORCH_CHECK(
           llvm::isPowerOf2_64(val1),
-          "For roundups, the divisons has to be power of 2 ",
+          "For roundups, the divisions has to be power of 2 ",
           "");
       std::fill(
           m_roundup_power2_divisions.begin(),
@@ -289,7 +296,7 @@ size_t CUDAAllocatorConfig::parseAllocatorConfig(
 #endif // USE_ROCM
 }
 
-void CUDAAllocatorConfig::parseArgs(const char* env) {
+void CUDAAllocatorConfig::parseArgs(const std::optional<std::string>& env) {
   // If empty, set the default values
   m_max_split_size = std::numeric_limits<size_t>::max();
   m_roundup_power2_divisions.assign(kRoundUpPowerOfTwoIntervals, 0);
@@ -297,16 +304,16 @@ void CUDAAllocatorConfig::parseArgs(const char* env) {
   bool used_cudaMallocAsync = false;
   bool used_native_specific_option = false;
 
-  if (env == nullptr) {
+  if (!env.has_value()) {
     return;
   }
   {
     std::lock_guard<std::mutex> lock(m_last_allocator_settings_mutex);
-    m_last_allocator_settings = env;
+    m_last_allocator_settings = env.value();
   }
 
   std::vector<std::string> config;
-  lexArgs(env, config);
+  lexArgs(env.value(), config);
 
   for (size_t i = 0; i < config.size(); i++) {
     std::string_view config_item_view(config[i]);
@@ -367,6 +374,9 @@ void CUDAAllocatorConfig::parseArgs(const char* env) {
     } else if (config_item_view == "pinned_use_background_threads") {
       i = parsePinnedUseBackgroundThreads(config, i);
       used_native_specific_option = true;
+    } else if (config_item_view == "graph_capture_record_stream_reuse") {
+      i = parseGraphCaptureRecordStreamReuse(config, i);
+      used_native_specific_option = true;
     } else {
       TORCH_CHECK(
           false, "Unrecognized CachingAllocator option: ", config_item_view);
@@ -397,6 +407,23 @@ size_t CUDAAllocatorConfig::parsePinnedUseCudaHostRegister(
     TORCH_CHECK(
         false, "Error, expecting pinned_use_cuda_host_register value", "");
   }
+  return i;
+}
+
+size_t CUDAAllocatorConfig::parseGraphCaptureRecordStreamReuse(
+    const std::vector<std::string>& config,
+    size_t i) {
+  consumeToken(config, ++i, ':');
+  if (++i < config.size()) {
+    TORCH_CHECK(
+        (config[i] == "True" || config[i] == "False"),
+        "Expected a single True/False argument for graph_capture_record_stream_reuse");
+    m_graph_capture_record_stream_reuse = (config[i] == "True");
+  } else {
+    TORCH_CHECK(
+        false, "Error, expecting graph_capture_record_stream_reuse value", "");
+  }
+
   return i;
 }
 

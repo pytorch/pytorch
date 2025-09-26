@@ -10,6 +10,7 @@
 // Two warninngs in Cutlass included header files
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wset-but-not-used")
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-but-set-parameter")
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-but-set-variable")
 
 // Determine if the architecture supports rowwise scaled mm
 // Currently failing on windows with:
@@ -23,7 +24,6 @@ C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-but-set-parameter")
 #if defined(BUILD_ROWWISE_FP8_KERNEL)
 
 #include <ATen/native/cuda/GroupMMCommon.cuh>
-#include <ATen/native/cuda/cutlass_utils.cuh>
 
 #include <cute/tensor.hpp>
 #include <cutlass/core_io.h>
@@ -45,6 +45,7 @@ C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-but-set-parameter")
 #include <cutlass/gemm/kernel/gemm_universal.hpp>
 #include <cutlass/util/packed_stride.hpp>
 
+C10_DIAGNOSTIC_POP()
 C10_DIAGNOSTIC_POP()
 C10_DIAGNOSTIC_POP()
 
@@ -160,20 +161,17 @@ void f8f8bf16_grouped_gemm_impl_sm90(
   using EpilogueSchedule =
       typename Schedule<FastAccum::value, Pong::value, TB_M, TB_N, TB_K>::
           EpilogueSchedule;
-  // TODO remove *BroadcastPtrArrays and replace with just Broadcast
-  // when  https://github.com/NVIDIA/cutlass/pull/2120/ is in the tagged cutlass
-  // version Implement rowwise scaling epilogue.
-  using ScaleA = cutlass::epilogue::fusion::Sm90ColBroadcastPtrArray<
+  using ScaleA = cutlass::epilogue::fusion::Sm90ColBroadcast<
       0,
       TileShape,
-      DtypeScale,
+      DtypeScale*,
       DtypeScale,
       cute::Stride<cute::Int<1>, cute::Int<0>, cute::Int<0>>>;
 
-  using ScaleB = cutlass::epilogue::fusion::Sm90RowBroadcastPtrArray<
+  using ScaleB = cutlass::epilogue::fusion::Sm90RowBroadcast<
       0,
       TileShape,
-      DtypeScale,
+      DtypeScale*,
       DtypeScale,
       cute::Stride<cute::Int<0>, cute::Int<1>, cute::Int<0>>>;
 
@@ -300,6 +298,9 @@ void f8f8bf16_grouped_gemm_impl_sm90(
   Strides tensor_StrideA = make_strides(mat_a.strides());
   Strides tensor_StrideB = make_strides(mat_b.strides());
   Strides tensor_StrideOutput = make_strides(out.strides());
+  Strides tensor_ShapeA = make_strides(mat_a.sizes());
+  Strides tensor_ShapeB = make_strides(mat_b.sizes());
+
   // scale stride will be used inside the kernel only if needed,
   // so for 1d scales the "1" assigned here won't be used
   int64_t a_scale_stride = scale_a.stride(0);
@@ -327,6 +328,8 @@ void f8f8bf16_grouped_gemm_impl_sm90(
       tensor_StrideA,
       tensor_StrideB,
       tensor_StrideOutput,
+      tensor_ShapeA,
+      tensor_ShapeB,
       a_scale_stride,
       b_scale_stride);
 

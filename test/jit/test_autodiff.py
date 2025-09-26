@@ -4,7 +4,10 @@
 from typing import List
 
 import torch
-from torch.testing._internal.common_utils import skipIfTorchDynamo
+from torch.testing._internal.common_utils import (
+    raise_on_run_directly,
+    skipIfTorchDynamo,
+)
 from torch.testing._internal.jit_utils import JitTestCase
 
 
@@ -145,3 +148,7 @@ class TestAutodiffJit(JitTestCase):
             self.assertEqual(x_s.requires_grad, x.requires_grad)
             self.assertEqual(y_s.requires_grad, y.requires_grad)
             self.assertEqual(z_s.requires_grad, z.requires_grad)
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_jit.py")

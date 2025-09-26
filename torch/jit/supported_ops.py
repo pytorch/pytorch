@@ -243,8 +243,8 @@ def _get_global_builtins():
         "getattr": "Attribute name must be a literal string",
         "hasattr": "Attribute name must be a literal string",
         "isinstance": "Result is static",
-        "zip": "Arguments must be iterable. See :ref:`Iterables <jit_iterables>` for details.",
-        "enumerate": "Arguments must be iterable. See :ref:`Iterables <jit_iterables>` for details.",
+        "zip": "Arguments must be iterable.",
+        "enumerate": "Arguments must be iterable.",
         "range": "Can only be used as an iterator in a for loop",
     }
 
@@ -295,7 +295,7 @@ The functions in the following table are supported but do not have a static sche
 
 {schemaless_ops_str}
 
-The following functions will use the corresponding magic method on :any:`TorchScript classes`
+The following functions will use the corresponding magic method on TorchScript classes
 
 .. csv-table::
     :header: "Function", "Magic Method"

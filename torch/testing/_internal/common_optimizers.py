@@ -20,6 +20,7 @@ from torch.optim import (
     AdamW,
     ASGD,
     LBFGS,
+    Muon,
     NAdam,
     Optimizer,
     RAdam,
@@ -245,8 +246,9 @@ class optims(_TestParametrizer):
 # Helper function for generating error inputs for all optimizers, used below.
 def get_error_inputs_for_all_optims(device, dtype):
     if _get_device_type(device) == "cpu":
-        sample_param = Parameter(torch.randn(1, device=device, dtype=dtype))
-        sample_param2 = Parameter(torch.randn(1, device=device, dtype=dtype))
+        # Creating 2D parameters for compatibility with Muon.
+        sample_param = Parameter(torch.randn(1, 1, device=device, dtype=dtype))
+        sample_param2 = Parameter(torch.randn(1, 1, device=device, dtype=dtype))
         return [
             ErrorOptimizerInput(
                 OptimizerInput(
@@ -833,6 +835,81 @@ def optim_error_inputs_func_lbfgs(device, dtype):
     return error_inputs
 
 
+def optim_inputs_func_muon(device, dtype=None):
+    return [
+        OptimizerInput(params=None, kwargs={}, desc="default"),
+        OptimizerInput(params=None, kwargs={"lr": 0.01}, desc="non-default lr"),
+        OptimizerInput(
+            params=None, kwargs={"lr": torch.tensor(0.001)}, desc="Tensor lr"
+        ),
+        OptimizerInput(
+            params=None,
+            kwargs={"weight_decay": 0.2},
+            desc="non-default weight_decay",
+        ),
+        OptimizerInput(
+            params=None,
+            kwargs={"momentum": 0.8},
+            desc="non-default momentum",
+        ),
+        OptimizerInput(
+            params=None,
+            kwargs={"ns_steps": 6},
+            desc="passing alternative ns_steps",
+        ),
+        OptimizerInput(
+            params=None,
+            kwargs={
+                "ns_coefficients": (3.4, -4.7, 2.0),
+            },
+            desc="passing alternative ns_coefficients",
+        ),
+    ]
+
+
+def optim_error_inputs_func_muon(device, dtype):
+    error_inputs = get_error_inputs_for_all_optims(device, dtype)
+    complex_param = torch.rand(2, 3, device=device, dtype=torch.complex64)
+    complex_param.grad = torch.rand_like(complex_param)
+    non_2d_param = torch.rand(2, 3, 4, device=device, dtype=dtype)
+    non_2d_param.grad = torch.rand_like(non_2d_param)
+    param = torch.rand(2, 3, device=device, dtype=dtype)
+    param.grad = torch.rand_like(param)
+    error_inputs += [
+        ErrorOptimizerInput(
+            OptimizerInput(
+                params=[non_2d_param],
+                kwargs=dict(),
+                desc="only support 2D parameters",
+            ),
+            error_type=ValueError,
+            error_regex="Muon only supports 2D parameters",
+            error_on=OptimizerErrorEnum.CONSTRUCTION_ERROR,
+        ),
+        ErrorOptimizerInput(
+            OptimizerInput(
+                params=[param],
+                kwargs={"adjust_lr_fn": "arbitrary"},
+                desc="only support `original` and `match_rms_adamw`",
+            ),
+            error_type=ValueError,
+            error_regex="Adjust learning rate function arbitrary is not supported",
+            error_on=OptimizerErrorEnum.CONSTRUCTION_ERROR,
+        ),
+        ErrorOptimizerInput(
+            OptimizerInput(
+                params=[complex_param],
+                kwargs=dict(),
+                desc="does not support complex parameters",
+            ),
+            error_type=RuntimeError,
+            error_regex="Muon does not support complex parameters",
+            error_on=OptimizerErrorEnum.STEP_ERROR,
+        ),
+    ]
+    return error_inputs
+
+
 def optim_inputs_func_nadam(device, dtype=None):
     cuda_supported_configs = [
         OptimizerInput(params=None, kwargs={"capturable": True}, desc="capturable"),
@@ -1268,9 +1345,9 @@ def _get_optim_inputs_including_global_cliquey_kwargs(
     trivial. That said, we sometimes want to test for all possible configs on an
     optimizer including all supported flags, so this helper returns all optim inputs.
     """
-    assert all(
-        x in ["foreach", "fused", "differentiable"] for x in skip
-    ), "skip must be a subset of ['foreach', 'fused', 'differentiable']"
+    assert all(x in ["foreach", "fused", "differentiable"] for x in skip), (
+        "skip must be a subset of ['foreach', 'fused', 'differentiable']"
+    )
 
     optim_inputs = optim_info.optim_inputs_func(device)
 
@@ -1543,13 +1620,6 @@ optim_db: list[OptimizerInfo] = [
         ),
         skips=(
             DecorateInfo(
-                skipIfMPS,  # addcdiv doesn't work for non-contiguous, see #118115
-                "TestOptimRenewed",
-                "test_forloop_goes_right_direction",
-                active_if=lambda kwargs: not kwargs["contiguous"],
-                device_type="mps",
-            ),
-            DecorateInfo(
                 skipIfTorchDynamo("See #116028"),
                 "TestOptimRenewed",
                 "test_set_default_dtype_works_with_foreach",
@@ -1640,13 +1710,6 @@ optim_db: list[OptimizerInfo] = [
         ),
         skips=(
             DecorateInfo(
-                skipIfMPS,  # addcdiv doesn't work for non-contiguous, see #118115
-                "TestOptimRenewed",
-                "test_forloop_goes_right_direction",
-                active_if=lambda kwargs: not kwargs["contiguous"],
-                device_type="mps",
-            ),
-            DecorateInfo(
                 skipIfTorchDynamo(
                     "Errors w/ Global state changed, see https://github.com/pytorch/pytorch/issues/116028"
                 ),
@@ -1676,13 +1739,6 @@ optim_db: list[OptimizerInfo] = [
         supported_impls=("foreach", "differentiable"),
         has_capturable_arg=True,
         skips=(
-            DecorateInfo(
-                skipIfMPS,  # addcdiv doesn't work for non-contiguous, see #118115
-                "TestOptimRenewed",
-                "test_forloop_goes_right_direction",
-                active_if=lambda kwargs: not kwargs["contiguous"],
-                device_type="mps",
-            ),
             DecorateInfo(
                 skipIfTorchDynamo("See #116028"),
                 "TestOptimRenewed",
@@ -1763,13 +1819,6 @@ optim_db: list[OptimizerInfo] = [
             ),
         ),
         skips=(
-            DecorateInfo(
-                skipIfMPS,  # addcdiv doesn't work for non-contiguous, see #118115
-                "TestOptimRenewed",
-                "test_forloop_goes_right_direction",
-                active_if=lambda kwargs: not kwargs["contiguous"],
-                device_type="mps",
-            ),
             DecorateInfo(
                 skipIfTorchDynamo(
                     "Errors w/ Global state changed, see https://github.com/pytorch/pytorch/issues/116028"
@@ -1898,19 +1947,33 @@ optim_db: list[OptimizerInfo] = [
         ),
     ),
     OptimizerInfo(
+        Muon,
+        optim_inputs_func=optim_inputs_func_muon,
+        optim_error_inputs_func=optim_error_inputs_func_muon,
+        supported_impls=(),
+        not_og_supported_flags=(),
+        supports_complex=False,
+        skips=(
+            # Note on numerical differences: `compile` applies different matmul tuning,
+            # which leads to deviations compared to eager mode. In the Newton–Schulz
+            # iteration for orthogonalization, computations are done in bfloat16, further
+            # amplifying these numerical differences.
+            DecorateInfo(
+                unittest.skip(
+                    "Expect high difference between compiled and eager due to bfloat16 and iterative process."
+                ),
+                "CompiledOptimizerParityTests",
+                "test_correctness",
+            ),
+        ),
+    ),
+    OptimizerInfo(
         NAdam,
         optim_inputs_func=optim_inputs_func_nadam,
         optim_error_inputs_func=optim_error_inputs_func_nadam,
         supported_impls=("foreach", "differentiable"),
         has_capturable_arg=True,
         skips=(
-            DecorateInfo(
-                skipIfMPS,  # addcdiv doesn't work for non-contiguous, see #118115
-                "TestOptimRenewed",
-                "test_forloop_goes_right_direction",
-                active_if=lambda kwargs: not kwargs["contiguous"],
-                device_type="mps",
-            ),
             DecorateInfo(
                 skipIfTorchDynamo(
                     "Errors w/ Global state changed, see https://github.com/pytorch/pytorch/issues/116028"
@@ -1989,13 +2052,6 @@ optim_db: list[OptimizerInfo] = [
         has_capturable_arg=True,
         skips=(
             DecorateInfo(
-                skipIfMPS,  # addcdiv doesn't work for non-contiguous, see #118115
-                "TestOptimRenewed",
-                "test_forloop_goes_right_direction",
-                active_if=lambda kwargs: not kwargs["contiguous"],
-                device_type="mps",
-            ),
-            DecorateInfo(
                 skipIfTorchDynamo("See #116028"),
                 "TestOptimRenewed",
                 "test_set_default_dtype_works_with_foreach",
@@ -2033,13 +2089,6 @@ optim_db: list[OptimizerInfo] = [
         supported_impls=("foreach", "differentiable"),
         has_capturable_arg=True,
         skips=(
-            DecorateInfo(
-                skipIfMPS,  # Rprop doesn't update for non-contiguous, see #118117
-                "TestOptimRenewed",
-                "test_forloop_goes_right_direction",
-                active_if=lambda kwargs: not kwargs["contiguous"],
-                device_type="mps",
-            ),
             DecorateInfo(
                 skipIfTorchDynamo("See #116028"),
                 "TestOptimRenewed",
@@ -2128,16 +2177,6 @@ optim_db: list[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_complex_2d",
-            ),
-            DecorateInfo(
-                toleranceOverride(
-                    {  # previously atol=5-05, rtol=0.001, https://github.com/pytorch/pytorch/issues/116202
-                        torch.float32: tol(atol=5e-04, rtol=0.007),
-                    }
-                ),
-                "TestOptimRenewed",
-                "test_mixed_device_dtype",
-                active_if=TEST_WITH_TORCHDYNAMO,
             ),
             DecorateInfo(
                 skipIfTorchDynamo(

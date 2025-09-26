@@ -42,7 +42,7 @@ class _IncompatibleKeys(
 ):
     __slots__ = ()
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         if not self.missing_keys and not self.unexpected_keys:
             return "<All keys matched successfully>"
         return super().__repr__()
@@ -70,7 +70,7 @@ _global_parameter_registration_hooks: dict[int, Callable] = OrderedDict()
 
 
 class _WrappedHook:
-    def __init__(self, hook: Callable, module: Optional["Module"] = None):
+    def __init__(self, hook: Callable, module: Optional["Module"] = None) -> None:
         self.hook: Callable = hook
         functools.update_wrapper(self, hook)
 
@@ -117,6 +117,18 @@ _global_forward_pre_hooks: dict[int, Callable] = OrderedDict()
 _global_forward_hooks: dict[int, Callable] = OrderedDict()
 _global_forward_hooks_always_called: dict[int, bool] = OrderedDict()
 _global_forward_hooks_with_kwargs: dict[int, bool] = OrderedDict()
+
+
+def _has_any_global_hook():
+    return (
+        _global_backward_pre_hooks
+        or _global_backward_hooks
+        or _global_forward_pre_hooks
+        or _global_forward_hooks
+        or _global_forward_hooks_always_called
+        or _global_forward_hooks_with_kwargs
+    )
+
 
 _EXTRA_STATE_KEY_SUFFIX = "_extra_state"
 
@@ -400,6 +412,7 @@ class Module:
         import torch.nn as nn
         import torch.nn.functional as F
 
+
         class Model(nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -463,7 +476,7 @@ class Module:
     call_super_init: bool = False
     _compiled_call_impl: Optional[Callable] = None
 
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         """Initialize internal Module state, shared by both nn.Module and ScriptModule."""
         torch._C._log_api_usage_once("python.nn_module")
 
@@ -514,7 +527,7 @@ class Module:
     ) -> None:
         r"""Add a buffer to the module.
 
-        This is typically used to register a buffer that should not to be
+        This is typically used to register a buffer that should not be
         considered a model parameter. For example, BatchNorm's ``running_mean``
         is not a parameter, but is part of the module's state. Buffers, by
         default, are persistent and will be saved alongside parameters. This
@@ -555,7 +568,9 @@ class Module:
             raise KeyError('buffer name can\'t be empty string ""')
         elif hasattr(self, name) and name not in self._buffers:
             raise KeyError(f"attribute '{name}' already exists")
-        elif tensor is not None and not isinstance(tensor, torch.Tensor):
+        elif tensor is not None and not (
+            isinstance(tensor, torch.Tensor) or hasattr(tensor, "__torch_function__")
+        ):
             raise TypeError(
                 f"cannot assign '{torch.typename(tensor)}' object to buffer '{name}' "
                 "(torch Tensor or None required)"
@@ -914,8 +929,12 @@ class Module:
             for module in self.children():
                 module._apply(fn)
 
-        def compute_should_use_set_data(tensor, tensor_applied):
-            if torch._has_compatible_shallow_copy_type(tensor, tensor_applied):
+        from torch._subclasses.fake_tensor import FakeTensor
+
+        def compute_should_use_set_data(tensor, tensor_applied) -> bool:
+            if torch._has_compatible_shallow_copy_type(
+                tensor, tensor_applied
+            ) and not isinstance(tensor_applied, FakeTensor):
                 # If the new tensor has compatible tensor type as the existing tensor,
                 # the current behavior is to change the tensor in-place using `.data =`,
                 # and the future behavior is to overwrite the existing tensor. However,
@@ -944,7 +963,9 @@ class Module:
 
             # subclasses may have multiple child tensors so we need to use swap_tensors
             p_should_use_swap_tensors = (
-                should_use_swap_tensors or is_traceable_wrapper_subclass(param_applied)
+                should_use_swap_tensors
+                or is_traceable_wrapper_subclass(param_applied)
+                or isinstance(param, FakeTensor)
             )
 
             param_grad = param.grad
@@ -1004,7 +1025,7 @@ class Module:
 
         return self
 
-    def apply(self: T, fn: Callable[["Module"], None]) -> T:
+    def apply(self, fn: Callable[["Module"], None]) -> Self:
         r"""Apply ``fn`` recursively to every submodule (as returned by ``.children()``) as well as self.
 
         Typical use includes initializing the parameters of a model
@@ -1045,7 +1066,7 @@ class Module:
         fn(self)
         return self
 
-    def cuda(self: T, device: Optional[Union[int, device]] = None) -> T:
+    def cuda(self, device: Optional[Union[int, device]] = None) -> Self:
         r"""Move all model parameters and buffers to the GPU.
 
         This also makes associated parameters and buffers different objects. So
@@ -1064,7 +1085,7 @@ class Module:
         """
         return self._apply(lambda t: t.cuda(device))
 
-    def ipu(self: T, device: Optional[Union[int, device]] = None) -> T:
+    def ipu(self, device: Optional[Union[int, device]] = None) -> Self:
         r"""Move all model parameters and buffers to the IPU.
 
         This also makes associated parameters and buffers different objects. So
@@ -1083,7 +1104,7 @@ class Module:
         """
         return self._apply(lambda t: t.ipu(device))
 
-    def xpu(self: T, device: Optional[Union[int, device]] = None) -> T:
+    def xpu(self, device: Optional[Union[int, device]] = None) -> Self:
         r"""Move all model parameters and buffers to the XPU.
 
         This also makes associated parameters and buffers different objects. So
@@ -1102,7 +1123,7 @@ class Module:
         """
         return self._apply(lambda t: t.xpu(device))
 
-    def mtia(self: T, device: Optional[Union[int, device]] = None) -> T:
+    def mtia(self, device: Optional[Union[int, device]] = None) -> Self:
         r"""Move all model parameters and buffers to the MTIA.
 
         This also makes associated parameters and buffers different objects. So
@@ -1121,7 +1142,7 @@ class Module:
         """
         return self._apply(lambda t: t.mtia(device))
 
-    def cpu(self: T) -> T:
+    def cpu(self) -> Self:
         r"""Move all model parameters and buffers to the CPU.
 
         .. note::
@@ -1132,7 +1153,7 @@ class Module:
         """
         return self._apply(lambda t: t.cpu())
 
-    def type(self: T, dst_type: Union[dtype, str]) -> T:
+    def type(self, dst_type: Union[dtype, str]) -> Self:
         r"""Casts all parameters and buffers to :attr:`dst_type`.
 
         .. note::
@@ -1146,7 +1167,7 @@ class Module:
         """
         return self._apply(lambda t: t.type(dst_type))
 
-    def float(self: T) -> T:
+    def float(self) -> Self:
         r"""Casts all floating point parameters and buffers to ``float`` datatype.
 
         .. note::
@@ -1157,7 +1178,7 @@ class Module:
         """
         return self._apply(lambda t: t.float() if t.is_floating_point() else t)
 
-    def double(self: T) -> T:
+    def double(self) -> Self:
         r"""Casts all floating point parameters and buffers to ``double`` datatype.
 
         .. note::
@@ -1168,7 +1189,7 @@ class Module:
         """
         return self._apply(lambda t: t.double() if t.is_floating_point() else t)
 
-    def half(self: T) -> T:
+    def half(self) -> Self:
         r"""Casts all floating point parameters and buffers to ``half`` datatype.
 
         .. note::
@@ -1179,7 +1200,7 @@ class Module:
         """
         return self._apply(lambda t: t.half() if t.is_floating_point() else t)
 
-    def bfloat16(self: T) -> T:
+    def bfloat16(self) -> Self:
         r"""Casts all floating point parameters and buffers to ``bfloat16`` datatype.
 
         .. note::
@@ -1191,8 +1212,8 @@ class Module:
         return self._apply(lambda t: t.bfloat16() if t.is_floating_point() else t)
 
     def to_empty(
-        self: T, *, device: Optional[DeviceLikeType], recurse: bool = True
-    ) -> T:
+        self, *, device: Optional[DeviceLikeType], recurse: bool = True
+    ) -> Self:
         r"""Move the parameters and buffers to the specified device without copying storage.
 
         Args:
@@ -1214,16 +1235,13 @@ class Module:
         device: Optional[DeviceLikeType] = ...,
         dtype: Optional[dtype] = ...,
         non_blocking: bool = ...,
-    ) -> Self:
-        ...
+    ) -> Self: ...
 
     @overload
-    def to(self, dtype: dtype, non_blocking: bool = ...) -> Self:
-        ...
+    def to(self, dtype: dtype, non_blocking: bool = ...) -> Self: ...
 
     @overload
-    def to(self, tensor: Tensor, non_blocking: bool = ...) -> Self:
-        ...
+    def to(self, tensor: Tensor, non_blocking: bool = ...) -> Self: ...
 
     def to(self, *args, **kwargs):
         r"""Move and/or cast the parameters and buffers.
@@ -1436,10 +1454,14 @@ class Module:
     ) -> RemovableHandle:
         r"""Register a backward hook on the module.
 
-        The hook will be called every time the gradients with respect to a module
-        are computed, i.e. the hook will execute if and only if the gradients with
-        respect to module outputs are computed. The hook should have the following
-        signature::
+        The hook will be called every time the gradients with respect to a module are computed, and its firing rules are as follows:
+
+            1. Ordinarily, the hook fires when the gradients are computed with respect to the module inputs.
+            2. If none of the module inputs require gradients, the hook will fire when the gradients are computed
+               with respect to module outputs.
+            3. If none of the module outputs require gradients, then the hooks will not fire.
+
+        The hook should have the following signature::
 
             hook(module, grad_input, grad_output) -> tuple(Tensor) or None
 
@@ -1518,7 +1540,7 @@ class Module:
 
         return backward_pre_hooks
 
-    def _maybe_warn_non_full_backward_hook(self, inputs, result, grad_fn):
+    def _maybe_warn_non_full_backward_hook(self, inputs, result, grad_fn) -> None:
         if not isinstance(result, torch.Tensor):
             if not (
                 isinstance(result, tuple)
@@ -1732,7 +1754,11 @@ class Module:
         if recording_scopes:
             # type ignore was added because at this point one knows that
             # torch.jit._trace._trace_module_map is not Optional and has type Dict[Any, Any]
-            name = torch.jit._trace._trace_module_map[self] if self in torch.jit._trace._trace_module_map else None  # type: ignore[index, operator] # noqa: B950
+            name = (
+                torch.jit._trace._trace_module_map[self]  # type: ignore[index]
+                if self in torch.jit._trace._trace_module_map  # type: ignore[operator]
+                else None
+            )  # noqa: B950
             if name:
                 tracing_state.push_scope(name)
             else:
@@ -1942,7 +1968,7 @@ class Module:
         )
 
     def __setattr__(self, name: str, value: Union[Tensor, "Module"]) -> None:
-        def remove_from(*dicts_or_sets):
+        def remove_from(*dicts_or_sets) -> None:
             for d in dicts_or_sets:
                 if name in d:
                     if isinstance(d, dict):
@@ -2002,7 +2028,10 @@ class Module:
             else:
                 buffers = self.__dict__.get("_buffers")
                 if isinstance(value, Buffer) or buffers is not None and name in buffers:
-                    if value is not None and not isinstance(value, torch.Tensor):
+                    if value is not None and not (
+                        isinstance(value, torch.Tensor)
+                        or hasattr(value, "__torch_function__")
+                    ):
                         raise TypeError(
                             f"cannot assign '{torch.typename(value)}' as buffer '{name}' "
                             "(torch.nn.Buffer, torch.Tensor or None expected)"
@@ -2019,7 +2048,10 @@ class Module:
                     # register_buffer() method that doesn't have the "persistent"
                     # argument. Only pass it in if it is accepted otherwise assume
                     # it is always true
-                    if self.register_buffer is torch.nn.Module.register_buffer:
+                    if (
+                        getattr(self.register_buffer, "__func__", None)
+                        is torch.nn.Module.register_buffer
+                    ):
                         self.register_buffer(name, value, persistent)
                     else:
                         sign = inspect.signature(self.register_buffer)
@@ -2040,7 +2072,7 @@ class Module:
                 else:
                     super().__setattr__(name, value)
 
-    def __delattr__(self, name):
+    def __delattr__(self, name) -> None:
         if name in self._parameters:
             del self._parameters[name]
         elif name in self._buffers:
@@ -2107,7 +2139,7 @@ class Module:
         self._state_dict_pre_hooks[handle.id] = hook
         return handle
 
-    def _save_to_state_dict(self, destination, prefix, keep_vars):
+    def _save_to_state_dict(self, destination, prefix, keep_vars) -> None:
         r"""Save module state to the `destination` dictionary.
 
         The `destination` dictionary will contain the state
@@ -2141,13 +2173,20 @@ class Module:
 
     @overload
     def state_dict(
-        self, *, destination: T_destination, prefix: str = ..., keep_vars: bool = ...
-    ) -> T_destination:
-        ...
+        self,
+        *,
+        destination: T_destination,
+        prefix: str = ...,
+        keep_vars: bool = ...,
+    ) -> T_destination: ...
 
     @overload
-    def state_dict(self, *, prefix: str = ..., keep_vars: bool = ...) -> dict[str, Any]:
-        ...
+    def state_dict(
+        self,
+        *,
+        prefix: str = ...,
+        keep_vars: bool = ...,
+    ) -> dict[str, Any]: ...
 
     # TODO: Change `*args` to `*` and remove the corresponding warning in docs when BC allows.
     # Also remove the logic for arg parsing together.
@@ -2310,7 +2349,7 @@ class Module:
         missing_keys,
         unexpected_keys,
         error_msgs,
-    ):
+    ) -> None:
         r"""Copy parameters and buffers from :attr:`state_dict` into only this module, but not its descendants.
 
         This is called on every submodule
@@ -2505,15 +2544,14 @@ class Module:
             assign (bool, optional): When set to ``False``, the properties of the tensors
                 in the current module are preserved whereas setting it to ``True`` preserves
                 properties of the Tensors in the state dict. The only
-                exception is the ``requires_grad`` field of :class:`~torch.nn.Parameter`s
-                for which the value from the module is preserved.
-                Default: ``False``
+                exception is the ``requires_grad`` field of :class:`~torch.nn.Parameter`
+                for which the value from the module is preserved. Default: ``False``
 
         Returns:
             ``NamedTuple`` with ``missing_keys`` and ``unexpected_keys`` fields:
-                * **missing_keys** is a list of str containing any keys that are expected
+                * ``missing_keys`` is a list of str containing any keys that are expected
                     by this module but missing from the provided ``state_dict``.
-                * **unexpected_keys** is a list of str containing the keys that are not
+                * ``unexpected_keys`` is a list of str containing the keys that are not
                     expected by this module but present in the provided ``state_dict``.
 
         Note:
@@ -2537,7 +2575,7 @@ class Module:
             # mypy isn't aware that "_metadata" exists in state_dict
             state_dict._metadata = metadata  # type: ignore[attr-defined]
 
-        def load(module, local_state_dict, prefix=""):
+        def load(module, local_state_dict, prefix="") -> None:
             local_metadata = {} if metadata is None else metadata.get(prefix[:-1], {})
             if assign:
                 local_metadata["assign_to_params_buffers"] = assign
@@ -2833,7 +2871,7 @@ class Module:
                     memo, submodule_prefix, remove_duplicate
                 )
 
-    def train(self: T, mode: bool = True) -> T:
+    def train(self, mode: bool = True) -> Self:
         r"""Set the module in training mode.
 
         This has an effect only on certain modules. See the documentation of
@@ -2855,7 +2893,7 @@ class Module:
             module.train(mode)
         return self
 
-    def eval(self: T) -> T:
+    def eval(self) -> Self:
         r"""Set the module in evaluation mode.
 
         This has an effect only on certain modules. See the documentation of
@@ -2873,7 +2911,7 @@ class Module:
         """
         return self.train(False)
 
-    def requires_grad_(self: T, requires_grad: bool = True) -> T:
+    def requires_grad_(self, requires_grad: bool = True) -> Self:
         r"""Change if autograd should record operations on parameters in this module.
 
         This method sets the parameters' :attr:`requires_grad` attributes
@@ -2924,7 +2962,7 @@ class Module:
                         p.grad.requires_grad_(False)
                     p.grad.zero_()
 
-    def share_memory(self: T) -> T:
+    def share_memory(self) -> Self:
         r"""See :meth:`torch.Tensor.share_memory_`."""
         return self._apply(lambda t: t.share_memory_())
 
@@ -2940,7 +2978,7 @@ class Module:
         """
         return ""
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         # We treat the extra repr like the sub-module, one item per line
         extra_lines = []
         extra_repr = self.extra_repr()

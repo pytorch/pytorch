@@ -17,6 +17,7 @@ from torch.distributed.tensor._ops._math_ops import (
     Reduction,
     replicate_reduction_dims,
 )
+from torch.distributed.tensor._ops.utils import normalize_dim
 from torch.distributed.tensor.placement_types import Placement
 
 
@@ -111,7 +112,7 @@ def _propagate_tensor_meta(
     kwargs: dict[str, object],
 ) -> TensorMeta:
     op_info = DTensor._op_dispatcher.unwrap_to_op_info(op_call, args, kwargs)
-    tensor_meta = DTensor._op_dispatcher.sharding_propagator._propagate_tensor_meta(
+    tensor_meta = DTensor._op_dispatcher.sharding_propagator.propagate_tensor_meta(
         op_info.schema
     )
     if isinstance(tensor_meta, TensorMeta):
@@ -160,6 +161,7 @@ def _log_softmax_handler(
     half_to_float = cast(bool, args[2])
 
     spec = x._spec
+    dim = normalize_dim(dim, x.dim())
     mesh_dim = _find_all_reduce_mesh_dim(spec.placements, dim)
 
     output_tensor_meta = _propagate_tensor_meta(op_call, args, kwargs)

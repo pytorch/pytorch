@@ -440,7 +440,7 @@ class _Matmul:
             A_node=cast("torch.fx.Node", match[0].args[0]),
             B_node=cast("torch.fx.Node", mm_node.args[1]),
             # _Matmul handles reshapes via custom graph manipulation logic, see `replace_with()` method.
-            # TOOO: explore unifying the _Matmul and _ScaledMatmul approaches to handling reshapes.
+            # TODO: explore unifying the _Matmul and _ScaledMatmul approaches to handling reshapes.
             pre_mm_reshape=None,
             post_mm_reshape=None,
         )
@@ -850,9 +850,11 @@ def fuse_matmul_reduce_scatter(reduce_scatter: _ReduceScatterMatch) -> None:
 
     Returns boolean indicating if fusion was successful or not.
     """
-    assert torch.distributed.is_available() and torch.distributed.is_nccl_available(), (
-        "torch.distributed and NCCL must be available to use async tensor parallelism"
-    )
+    if (
+        not torch.distributed.is_available()
+        or not torch.distributed.is_nccl_available()
+    ):
+        return
 
     from torch.distributed._symmetric_memory import (
         is_symm_mem_enabled_for_group,
@@ -875,9 +877,16 @@ def fuse_matmul_reduce_scatter(reduce_scatter: _ReduceScatterMatch) -> None:
         reduce_scatter.group_name,
     )
 
-    assert is_symm_mem_enabled_for_group(group_name), (
-        f"symmetric memory is not enabled for process group {group_name}, this is required for async TP"
-    )
+    if not is_symm_mem_enabled_for_group(group_name):
+        return
+
+    filter_matmul = None
+    if orig_scatter_dim == _get_tensor(input_node).ndim - 1:
+        # scaled_mm is not supported yet for last dim mm+rs
+        def _filter_out_scaled_matmul(matmul: _Matmul):
+            return not isinstance(matmul, _ScaledMatmul)
+
+        filter_matmul = _filter_out_scaled_matmul
 
     # Currently fused_matmul_reduce_scatter doesn't return the matmul result,
     # so we can't apply the fusion if the matmul result is used by multiple
@@ -890,10 +899,14 @@ def fuse_matmul_reduce_scatter(reduce_scatter: _ReduceScatterMatch) -> None:
         return
 
     matmul = _find_producer_matmul(input_node)
+
     if matmul is None:
         log.warning(
             "no producer matmul found for reduce scatter, skipping fuse_matmul_reduce_scatter fusion"
         )
+        return
+
+    if filter_matmul and not filter_matmul(matmul):
         return
 
     if rs_wait_tensor_node in matmul.arg_ancestor_nodes:
@@ -906,7 +919,7 @@ def fuse_matmul_reduce_scatter(reduce_scatter: _ReduceScatterMatch) -> None:
     #   1. The scatter dim before the reshape, which was assigned using the original (a,b,c) @ (c,d) = (a,b,d) dims.
     #   2. The scatter dim after the reshape, to use when we are doing the 2D (a*b,c) @ (c,d) = (a,b,d) scaled mm op.
     #   3. Store expected potentially 3D+ mm output shape, so we can reshape the 2D mm output to the intended
-    #      3D+ shape before applying reduce-scatter, and to prevent shape erros with subsequent ops.
+    #      3D+ shape before applying reduce-scatter, and to prevent shape errors with subsequent ops.
 
     # If 'A' was reshaped from 3D+ -> 2D for the mm, we need to determine the new scattter dim after the reshape
     # for the fused matmul reduce scatter implementation to use.

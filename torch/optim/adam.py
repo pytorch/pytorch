@@ -85,19 +85,19 @@ class Adam(Optimizer):
             if betas[1].numel() != 1:
                 raise ValueError("Tensor betas[1] must be 1-element")
 
-        defaults = dict(
-            lr=lr,
-            betas=betas,
-            eps=eps,
-            weight_decay=weight_decay,
-            amsgrad=amsgrad,
-            maximize=maximize,
-            foreach=foreach,
-            capturable=capturable,
-            differentiable=differentiable,
-            fused=fused,
-            decoupled_weight_decay=decoupled_weight_decay,
-        )
+        defaults = {
+            "lr": lr,
+            "betas": betas,
+            "eps": eps,
+            "weight_decay": weight_decay,
+            "amsgrad": amsgrad,
+            "maximize": maximize,
+            "foreach": foreach,
+            "capturable": capturable,
+            "differentiable": differentiable,
+            "fused": fused,
+            "decoupled_weight_decay": decoupled_weight_decay,
+        }
         super().__init__(params, defaults)
 
         if fused:
@@ -398,7 +398,9 @@ def _single_tensor_adam(
             assert (
                 param.device.type == step_t.device.type
                 and param.device.type in capturable_supported_devices
-            ), f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
+            ), (
+                f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
+            )
 
         # update step
         step_t += 1
@@ -433,7 +435,9 @@ def _single_tensor_adam(
             # cast to workaround https://github.com/pytorch/pytorch/issues/140601
             key = (device, dtype)
             if key not in beta1_dict:
-                beta1_dict[key] = beta1.to(device=device, dtype=dtype, non_blocking=True)  # type: ignore[union-attr]
+                beta1_dict[key] = beta1.to(  # type: ignore[union-attr]
+                    device=device, dtype=dtype, non_blocking=True
+                )
 
             device_beta1: Union[float, Tensor] = beta1_dict[key]
         else:
@@ -455,9 +459,11 @@ def _single_tensor_adam(
                 # expavg.lerp(grad^2, 1-beta2)
                 exp_avg_sq.lerp_(torch.square(grad), weight=1 - beta2)
             else:
-                exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)
+                exp_avg_sq.mul_(beta2).addcmul_(
+                    grad, grad, value=cast(float, 1 - beta2)
+                )
         else:
-            exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)
+            exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)  # type: ignore[arg-type]
 
         if capturable or differentiable:
             step = step_t
@@ -528,7 +534,7 @@ def _single_tensor_adam(
             else:
                 denom = (exp_avg_sq.sqrt() / bias_correction2_sqrt).add_(eps)
 
-            param.addcdiv_(exp_avg, denom, value=-step_size)
+            param.addcdiv_(exp_avg, denom, value=-step_size)  # type: ignore[arg-type]
 
         # Lastly, switch back to complex view
         if amsgrad and torch.is_complex(params[i]):
@@ -593,7 +599,9 @@ def _multi_tensor_adam(
             p.device.type == step.device.type
             and p.device.type in capturable_supported_devices
             for p, step in zip(params, state_steps)
-        ), f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
+        ), (
+            f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
+        )
 
     assert grad_scale is None and found_inf is None
 
@@ -669,7 +677,7 @@ def _multi_tensor_adam(
                 # Perform stepweight decay
                 torch._foreach_mul_(device_params, 1 - lr * weight_decay)
             else:
-                # Re-use the intermediate memory (device_grads) already allocated for maximize
+                # Reuse the intermediate memory (device_grads) already allocated for maximize
                 if maximize:
                     torch._foreach_add_(device_grads, device_params, alpha=weight_decay)
                 else:
@@ -680,7 +688,9 @@ def _multi_tensor_adam(
         # Decay the first and second moment running average coefficient
         # Use device beta1 if beta1 is a tensor to ensure all
         # tensors are on the same device
-        torch._foreach_lerp_(device_exp_avgs, device_grads, 1 - device_beta1)
+        torch._foreach_lerp_(
+            device_exp_avgs, device_grads, cast(float, 1 - device_beta1)
+        )
 
         torch._foreach_mul_(device_exp_avg_sqs, beta2)
 
@@ -769,7 +779,10 @@ def _multi_tensor_adam(
             torch._foreach_div_(exp_avg_sq_sqrt, bias_correction2_sqrt)
             torch._foreach_add_(exp_avg_sq_sqrt, eps)
             torch._foreach_addcdiv_(
-                device_params, device_exp_avgs, exp_avg_sq_sqrt, step_size  # type: ignore[arg-type]
+                device_params,
+                device_exp_avgs,
+                exp_avg_sq_sqrt,
+                step_size,  # type: ignore[arg-type]
             )
 
 

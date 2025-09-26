@@ -196,6 +196,12 @@ class set_grad_enabled(_DecoratorContextManager):
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
         torch._C._set_grad_enabled(self.prev)
 
+    def __str__(self) -> str:
+        return f"{torch.typename(self)}(mode={self.mode})"
+
+    def __repr__(self) -> str:
+        return str(self)
+
     def clone(self) -> "set_grad_enabled":
         r"""
         Create a copy of this class
@@ -204,29 +210,43 @@ class set_grad_enabled(_DecoratorContextManager):
 
 
 class inference_mode(_DecoratorContextManager):
-    r"""Context-manager that enables or disables inference mode.
+    r"""Context manager that enables or disables inference mode.
 
-    InferenceMode is a context manager analogous to :class:`~no_grad`
-    to be used when you are certain your operations will have no interactions
-    with autograd (e.g., model training). Code run under this mode gets better
-    performance by disabling view tracking and version counter bumps. Note that
-    unlike some other mechanisms that locally enable or disable grad,
-    entering inference_mode also disables to :ref:`forward-mode AD <forward-mode-ad>`.
+    InferenceMode is analogous to :class:`~no_grad` and should be used
+    when you are certain your operations will not interact with autograd
+    (e.g., during data loading or model evaluation). Compared to
+    :class:`~no_grad`, it removes additional overhead by disabling view
+    tracking and version counter bumps. It is also more restrictive, in
+    that tensors created in this mode cannot be used in computations
+    recorded by autograd.
 
-    This context manager is thread local; it will not affect computation
+    This context manager is thread-local; it does not affect computation
     in other threads.
 
     Also functions as a decorator.
 
     .. note::
-        Inference mode is one of several mechanisms that can enable or
-        disable gradients locally see :ref:`locally-disable-grad-doc` for
-        more information on how they compare.
+        Inference mode is one of several mechanisms that can locally enable
+        or disable gradients. See :ref:`locally-disable-grad-doc` for a
+        comparison. If avoiding the use of tensors created in inference mode
+        in autograd-tracked regions is difficult, consider benchmarking your
+        code with and without inference mode to weigh the performance benefits
+        against the trade-offs. You can always use :class:`~no_grad` instead.
+
+    .. note::
+       Unlike some other mechanisms that locally enable or disable grad,
+       entering inference_mode also disables :ref:`forward-mode AD <forward-mode-ad>`.
+
+    .. warning::
+        `inference_mode` does NOT automatically set the model to evaluation mode.
+        For proper inference behavior (e.g., disabling dropout, using running statistics
+        in batch normalization), you must explicitly set your model to evaluation mode using
+        `model.eval()` in addition to using this context manager.
 
     Args:
-        mode (bool or function): Either a boolean flag whether to enable or
-            disable inference mode or a Python function to decorate with
-            inference mode enabled
+        mode (bool or function): Either a boolean flag to enable or disable
+            inference mode, or a Python function to decorate with inference
+            mode enabled.
 
     Example::
         >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_AUTOGRAD)
@@ -236,7 +256,7 @@ class inference_mode(_DecoratorContextManager):
         ...     y = x * x
         >>> y.requires_grad
         False
-        >>> # xdoctest: +SKIP("want string isnt quite right")
+        >>> # xdoctest: +SKIP("want string isn't quite right")
         >>> y._version
         Traceback (most recent call last):
         File "<stdin>", line 1, in <module>

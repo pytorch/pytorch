@@ -23,6 +23,7 @@
 #include <ATen/cpu/Utils.h>
 #include <c10/core/GradMode.h>
 #include <c10/util/accumulate.h>
+#include <c10/util/env.h>
 #include <c10/util/irange.h>
 #include <variant>
 
@@ -1359,6 +1360,8 @@ Tensor outer(const Tensor& self, const Tensor& vec2) {
 #endif
 
 
+#if !defined(__aarch64__) || AT_MKLDNN_ACL_ENABLED()
+// Used by default on x86 platforms and on AArch64+ACL
 static inline int64_t get_mkldnn_matmul_min_dim() {
   static auto value = [&] {
     const int64_t default_min_dim = [&] {
@@ -1366,8 +1369,8 @@ static inline int64_t get_mkldnn_matmul_min_dim() {
       //it's enabled on all Neoverse cpus.
       return is_arm_neoverse() ? 8 : 0;
     }();
-    const char* ptr = std::getenv("TORCH_MKLDNN_MATMUL_MIN_DIM");
-    return ptr != nullptr ? std::atoi(ptr) : default_min_dim;
+    const auto value = c10::utils::get_env("TORCH_MKLDNN_MATMUL_MIN_DIM");
+    return value.has_value() ? std::stoi(value.value()) : default_min_dim;
   }();
   return value;
 }
@@ -1380,8 +1383,8 @@ static inline int64_t get_mkldnn_matmul_min_size() {
       // it's enabled on all Neoverse cpus.
       return is_arm_neoverse() ? 8 * 1024 : 0;
     }();
-    const char* ptr = std::getenv("TORCH_MKLDNN_MATMUL_MIN_SIZE");
-    return ptr != nullptr ? std::atoi(ptr) : default_min_size;
+    const auto value = c10::utils::get_env("TORCH_MKLDNN_MATMUL_MIN_SIZE");
+    return value.has_value() ? std::stoi(value.value()) : default_min_size;
   }();
   return value;
 }
@@ -1392,8 +1395,7 @@ static inline bool apply_mkldnn_matmul_heur(int64_t m, int64_t k, int64_t n) {
   const int64_t min_size = get_mkldnn_matmul_min_size();
   return at::globalContext().userEnabledMkldnn() && m > min_dim && k > min_dim && n > min_dim && m * k * n > min_size;
 }
-
-
+#endif
 static void addmm_impl_cpu_(
     Tensor &result, const Tensor &self, Tensor m1, Tensor m2, const Scalar& beta, const Scalar& alpha) {
   TORCH_INTERNAL_ASSERT(self.dim() == 2 && m1.dim() == 2 && m2.dim() == 2);
@@ -1769,7 +1771,8 @@ static inline void bmm_out_or_baddbmm_(const Tensor& self_or_result_, const Tens
     return (strides[2] == 1 && (sizes[1] == 1 || strides[1] >= sizes[2])) ||
         (strides[1] == 1 && (sizes[2] == 1 || strides[2] >= sizes[1]));
   };
-
+#if !defined(__aarch64__) || AT_MKLDNN_ACL_ENABLED()
+  // Always apply mkldnn heuristic on x86 platform, but on ARM only if compiled with ACL
   bool apply_heur = apply_mkldnn_matmul_heur(batch1.sizes()[1], batch1.sizes()[2], batch2.sizes()[2]);
   if (apply_heur && use_mkldnn_matmul(batch1, batch2, self_or_result)) {
     try {
@@ -1780,7 +1783,7 @@ static inline void bmm_out_or_baddbmm_(const Tensor& self_or_result_, const Tens
       at::globalContext().setUserEnabledMkldnn(false);
     }
   }
-
+#endif
   if (contraction_size * res_rows * res_cols < 400) {
     if (is_bmm_out) {
       AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf, batch1.scalar_type(), "bmm", [&] {
@@ -2652,7 +2655,7 @@ Tensor mexp_impl(
     // `norm_cpu` is used to decide which Tensors require which approximation
     // based on their norm. This decision takes place on CPU.
     // It requires moving data back and forth between devices when `a` is on CUDA,
-    // but at the cost of only one sigle CPU-CUDA synchronization (instead of 6),
+    // but at the cost of only one single CPU-CUDA synchronization (instead of 6),
     // and better performance overall (benchmarked).
     const auto norm_cpu = (a.device().type() == at::kCUDA)
       ? norm.to(at::kCPU) : norm;

@@ -573,7 +573,7 @@ class TestCaptureDataFrame(TestCase):
 
 class TestDataFramesPipes(TestCase):
     """
-    Most of test will fail if pandas instaled, but no dill available.
+    Most of test will fail if pandas installed, but no dill available.
     Need to rework them to avoid multiple skips.
     """
 
@@ -1887,7 +1887,7 @@ class TestFunctionalIterDataPipe(TestCase):
         with self.assertRaises(ValueError):
             list(filter_dp)
 
-        # Funtional Test: Specify input_col
+        # Functional Test: Specify input_col
         tuple_input_ds = dp.iter.IterableWrapper([(d - 1, d, d + 1) for d in range(10)])
 
         # Single input_col
@@ -3355,63 +3355,6 @@ class TestSharding(TestCase):
         dp.apply_sharding(5, 3, sharding_group=SHARDING_PRIORITIES.MULTIPROCESSING)
         with self.assertRaises(Exception):
             dp.apply_sharding(2, 1, sharding_group=SHARDING_PRIORITIES.DEFAULT)
-
-    # Test tud.datapipes.iter.grouping.SHARDING_PRIORITIES for backward compatbility
-    # TODO: Remove this test once tud.datapipes.iter.grouping.SHARDING_PRIORITIES is deprecated
-    def test_sharding_groups_in_legacy_grouping_package(self):
-        with self.assertWarnsRegex(
-            FutureWarning,
-            r"Please use `SHARDING_PRIORITIES` "
-            "from the `torch.utils.data.datapipes.iter.sharding`",
-        ):
-            from torch.utils.data.datapipes.iter.grouping import (
-                SHARDING_PRIORITIES as LEGACY_SHARDING_PRIORITIES,
-            )
-
-        def construct_sharded_pipe():
-            sharding_pipes = []
-            dp = NumbersDataset(size=90)
-            dp = dp.sharding_filter(
-                sharding_group_filter=LEGACY_SHARDING_PRIORITIES.DISTRIBUTED
-            )
-            sharding_pipes.append(dp)
-            dp = dp.sharding_filter(
-                sharding_group_filter=LEGACY_SHARDING_PRIORITIES.MULTIPROCESSING
-            )
-            sharding_pipes.append(dp)
-            dp = dp.sharding_filter(sharding_group_filter=300)
-            sharding_pipes.append(dp)
-            return dp, sharding_pipes
-
-        dp, sharding_pipes = construct_sharded_pipe()
-
-        for pipe in sharding_pipes:
-            pipe.apply_sharding(
-                2, 1, sharding_group=LEGACY_SHARDING_PRIORITIES.DISTRIBUTED
-            )
-            pipe.apply_sharding(
-                5, 3, sharding_group=LEGACY_SHARDING_PRIORITIES.MULTIPROCESSING
-            )
-            pipe.apply_sharding(3, 1, sharding_group=300)
-
-        actual = list(dp)
-        expected = [17, 47, 77]
-        self.assertEqual(expected, actual)
-        self.assertEqual(3, len(dp))
-
-        dp, _ = construct_sharded_pipe()
-        dp.apply_sharding(2, 1, sharding_group=LEGACY_SHARDING_PRIORITIES.DEFAULT)
-        with self.assertRaises(Exception):
-            dp.apply_sharding(
-                5, 3, sharding_group=LEGACY_SHARDING_PRIORITIES.MULTIPROCESSING
-            )
-
-        dp, _ = construct_sharded_pipe()
-        dp.apply_sharding(
-            5, 3, sharding_group=LEGACY_SHARDING_PRIORITIES.MULTIPROCESSING
-        )
-        with self.assertRaises(Exception):
-            dp.apply_sharding(2, 1, sharding_group=LEGACY_SHARDING_PRIORITIES.DEFAULT)
 
     def test_legacy_custom_sharding(self):
         dp = self._get_pipeline()

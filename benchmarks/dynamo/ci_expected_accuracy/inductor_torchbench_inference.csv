@@ -82,7 +82,7 @@ detectron2_fasterrcnn_r_50_fpn,eager_fail_to_run,0
 
 
 
-detectron2_fcos_r_50_fpn,pass,20
+detectron2_fcos_r_50_fpn,pass,22
 
 
 
@@ -106,7 +106,7 @@ dlrm,pass,0
 
 
 
-doctr_det_predictor,pass,4
+doctr_det_predictor,pass,3
 
 
 
@@ -178,7 +178,7 @@ hf_T5_base,eager_fail_to_run,0
 
 
 
-hf_T5_generate,pass,5
+hf_T5_generate,pass,7
 
 
 
@@ -378,7 +378,7 @@ vgg16,pass,0
 
 
 
-vision_maskrcnn,pass,18
+vision_maskrcnn,pass,20
 
 
 

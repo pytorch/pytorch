@@ -2,7 +2,7 @@ name,accuracy,graph_breaks
 
 
 
-torchrec_dlrm,fail_to_run,3
+torchrec_dlrm,pass,6
 
 
 
@@ -94,7 +94,7 @@ hf_Bert_large,pass,6
 
 
 
-hf_BigBird,fail_to_run,3
+hf_BigBird,pass,6
 
 
 
@@ -102,7 +102,7 @@ hf_DistilBert,pass,6
 
 
 
-hf_GPT2,pass,6
+hf_GPT2,pass,8
 
 
 
@@ -110,11 +110,11 @@ hf_GPT2_large,pass_due_to_skip,0
 
 
 
-hf_Reformer,fail_to_run,19
+hf_Reformer,pass,20
 
 
 
-hf_Roberta_base,fail_accuracy,6
+hf_Roberta_base,pass,6
 
 
 
@@ -282,7 +282,7 @@ vgg16,pass,6
 
 
 
-vision_maskrcnn,pass,35
+vision_maskrcnn,pass,39
 
 
 

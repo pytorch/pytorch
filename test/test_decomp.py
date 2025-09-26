@@ -15,7 +15,7 @@ from torch._dispatch.python import enable_python_dispatcher
 from torch._export.utils import _is_cia_op
 from torch._ops import DispatchKey
 from torch.testing import make_tensor
-from torch.testing._internal.common_cuda import tf32_off
+from torch.testing._internal.common_cuda import SM70OrLater, tf32_off
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCPU,
@@ -854,14 +854,23 @@ def forward(self, scores_1, mask_1, value_1):
             #  de-functionalise the graph, as that would break AoTAutograd
             # We run the real function *after* the decomposition to make sure that the
             # decomposition does not modify any of the inputs in-place. If it does
-            # real_out should be differen than decom_out so we should catch this
+            # real_out should be different than decom_out so we should catch this
             real_out_unflat = func(*args, **kwargs)
             real_out = pytree.tree_leaves(real_out_unflat)
 
             assert len(real_out) == len(decomp_out)
 
             if do_relative_check:
-                upcast = partial(upcast_tensor, dtype=torch.float64)
+                device_arg = kwargs.get("device", None)
+
+                def upcast(x):
+                    if (isinstance(x, Tensor) and x.device.type == "mps") or (
+                        device_arg and torch.device(device_arg).type == "mps"
+                    ):
+                        return upcast_tensor(x, dtype=torch.float32)
+                    else:
+                        return upcast_tensor(x, dtype=torch.float64)
+
                 real_out_double, _ = tree_flatten(
                     func(*tree_map(upcast, args), **tree_map(upcast, kwargs))
                 )
@@ -1226,6 +1235,33 @@ class DecompOneOffTests(TestCase):
         for o_ref, o in zip(out_ref, out):
             self.assertEqual(o_ref.dtype, o.dtype)
 
+    @onlyCUDA
+    @unittest.skipIf(not SM70OrLater, "triton")
+    def test_rms_norm_decomp_cuda(self, device):
+        @torch.compile
+        def rms_norm_sinh(a, b, c):
+            output = torch.nn.functional.rms_norm(a, b, c)
+            return torch.sinh(output)
+
+        normalized_shape_arg = (3, 3, 3)
+        input_tensor = torch.randn(3, 3, 3, device=device, requires_grad=True)
+        weight_tensor = torch.randn(3, 3, 3, device=device, requires_grad=True)
+
+        def forward_pass_fn():
+            return rms_norm_sinh(input_tensor, normalized_shape_arg, weight_tensor)
+
+        model_output, generated_codes = torch._inductor.utils.run_fw_bw_and_get_code(
+            forward_pass_fn
+        )
+
+        # check RMSNorm was fused with sinh
+        self.assertTrue(
+            "triton_per_fused_add_mean_mul_pow_rsqrt_sinh" in generated_codes[0]
+        )
+        self.assertTrue(
+            "triton_per_fused__fused_rms_norm_backward_cosh_mul" in generated_codes[1]
+        )
+
 
 instantiate_device_type_tests(DecompOneOffTests, globals())
 
@@ -1306,6 +1342,55 @@ class HasDecompTest(TestCase):
         core_decomps = torch._decomp.core_aten_decompositions().keys()
         core_aten_ops = useful_decomps - core_decomps
         self.assertExpected("".join(sorted(op.name() + "\n" for op in core_aten_ops)))
+
+    def test_conv1d_decomposition(self):
+        from torch._inductor.decomposition import conv1d_to_conv2d
+
+        def check_case(
+            N=2,
+            C_in=3,
+            C_out=5,
+            L=37,
+            K=5,
+            stride=2,
+            padding=3,
+            dilation=1,
+            groups=1,
+            dtype=torch.float32,
+            device="cpu",
+        ):
+            torch.manual_seed(0)
+            x = torch.randn(N, C_in, L, dtype=dtype, device=device)
+            w = torch.randn(C_out, C_in // groups, K, dtype=dtype, device=device)
+            b = torch.randn(C_out, dtype=dtype, device=device)
+
+            ref = torch.ops.aten.conv1d.default(
+                x,
+                w,
+                b,
+                stride=[stride],
+                padding=[padding],
+                dilation=[dilation],
+                groups=groups,
+            )
+            got = conv1d_to_conv2d(
+                x,
+                w,
+                b,
+                stride=[stride],
+                padding=[padding],
+                dilation=[dilation],
+                groups=groups,
+            )
+            self.assertTrue(torch.allclose(ref, got, atol=1e-5, rtol=1e-5))
+
+        # A few cases
+        check_case()  # default
+        check_case(stride=1, padding=0, K=3)
+        check_case(stride=3, padding=4, K=7)
+        check_case(dilation=2, padding=6, K=5)  # dilation
+        check_case(groups=1, C_in=8, C_out=12)  # groups=1 bigger
+        check_case(groups=2, C_in=8, C_out=12)  # grouped conv
 
 
 if __name__ == "__main__":

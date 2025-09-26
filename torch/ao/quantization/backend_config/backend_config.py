@@ -272,13 +272,13 @@ scale_min_lower_bound=None, scale_max_upper_bound=None)
         if self.input_dtype is not None:
             dtype_config_dict[INPUT_DTYPE_DICT_KEY] = self.input_dtype_with_constraints
         if self.output_dtype is not None:
-            dtype_config_dict[
-                OUTPUT_DTYPE_DICT_KEY
-            ] = self.output_dtype_with_constraints
+            dtype_config_dict[OUTPUT_DTYPE_DICT_KEY] = (
+                self.output_dtype_with_constraints
+            )
         if self.weight_dtype is not None:
-            dtype_config_dict[
-                WEIGHT_DTYPE_DICT_KEY
-            ] = self.weight_dtype_with_constraints
+            dtype_config_dict[WEIGHT_DTYPE_DICT_KEY] = (
+                self.weight_dtype_with_constraints
+            )
         if self.bias_dtype is not None:
             dtype_config_dict[BIAS_DTYPE_DICT_KEY] = self.bias_dtype
         if self.is_dynamic is not None:
@@ -671,23 +671,23 @@ class BackendPatternConfig:
         for d in backend_pattern_config_dict.get(DTYPE_CONFIGS_DICT_KEY, []):
             conf.add_dtype_config(_get_dtype_config(d))
         conf.set_root_module(
-            backend_pattern_config_dict.get(ROOT_MODULE_DICT_KEY, None)
+            backend_pattern_config_dict.get(ROOT_MODULE_DICT_KEY, None)  # type: ignore[arg-type]
         )
-        conf.set_qat_module(backend_pattern_config_dict.get(QAT_MODULE_DICT_KEY, None))
+        conf.set_qat_module(backend_pattern_config_dict.get(QAT_MODULE_DICT_KEY, None))  # type: ignore[arg-type]
         conf.set_reference_quantized_module(
-            backend_pattern_config_dict.get(REFERENCE_QUANTIZED_MODULE_DICT_KEY, None)
+            backend_pattern_config_dict.get(REFERENCE_QUANTIZED_MODULE_DICT_KEY, None)  # type: ignore[arg-type]
         )
         conf.set_fused_module(
-            backend_pattern_config_dict.get(FUSED_MODULE_DICT_KEY, None)
+            backend_pattern_config_dict.get(FUSED_MODULE_DICT_KEY, None)  # type: ignore[arg-type]
         )
         conf.set_fuser_method(
-            backend_pattern_config_dict.get(FUSER_METHOD_DICT_KEY, None)
+            backend_pattern_config_dict.get(FUSER_METHOD_DICT_KEY, None)  # type: ignore[arg-type]
         )
         conf._set_root_node_getter(
-            backend_pattern_config_dict.get(ROOT_NODE_GETTER_DICT_KEY, None)
+            backend_pattern_config_dict.get(ROOT_NODE_GETTER_DICT_KEY, None)  # type: ignore[arg-type]
         )
         conf._set_extra_inputs_getter(
-            backend_pattern_config_dict.get(EXTRA_INPUTS_GETTER_DICT_KEY, None)
+            backend_pattern_config_dict.get(EXTRA_INPUTS_GETTER_DICT_KEY, None)  # type: ignore[arg-type]
         )
         conf._set_num_tensor_args_to_observation_type(
             backend_pattern_config_dict.get(
@@ -719,31 +719,31 @@ class BackendPatternConfig:
         if self.qat_module is not None:
             backend_pattern_config_dict[QAT_MODULE_DICT_KEY] = self.qat_module
         if self.reference_quantized_module is not None:
-            backend_pattern_config_dict[
-                REFERENCE_QUANTIZED_MODULE_DICT_KEY
-            ] = self.reference_quantized_module
+            backend_pattern_config_dict[REFERENCE_QUANTIZED_MODULE_DICT_KEY] = (
+                self.reference_quantized_module
+            )
         if self.fused_module is not None:
             backend_pattern_config_dict[FUSED_MODULE_DICT_KEY] = self.fused_module
         if self.fuser_method is not None:
             backend_pattern_config_dict[FUSER_METHOD_DICT_KEY] = self.fuser_method
         if self._root_node_getter is not None:
-            backend_pattern_config_dict[
-                ROOT_NODE_GETTER_DICT_KEY
-            ] = self._root_node_getter
+            backend_pattern_config_dict[ROOT_NODE_GETTER_DICT_KEY] = (
+                self._root_node_getter
+            )
         if self._extra_inputs_getter is not None:
-            backend_pattern_config_dict[
-                EXTRA_INPUTS_GETTER_DICT_KEY
-            ] = self._extra_inputs_getter
+            backend_pattern_config_dict[EXTRA_INPUTS_GETTER_DICT_KEY] = (
+                self._extra_inputs_getter
+            )
         if len(self._num_tensor_args_to_observation_type) > 0:
             backend_pattern_config_dict[
                 NUM_TENSOR_ARGS_TO_OBSERVATION_TYPE_DICT_KEY
             ] = self._num_tensor_args_to_observation_type
         if len(self._input_type_to_index) > 0:
-            backend_pattern_config_dict[
-                INPUT_TYPE_TO_INDEX_DICT_KEY
-            ] = self._input_type_to_index
+            backend_pattern_config_dict[INPUT_TYPE_TO_INDEX_DICT_KEY] = (
+                self._input_type_to_index
+            )
         if self._pattern_complex_format is not None:
-            backend_pattern_config_dict[
-                PATTERN_COMPLEX_FORMAT_DICT_KEY
-            ] = self._pattern_complex_format
+            backend_pattern_config_dict[PATTERN_COMPLEX_FORMAT_DICT_KEY] = (
+                self._pattern_complex_format
+            )
         return backend_pattern_config_dict

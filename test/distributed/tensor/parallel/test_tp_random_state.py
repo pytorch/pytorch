@@ -2,7 +2,8 @@
 import torch
 import torch.distributed._functional_collectives as funcol
 import torch.distributed.tensor._random as random
-from torch.distributed._tensor import init_device_mesh, Replicate
+from torch.distributed.device_mesh import init_device_mesh
+from torch.distributed.tensor import Replicate
 from torch.distributed.tensor.parallel.api import parallelize_module
 from torch.distributed.tensor.parallel.style import ColwiseParallel
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
@@ -20,10 +21,10 @@ class TensorParallelRandomStateTests(DTensorTestBase):
         assert shape[0] % n == 0
         local_shape = [shape[0] // n, shape[1]]
 
-        slice_idx = [
+        slice_idx = (
             slice(idx * local_shape[0], (idx + 1) * local_shape[0]),
             slice(local_shape[1]),
-        ]
+        )
         return large_tensor[slice_idx]
 
     def check_gathered_tensors(self, self_rank, size, gathered_tensors, assertFunc):
@@ -65,7 +66,7 @@ class TensorParallelRandomStateTests(DTensorTestBase):
             # in the following way:
             #   - within a tensor parallel group, the RNG is set with the same seed
             #   - across data parallel groups, the RNG is set with different seeds
-            torch.cuda.manual_seed(dp_rank)
+            torch.get_device_module(self.device_type).manual_seed(0)
 
             # disable/enable parallel RNG feature
             if random._rng_tracker:
@@ -117,14 +118,10 @@ class TensorParallelRandomStateTests(DTensorTestBase):
 
                 # compare local shards across TP groups
                 def dp_weights_assert(tensor1, tensor2):
-                    if enable_distribute_flag:
-                        # local weights shall be initialized the same across TP groups
-                        self.assertEqual(tensor1, tensor2)
-                    else:
-                        # without the parallel RNG, weight initialization violates the TP setup:
-                        # local weights are initialized differently across TP groups due to different
-                        # random seeds set in data loading.
-                        self.assertNotEqual(tensor1, tensor2)
+                    # local weights shall be initialized the same across TP groups,
+                    # and it doesn't matter whether DTensor's RNG infra is activated since all spmd ranks
+                    # started with the same seed.
+                    self.assertEqual(tensor1, tensor2)
 
                 self.check_gathered_tensors(
                     dp_rank, dp_size, tensor_gather, dp_weights_assert

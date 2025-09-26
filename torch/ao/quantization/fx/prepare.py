@@ -117,7 +117,7 @@ _DEFAULT_QUINT8_QCONFIG_FOR_TARGET_DTYPE_INFO = {
 
 
 def _get_observer_kwargs(
-    quant_spec: Union[QuantizationSpec, FixedQParamsQuantizationSpec]
+    quant_spec: Union[QuantizationSpec, FixedQParamsQuantizationSpec],
 ):
     kwargs_dict = asdict(quant_spec)
     return copy.deepcopy(kwargs_dict)
@@ -213,9 +213,9 @@ def _needs_obs_or_fq(
     # need to insert placeholder observer for dynamic quantization so that it can
     # be converted to choose_qparams -> q -> dq in convert step
     if cur_target_is_dynamic:
-        assert (
-            cur_target_dtype in _OBS_DTYPE_LIST
-        ), f"Expected cur_target_dtype to be torch.float, but got: {cur_target_dtype}"
+        assert cur_target_dtype in _OBS_DTYPE_LIST, (
+            f"Expected cur_target_dtype to be torch.float, but got: {cur_target_dtype}"
+        )
         assert prev_output_dtype not in _DO_NOT_OBS_DTYPE_LIST
         return is_zeroth_arg
     if reuse_input_obs_or_fq:
@@ -478,6 +478,7 @@ def _insert_obs_or_fq(
     model: torch.nn.Module,
     named_modules: dict[str, torch.nn.Module],
     graph: Graph,
+    model_device: Optional[torch.device] = None,
 ) -> Node:
     """
     Attaches `obs_or_fq` to `model`, and creates a node which calls
@@ -485,7 +486,8 @@ def _insert_obs_or_fq(
 
     obs_or_fq: an instance of Observer or FakeQuantize module
     """
-    model_device = assert_and_get_unique_device(model)
+    if model_device is None:
+        model_device = assert_and_get_unique_device(model)
     if model_device:
         obs_or_fq.to(model_device)
     # add obs_or_fq module as attribute
@@ -695,9 +697,9 @@ def _get_output_act_obs_or_fq(
         )
     elif _is_activation_post_process_node(arg, named_modules):
         observed_arg = arg.args[0]
-        assert isinstance(
-            observed_arg, Node
-        ), "Currently we only support observing Node"
+        assert isinstance(observed_arg, Node), (
+            "Currently we only support observing Node"
+        )
         if "quantization_annotation" in observed_arg.meta:
             output_act_obs_or_fq = _create_obs_or_fq_from_qspec(
                 observed_arg.meta["quantization_annotation"].output_qspec,
@@ -805,6 +807,7 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
     obs_or_fq_map: dict[EdgeOrNode, ObserverOrFakeQuantize],
     is_qat: bool,
     backend_config: Optional[BackendConfig] = None,
+    model_device: Optional[torch.device] = None,
 ) -> Argument:
     """
     Given a `node` and an `arg`, inserts an input observer between
@@ -827,6 +830,7 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
                 obs_or_fq_map,
                 is_qat,
                 backend_config,
+                model_device,
             )
             new_arg_to_return.append(new_inner_arg)
         return type(arg)(new_arg_to_return)
@@ -935,8 +939,7 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
                 maybe_obs_mod = named_modules[maybe_obs_node.target]  # type: ignore[index]
                 if (
                     type(maybe_obs_mod) == type(arg_as_input_act_obs_or_fq)
-                    and maybe_obs_mod.dtype
-                    == arg_as_input_target_dtype  # type: ignore[possibly-undefined]
+                    and maybe_obs_mod.dtype == arg_as_input_target_dtype  # type: ignore[possibly-undefined]
                 ):
                     arg_as_input_act_obs_or_fq = maybe_obs_mod  # type: ignore[assignment]
                     existing_obs_node = maybe_obs_node
@@ -946,7 +949,12 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
         obs_or_fq_map[(arg, node)] = arg_as_input_act_obs_or_fq
         if existing_obs_node is None:
             new_obs_node = _insert_obs_or_fq(
-                arg, arg_as_input_act_obs_or_fq, model, named_modules, graph
+                arg,
+                arg_as_input_act_obs_or_fq,
+                model,
+                named_modules,
+                graph,
+                model_device,
             )
             # override this arg to be the observed arg
             new_arg = new_obs_node
@@ -967,6 +975,7 @@ def _maybe_insert_input_observers_for_node(
     obs_or_fq_map: dict[EdgeOrNode, ObserverOrFakeQuantize],
     is_qat: bool,
     backend_config: Optional[BackendConfig] = None,
+    model_device: Optional[torch.device] = None,
 ) -> None:
     """
     If needed, inserts observers to the input args and kwargs of `node`.
@@ -998,6 +1007,7 @@ def _maybe_insert_input_observers_for_node(
             obs_or_fq_map,
             is_qat,
             backend_config,
+            model_device,
         )
         new_args.append(new_arg)
 
@@ -1015,6 +1025,7 @@ def _maybe_insert_input_observers_for_node(
             obs_or_fq_map,
             is_qat,
             backend_config,
+            model_device,
         )
         new_kwargs[k] = new_kwarg
 
@@ -1108,7 +1119,7 @@ def _maybe_insert_output_observer_for_node(
         )
     target_dtype, target_is_dynamic = _get_dtype_and_is_dynamic(output_act_obs_or_fq)
     # uncomment after we support reuse_input_obs_or_fq properly by having separate
-    # implemntations for this key instead of reusing the input_output_share_observers
+    # implementations for this key instead of reusing the input_output_share_observers
     # code
     # reuse_input_obs_or_fq = node.meta["target_dtype_info"].get("reuse_input_obs_or_fq", False)
     # for now we set this to False since reuse_input_obs_or_fq for
@@ -1118,7 +1129,7 @@ def _maybe_insert_output_observer_for_node(
     reuse_input_obs_or_fq = False
 
     # Note: prev_output_dtype = torch.float and prev_output_is_dynamic=False
-    # because the prev_output is the output of an fp32 op, althought technically
+    # because the prev_output is the output of an fp32 op, although technically
     # we should get the dtype of the output from node.meta["val"] in the future
     # if we deprecate fx graph mode quantization
     needs_obs_or_fq = _needs_obs_or_fq(
@@ -1502,7 +1513,7 @@ def insert_observers_for_model(
 
     # first, populate the dtype map based only on qconfig and qhandler
     # this assumes:
-    # graph inputs are fp32 by default, and int8 where overriden
+    # graph inputs are fp32 by default, and int8 where overridden
     # other nodes output dtype is specified by the qconfig
     named_modules = dict(model.named_modules(remove_duplicate=False))
 
@@ -1664,6 +1675,7 @@ def insert_observers_for_model(
     outputs_seen_counter = 0
     results_node = None
     obs_or_fq_map: dict[EdgeOrNode, ObserverOrFakeQuantize] = {}
+    model_device = assert_and_get_unique_device(model)
 
     # TODO: change this to insert obs/fq by pattern instead of by node
     for node in nodes_before_observation:
@@ -1767,6 +1779,7 @@ def insert_observers_for_model(
                             obs_or_fq_map,
                             is_qat,
                             backend_config,
+                            model_device,
                         )
 
                         # insert equalization input observers if needed
@@ -1938,9 +1951,7 @@ def _run_prepare_fx_on_standalone_modules(
         )
 
         standalone_module = named_modules[root_node.target]
-        prepare = (
-            torch.ao.quantization.quantize_fx._prepare_standalone_module_fx
-        )  # type: ignore[attr-defined]
+        prepare = torch.ao.quantization.quantize_fx._prepare_standalone_module_fx  # type: ignore[attr-defined]
         observed_standalone_module = prepare(
             standalone_module,
             sm_qconfig_mapping,
@@ -2005,7 +2016,7 @@ def prepare(
                 same as input_quantized_idxs configuration provided
                 for the standalone module
             standalone_module_output_quantized_idxs(List[Int]): a list of
-                indexs for the graph output that is quantized
+                indices for the graph output that is quantized
                 same as input_quantized_idxs configuration provided
                 for the standalone module
     """
@@ -2174,9 +2185,9 @@ def prepare(
         # converting List[int] to Tensor since module attribute is
         # Union[Tensor, Module]
         input_quantized_idxs: list[int] = prepare_custom_config.input_quantized_indexes
-        output_quantized_idxs: list[
-            int
-        ] = prepare_custom_config.output_quantized_indexes
+        output_quantized_idxs: list[int] = (
+            prepare_custom_config.output_quantized_indexes
+        )
         observed_graph_module_attrs = model.meta["_observed_graph_module_attrs"]
         # inplace modification
         observed_graph_module_attrs.is_observed_standalone_module = True

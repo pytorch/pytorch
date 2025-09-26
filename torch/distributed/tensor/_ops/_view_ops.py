@@ -6,11 +6,12 @@ from typing import Callable, cast, Optional, Union
 
 import torch
 from torch import Tensor
+from torch._prims_common import DimsType
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
 from torch.distributed.tensor._op_schema import (
     OpSchema,
+    OpSpec,
     OpStrategy,
-    PlacementStrategy,
     RuntimeSchemaInfo,
     StrategyType,
 )
@@ -21,7 +22,12 @@ from torch.distributed.tensor._ops.utils import (
     prod,
     register_op_strategy,
 )
-from torch.distributed.tensor.placement_types import Placement, Replicate, Shard
+from torch.distributed.tensor.placement_types import (
+    _StridedShard,
+    Placement,
+    Replicate,
+    Shard,
+)
 
 
 aten = torch.ops.aten
@@ -226,8 +232,8 @@ def dim_flatten(ndim: int, start_dim=0, end_dim=-1) -> DimMap:
 
 def dim_movedim(
     ndim: int,
-    input: Union[int, Sequence[int]],
-    destination: Union[int, Sequence[int]],
+    input: DimsType,
+    destination: DimsType,
 ) -> DimMap:
     input = normalize_dims(input, ndim)
     destination = normalize_dims(destination, ndim)
@@ -299,7 +305,7 @@ def view_groups(from_size: Shape, to_size: Shape) -> DimMap:
             Flatten((InputDim(1), InputDim(2)))
         )
 
-    - ouptut dimension 0 maps to input dimension 0
+    - output dimension 0 maps to input dimension 0
     - output dimension 1 maps to a flattened input dimensions 1 and 2
 
 
@@ -422,9 +428,7 @@ def dim_view_as_real(shape: Shape) -> DimMap:
     return tuple(results)
 
 
-def dim_reduction(
-    ndim: int, dim_or_dims: Optional[Union[int, Sequence[int]]], keepdim: bool
-) -> DimMap:
+def dim_reduction(ndim: int, dim_or_dims: Optional[DimsType], keepdim: bool) -> DimMap:
     """
     General fallback for reduction ops where Partial() does not apply.
 
@@ -470,9 +474,10 @@ dim_maps: dict[Callable[..., torch.Tensor], Callable[..., DimMap]] = {
 
 def propagate_shape_and_sharding(
     input_src_placements: Sequence[Placement],
-    local_in_shape: Shape,
+    global_input_shape: Shape,
     rule: DimMap,
     mesh_sizes: Shape,
+    strict_view: bool = False,
 ) -> tuple[Sequence[Placement], Sequence[Placement]]:
     """
     Determine input target sharding and output sharding based on
@@ -485,7 +490,9 @@ def propagate_shape_and_sharding(
     - An output dimension that is a split of the input dimension can only be sharded
       if the leftmost split size is divisible by the mesh dimension
     """
-    assert len(input_src_placements) == len(mesh_sizes)
+    assert len(input_src_placements) == len(mesh_sizes), (
+        f"{input_src_placements} != {mesh_sizes}"
+    )
     # for each input dim, for each mesh dim, provides a list of possible shardable dimensions
     mesh_ndim = len(mesh_sizes)
     shardable_dims: dict[int, list[bool]] = {}
@@ -502,18 +509,60 @@ def propagate_shape_and_sharding(
 
     for cmd in rule:
         collect_used_inputs(cmd)
-    for dim in range(len(local_in_shape)):
+    for dim in range(len(global_input_shape)):
         shardable_dims[dim] = [dim in seen_input_dims] * mesh_ndim
 
+    def maybe_get_shard_mesh_dim_and_placement(
+        input_dim: InputDim,
+    ) -> tuple[Optional[int], Optional[Shard]]:
+        # if input_dim is sharded, return the mesh_dim and shard placement
+        for i, placement in enumerate(input_src_placements):
+            if isinstance(placement, Shard) and placement.dim == input_dim.input_dim:
+                return i, placement
+        return None, None
+
+    # NOTE: This function has three responsibilities:
+    # 1. determine "theoretically" if an output dimension can be sharded, i.e. fill the shardable_dims map
+    # 2. determine "theoretically" the corresponding input dimension to shard on, via return value
+    # 3. throw an error when strict_view is enabled and we cannot shard an output dimension
+    # 1 and 2 doesn't require the info of whether current input is sharded.
+    # 3 requires that info, to decide whether we can error out. Maybe we can refactor
+    # to make this function purely "theoretical".
     def get_in_dim_to_shard(cmd: DimSpec) -> Optional[InputDim]:
         if isinstance(cmd, InputDim):
             return cmd
         elif isinstance(cmd, Flatten):
-            for dim in cmd.input_dims[1:]:
-                if isinstance(dim, InputDim):
-                    shardable_dims[dim.input_dim] = [False] * mesh_ndim
-            dim0 = cmd.input_dims[0]
-            return dim0 if isinstance(dim0, InputDim) else None
+            for i, dim in enumerate(cmd.input_dims):
+                # so far all Flatten is always composed of InputDims; revisit this if needed
+                assert isinstance(dim, InputDim)
+                can_shard_dim = True
+                shard_mesh_dim, shard_placement = (
+                    maybe_get_shard_mesh_dim_and_placement(dim)
+                )
+                input_sharded = shard_mesh_dim is not None
+                if i > 0:
+                    can_shard_dim = False
+                    if strict_view and input_sharded:
+                        raise RuntimeError(
+                            f"Attempted to flatten multiple dimensions, with dimension {dim.input_dim} being sharded. ",
+                            "It cannot be performed without redistribution, which is disallowed by the current operator.",
+                        )
+                elif input_sharded:
+                    assert shard_placement is not None and shard_mesh_dim is not None
+                    tensor_dim_size = global_input_shape[shard_placement.dim]
+                    mesh_dim_size = mesh_sizes[shard_mesh_dim]
+                    if tensor_dim_size % mesh_dim_size != 0:
+                        can_shard_dim = False
+                        if strict_view:
+                            raise RuntimeError(
+                                f"Attempted to flatten unevenly sharded dimension {i}, "
+                                "which would require resharding the input. "
+                                "Please explicitly redistribute the tensor instead."
+                            )
+                shardable_dims[dim.input_dim] = [can_shard_dim] * mesh_ndim
+
+            assert isinstance(cmd.input_dims[0], InputDim)
+            return cmd.input_dims[0]
         elif isinstance(cmd, Split):
             in_dim = get_in_dim_to_shard(cmd.input_dim)
             out_size = cmd.group_shape[cmd.split_id]
@@ -531,6 +580,14 @@ def propagate_shape_and_sharding(
                 shardable_dims[in_dim.input_dim] = [
                     out_size % mesh_dim_size == 0 for mesh_dim_size in mesh_sizes
                 ]
+
+                shard_mesh_dim, _ = maybe_get_shard_mesh_dim_and_placement(in_dim)
+                if strict_view and shard_mesh_dim is not None:
+                    if not shardable_dims[in_dim.input_dim][shard_mesh_dim]:
+                        raise RuntimeError(
+                            f"Attempted to split the sharded dimension {in_dim.input_dim} into multiple subdimensions. ",
+                            "It cannot be performed without redistribution, which is disallowed by the current operator.",
+                        )
 
                 # 2. here we special case things like [Shard(0), Shard(0)]
                 submesh_size = 1
@@ -559,13 +616,37 @@ def propagate_shape_and_sharding(
             shard_dim_map[in_dim.input_dim] = dim
 
     input_tgt_placements = [
-        Replicate()
-        if isinstance(p, Shard) and not shardable_dims[p.dim][mesh_dim]
-        else p
+        (
+            Replicate()
+            if isinstance(p, Shard) and not shardable_dims[p.dim][mesh_dim]
+            else p
+        )
         for mesh_dim, p in enumerate(input_src_placements)
     ]
+
+    def _rewrite_shard_dim(p: Shard):
+        """
+        Rewrite the shard dim to the corresponding tensor dim in output.
+        For ``_StridedShard``, we can safely keep the placement type and
+        ``split_factor`` unchanged and only rewrite the ``dim`` because:
+        1. ``_StridedShard`` has no impact on sharding (i.e. how
+            tensor is partitioned) compared to ``Shard``. It only changes
+            how shards permute across the devices.
+        2. ``view()`` op on DTensor strictly forbids shard redistribution
+            which means if ``view()`` may cause shard permutation across
+            devices, it should be rejected. This is enforced in today's
+            sharding prop for ``view()``.
+        3. Since DTensor ``view()`` won't introduce any redistribution,
+            it's certain that ``placements`` won't change except the
+            inner ``dim`` attribute of ``Shard`` or ``_StridedShard``.
+        """
+        if isinstance(p, _StridedShard):
+            return _StridedShard(shard_dim_map[p.dim], split_factor=p.split_factor)
+        else:
+            return Shard(shard_dim_map[p.dim])
+
     output_placements = [
-        Shard(shard_dim_map[p.dim]) if isinstance(p, Shard) else p
+        _rewrite_shard_dim(p) if isinstance(p, Shard) else p
         for p in input_tgt_placements
     ]
 
@@ -576,7 +657,17 @@ def register_op_strategy_map(
     aten_op_overload: torch._ops.OpOverload,
     local_op_name: Callable[..., torch.Tensor],
     schema_info: Optional[RuntimeSchemaInfo] = None,
+    strict_view: bool = False,
 ) -> None:
+    """
+    Helper that registers strategies for view-like operators that follow a pattern:
+      (1) define the way input dims are split/combined to form output dims (dim_maps)
+      (2) register a strategy for the op schema that uses the dim_map as a sharding prop rule
+
+    strict_view: if True, we will error out if the view-operation would require resharding the input.
+       Currently, this should be set to 'true' for any "view" ops.
+       We could diverge behavior for "reshape" ops which could perform a redistribute implicitly.
+    """
     dim_map: Callable[..., DimMap] = dim_maps[local_op_name]
 
     @register_op_strategy(aten_op_overload, schema_info=schema_info)
@@ -597,6 +688,7 @@ def register_op_strategy_map(
                 tuple(global_in_shape),
                 rules,
                 mesh.shape,
+                strict_view,
             )
 
             # TODO: optimize this. we shouldn't simply blindly replicate
@@ -608,13 +700,13 @@ def register_op_strategy_map(
                 mesh=mesh,
                 tensor_meta=input_src_spec.tensor_meta,
             )
-            redistribute_costs = [
+            redistribute_costs: list[list[float]] = [
                 generate_redistribute_costs(input_strategy, input_tgt_spec)
             ]
 
             output_spec = DTensorSpec(mesh=mesh, placements=tuple(output_placements))
             output_strategy.strategies.append(
-                PlacementStrategy(
+                OpSpec(
                     output_specs=output_spec,
                     input_specs=(input_tgt_spec,),
                     redistribute_cost=redistribute_costs,
@@ -626,16 +718,25 @@ def register_op_strategy_map(
 
 register_op_strategy_map(aten.squeeze.default, torch.squeeze)
 register_op_strategy_map(
+    aten.squeeze_.dim, torch.squeeze, schema_info=RuntimeSchemaInfo(1)
+)
+register_op_strategy_map(
     aten.squeeze.dim, torch.squeeze, schema_info=RuntimeSchemaInfo(1)
 )
 register_op_strategy_map(
-    aten.view.default, Tensor.view, schema_info=RuntimeSchemaInfo(1)
+    aten.view.default,
+    Tensor.view,
+    schema_info=RuntimeSchemaInfo(1),
+    strict_view=True,
 )
 register_op_strategy_map(
     aten.reshape.default, torch.reshape, schema_info=RuntimeSchemaInfo(1)
 )
 register_op_strategy_map(
-    aten._unsafe_view.default, Tensor.view, schema_info=RuntimeSchemaInfo(1)
+    aten._unsafe_view.default,
+    Tensor.view,
+    schema_info=RuntimeSchemaInfo(1),
+    strict_view=True,
 )
 register_op_strategy_map(
     aten.unsqueeze.default, torch.unsqueeze, schema_info=RuntimeSchemaInfo(1)

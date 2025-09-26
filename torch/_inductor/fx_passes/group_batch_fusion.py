@@ -7,7 +7,7 @@ from collections.abc import Iterable, Iterator
 from typing import Any, Optional
 
 import torch
-from torch._dynamo.utils import counters
+from torch._dynamo.utils import counters, is_node_meta_valid
 from torch._logging import trace_structured
 from torch.fx.passes.graph_transform_observer import GraphTransformObserver
 from torch.utils._ordered_set import OrderedSet
@@ -18,6 +18,7 @@ from ..pattern_matcher import (
     get_arg_value,
     stable_topological_sort,
 )
+from ..utils import OPTIMUS_EXCLUDE_POST_GRAD
 
 
 try:
@@ -574,10 +575,6 @@ class BatchLinearLHSFusion(BatchFusion):
         counters["inductor"]["batch_linear_lhs"] += 1
 
 
-def is_node_meta_valid(node: Optional[torch.fx.Node]):
-    return node is None or "example_value" in node.meta or "val" in node.meta
-
-
 # Poor person's check for if a node in the graph mutates its input.
 # (the graph is torch IR, so we will see torch fns and python operators)
 def _is_mutable_node(tgt):
@@ -1055,7 +1052,7 @@ class BatchMathOpsPreGradFusion(BatchPointwiseOpsFusionFactory):
     def match(self, node: torch.fx.Node):
         input = get_arg_value(node, 0, "input")
         if CallFunctionVarArgs(self.op).match(node) and is_node_meta_valid(node):
-            # check the input has the same shape and its uers have the same target
+            # check the input has the same shape and its users have the same target
             # check all clamp operators have the same min and max values, and
             # nan_to_num operators use the same default value.
             child = next(iter(node.users.keys()))
@@ -1142,6 +1139,12 @@ class BatchNanToNumPreGradFusion(BatchMathOpsPreGradFusion):
 class BatchClampPreGradFusion(BatchMathOpsPreGradFusion):
     def __init__(self, **kwargs):
         super().__init__(torch.clamp, **kwargs)
+
+
+@register_fusion("batch_dropout")
+class BatchDropoutPreGradFusion(BatchMathOpsPreGradFusion):
+    def __init__(self, **kwargs):
+        super().__init__(torch.nn.functional.dropout, **kwargs)
 
 
 @register_fusion("batch_aten_tanh", pre_grad=False)
@@ -1368,10 +1371,13 @@ def apply_group_batch_fusion(graph: torch.fx.GraphModule, rule: GroupBatchFusion
             print_output=False, include_stride=True, include_device=True
         )
 
+        name = f"optimus_{str(rule.__class__.__name__)}"
+        if "MTIA" in name:
+            name = f"cff_{str(rule.__class__.__name__)}"
         trace_structured(
             "artifact",
             metadata_fn=lambda: {
-                "name": f"optimus_{str(rule.__class__.__name__)}",
+                "name": name,
                 "encoding": "string",
             },
             payload_fn=lambda: graph_str,
@@ -1403,7 +1409,10 @@ def group_batch_fusion_passes(graph: torch.fx.Graph, pre_grad=True):
         fbgemm_fusion_keys = [
             x
             for x in config.post_grad_fusion_options
-            if config.post_grad_fusion_options[x].get("require_fbgemm", False)
+            if (
+                x not in OPTIMUS_EXCLUDE_POST_GRAD
+                and config.post_grad_fusion_options[x].get("require_fbgemm", False)
+            )
         ]
         fbgemm_fusions = {
             fusion: config.post_grad_fusion_options[fusion]

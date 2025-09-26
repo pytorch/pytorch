@@ -232,9 +232,9 @@ class QConfigMapping:
     def __init__(self) -> None:
         # In increasing match priority:
         self.global_qconfig: QConfigAny = None
-        self.object_type_qconfigs: OrderedDict[
-            Union[Callable, str], QConfigAny
-        ] = OrderedDict()
+        self.object_type_qconfigs: OrderedDict[Union[Callable, str], QConfigAny] = (
+            OrderedDict()
+        )
         self.module_name_regex_qconfigs: OrderedDict[str, QConfigAny] = OrderedDict()
         self.module_name_qconfigs: OrderedDict[str, QConfigAny] = OrderedDict()
         self.module_name_object_type_order_qconfigs: OrderedDict[

@@ -16,10 +16,9 @@ DEFINE_UNARY_FLOATING_FUNCTOR(i0e);
 DEFINE_UNARY_FLOATING_FUNCTOR(i1);
 DEFINE_UNARY_FLOATING_FUNCTOR(i1e);
 DEFINE_UNARY_FLOATING_FUNCTOR(spherical_bessel_j0);
-DEFINE_UNARY_FLOATING_FUNCTOR(entr);
 
 // TODO: Replaceme with DEFINE_UNARY_FLOATING_FUNCTOR
-// But for some reason instantinating bessel_y[01] on M1/M2 results in
+// But for some reason instantinating bessel_y[01] and entr on M1/M2 results in
 // Failed to created pipeline state object, error: Error Domain=AGXMetalG14X
 // Code=3 "Compiler encountered an internal error"
 struct bessel_y0_forward_functor {
@@ -50,6 +49,20 @@ struct bessel_y1_forward_functor {
   }
 };
 
+struct entr_functor {
+  template <typename T>
+  inline enable_if_t<is_floating_point_v<T>, T> operator()(const T x) {
+    return static_cast<T>(entr(x));
+  }
+  template <typename T>
+  inline enable_if_t<is_integral_v<T>, float> operator()(const T x) {
+    return entr(static_cast<float>(x));
+  }
+  inline float operator()(const bool x) {
+    return x ? -0.0 : 0.0;
+  }
+};
+
 #define REGISTER_SPECIAL(DTI, DTO)                                \
   REGISTER_UNARY_OP(bessel_j0_forward, DTI, DTO);                 \
   REGISTER_UNARY_OP(bessel_j1_forward, DTI, DTO);                 \
@@ -76,6 +89,4 @@ REGISTER_SPECIAL(short, float);
 REGISTER_SPECIAL(int, float);
 REGISTER_SPECIAL(long, float);
 REGISTER_SPECIAL(half, half);
-#if __METAL_VERSION__ >= 310
 REGISTER_SPECIAL(bfloat, bfloat);
-#endif

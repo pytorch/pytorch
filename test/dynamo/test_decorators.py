@@ -8,8 +8,9 @@ from unittest.mock import patch
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
-from torch._dynamo.exc import IncorrectUsage
+from torch._dynamo.exc import IncorrectUsage, Unsupported
 from torch._dynamo.utils import counters
+from torch.testing._internal.common_utils import skipIfWindows
 
 
 def my_custom_function(x):
@@ -514,6 +515,23 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         fn(x, State(41))
         self.assertEqual(cnts.frame_count, 2)
 
+    def test_nonstrict_trace_int_and_float_output(self):
+        @torch._dynamo.nonstrict_trace
+        def trace_me(x):
+            torch._dynamo.graph_break()
+            return len(x.shape), 0.42
+
+        def fn(x):
+            n1, n2 = trace_me(x)
+            return x * n1 + n2
+
+        x = torch.randn(10)
+        opt_fn = torch.compile(fn, fullgraph=True, backend="aot_eager")
+
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
     def test_nonstrict_trace_tuple_and_sym_int_output(self):
         @torch._dynamo.nonstrict_trace
         def trace_me(x):
@@ -644,9 +662,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
             fn(torch.ones(10), torch.ones(1))
             self.assertFalse(True)  # must raise error before this
         except torch._dynamo.exc.Unsupported as e:
-            msg = """
-Applying `nonstrict_trace` to function <trace_me>; however, `nonstrict_trace` currently requires the function to be defined outside `torch.compile` region.
-"""  # NOQA: B950
+            msg = "Applying `nonstrict_trace` to function <trace_me>; however, `nonstrict_trace` currently requires the function to be defined outside `torch.compile` region."  # NOQA: B950
             self.assertIn(msg, str(e))
 
     def test_nonstrict_trace_custom_class_error(self):
@@ -673,13 +689,7 @@ Applying `nonstrict_trace` to function <trace_me>; however, `nonstrict_trace` cu
             fn(p)
             self.assertFalse(True)  # must raise error before this
         except torch._dynamo.exc.Unsupported as e:
-            msg = """
-For `nonstrict_trace`-ed function, the only allowed input types are basic types (e.g., torch.Tensor, int, float) or pytree containers of those. Here you are calling the function with arguments that contain a value of type <DecoratorTests.test_nonstrict_trace_custom_class_error.<locals>.Point>, please use one of the following to register the type with pytree:
-  * `torch.utils._pytree.register_constant`
-  * `torch.utils._pytree.register_dataclass`
-  * `torch.utils._pytree.register_pytree_node`
-"""  # NOQA: B950
-            self.assertIn(msg, str(e))
+            self.assertIn("Invalid input type for nonstrict_trace-ed function", str(e))
 
     def test_nonstrict_trace_nested_custom_class_error(self):
         class Point:
@@ -725,13 +735,35 @@ For `nonstrict_trace`-ed function, the only allowed input types are basic types 
             fn(torch.ones(10), torch.ones(1))
             self.assertFalse(True)  # must raise error before this
         except torch._dynamo.exc.Unsupported as e:
-            msg = """
-For `nonstrict_trace`-ed function, the only allowed input types are basic types (e.g., torch.Tensor, int, float) or pytree containers of those. Here you are calling the function with arguments that contain a value of type <DecoratorTests.test_nonstrict_trace_nested_custom_class_error.<locals>.Point>, please use one of the following to register the type with pytree:
-  * `torch.utils._pytree.register_constant`
-  * `torch.utils._pytree.register_dataclass`
-  * `torch.utils._pytree.register_pytree_node`
-"""  # NOQA: B950
-            self.assertIn(msg, str(e))
+            self.assertIn("Invalid input type for nonstrict_trace-ed function", str(e))
+
+    def test_nonstrict_trace_custom_class_output_error(self):
+        class Point:
+            x: torch.Tensor
+            y: torch.Tensor
+
+            def __init__(self, x, y):
+                self.x = x
+                self.y = y
+
+        @torch._dynamo.nonstrict_trace
+        def trace_me(x):
+            torch._dynamo.graph_break()
+            return Point(x, x + 1)
+
+        @torch.compile(fullgraph=True, backend="aot_eager")
+        def fn(x):
+            p = trace_me(x)
+            return p.x * p.y
+
+        try:
+            x = torch.ones(10)
+            fn(x)
+            self.assertFalse(True)  # must raise error before this
+        except torch._dynamo.exc.Unsupported as e:
+            self.assertIn(
+                "Unsupported output type for nonstrict_trace-ed function", str(e)
+            )
 
     def test_nonstrict_newly_constructed_trace_register_constant_type_error(self):
         class State:
@@ -768,12 +800,10 @@ For `nonstrict_trace`-ed function, the only allowed input types are basic types 
             fn(x)
             self.assertFalse(True)  # must raise error before this
         except torch._dynamo.exc.Unsupported as e:
-            msg = """
-You are calling a `nonstrict_trace`-ed function with an input that contains an object of type <DecoratorTests.test_nonstrict_newly_constructed_trace_register_constant_type_error.<locals>.State>, which was marked with `pytree.register_constant`. However, the object was constructed _inside_ the `torch.compile` region.
-
-Please construct the object _outside_ the `torch.compile` region, or submit an issue to GitHub.
-"""  # NOQA: B950
-            self.assertIn(msg, str(e))
+            self.assertIn(
+                "Input marked with `pytree.register_constant` constructed in the `torch.compile` region",
+                str(e),
+            )
 
     def test_nonstrict_trace_object_in_context_error(self):
         class Point:
@@ -816,17 +846,9 @@ Please construct the object _outside_ the `torch.compile` region, or submit an i
             fn(x, y)
             self.assertFalse(True)  # must raise error before this
         except torch._dynamo.exc.Unsupported as e:
-            msg = """
-You are calling a `nonstrict_trace`-ed function where one one of the inputs has been registered with a `pytree_flatten` that puts an object of type <DecoratorTests.test_nonstrict_trace_object_in_context_error.<locals>.Point> into the context.
-
-Please consider modifying that `pytree_flatten` to avoid putting the object into context, and apply one of the following to <DecoratorTests.test_nonstrict_trace_object_in_context_error.<locals>.Point>
-  * `torch.utils._pytree.register_constant`
-  * `torch.utils._pytree.register_dataclass`
-  * `torch.utils._pytree.register_pytree_node`
-
-If the above doesn't work, please subtmit an issue to GitHub.
-"""  # NOQA: B950
-            self.assertIn(msg, str(e))
+            self.assertIn(
+                "Invalid use of pytree_flatten with nonstrict_trace-ed function", str(e)
+            )
 
     def test_graph_break(self):
         cnts = torch._dynamo.testing.CompileCounter()
@@ -847,6 +869,33 @@ If the above doesn't work, please subtmit an issue to GitHub.
         self.assertEqual(cnts.frame_count, 3)
         self.assertEqual(cnts.op_count, 6)
 
+    def test_skip_frame(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts)
+        def fn(x):
+            x = x + 1
+            torch._dynamo.skip_frame()
+            return x + 1
+
+        inp = torch.ones(3, 3)
+        self.assertEqual(fn(inp), inp + 2)
+        self.assertEqual(cnts.frame_count, 0)
+
+        @torch.compile(backend=cnts)
+        def gn(x):
+            x = x + 1
+            torch._dynamo.graph_break()
+            x = x + 1
+            torch._dynamo.skip_frame()
+            return x + 1
+
+        self.assertEqual(gn(inp), inp + 3)
+        self.assertEqual(cnts.frame_count, 1)
+
+    @skipIfWindows(
+        msg="TODO: (xuhancn), confirm if torch.compiler.disable work on Windows."
+    )
     def test_disable_recursive_false(self):
         def fn2(x):
             return x + 1
@@ -1018,11 +1067,10 @@ If the above doesn't work, please subtmit an issue to GitHub.
         self.assertEqual(cnts.frame_count, 2)
         self.assertEqual(cnts.op_count, 4)
 
-        try:
+        with self.assertRaisesRegex(
+            Unsupported, r"Skip calling `torch.compiler.disable\(\)`d function"
+        ):
             fn3(torch.randn(4, 5))
-            self.assertFalse(True)
-        except torch._dynamo.exc.Unsupported as e:
-            self.assertIn("Skip calling `torch.compiler.disable()`d function", str(e))
 
     def test_disable_optimize(self):
         cnt = torch._dynamo.testing.CompileCounter()
@@ -1471,11 +1519,7 @@ If the above doesn't work, please subtmit an issue to GitHub.
 
         @torch.compile(backend="eager")
         def g(x):
-            # cause a skipped frame
-            try:
-                torch._dynamo.graph_break()
-            except Exception:
-                pass
+            torch._dynamo.skip_frame()
             # NOTE: torch._dynamo.is_compiling() will get traced
             # and return true. torch.compiler.is_compiling() is skipped
             # and will return false.
@@ -1533,6 +1577,472 @@ If the above doesn't work, please subtmit an issue to GitHub.
         # should not raise error
         with torch.compiler.set_stance("default", force_backend=fail_backend):
             f(torch.randn(3, 3))
+
+    # also tests a lot of torch._dynamo.patch_dynamo_config functionality
+    def test_dont_skip_tracing(self):
+        from torch._dynamo.test_dont_skip_tracing_functions import f1, f3, f4, f5, f6
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        # make sure test_dont_skip_tracing_functions is actually skipped by trace rules
+        torch.compile(f1, backend=cnts)(torch.randn(3))
+        self.assertEqual(cnts.frame_count, 0)
+
+        f1_unskip = torch._dynamo.dont_skip_tracing(f1)
+
+        # basic test
+        def g1(x):
+            return f1_unskip(x)
+
+        cnts.clear()
+        torch.compile(g1, backend=cnts, fullgraph=True)(torch.randn(3))
+        self.assertEqual(cnts.frame_count, 1)
+
+        # test that dont_skip_tracing is traceable
+        def g2(x):
+            return torch._dynamo.dont_skip_tracing(f1)(x)
+
+        cnts.clear()
+        torch.compile(g2, backend=cnts, fullgraph=True)(torch.randn(3))
+        self.assertEqual(cnts.frame_count, 1)
+
+        # test that dont_skip_tracing is recursive, applied to non-skipped function
+        @torch._dynamo.dont_skip_tracing
+        def g3(x):
+            return f1(x)
+
+        cnts.clear()
+        torch.compile(g3, backend=cnts, fullgraph=True)(torch.randn(3))
+        self.assertEqual(cnts.frame_count, 1)
+
+        # test that dont_skip_tracing is recursive, applied to skipped function
+        f3_unskip = torch._dynamo.dont_skip_tracing(f3)
+        cnts.clear()
+        torch.compile(f3_unskip, backend=cnts, fullgraph=True)(torch.randn(3))
+        self.assertEqual(cnts.frame_count, 1)
+
+        # test dont_skip_tracing with graph breaks
+        inp = torch.ones(3)
+        res = torch.compile(f4, backend=cnts)(inp)
+        self.assertEqual(res, inp + 6)
+
+        @torch.compile(backend=cnts)
+        def g4(x):
+            x = f5(x, 1)
+            x = torch._dynamo.dont_skip_tracing(f6)(x)
+            x = f5(x, 8)
+            return x
+
+        res = g4(inp)
+        self.assertEqual(res, inp + 6)
+
+        # test nested dont_skip_tracing
+        # this also happens to test if a previously skipped frame (f4)
+        # can actually be compiled if called as a top-level function (in the case of a graph break)
+        # TODO the reset is necessary for now since attempting to trace f4 previously
+        # resulted in an unconditional skip
+        torch._dynamo.reset()
+        f4_unskip = torch._dynamo.dont_skip_tracing(f4)
+        res = torch.compile(f4_unskip, backend=cnts)(inp)
+        self.assertEqual(res, inp + 15)
+
+        # test dont_skip_tracing that is activated outside torch.compile
+        f4_unskip2 = torch._dynamo.dont_skip_tracing(torch.compile(f4, backend=cnts))
+        res = f4_unskip2(inp)
+        self.assertEqual(res, inp + 15)
+
+        # test context manager from inside
+        @torch.compile(backend=cnts)
+        def g5(x):
+            x = f5(x, 1)
+            with torch._dynamo.dont_skip_tracing():
+                x = f5(x, 2)
+                torch._dynamo.graph_break()
+                x = f5(x, 4)
+            x = f5(x, 8)
+            return x
+
+        res = g5(inp)
+        self.assertEqual(res, inp + 6)
+
+        # test context manager from outside
+        with torch._dynamo.dont_skip_tracing():
+            res = torch.compile(f4, backend=cnts)(inp)
+        self.assertEqual(res, inp + 15)
+
+        # test skipped function from different dont_skip_tracing regions
+        @torch.compile(backend=cnts)
+        def g6(x):
+            fn1 = f5
+            with torch._dynamo.dont_skip_tracing():
+                fn2 = f5
+                x = fn1(x, 1)
+            x = fn2(x, 2)
+            return x
+
+        res = g6(inp)
+        self.assertEqual(res, inp + 1)
+
+    def test_patch_dynamo_config_errors(self):
+        @torch.compile(backend="eager")
+        def f1(x):
+            with torch._dynamo.patch_dynamo_config(nonexistent=False):
+                return x + 1
+
+        with self.assertRaisesRegex(Exception, "patch_dynamo_config does not support"):
+            f1(torch.randn(3))
+
+        @torch.compile(backend="eager")
+        def f2(x):
+            with torch._dynamo.patch_dynamo_config("verbose", {"a": 1}):
+                return x + 1
+
+        with self.assertRaisesRegex(
+            Exception, "patch_dynamo_config does not support .* with non-safe-constant"
+        ):
+            f2(torch.randn(3))
+
+        @torch.compile(backend="eager")
+        def f3(x):
+            with torch._dynamo.patch_dynamo_config({"recompile_limit": 1}):
+                return x + 1
+
+        with self.assertRaisesRegex(Exception, "patch_dynamo_config does not support"):
+            f3(torch.randn(3))
+
+        @torch.compile(backend="eager")
+        def f4(x):
+            with torch._dynamo.patch_dynamo_config(verbose=object()):
+                return x + 1
+
+        with self.assertRaisesRegex(
+            Exception, "Cannot convert patch_dynamo_config args/kwargs to constants."
+        ):
+            f4(torch.randn(3))
+
+    def test_error_on_graph_break(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch._dynamo.error_on_graph_break(True)
+        @torch.compile(backend=cnts)
+        def f1(x):
+            x = x + 1
+            with torch._dynamo.error_on_graph_break(False):
+                torch._dynamo.graph_break()
+            return x + 2
+
+        inp = torch.ones(3)
+        self.assertEqual(f1(inp), inp + 3)
+        self.assertEqual(cnts.frame_count, 2)
+
+        @torch.compile(backend=cnts)
+        def f2(x):
+            x = x + 1
+            with torch._dynamo.error_on_graph_break(True):
+                torch._dynamo.graph_break()
+            return x + 2
+
+        with self.assertRaises(Unsupported):
+            f2(inp)
+
+        @torch._dynamo.error_on_graph_break(True)
+        @torch.compile(backend=cnts)
+        def f3(x):
+            x = x + 1
+            with torch._dynamo.error_on_graph_break(False):
+                torch._dynamo.graph_break()
+                x = x + 2
+                torch._dynamo.graph_break()
+            return x + 4
+
+        cnts.clear()
+        self.assertEqual(f3(inp), inp + 7)
+        self.assertEqual(cnts.frame_count, 3)
+
+        def inner_f4(x):
+            x = x + 2
+            torch._dynamo.graph_break()
+            return x + 4
+
+        @torch._dynamo.error_on_graph_break(True)
+        @torch.compile(backend=cnts)
+        def f4(x):
+            x = x + 1
+            with torch._dynamo.error_on_graph_break(False):
+                torch._dynamo.skip_frame()
+                return inner_f4(x)
+
+        cnts.clear()
+        self.assertEqual(f4(inp), inp + 7)
+        self.assertEqual(cnts.frame_count, 2)
+
+    def test_error_on_graph_break_nested(self):
+        # error_on_graph_break in a nested frame
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch._dynamo.error_on_graph_break(False)
+        def inner_f5(x):
+            x = x + 2
+            torch._dynamo.graph_break()
+            return x + 4
+
+        @torch._dynamo.error_on_graph_break(True)
+        @torch.compile(backend=cnts)
+        def f5(x):
+            x = x + 1
+            return inner_f5(x)
+
+        inp = torch.ones(3)
+        self.assertEqual(f5(inp), inp + 7)
+        self.assertEqual(cnts.frame_count, 4)
+
+        def inner_f6(x):
+            x = x + 2
+            with torch._dynamo.error_on_graph_break(False):
+                torch._dynamo.graph_break()
+            return x + 4
+
+        @torch._dynamo.error_on_graph_break(True)
+        @torch.compile(backend=cnts)
+        def f6(x):
+            x = x + 1
+            return inner_f6(x)
+
+        cnts.clear()
+        self.assertEqual(f6(inp), inp + 7)
+        self.assertEqual(cnts.frame_count, 3)
+
+        def inner_f7(x):
+            x = x + 2
+            with torch._dynamo.error_on_graph_break(True):
+                torch._dynamo.graph_break()
+            return x + 4
+
+        @torch._dynamo.error_on_graph_break(False)
+        @torch.compile(backend=cnts)
+        def f7(x):
+            x = x + 1
+            return inner_f7(x)
+
+        with self.assertRaises(Unsupported):
+            f7(inp)
+
+    def test_error_on_graph_break_nested_with_skip(self):
+        # error_on_graph_break in a nested frame with a skipped frame in between
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch._dynamo.error_on_graph_break(False)
+        def inner2_f8(x):
+            x = x + 2
+            torch._dynamo.graph_break()
+            return x + 4
+
+        def inner1_f8(x):
+            with torch._dynamo.error_on_graph_break(False):
+                torch._dynamo.skip_frame()
+            return inner2_f8(x)
+
+        @torch._dynamo.error_on_graph_break(True)
+        @torch.compile(backend=cnts)
+        def f8(x):
+            x = x + 1
+            return inner1_f8(x)
+
+        inp = torch.ones(3)
+        self.assertEqual(f8(inp), inp + 7)
+        self.assertEqual(cnts.frame_count, 4)
+
+        def inner2_f9(x):
+            x = x + 2
+            with torch._dynamo.error_on_graph_break(True):
+                torch._dynamo.graph_break()
+            return x + 4
+
+        @torch._dynamo.disable(recursive=False)
+        def inner1_f9(x):
+            return inner2_f9(x)
+
+        @torch._dynamo.error_on_graph_break(False)
+        @torch.compile(backend=cnts)
+        def f9(x):
+            x = x + 1
+            return inner1_f9(x)
+
+        with self.assertRaises(Unsupported):
+            f9(inp)
+
+        # test export with error_on_graph_break(False) still errors
+
+    def test_error_on_graph_break_export(self):
+        @torch._dynamo.error_on_graph_break(False)
+        def inner(x):
+            x = x + 2
+            torch._dynamo.graph_break()
+            return x + 4
+
+        def f(x):
+            x = x + 1
+            return inner(x)
+
+        with self.assertRaises(Unsupported):
+            torch._dynamo.export(f)(torch.ones(3))
+
+    def test_error_on_graph_break_nested_deep(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        def inner1_f1(x):
+            x = x + 1
+            torch._dynamo.graph_break()
+            return x + 2
+
+        def inner2_f1(x):
+            return inner1_f1(x)
+
+        def inner3_f1(x):
+            with torch._dynamo.error_on_graph_break(False):
+                return inner2_f1(x)
+
+        def inner4_f1(x):
+            return inner3_f1(x)
+
+        @torch._dynamo.error_on_graph_break(True)
+        @torch.compile(backend=cnts)
+        def f1(x):
+            x = x + 4
+            return inner4_f1(x)
+
+        inp = torch.ones(3)
+        self.assertEqual(f1(inp), inp + 7)
+        self.assertEqual(cnts.frame_count, 4)
+
+        def inner1_f2(x):
+            x = x + 1
+            torch._dynamo.graph_break()
+            return x + 2
+
+        def inner2_f2(x):
+            return inner1_f2(x)
+
+        def inner3_f2(x):
+            with torch._dynamo.error_on_graph_break(True):
+                return inner2_f2(x)
+
+        def inner4_f2(x):
+            return inner3_f2(x)
+
+        @torch._dynamo.error_on_graph_break(False)
+        @torch.compile(backend=cnts)
+        def f2(x):
+            x = x + 4
+            return inner4_f2(x)
+
+        with self.assertRaises(Unsupported):
+            f2(inp)
+
+    def test_error_on_graph_break_error(self):
+        @torch.compile(backend="eager")
+        def f1():
+            with torch._dynamo.error_on_graph_break(foo="bar"):
+                pass
+
+        @torch.compile(backend="eager")
+        def f2():
+            with torch._dynamo.error_on_graph_break():
+                pass
+
+        @torch.compile(backend="eager")
+        def f3():
+            with torch._dynamo.error_on_graph_break("foo"):
+                pass
+
+        with self.assertRaises(Exception):
+            f1()
+        with self.assertRaises(Exception):
+            f2()
+        with self.assertRaises(Exception):
+            f3()
+
+    def test_nested_compile_error_on_graph_break(self):
+        inp = torch.ones(3)
+
+        @torch._dynamo.error_on_graph_break(True)
+        @torch.compile(backend="eager")
+        def inner_f1(x):
+            x = x + 1
+            torch._dynamo.graph_break()
+            return x + 2
+
+        @torch._dynamo.error_on_graph_break(False)
+        @torch.compile(backend="eager")
+        def f1(x):
+            return inner_f1(x)
+
+        with self.assertRaises(Unsupported):
+            f1(inp)
+
+        @torch._dynamo.error_on_graph_break(False)
+        @torch.compile(backend="eager")
+        def inner_f2(x):
+            x = x + 1
+            torch._dynamo.graph_break()
+            return x + 2
+
+        @torch._dynamo.error_on_graph_break(True)
+        @torch.compile(backend="eager")
+        def f2(x):
+            return inner_f2(x)
+
+        self.assertEqual(f2(inp), inp + 3)
+
+    def test_error_on_graph_break_fullgraph(self):
+        # Test that error_on_graph_break=False cannot override fullgraph=True
+        inp = torch.ones(3)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            x = x + 1
+            with torch._dynamo.error_on_graph_break(False):
+                torch._dynamo.graph_break()
+            return x + 2
+
+        with self.assertRaises(Unsupported):
+            f(inp)
+
+    def test_error_on_graph_break_empty_graph(self):
+        @torch._dynamo.error_on_graph_break(True)
+        @torch.compile(backend="eager")
+        def f():
+            return 1
+
+        self.assertEqual(f(), 1)
+
+    def test_nested_compile_fullgraph(self):
+        # Test that fullgraph=True cannot be toggled back by fullgraph=False
+        inp = torch.ones(3)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def inner_f1(x):
+            torch._dynamo.graph_break()
+            return x + 1
+
+        @torch.compile(backend="eager", fullgraph=False)
+        def outer_f1(x):
+            return inner_f1(x)
+
+        with self.assertRaises(Unsupported):
+            outer_f1(inp)
+
+        @torch.compile(backend="eager", fullgraph=False)
+        def inner_f2(x):
+            torch._dynamo.graph_break()
+            return x + 1
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def outer_f2(x):
+            return inner_f2(x)
+
+        with self.assertRaises(Unsupported):
+            outer_f2(inp)
 
 
 if __name__ == "__main__":

@@ -1,7 +1,7 @@
 #include <c10/core/SymIntArrayRef.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/core/impl/PyInterpreter.h>
-
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-parameter")
 namespace c10::impl {
 
 struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
@@ -59,6 +59,10 @@ struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
 
   bool is_contiguous(const TensorImpl* self, at::MemoryFormat) const override {
     PANIC(is_contiguous);
+  }
+  c10::SymBool sym_is_contiguous(const TensorImpl* self, at::MemoryFormat)
+      const override {
+    PANIC(sym_is_contiguous);
   }
   bool is_strides_like(const TensorImpl* self, at::MemoryFormat)
       const override {
@@ -145,3 +149,4 @@ void PyInterpreter::disarm() noexcept {
 }
 
 } // namespace c10::impl
+C10_DIAGNOSTIC_POP()

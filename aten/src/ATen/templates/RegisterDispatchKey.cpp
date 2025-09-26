@@ -1,10 +1,3 @@
-// required for old g++ to compile PRId64 macros, see
-// https://github.com/pytorch/pytorch/issues/3571
-// for context
-#ifndef __STDC_FORMAT_MACROS
-#define __STDC_FORMAT_MACROS
-#endif
-
 // an external backend might generate file within its code tree
 // and check all the source files within the tree with clang-format.
 // so, disable it since the backend might have a different config.
@@ -12,13 +5,11 @@
 
 // NOTE: This condition is true for all PyTorch internal libraries, it
 //       just excludes external projects such as torch_xla which
-//       re-use some of the PyTorch codegen machinery.
+//       reuse some of the PyTorch codegen machinery.
 #if defined(CAFFE2_BUILD_MAIN_LIB)        || \
     defined(TORCH_CUDA_BUILD_MAIN_LIB)    || \
     defined(TORCH_HIP_BUILD_MAIN_LIB)     || \
-    defined(TORCH_XPU_BUILD_MAIN_LIB)     || \
-    defined(TORCH_CUDA_CU_BUILD_MAIN_LIB) || \
-    defined(TORCH_CUDA_CPP_BUILD_MAIN_LIB)
+    defined(TORCH_XPU_BUILD_MAIN_LIB)
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #endif
 

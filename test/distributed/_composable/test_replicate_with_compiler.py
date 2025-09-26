@@ -98,6 +98,8 @@ class ReplicateTest(MultiProcessInductorTestCase):
         self.create_pg(device)
         torch._dynamo.config.optimize_ddp = "python_reducer"
         torch.manual_seed(123)
+        if device_type == "xpu":
+            torch.use_deterministic_algorithms(True, warn_only=True)
         model = Net(checkpoint=checkpoint).to(device)
         input = torch.randn([1, DIM], device=device)
 
@@ -414,7 +416,7 @@ class DDP_TP_Test(InductorTestCase):
             # https://github.com/pytorch/pytorch/issues/127797#issuecomment-2291695474
             with self.assertRaisesRegex(
                 AssertionError,
-                "Expected ProxyTensor, got <class 'torch.distributed._tensor.api.DTensor'>",
+                "Expected ProxyTensor, got <class 'torch.distributed.tensor.DTensor'>",
             ):
                 loss.backward()
 

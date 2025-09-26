@@ -241,7 +241,7 @@ def wait_for_connection(addr, port, timeout=15, attempt_cnt=5):
         try:
             with socket.create_connection((addr, port), timeout=timeout):
                 return
-        except (ConnectionRefusedError, socket.timeout):  # noqa: PERF203
+        except (ConnectionRefusedError, TimeoutError):  # noqa: PERF203
             if i == attempt_cnt - 1:
                 raise
             time.sleep(timeout)
@@ -438,9 +438,7 @@ def build_torchvision(
         )
         build_vars += f"BUILD_VERSION={version}.dev{build_date}"
     elif build_version is not None:
-        build_vars += (
-            f"BUILD_VERSION={build_version} PYTORCH_VERSION={branch[1:].split('-')[0]}"
-        )
+        build_vars += f"BUILD_VERSION={build_version} PYTORCH_VERSION={branch[1:].split('-', maxsplit=1)[0]}"
     if host.using_docker():
         build_vars += " CMAKE_SHARED_LINKER_FLAGS=-Wl,-z,max-page-size=0x10000"
 
@@ -495,9 +493,7 @@ def build_torchdata(
         )
         build_vars += f"BUILD_VERSION={version}.dev{build_date}"
     elif build_version is not None:
-        build_vars += (
-            f"BUILD_VERSION={build_version} PYTORCH_VERSION={branch[1:].split('-')[0]}"
-        )
+        build_vars += f"BUILD_VERSION={build_version} PYTORCH_VERSION={branch[1:].split('-', maxsplit=1)[0]}"
     if host.using_docker():
         build_vars += " CMAKE_SHARED_LINKER_FLAGS=-Wl,-z,max-page-size=0x10000"
 
@@ -553,9 +549,7 @@ def build_torchtext(
         )
         build_vars += f"BUILD_VERSION={version}.dev{build_date}"
     elif build_version is not None:
-        build_vars += (
-            f"BUILD_VERSION={build_version} PYTORCH_VERSION={branch[1:].split('-')[0]}"
-        )
+        build_vars += f"BUILD_VERSION={build_version} PYTORCH_VERSION={branch[1:].split('-', maxsplit=1)[0]}"
     if host.using_docker():
         build_vars += " CMAKE_SHARED_LINKER_FLAGS=-Wl,-z,max-page-size=0x10000"
 
@@ -613,9 +607,7 @@ def build_torchaudio(
         )
         build_vars += f"BUILD_VERSION={version}.dev{build_date}"
     elif build_version is not None:
-        build_vars += (
-            f"BUILD_VERSION={build_version} PYTORCH_VERSION={branch[1:].split('-')[0]}"
-        )
+        build_vars += f"BUILD_VERSION={build_version} PYTORCH_VERSION={branch[1:].split('-', maxsplit=1)[0]}"
     if host.using_docker():
         build_vars += " CMAKE_SHARED_LINKER_FLAGS=-Wl,-z,max-page-size=0x10000"
 
@@ -1012,7 +1004,7 @@ if __name__ == "__main__":
         install_condaforge_python(host, args.python_version)
         sys.exit(0)
 
-    python_version = args.python_version if args.python_version is not None else "3.9"
+    python_version = args.python_version if args.python_version is not None else "3.10"
 
     if args.use_torch_from_pypi:
         configure_system(host, compiler=args.compiler, python_version=python_version)

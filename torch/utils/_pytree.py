@@ -20,7 +20,6 @@ import functools
 import importlib
 import importlib.metadata
 import json
-import sys
 import threading
 import types
 import warnings
@@ -42,6 +41,8 @@ from typing import (
     Union,
 )
 from typing_extensions import deprecated, NamedTuple, Self
+
+from torch.torch_version import TorchVersion as _TorchVersion
 
 
 __all__ = [
@@ -97,24 +98,24 @@ NO_SERIALIZED_TYPE_NAME_FOUND = "NO_SERIALIZED_TYPE_NAME_FOUND"
 
 
 class KeyEntry(Protocol):
-    def __hash__(self) -> int:
-        ...
+    def __hash__(self) -> int: ...
 
-    def __eq__(self, other: object) -> bool:
-        ...
+    def __eq__(self, other: object) -> bool: ...
 
-    def __str__(self) -> str:
-        ...
+    def __str__(self) -> str: ...
 
-    def get(self, parent: Any) -> Any:
-        ...
+    def get(self, parent: Any) -> Any: ...
 
 
 class EnumEncoder(json.JSONEncoder):
-    def default(self, obj: object) -> str:
+    def default(self, obj: object) -> Union[str, dict[str, Any]]:
         if isinstance(obj, Enum):
-            return obj.value  # type: ignore[no-any-return]
-        return super().default(obj)  # type: ignore[no-any-return]
+            return {
+                "__enum__": True,
+                "fqn": f"{obj.__class__.__module__}:{obj.__class__.__qualname__}",
+                "name": obj.name,
+            }
+        return cast(str, super().default(obj))
 
 
 Context = Any
@@ -170,15 +171,23 @@ SERIALIZED_TYPE_TO_PYTHON_TYPE: dict[str, type[Any]] = {}
 # NB: we try really hard to not import _cxx_pytree (which depends on optree)
 # as much as possible. This is for isolation: a user who is not using C++ pytree
 # shouldn't pay for it, and it helps makes things like cpython upgrades easier.
+_optree_minimum_version = _TorchVersion("0.13.0")
 try:
     _optree_version = importlib.metadata.version("optree")
 except importlib.metadata.PackageNotFoundError:
-    # optree was not imported
+    # No optree package found
     _cxx_pytree_dynamo_traceable = _cxx_pytree_exists = False
+    _optree_version = _TorchVersion("0.0.0a0")
 else:
-    # optree was imported
-    _cxx_pytree_exists = True
-    _cxx_pytree_dynamo_traceable = True
+    _optree_version = _TorchVersion(_optree_version)
+    if _optree_version < _optree_minimum_version:
+        # optree package less than our required minimum version.
+        # Pretend the optree package doesn't exist.
+        # NB: We will raise ImportError if the user directly tries to
+        # `import torch.utils._cxx_pytree` (look in that file for the check).
+        _cxx_pytree_dynamo_traceable = _cxx_pytree_exists = False
+    else:
+        _cxx_pytree_dynamo_traceable = _cxx_pytree_exists = True
 
 _cxx_pytree_imported = False
 _cxx_pytree_pending_imports: list[Any] = []
@@ -360,7 +369,7 @@ def register_dataclass(
 
     def _flatten_fn_with_keys(obj: Any) -> tuple[list[Any], Context]:
         flattened, (flat_names, _none_names) = _flatten_fn(obj)  # type: ignore[misc]
-        return [(MappingKey(k), v) for k, v in zip(flat_names, flattened)], flat_names
+        return [(GetAttrKey(k), v) for k, v in zip(flat_names, flattened)], flat_names
 
     _private_register_pytree_node(
         cls,
@@ -743,7 +752,7 @@ def _tuple_flatten(d: tuple[T, ...]) -> tuple[list[T], Context]:
 
 
 def _tuple_flatten_with_keys(
-    d: tuple[T, ...]
+    d: tuple[T, ...],
 ) -> tuple[list[tuple[KeyEntry, T]], Context]:
     values, context = _tuple_flatten(d)
     return [(SequenceKey(i), v) for i, v in enumerate(values)], context
@@ -771,7 +780,7 @@ def _dict_flatten(d: dict[Any, T]) -> tuple[list[T], Context]:
 
 
 def _dict_flatten_with_keys(
-    d: dict[Any, T]
+    d: dict[Any, T],
 ) -> tuple[list[tuple[KeyEntry, T]], Context]:
     values, context = _dict_flatten(d)
     return [(MappingKey(k), v) for k, v in zip(context, values)], context
@@ -835,7 +844,7 @@ def _ordereddict_flatten(d: OrderedDict[Any, T]) -> tuple[list[T], Context]:
 
 
 def _ordereddict_flatten_with_keys(
-    d: OrderedDict[Any, T]
+    d: OrderedDict[Any, T],
 ) -> tuple[list[tuple[KeyEntry, T]], Context]:
     values, context = _ordereddict_flatten(d)
     return [(MappingKey(k), v) for k, v in zip(context, values)], context
@@ -858,7 +867,7 @@ def _defaultdict_flatten(d: defaultdict[Any, T]) -> tuple[list[T], Context]:
 
 
 def _defaultdict_flatten_with_keys(
-    d: defaultdict[Any, T]
+    d: defaultdict[Any, T],
 ) -> tuple[list[tuple[KeyEntry, T]], Context]:
     values, context = _defaultdict_flatten(d)
     _, dict_context = context
@@ -1021,9 +1030,9 @@ def tree_is_leaf(
     False
     >>> tree_is_leaf((1, 2, 3), is_leaf=lambda x: isinstance(x, tuple))
     True
-    >>> tree_is_leaf({'a': 1, 'b': 2, 'c': 3})
+    >>> tree_is_leaf({"a": 1, "b": 2, "c": 3})
     False
-    >>> tree_is_leaf({'a': 1, 'b': 2, 'c': None})
+    >>> tree_is_leaf({"a": 1, "b": 2, "c": None})
     False
     """
     if is_leaf is not None and is_leaf(tree):
@@ -1203,6 +1212,26 @@ class TreeSpec:
 
         return unflatten_fn(child_pytrees, self.context)
 
+    def __hash__(self) -> int:
+        node_type = self.type
+        if node_type is defaultdict:
+            default_factory, dict_context = self.context
+            hashable_context = (default_factory, tuple(dict_context))
+        elif node_type in (dict, OrderedDict):
+            hashable_context = tuple(self.context)
+        elif node_type is None or node_type in BUILTIN_TYPES:
+            hashable_context = self.context
+        elif isinstance(self.context, ConstantNode):
+            hashable_context = self.context.value
+        else:
+            # The context for user-defined node types might not be hashable.
+            # Ignore it for hashing.
+            # This does not break the correctness that equal objects imply the
+            # same hash. This might increase the hash collision rate, but we
+            # don't care about that.
+            hashable_context = None
+        return hash((node_type, hashable_context, tuple(self.children_specs)))
+
 
 # NOTE: subclassing a dataclass is subtle. In order to enable reasoning about
 # this class with `dataclasses.fields`, etc., while having a simplified
@@ -1312,9 +1341,9 @@ def tree_map(
 
     See also :func:`tree_map_`.
 
-    >>> tree_map(lambda x: x + 1, {'x': 7, 'y': (42, 64)})
+    >>> tree_map(lambda x: x + 1, {"x": 7, "y": (42, 64)})
     {'x': 8, 'y': (43, 65)}
-    >>> tree_map(lambda x: x is None, {'x': 7, 'y': (42, 64), 'z': None})
+    >>> tree_map(lambda x: x is None, {"x": 7, "y": (42, 64), "z": None})
     {'x': False, 'y': (False, False), 'z': True}
 
     If multiple inputs are given, the structure of the tree is taken from the first input;
@@ -1382,10 +1411,7 @@ def tree_map_(
 
 Type2 = tuple[type[T], type[S]]
 Type3 = tuple[type[T], type[S], type[U]]
-if sys.version_info >= (3, 10):
-    TypeAny = Union[type[Any], tuple[type[Any], ...], types.UnionType]
-else:
-    TypeAny = Union[type[Any], tuple[type[Any], ...]]
+TypeAny = Union[type[Any], tuple[type[Any], ...], types.UnionType]
 
 Fn2 = Callable[[Union[T, S]], R]
 Fn3 = Callable[[Union[T, S, U]], R]
@@ -1398,29 +1424,28 @@ MapOnlyFn = Callable[[T], Callable[[Any], Any]]
 # These specializations help with type inference on the lambda passed to this
 # function
 @overload
-def map_only(type_or_types_or_pred: type[T], /) -> MapOnlyFn[Fn[T, Any]]:
-    ...
+def map_only(type_or_types_or_pred: type[T], /) -> MapOnlyFn[Fn[T, Any]]: ...
 
 
 @overload
-def map_only(type_or_types_or_pred: Type2[T, S], /) -> MapOnlyFn[Fn2[T, S, Any]]:
-    ...
+def map_only(type_or_types_or_pred: Type2[T, S], /) -> MapOnlyFn[Fn2[T, S, Any]]: ...
 
 
 @overload
-def map_only(type_or_types_or_pred: Type3[T, S, U], /) -> MapOnlyFn[Fn3[T, S, U, Any]]:
-    ...
+def map_only(
+    type_or_types_or_pred: Type3[T, S, U], /
+) -> MapOnlyFn[Fn3[T, S, U, Any]]: ...
 
 
 # This specialization is needed for the implementations below that call
 @overload
-def map_only(type_or_types_or_pred: TypeAny, /) -> MapOnlyFn[FnAny[Any]]:
-    ...
+def map_only(type_or_types_or_pred: TypeAny, /) -> MapOnlyFn[FnAny[Any]]: ...
 
 
 @overload
-def map_only(type_or_types_or_pred: Callable[[Any], bool], /) -> MapOnlyFn[FnAny[Any]]:
-    ...
+def map_only(
+    type_or_types_or_pred: Callable[[Any], bool], /
+) -> MapOnlyFn[FnAny[Any]]: ...
 
 
 def map_only(
@@ -1444,10 +1469,7 @@ def map_only(
 
     You can also directly use 'tree_map_only'
     """
-    if isinstance(type_or_types_or_pred, (type, tuple)) or (
-        sys.version_info >= (3, 10)
-        and isinstance(type_or_types_or_pred, types.UnionType)
-    ):
+    if isinstance(type_or_types_or_pred, (type, tuple, types.UnionType)):
 
         def pred(x: Any) -> bool:
             return isinstance(x, type_or_types_or_pred)  # type: ignore[arg-type]
@@ -1476,8 +1498,7 @@ def tree_map_only(
     func: Fn[T, Any],
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
-) -> PyTree:
-    ...
+) -> PyTree: ...
 
 
 @overload
@@ -1487,8 +1508,7 @@ def tree_map_only(
     func: Fn2[T, S, Any],
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
-) -> PyTree:
-    ...
+) -> PyTree: ...
 
 
 @overload
@@ -1498,8 +1518,7 @@ def tree_map_only(
     func: Fn3[T, S, U, Any],
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
-) -> PyTree:
-    ...
+) -> PyTree: ...
 
 
 @overload
@@ -1509,8 +1528,7 @@ def tree_map_only(
     func: FnAny[Any],
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
-) -> PyTree:
-    ...
+) -> PyTree: ...
 
 
 @overload
@@ -1520,8 +1538,7 @@ def tree_map_only(
     func: FnAny[Any],
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
-) -> PyTree:
-    ...
+) -> PyTree: ...
 
 
 def tree_map_only(
@@ -1541,8 +1558,7 @@ def tree_map_only_(
     func: Fn[T, Any],
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
-) -> PyTree:
-    ...
+) -> PyTree: ...
 
 
 @overload
@@ -1552,8 +1568,7 @@ def tree_map_only_(
     func: Fn2[T, S, Any],
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
-) -> PyTree:
-    ...
+) -> PyTree: ...
 
 
 @overload
@@ -1563,8 +1578,7 @@ def tree_map_only_(
     func: Fn3[T, S, U, Any],
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
-) -> PyTree:
-    ...
+) -> PyTree: ...
 
 
 @overload
@@ -1574,8 +1588,7 @@ def tree_map_only_(
     func: FnAny[Any],
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
-) -> PyTree:
-    ...
+) -> PyTree: ...
 
 
 @overload
@@ -1585,8 +1598,7 @@ def tree_map_only_(
     func: FnAny[Any],
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
-) -> PyTree:
-    ...
+) -> PyTree: ...
 
 
 def tree_map_only_(
@@ -1624,8 +1636,7 @@ def tree_all_only(
     pred: Fn[T, bool],
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
-) -> bool:
-    ...
+) -> bool: ...
 
 
 @overload
@@ -1635,8 +1646,7 @@ def tree_all_only(
     pred: Fn2[T, S, bool],
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
-) -> bool:
-    ...
+) -> bool: ...
 
 
 @overload
@@ -1646,8 +1656,7 @@ def tree_all_only(
     pred: Fn3[T, S, U, bool],
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
-) -> bool:
-    ...
+) -> bool: ...
 
 
 def tree_all_only(
@@ -1668,8 +1677,7 @@ def tree_any_only(
     pred: Fn[T, bool],
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
-) -> bool:
-    ...
+) -> bool: ...
 
 
 @overload
@@ -1679,8 +1687,7 @@ def tree_any_only(
     pred: Fn2[T, S, bool],
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
-) -> bool:
-    ...
+) -> bool: ...
 
 
 @overload
@@ -1690,8 +1697,7 @@ def tree_any_only(
     pred: Fn3[T, S, U, bool],
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
-) -> bool:
-    ...
+) -> bool: ...
 
 
 def tree_any_only(
@@ -1806,6 +1812,18 @@ def _treespec_to_json(treespec: TreeSpec) -> _TreeSpecSchema:
     return _TreeSpecSchema(serialized_type_name, serialized_context, child_schemas)
 
 
+def enum_object_hook(obj: dict[str, Any]) -> Union[Enum, dict[str, Any]]:
+    if "__enum__" in obj:
+        modname, _, classname = obj["fqn"].partition(":")
+        mod = importlib.import_module(modname)
+        enum_cls = mod
+        for attr in classname.split("."):
+            enum_cls = getattr(enum_cls, attr)
+        enum_cls = cast(type[Enum], enum_cls)
+        return enum_cls[obj["name"]]
+    return obj
+
+
 def _json_to_treespec(json_schema: DumpableContext) -> TreeSpec:
     if (
         json_schema["type"] is None
@@ -1816,7 +1834,7 @@ def _json_to_treespec(json_schema: DumpableContext) -> TreeSpec:
 
     if json_schema["type"] not in SERIALIZED_TYPE_TO_PYTHON_TYPE:
         raise NotImplementedError(
-            f'Deserializing {json_schema["type"]} in pytree is not registered.',
+            f"Deserializing {json_schema['type']} in pytree is not registered.",
         )
 
     typ = SERIALIZED_TYPE_TO_PYTHON_TYPE[json_schema["type"]]
@@ -1824,7 +1842,7 @@ def _json_to_treespec(json_schema: DumpableContext) -> TreeSpec:
 
     if serialize_node_def.from_dumpable_context is None:
         try:
-            context = json.loads(json_schema["context"])
+            context = json.loads(json_schema["context"], object_hook=enum_object_hook)
         except TypeError as ex:
             raise TypeError(
                 "Unable to deserialize context. "

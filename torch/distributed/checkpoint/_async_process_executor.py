@@ -4,6 +4,7 @@ import logging
 import os
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
+from datetime import timedelta
 from enum import Enum
 from typing import Any, Optional, Union
 from uuid import uuid4
@@ -44,6 +45,8 @@ class _AsyncCheckpointRequest:
     checkpoint_request_id: _CheckpointRequestIdentifier
     storage_writer: Optional[StorageWriter] = None
     planner: Optional[SavePlanner] = None
+    no_dist: bool = False
+    use_collectives: bool = True
 
 
 @dataclass(init=False)
@@ -87,28 +90,68 @@ class _AsyncCheckpointProcess:
         pg_init_info: _ProcessGroupInitInfo,
     ):
         self.ctx = mp.get_context("spawn")
-        self._mp_queue_send: mp.Queue = self.ctx.Queue()
-        self._mp_queue_recv: mp.Queue = self.ctx.Queue()
+        self._process_pipe, child_end = self.ctx.Pipe()
 
         self._save_process = self.ctx.Process(
             target=self._checkpointing_subprocess,
             args=(
                 pg_init_info,
-                self._mp_queue_send,
-                self._mp_queue_recv,
+                child_end,
             ),
             daemon=True,
         )
 
         self._save_process.start()
-        response = self._wait_for_response()
+
+        # Close the parent's copy of child end after we pass it into the child,
+        # so the recv()s on it will fail-fast if the child process dies.
+        child_end.close()
+
+        # Wait for the checkpoint background process to initialize.
+        # Using default GLOO init timeout.
+        response = self._wait_for_response(timeout=1800)
         assert response == _CheckpointSaveProcessControlOpts.INIT_COMPLETE
 
     def __del__(self) -> None:
         if self._save_process.is_alive():
-            logger.info("Terminating the checkpoint background process...")
-            self._mp_queue_send.put(_CheckpointSaveProcessControlOpts.TERMINATE)
+            try:
+                logger.info("Terminating the checkpoint background process.")
+                self._send(_CheckpointSaveProcessControlOpts.TERMINATE)
+                self._save_process.join(timeout=5)
+            finally:
+                if self._save_process.is_alive():
+                    logger.warning(
+                        "Checkpoint background process is still alive after termination request. Sending SIGTERM."
+                    )
+                    self._save_process.terminate()
+
+    def _send(self, data: Any) -> None:
+        self._process_pipe.send(data)
+
+    def _wait_for_response(self, timeout: Optional[float] = None) -> Any:
+        if not self._save_process.is_alive():
+            logger.info("Checkpoint background process is dead calling join()...")
             self._save_process.join()
+            raise RuntimeError(
+                f"Checkpoint background process is dead. Exit code: {self._save_process.exitcode}"
+            )
+
+        if timeout is not None and not self._process_pipe.poll(timeout=timeout):
+            raise RuntimeError(
+                f"Timed out after {timeout}s while waiting for response from checkpointer process pid: {self._save_process.pid}"
+            )
+
+        try:
+            response = self._process_pipe.recv()
+        except EOFError:
+            raise RuntimeError(  # noqa: B904
+                f"Checkpoint background process is dead. Exit code: {self._save_process.exitcode}"
+            )
+
+        if isinstance(response, BaseException):
+            raise response
+
+        return response
 
     def save(
         self,
@@ -117,6 +160,8 @@ class _AsyncCheckpointProcess:
         checkpoint_id: Union[str, os.PathLike, None] = None,
         storage_writer: Optional[StorageWriter] = None,
         planner: Optional[SavePlanner] = None,
+        no_dist: bool = False,
+        use_collectives: bool = True,
     ) -> Metadata:
         # Create a unique identifier to locate requests/responses
         # from the checkpoint daemon process.
@@ -126,21 +171,13 @@ class _AsyncCheckpointProcess:
             checkpoint_request_id=checkpoint_request_id,
             storage_writer=storage_writer,
             planner=planner,
+            no_dist=no_dist,
+            use_collectives=use_collectives,
         )
-        self._mp_queue_send.put(async_cp_request)
+        self._send(async_cp_request)
         result = self._wait_for_response()
         assert isinstance(result, Metadata)
         return result
-
-    def _wait_for_response(self) -> Any:
-        if not self._save_process.is_alive():
-            logger.info("Checkpoint background process is dead calling join()...")
-            self._save_process.join()
-            raise RuntimeError("Checkpoint background process is dead.")
-        response = self._mp_queue_recv.get()
-        if isinstance(response, BaseException):
-            raise response
-        return response
 
     @staticmethod
     def _execute_save(
@@ -149,6 +186,8 @@ class _AsyncCheckpointProcess:
         checkpoint_request_id: _CheckpointRequestIdentifier,
         storage_writer: Optional[StorageWriter] = None,
         planner: Optional[SavePlanner] = None,
+        no_dist: bool = False,
+        use_collectives: bool = True,
     ) -> Metadata:
         from torch.distributed.checkpoint.state_dict_saver import save
 
@@ -157,15 +196,18 @@ class _AsyncCheckpointProcess:
             checkpoint_id=checkpoint_request_id.checkpoint_id,
             storage_writer=storage_writer,
             planner=planner,
+            no_dist=no_dist,
+            use_collectives=use_collectives,
         )
         return metadata
 
     @staticmethod
     def _checkpointing_subprocess(
         pg_init_info: _ProcessGroupInitInfo,
-        recv: mp.Queue,
-        send: mp.Queue,
+        parent_conn,
     ) -> None:
+        # Phase 1: Process Group Initialization
+        # Only needs to execute once during the lifetime of the checkpoint background process.
         try:
             _init_logger(pg_init_info.global_rank)
 
@@ -181,16 +223,25 @@ class _AsyncCheckpointProcess:
                 "Initializing dist.ProcessGroup in checkpoint background process"
             )
             # NOTE: GLOO backend is enforced here.
-            dist.init_process_group(backend=dist.Backend.GLOO)
+            dist.init_process_group(
+                backend=dist.Backend.GLOO, timeout=timedelta(seconds=600)
+            )
             dist.barrier()
 
             logger.info("Checkpoint background process is running...")
-            send.put(_CheckpointSaveProcessControlOpts.INIT_COMPLETE)
+            parent_conn.send(_CheckpointSaveProcessControlOpts.INIT_COMPLETE)
+        except BaseException as e:  # noqa: B036
+            logger.error(
+                f"Checkpoint background process failed during initialization: {e}"  # noqa: G004
+            )
+            parent_conn.send(e)
+            return
 
-            # Serving loop.
+        # Phase 2: Serving Loop
+        try:
             while True:
                 logger.info("Waiting for checkpoint save request...")
-                obj = recv.get()
+                obj = parent_conn.recv()
                 if (
                     isinstance(obj, _CheckpointSaveProcessControlOpts)
                     and obj == _CheckpointSaveProcessControlOpts.TERMINATE
@@ -202,25 +253,29 @@ class _AsyncCheckpointProcess:
                     f"Received async checkpoint request with id={obj.checkpoint_request_id.checkpoint_id}"  # noqa: G004
                 )
 
-                response = _AsyncCheckpointProcess._execute_save(
-                    obj.staged_state_dict,
-                    checkpoint_request_id=obj.checkpoint_request_id,
-                    storage_writer=obj.storage_writer,
-                    planner=obj.planner,
-                )
-                send.put(response)
-                logger.info(
-                    f"Submitted checkpoint save request for checkpoint_id={obj.checkpoint_request_id}"  # noqa: G004
-                )
-        except BaseException as e:
-            logger.error(
-                f"Checkpoint background process encountered an exception: {e}"  # noqa: G004
-            )
-            send.put(e)
-            raise
+                try:
+                    response = _AsyncCheckpointProcess._execute_save(
+                        obj.staged_state_dict,
+                        checkpoint_request_id=obj.checkpoint_request_id,
+                        storage_writer=obj.storage_writer,
+                        planner=obj.planner,
+                        no_dist=obj.no_dist,
+                        use_collectives=obj.use_collectives,
+                    )
+                    parent_conn.send(response)
+                    logger.info(
+                        f"Completed checkpoint save request for checkpoint_id={obj.checkpoint_request_id}"  # noqa: G004
+                    )
+                except BaseException as e:  # noqa: B036
+                    logger.error(
+                        f"Checkpoint save failed for checkpoint_id={obj.checkpoint_request_id.checkpoint_id}: {e}"  # noqa: G004
+                    )
+                    parent_conn.send(e)
+                    # Continue serving loop - don't exit process
         finally:
             logger.info("Checkpoint background process is shutting down...")
             dist.destroy_process_group()
+            parent_conn.close()
 
 
 _CHECKPOINT_PROCESS: Optional[_AsyncCheckpointProcess] = None
@@ -234,11 +289,13 @@ class _ProcessBasedAsyncCheckpointExecutor(_AsyncCheckpointExecutor):
     def _execute_save_impl(
         *,
         pg_init_info: Optional[_ProcessGroupInitInfo],
-        staged_state_dict: STATE_DICT_TYPE,
+        staging_future_or_state_dict: Union[Future[STATE_DICT_TYPE], STATE_DICT_TYPE],
         checkpoint_id: Union[str, os.PathLike, None] = None,
         storage_writer: Optional[StorageWriter] = None,
         planner: Optional[SavePlanner] = None,
         process_group: Optional[dist.ProcessGroup] = None,
+        no_dist: bool = False,
+        use_collectives: bool = True,
     ) -> Metadata:
         global _CHECKPOINT_PROCESS
         if _CHECKPOINT_PROCESS is None:
@@ -256,21 +313,30 @@ class _ProcessBasedAsyncCheckpointExecutor(_AsyncCheckpointExecutor):
             create_checkpoint_daemon_process()
 
         assert _CHECKPOINT_PROCESS is not None
+        staged_state_dict = (
+            staging_future_or_state_dict.result()
+            if isinstance(staging_future_or_state_dict, Future)
+            else staging_future_or_state_dict
+        )
         return _CHECKPOINT_PROCESS.save(
             staged_state_dict=staged_state_dict,
             checkpoint_id=checkpoint_id,
             storage_writer=storage_writer,
             planner=planner,
+            no_dist=no_dist,
+            use_collectives=use_collectives,
         )
 
     def execute_save(
         self,
-        staged_state_dict: STATE_DICT_TYPE,
+        staging_future_or_state_dict: Union[Future[STATE_DICT_TYPE], STATE_DICT_TYPE],
         *,
         checkpoint_id: Union[str, os.PathLike, None] = None,
         storage_writer: Optional[StorageWriter] = None,
         planner: Optional[SavePlanner] = None,
         process_group: Optional[dist.ProcessGroup] = None,
+        no_dist: bool = False,
+        use_collectives: bool = True,
     ) -> Future:
         """
         NOTE:
@@ -297,10 +363,12 @@ class _ProcessBasedAsyncCheckpointExecutor(_AsyncCheckpointExecutor):
         f: Future = self._executor.submit(
             self._execute_save_impl,
             pg_init_info=pg_init_info,
-            staged_state_dict=staged_state_dict,
+            staging_future_or_state_dict=staging_future_or_state_dict,
             checkpoint_id=checkpoint_id,
             storage_writer=storage_writer,
             planner=planner,
+            no_dist=no_dist,
+            use_collectives=use_collectives,
         )
         f.add_done_callback(lambda f: self._executor.shutdown(wait=False))
 

@@ -258,26 +258,26 @@ TORCH_META_FUNC(neg)(const Tensor& self) {
 
 TORCH_META_FUNC(trunc) (const Tensor& self) {
   // Note: this is consistent with NumPy
-  TORCH_CHECK(!self.is_complex(),
+  TORCH_CHECK_NOT_IMPLEMENTED(!self.is_complex(),
     "trunc is not supported for complex inputs");
   build_borrowing_unary_op(maybe_get_output(), self);
 }
 
 TORCH_META_FUNC(floor) (const Tensor& self) {
   // Note: this is consistent with NumPy
-  TORCH_CHECK(!self.is_complex(),
+  TORCH_CHECK_NOT_IMPLEMENTED(!self.is_complex(),
     "floor is not supported for complex inputs");
   build_borrowing_unary_op(maybe_get_output(), self);
 }
 
 TORCH_META_FUNC(sign) (const Tensor& self) {
-  TORCH_CHECK(!self.is_complex(),
+  TORCH_CHECK_NOT_IMPLEMENTED(!self.is_complex(),
               "Unlike NumPy, torch.sign is not intended to support complex numbers. Please use torch.sgn instead.");
   build_borrowing_unary_op(maybe_get_output(), self);
 }
 
 TORCH_META_FUNC(signbit) (const Tensor& self) {
-  TORCH_CHECK(!self.is_complex(), "signbit is not implemented for complex tensors.");
+  TORCH_CHECK_NOT_IMPLEMENTED(!self.is_complex(), "signbit is not implemented for complex tensors.");
   TORCH_CHECK(maybe_get_output().defined() ? maybe_get_output().dtype() == at::kBool : true,
               "signbit does not support non-boolean outputs.");
   build_borrowing_unary_force_boolean_op(maybe_get_output(), self);
@@ -285,7 +285,7 @@ TORCH_META_FUNC(signbit) (const Tensor& self) {
 
 TORCH_META_FUNC(ceil) (const Tensor& self) {
   // Note: this is consistent with NumPy
-  TORCH_CHECK(!self.is_complex(),
+  TORCH_CHECK_NOT_IMPLEMENTED(!self.is_complex(),
     "ceil is not supported for complex inputs");
   build_borrowing_unary_op(maybe_get_output(), self);
 }

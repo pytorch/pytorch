@@ -6,12 +6,15 @@
 #
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
+import os
 import sys
 import uuid
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional, Union
 
+import torch
 import torch.distributed.elastic.rendezvous.registry as rdzv_registry
+from torch._utils_internal import get_default_numa_options
 from torch.distributed.elastic import events, metrics
 from torch.distributed.elastic.agent.server.api import WorkerSpec
 from torch.distributed.elastic.agent.server.local_elastic_agent import LocalElasticAgent
@@ -24,6 +27,7 @@ from torch.distributed.elastic.multiprocessing.errors import ChildFailedError
 from torch.distributed.elastic.rendezvous import RendezvousParameters
 from torch.distributed.elastic.rendezvous.utils import parse_rendezvous_endpoint
 from torch.distributed.elastic.utils.logging import get_logger
+from torch.numa.binding import NumaOptions
 
 
 __all__ = ["LaunchConfig", "elastic_launch", "launch_agent"]
@@ -64,6 +68,9 @@ class LaunchConfig:
         local_addr: address of the local node if any. If not set, a lookup on the local
                 machine's FQDN will be performed.
         local_ranks_filter: ranks for which to show logs in console. If not set, show from all.
+        event_log_handler: name of the event logging handler as registered in
+          `elastic/events/handlers.py <https://docs.pytorch.org/docs/stable/elastic/events.html>`_.
+
 
     .. note::
         `rdzv_timeout` is a legacy argument that will be removed in future.
@@ -87,6 +94,9 @@ class LaunchConfig:
     log_line_prefix_template: Optional[str] = None
     metrics_cfg: dict[str, str] = field(default_factory=dict)
     local_addr: Optional[str] = None
+    event_log_handler: str = "null"
+    numa_options: Optional[NumaOptions] = None
+    signals_to_handle: str = "SIGTERM,SIGINT,SIGHUP,SIGQUIT"
 
     def __post_init__(self):
         default_timeout = 900
@@ -98,6 +108,15 @@ class LaunchConfig:
         # Post-processing to enable refactoring to introduce logs_specs due to non-torchrun API usage
         if self.logs_specs is None:
             self.logs_specs = DefaultLogsSpecs()
+
+        if (
+            self.numa_options is None
+            and torch.cuda.is_available()
+            # We assume local_rank n uses cuda device n.
+            and torch.cuda.device_count() == self.nproc_per_node
+        ):
+            self.numa_options = get_default_numa_options()
+            logger.info("Using default numa options = %r", self.numa_options)
 
 
 class elastic_launch:
@@ -194,18 +213,20 @@ def launch_agent(
 
     logger.info(
         "Starting elastic_operator with launch configs:\n"
-        "  entrypoint       : %(entrypoint)s\n"
-        "  min_nodes        : %(min_nodes)s\n"
-        "  max_nodes        : %(max_nodes)s\n"
-        "  nproc_per_node   : %(nproc_per_node)s\n"
-        "  run_id           : %(run_id)s\n"
-        "  rdzv_backend     : %(rdzv_backend)s\n"
-        "  rdzv_endpoint    : %(rdzv_endpoint)s\n"
-        "  rdzv_configs     : %(rdzv_configs)s\n"
-        "  max_restarts     : %(max_restarts)s\n"
-        "  monitor_interval : %(monitor_interval)s\n"
-        "  log_dir          : %(log_dir)s\n"
-        "  metrics_cfg      : %(metrics_cfg)s\n",
+        "  entrypoint         : %(entrypoint)s\n"
+        "  min_nodes          : %(min_nodes)s\n"
+        "  max_nodes          : %(max_nodes)s\n"
+        "  nproc_per_node     : %(nproc_per_node)s\n"
+        "  run_id             : %(run_id)s\n"
+        "  rdzv_backend       : %(rdzv_backend)s\n"
+        "  rdzv_endpoint      : %(rdzv_endpoint)s\n"
+        "  rdzv_configs       : %(rdzv_configs)s\n"
+        "  max_restarts       : %(max_restarts)s\n"
+        "  monitor_interval   : %(monitor_interval)s\n"
+        "  log_dir            : %(log_dir)s\n"
+        "  metrics_cfg        : %(metrics_cfg)s\n"
+        "  event_log_handler  : %(event_log_handler)s\n"
+        "  numa_options       : %(numa_options)s\n",
         {
             "entrypoint": entrypoint_name,
             "min_nodes": config.min_nodes,
@@ -219,6 +240,9 @@ def launch_agent(
             "monitor_interval": config.monitor_interval,
             "log_dir": config.logs_specs.root_log_dir,  # type: ignore[union-attr]
             "metrics_cfg": config.metrics_cfg,
+            "event_log_handler": config.event_log_handler,
+            "numa_options": config.numa_options,
+            "signals_to_handle": config.signals_to_handle,
         },
     )
 
@@ -234,6 +258,9 @@ def launch_agent(
 
     master_addr, master_port = _get_addr_and_port(rdzv_parameters)
 
+    # Set the signals to handle in the environment variable
+    os.environ["TORCHELASTIC_SIGNALS_TO_HANDLE"] = config.signals_to_handle
+
     spec = WorkerSpec(
         role=config.role,
         local_world_size=config.nproc_per_node,
@@ -245,6 +272,8 @@ def launch_agent(
         master_addr=master_addr,
         master_port=master_port,
         local_addr=config.local_addr,
+        event_log_handler=config.event_log_handler,
+        numa_options=config.numa_options,
     )
 
     agent = LocalElasticAgent(
@@ -260,7 +289,7 @@ def launch_agent(
 
         result = agent.run()
         # records that agent.run() has succeeded NOT that workers have succeeded
-        events.record(agent.get_event_succeeded())
+        events.record(agent.get_event_succeeded(), config.event_log_handler)
 
         if result.is_failed():
             # ChildFailedError is treated specially by @record
@@ -280,10 +309,10 @@ def launch_agent(
         # since this closes the rendezvous on this rdzv_id permanently and
         # prevents any additional scaling events
         shutdown_rdzv = False
-        events.record(agent.get_event_failed())
+        events.record(agent.get_event_failed(), config.event_log_handler)
         raise
     except Exception:
-        events.record(agent.get_event_failed())
+        events.record(agent.get_event_failed(), config.event_log_handler)
         raise
     finally:
         if shutdown_rdzv:

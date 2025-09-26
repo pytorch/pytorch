@@ -49,7 +49,7 @@ struct UndefinedGradCtor {
 
 struct NoCtor {
   Node* operator()(PyObject* args) {
-    throw std::runtime_error("Cannot construct");
+    TORCH_CHECK(false, "Cannot construct");
   }
 };
 
@@ -71,7 +71,7 @@ template <
     typename T,
     typename ValueT,
     typename ParamsT,
-    ValueT ParamsT::*ptr,
+    ValueT ParamsT::* ptr,
     typename ConvertArgT,
     PyObject* (*Convert)(ConvertArgT)>
 static PyObject* getTupleAttr(PyObject* obj, void* _unused) {
@@ -93,7 +93,7 @@ template <
     typename T,
     typename ValueT,
     typename ParamsT,
-    ValueT ParamsT::*ptr,
+    ValueT ParamsT::* ptr,
     typename ConvertArgT,
     PyObject* (*Convert)(ConvertArgT)>
 static PyObject* getValueAttr(PyObject* obj, void* _unused) {
