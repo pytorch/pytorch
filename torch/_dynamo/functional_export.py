@@ -28,7 +28,7 @@ log = logging.getLogger(__name__)
 
 def post_process_error_msg(
     constraint_violation_error: ConstraintViolationError,
-    mod: Callable[..., Any],
+    func: Callable[..., Any],
     args: Any,
     kwargs: Any,
 ):
@@ -38,8 +38,7 @@ def post_process_error_msg(
     """
     from torch.export._unlift import _get_input_paths, _replace_sources
 
-    assert isinstance(mod, torch.nn.Module)
-    orig_sig = inspect.signature(mod.forward)
+    orig_sig = inspect.signature(func)
     flat_input_paths = _get_input_paths((args, kwargs), orig_sig)
     constraint_violation_error.args = (
         _replace_sources(constraint_violation_error.args[0], flat_input_paths),
@@ -454,10 +453,12 @@ def _dynamo_graph_capture_for_export(
                 fake_mode,
             ).transform()
 
+            orig_callable = mod.forward if isinstance(mod, torch.nn.Module) else mod
+
             # Set up PyTree codegen for proper input/output handling
             transformed_graph.graph._codegen = _PyTreeCodeGen(
                 _PyTreeInfo(
-                    argument_names(inspect.signature(mod.forward), args, kwargs),  # type: ignore[attr-defined, arg-type]
+                    argument_names(inspect.signature(orig_callable), args, kwargs),  # type: ignore[attr-defined, arg-type]
                     in_spec,
                     out_spec,
                 )
@@ -490,7 +491,7 @@ def _dynamo_graph_capture_for_export(
                 dim_constraints.solve()
                 forced_specializations = dim_constraints.forced_specializations()
                 msg = dim_constraints.prettify_results(
-                    inspect.signature(mod.forward),  # type: ignore[attr-defined]
+                    inspect.signature(orig_callable),  # type: ignore[attr-defined]
                     dynamic_shapes,
                     constraint_violation_error,
                     forced_specializations,
@@ -519,7 +520,7 @@ def _dynamo_graph_capture_for_export(
                         )
             if constraint_violation_error:
                 constraint_violation_error = post_process_error_msg(
-                    constraint_violation_error, mod, args, kwargs
+                    constraint_violation_error, orig_callable, args, kwargs
                 )
                 raise constraint_violation_error
 
