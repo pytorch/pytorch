@@ -397,6 +397,21 @@ def create_call_function(nargs: int, push_null: bool) -> list[Instruction]:
     return [create_instruction("CALL_FUNCTION", arg=nargs)]
 
 
+def create_call_function_ex(has_kwargs: bool) -> list[Instruction]:
+    """
+    Assumes that in 3.14+, if has_kwargs=False, there is NOT a NULL
+    on the TOS for the kwargs. This utility function will add a PUSH_NULL.
+
+    If the caller has already pushed a NULL, then do not call this function -
+    just use create_instruction("CALL_FUNCTION_EX", arg=...).
+    """
+    insts = []
+    if sys.version_info >= (3, 14) and not has_kwargs:
+        insts.append(create_instruction("PUSH_NULL"))
+    insts.append(create_instruction("CALL_FUNCTION_EX", arg=int(has_kwargs)))
+    return insts
+
+
 def create_call_method(nargs: int) -> list[Instruction]:
     if sys.version_info >= (3, 12):
         return [create_instruction("CALL", arg=nargs)]
