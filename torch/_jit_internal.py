@@ -1444,7 +1444,8 @@ def container_checker(obj, target_type) -> bool:
         return True
     elif origin_type is Union or issubclass(
         # pyrefly: ignore  # bad-argument-type
-        origin_type, BuiltinUnionType
+        origin_type,
+        BuiltinUnionType,
     ):  # also handles Optional
         if obj is None:  # check before recursion because None is always fine
             return True

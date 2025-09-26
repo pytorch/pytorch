@@ -1519,7 +1519,9 @@ def load(
                         shared = False
                     overall_storage = torch.UntypedStorage.from_file(
                         # pyrefly: ignore  # no-matching-overload
-                        os.fspath(f), shared, size
+                        os.fspath(f),
+                        shared,
+                        size,
                     )
                 if weights_only:
                     try:

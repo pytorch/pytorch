@@ -7,7 +7,7 @@ If you are adding a new entry/functionality, please, add it to the
 here.
 """
 
-from torch.ao.quantization.qconfig import (
+from torch.ao.quantization.qconfig import (  # pyrefly: ignore  # deprecated
     _add_module_to_qconfig_obs_ctr,
     _assert_valid_qconfig,
     default_activation_only_qconfig,
@@ -27,6 +27,5 @@ from torch.ao.quantization.qconfig import (
     QConfig,
     qconfig_equals,
     QConfigAny,
-    # pyrefly: ignore  # deprecated
     QConfigDynamic,
 )

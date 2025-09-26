@@ -328,7 +328,9 @@ def deprecated():
         # public deprecated alias
         alias = typing_extensions.deprecated(
             # pyrefly: ignore  # bad-argument-type
-            warning_msg, category=UserWarning, stacklevel=1
+            warning_msg,
+            category=UserWarning,
+            stacklevel=1,
         )(func)
 
         alias.__name__ = public_name

@@ -755,7 +755,9 @@ class Tensor(torch._C.TensorBase):
                 "post accumulate grad hooks cannot be registered on non-leaf tensors"
             )
         if self._post_accumulate_grad_hooks is None:
-            self._post_accumulate_grad_hooks: dict[Any, Any] = OrderedDict() # pyrefly: ignore  # bad-assignment
+            self._post_accumulate_grad_hooks: dict[Any, Any] = (
+                OrderedDict()
+            )  # pyrefly: ignore  # bad-assignment
 
         from torch.utils.hooks import RemovableHandle
 
@@ -1055,7 +1057,9 @@ class Tensor(torch._C.TensorBase):
         if isinstance(split_size, (int, torch.SymInt)):
             return torch._VF.split(self, split_size, dim)  # type: ignore[attr-defined]
         else:
-            return torch._VF.split_with_sizes(self, split_size, dim) # pyrefly: ignore  # bad-argument-type
+            return torch._VF.split_with_sizes(
+                self, split_size, dim
+            )  # pyrefly: ignore  # bad-argument-type
 
     def unique(self, sorted=True, return_inverse=False, return_counts=False, dim=None):
         r"""Returns the unique elements of the input tensor.
@@ -1100,7 +1104,9 @@ class Tensor(torch._C.TensorBase):
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
     def __rsub__(self, other: Union["Tensor", int, float, bool, complex]) -> "Tensor":
-        return _C._VariableFunctions.rsub(self, other) # pyrefly: ignore  # no-matching-overload
+        return _C._VariableFunctions.rsub(
+            self, other
+        )  # pyrefly: ignore  # no-matching-overload
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
     def __rdiv__(self, other: Union["Tensor", int, float, bool, complex]) -> "Tensor":
@@ -1125,7 +1131,7 @@ class Tensor(torch._C.TensorBase):
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
     def __rmod__(self, other: Union["Tensor", int, float, bool, complex]) -> "Tensor":
-        return torch.remainder(other, self) # pyrefly: ignore  # no-matching-overload
+        return torch.remainder(other, self)  # pyrefly: ignore  # no-matching-overload
 
     def __format__(self, format_spec):
         if has_torch_function_unary(self):
@@ -1138,7 +1144,7 @@ class Tensor(torch._C.TensorBase):
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
     def __rpow__(self, other: Union["Tensor", int, float, bool, complex]) -> "Tensor":
-        return torch.pow(other, self) # pyrefly: ignore  # no-matching-overload
+        return torch.pow(other, self)  # pyrefly: ignore  # no-matching-overload
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
     def __floordiv__(self, other: Union["Tensor", int, float, bool]) -> "Tensor":  # type: ignore[override]
@@ -1154,13 +1160,17 @@ class Tensor(torch._C.TensorBase):
     def __rlshift__(
         self, other: Union["Tensor", int, float, bool, complex]
     ) -> "Tensor":
-        return torch.bitwise_left_shift(other, self) # pyrefly: ignore  # no-matching-overload
+        return torch.bitwise_left_shift(
+            other, self
+        )  # pyrefly: ignore  # no-matching-overload
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
     def __rrshift__(
         self, other: Union["Tensor", int, float, bool, complex]
     ) -> "Tensor":
-        return torch.bitwise_right_shift(other, self) # pyrefly: ignore  # no-matching-overload
+        return torch.bitwise_right_shift(
+            other, self
+        )  # pyrefly: ignore  # no-matching-overload
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
     def __rmatmul__(self, other: "Tensor") -> "Tensor":
@@ -1334,7 +1344,7 @@ class Tensor(torch._C.TensorBase):
 
         return self._typed_storage()._get_legacy_storage_class()
 
-    def refine_names(self, *names): # pyrefly: ignore  # bad-override
+    def refine_names(self, *names):  # pyrefly: ignore  # bad-override
         r"""Refines the dimension names of :attr:`self` according to :attr:`names`.
 
         Refining is a special case of renaming that "lifts" unnamed dimensions.
@@ -1378,7 +1388,7 @@ class Tensor(torch._C.TensorBase):
         names = resolve_ellipsis(names, self.names, "refine_names")
         return super().refine_names(names)
 
-    def align_to(self, *names): # pyrefly: ignore  # bad-override
+    def align_to(self, *names):  # pyrefly: ignore  # bad-override
         r"""Permutes the dimensions of the :attr:`self` tensor to match the order
         specified in :attr:`names`, adding size-one dims for any new names.
 
