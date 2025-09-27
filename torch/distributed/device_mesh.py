@@ -835,7 +835,8 @@ else:
         ) -> "DeviceMesh":
             """
             Helper method to create a DeviceMesh from tensor `pg_ranks_by_dim`. This is due to
-            the constraint of ProcessGroup API that all ranks have to call the PG creation API.
+            the constraint of ProcessGroup API that all ranks have to call the PG creation API
+            even if the rank is not in that PG.
             We will create a potentially very large number of DeviceMesh objects
             (e.g., on 1024 GPUs with TP=2, this could be up to 512 DeviceMeshes), only to throw
             them all away except when the mesh contains the current rank.
