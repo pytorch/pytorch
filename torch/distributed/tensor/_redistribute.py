@@ -202,10 +202,16 @@ def redistribute_local_tensor(
         for transform_info in transform_infos:
             i = transform_info.mesh_dim
             current, target = transform_info.src_dst_placements
-            device_mesh.size(mesh_dim=i)
+            num_chunks = device_mesh.size(mesh_dim=i)
 
             if current == target:
                 # short cut, just use the original local tensor
+                new_local_tensor = local_tensor
+                continue
+
+            if num_chunks == 1:
+                # short cut, if there's only one shard, we don't need to do any collective
+                # comm, just use the original local tensor
                 new_local_tensor = local_tensor
                 continue
 
