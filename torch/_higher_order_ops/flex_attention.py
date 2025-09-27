@@ -505,13 +505,6 @@ def flex_attention_fake_impl(
     ):
         return NotImplemented
 
-    # TODO: Figure out a better way to handle this for NJT than using sum()
-    if query.is_nested:
-        out = torch.empty_like(query, memory_format=torch.contiguous_format)
-        logsumexp = query.sum(dim=-1)
-        max_scores = query.max(dim=-1)[0]
-        return out, logsumexp, max_scores
-
     v_head_dim = value.size(-1)
     batch_size, num_heads, seq_len_q, _q_head_dim = query.shape
     logsumexp = query.new_empty(batch_size, num_heads, seq_len_q, dtype=torch.float32)
@@ -1266,7 +1259,7 @@ def flex_attention_backward_fake_tensor_mode(
         [
             (
                 torch.empty_like(buffer, memory_format=torch.contiguous_format)
-                if isinstance(buffer, torch.Tensor) and buffer.requires_grad
+                if isinstance(buffer, torch.Tensor)
                 else None
             )
             for buffer in score_mod_other_buffers
