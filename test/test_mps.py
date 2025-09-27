@@ -12546,6 +12546,13 @@ class TestConsistency(TestCaseMPS):
 
             self.assertEqual(half_out, full_out.to(dtype), atol=atol, rtol=rtol)
 
+    def test_grid_sampler_3d_nan(self, device):
+        input = torch.ones(1, 1, 3, 3, 3)
+        grid_nan = torch.tensor([[[[[torch.nan, 1., 1.], [1., 1., 1.]]]]])
+        out_cpu = torch.grid_sampler_3d(input, grid_nan, 0, 0, True)
+        out_mps = torch.grid_sampler_3d(input.to(device), grid_nan.to(device), 0, 0, True)
+        self.assertEqual(out_mps, out_cpu)
+
     def test_fmax_mixed_dtypes(self, device):
         # Regression tesing for https://github.com/pytorch/pytorch/issues/149951
         # fmax and fmin are implemented as binary metal shaders and they were implemented
