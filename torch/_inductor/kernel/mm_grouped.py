@@ -389,9 +389,9 @@ triton_grouped_mm_source = r"""
 {%- endif %}
                 mask = (offs_am[:, None] < m_size) & (offs_bn[None, :] < n_size)
 {%- if M_IS_VARYING or N_IS_VARYING %}
-                {{store_output(("idx_m", "idx_n"), "c", "mask", indent_width=16)}}
+                {{store_output(("idx_m", "idx_n"), "c", "mask", indent_width=16, val_shape=("BLOCK_M", "BLOCK_N"))}}
 {%- else %}
-                {{store_output(("g", "idx_m", "idx_n"), "c", "mask", indent_width=16)}}
+                {{store_output(("g", "idx_m", "idx_n"), "c", "mask", indent_width=16, val_shape=("BLOCK_M", "BLOCK_N"))}}
 {%- endif %}
                 tidx += NUM_SMS
 
@@ -491,7 +491,7 @@ def can_use_triton_kernel(
 ) -> bool:
     if not (
         torch.cuda.is_available()
-        and torch.cuda.get_device_capability() >= (9, 0)
+        and torch.cuda.get_device_capability() == (9, 0)
         and not torch.version.hip
     ):
         return False

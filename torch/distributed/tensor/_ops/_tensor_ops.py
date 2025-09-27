@@ -27,6 +27,8 @@ from torch.distributed.tensor._ops.utils import (
     normalize_dim,
     register_op_strategy,
     register_prop_rule,
+    shift_shard_dims_after_insert,
+    shift_shard_dims_after_remove,
 )
 from torch.distributed.tensor.placement_types import (
     Partial,
@@ -309,16 +311,11 @@ def select_int_strategy(op_schema: OpSchema) -> StrategyType:
         output_specs = input_specs
         if input_specs.is_sharded():
             # handle cases with sharded_dim != selected_dim
-            output_spec_placements = []
-            for placement in input_specs.placements:
-                if placement.is_shard():
-                    shard_dim = cast(Shard, placement).dim
-                    if shard_dim > selected_dim:
-                        shard_dim -= 1
-                    placement = Shard(dim=shard_dim)
-                output_spec_placements.append(placement)
+            output_placements = shift_shard_dims_after_remove(
+                input_specs.placements, selected_dim
+            )
             output_specs = DTensorSpec(
-                arg_spec.mesh, placements=tuple(output_spec_placements)
+                arg_spec.mesh, placements=tuple(output_placements)
             )
 
         select_strategy.strategies.append(
@@ -343,19 +340,10 @@ def select_backward_strategy(op_schema: OpSchema) -> OpStrategy:
     output_strategies: list[OpSpec] = []
     for placement_strategy in input_strategy.strategies:
         input_spec = placement_strategy.output_spec
-        output_spec_placements: list[Placement] = []
-        for placement in input_spec.placements:
-            if isinstance(placement, Shard):
-                shard_dim = placement.dim
-                if shard_dim >= dim:
-                    # NOTE: shard_dim is guaranteed to exist because
-                    # grad_input has one more dim than grad_output
-                    output_spec_placements.append(Shard(shard_dim + 1))
-                else:
-                    output_spec_placements.append(Shard(shard_dim))
-            else:
-                output_spec_placements.append(placement)
-        output_specs = DTensorSpec(input_spec.mesh, tuple(output_spec_placements))
+        # NOTE: shard_dim is guaranteed to exist because
+        # grad_input has one more dim than grad_output
+        output_placements = shift_shard_dims_after_insert(input_spec.placements, dim)
+        output_specs = DTensorSpec(input_spec.mesh, tuple(output_placements))
         output_strategies.append(
             OpSpec(output_specs=output_specs, input_specs=(input_spec,))
         )
@@ -724,20 +712,6 @@ def _derive_follow_placements_from_tuple_strategy(
     return follow_placements
 
 
-def normalize_shard_for_stack(
-    placements: Sequence[Placement], insert_dim: int = 0
-) -> Sequence[Placement]:
-    # stack op would "insert" new dim, so all sharded dim >= the inserted dim need to
-    # be normalized with the new Shard placement
-    normalized_placements: list[Placement] = []
-    for placement in placements:
-        if isinstance(placement, Shard) and placement.dim >= insert_dim:
-            normalized_placements.append(Shard(placement.dim + 1))
-        else:
-            normalized_placements.append(placement)
-    return normalized_placements
-
-
 @register_op_strategy(aten.stack.default, RuntimeSchemaInfo(1, needs_pytree=True))
 def stack_strategy(op_schema: OpSchema) -> StrategyType:
     args_schema = op_schema.args_schema
@@ -764,7 +738,9 @@ def stack_strategy(op_schema: OpSchema) -> StrategyType:
         for _ in range(len(input_tuple_strategy.children))
     )
 
-    follow_placements = normalize_shard_for_stack(follow_placements, dim)
+    # stack op would "insert" new dim, so all sharded dim >= the inserted dim need to
+    # be normalized with the new Shard placement
+    follow_placements = shift_shard_dims_after_insert(follow_placements, dim)
 
     for strategy in input_tuple_strategy.children:
         assert isinstance(strategy, OpStrategy)
@@ -1167,3 +1143,45 @@ def split_strategy(op_schema: OpSchema) -> OpStrategy:
         )
 
     return OpStrategy(all_strategies)
+
+
+# TODO: fix remaining failures in xfail("unbind") in test_dtensor_ops.py
+#       and remove this xfail item
+@register_op_strategy(aten.unbind.int, schema_info=RuntimeSchemaInfo(1))
+def gen_unbind_strategy(op_schema: OpSchema) -> StrategyType:
+    """Forward all shardings except the unbind dimension."""
+    input_strategy = op_schema.args_schema[0]
+    assert isinstance(input_strategy, OpStrategy)
+    input_ndim = input_strategy.ndim
+    input_shape = input_strategy.shape
+    unbind_dim = (
+        cast(int, op_schema.args_schema[1]) if len(op_schema.args_schema) > 1 else 0
+    )
+    unbind_dim = normalize_dim(unbind_dim, input_ndim)
+
+    mesh = input_strategy.mesh
+    unbind_strategy = OpStrategy([])
+    for arg_strategy in input_strategy.strategies:
+        arg_spec = arg_strategy.output_spec
+        if is_tensor_dim_sharded(arg_spec, dim=unbind_dim):
+            raise RuntimeError(
+                f"Attempted to unbind along the sharded dimension {unbind_dim}. ",
+                "It cannot be performed without redistribution, which is disallowed "
+                "by the current operator.",
+            )
+        # only add the strategy if the unbind dim is not sharded
+        output_placements = shift_shard_dims_after_remove(
+            arg_spec.placements, unbind_dim
+        )
+        output_specs = tuple(
+            DTensorSpec(mesh, tuple(output_placements))
+            for _ in range(input_shape[unbind_dim])
+        )
+        unbind_strategy.strategies.append(
+            OpSpec(
+                output_specs=output_specs,
+                input_specs=(arg_spec,),
+                redistribute_cost=[[0.0] * len(input_strategy.strategies)],
+            )
+        )
+    return unbind_strategy

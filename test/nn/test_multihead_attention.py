@@ -17,7 +17,6 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize as parametrize_test,
     run_tests,
-    skipIfRocm,
     TEST_NUMPY,
     TEST_WITH_CROSSREF,
 )
@@ -746,7 +745,6 @@ class TestMultiheadAttentionNN(NNTestCase):
 
 
 class TestMultiheadAttentionNNDeviceType(NNTestCase):
-    @skipIfRocm(msg="To investigate: yields NaN")
     def test_multihead_self_attn_two_masks_fast_path(self, device):
         """
         Multihead self-attention should give the same result on the fast path (BetterTransformer) as on the slow path
@@ -938,6 +936,26 @@ class TestMultiheadAttentionNNDeviceType(NNTestCase):
         ).eval()
         query = torch.randn(4, 4, 4, dtype=dtype, device=device)
         mha(query, query, query)
+
+    @dtypes(torch.double)
+    def test_fast_path_check_with_mask_does_not_break_in_compile(self, device, dtype):
+        # Test TransformerEncoder fast path determination with src_key_padding_mask set.
+        # Specifically, ensure the mask left-align check doesn't fail in torch.compile.
+        # See https://github.com/pytorch/pytorch/issues/163640
+        layer = nn.TransformerEncoderLayer(
+            d_model=512,
+            nhead=8,
+            batch_first=True,
+            dropout=0.1,
+            device=device,
+            dtype=dtype,
+        )
+        encoder = nn.TransformerEncoder(layer, num_layers=2).eval()
+        encoder = torch.compile(encoder, fullgraph=True)
+        x = torch.randn(1, 41, 512, dtype=dtype, device=device)
+        pad_mask = torch.rand(1, 41, device=device) > 0.5
+        pad_mask[..., 0] = True
+        encoder(x, mask=None, src_key_padding_mask=pad_mask)
 
     @dtypes(torch.double)
     @torch.no_grad()
