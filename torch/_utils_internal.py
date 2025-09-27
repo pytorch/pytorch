@@ -9,7 +9,6 @@ from typing import Any, Callable, Optional, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
-from torch._strobelight.compile_time_profiler import StrobelightCompileTimeProfiler
 
 
 _T = TypeVar("_T")
@@ -26,6 +25,7 @@ if os.environ.get("TORCH_COMPILE_STROBELIGHT", False):
         )
     else:
         log.info("Strobelight profiler is enabled via environment variable")
+        from torch._strobelight.compile_time_profiler import StrobelightCompileTimeProfiler
         StrobelightCompileTimeProfiler.enable()
 
 # this arbitrary-looking assortment of functionality is provided here
@@ -85,6 +85,8 @@ def compile_time_strobelight_meta(
         def wrapper_function(*args: _P.args, **kwargs: _P.kwargs) -> _T:
             if "skip" in kwargs and isinstance(skip := kwargs["skip"], int):
                 kwargs["skip"] = skip + 1
+
+            from torch._strobelight.compile_time_profiler import StrobelightCompileTimeProfiler
 
             # This is not needed but we have it here to avoid having profile_compile_time
             # in stack traces when profiling is not enabled.
