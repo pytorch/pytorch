@@ -148,8 +148,13 @@ try:
 
         NP_TO_TNP_MODULE = {}
     from torch._subclasses.fake_tensor import FakeTensor, is_fake, maybe_get_fake_mode
-except ImportError:
-    pass
+except ModuleNotFoundError as e:
+    # Optional modules may not be available in all configurations
+    logging.getLogger(__name__).debug("Optional module not found: %s", e)
+except ImportError as e:
+    # Re-raise critical import errors (e.g., missing dynamic libraries like cxxabi)
+    logging.getLogger(__name__).error("Critical import error: %s", e)
+    raise
 
 
 T = TypeVar("T")
