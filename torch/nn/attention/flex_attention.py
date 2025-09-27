@@ -36,6 +36,25 @@ from torch.nn.attention._utils import _validate_sdpa_input
 from torch.utils._pytree import tree_map_only
 
 
+def _select_default_device() -> torch.device:
+    """Auto-detect the best available device for flex attention operations.
+    
+    Returns the device in the following priority order:
+    1. CUDA if available
+    2. MPS if available (Apple Silicon)
+    3. CPU as fallback
+    
+    Returns:
+        torch.device: The selected default device
+    """
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        return torch.device("mps")
+    else:
+        return torch.device("cpu")
+
+
 # Private debug flag to disable internal compilation wrapping for debugging purposes.
 # WARNING: This is intended ONLY for debugging score_mod and mask_mod functions.
 # When enabled, this bypasses the required internal compilation that ensures correctness
@@ -980,7 +999,7 @@ def create_mask(
     H: Optional[int],
     Q_LEN: int,
     KV_LEN: int,
-    device: DeviceLikeType = "cuda",
+    device: Optional[DeviceLikeType] = None,
 ) -> Tensor:
     r"""This function creates a mask tensor from a mod_fn function.
 
@@ -990,7 +1009,8 @@ def create_mask(
         H (int): Number of query heads.
         Q_LEN (int): Sequence length of query.
         KV_LEN (int): Sequence length of key/value.
-        device (str): Device to run the mask creation on.
+        device (Optional[DeviceLikeType]): Device to run the mask creation on.
+            If None, automatically selects the best available device (CUDA > MPS > CPU).
 
     Returns:
         mask (Tensor): A mask tensor with shape (B, H, M, N).
@@ -999,6 +1019,9 @@ def create_mask(
         B = 1
     if H is None:
         H = 1
+    # Auto-detect device if not specified
+    if device is None:
+        device = _select_default_device()
     b = torch.arange(0, B, device=device)
     h = torch.arange(0, H, device=device)
     m = torch.arange(0, Q_LEN, device=device)
@@ -1029,7 +1052,7 @@ def create_block_mask(
     H: Optional[int],
     Q_LEN: int,
     KV_LEN: int,
-    device: DeviceLikeType = "cuda",
+    device: Optional[DeviceLikeType] = None,
     BLOCK_SIZE: Union[int, tuple[int, int]] = _DEFAULT_SPARSE_BLOCK_SIZE,
     _compile=False,
 ) -> BlockMask:
@@ -1045,7 +1068,8 @@ def create_block_mask(
         H (int): Number of query heads.
         Q_LEN (int): Sequence length of query.
         KV_LEN (int): Sequence length of key/value.
-        device (str): Device to run the mask creation on.
+        device (Optional[DeviceLikeType]): Device to run the mask creation on.
+            If None, automatically selects the best available device (CUDA > MPS > CPU).
         BLOCK_SIZE (int or tuple[int, int]): Block size for the block mask. If a single int is provided it is used for both query and key/value.
 
     Returns:
@@ -1077,6 +1101,10 @@ def create_block_mask(
         KV_BLOCK_SIZE = BLOCK_SIZE
     else:
         Q_BLOCK_SIZE, KV_BLOCK_SIZE = BLOCK_SIZE
+
+    # Auto-detect device if not specified
+    if device is None:
+        device = _select_default_device()
 
     if _compile:
         warnings.warn(
@@ -1183,14 +1211,34 @@ def _validate_embed_dim(query: Tensor, key: Tensor, value: Tensor):
 
 
 def _validate_device(query: Tensor, key: Tensor, value: Tensor):
-    """TODO: Remove once non cuda/cpu devices support is added
-    We only need to check query since we have already that q,k,v are on the same device
+    """Validate device compatibility for FlexAttention.
+    
+    Note: MPS support is experimental and requires setting PYTORCH_ENABLE_MPS_FALLBACK=1
+    environment variable. Without this, operations will fall back to CPU.
     """
     supported_devices = {"cuda", "cpu", "xpu", "hpu"}
+    
+    if query.device.type == "mps":
+        import os
+        if os.environ.get("PYTORCH_ENABLE_MPS_FALLBACK") == "1":
+            _warn_once(
+                "mps_flex_attention_fallback",
+                "FlexAttention on MPS is experimental. Operations may fall back to CPU for compatibility. "
+                "Set PYTORCH_ENABLE_MPS_FALLBACK=1 to enable this behavior."
+            )
+            return  # Allow MPS with warning
+        else:
+            raise ValueError(
+                "FlexAttention on MPS requires experimental fallback mode. "
+                "Set PYTORCH_ENABLE_MPS_FALLBACK=1 environment variable to enable MPS support. "
+                "Note: This may cause operations to fall back to CPU for compatibility."
+            )
+    
     if query.device.type not in supported_devices:
         raise ValueError(
-            "FlexAttention is only supported on CUDA, CPU or HPU devices. "
-            f"Found input tensors on {query.device.type} device."
+            "FlexAttention is only supported on CUDA, CPU, XPU, or HPU devices. "
+            f"Found input tensors on {query.device.type} device. "
+            "For MPS support, set PYTORCH_ENABLE_MPS_FALLBACK=1."
         )
 
 
