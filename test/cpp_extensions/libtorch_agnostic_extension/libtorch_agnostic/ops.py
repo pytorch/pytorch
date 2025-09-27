@@ -228,6 +228,22 @@ def get_any_data_ptr(t, mutable) -> int:
     return torch.ops.libtorch_agnostic.get_any_data_ptr.default(t, mutable)
 
 
+def get_template_any_data_ptr(t, r, mutable) -> int:
+    """
+    Return data pointer value of the first tensor iff dtypes of tensors match.
+
+    Args:
+        t: Input tensor
+        r: Input tensor defining dtype
+        mutable: whether data pointer qualifier is mutable or const
+
+    Returns: int - pointer value
+
+    Raises RuntimeError when t.dtype() != r.dtype()
+    """
+    return torch.ops.libtorch_agnostic.get_template_any_data_ptr.default(t, r, mutable)
+
+
 def test_dispatch_scalar_name(t, dispatch_name) -> str:
     """
     Return the name of the C++ scalar type corresponding to the tensor's dtype.
