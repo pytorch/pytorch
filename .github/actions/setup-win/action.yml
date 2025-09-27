@@ -59,7 +59,7 @@ runs:
         set -x
 
         # Create new py_tmp env with python-version
-        ${CONDA} create -y -n py_tmp python=${PYTHON_VERSION} intel-openmp
+        ${CONDA} create -y -n py_tmp python=${PYTHON_VERSION} intel-openmp libuv
 
         PYTHON3=$(${CONDA_RUN} -n py_tmp which python3)
         EXIT_CODE=$?
