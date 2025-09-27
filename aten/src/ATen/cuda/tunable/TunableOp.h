@@ -267,6 +267,26 @@ class TunableOp {
       for (size_t i = 0; i < op_names_.size(); i++) {
         auto* candidate = ops_[op_names_[i]].get(); // borrow pointer
 
+        // collect a small profile
+        int approx_num_iter = 3;
+        auto s = ProfileStats(candidate, reusable_params, approx_num_iter, offset);
+        double approx_duration = s._mean;
+        // bail if too slow
+        if (approx_duration > 1.5 * min_duration_ms) {
+          TUNABLE_LOG3("├──skip slow instance id=", i, ", ", op_sig, '(', params_sig, ") ", op_names_[i]);
+          continue;
+        }
+
+        // 2nd phase skip, more aggressive
+        approx_num_iter = 10;
+        s = ProfileStats(candidate, reusable_params, approx_num_iter, offset);
+        approx_duration = s._mean;
+        // bail if too slow
+        if (approx_duration > 1.15 * min_duration_ms) {
+          TUNABLE_LOG3("├──2nd skip slow instance id=", i, ", ", op_sig, '(', params_sig, ") ", op_names_[i]);
+          continue;
+        }
+
         if (do_numerics_check) {
           ParamsT* numerical_params = params->DeepCopy(false);
           auto status = candidate->Call(numerical_params);
@@ -288,26 +308,6 @@ class TunableOp {
             TUNABLE_LOG3("├──unsupported id=", i, ", ", op_sig, '(', params_sig, ") ", op_names_[i]);
             continue;
           }
-        }
-
-        // collect a small profile
-        int approx_num_iter = 3;
-        auto s = ProfileStats(candidate, reusable_params, approx_num_iter, offset);
-        double approx_duration = s._mean;
-        // bail if too slow
-        if (approx_duration > 1.5 * min_duration_ms) {
-          TUNABLE_LOG3("├──skip slow instance id=", i, ", ", op_sig, '(', params_sig, ") ", op_names_[i]);
-          continue;
-        }
-
-        // 2nd phase skip, more aggressive
-        approx_num_iter = 10;
-        s = ProfileStats(candidate, reusable_params, approx_num_iter, offset);
-        approx_duration = s._mean;
-        // bail if too slow
-        if (approx_duration > 1.15 * min_duration_ms) {
-          TUNABLE_LOG3("├──2nd skip slow instance id=", i, ", ", op_sig, '(', params_sig, ") ", op_names_[i]);
-          continue;
         }
 
         // for warmup does user set max duration, max iters, or both?
