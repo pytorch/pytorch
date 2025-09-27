@@ -79,21 +79,13 @@ class WhileLoopOp(HigherOrderOperator):
                 assert not isinstance(real_inp, torch.Tensor)
                 return real_inp
 
-        example_inputs = [
-            _find_example_value(n, real_inp)
-            for n, real_inp in zip(
-                body_gm.graph.find_nodes(op="placeholder"),
-                carried_inputs + additional_inputs,
-            )
-        ]
-
         (
             _,
             _,
             _,
             body_mutated_inputs,
             body_outputs,
-        ) = check_input_alias_and_mutation_return_outputs(body_gm, example_inputs)
+        ) = check_input_alias_and_mutation_return_outputs(body_gm)
 
         (
             _,
@@ -101,7 +93,7 @@ class WhileLoopOp(HigherOrderOperator):
             _,
             cond_mutated_inputs,
             _,
-        ) = check_input_alias_and_mutation_return_outputs(cond_gm, example_inputs)
+        ) = check_input_alias_and_mutation_return_outputs(cond_gm)
 
         mutated_inputs = set(body_mutated_inputs) | set(cond_mutated_inputs)
 
