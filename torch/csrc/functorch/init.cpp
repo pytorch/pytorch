@@ -7,6 +7,7 @@
 #include <ATen/FunctionalTensorWrapper.h>
 #include <ATen/WrapDimUtils.h>
 #include <torch/csrc/functorch/init.h>
+#include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_raii.h>
 #include <torch/python.h>
 
@@ -23,6 +24,9 @@
 #include <iostream>
 
 // This file contains functorch's Python bindings.
+
+TORCH_MAKE_PYBIND_ENUM_FASTER(at::functorch::TransformType)
+TORCH_MAKE_PYBIND_ENUM_FASTER(at::functorch::RandomnessType)
 
 namespace torch::functorch::impl {
 

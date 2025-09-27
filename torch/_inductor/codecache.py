@@ -14,6 +14,7 @@ import logging
 import os
 import pickle
 import pkgutil
+import platform
 import re
 import shlex
 import shutil
@@ -49,6 +50,7 @@ from typing_extensions import override, Self
 import torch
 import torch.distributed as dist
 from torch import SymInt, Tensor
+from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.exc import SkipFrame
 from torch._dynamo.utils import CompileEventLogger, counters, dynamo_timed
 from torch._inductor import config, exc, metrics
@@ -172,6 +174,21 @@ def get_kernel_bin_format(device: str) -> str:
         return "spv"
     else:
         return ""
+
+
+def get_device_information(device_type: str) -> dict[str, str]:
+    """
+    Gets all the current device information used to compile the .so.
+    """
+    metadata: dict[str, str] = {
+        "AOTI_PLATFORM": sys.platform,
+        "AOTI_MACHINE": platform.machine(),
+        "AOTI_CPU_ISA": str(torch._inductor.cpu_vec_isa.pick_vec_isa()).upper(),
+        "AOTI_COMPUTE_CAPABILITY": str(
+            get_interface_for_device(device_type).get_compute_capability()
+        ),
+    }
+    return metadata
 
 
 class CacheBase:
@@ -2086,6 +2103,9 @@ end
             metadata = config.aot_inductor.metadata
             metadata["AOTI_DEVICE_KEY"] = device_type
 
+            # Add environment information to ensure .so compatibility
+            metadata.update(get_device_information(device_type))
+
             # Save user provided metadata
             meta_json = str(
                 wrapper_path_operator.with_name(
@@ -2495,16 +2515,16 @@ end
                 if config.aot_inductor.package:
                     generated_files.append(output_so)
 
-        if config.aot_inductor.package:
-            if config.trace.provenance_tracking_level != 0:
-                kernel_info = torch._inductor.debug.create_kernel_information_json()
-                kernel_info_json = os.path.join(
-                    wrapper_path_operator.parent, "kernel_information.json"
-                )
-                with open(kernel_info_json, "w") as f:
-                    f.write(json.dumps(kernel_info, indent=4))
-                generated_files.append(kernel_info_json)
+        if config.trace.provenance_tracking_level != 0:
+            kernel_info = torch._inductor.debug.create_kernel_information_json()
+            kernel_info_json = os.path.join(
+                wrapper_path_operator.parent, "kernel_information.json"
+            )
+            with open(kernel_info_json, "w") as f:
+                f.write(json.dumps(kernel_info, indent=4))
+            generated_files.append(kernel_info_json)
 
+        if config.aot_inductor.package:
             # We want to return the directory that contains all the AOTI
             # generated files, not just the so
             # return os.path.split(output_so)[0]
@@ -2864,8 +2884,6 @@ def _worker_compile_cpp(
 # Customized Python binding for cpp kernels
 @clear_on_fresh_cache
 class CppPythonBindingsCodeCache(CppCodeCache):
-    """Compile and cache CPU C++ kernels together with lightweight Python bindings."""
-
     cache: dict[str, Callable[[], Union[CDLL, ModuleType]]] = {}
     cache_clear = staticmethod(cache.clear)
     cpp_compile_command_flags = {
@@ -2875,28 +2893,7 @@ class CppPythonBindingsCodeCache(CppCodeCache):
     }
     entry_function = "kernel"
     call_entry_function = "kernel({}); Py_RETURN_NONE;"
-    extra_parse_arg = textwrap.dedent(
-        """
-        template <> inline double parse_arg<double>(PyObject* args, size_t n) {{
-            auto result = PyFloat_AsDouble(PyTuple_GET_ITEM(args, n));
-            if(unlikely(result == -1.0 && PyErr_Occurred()))
-                throw std::runtime_error("expected float arg");
-            return result;
-        }}
-        template <> inline float parse_arg<float>(PyObject* args, size_t n) {{
-            auto result = PyFloat_AsDouble(PyTuple_GET_ITEM(args, n));
-            if(unlikely(result == -1.0 && PyErr_Occurred()))
-                throw std::runtime_error("expected float arg");
-            return static_cast<float>(result);
-        }}
-        template <> inline bool parse_arg<bool>(PyObject* args, size_t n) {{
-            int result = PyObject_IsTrue(PyTuple_GET_ITEM(args, n));
-            if(unlikely(result == -1 && PyErr_Occurred()))
-                throw std::runtime_error("expected bool arg");
-            return result;
-        }}
-        """
-    )
+    extra_parse_arg = ""
     suffix_template = textwrap.dedent(
         """
         // Python bindings to call {entry_func}():
