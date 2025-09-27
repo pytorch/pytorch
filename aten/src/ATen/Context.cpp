@@ -40,41 +40,6 @@ namespace {
                 ->conv
                 ->rnn
 */
-const std::map<std::string, std::vector<std::string>> _fp32_precisions = {
-    {"generic", {{"ieee", "tf32", "bf16", "none"}}},
-    {"mkldnn", {{"ieee", "tf32", "bf16", "none"}}},
-    {"cuda", {{"ieee", "tf32", "none"}}}};
-
-// Check whether the backend and op are legal
-void check_fp32_prec_backend_and_op(
-    const std::string& backend,
-    const std::string& op) {
-  static std::vector<std::string> backends = {"generic", "mkldnn", "cuda"};
-  static std::vector<std::string> operators = {"conv", "matmul", "rnn", "all"};
-  TORCH_CHECK(
-      std::find(backends.begin(), backends.end(), backend) != backends.end(),
-      "Invalid backend: ",
-      backend);
-  TORCH_CHECK(
-      std::find(operators.begin(), operators.end(), op) != operators.end(),
-      "Invalid operator: ",
-      op);
-  if (backend == "generic") {
-    TORCH_CHECK(op == "all", "Invalid operation for generic backend: ", op);
-  }
-  }
-
-  // Return whether the precision is supported by backends
-  bool validate_fp32_prec(
-      const std::string& backend,
-      const std::string& precision) {
-    auto iterp = _fp32_precisions.find(backend);
-    TORCH_CHECK(iterp != _fp32_precisions.end());
-    auto precisions = iterp->second;
-    bool valid = std::find(precisions.begin(), precisions.end(), precision) !=
-        precisions.end();
-    return valid;
-  }
 
   C10_ALWAYS_INLINE void warn_deprecated_fp32_precision_api(){
     TORCH_WARN_ONCE(
@@ -377,14 +342,16 @@ Float32MatmulPrecision Context::float32MatmulPrecision() const {
 }
 
 std::string Context::float32Precision(const std::string& backend, const std::string& op) const {
-  check_fp32_prec_backend_and_op(backend, op);
-  auto precision = fp32_precision.find(backend)->second.find(op)->second;
+  auto it = fp32_precision.find(std::make_pair(backend, op));
+  TORCH_CHECK(it != fp32_precision.end(), "Invalid (backend, op) pair: (", backend, ", ", op, ")");
+
+  using namespace std::string_literals;
+  std::string precision = it->second;
   if (precision == "none")
-    precision = fp32_precision.find(backend)->second.find("all")->second;
+    precision = fp32_precision.find(std::make_pair(backend, "all"s))->second;
   if (precision == "none")
-    precision = fp32_precision.find("generic")->second.find("all")->second;
-  bool valid_prec = validate_fp32_prec(backend, precision);
-  return valid_prec ? precision : "none";
+    precision = fp32_precision.find(std::make_pair("generic"s, "all"s))->second;
+  return precision;
 }
 
 void Context::setFloat32MatmulPrecision(const std::string &s) {
@@ -419,24 +386,15 @@ void Context::setFloat32MatmulPrecision(const std::string &s) {
 }
 
 void Context::setFloat32Precision(const std::string& backend, const std::string& op, const std::string& p) {
-  check_fp32_prec_backend_and_op(backend, op);
-  if (validate_fp32_prec(backend, p)) {
-    fp32_precision[backend][op] = p;
-  } else {
-    std::string msg;
-    auto iterp = _fp32_precisions.find(backend);
-    TORCH_CHECK(iterp != _fp32_precisions.end());
-    for (const auto& p : iterp->second) {
-      msg += p;
-      msg += " ";
-    }
-    TORCH_WARN(
-        "you have set wrong precision for backend:",
-        backend,
-        " setFloat32Precision call has no effect.",
-        "Please choose precision from: ",
-        msg);
-  }
+  auto it = fp32_precision.find(std::make_pair(backend, op));
+  TORCH_CHECK(
+      it != fp32_precision.end(),
+      "Invalid (backend, op) pair: (", backend, ", ", op, ")");
+  TORCH_CHECK(
+    p == "ieee" || p == "tf32" || p == "none" || (backend != "cuda" && p == "bf16"),
+    "Backend '", backend, "' does not support precision '", p, "'");
+
+  it->second = p;
 }
 
 at::LinalgBackend Context::linalgPreferredBackend() const {
