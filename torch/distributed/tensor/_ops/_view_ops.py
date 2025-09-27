@@ -539,16 +539,19 @@ def propagate_shape_and_sharding(
                 shard_mesh_dim, shard_placement = (
                     maybe_get_shard_mesh_dim_and_placement(dim)
                 )
-                input_sharded = shard_mesh_dim is not None
                 if i > 0:
                     can_shard_dim = False
-                    if strict_view and input_sharded:
-                        raise RuntimeError(
-                            f"Attempted to flatten multiple dimensions, with dimension {dim.input_dim} being sharded. ",
-                            "It cannot be performed without redistribution, which is disallowed by the current operator.",
-                        )
-                elif input_sharded:
-                    assert shard_placement is not None and shard_mesh_dim is not None
+                    if strict_view and (shard_mesh_dim is not None):
+                        assert shard_placement is not None
+                        tensor_dim_size = global_input_shape[shard_placement.dim]
+                        mesh_dim_size = mesh_sizes[shard_mesh_dim]
+                        if tensor_dim_size % mesh_dim_size != 0:
+                            raise RuntimeError(
+                                f"Attempted to flatten multiple dimensions, with dimension {dim.input_dim} being sharded. ",
+                                "It cannot be performed without redistribution, which is disallowed by the current operator.",
+                            )
+                elif (shard_mesh_dim is not None):
+                    assert shard_placement is not None
                     tensor_dim_size = global_input_shape[shard_placement.dim]
                     mesh_dim_size = mesh_sizes[shard_mesh_dim]
                     if tensor_dim_size % mesh_dim_size != 0:

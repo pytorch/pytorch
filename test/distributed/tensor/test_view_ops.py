@@ -221,6 +221,13 @@ class TestViewOps(DTensorTestBase):
     def test_illegal_views(self):
         device_mesh = self.build_device_mesh()
         # 1D mesh [6] (see above)
+        tensor = torch.randn((6, 252))
+        dtensor = distribute_tensor(tensor, device_mesh, [Replicate()])
+        shard = dtensor.redistribute(device_mesh=device_mesh, placements=[Shard(dim=1)])
+        # view should be legal, since sharding is even and flatten includes both sharded dim(0 & 1)
+        shard.view(-1)
+
+        # 1D mesh [6] (see above)
         tensor = torch.randn((6, 256))
         dtensor = distribute_tensor(tensor, device_mesh, [Replicate()])
         shard = dtensor.redistribute(device_mesh=device_mesh, placements=[Shard(dim=0)])
