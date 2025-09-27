@@ -9,6 +9,7 @@ import subprocess
 import sys
 import time
 from dataclasses import dataclass
+from typing import Optional
 
 
 try:
@@ -79,12 +80,13 @@ def is_ignored_output(output: str) -> int:
     return -1
 
 
-def run_fuzzer_with_seed(seed: int) -> FuzzerResult:
+def run_fuzzer_with_seed(seed: int, template: str = "default") -> FuzzerResult:
     """
     Run fuzzer.py with a specific seed.
 
     Args:
         seed: The seed value to pass to fuzzer.py
+        template: The template to use for code generation
 
     Returns:
         FuzzerResult dataclass instance
@@ -92,8 +94,16 @@ def run_fuzzer_with_seed(seed: int) -> FuzzerResult:
     start_time = time.time()
 
     try:
-        # Run fuzzer.py with the specified seed
-        cmd = [sys.executable, "fuzzer.py", "--single", "--seed", str(seed)]
+        # Run fuzzer.py with the specified seed and template
+        cmd = [
+            sys.executable,
+            "fuzzer.py",
+            "--single",
+            "--seed",
+            str(seed),
+            "--template",
+            template,
+        ]
 
         result = subprocess.run(
             cmd,
@@ -160,10 +170,11 @@ def handle_result_output(
 
 
 def run_multi_process_fuzzer(
-    num_processes: int = 2,
-    seed_start: int = 1,
-    seed_count: int = 10,
+    num_processes: Optional[int] = None,
+    seed_start: int = 0,
+    seed_count: int = 100,
     verbose: bool = False,
+    template: str = "default",
 ) -> None:
     """
     Run the multi-process fuzzer.
@@ -180,7 +191,9 @@ def run_multi_process_fuzzer(
     persist_print(
         f"📊 Processing seeds {seed_start} to {seed_start + seed_count - 1} ({len(seeds)} total)"
     )
-    persist_print("🔧 Command template: python fuzzer.py --seed {seed}")
+    persist_print(
+        f"🔧 Command template: python fuzzer.py --seed {{seed}} --template {template}"
+    )
     persist_print("=" * 60)
 
     start_time = time.time()
@@ -199,7 +212,7 @@ def run_multi_process_fuzzer(
             # Submit all seeds to the process pool
             future_results = []
             for seed in seeds:
-                future = pool.apply_async(run_fuzzer_with_seed, (seed,))
+                future = pool.apply_async(run_fuzzer_with_seed, (seed, template))
                 future_results.append(future)
 
             # Set up progress bar

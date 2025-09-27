@@ -291,11 +291,6 @@ class FloorDiv(sympy.Function):
 
         return None
 
-    def _ccode(self, printer):
-        base = printer.parenthesize(self.base, PRECEDENCE["Atom"] - 0.5)
-        divisor = printer.parenthesize(self.divisor, PRECEDENCE["Atom"] - 0.5)
-        return f"floor({base}/{divisor})"
-
 
 class ModularIndexing(sympy.Function):
     """
