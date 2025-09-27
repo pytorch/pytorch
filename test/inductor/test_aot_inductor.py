@@ -7265,14 +7265,16 @@ class AOTInductorLoggingTest(LoggingTestCase):
 
 class TestAOTInductorConfig(TestCase):
     def test_no_compile_standalone(self):
-        with config.patch({"aot_inductor.compile_standalone": False}):
+        with config.patch({"aot_inductor_mode.compile_standalone": False}):
             result = maybe_aoti_standalone_config({})
             self.assertEqual(result, {})
 
     def test_compile_standalone_sets_package_cpp(self):
-        result = maybe_aoti_standalone_config({"aot_inductor.compile_standalone": True})
+        result = maybe_aoti_standalone_config(
+            {"aot_inductor_mode.compile_standalone": True}
+        )
         self.assertEqual(result["aot_inductor.package_cpp_only"], True)
-        self.assertEqual(result["aot_inductor.compile_standalone"], True)
+        self.assertEqual(result["aot_inductor_mode.compile_standalone"], True)
         self.assertEqual(result["aot_inductor.embed_kernel_binary"], True)
         self.assertEqual(
             result["aot_inductor.emit_multi_arch_kernel"], not torch.version.hip
@@ -7283,7 +7285,7 @@ class TestAOTInductorConfig(TestCase):
 
     def test_compile_standalone_explicit_set(self):
         patches = {
-            "aot_inductor.compile_standalone": True,
+            "aot_inductor_mode.compile_standalone": True,
             "aot_inductor.package_cpp_only": True,
             "aot_inductor.embed_kernel_binary": True,
             "aot_inductor.emit_multi_arch_kernel": not torch.version.hip,
@@ -7294,7 +7296,7 @@ class TestAOTInductorConfig(TestCase):
 
     def test_compile_standalone_package_cpp_false_raises(self):
         patches = {
-            "aot_inductor.compile_standalone": True,
+            "aot_inductor_mode.compile_standalone": True,
             "aot_inductor.package_cpp_only": False,
         }
         with self.assertRaises(RuntimeError):
@@ -7302,7 +7304,7 @@ class TestAOTInductorConfig(TestCase):
 
         with config.patch({"aot_inductor.package_cpp_only": False}):
             patches = {
-                "aot_inductor.compile_standalone": True,
+                "aot_inductor_mode.compile_standalone": True,
             }
             with self.assertRaises(RuntimeError):
                 maybe_aoti_standalone_config(patches)
