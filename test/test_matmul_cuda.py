@@ -5,6 +5,7 @@ import json
 import math
 import re
 import tempfile
+import time
 import unittest
 from itertools import product
 from functools import partial
@@ -1712,6 +1713,27 @@ class TestFP8Matmul(TestCase):
                     # correct behavior
                     self.assertNotEqual(no_carveout, carveout_66)
                     self.assertNotEqual(carveout_66, carveout_0)
+
+    @unittest.skipIf(not _get_torch_cuda_version() >= (12, 8), "Green Context only tested on 12.8+")
+    def test_greencontext_carveout(self):
+        a = torch.randn(4096, 4096, device='cuda', dtype=torch.bfloat16)
+        ctx = torch.cuda.green_contexts.GreenContext.create(1, 0)
+        ctx.make_current()
+        torch.matmul(a, a)
+        torch.cuda.synchronize()
+        t0 = time.perf_counter()
+        partial_res = torch.matmul(a, a)
+        torch.cuda.synchronize()
+        t1 = time.perf_counter()
+        ctx.pop_current()
+        torch.matmul(a, a)
+        torch.cuda.synchronize()
+        t2 = time.perf_counter()
+        full_res = torch.matmul(a, a)
+        torch.cuda.synchronize()
+        t3 = time.perf_counter()
+        self.assertEqual(partial_res, full_res)
+        self.assertGreater(t1 - t0, t3 - t2)
 
     def test_pack_uint4(self):
         """
