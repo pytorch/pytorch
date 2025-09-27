@@ -212,7 +212,7 @@ if TYPE_CHECKING:
     from sympy import Symbol
 
     from torch._C import DispatchKeySet
-    from torch._dynamo.output_graph import OutputGraph, OutputGraphGuardsState
+    from torch._dynamo.output_graph import OutputGraphCommon, OutputGraphGuardsState
 
 T = TypeVar("T")
 log = logging.getLogger(__name__)
@@ -2456,7 +2456,7 @@ class GuardBuilder(GuardBuilderBase):
         )
 
     def SHAPE_ENV(self, guard: Guard) -> None:
-        from torch._dynamo.output_graph import OutputGraph
+        from torch._dynamo.output_graph import OutputGraphCommon
 
         assert guard.name == ""
         output_graph = self.check_fn_manager.output_graph
@@ -2473,8 +2473,9 @@ class GuardBuilder(GuardBuilderBase):
             # shape variables to sources from tracked_fakes.  This must happen after
             # tensor checks.
             # NB: self.output_graph can be None in the debug_nops tests
-            assert isinstance(output_graph, OutputGraph)
-            fs = output_graph.tracked_fakes
+            assert isinstance(output_graph, OutputGraphCommon)
+            assert output_graph.shape_env is not None
+            fs = output_graph.shape_env.tracked_fakes or []
             input_contexts = [a.symbolic_context for a in fs]
 
             def get_sources(t_id: int, dim: int) -> list[Source]:
@@ -2485,7 +2486,6 @@ class GuardBuilder(GuardBuilderBase):
                     for source in output_graph.tracked_fakes_id_to_source[t_id]
                 ]
 
-            assert output_graph.shape_env is not None
             if output_graph.export_constraints:
                 names: dict[str, tuple[int, int]] = {}
                 source_pairs: list[tuple[Source, Source]] = []
@@ -3354,7 +3354,7 @@ class CheckFunctionManager:
     def __init__(
         self,
         f_code: types.CodeType,
-        output_graph: OutputGraphGuardsState,
+        output_graph: OutputGraphCommon,
         cache_entry: Optional[CacheEntry] = None,
         guard_fail_fn: Optional[Callable[[GuardFail], None]] = None,
         guard_filter_fn: Optional[
@@ -3371,7 +3371,7 @@ class CheckFunctionManager:
         existing_diff_guard_sources = (
             update_diff_guard_managers_for_existing_cache_entries(cache_entry)
         )
-        self.output_graph: Optional[OutputGraphGuardsState] = output_graph
+        self.output_graph: Optional[OutputGraphCommon] = output_graph
         assert self.output_graph is not None
 
         # Only used for serialization.
@@ -3536,9 +3536,9 @@ class CheckFunctionManager:
 
         self.guards_state: Optional[bytes] = None
         if save_guards:
-            from torch._dynamo.output_graph import OutputGraph
+            from torch._dynamo.output_graph import OutputGraphCommon
 
-            assert isinstance(self.output_graph, OutputGraph)
+            assert isinstance(self.output_graph, OutputGraphCommon)
             try:
                 self.guards_state = self.serialize_guards(
                     builder, sorted_guards, self.output_graph
@@ -3580,7 +3580,7 @@ class CheckFunctionManager:
         self,
         builder: GuardBuilder,
         sorted_guards: list[Guard],
-        output_graph: OutputGraph,
+        output_graph: OutputGraphCommon,
     ) -> bytes:
         # We check whether our list of guards are serializable here
         for guard in sorted_guards:
@@ -3612,7 +3612,7 @@ class CheckFunctionManager:
                     f"{failed} guard cannot be serialized."
                 )
 
-        builtins_dict_name = output_graph.name_of_builtins_dict_key_in_fglobals
+        builtins_dict_name = output_graph.name_of_builtins_dict_key_in_fglobals or ""
         used_global_vars = set()
         used_local_vars = set()
 
