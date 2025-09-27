@@ -13,6 +13,7 @@
 #include <ATen/native/mkldnn/Conv.h>
 #include <ATen/native/mkldnn/Linear.h>
 #include <ATen/native/quantized/cpu/qconv.h>
+#include <ATen/native/quantized/cpu/qembeddingbag.h>
 #include <ATen/native/quantized/cpu/qlinear.h>
 
 using namespace torch::aot_inductor;
@@ -567,3 +568,17 @@ AOTITorchError aoti_torch_cpu__c10d_functional_wait_tensor(
   });
 }
 #endif
+
+AOTITorchError aoti_torch_cpu_embedding_bag_byte_unpack(
+    const AtenTensorHandle packed_weight,
+    AtenTensorHandle* ret) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    auto packed_tensor = *tensor_handle_to_tensor_pointer(packed_weight);
+    auto output = at::cpu::empty(
+        {},
+        packed_tensor.options().dtype(c10::kFloat),
+        packed_tensor.suggest_memory_format());
+    at::native::qembeddingbag_byte_unpack_out(output, packed_tensor);
+    *ret = new_tensor_handle(std::move(output));
+  });
+}

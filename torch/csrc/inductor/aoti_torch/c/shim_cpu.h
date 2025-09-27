@@ -245,6 +245,10 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu__weight_int4pack_mm_cpu_tensor(
     AtenTensorHandle qScaleAndZeros,
     AtenTensorHandle* ret0);
 
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu_embedding_bag_byte_unpack(
+    const AtenTensorHandle packed_weight,
+    AtenTensorHandle* ret);
+
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu__c10d_functional_all_reduce_(
     AtenTensorHandle inp,
     const char* reduce_op,
