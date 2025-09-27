@@ -150,11 +150,12 @@ void FrameLocalsMapping::_realize_dict() {
 
   auto update_mapping = [&](int i) {
     DEBUG_CHECK(0 <= i && i < _framelocals.size());
-    PyObject* value = _framelocals[i].ptr();
-    if (value == nullptr) {
-      _dict.attr("pop")(framelocals_names[i], py::none());
-    } else {
-      _dict[framelocals_names[i]] = value;
+    // Note that CPython pops the name from the dict when the framelocals[i] is
+    // a nullptr. But for our purposes, it is ok to skip it because this is used
+    // only for guard purposes, and guards will not use any name that is set to
+    // nullptr.
+    if (_framelocals[i]) {
+      _dict[framelocals_names[i]] = _framelocals[i];
     }
   };
 
