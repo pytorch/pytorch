@@ -5869,6 +5869,16 @@ class CommonTemplate:
             a = torch.rand((1, 1000000), device=self.device)
             self.common(f, (a,))
 
+    def test_inplace_flip(self):
+        def f(x, y):
+            x.copy_(x.flip(1))
+            y = y.sum(dim=1, keepdim=True) + y
+            return x + y
+
+        x = torch.randn(20, 1024 * 1024)
+        y = torch.randn(20, 1024 * 1024)
+        self.common(f, (x, y), atol=1e-3, rtol=1e-3)
+
     def test_gather_scatter(self):
         def fn(node_feat, edge_index):
             src_node_feat = node_feat[edge_index[0]]

@@ -207,7 +207,7 @@ __global__ void exchangeSplitAndOffset(int64_t* in_out_splits, nvshmem_team_t te
     nvshmem_int64_p(output_splits + mype, input_splits[tid], peer_global);
   }
   // This barrier ensures that all remote PEs see the updated values
-  nvshmemx_barrier_all_block();
+  nvshmemx_barrier_block(team);
 #endif
 }
 
@@ -418,7 +418,7 @@ __global__ void exchangeSplitAndOffset_2d(int64_t* in_splits_offsets, int64_t* o
     nvshmem_int64_p(output_splits + dst_offset, split_val, peer_global);
   }
   // This barrier ensures that all remote PEs see the updated values
-  nvshmemx_barrier_all_block();
+  nvshmemx_barrier_block(team);
 #endif
 }
 
