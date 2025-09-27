@@ -126,7 +126,7 @@ def create_subclass_metadata(
     new_start_idx = (
         new_start_idx
         + count_symints * len(enumerate_filter_symints(a.size()))
-        + count_symints * len(enumerate_filter_symints(a.stride()))
+        # + count_symints * len(enumerate_filter_symints(a.stride()))
     )
 
     return (
@@ -244,15 +244,15 @@ def unwrap_tensor_subclasses(
 
         if append_symints:
             sizes = enumerate_filter_symints(t.size())
-            strides = enumerate_filter_symints(t.stride())
+            # strides = enumerate_filter_symints(t.stride())
             out[0].extend(s for _, s in sizes)
-            out[0].extend(s for _, s in strides)
+            # out[0].extend(s for _, s in strides)
             if isinstance(desc, AOTInput):
                 out[1].extend(SubclassSizeAOTInput(desc, i) for i, _ in sizes)  # type: ignore[misc]
-                out[1].extend(SubclassStrideAOTInput(desc, i) for i, _ in strides)  # type: ignore[misc]
+                # out[1].extend(SubclassStrideAOTInput(desc, i) for i, _ in strides)  # type: ignore[misc]
             else:
                 out[1].extend(SubclassSizeAOTOutput(desc, i) for i, _ in sizes)  # type: ignore[misc]
-                out[1].extend(SubclassStrideAOTOutput(desc, i) for i, _ in strides)  # type: ignore[misc]
+                # out[1].extend(SubclassStrideAOTOutput(desc, i) for i, _ in strides)  # type: ignore[misc]
 
     xs_inner: list[FxValue] = []
     descs_inner: list[AOTDescriptor] = []
@@ -295,13 +295,13 @@ def runtime_unwrap_tensor_subclasses(
                 [r for (r, is_symint) in zip(size, symint_placeholders) if is_symint]
             )
 
-            # outer_stride
-            stride = x.stride()
-            symint_placeholders = compute_symint_placeholders(meta.outer_stride)
-            assert len(stride) == len(symint_placeholders)
-            out.extend(
-                [r for (r, is_symint) in zip(stride, symint_placeholders) if is_symint]
-            )
+            # # outer_stride
+            # stride = x.stride()
+            # symint_placeholders = compute_symint_placeholders(meta.outer_stride)
+            # assert len(stride) == len(symint_placeholders)
+            # out.extend(
+            #     [r for (r, is_symint) in zip(stride, symint_placeholders) if is_symint]
+            # )
         return out
 
     xs_inner: list[Union[int, Tensor, SymInt]] = []
@@ -348,7 +348,7 @@ def remap_unwrapped_subclass_arg_indices(wrapped_args, static_input_indices):
             num_indices = (
                 len(get_plain_tensors(typing.cast(Tensor, arg), out=[]))
                 + len(enumerate_filter_symints(arg.size()))
-                + len(enumerate_filter_symints(arg.stride()))
+                # + len(enumerate_filter_symints(arg.stride()))
             )
 
         for _ in range(num_indices):
