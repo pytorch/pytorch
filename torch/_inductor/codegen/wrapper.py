@@ -40,7 +40,6 @@ from torch.utils._sympy.symbol import symbol_is_type, SymT
 
 from .. import async_compile, config, ir
 from ..codecache import output_code_log
-from ..debug import set_kernel_post_grad_provenance_tracing
 from ..ir import IRNode, ReinterpretView
 from ..runtime import triton_heuristics
 from ..runtime.hints import DeviceProperties
@@ -509,19 +508,12 @@ class ExternKernelOutLine(WrapperLine):
         else:
             kernel_name = node.get_kernel_name()
         device = d.type if (d := node.get_device()) else V.graph.device_type
-        provenance_debug_handle: Optional[int] = None
-        # set provenance tracing kernel mapping for ExternKernel types
-        if config.trace.provenance_tracking_level != 0:
-            provenance_debug_handle = set_kernel_post_grad_provenance_tracing(
-                node, kernel_name, is_extern=True
-            )
         self.wrapper._generate_extern_kernel_out_helper(
             kernel_name,
             node.codegen_reference(),
             node.output_view.codegen_reference() if node.output_view else None,
             args,
             device,
-            provenance_debug_handle,
         )
 
     def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
@@ -1516,13 +1508,11 @@ class PythonWrapperCodegen(CodeGen):
         out_view: Optional[str],
         args: list[str],
         device: str,
-        debug_handle: Optional[int] = None,
     ) -> None:
         # add debug printer code for triton kernel calls at (jit) inductor level
         debug_printer_manager = V.graph.wrapper_code.debug_printer
         debug_printer_manager.set_printer_args(args, kernel, None, None, "extern")
         args.append(f"out={out_view if out_view else out}")
-        self.write_provenance_debug_handle(kernel, debug_handle)
         with debug_printer_manager:
             self.writeline(f"{kernel}({', '.join(args)})")
 
@@ -2696,7 +2686,6 @@ class PythonWrapperCodegen(CodeGen):
         raw_args=None,
         triton_meta=None,
         original_fxnode_name=None,
-        debug_handle: Optional[int] = None,
     ):
         """
         Generates kernel call code.
@@ -2716,7 +2705,6 @@ class PythonWrapperCodegen(CodeGen):
         )
 
         device = device or V.graph.get_current_device_or_throw()
-        self.write_provenance_debug_handle(kernel_name, debug_handle)
         self.writeline(
             KernelCallLine(
                 self,
