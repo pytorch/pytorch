@@ -470,6 +470,13 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
         constant_args = check_constant_args(args, kwargs)
 
+        if self.value is torch.distributed.P2POp:
+            from .distributed import P2POpVariable
+
+            return P2POpVariable.create(
+                tx, self.value, args=args, kwargs=kwargs, source=self.source
+            )
+
         if self.can_constant_fold_through() and constant_args:
             # constant fold
             return variables.ConstantVariable.create(
@@ -826,6 +833,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                     [self, *args],
                     kwargs,
                 )
+
         return super().call_function(tx, args, kwargs)
 
     def is_standard_new(self):
