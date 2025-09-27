@@ -6,6 +6,7 @@ import json
 import os
 import platform
 import timeit
+from torch.utils.benchmark import Timer
 from collections import namedtuple
 from dataclasses import asdict, dataclass
 from typing import Any, Optional
@@ -348,10 +349,19 @@ class BenchmarkRunner:
             func = test_case.run_jit_forward
         if self.use_compile:
             func = test_case.run_compile_forward
-        forward_time = timeit.timeit(
-            functools.partial(func, iters, print_per_iter, cuda_sync), number=1
+
+        if not cuda_sync:
+            forward_time = timeit.timeit(
+                functools.partial(func, iters, print_per_iter, cuda_sync), number=1
+            )
+            return forward_time
+        # Stable timing with Timer
+        timer = Timer(
+            stmt="func(iters, print_per_iter, cuda_sync)",
+            globals={"func": func, "iters": iters, "print_per_iter": print_per_iter, "cuda_sync": cuda_sync}
         )
-        return forward_time
+        result = timer.adaptive_autorange(min_run_time=0.001)
+        return result.median * iters
 
     def _launch_backward(self, test_case, iters, print_per_iter=False):
         """This function runs forward path of an op to get an output. Then the backward path is executed
