@@ -270,7 +270,7 @@ def _check_capability():
             major = capability[0]
             minor = capability[1]
             name = get_device_name(d)
-            current_arch = major * 10 + minor
+            cur_arch_major = major * 10
             min_arch = min(
                 (_extract_arch_version(arch) for arch in torch.cuda.get_arch_list()),
                 default=50,
@@ -279,7 +279,7 @@ def _check_capability():
                 (_extract_arch_version(arch) for arch in torch.cuda.get_arch_list()),
                 default=50,
             )
-            if current_arch < min_arch or current_arch > max_arch:
+            if cur_arch_major < min_arch or cur_arch_major > max_arch:
                 warnings.warn(
                     incompatible_gpu_warn
                     % (
@@ -295,10 +295,7 @@ def _check_capability():
                 )
                 matched_arches = ""
                 for arch, arch_info in CUDA_ARCHES_SUPPORTED.items():
-                    if (
-                        current_arch >= arch_info["min"]
-                        and current_arch <= arch_info["max"]
-                    ):
+                    if arch_info["min"] <= cur_arch_major <= arch_info["max"]:
                         matched_arches += f" {arch}"
                 if matched_arches != "":
                     warnings.warn(matched_cuda_warn.format(matched_arches))
