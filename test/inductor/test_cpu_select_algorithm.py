@@ -2936,8 +2936,10 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
 
         x = torch.randn(batch_size, in_features).to(dtype=dtype)
         mod = M().to(dtype=dtype).eval()
-        self.common(mod, (x))
-        _, code = run_and_get_cpp_code(mod, x)
+        with verify(dtype) as (atol, rtol):
+            self.common(mod, (x,), atol=atol, rtol=rtol)
+        m = torch.compile(mod)
+        _, code = run_and_get_cpp_code(m, x)
         # Check that only 2 kernels are in the generated code
         assert code.count("AMXState amx_state") == 2
 
