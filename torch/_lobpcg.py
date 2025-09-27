@@ -301,6 +301,7 @@ class LOBPCGAutogradFunction(torch.autograd.Function):
         return D, U
 
     @staticmethod
+    # pyrefly: ignore  # bad-override
     def backward(ctx, D_grad, U_grad):
         A_grad = B_grad = None
         grads = [None] * 14
@@ -1048,6 +1049,7 @@ class LOBPCG:
         else:
             E[(torch.where(E < t))[0]] = t
 
+        # pyrefly: ignore  # unsupported-operation
         return torch.matmul(U * d_col.mT, Z * E**-0.5)
 
     def _get_ortho(self, U, V):

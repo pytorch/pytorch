@@ -803,6 +803,7 @@ class OpOverload(OperatorBase, Generic[_P, _T]):
 
         # Logic replicated from aten/src/ATen/native/MathBitsFallback.h
         is_write = None
+        # pyrefly: ignore  # bad-assignment
         for a in self._schema.arguments:
             if a.alias_info is None:
                 continue
@@ -885,6 +886,7 @@ class OpOverload(OperatorBase, Generic[_P, _T]):
         elif torch._C._dispatch_has_kernel_for_dispatch_key(self.name(), dk):
             return self._op_dk(dk, *args, **kwargs)
         else:
+            # pyrefly: ignore  # bad-return
             return NotImplemented
 
     # Remove a dispatch key from the dispatch cache.  This will force it to get
@@ -990,8 +992,10 @@ class OpOverload(OperatorBase, Generic[_P, _T]):
 
         r = self.py_kernels.get(final_key, final_key)
         if cache_result:
+            # pyrefly: ignore  # unsupported-operation
             self._dispatch_cache[key] = r
             add_cached_op(self)
+        # pyrefly: ignore  # bad-return
         return r
 
     def name(self):
@@ -1122,6 +1126,7 @@ class TorchBindOpOverload(OpOverload[_P, _T]):
             )
 
         assert isinstance(handler, Callable)  # type: ignore[arg-type]
+        # pyrefly: ignore  # bad-return
         return handler(*args, **kwargs)
 
 
@@ -1251,6 +1256,7 @@ class OpOverloadPacket(Generic[_P, _T]):
         # the schema and cause an error for torchbind op when inputs consist of FakeScriptObject so we
         # intercept it here and call TorchBindOpverload instead.
         if self._has_torchbind_op_overload and _must_dispatch_in_python(args, kwargs):
+            # pyrefly: ignore  # bad-argument-type
             return _call_overload_packet_from_python(self, *args, **kwargs)
         return self._op(*args, **kwargs)
 

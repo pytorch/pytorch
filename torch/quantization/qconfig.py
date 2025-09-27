@@ -27,5 +27,6 @@ from torch.ao.quantization.qconfig import (
     QConfig,
     qconfig_equals,
     QConfigAny,
+    # pyrefly: ignore  # deprecated
     QConfigDynamic,
 )

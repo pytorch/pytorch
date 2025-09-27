@@ -246,6 +246,7 @@ def get_device_capability(device: Optional[_device_t] = None) -> dict[str, Any]:
     }
 
 
+# pyrefly: ignore  # not-a-type
 def get_device_properties(device: Optional[_device_t] = None) -> _XpuDeviceProperties:
     r"""Get the properties of a device.
 
@@ -314,6 +315,7 @@ class StreamContext:
         self.stream = stream
         self.idx = _get_device_index(None, True)
         if self.idx is None:
+            # pyrefly: ignore  # bad-assignment
             self.idx = -1
 
     def __enter__(self):

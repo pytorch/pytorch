@@ -406,6 +406,7 @@ class ViewBufferFromNested(torch.autograd.Function):
 # Not actually a view!
 class ViewNestedFromBuffer(torch.autograd.Function):
     @staticmethod
+    # pyrefly: ignore  # bad-override
     def forward(
         ctx,
         values: torch.Tensor,

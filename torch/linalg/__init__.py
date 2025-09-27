@@ -1,6 +1,8 @@
 from torch._C import (  # type: ignore[attr-defined]
     _add_docstr,
+    # pyrefly: ignore  # missing-module-attribute
     _linalg,
+    # pyrefly: ignore  # missing-module-attribute
     _LinAlgError as LinAlgError,
 )
 

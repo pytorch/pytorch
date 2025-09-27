@@ -302,6 +302,7 @@ class StreamContext:
         self.idx = _get_device_index(None, True)
         if not torch.jit.is_scripting():
             if self.idx is None:
+                # pyrefly: ignore  # bad-assignment
                 self.idx = -1
 
         self.src_prev_stream = (

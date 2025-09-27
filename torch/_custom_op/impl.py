@@ -101,6 +101,7 @@ def custom_op(
             lib, ns, function_schema, name, ophandle, _private_access=True
         )
 
+        # pyrefly: ignore  # bad-assignment
         result.__name__ = func.__name__
         result.__module__ = func.__module__
         result.__doc__ = func.__doc__
