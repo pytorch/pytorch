@@ -1,8 +1,6 @@
 # Owner(s): ["oncall: export"]
 
 
-import unittest
-
 from torch._dynamo import config as dynamo_config
 from torch._dynamo.testing import make_test_cls_with_patches
 from torch._export import config as export_config
@@ -66,23 +64,6 @@ for test in tests:
     make_dynamic_cls(test)
 del test
 
-
-# this is because we marked unlift hooks to be dynamo skip traced
-unittest.expectedFailure(
-    InlineAndInstallStrictExportTestExport.test_custom_tag_metadata_re_export_inline_and_install_strict  # noqa: F821
-)
-unittest.expectedFailure(
-    InlineAndInstallStrictExportTestExport.test_from_node_metadata_export_inline_and_install_strict  # noqa: F821
-)
-unittest.expectedFailure(
-    InlineAndInstallStrictExportTestExport.test_module_inline_and_install_strict  # noqa: F821
-)
-unittest.expectedFailure(
-    InlineAndInstallStrictExportTestExport.test_module_with_dict_container_inp_out_inline_and_install_strict  # noqa: F821
-)
-unittest.expectedFailure(
-    InlineAndInstallStrictExportTestExport.test_retrace_pre_autograd_inline_and_install_strict  # noqa: F821
-)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
