@@ -2148,10 +2148,11 @@ static Tensor select_sparse(const Tensor& self, int64_t dim, int64_t index) {
     if (sparse_dim == 1) {
       // return dense part:
       if (new_values.size(0) == 1) {
-        return new_values[0];
+        return std::move(new_values[0]);
       } else {
         // sum promotes integral type to int64 when dtype is not specified.
-        return at::sum(new_values, 0, false, new_values.scalar_type());
+        return std::move(
+            at::sum(new_values, 0, false, new_values.scalar_type()));
       }
     } else {
       auto dimIndices = (arange(
@@ -2165,23 +2166,23 @@ static Tensor select_sparse(const Tensor& self, int64_t dim, int64_t index) {
                             .view(-1);
       auto new_indices =
           indices.index_select(1, nzIndices).index_select(0, dimIndices);
-      return _sparse_coo_tensor_with_dims_and_tensors(
+      return std::move(_sparse_coo_tensor_with_dims_and_tensors(
           sparse_dim - 1,
           dense_dim,
           new_sizes,
           new_indices,
           new_values,
-          self.options());
+          self.options()));
     }
   } else {
     auto new_values = values.select(dim - sparse_dim + 1, index);
-    return _sparse_coo_tensor_with_dims_and_tensors(
+    return std::move(_sparse_coo_tensor_with_dims_and_tensors(
         sparse_dim,
         dense_dim - 1,
         new_sizes,
         indices,
         new_values,
-        self.options());
+        self.options()));
   }
 }
 
