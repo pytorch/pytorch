@@ -1241,6 +1241,20 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             for wpeu in [0, int(8 // num_warps)]
         ]
 
+    def _should_skip_config(self, block_k: int, matrix_instr_nonkdim: int) -> bool:
+        """Skip config if BLOCK_K <= 64 and matrix_instr_nonkdim=16 on GFX95+"""
+        try:
+            return (
+                block_k <= 64
+                and matrix_instr_nonkdim == 16
+                and torch.version.hip is not None
+                and torch.cuda.get_device_capability() >= (9, 5)
+            )
+        except RuntimeError:
+            # If no HIP GPUs are available, we can't check device capability
+            # so we don't skip any configs
+            return False
+
     def _prune_exhaustive_configs(
         self,
         configs: list[BaseConfig],
@@ -1281,6 +1295,10 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
                 or conf.block_n % matrix_instr_nonkdim != 0
             ):
                 #  block_m and block_n must be a multiple of matrix_instr_nonkdim
+                continue
+
+            # Skip configs that cause compilation errors on GFX95+
+            if self._should_skip_config(conf.block_k, matrix_instr_nonkdim):
                 continue
 
             # Construct key for finding duplicate configs
