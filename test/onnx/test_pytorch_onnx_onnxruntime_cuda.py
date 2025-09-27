@@ -15,7 +15,6 @@ from pytorch_test_common import (
 from test_pytorch_onnx_onnxruntime import _parameterized_class_attrs_and_values
 
 import torch
-from torch.cuda.amp import autocast
 from torch.testing._internal import common_utils
 
 
@@ -53,7 +52,7 @@ class TestONNXRuntime_cuda(onnx_test_common._TestONNXRuntime):
                 super().__init__()
                 self.layer_norm = torch.nn.LayerNorm([10, 10])
 
-            @autocast()
+            @torch.amp.autocast(device_type="cuda")
             def forward(self, x):
                 return self.layer_norm(x)
 
@@ -78,7 +77,7 @@ class TestONNXRuntime_cuda(onnx_test_common._TestONNXRuntime):
                 self.loss = torch.nn.NLLLoss(reduction="none")
                 self.m = torch.nn.LogSoftmax(dim=1)
 
-            @autocast()
+            @torch.amp.autocast(device_type="cuda")
             def forward(self, input, target):
                 output = self.loss(self.m(2 * input), target)
                 return output

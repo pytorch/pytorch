@@ -309,7 +309,7 @@ def smoke_test_conv2d() -> None:
         print("Testing smoke_test_conv2d with cuda")
         conv = nn.Conv2d(3, 3, 3).cuda()
         x = torch.randn(1, 3, 24, 24, device="cuda")
-        with torch.cuda.amp.autocast():
+        with torch.amp.autocast(device_type="cuda"):
             out = conv(x)
         assert out is not None
 

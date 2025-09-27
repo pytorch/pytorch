@@ -35,7 +35,6 @@ from torch._utils_internal import (
     TEST_MASTER_PORT as MASTER_PORT,
 )
 from torch.autograd import DeviceType
-from torch.cuda.amp import autocast, GradScaler
 from torch.distributed.algorithms.ddp_comm_hooks import (
     default_hooks as default,
     post_localSGD_hook as post_localSGD,
@@ -5503,7 +5502,7 @@ class DistributedTest:
             optimizer = torch.optim.SGD(model.parameters(), lr=0.03)
 
             # Creates a GradScaler once at the beginning of training.
-            scaler = GradScaler()
+            scaler = torch.amp.GradScaler(device="cuda")
 
             ddp_model = nn.parallel.DistributedDataParallel(
                 model, device_ids=[self.rank], gradient_as_bucket_view=grad_is_view
@@ -5521,7 +5520,7 @@ class DistributedTest:
             for idx in range(20):
                 optimizer.zero_grad()
                 # Runs the forward pass with autocasting.
-                with autocast():
+                with torch.autocast(device_type="cuda"):
                     output = ddp_model(input)
                     loss = loss_fn(output, target)
 
