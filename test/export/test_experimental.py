@@ -32,7 +32,8 @@ class TestExperiment(TestCase):
         m = Module()
         example_inputs = (torch.randn(3),)
         m(*example_inputs)
-        ep = torch.export.export(m, example_inputs, strict=True)
+        with torch._export.config.patch(use_new_tracer_experimental=True):
+            ep = torch.export.export(m, example_inputs, strict=True)
         joint_ep = _export_forward_backward(ep)
         self.assertExpectedInline(
             str(joint_ep.graph_module.code).strip(),

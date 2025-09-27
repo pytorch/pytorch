@@ -2614,8 +2614,8 @@ def sdpa_constraint(fx_node, *args, **kwargs):
         meta_stride_expr = [
             s.node.expr if isinstance(s, torch.SymInt) else s for s in meta_val.stride()
         ]
-
-        stride_order = ir.get_stride_order(meta_val.stride())
+        shape_env = V.graph.sizevars.shape_env
+        stride_order = ir.get_stride_order(meta_val.stride(), shape_env)
 
         if stride_order and stride_order[-1] != 0:
             # contiguous stride order
