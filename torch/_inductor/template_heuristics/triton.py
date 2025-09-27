@@ -315,6 +315,10 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             GemmConfig(128, 128, 128, 3, 8),
         ]
 
+        self.blackwell_persistent_addmm_configs: list[BaseConfig] = [
+            GemmConfig(256, 128, 64, 2, 4),
+        ]
+
         self.scaled_mm_configs: list[BaseConfig] = [
             GemmConfig(128, 256, 32, 3, 8),
             GemmConfig(256, 128, 32, 3, 8),
@@ -2094,7 +2098,11 @@ class CUDABlackwellAddmmPersistentTMATemplateConfigHeuristic(
 
     def __init__(self) -> None:
         super().__init__()
-        self.mm_configs = self.blackwell_persistent_mm_configs
+        # NOTE: to ensure that we pass tests, addmm needs a small config
+        self.mm_configs = (
+            self.blackwell_persistent_mm_configs
+            + self.blackwell_persistent_addmm_configs
+        )
 
 
 @register_template_heuristic(
