@@ -50,6 +50,7 @@ from torch.testing._internal.common_cuda import (
 )
 from torch.testing._internal.common_device_type import (
     _has_sufficient_memory,
+    e4m3_type,
     skipCUDAIf,
 )
 from torch.testing._internal.common_quantization import (
@@ -1194,7 +1195,6 @@ class AOTInductorTestsTemplate:
         not PLATFORM_SUPPORTS_FP8,
         "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
     )
-    @skipIfRocm  # _scaled_mm_out_cuda  is not compiled for ROCm platform
     @skipIfXpu
     def test_fp8(self):
         # cuda only
@@ -1207,7 +1207,7 @@ class AOTInductorTestsTemplate:
                 self.out_dtype = dtype
 
             def forward(self, x, weight, bias, scale_a, scale_b):
-                weight = weight.to(torch.float8_e4m3fn)
+                weight = weight.to(e4m3_type)
                 output = torch._scaled_mm(
                     x,
                     weight,
@@ -1229,7 +1229,7 @@ class AOTInductorTestsTemplate:
         b_inverse_scale = 1 / b_scale
 
         x_shape = (16, 16)
-        x = torch.rand(*x_shape, device=GPU_TYPE, dtype=dtype).to(torch.float8_e4m3fn)
+        x = torch.rand(*x_shape, device=GPU_TYPE, dtype=dtype).to(e4m3_type)
         dim0_x = Dim("dim0_x", min=1, max=2048)
         dynamic_shapes = ({0: dim0_x}, None, None, None, None)
         self.check_model(
@@ -1242,7 +1242,6 @@ class AOTInductorTestsTemplate:
         not PLATFORM_SUPPORTS_FP8,
         "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
     )
-    @skipIfRocm  # _scaled_mm_out_cuda  is not compiled for ROCm platform
     @skipIfXpu
     def test_fp8_view_of_param(self):
         # cuda only
@@ -1277,15 +1276,13 @@ class AOTInductorTestsTemplate:
         input_bias = torch.rand(32, device=self.device, dtype=dtype)
         weight_shape = (32, 16)
         weight = torch.rand(*weight_shape, device=self.device, dtype=dtype).to(
-            torch.float8_e4m3fn
+            e4m3_type
         )
         a_inverse_scale = 1 / a_scale
         b_inverse_scale = 1 / b_scale
 
         x_shape = (16, 16)
-        x = torch.rand(*x_shape, device=self.device, dtype=dtype).to(
-            torch.float8_e4m3fn
-        )
+        x = torch.rand(*x_shape, device=self.device, dtype=dtype).to(e4m3_type)
         dim0_x = Dim("dim0_x", min=1, max=2048)
         dynamic_shapes = ({0: dim0_x}, None, None, None)
         self.check_model(
@@ -1832,7 +1829,7 @@ class AOTInductorTestsTemplate:
                 self.user_float_feature_idx = user_float_feature_idx
                 self.register_buffer(
                     "_tensor_constant0",
-                    torch.ones(1, device=device, dtype=torch.float32),
+                    torch.ones(5, device=device, dtype=torch.float32),
                     persistent=True,
                 )
                 self.register_buffer(
@@ -1843,6 +1840,7 @@ class AOTInductorTestsTemplate:
                 self.sub_mod = SubModule(device)
 
             def forward(self, x):
+                self._tensor_constant0[1:2] = 1
                 return (
                     torch.index_select(
                         x, 1, torch.tensor(self.user_float_feature_idx, device=x.device)
@@ -5076,6 +5074,52 @@ class AOTInductorTestsTemplate:
 
             self.check_model(Model(N, K, self.device), example_inputs)
 
+    def test_aoti_user_defined_triton_kernel_profiling(self):
+        if self.device != GPU_TYPE or self.device == "mps":
+            raise unittest.SkipTest("requires GPU")
+
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, x, y):
+                out = torch.zeros_like(x)
+                add_kernel[(4,)](x, y, out, n_elements=4, BLOCK_SIZE=16)
+                return out
+
+        example_inputs = (
+            torch.randn(4, 4, device=self.device),
+            torch.randn(4, 4, device=self.device),
+        )
+
+        with (
+            config.patch({"cpp.enable_kernel_profile": True}),
+            torch.profiler.profile(
+                record_shapes=True,
+                activities=[
+                    torch.profiler.ProfilerActivity.CPU,
+                    torch.profiler.ProfilerActivity.CUDA,
+                ],
+            ) as prof,
+        ):
+            self.check_model(Model(), example_inputs)
+        with common_utils.TemporaryFileName(mode="w+") as fname:
+            prof.export_chrome_trace(fname)
+            with open(fname) as f:
+                import json
+
+                j = json.load(f)
+                op_events = [
+                    e
+                    for e in j["traceEvents"]
+                    if e.get("name", "") == "kernels_.add_kernel_0"
+                ]
+                self.assertEqual(len(op_events), 1)
+                self.assertEqual(
+                    op_events[0]["args"].get("Input Args", ""),
+                    ["in_ptr0", "in_ptr1", "out_ptr", "n_elements"],
+                )
+
     def test_aoti_debug_printer_user_defined_triton_kernel(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU")
@@ -5195,7 +5239,6 @@ class AOTInductorTestsTemplate:
         not PLATFORM_SUPPORTS_FP8,
         "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
     )
-    @skipIfRocm  # _scaled_mm_out_cuda  is not compiled for ROCm platform
     @skipIfXpu
     def test_aoti_debug_printer_fp8_dtype(self):
         if self.device != GPU_TYPE:
@@ -5207,7 +5250,7 @@ class AOTInductorTestsTemplate:
                 self.out_dtype = dtype
 
             def forward(self, x, weight, bias, scale_a, scale_b):
-                weight = weight.to(torch.float8_e4m3fn)
+                weight = weight.to(e4m3_type)
                 output = torch._scaled_mm(
                     x,
                     weight,
@@ -5229,7 +5272,7 @@ class AOTInductorTestsTemplate:
         b_inverse_scale = 1 / b_scale
 
         x_shape = (16, 16)
-        x = torch.rand(*x_shape, device=GPU_TYPE, dtype=dtype).to(torch.float8_e4m3fn)
+        x = torch.rand(*x_shape, device=GPU_TYPE, dtype=dtype).to(e4m3_type)
 
         kernel_calls = [
             (f"aoti_torch_{GPU_TYPE}__scaled_mm_out", 5),
@@ -7151,6 +7194,37 @@ class AOTInductorTestsTemplate:
                         for lib in torch_libs:
                             self.assertTrue(lib not in line)
 
+    def test_unbounded_expr_substitutions(self):
+        class Model(torch.nn.Module):
+            def forward(self, x, y, a, b):
+                u0, s0 = a.item(), b.item()
+                u_max = max(u0, 15)
+                # construct the equality rule Max(15, u0) == s0 * Max(15, u0)
+                torch._check(u_max == s0 * u_max)
+                # size x - [Max(u0, 15), 64]
+                x = x.expand(u_max, *x.shape).clone()
+                return x @ y
+
+        model = Model()
+
+        example_inputs = (
+            torch.randn((64,), dtype=torch.bfloat16, device=self.device),
+            torch.randn((64, 16), dtype=torch.bfloat16, device=self.device),
+            torch.tensor(19, device=self.device),
+            torch.tensor(1, device=self.device),
+        )
+        torch._dynamo.mark_dynamic(example_inputs[-1], 0)
+
+        so_path, code = run_and_get_cpp_code(
+            AOTIRunnerUtil.legacy_compile, model, example_inputs
+        )
+
+        compiled = AOTIRunnerUtil.legacy_load(self.device, so_path)
+        compiled_outputs = compiled(*example_inputs)
+
+        eager_outputs = model(*example_inputs)
+        torch.testing.assert_close(eager_outputs, compiled_outputs)
+
 
 class AOTInductorLoggingTest(LoggingTestCase):
     @make_logging_test(dynamic=logging.DEBUG)
@@ -7277,8 +7351,6 @@ GPU_TEST_FAILURES = {
 }
 
 MPS_TEST_FAILURES = {
-    # aten::_embedding_bag backward is not currently implemented for the MPS device.
-    "test_embedding_bag": fail_mps(),
     # aten::_scaled_dot_product_efficient_attention is not currently implemented for the MPS device.
     "test_scaled_dot_product_efficient_attention": fail_mps(),
     # aten::_int_mm is not implemented for MPS backend
@@ -7295,8 +7367,6 @@ MPS_TEST_FAILURES = {
     "test_index_put_with_none_index": fail_mps(),
     # Error device may not be nil
     "test_zero_size_weight": fail_mps(is_skip=True),
-    # RuntimeError: Cannot compare two tensors on different devices. Got: cpu and mps:0
-    "test_aoti_constant_tensor_name_collision": fail_mps(is_skip=True),
     # MPSGraph does not support tensor dims > INT_MAX
     "test_upper_bound_i64": fail_mps(is_skip=True),
     # MPS doesn't support triton
