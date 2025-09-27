@@ -174,6 +174,8 @@ def create_like_strategy(op_schema: OpSchema) -> StrategyType:
                 for p in arg_spec.placements
             ),
         )
+        if hasattr(arg_spec, "device_order"):
+            output_spec.device_order = arg_spec.device_order
         create_like_strategy.strategies.append(
             OpSpec(output_specs=output_spec, input_specs=(arg_spec,))
         )
