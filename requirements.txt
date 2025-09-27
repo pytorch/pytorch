@@ -18,4 +18,4 @@ lintrunner
 ninja
 packaging
 optree>=0.13.0
-cmake
+cmake>=3.18,<4
