@@ -50,6 +50,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     parametrize,
     TEST_WITH_ROCM,
+    patch_matmul,
 )
 from torch.testing._internal.logging_utils import multiple_logs_to_string
 from torch.utils._triton import (
@@ -1438,17 +1439,14 @@ class TestMaxAutotune(TestCase):
     @config.patch(
         max_autotune=True,
         max_autotune_gemm_backends="TRITON",
+        comprehensive_padding=False,
+        shape_padding=False,
+    )
+    @patch_matmul(
+        allow_fp16_reduced_precision_reduction=False,
+        allow_bf16_reduced_precision_reduction=False,
     )
     def test_max_autotune_decompose_k(self, sizes, dtype, dynamic):
-        fp16_red_setting = (
-            torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction
-        )
-        bf16_red_setting = (
-            torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction
-        )
-        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
-        torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = False
-
         M, N, K = sizes
 
         a = torch.randn(M, K, dtype=dtype, device=GPU_TYPE, requires_grad=True)
@@ -1526,13 +1524,6 @@ class TestMaxAutotune(TestCase):
                 atol=1e-2,
                 rtol=1e-2,
             )
-
-        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = (
-            fp16_red_setting
-        )
-        torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = (
-            bf16_red_setting
-        )
 
     @skipIfXpu
     @unittest.skipIf(TEST_WITH_ROCM, "decompose_k not supported on ROCm")

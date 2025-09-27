@@ -5757,6 +5757,31 @@ def recover_orig_fp32_precision(fn):
 
     return recover()(fn)
 
+def patch_matmul(**new_flags):
+    """
+    Decorator/context manager to temporarily set torch.backends.cuda.matmul flags.
+    Works like Inductor's @config.patch.
+    """
+    def decorator(fn):
+        @functools.wraps(fn)
+        def wrapped(*args, **kwargs):
+            # Save old values
+            old_flags = {
+                k: getattr(torch.backends.cuda.matmul, k)
+                for k in new_flags
+            }
+            try:
+                # Apply new ones
+                for k, v in new_flags.items():
+                    setattr(torch.backends.cuda.matmul, k, v)
+                return fn(*args, **kwargs)
+            finally:
+                # Restore
+                for k, v in old_flags.items():
+                    setattr(torch.backends.cuda.matmul, k, v)
+        return wrapped
+    return decorator
+
 def skipIfPythonVersionMismatch(predicate):
     vi = sys.version_info
 
