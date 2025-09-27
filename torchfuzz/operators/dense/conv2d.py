@@ -74,14 +74,14 @@ class Conv2dOperator(Operator):
 
         result = [input_tensor, weight_tensor]
 
-        # Store parameters for codegen
-        self._stride = stride
-        self._padding = padding
+        # Store parameters for codegen on the output tensor to avoid race conditions
+        tensor._conv_stride = stride
+        tensor._conv_padding = padding
         return result
 
     def codegen(self, output_name, input_names, output_tensor):
         """Generate code for conv2d operation."""
-        stride = getattr(self, '_stride', 1)
-        padding = getattr(self, '_padding', 0)
+        stride = getattr(output_tensor, '_conv_stride', 1)
+        padding = getattr(output_tensor, '_conv_padding', 0)
 
         return f"{output_name} = torch.conv2d({input_names[0]}, {input_names[1]}, stride={stride}, padding={padding})"

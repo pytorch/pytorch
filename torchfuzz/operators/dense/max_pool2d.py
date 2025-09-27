@@ -65,16 +65,16 @@ class MaxPool2dOperator(Operator):
 
         result = [input_tensor]
 
-        # Store parameters for codegen
-        self._kernel_size = kernel_size
-        self._stride = stride
-        self._padding = padding
+        # Store parameters for codegen on the output tensor to avoid race conditions
+        tensor._pool_kernel_size = kernel_size
+        tensor._pool_stride = stride
+        tensor._pool_padding = padding
         return result
 
     def codegen(self, output_name, input_names, output_tensor):
         """Generate code for max_pool2d operation."""
-        kernel_size = getattr(self, '_kernel_size', 2)
-        stride = getattr(self, '_stride', 2)
-        padding = getattr(self, '_padding', 0)
+        kernel_size = getattr(output_tensor, '_pool_kernel_size', 2)
+        stride = getattr(output_tensor, '_pool_stride', 2)
+        padding = getattr(output_tensor, '_pool_padding', 0)
 
         return f"{output_name} = torch.max_pool2d({input_names[0]}, kernel_size={kernel_size}, stride={stride}, padding={padding})"

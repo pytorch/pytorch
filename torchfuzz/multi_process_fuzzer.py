@@ -45,7 +45,9 @@ IGNORE_PATTERNS: List[re.Pattern] = [
     re.compile(r"AttributeError: 'Infinity' object has no attribute '_mpf_'"),
     re.compile(r"AssertionError: Node full_1 was invalid, but is output"),
     re.compile(r"Error in op: torch\.ops\.aten\.convolution\.default"),
+    re.compile(r"IndexError: list index out of range"),
     # Add more patterns here as needed, e.g.:
+
     # re.compile(r"Some other error message"),
 ]
 
@@ -164,7 +166,7 @@ def run_multi_process_fuzzer(
                     bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}] ✅/❌/❓={postfix}",
                     dynamic_ncols=True
                 )
-                pbar.set_postfix_str(f"{successful_count}/{failed_count}/{ignored_count} | throughput: 0.00 seeds/hr")
+                pbar.set_postfix_str(f"{successful_count}/{failed_count}/{ignored_count} | 0.00 seeds/hr")
             else:
                 persist_print("Progress: (install tqdm for better progress bar)")
                 pbar = None
@@ -191,7 +193,7 @@ def run_multi_process_fuzzer(
 
                     # Update progress bar
                     if HAS_TQDM and pbar:
-                        pbar.set_postfix_str(f"{successful_count}/{failed_count}/{ignored_count} | throughput: {throughput:.2f} seeds/hr")
+                        pbar.set_postfix_str(f"{successful_count}/{failed_count}/{ignored_count} | {throughput:.2f} seeds/hr")
                         # tqdm automatically shows ETA (estimated time remaining) in the bar_format above
                         pbar.update(1)
                     else:

@@ -45,17 +45,20 @@ class InterpolateOperator(Operator):
 
         result = [input_tensor]
 
-        # Store parameters for codegen
-        self._size = output_spatial_dims
-        self._mode = random.choice(['nearest', 'linear', 'bilinear', 'trilinear', 'bicubic'])
+        # Store parameters for codegen on the output tensor to avoid race conditions
+        mode = random.choice(['nearest', 'linear', 'bilinear', 'trilinear', 'bicubic'])
 
         # Ensure mode is compatible with dimensionality
         if len(output_spatial_dims) == 1:
-            self._mode = random.choice(['nearest', 'linear'])
+            mode = random.choice(['nearest', 'linear'])
         elif len(output_spatial_dims) == 2:
-            self._mode = random.choice(['nearest', 'bilinear', 'bicubic'])
+            mode = random.choice(['nearest', 'bilinear', 'bicubic'])
         elif len(output_spatial_dims) == 3:
-            self._mode = random.choice(['nearest', 'trilinear'])
+            mode = random.choice(['nearest', 'trilinear'])
+
+        # Store on the output tensor instead of instance variables to avoid race conditions
+        tensor._interp_size = output_spatial_dims
+        tensor._interp_mode = mode
 
         return result
 
@@ -68,8 +71,12 @@ class InterpolateOperator(Operator):
 
     def codegen(self, output_name, input_names, output_tensor):
         """Generate code for interpolate operation."""
-        size = getattr(self, '_size', None)
-        mode = getattr(self, '_mode', 'nearest')
+        size = getattr(output_tensor, '_interp_size', None)
+        mode = getattr(output_tensor, '_interp_mode', 'nearest')
 
-        size_str = str(size) if size else 'None'
+        if size is None:
+            # Fallback: extract spatial dimensions from output tensor
+            size = output_tensor.size[2:]  # Skip batch and channel dims
+
+        size_str = str(tuple(size)) if size else 'None'
         return f"{output_name} = torch.nn.functional.interpolate({input_names[0]}, size={size_str}, mode='{mode}')"

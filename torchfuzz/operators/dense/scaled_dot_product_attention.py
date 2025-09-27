@@ -28,13 +28,21 @@ class ScaledDotProductAttentionOperator(Operator):
         # tensor shape is (batch_size, num_heads, seq_len, head_dim)
         batch_size, num_heads, seq_len, head_dim = tensor.size
 
-        # For self-attention, query, key, value have same shape
-        # For cross-attention, key/value might have different seq_len
-        key_value_seq_len = random.choice([seq_len, seq_len // 2, seq_len * 2, 512])
+        # For attention, we need to be more careful about dimensions
+        # The output shape matches the query shape: (batch_size, num_heads, seq_len, head_dim)
+        # Key and value can have different sequence length but must have same head_dim
 
-        # All have same shape for self-attention case
-        qkv_size = (batch_size, num_heads, seq_len, head_dim)
-        kv_size = (batch_size, num_heads, key_value_seq_len, head_dim)
+        # Choose key/value sequence length - keep it reasonable to avoid memory issues
+        max_kv_seq_len = min(seq_len * 2, 128)  # Limit to avoid too large tensors
+        min_kv_seq_len = max(1, seq_len // 2)   # Ensure at least 1
+        key_value_seq_len = random.randint(min_kv_seq_len, max_kv_seq_len)
+
+        # Query shape (determines output shape)
+        query_size = (batch_size, num_heads, seq_len, head_dim)
+        # Key and value shapes (can have different sequence length but must have same head_dim)
+        key_size = (batch_size, num_heads, key_value_seq_len, head_dim)
+        # Value must have same head_dim as query and key for proper attention computation
+        value_size = (batch_size, num_heads, key_value_seq_len, head_dim)
 
         # Calculate strides for contiguous tensors
         def calc_stride(size):
@@ -43,13 +51,14 @@ class ScaledDotProductAttentionOperator(Operator):
                 stride.insert(0, stride[0] * dim)
             return tuple(stride)
 
-        qkv_stride = calc_stride(qkv_size)
-        kv_stride = calc_stride(kv_size)
+        query_stride = calc_stride(query_size)
+        key_stride = calc_stride(key_size)
+        value_stride = calc_stride(value_size)
 
         # Create input tensors: query, key, value
-        query_tensor = Tensor(qkv_size, qkv_stride, tensor.dtype, tensor.device, tensor.supported_ops)
-        key_tensor = Tensor(kv_size, kv_stride, tensor.dtype, tensor.device, tensor.supported_ops)
-        value_tensor = Tensor(kv_size, kv_stride, tensor.dtype, tensor.device, tensor.supported_ops)
+        query_tensor = Tensor(query_size, query_stride, tensor.dtype, tensor.device, tensor.supported_ops)
+        key_tensor = Tensor(key_size, key_stride, tensor.dtype, tensor.device, tensor.supported_ops)
+        value_tensor = Tensor(value_size, value_stride, tensor.dtype, tensor.device, tensor.supported_ops)
 
         result = [query_tensor, key_tensor, value_tensor]
 

@@ -19,7 +19,7 @@ class CodeGenerator:
             tensor_size = tensor._actual_size
         else:
             tensor_size = tensor.size
-            
+
         if tensor.dtype == "bool":
             # torch.rand does not support bool, use torch.randint for boolean tensors
             return f"torch.randint(0, 2, {tuple(tensor_size)}, dtype=torch.bool, device='{tensor.device}')"
@@ -28,13 +28,13 @@ class CodeGenerator:
             # Use a reasonable range for integer tensors (0 to 1000 for most cases)
             max_val = 1000 if tensor.dtype == "int64" else 100
             return f"torch.randint(0, {max_val}, {list(tensor_size)}, dtype=torch.{tensor.dtype}, device='{tensor.device}')"
-        
+
         # Handle requires_grad attribute
         if hasattr(tensor, 'requires_grad') and tensor.requires_grad is not None:
             requires_grad = tensor.requires_grad
         else:
             requires_grad = True  # Default behavior
-            
+
         return f"torch.rand({list(tensor_size)}, dtype=torch.{tensor.dtype}, device='{tensor.device}', requires_grad={requires_grad})"
 
     def generate_code(self, target_tensor, all_nodes, output_path):

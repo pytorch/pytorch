@@ -20,10 +20,10 @@ class PadOperator(Operator):
         """Decompose tensor into input tensor for pad operation."""
         # Simple approach: create an input tensor with same size as output
         # Apply minimal padding to ensure the operation is valid
-        
+
         # For now, just apply minimal padding to the last dimension to avoid complex verification issues
         input_size = list(tensor.size)
-        
+
         # Apply small padding to the last dimension only
         if tensor.size[-1] > 1:
             pad_values = [0, 1]  # Add 1 to the right of last dimension
@@ -31,13 +31,13 @@ class PadOperator(Operator):
         else:
             pad_values = [1, 0]  # Add 1 to the left of last dimension
             # Keep same input size - output will be 1 larger than requested
-        
+
         input_stride = self._calc_stride(tuple(input_size))
         input_tensor = Tensor(tuple(input_size), input_stride, tensor.dtype, tensor.device, tensor.supported_ops)
-        
+
         # Store the padding values so codegen can use them
         self._pad_values = pad_values
-        
+
         return [input_tensor]
 
     def _calc_stride(self, size):
