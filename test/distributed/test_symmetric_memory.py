@@ -22,7 +22,12 @@ from torch.distributed._symmetric_memory import (
     restride_A_for_fused_matmul_reduce_scatter,
     restride_A_shard_for_fused_all_gather_matmul,
 )
-from torch.testing._internal.common_cuda import _get_torch_cuda_version, SM90OrLater
+from torch.testing._internal.common_cuda import (
+    _get_torch_cuda_version,
+    SM100OrLater,
+    SM90OrLater,
+    xfailIfSM100OrLater,
+)
 from torch.testing._internal.common_device_type import e4m3_type
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
@@ -45,6 +50,10 @@ from torch.testing._internal.common_utils import (
 
 
 test_contexts = [nullcontext, _test_mode]
+
+# Set environment variable to disable multicast for all tests in this module
+# Workaround https://github.com/pytorch/pytorch/issues/162429
+os.environ["TORCH_SYMM_MEM_DISABLE_MULTICAST"] = "1"
 
 # So that tests are written in device-agnostic way
 device_type = "cuda"
@@ -324,6 +333,10 @@ class AsyncTPTest(MultiProcContinuousTest):
     @skip_if_lt_x_gpu(2)
     @parametrize("symm_mem_input", [True, False])
     @parametrize("is_b_row_major", [True, False])
+    @skipIf(
+        SM100OrLater,
+        "https://github.com/pytorch/pytorch/issues/162917",
+    )
     def test_fused_all_gather_matmul_native(
         self, symm_mem_input: bool, is_b_row_major: bool
     ) -> None:
@@ -883,6 +896,8 @@ class SymmMemCollectiveTest(MultiProcContinuousTest):
     @parametrize("dtype", [torch.float, torch.bfloat16])
     @parametrize("align_bytes", [4, 8, 16])
     @parametrize("size_bytes", [4, 8192, 8196])
+    # https://github.com/pytorch/pytorch/issues/164015
+    @xfailIfSM100OrLater
     def test_multimem_one_shot_all_reduce(
         self, dtype: torch.dtype, size_bytes: int, align_bytes: int
     ) -> None:
