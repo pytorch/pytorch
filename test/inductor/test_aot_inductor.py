@@ -5074,6 +5074,52 @@ class AOTInductorTestsTemplate:
 
             self.check_model(Model(N, K, self.device), example_inputs)
 
+    def test_aoti_user_defined_triton_kernel_profiling(self):
+        if self.device != GPU_TYPE or self.device == "mps":
+            raise unittest.SkipTest("requires GPU")
+
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, x, y):
+                out = torch.zeros_like(x)
+                add_kernel[(4,)](x, y, out, n_elements=4, BLOCK_SIZE=16)
+                return out
+
+        example_inputs = (
+            torch.randn(4, 4, device=self.device),
+            torch.randn(4, 4, device=self.device),
+        )
+
+        with (
+            config.patch({"cpp.enable_kernel_profile": True}),
+            torch.profiler.profile(
+                record_shapes=True,
+                activities=[
+                    torch.profiler.ProfilerActivity.CPU,
+                    torch.profiler.ProfilerActivity.CUDA,
+                ],
+            ) as prof,
+        ):
+            self.check_model(Model(), example_inputs)
+        with common_utils.TemporaryFileName(mode="w+") as fname:
+            prof.export_chrome_trace(fname)
+            with open(fname) as f:
+                import json
+
+                j = json.load(f)
+                op_events = [
+                    e
+                    for e in j["traceEvents"]
+                    if e.get("name", "") == "kernels_.add_kernel_0"
+                ]
+                self.assertEqual(len(op_events), 1)
+                self.assertEqual(
+                    op_events[0]["args"].get("Input Args", ""),
+                    ["in_ptr0", "in_ptr1", "out_ptr", "n_elements"],
+                )
+
     def test_aoti_debug_printer_user_defined_triton_kernel(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU")
@@ -7147,6 +7193,37 @@ class AOTInductorTestsTemplate:
                     if "NEEDED" in line:
                         for lib in torch_libs:
                             self.assertTrue(lib not in line)
+
+    def test_unbounded_expr_substitutions(self):
+        class Model(torch.nn.Module):
+            def forward(self, x, y, a, b):
+                u0, s0 = a.item(), b.item()
+                u_max = max(u0, 15)
+                # construct the equality rule Max(15, u0) == s0 * Max(15, u0)
+                torch._check(u_max == s0 * u_max)
+                # size x - [Max(u0, 15), 64]
+                x = x.expand(u_max, *x.shape).clone()
+                return x @ y
+
+        model = Model()
+
+        example_inputs = (
+            torch.randn((64,), dtype=torch.bfloat16, device=self.device),
+            torch.randn((64, 16), dtype=torch.bfloat16, device=self.device),
+            torch.tensor(19, device=self.device),
+            torch.tensor(1, device=self.device),
+        )
+        torch._dynamo.mark_dynamic(example_inputs[-1], 0)
+
+        so_path, code = run_and_get_cpp_code(
+            AOTIRunnerUtil.legacy_compile, model, example_inputs
+        )
+
+        compiled = AOTIRunnerUtil.legacy_load(self.device, so_path)
+        compiled_outputs = compiled(*example_inputs)
+
+        eager_outputs = model(*example_inputs)
+        torch.testing.assert_close(eager_outputs, compiled_outputs)
 
 
 class AOTInductorLoggingTest(LoggingTestCase):

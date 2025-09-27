@@ -1071,23 +1071,23 @@ class _SymNodeDict:
     """
 
     def __init__(self) -> None:
-        self.sym_node_dict: dict[PySymType, _PySymProxyType] = {}
+        self.sym_node_dict: dict[sympy.Expr, _PySymProxyType] = {}
 
     def __setitem__(self, key: PySymType, value: _PySymProxyType) -> None:
-        self.sym_node_dict[key.node] = value
+        self.sym_node_dict[key.node.expr] = value
 
     def __getitem__(self, key: PySymType) -> _PySymProxyType:
-        return self.sym_node_dict[key.node]
+        return self.sym_node_dict[key.node.expr]
 
     def __contains__(self, key: PySymType) -> bool:
-        return key.node in self.sym_node_dict
+        return key.node.expr in self.sym_node_dict
 
     def get(
         self, key: PySymType, default: Optional[_PySymProxyType] = None
     ) -> _PySymProxyType:
         # dict.get()'s annotation doesn't accept `None` when the value type
         # isn't Optional.
-        return self.sym_node_dict.get(key.node, default)  # type: ignore[arg-type, return-value]
+        return self.sym_node_dict.get(key.node.expr, default)  # type: ignore[arg-type, return-value]
 
     def __iter__(self) -> Any:
         raise NotImplementedError
