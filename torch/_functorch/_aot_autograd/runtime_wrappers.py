@@ -41,8 +41,8 @@ from torch._guards import (
 from torch._prims_common import CUDARngStateHelper
 from torch._subclasses import FakeTensor
 from torch.fx.experimental._backward_state import BackwardState
-from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+from torch.utils.weak import StorageWeakRef
 
 from .. import config
 from .collect_metadata_analysis import run_functionalized_fw_and_collect_metadata

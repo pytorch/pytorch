@@ -387,7 +387,7 @@ def _package_state_dict(
             archive_writer.write_bytes(archive_path, buffer.getvalue())
             idx += 1
         else:
-            tensor_storage = weight_tensor.untyped_storage()
+            tensor_storage = weight_tensor.cpu().untyped_storage()
             if tensor_storage not in storage_map:
                 storage_map[tensor_storage] = path_name
                 tensor_bytes = _get_raw_tensor_bytes(weight_tensor)
@@ -433,7 +433,7 @@ def _package_constants(
                 tensor_idx += 1
             else:
                 # Only save once when tensors share the same storage
-                tensor_storage = constant.untyped_storage()
+                tensor_storage = constant.cpu().untyped_storage()
                 if tensor_storage not in storage_map:
                     storage_map[tensor_storage] = path_name
                     tensor_bytes = _get_raw_tensor_bytes(constant)
