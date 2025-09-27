@@ -362,7 +362,8 @@ Tensor _convolution_out(
   }
   int64_t dim = k - 2;
   TORCH_CHECK(dim > 0, "weight should have at least three dimensions");
-
+  
+  bool is_1d = false;
   ConvParams params;
   if (ndim == 3) {
     // PyTorch does not support ChannelsLast1D case,
@@ -374,6 +375,7 @@ Tensor _convolution_out(
     params.output_padding = output_padding_.vec();
     params.groups = groups_;
     params.view1d_as_2d();
+    is_1d = true;
   } else {
     params.stride = expand_param_if_needed(stride_, "stride", dim);
     // PyTorch default Conv padding should be a single integer value
@@ -460,6 +462,7 @@ Tensor _convolution_out(
         params.stride,
         params.dilation,
         params.groups,
+        is_1d,
         attr);
   }
 
