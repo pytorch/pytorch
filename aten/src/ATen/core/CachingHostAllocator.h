@@ -6,6 +6,7 @@
 #include <c10/core/thread_pool.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/llvmMathExtras.h>
+#include <iostream>
 #include <optional>
 
 #include <deque>
@@ -49,6 +50,42 @@ namespace {
   constexpr size_t MAX_SIZE_INDEX = 64;
 }
 
+// A large reserved pinned memory segment that is created in advance which is used
+// to allocate small pinned memory requests to avoid calling into expensive APIs.
+// We never free this memory and move up the pointer as we allocate new blocks 
+// and when blocks are freed, they are cached in the free lists. 
+struct PinnedReserveSegment {
+  PinnedReserveSegment(void *start, size_t size) : start_(start), size_(size), 
+    current_ptr_(start_), initialized_(true) {}
+
+  PinnedReserveSegment() : start_(nullptr), size_(0), current_ptr_(nullptr), initialized_(false) {}
+  
+  bool initialized() {
+    return initialized_;
+  }
+
+  void* allocate(size_t bytes) {
+    std::lock_guard<std::mutex> guard(mutex_);
+    
+    // Round up the requested size to 4KB boundary for all including the small ones.
+    size_t rounded_bytes = (bytes + 4096 - 1) & ~(4096 - 1);
+
+    if (((uint8_t*)current_ptr_ + rounded_bytes) > ((uint8_t*)start_ + size_)) {
+      return nullptr;
+    }
+
+    void* ptr = current_ptr_;
+    current_ptr_ = (uint8_t*)current_ptr_ + rounded_bytes;
+    return ptr;
+  }
+
+  std::mutex mutex_;
+  void* start_;
+  size_t size_;
+  void* current_ptr_;
+  bool initialized_;
+};
+
 // Struct containing memory allocator summary statistics for host.
 struct TORCH_API HostStats {
   // COUNT: allocations requested by client code. Note that active
@@ -75,6 +112,9 @@ struct TORCH_API HostStats {
 
   // COUNT: number of times cudaHostFree/cudaHostUnregister was called.
   int64_t num_host_free = 0; // This is derived from segment or timing
+
+  // Count of cudaHostFree/cudaHostUnregister per bucket
+  std::vector<int64_t> bucket_allocation = std::vector<int64_t>(MAX_SIZE_INDEX);
 };
 
 // Struct containing memory allocator summary statistics for host, as they
@@ -196,27 +236,7 @@ struct CachingHostAllocatorImpl {
     // background.
     if (!pinned_use_background_threads()) {
       process_events();
-    }
-
-    // Round up the allocation to the nearest power of two to improve reuse.
-    // These power of two sizes are also used to index into the free list.
-    size_t roundSize = c10::llvm::PowerOf2Ceil(size);
-
-    // First, try to allocate from the free list
-    auto* block = get_free_block(roundSize);
-    if (block) {
-      return {block->ptr_, reinterpret_cast<void*>(block)};
-    }
-
-    // Check in the recently freed blocks with pending events to see if we
-    // can reuse them. Call get_free_block again after processing events
-    if (pinned_use_background_threads()) {
-      process_events_for_specific_size(roundSize);
-      block = get_free_block(roundSize);
-      if (block) {
-        return {block->ptr_, reinterpret_cast<void*>(block)};
-      }
-
+    } else {
       // Launch the background thread and process events in a loop.
       static bool background_thread_flag [[maybe_unused]] = [this] {
         getBackgroundThreadPool()->run([&]() {
@@ -229,8 +249,16 @@ struct CachingHostAllocatorImpl {
       }();
     }
 
-    // Slow path: if we can't allocate from the cached free list, we need
-    // to create a new block.
+    // Round up the allocation to the nearest power of two to improve reuse.
+    // These power of two sizes are also used to index into the free list.
+    size_t roundSize = c10::llvm::PowerOf2Ceil(size);
+
+    // First, try to allocate from the free list
+    auto* block = get_free_block(roundSize);
+    if (block) {
+      return {block->ptr_, reinterpret_cast<void*>(block)};
+    }
+
     void* ptr = nullptr;
     allocate_host_memory(roundSize, &ptr);
 
@@ -278,8 +306,6 @@ struct CachingHostAllocatorImpl {
       auto index = size_index(block->size_);
       std::lock_guard<std::mutex> g(free_list_[index].mutex_);
       free_list_[index].list_.push_back(block);
-      stats_.allocation_bucket_stats[index].decrease(1);
-      stats_.allocated_bytes_bucket_stats[index].decrease(block->size_);
     } else {
       // restore these events that record by used streams.
       std::lock_guard<std::mutex> g(events_mutex_);
@@ -339,9 +365,12 @@ struct CachingHostAllocatorImpl {
       for (auto* block : blocks_to_remove) {
         blocks_.erase(block);
         ptr_to_block_.erase(block->ptr_);
+        auto index = size_index(block->size_);
+        free_block(block);
         stats_.allocation.decrease(1);
         stats_.allocated_bytes.decrease(block->size_);
-        free_block(block);
+        stats_.allocation_bucket_stats[index].decrease(1);
+        stats_.allocated_bytes_bucket_stats[index].decrease(block->size_);
         delete block;
       }
     }
@@ -398,6 +427,7 @@ struct CachingHostAllocatorImpl {
       // a best effort manner, since we can't really replay the cached events per bucket.
       add_bucket_stats(stats.allocation, stats_.allocation_bucket_stats[i]);
       add_bucket_stats(stats.allocated_bytes, stats_.allocated_bytes_bucket_stats[i]);
+      stats.bucket_allocation[i] = stats_.allocation_bucket_stats[i].allocated;
     }
 
     // Get the timing stats
@@ -488,8 +518,6 @@ struct CachingHostAllocatorImpl {
       B* block = free_list_[index].list_.back();
       free_list_[index].list_.pop_back();
       block->allocated_ = true;
-      stats_.allocation_bucket_stats[index].increase(1);
-      stats_.allocated_bytes_bucket_stats[index].increase(size);
       return block;
     }
     return nullptr;
@@ -583,8 +611,6 @@ struct CachingHostAllocatorImpl {
         auto index = size_index(block->size_);
         std::lock_guard<std::mutex> g(free_list_[index].mutex_);
         free_list_[index].list_.push_back(block);
-        stats_.allocation_bucket_stats[index].decrease(1);
-        stats_.allocated_bytes_bucket_stats[index].decrease(size);
         if (size != -1) {
           return;
         }

@@ -608,6 +608,10 @@ Available options:
   for processing events. This avoids any slow path associated with querying/processing of
   events in the fast allocation path. This feature is disabled by default.
 
+* `pinned_reserve_segment_size_mb` option is a size in MB to reserve for pinned memory
+  segment. This allocates a large segment of pinned memory upfront and then uses to allocate
+  small size requests. This helps reduce the number of expensive device library calls.
+
 * ``graph_capture_record_stream_reuse`` (experimental, default: `False`)
   If set to `True`, the CUDA caching allocator will attempt to reclaim device memory during
   CUDA Graph capture by using the graph topology (instead of CUDA events) to determine
