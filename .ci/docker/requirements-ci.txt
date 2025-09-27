@@ -167,9 +167,9 @@ pillow==11.0.0
 #Pinned versions: 10.3.0
 #test that import:
 
-protobuf==5.29.4
+protobuf==6.31.1
 #Description:  Google's data interchange format
-#Pinned versions: 5.29.4
+#Pinned versions: 6.31.1
 #test that import: test_tensorboard.py, test/onnx/*
 
 psutil
@@ -331,7 +331,7 @@ sympy==1.13.3
 #Pinned versions:
 #test that import:
 
-onnx==1.18.0
+onnx==1.19.0
 #Description: Required by onnx tests, and mypy and test_public_bindings.py when checking torch.onnx._internal
 #Pinned versions:
 #test that import:
