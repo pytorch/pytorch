@@ -92,6 +92,8 @@ struct Vectorized16 {
     return fmadd(step_sizes, step_vec, base_vec);
   }
 
+#ifndef CPU_CAPABILITY_SVE128
+
   // Very slow implementation of indexing.
   // Only required because vec256_qint refers to this.
   // Once we specialize that implementation for ARM
@@ -114,13 +116,14 @@ struct Vectorized16 {
     return mask;
   }
 
+  #endif
+
   Derived map(value_type (*const f)(value_type)) const {
-    __at_align__ value_type tmp[size()];
-    static_cast<const Derived*>(this)->store(tmp);
+    VecT result;
     for (const auto i : c10::irange(size())) {
-      tmp[i] = f(tmp[i]);
+      result[i] = f(values[i]);
     }
-    return Derived::loadu(tmp);
+    return result;
   }
 
   Derived angle() const {
