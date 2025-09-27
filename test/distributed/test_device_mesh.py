@@ -1610,9 +1610,13 @@ class CuTeLayoutTest(TestCase):
         layout6 = _Layout((2, 2, 2), (8, 4, 1))
         self.assertTrue(layout6.check_non_overlap())
 
-        # Test 7: Invalid layout - middle dimension overlaps
+        # Test 7: Valid layout - stride not ordered
         layout7 = _Layout((2, 2, 2), (4, 1, 2))
         self.assertTrue(layout7.check_non_overlap())
+
+        # Test 8: Valid layout - Interleaved but no overlap
+        layout8 = _Layout((3, 2), (2, 3))
+        self.assertTrue(layout8.check_non_overlap())
 
     def test_remap_to_tensor(self):
         """Test the remap_to_tensor method for various scenarios."""
