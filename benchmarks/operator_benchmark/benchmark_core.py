@@ -360,7 +360,7 @@ class BenchmarkRunner:
             stmt="func(iters, print_per_iter, cuda_sync)",
             globals={"func": func, "iters": iters, "print_per_iter": print_per_iter, "cuda_sync": cuda_sync}
         )
-        result = timer.adaptive_autorange(min_run_time=0.001)
+        result = timer.adaptive_autorange(min_run_time=0.0001)
         return result.median * iters
 
     def _launch_backward(self, test_case, iters, print_per_iter=False):
