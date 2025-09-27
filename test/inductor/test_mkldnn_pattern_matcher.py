@@ -4750,7 +4750,7 @@ class TestDynamicPatternMatcher(TestPatternMatcherBase):
                 )
                 self.assertEqual(
                     counters["inductor"]["quant_lift_up_count"],
-                    4 if (annotate_matmul and not TEST_ACL and IS_X86) else 1,
+                    1 if ((not annotate_matmul or TEST_ACL) and IS_X86) else 4,
                 )
 
             quantizer = X86InductorQuantizer()
