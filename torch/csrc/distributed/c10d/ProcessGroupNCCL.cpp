@@ -4427,7 +4427,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce(
       std::vector<int64_t>(), // outSplitSizes
       globalRankStart_, // globalRankStart_
       globalRankStride_, // globalRankStride_
-      this->getSize()); // worldSize
+      this->getSize(), // worldSize
+      opts.asyncOp); // is synchronized op
 
   // avoidRecordStreams_ note: collective() will stash tensors.
   return allreduce_impl(tensor, "nccl:all_reduce", opts);
@@ -4459,7 +4460,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_coalesced(
       std::vector<int64_t>(), // outSplitSizes
       globalRankStart_, // globalRankStart_
       globalRankStride_, // globalRankStride_
-      this->getSize()); // worldSize
+      this->getSize(), // worldSize
+      opts.asyncOp); // is synchronized op
 
   // avoidRecordStreams_ note: collective() will stash tensors.
   return collectiveCoalesced(
@@ -4512,7 +4514,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::broadcast(
       std::vector<int64_t>(), // outSplitSizes
       globalRankStart_, // globalRankStart_
       globalRankStride_, // globalRankStride_
-      this->getSize()); // worldSize
+      this->getSize(), // worldSize
+      opts.asyncOp); // is synchronized op
 
   const auto root = opts.rootRank + opts.rootTensor;
   bool nanCheck = (root == rank_);
@@ -4609,7 +4612,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce(
       std::vector<int64_t>(), // outSplitSizes
       globalRankStart_, // globalRankStart_
       globalRankStride_, // globalRankStride_
-      this->getSize()); // worldSize
+      this->getSize(), // worldSize
+      opts.asyncOp); // is synchronized op
 
   // avoidRecordStreams_ note: collective() will stash tensors.
   return collective(
@@ -4706,7 +4710,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allgather(
       std::vector<int64_t>(), // outSplitSize
       globalRankStart_, // globalRankStart_
       globalRankStride_, // globalRankStride_
-      this->getSize()); // worldSize
+      this->getSize(), // worldSize
+      opts.asyncOp); // is synchronized op
 
   bool same_size = check_same_size(outputTensors_);
   if (same_size) {
@@ -4803,7 +4808,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allgather_into_tensor_coalesced(
       std::vector<int64_t>(), // outSplitSizes
       globalRankStart_, // globalRankStart_
       globalRankStride_, // globalRankStride_
-      this->getSize()); // worldSize
+      this->getSize(), // worldSize
+      opts.asyncOp); // is synchronized op
 
   return collectiveCoalesced(
       inputs,
@@ -4853,7 +4859,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter(
       std::vector<int64_t>(), // outSplitSizes
       globalRankStart_, // globalRankStart_
       globalRankStride_, // globalRankStride_
-      this->getSize()); // worldSize
+      this->getSize(), // worldSize
+      opts.asyncOp); // is synchronized op
 
   bool same_size = check_same_size(inputTensors_);
   if (same_size) {
@@ -4956,7 +4963,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_reduce_scatter_base(
       std::vector<int64_t>(), // outSplitSizes
       globalRankStart_, // globalRankStart_
       globalRankStride_, // globalRankStride_
-      this->getSize()); // worldSize
+      this->getSize(), // worldSize
+      opts.asyncOp); // is synchronized op
 
   // avoidRecordStreams_ note: collective() will stash inputs and outputs.
   // Note 2: for asyncOp = false, we don't want to record streams because we
@@ -5017,7 +5025,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter_tensor_coalesced(
       std::vector<int64_t>(), // outSplitSizes
       globalRankStart_, // globalRankStart_
       globalRankStride_, // globalRankStride_
-      this->getSize()); // worldSize
+      this->getSize(), // worldSize
+      opts.asyncOp); // is synchronized op
 
   return collectiveCoalesced(
       inputs,
@@ -5165,7 +5174,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::alltoall_base(
         std::vector<int64_t>(), // outSplitSizes
         globalRankStart_, // globalRankStart_
         globalRankStride_, // globalRankStride_
-        this->getSize()); // worldSize
+        this->getSize(), // worldSize
+        opts.asyncOp); // is synchronized op
 
     // avoidRecordStreams_ note: collective() will stash inputTensors and
     // outputTensors.
@@ -5203,7 +5213,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::alltoall_base(
         outputSplitSizes, // outSplitSizes
         globalRankStart_, // globalRankStart_
         globalRankStride_, // globalRankStride_
-        this->getSize()); // worldSize
+        this->getSize(), // worldSize
+        opts.asyncOp); // is synchronized op
 
     // avoidRecordStreams_ note: collective() will stash inputTensors and
     // outputTensors.
@@ -5283,7 +5294,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::alltoall(
       outSplitSizes, // outSplitSizes
       globalRankStart_, // globalRankStart_
       globalRankStride_, // globalRankStride_
-      this->getSize()); // worldSize
+      this->getSize(), // worldSize
+      opts.asyncOp); // is synchronized op
 
   return collective(
       inputTensors,
@@ -5329,7 +5341,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::send(
       std::vector<int64_t>(), // outSplitSizes
       globalRankStart_, // globalRankStart_
       globalRankStride_, // globalRankStride_
-      this->getSize()); // worldSize
+      this->getSize(), // worldSize
+      true); // is synchronized op
 
   auto ret = pointToPoint(
       tensor,
@@ -5377,7 +5390,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::recv(
       std::vector<int64_t>(), // outSplitSizes
       globalRankStart_, // globalRankStart_
       globalRankStride_, // globalRankStride_
-      this->getSize()); // worldSize
+      this->getSize(), // worldSize
+      true); // is synchronized op
 
   auto ret = pointToPoint(
       tensor,
@@ -5485,7 +5499,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::gather(
       std::vector<int64_t>(), // outSplitSize
       globalRankStart_, // globalRankStart_
       globalRankStride_, // globalRankStride_
-      this->getSize()); // worldSize
+      this->getSize(), // worldSize
+      opts.asyncOp); // is synchronized op
 
   // avoidRecordStreams_ note: collective() will stash inputTensors and
   // outputs, which == outputTensors[0] on the root rank where it matters.
@@ -5573,7 +5588,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::scatter(
       std::vector<int64_t>(), // outSplitSize
       globalRankStart_, // globalRankStart_
       globalRankStride_, // globalRankStride_
-      this->getSize()); // worldSize
+      this->getSize(), // worldSize
+      opts.asyncOp); // is synchronized op
 
   // avoidRecordStreams_ note: collective() will stash outputTensors and
   // inputs, which == inputTensors[0] on the root rank where it matters.
@@ -5643,7 +5659,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_allgather_base(
       std::vector<int64_t>(), // outSplitSize
       globalRankStart_, // globalRankStart_
       globalRankStride_, // globalRankStride_
-      this->getSize()); // worldSize
+      this->getSize(), // worldSize
+      opts.asyncOp); // is synchronized op
 
   // avoidRecordStreams_ note: collective() will stash inputs and outputs.
   // Note 2: for asyncOp = false, we don't want to record streams because we

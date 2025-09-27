@@ -23,7 +23,8 @@ class TORCH_API ParamCommsDebugInfo : public c10::DebugInfoBase {
       std::vector<int64_t> outSplitSizes,
       int globalRankStart,
       int globalRankStride,
-      int worldSize);
+      int worldSize,
+      bool isSynchronizedOp);
 
   ~ParamCommsDebugInfo() override = default;
 
@@ -79,6 +80,10 @@ class TORCH_API ParamCommsDebugInfo : public c10::DebugInfoBase {
     return groupRanks_;
   }
 
+  bool getIsSynchronizedOp() const {
+    return isSynchronizedOp_;
+  }
+
  private:
   std::tuple<std::string, std::string> pgName_; // <group_name, group_desc>
   int rank_{};
@@ -92,6 +97,7 @@ class TORCH_API ParamCommsDebugInfo : public c10::DebugInfoBase {
   int globalRankStart_{};
   int globalRankStride_{};
   std::vector<int64_t> groupRanks_{};
+  bool isSynchronizedOp_{};
 };
 
 #define RECORD_PARAM_COMMS(                                                    \
@@ -118,7 +124,8 @@ class TORCH_API ParamCommsDebugInfo : public c10::DebugInfoBase {
       outSplitSizes,                                                           \
       globalRankStart,                                                         \
       globalRankStride,                                                        \
-      worldSize);                                                              \
+      worldSize,                                                               \
+      true);                                                                   \
   c10::DebugInfoGuard g(c10::DebugInfoKind::PARAM_COMMS_INFO, paramCommsInfo); \
   std::initializer_list<const c10::IValue> paramList = {                       \
       seq,                                                                     \
@@ -129,7 +136,8 @@ class TORCH_API ParamCommsDebugInfo : public c10::DebugInfoBase {
       outSplitSizes,                                                           \
       globalRankStart,                                                         \
       globalRankStride,                                                        \
-      worldSize};                                                              \
+      worldSize,                                                               \
+      true};                                                                   \
   c10::ArrayRef<const c10::IValue> paramInputs(paramList);                     \
   RECORD_FUNCTION(at::kParamCommsCallName, paramInputs);
 
@@ -147,7 +155,8 @@ class TORCH_API ParamCommsDebugInfo : public c10::DebugInfoBase {
     outSplitSizes,                                                             \
     globalRankStart,                                                           \
     globalRankStride,                                                          \
-    worldSize)                                                                 \
+    worldSize,                                                                 \
+    isSyncOp)                                                                  \
   auto paramCommsInfo = std::make_shared<torch::ParamCommsDebugInfo>(          \
       pgName,                                                                  \
       rank,                                                                    \
@@ -159,7 +168,8 @@ class TORCH_API ParamCommsDebugInfo : public c10::DebugInfoBase {
       outSplitSizes,                                                           \
       globalRankStart,                                                         \
       globalRankStride,                                                        \
-      worldSize);                                                              \
+      worldSize,                                                               \
+      isSyncOp);                                                               \
   c10::DebugInfoGuard g(c10::DebugInfoKind::PARAM_COMMS_INFO, paramCommsInfo); \
   std::initializer_list<const c10::IValue> paramList = {                       \
       c10::IValue(InputTensors),                                               \
@@ -171,7 +181,8 @@ class TORCH_API ParamCommsDebugInfo : public c10::DebugInfoBase {
       outSplitSizes,                                                           \
       globalRankStart,                                                         \
       globalRankStride,                                                        \
-      worldSize};                                                              \
+      worldSize,                                                               \
+      isSyncOp};                                                               \
   c10::ArrayRef<const c10::IValue> paramInputs(paramList);                     \
   RECORD_FUNCTION_WITH_INPUTS_OUTPUTS(                                         \
       at::kParamCommsCallName,                                                 \

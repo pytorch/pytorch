@@ -707,7 +707,7 @@ inline std::string getCommsNodeAttrs(const RecordFunction& fn) { // NOLINT
 #endif // USE_DISTRIBUTED
 
   // XXX consider using as string stream?
-  return attrs.empty() ? "" : fmt::format(", {}", fmt::join(attrs, ", "));
+  return attrs.empty() ? "" : fmt::format(",         {}", fmt::join(attrs, ", "));
 }
 
 static void recordOperatorStart(
