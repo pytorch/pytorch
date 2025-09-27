@@ -361,6 +361,7 @@ def _dynamo_graph_capture_for_export(
                 capture_dynamic_output_shape_ops=True,
                 capture_scalar_outputs=True,
                 log_graph_in_out_metadata=True,
+                install_free_tensors=True,
             )
 
             with (

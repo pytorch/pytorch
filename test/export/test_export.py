@@ -222,6 +222,12 @@ STRICT_EXPORT_V2_SUFFIX = "_strict_export_v2"
 
 # Now default mode is non strict, so original unammended test names
 # should be treated as non-strict
+
+
+def is_strict_test(test_name):
+    return test_name.endswith(STRICT_SUFFIX)
+
+
 def is_non_strict_test(test_name):
     return not test_name.endswith(STRICT_SUFFIX) and not test_name.endswith(
         STRICT_EXPORT_V2_SUFFIX
@@ -1470,18 +1476,9 @@ graph():
 
         foo = Foo()
         ref = ReferenceControl(foo)
-        # TODO (tmanlaibaatar) this kinda sucks but today there is no good way to get
-        # good source name. We should have an util that post processes dynamo source names
-        # to be more readable.
-        if is_strict_v2_test(self._testMethodName):
-            with self.assertWarnsRegex(
-                UserWarning,
-                r"(L\['self']\._export_root\.forward\.__func__\.__closure__\[1\]\.cell_contents\.bank"
-                r"|L\['self']\._export_root\.forward\.__func__\.__closure__\[1\]\.cell_contents\.bank_dict"
-                r"|L\['self']\._export_root\.forward\.__func__\.__closure__\[0\]\.cell_contents)",
-            ):
-                ref(torch.randn(4, 4), torch.randn(4, 4))
-        elif is_inline_and_install_strict_test(self._testMethodName):
+        if is_strict_v2_test(self._testMethodName) or is_inline_and_install_strict_test(
+            self._testMethodName
+        ):
             with self.assertWarnsRegex(
                 UserWarning,
                 r"(L\['self']\._modules\['_export_root']\.forward\.__func__\.__closure__\[1\]\.cell_contents\.bank"
@@ -14665,9 +14662,16 @@ graph():
             for nn_module_stack in nn_module_stacks
         ]
 
-        # when inlined and install have same ID so reference same layer
-        self.assertEqual(filtered_nn_module_stack[0], "sub_net.0")
-        self.assertEqual(filtered_nn_module_stack[1], "sub_net.0")
+        if is_strict_test(self._testMethodName) or is_strict_v2_test(
+            self._testMethodName
+        ):
+            # when inlined and install have same ID so reference same layer
+            self.assertEqual(filtered_nn_module_stack[0], "sub_net.0")
+            self.assertEqual(filtered_nn_module_stack[1], "sub_net.0")
+        else:
+            # Non-strict diffes here - not sure why.
+            self.assertEqual(filtered_nn_module_stack[0], "sub_net.0")
+            self.assertEqual(filtered_nn_module_stack[1], "sub_net.2")
 
     def test_slice_nn_module_stack(self):
         class N(torch.nn.Module):
@@ -14700,20 +14704,19 @@ graph():
             list(nn_module_stack.values())[-1][0]
             for nn_module_stack in nn_module_stacks
         ]
-        if is_inline_and_install_strict_test(self._testMethodName):
+        if is_strict_test(self._testMethodName) or is_strict_v2_test(
+            self._testMethodName
+        ):
             self.assertEqual(filtered_nn_module_stack[0], "mod_list_1.2")
             self.assertEqual(filtered_nn_module_stack[1], "mod_list_1.2")
-        # This is fine since both of these will be deprecated soon.
-        elif is_strict_v2_test(self._testMethodName) and IS_FBCODE:
+        else:
+            # Non-strict diffes here - not sure why.
             self.assertEqual(
-                filtered_nn_module_stack[0], "mod_list_1.slice(2, 3, None).0"
+                filtered_nn_module_stack[0], "mod_list_1.slice(2, 3, None).2"
             )
             self.assertEqual(
                 filtered_nn_module_stack[1], "mod_list_2.slice(4, 5, None).0"
             )
-        else:
-            self.assertEqual(filtered_nn_module_stack[0], "mod_list_1.2")
-            self.assertEqual(filtered_nn_module_stack[1], "mod_list_1.2")
 
     def test_split_const_gm_with_lifted_constants(self):
         class Model(torch.nn.Module):

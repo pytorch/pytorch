@@ -67,12 +67,6 @@ for test in tests:
 del test
 
 
-# NOTE: For this test, we have a failure that occurs because the buffers (for BatchNorm2D) are installed, and not
-# graph input.  Therefore, they are not in the `program.graph_signature.inputs_to_buffers`
-# and so not found by the unit test when counting the buffers
-unittest.expectedFailure(
-    InlineAndInstallStrictExportTestExport.test_buffer_util_inline_and_install_strict  # noqa: F821
-)
 # this is because we marked unlift hooks to be dynamo skip traced
 unittest.expectedFailure(
     InlineAndInstallStrictExportTestExport.test_custom_tag_metadata_re_export_inline_and_install_strict  # noqa: F821
