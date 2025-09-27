@@ -9994,6 +9994,23 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         t1[:, 3] = float("nan")
         self.common(fn, (t1,))
 
+    def test_argmax_argmin_transposed_mutation(self):
+        # Regression for https://github.com/pytorch/pytorch/issues/163929
+        # Ensure argmax/argmin indices are correct on transposed views after base mutation
+        def fn(x):
+            y = x.transpose(0, 1)
+            # mutate the base; y shares storage so values change
+            x.add_(1)
+            return (
+                y.argmax(0),
+                y.argmin(0),
+                y.argmax(1),
+                y.argmin(1),
+            )
+
+        t = torch.randn([16, 8])
+        self.common(fn, (t,))
+
         # Persistent reduction
         t1 = torch.randn((32, 32))
         t1[:, 4] = float("nan")

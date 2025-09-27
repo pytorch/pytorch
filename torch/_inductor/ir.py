@@ -1558,6 +1558,8 @@ class Reduction(Loops):
             and V.graph.sizevars.size_hint_or_throw(reduction_numel)
             < config.unroll_reductions_threshold
             and (sympy_product(ranges) != 1 or is_gpu(device.type))
+            # Avoid unrolling for argmin/argmax to preserve correct index semantics
+            and reduction_type not in ("argmin", "argmax")
         ):
             # NB: This works around https://github.com/pytorch/pytorch/issues/140457
             # since turning reductions into pointwise ops can exacerbate this problem
