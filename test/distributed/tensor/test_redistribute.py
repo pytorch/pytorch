@@ -601,6 +601,26 @@ class RedistributeTest(DTensorTestBase):
         self.assertEqual(new_tensor.shape, new_meta_tensor.shape)
         self.assertEqual(new_tensor.stride(), new_meta_tensor.stride())
 
+    @with_comms
+    def test_one_chunk_mesh(self):
+        # mesh size is 1 on second dim
+        mesh = init_device_mesh(self.device_type, (4, 1))
+
+        srcs = [Shard(1), Replicate(), Partial()]
+        dsts = [Shard(0), Shard(1), Replicate()]
+
+        comm_mode = CommDebugMode()
+
+        for src, dst in itertools.product(srcs, dsts):
+            tensor = torch.randn(16, 8, device=self.device_type)
+            dt = DTensor.from_local(tensor, mesh, [Shard(0), src])
+
+            with comm_mode:
+                out = dt.redistribute(mesh, [Shard(0), dst])
+
+            self.assertEqual(comm_mode.get_total_counts(), 0)
+            self.assertEqual(out.placements, [Shard(0), dst])
+
 
 instantiate_parametrized_tests(RedistributeTest)
 
@@ -701,6 +721,118 @@ class DeviceOrderRedistributeTest(DTensorTestBase):
     @property
     def world_size(self) -> int:
         return 8
+
+    @with_comms
+    def test_negative_dim_in_placements(self):
+        device_mesh = self.build_device_mesh()
+        input_tensor = torch.randn(8, 6, 5, device=self.device_type)
+        # Use negative dim in Shard placement
+        placements = [Shard(-1)]
+        dt = distribute_tensor(input_tensor, device_mesh, placements)
+        # Should be equivalent to Shard(2)
+        self.assertEqual(dt.placements[0].dim, 2)
+        # Redistribute to another negative dim
+        dt2 = dt.redistribute(device_mesh, [Shard(-2)])
+        self.assertEqual(dt2.placements[0].dim, 1)
+        # Check full tensor is preserved
+        self.assertEqual(dt2.full_tensor(), input_tensor)
+
+    @with_comms
+    def test_negative_dim_in_shard_order(self):
+        mesh = init_device_mesh(self.device_type, (2, 4))
+        input_tensor = torch.randn(8, 6, 5, device=self.device_type)
+        # Use negative tensor dim as key in shard_order
+        shard_order = {-1: [0], -2: [1]}
+        dt = distribute_tensor(input_tensor, mesh, shard_order=shard_order)
+        # Should be equivalent to {2: [0], 1: [1]}
+        self.assertEqual(dt.shard_order, ((), (1,), (0,)))
+        self.assertEqual(dt.full_tensor(), input_tensor)
+        shard_order = {2: [0], -2: [1]}
+        dt2 = dt.redistribute(mesh, shard_order=shard_order)
+        self.assertEqual(dt2.shard_order, ((), (1,), (0,)))
+
+    @with_comms
+    def test_conflict_placement_and_shard_order(self):
+        mesh = init_device_mesh(self.device_type, (2, 4))
+        input_tensor = torch.randn(8, 6, 5, device=self.device_type)
+
+        # Test 1: Both placements and shard_order provided should raise AssertionError
+        shard_order = {0: [0], 1: [1]}
+        placements = [Shard(0), Shard(1)]
+        with self.assertRaisesRegex(
+            AssertionError,
+            "distribute function accepts either `placements` or `shard_order` "
+            "but not both",
+        ):
+            dt = distribute_tensor(  # noqa: F841
+                input_tensor, mesh, placements, shard_order=shard_order
+            )
+
+        # Test 2: Only placements provided should work fine
+        dt_placements = distribute_tensor(input_tensor, mesh, placements)
+        self.assertEqual(dt_placements.placements, tuple(placements))
+        self.assertEqual(dt_placements.full_tensor(), input_tensor)
+
+        # Test 3: Only shard_order provided should work fine
+        dt_shard_order = distribute_tensor(input_tensor, mesh, shard_order=shard_order)
+        expected_placements = [Shard(0), Shard(1)]
+        self.assertEqual(dt_shard_order.placements, tuple(expected_placements))
+        self.assertEqual(dt_shard_order.full_tensor(), input_tensor)
+
+        # Test 4: Neither placements nor shard_order (default behavior)
+        dt_default = distribute_tensor(input_tensor, mesh)
+        expected_default_placements = [Replicate(), Replicate()]
+        self.assertEqual(dt_default.placements, tuple(expected_default_placements))
+        self.assertEqual(dt_default.full_tensor(), input_tensor)
+
+        # Test 5: Redistribute with conflict should also raise error
+        with self.assertRaisesRegex(
+            AssertionError,
+            "distribute function accepts either `placements` or `shard_order` "
+            "but not both",
+        ):
+            dt_default.redistribute(mesh, placements, shard_order=shard_order)
+
+        # Test 6: Valid redistributions should work
+        # Redistribute using placements only
+        dt_redist_placements = dt_default.redistribute(mesh, placements)
+        self.assertEqual(dt_redist_placements.placements, tuple(placements))
+        self.assertEqual(dt_redist_placements.full_tensor(), input_tensor)
+
+        # Redistribute using shard_order only
+        dt_redist_shard_order = dt_default.redistribute(mesh, shard_order=shard_order)
+        self.assertEqual(dt_redist_shard_order.placements, tuple(expected_placements))
+        self.assertEqual(dt_redist_shard_order.full_tensor(), input_tensor)
+
+        # Test 7: Test with more complex shard orders and placements
+        complex_shard_order = {
+            0: [0, 1],
+            2: [0],
+        }  # Tensor dim 0 sharded on mesh dims [0,1], dim 2 on mesh dim 0
+        complex_placements = [
+            Shard(0),
+            Shard(0),
+            Replicate(),
+        ]  # Not equivalent to the shard_order
+
+        with self.assertRaisesRegex(
+            AssertionError,
+            "distribute function accepts either `placements` or `shard_order` "
+            "but not both",
+        ):
+            distribute_tensor(
+                input_tensor, mesh, complex_placements, shard_order=complex_shard_order
+            )
+
+        # Test 8: Edge case with empty shard_order (should work like default)
+        empty_shard_order = {}
+        dt_empty_shard_order = distribute_tensor(
+            input_tensor, mesh, shard_order=empty_shard_order
+        )
+        self.assertEqual(
+            dt_empty_shard_order.placements, tuple(expected_default_placements)
+        )
+        self.assertEqual(dt_empty_shard_order.full_tensor(), input_tensor)
 
     @with_comms
     def test_ordered_redistribute(self):
