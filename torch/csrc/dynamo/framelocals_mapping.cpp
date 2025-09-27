@@ -82,17 +82,67 @@ FrameLocalsMapping::FrameLocalsMapping(FrameLocalsFrameType* frame)
   // since we don't actually copy free vars from the closure to the frame
   // localsplus.
 }
-
 void FrameLocalsMapping::_realize_dict() {
   _dict = py::dict();
-  py::tuple framelocals_names = code_framelocals_names(_code_obj);
 
-  auto nlocalsplus = ((PyCodeObject*)_code_obj.ptr())->co_nlocalsplus;
-  DEBUG_CHECK(nlocalsplus == _framelocals.size());
-  for (int i = 0; i < nlocalsplus; i++) {
-    if (_framelocals[i]) {
-      _dict[framelocals_names[i]] = _framelocals[i];
+  PyCodeObject* co = (PyCodeObject*)_code_obj.ptr();
+  py::tuple names =
+      code_framelocals_names(_code_obj); // len == co->co_nlocalsplus
+
+  // Collect the names of the actual arguments of the function and not the
+  // intermediates.
+  const int posonly = co->co_posonlyargcount;
+  const int pos_or_kw = co->co_argcount;
+  const int kwonly = co->co_kwonlyargcount;
+  const int nargs = posonly + pos_or_kw + kwonly +
+      ((co->co_flags & CO_VARARGS) ? 1 : 0) +
+      ((co->co_flags & CO_VARKEYWORDS) ? 1 : 0);
+
+  py::tuple varnames = _code_obj.attr("co_varnames");
+  const int limit = std::min<int>(nargs, (int)varnames.size());
+
+  py::set argset;
+  for (int i = 0; i < limit; ++i)
+    argset.add(varnames[i]);
+
+  auto pop_if_present = [&](py::handle key) {
+    _dict.attr("pop")(key, py::none());
+  };
+
+  // locals segment: include only those locals whose name is an argument
+  int populated = 0;
+  const Py_ssize_t nlocals = co->co_nlocals; // start of cell/free tail
+  for (Py_ssize_t i = 0; i < nlocals; ++i) {
+    py::handle name = names[i];
+    // Skip intermediates
+    if (!argset.contains(name))
+      continue;
+    PyObject* v = _framelocals[i].ptr();
+    if (!v) {
+      pop_if_present(name);
+      continue;
     }
+    _dict[name] = v;
+
+    // Early return
+    populated++;
+    if (populated == limit) {
+      break;
+    }
+  }
+
+  // cell/free tail: include ALL (values already unwrapped)
+  const Py_ssize_t tail_begin =
+      co->co_nlocalsplus - PyCode_GetNCellvars(co) - PyCode_GetNFreevars(co);
+  for (Py_ssize_t i = tail_begin; i < co->co_nlocalsplus; ++i) {
+    py::handle name = names[i];
+    PyObject* v = _framelocals[i].ptr();
+    if (!v) {
+      pop_if_present(name);
+      continue;
+    }
+    // later cell overrides earlier local of same name
+    _dict[name] = v;
   }
 }
 
@@ -161,7 +211,19 @@ void FrameLocalsMapping::_realize_dict() {
   // locals
   py::tuple varnames = _code_obj.attr("co_varnames");
   auto nlocals = std::min(co->co_nlocals, (int)varnames.size());
-  for (int i = 0; i < nlocals; i++) {
+
+  // Collect the names of the actual arguments of the function and not the
+  // intermediates.
+  const int posonly = co->co_posonlyargcount;
+  const int pos_or_kw = co->co_argcount;
+  const int kwonly = co->co_kwonlyargcount;
+  const int nargs = posonly + pos_or_kw + kwonly +
+      ((co->co_flags & CO_VARARGS) ? 1 : 0) +
+      ((co->co_flags & CO_VARKEYWORDS) ? 1 : 0);
+  const int limit = std::min<int>(nargs, nlocals);
+
+  // Just lookup args and not intermediates
+  for (int i = 0; i < limit; i++) {
     update_mapping(i);
   }
 
