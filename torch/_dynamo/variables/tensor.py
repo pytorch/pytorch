@@ -666,16 +666,19 @@ class TensorVariable(VariableTracker):
 
         if name == "wait":
             if args or kwargs:
-                raise torch._dynamo.exc.InternalTorchDynamoError("`wait` and `wait_tensor` do not take any arguments") 
-            from torch.distributed._functional_collectives import wait_tensor 
+                raise torch._dynamo.exc.InternalTorchDynamoError(
+                    "`wait` and `wait_tensor` do not take any arguments"
+                )
+            from torch.distributed._functional_collectives import wait_tensor
+
             from .builder import wrap_fx_proxy
+
             return wrap_fx_proxy(
-                        tx,
-                        tx.output.create_proxy(
-                        "call_function",
-                        wait_tensor,
-                        (self.as_proxy(),), {})
-                    )
+                tx,
+                tx.output.create_proxy(
+                    "call_function", wait_tensor, (self.as_proxy(),), {}
+                ),
+            )
 
         # For historical reasons, these ops decompose down to syntactically
         # invalid aten ops because they contain the python keyword `from`, see

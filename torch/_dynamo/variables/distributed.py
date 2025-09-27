@@ -441,36 +441,30 @@ class BackwardHookVariable(VariableTracker):
             ),
         )
 
+
 class P2POpVariable(VariableTracker):
     @staticmethod
-    def can_rewrite(variable):   
+    def can_rewrite(variable):
         return isinstance(variable, dist.P2POp)
 
-    def __init__(self,
-            op: ConstantVariable,
-            peer: ConstantVariable,
-            tag: ConstantVariable,
-            tensor: ConstantVariable,
-            pg: VariableTracker,
-            **kwargs):
+    def __init__(
+        self,
+        op: ConstantVariable,
+        peer: ConstantVariable,
+        tag: ConstantVariable,
+        tensor: ConstantVariable,
+        pg: VariableTracker,
+        **kwargs,
+    ):
         super().__init__(**kwargs)
         self.op = op
         self.peer = peer
         self.tag = tag
         self.tensor = tensor
-        self.group = pg 
+        self.group = pg
 
     @staticmethod
-    def create(
-            tx,
-            value,
-            args,
-            kwargs,
-            source):        
-
-        import torch.distributed as dist     
-        from .builder import VariableBuilder
-        from .tensor import TensorVariable
+    def create(tx, value, args, kwargs, source):
         def get_param(name, pos, default=None, transform=None):
             if name in kwargs:
                 val = kwargs[name]
@@ -480,24 +474,23 @@ class P2POpVariable(VariableTracker):
                 val = default
 
             return transform(val) if transform and val is not None else val
-        
-        op_var     = get_param("op", 0, transform=lambda x: ConstantVariable.create(x.get_name()))
+
+        op_var = get_param(
+            "op", 0, transform=lambda x: ConstantVariable.create(x.get_name())
+        )
         tensor_var = get_param("tensor", 1, transform=lambda x: x.realize())
-        peer_var   = get_param("peer", 2)
-        tag_var    = get_param("tag", 3, default=0, transform=ConstantVariable.create) 
+        peer_var = get_param("peer", 2)
+        tag_var = get_param("tag", 3, default=0, transform=ConstantVariable.create)
         # We currently only allow compilation for the default pg.
-        group_var  = get_param("group", 4, default="", transform=ConstantVariable.create)
+        group_var = get_param("group", 4, default="", transform=ConstantVariable.create)
 
         return P2POpVariable(
-                op=op_var,
-                tensor=tensor_var,
-                peer=peer_var,
-                tag=tag_var,
-                pg=group_var)
-        
+            op=op_var, tensor=tensor_var, peer=peer_var, tag=tag_var, pg=group_var
+        )
+
     def python_type(self):
         return torch.distributed.P2POp
-       
+
     def call_method(self, tx, name, args, kwargs):
         return super().call_method(tx, name, args, kwargs)
 
@@ -508,15 +501,15 @@ class P2POpVariable(VariableTracker):
         unimplemented_v2("Cannot reconstruct P2POpVariable")
 
     def var_getattr(self, tx, name):
-        if name == 'op':
+        if name == "op":
             return self.op
-        elif name == 'tensor':
+        elif name == "tensor":
             return self.tensor
-        elif name == 'tag':
+        elif name == "tag":
             return self.tag
-        elif name == 'group':
+        elif name == "group":
             return self.group
-        elif name == 'peer':
+        elif name == "peer":
             return self.peer
         else:
-            return super().var_getattr(tx, name) 
+            return super().var_getattr(tx, name)

@@ -487,7 +487,7 @@ class BatchP2P : public torch::autograd::Function<BatchP2P> {
       std::vector<int64_t> peer_list,
       std::vector<int64_t> tag_list,
       std::vector<at::Tensor> tensors,
-      std::string group_name) { 
+      std::string group_name) {
     auto work = c10::Dispatcher::singleton()
                     .findSchemaOrThrow("_c10d_functional::batch_p2p_ops", "")
                     .typed<decltype(c10d::batch_p2p_ops)>()
@@ -511,8 +511,7 @@ class Isend : public torch::autograd::Function<Isend> {
       at::Tensor& input,
       int64_t dst,
       int64_t tag,
-      std::string group_name)
-  {
+      std::string group_name) {
     ctx->saved_data["dst"] = dst;
     ctx->saved_data["tag"] = tag;
     ctx->saved_data["group_name"] = group_name;
@@ -552,8 +551,7 @@ class Irecv : public torch::autograd::Function<Irecv> {
       at::Tensor& input,
       int64_t src,
       int64_t tag,
-      std::string group_name)
-  {
+      std::string group_name) {
     ctx->saved_data["src"] = src;
     ctx->saved_data["tag"] = tag;
     ctx->saved_data["group_name"] = group_name;

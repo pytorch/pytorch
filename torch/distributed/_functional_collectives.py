@@ -134,41 +134,41 @@ def wait_tensor(tensor):
     """
     return torch.ops._c10d_functional.wait_tensor(tensor)  # type: ignore[attr-defined]
 
-def isend(tensor: torch.Tensor, dst: int, group: RANK_TYPES,
-        tag: int=0, group_dst: int=-1):
-    if group is None or group == "":
-        group = c10d._get_default_group()
 
-    if c10d._rank_not_in_group(group):
-        return torch.empty((1,), dtype=tensor.dtype, device=tensor.device)
-
-    if group_dst is not None:
+def isend(
+    tensor: torch.Tensor, dst: int, group: RANK_TYPES, tag: int = 0, group_dst: int = -1
+):
+    group_name = _resolve_group_name(group)
+    if group_dst != -1:
         if dst is not None:
-            raise ValueError("Cannot specify both 'dst' and 'group_dst' args as per eager impl")
-        global_dst = _get_global_rank(group, group_dst)
+            raise ValueError(
+                "Cannot specify both 'dst' and 'group_dst' args as per eager impl"
+            )
+        global_dst = c10d.get_global_rank(group, group_dst)
     else:
         global_dst = dst
+    return torch.ops._c10d_functional.isend(tensor, global_dst, tag, group_name)
 
-    group_name = _resolve_group_name(group, "")
-    return torch.ops._c10d_functional.isend(
-                tensor, global_dst, tag, group_name)
 
-def irecv(tensor: torch.Tensor, src: int, group: RANK_TYPES, tag: int=0, group_src: int=-1, group_rcv: int=-1):
-    if group is None or group == "":
-        group = c10d._get_default_group()
-
-    if c10d._rank_not_in_group(group):
-        return torch.empty((1,), dtype=tensor.dtype, device=tensor.device)
-
-    if group_src is not None:
+def irecv(
+    tensor: torch.Tensor,
+    src: int,
+    group: RANK_TYPES,
+    tag: int = 0,
+    group_src: int = -1,
+    group_rcv: int = -1,
+):
+    group_name = _resolve_group_name(group)
+    if group_src != -1:
         if src is not None:
-            raise ValueError("Cannot specify both 'src' and 'group_src' args as per eager impl")
-        global_src = _get_global_rank(group, group_src)
+            raise ValueError(
+                "Cannot specify both 'src' and 'group_src' args as per eager impl"
+            )
+        global_src = c10d.get_global_rank(group, group_src)
     else:
         global_src = src
-    group_name = _resolve_group_name(group, group_src)
-    return torch.ops._c10d_functional.irecv(
-                tensor, global_src, tag, group_name)
+    return torch.ops._c10d_functional.irecv(tensor, global_src, tag, group_name)
+
 
 def broadcast(self: torch.Tensor, src: int, group: RANK_TYPES, tag: str = ""):
     """
@@ -925,14 +925,18 @@ def _all_reduce_meta(self, *args):
 def _wait_tensor_meta(self, *args):
     return torch.empty_like(self)
 
+
 def _isend_meta(self, *args):
     return torch.empty_like(self)
+
 
 def _irecv_meta(self, *args):
     return torch.empty_like(self)
 
+
 def _batch_p2p_ops_meta(op_list, peer_list, tag_list, tensors, group_name):
     return [torch.empty_like(t) for t in tensors]
+
 
 def _all_gather_into_tensor_meta(shard, tag, rankset, group_size):
     return _make_all_gather_out_tensor(shard, group_size)
@@ -1061,7 +1065,6 @@ torch.fx.node.has_side_effect(torch.ops._c10d_functional.irecv)
 torch.fx.node.has_side_effect(torch.ops._c10d_functional.batch_p2p_ops)
 
 
-
 # Register legacy ops for backward compatibility
 # TODO(yifu): remove these in functional collective beta release
 legacy_lib = torch.library.Library("c10d_functional", "DEF")
@@ -1135,6 +1138,7 @@ def reduce_scatter_tensor_inplace(
     assert group is not None
 
     return output.copy_(reduce_scatter_tensor(input, op, scatter_dim, group, tag))
+
 
 REDUCE_OP_TO_STR = {
     dist.ReduceOp.SUM: "sum",
@@ -1225,67 +1229,65 @@ def all_gather_inplace(
         dst.copy_(src)
     return tensor_list
 
+
 def isend_inplace(
-        tensor: torch.Tensor,
-        dst: int,
-        tag: int,
-        group: RANK_TYPES = None,
-        group_dst: int = None):
-    if group is None or group == "":
-        group = c10d._get_default_group()
-
-    if c10d._rank_not_in_group(group):
-        return torch.empty((1,), dtype=tensor.dtype, device=tensor.device)
-
-    if group_dst is not None:
+    tensor: torch.Tensor,
+    dst: int,
+    tag: int,
+    group: RANK_TYPES = "",
+    group_dst: int = -1,
+):
+    group = group or dist.group.WORLD
+    assert group is not None
+    if group_dst != -1:
         if dst is not None:
-            raise ValueError("Cannot specify both 'dst' and 'group_dst' args as per eager impl")
-        global_dst = _get_global_rank(group, group_dst)
+            raise ValueError(
+                "Cannot specify both 'dst' and 'group_dst' args as per eager impl"
+            )
+        global_dst = c10d.get_global_rank(group, group_dst)
     else:
         global_dst = dst
 
-    group_name = _resolve_group_name(group, "")
-    return (
-            torch.ops._c10d_functional.isend(
-                tensor, global_dst, tag, group_name)
-            )
+    group_name = _resolve_group_name(group)
+    return torch.ops._c10d_functional.isend(tensor, global_dst, tag, group_name)
+
 
 def irecv_inplace(
     tensor: torch.Tensor,
-        src: int,
-        tag: int,
-        group: RANK_TYPES = None,
-        group_src: int = None):
-    if group is None or group == None:
-        group = c10d._get_default_group()
-
-    if c10d._rank_not_in_group(group):
-        return torch.empty((1,), dtype=tensor.dtype, device=tensor.device)
-
-    if group_src is not None:
+    src: int,
+    tag: int,
+    group: RANK_TYPES = "",
+    group_src: int = -1,
+):
+    group = group or dist.group.WORLD
+    assert group is not None
+    if group_src != -1:
         if src is not None:
-            raise ValueError("Cannot specify both 'src' and 'group_src' args as per eager impl")
-        global_src = _get_global_rank(group, group_src)
+            raise ValueError(
+                "Cannot specify both 'src' and 'group_src' args as per eager impl"
+            )
+        global_src = c10d.get_global_rank(group, group_src)
     else:
         global_src = src
-    group_name = _resolve_group_name(group, group_src)
-    return (
-            torch.ops._c10d_functional.irecv(tensor, global_src, tag, group_name)
-            )
+    group_name = _resolve_group_name(group)
+    return torch.ops._c10d_functional.irecv(tensor, global_src, tag, group_name)
 
-def batch_p2p_ops_inplace(op_list: list[str], peer_list: list[int],
-                     tag_list: list[int], tensors: list[torch.Tensor],
-                     group_name: str):
+
+def batch_p2p_ops_inplace(
+    op_list: list[str],
+    peer_list: list[int],
+    tag_list: list[int],
+    tensors: list[torch.Tensor],
+    group_name: RANK_TYPES,
+):
     assert dist.is_initialized()
     if group_name is None or group_name == "":
         group_name = c10d._get_default_group()
-    group_name = _resolve_group_name(group_name, peer_list[0])
-
-    group = c10d._get_default_group()
+    group_name = _resolve_group_name(group_name)
     device = tensors[0].device
-
     return torch.ops._c10d_functional.batch_p2p_ops(
-            op_list, peer_list, tag_list, tensors, group_name)
+        op_list, peer_list, tag_list, tensors, group_name
+    )
 
 
 from torch.distributed.distributed_c10d import (
@@ -1295,10 +1297,10 @@ from torch.distributed.distributed_c10d import (
     all_gather_into_tensor as legacy_allgather,
     all_reduce as legacy_allreduce,
     all_to_all_single as legacy_all_to_all_single,
-    reduce_scatter_tensor as legacy_reducescatter,
-    isend as legacy_isend,
-    irecv as legacy_irecv,
     batch_isend_irecv as legacy_batch_p2p_ops,
+    irecv as legacy_irecv,
+    isend as legacy_isend,
+    reduce_scatter_tensor as legacy_reducescatter,
 )
 
 

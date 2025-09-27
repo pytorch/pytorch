@@ -461,16 +461,15 @@ class UserDefinedClassVariable(UserDefinedVariable):
     ) -> "VariableTracker":
         from ..side_effects import SideEffects
         from .builder import wrap_fx_proxy
- 
+
         constant_args = check_constant_args(args, kwargs)
 
         if self.value is torch.distributed.P2POp:
             from .distributed import P2POpVariable
-            return P2POpVariable.create(tx,
-                    self.value,
-                    args=args,
-                    kwargs=kwargs,
-                    source=self.source)
+
+            return P2POpVariable.create(
+                tx, self.value, args=args, kwargs=kwargs, source=self.source
+            )
 
         if self.can_constant_fold_through() and constant_args:
             # constant fold
