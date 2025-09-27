@@ -52,6 +52,7 @@ from ..exc import (
     ObservedUserStopIteration,
     raise_observed_exception,
     SkipFrame,
+    StepUnsupported,
     unimplemented_v2,
     Unsupported,
 )
@@ -1527,6 +1528,8 @@ class SkipFunctionVariable(VariableTracker):
             raise SkipFrame(
                 f"Skip frame due to `torch._dynamo.skip_frame()`. Message: {skip_frame_msg}"
             )
+        elif self.value is torch._dynamo.step_unsupported:
+            raise StepUnsupported
         else:
             if config.dont_skip_tracing:
                 from .builder import SourcelessBuilder

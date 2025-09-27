@@ -4822,6 +4822,67 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             "encountered a mutation on a view chain of length 2, where view 1 was an as_strided",
         ):
             f_compiled(a)
+        # See https://github.com/pytorch/pytorch/issues/161010
+
+    def test_preserve_stride_with_clone(self) -> None:
+        A = torch.rand(5, 5, device="cuda" if torch.cuda.is_available() else "cpu")
+        B = torch.rand(5, 5, device="cuda" if torch.cuda.is_available() else "cpu")
+
+        def fn(
+            src: torch.Tensor, count: torch.Tensor
+        ) -> tuple[tuple[int, ...], tuple[int, ...]]:
+            Q, R = torch.linalg.qr(src)
+            rhs = torch.ones(Q.shape[0], 1, device=src.device)
+            a = torch.linalg.solve_triangular(R, Q.T @ rhs, upper=True)
+            cloned = a.clone(memory_format=torch.preserve_format)
+            return a.stride(), cloned.stride()
+
+        a_stride, cloned_stride = fn(A, torch.zeros(1))
+        self.assertEqual(
+            a_stride,
+            cloned_stride,
+            f"Strides should match in eager: {a_stride} against {cloned_stride}",
+        )
+
+        compiled_a_stride, compiled_cloned_stride = torch.compile(fn, backend="eager")(
+            B, torch.zeros(1)
+        )
+        self.assertEqual(
+            compiled_a_stride,
+            compiled_cloned_stride,
+            f"Strides should match in eager: {compiled_a_stride} against {compiled_cloned_stride}",
+        )
+
+    # Extension of https://github.com/pytorch/pytorch/issues/161010
+    # in the non memory dense case
+    def test_clone_not_memory_dense(self):
+        def foo() -> torch.Tensor:
+            x = torch.randn(10, 8).t()[::2, ::2]
+            y = x.clone()
+            return y
+
+        y = foo()
+        self.assertEqual(
+            y.stride(),
+            (1, 4),
+            "Reference eager implementation should have stride (1, 4)",
+        )
+        y = torch.compile(foo, backend="eager")()
+        self.assertEqual(
+            y.stride(), (1, 4), "Compile with eager backend should have stride (1, 4)"
+        )
+        y = torch.compile(foo, backend="aot_eager")()
+        self.assertEqual(
+            y.stride(),
+            (1, 4),
+            "Compile with aot_eager backend should have stride (1, 4)",
+        )
+        y = torch.compile(foo, backend="inductor")()
+        self.assertEqual(
+            y.stride(),
+            (1, 4),
+            "Compile with inductor backend should have stride (1, 4)",
+        )
 
     # https://github.com/pytorch/pytorch/issues/146598
     @unittest.expectedFailure
@@ -7194,6 +7255,26 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         self.assertEqual(fn(inp), opt_fn(inp))
         flag = False
         self.assertEqual(fn(inp), opt_fn(inp))
+
+    def test_cells_unsupported_step_exception(self):
+        # This error happened because:
+        #  - we were generating cells into a list on the stack
+        #  - we encountered an unsupported step, resulting in a step graph break
+        #  - we encounter an exception, which pops the stack until it reaches a certain length;
+        #    the presence of the list of cells then messes things up.
+
+        cell = 0
+
+        @torch.compile(backend="eager")
+        def fn(x):
+            x = x + 1 + 2
+            torch._dynamo.step_unsupported()
+            with contextlib.nullcontext():
+                print(cell)
+                raise AssertionError
+
+        with self.assertRaises(AssertionError):
+            fn(torch.ones(3))
 
     def test_unbind_copy_out(self):
         def f(eye, out):
