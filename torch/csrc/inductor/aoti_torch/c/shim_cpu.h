@@ -112,6 +112,11 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu_mkldnn_rnn_layer(
     AtenTensorHandle* ret2,
     AtenTensorHandle* ret3);
 
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu__gelu(
+    AtenTensorHandle X,
+    const char* algorithm,
+    AtenTensorHandle* ret0);
+
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu__linear_pointwise(
     AtenTensorHandle X,
     AtenTensorHandle W,
