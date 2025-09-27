@@ -3026,6 +3026,10 @@ def iota(
 @register_lowering(aten.select_scatter, type_promotion_kind=None)
 def select_scatter(x, src, dim: int, index: int):
     assert x.get_dtype() == src.get_dtype()
+    if hasattr(src, "realize"):
+        src.realize()
+    if hasattr(x, "realize"):
+        x.realize()
     x_loader = x.make_loader()
     dim = _validate_dim(x, dim, 0)
     if V.graph.sizevars.evaluate_expr(sympy.Lt(index, 0)):
