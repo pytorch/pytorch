@@ -1463,6 +1463,10 @@ TEST_WITH_ROCM: bool = TestEnvironment.def_flag(
     "TEST_WITH_ROCM",
     env_var="PYTORCH_TEST_WITH_ROCM",
 )
+TEST_WITH_MTIA: bool = TestEnvironment.def_flag(
+    "TEST_WITH_MTIA",
+    env_var="PYTORCH_TEST_WITH_MTIA",
+)
 
 # TODO: Remove PYTORCH_MIOPEN_SUGGEST_NHWC once ROCm officially supports NHWC in MIOpen
 # See #64427
