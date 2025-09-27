@@ -1409,7 +1409,7 @@
 - func: _sparse_broadcast_to(Tensor(a) self, int[] size) -> Tensor(a)
   variants: function
   dispatch:
-    SparseCPU, SparseCUDA: sparse_broadcast_to
+    SparseCPU, SparseCUDA, SparseMPS: sparse_broadcast_to
 
 - func: cat(Tensor[] tensors, int dim=0) -> Tensor
   structured_delegate: cat.out
@@ -6450,6 +6450,7 @@
   dispatch:
     CPU: unique_dim_cpu
     CUDA: unique_dim_cuda
+    MPS: unique_dim_mps
   tags: dynamic_output_shape
   autogen: unique_dim.out
 
