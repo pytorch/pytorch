@@ -329,8 +329,20 @@ class Tensor(torch._C.TensorBase):
         materialize_fake_tensors = (
             torch.serialization._serialization_tls.materialize_fake_tensors
         )
-
-        if self.device.type in ["xla", "maia", "mtia"] or (
+        if self.device.type in ["mtia"] or (
+            not torch._C._has_storage(self)
+            and self.device.type == torch._C._get_privateuse1_backend_name()
+        ):
+            if skip_data:
+                raise RuntimeError(
+                    "Cannot serialize tensors on backends with no storage under skip_data context manager"
+                )
+            cpu_tensor = self.cpu()
+            return (
+                torch._utils._rebuild_device_tensor_from_cpu_tensor_with_strides,
+                (cpu_tensor, self.dtype, str(self.device), self.stride(), self.storage_offset(), self.requires_grad),
+            )
+        if self.device.type in ["xla", "maia"] or (
             not torch._C._has_storage(self)
             and self.device.type == torch._C._get_privateuse1_backend_name()
         ):
