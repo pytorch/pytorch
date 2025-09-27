@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/core/Allocator.h>
 #include <c10/cuda/CUDAStream.h>
 #include <iostream>
 #include <utility>
@@ -8,6 +9,9 @@
 // aten/cuda/CUDAGraphsUtils.cuh adds utils used by aten only.
 
 namespace c10::cuda {
+
+// backwards compatibility
+using MempoolId_t = c10::MempoolId_t;
 
 // RAII guard for "cudaStreamCaptureMode", a thread-local value
 // that controls the error-checking strictness of a capture.
