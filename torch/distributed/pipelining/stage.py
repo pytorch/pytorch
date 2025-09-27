@@ -588,7 +588,7 @@ class _PipelineStageBase(ABC):
         last_backward: bool = False,
     ) -> tuple[tuple[Optional[torch.Tensor], ...], Optional[list[dict[str, Any]]]]:
         """
-        Whether using PP with FSDP or DDP, there are some runtime differences between the last backward step and the
+        Whether using PP with FSDP, DDP, or replicate there are some runtime differences between the last backward step and the
         other steps.  Namely, we need to accumulate gradients on previous steps and reduce them on the last step, but
         there are additional state-variables and performance considerations depending on the data parallelism used.
         This helper should adapt any pipeline parallel schedule to work with common/supported data parallel libraries.
@@ -662,9 +662,6 @@ class _PipelineStageBase(ABC):
                         if state._fsdp_param_group:
                             state._fsdp_param_group.post_backward()
 
-                    # it would be much better if pipelining backward invoked .backward so autograd hooks
-                    # worked and modules like DDP/FSDP behaved as expected.  Working around this for the time being,
-                    # we need to call this too to ensure FSDP syncs its grad reduction ops back to the default stream.
                     replicate_state._root_post_backward_final_callback()
 
                 replicate_run_post_backward(self.submod)
