@@ -99,7 +99,7 @@ class DefaultSavePlanner(SavePlanner):
         if self.flatten_state_dict:
             state_dict, self.mappings = flatten_state_dict(state_dict)
         if self.flatten_sharded_tensors:
-            state_dict = _flatten_sharded_tensors(state_dict)
+            state_dict, _ = _flatten_sharded_tensors(state_dict)
         self.state_dict = state_dict
         self.is_coordinator = is_coordinator
 
@@ -291,6 +291,7 @@ class DefaultLoadPlanner(LoadPlanner):
         self.flatten_sharded_tensors = flatten_sharded_tensors
         self.original_state_dict = {}
         self.mappings = {}
+        self.zero_shards_removed = set()
         self.allow_partial_load = allow_partial_load
 
     def set_up_planner(
@@ -303,7 +304,7 @@ class DefaultLoadPlanner(LoadPlanner):
         self.original_state_dict = state_dict
 
         if self.flatten_sharded_tensors:
-            state_dict = _flatten_sharded_tensors(state_dict)
+            state_dict, self.zero_shards_removed = _flatten_sharded_tensors(state_dict)
 
         if self.flatten_state_dict:
             state_dict, self.mappings = flatten_state_dict(state_dict)
@@ -334,7 +335,9 @@ class DefaultLoadPlanner(LoadPlanner):
             # whether the checkpoint belong to 2.3 (or before) or 2.4 (or after).
             current_keys = set(self.state_dict.keys())
             load_keys = set(self.metadata.state_dict_metadata.keys())
-            missing_keys = load_keys - current_keys
+
+            # We don't count keys which were omitted due to 0 local shards as missing.
+            missing_keys = (load_keys - current_keys) - self.zero_shards_removed
             if missing_keys:
                 _version._derived_version = "2_3"
                 old_state_dict, old_mappings = flatten_state_dict(
