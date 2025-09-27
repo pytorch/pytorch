@@ -1799,6 +1799,16 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
             # if not a tarfile, reset file offset and proceed
             f.seek(0)
 
+    start = f.tell()
+    f.seek(0, 2)
+    file_size = f.tell()
+    # Check that file is long enough to contain magic number and
+    # protocol version: 10 bytes for MAGIC_NUMBER, 2 bytes for
+    # PROTOCOL_VERSION, 8 bytes for unpickling operators.
+    if file_size < 20:
+        raise RuntimeError("file is too short: corrupt file?")
+    f.seek(start)
+
     magic_number = pickle_module.load(f, **pickle_load_args)
     if magic_number != MAGIC_NUMBER:
         raise RuntimeError("Invalid magic number; corrupt file?")
