@@ -3,6 +3,8 @@
 import random
 from typing import Optional
 
+import torch
+
 from torchfuzz.operators.base import Operator
 from torchfuzz.tensor_fuzzer import Spec, TensorSpec
 from torchfuzz.type_promotion import (
@@ -27,6 +29,10 @@ class PointwiseOperator(Operator):
 
     def can_produce(self, output_spec: Spec) -> bool:
         """Tensor pointwise operations can produce tensors but not scalars."""
+        if not super().can_produce(output_spec):
+            return False
+        if isinstance(output_spec, TensorSpec) and output_spec.dtype == torch.bool:
+            return False
         return isinstance(output_spec, TensorSpec)
 
     def fuzz_inputs_specs(self, output_spec: Spec, num_inputs: int = 2) -> list[Spec]:
