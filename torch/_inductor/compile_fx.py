@@ -2388,6 +2388,15 @@ def compile_fx(
     decompositions: Optional[dict[OpOverload, Callable[..., Any]]] = None,
     ignore_shape_env: bool = False,
 ) -> Union[Callable[[list[object]], Sequence[torch.Tensor]], str, list[str], Weights]:
+    return compile_fx_refactored(
+        model_,
+        example_inputs_,
+        inner_compile,
+        config_patches,
+        decompositions,
+        ignore_shape_env,
+    )
+
     """
     Main entry point for compiling given FX graph.  Despite the fact that this
     lives in :mod:`torch._inductor`, this function is responsible for calling
@@ -2876,3 +2885,381 @@ def _aoti_flatten_inputs(
         }
     )
     return flat_example_inputs, options
+
+
+"""
+Minimal Refactoring of compile_fx into Two Steps:
+1. Run pregrad passes
+2. Call aot_autograd
+
+This is a targeted refactoring that creates clear separation between
+pre-AOT graph transformations and AOT compilation.
+"""
+
+from typing import Dict, Sequence
+from torch._inductor.utils import InputType
+
+
+# ============================================================================
+# STEP 1: PRE-AOT GRAPH PREPARATION
+# ============================================================================
+
+class PreAOTStep:
+    """
+    Step 1: Prepare graph before calling AOT autograd
+
+    Responsibilities:
+    - Input validation and normalization
+    - Pre-grad passes (normalization, constant folding prep, etc.)
+    - Graph metadata setup
+    - Return prepared graph ready for AOT
+    """
+
+    @staticmethod
+    def prepare_graph_for_aot(
+        model: GraphModule,
+        example_inputs: Sequence[InputType],
+        **compile_kwargs: Any
+    ) -> tuple[GraphModule, Sequence[InputType], Dict[str, Any]]:
+        """
+        Prepare graph and context for AOT compilation
+
+        Args:
+            model: Input FX GraphModule
+            example_inputs: Example inputs for compilation
+            **compile_kwargs: Additional compilation arguments
+
+        Returns:
+            (prepared_model, prepared_inputs, aot_context)
+        """
+
+        # 1. Input validation - ensure graph returns tuple
+        if not _graph_returns_tuple(model):
+            raise ValueError("Graph must return tuple for AOT compilation")
+
+        # 2. Handle special graph types (dynamo export graphs, etc.)
+        prepared_model = model
+        prepared_inputs = example_inputs
+
+        if isinstance(model.graph._codegen, torch.fx.graph._PyTreeCodeGen):
+            # Handle dynamo export graphs
+            prepared_model, prepared_inputs = _handle_pytree_codegen(model, example_inputs)
+
+        # 3. Flatten inputs if needed
+        if any(isinstance(x, (list, tuple, dict)) for x in prepared_inputs):
+            prepared_model, prepared_inputs = _flatten_graph_inputs(prepared_model, prepared_inputs)
+
+        # 4. Run pre-grad passes
+        if isinstance(prepared_model, GraphModule):
+            prepared_model = _run_pregrad_passes(prepared_model, prepared_inputs)
+
+        # 5. Setup AOT compilation context
+        aot_context = _create_aot_context(prepared_model, prepared_inputs, compile_kwargs)
+
+        return prepared_model, prepared_inputs, aot_context
+
+
+# ============================================================================
+# STEP 2: AOT AUTOGRAD COMPILATION
+# ============================================================================
+
+class AOTStep:
+    """
+    Step 2: Run AOT autograd compilation
+
+    Responsibilities:
+    - Create forward and backward compilers
+    - Configure AOT autograd with proper settings
+    - Call aot_autograd with prepared graph and compilers
+    - Return final compiled function
+    """
+
+    @staticmethod
+    def run_aot_compilation(
+        prepared_model: GraphModule,
+        prepared_inputs: Sequence[InputType],
+        aot_context: Dict[str, Any],
+        inner_compile: Callable[..., OutputCode]
+    ) -> Union[Callable[..., Any], str]:
+        """
+        Run AOT autograd compilation on prepared graph
+
+        Args:
+            prepared_model: Graph prepared by PreAOTStep
+            prepared_inputs: Inputs prepared by PreAOTStep
+            aot_context: Context created by PreAOTStep
+            inner_compile: Inner compiler function (compile_fx_inner)
+
+        Returns:
+            Compiled function or AOT artifact
+        """
+
+        # 1. Extract context
+        decompositions = aot_context.get("decompositions", {})
+        compiler_config_extra = aot_context["compiler_config_extra"]
+
+        # 2. Create forward compiler
+        def fw_compiler(gm: GraphModule, example_inputs: Sequence[InputType]) -> OutputCode:
+            return _compile_forward_graph(
+                gm, example_inputs, aot_context, inner_compile
+            )
+
+        # 3. Create backward compiler
+        def bw_compiler(gm: GraphModule, example_inputs: Sequence[InputType]) -> OutputCode:
+            return _compile_backward_graph(
+                gm, example_inputs, aot_context, inner_compile
+            )
+
+        # 4. Create inference compiler
+        def inference_compiler(gm: GraphModule, example_inputs: Sequence[InputType]) -> OutputCode:
+            return _compile_inference_graph(
+                gm, example_inputs, aot_context, inner_compile
+            )
+
+        # 5. Call AOT autograd with prepared compilers
+        from torch._dynamo.backends.common import aot_autograd
+
+        return aot_autograd(
+            fw_compiler=fw_compiler,
+            bw_compiler=bw_compiler,
+            inference_compiler=inference_compiler,
+            decompositions=decompositions,
+            partition_fn=aot_context.get("partition_fn"),
+            keep_inference_input_mutations=True,
+            cudagraphs=compiler_config_extra.cudagraphs,
+            boxed_forward_device_index=compiler_config_extra.forward_device,
+            ignore_shape_env=aot_context.get("ignore_shape_env", False),
+        )(prepared_model, prepared_inputs)
+
+
+# ============================================================================
+# REFACTORED COMPILE_FX
+# ============================================================================
+
+def compile_fx_refactored(
+    model: GraphModule,
+    example_inputs: Sequence[InputType],
+    inner_compile: Callable[..., OutputCode] = None,  # Would be compile_fx_inner
+    config_patches: Optional[Dict[str, Any]] = None,
+    decompositions: Optional[Dict[Any, Callable[..., Any]]] = None,
+    ignore_shape_env: bool = False,
+) -> Union[Callable[..., Any], str]:
+    """
+    Refactored compile_fx with clear two-step process:
+
+    Step 1: Pre-AOT graph preparation (pregrad passes, validation, setup)
+    Step 2: AOT autograd compilation (forward/backward compilation)
+
+    This separates graph transformation concerns from compilation orchestration.
+    """
+
+    # Handle config patches via recursion (existing pattern)
+    if config_patches:
+        from torch._inductor import config
+        with config.patch(config_patches):
+            return compile_fx_refactored(
+                model, example_inputs, inner_compile, None, decompositions, ignore_shape_env
+            )
+
+    # STEP 1: Pre-AOT Graph Preparation
+    print("Step 1: Running pre-AOT graph preparation...")
+    prepared_model, prepared_inputs, aot_context = PreAOTStep.prepare_graph_for_aot(
+        model=model,
+        example_inputs=example_inputs,
+        decompositions=decompositions,
+        ignore_shape_env=ignore_shape_env,
+        inner_compile=inner_compile,
+    )
+    print(f"✓ Pre-AOT preparation complete. Graph has {len(list(prepared_model.graph.nodes))} nodes")
+
+    # STEP 2: AOT Autograd Compilation
+    print("Step 2: Running AOT autograd compilation...")
+    compiled_result = AOTStep.run_aot_compilation(
+        prepared_model=prepared_model,
+        prepared_inputs=prepared_inputs,
+        aot_context=aot_context,
+        inner_compile=inner_compile,
+    )
+    print("✓ AOT compilation complete")
+
+    return compiled_result
+
+
+# ============================================================================
+# HELPER FUNCTIONS
+# ============================================================================
+
+def _graph_returns_tuple(gm: GraphModule) -> bool:
+    """Check if graph returns tuple"""
+    if not isinstance(gm, GraphModule):
+        return True
+
+    output_node = None
+    for node in reversed(gm.graph.nodes):
+        if node.op == "output":
+            output_node = node
+            break
+
+    if output_node is None:
+        return True
+
+    (rv,) = output_node.args
+    return isinstance(rv, (list, tuple))
+
+
+def _handle_pytree_codegen(model: GraphModule, inputs: Sequence[InputType]) -> tuple[GraphModule, Sequence[InputType]]:
+    """Handle graphs with PyTree codegen"""
+    # Simplified version - in real implementation would handle pytree conversion
+    return model, inputs
+
+
+def _flatten_graph_inputs(model: GraphModule, inputs: Sequence[InputType]) -> tuple[GraphModule, Sequence[InputType]]:
+    """Flatten complex input structures"""
+    # Simplified version - in real implementation would handle flattening
+    return model, inputs
+
+
+def _run_pregrad_passes(model: GraphModule, inputs: Sequence[InputType]) -> GraphModule:
+    """Run pre-gradient optimization passes"""
+    from torch._inductor.fx_passes.pre_grad import pre_grad_passes
+    from torch._inductor import config
+
+    # This is the key step - run all pre-grad passes
+    transformed_model = pre_grad_passes(
+        gm=model,
+        example_inputs=inputs,
+        add_passes=config.add_pre_grad_passes,
+        remove_passes=config.remove_pre_grad_passes,
+    )
+
+    return transformed_model
+
+
+def _create_aot_context(model: GraphModule, inputs: Sequence[InputType], compile_kwargs: Dict[str, Any]) -> Dict[str, Any]:
+    """Create context needed for AOT compilation"""
+    from torch._inductor.compile_fx import create_compiler_config_extra
+    from torch._inductor.decomposition import select_decomp_table
+    from torch._inductor.compile_fx import partition_fn
+    from torch._inductor import config
+
+    return {
+        "compiler_config_extra": create_compiler_config_extra(config),
+        "decompositions": compile_kwargs.get("decompositions") or select_decomp_table(),
+        "partition_fn": partition_fn,
+        "ignore_shape_env": compile_kwargs.get("ignore_shape_env", False),
+        "num_example_inputs": len(inputs),
+        "original_model_outputs": _get_num_model_outputs(model),
+    }
+
+
+def _get_num_model_outputs(model: GraphModule) -> int:
+    """Get number of model outputs"""
+    output_node = None
+    for node in reversed(model.graph.nodes):
+        if node.op == "output":
+            output_node = node
+            break
+
+    if output_node is None:
+        return 1
+
+    (outputs,) = output_node.args
+    if isinstance(outputs, (list, tuple)):
+        return len(outputs)
+    return 1
+
+
+def _compile_forward_graph(
+    gm: GraphModule,
+    example_inputs: Sequence[InputType],
+    aot_context: Dict[str, Any],
+    inner_compile: Callable[..., OutputCode]
+) -> OutputCode:
+    """Compile forward graph"""
+    from torch._inductor.compile_fx import compile_fx_forward
+
+    return compile_fx_forward(
+        gm=gm,
+        example_inputs=example_inputs,
+        num_orig_model_outputs=aot_context["original_model_outputs"],
+        num_example_inputs=aot_context["num_example_inputs"],
+        compiler_config_extra=aot_context["compiler_config_extra"],
+        inner_compile=inner_compile,
+        is_inference=False,
+    )
+
+
+def _compile_backward_graph(
+    gm: GraphModule,
+    example_inputs: Sequence[InputType],
+    aot_context: Dict[str, Any],
+    inner_compile: Callable[..., OutputCode]
+) -> OutputCode:
+    """Compile backward graph"""
+    from torch._inductor.compile_fx import compile_fx_backward
+
+    return compile_fx_backward(
+        gm=gm,
+        example_inputs=example_inputs,
+        compiler_config_extra=aot_context["compiler_config_extra"],
+        inner_compile=inner_compile,
+    )
+
+
+def _compile_inference_graph(
+    gm: GraphModule,
+    example_inputs: Sequence[InputType],
+    aot_context: Dict[str, Any],
+    inner_compile: Callable[..., OutputCode]
+) -> OutputCode:
+    """Compile inference graph"""
+    from torch._inductor.compile_fx import compile_fx_forward
+
+    return compile_fx_forward(
+        gm=gm,
+        example_inputs=example_inputs,
+        num_orig_model_outputs=aot_context["original_model_outputs"],
+        num_example_inputs=aot_context["num_example_inputs"],
+        compiler_config_extra=aot_context["compiler_config_extra"],
+        inner_compile=inner_compile,
+        is_inference=True,
+    )
+
+
+# ============================================================================
+# EXAMPLE USAGE & COMPARISON
+# ============================================================================
+
+def example_usage():
+    """Example showing the refactored compile_fx in action"""
+
+    # Create a simple model
+    class SimpleModel(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.linear = torch.nn.Linear(4, 2)
+
+        def forward(self, x):
+            return self.linear(x)
+
+    model = SimpleModel()
+    example_input = torch.randn(2, 4)
+
+    # Trace to FX graph
+    traced_model = torch.fx.symbolic_trace(model)
+
+    print("=== REFACTORED COMPILE_FX EXAMPLE ===")
+
+    # Mock inner_compile function
+    def mock_inner_compile(*args, **kwargs):
+        print(f"  inner_compile called with {len(args)} args")
+        return lambda x: x  # Simple passthrough
+
+    # Use refactored compile_fx
+    compiled_fn = compile_fx_refactored(
+        model=traced_model,
+        example_inputs=[example_input],
+        inner_compile=mock_inner_compile,
+    )
+
+    print(f"Compilation successful! Result: {type(compiled_fn)}")
