@@ -26,6 +26,7 @@
 #include <ATen/native/Normalization.h>
 #include <c10/core/Device.h>
 #include <c10/core/DispatchKeySet.h>
+#include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/util/AbortHandler.h>
 #include <c10/util/Backtrace.h>
 #include <c10/util/Logging.h>
@@ -71,6 +72,7 @@
 #include <torch/csrc/cpu/Module.h>
 #include <torch/csrc/dynamo/init.h>
 #include <torch/csrc/export/pybind.h>
+#include <torch/csrc/functionalization/Module.h>
 #include <torch/csrc/functorch/init.h>
 #include <torch/csrc/fx/node.h>
 #include <torch/csrc/inductor/aoti_package/pybind.h>
@@ -120,10 +122,14 @@
 #endif
 #endif
 
+#ifdef USE_DISTRIBUTED
+#ifdef USE_C10D
 #include <torch/csrc/distributed/autograd/python_autograd.h>
 #include <torch/csrc/distributed/c10d/c10d.h>
 #include <torch/csrc/distributed/rpc/rpc.h>
 #include <torch/csrc/distributed/rpc/testing/testing.h>
+#endif
+#endif
 
 #if defined(USE_VALGRIND)
 #include <callgrind.h>
@@ -136,6 +142,14 @@
 #include <torch/nativert/python/Bindings.h>
 
 namespace py = pybind11;
+
+TORCH_MAKE_PYBIND_ENUM_FASTER(at::native::ConvBackend)
+TORCH_MAKE_PYBIND_ENUM_FASTER(sdp::SDPBackend)
+TORCH_MAKE_PYBIND_ENUM_FASTER(at::LinalgBackend)
+TORCH_MAKE_PYBIND_ENUM_FASTER(at::BlasBackend)
+TORCH_MAKE_PYBIND_ENUM_FASTER(at::ROCmFABackend)
+TORCH_MAKE_PYBIND_ENUM_FASTER(at::native::BatchNormBackend)
+TORCH_MAKE_PYBIND_ENUM_FASTER(at::impl::TorchFunctionDisabledState)
 
 static PyObject* module;
 
@@ -546,7 +560,11 @@ static PyObject* THPModule_getBackcompatKeepdimWarn(
 }
 
 static PyObject* THPModule_hasDistributed(PyObject* _unused, PyObject* noargs) {
+#ifdef USE_DISTRIBUTED
   Py_RETURN_TRUE;
+#else
+  Py_RETURN_FALSE;
+#endif
 }
 
 static PyObject* THPModule_showConfig(PyObject* module, PyObject* noargs) {
@@ -1548,6 +1566,15 @@ static PyObject* THPModule_are_vmap_fallback_warnings_enabled(
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THCPModule_ensureCUDADeviceGuardSet(
+    PyObject* self,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  c10::impl::ensureCUDADeviceGuardSet();
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 static std::initializer_list<PyMethodDef> TorchMethods = {
     {"_initExtension", THPModule_initExtension, METH_O, nullptr},
     {"_autograd_init", THPAutograd_initExtension, METH_NOARGS, nullptr},
@@ -1843,7 +1870,13 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
      (PyCFunction)(void (*)())THPModule_has_torch_function_variadic,
      METH_FASTCALL,
      nullptr},
-    {nullptr, nullptr, 0, nullptr}};
+    {"_ensureCUDADeviceGuardSet",
+     THCPModule_ensureCUDADeviceGuardSet,
+     METH_NOARGS,
+     nullptr},
+    {nullptr, nullptr, 0, nullptr}
+
+};
 
 #ifdef USE_CUDA
 // NOLINTBEGIN(misc-use-internal-linkage)
@@ -1983,6 +2016,7 @@ PyObject* initModule() {
 #ifdef USE_XPU
   THPUtils_addPyMethodDefs(methods, THXPModule_methods());
 #endif
+#if defined(USE_DISTRIBUTED) && defined(USE_C10D)
   THPUtils_addPyMethodDefs(
       methods, torch::distributed::c10d::python_functions());
 #ifndef _WIN32
@@ -1992,6 +2026,7 @@ PyObject* initModule() {
       methods, torch::distributed::autograd::python_functions());
   THPUtils_addPyMethodDefs(
       methods, torch::distributed::rpc::testing::python_functions());
+#endif
 #endif
 
   static struct PyModuleDef torchmodule = {
@@ -2064,6 +2099,7 @@ PyObject* initModule() {
   torch::instruction_counter::initModule(module);
   torch::initVerboseBindings(module);
   ASSERT_TRUE(THPStorage_init(module));
+  torch::functionalization::initModule(module);
 
 #ifdef USE_CUDA
   // This will only initialise base classes and attach them to library namespace
