@@ -18,4 +18,4 @@ lintrunner
 ninja
 packaging
 optree>=0.13.0
-cmake
+cmake==3.31.6  # Temp pin until we support 4.0.0?
