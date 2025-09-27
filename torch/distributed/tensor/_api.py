@@ -634,6 +634,15 @@ class DTensor(torch.Tensor):
         else:
             raise RuntimeError("Unsupported tensor type!")
 
+    @classmethod
+    def __metadata_guard__(cls, orig, other):
+        orig_spec, orig_requires_grad = orig
+        other_spec, other_requires_grad = other
+        return (
+            orig_spec._check_equals(other_spec, skip_shapes=True)
+            and orig_requires_grad == other_requires_grad
+        )
+
 
 def distribute_tensor(
     tensor: torch.Tensor,
