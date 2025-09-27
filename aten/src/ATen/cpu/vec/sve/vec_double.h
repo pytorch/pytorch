@@ -22,7 +22,7 @@ namespace at::vec {
 // accessed as `at::vec`.
 inline namespace CPU_CAPABILITY {
 
-#if defined(CPU_CAPABILITY_SVE)
+#if defined(CPU_CAPABILITY_SVE256) || defined(CPU_CAPABILITY_SVE)
 
 template <>
 struct is_vec_specialized_for<double> : std::bool_constant<true> {};
@@ -55,10 +55,11 @@ class Vectorized<double> {
   operator svfloat64_t() const {
     return values;
   }
-  template <uint64_t mask>
   static Vectorized<double> blend(
       const Vectorized<double>& a,
-      const Vectorized<double>& b) {
+      const Vectorized<double>& b,
+      int64_t mask
+    ) {
     // Build an array of flags: each element is 1 if the corresponding bit in
     // 'mask' is set, 0 otherwise.
     __at_align__ int64_t flag_arr[size()];
