@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: distributed"]
+
 import contextlib
 
 import torch
@@ -83,8 +85,7 @@ class DTensorExportTest(TestCase):
     @parametrize(
         "export_fn",
         [
-            # failing as bw missing from joint_gm
-            # strict_export_and_aot_export_joint_with_descriptors,
+            strict_export_and_aot_export_joint_with_descriptors,
             graph_capture_and_aot_export_joint_with_descriptors,
             aot_export_joint_with_descriptors_alone,
         ],
@@ -119,6 +120,9 @@ class DTensorExportTest(TestCase):
         fw_gm, bw_gm = min_cut_rematerialization_partition(
             joint_gm, None, num_fwd_outputs=1
         )
+
+        if export_fn == strict_export_and_aot_export_joint_with_descriptors:
+            self.skipTest("joint_gm produced here is missing the backward region")
 
         self.assertTrue(
             _count_op(joint_gm, torch.ops._c10d_functional.all_reduce.default),
