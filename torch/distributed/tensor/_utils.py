@@ -72,7 +72,10 @@ def _explicit_order_placements(
 
 
 def compute_local_shape_and_global_offset(
-    global_shape: ShapeType, mesh: DeviceMesh, placements: Sequence[Placement]
+    global_shape: ShapeType,
+    mesh: DeviceMesh,
+    placements: Sequence[Placement],
+    device_order: Optional[Sequence[int]] = None,
 ) -> tuple[tuple[int, ...], tuple[int, ...]]:
     """
     Compute the local tensor shape and the global offsets into the original tensor
@@ -113,7 +116,7 @@ def compute_local_shape_and_global_offset(
 
     """
     return _compute_local_shape_and_global_offset(
-        global_shape, mesh.shape, mesh.get_coordinate(), placements
+        global_shape, mesh.shape, mesh.get_coordinate(), placements, device_order
     )
 
 
@@ -123,6 +126,7 @@ def _compute_local_shape_and_global_offset(
     mesh_shape: ShapeType,
     my_coordinate: Optional[list[int]],
     placements: Sequence[Placement],
+    device_order: Optional[Sequence[int]] = None,
 ) -> tuple[tuple[int, ...], tuple[int, ...]]:
     """
     Suppose you have a full tensor with size global_shape, and you have sharded
@@ -139,6 +143,10 @@ def _compute_local_shape_and_global_offset(
     is around uneven splits.  There is also some complication for handling StridedShard,
     which changes the order you should apply sharding.
     """
+    if device_order is None:
+        ordered_placements = _explicit_order_placements(mesh_shape, placements)
+    else:
+        ordered_placements = list(zip(device_order, placements))
 
     if my_coordinate is None:
         # if rank not in the mesh, return empty offset
