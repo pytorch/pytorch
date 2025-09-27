@@ -989,7 +989,7 @@ def register_onednn_fusion_ops():
             x_size = x.get_size()
             x2_size = x2.get_size()
             assert len(x_size) == len(x2_size)
-            if len(x_size) > 2 and binary_attr == "add":
+            if len(x_size) > 2 and binary_attr in ["add", "sum"]:
                 # GEMM template needs 2D input, normalize input shape here
                 x = view(x, [-1, x_size[-1]])
                 x2 = view(x2, [-1, x2_size[-1]])
@@ -1058,7 +1058,7 @@ def register_onednn_fusion_ops():
             choices: list[ChoiceCaller] = []
             if (
                 config.max_autotune or config.max_autotune_gemm
-            ) and binary_attr == "add":  # <TODO> Support inplace sum fusion
+            ) and binary_attr in ["add", "sum"]:
                 *_, layout, x, packed_weight, x2 = mm_args(
                     x, packed_weight, x2, layout=layout, out_dtype=output_dtype
                 )
@@ -1283,7 +1283,24 @@ def register_onednn_fusion_ops():
                 layout,
                 input_gen_fns=input_gen_fns,
             )
-            if len(x_size) > 2 and binary_attr == "add":
+            if (
+                isinstance(result.data.data, ir.CppTemplateBuffer)
+                and binary_attr == "sum"
+            ):
+                # In this case, x2 is inplace updated when binary_attr is "sum"
+                # So we need to update the layout of result to x2
+                result = ir.TensorBox.create(
+                    ir.CppTemplateBuffer(
+                        layout=ir.NonOwningLayout(
+                            ir.ReinterpretView(data=x2, layout=x2.get_layout())
+                        ),
+                        inputs=result.data.data.inputs,
+                        make_kernel_render=result.data.data.make_kernel_render,
+                        template=result.data.data.template,
+                        choice=result.data.data.choice,
+                    )
+                )
+            if len(x_size) > 2 and binary_attr in ["add", "sum"]:
                 result = view(result, (*x_size[:-1], result.get_size()[-1]))
             return result
 

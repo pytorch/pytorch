@@ -606,15 +606,15 @@ def _register_quantized_linear_binary_lowering(
         unary_op_args = kwargs["unary_op_args"]
         unary_op_algorithm = kwargs["unary_op_algorithm"]
 
-        if binary_op_name == "sum" and not _can_be_inplace(x2):
-            # When we enable the GEMM Template, the output of QLinear
-            # will be reshaped from 2D back to 3D if the input is 3D.
-            # This causes _can_be_inplace(x2) to return False if x2 happens
-            # to be the output of QLinear in this scenario.
-            # Change the post op from sum to binary add for this case.
-            # Refer to test case:
-            #   test_mkldnn_pattern_matcher.py::test_qlinear_dequant_promotion_cpu_input_dim_exceeds_2
-            binary_op_name = "add"
+        # if binary_op_name == "sum" and not _can_be_inplace(x2):
+        #     # When we enable the GEMM Template, the output of QLinear
+        #     # will be reshaped from 2D back to 3D if the input is 3D.
+        #     # This causes _can_be_inplace(x2) to return False if x2 happens
+        #     # to be the output of QLinear in this scenario.
+        #     # Change the post op from sum to binary add for this case.
+        #     # Refer to test case:
+        #     #   test_mkldnn_pattern_matcher.py::test_qlinear_dequant_promotion_cpu_input_dim_exceeds_2
+        #     binary_op_name = "add"
 
         computation_args = (
             x,
