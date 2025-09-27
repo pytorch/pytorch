@@ -4,7 +4,7 @@ import multiprocessing as mp
 import os
 import random
 import sys
-from typing import Any, Optional, Union
+from typing import Optional
 
 
 # Add parent directory to path so we can import torchfuzz as a module
@@ -14,8 +14,9 @@ if parent_dir not in sys.path:
     sys.path.insert(0, parent_dir)
 
 import torch
-from torchfuzz.codegen import convert_graph_to_python_code, execute_python_code
+from torchfuzz.codegen import convert_graph_to_python_code, create_program_file
 from torchfuzz.ops_fuzzer import fuzz_operation_graph, fuzz_spec
+from torchfuzz.runner import ProgramRunner
 from torchfuzz.visualize_graph import visualize_operation_graph
 
 
@@ -23,19 +24,14 @@ def fuzz_and_execute(
     seed: Optional[int] = None,
     max_depth: Optional[int] = None,
     log_at_faluire: bool = False,
-) -> tuple[int, Union[bool, Any], Optional[str]]:
+    template: str = "default",
+) -> None:
     """
     Generate a fuzzed operation stack, convert it to Python code, and execute it.
 
     Args:
         seed: Random seed for reproducible generation. If None, uses a random seed.
         max_depth: Maximum depth for operation stack (1-10). If None, uses a random depth.
-
-    Returns:
-        tuple: (seed_used, success_status, error_message)
-            - seed_used: The actual seed that was used for generation
-            - success_status: True if execution succeeded, False if it failed
-            - error_message: Error message if failed, None if succeeded
 
     This function:
     1. Generates a random target specification
@@ -52,20 +48,18 @@ def fuzz_and_execute(
     # Generate max_depth if not provided (range 3-12)
     if max_depth is None:
         random.seed(seed + 999)  # Use seed offset for consistent depth selection
-        max_depth = random.randint(3, 12)
+        max_depth = random.randint(2, 4)
     else:
         # Clamp max_depth to valid range
         max_depth = max(1, max_depth)
 
-    print(f"Using seed: {seed}")
-    print(f"Using max_depth: {max_depth}")
+    print(f"Using seed: {seed}, max_depth: {max_depth}")
 
     # Set seed for reproducible generation
     random.seed(seed)
     torch.manual_seed(seed)
     operation_stack = None
     python_code = None
-    result = None
     target_spec = None
 
     def log(success: bool) -> None:
@@ -79,11 +73,6 @@ def fuzz_and_execute(
         )
         iteration_folder = os.path.join("/tmp", folder_name)
         os.makedirs(iteration_folder, exist_ok=True)
-
-        if success:
-            print(f"✅ SUCCESS - artifacts saved to: {iteration_folder}")
-        else:
-            print(f"❌ FAILED - artifacts saved to: {iteration_folder}")
 
         # Write summary file
         summary_path = os.path.join(iteration_folder, "summary.txt")
@@ -115,16 +104,6 @@ def fuzz_and_execute(
                 operation_graph, "Operation Graph", iteration_folder
             )
 
-        if python_code:
-            # Write Python code to file in iteration folder
-            code_file_path = os.path.join(iteration_folder, "generated_code.py")
-            with open(code_file_path, "w") as f:
-                f.write(python_code)
-
-            print(f"📁 Code saved in : {code_file_path}")
-
-        print(f"📁 All files saved to: {iteration_folder}")
-
     import time
 
     try:
@@ -133,7 +112,7 @@ def fuzz_and_execute(
         # Generate target specification first
         logger.debug("⏱️  Step 1: Generating target spec...")
         start_time = time.time()
-        target_spec = fuzz_spec()
+        target_spec = fuzz_spec(template)
         logger.debug(
             "   Completed in %.3fs - %s", time.time() - start_time, target_spec
         )
@@ -141,11 +120,13 @@ def fuzz_and_execute(
         logger.debug("⏱️  Step 2: Generating operation graph...")
         start_time = time.time()
         operation_graph = fuzz_operation_graph(
-            target_spec, max_depth=max_depth, seed=seed
+            target_spec, max_depth=max_depth, seed=seed, template=template
         )
         logger.debug("⏱️  Step 3: Converting to Python code...")
         start_time = time.time()
-        python_code = convert_graph_to_python_code(operation_graph, seed=seed)
+        python_code = convert_graph_to_python_code(
+            operation_graph, seed=seed, template=template
+        )
         logger.debug(
             "   Completed in %.3fs - %d chars",
             time.time() - start_time,
@@ -154,18 +135,17 @@ def fuzz_and_execute(
 
         logger.debug("⏱️  Step 4: Executing Python code...")
         start_time = time.time()
-        # Enable temporary file preservation in debug mode for easier debugging
-        preserve_temp = logger.isEnabledFor(logging.DEBUG)
-        # Use a 60-second timeout for execution
-        result = execute_python_code(
-            python_code, target_spec, preserve_temp_file=preserve_temp, timeout=300
-        )
+
+        # Create program file and run with new runner
+        program_path = create_program_file(python_code)
+        runner = ProgramRunner()
+        runner.run_program(program_path)
+
         logger.debug("   Completed in %.3fs", time.time() - start_time)
 
         # # Validate the result matches target specification
         if not log_at_faluire:
             log(True)
-        return seed, result, None
 
     except Exception as e:
         print(f"\n❌ Execution failed: {e}")
@@ -175,7 +155,7 @@ def fuzz_and_execute(
 
         traceback.print_exc()
         error_message = str(e)
-        return seed, False, error_message
+        print(f"Error: {error_message}")
 
 
 if __name__ == "__main__":
@@ -201,6 +181,12 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, help="Random seed for single execution")
     parser.add_argument(
         "--max-depth", type=int, help="Maximum depth for operation stack (1-20)"
+    )
+    parser.add_argument(
+        "--template",
+        choices=["default", "dtensor", "unbacked"],
+        default="default",
+        help="Template to use for code generation (default: default)",
     )
 
     # Multi-process fuzzing arguments
@@ -248,13 +234,9 @@ if __name__ == "__main__":
     if args.seed is not None or args.single:
         # Single seed execution mode
         print("Running single fuzz_and_execute...")
-        seed, success, error_message = fuzz_and_execute(
-            seed=args.seed, max_depth=args.max_depth
+        fuzz_and_execute(
+            seed=args.seed, max_depth=args.max_depth, template=args.template
         )
-        print(f"Result: seed={seed}, success={success}")
-        if not success:
-            print(f"Error: {error_message}")
-            sys.exit(1)
     elif args.start is not None or args.count is not None:
         # Multi-process fuzzing mode
         if args.start is None:
@@ -284,6 +266,7 @@ if __name__ == "__main__":
                 seed_start=args.start,
                 seed_count=args.count,
                 verbose=args.verbose,
+                template=args.template,
             )
         except Exception as e:
             print(f"❌ Unexpected error: {str(e)}")

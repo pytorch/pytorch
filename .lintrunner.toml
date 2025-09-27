@@ -49,7 +49,7 @@ init_command = [
     'mccabe==0.7.0',
     'pycodestyle==2.14.0',
     'pyflakes==3.4.0',
-    'torchfix==0.4.0 ; python_version >= "3.9" and python_version < "3.13"',
+    'torchfix==0.4.0 ; python_version >= "3.10" and python_version < "3.13"',
 ]
 
 
@@ -153,7 +153,7 @@ init_command = [
     'python3',
     'tools/linter/adapters/pip_init.py',
     '--dry-run={{DRYRUN}}',
-    'numpy==1.26.4 ; python_version >= "3.9" and python_version <= "3.11"',
+    'numpy==1.26.4 ; python_version >= "3.10" and python_version <= "3.11"',
     'numpy==2.1.0 ; python_version >= "3.12"',
     'expecttest==0.3.0',
     'mypy==1.16.0',
@@ -1453,7 +1453,7 @@ init_command = [
     '--dry-run={{DRYRUN}}',
     'usort==1.0.8.post1',
     'isort==6.0.1',
-    'ruff==0.12.9',  # sync with RUFF
+    'ruff==0.13.1',  # sync with RUFF
 ]
 is_formatter = true
 
@@ -1587,7 +1587,7 @@ init_command = [
     'python3',
     'tools/linter/adapters/pip_init.py',
     '--dry-run={{DRYRUN}}',
-    'ruff==0.12.9',  # sync with PYFMT
+    'ruff==0.13.1',  # sync with PYFMT
 ]
 is_formatter = true
 
