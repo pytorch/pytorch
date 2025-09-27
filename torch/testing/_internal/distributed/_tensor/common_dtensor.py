@@ -187,7 +187,8 @@ class TransformerBlock(nn.Module):
 
     def forward(self, x):
         h = x + self.attention(self.attention_norm(x))
-        out = h + self.feed_forward(self.ffn_norm(h))
+        # out = h + self.feed_forward(self.ffn_norm(h))
+        out = h + torch.utils.checkpoint.checkpoint(self.feed_forward, self.ffn_norm(h), use_reentrant=False)
         return out
 
 
