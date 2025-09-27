@@ -114,14 +114,19 @@ void nvshmem_wait_for_signal(at::Tensor& sigpad, int64_t signal, int64_t peer) {
 }
 
 void nvshmem_put_with_signal(at::Tensor& tensor, at::Tensor& sigpad, int64_t signal, int64_t peer) {
-  auto hdl = c10d::symmetric_memory::rendezvous(tensor, "0");
-  auto rank = hdl->get_rank();
-  void* buffer_ptr = hdl->get_buffer_ptrs()[rank];
   auto buffer_size = tensor.numel() * tensor.element_size();
 
   c10::cuda::CUDAGuard guard(tensor.device());
   auto stream = at::cuda::getCurrentCUDAStream();
-  nvshmemx_putmem_signal_on_stream(buffer_ptr, tensor.data_ptr(), buffer_size, static_cast<uint64_t*>(sigpad.data_ptr()), NVSHMEM_SIGNAL_SET, signal, peer, stream);
+  nvshmemx_putmem_signal_on_stream(
+    tensor.mutable_data_ptr(),
+    tensor.mutable_data_ptr(),
+    buffer_size,
+    static_cast<uint64_t*>(sigpad.mutable_data_ptr()),
+    signal,
+    NVSHMEM_SIGNAL_SET,
+    peer,
+    stream);
 }
 
 void nvshmem_get(at::Tensor& tensor, const int64_t peer) {
