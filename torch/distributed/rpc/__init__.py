@@ -37,6 +37,7 @@ if is_available():
     import numbers
 
     import torch.distributed.autograd as dist_autograd
+    from torch._C._distributed_c10d import Store
     from torch._C._distributed_rpc import (  # noqa: F401
         _cleanup_python_rpc_handler,
         _DEFAULT_INIT_METHOD,
@@ -69,7 +70,6 @@ if is_available():
         RpcBackendOptions,
         WorkerInfo,
     )
-    from torch.distributed._distributed_c10d import Store
 
     if _is_tensorpipe_available:
         from torch._C._distributed_rpc import (  # noqa: F401
