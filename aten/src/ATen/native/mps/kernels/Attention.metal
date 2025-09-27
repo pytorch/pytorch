@@ -14,13 +14,12 @@ template <typename T, int D, int V = D>
     device T* out [[buffer(3)]],
     const constant uint& gqa_factor [[buffer(4)]],
     const constant uint& N [[buffer(5)]],
-    const constant uint2& q_head_seq_stride [[buffer(6)]],
-    const constant uint2& k_head_seq_stride [[buffer(7)]],
-    const constant uint2& v_head_seq_stride [[buffer(8)]],
-    const constant float& scale [[buffer(9)]],
-    const device bool* mask [[buffer(10)]],
-    const constant uint3& mask_strides [[buffer(11)]],
-    const constant bool& has_mask [[buffer(12)]],
+    const constant uint3& qkv_head_strides [[buffer(6)]],
+    const constant uint3& qkv_seq_strides [[buffer(7)]],
+    const constant float& scale [[buffer(8)]],
+    const device bool* mask [[buffer(9)]],
+    const constant uint3& mask_strides [[buffer(10)]],
+    const constant bool& has_mask [[buffer(11)]],
     uint3 tid [[threadgroup_position_in_grid]],
     uint3 tpg [[threadgroups_per_grid]],
     uint simd_gid [[simdgroup_index_in_threadgroup]],
@@ -29,12 +28,12 @@ template <typename T, int D, int V = D>
   constexpr uint BD = 32;
   constexpr uint qk_per_thread = D / BD;
   constexpr uint v_per_thread = V / BD;
-  const uint q_head_stride = q_head_seq_stride.x;
-  const uint q_seq_stride = q_head_seq_stride.y;
-  const uint k_head_stride = k_head_seq_stride.x;
-  const uint k_seq_stride = k_head_seq_stride.y;
-  const uint v_head_stride = v_head_seq_stride.x;
-  const uint v_seq_stride = v_head_seq_stride.y;
+  const uint q_head_stride = qkv_head_strides.x;
+  const uint q_seq_stride = qkv_seq_strides.x;
+  const uint k_head_stride = qkv_head_strides.y;
+  const uint k_seq_stride = qkv_seq_strides.y;
+  const uint v_head_stride = qkv_head_strides.z;
+  const uint v_seq_stride = qkv_seq_strides.z;
   const uint mask_head_stride = mask_strides.x;
   const uint mask_kv_seq_stride = mask_strides.y;
   const uint mask_q_seq_stride = mask_strides.z;
@@ -159,13 +158,12 @@ template <typename T, int D, int V = D>
     device float* maxs [[buffer(5)]],
     const constant uint& gqa_factor [[buffer(6)]],
     const constant uint& N [[buffer(7)]],
-    const constant uint2& q_head_seq_stride [[buffer(8)]],
-    const constant uint2& k_head_seq_stride [[buffer(9)]],
-    const constant uint2& v_head_seq_stride [[buffer(10)]],
-    const constant float& scale [[buffer(11)]],
-    const device bool* mask [[buffer(12)]],
-    const constant uint3& mask_strides [[buffer(13)]],
-    const constant bool& has_mask [[buffer(14)]],
+    const constant uint3& qkv_head_strides [[buffer(8)]],
+    const constant uint3& qkv_seq_strides [[buffer(9)]],
+    const constant float& scale [[buffer(10)]],
+    const device bool* mask [[buffer(11)]],
+    const constant uint3& mask_strides [[buffer(12)]],
+    const constant bool& has_mask [[buffer(13)]],
     uint3 tid [[threadgroup_position_in_grid]],
     uint3 tpg [[threadgroups_per_grid]],
     uint simd_gid [[simdgroup_index_in_threadgroup]],
@@ -174,12 +172,12 @@ template <typename T, int D, int V = D>
   constexpr int BD = 32;
   constexpr int qk_per_thread = D / BD;
   constexpr int v_per_thread = V / BD;
-  const int q_head_stride = q_head_seq_stride.x;
-  const int q_seq_stride = q_head_seq_stride.y;
-  const int k_head_stride = k_head_seq_stride.x;
-  const int k_seq_stride = k_head_seq_stride.y;
-  const int v_head_stride = v_head_seq_stride.x;
-  const int v_seq_stride = v_head_seq_stride.y;
+  const int q_head_stride = qkv_head_strides.x;
+  const int q_seq_stride = qkv_seq_strides.x;
+  const int k_head_stride = qkv_head_strides.y;
+  const int k_seq_stride = qkv_seq_strides.y;
+  const int v_head_stride = qkv_head_strides.z;
+  const int v_seq_stride = qkv_seq_strides.z;
   const int mask_kv_seq_stride = mask_strides.x;
   const int mask_q_seq_stride = mask_strides.y;
   const int mask_head_stride = mask_strides.z;
@@ -526,26 +524,25 @@ kernel void attention(
   }
 }
 
-#define INSTANTIATE_SDPA_VECTOR(DTYPE, QK_DIM, VALUE_DIM)    \
-  template [[host_name("sdpa_vector_" #DTYPE "_" #QK_DIM     \
-                       "_" #VALUE_DIM)]] kernel void         \
-  sdpa_vector<DTYPE, QK_DIM, VALUE_DIM>(                     \
-      const device DTYPE* queries [[buffer(0)]],             \
-      const device DTYPE* keys [[buffer(1)]],                \
-      const device DTYPE* values [[buffer(2)]],              \
-      device DTYPE* out [[buffer(3)]],                       \
-      const constant uint& gqa_factor [[buffer(4)]],         \
-      const constant uint& N [[buffer(5)]],                  \
-      const constant uint2& q_head_seq_stride [[buffer(6)]], \
-      const constant uint2& k_head_seq_stride [[buffer(7)]], \
-      const constant uint2& v_head_seq_stride [[buffer(8)]], \
-      const constant float& scale [[buffer(9)]],             \
-      const device bool* mask [[buffer(10)]],                \
-      const constant uint3& mask_strides [[buffer(11)]],     \
-      const constant bool& has_mask [[buffer(12)]],          \
-      uint3 tid [[threadgroup_position_in_grid]],            \
-      uint3 tpg [[threadgroups_per_grid]],                   \
-      uint simd_gid [[simdgroup_index_in_threadgroup]],      \
+#define INSTANTIATE_SDPA_VECTOR(DTYPE, QK_DIM, VALUE_DIM)   \
+  template [[host_name("sdpa_vector_" #DTYPE "_" #QK_DIM    \
+                       "_" #VALUE_DIM)]] kernel void        \
+  sdpa_vector<DTYPE, QK_DIM, VALUE_DIM>(                    \
+      const device DTYPE* queries [[buffer(0)]],            \
+      const device DTYPE* keys [[buffer(1)]],               \
+      const device DTYPE* values [[buffer(2)]],             \
+      device DTYPE* out [[buffer(3)]],                      \
+      const constant uint& gqa_factor [[buffer(4)]],        \
+      const constant uint& N [[buffer(5)]],                 \
+      const constant uint3& qkv_head_strides [[buffer(6)]], \
+      const constant uint3& qkv_seq_strides [[buffer(7)]],  \
+      const constant float& scale [[buffer(8)]],            \
+      const device bool* mask [[buffer(9)]],                \
+      const constant uint3& mask_strides [[buffer(10)]],    \
+      const constant bool& has_mask [[buffer(11)]],         \
+      uint3 tid [[threadgroup_position_in_grid]],           \
+      uint3 tpg [[threadgroups_per_grid]],                  \
+      uint simd_gid [[simdgroup_index_in_threadgroup]],     \
       uint simd_lid [[thread_index_in_simdgroup]]);
 
 #define INSTANTIATE_SDPA_VECTOR_2PASS_1(DTYPE, QK_DIM, VALUE_DIM) \
@@ -560,13 +557,12 @@ kernel void attention(
       device float* maxs [[buffer(5)]],                           \
       const constant uint& gqa_factor [[buffer(6)]],              \
       const constant uint& N [[buffer(7)]],                       \
-      const constant uint2& q_head_seq_stride [[buffer(8)]],      \
-      const constant uint2& k_head_seq_stride [[buffer(9)]],      \
-      const constant uint2& v_head_seq_stride [[buffer(10)]],     \
-      const constant float& scale [[buffer(11)]],                 \
-      const device bool* mask [[buffer(12)]],                     \
-      const constant uint3& mask_strides [[buffer(13)]],          \
-      const constant bool& has_mask [[buffer(14)]],               \
+      const constant uint3& qkv_head_strides [[buffer(8)]],       \
+      const constant uint3& qkv_seq_strides [[buffer(9)]],        \
+      const constant float& scale [[buffer(10)]],                 \
+      const device bool* mask [[buffer(11)]],                     \
+      const constant uint3& mask_strides [[buffer(12)]],          \
+      const constant bool& has_mask [[buffer(13)]],               \
       uint3 tid [[threadgroup_position_in_grid]],                 \
       uint3 tpg [[threadgroups_per_grid]],                        \
       uint simd_gid [[simdgroup_index_in_threadgroup]],           \
