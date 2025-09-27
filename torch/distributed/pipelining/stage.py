@@ -10,6 +10,7 @@ import torch.distributed as dist
 import torch.fx as fx
 import torch.nn as nn
 from torch._subclasses.fake_tensor import FakeTensor
+from torch.distributed._composable.replicate_with_fsdp import replicate, ReplicateModule
 from torch.distributed.fsdp import FSDPModule, fully_shard
 from torch.fx.node import Argument, map_aggregate
 from torch.nn.parallel import DistributedDataParallel
@@ -641,6 +642,33 @@ class _PipelineStageBase(ABC):
             else:
                 with self.submod.no_sync():  # type: ignore[operator]
                     result = perform_backward(backward_type)()
+
+        # If submod is a Replicate module
+        elif isinstance(self.submod, ReplicateModule):
+            self.submod.set_is_last_backward(False)
+            self.submod.set_reshard_after_backward(False)
+            self.submod.set_requires_gradient_sync(False)
+            result = perform_backward(backward_type)()
+            if last_backward:
+                # Manually call post backward for Replicate
+                def replicate_run_post_backward(
+                    replicate_module: ReplicateModule,
+                ) -> None:
+                    replicate_module.set_is_last_backward(True)
+                    replicate_module.set_reshard_after_backward(True)
+                    replicate_module.set_requires_gradient_sync(True)
+                    replicate_state = replicate.state(replicate_module)  # type: ignore[attr-defined,arg-type]
+                    for state in replicate_state._state_ctx.all_states:
+                        if state._fsdp_param_group:
+                            state._fsdp_param_group.post_backward()
+
+                    # it would be much better if pipelining backward invoked .backward so autograd hooks
+                    # worked and modules like DDP/FSDP behaved as expected.  Working around this for the time being,
+                    # we need to call this too to ensure FSDP syncs its grad reduction ops back to the default stream.
+                    replicate_state._root_post_backward_final_callback()
+
+                replicate_run_post_backward(self.submod)
+
         # If submod is a FSDP module
         elif isinstance(self.submod, FSDPModule):
             self.submod.set_is_last_backward(False)
