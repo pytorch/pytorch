@@ -25,20 +25,68 @@ class TensorMeta(NamedTuple):
 class DTensorSpec:
     mesh: DeviceMesh
     placements: tuple[Placement, ...]
-
-    # tensor meta will only be set during sharding propagation
+    # Tensor meta will only be set during sharding propagation
     tensor_meta: Optional[TensorMeta] = None
+    # When a tensor dimension is sharded across multiple mesh axes,
+    # `shard_order` specifies the sequence in which these shardings are applied,
+    # which in turn determines the placement of tensor shards on devices.
+    # `len(shard_order)` is equal to tensor dimensions and `shard_order[i]` is a
+    # tuple of mesh axis indices indicating the order in which sharding is
+    # applied to the tensor dimensions `i`. Note that since `tensor_meta` can be
+    # None, we are unable to tell the rank of the tensor. Therefore, the size of
+    # `shard_order` is only extended to the largest mesh axis index appeared in
+    # `placements` if we let __post_init__ to help fill the `shard_order`.
+    shard_order: Optional[tuple[tuple[int, ...], ...]] = None
+
+    @staticmethod
+    def compute_default_shard_order(
+        placements: tuple[Placement, ...],
+        mesh: DeviceMesh,
+        tensor_rank: Optional[int] = None,
+    ) -> tuple[tuple[int, ...], ...]:
+        # follow default left-to-right device order if shard_order is not specified
+        tensor_dim_to_mesh_dims: list[list[int]] = [[]]
+        for mesh_dim in range(0, mesh.ndim):
+            if isinstance(placements[mesh_dim], Shard):
+                placement = cast(Shard, placements[mesh_dim])
+                shard_dim = placement.dim
+                assert shard_dim >= 0, (
+                    f"Shard dim {shard_dim} in placements {placements} must be normalized"
+                )
+                # Extend tensor_dim_to_mesh_dims to have at least (shard_dim + 1) elements
+                while len(tensor_dim_to_mesh_dims) <= shard_dim:
+                    tensor_dim_to_mesh_dims.append([])
+                tensor_dim_to_mesh_dims[shard_dim].append(mesh_dim)
+        if tensor_rank:
+            while len(tensor_dim_to_mesh_dims) < tensor_rank:
+                tensor_dim_to_mesh_dims.append([])
+        default_shard_order = tuple(
+            tuple(mesh_dims) for mesh_dims in tensor_dim_to_mesh_dims
+        )
+        return default_shard_order
 
     def __post_init__(self) -> None:
         if not isinstance(self.placements, tuple):
             self.placements = tuple(self.placements)
+
+        if self.shard_order is None:
+            tensor_rank = len(self.tensor_meta.shape) if self.tensor_meta else None
+            self.shard_order = DTensorSpec.compute_default_shard_order(
+                self.placements, self.mesh, tensor_rank
+            )
+
         self._hash: Optional[int] = None
 
     def __setattr__(self, attr: str, value: Any) -> None:
         super().__setattr__(attr, value)
         # Make sure to recompute the hash in case any of the hashed attributes
         # change (though we do not expect `mesh` or `placements` to change)
-        if hasattr(self, "_hash") and attr in ("mesh", "placements", "tensor_meta"):
+        if hasattr(self, "_hash") and attr in (
+            "mesh",
+            "placements",
+            "tensor_meta",
+            "shard_order",
+        ):
             self._hash = None
         # This assert was triggered by buggy handling for dict outputs in some
         # FX passes, where you accidentally iterate over a dict and try to put
@@ -57,17 +105,16 @@ class DTensorSpec:
         # dtype and stride.
         # Caveat: we need to keep this in mind and sync hash and eq if we add more
         # fields to them.
+        hash_items = [self.mesh, self.placements, self.shard_order]
         if self.tensor_meta is not None:
-            return hash(
-                (
-                    self.mesh,
-                    self.placements,
+            hash_items.extend(
+                [
                     self.tensor_meta.shape,
                     self.tensor_meta.stride,
                     self.tensor_meta.dtype,
-                )
+                ]
             )
-        return hash((self.mesh, self.placements))
+        return hash(tuple(hash_items))
 
     def __hash__(self) -> int:
         # We lazily cache the spec to avoid recomputing the hash upon each
@@ -83,6 +130,7 @@ class DTensorSpec:
             isinstance(other, DTensorSpec)
             and self.mesh == other.mesh
             and self.placements == other.placements
+            and self.shard_order == other.shard_order
         ):
             return False
         if self.tensor_meta is None or other.tensor_meta is None:
@@ -98,17 +146,53 @@ class DTensorSpec:
         """
         human readable representation of the DTensorSpec
         """
-        if len(self.placements) == 1:
-            placement_str = str(self.placements[0])
-        else:
-            placement_str = str(self.placements)
-
+        placement_str = self.format_shard_order_str(self.placements, self.shard_order)
         if self.tensor_meta is not None:
             tensor_shape = str(tuple(self.tensor_meta.shape))
         else:
             tensor_shape = "unknown shape"
 
         return f"Spec({placement_str} on {tensor_shape})"
+
+    @staticmethod
+    def format_shard_order_str(
+        placements: tuple[Placement, ...],
+        shard_order: Optional[tuple[tuple[int, ...], ...]] = None,
+        use_jax_style_print: bool = False,
+    ) -> str:
+        out_str = ""
+        # jax-style sharding representation: map from tensor dim to mesh dim
+        if shard_order and use_jax_style_print:
+            for tensor_dim, mesh_dims in enumerate(shard_order):
+                if len(mesh_dims) > 0:
+                    out_str += f"S({tensor_dim})"
+                    out_str += f"[{', '.join([str(m) for m in mesh_dims])}]"
+            # in addition, add the partial placement
+            partial_to_mesh_dim: dict[Partial, list[int]] = {}
+            for mesh_dim, p in enumerate(placements):
+                if isinstance(p, Partial):
+                    if p not in partial_to_mesh_dim:
+                        partial_to_mesh_dim[p] = []
+                    partial_to_mesh_dim[p].append(mesh_dim)
+            for p, mesh_dims in partial_to_mesh_dim.items():
+                out_str += f"P({p.reduce_op})"
+                out_str += f"[{', '.join([str(m) for m in mesh_dims])}]"
+        else:
+            # native dtensor-style sharding representation: map from mesh
+            # dim to tensor dim
+            for mesh_dim, placement in enumerate(placements):
+                if isinstance(placement, Replicate):
+                    out_str += "R"
+                elif isinstance(placement, Shard):
+                    if shard_order is not None:
+                        assert mesh_dim in shard_order[placement.dim]
+                        out_str += f"S({placement.dim})[{shard_order[placement.dim].index(mesh_dim)}]"
+                    else:
+                        out_str += f"S({placement.dim})"
+                else:
+                    assert isinstance(placement, Partial)
+                    out_str += f"P({placement.reduce_op})"
+        return out_str
 
     @property
     def shape(self) -> torch.Size:
