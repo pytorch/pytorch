@@ -1562,6 +1562,38 @@ namespace {
         }
     }
 #endif
+#if defined(CPU_CAPABILITY_AVX512)
+    TYPED_TEST(Quantization8BitTests, TransposePackVNNI4) {
+        using VT = ValueType<TypeParam>;
+        constexpr auto K = 197;
+        constexpr auto N = 64;
+        constexpr auto L = K * N;
+        constexpr auto ld_src = N;
+        constexpr auto ld_dst = K * 4;
+        CACHE_ALIGN VT x[L];
+        CACHE_ALIGN VT y[L];
+        CACHE_ALIGN VT ref[L];
+        auto seed = TestSeed();
+        ValueGen<VT> generator(VT(-100), VT(100), seed);
+        for (const auto i : c10::irange(L)) {
+          x[i] = generator.get();
+        }
+        at::vec::transpose_pack_vnni4(x, y, ld_src, K, N);
+        int64_t _N = N / 4;
+        for (int64_t k = 0; k < K; k++) {
+          for(int64_t n = 0; n < _N; n++) {
+            for(int64_t l = 0; l < 4; l++) {
+              ref[n * ld_dst + k * 4 + l] =
+                  c10::load(&(x[k * ld_src + n * 4 + l]));
+            }
+          }
+        }
+        for (const auto i : c10::irange(L)) {
+          ASSERT_EQ(y[i], ref[i])
+              << "Failure Details:\nTest Seed to reproduce: " << seed;
+        }
+    }
+#endif
     TYPED_TEST(FunctionalTests, Map) {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;

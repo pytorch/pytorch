@@ -6,10 +6,10 @@ import unittest
 from typing import Callable, Optional
 
 import torch
-import torch.distributed.fsdp
 import torch._dynamo.config as dynamo_config
 import torch._inductor.config as inductor_config
 import torch._inductor.fx_passes.post_grad
+import torch.distributed.fsdp
 import torch.nn.functional as F
 from torch._dynamo.utils import count_calls, counters
 from torch._higher_order_ops.auto_functionalize import auto_functionalized
