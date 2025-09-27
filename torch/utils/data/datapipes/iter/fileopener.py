@@ -1,5 +1,4 @@
-# mypy: allow-untyped-defs
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 from io import IOBase
 from typing import Optional
 
@@ -53,7 +52,7 @@ class FileOpenerIterDataPipe(IterDataPipe[tuple[str, IOBase]]):
         length: int = -1,
     ):
         super().__init__()
-        self.datapipe: Iterable = datapipe
+        self.datapipe: Iterable[str] = datapipe
         self.mode: str = mode
         self.encoding: Optional[str] = encoding
 
@@ -70,12 +69,12 @@ class FileOpenerIterDataPipe(IterDataPipe[tuple[str, IOBase]]):
     # Remove annotation due to 'IOBase' is a general type and true type
     # is determined at runtime based on mode. Some `DataPipe` requiring
     # a subtype would cause mypy error.
-    def __iter__(self):
+    def __iter__(self) -> Iterator[tuple[str, IOBase]]:
         yield from get_file_binaries_from_pathnames(
             self.datapipe, self.mode, self.encoding
         )
 
-    def __len__(self):
+    def __len__(self) -> int:
         if self.length == -1:
             raise TypeError(f"{type(self).__name__} instance doesn't have valid length")
         return self.length
