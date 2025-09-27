@@ -1065,12 +1065,14 @@ def latency_experiment_summary(suite_name, args, model, timings, **kwargs):
     return msg
 
 
-def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
+def speedup_experiment(args, model_iter_fn, optimize_ctx, model, example_inputs, **kwargs):
     """
     Measure speedups over eager.
 
     Writes to ./speedups.csv
     """
+    print("running speedup_experiment with sizes:", [x.shape for x in example_inputs])
+
     timings = np.zeros((args.repeat, 2), np.float64)
     # if we randomize the input, we should also check the result is correct
     should_randomize_input = args.randomize_input
@@ -1106,13 +1108,7 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
         elif args.torchscript_jit_trace:
             frozen_model_iter_fn = torchscript_jit_trace(model, example_inputs)
         else:
-            if kwargs["hf_llm"]:
-                # If it's an llm, we want to optimize model.forward, and use
-                # the generate function
-                model.forward = torch._dynamo.run(model)
-                frozen_model_iter_fn = model_iter_fn
-            else:
-                frozen_model_iter_fn = torch._dynamo.run(model_iter_fn)
+            frozen_model_iter_fn = optimize_ctx(model_iter_fn)
 
         for rep in trange(args.repeat, desc="running benchmark"):
             inputs = (
@@ -1166,6 +1162,7 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
 
     median = np.median(timings, axis=0)
     speedup = median[0] / median[1]
+    print("eager: {:.4f}s, compiled: {:.4f}s".format(median[0], median[1]))
     if args.dump_raw_metrics:
         np.save(
             f"{output_filename[:-4]}-raw_timings-{current_name}-{current_device}.npy",
@@ -2638,6 +2635,138 @@ class BenchmarkRunner:
             results.append(result_summary)
             return " ".join(map(str, results))
 
+    def run_shape_sweep_test(
+        self,
+        name,
+        model,
+        all_example_inputs,
+        optimize_ctx,
+        experiment,
+        tag=None,
+        batch_size=None,
+    ):
+        def warmup(fn, model, example_inputs, mode, niters=5):
+            gc.collect()
+            peak_mem = 0
+            start_stats = get_dynamo_stats()
+            try:
+                if current_device == "cuda":
+                    torch.cuda.reset_peak_memory_stats()
+                    empty_gpu_cache(current_device)
+                elif current_device == "hpu":
+                    torch.hpu.reset_peak_memory_stats()
+                t0 = time.perf_counter()
+                for _ in range(niters):
+                    fn(model, example_inputs)
+                t1 = time.perf_counter()
+                latency = t1 - t0
+                if current_device == "cuda":
+                    peak_mem = get_peak_memory()
+                elif current_device == "hpu":
+                    peak_mem = torch.hpu.max_memory_allocated() / 10**9
+                elif current_device == "cpu":
+                    total = psutil.virtual_memory().total
+                    percentage = psutil.Process(os.getpid()).memory_percent()
+                    peak_mem = percentage * total / 10**9
+            except Exception:
+                log.exception("Backend %s failed in warmup()", mode)
+                write_csv_when_exception(
+                    self.args, current_name, "warmup_failed", current_device
+                )
+                output_signpost({}, self.args, self.suite_name, error="warmup_failed")
+                return sys.exit(-1)
+            dynamo_stats = get_dynamo_stats()
+            dynamo_stats.subtract(start_stats)
+            return latency, peak_mem, dynamo_stats
+
+        BATCH_SIZES = [2, 8, 32]
+        SEQ_LENS = [256, 1024, 2048]
+        SIZES = list(itertools.product(BATCH_SIZES, SEQ_LENS))
+
+        results = []
+        iteration = 0
+        niters = 5
+        for hint_inputs, hint_sizes in zip(all_example_inputs, SIZES):
+
+            torch._inductor.config.autotune_remote_cache = False
+            torch._dynamo.config.error_on_recompile = True
+            torch._inductor.config.multi_kernel_hints = [2, 32, 256]
+            torch._inductor.config.triton.multi_kernel = True
+
+            from torch._functorch._aot_autograd.autograd_cache import (
+                AOTAutogradCache,
+            )
+            from torch.compiler._cache import CacheArtifactManager
+            torch._inductor.codecache.FxGraphCache.clear()
+            AOTAutogradCache.clear()
+            CacheArtifactManager.clear()
+            torch._dynamo.reset()
+            torch._inductor.codecache.PyCodeCache.cache_clear(purge=True)
+
+            # The self.autocast context is needed for the model we export with aot_compile,
+            # similar to what we do in the check_accuracy function
+            ctx = (
+                self.autocast(**self.autocast_arg)
+                if self.args.export_aot_inductor
+                else contextlib.nullcontext()
+            )
+
+            # mark dynamism
+            for x in hint_inputs:
+                torch._dynamo.mark_dynamic(x, 0)
+                torch._dynamo.mark_dynamic(x, 1)
+
+            with self.pick_grad(name, self.args.training), ctx:
+                ok, total = Stats.reset_counters()
+                experiment_kwargs = {}
+                experiment_kwargs["batch_size"] = batch_size
+                if tag is not None:
+                    experiment_kwargs["tag"] = tag
+
+                optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)
+
+                with maybe_snapshot_memory(
+                    self.args.snapshot_memory, f"compiled_{self.args.only}"
+                ):
+                    dynamo_latency, dynamo_peak_mem, dynamo_stats = warmup(
+                        optimized_model_iter_fn, model, hint_inputs, "dynamo"
+                    )
+
+            for runtime_inputs, runtime_sizes in zip(all_example_inputs, SIZES):
+
+                (hint_bs, hint_sl) = hint_sizes
+                (runtime_bs, runtime_sl) = runtime_sizes
+
+                # Cast the model to float16/float32 as necessary
+                _, hint_inputs = self.maybe_cast(model, hint_inputs)
+                _model, runtime_inputs = self.maybe_cast(model, runtime_inputs)
+
+                # mark dynamism
+                for x in runtime_inputs:
+                    torch._dynamo.mark_dynamic(x, 0)
+                    torch._dynamo.mark_dynamic(x, 1)
+
+                # Use distributed wrapping as necessary
+                if iteration == 0:
+                    model = _model
+                    model = self.deepcopy_and_maybe_parallelize(model)
+                    if not hasattr(model, name):
+                        model.name = name
+                    self.init_optimizer(name, current_device, model.parameters())
+
+                with self.pick_grad(name, self.args.training), ctx:
+                    experiment_kwargs["hf_llm"] = False
+                    results.append(
+                        experiment(
+                            self.model_iter_fn, optimize_ctx, model, runtime_inputs, **experiment_kwargs
+                        )
+                    )
+                    print("HINT_SIZE", hint_sizes, "RUNTIME_SIZE", runtime_sizes, results[-1])
+
+                iteration += 1
+                exit()
+        return " ".join(map(str, results))
+
     def run_performance_test(
         self,
         name,
@@ -2833,11 +2962,18 @@ class BenchmarkRunner:
 
             experiment_kwargs["hf_llm"] = getattr(self, "hf_llm", False)
 
-            results.append(
-                experiment(
-                    self.model_iter_fn, model, example_inputs, **experiment_kwargs
+            if experiment.func is coverage_experiment:
+                results.append(
+                    experiment(
+                        self.model_iter_fn, model, example_inputs
+                    )
                 )
-            )
+            else:
+                results.append(
+                    experiment(
+                        self.model_iter_fn, model, example_inputs, **experiment_kwargs
+                    )
+                )
             return " ".join(map(str, results))
 
     def minify_model(
@@ -2922,20 +3058,30 @@ class BenchmarkRunner:
             status = self.check_tolerance(name, model, example_inputs, optimize_ctx)
             print(status)
         elif self.args.performance:
-            if self.args.backend == "torchao":
-                status = self.run_performance_test_non_alternate(
-                    name, model, example_inputs, optimize_ctx, experiment, tag
-                )
-            else:
-                status = self.run_performance_test(
-                    name,
-                    model,
-                    example_inputs,
-                    optimize_ctx,
-                    experiment,
-                    tag,
-                    batch_size=batch_size,
-                )
+            status = self.run_shape_sweep_test(
+                name,
+                model,
+                example_inputs,
+                optimize_ctx,
+                experiment,
+                tag,
+                batch_size=batch_size,
+            )
+
+            # if self.args.backend == "torchao":
+            #     status = self.run_performance_test_non_alternate(
+            #         name, model, example_inputs, optimize_ctx, experiment, tag
+            #     )
+            # else:
+            #     status = self.run_performance_test(
+            #         name,
+            #         model,
+            #         example_inputs,
+            #         optimize_ctx,
+            #         experiment,
+            #         tag,
+            #         batch_size=batch_size,
+            #     )
             print(status)
         empty_gpu_cache(current_device)
 
