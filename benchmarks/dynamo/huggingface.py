@@ -373,6 +373,10 @@ class HuggingfaceRunner(BenchmarkRunner):
     def skip_models_due_to_control_flow(self):
         return self._skip["control_flow"]
 
+    @property
+    def skip_not_suitable_for_training_models(self):
+        return self._skip["test"]["training"]
+
     def use_larger_multiplier_for_smaller_tensor(self, name):
         return name in [
             "ElectraForQuestionAnswering",
