@@ -1,3 +1,4 @@
+# Owner(s): ["module: cuda"]
 import os
 import json
 import sys
@@ -45,8 +46,6 @@ class TestCudaAllocatorRoundup(unittest.TestCase):
             self.skipTest("CUDA not available")
         self.assertEqual(code, 0, msg=f"subprocess failed: {err}")
         data = json.loads(out.strip().splitlines()[-1])
-        # Emulate a power-of-two exact check by reallocating in-process is not possible (torch already imported in child)
-        # Keep this as a smoke test that divisions=1 path does not regress for PoT sizes.
         reserved = int(data["reserved"])  # bytes
         self.assertIsInstance(reserved, int)
 
@@ -73,7 +72,6 @@ class TestCudaAllocatorRoundup(unittest.TestCase):
         code, out, err = _run_subprocess_with_env(env)
         if code == 2:
             self.skipTest("CUDA not available")
-        # If cudaMallocAsync backend not available, torch may still run but ignore; treat nonzero exit as skip
         if code != 0:
             self.skipTest(f"subprocess failed under cudaMallocAsync backend: {err}")
         data = json.loads(out.strip().splitlines()[-1])
@@ -85,5 +83,3 @@ class TestCudaAllocatorRoundup(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
-
