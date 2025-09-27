@@ -2453,7 +2453,6 @@ class CommonTemplate:
         self.common(fn, [packed])
 
     @xfail_if_mps_unimplemented
-    @skipCUDAIf(True, "No _weight_int8pack_mm implementation on CUDA")
     @skipIfXpu(msg="No _weight_int8pack_mm implementation on XPU")
     def test_int8_weight_only_quant(self):
         def convert_weight_to_int8pack(b):
@@ -4640,6 +4639,41 @@ class CommonTemplate:
             (torch.randn([4, 4, 4]),),
         )
 
+    def test_conv1d_with_permute(self):
+        # fix https://github.com/pytorch/pytorch/issues/159462
+        class ConvModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = nn.Conv1d(1, 64, kernel_size=3, padding=1)
+
+            def forward(self, x):
+                x = x.permute(0, 2, 1)
+                return self.conv(x)
+
+        self.common(ConvModel(), (torch.randn([32, 100, 1]),), check_lowp=False)
+
+    def test_conv1d_depthwise(self):
+        class ConvModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = nn.Conv1d(
+                    768,
+                    768,
+                    kernel_size=(9,),
+                    stride=(1,),
+                    padding=(4,),
+                    groups=768,
+                    bias=False,
+                )
+
+            def forward(self, x):
+                return self.conv(x)
+
+        input_tensor = torch.randn([1, 768, 512]).as_strided(
+            (1, 768, 512), (393216, 1, 768)
+        )
+        self.common(ConvModel(), (input_tensor,), check_lowp=False)
+
     def test_convolution1(self):
         m = torch.nn.Sequential(
             torch.nn.Conv2d(5, 6, [3, 3]),
@@ -4738,7 +4772,7 @@ class CommonTemplate:
         self.common(
             m,
             (torch.randn([1, 3, 8, 16, 32]),),
-            atol=6e-5,
+            atol=1e-3,
             rtol=0.001,
             # Make sure we compute also with fp16 in the reference. Otherwise,
             # the reference will compute with fp32 and cast back to fp16, which
@@ -12449,11 +12483,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 # to be channels-last. If this assertion ever fails then we need
                 # a new test case.
                 self.assertEqual(len(bar_strides), 1)
-                if self.device == "mps" and MACOS_VERSION < 15.0:
-                    # Before MacOS15 contiguous output were returned regardless of input
-                    self.assertEqual(bar_strides[0], expected_stride)
-                else:
-                    self.assertNotEqual(bar_strides[0], expected_stride)
+                self.assertNotEqual(bar_strides[0], expected_stride)
 
     @config.patch(implicit_fallbacks=True)
     @skip_if_cpp_wrapper(

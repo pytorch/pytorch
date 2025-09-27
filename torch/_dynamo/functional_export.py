@@ -28,7 +28,7 @@ log = logging.getLogger(__name__)
 
 def post_process_error_msg(
     constraint_violation_error: ConstraintViolationError,
-    mod: Callable[..., Any],
+    func: Callable[..., Any],
     args: Any,
     kwargs: Any,
 ):
@@ -38,8 +38,7 @@ def post_process_error_msg(
     """
     from torch.export._unlift import _get_input_paths, _replace_sources
 
-    assert isinstance(mod, torch.nn.Module)
-    orig_sig = inspect.signature(mod.forward)
+    orig_sig = inspect.signature(func)
     flat_input_paths = _get_input_paths((args, kwargs), orig_sig)
     constraint_violation_error.args = (
         _replace_sources(constraint_violation_error.args[0], flat_input_paths),
@@ -118,6 +117,10 @@ def clean_export_root(graph_module: torch.fx.GraphModule) -> None:
             return name.replace("__export_root_", "_")
         return name
 
+    # Unlike getattr node, call_module can be invoked multiple times
+    # In those cases, we should fix all invocations of call_module
+    clean_named_module_map: dict[str, str] = {}
+
     # Update get_attr nodes in-place
     for node in graph_module.graph.nodes:
         if node.op == "get_attr":
@@ -125,11 +128,32 @@ def clean_export_root(graph_module: torch.fx.GraphModule) -> None:
             new_target = clean_name(old_target)
             if new_target != old_target:
                 node.target = new_target
+                assert hasattr(graph_module, old_target)
                 # Move the parameter to the new name
-                if hasattr(graph_module, old_target):
-                    param = torch.fx.graph_module._get_attr(graph_module, old_target)
-                    torch.fx.graph_module._assign_attr(param, graph_module, new_target)
-                    torch.fx.graph_module._del_attr(graph_module, old_target)
+                param = torch.fx.graph_module._get_attr(graph_module, old_target)
+                torch.fx.graph_module._assign_attr(param, graph_module, new_target)
+                torch.fx.graph_module._del_attr(graph_module, old_target)
+        # Dynamo will only have one nested level
+        if node.op == "call_module":
+            old_target = node.target
+            new_target = clean_name(old_target)
+            new_name = clean_name(node.name)
+            if new_target == old_target:
+                continue
+
+            # if this module has already been cleaned before, just lookup from map.
+            if old_target in clean_named_module_map:
+                node.target = clean_named_module_map[old_target]
+                node.name = new_name
+                continue
+            assert isinstance(old_target, str)
+            assert isinstance(new_target, str)
+            target = graph_module.get_submodule(old_target)
+            graph_module.delete_submodule(old_target)
+            graph_module.add_submodule(new_target, target)
+            node.target = new_target
+            node.name = new_name
+            clean_named_module_map[old_target] = new_target
 
 
 class ModuleToTrace(torch.nn.Module):
@@ -429,10 +453,12 @@ def _dynamo_graph_capture_for_export(
                 fake_mode,
             ).transform()
 
+            orig_callable = mod.forward if isinstance(mod, torch.nn.Module) else mod
+
             # Set up PyTree codegen for proper input/output handling
             transformed_graph.graph._codegen = _PyTreeCodeGen(
                 _PyTreeInfo(
-                    argument_names(inspect.signature(mod.forward), args, kwargs),  # type: ignore[attr-defined, arg-type]
+                    argument_names(inspect.signature(orig_callable), args, kwargs),  # type: ignore[attr-defined, arg-type]
                     in_spec,
                     out_spec,
                 )
@@ -465,7 +491,7 @@ def _dynamo_graph_capture_for_export(
                 dim_constraints.solve()
                 forced_specializations = dim_constraints.forced_specializations()
                 msg = dim_constraints.prettify_results(
-                    inspect.signature(mod.forward),  # type: ignore[attr-defined]
+                    inspect.signature(orig_callable),  # type: ignore[attr-defined]
                     dynamic_shapes,
                     constraint_violation_error,
                     forced_specializations,
@@ -494,7 +520,7 @@ def _dynamo_graph_capture_for_export(
                         )
             if constraint_violation_error:
                 constraint_violation_error = post_process_error_msg(
-                    constraint_violation_error, mod, args, kwargs
+                    constraint_violation_error, orig_callable, args, kwargs
                 )
                 raise constraint_violation_error
 
