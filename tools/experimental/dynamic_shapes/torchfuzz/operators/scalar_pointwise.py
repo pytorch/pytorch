@@ -1,8 +1,9 @@
 """Scalar pointwise operator implementation."""
 
 import random
-import torch
 from typing import Optional
+
+import torch
 
 from torchfuzz.operators.base import Operator
 from torchfuzz.tensor_fuzzer import ScalarSpec, Spec
@@ -57,11 +58,13 @@ class ScalarAddOperator(ScalarPointwiseOperator):
     def __init__(self):
         super().__init__("scalar_add", "+")
 
+
 class ScalarMulOperator(ScalarPointwiseOperator):
     """Operator for scalar multiplication."""
 
     def __init__(self):
         super().__init__("scalar_mul", "*")
+
 
 class ScalarSubOperator(ScalarPointwiseOperator):
     """Operator for scalar subtraction."""

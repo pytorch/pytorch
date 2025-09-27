@@ -91,17 +91,20 @@ class AddOperator(PointwiseOperator):
     def __init__(self):
         super().__init__("add", "torch.add", "+")
 
+
 class MulOperator(PointwiseOperator):
     """Operator for element-wise multiplication."""
 
     def __init__(self):
         super().__init__("mul", "torch.mul", "*")
 
+
 class SubOperator(PointwiseOperator):
     """Operator for element-wise subtraction."""
 
     def __init__(self):
         super().__init__("sub", "torch.sub", "-")
+
 
 class DivOperator(PointwiseOperator):
     """Operator for element-wise division."""
