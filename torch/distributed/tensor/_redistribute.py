@@ -4,11 +4,8 @@ import contextlib
 import dataclasses
 import itertools
 import logging
-<<<<<<< HEAD
 import weakref
-=======
 from enum import auto, Enum
->>>>>>> 858b9a4768c (Support of AllPermute for redistribution)
 from functools import cache
 from typing import cast, Optional
 
@@ -312,8 +309,8 @@ class DTensorRedistributePlanner:
     def get_next_state(
         self,
         placements: tuple[Placement, ...],
-        tensor_dim_mesh_dim: tuple[tuple[int, ...], ...],
-    ):
+        tensor_dim_to_ordered_mesh_dim_list: tuple[tuple[int, ...], ...],
+    ) -> dict["DTensorRedistributePlanner.DistState", int]:
         # We map tensor dimensions to device mesh axes, similar to JAX-style
         # sharding representation. Notation:
         # S(<tensor_dim>)[<list_of_device_dims>] means tensor dimension
@@ -374,17 +371,22 @@ class DTensorRedistributePlanner:
                     continue
                 # try move the last sharded device dim from
                 # Shard(src_tensor_dim) to Shard(dst_tensor_dim)
-                if len(tensor_dim_mesh_dim[src_tensor_dim]) > 0:
-                    new_tensor_dim_mesh_dim = [
-                        list(dim_tuple) for dim_tuple in tensor_dim_mesh_dim
+                if len(tensor_dim_to_ordered_mesh_dim_list[src_tensor_dim]) > 0:
+                    new_tensor_dim_to_ordered_mesh_dim_list = [
+                        list(dim_tuple)
+                        for dim_tuple in tensor_dim_to_ordered_mesh_dim_list
                     ]
-                    move_mesh_dim = new_tensor_dim_mesh_dim[src_tensor_dim].pop()
-                    new_tensor_dim_mesh_dim[dst_tensor_dim].append(move_mesh_dim)
+                    move_mesh_dim = new_tensor_dim_to_ordered_mesh_dim_list[
+                        src_tensor_dim
+                    ].pop()
+                    new_tensor_dim_to_ordered_mesh_dim_list[dst_tensor_dim].append(
+                        move_mesh_dim
+                    )
                     new_placements = list(placements)
                     new_placements[move_mesh_dim] = Shard(dst_tensor_dim)
                     dist_state = self.DistState(
                         self._to_tuple(new_placements),
-                        self._to_tuple(new_tensor_dim_mesh_dim),
+                        self._to_tuple(new_tensor_dim_to_ordered_mesh_dim_list),
                     )
                     all_next_state[dist_state] = (
                         self.all_to_all_cost,
@@ -396,16 +398,18 @@ class DTensorRedistributePlanner:
         ######################################################################
         # handle case 2: Shard() -> Replicate()
         for src_tensor_dim in range(self.tensor_dimension):
-            if len(tensor_dim_mesh_dim[src_tensor_dim]) > 0:
-                new_tensor_dim_mesh_dim = [
-                    list(dim_tuple) for dim_tuple in tensor_dim_mesh_dim
+            if len(tensor_dim_to_ordered_mesh_dim_list[src_tensor_dim]) > 0:
+                new_tensor_dim_to_ordered_mesh_dim_list = [
+                    list(dim_tuple) for dim_tuple in tensor_dim_to_ordered_mesh_dim_list
                 ]
-                move_mesh_dim = new_tensor_dim_mesh_dim[src_tensor_dim].pop()
+                move_mesh_dim = new_tensor_dim_to_ordered_mesh_dim_list[
+                    src_tensor_dim
+                ].pop()
                 new_placements = list(placements)
                 new_placements[move_mesh_dim] = Replicate()
                 dist_state = self.DistState(
                     self._to_tuple(new_placements),
-                    self._to_tuple(new_tensor_dim_mesh_dim),
+                    self._to_tuple(new_tensor_dim_to_ordered_mesh_dim_list),
                 )
                 all_next_state[dist_state] = (
                     self.all_gather_cost,
@@ -419,7 +423,7 @@ class DTensorRedistributePlanner:
                 new_placements = list(placements)
                 new_placements[src_tensor_dim] = Replicate()
                 dist_state = self.DistState(
-                    self._to_tuple(new_placements), tensor_dim_mesh_dim
+                    self._to_tuple(new_placements), tensor_dim_to_ordered_mesh_dim_list
                 )
                 all_next_state[dist_state] = (
                     self.all_gather_cost,
@@ -435,13 +439,13 @@ class DTensorRedistributePlanner:
                 # try convert placement[mesh_dim] to Shard(dst_tensor_dim)
                 new_placements = list(placements)
                 new_placements[mesh_dim] = Shard(dst_tensor_dim)
-                new_tensor_dim_mesh_dim = [
-                    list(dim_tuple) for dim_tuple in tensor_dim_mesh_dim
+                new_tensor_dim_to_ordered_mesh_dim_list = [
+                    list(dim_tuple) for dim_tuple in tensor_dim_to_ordered_mesh_dim_list
                 ]
-                new_tensor_dim_mesh_dim[dst_tensor_dim].append(mesh_dim)
+                new_tensor_dim_to_ordered_mesh_dim_list[dst_tensor_dim].append(mesh_dim)
                 dist_state = self.DistState(
                     self._to_tuple(new_placements),
-                    self._to_tuple(new_tensor_dim_mesh_dim),
+                    self._to_tuple(new_tensor_dim_to_ordered_mesh_dim_list),
                 )
                 all_next_state[dist_state] = (
                     self.chunk_cost,
@@ -457,13 +461,13 @@ class DTensorRedistributePlanner:
                 # try convert placement[mesh_dim] to Shard(dst_tensor_dim)
                 new_placements = list(placements)
                 new_placements[mesh_dim] = Shard(dst_tensor_dim)
-                new_tensor_dim_mesh_dim = [
-                    list(dim_tuple) for dim_tuple in tensor_dim_mesh_dim
+                new_tensor_dim_to_ordered_mesh_dim_list = [
+                    list(dim_tuple) for dim_tuple in tensor_dim_to_ordered_mesh_dim_list
                 ]
-                new_tensor_dim_mesh_dim[dst_tensor_dim].append(mesh_dim)
+                new_tensor_dim_to_ordered_mesh_dim_list[dst_tensor_dim].append(mesh_dim)
                 dist_state = self.DistState(
                     self._to_tuple(new_placements),
-                    self._to_tuple(new_tensor_dim_mesh_dim),
+                    self._to_tuple(new_tensor_dim_to_ordered_mesh_dim_list),
                 )
                 all_next_state[dist_state] = (
                     self.reduce_scatter,
@@ -478,7 +482,7 @@ class DTensorRedistributePlanner:
             new_placements = list(placements)
             new_placements[mesh_dim] = Partial()
             dist_state = self.DistState(
-                self._to_tuple(new_placements), tensor_dim_mesh_dim
+                self._to_tuple(new_placements), tensor_dim_to_ordered_mesh_dim_list
             )
             all_next_state[dist_state] = (
                 self.chunk_cost,
@@ -580,7 +584,7 @@ class DTensorRedistributePlanner:
             for mdim in mesh_dims:
                 if mdim == mesh_dim:
                     continue
-                new_size = Shard._local_shard_size_and_offset(
+                new_size = Shard.local_shard_size_and_offset(
                     new_logical_shape[tensor_dim],
                     self.device_mesh.size(mesh_dim=mdim),
                     self.coordinate[mdim],
@@ -688,7 +692,7 @@ class DTensorRedistributePlanner:
 
         # Handle multi-dim device mesh placement redistribution
         # First, we need to build the logical shape for each mesh dim
-        # for correct allgathering uneven shards on each mesh dim (with dynamic padding)
+        # for correct allgather uneven shards on each mesh dim (with dynamic padding)
         for i, src in enumerate(src_spec.placements):
             current_logical_shape = mesh_dims_to_logical_shape[i]
             if isinstance(src, Shard):
@@ -865,10 +869,16 @@ def redistribute_local_tensor(
             if isinstance(transform_info, PerDimTransformInfo):
                 i = transform_info.mesh_dim
                 current, target = transform_info.src_dst_placements
-                device_mesh.size(mesh_dim=i)
+                num_chunks = device_mesh.size(mesh_dim=i)
 
                 if current == target:
                     # short cut, just use the original local tensor
+                    new_local_tensor = local_tensor
+                    continue
+
+                if num_chunks == 1:
+                    # short cut, if there's only one shard, we don't need to do any collective
+                    # comm, just use the original local tensor
                     new_local_tensor = local_tensor
                     continue
 

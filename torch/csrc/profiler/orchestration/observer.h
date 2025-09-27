@@ -63,6 +63,7 @@ struct TORCH_API ExperimentalConfig {
       bool profile_all_threads = false,
       bool capture_overload_names = false,
       bool record_python_gc_info = false,
+      bool expose_kineto_event_metadata = false,
       std::string custom_profiler_config = "",
       bool adjust_timestamps = false);
   explicit operator bool() const;
@@ -108,6 +109,10 @@ struct TORCH_API ExperimentalConfig {
    * determine if gc collect is slowing down your profile.
    */
   bool record_python_gc_info;
+
+  /* controls whether KinetoEvent metadata is exposed to FunctionEvent
+   * in the PyTorch Profiler as a JSON string */
+  bool expose_kineto_event_metadata;
 
   /*
    * A custom_profiler_config option is introduced to allow custom backends

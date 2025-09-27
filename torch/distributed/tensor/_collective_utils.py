@@ -8,11 +8,8 @@ from typing import Optional
 import torch
 import torch.distributed._functional_collectives as funcol
 import torch.distributed.tensor._dtensor_spec as dtensor_spec
+from torch._C._distributed_c10d import _resolve_process_group
 from torch._logging import warning_once
-from torch.distributed import _functional_collectives
-
-# Import from centralized fallback module - no conditional imports needed
-from torch.distributed._distributed_c10d import _resolve_process_group
 from torch.distributed.device_mesh import _mesh_resources, DeviceMesh
 from torch.distributed.distributed_c10d import (
     _get_group_size_by_name,
@@ -114,7 +111,7 @@ def all_permute_mesh_dim(
         permuted_rank[tgt_rank],
         permuted_rank[src_rank],
     )
-    output = _functional_collectives.permute_tensor(input, permuted_rank, mesh)
+    output = funcol.permute_tensor(input, permuted_rank, mesh)
     return output
 
 
