@@ -1411,7 +1411,10 @@ def make_opaque_bitwise_fn(name, real_op_name):
                 return sympy.Integer(getattr(operator, real_op_name)(int(a), int(b)))
             return None
 
-    BitwiseFn.__name__ = "BitwiseFn_" + name
+    nm = "BitwiseFn_" + name
+    BitwiseFn.__name__ = nm
+    BitwiseFn.__qualname__ = nm
+
     return BitwiseFn
 
 
