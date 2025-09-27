@@ -162,7 +162,7 @@ def custom_op(
             if expected != set(mutates_args):
                 raise ValueError(
                     f"Attempted to create a custom op with `mutates_args={mutates_args}` "
-                    f"and `schema={schema}. The schema suggests that the op mutates {expected}"
+                    f"and `schema={schema}`. The schema suggests that the op mutates {expected} "
                     f"which is different from what was provided to us in `mutates_args`. "
                     f"Please make these consistent."
                 )
