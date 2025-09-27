@@ -1,0 +1,28 @@
+# SDPA-only benchmark configuration for PyTorch transformer benchmarks
+# Usage: python score_mod.py --config config_sdpa_only.yaml
+
+# Core parameters
+dynamic: false
+calculate_bwd: true
+dtype: "bfloat16"
+
+# Shape parameters
+b: [1, 8, 16]  # batch sizes
+nh: ["16,16"]  # [query_heads,key_value_heads]
+s: [128, 256, 512, 1024, 2048, 4096]  # sequence lengths
+d: [64, 128]  # head dimensions
+
+# Basic attention types
+mods: ["causal", "alibi"]
+
+# SDPA backends only
+backend: ["math", "efficient", "cudnn"]
+max_autotune: true  # Enable torch.compile with max-autotune for optimal performance
+
+# Decoding and cache settings
+decoding: false
+kv_size: null
+
+# Metrics and output
+throughput: true  # Calculate memory bandwidth & TFLOPS
+save_path: "sdpa_results.csv"
