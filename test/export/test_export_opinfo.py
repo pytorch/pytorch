@@ -20,7 +20,7 @@ from torch.testing._internal.common_methods_invocations import (
     skipOps,
     xfail,
 )
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import run_tests, skipIfRocm, TestCase
 from torch.utils import _pytree as pytree
 
 
@@ -57,7 +57,6 @@ fake_export_failures = {
     xfail("nn.functional.grid_sample"),
     xfail("to_sparse"),
     # cannot xfail as it is passing for cpu-only build
-    skip("nn.functional.conv2d"),
     skip("nn.functional.scaled_dot_product_attention"),
     # following are failing due to OptionalDeviceGuard
     xfail("__getitem__"),
@@ -81,14 +80,11 @@ def _test_export_helper(self, dtype, op):
     sample_inputs_itr = op.sample_inputs("cpu", dtype, requires_grad=False)
 
     mode = FakeTensorMode(allow_non_fake_inputs=True)
-    converter = mode.fake_tensor_converter
     # intentionally avoid cuda:0 to flush out some bugs
     target_device = "cuda:1"
 
     def to_fake_device(x):
-        x = converter.from_real_tensor(mode, x)
-        x.fake_device = torch.device(target_device)
-        return x
+        return x.to(target_device)
 
     # Limit to first 100 inputs so tests don't take too long
     for sample_input in itertools.islice(sample_inputs_itr, 100):
@@ -151,6 +147,7 @@ class TestExportOnFakeCuda(TestCase):
     # We set CUDA_VISIBLE_DEVICES="" to simulate a CPU machine with cuda build
     # Running this on all ops in op_db is too slow, so we only run on a selected subset
     @onlyCUDA
+    @skipIfRocm
     @ops(selected_op_db, allowed_dtypes=(torch.float,))
     def test_fake_export(self, device, dtype, op):
         test_script = f"""\
@@ -172,9 +169,7 @@ converter = mode.fake_tensor_converter
 target_device = "cuda:1"
 
 def to_fake_device(x):
-    x = converter.from_real_tensor(mode, x)
-    x.fake_device = torch.device(target_device)
-    return x
+    return x.to(target_device)
 
 # Limit to first 100 inputs so tests don't take too long
 for sample_input in itertools.islice(sample_inputs_itr, 100):
@@ -220,6 +215,7 @@ for sample_input in itertools.islice(sample_inputs_itr, 100):
         self.assertEqual(r, "")
 
     @unittest.skipIf(not torch.backends.cuda.is_built(), "requires CUDA build")
+    @skipIfRocm
     def test_preserve_original_behavior(self):
         test_script = f"""\
 import torch

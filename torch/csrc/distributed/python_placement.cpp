@@ -8,14 +8,14 @@ using namespace pybind11::literals;
 
 namespace torch::distributed {
 namespace {
-// NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-const char placement_class_docstring[] =
-    "The base class for the Placement type, where it describes how a DTensor is placed onto the\n"
-    "``DeviceMesh``. ``Placement`` and ``DeviceMesh`` together could describe the DTensor Layout.\n"
-    "It is the base class of the three main DTensor Placement types: ``Shard``, ``Replicate``,\n"
-    "and ``Partial``.\n"
-    "\n"
-    "This class is not meant to be used directly, mainly served as a typing stub.\n";
+const auto placement_class_docstring =
+    R"(The base class for the Placement type, where it describes how a DTensor is placed onto the
+``DeviceMesh``. ``Placement`` and ``DeviceMesh`` together could describe the DTensor Layout.
+It is the base class of the three main DTensor Placement types: ``Shard``, ``Replicate``,
+and ``Partial``.
+
+This class is not meant to be used directly, mainly served as a typing stub.
+)";
 } // namespace
 
 void initPlacementBindings(PyObject* module) {
