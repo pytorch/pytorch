@@ -1830,34 +1830,34 @@ def forward(self, pred_1, x_1):
             ]
         )
 
+        init_clone = [i.clone() for i in init]
+        init_clone2 = [i.clone() for i in init]
+        elements_clone = [ele.clone() for ele in elements]
+        elements_clone2 = [ele.clone() for ele in elements]
         result = scan_fct(
             get_scan_combine_fn("s5_operator", False),
-            init,
-            elements,
-            dim=0,
+            init_clone,
+            elements_clone,
             reverse=reverse,
         )
         expected_result = _fake_scan(
             get_scan_combine_fn("s5_operator", False),
-            init=init,
-            xs=elements,
-            dim=0,
+            init_clone2,
+            elements_clone2,
             reverse=reverse,
         )
         self.assertEqual(result, expected_result)
 
         if autograd:
-            init_flatten, _ = pytree.tree_flatten(init)
-            elements_flatten, _ = pytree.tree_flatten(elements)
-
             result_flatten, _ = pytree.tree_flatten(result)
             result_exp_flatten, _ = pytree.tree_flatten(expected_result)
+
             grad_out = [torch.ones_like(el) for el in result_exp_flatten]
             expected_grads = torch.autograd.grad(
-                result_exp_flatten, (*init_flatten, *elements_flatten), grad_out
+                result_exp_flatten, (*init_clone2, *elements_clone2), grad_out
             )
             grads = torch.autograd.grad(
-                result_flatten, (*init_flatten, *elements_flatten), grad_out
+                result_flatten, (*init_clone, *elements_clone), grad_out
             )
             self.assertEqual(grads, expected_grads)
 
@@ -2757,9 +2757,7 @@ class GraphModule(torch.nn.Module):
         l_init_1_ = L_init_1_
         l_xs_ = L_xs_
 
-        elem: "f32[3, 10, 2]" = torch.movedim(l_xs_, 0, 0);  l_xs_ = None
-
-        flip: "f32[3, 10, 2]" = torch.flip(elem, [0]);  elem = None
+        flip: "f32[3, 10, 2]" = torch.flip(l_xs_, [0]);  l_xs_ = None
 
         scan_combine_fn_0 = self.scan_combine_fn_0
         scan = torch.ops.higher_order.scan(scan_combine_fn_0, [l_init_0_, l_init_1_], [flip], []);  scan_combine_fn_0 = l_init_0_ = l_init_1_ = flip = None
@@ -3457,8 +3455,7 @@ class GraphModule(torch.nn.Module):
             gm.code.strip(),
             """\
 def forward(self, fct_1, init_1, xs_1):
-    permute = torch.ops.aten.permute.default(xs_1, [0, 1, 2])
-    flip = torch.ops.aten.flip.default(permute, [0]);  permute = None
+    flip = torch.ops.aten.flip.default(xs_1, [0])
     sym_size_int_1 = torch.ops.aten.sym_size.int(init_1, 1)
     sym_size_int_2 = torch.ops.aten.sym_size.int(init_1, 2)
     sym_size_int_3 = torch.ops.aten.sym_size.int(xs_1, 1)
@@ -3482,8 +3479,7 @@ def forward(self, fct_1, init_1, xs_1):
 def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
     l_init_ = L_init_
     l_xs_ = L_xs_
-    elem = torch.movedim(l_xs_, 0, 0);  l_xs_ = None
-    flip = torch.flip(elem, [0]);  elem = None
+    flip = torch.flip(l_xs_, [0]);  l_xs_ = None
     scan_combine_fn_0 = self.scan_combine_fn_0
     scan = torch.ops.higher_order.scan(scan_combine_fn_0, [l_init_], [flip], []);  scan_combine_fn_0 = l_init_ = flip = None
     carry = scan[0]
@@ -8069,9 +8065,8 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor, L_add_closure_0_
     l_xs_ = L_xs_
     l_add_closure_0_cell_contents_0_param_ = L_add_closure_0_cell_contents_0_param_
     l_add_closure_0_cell_contents_1_0_ = L_add_closure_0_cell_contents_1_0_
-    r = torch.movedim(l_xs_, 0, 0);  l_xs_ = None
     scan_combine_fn_0 = self.scan_combine_fn_0
-    scan = torch.ops.higher_order.scan(scan_combine_fn_0, [l_init_], [r], [l_add_closure_0_cell_contents_0_param_, l_add_closure_0_cell_contents_1_0_]);  scan_combine_fn_0 = l_init_ = r = l_add_closure_0_cell_contents_0_param_ = l_add_closure_0_cell_contents_1_0_ = None
+    scan = torch.ops.higher_order.scan(scan_combine_fn_0, [l_init_], [l_xs_], [l_add_closure_0_cell_contents_0_param_, l_add_closure_0_cell_contents_1_0_]);  scan_combine_fn_0 = l_init_ = l_xs_ = l_add_closure_0_cell_contents_0_param_ = l_add_closure_0_cell_contents_1_0_ = None
     carry = scan[0]
     out = scan[1];  scan = None
     return (carry, out)""",  # noqa: B950
@@ -8085,9 +8080,8 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor, L_add_closure_0_
     l_xs_ = L_xs_
     l_add_closure_0_cell_contents_0_param_ = L_add_closure_0_cell_contents_0_param_
     l_add_closure_0_cell_contents_1_0_ = L_add_closure_0_cell_contents_1_0_
-    movedim = torch.movedim(l_xs_, 0, 0);  l_xs_ = None
     scan_combine_fn_0 = self.scan_combine_fn_0
-    scan = torch.ops.higher_order.scan(scan_combine_fn_0, [l_init_], [movedim], [l_add_closure_0_cell_contents_0_param_, l_add_closure_0_cell_contents_1_0_]);  scan_combine_fn_0 = l_init_ = movedim = l_add_closure_0_cell_contents_0_param_ = l_add_closure_0_cell_contents_1_0_ = None
+    scan = torch.ops.higher_order.scan(scan_combine_fn_0, [l_init_], [l_xs_], [l_add_closure_0_cell_contents_0_param_, l_add_closure_0_cell_contents_1_0_]);  scan_combine_fn_0 = l_init_ = l_xs_ = l_add_closure_0_cell_contents_0_param_ = l_add_closure_0_cell_contents_1_0_ = None
     carry = scan[0]
     out = scan[1];  scan = None
     return (carry, out)""",  # noqa: B950
