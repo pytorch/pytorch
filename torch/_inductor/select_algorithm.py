@@ -3626,6 +3626,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 V.graph.sizevars.atomically_apply_size_hint(
                     stride,
                     fallback=config.unbacked_symint_fallback,
+                    hint_override=hint_override,
                 )
                 for stride in node.get_stride()
             ),
