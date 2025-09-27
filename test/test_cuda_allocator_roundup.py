@@ -1,16 +1,27 @@
 # Owner(s): ["module: cuda"]
-import os
 import json
-import sys
+import os
 import subprocess
+import sys
 import unittest
+from torch.testing._internal.common_utils import run_tests
 
 
 def _run_subprocess_with_env(env):
-    cmd = [sys.executable, os.path.join(os.path.dirname(__file__), "..", "tools", "repro_allocator_roundup_divisions_one.py")]
+    cmd = [
+        sys.executable,
+        os.path.join(
+            os.path.dirname(__file__),
+            "..",
+            "tools",
+            "repro_allocator_roundup_divisions_one.py",
+        ),
+    ]
     proc_env = os.environ.copy()
     proc_env.update(env or {})
-    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=proc_env)
+    p = subprocess.Popen(
+        cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=proc_env
+    )
     out, err = p.communicate()
     return p.returncode, out.decode("utf-8"), err.decode("utf-8")
 
@@ -79,6 +90,10 @@ class TestCudaAllocatorRoundup(unittest.TestCase):
         MB = 1024 * 1024
         # Expect not rounded up to 1 GiB
         self.assertLess(reserved, 900 * MB)
+
+
+if __name__ == "__main__":
+    run_tests()
 
 
 if __name__ == "__main__":
