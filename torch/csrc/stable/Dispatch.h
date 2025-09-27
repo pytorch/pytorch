@@ -10,7 +10,7 @@
   be extended in the future based on the actual need.
 */
 
-#include <torch/headeronly/core/ScalarType.h>
+#include <torch/csrc/stable/ScalarType.h>
 #include <torch/headeronly/util/Exception.h>
 
 namespace torch::stable {
@@ -18,19 +18,6 @@ namespace torch::stable {
 using torch::headeronly::ScalarType;
 
 namespace impl {
-
-inline const char* toString(ScalarType t) {
-#define DEFINE_CASE(_, name) \
-  case ScalarType::name:     \
-    return #name;
-
-  switch (t) {
-    AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(DEFINE_CASE)
-    default:
-      return "UNKNOWN_SCALAR";
-  }
-#undef DEFINE_CASE
-}
 
 template <ScalarType N>
 struct ScalarTypeToCPPType;
@@ -41,7 +28,7 @@ struct ScalarTypeToCPPType;
     using type = cpp_type;                                    \
   };
 
-AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(SPECIALIZE_ScalarTypeToCPPType)
+STABLE_FORALL_SUPPORTED_SCALAR_TYPES(SPECIALIZE_ScalarTypeToCPPType)
 
 #undef SPECIALIZE_ScalarTypeToCPPType
 
@@ -71,7 +58,7 @@ using ScalarTypeToCPPTypeT = typename ScalarTypeToCPPType<N>::type;
             '"',                                       \
             stable_dispatch_name,                      \
             "\" not implemented for '",                \
-            torch::stable::impl::toString(the_type),   \
+            torch::stable::toString(the_type),         \
             "'");                                      \
     }                                                  \
   }()
