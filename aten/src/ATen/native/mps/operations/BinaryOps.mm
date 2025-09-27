@@ -196,6 +196,13 @@ static void add_sub_lerp_template(const Tensor& self,
 
 } // namespace mps
 
+Tensor& logical_and_scalar_out_mps(const Tensor& self, const Scalar& other, Tensor& output);
+Tensor& logical_or_scalar_out_mps(const Tensor& self, const Scalar& other, Tensor& output);
+Tensor& logical_xor_scalar_out_mps(const Tensor& self, const Scalar& other, Tensor& output);
+Tensor& logical_and_Scalar_Tensor_out_mps(const Scalar& self, const Tensor& other, Tensor& output);
+Tensor& logical_or_Scalar_Tensor_out_mps(const Scalar& self, const Tensor& other, Tensor& output);
+Tensor& logical_xor_Scalar_Tensor_out_mps(const Scalar& self, const Tensor& other, Tensor& output);
+
 #define CREATE_MPS_BINARY_COMPARISON_OP_FUNC(func_out, func_stub, other_type)                               \
   Tensor& func_out(const Tensor& self, const other_type& other, Tensor& output) {                           \
     mps::binaryOp##other_type(                                                                              \
@@ -251,9 +258,65 @@ CREATE_MPS_STRUCTURED_BINARY_OP_FUNC(minimum_out_mps, minimumWithNaNPropagationA
 CREATE_MPS_STRUCTURED_BINARY_OP_FUNC(maximum_out_mps, maximumWithNaNPropagationAndIntFallback, Tensor);
 CREATE_MPS_STRUCTURED_BINARY_OP_FUNC(pow_tensor_scalar_out_mps, power, Scalar);
 CREATE_MPS_STRUCTURED_BINARY_OP_FUNC(pow_tensor_tensor_out_mps, power, Tensor);
+CREATE_MPS_BINARY_COMPARISON_OP_FUNC(logical_and_scalar_out_mps, logicalAND, Scalar);
 CREATE_MPS_BINARY_COMPARISON_OP_FUNC(logical_and_out_mps, logicalAND, Tensor);
+CREATE_MPS_BINARY_COMPARISON_OP_FUNC(logical_or_scalar_out_mps, logicalOR, Scalar);
 CREATE_MPS_BINARY_COMPARISON_OP_FUNC(logical_or_out_mps, logicalOR, Tensor);
+CREATE_MPS_BINARY_COMPARISON_OP_FUNC(logical_xor_scalar_out_mps, logicalXOR, Scalar);
 CREATE_MPS_BINARY_COMPARISON_OP_FUNC(logical_xor_out_mps, logicalXOR, Tensor);
+
+Tensor& logical_and_Scalar_Tensor_out_mps(const Scalar& self, const Tensor& other, Tensor& output) {
+  return logical_and_scalar_out_mps(other, self, output);
+}
+
+Tensor& logical_or_Scalar_Tensor_out_mps(const Scalar& self, const Tensor& other, Tensor& output) {
+  return logical_or_scalar_out_mps(other, self, output);
+}
+
+Tensor& logical_xor_Scalar_Tensor_out_mps(const Scalar& self, const Tensor& other, Tensor& output) {
+  return logical_xor_scalar_out_mps(other, self, output);
+}
+
+TORCH_LIBRARY_IMPL(aten, MPS, m) {
+  m.impl("logical_and.Scalar_out", TORCH_FN(logical_and_scalar_out_mps));
+  m.impl("logical_and.Scalar", [](const Tensor& self, const Scalar& other) {
+    Tensor result = at::empty({0}, self.options().dtype(kBool));
+    logical_and_scalar_out_mps(self, other, result);
+    return result;
+  });
+  m.impl("logical_and.Scalar_Tensor_out", TORCH_FN(logical_and_Scalar_Tensor_out_mps));
+  m.impl("logical_and.Scalar_Tensor", [](const Scalar& self, const Tensor& other) {
+    Tensor result = at::empty({0}, other.options().dtype(kBool));
+    logical_and_Scalar_Tensor_out_mps(self, other, result);
+    return result;
+  });
+
+  m.impl("logical_or.Scalar_out", TORCH_FN(logical_or_scalar_out_mps));
+  m.impl("logical_or.Scalar", [](const Tensor& self, const Scalar& other) {
+    Tensor result = at::empty({0}, self.options().dtype(kBool));
+    logical_or_scalar_out_mps(self, other, result);
+    return result;
+  });
+  m.impl("logical_or.Scalar_Tensor_out", TORCH_FN(logical_or_Scalar_Tensor_out_mps));
+  m.impl("logical_or.Scalar_Tensor", [](const Scalar& self, const Tensor& other) {
+    Tensor result = at::empty({0}, other.options().dtype(kBool));
+    logical_or_Scalar_Tensor_out_mps(self, other, result);
+    return result;
+  });
+
+  m.impl("logical_xor.Scalar_out", TORCH_FN(logical_xor_scalar_out_mps));
+  m.impl("logical_xor.Scalar", [](const Tensor& self, const Scalar& other) {
+    Tensor result = at::empty({0}, self.options().dtype(kBool));
+    logical_xor_scalar_out_mps(self, other, result);
+    return result;
+  });
+  m.impl("logical_xor.Scalar_Tensor_out", TORCH_FN(logical_xor_Scalar_Tensor_out_mps));
+  m.impl("logical_xor.Scalar_Tensor", [](const Scalar& self, const Tensor& other) {
+    Tensor result = at::empty({0}, other.options().dtype(kBool));
+    logical_xor_Scalar_Tensor_out_mps(self, other, result);
+    return result;
+  });
+}
 
 TORCH_IMPL_FUNC(atan2_out_mps)(const Tensor& self, const Tensor& other, const Tensor& output) {
   mps::binaryOpTensor(self, other, output, "atan2", ^BinaryOpFn(cachedGraph, primaryCastTensor, secondaryCastTensor) {

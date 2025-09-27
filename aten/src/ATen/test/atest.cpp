@@ -125,19 +125,22 @@ TEST_F(atest, operators) {
 
 TEST_F(atest, logical_and_operators) {
   auto exp_tensor = tensor({0, 1, 0, 1, 0});
-  run_binary_ops_test(
+  run_binary_ops_test<
+      at::Tensor& (*)(at::Tensor&, const at::Tensor&, const at::Tensor&)>(
       logical_and_out, x_logical, y_logical, exp_tensor, INTBOOL);
 }
 
 TEST_F(atest, logical_or_operators) {
   auto exp_tensor = tensor({1, 1, 0, 1, 1});
-  run_binary_ops_test(
+  run_binary_ops_test<
+      at::Tensor& (*)(at::Tensor&, const at::Tensor&, const at::Tensor&)>(
       logical_or_out, x_logical, y_logical, exp_tensor, INTBOOL);
 }
 
 TEST_F(atest, logical_xor_operators) {
   auto exp_tensor = tensor({1, 0, 0, 0, 1});
-  run_binary_ops_test(
+  run_binary_ops_test<
+      at::Tensor& (*)(at::Tensor&, const at::Tensor&, const at::Tensor&)>(
       logical_xor_out, x_logical, y_logical, exp_tensor, INTBOOL);
 }
 
