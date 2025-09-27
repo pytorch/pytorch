@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import textwrap
 import unittest
 from contextlib import contextmanager
 from typing import Optional, Union
@@ -56,6 +57,7 @@ from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_FBCODE,
+    IS_SANDCASTLE,
     parametrize,
     TEST_WITH_ROCM,
 )
@@ -137,6 +139,101 @@ class TestPyCodeCache(TestCase):
         PyCodeCache.load_by_key_path(key, path, linemap=[])
         stack_frames = PyCodeCache.stack_frames_for_code(path, 0)
         self.assertEqual(stack_frames, None)
+
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
+    def test_editable_cached_wrapper(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            env = os.environ.copy()
+            env["TORCHINDUCTOR_CACHE_DIR"] = tmpdir
+
+            step1 = textwrap.dedent(
+                """
+                import glob
+                import os
+                import torch
+                import warnings
+                from torch._inductor import config
+
+                warnings.filterwarnings("ignore")
+                config.fx_graph_cache = True
+                config.fx_graph_remote_cache = False
+                torch._dynamo.reset()
+
+                @torch.compile(backend="inductor")
+                def f(x):
+                    return x * 2
+
+                f(torch.ones(2))
+                cache_dir = os.environ["TORCHINDUCTOR_CACHE_DIR"]
+                pyfiles = glob.glob(os.path.join(cache_dir, "**", "*.py"), recursive=True)
+                print(pyfiles[0])
+                """
+            )
+            wrapper_path = (
+                subprocess.check_output([sys.executable, "-c", step1], env=env)
+                .decode()
+                .strip()
+            )
+
+            step2 = textwrap.dedent(
+                """
+                import torch
+                import warnings
+                from torch._dynamo.utils import counters
+                from torch._inductor import config
+
+                warnings.filterwarnings("ignore")
+                config.fx_graph_cache = True
+                config.fx_graph_remote_cache = False
+                torch._dynamo.reset()
+
+                @torch.compile(backend="inductor")
+                def f(x):
+                    return x * 2
+
+                f(torch.ones(2))
+                print(counters["inductor"]["fxgraph_cache_hit"])
+                """
+            )
+            hit = (
+                subprocess.check_output([sys.executable, "-c", step2], env=env)
+                .decode()
+                .strip()
+            )
+            self.assertEqual(hit, "1")
+
+            with open(wrapper_path) as f:
+                src = f.read()
+            with open(wrapper_path, "w") as f:
+                f.write(
+                    src.replace(
+                        "def call(self, args):",
+                        "def call(self, args):\n        print('debug')",
+                    )
+                )
+
+            step3 = textwrap.dedent(
+                """
+                import torch
+                import warnings
+                from torch._inductor import config
+
+                warnings.filterwarnings("ignore")
+                config.fx_graph_cache = True
+                config.fx_graph_remote_cache = False
+                torch._dynamo.reset()
+
+                @torch.compile(backend="inductor")
+                def f(x):
+                    return x * 2
+
+                f(torch.ones(2))
+                """
+            )
+            out = subprocess.check_output(
+                [sys.executable, "-c", step3], env=env
+            ).decode()
+            self.assertIn("debug", out)
 
 
 @instantiate_parametrized_tests
