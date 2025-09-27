@@ -1353,7 +1353,7 @@ if HAS_CUDA_AND_TRITON:
             # amp cache for cudagraph outputs should be disabled
             t2 = torch.rand([4, 4], device="cuda")
 
-            with torch.cuda.amp.autocast():
+            with torch.amp.autocast(device_type="cuda"):
                 run_once = out @ t2
 
                 out.detach().zero_()

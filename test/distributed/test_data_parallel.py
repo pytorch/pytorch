@@ -11,7 +11,6 @@ import torch
 import torch.nn.functional as F
 import torch.nn.parallel as dp
 from torch import nn
-from torch.cuda.amp import autocast
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU
 from torch.testing._internal.common_device_type import (
     dtypes,
@@ -130,7 +129,7 @@ class TestDataParallel(TestCase):
         l2 = nn.Linear(10, 5).to("cuda:1", torch.float)
         i1 = torch.randn(2, 10, device="cuda:0", dtype=torch.float)
         i2 = torch.randn(2, 10, device="cuda:1", dtype=torch.float)
-        with autocast():
+        with torch.amp.autocast(device_type="cuda"):
             expected1 = l1(i1)
             expected2 = l2(i2)
         modules = (l1, l2)
@@ -139,7 +138,7 @@ class TestDataParallel(TestCase):
         # each input can be either a collection of positional arguments
         #                       or an object representing the single argument
         for inputs in [((i1,), (i2,)), (i1, i2)]:
-            with autocast():
+            with torch.amp.autocast(device_type="cuda"):
                 outputs = dp.parallel_apply(modules, inputs, None)
             for out, expected in zip(outputs, expected_outputs):
                 self.assertEqual(out, expected)

@@ -306,7 +306,7 @@ class TestFakeQuantizeOps(TestCase):
         net.qconfig = torch.ao.quantization.get_default_qat_qconfig('fbgemm')
         net_prep = torch.ao.quantization.prepare_qat(net)
 
-        with torch.cuda.amp.autocast():
+        with torch.amp.autocast(device_type="cuda"):
             x = torch.randn(4, 1, 5, 5)
             out = net_prep(x).sum()
             out.backward()
