@@ -4,7 +4,7 @@ from __future__ import annotations
 import io
 import logging
 import os
-from typing import Any, IO, Literal, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, IO, Literal, Optional, TYPE_CHECKING, Union
 
 import torch.fx
 
@@ -389,7 +389,7 @@ def standalone_compile(
         "from_example_inputs", "from_tracing_context", "from_graph"
     ] = "from_graph",
     options: Optional[dict[str, Any]] = None,
-) -> CompiledArtifact:
+) -> CompiledArtifact | Callable[..., Any]:
     """
     Precompilation API for inductor.
 

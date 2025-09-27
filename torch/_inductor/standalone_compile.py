@@ -192,7 +192,7 @@ def standalone_compile(
     *,
     dynamic_shapes: Any,
     options: Any,
-) -> CompiledArtifact:
+) -> CompiledArtifact | Callable[..., Any]:
     from torch.compiler._cache import CacheArtifactManager
 
     from .compile_fx import compile_fx
@@ -251,10 +251,16 @@ def standalone_compile(
     ):
         # compile_fx can mutate gm
         gm = copy.deepcopy(gm)
+
+        save_artifacts = options.pop("save_artifacts", True)
+
         compiled_fn = compile_fx(
             gm, example_inputs, ignore_shape_env=ignore_shape_env, **options
         )
         assert callable(compiled_fn)
+
+        if not save_artifacts:
+            return compiled_fn
 
         artifacts = torch.compiler.save_cache_artifacts()
         if artifacts is None:

@@ -11,14 +11,17 @@ import textwrap
 import unittest
 from contextlib import contextmanager
 from typing import Optional, Union
-from typing_extensions import override
 from unittest import mock
 
 import torch
 from torch._dynamo import reset
 from torch._dynamo.utils import counters
 from torch._functorch import config as functorch_config
-from torch._functorch._aot_autograd.autograd_cache import AOTAutogradCache
+from torch._functorch._aot_autograd.autograd_cache import (
+    AOTAutogradCache,
+    BundledAOTAutogradCacheEntry,
+    deserialize_bundled_cache_entry,
+)
 from torch._inductor import config, metrics
 from torch._inductor.codecache import (
     BypassFxGraphCache,
@@ -71,6 +74,7 @@ from torch.testing._internal.inductor_utils import (
     requires_triton,
 )
 from torch.testing._internal.triton_utils import requires_cuda_and_triton
+from typing_extensions import override
 
 
 try:
@@ -1775,6 +1779,62 @@ class TestStandaloneCompile(TestCase):
                 self.assertEqual(eager_out, compiled_out)
 
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+
+    @config.patch({"fx_graph_cache": True})
+    @config.patch({"fx_graph_remote_cache": False})
+    @functorch_config.patch({"enable_autograd_cache": True})
+    @parametrize("device", (GPU_TYPE, "cpu"))
+    @parametrize("format", ("binary", "unpacked"))
+    @parametrize("dynamic", (False, True))
+    @parametrize("graph_partition", (False, True))
+    def test_basic_nosave(
+        self, device: str, format: str, dynamic: bool, graph_partition: bool
+    ) -> None:
+        if device == GPU_TYPE and not HAS_GPU:
+            raise unittest.SkipTest(f"requires {GPU_TYPE}")
+
+        mod = torch.nn.Linear(1, 3, device=device)
+        x = torch.randn(4, 1, device=device)
+        if dynamic:
+            torch._dynamo.mark_dynamic(x, 0)
+
+        def f(x):
+            with torch.no_grad():
+                return mod(x), x.sin()
+
+        eager_out = f(x)
+
+        with (config.patch(graph_partition=graph_partition),):
+            pickled = None
+
+            with fresh_cache():
+                gm, args, kwargs = self.capture(f)(x)
+                assert not kwargs
+
+                with torch._functorch.config.patch("bundled_autograd_cache", True):
+                    fn = torch._inductor.standalone_compile(
+                        gm, args, options={"save_artifacts": False}
+                    )
+                    entry = fn.serialize()
+                    entry.pre_save()
+                    pickled = pickle.dumps(entry)
+
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+
+            with fresh_cache():
+                entry_loaded = pickle.loads(pickled)
+                assert isinstance(entry_loaded, BundledAOTAutogradCacheEntry)
+                loaded = deserialize_bundled_cache_entry(entry_loaded)
+                if dynamic:
+                    concrete_args = [
+                        4 if isinstance(a, torch.SymInt) else a for a in args
+                    ]
+                else:
+                    concrete_args = args
+                compiled_out = loaded(*concrete_args)
+                self.assertEqual(eager_out, compiled_out)
+
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
 
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
