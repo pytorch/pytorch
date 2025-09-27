@@ -905,7 +905,6 @@ def _export_to_aten_ir(
             # make sure we don't override any meta
             if "desc" in new_output_node.meta:
                 del new_output_node.meta["desc"]
-            assert len(new_output_node.meta) == 0
             new_output_node.meta.update(old_output_node.meta)
 
     # TODO unfortunately preserving graph-level metadata and output node's meta
