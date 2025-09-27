@@ -37,6 +37,9 @@ class autocast(torch.amp.autocast_mode.autocast):
         ):
             return super().__new__(cls)
 
+        def __init_subclass__(cls):
+            pass
+
     def __init__(
         self,
         enabled: bool = True,
