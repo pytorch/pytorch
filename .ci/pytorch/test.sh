@@ -1630,6 +1630,25 @@ test_operator_benchmark() {
       --expected "expected_ci_operator_benchmark_eager_float32_cpu.csv"
 }
 
+test_operator_microbenchmark() {
+  TEST_REPORTS_DIR=$(pwd)/test/test-reports
+  mkdir -p "$TEST_REPORTS_DIR"
+  TEST_DIR=$(pwd)
+
+  cd benchmarks/operator_benchmark/pt_extension
+  python -m pip install .
+
+  cd "${TEST_DIR}"/benchmarks/operator_benchmark
+
+  for OP_BENCHMARK_TESTS in matmul mm addmm bmm; do
+    $TASKSET python -m pt.${OP_BENCHMARK_TESTS}_test --tag-filter long \
+      --output-json-for-dashboard "${TEST_REPORTS_DIR}/operator_microbenchmark_${OP_BENCHMARK_TESTS}_compile.json" \
+      --benchmark-name "PyTorch operator microbenchmark" --use-compile
+    $TASKSET python -m pt.${OP_BENCHMARK_TESTS}_test --tag-filter long \
+      --output-json-for-dashboard "${TEST_REPORTS_DIR}/operator_microbenchmark_${OP_BENCHMARK_TESTS}.json" \
+      --benchmark-name "PyTorch operator microbenchmark"
+  done
+}
 
 if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
   (cd test && python -c "import torch; print(torch.__config__.show())")
@@ -1686,6 +1705,8 @@ elif [[ "${TEST_CONFIG}" == *operator_benchmark* ]]; then
     test_operator_benchmark cpu ${TEST_MODE}
 
   fi
+elif [[ "${TEST_CONFIG}" == *operator_microbenchmark* ]]; then
+  test_operator_microbenchmark
 elif [[ "${TEST_CONFIG}" == *inductor_distributed* ]]; then
   test_inductor_distributed
 elif [[ "${TEST_CONFIG}" == *inductor-halide* ]]; then
