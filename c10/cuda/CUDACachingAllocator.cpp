@@ -2472,6 +2472,13 @@ class DeviceCachingAllocator {
       auto divisions = CUDAAllocatorConfig::roundup_power2_divisions(size);
       if (divisions > 1 && size > (kMinBlockSize * divisions)) {
         return roundup_power2_next_division(size, divisions);
+      } else if (divisions == 1 && size > kMinBlockSize) {
+        // For divisions==1, round to the next power-of-two boundary
+        if (llvm::isPowerOf2_64(size)) {
+          return size;
+        }
+        size_t power2_floor = llvm::PowerOf2Floor(size);
+        return (power2_floor << 1);
       } else {
         return kMinBlockSize * ((size + kMinBlockSize - 1) / kMinBlockSize);
       }
