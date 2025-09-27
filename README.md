@@ -433,25 +433,31 @@ make -f docker.Makefile
 
 ### Building the Documentation
 
-Currently, the docs can only be built with Python 3.10.
+Currently, the docs can only be built with Python 3.10. To build them:
 
+1. Set up a Python 3.10 environment which includes `pip`. For example:
 ```bash
-# Set up a Python 3.10 environment with pip
 python3.10 -m venv .venv-docs
 source .venv-docs/bin/activate  # or `& .\venv-docs\Scripts\Activate.ps1` on Windows
 python -m ensurepip --upgrade
-# Install PyTorch nightly
-pip install --pre torch --index-url https://download.pytorch.org/whl/nightly/cpu
-# Install the docs' dependencies
+```
+
+2. Install PyTorch in that environment. If you're building the docs without changes, [select "Preview (Nightly)" on this page](https://pytorch.org/get-started/locally/) and follow its instructions. If you're building the docs with changes, see the instructions in [CONTRIBUTING.md](https://github.com/pytorch/pytorch/blob/main/CONTRIBUTING.md#building-documentation).
+
+3. Install the docs' Python dependencies and the [`katex` CLI](https://katex.org/docs/node). If `node` is not already on your system, you may have to [download and install Node.js](https://nodejs.org/en/download). For example:
+```bash
 pip install -r docs/requirements.txt
 pip install 'numpy<2'
 npm install -g katex
-# Build the docs as HTML files in docs/build/html
+```
+
+4. Build the docs with `make`. For example, to build HTML files in `docs/build/html`:
+```bash
 cd docs
 make html
 ```
 
-For detailed instructions on how to build the docs in other formats or reflecting changes in `torch/`, see [CONTRIBUTING.md](https://github.com/pytorch/pytorch/blob/main/CONTRIBUTING.md#building-documentation).
+To build the docs in other formats, or reflecting changes in `torch/`, see [CONTRIBUTING.md](https://github.com/pytorch/pytorch/blob/main/CONTRIBUTING.md#building-documentation).
 
 ### Previous Versions
 
