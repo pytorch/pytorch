@@ -465,14 +465,6 @@ class NVSHMEMAll2AllTest(MultiProcContinuousTest):
             0, k * nsplits, k, dtype=torch.int64, device=self.device
         )
 
-        # Exchange input splits to get output splits
-        out_splits = torch.zeros_like(inp_splits)
-        # First need to transpose the input splits
-        inp_splits_t = inp_splits.reshape(ne, self.world_size).t().contiguous()
-        dist.all_to_all_single(out_splits, inp_splits_t)
-
-        # Actual number of output elements
-        out_numel = out_splits.sum().item()
         # Max number of input elements (must be a constant across ranks for symmetric memory allocation)
         # Remember that we up-align each input split to k?
         max_inp_numel = k * nsplits
@@ -513,6 +505,11 @@ class NVSHMEMAll2AllTest(MultiProcContinuousTest):
         torch.testing.assert_close(in_splits_offsets[1], inp_offsets)
 
         # Check output splits (row 1)
+        # Exchange input splits to get output splits
+        out_splits = torch.zeros_like(inp_splits)
+        # First need to transpose the input splits
+        inp_splits_t = inp_splits.reshape(ne, self.world_size).t().contiguous()
+        dist.all_to_all_single(out_splits, inp_splits_t)
         torch.testing.assert_close(received_out_splits, out_splits)
 
         # Check output offsets (row 2)
@@ -555,6 +552,8 @@ class NVSHMEMAll2AllTest(MultiProcContinuousTest):
 
         # Concatenate the output chunks received from all peers
         out_expected = torch.cat(out_chunks)
+        # Actual number of output elements
+        out_numel = out_splits.sum().item()
         self.assertEqual(out_expected.shape[0], out_numel)
 
         # Check data

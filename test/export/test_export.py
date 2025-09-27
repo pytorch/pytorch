@@ -15159,9 +15159,6 @@ def forward(self, x):
             test_serdes=True,
         )
 
-    # TODO: following tests should be fixed
-    @testing.expectedFailureTrainingIRToRunDecomp
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict
     def test_preserve_annotation(self):
         class M(torch.nn.Module):
             def forward(self, x):
