@@ -505,9 +505,13 @@ def prepare_fw_with_masks_all_requires_grad(fn):
                 lambda x: x.requires_grad_(True) if x.dtype.is_floating_point else x,
                 fw_out,
             )
-        return fw_out, pytree.tree_map_only(
-            torch.Tensor, lambda x: x.requires_grad, fw_out
-        )
+
+        def _query_requires_grad(t: torch.Tensor) -> bool:
+            if torch._is_functional_tensor(t):
+                t = torch._from_functional_tensor(t)
+            return t.requires_grad
+
+        return fw_out, pytree.tree_map_only(torch.Tensor, _query_requires_grad, fw_out)
 
     return fw_with_masks
 
@@ -759,7 +763,9 @@ def _clone_aliasing_output(inputs: Sequence[Any], outputs: Sequence[Any]):
     return final_outputs
 
 
-def create_bw_fn(fn: Callable, args: tuple[Any]) -> Callable:
+def create_bw_fn(
+    fn: Callable, args: tuple[Any, ...], return_fw_outputs: bool = False
+) -> Callable:
     """
     For a fn that accepts flat inputs and returns flat outputs:
         fw_out = fn(*args),
@@ -793,7 +799,7 @@ def create_bw_fn(fn: Callable, args: tuple[Any]) -> Callable:
     def flat_fn(*args_and_grad_outs):
         primals = args_and_grad_outs[:n_primals]
         tangents = args_and_grad_outs[n_primals:]
-        grad_args = bw_fn(primals, tangents)[1]
+        fw_outs, grad_args = bw_fn(primals, tangents)
         assert len(args) == len(grad_args)
 
         # For tensors whose grad is None, create zero tensors as gradients
@@ -806,6 +812,8 @@ def create_bw_fn(fn: Callable, args: tuple[Any]) -> Callable:
         ]
 
         final_grads = _clone_aliasing_output(args_and_grad_outs, grad_args)
+        if return_fw_outputs:
+            return *fw_outs, *final_grads
         return final_grads
 
     return flat_fn
@@ -1111,7 +1119,7 @@ def call_op(op: Union[OpOverload, HopInstance], args, kwargs):
 
 def materialize_as_graph(
     fn: Callable,
-    args: tuple[Any],
+    args: tuple[Any, ...],
     include_key_set: Optional[torch._C.DispatchKeySet] = None,
     exclude_key_set: Optional[torch._C.DispatchKeySet] = None,
     force_enable_grad=False,
