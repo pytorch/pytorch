@@ -2475,6 +2475,36 @@ class CommonTemplate:
         b_int8pack, b_scales = convert_weight_to_int8pack(b)
         self.common(fn, (a, b_int8pack, b_scales, c))
 
+    @skipIfXpu
+    @skipCUDAIf(not HAS_GPU, "CUDA not available")
+    def test_int8_weight_only_quant_user_entry(self):
+        in_f, out_f = 128, 256
+
+        # Row-major int8 weight + per-row bf16 scales
+        Wf = torch.randn(out_f, in_f, dtype=torch.bfloat16, device=GPU_TYPE)
+        s  = (Wf.abs().amax(dim=1, keepdim=True) / 127).clamp(min=1e-8).to(torch.float32)
+        Wq = torch.round(Wf.to(torch.float32) / s).clamp_(-128, 127).to(torch.int8).contiguous()
+        scales = s.squeeze(1).to(torch.bfloat16)
+
+        class M(nn.Module):
+            def __init__(self, Wq, scales):
+                super().__init__()
+                self.register_buffer("Wq", Wq)
+                self.register_buffer("scales", scales)
+            def forward(self, x):
+                return (x @ self.Wq.t().to(x.dtype)) * self.scales
+
+        m = M(Wq, scales).eval().to(GPU_TYPE)
+        x = torch.randn(32, in_f, dtype=torch.bfloat16, device=GPU_TYPE)
+
+        out_compiled, (code,) = run_and_get_code(torch.compile(m, fullgraph=True, dynamic=False), x)
+        self.assertIn("_weight_int8pack_mm", code)
+
+        out_eager = m(x)
+        torch.testing.assert_close(out_compiled, out_eager, rtol=1e-2, atol=1e-2)
+
+
+
     @xfail_if_mps_unimplemented
     @xfail_if_triton_cpu
     @skipCUDAIf(True, "No _dyn_quant_pack_4bit_weight implementation on CUDA")
