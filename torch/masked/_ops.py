@@ -1579,7 +1579,11 @@ reduction, is ``{identity_float32}``, except for ``ord=-inf`` it is
     if mask_input.layout == torch.strided:
         dim_ = _canonical_dim(dim, input.ndim)
         return torch.linalg.vector_norm(
-            mask_input, ord, dim_, bool(keepdim), dtype=dtype
+            mask_input,
+            ord if ord is not None else 2.0,
+            dim_,
+            bool(keepdim),
+            dtype=dtype,
         )
     else:
         raise ValueError(

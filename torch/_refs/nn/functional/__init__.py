@@ -1201,7 +1201,13 @@ def pairwise_distance(
     eps: NumberType = 1e-6,
     keepdim=False,
 ) -> TensorLikeType:
-    return torch.linalg.vector_norm(x1 - x2 + eps, ord=p, dim=-1, keepdim=keepdim)
+    if isinstance(p, bool):
+        ord_val = 1.0 if p else 0.0
+    elif isinstance(p, complex):
+        ord_val = p.real  # Use real part for complex numbers
+    else:
+        ord_val = p
+    return torch.linalg.vector_norm(x1 - x2 + eps, ord=ord_val, dim=-1, keepdim=keepdim)
 
 
 @register_decomposition(aten.pdist)
