@@ -96,6 +96,12 @@ class Tensor {
     return data_ptr;
   }
 
+  template <typename T>
+  T* mutable_data_ptr() const;
+
+  template <typename T>
+  const T* const_data_ptr() const;
+
   int64_t dim() const {
     int64_t dim;
     TORCH_ERROR_CODE_CHECK(aoti_torch_get_dim(ath_.get(), &dim));

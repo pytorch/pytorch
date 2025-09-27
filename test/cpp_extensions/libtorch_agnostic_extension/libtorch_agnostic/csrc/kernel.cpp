@@ -493,6 +493,31 @@ void boxed_get_any_data_ptr(
   stack[0] = from(res);
 }
 
+uint64_t get_template_any_data_ptr(Tensor t, Tensor r, bool mutable_) {
+#define DEFINE_CASE(T, name)                                            \
+  case torch::headeronly::ScalarType::name: {                                              \
+    if (mutable_) {                                                     \
+      return reinterpret_cast<uint64_t>(t.mutable_data_ptr<T>());       \
+    } else {                                                            \
+      return reinterpret_cast<uint64_t>(t.const_data_ptr<T>());         \
+    }                                                                   \
+  }
+  switch (r.scalar_type()) {
+    STABLE_FORALL_SUPPORTED_SCALAR_TYPES(DEFINE_CASE)
+  default:
+      return 0;
+  }
+#undef DEFINE_CASE
+}
+
+void boxed_get_template_any_data_ptr(
+    StableIValue* stack,
+    uint64_t num_args,
+    uint64_t num_outputs) {
+  uint64_t res = get_template_any_data_ptr(to<Tensor>(stack[0]), to<Tensor>(stack[1]), to<bool>(stack[2]));
+  stack[0] = from(res);
+}
+
 Tensor test_dispatch_scalar_name(Tensor t, int dispatch_index) {
   Tensor result;
 
@@ -592,9 +617,11 @@ void boxed_test_dispatch_scalar_name(
   stack[0] = from(res);
 }
 
+
 STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
   m.def("test_default_constructor(bool undefined) -> bool");
   m.def("get_any_data_ptr(Tensor t, bool mutable_) -> int");
+  m.def("get_template_any_data_ptr(Tensor t, Tensor r, bool mutable_) -> int");
   m.def("test_dispatch_scalar_name(Tensor t, int dispatch_index) -> Tensor");
 }
 
@@ -603,6 +630,7 @@ STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
   m.impl("my_amax", &boxed_my_amax);
   m.impl("my_amax_vec", &boxed_my_amax_vec);
   m.impl("get_any_data_ptr", &boxed_get_any_data_ptr);
+  m.impl("get_template_any_data_ptr", &boxed_get_template_any_data_ptr);
   m.impl("test_dispatch_scalar_name", &boxed_test_dispatch_scalar_name);
 }
 
