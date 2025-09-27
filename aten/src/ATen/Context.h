@@ -30,6 +30,7 @@
 #include <cstdint>
 #include <map>
 #include <mutex>
+#include <unordered_map>
 
 namespace at {
 
@@ -488,22 +489,35 @@ class TORCH_API Context {
   bool enable_sparse_tensor_invariant_checks = false;
   bool allow_fp16_reduction_cpu = false;
 
-  std::map<std::string, std::map<std::string, std::string>> fp32_precision = {
-      {"generic", {{"all", "none"}}},
-      {"mkldnn",
-       {{"matmul", "none"},
-        {"conv", "none"},
-        {"rnn", "none"},
-        {"all", "none"}}},
-      {"cuda",
-       {{"matmul",
-         float32_matmul_precision == at::Float32MatmulPrecision::HIGHEST
-             ? "none"
-             : "tf32"},
-        {"conv", "tf32"},
-        {"rnn", "tf32"},
-        {"all", "none"}}},
+  // manually designed hash function
+  struct BackendOpHash {
+    size_t operator()(const std::pair<std::string, std::string>& p) const {
+      if (C10_UNLIKELY(p.first.empty() || p.second.empty())) {
+        return 0ull;
+      }
+      return 2 * static_cast<size_t>(p.first[0]) +
+          static_cast<size_t>(p.second[0]);
+    }
   };
+
+  std::unordered_map<
+      std::pair<std::string, std::string>,
+      std::string,
+      BackendOpHash>
+      fp32_precision = {
+          {{"generic", "all"}, "none"},
+          {{"mkldnn", "all"}, "none"},
+          {{"mkldnn", "conv"}, "none"},
+          {{"mkldnn", "rnn"}, "none"},
+          {{"mkldnn", "matmul"}, "none"},
+          {{"cuda", "all"}, "none"},
+          {{"cuda", "conv"}, "none"},
+          {{"cuda", "rnn"}, "none"},
+          {{"cuda", "matmul"},
+           float32_matmul_precision == at::Float32MatmulPrecision::HIGHEST
+               ? "none"
+               : "tf32"},
+      };
 
   Allocator* prev_allocator_ptr_{nullptr};
 };
