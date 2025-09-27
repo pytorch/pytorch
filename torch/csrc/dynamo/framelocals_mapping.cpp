@@ -89,7 +89,7 @@ void FrameLocalsMapping::_realize_dict() {
   py::tuple names =
       code_framelocals_names(_code_obj); // len == co->co_nlocalsplus
 
-  // Collect the names of the acutal arguments of the function and not the
+  // Collect the names of the actual arguments of the function and not the
   // intermediates.
   const int posonly = co->co_posonlyargcount;
   const int pos_or_kw = co->co_argcount;
@@ -212,7 +212,7 @@ void FrameLocalsMapping::_realize_dict() {
   py::tuple varnames = _code_obj.attr("co_varnames");
   auto nlocals = std::min(co->co_nlocals, (int)varnames.size());
 
-  // Collect the names of the acutal arguments of the function and not the
+  // Collect the names of the actual arguments of the function and not the
   // intermediates.
   const int posonly = co->co_posonlyargcount;
   const int pos_or_kw = co->co_argcount;

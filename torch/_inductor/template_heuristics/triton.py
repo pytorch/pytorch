@@ -243,6 +243,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             GemmConfig(128, 128, 32, 3, 4),
             GemmConfig(128, 128, 64, 3, 4),
             GemmConfig(128, 128, 64, 5, 8),
+            GemmConfig(128, 128, 128, 4, 8),
         ]
 
         # Exhaustive search for mm configs
@@ -302,6 +303,16 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             GemmConfig(128, 128, 64, 5, 8),
             GemmConfig(256, 128, 64, 4, 8),
             GemmConfig(128, 128, 64, 5, 4),
+        ]
+
+        self.blackwell_persistent_mm_configs: list[BaseConfig] = [
+            GemmConfig(128, 256, 64, 4, 8),
+            GemmConfig(256, 128, 64, 3, 8),
+            GemmConfig(128, 256, 128, 2, 8),
+            GemmConfig(128, 256, 64, 3, 8),
+            GemmConfig(128, 128, 128, 3, 4),
+            GemmConfig(256, 128, 64, 3, 8),
+            GemmConfig(128, 128, 128, 3, 8),
         ]
 
         self.scaled_mm_configs: list[BaseConfig] = [
@@ -1532,6 +1543,23 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
     ]
     _filter_configs: Callable[[list[BaseConfig]], list[BaseConfig]]
 
+    def get_extra_kwargs(
+        self,
+        kernel_inputs: KernelInputs,
+        op_name: str,
+    ) -> dict[str, Any]:
+        assert isinstance(kernel_inputs, MMKernelInputs)
+        m, n, k = kernel_inputs.mnk_symbolic()
+        # Calculate allow_tf32
+        allow_tf32 = torch.backends.cuda.matmul.allow_tf32 and (
+            not inductor_config.force_same_precision
+            or ((m % 16) == 0 and (n % 16) == 0 and (k % 8) == 0)
+        )
+
+        return {
+            "ALLOW_TF32": allow_tf32,
+        }
+
     def _valid(self, kernel_inputs: KernelInputs) -> bool:
         return True
 
@@ -1605,16 +1633,9 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
             == triton_config.kwargs["BLOCK_K"]
         )
 
-        # Calculate allow_tf32
-        allow_tf32 = torch.backends.cuda.matmul.allow_tf32 and (
-            not inductor_config.force_same_precision
-            or ((m % 16) == 0 and (n % 16) == 0 and (k % 8) == 0)
-        )
-
         # Build options dict
         options_dict = dict(
             EVEN_K=even_k_symbolic,
-            ALLOW_TF32=allow_tf32,
             USE_FAST_ACCUM=False,  # Option for _scaled_mm
             ACC_TYPE=self._get_acc_type(out_dtype),
             num_stages=triton_config.num_stages,
@@ -1764,7 +1785,12 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
             ws = (
                 template_kwargs["num_warps"] >= 4 and template_kwargs["num_stages"] >= 2
             )
-            yield {**template_kwargs, **base_ops, "WARP_SPECIALIZE": ws}
+            yield {
+                **template_kwargs,
+                **base_ops,
+                "WARP_SPECIALIZE": ws,
+                "EPILOGUE_SUBTILE": config.triton.enable_epilogue_subtiling,
+            }
 
 
 # Scaled MM-specific mixin for scaled MM templates
@@ -2040,8 +2066,7 @@ class CUDABlackwellPersistentTMATemplateConfigHeuristic(
 
     def __init__(self) -> None:
         super().__init__()
-        # TODO: Tune mm_configs for blackwell.
-        self.mm_configs = self.persistent_mm_configs
+        self.mm_configs = self.blackwell_persistent_mm_configs
 
 
 @register_template_heuristic(
@@ -2060,6 +2085,7 @@ class CUDAAddmmPersistentTMATemplateConfigHeuristic(
     blackwell_ws_persistent_device_tma_mm_template.uid,
     "cuda",
     register=torch.version.hip is None,
+    op_name="addmm",
 )
 class CUDABlackwellAddmmPersistentTMATemplateConfigHeuristic(
     AddMMConfigMixin, CUDABlackwellPersistentTMATemplateConfigHeuristic
@@ -2068,8 +2094,7 @@ class CUDABlackwellAddmmPersistentTMATemplateConfigHeuristic(
 
     def __init__(self) -> None:
         super().__init__()
-        # TODO: Tune mm_configs for blackwell.
-        self.mm_configs = self.persistent_mm_configs
+        self.mm_configs = self.blackwell_persistent_mm_configs
 
 
 @register_template_heuristic(
@@ -2106,6 +2131,7 @@ class CUDAScaledTMATemplateConfigHeuristic(ScaledTMAConfigMixin, CUDAConfigHeuri
     blackwell_ws_persistent_device_tma_mm_template.uid,  # regular Blackwell MM template + scaling epilogue from ScaledMMConfigMixin
     "cuda",
     register=torch.version.hip is None,
+    op_name="scaled_mm",
 )
 class CUDAScaledBlackwellTMATemplateConfigHeuristic(
     ScaledBlackwellTMAConfigMixin, CUDAConfigHeuristic
