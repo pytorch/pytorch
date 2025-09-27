@@ -1,11 +1,13 @@
 # mypy: allow-untyped-defs
 """Triton Implementation of the flex_attention Kernel"""
 
+from __future__ import annotations
+
 import logging
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, Optional, Union
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 import sympy
 
@@ -33,6 +35,10 @@ from .common import (
 )
 from .flex_cpu import lower_cpu
 from .flex_decoding import _use_flex_decoding, create_flex_decoding_kernel
+
+
+if TYPE_CHECKING:
+    from ...template_heuristics.triton import FlexBwDConfig, FlexConfig
 
 
 log = logging.getLogger(__name__)
@@ -279,7 +285,7 @@ def flex_attention(
 
     dtype = query.get_dtype()
     head_dim = V.graph.sizevars.guard_int(query.get_size()[-1])
-    configs = V.choices.get_flex_attention_fwd_configs(
+    configs: list[FlexConfig] = V.choices.get_flex_attention_fwd_configs(
         head_dim, dtype, query.get_device().type
     )
 
@@ -719,7 +725,7 @@ def flex_attention_backward(*args, **kwargs):
 
     dtype = query.get_dtype()
     head_dim = V.graph.sizevars.guard_int(query.get_size()[-1])
-    configs = V.choices.get_flex_attention_bwd_configs(
+    configs: list[FlexBwDConfig] = V.choices.get_flex_attention_bwd_configs(
         head_dim, dtype, query.get_device().type
     )
 
@@ -727,12 +733,13 @@ def flex_attention_backward(*args, **kwargs):
     num_consumer_groups, num_buffers_warp_spec = 0, 0
 
     original_kernel_options = kernel_options.copy()
+
     for conf in configs:
         if (
-            SPARSE_KV_BLOCK_SIZE % conf.block_m != 0
-            or SPARSE_Q_BLOCK_SIZE % conf.block_m != 0
-            or SPARSE_KV_BLOCK_SIZE % conf.block_n != 0
-            or SPARSE_Q_BLOCK_SIZE % conf.block_n != 0
+            SPARSE_KV_BLOCK_SIZE % conf.block_n1 != 0
+            or SPARSE_Q_BLOCK_SIZE % conf.block_m1 != 0
+            or SPARSE_KV_BLOCK_SIZE % conf.block_n2 != 0
+            or SPARSE_Q_BLOCK_SIZE % conf.block_m2 != 0
         ):
             continue
 
@@ -755,10 +762,10 @@ def flex_attention_backward(*args, **kwargs):
                 "num_buffers_warp_spec", num_buffers_warp_spec
             )
 
-        cur_kernel_options.setdefault("BLOCK_M1", conf.block_m)
-        cur_kernel_options.setdefault("BLOCK_N1", conf.block_n)
-        cur_kernel_options.setdefault("BLOCK_M2", conf.block_n)
-        cur_kernel_options.setdefault("BLOCK_N2", conf.block_m)
+        cur_kernel_options.setdefault("BLOCK_M1", conf.block_m1)
+        cur_kernel_options.setdefault("BLOCK_N1", conf.block_n1)
+        cur_kernel_options.setdefault("BLOCK_M2", conf.block_m2)
+        cur_kernel_options.setdefault("BLOCK_N2", conf.block_n2)
 
         # Blocksparse options
         cur_kernel_options.setdefault("SPARSE_Q_BLOCK_SIZE", SPARSE_Q_BLOCK_SIZE)
