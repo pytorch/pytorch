@@ -40,6 +40,7 @@ from .decorators import (
     run,
     set_stance,
     skip_frame,
+    step_unsupported,
     substitute_in_graph,
 )
 from .eval_frame import (
@@ -100,6 +101,7 @@ __all__ = [
     "error_on_graph_break",
     "set_stance",
     "skip_frame",
+    "step_unsupported",
     "substitute_in_graph",
 ]
 

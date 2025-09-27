@@ -263,6 +263,11 @@ class RecompileLimitExceeded(Unsupported):
     pass
 
 
+# debug exception thrown when tracing torch._dynamo.step_unsupported()
+class StepUnsupported(TorchDynamoException):
+    pass
+
+
 class UnsafeScriptObjectError(TorchDynamoException):
     pass
 
