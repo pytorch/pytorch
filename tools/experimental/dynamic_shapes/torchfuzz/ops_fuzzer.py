@@ -216,31 +216,47 @@ class OperationGraph:
 
 def fuzz_spec(template: str = "default") -> Spec:
     """
-    Generate a random Spec (either TensorSpec or ScalarSpec) using tensor fuzzing functions.
-
-    Utilizes:
-    - fuzz_torch_tensor_type() for random dtype
-    - fuzz_tensor_size() for random tensor size
-    - fuzz_valid_stride() for random valid strides
+    Generate a random Spec (either TensorSpec or ScalarSpec) using template's distribution preferences.
 
     Args:
-        template: Template name to determine supported dtypes
+        template: Template name to determine configuration and distribution
 
     Returns:
-        Spec: Either a TensorSpec (80% probability) or ScalarSpec (20% probability) with random properties
+        Spec: Either a TensorSpec or ScalarSpec according to template's distribution
     """
-    # Get random dtype based on template
-    dtype = fuzz_torch_tensor_type(template)
+    # Try to use template's custom distribution if available
+    try:
+        # Instantiate template
+        if template == "dtensor":
+            from torchfuzz.codegen import DTensorFuzzTemplate
 
-    # 20% probability of returning ScalarSpec
-    if random.random() < 0.2:
-        return ScalarSpec(dtype=dtype)
+            fuzz_template = DTensorFuzzTemplate()
+        elif template == "unbacked":
+            from torchfuzz.codegen import UnbackedFuzzTemplate
 
-    # 80% probability of returning TensorSpec
-    # Get random size and corresponding stride
-    size = fuzz_tensor_size()
-    stride = fuzz_valid_stride(size)
-    return TensorSpec(size=size, stride=stride, dtype=dtype)
+            fuzz_template = UnbackedFuzzTemplate()
+        else:
+            from torchfuzz.codegen import DefaultFuzzTemplate
+
+            fuzz_template = DefaultFuzzTemplate()
+
+        # Use template's custom spec generation
+        return fuzz_template.fuzz_spec_custom()
+
+    except Exception:
+        # Fallback to original hardcoded behavior if template fails
+        # Get random dtype based on template
+        dtype = fuzz_torch_tensor_type(template)
+
+        # 20% probability of returning ScalarSpec
+        if random.random() < 0.2:
+            return ScalarSpec(dtype=dtype)
+
+        # 80% probability of returning TensorSpec
+        # Get random size and corresponding stride
+        size = fuzz_tensor_size()
+        stride = fuzz_valid_stride(size)
+        return TensorSpec(size=size, stride=stride, dtype=dtype)
 
 
 def fuzz_op(

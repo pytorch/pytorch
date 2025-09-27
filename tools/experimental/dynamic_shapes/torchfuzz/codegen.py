@@ -29,6 +29,81 @@ class FuzzTemplate:
             torch.bool,
         ]
 
+    def spec_distribution(self):
+        """
+        Define the distribution for generating random Specs.
+
+        Returns:
+            Dict with keys:
+            - 'tensor_prob': Probability of generating TensorSpec (0.0 to 1.0)
+            - 'scalar_prob': Probability of generating ScalarSpec (0.0 to 1.0)
+            - 'allow_tensors': Whether TensorSpec generation is allowed (boolean)
+            - 'allow_scalars': Whether ScalarSpec generation is allowed (boolean)
+        """
+        return {
+            "tensor_prob": 0.8,
+            "scalar_prob": 0.2,
+            "allow_tensors": True,
+            "allow_scalars": True,
+        }
+
+    def fuzz_spec_custom(self):
+        """
+        Generate a random Spec based on this template's distribution preferences.
+
+        Returns:
+            Spec: Either a TensorSpec or ScalarSpec according to template's distribution
+        """
+        import random
+
+        from torchfuzz.tensor_fuzzer import fuzz_torch_tensor_type
+
+        # Get template's distribution configuration
+        distribution = self.spec_distribution()
+
+        # Get random dtype based on template
+        dtype = fuzz_torch_tensor_type("default")
+
+        # Validate distribution configuration
+        allow_tensors = distribution.get("allow_tensors", True)
+        allow_scalars = distribution.get("allow_scalars", True)
+
+        if not allow_tensors and not allow_scalars:
+            raise ValueError("Template must allow at least one of tensors or scalars")
+
+        # Determine which type to generate
+        if not allow_scalars:
+            # Only tensors allowed
+            return self._generate_tensor_spec(dtype)
+        elif not allow_tensors:
+            # Only scalars allowed
+            return self._generate_scalar_spec(dtype)
+        else:
+            # Both allowed, use probability distribution
+            tensor_prob = distribution.get("tensor_prob", 0.8)
+            if random.random() < tensor_prob:
+                return self._generate_tensor_spec(dtype)
+            else:
+                return self._generate_scalar_spec(dtype)
+
+    def _generate_tensor_spec(self, dtype):
+        """Generate a TensorSpec with the given dtype."""
+        from torchfuzz.tensor_fuzzer import (
+            fuzz_tensor_size,
+            fuzz_valid_stride,
+            TensorSpec,
+        )
+
+        size = fuzz_tensor_size()
+        stride = fuzz_valid_stride(size)
+        return TensorSpec(size=size, stride=stride, dtype=dtype)
+
+    def _generate_scalar_spec(self, dtype):
+        """Generate a ScalarSpec with the given dtype."""
+        from torchfuzz.tensor_fuzzer import ScalarSpec
+
+        return ScalarSpec(dtype=dtype)
+
 
 class DefaultFuzzTemplate(FuzzTemplate):
     def __init__(self):
@@ -43,6 +118,15 @@ class DefaultFuzzTemplate(FuzzTemplate):
             ],
             check=EagerVsFullGraphDynamicCompileCheck(),
         )
+
+    def spec_distribution(self):
+        """Default template: tensor-only (no scalars)."""
+        return {
+            "tensor_prob": 1.0,
+            "scalar_prob": 0.0,
+            "allow_tensors": True,
+            "allow_scalars": False,
+        }
 
     def imports_codegen(self):
         return [
@@ -128,6 +212,15 @@ class DTensorFuzzTemplate(FuzzTemplate):
             torch.int64,
             torch.bool,
         ]
+
+    def spec_distribution(self):
+        """DTensor template: tensor-only (no scalars)."""
+        return {
+            "tensor_prob": 1.0,
+            "scalar_prob": 0.0,
+            "allow_tensors": True,
+            "allow_scalars": False,
+        }
 
     def imports_codegen(self):
         return [
@@ -258,6 +351,15 @@ class UnbackedFuzzTemplate(FuzzTemplate):
             torch.int32,
             torch.int64,
         ]
+
+    def spec_distribution(self):
+        """Unbacked template: 50% tensors, 50% scalars."""
+        return {
+            "tensor_prob": 0.5,
+            "scalar_prob": 0.5,
+            "allow_tensors": True,
+            "allow_scalars": True,
+        }
 
     def imports_codegen(self):
         return [
