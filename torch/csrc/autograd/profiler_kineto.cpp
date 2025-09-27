@@ -37,7 +37,8 @@ extern "C" {
 // https://github.com/pytorch/pytorch/issues/51026
 __attribute__((weak)) int acc_get_device_type();
 __attribute__((weak)) int acc_get_device_type() {
-  throw std::runtime_error(
+  TORCH_CHECK(
+      false,
       "Dummy implementation of acc_get_device_type is not supposed to be called!");
 }
 } // extern "C"
@@ -1065,6 +1066,17 @@ void KinetoEvent::getPerfEventCounters(std::vector<uint64_t>& in) const {
         }
       },
       [](const auto&) -> void { return; }));
+}
+
+std::string KinetoEvent::metadataJson() const {
+  return result_->visit(c10::overloaded(
+      [](const ExtraFields<EventType::TorchOp>& op) -> std::string {
+        return op.metadata_json_;
+      },
+      [](const ExtraFields<EventType::Kineto>& op) -> std::string {
+        return op.metadata_json_;
+      },
+      [](const auto&) -> std::string { return std::string(""); }));
 }
 
 #define FORWARD_FROM_RESULT(method_name, result_expr)                        \

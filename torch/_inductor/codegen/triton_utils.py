@@ -13,7 +13,6 @@ from .common import (
     ArgName,
     ConstexprArg,
     KernelArgType,
-    ScalarArg,
     SizeArg,
     TensorArg,
     TMADescriptorArg,
@@ -92,9 +91,6 @@ def signature_of(arg: KernelArgType, *, size_dtype: Optional[str]) -> str:
             raise NotImplementedError(f"unhandled size_dtype {size_dtype}")
     if isinstance(arg, WorkspaceArg):
         return _type_of(arg.dtype)
-    if isinstance(arg, ScalarArg):
-        typ = _type_of(arg.dtype)
-        return typ.removeprefix("*")
     if isinstance(arg, TMADescriptorArg):
         if arg.api_type == "experimental":
             return "nvTmaDesc"

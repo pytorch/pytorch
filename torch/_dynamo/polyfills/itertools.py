@@ -25,9 +25,9 @@ __all__ = [
     "dropwhile",
     "filterfalse",
     "islice",
-    "pairwise",
     "tee",
     "zip_longest",
+    "pairwise",
 ]
 
 
