@@ -14,16 +14,45 @@
 namespace torch::optim {
 
 struct TORCH_API LBFGSOptions : public OptimizerCloneableOptions<LBFGSOptions> {
+  // Field IDs for tracking
+  static constexpr size_t LR_ID = 0;
+  static constexpr size_t MAX_ITER_ID = 1;
+  static constexpr size_t MAX_EVAL_ID = 2;
+  static constexpr size_t TOLERANCE_GRAD_ID = 3;
+  static constexpr size_t TOLERANCE_CHANGE_ID = 4;
+  static constexpr size_t HISTORY_SIZE_ID = 5;
+  static constexpr size_t LINE_SEARCH_FN_ID = 6;
+
   LBFGSOptions(double lr = 1);
-  TORCH_ARG(double, lr) = 1;
-  TORCH_ARG(int64_t, max_iter) = 20;
-  TORCH_ARG(std::optional<int64_t>, max_eval) = std::nullopt;
-  TORCH_ARG(double, tolerance_grad) = 1e-7;
-  TORCH_ARG(double, tolerance_change) = 1e-9;
-  TORCH_ARG(int64_t, history_size) = 100;
-  TORCH_ARG(std::optional<std::string>, line_search_fn) = std::nullopt;
+  TORCH_ARG_WITH_TRACKING(double, lr, LR_ID) = 1;
+  TORCH_ARG_WITH_TRACKING(int64_t, max_iter, MAX_ITER_ID) = 20;
+  TORCH_ARG_WITH_TRACKING(std::optional<int64_t>, max_eval, MAX_EVAL_ID) =
+      std::nullopt;
+  TORCH_ARG_WITH_TRACKING(double, tolerance_grad, TOLERANCE_GRAD_ID) = 1e-7;
+  TORCH_ARG_WITH_TRACKING(double, tolerance_change, TOLERANCE_CHANGE_ID) = 1e-9;
+  TORCH_ARG_WITH_TRACKING(int64_t, history_size, HISTORY_SIZE_ID) = 100;
+  TORCH_ARG_WITH_TRACKING(
+      std::optional<std::string>,
+      line_search_fn,
+      LINE_SEARCH_FN_ID) = std::nullopt;
 
  public:
+  static void merge_impl(LBFGSOptions* dst, const LBFGSOptions& src) {
+    if (src.is_field_explicitly_set(LR_ID))
+      dst->lr_ = src.lr_;
+    if (src.is_field_explicitly_set(MAX_ITER_ID))
+      dst->max_iter_ = src.max_iter_;
+    if (src.is_field_explicitly_set(MAX_EVAL_ID))
+      dst->max_eval_ = src.max_eval_;
+    if (src.is_field_explicitly_set(TOLERANCE_GRAD_ID))
+      dst->tolerance_grad_ = src.tolerance_grad_;
+    if (src.is_field_explicitly_set(TOLERANCE_CHANGE_ID))
+      dst->tolerance_change_ = src.tolerance_change_;
+    if (src.is_field_explicitly_set(HISTORY_SIZE_ID))
+      dst->history_size_ = src.history_size_;
+    if (src.is_field_explicitly_set(LINE_SEARCH_FN_ID))
+      dst->line_search_fn_ = src.line_search_fn_;
+  }
   void serialize(torch::serialize::InputArchive& archive) override;
   void serialize(torch::serialize::OutputArchive& archive) const override;
   TORCH_API friend bool operator==(

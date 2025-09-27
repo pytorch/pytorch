@@ -13,7 +13,9 @@
 
 namespace torch::optim {
 
-SGDOptions::SGDOptions(double lr) : lr_(lr) {}
+SGDOptions::SGDOptions(double lr) : lr_(lr) {
+  mark_field_as_set(LR_ID);
+}
 
 bool operator==(const SGDOptions& lhs, const SGDOptions& rhs) {
   return (lhs.lr() == rhs.lr()) && (lhs.momentum() == rhs.momentum()) &&
@@ -28,6 +30,8 @@ void SGDOptions::serialize(torch::serialize::OutputArchive& archive) const {
   _TORCH_OPTIM_SERIALIZE_TORCH_ARG(dampening);
   _TORCH_OPTIM_SERIALIZE_TORCH_ARG(weight_decay);
   _TORCH_OPTIM_SERIALIZE_TORCH_ARG(nesterov);
+  // Serialize field tracking mask
+  archive.write("_field_mask", static_cast<int64_t>(get_field_mask()));
 }
 
 void SGDOptions::serialize(torch::serialize::InputArchive& archive) {
@@ -36,6 +40,11 @@ void SGDOptions::serialize(torch::serialize::InputArchive& archive) {
   _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(double, dampening);
   _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(double, weight_decay);
   _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(bool, nesterov);
+  // Deserialize field tracking mask
+  c10::IValue mask_ivalue;
+  if (archive.try_read("_field_mask", mask_ivalue)) {
+    set_field_mask(static_cast<uint32_t>(mask_ivalue.toInt()));
+  }
 }
 
 double SGDOptions::get_lr() const {

@@ -29,6 +29,8 @@ void AdamWOptions::serialize(torch::serialize::OutputArchive& archive) const {
   _TORCH_OPTIM_SERIALIZE_TORCH_ARG(eps);
   _TORCH_OPTIM_SERIALIZE_TORCH_ARG(weight_decay);
   _TORCH_OPTIM_SERIALIZE_TORCH_ARG(amsgrad);
+  // Serialize field tracking mask
+  archive.write("_field_mask", static_cast<int64_t>(get_field_mask()));
 }
 
 void AdamWOptions::serialize(torch::serialize::InputArchive& archive) {
@@ -37,6 +39,11 @@ void AdamWOptions::serialize(torch::serialize::InputArchive& archive) {
   _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(double, eps);
   _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(double, weight_decay);
   _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(bool, amsgrad);
+  // Deserialize field tracking mask
+  c10::IValue mask_ivalue;
+  if (archive.try_read("_field_mask", mask_ivalue)) {
+    set_field_mask(static_cast<uint32_t>(mask_ivalue.toInt()));
+  }
 }
 
 double AdamWOptions::get_lr() const {

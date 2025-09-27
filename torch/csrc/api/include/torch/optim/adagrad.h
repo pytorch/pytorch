@@ -18,14 +18,36 @@ namespace torch::optim {
 
 struct TORCH_API AdagradOptions
     : public OptimizerCloneableOptions<AdagradOptions> {
+  // Field IDs for tracking
+  static constexpr size_t LR_ID = 0;
+  static constexpr size_t LR_DECAY_ID = 1;
+  static constexpr size_t WEIGHT_DECAY_ID = 2;
+  static constexpr size_t INITIAL_ACCUMULATOR_VALUE_ID = 3;
+  static constexpr size_t EPS_ID = 4;
+
   AdagradOptions(double lr = 1e-2);
-  TORCH_ARG(double, lr) = 1e-2;
-  TORCH_ARG(double, lr_decay) = 0;
-  TORCH_ARG(double, weight_decay) = 0;
-  TORCH_ARG(double, initial_accumulator_value) = 0;
-  TORCH_ARG(double, eps) = 1e-10;
+  TORCH_ARG_WITH_TRACKING(double, lr, LR_ID) = 1e-2;
+  TORCH_ARG_WITH_TRACKING(double, lr_decay, LR_DECAY_ID) = 0;
+  TORCH_ARG_WITH_TRACKING(double, weight_decay, WEIGHT_DECAY_ID) = 0;
+  TORCH_ARG_WITH_TRACKING(
+      double,
+      initial_accumulator_value,
+      INITIAL_ACCUMULATOR_VALUE_ID) = 0;
+  TORCH_ARG_WITH_TRACKING(double, eps, EPS_ID) = 1e-10;
 
  public:
+  static void merge_impl(AdagradOptions* dst, const AdagradOptions& src) {
+    if (src.is_field_explicitly_set(LR_ID))
+      dst->lr_ = src.lr_;
+    if (src.is_field_explicitly_set(LR_DECAY_ID))
+      dst->lr_decay_ = src.lr_decay_;
+    if (src.is_field_explicitly_set(WEIGHT_DECAY_ID))
+      dst->weight_decay_ = src.weight_decay_;
+    if (src.is_field_explicitly_set(INITIAL_ACCUMULATOR_VALUE_ID))
+      dst->initial_accumulator_value_ = src.initial_accumulator_value_;
+    if (src.is_field_explicitly_set(EPS_ID))
+      dst->eps_ = src.eps_;
+  }
   void serialize(torch::serialize::InputArchive& archive) override;
   void serialize(torch::serialize::OutputArchive& archive) const override;
   TORCH_API friend bool operator==(

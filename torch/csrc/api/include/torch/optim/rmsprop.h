@@ -21,15 +21,37 @@ namespace torch::optim {
 
 struct TORCH_API RMSpropOptions
     : public OptimizerCloneableOptions<RMSpropOptions> {
+  // Field IDs for tracking
+  static constexpr size_t LR_ID = 0;
+  static constexpr size_t ALPHA_ID = 1;
+  static constexpr size_t EPS_ID = 2;
+  static constexpr size_t WEIGHT_DECAY_ID = 3;
+  static constexpr size_t MOMENTUM_ID = 4;
+  static constexpr size_t CENTERED_ID = 5;
+
   RMSpropOptions(double lr = 1e-2);
-  TORCH_ARG(double, lr) = 1e-2;
-  TORCH_ARG(double, alpha) = 0.99;
-  TORCH_ARG(double, eps) = 1e-8;
-  TORCH_ARG(double, weight_decay) = 0;
-  TORCH_ARG(double, momentum) = 0;
-  TORCH_ARG(bool, centered) = false;
+  TORCH_ARG_WITH_TRACKING(double, lr, LR_ID) = 1e-2;
+  TORCH_ARG_WITH_TRACKING(double, alpha, ALPHA_ID) = 0.99;
+  TORCH_ARG_WITH_TRACKING(double, eps, EPS_ID) = 1e-8;
+  TORCH_ARG_WITH_TRACKING(double, weight_decay, WEIGHT_DECAY_ID) = 0;
+  TORCH_ARG_WITH_TRACKING(double, momentum, MOMENTUM_ID) = 0;
+  TORCH_ARG_WITH_TRACKING(bool, centered, CENTERED_ID) = false;
 
  public:
+  static void merge_impl(RMSpropOptions* dst, const RMSpropOptions& src) {
+    if (src.is_field_explicitly_set(LR_ID))
+      dst->lr_ = src.lr_;
+    if (src.is_field_explicitly_set(ALPHA_ID))
+      dst->alpha_ = src.alpha_;
+    if (src.is_field_explicitly_set(EPS_ID))
+      dst->eps_ = src.eps_;
+    if (src.is_field_explicitly_set(WEIGHT_DECAY_ID))
+      dst->weight_decay_ = src.weight_decay_;
+    if (src.is_field_explicitly_set(MOMENTUM_ID))
+      dst->momentum_ = src.momentum_;
+    if (src.is_field_explicitly_set(CENTERED_ID))
+      dst->centered_ = src.centered_;
+  }
   void serialize(torch::serialize::InputArchive& archive) override;
   void serialize(torch::serialize::OutputArchive& archive) const override;
   TORCH_API friend bool operator==(

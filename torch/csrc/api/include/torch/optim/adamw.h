@@ -15,15 +15,35 @@ class InputArchive;
 namespace torch::optim {
 
 struct TORCH_API AdamWOptions : public OptimizerCloneableOptions<AdamWOptions> {
+  // Field IDs for tracking
+  static constexpr size_t LR_ID = 0;
+  static constexpr size_t BETAS_ID = 1;
+  static constexpr size_t EPS_ID = 2;
+  static constexpr size_t WEIGHT_DECAY_ID = 3;
+  static constexpr size_t AMSGRAD_ID = 4;
+
   AdamWOptions(double lr = 1e-3);
-  TORCH_ARG(double, lr) = 1e-3;
+  TORCH_ARG_WITH_TRACKING(double, lr, LR_ID) = 1e-3;
   typedef std::tuple<double, double> betas_t;
-  TORCH_ARG(betas_t, betas) = std::make_tuple(0.9, 0.999);
-  TORCH_ARG(double, eps) = 1e-8;
-  TORCH_ARG(double, weight_decay) = 1e-2;
-  TORCH_ARG(bool, amsgrad) = false;
+  TORCH_ARG_WITH_TRACKING(betas_t, betas, BETAS_ID) =
+      std::make_tuple(0.9, 0.999);
+  TORCH_ARG_WITH_TRACKING(double, eps, EPS_ID) = 1e-8;
+  TORCH_ARG_WITH_TRACKING(double, weight_decay, WEIGHT_DECAY_ID) = 1e-2;
+  TORCH_ARG_WITH_TRACKING(bool, amsgrad, AMSGRAD_ID) = false;
 
  public:
+  static void merge_impl(AdamWOptions* dst, const AdamWOptions& src) {
+    if (src.is_field_explicitly_set(LR_ID))
+      dst->lr_ = src.lr_;
+    if (src.is_field_explicitly_set(BETAS_ID))
+      dst->betas_ = src.betas_;
+    if (src.is_field_explicitly_set(EPS_ID))
+      dst->eps_ = src.eps_;
+    if (src.is_field_explicitly_set(WEIGHT_DECAY_ID))
+      dst->weight_decay_ = src.weight_decay_;
+    if (src.is_field_explicitly_set(AMSGRAD_ID))
+      dst->amsgrad_ = src.amsgrad_;
+  }
   void serialize(torch::serialize::InputArchive& archive) override;
   void serialize(torch::serialize::OutputArchive& archive) const override;
   TORCH_API friend bool operator==(

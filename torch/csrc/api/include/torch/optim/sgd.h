@@ -18,14 +18,34 @@ class InputArchive;
 namespace torch::optim {
 
 struct TORCH_API SGDOptions : public OptimizerCloneableOptions<SGDOptions> {
+  // Field IDs for tracking
+  static constexpr size_t LR_ID = 0;
+  static constexpr size_t MOMENTUM_ID = 1;
+  static constexpr size_t DAMPENING_ID = 2;
+  static constexpr size_t WEIGHT_DECAY_ID = 3;
+  static constexpr size_t NESTEROV_ID = 4;
+
   SGDOptions(double lr);
-  TORCH_ARG(double, lr);
-  TORCH_ARG(double, momentum) = 0;
-  TORCH_ARG(double, dampening) = 0;
-  TORCH_ARG(double, weight_decay) = 0;
-  TORCH_ARG(bool, nesterov) = false;
+
+  TORCH_ARG_WITH_TRACKING(double, lr, LR_ID);
+  TORCH_ARG_WITH_TRACKING(double, momentum, MOMENTUM_ID) = 0;
+  TORCH_ARG_WITH_TRACKING(double, dampening, DAMPENING_ID) = 0;
+  TORCH_ARG_WITH_TRACKING(double, weight_decay, WEIGHT_DECAY_ID) = 0;
+  TORCH_ARG_WITH_TRACKING(bool, nesterov, NESTEROV_ID) = false;
 
  public:
+  static void merge_impl(SGDOptions* dst, const SGDOptions& src) {
+    if (src.is_field_explicitly_set(LR_ID))
+      dst->lr_ = src.lr_;
+    if (src.is_field_explicitly_set(MOMENTUM_ID))
+      dst->momentum_ = src.momentum_;
+    if (src.is_field_explicitly_set(DAMPENING_ID))
+      dst->dampening_ = src.dampening_;
+    if (src.is_field_explicitly_set(WEIGHT_DECAY_ID))
+      dst->weight_decay_ = src.weight_decay_;
+    if (src.is_field_explicitly_set(NESTEROV_ID))
+      dst->nesterov_ = src.nesterov_;
+  }
   void serialize(torch::serialize::InputArchive& archive) override;
   void serialize(torch::serialize::OutputArchive& archive) const override;
   TORCH_API friend bool operator==(

@@ -26,6 +26,8 @@ void RMSpropOptions::serialize(torch::serialize::OutputArchive& archive) const {
   _TORCH_OPTIM_SERIALIZE_TORCH_ARG(weight_decay);
   _TORCH_OPTIM_SERIALIZE_TORCH_ARG(momentum);
   _TORCH_OPTIM_SERIALIZE_TORCH_ARG(centered);
+  // Serialize field tracking mask
+  archive.write("_field_mask", static_cast<int64_t>(get_field_mask()));
 }
 
 void RMSpropOptions::serialize(torch::serialize::InputArchive& archive) {
@@ -35,6 +37,11 @@ void RMSpropOptions::serialize(torch::serialize::InputArchive& archive) {
   _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(double, weight_decay);
   _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(double, momentum);
   _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(bool, centered);
+  // Deserialize field tracking mask
+  c10::IValue mask_ivalue;
+  if (archive.try_read("_field_mask", mask_ivalue)) {
+    set_field_mask(static_cast<uint32_t>(mask_ivalue.toInt()));
+  }
 }
 
 double RMSpropOptions::get_lr() const {

@@ -8,6 +8,7 @@
 #include <torch/csrc/Export.h>
 
 #include <algorithm>
+#include <bitset>
 #include <functional>
 #include <iterator>
 #include <memory>
@@ -51,19 +52,47 @@ class OptimizerCloneableParamState : public OptimizerParamState {
   }
 };
 
+// Base class for compatibility with existing code
 class TORCH_API OptimizerOptions {
+ protected:
+  // Bitset for efficient field tracking (8 bytes vs 32+ bytes from hash map)
+  std::bitset<32> explicitly_set_fields_;
+
  public:
   OptimizerOptions() = default;
   OptimizerOptions(const OptimizerOptions&) = default;
   OptimizerOptions& operator=(const OptimizerOptions&) = default;
   OptimizerOptions(OptimizerOptions&&) noexcept = default;
   OptimizerOptions& operator=(OptimizerOptions&&) noexcept = default;
-  virtual std::unique_ptr<OptimizerOptions> clone() const;
-  virtual void serialize(torch::serialize::InputArchive& archive);
-  virtual void serialize(torch::serialize::OutputArchive& archive) const;
+
+  virtual std::unique_ptr<OptimizerOptions> clone() const = 0;
+  virtual void serialize(torch::serialize::InputArchive& archive) = 0;
+  virtual void serialize(torch::serialize::OutputArchive& archive) const = 0;
   virtual ~OptimizerOptions() = default;
-  virtual double get_lr() const;
-  virtual void set_lr(const double lr);
+  virtual double get_lr() const = 0;
+  virtual void set_lr(const double lr) = 0;
+
+  virtual void merge_explicit_fields_from(const OptimizerOptions& source) = 0;
+
+  // Simple field tracking methods
+  bool is_field_explicitly_set(size_t field_id) const {
+    return field_id < 32 && explicitly_set_fields_[field_id];
+  }
+
+  uint32_t get_field_mask() const {
+    return static_cast<uint32_t>(explicitly_set_fields_.to_ulong());
+  }
+
+  void set_field_mask(uint32_t mask) {
+    explicitly_set_fields_ = std::bitset<32>(mask);
+  }
+
+ protected:
+  void mark_field_as_set(size_t field_id) {
+    if (field_id < 32) {
+      explicitly_set_fields_.set(field_id);
+    }
+  }
 };
 
 template <typename Derived>
@@ -71,6 +100,12 @@ class OptimizerCloneableOptions : public OptimizerOptions {
  private:
   std::unique_ptr<OptimizerOptions> clone() const override {
     return std::make_unique<Derived>(static_cast<const Derived&>(*this));
+  }
+
+ public:
+  void merge_explicit_fields_from(const OptimizerOptions& source) override {
+    Derived::merge_impl(
+        static_cast<Derived*>(this), static_cast<const Derived&>(source));
   }
 };
 
