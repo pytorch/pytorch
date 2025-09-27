@@ -8,9 +8,10 @@ import sysconfig
 import time
 import unittest
 import unittest.mock as mock
+from collections.abc import Callable
 from enum import Enum
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Optional
 
 from torch._dynamo.exc import BackendCompilerFailed
 from torch._inductor.codegen.cuda.serialization import get_cutlass_operation_serializer

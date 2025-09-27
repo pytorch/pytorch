@@ -6,7 +6,8 @@ Test the FX IR backend.
 import itertools
 import operator
 import unittest
-from typing import Callable, Optional
+from collections.abc import Callable
+from typing import Optional
 
 import sympy
 
