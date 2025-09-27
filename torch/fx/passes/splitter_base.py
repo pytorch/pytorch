@@ -18,7 +18,7 @@ from torch.fx.passes.graph_manipulation import get_size_of_node
 from .graph_drawer import FxGraphDrawer
 from .operator_support import get_node_target, OperatorSupportBase
 from .shape_prop import ShapeProp
-from .split_utils import split_by_tags
+from .split_utils import split_by_tags, move_non_tensor_nodes_on_boundary
 from .tools_common import (
     CALLABLE_NODE_OPS,
     FxNetAccFusionsFinder,
@@ -81,6 +81,7 @@ class _SplitterSettingBase:
         skip_fusion=DEFAULT_SKIP_FUSION,
         allow_non_tensor=DEFAULT_ALLOW_NON_TENSOR,
         max_acc_splits: int = -1,
+        move_non_tensor_nodes_on_boundary: bool = False,
     ):
         parser = argparse.ArgumentParser()
         parser.add_argument(
@@ -119,6 +120,16 @@ class _SplitterSettingBase:
             "we might not care about non-tensor data flow and we can set this option "
             "to true to disable the functionality that prevent non-tensor data flow.",
         )
+        parser.add_argument(
+            "--move-non-tensor-nodes-on-boundary",
+            "--move_non_tensor_nodes_on_boundary",
+            required=False,
+            type=bool,
+            help="AOTI does not support non-tensor nodes on acc->acc, acc->gpu and gpu->acc boundary. "
+            "For non-tensor nodes on acc->acc boundary and acc->gpu, we move the nodes from upstream to downstream. "
+            "For non-tensor nodes on gpu->acc boundary, it is handled by the pre-split process. "
+            "(by method reduce_acc_nodes_non_tensor_input). "
+        )
         args, _unknown = parser.parse_known_args()
 
         self.min_acc_module_size: int = (
@@ -131,6 +142,7 @@ class _SplitterSettingBase:
             args.allow_non_tensor if args.allow_non_tensor else allow_non_tensor
         )
         self.max_acc_splits: int = max_acc_splits
+        self.move_non_tensor_nodes_on_boundary: bool = move_non_tensor_nodes_on_boundary
 
 
 @compatibility(is_backward_compatible=False)
@@ -970,6 +982,7 @@ class _SplitterBase:
 
         return starter_cpu_nodes, starter_acc_nodes
 
+
     def put_nodes_into_subgraphs(self) -> list[Subgraph]:
         # We start graph traversal from leaf nodes
         current_cpu_nodes, current_acc_nodes = self.starter_nodes()
@@ -1092,6 +1105,8 @@ class _SplitterBase:
     def __call__(self) -> torch.fx.GraphModule:
         subgraphs = self.put_nodes_into_subgraphs()
         subgraphs = self.remove_small_acc_subgraphs(subgraphs)
+        if self.settings.move_non_tensor_nodes_on_boundary:
+            move_non_tensor_nodes_on_boundary(subgraphs)
         acc_subgraphs_count = len([s for s in subgraphs if s.is_acc])
         non_acc_subgraphs_count = len(subgraphs) - acc_subgraphs_count
         print(
