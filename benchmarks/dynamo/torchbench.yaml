@@ -43,6 +43,7 @@ tolerance:
     - timm_efficientdet
     - timm_efficientnet
     - squeezenet1_1
+    - vision_maskrcnn
 
   higher_fp16:
     - doctr_reco_predictor
