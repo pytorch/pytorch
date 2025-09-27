@@ -229,7 +229,7 @@ case "$tag" in
     VISION=yes
     TRITON=yes
     ;;
-  pytorch-linux-jammy-py3-clang20-asan)
+  pytorch-linux-noble-py3-clang20-asan)
     ANACONDA_PYTHON_VERSION=3.10
     CLANG_VERSION=20
     VISION=yes

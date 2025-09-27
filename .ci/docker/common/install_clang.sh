@@ -11,14 +11,11 @@ if [ -n "$CLANG_VERSION" ]; then
     if [[ $CLANG_VERSION == 18 ]]; then
       apt-add-repository "deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-18 main"
     fi
-    if [[ $CLANG_VERSION == 20 ]]; then
-      apt-add-repository "deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-20 main"
-    fi
   fi
 
   sudo apt-get update
   if [[ $CLANG_VERSION -ge 18 ]]; then
-    apt-get install -y libomp-${CLANG_VERSION} libclang-rt-${CLANG_VERSION} clang-"$CLANG_VERSION" llvm-"$CLANG_VERSION"
+    apt-get install -y libomp-${CLANG_VERSION}-dev libclang-rt-${CLANG_VERSION}-dev clang-"$CLANG_VERSION" llvm-"$CLANG_VERSION"
   else
     apt-get install -y --no-install-recommends clang-"$CLANG_VERSION" llvm-"$CLANG_VERSION"
   fi

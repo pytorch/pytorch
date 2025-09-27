@@ -122,16 +122,16 @@ jobs:
         ]}
     secrets: inherit
 
-  linux-jammy-py3_10-clang20-asan-build:
-    name: linux-jammy-py3.10-clang20-asan
+  linux-noble-py3_10-clang20-asan-build:
+    name: linux-noble-py3.10-clang20-asan
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       # More memory is needed to build with asan
       runner: linux.2xlarge.memory
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-jammy-py3.10-clang20-asan
-      docker-image-name: ci-image:pytorch-linux-jammy-py3-clang20-asan
+      build-environment: linux-noble-py3.10-clang20-asan
+      docker-image-name: ci-image:pytorch-linux-noble-py3-clang20-asan
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
@@ -145,16 +145,16 @@ jobs:
       sync-tag: asan-build
     secrets: inherit
 
-  linux-jammy-py3_10-clang20-asan-test:
-    name: linux-jammy-py3.10-clang20-asan
+  linux-noble-py3_10-clang20-asan-test:
+    name: linux-noble-py3.10-clang20-asan
     uses: ./.github/workflows/_linux-test.yml
     needs:
-      - linux-jammy-py3_10-clang20-asan-build
+      - linux-noble-py3_10-clang20-asan-build
       - target-determination
     with:
-      build-environment: linux-jammy-py3.10-clang20-asan
-      docker-image: ${{ needs.linux-jammy-py3_10-clang20-asan-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-jammy-py3_10-clang20-asan-build.outputs.test-matrix }}
+      build-environment: linux-noble-py3.10-clang20-asan
+      docker-image: ${{ needs.linux-noble-py3_10-clang20-asan-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-noble-py3_10-clang20-asan-build.outputs.test-matrix }}
       sync-tag: asan-test
     secrets: inherit
 
