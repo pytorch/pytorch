@@ -6,7 +6,6 @@ import json
 import os
 import platform
 import timeit
-from torch.utils.benchmark import Timer
 from collections import namedtuple
 from dataclasses import asdict, dataclass
 from typing import Any, Optional
@@ -19,6 +18,7 @@ import torch
 
 # needs to be imported after torch
 import torch.utils.cpp_extension as cpp_extension  # noqa: F401
+from torch.utils.benchmark import Timer
 
 
 """Performance microbenchmarks.
@@ -358,9 +358,14 @@ class BenchmarkRunner:
         # Stable timing with Timer
         timer = Timer(
             stmt="func(iters, print_per_iter, cuda_sync)",
-            globals={"func": func, "iters": iters, "print_per_iter": print_per_iter, "cuda_sync": cuda_sync}
+            globals={
+                "func": func,
+                "iters": iters,
+                "print_per_iter": print_per_iter,
+                "cuda_sync": cuda_sync,
+            },
         )
-        result = timer.adaptive_autorange(min_run_time=0.001)
+        result = timer.adaptive_autorange(min_run_time=0.0001)
         return result.median * iters
 
     def _launch_backward(self, test_case, iters, print_per_iter=False):
