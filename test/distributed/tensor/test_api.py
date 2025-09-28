@@ -116,8 +116,7 @@ class DTensorAPITest(DTensorTestBase):
             distribute_tensor(tensor_to_distribute, device_mesh, shard_spec)
 
         with self.assertRaisesRegex(
-            ValueError,
-            "`placements` must have the same length as `device_mesh.ndim`"
+            ValueError, "`placements` must have the same length as `device_mesh.ndim`"
         ):
             shard_spec = [Shard(0)]
             global_tensor = torch.randn(*tensor_shape, requires_grad=True)

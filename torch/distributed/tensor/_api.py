@@ -364,7 +364,7 @@ def _prepare_placements_and_shard_order(
 
         if shard_order is None:
             # need to construct the default shard_order
-            shard_order_tuple = DTensorSpec.compute_default_shard_order(
+            shard_order_tuple = DTensorSpec.compute_default_shard_order(  # type: ignore[assignment]
                 placement_tuple, device_mesh, tensor_rank
             )
         else:
