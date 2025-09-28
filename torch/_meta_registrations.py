@@ -2238,7 +2238,7 @@ def meta__fused_moving_avg_obs_fq_helper(
 
 @register_meta(aten.mm)
 @out_wrapper(exact_dtype=True)
-def meta_mm(a, b):
+def meta_mm(a, b, out_dtype: Optional[torch.dtype] = None):
     torch._check(a.dim() == 2, lambda: "a must be 2D")
     torch._check(b.dim() == 2, lambda: "b must be 2D")
     N, M1 = a.shape
@@ -2247,7 +2247,17 @@ def meta_mm(a, b):
         M1 == M2,
         lambda: f"a and b must have same reduction dim, but got [{N}, {M1}] X [{M2}, {P}].",
     )
-    return a.new_empty(N, P)
+    if out_dtype is not None:
+        torch._check(
+            out_dtype == a.dtype
+            or (
+                out_dtype == torch.float32
+                and a.dtype in (torch.float16, torch.bfloat16)
+            ),
+            lambda: "out_dtype must be the same as input dtype or fp32 for fp16/bf16 inputs",
+        )
+    result_dtype = a.dtype if out_dtype is None else out_dtype
+    return a.new_empty((N, P), dtype=result_dtype)
 
 
 def _compute_reduction_shape(self, dims, keepdim):
@@ -2437,18 +2447,6 @@ def meta_conv(
     output_padding: list[int],
     groups: int,
 ):
-    def pick_memory_format():
-        if device_hint(input_tensor) == "cuda":
-            if is_channels_last(input_tensor) or is_channels_last(weight):
-                return torch.channels_last
-        else:
-            if is_channels_last(input_tensor):
-                return torch.channels_last
-        if input_tensor.is_contiguous(memory_format=torch.contiguous_format):
-            return torch.contiguous_format
-        elif input_tensor.is_contiguous(memory_format=torch.preserve_format):
-            return torch.preserve_format
-
     shape_out = calc_conv_nd_return_shape(
         input_tensor,
         weight,
@@ -2466,7 +2464,6 @@ def meta_conv(
         shape_out[output_channels_dim] = 0
 
     out = input_tensor.new_empty(shape_out)
-    out = out.to(memory_format=pick_memory_format())  # type: ignore[call-overload]
     return out
 
 
