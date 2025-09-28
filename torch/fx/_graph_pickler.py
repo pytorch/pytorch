@@ -262,6 +262,14 @@ class _TensorPickleData:
             fake_mode=unpickle_state.fake_mode,
         )
 
+        # also need to set the fake_mode on the base of a tensor if it's a view
+        if metadata.is_view and metadata.base is not None:
+            new_base = dataclasses.replace(
+                metadata.base,
+                fake_mode=unpickle_state.fake_mode,
+            )
+            metadata = dataclasses.replace(metadata, base=new_base)
+
         def with_fake(
             make_meta_t: Callable[[], torch.Tensor], device: Union[torch.device, str]
         ) -> FakeTensor:
