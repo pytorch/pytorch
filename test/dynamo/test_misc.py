@@ -40,6 +40,11 @@ import torch._inductor.test_case
 import torch.onnx.operators
 import torch.utils._pytree as python_pytree
 import torch.utils.cpp_extension
+import torch
+import sys
+from torch.distributed.tensor.placement_types import Replicate
+from torch.testing._internal.distributed.fake_pg import FakeStore
+from torch.distributed.tensor import DTensor
 from torch import Tensor
 from torch._C import FileCheck
 from torch._dynamo import allow_in_graph
@@ -13388,6 +13393,29 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
 
         x = torch.zeros(4, 4)
         f(x)
+
+    def test_dtensor_embedding(self):
+        world_size = 1
+        fake_store = FakeStore()
+        torch.distributed.init_process_group("fake", store=fake_store, rank=0, world_size=world_size)
+        mesh = torch.distributed.device_mesh.init_device_mesh(
+            "cuda",
+            (1, ),
+            mesh_dim_names=("dim1",),
+        )
+
+        placements = (Replicate(),)
+        arg0 = torch.randint(low=0, high=8, size=(2, 8), dtype=torch.int64, device='cuda')
+        arg0 = DTensor.from_local(arg0, mesh, placements)
+        arg1 = torch.rand((8, 16), dtype=torch.float16, device='cuda', requires_grad=True)
+        arg1 = DTensor.from_local(arg1, mesh, placements)
+
+        @torch.compile(fullgraph=True, dynamic=True)
+        def foo(arg0, arg1):
+            output = torch.nn.functional.embedding(arg0, arg1)
+            return output
+        foo(arg0, arg1)
+
 
     def test_dynamic_float_scalar_tensor_coersion(self):
         # Minified version of https://github.com/pytorch/pytorch/issues/158376#issuecomment-3079591367
