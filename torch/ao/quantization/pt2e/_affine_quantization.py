@@ -285,10 +285,10 @@ def _choose_qparams_affine(
         max_val = torch.amax(input, dim=reduction_dims, keepdim=False)
     else:
         assert min_val is not None and max_val is not None, (
-            "Need to provide `min_val` and `max_val` when `input` is None, got: {min_val, max_val}"
+            f"Need to provide `min_val` and `max_val` when `input` is None, got: {min_val, max_val}"
         )
         assert min_val.dtype == max_val.dtype, (
-            "Expecting `min_val` and `max_val` to have the same dtype, got: {min_val.dtype, max_val.dtype}"
+            f"Expecting `min_val` and `max_val` to have the same dtype, got: {min_val.dtype, max_val.dtype}"
         )
 
         if scale_dtype is None:
