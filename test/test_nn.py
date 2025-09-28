@@ -8292,6 +8292,37 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqual(x_fp32.grad.to(dtype=dtype), x_bf16.grad, atol=1e-1, rtol=1e-1)
             self.assertEqual(x_fp32.grad.to(dtype=dtype), x_mix.grad, atol=1e-1, rtol=1e-1)
 
+    def test_normalization_mixed_dtype(self, device):
+        input_tensor = torch.rand(5, 10, 5, dtype=torch.float64, device=device)
+        layer = torch.nn.InstanceNorm2d(num_features=5, track_running_stats=True, device=device)
+
+        output = layer(input_tensor)
+        self.assertEqual(output.shape, input_tensor.shape)
+        self.assertEqual(output.dtype, input_tensor.dtype)
+        self.assertTrue(torch.isfinite(output).all())
+
+        # test InstanceNorm2d with different input shape
+        norm_layer = torch.nn.InstanceNorm2d(4)
+        test_input = torch.randn(2, 4, 8, 8, dtype=torch.float64, device=device)
+        norm_layer = norm_layer.to(device)
+
+        result = norm_layer(test_input)
+        self.assertEqual(result.dtype, test_input.dtype, f"{type(norm_layer).__name__} should output {test_input.dtype}")
+        self.assertTrue(torch.isfinite(result).all(), f"{type(norm_layer).__name__} output should be finite")
+
+    def test_instancenorm_mixed_dtype_backward(self, device):
+        input_tensor = torch.rand(2, 3, 4, 4, dtype=torch.float64, device=device, requires_grad=True)
+        layer = torch.nn.InstanceNorm2d(3, affine=True, device=device)
+
+        output = layer(input_tensor)
+        loss = output.sum()
+        loss.backward()
+
+        # verify gradients are computed correctly
+        self.assertIsNotNone(input_tensor.grad)
+        self.assertEqual(input_tensor.grad.dtype, input_tensor.dtype)
+        self.assertTrue(torch.isfinite(input_tensor.grad).all())
+
     def _test_GroupNorm_general(self, device, dtype=torch.float):
         good_shape_g = {
             (1, 2, 3, 4): 2,
