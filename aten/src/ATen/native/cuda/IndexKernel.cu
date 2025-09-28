@@ -90,7 +90,6 @@ void gpu_index_kernel(TensorIteratorBase& iter, const IntArrayRef index_size, co
         const int max_grid_y = at::cuda::getCurrentDeviceProperties()->maxGridSize[1];
         // if it's an eligible grid we use the fast path, otherwise default to slower path
         if (blocks_per_slice_upper <= max_grid_y) {
-          if (iter.numel() == 0) return;
           at::native::vectorized_gather_kernel_launch<alignment, int64_t>(out_ptr, in_ptr, (int64_t*)iter.data_ptr(2), num_ind,
           slice_size, ind_dim_size, inp_stride_bytes, out_stride_bytes, /*allow_neg_indices*/true);
           return;
