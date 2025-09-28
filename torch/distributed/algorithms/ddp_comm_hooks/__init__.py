@@ -4,7 +4,7 @@ from enum import Enum
 from functools import partial
 
 
-# To supress FutureWarning from partial since 3.13
+# To suppress FutureWarning from partial since 3.13
 if sys.version_info >= (3, 13):
     from enum import member
 
