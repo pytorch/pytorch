@@ -59,6 +59,7 @@ def split_module(
     keep_original_order: Optional[bool] = False,
     keep_original_node_name: Optional[bool] = False,
     keep_original_input_name: bool = True,
+    *,
     partition_affix: Optional[str] = None,
 ):
     """
@@ -82,7 +83,8 @@ def split_module(
             have the same node names as the original graph.
         keep_original_input_name: bool: If the partitioned graphs should
             have the same input names as the original graph.
-        partition_affix: Optional[str]: If specified, the submodules' names will contain the affix, e.g. "submod_<affix>_<idx>".
+        partition_affix: Optional[str]: If specified, the submodules' names will contain
+            the affix, e.g. "submod_<affix>_<idx>".
 
     Returns:
         GraphModule: the module after split.
