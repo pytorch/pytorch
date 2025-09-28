@@ -87,7 +87,6 @@ from torch._utils_internal import (
 from torch.fx._utils import _format_graph_code, lazy_format_graph_code
 from torch.monitor import _WaitCounter
 from torch.nn.modules.lazy import LazyModuleMixin
-from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils._triton import has_triton, has_triton_package
 from torch.utils.hooks import RemovableHandle
 
@@ -2147,10 +2146,6 @@ def clone_input(
                 x.shape,
                 layout=x.layout,
             )
-        elif is_traceable_wrapper_subclass(x):
-            # Questionable - but this is required to not fail executorch related
-            # torchao tests.
-            return torch_clone(x)
 
         needed_size = sum(
             (shape - 1) * stride for shape, stride in zip(x.size(), x.stride())
