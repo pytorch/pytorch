@@ -175,6 +175,13 @@ trace_call_log = torch._logging.getArtifactLogger(__name__, "trace_call")
 RootGuardManager = guards.RootGuardManager
 
 
+# Capture fn pointer at import time
+# This is to guard against trying to mark the iterated tensors
+# as static in case user overrides fn ptr
+og_module_named_buffers_fn_ptr = torch.nn.Module.named_buffers
+og_module_named_parameters_fn_ptr = torch.nn.Module.named_parameters
+
+
 @dataclass(frozen=True)
 class VariableTrackerCacheKey:
     vt_id: int
@@ -2629,11 +2636,21 @@ class OutputGraph(OutputGraphCommon):
         # annoying, but there are cases when we do not have parameters
         # see test_nn_moduledict_contains
         if hasattr(inlined_module, "_parameters"):
-            for leaf_name, _ in inlined_module.named_parameters():
-                register_leaf_name(leaf_name)
+            if (
+                callable(inlined_module.named_parameters)
+                and inlined_module.named_parameters.__func__  # type: ignore[attr-defined]
+                is og_module_named_parameters_fn_ptr
+            ):
+                for leaf_name, _ in inlined_module.named_parameters():
+                    register_leaf_name(leaf_name)
         if hasattr(inlined_module, "_buffers"):
-            for leaf_name, _ in inlined_module.named_buffers():
-                register_leaf_name(leaf_name)
+            if (
+                callable(inlined_module.named_buffers)
+                and inlined_module.named_buffers.__func__  # type: ignore[attr-defined]
+                is og_module_named_buffers_fn_ptr
+            ):
+                for leaf_name, _ in inlined_module.named_buffers():
+                    register_leaf_name(leaf_name)
 
 
 class DynamoTracerOutput:
