@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from pickle import NONE
 from typing import Any, cast, NamedTuple, Optional
 
 import torch
@@ -41,12 +42,13 @@ class DTensorSpec:
     @staticmethod
     def compute_default_shard_order(
         placements: tuple[Placement, ...],
-        mesh: DeviceMesh,
+        mesh: Optional[DeviceMesh],
         tensor_rank: Optional[int] = None,
-    ) -> tuple[tuple[int, ...], ...]:
+    ) -> tuple[tuple[int, ...], ...] | None:
         # follow default left-to-right device order if shard_order is not specified
         tensor_dim_to_mesh_dims: list[list[int]] = [[]]
-        for mesh_dim in range(0, mesh.ndim):
+        mesh_ndim = mesh.ndim if mesh else 0
+        for mesh_dim in range(0, mesh_ndim):
             if isinstance(placements[mesh_dim], Shard):
                 placement = cast(Shard, placements[mesh_dim])
                 shard_dim = placement.dim
