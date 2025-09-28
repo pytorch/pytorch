@@ -1,4 +1,5 @@
 #include <c10/core/ScalarType.h>
+#include <c10/util/Exception.h>
 #include <torch/csrc/lazy/ts_backend/ts_backend_impl.h>
 #include <torch/csrc/lazy/ts_backend/ts_lowering_context.h>
 #include <torch/csrc/lazy/ts_backend/ts_node.h>
@@ -44,8 +45,8 @@ void TSLoweringContext::Lower(const Node* node) {
       AssignOutputOp(torch::lazy::Output(node, i), ops[i]);
     }
   } else {
-    throw std::runtime_error(
-        "Expected torch::lazy::TsNode but could not dynamic cast");
+    TORCH_CHECK(
+        false, "Expected torch::lazy::TsNode but could not dynamic cast");
   }
 }
 

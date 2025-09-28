@@ -442,7 +442,7 @@ if(WIN32)
       message(
         WARNING
           "Libuv is not installed in current conda env. Set USE_DISTRIBUTED to OFF. "
-          "Please run command 'conda install -c conda-forge libuv=1.39' to install libuv."
+          "Please run command 'conda install -c conda-forge libuv=1.51' to install libuv."
       )
     else()
       set(ENV{libuv_ROOT} ${libuv_tmp_LIBRARY}/../../)
