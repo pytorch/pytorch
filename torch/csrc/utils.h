@@ -55,12 +55,11 @@
 
 #define THPUtils_checkReal_BOOL(object) PyBool_Check(object)
 
-#define THPUtils_checkReal_COMPLEX(object)                                    \
-  PyComplex_Check(object) || PyFloat_Check(object) || PyLong_Check(object) || \
-      PyInt_Check(object)
+#define THPUtils_checkReal_COMPLEX(object) \
+  PyComplex_Check(object) || PyFloat_Check(object) || PyLong_Check(object)
 
 #define THPUtils_newReal_FLOAT(value) PyFloat_FromDouble(value)
-#define THPUtils_newReal_INT(value) PyInt_FromLong(value)
+#define THPUtils_newReal_INT(value) PyLong_FromLong(value)
 
 #define THPUtils_newReal_BOOL(value) PyBool_FromLong(value)
 
