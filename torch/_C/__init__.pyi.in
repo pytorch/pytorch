@@ -37,6 +37,7 @@ from torch._C import (
     _onnx,
     _VariableFunctions,
     _verbose,
+    fft,
 )
 from torch._prims_common import DeviceLikeType
 from torch.autograd.graph import Node as _Node
@@ -2758,33 +2759,29 @@ class _StaticCudaLauncher:
         stream: _int,
     ) -> None: ...
 
-class fft:
-    @staticmethod
-    def rfft(input: Tensor, n: _int = ..., dim: _int = ..., norm: str = ...) -> Tensor: ...
-
 def stft(
     input: Tensor,
     n_fft: _int,
-    hop_length: _int = ...,
-    win_length: _int = ...,
-    window: Tensor = ...,
+    hop_length: _int | None = ...,
+    win_length: _int | None = ...,
+    window: Tensor | None = ...,
     center: _bool = ...,
     pad_mode: str = ...,
     normalized: _bool = ...,
-    onesided: _bool = ...,
-    return_complex: _bool = ...,
-    align_to_window: _bool = ...,
+    onesided: _bool | None = ...,
+    return_complex: _bool | None = ...,
+    align_to_window: _bool | None = ...,
 ) -> Tensor: ...
 
 def istft(
     input: Tensor,
     n_fft: _int,
-    hop_length: _int = ...,
-    win_length: _int = ...,
-    window: Tensor = ...,
+    hop_length: _int | None = ...,
+    win_length: _int | None = ...,
+    window: Tensor | None = ...,
     center: _bool = ...,
     normalized: _bool = ...,
-    onesided: _bool = ...,
-    length: _int = ...,
+    onesided: _bool | None = ...,
+    length: _int | None = ...,
     return_complex: _bool = ...,
 ) -> Tensor: ...
