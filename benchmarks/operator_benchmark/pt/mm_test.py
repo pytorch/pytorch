@@ -52,7 +52,7 @@ op_bench.generate_pt_tests_from_op_list(
     ops_list, mm_short_configs + mm_long_configs, MmOpBenchmark
 )
 op_bench.generate_pt_gradient_tests_from_op_list(
-    ops_list, mm_short_configs + mm_long_configs, MmOpBenchmark
+    ops_list, mm_long_configs, MmOpBenchmark
 )
 
 

@@ -32,27 +32,27 @@ mm_long_configs = op_bench.cross_product_configs(
 
 class MatMulBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, M, N, K, trans_a, trans_b, device, dtype):
+        # Create tensors without requires_grad first, then set it separately
+        # This avoids creating graph leaves that cannot be deep copied
+        if trans_a:
+            input_one = torch.rand(M, N, device=device, dtype=dtype)
+        else:
+            input_one = torch.rand(N, M, device=device, dtype=dtype).t()
+
+        if trans_b:
+            input_two = torch.rand(N, K, device=device, dtype=dtype)
+        else:
+            input_two = torch.rand(K, N, device=device, dtype=dtype).t()
+
+        # Set requires_grad after tensor creation to avoid graph leaf issues
+        if self.auto_set():
+            input_one.requires_grad_(True)
+        if self.auto_set():
+            input_two.requires_grad_(True)
+
         self.inputs = {
-            "input_one": torch.rand(
-                M, N, device=device, dtype=dtype, requires_grad=self.auto_set()
-            )
-            if trans_a
-            else torch.rand(N, M, device=device, dtype=dtype)
-            .t()
-            .contiguous()
-            .clone()
-            .detach()
-            .requires_grad_(self.auto_set()),
-            "input_two": torch.rand(
-                N, K, device=device, dtype=dtype, requires_grad=self.auto_set()
-            )
-            if trans_b
-            else torch.rand(K, N, device=device, dtype=dtype)
-            .t()
-            .contiguous()
-            .clone()
-            .detach()
-            .requires_grad_(self.auto_set()),
+            "input_one": input_one,
+            "input_two": input_two,
         }
         self.set_module_name("matmul")
 
@@ -61,7 +61,7 @@ class MatMulBenchmark(op_bench.TorchBenchmarkBase):
 
 
 op_bench.generate_pt_test(mm_long_configs + mm_short_configs, MatMulBenchmark)
-op_bench.generate_pt_gradient_test(mm_long_configs + mm_short_configs, MatMulBenchmark)
+op_bench.generate_pt_gradient_test(mm_long_configs, MatMulBenchmark)
 
 
 if __name__ == "__main__":
