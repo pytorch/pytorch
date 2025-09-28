@@ -69,7 +69,7 @@ def test_embedding_codegen():
     op = EmbeddingOperator()
 
     code = op.codegen("output", ["indices", "weight"], None)
-    assert code == "output = torch.nn.functional.embedding(indices, weight)"
+    assert code == "output = torch.nn.functional.embedding(torch.clamp(indices, 0, weight.size(0) - 1).to(torch.long), weight)"
 
 
 def test_embedding_supports_variable_inputs():

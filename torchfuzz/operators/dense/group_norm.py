@@ -85,4 +85,15 @@ class GroupNormOperator(Operator):
             # Fallback to 1 group if not divisible
             num_groups = 1
 
-        return f"{output_name} = torch.nn.functional.group_norm({input_names[0]}, {num_groups})"
+        # Cast input to float to satisfy GroupNorm kernel requirements
+        input_expr = f"{input_names[0]}.float()"
+
+        if len(input_names) == 2:
+            return f"{output_name} = torch.nn.functional.group_norm({input_expr}, {num_groups})"
+        elif len(input_names) == 3:
+            weight = input_names[2]
+            return f"{output_name} = torch.nn.functional.group_norm({input_expr}, {num_groups}, weight={weight})"
+        else:
+            weight = input_names[2]
+            bias = input_names[3]
+            return f"{output_name} = torch.nn.functional.group_norm({input_expr}, {num_groups}, weight={weight}, bias={bias})"

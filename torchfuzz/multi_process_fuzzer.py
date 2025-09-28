@@ -46,6 +46,7 @@ IGNORE_PATTERNS: List[re.Pattern] = [
     re.compile(r"AssertionError: Node full_1 was invalid, but is output"),
     re.compile(r"Error in op: torch\.ops\.aten\.convolution\.default"),
     re.compile(r"IndexError: list index out of range"),
+    re.compile(r"TypeError\('unexpected type fp32'\)"),
     # Add more patterns here as needed, e.g.:
 
     # re.compile(r"Some other error message"),

@@ -66,4 +66,8 @@ class ScaledDotProductAttentionOperator(Operator):
 
     def codegen(self, output_name, input_names, output_tensor):
         """Generate code for scaled dot product attention operation."""
-        return f"{output_name} = torch.nn.functional.scaled_dot_product_attention({input_names[0]}, {input_names[1]}, {input_names[2]})"
+        # Cast inputs to float to satisfy SDPA requirements when upstream tensors are integer
+        q = f"{input_names[0]}.float()"
+        k = f"{input_names[1]}.float()"
+        v = f"{input_names[2]}.float()"
+        return f"{output_name} = torch.nn.functional.scaled_dot_product_attention({q}, {k}, {v})"
