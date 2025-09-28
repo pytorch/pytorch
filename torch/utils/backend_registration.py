@@ -9,7 +9,6 @@ from torch.overrides import handle_torch_function, has_torch_function_unary
 __all__ = [
     "rename_privateuse1_backend",
     "generate_methods_for_privateuse1_backend",
-    "setup_privateuseone_for_python_backend",
 ]
 
 # TODO: Should use `torch._C._get_privateuse1_backend_name()` to get

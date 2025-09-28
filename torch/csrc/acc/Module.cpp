@@ -117,32 +117,25 @@ struct PythonDeviceGuard final : public c10::impl::DeviceGuardImplInterface {
 
 namespace {
 
-static py::object g_hook;
-bool registerPythonPrivateUse1Hook(py::object hook) {
+bool registerPythonPrivateUse1Hook(const py::object& hook) {
   if (at::isPrivateUse1HooksRegistered()) {
     return false;
   }
-  g_hook = hook;
+  hook.inc_ref();
   at::RegisterPrivateUse1HooksInterface(
       hook.cast<PrivateUse1HooksInterface*>());
   return true;
 }
 
-static py::object g_guard;
-bool registerPythonPrivateUse1DeviceGuard(py::object guard) {
+bool registerPythonPrivateUse1DeviceGuard(const py::object& guard) {
   if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
     return false;
   }
-  g_guard = guard;
+  guard.inc_ref();
   c10::impl::registerDeviceGuard(
       c10::DeviceType::PrivateUse1,
-      g_guard.cast<c10::impl::DeviceGuardImplInterface*>());
+      guard.cast<c10::impl::DeviceGuardImplInterface*>());
   return true;
-}
-
-void cleanupPyObj() {
-  g_guard.release();
-  g_hook.release();
 }
 
 at::Tensor createEmptyTensor(
@@ -163,9 +156,9 @@ at::Tensor createEmptyTensor(
 
   std::vector<int64_t> strides(shape.size());
   int64_t size = 1;
-  for (int64_t i = strides.size() - 1; i >= 0; --i) {
-    strides[i] = size;
-    size *= shape[i];
+  for (auto i = strides.size(); i > 0; --i) {
+    strides[i - 1] = size;
+    size *= shape[i - 1];
   }
 
   tensor.unsafeGetTensorImpl()->set_sizes_and_strides(shape, strides, 0);
