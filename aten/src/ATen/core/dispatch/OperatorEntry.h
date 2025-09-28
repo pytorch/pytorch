@@ -7,8 +7,8 @@
 #include <c10/core/DispatchKey.h>
 #include <c10/core/PyHandleCache.h>
 #include <c10/core/SafePyObject.h>
-#include <c10/util/Metaprogramming.h>
 #include <c10/util/flat_hash_map.h>
+#include <torch/headeronly/util/Metaprogramming.h>
 
 #include <ATen/core/dispatch/CppSignature.h>
 #include <ATen/core/dispatch/OperatorOptions.h>

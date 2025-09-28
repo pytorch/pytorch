@@ -7,8 +7,8 @@
 #include <c10/core/TensorImpl.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Exception.h>
-#include <c10/util/Metaprogramming.h>
 #include <c10/util/irange.h>
+#include <torch/headeronly/util/Metaprogramming.h>
 
 namespace at::native {
 struct NestedTensorImpl;

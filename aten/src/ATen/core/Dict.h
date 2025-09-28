@@ -2,8 +2,8 @@
 
 #include <c10/macros/Macros.h>
 #include <c10/macros/Export.h>
-#include <c10/util/TypeTraits.h>
-#include <c10/util/TypeList.h>
+#include <torch/headeronly/util/TypeTraits.h>
+#include <torch/headeronly/util/TypeList.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/order_preserving_flat_hash_map.h>
 #include <optional>

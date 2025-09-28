@@ -113,7 +113,7 @@
 #include <c10/util/IdWrapper.h>
 #include <c10/util/Logging.h>
 #include <c10/util/MaybeOwned.h>
-#include <c10/util/Metaprogramming.h>
+#include <torch/headeronly/util/Metaprogramming.h>
 #include <c10/util/Optional.h>
 #include <c10/util/Registry.h>
 #include <c10/util/SmallVector.h>
@@ -122,9 +122,9 @@
 #include <c10/util/Type.h>
 #include <c10/util/TypeCast.h>
 #include <c10/util/TypeIndex.h>
-#include <c10/util/TypeList.h>
+#include <torch/headeronly/util/TypeList.h>
 #include <c10/util/TypeSafeSignMath.h>
-#include <c10/util/TypeTraits.h>
+#include <torch/headeronly/util/TypeTraits.h>
 #include <c10/util/UniqueVoidPtr.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/bit_cast.h>

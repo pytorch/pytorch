@@ -4,8 +4,8 @@
 #include <ATen/core/boxing/BoxedKernel.h>
 #include <ATen/core/stack.h>
 #include <c10/core/DispatchKeySet.h>
-#include <c10/util/TypeList.h>
 #include <c10/util/intrusive_ptr.h>
+#include <torch/headeronly/util/TypeList.h>
 #include <atomic>
 #include <memory>
 #include <type_traits>
