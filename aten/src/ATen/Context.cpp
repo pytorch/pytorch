@@ -342,16 +342,21 @@ Float32MatmulPrecision Context::float32MatmulPrecision() const {
 }
 
 std::string Context::float32Precision(const std::string& backend, const std::string& op) const {
-  auto it = fp32_precision.find(std::make_pair(backend, op));
+  std::pair<std::string, std::string> key{backend, op};
+  auto it = fp32_precision.find(key);
   TORCH_CHECK(it != fp32_precision.end(), "Invalid (backend, op) pair: (", backend, ", ", op, ")");
 
-  using namespace std::string_literals;
   std::string precision = it->second;
-  if (precision == "none")
-    precision = fp32_precision.find(std::make_pair(backend, "all"s))->second;
-  if (precision == "none")
-    precision = fp32_precision.find(std::make_pair("generic"s, "all"s))->second;
-  return precision;
+  if (precision == "none") {
+    key.second = "all";
+    precision = fp32_precision.find(key)->second;
+  }
+  if (precision == "none") {
+    key.first = "generic";
+    precision = fp32_precision.find(key)->second;
+  }
+  // "cuda" does not support "bf16"
+  return (backend == "cuda" && precision == "bf16") ? std::string("none") : precision;
 }
 
 void Context::setFloat32MatmulPrecision(const std::string &s) {
@@ -391,8 +396,8 @@ void Context::setFloat32Precision(const std::string& backend, const std::string&
       it != fp32_precision.end(),
       "Invalid (backend, op) pair: (", backend, ", ", op, ")");
   TORCH_CHECK(
-    p == "ieee" || p == "tf32" || p == "none" || (backend != "cuda" && p == "bf16"),
-    "Backend '", backend, "' does not support precision '", p, "'");
+      p == "ieee" || p == "tf32" || p == "none" || (backend != "cuda" && p == "bf16"),
+      "Backend '", backend, "' does not support precision '", p, "'");
 
   it->second = p;
 }
