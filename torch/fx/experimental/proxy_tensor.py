@@ -283,8 +283,8 @@ def set_proxy_slot(  # type: ignore[no-redef]
         # THEN later we allocate tangent inputs.  Make sure if a SymInt
         # is derivable from a primal that we use that.
         assert isinstance(obj, py_sym_types), type(obj)
-        if obj not in tracer.symnode_tracker:
-            tracer.symnode_tracker[obj] = typing.cast(_PySymProxyType, proxy)
+        if obj not in tracer.sym_expr_tracker:
+            tracer.sym_expr_tracker[obj] = typing.cast(_PySymProxyType, proxy)
 
             # WAR: python test/dynamo/test_subclasses.py
             # TestNestedTensor.test_basic_autograd
@@ -400,7 +400,7 @@ def get_proxy_slot(
         tracker = tracer.script_object_tracker
     else:
         assert isinstance(obj, py_sym_types), type(obj)
-        tracker = tracer.symnode_tracker
+        tracker = tracer.sym_expr_tracker
 
     if obj not in tracker:
         # Last ditch
@@ -1065,40 +1065,40 @@ def proxy_call(
     return out
 
 
-class _SymNodeDict:
+class _SymExprDict:
     """
     Wrapper around a dictionary that will hash SymInts with their nodes
     """
 
     def __init__(self) -> None:
-        self.sym_node_dict: dict[sympy.Expr, _PySymProxyType] = {}
+        self.sym_expr_dict: dict[sympy.Expr, _PySymProxyType] = {}
 
     def __setitem__(self, key: PySymType, value: _PySymProxyType) -> None:
-        self.sym_node_dict[key.node._expr] = value
+        self.sym_expr_dict[key.node._expr] = value
 
     def __getitem__(self, key: PySymType) -> _PySymProxyType:
-        return self.sym_node_dict[key.node._expr]
+        return self.sym_expr_dict[key.node._expr]
 
     def __contains__(self, key: PySymType) -> bool:
-        return key.node._expr in self.sym_node_dict
+        return key.node._expr in self.sym_expr_dict
 
     def get(
         self, key: PySymType, default: Optional[_PySymProxyType] = None
     ) -> _PySymProxyType:
         # dict.get()'s annotation doesn't accept `None` when the value type
         # isn't Optional.
-        return self.sym_node_dict.get(key.node._expr, default)  # type: ignore[arg-type, return-value]
+        return self.sym_expr_dict.get(key.node._expr, default)  # type: ignore[arg-type, return-value]
 
     def __iter__(self) -> Any:
         raise NotImplementedError
 
     def __len__(self) -> int:
-        return len(self.sym_node_dict)
+        return len(self.sym_expr_dict)
 
 
 class PythonKeyTracer(Tracer):
     script_object_tracker: MutableMapping[_AnyScriptObjectType, Proxy]
-    symnode_tracker: _SymNodeDict
+    sym_expr_tracker: _SymExprDict
     sympy_expr_tracker: dict[sympy.Symbol, object]
     tensor_tracker: MutableMapping[Tensor, _ProxyTensor]
     torch_fn_counts: dict[OpOverload, int]
@@ -1107,7 +1107,7 @@ class PythonKeyTracer(Tracer):
     def __init__(self) -> None:
         super().__init__(autowrap_modules=())  # type: ignore[arg-type]
         self.tensor_tracker = WeakTensorKeyDictionary()
-        self.symnode_tracker = _SymNodeDict()
+        self.sym_expr_tracker = _SymExprDict()
         self.script_object_tracker = WeakIdKeyDictionary(
             dict=None, ref_type=_WeakHashRef
         )
@@ -1633,7 +1633,7 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
 
 class _GraphAppendingTracerEx(fx.proxy.GraphAppendingTracer):
     script_object_tracker: MutableMapping[_AnyScriptObjectType, Proxy]
-    symnode_tracker: MutableMapping[PySymType, _PySymProxyType]
+    sym_expr_tracker: MutableMapping[PySymType, _PySymProxyType]
     tensor_tracker: MutableMapping[Tensor, _ProxyTensor]
     sympy_expr_tracker: dict[sympy.Symbol, object]
     torch_fn_metadata: Optional[OpOverload]
@@ -1642,7 +1642,7 @@ class _GraphAppendingTracerEx(fx.proxy.GraphAppendingTracer):
 
     def __init__(self, graph: fx.graph.Graph) -> None:
         super().__init__(graph)
-        self.symnode_tracker = weakref.WeakKeyDictionary()
+        self.sym_expr_tracker = weakref.WeakKeyDictionary()
         self.tensor_tracker = WeakTensorKeyDictionary()
         self.sympy_expr_tracker = {}
         self.script_object_tracker = WeakIdKeyDictionary(
