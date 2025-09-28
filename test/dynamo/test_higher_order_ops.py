@@ -815,6 +815,7 @@ class GraphModule(torch.nn.Module):
 
     @torch._dynamo.config.patch(
         capture_dynamic_output_shape_ops=True,
+        capture_scalar_outputs=True,
     )
     def test_tensor_to_list_closure(self):
         def f(x):
@@ -7197,6 +7198,7 @@ xfail_hops_compile = {
     # aot_eager
     "map",  # assert type(args[1].realize()) is TensorVariable
     "scan",  # scan is not an OpOverload
+    "local_map_hop",  # can't retrace
     # inductor
     "while_loop",  # LoweringException: AssertionError
     "flex_attention",  # LoweringException: AssertionError

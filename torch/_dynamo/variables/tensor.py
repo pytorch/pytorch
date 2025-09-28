@@ -23,7 +23,6 @@ import operator
 import textwrap
 import traceback
 import types
-import unittest
 from typing import TYPE_CHECKING
 
 import sympy
@@ -945,15 +944,10 @@ class TensorVariable(VariableTracker):
 
         def tolist(tensor, sub_proxy):
             def wrap(i, sub_proxy):
-                # Sigh, we forgot to gate this, so this data dependent is on
-                # by default and is load bearing in CI
-                with unittest.mock.patch.object(
-                    tx.fake_mode, "allow_scalar_outputs", True
-                ):
-                    return wrap_fx_proxy(
-                        tx,
-                        sub_proxy.item(),
-                    )
+                return wrap_fx_proxy(
+                    tx,
+                    sub_proxy.item(),
+                )
 
             if tensor.dtype not in [
                 torch.int8,
@@ -999,7 +993,11 @@ class TensorVariable(VariableTracker):
         return DataPtrVariable(self)
 
     def method_item(self, *args, **kwargs):
-        if not config.capture_scalar_outputs:
+        from ..symbolic_convert import InstructionTranslator
+
+        tx = InstructionTranslator.current_tx()
+        # We enable capture_scalar_outputs when full_graph=True by default.
+        if not tx.one_graph and not config.capture_scalar_outputs:
             self._warn_capture_scalar_outputs()
             unimplemented_v2(
                 gb_type="Unsupported Tensor.item() call with capture_scalar_outputs=False",

@@ -1,7 +1,6 @@
 #include <torch/nativert/kernels/HigherOrderKernel.h>
 
-#include <fmt/format.h>
-
+#include <c10/util/Exception.h>
 #include <c10/util/string_view.h>
 
 namespace torch::nativert {
@@ -34,8 +33,7 @@ HigherOrderKernel::HigherOrderKernel(
     TORCH_CHECK(!node_->attributes().empty());
     TORCH_CHECK(node_->inputs().size() == 1);
   } else {
-    throw std::runtime_error(
-        fmt::format("Unknown higher order op: {}", opName));
+    TORCH_CHECK(false, "Unknown higher order op: ", opName);
   }
 }
 
@@ -53,7 +51,7 @@ void HigherOrderKernel::computeInternal(ExecutionFrame& executionFrame) const {
       } else if (cond.isBool()) {
         branchIdx = cond.toBool() ? 0 : 1;
       } else {
-        throw std::runtime_error("Unsupported type for cond predicate");
+        TORCH_CHECK(false, "Unsupported type for cond predicate");
       }
       ExecutionFrame branchFrame(*std::get<std::unique_ptr<Graph>>(
           node_->attributes()[branchIdx].value));

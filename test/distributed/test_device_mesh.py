@@ -1,12 +1,14 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
 import os
+import unittest
 
 import torch
 import torch.distributed as dist
 import torch.distributed._functional_collectives as funcol
 from torch._C._distributed_c10d import Backend as C10dBackend
 from torch._subclasses.fake_tensor import FakeTensorMode
+from torch.distributed._mesh_layout import _MeshLayout as _Layout
 from torch.distributed.device_mesh import _mesh_resources, DeviceMesh, init_device_mesh
 from torch.distributed.distributed_c10d import (
     _get_default_group,
@@ -26,13 +28,17 @@ from torch.distributed.tensor._collective_utils import (
 )
 from torch.distributed.tensor.placement_types import _Partial, Shard
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, TEST_XPU, TestCase
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
 )
 from torch.testing._internal.distributed.fake_pg import FakeProcessGroup, FakeStore
 from torch.utils._typing_utils import not_none
+
+
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+device_count = torch.accelerator.device_count()
 
 
 def _set_env_var(addr="localhost", port="25364", world_size=1, rank=0, local_rank=-1):
@@ -44,6 +50,7 @@ def _set_env_var(addr="localhost", port="25364", world_size=1, rank=0, local_ran
         os.environ["LOCAL_RANK"] = f"{local_rank}"
 
 
+@unittest.skipIf(TEST_XPU, "XPU does not support gloo backend.")
 class DeviceMeshTestGlooBackend(DTensorTestBase):
     @property
     def backend(self):
@@ -73,14 +80,16 @@ class DeviceMeshSetDeviceTest(DTensorTestBase):
 
         # Set the device on each process before DeviceMesh constructor,
         # and device to be different than the default world rank
-        torch.cuda.set_device((self.rank + 2) % self.world_size)
+        torch.accelerator.set_device_index((self.rank + 2) % self.world_size)
         _set_env_var(world_size=self.world_size, rank=self.rank)
         DeviceMesh(self.device_type, mesh_tensor)
         self.assertTrue(is_initialized())
 
         # check that the device is set to the correct device
         # and respect the previous set_device calls
-        self.assertEqual(torch.cuda.current_device(), (self.rank + 2) % self.world_size)
+        self.assertEqual(
+            torch.accelerator.current_device_idx(), (self.rank + 2) % self.world_size
+        )
         self.destroy_pg()
 
     @skip_if_lt_x_gpu(4)
@@ -101,7 +110,7 @@ class DeviceMeshSetDeviceTest(DTensorTestBase):
 
         # check that the device is set to the correct device
         # and respect the LOCAL_RANK env var
-        self.assertEqual(torch.cuda.current_device(), local_rank)
+        self.assertEqual(torch.accelerator.current_device_idx(), local_rank)
         self.destroy_pg()
 
     @skip_if_lt_x_gpu(4)
@@ -120,7 +129,7 @@ class DeviceMeshSetDeviceTest(DTensorTestBase):
         self.assertTrue(is_initialized())
 
         # check that the device is set to the correct device
-        self.assertEqual(torch.cuda.current_device(), self.rank)
+        self.assertEqual(torch.accelerator.current_device_idx(), self.rank)
         self.destroy_pg()
 
 
@@ -222,7 +231,7 @@ class DeviceMeshTest(DTensorTestBase):
     @with_comms
     def test_device_mesh_2d(self):
         mesh_tensor = torch.arange(4).reshape(2, 2)
-        # construct a cuda device mesh
+        # construct a device mesh for self.device_type
         mesh = DeviceMesh(self.device_type, mesh_tensor)
 
         # check all dim groups
@@ -260,7 +269,11 @@ class DeviceMeshTest(DTensorTestBase):
     def test_fake_pg_device_mesh(self):
         fake_store = FakeStore()
         init_process_group("fake", store=fake_store, rank=0, world_size=self.world_size)
-        device_type = "cuda" if torch.cuda.is_available() else "cpu"
+        device_type = (
+            torch.accelerator.current_accelerator().type
+            if torch.accelerator.is_available()
+            else "cpu"
+        )
         mesh = DeviceMesh(device_type, torch.arange(self.world_size))
 
         local_tensor = torch.randn(2, 8)
@@ -300,7 +313,7 @@ class DeviceMeshTest(DTensorTestBase):
         regex = r"Invalid mesh \[\[0, 1\], \[2, 3\]\] for ProcessGroup with ranks \[0, 1, 2, 3\]"
         with self.assertRaisesRegex(ValueError, regex):
             DeviceMesh.from_group(
-                global_pg, "cuda", invalid_mesh, mesh_dim_names=("dim0", "dim1")
+                global_pg, device_type, invalid_mesh, mesh_dim_names=("dim0", "dim1")
             )
 
         device_mesh = init_device_mesh(self.device_type, (2, 2))
@@ -320,12 +333,16 @@ class DeviceMeshTest(DTensorTestBase):
             # test init_device_mesh with an invalid device type that contains a GPU index
             mesh_shape = (2, self.world_size // 2)
             init_device_mesh(
-                "cuda:0", mesh_shape=mesh_shape, mesh_dim_names=("dp", "tp")
+                f"{device_type}:0", mesh_shape=mesh_shape, mesh_dim_names=("dp", "tp")
             )
 
     @with_comms
     def test_set_mesh_dim_group_options(self):
-        device_type = "cuda" if torch.cuda.is_available() else "cpu"
+        device_type = (
+            torch.accelerator.current_accelerator().type
+            if torch.accelerator.is_available()
+            else "cpu"
+        )
         _mesh_resources._set_mesh_dim_group_options(1, "fake", None)
 
         mesh_tensor = torch.arange(4).reshape(2, 2)
@@ -341,7 +358,7 @@ class DeviceMeshTestNDim(DTensorTestBase):
 
     @with_comms
     def test_device_mesh_nd(self):
-        # construct a cuda device mesh
+        # construct a device mesh for self.device_type
         mesh_tensor = torch.arange(8).reshape(2, 2, 2)
         mesh = DeviceMesh(self.device_type, mesh_tensor)
 
@@ -710,7 +727,9 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         with self.assertRaisesRegex(KeyError, "Invalid mesh_dim_name"):
             mesh_dim_names = ("DP", "TP")
             mesh = init_device_mesh(
-                self.device_type, (2, 4), mesh_dim_names=mesh_dim_names
+                self.device_type,
+                (2, 4),
+                mesh_dim_names=mesh_dim_names,
             )
             mesh[child_mesh_dim_name]
 
@@ -844,7 +863,7 @@ class TestDeviceMeshGetItem(DTensorTestBase):
 
         # Test flatten into an existing mesh_dim_name inside the mesh
         with self.assertRaisesRegex(
-            RuntimeError,
+            ValueError,
             "already exists for submesh of the DeviceMesh",
         ):
             mesh_3d._flatten("dp")
@@ -883,6 +902,18 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         cp_tp_mesh = mesh_3d["cp", "tp"]
         cp_tp_mesh._flatten("dummy")
         self.assertEqual(mesh_3d["dummy"].mesh_dim_names[0], "dummy")
+
+        # Test flatten into an existing mesh_dim_name inside the mesh
+        with self.assertRaisesRegex(
+            ValueError,
+            "dp already exists for submesh of the DeviceMesh",
+        ):
+            mesh_3d._flatten("dp")
+        with self.assertRaisesRegex(
+            ValueError,
+            "Flatten mesh with mesh_dim_name dp_tp has been created before",
+        ):
+            mesh_3d["cp", "tp"]._flatten("dp_tp")
 
     @with_comms(eager_init=True)
     def test_flatten_mesh_4d(self):
@@ -938,7 +969,9 @@ class TestMeshEnv(DTensorTestBase):
     @with_comms
     def test_get_root_mesh(self):
         mesh_3d = init_device_mesh(
-            self.device_type, (2, 2, 2), mesh_dim_names=("dp", "cp", "tp")
+            self.device_type,
+            (2, 2, 2),
+            mesh_dim_names=("dp", "cp", "tp"),
         )
 
         dp_cp_mesh = mesh_3d["dp", "cp"]
@@ -986,7 +1019,9 @@ class TestMeshEnv(DTensorTestBase):
     @with_comms
     def test_get_all_submeshes(self):
         mesh_2d = init_device_mesh(
-            self.device_type, (2, 4), mesh_dim_names=("replicate", "shard")
+            self.device_type,
+            (2, 4),
+            mesh_dim_names=("replicate", "shard"),
         )
         all_submeshes = _mesh_resources._get_all_submeshes(mesh_2d, "replicate")
         self.assertEqual(len(all_submeshes), 4)
@@ -1264,6 +1299,243 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
             )
             mesh_scatter(received_tensor, scattered_tensors, mesh, mesh_dim=dim)
             self.assertEqual(received_tensor, torch.ones(3, 3) * self.rank)
+
+
+class CuTeLayoutTest(TestCase):
+    def test_coalesce(self):
+        # ((3,2),(2,1)) -> (6,1)
+        l = _Layout((3, 2), (2, 1))
+        l = l.coalesce()
+        self.assertEqual(list(l.sizes_and_strides), [(6, 1)])
+
+        # ((2,12),(3,4),(4,1)) -> (24,1)
+        l = _Layout((2, 3, 4), (12, 4, 1))
+        l = l.coalesce()
+        self.assertEqual(list(l.sizes_and_strides), [(24, 1)])
+
+    def test_coalesce_non_coalescible(self):
+        # ((3,4),(2,1)) stays as-is (4 ≠ 2*1)
+        l = _Layout((3, 2), (4, 1))
+        l = l.coalesce()
+        self.assertEqual(list(l.sizes_and_strides), [(3, 4), (2, 1)])
+
+    def test_complement_n_group_layout(self):
+        # complement((4,2), 8) = (2,1); together form (8,1)
+        pg_layout = _Layout(
+            (4,),
+            (2,),
+        )
+        outer = pg_layout.complement(world_size=8)
+        self.assertEqual(list(outer.sizes_and_strides), [(2, 1)])
+        self.assertEqual(
+            pg_layout.all_ranks_from_zero(),
+            [0, 2, 4, 6],
+        )
+        groups = [
+            [o + i for i in pg_layout.all_ranks_from_zero()]
+            for o in outer.all_ranks_from_zero()
+        ]
+        self.assertEqual(
+            groups,
+            [
+                [0, 2, 4, 6],
+                [1, 3, 5, 7],
+            ],
+        )
+        self.assertEqual(
+            pg_layout.global_ranks(8),
+            [
+                [0, 2, 4, 6],
+                [1, 3, 5, 7],
+            ],
+        )
+        # complement((4,2), 16) = ((2,8), (2,1)); together form (16,1)
+        outer = pg_layout.complement(world_size=16)
+        self.assertEqual(list(outer.sizes_and_strides), [(2, 8), (2, 1)])
+        self.assertEqual(
+            outer.all_ranks_from_zero(),
+            [0, 1, 8, 9],
+        )
+        self.assertEqual(
+            pg_layout.global_ranks(16),
+            [
+                [0, 2, 4, 6],
+                [1, 3, 5, 7],
+                [8, 10, 12, 14],
+                [9, 11, 13, 15],
+            ],
+        )
+
+        # Complement ((2,4), (2,1)) under world_size=16 → complement ((2,8), (2,2))
+        pg_layout = _Layout((2, 2), (4, 1))
+        self.assertEqual(
+            pg_layout.all_ranks_from_zero(),
+            [0, 1, 4, 5],
+        )
+        outer = pg_layout.complement(world_size=16)
+        self.assertEqual(list(outer.sizes_and_strides), [(2, 8), (2, 2)])
+        self.assertEqual(
+            outer.all_ranks_from_zero(),
+            [0, 2, 8, 10],
+        )
+        self.assertEqual(
+            pg_layout.global_ranks(16),
+            [
+                [0, 1, 4, 5],
+                [2, 3, 6, 7],
+                [8, 9, 12, 13],
+                [10, 11, 14, 15],
+            ],
+        )
+
+        # Test layout_to_global_ranks and layout_to_all_ranks_from_zero
+        pg_layout = _Layout((2, 2), (4, 2))
+        self.assertEqual(
+            pg_layout.all_ranks_from_zero(),
+            [0, 2, 4, 6],
+        )
+        self.assertEqual(
+            pg_layout.global_ranks(16),
+            [
+                [0, 2, 4, 6],
+                [1, 3, 5, 7],
+                [8, 10, 12, 14],
+                [9, 11, 13, 15],
+            ],
+        )
+        outer = pg_layout.complement(world_size=16)
+        self.assertEqual(list(outer.sizes_and_strides), [(2, 8), (2, 1)])
+        # Test when stride is not monotonically decreasing, the complement layout
+        # is same as the one sorted its stride.
+        pg_layout_r = _Layout((2, 2), (2, 4))
+        outer = pg_layout_r.complement(world_size=16)
+        self.assertEqual(list(outer.sizes_and_strides), [(2, 8), (2, 1)])
+        self.assertEqual(
+            pg_layout_r.global_ranks(16),
+            [
+                [0, 4, 2, 6],
+                [1, 5, 3, 7],
+                [8, 12, 10, 14],
+                [9, 13, 11, 15],
+            ],
+        )
+
+        # Test just all_ranks_from_zero and global_ranks.
+        pg_layout = _Layout((4,), (2,))
+        self.assertEqual(
+            pg_layout.all_ranks_from_zero(),
+            [0, 2, 4, 6],
+        )
+        self.assertEqual(
+            pg_layout.global_ranks(16),
+            [
+                [0, 2, 4, 6],
+                [1, 3, 5, 7],
+                [8, 10, 12, 14],
+                [9, 11, 13, 15],
+            ],
+        )
+
+    def test_composition(self):
+        # self = ((4,2), (2,1)), l = (2,1)  → self o l = (2,1)
+        orig_l = _Layout((4, 2), (2, 1))
+        right_l = _Layout((2,), (1,))
+        composed_layout = orig_l.composition(right_l)
+        self.assertEqual(list(composed_layout.sizes_and_strides), [(2, 1)])
+        self.assertEqual(
+            composed_layout.global_ranks(8),
+            [
+                [0, 1],
+                [2, 3],
+                [4, 5],
+                [6, 7],
+            ],
+        )
+
+        # self = (4,2), l = (2,1)  → self o l = (2,2)
+        orig_l = _Layout((4,), (2,))
+        right_l = _Layout((2,), (1,))
+        composed_layout = orig_l.composition(right_l)
+        self.assertEqual(list(composed_layout.sizes_and_strides), [(2, 2)])
+        self.assertEqual(
+            composed_layout.global_ranks(8),
+            [
+                [0, 2],
+                [1, 3],
+                [4, 6],
+                [5, 7],
+            ],
+        )
+
+        # self = (4,2), l = ((2,2), (2,1))  → self o l = ((2,4), (2,2))
+        # This is to mimic the un-flatten from a 2D mesh to a 1D mesh.
+        right_l = _Layout((2, 2), (2, 1))
+        composed_layout = orig_l.composition(right_l)
+        self.assertEqual(list(composed_layout.sizes_and_strides), [(2, 4), (2, 2)])
+        self.assertEqual(
+            composed_layout[0].global_ranks(8),
+            [
+                [0, 4],
+                [1, 5],
+                [2, 6],
+                [3, 7],
+            ],
+        )
+        self.assertEqual(
+            composed_layout[1].global_ranks(8),
+            [
+                [0, 2],
+                [1, 3],
+                [4, 6],
+                [5, 7],
+            ],
+        )
+
+        # Error case.
+        orig_l = _Layout((4, 2), (4, 1))
+        with self.assertRaises(
+            AssertionError,
+        ):
+            right_l = _Layout((2,), (3,))
+            orig_l.composition(right_l)
+
+    def test_check_non_overlap(self):
+        """Test the check_non_overlap method for various layout configurations."""
+        # Test 1: Valid layout - no overlap
+        # sizes=(2,3), strides=(6,1) - stride 6 > span 3, so no overlap
+        layout1 = _Layout((2, 3), (6, 1))
+        self.assertTrue(layout1.check_non_overlap())
+
+        # Test 2: Invalid layout - overlap due to stride < previous span
+        # sizes=(2,3), strides=(2,1) - stride 2 < span 3, causes overlap
+        layout2 = _Layout((2, 3), (2, 1))
+        self.assertFalse(layout2.check_non_overlap())
+
+        # Test 3: Invalid layout - duplicate strides
+        # sizes=(2,3), strides=(1,1) - same stride, causes overlap
+        layout3 = _Layout((2, 3), (1, 1))
+        self.assertFalse(layout3.check_non_overlap())
+
+        # Test 4: Valid layout - single dimension
+        layout4 = _Layout((4,), (1,))
+        self.assertTrue(layout4.check_non_overlap())
+
+        # Test 5: Valid layout - exact boundary case
+        # sizes=(2,3), strides=(3,1) - stride 3 == span 3, valid
+        layout5 = _Layout((2, 3), (3, 1))
+        self.assertTrue(layout5.check_non_overlap())
+
+        # Test 6: Valid layout - multi-dimensional with proper spacing
+        layout6 = _Layout((2, 2, 2), (8, 4, 1))
+        self.assertTrue(layout6.check_non_overlap())
+
+        # Test 7: Valid layout - stride not ordered
+        layout7 = _Layout((2, 2, 2), (4, 1, 2))
+        self.assertTrue(layout7.check_non_overlap())
+
+        # Test 8: Valid layout - Interleaved but no overlap
+        layout8 = _Layout((3, 2), (2, 3))
+        self.assertTrue(layout8.check_non_overlap())
 
 
 if __name__ == "__main__":

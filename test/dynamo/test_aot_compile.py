@@ -1,8 +1,10 @@
 # Owner(s): ["module: dynamo"]
 
+import inspect
 import os
 import pickle
 from contextlib import contextmanager
+from unittest.mock import patch
 
 import torch
 import torch._dynamo.testing
@@ -19,6 +21,9 @@ from torch.fx._graph_pickler import GraphPickler
 from torch.testing._internal.common_utils import instantiate_parametrized_tests
 
 
+MY_LAMBDA = lambda x: x + 1  # noqa: E731
+
+
 class CustomCompiledFunction(torch._dynamo.aot_compile.SerializableCallable):
     def __init__(self, gm: torch.fx.GraphModule, example_inputs: list[torch.Tensor]):
         self.gm = gm
@@ -26,8 +31,27 @@ class CustomCompiledFunction(torch._dynamo.aot_compile.SerializableCallable):
 
     @classmethod
     def serialize_compile_artifacts(cls, fn) -> bytes:
+        import sympy
+
+        from torch._subclasses import FakeTensorMode
+        from torch.fx._graph_pickler import Options
+
         state = fn.__dict__.copy()
-        state["gm"] = GraphPickler.dumps(state["gm"])
+        graph_reducer_override = GraphPickler.reducer_override
+
+        def _graph_reducer_override(self, obj):
+            if (
+                inspect.isclass(obj)
+                and issubclass(obj, sympy.Function)
+                and hasattr(obj, "_torch_unpickler")
+            ):
+                return obj._torch_unpickler, (obj._torch_handler_name,)
+            if isinstance(obj, FakeTensorMode):
+                return type(None), ()
+            return graph_reducer_override(self, obj)
+
+        with patch.object(GraphPickler, "reducer_override", _graph_reducer_override):
+            state["gm"] = GraphPickler.dumps(state["gm"], Options(ops_filter=None))
         return pickle.dumps(state)
 
     @classmethod
@@ -49,6 +73,14 @@ class SimpleLinearModule(torch.nn.Module):
 
     def forward(self, x):
         return self.linear(x)
+
+
+class RepeatInterleaveModule(torch.nn.Module):
+    def forward(self, x):
+        chunk = x.chunk(2, dim=-1)
+        y = chunk[0]
+        y_repeat = y.repeat_interleave(2, dim=-1)
+        return y_repeat
 
 
 @torch._dynamo.config.patch("enable_aot_compile", True)
@@ -111,6 +143,34 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
             actual = compiled_fn(mod, *inputs)
             self.assertEqual(expected, actual)
 
+    def test_aot_compile_repeat_interleave(self):
+        mod = RepeatInterleaveModule()
+
+        def backend(gm, example_inputs):
+            return CustomCompiledFunction(gm, example_inputs)
+
+        inputs = (torch.randn(2, 4),)
+
+        # The first dim should be dynamic to repro the issue of repeat_interleave
+        # torch._dynamo.mark_dynamic(inputs[0], [0])
+
+        compiled_fn = torch.compile(
+            mod,
+            fullgraph=True,
+            backend=backend,
+        ).forward.aot_compile((inputs, {}))
+
+        expected = mod(*inputs)
+        actual = compiled_fn(mod, *inputs)
+        self.assertEqual(expected, actual)
+        compiled_fn.save_compiled_function(self.path())
+        torch._dynamo.reset()
+        with torch.compiler.set_stance("fail_on_recompile"):
+            with open(self.path(), "rb") as f:
+                compiled_fn = torch.compiler.load_compiled_function(f)
+            actual = compiled_fn(mod, *inputs)
+            self.assertEqual(expected, actual)
+
     def test_decorated_function_aot(self):
         def check_inputs(fn):
             def _fn(*args, **kwargs):
@@ -142,6 +202,28 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
             ).aot_compile((example_inputs, {}))
             actual = compiled_fn(*example_inputs)
             self.assertEqual(expected, actual)
+
+    def test_aot_compile_source_info(self):
+        from torch._dynamo.package import SourceInfo
+
+        def fn(x, y):
+            return MY_LAMBDA(x) + y
+
+        compiled_fn = torch.compile(fn, fullgraph=True).aot_compile(
+            ((torch.randn(3, 4), torch.randn(3, 4)), {})
+        )
+
+        source_info = compiled_fn.source_info()
+        self.assertIsInstance(source_info, SourceInfo)
+        self.assertEqual(len(source_info.inlined_sources), 2)
+        self.assertEqual(next(iter(source_info.inlined_sources)).module, __name__)
+        compiled_fn.save_compiled_function(self.path())
+        with open(self.path(), "rb") as f:
+            compiled_fn = torch.compiler.load_compiled_function(f)
+        source_info = compiled_fn.source_info()
+        self.assertIsInstance(source_info, SourceInfo)
+        self.assertEqual(len(source_info.inlined_sources), 2)
+        self.assertEqual(next(iter(source_info.inlined_sources)).module, __name__)
 
     def test_aot_compile_graph_break_error_fmt(self):
         def foo(x, y):

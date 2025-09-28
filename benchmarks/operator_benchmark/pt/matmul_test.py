@@ -13,7 +13,7 @@ mm_short_configs = op_bench.config_list(
         [128, 128, 128, True, False],
         [256, 256, 256, False, True],
     ],
-    cross_product_configs={"device": ["cpu", "cuda"], "dtype": [torch.float]},
+    cross_product_configs={"device": ["cpu", "cuda"]},
     tags=["short"],
 )
 
@@ -31,7 +31,7 @@ mm_long_configs = op_bench.cross_product_configs(
 
 
 class MatMulBenchmark(op_bench.TorchBenchmarkBase):
-    def init(self, M, N, K, trans_a, trans_b, device, dtype):
+    def init(self, M, N, K, trans_a, trans_b, device, dtype=torch.float):
         # Create tensors without requires_grad first, then set it separately
         # This avoids creating graph leaves that cannot be deep copied
         if trans_a:
