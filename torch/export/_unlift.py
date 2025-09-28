@@ -219,7 +219,6 @@ def _convert_guards_code_to_fn(
     return guards_fn
 
 
-@torch._dynamo.disable
 def _check_input_constraints_for_module(self, args, kwargs):
     flat_args_with_path = _check_inputs_match(args, kwargs, self._in_spec)
     _check_input_constraints_for_graph(
