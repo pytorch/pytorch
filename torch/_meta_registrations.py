@@ -4210,18 +4210,30 @@ def meta_round(self, **kwargs):
 
 def shift_dtype_check(fn_name, self, val):
     torch._check(
-        utils.is_integer_dtype(self.dtype),
-        lambda: f"{fn_name}: Expected input tensor to have an integral dtype. Got {self.dtype}",
+        utils.is_integer_dtype(self.dtype) or utils.is_boolean_dtype(self.dtype),
+        lambda: f"{fn_name}: Expected input tensor to have an integral or boolean dtype. Got {self.dtype}",
     )
     if isinstance(val, torch.Tensor):
         torch._check(
-            utils.is_integer_dtype(val.dtype),
-            lambda: f"{fn_name}: Expected shift value to have an integral dtype. Got {val.dtype}",
+            utils.is_integer_dtype(val.dtype) or utils.is_boolean_dtype(val.dtype),
+            lambda: f"{fn_name}: Expected shift value to have an integral or boolean dtype. Got {val.dtype}",
+        )
+        torch._check(
+            not (
+                utils.is_boolean_dtype(self.dtype) and utils.is_boolean_dtype(val.dtype)
+            ),
+            lambda: f"{fn_name} not implemented for 'Bool'",
         )
     else:
         torch._check(
-            isinstance(val, IntLike),
-            lambda: f"{fn_name}: Expected shift value to be an int. Got {val}",
+            isinstance(val, utils.IntLike + utils.BoolLike),
+            lambda: f"{fn_name}: Expected shift value to be an int or bool. Got {val}",
+        )
+        torch._check(
+            not (
+                utils.is_boolean_dtype(self.dtype) and isinstance(val, utils.BoolLike)
+            ),
+            lambda: f"{fn_name} not implemented for 'Bool'",
         )
 
 

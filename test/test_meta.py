@@ -1864,6 +1864,24 @@ class TestMeta(TestCase):
         else:
             self.assertEqual(out_dtype, [in_dtype,])
 
+
+    @parametrize("x_dtype", [torch.int64, torch.int32, torch.bool])
+    @parametrize("y_dtype", [torch.int64, torch.int32, torch.bool])
+    def test_bitwise_shift(self, x_dtype, y_dtype):
+        device = "meta"
+
+        x = torch.empty(10, dtype=x_dtype, device=device)
+        y = torch.empty(10, dtype=y_dtype, device=device)
+        if x_dtype == torch.bool and y_dtype == torch.bool:
+            with self.assertRaisesRegex(RuntimeError, "lshift not implemented for 'Bool'"):
+                x << y
+            with self.assertRaisesRegex(RuntimeError, "rshift not implemented for 'Bool'"):
+                x >> y
+        else:
+            x << y
+            x >> y
+
+
 instantiate_device_type_tests(TestMeta, globals())
 
 def print_op_str_if_not_supported(op_str):
