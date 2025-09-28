@@ -451,7 +451,7 @@ class AsyncTPTest(MultiProcContinuousTest):
         elif gather_dim == 1:
             leading_dims = (BATCH, M // self.world_size)
         else:
-            raise AssertionError("Invalid scale_mode: {scale_mode}")
+            raise AssertionError(f"Invalid scale_mode: {scale_mode}")
 
         torch.manual_seed(42 + rank)
 

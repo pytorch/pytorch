@@ -97,7 +97,7 @@ class TestObserver(QuantizationTestCase):
                                                     reduce_range=reduce_range)]
 
         def _get_ref_params(reduce_range, qscheme, dtype, input_scale, min_val, max_val):
-            assert dtype in _INT_DTYPES, "Not supported dtype: {dtype}, supported dtypes are {_INT_DTYPES}"
+            assert dtype in _INT_DTYPES, f"Not supported dtype: {dtype}, supported dtypes are {_INT_DTYPES}"
             eps = torch.tensor([tolerance])
             if dtype in [torch.qint8, torch.int8]:
                 if reduce_range:
