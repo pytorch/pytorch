@@ -93,6 +93,7 @@ class DebugMode(TorchDispatchMode):
         super().__init__()
         import torch.distributed.tensor  # noqa: F401
 
+        self.supports_higher_order_operators = True
         self.record_torchfunction = record_torchfunction
         self.record_faketensor = record_faketensor
         self.record_realtensor = record_realtensor
