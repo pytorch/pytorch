@@ -27,7 +27,7 @@ class MaxPool2dOperator(Operator):
         padding = 0  # Typically no padding for pooling
 
         # Calculate input dimensions that will produce exact output dimensions
-        # For pooling: out_dim = (in_dim + 2 * padding - kernel_size) / stride + 1
+        # For pooling: out_dim = floor((in_dim + 2 * padding - kernel_size) / stride) + 1
         # Solve for in_dim: in_dim = (out_dim - 1) * stride + kernel_size - 2 * padding
         in_height = (out_height - 1) * stride + kernel_size - 2 * padding
         in_width = (out_width - 1) * stride + kernel_size - 2 * padding
@@ -36,17 +36,28 @@ class MaxPool2dOperator(Operator):
         in_height = max(in_height, kernel_size)
         in_width = max(in_width, kernel_size)
 
-        # Verify the calculation works for both dimensions
+        # Recompute output shape using floor division to match PyTorch's behavior
         calculated_out_height = (in_height + 2 * padding - kernel_size) // stride + 1
         calculated_out_width = (in_width + 2 * padding - kernel_size) // stride + 1
 
         if calculated_out_height != out_height or calculated_out_width != out_width:
-            # If it doesn't work, use kernel_size=stride=1 for guaranteed match
-            kernel_size = 1
-            stride = 1
-            padding = 0
-            in_height = out_height
-            in_width = out_width
+            # Try to find an input size that matches the requested output size
+            # Use the formula: out_dim = floor((in_dim + 2*padding - kernel_size)/stride) + 1
+            # So, in_dim = (out_dim - 1) * stride + kernel_size - 2 * padding
+            in_height = (out_height - 1) * stride + kernel_size - 2 * padding
+            in_width = (out_width - 1) * stride + kernel_size - 2 * padding
+
+            # Recompute output shape
+            calculated_out_height = (in_height + 2 * padding - kernel_size) // stride + 1
+            calculated_out_width = (in_width + 2 * padding - kernel_size) // stride + 1
+
+            # If still not matching, fallback to kernel_size=stride=1 for guaranteed match
+            if calculated_out_height != out_height or calculated_out_width != out_width:
+                kernel_size = 1
+                stride = 1
+                padding = 0
+                in_height = out_height
+                in_width = out_width
 
         # Input tensor: (batch_size, channels, in_height, in_width)
         input_size = (batch_size, channels, in_height, in_width)
