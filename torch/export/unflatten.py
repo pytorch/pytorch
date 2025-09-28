@@ -1363,14 +1363,16 @@ class _ModuleFrame:
             self.print(i, node.meta.get("nn_module_stack"), node.format_node())
 
         # Copy all graph inputs
-        node_idx: int = 0
-        node = self.nodes[node_idx]
-        while node.op == "placeholder":
-            self.copy_node(node)
-            node_idx += 1
+        # Index of the first non-placeholder node in the graph
+        first_non_placeholder = 0
+        for node_idx in range(len(self.nodes)):
             node = self.nodes[node_idx]
+            if node.op == "placeholder":
+                self.copy_node(node)
+            elif first_non_placeholder == 0:
+                first_non_placeholder = node_idx
 
-        self.run_from(node_idx)
+        self.run_from(first_non_placeholder)
 
         # Copy graph outputs
         for node in self.flat_graph.nodes:
@@ -1386,7 +1388,12 @@ class _ModuleFrame:
         # Walk through the graph, building up a new graph with the right submodules
         while node_idx < len(self.nodes):
             node = self.nodes[node_idx]
-            assert node.op != "placeholder"
+            if node.op == "placeholder":
+                # This is a placeholder node for a graph input which has been
+                # taken care of before `run_from` (see `run_outer`). We can thus
+                # skip this node.
+                node_idx += 1
+                continue
 
             self.print()
             self.print("STEP", node_idx, node.format_node())
