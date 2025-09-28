@@ -511,8 +511,8 @@ class TORCH_API Context {
           {{"mkldnn", "rnn"}, "none"},
           {{"mkldnn", "matmul"}, "none"},
           {{"cuda", "all"}, "none"},
-          {{"cuda", "conv"}, "none"},
-          {{"cuda", "rnn"}, "none"},
+          {{"cuda", "conv"}, "tf32"},
+          {{"cuda", "rnn"}, "tf32"},
           {{"cuda", "matmul"},
            float32_matmul_precision == at::Float32MatmulPrecision::HIGHEST
                ? "none"
