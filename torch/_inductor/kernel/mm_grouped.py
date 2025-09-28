@@ -337,10 +337,8 @@ triton_grouped_mm_source = r"""
                     )
                     a_mask = (offs_am[:, None] < m_size) & (group_offs_k[None, :] < k_size)
                     b_mask = (offs_bn[:, None] < n_size) & (group_offs_k[None, :] < k_size)
-                    a = tl.load(a_ptrs, mask=a_mask)
-                    b = tl.load(b_ptrs, mask=b_mask)
-                    a = tl.where(a_mask, a, 0)
-                    b = tl.where(b_mask, b, 0)
+                    a = tl.load(a_ptrs, mask=a_mask, other=0)
+                    b = tl.load(b_ptrs, mask=b_mask, other=0)
 {%- if USE_FAST_ACCUM %}
                     accumulator = tl.dot(a, b.T, accumulator)
 {%- else %}
@@ -362,6 +360,7 @@ triton_grouped_mm_source = r"""
 {%- endif %}
                     + offs_am[:, None],
                     mask=offs_am[:, None] < m_size,
+                    other=0,
                 )
                 scale_b = tl.load(
                     scale_b_ptr
@@ -372,6 +371,7 @@ triton_grouped_mm_source = r"""
 {%- endif %}
                     + offs_bn[None, :],
                     mask=offs_bn[None, :] < n_size,
+                    other=0,
                 )
                 c = accumulator.to(tl.float32) * scale_a * scale_b
 {%- else %}

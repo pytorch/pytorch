@@ -30,7 +30,7 @@ CUDA_ARCHES_CUDNN_VERSION = {
 }
 
 # NOTE: Please also update the ROCm sources in `PIP_SOURCES` in tools/nightly.py when changing this
-ROCM_ARCHES = ["6.3", "6.4"]
+ROCM_ARCHES = ["6.4", "7.0"]
 
 XPU_ARCHES = ["xpu"]
 
@@ -53,7 +53,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "nvidia-cusolver-cu12==11.7.1.2; platform_system == 'Linux' | "
         "nvidia-cusparse-cu12==12.5.4.2; platform_system == 'Linux' | "
         "nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux' | "
-        "nvidia-nccl-cu12==2.27.5; platform_system == 'Linux' | "
+        "nvidia-nccl-cu12==2.28.3; platform_system == 'Linux' | "
         "nvidia-nvshmem-cu12==3.3.24; platform_system == 'Linux' | "
         "nvidia-nvtx-cu12==12.6.77; platform_system == 'Linux' | "
         "nvidia-nvjitlink-cu12==12.6.85; platform_system == 'Linux' | "
@@ -70,7 +70,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "nvidia-cusolver-cu12==11.7.3.90; platform_system == 'Linux' | "
         "nvidia-cusparse-cu12==12.5.8.93; platform_system == 'Linux' | "
         "nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux' | "
-        "nvidia-nccl-cu12==2.27.5; platform_system == 'Linux' | "
+        "nvidia-nccl-cu12==2.28.3; platform_system == 'Linux' | "
         "nvidia-nvshmem-cu12==3.3.24; platform_system == 'Linux' | "
         "nvidia-nvtx-cu12==12.8.90; platform_system == 'Linux' | "
         "nvidia-nvjitlink-cu12==12.8.93; platform_system == 'Linux' | "
@@ -87,7 +87,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "nvidia-cusolver==12.0.3.29; platform_system == 'Linux' | "
         "nvidia-cusparse==12.6.2.49; platform_system == 'Linux' | "
         "nvidia-cusparselt-cu13==0.8.0; platform_system == 'Linux' | "
-        "nvidia-nccl-cu13==2.27.7; platform_system == 'Linux' | "
+        "nvidia-nccl-cu13==2.28.3; platform_system == 'Linux' | "
         "nvidia-nvshmem-cu13==3.3.24; platform_system == 'Linux' | "
         "nvidia-nvtx==13.0.39; platform_system == 'Linux' | "
         "nvidia-nvjitlink==13.0.39; platform_system == 'Linux' | "

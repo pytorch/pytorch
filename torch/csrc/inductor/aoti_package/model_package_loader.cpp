@@ -571,6 +571,107 @@ class RAIIMinizArchive {
   mz_zip_archive _zip_archive{};
 };
 
+std::unordered_map<std::string, std::string> AOTIModelPackageLoader::
+    load_metadata_from_package(
+        const std::string& model_package_path,
+        const std::string& model_name) {
+  // Open the zip archive
+  RAIIMinizArchive zip_archive{model_package_path};
+  auto found_filenames{zip_archive.get_filenames()};
+  if (found_filenames.empty()) {
+    throw std::runtime_error("No files found in zip archive.");
+  }
+
+  // Find the file prefix (similar to constructor logic)
+  std::string file_prefix;
+  if (found_filenames.size() >= 2) {
+    size_t pos = found_filenames[0].find('/');
+    std::string prefix0 = found_filenames[0].substr(0, pos);
+    pos = found_filenames[1].find('/');
+    std::string prefix1 = found_filenames[1].substr(0, pos);
+
+    if (!prefix0.empty() && !prefix1.empty() && prefix0 == prefix1) {
+      file_prefix = prefix0 + "/";
+    }
+  }
+
+  // Construct the expected metadata file path within the zip
+  std::string model_directory = normalize_path_separator(
+      file_prefix + "data" + k_separator + "aotinductor" + k_separator +
+      model_name);
+  std::string metadata_suffix = "wrapper_metadata.json";
+
+  std::string metadata_filename;
+
+  for (auto const& zip_filename_str : found_filenames) {
+    auto cur_filename = normalize_path_separator(zip_filename_str);
+
+    if (c10::starts_with(cur_filename, model_directory) &&
+        c10::ends_with(cur_filename, metadata_suffix)) {
+      metadata_filename = cur_filename;
+      break;
+    }
+  }
+
+  if (metadata_filename.empty()) {
+    std::string found_filenames_str;
+    for (const std::string& filename : found_filenames) {
+      found_filenames_str += filename + "\n";
+    }
+    std::string model_names_str;
+    for (const std::string& model_name_tmp :
+         find_model_names(found_filenames)) {
+      model_names_str += model_name_tmp + "\n";
+    }
+
+    throw std::runtime_error(
+        "Failed to find a generated cpp file or so file for model '" +
+        model_name +
+        "' in the zip archive.\n\n"
+        "Available models in the archive:\n" +
+        model_names_str +
+        "\n\n"
+        "To load a specific model, please provide its name using the `model_name` parameter when calling AOTIModelPackageLoader() or torch._inductor.package.load_package.\n\n"
+        "The following files were loaded from the archive:\n" +
+        found_filenames_str);
+  }
+
+  // Create temporary directory for extraction
+  std::string temp_dir = normalize_path_separator(create_temp_dir());
+  std::string output_path_str =
+      normalize_path_separator(temp_dir + k_separator + metadata_filename);
+
+  // Create the parent directory if it doesn't exist
+  size_t parent_path_idx = output_path_str.find_last_of(k_separator);
+  if (parent_path_idx == std::string::npos) {
+    throw std::runtime_error(
+        "Failed to find parent path in " + output_path_str);
+  }
+  std::string parent_path = output_path_str.substr(0, parent_path_idx);
+  if (!recursive_mkdir(parent_path)) {
+    throw std::runtime_error(fmt::format(
+        "Failed to create directory {}: {}",
+        parent_path,
+        c10::utils::str_error(errno)));
+  }
+
+  LOG(INFO) << "Extract file: " << metadata_filename << " to "
+            << output_path_str;
+  zip_archive.extract_file(metadata_filename, output_path_str);
+
+  // Parse the metadata json file
+  const nlohmann::json metadata_json_obj = load_json_file(output_path_str);
+
+  std::unordered_map<std::string, std::string> metadata;
+  for (auto& item : metadata_json_obj.items()) {
+    metadata[item.key()] = item.value().get<std::string>();
+  }
+  // Clean up temporary directory
+  recursive_rmdir(temp_dir);
+
+  return metadata;
+}
+
 AOTIModelPackageLoader::AOTIModelPackageLoader(
     const std::string& model_package_path,
     const std::string& model_name,
