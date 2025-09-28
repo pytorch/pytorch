@@ -2,8 +2,8 @@
 
 #include <ATen/core/boxing/impl/make_boxed_from_unboxed_functor.h>
 #include <ATen/core/function.h>
-#include <c10/util/Metaprogramming.h>
-#include <c10/util/TypeTraits.h>
+#include <torch/headeronly/util/Metaprogramming.h>
+#include <torch/headeronly/util/TypeTraits.h>
 #include <c10/util/irange.h>
 
 #include <functional>
