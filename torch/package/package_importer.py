@@ -8,9 +8,9 @@ import linecache
 import os
 import sys
 import types
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from contextlib import contextmanager
-from typing import Any, Callable, cast, Optional, TYPE_CHECKING, Union
+from typing import Any, cast, Optional, TYPE_CHECKING, Union
 from weakref import WeakValueDictionary
 
 import torch

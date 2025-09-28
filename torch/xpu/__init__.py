@@ -9,8 +9,9 @@ This package is lazily initialized, so you can always import it, and use
 
 import threading
 import traceback
+from collections.abc import Callable
 from functools import lru_cache
-from typing import Any, Callable, Optional, Union
+from typing import Any, Optional, Union
 
 import torch
 import torch._C
