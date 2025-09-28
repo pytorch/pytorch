@@ -1021,8 +1021,6 @@ def conv(fake_mode, func, *args, **kwargs):
             # TODO: We can make this a little more faithful with best effort
             # channels last detection (but only if it's statically obvious!)
             mem_fmt = None
-        elif k == 3 and not kwargs["input"].is_mkldnn and not kwargs["input"].is_xpu:
-            mem_fmt = None
         else:
             if func is aten.convolution.default:
                 conv_backend = torch._C._select_conv_backend(**kwargs)
@@ -1039,15 +1037,40 @@ def conv(fake_mode, func, *args, **kwargs):
                     groups=kwargs["groups"],
                     bias_sizes=kwargs["bias_sizes"],
                 )
+            # Expand 1d -> 2d.
+            # Note: Avoid expanding before calling _select_conv_backend,
+            # as the function handles 2D expansion internally.
+            if k == 3 and not kwargs["input"].is_mkldnn and not kwargs["input"].is_xpu:
+                # Note: Using input.to(memory_format=contiguous) does not work.
+                kwargs["input"] = kwargs["input"].contiguous().unsqueeze(2)
+                kwargs["weight"] = kwargs["weight"].unsqueeze(2)
+                if len(kwargs["stride"]) == 1:
+                    kwargs["stride"].insert(0, 1)
+                    kwargs["padding"].insert(0, 0)
+                    kwargs["dilation"].insert(0, 1)
+                    kwargs["output_padding"].insert(0, 0)
             mem_fmt = torch._C._conv_determine_backend_memory_format(
                 kwargs["input"], kwargs["weight"], conv_backend
             )
+            # revert 2d -> 1d
+            if k == 3 and not kwargs["input"].is_mkldnn and not kwargs["input"].is_xpu:
+                kwargs["input"] = kwargs["input"].squeeze(2)
+                kwargs["weight"] = kwargs["weight"].squeeze(2)
+                if len(kwargs["stride"]) == 2:
+                    kwargs["stride"].pop(0)
+                    kwargs["padding"].pop(0)
+                    kwargs["dilation"].pop(0)
+                    kwargs["output_padding"].pop(0)
 
     def convert(t, mem_fmt):
         if t is None:
             return t
         if mem_fmt is not None:
-            t = t.to(memory_format=mem_fmt)
+            # channels last only support 4d, try to expand dim then convert it back later.
+            if t.dim() == 3 and mem_fmt == torch.channels_last:
+                t = t.unsqueeze(2).to(memory_format=mem_fmt).squeeze(2)
+            else:
+                t = t.to(memory_format=mem_fmt)
         return FakeTensor(fake_mode, t, device)
 
     with in_kernel_invocation_manager(fake_mode):
