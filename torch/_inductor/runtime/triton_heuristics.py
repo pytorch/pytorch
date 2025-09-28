@@ -755,6 +755,8 @@ class CachingAutotuner(KernelInterface):
             "debug": compile_meta["debug"],
             "sanitize_overflow": False,  # turn off additional asserts added for overflow checks
         }
+        if "enable_fp_fusion" in compile_meta:
+            options["enable_fp_fusion"] = compile_meta["enable_fp_fusion"]
         if HAS_WARP_SPEC:
             options.update(
                 {
@@ -867,25 +869,34 @@ class CachingAutotuner(KernelInterface):
             )
             # reset to zero before evaluating any config
             self.reset_to_zero_args(*args, **kwargs)
+            kernel_name = self.inductor_meta.get("kernel_name", "triton kernel")
             if autograd_profiler._is_profiler_enabled:
                 profiler_kwargs = self.get_profiler_kwargs(stream, launcher)
                 with torch._C._profiler._RecordFunctionFast(
-                    self.inductor_meta.get("kernel_name", "triton kernel"),
+                    kernel_name,
                     cloned_args,
                     profiler_kwargs,
                 ):
+                    try:
+                        launcher(
+                            *cloned_args,
+                            **cloned_kwargs,
+                            stream=stream,
+                        )
+                    except Exception:
+                        log.error("Failed during launch %s: ", kernel_name)
+                        raise
+
+            else:
+                try:
                     launcher(
                         *cloned_args,
                         **cloned_kwargs,
                         stream=stream,
                     )
-
-            else:
-                launcher(
-                    *cloned_args,
-                    **cloned_kwargs,
-                    stream=stream,
-                )
+                except Exception:
+                    log.error("Failed during launch %s: ", kernel_name)
+                    raise
             self.restore_args_from_cpu(cpu_copies)
 
         # only use profiler when not already in a profiler instance
@@ -911,7 +922,11 @@ class CachingAutotuner(KernelInterface):
             return {}
 
         copies = {}
-        budget = torch.cuda.max_memory_allocated() - torch.cuda.memory_allocated()
+        try:
+            budget = torch.cuda.max_memory_allocated() - torch.cuda.memory_allocated()
+        except RuntimeError:
+            # Possibly a custom CUDA allocator, see https://github.com/pytorch/pytorch/issues/163257
+            return {}
 
         def maybe_copy(name, arg):
             if name in self.mutated_arg_names and arg.is_cuda:
@@ -1975,7 +1990,6 @@ class DebugAutotuner(CachingAutotuner):
             kernel_name = f"{max(possible_names, key=len)}"
             if not re.match(self.regex_filter, kernel_name):
                 return
-
             if len(self.launchers) != 1:
                 if len(self.launchers) == 0:
                     start_time = time.time_ns()
@@ -2898,6 +2912,9 @@ def _persistent_reduction_configs(
 ):
     xnumel = size_hints["x"]
     rnumel = get_total_reduction_numel(size_hints)
+    loads_and_stores = inductor_meta.get("num_load", 0) + inductor_meta.get(
+        "num_store", 0
+    )
 
     MAX_PERSISTENT_BLOCK_NUMEL = 4096
 
@@ -2929,8 +2946,26 @@ def _persistent_reduction_configs(
     if "y" in size_hints:
         pass
     # TODO(jansel): we should be able to improve these heuristics
-    elif reduction_hint == ReductionHint.INNER and rnumel >= 256:
-        configs = configs[:1]
+    elif reduction_hint == ReductionHint.INNER:
+        if rnumel > 1024:
+            configs = configs[:1]
+        else:
+            x_block = 8
+            if xnumel // x_block < 128 or (loads_and_stores >= 5 and rnumel >= 256):
+                # If loads/stores greater than 5, a lot of register pressure
+                # rnumel < 256 means no vectorized loads if we split up r dim
+                # so xblock still needs to be larger
+                x_block = 1
+
+            configs = [
+                triton_config_reduction(
+                    size_hints,
+                    x_block,
+                    rnumel,
+                    register_intensive=True,
+                )
+            ]
+
     elif reduction_hint == ReductionHint.OUTER:
         configs = configs[-1:]
     elif reduction_hint == ReductionHint.OUTER_TINY:

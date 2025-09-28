@@ -5606,7 +5606,7 @@ class Scheduler:
                         V.graph.zero_dim_cpu_tensor_list.add(read.name)
 
 
-class BaseScheduling:
+class BaseScheduling:  # noqa: docstring_linter
     def __init__(self, scheduler: Optional[Scheduler]):
         super().__init__()
         self.scheduler = scheduler
@@ -5749,3 +5749,19 @@ class BaseScheduling:
         and memory copy time in milliseconds on randomly generated inputs.
         """
         raise NotImplementedError
+
+    def codegen_comment(
+        self,
+        node_schedule: Sequence[BaseSchedulerNode],
+        kernel_name: Optional[str] = None,
+    ) -> None:
+        if kernel_name:
+            from torch._inductor.debug import set_kernel_post_grad_provenance_tracing
+
+            debug_handle = set_kernel_post_grad_provenance_tracing(
+                node_schedule,  # type: ignore[arg-type]
+                kernel_name,
+            )
+            V.graph.wrapper_code.write_provenance_debug_handle(
+                kernel_name, debug_handle
+            )
