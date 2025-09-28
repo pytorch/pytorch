@@ -42,6 +42,7 @@ IS_JETSON = LazyVal(lambda: torch.cuda.is_available() and (torch.cuda.get_device
 IS_SM89 = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() == (8, 9))
 IS_SM90 = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() == (9, 0))
 IS_SM100 = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() == (10, 0))
+IS_SM121 = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() == (12, 1))
 
 def evaluate_gfx_arch_within(arch_list):
     if not torch.cuda.is_available():
