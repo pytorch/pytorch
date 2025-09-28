@@ -501,7 +501,7 @@ static void child_atfork() {
 bool THPEngine_initModule(PyObject* module) {
 #ifndef _WIN32
   if (pthread_atfork(nullptr, nullptr, child_atfork) != 0) {
-    throw std::runtime_error("unable to set pthread_atfork handler");
+    TORCH_CHECK(false, "unable to set pthread_atfork handler");
   }
 #endif
   if (PyType_Ready(&THPEngineType) < 0)

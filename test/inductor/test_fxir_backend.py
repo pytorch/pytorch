@@ -990,6 +990,48 @@ def forward(self, arg0_1, arg1_1, arg2_1):
     return [buf1, buf2]""",  # noqa: B950
         )
 
+    @parametrize("length", (4, 8))
+    def test_cond_dynamic_shape_pred_scalar_closure(self, length: int):
+        """
+        Test cond using a predicate computed from dynamic shapes.
+        Also test a dynamic scalar computed outside the branches.
+        """
+
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                z = x.reshape(-1)
+                a = y.shape[0]
+
+                def true_fn(x):
+                    return x + a
+
+                def false_fn(x):
+                    return true_fn(x) / 2
+
+                return torch.cond(x.shape[0] > 5, true_fn, false_fn, (z,))
+
+        (x, y) = [
+            torch.randn(shape, device=self.device)
+            for shape in [(length // 2,) * 2, (length,)]
+        ]
+        dynamic_shapes = {
+            "x": {0: Dim.DYNAMIC},
+            "y": {0: Dim.DYNAMIC},
+        }
+        self.check(M(), (x, y), dynamic_shapes=dynamic_shapes)
+
+    def test_dynamic_scalar_output(self):
+        """
+        Test an output scalar from dynamic shapes.
+        """
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x.shape[0] * 3
+
+        x = torch.randn(7, device=self.device)
+        self.check(M(), (x,), dynamic_shapes=({0: Dim.DYNAMIC},))
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests

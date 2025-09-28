@@ -193,21 +193,19 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
         dtype = torch.float
         numel = 1024
         tensor = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(self.rank)
-        symm_mem.rendezvous(tensor, group=group_name)
+        hdl = symm_mem.rendezvous(tensor, group=group_name)
+        signal_pad = hdl.get_signal_pad(self.rank)
+        signal_val = 5
 
         if self.rank == 0:
-            torch.ops.symm_mem.nvshmem_put(tensor, 1)
-            # TODO: remove after we have wait_signal
-            dist.barrier()
+            torch.ops.symm_mem.nvshmem_put_with_signal(
+                tensor, signal_pad, signal_val, 1
+            )
         elif self.rank == 1:
-            # handle.wait_signal(src_rank=0)
-            # TODO: remove after we have wait_signal
-            dist.barrier()
+            torch.ops.symm_mem.nvshmem_wait_for_signal(signal_pad, signal_val, 0)
             torch.testing.assert_close(
                 tensor, torch.zeros(numel, dtype=dtype, device=self.device)
             )
-        else:
-            dist.barrier()
 
     @skipIfRocm
     def test_nvshmem_get(self) -> None:
@@ -299,28 +297,33 @@ class NVSHMEMAll2AllTest(MultiProcContinuousTest):
             torch.randn(max_inp_numel, dtype=dtype, device=self.device)
         )
         out = symm_mem.empty(max_out_numel, dtype=dtype, device=self.device).fill_(-1)
-        in_out_splits = symm_mem.empty(
-            (3, self.world_size), dtype=torch.int64, device=self.device
+        in_splits = symm_mem.empty(
+            self.world_size, dtype=torch.int64, device=self.device
+        )
+        out_splits_offsets = symm_mem.empty(
+            (2, self.world_size), dtype=torch.int64, device=self.device
         )
         # Row 0 is input splits
-        in_out_splits[0].copy_(inp_splits)
+        in_splits.copy_(inp_splits)
 
         # Sync all ranks to ensure remote tensors are allocated
         dist.barrier()
 
-        torch.ops.symm_mem.all_to_all_vdev(inp, out, in_out_splits, group_name)
+        torch.ops.symm_mem.all_to_all_vdev(
+            inp, out, in_splits, out_splits_offsets, group_name
+        )
 
         # Check input splits (row 0) -- should not change
-        torch.testing.assert_close(in_out_splits[0], inp_splits)
+        torch.testing.assert_close(in_splits, inp_splits)
 
         # Check output splits (row 1)
-        torch.testing.assert_close(in_out_splits[1], out_splits)
+        torch.testing.assert_close(out_splits_offsets[0], out_splits)
 
         # Check output offsets (row 2)
         out_offsets = torch.cumsum(out_splits, dim=0)  # inclusive scan
         # output offsets from `all_to_all_vdev` is exclusive scan
-        self.assertEqual(in_out_splits[2][0], 0)
-        torch.testing.assert_close(in_out_splits[2][1:], out_offsets[:-1])
+        self.assertEqual(out_splits_offsets[1][0], 0)
+        torch.testing.assert_close(out_splits_offsets[1][1:], out_offsets[:-1])
 
         # Check data
         expected = torch.empty(out_numel, dtype=dtype, device=self.device)
@@ -460,14 +463,6 @@ class NVSHMEMAll2AllTest(MultiProcContinuousTest):
             0, k * nsplits, k, dtype=torch.int64, device=self.device
         )
 
-        # Exchange input splits to get output splits
-        out_splits = torch.zeros_like(inp_splits)
-        # First need to transpose the input splits
-        inp_splits_t = inp_splits.reshape(ne, self.world_size).t().contiguous()
-        dist.all_to_all_single(out_splits, inp_splits_t)
-
-        # Actual number of output elements
-        out_numel = out_splits.sum().item()
         # Max number of input elements (must be a constant across ranks for symmetric memory allocation)
         # Remember that we up-align each input split to k?
         max_inp_numel = k * nsplits
@@ -508,6 +503,11 @@ class NVSHMEMAll2AllTest(MultiProcContinuousTest):
         torch.testing.assert_close(in_splits_offsets[1], inp_offsets)
 
         # Check output splits (row 1)
+        # Exchange input splits to get output splits
+        out_splits = torch.zeros_like(inp_splits)
+        # First need to transpose the input splits
+        inp_splits_t = inp_splits.reshape(ne, self.world_size).t().contiguous()
+        dist.all_to_all_single(out_splits, inp_splits_t)
         torch.testing.assert_close(received_out_splits, out_splits)
 
         # Check output offsets (row 2)
@@ -550,6 +550,8 @@ class NVSHMEMAll2AllTest(MultiProcContinuousTest):
 
         # Concatenate the output chunks received from all peers
         out_expected = torch.cat(out_chunks)
+        # Actual number of output elements
+        out_numel = out_splits.sum().item()
         self.assertEqual(out_expected.shape[0], out_numel)
 
         # Check data

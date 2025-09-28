@@ -1,23 +1,39 @@
 """Torchfuzz operators module."""
 
-from torchfuzz.operators.add import AddOperator
 from torchfuzz.operators.arg import ArgOperator
 from torchfuzz.operators.base import Operator
 from torchfuzz.operators.constant import ConstantOperator
 from torchfuzz.operators.item import ItemOperator
-from torchfuzz.operators.mul import MulOperator
 from torchfuzz.operators.registry import get_operator, list_operators, register_operator
-from torchfuzz.operators.scalar_add import ScalarAddOperator
-from torchfuzz.operators.scalar_multiply import ScalarMultiplyOperator
+from torchfuzz.operators.scalar_pointwise import (
+    ScalarAddOperator,
+    ScalarDivOperator,
+    ScalarMulOperator,
+    ScalarPointwiseOperator,
+    ScalarSubOperator,
+)
+from torchfuzz.operators.tensor_pointwise import (
+    AddOperator,
+    DivOperator,
+    MulOperator,
+    PointwiseOperator,
+    SubOperator,
+)
 
 
 __all__ = [
     "Operator",
+    "PointwiseOperator",
     "AddOperator",
     "MulOperator",
-    "ItemOperator",
+    "SubOperator",
+    "DivOperator",
+    "ScalarPointwiseOperator",
     "ScalarAddOperator",
-    "ScalarMultiplyOperator",
+    "ScalarMulOperator",
+    "ScalarSubOperator",
+    "ScalarDivOperator",
+    "ItemOperator",
     "ConstantOperator",
     "ArgOperator",
     "get_operator",
