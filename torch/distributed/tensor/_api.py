@@ -781,6 +781,19 @@ class DTensor(torch.Tensor):
         """
         return self._spec.placements
 
+    def _raise_if_contains_partial_placements(self) -> None:
+        """
+        Raise an error if the DTensor contains partial placements.
+        """
+        for placement in self._spec.placements:
+            if not isinstance(placement, Partial):
+                continue
+
+            raise ValueError(
+                "Any checkpointing related operations are not supported for "
+                "DTensor with partial placements!"
+            )
+
     @property
     def shard_order(self) -> Optional[tuple[tuple[int, ...], ...]]:
         """
@@ -797,6 +810,7 @@ class DTensor(torch.Tensor):
         return self._spec.shard_order
 
     def __create_write_items__(self, fqn: str, object: Any):
+        self._raise_if_contains_partial_placements()
         from torch.distributed.checkpoint.planner_helpers import (
             _create_write_items_for_dtensor,
         )
@@ -819,6 +833,7 @@ class DTensor(torch.Tensor):
         Returns:
             A List[:class:`ChunkStorageMetadata`] object that represents the shard size/offset on the current rank.
         """
+        self._raise_if_contains_partial_placements()
         from torch.distributed.checkpoint.planner_helpers import (
             _create_chunk_from_dtensor,
         )
@@ -831,6 +846,7 @@ class DTensor(torch.Tensor):
             raise RuntimeError("Unsupported tensor type!")
 
     def __get_tensor_shard__(self, index):
+        self._raise_if_contains_partial_placements()
         if hasattr(self._local_tensor, "__get_tensor_shard__"):
             return self._local_tensor.__get_tensor_shard__(index)  # type: ignore[attr-defined]
         elif isinstance(self._local_tensor, torch.Tensor):
