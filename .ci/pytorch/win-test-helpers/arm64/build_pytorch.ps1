@@ -70,7 +70,7 @@ sccache --zero-stats
 sccache --show-stats
 
 # Build the wheel
-python setup.py bdist_wheel
+python -m build --wheel --no-build-isolation
 if ($LASTEXITCODE -ne 0) { exit 1 }
 
 # Install the wheel locally

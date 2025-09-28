@@ -182,7 +182,7 @@ maml_omniglot,pass,0
 
 
 
-microbench_unbacked_tolist_sum,pass,1
+microbench_unbacked_tolist_sum,pass,2
 
 
 
@@ -318,7 +318,7 @@ timm_vovnet,pass,0
 
 
 
-torch_multimodal_clip,pass,3
+torch_multimodal_clip,pass,0
 
 
 
