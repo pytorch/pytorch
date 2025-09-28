@@ -60,7 +60,7 @@ op_bench.generate_pt_tests_from_op_list(
 )
 op_bench.generate_pt_gradient_tests_from_op_list(
     batched_binary_ops,
-    batched_binary_configs_short + batched_binary_configs_long,
+    batched_binary_configs_long,
     BatchedBinaryOpBenchmark,
 )
 
@@ -98,7 +98,7 @@ op_bench.generate_pt_tests_from_op_list(
 )
 op_bench.generate_pt_gradient_tests_from_op_list(
     batched_ternary_ops,
-    batched_binary_configs_short + batched_binary_configs_long,
+    batched_binary_configs_long,
     BatchedTernaryOpBenchmark,
 )
 

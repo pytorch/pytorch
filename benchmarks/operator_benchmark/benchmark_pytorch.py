@@ -161,6 +161,8 @@ class PyTorchOperatorTestCase:
         if self._compile_forward_graph is None:
             self._compile_forward_graph = self._generate_compile_forward_graph()
         self._compile_forward_graph(num_runs)
+        if cuda_sync:
+            torch.cuda.synchronize(torch.cuda.current_device())
 
     def _print_per_iter(self):
         # print last 50 values
