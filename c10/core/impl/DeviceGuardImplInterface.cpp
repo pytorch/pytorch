@@ -21,7 +21,6 @@ DeviceGuardImplRegistrar::DeviceGuardImplRegistrar(
   registerDeviceGuard(type, impl);
 }
 
-
 namespace {
 thread_local std::unique_ptr<DeviceGuardImplInterface> tls_fake_device_guard =
     nullptr;

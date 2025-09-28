@@ -175,7 +175,8 @@ at::Tensor createEmptyTensor(
 
 void initModule(PyObject* module) {
   auto py_module = py::reinterpret_borrow<py::module>(module);
-  auto _acc = py_module.def_submodule("_acc", "classes related to custom accelerators");
+  auto _acc =
+      py_module.def_submodule("_acc", "classes related to custom accelerators");
 
   py::class_<at::PrivateUse1HooksInterface, PythonHooks>(
       _acc.ptr(), "PrivateUse1Hooks")
@@ -197,10 +198,6 @@ void initModule(PyObject* module) {
       "register_python_privateuseone_device_guard",
       &registerPythonPrivateUse1DeviceGuard);
   _acc.def("create_empty_tensor", &createEmptyTensor);
-
-  // Make sure to unclean up python objects when python interpreter exits
-  py::module_::import("atexit").attr("register")(
-      py::cpp_function(cleanupPyObj));
 }
 
 } // namespace torch::acc

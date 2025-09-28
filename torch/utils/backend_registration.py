@@ -464,7 +464,7 @@ class _DummyBackendModule:
         return 1
 
 
-class _DummyPrivateUse1Hook(torch._C.PrivateUse1Hooks):
+class _DummyPrivateUse1Hook(torch._C._acc.PrivateUse1Hooks):
     def is_available(self):
         return True
 
@@ -475,15 +475,17 @@ class _DummyPrivateUse1Hook(torch._C.PrivateUse1Hooks):
         return True
 
 
-class _DummyDeviceGuard(torch._C.DeviceGuard):
+class _DummyDeviceGuard(torch._C._acc.DeviceGuard):
     def type_(self):
         return torch._C._autograd.DeviceType.PrivateUse1
 
 
-def setup_privateuseone_for_python_backend(
+def _setup_privateuseone_for_python_backend(
     rename=None, backend_module=None, hook=None, device_guard=None
 ):
     """This function will prepare the PrivateUse1 dispatch key to be used as a python backend.
+
+    WARNING: this API is experimental and might change without notice.
 
     Formally, this registers things that Pytorch expects a registered backend
     in C++ to have: including device guards, hooks, and backend modules and what not.
@@ -513,5 +515,5 @@ def setup_privateuseone_for_python_backend(
     if device_guard is None:
         device_guard = _DummyDeviceGuard()
     torch._register_device_module(rename, backend_module)
-    torch._C.register_python_privateuseone_hook(hook)
-    torch._C.register_python_privateuseone_device_guard(device_guard)
+    torch._C._acc.register_python_privateuseone_hook(hook)
+    torch._C._acc.register_python_privateuseone_device_guard(device_guard)

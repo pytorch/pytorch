@@ -3,10 +3,10 @@ import numpy as np
 import torch
 import torch._C
 from torch.testing._internal.common_utils import run_tests, TestCase
-from torch.utils.backend_registration import setup_privateuseone_for_python_backend
+from torch.utils.backend_registration import _setup_privateuseone_for_python_backend
 
 
-setup_privateuseone_for_python_backend("npy")
+_setup_privateuseone_for_python_backend("npy")
 
 aten = torch.ops.aten
 
@@ -17,7 +17,7 @@ class MyDeviceTensor(torch.Tensor):
     @staticmethod
     def __new__(cls, size, dtype, raw_data=None, requires_grad=False):
         # Use a meta Tensor here to be used as the wrapper
-        res = torch._C.create_empty_tensor(size, dtype)
+        res = torch._C._acc.create_empty_tensor(size, dtype)
         res.__class__ = MyDeviceTensor
         return res
 
@@ -40,18 +40,14 @@ def unwrap(arr):
     return arr.raw_data
 
 
-aten_library = torch.library.Library("aten", "FRAGMENT")
-
-
 # Add some ops
+@torch.library.impl("aten::add.Tensor", "privateuseone")
 def add(t1, t2):
     out = unwrap(t1) + unwrap(t2)
     return wrap(out, out.shape, torch.float32)
 
 
-aten_library.impl("add.Tensor", add, "PrivateUse1")
-
-
+@torch.library.impl("aten::mul.Tensor", "privateuseone")
 def mul(t1, t2):
     # If unsure what should be the result's properties, you can
     # use the super_fn (can be useful for type promotion)
@@ -59,31 +55,18 @@ def mul(t1, t2):
     return wrap(out, out.shape, torch.float32)
 
 
-aten_library.impl("mul.Tensor", mul, "PrivateUse1")
-
-
-# Add some trivial ops that need impl
-# @implements(aten.detach.default)
-# @implements(aten.alias.default)
-
-
+@torch.library.impl("aten::detach", "privateuseone")
 def detach(self):
     out = unwrap(self)
     return wrap(out, out.shape, torch.float32)
 
 
-aten_library.impl("detach", detach, "PrivateUse1")
-
-
+@torch.library.impl("aten::empty_strided", "privateuseone")
 def empty_strided(
     size, stride, *, dtype=None, layout=None, device=None, pin_memory=None
 ):
     out = np.empty(size)
     return wrap(out, out.shape, torch.float32)
-
-
-aten_library.impl("empty_strided.memory_format", empty_strided, "PrivateUse1")
-aten_library.impl("empty_strided", empty_strided, "PrivateUse1")
 
 
 @torch.library.impl("aten::_copy_from", "privateuseone")
