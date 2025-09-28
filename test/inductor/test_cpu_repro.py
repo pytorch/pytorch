@@ -311,6 +311,33 @@ class CPUReproTests(TestCase):
                 (v,),
             )
 
+    def test_conv1d_strided_weight_torch_compile(self):
+        def fn(x, w):
+            wt = w.transpose(2, 1)
+            y = F.conv1d(x, wt)
+            return y.clone()
+
+        x_eager = torch.randn(2, 3, 5, requires_grad=True)
+        w_eager = torch.randn(4, 2, 3, requires_grad=True)
+
+        out_eager = fn(x_eager, w_eager)
+        grad = torch.randn_like(out_eager)
+        out_eager_val = out_eager.detach()
+        out_eager.backward(grad)
+        grad_x_eager = x_eager.grad.detach().clone()
+        grad_w_eager = w_eager.grad.detach().clone()
+
+        x_comp = x_eager.detach().requires_grad_(True)
+        w_comp = w_eager.detach().requires_grad_(True)
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True, dynamic=True)
+        out_comp = compiled(x_comp, w_comp)
+        out_comp_val = out_comp.detach()
+        out_comp.backward(grad)
+
+        torch.testing.assert_close(out_comp_val, out_eager_val)
+        torch.testing.assert_close(x_comp.grad, grad_x_eager)
+        torch.testing.assert_close(w_comp.grad, grad_w_eager)
+
     @config.patch(freezing=True)
     @unittest.skipIf(not TEST_MKL, "Test requires MKL")
     @patch("torch.cuda.is_available", lambda: False)

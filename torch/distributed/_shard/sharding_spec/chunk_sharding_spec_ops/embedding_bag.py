@@ -4,7 +4,7 @@ from typing import cast
 
 import torch
 import torch.distributed as dist
-from torch.distributed._distributed_c10d import ReduceOp
+from torch._C._distributed_c10d import ReduceOp
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed._shard.sharding_spec import ChunkShardingSpec
 from torch.distributed._shard.sharding_spec.api import custom_sharding_spec_op
