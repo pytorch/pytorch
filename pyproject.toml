@@ -182,7 +182,6 @@ ignore = [
     "SIM117",
     "SIM118",
     "UP007", # keep-runtime-typing
-    "UP038", # Was removed from newer versions, results in slower code
     "UP045", # keep-runtime-typing
     "TC006",
     # TODO: Remove Python-3.10 specific suppressions

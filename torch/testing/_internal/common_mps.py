@@ -383,8 +383,6 @@ if torch.backends.mps.is_available():
             "symeig": None,
             "take": None,
             "to": None,
-            "to_sparse": None,
-            "unique": None,
             "vdot": None,
             "segment_reduce_": None,
             "_upsample_bilinear2d_aa": [torch.uint8],  # uint8 is for CPU only
@@ -758,6 +756,10 @@ if torch.backends.mps.is_available():
             "eye": [torch.float16, torch.float32],
             # topk fails with duplicate indices
             "topk": [torch.float16],
+            # Could not run 'aten::uniform_' with arguments from the 'SparseCPU' backend
+            "to_sparse": None,
+            # Exception: the derivative for '_unique2' is not implemented.
+            "unique": None,
         }
 
         SKIPLIST_GRAD = {
