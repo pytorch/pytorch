@@ -664,17 +664,19 @@ class NVSHMEMAll2AllTest(MultiProcContinuousTest):
             in_splits, src_offsets, out_splits, dst_offsets, group_name
         )
 
-        # Exchange data with plan
-        symm_mem.all_to_all_v(inp, out, plan, group_name)
-
-        # Check data
+        # Prepare expected output
         inp_numel = in_splits.sum().item()
         out_numel = out_splits.sum().item()
         expected = torch.empty(out_numel, dtype=dtype, device=self.device)
         dist.all_to_all_single(
             expected, inp[:inp_numel], out_splits.tolist(), in_splits.tolist()
         )
-        torch.testing.assert_close(out[:out_numel], expected)
+
+        # Exchange data with plan
+        # Loop a couple times to ensure the plan is reusable
+        for _ in range(3):
+            symm_mem.all_to_all_v(inp, out, plan, group_name)
+            torch.testing.assert_close(out[:out_numel], expected)
 
 
 # Help function used by multiple tests

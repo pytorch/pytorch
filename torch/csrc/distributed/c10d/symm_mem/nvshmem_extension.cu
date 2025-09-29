@@ -241,7 +241,7 @@ __global__ void exchangeSplitAndOffsetKernel(int64_t* in_splits, int64_t* src_of
 // This kernel is used to do the actual data exchange.
 // `in_out_splits` has the same definition as in `exchangeSplitAndOffset`.
 // `stride` is the stride at dim 0, unit in byte.
-__global__ void allToAllGet(void *send_data, void *recv_data, int64_t* source_offsets, int64_t* output_splits, size_t stride, nvshmem_team_t team) {
+__global__ void allToAllGet(void *send_data, void *recv_data, int64_t* source_offsets, int64_t* output_splits, int64_t* dst_offsets, size_t stride, nvshmem_team_t team) {
 #ifndef _NVSHMEM_DEVICELIB_SUPPORTED
   CUDA_KERNEL_ASSERT_MSG(false, "SM arch unsupported for NVSHMEM");
 #else
@@ -252,11 +252,14 @@ __global__ void allToAllGet(void *send_data, void *recv_data, int64_t* source_of
   int tid = threadIdx.x;
   int blocks_per_peer = max(gridDim.x / npes, 1);
 
-  // Calculate the output offsets
-  CUDA_KERNEL_ASSERT(npes <= THREADS_PER_BLOCK);
+  // Calculate the output offsets if not provided
   __shared__ int64_t peer_offsets[THREADS_PER_BLOCK];
-  prefixSum(peer_offsets, output_splits, npes);
-  __syncthreads();
+  if (dst_offsets == nullptr) {
+    CUDA_KERNEL_ASSERT(npes <= THREADS_PER_BLOCK);
+    prefixSum(peer_offsets, output_splits, npes);
+    __syncthreads();
+    dst_offsets = peer_offsets;
+  }
 
   // Target a different peer based on bid
   for (int i = bid / blocks_per_peer; i < npes; i += gridDim.x / blocks_per_peer) {
@@ -271,16 +274,20 @@ __global__ void allToAllGet(void *send_data, void *recv_data, int64_t* source_of
     // This block's offset in the data from `peer`
     auto block_offset = block_size * (bid % blocks_per_peer);
     auto source_offset = source_offsets[peer] * stride + block_offset;
-    auto write_offset = peer_offsets[peer] * stride + block_offset;
+    auto write_offset = dst_offsets[peer] * stride + block_offset;
     nvshmemx_getmem_nbi_block(
       (char*)recv_data + write_offset,
       (char*)send_data + source_offset,
       block_size,
       peer_global);
   }
-  // Write out the output offsets (to the scratchpad line)
-  if (bid == 0 && tid < npes) {
-    source_offsets[tid] = peer_offsets[tid];
+
+  // Write out the output offsets if not provided
+  if (dst_offsets == nullptr) {
+    if (bid == 0 && tid < npes) {
+      // source_offsets alias dst_offsets space when dst_offsets is not provided
+      source_offsets[tid] = peer_offsets[tid];
+    }
   }
   // Make sure getmem_nbi calls finish
   nvshmem_quiet();
@@ -363,11 +370,14 @@ void all_to_all_vdev(
   size_t stride_bytes = input.stride(0) * input.element_size();
 
   // All to all data exchange
+  // Don't know dst offsets at this point, marking it as nullptr to tell the kernel to calculate it.
+  int64_t* dst_offsets_ptr = nullptr;
   void* args1[] = {
       &input_ptr,
       &output_ptr,
       &tmp_src_offsets_ptr,
       &out_splits_offsets_ptr,
+      &dst_offsets_ptr,
       &stride_bytes,
       &team};
   nvshmemx_collective_launch(
@@ -949,12 +959,14 @@ void _all_to_all_get(
     at::Tensor& out,
     at::Tensor& src_offsets,
     at::Tensor& out_splits,
+    at::Tensor& dst_offsets,
     std::string group_name) {
   // Perform a 1D AllToAllv shuffle operation, with source offset information, and get operations.
   auto input_hdl = c10d::symmetric_memory::rendezvous(input, group_name);
   auto out_hdl = c10d::symmetric_memory::rendezvous(out, group_name);
   auto src_offsets_hdl = c10d::symmetric_memory::rendezvous(src_offsets, group_name);
   auto out_splits_hdl = c10d::symmetric_memory::rendezvous(out_splits, group_name);
+  auto dst_offsets_hdl = c10d::symmetric_memory::rendezvous(dst_offsets, group_name);
 
   // Verify inputs
   TORCH_CHECK_EQ(input.device(), out.device());
@@ -982,6 +994,7 @@ void _all_to_all_get(
   auto output_ptr = out.mutable_data_ptr();
   auto src_offsets_ptr = src_offsets.const_data_ptr<int64_t>();
   auto out_splits_ptr = out_splits.const_data_ptr<int64_t>();
+  auto dst_offsets_ptr = dst_offsets.const_data_ptr<int64_t>();
 
   // All to all data exchange
   void* args[] = {
@@ -989,6 +1002,7 @@ void _all_to_all_get(
       &output_ptr,
       &src_offsets_ptr,
       &out_splits_ptr,
+      &dst_offsets_ptr,
       &stride_bytes,
       &team};
   nvshmemx_collective_launch(

@@ -1880,6 +1880,7 @@ def all_to_all_v(
         out,
         plan.src_offsets,
         plan.out_splits,
+        plan.dst_offsets,
         group_name,
     )
 
