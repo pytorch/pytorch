@@ -51,6 +51,7 @@ from .resume_execution import TORCH_DYNAMO_RESUME_IN_PREFIX
 from .utils import (
     getfile,
     hashable,
+    is_annotate_wrapped_function,
     is_lru_cache_wrapped_function,
     NP_SUPPORTED_MODULES,
     unwrap_if_wrapper,
@@ -154,6 +155,7 @@ manual_torch_name_rule_map: dict[
         type[UserFunctionVariable],
     ],
 ] = {
+    "torch.fx.traceback.annotate": UserFunctionVariable,
     "torch.onnx.is_in_onnx_export": TorchInGraphFunctionVariable,
     "torch.onnx.operators.shape_as_tensor": TorchInGraphFunctionVariable,
     "torch.overrides.is_tensor_like": TorchInGraphFunctionVariable,
@@ -3002,6 +3004,8 @@ def get_torch_obj_rule_map() -> dict[Any, type["VariableTracker"]]:
                     continue
                 obj = torch_dir + k[len("torch/") :]
             if obj is not None:
+                if is_annotate_wrapped_function(obj):
+                    obj = obj.__wrapped__
                 if is_lru_cache_wrapped_function(obj):
                     obj = obj.__wrapped__
                 if obj in d and d[obj] != v:
