@@ -692,16 +692,22 @@ def _clone_meta(
             device=input.device,
             memory_format=memory_format,
         )
+    else:
+        # Match eager behavior by preserving strides for non_overlapping_and_dense tensors
+        # If not, eager clone creates contiguous strides
+        computed_stride = None
+        if utils.is_non_overlapping_and_dense(input):
+            computed_stride = input.stride()
+        else:
+            computed_stride = utils.compute_elementwise_output_strides(input)
 
-    # memory_format == torch.preserve_format
-    strides = utils.compute_elementwise_output_strides(input)
-    return torch.empty_strided(
-        input.shape,
-        strides,
-        dtype=input.dtype,
-        layout=input.layout,
-        device=input.device,
-    )
+        return torch.empty_strided(
+            input.shape,
+            computed_stride,
+            dtype=input.dtype,
+            layout=input.layout,
+            device=input.device,
+        )
 
 
 clone = _make_prim(

@@ -1,4 +1,4 @@
-#if defined(__aarch64__) && defined(CAFFE2_PERF_WITH_SVE128)
+#if defined(__aarch64__) && defined(__ARM_FEATURE_SVE) && defined(CAFFE2_PERF_WITH_SVE128)
 #include <arm_neon.h>
 #include <arm_neon_sve_bridge.h>
 #include <arm_sve.h>
@@ -114,14 +114,20 @@ inline float32x4_t vexpq_f32(float32x4_t x) {
 
   auto poly = svset_neonq(svundef_f32(), vfmaq_f32(scale, p12345, scale));
 
+  auto pHigh = svcmpgt_f32(svptrue_b8(), svset_neonq(svundef_f32(), x), max_input);
+  auto pLow = svcmplt_f32(svptrue_b8(), svset_neonq(svundef_f32(), x), min_input);
+
+  auto bound = svsel_f32(
+      pHigh,
+      inf,
+      zero);
+
+  auto pCombined = svorr_b_z(svptrue_b8(), pLow, pHigh);
+
   // Handle underflow and overflow.
   poly = svsel_f32(
-      svcmplt_f32(svptrue_b8(), svset_neonq(svundef_f32(), x), min_input),
-      zero,
-      poly);
-  poly = svsel_f32(
-      svcmpgt_f32(svptrue_b8(), svset_neonq(svundef_f32(), x), max_input),
-      inf,
+      pCombined,
+      bound,
       poly);
 
   return svget_neonq(poly);
@@ -240,4 +246,4 @@ template void compute_batch_box_cox__sve128<float>(
 
 } // namespace caffe2::details
 
-#endif // __aarch64__ && CAFFE2_PERF_WITH_SVE128
+#endif // __aarch64__ && __ARM_FEATURE_SVE && CAFFE2_PERF_WITH_SVE128

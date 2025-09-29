@@ -606,6 +606,37 @@ class LoopOrderingTest(TestCase):
         out, code = run_and_get_code(f, x)
         FileCheck().check_count("@triton.jit", 1, exactly=True).run(code[0])
 
+    def test_3dred_pw_2d_outer_red(self):
+        """
+        Test a pattern as follows. We have a 3d contiguous tensor [m, n, k] as input.
+        1. do reduction on the k dimension and get a [m, n] tensor
+        2. do a pointwise operation on this [m, n] tensor (and realize the computation)
+        3. do a outer reduction on the output of step 2 on the m dimension.
+
+        Each of these step generate a kernel before fusion.
+        Without any loop reorder, kernel 1 and kernel 2 will get fused. And kernel 3 will be separeate.
+
+        But if we reorder the loop for kernel 2, then kernel 2 will get fused with kernel 3.
+        And the fused kernel-2-3 can not be fused with kernel 1.
+
+        The older version of LOAF algorithm will do reorder in this case. But there is no real
+        benefits. There are even some slight downsides
+        1. the original fusion without loop reordering is more natural
+        2. fusion kernel 1 with kernel 2 may help precision when the output of kernel 1 is in low precision.
+           By fusion kernel 1 and kernel 2, the pointwise operation will operate on fp32 precision thanks
+           to fusion.
+        """
+        M, N, K = 64, 64, 64
+
+        def f(x):
+            x = x.sum(dim=-1)
+            x = x + 1  # can be more complex like sigmoid or other ops
+            return x, x.sum(dim=0)
+
+        x = torch.randn(M, N, K, device=GPU_TYPE)
+        self.do_acc_test(f, x)
+        self.assertEqual(0, metrics.num_loop_reordering)
+
 
 @inductor_config.patch(
     {

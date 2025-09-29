@@ -275,10 +275,6 @@ See the docs for {class}`~torch.cuda.gds.GdsFile` for an example of how to use t
 ```
 
 ```{eval-rst}
-.. py:module:: torch.cuda.graphs
-```
-
-```{eval-rst}
 .. py:module:: torch.cuda.jiterator
 ```
 
@@ -295,13 +291,12 @@ See the docs for {class}`~torch.cuda.gds.GdsFile` for an example of how to use t
 ```
 
 ```{eval-rst}
-.. py:module:: torch.cuda.random
-```
-
-```{eval-rst}
 .. py:module:: torch.cuda.sparse
 ```
 
 ```{eval-rst}
-.. py:module:: torch.cuda.streams
+.. toctree::
+    :hidden:
+
+    cuda.aliases.md
 ```
