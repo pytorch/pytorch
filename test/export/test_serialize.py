@@ -28,6 +28,7 @@ import torch
 import torch._dynamo as torchdynamo
 import torch._export.serde.schema as schema
 import torch.export._trace
+from torch._export.serde.serialize import deserialize_torch_artifact
 import torch.utils._pytree as pytree
 from torch._export.db.case import ExportCase, SupportLevel
 from torch._export.db.examples import all_examples
@@ -1909,6 +1910,16 @@ class TestSaveLoad(TestCase):
         loaded_ep = load(buffer)
 
         inp = (torch.tensor(1),)
+
+    def test_deserialize_torch_artifact_dict(self):
+        data = {"Key": torch.tensor([1, 2, 3])}
+        buf = io.BytesIO()
+        torch.save(data, buf)
+        serialized = buf.getvalue()
+
+        result = deserialize_torch_artifact(serialized)
+        self.assertIsInstance(result, dict)
+        self.assertTrue(torch.equal(result["Key"], torch.tensor([1, 2, 3])))
         self.assertTrue(torch.allclose(ep.module()(*inp), loaded_ep.module()(*inp)))
 
 
