@@ -5,6 +5,7 @@
 
 #if AT_ZENDNN_ENABLED()
 #include <zendnnl.hpp>
+
 namespace at::native {
 using namespace zendnnl::interface;
 inline bool zendnn_bf16_device_check() {
