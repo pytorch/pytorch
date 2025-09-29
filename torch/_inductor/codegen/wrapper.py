@@ -370,7 +370,7 @@ class MemoryPlanningState:
 
 class WrapperLine:
     def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
-        raise NotImplementedError("FX codegen not yet supported for type {type(self)}")
+        raise NotImplementedError(f"FX codegen not yet supported for type {type(self)}")
 
 
 @dataclasses.dataclass

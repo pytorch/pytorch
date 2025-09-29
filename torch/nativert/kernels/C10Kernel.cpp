@@ -3,6 +3,7 @@
 #include <fmt/ostream.h>
 
 #include <c10/util/Enumerate.h>
+#include <c10/util/Exception.h>
 
 #ifdef __SIGRID_USE_GPU__
 #include <ATen/cuda/CUDAContext.h>
@@ -31,15 +32,18 @@ void C10Kernel::computeInternal(ExecutionFrame& executionFrame) const {
     op_.callBoxed(stack);
   } catch (const std::exception& ex) {
     auto stackTrace = node_->getMetadata("stack_trace");
-    throw std::runtime_error(fmt::format(
-        "Exception while executing node: {}\n"
-        "with args:\n{}\n"
-        "{}\n"
-        "Original Python stacktrace:\n{}",
-        fmt::streamed(*node_),
+    TORCH_CHECK(
+        false,
+        "Exception while executing node: ",
+        *node_,
+        "\n"
+        "with args:\n",
         readableArgs(op_.schema(), stack),
+        "\n",
         ex.what(),
-        stackTrace ? *stackTrace : "<no stack trace>"));
+        "\n",
+        "Original Python stacktrace:\n",
+        stackTrace ? *stackTrace : "<no stack trace>")
   }
 
   // Write out results
@@ -67,7 +71,7 @@ std::unordered_map<std::string, c10::IValue> getSymInputs(
     if (val.isInt() || val.isDouble() || val.isBool()) {
       inputs[input.name] = val;
     } else {
-      throw std::runtime_error("unsupported type for symbolic input");
+      TORCH_CHECK(false, "unsupported type for symbolic input");
     }
   }
   for (const auto& attribute : node.attributes()) {
@@ -78,7 +82,7 @@ std::unordered_map<std::string, c10::IValue> getSymInputs(
     } else if (std::holds_alternative<bool>(attribute.value)) {
       inputs[attribute.name] = std::get<bool>(attribute.value);
     } else {
-      throw std::runtime_error("unsupported type for symbolic input");
+      TORCH_CHECK(false, "unsupported type for symbolic input");
     }
   }
   return inputs;
@@ -102,8 +106,7 @@ void computeScalarBinaryOp(
   } else if (target == "_operator.pow") {
     out = std::pow(a, b);
   } else {
-    throw std::runtime_error(
-        fmt::format("unsupported operator for symbolic values: {}", target));
+    TORCH_CHECK(false, "unsupported operator for scalar binary op: ", target);
   }
 
   executionFrame.setIValue(node.outputs()[0]->id(), out);
@@ -130,7 +133,7 @@ void ScalarBinaryOpKernel::computeInternal(
     } else if (x.isDouble()) {
       return x.toDouble();
     } else {
-      throw std::runtime_error("unsupported type for symbolic input");
+      TORCH_CHECK(false, "unsupported type for symbolic input");
     }
   };
 
@@ -171,8 +174,7 @@ void SymIntOpKernel::computeInternal(ExecutionFrame& executionFrame) const {
   } else if (target == "torch.sym_min") {
     out = std::min(a, b);
   } else {
-    throw std::runtime_error(
-        fmt::format("unsupported operator for SymInt: {}", node_->target()));
+    TORCH_CHECK(false, "unsupported operator for SymInt: ", node_->target())
   }
 
   executionFrame.setIValue(node_->outputs()[0]->id(), out);
@@ -219,8 +221,7 @@ void SymBoolOpKernel::computeInternal(ExecutionFrame& executionFrame) const {
     bool b = inputs.at("b").toBool();
     out = a && b;
   } else {
-    throw std::runtime_error(
-        fmt::format("unsupported operator for SymBool: {}", node_->target()));
+    TORCH_CHECK(false, "unsupported operator for SymBool: ", node_->target())
   }
 
   executionFrame.setIValue(node_->outputs()[0]->id(), out);
@@ -247,7 +248,7 @@ void SymFloatOpKernel::computeInternal(ExecutionFrame& executionFrame) const {
     } else if (a.isDouble()) {
       out = -a.toDouble();
     } else {
-      throw std::runtime_error("unsupported type for symbolic input");
+      TORCH_CHECK(false, "unsupported type for symbolic input");
     }
     executionFrame.setIValue(node_->outputs()[0]->id(), out);
   } else if (target == "_operator.truediv") {
@@ -258,9 +259,7 @@ void SymFloatOpKernel::computeInternal(ExecutionFrame& executionFrame) const {
     double out = a / b;
     executionFrame.setIValue(node_->outputs()[0]->id(), out);
   } else {
-    throw std::runtime_error(
-        fmt::format("unsupported operator for SymFloat: {}", node_->target()));
+    TORCH_CHECK(false, "unsupported operator for SymFloat: ", node_->target());
   }
 }
-
 } // namespace torch::nativert
