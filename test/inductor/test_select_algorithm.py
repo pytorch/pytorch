@@ -2,7 +2,7 @@
 import contextlib
 import functools
 import unittest.mock
-from typing import Callable
+from collections.abc import Callable
 from unittest.mock import patch
 
 import torch

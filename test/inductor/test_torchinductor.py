@@ -19,8 +19,9 @@ import time
 import unittest
 import unittest.mock
 import weakref
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable, TypeVar
+from typing import TypeVar
 from typing_extensions import ParamSpec
 from unittest.mock import patch
 
