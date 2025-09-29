@@ -14,9 +14,36 @@ from torch.testing._internal.common_utils import (
     install_cpp_extension,
     IS_WINDOWS,
     run_tests,
+    skipIfTorchDynamo,
     TestCase,
     xfailIfTorchDynamo,
 )
+
+
+def get_supported_dtypes():
+    """Return a list of dtypes that are supported by torch stable ABI."""
+    return [
+        torch.int8,
+        torch.int16,
+        torch.int32,
+        torch.int64,
+        torch.uint8,
+        torch.uint16,
+        torch.uint32,
+        torch.uint64,
+        torch.bfloat16,
+        torch.float16,
+        torch.float32,
+        torch.float64,
+        torch.float8_e5m2,
+        torch.float8_e4m3fn,
+        torch.float8_e5m2fnuz,
+        torch.float8_e4m3fnuz,
+        torch.complex32,
+        torch.complex64,
+        torch.complex128,
+        torch.bool,
+    ]
 
 
 # TODO: Fix this error in Windows:
@@ -273,6 +300,120 @@ if not IS_WINDOWS:
             out0 = libtorch_agnostic.ops.my_narrow(t, dim0, start0, length0)
             expected0 = torch.narrow(t, dim0, start0, length0)
             self.assertEqual(out0, expected0)
+
+        @skipIfTorchDynamo("no data pointer defined for FakeTensor, FunctionalTensor")
+        def test_get_any_data_ptr(self, device):
+            import libtorch_agnostic
+
+            t = torch.empty(2, 5, device=device, dtype=torch.float32)
+            expected_p = t.data_ptr()
+
+            for mutable in [True, False]:
+                p = libtorch_agnostic.ops.get_any_data_ptr(t, mutable)
+                self.assertEqual(p, expected_p)
+
+        @skipIfTorchDynamo("no data pointer defined for FakeTensor, FunctionalTensor")
+        def test_get_template_any_data_ptr(self, device):
+            import libtorch_agnostic
+
+            supported_dtypes = get_supported_dtypes()
+
+            for dtype in supported_dtypes:
+                t = torch.empty(2, 5, device=device, dtype=dtype)
+                expected_p = t.data_ptr()
+
+                for rdtype in supported_dtypes:
+                    r = torch.empty(2, 5, device=device, dtype=rdtype)
+
+                    if dtype == rdtype:
+                        for mutable in [True, False]:
+                            p = libtorch_agnostic.ops.get_template_any_data_ptr(
+                                t, r, mutable
+                            )
+                            self.assertEqual(p, expected_p)
+                    else:
+                        for mutable in [True, False]:
+                            with self.assertRaisesRegex(
+                                RuntimeError, "expected scalar type.* but found"
+                            ):
+                                libtorch_agnostic.ops.get_template_any_data_ptr(
+                                    t, r, mutable
+                                )
+
+        @skipIfTorchDynamo("testing CPP macros only")
+        def test_dispatch_all_types(self, device):
+            import libtorch_agnostic
+
+            all_dtypes = {
+                t for t in torch.__dict__.values() if isinstance(t, torch.dtype)
+            }
+
+            dispatch_with_dtypes = dict(
+                STABLE_DISPATCH_INDEX_TYPES=(torch.int32, torch.int64),
+                STABLE_DISPATCH_INTEGRAL_TYPES=(
+                    torch.uint8,
+                    torch.int8,
+                    torch.int16,
+                    torch.int32,
+                    torch.int64,
+                ),
+                STABLE_DISPATCH_FLOATING_TYPES=(torch.float32, torch.float64),
+                STABLE_DISPATCH_COMPLEX_TYPES=(torch.complex64, torch.complex128),
+                STABLE_DISPATCH_REDUCED_FLOATING_TYPES=(torch.float16, torch.bfloat16),
+                STABLE_DISPATCH_SUPPORTED_TYPES=get_supported_dtypes(),
+            )
+            dispatch_with_dtypes.update(
+                STABLE_DISPATCH_ALL_TYPES=dispatch_with_dtypes[
+                    "STABLE_DISPATCH_INTEGRAL_TYPES"
+                ]
+                + dispatch_with_dtypes["STABLE_DISPATCH_FLOATING_TYPES"]
+            )
+            dispatch_with_dtypes.update(
+                STABLE_DISPATCH_FLOATING_TYPES_AND_HALF=dispatch_with_dtypes[
+                    "STABLE_DISPATCH_FLOATING_TYPES"
+                ]
+                + (torch.float16,),
+                STABLE_DISPATCH_FLOATING_AND_COMPLEX_TYPES=dispatch_with_dtypes[
+                    "STABLE_DISPATCH_FLOATING_TYPES"
+                ]
+                + dispatch_with_dtypes["STABLE_DISPATCH_COMPLEX_TYPES"],
+                STABLE_DISPATCH_ALL_TYPES_AND_COMPLEX=dispatch_with_dtypes[
+                    "STABLE_DISPATCH_ALL_TYPES"
+                ]
+                + dispatch_with_dtypes["STABLE_DISPATCH_COMPLEX_TYPES"],
+                # STABLE_DISPATCH_ALL_TYPES_AND_BOOL tests STABLE_DISPATCH_ALL_TYPES_AND
+                STABLE_DISPATCH_ALL_TYPES_AND_BOOL=dispatch_with_dtypes[
+                    "STABLE_DISPATCH_ALL_TYPES"
+                ]
+                + (torch.bool,),
+            )
+
+            for dispatch_name, supported_dtypes in dispatch_with_dtypes.items():
+                for dtype in supported_dtypes:
+                    t = torch.zeros(2, 3, device=device, dtype=dtype)
+                    n = libtorch_agnostic.ops.test_dispatch_scalar_name(
+                        t, dispatch_name
+                    )
+                    assert getattr(torch, n) == dtype
+
+                for dtype in all_dtypes:
+                    if dtype not in supported_dtypes:
+                        t = torch.empty(2, 3, device=device, dtype=dtype)
+                        # A tensor with unsupported dtype will cause
+                        # runtime exception either because the dtype
+                        # support is not implemented (per
+                        # torch/stable/Dispatch.h) or not yet
+                        # supported in
+                        # torch/csrc/stable/stableivalue_conversions.h
+                        with self.assertRaisesRegex(
+                            RuntimeError, "not implemented for|Not yet supported"
+                        ):
+                            libtorch_agnostic.ops.test_dispatch_scalar_name(
+                                t, dispatch_name
+                            )
+                            print(
+                                f"UNEXPECTED SUCCESS: CPP macro {dispatch_name} accepts {dtype=}"
+                            )
 
         @onlyCUDA
         @deviceCountAtLeast(2)
