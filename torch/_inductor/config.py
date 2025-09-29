@@ -2007,6 +2007,17 @@ class test_configs:
     # for unit testing
     use_libtorch = False
 
+    # to be migrated when ready for use
+    aten_fx_overlap_scheduling = False
+
+    # to be migrated when ready for use
+    # runtime estimation function for ops
+    # for user-defined estimation function, pass in the function handle
+    # TODO - need estimated and profile based version
+    estimate_aten_runtime: Union[
+        Literal["default"], Callable[[torch.fx.Node], Optional[float]]
+    ] = "default"
+
 
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403
