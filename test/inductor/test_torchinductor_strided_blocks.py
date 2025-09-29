@@ -240,6 +240,7 @@ class CommonTemplate:
                     test_torchinductor.skip_if_triton_cpu("Triton CPU: slow test")
                 ],
             ),
+        ((64,), (64, ), None, None, True)
         ],
     )
     def test_pointwise(
