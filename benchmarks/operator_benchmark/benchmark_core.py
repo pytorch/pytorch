@@ -18,7 +18,6 @@ import torch
 
 # needs to be imported after torch
 import torch.utils.cpp_extension as cpp_extension  # noqa: F401
-from torch.utils.benchmark import Timer
 
 
 """Performance microbenchmarks.
@@ -349,24 +348,10 @@ class BenchmarkRunner:
             func = test_case.run_jit_forward
         if self.use_compile:
             func = test_case.run_compile_forward
-
-        if not cuda_sync:
-            forward_time = timeit.timeit(
-                functools.partial(func, iters, print_per_iter, cuda_sync), number=1
-            )
-            return forward_time
-        # Stable timing with Timer
-        timer = Timer(
-            stmt="func(iters, print_per_iter, cuda_sync)",
-            globals={
-                "func": func,
-                "iters": iters,
-                "print_per_iter": print_per_iter,
-                "cuda_sync": cuda_sync,
-            },
+        forward_time = timeit.timeit(
+            functools.partial(func, iters, print_per_iter, cuda_sync), number=1
         )
-        result = timer.adaptive_autorange(min_run_time=0.0001)
-        return result.median * iters
+        return forward_time
 
     def _launch_backward(self, test_case, iters, print_per_iter=False):
         """This function runs forward path of an op to get an output. Then the backward path is executed

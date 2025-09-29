@@ -1,4 +1,4 @@
-# Owner(s): ["oncall: distributed"]
+# Owner(s): ["module: unknown"]
 import unittest
 
 import torch

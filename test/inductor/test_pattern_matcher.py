@@ -3,8 +3,7 @@ import copy
 import itertools
 import os
 import unittest
-from collections.abc import Callable
-from typing import Optional
+from typing import Callable, Optional
 
 import torch
 import torch._dynamo.config as dynamo_config
@@ -181,7 +180,8 @@ class TestPatternMatcher(TestCase):
             self._test_fused_int_mm_mul_impl(fn2, args, True)
 
     def test_duplicate_search(self):
-        from collections.abc import Callable, Iterable
+        from collections.abc import Iterable
+        from typing import Callable
 
         import torch
         from torch._inductor.pattern_matcher import (

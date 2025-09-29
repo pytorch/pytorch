@@ -19,9 +19,8 @@ import time
 import unittest
 import unittest.mock
 import weakref
-from collections.abc import Callable
 from pathlib import Path
-from typing import TypeVar
+from typing import Callable, TypeVar
 from typing_extensions import ParamSpec
 from unittest.mock import patch
 
@@ -4640,41 +4639,6 @@ class CommonTemplate:
             (torch.randn([4, 4, 4]),),
         )
 
-    def test_conv1d_with_permute(self):
-        # fix https://github.com/pytorch/pytorch/issues/159462
-        class ConvModel(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.conv = nn.Conv1d(1, 64, kernel_size=3, padding=1)
-
-            def forward(self, x):
-                x = x.permute(0, 2, 1)
-                return self.conv(x)
-
-        self.common(ConvModel(), (torch.randn([32, 100, 1]),), check_lowp=False)
-
-    def test_conv1d_depthwise(self):
-        class ConvModel(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.conv = nn.Conv1d(
-                    768,
-                    768,
-                    kernel_size=(9,),
-                    stride=(1,),
-                    padding=(4,),
-                    groups=768,
-                    bias=False,
-                )
-
-            def forward(self, x):
-                return self.conv(x)
-
-        input_tensor = torch.randn([1, 768, 512]).as_strided(
-            (1, 768, 512), (393216, 1, 768)
-        )
-        self.common(ConvModel(), (input_tensor,), check_lowp=False)
-
     def test_convolution1(self):
         m = torch.nn.Sequential(
             torch.nn.Conv2d(5, 6, [3, 3]),
@@ -4773,7 +4737,7 @@ class CommonTemplate:
         self.common(
             m,
             (torch.randn([1, 3, 8, 16, 32]),),
-            atol=1e-3,
+            atol=6e-5,
             rtol=0.001,
             # Make sure we compute also with fp16 in the reference. Otherwise,
             # the reference will compute with fp32 and cast back to fp16, which
@@ -15126,7 +15090,11 @@ if RUN_GPU:
                 ),
                 (
                     fn3,
-                    "triton_poi_fused_LayerNorm_ReLU",
+                    (
+                        "triton_poi_fused_layer_norm_relu"
+                        if torch._dynamo.config.inline_inbuilt_nn_modules
+                        else "triton_poi_fused_LayerNorm_ReLU"
+                    ),
                     (torch.randn(4, 4, device=GPU_TYPE),),
                 ),
             ]

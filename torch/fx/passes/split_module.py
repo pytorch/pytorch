@@ -59,8 +59,6 @@ def split_module(
     keep_original_order: Optional[bool] = False,
     keep_original_node_name: Optional[bool] = False,
     keep_original_input_name: bool = True,
-    *,
-    partition_affix: Optional[str] = None,
 ):
     """
     Creates subgraphs out of main graph
@@ -83,8 +81,6 @@ def split_module(
             have the same node names as the original graph.
         keep_original_input_name: bool: If the partitioned graphs should
             have the same input names as the original graph.
-        partition_affix: Optional[str]: If specified, the submodules' names will contain
-            the affix, e.g. "submod_<affix>_<idx>".
 
     Returns:
         GraphModule: the module after split.
@@ -257,13 +253,7 @@ def split_module(
                     use_partition.dependencies.setdefault(defined)
 
     def instantiate_node_partition_mapping(node):
-        partition_idx = split_callback(node)
-        partition_name = str(partition_idx)
-        if partition_affix is not None:
-            # For example, if user specifies partition_affix = "pp", then the
-            # partition name will be "pp_0", "pp_1", etc
-            partition_name = "_".join([partition_affix, partition_name])
-
+        partition_name = str(split_callback(node))
         log.debug(
             "instantiate_node_partition_mapping %s (%s)", node.name, partition_name
         )

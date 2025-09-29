@@ -4041,7 +4041,7 @@ class AOTInductorTestsTemplate:
         expected_original_fqns = {
             "L__self___test_param": "test_param",
             "L__self___test_buf": "test_buf",
-            "L__self___foo_bar_0": "foo_bar.0",
+            "getattr_L__self___foo_bar___0__": "foo_bar.0",
             "L__self___foo_bar_test_param": "foo_bar.test_param",
             "L__self___foo_bar_test_buf": "foo_bar.test_buf",
         }
@@ -4052,7 +4052,7 @@ class AOTInductorTestsTemplate:
         expected_dtypes = {
             "L__self___test_param": 6,
             "L__self___test_buf": 6,
-            "L__self___foo_bar_0": 6,
+            "getattr_L__self___foo_bar___0__": 6,
             "L__self___foo_bar_test_param": 6,
             "L__self___foo_bar_test_buf": 6,
         }
@@ -7193,37 +7193,6 @@ class AOTInductorTestsTemplate:
                     if "NEEDED" in line:
                         for lib in torch_libs:
                             self.assertTrue(lib not in line)
-
-    def test_unbounded_expr_substitutions(self):
-        class Model(torch.nn.Module):
-            def forward(self, x, y, a, b):
-                u0, s0 = a.item(), b.item()
-                u_max = max(u0, 15)
-                # construct the equality rule Max(15, u0) == s0 * Max(15, u0)
-                torch._check(u_max == s0 * u_max)
-                # size x - [Max(u0, 15), 64]
-                x = x.expand(u_max, *x.shape).clone()
-                return x @ y
-
-        model = Model()
-
-        example_inputs = (
-            torch.randn((64,), dtype=torch.bfloat16, device=self.device),
-            torch.randn((64, 16), dtype=torch.bfloat16, device=self.device),
-            torch.tensor(19, device=self.device),
-            torch.tensor(1, device=self.device),
-        )
-        torch._dynamo.mark_dynamic(example_inputs[-1], 0)
-
-        so_path, code = run_and_get_cpp_code(
-            AOTIRunnerUtil.legacy_compile, model, example_inputs
-        )
-
-        compiled = AOTIRunnerUtil.legacy_load(self.device, so_path)
-        compiled_outputs = compiled(*example_inputs)
-
-        eager_outputs = model(*example_inputs)
-        torch.testing.assert_close(eager_outputs, compiled_outputs)
 
 
 class AOTInductorLoggingTest(LoggingTestCase):
