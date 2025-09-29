@@ -1540,9 +1540,10 @@ static at::Tensor _quantized_convolution_onednn(
   // inv_scale = 1.0 / scale will be folded.
   // So, we can only get inv_scale from quant node which is used as
   // output_scale of this op.
-  bool fp32_output = output_dtype.has_value() && (output_dtype.value() == c10::kFloat);
-  bool bfloat16_output = output_dtype.has_value() && (output_dtype.value() == c10::kBFloat16);
-  if (fp32_output || bfloat16_output) {
+  bool is_fp8 = weight.scalar_type() == c10::ScalarType::Float8_e4m3fn;
+  bool high_prec_output = output_dtype.has_value() &&
+     ((output_dtype.value() != c10::ScalarType::Byte) && !is_fp8);
+  if (high_prec_output) {
     // When fp32 or bf16 output, oneDNN expects op_attr doesn't set_scales and set_zero_points.
     // So, we will use default output_scale as 1.0 and output_zero_point as 0, since
     // when output_scale is 1.0, we will skip invoking of op_attr.set_scales in ideep;

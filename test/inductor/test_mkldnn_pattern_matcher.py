@@ -209,13 +209,8 @@ class TestPatternMatcherBase(TestCase):
             convert_model = _generate_qdq_quantized_model(
                 mod, inputs, is_qat, is_dynamic, quantizer
             )
-            expected = mod(*inputs)
             with torch.no_grad(), maybe_autocast:
-                actual = torch.compile(convert_model)(*inputs)
-                print("actual:", actual[0, 0:2,:,:])
-                print("expected:", expected[0, 0:2, :, :])
-                mean_err = torch.mean((actual - expected).abs())
-                print("mean_err:", mean_err)
+                _ = torch.compile(convert_model)(*inputs)
                 matcher_check_fn()
         else:
             with torch.no_grad(), maybe_autocast:
@@ -1173,21 +1168,15 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 self.softmax = torch.nn.Softmax(dim=1)
 
             def forward(self, x):
-                # [1,3,8,8]
-                # [1,128, 8, 8]
                 x = self.conv(x)
-                # x = self.softmax(x.to(torch.float32)).to(torch.float16)
-                x = self.softmax(x)
-                # x = torch.nn.functional.relu(x)
-                x = self.conv2(x)
-                x = self.conv3(x)
+                x = self.softmax(x.to(torch.float32)).to(torch.float16)
+                x = self.conv3(self.conv2(x))
                 return x
                 # return self.conv3(self.conv2(self.conv(x).to(torch.float32)))
 
-        dtype=torch.float16
-        mod = M().eval().to(device=device, dtype=dtype)
+        mod = M().eval().to(device=device, dtype=torch.float16)
         v = (
-            torch.randn((1, 3, 8, 8), dtype=dtype, requires_grad=False)
+            torch.randn((1, 3, 8, 8), dtype=torch.float16, requires_grad=False)
             .add(1)
             .to(device=device)
         )

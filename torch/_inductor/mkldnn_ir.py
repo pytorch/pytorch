@@ -1023,7 +1023,7 @@ class QLinearPointwisePT2E(ExternKernelAlloc):
         ]
 
         assert output_dtype is not None
-        if output_dtype in [torch.float32, torch.bfloat16]:
+        if output_dtype in [torch.float32, torch.bfloat16, torch.float16]:
             # in _prepare_linear_fusion_create, we use x.dtype (uint8) to create kernel_layout
             # if we set fp32_output, the output buf should be dtype float32 instead of uint8.
             kernel_layout.dtype = output_dtype
