@@ -31,6 +31,8 @@ jobs:
     if: github.repository_owner == 'pytorch'
     name: Get changed files
     uses: ./.github/workflows/_get-changed-files.yml
+    with:
+      all_files: ${{ contains(github.event.pull_request.labels.*.name, 'lint-all-files') || contains(github.event.pull_request.labels.*.name, 'Reverted') }}
 
   lintrunner-clang:
     uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
@@ -53,7 +55,7 @@ jobs:
     with:
       timeout: 120
       runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
-      docker-image: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3.9-linter
+      docker-image: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3.10-linter
       # NB: A shallow checkout won't work here because calculate-docker-image requires a full checkout
       # to run git rev-parse HEAD~:.ci/docker when a new image is needed
       fetch-depth: 0
@@ -264,10 +266,10 @@ jobs:
         with:
           submodules: false
           fetch-depth: 1
-      - name: Setup Python 3.9
+      - name: Setup Python 3.10
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
-          python-version: '3.9'
+          python-version: '3.10'
           architecture: x64
           cache: pip
       - name: Install dependencies

@@ -8,8 +8,9 @@ import itertools
 import math
 import operator
 import warnings
+from collections.abc import Callable
 from enum import Enum
-from typing import Any, Callable, NamedTuple, Optional, Union
+from typing import Any, NamedTuple, Optional, Union
 
 import torch
 from torch import Tensor
@@ -648,6 +649,15 @@ class BlockMask:
                 assert new_block_mask.kv_num_blocks.shape == (2, 1, 1)
                 assert new_block_mask.kv_indices.shape == (2, 1, 1, 4)
         """
+        index = (index,) if not isinstance(index, tuple) else index
+        padded = (*index, slice(None), slice(None), slice(None))[:3]
+        sizes = self.kv_num_blocks.shape[:3]
+        index = tuple(
+            (slice(i + n, i + n + 1) if -n <= i < 0 else slice(i, i + 1))
+            if isinstance(i, int)
+            else i
+            for i, n in zip(padded, sizes)
+        )
         new_kv_num_blocks = self.kv_num_blocks[index]
         new_kv_indices = self.kv_indices[index]
         if self.full_kv_num_blocks is not None:
@@ -1404,7 +1414,7 @@ def flex_attention(
     elif return_lse and return_aux is None:
         _warn_once(
             "deprecated_return_lse",
-            "return_lse is deprecated and will be removed in v2.7. "
+            "return_lse is deprecated and will be removed in v2.10. "
             "Please use return_aux=AuxRequest(lse=True) instead.",
             category=FutureWarning,
         )

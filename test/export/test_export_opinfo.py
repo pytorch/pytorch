@@ -57,7 +57,6 @@ fake_export_failures = {
     xfail("nn.functional.grid_sample"),
     xfail("to_sparse"),
     # cannot xfail as it is passing for cpu-only build
-    skip("nn.functional.conv2d"),
     skip("nn.functional.scaled_dot_product_attention"),
     # following are failing due to OptionalDeviceGuard
     xfail("__getitem__"),
@@ -81,14 +80,11 @@ def _test_export_helper(self, dtype, op):
     sample_inputs_itr = op.sample_inputs("cpu", dtype, requires_grad=False)
 
     mode = FakeTensorMode(allow_non_fake_inputs=True)
-    converter = mode.fake_tensor_converter
     # intentionally avoid cuda:0 to flush out some bugs
     target_device = "cuda:1"
 
     def to_fake_device(x):
-        x = converter.from_real_tensor(mode, x)
-        x.fake_device = torch.device(target_device)
-        return x
+        return x.to(target_device)
 
     # Limit to first 100 inputs so tests don't take too long
     for sample_input in itertools.islice(sample_inputs_itr, 100):
@@ -173,9 +169,7 @@ converter = mode.fake_tensor_converter
 target_device = "cuda:1"
 
 def to_fake_device(x):
-    x = converter.from_real_tensor(mode, x)
-    x.fake_device = torch.device(target_device)
-    return x
+    return x.to(target_device)
 
 # Limit to first 100 inputs so tests don't take too long
 for sample_input in itertools.islice(sample_inputs_itr, 100):
