@@ -1138,9 +1138,14 @@ bool is_blockwise_1x16_scaling(const at::Tensor& t, const at::Tensor& scale) {
 bool is_blockwise_1x32_scaling(const at::Tensor& t, const at::Tensor& scale) {
   // TODO: We might want to enforce some structure on the shapes of the scale
   // tensors
-  return (isFloat8Type(t.scalar_type()) && scale.scalar_type() == at::kFloat8_e8m0fnu
-      && scale.numel() == round_up<int64_t>(t.size(0), 128) * round_up<int64_t>(ceil_div<int64_t>(t.size(1), 32), 4)
-      && scale.is_contiguous());
+  bool is_fp8_path = (isFloat8Type(t.scalar_type()) && scale.scalar_type() == at::kFloat8_e8m0fnu
+      && scale.numel() == round_up<int64_t>(t.size(0), 128) * round_up<int64_t>(ceil_div<int64_t>(t.size(1), 32), 4));
+  bool is_packed_fp4_path = false;
+#ifdef USE_ROCM
+  is_packed_fp4_path = (t.scalar_type() == ScalarType::Float4_e2m1fn_x2 && scale.scalar_type() == at::kFloat8_e8m0fnu
+      && scale.numel() == round_up<int64_t>(t.size(0), 128) * round_up<int64_t>(ceil_div<int64_t>(t.size(1) * 2, 32), 4));
+#endif
+  return (is_fp8_path || is_packed_fp4_path) && scale.is_contiguous();
 }
 
 bool is_blockwise_1x128_scaling(const at::Tensor& t, const at::Tensor& scale) {
@@ -1381,9 +1386,15 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
     TORCH_CHECK(at::detail::getCUDAHooks().isGPUArch({"gfx950"}),
                 "Block-wise scaling for Float8_e8m0fnu is only supported on gfx950");
 
-    TORCH_CHECK(mat1.size(0) % 32 == 0 && mat1.size(1) % 32 == 0 &&
-                mat2.size(0) % 32 == 0 && mat2.size(1) % 32 == 0,
-                "Matrix dimensions must be multiples of 32 for block-wise scaling");
+    int packed_factor = 1;
+    if (mat1.scalar_type() == ScalarType::Float4_e2m1fn_x2) {
+      // For float4 data type, each byte stores two 4-bit floating-point values,
+      // effectively packing two elements into one byte.
+      packed_factor = 2;
+    }
+    TORCH_CHECK(mat1.size(0) % 16 == 0 && (mat1.size(1) * packed_factor) % 128 == 0 &&
+                mat2.size(1) % 16 == 0,
+                "M, N must be multiples of 16 and K must be multiple of 128 for block-wise scaling");
 
     TORCH_CHECK(out.scalar_type() == ScalarType::BFloat16 ||
                 out.scalar_type() == ScalarType::Half,

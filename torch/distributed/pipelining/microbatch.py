@@ -6,6 +6,7 @@ from typing import Any, Optional
 
 import torch
 from torch.fx.node import map_aggregate
+from torch.nn.attention.flex_attention import BlockMask
 from torch.utils._pytree import tree_flatten, tree_unflatten
 
 
@@ -115,6 +116,82 @@ class _Replicate:
     pass
 
 
+def _split_block_mask(
+    block_mask: BlockMask,
+    spec: TensorChunkSpec,
+    num_chunks: int,
+) -> list[BlockMask]:
+    chunk_block_masks = []
+    kv_num_blocks_chunks = torch.tensor_split(
+        block_mask.kv_num_blocks, num_chunks, spec.split_dim
+    )
+    kv_indices_chunks = torch.tensor_split(
+        block_mask.kv_indices, num_chunks, spec.split_dim
+    )
+    full_kv_num_blocks_chunks = (
+        torch.tensor_split(block_mask.full_kv_num_blocks, num_chunks, spec.split_dim)
+        if block_mask.full_kv_num_blocks is not None
+        else [None] * num_chunks
+    )
+    full_kv_indices_chunks = (
+        torch.tensor_split(block_mask.full_kv_indices, num_chunks, spec.split_dim)
+        if block_mask.full_kv_indices is not None
+        else [None] * num_chunks
+    )
+
+    ret = []
+    batch_offset = 0
+    for chunk_idx in range(num_chunks):
+
+        def create_mask_mod(idx):
+            def mask_mod_wrapper(b, h, q_idx, kv_idx):
+                b_offset = torch.full_like(b, idx)
+                return block_mask.mask_mod(b + b_offset, h, q_idx, kv_idx)
+
+            return mask_mod_wrapper
+
+        ret.append(
+            BlockMask.from_kv_blocks(
+                kv_num_blocks=kv_num_blocks_chunks[chunk_idx],
+                kv_indices=kv_indices_chunks[chunk_idx],
+                full_kv_num_blocks=full_kv_num_blocks_chunks[chunk_idx],
+                full_kv_indices=full_kv_indices_chunks[chunk_idx],
+                BLOCK_SIZE=block_mask.BLOCK_SIZE,
+                mask_mod=create_mask_mod(batch_offset),
+                seq_lengths=block_mask.seq_lengths,
+            )
+        )
+        batch_offset += kv_num_blocks_chunks[chunk_idx].size(0)
+    return ret
+
+
+def _split_tensor(
+    tensor: torch.Tensor,
+    spec: TensorChunkSpec,
+    num_chunks: int,
+) -> list[torch.Tensor]:
+    chunk_tensors = torch.tensor_split(tensor, num_chunks, spec.split_dim)
+
+    if not _debug_mask_minibatches:
+        return chunk_tensors
+
+    expanded_chunks = []
+    split_dim_idx = 0
+    for chunk_tensor in chunk_tensors:
+        new_val = torch.zeros_like(tensor)
+        upper_idx = split_dim_idx + chunk_tensor.size(spec.split_dim)
+
+        slice_indices = [slice(None, None, None)] * new_val.ndim
+        slice_indices[spec.split_dim] = slice(split_dim_idx, upper_idx)
+        new_val[slice_indices] = chunk_tensor
+
+        expanded_chunks.append(new_val)
+
+        split_dim_idx += chunk_tensor.size(chunk_v.split_dim)
+
+    return expanded_chunks
+
+
 def _shard_dict_of_args(
     args_dict,
     args_chunk_spec,
@@ -132,112 +209,58 @@ def _shard_dict_of_args(
     Returns:
         args_split: List of sharded args
     """
-    # Stage 1+2: flatten and shard/replicate
 
-    # args_sharded_replicated : [num args, num flat values, num chunks]
-    args_sharded_replicated = {}
-    arg_specs = []
+    if not args_dict:
+        return [{} for _ in range(num_chunks)]
 
-    real_num_chunks = num_chunks
-    first_tensor = True
+    assert len(args_dict) == len(
+        args_chunk_spec
+    ), f"args_dict.keys() = {list(args_dict.keys())} args_chunk_spec.keys() = {list(args_chunk_spec.keys())}"
+    assert args_chunk_spec is not None  # Should have been set by caller
 
-    assert len(args_dict) == len(args_chunk_spec), (
-        f"args_dict.keys() = {list(args_dict.keys())} args_chunk_spec.keys() = {list(args_chunk_spec.keys())}"
-    )
+    values, tree_spec = tree_flatten(args_dict)
+    chunk_specs, _ = tree_flatten(args_chunk_spec)
+    assert len(values) == len(chunk_specs)
 
-    for arg_key, arg in args_dict.items():
-        flat, spec = tree_flatten(arg)
-        arg_specs.append(spec)
-
-        chunk_spec = args_chunk_spec[arg_key]
-        assert chunk_spec is not None  # Should have been set by caller
-        chunk_spec_flat, _ = tree_flatten(chunk_spec)
-        if len(flat) != len(chunk_spec_flat):
+    # Fist check and find the actual number of chunks
+    split_sizes = []
+    for v, spec in zip(values, chunk_specs):
+        if spec is _Replicate:
+            split_sizes.append(num_chunks)
+        elif isinstance(v, torch.Tensor):
+            assert isinstance(spec, TensorChunkSpec)
+            split_sizes.append(v.size(spec.split_dim))
+        elif isinstance(v, BlockMask):
+            assert isinstance(spec, TensorChunkSpec)
+            assert spec.split_dim == 0
+            split_sizes.append(v.kv_num_blocks.size(0))
+        else:
             raise ValueError(
-                f"Argument value {arg} did not have the same number of "
-                f"values as as chunk spec {chunk_spec}"
+                f"Unsupported chunk spec: {spec} and value: {v} combination."
+            )
+    num_chunks = min(min(split_sizes), num_chunks)
+
+    flat_split_results = [[] for _ in range(num_chunks)]
+    for v, spec in zip(values, chunk_specs):
+        v_splits = []
+        if spec is _Replicate:
+            v_splits = [v] * num_chunks
+        elif isinstance(v, torch.Tensor):
+            v_splits = _split_tensor(v, spec, num_chunks)
+        elif isinstance(v, BlockMask):
+            v_splits = _split_block_mask(v, spec, num_chunks)
+        else:
+            raise ValueError(
+                f"Unsupported chunk spec: {spec} and value: {v} combination."
             )
 
-        sharded_arg_flat = []
+        for _flat_split_result, _v_split in zip(flat_split_results, v_splits):
+            _flat_split_result.append(_v_split)
 
-        for v, chunk_v in zip(flat, chunk_spec_flat):
-            if chunk_v is _Replicate or not isinstance(v, torch.Tensor):
-                sharded_arg_flat.append([v] * real_num_chunks)
-            elif isinstance(chunk_v, TensorChunkSpec):
-                # TODO: check type of v. If it's a tensor, use chunk (or debug mask).
-                # If it's a collection type, split it as you would expect. Otherwise,
-                # Throw an error
-                assert isinstance(v, torch.Tensor), f"{v} is not a tensor"
-
-                v_split_dim_size = v.size(chunk_v.split_dim)
-                if v_split_dim_size < real_num_chunks:
-                    if first_tensor:
-                        # We can only adjust number of chunks when we hit this
-                        # issue at the first tensor encountered
-                        logger.warning(
-                            f"Tensor size on chunking dimension is {v_split_dim_size}, "  # noqa: G004
-                            f"downsizing the number of chunks from {num_chunks} to {v_split_dim_size}."
-                        )
-                        real_num_chunks = v_split_dim_size
-                    else:
-                        raise RuntimeError(
-                            f"Arg {arg_key} on chunking dimension has a size of {v_split_dim_size}, "
-                            f"smaller than the number of chunks {num_chunks}. "
-                            "PiPPy cannot reduce the number of chunks because "
-                            "other arguments have bigger chunk-dimension sizes. "
-                            "Please adjust your num_chunks setting."
-                        )
-
-                chunk_tensors = torch.tensor_split(
-                    v, real_num_chunks, chunk_v.split_dim
-                )
-
-                if _debug_mask_minibatches:
-                    expanded_chunks = []
-
-                    split_dim_idx = 0
-                    for chunk_tensor in chunk_tensors:
-                        new_val = torch.zeros_like(v)
-                        upper_idx = split_dim_idx + chunk_tensor.size(chunk_v.split_dim)
-
-                        slice_indices = [slice(None, None, None)] * new_val.ndim
-                        slice_indices[chunk_v.split_dim] = slice(
-                            split_dim_idx, upper_idx
-                        )
-                        new_val[slice_indices] = chunk_tensor
-
-                        expanded_chunks.append(new_val)
-
-                        split_dim_idx += chunk_tensor.size(chunk_v.split_dim)
-
-                    sharded_arg_flat.append(expanded_chunks)
-                else:
-                    sharded_arg_flat.append(chunk_tensors)  # type: ignore[arg-type]
-
-                first_tensor = False
-            else:
-                raise TypeError(f"Unrecognized chunk spec: {chunk_v}")
-
-        args_sharded_replicated[arg_key] = sharded_arg_flat
-
-    # chunks_flat : [num chunks, num args, num flat values]
-    chunks_flat = []
-    for chunk_idx in range(real_num_chunks):
-        chunk_args = {}
-        for key, arg in args_sharded_replicated.items():
-            arg_single_chunk = [v_flat[chunk_idx] for v_flat in arg]
-            chunk_args[key] = arg_single_chunk
-        chunks_flat.append(chunk_args)
-
-    # args_split : [num chunks, num args]
-    args_split = []
-
-    for chunk in chunks_flat:
-        per_chunk_args = {}
-        assert len(arg_specs) == len(chunk)
-        for (key, arg), arg_spec in zip(chunk.items(), arg_specs):
-            per_chunk_args[key] = tree_unflatten(arg, arg_spec)
-        args_split.append(per_chunk_args)
+    return [
+        tree_unflatten(_flat_split_result, tree_spec)
+        for _flat_split_result in flat_split_results
+    ]
 
     return args_split
 

@@ -1,3 +1,4 @@
+#include <c10/util/Exception.h>
 #include <utility>
 
 #include <c10/util/WaitCounter.h>
@@ -15,6 +16,8 @@
 #include <torch/csrc/monitor/counters.h>
 #include <torch/csrc/monitor/events.h>
 #include <torch/csrc/monitor/python_init.h>
+
+TORCH_MAKE_PYBIND_ENUM_FASTER(torch::monitor::Aggregation)
 
 namespace pybind11::detail {
 template <>
@@ -58,7 +61,7 @@ struct type_caster<torch::monitor::data_value_t> {
       std::string& str = std::get<std::string>(src);
       return THPUtils_packString(str);
     }
-    throw std::runtime_error("unknown data_value_t type");
+    TORCH_CHECK(false, "unknown data_value_t type");
   }
 };
 } // namespace pybind11::detail
