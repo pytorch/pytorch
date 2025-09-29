@@ -614,7 +614,14 @@ dropout_p = 0.0
 def generate_score_mod(attn_type: str, shape: tuple[int]) -> Callable | None:
     B, Hq, M, Hkv, N, D = shape
     is_decoding = M == 1
-    from attn_gym.mods import generate_alibi_bias, generate_tanh_softcap
+    
+    # Local implementations instead of importing from attn_gym
+    def generate_alibi_bias(Hq, device):
+        h = torch.arange(Hq, dtype=torch.float32)
+        return torch.exp2(-((h + 1) * 8.0 / Hq))
+    
+    def generate_tanh_softcap(score, softcap_value):
+        return torch.tanh(score / softcap_value) * softcap_value
 
     def relative_bias(score, b, h, m, n):
         return score + (m - n)
@@ -627,11 +634,11 @@ def generate_score_mod(attn_type: str, shape: tuple[int]) -> Callable | None:
         "causal": None,
         "rel": relative_bias,
         "head_bias": head_bias,
-        "alibi": generate_alibi_bias(Hq),
+        "alibi": lambda score, b, h, m, n: score + generate_alibi_bias(Hq)[h] * (m - n),
         "sliding_window": None,
         "document_mask": None,
         "prefix_lm": None,
-        "softcap": generate_tanh_softcap(softcap_value, approx=True),
+        "softcap": lambda score, b, h, m, n: generate_tanh_softcap(score, softcap_value),
     }
 
     score_mod = function_dict[attn_type]
@@ -666,12 +673,27 @@ def generate_block_mask(attn_type: str, shape: tuple[int]):
 
         return offset
 
-    from attn_gym.masks import (
-        generate_doc_mask_mod,
-        generate_prefix_lm_mask,
-        generate_sliding_window,
-    )
-    from attn_gym.masks.document_mask import length_to_offsets
+    # Local implementations instead of importing from attn_gym
+    def generate_doc_mask_mod(offsets):
+        def doc_mask(b, h, m, n):
+            return m < offsets[b + 1] and n < offsets[b + 1]
+        return doc_mask
+    
+    def generate_prefix_lm_mask(prefix_length):
+        def prefix_mask(b, h, m, n):
+            return m >= prefix_length or n >= prefix_length
+        return prefix_mask
+    
+    def generate_sliding_window(window_size):
+        def sliding_mask(b, h, m, n):
+            return abs(m - n) <= window_size
+        return sliding_mask
+    
+    def length_to_offsets(lengths):
+        offsets = [0]
+        for length in lengths:
+            offsets.append(offsets[-1] + length)
+        return torch.tensor(offsets, dtype=torch.int32)
 
     def generate_random_lengths(total_length, num_documents):
         # Initialize all lengths to 1 to ensure each document has at least one token
@@ -1082,6 +1104,230 @@ def generate_experiment_configs(
     return all_configs
 
 
+def _output_json_for_dashboard(
+    experiments,
+    output_file,
+    benchmark_name="PyTorch attention benchmark",
+):
+    """
+    Write the result into JSON format for PyTorch OSS dashboard.
+    The JSON format is defined at
+    https://github.com/pytorch/pytorch/wiki/How-to-integrate-with-PyTorch-OSS-benchmark-database
+    """
+    if not experiments:
+        return
+
+    import platform
+    import json
+    from dataclasses import dataclass, asdict
+    from typing import Any, Optional
+
+    # Prepare headers and records for JSON output
+    records = []
+    for experiment in experiments:
+        config = experiment.config
+        results_dict = experiment.results  # This is a dict: backend -> ExperimentResults
+        
+        # Process each backend result
+        for backend, results in results_dict.items():
+            # Extract data from experiment
+            test_name = f"{config.attn_type}_{backend}"
+            input_config = f"shape: {config.shape}, dtype: {config.dtype}"
+            
+            # Determine mode based on backward pass
+            mode = "training" if config.calculate_bwd_time else "inference"
+            
+            # Extract dtype
+            dtype = str(config.dtype).split(".")[1] if "." in str(config.dtype) else str(config.dtype)
+            
+            # Determine device
+            device = "cuda"
+            
+            # Get device architecture
+            device_arch = (
+                torch.cuda.get_device_name(0)
+                if device == "cuda"
+                else platform.processor()
+                if device == "cpu"
+                else "unknown"
+            )
+
+        # Create dataclasses for JSON structure
+        @dataclass
+        class BenchmarkInfo:
+            name: str
+            mode: Optional[str]
+            dtype: str
+            extra_info: dict[str, Any]
+
+        @dataclass
+        class ModelInfo:
+            name: str
+            type: str
+            origins: list[str]
+
+        @dataclass
+        class MetricInfo:
+            name: str
+            unit: str
+            benchmark_values: list[float]
+            target_value: Optional[float]
+
+        @dataclass
+        class BenchmarkRecord:
+            benchmark: BenchmarkInfo
+            model: ModelInfo
+            metric: MetricInfo
+
+        # Add record for forward latency
+        record_fwd_latency = BenchmarkRecord(
+            benchmark=BenchmarkInfo(
+                name=benchmark_name,
+                mode=mode,
+                dtype=dtype,
+                extra_info={
+                    "input_config": input_config,
+                    "device": device,
+                    "arch": device_arch,
+                    "backend": backend,
+                    "attn_type": config.attn_type,
+                    "shape": str(config.shape),
+                    "max_autotune": True,  # We always use max_autotune
+                },
+            ),
+            model=ModelInfo(
+                name=test_name, type="attention-benchmark", origins=["pytorch"]
+            ),
+            metric=MetricInfo(
+                name="forward_latency",
+                unit="us",
+                benchmark_values=[results.fwd_time],
+                target_value=None,
+            ),
+        )
+        records.append(asdict(record_fwd_latency))
+
+        # Add record for forward memory bandwidth (if available)
+        if config.cal_bandwidth and results.sparsity is not None:
+            record_fwd_bandwidth = BenchmarkRecord(
+                benchmark=BenchmarkInfo(
+                    name=benchmark_name,
+                    mode=mode,
+                    dtype=dtype,
+                    extra_info={
+                        "input_config": input_config,
+                        "device": device,
+                        "arch": device_arch,
+                        "backend": backend,
+                        "attn_type": config.attn_type,
+                        "shape": str(config.shape),
+                        "max_autotune": True,
+                    },
+                ),
+                model=ModelInfo(
+                    name=test_name, type="attention-benchmark", origins=["pytorch"]
+                ),
+                metric=MetricInfo(
+                    name="forward_memory_bandwidth",
+                    unit="TB/s",
+                    benchmark_values=[calculate_bandwidth(config, results, "fwd")],
+                    target_value=None,
+                ),
+            )
+            records.append(asdict(record_fwd_bandwidth))
+
+        # Add record for forward TFLOPS (if available)
+        if config.cal_bandwidth:
+            record_fwd_tflops = BenchmarkRecord(
+                benchmark=BenchmarkInfo(
+                    name=benchmark_name,
+                    mode=mode,
+                    dtype=dtype,
+                    extra_info={
+                        "input_config": input_config,
+                        "device": device,
+                        "arch": device_arch,
+                        "backend": backend,
+                        "attn_type": config.attn_type,
+                        "shape": str(config.shape),
+                        "max_autotune": True,
+                    },
+                ),
+                model=ModelInfo(
+                    name=test_name, type="attention-benchmark", origins=["pytorch"]
+                ),
+                metric=MetricInfo(
+                    name="forward_tflops",
+                    unit="TFLOPS/s",
+                    benchmark_values=[calculate_tflops(config, results)],
+                    target_value=None,
+                ),
+            )
+            records.append(asdict(record_fwd_tflops))
+
+        # Add record for backward latency (if available)
+        if config.calculate_bwd_time and results.bwd_time is not None:
+            record_bwd_latency = BenchmarkRecord(
+                benchmark=BenchmarkInfo(
+                    name=benchmark_name,
+                    mode=mode,
+                    dtype=dtype,
+                    extra_info={
+                        "input_config": input_config,
+                        "device": device,
+                        "arch": device_arch,
+                        "backend": backend,
+                        "attn_type": config.attn_type,
+                        "shape": str(config.shape),
+                        "max_autotune": True,
+                    },
+                ),
+                model=ModelInfo(
+                    name=test_name, type="attention-benchmark", origins=["pytorch"]
+                ),
+                metric=MetricInfo(
+                    name="backward_latency",
+                    unit="us",
+                    benchmark_values=[results.bwd_time],
+                    target_value=None,
+                ),
+            )
+            records.append(asdict(record_bwd_latency))
+
+        # Add record for sparsity (if available)
+        if results.sparsity is not None:
+            record_sparsity = BenchmarkRecord(
+                benchmark=BenchmarkInfo(
+                    name=benchmark_name,
+                    mode=mode,
+                    dtype=dtype,
+                    extra_info={
+                        "input_config": input_config,
+                        "device": device,
+                        "arch": device_arch,
+                        "backend": backend,
+                        "attn_type": config.attn_type,
+                        "shape": str(config.shape),
+                        "max_autotune": True,
+                    },
+                ),
+                model=ModelInfo(
+                    name=test_name, type="attention-benchmark", origins=["pytorch"]
+                ),
+                metric=MetricInfo(
+                    name="attention_sparsity",
+                    unit="%",
+                    benchmark_values=[results.sparsity * 100],
+                    target_value=None,
+                ),
+            )
+            records.append(asdict(record_sparsity))
+
+    # Write all records to the output file
+    with open(output_file, "w", encoding="utf-8") as f:
+        json.dump(records, f, indent=2)
+
+
 def main(args):
     seed = 123
     np.random.seed(seed)
@@ -1114,6 +1360,10 @@ def main(args):
         )
 
     print_results(results, args.save_path)
+    
+    # Output JSON for dashboard if requested
+    if args.output_json_for_dashboard:
+        _output_json_for_dashboard(results, args.output_json_for_dashboard, args.benchmark_name)
 
 
 def heads_input_type(s):
@@ -1197,6 +1447,18 @@ Ignores -b batch size and calculate batch size from kv size instead when specifi
         choices=["math", "efficient", "cudnn", "fav2", "fav3", "fakv"],
         default=["efficient"],
         help="Backend to use for attention computation",
+    )
+    parser.add_argument(
+        "--output-json-for-dashboard",
+        type=str,
+        help="Path to save results in JSON format for PyTorch OSS dashboard",
+        default=None,
+    )
+    parser.add_argument(
+        "--benchmark-name",
+        type=str,
+        help="Name of the benchmark for dashboard output",
+        default="PyTorch attention benchmark",
     )
     # Parse arguments
     args = parser.parse_args()
