@@ -1,0 +1,2 @@
+attn_type,dtype,"shape(B,Hq,M,Hkv,N,D)",fwd_efficient,fwd_compiled,fwd_efficient_speedup,fwd_mem_bw (TB/s),TFlops/s
+causal,torch.bfloat16,"(1, 16, 128, 16, 128, 64)",nan,6566.733400177327,nan,0.00015968000162328572,0.010299360104701928

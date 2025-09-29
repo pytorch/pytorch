@@ -1,0 +1,26 @@
+operator_benchmark_tests:
+  - matmul
+  - mm
+  - addmm
+  - bmm
+
+operator_benchmark_config:
+  tag_filter: "long"
+  benchmark_name: "PyTorch operator microbenchmark"
+  use_compile: true
+
+# Additional configuration options
+test_matrix:
+  include:
+    - config: "operator_microbenchmark_test"
+      shard: 1
+      num_shards: 1
+      runner: "linux.aws.h100"
+    - config: "operator_microbenchmark_test"
+      shard: 1
+      num_shards: 1
+      runner: "linux.aws.a100"
+    - config: "operator_microbenchmark_test"
+      shard: 1
+      num_shards: 1
+      runner: "linux.dgx.b200"

@@ -1,0 +1,126 @@
+[
+  {
+    "benchmark": {
+      "name": "PyTorch attention benchmark",
+      "mode": "inference",
+      "dtype": "bfloat16",
+      "extra_info": {
+        "input_config": "shape: (1, 16, 128, 16, 128, 64), dtype: torch.bfloat16",
+        "device": "cpu",
+        "arch": "arm",
+        "backend": "compiled",
+        "attn_type": "causal",
+        "shape": "(1, 16, 128, 16, 128, 64)",
+        "max_autotune": true
+      }
+    },
+    "model": {
+      "name": "causal_compiled",
+      "type": "attention-benchmark",
+      "origins": [
+        "pytorch"
+      ]
+    },
+    "metric": {
+      "name": "forward_latency",
+      "unit": "us",
+      "benchmark_values": [
+        6566.733400177327
+      ],
+      "target_value": null
+    }
+  },
+  {
+    "benchmark": {
+      "name": "PyTorch attention benchmark",
+      "mode": "inference",
+      "dtype": "bfloat16",
+      "extra_info": {
+        "input_config": "shape: (1, 16, 128, 16, 128, 64), dtype: torch.bfloat16",
+        "device": "cpu",
+        "arch": "arm",
+        "backend": "compiled",
+        "attn_type": "causal",
+        "shape": "(1, 16, 128, 16, 128, 64)",
+        "max_autotune": true
+      }
+    },
+    "model": {
+      "name": "causal_compiled",
+      "type": "attention-benchmark",
+      "origins": [
+        "pytorch"
+      ]
+    },
+    "metric": {
+      "name": "forward_memory_bandwidth",
+      "unit": "TB/s",
+      "benchmark_values": [
+        0.00015968000162328572
+      ],
+      "target_value": null
+    }
+  },
+  {
+    "benchmark": {
+      "name": "PyTorch attention benchmark",
+      "mode": "inference",
+      "dtype": "bfloat16",
+      "extra_info": {
+        "input_config": "shape: (1, 16, 128, 16, 128, 64), dtype: torch.bfloat16",
+        "device": "cpu",
+        "arch": "arm",
+        "backend": "compiled",
+        "attn_type": "causal",
+        "shape": "(1, 16, 128, 16, 128, 64)",
+        "max_autotune": true
+      }
+    },
+    "model": {
+      "name": "causal_compiled",
+      "type": "attention-benchmark",
+      "origins": [
+        "pytorch"
+      ]
+    },
+    "metric": {
+      "name": "forward_tflops",
+      "unit": "TFLOPS/s",
+      "benchmark_values": [
+        0.010299360104701928
+      ],
+      "target_value": null
+    }
+  },
+  {
+    "benchmark": {
+      "name": "PyTorch attention benchmark",
+      "mode": "inference",
+      "dtype": "bfloat16",
+      "extra_info": {
+        "input_config": "shape: (1, 16, 128, 16, 128, 64), dtype: torch.bfloat16",
+        "device": "cpu",
+        "arch": "arm",
+        "backend": "compiled",
+        "attn_type": "causal",
+        "shape": "(1, 16, 128, 16, 128, 64)",
+        "max_autotune": true
+      }
+    },
+    "model": {
+      "name": "causal_compiled",
+      "type": "attention-benchmark",
+      "origins": [
+        "pytorch"
+      ]
+    },
+    "metric": {
+      "name": "attention_sparsity",
+      "unit": "%",
+      "benchmark_values": [
+        0.0
+      ],
+      "target_value": null
+    }
+  }
+]
