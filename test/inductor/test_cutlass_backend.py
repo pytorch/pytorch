@@ -8,10 +8,9 @@ import sysconfig
 import time
 import unittest
 import unittest.mock as mock
-from collections.abc import Callable
 from enum import Enum
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 from torch._dynamo.exc import BackendCompilerFailed
 from torch._inductor.codegen.cuda.serialization import get_cutlass_operation_serializer
@@ -85,7 +84,7 @@ def _check_if_instances_equal(op1, op2) -> bool:
     Utility function to check if two instances of a class are equal.
     """
     # cutlass uses list and tuple inconsistently
-    if isinstance(op1, (list | tuple)):
+    if isinstance(op1, (list, tuple)):
         return tuple(op1) == tuple(op2)
 
     if type(op1) != type(op2):
@@ -256,7 +255,7 @@ class TestCutlassBackend(TestCase):
         self.assertTrue(try_import_cutlass())
 
         if config.is_fbcode():
-            import cutlass_cppgen  # noqa: F401
+            import python_cutlass
         else:
             import cutlass_cppgen as python_cutlass  # noqa: F401
         import cutlass_library  # noqa: F401
@@ -2151,7 +2150,7 @@ class TestCutlassBackend(TestCase):
         deserialized_ops = [
             serializer.deserialize(serialized_op) for serialized_op in serialized_ops
         ]
-        for op, deserialized_op in zip(ops, deserialized_ops, strict=False):
+        for op, deserialized_op in zip(ops, deserialized_ops):
             self.assertTrue(_check_if_instances_equal(op, deserialized_op))
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, "FP8 is only supported on H100+")
