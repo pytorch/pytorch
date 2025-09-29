@@ -1053,7 +1053,10 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def truediv(x, y):
-        out = f"({x} / {y})"
+        if x.dtype == torch.float32 and y.dtype == torch.float32:
+            out = f"triton.language.div_rn({x}, {y})"
+        else:
+            out = f"({x} / {y})"
         if low_precision_fp_var(x) or low_precision_fp_var(y):
             out_dtype = get_dtype_handler().truediv(x, y)
             if out_dtype in (torch.float16, torch.float32):
