@@ -1941,7 +1941,7 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                             stage_idx,
                             mb_index,
                         ) not in fwd_recv_ops, (
-                            "Recv twice for {stage_idx=} {mb_index=} without executing forward"
+                            f"Recv twice for {stage_idx=} {mb_index=} without executing forward"
                         )
                         fwd_recv_ops[(stage_idx, mb_index)] = _batch_p2p(
                             stage.get_fwd_recv_ops(mb_index)
