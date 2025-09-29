@@ -229,12 +229,14 @@ def get_test_status(test_cases: list[list[dict[str, Any]]]) -> list[dict[str, An
         else:
             status = statuses[0]
 
-        only_status_info.append({
-            "short_job_name": short_job_name,
-            "file": file,
-            "name": test["name"],
-            "status": status,
-        })
+        only_status_info.append(
+            {
+                "short_job_name": short_job_name,
+                "file": file,
+                "name": test["name"],
+                "status": status,
+            }
+        )
 
     return only_status_info
 
@@ -269,5 +271,5 @@ def upload_additional_info(
         workflow_run_id,
         workflow_run_attempt,
         "additional_info/test_status",
-        [get_test_status(grouped_tests)],
+        get_test_status(grouped_tests),
     )
