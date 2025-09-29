@@ -475,18 +475,11 @@ In addition to the standard Google Style docstring formatting rules, the followi
 
 Currently, the docs can only be built with Python 3.10. To build the documentation:
 
-1. Set up a Python 3.10 environment and install `pip`. We recommend using separate environments for PyTorch development and building the docs. For example:
+1. Set up a Python 3.10 virtual environment and install `pip`. We recommend using separate environments for PyTorch development and building the docs. For example:
 ```bash
 python3.10 -m venv .venv-docs
 source .venv-docs/bin/activate  # or `& .\venv-docs\Scripts\Activate.ps1` on Windows
 python -m ensurepip --upgrade
-```
-
-Or with `uv`:
-```bash
-uv venv -p 3.10 .venv-docs
-source .venv-docs/bin/activate  # or `& .\venv-docs\Scripts\Activate.ps1` on Windows
-uv pip install -U pip
 ```
 
 2. Install PyTorch in that environment.
@@ -503,9 +496,11 @@ npm install -g katex
 npm install katex && export PATH="$PATH:$(pwd)/node_modules/.bin"
 ```
 
-Note that:
-- If you installed `node` and `npm` with different package managers (such as `conda` and `brew`), your `node` and `katex` versions may be incompatible. `node@6.13.1` and `katex@0.13.18` are known to be compatible with one another. To install the latter, you can use `npm install -g katex@0.13.18`.
-- If you are a Meta employee using a devserver, it may be more convenient to install KaTeX with `yarn global add katex`. You can install a specific version with e.g. `yarn global add katex@0.13.18`
+> [!TIP]
+> If you are a Meta employee using a devserver, it may be more convenient to install KaTeX with `yarn global add katex`. You can install a specific version with e.g. `yarn global add katex@0.13.18`
+
+> [!CAUTION]
+> If you installed `node` and `npm` with different package managers (such as `conda` and `brew`), your `node` and `katex` versions may be incompatible. `node@6.13.1` and `katex@0.13.18` are known to be compatible with one another. To install the latter, you can use `npm install -g katex@0.13.18`.
 
 4. Install the docs' Python dependencies:
 ```bash
