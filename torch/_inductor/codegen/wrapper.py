@@ -976,6 +976,22 @@ class SymbolicCallArgLine(WrapperLine):
         return converter._generate_symbolic_call_arg
 
 
+@dataclasses.dataclass
+class UnbackedSymbolDefsLine(WrapperLine):
+    wrapper: PythonWrapperCodegen
+    output_name: str
+    outputs: Any
+    unbacked_bindings: Optional[dict[sympy.Symbol, pytree.KeyPath]]
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        self.wrapper._codegen_unbacked_symbol_defs_for_outputs(
+            self.output_name, self.outputs, self.unbacked_bindings
+        )
+
+    def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
+        return converter._generate_unbacked_symbol_defs
+
+
 BufferName = str
 Line = Union[MemoryPlanningLine, LineContext]
 
@@ -3189,7 +3205,16 @@ class PythonWrapperCodegen(CodeGen):
         unbacked_bindings = resolve_unbacked_bindings(
             V.graph.sizevars.shape_env, unbacked_bindings
         )
+        self.writeline(
+            UnbackedSymbolDefsLine(self, output_name, outputs, unbacked_bindings)
+        )
 
+    def _codegen_unbacked_symbol_defs_for_outputs(
+        self,
+        output_name: str,
+        outputs: Any,
+        unbacked_bindings: Optional[dict[sympy.Symbol, pytree.KeyPath]],
+    ) -> None:
         if not unbacked_bindings:
             return
 
