@@ -105,24 +105,14 @@ class AssociativeScanOp(HigherOrderOperator):
         xs_slice2 = [first_slice_copy(x) for x in xs]
         all_inputs = tuple(xs_slice1 + xs_slice2 + list(additional_inputs))
 
-        combine_gm: torch.fx.GraphModule = (
-            combine_fn
-            if isinstance(combine_fn, torch.fx.GraphModule)
-            else materialize_as_graph(combine_fn, all_inputs)
-        )
-
-        example_inputs = [
-            n.meta["val"] if "val" in n.meta else n.meta["example_value"]
-            for n in combine_gm.graph.find_nodes(op="placeholder")
-        ]
-
+        combine_gm: torch.fx.GraphModule = materialize_as_graph(combine_fn, all_inputs)
         (
             _,
             _,
             _,
             mutated_inputs,
             outputs,
-        ) = check_input_alias_and_mutation_return_outputs(combine_gm, example_inputs)
+        ) = check_input_alias_and_mutation_return_outputs(combine_gm)
         if len(mutated_inputs) > 0:
             raise RuntimeError(
                 "For associative_scan, combine_fn cannot have in-place mutations but found "
@@ -493,16 +483,16 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
 
     Level 0 (Input):    xs0    xs1    xs2    xs3    xs4
                         \    /       |      |      |
-                        \  /        |      |      |
-    Level 1:               ys1 ───────┘      |      |
-                            \               /       |
+                         \  /        |      |      |
+    Level 1:              ys1 ───────┘      |      |
+                           \               /       |
                             \             /        |
-    Level 2:                  ys2 ────────┘         |
-                            \                   /
-                                \                 /
-    Level 3:                     ys3 ────────────┘
-                                \
-                                \
+    Level 2:                 ys2 ────────┘         |
+                              \                   /
+                               \                 /
+    Level 3:                    ys3 ────────────┘
+                                 \
+                                  \
     Level 4:                        ys4
 
 
@@ -510,17 +500,17 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
 
 
     Level 0 (output):   g_xs0   g_xs1   g_xs2   g_xs3   g_xs4
-                        \      /       |       |     |
-                        \    /        |       |     |
-    Level 1:    gl_ys1  ─> g_ys1  ──────┘       |     |
-                            \                  /      |
-                            \                /       |
-    Level 2:    gl_ys2     ─> g_ys2  ────────┘        |
-                            \                     /
-                                \                   /
-    Level 3:    gl_ys3        ─> g_ys3  ───────────┘
-                                \
-                                \
+                         \      /       |       |       |
+                          \    /        |       |       |
+    Level 1:    gl_ys1  ─> g_ys1  ──────┘       |       |
+                            \                  /        |
+                             \                /         |
+    Level 2:    gl_ys2     ─> g_ys2  ────────┘          |
+                               \                       /
+                                \                    /
+    Level 3:    gl_ys3        ─> g_ys3  ────────────┘
+                                  \
+                                   \
     Level 4:    gl_ys4           ─> g_ys4,
 
     where gl_y1 is the gradient of the loss with respect to ys1 and the input of backward.

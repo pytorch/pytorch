@@ -82,15 +82,9 @@ RUN if command -v apt-get >/dev/null; then \
         apt-get update -y \
         && apt-get install -y ccache software-properties-common git curl wget sudo vim; \
     else \
-        dnf install -y git curl wget sudo vim; \
+        dnf install -y git curl wget sudo; \
     fi \
     && python3 --version && python3 -m pip --version
-
-# Workaround for https://github.com/openai/triton/issues/2507 and
-# https://github.com/pytorch/pytorch/issues/107960 -- hopefully
-# this won't be needed for future versions of this docker image
-# or future versions of triton.
-RUN ldconfig /usr/local/cuda-$(echo $CUDA_VERSION | cut -d. -f1,2)/compat/
 
 # Install uv for faster pip installs if not existed
 RUN --mount=type=cache,target=/root/.cache/uv \
@@ -220,11 +214,16 @@ ARG SCCACHE_S3_NO_CREDENTIALS=0
 RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,source=.git,target=.git \
     if [ "$USE_SCCACHE" = "1" ]; then \
-        echo "Installing sccache..." \
-        && curl -L -o sccache.tar.gz https://github.com/mozilla/sccache/releases/download/v0.8.1/sccache-v0.8.1-x86_64-unknown-linux-musl.tar.gz \
+        echo "Installing sccache..."; \
+        if [ "$TARGETPLATFORM" = "linux/arm64" ]; then \
+            SCCACHE_ARCHIVE="sccache-v0.8.1-aarch64-unknown-linux-musl"; \
+        else \
+            SCCACHE_ARCHIVE="sccache-v0.8.1-x86_64-unknown-linux-musl"; \
+        fi; \
+        curl -L -o sccache.tar.gz "https://github.com/mozilla/sccache/releases/download/v0.8.1/${SCCACHE_ARCHIVE}.tar.gz" \
         && tar -xzf sccache.tar.gz \
-        && sudo mv sccache-v0.8.1-x86_64-unknown-linux-musl/sccache /usr/bin/sccache \
-        && rm -rf sccache.tar.gz sccache-v0.8.1-x86_64-unknown-linux-musl \
+        && sudo mv "${SCCACHE_ARCHIVE}"/sccache /usr/bin/sccache \
+        && rm -rf sccache.tar.gz "${SCCACHE_ARCHIVE}" \
         && export SCCACHE_BUCKET=${SCCACHE_BUCKET_NAME} \
         && export SCCACHE_REGION=${SCCACHE_REGION_NAME} \
         && export SCCACHE_S3_NO_CREDENTIALS=${SCCACHE_S3_NO_CREDENTIALS} \
@@ -285,7 +284,7 @@ RUN if command -v apt-get >/dev/null; then \
         && ln -sf /usr/bin/python${PYTHON_VERSION}-config /usr/bin/python3-config \
         && curl -sS ${GET_PIP_URL} | python${PYTHON_VERSION}; \
     else \
-        dnf install -y git curl wget sudo vim; \
+        dnf install -y git curl wget sudo; \
     fi \
     && python3 --version && python3 -m pip --version
 
@@ -297,12 +296,6 @@ RUN echo "[INFO] Listing current directory before torch install step:" && \
     ls -al && \
     echo "[INFO] Showing torch_build_versions.txt content:" && \
     cat torch_build_versions.txt
-
-# Workaround for https://github.com/openai/triton/issues/2507 and
-# https://github.com/pytorch/pytorch/issues/107960 -- hopefully
-# this won't be needed for future versions of this docker image
-# or future versions of triton.
-RUN ldconfig /usr/local/cuda-$(echo $CUDA_VERSION | cut -d. -f1,2)/compat/
 
 # Install uv for faster pip installs if not existed
 RUN --mount=type=cache,target=/root/.cache/uv \
