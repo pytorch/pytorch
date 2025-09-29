@@ -37,6 +37,7 @@ if errorlevel 1 goto fail
 if not errorlevel 0 goto fail
 
 call pip install mkl==2024.2.0 mkl-static==2024.2.0 mkl-include==2024.2.0 ninja typing-extensions
+call pip install -r .ci/docker/requirements-ci.txt
 SET CMAKE_LIBRARY_PATH=%PYTHON_PATH%\Library\lib
 SET CMAKE_INCLUDE_PATH=%PYTHON_PATH%\Library\include
 if errorlevel 1 goto fail
