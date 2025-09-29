@@ -131,7 +131,7 @@ uint32_t L2_cache_size() {
 }
 
 bool is_amd_cpu() {
-  #if !defined(__s390x__) && !defined(__powerpc__)
+#if !defined(__s390x__) && !defined(__powerpc__)
     if (!cpuinfo_initialize()) {
       return false;
     }
@@ -146,9 +146,9 @@ bool is_amd_cpu() {
     }
     // Check AMD vendor support
     return (core->vendor == cpuinfo_vendor_amd);
-  #else
+#else
     return false;
-  #endif
-  }
+#endif
+}
 
 } // namespace at::cpu
