@@ -6625,6 +6625,37 @@ The attribute will then contain the gradients computed and future calls to
 )
 
 add_docstr_all(
+    "grad_dtype",
+    r"""
+The allowed dtype of :attr:`grad` for this tensor.
+
+:attr:`grad_dtype` can be set to a specific dtype or ``None``. By default,
+``t.grad_dtype == t.dtype``. When not ``None``, the autograd engine will cast
+incoming gradients to that dtype. This attribute can only be accessed and set
+for leaf tensors.
+
+.. warning::
+    Only use this API if you know what you are doing. Diverging the dtype
+    of the tensor and its gradient will break downstream systems that do
+    not expect this.
+
+Example::
+
+    >>> x = torch.tensor([1.0, 2.0], requires_grad=True)
+    >>> x.grad_dtype
+    torch.float32
+
+    >>> x.grad_dtype = torch.float16
+    >>> x.grad_dtype
+    torch.float16
+
+    >>> # Allow any gradient dtype
+    >>> x.grad_dtype = None
+    >>> x.grad_dtype
+""",
+)
+
+add_docstr_all(
     "retain_grad",
     r"""
 retain_grad() -> None

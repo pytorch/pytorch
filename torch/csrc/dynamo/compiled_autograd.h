@@ -1463,8 +1463,11 @@ struct IValuePacker<InputMetadata> {
     return tuple;
   }
   static InputMetadata unpack(const at::IValue& t) {
-    auto tuple = t.to<
-        std::tuple<packed_tensoroptions_t, std::vector<at::SymInt>, bool, std::optional<c10::ScalarType>>>();
+    auto tuple = t.to<std::tuple<
+        packed_tensoroptions_t,
+        std::vector<at::SymInt>,
+        bool,
+        std::optional<c10::ScalarType>>>();
 
     return InputMetadata(
         unpack_TensorOptions(std::get<0>(tuple)),

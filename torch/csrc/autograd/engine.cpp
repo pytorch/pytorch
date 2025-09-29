@@ -950,8 +950,6 @@ static void validate_outputs_impl(
         isFloatingType(grad.scalar_type()) ||
         (input_is_complex == grad_is_complex));
 
-    // grad_dtype and allow_grad_dtype_mismatch can only be customized
-    // on leaf tensors, defaulting to nullopt and false otherwise.
     if (metadata.grad_dtype().has_value()) {
       if (grad.scalar_type() != metadata.grad_dtype().value()) {
         grad = grad.to(metadata.grad_dtype().value());
