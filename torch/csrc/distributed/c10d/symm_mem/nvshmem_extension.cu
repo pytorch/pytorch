@@ -241,15 +241,13 @@ __global__ void exchangeSplitAndOffsetKernel(int64_t* in_splits, int64_t* src_of
 // This kernel is used to do the actual data exchange.
 // `in_out_splits` has the same definition as in `exchangeSplitAndOffset`.
 // `stride` is the stride at dim 0, unit in byte.
-__global__ void allToAllV(void *send_data, void *recv_data, int64_t* out_splits_offsets, size_t stride, nvshmem_team_t team) {
+__global__ void allToAllGet(void *send_data, void *recv_data, int64_t* source_offsets, int64_t* output_splits, size_t stride, nvshmem_team_t team) {
 #ifndef _NVSHMEM_DEVICELIB_SUPPORTED
   CUDA_KERNEL_ASSERT_MSG(false, "SM arch unsupported for NVSHMEM");
 #else
   CUDA_KERNEL_ASSERT(team != NVSHMEM_TEAM_INVALID);
   int mype = nvshmem_team_my_pe(team);
   int npes = nvshmem_team_n_pes(team);
-  auto output_splits = out_splits_offsets;
-  auto source_offsets = out_splits_offsets + npes;
   int bid = blockIdx.x;
   int tid = threadIdx.x;
   int blocks_per_peer = max(gridDim.x / npes, 1);
@@ -368,11 +366,12 @@ void all_to_all_vdev(
   void* args1[] = {
       &input_ptr,
       &output_ptr,
+      &tmp_src_offsets_ptr,
       &out_splits_offsets_ptr,
       &stride_bytes,
       &team};
   nvshmemx_collective_launch(
-      (const void*)allToAllV,
+      (const void*)allToAllGet,
       dim3(num_blocks),
       dim3(THREADS_PER_BLOCK),
       args1,
@@ -945,6 +944,62 @@ void _make_a2a_exchange_plan(
       stream);
 }
 
+void _all_to_all_get(
+    at::Tensor& input,
+    at::Tensor& out,
+    at::Tensor& src_offsets,
+    at::Tensor& out_splits,
+    std::string group_name) {
+  // Perform a 1D AllToAllv shuffle operation, with source offset information, and get operations.
+  auto input_hdl = c10d::symmetric_memory::rendezvous(input, group_name);
+  auto out_hdl = c10d::symmetric_memory::rendezvous(out, group_name);
+  auto src_offsets_hdl = c10d::symmetric_memory::rendezvous(src_offsets, group_name);
+  auto out_splits_hdl = c10d::symmetric_memory::rendezvous(out_splits, group_name);
+
+  // Verify inputs
+  TORCH_CHECK_EQ(input.device(), out.device());
+  TORCH_CHECK(input.dtype() == out.dtype(), "input and out must have the same dtype");
+  TORCH_CHECK(input.stride(0) == out.stride(0), "input and out must have the same stride at dim 0");
+  TORCH_CHECK(input.is_contiguous() && out.is_contiguous(), "input and out must be contiguous");
+
+  // Get team
+  auto device = input.device();
+  c10::cuda::CUDAGuard guard(device);
+  auto& team_manager = TeamManager::get(device);
+  auto team = team_manager.get_team(group_name, input_hdl->get_rank_to_global_rank());
+  auto stream = at::cuda::getCurrentCUDAStream(device.index());
+
+  // CTA Tuning
+  auto input_size = input.numel() * input.element_size();
+  int num_blocks = get_a2a_nblocks(
+    input_size,
+    input_hdl->get_world_size(),
+    input_hdl->world_within_direct_access());
+
+  // Stride at dim 0
+  size_t stride_bytes = input.stride(0) * input.element_size();
+  auto input_ptr = input.const_data_ptr();
+  auto output_ptr = out.mutable_data_ptr();
+  auto src_offsets_ptr = src_offsets.const_data_ptr<int64_t>();
+  auto out_splits_ptr = out_splits.const_data_ptr<int64_t>();
+
+  // All to all data exchange
+  void* args[] = {
+      &input_ptr,
+      &output_ptr,
+      &src_offsets_ptr,
+      &out_splits_ptr,
+      &stride_bytes,
+      &team};
+  nvshmemx_collective_launch(
+      (const void*)allToAllGet,
+      dim3(num_blocks),
+      dim3(THREADS_PER_BLOCK),
+      args,
+      0,
+      stream);
+}
+
 } // namespace c10d::nvshmem_extension
 
 
@@ -959,4 +1014,5 @@ TORCH_LIBRARY_IMPL(symm_mem, CUDA, m) {
   m.impl("all_to_all_vdev_2d", c10d::nvshmem_extension::all_to_all_vdev_2d);
   m.impl("all_to_all_vdev_2d_offset", c10d::nvshmem_extension::all_to_all_vdev_2d_offset);
   m.impl("_make_a2a_exchange_plan", c10d::nvshmem_extension::_make_a2a_exchange_plan);
+  m.impl("_all_to_all_get", c10d::nvshmem_extension::_all_to_all_get);
 }

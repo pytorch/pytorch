@@ -6,6 +6,7 @@ import socket
 import uuid
 from collections.abc import Generator
 from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import timedelta
 from enum import Enum
 from functools import partial
@@ -1824,13 +1825,21 @@ def get_mempool_allocator(device: _device):  # type: ignore[no-untyped-def]
     return _SymmetricMemory.get_mempool_allocator(torch.device(device))
 
 
+@dataclass
+class ExchangePlan:
+    in_splits: torch.Tensor
+    src_offsets: torch.Tensor
+    out_splits: torch.Tensor
+    dst_offsets: torch.Tensor
+
+
 def make_a2a_exchange_plan(
     in_splits: torch.Tensor,
     src_offsets: torch.Tensor,
     out_splits: torch.Tensor,
     dst_offsets: torch.Tensor,
     group_name: str,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+) -> ExchangePlan:
     r"""
     Create an all-to-all exchange plan given the input splits. This is a
     collective operation.
@@ -1847,7 +1856,32 @@ def make_a2a_exchange_plan(
     torch.ops.symm_mem._make_a2a_exchange_plan(
         in_splits, src_offsets, out_splits, dst_offsets, group_name
     )
-    return in_splits, src_offsets, out_splits, dst_offsets
+    return ExchangePlan(in_splits, src_offsets, out_splits, dst_offsets)
+
+
+def all_to_all_v(
+    input: torch.Tensor,
+    out: torch.Tensor,
+    plan: ExchangePlan,
+    group_name: str,
+) -> None:
+    r"""
+    Perform an all-to-all-v operation given an `ExchangePlan`.
+    Args:
+        input (class:`torch.Tensor`): the input tensor for the all-to-all operation (IN).
+        out (class:`torch.Tensor`): the output tensor for the all-to-all operation (OUT).
+        plan (`ExchangePlan`): a tuple consisting of (in_splits, src_offsets, out_splits, dst_offsets).
+        group_name (str): the group over which to perform the all-to-all.
+    """
+    # For now we use the get style, in future we can extend it to support the
+    # put style too, given a flag or something.
+    torch.ops.symm_mem._all_to_all_get(
+        input,
+        out,
+        plan.src_offsets,
+        plan.out_splits,
+        group_name,
+    )
 
 
 __all__ = ["empty", "rendezvous", "is_nvshmem_available", "set_backend", "get_backend"]
