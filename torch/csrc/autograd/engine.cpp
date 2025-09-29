@@ -4,6 +4,7 @@
 #include <torch/csrc/autograd/autograd.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/functions/basic_ops.h>
+#include <torch/csrc/autograd/python_function.h>
 #include <torch/csrc/autograd/grad_mode.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/dynamo/compiled_autograd.h>
@@ -1126,7 +1127,24 @@ void Engine::evaluate_function(
     }
   }
 
-  auto outputs = call_function(graph_task, func, inputs);
+  // For custom autograd functions, we need to allow stream switching
+  // Check if this is a Python function that might want to switch streams
+  bool is_python_function = dynamic_cast<PyNode*>(func) != nullptr;
+  
+  variable_list outputs;
+  if (is_python_function) {
+    // Release the stream guard temporarily to allow custom stream switching
+    // within Python autograd functions
+    parent_stream_guard.reset();
+    outputs = call_function(graph_task, func, inputs);
+    // Restore the stream guard after the function call
+    if (opt_parent_stream) {
+      parent_stream_guard = c10::OptionalStreamGuard{opt_parent_stream};
+    }
+  } else {
+    // For built-in functions, use the normal flow with stream enforcement
+    outputs = call_function(graph_task, func, inputs);
+  }
 
   auto& fn = *func;
   if (!graph_task->keep_graph_) {
