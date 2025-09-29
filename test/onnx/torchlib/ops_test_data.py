@@ -39,7 +39,7 @@ from __future__ import annotations
 import copy
 import dataclasses
 import functools
-from typing import Any, Callable, Optional, TYPE_CHECKING
+from typing import Any, Optional, TYPE_CHECKING
 from typing_extensions import Self
 
 import numpy as np
@@ -52,7 +52,7 @@ from torch.testing._internal.opinfo import definitions as opinfo_definitions
 
 
 if TYPE_CHECKING:
-    from collections.abc import Collection
+    from collections.abc import Callable, Collection
 
 
 # Create a copy of the op_db to modify
