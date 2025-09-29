@@ -418,7 +418,7 @@ def _call_while_loop(
         source_target=self.value,
         # NOTE [why we cannot use "automatic" for while_loop]:
         # The reason is that we want to enforce
-        # the ordering of inputs and outputs to be consistent and the the ordering
+        # the ordering of inputs and outputs to be consistent and the ordering
         # of cond_fn and body_fn to the consistent.
         # e.g. suppose we use "automatic" and we have:
         #
@@ -1768,6 +1768,7 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 combine_fn_var,
                 (
                     variables.nn_module.NNModuleVariable,
+                    variables.nn_module.UnspecializedNNModuleVariable,
                     variables.FunctoolsPartialVariable,
                 ),
             ):
@@ -1776,7 +1777,13 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                     f"or a graph module if we're re-exporting but got "
                     f"{combine_fn.python_type()}. Please report an issue to PyTorch if you're seeing this."
                 )
-            return isinstance(combine_fn_var, variables.nn_module.NNModuleVariable)
+            return isinstance(
+                combine_fn_var,
+                (
+                    variables.nn_module.NNModuleVariable,
+                    variables.nn_module.UnspecializedNNModuleVariable,
+                ),
+            )
 
         def arg_extractor(combine_fn, init, xs, additional_inputs):
             return combine_fn, init, xs, additional_inputs

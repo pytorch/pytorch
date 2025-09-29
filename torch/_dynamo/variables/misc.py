@@ -388,10 +388,19 @@ class SuperVariable(VariableTracker):
 
 class ExceptionVariable(VariableTracker):
     # The ExceptionVariable corresponds to the BaseException class in Python
-    def __init__(self, exc_type, args, **kwargs) -> None:
-        super().__init__(**kwargs)
+    def __init__(
+        self, exc_type, args, init_kwargs=None, source=None, mutation_type=None
+    ) -> None:
+        super().__init__(source=source, mutation_type=mutation_type)
         self.exc_type = exc_type
         self.args = args
+        if init_kwargs:
+            unimplemented_v2(
+                gb_type="Keyword args passed to exception constructor",
+                context=f"{self} with kwargs {init_kwargs}",
+                explanation="Dynamo does not know how to handle keyword args passed to an exception constructor",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
         # When raising a new exception while another exception is already being
         # handled, the new exception's __context__ attribute is automatically
         # set to the handled exception.

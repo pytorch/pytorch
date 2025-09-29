@@ -70,10 +70,13 @@ class SizeVarAllocator:
 
     def __init__(self, shape_env=None) -> None:
         super().__init__()
+        # Note: this can lead to bugs. Reasoning APIs depends on existing information in
+        # in the shape_env. For example! var_to_ranges can't be empty!
         if shape_env is None:
             shape_env = ShapeEnv()
         self.shape_env = shape_env
         self.var_to_val = self.shape_env.var_to_val
+        self.var_to_hint_override = self.shape_env.var_to_hint_override
         self.replacements: dict[sympy.Symbol, Expr] = self.shape_env.replacements
         self.unbacked_replacements: Optional[dict[Expr, Expr]] = None
         # Maps of dynamic sizes that have to be precomputed on the host to the kernel args.
@@ -544,7 +547,13 @@ class SizeVarAllocator:
         return expr
 
     def symbolic_hint(
-        self, expr: Union[Expr, int], hint_override: Optional[int] = None
+        self,
+        expr: Union[Expr, int],
+        hint_override: Optional[int] = None,
+        # Only flip this flag if you don't plan on guarding/adding runtime
+        # asserts based on this value and promise to only use this value
+        # in a heuristic nature.
+        use_user_provided_hint_override: bool = False,
     ) -> Union[Expr, int]:
         if isinstance(expr, int):
             return expr
@@ -564,6 +573,10 @@ class SizeVarAllocator:
             return hint_override
 
         expr = self.remove_precomputed_replacements(expr)
+
+        if use_user_provided_hint_override:
+            expr = sympy_subs(expr, self.var_to_hint_override)
+
         return sympy_subs(expr, self.var_to_val)
 
     def size_hint(
@@ -573,7 +586,11 @@ class SizeVarAllocator:
         fallback: Optional[int] = None,
         hint_override: Optional[int] = None,
     ) -> int:
-        out = self.symbolic_hint(expr, hint_override=hint_override)
+        out = self.symbolic_hint(
+            expr,
+            hint_override=hint_override,
+            use_user_provided_hint_override=fallback is not None,
+        )
         if not isinstance(out, (int, sympy.Integer)) and fallback is not None:
             # Use the provided heuristic fallback hint
             unbacked_sym_vrs = {
@@ -610,7 +627,11 @@ class SizeVarAllocator:
         hint_override: Optional[int] = None,
     ) -> tuple[int, ...]:
         return tuple(
-            self.size_hint(x, fallback=fallback, hint_override=hint_override)
+            self.size_hint(
+                x,
+                fallback=fallback,
+                hint_override=hint_override,
+            )
             for x in exprs
         )
 
@@ -706,6 +727,16 @@ class SizeVarAllocator:
         if self.unbacked_replacements is not None:
             return self.unbacked_replacements
 
+        def should_keep_src_dst(lhs: Expr, rhs: Expr):
+            # assuming lhs is the expr to be replaced (src), rhs is the replacement (dst)
+            # checking if we should keep them for the replacement rule or swap
+            if lhs.has(rhs):
+                return True
+            elif rhs.has(lhs):
+                return False
+            else:
+                return lhs.compare(rhs) == 1  # see sympy.Basic.compare
+
         self.unbacked_replacements = {}
         for assertions in self.shape_env.deferred_runtime_asserts.values():
             for assertion in assertions:
@@ -713,9 +744,9 @@ class SizeVarAllocator:
                     continue
 
                 lhs, rhs = assertion.expr.lhs, assertion.expr.rhs
-                l2r = lhs.compare(rhs) == 1  # see sympy.Basic.compare
-                src = lhs if l2r else rhs
-                dst = rhs if l2r else lhs
+                should_keep = should_keep_src_dst(lhs, rhs)
+                src = lhs if should_keep else rhs
+                dst = rhs if should_keep else lhs
 
                 existing_replacement = self.unbacked_replacements.get(src, None)
                 if existing_replacement and isinstance(
@@ -730,11 +761,19 @@ class SizeVarAllocator:
     def _sub_unbacked_exprs(self, expr: Expr) -> Expr:
         # it's fine to cache this fn since self is a singleton
         replacements = self._get_unbacked_replacements()
-        while True:
+
+        # consider making this threshold configurable
+        sub_cnt_limit = 30
+        sub_cnt = 0
+        while sub_cnt < sub_cnt_limit:
             new_expr = expr.subs(replacements)
             if new_expr == expr:
                 return new_expr
             expr = sympy.factor(new_expr)
+            sub_cnt += 1
+
+        log.warning("Substitution limit (%d) reached w/ %s", sub_cnt_limit, expr)
+        return expr
 
     def atomically_apply_size_hint(
         self, expr: Union[Expr, int], *, fallback: Optional[int] = None
