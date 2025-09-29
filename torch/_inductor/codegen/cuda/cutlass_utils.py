@@ -41,7 +41,7 @@ def move_cutlass_compiled_cache() -> None:
         return
 
     if config.is_fbcode():
-        import cutlass_cppgen as python_cutlass  # type: ignore[import-not-found]
+        import python_cutlass  # type: ignore[import-not-found]
     else:
         import cutlass_cppgen as python_cutlass  # type: ignore[import-not-found]  # noqa: F401
 
@@ -78,8 +78,8 @@ def try_import_cutlass() -> bool:
     """
     if config.is_fbcode():
         try:
-            import cutlass_cppgen  # type: ignore[import-not-found]  # noqa: F401
             import cutlass_library  # type: ignore[import-not-found]
+            import python_cutlass  # type: ignore[import-not-found]  # noqa: F401
         except ImportError as e:
             log.warning(
                 "Failed to import CUTLASS packages in fbcode: %s, ignoring the CUTLASS backend.",
@@ -421,7 +421,7 @@ def get_max_alignment(inductor_layout: Layout) -> int:
     offset = inductor_layout.offset
 
     def is_static_int(number):
-        return isinstance(number, (int | sympy.Integer))
+        return isinstance(number, (int, sympy.Integer))
 
     def a_factor_of(x, alignment):
         if is_static_int(x) and is_static_int(alignment):
