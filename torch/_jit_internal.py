@@ -147,7 +147,7 @@ def _qualified_name(obj, mangle_name=True) -> str:
 
     # If the module is actually a torchbind module, then we should short circuit
     if module_name == "torch._classes":
-        return obj.qualified_name
+        return obj.qualified_name  # pyrefly: ignore  # missing-attribute
 
     # The Python docs are very clear that `__module__` can be None, but I can't
     # figure out when it actually would be.
@@ -759,7 +759,7 @@ def unused(fn: Callable[_P, _R]) -> Callable[_P, _R]:
                 prop.fset, "_torchscript_modifier", FunctionModifiers.UNUSED
             )
 
-        return prop
+        return prop  # pyrefly: ignore  # bad-return
 
     fn._torchscript_modifier = FunctionModifiers.UNUSED  # type: ignore[attr-defined]
     return fn
@@ -844,7 +844,9 @@ def ignore(drop=False, **kwargs):
         #   @torch.jit.ignore
         #   def fn(...):
         fn = drop
-        fn._torchscript_modifier = FunctionModifiers.IGNORE
+        fn._torchscript_modifier = (
+            FunctionModifiers.IGNORE
+        )  # pyrefly: ignore  # missing-attribute
         return fn
 
     if not isinstance(drop, bool):
@@ -1250,7 +1252,9 @@ def _get_named_tuple_properties(
 
     obj_annotations = inspect.get_annotations(obj)
     if len(obj_annotations) == 0 and hasattr(obj, "__base__"):
-        obj_annotations = inspect.get_annotations(obj.__base__)
+        obj_annotations = inspect.get_annotations(
+            obj.__base__
+        )  # pyrefly: ignore  # bad-argument-type
 
     annotations = []
     for field in obj._fields:
@@ -1439,7 +1443,8 @@ def container_checker(obj, target_type) -> bool:
                 return False
         return True
     elif origin_type is Union or issubclass(
-        origin_type, BuiltinUnionType
+        origin_type,
+        BuiltinUnionType,  # pyrefly: ignore  # bad-argument-type
     ):  # also handles Optional
         if obj is None:  # check before recursion because None is always fine
             return True

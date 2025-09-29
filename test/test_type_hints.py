@@ -142,7 +142,9 @@ class TestTypeHints(TestCase):
                     ]
                 )
             if result != 0:
-                self.fail(f"mypy failed:\n{stderr}\n{stdout}")
+                self.fail(
+                    f"mypy failed:\n{stderr}\n{stdout}"
+                )  # pyrefly: ignore  # missing-attribute
 
 
 if __name__ == "__main__":

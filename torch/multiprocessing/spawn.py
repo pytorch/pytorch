@@ -119,7 +119,9 @@ class ProcessContext:
         """Attempt to join all processes with a shared timeout."""
         end = time.monotonic() + timeout
         for process in self.processes:
-            time_to_wait = max(0, end - time.monotonic())
+            time_to_wait = max(
+                0, end - time.monotonic()
+            )  # pyrefly: ignore  # no-matching-overload
             process.join(time_to_wait)
 
     def join(
@@ -274,7 +276,7 @@ def start_processes(
         tf.close()
         os.unlink(tf.name)
 
-        process = mp.Process(
+        process = mp.Process(  # pyrefly: ignore  # missing-attribute
             target=_wrap,
             args=(fn, i, args, tf.name),
             daemon=daemon,

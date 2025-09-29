@@ -768,7 +768,9 @@ def _open_file_like(name_or_buffer: FileLike, mode: str) -> _opener[IO[bytes]]:
 
 class _open_zipfile_reader(_opener[torch._C.PyTorchFileReader]):
     def __init__(self, name_or_buffer: Union[str, IO[bytes]]) -> None:
-        super().__init__(torch._C.PyTorchFileReader(name_or_buffer))
+        super().__init__(
+            torch._C.PyTorchFileReader(name_or_buffer)
+        )  # pyrefly: ignore  # no-matching-overload
 
 
 class _open_zipfile_writer_file(_opener[torch._C.PyTorchFileWriter]):
@@ -781,9 +783,11 @@ class _open_zipfile_writer_file(_opener[torch._C.PyTorchFileWriter]):
             # PyTorchFileWriter only supports ascii filename.
             # For filenames with non-ascii characters, we rely on Python
             # for writing out the file.
-            self.file_stream = io.FileIO(self.name, mode="w")
+            self.file_stream = io.FileIO(
+                self.name, mode="w"
+            )  # pyrefly: ignore  # bad-assignment
             super().__init__(
-                torch._C.PyTorchFileWriter(
+                torch._C.PyTorchFileWriter(  # pyrefly: ignore  # no-matching-overload
                     self.file_stream, get_crc32_options(), _get_storage_alignment()
                 )
             )
@@ -960,7 +964,7 @@ def save(
     _check_save_filelike(f)
 
     if isinstance(f, (str, os.PathLike)):
-        f = os.fspath(f)
+        f = os.fspath(f)  # pyrefly: ignore  # no-matching-overload
 
     if _use_new_zipfile_serialization:
         with _open_zipfile_writer(f) as opened_zipfile:
@@ -1514,7 +1518,9 @@ def load(
                     else:
                         shared = False
                     overall_storage = torch.UntypedStorage.from_file(
-                        os.fspath(f), shared, size
+                        os.fspath(f),
+                        shared,
+                        size,  # pyrefly: ignore  # no-matching-overload
                     )
                 if weights_only:
                     try:

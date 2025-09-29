@@ -29,11 +29,13 @@ def _outer_to_inner_dim(ndim, dim, ragged_dim, canonicalize=False):
     if canonicalize:
         dim = canonicalize_dims(ndim, dim)
 
-    assert dim >= 0 and dim < ndim
+    assert dim >= 0 and dim < ndim  # pyrefly: ignore  # unsupported-operation
 
     # Map dim=0 (AKA batch dim) -> packed dim i.e. outer ragged dim - 1.
     # For other dims, subtract 1 to convert to inner space.
-    return ragged_dim - 1 if dim == 0 else dim - 1
+    return (
+        ragged_dim - 1 if dim == 0 else dim - 1
+    )  # pyrefly: ignore  # unsupported-operation
 
 
 def _wrap_jagged_dim(
@@ -1988,7 +1990,9 @@ def index_put_(func, *args, **kwargs):
     else:
         lengths = inp.lengths()
     torch._assert_async(
-        torch.all(indices[inp._ragged_idx] < lengths),
+        torch.all(
+            indices[inp._ragged_idx] < lengths
+        ),  # pyrefly: ignore  # no-matching-overload
         "Some indices in the ragged dimension are out of bounds!",
     )
 
