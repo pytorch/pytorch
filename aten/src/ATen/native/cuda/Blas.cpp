@@ -359,8 +359,7 @@ static bool isInputCompliesAddmmCudaLt(Tensor& result, const Tensor& self, const
         // filter by dtype
         (scalar_type != at::ScalarType::Half && scalar_type != at::ScalarType::BFloat16) ||
         // check mat1/mat2 is row-/col-major
-        (mat1.is_contiguous() || mat1.mT().is_contiguous()) &&
-        (mat2.is_contiguous() || mat2.mT().is_contiguous())
+        (mat1.is_non_overlapping_and_dense() && mat2.is_non_overlapping_and_dense())
       )
       #endif
     )
