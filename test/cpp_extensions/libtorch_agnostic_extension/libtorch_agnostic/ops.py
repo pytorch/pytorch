@@ -244,6 +244,37 @@ def get_template_any_data_ptr(t, r, mutable) -> int:
     return torch.ops.libtorch_agnostic.get_template_any_data_ptr.default(t, r, mutable)
 
 
+def test_dispatch_scalar_name(t, dispatch_name) -> str:
+    """
+    Return the name of the C++ scalar type corresponding to the tensor's dtype.
+
+    Args:
+        t: Input tensor
+        dispatch_name: str, the name of a STABLE_DISPATCH_... macro
+
+    Returns: str
+    """
+    dispatch_index = dict(
+        STABLE_DISPATCH_ALL_TYPES=0,
+        STABLE_DISPATCH_INDEX_TYPES=1,
+        STABLE_DISPATCH_INTEGRAL_TYPES=2,
+        STABLE_DISPATCH_FLOATING_TYPES=3,
+        STABLE_DISPATCH_FLOATING_TYPES_AND_HALF=4,
+        STABLE_DISPATCH_COMPLEX_TYPES=5,
+        STABLE_DISPATCH_FLOATING_AND_COMPLEX_TYPES=6,
+        STABLE_DISPATCH_ALL_TYPES_AND_COMPLEX=7,
+        STABLE_DISPATCH_REDUCED_FLOATING_TYPES=8,
+        STABLE_DISPATCH_ALL_TYPES_AND_BOOL=9,
+        STABLE_DISPATCH_SUPPORTED_TYPES=10,
+    )[dispatch_name]
+    return (
+        torch.ops.libtorch_agnostic.test_dispatch_scalar_name.default(t, dispatch_index)
+        .numpy()
+        .tobytes()
+        .decode()
+    )
+
+
 def my_pad(t) -> Tensor:
     """
     Pads the input tensor with hardcoded padding parameters.
