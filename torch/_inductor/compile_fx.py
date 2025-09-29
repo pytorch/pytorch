@@ -2493,6 +2493,7 @@ def _compile_fx(
     decompositions,
     ignore_shape_env,
 ):
+
     recursive_compile_fx = functools.partial(
         _compile_fx,
         inner_compile=inner_compile,
@@ -2517,6 +2518,16 @@ def _compile_fx(
             recursive_compile_fx,
         )
 
+    # TODO: Move this before recursive pre-grad passes
+    # NB: This short circuit never occurs for Dynamo produced graphs
+    # (which are pre-flattened)
+    if any(isinstance(x, (list, tuple, dict)) for x in example_inputs_):
+        return flatten_graph_inputs(
+            model_,
+            example_inputs_,
+            recursive_compile_fx,
+        )
+
     # Do the actual work
 
     with (
@@ -2534,16 +2545,6 @@ def _compile_fx(
         # TODO: Get rid of this?
         if isinstance(model_, GraphModule):
             model_ = run_pre_grad_passes(model_, example_inputs_)
-
-        # TODO: Move this before recursive pre-grad passes
-        # NB: This short circuit never occurs for Dynamo produced graphs
-        # (which are pre-flattened)
-        if any(isinstance(x, (list, tuple, dict)) for x in example_inputs_):
-            return flatten_graph_inputs(
-                model_,
-                example_inputs_,
-                recursive_compile_fx,
-            )
 
         assert not config._raise_error_for_testing
 
