@@ -272,28 +272,39 @@ class TestFakePG(TestCase):
                     kwargs = {}
                 return func(*args, **kwargs)
 
-        fake_pg = FakeProcessGroup(rank=0, world_size=3)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"FakeProcessGroup cannot be constructed directly\. "
+            r"Use torch\.distributed\.init_process_group\(backend='fake'\) instead to ensure "
+            r"proper dispatch system integration\.",
+        ):
+            fake_pg = FakeProcessGroup(rank=0, world_size=3)
 
-        with SimpleTensorMode():
-            tensor = torch.tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
-            with self.assertRaisesRegex(
-                RuntimeError,
-                r"FakeProcessGroup requires distributed to be initialized first\. "
-                r"Call torch\.distributed\.init_process_group\(backend='fake'\) first to ensure "
-                r"proper dispatch system integration\.",
-            ):
+            with SimpleTensorMode():
+                tensor = torch.tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
                 dist.all_reduce(tensor, group=fake_pg)
 
-            input_tensor = torch.randn(6, 2)
-            output_tensor = torch.zeros_like(input_tensor)
+    def test_fake_process_group_proper_usage_dispatch(self):
+        class SimpleTensorMode(TorchDispatchMode):
+            def __init__(self):
+                self.ops = []
 
-            with self.assertRaisesRegex(
-                RuntimeError,
-                r"FakeProcessGroup requires distributed to be initialized first\. "
-                r"Call torch\.distributed\.init_process_group\(backend='fake'\) first to ensure "
-                r"proper dispatch system integration\.",
-            ):
-                dist.all_to_all_single(output_tensor, input_tensor, group=fake_pg)
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                self.ops.append(str(func))
+                if kwargs is None:
+                    kwargs = {}
+                return func(*args, **kwargs)
+
+        fake_store = FakeStore()
+        dist.init_process_group("fake", store=fake_store, rank=0, world_size=3)
+
+        with SimpleTensorMode() as mode:
+            tensor = torch.tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+            dist.all_reduce(tensor)
+
+        op_names = [str(op) for op in mode.ops]
+        self.assertIn("aten.lift_fresh.default", op_names)
+        self.assertIn("c10d.allreduce_.default", op_names)
 
 
 if __name__ == "__main__":

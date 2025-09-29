@@ -34,7 +34,6 @@ from torch._C._distributed_c10d import (
     BarrierOptions,
     BroadcastOptions,
     DebugLevel,
-    FakeProcessGroup,
     GatherOptions,
     get_debug_level,
     PrefixStore,
@@ -1002,26 +1001,6 @@ def _rank_not_in_group(group: Optional[ProcessGroup]) -> bool:
     if group is None:
         return False
     return group == GroupMember.NON_GROUP_MEMBER
-
-
-def _check_process_group_initialization(group: Optional[ProcessGroup]) -> None:
-    """
-    Check if user is using FakeProcessGroup directly without proper initialization.
-    This can cause dispatch issues and should raise error.
-
-    Args:
-        group (ProcessGroup): Process group to validate.
-
-    Raises:
-        RuntimeError: If group is FakeProcessGroup and distributed is not initialized.
-            Users should call init_process_group(backend='fake') instead.
-    """
-    if isinstance(group, FakeProcessGroup) and not is_initialized():
-        raise RuntimeError(
-            "FakeProcessGroup requires distributed to be initialized first. "
-            "Call torch.distributed.init_process_group(backend='fake') first to ensure "
-            "proper dispatch system integration."
-        )
 
 
 def _warn_not_in_group(op_name) -> None:
@@ -2430,8 +2409,6 @@ def isend(
         None, if not part of the group
 
     """
-    if group is not None:
-        _check_process_group_initialization(group)
     group = _group_or_default_group(group)
     group_dst = _canonicalize_group_rank(group, dst, group_dst)
     _check_single_tensor(tensor, "tensor")
@@ -2474,8 +2451,6 @@ def irecv(
         None, if not part of the group
 
     """
-    if group is not None:
-        _check_process_group_initialization(group)
     _check_single_tensor(tensor, "tensor")
     if _rank_not_in_group(group):
         _warn_not_in_group("irecv")
@@ -2516,8 +2491,6 @@ def send(
         group_dst (int, optional): Destination rank on ``group``.  Invalid to specify both ``dst`` and ``group_dst``.
 
     """
-    if group is not None:
-        _check_process_group_initialization(group)
     group = _group_or_default_group(group)
     group_dst = _canonicalize_group_rank(group, dst, group_dst)
     _check_not_self_rank(group, group_dst, "destination")
@@ -2553,8 +2526,6 @@ def recv(
         -1, if not part of the group
 
     """
-    if group is not None:
-        _check_process_group_initialization(group)
     work = irecv(tensor, src=src, group=group, tag=tag, group_src=group_src)
     if work is None:
         return -1
@@ -2851,8 +2822,6 @@ def broadcast(
         None, if not async_op or if not part of the group
 
     """
-    if group is not None:
-        _check_process_group_initialization(group)
     group = _group_or_default_group(group)
     group_src = _canonicalize_group_rank(group, src, group_src, return_global=False)
     _check_single_tensor(tensor, "tensor")
@@ -2927,8 +2896,6 @@ def all_reduce(tensor, op=ReduceOp.SUM, group=None, async_op=False):
         tensor([4.+4.j, 6.+6.j], device='cuda:1') # Rank 1
 
     """
-    if group is not None:
-        _check_process_group_initialization(group)
     # Dynamo has built-in logic to map legacy distributed ops to functional collectives.
     # Let's redirect to a torch function mode that can mimic this logic outside Dynamo
     # (e.g., non-strict export implements such a torch function mode).
@@ -3080,8 +3047,6 @@ def reduce(
         None, if not async_op or if not part of the group
 
     """
-    if group is not None:
-        _check_process_group_initialization(group)
     group = _group_or_default_group(group)
     group_dst = _canonicalize_group_rank(group, dst, group_dst, return_global=False)
     _check_single_tensor(tensor, "tensor")
@@ -3197,8 +3162,6 @@ def all_gather_object(object_list, obj, group=None):
         >>> output
         ['foo', 12, {1: 2}]
     """
-    if group is not None:
-        _check_process_group_initialization(group)
     if _rank_not_in_group(group):
         _warn_not_in_group("all_gather_object")
         return
@@ -3308,8 +3271,6 @@ def gather_object(
         >>> output
         ['foo', 12, {1: 2}]
     """
-    if group is not None:
-        _check_process_group_initialization(group)
     group = _group_or_default_group(group)
     if dst is None and group_dst is None:
         dst = 0
@@ -3440,8 +3401,6 @@ def send_object_list(
         >>> objects
         ['foo', 12, {1: 2}]
     """
-    if group is not None:
-        _check_process_group_initialization(group)
     group = _group_or_default_group(group)
     group_dst = _canonicalize_group_rank(group, dst, group_dst)
     _check_not_self_rank(group, group_dst, "destination")
@@ -3559,13 +3518,11 @@ def recv_object_list(
         >>> objects
         ['foo', 12, {1: 2}]
     """
-    if group is not None:
-        _check_process_group_initialization(group)
 
     group = _group_or_default_group(group)
     group_src = _canonicalize_group_rank(group, src, group_src)
     _check_not_self_rank(group, group_src, "source")
-    
+
     if _rank_not_in_group(group):
         _warn_not_in_group("recv_object_list")
         return -1
@@ -3707,8 +3664,6 @@ def broadcast_object_list(
         >>> objects
         ['foo', 12, {1: 2}]
     """
-    if group is not None:
-        _check_process_group_initialization(group)
     group = _group_or_default_group(group)
     if src is None and group_src is None:
         src = 0
@@ -3833,8 +3788,6 @@ def scatter_object_list(
         >>> output_list
         [{1: 2}]
     """
-    if group is not None:
-        _check_process_group_initialization(group)
     group = _group_or_default_group(group)
     if src is None and group_src is None:
         src = 0
@@ -3961,8 +3914,6 @@ def all_gather(tensor_list, tensor, group=None, async_op=False):
         [tensor([1.+1.j, 2.+2.j], device='cuda:1'), tensor([3.+3.j, 4.+4.j], device='cuda:1')] # Rank 1
 
     """
-    if group is not None:
-        _check_process_group_initialization(group)
     # Dynamo has built-in logic to map legacy distributed ops to functional collectives.
     # Let's redirect to a torch function mode that can mimic this logic outside Dynamo
     # (e.g., non-strict export implements such a torch function mode).
@@ -4054,8 +4005,6 @@ def all_gather_into_tensor(output_tensor, input_tensor, group=None, async_op=Fal
         tensor([[1, 2],
                 [3, 4]], device='cuda:1') # Rank 1
     """
-    if group is not None:
-        _check_process_group_initialization(group)
     # Dynamo has built-in logic to map legacy distributed ops to functional collectives.
     # Let's redirect to a torch function mode that can mimic this logic outside Dynamo
     # (e.g., non-strict export implements such a torch function mode).
@@ -4293,8 +4242,6 @@ def gather(
         None                                                                   # Rank 1
 
     """
-    if group is not None:
-        _check_process_group_initialization(group)
     _check_single_tensor(tensor, "tensor")
 
     # Parameter ``gather_list`` may be left unspecified on non-dst ranks.
@@ -4385,8 +4332,6 @@ def scatter(
         tensor([5., 5.], device='cuda:1') # Rank 1
 
     """
-    if group is not None:
-        _check_process_group_initialization(group)
     _check_single_tensor(tensor, "tensor")
     # Parameter ``scatter_list`` may be left unspecified on non-src ranks.
     if scatter_list:
@@ -4456,8 +4401,6 @@ def reduce_scatter(output, input_list, op=ReduceOp.SUM, group=None, async_op=Fal
         None, if not async_op or if not part of the group.
 
     """
-    if group is not None:
-        _check_process_group_initialization(group)
     _check_single_tensor(output, "output")
     _check_tensor_list(input_list, "input_list")
     _ensure_all_tensors_same_dtype(output, input_list)
@@ -4533,8 +4476,6 @@ def reduce_scatter_tensor(output, input, op=ReduceOp.SUM, group=None, async_op=F
         tensor([4, 6], device='cuda:1') # Rank 1
 
     """
-    if group is not None:
-        _check_process_group_initialization(group)
     # Dynamo has built-in logic to map legacy distributed ops to functional collectives.
     # Let's redirect to a torch function mode that can mimic this logic outside Dynamo
     # (e.g., non-strict export implements such a torch function mode).
@@ -4713,8 +4654,6 @@ def all_to_all_single(
         tensor([3+3j, 7+7j, 11+11j, 15+15j])                            # Rank 2
         tensor([4+4j, 8+8j, 12+12j, 16+16j])                            # Rank 3
     """
-    if group is not None:
-        _check_process_group_initialization(group)
     # Dynamo has built-in logic to map legacy distributed ops to functional collectives.
     # Let's redirect to a torch function mode that can mimic this logic outside Dynamo
     # (e.g., non-strict export implements such a torch function mode).
@@ -4856,8 +4795,6 @@ def all_to_all(output_tensor_list, input_tensor_list, group=None, async_op=False
         [tensor([4+4j]), tensor([8+8j]), tensor([12+12j]), tensor([16+16j])]        # Rank 3
 
     """
-    if group is not None:
-        _check_process_group_initialization(group)
     if _rank_not_in_group(group):
         _warn_not_in_group("all_to_all")
         return
@@ -4914,8 +4851,6 @@ def barrier(
        that was first used with this process group, if another collective with tensor inputs has been performed, (4)
        the device index indicated by the global rank mod local device count.
     """
-    if group is not None:
-        _check_process_group_initialization(group)
     group = group or _get_default_group()
 
     if _rank_not_in_group(group):
@@ -5010,8 +4945,6 @@ def monitored_barrier(
         >>> # indicating that ranks 1, 2, ... world_size - 1 did not call into
         >>> # monitored_barrier.
     """
-    if group is not None:
-        _check_process_group_initialization(group)
     # Need to call rank not in group before using the group, otherwise
     # "Invalid process group" error is raised.
     if _rank_not_in_group(group):
