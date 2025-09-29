@@ -15,7 +15,6 @@
 #include <ATen/cuda/tunable/Tunable.h>
 #include <ATen/cuda/tunable/TunableGemm.h>
 #include <ATen/native/Resize.h>
-#include <ATen/native/LinearAlgebra.h>
 #include <c10/util/MaybeOwned.h>
 #include <ATen/native/GroupedMMUtils.h>
 #include <ATen/native/cuda/RowwiseScaledMM.h>
@@ -785,8 +784,6 @@ const Tensor& baddbmm_out_cuda_impl(const Tensor& result, const Tensor& self, co
 }
 
 } // anonymous namespace
-
-#define MM
 
 TORCH_IMPL_FUNC(addmm_out_cuda)(const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha, const Tensor& result) {
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
@@ -1815,6 +1812,7 @@ std::optional<c10::ScalarType> out_dtype) {
 }
 
 static void baddbmm_bmm_out_dtype_checks(const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha, const at::ScalarType out_dtype, bool is_bmm, const std::optional<Tensor>& self_baddbmm = std::nullopt) {
+  // ref ATen/native/LinearAlgebra.cpp common_checks_baddbmm_bmm
   TORCH_CHECK(batch1.dim() == 3, "batch1 must be a 3D tensor");
   TORCH_CHECK(batch2.dim() == 3, "batch2 must be a 3D tensor");
 
