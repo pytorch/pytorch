@@ -10,6 +10,7 @@ from torch._functorch.aot_autograd import aot_export_joint_with_descriptors
 from torch._functorch.partitioners import min_cut_rematerialization_partition
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import distribute_tensor, Replicate
+from torch.distributed.tensor._dtensor_spec import DTensorSpec
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
     parallelize_module,
@@ -37,6 +38,9 @@ class SimpleModel(torch.nn.Module):
 
 
 def strict_export_and_aot_export_joint_with_descriptors(model, inputs):
+    # needed for stric export
+    torch.utils._pytree.register_constant(DTensorSpec)
+
     # install_free_tensors is required for dynamo to work
     with torch._dynamo.config.patch(
         install_free_tensors=True, inline_inbuilt_nn_modules=True
@@ -113,8 +117,6 @@ class DTensorExportTest(TestCase):
         fw_gm, bw_gm = min_cut_rematerialization_partition(
             joint_gm, None, num_fwd_outputs=1
         )
-
-        breakpoint()
 
         self.assertTrue(
             _count_op(joint_gm, torch.ops._c10d_functional.all_reduce.default),

@@ -1,5 +1,4 @@
 # Owner(s): ["oncall: distributed"]
-import contextlib
 from collections import defaultdict
 
 import torch
@@ -75,29 +74,13 @@ class TensorParallelTest(DTensorTestBase):
             exported_program = torch.export.export(
                 model, inputs, strict=True
             ).run_decompositions()
-
-        @contextlib.contextmanager
-        def temp_deregister():
-            import torch.utils._pytree as pytree
-            from torch.distributed.tensor._dtensor_spec import DTensorSpec
-
-            try:
-                pytree._deregister_pytree_node(DTensorSpec)
-                yield
-            finally:
-                pytree.register_constant(DTensorSpec)
-
-        # TODO: Having DTensorSpec in pytree causes issue with tensor_parallel_transformation
-        # Need to understand the interaction here
-        with temp_deregister():
-            tp_exported_program = tensor_parallel_transformation(
-                exported_program,
-                self.rank,
-                self.world_size,
-                self.device_type,
-                {"fc": ColwiseParallel},
-            )
-
+        tp_exported_program = tensor_parallel_transformation(
+            exported_program,
+            self.rank,
+            self.world_size,
+            self.device_type,
+            {"fc": ColwiseParallel},
+        )
         tp_model = tp_exported_program.module()
         with torch.no_grad():
             tp_res = tp_model(*inputs)

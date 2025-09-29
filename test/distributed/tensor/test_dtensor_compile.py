@@ -178,6 +178,11 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
                 )
                 return inter.to_local()
 
+        torch.utils._pytree.register_constant(
+            torch.distributed.tensor._dtensor_spec.DTensorSpec
+        )
+        torch.utils._pytree.register_constant(DeviceMesh)
+
         ep = torch.export.export(
             Foo(), (torch.randn(4, 4, dtype=torch.float64),), strict=False
         )

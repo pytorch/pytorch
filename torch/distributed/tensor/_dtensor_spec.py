@@ -284,6 +284,3 @@ class DTensorSpec:
             self.placements,
             tensor_meta=tensor_meta,
         )
-
-
-torch.utils._pytree.register_constant(DTensorSpec)
