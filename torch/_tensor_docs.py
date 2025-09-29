@@ -6627,17 +6627,16 @@ The attribute will then contain the gradients computed and future calls to
 add_docstr_all(
     "grad_dtype",
     r"""
-The allowed dtype of :attr:`grad` for this tensor.
+The allowed dtype of :attr:``grad`` for this tensor.
 
-:attr:`grad_dtype` can be set to a specific dtype or ``None``. By default,
-``t.grad_dtype == t.dtype``. When not ``None``, the autograd engine will cast
-incoming gradients to that dtype. This attribute can only be accessed and set
-for leaf tensors.
+:attr:``grad_dtype`` can be set to a specific dtype or ``None``. By default,
+``t.grad_dtype == t.dtype``. When not None, the autograd engine casts
+incoming gradients to this dtype. This attribute is only accessible and
+settable for leaf tensors.
 
 .. warning::
-    Only use this API if you know what you are doing. Diverging the dtype
-    of the tensor and its gradient will break downstream systems that do
-    not expect this.
+    Use with caution. Diverging the dtypes of a tensor and its gradient may
+    break downstream systems that assume they match.
 
 Example::
 

@@ -965,9 +965,10 @@ static int THPVariable_set_grad(
         grad.dtype(),
         "' to a tensor with grad_dtype '",
         var.grad_dtype().value(),
-        "'. The gradient must match the tensor's grad_dtype (by default the tensor's dtype). "
-        "You can set grad_dtype with tensor.grad_dtype = desired_dtype, or None if you wish "
-        "to allow any dtype. CAUTION! Only do this if you know what you're doing!");
+        "'. The gradient must match the tensor's grad_dtype (defaults to the tensor's "
+        "dtype). You can set the tensor's grad_dtype attribute with a specific dtype, or "
+        "None to allow any dtype. Set grad_dtype with caution. Diverging the dtypes of "
+        "a tensor and its gradient may break downstream systems that assume they match.");
   }
   TORCH_CHECK(
       var.device().type() == grad.device().type(),
