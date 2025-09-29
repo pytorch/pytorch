@@ -16,6 +16,11 @@ __all__: list[Any] = []
 
 JAGGED_OPS_TABLE: Dict[Any, Any] = {}
 
+# Largest int64 value exactly representable in float64 (IEEE 754 double precision).
+# Avoids overflow when padding_value is passed as double to _jagged_to_padded_dense_forward.
+_INT64_SAFE_MAX_FLOAT64 = (1 << 53) - 1
+_INT64_SAFE_MIN_FLOAT64 = -_INT64_SAFE_MAX_FLOAT64
+
 
 def _get_padding_value(dtype, padding_type):
     if dtype.is_floating_point:
