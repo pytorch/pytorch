@@ -2399,13 +2399,6 @@ def compile_fx(
     NB: This function TAKES OWNERSHIP of the input ``model_`` and can potentially
     mutate it!  Make a copy if you need to preserve the original GraphModule.
     """
-    # Wake up the AsyncCompile subproc pool as early as possible (if there's cuda).
-    if any(
-        isinstance(e, torch.Tensor) and e.device.type in ("cuda", "xpu")
-        for e in example_inputs_
-    ):
-        torch._inductor.async_compile.AsyncCompile.wakeup()
-
     # Some arguments trigger a recursive call to compile_fx.  Handle these
     # short circuits first, before anything else
 
@@ -2420,19 +2413,19 @@ def compile_fx(
                 ignore_shape_env=ignore_shape_env,
             )
 
-    # TODO: This probably shouldn't be a recursive call
+    # Wake up the AsyncCompile subproc pool as early as possible (if there's cuda).
+    if any(
+        isinstance(e, torch.Tensor) and e.device.type in ("cuda", "xpu")
+        for e in example_inputs_
+    ):
+        torch._inductor.async_compile.AsyncCompile.wakeup()
+
     if config.cpp_wrapper or config.fx_wrapper:
         cpp_wrapper_config = config.cpp_wrapper
         fx_wrapper_config = config.fx_wrapper
 
         with (
-            config.patch(
-                {
-                    "cpp_wrapper": False,  # reset to break recursive call to compile_fx
-                    "fx_wrapper": False,  # reset to break recursive call to compile_fx
-                    **get_cpp_wrapper_config(),
-                }
-            ),
+            config.patch(get_cpp_wrapper_config()),
             V.set_real_inputs(example_inputs_),
         ):
             inputs_: Sequence[InputType] = example_inputs_
@@ -2472,7 +2465,7 @@ def compile_fx(
                 _,
                 _,
             ):
-                return compile_fx(
+                return _compile_fx(
                     patched_mod,
                     fake_args,
                     inner_compile=functools.partial(
@@ -2484,8 +2477,24 @@ def compile_fx(
                     ignore_shape_env=ignore_shape_env,
                 )
 
+    return _compile_fx(
+        model_,
+        example_inputs_,
+        inner_compile,
+        decompositions,
+        ignore_shape_env,
+    )
+
+
+def _compile_fx(
+    model_,
+    example_inputs_,
+    inner_compile,
+    decompositions,
+    ignore_shape_env,
+):
     recursive_compile_fx = functools.partial(
-        compile_fx,
+        _compile_fx,
         inner_compile=inner_compile,
         decompositions=decompositions,
         ignore_shape_env=ignore_shape_env,
