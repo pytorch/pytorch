@@ -3356,8 +3356,7 @@ def meta_complex(real, imag):
 @register_meta([aten.nonzero_static.default, aten.nonzero_static.out])
 @out_wrapper()
 def nonzero_static(self, *, size, fill_value: int = -1):
-    return self.new_empty((size, self.dim()), dtype=torch.long)
-
+    return self.new_empty_strided((size, self.dim()), (1, size), dtype=torch.long)
 
 @register_meta([torch.ops.aten.nonzero.default, torch.ops.aten.nonzero.out])
 @out_wrapper()

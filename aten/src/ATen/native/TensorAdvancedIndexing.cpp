@@ -3076,8 +3076,8 @@ Tensor nonzero_static_cpu(
   // Allocate fixed-size out tensor
   int64_t ndim = self.dim();
   auto result = at::empty(
-      {size, ndim},
-      at::TensorOptions().dtype(at::ScalarType::Long).device(at::kCPU));
+      {ndim, size},
+      at::TensorOptions().dtype(at::ScalarType::Long).device(at::kCPU)).t();
   nonzero_static_out_cpu(self, size, fill_value, result);
   return result;
 }
