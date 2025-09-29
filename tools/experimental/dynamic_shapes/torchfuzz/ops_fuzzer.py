@@ -30,6 +30,64 @@ def _get_cached_operators():
     return _CACHED_OPERATORS
 
 
+def _get_template_filtered_operators(template: str = "default"):
+    """Get operators filtered by template's supported_ops."""
+    # Instantiate template
+    if template == "dtensor":
+        from torchfuzz.codegen import DTensorFuzzTemplate
+
+        fuzz_template = DTensorFuzzTemplate()
+    elif template == "unbacked":
+        from torchfuzz.codegen import UnbackedFuzzTemplate
+
+        fuzz_template = UnbackedFuzzTemplate()
+    else:
+        from torchfuzz.codegen import DefaultFuzzTemplate
+
+        fuzz_template = DefaultFuzzTemplate()
+
+    all_operators = _get_cached_operators()
+
+    # If no supported_ops specified, return all operators
+    if not fuzz_template.supported_ops:
+        return all_operators
+
+    # Filter operators based on supported_ops
+    filtered_ops = {}
+
+    for op_name, operator in all_operators.items():
+        # Always include operations that don't have a specific torch operation
+        # (utility operations like arg, constant, item, scalar ops)
+        torch_op = operator.torch_op_name
+        if torch_op is None:
+            # Set template on operators that support it
+            if hasattr(operator, "set_template"):
+                operator.set_template(template)  # type: ignore[attr-defined]
+            filtered_ops[op_name] = operator
+            continue
+
+        # Check if the operator supports any of the template's operations
+        should_include = False
+        for supported_op in fuzz_template.supported_ops:
+            # Direct torch operation matching
+            if torch_op == supported_op:
+                should_include = True
+                break
+
+            # Direct name matching as fallback
+            if supported_op in op_name or op_name in supported_op:
+                should_include = True
+                break
+
+        if should_include:
+            # Set template on operators that support it
+            if hasattr(operator, "set_template"):
+                operator.set_template(template)  # type: ignore[attr-defined]
+            filtered_ops[op_name] = operator
+
+    return filtered_ops
+
+
 @dataclass
 class OperationNode:
     """
@@ -156,7 +214,7 @@ class OperationGraph:
         return "\n".join(lines)
 
 
-def fuzz_spec() -> Spec:
+def fuzz_spec(template: str = "default") -> Spec:
     """
     Generate a random Spec (either TensorSpec or ScalarSpec) using tensor fuzzing functions.
 
@@ -165,11 +223,14 @@ def fuzz_spec() -> Spec:
     - fuzz_tensor_size() for random tensor size
     - fuzz_valid_stride() for random valid strides
 
+    Args:
+        template: Template name to determine supported dtypes
+
     Returns:
         Spec: Either a TensorSpec (80% probability) or ScalarSpec (20% probability) with random properties
     """
-    # Get random dtype
-    dtype = fuzz_torch_tensor_type()
+    # Get random dtype based on template
+    dtype = fuzz_torch_tensor_type(template)
 
     # 20% probability of returning ScalarSpec
     if random.random() < 0.2:
@@ -182,7 +243,9 @@ def fuzz_spec() -> Spec:
     return TensorSpec(size=size, stride=stride, dtype=dtype)
 
 
-def fuzz_op(target_spec: Spec, depth, stack_size) -> tuple[str, list[Spec]]:
+def fuzz_op(
+    target_spec: Spec, depth, stack_size, template: str = "default"
+) -> tuple[str, list[Spec]]:
     """
     Given an output specification, returns an operation that can
     produce a tensor with that layout using the operator class system.
@@ -197,8 +260,8 @@ def fuzz_op(target_spec: Spec, depth, stack_size) -> tuple[str, list[Spec]]:
         Tuple of (operation_name, list_of_argument_specs) where each argument spec
         describes the layout requirements for the operation's inputs
     """
-    # Get all available operators (cached)
-    available_operators = _get_cached_operators()
+    # Get template-filtered operators
+    available_operators = _get_template_filtered_operators(template)
 
     # Filter operators that can produce the target spec
     compatible_ops = []
@@ -274,6 +337,7 @@ def fuzz_operation_graph(
     target_spec: Spec,
     max_depth: int = 7,
     seed: Optional[int] = None,
+    template: str = "default",
 ) -> OperationGraph:
     """
     Generate a graph of operations that produces the target specification.
@@ -285,6 +349,7 @@ def fuzz_operation_graph(
         target_spec: The desired output specification (TensorSpec or ScalarSpec)
         max_depth: Maximum depth of operations. At depth 0, only leaf operations (constant, arg) are used.
         seed: Random seed for reproducible generation. If None, uses current random state.
+        template: Template name to determine configuration
 
     Returns:
         OperationGraph with nodes organized in a DAG structure
@@ -310,7 +375,7 @@ def fuzz_operation_graph(
         nonlocal node_counter
 
         # Generate new operation
-        op_name, input_specs = fuzz_op(spec, depth, stack_size)
+        op_name, input_specs = fuzz_op(spec, depth, stack_size, template)
 
         # Create unique node ID
         node_id = f"node_{node_counter}"
