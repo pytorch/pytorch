@@ -2885,7 +2885,7 @@ class ExpandView(BaseView):
                 # guarded because the meta formula was expected to have taught
                 # us this equality.
                 assert sizevars.size_hint(new_size[i] - old_size[i], fallback=0) == 0, (
-                    "Broadcast failed in ExpandView({x.get_size()}, {new_size}) on dimension {i}"
+                    f"Broadcast failed in ExpandView({x.get_size()}, {new_size}) on dimension {i}"
                 )
         return new_size
 

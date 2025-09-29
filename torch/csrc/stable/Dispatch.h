@@ -158,3 +158,27 @@ using ScalarTypeToCPPTypeT = typename ScalarTypeToCPPType<N>::type;
       TYPE,                                                        \
       NAME,                                                        \
       STABLE_DISPATCH_CASE_ALL_TYPES_AND(SCALARTYPE, scalar_t, __VA_ARGS__))
+
+#define STABLE_DISPATCH_CASE_SUPPORTED_TYPES(...)                          \
+  STABLE_DISPATCH_CASE_INTEGRAL_TYPES(__VA_ARGS__)                         \
+  STABLE_DISPATCH_CASE_FLOATING_TYPES(__VA_ARGS__)                         \
+  STABLE_DISPATCH_CASE_COMPLEX_TYPES(__VA_ARGS__)                          \
+  STABLE_DISPATCH_CASE_REDUCED_FLOATING_TYPES(__VA_ARGS__)                 \
+  STABLE_DISPATCH_CASE(                                                    \
+      torch::headeronly::ScalarType::ComplexHalf, __VA_ARGS__)             \
+  STABLE_DISPATCH_CASE(                                                    \
+      torch::headeronly::ScalarType::Float8_e5m2, __VA_ARGS__)             \
+  STABLE_DISPATCH_CASE(                                                    \
+      torch::headeronly::ScalarType::Float8_e4m3fn, __VA_ARGS__)           \
+  STABLE_DISPATCH_CASE(                                                    \
+      torch::headeronly::ScalarType::Float8_e5m2fnuz, __VA_ARGS__)         \
+  STABLE_DISPATCH_CASE(                                                    \
+      torch::headeronly::ScalarType::Float8_e4m3fnuz, __VA_ARGS__)         \
+  STABLE_DISPATCH_CASE(torch::headeronly::ScalarType::UInt16, __VA_ARGS__) \
+  STABLE_DISPATCH_CASE(torch::headeronly::ScalarType::UInt32, __VA_ARGS__) \
+  STABLE_DISPATCH_CASE(torch::headeronly::ScalarType::UInt64, __VA_ARGS__) \
+  STABLE_DISPATCH_CASE(torch::headeronly::ScalarType::Bool, __VA_ARGS__)
+
+#define STABLE_DISPATCH_SUPPORTED_TYPES(TYPE, NAME, ...) \
+  STABLE_DISPATCH_SWITCH(                                \
+      TYPE, NAME, STABLE_DISPATCH_CASE_SUPPORTED_TYPES(scalar_t, __VA_ARGS__))
