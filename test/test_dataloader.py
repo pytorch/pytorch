@@ -2463,6 +2463,7 @@ except RuntimeError as e:
         Regression test for issue #163184 where DataLoader ignores custom
         transformations in Subset subclasses that override __getitem__.
         """
+
         class SimpleDataset(Dataset):
             def __init__(self):
                 self.data = torch.arange(20)
@@ -2509,6 +2510,7 @@ except RuntimeError as e:
 
         class SumSubset(Subset):
             """Subset that returns sum instead of tuple"""
+
             def __getitem__(self, idx):
                 original_idx = self.indices[idx]
                 a, b = self.dataset[original_idx]
