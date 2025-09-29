@@ -1,5 +1,4 @@
 cmake_minimum_required(VERSION 3.27 FATAL_ERROR)
-# cmake_policy(SET CMP0022 NEW) cmake_policy(SET CMP0023 NEW)
 
 # Use compiler ID "AppleClang" instead of "Clang" for XCode. Not setting this
 # sometimes makes XCode C compiler gets detected as "Clang", even when the C++
@@ -443,7 +442,7 @@ if(WIN32)
       message(
         WARNING
           "Libuv is not installed in current conda env. Set USE_DISTRIBUTED to OFF. "
-          "Please run command 'conda install -c conda-forge libuv=1.39' to install libuv."
+          "Please run command 'conda install -c conda-forge libuv=1.51' to install libuv."
       )
     else()
       set(ENV{libuv_ROOT} ${libuv_tmp_LIBRARY}/../../)
@@ -1390,10 +1389,6 @@ endif()
 
 include(cmake/Summary.cmake)
 caffe2_print_configuration_summary()
-
-if(BUILD_FUNCTORCH)
-  add_subdirectory(functorch)
-endif()
 
 # Parse custom debug info
 if(DEFINED USE_CUSTOM_DEBINFO)

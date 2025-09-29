@@ -370,9 +370,12 @@ def _resolve_name_collision(mod: GraphModule, gm: GraphModule) -> None:
                 ):
                     continue
             elif (
-                torch.equal(gm_target, model_target)
+                gm_target.device == model_target.device
                 and gm_target.dtype == model_target.dtype
+                and torch.equal(gm_target, model_target)
             ):
+                # If tensors with same name from gm and model are indeed the same, we don't need to rename
+                # Check device first, to avoid torch.equal(wrapper_CUDA__equal) raise when different device
                 continue
 
             prefix = (
@@ -1323,11 +1326,7 @@ class _InProcessFxCompile(FxCompile):
 
                 metrics_context = get_metrics_context()
                 if metrics_context.in_progress():
-                    # TODO: Remove this when 3.9 is no longer supported
-                    if sys.version_info < (3, 10):
-                        num_graph_breaks = sum(counters["graph_break"].values())
-                    else:
-                        num_graph_breaks = counters["graph_break"].total()
+                    num_graph_breaks = counters["graph_break"].total()
                     CompileEventLogger.compilation_metric(
                         overwrite=True, num_graph_breaks=num_graph_breaks
                     )
