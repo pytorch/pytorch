@@ -2476,6 +2476,47 @@ class CommonTemplate:
         b_int8pack, b_scales = convert_weight_to_int8pack(b)
         self.common(fn, (a, b_int8pack, b_scales, c))
 
+    @requires_cuda_and_triton
+    def test_int8_weight_only_quant_user_entry(self):
+        K, N, M = 128, 256, 32  # in, out, batch
+
+        class FloatLinear(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc = nn.Linear(K, N, bias=False)
+
+            def forward(self, x):
+                return self.fc(x)
+
+        src = FloatLinear().eval().to(GPU_TYPE)
+
+        Wf = src.fc.weight.detach().float()  # [N,K]
+        s = (Wf.abs().amax(dim=1, keepdim=True) / 127).clamp_min(1e-8)  # [N,1]
+        Wq = torch.round(Wf / s).clamp_(-128, 127).to(torch.int8).contiguous()  # [N,K]
+        scales = s.squeeze(1).to(torch.bfloat16).contiguous()  # [N]
+
+        class WOQLinear(nn.Module):
+            def __init__(self, Wq, scales):
+                super().__init__()
+                self.register_buffer("Wq", Wq)  # int8 [N,K]
+                self.register_buffer("scales", scales)  # bf16 [N]
+
+            def forward(self, x):
+                # [M,K] @ [K,N] → [M,N] * scales[N]
+                return (x @ self.Wq.t().to(x.dtype)) * self.scales
+
+        m = WOQLinear(Wq, scales).eval().to(GPU_TYPE)
+        x = torch.randn(M, K, dtype=torch.bfloat16, device=GPU_TYPE)  # [M,K]
+
+        compiled = torch.compile(m, fullgraph=True, dynamic=False)
+        out_compiled, (code,) = run_and_get_code(compiled, x)
+
+        self.assertIn("_weight_int8pack_mm", code)
+
+        with torch.inference_mode():
+            out_eager = m(x)
+        torch.testing.assert_close(out_compiled, out_eager, rtol=1e-2, atol=1e-2)
+
     @xfail_if_mps_unimplemented
     @xfail_if_triton_cpu
     @skipCUDAIf(True, "No _dyn_quant_pack_4bit_weight implementation on CUDA")
