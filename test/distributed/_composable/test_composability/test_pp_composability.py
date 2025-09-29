@@ -560,16 +560,8 @@ class ComposabilityTest(MultiProcessTestCase):
             for model in partial_models
         ]
 
-        ref_optimizer_kwargs = {
-            "lr": 0.01,
-            "betas": (0.9, 0.95),
-            "weight_decay": 0.1,
-            "fused": False,
-            "foreach": True,
-        }
-
         ref_optimizers = [
-            torch.optim.AdamW(model.parameters(), **ref_optimizer_kwargs)
+            torch.optim.AdamW(model.parameters(), **optimizer_kwargs)
             for model in ref_partial_models
         ]
 
