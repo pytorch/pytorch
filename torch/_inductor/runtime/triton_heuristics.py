@@ -2824,27 +2824,66 @@ def adapt_config_for_tiling(
     )
 
 
+class ReductionConfigKey:
+    """
+    The part of reduction configs that affect determinism.
+    """
+
+    def __init__(self, config: Config):
+        # persistent reduction does not have a RBLOCK, use -1 as a flag
+        self.r0_block = config.kwargs.get("R0_BLOCK", -1)
+        self.r1_block = config.kwargs.get("R1_BLOCK", -1)
+        self.num_warps = config.num_warps
+        self.num_ctas = config.num_ctas
+
+    def __hash__(self) -> int:
+        return hash((self.r0_block, self.r1_block, self.num_warps, self.num_ctas))
+
+    def __eq__(self, other: object) -> bool:
+        return (
+            isinstance(other, ReductionConfigKey)
+            and self.r0_block == other.r0_block
+            and self.r1_block == other.r1_block
+            and self.num_warps == other.num_warps
+            and self.num_ctas == other.num_ctas
+        )
+
+
 def filter_reduction_configs_for_determinism(configs: list[Config]) -> list[Config]:
     """
     Filter configs for reduction so the numerics can be deterministic.
     Simply return the first one for now.
     """
-    groups: defaultdict[tuple[int, int, int], list[Config]] = defaultdict(
+
+    if log.isEnabledFor(logging.DEBUG):
+        print_configs = len(configs) >= 2
+
+        # we don't print configs if the list has a single item
+        if print_configs:
+            log.debug("reduction configs before filtering:")
+            for c in configs:
+                log.debug("%s", c)
+                log.debug("")
+
+    groups: defaultdict[ReductionConfigKey, list[Config]] = defaultdict(
         list
     )  # group configs by RBLOCK, num_warps, num_ctas
 
     for c in configs:
-        # persistent reduction does not have a RBLOCK, use -1 as a flag
-        rblk = c.kwargs.get("RBLOCK", -1)
-        nwarps = c.num_warps
-        nctas = c.num_ctas
-
-        groups[(rblk, nwarps, nctas)].append(c)
+        key = ReductionConfigKey(c)
+        groups[key].append(c)
 
     assert len(groups) > 0
 
     # pick the group with smallest RBLOCK
-    return sorted(groups.items(), key=lambda item: item[0][0])[0][1]
+    out = sorted(groups.items(), key=lambda item: item[0].r0_block)[0][1]
+
+    if log.isEnabledFor(logging.DEBUG) and print_configs:  # type: ignore[possibly-undefined]
+        log.debug("reduction configs after filtering:")
+        for c in out:
+            log.debug("%s", c)
+            log.debug("")
+    return out
 
 
 def reduction(
