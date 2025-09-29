@@ -3,7 +3,7 @@
 import copy
 import functools
 import unittest
-from collections.abc import Callable
+from typing import Callable
 
 import torch
 import torch.distributed as dist

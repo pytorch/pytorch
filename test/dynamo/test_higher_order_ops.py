@@ -815,7 +815,6 @@ class GraphModule(torch.nn.Module):
 
     @torch._dynamo.config.patch(
         capture_dynamic_output_shape_ops=True,
-        capture_scalar_outputs=True,
     )
     def test_tensor_to_list_closure(self):
         def f(x):

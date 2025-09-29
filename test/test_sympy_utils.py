@@ -5,7 +5,7 @@ import itertools
 import math
 import pickle
 import sys
-from collections.abc import Callable
+from typing import Callable
 
 import sympy
 

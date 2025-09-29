@@ -547,12 +547,11 @@ class TestSparse(TestSparseBase):
 
     @coalescedonoff
     @dtypes(torch.float16, torch.bfloat16, torch.float64, torch.int, torch.cfloat, torch.cdouble)
-    @dtypesIfMPS(torch.float16, torch.bfloat16, torch.float32, torch.int, torch.cfloat)
+    @expectedFailureMPS  # unique_dim not implemented for MPS device
     def test_to_sparse(self, device, dtype, coalesced):
         shape = [5, 2, 10, 4]
         max_nnz = 1
-        dtypes = [torch.double, torch.cdouble] if device != "mps:0" else [torch.float32, torch.complex64]
-        for value_type in dtypes:
+        for value_type in [torch.double, torch.cdouble]:
             for dim, dim_sz in enumerate(shape, 1):
                 max_nnz *= dim_sz
                 rnnz = torch.randint(2, max_nnz, (1,)).item()
@@ -1765,8 +1764,8 @@ class TestSparse(TestSparseBase):
         test_shape(1000, 100, 0, 20)
 
     @coalescedonoff
+    @expectedFailureMPS
     @dtypes(torch.double)
-    @dtypesIfMPS(torch.float32)
     def test_spadd(self, device, dtype, coalesced):
 
         def _test_spadd_shape(nnz, shape_i, shape_v=None):
@@ -3857,8 +3856,8 @@ class TestSparse(TestSparseBase):
 
         self.assertRaises(TypeError, assign_to)
 
+    @expectedFailureMPS
     @dtypes(torch.double, torch.cdouble)
-    @dtypesIfMPS(torch.float32, torch.complex64)
     def test_full_broadcast_to(self, device, dtype):
         def can_broadcast(s0, s1):
             s0 = tuple(reversed(s0))
@@ -3888,8 +3887,8 @@ class TestSparse(TestSparseBase):
                         torch._sparse_broadcast_to(s, s1)
 
     @coalescedonoff
+    @expectedFailureMPS
     @dtypes(torch.double, torch.cdouble)
-    @dtypesIfMPS(torch.float32, torch.complex64)
     def test_sparse_broadcast_to(self, device, dtype, coalesced):
         def test(sparse_dims, nnz, with_size, new_size):
             x = self._gen_sparse(sparse_dims, nnz, with_size, dtype, device, coalesced)[0]

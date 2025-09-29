@@ -351,7 +351,7 @@ def _broadcast_state(
         if isinstance(state, torch.Tensor):
             assert state.dim() == 0, (
                 "For non-zero ranks, a tensor state should have zero dimension, "
-                f"but got the state with shape {state.shape}."
+                "but got the state with shape {state.shape()}."
             )
             return state
         elif not isinstance(state, _PosDimTensorInfo):

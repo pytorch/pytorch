@@ -136,9 +136,6 @@ def get_promotion_table_for_strings() -> dict:
             ("int32", "int64"),
             ("int64", "int32"),
         ],
-        "bool": [
-            ("bool", "bool"),
-        ],
     }
 
 
