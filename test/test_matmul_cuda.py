@@ -56,6 +56,7 @@ from torch.testing._internal.common_utils import (
     TEST_CUDA,
     TEST_WITH_ROCM,
     TestCase,
+    decorateIf,
 )
 from torch.testing._internal.common_quantized import (
     _f32_to_floatx_unpacked,
@@ -73,6 +74,16 @@ if TEST_CUDA:
 
 # Protects against includes accidentally setting the default dtype
 assert torch.get_default_dtype() is torch.float32
+
+def xfailIfSM100OrLaterAndCondition(condition_fn):
+    """
+    Conditionally xfail tests on SM100+ based on a condition function.
+    The condition function receives the test parameters dict and returns True to xfail.
+    """
+    return decorateIf(
+        unittest.expectedFailure,
+        lambda params: SM100OrLater and condition_fn(params)
+    )
 
 
 @contextlib.contextmanager
@@ -169,6 +180,7 @@ class TestMatmulCuda(InductorTestCase):
             self.cublas_addmm(size, dtype, False)
 
     @onlyCUDA
+    @xfailIfSM100OrLaterAndCondition(lambda params: params.get('dtype') == torch.bfloat16 and params.get('size') == 10000)
     @skipIfRocmVersionLessThan((5, 2))
     # imported 'tol' as 'xtol' to avoid aliasing in code above
     @toleranceOverride({torch.float16: xtol(atol=7e-1, rtol=2e-1),
@@ -503,13 +515,12 @@ class TestMatmulCuda(InductorTestCase):
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
     # TODO(future PR): enable compile for torch._grouped_mm fallback path
     @unittest.skipIf(not SM90OrLater, "Grouped gemm with compile supported on SM90")
+    @unittest.skipIf(SM100OrLater, "Grouped gemm is inconsistently raising numeric issues see: #163462 ")
     @parametrize("op", ["2d/2d", "2d/3d", "3d/2d", "3d/3d"])
     @parametrize("a_row_major", [False, True])
     @parametrize("b_row_major", [False, True])
     @parametrize("max_autotune", [False, True])
     def test_grouped_gemm_compiled(self, op, a_row_major, b_row_major, max_autotune):
-        if max_autotune and SM100OrLater:
-            self.skipTest("Triton templates not supported on SM100+ for grouped_mm")
         device = "cuda"
         dtype_AB = torch.bfloat16
         dtype_offset = torch.int32
