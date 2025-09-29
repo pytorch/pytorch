@@ -36,7 +36,7 @@ def _outline_submodules(submodule: torch.fx.GraphModule) -> torch.fx.GraphModule
     try:
         _copy_graph_attrs(submodule, new_module, seen_attrs)  # type: ignore[arg-type]
     except Exception as e:
-        logger.error(f"{seen_attrs=}")  # noqa: G004
+        logger.error(f"{seen_attrs=}", exc_info=False)
         raise e
 
     new_module.graph.lint()
