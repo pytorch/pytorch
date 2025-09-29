@@ -1250,6 +1250,8 @@ if torch._C._has_mkldnn:
             and not torch._C.has_mkl
         ):
             return False
+        if not is_lp_weight and linear_node.target == aten.bmm.default:
+            return False
         for meta_value in [input_meta_value, weight_meta_value]:
             if (
                 meta_value is None
