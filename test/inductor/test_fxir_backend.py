@@ -6,7 +6,8 @@ Test the FX IR backend.
 import itertools
 import operator
 import unittest
-from typing import Callable, Optional
+from collections.abc import Callable
+from typing import Optional
 
 import sympy
 
@@ -35,6 +36,13 @@ from torch.testing._internal.inductor_utils import (
     TRITON_HAS_CPU,
 )
 
+
+try:
+    from .test_control_flow import CondModels
+except ImportError:
+    from test_control_flow import (
+        CondModels,  # @manual=fbcode//caffe2/test/inductor:control_flow-library
+    )
 
 if HAS_GPU:
     import triton
@@ -988,6 +996,75 @@ def forward(self, arg0_1, arg1_1, arg2_1):
     buf1 = cond[0]
     buf2 = cond[1];  cond = None
     return [buf1, buf2]""",  # noqa: B950
+        )
+
+    @parametrize("length", (4, 8))
+    def test_cond_dynamic_shape_pred_scalar_closure(self, length: int):
+        """
+        Test cond using a predicate computed from dynamic shapes.
+        Also test a dynamic scalar computed outside the branches.
+        """
+
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                z = x.reshape(-1)
+                a = y.shape[0]
+
+                def true_fn(x):
+                    return x + a
+
+                def false_fn(x):
+                    return true_fn(x) / 2
+
+                return torch.cond(x.shape[0] > 5, true_fn, false_fn, (z,))
+
+        (x, y) = [
+            torch.randn(shape, device=self.device)
+            for shape in [(length // 2,) * 2, (length,)]
+        ]
+        dynamic_shapes = {
+            "x": {0: Dim.DYNAMIC},
+            "y": {0: Dim.DYNAMIC},
+        }
+        self.check(M(), (x, y), dynamic_shapes=dynamic_shapes)
+
+    def test_dynamic_scalar_output(self):
+        """
+        Test an output scalar from dynamic shapes.
+        """
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x.shape[0] * 3
+
+        x = torch.randn(7, device=self.device)
+        self.check(M(), (x,), dynamic_shapes=({0: Dim.DYNAMIC},))
+
+    @parametrize("pred", (False, True))
+    def test_mismatched_branch_dynamic(self, pred: bool):
+        """
+        Test cond branches with mismatched dynamic shapes.
+        """
+
+        # Apply an offset to guarantee the truith of the predicate.
+        pred_offset = 1 if pred else -1
+
+        inputs = [
+            torch.tensor([pred], device=self.device),
+        ] + [torch.randn(10, 20, device=self.device) + pred_offset for _ in range(3)]
+        dim0_a = Dim("s0", min=4, max=1024)
+        dim0_b = Dim("s1", min=4, max=1024)
+        dynamic_shapes = {
+            "p": {},
+            "x": {0: dim0_a, 1: None},
+            "y": {0: dim0_b, 1: None},
+            "z": {0: dim0_a, 1: None},
+        }
+
+        self.check(
+            CondModels.MismatchedOutputSize(),
+            tuple(inputs),
+            dynamic_shapes=dynamic_shapes,
         )
 
 

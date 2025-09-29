@@ -1326,11 +1326,7 @@ class _InProcessFxCompile(FxCompile):
 
                 metrics_context = get_metrics_context()
                 if metrics_context.in_progress():
-                    # TODO: Remove this when 3.9 is no longer supported
-                    if sys.version_info < (3, 10):
-                        num_graph_breaks = sum(counters["graph_break"].values())
-                    else:
-                        num_graph_breaks = counters["graph_break"].total()
+                    num_graph_breaks = counters["graph_break"].total()
                     CompileEventLogger.compilation_metric(
                         overwrite=True, num_graph_breaks=num_graph_breaks
                     )
