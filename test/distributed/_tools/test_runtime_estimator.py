@@ -1,4 +1,4 @@
-# Owner(s): ["module: unknown"]
+# Owner(s): ["oncall: distributed"]
 import unittest
 from dataclasses import dataclass
 from typing import Any, Callable, cast, Union

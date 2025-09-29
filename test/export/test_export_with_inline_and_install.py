@@ -89,10 +89,6 @@ unittest.expectedFailure(
 unittest.expectedFailure(
     InlineAndInstallStrictExportTestExport.test_retrace_pre_autograd_inline_and_install_strict  # noqa: F821
 )
-# this is because detect leak test has export root
-unittest.expectedFailure(
-    InlineAndInstallStrictExportTestExport.test_detect_leak_strict_inline_and_install_strict  # noqa: F821
-)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

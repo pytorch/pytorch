@@ -1053,6 +1053,25 @@ static void registerCudaDeviceProperties(PyObject* module) {
       .def_readonly("warp_size", &cudaDeviceProp::warpSize)
 #ifndef USE_ROCM
       // NVIDIA-only properties
+      .def_property_readonly(
+          "clock_rate",
+          [](const cudaDeviceProp&) {
+            int clk = 0;
+            AT_CUDA_CHECK(cudaDeviceGetAttribute(
+                &clk, cudaDevAttrClockRate, c10::cuda::current_device()));
+            return clk;
+          })
+      .def_property_readonly(
+          "memory_clock_rate",
+          [](const cudaDeviceProp&) {
+            int mem_clk = 0;
+            AT_CUDA_CHECK(cudaDeviceGetAttribute(
+                &mem_clk,
+                cudaDevAttrMemoryClockRate,
+                c10::cuda::current_device()));
+            return mem_clk;
+          })
+      .def_readonly("memory_bus_width", &cudaDeviceProp::memoryBusWidth)
       .def_readonly(
           "shared_memory_per_block", &cudaDeviceProp::sharedMemPerBlock)
       .def_readonly(
@@ -2167,7 +2186,6 @@ PyMethodDef* THCPModule_methods() {
 }
 
 namespace torch::cuda {
-
 namespace shared {
 
 void initCudartBindings(PyObject* module);
