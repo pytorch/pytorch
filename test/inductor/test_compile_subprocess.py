@@ -206,7 +206,8 @@ class TestSubprocess(TestCase):
 
             start = time.time()
             last_report = start
-            while _AsyncFxCompile._stat_compiled_runs < 4:
+            while True:
+                start_stat_compiled_runs = _AsyncFxCompile._stat_compiled_runs
                 # Sleep a bit so we don't drive the CPU unnecessarily.
                 time.sleep(0.25)
 
@@ -218,6 +219,9 @@ class TestSubprocess(TestCase):
 
                 # Backward pass
                 output.sum().backward()
+
+                if _AsyncFxCompile._stat_compiled_runs - start_stat_compiled_runs == 2:
+                    break
 
                 # DEBUGGING: Print a periodic message so we know we're still
                 # running...
@@ -231,12 +235,12 @@ class TestSubprocess(TestCase):
                         "Test timed out before producing a compiled artifact."
                     )
 
-            self.assertEqual(_AsyncFxCompile._stat_compiled_runs, 4)
+            self.assertGreater(_AsyncFxCompile._stat_compiled_runs, 1)
             # Make sure we ran eager at least once. Normally this will be
             # something like 80.
             self.assertGreater(_AsyncFxCompile._stat_eager_runs, 0)
-            self.assertEqual(_AsyncFxCompile._stat_bg_started, 1)
-            self.assertEqual(_AsyncFxCompile._stat_bg_finished, 1)
+            self.assertEqual(_AsyncFxCompile._stat_bg_started, 2)
+            self.assertEqual(_AsyncFxCompile._stat_bg_finished, 2)
 
 
 if RUN_CPU:

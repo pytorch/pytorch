@@ -67,7 +67,7 @@ def export_compat(
     profile: bool = False,
     dump_exported_program: bool = False,
     artifacts_dir: str | os.PathLike = ".",
-    fallback: bool = True,
+    fallback: bool = False,
     # Legacy export parameters for fallback
     legacy_export_kwargs: dict[str, Any] | None = None,
 ) -> _onnx_program.ONNXProgram:

@@ -42,6 +42,7 @@ Next, we will delve into each chapter of this guide. Each chapter focuses on a k
 :glob:
 :maxdepth: 1
 
+autoload
 operators
 ```
 
