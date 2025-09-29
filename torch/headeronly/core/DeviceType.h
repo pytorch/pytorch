@@ -6,8 +6,8 @@
 #include <torch/headeronly/macros/Export.h>
 
 #include <cstddef>
-#include <functional>
 #include <cstdint>
+#include <functional>
 
 namespace c10 {
 
@@ -103,5 +103,23 @@ struct hash<c10::DeviceType> {
 } // namespace std
 
 namespace torch::headeronly {
-  using c10::DeviceType;
-}
+using c10::DeviceType;
+using c10::kCPU;
+using c10::kCUDA;
+using c10::kHIP;
+using c10::kFPGA;
+using c10::kMAIA;
+using c10::kXLA;
+using c10::kMPS;
+using c10::kMeta;
+using c10::kVulkan;
+using c10::kMetal;
+using c10::kXPU;
+using c10::kHPU;
+using c10::kVE;
+using c10::kLazy;
+using c10::kIPU;
+using c10::kMTIA;
+using c10::kPrivateUse1;
+using c10::COMPILE_TIME_MAX_DEVICE_TYPES;
+} // namespace torch::headeronly
