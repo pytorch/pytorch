@@ -40,7 +40,6 @@ from torch.fx.operator_schemas import normalize_function
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.overrides import TorchFunctionMode
 from torch.types import IntLikeType, py_sym_types
-from torch.utils._backport_slots import dataclass_slots
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import (
     is_traceable_wrapper_subclass,
@@ -135,9 +134,11 @@ class FakeTensorTLS(threading.local):
     # Default to None, otherwise it'll be used to override _all_
     # `FakeTensorMode.allow_non_fake_inputs` in this thread.
     allow_non_fake_inputs_override: Optional[bool]
+    non_strict_export_fake_tensor_tracker: weakref.WeakSet
 
     def __init__(self) -> None:
         self.allow_non_fake_inputs_override = None
+        self.non_strict_export_fake_tensor_tracker = weakref.WeakSet()
 
 
 fake_tensor_tls = FakeTensorTLS()
@@ -791,6 +792,11 @@ class FakeTensor(Tensor):
     #
     def __init__(self, *args: object, **kwargs: object) -> None:
         super().__init__()
+        if (
+            torch.compiler.is_exporting()
+            and torch._export.config.detect_non_strict_fake_tensor_leaks
+        ):
+            fake_tensor_tls.non_strict_export_fake_tensor_tracker.add(self)
 
     @staticmethod
     def from_tensor(t: Tensor, fake_mode: FakeTensorMode) -> FakeTensor:
@@ -1001,8 +1007,7 @@ class FakeTensor(Tensor):
 _MetadataIntLike = Union[IntLikeType, "_PySymInputStub", "_SymIntOutputStub"]
 
 
-@dataclass_slots
-@dataclass
+@dataclass(slots=True)
 class TensorMetadata:
     """
     The Tensor metadata relevant to hashing FakeTensors when caching.
@@ -1086,8 +1091,7 @@ def extract_tensor_metadata(t: Tensor) -> TensorMetadata:
     )
 
 
-@dataclass_slots
-@dataclass
+@dataclass(slots=True)
 class _DispatchCacheKey:
     """
     Key for the FakeTensor dispatch cache.
@@ -1120,8 +1124,7 @@ class SingletonConstant:
     pass
 
 
-@dataclass_slots
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class _DispatchCacheEntryOutputInfo:
     """
     Entry type for the FakeTensor dispatch cache for an output. Accounts for three
@@ -1140,8 +1143,7 @@ class _DispatchCacheEntryOutputInfo:
     constant_value: Optional[Any] = SingletonConstant
 
 
-@dataclass_slots
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class _DispatchCacheValidEntry:
     """
     Entry type for the FakeTensor dispatch cache. It supports two types of outputs
@@ -1155,8 +1157,7 @@ class _DispatchCacheValidEntry:
     is_output_tuple: bool = False
 
 
-@dataclass_slots
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class _DispatchCacheBypassEntry:
     """
     Entry type for a negative cache entry.
@@ -1169,8 +1170,7 @@ if TYPE_CHECKING:
     _DispatchCacheEntry = Union[_DispatchCacheValidEntry, _DispatchCacheBypassEntry]
 
 
-@dataclass_slots
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class _BypassDispatchCache(Exception):
     """
     Signals cases that should skip FakeTensor caching.
@@ -1179,8 +1179,7 @@ class _BypassDispatchCache(Exception):
     reason: str
 
 
-@dataclass_slots
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class DispatchCacheInfo:
     """
     Information about the state of the FakeTensor dispatch cache.

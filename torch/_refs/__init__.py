@@ -5585,6 +5585,13 @@ def empty_strided(
     )
 
 
+def _strength_reduce_integer(val: int) -> torch.dtype:
+    for possible_dtype in (torch.uint8, torch.uint16, torch.int32):
+        if val <= torch.iinfo(possible_dtype).max:
+            return possible_dtype
+    return torch.int64
+
+
 @register_decomposition(aten.eye)
 @out_wrapper()
 def eye(
@@ -5606,12 +5613,15 @@ def eye(
     torch._check(n >= 0, lambda: f"n must be greater or equal to 0, got {n}")
     torch._check(m >= 0, lambda: f"m must be greater or equal to 0, got {m}")
 
-    range_n = torch.arange(n, dtype=torch.int64, device=device, requires_grad=False)
-    range_m = torch.arange(m, dtype=torch.int64, device=device, requires_grad=False)
+    range_dtype = torch.int64
+    if isinstance(n, utils.IntWithoutSymInt) and isinstance(m, utils.IntWithoutSymInt):
+        range_dtype = _strength_reduce_integer(max(n, m))
+    range_n = torch.arange(n, dtype=range_dtype, device=device, requires_grad=False)
+    range_m = torch.arange(m, dtype=range_dtype, device=device, requires_grad=False)
 
     cond = range_n.unsqueeze(-1) == range_m
-    if dtype is torch.bool:
-        return cond
+    if layout in (torch.strided, None) and not pin_memory:
+        return cond.to(dtype or torch.get_default_dtype())
     else:
         one = torch.ones(
             (1,),

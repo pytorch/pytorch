@@ -5,7 +5,6 @@ import sysconfig
 from typing import Any, Optional
 
 import torch.distributed as dist
-from torch.distributed._distributed_c10d import _nvshmemx_cumodule_init
 from torch.utils._triton import has_triton
 
 
@@ -155,6 +154,8 @@ def _nvshmem_init_hook(*args, **kwargs) -> None:  # type: ignore[no-untyped-def]
     A hook function to initialize the CUModule created by `triton.jit` with
     NVSHMEM device context
     """
+    from torch._C._distributed_c10d import _nvshmemx_cumodule_init
+
     jit_function = kwargs["fn"].jit_function
     fn_name = jit_function.fn.__name__
 
