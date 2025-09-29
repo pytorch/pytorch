@@ -8,9 +8,10 @@ import logging
 import re
 from abc import ABC, abstractmethod
 from collections import Counter, defaultdict
+from collections.abc import Callable
 from enum import Enum
 from functools import lru_cache
-from typing import Any, Callable, NamedTuple, Optional, Union
+from typing import Any, NamedTuple, Optional, Union
 
 import torch
 import torch.distributed as dist
