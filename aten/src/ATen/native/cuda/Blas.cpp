@@ -4,6 +4,7 @@
 #include <c10/util/SmallVector.h>
 #include <c10/core/Scalar.h>
 #include <c10/core/ScalarType.h>
+#include <c10/util/Exception.h>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
 #include <ATen/core/NamedTensor.h>
@@ -1690,6 +1691,7 @@ enum class ScaledGemmImplementation {
 template <class EnumType>
 std::vector<EnumType> convert_int_to_enum(ArrayRef<long>& v) {
   std::vector<EnumType> converted{};
+  converted.reserve(v.size());
 
   for (auto vi : v) {
     converted.push_back(static_cast<EnumType>(vi));
@@ -1879,7 +1881,7 @@ bool check_mxfp8_recipe(c10::ScalarType type_a,
 using acceptance_fn = std::function<bool(c10::ScalarType, std::vector<ScalingType>&, ArrayRef<Tensor>&, c10::ScalarType, std::vector<ScalingType>&, ArrayRef<Tensor>&)>;
 using namespace std::placeholders;
 
-std::vector<std::tuple<std::string, acceptance_fn, ScaledGemmImplementation>> scale_kernel_dispatch = {
+std::array<std::tuple<std::string, acceptance_fn, ScaledGemmImplementation>, 8> scale_kernel_dispatch = {{
   { "tensorwise_tensorwise", check_tensorwise_recipe, ScaledGemmImplementation::TENSORWISE_TENSORWISE },
   { "rowwise_rowwise", check_rowwise_recipe, ScaledGemmImplementation::ROWWISE_ROWWISE},
   { "block_1x128_128x128", std::bind(check_deepseek_recipe, ScalingType::BlockWise1x128, ScalingType::BlockWise128x128, _1, _2, _3, _4, _5, _6),
@@ -1890,7 +1892,7 @@ std::vector<std::tuple<std::string, acceptance_fn, ScaledGemmImplementation>> sc
     ScaledGemmImplementation::BLOCK_1x128_1x128},
   { "nvfp4", check_nvfp4_recipe, ScaledGemmImplementation::NVFP4_NVFP4},
   { "nvfp4_single_scale", check_nvfp4_recipe_single_scale, ScaledGemmImplementation::NVFP4_NVFP4_SINGLE_SCALE },
-  { "mxfp8", check_mxfp8_recipe, ScaledGemmImplementation::MXFP8_MXFP8}};
+  { "mxfp8", check_mxfp8_recipe, ScaledGemmImplementation::MXFP8_MXFP8}}};
 
 Tensor&
 _cutlass_scaled_gemm(
@@ -2056,12 +2058,10 @@ _scaled_tensorwise_tensorwise(
   // Restrictions:
   // A, B are FP8, scales are fp32
   //
-  TORCH_CHECK(isFloat8Type(mat_a.scalar_type()) && isFloat8Type(mat_b.scalar_type()), "mat_a and mat_b must be fp8 types, got: ",
+  TORCH_CHECK_VALUE(isFloat8Type(mat_a.scalar_type()) && isFloat8Type(mat_b.scalar_type()), "mat_a and mat_b must be fp8 types, got: ",
       mat_a.scalar_type(), mat_b.scalar_type());
-  TORCH_CHECK(scale_a.numel() == 1 && scale_a.scalar_type() == kFloat, "scale_a must have 1 Float element")
-  TORCH_CHECK(scale_b.numel() == 1 && scale_b.scalar_type() == kFloat, "scale_b must have 1 Float element")
-
-  //at::native::resize_output(out, {mat_a.sizes()[0], mat_b.sizes()[1]});
+  TORCH_CHECK_VALUE(scale_a.numel() == 1 && scale_a.scalar_type() == kFloat, "scale_a must have 1 Float element")
+  TORCH_CHECK_VALUE(scale_b.numel() == 1 && scale_b.scalar_type() == kFloat, "scale_b must have 1 Float element")
 
   auto scaling_choice_a = ScalingType::TensorWise;
   auto scaling_choice_b = ScalingType::TensorWise;
@@ -2082,14 +2082,14 @@ _scaled_rowwise_rowwise(
           Tensor& out) {
   // Restrictions:
   // A, B are FP8, scales are fp32, shape M/N for A/B
-  TORCH_CHECK(isFloat8Type(mat_a.scalar_type()) && isFloat8Type(mat_b.scalar_type()), "mat_a and mat_b must be fp8 types, got: ",
+  TORCH_CHECK_VALUE(isFloat8Type(mat_a.scalar_type()) && isFloat8Type(mat_b.scalar_type()), "mat_a and mat_b must be fp8 types, got: ",
       mat_a.scalar_type(), mat_b.scalar_type());
-  TORCH_CHECK(scale_a.size(0) == mat_a.size(0) && scale_a.size(1) == 1, "scale_a must have shape [", mat_a.size(0), ", 1], got [", scale_a.sizes(), "]");
-  TORCH_CHECK(scale_a.numel() == mat_a.size(0) && scale_a.scalar_type() == kFloat, "scale_a must have ", mat_a.size(0), " Float elements, got ", scale_a.numel())
-  TORCH_CHECK(scale_b.numel() == mat_b.size(1) && scale_b.scalar_type() == kFloat, "scale_b must have ", mat_b.size(1), " Float elements, got ", scale_b.numel())
+  TORCH_CHECK_VALUE(scale_a.size(0) == mat_a.size(0) && scale_a.size(1) == 1, "scale_a must have shape [", mat_a.size(0), ", 1], got [", scale_a.sizes(), "]");
+  TORCH_CHECK_VALUE(scale_a.numel() == mat_a.size(0) && scale_a.scalar_type() == kFloat, "scale_a must have ", mat_a.size(0), " Float elements, got ", scale_a.numel())
+  TORCH_CHECK_VALUE(scale_b.numel() == mat_b.size(1) && scale_b.scalar_type() == kFloat, "scale_b must have ", mat_b.size(1), " Float elements, got ", scale_b.numel())
 
-  TORCH_CHECK(scale_a.stride(1) == 1); // , "Expected scale_a.stride(0) == 1, got ", scale_a.stride(0));
-  TORCH_CHECK(scale_b.stride(1) == 1); //0, "Expected scale_b.stride(0) == 1, got ", scale_b.stride(0));
+  TORCH_CHECK_VALUE(scale_a.stride(1) == 1, "expected scale_a.stride(1) to be 1, but got ", scale_a.stride(1));
+  TORCH_CHECK_VALUE(scale_b.stride(1) == 1, "expected scale_b.stride(1) to be 1, but got ", scale_b.stride(1));
 
   auto scaling_choice_a = ScalingType::RowWise;
   auto scaling_choice_b = ScalingType::RowWise;
@@ -2118,13 +2118,13 @@ _scaled_rowwise_rowwise(
   // For ROCm, match behavior of f8f8bf16_rowwise type checking, for unit test purposes.
   //Tensor b = mat_b;
   if (_scaled_mm_is_fnuz()) {
-    TORCH_CHECK(mat_b.dtype() == at::kFloat8_e4m3fnuz);
+    TORCH_CHECK_VALUE(mat_b.dtype() == at::kFloat8_e4m3fnuz, "expected mat_b.dtype() to be at::kFloat8_e4m3fnuz, but got ", mat_b.dtype());
   }
   else {
-    TORCH_CHECK(mat_b.dtype() == at::kFloat8_e4m3fn);
+    TORCH_CHECK_VALUE(mat_b.dtype() == at::kFloat8_e4m3fn, "expected mat_b.dtype() to be at::kFloat8_e4m3fn, but got ", mat_b.dtype());
   }
   // Until more than bf16 is supported.
-  TORCH_CHECK(out.scalar_type() == ScalarType::BFloat16,
+  TORCH_CHECK_VALUE(out.scalar_type() == ScalarType::BFloat16,
        "hipblaslt rowwise _scaled_mm only supports BFloat16 output but got ", out.scalar_type());
 #endif
 
@@ -2143,18 +2143,17 @@ _scaled_block1x128_block1x128(
           Tensor& out) {
   // Restrictions:
   // A, B are FP8, scales are fp32, shape K//128
-  TORCH_CHECK(isFloat8Type(mat_a.scalar_type()) && isFloat8Type(mat_b.scalar_type()), "mat_a and mat_b must be fp8 types, got: ",
+  TORCH_CHECK_VALUE(isFloat8Type(mat_a.scalar_type()) && isFloat8Type(mat_b.scalar_type()), "mat_a and mat_b must be fp8 types, got: ",
       mat_a.scalar_type(), mat_b.scalar_type());
-  TORCH_CHECK(scale_a.sizes()[0] == mat_a.sizes()[0] && scale_a.sizes()[1] == mat_a.sizes()[1] / 128 && scale_a.scalar_type() == kFloat,
+  TORCH_CHECK_VALUE(scale_a.sizes()[0] == mat_a.sizes()[0] && scale_a.sizes()[1] == mat_a.sizes()[1] / 128 && scale_a.scalar_type() == kFloat,
       "scale_a must have shape ", mat_a.sizes()[0], " x ", mat_a.sizes()[1] / 128, " Float elements, got ", scale_a.sizes())
-  TORCH_CHECK(scale_b.sizes()[0] == ceil_div<int64_t>(mat_b.sizes()[0], 128) && scale_b.sizes()[1] == mat_b.sizes()[1] && scale_b.scalar_type() == kFloat,
+  TORCH_CHECK_VALUE(scale_b.sizes()[0] == ceil_div<int64_t>(mat_b.sizes()[0], 128) && scale_b.sizes()[1] == mat_b.sizes()[1] && scale_b.scalar_type() == kFloat,
       "scale_b must have shape ", ceil_div<int64_t>(mat_b.sizes()[0], 128), " x ", mat_b.sizes()[1], " Float elements, got ", scale_b.sizes())
 
-  TORCH_CHECK(scale_a.stride(0) == 1);
-  TORCH_CHECK(scale_b.stride(1) == 1);
-  TORCH_CHECK(scale_b.stride(0) == scale_b.size(1));
-
-  // at::native::resize_output(out, {mat_a.sizes()[0], mat_b.sizes()[1]});
+  TORCH_CHECK(scale_a.stride(0) == 1, "expected scale_a.stride(0) to be 1, but got ", scale_a.stride(0));
+  TORCH_CHECK(scale_b.stride(1) == 1, "expected scale_b.stride(1) to be 1, but got ", scale_b.stride(1));
+  TORCH_CHECK(scale_b.stride(0) == scale_b.size(1),
+      "expected scale_b.stride(0) to be ", scale_b.size(1), ", but got ", scale_b.size(1));
 
   auto scaling_choice_a = ScalingType::BlockWise1x128;
   auto scaling_choice_b = ScalingType::BlockWise1x128;
@@ -2174,16 +2173,17 @@ _scaled_block128x128_block1x128(
           Tensor& out) {
   // Restrictions:
   // A, B are FP8, scales are fp32, shape K//128
-  TORCH_CHECK(isFloat8Type(mat_a.scalar_type()) && isFloat8Type(mat_b.scalar_type()), "mat_a and mat_b must be fp8 types, got: ",
+  TORCH_CHECK_VALUE(isFloat8Type(mat_a.scalar_type()) && isFloat8Type(mat_b.scalar_type()), "mat_a and mat_b must be fp8 types, got: ",
       mat_a.scalar_type(), mat_b.scalar_type());
-  TORCH_CHECK(scale_a.sizes()[0] == ceil_div<int64_t>(mat_a.sizes()[0], 128) && scale_a.sizes()[1] == ceil_div<int64_t>(mat_a.sizes()[1], 128) && scale_a.scalar_type() == kFloat,
+  TORCH_CHECK_VALUE(scale_a.sizes()[0] == ceil_div<int64_t>(mat_a.sizes()[0], 128) && scale_a.sizes()[1] == ceil_div<int64_t>(mat_a.sizes()[1], 128) && scale_a.scalar_type() == kFloat,
       "scale_a must have shape ", ceil_div<int64_t>(mat_a.sizes()[0], 128), " x ", ceil_div<int64_t>(mat_a.sizes()[1], 128), " Float elements, got ", scale_a.sizes())
-  TORCH_CHECK(scale_b.sizes()[0] == ceil_div<int64_t>(mat_b.sizes()[0], 128) && scale_b.sizes()[1] == mat_b.sizes()[1] && scale_b.scalar_type() == kFloat,
+  TORCH_CHECK_VALUE(scale_b.sizes()[0] == ceil_div<int64_t>(mat_b.sizes()[0], 128) && scale_b.sizes()[1] == mat_b.sizes()[1] && scale_b.scalar_type() == kFloat,
       "scale_b must have shape ", ceil_div<int64_t>(mat_b.sizes()[0], 128), " x ", mat_b.sizes()[1], " Float elements, got ", scale_b.sizes())
 
-  TORCH_CHECK(scale_a.stride(1) == 1);
-  TORCH_CHECK(scale_b.stride(1) == 1);
-  TORCH_CHECK(scale_b.stride(0) == scale_b.size(1));
+  TORCH_CHECK_VALUE(scale_a.stride(1) == 1, "expected scale_a.stride(1) to be 1, but got ", scale_a.stride(1));
+  TORCH_CHECK_VALUE(scale_b.stride(1) == 1, "expected scale_b.stride(1) to be 1, but got ", scale_b.stride(1));
+  TORCH_CHECK_VALUE(scale_b.stride(0) == scale_b.size(1),
+      "expected scale_b.stride(0) to be ", scale_b.size(1), ", but got ", scale_b.stride(0));
 
   auto scaling_choice_a = ScalingType::BlockWise128x128;
   auto scaling_choice_b = ScalingType::BlockWise1x128;
@@ -2203,16 +2203,17 @@ _scaled_block1x128_block128x128(
           Tensor& out) {
   // Restrictions:
   // A, B are FP8, scales are fp32, A: shape K//128, B: K//128, N//128
-  TORCH_CHECK(isFloat8Type(mat_a.scalar_type()) && isFloat8Type(mat_b.scalar_type()), "mat_a and mat_b must be fp8 types, got: ",
+  TORCH_CHECK_VALUE(isFloat8Type(mat_a.scalar_type()) && isFloat8Type(mat_b.scalar_type()), "mat_a and mat_b must be fp8 types, got: ",
       mat_a.scalar_type(), mat_b.scalar_type());
-  TORCH_CHECK(scale_a.sizes()[0] == mat_a.sizes()[0] && scale_a.sizes()[1] == mat_a.sizes()[1] / 128 && scale_a.scalar_type() == kFloat,
+  TORCH_CHECK_VALUE(scale_a.sizes()[0] == mat_a.sizes()[0] && scale_a.sizes()[1] == mat_a.sizes()[1] / 128 && scale_a.scalar_type() == kFloat,
       "scale_a must have shape ", mat_a.sizes()[0], " x ", mat_a.sizes()[1] / 128, " Float elements, got ", scale_a.sizes())
-  TORCH_CHECK(scale_b.sizes()[0] == mat_b.sizes()[0] / 128 && scale_b.sizes()[1] == mat_b.sizes()[1] / 128 && scale_b.scalar_type() == kFloat,
+  TORCH_CHECK_VALUE(scale_b.sizes()[0] == mat_b.sizes()[0] / 128 && scale_b.sizes()[1] == mat_b.sizes()[1] / 128 && scale_b.scalar_type() == kFloat,
       "scale_b must have shape ", mat_b.sizes()[0] / 128, " x ", mat_b.sizes()[1] / 128, " Float elements, got ", scale_b.sizes())
 
-  TORCH_CHECK(scale_a.stride(0) == 1);
-  TORCH_CHECK(scale_b.stride(0) == 1);
-  TORCH_CHECK(scale_b.stride(1) == scale_b.size(0));
+  TORCH_CHECK_VALUE(scale_a.stride(0) == 1, "expected scale_a.stride(0) to be 1, but got ", scale_a.stride(0));
+  TORCH_CHECK_VALUE(scale_b.stride(0) == 1, "expected scale_b.stride(0) to be 1, but got ", scale_b.stride(0));
+  TORCH_CHECK_VALUE(scale_b.stride(1) == scale_b.size(0),
+      "expected scale_b.stride(1) to be ", scale_b.size(0), ", but got ", scale_b.stride(1));
 
   auto scaling_choice_a = ScalingType::BlockWise1x128;
   auto scaling_choice_b = ScalingType::BlockWise128x128;
@@ -2233,41 +2234,41 @@ _scaled_mxfp8_mxfp8(
   // Restrictions:
   // A, B are FP8, scales are e8m0, A: shape K//32, B: K, N//32
   // Scales must be swizzled
-  TORCH_CHECK(isFloat8Type(mat_a.scalar_type()) && isFloat8Type(mat_b.scalar_type()), "mat_a and mat_b must be fp8 types, got: ",
+  TORCH_CHECK_VALUE(isFloat8Type(mat_a.scalar_type()) && isFloat8Type(mat_b.scalar_type()), "mat_a and mat_b must be fp8 types, got: ",
       mat_a.scalar_type(), mat_b.scalar_type());
 
   auto scale_a_elems = round_up<int64_t>(mat_a.size(0), 128) * round_up<int64_t>(ceil_div<int64_t>(mat_a.size(1), 32), 4);
   auto scale_b_elems = round_up<int64_t>(mat_b.size(1), 128) * round_up<int64_t>(ceil_div<int64_t>(mat_b.size(0), 32), 4);
-  TORCH_CHECK(scale_a_elems == scale_a.numel(),
+  TORCH_CHECK_VALUE(scale_a_elems == scale_a.numel(),
          "For Blockwise scaling scale_a should have ", scale_a_elems, " elements, got: ", scale_a.numel());
-  TORCH_CHECK(scale_b_elems == scale_b.numel(),
+  TORCH_CHECK_VALUE(scale_b_elems == scale_b.numel(),
          "For Blockwise scaling scale_b should have ", scale_b_elems, " elements, got: ", scale_b.numel());
 
-  TORCH_CHECK(swizzle_a == SwizzleType::SWIZZLE_32_4_4, "scale_a must be swizzled to SWIZZLE_32_4_4 format");
-  TORCH_CHECK(swizzle_b == SwizzleType::SWIZZLE_32_4_4, "scale_b must be swizzled to SWIZZLE_32_4_4 format");
+  TORCH_CHECK_VALUE(swizzle_a == SwizzleType::SWIZZLE_32_4_4, "scale_a must be swizzled to SWIZZLE_32_4_4 format");
+  TORCH_CHECK_VALUE(swizzle_b == SwizzleType::SWIZZLE_32_4_4, "scale_b must be swizzled to SWIZZLE_32_4_4 format");
 
-  TORCH_CHECK(scale_a.is_contiguous() && scale_b.is_contiguous(),
+  TORCH_CHECK_VALUE(scale_a.is_contiguous() && scale_b.is_contiguous(),
         "For Blockwise scaling both scales should be contiguous");
 
-  TORCH_CHECK(out.scalar_type() == out_dtype);
+  TORCH_CHECK_VALUE(out.scalar_type() == out_dtype, "expected out.scalar_type() to be ", out_dtype, ", but got ", out_dtype);
 
   auto scaling_choice_a = ScalingType::BlockWise1x32;
   auto scaling_choice_b = ScalingType::BlockWise1x32;
 
 #ifdef USE_ROCM
 #if ROCM_VERSION >= 70000
-  TORCH_CHECK(at::detail::getCUDAHooks().isGPUArch({"gfx950"}),
+  TORCH_CHECK_NOT_IMPLEMENTED(at::detail::getCUDAHooks().isGPUArch({"gfx950"}),
               "Block-wise scaling for Float8_e8m0fnu is only supported on gfx950");
 
-  TORCH_CHECK(mat_a.size(0) % 32 == 0 && mat_a.size(1) % 32 == 0 &&
+  TORCH_CHECK_VALUE(mat_a.size(0) % 32 == 0 && mat_a.size(1) % 32 == 0 &&
               mat_b.size(0) % 32 == 0 && mat_b.size(1) % 32 == 0,
               "Matrix dimensions must be multiples of 32 for block-wise scaling");
 
-  TORCH_CHECK(out.scalar_type() == ScalarType::BFloat16 ||
+  TORCH_CHECK_VALUE(out.scalar_type() == ScalarType::BFloat16 ||
               out.scalar_type() == ScalarType::Half,
               "Block-wise scaling only supports BFloat16 or Half output types");
 #else
-    TORCH_CHECK(false, "Block-wise scaling for Float8_e8m0fnu requires ROCm 7.0 or later");
+    TORCH_CHECK_NOT_IMPLEMENTED(false, "Block-wise scaling for Float8_e8m0fnu requires ROCm 7.0 or later");
 #endif
 #endif
 
@@ -2284,26 +2285,26 @@ _scaled_nvfp4_nvfp4(
           const bool single_scale,
           Tensor& out) {
 #ifdef USE_ROCM
-  TORCH_CHECK(false, "NVFP4 scaling not supported on ROCM");
+  TORCH_CHECK_NOT_IMPLEMENTED(false, "NVFP4 scaling not supported on ROCM");
 #endif
-  TORCH_CHECK(single_scale, "Only single-scaled NVFP4 currently supported");
+  TORCH_CHECK_VALUE(single_scale, "Only single-scaled NVFP4 currently supported");
   // Restrictions:
   // A, B are FP4, scales are e8m0, A: shape K//32, B: K, N//32
   // Scales must be swizzled
-  TORCH_CHECK(mat_a.scalar_type() == at::kFloat4_e2m1fn_x2 && mat_b.scalar_type() == at::kFloat4_e2m1fn_x2, "mat_a and mat_b must be fp4 types, got: ",
+  TORCH_CHECK_VALUE(mat_a.scalar_type() == at::kFloat4_e2m1fn_x2 && mat_b.scalar_type() == at::kFloat4_e2m1fn_x2, "mat_a and mat_b must be fp4 types, got: ",
       mat_a.scalar_type(), mat_b.scalar_type());
   // Note: fp4x2 format, need to double the K dimension for checking purposes.
   auto scale_a_elems = round_up<int64_t>(mat_a.size(0), 128) * round_up<int64_t>(ceil_div<int64_t>(mat_a.size(1) * 2, 16), 4);
   auto scale_b_elems = round_up<int64_t>(mat_b.size(1), 128) * round_up<int64_t>(ceil_div<int64_t>(mat_b.size(0) * 2, 16), 4);
-  TORCH_CHECK(scale_a_elems == scale_a.numel(),
+  TORCH_CHECK_VALUE(scale_a_elems == scale_a.numel(),
          "For Blockwise scaling scale_a should have ", scale_a_elems, " elements, got: ", scale_a.numel());
-  TORCH_CHECK(scale_b_elems == scale_b.numel(),
+  TORCH_CHECK_VALUE(scale_b_elems == scale_b.numel(),
          "For Blockwise scaling scale_b should have ", scale_b_elems, " elements, got: ", scale_b.numel());
 
-  TORCH_CHECK(swizzle_a == SwizzleType::SWIZZLE_32_4_4, "scale_a must be swizzled to SWIZZLE_32_4_4 format");
-  TORCH_CHECK(swizzle_b == SwizzleType::SWIZZLE_32_4_4, "scale_b must be swizzled to SWIZZLE_32_4_4 format");
+  TORCH_CHECK_VALUE(swizzle_a == SwizzleType::SWIZZLE_32_4_4, "scale_a must be swizzled to SWIZZLE_32_4_4 format");
+  TORCH_CHECK_VALUE(swizzle_b == SwizzleType::SWIZZLE_32_4_4, "scale_b must be swizzled to SWIZZLE_32_4_4 format");
 
-  TORCH_CHECK(scale_a.is_contiguous() && scale_b.is_contiguous(),
+  TORCH_CHECK_VALUE(scale_a.is_contiguous() && scale_b.is_contiguous(),
         "For Blockwise scaling both scales should be contiguous");
 
   auto scaling_choice_a = ScalingType::BlockWise1x16;
@@ -2349,9 +2350,10 @@ _scaled_mm_cuda_v2_out(
           Tensor& out) {
   // Check sizes
   bool allowed_device = _scaled_mm_allowed_device();
-  TORCH_CHECK(allowed_device, "torch._scaled_mm is only supported on CUDA devices with compute capability >= 9.0 or 8.9, or ROCm MI300+");
-  TORCH_CHECK(mat_a.dim() == 2, "mat_a must be a matrix");
-  TORCH_CHECK(mat_b.dim() == 2, "mat_b must be a matrix");
+  TORCH_CHECK_NOT_IMPLEMENTED(allowed_device,
+      "torch._scaled_mm is only supported on CUDA devices with compute capability >= 9.0 or 8.9, or ROCm MI300+");
+  TORCH_CHECK_VALUE(mat_a.dim() == 2, "mat_a must be a matrix");
+  TORCH_CHECK_VALUE(mat_b.dim() == 2, "mat_b must be a matrix");
 
   // If any of M, K, N is 0 - return early (the tensorwise/rowwise float8 gemm kernels
   // do not support this case).
@@ -2371,22 +2373,22 @@ _scaled_mm_cuda_v2_out(
   // - if optional contraction dims are provided, use those
   //   -- mostly for < 1B formats (i.e. nvfp4x2) where cheap .t() is not available.
   if (contraction_dim.size() > 0) {
-    TORCH_CHECK(contraction_dim.size() == 2, "contraction_dim must have exactly 2 elements");
+    TORCH_CHECK_VALUE(contraction_dim.size() == 2, "contraction_dim must have exactly 2 elements");
     auto mat_a_dim = contraction_dim[0];
     auto mat_b_dim = contraction_dim[1];
-    TORCH_CHECK(
+    TORCH_CHECK_VALUE(
         mat_a.size(mat_a_dim) == mat_b.size(mat_b_dim), "mat_a and mat_b shapes cannot be multiplied (",
         mat_a.size(0), "x", mat_a.size(1), " and ", mat_b.size(0), "x", mat_b.size(1), ") ",
         "with contraction dims mat_a: ", mat_a_dim, ", mat_b: ", mat_b_dim);
   } else {
-    TORCH_CHECK(
+    TORCH_CHECK_VALUE(
         mat_a.size(1) == mat_b.size(0), "mat_a and mat_b shapes cannot be multiplied (",
         mat_a.size(0), "x", mat_a.size(1), " and ", mat_b.size(0), "x", mat_b.size(1), ")");
   }
 
-  TORCH_CHECK(!bias || bias->numel() == mat_b.sizes()[1], "Bias must be size ", mat_b.sizes()[1],
+  TORCH_CHECK_VALUE(!bias || bias->numel() == mat_b.sizes()[1], "Bias must be size ", mat_b.sizes()[1],
        " but got ", bias->numel());
-  TORCH_CHECK(
+  TORCH_CHECK_VALUE(
       mat_a.sizes()[1] % 16 == 0,
       "Expected trailing dimension of mat1 to be divisible by 16 ",
       "but got mat1 shape: (",
@@ -2394,47 +2396,52 @@ _scaled_mm_cuda_v2_out(
       "x",
       mat_a.sizes()[1],
       ").");
-  TORCH_CHECK(mat_b.sizes()[0] % 16 == 0 && mat_b.sizes()[1] % 16 == 0, "mat2 shape (", mat_b.sizes()[0], "x",
+  TORCH_CHECK_VALUE(mat_b.sizes()[0] % 16 == 0 && mat_b.sizes()[1] % 16 == 0, "mat2 shape (", mat_b.sizes()[0], "x",
        mat_b.sizes()[1], ") must be divisible by 16");
 
   // TODO(slayton): Existing checks, not sure if they should really be here.
-  TORCH_CHECK(!out_dtype || *out_dtype == out.scalar_type(), "out_dtype must match output matrix type");
-  TORCH_CHECK(isFloat8Type(mat_a.scalar_type()) || mat_a.scalar_type() == ScalarType::Float4_e2m1fn_x2, "Expected mat_a to be Float8 or Float4_x2 matrix got ", mat_a.scalar_type());
-  TORCH_CHECK(isFloat8Type(mat_b.scalar_type()) || mat_b.scalar_type() == ScalarType::Float4_e2m1fn_x2, "Expected mat_b to be Float8 or Float4_x2 matrix got ", mat_b.scalar_type());
+  TORCH_CHECK_VALUE(!out_dtype || *out_dtype == out.scalar_type(), "out_dtype must match output matrix type");
+  TORCH_CHECK_VALUE(isFloat8Type(mat_a.scalar_type()) || mat_a.scalar_type() == ScalarType::Float4_e2m1fn_x2,
+      "Expected mat_a to be Float8 or Float4_x2 matrix got ", mat_a.scalar_type());
+  TORCH_CHECK_VALUE(isFloat8Type(mat_b.scalar_type()) || mat_b.scalar_type() == ScalarType::Float4_e2m1fn_x2,
+      "Expected mat_b to be Float8 or Float4_x2 matrix got ", mat_b.scalar_type());
 #ifndef USE_ROCM
   // Type restrictions imposed by CuBLASLt as of CUDA-12.1
-  TORCH_CHECK(mat_a.scalar_type() != ScalarType::Float8_e5m2 || mat_b.scalar_type() != ScalarType::Float8_e5m2,
+  TORCH_CHECK_VALUE(mat_a.scalar_type() != ScalarType::Float8_e5m2 || mat_b.scalar_type() != ScalarType::Float8_e5m2,
         "Multiplication of two Float8_e5m2 matrices is not supported");
 #endif
   if (use_fast_accum) {
-    TORCH_CHECK(mat_a.scalar_type() != ScalarType::Float4_e2m1fn_x2 && mat_b.scalar_type() != ScalarType::Float4_e2m1fn_x2, "`use_fast_accum` is not supported when `mat_a` or `mat_b` tensors have the `Float4_e2m1fn_x2` dtype.");
+    TORCH_CHECK_VALUE(mat_a.scalar_type() != ScalarType::Float4_e2m1fn_x2 && mat_b.scalar_type() != ScalarType::Float4_e2m1fn_x2, "`use_fast_accum` is not supported when `mat_a` or `mat_b` tensors have the `Float4_e2m1fn_x2` dtype.");
   }
 #ifdef USE_ROCM
   if (mat_a.scalar_type() == ScalarType::Float4_e2m1fn_x2 || mat_b.scalar_type() == ScalarType::Float4_e2m1fn_x2) {
-    TORCH_CHECK(ROCM_VERSION >= 70000, "Float4_e2m1fn_x2 is only supported for ROCm 7.0 and above");
+    TORCH_CHECK_NOT_IMPLEMENTED(ROCM_VERSION >= 70000,
+        "Float4_e2m1fn_x2 is only supported for ROCm 7.0 and above");
   }
   if (mat_a.scalar_type() == ScalarType::Float8_e5m2 || mat_b.scalar_type() == ScalarType::Float8_e5m2) {
-    TORCH_CHECK(ROCM_VERSION >= 60500, "Float8_e5m2 is only supported for ROCm 6.5 and above");
+    TORCH_CHECK_NOT_IMPLEMENTED(ROCM_VERSION >= 60500,
+        "Float8_e5m2 is only supported for ROCm 6.5 and above");
   }
   if (mat_a.scalar_type() == ScalarType::Float8_e4m3fn || mat_b.scalar_type() == ScalarType::Float8_e4m3fn) {
-    TORCH_CHECK(ROCM_VERSION >= 60500, "Float8_e4m3fn is only supported for ROCm 6.5 and above");
+    TORCH_CHECK_NOT_IMPLEMENTED(ROCM_VERSION >= 60500,
+        "Float8_e4m3fn is only supported for ROCm 6.5 and above");
   }
 #endif
   if (bias) {
-    TORCH_CHECK(out.scalar_type() != kFloat,
+    TORCH_CHECK_VALUE(out.scalar_type() != kFloat,
         "Bias is not supported when out_dtype is set to Float32");
 
-    TORCH_CHECK(bias->scalar_type() == ScalarType::BFloat16 ||
+    TORCH_CHECK_VALUE(bias->scalar_type() == ScalarType::BFloat16 ||
                 bias->scalar_type() == ScalarType::Half,
         "Bias must be BFloat16 or Half, but got ", bias->scalar_type());
 
-    TORCH_CHECK((out.scalar_type() != kFloat &&
+    TORCH_CHECK_VALUE((out.scalar_type() != kFloat &&
                  out.scalar_type() != ScalarType::BFloat16) ||
                 bias->scalar_type() == ScalarType::BFloat16,
         "Bias must be BFloat16 to compute ", out.scalar_type(),
         " output, but got ", bias->scalar_type());
 
-    TORCH_CHECK(out.scalar_type() != ScalarType::Half ||
+    TORCH_CHECK_VALUE(out.scalar_type() != ScalarType::Half ||
                 bias->scalar_type() == ScalarType::Half,
         "Bias must be Float16 to compute ", out.scalar_type(),
         " output, but got ", bias->scalar_type());
@@ -2448,12 +2455,6 @@ _scaled_mm_cuda_v2_out(
     checkAllSameGPU(__func__, targs);
   }
 
-  // std::optional<Tensor> scale_out_;
-  // if (scale_output.size() > 0) {
-  //   scale_out_ = scale_output[0];
-  // } else {
-  //   scale_out_ = std::nullopt;
-  // }
   auto out_dtype_ = out_dtype.value_or(at::ScalarType::BFloat16);
 
   // Conversion of implicitly-defined enums to explicit
@@ -2483,7 +2484,7 @@ _scaled_mm_cuda_v2_out(
       break;
     }
   }
-  TORCH_CHECK(
+  TORCH_CHECK_VALUE(
     found_impl,
     "Invalid scaling configuration.\n"
     "- For TensorWise scaling, a and b should be float8, scales should be float and singletons.\n"
@@ -2514,11 +2515,11 @@ _scaled_mm_cuda_v2_out(
   } else if (gemm_impl == ScaledGemmImplementation::MXFP8_MXFP8) {
     return _scaled_mxfp8_mxfp8(mat_a, mat_b, scale_a[0], swizzle_a_enum[0], scale_b[0], swizzle_b_enum[0], bias, out_dtype_, out);
   } else if (gemm_impl == ScaledGemmImplementation::NVFP4_NVFP4) {
-    TORCH_CHECK(false, "Only single-scale NVFP4 currently supported");
+    TORCH_CHECK_NOT_IMPLEMENTED(false, "Only single-scale NVFP4 currently supported");
   } else if (gemm_impl == ScaledGemmImplementation::NVFP4_NVFP4_SINGLE_SCALE) {
     return _scaled_nvfp4_nvfp4(mat_a, mat_b, scale_a[0], swizzle_a_enum[0], scale_b[0], swizzle_b_enum[0], bias, out_dtype_, true /* single_scale */, out);
   } else {
-    TORCH_CHECK(false, "Invalid state - found implementation, but not actually");
+    TORCH_CHECK_VALUE(false, "Invalid state - found an implementation, but not really");
   }
 }
 
