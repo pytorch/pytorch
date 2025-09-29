@@ -328,6 +328,18 @@ def my_clone(t) -> Tensor:
     return torch.ops.libtorch_agnostic.my_clone.default(t)
 
 
+def my_element_wise_clone(t) -> Tensor:
+    """
+    Returns a clone of input tensor.
+
+    Args:
+        t: Input tensor
+
+    Returns: Cloned tensor
+    """
+    return torch.ops.libtorch_agnostic.my_element_wise_clone.default(t)
+
+
 def test_device_guard(device_index) -> int:
     """
     Tests the DeviceGuard functionality by creating a device guard and returning an empty tensor.

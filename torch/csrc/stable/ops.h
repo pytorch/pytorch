@@ -1,5 +1,6 @@
 #pragma once
 
+#include <torch/csrc/stable/TensorAccessor.h>
 #include <torch/csrc/stable/stableivalue_conversions.h>
 #include <array>
 #include <cstdint>
@@ -233,6 +234,94 @@ inline torch::stable::Tensor clone(const torch::stable::Tensor& self) {
   TORCH_ERROR_CODE_CHECK(
       aoti_torch_call_dispatcher("aten::clone", "", stack.data()));
   return to<torch::stable::Tensor>(stack[0]);
+}
+
+inline std::vector<int64_t> sizes(const Tensor& t) {
+  int64_t* ptr;
+  TORCH_ERROR_CODE_CHECK(aoti_torch_get_sizes(t.get(), &ptr));
+  std::vector<int64_t> r(ptr, ptr + t.dim());
+  return r;
+}
+
+inline std::vector<int64_t> strides(const Tensor& t) {
+  int64_t* ptr;
+  TORCH_ERROR_CODE_CHECK(aoti_torch_get_strides(t.get(), &ptr));
+  std::vector<int64_t> r(ptr, ptr + t.dim());
+  return r;
+}
+
+template <typename T, size_t N>
+torch::stable::TensorAccessor<T, N> accessor(const Tensor& t) {
+  static_assert(
+      N > 0,
+      "accessor is used for indexing tensor, for scalars use *data_ptr<T>()");
+  STD_TORCH_CHECK(
+      t.dim() == N,
+      "TensorAccessor expected ",
+      N,
+      " dims but tensor has ",
+      t.dim());
+  T* ptr = nullptr;
+  if constexpr (std::is_const_v<T>) {
+    ptr = t.const_data_ptr<T>();
+  } else {
+    ptr = t.mutable_data_ptr<T>();
+  }
+  auto sizes_ = sizes(t);
+  auto strides_ = strides(t);
+  return torch::stable::TensorAccessor<T, N>(
+      ptr, sizes_.data(), strides_.data());
+}
+
+template <
+    typename T,
+    size_t N,
+    template <typename U> class PtrTraits = torch::stable::DefaultPtrTraits,
+    typename index_t = int64_t>
+torch::stable::GenericPackedTensorAccessor<T, N, PtrTraits, index_t>
+generic_packed_accessor(const Tensor& t) {
+  static_assert(
+      N > 0,
+      "accessor is used for indexing tensor, for scalars use *data_ptr<T>()");
+  STD_TORCH_CHECK(
+      t.dim() == N,
+      "TensorAccessor expected ",
+      N,
+      " dims but tensor has ",
+      t.dim());
+  T* ptr = nullptr;
+  if constexpr (std::is_const_v<T>) {
+    ptr = t.const_data_ptr<T>();
+  } else {
+    ptr = t.mutable_data_ptr<T>();
+  }
+  auto sizes_ = sizes(t);
+  auto strides_ = strides(t);
+  return torch::stable::GenericPackedTensorAccessor<T, N, PtrTraits, index_t>(
+      static_cast<typename PtrTraits<T>::PtrType>(ptr),
+      sizes_.data(),
+      strides_.data());
+}
+
+template <
+    typename T,
+    size_t N,
+    template <typename U> class PtrTraits = torch::stable::DefaultPtrTraits>
+torch::stable::PackedTensorAccessor32<T, N, PtrTraits> packed_accessor32(
+    const Tensor& t) {
+  STD_TORCH_CHECK(
+      t.numel() <= static_cast<int64_t>(std::numeric_limits<int32_t>::max()),
+      "numel needs to be smaller than int32_t max; otherwise, please use packed_accessor64");
+  return generic_packed_accessor<T, N, PtrTraits, int32_t>(t);
+}
+
+template <
+    typename T,
+    size_t N,
+    template <typename U> class PtrTraits = torch::stable::DefaultPtrTraits>
+torch::stable::PackedTensorAccessor64<T, N, PtrTraits> packed_accessor64(
+    const Tensor& t) {
+  return generic_packed_accessor<T, N, PtrTraits, int64_t>();
 }
 
 } // namespace torch::stable

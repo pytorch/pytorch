@@ -622,11 +622,76 @@ void boxed_test_dispatch_scalar_name(
   stack[0] = from(res);
 }
 
+Tensor my_element_wise_clone(Tensor t) {
+  // used to test TensorAccessor
+  Tensor result = empty_like(t);
+  STABLE_DISPATCH_SUPPORTED_TYPES(t.scalar_type(), "my_element_wise_clone", [&] {
+    switch(t.dim()) {
+    case 1: {
+      if (t.is_cpu()) {
+        auto t_a = torch::stable::accessor<scalar_t, 1>(t);
+        auto r_a = torch::stable::accessor<scalar_t, 1>(result);
+        for (int i=0; i < t.size(0); i++) {
+          r_a[i] = t_a[i];
+        }
+#ifdef LAE_USE_CUDA
+      } else if (t.is_cuda()) {
+        auto t_a = torch::stable::packed_accessor32<scalar_t, 1, torch::stable::RestrictPtrTraits>(t);
+        auto r_a = torch::stable::packed_accessor32<scalar_t, 1, torch::stable::RestrictPtrTraits>(result);
+        for (int i=0; i < t.size(0); i++) {
+          C10_CUDA_CHECK(cudaMemcpyAsync(&r_a[i], &t_a[i], sizeof(scalar_t),  cudaMemcpyDeviceToDevice));
+        }
+#endif
+      } else {
+        STD_TORCH_CHECK(false, "unexpected device");
+      }
+      break;
+    }
+    case 2: {
+      if (t.is_cpu()) {
+        auto t_a = torch::stable::accessor<scalar_t, 2>(t);
+        auto r_a = torch::stable::accessor<scalar_t, 2>(result);
+        for (int i=0; i < t.size(0); i++) {
+          for (int j=0; j < t.size(1); j++) {
+            r_a[i][j] = t_a[i][j];
+          }
+        }
+#ifdef LAE_USE_CUDA
+      } else if (t.is_cuda()) {
+        auto t_a = torch::stable::packed_accessor32<scalar_t, 2, torch::stable::RestrictPtrTraits>(t);
+        auto r_a = torch::stable::packed_accessor32<scalar_t, 2, torch::stable::RestrictPtrTraits>(result);
+        for (int i=0; i < t.size(0); i++) {
+          for (int j=0; j < t.size(1); j++) {
+            C10_CUDA_CHECK(cudaMemcpyAsync(&r_a[i][j], &t_a[i][j], sizeof(scalar_t),  cudaMemcpyDeviceToDevice));
+          }
+        }
+#endif
+      } else {
+        STD_TORCH_CHECK(false, "unexpected device");
+      }
+      break;
+    }
+    default:
+      STD_TORCH_CHECK(false, "unexpected dimensionality: ", t.dim());
+    }
+  });
+  return result;
+}
+
+void boxed_my_element_wise_clone(
+    StableIValue* stack,
+    uint64_t num_args,
+    uint64_t num_outputs) {
+  Tensor res = my_element_wise_clone(to<Tensor>(stack[0]));
+  stack[0] = from(res);
+}
+
 STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
   m.def("test_default_constructor(bool undefined) -> bool");
   m.def("get_any_data_ptr(Tensor t, bool mutable_) -> int");
   m.def("get_template_any_data_ptr(Tensor t, Tensor r, bool mutable_) -> int");
   m.def("test_dispatch_scalar_name(Tensor t, int dispatch_index) -> Tensor");
+  m.def("my_element_wise_clone(Tensor t) -> Tensor");
 }
 
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
@@ -636,6 +701,7 @@ STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
   m.impl("get_any_data_ptr", &boxed_get_any_data_ptr);
   m.impl("get_template_any_data_ptr", &boxed_get_template_any_data_ptr);
   m.impl("test_dispatch_scalar_name", &boxed_test_dispatch_scalar_name);
+  m.impl("my_element_wise_clone", &boxed_my_element_wise_clone);
 }
 
 // Test functions for torch::stable::accelerator APIs
