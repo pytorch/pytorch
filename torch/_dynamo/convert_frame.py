@@ -122,7 +122,7 @@ from .guards import (
     GuardedCode,
 )
 from .hooks import Hooks
-from .output_graph import DynamoTracerOutput
+from .output_graph import DynamoTracerOutput, OutputGraphCommon
 from .pgo import log_frame_dynamic_whitelist, put_code_state
 from .replay_record import ExecutionRecord
 from .resume_execution import TORCH_DYNAMO_RESUME_IN_PREFIX
@@ -297,7 +297,8 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
             torch_rng_state = torch.random.get_rng_state()
             cuda_rng_state = None
             if torch.cuda.is_available():
-                cuda_rng_state = torch.cuda.get_rng_state()
+                with torch._C.DisableTorchFunction():
+                    cuda_rng_state = torch.cuda.get_rng_state()
             cuda_matmul_fp32_prec = torch._C._get_fp32_precision_getter(
                 "cuda", "matmul"
             )
@@ -331,7 +332,8 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
                 if prior_mobile_allocator_state != curr_mobile_allocator_state:
                     torch._C._unset_default_mobile_cpu_allocator()
                 if cuda_rng_state is not None:
-                    torch.cuda.set_rng_state(cuda_rng_state)
+                    with torch._C.DisableTorchFunction():
+                        torch.cuda.set_rng_state(cuda_rng_state)
                 torch._C._set_fp32_precision_setter(
                     "cuda", "matmul", cuda_matmul_fp32_prec
                 )
@@ -853,15 +855,31 @@ class DynamoOutput:
         cache_entry: Optional[CacheEntry] = None,
         strict_error: bool = False,
     ) -> CheckFunctionManager:
-        assert self.tracer_output.output_graph is not None
+        output_graph = self.tracer_output.output_graph
+        assert output_graph is not None
         return CheckFunctionManager(
             code,
-            self.tracer_output.output_graph,
+            output_graph,
             cache_entry,
             hooks.guard_fail_fn if hooks else None,
             hooks.guard_filter_fn if hooks else None,
             save_guards=save,
             strict_error=strict_error,
+        )
+
+    def graph_capture_output(self) -> GraphCaptureOutput:
+        output_graph = self.tracer_output.output_graph
+        assert output_graph is not None
+        return GraphCaptureOutput(
+            OutputGraphCommon(
+                output_graph.dump_guards_state(),
+                output_graph.shape_env,
+                output_graph.export_metadata,
+                output_graph.tracked_fakes_id_to_source,
+            ),
+            output_graph.import_sources,
+            output_graph.traced_code,
+            self.bytecode,
         )
 
 
@@ -883,6 +901,36 @@ class BackendInput:
 
 
 @dataclass
+class GraphCaptureOutput:
+    """
+    Minimal version of DynamoOutput
+    """
+
+    output_graph: OutputGraphCommon
+    import_sources: dict[str, str]
+    traced_code: list[CodeType]
+    bytecode: CodeType
+
+    def build_guards(
+        self,
+        code: types.CodeType,
+        hooks: Optional[Hooks] = None,
+        save: bool = False,
+        cache_entry: Optional[CacheEntry] = None,
+        strict_error: bool = False,
+    ) -> CheckFunctionManager:
+        return CheckFunctionManager(
+            code,
+            self.output_graph,
+            cache_entry,
+            hooks.guard_fail_fn if hooks else None,
+            hooks.guard_filter_fn if hooks else None,
+            save_guards=save,
+            strict_error=strict_error,
+        )
+
+
+@dataclass
 class CaptureOutput:
     """
     CaptureOutput should represent all the information produced from torch
@@ -894,9 +942,104 @@ class CaptureOutput:
     frontends.
     """
 
-    dynamo_output: DynamoOutput
+    graph_capture_output: GraphCaptureOutput
     # BackendInput can be None when dynamo didn't compile any graph (no tensor op)
     backend_input: Optional[BackendInput]
+
+
+def get_traced_fn(mod: Any) -> tuple[FunctionType, Optional[object]]:
+    """
+    Utility function to get the function to trace, and optionally a bound self
+    object, from a callable (nn.Module, function, or method).
+    """
+    import inspect
+
+    if isinstance(mod, torch.nn.Module):
+        mod = mod.forward
+    if hasattr(mod, "__self__"):
+        return mod.__func__, mod.__self__
+    elif inspect.isfunction(mod):
+        return mod, None
+    else:
+        raise RuntimeError(f"Unsupported model code type {mod}")
+
+
+def _get_frame(
+    mod: Any,
+    args: tuple[Any, ...],
+    kwargs: Optional[dict[str, Any]] = None,
+) -> FrameInfo:
+    """
+    Create a frame to trace, given a model, args, and optional kwargs.
+    """
+    import builtins
+    import inspect
+
+    fn, self_opt = get_traced_fn(mod)
+    if self_opt is not None:
+        args = (self_opt,) + args
+    if kwargs is None:
+        kwargs = {}
+
+    signature = inspect.signature(fn)
+    bound_arguments = signature.bind(*args, **kwargs)
+    bound_arguments.apply_defaults()
+    f_locals = bound_arguments.arguments
+
+    closure = fn.__closure__ or ()
+    freevars = fn.__code__.co_freevars
+    if freevars or closure:
+        assert len(closure) == len(freevars)
+        f_locals.update(
+            {name: cell.cell_contents for name, cell in zip(freevars, closure)}
+        )
+
+    return FrameInfo(
+        fn.__code__,
+        fn.__globals__,
+        f_locals,
+        builtins.__dict__,
+        closure=fn.__closure__ or (),  # type: ignore[arg-type]
+    )
+
+
+def fullgraph_capture(
+    mod: Any,
+    args: tuple[Any, ...],
+    kwargs: Optional[dict[str, Any]] = None,
+    *,
+    constraints: Optional[list[Constraint]] = None,
+    _is_export_deprecated_do_not_use: bool = False,
+) -> CaptureOutput:
+    """
+    This API captures a full graph for a model, given example inputs to trace with.
+
+    Specifically, it takes a callable (nn.Module, method, or function), args, and
+    optional kwargs, and returns Dynamo-captured graph along with other important
+    compile-time information. This serves as the common graph-capture mechanism
+    for different torch compiler AOT frontends (e.g. AOT precompile, export).
+
+    Note that this API doesn't apply context managers like metrics context,
+    and the expectation is that the caller will apply them depending
+    on the use case.
+
+    The CaptureOutput is separated into two parts:
+    1. Frontend specific information, which includes:
+        - guards
+        - generated bytecode
+        - other information tracked by OutputGraphCommon.
+    2. Backend specific information (indexed by unique backend id) such as:
+        - fx graph
+        - example inputs
+    """
+    frame = _get_frame(mod, args, kwargs)
+
+    with compile_context(CompileContext(get_compile_id({}))):
+        return _fullgraph_capture_frame(
+            frame,
+            constraints=constraints,
+            _is_export_deprecated_do_not_use=_is_export_deprecated_do_not_use,
+        )
 
 
 @dataclass
@@ -908,29 +1051,12 @@ class FrameInfo:
     closure: tuple[CellType]
 
 
-def fullgraph_capture(
+def _fullgraph_capture_frame(
     frame: FrameInfo,
     *,
     constraints: Optional[list[Constraint]] = None,
     _is_export_deprecated_do_not_use: bool = False,
 ) -> CaptureOutput:
-    """
-    A standalone function which takes a frame and returns dynamo captured graph
-    plus other important compile information. This should serve as the common
-    interface for different torch compiler AOT frontengs (e.g. precompile, export).
-    Note that this function doesn't apply context managers like metrics context
-    or compile id, and the expectation is that the caller will apply them depending
-    on the use case.
-
-    The CaptureOutput is separated into two parts:
-    1. Dynamo specific information from DynamoOutput, which includes:
-        - guards
-        - generated bytecode
-        - other information tracked by OutputGraph.
-    2. Backend specific information (indexed by unique backend id) such as:
-        - fx graph
-        - example inputs
-    """
     from torch._guards import TracingContext
 
     backend_input: Optional[BackendInput] = None
@@ -972,7 +1098,10 @@ def fullgraph_capture(
             cur_exn = cur_exn.__cause__
         raise e.with_traceback(None) from e.__cause__  # User compiler error
 
-    return CaptureOutput(dynamo_output, backend_input)
+    return CaptureOutput(
+        dynamo_output.graph_capture_output(),
+        backend_input,
+    )
 
 
 def compile_frame(  # type: ignore[return]
@@ -1264,6 +1393,7 @@ def _compile(
             assert check_fn.guards_state is not None
             package.add_guarded_code(check_fn.guards_state, out_code)
             package.add_inlined_source(output.tracing_context.traced_code)
+            package.update_device_type(output.current_tracer.graph)
 
         compile_id_str = str(compile_id) if compile_id is not None else "Unknown"
         annotation_str = "Torch-Compiled Region: " + compile_id_str
@@ -1434,6 +1564,7 @@ def _compile(
         fail_user_frame_lineno: Optional[int] = None
         torch._dynamo.utils.ReinplaceCounters.clear()
         guarded_code = None
+        tracer_output = None
         try:
             guarded_code, tracer_output = compile_inner(code, one_graph, hooks)
 

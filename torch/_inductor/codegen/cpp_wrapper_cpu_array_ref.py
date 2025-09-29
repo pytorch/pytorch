@@ -694,7 +694,12 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             kernel, wrapped_args, device, debug_args=args
         )
 
-    def generate_scatter_fallback(
+    def generate_scatter_fallback(self, node: ir.ScatterFallback):
+        # No stack allocation when there is a fallback op
+        self.allow_stack_allocation = False
+        super().generate_scatter_fallback(node)
+
+    def _generate_scatter_fallback(
         self,
         output,
         inputs,
@@ -704,8 +709,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         reduce,
         kwargs,
     ):
-        # No stack allocation when there is a fallback op
-        self.allow_stack_allocation = False
+        reduce = self._get_scatter_reduce_enum(reduce)
 
         # call the ABI shim function instead of the ATen one
         cpp_kernel_name = self.get_c_shim_func_name(cpp_kernel_name, self.device)
@@ -731,10 +735,12 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         line += ");"
         self.writeline(line)
 
-    def generate_index_put_fallback(self, kernel, x, indices, values, accumulate):
+    def generate_index_put_fallback(self, node: ir.IndexPutFallback) -> None:
         # No stack allocation when there is a fallback op
         self.allow_stack_allocation = False
+        super().generate_index_put_fallback(node)
 
+    def _generate_index_put_fallback(self, kernel, x, indices, values, accumulate):
         self._assert_safe_to_use_borrow_arrayref_tensor_as_tensor()
         # TODO: update aoti_torch_index_put_out in ir.py to use autogen out version
         # See the comment in codegen_reinterpret_view about why having something like

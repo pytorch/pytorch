@@ -302,12 +302,6 @@ def _has_attr(model: torch.nn.Module, attr_name: str):
     return hasattr(t, field)
 
 
-def _set_attr(model: torch.nn.Module, attr_name: str, value):
-    attr_names = attr_name.split(".")
-    t = _get_attr_via_attr_list(model, attr_names[:-1])
-    setattr(t, attr_names[-1], value)
-
-
 def _print_readable(
     module,
     module_name,
@@ -552,6 +546,7 @@ class GraphModule(torch.nn.Module):
         self._erase_node_hooks: list[Callable] = []
         # Used to remove hooks from deepcopied graph modules within a context manager.
         self._deepcopy_hooks: list[Callable] = []
+        self.shape_env = None  # optional not always set even when dynamic shapes exist.
 
     # TorchScript breaks trying to compile the graph setter because of the
     # continued string literal. Issue here: https://github.com/pytorch/pytorch/issues/44842

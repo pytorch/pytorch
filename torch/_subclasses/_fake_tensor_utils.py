@@ -7,7 +7,6 @@ import torch
 from torch import SymInt
 from torch.fx.experimental.sym_node import SymNode
 from torch.types import py_sym_types, PySymType
-from torch.utils._backport_slots import dataclass_slots
 
 
 if TYPE_CHECKING:
@@ -18,8 +17,7 @@ if TYPE_CHECKING:
     from .fake_tensor import _DispatchCacheKey, _MetadataIntLike
 
 
-@dataclass_slots
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class _DeconstructedSymNode:
     """
     Represents a SymNode without the associated ShapeEnv
@@ -73,8 +71,7 @@ class _DeconstructedSymNode:
         return hash((self._expr, self.pytype, self._hint, self.constant, self.fx_node))
 
 
-@dataclass_slots
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class _DeconstructedSymType:
     """
     Represents a SymInt, SymFloat, SymBool without the associated ShapeEnv
@@ -103,14 +100,12 @@ class _DeconstructedSymType:
         return NotImplemented
 
 
-@dataclass_slots
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class _InputBackref:
     value: int
 
 
-@dataclass_slots
-@dataclass
+@dataclass(slots=True)
 class _PySymInputStub:
     """
     Represents a SymInt in the cached key. Needed because SymInt doesn't
@@ -172,8 +167,7 @@ class _PySymInputStub:
             return self.value.node._value_hash()
 
 
-@dataclass_slots
-@dataclass
+@dataclass(slots=True)
 class _SymIntOutputStub:
     """
     Represents a SymInt in the cached output.
@@ -207,8 +201,7 @@ class _SymIntOutputStub:
         raise NotImplementedError
 
 
-@dataclass_slots
-@dataclass
+@dataclass(slots=True)
 class _CacheKeyState:
     """
     State used while building our cache key.

@@ -1,7 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
 
-import os
 import pathlib
 import tempfile
 import unittest
@@ -33,7 +32,6 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
 )
-from torch.testing._internal.logging_utils import LoggingTestCase
 
 
 c10d_functional = torch.ops.c10d_functional
@@ -1010,37 +1008,6 @@ class TestDTensorPlacementTypes(DTensorTestBase):
                     for unpadded_tensor in unpadded_list
                 ]
                 assert_array_equal(expected_is_tensor_empty, is_tensor_empty)
-
-
-class DTensorLogTest(LoggingTestCase):
-    def test_dtensor_log(self):
-        if not torch.distributed.is_available() or not torch.cuda.is_available():
-            return
-
-        env = dict(os.environ)
-        env["TORCH_LOGS"] = "+dtensor"
-        env["RANK"] = "0"
-        env["WORLD_SIZE"] = "1"
-        env["MASTER_PORT"] = "12345"
-        env["MASTER_ADDR"] = "localhost"
-
-        _, stderr = self.run_process_no_exception(
-            """\
-import logging
-import torch
-from torch.distributed.device_mesh import init_device_mesh
-from torch.distributed.tensor import distribute_tensor, Shard
-
-mesh = init_device_mesh("cuda", (1,), mesh_dim_names=("dp",))
-placements = [Shard(0)]
-tensor = torch.randn(12, 8, 8)
-dtensor = distribute_tensor(tensor, mesh, placements)
-dtensor.max()
-""",
-            env=env,
-        )
-        self.assertIn("_dispatch.py", stderr.decode("utf-8"))
-        self.assertIn("redistribute=False", stderr.decode("utf-8"))
 
 
 if __name__ == "__main__":

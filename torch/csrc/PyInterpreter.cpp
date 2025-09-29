@@ -157,10 +157,10 @@ class PyInterpreterHolder {
  public:
   PyInterpreterHolder()
       : impl_(new c10::impl::PyInterpreter(
-            ConcretePyInterpreterVTable::instance())),
-        is_main_interpreter_(
-            at::impl::PythonOpRegistrationTrampoline::registerInterpreter(
-                impl_)) {}
+            ConcretePyInterpreterVTable::instance())) {
+    // Register the single interpreter
+    at::impl::PythonOpRegistrationTrampoline::registerInterpreter(impl_);
+  }
   PyInterpreterHolder(const PyInterpreterHolder&) = delete;
   PyInterpreterHolder(PyInterpreterHolder&&) = delete;
   PyInterpreterHolder& operator=(const PyInterpreterHolder&) = delete;
@@ -174,13 +174,14 @@ class PyInterpreterHolder {
   c10::impl::PyInterpreter* get() const noexcept {
     return impl_;
   }
+  // In single-interpreter mode, this is always true
+  // TODO: delete this
   bool is_main_interpreter() const noexcept {
-    return is_main_interpreter_;
+    return true;
   }
 
  private:
   c10::impl::PyInterpreter* impl_;
-  bool is_main_interpreter_;
 };
 
 py::object torchDispatchFromTensorImpl(
@@ -614,8 +615,7 @@ static void set_tensor_attr_with_capsule(
     const c10::TensorImpl* tensor,
     py::capsule& capsule,
     const char* attr_name) {
-  std::optional<PyObject*> mb_obj = tensor->pyobj_slot()->check_pyobj(
-      /*ignore_hermetic_tls=*/false);
+  std::optional<PyObject*> mb_obj = tensor->pyobj_slot()->check_pyobj();
   TORCH_CHECK(
       mb_obj.has_value(), "Tensor subclass's PyInterpreter has no value");
   auto obj = mb_obj.value();
@@ -642,8 +642,7 @@ static c10::ArrayRef<T> get_set_cached_attr(
     const c10::TensorImpl* tensor,
     const char* base_attr_name,
     const py::object& obj) {
-  std::optional<PyObject*> mb_obj =
-      tensor->pyobj_slot()->check_pyobj(getPyInterpreter());
+  std::optional<PyObject*> mb_obj = tensor->pyobj_slot()->check_pyobj();
   TORCH_CHECK(
       mb_obj.has_value(), "Tensor subclass's PyInterpreter has no value");
   auto tensor_obj = mb_obj.value();

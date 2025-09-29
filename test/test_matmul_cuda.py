@@ -24,7 +24,7 @@ from torch.testing._internal.common_cuda import (
     SM80OrLater,
     SM89OrLater,
     SM90OrLater,
-    xfailIfSM100OrLater,
+    SM100OrLater,
     xfailIfSM120OrLater,
     _get_torch_cuda_version,
     PLATFORM_SUPPORTS_FP8,
@@ -56,6 +56,7 @@ from torch.testing._internal.common_utils import (
     TEST_CUDA,
     TEST_WITH_ROCM,
     TestCase,
+    decorateIf,
 )
 from torch.testing._internal.common_quantized import (
     _f32_to_floatx_unpacked,
@@ -65,12 +66,24 @@ from torch.testing._internal.common_quantized import (
     generate_jagged_offs,
 )
 
+from torch._inductor.test_case import TestCase as InductorTestCase
+
 _IS_SM8X = False
 if TEST_CUDA:
     _IS_SM8X = torch.cuda.get_device_capability(0)[0] == 8
 
 # Protects against includes accidentally setting the default dtype
 assert torch.get_default_dtype() is torch.float32
+
+def xfailIfSM100OrLaterAndCondition(condition_fn):
+    """
+    Conditionally xfail tests on SM100+ based on a condition function.
+    The condition function receives the test parameters dict and returns True to xfail.
+    """
+    return decorateIf(
+        unittest.expectedFailure,
+        lambda params: SM100OrLater and condition_fn(params)
+    )
 
 
 @contextlib.contextmanager
@@ -82,7 +95,7 @@ def blas_library_context(backend):
     finally:
         torch.backends.cuda.preferred_blas_library(prev_backend)
 
-class TestMatmulCuda(TestCase):
+class TestMatmulCuda(InductorTestCase):
     def setUp(self):
         super().setUp()
         torch.backends.cuda.matmul.allow_tf32 = False
@@ -167,6 +180,7 @@ class TestMatmulCuda(TestCase):
             self.cublas_addmm(size, dtype, False)
 
     @onlyCUDA
+    @xfailIfSM100OrLaterAndCondition(lambda params: params.get('dtype') == torch.bfloat16 and params.get('size') == 10000)
     @skipIfRocmVersionLessThan((5, 2))
     # imported 'tol' as 'xtol' to avoid aliasing in code above
     @toleranceOverride({torch.float16: xtol(atol=7e-1, rtol=2e-1),
@@ -499,16 +513,14 @@ class TestMatmulCuda(TestCase):
             self.grouped_mm_helper(a, blist, gOlist, agradlist, bgradlist, outlist)
 
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
-    @xfailIfSM100OrLater
     # TODO(future PR): enable compile for torch._grouped_mm fallback path
     @unittest.skipIf(not SM90OrLater, "Grouped gemm with compile supported on SM90")
+    @unittest.skipIf(SM100OrLater, "Grouped gemm is inconsistently raising numeric issues see: #163462 ")
     @parametrize("op", ["2d/2d", "2d/3d", "3d/2d", "3d/3d"])
     @parametrize("a_row_major", [False, True])
     @parametrize("b_row_major", [False, True])
     @parametrize("max_autotune", [False, True])
     def test_grouped_gemm_compiled(self, op, a_row_major, b_row_major, max_autotune):
-        torch._dynamo.reset()
-
         device = "cuda"
         dtype_AB = torch.bfloat16
         dtype_offset = torch.int32
@@ -624,8 +636,7 @@ class TestMatmulCuda(TestCase):
     @parametrize("N", [1, 32, 64])
     @parametrize("K", [1, 32, 64])
     @parametrize("batch_size", [None, 1, 16])
-    # TODO: enable rocblas path on ROCm
-    @parametrize("backend", ["cublaslt"] if torch.version.hip else ["cublas", "cublaslt"])
+    @parametrize("backend", ["cublas", "cublaslt"])
     def test_mm_bmm_dtype_overload(self, input_dtype, M, N, K, batch_size, backend):
         device = "cuda"
         dtype = input_dtype
@@ -679,8 +690,7 @@ class TestMatmulCuda(TestCase):
     @parametrize("N", [1, 32, 64])
     @parametrize("K", [1, 32, 64])
     @parametrize("batch_size", [None, 1, 32])
-    # TODO: enable rocblas path on ROCm
-    @parametrize("backend", ["cublaslt"] if torch.version.hip else ["cublas", "cublaslt"])
+    @parametrize("backend", ["cublas", "cublaslt"])
     def test_addmm_baddmm_dtype_overload(self, input_dtype, M, N, K, batch_size, backend):
         device = "cuda"
         dtype = input_dtype
@@ -928,7 +938,7 @@ def compute_error(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
 # largest power of 2 representable in `torch.float8_e4m3fn`
 F8E4M3_LARGEST_POW2 = 8
 # largest power of 2 representable in `torch.float4_e2m1fn_x2`
-FP4E2M1FN_LARGEST_POW2 = 1.0
+FP4E2M1FN_LARGEST_POW2 = 2.0
 # max value of `torch.float8_e4m3fn` (448)
 F8E4M3_MAX_VAL = torch.finfo(torch.float8_e4m3fn).max
 # exponent bias of `torch.float8_e8m0fnu`
@@ -1532,22 +1542,34 @@ class TestFP8Matmul(TestCase):
         x_fp8 = to_fp8_saturated(x * x_scales, e4m3_type)
         y_fp8 = to_fp8_saturated(y * y_scales, e4m3_type)
 
-        # Calculate actual F8 mm
-        out_scaled_mm = mm_float8(
-            x_fp8, y_fp8, a_scale=x_scales, b_scale=y_scales, output_dtype=output_dtype
-        )
+        def test():
+            # Calculate actual F8 mm
+            out_scaled_mm = mm_float8(
+                x_fp8, y_fp8, a_scale=x_scales, b_scale=y_scales, output_dtype=output_dtype
+            )
 
-        # Calculate emulated F8 mm
-        out_emulated = mm_float8_emulated(
-            x_fp8, x_scales, y_fp8, y_scales, output_dtype
-        )
+            # Calculate emulated F8 mm
+            out_emulated = mm_float8_emulated(
+                x_fp8, x_scales, y_fp8, y_scales, output_dtype
+            )
 
-        if base_dtype in {torch.bfloat16, torch.float16}:
-            atol, rtol = 7e-2, 7e-2
+            if base_dtype in {torch.bfloat16, torch.float16}:
+                atol, rtol = 7e-2, 7e-2
+            else:
+                atol, rtol = 2e-3, 2e-3
+
+            self.assertEqual(out_scaled_mm, out_emulated, atol=atol, rtol=rtol)
+
+        # only cuBLAS supports rowwise with fp32 output and cuBLAS only supports
+        # rowwise on SM 9.0
+        if torch.cuda.get_device_capability() != (9, 0) and output_dtype == torch.float:
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "Only bf16 high precision output types are supported for row-wise scaling."
+            ):
+                test()
         else:
-            atol, rtol = 2e-3, 2e-3
-
-        torch.testing.assert_close(out_scaled_mm, out_emulated, atol=atol, rtol=rtol)
+            test()
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
     @unittest.skipIf(not IS_SM90, "cuBLAS blockwise scaling requires sm90+")
@@ -1748,8 +1770,12 @@ class TestFP8Matmul(TestCase):
 
         device = "cuda"
         M, K, N = mkn
-        if (recipe == "nvfp4" or recipe == "mxfp4") and K % 32 != 0:
-            raise unittest.SkipTest("K must be divisible by 32 for nvfp4/mxfp4 cublas gemm, skipping")
+        if recipe == "nvfp4" and K % 32 != 0:
+            raise unittest.SkipTest("K must be divisible by 32 for nvfp4 cublas gemm, skipping")
+
+        if torch.version.hip:
+            if not (M % 16 == 0 and K % 128 == 0 and N % 16 == 0):
+                raise unittest.SkipTest("M and N must be multiples of 16 and K must be multiple of 128 on ROCm, skipping")
 
         fp4_scaling_dtype = torch.float8_e8m0fnu if torch.version.hip else torch.float8_e4m3fn
         BLOCK_SIZE = 32 if torch.version.hip else (16 if recipe == "nvfp4" else 32)
@@ -1914,9 +1940,12 @@ class TestFP8Matmul(TestCase):
                 B = (B_ref.reshape(-1, BLOCK_SIZE) / B_scale.reshape(N * ceil_div(K, BLOCK_SIZE), 1).float()).reshape(N, K)
                 B = B.clamp(min=min_val, max=max_val).to(torch.float8_e4m3fn)
             else:  # nvfp4 # mxfp4
-                scale_func = data_to_mx_scale if recipe == "mxfp4" else data_to_nvfp4_scale
-                A_scale = scale_func(*([A_ref, BLOCK_SIZE] + recipe if recipe == "mxfp4" else [A_ref, BLOCK_SIZE]))
-                B_scale = scale_func(*([B_ref, BLOCK_SIZE] + recipe if recipe == "mxfp4" else [B_ref, BLOCK_SIZE]))
+                if recipe == "mxfp4":
+                    A_scale = data_to_mx_scale(A_ref, BLOCK_SIZE, recipe)
+                    B_scale = data_to_mx_scale(B_ref, BLOCK_SIZE, recipe)
+                else:
+                    A_scale = data_to_nvfp4_scale(A_ref, BLOCK_SIZE)
+                    B_scale = data_to_nvfp4_scale(B_ref, BLOCK_SIZE)
                 max_val = FP4_MAX_VAL
                 min_val = -1 * max_val
 
@@ -1927,7 +1956,7 @@ class TestFP8Matmul(TestCase):
                 B = B.clamp(min=min_val, max=max_val)
                 B = _bfloat16_to_float4_e2m1fn_x2(B)
 
-                approx_match_sqnr_target = 12.0 if torch.version.hip else 15.8
+                approx_match_sqnr_target = 15 if torch.version.hip else 15.8
 
         C_ref = A_ref @ B_ref.t()
 

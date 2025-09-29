@@ -764,6 +764,14 @@ class ComboKernel(Kernel):
         if config.benchmark_combo_kernel:
             code.splice(self.imports_for_benchmark_kernel())
 
+        seen_helpers: OrderedSet[str] = OrderedSet()
+        for sub_kernel in self.sub_kernels:
+            for helper in sub_kernel.helper_functions:
+                if helper not in seen_helpers:
+                    code.writeline("")
+                    code.splice(helper)
+                    seen_helpers.add(helper)
+
         argdefs, _, signature, _ = self.args.python_argdefs()
         argdefs = self.add_numel_to_args(argdefs, signature)
         block_args = self.get_block_args()
