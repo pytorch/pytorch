@@ -114,6 +114,8 @@ class DTensorExportTest(TestCase):
             joint_gm, None, num_fwd_outputs=1
         )
 
+        breakpoint()
+
         self.assertTrue(
             _count_op(joint_gm, torch.ops._c10d_functional.all_reduce.default),
             3,
