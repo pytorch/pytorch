@@ -802,21 +802,27 @@ class TestMatmulCuda(InductorTestCase):
             mismatch_k_b = torch.randn(B, K + 1, N, device="cuda", dtype=torch.bfloat16)
             c = torch.randn(B, M, N, device="cuda", dtype=torch.bfloat16)
             extra_dim_b = a.clone().unsqueeze(0)
+
+            mismatch_k_err = "Expected size for first two dimensions of batch2 tensor to be"
+            extra_dim_err = "batch2 must be a 3D tensor"
         else:
             a = torch.randn(M, K, device="cuda", dtype=torch.bfloat16)
             mismatch_k_b = torch.randn(K + 1, N, device="cuda", dtype=torch.bfloat16)
             c = torch.randn(M, N, device="cuda", dtype=torch.bfloat16)
             extra_dim_b = a.clone().unsqueeze(0)
 
+            mismatch_k_err = "mat1 and mat2 shapes cannot be multiplied"
+            extra_dim_err = "mat2 must be a matrix, got 3-D tensor"
+
         # Test mismatch K
-        with self.assertRaisesRegex(RuntimeError, "Expected size for first two dimensions of batch2 tensor to be" if is_batched() else "mat1 and mat2 shapes cannot be multiplied"):
+        with self.assertRaisesRegex(RuntimeError, mismatch_k_err):
             if is_addmm():
                 op(c, a, mismatch_k_b, out_dtype=torch.float32)
             else:
                 op(a, mismatch_k_b, out_dtype=torch.float32)
 
         # Test extra dimension
-        with self.assertRaisesRegex(RuntimeError, "batch2 must be a 3D tensor" if is_batched() else "mat2 must be a matrix, got 3-D tensor"):
+        with self.assertRaisesRegex(RuntimeError, extra_dim_err):
             if is_addmm():
                 op(c, a, extra_dim_b, out_dtype=torch.float32)
             else:
