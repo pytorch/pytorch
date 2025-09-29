@@ -1648,7 +1648,7 @@ def constrain_range(
     if max < min:
         raise ValueError(
             "Maximum value to constrain_as_size can't be less than the specified min value, "
-            "received min={min} and max={max}"
+            f"received min={min} and max={max}"
         )
 
     if isinstance(a, int):
@@ -4095,7 +4095,7 @@ class ShapeEnv:
         if max < min:
             raise ValueError(
                 "Maximum value to constrain_as_size can't be less than the specified min value, "
-                "received min={min} and max={max}"
+                f"received min={min} and max={max}"
             )
 
         self.constrain_symbol_range(

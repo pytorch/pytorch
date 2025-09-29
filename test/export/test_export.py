@@ -1553,6 +1553,39 @@ graph():
             ep = export(m, (x, y))
         self.assertEqual(ep.module()(x, y), m(x, y))
 
+    def test_subclass_context(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        input = TwoTensor(
+            TwoTensor(torch.randn(4, 4), torch.rand(4, 4)),
+            TwoTensor(torch.randn(4, 4), torch.rand(4, 4)),
+        )
+
+        input_test = TwoTensor(
+            TwoTensor(torch.randn(6, 6), torch.rand(6, 6)),
+            TwoTensor(torch.randn(6, 6), torch.rand(6, 6)),
+        )
+
+        for strict in [True, False]:
+            dim = torch.export.ShapesCollection()
+            dim[input] = [Dim.STATIC, Dim.AUTO]
+            ep = torch.export.export(Foo(), (input,), strict=strict, dynamic_shapes=dim)
+            self.assertExpectedInline(
+                str(ep.graph).strip(),
+                """\
+graph():
+    %x : [num_users=1] = placeholder[target=x]
+    %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, 1), kwargs = {})
+    return (add,)""",
+            )
+
+            with self.assertRaisesRegex(
+                AssertionError, escape("Guard failed: x.size()[0] == 4")
+            ):
+                ep.module()(input_test)
+
     def test_basic_non_strict_real_tensor(self):
         class Basic(torch.nn.Module):
             def __init__(self) -> None:
@@ -8899,12 +8932,12 @@ def forward(self, b_a_buffer, x):
                 self.assertExpectedInline(
                     ep.graph_module.code.strip(),
                     """\
-def forward(self, b____modules__a____buffers__buffer, x):
+def forward(self, b_a_buffer, x):
     sym_size_int_1 = torch.ops.aten.sym_size.int(x, 0)
     gt = sym_size_int_1 > 4;  sym_size_int_1 = None
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, (x, b____modules__a____buffers__buffer));  gt = true_graph_0 = false_graph_0 = x = b____modules__a____buffers__buffer = None
+    cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, (x, b_a_buffer));  gt = true_graph_0 = false_graph_0 = x = b_a_buffer = None
     getitem = cond[0];  cond = None
     return (getitem,)""",
                 )
@@ -13609,29 +13642,16 @@ def forward(self, x):
             torch.randn(4),
         )
         ep = export(Foo(), inputs)
-        if is_inline_and_install_strict_test(self._testMethodName):
-            # when installed, prefix name
-            expected_names = [  # user inputs should be prioritized, unprefixed
-                ("p____parameters__param", InputKind.PARAMETER),
-                ("b____buffers__alpha", InputKind.BUFFER),
-                ("b____buffers__beta", InputKind.BUFFER),
-                ("c_gamma_1", InputKind.CONSTANT_TENSOR),
-                ("p_param", InputKind.USER_INPUT),
-                ("b_alpha", InputKind.USER_INPUT),
-                ("b_beta", InputKind.USER_INPUT),
-                ("c_gamma", InputKind.USER_INPUT),
-            ]
-        else:
-            expected_names = [  # user inputs should be prioritized, unprefixed
-                ("p_param_1", InputKind.PARAMETER),
-                ("b_alpha_1", InputKind.BUFFER),
-                ("b_beta_1", InputKind.BUFFER),
-                ("c_gamma_1", InputKind.CONSTANT_TENSOR),
-                ("p_param", InputKind.USER_INPUT),
-                ("b_alpha", InputKind.USER_INPUT),
-                ("b_beta", InputKind.USER_INPUT),
-                ("c_gamma", InputKind.USER_INPUT),
-            ]
+        expected_names = [  # user inputs should be prioritized, unprefixed
+            ("p_param_1", InputKind.PARAMETER),
+            ("b_alpha_1", InputKind.BUFFER),
+            ("b_beta_1", InputKind.BUFFER),
+            ("c_gamma_1", InputKind.CONSTANT_TENSOR),
+            ("p_param", InputKind.USER_INPUT),
+            ("b_alpha", InputKind.USER_INPUT),
+            ("b_beta", InputKind.USER_INPUT),
+            ("c_gamma", InputKind.USER_INPUT),
+        ]
         real_names = [
             (spec.arg.name, spec.kind) for spec in ep.graph_signature.input_specs
         ]

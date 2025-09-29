@@ -265,6 +265,7 @@ def test_dispatch_scalar_name(t, dispatch_name) -> str:
         STABLE_DISPATCH_ALL_TYPES_AND_COMPLEX=7,
         STABLE_DISPATCH_REDUCED_FLOATING_TYPES=8,
         STABLE_DISPATCH_ALL_TYPES_AND_BOOL=9,
+        STABLE_DISPATCH_SUPPORTED_TYPES=10,
     )[dispatch_name]
     return (
         torch.ops.libtorch_agnostic.test_dispatch_scalar_name.default(t, dispatch_index)
@@ -325,6 +326,18 @@ def my_clone(t) -> Tensor:
     Returns: Cloned tensor
     """
     return torch.ops.libtorch_agnostic.my_clone.default(t)
+
+
+def my_element_wise_clone(t) -> Tensor:
+    """
+    Returns a clone of input tensor.
+
+    Args:
+        t: Input tensor
+
+    Returns: Cloned tensor
+    """
+    return torch.ops.libtorch_agnostic.my_element_wise_clone.default(t)
 
 
 def test_device_guard(device_index) -> int:

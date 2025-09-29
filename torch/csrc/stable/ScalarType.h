@@ -4,6 +4,7 @@
   Keep the set of dtypes that are supported by torch stable ABI in
   sync in the following files:
     this file
+    torch/csrc/stable/Dispatch.h
     torch/csrc/stable/stableivalue_conversions.h
     test/cpp_extensions/libtorch_agnostic_extension/test/test_libtorch_agnostic.py
 
