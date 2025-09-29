@@ -508,6 +508,7 @@ if not IS_WINDOWS:
             self.assertNotEqual(result.data_ptr(), expected.data_ptr())
             self.assertEqual(result.stride(), expected.stride())
 
+        @skipIfTorchDynamo("testing C++ accessor")
         def test_my_element_wise_clone(self, device):
             # tests tensor accessor
             import libtorch_agnostic
