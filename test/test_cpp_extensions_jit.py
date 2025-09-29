@@ -141,8 +141,6 @@ class TestCppExtensionJIT(common.TestCase):
                 sources=[sycl_file],
                 extra_sycl_cflags=extra_sycl_cflags,
                 verbose=True,
-                keep_intermediates=True,
-                build_directory=temp_dir,
             )
 
             x = torch.zeros(100, device="xpu", dtype=torch.float32)
@@ -155,9 +153,7 @@ class TestCppExtensionJIT(common.TestCase):
             # 2 * sigmoid(0) = 2 * 0.5 = 1
             self.assertEqual(z, torch.ones_like(z))
         finally:
-            # Workaround on Windows: can't remove dll while it's loaded
-            if not IS_WINDOWS:
-                shutil.rmtree(temp_dir)
+            shutil.rmtree(temp_dir)
 
     @unittest.skipIf(not (TEST_XPU), "XPU not found")
     def test_jit_xpu_extension(self):
