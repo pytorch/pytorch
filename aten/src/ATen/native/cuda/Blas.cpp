@@ -423,7 +423,7 @@ bool launchGemmAndBiasCudaLt(
     #ifdef USE_ROCM
     // This condition is needed for mm case on ROCm for hipblasLt path.
     // Passing the bias ptr as null to avoid accuracy issues for mm case.
-    if (!args.result->is_same(self)) {
+    if (args.result->is_same(self)) {
       bias_ptr = nullptr;
     }
     #endif
