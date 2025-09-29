@@ -809,21 +809,21 @@ class TestMatmulCuda(InductorTestCase):
             extra_dim_b = a.clone().unsqueeze(0)
 
         # Test mismatch K
-        with self.assertRaises(RuntimeError):
+        with self.assertRaisesRegex(RuntimeError, "Expected size for first two dimensions of batch2 tensor to be" if is_batched() else "mat1 and mat2 shapes cannot be multiplied"):
             if is_addmm():
                 op(c, a, mismatch_k_b, out_dtype=torch.float32)
             else:
                 op(a, mismatch_k_b, out_dtype=torch.float32)
 
         # Test extra dimension
-        with self.assertRaises(RuntimeError):
+        with self.assertRaisesRegex(RuntimeError, "batch2 must be a 3D tensor" if is_batched() else "mat2 must be a matrix, got 3-D tensor"):
             if is_addmm():
                 op(c, a, extra_dim_b, out_dtype=torch.float32)
             else:
                 op(c, extra_dim_b, out_dtype=torch.float32)
 
         if is_batched():
-            with self.assertRaises(RuntimeError):
+            with self.assertRaisesRegex(RuntimeError, "Expected size for first two dimensions of batch2 tensor to be"):
                 # Test mismatch B for bmm/baddbmm
                 mismatch_batch_dim_b = torch.randn(B + 1, K, N, device="cuda", dtype=torch.bfloat16)
                 if is_addmm():
