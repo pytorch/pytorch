@@ -1,5 +1,5 @@
-from torch.types import _dtype, _int, Device
 from torch import Tensor
+from torch.types import _dtype, _int, Device
 
 # Defined in torch/csrc/acc/Module.cpp
 class PrivateUse1Hooks:
