@@ -1,8 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
-from model_registry import ModelWithKwargs
-
 import torch
+from model_registry import ModelWithKwargs
 from torch.distributed.pipelining import pipeline
 from torch.distributed.pipelining.microbatch import (
     merge_chunks,
@@ -58,6 +57,9 @@ class MicrobatchTests(TestCase):
         )
         torch.testing.assert_close(merged_kwargs, kwargs)
         print("Microbatch test passed")
+
+    def test_split_block_mask(self):
+        pass
 
     @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/1682")
     def test_chunk_spec(self, device):
