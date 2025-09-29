@@ -12,7 +12,6 @@ import torch._dynamo.test_case
 import torch.distributed._functional_collectives as _functional_collectives
 from torch._C import FileCheck
 from torch._dynamo.utils import counters, same
-from torch._inductor import config
 from torch._inductor.utils import run_and_get_triton_code
 from torch.testing._internal.common_distributed import (
     _dynamo_dist_per_rank_init,
@@ -32,7 +31,7 @@ from torch.testing._internal.inductor_utils import HAS_GPU
 
 def estimate_aten_runtime(fx_node):
     # for tests, assume a matmul can hide a single collective
-    if "c10" in fx_node.target:
+    if "c10" in str(fx_node.target):
         return 1.0
     elif fx_node.target == aten.mm.default:
         return 1.0
@@ -61,12 +60,18 @@ def run_and_get_aten_graph(fn, *inputs):
     return out, li[0]
 
 
+def get_patches():
+    return {
+        "test_configs.estimate_aten_runtime": estimate_aten_runtime,
+        "reorder_for_locality": False,
+        "reorder_for_compute_comm_overlap_passes": [],
+        "compile_threads": 1,
+        "force_disable_caches": True,
+    }
+
+
 @requires_accelerator_dist_backend()
 # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
-@config.patch(compile_threads=1)
-@config.patch(reorder_for_locality=False)
-@config.patch(reorder_for_compute_comm_overlap_passes=[])
-@config.patch("test_configs.estimate_aten_runtime", estimate_aten_runtime)
 @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
 class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
     """
@@ -95,6 +100,7 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
         return 2
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @torch._inductor.config.patch(get_patches())
     def test_sink_waits(self):
         def func(a):
             ar = _functional_collectives.all_reduce(a, "sum", "0")
@@ -125,6 +131,7 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             self.assertTrue(same(out, correct))
             self.assertEqual(counters["inductor"]["overlap_scheduling_exposed"], 0)
 
+    @torch._inductor.config.patch(get_patches())
     def test_raise_comms(self):
         def func(a):
             b = torch.matmul(a, a)
@@ -161,6 +168,7 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             self.assertTrue(same(out, correct))
             self.assertEqual(counters["inductor"]["overlap_scheduling_exposed"], 0)
 
+    @torch._inductor.config.patch(get_patches())
     def test_sink_waits_raise_comms(self):
         def func(a, *, tag, ranks, group_size):
             b = torch.matmul(a, a)
@@ -211,6 +219,7 @@ graph():
             self.assertTrue(same(out, correct))
             self.assertEqual(counters["inductor"]["overlap_scheduling_exposed"], 0)
 
+    @torch._inductor.config.patch(get_patches())
     def test_reorder_compute_for_overlap_mul(self):
         def func(a, *, tag, ranks, group_size):
             ar = _functional_collectives.all_reduce(a, "sum", ranks, tag)
@@ -234,21 +243,22 @@ graph():
             out_c, aten_graph_str = run_and_get_aten_graph(compiled, inputs)
             # Note: because we have given collectives and mms equal estimation,
             # we overlap each collective with a single mm.
+            # Same schedule as in test_reorder_compute_for_overlap_custom_runtime_estimation
+            # although there is an exposed collective
             (
                 FileCheck()
                 .check("all_reduce.default")
                 .check("aten.mm")
+                .check("aten.mm")
                 .check("wait_tensor.default")
                 .check("aten.mul")
                 .check("all_reduce.default")
-                .check("aten.mm")
                 .check("wait_tensor.default")
-                .check("aten.add")
                 .check("aten.mm")
                 .run(aten_graph_str)
             )
             correct = func(inputs, **self.get_world_trs())
-            self.assertEqual(counters["inductor"]["overlap_scheduling_exposed"], 0)
+            self.assertEqual(counters["inductor"]["overlap_scheduling_exposed"], 1)
             self.assertTrue(same(out_c, correct))
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
@@ -256,6 +266,7 @@ graph():
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
     @patch.object(torch._inductor.config, "compile_threads", 1)
     @unittest.skipIf(True, "Logic not yet implemented")
+    @torch._inductor.config.patch(get_patches())
     def test_grouped_scheduler_node(self):
         def func(a, *, tag, ranks, group_size):
             add = a + a
@@ -290,7 +301,7 @@ graph():
             self.assertTrue(same(out, correct))
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    @torch._inductor.config.patch(force_disable_caches=True)
+    @torch._inductor.config.patch(get_patches())
     def test_inductor_default_comms_ordering(self):
         pg_info = self.get_world_trs()
         tag = pg_info["tag"]
