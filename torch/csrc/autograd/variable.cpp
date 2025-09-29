@@ -597,10 +597,9 @@ void VariableHooks::_backward(
 void VariableHooks::requires_grad_(
     const at::TensorBase& self,
     bool _requires_grad) const {
-  if (!self.is_leaf() && !_requires_grad) {
-    throw std::runtime_error(
-        autograd::utils::requires_grad_leaf_error(_requires_grad));
-  }
+  TORCH_CHECK(
+      self.is_leaf() || _requires_grad,
+      autograd::utils::requires_grad_leaf_error(_requires_grad));
   self.set_requires_grad(_requires_grad);
 }
 
@@ -624,7 +623,7 @@ const at::TensorBase& VariableHooks::base(const at::TensorBase& self) const {
         "Can't get base of non-backward view Tensor");
     return diff_view_meta->get_backward_view().base_;
   } else {
-    throw std::runtime_error("Can't get base of non-view Tensor");
+    TORCH_CHECK(false, "Can't get base of non-view Tensor");
   }
 }
 

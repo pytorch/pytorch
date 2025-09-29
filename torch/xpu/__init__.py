@@ -9,8 +9,9 @@ This package is lazily initialized, so you can always import it, and use
 
 import threading
 import traceback
+from collections.abc import Callable
 from functools import lru_cache
-from typing import Any, Callable, Optional, Union
+from typing import Any, Optional, Union
 
 import torch
 import torch._C
@@ -280,6 +281,22 @@ def _get_device(device: Union[int, str, torch.device]) -> torch.device:
     return device
 
 
+def can_device_access_peer(device: _device_t, peer: _device_t) -> bool:
+    r"""Query whether a device can access a peer device's memory.
+
+    Args:
+        device (torch.device or int or str): selected device.
+        peer (torch.device or int or str): peer device to query access to.
+
+    Returns:
+        bool: ``True`` if ``device`` can access ``peer``, ``False`` otherwise.
+    """
+    _lazy_init()
+    device = _get_device_index(device, optional=True)
+    peer = _get_device_index(peer, optional=True)
+    return torch._C._xpu_canDeviceAccessPeer(device, peer)
+
+
 class StreamContext:
     r"""Context-manager that selects a given stream.
 
@@ -518,6 +535,7 @@ __all__ = [
     "Event",
     "Stream",
     "StreamContext",
+    "can_device_access_peer",
     "current_device",
     "current_stream",
     "default_generators",
