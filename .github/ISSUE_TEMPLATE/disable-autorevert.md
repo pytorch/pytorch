@@ -7,7 +7,7 @@ assignees: ''
 
 ---
 
-This issue, while open, disables the autorevert functionality. 
+This issue, while open, disables the autorevert functionality.
 
 More details can be found [here](https://github.com/pytorch/test-infra/blob/main/aws/lambda/pytorch-auto-revert/README.md)
 
