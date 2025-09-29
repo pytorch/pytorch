@@ -903,7 +903,7 @@ cmake_dependent_option(
   USE_FBGEMM_GENAI
   "Whether to build FBGEMM GenAI quantized GEMM kernels.\
   Will be disabled if not supported by the platform"
-  USE_FBGEMM_GENAI_DEFAULT
+  ${USE_FBGEMM_GENAI_DEFAULT}
   "(USE_CUDA AND NOT MSVC) OR USE_ROCM"
   OFF)
 
