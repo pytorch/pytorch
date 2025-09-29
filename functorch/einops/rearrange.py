@@ -4,7 +4,7 @@ import functools
 from typing import Callable, TYPE_CHECKING, Union
 
 import torch
-from functorch._C import dim as _C
+from functorch.dim import dims  # noqa: F401
 
 from ._parsing import (
     _ellipsis,
@@ -19,8 +19,6 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
 __all__ = ["rearrange"]
-
-dims = _C.dims
 
 
 @functools.lru_cache(256)
