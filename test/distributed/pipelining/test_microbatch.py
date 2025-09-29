@@ -62,7 +62,7 @@ class MicrobatchTests(TestCase):
         print("Microbatch test passed")
 
     def test_split_block_mask(self, device):
-        B = 4
+        B = 6
         H = 1
         Q_LEN = 32
         KV_LEN = 32
@@ -85,13 +85,12 @@ class MicrobatchTests(TestCase):
 
             return block_causal_mask
 
-        batch = list(range(30)) * 5
+        batch = list(range(30)) * 8
         batch = torch.tensor(batch[: B * Q_LEN], device=device).reshape(B, Q_LEN)
-        q = torch.randn(B, H, Q_LEN, DIM, device=device)
-        k = torch.randn(B, H, KV_LEN, DIM, device=device)
-        v = torch.randn(B, H, KV_LEN, DIM, device=device)
-        # block_mask_fn = torch.compile(create_block_mask)
-        block_mask_fn = create_block_mask
+        q = torch.randn(B, H, Q_LEN, DIM, device=device, requires_grad=True)
+        k = torch.randn(B, H, KV_LEN, DIM, device=device, requires_grad=True)
+        v = torch.randn(B, H, KV_LEN, DIM, device=device, requires_grad=True)
+        block_mask_fn = torch.compile(create_block_mask)
         block_mask = block_mask_fn(
             create_block_causal_mask(batch, 29),
             B=B,
@@ -100,42 +99,81 @@ class MicrobatchTests(TestCase):
             KV_LEN=KV_LEN,
             device=device,
         )
-        # flex_fn = torch.compile(flex_attention)
-        flex_fn = flex_attention
+        if device == "cuda":
+            flex_fn = torch.compile(flex_attention)
+        else:
+            # It's unclear why CPU + torch.compile + flex_attention can cause an issue.
+            flex_fn = flex_attention
         out = flex_fn(q, k, v, block_mask=block_mask)
+        out.sum().backward()
 
+        q_clone = q.clone().detach()
+        k_clone = k.clone().detach()
+        v_clone = v.clone().detach()
         arg_split, _ = split_args_kwargs_into_chunks(
-            (q, k, v, block_mask),
+            (q_clone, k_clone, v_clone, {"block_mask": block_mask}),
             {},
             chunks=B,
             args_chunk_spec=None,
             kwargs_chunk_spec=None,
         )
 
-        for i in range(B):
+        q_chunks = []
+        dq_chunks = []
+        k_chunks = []
+        dk_chunks = []
+        v_chunks = []
+        dv_chunks = []
+        block_mask_chunks = []
+        out_chunks = []
+        for i in range(len(arg_split)):
             q_chunk, k_chunk, v_chunk, block_mask_chunk = arg_split[i]
-            out_chunk = flex_fn(q_chunk, k_chunk, v_chunk, block_mask=block_mask_chunk)
-            self.assertEqual(q_chunk.squeeze(0), q[i])
-            self.assertEqual(k_chunk.squeeze(0), k[i])
-            self.assertEqual(v_chunk.squeeze(0), v[i])
-            self.assertEqual(
-                block_mask_chunk.kv_indices.squeeze(0), block_mask.kv_indices[i]
+            q_chunk.requires_grad = True
+            k_chunk.requires_grad = True
+            v_chunk.requires_grad = True
+            out_chunk = flex_fn(
+                q_chunk, k_chunk, v_chunk, block_mask=block_mask_chunk["block_mask"]
             )
-            self.assertEqual(
-                block_mask_chunk.kv_num_blocks.squeeze(0), block_mask.kv_num_blocks[i]
-            )
-            self.assertEqual(
-                block_mask_chunk.full_kv_num_blocks.squeeze(0),
-                block_mask.full_kv_num_blocks[i],
-            )
-            self.assertEqual(
-                block_mask_chunk.full_kv_indices.squeeze(0),
-                block_mask.full_kv_indices[i],
-            )
-            self.assertEqual(
-                block_mask_chunk.q_indices.squeeze(0), block_mask.q_indices[i]
-            )
-            self.assertEqual(out_chunk.squeeze(0), out[i])
+            out_chunk.sum().backward()
+            q_chunks.append(q_chunk)
+            dq_chunks.append(q_chunk.grad)
+            k_chunks.append(k_chunk)
+            dk_chunks.append(k_chunk.grad)
+            v_chunks.append(v_chunk)
+            dv_chunks.append(v_chunk.grad)
+            block_mask_chunks.append(block_mask_chunk["block_mask"])
+            out_chunks.append(out_chunk)
+
+        concat_q = torch.cat(q_chunks, dim=0)
+        concat_dq = torch.cat(dq_chunks, dim=0)
+        concat_k = torch.cat(k_chunks, dim=0)
+        concat_dk = torch.cat(dk_chunks, dim=0)
+        concat_v = torch.cat(v_chunks, dim=0)
+        concat_dv = torch.cat(dv_chunks, dim=0)
+        concat_kv_indices = torch.cat(
+            [bm.kv_indices for bm in block_mask_chunks], dim=0
+        )
+        concat_kv_num_blocks = torch.cat(
+            [bm.kv_num_blocks for bm in block_mask_chunks], dim=0
+        )
+        concat_kv_full_num_blocks = torch.cat(
+            [bm.full_kv_num_blocks for bm in block_mask_chunks], dim=0
+        )
+        concat_kv_full_indices = torch.cat(
+            [bm.full_kv_indices for bm in block_mask_chunks], dim=0
+        )
+        concat_out = torch.cat(out_chunks, dim=0)
+        self.assertEqual(concat_q, q)
+        self.assertEqual(concat_dq, q.grad)
+        self.assertEqual(concat_k, k)
+        self.assertEqual(concat_dk, k.grad)
+        self.assertEqual(concat_v, v)
+        self.assertEqual(concat_dv, v.grad)
+        self.assertEqual(concat_kv_indices, block_mask.kv_indices)
+        self.assertEqual(concat_kv_num_blocks, block_mask.kv_num_blocks)
+        self.assertEqual(concat_kv_full_num_blocks, block_mask.full_kv_num_blocks)
+        self.assertEqual(concat_kv_full_indices, block_mask.full_kv_indices)
+        self.assertEqual(concat_out, out)
 
     @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/1682")
     def test_chunk_spec(self, device):
