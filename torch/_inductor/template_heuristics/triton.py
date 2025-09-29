@@ -243,6 +243,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             GemmConfig(128, 128, 32, 3, 4),
             GemmConfig(128, 128, 64, 3, 4),
             GemmConfig(128, 128, 64, 5, 8),
+            GemmConfig(128, 128, 128, 4, 8),
         ]
 
         # Exhaustive search for mm configs
