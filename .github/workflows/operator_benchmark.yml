@@ -14,6 +14,10 @@ on:
   schedule:
     # Run at 07:00 UTC every Sunday
     - cron: 0 7 * * 0
+  pull_request:
+    paths:
+      - benchmarks/operator_benchmark/**
+      - .github/workflows/operator_benchmark.yml
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
@@ -29,7 +33,7 @@ jobs:
     name: opbenchmark-build
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-jammy-py3.9-gcc11-build
+      build-environment: linux-jammy-py3.10-gcc11-build
       docker-image-name: ci-image:pytorch-linux-jammy-py3-gcc11-inductor-benchmarks
       test-matrix: |
         { include: [
@@ -42,7 +46,7 @@ jobs:
     name: opbenchmark-on-demand-build
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-jammy-py3.9-gcc11-build
+      build-environment: linux-jammy-py3.10-gcc11-build
       docker-image-name: ci-image:pytorch-linux-jammy-py3-gcc11-inductor-benchmarks
       test-matrix: |
         { include: [
@@ -55,7 +59,7 @@ jobs:
     uses: ./.github/workflows/_linux-test.yml
     needs: opbenchmark-build
     with:
-      build-environment: linux-jammy-py3.9-gcc11-build
+      build-environment: linux-jammy-py3.10-gcc11-build
       docker-image: ${{ needs.opbenchmark-build.outputs.docker-image }}
       test-matrix: ${{ needs.opbenchmark-build.outputs.test-matrix }}
     secrets: inherit

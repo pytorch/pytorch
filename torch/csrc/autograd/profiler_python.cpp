@@ -167,7 +167,7 @@ class CallTypeHelper final {
 //
 // During post processing we:
 //   1) Determine the type represented by a TraceKey by checking which
-//      sub-cache it appears in in the thread local cache.
+//      sub-cache it appears in the thread local cache.
 //   2) Look up the pair of CallKeys from the thread local cache.
 //   3) Look up the expanded values of each CallKey from the global value cache.
 //
@@ -657,7 +657,7 @@ struct ThreadLocalResults {
   }
 
   template <CallType C, EventType E, typename Ephemeral, typename... Args>
-  TraceKey intern(Ephemeral ephemeral, Args&&... args) {
+  TraceKey intern(Ephemeral ephemeral, Args... args) {
     static_assert(
         Config<C>::event_type == E,
         "ThreadLocalResults.intern called from the wrong typed context.");

@@ -267,7 +267,7 @@ class ExprEval {
   }
 
   template <typename T, typename... Ts>
-  T value(Ts&&... ts) {
+  T value(Ts... ts) {
     call(std::forward<Ts>(ts)...);
     return ret_value_.as<T>();
   }

@@ -341,6 +341,7 @@ CUDA_TYPE_NAME_MAP = collections.OrderedDict(
         ("cudaPos", ("hipPos", CONV_MEM, API_RUNTIME)),
         ("cudaEvent_t", ("hipEvent_t", CONV_TYPE, API_RUNTIME)),
         ("cudaStream_t", ("hipStream_t", CONV_TYPE, API_RUNTIME)),
+        ("cudaHostFn_t", ("hipHostFn_t", CONV_TYPE, API_RUNTIME)),
         ("cudaPointerAttributes", ("hipPointerAttribute_t", CONV_TYPE, API_RUNTIME)),
         ("cudaDeviceAttr", ("hipDeviceAttribute_t", CONV_TYPE, API_RUNTIME)),
         ("cudaDeviceProp", ("hipDeviceProp_t", CONV_TYPE, API_RUNTIME)),
@@ -4333,6 +4334,8 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
         ("cudaStreamCaptureModeThreadLocal", ("hipStreamCaptureModeThreadLocal", CONV_TYPE, API_RUNTIME)),
         ("cudaStreamBeginCapture", ("hipStreamBeginCapture", CONV_TYPE, API_RUNTIME)),
         ("cudaStreamEndCapture", ("hipStreamEndCapture", CONV_TYPE, API_RUNTIME)),
+        ("cudaStreamSetCaptureDependencies", ("hipStreamSetCaptureDependencies", CONV_STREAM, API_RUNTIME)),
+        ("cudaStreamUpdateCaptureDependencies", ("hipStreamUpdateCaptureDependencies", CONV_STREAM, API_RUNTIME)),
         ("cudaGraphInstantiate", ("hipGraphInstantiate", CONV_TYPE, API_RUNTIME)),
         ("cudaGraphInstantiateWithFlags", ("hipGraphInstantiateWithFlags", CONV_TYPE, API_RUNTIME)),
         (

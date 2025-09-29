@@ -420,11 +420,12 @@ def rand_strided(
     device: Union[str, torch.device] = "cpu",
     extra_size: int = 0,
 ) -> torch.Tensor:
-    needed_size = (
-        sum((shape - 1) * stride for shape, stride in zip(size, stride))
-        + 1
-        + extra_size
-    )
+    needed_size = extra_size
+    if all(s > 0 for s in size):
+        # only need to allocate if all sizes are non-zero
+        needed_size += (
+            sum((shape - 1) * stride for shape, stride in zip(size, stride)) + 1
+        )
     if dtype.is_floating_point:
         if dtype.itemsize == 1:
             """
@@ -514,13 +515,6 @@ def skipIfPy312(fn: Callable[_P, _T]) -> Callable[_P, _T]:
     if sys.version_info >= (3, 12):
         return unittest.skip("Not supported in Python 3.12+")(fn)
     return fn
-
-
-def requiresPy310(fn: Callable[_P, _T]) -> Callable[_P, _T]:
-    if sys.version_info >= (3, 10):
-        return fn
-    else:
-        return unittest.skip("Requires Python 3.10+")(fn)
 
 
 # Controls tests generated in test/inductor/test_torchinductor_dynamic_shapes.py

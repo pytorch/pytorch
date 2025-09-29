@@ -76,13 +76,14 @@ bool priority_order_init_ = false;
 // TODO(eqy): more benchmarking to determine whether this should include sm86/89
 // Needs to be kept in-sync with test_fused_chocie in test_transformers.py
 bool check_prefer_cudnn_attention() {
-  static const bool prefer_cudnn = c10::utils::check_env("TORCH_CUDNN_SDPA_PREFERRED") == true;
+  static const bool prefer_cudnn = c10::utils::check_env("TORCH_CUDNN_SDPA_PREFERRED") != false;
   if (!prefer_cudnn) {
     return false;
   }
-#if (defined(CUDNN_VERSION) && (CUDNN_VERSION > 90000))
+#if (defined(CUDNN_VERSION) && (CUDNN_VERSION >= 90900))
   auto dprops = at::cuda::getCurrentDeviceProperties();
-  return dprops->major >= 9 && !dprops->minor;
+  auto major = dprops->major;
+  return (major == 9 || major == 10) && !dprops->minor;
 #else
   return false;
 #endif
@@ -174,6 +175,28 @@ bool check_head_dim_size_flash(sdp_params const& params, bool debug) {
           " instead.");
     }
     return false;
+  }
+  if constexpr(caller_is_meff) {
+    bool is_half = (params.query.dtype() == at::kHalf) ||
+      (params.query.dtype() == at::kBFloat16);
+    const int64_t alignment = is_half ? 8 : 4;
+    if (!(query_size_last % alignment == 0 && query_size_last > 0 &&
+          value_size_last % alignment == 0 && value_size_last > 0)) {
+      if (debug) {
+        TORCH_WARN(
+            "Mem efficient attention requires last dimension of inputs to be divisible by ",
+            alignment,
+            ". ",
+            "Got Query.size(-1): ",
+            query_size_last,
+            ", Key.size(-1): ",
+            params.key.sym_size(-1),
+            ", Value.size(-1): ",
+            params.value.sym_size(-1),
+            " instead.");
+      }
+      return false;
+    }
   }
   return true;
 }
@@ -605,7 +628,7 @@ bool check_for_nested_inputs(sdp_params const& params, bool debug) {
 
   const auto dprop = at::cuda::getCurrentDeviceProperties();
   // Check that the input is nested
-  if ((dprop->major == 9 || dprop->major == 10) && has_for_nested_inputs(params)) {
+  if (!(dprop->major == 9 || dprop->major == 10) && has_for_nested_inputs(params)) {
     if (debug) {
       TORCH_WARN("cuDNN SDPA supports nested tensors on SM 9.0, SM 10.0.");
     }
@@ -665,6 +688,15 @@ bool can_use_cudnn_attention(const sdp_params& params, bool debug) {
     TORCH_WARN(CUDNN_VERSION, " cuDNN version too old to use cuDNN Attention (< v9.0.0)");
   }
   return false;
+#endif
+#if defined(CUDNN_VERSION)
+  static auto cudnn_version = cudnnGetVersion();
+  if (params.dropout > 0.0 && cudnn_version > 91100 && cudnn_version < 91400) {
+    if (debug) {
+      TORCH_WARN(CUDNN_VERSION, " cuDNN version does not support droppout in SDPA (9.11 - 9.13).");
+    }
+    return false;
+  }
 #endif
   // Define gate functions that determine if a flash kernel can be ran
   // Replace with std::to_array when we migrate to c++20
