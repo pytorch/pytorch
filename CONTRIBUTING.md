@@ -1131,9 +1131,26 @@ Note: There's a [compilation issue](https://github.com/uxlfoundation/oneDNN/issu
 
 ## Pre-commit tidy/linting hook
 
+Please see [The Wiki Pre-Commit Guide](https://github.com/pytorch/pytorch/wiki/Pre-Commit-Checks) for up to date guides on steps to take before committing.
+
 See the [Lint as you type](https://github.com/pytorch/pytorch/wiki/Lint-as-you-type) page for information on setting up linters in your local development environment.
 
-Please see [The Wiki Pre-Commit Guide](https://github.com/pytorch/pytorch/wiki/Pre-Commit-Checks) for up to date guides on steps to take before committing.
+Given you have a working installation of lintrunner, you can set up a pre-commit hook to check for linting errors on any files by creating or adding the following to your .git/hooks/pre-commit file.
+
+```
+#!/usr/bin/sh
+# Get staged files
+STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACMR)
+
+if [ -n "$STAGED_FILES" ]; then
+    $(lintrunner --paths-cmd='git diff --cached --name-only --diff-filter=ACMR')
+    echo "$STAGED_FILES" | xargs lintrunner
+    if [ $? -ne 0 ]; then
+        echo "Linting failed. Please fix the issues and try again."
+        exit 1
+    fi
+fi
+```
 
 ## Building PyTorch with ASAN
 
