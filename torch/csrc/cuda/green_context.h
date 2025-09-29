@@ -1,7 +1,7 @@
 #pragma once
 #include <ATen/cuda/CUDAEvent.h>
-#include <c10/cuda/driver_api.h>
 #if defined(CUDA_VERSION) && !defined(USE_ROCM)
+#include <c10/cuda/driver_api.h>
 #include <cuda.h>
 #include <memory>
 #include <stdexcept>
