@@ -2518,12 +2518,12 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
             
         for y_dtype in [torch.float16, torch.bfloat16, torch.float32, torch.float64]:
             for x_dtype in [torch.float16, torch.bfloat16, torch.float32, torch.float64]:
-                y = torch.tensor([y], dtype=y_dtype, device="cuda")
-                x = torch.tensor([x], dtype=x_dtype, device="cuda")
+                y_ten = torch.tensor([y], dtype=y_dtype, device="cuda")
+                x_ten = torch.tensor([x], dtype=x_dtype, device="cuda")
                 
                 torch._dynamo.reset()
-                compiled_div = Decimal(compiled_divide(x, y).item())
-                eager_div = Decimal((x / y).item())
+                compiled_div = Decimal(compiled_divide(x, y_ten).item())
+                eager_div = Decimal((x / y_ten).item())
 
                 self.assertEqual(eager_div, compiled_div)
 
