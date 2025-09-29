@@ -1054,7 +1054,8 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     def truediv(x, y):
         x_dtype = getattr(x, "dtype", None)
-        y_dtype = getattr(x, "dtype", None)
+        y_dtype = getattr(y, "dtype", None)
+
         if x_dtype == torch.float32 and y_dtype == torch.float32:
             out = f"triton.language.div_rn({x}, {y})"
         else:
