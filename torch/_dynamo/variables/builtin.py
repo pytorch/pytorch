@@ -28,7 +28,6 @@ import itertools
 import logging
 import math
 import operator
-import sys
 import types
 import typing
 import unittest
@@ -990,7 +989,7 @@ class BuiltinVariable(VariableTracker):
                         hints=[*graph_break_hints.SUPPORTABLE],
                     )
 
-                return variables.ExceptionVariable(fn, args, **kwargs)
+                return variables.ExceptionVariable(fn, args, kwargs)
 
             return create_exception_class_object
 
@@ -1820,6 +1819,8 @@ class BuiltinVariable(VariableTracker):
     def call_iter(self, tx: "InstructionTranslator", obj, *args, **kwargs):
         if isinstance(obj, variables.IteratorVariable):
             ret = obj
+        elif isinstance(obj, variables.RangeVariable):
+            ret = obj.call_method(tx, "__iter__", [], {})
         else:
             # Handle the case where we are iterating over a tuple, list or iterator
             ret = self._call_iter_tuple_list(tx, obj, *args, **kwargs)
@@ -2113,9 +2114,7 @@ class BuiltinVariable(VariableTracker):
             getattr(isinstance_type, "__instancecheck__", None)
         ):
             isinstance_type_tuple = (isinstance_type,)
-        elif sys.version_info >= (3, 10) and isinstance(
-            isinstance_type, types.UnionType
-        ):
+        elif isinstance(isinstance_type, types.UnionType):
             isinstance_type_tuple = isinstance_type.__args__
         elif isinstance(isinstance_type, tuple) and all(
             isinstance(tp, type) or callable(getattr(tp, "__instancecheck__", None))

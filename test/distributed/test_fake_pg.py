@@ -40,16 +40,14 @@ class TestFakePG(TestCase):
             pass
 
     def test_all_reduce(self):
-        store = FakeStore()
-        dist.init_process_group(backend="fake", rank=1, world_size=2, store=store)
+        dist.init_process_group(backend="fake", rank=1, world_size=2)
 
         output = torch.ones(3, 3) * dist.get_rank()
         dist.all_reduce(output)
         self.assertEqual(tuple(output.shape), (3, 3))
 
     def test_allgather(self):
-        store = FakeStore()
-        dist.init_process_group(backend="fake", rank=1, world_size=2, store=store)
+        dist.init_process_group(backend="fake", rank=1, world_size=2)
 
         input_tensor = torch.ones(3, 3) * dist.get_rank()
         output_tensors = [torch.empty_like(input_tensor) for _ in range(2)]
@@ -106,8 +104,7 @@ class TestFakePG(TestCase):
         FileCheck().check("all_gather").check("wait_tensor").run(str(gm.graph))
 
     def test_broadcast(self):
-        store = FakeStore()
-        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+        dist.init_process_group(backend="fake", rank=0, world_size=2)
 
         # src == rank
         output = torch.ones(3, 3)

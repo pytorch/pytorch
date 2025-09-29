@@ -22,7 +22,7 @@ LABEL_CIFLOW_BINARIES = "ciflow/binaries"
 LABEL_CIFLOW_PERIODIC = "ciflow/periodic"
 LABEL_CIFLOW_BINARIES_LIBTORCH = "ciflow/binaries_libtorch"
 LABEL_CIFLOW_BINARIES_WHEEL = "ciflow/binaries_wheel"
-LABEL_CIFLOW_ROCM = "ciflow/rocm-mi300"
+LABEL_CIFLOW_ROCM = "ciflow/rocm"
 
 
 @dataclass
@@ -135,10 +135,12 @@ ROCM_SMOKE_WORKFLOWS = [
         build_configs=generate_binary_build_matrix.generate_wheels_matrix(
             OperatingSystem.LINUX,
             arches=["6.4"],
-            python_versions=["3.9"],
+            python_versions=["3.10"],
         ),
         ciflow_config=CIFlowConfig(
             labels={
+                LABEL_CIFLOW_BINARIES,
+                LABEL_CIFLOW_BINARIES_WHEEL,
                 LABEL_CIFLOW_ROCM,
             },
             isolated_workflow=True,
@@ -153,7 +155,7 @@ LINUX_BINARY_SMOKE_WORKFLOWS = [
         package_type="manywheel",
         build_configs=generate_binary_build_matrix.generate_wheels_matrix(
             OperatingSystem.LINUX,
-            arches=["12.8"],
+            arches=["13.0"],
             python_versions=["3.12"],
         ),
         branches="main",

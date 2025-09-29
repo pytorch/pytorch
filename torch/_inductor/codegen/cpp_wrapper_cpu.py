@@ -1168,7 +1168,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             """
         )
 
-        wrapper_body = "input_tensors = [arg if isinstance(arg, torch.Tensor) else torch.tensor(arg) for arg in args]"
+        wrapper_body = "input_tensors = [arg if isinstance(arg, torch.Tensor) else torch.tensor(arg, device='cpu') for arg in args]"
         if V.graph.constants:
             # Append constants to the input args for cpp wrapper.
             # Python wrapper directly gets the value inside the wrapper call
@@ -1295,6 +1295,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             args = [*args, f"&{output_handle_name}"]
 
         device = d.type if (d := extern_kernel.get_device()) else self.device
+
         self.generate_c_shim_extern_kernel_call(
             extern_kernel.get_kernel_name(), args, device
         )
@@ -1353,6 +1354,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 raise NotImplementedError(f"unsupported type of {output=}")
         args = args + output_args
         device = d.type if (d := fallback_kernel.get_device()) else self.device
+
         self.generate_c_shim_extern_kernel_call(
             fallback_kernel.cpp_kernel_name,  # type: ignore[arg-type]
             args,
@@ -1381,7 +1383,15 @@ class CppWrapperCpu(PythonWrapperCodegen):
             kernel, args, device, debug_handle=debug_handle
         )
 
-    def generate_scatter_fallback(
+    def _get_scatter_reduce_enum(self, reduce):
+        # Follow aten/src/ATen/native/ReductionType.h:get_operator_enum
+        get_operator_enum = {"add": "sum", "multiply": "prod"}
+        if reduce in get_operator_enum:
+            reduce = get_operator_enum[reduce]
+
+        return reduce
+
+    def _generate_scatter_fallback(
         self,
         output,
         inputs,
@@ -1391,6 +1401,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
         reduce,
         kwargs,
     ):
+        reduce = self._get_scatter_reduce_enum(reduce)
+
         # call the ABI shim function instead of the ATen one
         cpp_kernel_name = self.get_c_shim_func_name(cpp_kernel_name, self.device)
         # TODO: consider remove "_out" and add missing inplace variants to fallback_ops.py
@@ -1411,7 +1423,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         line += ");"
         self.writeline(line)
 
-    def generate_index_put_fallback(self, kernel, x, indices, values, accumulate):
+    def _generate_index_put_fallback(self, kernel, x, indices, values, accumulate):
         # TODO: update aoti_torch_index_put_out in ir.py to use autogen out version
         # See the comment in codegen_reinterpret_view about why having something like
         # RAIIAtenTensorHandle(tmp_tensor_handle_2) in a tmp array can cause the corresponding
@@ -1678,6 +1690,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
             self.wrapper_call.writeline(
                 f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_as_strided({', '.join(args)}));"
             )
+            self.wrapper_call.writeline(
+                f"wrap_with_raii_handle_if_needed({old_handle_name});"
+            )
 
         return f"RAIIAtenTensorHandle {name}({handle_name});"
 
@@ -1927,7 +1942,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
         finally:
             self.pop_codegened_graph()
 
-    def codegen_while_loop(self, while_loop):
+    def codegen_while_loop(self, while_loop, stack_output=False):
+        if stack_output:
+            raise NotImplementedError("NYI cpp wrapper for while_loop_stack_output")
         is_bool_pred = isinstance(
             while_loop.cond_subgraph.graph.graph_outputs[0], ir.ShapeAsConstantBuffer
         )

@@ -1429,12 +1429,12 @@ class DynamoConfigPatchVariable(ContextWrappingVariable):
         return "patch_dynamo_config"
 
 
-class SetFullgraphVariable(ContextWrappingVariable):
-    """represents torch._dynamo.set_fullgraph"""
+class ErrorOnGraphBreakVariable(ContextWrappingVariable):
+    """represents torch._dynamo.error_on_graph_break"""
 
-    def __init__(self, fullgraph, **kwargs) -> None:
+    def __init__(self, error_on_graph_break, **kwargs) -> None:
         super().__init__(
-            target_values=(fullgraph,),
+            target_values=(error_on_graph_break,),
             initial_values=(_get_error_on_graph_break(),),
             **kwargs,
         )
@@ -1447,7 +1447,7 @@ class SetFullgraphVariable(ContextWrappingVariable):
         return "torch._dynamo"
 
     def fn_name(self):
-        return "set_fullgraph"
+        return "error_on_graph_break"
 
 
 class WithExitFunctionVariable(VariableTracker):
