@@ -4,6 +4,8 @@ import copy
 import unittest
 from collections import Counter
 
+from packaging import version
+
 import torch
 from torch.ao.quantization import (
     compare_results,
@@ -27,6 +29,10 @@ from torch.testing._internal.common_utils import (
     skipIfCrossRef,
     TestCase,
 )
+
+
+if version.parse(torch.__version__) >= version.parse("2.8.0"):
+    torch._dynamo.config.cache_size_limit = 128
 
 
 @unittest.skipIf(IS_WINDOWS, "Windows not yet supported for torch.compile")
@@ -76,7 +82,7 @@ class TestNumericDebugger(TestCase):
                         prev_decomp_op_to_debug_handle_map[prev_decomp_op]
                         == debug_handle
                     ), f"Node {node} has different debug handle {debug_handle}"
-                    "than previous node sharing the same decomp op {prev_decomp_op}"
+                    f"than previous node sharing the same decomp op {prev_decomp_op}"
 
         bfs_trace_with_node_process(
             model, _extract_debug_handles_with_prev_decomp_op_from_node

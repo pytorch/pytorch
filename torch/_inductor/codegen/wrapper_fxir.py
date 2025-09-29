@@ -23,7 +23,11 @@ from torch._higher_order_ops.triton_kernel_wrap import (
 from torch._inductor.codecache import LambdaFuture, PyCodeCache
 from torch._inductor.runtime.triton_heuristics import CachingAutotuner
 from torch._inductor.select_algorithm import extern_kernels  # noqa: F401
-from torch._inductor.utils import convert_shape_to_symint, sympy_product
+from torch._inductor.utils import (
+    convert_shape_to_symint,
+    convert_to_symint,
+    sympy_product,
+)
 from torch._inductor.virtualized import V
 from torch._library.triton import wrap_triton
 from torch.fx import GraphModule
@@ -89,8 +93,10 @@ class SymbolBuffer(CodegenSymbol):
     def get_name(self) -> str:
         return str(self.symbol)
 
-    def get_example(self) -> Union[torch.Tensor, sympy.Symbol]:
-        return self.symbol
+    def get_example(self) -> Union[torch.Tensor, torch.SymInt]:
+        sym_int = convert_to_symint(self.symbol)
+        assert isinstance(sym_int, torch.SymInt)
+        return sym_int
 
 
 CodegenBuffer = Union[BufferLike, SymbolBuffer]
@@ -386,6 +392,13 @@ class FxConverter:
         else:
             raise NotImplementedError(f"Unable to extract buffer from node: {node}")
 
+    def _generate_size_proxy(
+        self, node: torch.fx.Node, expr: sympy.Expr
+    ) -> torch.fx.Proxy:
+        proxy = torch.fx.Proxy(node, tracer=self.tracer)
+        self.expr_to_proxy[expr] = proxy
+        return proxy
+
     def _generate_graph_inputs(self) -> None:
         """
         Converts graph inputs to FX placeholders.
@@ -398,14 +411,21 @@ class FxConverter:
                 continue
 
             # Introduce a new symbol for constant inputs.
+            is_constant = isinstance(ir_node, (int, float, sympy.Integer, sympy.Float))
             buffer = (
                 SymbolBuffer(sympy.Symbol(name, is_integer=True))
-                if isinstance(ir_node, (int, float, sympy.Integer, sympy.Float))
+                if is_constant
                 else self._get_buffer(ir_node)
             )
             placeholder_node = self.gm.graph.placeholder(buffer.get_name())
-            placeholder_node.meta["val"] = buffer.get_example()
+            placeholder_node.meta["val"] = (
+                ir_node if is_constant else buffer.get_example()
+            )
             self._record_allocation(buffer, placeholder_node)
+
+            # Record symbol definitions for dynamic shapes.
+            if isinstance(ir_node, sympy.Symbol):
+                self._generate_size_proxy(placeholder_node, ir_node)
 
     def _generate_graph_input_shapes(self) -> None:
         """
@@ -421,8 +441,7 @@ class FxConverter:
         ) -> None:
             def codegen_proxy() -> torch.fx.Proxy:
                 size_node = self.gm.graph.call_function(target, (base_node, dim))
-                size_proxy = torch.fx.Proxy(size_node, tracer=self.tracer)
-                self.expr_to_proxy[sym_or_exp] = size_proxy
+                size_proxy = self._generate_size_proxy(size_node, sym_or_exp)
                 return size_proxy
 
             if isinstance(sym_or_exp, sympy.Symbol):
@@ -475,9 +494,7 @@ class FxConverter:
                     undefined_symbol_expr
                 ]
 
-        for node in V.graph.module.graph.find_nodes(op="placeholder"):  # type: ignore[operator, union-attr]
-            name = node.name
-            ir_node = self.graph_inputs.get(name)
+        for ir_node in self.graph_inputs.values():
             if isinstance(ir_node, ir.TensorBox):
                 buffer = self._get_buffer(ir_node)
                 placeholder_node = self.buffer_to_node[buffer.get_name()]
@@ -503,6 +520,10 @@ class FxConverter:
         Generates FX IR for transformations on a buffer, such as ReinterpretView.
         Does nothing if no such transformations are present.
         """
+
+        if isinstance(node, ir.ShapeAsConstantBuffer):
+            # Generate FX nodes to compute the shape expression.
+            return self._sympy_interp(node.expr).node
 
         def generate_to_buffer(node: ir.IRNode) -> Optional[BufferLike]:
             if isinstance(node, (ir.Buffer, WorkspaceArg)):
@@ -539,7 +560,9 @@ class FxConverter:
         buffer = generate_to_buffer(node)
         return self.buffer_to_node[buffer.get_name()] if buffer is not None else None
 
-    def _generate_output(self) -> None:
+    def _generate_outputs(
+        self,
+    ) -> Union[Optional[torch.fx.Node], list[Optional[torch.fx.Node]]]:
         """
         Generate FX IR for graph outputs.
         """
@@ -554,7 +577,7 @@ class FxConverter:
             else output_nodes
         )
 
-        self.gm.graph.output(output_value)
+        return output_value
 
     def _generate_subgm_getattrs(self) -> None:
         """
@@ -614,7 +637,9 @@ class FxConverter:
                         )
                     )
 
-        self._generate_output()
+            output = self._generate_outputs()
+
+        self.gm.graph.output(output)
         self.gm.recompile()
         return self.gm
 
