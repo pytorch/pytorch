@@ -788,21 +788,13 @@ class inner_f(torch.nn.Module):
                         model = SimpleLinear()
 
                     joint_with_descriptors = aot_export_joint_with_descriptors(
-                        stack, model, inputs, decompositions=decomposition_table
+                        stack, model, inputs, decompositions={}
                     )
 
                 for node in joint_with_descriptors.graph_module.graph.nodes:
-                    if (
-                        node.target
-                        in (
-                            torch.ops.prims.transpose.default,
-                            torch.ops.aten.mm.default,
-                            torch.ops.prims.mul.default,
-                            torch.ops.prims.broadcast_in_dim.default,
-                            torch.ops.prims.add.default,
-                        )
-                        # TODO: add annotation to backward graph nodes
-                        and node.meta.get("partitioner_tag") != "is_backward"
+                    if node.target != torch.ops.aten.sub.Tensor and node.op not in (
+                        "placeholder",
+                        "output",
                     ):
                         self.assertTrue(node.meta["custom"], {"pp_stage": 0})
                     if node.target == torch.ops.aten.sub.default:
