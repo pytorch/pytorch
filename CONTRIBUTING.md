@@ -127,7 +127,6 @@ source venv/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
       ```bash
       git submodule deinit -f .
       git clean -xdf
-      rm -rf build/ 
       git submodule update --init --recursive
       python -m pip install --group dev
       python -m pip install --no-build-isolation -v -e .
