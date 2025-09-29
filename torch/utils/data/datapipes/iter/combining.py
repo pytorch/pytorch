@@ -3,8 +3,8 @@ import copy as copymodule
 import warnings
 from abc import ABC, abstractmethod
 from collections import deque
-from collections.abc import Iterator, Sized
-from typing import Any, Callable, Literal, Optional, TypeVar
+from collections.abc import Callable, Iterator, Sized
+from typing import Any, Literal, Optional, TypeVar
 
 from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data.datapipes._hook_iterator import _SnapshotState

@@ -3,7 +3,8 @@ import functools
 import math
 import operator
 import sys
-from typing import Callable, Optional, SupportsFloat, TYPE_CHECKING, TypeVar, Union
+from collections.abc import Callable
+from typing import Optional, SupportsFloat, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import TypeVarTuple, Unpack
 
 import sympy

@@ -8,18 +8,10 @@ import os
 import pickle
 import tokenize
 import unittest
+from collections.abc import Callable
 from dataclasses import dataclass
 from types import FunctionType, ModuleType
-from typing import (
-    Any,
-    Callable,
-    Generic,
-    NoReturn,
-    Optional,
-    TYPE_CHECKING,
-    TypeVar,
-    Union,
-)
+from typing import Any, Generic, NoReturn, Optional, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import deprecated
 from unittest import mock
 
