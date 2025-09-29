@@ -1188,6 +1188,18 @@ class PythonWrapperCodegen(CodeGen):
             """
         )
 
+        try:
+            from torch._C import _cuda_getCurrentRawStream  # noqa: F401
+
+            self.kernel_autotune_defs.splice(
+                """
+                get_raw_stream = torch._C._cuda_getCurrentRawStream
+                """,
+                strip=True,
+            )
+        except (ImportError, AttributeError):
+            pass
+
     @cache_on_self
     def write_triton_header_once(self) -> None:
         import_str = f"""
