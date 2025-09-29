@@ -8,6 +8,7 @@
 
 #include <torch/headeronly/macros/Macros.h>
 #include <type_traits>
+#include <vector>
 
 namespace torch::stable {
 
@@ -23,7 +24,7 @@ struct RestrictPtrTraits {
 
 template <
     typename T,
-    size_t N,
+    std::size_t N,
     template <typename U> class PtrTraits = DefaultPtrTraits,
     typename index_t = int64_t>
 class TensorAccessorBase {
@@ -38,7 +39,7 @@ class TensorAccessorBase {
     // Originally, TensorAccessor is a view of sizes and strides as
     // these are ArrayRef instances. Until torch::stable supports an
     // ArrayRef-like feature, we store copies of sizes and strides:
-    for (auto i = 0; i < N; ++i) {
+    for (std::size_t i = 0; i < N; ++i) {
       this->sizes_[i] = sizes_[i];
       this->strides_[i] = strides_[i];
     }
@@ -65,7 +66,7 @@ class TensorAccessorBase {
 
 template <
     typename T,
-    size_t N,
+    std::size_t N,
     template <typename U> class PtrTraits = DefaultPtrTraits,
     typename index_t = int64_t>
 class TensorAccessor : public TensorAccessorBase<T, N, PtrTraits, index_t> {
@@ -117,7 +118,7 @@ class TensorAccessor<T, 1, PtrTraits, index_t>
 
 template <
     typename T,
-    size_t N,
+    std::size_t N,
     template <typename U> class PtrTraits = DefaultPtrTraits,
     typename index_t = int64_t>
 class GenericPackedTensorAccessorBase {
@@ -140,7 +141,7 @@ class GenericPackedTensorAccessorBase {
       const source_index_t* sizes_,
       const source_index_t* strides_)
       : data_(data_) {
-    for (auto i = 0; i < N; ++i) {
+    for (std::size_t i = 0; i < N; ++i) {
       this->sizes_[i] = sizes_[i];
       this->strides_[i] = strides_[i];
     }
@@ -171,7 +172,7 @@ class GenericPackedTensorAccessorBase {
 
 template <
     typename T,
-    size_t N,
+    std::size_t N,
     template <typename U> class PtrTraits = DefaultPtrTraits,
     typename index_t = int64_t>
 class GenericPackedTensorAccessor
@@ -254,14 +255,14 @@ class GenericPackedTensorAccessor<T, 1, PtrTraits, index_t>
 
 template <
     typename T,
-    size_t N,
+    std::size_t N,
     template <typename U> class PtrTraits = DefaultPtrTraits>
 using PackedTensorAccessor32 =
     GenericPackedTensorAccessor<T, N, PtrTraits, int32_t>;
 
 template <
     typename T,
-    size_t N,
+    std::size_t N,
     template <typename U> class PtrTraits = DefaultPtrTraits>
 using PackedTensorAccessor64 =
     GenericPackedTensorAccessor<T, N, PtrTraits, int64_t>;
