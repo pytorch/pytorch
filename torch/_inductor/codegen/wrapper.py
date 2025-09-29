@@ -370,7 +370,7 @@ class MemoryPlanningState:
 
 class WrapperLine:
     def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
-        raise NotImplementedError("FX codegen not yet supported for type {type(self)}")
+        raise NotImplementedError(f"FX codegen not yet supported for type {type(self)}")
 
 
 @dataclasses.dataclass
@@ -1187,6 +1187,18 @@ class PythonWrapperCodegen(CodeGen):
                 empty_strided_xpu = torch._C._dynamo.guards._empty_strided_xpu
             """
         )
+
+        try:
+            from torch._C import _cuda_getCurrentRawStream  # noqa: F401
+
+            self.kernel_autotune_defs.splice(
+                """
+                get_raw_stream = torch._C._cuda_getCurrentRawStream
+                """,
+                strip=True,
+            )
+        except (ImportError, AttributeError):
+            pass
 
     @cache_on_self
     def write_triton_header_once(self) -> None:
