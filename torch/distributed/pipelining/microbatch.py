@@ -122,15 +122,15 @@ def _split_block_mask(
     num_chunks: int,
 ) -> list[BlockMask]:
     chunk_block_masks = []
-    kv_blocks_chunks = torch.tensor_split(
+    kv_num_blocks_chunks = torch.tensor_split(
         block_mask.kv_num_blocks, num_chunks, spec.split_dim
     )
     kv_indices_chunks = torch.tensor_split(
         block_mask.kv_indices, num_chunks, spec.split_dim
     )
-    full_kv_blocks_chunks = (
+    full_kv_num_blocks_chunks = (
         torch.tensor_split(block_mask.full_kv_num_blocks, num_chunks, spec.split_dim)
-        if block_mask.full_kv_blocks is not None
+        if block_mask.full_kv_num_blocks is not None
         else [None] * num_chunks
     )
     full_kv_indices_chunks = (
@@ -138,20 +138,31 @@ def _split_block_mask(
         if block_mask.full_kv_indices is not None
         else [None] * num_chunks
     )
+
+    ret = []
+    batch_offset = 0
     for chunk_idx in range(num_chunks):
-        BlockMask.from_kv_blocks()
-    return [
-        BlockMask.from_kv_blocks(
-            kv_num_blocks=kv_blocks_chunks[chunk_idx],
-            kv_indices=kv_indices_chunks[chunk_idx],
-            full_kv_num_blocks=full_kv_blocks_chunks[chunk_idx],
-            full_kv_indices=full_kv_indices_chunks[chunk_idx],
-            BLOCK_SIZE=block_mask.BLOCK_SIZE,
-            mask_mode=block_mask.mask_mode,
-            seq_lengths=block_mask.seq_lengths,
+
+        def create_mask_mod(idx):
+            def mask_mod_wrapper(b, h, q_idx, kv_idx):
+                b_offset = torch.full_like(b, idx)
+                return block_mask.mask_mod(b + b_offset, h, q_idx, kv_idx)
+
+            return mask_mod_wrapper
+
+        ret.append(
+            BlockMask.from_kv_blocks(
+                kv_num_blocks=kv_num_blocks_chunks[chunk_idx],
+                kv_indices=kv_indices_chunks[chunk_idx],
+                full_kv_num_blocks=full_kv_num_blocks_chunks[chunk_idx],
+                full_kv_indices=full_kv_indices_chunks[chunk_idx],
+                BLOCK_SIZE=block_mask.BLOCK_SIZE,
+                mask_mod=create_mask_mod(batch_offset),
+                seq_lengths=block_mask.seq_lengths,
+            )
         )
-        for chunk_idx in range(num_chunks)
-    ]
+        batch_offset += kv_num_blocks_chunks[chunk_idx].size(0)
+    return ret
 
 
 def _split_tensor(
@@ -198,6 +209,9 @@ def _shard_dict_of_args(
     Returns:
         args_split: List of sharded args
     """
+
+    if not args_dict:
+        return [{} for _ in range(num_chunks)]
 
     assert len(args_dict) == len(
         args_chunk_spec

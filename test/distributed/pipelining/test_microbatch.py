@@ -1,13 +1,16 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
-import torch
 from model_registry import ModelWithKwargs
+
+import torch
 from torch.distributed.pipelining import pipeline
 from torch.distributed.pipelining.microbatch import (
     merge_chunks,
     split_args_kwargs_into_chunks,
     TensorChunkSpec,
 )
+
+from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     skipXPUIf,
@@ -58,8 +61,81 @@ class MicrobatchTests(TestCase):
         torch.testing.assert_close(merged_kwargs, kwargs)
         print("Microbatch test passed")
 
-    def test_split_block_mask(self):
-        pass
+    def test_split_block_mask(self, device):
+        B = 4
+        H = 1
+        Q_LEN = 32
+        KV_LEN = 32
+        DIM = 32
+
+        def create_block_causal_mask(batch, eos_id: int):
+            mask = batch == eos_id
+            mask[:, -1] = True
+            acc_mask = torch.cumsum(torch.where(mask, 1, 0), dim=1)
+            seq_idx = torch.zeros_like(acc_mask, dtype=torch.int32)
+            seq_idx[:, 1:] = acc_mask[:, :-1]
+
+            def block_causal_mask(
+                b: torch.Tensor,
+                h: torch.Tensor,
+                q_idx: torch.Tensor,
+                kv_idx: torch.Tensor,
+            ):
+                return (seq_idx[b, q_idx] == seq_idx[b, kv_idx]) & (q_idx >= kv_idx)
+
+            return block_causal_mask
+
+        batch = list(range(30)) * 5
+        batch = torch.tensor(batch[: B * Q_LEN], device=device).reshape(B, Q_LEN)
+        q = torch.randn(B, H, Q_LEN, DIM, device=device)
+        k = torch.randn(B, H, KV_LEN, DIM, device=device)
+        v = torch.randn(B, H, KV_LEN, DIM, device=device)
+        # block_mask_fn = torch.compile(create_block_mask)
+        block_mask_fn = create_block_mask
+        block_mask = block_mask_fn(
+            create_block_causal_mask(batch, 29),
+            B=B,
+            H=H,
+            Q_LEN=Q_LEN,
+            KV_LEN=KV_LEN,
+            device=device,
+        )
+        # flex_fn = torch.compile(flex_attention)
+        flex_fn = flex_attention
+        out = flex_fn(q, k, v, block_mask=block_mask)
+
+        arg_split, _ = split_args_kwargs_into_chunks(
+            (q, k, v, block_mask),
+            {},
+            chunks=B,
+            args_chunk_spec=None,
+            kwargs_chunk_spec=None,
+        )
+
+        for i in range(B):
+            q_chunk, k_chunk, v_chunk, block_mask_chunk = arg_split[i]
+            out_chunk = flex_fn(q_chunk, k_chunk, v_chunk, block_mask=block_mask_chunk)
+            self.assertEqual(q_chunk.squeeze(0), q[i])
+            self.assertEqual(k_chunk.squeeze(0), k[i])
+            self.assertEqual(v_chunk.squeeze(0), v[i])
+            self.assertEqual(
+                block_mask_chunk.kv_indices.squeeze(0), block_mask.kv_indices[i]
+            )
+            self.assertEqual(
+                block_mask_chunk.kv_num_blocks.squeeze(0), block_mask.kv_num_blocks[i]
+            )
+            self.assertEqual(
+                block_mask_chunk.full_kv_num_blocks.squeeze(0),
+                block_mask.full_kv_num_blocks[i],
+            )
+            self.assertEqual(
+                block_mask_chunk.full_kv_indices.squeeze(0),
+                block_mask.full_kv_indices[i],
+            )
+            self.assertEqual(
+                block_mask_chunk.q_indices.squeeze(0), block_mask.q_indices[i]
+            )
+            self.assertEqual(out_chunk.squeeze(0), out[i])
 
     @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/1682")
     def test_chunk_spec(self, device):
