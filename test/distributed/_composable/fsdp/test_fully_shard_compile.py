@@ -557,28 +557,18 @@ val.shape: {[node.meta["val"].shape for node in aliased_graph_inputs]},
                     compiled_autograd_backend=backend,
                 )
                 if fwd_fullgraph:
-                    self.assertEqual(len(counters["graph_break"]), 2)
-                    graph_break_0_reason = (
-                        "torch.* op returned non-Tensor\n  Explanation: torch.* ops that return a"
-                        " non-Tensor cannot be traced into the Dynamo FX graph output\n\n\n  Developer"
-                        " debug context: example_value type: int; op: call_function; target: <built-in"
-                        " function _current_graph_task_id>\n\n For more details about this graph break,"
-                        " please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0208.html"
-                    )
-                    graph_break_1_reason = """\
+                    self.assertEqual(len(counters["graph_break"]), 1)
+                    self.assertExpectedInline(
+                        next(iter(counters["graph_break"].keys())),
+                        """\
 Unsupported Tensor.backward() call
   Explanation: Dynamo currently does not support tracing `Tensor.backward()`.
   Hint: This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround.
 
   Developer debug context: call_method TensorVariable() backward () {}
 
- For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0123.html"""  # noqa: B950
-                    reasons = list(counters["graph_break"].keys())
-                    self.assertExpectedInline(
-                        reasons[0],
-                        graph_break_0_reason,  # noqa: B950
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0123.html""",  # noqa: B950
                     )
-                    self.assertExpectedInline(reasons[1], graph_break_1_reason)
                 else:
                     self.assertGreater(len(counters["graph_break"]), 1)
                 return res
