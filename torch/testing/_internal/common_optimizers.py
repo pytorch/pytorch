@@ -2179,16 +2179,6 @@ optim_db: list[OptimizerInfo] = [
                 "test_complex_2d",
             ),
             DecorateInfo(
-                toleranceOverride(
-                    {  # previously atol=5-05, rtol=0.001, https://github.com/pytorch/pytorch/issues/116202
-                        torch.float32: tol(atol=5e-04, rtol=0.007),
-                    }
-                ),
-                "TestOptimRenewed",
-                "test_mixed_device_dtype",
-                active_if=TEST_WITH_TORCHDYNAMO,
-            ),
-            DecorateInfo(
                 skipIfTorchDynamo(
                     "This test uses mocks, which dynamo does not support"
                 ),

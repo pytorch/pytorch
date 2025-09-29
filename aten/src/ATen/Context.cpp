@@ -180,7 +180,7 @@ void Context::setUserEnabledNNPACK(bool e) {
 }
 
 bool Context::allowTF32CuDNN(const std::string& op) const {
-  if (op.size() == 0){
+  if (op.empty()){
     bool allow_tf32_rnn = float32Precision("cuda", "rnn") == "tf32";
     bool allow_tf32_conv = float32Precision("cuda", "conv") == "tf32";
     TORCH_CHECK(
@@ -281,9 +281,6 @@ bool Context::userEnabledOverrideableSDP() const {
 
 static constexpr const auto cublas_config_var_name = "CUBLAS_WORKSPACE_CONFIG";
 static constexpr const std::array<const char*, 2> cublas_deterministic_configs = {":4096:8", ":16:8"};
-#ifdef USE_ROCM
-static constexpr const auto hipblaslt_allow_tf32 = "HIPBLASLT_ALLOW_TF32";
-#endif
 
 bool Context::checkCuBLASConfigDeterministic() {
   // If using CUDA 10.2 or greater, need to make sure CuBLAS workspace config
@@ -343,12 +340,6 @@ void Context::setImmediateMiopen(bool b) {
 }
 
 bool Context::allowTF32CuBLAS() const {
-#ifdef USE_ROCM
-    const auto allow_tf32 = c10::utils::check_env(hipblaslt_allow_tf32);
-    if (allow_tf32 != true) {
-      return false;
-    }
-#endif
   bool legacy_allow_tf32 = float32_matmul_precision != at::Float32MatmulPrecision::HIGHEST;
   bool allow_tf32_new = float32Precision("cuda", "matmul") == "tf32";
   TORCH_CHECK(
@@ -362,14 +353,6 @@ bool Context::allowTF32CuBLAS() const {
 }
 
 void Context::setAllowTF32CuBLAS(bool b) {
-#ifdef USE_ROCM
-  const auto allow_tf32 = c10::utils::check_env(hipblaslt_allow_tf32);
-  if (allow_tf32 != true) {
-    C10_LOG_FIRST_N(INFO, 10) << "torch.backends.cuda.matmul.allow_tf32 is not supported on ROCm by default. "
-                              << "Please set environment variable HIPBLASLT_ALLOW_TF32=1 to enable it.";
-    return;
-  }
-#endif
   float32_matmul_precision = b ? at::Float32MatmulPrecision::HIGH : at::Float32MatmulPrecision::HIGHEST;
   setFloat32Precision("cuda", "matmul", b ? "tf32" : "ieee");
 }
@@ -443,7 +426,7 @@ void Context::setFloat32Precision(const std::string& backend, const std::string&
     std::string msg;
     auto iterp = _fp32_precisions.find(backend);
     TORCH_CHECK(iterp != _fp32_precisions.end());
-    for (auto p : iterp->second) {
+    for (const auto& p : iterp->second) {
       msg += p;
       msg += " ";
     }
