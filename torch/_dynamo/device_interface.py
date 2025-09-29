@@ -341,7 +341,7 @@ class MtiaInterface(DeviceInterface):
     synchronize = staticmethod(torch.mtia.synchronize)
     get_device_properties = staticmethod(torch.mtia.get_device_properties)  # type: ignore[assignment]
     get_raw_stream = staticmethod(get_mtia_stream)  # type: ignore[assignment, arg-type]
-    exchange_device = staticmethod(torch.mtia._exchange_device)  # type: ignore[arg-type]
+    exchange_device = staticmethod(torch.mtia._exchange_device)  # type: ignore[arg-type, has-type]
     maybe_exchange_device = staticmethod(torch.mtia._maybe_exchange_device)  # type: ignore[arg-type]
     memory_allocated = staticmethod(torch.mtia.memory_allocated)  # type: ignore[assignment]
     is_bf16_supported = staticmethod(torch.mtia.is_bf16_supported)  # type: ignore[arg-type]

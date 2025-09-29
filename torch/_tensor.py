@@ -756,6 +756,7 @@ class Tensor(torch._C.TensorBase):
             )
         if self._post_accumulate_grad_hooks is None:
             self._post_accumulate_grad_hooks: dict[Any, Any] = (
+                # pyrefly: ignore  # bad-assignment
                 OrderedDict()
             )  # pyrefly: ignore  # bad-assignment
 
@@ -1058,7 +1059,10 @@ class Tensor(torch._C.TensorBase):
             return torch._VF.split(self, split_size, dim)  # type: ignore[attr-defined]
         else:
             return torch._VF.split_with_sizes(
-                self, split_size, dim
+                # pyrefly: ignore  # bad-argument-type
+                self,
+                split_size,
+                dim,
             )  # pyrefly: ignore  # bad-argument-type
 
     def unique(self, sorted=True, return_inverse=False, return_counts=False, dim=None):

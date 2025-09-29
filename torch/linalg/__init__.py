@@ -1,4 +1,4 @@
-from torch._C import (  # type: ignore[attr-defined]; pyrefly: ignore  # missing-module-attribute
+from torch._C import (  # type: ignore[attr-defined]
     _add_docstr,
     _linalg,
     _LinAlgError as LinAlgError,
