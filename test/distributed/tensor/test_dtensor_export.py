@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import contextlib
+import unittest
 
 import torch
 import torch.distributed as dist
@@ -37,7 +38,9 @@ class SimpleModel(torch.nn.Module):
 
 def strict_export_and_aot_export_joint_with_descriptors(model, inputs):
     # install_free_tensors is required for dynamo to work
-    with torch._dynamo.config.patch(install_free_tensors=True):
+    with torch._dynamo.config.patch(
+        install_free_tensors=True, inline_inbuilt_nn_modules=True
+    ):
         with torch._export.utils._disable_aten_to_metadata_assertions():
             ep = torch.export.export(model, (inputs,), strict=True)
 
@@ -48,8 +51,9 @@ def strict_export_and_aot_export_joint_with_descriptors(model, inputs):
 
 
 def graph_capture_and_aot_export_joint_with_descriptors(model, inputs):
-    # TODO: switch to use the official graph_capture API once it is ready
-    gm = _dynamo_graph_capture_for_export(model)(inputs)
+    with torch._dynamo.config.patch(install_free_tensors=True):
+        # TODO: switch to use the official graph_capture API once it is ready
+        gm = _dynamo_graph_capture_for_export(model)(inputs)
     return aot_export_joint_with_descriptors_alone(gm, inputs)
 
 
@@ -82,18 +86,7 @@ class DTensorExportTest(TestCase):
         )
         self.device_type = "cuda"
 
-    @parametrize(
-        "export_fn",
-        [
-            strict_export_and_aot_export_joint_with_descriptors,
-            graph_capture_and_aot_export_joint_with_descriptors,
-            aot_export_joint_with_descriptors_alone,
-        ],
-    )
-    def test_parallelize_module_with_dtensor_input(
-        self,
-        export_fn,
-    ):
+    def _run_test(self, export_fn):
         dp_degree = 2
         tp_degree = self.world_size // dp_degree
 
@@ -121,9 +114,6 @@ class DTensorExportTest(TestCase):
             joint_gm, None, num_fwd_outputs=1
         )
 
-        if export_fn == strict_export_and_aot_export_joint_with_descriptors:
-            self.skipTest("joint_gm produced here is missing the backward region")
-
         self.assertTrue(
             _count_op(joint_gm, torch.ops._c10d_functional.all_reduce.default),
             3,
@@ -136,6 +126,25 @@ class DTensorExportTest(TestCase):
             _count_op(bw_gm, torch.ops._c10d_functional.all_reduce.default),
             1,
         )
+
+    @parametrize(
+        "export_fn",
+        [
+            graph_capture_and_aot_export_joint_with_descriptors,
+            aot_export_joint_with_descriptors_alone,
+        ],
+    )
+    def test_export_parallelize_module_with_dtensor_input(
+        self,
+        export_fn,
+    ):
+        self._run_test(export_fn)
+
+    # aot_export_joint_with_descriptors on strict-exported exported_program.module()
+    # is producing a joint graph with backward region missing
+    @unittest.expectedFailure
+    def test_strict_export_parallelize_module_with_dtensor_input(self):
+        self._run_test(strict_export_and_aot_export_joint_with_descriptors)
 
 
 instantiate_parametrized_tests(DTensorExportTest)

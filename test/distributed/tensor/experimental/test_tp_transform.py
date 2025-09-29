@@ -80,9 +80,10 @@ class TensorParallelTest(DTensorTestBase):
         def temp_deregister():
             import torch.utils._pytree as pytree
             from torch.distributed.tensor._dtensor_spec import DTensorSpec
+
             try:
                 pytree._deregister_pytree_node(DTensorSpec)
-                yield 
+                yield
             finally:
                 pytree.register_constant(DTensorSpec)
 
