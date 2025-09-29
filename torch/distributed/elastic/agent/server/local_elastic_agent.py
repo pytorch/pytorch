@@ -7,6 +7,7 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+from __future__ import annotations
 
 import json
 import os
@@ -14,7 +15,6 @@ import signal
 import socket
 import time
 import uuid
-from string import Template
 from typing import Any, Optional, TYPE_CHECKING
 
 import torch.distributed.elastic.timer as timer
@@ -36,6 +36,7 @@ from torch.distributed.elastic.multiprocessing import (
     PContext,
     start_processes,
 )
+from torch.distributed.elastic.multiprocessing.api import _LogPrefixContext
 from torch.distributed.elastic.utils import macros
 from torch.distributed.elastic.utils.logging import get_logger
 
@@ -97,9 +98,7 @@ class LocalElasticAgent(SimpleElasticAgent):
     Log prefixes can be customized by passing a `template string
     <https://docs.python.org/3/library/string.html#template-strings>`_ as the
     ``log_line_prefix_template`` argument.
-    The following macros (identifiers) are substituted at runtime:
-    ``${role_name}, ${local_rank}, ${rank}``. For example, to prefix each log line with
-    global rank instead of the local rank, set ``log_line_prefix_template = "[${rank}]:``.
+    See ``PContext`` for the full list of available template variables supported.
 
 
     Example launching function
@@ -297,8 +296,8 @@ class LocalElasticAgent(SimpleElasticAgent):
 
         args: dict[int, tuple] = {}
         envs: dict[int, dict[str, str]] = {}
-        log_line_prefixes: Optional[dict[int, str]] = (
-            {} if self._log_line_prefix_template else None
+        per_rank_log_prefix_context: list[_LogPrefixContext] | None = (
+            [] if self._log_line_prefix_template is not None else None
         )
         for worker in worker_group.workers:
             local_rank = worker.local_rank
@@ -325,15 +324,13 @@ class LocalElasticAgent(SimpleElasticAgent):
             if "OMP_NUM_THREADS" in os.environ:
                 worker_env["OMP_NUM_THREADS"] = os.environ["OMP_NUM_THREADS"]
 
-            if self._log_line_prefix_template:
-                log_line_prefix = Template(
-                    self._log_line_prefix_template
-                ).safe_substitute(
+            per_rank_log_prefix_context.append(
+                _LogPrefixContext(
                     role_name=spec.role,
                     rank=worker.global_rank,
                     local_rank=local_rank,
                 )
-                log_line_prefixes[local_rank] = log_line_prefix
+            )
 
             envs[local_rank] = worker_env
             worker_args = list(spec.args)
@@ -351,7 +348,8 @@ class LocalElasticAgent(SimpleElasticAgent):
             args=args,
             envs=envs,
             logs_specs=self._logs_specs,
-            log_line_prefixes=log_line_prefixes,
+            log_prefix_template=self._log_line_prefix_template,
+            per_rank_log_prefix_context=per_rank_log_prefix_context,
             start_method=self._start_method,
             numa_options=spec.numa_options,
         )
