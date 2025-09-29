@@ -2518,7 +2518,6 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
             
         for y_dtype in [torch.float16, torch.bfloat16, torch.float32, torch.float64]:
             for x_dtype in [torch.float16, torch.bfloat16, torch.float32, torch.float64]:
-                print(f"y_dtype={y_dtype}, x_dtype={x_dtype}")
                 y = torch.tensor([y], dtype=y_dtype, device="cuda")
                 x = torch.tensor([x], dtype=x_dtype, device="cuda")
                 
