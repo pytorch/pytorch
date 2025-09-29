@@ -5,10 +5,6 @@ from typing import Union
 
 import torch
 import torch.distributed as dist
-
-# The two imports below are not always available depending on the
-# USE_DISTRIBUTED compile flag. Make sure they raise import error
-# if we're trying to use them.
 from torch.distributed import group, ProcessGroup
 
 
