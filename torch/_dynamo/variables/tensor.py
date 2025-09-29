@@ -590,9 +590,9 @@ class TensorVariable(VariableTracker):
         if idxes is None:
             idxes = range(length)
         else:
-            assert len(idxes) == length, (
-                f"Can't unpack a tensor of {length} rows into a tuple of {len(idxes)} elements."
-            )
+            assert (
+                len(idxes) == length
+            ), f"Can't unpack a tensor of {length} rows into a tuple of {len(idxes)} elements."
         return [
             wrap_fx_proxy_cls(target_cls=type(self), tx=tx, proxy=self.as_proxy()[i])
             for i in idxes
@@ -1103,7 +1103,7 @@ class TensorVariable(VariableTracker):
             #   value.requires_grad is True => self.has_grad_fn becomes True
 
             # Not sure if __setitem__ can ever save activations, disabling just in case
-            with torch._dynamo.utils._disable_saved_tensors_hooks_during_tracing():
+            with torch._dynamo.utils._disable_saved_tensors_hooks_during_tracing(), tx.fake_mode.shape_env.ignore_fresh_unbacked_symbols():
                 get_fake_value(proxy.node, tx, allow_non_graph_fake=False)
 
             example_value = self.proxy.node.meta.get("example_value")

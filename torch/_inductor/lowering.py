@@ -1859,7 +1859,7 @@ def select(x, dim, idx):
     assert unbacked_bindings is not None
     assert len(unbacked_bindings) == 1, unbacked_bindings
     unbacked_offset_sym, _ = next(iter(unbacked_bindings.items()))
-
+    x.realize()
     new_size = x.get_size()
     new_stride = x.get_stride()
     new_storage_offset = unbacked_offset_sym
