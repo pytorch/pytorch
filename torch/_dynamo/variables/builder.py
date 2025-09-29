@@ -44,6 +44,7 @@ import sympy
 
 import torch
 from torch import SymInt
+from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import (
     get_metrics_context,
     is_int_specialization_case,
@@ -59,6 +60,7 @@ from torch._subclasses.meta_utils import is_sparse_any, safe_grad
 from torch._utils_internal import justknobs_check
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental._dynamism import normalize_source_name
+from torch.fx.experimental.sym_node import _DynamicScalar, DynamicInt
 from torch.fx.experimental.symbolic_shapes import (
     _constrain_range_for_size,
     _nested_int_aware_sort,
@@ -100,6 +102,7 @@ from ..source import (
     ConvertIntSource,
     DictGetItemSource,
     DictSubclassGetItemSource,
+    DynamicScalarSource,
     FloatTensorSource,
     GetItemSource,
     GradSource,
@@ -168,10 +171,10 @@ from .constant import ConstantVariable, EnumVariable
 from .ctx_manager import (
     AutocastModeVariable,
     DynamoConfigPatchVariable,
+    ErrorOnGraphBreakVariable,
     EventVariable,
     NullContextVariable,
     PreserveVersionContextVariable,
-    SetFullgraphVariable,
     StreamContextVariable,
     StreamVariable,
 )
@@ -205,7 +208,10 @@ from .functions import (
     UserMethodVariable,
     WrapperUserFunctionVariable,
 )
-from .higher_order_ops import TorchHigherOrderOperatorVariable
+from .higher_order_ops import (
+    LocalMapWrappedHigherOrderVariable,
+    TorchHigherOrderOperatorVariable,
+)
 from .iter import ItertoolsVariable
 from .lazy import LazyVariableTracker
 from .lists import (
@@ -452,7 +458,9 @@ class VariableBuilder:
             # should NOT track them. If we use a single SymNodeVariable instance to track them
             # across multiple uses, then guards created for one usage will incorrectly apply to
             # all other usages of that constant, leading to unnecessary recompilations.
-            return is_torch_sym(value) and isinstance(vt, SymNodeVariable)
+            return (
+                is_torch_sym(value) or isinstance(value, _DynamicScalar)
+            ) and isinstance(vt, SymNodeVariable)
 
         if (
             (
@@ -630,7 +638,7 @@ class VariableBuilder:
 
         from ..decorators import (
             DynamoConfigPatchProxy,
-            SetFullgraphDecoratorContextManager,
+            ErrorOnGraphBreakDecoratorContextManager,
         )
 
         if has_triton():
@@ -707,7 +715,7 @@ class VariableBuilder:
             result = NamedTupleVariable(
                 output, tuple_cls=type(value), source=self.source
             )
-            return result
+            return self.tx.output.side_effects.track_object_existing(value, result)
         elif istype(value, (dict, collections.defaultdict, collections.OrderedDict)):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             all_const = all(ConstantVariable.is_literal(k) for k in value.keys())
@@ -849,6 +857,8 @@ class VariableBuilder:
             return build_checkpoint_variable(source=self.source)
         elif is_invoke_subgraph(value):
             return build_invoke_subgraph_variable(source=self.source)
+        elif LocalMapWrappedHigherOrderVariable.should_wrap_in_hop(value):
+            return LocalMapWrappedHigherOrderVariable.build(source=self.source)
         elif isinstance(value, functools.partial):
             func_src = AttrSource(self.get_source(), "func")
             func_obj = VariableBuilder(self.tx, func_src)(value.func)
@@ -988,8 +998,8 @@ class VariableBuilder:
             )
         elif isinstance(value, DynamoConfigPatchProxy):
             return DynamoConfigPatchVariable(value.changes)
-        elif isinstance(value, SetFullgraphDecoratorContextManager):
-            return SetFullgraphVariable(value.fullgraph)
+        elif isinstance(value, ErrorOnGraphBreakDecoratorContextManager):
+            return ErrorOnGraphBreakVariable(value.error_on_graph_break)
         elif callable(value) and trace_rules.lookup_callable(value) is not None:
             if trace_rules.is_callable_allowed(value):
                 self.tx.output.has_user_defined_allowed_in_graph = True
@@ -1097,6 +1107,46 @@ class VariableBuilder:
         ):
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return ItertoolsVariable(value, source=self.source)
+        elif isinstance(value, _DynamicScalar):
+            is_int = isinstance(value, DynamicInt)
+            source = DynamicScalarSource(self.source, is_int)
+            if id(value) in self.tx.output.root_tracer.dynamic_scalar_nodes:
+                # If we've already seen this dynamic scalar, reuse the existing
+                # SymInt/SymFloat node.
+                node = self.tx.output.root_tracer.dynamic_scalar_nodes[id(value)]
+            else:
+                sym = self.tx.output.shape_env.create_unspecified_symbol(
+                    value.real,
+                    source=source,
+                    dynamic_dim=DimDynamic.DYNAMIC,
+                )
+                node = self.tx.output.shape_env.create_symintnode(
+                    sym,
+                    hint=value.real,
+                    source=source,
+                )
+
+            # Bind to graph input
+            sym_node_proxy = self.tx.output.root_tracer.create_graph_input(
+                re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
+                type(node),
+                node,
+                source=source,
+            )
+            sym_node_proxy.node.meta["grapharg"] = GraphArg(
+                source,
+                node,
+                False,
+                None,
+                is_tensor=False,
+                example_strong_ref=node,
+            )
+            sym_expr = node.node.expr
+            assert isinstance(sym_expr, sympy.Symbol), (
+                f"{sym_expr} is not a basic Symbol."
+            )
+            self.tx.output.tracked_fakes.append(TrackedFake(node, source, None))
+            return SymNodeVariable(sym_node_proxy, node)
         elif is_torch_sym(value):
             # Note: this doesn't handle nested symints.
             # For SymBool input, we reuse the infra for SymInt by simulating SymBool with a SymInt in dynamo.
@@ -2983,6 +3033,11 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
             torch.backends.cuda.is_flash_attention_available,
             torch.backends.cuda.can_use_flash_attention,
             torch.backends.cuda.can_use_efficient_attention,
+            torch._C._get_cudnn_sdp_enabled,
+            torch._C._get_flash_sdp_enabled,
+            torch._C._get_mem_efficient_sdp_enabled,
+            torch._C._get_math_sdp_enabled,
+            torch._C._get_overrideable_sdp_enabled,
             "is_integer",
         ]
         + list(supported_const_comparison_op_values.keys())
@@ -2991,12 +3046,8 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
         return ConstantVariable.create(example_value, **options)
     elif isinstance(example_value, (int, float, bool)) and (
         proxy.node.target is call_torchbind
-    ):
-        set_example_value(proxy.node, example_value)
-        return ConstantVariable.create(example_value, **options)
-    elif (
-        isinstance(example_value, (int, float, bool))
-        and proxy.node.target is flat_apply
+        or proxy.node.target is flat_apply
+        or (proxy.node.op == "call_method" and proxy.node.target == "item")
     ):
         set_example_value(proxy.node, example_value)
         return ConstantVariable.create(example_value, **options)
@@ -3501,13 +3552,19 @@ def wrap_to_fake_tensor_and_record(
             type(e),
         )
 
-        fake_e = wrap_fake_exception(
-            lambda: tx.fake_mode.from_tensor(
-                e,
-                source=source,
-                symbolic_context=symbolic_context,
+        # Note [enable_python_dispatcher in dynamo]
+        # Dynamo disables itself when it runs fake tensor prop, which means that tensor subclasses
+        # have no way to know (purely based off of global state) if they are currently being run under compile or not.
+        # we use enable_python_dispatcher mainly to tweak the DispatchKeyState so that subclass authors
+        # can check it to know if they are running in an eager context or not
+        with enable_python_dispatcher():
+            fake_e = wrap_fake_exception(
+                lambda: tx.fake_mode.from_tensor(
+                    e,
+                    source=source,
+                    symbolic_context=symbolic_context,
+                )
             )
-        )
         if (
             source is not None
             and isinstance(fake_e, FakeTensor)

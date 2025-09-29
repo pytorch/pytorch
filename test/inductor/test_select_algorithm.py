@@ -393,6 +393,31 @@ class TestSelectAlgorithm(TestCase):
         # Autotuning checks correctness of each version
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
+    @patches
+    @torch._inductor.config.patch(conv_1x1_as_mm=False)
+    def test_convolution2_group(self):
+        @torch.compile
+        def foo(x, w, b):
+            return aten.convolution(
+                x,
+                w,
+                b,
+                stride=(1, 1),
+                padding=(1, 1),
+                dilation=(1, 1),
+                transposed=False,
+                output_padding=(0, 0),
+                groups=32,  # group is not 1
+            )
+
+        foo(
+            torch.randn(1, 32, 16, 16, device=GPU_TYPE),
+            torch.randn(32, 1, 3, 3, device=GPU_TYPE),
+            torch.randn(32, device=GPU_TYPE),
+        )
+        # Autotuning checks correctness of each version
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+
     def test_TritonTemplateCaller_str(self):
         """
         Make sure str(TritonTemplateCaller) does not raise exceptions.

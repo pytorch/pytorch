@@ -681,7 +681,7 @@ class Pipe(torch.nn.Module):
         ``output_loss_value_spec={'loss': True, 'model_out': False}``
         """
 
-        traced = exported_program.module()
+        traced = exported_program.module(check_guards=False)
 
         if split_policy is not None:
             logger.info("Auto-splitting model")
@@ -1002,9 +1002,7 @@ class Pipe(torch.nn.Module):
     ) -> ExportedProgram:
         logger.info("Tracing model ...")
         try:
-            ep = torch.export.export_for_training(
-                mod, example_args, example_kwargs, strict=True
-            )
+            ep = torch.export.export(mod, example_args, example_kwargs, strict=True)
         except Exception as e:
             raise RuntimeError(
                 "It seems that we cannot capture your model as a full graph. "

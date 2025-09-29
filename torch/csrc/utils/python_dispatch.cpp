@@ -2,6 +2,7 @@
 #include <torch/csrc/utils/python_dispatch.h>
 
 #include <ATen/ATen.h>
+#include <ATen/DTensorState.h>
 #include <ATen/FuncTorchTLS.h>
 #include <ATen/FunctionalTensorWrapper.h>
 #include <ATen/TensorSubclassLikeUtils.h>
@@ -79,40 +80,6 @@ inline static torch::CppFunction dispatch_str(const char* key, Func&& raw_f) {
     return f;
   }
 }
-
-struct EnableHermeticPyObject {
-  EnableHermeticPyObject()
-      : old_(c10::impl::HermeticPyObjectTLS::get_state()),
-        old_excluded_python_(
-            c10::impl::tls_is_dispatch_key_excluded(at::DispatchKey::Python)),
-        old_python_(
-            c10::impl::tls_is_dispatch_key_included(at::DispatchKey::Python)),
-        old_python_snapshot_(c10::impl::tls_is_dispatch_key_included(
-            at::DispatchKey::PythonTLSSnapshot)) {
-    c10::impl::HermeticPyObjectTLS::set_state(true);
-    c10::impl::tls_set_dispatch_key_excluded(at::DispatchKey::Python, true);
-    c10::impl::tls_set_dispatch_key_included(at::DispatchKey::Python, false);
-    c10::impl::tls_set_dispatch_key_included(
-        at::DispatchKey::PythonTLSSnapshot, false);
-  }
-  ~EnableHermeticPyObject() {
-    c10::impl::HermeticPyObjectTLS::set_state(old_);
-    c10::impl::tls_set_dispatch_key_excluded(
-        at::DispatchKey::Python, old_excluded_python_);
-    c10::impl::tls_set_dispatch_key_included(
-        at::DispatchKey::Python, old_python_);
-    c10::impl::tls_set_dispatch_key_included(
-        at::DispatchKey::PythonTLSSnapshot, old_python_snapshot_);
-  }
-  EnableHermeticPyObject(const EnableHermeticPyObject&) = delete;
-  EnableHermeticPyObject(EnableHermeticPyObject&&) = delete;
-  EnableHermeticPyObject& operator=(const EnableHermeticPyObject&) = delete;
-  EnableHermeticPyObject& operator=(EnableHermeticPyObject&&) = delete;
-  bool old_;
-  bool old_excluded_python_;
-  bool old_python_;
-  bool old_python_snapshot_;
-};
 
 class PythonKernelHolder : public c10::OperatorKernel {
   c10::SafePyObject func_;
@@ -1044,6 +1011,13 @@ void initDispatchBindings(PyObject* module) {
 
   m.def("_only_lift_cpu_tensors", &torch::utils::only_lift_cpu_tensors);
   m.def("_set_only_lift_cpu_tensors", &torch::utils::set_only_lift_cpu_tensors);
+
+  m.def(
+      "_get_dtensor_allow_implicit_replication",
+      &at::get_dtensor_allow_implicit_replication);
+  m.def(
+      "_set_dtensor_allow_implicit_replication",
+      &at::set_dtensor_allow_implicit_replication);
 
   using c10::impl::TorchDispatchModeKey;
   py::enum_<TorchDispatchModeKey>(m, "_TorchDispatchModeKey")

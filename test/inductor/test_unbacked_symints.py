@@ -490,6 +490,22 @@ class TestUnbackedSymints(InductorTestCase):
         torch.testing.assert_close(actual, expected)
 
     @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
+    def test_softmax(self, device):
+        def fn(x):
+            nz = x.nonzero().float()
+            soft = torch.softmax(nz, dim=0)
+            logsoft = torch.nn.functional.log_softmax(nz, dim=0)
+            return soft * logsoft
+
+        example_inputs = (
+            torch.randint(low=0, high=2, size=(32,), device=device, dtype=torch.int8),
+        )
+        actual = torch.compile(fn, fullgraph=True)(*example_inputs)
+        expected = fn(*example_inputs)
+        torch.testing.assert_close(actual, expected)
+
+    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
     @skipIfXpu(msg="_scaled_dot_product_flash_attention is not supported on XPU yet")
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     def test_sdpfa(self, device):
@@ -560,6 +576,33 @@ class TestUnbackedSymints(InductorTestCase):
             return unbacked_size.int()
 
         example_inputs = (torch.tensor(16, device=device),)
+        actual = torch.compile(fn, fullgraph=True)(*example_inputs)
+        expected = fn(*example_inputs)
+        torch.testing.assert_close(actual, expected)
+
+    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
+    @inductor_config.patch({"combo_kernels": True, "benchmark_combo_kernel": True})
+    def test_combo_kernel_size_hint_failure(self, device):
+        # A size hint failure is "TypeError: Cannot convert symbols to int"
+        if device == "cpu":
+            raise unittest.SkipTest("Combo kernels must be for GPU.")
+
+        def fn(x):
+            nz = torch.nonzero(x)
+            u0 = nz.size(0)
+            t1 = torch.ones(u0, device=device)
+            t2 = torch.zeros(u0 + 1, device=device)
+            t3 = torch.zeros(u0 * 2, device=device)
+            t4 = torch.zeros(u0 - x.size(0), device=device)
+            out1 = t1 - 1
+            out2 = t2 + 2
+            out3 = t3 * 3
+            out4 = t4 / 4
+            return out1, out2, out3, out4
+
+        example_inputs = (torch.randn(32, device=device, dtype=torch.float16),)
+        torch._dynamo.mark_dynamic(example_inputs[0], 0)
         actual = torch.compile(fn, fullgraph=True)(*example_inputs)
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)

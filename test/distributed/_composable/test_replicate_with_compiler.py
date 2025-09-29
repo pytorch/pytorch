@@ -98,6 +98,8 @@ class ReplicateTest(MultiProcessInductorTestCase):
         self.create_pg(device)
         torch._dynamo.config.optimize_ddp = "python_reducer"
         torch.manual_seed(123)
+        if device_type == "xpu":
+            torch.use_deterministic_algorithms(True, warn_only=True)
         model = Net(checkpoint=checkpoint).to(device)
         input = torch.randn([1, DIM], device=device)
 

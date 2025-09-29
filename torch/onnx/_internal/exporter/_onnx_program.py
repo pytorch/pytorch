@@ -128,7 +128,7 @@ def _to_numpy_array(input: torch.Tensor | int | float | str | bool) -> np.ndarra
 
 def _from_numpy_array(array: np.ndarray) -> torch.Tensor:
     """Convert a NumPy array to a PyTorch tensor."""
-    import ml_dtypes
+    import ml_dtypes  # type: ignore[import-not-found]
     import numpy as np
 
     if array.dtype == ml_dtypes.bfloat16:

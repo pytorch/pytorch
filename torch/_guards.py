@@ -27,7 +27,6 @@ from typing import (
 
 import torch
 from torch.utils import _pytree as pytree
-from torch.utils._backport_slots import dataclass_slots
 from torch.utils._traceback import CapturedTraceback, format_frame
 from torch.utils.weak import WeakTensorKeyDictionary
 
@@ -41,6 +40,7 @@ if TYPE_CHECKING:
 
     import sympy
 
+    from torch._dynamo.backends.distributed import DDPOptimizerContext
     from torch._dynamo.codegen import PyCodegen
     from torch._functorch._aot_autograd.schemas import ViewAndMutationMeta
     from torch._subclasses.fake_tensor import FakeTensorMode
@@ -240,8 +240,7 @@ class ShapeGuard(NamedTuple):
     size_oblivious: bool
 
 
-@dataclass_slots
-@dataclasses.dataclass
+@dataclasses.dataclass(slots=True)
 class Guard:
     # originating_source is the source that called the make_guard method to
     # construct this guard object. The property name specifies what exactly it
@@ -868,6 +867,8 @@ class TracingContext:
         self.loc_in_frame: Optional[tuple[str, int, str]] = None
         # this is only set after aot_autograd
         self.fw_metadata: Optional[ViewAndMutationMeta] = None
+        # this is only set when the DDPOptimizer is used
+        self.ddp_optimizer_ctx: Optional[DDPOptimizerContext] = None
         # this is only set after aot_autograd
         self.aot_graph_name: Optional[list[str]] = None
         self.params_flat: Optional[list[Any]] = None

@@ -249,8 +249,10 @@ class ResumeFunctionMetadata:
     prefix_block_target_offset_remap: list[int] = dataclasses.field(
         default_factory=list
     )
-    # map from new block target offsets to original block target offsets
-    block_target_offset_remap: Optional[dict[int, int]] = None
+    # per-offset map from new block target offsets to original block target offsets
+    block_target_offset_remap: dict[int, dict[int, int]] = dataclasses.field(
+        default_factory=dict
+    )
 
 
 def _filter_iter(
@@ -588,7 +590,7 @@ class ContinueExecutionCache:
         meta: ResumeFunctionMetadata = ContinueExecutionCache.generated_code_metadata[
             code
         ]
-        new_offset = None
+        new_offset = -1
 
         def find_new_offset(
             instructions: list[Instruction], code_options: dict[str, Any]
@@ -602,17 +604,21 @@ class ContinueExecutionCache:
                 if i1 is target
             )
             assert target.opcode == new_target.opcode
+            assert new_target.offset is not None
             new_offset = new_target.offset
 
         transform_code_object(code, find_new_offset)
+        assert new_offset >= 0
 
         if sys.version_info >= (3, 11):
             # setup_fn_target_offsets currently contains the target offset of
             # each setup_fn, based on `code`. When we codegen the resume function
             # based on the original code object, `meta.code`, the offsets in
             # setup_fn_target_offsets must be based on `meta.code` instead.
-            if not meta.block_target_offset_remap:
-                block_target_offset_remap = meta.block_target_offset_remap = {}
+            if new_offset not in meta.block_target_offset_remap:
+                block_target_offset_remap = meta.block_target_offset_remap[
+                    new_offset
+                ] = {}
 
                 def remap_block_offsets(
                     instructions: list[Instruction], code_options: dict[str, Any]
@@ -660,7 +666,8 @@ class ContinueExecutionCache:
 
             # if offset is not in setup_fn_target_offsets, it is an error
             setup_fn_target_offsets = tuple(
-                meta.block_target_offset_remap[n] for n in setup_fn_target_offsets
+                meta.block_target_offset_remap[new_offset][n]
+                for n in setup_fn_target_offsets
             )
         return ContinueExecutionCache.lookup(
             meta.code, lineno, new_offset, setup_fn_target_offsets, *args

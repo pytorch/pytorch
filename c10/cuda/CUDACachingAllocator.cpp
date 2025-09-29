@@ -504,7 +504,16 @@ struct ExpandableSegment {
   SegmentRange share(SegmentRange range, std::ostream& buf) {
     auto begin = segmentLeft(range.ptr);
     auto end = segmentRight(range.ptr + range.size);
-    ShareHeader header{getpid(), segment_size_, end - begin};
+
+    // header.pid needs to be padded with 4 bytes and initialized with
+    // 0 values ​​to avoid random padding of different bytes each time,
+    // thereby ensuring that the handle can be correctly matched in
+    // ipcMemHandle_to_devptr.
+    ShareHeader header{};
+    header.pid = getpid();
+    header.segment_size = segment_size_;
+    header.num_handles = end - begin;
+
     buf.write((const char*)&header, sizeof(ShareHeader));
     for (auto i : c10::irange(begin, end)) {
       // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
@@ -1641,8 +1650,13 @@ class DeviceCachingAllocator {
       cudaGraph_t graph{};
       const cudaGraphNode_t* deps = nullptr;
       size_t num_deps = 0;
+#if (defined(CUDA_VERSION) && CUDA_VERSION >= 13000)
+      C10_CUDA_CHECK(cudaStreamGetCaptureInfo(
+          stream, &status, nullptr, &graph, &deps, nullptr, &num_deps));
+#else
       C10_CUDA_CHECK(cudaStreamGetCaptureInfo_v2(
           stream, &status, nullptr, &graph, &deps, &num_deps));
+#endif
 
       TORCH_INTERNAL_ASSERT(
           status != cudaStreamCaptureStatusInvalidated,
@@ -1654,8 +1668,13 @@ class DeviceCachingAllocator {
 
       cudaGraphNode_t node{};
       C10_CUDA_CHECK(cudaGraphAddEmptyNode(&node, graph, deps, num_deps));
+#if (defined(CUDA_VERSION) && CUDA_VERSION >= 13000)
+      C10_CUDA_CHECK(cudaStreamUpdateCaptureDependencies(
+          stream, &node, nullptr, 1, cudaStreamSetCaptureDependencies));
+#else
       C10_CUDA_CHECK(cudaStreamUpdateCaptureDependencies(
           stream, &node, 1, cudaStreamSetCaptureDependencies));
+#endif
       empty_nodes.push_back(node);
       return true;
     };
@@ -1689,13 +1708,19 @@ class DeviceCachingAllocator {
     const cudaGraphNode_t* dependencies = nullptr;
     size_t num_dependencies = 0;
 
-    C10_CUDA_CHECK(cudaStreamGetCaptureInfo_v2(
+#if (defined(CUDA_VERSION) && CUDA_VERSION >= 13000)
+    C10_CUDA_CHECK(cudaStreamGetCaptureInfo(
         stream,
         &status,
-        /*id=*/nullptr,
+        nullptr,
         &graph,
         &dependencies,
+        nullptr,
         &num_dependencies));
+#else
+    C10_CUDA_CHECK(cudaStreamGetCaptureInfo_v2(
+        stream, &status, nullptr, &graph, &dependencies, &num_dependencies));
+#endif
 
     TORCH_INTERNAL_ASSERT(
         status == cudaStreamCaptureStatusActive,
@@ -1724,14 +1749,26 @@ class DeviceCachingAllocator {
       return {};
     }
 
-    // Helper to retrieve all parent nodes (dependencies) of a given node.
-    auto get_parents = [](cudaGraphNode_t n) -> std::vector<cudaGraphNode_t> {
-      size_t count = 0;
+    auto get_dependencies = [](cudaGraphNode_t node,
+                               cudaGraphNode_t* pDependencies,
+                               size_t* pNumDependencies) -> void {
+#if (defined(CUDA_VERSION) && CUDA_VERSION >= 13000)
+      C10_CUDA_CHECK(cudaGraphNodeGetDependencies(
+          node, pDependencies, nullptr, pNumDependencies));
+#else
       C10_CUDA_CHECK(
-          cudaGraphNodeGetDependencies(n, /*pDependencies=*/nullptr, &count));
+          cudaGraphNodeGetDependencies(node, pDependencies, pNumDependencies));
+#endif
+    };
+
+    // Helper to retrieve all parent nodes (dependencies) of a given node.
+    auto get_parents =
+        [&](cudaGraphNode_t node) -> std::vector<cudaGraphNode_t> {
+      size_t count = 0;
+      get_dependencies(node, nullptr, &count);
       std::vector<cudaGraphNode_t> out(count);
       if (count) {
-        C10_CUDA_CHECK(cudaGraphNodeGetDependencies(n, out.data(), &count));
+        get_dependencies(node, out.data(), &count);
         out.resize(count);
       }
       return out;
@@ -3209,8 +3246,8 @@ class DeviceCachingAllocator {
           --it;
         }
         if (!(*cur)->expandable_segment_) {
-          release_block(*cur, context);
           totalReleased += (*cur)->size;
+          release_block(*cur, context);
         }
         if (is_first) {
           break;

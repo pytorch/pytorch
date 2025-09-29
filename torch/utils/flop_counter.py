@@ -834,7 +834,8 @@ class _FlopCounterMode(TorchDispatchMode):
         kwargs = kwargs if kwargs else {}
 
         # Skip ops from non-standard dispatch_sizes_strides_policy such as NJT
-        if func in {torch.ops.aten.is_contiguous.default,
+        if func in {torch.ops.aten.sym_is_contiguous.default,
+                    torch.ops.aten.is_contiguous.default,
                     torch.ops.aten.is_contiguous.memory_format,
                     torch.ops.aten.is_strides_like_format.default,
                     torch.ops.aten.is_non_overlapping_and_dense.default,

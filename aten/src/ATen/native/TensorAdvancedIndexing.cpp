@@ -2174,7 +2174,7 @@ static void _scatter_via_index_put(
   if (self.dim() == 1 || broadcast_index) {
     Tensor squeezed = index;
     if (broadcast_index && index.dim() > 1) {
-      for (const auto d : c10::irange(index.dim())) {
+      for (int64_t d = index.dim() - 1; d >= 0; --d) {
         if (d == dim) {
           continue;
         }
