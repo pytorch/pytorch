@@ -219,7 +219,6 @@ def _convert_guards_code_to_fn(
     return guards_fn
 
 
-@torch._dynamo.disable
 def _check_input_constraints_for_module(self, args, kwargs):
     flat_args_with_path = _check_inputs_match(args, kwargs, self._in_spec)
     _check_input_constraints_for_graph(
@@ -241,8 +240,11 @@ def _check_input_constraints_pre_hook(self, args, kwargs):
         _check_inputs_match(args, kwargs, self._in_spec)
         return
 
-    # NOTE: this call is Dynamo disabled, as it used to be
-    _check_input_constraints_for_module(self, args, kwargs)
+    # NOTE: for some reason, Dynamo is tracing into this, we should see why and
+    # put compile at the right place. Until then, we can skip the input
+    # constraint checks.
+    if not torch.compiler.is_dynamo_compiling():
+        _check_input_constraints_for_module(self, args, kwargs)
 
 
 def _unlift_inputs_as_getattr(
