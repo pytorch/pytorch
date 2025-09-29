@@ -508,6 +508,17 @@ if not IS_WINDOWS:
             self.assertNotEqual(result.data_ptr(), expected.data_ptr())
             self.assertEqual(result.stride(), expected.stride())
 
+        def test_my_element_wise_clone(self, device):
+            # tests tensor accessor
+            import libtorch_agnostic
+
+            for dtype in [torch.float16, torch.float32, torch.float64]:
+                for shape in [(3,), (3, 4)]:
+                    t = torch.empty(shape, device=device, dtype=dtype)
+                    result = libtorch_agnostic.ops.my_element_wise_clone(t)
+                    expected = t.clone()
+                    self.assertEqual(result, expected)
+
     instantiate_device_type_tests(TestLibtorchAgnostic, globals(), except_for=None)
 
 if __name__ == "__main__":
