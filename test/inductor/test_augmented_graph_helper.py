@@ -1,4 +1,4 @@
-# Owner(s): ["module: inductor"] torc
+# Owner(s): ["module: inductor"]
 import operator
 
 import torch
