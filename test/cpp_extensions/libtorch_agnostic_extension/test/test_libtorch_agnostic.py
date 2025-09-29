@@ -360,6 +360,7 @@ if not IS_WINDOWS:
                 STABLE_DISPATCH_FLOATING_TYPES=(torch.float32, torch.float64),
                 STABLE_DISPATCH_COMPLEX_TYPES=(torch.complex64, torch.complex128),
                 STABLE_DISPATCH_REDUCED_FLOATING_TYPES=(torch.float16, torch.bfloat16),
+                STABLE_DISPATCH_SUPPORTED_TYPES=get_supported_dtypes(),
             )
             dispatch_with_dtypes.update(
                 STABLE_DISPATCH_ALL_TYPES=dispatch_with_dtypes[
@@ -506,6 +507,17 @@ if not IS_WINDOWS:
             self.assertEqual(result, expected)
             self.assertNotEqual(result.data_ptr(), expected.data_ptr())
             self.assertEqual(result.stride(), expected.stride())
+
+        def test_my_element_wise_clone(self, device):
+            # tests tensor accessor
+            import libtorch_agnostic
+
+            for dtype in [torch.float16, torch.float32, torch.float64]:
+                for shape in [(3,), (3, 4)]:
+                    t = torch.empty(shape, device=device, dtype=dtype)
+                    result = libtorch_agnostic.ops.my_element_wise_clone(t)
+                    expected = t.clone()
+                    self.assertEqual(result, expected)
 
     instantiate_device_type_tests(TestLibtorchAgnostic, globals(), except_for=None)
 

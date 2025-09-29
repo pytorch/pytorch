@@ -368,11 +368,7 @@ class Shard(Placement):
         return f"S({self.dim})"
 
 
-# kw_only is only available in python >= 3.10
-kw_only_dataclass = dict(kw_only=True) if "kw_only" in dataclass.__kwdefaults__ else {}
-
-
-@dataclass(frozen=True, **kw_only_dataclass)
+@dataclass(frozen=True, kw_only=True)
 class _StridedShard(Shard):
     """
     _StridedShard is only introduced to support 2D FSDP2 + TP sharding where the tensor
