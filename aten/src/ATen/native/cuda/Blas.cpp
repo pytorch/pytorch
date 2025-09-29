@@ -418,17 +418,7 @@ bool launchGemmAndBiasCudaLt(
     const Scalar& alpha,
     Activation activation = Activation::None
 ) {
-  const auto* self_ptr = [&]() -> const scalar_t* {
-    auto* bias_ptr = self.data_ptr<scalar_t>();
-    #ifdef USE_ROCM
-    // This condition is needed for mm case on ROCm for hipblasLt path.
-    // Passing the bias ptr as null to avoid accuracy issues for mm case.
-    if (args.result->is_same(self)) {
-      bias_ptr = nullptr;
-    }
-    #endif
-    return const_cast<scalar_t*>(bias_ptr);
-  }();
+  const auto* self_ptr = self.const_data_ptr<scalar_t>();
 
   const auto tuning_ctx = at::cuda::tunable::getTuningContext();
   if (tuning_ctx->IsTunableOpEnabled()) {
