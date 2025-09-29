@@ -3579,7 +3579,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             elif isinstance(value, tuple):
                 masked_value = [_mask_value(v, d) for v, d in zip(value, default)]  # type: ignore[arg-type]
             elif reduction_type == "dot":
-                # We don't need where condition in native matmul.
+                # Here, we don't perform the masking.
+                # Masking w/ where condition in native matmul is handled in ops.dot codegen.
+                # Since tl.dot performs reduction within the triton block, 
+                # masking should happen before the tl.dot is called.
                 masked_value = self.cse.generate(self.compute, value, dtype=value.dtype)
             else:
                 masked_value = _mask_value(value, default)
