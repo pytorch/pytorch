@@ -265,7 +265,7 @@ class Dispatcher:
         return od
 
     def __call__(self, *args, **kwargs):
-        types = tuple([type(arg) for arg in args])
+        types = tuple(type(arg) for arg in args)
         try:
             func = self._cache[types]
         except KeyError as e:
@@ -420,7 +420,7 @@ class MethodDispatcher(Dispatcher):
         return self
 
     def __call__(self, *args, **kwargs):
-        types = tuple([type(arg) for arg in args])
+        types = tuple(type(arg) for arg in args)
         func = self.dispatch(*types)
         if not func:
             raise NotImplementedError(
