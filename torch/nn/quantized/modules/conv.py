@@ -1,4 +1,3 @@
-# flake8: noqa: F401
 r"""Quantized Modules.
 
 This file is in the process of migration to `torch/ao/nn/quantized`, and
@@ -9,7 +8,6 @@ while adding an import statement here.
 """
 
 from torch.ao.nn.quantized.modules.conv import (
-    _reverse_repeat_padding,
     Conv1d,
     Conv2d,
     Conv3d,

@@ -3,8 +3,6 @@ from typing import Optional, TypeAlias as _TypeAlias, TypeVar, Union
 from torch import Tensor
 
 
-# ruff: noqa: PYI042,PYI047
-
 # Create some useful type aliases
 
 # Template for arguments which can be supplied as a tuple, or which can be a scalar which PyTorch will internally

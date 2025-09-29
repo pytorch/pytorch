@@ -24,9 +24,9 @@ __all__: list[str] = [
 ]
 
 
-_tensor_or_tensors: TypeAlias = Union[  # noqa: PYI042
+_tensor_or_tensors: TypeAlias = Union[
     torch.Tensor,
-    typing.Iterable[torch.Tensor],  # noqa: UP006 - needed until XLA's patch is updated
+    typing.Iterable[torch.Tensor],
 ]
 
 _P = ParamSpec("_P")
