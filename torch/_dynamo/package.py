@@ -441,11 +441,9 @@ class PrecompileCacheEntry:
     def from_cache_entry(
         cache_entry: _DynamoCacheEntry, backends: dict[_BackendId, Any]
     ) -> Optional["PrecompileCacheEntry"]:
-        serializable_codes = []
         backend_content: dict[_BackendId, Any] = {}
 
         for code in cache_entry.codes:
-            skip_code = False
             for backend_id in code.backend_ids:
                 if backend_id not in backends:
                     logger.warning("Backend not found")
@@ -464,17 +462,12 @@ class PrecompileCacheEntry:
                         payload_fn=lambda: debug_str,
                         expect_trace_id=False,
                     )
-                    skip_code = True
+                    code.bypassed = True
                     break
                 else:
                     backend_content[backend_id] = backends[backend_id]
-            if not skip_code:
-                serializable_codes.append(code)
-        if serializable_codes:
-            cache_entry.codes = serializable_codes
-            return PrecompileCacheEntry(dynamo=cache_entry, backends=backend_content)
-        else:
-            return None
+
+        return PrecompileCacheEntry(dynamo=cache_entry, backends=backend_content)
 
 
 def _hash_source(source: str) -> str:
@@ -669,10 +662,6 @@ class CompilePackage:
         try:
             yield
         finally:
-            if (
-                entry.bypassed
-            ):  # Remove the code from the cache entry if it's been bypassed
-                del self._codes[code]
             entry.has_compile_id = True
             self._current_entry = None
 
@@ -767,6 +756,8 @@ class CompilePackage:
 
         self.uninstall()
         for code, entry in self._codes.items():
+            if entry.bypassed:
+                continue
             context = (
                 _compile_frame_context(code)
                 if entry.has_compile_id
