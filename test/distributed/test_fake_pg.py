@@ -238,11 +238,7 @@ class TestFakePG(TestCase):
 
         store = FakeStore()
         dist.init_process_group(
-            backend="fake",
-            rank=0,
-            world_size=2,
-            store=store,
-            pg_options=options
+            backend="fake", rank=0, world_size=2, store=store, pg_options=options
         )
 
         # These should now raise errors

@@ -239,7 +239,7 @@ class FakeProcessGroup : public Backend {
 
   void checkCollectiveError() {
     TORCH_CHECK(
-        !options || !options_->error_on_collective,
+        !options_ || !options_->error_on_collective,
         "FakeProcessGroup collective operation error (error_on_collective=true)");
   }
 };
