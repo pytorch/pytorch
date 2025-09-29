@@ -151,7 +151,7 @@ struct CUDACachingHostAllocatorImpl
   }
 
   bool query_event(EventPool::Event& event) override {
-    // Do not call cudaEventQuery if captureing is underway
+    // Do not call cudaEventQuery if capturing is underway
     if (at::cuda::currentStreamCaptureStatusMayInitCtx() !=
         at::cuda::CaptureStatus::None) {
       return false;
