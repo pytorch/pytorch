@@ -1659,6 +1659,7 @@ _scaled_mm_cuda(const Tensor& mat_a, const Tensor& mat_b,
           bool use_fast_accum) {
   const auto out_dtype_ = out_dtype.value_or(mat_a.scalar_type());
   Tensor out = at::empty({0}, mat_a.options().dtype(out_dtype_));
+
   return _scaled_mm_out_cuda(mat_a, mat_b, scale_a, scale_b, bias, scale_result, out_dtype, use_fast_accum, out);
 }
 
@@ -1883,7 +1884,7 @@ std::vector<std::tuple<std::string, acceptance_fn, ScaledGemmImplementation>> sc
   { "rowwise_rowwise", check_rowwise_recipe, ScaledGemmImplementation::ROWWISE_ROWWISE},
   { "block_1x128_128x128", std::bind(check_deepseek_recipe, ScalingType::BlockWise1x128, ScalingType::BlockWise128x128, _1, _2, _3, _4, _5, _6),
     ScaledGemmImplementation::BLOCK_1x128_128x128},
-  { "block_128x128_1x128", std::bind(check_deepseek_recipe, ScalingType::BlockWise128x128, ScalingType::BlockWise128x128, _1, _2, _3, _4, _5, _6),
+  { "block_128x128_1x128", std::bind(check_deepseek_recipe, ScalingType::BlockWise128x128, ScalingType::BlockWise1x128, _1, _2, _3, _4, _5, _6),
     ScaledGemmImplementation::BLOCK_128x128_1x128},
   { "block_1x128_1x128", std::bind(check_deepseek_recipe, ScalingType::BlockWise1x128, ScalingType::BlockWise1x128, _1, _2, _3, _4, _5, _6),
     ScaledGemmImplementation::BLOCK_1x128_1x128},
@@ -2087,6 +2088,9 @@ _scaled_rowwise_rowwise(
   TORCH_CHECK(scale_a.numel() == mat_a.size(0) && scale_a.scalar_type() == kFloat, "scale_a must have ", mat_a.size(0), " Float elements, got ", scale_a.numel())
   TORCH_CHECK(scale_b.numel() == mat_b.size(1) && scale_b.scalar_type() == kFloat, "scale_b must have ", mat_b.size(1), " Float elements, got ", scale_b.numel())
 
+  TORCH_CHECK(scale_a.stride(1) == 1); // , "Expected scale_a.stride(0) == 1, got ", scale_a.stride(0));
+  TORCH_CHECK(scale_b.stride(1) == 1); //0, "Expected scale_b.stride(0) == 1, got ", scale_b.stride(0));
+
   auto scaling_choice_a = ScalingType::RowWise;
   auto scaling_choice_b = ScalingType::RowWise;
   //
@@ -2143,10 +2147,14 @@ _scaled_block1x128_block1x128(
       mat_a.scalar_type(), mat_b.scalar_type());
   TORCH_CHECK(scale_a.sizes()[0] == mat_a.sizes()[0] && scale_a.sizes()[1] == mat_a.sizes()[1] / 128 && scale_a.scalar_type() == kFloat,
       "scale_a must have shape ", mat_a.sizes()[0], " x ", mat_a.sizes()[1] / 128, " Float elements, got ", scale_a.sizes())
-  TORCH_CHECK(scale_b.sizes()[0] == mat_b.sizes()[0] && scale_b.sizes()[1] == mat_b.sizes()[1] / 128 && scale_b.scalar_type() == kFloat,
-      "scale_b must have shape ", mat_b.sizes()[0], " x ", mat_b.sizes()[1] / 128, " Float elements, got ", scale_b.sizes())
+  TORCH_CHECK(scale_b.sizes()[0] == ceil_div<int64_t>(mat_b.sizes()[0], 128) && scale_b.sizes()[1] == mat_b.sizes()[1] && scale_b.scalar_type() == kFloat,
+      "scale_b must have shape ", ceil_div<int64_t>(mat_b.sizes()[0], 128), " x ", mat_b.sizes()[1], " Float elements, got ", scale_b.sizes())
 
-  at::native::resize_output(out, {mat_a.sizes()[0], mat_b.sizes()[1]});
+  TORCH_CHECK(scale_a.stride(0) == 1);
+  TORCH_CHECK(scale_b.stride(1) == 1);
+  TORCH_CHECK(scale_b.stride(0) == scale_b.size(1));
+
+  // at::native::resize_output(out, {mat_a.sizes()[0], mat_b.sizes()[1]});
 
   auto scaling_choice_a = ScalingType::BlockWise1x128;
   auto scaling_choice_b = ScalingType::BlockWise1x128;
@@ -2168,12 +2176,14 @@ _scaled_block128x128_block1x128(
   // A, B are FP8, scales are fp32, shape K//128
   TORCH_CHECK(isFloat8Type(mat_a.scalar_type()) && isFloat8Type(mat_b.scalar_type()), "mat_a and mat_b must be fp8 types, got: ",
       mat_a.scalar_type(), mat_b.scalar_type());
-  TORCH_CHECK(scale_a.sizes()[0] == mat_a.sizes()[0] / 128 && scale_a.sizes()[1] == mat_a.sizes()[1] / 128 && scale_a.scalar_type() == kFloat,
-      "scale_a must have shape ", mat_a.sizes()[0] / 128, " x ", mat_a.sizes()[1] / 128, " Float elements, got ", scale_a.sizes())
-  TORCH_CHECK(scale_b.sizes()[0] == mat_b.sizes()[0] && scale_b.sizes()[1] == mat_b.sizes()[1] / 128 && scale_b.scalar_type() == kFloat,
-      "scale_b must have shape ", mat_b.sizes()[0], " x ", mat_b.sizes()[1] / 128, " Float elements, got ", scale_b.sizes())
+  TORCH_CHECK(scale_a.sizes()[0] == ceil_div<int64_t>(mat_a.sizes()[0], 128) && scale_a.sizes()[1] == ceil_div<int64_t>(mat_a.sizes()[1], 128) && scale_a.scalar_type() == kFloat,
+      "scale_a must have shape ", ceil_div<int64_t>(mat_a.sizes()[0], 128), " x ", ceil_div<int64_t>(mat_a.sizes()[1], 128), " Float elements, got ", scale_a.sizes())
+  TORCH_CHECK(scale_b.sizes()[0] == ceil_div<int64_t>(mat_b.sizes()[0], 128) && scale_b.sizes()[1] == mat_b.sizes()[1] && scale_b.scalar_type() == kFloat,
+      "scale_b must have shape ", ceil_div<int64_t>(mat_b.sizes()[0], 128), " x ", mat_b.sizes()[1], " Float elements, got ", scale_b.sizes())
 
-  // at::native::resize_output(out, {mat_a.sizes()[0], mat_b.sizes()[1]});
+  TORCH_CHECK(scale_a.stride(1) == 1);
+  TORCH_CHECK(scale_b.stride(1) == 1);
+  TORCH_CHECK(scale_b.stride(0) == scale_b.size(1));
 
   auto scaling_choice_a = ScalingType::BlockWise128x128;
   auto scaling_choice_b = ScalingType::BlockWise1x128;
@@ -2200,7 +2210,9 @@ _scaled_block1x128_block128x128(
   TORCH_CHECK(scale_b.sizes()[0] == mat_b.sizes()[0] / 128 && scale_b.sizes()[1] == mat_b.sizes()[1] / 128 && scale_b.scalar_type() == kFloat,
       "scale_b must have shape ", mat_b.sizes()[0] / 128, " x ", mat_b.sizes()[1] / 128, " Float elements, got ", scale_b.sizes())
 
-  // at::native::resize_output(out, {mat_a.sizes()[0], mat_b.sizes()[1]});
+  TORCH_CHECK(scale_a.stride(0) == 1);
+  TORCH_CHECK(scale_b.stride(0) == 1);
+  TORCH_CHECK(scale_b.stride(1) == scale_b.size(0));
 
   auto scaling_choice_a = ScalingType::BlockWise1x128;
   auto scaling_choice_b = ScalingType::BlockWise128x128;
