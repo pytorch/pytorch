@@ -908,6 +908,15 @@ void _make_exchange_plan(
   auto out_splits_hdl = c10d::symmetric_memory::rendezvous(out_splits, group_name);
   auto dst_offsets_hdl = c10d::symmetric_memory::rendezvous(dst_offsets, group_name);
 
+  // Verify inputs
+  auto npes = in_splits_hdl->get_world_size();
+  TORCH_CHECK(npes <= THREADS_PER_BLOCK, "Number of peers must be smaller than THREADS_PER_BLOCK", THREADS_PER_BLOCK);
+  TORCH_CHECK(in_splits.size(0) == npes && src_offsets.size(0) == npes && out_splits.size(0) == npes && dst_offsets.size(0) == npes,
+      "in_splits, src_offsets, out_splits and dst_offsets must have the same size as world_size");
+  TORCH_CHECK(in_splits.scalar_type() == at::kLong && src_offsets.scalar_type() == at::kLong
+      && out_splits.scalar_type() == at::kLong && dst_offsets.scalar_type() == at::kLong,
+      "splits and offsets must be int64");
+
   auto in_splits_ptr = in_splits.const_data_ptr<int64_t>();
   auto src_offsets_ptr = src_offsets.mutable_data_ptr<int64_t>();
   auto out_splits_ptr = out_splits.mutable_data_ptr<int64_t>();
