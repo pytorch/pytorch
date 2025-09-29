@@ -20,7 +20,7 @@ on:
       - .github/workflows/operator_benchmark.yml
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
+  group: ${{ github.workflow }}-${{ (github.event_name == 'pull_request' && github.head_ref) || github.ref_name }}
   cancel-in-progress: true
 
 permissions:
