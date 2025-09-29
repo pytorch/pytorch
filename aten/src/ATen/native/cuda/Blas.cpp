@@ -272,10 +272,10 @@ cuda::blas::GEMMAndBiasActivationEpilogue activation_to_gemm_and_blas_arg(Activa
 
 /*
  * Checks whether DISABLE_ADDMM_CUDA_LT is set.
- * For ROCM we test whether the architecture supports the Lt.
+ * Additionally, for ROCM we test whether the architecture supports the Lt.
  */
 static bool isGloballyDisabledAddmmCudaLt(const at::Device& device) {
-  // When hipBLASLt is not supported on the architecture, return false
+  // When hipBLASLt is not supported on the architecture, return true
   #ifdef USE_ROCM
   static const std::vector<std::string> archs = {
         "gfx90a", "gfx942",
@@ -318,19 +318,13 @@ static bool isInputCompliesAddmmCudaLt(Tensor& result, const Tensor& self, const
   }
   #endif
 
-  // Strangely, if mat2 has only 1 row or column, we get
-  // CUBLAS_STATUS_INVALID_VALUE error from cublasLtMatmulAlgoGetHeuristic.
-  // self.dim() == 1 && result.dim() == 2 && self.sizes()[0] == mat2_sizes[1]
-  // is to use lt interface only when self is bias.
-  // for cuda 11.4, cublasLtMatmul is activated
-  // the last conditions is to skip 16b transA and non-trans-B having
-  // leading dim >> rows when they are sliced from a large tensor
-  // see fbcode/caffe2/test/test_linalg.py:test_corner_cases_of_cublasltmatmul
   const auto mat1_sizes = mat1.sizes();
   const auto mat2_sizes = mat2.sizes();
   #if defined(CUDA_VERSION) || defined(USE_ROCM)
   const auto scalar_type = mat1.scalar_type();
   return (beta.toComplexDouble() == 1.0
+    // self.dim() == 1 && result.dim() == 2 && self.sizes()[0] == mat2_sizes[1]
+    // is to use lt interface only when self is bias.
     && self.dim() == 1 && self.sizes()[0] == mat2_sizes[1] && self.is_contiguous()
     && result.dim() == 2 && result.is_contiguous()
     && ( // some dtype restrictions
@@ -342,8 +336,15 @@ static bool isInputCompliesAddmmCudaLt(Tensor& result, const Tensor& self, const
       scalar_type == at::ScalarType::BFloat16
     )
     && ( // some shape/stride restrictions
+      // Strangely, if mat2 has only 1 row or column, we get
+      // CUBLAS_STATUS_INVALID_VALUE error from cublasLtMatmulAlgoGetHeuristic.
+      // NOTE: extension to mat1 because mat1/mat2 can be swapped based off
+      // their row-/col-majorness.
       mat1_sizes[0] > 1 && mat1_sizes[1] > 1 &&
       mat2_sizes[0] > 1 && mat2_sizes[1] > 1
+      // The last conditions is to skip 16b transA and non-trans-B having
+      // leading dim >> rows when they are sliced from a large tensor
+      // see fbcode/caffe2/test/test_linalg.py:test_corner_cases_of_cublasltmatmul
       #if !(defined(CUDA_VERSION) && CUDA_VERSION >= 12010 || defined(USE_ROCM))
       // Related to avoiding the leading stride >> leading dim problematic case
       // with 16b dtypes described above. For such dtypes we only allow inputs
