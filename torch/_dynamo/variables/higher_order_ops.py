@@ -1768,7 +1768,6 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 combine_fn_var,
                 (
                     variables.nn_module.NNModuleVariable,
-                    variables.nn_module.UnspecializedNNModuleVariable,
                     variables.FunctoolsPartialVariable,
                 ),
             ):
@@ -1777,13 +1776,7 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                     f"or a graph module if we're re-exporting but got "
                     f"{combine_fn.python_type()}. Please report an issue to PyTorch if you're seeing this."
                 )
-            return isinstance(
-                combine_fn_var,
-                (
-                    variables.nn_module.NNModuleVariable,
-                    variables.nn_module.UnspecializedNNModuleVariable,
-                ),
-            )
+            return isinstance(combine_fn_var, variables.nn_module.NNModuleVariable)
 
         def arg_extractor(combine_fn, init, xs, additional_inputs):
             return combine_fn, init, xs, additional_inputs

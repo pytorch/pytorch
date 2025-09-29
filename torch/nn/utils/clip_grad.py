@@ -4,9 +4,8 @@ import functools
 import types
 import typing
 import warnings
-from collections.abc import Callable
-from typing import cast, Optional, TypeAlias, TypeVar, Union
-from typing_extensions import deprecated, ParamSpec
+from typing import Callable, cast, Optional, TypeVar, Union
+from typing_extensions import deprecated, ParamSpec, TypeAlias
 
 import torch
 from torch import Tensor

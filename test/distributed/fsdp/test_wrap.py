@@ -5,9 +5,8 @@ import itertools
 import os
 import tempfile
 import unittest
-from collections.abc import Callable
 from enum import auto, Enum
-from typing import Union
+from typing import Callable, Union
 
 import torch
 import torch.nn as nn

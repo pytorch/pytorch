@@ -1,7 +1,7 @@
-#include <ATen/core/functional.h>
-#include <c10/util/Exception.h>
-#include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/ir/constants.h>
+
+#include <ATen/core/functional.h>
+#include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/runtime/operator.h>
@@ -54,7 +54,8 @@ Value* insertConstant(
   if (value) {
     return *value;
   }
-  TORCH_CHECK(false, "Unsupported value kind: ", val.tagKind());
+  throw constant_not_supported_error(
+      "Unsupported value kind: " + val.tagKind());
 }
 
 // IValue -> Constant node
@@ -214,7 +215,9 @@ std::optional<IValue> toIValue(const Value* v) {
     const auto& class_val = node->ival(attr::value);
     return class_val;
   } else {
-    TORCH_CHECK(false, "constant literal not supported for: ", type->str());
+    std::stringstream ss;
+    ss << "constant literal not supported for: " << type->str();
+    throw std::runtime_error(ss.str());
   }
 }
 

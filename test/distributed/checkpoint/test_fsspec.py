@@ -2,9 +2,8 @@
 
 import shutil
 import tempfile
-from collections.abc import Callable
 from functools import wraps
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 import torch
 import torch.distributed as dist
