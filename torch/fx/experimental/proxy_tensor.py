@@ -285,23 +285,7 @@ def set_proxy_slot(  # type: ignore[no-redef]
         assert isinstance(obj, py_sym_types), type(obj)
         if obj not in tracer.symnode_tracker:
             tracer.symnode_tracker[obj] = typing.cast(_PySymProxyType, proxy)
-
-            # WAR: python test/dynamo/test_subclasses.py
-            # TestNestedTensor.test_basic_autograd
-            #
-            # AOTAutograd doesn't pass the "outer sizes" as an actual argument
-            # to make_fx, but it is made use of internally in AOTAutograd's
-            # call to tensor unflatten.  Because the outer sizes isn't passed
-            # as an argument, it is therefore untracked.  However, it turns
-            # out you luck out, because *Dynamo* will manually add the outer
-            # sizes as an argument so you can fix up the proxy'ness.
-            #
-            # This is probably fixed in
-            # https://github.com/pytorch/pytorch/pull/125941/
-            import sympy
-
-            if isinstance(obj.node.expr, sympy.Symbol):
-                tracer.sympy_expr_tracker[obj.node.expr] = proxy
+            tracer.sympy_expr_tracker[obj.node.expr] = proxy
 
 
 def has_proxy_slot(obj: Tensor, tracer: _ProxyTracer) -> bool:
