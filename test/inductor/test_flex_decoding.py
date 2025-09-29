@@ -5,7 +5,8 @@ import functools
 import sys
 import unittest
 from collections import namedtuple
-from typing import Callable, Optional, Union
+from collections.abc import Callable
+from typing import Optional, Union
 from unittest import expectedFailure
 from unittest.mock import patch
 

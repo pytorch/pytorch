@@ -7,10 +7,11 @@ import string
 import unittest
 import warnings
 from collections import namedtuple
+from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass
 from itertools import product
-from typing import Callable, Optional, TypeVar, Union
+from typing import Optional, TypeVar, Union
 from unittest import expectedFailure, skip, skipUnless
 from unittest.mock import patch
 

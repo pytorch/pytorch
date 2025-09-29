@@ -15,8 +15,9 @@ import signal
 import sys
 import tempfile
 import time
+from collections.abc import Callable
 from itertools import product
-from typing import Callable, Union
+from typing import Union
 from unittest import mock
 
 import torch
