@@ -12,8 +12,7 @@ import collections
 import contextlib
 import copy
 import re
-from collections.abc import Callable
-from typing import Optional, Union
+from typing import Callable, Optional, Union
 
 import torch
 

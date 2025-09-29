@@ -5,8 +5,7 @@ import dataclasses
 import importlib
 import math
 import unittest
-from collections.abc import Callable
-from typing import Any, Optional, Union
+from typing import Any, Callable, Optional, Union
 
 import torch
 import torch.utils._pytree as pytree

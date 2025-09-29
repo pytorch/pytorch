@@ -1,7 +1,6 @@
 """Base operator implementation."""
 
 from abc import ABC, abstractmethod
-from typing import Optional
 
 from torchfuzz.tensor_fuzzer import Spec
 
@@ -12,17 +11,6 @@ class Operator(ABC):
     def __init__(self, name: str):
         """Initialize operator with name."""
         self.name = name
-
-    @property
-    @abstractmethod
-    def torch_op_name(self) -> Optional[str]:
-        """
-        Return the torch operation name this operator represents.
-
-        Returns:
-            Optional[str]: The torch operation name (e.g., "torch.ops.aten.add", "torch.nonzero").
-                          Returns None for non-torch operations like "arg" and "constant".
-        """
 
     @abstractmethod
     def can_produce(self, output_spec: Spec) -> bool:

@@ -3,8 +3,7 @@ import json
 import os
 import tempfile
 import unittest
-from collections.abc import Callable
-from typing import Optional
+from typing import Callable, Optional
 
 import torch
 import torch._inductor.test_case

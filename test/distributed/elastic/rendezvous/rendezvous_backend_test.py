@@ -7,8 +7,7 @@
 # LICENSE file in the root directory of this source tree.
 
 from abc import ABC, abstractmethod
-from collections.abc import Callable
-from typing import Any, cast, Optional
+from typing import Any, Callable, cast, Optional
 
 from torch.distributed.elastic.rendezvous import RendezvousStateError
 from torch.distributed.elastic.rendezvous.dynamic_rendezvous import (

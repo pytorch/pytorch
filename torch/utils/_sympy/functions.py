@@ -3,8 +3,7 @@ import functools
 import math
 import operator
 import sys
-from collections.abc import Callable
-from typing import Optional, SupportsFloat, TYPE_CHECKING, TypeVar, Union
+from typing import Callable, Optional, SupportsFloat, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import TypeVarTuple, Unpack
 
 import sympy
@@ -291,6 +290,11 @@ class FloorDiv(sympy.Function):
             pass  # https://github.com/pytorch/pytorch/issues/108276
 
         return None
+
+    def _ccode(self, printer):
+        base = printer.parenthesize(self.base, PRECEDENCE["Atom"] - 0.5)
+        divisor = printer.parenthesize(self.divisor, PRECEDENCE["Atom"] - 0.5)
+        return f"floor({base}/{divisor})"
 
 
 class ModularIndexing(sympy.Function):

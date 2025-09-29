@@ -1,7 +1,6 @@
 # Owner(s): ["module: inductor"]
 import importlib
-from collections.abc import Callable
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 from unittest import skipIf
 
 import torch
