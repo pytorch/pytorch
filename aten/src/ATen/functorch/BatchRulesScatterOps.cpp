@@ -96,7 +96,7 @@ static std::vector<std::optional<Tensor>> batchIndices(
       const auto idx_bdim = indices_bdims[i];
       indices_.emplace_back(maybePadToLogicalRank(moveBatchDimToFront(index.value(), idx_bdim), idx_bdim, maxLogicalRank));
       TORCH_CHECK(
-        !(index.value().dtype() == kBool && indices_bdims[i].has_value()),
+        !(index.value().dtype() == kBool) || !indices_bdims[i].has_value(),
         "vmap: We do not support batching operators that can support dynamic shape. Attempting to batch over indexing with a boolean mask."
       );
     } else {
