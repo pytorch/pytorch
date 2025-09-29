@@ -370,7 +370,7 @@ class MemoryPlanningState:
 
 class WrapperLine:
     def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
-        raise NotImplementedError("FX codegen not yet supported for type {type(self)}")
+        raise NotImplementedError(f"FX codegen not yet supported for type {type(self)}")
 
 
 @dataclasses.dataclass
@@ -976,6 +976,22 @@ class SymbolicCallArgLine(WrapperLine):
         return converter._generate_symbolic_call_arg
 
 
+@dataclasses.dataclass
+class UnbackedSymbolDefsLine(WrapperLine):
+    wrapper: PythonWrapperCodegen
+    output_name: str
+    outputs: Any
+    unbacked_bindings: Optional[dict[sympy.Symbol, pytree.KeyPath]]
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        self.wrapper._codegen_unbacked_symbol_defs_for_outputs(
+            self.output_name, self.outputs, self.unbacked_bindings
+        )
+
+    def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
+        return converter._generate_unbacked_symbol_defs
+
+
 BufferName = str
 Line = Union[MemoryPlanningLine, LineContext]
 
@@ -1187,6 +1203,18 @@ class PythonWrapperCodegen(CodeGen):
                 empty_strided_xpu = torch._C._dynamo.guards._empty_strided_xpu
             """
         )
+
+        try:
+            from torch._C import _cuda_getCurrentRawStream  # noqa: F401
+
+            self.kernel_autotune_defs.splice(
+                """
+                get_raw_stream = torch._C._cuda_getCurrentRawStream
+                """,
+                strip=True,
+            )
+        except (ImportError, AttributeError):
+            pass
 
     @cache_on_self
     def write_triton_header_once(self) -> None:
@@ -3177,7 +3205,16 @@ class PythonWrapperCodegen(CodeGen):
         unbacked_bindings = resolve_unbacked_bindings(
             V.graph.sizevars.shape_env, unbacked_bindings
         )
+        self.writeline(
+            UnbackedSymbolDefsLine(self, output_name, outputs, unbacked_bindings)
+        )
 
+    def _codegen_unbacked_symbol_defs_for_outputs(
+        self,
+        output_name: str,
+        outputs: Any,
+        unbacked_bindings: Optional[dict[sympy.Symbol, pytree.KeyPath]],
+    ) -> None:
         if not unbacked_bindings:
             return
 
