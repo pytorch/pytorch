@@ -785,22 +785,51 @@ class TestMatmulCuda(InductorTestCase):
             torch.backends.cuda.matmul.allow_fp16_accumulation = orig_fp16_accum
 
     @onlyCUDA
-    @parametrize("batch_size", [1, 32])
-    def test_input_checking_bmm_baddmm(self, batch_size):
-        B = batch_size
+    @parametrize("ops", [("mm", torch.mm), ("bmm", torch.bmm), ("addmm", torch.addmm), ("baddbmm", torch.baddbmm)])
+    def test_input_dimension_checking_out_dtype(self, ops):
+        op_name, op = ops
+        B = 2
         M, N, K = 32, 32, 32
 
-        a = torch.randn(B, M, K, device="cuda", dtype=torch.bfloat16)
-        # Make b, c have batch size + 1 for mismatching batch size
-        b = torch.randn(B + 1, K, N, device="cuda", dtype=torch.bfloat16)
-        c = torch.randn(B + 1, M, N, device="cuda", dtype=torch.bfloat16)
+        def is_addmm():
+            return "add" in op_name
 
-        # Test that we error out when the batch size is not the same
-        with self.assertRaisesRegex(RuntimeError, "Expected size for first two dimensions of batch2 tensor to be"):
-            torch.bmm(a, b, out_dtype=torch.float32)
+        def is_batched():
+            return "bmm" in op_name
 
-        with self.assertRaisesRegex(RuntimeError, "Expected size for first two dimensions of batch2 tensor to be"):
-            torch.baddbmm(c, a, b, out_dtype=torch.float32)
+        if is_batched():
+            a = torch.randn(B, M, K, device="cuda", dtype=torch.bfloat16)
+            mismatch_k_b = torch.randn(B, K + 1, N, device="cuda", dtype=torch.bfloat16)
+            c = torch.randn(B, M, N, device="cuda", dtype=torch.bfloat16)
+            extra_dim_b = a.clone().unsqueeze(0)
+        else:
+            a = torch.randn(M, K, device="cuda", dtype=torch.bfloat16)
+            mismatch_k_b = torch.randn(K + 1, N, device="cuda", dtype=torch.bfloat16)
+            c = torch.randn(M, N, device="cuda", dtype=torch.bfloat16)
+            extra_dim_b = a.clone().unsqueeze(0)
+
+        # Test mismatch K
+        with self.assertRaises(RuntimeError):
+            if is_addmm():
+                op(c, a, mismatch_k_b, out_dtype=torch.float32)
+            else:
+                op(a, mismatch_k_b, out_dtype=torch.float32)
+
+        # Test extra dimension
+        with self.assertRaises(RuntimeError):
+            if is_addmm():
+                op(c, a, extra_dim_b, out_dtype=torch.float32)
+            else:
+                op(c, extra_dim_b, out_dtype=torch.float32)
+
+        if is_batched():
+            with self.assertRaises(RuntimeError):
+                # Test mismatch B for bmm/baddbmm
+                mismatch_batch_dim_b = torch.randn(B + 1, K, N, device="cuda", dtype=torch.bfloat16)
+                if is_addmm():
+                    op(c, a, mismatch_batch_dim_b, out_dtype=torch.float32)
+                else:
+                    op(a, mismatch_batch_dim_b, out_dtype=torch.float32)
 
 
 f8_msg = "FP8 is only supported on H100+, SM 8.9 and MI300+ devices"
