@@ -558,7 +558,8 @@ class PipelineScheduleSingle(_PipelineSchedule):
         # Self attributes
         self._stage = stage
         self._num_stages = stage.num_stages
-        self._stage_initialized = False
+        self._stage_forward_initialized = False
+        self._stage_backward_initialized = False
 
         if n_microbatches < self._num_stages:
             raise ValueError(
@@ -571,17 +572,20 @@ or equal to the number of stages ({self._num_stages})."
         )
 
     def _initialize_stage(self, args, kwargs):
-        # Prepare the communication needed for the pipeline schedule execution
-        # This is needed because during execution we always perform a series of batch P2P ops
-        # The first call of the batched P2P needs to involve the global group
-        all_ops: list[dist.P2POp] = []
-        all_ops.extend(self._stage._get_init_p2p_neighbors_ops())
-        _wait_batch_p2p(_batch_p2p(all_ops))
+        if not self._stage_forward_initialized:
+            # Prepare the communication needed for the pipeline schedule execution
+            # This is needed because during execution we always perform a series of batch P2P ops
+            # The first call of the batched P2P needs to involve the global group
+            all_ops: list[dist.P2POp] = []
+            all_ops.extend(self._stage._get_init_p2p_neighbors_ops())
+            _wait_batch_p2p(_batch_p2p(all_ops))
 
-        self._stage._prepare_forward_infra(self._n_microbatches, args, kwargs)
-        if self._has_backward:
+            self._stage._prepare_forward_infra(self._n_microbatches, args, kwargs)
+            self._stage_forward_initialized = True
+
+        if self._has_backward and not self._stage_backward_initialized:
             self._stage._prepare_backward_infra(self._n_microbatches)
-        self._stage_initialized = True
+            self._stage_backward_initialized = True
 
     def step(self, *args, target=None, losses: Optional[list] = None, **kwargs):
         """
@@ -666,8 +670,7 @@ class _ScheduleForwardOnly(PipelineScheduleSingle):
             )
 
         arg_mbs, kwarg_mbs = self._check_inputs(arg_mbs, kwarg_mbs, target_mbs, losses)
-        if not self._stage_initialized:
-            self._initialize_stage(arg_mbs[0], kwarg_mbs[0])
+        self._initialize_stage(arg_mbs[0], kwarg_mbs[0])
 
         # Delay send waits
         fwd_sends_to_wait: list[list[dist.Work]] = []
@@ -716,9 +719,7 @@ class ScheduleGPipe(PipelineScheduleSingle):
             microbatches: list of microbatch args.
         """
         arg_mbs, kwarg_mbs = self._check_inputs(arg_mbs, kwarg_mbs, target_mbs, losses)
-
-        if not self._stage_initialized:
-            self._initialize_stage(arg_mbs[0], kwarg_mbs[0])
+        self._initialize_stage(arg_mbs[0], kwarg_mbs[0])
 
         # Delay send waits
         fwd_sends_to_wait: list[list[dist.Work]] = []
@@ -835,9 +836,7 @@ class Schedule1F1B(PipelineScheduleSingle):
             microbatches: list of microbatch args.
         """
         arg_mbs, kwarg_mbs = self._check_inputs(arg_mbs, kwarg_mbs, target_mbs, losses)
-
-        if not self._stage_initialized:
-            self._initialize_stage(arg_mbs[0], kwarg_mbs[0])
+        self._initialize_stage(arg_mbs[0], kwarg_mbs[0])
 
         # Last stage has 1 warmup, second-to-last 2 warmups, ...
         # first stage `num_stages` warmups
@@ -1436,7 +1435,8 @@ class PipelineScheduleMulti(_PipelineSchedule):
         for stage in self._stages:
             stage.stage_index_to_group_rank = self.stage_index_to_group_rank
 
-        self._stages_initialized = False
+        self._stages_forward_initialized = False
+        self._stages_backward_initialized = False
 
         # avoid putting a reference to 'self' inside the lambda, it creates a ref cycle
         has_loss: bool = self._loss_fn is not None
@@ -1452,30 +1452,33 @@ class PipelineScheduleMulti(_PipelineSchedule):
             )
 
     def _initialize_stages(self, args: tuple[Any, ...], kwargs):
-        # Prepare the communication needed for the pipeline schedule execution
-        # This is needed because during execution we always perform a series of batch P2P ops
-        # The first call of the batched P2P needs to involve the global group
-        all_ops: list[dist.P2POp] = []
-        for stage in self._stages:
-            all_ops.extend(stage._get_init_p2p_neighbors_ops())
-        _wait_batch_p2p(_batch_p2p(all_ops))
+        if not self._stages_forward_initialized:
+            # Prepare the communication needed for the pipeline schedule execution
+            # This is needed because during execution we always perform a series of batch P2P ops
+            # The first call of the batched P2P needs to involve the global group
+            all_ops: list[dist.P2POp] = []
+            for stage in self._stages:
+                all_ops.extend(stage._get_init_p2p_neighbors_ops())
+            _wait_batch_p2p(_batch_p2p(all_ops))
 
-        # may be 'none' value (if this stage sends its output shapes to the next stage via P2P)
-        # or real value (if this stage and next stage are on the same device)
-        next_stage_args: tuple[Any, ...] = tuple()
-        for stage in self._stages:
-            if stage.is_first:
-                next_stage_args = stage._prepare_forward_infra(
-                    self._n_microbatches, args, kwargs
-                )
-            else:
-                next_stage_args = stage._prepare_forward_infra(
-                    self._n_microbatches, next_stage_args, kwargs
-                )
+            # may be 'none' value (if this stage sends its output shapes to the next stage via P2P)
+            # or real value (if this stage and next stage are on the same device)
+            next_stage_args: tuple[Any, ...] = tuple()
+            for stage in self._stages:
+                if stage.is_first:
+                    next_stage_args = stage._prepare_forward_infra(
+                        self._n_microbatches, args, kwargs
+                    )
+                else:
+                    next_stage_args = stage._prepare_forward_infra(
+                        self._n_microbatches, next_stage_args, kwargs
+                    )
+            self._stages_forward_initialized = True
 
-            if self._has_backward:
+        if self._has_backward and not self._stages_backward_initialized:
+            for stage in self._stages:
                 stage._prepare_backward_infra(self._n_microbatches)
-        self._stages_initialized = True
+            self._stages_backward_initialized = True
 
     def _validate_and_set_stage_mapping(
         self, actions: dict[int, list[Optional[_Action]]]
@@ -1575,8 +1578,7 @@ class PipelineScheduleMulti(_PipelineSchedule):
         """
         arg_mbs, kwarg_mbs = self._check_inputs(arg_mbs, kwarg_mbs, target_mbs, losses)
 
-        if not self._stages_initialized:
-            self._initialize_stages(arg_mbs[0], kwarg_mbs[0])
+        self._initialize_stages(arg_mbs[0], kwarg_mbs[0])
 
         # Based on the plan in Step 1 created in __init__:
         # 2. Perform communication based on the pipeline_order
@@ -1864,8 +1866,7 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
         not support models with skip connections.
         """
         arg_mbs, kwarg_mbs = self._check_inputs(arg_mbs, kwarg_mbs, target_mbs, losses)
-        if not self._stages_initialized:
-            self._initialize_stages(arg_mbs[0], kwarg_mbs[0])
+        self._initialize_stages(arg_mbs[0], kwarg_mbs[0])
 
         # Based on the plan in Step 1 created in __init__:
         # 2. Perform communication based on the pipeline_order
