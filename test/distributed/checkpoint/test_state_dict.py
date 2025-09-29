@@ -3,8 +3,9 @@
 import copy
 import functools
 import sys
+from collections.abc import Callable
 from itertools import chain
-from typing import Callable, Union
+from typing import Union
 
 import torch
 import torch.distributed as dist

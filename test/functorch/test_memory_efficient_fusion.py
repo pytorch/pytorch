@@ -3,7 +3,7 @@
 import inspect
 import random
 import unittest
-from typing import Callable
+from collections.abc import Callable
 
 import torch
 import torch.fx as fx
