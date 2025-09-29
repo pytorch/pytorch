@@ -67,4 +67,5 @@
   {"USE_CUSPARSELT", "${USE_CUSPARSELT}"}, \
   {"USE_XPU", "${USE_XPU}"}, \
   {"USE_XCCL", "${USE_XCCL}"}, \
+  {"USE_ZENDNN", "${USE_ZENDNN}"} \
 }

@@ -117,6 +117,10 @@ if(@USE_MKLDNN@)
   include("${CMAKE_CURRENT_LIST_DIR}/public/mkldnn.cmake")
 endif()
 
+if(@USE_ZENDNN@)
+  include("${CMAKE_CURRENT_LIST_DIR}/public/zendnn.cmake")
+endif()
+
 # import targets
 include ("${CMAKE_CURRENT_LIST_DIR}/Caffe2Targets.cmake")
 
