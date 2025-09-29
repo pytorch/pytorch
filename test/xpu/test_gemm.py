@@ -19,7 +19,11 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
+    onlyNativeDeviceTypes,
     precisionOverride,
+)
+from torch.testing._internal.common_quantization import (
+    _dynamically_quantize_per_channel,
 )
 from torch.testing._internal.common_utils import (
     iter_indices,
@@ -1445,6 +1449,50 @@ def forward(self, x_1, w_1):
     out_dtype = torch.ops.higher_order.out_dtype(torch.ops.aten.mm.default, torch.int32, x_1, w_1);  x_1 = w_1 = None
     return out_dtype""",
         )
+
+    @onlyNativeDeviceTypes
+    @parametrize("m", [32, 64])
+    @parametrize("k", [32, 64])
+    @parametrize("n", [48, 64])
+    @parametrize("compile", [True, False])
+    @parametrize("slice", [True, False])
+    def test__int8_mm(self, device, m, k, n, compile, slice):
+        torch.manual_seed(1)
+        if slice:
+            # logits are generated from LLaMA LM head like this -
+            # the activation to LM head is a slice of final hidden state
+            # of shape (batch_size, sequence_length, hidden dim),
+            # but is non-contiguous
+            # Using arbitrary batch-size here, since it'd be converted to 2D
+            batch_size = 4
+            a = torch.rand((batch_size, m, k), dtype=torch.bfloat16, device=device)
+            # Make a non-contiguous
+            a = a[:, -1:, :]
+            a = a.view(-1, a.size(-1))
+        else:
+            a = torch.rand((m, k), dtype=torch.bfloat16, device=device)
+
+        b = torch.rand((n, k), dtype=torch.bfloat16, device=device)
+
+        def convert_weight_to_int8pack(b):
+            b_int8pack, b_scales, _ = _dynamically_quantize_per_channel(
+                b, -128, 127, torch.int8
+            )
+            return b_int8pack, b_scales
+
+        def weight_int8pack_mm(a, b_int8pack, b_scales):
+            return torch._weight_int8pack_mm(a, b_int8pack, b_scales)
+
+        b_int8pack, b_scales = convert_weight_to_int8pack(b)
+        if compile:
+            mod = torch.compile(weight_int8pack_mm)
+        else:
+            mod = weight_int8pack_mm
+        res = mod(a, b_int8pack, b_scales)
+        ref = torch.mm(a, b.transpose(0, 1))
+
+        mean_err = ((res - ref).abs() / ref).mean()
+        self.assertTrue(mean_err < 0.05)
 
 
 instantiate_device_type_tests(TestBasicGEMM, globals(), only_for="xpu", allow_xpu=True)
