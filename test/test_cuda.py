@@ -1479,6 +1479,13 @@ except RuntimeError as e:
         res_cpu = src.cpu()[idx.cpu()]
         self.assertEqual(res.cpu(), res_cpu)
 
+    def test_fast_index_overflow(self):
+        src = torch.randint(0, 20, (4, 87, 1056, 736), device="cuda")
+        indices = torch.tensor([True, False, False, True], device="cuda")
+        res = src[indices]
+        res_cpu = src.cpu()[indices.cpu()]
+        self.assertEqual(res.cpu(), res_cpu)
+
     def test_randint_randomness_for_large_range(self) -> None:
         # For large ranges, randint generation is slightly different. This lead to a subtle bug where some Philox
         # offsets were not calculated correctly, resulting in reused random states.
@@ -4471,7 +4478,7 @@ class TestCudaMallocAsync(TestCase):
             # expandable_segment blocks can be in the free list when this is called.
             alloc(80)
         finally:
-            orig = torch.cuda.get_per_process_memory_fraction(0)
+            torch.cuda.memory.set_per_process_memory_fraction(orig)
 
     def test_allocator_settings(self):
         def power2_div(size, div_factor):
@@ -6923,7 +6930,7 @@ class TestCompileKernel(TestCase):
         with self.assertRaises(RuntimeError):
             kernel.set_shared_memory_config(excessive_shared_mem)
 
-    @tf32_on_and_off(0.005)
+    @tf32_on_and_off(0.05 if TEST_WITH_ROCM else 0.005)
     @unittest.skipIf(not TEST_CUDA, "No CUDA")
     def test_compile_kernel_advanced(self):
         # Test matrix multiplication

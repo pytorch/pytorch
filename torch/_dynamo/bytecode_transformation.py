@@ -24,7 +24,6 @@ import uuid
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from typing import Any, Callable, cast, Optional, TYPE_CHECKING, Union
 
-from ..utils._backport_slots import dataclass_slots
 from . import config
 from .bytecode_analysis import (
     get_indexof,
@@ -39,8 +38,7 @@ if TYPE_CHECKING:
     from .output_graph import DynamoTracerOutput
 
 
-@dataclass_slots
-@dataclasses.dataclass
+@dataclasses.dataclass(slots=True)
 class InstructionExnTabEntry:
     start: "Instruction"
     end: "Instruction"
@@ -68,8 +66,7 @@ class InstructionExnTabEntry:
         )
 
 
-@dataclass_slots
-@dataclasses.dataclass
+@dataclasses.dataclass(slots=True)
 class Instruction:
     """A mutable version of dis.Instruction"""
 
@@ -529,7 +526,7 @@ def create_print_value(value: Any) -> list[Instruction]:
     ]
 
 
-def linetable_310_writer(
+def linetable_writer(
     first_lineno: int,
 ) -> tuple[list[int], Callable[[int, int], None], Callable[[int], None]]:
     """
@@ -642,8 +639,7 @@ def linetable_311_writer(
     return linetable, update
 
 
-@dataclass_slots
-@dataclasses.dataclass
+@dataclasses.dataclass(slots=True)
 class ExceptionTableEntry:
     start: int
     end: int
@@ -759,7 +755,7 @@ def assemble(instructions: list[Instruction], firstlineno: int) -> tuple[bytes, 
             for _ in range(instruction_size(inst) // 2 - 1):
                 code.extend((0, 0))
     else:
-        lnotab, update_lineno, end = linetable_310_writer(firstlineno)
+        lnotab, update_lineno, end = linetable_writer(firstlineno)
 
         for inst in instructions:
             if inst.starts_line is not None:
@@ -871,7 +867,6 @@ def devirtualize_jumps(instructions: list[Instruction]) -> None:
                 inst.arg = abs(
                     int(target.offset - inst.offset - instruction_size(inst))
                 )
-                # see bytecode size comment in the absolute jump case above
                 inst.arg //= 2
             inst.argval = target.offset
             inst.argrepr = f"to {target.offset}"

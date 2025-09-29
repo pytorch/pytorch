@@ -637,8 +637,8 @@ def make_pointwise(
             and getattr(V.graph, "current_node", None) is not None
             and V.graph.current_node.meta is not None
             and V.graph.current_node.meta.get("low_precision_pointwise_barrier", False)
-            and dtype in low_pr_fp
         )
+        emulate_output_cast = emulate_precision_casts and dtype in low_pr_fp
 
         def inner_fn(index):
             assert len(index) == len(ranges), f"wrong ndim {index} {ranges}"
@@ -655,7 +655,7 @@ def make_pointwise(
                     inputs_loaded.append(out)
 
                 out = fn(*inputs_loaded)
-                if emulate_precision_casts:
+                if emulate_output_cast:
                     # fp16/bf16 kernels are computed in fp32. Casting down to fp16/bf16 here,
                     # then upcasting again, to emulate casts that eager would do.
                     downcast = ops.to_dtype(out, dtype, use_compute_types=False)
@@ -2614,8 +2614,8 @@ def sdpa_constraint(fx_node, *args, **kwargs):
         meta_stride_expr = [
             s.node.expr if isinstance(s, torch.SymInt) else s for s in meta_val.stride()
         ]
-
-        stride_order = ir.get_stride_order(meta_val.stride())
+        shape_env = V.graph.sizevars.shape_env
+        stride_order = ir.get_stride_order(meta_val.stride(), shape_env)
 
         if stride_order and stride_order[-1] != 0:
             # contiguous stride order
@@ -7095,21 +7095,11 @@ def while_loop(cond_fn, body_fn, carried_inputs, additional_inputs, stack_output
             msg = f"{msg} Found from : \n {stack_trace}"
         V.graph.disable_cudagraphs_reason = msg
 
-    def _map_output(out: Any):
-        if isinstance(out, TensorBox):
-            return out
-        elif isinstance(out, ir.StorageBox):
-            return TensorBox(out)
-        elif isinstance(out, ir.MultiOutput):
-            return TensorBox.create(out)
-        else:
-            raise RuntimeError(f"NYI unsupported output type: {type(out)}")
-
     result = ir.WhileLoop.create(
         cond_fn, body_fn, carried_inputs, additional_inputs, stack_output
     )
     assert isinstance(result, Sequence)
-    return list(map(_map_output, result))
+    return list(map(ir.WhileLoop._maybe_wrap_as_tensor_box, result))
 
 
 register_lowering(
