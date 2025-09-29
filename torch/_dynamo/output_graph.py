@@ -175,6 +175,13 @@ trace_call_log = torch._logging.getArtifactLogger(__name__, "trace_call")
 RootGuardManager = guards.RootGuardManager
 
 
+# Capture fn pointer at import time
+# This is to guard against trying to mark the iterated tensors
+# as static in case user overrides fn ptr
+og_module_named_buffers_fn_ptr = torch.nn.Module.named_buffers
+og_module_named_parameters_fn_ptr = torch.nn.Module.named_parameters
+
+
 @dataclass(frozen=True)
 class VariableTrackerCacheKey:
     vt_id: int
@@ -718,6 +725,11 @@ class OutputGraph(OutputGraphCommon):
 
         self.export_metadata = ExportMetaData()
 
+        # Dict of inlined unspecialized modules to generate the
+        # dynamo_flat_name_to_original_fqn mapping. The code here follows what
+        # export was doing earlier.
+        self.inlined_unspecialized_modules: dict[str, torch.nn.Module] = {}
+
     def mark_bytecode_tracing_start(self) -> None:
         self.compiler_trace_stack.enter_context(
             dynamo_timed(
@@ -1042,6 +1054,14 @@ class OutputGraph(OutputGraphCommon):
     def module_key_name(*names: Any) -> str:
         # create a new unique name
         name = "_".join(map(str, names))
+        # Strip _buffers[..]/_parmeters[..]/_modules[..] names
+        name = re.sub(
+            r"\._(?:modules|parameters|buffers)\[(['\"])([^'\"\]]+)\1\]", r".\2", name
+        )
+        # Replace getattr(a, b) with a.b
+        name = re.sub(
+            r"getattr\(\s*([^,]+?)\s*,\s*(['\"])([^'\"]+)\2\s*\)", r"\1.\3", name
+        )
         # Strip the guard lookup L/G access
         name = re.sub(r"^[GL]\['?(.*?)'?\]$", r"\1", name)
         # e.g. replace abc.xyz[123].qkv with abc.xyz_123.qkv
@@ -2564,6 +2584,7 @@ class OutputGraph(OutputGraphCommon):
         # some of the tensor objects to be held alive for longer than necessary.
         self.root_tx = None  # type: ignore[assignment]
         self.nn_modules.clear()
+        self.inlined_unspecialized_modules.clear()
         self.param_name_to_source = None
 
         for node in self.graph.nodes:
@@ -2591,6 +2612,44 @@ class OutputGraph(OutputGraphCommon):
             return node.meta["grapharg"].example
         assert node.op == "get_attr"
         return self.nn_modules[node.target]  # type: ignore[index]
+
+    def add_fqn_info_for_inlined_modules(
+        self, inlined_module: torch.nn.Module, source: Source
+    ) -> None:
+        name = OutputGraph.module_key_name(source.name())
+        name = get_unique_name_wrt(
+            name, self.inlined_unspecialized_modules, self.global_scope
+        )
+        self.inlined_unspecialized_modules[name] = inlined_module
+
+        def register_leaf_name(leaf_name: str) -> None:
+            assert self.param_name_to_source is not None
+            new_source = ParamBufferSource(source, leaf_name)
+            new_name = f"{name}.{leaf_name}"
+            self.param_name_to_source[new_name] = new_source
+            if isinstance(source, LocalSource):
+                self.dynamo_flat_name_to_original_fqn[
+                    OutputGraph.module_key_name(new_source.name())
+                ] = leaf_name
+
+        # annoying, but there are cases when we do not have parameters
+        # see test_nn_moduledict_contains
+        if hasattr(inlined_module, "_parameters"):
+            if (
+                callable(inlined_module.named_parameters)
+                and inlined_module.named_parameters.__func__  # type: ignore[attr-defined]
+                is og_module_named_parameters_fn_ptr
+            ):
+                for leaf_name, _ in inlined_module.named_parameters():
+                    register_leaf_name(leaf_name)
+        if hasattr(inlined_module, "_buffers"):
+            if (
+                callable(inlined_module.named_buffers)
+                and inlined_module.named_buffers.__func__  # type: ignore[attr-defined]
+                is og_module_named_buffers_fn_ptr
+            ):
+                for leaf_name, _ in inlined_module.named_buffers():
+                    register_leaf_name(leaf_name)
 
 
 class DynamoTracerOutput:
@@ -2952,9 +3011,21 @@ class SubgraphTracer(fx.Tracer):
             rv.node.meta["nn_module_stack"] = nn_module_stack.copy()
 
         if kind in {"call_function", "call_method"}:
-            rv.node.meta["source_fn_stack"] = self.source_fn_stack + [
-                (rv.node.name, target)
-            ]
+            stack = (rv.node.name, target)
+            if nn_module_stack:
+                # Current codebase assumes that the nn_module_stack has the
+                # builtin modules in the stack.
+                current_nn_module = list(rv.node.meta["nn_module_stack"].values())[-1][
+                    1
+                ]
+                if current_nn_module.__module__.startswith(
+                    ("torch.nn.modules", "torch.ao.")
+                ) and not current_nn_module.__module__.startswith(
+                    "torch.nn.modules.container"
+                ):
+                    stack = (rv.node.name, current_nn_module)
+
+            rv.node.meta["source_fn_stack"] = self.source_fn_stack + [stack]
         elif kind == "call_module":
             if self.parent is not None:
                 # TODO can remove once inline_inbuilt_nn_modules is always True
