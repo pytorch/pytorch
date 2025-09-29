@@ -924,7 +924,7 @@ def im2col(
     def check_positive(param, param_name, strict=True):
         cond = all(p > 0 for p in param) if strict else all(p >= 0 for p in param)
         torch._check(
-            cond, lambda: "{param_name} should be greater {'than' zero, but got {param}"
+            cond, lambda: f"{param_name} should be greater than zero, but got {param}"
         )
 
     check_positive(kernel_size, "kernel_size")
@@ -1009,7 +1009,7 @@ def col2im(
     def check_positive(param, param_name, strict=True):
         cond = all(p > 0 for p in param) if strict else all(p >= 0 for p in param)
         torch._check(
-            cond, lambda: "{param_name} should be greater than zero, but got {param}"
+            cond, lambda: f"{param_name} should be greater than zero, but got {param}"
         )
 
     check_positive(kernel_size, "kernel_size")
@@ -1543,9 +1543,9 @@ def native_group_norm_backward(
         lambda: f"Expect gamma to have {C} elements but got {gamma.numel() if gamma is not None else -1}",
     )
 
-    cpg, _rem = divmod(C, group)
+    cpg = C // group
     torch._check(
-        _rem == 0,
+        C == cpg * group,
         lambda: f"Expect number of channels {C} to be evenly-divisible by number of groups {group}",
     )
 

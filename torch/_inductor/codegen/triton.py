@@ -34,6 +34,7 @@ from ...utils._sympy.value_ranges import ValueRanges
 from .. import config, ir, metrics
 from ..async_compile import AsyncCompile
 from ..codecache import code_hash, get_path, PyCodeCache, write_atomic
+from ..debug import set_kernel_post_grad_provenance_tracing
 from ..ops_handler import DefaultHandler
 from ..runtime import triton_heuristics
 from ..runtime.benchmarking import benchmarker
@@ -47,6 +48,7 @@ from ..runtime.runtime_utils import get_max_y_grid, next_power_of_2
 from ..scheduler import BaseSchedulerNode, FusedSchedulerNode, Scheduler, SchedulerNode
 from ..utils import (
     cache_on_self,
+    DelayMaybeLine,
     DelayReplaceLine,
     get_bounds_index_expr,
     get_fused_kernel_name,
@@ -638,6 +640,13 @@ def triton_reshape(
     return f"{value}[{', '.join(expand)}]"
 
 
+def enable_pdl_codegen():
+    if not torch._inductor.config.triton.enable_pdl:
+        return False
+    major, _ = torch.cuda.get_device_capability(torch.cuda.current_device())
+    return major >= 9
+
+
 # NB: Inheriting from PythonPrinter is somewhat dangerous, because there are a
 # number of operators which Triton "implements", but in a way that is
 # inconsistent with Python semantics (and consistent with C semantics).  We
@@ -866,8 +875,7 @@ class TritonCSEVariable(CSEVariable):
         # We'll use this to track which masks the variable needs when used for indirect indexing
         self.mask_vars: OrderedSet[str] = OrderedSet()
         assert dtype is not None, "TritonCSEVariable must have dtype"
-        # TODO: uncomment this and fix the few failures left
-        # assert shape is not None, "TritonCSEVariable must have shape"
+        assert shape is not None, "TritonCSEVariable must have shape"
 
     def update_on_args(self, name, args, kwargs):
         for arg in args:
@@ -1597,10 +1605,6 @@ class TritonKernelOverrides(TritonOverrides):
         V.kernel.cse.put(cache_key, (mantissa, exponent))
         return (mantissa, exponent)
 
-    @staticmethod
-    def device_assert_async(cond, msg):
-        return f"tl.device_assert({cond}, {repr(msg)})"
-
 
 class HelperFunctions:
     """An ordered set of helper functions."""
@@ -1944,6 +1948,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self.fixed_config = fixed_config
         super().__init__(tiling, **kwargs)
         self.cse = TritonCSE(self.newvar_prefix, self.suffix)
+        # Cache of values that can be reused for the prologue.
+        self.prologue_cache: dict[str, str] = {}
         self.prologue: IndentedBuffer = IndentedBuffer()
         self.post_loop_combine: IndentedBuffer = IndentedBuffer()
         self.post_loop_store: IndentedBuffer = IndentedBuffer()
@@ -1958,6 +1964,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self.tma_min_block_sizes = dict[str, int]()
         self.hint_override = hint_override
         self._load_counts: collections.Counter[str] = collections.Counter()
+        self._load_index = 0
 
         # A set of autotuning hints to pass as part of triton_meta
         self.autotune_hints = OrderedSet[AutotuneHint]()
@@ -2485,42 +2492,49 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             and self.range_trees[-1].is_loop
             and indexing.has_rindex()
         ) or indexing.can_lift:
-            block_descriptor_id = next(self.block_ptr_id)
-            if isinstance(indexing, BlockPtrOptions):
-                block_descriptor = f"block_ptr{block_descriptor_id}"
+            if indexing.can_lift and var in self.prologue_cache:
+                # Check for epilogue subtiling to reuse the same
+                # tensor descriptor.
+                block_descriptor = self.prologue_cache[var]
             else:
-                block_descriptor = f"tma_descriptor{block_descriptor_id}"
-            line_body = DeferredLine(
-                name, f"{block_descriptor} = {indexing.format(var, roffset=False)}"
-            )
-            if indexing.can_lift:
-                self.prologue.writeline(line_body)
-            else:
-                self.body.writeline(line_body)
+                block_descriptor_id = next(self.block_ptr_id)
+                if isinstance(indexing, BlockPtrOptions):
+                    block_descriptor = f"block_ptr{block_descriptor_id}"
+                else:
+                    block_descriptor = f"tma_descriptor{block_descriptor_id}"
+                line_body = DeferredLine(
+                    name, f"{block_descriptor} = {indexing.format(var, roffset=False)}"
+                )
+                if indexing.can_lift:
+                    self.prologue.writeline(line_body)
+                    # Cache the descriptor for epilogue subtiling
+                    self.prologue_cache[var] = block_descriptor
+                else:
+                    self.body.writeline(line_body)
 
-            if isinstance(indexing, BlockPtrOptions):
-                # Store for later use. If the buffer is removed the below advancements
-                # are no longer necessary
-                self.block_ptr_to_buffer[block_descriptor] = name
+                if isinstance(indexing, BlockPtrOptions):
+                    # Store for later use. If the buffer is removed the below advancements
+                    # are no longer necessary
+                    self.block_ptr_to_buffer[block_descriptor] = name
 
-                # Generate block pointer advancements, for later use.
-                for symt in TritonSymbols.reduction_types:
-                    advance_offsets = indexing.advance_roffset(symt)
+                    # Generate block pointer advancements, for later use.
+                    for symt in TritonSymbols.reduction_types:
+                        advance_offsets = indexing.advance_roffset(symt)
 
-                    # Ignore identity advancements.
-                    if all(
-                        V.graph.sizevars.statically_known_equals(
-                            offset, sympy.Integer(0)
+                        # Ignore identity advancements.
+                        if all(
+                            V.graph.sizevars.statically_known_equals(
+                                offset, sympy.Integer(0)
+                            )
+                            for offset in advance_offsets
+                        ):
+                            continue
+
+                        advancements = self.pointer_advancements[symt]
+                        assert block_descriptor not in advancements, (
+                            f"duplicate advancement for pointer '{block_descriptor}' at type '{symt}'"
                         )
-                        for offset in advance_offsets
-                    ):
-                        continue
-
-                    advancements = self.pointer_advancements[symt]
-                    assert block_descriptor not in advancements, (
-                        f"duplicate advancement for pointer '{block_descriptor}' at type '{symt}'"
-                    )
-                    advancements[block_descriptor] = advance_offsets
+                        advancements[block_descriptor] = advance_offsets
         else:
             block_descriptor = indexing.format(var)
         return block_descriptor, other
@@ -2612,6 +2626,27 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             return self.body
         else:
             return self.loads
+
+    def _handle_pdl_before_load(self, wait_buffer):
+        GDC_WAIT = "tl.extra.cuda.gdc_wait()"
+        self._load_index += 1
+        if self.inside_reduction:
+            wait_buffer = self.body
+        if enable_pdl_codegen():
+            if self._load_index == 1:
+                wait_buffer.writeline(GDC_WAIT)
+
+    def _handle_pdl_after_load(self, launch_buffer, result_var):
+        GDC_LAUNCH = "tl.extra.cuda.gdc_launch_dependents()"
+        if self.inside_reduction:
+            launch_buffer = self.post_loop_combine
+        if enable_pdl_codegen():
+            current_load_index = self._load_index
+            launch_if_last_load = DelayMaybeLine(
+                lambda: current_load_index == self._load_index,
+                f"0; {GDC_LAUNCH} # gdc launch for {result_var}",
+            )
+            self.cse.generate(launch_buffer, launch_if_last_load, dtype=torch.int32)
 
     def load(self, name: str, index: sympy.Expr):
         """
@@ -2743,11 +2778,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 dtype = torch.bool
 
         load_buffer = self.get_load_buffer(indexing)
-        if config.triton.enable_pdl:
-            load_buffer.writeline("tl.extra.cuda.gdc_wait()")
+        self._handle_pdl_before_load(load_buffer)
         result_var = self.cse.generate(
             load_buffer, make_line(line), dtype=dtype, shape=shape
         )
+        self._handle_pdl_after_load(load_buffer, result_var)
         if result_var.use_count > 1:
             load_counts[name] -= 1  # don't double count cache hit
         assert isinstance(result_var, TritonCSEVariable)
@@ -2836,6 +2871,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         exit_stack.close()
 
+    def device_assert_async(self, cond, msg) -> None:
+        self.compute.writeline(f"tl.device_assert({cond}, {repr(msg)})")
+
     def guard_cooperative_store(self, name, buffer):
         """
         For cooperative reductions only one thread block should write out the result.
@@ -2893,6 +2931,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 "Bucketize only supports indexing with int32 and int64"
             )
 
+        self._handle_pdl_before_load(self.compute)
         result = self.cse.generate(
             self.compute,
             f"triton_helpers.bucketize_binary_search({values}, "
@@ -2906,6 +2945,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             dtype=indexing_dtype,  # type: ignore[attr-defined]
             shape=values.shape,
         )
+        self._handle_pdl_after_load(self.compute, result)
 
         masks = self._combine_masks(values, boundary_indices, sorter_indices)
         result.mask_vars = masks  # type: ignore[attr-defined]
@@ -3879,6 +3919,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         code.splice(self.prologue)
         self.prologue.clear()
+        self.prologue_cache.clear()
 
     def codegen_body(self):
         """
@@ -4406,7 +4447,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         triton_meta["configs"] = [config_of(signature)]
 
-        if config.triton.enable_pdl:
+        if enable_pdl_codegen():
             triton_meta["launch_pdl"] = True
 
         # Triton compiler includes equal_to_1 args into constants even
@@ -4858,7 +4899,7 @@ class TritonScheduling(SIMDScheduling):
             )
         return cls.backend_features
 
-    def codegen_comment(self, node_schedule):
+    def codegen_comment(self, node_schedule, kernel_name=None):
         wrapper = V.graph.wrapper_code
         origins, _detailed_origins = get_kernel_metadata(node_schedule, wrapper)
         if origins:
@@ -4883,6 +4924,13 @@ class TritonScheduling(SIMDScheduling):
                 wrapper.make_comment(
                     f"{wrapper.comment} Fused node name list: {', '.join(node_names)}"
                 )
+
+        if kernel_name:
+            debug_handle = set_kernel_post_grad_provenance_tracing(
+                node_schedule,  # type: ignore[arg-type]
+                kernel_name,
+            )
+            wrapper.write_provenance_debug_handle(kernel_name, debug_handle)
 
     def define_kernel(self, src_code, node_schedule, kernel):
         wrapper = V.graph.wrapper_code
