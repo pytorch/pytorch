@@ -10,5 +10,5 @@ COMMIT_DATE=$(echo "$NIGHTLY_PATCH" | grep '^Date:' | sed -E 's/Date: .*, ([0-9]
 VERSION_STRING="2.9.0.dev${COMMIT_DATE}+cpu"
 git rev-parse HEAD > /tmp/orig_work.txt
 git reset --hard $COMMIT
-USE_NIGHTLY=$VERSION_STRING python setup.py develop
+USE_NIGHTLY=$VERSION_STRING python -m pip install --no-build-isolation -v -e .
 echo "source $PWD/.venv/bin/activate" >> ~/.bashrc

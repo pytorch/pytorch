@@ -8,8 +8,9 @@ import itertools
 import math
 import operator
 import warnings
+from collections.abc import Callable
 from enum import Enum
-from typing import Any, Callable, NamedTuple, Optional, Union
+from typing import Any, NamedTuple, Optional, Union
 
 import torch
 from torch import Tensor
@@ -1413,7 +1414,7 @@ def flex_attention(
     elif return_lse and return_aux is None:
         _warn_once(
             "deprecated_return_lse",
-            "return_lse is deprecated and will be removed in v2.7. "
+            "return_lse is deprecated and will be removed in v2.10. "
             "Please use return_aux=AuxRequest(lse=True) instead.",
             category=FutureWarning,
         )

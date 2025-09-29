@@ -133,7 +133,7 @@ html_static_path = ["_static"]
 html_theme_options = {
     "logo": {"text": "Home"},
     "analytics_id": "GTM-T8XT4PS",
-    "canonical_url": "https://pytorch.org/docs/stable/",
+    "canonical_url": "https://docs.pytorch.org/docs/stable/",
     "switcher": {
         "json_url": "https://docs.pytorch.org/docs/pytorch-versions.json",
         "version_match": switcher_version,
@@ -143,7 +143,7 @@ html_theme_options = {
     "external_links": [
         {
             "name": "Tutorials",
-            "url": "https://pytorch.org/tutorials/",
+            "url": "https://docs.pytorch.org/tutorials/",
         },
     ],
     "show_version_warning_banner": True,
@@ -3304,6 +3304,13 @@ def coverage_post_process(app, exception):
     # Only run this test for the coverage build
     if not isinstance(app.builder, CoverageBuilder):
         return
+
+    if not torch.distributed.is_available():
+        raise RuntimeError(
+            "The coverage tool cannot run with a version "
+            "of PyTorch that was built with USE_DISTRIBUTED=0 "
+            "as this module's API changes."
+        )
 
     # These are all the modules that have "automodule" in an rst file
     # These modules are the ones for which coverage is checked

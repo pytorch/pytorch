@@ -1579,11 +1579,12 @@ class TestFP8Matmul(TestCase):
     )
     @parametrize("output_dtype", [torch.bfloat16, torch.float32])
     @parametrize("lhs_block,rhs_block", [(1, 1), (128, 1), (1, 128)])
-    def test_scaled_mm_vs_emulated_block_wise(self, output_dtype, lhs_block, rhs_block):
+    @parametrize("M,N,K", [(256, 768, 512), (256, 128, 256), (256, 256, 128)])
+    def test_scaled_mm_vs_emulated_block_wise(self, output_dtype, lhs_block, rhs_block, M, N, K):
         torch.manual_seed(42)
 
-        x = torch.randn(256, 512, device="cuda", dtype=output_dtype).pow(3)
-        y = torch.randn(768, 512, device="cuda", dtype=output_dtype).pow(3)
+        x = torch.randn(M, K, device="cuda", dtype=output_dtype).pow(3)
+        y = torch.randn(N, K, device="cuda", dtype=output_dtype).pow(3)
 
         x_fp8, x_scales = tensor_to_scale_block(x, e4m3_type, lhs_block, 128)
         y_fp8, y_scales = tensor_to_scale_block(y, e4m3_type, rhs_block, 128)
