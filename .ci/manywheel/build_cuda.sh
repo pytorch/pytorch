@@ -124,6 +124,7 @@ if [[ $CUDA_VERSION == 12* || $CUDA_VERSION == 13* ]]; then
     fi
     if [[ -z "$PYTORCH_EXTRA_INSTALL_REQUIREMENTS" ]]; then
         echo "Bundling with cudnn and cublas."
+
         DEPS_LIST+=(
             "/usr/local/cuda/lib64/libcudnn_adv.so.9"
             "/usr/local/cuda/lib64/libcudnn_cnn.so.9"
@@ -133,16 +134,11 @@ if [[ $CUDA_VERSION == 12* || $CUDA_VERSION == 13* ]]; then
             "/usr/local/cuda/lib64/libcudnn_engines_precompiled.so.9"
             "/usr/local/cuda/lib64/libcudnn_heuristic.so.9"
             "/usr/local/cuda/lib64/libcudnn.so.9"
-            "/usr/local/cuda/lib64/libcublas.so.12"
-            "/usr/local/cuda/lib64/libcublasLt.so.12"
             "/usr/local/cuda/lib64/libcusparseLt.so.0"
-            "/usr/local/cuda/lib64/libcudart.so.12"
-            "/usr/local/cuda/lib64/libnvrtc.so.12"
             "/usr/local/cuda/lib64/libnvrtc-builtins.so"
             "/usr/local/cuda/lib64/libcufile.so.0"
             "/usr/local/cuda/lib64/libcufile_rdma.so.1"
             "/usr/local/cuda/lib64/libnvshmem_host.so.3"
-            "/usr/local/cuda/extras/CUPTI/lib64/libcupti.so.12"
             "/usr/local/cuda/extras/CUPTI/lib64/libnvperf_host.so"
         )
         DEPS_SONAME+=(
@@ -154,22 +150,56 @@ if [[ $CUDA_VERSION == 12* || $CUDA_VERSION == 13* ]]; then
             "libcudnn_engines_precompiled.so.9"
             "libcudnn_heuristic.so.9"
             "libcudnn.so.9"
-            "libcublas.so.12"
-            "libcublasLt.so.12"
             "libcusparseLt.so.0"
-            "libcudart.so.12"
-            "libnvrtc.so.12"
             "libnvrtc-builtins.so"
             "libnvshmem_host.so.3"
             "libcufile.so.0"
             "libcufile_rdma.so.1"
-            "libcupti.so.12"
             "libnvperf_host.so"
         )
         # Add libnvToolsExt only if CUDA version is not 12.9
-        if [[ $CUDA_VERSION != 12.9* ]]; then
-            DEPS_LIST+=("/usr/local/cuda/lib64/libnvToolsExt.so.1")
-            DEPS_SONAME+=("libnvToolsExt.so.1")
+        if [[ $CUDA_VERSION == 13* ]]; then
+            DEPS_LIST+=(
+                "/usr/local/cuda/lib64/libcublas.so.13"
+                "/usr/local/cuda/lib64/libcublasLt.so.13"
+                "/usr/local/cuda/lib64/libcudart.so.13"
+                "/usr/local/cuda/lib64/libnvrtc.so.13"
+                "/usr/local/cuda/extras/CUPTI/lib64/libcupti.so.13"
+                "/usr/local/cuda/lib64/libibverbs.so.1"
+                "/usr/local/cuda/lib64/librdmacm.so.1"
+                "/usr/local/cuda/lib64/libmlx5.so.1"
+                "/usr/local/cuda/lib64/libnl-3.so.200"
+                "/usr/local/cuda/lib64/libnl-route-3.so.200")
+            DEPS_SONAME+=(
+                "libcublas.so.13"
+                "libcublasLt.so.13"
+                "libcudart.so.13"
+                "libnvrtc.so.13"
+                "libcupti.so.13"
+                "libibverbs.so.1"
+                "librdmacm.so.1"
+                "libmlx5.so.1"
+                "libnl-3.so.200"
+                "libnl-route-3.so.200")
+            export USE_CUPTI_SO=1
+            export ATEN_STATIC_CUDA=0
+            export USE_CUDA_STATIC_LINK=0
+            export USE_CUFILE=0
+        else
+            DEPS_LIST+=(
+                "/usr/local/cuda/lib64/libnvToolsExt.so.1"
+                "/usr/local/cuda/lib64/libcublas.so.12"
+                "/usr/local/cuda/lib64/libcublasLt.so.12"
+                "/usr/local/cuda/lib64/libcudart.so.12"
+                "/usr/local/cuda/lib64/libnvrtc.so.12"
+                "/usr/local/cuda/extras/CUPTI/lib64/libcupti.so.12")
+            DEPS_SONAME+=(
+                "libnvToolsExt.so.1"
+                "libcublas.so.12"
+                "libcublasLt.so.12"
+                "libcudart.so.12"
+                "libnvrtc.so.12"
+                "libcupti.so.12")
         fi
     else
         echo "Using nvidia libs from pypi."

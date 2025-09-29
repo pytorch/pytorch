@@ -628,8 +628,17 @@ class XPUTestBase(DeviceTypeTestBase):
     @classmethod
     def get_all_devices(cls):
         # currently only one device is supported on MPS backend
+        primary_device_idx = int(cls.get_primary_device().split(":")[1])
+        num_devices = torch.xpu.device_count()
+
         prim_device = cls.get_primary_device()
-        return [prim_device]
+        xpu_str = "xpu:{0}"
+        non_primary_devices = [
+            xpu_str.format(idx)
+            for idx in range(num_devices)
+            if idx != primary_device_idx
+        ]
+        return [prim_device] + non_primary_devices
 
     @classmethod
     def setUpClass(cls):
@@ -1139,7 +1148,7 @@ class ops(_TestParametrizer):
                             tracked_input = get_tracked_input()
                             if PRINT_REPRO_ON_FAILURE and tracked_input is not None:
                                 e_tracked = Exception(  # noqa: TRY002
-                                    f"Caused by {tracked_input.type_desc} "
+                                    f"{str(e)}\n\nCaused by {tracked_input.type_desc} "
                                     f"at index {tracked_input.index}: "
                                     f"{_serialize_sample(tracked_input.val)}"
                                 )
@@ -1277,26 +1286,39 @@ class skipPRIVATEUSE1If(skipIf):
 
 
 def _has_sufficient_memory(device, size):
-    if torch.device(device).type == "cuda":
-        if not torch.cuda.is_available():
+    device_ = torch.device(device)
+    device_type = device_.type
+    if device_type in ["cuda", "xpu"]:
+        acc = torch.accelerator.current_accelerator()
+        # Case 1: no accelerator found
+        if not acc:
             return False
+        # Case 2: accelerator found but not matching device type
+        if acc.type != device_type:
+            return True
+        # Case 3: accelerator found and matching device type but not available
+        if not torch.accelerator.is_available():
+            return False
+        # Case 4: accelerator found and matching device type and available
         gc.collect()
-        torch.cuda.empty_cache()
-        # torch.cuda.mem_get_info, aka cudaMemGetInfo, returns a tuple of (free memory, total memory) of a GPU
-        if device == "cuda":
-            device = "cuda:0"
-        return (
-            torch.cuda.memory.mem_get_info(device)[0]
-            * torch.cuda.memory.get_per_process_memory_fraction(device)
-        ) >= size
+        torch.accelerator.empty_cache()
 
-    if device == "xla":
+        if device_.index is None:
+            device_ = torch.device(device_type, 0)
+
+        if device_type == "cuda":
+            return (
+                torch.cuda.memory.mem_get_info(device_)[0]
+                * torch.cuda.memory.get_per_process_memory_fraction(device_)
+            ) >= size
+
+        if device_type == "xpu":
+            return torch.xpu.memory.mem_get_info(device_)[0] >= size
+
+    if device_type == "xla":
         raise unittest.SkipTest("TODO: Memory availability checks for XLA?")
 
-    if device == "xpu":
-        raise unittest.SkipTest("TODO: Memory availability checks for Intel GPU?")
-
-    if device != "cpu":
+    if device_type != "cpu":
         raise unittest.SkipTest("Unknown device type")
 
     # CPU
@@ -1342,8 +1364,7 @@ def largeTensorTest(size, device=None, inductor=TEST_WITH_TORCHINDUCTOR):
             # an additional array of the same size as the input.
             if inductor and torch._inductor.config.cpp_wrapper and _device != "cpu":
                 size_bytes *= 2
-            # TODO: Memory availability checks for Intel GPU
-            if device != "xpu" and not _has_sufficient_memory(_device, size_bytes):
+            if not _has_sufficient_memory(_device, size_bytes):
                 raise unittest.SkipTest(f"Insufficient {_device} memory")
 
             return fn(self, *args, **kwargs)
@@ -1383,13 +1404,13 @@ class expectedFailure:
 
 
 class onlyOn:
-    def __init__(self, device_type):
+    def __init__(self, device_type: Union[str, list]):
         self.device_type = device_type
 
     def __call__(self, fn):
         @wraps(fn)
         def only_fn(slf, *args, **kwargs):
-            if self.device_type != slf.device_type:
+            if slf.device_type not in self.device_type:
                 reason = f"Only runs on {self.device_type}"
                 raise unittest.SkipTest(reason)
 
@@ -1946,6 +1967,10 @@ def skipMPS(fn):
 
 def skipHPU(fn):
     return skipHPUIf(True, "test doesn't work on HPU backend")(fn)
+
+
+def skipXPU(fn):
+    return skipXPUIf(True, "test doesn't work on XPU backend")(fn)
 
 
 def skipPRIVATEUSE1(fn):

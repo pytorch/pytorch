@@ -87,6 +87,7 @@ from torch._utils_internal import (
 from torch.fx._utils import _format_graph_code, lazy_format_graph_code
 from torch.monitor import _WaitCounter
 from torch.nn.modules.lazy import LazyModuleMixin
+from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils._triton import has_triton, has_triton_package
 from torch.utils.hooks import RemovableHandle
 
@@ -709,6 +710,7 @@ def dynamo_timed(
     if key not in compilation_time_metrics:
         compilation_time_metrics[key] = []
 
+    metrics = compilation_time_metrics[key]
     event_metadata = {}
     if metadata:
         event_metadata.update(metadata)
@@ -756,7 +758,7 @@ def dynamo_timed(
     finally:
         end_ns = time.time_ns()
         time_spent_ns = end_ns - start_ns
-        compilation_time_metrics[key].append(time_spent_ns / 1e9)
+        metrics.append(time_spent_ns / 1e9)
         chromium_log.log_event_end(
             event_name, end_ns, {}, start_ns, log_pt2_compile_event, compile_id
         )
@@ -1096,6 +1098,14 @@ def is_lru_cache_wrapped_function(
     value: Any,
 ) -> bool:
     return isinstance(value, functools._lru_cache_wrapper) and is_function(
+        inspect.getattr_static(value, "__wrapped__")
+    )
+
+
+def is_annotate_wrapped_function(
+    value: Any,
+) -> bool:
+    return value == torch.fx.traceback.annotate and is_function(
         inspect.getattr_static(value, "__wrapped__")
     )
 
@@ -2137,6 +2147,10 @@ def clone_input(
                 x.shape,
                 layout=x.layout,
             )
+        elif is_traceable_wrapper_subclass(x):
+            # Questionable - but this is required to not fail executorch related
+            # torchao tests.
+            return torch_clone(x)
 
         needed_size = sum(
             (shape - 1) * stride for shape, stride in zip(x.size(), x.stride())
@@ -2637,7 +2651,11 @@ def normalize_range_iter(range_iter: Any) -> tuple[int, int, int]:
     _, (range_obj,), maybe_idx = range_iter.__reduce__()
     # In 3.12+, `maybe_idx` could be None, and `range_obj.start` would've been
     # already incremented by the current index.
-    start = range_obj.start + (maybe_idx or 0)
+    # The index (maybe_idx) is the number of steps taken so far. To get the
+    # correct start value, one must add (maybe_idx * step) to the original
+    # start. See:
+    # https://github.com/python/cpython/blob/ea77feecbba389916af8f90b2fc77f07910a2963/Objects/rangeobject.c#L885-L899
+    start = range_obj.start + (maybe_idx or 0) * range_obj.step
     stop = range_obj.stop
     step = range_obj.step
     return (start, stop, step)
@@ -4691,7 +4709,18 @@ def get_user_object_from_id(obj_id: int) -> Any:
 
 def store_user_object_weakref(obj: object) -> None:
     obj_id = id(obj)
-    user_obj_id_to_weakref[obj_id] = weakref.ref(obj)
+    try:
+        user_obj_id_to_weakref[obj_id] = weakref.ref(obj)
+    except TypeError as e:
+        from .exc import unimplemented_v2
+
+        unimplemented_v2(
+            gb_type="Failed to make weakref to User Object",
+            context=f"user_objected: {obj}",
+            explanation="Object does not allow us to make a weakref to it",
+            hints=[],
+            from_exc=e,
+        )
 
 
 class CompileTimeInstructionCounter:
