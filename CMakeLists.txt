@@ -941,6 +941,8 @@ if(USE_FBGEMM)
 endif()
 
 if(USE_FBGEMM_GENAI)
+  # FBGEMM_GENAI depends on ATen headers generation
+  add_dependencies(fbgemm_genai ATEN_CPU_FILES_GEN_TARGET)
   string(APPEND CMAKE_CXX_FLAGS " -DUSE_FBGEMM_GENAI")
 endif()
 
