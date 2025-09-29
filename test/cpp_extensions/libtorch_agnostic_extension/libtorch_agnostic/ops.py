@@ -215,6 +215,35 @@ def test_default_constructor(defined) -> bool:
     return torch.ops.libtorch_agnostic.test_default_constructor.default(defined)
 
 
+def get_any_data_ptr(t, mutable) -> int:
+    """
+    Return data pointer value of the tensor.
+
+    Args:
+        t: Input tensor
+        mutable: whether data pointer qualifier is mutable or const
+
+    Returns: int - pointer value
+    """
+    return torch.ops.libtorch_agnostic.get_any_data_ptr.default(t, mutable)
+
+
+def get_template_any_data_ptr(t, r, mutable) -> int:
+    """
+    Return data pointer value of the first tensor iff dtypes of tensors match.
+
+    Args:
+        t: Input tensor
+        r: Input tensor defining dtype
+        mutable: whether data pointer qualifier is mutable or const
+
+    Returns: int - pointer value
+
+    Raises RuntimeError when t.dtype() != r.dtype()
+    """
+    return torch.ops.libtorch_agnostic.get_template_any_data_ptr.default(t, r, mutable)
+
+
 def my_pad(t) -> Tensor:
     """
     Pads the input tensor with hardcoded padding parameters.
