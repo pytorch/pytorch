@@ -1824,7 +1824,7 @@ def get_mempool_allocator(device: _device):  # type: ignore[no-untyped-def]
     return _SymmetricMemory.get_mempool_allocator(torch.device(device))
 
 
-def make_exchange_plan(
+def make_a2a_exchange_plan(
     in_splits: torch.Tensor,
     src_offsets: torch.Tensor,
     out_splits: torch.Tensor,
@@ -1844,7 +1844,7 @@ def make_exchange_plan(
         A tuple of (in_splits, src_offsets, out_splits, dst_offsets)
         representing the exchange plan.
     """
-    torch.ops.symm_mem._make_exchange_plan(
+    torch.ops.symm_mem._make_a2a_exchange_plan(
         in_splits, src_offsets, out_splits, dst_offsets, group_name
     )
     return in_splits, src_offsets, out_splits, dst_offsets

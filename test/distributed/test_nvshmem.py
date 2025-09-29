@@ -558,7 +558,7 @@ class NVSHMEMAll2AllTest(MultiProcContinuousTest):
         torch.testing.assert_close(out_expected, out[:out_numel])
 
     @skipIfRocm
-    def test_make_exchange_plan(self) -> None:
+    def test_make_a2a_exchange_plan(self) -> None:
         self._init_device()
 
         group_name = dist.group.WORLD.group_name
@@ -587,7 +587,7 @@ class NVSHMEMAll2AllTest(MultiProcContinuousTest):
         # Sync all ranks to ensure remote tensors are allocated
         dist.barrier()
 
-        symm_mem.make_exchange_plan(
+        symm_mem.make_a2a_exchange_plan(
             in_splits, src_offsets, out_splits, dst_offsets, group_name
         )
 

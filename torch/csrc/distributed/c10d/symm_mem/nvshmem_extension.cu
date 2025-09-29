@@ -896,7 +896,7 @@ __global__ void makeExchangePlan(int64_t* in_splits, int64_t* src_offsets, int64
 #endif
 }
 
-void _make_exchange_plan(
+void _make_a2a_exchange_plan(
     at::Tensor& in_splits,
     at::Tensor& src_offsets,
     at::Tensor& out_splits,
@@ -958,5 +958,5 @@ TORCH_LIBRARY_IMPL(symm_mem, CUDA, m) {
   m.impl("all_to_all_vdev", c10d::nvshmem_extension::all_to_all_vdev);
   m.impl("all_to_all_vdev_2d", c10d::nvshmem_extension::all_to_all_vdev_2d);
   m.impl("all_to_all_vdev_2d_offset", c10d::nvshmem_extension::all_to_all_vdev_2d_offset);
-  m.impl("_make_exchange_plan", c10d::nvshmem_extension::_make_exchange_plan);
+  m.impl("_make_a2a_exchange_plan", c10d::nvshmem_extension::_make_a2a_exchange_plan);
 }
