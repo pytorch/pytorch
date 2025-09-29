@@ -42,7 +42,7 @@ from ..pattern_matcher import (
     Match,
     MultiOutputPattern,
     MULTIPLE,
-    PatternMatcherPass,
+    PatternMatcherPass as PatternMatcherPassBase,
     register_graph_pattern,
     register_replacement,
     stable_topological_sort,
@@ -67,6 +67,10 @@ from .split_cat import POST_GRAD_PATTERNS
 
 _T = TypeVar("_T")
 _P = ParamSpec("_P")
+
+PatternMatcherPass = functools.partial(
+    PatternMatcherPassBase, subsystem="post_grad_passes"
+)
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
@@ -808,6 +812,12 @@ def scatter_upon_const_tensor(
     when it is a tensor as well.
     """
     from torch._inductor import metrics
+
+    # Check if inputs are tensors instead of inductor IR nodes
+    if isinstance(selector, torch.Tensor):
+        # Return a fake tensor with the proper shape that this operator is intended to return
+        device = selector.device if hasattr(selector, "device") else torch.device("cpu")
+        return torch.empty(shape, dtype=dtype, device=device)
 
     metrics.num_matches_for_scatter_upon_const_tensor += 1
 

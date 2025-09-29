@@ -160,13 +160,6 @@ def addmm_patterns_init():
         ):
             return False
 
-        equal_shape_inputs = [weight_inputs]
-        for equal_shape_group in equal_shape_inputs:
-            inps = [match.kwargs[name] for name in equal_shape_group]
-            if not all(
-                inp.meta["val"].shape == inps[0].meta["val"].shape for inp in inps
-            ):
-                return False
         return True
 
     def check_concat_weights(match):
@@ -205,7 +198,8 @@ def addmm_patterns_init():
         cat_w = torch.cat((w1, w2, w3), dim=1)
         cat_s = torch.cat((s1, s2, s3), dim=0)
         mm = (inp @ cat_w).mul(cat_s)
-        return mm.chunk(3, dim=1)
+        n1, n2 = w1.size(1), w2.size(1)
+        return mm.tensor_split([n1, n1 + n2], dim=-1)
 
     register_replacement(
         int8_woq_fusion_pattern,
