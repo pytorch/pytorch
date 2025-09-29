@@ -24,7 +24,6 @@ def fuzz_and_execute(
     seed: Optional[int] = None,
     max_depth: Optional[int] = None,
     log_at_faluire: bool = False,
-    template: str = "default",
 ) -> None:
     """
     Generate a fuzzed operation stack, convert it to Python code, and execute it.
@@ -112,7 +111,7 @@ def fuzz_and_execute(
         # Generate target specification first
         logger.debug("⏱️  Step 1: Generating target spec...")
         start_time = time.time()
-        target_spec = fuzz_spec(template)
+        target_spec = fuzz_spec()
         logger.debug(
             "   Completed in %.3fs - %s", time.time() - start_time, target_spec
         )
@@ -120,13 +119,11 @@ def fuzz_and_execute(
         logger.debug("⏱️  Step 2: Generating operation graph...")
         start_time = time.time()
         operation_graph = fuzz_operation_graph(
-            target_spec, max_depth=max_depth, seed=seed, template=template
+            target_spec, max_depth=max_depth, seed=seed
         )
         logger.debug("⏱️  Step 3: Converting to Python code...")
         start_time = time.time()
-        python_code = convert_graph_to_python_code(
-            operation_graph, seed=seed, template=template
-        )
+        python_code = convert_graph_to_python_code(operation_graph, seed=seed)
         logger.debug(
             "   Completed in %.3fs - %d chars",
             time.time() - start_time,
@@ -182,12 +179,6 @@ if __name__ == "__main__":
     parser.add_argument(
         "--max-depth", type=int, help="Maximum depth for operation stack (1-20)"
     )
-    parser.add_argument(
-        "--template",
-        choices=["default", "dtensor", "unbacked"],
-        default="default",
-        help="Template to use for code generation (default: default)",
-    )
 
     # Multi-process fuzzing arguments
     parser.add_argument(
@@ -234,9 +225,7 @@ if __name__ == "__main__":
     if args.seed is not None or args.single:
         # Single seed execution mode
         print("Running single fuzz_and_execute...")
-        fuzz_and_execute(
-            seed=args.seed, max_depth=args.max_depth, template=args.template
-        )
+        fuzz_and_execute(seed=args.seed, max_depth=args.max_depth)
     elif args.start is not None or args.count is not None:
         # Multi-process fuzzing mode
         if args.start is None:
@@ -266,7 +255,6 @@ if __name__ == "__main__":
                 seed_start=args.start,
                 seed_count=args.count,
                 verbose=args.verbose,
-                template=args.template,
             )
         except Exception as e:
             print(f"❌ Unexpected error: {str(e)}")

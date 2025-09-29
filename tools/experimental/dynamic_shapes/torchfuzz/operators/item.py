@@ -1,24 +1,17 @@
 """Item operator implementation."""
 
-from typing import Optional
-
 from torchfuzz.operators.base import Operator
 from torchfuzz.tensor_fuzzer import ScalarSpec, Spec, TensorSpec
 
 
 class ItemOperator(Operator):
-    """Operator for converting 0-d tensor to scalar."""
+    """Operator for extracting a scalar from a tensor."""
 
     def __init__(self):
-        super().__init__("item")
-
-    @property
-    def torch_op_name(self) -> Optional[str]:
-        """Item is a tensor method, not a direct torch operation."""
-        return None
+        super().__init__("torch.ops.aten.item")
 
     def can_produce(self, output_spec: Spec) -> bool:
-        """Item produces scalars from 0-d tensors."""
+        """Item can only produce scalars."""
         return isinstance(output_spec, ScalarSpec)
 
     def fuzz_inputs_specs(self, output_spec: Spec, num_inputs: int = 1) -> list[Spec]:
@@ -27,8 +20,8 @@ class ItemOperator(Operator):
             raise ValueError("ItemOperator can only produce ScalarSpec outputs")
 
         # Create a tensor spec that can produce a scalar via .item()
-        # Use a 0-D tensor (scalar tensor) to ensure .item() works reliably
-        tensor_spec = TensorSpec(size=(), stride=(), dtype=output_spec.dtype)
+        # Use a 1-D tensor with 1 element
+        tensor_spec = TensorSpec(size=(1,), stride=(1,), dtype=output_spec.dtype)
 
         return [tensor_spec]
 

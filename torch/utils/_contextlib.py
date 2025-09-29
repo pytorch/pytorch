@@ -6,8 +6,7 @@ import functools
 import inspect
 import sys
 import warnings
-from collections.abc import Callable
-from typing import Any, cast, TypeVar
+from typing import Any, Callable, cast, TypeVar
 
 
 # Used for annotating the decorator usage of _DecoratorContextManager (e.g.,

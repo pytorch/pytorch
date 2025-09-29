@@ -2,8 +2,7 @@
 import torch
 from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
 from .module_tracker import ModuleTracker
-from typing import Any, Optional, Union, TypeVar
-from collections.abc import Callable
+from typing import Any, Optional, Union, TypeVar, Callable
 from collections.abc import Iterator
 from typing_extensions import ParamSpec
 from collections import defaultdict

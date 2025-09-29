@@ -10,6 +10,7 @@
 #endif
 
 // see https://bugs.python.org/issue35886
+#if PY_VERSION_HEX >= 0x03080000
 #define Py_BUILD_CORE
 
 #ifndef __cplusplus
@@ -33,6 +34,7 @@
 #endif
 
 #undef Py_BUILD_CORE
+#endif // PY_VERSION_HEX >= 0x03080000
 
 #ifdef __cplusplus
 extern "C" {

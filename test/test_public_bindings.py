@@ -7,7 +7,7 @@ import logging
 import os
 import pkgutil
 import unittest
-from collections.abc import Callable
+from typing import Callable
 
 import torch
 from torch._utils_internal import get_file_path_2  # @manual

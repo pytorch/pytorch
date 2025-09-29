@@ -3,8 +3,7 @@
 import importlib
 import math
 import warnings
-from collections.abc import Callable
-from typing import Optional, TYPE_CHECKING, Union
+from typing import Callable, Optional, TYPE_CHECKING, Union
 
 import torch
 from torch import _VF, sym_int as _sym_int, Tensor
