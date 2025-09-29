@@ -763,6 +763,14 @@ auto ${inp_name}_t = (${inp_name}_t_raw.defined() || !${inp_name}_tensor.defined
 """
 )
 
+FW_DERIVATIVE_ADD_WRAPPED_NUM_TEMPLATE = CodeTemplate(
+    """\
+if (${inp}.unsafeGetTensorImpl()->is_wrapped_number() && !${inp}_t.unsafeGetTensorImpl()->is_wrapped_number()) {
+  ${inp}_t.unsafeGetTensorImpl()->set_wrapped_number(true);
+}
+"""
+)
+
 FW_DERIVATIVE_DEFINED_PRIMAL_TEMPLATE = CodeTemplate(
     """\
 auto ${inp_name}_p = toNonOptPrimal(${inp});
@@ -1908,6 +1916,14 @@ def emit_body(
                             zeros_fn=zeros_fn,
                         )
                     )
+                if f.root_name == 'mul':
+                    unpacked_arguments += (
+                        FW_DERIVATIVE_ADD_WRAPPED_NUM_TEMPLATE.substitute(
+                            inp_name=inp.name,
+                            inp=inp_name + input_suffix
+                        )
+                    )
+                    
                 if inp.name in (derivative.required_inputs_primal or []):
                     unpacked_arguments += (
                         FW_DERIVATIVE_DEFINED_PRIMAL_TEMPLATE.substitute(
