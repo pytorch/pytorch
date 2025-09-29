@@ -126,18 +126,26 @@ def shape_div(a: IntTuple, b: IntTuple) -> IntTuple:
             return (a + b - 1) // b
 
 
-# Exclusive prefix product with output congruent to input a
-def prefix_product(a: IntTuple, init: IntTuple = 1) -> IntTuple:
+# Exclusive suffix product with output congruent to input a (lexicographic)
+def suffix_product(a: IntTuple, init: IntTuple = 1) -> IntTuple:
+    # TODO: With all these length asserts, may want to create a zip_strict wrapper.
     if is_tuple(a):
         if is_tuple(init):  # tuple tuple
             assert len(a) == len(init)
-            return tuple(prefix_product(x, i) for x, i in zip(a, init))
+            return tuple(suffix_product(x, i) for x, i in zip(a, init))
         else:  # tuple "int"
-            # r = [prefix_product(a[0],init)] + [prefix_product(a[i],init := init * product(a[i-1])) for i in range(1,len(a))]
+            # Process from right to left for lexicographic ordering
+            # r = [prefix_product(a[len(a)-1],init)] +
+            # [prefix_product(a[i],init := init * product(a[i+1])) for i in range(len(a)-1,0)].reverse()
             r = []
-            for v in a:
-                r.append(prefix_product(v, init))
-                init = init * product(v)
+
+            # Calculate products from right to left, appending to list
+            for i in range(len(a) - 1, -1, -1):
+                r.append(suffix_product(a[i], init))
+                init = init * product(a[i])
+
+            # Reverse to get correct lexicographic order
+            r.reverse()
             return tuple(r)
     else:
         if is_tuple(init):  # "int" tuple
@@ -150,7 +158,7 @@ def idx2crd(
     idx: IntTuple, shape: IntTuple, stride: Optional[IntTuple] = None
 ) -> IntTuple:
     if stride is None:
-        stride = prefix_product(shape)
+        stride = suffix_product(shape)
 
     if is_tuple(idx):
         if is_tuple(shape) and is_tuple(stride):  # tuple tuple tuple
@@ -171,7 +179,7 @@ def crd2idx(
     crd: Optional[IntTuple], shape: IntTuple, stride: Optional[IntTuple] = None
 ) -> int:
     if stride is None:
-        stride = prefix_product(shape)
+        stride = suffix_product(shape)
 
     if is_tuple(crd):
         if is_tuple(shape) and is_tuple(stride):  # tuple tuple tuple
@@ -186,10 +194,11 @@ def crd2idx(
         if is_tuple(shape) and is_tuple(stride):  # "int" tuple tuple
             assert len(shape) == len(stride)
             result = 0
-            for i in range(len(shape) - 1):
+            # Process from right to left for lexicographic ordering
+            for i in range(len(shape) - 1, 0, -1):
                 result += crd2idx(crd % product(shape[i]), shape[i], stride[i])
                 crd = crd // product(shape[i])
-            return result + crd2idx(crd, shape[-1], stride[-1])
+            return result + crd2idx(crd, shape[0], stride[0])
         else:  # "int" "int" "int"
             assert not is_tuple(shape) and not is_tuple(stride)
             return crd * stride  # all are ints after type checks
