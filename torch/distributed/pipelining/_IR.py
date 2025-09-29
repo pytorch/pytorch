@@ -758,7 +758,7 @@ class Pipe(torch.nn.Module):
 
         for name, submodule in split.named_children():
             if name.startswith(PP_SUBMOD_PREFIX):
-                logger.info(f"===== Unflattening {name}")  # noqa: G004
+                logger.info(f"===== Unflattening %s", name)  # noqa: G004
                 new_submod = _outline_submodules(submodule)
                 # Replace old submod
                 split.register_module(name, new_submod)
