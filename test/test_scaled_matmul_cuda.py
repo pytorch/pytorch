@@ -412,7 +412,7 @@ class TestFP8Matmul(TestCase):
         self._test_tautological_mm(device, e4m3_type, e4m3_type, size=16)
         # According to https://docs.nvidia.com/cuda/cublas/#id99 8F_E5M2 MM is unsupported
         # supported on ROCm but fails on CUDA
-        ctx = self.assertRaises(RuntimeError) if torch.version.hip is None and device != "cpu" else contextlib.nullcontext()
+        ctx = self.assertRaises(ValueError) if torch.version.hip is None and device != "cpu" else contextlib.nullcontext()
         with ctx:
             self._test_tautological_mm(device, e5m2_type, e5m2_type)
 
@@ -759,7 +759,7 @@ class TestFP8Matmul(TestCase):
         scale_b = torch.tensor(1.0, device=device)
         bias = torch.full((m,), 4.0, device=device, dtype=torch.bfloat16)
         self.assertRaisesRegex(
-            RuntimeError,
+            ValueError,
             "Bias is not supported when out_dtype is set to Float32",
             lambda: scaled_mm_wrap(x, y, scale_a, scale_b, bias=bias, out_dtype=torch.float32),
         )
@@ -833,7 +833,7 @@ class TestFP8Matmul(TestCase):
         y_fp8 = y.to(e4m3_type).t()
 
         with self.assertRaisesRegex(
-            RuntimeError, re.escape("scale_b must have 1 Float element")
+            ValueError, re.escape("scale_b must have 1 Float element")
         ):
             scaled_mm_wrap(
                 x_fp8,
@@ -846,7 +846,7 @@ class TestFP8Matmul(TestCase):
             )
 
         with self.assertRaisesRegex(
-            RuntimeError, re.escape(f"scale_b must have {N} Float elements, got {N + 1}"),
+            ValueError, re.escape(f"scale_b must have {N} Float elements, got {N + 1}"),
         ):
             scaled_mm_wrap(
                 x_fp8,
@@ -871,7 +871,7 @@ class TestFP8Matmul(TestCase):
             )
 
         with self.assertRaisesRegex(
-            RuntimeError, re.escape("Expected scale_b.stride(1) == 1 to be true, but got false."),
+            ValueError, re.escape("expected scale_b.stride(1) to be 1, but got 2"),
         ):
             scaled_mm_wrap(
                 x_fp8,
