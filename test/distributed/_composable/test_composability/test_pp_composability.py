@@ -249,7 +249,7 @@ class ComposabilityTest(MultiProcessTestCase):
 
         # create "entire model"
         total_layers = 8
-        full_model = nn.ModuleList([MLPModule(dim) for _ in range(total_layers)])
+        full_model = nn.ModuleList([MLPModuleEven(dim) for _ in range(total_layers)])
 
         # dummy loss needed just to force backwards to run in schedule step
         def loss_fn(y, target):
