@@ -1,4 +1,5 @@
 #include <c10/util/Enumerate.h>
+#include <c10/util/Exception.h>
 #include <c10/util/Logging.h>
 
 #include <torch/nativert/executor/ExecutionFrame.h>
@@ -156,11 +157,8 @@ void ExecutionFrame::setBorrowedIValue(ValueId id, c10::IValue ivalue) {
 
 at::Tensor ExecutionFrame::getTensor(ValueId id) const {
   const auto& ivalue = getIValue(id);
-  if (C10_LIKELY(ivalue.isTensor())) {
-    return ivalue.toTensor();
-  } else {
-    throw std::runtime_error("getTensor called on non-tensor value");
-  }
+  TORCH_CHECK(ivalue.isTensor(), "getTensor called on non-tensor value");
+  return ivalue.toTensor();
 }
 
 std::vector<c10::IValue> ExecutionFrame::tryMoveUserOutputs() {
