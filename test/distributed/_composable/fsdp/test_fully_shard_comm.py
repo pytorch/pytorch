@@ -6,8 +6,7 @@ import itertools
 import os
 import tempfile
 import unittest
-from collections.abc import Callable
-from typing import Optional, Union
+from typing import Callable, Optional, Union
 from unittest.mock import MagicMock
 
 import torch

@@ -3,9 +3,8 @@
 
 import os
 import unittest
-from collections.abc import Callable
 from functools import wraps
-from typing import Any
+from typing import Any, Callable
 
 import numpy as np
 

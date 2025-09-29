@@ -10,8 +10,7 @@ import random
 import re
 import tempfile
 import unittest
-from collections.abc import Callable
-from typing import Optional
+from typing import Callable, Optional
 from unittest import mock
 
 import torch

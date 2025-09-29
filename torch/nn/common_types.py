@@ -1,4 +1,5 @@
-from typing import Optional, TypeAlias as _TypeAlias, TypeVar, Union
+from typing import Optional, TypeVar, Union
+from typing_extensions import TypeAlias as _TypeAlias
 
 from torch import Tensor
 

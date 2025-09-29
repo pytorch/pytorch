@@ -8,9 +8,8 @@ import itertools
 import math
 import operator
 import warnings
-from collections.abc import Callable
 from enum import Enum
-from typing import Any, NamedTuple, Optional, Union
+from typing import Any, Callable, NamedTuple, Optional, Union
 
 import torch
 from torch import Tensor

@@ -1,7 +1,8 @@
 #include <torch/nativert/kernels/AutoFunctionalizeKernel.h>
 
+#include <fmt/format.h>
+
 #include <c10/util/Enumerate.h>
-#include <c10/util/Exception.h>
 
 namespace torch::nativert {
 
@@ -36,12 +37,10 @@ void UnsafeAutoFunctionalizeKernel::computeInternal(
     // IndexError, ValueError). If retaining this information is important
     // to us, we'll have to change this up a little.
     auto stackTrace = node_->getMetadata("stack_trace");
-    TORCH_CHECK(
-        false,
-        "Oringinal Python stacktrace:\n",
+    throw std::runtime_error(fmt::format(
+        "Original Python stacktrace:\n{}\n{}",
         stackTrace ? *stackTrace : "<no stack trace>",
-        "\n",
-        ex.what())
+        ex.what()));
   }
 
   const auto& outputValues = node_->outputs();

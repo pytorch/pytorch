@@ -842,7 +842,10 @@ bool Value::isValidName(const std::string& name) {
 }
 
 Value* Value::setDebugName(const std::string& name) {
-  TORCH_CHECK(isValidName(name), "Invalid name: '", name, "'")
+  if (!isValidName(name)) {
+    throw std::runtime_error("Invalid name: '" + name + "'");
+  }
+
   auto& names = node()->owningGraph()->unique_names_;
 
   // clear any old name from the map
@@ -967,7 +970,8 @@ static size_t findArgument(
       return i;
     }
   }
-  TORCH_CHECK(false, "Couldn't find an argument called ", unqualName);
+  throw std::runtime_error(
+      std::string("Couldn't find an argument called ") + unqualName);
 }
 
 static size_t findArgument(const FunctionSchema& the_schema, Symbol name) {

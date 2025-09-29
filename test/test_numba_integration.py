@@ -1,4 +1,4 @@
-# Owner(s): ["module: cuda"]
+# Owner(s): ["module: unknown"]
 
 import unittest
 

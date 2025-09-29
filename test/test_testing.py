@@ -12,8 +12,7 @@ import re
 import subprocess
 import sys
 import unittest.mock
-from typing import Any
-from collections.abc import Callable
+from typing import Any, Callable
 from collections.abc import Iterator
 
 import torch
