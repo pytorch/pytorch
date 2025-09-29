@@ -12,7 +12,6 @@ import torch._dynamo.test_case
 import torch.distributed._functional_collectives as _functional_collectives
 from torch._C import FileCheck
 from torch._dynamo.utils import counters, same
-from torch._inductor import config
 from torch._inductor.utils import run_and_get_triton_code
 from torch.testing._internal.common_distributed import (
     _dynamo_dist_per_rank_init,
@@ -61,12 +60,18 @@ def run_and_get_aten_graph(fn, *inputs):
     return out, li[0]
 
 
+def get_patches():
+    return {
+        "test_configs.estimate_aten_runtime": estimate_aten_runtime,
+        "reorder_for_locality": False,
+        "reorder_for_compute_comm_overlap_passes": [],
+        "compile_threads": 1,
+        "force_disable_caches": True,
+    }
+
+
 @requires_accelerator_dist_backend()
 # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
-@config.patch(compile_threads=1)
-@config.patch(reorder_for_locality=False)
-@config.patch(reorder_for_compute_comm_overlap_passes=[])
-@config.patch("test_configs.estimate_aten_runtime", estimate_aten_runtime)
 @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
 class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
     """
@@ -95,6 +100,7 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
         return 2
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @torch._inductor.config.patch(get_patches())
     def test_sink_waits(self):
         def func(a):
             ar = _functional_collectives.all_reduce(a, "sum", "0")
@@ -125,6 +131,7 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             self.assertTrue(same(out, correct))
             self.assertEqual(counters["inductor"]["overlap_scheduling_exposed"], 0)
 
+    @torch._inductor.config.patch(get_patches())
     def test_raise_comms(self):
         def func(a):
             b = torch.matmul(a, a)
@@ -161,6 +168,7 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             self.assertTrue(same(out, correct))
             self.assertEqual(counters["inductor"]["overlap_scheduling_exposed"], 0)
 
+    @torch._inductor.config.patch(get_patches())
     def test_sink_waits_raise_comms(self):
         def func(a, *, tag, ranks, group_size):
             b = torch.matmul(a, a)
@@ -211,6 +219,7 @@ graph():
             self.assertTrue(same(out, correct))
             self.assertEqual(counters["inductor"]["overlap_scheduling_exposed"], 0)
 
+    @torch._inductor.config.patch(get_patches())
     def test_reorder_compute_for_overlap_mul(self):
         def func(a, *, tag, ranks, group_size):
             ar = _functional_collectives.all_reduce(a, "sum", ranks, tag)
@@ -234,21 +243,22 @@ graph():
             out_c, aten_graph_str = run_and_get_aten_graph(compiled, inputs)
             # Note: because we have given collectives and mms equal estimation,
             # we overlap each collective with a single mm.
+            # Same schedule as in test_reorder_compute_for_overlap_custom_runtime_estimation
+            # although there is an exposed collective
             (
                 FileCheck()
                 .check("all_reduce.default")
                 .check("aten.mm")
+                .check("aten.mm")
                 .check("wait_tensor.default")
                 .check("aten.mul")
                 .check("all_reduce.default")
-                .check("aten.mm")
                 .check("wait_tensor.default")
-                .check("aten.add")
                 .check("aten.mm")
                 .run(aten_graph_str)
             )
             correct = func(inputs, **self.get_world_trs())
-            self.assertEqual(counters["inductor"]["overlap_scheduling_exposed"], 0)
+            self.assertEqual(counters["inductor"]["overlap_scheduling_exposed"], 1)
             self.assertTrue(same(out_c, correct))
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
@@ -256,6 +266,7 @@ graph():
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
     @patch.object(torch._inductor.config, "compile_threads", 1)
     @unittest.skipIf(True, "Logic not yet implemented")
+    @torch._inductor.config.patch(get_patches())
     def test_grouped_scheduler_node(self):
         def func(a, *, tag, ranks, group_size):
             add = a + a
@@ -290,7 +301,7 @@ graph():
             self.assertTrue(same(out, correct))
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    @torch._inductor.config.patch(force_disable_caches=True)
+    @torch._inductor.config.patch(get_patches())
     def test_inductor_default_comms_ordering(self):
         pg_info = self.get_world_trs()
         tag = pg_info["tag"]
@@ -336,12 +347,23 @@ graph():
             self.assertEqual(counters["inductor"]["overlap_scheduling_bad_exposed"], 0)
 
 
-@config.patch(
-    "test_configs.aten_fx_overlap_preserving_bucketing",
-    True,
-)
+def get_bucket_patches(compute_multiplier=1.0):
+    estimate_aten_runtime_part = functools.partial(
+        estimate_aten_runtime, compute_multiplier=compute_multiplier
+    )
+    return {
+        "test_configs.estimate_aten_runtime": estimate_aten_runtime_part,
+        "test_configs.aten_fx_overlap_preserving_bucketing": True,
+        "reorder_for_locality": False,
+        "reorder_for_compute_comm_overlap_passes": [],
+        "compile_threads": 1,
+        "force_disable_caches": True,
+    }
+
+
 class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @torch._inductor.config.patch(get_bucket_patches())
     def test_basic_all_gather_bucketing(self):
         """Test that independent all_gather operations get bucketed together."""
 
@@ -380,6 +402,7 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
             self.assertTrue(same(out, correct))
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @torch._inductor.config.patch(get_bucket_patches())
     def test_reduce_scatter_bucketing(self):
         """Test bucketing of reduce_scatter operations."""
 
@@ -412,6 +435,7 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
             self.assertTrue(same(out, correct))
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @torch._inductor.config.patch(get_bucket_patches())
     def test_no_bucketing_with_dependent_hiding_nodes(self):
         """Test that collectives with dependent hiding nodes don't get bucketed."""
 
@@ -452,6 +476,7 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
             self.assertTrue(same(out, correct))
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @torch._inductor.config.patch(get_bucket_patches())
     def test_no_bucketing_when_collective_depends_on_hiding_node(self):
         """Test that collectives don't get bucketed when one depends on another's hiding node."""
 
@@ -488,10 +513,7 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
             self.assertTrue(same(out, correct))
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    @config.patch(
-        "test_configs.estimate_aten_runtime",
-        functools.partial(estimate_aten_runtime, compute_multiplier=2.0),
-    )
+    @torch._inductor.config.patch(get_bucket_patches(2.0))
     def test_bucketing_wait_sink(self):
         """Test that 4 independent all-gathers split bucketed."""
 
@@ -537,7 +559,6 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
             func_c = functools.partial(func, ranks=ranks)
             compiled = torch.compile(func_c)
             out, aten_graph_str = run_and_get_aten_graph(compiled, a, b, c, d)
-            torch.distributed.breakpoint(0)
 
             # The 4 all gathers can be bucketed, and their waits should be sunk below the mms
             FileCheck().check_count(
@@ -550,10 +571,7 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
             self.assertTrue(same(out, correct))
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    @config.patch(
-        "test_configs.estimate_aten_runtime",
-        functools.partial(estimate_aten_runtime, compute_multiplier=2.0),
-    )
+    @torch._inductor.config.patch(get_bucket_patches(2.0))
     def test_bucketing_split_for_overlap_blocking(self):
         """Test that 4 independent all-gathers split into 2+2 buckets for better overlap with compute."""
 
@@ -569,7 +587,8 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
             mm1 = torch.matmul(e, e.T)
 
             # Force ag1/ag2 to complete before mm2 (but ag3/ag4 can still be deferred)
-            intermediate = ag1[:2, :2] + ag2[:2, :2]  # Small slice to minimize compute
+            # Use first 8x8 elements to match mm1's shape
+            intermediate = ag1[:8, :8] + ag2[:8, :8]
 
             # Second compute - depends on ag1/ag2 through intermediate, can hide ag3/ag4
             mm2 = torch.matmul(mm1 + intermediate, c[:8])
@@ -583,7 +602,6 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
                 + mm1.sum()
                 + mm2.sum()
             )
-
             return result
 
         with _dynamo_dist_per_rank_init(
@@ -613,10 +631,7 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
             self.assertTrue(same(out, correct))
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    @config.patch(
-        "test_configs.estimate_aten_runtime",
-        functools.partial(estimate_aten_runtime, compute_multiplier=2.0),
-    )
+    @torch._inductor.config.patch(get_bucket_patches(2.0))
     def test_bucketing_split_for_overlap(self):
         """Test that 4 independent all-gathers split into 2+2 buckets for better overlap with compute."""
 
@@ -685,6 +700,7 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
             self.assertTrue(same(out, correct))
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @torch._inductor.config.patch(get_bucket_patches())
     def test_bucket_exposed_with_hidden_single_overlap(self):
         """Test that exposed and hidden collectives bucket together when overlap is preserved."""
 
