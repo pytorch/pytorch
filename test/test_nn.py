@@ -5244,7 +5244,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                 return torch.contiguous_format
             if memory_format in (torch.contiguous_format, torch.channels_last, torch.channels_last_3d):
                 return memory_format
-            raise ValueError("Unable to detect memory format for backend={backend} and memory_format={memory_format}")
+            raise ValueError(f"Unable to detect memory format for backend={backend} and memory_format={memory_format}")
 
         def _get_memory_format(t: torch.Tensor) -> torch.memory_format:
             if t.is_contiguous(memory_format=torch.contiguous_format):
