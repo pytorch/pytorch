@@ -9,8 +9,8 @@ import sys
 import tempfile
 import unittest
 import zipfile
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 from parameterized import parameterized_class
 

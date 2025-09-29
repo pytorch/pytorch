@@ -5696,8 +5696,7 @@ def install_cpp_extension(extension_root):
             shutil.rmtree(d)
 
     # Build the extension
-    setup_py_path = os.path.join(extension_root, "setup.py")
-    cmd = [sys.executable, setup_py_path, "install", "--root", install_dir]
+    cmd = [sys.executable, "-m", "pip", "install", "--no-build-isolation", "-v", ".", "--root", install_dir]
     return_code = shell(cmd, cwd=extension_root, env=os.environ)
     if return_code != 0:
         raise RuntimeError(f"build failed for cpp extension at {extension_root}")

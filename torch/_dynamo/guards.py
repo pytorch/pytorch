@@ -2061,10 +2061,10 @@ class GuardBuilder(GuardBuilderBase):
         # TODO(anijain2305) - Consider this moving this guard to C++
         compare_fn = torch._functorch.pyfunctorch.compare_functorch_state
 
-        def fn() -> bool:
+        def fn(x: Any) -> bool:
             return compare_fn(states)
 
-        self.guard_manager.root.add_lambda_guard_no_args(
+        self.guard_manager.root.add_lambda_guard(
             fn, get_verbose_code_parts(code, guard)
         )
 
@@ -2090,10 +2090,10 @@ class GuardBuilder(GuardBuilderBase):
         ]
         self._set_guard_export_info(guard, code)
 
-        def fn() -> bool:
+        def fn(x: Any) -> bool:
             return guard_hooks_ids == hooks_ids_fn(get_hooks())
 
-        self.guard_manager.root.add_lambda_guard_no_args(
+        self.guard_manager.root.add_lambda_guard(
             fn, get_verbose_code_parts(code, guard)
         )
 
@@ -2114,7 +2114,7 @@ class GuardBuilder(GuardBuilderBase):
                 return x.__tensor_flatten__()[1] == original_metadata
 
         global_name = f"___check_metadata_{id(metadata_checker)}_c{CompileContext.current_compile_id()}"
-        self.get_guard_manager(guard).add_lambda_guard_no_framelocals(
+        self.get_guard_manager(guard).add_lambda_guard(
             metadata_checker, get_verbose_code_parts(global_name, guard)
         )
 
@@ -2721,9 +2721,10 @@ class GuardBuilder(GuardBuilderBase):
 
             if config.log_compilation_metrics and isinstance(value, torch.nn.Parameter):
                 metrics_context = get_metrics_context()
-                metrics_context.increment("param_numel", value.numel())
-                metrics_context.increment("param_bytes", value.nbytes)
-                metrics_context.increment("param_count", 1)
+                if metrics_context.in_progress():
+                    metrics_context.increment("param_numel", value.numel())
+                    metrics_context.increment("param_bytes", value.nbytes)
+                    metrics_context.increment("param_count", 1)
 
             tensor_name = self.arg_ref(guard)
             # [Note - On Export Tensor Guards]
