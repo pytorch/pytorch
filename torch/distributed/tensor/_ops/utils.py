@@ -194,6 +194,22 @@ def is_tensor_evenly_shardable(shape: Sequence[int], spec: DTensorSpec) -> bool:
     return True
 
 
+def is_tensor_evenly_shardable_on_dim(
+    shape: Sequence[int], spec: DTensorSpec, dim: int
+) -> bool:
+    """Check if the shape is evenly shardable according to the spec on dim."""
+    dim = normalize_dim(dim, len(shape))
+
+    num_shards = 1
+    for i, placement in enumerate(spec.placements):
+        if placement.is_shard():
+            shard_dim = cast(Shard, placement).dim
+            if shard_dim == dim:
+                num_shards *= spec.mesh.size(i)
+
+    return shape[dim] % num_shards == 0
+
+
 def is_tensor_dim_sharded(spec: DTensorSpec, dim: int) -> bool:
     """Return True if tensor dim is sharded."""
     return any(p.is_shard(dim) for p in spec.placements)

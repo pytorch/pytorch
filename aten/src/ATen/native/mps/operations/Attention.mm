@@ -182,6 +182,8 @@ static std::tuple<Tensor, Tensor> sdpa_vector_fast_mps(const Tensor& q_,
   uint maxSeqLength = k_.size(2);
   uint N = k_.size(2);
   uint B = q_.size(0) * q_.size(1);
+  uint q_head_stride = q_.stride(1);
+  uint q_seq_stride = q_.stride(2);
   uint k_head_stride = k_.stride(1);
   uint k_seq_stride = k_.stride(2);
   uint v_head_stride = v_.stride(1);
@@ -209,8 +211,8 @@ static std::tuple<Tensor, Tensor> sdpa_vector_fast_mps(const Tensor& q_,
                   out,
                   1,
                   N,
-                  std::array<uint32_t, 2>{k_head_stride, k_seq_stride},
-                  std::array<uint32_t, 2>{v_head_stride, v_seq_stride},
+                  std::array<uint32_t, 3>{q_head_stride, k_head_stride, v_head_stride},
+                  std::array<uint32_t, 3>{q_seq_stride, k_seq_stride, v_seq_stride},
                   scale_factor);
 
       if (has_mask) {
@@ -257,6 +259,8 @@ static std::tuple<Tensor, Tensor> sdpa_vector_2pass_mps(const Tensor& q_,
   uint B = batchSize * num_heads;
   uint gqa_factor = q_.size(1) / k_.size(1);
 
+  uint q_head_stride = q_.stride(1);
+  uint q_seq_stride = q_.stride(2);
   uint k_head_stride = k_.stride(1);
   uint k_seq_stride = k_.stride(2);
   uint v_head_stride = v_.stride(1);
@@ -294,8 +298,8 @@ static std::tuple<Tensor, Tensor> sdpa_vector_2pass_mps(const Tensor& q_,
                   maxs,
                   gqa_factor,
                   N,
-                  std::array<uint32_t, 2>{k_head_stride, k_seq_stride},
-                  std::array<uint32_t, 2>{v_head_stride, v_seq_stride},
+                  std::array<uint32_t, 3>{q_head_stride, k_head_stride, v_head_stride},
+                  std::array<uint32_t, 3>{q_seq_stride, k_seq_stride, v_seq_stride},
                   scale_factor);
 
       if (has_mask) {
