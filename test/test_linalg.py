@@ -4746,11 +4746,69 @@ class TestLinalg(TestCase):
                 y = make_arg(size_y, noncontiguous=nctg_y)
                 self.check_single_matmul(x, y)
 
+    # @onlyCUDA
+    # @skipCUDAIfNotRocm  # Skipping due to SM89 OOM in CI, UT doesn't do much on NV anyways
+    # @dtypes(*floating_types_and(torch.half))
+    # @precisionOverride({torch.float16: 1e-1})  # TunableOp may occasionally find less precise solution
+    # def test_matmul_small_brute_force_tunableop(self, device, dtype):
+    #     # disable tunableop buffer rotation for all tests everywhere, it can be slow
+    #     # We set the TunableOp numerical check environment variable here because it is
+    #     # possible to hit some invalid numerical solutions due to the small matrix sizes.
+
+    #     with self._tunableop_ctx():
+    #         torch.cuda.tunable.set_rotating_buffer_size(0)
+    #         # Numerical check adds significant overhead, unsure if this is needed
+    #         # or if there was a transient problem at the time.
+    #         # if dtype is torch.half:
+    #         #     os.environ["PYTORCH_TUNABLEOP_NUMERICAL_CHECK"] = "1"
+    #         ordinal = torch.cuda.current_device()
+
+    #         # set these to single iterations to keep it short but still exercise the code
+    #         torch.cuda.tunable.set_max_tuning_duration(1)
+    #         torch.cuda.tunable.set_max_tuning_iterations(1)
+
+    #         make_arg = partial(make_tensor, device=device, dtype=dtype)
+    #         # Using gen_sizes_matmul(2) to ensure we cover
+    #         # 'NN', 'TN', 'TT', and 'NN' cases.
+    #         for (size_x, size_y), nctg_x, nctg_y in product(self.gen_sizes_matmul(2, y_dim=3),
+    #                                                         (True, False), (True, False)):
+    #             x = make_arg(size_x, noncontiguous=nctg_x)
+    #             y = make_arg(size_y, noncontiguous=nctg_y)
+    #             self.check_single_matmul(x, y)
+
+    #         filename1 = torch.cuda.tunable.get_filename()
+    #         unique_id = self.id().split(".")[-1]
+    #         filename2 = f"{filename1}_tmp1.csv"
+    #         filename3 = f"{filename1}_tmp2.csv"
+    #         ordinal = torch.cuda.current_device()
+    #         assert filename1 == f"tunableop_results_{unique_id}_{ordinal}.csv"
+    #         assert len(torch.cuda.tunable.get_results()) > 0
+
+    #         assert torch.cuda.tunable.write_file()  # use default filename
+    #         assert torch.cuda.tunable.write_file(filename2)  # use custom, one-time filename
+    #         torch.cuda.tunable.set_filename(filename3)
+    #         assert torch.cuda.tunable.write_file()  # use previously set filename
+    #         assert torch.cuda.tunable.read_file()  # use previously set filename, will ignore duplicates and return True
+
+    #         with open(filename1) as file1:
+    #             file1_contents = file1.read()
+    #         with open(filename2) as file2:
+    #             file2_contents = file2.read()
+    #         with open(filename3) as file3:
+    #             file3_contents = file3.read()
+    #         assert file1_contents == file2_contents
+    #         assert file1_contents == file3_contents
+
+    #         # We need to reset the filename to the default value so we can properly
+    #         # clean up intermediate files
+    #         self._set_tunableop_defaults()
+
     @onlyCUDA
     @skipCUDAIfNotRocm  # Skipping due to SM89 OOM in CI, UT doesn't do much on NV anyways
     @dtypes(*floating_types_and(torch.half))
     @precisionOverride({torch.float16: 1e-1})  # TunableOp may occasionally find less precise solution
     def test_matmul_small_brute_force_tunableop(self, device, dtype):
+        import os
         # disable tunableop buffer rotation for all tests everywhere, it can be slow
         # We set the TunableOp numerical check environment variable here because it is
         # possible to hit some invalid numerical solutions due to the small matrix sizes.
@@ -4778,26 +4836,32 @@ class TestLinalg(TestCase):
 
             filename1 = torch.cuda.tunable.get_filename()
             unique_id = self.id().split(".")[-1]
-            filename2 = f"{filename1}_tmp1.csv"
             filename3 = f"{filename1}_tmp2.csv"
             ordinal = torch.cuda.current_device()
             assert filename1 == f"tunableop_results_{unique_id}_{ordinal}.csv"
             assert len(torch.cuda.tunable.get_results()) > 0
 
-            assert torch.cuda.tunable.write_file()  # use default filename
-            assert torch.cuda.tunable.write_file(filename2)  # use custom, one-time filename
+            assert os.path.exists(filename1)
+
             torch.cuda.tunable.set_filename(filename3)
-            assert torch.cuda.tunable.write_file()  # use previously set filename
+
+            # Run one more matmul to trigger a write to the new filename
+            x = make_arg((4, 4), noncontiguous=False)
+            y = make_arg((4, 4), noncontiguous=False)
+            self.check_single_matmul(x, y)
+
+            self.assertTrue(os.path.exists(filename3))
             assert torch.cuda.tunable.read_file()  # use previously set filename, will ignore duplicates and return True
 
             with open(filename1) as file1:
                 file1_contents = file1.read()
-            with open(filename2) as file2:
-                file2_contents = file2.read()
             with open(filename3) as file3:
                 file3_contents = file3.read()
-            assert file1_contents == file2_contents
-            assert file1_contents == file3_contents
+
+            assert "Validator" in file1_contents
+            assert len(file1_contents) > 0
+            assert "Validator" in file3_contents
+            assert len(file3_contents) > 0
 
             # We need to reset the filename to the default value so we can properly
             # clean up intermediate files
@@ -4807,6 +4871,7 @@ class TestLinalg(TestCase):
     @skipCUDAIfNotRocm
     @dtypes(torch.half)
     def test_matmul_offline_tunableop(self, device, dtype):
+        import os
         # Main offline tunableop test
         # NOTE: The offline tuning does not support certain tensor
         # shapes as noted below. Submatrics / matrix slices are
@@ -4917,7 +4982,18 @@ class TestLinalg(TestCase):
             new_results = len(torch.cuda.tunable.get_results())
 
             self.assertGreater(new_results - ref_results, 0)
-            self.assertTrue(torch.cuda.tunable.write_file())
+            # self.assertTrue(torch.cuda.tunable.write_file())
+
+            results_filename = torch.cuda.tunable.get_filename()
+            self.assertTrue(os.path.exists(results_filename))
+
+            with open(results_filename) as f:
+                content = f.read()
+                self.assertIn("Validator", content)
+                # Count non-validator lines to verify results were written
+                result_lines = [l for l in content.split('\n')
+                            if l and not l.startswith('Validator')]
+                self.assertGreater(len(result_lines), 0)
 
             # Compare Param Signature of untuned and tuned results
             ok = self._compare_untuned_tuned_entries()
@@ -4928,6 +5004,7 @@ class TestLinalg(TestCase):
     @runOnRocmArch(MI300_ARCH)
     @dtypes(torch.torch.float8_e4m3fnuz, torch.float8_e5m2fnuz)
     def test_scaled_gemm_offline_tunableop(self, device, dtype):
+        import os
         # This test is the offline version of test_scaled_gemm_tunableop
 
         with self._tunableop_ctx():
@@ -5007,7 +5084,17 @@ class TestLinalg(TestCase):
                 count = 6
             self.assertEqual(total_num_results, count)
 
-            self.assertTrue(torch.cuda.tunable.write_file())
+            # self.assertTrue(torch.cuda.tunable.write_file())
+            results_filename = torch.cuda.tunable.get_filename()
+            self.assertTrue(os.path.exists(results_filename))
+
+            with open(results_filename) as f:
+                content = f.read()
+                self.assertIn("Validator", content)
+                # Count non-validator lines to verify results were written
+                result_lines = [l for l in content.split('\n')
+                            if l and not l.startswith('Validator')]
+                self.assertGreater(len(result_lines), 0)
 
             # Compare Param Signature of untuned and tuned results
             ok = self._compare_untuned_tuned_entries()
@@ -5382,6 +5469,7 @@ class TestLinalg(TestCase):
     @skipCUDAIfNotRocm
     @dtypes(torch.bfloat16)
     def test_gemm_bias_offline_tunableop(self, device, dtype):
+        import os
         # This test is the offline version of test_gemm_bias_tunableop
         ordinal = torch.cuda.current_device()
 
@@ -5432,7 +5520,17 @@ class TestLinalg(TestCase):
             # There must be a new tuning results
             self.assertEqual(total_num_results, 2)
 
-            self.assertTrue(torch.cuda.tunable.write_file())
+            # self.assertTrue(torch.cuda.tunable.write_file())
+            results_filename = torch.cuda.tunable.get_filename()
+            self.assertTrue(os.path.exists(results_filename))
+
+            with open(results_filename) as f:
+                content = f.read()
+                self.assertIn("Validator", content)
+                # Count non-validator lines to verify results were written
+                result_lines = [l for l in content.split('\n')
+                            if l and not l.startswith('Validator')]
+                self.assertGreater(len(result_lines), 0)
 
             # Compare Param Signature of untuned and tuned results
             ok = self._compare_untuned_tuned_entries()
@@ -5633,8 +5731,17 @@ class TestLinalg(TestCase):
                                                      'nn_41_41_41_ld_41_41_41')
                 self.assertTrue(found_result is not None)
 
-                self.assertTrue(torch.cuda.tunable.write_file())
+                results_filename = torch.cuda.tunable.get_filename()
+                self.assertTrue(os.path.exists(results_filename))
 
+                # self.assertTrue(torch.cuda.tunable.write_file())
+                with open(results_filename) as f:
+                    content = f.read()
+                    self.assertIn("Validator", content)
+                    # Count non-validator lines to verify results were written
+                    result_lines = [l for l in content.split('\n')
+                                if l and not l.startswith('Validator')]
+                    self.assertGreater(len(result_lines), 0)
                 # Compare Param Signature of untuned and tuned results
                 ok = self._compare_untuned_tuned_entries()
                 self.assertTrue(ok)
@@ -5733,6 +5840,7 @@ class TestLinalg(TestCase):
     @skipCUDAIfNotRocm
     @dtypes(torch.float)
     def test_mm_submatrix_offline_tunableop(self, device, dtype):
+        import os
         # Test offline tuning with submatrices
         # Covers GEMM, ScaledGEMM, and GEMM+bias.
         ordinal = torch.cuda.current_device()
@@ -5863,11 +5971,103 @@ class TestLinalg(TestCase):
             # There must be a new tuning results
             self.assertEqual(total_num_results, 10)
 
-            self.assertTrue(torch.cuda.tunable.write_file())
+            # self.assertTrue(torch.cuda.tunable.write_file())
+            results_filename = torch.cuda.tunable.get_filename()
+            self.assertTrue(os.path.exists(results_filename))
+
+            with open(results_filename) as f:
+                content = f.read()
+                self.assertIn("Validator", content)
+                # Count non-validator lines to verify results were written
+                result_lines = [l for l in content.split('\n')
+                            if l and not l.startswith('Validator')]
+                self.assertGreater(len(result_lines), 0)
 
             # Compare Param Signature of untuned and tuned results
             ok = self._compare_untuned_tuned_entries()
             self.assertTrue(ok)
+    
+    @onlyCUDA
+    @skipCUDAIfNotRocm
+    @dtypes(torch.float32)
+    def test_ops_append_to_existing_file_tunableop(self, device, dtype):
+        import os
+        
+        with self._tunableop_ctx():
+            torch.cuda.tunable.set_rotating_buffer_size(0)
+            torch.cuda.tunable.tuning_enable(True)
+            
+            make_arg = partial(make_tensor, device=device, dtype=dtype)
+            
+            for size in [(64, 64), (128, 128)]:
+                x = make_arg(size, noncontiguous=False)
+                y = make_arg((size[1], size[0]), noncontiguous=False)
+                self.check_single_matmul(x, y)
+            
+            results_filename = torch.cuda.tunable.get_filename()
+            self.assertTrue(os.path.exists(results_filename))
+            
+            with open(results_filename) as f:
+                initial_content = f.read()
+                initial_lines = [l for l in initial_content.split('\n') 
+                            if l and not l.startswith('Validator')]
+                initial_count = len(initial_lines)
+            
+            self.assertGreater(initial_count, 0)
+            
+            torch.cuda.tunable.enable(False)
+            torch.cuda.tunable.enable(True)
+            torch.cuda.tunable.tuning_enable(True)
+            
+            self.assertTrue(os.path.exists(results_filename))
+            
+            for size in [(64, 64), (128, 128)]:
+                x = make_arg(size, noncontiguous=False)
+                y = make_arg((size[1], size[0]), noncontiguous=False)
+                self.check_single_matmul(x, y)
+            
+            for size in [(256, 256), (512, 512)]:
+                x = make_arg(size, noncontiguous=False)
+                y = make_arg((size[1], size[0]), noncontiguous=False)
+                self.check_single_matmul(x, y)
+            
+            with open(results_filename) as f:
+                final_content = f.read()
+                final_lines = [l for l in final_content.split('\n') 
+                            if l and not l.startswith('Validator')]
+                final_count = len(final_lines)
+            
+            self.assertGreater(final_count, initial_count)
+
+    @onlyCUDA
+    @skipCUDAIfNotRocm
+    @dtypes(torch.float32)
+    def test_matmul_empty_existing_file_tunableop(self, device, dtype):
+        import os
+        with self._tunableop_ctx():
+            torch.cuda.tunable.set_rotating_buffer_size(0)
+            results_filename = torch.cuda.tunable.get_filename()
+            
+            # Pre-create an empty results file
+            with open(results_filename, 'w') as f:
+                pass  # Empty file
+            
+            torch.cuda.tunable.enable(True)
+            torch.cuda.tunable.tuning_enable(True)
+            
+            make_arg = partial(make_tensor, device=device, dtype=dtype)
+            
+            x = make_arg((64, 64), noncontiguous=False)
+            y = make_arg((64, 64), noncontiguous=False)
+            self.check_single_matmul(x, y)
+            
+            with open(results_filename) as f:
+                content = f.read()
+                self.assertIn("Validator", content)
+                result_lines = [l for l in content.split('\n') 
+                            if l and not l.startswith('Validator')]
+                self.assertGreater(len(result_lines), 0)
+        
 
     @onlyCUDA
     @skipCUDAIfNotRocm

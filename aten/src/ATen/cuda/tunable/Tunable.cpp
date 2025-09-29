@@ -107,14 +107,29 @@ void TuningResultsManager::AddImpl(const std::string& op_signature,
 }
 
 void TuningResultsManager::Add(const std::string& op_signature, const std::string& params_signature, ResultEntry best) {
-  std::scoped_lock l{lock_};
+  bool is_new = false;
+  ResultEntry inserted = ResultEntry::Null();
 
-  auto it = results_.find(op_signature);
-  if (it == results_.end()) {
-    it = results_.insert({op_signature, {}}).first;
+  // ---- mutate maps under results lock ----
+  {
+    std::scoped_lock l{lock_};
+    auto& km = results_[op_signature];  // creates if missing
+    is_new = (km.find(params_signature) == km.end());
+    AddImpl(op_signature, params_signature, std::move(best), km);
+    if (is_new) {
+      inserted = km.at(params_signature);  // snapshot for I/O after unlocking
+    }
   }
+   if (!is_new) return;  // only write once per unique (op, params)
 
-  AddImpl(op_signature, params_signature, std::move(best), it->second);
+   TuningContext* ctx = getTuningContext();
+  if (ctx->IsTuningEnabled() && !ctx->IsRecordUntunedEnabled()) {
+    InitRealtimeAppend(ctx->GetFilename(), ctx->GetTuningResultsValidator().GetAllValidators());
+
+    if (is_new && realtime_out_ && realtime_out_->good()) {
+      AppendResultLine(op_signature, params_signature, inserted);
+    }
+  }
 
 }
 
@@ -154,8 +169,15 @@ void TuningResultsManager::RecordUntuned( std::ofstream& untuned_file, const std
 void TuningResultsManager::InitRealtimeAppend(const std::string& filename, const std::unordered_map<std::string, std::string>& validators) {
   std::scoped_lock fl{realtime_file_mutex_};
 
-  if(realtime_out_) {
+  if (realtime_out_ && realtime_out_->good() && realtime_filename_ == filename) {
     return;
+  }
+
+  if (realtime_out_ && realtime_filename_ != filename) {
+    realtime_out_->flush();
+    realtime_out_->close();
+    realtime_out_.reset();
+    validators_written_ = false;
   }
 
   bool file_exists = false;
@@ -172,7 +194,7 @@ void TuningResultsManager::InitRealtimeAppend(const std::string& filename, const
   realtime_out_ = std::make_unique<std::ofstream>(filename, std::ios::out | std::ios::app);
 
   if (!realtime_out_->good()) {
-    TORCH_WARN("TunableOp realtime append: failed to open '", filename, 
+    TORCH_WARN("TunableOp realtime append: failed to open '", filename,
                "'; falling back to batch write on exit.");
     realtime_out_.reset();
     return;
@@ -184,9 +206,11 @@ void TuningResultsManager::InitRealtimeAppend(const std::string& filename, const
       realtime_out_->flush();
     }
     validators_written_ = true;
-    
+
     TUNABLE_LOG2("Wrote validators to realtime output file");
   }
+
+  realtime_filename_ = filename;
 }
 
 void TuningResultsManager::AppendResultLine(const std::string& op_sig, const std::string& param_sig, const ResultEntry& result) {
@@ -204,7 +228,7 @@ void TuningResultsManager::AppendResultLine(const std::string& op_sig, const std
 
 void TuningResultsManager::CloseRealtimeAppend() {
   std::scoped_lock fl{realtime_file_mutex_};
-  
+
 
   if(realtime_out_) {
     realtime_out_->flush();
@@ -459,9 +483,7 @@ TuningContext::TuningContext() :
     enable_{false},
     tuning_enable_{true},
     record_untuned_enable_{false},
-    output_realtime_enable_{false},
     manager_initialized_{false},
-    write_file_on_exit_{true},
     numerics_check_enable_{false},
     max_tuning_duration_ms_{30},
     max_tuning_iterations_{100},
@@ -484,32 +506,8 @@ TuningContext::~TuningContext() {
     // but doesn't do any computation itself.
     return;
   }
-  if(IsOutputRealtimeEnabled()) {
-    GetTuningResultsManager().CloseRealtimeAppend();
-  }
-  auto filename = GetFilename();
-  if (IsTunableOpEnabled() && IsTuningEnabled() && !filename.empty() && write_file_on_exit_) {
-    if(!IsOutputRealtimeEnabled()) {
-      if (results_count_from_input_file_ < GetTuningResultsManager().GetSize()) {
-        if (results_count_from_input_file_ > 0) {
-          TUNABLE_LOG1("additional tuning results available, rewriting file ", filename);
-        }
-        else {
-          TUNABLE_LOG1("writing file ", filename);
-        }
-        if (!WriteFile(filename)) {
-          TUNABLE_LOG1("failed to write file ", filename);
-        }
-      }
-    } else {
-      if (c10::utils::get_env("PYTORCH_TUNABLEOP_CONSOLIDATE_ON_EXIT") == "1") {
-        TUNABLE_LOG1("Realtime mode: final consolidation to ", filename);
-        if (!WriteFile(filename)) {
-          TUNABLE_LOG1("failed to write consolidated file ", filename);
-        }
-      }
-    }
-  }
+  TUNABLE_LOG1("Closing File");
+  GetTuningResultsManager().CloseRealtimeAppend(); // Since, we do instant logging by default now.
 
   if (untuned_file_.good()) {
     untuned_file_.close();
@@ -590,29 +588,6 @@ std::ofstream& TuningContext::GetUntunedFile(){
   return untuned_file_;
 }
 
-void TuningContext::SetOutputRealtime(bool value) {
-  output_realtime_enable_ = value;
-
-  if(value) {
-    TUNABLE_LOG1("Enabled realtime tuning output for TunableOp");
-  } else {
-    TUNABLE_LOG1("Disabled realtime tuning output for TunableOp");
-  }
-}
-
-bool TuningContext::IsOutputRealtimeEnabled() const {
-  static const auto env = c10::utils::get_env("PYTORCH_TUNABLEOP_OUTPUT_REALTIME");
-
-  if(env == "1") {
-    return true;
-  }
-
-  return output_realtime_enable_;
-}
-
-void TuningContext::WriteFileOnExit(bool value) {
-  write_file_on_exit_ = value;
-}
 
 void TuningContext::EnableNumericsCheck(bool value) {
   numerics_check_enable_ = value;
@@ -733,14 +708,6 @@ TuningResultsManager& TuningContext::GetTuningResultsManager() {
     auto filename = GetFilename();
     if (!filename.empty() && !IsRecordUntunedEnabled()) {
       ReadFile(filename);
-      // attempt immediately to open file for writing to catch errors early
-      std::ofstream file(filename, std::ios::out | std::ios::app);
-      if (!file.good()) {
-        TORCH_WARN("failed to open file '", filename, "' for writing; your tuning results will not be saved");
-      }
-      if(IsOutputRealtimeEnabled()) {
-        manager_.InitRealtimeAppend(filename, GetTuningResultsValidator().GetAllValidators());
-      }
     }
   });
   return manager_;
@@ -843,27 +810,6 @@ bool TuningContext::ReadFile(const std::string& filename_) {
     TUNABLE_LOG1("results validator check failed");
     return false;
   }
-  return true;
-}
-
-bool TuningContext::WriteFile(const std::string& filename_) {
-  std::string filename = filename_.empty() ? GetFilename() : filename_;
-  std::ofstream file(filename, std::ios::out | std::ios::trunc);
-  if (!file.good()) {
-    TUNABLE_LOG1("error opening tuning results file for writing ", filename);
-    return false;
-  }
-  auto validators = GetTuningResultsValidator().GetAllValidators();
-  for (const auto& [key, val] : validators) {
-    file << "Validator," << key << "," << val << std::endl;
-  }
-  auto results = GetTuningResultsManager().Dump();
-  for (const auto& [op_sig, kernelmap] : results) {
-    for (const auto& [param_sig, result] : kernelmap) {
-      file << op_sig << "," << param_sig << "," << result << std::endl;
-    }
-  }
-  file.close();
   return true;
 }
 
