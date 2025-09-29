@@ -178,7 +178,7 @@ llama,fail_to_run,0
 
 
 
-llama_v2_7b_16h,model_fail_to_load,0
+llama_v2_7b_16h,pass_due_to_skip,0
 
 
 
