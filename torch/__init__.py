@@ -2249,7 +2249,6 @@ from torch import ao as ao  # usort: skip
 
 # nn.quant* depends on ao -- so should be after those.
 import torch.nn.intrinsic
-import torch.nn.qat
 import torch.nn.quantizable
 import torch.nn.quantized
 
