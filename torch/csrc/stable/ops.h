@@ -1,5 +1,7 @@
 #pragma once
 
+#include <torch/csrc/stable/TensorAccessor.h>
+
 #include <torch/csrc/stable/stableivalue_conversions.h>
 #include <array>
 #include <cstdint>

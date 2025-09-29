@@ -9,6 +9,7 @@
 
 #ifdef LAE_USE_CUDA
 #include <cuda_runtime.h>
+#include <c10/cuda/CUDAException.h>
 #endif
 
 #include <optional>
@@ -527,7 +528,7 @@ Tensor test_dispatch_scalar_name(Tensor t, int dispatch_index) {
     else if (ti == typeid(double)) { name = "float64"; }
     else if (ti == typeid(float)) { name = "float32"; }
     else if (ti == typeid(c10::BFloat16)) { name = "bfloat16";}
-    else if (ti == typeid(c10::complex<c10::Half>)) { name = "complex16";}
+    else if (ti == typeid(c10::complex<c10::Half>)) { name = "complex32";}
     else if (ti == typeid(c10::complex<float>)) { name = "complex64";}
     else if (ti == typeid(c10::complex<double>)) { name = "complex128";}
     else if (ti == typeid(uint8_t)) { name = "uint8";}
@@ -603,6 +604,10 @@ Tensor test_dispatch_scalar_name(Tensor t, int dispatch_index) {
     STABLE_DISPATCH_ALL_TYPES_AND(torch::headeronly::ScalarType::Bool, t.scalar_type(), "dispatch_all_types_and_bool", [&] { result = get_dtype_name_as_Tensor(typeid(scalar_t)); });
     break;
   }
+  case 10: {
+    STABLE_DISPATCH_SUPPORTED_TYPES(t.scalar_type(), "dispatch_supported_types", [&] { result = get_dtype_name_as_Tensor(typeid(scalar_t)); });
+    break;
+  }
   default:
     STD_TORCH_CHECK(false, "unexpected dispatch_index: ", dispatch_index);
   }
@@ -616,7 +621,6 @@ void boxed_test_dispatch_scalar_name(
   Tensor res = test_dispatch_scalar_name(to<Tensor>(stack[0]), to<int>(stack[1]));
   stack[0] = from(res);
 }
-
 
 STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
   m.def("test_default_constructor(bool undefined) -> bool");

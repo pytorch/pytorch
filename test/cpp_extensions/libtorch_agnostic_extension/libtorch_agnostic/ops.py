@@ -265,6 +265,7 @@ def test_dispatch_scalar_name(t, dispatch_name) -> str:
         STABLE_DISPATCH_ALL_TYPES_AND_COMPLEX=7,
         STABLE_DISPATCH_REDUCED_FLOATING_TYPES=8,
         STABLE_DISPATCH_ALL_TYPES_AND_BOOL=9,
+        STABLE_DISPATCH_SUPPORTED_TYPES=10,
     )[dispatch_name]
     return (
         torch.ops.libtorch_agnostic.test_dispatch_scalar_name.default(t, dispatch_index)

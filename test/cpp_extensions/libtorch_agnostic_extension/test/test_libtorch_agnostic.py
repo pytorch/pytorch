@@ -360,6 +360,7 @@ if not IS_WINDOWS:
                 STABLE_DISPATCH_FLOATING_TYPES=(torch.float32, torch.float64),
                 STABLE_DISPATCH_COMPLEX_TYPES=(torch.complex64, torch.complex128),
                 STABLE_DISPATCH_REDUCED_FLOATING_TYPES=(torch.float16, torch.bfloat16),
+                STABLE_DISPATCH_SUPPORTED_TYPES=get_supported_dtypes(),
             )
             dispatch_with_dtypes.update(
                 STABLE_DISPATCH_ALL_TYPES=dispatch_with_dtypes[
