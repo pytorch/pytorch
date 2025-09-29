@@ -27,7 +27,8 @@ TEST(TestDeviceType, TestDeviceType) {
       torch::headeronly::kMTIA,
       torch::headeronly::kPrivateUse1,
   };
-  for (int8_t i = 0; i < static_cast<int8_t>(torch::headeronly::COMPILE_TIME_MAX_DEVICE_TYPES);
+  for (int8_t i = 0; i <
+       static_cast<int8_t>(torch::headeronly::COMPILE_TIME_MAX_DEVICE_TYPES);
        i++) {
     EXPECT_EQ(static_cast<DeviceType>(i), expected_device_types[i]);
   }
