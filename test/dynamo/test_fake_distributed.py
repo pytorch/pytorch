@@ -14,7 +14,6 @@ if dist.is_available():
         wait_tensor,
     )
     from torch.distributed.device_mesh import init_device_mesh
-    from torch.testing._internal.distributed.fake_pg import FakeStore
 
 
 def normalize_graph(gm):
@@ -25,8 +24,7 @@ def normalize_graph(gm):
 class TestFakeDistributed(DynamoTestCase):
     def setUp(self):
         # Use FakeProcessGroup to run tests on a single process
-        self.store = FakeStore()
-        dist.init_process_group(backend="fake", rank=0, world_size=2, store=self.store)
+        dist.init_process_group(backend="fake", rank=0, world_size=2)
         self.local_rank = 0
         self.world_size = 2
 

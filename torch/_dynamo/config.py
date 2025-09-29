@@ -110,6 +110,12 @@ automatic_dynamic_shapes = True
 # Valid options: "dynamic", "unbacked"
 automatic_dynamic_shapes_mark_as: Literal["dynamic", "unbacked"] = "dynamic"
 
+# log graph in/out metadata
+# This is only turned on for export today since we
+# know we are tracing a flat callable. later, this
+# can extended to other use cases as well.
+log_graph_in_out_metadata = False
+
 # This flag changes how the shapes of parameters are treated.
 # If this flag is set to True, then the shapes of torch.nn.Parameter as well as of torch.Tensor are attempted to be dynamic
 # If this flag is set to False, then the shapes of torch.nn.Parameter are assumed to be static,
@@ -257,12 +263,6 @@ capture_dynamic_output_shape_ops = (
 
 # hybrid backed unbacked symints
 prefer_deferred_runtime_asserts_over_guards = False
-
-# For complex dynamic shapes guards that we're unable to specify with dynamo/export's
-# range constraints + dims + derived dims language, we raise constraint violation
-# errors or specialize by default. If set to True, this flag avoids crashing/specialization,
-# and allows complex guards as runtime assertions in the graph.
-allow_complex_guards_as_runtime_asserts = False
 
 # By default, dynamo will treat all ints as backed SymInts, which means (1) it
 # will wait to see the int change over multiple runs before generalizing and

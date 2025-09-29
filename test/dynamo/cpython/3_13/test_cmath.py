@@ -251,7 +251,7 @@ class CMathTests(__TestCase):
         # end up being passed to the cmath functions
 
         # usual case: new-style class implementing __complex__
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class MyComplex:
                 def __init__(self, value):
                     self.value = value

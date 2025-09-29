@@ -33,6 +33,7 @@ using c10::StorageType;
 using c10::StreamObjType;
 using c10::StringType;
 using c10::Symbol;
+using c10::SymBoolType;
 using c10::SymIntType;
 using c10::TensorType;
 using c10::TupleType;
@@ -66,6 +67,7 @@ TypePtr SchemaTypeParser::parseBaseType() {
       {"int", c10::TypeFactory::get<IntType>()},
       {"SymInt", c10::TypeFactory::get<SymIntType>()},
       {"bool", c10::TypeFactory::get<BoolType>()},
+      {"SymBool", c10::TypeFactory::get<SymBoolType>()},
       {"None", c10::TypeFactory::get<NoneType>()},
       {"NoneType", c10::TypeFactory::get<NoneType>()},
       {"Capsule", c10::TypeFactory::get<CapsuleType>()},

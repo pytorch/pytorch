@@ -58,7 +58,7 @@ jobs:
       LIBTORCH_VARIANT: shared-with-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
-      DESIRED_PYTHON: "3.9"
+      DESIRED_PYTHON: "3.10"
     steps:
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
@@ -173,7 +173,7 @@ jobs:
       LIBTORCH_VARIANT: shared-with-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
-      DESIRED_PYTHON: "3.9"
+      DESIRED_PYTHON: "3.10"
     steps:
       - name: Display EC2 information
         shell: bash
@@ -283,7 +283,7 @@ jobs:
       LIBTORCH_VARIANT: shared-with-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
-      DESIRED_PYTHON: "3.9"
+      DESIRED_PYTHON: "3.10"
       build_name: libtorch-cpu-shared-with-deps-release
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -306,7 +306,7 @@ jobs:
       LIBTORCH_VARIANT: shared-with-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
-      DESIRED_PYTHON: "3.9"
+      DESIRED_PYTHON: "3.10"
     steps:
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
@@ -422,7 +422,7 @@ jobs:
       LIBTORCH_VARIANT: shared-with-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
-      DESIRED_PYTHON: "3.9"
+      DESIRED_PYTHON: "3.10"
     steps:
       - name: Display EC2 information
         shell: bash
@@ -533,7 +533,7 @@ jobs:
       LIBTORCH_VARIANT: shared-with-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
-      DESIRED_PYTHON: "3.9"
+      DESIRED_PYTHON: "3.10"
       build_name: libtorch-cuda12_6-shared-with-deps-release
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -556,7 +556,7 @@ jobs:
       LIBTORCH_VARIANT: shared-with-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
-      DESIRED_PYTHON: "3.9"
+      DESIRED_PYTHON: "3.10"
     steps:
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
@@ -672,7 +672,7 @@ jobs:
       LIBTORCH_VARIANT: shared-with-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
-      DESIRED_PYTHON: "3.9"
+      DESIRED_PYTHON: "3.10"
     steps:
       - name: Display EC2 information
         shell: bash
@@ -783,12 +783,12 @@ jobs:
       LIBTORCH_VARIANT: shared-with-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
-      DESIRED_PYTHON: "3.9"
+      DESIRED_PYTHON: "3.10"
       build_name: libtorch-cuda12_8-shared-with-deps-release
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
-  libtorch-cuda12_9-shared-with-deps-release-build:
+  libtorch-cuda13_0-shared-with-deps-release-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
@@ -798,15 +798,15 @@ jobs:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: "12.9"
+      DESIRED_CUDA: cu130
+      GPU_ARCH_VERSION: "13.0"
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
       LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-with-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
-      DESIRED_PYTHON: "3.9"
+      DESIRED_PYTHON: "3.10"
     steps:
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
@@ -884,7 +884,7 @@ jobs:
       - uses: actions/upload-artifact@v4.4.0
         if: always()
         with:
-          name: libtorch-cuda12_9-shared-with-deps-release
+          name: libtorch-cuda13_0-shared-with-deps-release
           retention-days: 14
           if-no-files-found: error
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
@@ -902,10 +902,10 @@ jobs:
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
 
-  libtorch-cuda12_9-shared-with-deps-release-test:  # Testing
+  libtorch-cuda13_0-shared-with-deps-release-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
-      - libtorch-cuda12_9-shared-with-deps-release-build
+      - libtorch-cuda13_0-shared-with-deps-release-build
       - get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
     timeout-minutes: 360
@@ -914,15 +914,15 @@ jobs:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: "12.9"
+      DESIRED_CUDA: cu130
+      GPU_ARCH_VERSION: "13.0"
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
       LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-with-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
-      DESIRED_PYTHON: "3.9"
+      DESIRED_PYTHON: "3.10"
     steps:
       - name: Display EC2 information
         shell: bash
@@ -992,7 +992,7 @@ jobs:
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
-          name: libtorch-cuda12_9-shared-with-deps-release
+          name: libtorch-cuda13_0-shared-with-deps-release
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Populate binary env
         shell: bash
@@ -1015,26 +1015,26 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  libtorch-cuda12_9-shared-with-deps-release-upload:  # Uploading
+  libtorch-cuda13_0-shared-with-deps-release-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
       contents: read
-    needs: libtorch-cuda12_9-shared-with-deps-release-test
+    needs: libtorch-cuda13_0-shared-with-deps-release-test
     with:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: "12.9"
+      DESIRED_CUDA: cu130
+      GPU_ARCH_VERSION: "13.0"
       GPU_ARCH_TYPE: cuda
       LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-with-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
-      DESIRED_PYTHON: "3.9"
-      build_name: libtorch-cuda12_9-shared-with-deps-release
+      DESIRED_PYTHON: "3.10"
+      build_name: libtorch-cuda13_0-shared-with-deps-release
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml

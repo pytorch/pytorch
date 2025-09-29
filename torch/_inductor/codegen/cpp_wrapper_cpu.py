@@ -721,6 +721,28 @@ class CppWrapperCpu(PythonWrapperCodegen):
                     )
             self.prefix.writeline("}")
 
+    # MSVC string was longer than the limit of 16380 single-byte characters.
+    # https://learn.microsoft.com/en-us/cpp/error-messages/compiler-errors-1/compiler-error-c2026
+    MSVC_C2026_MAX_STRING_LENGTH = 16000
+
+    def codegen_write_arg_with_large_length_string(
+        self,
+        arg_name: str,
+        arg_str_val: str,
+        max_truncate_length: int = MSVC_C2026_MAX_STRING_LENGTH,
+    ):
+        def truncate_string(s: str, length: int) -> list[str]:
+            return [s[i : i + length] for i in range(0, len(s), length)]
+
+        if len(arg_str_val) > max_truncate_length:
+            truncated_strs = truncate_string(arg_str_val, max_truncate_length)
+            self.prefix.writeline(f"{arg_name} =")
+            for truncate_str in truncated_strs:
+                self.prefix.writeline(f'R"({truncate_str})"')
+            self.prefix.writeline(";")
+        else:
+            self.prefix.writeline(f'{arg_name} = R"({arg_str_val})";')
+
     def codegen_model_constructor(self):
         """
         // Generated code example
@@ -868,11 +890,16 @@ class CppWrapperCpu(PythonWrapperCodegen):
                     .replace("\t", "\\t")
                 )
 
-            self.prefix.writeline(
-                f'in_spec_ = R"({config.aot_inductor.serialized_in_spec})";'
+            # Origin code: self.prefix.writeline(f'in_spec_ = R"({config.aot_inductor.serialized_in_spec})";')
+            # Fix msvc C2026 error via codegen_write_arg_with_large_length_string
+            self.codegen_write_arg_with_large_length_string(
+                arg_name="in_spec_", arg_str_val=config.aot_inductor.serialized_in_spec
             )
-            self.prefix.writeline(
-                f'out_spec_ = R"({config.aot_inductor.serialized_out_spec})";'
+            # Origin code: self.prefix.writeline(f'out_spec_ = R"({config.aot_inductor.serialized_out_spec})";')
+            # Fix msvc C2026 error via codegen_write_arg_with_large_length_string
+            self.codegen_write_arg_with_large_length_string(
+                arg_name="out_spec_",
+                arg_str_val=config.aot_inductor.serialized_out_spec,
             )
 
             for idx, output in enumerate(V.graph.graph_outputs):
@@ -1141,7 +1168,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             """
         )
 
-        wrapper_body = "input_tensors = [arg if isinstance(arg, torch.Tensor) else torch.tensor(arg) for arg in args]"
+        wrapper_body = "input_tensors = [arg if isinstance(arg, torch.Tensor) else torch.tensor(arg, device='cpu') for arg in args]"
         if V.graph.constants:
             # Append constants to the input args for cpp wrapper.
             # Python wrapper directly gets the value inside the wrapper call
@@ -1268,6 +1295,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             args = [*args, f"&{output_handle_name}"]
 
         device = d.type if (d := extern_kernel.get_device()) else self.device
+
         self.generate_c_shim_extern_kernel_call(
             extern_kernel.get_kernel_name(), args, device
         )
@@ -1326,6 +1354,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 raise NotImplementedError(f"unsupported type of {output=}")
         args = args + output_args
         device = d.type if (d := fallback_kernel.get_device()) else self.device
+
         self.generate_c_shim_extern_kernel_call(
             fallback_kernel.cpp_kernel_name,  # type: ignore[arg-type]
             args,
@@ -1354,7 +1383,15 @@ class CppWrapperCpu(PythonWrapperCodegen):
             kernel, args, device, debug_handle=debug_handle
         )
 
-    def generate_scatter_fallback(
+    def _get_scatter_reduce_enum(self, reduce):
+        # Follow aten/src/ATen/native/ReductionType.h:get_operator_enum
+        get_operator_enum = {"add": "sum", "multiply": "prod"}
+        if reduce in get_operator_enum:
+            reduce = get_operator_enum[reduce]
+
+        return reduce
+
+    def _generate_scatter_fallback(
         self,
         output,
         inputs,
@@ -1364,6 +1401,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
         reduce,
         kwargs,
     ):
+        reduce = self._get_scatter_reduce_enum(reduce)
+
         # call the ABI shim function instead of the ATen one
         cpp_kernel_name = self.get_c_shim_func_name(cpp_kernel_name, self.device)
         # TODO: consider remove "_out" and add missing inplace variants to fallback_ops.py
@@ -1384,7 +1423,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         line += ");"
         self.writeline(line)
 
-    def generate_index_put_fallback(self, kernel, x, indices, values, accumulate):
+    def _generate_index_put_fallback(self, kernel, x, indices, values, accumulate):
         # TODO: update aoti_torch_index_put_out in ir.py to use autogen out version
         # See the comment in codegen_reinterpret_view about why having something like
         # RAIIAtenTensorHandle(tmp_tensor_handle_2) in a tmp array can cause the corresponding
@@ -1651,6 +1690,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
             self.wrapper_call.writeline(
                 f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_as_strided({', '.join(args)}));"
             )
+            self.wrapper_call.writeline(
+                f"wrap_with_raii_handle_if_needed({old_handle_name});"
+            )
 
         return f"RAIIAtenTensorHandle {name}({handle_name});"
 
@@ -1900,7 +1942,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
         finally:
             self.pop_codegened_graph()
 
-    def codegen_while_loop(self, while_loop):
+    def codegen_while_loop(self, while_loop, stack_output=False):
+        if stack_output:
+            raise NotImplementedError("NYI cpp wrapper for while_loop_stack_output")
         is_bool_pred = isinstance(
             while_loop.cond_subgraph.graph.graph_outputs[0], ir.ShapeAsConstantBuffer
         )

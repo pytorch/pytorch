@@ -27,7 +27,7 @@ from typing import (
 
 import torch
 from torch.utils import _pytree as pytree
-from torch.utils._backport_slots import dataclass_slots
+from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils._traceback import CapturedTraceback, format_frame
 from torch.utils.weak import WeakTensorKeyDictionary
 
@@ -41,6 +41,7 @@ if TYPE_CHECKING:
 
     import sympy
 
+    from torch._dynamo.backends.distributed import DDPOptimizerContext
     from torch._dynamo.codegen import PyCodegen
     from torch._functorch._aot_autograd.schemas import ViewAndMutationMeta
     from torch._subclasses.fake_tensor import FakeTensorMode
@@ -240,8 +241,7 @@ class ShapeGuard(NamedTuple):
     size_oblivious: bool
 
 
-@dataclass_slots
-@dataclasses.dataclass
+@dataclasses.dataclass(slots=True)
 class Guard:
     # originating_source is the source that called the make_guard method to
     # construct this guard object. The property name specifies what exactly it
@@ -868,6 +868,8 @@ class TracingContext:
         self.loc_in_frame: Optional[tuple[str, int, str]] = None
         # this is only set after aot_autograd
         self.fw_metadata: Optional[ViewAndMutationMeta] = None
+        # this is only set when the DDPOptimizer is used
+        self.ddp_optimizer_ctx: Optional[DDPOptimizerContext] = None
         # this is only set after aot_autograd
         self.aot_graph_name: Optional[list[str]] = None
         self.params_flat: Optional[list[Any]] = None
@@ -1129,7 +1131,11 @@ def detect_fake_mode(inputs: Any = None) -> Optional[FakeTensorMode]:
         - Fake mode associated with passed in tensors (inputs does not
           have to be flattened)
     """
-    from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+    from torch._subclasses.fake_tensor import (
+        FakeTensor,
+        FakeTensorMode,
+        get_plain_tensors,
+    )
 
     fake_modes = []
 
@@ -1148,6 +1154,18 @@ def detect_fake_mode(inputs: Any = None) -> Optional[FakeTensorMode]:
     for i, flat_input in enumerate(flat_inputs):
         if isinstance(flat_input, FakeTensor):
             fake_modes.append((flat_input.fake_mode, "fake tensor input", i))
+        if is_traceable_wrapper_subclass(flat_input):
+            out: list[Union[torch.Tensor, int, torch.SymInt]] = []
+            get_plain_tensors(flat_input, out=out)  # type: ignore[arg-type]
+            fake_tensors: list[FakeTensor] = [
+                x for x in out if isinstance(x, FakeTensor)
+            ]
+            fake_modes.extend(
+                [
+                    (tensor.fake_mode, f"subclass input {i}", ix)
+                    for ix, tensor in enumerate(fake_tensors)
+                ]
+            )
 
     if fake_modes:
         fake_mode, desc1, i1 = fake_modes[0]
