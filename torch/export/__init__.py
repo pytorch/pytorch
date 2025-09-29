@@ -70,7 +70,6 @@ def export_for_training(
     strict: bool = False,
     preserve_module_call_signature: tuple[str, ...] = (),
     prefer_deferred_runtime_asserts_over_guards: bool = False,
-    _use_new_tracer_experimental: bool = False,
 ) -> ExportedProgram:
     """
     :func:`export_for_training` takes any nn.Module along with example inputs, and produces a traced graph representing
@@ -160,7 +159,6 @@ def export_for_training(
         strict=strict,
         preserve_module_call_signature=preserve_module_call_signature,
         prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,
-        _use_new_tracer_experimental=_use_new_tracer_experimental,
     )
 
 
@@ -173,7 +171,6 @@ def export(
     strict: bool = False,
     preserve_module_call_signature: tuple[str, ...] = (),
     prefer_deferred_runtime_asserts_over_guards: bool = False,
-    _use_new_tracer_experimental: bool = False,
 ) -> ExportedProgram:
     """
     :func:`export` takes any nn.Module along with example inputs, and produces a traced graph representing
@@ -286,7 +283,6 @@ def export(
             preserve_module_call_signature=preserve_module_call_signature,
             pre_dispatch=True,
             prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,
-            _use_new_tracer_experimental=_use_new_tracer_experimental,
         )
     except Exception as e:
         draft_export_msg = (

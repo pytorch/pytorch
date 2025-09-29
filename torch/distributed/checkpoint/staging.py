@@ -57,7 +57,7 @@ class AsyncStager(Protocol):
 
     3. If AsyncStager.should_synchronize_after_execute is True, this method will be called immediately after
         the serialization thread starts and before returning from dcp.async_save. If this is set to False,
-        the assumption is the user has defined a custom synchronization point for the the purpose of further
+        the assumption is the user has defined a custom synchronization point for the purpose of further
         optimizing save latency in the training loop (for example, by overlapping staging with the
         forward/backward pass), and it is the respondsibility of the user to call `AsyncStager.synchronize_staging`
         at the appropriate time.
