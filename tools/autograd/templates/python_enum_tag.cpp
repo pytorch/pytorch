@@ -4,6 +4,9 @@
 #include <ATen/core/enum_tag.h>
 
 namespace py = pybind11;
+
+TORCH_MAKE_PYBIND_ENUM_FASTER(at::Tag)
+
 namespace torch {
     namespace autograd {
     void initEnumTag(PyObject* module) {
