@@ -17,6 +17,11 @@ __all__: list[Any] = []
 
 JAGGED_OPS_TABLE: Dict[Any, Any] = {}
 
+# Largest int64 value exactly representable in float64 (IEEE 754 double precision).
+# Avoids overflow when padding_value is passed as double to _jagged_to_padded_dense_forward.
+_INT64_SAFE_MAX_FLOAT64 = (1 << 53) - 1
+_INT64_SAFE_MIN_FLOAT64 = -_INT64_SAFE_MAX_FLOAT64
+
 
 def _outer_to_inner_dim(ndim, dim, ragged_dim, canonicalize=False):
     from torch._prims_common import canonicalize_dims
@@ -2152,7 +2157,11 @@ def min_dim(func, *args, **kwargs):
 
     dtype = new_kwargs["input"].dtype
     dtype_max = (
-        torch.finfo(dtype).max if dtype.is_floating_point else torch.iinfo(dtype).max
+        torch.finfo(dtype).max
+        if dtype.is_floating_point
+        else _INT64_SAFE_MAX_FLOAT64
+        if dtype == torch.int64
+        else torch.iinfo(dtype).max
     )
     return _apply_reduction(func, "min", dtype_max, *args, **kwargs)
 
@@ -2165,7 +2174,11 @@ def max_dim(func, *args, **kwargs):
 
     dtype = new_kwargs["input"].dtype
     dtype_min = (
-        torch.finfo(dtype).min if dtype.is_floating_point else torch.iinfo(dtype).min
+        torch.finfo(dtype).min
+        if dtype.is_floating_point
+        else _INT64_SAFE_MIN_FLOAT64
+        if dtype == torch.int64
+        else torch.iinfo(dtype).min
     )
     return _apply_reduction(func, "max", dtype_min, *args, **kwargs)
 
@@ -2180,7 +2193,11 @@ def amin_default(func, *args, **kwargs):
 
     dtype = new_kwargs["input"].dtype
     dtype_max = (
-        torch.finfo(dtype).max if dtype.is_floating_point else torch.iinfo(dtype).max
+        torch.finfo(dtype).max
+        if dtype.is_floating_point
+        else _INT64_SAFE_MAX_FLOAT64
+        if dtype == torch.int64
+        else torch.iinfo(dtype).max
     )
     return _apply_reduction(func, "amin", dtype_max, *args, **kwargs)
 
@@ -2195,7 +2212,11 @@ def amax_default(func, *args, **kwargs):
 
     dtype = new_kwargs["input"].dtype
     dtype_min = (
-        torch.finfo(dtype).min if dtype.is_floating_point else torch.iinfo(dtype).min
+        torch.finfo(dtype).min
+        if dtype.is_floating_point
+        else _INT64_SAFE_MIN_FLOAT64
+        if dtype == torch.int64
+        else torch.iinfo(dtype).min
     )
     return _apply_reduction(func, "amax", dtype_min, *args, **kwargs)
 
@@ -2210,7 +2231,11 @@ def argmin_default(func, *args, **kwargs):
 
     dtype = new_kwargs["input"].dtype
     dtype_max = (
-        torch.finfo(dtype).max if dtype.is_floating_point else torch.iinfo(dtype).max
+        torch.finfo(dtype).max
+        if dtype.is_floating_point
+        else _INT64_SAFE_MAX_FLOAT64
+        if dtype == torch.int64
+        else torch.iinfo(dtype).max
     )
     return _apply_reduction(func, "argmin", dtype_max, *args, **kwargs)
 
@@ -2225,7 +2250,11 @@ def argmax_default(func, *args, **kwargs):
 
     dtype = new_kwargs["input"].dtype
     dtype_min = (
-        torch.finfo(dtype).min if dtype.is_floating_point else torch.iinfo(dtype).min
+        torch.finfo(dtype).min
+        if dtype.is_floating_point
+        else _INT64_SAFE_MIN_FLOAT64
+        if dtype == torch.int64
+        else torch.iinfo(dtype).min
     )
     return _apply_reduction(func, "argmax", dtype_min, *args, **kwargs)
 
