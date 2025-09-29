@@ -263,6 +263,34 @@ def set_proxy_slot(  # type: ignore[no-redef]
     tracer: _ProxyTracer,
     proxy: object,
 ) -> None:
+    """Associate an object with its corresponding proxy in the tracer.
+
+    This function establishes a mapping between real objects (tensors, symbolic types,
+    or script objects) and their proxy representations within the FX graph tracer.
+    The behavior varies based on the type of object being tracked.
+
+    Args:
+        obj: The object to associate with a proxy. Can be:
+            - Tensor: A PyTorch tensor to be tracked
+            - PySymType: A symbolic type (e.g., SymInt, SymBool) representing symbolic values
+            - _AnyScriptObjectType: A script object (torch.ScriptObject or FakeScriptObject)
+        tracer: The proxy tracer that maintains the mapping between objects and proxies.
+        proxy: The proxy object to associate with obj. Type varies based on obj:
+            - _ProxyTensor for Tensor objects
+            - Proxy for script objects
+            - _PySymProxyType for symbolic types
+
+    Note:
+        - For Tensors: Proxies are updated/clobbered when inplace operations occur,
+          unless the tensor tracker is disabled via _proxy_tensor_disable_update_tensor_tracker().
+        - For Script Objects: Proxies are always updated to maintain consistency.
+        - For Symbolic Types: Existing proxies are never clobbered to avoid spurious
+          dependencies during graph partitioning. This ensures primals get their SymInts
+          set first before tangent inputs are allocated.
+
+    Raises:
+        AssertionError: If the proxy type doesn't match the expected type for the given object.
+    """
     log.debug("set_proxy_slot %s (%s) %s", obj, id(obj), proxy)
     if isinstance(obj, Tensor):
         # We DO want to clobber proxies whenever we run an inplace operation

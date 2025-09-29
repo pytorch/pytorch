@@ -103,6 +103,40 @@ def _reparametrize_module(
     strict: bool = False,
     stack_weights: bool = False,
 ):
+    """Context manager to temporarily replace module parameters and buffers.
+
+    This function temporarily swaps the module's parameters and buffers with the provided
+    ones for the duration of the context. When the context exits, the original parameters
+    and buffers are restored.
+
+    Args:
+        module (torch.nn.Module): The module whose parameters and buffers will be replaced.
+        parameters_and_buffers (dict[str, Tensor]): A dictionary mapping parameter/buffer
+            names to their replacement tensors.
+        tie_weights (bool, optional): If True, tied parameters in the original module will
+            be handled consistently. If different values are provided for tied parameters,
+            an error will be raised. If False, tied parameters are treated independently.
+            Default: False.
+        strict (bool, optional): If True, the provided parameters_and_buffers must exactly
+            match the module's parameters and buffers (no missing or unexpected keys).
+            If False, missing keys are allowed. Default: False.
+        stack_weights (bool, optional): If True, weights are restored in LIFO (Last In,
+            First Out) order. Default: False.
+
+    Yields:
+        None: This is a context manager that yields control to the caller with the
+        module's parameters temporarily replaced.
+
+    Raises:
+        ValueError: If tie_weights is True and multiple different values are provided
+            for tied parameters.
+        RuntimeError: If strict is True and there are missing or unexpected keys in
+            parameters_and_buffers.
+
+    Note:
+        Any in-place modifications made to the module's parameters or buffers during
+        the context will be reflected back in the original parameters_and_buffers dict.
+    """
     parameters_and_buffers = parameters_and_buffers
     stack_weights = stack_weights
 
