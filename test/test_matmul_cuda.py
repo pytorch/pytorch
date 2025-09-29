@@ -784,6 +784,25 @@ class TestMatmulCuda(InductorTestCase):
 
             torch.backends.cuda.matmul.allow_fp16_accumulation = orig_fp16_accum
 
+    @onlyCUDA
+    @parametrize("batch_size", [1, 32])
+    def test_input_checking_bmm_baddmm(self, batch_size):
+        B = batch_size
+        M, N, K = 32, 32, 32
+
+        a = torch.randn(B, M, K, device="cuda", dtype=torch.bfloat16)
+        # Make b, c have batch size + 1 for mismatching batch size
+        b = torch.randn(B + 1, K, N, device="cuda", dtype=torch.bfloat16)
+        c = torch.randn(B + 1, M, N, device="cuda", dtype=torch.bfloat16)
+
+        # Test that we error out when the batch size is not the same
+        with self.assertRaisesRegex(RuntimeError, "Expected size for first two dimensions of batch2 tensor to be"):
+            torch.bmm(a, b, out_dtype=torch.float32)
+
+        with self.assertRaisesRegex(RuntimeError, "Expected size for first two dimensions of batch2 tensor to be"):
+            torch.baddbmm(c, a, b, out_dtype=torch.float32)
+
+
 f8_msg = "FP8 is only supported on H100+, SM 8.9 and MI300+ devices"
 f8_grouped_msg = "FP8 grouped is only supported on SM90 and MI300+ devices"
 mx_skip_msg = "MX gemm is only supported on CUDA capability 10.0+"
