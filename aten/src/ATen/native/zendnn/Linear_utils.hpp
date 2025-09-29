@@ -80,7 +80,8 @@ inline void check_tensor_sizes_for_linear(
     const at::Tensor& input,
     const at::Tensor& weights,
     const at::Tensor& bias,
-    const at::Tensor& result) {
+    const at::Tensor& result,
+    const std::vector<at::Tensor>& post_op_buffers) {
   const int input_dim = input.dim();
   const int weights_dim = weights.dim();
   TORCH_CHECK(
@@ -96,13 +97,24 @@ inline void check_tensor_sizes_for_linear(
         bias.dim() == 1 && bias.size(0) == weights_sizes[1],
         "bias shape incompatible with linear");
   }
+  for (const at::Tensor& buffer : post_op_buffers) {
+    if (buffer.defined()) {
+      TORCH_CHECK(
+          buffer.dim() == input_dim,
+          "unsupported dims for mat1, mat2 and post op buffers");
+      TORCH_CHECK(
+          buffer.sizes() == result.sizes(),
+          "unsupported shapes for mat1, mat2 and post op buffers");
+    }
+  }
 }
 
 inline void check_tensor_dtypes_for_linear(
     const at::Tensor& input,
     const at::Tensor& weights,
     const at::Tensor& bias,
-    const at::Tensor& result) {
+    const at::Tensor& result,
+    const std::vector<at::Tensor>& post_op_buffers) {
   auto is_fp32 = [](const at::Tensor& t) {
     return t.scalar_type() == c10::ScalarType::Float;
   };
@@ -121,12 +133,19 @@ inline void check_tensor_dtypes_for_linear(
         zendnn_bf16_device_check(),
         "zendnn linear bf16 path needs cpu support avx512bf16");
   }
+  for (const at::Tensor& buffer : post_op_buffers) {
+    if (buffer.defined()) {
+      TORCH_CHECK(
+          (all_fp32 && is_fp32(buffer)) ^ (all_bf16 && is_bf16(buffer)),
+          "Post ops must match with other tensor dtype");
+    }
+  }
 }
 
 inline void set_linear_context_attributes(
     matmul_context_t& matmul_context,
     tensor_t& weights,
-    const std::string_view& post_op_id,
+    const std::vector<std::string_view>& post_op_ids,
     std::optional<std::reference_wrapper<tensor_t>> bias_opt_ref =
         std::nullopt) {
   matmul_context.set_param("weights", weights);
@@ -134,8 +153,6 @@ inline void set_linear_context_attributes(
     tensor_t& bias = bias_opt_ref->get();
     matmul_context.set_param("bias", bias);
   }
-  if (post_op_id == "none")
-    return;
   static const std::unordered_map<std::string_view, post_op_type_t>
       post_op_map = {
           {"relu", post_op_type_t::relu},
@@ -143,23 +160,30 @@ inline void set_linear_context_attributes(
           {"gelu_erf", post_op_type_t::gelu_erf},
           {"silu", post_op_type_t::swish},
           {"sigmoid", post_op_type_t::sigmoid},
-          {"tanh", post_op_type_t::tanh}};
-  auto it = post_op_map.find(post_op_id);
-  if (it == post_op_map.end()) {
-    static std::string supported_ops;
-    for (const auto& kv : post_op_map) {
-      if (!supported_ops.empty())
-        supported_ops += ", ";
-      supported_ops += std::string(kv.first);
+          {"tanh", post_op_type_t::tanh},
+          {"mul", post_op_type_t::binary_mul},
+          {"add", post_op_type_t::binary_add}};
+  for (const auto& op_str : post_op_ids) {
+    if (op_str == "none")
+      continue;
+    auto it = post_op_map.find(op_str);
+    if (it == post_op_map.end()) {
+      std::string supported_ops;
+      for (const auto& kv : post_op_map) {
+        if (!supported_ops.empty()) {
+          supported_ops += ", ";
+        }
+        supported_ops += std::string(kv.first);
+      }
+      TORCH_CHECK(
+          false,
+          "Unsupported post operation. Supported ops: ",
+          supported_ops,
+          " for ZenDNN_linear");
     }
-    TORCH_CHECK(
-        false,
-        "Unsupported post operation. Supported ops: ",
-        supported_ops,
-        " for ZenDNN_linear");
+    auto post_op = post_op_t{it->second};
+    matmul_context.set_post_op(post_op);
   }
-  auto post_op = post_op_t{it->second};
-  matmul_context.set_post_op(post_op);
 }
 } // namespace at::native
 #endif // AT_ZENDNN_ENABLED()
