@@ -80,7 +80,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "nvidia-cuda-nvrtc==13.0.48; platform_system == 'Linux' | "
         "nvidia-cuda-runtime==13.0.48; platform_system == 'Linux' | "
         "nvidia-cuda-cupti==13.0.48; platform_system == 'Linux' | "
-        "nvidia-cudnn-cu13==9.13.0.50; platform_system == 'Linux' | "
+        "nvidia-cudnn-cu13==9.13.1.26; platform_system == 'Linux' | "
         "nvidia-cublas==13.0.0.19; platform_system == 'Linux' | "
         "nvidia-cufft==12.0.0.15; platform_system == 'Linux' | "
         "nvidia-curand==10.4.0.35; platform_system == 'Linux' | "
