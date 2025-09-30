@@ -23,6 +23,7 @@ import torch._logging
 import torch.utils._pytree as pytree
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.utils import identity, preserve_rng_state
+from torch._inductor import shape_propagation
 from torch._prims_common import is_integer_dtype
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import CeilDiv, FloorDiv, ModularIndexing
@@ -99,7 +100,7 @@ from .triton_utils import (
     signature_to_meta,
 )
 from .wrapper import SymbolicCallArg
-from ..shape_propagation import BlockShapeType
+
 
 if TYPE_CHECKING:
     from types import ModuleType
@@ -108,6 +109,7 @@ if TYPE_CHECKING:
     from torch._inductor.dtype_propagation import DtypePropagationOpsHandler
 
     from ..ir import IRNode
+    from .common import BlockShapeType
     from .simd_kernel_features import SIMDKernelFeatures
 
     _T = TypeVar("_T")
@@ -861,7 +863,6 @@ def low_precision_fp_var(var: Union[CSEVariable, Any]) -> bool:
     dtype = var.dtype
     return low_precision_fp(dtype) if isinstance(dtype, torch.dtype) else False
 
-TritonBlockShapeType = Optional[Sequence[Union[int, str, sympy.Expr]]]
 
 class TritonCSEVariable(CSEVariable):
     def __init__(
@@ -869,9 +870,9 @@ class TritonCSEVariable(CSEVariable):
         name: str,
         bounds: ValueRanges[Any],
         dtype: torch.dtype,
-        shape: TritonBlockShape = None,
+        shape: BlockShapeType = None,
     ) -> None:
-        super().__init__(name, bounds, dtype, shape=self._cast_triton_block_shape(shape))
+        super().__init__(name, bounds, dtype, shape=shape)
         # We'll use this to track which masks the variable needs when used for indirect indexing
         self.mask_vars: OrderedSet[str] = OrderedSet()
         assert dtype is not None, "TritonCSEVariable must have dtype"
@@ -890,27 +891,6 @@ class TritonCSEVariable(CSEVariable):
                     if symbol_is_type(arg, symt):
                         self.mask_vars.update([f"{prefix_str[symt]}mask"])
                         break
-    @classmethod
-    def _cast_triton_block_shape(cls, block_shape: TritonBlockShapeType) -> BlockShapeType:
-        if block_shape is not None:
-            assert isinstance(block_shape, Sequence)
-            cast_shape = [V.kernel.index_to_str(s) if isinstance(s, sympy.Expr) else s for s in block_shape]
-        return cast(BlockShapeType, cast_shape)
-
-    def generate(self,
-        buffer: IndentedBuffer,
-        expr: Union[str, CSEVariable, OpsValue, IndentedBuffer, DeferredLineBase],
-        *,
-        bounds: ValueRanges[Any] = ValueRanges.unknown(),
-        write: bool = True,
-        assignment: bool = True,
-        dtype: Optional[torch.dtype] = None,
-        shape: TritonBlockShapeType = None,
-    ) -> CSEVariableType:
-        return super().generate(
-            buffer, expr, bounds=bounds, write=write,
-            assignment=assignment, dtype=dtype,
-            shape=self._cast_triton_block_shape(cast_shape))
 
 
 def get_dtype_handler() -> DtypePropagationOpsHandler:
@@ -2576,9 +2556,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         #
         # To prevent unintended side effects we will gate options 1-3 behind isinstance(indexing, TensorDescriptorOptions).
         if isinstance(indexing, TensorDescriptorOptions) and value.shape:
-            str_final_shape = tuple([symt.name for symt in indexing.final_shape])
+            str_final_shape = shape_propagation.cast_sym_block_shape(
+                indexing.final_shape
+            )
             value_shape = tuple(value.shape)
-            if len(value_shape) > 1 and tuple(value_shape[::-1]) == str_final_shape:
+            if len(value_shape) > 1 and value_shape[::-1] == str_final_shape:
                 value = f"tl.trans({value}, {list(reversed(range(len(value.shape))))})"
             elif value_shape != str_final_shape:
                 raise AssertionError(
@@ -2778,7 +2760,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 line = indexing.codegen_broadcast_and_reshape(
                     line, indexing.block_shape, indexing.final_shape, True
                 )
-                shape = indexing.final_shape
+                shape = shape_propagation.cast_sym_block_shape(indexing.final_shape)
             elif isinstance(original_index, sympy.Integer):
                 line = f"tl.load({var} + ({original_index}))"
                 append_broadcast = indexing.expand_str
