@@ -876,21 +876,6 @@ static PyObject * THPVariable_is_contiguous(PyObject* self_, PyObject* args, PyO
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPVariable_is_wrapped_number(PyObject* self, PyObject* args)
-{
-  HANDLE_TH_ERRORS
-  if (check_has_torch_function(self)) {
-    return handle_torch_function(self, "is_wrapped_number", args);
-  }
-  auto& self_ = THPVariable_Unpack(self);
-  if (self_.unsafeGetTensorImpl()->is_wrapped_number()) {
-    Py_RETURN_TRUE;
-  } else {
-    Py_RETURN_FALSE;
-  }
-  END_HANDLE_TH_ERRORS
-}
-
 // implemented on the python object to avoid dispatch overhead
 static PyObject * THPVariable_item(PyObject* self, PyObject* args)
 {
@@ -1325,7 +1310,6 @@ PyMethodDef variable_methods[] = {
   {"half", castPyCFunctionWithKeywords(THPVariable_half), METH_VARARGS | METH_KEYWORDS, nullptr},
   {"int", castPyCFunctionWithKeywords(THPVariable_int), METH_VARARGS | METH_KEYWORDS, nullptr},
   {"is_contiguous", castPyCFunctionWithKeywords(THPVariable_is_contiguous), METH_VARARGS | METH_KEYWORDS, nullptr},
-  {"is_wrapped_number", THPVariable_is_wrapped_number, METH_NOARGS, nullptr},
   {"item", THPVariable_item, METH_NOARGS, nullptr},
   {"long", castPyCFunctionWithKeywords(THPVariable_long), METH_VARARGS | METH_KEYWORDS, nullptr},
   {"map_", castPyCFunctionWithKeywords(THPVariable_map_), METH_VARARGS | METH_KEYWORDS, nullptr},
