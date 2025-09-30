@@ -517,16 +517,6 @@ make  # List available output formats.
 
 Other output formats may have additional dependencies. For example, `pdflatex` must be available in order to build a PDF with `make latexpdf`.
 
-#### Building a PDF
-
-To build a PDF of the PyTorch docs:
-
-1. Install a LaTeX distribution that provides `pdflatex`. For example, you can use `brew install --cask mactex-no-gui` on MacOS.
-2. From the `docs` directory, run `make latexpdf`. This populates `docs/build/latex` with the LaTeX output.
-3. To build the PDF, `cd build/latex` and run `make LATEXOPTS="-interaction=nonstopmode"` twice. The first run builds a preliminary `pytorch.pdf`, and the second run resolves references and updates its table of contents and index.
-
-To navigate the document, use the table of contents view in your PDF reader.
-
 #### Tips
 
 The `.rst` source files live in [docs/source](docs/source). Some of the `.rst`
@@ -563,6 +553,16 @@ commands. To run this check locally, run `./check-doxygen.sh` from inside
 
 To build the documentation, follow the same steps as above, but run them from
 `docs/cpp` instead of `docs`.
+
+#### Building a PDF
+
+To build a PDF of the PyTorch docs:
+
+1. Install a LaTeX distribution that provides `pdflatex`. For example, you can use `brew install --cask mactex-no-gui` on MacOS.
+2. From the `docs` directory, run `make latexpdf`. This populates `docs/build/latex` with the LaTeX output.
+3. To build the PDF, `cd build/latex` and run `make LATEXOPTS="-interaction=nonstopmode"` twice. The first run builds a preliminary `pytorch.pdf`, and the second run resolves references and updates its table of contents and index.
+
+To navigate the document, use the table of contents view in your PDF reader.
 
 ### Previewing changes locally
 
