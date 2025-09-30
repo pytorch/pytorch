@@ -123,13 +123,6 @@ AOTITorchError aoti_torch_mps_dispatch_array_with_group_size(
   });
 }
 
-AOTITorchError aoti_torch_mps_synchronize_stream() {
-  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
-    auto* stream = at::mps::getCurrentMPSStream();
-    stream->synchronize(at::mps::SyncType::COMMIT_AND_WAIT);
-  });
-}
-
 // Shared callback function for std::function trampoline
 void aoti_torch_mps_shared_callback(
     AOTIMetalKernelFunctionHandle func,

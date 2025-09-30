@@ -83,8 +83,6 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_mps_copy_buffer(
     size_t src_offset,
     size_t dst_offset);
 
-AOTI_TORCH_EXPORT AOTITorchError aoti_torch_mps_synchronize_stream();
-
 // C callback function type for command block execution
 typedef void (*aoti_torch_mps_command_block_callback_t)(
     AOTIMetalKernelFunctionHandle func,
