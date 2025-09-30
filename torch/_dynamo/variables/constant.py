@@ -52,6 +52,10 @@ class ConstantVariable(VariableTracker):
         elif isinstance(value, frozenset):
             items = [ConstantVariable.create(x) for x in value]
             return variables.FrozensetVariable(items, **kwargs)
+        elif isinstance(value, slice):
+            slice_args = (value.start, value.stop, value.step)
+            slice_args_vars = tuple(ConstantVariable.create(arg) for arg in slice_args)
+            return variables.SliceVariable(slice_args_vars, **kwargs)
         elif isinstance(value, (list, tuple)):
             items = []
             for i, x in enumerate(value):

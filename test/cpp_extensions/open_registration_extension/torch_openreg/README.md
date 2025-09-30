@@ -25,6 +25,8 @@ The goal of `torch_openreg` is **not to implement a fully functional, high-perfo
 torch_openreg/
 ├── CMakeLists.txt
 ├── csrc
+│   ├── amp
+│   │   └── autocast_mode.cpp
 │   ├── aten
 │   │   ├── native
 │   │   │   ├── Extra.cpp
@@ -59,6 +61,8 @@ torch_openreg/
     │   └── stub.c
     ├── __init__.py
     └── openreg
+        ├── amp
+        │   └── __init__.py
         ├── __init__.py
         ├── meta.py
         └── random.py
@@ -95,11 +99,12 @@ There are 4 DSOs in torch_openreg, and the dependencies between them are as foll
 **Key Directories**:
 
 - `csrc/`: Core device implementation, including operator registration, runtime, etc.
+  - `csrc/amp/`: AMP(Automatic Mixed Precision)
   - `csrc/aten/`: Operator registration
     - `csrc/aten/native/`: Specific operator implementations for the OpenReg device.
-      - `csrc/aten/OpenRegMinimal.cpp`: The most minimal set of operator implementations (allowing for the creation of Tensors and related operations upon completion).
-      - `csrc/aten/OpenRegExtra.cpp`: Implementations for other types of operators.
-    - `csrc/runtime/`: Implementations for Host memory, device memory, Guard, Hooks, etc.
+      - `csrc/aten/native/OpenRegMinimal.cpp`: The most minimal set of operator implementations (allowing for the creation of Tensors and related operations upon completion).
+      - `csrc/aten/native/OpenRegExtra.cpp`: Implementations for other types of operators.
+  - `csrc/runtime/`: Implementations for Host memory, device memory, Guard, Hooks, etc.
 - `third_party/`: A C++ library that simulates a CUDA-like device using the CPU.
 - `torch_openreg/`: Python interface implementation (Python code and C++ Bindings).
   - `torch_openreg/csrc/`: Python C++ binding code.
@@ -126,13 +131,18 @@ There are 4 DSOs in torch_openreg, and the dependencies between them are as foll
 
 ### Autoload
 
-- Autoload Machanism
+When `import torch`, installed accelerators (such as `torch_openreg`) will be automatically loaded, achieving the same experience as the built-in backends.
 
-    When `import torch`, installed accelerators (such as `torch_openreg`) will be automatically loaded, achieving the same experience as the built-in backends.
+- Register the backend with Python `entry points`: See `setup` in `setup.py`
+- Add a callable function for backend initialization: See `_autoload` in `torch_openreg/__init__.py`
+- Dynamically loading the backend without explicit imports: See [Usage Example](#usage-example)
 
-  - Registering the backend with Python `entry points`: See `setup` in `setup.py`
-  - Adding a callable function for backend initialization: See `_autoload` in `torch_openreg/__init__.py`
-  - Dynamically loading the backend without explicit imports: See [Usage Example](#usage-example)
+### AMP(Automatic Mixed Precision)
+
+`AMP` provides convenience methods for mixed precision, where some operations use the `torch.float32` datatype and other operations use `lower precision` floating point datatype: `torch.float16` or `torch.bfloat16`.
+
+- Register specific operator conversion rules: See `autocat_mode.cpp` in `csrc/amp`.
+- Add support for new data types for different accelerators: See `get_amp_supported_dtype` in `torch_openreg/openreg/amp/__init__.py`
 
 ## Installation and Usage
 
@@ -168,11 +178,13 @@ print("Result z:\n", z)
 print(f"Device of z: {z.device}")
 ```
 
+## Documentation
+
+Please refer to [this](https://docs.pytorch.org/docs/main/accelerator/index.html) for a series of documents on integrating new accelerators into PyTorch, which will be kept in sync with the `OpenReg` codebase as well.
+
 ## Future Plans
 
 - **Enhance Features**:
-  - Autoload
-  - AMP
   - Device-agnostic APIs
   - Memory Management
   - Generator
@@ -180,5 +192,3 @@ print(f"Device of z: {z.device}")
   - Custom Tensor&Storage
   - ...
 - **Improve Tests**: Add more test cases related to the integration mechanism.
-- **Improve Documentation**: Add a new chapter on third-party device integration in the `Developer Notes` section of the PyTorch documentation.
-- **Real-time Synchronization**: Keep the code and documentation updated iteratively and in sync.
