@@ -19,6 +19,13 @@ from torchfuzz.operators.tensor_pointwise import (
     PointwiseOperator,
     SubOperator,
 )
+from torchfuzz.operators.layout import (
+    ViewOperator,
+    ReshapeOperator,
+    FlattenOperator,
+    SqueezeOperator,
+    UnsqueezeOperator,
+)
 
 
 __all__ = [
@@ -36,6 +43,11 @@ __all__ = [
     "ItemOperator",
     "ConstantOperator",
     "ArgOperator",
+    "ViewOperator",
+    "ReshapeOperator",
+    "FlattenOperator",
+    "SqueezeOperator",
+    "UnsqueezeOperator",
     "get_operator",
     "register_operator",
     "list_operators",

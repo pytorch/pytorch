@@ -21,6 +21,13 @@ from torchfuzz.operators.tensor_pointwise import (
     SubOperator,
 )
 from torchfuzz.operators.unique import UniqueOperator
+from torchfuzz.operators.layout import (
+    ViewOperator,
+    ReshapeOperator,
+    FlattenOperator,
+    SqueezeOperator,
+    UnsqueezeOperator,
+)
 
 
 class OperatorRegistry:
@@ -52,6 +59,13 @@ class OperatorRegistry:
         self.register(NonzeroOperator())
         self.register(MaskedSelectOperator())
         self.register(UniqueOperator())
+
+        # Tensor layout operators
+        self.register(ViewOperator())
+        self.register(ReshapeOperator())
+        self.register(FlattenOperator())
+        self.register(SqueezeOperator())
+        self.register(UnsqueezeOperator())
 
     def register(self, operator: Operator):
         """Register an operator in the registry."""
