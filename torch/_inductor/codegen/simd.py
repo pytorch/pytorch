@@ -1724,13 +1724,16 @@ class SIMDScheduling(BaseScheduling):
         """
         Returns cache key for hint-based multi-graph; key is tuple of shapes with hint filled in.
         """
+        def _size_hint(shape, hint):
+            if isinstance(shape, sympy.Expr):
+                subs = {sym: hint for sym in shape.free_symbols}
+                return int(shape.subs(subs))
+            return shape
+
         shapes = self._get_multikernel_shapes(node)
         return tuple(
             tuple(
-                hint
-                if isinstance(s, sympy.Expr) and not isinstance(s, sympy.Integer)
-                else s
-                for s in shape
+                _size_hint(s, hint) for s in shape
             )
             for shape in shapes
         )

@@ -570,7 +570,10 @@ class SizeVarAllocator:
                 return expr  # inf/nan/I
 
         if hint_override:
-            return hint_override
+            subs = {s: hint_override for s in free_symbols}
+            out = sympy_subs(expr, subs)
+            assert isinstance(out, sympy.Integer)
+            return int(out)
 
         expr = self.remove_precomputed_replacements(expr)
 
