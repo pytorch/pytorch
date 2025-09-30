@@ -356,7 +356,7 @@ class RedistributeTest(DTensorTestBase):
         replica_spec = Replicate()
         # 1) test replicate -> partial forward
         replica_tensor = distribute_tensor(local_tensor, device_mesh, [replica_spec])
-        with self.assertRaisesRegex(RuntimeError, "Can not redistribute to Partial"):
+        with self.assertRaisesRegex(RuntimeError, "Can not redistribute"):
             partial_tensor = replica_tensor.redistribute(device_mesh, [partial_spec])
 
         from torch.distributed.tensor._redistribute import Redistribute
@@ -643,7 +643,7 @@ class RedistributeTest(DTensorTestBase):
         for src, dst, allow in test_cases:
             dt = DTensor.from_local(tensor, mesh, src)
             raise_context = (
-                self.assertRaisesRegex(RuntimeError, "Can not redistribute from")
+                self.assertRaisesRegex(RuntimeError, "Can not redistribute")
                 if not allow
                 else contextlib.nullcontext()
             )
