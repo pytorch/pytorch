@@ -33,7 +33,7 @@ namespace {
 // Function to check if test data files exist and are valid
 bool testDataFilesExist() {
   std::string bindir = STRINGIZE(CMAKE_CURRENT_BINARY_DIR);
-  std::vector<std::string> required_files = {
+  std::array<std::string, 4> required_files = {
       "data.pt",
       "script_data.pt",
       "script_model_cpu.pt",
