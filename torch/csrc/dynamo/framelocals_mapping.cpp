@@ -147,19 +147,20 @@ void FrameLocalsMapping::_realize_dict() {
   _dict = py::dict();
   std::unordered_set<PyObject*> seen;
   py::tuple framelocals_names = code_framelocals_names(_code_obj);
+  PyObject* framelocals_names_ptr = framelocals_names.ptr();
   PyCodeObject* co = (PyCodeObject*)_code_obj.ptr();
 
   auto update_mapping = [&](int i) {
     DEBUG_CHECK(0 <= i && i < _framelocals.size());
     PyObject* value = _framelocals[i].ptr();
+    PyObject* name_ptr = PyTuple_GET_ITEM(framelocals_names_ptr, i);
     if (value == nullptr) {
-      PyObject* name = framelocals_names[i].ptr();
-      if (name != nullptr && seen.count(name) != 0) {
+      if (name_ptr != nullptr && seen.count(name_ptr) != 0) {
         _dict.attr("pop")(framelocals_names[i], py::none());
       }
     } else {
       _dict[framelocals_names[i]] = value;
-      seen.insert(framelocals_names[i].ptr());
+      seen.insert(name_ptr);
     }
   };
 
