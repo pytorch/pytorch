@@ -1092,8 +1092,8 @@ void gather(
   void* recv_ptr = nullptr;
   at::Tensor flat; // keep alive until after NCCL call
   if (cur_rank == root) {
-    TORCH_CHECK(
-        (int)outputs.size() == numranks,
+    TORCH_CHECK_VALUE(
+        static_cast<int>(outputs.size()) == numranks,
         "root must provide inputs.size()==numranks");
     // Allocate one flat buffer [world_size * count]
     flat = at::empty({numranks * count}, inputs.options());
@@ -1164,24 +1164,35 @@ void scatter(
   int64_t count = outputs.numel();
   at::Tensor flat; // keep alive until after NCCL call
   if (cur_rank == root) {
-    TORCH_CHECK(
-        (int)inputs.size() == numranks,
+    TORCH_CHECK_VALUE(
+        static_cast<int>(inputs.size()) == numranks,
         "root must provide inputs.size()==numranks");
     // Allocate one flat buffer [world_size * count]
-    flat = at::empty({numranks * count}, outputs.options());
+    flat = at::empty(
+        {numranks * count}, outputs.options(), c10::MemoryFormat::Contiguous);
 
     // Pack each inputs[i] into its slot
     for (int i = 0; i < numranks; ++i) {
-      const at::Tensor& src = inputs[i].contiguous().view({count});
-      TORCH_CHECK(
+      const at::Tensor& src = inputs[i];
+      TORCH_CHECK_VALUE(
           src.scalar_type() == outputs.scalar_type(),
           "dtype mismatch at i=",
           i);
-      TORCH_CHECK(
+      TORCH_CHECK_VALUE(
           src.is_cuda() && src.get_device() == outputs.get_device(),
           "device mismatch at i=",
           i);
-      flat.narrow(0, i * count, count).copy_(src, /*non_blocking=*/true);
+      TORCH_CHECK_VALUE(
+          src.numel() == count,
+          "numel mismatch at i=",
+          i,
+          " (got ",
+          src.numel(),
+          ", expected ",
+          count,
+          ")");
+      auto slot = flat.narrow(0, i * count, count).view(src.sizes());
+      slot.copy_(src, /*non_blocking=*/true);
     }
     // Make sure packing copies are visible to NCCL on the same stream
     // (copy_ on the same stream is already ordered; no extra sync needed)
