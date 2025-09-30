@@ -666,6 +666,7 @@ def compute_elementwise_output_strides(*tensors) -> tuple[int, ...]:
     if len(tensors) == 0:
         msg = "Can't compute elementwise output strides for zero tensors!"
         raise ValueError(msg)
+    
 
     check_same_shape(*tensors, allow_cpu_scalar_tensors=True)
 
@@ -685,6 +686,10 @@ def compute_elementwise_output_strides(*tensors) -> tuple[int, ...]:
         return ()
     if ndim == 1:
         return (1,)
+    
+    if len(tensors) == 1:
+        if torch._prims_common.is_non_overlapping_and_dense(tensors[0]):
+            return tensors[0].stride()
 
     logical_to_physical_perm, _ = compute_elementwise_output_logical_to_physical_perm(
         *tensors, _skip_checks=True
