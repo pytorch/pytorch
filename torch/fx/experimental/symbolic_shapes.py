@@ -5077,7 +5077,7 @@ class ShapeEnv:
                         self._get_sloc(
                             "user code shown is first use of this value--the guard itself is not "
                             "due user code but due to 0/1 specialization in the framework; to "
-                            "avoid specialization try torch._dynamo.mark_unbacked(tensor, dim)"
+                            "avoid specialization try torch._dynamo.decorators.mark_unbacked(tensor, dim)"
                             if self.specialize_zero_one
                             else None
                         ),
