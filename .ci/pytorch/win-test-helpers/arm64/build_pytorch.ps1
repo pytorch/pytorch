@@ -55,6 +55,7 @@ where.exe python
 
 # Python install dependencies
 python -m pip install --upgrade pip
+python -m pip install --upgrade build
 pip install setuptools pyyaml
 pip install -r requirements.txt
 
