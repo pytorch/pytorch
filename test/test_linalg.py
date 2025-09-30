@@ -4746,63 +4746,6 @@ class TestLinalg(TestCase):
                 y = make_arg(size_y, noncontiguous=nctg_y)
                 self.check_single_matmul(x, y)
 
-    # @onlyCUDA
-    # @skipCUDAIfNotRocm  # Skipping due to SM89 OOM in CI, UT doesn't do much on NV anyways
-    # @dtypes(*floating_types_and(torch.half))
-    # @precisionOverride({torch.float16: 1e-1})  # TunableOp may occasionally find less precise solution
-    # def test_matmul_small_brute_force_tunableop(self, device, dtype):
-    #     # disable tunableop buffer rotation for all tests everywhere, it can be slow
-    #     # We set the TunableOp numerical check environment variable here because it is
-    #     # possible to hit some invalid numerical solutions due to the small matrix sizes.
-
-    #     with self._tunableop_ctx():
-    #         torch.cuda.tunable.set_rotating_buffer_size(0)
-    #         # Numerical check adds significant overhead, unsure if this is needed
-    #         # or if there was a transient problem at the time.
-    #         # if dtype is torch.half:
-    #         #     os.environ["PYTORCH_TUNABLEOP_NUMERICAL_CHECK"] = "1"
-    #         ordinal = torch.cuda.current_device()
-
-    #         # set these to single iterations to keep it short but still exercise the code
-    #         torch.cuda.tunable.set_max_tuning_duration(1)
-    #         torch.cuda.tunable.set_max_tuning_iterations(1)
-
-    #         make_arg = partial(make_tensor, device=device, dtype=dtype)
-    #         # Using gen_sizes_matmul(2) to ensure we cover
-    #         # 'NN', 'TN', 'TT', and 'NN' cases.
-    #         for (size_x, size_y), nctg_x, nctg_y in product(self.gen_sizes_matmul(2, y_dim=3),
-    #                                                         (True, False), (True, False)):
-    #             x = make_arg(size_x, noncontiguous=nctg_x)
-    #             y = make_arg(size_y, noncontiguous=nctg_y)
-    #             self.check_single_matmul(x, y)
-
-    #         filename1 = torch.cuda.tunable.get_filename()
-    #         unique_id = self.id().split(".")[-1]
-    #         filename2 = f"{filename1}_tmp1.csv"
-    #         filename3 = f"{filename1}_tmp2.csv"
-    #         ordinal = torch.cuda.current_device()
-    #         assert filename1 == f"tunableop_results_{unique_id}_{ordinal}.csv"
-    #         assert len(torch.cuda.tunable.get_results()) > 0
-
-    #         assert torch.cuda.tunable.write_file()  # use default filename
-    #         assert torch.cuda.tunable.write_file(filename2)  # use custom, one-time filename
-    #         torch.cuda.tunable.set_filename(filename3)
-    #         assert torch.cuda.tunable.write_file()  # use previously set filename
-    #         assert torch.cuda.tunable.read_file()  # use previously set filename, will ignore duplicates and return True
-
-    #         with open(filename1) as file1:
-    #             file1_contents = file1.read()
-    #         with open(filename2) as file2:
-    #             file2_contents = file2.read()
-    #         with open(filename3) as file3:
-    #             file3_contents = file3.read()
-    #         assert file1_contents == file2_contents
-    #         assert file1_contents == file3_contents
-
-    #         # We need to reset the filename to the default value so we can properly
-    #         # clean up intermediate files
-    #         self._set_tunableop_defaults()
-
     @onlyCUDA
     @skipCUDAIfNotRocm  # Skipping due to SM89 OOM in CI, UT doesn't do much on NV anyways
     @dtypes(*floating_types_and(torch.half))
@@ -4982,7 +4925,6 @@ class TestLinalg(TestCase):
             new_results = len(torch.cuda.tunable.get_results())
 
             self.assertGreater(new_results - ref_results, 0)
-            # self.assertTrue(torch.cuda.tunable.write_file())
 
             results_filename = torch.cuda.tunable.get_filename()
             self.assertTrue(os.path.exists(results_filename))
@@ -5084,7 +5026,6 @@ class TestLinalg(TestCase):
                 count = 6
             self.assertEqual(total_num_results, count)
 
-            # self.assertTrue(torch.cuda.tunable.write_file())
             results_filename = torch.cuda.tunable.get_filename()
             self.assertTrue(os.path.exists(results_filename))
 
@@ -5520,7 +5461,6 @@ class TestLinalg(TestCase):
             # There must be a new tuning results
             self.assertEqual(total_num_results, 2)
 
-            # self.assertTrue(torch.cuda.tunable.write_file())
             results_filename = torch.cuda.tunable.get_filename()
             self.assertTrue(os.path.exists(results_filename))
 
@@ -5734,7 +5674,6 @@ class TestLinalg(TestCase):
                 results_filename = torch.cuda.tunable.get_filename()
                 self.assertTrue(os.path.exists(results_filename))
 
-                # self.assertTrue(torch.cuda.tunable.write_file())
                 with open(results_filename) as f:
                     content = f.read()
                     self.assertIn("Validator", content)
@@ -5971,7 +5910,6 @@ class TestLinalg(TestCase):
             # There must be a new tuning results
             self.assertEqual(total_num_results, 10)
 
-            # self.assertTrue(torch.cuda.tunable.write_file())
             results_filename = torch.cuda.tunable.get_filename()
             self.assertTrue(os.path.exists(results_filename))
 
