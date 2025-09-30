@@ -37,6 +37,13 @@ from torch.testing._internal.inductor_utils import (
 )
 
 
+try:
+    from .test_control_flow import CondModels
+except ImportError:
+    from test_control_flow import (
+        CondModels,  # @manual=fbcode//caffe2/test/inductor:control_flow-library
+    )
+
 if HAS_GPU:
     import triton
     import triton.language as tl
@@ -1032,6 +1039,33 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 
         x = torch.randn(7, device=self.device)
         self.check(M(), (x,), dynamic_shapes=({0: Dim.DYNAMIC},))
+
+    @parametrize("pred", (False, True))
+    def test_mismatched_branch_dynamic(self, pred: bool):
+        """
+        Test cond branches with mismatched dynamic shapes.
+        """
+
+        # Apply an offset to guarantee the truith of the predicate.
+        pred_offset = 1 if pred else -1
+
+        inputs = [
+            torch.tensor([pred], device=self.device),
+        ] + [torch.randn(10, 20, device=self.device) + pred_offset for _ in range(3)]
+        dim0_a = Dim("s0", min=4, max=1024)
+        dim0_b = Dim("s1", min=4, max=1024)
+        dynamic_shapes = {
+            "p": {},
+            "x": {0: dim0_a, 1: None},
+            "y": {0: dim0_b, 1: None},
+            "z": {0: dim0_a, 1: None},
+        }
+
+        self.check(
+            CondModels.MismatchedOutputSize(),
+            tuple(inputs),
+            dynamic_shapes=dynamic_shapes,
+        )
 
 
 if __name__ == "__main__":
