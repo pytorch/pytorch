@@ -92,7 +92,8 @@ class ViewOperator(LayoutOperatorBase):
             raise ValueError("ViewOperator can only produce TensorSpec outputs")
 
         shape_str = str(list(output_spec.size))
-        return f"{output_name} = {input_names[0]}.view({shape_str})"
+        # Ensure tensor is contiguous before view to avoid stride compatibility issues
+        return f"{output_name} = {input_names[0]}.contiguous().view({shape_str})"
 
 
 class ReshapeOperator(LayoutOperatorBase):
