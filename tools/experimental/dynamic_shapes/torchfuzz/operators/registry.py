@@ -6,8 +6,21 @@ from torchfuzz.operators.arg import ArgOperator
 from torchfuzz.operators.base import Operator
 from torchfuzz.operators.constant import ConstantOperator
 from torchfuzz.operators.item import ItemOperator
-from torchfuzz.operators.scalar_pointwise import ScalarPointwiseOperator
-from torchfuzz.operators.tensor_pointwise import TensorPointwiseOperator
+from torchfuzz.operators.masked_select import MaskedSelectOperator
+from torchfuzz.operators.nonzero import NonzeroOperator
+from torchfuzz.operators.scalar_pointwise import (
+    ScalarAddOperator,
+    ScalarDivOperator,
+    ScalarMulOperator,
+    ScalarSubOperator,
+)
+from torchfuzz.operators.tensor_pointwise import (
+    AddOperator,
+    DivOperator,
+    MulOperator,
+    SubOperator,
+)
+from torchfuzz.operators.unique import UniqueOperator
 
 
 class OperatorRegistry:
@@ -20,11 +33,25 @@ class OperatorRegistry:
 
     def _register_default_operators(self):
         """Register the default set of operators."""
-        self.register(TensorPointwiseOperator())
-        self.register(ScalarPointwiseOperator())
+        # Individual tensor pointwise operators (preferred)
+        self.register(AddOperator())
+        self.register(MulOperator())
+        self.register(SubOperator())
+        self.register(DivOperator())
+
+        # Individual scalar pointwise operators (preferred)
+        self.register(ScalarAddOperator())
+        self.register(ScalarMulOperator())
+        self.register(ScalarSubOperator())
+        self.register(ScalarDivOperator())
+
         self.register(ItemOperator())
         self.register(ConstantOperator())
         self.register(ArgOperator())
+        # Data-dependent operators
+        self.register(NonzeroOperator())
+        self.register(MaskedSelectOperator())
+        self.register(UniqueOperator())
 
     def register(self, operator: Operator):
         """Register an operator in the registry."""
