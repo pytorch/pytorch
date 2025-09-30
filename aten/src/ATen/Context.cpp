@@ -51,6 +51,40 @@ namespace {
   }
 } // namespace
 
+Float32Backend str2backend(const std::string& name) {
+  if (name == "generic")
+    return Float32Backend::GENERIC;
+  else if (name == "cuda")
+    return Float32Backend::CUDA;
+  else if (name == "mkldnn")
+    return Float32Backend::MKLDNN;
+  TORCH_CHECK(false, "Unknown backend: ", name);
+}
+
+Float32Op str2op(const std::string& name) {
+  if (name == "all")
+    return Float32Op::ALL;
+  else if (name == "conv")
+    return Float32Op::CONV;
+  else if (name == "rnn")
+    return Float32Op::RNN;
+  else if (name == "matmul")
+    return Float32Op::MATMUL;
+  TORCH_CHECK(false, "Unknown op: ", name);
+}
+
+Float32Precision str2precision(const std::string& name) {
+  if (name == "none")
+    return Float32Precision::NONE;
+  else if (name == "ieee")
+    return Float32Precision::IEEE;
+  else if (name == "tf32")
+    return Float32Precision::TF32;
+  else if (name == "bf16")
+    return Float32Precision::BF16;
+  TORCH_CHECK(false, "Unknown precision: ", name);
+}
+
 Context::Context() = default;
 
 // TODO: This could be bad juju if someone calls globalContext() in the
@@ -144,10 +178,10 @@ void Context::setUserEnabledNNPACK(bool e) {
   enabled_nnpack = e;
 }
 
-bool Context::allowTF32CuDNN(const std::string& op) const {
-  if (op.empty()){
-    bool allow_tf32_rnn = float32Precision("cuda", "rnn") == "tf32";
-    bool allow_tf32_conv = float32Precision("cuda", "conv") == "tf32";
+bool Context::allowTF32CuDNN(std::optional<Float32Op> op) const {
+  if (!op.has_value()) {
+    bool allow_tf32_rnn = float32Precision(Float32Backend::CUDA, Float32Op::RNN) == Float32Precision::TF32;
+    bool allow_tf32_conv = float32Precision(Float32Backend::CUDA, Float32Op::CONV) == Float32Precision::TF32;
     TORCH_CHECK(
         allow_tf32_rnn == allow_tf32_conv && allow_tf32_rnn == allow_tf32_cudnn,
         "PyTorch is checking whether allow_tf32 is enabled for cuDNN without a specific operator name,",
@@ -156,15 +190,15 @@ bool Context::allowTF32CuDNN(const std::string& op) const {
         "We suggest only using the new API to set the TF32 flag(s). See also: ",
         "https://pytorch.org/docs/main/notes/cuda.html#tensorfloat-32-tf32-on-ampere-and-later-devices");
   } else {
-    return float32Precision("cuda", op) == "tf32";
+    return float32Precision(Float32Backend::CUDA, op.value()) == Float32Precision::TF32;
   }
   warn_deprecated_fp32_precision_api();
   return allow_tf32_cudnn;
 }
 
 void Context::setAllowTF32CuDNN(bool b) {
-  setFloat32Precision("cuda", "rnn", b ? "tf32" : "none");
-  setFloat32Precision("cuda", "conv", b ? "tf32" : "none");
+  setFloat32Precision(Float32Backend::CUDA, Float32Op::RNN, b ? Float32Precision::TF32 : Float32Precision::NONE);
+  setFloat32Precision(Float32Backend::CUDA, Float32Op::CONV, b ? Float32Precision::TF32 : Float32Precision::NONE);
   allow_tf32_cudnn = b;
   warn_deprecated_fp32_precision_api();
 }
@@ -306,7 +340,7 @@ void Context::setImmediateMiopen(bool b) {
 
 bool Context::allowTF32CuBLAS() const {
   bool legacy_allow_tf32 = float32_matmul_precision != at::Float32MatmulPrecision::HIGHEST;
-  bool allow_tf32_new = float32Precision("cuda", "matmul") == "tf32";
+  bool allow_tf32_new = float32Precision(Float32Backend::CUDA, Float32Op::MATMUL) == Float32Precision::TF32;
   TORCH_CHECK(
       legacy_allow_tf32 == allow_tf32_new,
       "PyTorch is checking whether allow_tf32_new is enabled for cuBlas matmul,",
@@ -319,17 +353,17 @@ bool Context::allowTF32CuBLAS() const {
 
 void Context::setAllowTF32CuBLAS(bool b) {
   float32_matmul_precision = b ? at::Float32MatmulPrecision::HIGH : at::Float32MatmulPrecision::HIGHEST;
-  setFloat32Precision("cuda", "matmul", b ? "tf32" : "ieee");
+  setFloat32Precision(Float32Backend::CUDA, Float32Op::MATMUL, b ? Float32Precision::TF32 : Float32Precision::IEEE);
 }
 
 Float32MatmulPrecision Context::float32MatmulPrecision() const {
-  bool invalid = float32Precision("cuda", "matmul") == "tf32" &&
+  bool invalid = float32Precision(Float32Backend::CUDA, Float32Op::MATMUL) == Float32Precision::TF32 &&
       float32_matmul_precision == at::Float32MatmulPrecision::HIGHEST;
   invalid = invalid ||
-      (float32Precision("mkldnn", "matmul") == "bf16" &&
+      (float32Precision(Float32Backend::MKLDNN, Float32Op::MATMUL) == Float32Precision::BF16 &&
        float32_matmul_precision != at::Float32MatmulPrecision::MEDIUM);
   invalid = invalid ||
-      (float32Precision("mkldnn", "matmul") == "tf32" &&
+      (float32Precision(Float32Backend::MKLDNN, Float32Op::MATMUL) == Float32Precision::TF32 &&
        float32_matmul_precision != at::Float32MatmulPrecision::HIGH);
   TORCH_CHECK(
       !invalid,
@@ -341,22 +375,26 @@ Float32MatmulPrecision Context::float32MatmulPrecision() const {
   return float32_matmul_precision;
 }
 
-std::string Context::float32Precision(const std::string& backend, const std::string& op) const {
-  std::pair<std::string, std::string> key{backend, op};
+Float32Precision Context::float32Precision(Float32Backend backend, Float32Op op) const {
+  std::pair<Float32Backend, Float32Op> key{backend, op};
   auto it = fp32_precision.find(key);
   TORCH_CHECK(it != fp32_precision.end(), "Invalid (backend, op) pair: (", backend, ", ", op, ")");
 
-  std::string precision = it->second;
-  if (precision == "none") {
-    key.second = "all";
+  Float32Precision precision = it->second;
+  if (precision == Float32Precision::NONE) {
+    key.second = Float32Op::ALL;
     precision = fp32_precision.find(key)->second;
   }
-  if (precision == "none") {
-    key.first = "generic";
+  if (precision == Float32Precision::NONE) {
+    key.first = Float32Backend::GENERIC;
     precision = fp32_precision.find(key)->second;
   }
+
   // "cuda" does not support "bf16"
-  return (backend == "cuda" && precision == "bf16") ? std::string("none") : precision;
+  if (backend == Float32Backend::CUDA && precision == Float32Precision::BF16) {
+    return Float32Precision::NONE;
+  }
+  return precision;
 }
 
 void Context::setFloat32MatmulPrecision(const std::string &s) {
@@ -365,18 +403,18 @@ void Context::setFloat32MatmulPrecision(const std::string &s) {
     // TODO: consider if CuDNN field needs to also be set for potential future CuDNN ops like multi-headed attention
     if (s_ == "highest") {
       float32_matmul_precision = at::Float32MatmulPrecision::HIGHEST;
-      setFloat32Precision("cuda", "matmul", "ieee");
-      setFloat32Precision("mkldnn", "matmul", "ieee");
+      setFloat32Precision(Float32Backend::CUDA, Float32Op::MATMUL, Float32Precision::IEEE);
+      setFloat32Precision(Float32Backend::MKLDNN, Float32Op::MATMUL, Float32Precision::IEEE);
       return true;
     } else if (s_ == "high") {
       float32_matmul_precision = at::Float32MatmulPrecision::HIGH;
-      setFloat32Precision("cuda", "matmul", "tf32");
-      setFloat32Precision("mkldnn", "matmul", "tf32");
+      setFloat32Precision(Float32Backend::CUDA, Float32Op::MATMUL, Float32Precision::TF32);
+      setFloat32Precision(Float32Backend::MKLDNN, Float32Op::MATMUL, Float32Precision::TF32);
       return true;
     } else if (s_ == "medium") {
       float32_matmul_precision = at::Float32MatmulPrecision::MEDIUM;
-      setFloat32Precision("cuda", "matmul", "tf32");
-      setFloat32Precision("mkldnn", "matmul", "bf16");
+      setFloat32Precision(Float32Backend::CUDA, Float32Op::MATMUL, Float32Precision::TF32);
+      setFloat32Precision(Float32Backend::MKLDNN, Float32Op::MATMUL, Float32Precision::BF16);
       return true;
     }
     return false;
@@ -390,14 +428,14 @@ void Context::setFloat32MatmulPrecision(const std::string &s) {
     "setFloat32MatmulPrecision call has no effect.");
 }
 
-void Context::setFloat32Precision(const std::string& backend, const std::string& op, const std::string& p) {
+void Context::setFloat32Precision(Float32Backend backend, Float32Op op, Float32Precision p) {
   auto it = fp32_precision.find(std::make_pair(backend, op));
   TORCH_CHECK(
       it != fp32_precision.end(),
       "Invalid (backend, op) pair: (", backend, ", ", op, ")");
   TORCH_CHECK(
-      p == "ieee" || p == "tf32" || p == "none" || (backend != "cuda" && p == "bf16"),
-      "Backend '", backend, "' does not support precision '", p, "'");
+      !(backend == Float32Backend::CUDA && p == Float32Precision::BF16),
+      "backend 'cuda' does not support precision 'bf16'");
 
   it->second = p;
 }
