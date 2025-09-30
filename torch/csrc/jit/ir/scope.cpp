@@ -1,7 +1,7 @@
-#include <torch/csrc/jit/ir/scope.h>
-
 #include <ATen/core/class_type.h>
 #include <ATen/core/function.h>
+#include <c10/util/Exception.h>
+#include <torch/csrc/jit/ir/scope.h>
 
 namespace torch::jit {
 // util functions
@@ -45,9 +45,7 @@ ScopePtr Scope::push(Symbol name) {
 }
 
 ScopePtr Scope::parent() {
-  if (!parent_) {
-    throw std::runtime_error("Cannot get parent from Scope with no parent");
-  }
+  TORCH_CHECK(parent_, "Cannot get parent from Scope with no parent");
   return parent_;
 }
 
