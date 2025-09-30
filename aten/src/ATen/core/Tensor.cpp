@@ -174,25 +174,11 @@ unsigned TensorBase::_register_hook(std::function<TensorBase(const TensorBase&)>
 }
 
 std::optional<ScalarType> TensorBase::grad_dtype() const {
-  auto variable_hooks = impl::GetVariableHooks();
-  if (variable_hooks->allow_grad_dtype_mismatch(*this)) {
-    return std::nullopt;
-  } else if (variable_hooks->grad_dtype(*this).has_value()) {
-    return variable_hooks->grad_dtype(*this);
-  } else {
-    return scalar_type();
-  }
+  return impl::GetVariableHooks()->grad_dtype(*this);
 }
 
 void TensorBase::set_grad_dtype(const std::optional<ScalarType>& grad_dtype) const {
-  auto variable_hooks = impl::GetVariableHooks();
-  TORCH_CHECK(!variable_hooks->grad_fn(*this), "grad_dtype can only be set on leaf tensors.");
-  if (grad_dtype.has_value()) {
-    variable_hooks->set_grad_dtype(*this, grad_dtype);
-    variable_hooks->set_allow_grad_dtype_mismatch(*this, false);
-  } else {
-    variable_hooks->set_allow_grad_dtype_mismatch(*this, true);
-  }
+  return impl::GetVariableHooks()->set_grad_dtype(*this, grad_dtype);
 }
 
 } // namespace at

@@ -128,6 +128,7 @@ TORCH_API void set_grad_accumulator(
 /// if it still exists. If the gradient accumulator function has been
 /// destroyed, returns a `nullptr`.
 TORCH_API std::shared_ptr<Node> try_get_grad_accumulator(const Variable&);
+TORCH_API std::shared_ptr<Node> try_get_grad_accumulator(const at::TensorBase&);
 
 /// Gets the gradient accumulator of the `Variable` if it has one, or else
 /// create one on the fly and return it.
@@ -191,6 +192,9 @@ TORCH_API std::unique_ptr<PostAccumulateGradHook>& post_acc_grad_hooks(
 TORCH_API void create_cpp_hook(
     const at::TensorBase&,
     bool is_retains_grad_hooks = false);
+TORCH_API void set_grad_accumulator_grad_dtype(
+    const at::TensorBase&,
+    const std::optional<at::ScalarType>&);
 } // namespace impl
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -300,20 +304,27 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
       uint64_t level,
       bool is_inplace_op) override;
 
-  const std::optional<at::ScalarType>& grad_dtype() const {
-    return grad_dtype_;
+  std::optional<at::ScalarType> grad_dtype(const at::TensorBase& self) const {
+    if (allow_grad_dtype_mismatch_) {
+      return std::nullopt;
+    } else if (grad_dtype_.has_value()) {
+      return grad_dtype_;
+    } else {
+      return self.scalar_type();
+    }
   }
 
-  void set_grad_dtype(const std::optional<at::ScalarType>& grad_dtype) {
-    grad_dtype_ = grad_dtype;
-  }
-
-  bool allow_grad_dtype_mismatch() const {
-    return allow_grad_dtype_mismatch_;
-  }
-
-  void set_allow_grad_dtype_mismatch(bool allow_mismatch) {
-    allow_grad_dtype_mismatch_ = allow_mismatch;
+  void set_grad_dtype(
+      const std::optional<at::ScalarType>& grad_dtype,
+      const at::TensorBase& self) {
+    TORCH_CHECK(!grad_fn_, "grad_dtype can only be set on leaf tensors.");
+    if (grad_dtype.has_value()) {
+      grad_dtype_ = grad_dtype;
+      allow_grad_dtype_mismatch_ = false;
+    } else {
+      allow_grad_dtype_mismatch_ = true;
+    }
+    impl::set_grad_accumulator_grad_dtype(self, grad_dtype);
   }
 
   AutogradMeta(
@@ -968,9 +979,6 @@ struct VariableHooks final : at::impl::VariableHooksInterface {
   void set_grad_dtype(
       const at::TensorBase&,
       const std::optional<c10::ScalarType>&) const override;
-  bool allow_grad_dtype_mismatch(const at::TensorBase&) const override;
-  void set_allow_grad_dtype_mismatch(const at::TensorBase&, bool)
-      const override;
 };
 
 namespace utils {

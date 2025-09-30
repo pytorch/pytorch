@@ -274,12 +274,25 @@ void set_grad_accumulator(
       std::move(grad_accumulator);
 }
 
-std::shared_ptr<Node> try_get_grad_accumulator(const Variable& self) {
+std::shared_ptr<Node> try_get_grad_accumulator(const at::TensorBase& self) {
   if (get_autograd_meta(self)) {
     return get_autograd_meta(self)->grad_accumulator_.lock();
   } else {
     return nullptr;
   }
+}
+
+void set_grad_accumulator_grad_dtype(
+    const at::TensorBase& self,
+    const std::optional<at::ScalarType>& grad_dtype) {
+  auto grad_acc = try_get_grad_accumulator(self);
+  if (grad_acc) {
+    grad_acc->mutable_input_metadata(0).set_grad_dtype(grad_dtype);
+  }
+}
+
+std::shared_ptr<Node> try_get_grad_accumulator(const Variable& self) {
+  return try_get_grad_accumulator(get_tensor_base(self));
 }
 
 std::shared_ptr<Node> grad_accumulator(const Variable& self) {
@@ -914,7 +927,7 @@ std::unique_ptr<ViewFunc> ChainedViewFunc::clone_and_set(
 std::optional<c10::ScalarType> VariableHooks::grad_dtype(
     const at::TensorBase& self) const {
   if (auto* meta = impl::get_autograd_meta(self)) {
-    return meta->grad_dtype();
+    return meta->grad_dtype(self);
   }
   return std::nullopt;
 }
@@ -923,22 +936,7 @@ void VariableHooks::set_grad_dtype(
     const at::TensorBase& self,
     const std::optional<c10::ScalarType>& grad_dtype) const {
   auto* meta = impl::materialize_autograd_meta(self);
-  meta->set_grad_dtype(grad_dtype);
-}
-
-bool VariableHooks::allow_grad_dtype_mismatch(
-    const at::TensorBase& self) const {
-  if (auto* meta = impl::get_autograd_meta(self)) {
-    return meta->allow_grad_dtype_mismatch();
-  }
-  return false;
-}
-
-void VariableHooks::set_allow_grad_dtype_mismatch(
-    const at::TensorBase& self,
-    bool allow_mismatch) const {
-  auto* meta = impl::materialize_autograd_meta(self);
-  meta->set_allow_grad_dtype_mismatch(allow_mismatch);
+  meta->set_grad_dtype(grad_dtype, self);
 }
 
 } // namespace torch::autograd

@@ -1534,12 +1534,6 @@ static int THPVariable_set_grad_dtype(
     auto* dtype = reinterpret_cast<THPDtype*>(obj);
     new_dtype = dtype->scalar_type;
   }
-  // 1) If there's already a grad_acc, update its InputMetadata now.
-  if (auto grad_acc = torch::autograd::impl::try_get_grad_accumulator(var)) {
-    grad_acc->mutable_input_metadata(0).set_grad_dtype(new_dtype);
-  }
-  // 2) Always set grad_dtype in the tensor, so that we can set
-  //    InputMetadata appropriately when grad_acc is (re)constructed
   var.set_grad_dtype(new_dtype);
   return 0;
   END_HANDLE_TH_ERRORS_RET(-1)
