@@ -11,8 +11,8 @@
 #include <torch/csrc/utils/pybind.h>
 
 #include <c10/cuda/CUDAGuard.h>
-#include <c10/util/irange.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 
 using namespace at;
 using namespace torch;
@@ -65,8 +65,8 @@ static std::vector<std::optional<at::cuda::CUDAStream>> unpack_streams(
   }
   auto streams = THPUtils_PySequence_to_CUDAStreamList(obj);
   TORCH_CHECK(
-    streams.size() == size,
-    "number of streams is not equal to number of inputs");
+      streams.size() == size,
+      "number of streams is not equal to number of inputs");
   return streams;
 }
 
@@ -91,8 +91,8 @@ static std::vector<ncclComm_t> unpack_comms(PyObject* obj, size_t size) {
     }
   }
   TORCH_CHECK(
-    comms.size() == size,
-    "number of communicators is not equal to number of inputs");
+      comms.size() == size,
+      "number of communicators is not equal to number of inputs");
   return comms;
 }
 

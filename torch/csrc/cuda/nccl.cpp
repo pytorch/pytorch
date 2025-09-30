@@ -194,7 +194,9 @@ static void NCCL_CHECK_TIMEOUT(ncclResult status, ncclComm_t comm) {
     auto timeElapsed = std::chrono::duration_cast<std::chrono::seconds>(
                            currentTimepoint - startTimepoint)
                            .count();
-    TORCH_CHECK(timeElapsed <= nccl_nonblocking_timeout(), "NCCL timeout when waiting for nonblocking call to become successful.");
+    TORCH_CHECK(
+        timeElapsed <= nccl_nonblocking_timeout(),
+        "NCCL timeout when waiting for nonblocking call to become successful.");
     sched_yield(); // yield to other threads
     ncclCommGetAsyncError(to_nccl_comm(comm), &result);
   }
@@ -225,8 +227,8 @@ static void NCCL_CHECK_TIMEOUT(
                                currentTimepoint - startTimepoint)
                                .count();
         TORCH_CHECK(
-          timeElapsed <= nccl_nonblocking_timeout(),
-          "NCCL timeout when waiting for nonblocking call to become successful.");
+            timeElapsed <= nccl_nonblocking_timeout(),
+            "NCCL timeout when waiting for nonblocking call to become successful.");
         sched_yield(); // yield to other threads
         ncclCommGetAsyncError(to_nccl_comm(comms[i]), &result);
       } while (result == ncclInProgress);
@@ -315,32 +317,35 @@ static void check_tensor(
     ScalarType ref_dtype) {
   auto check_one = [&](const at::Tensor& tensor) {
     TORCH_CHECK(
-      tensor.is_cuda() && !tensor.is_sparse(),
-      "input and output elements have to be cuda dense Tensors");
+        tensor.is_cuda() && !tensor.is_sparse(),
+        "input and output elements have to be cuda dense Tensors");
 
     TORCH_CHECK(
-      ref_dtype == tensor.scalar_type(),
-      "all inputs and outputs must be of the same Tensor dtype");
+        ref_dtype == tensor.scalar_type(),
+        "all inputs and outputs must be of the same Tensor dtype");
 
-    TORCH_CHECK(tensor.is_contiguous(), "all inputs and outputs have to be contiguous");
+    TORCH_CHECK(
+        tensor.is_contiguous(), "all inputs and outputs have to be contiguous");
   };
 
   check_one(input);
 
   // all inputs must be same size
-  TORCH_CHECK(input.numel() == ref_numel, "all inputs must have the same number of elements");
+  TORCH_CHECK(
+      input.numel() == ref_numel,
+      "all inputs must have the same number of elements");
 
   if (output) {
     check_one(*output);
 
     // inputs and outputs must be on same device respectively
     TORCH_CHECK(
-      input.get_device() == output->get_device(),
-      "input and output must be on the same device");
+        input.get_device() == output->get_device(),
+        "input and output must be on the same device");
 
     TORCH_CHECK(
-      output->numel() * output_multiplier == ref_numel * input_multiplier,
-      "output must be of size input_size * size_multiplier");
+        output->numel() * output_multiplier == ref_numel * input_multiplier,
+        "output must be of size input_size * size_multiplier");
   }
 }
 
@@ -374,7 +379,8 @@ void check_inputs(
 
     auto input_device = input.get_device();
     // inputs must be on unique devices
-    TORCH_CHECK(!devices.test(input_device), "inputs must be on unique devices");
+    TORCH_CHECK(
+        !devices.test(input_device), "inputs must be on unique devices");
     devices.set(input_device);
   }
 }
@@ -408,7 +414,8 @@ void check_inputs(
 
     auto input_device = input.get_device();
     // inputs must be on unique devices
-    TORCH_CHECK(!devices.test(input_device), "inputs must be on unique devices");
+    TORCH_CHECK(
+        !devices.test(input_device), "inputs must be on unique devices");
     devices.set(input_device);
   }
 }
