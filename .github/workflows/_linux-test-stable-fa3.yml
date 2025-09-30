@@ -54,7 +54,7 @@ jobs:
     # Don't run on forked repos
     if: github.repository_owner == 'pytorch'
     runs-on: linux.aws.h100
-    timeout-minutes: inputs.timeout-minutes
+    timeout-minutes: ${{ inputs.timeout-minutes || 30 }}
     permissions:
       id-token: write
       contents: read
