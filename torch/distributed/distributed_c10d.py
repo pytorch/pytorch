@@ -3518,7 +3518,6 @@ def recv_object_list(
         >>> objects
         ['foo', 12, {1: 2}]
     """
-
     group = _group_or_default_group(group)
     group_src = _canonicalize_group_rank(group, src, group_src)
     _check_not_self_rank(group, group_src, "source")

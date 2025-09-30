@@ -3834,7 +3834,9 @@ such as `dist.all_reduce(tensor, async_op=True)`.
               c10::make_intrusive<::c10d::FakeProcessGroup::Options>())
       .def(
           "__init__",
-          [](py::object, py::args args, py::kwargs kwargs) {
+          [](const py::object&,
+             const py::args& args,
+             const py::kwargs& kwargs) {
             TORCH_CHECK(
                 false,
                 "FakeProcessGroup cannot be constructed directly. "
