@@ -218,9 +218,7 @@ def get_test_status(test_cases: list[list[dict[str, Any]]]) -> list[dict[str, An
         for test in tests:
             if "skipped" in test:
                 statuses.append("skipped")
-            elif "failure" in test:
-                statuses.append("failure")
-            elif "error" in test:
+            elif "failure" in test or "error" in test:
                 statuses.append("failure")
             else:
                 statuses.append("success")
