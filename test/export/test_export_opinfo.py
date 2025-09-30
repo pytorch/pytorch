@@ -80,8 +80,7 @@ def _test_export_helper(self, dtype, op):
     sample_inputs_itr = op.sample_inputs("cpu", dtype, requires_grad=False)
 
     mode = FakeTensorMode(allow_non_fake_inputs=True)
-    # intentionally avoid cuda:0 to flush out some bugs
-    target_device = "cuda:1"
+    target_device = "cuda:0"
 
     def to_fake_device(x):
         return x.to(target_device)
