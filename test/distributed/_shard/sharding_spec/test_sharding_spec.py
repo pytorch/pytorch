@@ -47,15 +47,13 @@ class TestShardingSpec(TestCase):
     def setUp(self):
         super().setUp()
         # Check the availability of gpu device dynamically
-        if torch.cuda.is_available() and torch.cuda.device_count() >= 2:
-            self.device_type = "cuda"
-        elif hasattr(torch, "xpu") and torch.xpu.is_available() and torch.xpu.device_count() >= 2:
-            self.device_type = "xpu"
+        if torch.accelerator.is_available() and torch.accelerator.device_count() >= 2:
+            self.device_type = torch.accelerator.current_accelerator()
         else:
             # default to cuda, but the test will be skipped
             self.device_type = "cuda"
 
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "2 GPUS (CUDA or XPU) are needed")
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "2 accelerator devices are needed")
     def test_device_placement(self):
         # valid devices
         DevicePlacementSpec(f"{self.device_type}:0")
@@ -65,23 +63,17 @@ class TestShardingSpec(TestCase):
         DevicePlacementSpec("rank:0/cpu")
         DevicePlacementSpec("rank:0")
 
-        other_device_type = "xpu" if self.device_type == "cuda" else "cuda"
-        if (other_device_type == "cuda" and torch.cuda.is_available()) or \
-           (other_device_type == "xpu" and hasattr(torch, 'xpu') and torch.xpu.is_available()):
-            DevicePlacementSpec(f"{other_device_type}:0")
-            DevicePlacementSpec(f"rank:0/{other_device_type}:0")
-
         # invalid devices
         with self.assertRaisesRegex(ValueError, "Could not parse remote_device"):
-            DevicePlacementSpec(f"{self.device_type}:foo")
+            DevicePlacementSpec("cuda:foo")
         with self.assertRaisesRegex(ValueError, "Could not parse remote_device"):
             DevicePlacementSpec("foo:0")
         with self.assertRaisesRegex(RuntimeError, "Invalid device string"):
-            DevicePlacementSpec(f"rank:0/{self.device_type}:foo")
+            DevicePlacementSpec(f"rank:0/cuda:foo")
         with self.assertRaisesRegex(RuntimeError, "Invalid device string"):
             DevicePlacementSpec("rank:0/cpu2")
 
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "2 GPUS (CUDA or XPU) are needed")
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "2 accelerator devices are needed")
     def test_chunked_sharding_spec(self):
         # Test valid specs.
         ChunkShardingSpec(0, [torch.device(0), torch.device(1)])
@@ -114,7 +106,7 @@ class TestShardingSpec(TestCase):
         with self.assertRaisesRegex(RuntimeError, "Invalid device string"):
             ChunkShardingSpec(0, [f"rank:0/{self.device_type}:foo", f"{self.device_type}:1"])
 
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "2 GPUS (CUDA or XPU) are needed")
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "2 accelerator devices are needed")
     def test_enumerable_sharding_spec(self):
         # test valid specs
 
@@ -652,7 +644,7 @@ class TestCustomShardingSpec(ShardedTensorTestBase):
         meta = grid_spec.build_metadata(torch.Size((8, 8)), tensor_properties)
         check_tensor(meta.shards_metadata, torch.Size((8, 8)))
 
-    @with_comms(init_rpc=False, backend=BACKEND)
+    @with_comms(backend=BACKEND)
     @skip_if_lt_x_gpu(4)
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_custom_sharding_spec_tensor_ctor(self):
@@ -679,7 +671,7 @@ class TestCustomShardingSpec(ShardedTensorTestBase):
         self.assertEqual((2, 2), local_shard.size())
         self.assertEqual(local_shard, torch.ones(2, 2))
 
-    @with_comms(init_rpc=False, backend=BACKEND)
+    @with_comms(backend=BACKEND)
     @skip_if_lt_x_gpu(4)
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_custom_sharding_spec_shard_tensor(self):
