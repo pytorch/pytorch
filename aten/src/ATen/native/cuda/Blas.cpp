@@ -57,6 +57,103 @@ namespace at::native {
 
 namespace {
 
+// NOTE: conjugation is handled seperately
+enum class CublasPrepTransType : int {
+  N = 0, // no transposition, no copy
+  N_OWNED = 1, // make a col-major copy, no transposition
+  T_BORROWED = 2, // transpose, no copy
+  T_OWNED = 3 // make a row-major copy, then transpose
+};
+
+inline bool is_trans(const CublasPrepTransType& trans_type) {
+  return static_cast<int>(trans_type) >= static_cast<int>(CublasPrepTransType::T_BORROWED);
+}
+
+// Fast dim must be contiguous, and the leading one
+// should have a stride max(1, length of the fast dim)
+inline bool matrix_ld_complies_cublas(const Tensor& t, int64_t ld_idx) {
+  // fast dim index: assuming ld_idx is in {0, 1}
+  const auto fd_idx = static_cast<int64_t>(1) - ld_idx;
+  const auto t_strides = t.strides();
+  return t_strides[fd_idx] == 1 && t_strides[ld_idx] >= std::max<int64_t>(1, t.sizes()[fd_idx]);
+}
+
+inline CublasPrepTransType predict_matrix_trans_type_cublas(const Tensor& t) {
+  if (t.is_non_overlapping_and_dense()) { // is t row- or col-major?
+      return t.is_contiguous()
+        ? CublasPrepTransType::T_BORROWED // yes, then transpose without copy
+        : CublasPrepTransType::N; // no, then use as is without transposition
+  }
+  // We transpose a tensor if the rows dim (dim 0) complies
+  // with the cublas requirements for the leading dimension
+  const auto row_dim_ld_compliant = matrix_ld_complies_cublas(t, /*ld_idx=*/0);
+  if (row_dim_ld_compliant) {
+    return CublasPrepTransType::T_BORROWED; // no copy
+  } else {
+    // If neither row nor col dim complies, a contiguous copy is created
+    // which has its row dim compliant, so the tensor will need transposition
+    return matrix_ld_complies_cublas(t, /*ld_idx=*/1)
+      ? CublasPrepTransType::N // no copy
+      : CublasPrepTransType::T_OWNED; // copy
+  }
+}
+
+inline std::tuple<CublasPrepTransType, CublasPrepTransType, CublasPrepTransType>
+predict_gemm_args_trans_type_cublas(const Tensor& result, const Tensor& mat1, const Tensor& mat2) {
+  const auto result_trans_type = predict_matrix_trans_type_cublas(result);
+  const auto mat1_trans_type = predict_matrix_trans_type_cublas(mat1);
+  const auto mat2_trans_type = predict_matrix_trans_type_cublas(mat2);
+  if (!is_trans(result_trans_type)) {
+    // Nothing to do, return types as is
+    return std::make_tuple(
+        result_trans_type,
+        mat1_trans_type,
+        mat2_trans_type
+    );
+  } else {
+    // More involved, need to "negate" transposition types.
+    // NOTE: here we map N_* to T_* and T_* to N_* just to comply
+    // with the previous logic where the trans prep was just
+    // a boolean, and it was directly negated.
+    // One can see that there are tensors which can be
+    // passed as transposed and not transposed without
+    // any correctness issues. Consider, for example, a tensor
+    // of shape (1, 1) with strides (1, 1).
+    const auto neg_trans_type = [](const Tensor& t, const CublasPrepTransType& t_trans_type) -> auto {
+      if (t.is_non_overlapping_and_dense()) { // when t is row- or col-major
+        switch(t_trans_type) {
+          case CublasPrepTransType::T_BORROWED:
+            return CublasPrepTransType::N;
+          case CublasPrepTransType::N:
+            return CublasPrepTransType::T_BORROWED;
+          default:
+            TORCH_CHECK(false, "This path should not be reachable")
+        }
+      }
+      switch (t_trans_type) {
+        case CublasPrepTransType::T_OWNED:
+          // Implies negating the case with an owned row-major copy,
+          // so we can just create a col-major copy directly
+          return CublasPrepTransType::N_OWNED;
+        case CublasPrepTransType::N:
+          // Implies T_BORROWED was not possible, so do T_OWNED
+          return CublasPrepTransType::T_OWNED;
+        case CublasPrepTransType::T_BORROWED:
+          return matrix_ld_complies_cublas(t, /*ld_idx=*/1) // is col-compliant?
+            ? CublasPrepTransType::N // if so, no copy needed
+            : CublasPrepTransType::N_OWNED; // col-major copy otherwise
+        default:
+          TORCH_CHECK(false, "This path should not be reachable")
+      }
+    };
+    return std::make_tuple(
+        result_trans_type,
+        neg_trans_type(mat1, mat1_trans_type),
+        neg_trans_type(mat2, mat2_trans_type)
+    );
+  }
+}
+
 // TODO: https://github.com/pytorch/pytorch/pull/59380#pullrequestreview-725310492
 c10::MaybeOwned<Tensor> inline resolve_conj_if_indicated(const Tensor& tensor, bool resolve_conj) {
   if (resolve_conj && tensor.is_conj()) {
@@ -176,6 +273,23 @@ struct cublasCommonArgs {
     if (transpose_result) {
       transpose_a = !transpose_a;
       transpose_b = !transpose_b;
+    }
+
+    const auto [res_trans_type, mat1_trans_type, mat2_trans_type] = predict_gemm_args_trans_type_cublas(c, mat1, mat2);
+    const auto res_trans = is_trans(res_trans_type);
+    const auto mat1_trans = is_trans(mat1_trans_type);
+    const auto mat2_trans = is_trans(mat2_trans_type);
+    TORCH_CHECK(transpose_result == res_trans);
+    if (transpose_result) {
+      //TORCH_CHECK(transpose_a == static_cast<bool>(mat2_trans_type))
+      //TORCH_CHECK(transpose_b == static_cast<bool>(mat1_trans_type))
+      if (transpose_a != mat2_trans) {
+      }
+      if (transpose_b != mat1_trans) {
+      }
+      TORCH_CHECK(transpose_a == mat2_trans && transpose_b == mat1_trans);
+    } else {
+      TORCH_CHECK(transpose_a == mat1_trans && transpose_b == mat2_trans);
     }
 
     auto sizes_a = mata->sizes();
