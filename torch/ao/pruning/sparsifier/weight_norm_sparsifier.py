@@ -1,7 +1,8 @@
 # mypy: allow-untyped-defs
 import operator
+from collections.abc import Callable
 from functools import reduce
-from typing import Callable, Optional, Union
+from typing import Optional, Union
 
 import torch
 import torch.nn.functional as F

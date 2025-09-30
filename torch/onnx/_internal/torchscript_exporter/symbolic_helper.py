@@ -103,8 +103,14 @@ import math
 import sys
 import typing
 import warnings
-from typing import Any, Callable, Literal, NoReturn, TypeVar as _TypeVar
-from typing_extensions import Concatenate as _Concatenate, ParamSpec as _ParamSpec
+from typing import (
+    Any,
+    Concatenate as _Concatenate,
+    Literal,
+    NoReturn,
+    TypeVar as _TypeVar,
+)
+from typing_extensions import ParamSpec as _ParamSpec
 
 import torch
 import torch._C._onnx as _C_onnx
@@ -115,7 +121,7 @@ from torch.onnx._internal.torchscript_exporter._globals import GLOBALS
 
 
 if typing.TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
     from torch.types import Number
 

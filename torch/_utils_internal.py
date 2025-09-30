@@ -5,7 +5,8 @@ import os
 import sys
 import tempfile
 import typing_extensions
-from typing import Any, Callable, Optional, TypeVar
+from collections.abc import Callable
+from typing import Any, Optional, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
