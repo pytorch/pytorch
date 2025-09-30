@@ -384,7 +384,7 @@ def _softmax_backward_data(func, *args, **kwargs):
     if is_masked_tensor(grad) and is_masked_tensor(output):
         if not _masks_match(grad, output):
             raise ValueError(
-                "__torch_dispatch__, {func}: expected the masks of grad and output to match"
+                f"__torch_dispatch__, {func}: expected the masks of grad and output to match"
             )
         grad_data = _get_data(grad)
         new_grad_data = torch.ops.aten._masked_softmax_backward(
@@ -434,7 +434,7 @@ def _to_sparse(func, *args, **kwargs):
         args, kwargs, f"__torch_dispatch__, {func}", len_args=1, len_kwargs=0
     )
     if not torch.is_tensor(args[0]):
-        raise TypeError("__torch_dispatch__, {func}: expected args[0] to be a tensor")
+        raise TypeError(f"__torch_dispatch__, {func}: expected args[0] to be a tensor")
     mt = args[0]
     if not is_masked_tensor(mt):
         mt = MaskedTensor(mt, torch.ones_like(mt, dtype=torch.bool))
@@ -451,7 +451,7 @@ def _to_sparse_csr(func, *args, **kwargs):
         args, kwargs, f"__torch_dispatch__, {func}", len_args=1, len_kwargs=0
     )
     if not torch.is_tensor(args[0]):
-        raise ValueError("__torch_dispatch__, {func}: expected args[0] to be a tensor")
+        raise ValueError(f"__torch_dispatch__, {func}: expected args[0] to be a tensor")
     mt = args[0]
     if not is_masked_tensor(mt):
         mt = MaskedTensor(mt, torch.ones_like(mt).bool())
@@ -468,7 +468,7 @@ def _to_dense(func, *args, **kwargs):
         args, kwargs, f"__torch_dispatch__, {func}", len_args=1, len_kwargs=0
     )
     if not torch.is_tensor(args[0]):
-        raise ValueError("__torch_dispatch__, {func}: expected args[0] to be a tensor")
+        raise ValueError(f"__torch_dispatch__, {func}: expected args[0] to be a tensor")
     mt = args[0]
     if not is_masked_tensor(mt):
         mt = MaskedTensor(mt, torch.ones_like(mt).bool())
