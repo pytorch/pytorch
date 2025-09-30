@@ -134,7 +134,7 @@ instantiate_device_type_tests(TestExportOpInfo, globals(), only_for="cpu")
 
 selected_ops = {
     "__getitem__",
-    # "nn.functional.batch_norm",  # needs to fix
+    "nn.functional.batch_norm",
     "nn.functional.instance_norm",
     "nn.functional.multi_margin_loss",
     "nonzero",
