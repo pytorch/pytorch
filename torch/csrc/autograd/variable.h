@@ -840,7 +840,11 @@ inline Variable make_variable_non_differentiable_view(
     // Currently all of non-differentiable view ops (just detach)
     // redispatch first, so they should have already allocated a new
     // TensorImpl. No need to shallow_copy_and_detach here.
-    data.unsafeGetTensorImpl()->set_autograd_meta(nullptr);
+    auto* data_impl = data.unsafeGetTensorImpl();
+    data_impl->set_version_counter(
+        base.unsafeGetTensorImpl()->version_counter());
+    data_impl->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
+    data_impl->set_autograd_meta(nullptr);
     return data;
   }
   return Variable();

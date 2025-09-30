@@ -450,7 +450,6 @@ static const Tensor& resize_as_(
 static Tensor detach(c10::DispatchKeySet ks, const Tensor& self) {
   auto out = ([&]() {
     at::AutoDispatchBelowADInplaceOrView guard;
-
     return at::_ops::detach::redispatch(
         ks & c10::after_ADInplaceOrView_keyset, self);
   })();
