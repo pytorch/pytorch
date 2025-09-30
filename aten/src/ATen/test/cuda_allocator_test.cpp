@@ -12,23 +12,17 @@ std::unordered_map<void*, ssize_t> allocation_sizes;
 void* logging_malloc(ssize_t size, int device, cudaStream_t stream) {
     void* ptr;
     cudaMalloc(&ptr, size);
-    std::cout << "alloc ptr=" << ptr << " size=" << size << " device=" << device
-              << " stream=" << stream << std::endl;
     allocation_sizes[ptr] = size;
     return ptr;
 }
 
 void logging_free(void* ptr, ssize_t size, int device, cudaStream_t stream) {
-    std::cout << "free  ptr=" << ptr << " size=" << size << " device=" << device
-              << " stream=" << stream << std::endl;
-    // Print out any frees that don't match the allocation sizes
     if (allocation_sizes.find(ptr) != allocation_sizes.end()) {
         if (allocation_sizes[ptr] != size) {
-            std::cout << "*** ERROR: free mismatch: " << ptr << " size=" << size
-                      << " expected=" << allocation_sizes[ptr] << std::endl;
+          throw std::runtime_error("free mismatch");
         }
     } else {
-        std::cout << "WARNING: free of unknown ptr=" << ptr << std::endl;
+      throw std::runtime_error("free of unknown ptr");
     }
     cudaFree(ptr);
     allocation_sizes.erase(ptr);
@@ -41,16 +35,14 @@ TEST(TestTorchUnique, UniqueComparisonTest) {
     // Run the command 3 times; the first 2 will pass and the third invocation will have
     // different sizes in alloc and free
     for (int i = 0; i < 3; ++i) {
-        LOG(INFO) << "Starting test " << i;
         // Initialize simple sorted tensor with repeats
         at::Tensor sorted_tensor =
             at::tensor({0, 0, 0, 1, 1, 2, 3, 3, 3, 3, 5},
                           at::TensorOptions().dtype(at::kFloat).device(at::kCUDA));
 
-        LOG(INFO) << "Starting unique_consecutive";
         // This operation will call malloc/free with different sizes on the same pointer
         auto unique_dim_result = at::unique_consecutive(sorted_tensor, false, true, 0);
-        LOG(INFO) << "Finished unique_consecutive";
+
         // Everything below is only there to validate correct results
         auto unique_dim_values = std::get<0>(unique_dim_result);
         auto unique_dim_counts = std::get<2>(unique_dim_result);
