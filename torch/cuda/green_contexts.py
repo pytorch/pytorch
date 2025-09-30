@@ -1,12 +1,12 @@
 import torch
 
 
-GreenContext_ = None
+GreenContext_ = object
+SUPPORTED = False
 
 if hasattr(torch._C, "GreenContext"):
     GreenContext_ = torch._C.GreenContext
-
-GreenContext = GreenContext_
+    SUPPORTED = True
 
 # Python shim helps Sphinx process docstrings more reliably.
 class GreenContext(GreenContext_):
@@ -23,6 +23,8 @@ class GreenContext(GreenContext_):
             num_sms (int): The number of SMs to use in the green context.
             device_id (int, optional): The device index of green context.
         """
+        if not SUPPORTED:
+            raise RuntimeError("PyTorch was not built with Green Context support!")
         return GreenContext_.create(num_sms, device_id)
 
     # Note that these functions are bypassed by we define them here
