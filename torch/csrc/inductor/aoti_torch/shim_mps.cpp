@@ -2,12 +2,8 @@
 #include <torch/csrc/inductor/aoti_torch/c/shim_mps.h>
 #include <torch/csrc/inductor/aoti_torch/utils.h>
 #include <ATen/mps/MPSStream.h>
-#include <unordered_map>
 
 using namespace torch::aot_inductor;
-
-// Global storage to keep shared_ptr alive while raw pointers are used
-static std::unordered_map<at::native::mps::MetalKernelFunction*, std::shared_ptr<at::native::mps::MetalKernelFunction>> function_storage;
 
 AOTITorchError aoti_torch_mps_set_arg_tensor(
     AOTIMetalKernelFunctionHandle handle,
@@ -60,14 +56,11 @@ AOTITorchError aoti_torch_mps_get_kernel_function(
     auto function_shared_ptr = library->getKernelFunction(std::string(kernel_name));
     auto* raw_function = function_shared_ptr.get();
 
-    // Store the shared_ptr to keep the object alive
-    function_storage[raw_function] = function_shared_ptr;
-
-    // Return raw pointer to match existing API
+    // Note: With RAII pattern in codegen, the shared_ptr lifetime is managed
+    // by the static kernel_handle in the generated getter functions
     *function_handle = reinterpret_cast<AOTIMetalKernelFunctionHandle>(raw_function);
   });
 }
-
 
 AOTITorchError aoti_torch_mps_start_encoding(
     AOTIMetalKernelFunctionHandle func) {
