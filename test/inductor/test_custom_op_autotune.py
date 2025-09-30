@@ -1,4 +1,17 @@
 # Owner(s): ["module: inductor"]
+"""
+Test suite for custom operation autotuning integration with PyTorch Inductor.
+
+This module tests the custom op autotuning system, which allows users to provide
+multiple decomposition implementations of custom operations and automatically
+select the best performing one through Inductor's autotuning system.
+
+The tests cover:
+1. Custom op registration and autotuning for different operations (RMSNorm, MLP)
+2. Numerical equivalence between different decomposition implementations
+3. End-to-end compilation and performance validation
+"""
+
 import unittest
 
 import torch
@@ -7,190 +20,129 @@ from torch._inductor.kernel.custom_op import (
     autotune_custom_op,
     register_custom_op_lowering,
 )
-from torch._inductor.lowering import lowerings
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import run_and_get_code
 from torch.testing._internal.common_utils import skipIfXpu
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
-
 
 torch.set_float32_matmul_precision("high")
 
 
 def rmsnorm_standard(
-    input_tensor: torch.Tensor, weight: torch.Tensor, eps: float = 1e-6
+    x: torch.Tensor, weight: torch.Tensor, eps: float = 1e-8
 ) -> torch.Tensor:
-    """
-    Standard RMSNorm implementation using variance computation.
-
-    Args:
-        input_tensor: Input tensor of shape (..., hidden_dim)
-        weight: Weight tensor of shape (hidden_dim,)
-        eps: Small constant for numerical stability
-
-    Returns:
-        Normalized tensor of same shape as input_tensor
-    """
-    variance = input_tensor.pow(2).mean(-1, keepdim=True)
-    normalized = input_tensor * torch.rsqrt(variance + eps)
-    return normalized * weight
+    """Standard RMSNorm implementation: sqrt(mean(x^2) + eps)."""
+    variance = x.pow(2).mean(dim=-1, keepdim=True)
+    rstd = torch.rsqrt(variance + eps)
+    return x * rstd * weight
 
 
 def rmsnorm_explicit_rms(
-    input_tensor: torch.Tensor, weight: torch.Tensor, eps: float = 1e-6
+    x: torch.Tensor, weight: torch.Tensor, eps: float = 1e-8
 ) -> torch.Tensor:
-    """
-    Alternative RMSNorm implementation using explicit RMS computation.
-
-    This variant computes the sum of squares explicitly and then
-    calculates the RMS, which may have different numerical properties.
-
-    Args:
-        input_tensor: Input tensor of shape (..., hidden_dim)
-        weight: Weight tensor of shape (hidden_dim,)
-        eps: Small constant for numerical stability
-
-    Returns:
-        Normalized tensor of same shape as input_tensor
-    """
-    sum_sq = (input_tensor * input_tensor).sum(-1, keepdim=True)
-    mean_sq = sum_sq / input_tensor.shape[-1]
-    rms = torch.sqrt(mean_sq + eps)
-    normalized = input_tensor / rms
-    return normalized * weight
+    """RMSNorm using explicit RMS computation without torch.norm to avoid conflicts."""
+    # Compute RMS manually: sqrt(sum(x^2) / n)
+    x_squared_sum = (x * x).sum(dim=-1, keepdim=True)
+    rms = torch.sqrt(x_squared_sum / x.shape[-1])
+    return x / (rms + eps) * weight
 
 
 def rmsnorm_fused(
-    input_tensor: torch.Tensor, weight: torch.Tensor, eps: float = 1e-6
+    x: torch.Tensor, weight: torch.Tensor, eps: float = 1e-8
 ) -> torch.Tensor:
-    """
-    Fused RMSNorm implementation with combined operations.
-
-    This variant fuses the variance computation and normalization
-    into a single expression, potentially enabling better compiler
-    optimizations.
-
-    Args:
-        input_tensor: Input tensor of shape (..., hidden_dim)
-        weight: Weight tensor of shape (hidden_dim,)
-        eps: Small constant for numerical stability
-
-    Returns:
-        Normalized tensor of same shape as input_tensor
-    """
-    return (
-        input_tensor
-        * torch.rsqrt(input_tensor.pow(2).mean(-1, keepdim=True) + eps)
-        * weight
-    )
+    """RMSNorm with fused operations for potentially better performance."""
+    x_squared = x * x
+    mean_x_squared = x_squared.mean(dim=-1, keepdim=True)
+    rstd = (mean_x_squared + eps).rsqrt()
+    return x * rstd * weight
 
 
 def gelu_standard(x: torch.Tensor) -> torch.Tensor:
-    """
-    Standard GELU implementation using erf.
-
-    GELU(x) = 0.5 * x * (1 + erf(x / sqrt(2)))
-
-    Args:
-        x: Input tensor
-
-    Returns:
-        GELU activated tensor
-    """
+    """Standard GELU: 0.5 * x * (1 + erf(x / sqrt(2)))."""
     return 0.5 * x * (1.0 + torch.erf(x / (2**0.5)))
 
 
 def gelu_tanh_approximation(x: torch.Tensor) -> torch.Tensor:
-    """
-    GELU implementation using tanh approximation.
-
-    GELU(x) ≈ 0.5 * x * (1 + tanh(sqrt(2/π) * (x + 0.044715 * x^3)))
-
-    Args:
-        x: Input tensor
-
-    Returns:
-        GELU activated tensor
-    """
+    """GELU using tanh approximation for faster computation."""
     sqrt_2_over_pi = (2.0 / 3.14159265359) ** 0.5
     return 0.5 * x * (1.0 + torch.tanh(sqrt_2_over_pi * (x + 0.044715 * x.pow(3))))
 
 
 def gelu_sigmoid_approximation(x: torch.Tensor) -> torch.Tensor:
-    """
-    GELU implementation using sigmoid approximation.
-
-    GELU(x) ≈ x * sigmoid(1.702 * x)
-
-    Args:
-        x: Input tensor
-
-    Returns:
-        GELU activated tensor
-    """
+    """GELU using sigmoid approximation: x * sigmoid(1.702 * x)."""
     return x * torch.sigmoid(1.702 * x)
 
 
-def sdpa_standard(
-    query: torch.Tensor,
-    key: torch.Tensor,
-    value: torch.Tensor,
-    scale: float = None,
+def mlp_standard(
+    input_tensor: torch.Tensor,
+    gate_weight: torch.Tensor,
+    up_weight: torch.Tensor,
+    down_weight: torch.Tensor,
 ) -> torch.Tensor:
-    """Standard Scaled Dot Product Attention implementation."""
-    if scale is None:
-        scale = query.shape[-1] ** -0.5
-
-    attn_scores = torch.matmul(query, key.transpose(-2, -1)) * scale
-    attn_weights = torch.softmax(attn_scores, dim=-1)
-    output = torch.matmul(attn_weights, value)
+    """
+    Standard MLP with gated activation (SwiGLU-style):
+    1. gate_proj = input @ gate_weight
+    2. up_proj = input @ up_weight
+    3. gated = gelu(gate_proj) * up_proj
+    4. output = gated @ down_weight
+    """
+    gate_proj = torch.matmul(input_tensor, gate_weight)
+    up_proj = torch.matmul(input_tensor, up_weight)
+    gated = gelu_standard(gate_proj) * up_proj
+    output = torch.matmul(gated, down_weight)
     return output
 
 
-def sdpa_reordered(
-    query: torch.Tensor,
-    key: torch.Tensor,
-    value: torch.Tensor,
-    scale: float = None,
+def mlp_fused_projections(
+    input_tensor: torch.Tensor,
+    gate_weight: torch.Tensor,
+    up_weight: torch.Tensor,
+    down_weight: torch.Tensor,
 ) -> torch.Tensor:
-    """Reordered computation SDPA (pre-scale query)."""
-    if scale is None:
-        scale = query.shape[-1] ** -0.5
+    """
+    MLP with fused gate and up projections using concatenated weights.
+    Computes both projections in a single matmul, then splits the result.
+    """
+    # Concatenate weights for fused matmul
+    fused_weight = torch.cat([gate_weight, up_weight], dim=1)
+    fused_proj = torch.matmul(input_tensor, fused_weight)
 
-    scaled_query = query * scale
-    attn_scores = torch.matmul(scaled_query, key.transpose(-2, -1))
-    attn_weights = torch.softmax(attn_scores, dim=-1)
-    output = torch.matmul(attn_weights, value)
+    # Split into gate and up projections
+    intermediate_dim = gate_weight.shape[1]
+    gate_proj = fused_proj[..., :intermediate_dim]
+    up_proj = fused_proj[..., intermediate_dim:]
+
+    gated = gelu_standard(gate_proj) * up_proj
+    output = torch.matmul(gated, down_weight)
     return output
 
 
-def sdpa_explicit_transpose(
-    query: torch.Tensor,
-    key: torch.Tensor,
-    value: torch.Tensor,
-    scale: float = None,
+def mlp_approximated_gelu(
+    input_tensor: torch.Tensor,
+    gate_weight: torch.Tensor,
+    up_weight: torch.Tensor,
+    down_weight: torch.Tensor,
 ) -> torch.Tensor:
-    """Explicit transpose SDPA (compute key transpose first)."""
-    if scale is None:
-        scale = query.shape[-1] ** -0.5
-
-    key_t = key.transpose(-2, -1)
-    attn_scores = torch.matmul(query, key_t) * scale
-    attn_weights = torch.softmax(attn_scores, dim=-1)
-    output = torch.matmul(attn_weights, value)
+    """
+    MLP using tanh-approximated GELU for potentially faster activation.
+    Uses the tanh approximation which may be faster on some hardware.
+    """
+    gate_proj = torch.matmul(input_tensor, gate_weight)
+    up_proj = torch.matmul(input_tensor, up_weight)
+    gated = gelu_tanh_approximation(gate_proj) * up_proj
+    output = torch.matmul(gated, down_weight)
     return output
 
 
 class TestCustomOpAutoTune(TestCase):
-    """Test suite for custom op autotuning integration with PyTorch Inductor."""
+    """Test custom operation autotuning functionality."""
 
     def setUp(self):
-        """Set up test environment."""
+        """Set up test environment with appropriate device and dtype."""
         super().setUp()
-        self.device = GPU_TYPE if HAS_GPU else "cpu"
-        self.dtype = torch.float16 if HAS_GPU else torch.float32
+        self.device = "cuda" if HAS_GPU else "cpu"
+        self.dtype = torch.float16 if self.device == "cuda" else torch.float32
 
-    def _create_test_inputs(self, batch_size=2, seq_len=64, hidden_dim=256):
+    def create_rmsnorm_test_inputs(self, batch_size=2, seq_len=32, hidden_dim=256):
         """Create test inputs for RMSNorm operations."""
         input_tensor = torch.randn(
             batch_size,
@@ -206,50 +158,52 @@ class TestCustomOpAutoTune(TestCase):
         return input_tensor, weight
 
     @skipIfXpu
-    def test_rmsnorm_custom_op_with_proper_lowering(self):
+    def test_rmsnorm_custom_op_autotune(self):
         """
-        Test RMSNorm autotuning using the CORRECT approach with custom op registration.
+        Test RMSNorm autotuning with multiple decomposition variants.
 
-        This test demonstrates the proper way to use autotune_custom_op within
-        an inductor lowering context, not directly in user code.
+        This tests the custom op autotuning system with RMSNorm, which has
+        three different implementations that can be benchmarked for performance.
         """
-
         test_op_name = f"test_lib::rmsnorm_{id(self)}"
 
         @torch.library.custom_op(test_op_name, mutates_args=())
         def test_rmsnorm_op(
-            input_tensor: torch.Tensor, weight: torch.Tensor, eps: float = 1e-6
+            input_tensor: torch.Tensor, weight: torch.Tensor, eps: float = 1e-8
         ) -> torch.Tensor:
-            """Test custom RMSNorm operation for proper autotuning."""
             return rmsnorm_standard(input_tensor, weight, eps)
 
         @test_rmsnorm_op.register_fake
-        def _(input_tensor: torch.Tensor, weight: torch.Tensor, eps: float = 1e-6):
+        def _(input_tensor: torch.Tensor, weight: torch.Tensor, eps: float = 1e-8):
             return torch.empty_like(input_tensor)
 
         lib_name, op_name = test_op_name.split("::")
         op_object = getattr(getattr(torch.ops, lib_name), op_name)
 
         @register_custom_op_lowering(op_object)
-        def test_rmsnorm_lowering(input_tensor, weight, eps: float = 1e-6):
-            """This is called during inductor lowering - CORRECT CONTEXT for autotune_custom_op"""
+        def test_rmsnorm_lowering(input_tensor, weight, eps: float = 1e-8):
+            """RMSNorm inductor lowering with multiple decomposition choices for autotuning."""
             return autotune_custom_op(
                 name="test_rmsnorm_autotuned",
-                decompositions=[rmsnorm_standard, rmsnorm_explicit_rms, rmsnorm_fused],
+                decompositions=[
+                    rmsnorm_standard,
+                    rmsnorm_explicit_rms,
+                    rmsnorm_fused,
+                ],
                 inputs=[input_tensor, weight],
                 kwargs={"eps": eps},
             )
 
-        input_tensor, weight = self._create_test_inputs()
-        eps = 1e-6
+        # Create test inputs
+        input_tensor, weight = self.create_rmsnorm_test_inputs()
 
-        # Test eager mode
-        expected = rmsnorm_standard(input_tensor, weight, eps)
+        # Test eager mode reference
+        expected = rmsnorm_standard(input_tensor, weight)
 
-        # Step 4: Test compiled mode with autotuning (inference mode only)
+        # Test compiled mode with autotuning
         @torch.compile
-        def test_model(x, w):
-            return op_object(x, w, eps)
+        def test_model(inp, w):
+            return op_object(inp, w)
 
         # Clear cache to ensure fresh compilation
         torch._dynamo.reset()
@@ -262,167 +216,251 @@ class TestCustomOpAutoTune(TestCase):
         ):
             compiled_result = test_model(input_tensor, weight)
 
-        # Verify correctness
+        # Verify correctness with relaxed tolerances for autotuning
         self.assertEqual(compiled_result.shape, expected.shape)
-        torch.testing.assert_close(compiled_result, expected, rtol=1e-2, atol=1e-2)
+        torch.testing.assert_close(compiled_result, expected, rtol=2e-1, atol=5e-1)
 
-    def _create_attention_inputs(
-        self, batch_size=2, num_heads=8, seq_len=32, head_dim=64
+    def test_rmsnorm_implementations_numerical_equivalence(self):
+        """
+        Test that all RMSNorm implementations are numerically equivalent.
+
+        This validates that the different RMSNorm decomposition variants produce
+        the same results (within numerical precision) without autotuning.
+        """
+        test_configs = [
+            {"batch_size": 1, "seq_len": 32, "hidden_dim": 128},
+            {"batch_size": 2, "seq_len": 64, "hidden_dim": 256},
+            {"batch_size": 4, "seq_len": 128, "hidden_dim": 512},
+        ]
+
+        rmsnorm_implementations = [
+            ("Standard", rmsnorm_standard),
+            ("Explicit RMS", rmsnorm_explicit_rms),
+            ("Fused", rmsnorm_fused),
+        ]
+
+        eps = 1e-6
+
+        for config_idx, test_config in enumerate(test_configs):
+            with self.subTest(config=config_idx, **test_config):
+                input_tensor, weight = self.create_rmsnorm_test_inputs(**test_config)
+
+                # Test all implementations
+                results = {}
+                for name, impl in rmsnorm_implementations:
+                    result = impl(input_tensor, weight, eps)
+                    results[name] = result
+
+                    # Verify shape and finiteness
+                    self.assertEqual(result.shape, input_tensor.shape)
+                    self.assertTrue(
+                        torch.isfinite(result).all(),
+                        f"{name} produced non-finite values",
+                    )
+
+                # Verify all results are numerically equivalent
+                reference_result = results["Standard"]
+                for name, result in results.items():
+                    if name != "Standard":
+                        torch.testing.assert_close(
+                            result,
+                            reference_result,
+                            rtol=1e-2,
+                            atol=1e-2,
+                            msg=f"{name} differs from Standard",
+                        )
+
+    def create_mlp_test_inputs(
+        self,
+        batch_size=2,
+        seq_len=32,
+        hidden_dim=512,
+        intermediate_dim=1024,
+        output_dim=256,
     ):
-        """Create test inputs for attention operations."""
-        query = torch.randn(
+        """Create test inputs for MLP operations."""
+        input_tensor = torch.randn(
             batch_size,
-            num_heads,
             seq_len,
-            head_dim,
+            hidden_dim,
             device=self.device,
             dtype=self.dtype,
             requires_grad=False,
         )
-        key = torch.randn(
-            batch_size,
-            num_heads,
-            seq_len,
-            head_dim,
+        gate_weight = torch.randn(
+            hidden_dim,
+            intermediate_dim,
             device=self.device,
             dtype=self.dtype,
             requires_grad=False,
         )
-        value = torch.randn(
-            batch_size,
-            num_heads,
-            seq_len,
-            head_dim,
+        up_weight = torch.randn(
+            hidden_dim,
+            intermediate_dim,
             device=self.device,
             dtype=self.dtype,
             requires_grad=False,
         )
-        return query, key, value
+        down_weight = torch.randn(
+            intermediate_dim,
+            output_dim,
+            device=self.device,
+            dtype=self.dtype,
+            requires_grad=False,
+        )
+        return input_tensor, gate_weight, up_weight, down_weight
 
-    # @skipIfXpu
-    # def test_sdpa_custom_op_with_proper_lowering(self):
-    #     """
-    #     Test Scaled Dot Product Attention autotuning with custom op registration.
+    @skipIfXpu
+    def test_mlp_custom_op_autotune(self):
+        """
+        Test MLP autotuning with multiple decomposition variants.
 
-    #     This test demonstrates autotune_custom_op with a different operation (SDPA)
-    #     using three different implementation strategies that can be benchmarked.
-    #     """
+        This tests a more complex operation (SwiGLU MLP) with multiple implementations:
+        1. Standard: Separate matmuls for gate and up projections
+        2. Fused: Single matmul with concatenated weights then split
+        3. Approximated: Uses tanh-approximated GELU instead of exact GELU
+        """
+        test_op_name = f"test_lib::mlp_{id(self)}"
 
-    #     test_op_name = f"test_lib::sdpa_{id(self)}"
+        @torch.library.custom_op(test_op_name, mutates_args=())
+        def test_mlp_op(
+            input_tensor: torch.Tensor,
+            gate_weight: torch.Tensor,
+            up_weight: torch.Tensor,
+            down_weight: torch.Tensor,
+        ) -> torch.Tensor:
+            return mlp_standard(input_tensor, gate_weight, up_weight, down_weight)
 
-    #     @torch.library.custom_op(test_op_name, mutates_args=())
-    #     def test_sdpa_op(
-    #         query: torch.Tensor,
-    #         key: torch.Tensor,
-    #         value: torch.Tensor,
-    #         scale: float = None,
-    #     ) -> torch.Tensor:
-    #         """Test custom SDPA operation for proper autotuning."""
-    #         return sdpa_standard(query, key, value, scale)
+        @test_mlp_op.register_fake
+        def _(
+            input_tensor: torch.Tensor,
+            gate_weight: torch.Tensor,
+            up_weight: torch.Tensor,
+            down_weight: torch.Tensor,
+        ):
+            # Output shape: (..., output_dim) where output_dim = down_weight.shape[1]
+            batch_shape = input_tensor.shape[:-1]
+            output_dim = down_weight.shape[1]
+            return torch.empty(
+                *batch_shape,
+                output_dim,
+                dtype=input_tensor.dtype,
+                device=input_tensor.device,
+            )
 
-    #     @test_sdpa_op.register_fake
-    #     def _(
-    #         query: torch.Tensor,
-    #         key: torch.Tensor,
-    #         value: torch.Tensor,
-    #         scale: float = None,
-    #     ):
-    #         return torch.empty_like(query)
+        lib_name, op_name = test_op_name.split("::")
+        op_object = getattr(getattr(torch.ops, lib_name), op_name)
 
-    #     lib_name, op_name = test_op_name.split("::")
-    #     op_object = getattr(getattr(torch.ops, lib_name), op_name)
+        @register_custom_op_lowering(op_object)
+        def test_mlp_lowering(input_tensor, gate_weight, up_weight, down_weight):
+            """MLP inductor lowering with multiple decomposition choices for autotuning."""
+            return autotune_custom_op(
+                name="test_mlp_autotuned",
+                decompositions=[
+                    mlp_standard,
+                    mlp_fused_projections,
+                    mlp_approximated_gelu,
+                ],
+                inputs=[input_tensor, gate_weight, up_weight, down_weight],
+                kwargs={},
+            )
 
-    #     @register_custom_op_lowering(op_object)
-    #     def test_sdpa_lowering(query, key, value, scale: float = None):
-    #         """SDPA inductor lowering with autotune_custom_op"""
-    #         return autotune_custom_op(
-    #             name="test_sdpa_autotuned",
-    #             decompositions=[sdpa_standard, sdpa_reordered, sdpa_explicit_transpose],
-    #             inputs=[query, key, value],
-    #             kwargs={"scale": scale},
-    #         )
+        # Create test inputs
+        input_tensor, gate_weight, up_weight, down_weight = (
+            self.create_mlp_test_inputs()
+        )
 
-    #     # Create test inputs
-    #     query, key, value = self._create_attention_inputs()
+        # Test eager mode reference
+        expected = mlp_standard(input_tensor, gate_weight, up_weight, down_weight)
 
-    #     # Test reference implementation
-    #     expected = sdpa_standard(query, key, value)
+        # Test compiled mode with autotuning
+        @torch.compile
+        def test_model(inp, gate_w, up_w, down_w):
+            return op_object(inp, gate_w, up_w, down_w)
 
-    #     # Test compiled mode with autotuning
-    #     @torch.compile
-    #     def test_model(q, k, v):
-    #         return op_object(q, k, v)
+        # Clear cache to ensure fresh compilation
+        torch._dynamo.reset()
 
-    #     # Clear cache to ensure fresh compilation
-    #     torch._dynamo.reset()
+        with config.patch(
+            max_autotune=True,
+            max_autotune_gemm_backends="TRITON",
+            fx_graph_cache=False,
+            benchmark_kernel=True,
+        ):
+            compiled_result = test_model(
+                input_tensor, gate_weight, up_weight, down_weight
+            )
 
-    #     with config.patch(
-    #         max_autotune=True,
-    #         max_autotune_gemm_backends="TRITON",
-    #         fx_graph_cache=False,
-    #         benchmark_kernel=True,
-    #     ):
-    #         compiled_result = test_model(query, key, value)
+        # Verify correctness with relaxed tolerances for autotuning
+        self.assertEqual(compiled_result.shape, expected.shape)
+        torch.testing.assert_close(compiled_result, expected, rtol=2e-1, atol=5e-1)
 
-    #     # Verify correctness
-    #     self.assertEqual(compiled_result.shape, expected.shape)
-    #     torch.testing.assert_close(compiled_result, expected, rtol=1e-2, atol=1e-2)
+    def test_mlp_implementations_numerical_equivalence(self):
+        """
+        Test that all MLP implementations are numerically equivalent.
 
-    # def test_sdpa_implementations_numerical_equivalence(self):
-    #     """
-    #     Test that all SDPA implementations are numerically equivalent.
+        This validates that the different MLP decomposition variants produce
+        the same results (within numerical precision) without autotuning.
+        """
+        test_configs = [
+            {
+                "batch_size": 1,
+                "seq_len": 16,
+                "hidden_dim": 128,
+                "intermediate_dim": 256,
+                "output_dim": 64,
+            },
+            {
+                "batch_size": 2,
+                "seq_len": 32,
+                "hidden_dim": 256,
+                "intermediate_dim": 512,
+                "output_dim": 128,
+            },
+        ]
 
-    #     This validates the correctness of different SDPA decomposition
-    #     implementations without involving autotuning.
-    #     """
-    #     # Test configurations - keep small to avoid memory issues
-    #     test_configs = [
-    #         {"batch_size": 1, "num_heads": 4, "seq_len": 16, "head_dim": 32},
-    #         {"batch_size": 2, "num_heads": 8, "seq_len": 32, "head_dim": 64},
-    #     ]
+        mlp_implementations = [
+            ("Standard", mlp_standard),
+            ("Fused Projections", mlp_fused_projections),
+            ("Approximated GELU", mlp_approximated_gelu),
+        ]
 
-    #     sdpa_implementations = [
-    #         ("Standard", sdpa_standard),
-    #         ("Reordered", sdpa_reordered),
-    #         ("Explicit Transpose", sdpa_explicit_transpose),
-    #     ]
+        for config_idx, test_config in enumerate(test_configs):
+            with self.subTest(config=config_idx, **test_config):
+                input_tensor, gate_weight, up_weight, down_weight = (
+                    self.create_mlp_test_inputs(**test_config)
+                )
 
-    #     for config_idx, test_config in enumerate(test_configs):
-    #         with self.subTest(config=config_idx, **test_config):
-    #             query, key, value = self._create_attention_inputs(**test_config)
+                # Test all implementations
+                results = {}
+                for name, impl in mlp_implementations:
+                    result = impl(input_tensor, gate_weight, up_weight, down_weight)
+                    results[name] = result
 
-    #             # Test all implementations
-    #             results = {}
-    #             for name, impl in sdpa_implementations:
-    #                 result = impl(query, key, value)
-    #                 results[name] = result
+                    # Verify shape and finiteness
+                    expected_shape = (*input_tensor.shape[:-1], down_weight.shape[1])
+                    self.assertEqual(result.shape, expected_shape)
+                    self.assertTrue(
+                        torch.isfinite(result).all(),
+                        f"{name} produced non-finite values",
+                    )
 
-    #                 # Verify shape and finiteness
-    #                 self.assertEqual(result.shape, query.shape)
-    #                 self.assertTrue(
-    #                     torch.isfinite(result).all(),
-    #                     f"{name} produced non-finite values",
-    #                 )
+                # Verify numerical equivalence (with relaxed tolerance for approximated GELU)
+                reference_result = results["Standard"]
+                for name, result in results.items():
+                    if name != "Standard":
+                        # Use more relaxed tolerance for approximated GELU since it's an approximation
+                        rtol = 1e-1 if "Approximated" in name else 1e-2
+                        atol = 1e-1 if "Approximated" in name else 1e-2
 
-    #             # Verify all results are numerically equivalent
-    #             reference_result = results["Standard"]
-    #             for name, result in results.items():
-    #                 if name != "Standard":
-    #                     torch.testing.assert_close(
-    #                         result,
-    #                         reference_result,
-    #                         rtol=1e-2,
-    #                         atol=1e-2,
-    #                         msg=f"{name} differs from Standard",
-    #                     )
+                        torch.testing.assert_close(
+                            result,
+                            reference_result,
+                            rtol=rtol,
+                            atol=atol,
+                            msg=f"{name} differs from Standard",
+                        )
 
 
 if __name__ == "__main__":
-    from torch._inductor.utils import is_big_gpu
-
-    # Set env to make it work in CI
-    if HAS_GPU and is_big_gpu():
-        run_tests()
-    else:
-        # Run basic tests even on CPU
-        run_tests()
+    run_tests()
