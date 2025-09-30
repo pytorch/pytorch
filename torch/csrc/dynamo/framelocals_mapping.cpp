@@ -4,9 +4,6 @@
 #include <torch/csrc/dynamo/cpython_includes.h>
 #include <torch/csrc/dynamo/debug_macros.h>
 
-#include <chrono>
-#include <csignal>
-
 #define Py_BUILD_CORE
 #include <internal/pycore_code.h>
 #undef Py_BUILD_CORE
