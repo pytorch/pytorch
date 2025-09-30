@@ -148,7 +148,7 @@ class TestSqueezeOperator:
         input_names = ["input"]
 
         code = squeeze_op.codegen(output_name, input_names, tensor)
-        expected = "output = torch.squeeze(input)"
+        expected = "output = torch.squeeze(input, next(i for i, s in enumerate(input.shape) if s == 1))"
 
         assert code == expected
 
@@ -160,7 +160,7 @@ class TestSqueezeOperator:
         input_names = ["x"]
 
         code = squeeze_op.codegen(output_name, input_names, scalar)
-        expected = "result = torch.squeeze(x)"
+        expected = "result = torch.squeeze(x, next(i for i, s in enumerate(x.shape) if s == 1))"
 
         assert code == expected
 
@@ -172,7 +172,7 @@ class TestSqueezeOperator:
         input_names = ["data"]
 
         code = squeeze_op.codegen(output_name, input_names, tensor)
-        expected = "out = torch.squeeze(data)"
+        expected = "out = torch.squeeze(data, next(i for i, s in enumerate(data.shape) if s == 1))"
 
         assert code == expected
 
@@ -184,7 +184,7 @@ class TestSqueezeOperator:
         input_names = ["original"]
 
         code = squeeze_op.codegen(output_name, input_names, tensor)
-        expected = "squeezed = torch.squeeze(original)"
+        expected = "squeezed = torch.squeeze(original, next(i for i, s in enumerate(original.shape) if s == 1))"
 
         assert code == expected
 
@@ -196,7 +196,7 @@ class TestSqueezeOperator:
         input_names = ["input_data"]
 
         code = squeeze_op.codegen(output_name, input_names, tensor)
-        expected = "tensor_squeezed = torch.squeeze(input_data)"
+        expected = "tensor_squeezed = torch.squeeze(input_data, next(i for i, s in enumerate(input_data.shape) if s == 1))"
 
         assert code == expected
 
@@ -208,7 +208,7 @@ class TestSqueezeOperator:
         input_names = ["input_empty"]
 
         code = squeeze_op.codegen(output_name, input_names, tensor)
-        expected = "empty_tensor = torch.squeeze(input_empty)"
+        expected = "empty_tensor = torch.squeeze(input_empty, next(i for i, s in enumerate(input_empty.shape) if s == 1))"
 
         assert code == expected
 

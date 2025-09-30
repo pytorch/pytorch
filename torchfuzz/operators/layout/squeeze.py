@@ -46,10 +46,6 @@ class SqueezeOperator(Operator):
 
     def codegen(self, output_name, input_names, output_tensor):
         """Generate code for squeeze operation."""
-        # For squeeze, we need to find a dimension of size 1 to remove
-        # The safest approach is to use squeeze() without dimension to remove all size-1 dims
-        # This is more robust than trying to use a specific dimension that might not be valid
-        
-        # Note: This approach removes ALL size-1 dimensions, which might not exactly match
-        # the decomposition, but it's the most robust approach for the fuzzer context
-        return f"{output_name} = torch.squeeze({input_names[0]})"
+        # Always squeeze the first dimension that has size 1
+        # This is predictable and works well with the fuzzer's expectations
+        return f"{output_name} = torch.squeeze({input_names[0]}, next(i for i, s in enumerate({input_names[0]}.shape) if s == 1))"
