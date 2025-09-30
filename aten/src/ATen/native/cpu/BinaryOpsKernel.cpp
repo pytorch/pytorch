@@ -352,7 +352,7 @@ void remainder_kernel(TensorIteratorBase& iter) {
     AT_DISPATCH_INTEGRAL_TYPES(iter.common_dtype(), "remainder_cpu", [&]() {
       cpu_kernel(iter, [](scalar_t a, scalar_t b) -> scalar_t {
         TORCH_CHECK(b != 0, "ZeroDivisionError");
-        // Prevent overflow when computing INT_MIN % -1. For all signed integer types, x % 1 is defined to be 0
+        // Prevent overflow when computing INT_MIN % -1. For all signed integer types, x % (-1) is defined to be 0
         if constexpr (std::is_signed_v<scalar_t>) {
           if (b == scalar_t(-1)) {
             return scalar_t(0);
