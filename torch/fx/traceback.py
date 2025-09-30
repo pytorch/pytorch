@@ -16,6 +16,7 @@ from .node import Node
 log = logging.getLogger(__name__)
 
 __all__ = [
+    "annotate",
     "preserve_node_meta",
     "has_preserved_node_meta",
     "set_stack_trace",
@@ -239,6 +240,62 @@ def set_stack_trace(stack: list[str]):
 
     if should_preserve_node_meta and stack:
         current_meta["stack_trace"] = "".join(stack)
+
+
+@compatibility(is_backward_compatible=False)
+@contextmanager
+def annotate(annotation_dict: dict):
+    """
+    Temporarily adds custom annotations to the current tracing context.
+    The fx_node produced from this tracing context will have the
+    custom annotations in node.metadata["custom"] field.
+
+    This context manager allows you to insert arbitrary metadata into the PT2
+    tracing system by updating the global `current_meta["custom"]` dictionary.
+    The annotations are automatically reverted after the context exits.
+
+    This is intended for advanced users who need to attach additional metadata to the fx nodes
+    (e.g., for debugging, analysis, or external tooling) during export tracing.
+
+    Note:
+        This API is **not backward compatible** and may evolve in future releases.
+
+    Note:
+        This API is not compatible with fx.symbolic_trace or jit.trace. It's intended
+        to be used with PT2 family of tracers, e.g. torch.export and dynamo.
+
+    Args:
+        annotation_dict (dict): A dictionary of custom key-value pairs to inject
+            into the FX trace metadata.
+
+    Example:
+        >>> with annotate({"source": "custom_pass", "tag": 42}):
+        ...     # compute here
+        # After exiting the context, custom annotations are removed.
+    """
+
+    global current_meta
+
+    has_custom = "custom" in current_meta
+    old_custom = {}
+    # cannot use `old_custom = copy.copy(current_meta.get("custom", {}))` here,
+    # as dynamo doesn't support copy.copy()
+    for k, v in current_meta.get("custom", {}).items():
+        old_custom[k] = v  # noqa: PERF403
+
+    try:
+        if not has_custom:
+            current_meta["custom"] = {}
+
+        # Update with all key-value pairs from the input dict
+        current_meta["custom"].update(annotation_dict)
+        yield
+    finally:
+        if has_custom:
+            # Restore the original custom dict
+            current_meta["custom"] = old_custom
+        else:
+            del current_meta["custom"]
 
 
 @compatibility(is_backward_compatible=False)

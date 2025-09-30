@@ -11,8 +11,9 @@ import subprocess
 import sys
 import textwrap
 from typing import (
-    cast, Any, Callable, NamedTuple,
+    cast, Any, NamedTuple,
     Optional, Union, TYPE_CHECKING)
+from collections.abc import Callable
 from collections.abc import Iterator
 
 import torch

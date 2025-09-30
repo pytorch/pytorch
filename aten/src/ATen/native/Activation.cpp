@@ -670,6 +670,8 @@ Tensor rrelu_with_noise_backward(
 }
 
 Tensor rrelu(const Tensor & self, const Scalar& lower, const Scalar& upper, bool training, std::optional<Generator> generator) {
+  TORCH_CHECK(std::isfinite(lower.to<double>()), "rrelu: lower bound must be finite, got ", lower.to<double>());
+  TORCH_CHECK(std::isfinite(upper.to<double>()), "rrelu: upper bound must be finite, got ", upper.to<double>());
   TORCH_CHECK(lower.to<double>() <= upper.to<double>(), "Lower bound should be less than or equal to the upper bound")
   auto noise = at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   return at::rrelu_with_noise(self, noise, lower, upper, training, std::move(generator));

@@ -11,6 +11,8 @@ skip:
     - GPTJForQuestionAnswering
     # Model too big
     - google/gemma-3-4b-it
+    - openai/gpt-oss-20b
+    - mistralai/Mistral-7B-Instruct-v0.3
 
   device:
     cpu:
@@ -19,6 +21,8 @@ skip:
       - google/gemma-3-4b-it
       - openai/whisper-tiny
       - Qwen/Qwen3-0.6B
+      - mistralai/Mistral-7B-Instruct-v0.3
+      - openai/gpt-oss-20b
 
   control_flow:
     - AllenaiLongformerBase
@@ -79,6 +83,8 @@ batch_size:
     google/gemma-3-4b-it: 8
     openai/whisper-tiny: 8
     Qwen/Qwen3-0.6B: 8
+    mistralai/Mistral-7B-Instruct-v0.3: 8
+    openai/gpt-oss-20b: 8
 
 
 tolerance:

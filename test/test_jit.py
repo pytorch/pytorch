@@ -7375,7 +7375,7 @@ a")
                     if "annotate" in li and "dtype" not in option:
                         continue
                     # Skip unsigned tensor initialization for signed values on 3.10
-                    if sys.version_info[:2] >= (3, 10) and "torch.uint8" in option and "-" in li:
+                    if "torch.uint8" in option and "-" in li:
                         continue
                     code = tensor_template.format(list_create=li, tensor_op=op, options=option)
                     scope = {}

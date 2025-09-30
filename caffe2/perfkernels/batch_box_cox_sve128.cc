@@ -114,14 +114,20 @@ inline float32x4_t vexpq_f32(float32x4_t x) {
 
   auto poly = svset_neonq(svundef_f32(), vfmaq_f32(scale, p12345, scale));
 
+  auto pHigh = svcmpgt_f32(svptrue_b8(), svset_neonq(svundef_f32(), x), max_input);
+  auto pLow = svcmplt_f32(svptrue_b8(), svset_neonq(svundef_f32(), x), min_input);
+
+  auto bound = svsel_f32(
+      pHigh,
+      inf,
+      zero);
+
+  auto pCombined = svorr_b_z(svptrue_b8(), pLow, pHigh);
+
   // Handle underflow and overflow.
   poly = svsel_f32(
-      svcmplt_f32(svptrue_b8(), svset_neonq(svundef_f32(), x), min_input),
-      zero,
-      poly);
-  poly = svsel_f32(
-      svcmpgt_f32(svptrue_b8(), svset_neonq(svundef_f32(), x), max_input),
-      inf,
+      pCombined,
+      bound,
       poly);
 
   return svget_neonq(poly);

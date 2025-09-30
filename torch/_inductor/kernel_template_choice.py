@@ -27,11 +27,13 @@ class KernelTemplateChoice:
         self,
         template: Union[KernelTemplate, ExternKernelChoice],
         params: KernelTemplateParams,
+        extra_kwargs: dict[str, Any],
         layout: Layout,
         inputs: KernelInputs,
     ):
         self.template = template
         self.params = params
+        self.extra_kwargs = extra_kwargs
         self.layout = layout
         self.inputs = inputs
         self.annotations: dict[str, Any] = {"ktc": self}
@@ -53,6 +55,7 @@ class KernelTemplateChoice:
             kwargs = self.params.to_kwargs()
             self._choice = self.template.choice_or_none(
                 **kwargs,
+                **self.extra_kwargs,
                 layout=self.layout,
                 input_nodes=self.inputs.nodes(),
             )
@@ -64,6 +67,7 @@ class KernelTemplateChoice:
 def make_ktc_generator(
     template: Union[KernelTemplate, ExternKernelChoice],
     cs: Generator[KernelTemplateParams, None, None],
+    extra_kwargs: dict[str, Any],
     overrides: dict[str, Any],
     layout: Layout,
     inputs: KernelInputs,
@@ -86,10 +90,10 @@ def make_ktc_generator(
         base_kwargs = params.to_kwargs()
         final_kwargs = {**base_kwargs, **overrides}
         final_params = DictKernelTemplateParams(final_kwargs)
-
         yield KernelTemplateChoice(
             template=template,
             params=final_params,
+            extra_kwargs=extra_kwargs,
             layout=layout,
             inputs=inputs,
         )

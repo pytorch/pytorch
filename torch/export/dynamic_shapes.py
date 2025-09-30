@@ -57,6 +57,15 @@ class _DimHintType(Enum):
 
 @dataclasses.dataclass
 class _DimHint:
+    """
+    Internal class for dynamic shape hints.
+    - min and max are optional.
+    - _factory is for UX only, below example:
+        auto_hint = _DimHint.AUTO()  # _factory=True
+        bounded_hint = auto_hint(min=10, max=100)  # Returns new instance with _factory=False
+        bounded_hint(min=5, max=50)  # Will fail, non-factory instance cannot be called
+    """
+
     type: _DimHintType
     min: Optional[int] = None
     max: Optional[int] = None
@@ -81,6 +90,14 @@ class _DimHint:
         assert max is None or max >= 0, "max must be non-negative"
         assert min is None or max is None or min <= max, "min must be <= max"
         return _DimHint(self.type, min=min, max=max, _factory=False)
+
+    def __repr__(self):
+        parts = [self.type.name]
+        if self.min is not None:
+            parts.append(f"min={self.min}")
+        if self.max is not None:
+            parts.append(f"max={self.max}")
+        return f"DimHint({', '.join(parts)})"
 
 
 class Dim:

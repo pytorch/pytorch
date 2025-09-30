@@ -95,6 +95,18 @@ class TestSerialization(TestCase):
         result = _streaming_load(file)
         torch.testing.assert_close(result, state_dict)
 
+    def test_empty_tensor(self) -> None:
+        state_dict = {
+            "empty": torch.zeros(0, 10),
+        }
+
+        file = BytesIO()
+        _streaming_save(state_dict, file)
+        file.seek(0)
+
+        result = _streaming_load(file, weights_only=False)
+        self.assertEqual(result, state_dict)
+
     def test_dtensor(self) -> None:
         dist.init_process_group(
             backend="gloo", rank=0, world_size=1, store=dist.HashStore()

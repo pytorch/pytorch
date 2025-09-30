@@ -219,7 +219,7 @@ def sympy_interp(
                 missing_handler=missing_handler,
             )
             for arg in expr.args
-        ],  # type: ignore[arg-type]
+        ],
         expr,
         index_dtype=index_dtype,
-    )  # type: ignore[arg-type]
+    )

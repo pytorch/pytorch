@@ -1,5 +1,6 @@
 #include <torch/nativert/executor/triton/TritonKernelManager.h>
 
+#include <c10/util/Exception.h>
 #include <c10/util/FbcodeMaps.h>
 #include <c10/util/Logging.h>
 
@@ -28,7 +29,7 @@ void* _dlsym(void* handle, const char* name) {
 
 char* _dlerror() {
 #if defined(_WIN32)
-  throw std::runtime_error("dlerror not supported on Windows");
+  TORCH_CHECK(false, "dlerror not supported on Windows");
 #else
   return dlerror();
 #endif

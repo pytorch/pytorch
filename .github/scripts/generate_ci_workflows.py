@@ -135,7 +135,7 @@ ROCM_SMOKE_WORKFLOWS = [
         build_configs=generate_binary_build_matrix.generate_wheels_matrix(
             OperatingSystem.LINUX,
             arches=["6.4"],
-            python_versions=["3.9"],
+            python_versions=["3.10"],
         ),
         ciflow_config=CIFlowConfig(
             labels={
@@ -155,7 +155,7 @@ LINUX_BINARY_SMOKE_WORKFLOWS = [
         package_type="manywheel",
         build_configs=generate_binary_build_matrix.generate_wheels_matrix(
             OperatingSystem.LINUX,
-            arches=["12.8"],
+            arches=["13.0"],
             python_versions=["3.12"],
         ),
         branches="main",

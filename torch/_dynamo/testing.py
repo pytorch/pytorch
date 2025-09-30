@@ -517,13 +517,6 @@ def skipIfPy312(fn: Callable[_P, _T]) -> Callable[_P, _T]:
     return fn
 
 
-def requiresPy310(fn: Callable[_P, _T]) -> Callable[_P, _T]:
-    if sys.version_info >= (3, 10):
-        return fn
-    else:
-        return unittest.skip("Requires Python 3.10+")(fn)
-
-
 # Controls tests generated in test/inductor/test_torchinductor_dynamic_shapes.py
 # and test/dynamo/test_dynamic_shapes.py
 def expectedFailureDynamic(fn: Callable[_P, _T]) -> Callable[_P, _T]:

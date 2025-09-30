@@ -1317,6 +1317,15 @@ class NamedTupleVariable(TupleVariable):
 
         return super().call_method(tx, name, args, kwargs)
 
+    def getitem_const(self, tx: "InstructionTranslator", arg: VariableTracker):
+        if isinstance(arg, SliceVariable):
+            # slicing a namedtuple produces a tuple
+            return TupleVariable(
+                self.items[arg.as_python_constant()],
+                source=None,
+            )
+        return super().getitem_const(tx, arg)
+
     def var_getattr(self, tx: "InstructionTranslator", name):
         def check_and_create_method():
             method = inspect.getattr_static(self.tuple_cls, name, None)

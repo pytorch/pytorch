@@ -386,6 +386,23 @@ def generate_ttir(
                         triton.runtime.jit.create_specialize_impl(),
                         specialize_extra=backend.get_arg_specialization,
                     )
+            # create_specialize_impl is removed in https://github.com/triton-lang/triton/pull/7771
+            # switch to native_specialize_impl instead
+            elif hasattr(triton.runtime.jit, "native_specialize_impl"):
+                from triton.backends import BaseBackend
+                from triton.runtime.jit import native_specialize_impl
+
+                def _native_specialize_impl(
+                    arg: Any,
+                    is_const: bool = False,
+                    specialize_value: bool = True,
+                    align: bool = True,
+                ) -> Callable:
+                    return native_specialize_impl(
+                        BaseBackend, arg, is_const, specialize_value, align
+                    )
+
+                specialize_impl = _native_specialize_impl
             else:
                 from triton.runtime.jit import specialize_impl as specialize_impl_orig
 

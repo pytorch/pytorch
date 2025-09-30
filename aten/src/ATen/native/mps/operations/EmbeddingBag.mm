@@ -66,11 +66,12 @@ static std::tuple<Tensor, Tensor, Tensor, Tensor> _embedding_bag_mps_impl(
   int64_t num_indices = indices.size(0);
   int64_t num_bags = offsets.size(0);
   if (include_last_offset) {
+    TORCH_CHECK(num_bags >= 1, "include_last_offset: number of offsets should be at least 1");
     num_bags -= 1;
   }
   int64_t feature_size = weight.size(1);
 
-  auto bag_size = at::empty(offsets.sizes(), indices.options());
+  auto bag_size = at::empty({num_bags}, indices.options());
   auto offset2bag = at::empty({indices.size(0)}, indices.options());
   auto output = at::empty({num_bags, feature_size}, weight.options());
 
@@ -94,7 +95,7 @@ static std::tuple<Tensor, Tensor, Tensor, Tensor> _embedding_bag_mps_impl(
   }
 
   bool use_per_sample_weights = per_sample_weights_opt.has_value() && per_sample_weights_opt->defined();
-  params.per_sample_weights_strides = use_per_sample_weights ? per_sample_weights_opt->stride(0) : 0;
+  params.per_sample_weights_stride = use_per_sample_weights ? per_sample_weights_opt->stride(0) : 0;
 
   params.num_indices = num_indices;
   params.num_bags = num_bags;

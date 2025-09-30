@@ -11,13 +11,13 @@ import threading
 import uuid
 import warnings
 from abc import ABC, abstractmethod
-from collections.abc import Generator, Iterable, Iterator, Sequence
+from collections.abc import Callable, Generator, Iterable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum
 from io import UnsupportedOperation
 from pathlib import Path
-from typing import Any, Callable, cast, Final, IO, Optional, Union
+from typing import Any, cast, Final, IO, Optional, Union
 
 # introduced as collections.abc.Buffer in Python 3.12
 from typing_extensions import Buffer

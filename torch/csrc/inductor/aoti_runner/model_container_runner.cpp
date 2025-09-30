@@ -5,23 +5,7 @@
 #include <torch/csrc/inductor/aoti_torch/oss_proxy_executor.h>
 #include <torch/csrc/inductor/aoti_torch/tensor_converter.h>
 
-#ifndef _WIN32
-#include <sys/stat.h>
-#else
-#include <filesystem>
-namespace fs = std::filesystem;
-#endif
-
-namespace {
-bool file_exists(std::string& path) {
-#ifdef _WIN32
-  return fs::exists(path);
-#else
-  struct stat rc{};
-  return lstat(path.c_str(), &rc) == 0;
-#endif
-}
-} // namespace
+#include <c10/util/FileSystem.h>
 
 namespace torch::inductor {
 
@@ -110,7 +94,7 @@ consider rebuild your model with the latest AOTInductor.");
   size_t lastindex = model_so_path.find_last_of('.');
   std::string json_filename = model_so_path.substr(0, lastindex) + ".json";
 
-  if (file_exists(json_filename)) {
+  if (c10::filesystem::exists(json_filename)) {
     proxy_executor_ = std::make_unique<torch::aot_inductor::OSSProxyExecutor>(
         json_filename, device_str == "cpu");
     proxy_executor_handle_ =

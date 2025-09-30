@@ -961,8 +961,9 @@ class TransferEvents {
  public:
   TransferEvents(
       std::vector<std::shared_ptr<Result>>& results,
-      trace_ptr_t& trace)
-      : results_{results} {
+      trace_ptr_t& trace,
+      const ProfilerConfig& config)
+      : results_{results}, config_{config} {
     auto* trace_activities_ptr = trace->get()->activities();
     TORCH_INTERNAL_ASSERT(trace_activities_ptr != nullptr);
     trace_activities_ = *trace_activities_ptr;
@@ -1092,13 +1093,25 @@ class TransferEvents {
   void extractEventsFromTrace() {
     for (const auto* activity : trace_activities_) {
       auto e = toResult(activity);
-      const auto* linked_activity = activity->linkedActivity();
-      if (e && linked_activity) {
-        e->visit(c10::overloaded(
-            [&](ExtraFields<EventType::Kineto>& i) {
-              i.linked_activity_ = toResult(linked_activity);
-            },
-            [](auto&) { TORCH_INTERNAL_ASSERT(false); }));
+      if (e) {
+        if (config_.experimental_config.expose_kineto_event_metadata) {
+          e->visit(c10::overloaded(
+              [&](ExtraFields<EventType::TorchOp>& i) {
+                i.metadata_json_ = activity->metadataJson();
+              },
+              [&](ExtraFields<EventType::Kineto>& i) {
+                i.metadata_json_ = activity->metadataJson();
+              },
+              [](auto&) { return; }));
+        }
+        const auto* linked_activity = activity->linkedActivity();
+        if (linked_activity) {
+          e->visit(c10::overloaded(
+              [&](ExtraFields<EventType::Kineto>& i) {
+                i.linked_activity_ = toResult(linked_activity);
+              },
+              [](auto&) { TORCH_INTERNAL_ASSERT(false); }));
+        }
       }
     }
   }
@@ -1175,6 +1188,7 @@ class TransferEvents {
   static constexpr long long unmatchedIndex = -1;
   static constexpr auto noTID = std::numeric_limits<uint64_t>::max();
   std::reference_wrapper<std::vector<std::shared_ptr<Result>>> results_;
+  const ProfilerConfig& config_;
   std::vector<const itrace_t*> trace_activities_;
   ska::flat_hash_map<const itrace_t*, std::shared_ptr<Result>> kineto_events_;
 };
@@ -1201,7 +1215,7 @@ trace_ptr_t addKinetoEvents(
 
   auto trace = std::make_unique<ActivityTraceWrapper>(stopTrace());
   TORCH_INTERNAL_ASSERT(trace || !kKinetoAvailable);
-  TransferEvents transfer{results, trace};
+  TransferEvents transfer{results, trace, config};
   return trace;
 }
 

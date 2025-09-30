@@ -86,9 +86,9 @@
      reset_peak_memory_stats
 ```
 
-<!-- This module needs to be documented. Adding here in the meantime
-for tracking purposes -->
 ```{eval-rst}
-.. py:module:: torch.xpu.random
-.. py:module:: torch.xpu.streams
+.. toctree::
+    :hidden:
+
+    xpu.aliases.md
 ```

@@ -46,7 +46,6 @@
 #include <fmt/format.h>
 #include <pybind11/chrono.h>
 #include <torch/csrc/distributed/c10d/PrefixStore.hpp>
-
 #include <torch/csrc/distributed/c10d/symm_mem/DMAConnectivity.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
 
@@ -66,6 +65,14 @@
 #include <torch/csrc/utils/pybind.h>
 
 #include <torch/custom_class.h>
+
+TORCH_MAKE_PYBIND_ENUM_FASTER(c10d::BuiltinCommHookType)
+TORCH_MAKE_PYBIND_ENUM_FASTER(c10d::DebugLevel)
+TORCH_MAKE_PYBIND_ENUM_FASTER(c10d::ReduceOp::RedOpType)
+TORCH_MAKE_PYBIND_ENUM_FASTER(c10d::ProcessGroup::BackendType)
+TORCH_MAKE_PYBIND_ENUM_FASTER(c10d::OpType)
+TORCH_MAKE_PYBIND_ENUM_FASTER(c10d::WorkResult)
+TORCH_MAKE_PYBIND_ENUM_FASTER(c10d::ErrorType)
 
 namespace {
 
