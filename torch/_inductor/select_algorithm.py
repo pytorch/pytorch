@@ -1985,7 +1985,9 @@ class TritonTemplate(KernelTemplate):
 
         # `kernel_input_nodes` are the actual inputs that will be passed to the kernel,
         # so e.g. views of the same input are not included. `codegen_input_nodes`
-        # includes views of inputs to preserve the kernel semantics
+        # includes views of inputs to preserve the kernel semantics. The shape and
+        # strides of `codegen_input_nodes` will be used to infer read/writes in
+        # TemplateBuffer.extract_read_writes
         kernel_input_nodes = tuple(
             [V.graph.get_buffer(k) for k in result.input_call_args]
         )
