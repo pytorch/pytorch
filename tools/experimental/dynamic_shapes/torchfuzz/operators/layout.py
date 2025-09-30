@@ -300,9 +300,7 @@ class SqueezeOperator(LayoutOperatorBase):
 
         return [
             TensorSpec(
-                size=tuple(input_size),
-                stride=input_stride,
-                dtype=output_spec.dtype
+                size=tuple(input_size), stride=input_stride, dtype=output_spec.dtype
             )
         ]
 
@@ -358,7 +356,9 @@ class UnsqueezeOperator(LayoutOperatorBase):
             input_size.pop(singleton_idx)
         else:
             # This shouldn't happen given our can_produce constraint
-            raise ValueError("UnsqueezeOperator requires output to have at least one singleton dimension")
+            raise ValueError(
+                "UnsqueezeOperator requires output to have at least one singleton dimension"
+            )
 
         # Handle empty input (scalar case)
         if not input_size:
@@ -375,9 +375,7 @@ class UnsqueezeOperator(LayoutOperatorBase):
             input_stride = tuple()  # Scalar has empty stride
 
         return [
-            TensorSpec(
-                size=input_size, stride=input_stride, dtype=output_spec.dtype
-            )
+            TensorSpec(size=input_size, stride=input_stride, dtype=output_spec.dtype)
         ]
 
     def codegen(
