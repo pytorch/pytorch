@@ -715,6 +715,7 @@ def check_shape(
     buffer: IndentedBuffer, var: CSEVariableType, shape: BlockShapeType
 ) -> None:
     backend = get_current_backend()
+    assert shape is not None
     if config.test_configs.runtime_triton_dtype_assert and backend == "triton":
         shape_str = (
             ", ".join(str(d) for d in shape) if len(shape) != 1 else f"{shape[0]},"
