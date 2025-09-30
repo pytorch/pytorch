@@ -765,8 +765,8 @@ auto ${inp_name}_t = (${inp_name}_t_raw.defined() || !${inp_name}_tensor.defined
 
 FW_DERIVATIVE_ADD_WRAPPED_NUM_TEMPLATE = CodeTemplate(
     """\
-if (${inp}.unsafeGetTensorImpl()->is_wrapped_number() && !${inp}_t.unsafeGetTensorImpl()->is_wrapped_number()) {
-  ${inp}_t.unsafeGetTensorImpl()->set_wrapped_number(true);
+if (${inp}.unsafeGetTensorImpl()->is_wrapped_number() && !${inp}_t.unsafeGetTensorImpl()->was_wrapped_number()) {
+  ${inp}_t.unsafeGetTensorImpl()->set_was_wrapped_number(true);
 }
 """
 )
