@@ -7,16 +7,16 @@
 
 #include <torch/csrc/cuda/CUDAPluggableAllocator.h>
 
-std::unordered_map<void*, ssize_t> allocation_sizes;
+std::unordered_map<void*, size_t> allocation_sizes;
 
-void* logging_malloc(ssize_t size, int device, cudaStream_t stream) {
+void* logging_malloc(size_t size, int device, cudaStream_t stream) {
     void* ptr;
     cudaMalloc(&ptr, size);
     allocation_sizes[ptr] = size;
     return ptr;
 }
 
-void logging_free(void* ptr, ssize_t size, int device, cudaStream_t stream) {
+void logging_free(void* ptr, size_t size, int device, cudaStream_t stream) {
     if (allocation_sizes.find(ptr) != allocation_sizes.end()) {
         if (allocation_sizes[ptr] != size) {
           throw std::runtime_error("free mismatch");
