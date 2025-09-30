@@ -1,5 +1,4 @@
 #include <ATen/core/PythonFallbackKernel.h>
-#include <ATen/core/PythonOpRegistrationTrampoline.h>
 #include <torch/csrc/PyInterpreter.h>
 #include <torch/csrc/THP.h>
 #include <torch/csrc/autograd/generated/VariableType.h>
