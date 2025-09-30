@@ -1946,7 +1946,7 @@ def _convert_element_type_meta(a: TensorLikeType, dtype: torch.dtype) -> TensorL
     assert isinstance(dtype, torch.dtype)
 
     # dtype conversion preserves dense strides
-    if torch._prims_common.is_non_overlapping_and_dense(a):
+    if torch._prims_common.is_non_overlapping_and_dense_or_false(a):
         strides = a.stride()
     else:
         strides = utils.compute_elementwise_output_strides(a)
