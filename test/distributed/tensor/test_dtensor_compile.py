@@ -401,11 +401,12 @@ def forward(self, b_parametrizations_buffer_original0, x):
 
         def run(func, *shape):
             res = func(inp(*shape))
-            res.to_local().sum().backward()
+            res.sum().backward()
 
         @torch.compile(backend=cnt, fullgraph=True)
         def f(x):
-            return x * x
+            y = x * x
+            return y.to_local()
 
         run(f, 4, 4)
         run(f, 6, 8)
@@ -416,9 +417,10 @@ def forward(self, b_parametrizations_buffer_original0, x):
         @torch.compile(backend=cnt, fullgraph=True)
         def g(x):
             if x.size(0) <= 16:
-                return x * x
+                y = x * x
             else:
-                return x + x
+                y = x + x
+            return y.to_local()
 
         cnt.clear()
         run(g, 4, 4)
