@@ -151,13 +151,11 @@ class GreenContext {
   }
 
   // Get the underlying green context
-  CUgreenCtx getGreenContext() const {
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 12080 && !defined(USE_ROCM)
+  CUgreenCtx getGreenContext() const {
     return green_ctx_;
-#else
-    TORCH_CHECK(false, "Green Context is only supported on CUDA 12.8+!");
-#endif
   }
+#endif
 
   // Make this context current
   void makeCurrent() {

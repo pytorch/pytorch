@@ -1845,6 +1845,7 @@ __all__ = [
     "ExternalStream",
     "Stream",
     "StreamContext",
+    "GreenContext",
     "amp",
     "caching_allocator_alloc",
     "caching_allocator_delete",
