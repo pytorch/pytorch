@@ -56,7 +56,6 @@
 #include <torch/csrc/Stream.h>
 #include <torch/csrc/THP.h>
 #include <torch/csrc/TypeInfo.h>
-#include <torch/csrc/acc/Module.h>
 #include <torch/csrc/api/include/torch/python/init.h>
 #include <torch/csrc/autograd/generated/python_return_types.h>
 #include <torch/csrc/autograd/python_cpp_function.h>
@@ -2098,7 +2097,6 @@ PyObject* initModule() {
   torch::cpu::initModule(module);
   torch::accelerator::initModule(module);
   torch::instruction_counter::initModule(module);
-  torch::acc::initModule(module);
   torch::initVerboseBindings(module);
   ASSERT_TRUE(THPStorage_init(module));
   torch::functionalization::initModule(module);

@@ -284,7 +284,6 @@ RUN_PARALLEL_BLOCKLIST = [
     # temporarily sets a global config
     "test_autograd_fallback",
     "inductor/test_compiler_bisector",
-    "test_privateuseone_python_backend",
 ] + FSDP_TEST
 
 # Test files that should always be run serially with other test files,

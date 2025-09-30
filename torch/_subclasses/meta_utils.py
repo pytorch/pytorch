@@ -887,15 +887,13 @@ class MetaConverter(Generic[_TensorT]):
                 f"__meta_utils_unknown_tensor{len(self.tensor_memo)}"
             )
 
-        msg = (
-            " This indicates you set no_dispatch() before calling into this"
-            " function.  This is an error: we may be creating fake tensors and"
-            " will perform operations on them which need fake tensor mode to"
-            " be active.  You will segfault if you are in a no_dispatch() block."
-        )
+        # This indicates you set no_dispatch() before calling into this
+        # function.  This is an error: we may be creating fake tensors and
+        # will perform operations on them which need fake tensor mode to
+        # be active.  You will segfault if you are in a no_dispatch() block.
         assert not torch._C._dispatch_tls_local_exclude_set().has(
             torch._C.DispatchKey.Python
-        ), msg
+        )
         self.arg_cnt += 1
 
         # When we make as_strided calls, we end up generating a guard
