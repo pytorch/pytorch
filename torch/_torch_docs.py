@@ -3135,7 +3135,7 @@ add_docstr(
     r"""
 cos(input, *, out=None) -> Tensor
 
-Returns a new tensor with the cosine of the elements in the :attr:`input` tensor where each value in this input tensor is in radians.
+Returns a new tensor with the cosine of the elements of :attr:`input` given in radians.
 
 .. math::
     \text{out}_{i} = \cos(\text{input}_{i})
