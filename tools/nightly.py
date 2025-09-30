@@ -258,7 +258,7 @@ class Venv:
         if not base_executable.is_absolute():
             base_exec = shutil.which(str(base_executable))
             if base_exec is None:
-                raise RuntimeError(f"Could not find Python executable {base_exec}")
+                raise RuntimeError(f"Could not find Python executable {base_executable}")
             base_executable = Path(base_exec)
 
         self.prefix = Path(prefix).absolute()
