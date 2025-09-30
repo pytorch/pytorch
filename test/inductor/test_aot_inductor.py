@@ -4041,7 +4041,7 @@ class AOTInductorTestsTemplate:
         expected_original_fqns = {
             "L__self___test_param": "test_param",
             "L__self___test_buf": "test_buf",
-            "getattr_L__self___foo_bar___0__": "foo_bar.0",
+            "L__self___foo_bar_0": "foo_bar.0",
             "L__self___foo_bar_test_param": "foo_bar.test_param",
             "L__self___foo_bar_test_buf": "foo_bar.test_buf",
         }
@@ -4052,7 +4052,7 @@ class AOTInductorTestsTemplate:
         expected_dtypes = {
             "L__self___test_param": 6,
             "L__self___test_buf": 6,
-            "getattr_L__self___foo_bar___0__": 6,
+            "L__self___foo_bar_0": 6,
             "L__self___foo_bar_test_param": 6,
             "L__self___foo_bar_test_buf": 6,
         }

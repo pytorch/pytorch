@@ -3,8 +3,8 @@
 import functools
 import itertools
 import operator
-from collections.abc import Iterable, Sequence
-from typing import Callable, cast, Optional, TypeVar, Union
+from collections.abc import Callable, Iterable, Sequence
+from typing import cast, Optional, TypeVar, Union
 from typing_extensions import ParamSpec
 
 import torch
