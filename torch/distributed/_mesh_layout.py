@@ -211,3 +211,35 @@ class _MeshLayout(Layout):
             [offset + rank for rank in self.all_ranks_from_zero()]
             for offset in self.complement(world_size).all_ranks_from_zero()
         ]
+
+    def check_non_overlap(self) -> bool:
+        """
+        Check if the layout has any overlap between the ranks it generates. If there is overlap,
+        we return False, otherwise True.
+
+        The layout is supposed to be injective i.e, aside from indice 0, indices from each
+        dim of the layout must be non-overlapping.
+
+        Example 1 - Valid (no overlap):
+        Layout: sizes=(2,3), strides=(6,1)
+        - Dim 1: stride=1, span=3*1=3, covers indices [0,1,2]
+        - Dim 0: stride=6, span=2*6=12, covers indices [0,6]
+        → No overlap since 6 > 3
+
+        Example 2 - Invalid (overlap):
+        Layout: sizes=(2,3), strides=(2,1)
+        - Dim 1: stride=1, span=3*1=3, covers indices [0,1,2]
+        - Dim 0: stride=2, span=2*2=4, covers indices [0,2]
+        → Overlap! stride=2 < span=3, so indices [0,2] are duplicated
+
+        Example 3 - Invalid (overlap):
+        Layout: sizes=(4,2), strides=(1,1)
+        - Dim 1: stride=1, span=4, covers indices [0,1,2,3]
+        - Dim 0: stride=1, span=2, covers indices [0,1]
+        → Overlap! stride is same for two dims, so indices [0,2] are duplicated
+
+        Returns:
+            bool: True if no overlap, False if overlap detected
+        """
+        ranks = self.all_ranks_from_zero()
+        return len(ranks) == len(set(ranks))
