@@ -1007,6 +1007,7 @@ libtorch_python_core_sources = [
     "torch/csrc/utils/tensor_new.cpp",
     "torch/csrc/utils/tensor_numpy.cpp",
     "torch/csrc/utils/tensor_types.cpp",
+    "torch/csrc/utils/tensor_weakref.cpp",
     "torch/csrc/utils/disable_torch_function.cpp",
     "torch/csrc/utils/verbose.cpp",
     "torch/csrc/cpu/Module.cpp",

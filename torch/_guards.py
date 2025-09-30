@@ -26,6 +26,7 @@ from typing import (
 )
 
 import torch
+from torch._C import TensorImplWeakRef
 from torch.utils import _pytree as pytree
 from torch.utils._backport_slots import dataclass_slots
 from torch.utils._traceback import CapturedTraceback, format_frame
@@ -329,7 +330,7 @@ class Guard:
             obj_weakref = weakref.ref(obj)
             str(obj_weakref)  # raise error: KeyError: '__name__'
         """
-        if isinstance(obj_weakref, weakref.ReferenceType):
+        if isinstance(obj_weakref, (weakref.ReferenceType, TensorImplWeakRef)):
             obj = obj_weakref()
             if obj is not None:
                 return f"<weakref at {hex(id(obj_weakref))}; to '{obj.__class__.__name__}' at {hex(id(obj))}>"

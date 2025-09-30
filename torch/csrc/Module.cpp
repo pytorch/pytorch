@@ -102,6 +102,7 @@
 #include <torch/csrc/utils/tensor_new.h>
 #include <torch/csrc/utils/tensor_numpy.h>
 #include <torch/csrc/utils/tensor_qschemes.h>
+#include <torch/csrc/utils/tensor_weakref.h>
 #include <torch/csrc/utils/verbose.h>
 
 #include <ATen/native/transformers/sdp_utils_cpp.h>
@@ -2036,6 +2037,8 @@ PyObject* initModule() {
   ASSERT_TRUE(THPVariable_initModule(module));
   ASSERT_TRUE(THPFunction_initModule(module));
   ASSERT_TRUE(THPEngine_initModule(module));
+  ASSERT_TRUE(TensorImplWeakRef_init(module));
+
   // NOTE: We need to be able to access OperatorExportTypes from ONNX for use in
   // the export side of JIT, so this ONNX init needs to appear before the JIT
   // init.
