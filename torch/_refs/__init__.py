@@ -3613,7 +3613,7 @@ def istft(
             n_fft // 2 + 1 == fft_size,
             lambda: (
                 "istft expected the frequency dimension (3rd to the last) of the input tensor "
-                + "to match n_fft / 2 + 1 when onesided=True, but got {fft_size}"
+                + f"to match n_fft / 2 + 1 when onesided=True, but got {fft_size}"
             ),
         )
     else:
@@ -3621,7 +3621,7 @@ def istft(
             n_fft == fft_size,
             lambda: (
                 "istft expected the frequency dimension (3rd to the last) of the input tensor "
-                + "to match n_fft when onesided=False, but got {fft_size}",
+                + f"to match n_fft when onesided=False, but got {fft_size}",
             ),
         )
 
