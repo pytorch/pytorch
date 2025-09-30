@@ -341,21 +341,26 @@ class UnsqueezeOperator(LayoutOperatorBase):
         if not isinstance(output_spec, TensorSpec):
             raise ValueError("UnsqueezeOperator can only produce TensorSpec outputs")
 
-        # Remove one singleton dimension from output to create input
+        # Remove the LAST singleton dimension from output to create input
+        # This ensures our codegen logic (which adds at the end) is consistent
         input_size = list(output_spec.size)
 
-        # Find and remove a singleton dimension
-        singleton_indices = [i for i, dim in enumerate(input_size) if dim == 1]
-        if singleton_indices:
-            # Remove one singleton dimension
-            idx_to_remove = random.choice(singleton_indices)
-            input_size.pop(idx_to_remove)
+        # Find the last singleton dimension and remove it
+        last_singleton_idx = None
+        for i in range(len(input_size) - 1, -1, -1):
+            if input_size[i] == 1:
+                last_singleton_idx = i
+                break
+
+        if last_singleton_idx is not None:
+            # Remove the last singleton dimension
+            input_size.pop(last_singleton_idx)
 
         # If no singleton dimensions exist or input becomes empty, create a simpler input
         if not input_size:
             input_size = [dim for dim in output_spec.size if dim != 1]
             if not input_size:  # All dims were 1
-                input_size = [1]  # Keep at least one dim
+                input_size = [2]  # Create a non-singleton input
 
         # Create input tensor spec
         from torchfuzz.tensor_fuzzer import fuzz_valid_stride
@@ -375,13 +380,17 @@ class UnsqueezeOperator(LayoutOperatorBase):
         if not isinstance(output_spec, TensorSpec):
             raise ValueError("UnsqueezeOperator can only produce TensorSpec outputs")
 
-        # Find where the singleton dimension appears in the output
-        singleton_indices = [i for i, dim in enumerate(output_spec.size) if dim == 1]
-        if singleton_indices:
-            # Use the first singleton dimension position
-            dim = singleton_indices[0]
+        # Find the last singleton dimension position (matching fuzz_inputs_specs logic)
+        last_singleton_idx = None
+        for i in range(len(output_spec.size) - 1, -1, -1):
+            if output_spec.size[i] == 1:
+                last_singleton_idx = i
+                break
+
+        if last_singleton_idx is not None:
+            dim = last_singleton_idx
         else:
-            # Fallback: add at the end (this shouldn't happen given our can_produce constraint)
+            # Fallback: add at the end (shouldn't happen given our can_produce constraint)
             dim = len(output_spec.size) - 1
 
         return f"{output_name} = torch.unsqueeze({input_names[0]}, dim={dim})"
