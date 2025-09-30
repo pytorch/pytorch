@@ -25,10 +25,6 @@
 #define NCCL_HAS_COMM_NONBLOCKING 1
 #endif
 
-#if (NCCL_MAJOR > 2) || (NCCL_MAJOR == 2) && (NCCL_MINOR >= 28)
-#define NCCL_HAS_COMM_NONBLOCKING
-#endif
-
 ncclComm_t* to_nccl_comm(torch::cuda::nccl::ncclComm_t* var) {
   return reinterpret_cast<ncclComm_t*>(var);
 }
@@ -1101,7 +1097,7 @@ void gather(
         "root must provide inputs.size()==numranks");
     // Allocate one flat buffer [world_size * count]
     flat = at::empty({numranks * count}, inputs.options());
-    recv_ptr = flat.data_ptr();
+    recv_ptr = flat.mutable_data_ptr();
   }
   auto* recvbuff = reinterpret_cast<char*>(recv_ptr);
   NCCL_CHECK(ncclGather(sendbuff, recvbuff, count, type, root, comm, stream));
@@ -1111,7 +1107,7 @@ void gather(
       outputs[i].copy_(flat.narrow(0, i * count, count));
     }
   }
-#else  
+#else
   NCCL_CHECK(ncclGroupStart());
 
   if (cur_rank == root) {
@@ -1127,11 +1123,11 @@ void gather(
   } else {
     NCCL_CHECK(ncclSend(sendbuff, count, type, root, comm, stream));
   }
+#endif
 #ifndef NCCL_HAS_COMM_NONBLOCKING
   NCCL_CHECK(ncclGroupEnd());
 #else
   NCCL_CHECK_TIMEOUT(ncclGroupEnd(), _comm);
-#endif
 #endif
 
 #else
@@ -1163,7 +1159,7 @@ void scatter(
   NCCL_CHECK_TIMEOUT(ncclCommUserRank(comm, &cur_rank), _comm);
 #endif
 #if ((NCCL_MAJOR > 2) || ((NCCL_MAJOR == 2) && (NCCL_MINOR >= 28)))
-  void* send_ptr = nullptr;
+  const void* send_ptr = nullptr;
   auto type = to_nccl_data_type(outputs);
   int64_t count = outputs.numel();
   at::Tensor flat; // keep alive until after NCCL call
@@ -1189,10 +1185,10 @@ void scatter(
     }
     // Make sure packing copies are visible to NCCL on the same stream
     // (copy_ on the same stream is already ordered; no extra sync needed)
-    send_ptr = flat.data_ptr();
+    send_ptr = flat.const_data_ptr();
   }
   const auto* sendbuff = reinterpret_cast<const char*>(send_ptr);
-  auto* recvbuff = reinterpret_cast<char*>(outputs.data_ptr());
+  auto* recvbuff = reinterpret_cast<char*>(outputs.mutable_data_ptr());
   NCCL_CHECK(ncclScatter(sendbuff, recvbuff, count, type, root, comm, stream));
 #else
   NCCL_CHECK(ncclGroupStart());
@@ -1215,11 +1211,11 @@ void scatter(
     auto* recvbuff = reinterpret_cast<char*>(outputs.data_ptr());
     NCCL_CHECK(ncclRecv(recvbuff, recv_count, recv_type, root, comm, stream));
   }
+#endif
 #ifndef NCCL_HAS_COMM_NONBLOCKING
   NCCL_CHECK(ncclGroupEnd());
 #else
   NCCL_CHECK_TIMEOUT(ncclGroupEnd(), _comm);
-#endif
 #endif
 #else
   TORCH_CHECK(false, "scatter is only supported for NCCL lib version >= 2.7.0");
