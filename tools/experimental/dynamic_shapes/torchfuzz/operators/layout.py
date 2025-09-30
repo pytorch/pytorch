@@ -46,7 +46,7 @@ class ViewOperator(LayoutOperatorBase):
 
         # Generate a compatible input shape with exactly the same number of elements
         input_size = fuzz_tensor_size()
-          
+
         # Directly adjust to match exact element count
         if output_numel == 0:
             # For zero-sized output, create zero-sized input
@@ -57,7 +57,7 @@ class ViewOperator(LayoutOperatorBase):
             prefix_numel = 1
             for dim in input_size[:-1]:
                 prefix_numel *= dim
-              
+
             if prefix_numel > 0:
                 last_dim = output_numel // prefix_numel
                 # Ensure we get exactly output_numel elements
@@ -115,7 +115,7 @@ class ReshapeOperator(LayoutOperatorBase):
 
         # Generate a compatible input shape with exactly the same number of elements
         input_size = fuzz_tensor_size()
-          
+
         # Directly adjust to match exact element count
         if output_numel == 0:
             # For zero-sized output, create zero-sized input
@@ -126,7 +126,7 @@ class ReshapeOperator(LayoutOperatorBase):
             prefix_numel = 1
             for dim in input_size[:-1]:
                 prefix_numel *= dim
-              
+
             if prefix_numel > 0:
                 last_dim = output_numel // prefix_numel
                 # Ensure we get exactly output_numel elements
@@ -210,7 +210,7 @@ class FlattenOperator(LayoutOperatorBase):
                 prefix_numel = 1
                 for dim in input_size[:-1]:
                     prefix_numel *= dim
-                  
+
                 if prefix_numel > 0:
                     last_dim = output_numel // prefix_numel
                     # Ensure we get exactly output_numel elements

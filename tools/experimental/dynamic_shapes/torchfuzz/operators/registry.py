@@ -42,23 +42,25 @@ class OperatorRegistry:
         """Register the default set of operators."""
         # Individual tensor pointwise operators (preferred)
         self.register(AddOperator())
-        # self.register(MulOperator())
-        # self.register(SubOperator())
-        # self.register(DivOperator())
+        self.register(MulOperator())
+        self.register(SubOperator())
+        self.register(DivOperator())
 
         # Individual scalar pointwise operators (preferred)
-        # self.register(ScalarAddOperator())
-        # self.register(ScalarMulOperator())
-        # self.register(ScalarSubOperator())
-        # self.register(ScalarDivOperator())
+        self.register(ScalarAddOperator())
+        self.register(ScalarMulOperator())
+        self.register(ScalarSubOperator())
+        self.register(ScalarDivOperator())
 
-        # self.register(ItemOperator())
-        # self.register(ConstantOperator())
-        # self.register(ArgOperator())
+        # Leaf Input operators
+        self.register(ConstantOperator())
+        self.register(ArgOperator())
+
         # # Data-dependent operators
-        # self.register(NonzeroOperator())
-        # self.register(MaskedSelectOperator())
-        # self.register(UniqueOperator())
+        self.register(NonzeroOperator())
+        self.register(MaskedSelectOperator())
+        self.register(ItemOperator())
+        self.register(UniqueOperator())
 
         # Tensor layout operators
         self.register(ViewOperator())
