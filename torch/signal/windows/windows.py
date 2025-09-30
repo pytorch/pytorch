@@ -406,6 +406,7 @@ def kaiser(
     end = torch.minimum(
         # pyrefly: ignore  # bad-argument-type
         beta,
+        # pyrefly: ignore  # bad-argument-type
         start + (M - 1) * constant,
     )  # pyrefly: ignore  # bad-argument-type
 

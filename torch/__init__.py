@@ -1806,6 +1806,7 @@ def _check_not_implemented(cond, message=None):  # noqa: F811
         # pyrefly: ignore  # bad-argument-type
         NotImplementedError,
         cond,
+        # pyrefly: ignore  # bad-argument-type
         message,
     )  # pyrefly: ignore  # bad-argument-type
 

@@ -1061,6 +1061,7 @@ class Tensor(torch._C.TensorBase):
             return torch._VF.split_with_sizes(
                 # pyrefly: ignore  # bad-argument-type
                 self,
+                # pyrefly: ignore  # bad-argument-type
                 split_size,
                 dim,
             )  # pyrefly: ignore  # bad-argument-type
