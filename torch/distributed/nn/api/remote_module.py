@@ -4,8 +4,8 @@ import collections
 import io
 import sys
 import types
-from collections.abc import Iterator, Mapping
-from typing import Any, Callable, Optional, TypeVar, Union
+from collections.abc import Callable, Iterator, Mapping
+from typing import Any, Optional, TypeVar, Union
 from typing_extensions import Self
 
 import torch
