@@ -515,16 +515,14 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_call_dispatcher(
     const char* overloadName,
     StableIValue* stack);
 
-// Has the same semantic as aoti_torch_call_dispatcher, but takes
-// additional arguments for the extension target and build versions. This is
-// needed for forward/backward compatibility when calling native functions via
-// the dispatcher. The caller should pass in its target version and build
-// version.
+// Has the same semantic as aoti_torch_call_dispatcher, but takes an
+// additional argument for the extension build version. This is
+// needed for backward compatibility when calling native functions via
+// the dispatcher. The caller should pass in its build version (not target version).
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_call_dispatcher_v2(
     const char* opName,
     const char* overloadName,
     StableIValue* stack,
-    uint64_t extension_target_version,
     uint64_t extension_build_version);
 
 // Function to register test schema adapters for _test_schema_upgrader

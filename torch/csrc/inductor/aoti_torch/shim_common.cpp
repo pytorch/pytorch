@@ -95,7 +95,7 @@ bool file_exists(std::string& path) {
 #ifdef _WIN32
   return fs::exists(path);
 #else
-  struct stat rc{};
+  struct stat rc {};
   return lstat(path.c_str(), &rc) == 0;
 #endif
 }
@@ -1697,8 +1697,7 @@ namespace {
 using SchemaAdapterFn = std::function<torch::jit::Stack(
     const c10::FunctionSchema& current_schema,
     const StableIValue* extension_stack,
-    uint64_t extension_build_version,
-    uint64_t extension_target_version)>;
+    uint64_t extension_build_version)>;
 
 // Global registry for schema adapters
 class SchemaAdapterRegistry {
@@ -1783,8 +1782,7 @@ constexpr uint64_t VERSION_V3 = MAKE_VERSION(
 torch::jit::Stack adapt_v1_to_v3(
     const c10::FunctionSchema& current_schema,
     const StableIValue* extension_stack,
-    uint64_t extension_build_version,
-    uint64_t extension_target_version) {
+    uint64_t extension_build_version) {
   TORCH_CHECK(
       extension_build_version < VERSION_V2,
       "adapt_v1_to_v3 should only be called for extensions built with V1");
@@ -1810,8 +1808,7 @@ torch::jit::Stack adapt_v1_to_v3(
 torch::jit::Stack adapt_v2_to_v3(
     const c10::FunctionSchema& current_schema,
     const StableIValue* extension_stack,
-    uint64_t extension_build_version,
-    uint64_t extension_target_version) {
+    uint64_t extension_build_version) {
   TORCH_CHECK(
       extension_build_version >= VERSION_V2 &&
           extension_build_version < VERSION_V3,
@@ -1861,9 +1858,6 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_call_dispatcher_v2(
     const char* opName,
     const char* overloadName,
     StableIValue* stack,
-    // version extension targets: necessary for StableIValue conversions that
-    // deal with header-only types
-    uint64_t extension_target_version,
     // version of stable headers used to build the extension: necessary for
     // applying schema adapters
     uint64_t extension_build_version) {
@@ -1880,8 +1874,7 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_call_dispatcher_v2(
     // Check if we need an adapter for this operation
     if (auto adapter = registry.get_adapter(opName, extension_build_version)) {
       // Use adapter to create IValue stack
-      ivalue_stack = (*adapter)(
-          schema, stack, extension_build_version, extension_target_version);
+      ivalue_stack = (*adapter)(schema, stack, extension_build_version);
     } else {
       // No adapter needed - implementation matches aoti_torch_call_dispatcher
       ivalue_stack.reserve(std::max(num_arguments, num_returns));

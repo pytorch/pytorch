@@ -30,11 +30,7 @@ inline Tensor _test_schema_upgrader_v2_6_0(const Tensor& self) {
   const auto num_args = 1;
   std::array<StableIValue, num_args> stack{from(self)};
   TORCH_ERROR_CODE_CHECK(aoti_torch_call_dispatcher_v2(
-      "aten::_test_schema_upgrader",
-      "",
-      stack.data(),
-      TORCH_VERSION_2_6_0,
-      TORCH_VERSION_2_6_0));
+      "aten::_test_schema_upgrader", "", stack.data(), TORCH_VERSION_2_6_0));
   return to<Tensor>(stack[0]);
 }
 
@@ -48,17 +44,13 @@ inline Tensor _test_schema_upgrader_v2_7_0(
   std::array<StableIValue, num_args> stack{
       from(self), from(a.has_value() ? a.value() : true)};
   TORCH_ERROR_CODE_CHECK(aoti_torch_call_dispatcher_v2(
-      "aten::_test_schema_upgrader",
-      "",
-      stack.data(),
-      TORCH_VERSION_2_7_0,
-      TORCH_VERSION_2_7_0));
+      "aten::_test_schema_upgrader", "", stack.data(), TORCH_VERSION_2_7_0));
   return to<Tensor>(stack[0]);
 }
 
 // Wrapper for _test_schema_upgrader V3 (PyTorch 2.8.0)
-// Schema: _test_schema_upgrader(Tensor self, *, int a=2, bool b=False) -> Tensor
-// Behavior: fills Tensor with a or -a if b is False
+// Schema: _test_schema_upgrader(Tensor self, *, int a=2, bool b=False) ->
+// Tensor Behavior: fills Tensor with a or -a if b is False
 inline Tensor _test_schema_upgrader_v2_8_0(
     const Tensor& self,
     std::optional<int64_t> a = std::nullopt,
@@ -69,11 +61,7 @@ inline Tensor _test_schema_upgrader_v2_8_0(
       from(a.has_value() ? a.value() : true),
       from(b.has_value() ? b.value() : 2)};
   TORCH_ERROR_CODE_CHECK(aoti_torch_call_dispatcher_v2(
-      "aten::_test_schema_upgrader",
-      "",
-      stack.data(),
-      TORCH_VERSION_2_8_0,
-      TORCH_VERSION_2_8_0));
+      "aten::_test_schema_upgrader", "", stack.data(), TORCH_VERSION_2_8_0));
   return to<Tensor>(stack[0]);
 }
 
@@ -89,15 +77,9 @@ inline Tensor _test_schema_upgrader_v2_9_0(
   std::array<StableIValue, num_args> stack{
       from(self),
       from(a.has_value() ? a.value() : true),
-      from(
-          b.has_value() ? b.value()
-                        : 3)};  // default changed from 2 to 3
+      from(b.has_value() ? b.value() : 3)}; // default changed from 2 to 3
   TORCH_ERROR_CODE_CHECK(aoti_torch_call_dispatcher_v2(
-      "aten::_test_schema_upgrader",
-      "",
-      stack.data(),
-      TORCH_VERSION_2_9_0,
-      TORCH_VERSION_2_9_0));
+      "aten::_test_schema_upgrader", "", stack.data(), TORCH_VERSION_2_9_0));
   return to<Tensor>(stack[0]);
 }
 

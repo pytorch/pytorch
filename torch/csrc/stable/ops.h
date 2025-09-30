@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 
+#include <torch/csrc/stable/version.h>
 #include <torch/csrc/inductor/aoti_torch/generated/c_shim_aten.h>
 #include <torch/headeronly/core/ScalarType.h>
 
@@ -24,8 +25,8 @@ inline torch::stable::Tensor empty_like(const torch::stable::Tensor& self) {
       from(std::nullopt),
       from(std::nullopt),
       from(std::nullopt)};
-  TORCH_ERROR_CODE_CHECK(
-      aoti_torch_call_dispatcher("aten::empty_like", "", stack.data()));
+  TORCH_ERROR_CODE_CHECK(aoti_torch_call_dispatcher_v2(
+      "aten::empty_like", "", stack.data(), TORCH_ABI_VERSION));
   return to<torch::stable::Tensor>(stack[0]);
 }
 
@@ -195,8 +196,8 @@ inline torch::stable::Tensor transpose(
     int64_t dim1) {
   const auto num_args = 3;
   std::array<StableIValue, num_args> stack{from(self), from(dim0), from(dim1)};
-  TORCH_ERROR_CODE_CHECK(
-      aoti_torch_call_dispatcher("aten::transpose", "int", stack.data()));
+  TORCH_ERROR_CODE_CHECK(aoti_torch_call_dispatcher_v2(
+      "aten::transpose", "int", stack.data(), TORCH_ABI_VERSION));
   return to<torch::stable::Tensor>(stack[0]);
 }
 
@@ -206,8 +207,8 @@ inline torch::stable::Tensor transpose(
 inline torch::stable::Tensor zero_(torch::stable::Tensor& self) {
   const auto num_args = 1;
   std::array<StableIValue, num_args> stack{from(self)};
-  TORCH_ERROR_CODE_CHECK(
-      aoti_torch_call_dispatcher("aten::zero_", "", stack.data()));
+  TORCH_ERROR_CODE_CHECK(aoti_torch_call_dispatcher_v2(
+      "aten::zero_", "", stack.data(), TORCH_ABI_VERSION));
   return to<torch::stable::Tensor>(stack[0]);
 }
 
@@ -220,8 +221,8 @@ inline Tensor copy_(
   const auto num_args = 3;
   std::array<StableIValue, num_args> stack{
       from(self), from(src), from(non_blocking.value_or(false))};
-  TORCH_ERROR_CODE_CHECK(
-      aoti_torch_call_dispatcher("aten::copy_", "", stack.data()));
+  TORCH_ERROR_CODE_CHECK(aoti_torch_call_dispatcher_v2(
+      "aten::copy_", "", stack.data(), TORCH_ABI_VERSION));
   return to<Tensor>(stack[0]);
 }
 
