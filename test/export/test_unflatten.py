@@ -150,6 +150,9 @@ class TestUnflatten(TestCase):
         inputs = (torch.rand(2, 3),)
         self.compare_outputs(eager_module, unflattened_module, inputs)
 
+    @unittest.skip(
+        "Identity does not work with install_free_tensors - https://github.com/pytorch/pytorch/issues/164062"
+    )
     def test_unflatten_shared_submodule(self):
         class Shared(torch.nn.Module):
             def __init__(self) -> None:
