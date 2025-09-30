@@ -18,7 +18,6 @@ permissions:
   contents: read
 
 jobs:
-  # H100 A100 runners
   opmicrobenchmark-build:
     if: github.repository_owner == 'pytorch'
     name: opmicrobenchmark-build
