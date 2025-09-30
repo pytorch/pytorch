@@ -7198,9 +7198,7 @@ for shape in [(1,), ()]:
             lambda x: x.exp(), x, use_reentrant=False, context_fn=context_fn
         )
         out.backward()
-        self.assertEqual(
-            verbose_mode.operators, ["exp.default", "detach.default"]
-        )
+        self.assertEqual(verbose_mode.operators, ["exp.default", "detach.default"])
 
         with self.assertRaisesRegex(
             Exception, "only supported when use_reentrant=False"

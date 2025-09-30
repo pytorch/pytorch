@@ -3383,6 +3383,7 @@ class BaseHOPVariable(WrapHigherOrderVariable):
             lambda a: a.node.meta["example_value"],
             body_r.as_proxy(),
         )
+
         p_kwargs = {key: value.as_proxy() for key, value in kwargs.items()}
         return _call_function_and_unflatten_output(
             tx, self.value, p_args, p_kwargs, flat_example_value, treespec
@@ -3497,6 +3498,115 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
         )
 
 
+class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
+    supports_input_mutation = False
+    supports_aliasing = False
+
+    # Subclasses aren't supported by speculate_subgraph yet
+    # So this HOP is only usable with plain tensors
+    _enabled = False
+
+    @classmethod
+    @contextlib.contextmanager
+    def enable(cls):
+        """Context manager to temporarily enable local map wrapping.
+        Will be removed when speculate_subgraph supports subclass inputs:
+        https://github.com/pytorch/pytorch/issues/161456.
+
+        Usage:
+            with LocalMapWrappedHigherOrderVariable.enable_wrapping():
+                # Code where should_wrap_in_hop will return True
+                pass
+        """
+        old_value = cls._enabled
+        cls._enabled = True
+        try:
+            yield
+        finally:
+            cls._enabled = old_value
+
+    @classmethod
+    def should_wrap_in_hop(cls, value):
+        if not torch.distributed.is_available():
+            return False
+
+        from torch.distributed.tensor.experimental._func_map import _local_map_wrapped
+
+        # check is important to avoid subclass dispatch
+        if type(value) != type(_local_map_wrapped):
+            return False
+
+        return value == _local_map_wrapped and cls._enabled
+
+    @staticmethod
+    def build(**options):
+        return TorchHigherOrderOperatorVariable.make(
+            torch._higher_order_ops.local_map_hop,
+            **options,
+        )
+
+    def python_type(self):
+        return type(self.value)
+
+    def _call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        """
+        Goal of this function is to rewrite local_map usage as a HOP:
+            local_map(func, ...) -> local_map_hop(gm, ...)
+        """
+
+        (
+            user_func,
+            out_placements,
+            in_placements,
+            in_grad_placements,
+            device_mesh,
+            redistribute_inputs,
+            *user_args,
+        ) = args
+
+        (
+            p_args,
+            p_kwargs,
+            example_value,
+            body_r,
+            treespec,
+            body_gmod,
+            body_name,
+        ) = self.create_wrapped_node(
+            tx, user_func, user_args, kwargs, self.value._name, subgraph_name="subgraph"
+        )
+
+        # Treat as const, so we don't have to deal with Placement types in fx IR
+        # Guarded with EQUALS_MATCH on local_map call's arguments
+        body_gmod.meta["local_map_kwargs"] = {
+            "out_placements": out_placements.value,
+            "in_placements": in_placements.value,
+            "redistribute_inputs": redistribute_inputs.value,
+            "in_grad_placements": in_grad_placements.value,
+            "device_mesh": device_mesh.value,
+        }
+
+        assert len(p_kwargs) == 0
+
+        flat_example_value = pytree.tree_map_only(
+            torch.fx.Proxy,
+            lambda a: a.node.meta["example_value"],
+            body_r.as_proxy(),
+        )
+
+        p_kwargs = {key: value.as_proxy() for key, value in kwargs.items()}
+        out = _call_function_and_unflatten_output(
+            tx, self.value, p_args, p_kwargs, flat_example_value, treespec
+        )
+
+        return out
+
+
 # Map operator names to their corresponding variable for fast TorchHigherOrderOperatorVariable.make()
 _hop_name_to_variable_class = {
     "cond": CondHigherOrderVariable,
@@ -3525,4 +3635,5 @@ _hop_name_to_variable_class = {
     "auto_functionalized_v2": AutoFunctionalizeHigherOrderVariable,
     "invoke_subgraph": InvokeSubgraphHigherOrderVariable,
     "custom_function_call": CustomFunctionHigherOrderOperatorVariable,
+    "local_map_hop": LocalMapWrappedHigherOrderVariable,
 }

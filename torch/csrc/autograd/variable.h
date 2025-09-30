@@ -837,14 +837,11 @@ inline Variable make_variable_non_differentiable_view(
     const at::Tensor& data,
     bool allow_tensor_metadata_change = true) {
   if (data.defined()) {
-    // Currently all of non-differentiable view ops(detach/_indices/_values)
-    // share the same TensorImpl as their base Tensor. Thus a new TensorImpl
-    // allocation here is required.
-    auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach(
-        /*version_counter=*/impl::version_counter(base),
-        /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
-    data_impl_copy->set_autograd_meta(nullptr);
-    return Variable(data_impl_copy);
+    // Currently all of non-differentiable view ops (just detach)
+    // redispatch first, so they should have already allocated a new
+    // TensorImpl. No need to shallow_copy_and_detach here.
+    data.unsafeGetTensorImpl()->set_autograd_meta(nullptr);
+    return data;
   }
   return Variable();
 }

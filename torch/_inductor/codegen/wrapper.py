@@ -40,7 +40,6 @@ from torch.utils._sympy.symbol import symbol_is_type, SymT
 
 from .. import async_compile, config, ir
 from ..codecache import output_code_log
-from ..debug import set_kernel_post_grad_provenance_tracing
 from ..ir import IRNode, ReinterpretView
 from ..runtime import triton_heuristics
 from ..runtime.hints import DeviceProperties
@@ -391,6 +390,19 @@ class EnterSubgraphLine(WrapperLine):
 
 
 @dataclasses.dataclass
+class ConditionalLine(WrapperLine):
+    wrapper: PythonWrapperCodegen
+    node: ir.Conditional
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        raise NotImplementedError("Only supports FX codegen")
+
+    @staticmethod
+    def codegen_fx(converter: FxConverter) -> FxConversionFunc:
+        return converter._generate_conditional
+
+
+@dataclasses.dataclass
 class CommentLine(WrapperLine):
     line: LineContext
 
@@ -496,19 +508,12 @@ class ExternKernelOutLine(WrapperLine):
         else:
             kernel_name = node.get_kernel_name()
         device = d.type if (d := node.get_device()) else V.graph.device_type
-        provenance_debug_handle: Optional[int] = None
-        # set provenance tracing kernel mapping for ExternKernel types
-        if config.trace.provenance_tracking_level != 0:
-            provenance_debug_handle = set_kernel_post_grad_provenance_tracing(
-                node, kernel_name, is_extern=True
-            )
         self.wrapper._generate_extern_kernel_out_helper(
             kernel_name,
             node.codegen_reference(),
             node.output_view.codegen_reference() if node.output_view else None,
             args,
             device,
-            provenance_debug_handle,
         )
 
     def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
@@ -1503,13 +1508,11 @@ class PythonWrapperCodegen(CodeGen):
         out_view: Optional[str],
         args: list[str],
         device: str,
-        debug_handle: Optional[int] = None,
     ) -> None:
         # add debug printer code for triton kernel calls at (jit) inductor level
         debug_printer_manager = V.graph.wrapper_code.debug_printer
         debug_printer_manager.set_printer_args(args, kernel, None, None, "extern")
         args.append(f"out={out_view if out_view else out}")
-        self.write_provenance_debug_handle(kernel, debug_handle)
         with debug_printer_manager:
             self.writeline(f"{kernel}({', '.join(args)})")
 
@@ -2142,6 +2145,10 @@ class PythonWrapperCodegen(CodeGen):
     def _format_kernel_definition(
         kernel_name: str, kernel_body: str, metadata: Optional[str] = None
     ):
+        if config.triton.autotune_at_compile_time and metadata:
+            # Generating autotune block
+            # Need to replace C++ comment starter with Python comment starter
+            metadata = re.sub(r"^// ", "# ", metadata, flags=re.MULTILINE)
         metadata_comment = f"{metadata}\n" if metadata else ""
         body = f"\n\n{metadata_comment}{kernel_name} = {kernel_body}"
         return body
@@ -2155,9 +2162,8 @@ class PythonWrapperCodegen(CodeGen):
         cpp_definition: Optional[str] = None,
     ):
         if config.triton.autotune_at_compile_time:
-            # Skip inserting comments for the autotune block as they may contain cpp style comments
             body = self._format_kernel_definition(
-                kernel_name, kernel_body, metadata=None
+                kernel_name, kernel_body, metadata=metadata
             )
             self.kernel_autotune_defs.splice(body)
             if V.graph.cpp_wrapper:
@@ -2169,8 +2175,8 @@ class PythonWrapperCodegen(CodeGen):
         )
         self.header.splice(body)
 
-    def define_subgraph_launcher_fn(self, fn_code: str):
-        self.subgraph_definitions.splice(fn_code)
+    def define_subgraph_launcher_fn(self, name: str, subgraph_code):
+        self.subgraph_definitions.splice(subgraph_code.value)
 
     def define_user_defined_triton_kernel(
         self,
@@ -2680,7 +2686,6 @@ class PythonWrapperCodegen(CodeGen):
         raw_args=None,
         triton_meta=None,
         original_fxnode_name=None,
-        debug_handle: Optional[int] = None,
     ):
         """
         Generates kernel call code.
@@ -2700,7 +2705,6 @@ class PythonWrapperCodegen(CodeGen):
         )
 
         device = device or V.graph.get_current_device_or_throw()
-        self.write_provenance_debug_handle(kernel_name, debug_handle)
         self.writeline(
             KernelCallLine(
                 self,
@@ -3362,11 +3366,12 @@ class PythonWrapperCodegen(CodeGen):
 
     def codegen_subgraph_common(self, subgraph):
         self.push_codegened_graph(subgraph.graph)
-        self.writeline("")
-        self.writeline(f"{self.comment} subgraph: {subgraph.name}")
+        self.make_comment("")
+        self.make_comment(f"{self.comment} subgraph: {subgraph.name}")
 
         parent_graph = V.graph
         subgraph.graph.cpp_wrapper = parent_graph.cpp_wrapper
+        subgraph.graph.fx_wrapper = parent_graph.fx_wrapper
 
         if subgraph.graph.name not in self.already_codegened_subgraphs:
             # If it is already codegened, the parent wrapper already has
@@ -3376,8 +3381,9 @@ class PythonWrapperCodegen(CodeGen):
                 with config.patch("graph_partition", False):
                     # Call the codegen of subgraph recursively
                     subgraph_code, _ = subgraph.graph.codegen()
-            self.already_codegened_subgraphs.add(subgraph.graph.name)
-            self.define_subgraph_launcher_fn(subgraph_code.value)
+            subgraph_name = subgraph.graph.name
+            self.already_codegened_subgraphs.add(subgraph_name)
+            self.define_subgraph_launcher_fn(subgraph_name, subgraph_code)
 
     def codegen_subgraph_with_flattened_outputs(
         self, subgraph, outer_inputs, outer_flattened_outputs
@@ -3409,7 +3415,7 @@ class PythonWrapperCodegen(CodeGen):
         else:
             self.codegen_subgraph(invoke_subgraph.subgraph, outer_inputs, name)
 
-    def codegen_conditional(self, conditional):
+    def codegen_conditional(self, conditional) -> None:
         name = conditional.get_name()
 
         outer_inputs = [buf.codegen_reference() for buf in conditional.operands]
@@ -3644,7 +3650,7 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
 
     def get_graph_inputs(
         self,
-    ) -> dict[str, Union[ir.TensorBox, ir.TorchBindObject, sympy.Expr]]:
+    ) -> dict[str, Union[ir.TensorBox, ir.TorchBindObject, sympy.Expr, None]]:
         if signature := self.partition_signatures:
             inputs = signature.input_nodes | {
                 str(s): s for s in signature.symbol_inputs
