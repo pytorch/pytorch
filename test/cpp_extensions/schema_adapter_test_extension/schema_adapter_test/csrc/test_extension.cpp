@@ -1,6 +1,4 @@
-#include <ATen/core/function_schema.h>
 #include <pybind11/pybind11.h>
-#include <torch/csrc/inductor/aoti_torch/c/private_utils.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/stable/library.h>
@@ -9,7 +7,11 @@
 #include <torch/csrc/stable/tensor.h>
 #include <torch/extension.h>
 
-// Simulate version constants since we can't change TORCH_ABI_VERSION
+// Simulate version constants for _test_schema_upgrader evolution
+constexpr uint64_t TORCH_VERSION_2_6_0 =
+    ((uint64_t)2 << 56) | ((uint64_t)6 << 48);
+constexpr uint64_t TORCH_VERSION_2_7_0 =
+    ((uint64_t)2 << 56) | ((uint64_t)7 << 48);
 constexpr uint64_t TORCH_VERSION_2_8_0 =
     ((uint64_t)2 << 56) | ((uint64_t)8 << 48);
 constexpr uint64_t TORCH_VERSION_2_9_0 =
@@ -17,120 +19,158 @@ constexpr uint64_t TORCH_VERSION_2_9_0 =
 
 using torch::stable::Tensor;
 
-// Dummy operation implementation
-// We pretend we had
-// V1: dummy_op(Tensor input) -> Tensor
-// V2: dummy_op(Tensor input, int a = 2) -> Tensor  (added defaulted kwarg a
-// in 2.9.0) V1 fills tensor with 2, V2 fills tensor with the value of 'a'
-Tensor dummy_op_v2_impl(const Tensor& input, int64_t a) {
-  Tensor result = torch::stable::empty_like(input);
-  torch::stable::fill_(result, static_cast<double>(a));
-  return result;
-}
+// Wrapper functions for _test_schema_upgrader (from
+// test_schema_upgrader_wrappers.h)
+namespace torch::stable {
 
-// Adapter to read stack of v1 op
-// Schema adapter for our dummy operation
-// V1: dummy_op(Tensor input) -> Tensor
-// V2: dummy_op(Tensor input, int a = 2) -> Tensor  (added defaulted kwarg a
-// in 2.9.0)
-torch::jit::Stack adapt_dummy_op_v1_to_v2(
-    const c10::FunctionSchema& current_schema,
-    const StableIValue* extension_stack,
-    uint64_t extension_abi_version) {
-  TORCH_CHECK(
-      extension_abi_version < TORCH_VERSION_2_9_0,
-      "Schema adapter adapt_dummy_op_v1_to_v2 should only be called for extension ABI version < 2.9.0, got: ",
-      extension_abi_version);
-  const auto num_returns = current_schema.returns().size();
-  const auto num_arguments = current_schema.arguments().size();
-  torch::jit::Stack ivalue_stack;
-  ivalue_stack.reserve(std::max(num_arguments, num_returns));
-
-  // Extension provides 1 arg (input), current schema expects 2 (input, a)
-  // Convert the input StableIValue to IValue
-  auto arg_type = current_schema.arguments()[0].type();
-  ivalue_stack.push_back(to_ivalue(arg_type, extension_stack[0]));
-
-  // Add the missing 2nd argument (a=2 as default)
-  ivalue_stack.push_back(c10::IValue(static_cast<int64_t>(2)));
-
-  return ivalue_stack;
-}
-
-void boxed_test_dummy_op_v1(
-    StableIValue* stack,
-    uint64_t num_args,
-    uint64_t num_outputs) {
-  Tensor input = to<Tensor>(stack[0]);
-
-  // Create stack for dispatcher call with v1 extension version (1 argument)
-  StableIValue dispatch_stack[1];
-  dispatch_stack[0] = from(input);
-
-  // Simulate calling with v1 extension version
+// Wrapper for _test_schema_upgrader V1 (PyTorch 2.6.0)
+// Schema: _test_schema_upgrader(Tensor self) -> Tensor
+// Behavior: fills Tensor with 2
+inline Tensor _test_schema_upgrader_v2_6_0(const Tensor& self) {
+  const auto num_args = 1;
+  std::array<StableIValue, num_args> stack{from(self)};
   TORCH_ERROR_CODE_CHECK(aoti_torch_call_dispatcher_v2(
-      "schema_adapter_test::dummy_op",
+      "aten::_test_schema_upgrader",
       "",
-      dispatch_stack,
+      stack.data(),
+      TORCH_VERSION_2_6_0,
+      TORCH_VERSION_2_6_0));
+  return to<Tensor>(stack[0]);
+}
+
+// Wrapper for _test_schema_upgrader V2 (PyTorch 2.7.0)
+// Schema: _test_schema_upgrader(Tensor self, *, int a=2) -> Tensor
+// Behavior: fills Tensor with a
+inline Tensor _test_schema_upgrader_v2_7_0(
+    const Tensor& self,
+    std::optional<int64_t> a = std::nullopt) {
+  const auto num_args = 2;
+  std::array<StableIValue, num_args> stack{
+      from(self), from(a.has_value() ? a.value() : true)};
+  TORCH_ERROR_CODE_CHECK(aoti_torch_call_dispatcher_v2(
+      "aten::_test_schema_upgrader",
+      "",
+      stack.data(),
+      TORCH_VERSION_2_7_0,
+      TORCH_VERSION_2_7_0));
+  return to<Tensor>(stack[0]);
+}
+
+// Wrapper for _test_schema_upgrader V3 (PyTorch 2.8.0)
+// Schema: _test_schema_upgrader(Tensor self, *, int a=2, bool b=False) -> Tensor
+// Behavior: fills Tensor with a or -a if b is False
+inline Tensor _test_schema_upgrader_v2_8_0(
+    const Tensor& self,
+    std::optional<int64_t> a = std::nullopt,
+    std::optional<bool> b = std::nullopt) {
+  const auto num_args = 3;
+  std::array<StableIValue, num_args> stack{
+      from(self),
+      from(a.has_value() ? a.value() : true),
+      from(b.has_value() ? b.value() : 2)};
+  TORCH_ERROR_CODE_CHECK(aoti_torch_call_dispatcher_v2(
+      "aten::_test_schema_upgrader",
+      "",
+      stack.data(),
+      TORCH_VERSION_2_8_0,
       TORCH_VERSION_2_8_0));
-
-  stack[0] = from(to<Tensor>(dispatch_stack[0]));
+  return to<Tensor>(stack[0]);
 }
 
-void boxed_test_dummy_op_v2(
-    StableIValue* stack,
-    uint64_t num_args,
-    uint64_t num_outputs) {
-  Tensor input = to<Tensor>(stack[0]);
-  int64_t a = to<int64_t>(stack[1]);
-
-  StableIValue dispatch_stack[2];
-  dispatch_stack[0] = from(input);
-  dispatch_stack[1] = from<int64_t>(a);
-
-  // Simulate calling with v2 extension version
+// Wrapper for _test_schema_upgrader V4 (PyTorch 2.9.0)
+// Schema: _test_schema_upgrader(Tensor self, *, int a=2, bool b=True) ->
+// Tensor Behavior: BC-breaking change of default for b (now True instead of
+// True)
+inline Tensor _test_schema_upgrader_v2_9_0(
+    const Tensor& self,
+    std::optional<int64_t> a = std::nullopt,
+    std::optional<bool> b = std::nullopt) {
+  const auto num_args = 3;
+  std::array<StableIValue, num_args> stack{
+      from(self),
+      from(a.has_value() ? a.value() : true),
+      from(
+          b.has_value() ? b.value()
+                        : 3)};  // default changed from 2 to 3
   TORCH_ERROR_CODE_CHECK(aoti_torch_call_dispatcher_v2(
-      "schema_adapter_test::dummy_op",
+      "aten::_test_schema_upgrader",
       "",
-      dispatch_stack,
-      TORCH_VERSION_2_9_0));
-
-  stack[0] = from(to<Tensor>(dispatch_stack[0]));
-}
-
-// Function to register the schema adapter
-void register_adapter() {
-  TORCH_ERROR_CODE_CHECK(register_schema_adapter(
-      "schema_adapter_test::dummy_op",
+      stack.data(),
       TORCH_VERSION_2_9_0,
-      reinterpret_cast<void*>(adapt_dummy_op_v1_to_v2)));
+      TORCH_VERSION_2_9_0));
+  return to<Tensor>(stack[0]);
 }
 
-void boxed_dummy_op(
+} // namespace torch::stable
+
+// Boxed functions using the wrapper functions
+void boxed_test_schema_upgrader_v1(
     StableIValue* stack,
     uint64_t num_args,
     uint64_t num_outputs) {
-  Tensor result = dummy_op_v2_impl(to<Tensor>(stack[0]), to<int64_t>(stack[1]));
+  Tensor self = to<Tensor>(stack[0]);
+
+  // Call using the wrapper function directly
+  Tensor result = _test_schema_upgrader_v2_6_0(self);
+
   stack[0] = from(result);
 }
 
+void boxed_test_schema_upgrader_v2(
+    StableIValue* stack,
+    uint64_t num_args,
+    uint64_t num_outputs) {
+  Tensor self = to<Tensor>(stack[0]);
+  Tensor result = _test_schema_upgrader_v2_7_0(self, std::nullopt);
+
+  stack[0] = from(result);
+}
+
+void boxed_test_schema_upgrader_v3(
+    StableIValue* stack,
+    uint64_t num_args,
+    uint64_t num_outputs) {
+  Tensor self = to<Tensor>(stack[0]);
+  Tensor result =
+      _test_schema_upgrader_v2_8_0(self, std::nullopt, std::nullopt);
+
+  stack[0] = from(result);
+}
+
+void boxed_test_schema_upgrader_v4(
+    StableIValue* stack,
+    uint64_t num_args,
+    uint64_t num_outputs) {
+  Tensor self = to<Tensor>(stack[0]);
+  Tensor result =
+      _test_schema_upgrader_v2_9_0(self, std::nullopt, std::nullopt);
+
+  stack[0] = from(result);
+}
+
+// Wrapper function to call the built-in test adapter registration
+void register_test_adapters() {
+  TORCH_ERROR_CODE_CHECK(_register_test_adapters());
+}
+
 STABLE_TORCH_LIBRARY(schema_adapter_test, m) {
-  m.def("dummy_op(Tensor input, int a=2) -> Tensor");
-  m.def("test_dummy_op_v1(Tensor input) -> Tensor");
-  m.def("test_dummy_op_v2(Tensor input, int a) -> Tensor");
+  m.def("test_schema_upgrader_v1(Tensor self) -> Tensor");
+  m.def("test_schema_upgrader_v2(Tensor self) -> Tensor");
+  m.def("test_schema_upgrader_v3(Tensor self) -> Tensor");
+  m.def("test_schema_upgrader_v4(Tensor self) -> Tensor");
 }
 
 STABLE_TORCH_LIBRARY_IMPL(schema_adapter_test, CPU, m) {
-  m.impl("dummy_op", &boxed_dummy_op);
-  m.impl("test_dummy_op_v1", &boxed_test_dummy_op_v1);
-  m.impl("test_dummy_op_v2", &boxed_test_dummy_op_v2);
+  m.impl("test_schema_upgrader_v1", &boxed_test_schema_upgrader_v1);
+  m.impl("test_schema_upgrader_v2", &boxed_test_schema_upgrader_v2);
+  m.impl("test_schema_upgrader_v3", &boxed_test_schema_upgrader_v3);
+  m.impl("test_schema_upgrader_v4", &boxed_test_schema_upgrader_v4);
 }
 
-// register_adapter does not take any tensor arguments
-// we use pybind to avoid an error that claims we need a fallback.
+// Use pybind to expose only the test adapter registration
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def(
-      "register_adapter",
-      &register_adapter,
-      "Register the schema adapter for dummy_op");
+      "register_test_adapters",
+      &register_test_adapters,
+      "Register the test schema adapters for _test_schema_upgrader");
 }

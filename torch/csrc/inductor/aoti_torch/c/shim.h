@@ -515,16 +515,21 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_call_dispatcher(
     const char* overloadName,
     StableIValue* stack);
 
-// Has the same semantic as aoti_torch_call_dispatcher, but takes an
-// additional argument for the extension abi version. This is needed for
-// forward/backward compatiblity when calling native functions via the
-// dispatcher. The caller should pass in its own TORCH_ABI_TAG as
-// extension_abi_version.
+// Has the same semantic as aoti_torch_call_dispatcher, but takes
+// additional arguments for the extension target and build versions. This is
+// needed for forward/backward compatibility when calling native functions via
+// the dispatcher. The caller should pass in its target version and build
+// version.
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_call_dispatcher_v2(
     const char* opName,
     const char* overloadName,
     StableIValue* stack,
-    uint64_t extension_abi_version);
+    uint64_t extension_target_version,
+    uint64_t extension_build_version);
+
+// Function to register test schema adapters for _test_schema_upgrader
+// This demonstrates the adapter registration pattern and is exposed for testing
+AOTI_TORCH_EXPORT AOTITorchError _register_test_adapters();
 
 // Device-generic guard for managing device context
 struct DeviceGuardOpaque;
