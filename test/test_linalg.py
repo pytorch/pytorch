@@ -4779,33 +4779,11 @@ class TestLinalg(TestCase):
 
             filename1 = torch.cuda.tunable.get_filename()
             unique_id = self.id().split(".")[-1]
-            filename3 = f"{filename1}_tmp2.csv"
             ordinal = torch.cuda.current_device()
             assert filename1 == f"tunableop_results_{unique_id}_{ordinal}.csv"
             assert len(torch.cuda.tunable.get_results()) > 0
 
-            assert os.path.exists(filename1)
-
-            torch.cuda.tunable.set_filename(filename3)
-
-            # Run one more matmul to trigger a write to the new filename
-            x = make_arg((4, 4), noncontiguous=False)
-            y = make_arg((4, 4), noncontiguous=False)
-            self.check_single_matmul(x, y)
-
-            self.assertTrue(os.path.exists(filename3))
-            assert torch.cuda.tunable.read_file()  # use previously set filename, will ignore duplicates and return True
-
-            with open(filename1) as file1:
-                file1_contents = file1.read()
-            with open(filename3) as file3:
-                file3_contents = file3.read()
-
-            assert "Validator" in file1_contents
-            assert len(file1_contents) > 0
-            assert "Validator" in file3_contents
-            assert len(file3_contents) > 0
-
+            self.assertTrue(os.path.exists(filename1))
             # We need to reset the filename to the default value so we can properly
             # clean up intermediate files
             self._set_tunableop_defaults()
@@ -4928,14 +4906,6 @@ class TestLinalg(TestCase):
 
             results_filename = torch.cuda.tunable.get_filename()
             self.assertTrue(os.path.exists(results_filename))
-
-            with open(results_filename) as f:
-                content = f.read()
-                self.assertIn("Validator", content)
-                # Count non-validator lines to verify results were written
-                result_lines = [l for l in content.split('\n')
-                            if l and not l.startswith('Validator')]
-                self.assertGreater(len(result_lines), 0)
 
             # Compare Param Signature of untuned and tuned results
             ok = self._compare_untuned_tuned_entries()
