@@ -686,10 +686,12 @@ def compute_elementwise_output_strides(*tensors) -> tuple[int, ...]:
     if ndim == 1:
         return (1,)
 
-    if len(tensors) == 1 and torch._prims_common.is_non_overlapping_and_dense_or_false(
-        tensors[0]
-    ):
-        return tensors[0].stride()
+    if len(tensors) == 1:
+        if torch._prims_common.is_non_overlapping_and_dense_or_false(tensors[0]):
+            return tensors[0].stride()
+        else:
+            empty_like_tensor = torch.empty_like(tensors[0])
+            return empty_like_tensor.stride()
 
     logical_to_physical_perm, _ = compute_elementwise_output_logical_to_physical_perm(
         *tensors, _skip_checks=True
