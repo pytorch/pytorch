@@ -430,8 +430,8 @@ def _get_custom_mod_func(func_name: str):
         f"func_name must be `str`, but got `{type(func_name)}`."
     )
     backend_name = _get_privateuse1_backend_name()
-    custom_device_mod = getattr(torch, backend_name, None)  # type: ignore[arg-type]
-    function = getattr(custom_device_mod, func_name, None)  # type: ignore[arg-type]
+    custom_device_mod = getattr(torch, backend_name, None)
+    function = getattr(custom_device_mod, func_name, None)
     if custom_device_mod is None or function is None:
         message = f"Try to call torch.{backend_name}.{func_name}. The backend must register a custom backend "
         message += f"module with `torch._register_device_module('{backend_name}', BackendModule)`. And "
