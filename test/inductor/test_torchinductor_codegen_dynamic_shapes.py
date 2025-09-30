@@ -110,6 +110,7 @@ test_failures = {
     #
     # Failed to find dynamic for loop variable:
     #
+    "test_conv1d_with_permute_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
     "test_arange1_dynamic_shapes": TestFailure(("cpu",)),
     "test_arange2_dynamic_shapes": TestFailure(("cpu",)),
     "test_arange3_dynamic_shapes": TestFailure(("cpu",)),

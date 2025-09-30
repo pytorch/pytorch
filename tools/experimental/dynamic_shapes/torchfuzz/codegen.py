@@ -1,23 +1,435 @@
 # mypy: ignore-errors
 import os
-import signal
-import subprocess
-import sys
-import tempfile
-import time
-from queue import Empty, Queue
-from threading import Thread
-from typing import Any, Optional, Union
+from typing import Optional
 
 import torch
 
 from torchfuzz.operators import get_operator
 from torchfuzz.ops_fuzzer import OperationGraph
+from torchfuzz.tensor_descriptor import format_tensor_descriptor
 from torchfuzz.tensor_fuzzer import ScalarSpec, Spec, TensorSpec
 
 
+class FuzzTemplate:
+    def __init__(self, supported_ops, check):
+        self.supported_ops = supported_ops
+        self.check = check
+
+    def supported_dtypes(self):
+        """Return list of supported dtypes for this template."""
+        return [
+            torch.float32,
+            torch.float64,
+            torch.float16,
+            torch.bfloat16,
+            torch.int8,
+            torch.int16,
+            torch.int32,
+            torch.int64,
+            torch.bool,
+        ]
+
+    def spec_distribution(self):
+        """
+        Define the distribution for generating random Specs.
+
+        Returns:
+            Dict with keys:
+            - 'tensor_prob': Probability of generating TensorSpec (0.0 to 1.0)
+            - 'scalar_prob': Probability of generating ScalarSpec (0.0 to 1.0)
+            - 'allow_tensors': Whether TensorSpec generation is allowed (boolean)
+            - 'allow_scalars': Whether ScalarSpec generation is allowed (boolean)
+        """
+        return {
+            "tensor_prob": 0.8,
+            "scalar_prob": 0.2,
+            "allow_tensors": True,
+            "allow_scalars": True,
+        }
+
+    def fuzz_spec_custom(self):
+        """
+        Generate a random Spec based on this template's distribution preferences.
+
+        Returns:
+            Spec: Either a TensorSpec or ScalarSpec according to template's distribution
+        """
+        import random
+
+        from torchfuzz.tensor_fuzzer import fuzz_torch_tensor_type
+
+        # Get template's distribution configuration
+        distribution = self.spec_distribution()
+
+        # Get random dtype based on template
+        dtype = fuzz_torch_tensor_type("default")
+
+        # Validate distribution configuration
+        allow_tensors = distribution.get("allow_tensors", True)
+        allow_scalars = distribution.get("allow_scalars", True)
+
+        if not allow_tensors and not allow_scalars:
+            raise ValueError("Template must allow at least one of tensors or scalars")
+
+        # Determine which type to generate
+        if not allow_scalars:
+            # Only tensors allowed
+            return self._generate_tensor_spec(dtype)
+        elif not allow_tensors:
+            # Only scalars allowed
+            return self._generate_scalar_spec(dtype)
+        else:
+            # Both allowed, use probability distribution
+            tensor_prob = distribution.get("tensor_prob", 0.8)
+            if random.random() < tensor_prob:
+                return self._generate_tensor_spec(dtype)
+            else:
+                return self._generate_scalar_spec(dtype)
+
+    def _generate_tensor_spec(self, dtype):
+        """Generate a TensorSpec with the given dtype."""
+        from torchfuzz.tensor_fuzzer import (
+            fuzz_tensor_size,
+            fuzz_valid_stride,
+            TensorSpec,
+        )
+
+        size = fuzz_tensor_size()
+        stride = fuzz_valid_stride(size)
+        return TensorSpec(size=size, stride=stride, dtype=dtype)
+
+    def _generate_scalar_spec(self, dtype):
+        """Generate a ScalarSpec with the given dtype."""
+        from torchfuzz.tensor_fuzzer import ScalarSpec
+
+        return ScalarSpec(dtype=dtype)
+
+
+class DefaultFuzzTemplate(FuzzTemplate):
+    def __init__(self):
+        from torchfuzz.checks import EagerVsFullGraphDynamicCompileCheck
+
+        super().__init__(
+            supported_ops=[
+                "torch.add",
+                "torch.sub",
+                "torch.mul",
+                "torch.div",
+            ],
+            check=EagerVsFullGraphDynamicCompileCheck(),
+        )
+
+    def spec_distribution(self):
+        """Default template: tensor-only (no scalars)."""
+        return {
+            "tensor_prob": 1.0,
+            "scalar_prob": 0.0,
+            "allow_tensors": True,
+            "allow_scalars": False,
+        }
+
+    def imports_codegen(self):
+        return [
+            "import torch",
+        ]
+
+    def flags_codegen(self):
+        return ["torch._dynamo.config.capture_scalar_outputs = True"]
+
+    def args_codegen(self, arg_operations):
+        """Generate argument creation code for default template."""
+        code_lines = []
+
+        # Add sentinel tensor that ensures gradient computation
+        code_lines.extend(
+            [
+                "# Sentinel tensor to ensure gradient computation",
+                "sentinel = torch.tensor(1.0, requires_grad=True)",
+                "",
+            ]
+        )
+
+        if arg_operations:
+            for i, (node_id, spec) in enumerate(arg_operations):
+                arg_name = f"arg_{i}"
+
+                if isinstance(spec, ScalarSpec):
+                    dtype_str = f"torch.{spec.dtype}".replace("torch.torch.", "torch.")
+                    code_lines.append(
+                        f"{arg_name} = torch.tensor(torch.randn(()), dtype={dtype_str}).item()"
+                    )
+
+                elif isinstance(spec, TensorSpec):
+                    size_str = str(spec.size)
+                    dtype_str = f"torch.{spec.dtype}".replace("torch.torch.", "torch.")
+
+                    # Calculate storage size needed for the strided tensor
+                    if spec.size:
+                        # Calculate the maximum index that will be accessed
+                        max_offset = 0
+                        for dim_size, stride in zip(spec.size, spec.stride):
+                            if dim_size > 1:
+                                max_offset += (dim_size - 1) * abs(stride)
+                        storage_size = max_offset + 1
+                    else:
+                        storage_size = 1
+
+                    stride_str = str(spec.stride)
+                    code_lines.append(
+                        f"{arg_name} = torch.as_strided(torch.randn({storage_size}).to({dtype_str}), {size_str}, {stride_str})"
+                    )
+
+        return code_lines
+
+    def epilogue_codegen(self):
+        return []
+
+
+class DTensorFuzzTemplate(FuzzTemplate):
+    def __init__(self):
+        from torchfuzz.checks import EagerVsFullGraphDynamicCompileCheck
+
+        super().__init__(
+            supported_ops=[
+                "torch.add",
+                "torch.sub",
+                "torch.mul",
+                "torch.div",
+            ],
+            check=EagerVsFullGraphDynamicCompileCheck(),
+        )
+
+    def supported_dtypes(self):
+        """Return list of DTensor-compatible dtypes (no complex types)."""
+        return [
+            torch.float32,
+            torch.float64,
+            torch.float16,
+            torch.bfloat16,
+            torch.int8,
+            torch.int16,
+            torch.int32,
+            torch.int64,
+            torch.bool,
+        ]
+
+    def spec_distribution(self):
+        """DTensor template: tensor-only (no scalars)."""
+        return {
+            "tensor_prob": 1.0,
+            "scalar_prob": 0.0,
+            "allow_tensors": True,
+            "allow_scalars": False,
+        }
+
+    def imports_codegen(self):
+        return [
+            "import torch",
+            "from torch.distributed.tensor.placement_types import Replicate, Shard",
+            "from torch.testing._internal.distributed.fake_pg import FakeStore",
+            "from torch.distributed.tensor import DTensor",
+        ]
+
+    def flags_codegen(self):
+        return [
+            "torch._dynamo.config.capture_scalar_outputs = True",
+            "torch._dynamo.config.capture_dynamic_output_shape_ops = True",
+            "torch._inductor.config.emulate_precision_casts = True",
+        ]
+
+    def args_codegen(self, arg_operations):
+        """Generate DTensor argument creation code with proper mesh setup."""
+        code_lines = []
+
+        # Add DTensor setup code first
+        code_lines.extend(
+            [
+                "world_size = 1024",
+                "fake_store = FakeStore()",
+                "torch.distributed.init_process_group(",
+                '    "fake", store=fake_store, rank=0, world_size=world_size',
+                ")",
+                "",
+                "mesh = torch.distributed.device_mesh.init_device_mesh(",
+                '    "cuda",',
+                "    (2, 8),",
+                "    mesh_dim_names=(",
+                '        "dim1", "dim2",',
+                "    ),",
+                ")",
+                "",
+                "placements = (Replicate(), Replicate())",
+                "",
+                "# Sentinel tensor to ensure gradient computation",
+                "sentinel_local = torch.tensor(1.0, device='cuda', requires_grad=True)",
+                "sentinel = DTensor.from_local(sentinel_local, mesh, placements)",
+                "",
+            ]
+        )
+
+        if arg_operations:
+            for i, (node_id, spec) in enumerate(arg_operations):
+                arg_name = f"arg_{i}"
+
+                if isinstance(spec, ScalarSpec):
+                    # For scalars in DTensor, create a 0-dim tensor
+                    dtype_str = f"torch.{spec.dtype}".replace("torch.torch.", "torch.")
+                    code_lines.extend(
+                        [
+                            f"{arg_name}_local = torch.randn((), dtype={dtype_str}, device='cuda', requires_grad=True)",
+                            f"{arg_name} = DTensor.from_local({arg_name}_local, mesh, placements)",
+                        ]
+                    )
+
+                elif isinstance(spec, TensorSpec):
+                    size_str = str(spec.size)
+                    dtype_str = f"torch.{spec.dtype}".replace("torch.torch.", "torch.")
+
+                    # Handle different dtypes appropriately for DTensor
+                    if spec.dtype in [
+                        torch.int32,
+                        torch.int64,
+                        torch.int8,
+                        torch.int16,
+                    ]:
+                        # Integer dtypes: use randint and no requires_grad
+                        code_lines.extend(
+                            [
+                                f"{arg_name}_local = torch.randint(1, 10, {size_str}, dtype={dtype_str}, device='cuda')",
+                                f"{arg_name} = DTensor.from_local({arg_name}_local, mesh, placements)",
+                            ]
+                        )
+                    elif spec.dtype == torch.bool:
+                        # Boolean dtype: use randint and cast to bool
+                        code_lines.extend(
+                            [
+                                f"{arg_name}_local = torch.randint(0, 2, {size_str}, device='cuda').bool()",
+                                f"{arg_name} = DTensor.from_local({arg_name}_local, mesh, placements)",
+                            ]
+                        )
+                    else:
+                        # Float dtypes: use randn and requires_grad
+                        code_lines.extend(
+                            [
+                                f"{arg_name}_local = torch.randn({size_str}, dtype={dtype_str}, device='cuda', requires_grad=True)",
+                                f"{arg_name} = DTensor.from_local({arg_name}_local, mesh, placements)",
+                            ]
+                        )
+
+        return code_lines
+
+    def epilogue_codegen(self):
+        return ["torch.distributed.destroy_process_group()"]
+
+
+class UnbackedFuzzTemplate(FuzzTemplate):
+    def __init__(self):
+        from torchfuzz.checks import EagerVsFullGraphDynamicCompileCheck
+
+        super().__init__(
+            supported_ops=[
+                "torch.ops.aten.item",
+                "torch.ops.aten.nonzero",
+                "torch.ops.aten.masked_select",
+                "torch.ops.aten.unique",
+                # Include basic operations for building up data
+                "torch.add",
+                "torch.sub",
+                "torch.mul",
+                "torch.div",
+            ],
+            check=EagerVsFullGraphDynamicCompileCheck(),
+        )
+
+    def supported_dtypes(self):
+        """Return list of dtypes good for data-dependent operations."""
+        # Focus on dtypes that work well with data-dependent ops and arithmetic
+        # Exclude bool since arithmetic operations don't work with boolean tensors
+        return [
+            torch.float32,
+            torch.float64,
+            torch.int32,
+            torch.int64,
+        ]
+
+    def spec_distribution(self):
+        """Unbacked template: 50% tensors, 50% scalars."""
+        return {
+            "tensor_prob": 0.5,
+            "scalar_prob": 0.5,
+            "allow_tensors": True,
+            "allow_scalars": True,
+        }
+
+    def imports_codegen(self):
+        return [
+            "import torch",
+        ]
+
+    def flags_codegen(self):
+        return [
+            "torch._dynamo.config.capture_scalar_outputs = True",
+            "torch._dynamo.config.capture_dynamic_output_shape_ops = True",
+        ]
+
+    def args_codegen(self, arg_operations):
+        """Generate argument creation code for unbacked template."""
+        code_lines = []
+
+        # Add sentinel tensor that ensures gradient computation
+        code_lines.extend(
+            [
+                "# Sentinel tensor to ensure gradient computation",
+                "sentinel = torch.tensor(1.0, requires_grad=True)",
+                "",
+            ]
+        )
+
+        if arg_operations:
+            for i, (node_id, spec) in enumerate(arg_operations):
+                arg_name = f"arg_{i}"
+
+                if isinstance(spec, ScalarSpec):
+                    dtype_str = f"torch.{spec.dtype}".replace("torch.torch.", "torch.")
+                    code_lines.append(
+                        f"{arg_name} = torch.tensor(torch.randn(()), dtype={dtype_str}).item()"
+                    )
+
+                elif isinstance(spec, TensorSpec):
+                    size_str = str(spec.size)
+                    dtype_str = f"torch.{spec.dtype}".replace("torch.torch.", "torch.")
+
+                    # For unbacked operations, create tensors with specific patterns
+                    # that are likely to produce meaningful results
+                    if spec.dtype == torch.bool:
+                        # For boolean tensors, create a mix of True/False values
+                        code_lines.append(
+                            f"{arg_name} = torch.randint(0, 2, {size_str}, dtype={dtype_str}) > 0"
+                        )
+                    elif spec.dtype in [torch.int32, torch.int64]:
+                        # For integer tensors, create values that will have some duplicates
+                        # and some unique values for operations like unique()
+                        code_lines.append(
+                            f"{arg_name} = torch.randint(0, 3, {size_str}, dtype={dtype_str})"
+                        )
+                    else:
+                        # For float tensors, create values with some zeros and non-zeros
+                        code_lines.append(
+                            f"{arg_name} = (torch.randn({size_str}) * 2).to({dtype_str})"
+                        )
+                        # Zero out some values to make nonzero operations meaningful
+                        code_lines.append(f"{arg_name}[{arg_name}.abs() < 0.5] = 0")
+
+        return code_lines
+
+    def epilogue_codegen(self):
+        return []
+
+
 def convert_graph_to_python_code(
-    operation_graph: OperationGraph, seed: Optional[int] = None
+    operation_graph: OperationGraph,
+    seed: Optional[int] = None,
+    template: str = "default",
 ) -> str:
     """
     Convert an operation graph to executable Python code using topological ordering.
@@ -34,6 +446,14 @@ def convert_graph_to_python_code(
     Returns:
         String containing the complete Python code that executes the operations
     """
+
+    # Instantiate template
+    if template == "dtensor":
+        fuzz_template = DTensorFuzzTemplate()
+    elif template == "unbacked":
+        fuzz_template = UnbackedFuzzTemplate()
+    else:
+        fuzz_template = DefaultFuzzTemplate()
 
     # Set seed for reproducible code generation
     if seed is not None:
@@ -61,11 +481,6 @@ def convert_graph_to_python_code(
         op_name = node.op_name
         output_spec = node.output_spec
 
-        # Generate comment for this operation
-        generated_code_lines.append(
-            f"    # Node {node_id}: {op_name} (depth {node.depth})"
-        )
-
         # Generate output variable name
         output_var_name = f"var_{node_id}"
 
@@ -86,7 +501,9 @@ def convert_graph_to_python_code(
             # Track arg operations for later function signature generation
             arg_operations.append((node_id, output_spec))
             arg_name = f"arg_{len(arg_operations) - 1}"
-            operation_lines = [f"{output_var_name} = {arg_name}"]
+            # Add tensor descriptor comment for arg operations too
+            descriptor_comment = f"# {format_tensor_descriptor(output_spec)}"
+            operation_lines = [f"{output_var_name} = {arg_name} " + descriptor_comment]
         else:
             # Generate operation execution code
             operation_lines = generate_simple_operation_code(
@@ -95,7 +512,6 @@ def convert_graph_to_python_code(
 
         # Add proper indentation for function body
         generated_code_lines.extend(["    " + line for line in operation_lines])
-        generated_code_lines.append("")
 
         # Track this node's variable
         node_variables[node_id] = (output_var_name, output_spec)
@@ -110,76 +526,60 @@ def convert_graph_to_python_code(
     # Generate function signature based on discovered arg operations
     if arg_operations:
         arg_names = [f"arg_{i}" for i in range(len(arg_operations))]
-        function_signature = f"def fuzzed_program({', '.join(arg_names)})"
+        function_signature = f"def fuzzed_program({', '.join(arg_names)}, sentinel)"
     else:
-        function_signature = "def fuzzed_program()"
+        function_signature = "def fuzzed_program(sentinel)"
 
-    # Build the complete code
-    fuzzer_dir = os.path.dirname(os.path.abspath(__file__))
-    code_lines = [
-        "import torch",
-        "import sys",
-        "import os",
-        "# Add fuzzer directory to path so we can import tensor_fuzzer",
-        f"fuzzer_dir = r'{fuzzer_dir}'",
-        "if fuzzer_dir not in sys.path:",
-        "    sys.path.insert(0, fuzzer_dir)",
-        "from tensor_fuzzer import fuzz_scalar, fuzz_tensor_simple, ScalarSpec, TensorSpec",
-        "",
-        "# Generated fuzzed program code (topological order from operation graph)",
-        f"# Graph has {len(operation_graph.nodes)} nodes",
-        "",
-        function_signature + ":",
-    ]
+    # Build the complete code - all imports at the top
+    code_lines = []
+
+    # Add template imports
+    code_lines.extend(fuzz_template.imports_codegen())
+
+    # Add template flags
+    code_lines.extend(fuzz_template.flags_codegen())
+    code_lines.append("")
+
+    # Add single seed at the top if seed is provided
+    if seed is not None:
+        code_lines.append(f"torch.manual_seed({seed})")
+        code_lines.append("")
+
+    code_lines.append(function_signature + ":")
 
     # Add the generated operation code
     code_lines.extend(generated_code_lines)
 
-    # Add return statement
-    code_lines.extend(
-        [
-            "    # Final result from root node",
-            f"    return {final_var_name}",
-            "",
-        ]
-    )
+    # Add return statement with sentinel multiplication to ensure gradient computation
+    # Handle complex tensors appropriately based on template
+    if template == "dtensor":
+        # For DTensor, avoid .real operation which doesn't work with sharding
+        # Instead use abs() for complex tensors to get a real result
+        code_lines.extend(
+            [
+                "    # Ensure gradient computation by multiplying with sentinel",
+                f"    result = {final_var_name} * sentinel",
+                "    if result.is_complex():",
+                "        result = result.abs()  # Use abs() instead of .real for DTensor compatibility",
+                "    return result",
+                "",
+            ]
+        )
+    else:
+        code_lines.extend(
+            [
+                "    # Ensure gradient computation by multiplying with sentinel and taking real part",
+                f"    result = {final_var_name} * sentinel",
+                "    if result.is_complex():",
+                "        result = result.real",
+                "    return result",
+                "",
+            ]
+        )
 
-    # Generate argument creation code with deterministic seeds
-    if arg_operations:
-        code_lines.append("# Create arguments for the fuzzed program")
-        for i, (node_id, spec) in enumerate(arg_operations):
-            arg_name = f"arg_{i}"
-            # Use a deterministic seed based on the argument index and main seed
-            arg_seed = (seed + 10000 + i) if seed is not None else None
-
-            if isinstance(spec, ScalarSpec):
-                dtype_str = f"torch.{spec.dtype}".replace("torch.torch.", "torch.")
-                if arg_seed is not None:
-                    code_lines.extend(
-                        [
-                            f"scalar_spec = ScalarSpec(dtype={dtype_str})",
-                            f"{arg_name} = fuzz_scalar(scalar_spec, seed={arg_seed})",
-                        ]
-                    )
-                else:
-                    code_lines.extend(
-                        [
-                            f"scalar_spec = ScalarSpec(dtype={dtype_str})",
-                            f"{arg_name} = fuzz_scalar(scalar_spec)",
-                        ]
-                    )
-            elif isinstance(spec, TensorSpec):
-                size_str = str(spec.size)
-                stride_str = str(spec.stride)
-                dtype_str = f"torch.{spec.dtype}".replace("torch.torch.", "torch.")
-                if arg_seed is not None:
-                    code_lines.append(
-                        f"{arg_name} = fuzz_tensor_simple({size_str}, {stride_str}, {dtype_str}, seed={arg_seed})"
-                    )
-                else:
-                    code_lines.append(
-                        f"{arg_name} = fuzz_tensor_simple({size_str}, {stride_str}, {dtype_str})"
-                    )
+    # Generate argument creation code using template
+    arg_code_lines = fuzz_template.args_codegen(arg_operations)
+    code_lines.extend(arg_code_lines)
 
     # Generate the final execution with both normal and compiled versions
     if arg_operations:
@@ -193,71 +593,15 @@ def convert_graph_to_python_code(
     else:
         args_tuple = "()"
 
-    code_lines.extend(
-        [
-            "",
-            "# Execute the fuzzed program both normally and with torch.compile",
-            "import torch",
-            "import tempfile",
-            "import os",
-            "import sys",
-            "import contextlib",
-            "from io import StringIO",
-            "",
-            "# Create arguments",
-            f"args = {args_tuple}",
-            "",
-            "# Execute original version",
-            "print('=== Executing Original Program ===')",
-            "try:",
-            "    result_original = fuzzed_program(*args)",
-            "    print('✅ Original execution successful')",
-            "except Exception as e:",
-            "    print(f'❌ Original execution failed: {e}')",
-            "    raise",
-            "",
-            "# Execute compiled version",
-            "print('\\n=== Executing Compiled Program  fullgraph=False')",
-            "try:",
-            "    compiled_program = torch.compile(fuzzed_program, fullgraph=False)",
-            "    result_compiled = compiled_program(*args)",
-            "    print('✅ Compiled execution successful')",
-            "    print(f'Compiled result type: {type(result_compiled)}')",
-            "except Exception as e:",
-            "    print(f'❌ Compiled execution failed: {e}')",
-            "    # Exit with non-zero code to signal compile failure",
-            "    import sys",
-            "    sys.exit(1)",
-            "",
-            "# Execute compiled version 2",
-            "print('\\n=== Executing Compiled Program  fullgraph=False dynamic=True')",
-            "try:",
-            "    compiled_program = torch.compile(fuzzed_program, fullgraph=False, dynamic=True)",
-            "    result_compiled = compiled_program(*args)",
-            "    print('✅ Compiled execution successful')",
-            "    print(f'Compiled result type: {type(result_compiled)}')",
-            "except Exception as e:",
-            "    print(f'❌ Compiled execution failed: {e}')",
-            "    # Exit with non-zero code to signal compile failure",
-            "    import sys",
-            "    sys.exit(1)",
-            "",
-            "# Execute compiled version 3",
-            "print('\\n=== Executing Compiled Program  fullgraph=True dynamic=True')",
-            "try:",
-            "    with torch._dynamo.config.patch(capture_scalar_outputs=True):",
-            "       compiled_program = torch.compile(fuzzed_program, fullgraph=False, dynamic=True)",
-            "       result_compiled = compiled_program(*args)",
-            "       print('✅ Compiled execution successful')",
-            "       print(f'Compiled result type: {type(result_compiled)}')",
-            "except Exception as e:",
-            "    print(f'❌ Compiled execution failed: {e}')",
-            "    # Exit with non-zero code to signal compile failure",
-            "    import sys",
-            "    sys.exit(1)",
-            "",
-        ]
-    )
+    # Generate execution code using template check
+    check_lines = fuzz_template.check.codegen(f"{args_tuple} + (sentinel,)")
+    code_lines.extend([""] + check_lines)
+
+    # Add template epilogue
+    epilogue_lines = fuzz_template.epilogue_codegen()
+    if epilogue_lines:
+        code_lines.append("")
+        code_lines.extend(epilogue_lines)
 
     return "\n".join(code_lines)
 
@@ -283,229 +627,34 @@ def generate_simple_operation_code(
     if operator is not None:
         # Use the class-based operator to generate code
         code_line = operator.codegen(output_var, input_vars, output_spec)
-        return [code_line]
+        # Add tensor descriptor comment
+        descriptor_comment = f"# {format_tensor_descriptor(output_spec)}"
+        return [code_line + " " + descriptor_comment]
     else:
         # Fallback for unknown operations
         return [f"# Unknown operation: {op_name}"]
 
 
-def execute_python_code(
-    python_code: str, target_spec, preserve_temp_file: bool = False, timeout: int = 60
-) -> Union[torch.Tensor, float, int, bool, complex]:
+def create_program_file(python_code: str) -> str:
     """
-    Execute the generated Python code by writing it to a file and running it.
-    Supports both real-time output printing and output capturing with proper process termination.
+    Create a temporary Python file from the generated code.
 
     Args:
-        python_code: String containing Python code to execute
-        target_spec: Expected output specification for validation
-        preserve_temp_file: If True, don't delete the temporary file after execution
-        timeout: Maximum time in seconds to wait for execution (default: 60)
+        python_code: String containing Python code to write
 
     Returns:
-        The actual result from executing the generated code
-
-    Raises:
-        RuntimeError: With full stdout/stderr output if execution fails
-        TimeoutError: If execution exceeds the timeout
+        Path to the created temporary file
     """
+    import random
 
-    # Write the generated code to a temporary file
-    with tempfile.NamedTemporaryFile(
-        mode="w", suffix="_generated.py", delete=False
-    ) as f:
+    # Generate a random nonce for the filename
+    nonce = random.randint(0, 1_000_000_000)
+    tmp_dir = "/tmp/torchfuzz"
+    os.makedirs(tmp_dir, exist_ok=True)
+    generated_file_path = os.path.join(tmp_dir, f"fuzz_{nonce}.py")
+
+    # Write the generated code to the specified file
+    with open(generated_file_path, "w") as f:
         f.write(python_code)
-        generated_file_path = f.name
 
-    print(f"📄 Generated code written to: {generated_file_path}")
-
-    process = None
-    stdout_thread = None
-    stderr_thread = None
-
-    def stream_reader(
-        stream: Any, queue: "Queue[tuple[str, str]]", stream_name: str
-    ) -> None:
-        """Read from stream and put lines in queue with stream identifier"""
-        try:
-            for line in iter(stream.readline, ""):
-                if line:
-                    queue.put((stream_name, line.rstrip("\n")))
-        except Exception:
-            pass
-        finally:
-            try:
-                stream.close()
-            except Exception:
-                pass
-
-    def kill_process_tree(process):
-        """Kill the process and all its children"""
-        try:
-            # Try to terminate gracefully first
-            if process.poll() is None:
-                process.terminate()
-                try:
-                    process.wait(timeout=5)
-                    print("🔄 Process terminated gracefully")
-                except subprocess.TimeoutExpired:
-                    # Force kill if it doesn't terminate gracefully
-                    print("💀 Force killing process...")
-                    process.kill()
-                    try:
-                        process.wait(timeout=5)
-                        print("💀 Process force killed")
-                    except subprocess.TimeoutExpired:
-                        print("⚠️  Process may still be running after force kill")
-
-            # Also try to kill process group if it was created
-            try:
-                pid = process.pid
-                os.killpg(os.getpgid(pid), signal.SIGTERM)
-                time.sleep(2)
-                os.killpg(os.getpgid(pid), signal.SIGKILL)
-            except OSError:
-                pass  # Process group might not exist or already killed
-
-        except Exception as e:
-            print(f"⚠️  Error killing process: {e}")
-
-    try:
-        # Execute the generated file with real-time output streaming
-        print(f"🚀 Executing: python {generated_file_path} (timeout: {timeout}s)")
-        print("=" * 50)
-
-        # Start process with new process group to enable killing child processes
-        process = subprocess.Popen(
-            [sys.executable, generated_file_path],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            bufsize=1,  # Line buffered
-            universal_newlines=True,
-            preexec_fn=os.setsid,  # Create new process group  # noqa: PLW1509
-        )
-
-        # Create queues and threads for reading stdout and stderr
-        output_queue = Queue()
-        stdout_thread = Thread(
-            target=stream_reader, args=(process.stdout, output_queue, "stdout")
-        )
-        stderr_thread = Thread(
-            target=stream_reader, args=(process.stderr, output_queue, "stderr")
-        )
-
-        stdout_thread.daemon = True
-        stderr_thread.daemon = True
-        stdout_thread.start()
-        stderr_thread.start()
-
-        # Collect output while printing in real-time
-        captured_stdout = []
-        captured_stderr = []
-        start_time = time.time()
-
-        # Read output until process finishes or timeout
-        while process.poll() is None:
-            # Check for timeout
-            if time.time() - start_time > timeout:
-                print(f"⏰ Execution timeout ({timeout}s) reached, killing process...")
-                kill_process_tree(process)
-                raise TimeoutError(f"Execution exceeded {timeout} seconds timeout")
-
-            try:
-                stream_name, line = output_queue.get(timeout=0.1)
-                if stream_name == "stdout":
-                    print(line)  # Print to console in real-time
-                    captured_stdout.append(line)
-                elif stream_name == "stderr":
-                    print(line, file=sys.stderr)  # Print to stderr in real-time
-                    captured_stderr.append(line)
-            except Empty:
-                continue
-
-        # Process has finished, collect any remaining output
-        timeout_remaining = max(0, timeout - (time.time() - start_time))
-        output_timeout = min(5, timeout_remaining)  # Max 5 seconds for remaining output
-
-        end_time = time.time() + output_timeout
-        while not output_queue.empty() and time.time() < end_time:
-            try:
-                stream_name, line = output_queue.get(timeout=0.1)
-                if stream_name == "stdout":
-                    print(line)
-                    captured_stdout.append(line)
-                elif stream_name == "stderr":
-                    print(line, file=sys.stderr)
-                    captured_stderr.append(line)
-            except Empty:
-                break
-
-        # Wait for threads to finish with timeout
-        if stdout_thread.is_alive():
-            stdout_thread.join(timeout=2)
-        if stderr_thread.is_alive():
-            stderr_thread.join(timeout=2)
-
-        # Get the return code
-        return_code = process.returncode
-
-        print("=" * 50)
-        print(f"🏁 Process finished with return code: {return_code}")
-
-        if return_code == 0:
-            # Success - we already printed output in real-time
-            if preserve_temp_file:
-                print(f"📁 Temporary file preserved at: {generated_file_path}")
-            return True
-        else:
-            # Failed execution
-            full_output = ""
-            if captured_stdout:
-                full_output += "STDOUT:\n" + "\n".join(captured_stdout) + "\n"
-            if captured_stderr:
-                full_output += "STDERR:\n" + "\n".join(captured_stderr) + "\n"
-            full_output += f"Return code: {return_code}\n"
-
-            print(f"❌ Generated file execution failed with return code {return_code}")
-            if preserve_temp_file:
-                print(f"📁 Failed execution file preserved at: {generated_file_path}")
-            raise RuntimeError(full_output)
-
-    except TimeoutError:
-        # Re-raise timeout error as-is
-        raise
-    except Exception as e:
-        if hasattr(e, "returncode"):
-            # This was a CalledProcessError-like exception
-            raise e
-        else:
-            # Some other error occurred
-            print(f"❌ Execution error: {e}")
-            if preserve_temp_file:
-                print(f"📁 Error execution file preserved at: {generated_file_path}")
-            raise RuntimeError(f"Execution failed: {e}") from e
-    finally:
-        # Ensure process and threads are properly cleaned up
-        try:
-            if process is not None:
-                kill_process_tree(process)
-        except Exception:
-            pass
-
-        # Force cleanup threads if they're still running
-        try:
-            if stdout_thread is not None and stdout_thread.is_alive():
-                stdout_thread.join(timeout=1)
-            if stderr_thread is not None and stderr_thread.is_alive():
-                stderr_thread.join(timeout=1)
-        except Exception:
-            pass
-
-        # Clean up the temporary file unless preservation is requested
-        if not preserve_temp_file:
-            try:
-                os.unlink(generated_file_path)
-                print(f"🗑️  Temporary file cleaned up: {generated_file_path}")
-            except Exception:
-                pass
+    return generated_file_path
