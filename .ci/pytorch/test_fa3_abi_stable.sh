@@ -1,9 +1,5 @@
 #!/bin/bash
 
-# Required environment variable: $BUILD_ENVIRONMENT
-# (This is set by default in the Docker images we build, so you don't
-# need to set it yourself.
-
 set -ex -o pipefail
 
 # Suppress ANSI color escape sequences
@@ -13,26 +9,6 @@ export TERM=vt100
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 # shellcheck source=./common-build.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
-
-# Do not change workspace permissions for ROCm and s390x CI jobs
-# as it can leave workspace with bad permissions for cancelled jobs
-if [[ "$BUILD_ENVIRONMENT" != *rocm* && "$BUILD_ENVIRONMENT" != *s390x* && -d /var/lib/jenkins/workspace ]]; then
-  # Workaround for dind-rootless userid mapping (https://github.com/pytorch/ci-infra/issues/96)
-  WORKSPACE_ORIGINAL_OWNER_ID=$(stat -c '%u' "/var/lib/jenkins/workspace")
-  cleanup_workspace() {
-    echo "sudo may print the following warning message that can be ignored. The chown command will still run."
-    echo "    sudo: setrlimit(RLIMIT_STACK): Operation not permitted"
-    echo "For more details refer to https://github.com/sudo-project/sudo/issues/42"
-    sudo chown -R "$WORKSPACE_ORIGINAL_OWNER_ID" /var/lib/jenkins/workspace
-  }
-  # Disable shellcheck SC2064 as we want to parse the original owner immediately.
-  # shellcheck disable=SC2064
-  trap_add cleanup_workspace EXIT
-  sudo chown -R jenkins /var/lib/jenkins/workspace
-  git config --global --add safe.directory /var/lib/jenkins/workspace
-fi
-
-detect_cuda_arch
 
 echo "Environment variables"
 env
