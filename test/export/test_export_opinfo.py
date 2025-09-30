@@ -56,8 +56,6 @@ fake_export_failures = {
     xfail("masked.var"),
     xfail("nn.functional.grid_sample"),
     xfail("to_sparse"),
-    # cannot xfail as it is passing for cpu-only build
-    skip("nn.functional.scaled_dot_product_attention"),
     # following are failing due to OptionalDeviceGuard
     xfail("__getitem__"),
     xfail("nn.functional.batch_norm"),
@@ -134,8 +132,10 @@ instantiate_device_type_tests(TestExportOpInfo, globals(), only_for="cpu")
 selected_ops = {
     "__getitem__",
     # "nn.functional.batch_norm",  # needs to fix
+    "nn.functional.conv2d",
     "nn.functional.instance_norm",
     "nn.functional.multi_margin_loss",
+    "nn.functional.scaled_dot_product_attention",
     "nonzero",
 }
 selected_op_db = [op for op in op_db if op.name in selected_ops]
