@@ -253,7 +253,7 @@ add_docstr(
     r"""
 acos(input: Tensor, *, out: Optional[Tensor]) -> Tensor
 
-Returns a new tensor with the arccosine of the elements (in radians) in the :attr:`input` tensor.
+Returns a new tensor with the arccosine (in radians) of each element in :attr:`input`.
 
 .. math::
     \text{out}_{i} = \cos^{-1}(\text{input}_{i})
