@@ -8,10 +8,6 @@ on:
   schedule:
     # Run at 06:00 UTC everyday
     - cron: 0 6 * * *
-  pull_request:
-    paths:
-      - benchmarks/operator_benchmark/**
-      - .github/workflows/operator_microbenchmark.yml
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
