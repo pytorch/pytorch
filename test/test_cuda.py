@@ -7296,9 +7296,7 @@ class TestCudaDeviceParametrized(TestCase):
         """
         from torch.cuda import _compile_kernel
 
-        spin_wait_kernel = _compile_kernel(
-            kernel_source, "wait_for_cpu", compute_capability="70"
-        )
+        spin_wait_kernel = _compile_kernel(kernel_source, "wait_for_cpu")
 
         x = torch.ones(4, device="cuda")
         x_cpu = torch.zeros(x.shape, device="cpu").pin_memory()
