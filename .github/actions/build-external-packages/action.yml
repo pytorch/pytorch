@@ -4,6 +4,11 @@ name: Build External packages
 description: build external packages for PyTorch
 
 inputs:
+  cuda-version:
+    description: CUDA version to use
+    type: string
+    required: true
+    default: '12.8.1'
   cuda-arch-list:
     description: TORCH_CUDA_ARCH_LIST (e.g., "8.0;8.9;9.0")
     type: string
@@ -44,11 +49,12 @@ runs:
       env:
         SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
         SCCACHE_REGION: us-east-1
+        CUDA_VERSION: ${{ inputs.cuda-version }}
         TORCH_CUDA_ARCH_LIST: ${{ inputs.cuda-arch-list }}
         BASE_IMAGE: ${{ inputs.docker-image }}
         BUILD_TARGETS: ${{ inputs.build-targets }}
-        PARENT_OUTPUT_DIR: ${{ inputs.output-dir}}
-
+        PARENT_OUTPUT_DIR: ${{ inputs.output-dir }}
+        TORCH_WHEELS_PATH: ${{ inputs.torch-wheel-dir }}
       shell: bash
       run: |
         set -euo pipefail
@@ -69,7 +75,6 @@ runs:
           export OUTPUT_DIR
           echo "Building external package: $target in directory $OUTPUT_DIR"
           python3 -m cli.run build external "$target"
-
         done
 
         END_TIME=$(date +%s)

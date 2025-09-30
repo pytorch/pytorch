@@ -934,7 +934,6 @@ class TestFullyShardGradientAccumulation(FSDPTest):
         return min(4, torch.get_device_module(device_type).device_count())
 
     @skip_if_lt_x_gpu(2)
-    @xfailIf(TEST_XPU)  # https://github.com/pytorch/pytorch/issues/156782
     def test_gradient_accumulation(self):
         """
         Tests gradient accumulation with/without gradient reduction and
@@ -1116,7 +1115,6 @@ class TestFullyShardGradientAccumulation(FSDPTest):
                 _optim.zero_grad(set_to_none=(iter_idx % 2))
 
     @skip_if_lt_x_gpu(2)
-    @xfailIf(TEST_XPU)  # https://github.com/pytorch/pytorch/issues/156782
     def test_1f1b_microbatching(self):
         self.run_subtests(
             {
@@ -1492,8 +1490,8 @@ class TestFullyShardWorldSize1(FSDPTest):
     @skip_if_lt_x_gpu(1)
     def test_train_parity_single_worldsize1(self):
         """
-        Tests train parity with DDP for a single FSDP group when sharding
-        parameters on dim-0.
+        Tests train parity with DDP for a single FSDP group
+        when sharding parameters on dim-0.
         """
         self.run_subtests(
             {
@@ -1541,9 +1539,7 @@ class TestFullyShardWorldSize1(FSDPTest):
                 losses.append(model(*inp).sum())
                 losses[-1].backward()
 
-            # Before there was 1 all-gather and 1 reduce-scatter
-            # Now therre is 1 reduce-scatter
-            self.assertEqual(comm_mode.get_total_counts(), 1)
+            self.assertEqual(comm_mode.get_total_counts(), 0)
             optim.step()
 
             self.assertEqual(losses[0], losses[1])

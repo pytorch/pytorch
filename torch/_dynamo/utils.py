@@ -709,6 +709,7 @@ def dynamo_timed(
     if key not in compilation_time_metrics:
         compilation_time_metrics[key] = []
 
+    metrics = compilation_time_metrics[key]
     event_metadata = {}
     if metadata:
         event_metadata.update(metadata)
@@ -756,7 +757,7 @@ def dynamo_timed(
     finally:
         end_ns = time.time_ns()
         time_spent_ns = end_ns - start_ns
-        compilation_time_metrics[key].append(time_spent_ns / 1e9)
+        metrics.append(time_spent_ns / 1e9)
         chromium_log.log_event_end(
             event_name, end_ns, {}, start_ns, log_pt2_compile_event, compile_id
         )
@@ -1096,6 +1097,14 @@ def is_lru_cache_wrapped_function(
     value: Any,
 ) -> bool:
     return isinstance(value, functools._lru_cache_wrapper) and is_function(
+        inspect.getattr_static(value, "__wrapped__")
+    )
+
+
+def is_annotate_wrapped_function(
+    value: Any,
+) -> bool:
+    return value == torch.fx.traceback.annotate and is_function(
         inspect.getattr_static(value, "__wrapped__")
     )
 
@@ -4695,7 +4704,18 @@ def get_user_object_from_id(obj_id: int) -> Any:
 
 def store_user_object_weakref(obj: object) -> None:
     obj_id = id(obj)
-    user_obj_id_to_weakref[obj_id] = weakref.ref(obj)
+    try:
+        user_obj_id_to_weakref[obj_id] = weakref.ref(obj)
+    except TypeError as e:
+        from .exc import unimplemented_v2
+
+        unimplemented_v2(
+            gb_type="Failed to make weakref to User Object",
+            context=f"user_objected: {obj}",
+            explanation="Object does not allow us to make a weakref to it",
+            hints=[],
+            from_exc=e,
+        )
 
 
 class CompileTimeInstructionCounter:

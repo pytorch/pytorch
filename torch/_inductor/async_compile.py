@@ -465,6 +465,8 @@ class AsyncCompile:
                 kernel.set_compile_info(compile_id, is_backward)
                 CompiledTritonKernels.remove_future(source_code)
 
+                kernel.restore_after_unpickle(old_values=None)
+
                 kernel.precompile(
                     warm_cache_only=False,
                     reload_kernel=reload_kernel_in_parent,
@@ -518,6 +520,11 @@ class AsyncCompile:
 
         # no need to call this in parallel since the sub-kernels are already parallel tasks
         return MultiKernelCall(*args, **kwargs)
+
+    def size_hint_multi_kernel(self, *args, **kwargs) -> Any:
+        from torch._inductor.codegen.multi_kernel import SizeHintMultiKernelCall
+
+        return SizeHintMultiKernelCall(*args, **kwargs)
 
     def cpp(self, source_code: str):
         kernel_code_log.info("CPP Kernel:\n%s", source_code)

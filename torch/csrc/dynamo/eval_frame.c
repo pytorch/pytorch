@@ -544,7 +544,6 @@ static PyObject* decrement_working_threads(
 
 static PyObject* set_eval_frame(
     PyObject* new_callback,
-    PyThreadState* tstate,
     PyObject* module) {
   // Change the eval frame callback and return the old one
   //  - None: disables TorchDynamo
@@ -552,21 +551,31 @@ static PyObject* set_eval_frame(
   //  - Python callable(): enables TorchDynamo
   PyObject* old_callback = eval_frame_callback_get();
 
-  // owned by caller
-  Py_INCREF(old_callback);
+  // Common case: if Dynamo is actually off, we might see a lot of
+  // traffic setting the callback to None when it was already
+  // None. Skip messing with threading, thread-local storage, and
+  // reference counts.
+  if (old_callback != new_callback) {
+    if (new_callback == Py_None) {
+      decrement_working_threads(PyThreadState_GET(), module);
+    } else {
+      increment_working_threads(PyThreadState_GET(), module);
+    }
 
-  if (old_callback != Py_None && new_callback == Py_None) {
-    decrement_working_threads(tstate, module);
-  } else if (old_callback == Py_None && new_callback != Py_None) {
-    increment_working_threads(tstate, module);
+    Py_INCREF(new_callback);
+
+    // Set thread local callback. This will drive behavior of our shim, if/when it
+    // is installed.
+    eval_frame_callback_set(new_callback);
+
+    // Transfer owned reference from eval_frame_callback_get() to caller
+    // without Py_DECREF/Py_INCREF.
+  } else {
+    // We retain a reference to old_callback because it's still the
+    // eval_frame_callback, so we need to give the caller their
+    // own reference.
+    Py_INCREF(old_callback);
   }
-
-  Py_INCREF(new_callback);
-  Py_DECREF(old_callback);
-
-  // Set thread local callback. This will drive behavior of our shim, if/when it
-  // is installed.
-  eval_frame_callback_set(new_callback);
 
   return old_callback;
 }
@@ -582,7 +591,7 @@ static PyObject* set_eval_frame_py(PyObject* module, PyObject* callback) {
       "python enabled=%d and is run_only=%d",
       callback != Py_None,
       callback == Py_False);
-  return set_eval_frame(callback, PyThreadState_GET(), module);
+  return set_eval_frame(callback, module);
 }
 
 static PyObject* set_skip_guard_eval_unsafe(
