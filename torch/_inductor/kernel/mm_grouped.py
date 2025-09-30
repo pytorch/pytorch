@@ -470,7 +470,7 @@ def grouped_mm_args(
 aten__grouped_mm = ExternKernelChoice(
     torch._grouped_mm,
     "at::_grouped_mm",
-    op_overload=aten._grouped_mm,
+    op_overload=aten._grouped_mm.default,
     has_out_variant=False,
 )
 
@@ -478,7 +478,7 @@ aten__grouped_mm = ExternKernelChoice(
 aten__scaled_grouped_mm = ExternKernelChoice(
     torch._scaled_grouped_mm,
     "at::_scaled_grouped_mm",
-    op_overload=aten._scaled_grouped_mm,
+    op_overload=aten._scaled_grouped_mm.default,
     has_out_variant=False,
 )
 
@@ -735,6 +735,9 @@ def tuned_scaled_grouped_mm(
     layout: Optional[Layout] = None,
 ) -> TensorBox:
     """Auto-tuning for _scaled_grouped_mm() operator."""
+
+    # matching _scaled_grouped_mm_cuda Blas.cpp implementation
+    out_dtype = out_dtype or torch.bfloat16
 
     return _tuned_grouped_mm_common(
         "aten._scaled_grouped_mm.default",

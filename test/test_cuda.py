@@ -1479,6 +1479,13 @@ except RuntimeError as e:
         res_cpu = src.cpu()[idx.cpu()]
         self.assertEqual(res.cpu(), res_cpu)
 
+    def test_fast_index_overflow(self):
+        src = torch.randint(0, 20, (4, 87, 1056, 736), device="cuda")
+        indices = torch.tensor([True, False, False, True], device="cuda")
+        res = src[indices]
+        res_cpu = src.cpu()[indices.cpu()]
+        self.assertEqual(res.cpu(), res_cpu)
+
     def test_randint_randomness_for_large_range(self) -> None:
         # For large ranges, randint generation is slightly different. This lead to a subtle bug where some Philox
         # offsets were not calculated correctly, resulting in reused random states.
@@ -7289,9 +7296,7 @@ class TestCudaDeviceParametrized(TestCase):
         """
         from torch.cuda import _compile_kernel
 
-        spin_wait_kernel = _compile_kernel(
-            kernel_source, "wait_for_cpu", compute_capability="70"
-        )
+        spin_wait_kernel = _compile_kernel(kernel_source, "wait_for_cpu")
 
         x = torch.ones(4, device="cuda")
         x_cpu = torch.zeros(x.shape, device="cpu").pin_memory()
