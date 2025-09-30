@@ -41,4 +41,7 @@ class BaddbmmOperator(Operator):
         """Generate code for baddbmm operation."""
         if len(input_names) != 3:
             raise ValueError("Baddbmm requires exactly 3 inputs (bias, batch1, batch2)")
-        return f"{output_name} = torch.baddbmm({input_names[0]}, {input_names[1]}, {input_names[2]})"
+        bias = input_names[0]
+        batch1 = f"{input_names[1]}.to({bias}.dtype)"
+        batch2 = f"{input_names[2]}.to({bias}.dtype)"
+        return f"{output_name} = torch.baddbmm({bias}, {batch1}, {batch2})"

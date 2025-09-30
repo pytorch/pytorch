@@ -13,6 +13,8 @@ from .max_pool2d import MaxPool2dOperator
 from .interpolate import InterpolateOperator
 from .group_norm import GroupNormOperator
 from .embedding import EmbeddingOperator
+from .rms_norm import RmsNormOperator
+from .einsum import EinsumOperator
 
 __all__ = [
     'MmOperator',
@@ -28,4 +30,6 @@ __all__ = [
     'InterpolateOperator',
     'GroupNormOperator',
     'EmbeddingOperator',
+    'RmsNormOperator',
+    'EinsumOperator',
 ]

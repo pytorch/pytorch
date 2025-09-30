@@ -55,4 +55,4 @@ class PadOperator(Operator):
         # Use the padding values calculated in decompose
         pad = getattr(self, '_pad_values', [0, 1])
 
-        return f"{output_name} = torch.nn.functional.pad({input_names[0]}, {pad}, mode='{mode}', value={value})"
+        return f"{output_name} = torch._C._nn.pad({input_names[0]}, {pad}, mode='{mode}', value={value})"

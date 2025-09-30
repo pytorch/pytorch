@@ -32,9 +32,10 @@ class ScaledDotProductAttentionOperator(Operator):
         # The output shape matches the query shape: (batch_size, num_heads, seq_len, head_dim)
         # Key and value can have different sequence length but must have same head_dim
 
-        # Choose key/value sequence length - keep it reasonable to avoid memory issues
-        max_kv_seq_len = min(seq_len * 2, 128)  # Limit to avoid too large tensors
-        min_kv_seq_len = max(1, seq_len // 2)   # Ensure at least 1
+        # Choose key/value sequence length - keep it reasonable and valid
+        # Ensure min <= max to avoid empty randint ranges
+        max_kv_seq_len = max(1, min(seq_len * 2, 128))
+        min_kv_seq_len = max(1, min(seq_len // 2, max_kv_seq_len))
         key_value_seq_len = random.randint(min_kv_seq_len, max_kv_seq_len)
 
         # Query shape (determines output shape)
@@ -70,4 +71,5 @@ class ScaledDotProductAttentionOperator(Operator):
         q = f"{input_names[0]}.float()"
         k = f"{input_names[1]}.float()"
         v = f"{input_names[2]}.float()"
-        return f"{output_name} = torch.nn.functional.scaled_dot_product_attention({q}, {k}, {v})"
+        cast_back = f".to({input_names[0]}.dtype)"
+        return f"{output_name} = torch.nn.functional.scaled_dot_product_attention({q}, {k}, {v}){cast_back}"

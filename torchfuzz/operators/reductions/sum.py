@@ -56,12 +56,12 @@ class SumOperator(Operator):
         sd = getattr(output_tensor, "_sum_dim", None)
         src = input_names[0]
         if sd == "all":
-            return f"{output_name} = {src}.sum()"
+            return f"{output_name} = {src}.sum().to({src}.dtype)"
         elif isinstance(sd, tuple):
             # If you later extend to multi-dim reductions, this handles it.
-            return f"{output_name} = {src}.sum(dim={sd})"
+            return f"{output_name} = {src}.sum(dim={sd}).to({src}.dtype)"
         elif isinstance(sd, int):
-            return f"{output_name} = {src}.sum(dim={sd})"
+            return f"{output_name} = {src}.sum(dim={sd}).to({src}.dtype)"
         else:
             # Safe default for legacy cases: reduce all dims
-            return f"{output_name} = {src}.sum()"
+            return f"{output_name} = {src}.sum().to({src}.dtype)"

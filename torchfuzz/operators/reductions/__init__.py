@@ -9,6 +9,7 @@ from .var import VarOperator
 from .norm import NormOperator
 from .argmax import ArgmaxOperator
 from .argmin import ArgminOperator
+from .argsort import ArgsortOperator
 
 __all__ = [
     'SumOperator',
@@ -20,4 +21,5 @@ __all__ = [
     'NormOperator',
     'ArgmaxOperator',
     'ArgminOperator',
+    'ArgsortOperator',
 ]

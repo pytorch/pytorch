@@ -47,7 +47,12 @@ IGNORE_PATTERNS: List[re.Pattern] = [
     re.compile(r"Error in op: torch\.ops\.aten\.convolution\.default"),
     re.compile(r"IndexError: list index out of range"),
     re.compile(r"TypeError\('unexpected type fp32'\)"),
+    re.compile(r"Argument 'sym_size_int_\d+' of Node 'full_default' was used before it has been defined!"),
+    re.compile(r"IncompatibleTypeErrorImpl\('invalid operands of type pointer<fp16> and triton\.language\.float64'\)"),
+    re.compile(r"AssertionError: 'XBLOCK' too large"),
+    re.compile(r"AssertionError: Node add_\d+ was invalid, but is output"),
     # Add more patterns here as needed, e.g.:
+
 
     # re.compile(r"Some other error message"),
 ]
