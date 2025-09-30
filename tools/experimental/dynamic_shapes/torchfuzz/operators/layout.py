@@ -166,11 +166,11 @@ class FlattenOperator(LayoutOperatorBase):
         return "torch.flatten"
 
     def can_produce(self, output_spec: Spec) -> bool:
-        """Flatten can only produce 1D or 2D tensors (depending on start_dim)."""
+        """Flatten can only produce 1D tensors when using torch.flatten() without start_dim."""
         if not isinstance(output_spec, TensorSpec):
             return False
-        # Flatten typically produces 1D or 2D tensors
-        return len(output_spec.size) <= 2
+        # Since we always use torch.flatten() without start_dim, we can only produce 1D tensors
+        return len(output_spec.size) == 1
 
     def fuzz_inputs_specs(self, output_spec: Spec) -> list[Spec]:
         """Generate input spec for flatten operation."""
@@ -233,14 +233,9 @@ class FlattenOperator(LayoutOperatorBase):
         if not isinstance(output_spec, TensorSpec):
             raise ValueError("FlattenOperator can only produce TensorSpec outputs")
 
-        # Choose start_dim based on output dimensions
-        if len(output_spec.size) == 1:
-            # Flatten all dimensions
-            return f"{output_name} = torch.flatten({input_names[0]})"
-        else:
-            # Flatten from a random start dimension
-            start_dim = random.randint(0, 1)
-            return f"{output_name} = torch.flatten({input_names[0]}, start_dim={start_dim})"
+        # Always flatten all dimensions to avoid shape calculation errors
+        # This ensures the output matches the expected output_spec shape
+        return f"{output_name} = torch.flatten({input_names[0]})"
 
 
 class SqueezeOperator(LayoutOperatorBase):
@@ -277,14 +272,9 @@ class SqueezeOperator(LayoutOperatorBase):
 
     def codegen(self, output_name: str, input_names: list[str], output_spec: Spec) -> str:
         """Generate code for squeeze operation."""
-        # Randomly choose between squeeze() and squeeze(dim)
-        if random.random() < 0.7:
-            # Just squeeze all singleton dimensions
-            return f"{output_name} = torch.squeeze({input_names[0]})"
-        else:
-            # Squeeze a specific dimension (we'll let PyTorch handle invalid dims)
-            dim = random.randint(0, 3)
-            return f"{output_name} = torch.squeeze({input_names[0]}, dim={dim})"
+        # Always use squeeze() without specifying dim to avoid dimension errors
+        # This will squeeze all singleton dimensions safely
+        return f"{output_name} = torch.squeeze({input_names[0]})"
 
 
 class UnsqueezeOperator(LayoutOperatorBase):

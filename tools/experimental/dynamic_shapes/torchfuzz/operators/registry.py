@@ -62,10 +62,10 @@ class OperatorRegistry:
 
         # Tensor layout operators
         self.register(ViewOperator())
-        # self.register(ReshapeOperator())
-        # self.register(FlattenOperator())
-        # self.register(SqueezeOperator())
-        # self.register(UnsqueezeOperator())
+        self.register(ReshapeOperator())
+        self.register(FlattenOperator())
+        self.register(SqueezeOperator())
+        self.register(UnsqueezeOperator())
 
     def register(self, operator: Operator):
         """Register an operator in the registry."""
