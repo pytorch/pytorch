@@ -56,6 +56,7 @@
 #include <torch/csrc/Stream.h>
 #include <torch/csrc/THP.h>
 #include <torch/csrc/TypeInfo.h>
+#include <torch/csrc/acc/Module.h>
 #include <torch/csrc/api/include/torch/python/init.h>
 #include <torch/csrc/autograd/generated/python_return_types.h>
 #include <torch/csrc/autograd/python_cpp_function.h>
@@ -122,10 +123,14 @@
 #endif
 #endif
 
+#ifdef USE_DISTRIBUTED
+#ifdef USE_C10D
 #include <torch/csrc/distributed/autograd/python_autograd.h>
 #include <torch/csrc/distributed/c10d/c10d.h>
 #include <torch/csrc/distributed/rpc/rpc.h>
 #include <torch/csrc/distributed/rpc/testing/testing.h>
+#endif
+#endif
 
 #if defined(USE_VALGRIND)
 #include <callgrind.h>
@@ -138,6 +143,14 @@
 #include <torch/nativert/python/Bindings.h>
 
 namespace py = pybind11;
+
+TORCH_MAKE_PYBIND_ENUM_FASTER(at::native::ConvBackend)
+TORCH_MAKE_PYBIND_ENUM_FASTER(sdp::SDPBackend)
+TORCH_MAKE_PYBIND_ENUM_FASTER(at::LinalgBackend)
+TORCH_MAKE_PYBIND_ENUM_FASTER(at::BlasBackend)
+TORCH_MAKE_PYBIND_ENUM_FASTER(at::ROCmFABackend)
+TORCH_MAKE_PYBIND_ENUM_FASTER(at::native::BatchNormBackend)
+TORCH_MAKE_PYBIND_ENUM_FASTER(at::impl::TorchFunctionDisabledState)
 
 static PyObject* module;
 
@@ -548,7 +561,11 @@ static PyObject* THPModule_getBackcompatKeepdimWarn(
 }
 
 static PyObject* THPModule_hasDistributed(PyObject* _unused, PyObject* noargs) {
+#ifdef USE_DISTRIBUTED
   Py_RETURN_TRUE;
+#else
+  Py_RETURN_FALSE;
+#endif
 }
 
 static PyObject* THPModule_showConfig(PyObject* module, PyObject* noargs) {
@@ -2000,6 +2017,7 @@ PyObject* initModule() {
 #ifdef USE_XPU
   THPUtils_addPyMethodDefs(methods, THXPModule_methods());
 #endif
+#if defined(USE_DISTRIBUTED) && defined(USE_C10D)
   THPUtils_addPyMethodDefs(
       methods, torch::distributed::c10d::python_functions());
 #ifndef _WIN32
@@ -2009,6 +2027,7 @@ PyObject* initModule() {
       methods, torch::distributed::autograd::python_functions());
   THPUtils_addPyMethodDefs(
       methods, torch::distributed::rpc::testing::python_functions());
+#endif
 #endif
 
   static struct PyModuleDef torchmodule = {
@@ -2079,6 +2098,7 @@ PyObject* initModule() {
   torch::cpu::initModule(module);
   torch::accelerator::initModule(module);
   torch::instruction_counter::initModule(module);
+  torch::acc::initModule(module);
   torch::initVerboseBindings(module);
   ASSERT_TRUE(THPStorage_init(module));
   torch::functionalization::initModule(module);

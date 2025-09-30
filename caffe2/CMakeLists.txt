@@ -544,9 +544,11 @@ if(NOT INTERN_BUILD_MOBILE AND NOT BUILD_LITE_INTERPRETER)
     ${TORCH_SRC_DIR}/csrc/utils/byte_order.cpp
   )
 
-  append_filelist("libtorch_distributed_base_sources" TORCH_SRCS)
-  if(NOT WIN32)
-    append_filelist("libtorch_distributed_extra_sources" TORCH_SRCS)
+  if(USE_DISTRIBUTED)
+    append_filelist("libtorch_distributed_base_sources" TORCH_SRCS)
+    if(NOT WIN32)
+      append_filelist("libtorch_distributed_extra_sources" TORCH_SRCS)
+    endif()
   endif()
 endif()
 
@@ -577,30 +579,32 @@ if(USE_CUDA)
     list(APPEND Caffe2_GPU_SRCS
       ${TORCH_SRC_DIR}/csrc/cuda/nccl.cpp)
   endif()
-  append_filelist("libtorch_cuda_distributed_base_sources" Caffe2_GPU_SRCS)
-  if(NOT WIN32)
-    append_filelist("libtorch_cuda_distributed_extra_sources" Caffe2_GPU_SRCS)
-    set_source_files_properties(
-      ${TORCH_SRC_DIR}/csrc/distributed/c10d/ProcessGroupNCCL.cpp
-      ${TORCH_SRC_DIR}/csrc/distributed/c10d/cuda/utils.cpp
-      ${TORCH_SRC_DIR}/csrc/distributed/c10d/intra_node_comm.cpp
-      ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/CudaDMAConnectivity.cpp
-      ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory.cu
-      ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryOps.cu
-      ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.cpp
-      ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/NCCLSymmetricMemory.cu
-      ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/cuda_mem_pool.cpp
-      PROPERTIES COMPILE_FLAGS "-DPYTORCH_C10_DRIVER_API_SUPPORTED=1"
-    )
-  endif()
+  if(USE_DISTRIBUTED)
+    append_filelist("libtorch_cuda_distributed_base_sources" Caffe2_GPU_SRCS)
+    if(NOT WIN32)
+      append_filelist("libtorch_cuda_distributed_extra_sources" Caffe2_GPU_SRCS)
+      set_source_files_properties(
+        ${TORCH_SRC_DIR}/csrc/distributed/c10d/ProcessGroupNCCL.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/c10d/cuda/utils.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/c10d/intra_node_comm.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/CudaDMAConnectivity.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory.cu
+        ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryOps.cu
+        ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/NCCLSymmetricMemory.cu
+        ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/cuda_mem_pool.cpp
+        PROPERTIES COMPILE_FLAGS "-DPYTORCH_C10_DRIVER_API_SUPPORTED=1"
+      )
+    endif()
 
-  set(ASYNC_MM_FILE "${TORCH_SRC_DIR}/csrc/distributed/c10d/cuda/AsyncMM.cu")
-  # Disable the warning to make cutlass warp-specialized cooperative kernel build for gcc-9
-  if(CMAKE_COMPILER_IS_GNUCXX)
-    set_source_files_properties(${ASYNC_MM_FILE} PROPERTIES COMPILE_FLAGS "-Wno-unused-but-set-variable")
-  endif()
-  if(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL 12.0 AND CUDA_NVCC_FLAGS MATCHES ".*compute_90.*")
-    set_source_files_properties(${ASYNC_MM_FILE} PROPERTIES COMPILE_FLAGS "-gencode arch=compute_90a,code=sm_90a")
+    set(ASYNC_MM_FILE "${TORCH_SRC_DIR}/csrc/distributed/c10d/cuda/AsyncMM.cu")
+    # Disable the warning to make cutlass warp-specialized cooperative kernel build for gcc-9
+    if(CMAKE_COMPILER_IS_GNUCXX)
+      set_source_files_properties(${ASYNC_MM_FILE} PROPERTIES COMPILE_FLAGS "-Wno-unused-but-set-variable")
+    endif()
+    if(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL 12.0 AND CUDA_NVCC_FLAGS MATCHES ".*compute_90.*")
+      set_source_files_properties(${ASYNC_MM_FILE} PROPERTIES COMPILE_FLAGS "-gencode arch=compute_90a,code=sm_90a")
+    endif()
   endif()
   set_source_files_properties(
     ${TORCH_ROOT}/aten/src/ATen/cuda/detail/LazyNVRTC.cpp
@@ -633,9 +637,11 @@ if(USE_ROCM)
     list(APPEND Caffe2_HIP_SRCS
       ${TORCH_SRC_DIR}/csrc/cuda/nccl.cpp)
   endif()
-  append_filelist("libtorch_cuda_distributed_base_sources" Caffe2_HIP_SRCS)
-  if(NOT WIN32)
-    append_filelist("libtorch_cuda_distributed_extra_sources" Caffe2_HIP_SRCS)
+  if(USE_DISTRIBUTED)
+    append_filelist("libtorch_cuda_distributed_base_sources" Caffe2_HIP_SRCS)
+    if(NOT WIN32)
+      append_filelist("libtorch_cuda_distributed_extra_sources" Caffe2_HIP_SRCS)
+    endif()
   endif()
   # caffe2_nvrtc's stubs to driver APIs are useful for HIP.
   # See NOTE [ ATen NVRTC Stub and HIP ]
@@ -1356,10 +1362,12 @@ if(BUILD_TEST)
     add_subdirectory(${TORCH_ROOT}/test/cpp/jit ${CMAKE_BINARY_DIR}/test_jit)
     add_subdirectory(${TORCH_ROOT}/test/cpp/nativert ${CMAKE_BINARY_DIR}/test_nativert)
     add_subdirectory(${TORCH_ROOT}/test/inductor ${CMAKE_BINARY_DIR}/test_inductor)
-    add_subdirectory(${TORCH_ROOT}/test/cpp/c10d ${CMAKE_BINARY_DIR}/test_cpp_c10d)
-    if(NOT WIN32)
-      add_subdirectory(${TORCH_ROOT}/test/cpp/dist_autograd ${CMAKE_BINARY_DIR}/dist_autograd)
-      add_subdirectory(${TORCH_ROOT}/test/cpp/rpc ${CMAKE_BINARY_DIR}/test_cpp_rpc)
+    if(USE_DISTRIBUTED)
+      add_subdirectory(${TORCH_ROOT}/test/cpp/c10d ${CMAKE_BINARY_DIR}/test_cpp_c10d)
+      if(NOT WIN32)
+        add_subdirectory(${TORCH_ROOT}/test/cpp/dist_autograd ${CMAKE_BINARY_DIR}/dist_autograd)
+        add_subdirectory(${TORCH_ROOT}/test/cpp/rpc ${CMAKE_BINARY_DIR}/test_cpp_rpc)
+      endif()
     endif()
     if(NOT NO_API)
       add_subdirectory(${TORCH_ROOT}/test/cpp/api ${CMAKE_BINARY_DIR}/test_api)
@@ -1464,40 +1472,46 @@ if(BUILD_LITE_INTERPRETER)
   endif()
 endif()
 
-if(USE_GLOO AND USE_C10D_GLOO)
-  target_compile_definitions(torch_cpu PUBLIC USE_C10D_GLOO)
-endif()
-if(USE_UCC AND USE_C10D_UCC)
-  target_compile_definitions(torch_cpu PUBLIC USE_C10D_UCC)
-  if(USE_CUDA)
-    target_compile_definitions(torch_cuda PUBLIC USE_C10D_UCC)
+
+# Pass USE_DISTRIBUTED to torch_cpu, as some codes in jit/pickler.cpp and
+# jit/unpickler.cpp need to be compiled only when USE_DISTRIBUTED is set
+if(USE_DISTRIBUTED)
+  target_compile_definitions(torch_cpu PUBLIC USE_DISTRIBUTED)
+  if(USE_GLOO AND USE_C10D_GLOO)
+    target_compile_definitions(torch_cpu PUBLIC USE_C10D_GLOO)
   endif()
-endif()
-if(USE_NCCL AND USE_C10D_NCCL)
-  if(USE_ROCM)
-    target_compile_definitions(torch_hip PUBLIC USE_C10D_NCCL)
-  else()
-    target_compile_definitions(torch_cuda PUBLIC USE_C10D_NCCL)
+  if(USE_UCC AND USE_C10D_UCC)
+    target_compile_definitions(torch_cpu PUBLIC USE_C10D_UCC)
+    if(USE_CUDA)
+      target_compile_definitions(torch_cuda PUBLIC USE_C10D_UCC)
+    endif()
   endif()
-endif()
-if(USE_MPI AND USE_C10D_MPI)
-  if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    set_source_files_properties(
-      "${TORCH_SRC_DIR}/csrc/distributed/c10d/ProcessGroupMPI.cpp"
-      PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
+  if(USE_NCCL AND USE_C10D_NCCL)
+    if(USE_ROCM)
+      target_compile_definitions(torch_hip PUBLIC USE_C10D_NCCL)
+    else()
+      target_compile_definitions(torch_cuda PUBLIC USE_C10D_NCCL)
+    endif()
   endif()
-  target_compile_definitions(torch_cpu PUBLIC USE_C10D_MPI)
-endif()
-# Pass USE_RPC in order to reduce use of
-# #if defined(USE_DISTRIBUTED) && !defined(_WIN32)
-# need to be removed when RPC is supported
-if(NOT WIN32)
-  target_compile_definitions(torch_cpu PUBLIC USE_RPC)
-endif()
-# Pass USE_TENSORPIPE to torch_cpu as some parts of rpc/utils.cpp
-# can only be compiled with USE_TENSORPIPE is set.
-if(USE_TENSORPIPE)
-  target_compile_definitions(torch_cpu PUBLIC USE_TENSORPIPE)
+  if(USE_MPI AND USE_C10D_MPI)
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+      set_source_files_properties(
+        "${TORCH_SRC_DIR}/csrc/distributed/c10d/ProcessGroupMPI.cpp"
+        PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
+    endif()
+    target_compile_definitions(torch_cpu PUBLIC USE_C10D_MPI)
+  endif()
+  # Pass USE_RPC in order to reduce use of
+  # #if defined(USE_DISTRIBUTED) && !defined(_WIN32)
+  # need to be removed when RPC is supported
+  if(NOT WIN32)
+    target_compile_definitions(torch_cpu PUBLIC USE_RPC)
+  endif()
+  # Pass USE_TENSORPIPE to torch_cpu as some parts of rpc/utils.cpp
+  # can only be compiled with USE_TENSORPIPE is set.
+  if(USE_TENSORPIPE)
+    target_compile_definitions(torch_cpu PUBLIC USE_TENSORPIPE)
+  endif()
 endif()
 
 if(NOT INTERN_BUILD_MOBILE)
