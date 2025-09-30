@@ -56,7 +56,9 @@ def get_symbols(lib: str) -> list[tuple[str, str, str]]:
     return [x.split(" ", 2) for x in lines.decode("latin1").split("\n")[:-1]]
 
 
-def grep_symbols(lib: str, patterns: list[Any], symbol_type: str|None = None) -> list[str]:
+def grep_symbols(
+    lib: str, patterns: list[Any], symbol_type: str | None = None
+) -> list[str]:
     def _grep_symbols(
         symbols: list[tuple[str, str, str]], patterns: list[Any]
     ) -> list[str]:
