@@ -159,11 +159,16 @@ VECTORIZABLE_DTYPES: list[torch.dtype] = [
 ]
 
 MASKED_VECTORIZABLE_DTYPES: list[torch.dtype] = [
+    torch.float64,
     torch.float,
     torch.bfloat16,
     torch.float16,
     torch.uint8,
     torch.int8,
+    torch.int32,
+    torch.int64,
+    torch.float8_e4m3fn,
+    torch.float8_e5m2,
 ]
 
 
@@ -2967,7 +2972,10 @@ class CppVecKernel(CppKernel):
                 cdtype = DTYPE_TO_CPP[dtype]
                 index = ops.index_expr(index, torch.int64).value
                 assert isinstance(index, CppCSEVariable) and index.is_vec
-                line = f"atomic_add_vec<{cdtype}, {n_idx}, {n_src}>({var}, {index}, {value});"
+                if self.tail_size:
+                    line = f"atomic_add_vec<{cdtype}, {n_idx}, {n_src}>({var}, {index}, {value}, {cexpr_index(self.tail_size)});"
+                else:
+                    line = f"atomic_add_vec<{cdtype}, {n_idx}, {n_src}>({var}, {index}, {value});"
                 self.stores.writeline(DeferredLine(name, line))
         else:
             raise NotImplementedError(f"store mode={mode}")
