@@ -2955,6 +2955,14 @@ def _persistent_reduction_configs(
                 )
             )
 
+    tiny_configs = [
+        triton_config_reduction(
+            size_hints,
+            2 * (256 // rnumel) if rnumel <= 256 else 1,
+            rnumel,
+            reduction_hint=reduction_hint,
+        )
+    ]
     # defer to more autotuning, initially
     if "y" in size_hints:
         pass
@@ -2981,23 +2989,15 @@ def _persistent_reduction_configs(
                     )
                 ]
 
-    elif reduction_hint == ReductionHint.OUTER:
-        configs = configs[-1:]
-    elif reduction_hint == ReductionHint.OUTER_TINY:
-        tiny_configs = [
-            triton_config_reduction(
-                size_hints,
-                2 * (256 // rnumel) if rnumel <= 256 else 1,
-                rnumel,
-                reduction_hint=reduction_hint,
-            )
-        ]
-        if max_autotune_enabled:
-            for tconfig in tiny_configs:
-                if tconfig not in configs:
-                    configs.append(tconfig)
-            else:
-                configs = tiny_configs
+        elif reduction_hint == ReductionHint.OUTER:
+            configs = configs[-1:]
+        elif reduction_hint == ReductionHint.OUTER_TINY:
+            configs = tiny_configs
+    else:
+		# If autotune is enabled append tiny configs
+        for conf in tiny_configs:
+            if conf not in configs:
+                configs.append(conf)
 
     for c in configs:
         # we don't need Rn_BLOCK for persistent reduction
