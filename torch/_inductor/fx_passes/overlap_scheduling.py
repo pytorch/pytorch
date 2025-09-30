@@ -11,6 +11,7 @@ from typing import Any, Callable, Optional, Union
 import torch
 import torch.fx as fx
 from torch._dynamo.utils import counters, dynamo_timed
+from torch._inductor.fx_passes.bucketing import is_wait_tensor
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._ordered_set import OrderedSet
 
@@ -18,13 +19,6 @@ from torch.utils._ordered_set import OrderedSet
 log = logging.getLogger(__name__)
 
 from ..pattern_matcher import stable_topological_sort
-
-
-def is_wait_tensor(node: torch.fx.Node) -> bool:
-    return (
-        node.op == "call_function"
-        and node.target == torch.ops._c10d_functional.wait_tensor.default
-    )
 
 
 def get_custom_estimation(n: fx.Node) -> Optional[float]:
@@ -156,6 +150,16 @@ class CollectiveInfo:
         return self.exposed_time_ms != 0
 
 
+@dataclass
+class CollBucket:
+    """Track information about a bucket of collectives."""
+
+    collectives: list[fx.Node]  # Original collective starts
+    bucketed_start: Optional[fx.Node] = None  # After bucketing
+    bucketed_wait: Optional[fx.Node] = None  # After bucketing
+    total_bytes: int = 0
+
+
 class OverlapScheduler:
     """
     Scheduler that reorders operations to maximize compute-collective overlap.
@@ -184,7 +188,7 @@ class OverlapScheduler:
         self,
         gm: torch.fx.GraphModule,
         max_in_flight_gb: float = 2.0,
-        compute_overlap_multipler: float = 1.0,
+        compute_overlap_multipler: float = 2.0,
         max_coll_distance: int = 1000,
     ):
         self.gm = gm
@@ -325,6 +329,8 @@ class OverlapScheduler:
                 self._handle_other(node)
 
         self._reorder_graph()
+        if torch._inductor.config.test_configs.aten_fx_overlap_preserving_bucketing:
+            self._bucket_collectives()
         return self.gm
 
     def _handle_other(self, node: fx.Node) -> None:
@@ -582,6 +588,20 @@ class OverlapScheduler:
         )
 
         self.reorder_graph()
+
+    def _bucket_collectives(self) -> None:
+        from torch._inductor.fx_passes.overlap_preserving_bucketer import (
+            OverlapPreservingBucketer,
+        )
+
+        bucketer = OverlapPreservingBucketer(
+            graph=self.graph,
+            collective_info=self.collective_info,
+            node_ancestors=self.node_ancestors,
+            scheduled=self.scheduled,
+            max_bucket_memory_gb=1.0,  # Could make this configurable
+        )
+        bucketer.bucket_collectives()
 
     def compute_potential_hidden_nodes(
         self, nodes_to_check: Iterable[fx.Node], limit_coll_per_compute: bool = False
