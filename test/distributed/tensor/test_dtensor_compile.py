@@ -317,6 +317,45 @@ def forward(self, b_parametrizations_buffer_original0, x):
         self.assertEqual(res, ref)
 
     @skipIfHpu
+    def test_dtensor_dynamic_embedding(self):
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        # Create a distributed embedding weight (sharded or replicated)
+        num_embeddings = 1000
+        embedding_dim = 64
+        placements = [Replicate()]
+        weight = distribute_tensor(
+            torch.randn(num_embeddings, embedding_dim, device=self.device_type, requires_grad=True),
+            mesh,
+            placements,
+        )
+
+        class EmbeddingModule(torch.nn.Module):
+            def __init__(self, weight):
+                super().__init__()
+                self.weight = torch.nn.Parameter(weight)
+
+            def forward(self, indices):
+                return torch.nn.functional.embedding(indices, self.weight)
+
+        module = EmbeddingModule(weight)
+        indices = torch.randint(0, num_embeddings, (4, 8), device=self.device_type)
+        dt_indices = DTensor.from_local(indices, mesh, placements, run_check=False)
+
+        # Eager output
+        out_eager = module(dt_indices)
+        out_eager.sum().backward()
+
+        # Compiled output using test harness abstractions
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        compiled_module = torch.compile(module, backend=cnt, fullgraph=True, dynamic=True)
+        out_compiled = compiled_module(dt_indices)
+        out_compiled.sum().backward()
+
+        self.assertTrue(torch.allclose(out_eager.to_local(), out_compiled.to_local(), atol=1e-5))
+        self.assertEqual(cnt.frame_count, 1)
+
+    @skipIfHpu
     @unittest.skip(
         "DTensor + dynamic fails - s77 + 8 is not tracked with proxy .. proxy_tensor.PythonKeyTracer"
     )
