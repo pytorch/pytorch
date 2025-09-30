@@ -56,6 +56,7 @@ def is_fsdp_reduce_scatter_wait(wait: torch.fx.Node) -> bool:
 def bucket_fsdp_all_gather(
     gm: torch.fx.GraphModule,
     bucket_cap_mb_by_bucket_idx: Optional[Callable[[int], float]] = None,
+    mode: Optional[str] = None,
 ) -> None:
     """
     Bucketing pass for SimpleFSDP all_gather ops.
@@ -79,12 +80,13 @@ def bucket_fsdp_all_gather(
     )
     if len(ag_buckets) == 0:
         return
-    merge_all_gather(gm, ag_buckets)
+    merge_all_gather(gm, ag_buckets, mode)
 
 
 def bucket_fsdp_reduce_scatter(
     gm: torch.fx.GraphModule,
     bucket_cap_mb_by_bucket_idx: Optional[Callable[[int], float]] = None,
+    mode: Optional[str] = None,
 ) -> None:
     """
     Bucketing pass for SimpleFSDP reduce_scatter ops.
@@ -109,4 +111,4 @@ def bucket_fsdp_reduce_scatter(
     )
     if len(rs_buckets) == 0:
         return
-    merge_reduce_scatter(gm, rs_buckets)
+    merge_reduce_scatter(gm, rs_buckets, mode)

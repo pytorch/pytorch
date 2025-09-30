@@ -551,6 +551,32 @@ std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
 
 static std::atomic<size_t> process_group_id = 0;
 
+c10::intrusive_ptr<ProcessGroupGloo::Options> ProcessGroupGloo::Options::
+    create_default(std::chrono::milliseconds timeout) {
+  auto options = ::c10d::ProcessGroupGloo::Options::create();
+  bool lazyInit = ::c10d::getDefaultGlooLazyInit();
+
+  // Use interfaces listed in "GLOO_SOCKET_IFNAME", if set.
+  auto ifnameEnv = c10::utils::get_env("GLOO_SOCKET_IFNAME");
+  if (ifnameEnv && ifnameEnv->size() > 1) {
+    for (const auto& iface : ::c10d::split(',', ifnameEnv->c_str())) {
+      options->devices.push_back(
+          ::c10d::ProcessGroupGloo::createDeviceForInterface(iface, lazyInit));
+    }
+  } else {
+    // If no hostname is specified, this function looks up
+    // the machine's hostname and returns a device instance
+    // associated with the address that the hostname resolves to.
+    options->devices.push_back(
+        ::c10d::ProcessGroupGloo::createDefaultDevice(lazyInit));
+  }
+
+  options->timeout = timeout;
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
+  options->threads = options->devices.size() * 2;
+  return options;
+}
+
 ProcessGroupGloo::ProcessGroupGloo(
     const c10::intrusive_ptr<Store>& store,
     int rank,
@@ -710,7 +736,12 @@ c10::intrusive_ptr<Backend> ProcessGroupGloo::split(
   }
 
   auto glooOpts = c10::dynamic_intrusive_pointer_cast<Options>(opts);
-  TORCH_CHECK(glooOpts != nullptr, "opts not a ProcessGroupGloo::Options.");
+  if (glooOpts == nullptr) {
+    TORCH_WARN_ONCE(
+        "Tried to pass options to ProcessGroupGloo::split that are not ProcessGroupGloo::Options."
+        "Falling back to default options.");
+    glooOpts = ProcessGroupGloo::Options::create_default();
+  }
 
   // TODO: we need to get rid of globalRanksInGroup eventually.
   std::vector<uint64_t> globalRanksInGroup;
@@ -729,7 +760,12 @@ c10::intrusive_ptr<Backend> ProcessGroupGloo::merge(
     const int& rank,
     const int& size) {
   auto glooOpts = c10::dynamic_intrusive_pointer_cast<Options>(opts);
-  TORCH_CHECK(glooOpts != nullptr, "opts not a ProcessGroupGloo::Options.");
+  if (glooOpts == nullptr) {
+    TORCH_WARN_ONCE(
+        "Tried to pass options to ProcessGroupGloo::merge that are not ProcessGroupGloo::Options."
+        "Falling back to default options.");
+    glooOpts = ProcessGroupGloo::Options::create_default();
+  }
   auto pg = c10::make_intrusive<ProcessGroupGloo>(
       store->clone(), rank, size, glooOpts);
   return c10::static_intrusive_pointer_cast<Backend>(pg);
@@ -1345,7 +1381,8 @@ class AsyncAllgatherWork : public ProcessGroupGloo::AsyncWork {
     // Use single flat output tensor.
     // The first dimension corresponds to the index into outputs[N],
     // so copying into the actual output later is easy.
-    at::Tensor flatOutputTensor = newLikeFlat(outputs[0]);
+    at::Tensor flatOutputTensor =
+        newLikeFlat(outputs[0], /*preserve_strides*/ false);
     GENERATE_ALL_TYPES(scalarType, setOutput, opts, flatOutputTensor);
     gloo::allgather(opts);
 
@@ -1362,7 +1399,7 @@ class AsyncAllgatherWork : public ProcessGroupGloo::AsyncWork {
   }
 
   const std::vector<at::Tensor> getOutputTensors() override {
-    return {newLikeFlat(outputs[0])};
+    return {newLikeFlat(outputs[0], /*preserve_strides*/ false)};
   }
 
   void run() override {
@@ -1658,7 +1695,7 @@ class AsyncAllgatherCoalescedWork : public ProcessGroupGloo::AsyncWork {
   }
 
   const std::vector<at::Tensor> getOutputTensors() override {
-    return {newLikeFlat(output_lists[0])};
+    return {newLikeFlat(output_lists[0], /*preserve_strides*/ false)};
   }
 
   void run() override {
@@ -1782,7 +1819,7 @@ class AsyncGatherWork : public ProcessGroupGloo::AsyncWork {
     // This is later scattered to the separate output tensors.
     at::Tensor flatOutputTensor;
     if (context_->rank == root) {
-      flatOutputTensor = newLikeFlat(outputs[0]);
+      flatOutputTensor = newLikeFlat(outputs[0], /*preserve_strides*/ false);
       GENERATE_ALL_TYPES(scalarType, setOutput, opts, flatOutputTensor);
     }
 
@@ -1805,7 +1842,8 @@ class AsyncGatherWork : public ProcessGroupGloo::AsyncWork {
 
   const std::vector<at::Tensor> getOutputTensors() override {
     return outputs.empty() ? std::vector<at::Tensor>{}
-                           : std::vector<at::Tensor>{newLikeFlat(outputs[0])};
+                           : std::vector<at::Tensor>{newLikeFlat(
+                                 outputs[0], /*preserve_strides*/ false)};
   }
 
   void run() override {
@@ -2021,7 +2059,8 @@ class AsyncScatterWork : public ProcessGroupGloo::AsyncWork {
 
   const std::vector<at::Tensor> getInputTensors() override {
     return inputs.empty() ? std::vector<at::Tensor>{}
-                          : std::vector<at::Tensor>{newLikeFlat(inputs[0])};
+                          : std::vector<at::Tensor>{newLikeFlat(
+                                inputs[0], /*preserve_strides*/ false)};
   }
 
   const std::vector<at::Tensor> getOutputTensors() override {
