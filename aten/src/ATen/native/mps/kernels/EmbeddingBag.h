@@ -14,7 +14,7 @@ struct EmbeddingBagParams {
   ::c10::metal::array<idx_type_t, 2> output_strides;
   ::c10::metal::array<idx_type_t, 2> max_indices_strides;
 
-  idx_type_t per_sample_weights_strides;
+  idx_type_t per_sample_weights_stride;
 
   idx_type_t num_indices;
   idx_type_t num_bags;
