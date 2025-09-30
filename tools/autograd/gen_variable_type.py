@@ -1916,7 +1916,7 @@ def emit_body(
                             zeros_fn=zeros_fn,
                         )
                     )
-                if f.root_name == 'mul':
+                if f.root_name in ['mul', 'add']:
                     unpacked_arguments += (
                         FW_DERIVATIVE_ADD_WRAPPED_NUM_TEMPLATE.substitute(
                             inp_name=inp.name,
