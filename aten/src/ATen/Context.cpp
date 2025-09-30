@@ -85,6 +85,20 @@ Float32Precision str2precision(const std::string& name) {
   TORCH_CHECK(false, "Unknown precision: ", name);
 }
 
+std::string precision2str(Float32Precision prec) {
+  switch (prec) {
+    case Float32Precision::NONE:
+      return "none";
+    case Float32Precision::IEEE:
+      return "ieee";
+    case Float32Precision::TF32:
+      return "tf32";
+    case Float32Precision::BF16:
+      return "bf16";
+  }
+  TORCH_CHECK(false, "Invalid enum Float32Precision(", static_cast<int>(prec), ")");
+}
+
 Context::Context() = default;
 
 // TODO: This could be bad juju if someone calls globalContext() in the

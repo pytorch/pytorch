@@ -44,6 +44,7 @@ enum class TORCH_API Float32Precision { NONE, IEEE, TF32, BF16 };
 TORCH_API Float32Backend str2backend(const std::string& name);
 TORCH_API Float32Op str2op(const std::string& name);
 TORCH_API Float32Precision str2precision(const std::string& name);
+TORCH_API std::string precision2str(Float32Precision prec);
 
 class TORCH_API Context {
  public:
