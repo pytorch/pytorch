@@ -1007,6 +1007,24 @@ print(t.is_pinned())
         s.record_event(e)
         self.assertTrue("torch.cuda.Event" in e.__repr__())
 
+    def test_cuda_stream_protocol(self):
+        stream = torch.cuda.Stream()
+
+        self.assertTrue(hasattr(stream, "__cuda_stream__"))
+
+        result = stream.__cuda_stream__()
+
+        self.assertIsInstance(result, tuple)
+        self.assertEqual(len(result), 2)
+        self.assertEqual(result[0], 0)  # Protocol version
+        self.assertEqual(result[1], stream.cuda_stream)  # Stream handle
+
+        external_stream = torch.cuda.ExternalStream(stream.cuda_stream)
+        external_result = external_stream.__cuda_stream__()
+
+        self.assertEqual(external_result[0], 0)
+        self.assertEqual(external_result[1], external_stream.cuda_stream)
+
     def test_events(self):
         stream = torch.cuda.current_stream()
         event = torch.cuda.Event(enable_timing=True)
@@ -1459,6 +1477,13 @@ except RuntimeError as e:
         idx = torch.randperm(src.shape[0], device="cuda")
         res = src[idx]
         res_cpu = src.cpu()[idx.cpu()]
+        self.assertEqual(res.cpu(), res_cpu)
+
+    def test_fast_index_overflow(self):
+        src = torch.randint(0, 20, (4, 87, 1056, 736), device="cuda")
+        indices = torch.tensor([True, False, False, True], device="cuda")
+        res = src[indices]
+        res_cpu = src.cpu()[indices.cpu()]
         self.assertEqual(res.cpu(), res_cpu)
 
     def test_randint_randomness_for_large_range(self) -> None:
@@ -4390,14 +4415,14 @@ class TestCudaMallocAsync(TestCase):
     @serialTest()
     def test_max_split_expandable(self):
         try:
+            orig = torch.cuda.get_per_process_memory_fraction()
             torch.cuda.memory.empty_cache()
             mb = 1024 * 1024
             _, all_memory = torch.cuda.memory.mem_get_info()
             pre_reserved = torch.cuda.memory_reserved()
             total_allowed = 120 * mb + pre_reserved
             fraction_allowed = total_allowed / all_memory
-            self.assertEqual(int(fraction_allowed * all_memory), total_allowed)
-            orig = torch.cuda.get_per_process_memory_fraction()
+            self.assertEqual(int(round(fraction_allowed * all_memory)), total_allowed)
             torch.cuda.memory.set_per_process_memory_fraction(fraction_allowed)
 
             def alloc(n):
@@ -4426,6 +4451,7 @@ class TestCudaMallocAsync(TestCase):
     @serialTest()
     def test_garbage_collect_expandable(self):
         try:
+            orig = torch.cuda.get_per_process_memory_fraction(0)
             torch.cuda.memory.empty_cache()
             mb = 1024 * 1024
             _, all_memory = torch.cuda.memory.mem_get_info()
@@ -4433,7 +4459,6 @@ class TestCudaMallocAsync(TestCase):
             total_allowed = 120 * mb + pre_reserved
             fraction_allowed = total_allowed / all_memory
             self.assertEqual((fraction_allowed * all_memory), total_allowed)
-            orig = torch.cuda.get_per_process_memory_fraction(0)
             torch.cuda.memory.set_per_process_memory_fraction(fraction_allowed)
 
             def alloc(n):
@@ -4453,7 +4478,7 @@ class TestCudaMallocAsync(TestCase):
             # expandable_segment blocks can be in the free list when this is called.
             alloc(80)
         finally:
-            orig = torch.cuda.get_per_process_memory_fraction(0)
+            torch.cuda.memory.set_per_process_memory_fraction(orig)
 
     def test_allocator_settings(self):
         def power2_div(size, div_factor):
@@ -6905,7 +6930,7 @@ class TestCompileKernel(TestCase):
         with self.assertRaises(RuntimeError):
             kernel.set_shared_memory_config(excessive_shared_mem)
 
-    @tf32_on_and_off(0.005)
+    @tf32_on_and_off(0.05 if TEST_WITH_ROCM else 0.005)
     @unittest.skipIf(not TEST_CUDA, "No CUDA")
     def test_compile_kernel_advanced(self):
         # Test matrix multiplication
@@ -7271,9 +7296,7 @@ class TestCudaDeviceParametrized(TestCase):
         """
         from torch.cuda import _compile_kernel
 
-        spin_wait_kernel = _compile_kernel(
-            kernel_source, "wait_for_cpu", compute_capability="70"
-        )
+        spin_wait_kernel = _compile_kernel(kernel_source, "wait_for_cpu")
 
         x = torch.ones(4, device="cuda")
         x_cpu = torch.zeros(x.shape, device="cpu").pin_memory()
