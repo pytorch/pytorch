@@ -97,8 +97,8 @@ There are 4 DSOs in torch_openreg, and the dependencies between them are as foll
 - `csrc/`: Core device implementation, including operator registration, runtime, etc.
   - `csrc/aten/`: Operator registration
     - `csrc/aten/native/`: Specific operator implementations for the OpenReg device.
-      - `csrc/aten/OpenRegMinimal.cpp`: The most minimal set of operator implementations (allowing for the creation of Tensors and related operations upon completion).
-      - `csrc/aten/OpenRegExtra.cpp`: Implementations for other types of operators.
+      - `csrc/aten/native/OpenRegMinimal.cpp`: The most minimal set of operator implementations (allowing for the creation of Tensors and related operations upon completion).
+      - `csrc/aten/native/OpenRegExtra.cpp`: Implementations for other types of operators.
     - `csrc/runtime/`: Implementations for Host memory, device memory, Guard, Hooks, etc.
 - `third_party/`: A C++ library that simulates a CUDA-like device using the CPU.
 - `torch_openreg/`: Python interface implementation (Python code and C++ Bindings).

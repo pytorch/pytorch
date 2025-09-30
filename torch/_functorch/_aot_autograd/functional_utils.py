@@ -14,6 +14,7 @@ from typing import Optional
 
 import torch
 from torch import Tensor
+from torch._C import _functionalization
 from torch._logging import getArtifactLogger
 from torch._subclasses.fake_tensor import FakeTensor
 from torch._subclasses.functional_tensor import FunctionalTensor
@@ -224,9 +225,9 @@ def gen_alias_from_base(
     aliased_base_tensor,
     target_meta_tensor,
     target_requires_grad,
-    target_functional_tensor: Optional[FunctionalTensorMetadataEq] = None,
+    target_view_meta_sequence: Optional[ViewMetaSequence] = None,
     *,
-    replay_views,
+    replay_views: bool,
 ):
     # Patch the correct requires_grad field of the output tensor, depending on whether:
     # (i) the reconstructed output (out) was came from a tensor that requires grad or not;
@@ -245,13 +246,11 @@ def gen_alias_from_base(
     # to replay them (view functions) on the aliased_base_tensor.
     if (
         replay_views
-        and target_functional_tensor is not None
-        and not torch._functionalize_is_symbolic(target_functional_tensor.tensor)
+        and target_view_meta_sequence is not None
+        and not any(vm.has_symbolic_inputs for vm in target_view_meta_sequence.sequence)
     ):
-        functional_tensor = target_functional_tensor.tensor
-
-        out = torch._functionalize_apply_view_metas(
-            functional_tensor, aliased_base_tensor
+        out = _functionalization.apply_view_meta_sequence(
+            aliased_base_tensor, target_view_meta_sequence.sequence
         )
         # If re-applying the ViewMeta sequence succeeded, there should be no more
         # problems going forward. We just check we got to the target shape and
@@ -357,25 +356,45 @@ class MetadataKey:
         )
 
 
-# Wrapper around a FunctionalTensorWrapper for comparing only the resulting metadata
-# after applying all the ViewMeta operations.
-class FunctionalTensorMetadataEq:
-    def __init__(self, tensor: torch.Tensor) -> None:
-        assert torch._is_functional_tensor(tensor)
-        self.tensor = tensor
+# ViewMeta sequence wrapper for equality comparisons.
+#
+# Even though we can compare each ViewMeta instance, we compare the resulting
+# tensor metadata, instead. That's because the creation of synthetic bases + the
+# re-generation of input views might end-up creating a different sequence of
+# ViewMeta that is semantically equivalent. i.e. gets to a tensor with the same
+# metadata.
+#
+# Therefore, we store what the end result should look like as serializable
+# metadata.
+#
+# When logging, this class should look like:
+#
+#     ViewMetaSequence(view, select_int, slice_Tensor)
+#
+# i.e. a parenthesized list of view operations within that ViewMeta sequence.
+class ViewMetaSequence:
+    def __init__(self, tensor: FunctionalTensor) -> None:
+        assert torch._is_functional_tensor(tensor.elem)
+        self.sequence = _functionalization.get_view_meta_sequence(tensor.elem)
+        self.metadata = MetadataKey.make(tensor)
+
+    def __repr__(self) -> str:
+        suffix = len("_ViewMeta")
+        types = ", ".join(type(vm).__name__[:-suffix] for vm in self.sequence)
+        return f"ViewMetaSequence({types})"
 
     def __eq__(self, other: object) -> bool:
         # If other is None, then it probably means that we weren't able to recreate
-        # the FunctionalTensorMetadataEq. One of this cases is when we update the
-        # view metadata by calling: create_synthetic_base_metadata.
+        # the ViewMeta sequence. One example is when we update the view metadata by
+        # calling: create_synthetic_base_metadata.
         if other is None:
             return True
 
         # Comparison against any other type is not implemented.
-        if not isinstance(other, FunctionalTensorMetadataEq):
+        if not isinstance(other, ViewMetaSequence):
             return NotImplemented
 
-        return has_same_metadata(self.tensor, other.tensor)
+        return self.metadata == other.metadata
 
 
 # new_arg and arg here are either:
