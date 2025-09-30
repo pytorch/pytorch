@@ -19,15 +19,15 @@ Example:
 """
 
 import functools
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Optional, Union
 
 import torch
-
 from torch._inductor.codegen.subgraph import SubgraphChoiceCaller, SubgraphTemplate
 from torch._inductor.ir import Buffer, FixedLayout, Layout, TensorBox
 from torch._inductor.lowering import register_lowering
 from torch._inductor.select_algorithm import autotune_select_algorithm
 from torch.fx.experimental.proxy_tensor import make_fx
+
 
 __all__ = ["autotune_custom_op", "register_custom_op_lowering"]
 
@@ -40,13 +40,13 @@ class CustomOpTemplate(SubgraphTemplate):
     """
 
     def __init__(
-        self, name: str, decompositions: List[Callable], kwargs: Dict[str, Any]
+        self, name: str, decompositions: list[Callable], kwargs: dict[str, Any]
     ):
         super().__init__(name=name)
         self.decompositions = decompositions
         self.kwargs = kwargs
 
-    def _infer_output_layout(self, input_nodes: List[Buffer]) -> Layout:
+    def _infer_output_layout(self, input_nodes: list[Buffer]) -> Layout:
         """Infer correct output layout by tracing the first decomposition.
 
         Uses PyTorch's ir_node_to_tensor for proper example input creation,
@@ -90,7 +90,7 @@ class CustomOpTemplate(SubgraphTemplate):
         # Last resort: create a basic layout if nothing else works
         raise RuntimeError("Unable to infer output layout from decomposition or inputs")
 
-    def generate_choices(self, input_nodes: List[Buffer]) -> List[SubgraphChoiceCaller]:
+    def generate_choices(self, input_nodes: list[Buffer]) -> list[SubgraphChoiceCaller]:
         """Generate SubgraphChoiceCaller instances for all decompositions."""
         # Infer correct output layout once, use for all choices
         layout = self._infer_output_layout(input_nodes)
@@ -115,9 +115,9 @@ class CustomOpTemplate(SubgraphTemplate):
 
 def autotune_custom_op(
     name: str,
-    decompositions: Union[Callable, List[Callable]],
-    inputs: List[Any],
-    kwargs: Optional[Dict[str, Any]] = None,
+    decompositions: Union[Callable, list[Callable]],
+    inputs: list[Any],
+    kwargs: Optional[dict[str, Any]] = None,
     layout: Optional[Layout] = None,
 ) -> Union[TensorBox, Any]:
     """
