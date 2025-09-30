@@ -469,6 +469,7 @@ class ComposabilityTest(MultiProcessTestCase):
                 pipeline_stage,
                 n_microbatches=num_microbatches,
                 loss_fn=loss_fn,
+                scale_grads=False,
             )
 
             ref_partial_model = nn.Sequential(
@@ -491,6 +492,7 @@ class ComposabilityTest(MultiProcessTestCase):
                 ref_pipeline_stage,
                 n_microbatches=num_microbatches,
                 loss_fn=loss_fn,
+                scale_grads=False,
             )
         else:
             n_virtual = 2
@@ -539,12 +541,14 @@ class ComposabilityTest(MultiProcessTestCase):
                 stages,
                 n_microbatches=num_microbatches,
                 loss_fn=loss_fn,
+                scale_grads=False,
             )
 
             ref_pipeline_schedule = ScheduleClass(
                 ref_stages,
                 n_microbatches=num_microbatches,
                 loss_fn=loss_fn,
+                scale_grads=False,
             )
 
         optimizer_kwargs = {
