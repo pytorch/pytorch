@@ -1991,7 +1991,8 @@ class TritonTemplate(KernelTemplate):
         kernel_input_nodes = tuple(
             [V.graph.get_buffer(k) for k in result.input_call_args]
         )
-        codegen_input_nodes = input_nodes
+        # Here we have (*input_nodes, *captured_buffers)
+        codegen_input_nodes = tuple(input_nodes) + kernel_input_nodes[len(expected_input_args):]
         extra_args = V.graph.sizevars.size_hints(
             map(sympy.expand, result.kernel_args_sizevars_keys),
             fallback=config.unbacked_symint_fallback,
