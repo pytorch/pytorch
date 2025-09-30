@@ -67,6 +67,9 @@ __host__ __device__ c10::complex<scalar_t> _fast_build_exp_inf(const c10::comple
   // this function only handles the case where the real part of x is infinite
   const auto ximag = std::imag(x);
   constexpr auto exp_x_abs = std::numeric_limits<scalar_t>::infinity();
+  if (!::isfinite(ximag)) {  // add this to make consitent with std::exp(x+yi)
+    return {exp_x_abs, std::numeric_limits<scalar_t>::quiet_NaN()};
+  }
   const auto sin = std::sin(ximag);
   const auto cos = std::cos(ximag);
   // special case if the angle is exactly the multiple of pi/2
@@ -101,7 +104,12 @@ __host__ __device__ c10::complex<scalar_t> _log_add_exp_helper(const c10::comple
     }
   } else {
     const auto minmax = min - max;
-    const auto exp_minmax = _fast_build_exp(minmax);
+    c10::complex<scalar_t> exp_minmax;
+    if (!::isfinite(minmax.real())) {
+        exp_minmax = minmax.real() < 0 ? c10::complex<scalar_t>{0.0, 0.0} : _fast_build_exp_inf(minmax);
+    } else {
+        exp_minmax = _fast_build_exp(minmax);
+    }
     return ::log1p(exp_minmax) + max;
   }
 }
