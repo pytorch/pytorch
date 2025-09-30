@@ -33,9 +33,7 @@ LIBTORCH_NAMESPACE_LIST = (
 )
 
 # Patterns for detecting statically linked libstdc++ symbols
-STATICALLY_LINKED_CXX11_ABI = [
-    re.compile(r".*recursive_directory_iterator.*")
-]
+STATICALLY_LINKED_CXX11_ABI = [re.compile(r".*recursive_directory_iterator.*")]
 
 
 def _apply_libtorch_symbols(symbols):
@@ -58,9 +56,11 @@ def get_symbols(lib: str) -> list[tuple[str, str, str]]:
     return [x.split(" ", 2) for x in lines.decode("latin1").split("\n")[:-1]]
 
 
-def grep_symbols(lib: str, patterns: list[Any], symbol_type: str = None) -> list[str]:
+def grep_symbols(lib: str, patterns: list[Any], symbol_type: str = None) -> list[str]:  # noqa: RUF013
     def _grep_symbols(
-        symbols: list[tuple[str, str, str]], patterns: list[Any], symbol_type: str = None
+        symbols: list[tuple[str, str, str]],
+        patterns: list[Any],
+        symbol_type: str = None,  # noqa: RUF013
     ) -> list[str]:
         rc = []
         for _s_addr, _s_type, s_name in symbols:
@@ -90,12 +90,14 @@ def grep_symbols(lib: str, patterns: list[Any], symbol_type: str = None) -> list
 
 def check_lib_statically_linked_libstdc_cxx_abi_symbols(lib: str) -> None:
     print(f"lib: {lib}")
-    cxx11_statically_linked_symbols = grep_symbols(lib, STATICALLY_LINKED_CXX11_ABI, symbol_type="T")
+    cxx11_statically_linked_symbols = grep_symbols(
+        lib, STATICALLY_LINKED_CXX11_ABI, symbol_type="T"
+    )
     num_statically_linked_symbols = len(cxx11_statically_linked_symbols)
     print(f"num_statically_linked_symbols (T): {num_statically_linked_symbols}")
     if num_statically_linked_symbols > 0:
         raise RuntimeError(
-            f"Found statically linked libstdc++ symbols (recursive_directory_iterator), but there shouldn't be any, see: {cxx11_statically_linked_symbols[:100]}"
+            f"Found statically linked libstdc++ symbols (recursive_directory_iterator): {cxx11_statically_linked_symbols[:100]}"
         )
 
 
