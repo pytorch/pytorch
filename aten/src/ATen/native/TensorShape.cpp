@@ -1907,7 +1907,7 @@ Tensor repeat(const Tensor& self, IntArrayRef repeats) {
 
   // Reshape to [s0 * r0, s1 * r1, ...].
   // No extra copy of data during reshape for a contiguous tensor.
-  return contiguous_copy.reshape(target_size);
+  return contiguous_copy.view(target_size);
 }
 
 Tensor tile_symint(const Tensor& self, SymIntArrayRef reps) {
