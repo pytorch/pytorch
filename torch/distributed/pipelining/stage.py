@@ -658,7 +658,7 @@ class _PipelineStageBase(ABC):
                     fsdp_module.set_requires_gradient_sync(True)
 
                     if isinstance(fsdp_module, ReplicateModule):
-                        distributed_state = replicate.state(fsdp_module)  # type: ignore[attr-defined,arg-type]
+                        distributed_state = replicate.state(fsdp_module)  # type: ignore[arg-type]
                     else:
                         distributed_state = fully_shard.state(fsdp_module)  # type: ignore[attr-defined]
 
