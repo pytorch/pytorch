@@ -1839,7 +1839,6 @@ static void baddbmm_bmm_out_dtype_checks(const Tensor& batch1, const Tensor& bat
     const auto& self = self_baddbmm.value();
     TORCH_CHECK(self.dim() == 3, "self must be a 3D tensor");
     TORCH_CHECK(self.sizes() == output_size, "self must have the same shape as the output");
-    TORCH_CHECK(self.scalar_type() == batch1.scalar_type(), "self and batch1 must have the same dtype");
   }
 }
 
