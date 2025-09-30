@@ -476,7 +476,7 @@ def _maybe_broadcast(*args, preserve_cpu_scalar_tensors=True):
             # u0==u1 assume the same, no broadcasting!
             torch._check(
                 x == y,
-                "sizes assumed to be the same due to unbacked broadcasting semantics",
+                lambda: "sizes assumed to be the same due to unbacked broadcasting semantics",
             )
 
         return False
@@ -2995,7 +2995,7 @@ def constant_pad_nd(
         pad_idx = len(pad) - ((i + 1) * 2)
         new_dim = input_sizes[l_diff + i] + pad[pad_idx] + pad[pad_idx + 1]
         torch._check(
-            new_dim > 0,
+            new_dim >= 0,
             lambda: f"The input size {input_sizes[l_diff + i]}, plus negative padding "
             f"{pad[pad_idx]} and {pad[pad_idx + 1]} resulted in a negative output size, "
             f"which is invalid. Check dimension {l_diff + i} of your input.",
@@ -3613,7 +3613,7 @@ def istft(
             n_fft // 2 + 1 == fft_size,
             lambda: (
                 "istft expected the frequency dimension (3rd to the last) of the input tensor "
-                + "to match n_fft / 2 + 1 when onesided=True, but got {fft_size}"
+                + f"to match n_fft / 2 + 1 when onesided=True, but got {fft_size}"
             ),
         )
     else:
@@ -3621,7 +3621,7 @@ def istft(
             n_fft == fft_size,
             lambda: (
                 "istft expected the frequency dimension (3rd to the last) of the input tensor "
-                + "to match n_fft when onesided=False, but got {fft_size}",
+                + f"to match n_fft when onesided=False, but got {fft_size}",
             ),
         )
 
@@ -5585,6 +5585,13 @@ def empty_strided(
     )
 
 
+def _strength_reduce_integer(val: int) -> torch.dtype:
+    for possible_dtype in (torch.uint8, torch.uint16, torch.int32):
+        if val <= torch.iinfo(possible_dtype).max:
+            return possible_dtype
+    return torch.int64
+
+
 @register_decomposition(aten.eye)
 @out_wrapper()
 def eye(
@@ -5606,12 +5613,15 @@ def eye(
     torch._check(n >= 0, lambda: f"n must be greater or equal to 0, got {n}")
     torch._check(m >= 0, lambda: f"m must be greater or equal to 0, got {m}")
 
-    range_n = torch.arange(n, dtype=torch.int64, device=device, requires_grad=False)
-    range_m = torch.arange(m, dtype=torch.int64, device=device, requires_grad=False)
+    range_dtype = torch.int64
+    if isinstance(n, utils.IntWithoutSymInt) and isinstance(m, utils.IntWithoutSymInt):
+        range_dtype = _strength_reduce_integer(max(n, m))
+    range_n = torch.arange(n, dtype=range_dtype, device=device, requires_grad=False)
+    range_m = torch.arange(m, dtype=range_dtype, device=device, requires_grad=False)
 
     cond = range_n.unsqueeze(-1) == range_m
-    if dtype is torch.bool:
-        return cond
+    if layout in (torch.strided, None) and not pin_memory:
+        return cond.to(dtype or torch.get_default_dtype())
     else:
         one = torch.ones(
             (1,),
@@ -5918,7 +5928,8 @@ def norm(
 @out_wrapper()
 def trace(self: TensorLikeType) -> TensorLikeType:
     torch._check(
-        self.ndim == 2, lambda: "expected a matrix, but got tensor with dim {self.ndim}"
+        self.ndim == 2,
+        lambda: f"expected a matrix, but got tensor with dim {self.ndim}",
     )
     return torch.sum(torch.diag(self, 0))
 
