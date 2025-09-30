@@ -74,8 +74,7 @@ def get_collective_do_bench() -> Callable[[Callable[[], Any]], float]:
 
 
 def benchmark_node_with_cache_key(n: fx.Node) -> tuple[float, Optional[str]]:
-    if n.op in ("placeholder", "output"):
-        return 0, None
+    assert is_compute_node(n)
 
     from torch._dynamo.testing import rand_strided
 
@@ -313,14 +312,15 @@ class OverlapScheduler:
 
         return compute_depth_dominance
 
-    def _align_runtime_estimations_across_all_distributed_ranks(self) -> None:
+    def _align_compute_nodes_runtime_estimations_across_all_distributed_ranks(
+        self,
+    ) -> None:
         log.info(
             "Overlap scheduling: Aligning runtime estimations across all distributed ranks"
         )
-        g = self.graph
         runtime_estimations_keys: list[Optional[str]] = []
         runtime_estimations: list[float] = []
-        for n in g.nodes:
+        for n in self.compute_nodes:
             val, key = benchmark_node_with_cache_key(n)
             runtime_estimations.append(val)
             runtime_estimations_keys.append(key)
@@ -351,7 +351,8 @@ class OverlapScheduler:
         """Run the scheduling algorithm."""
         # All ranks must make identical decisions on overlap reordering,
         # Thus we must have identical runtime estimations across ranks.
-        self._align_runtime_estimations_across_all_distributed_ranks()
+        # For now we do benchmarking only for compute nodes.
+        self._align_compute_nodes_runtime_estimations_across_all_distributed_ranks()
 
         while self.ready:
             if self._should_force_wait_for_memory():
