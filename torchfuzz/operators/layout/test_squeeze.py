@@ -144,15 +144,11 @@ class TestSqueezeOperator:
         """Test basic code generation."""
         tensor = Tensor((2, 6), (6, 1), "float32", "cuda", [])
         
-        # First decompose to set up the metadata
-        inputs = squeeze_op.decompose(tensor)
-        input_tensor = inputs[0]
-        
         output_name = "output"
         input_names = ["input"]
 
         code = squeeze_op.codegen(output_name, input_names, tensor)
-        expected = f"output = torch.squeeze(input, {input_tensor._squeeze_dim})"
+        expected = "output = torch.squeeze(input)"
 
         assert code == expected
 
@@ -160,15 +156,11 @@ class TestSqueezeOperator:
         """Test code generation for scalar tensor."""
         scalar = Tensor((), (), "float32", "cuda", [])
         
-        # First decompose to set up the metadata
-        inputs = squeeze_op.decompose(scalar)
-        input_tensor = inputs[0]
-        
         output_name = "result"
         input_names = ["x"]
 
         code = squeeze_op.codegen(output_name, input_names, scalar)
-        expected = f"result = torch.squeeze(x, {input_tensor._squeeze_dim})"
+        expected = "result = torch.squeeze(x)"
 
         assert code == expected
 
@@ -176,15 +168,11 @@ class TestSqueezeOperator:
         """Test code generation for 1D tensor."""
         tensor = Tensor((12,), (1,), "float32", "cuda", [])
         
-        # First decompose to set up the metadata
-        inputs = squeeze_op.decompose(tensor)
-        input_tensor = inputs[0]
-        
         output_name = "out"
         input_names = ["data"]
 
         code = squeeze_op.codegen(output_name, input_names, tensor)
-        expected = f"out = torch.squeeze(data, {input_tensor._squeeze_dim})"
+        expected = "out = torch.squeeze(data)"
 
         assert code == expected
 
@@ -192,15 +180,11 @@ class TestSqueezeOperator:
         """Test code generation for 3D tensor."""
         tensor = Tensor((2, 3, 4), (12, 4, 1), "float32", "cuda", [])
         
-        # First decompose to set up the metadata
-        inputs = squeeze_op.decompose(tensor)
-        input_tensor = inputs[0]
-        
         output_name = "squeezed"
         input_names = ["original"]
 
         code = squeeze_op.codegen(output_name, input_names, tensor)
-        expected = f"squeezed = torch.squeeze(original, {input_tensor._squeeze_dim})"
+        expected = "squeezed = torch.squeeze(original)"
 
         assert code == expected
 
@@ -208,15 +192,11 @@ class TestSqueezeOperator:
         """Test code generation with different variable names."""
         tensor = Tensor((5, 2), (2, 1), "float32", "cuda", [])
         
-        # First decompose to set up the metadata
-        inputs = squeeze_op.decompose(tensor)
-        input_tensor = inputs[0]
-        
         output_name = "tensor_squeezed"
         input_names = ["input_data"]
 
         code = squeeze_op.codegen(output_name, input_names, tensor)
-        expected = f"tensor_squeezed = torch.squeeze(input_data, {input_tensor._squeeze_dim})"
+        expected = "tensor_squeezed = torch.squeeze(input_data)"
 
         assert code == expected
 
@@ -224,15 +204,11 @@ class TestSqueezeOperator:
         """Test code generation for tensor with zero size."""
         tensor = Tensor((0, 5), (5, 1), "float32", "cuda", [])
         
-        # First decompose to set up the metadata
-        inputs = squeeze_op.decompose(tensor)
-        input_tensor = inputs[0]
-        
         output_name = "empty_tensor"
         input_names = ["input_empty"]
 
         code = squeeze_op.codegen(output_name, input_names, tensor)
-        expected = f"empty_tensor = torch.squeeze(input_empty, {input_tensor._squeeze_dim})"
+        expected = "empty_tensor = torch.squeeze(input_empty)"
 
         assert code == expected
 
