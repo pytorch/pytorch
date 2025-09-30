@@ -257,6 +257,7 @@ class DynamoGraphTransformer(torch.fx.Transformer):
         # graph_input_order maps: user_input_index -> graph_placeholder_index
         # We need to create: old_graph_placeholder -> new_user_input_placeholder
         for user_input_idx, graph_placeholder_idx in self.graph_input_order.items():
+            
             if graph_placeholder_idx < len(self.placeholders):
                 old_placeholder = self.placeholders[graph_placeholder_idx]
                 new_placeholder = self.new_input_nodes[user_input_idx]
