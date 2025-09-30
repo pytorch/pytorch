@@ -634,6 +634,9 @@ realize_acc_reads_size_threshold: Optional[int] = (
 # fallback to eager for random/dropout, this is slow but useful for debugging
 fallback_random = False
 
+# fallback embedding_bag_byte_unpack to eager
+fallback_embedding_bag_byte_unpack = False
+
 # automatically create fallbacks when encountering an unhandled op
 implicit_fallbacks = True
 assume_unaligned_fallback_output = (
@@ -1466,6 +1469,8 @@ class triton:
     )
 
     # Programmatic Dependent Launch improves launch latency on Nvidia Hopper+ devices
+    # If set to true, will generate PDL code on devices that support it.
+    # If set to false, will never generate PDL code.
     enable_pdl = False
 
 
@@ -2001,6 +2006,20 @@ class test_configs:
     # If set to True, AOTI-generated CMakelists.txt will still use libtorch
     # for unit testing
     use_libtorch = False
+
+    # to be migrated when ready for use
+    aten_fx_overlap_scheduling = False
+
+    # to be migrated when ready for use
+    aten_fx_overlap_preserving_bucketing = False
+
+    # to be migrated when ready for use
+    # runtime estimation function for ops
+    # for user-defined estimation function, pass in the function handle
+    # TODO - need estimated and profile based version
+    estimate_aten_runtime: Union[
+        Literal["default"], Callable[[torch.fx.Node], Optional[float]]
+    ] = "default"
 
 
 if TYPE_CHECKING:

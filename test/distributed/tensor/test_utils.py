@@ -691,6 +691,25 @@ class TestStridedSharding(DTensorTestBase):
         )
         self.assertEqual(full_tensor, x)
 
+    @with_comms
+    def test_2d_mesh_uneven_strided_shard(self):
+        mesh = init_device_mesh(
+            self.device_type,
+            (self.world_size // 2, 2),
+            mesh_dim_names=("fsdp", "tp"),
+        )
+
+        for size in (2, 3, 5, 11):
+            tensor = torch.arange(size, device=self.device_type).view(1, -1)
+            dtensor = distribute_tensor(
+                tensor,
+                device_mesh=mesh,
+                placements=(Replicate(), Replicate()),
+            ).redistribute(
+                mesh, placements=(_StridedShard(dim=1, split_factor=2), Shard(1))
+            )
+            self.assertEqual(dtensor.full_tensor(), tensor)
+
 
 class Test2DStridedLocalShard(DTensorTestBase):
     @property

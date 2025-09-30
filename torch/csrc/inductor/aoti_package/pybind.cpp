@@ -86,6 +86,11 @@ void initAOTIPackageBindings(PyObject* module) {
           py::arg("tensor_map"),
           py::arg("use_inactive"),
           py::arg("validate_full_updates"),
-          py::arg("user_managed") = false);
+          py::arg("user_managed") = false)
+      .def_static(
+          "load_metadata_from_package",
+          &AOTIModelPackageLoaderPybind::load_metadata_from_package,
+          py::arg("model_package_path"),
+          py::arg("model_name"));
 }
 } // namespace torch::inductor

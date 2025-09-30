@@ -201,6 +201,26 @@ class FakeTensorTest(TestCase):
 
         self.assertEqual(torch.ones([10]), out[0])
 
+    def test_conv_nhwc(self):
+        x = torch.randn([1, 1024, 16, 16]).to(memory_format=torch.channels_last)
+        w = torch.randn([256, 1024, 4, 4]).to(memory_format=torch.channels_last)
+        b = torch.randn([256])
+
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, x, w, b):
+                return torch.ops.aten.convolution(
+                    x, w, b, [1, 1], [0, 0], [1, 1], False, [0, 0], 1
+                )
+
+        model = Model()
+        with FakeTensorMode(allow_non_fake_inputs=True) as mode:
+            fake_out = model.forward(x, w, b)
+        eager_out = model.forward(x, w, b)
+        self.assertEqual(fake_out.stride(), eager_out.stride())
+
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_zero_dim(self):
         with FakeTensorMode() as mode:
