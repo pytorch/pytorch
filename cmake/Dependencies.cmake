@@ -1552,6 +1552,12 @@ endif()
 #
 # End ATen checks
 #
+
+# Install `fmtlib` header.
+# This was the default behavior before version 12.0.0.
+# Since PyTorch C API depends on it, make it available for projects that
+# depend on PyTorch.
+set(FMT_INSTALL ON)
 set(TEMP_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS})
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build shared libs" FORCE)
 add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/fmt)
