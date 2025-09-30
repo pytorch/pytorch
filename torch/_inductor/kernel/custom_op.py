@@ -65,9 +65,27 @@ class CustomOpTemplate(SubgraphTemplate):
             name=f"{name}_{next(SubgraphTemplate.index_counter)}",
             input_nodes=input_nodes,
             layout=layout,
-            description=f"{description} ({self.decomposition_fn.__name__})",
+            description=(
+                f"CustomOp {self.decomposition_fn.__name__}"
+                if description == ""
+                else description
+            ),
             make_fx_graph=make_fx_graph,
         )
+
+    def maybe_append_choice(self, choices, input_nodes, layout, inputs, kwargs):
+        """Maybe append this choice to the choices list"""
+        try:
+            choice = self.generate(
+                name=f"{self.name}_{next(SubgraphTemplate.index_counter)}",
+                input_nodes=input_nodes,
+                layout=layout,
+                inputs=inputs,
+                kwargs=kwargs,
+            )
+            choices.append(choice)
+        except Exception as e:
+            print(f"Failed to add choice {self.decomposition_fn.__name__}: {e}")
 
 
 def autotune_custom_op(
@@ -143,25 +161,15 @@ def autotune_custom_op(
 
     # Generate choices from decomposition functions
     choices = []
+
     for i, decomp_fn in enumerate(decompositions):
         template = CustomOpTemplate(
             name=f"{name}_{getattr(decomp_fn, '__name__', f'impl_{i}')}",
             decomposition_fn=decomp_fn,
         )
 
-        try:
-            choice = template.generate(
-                name=f"{name}_choice_{i}",
-                input_nodes=input_nodes,
-                layout=layout,
-                inputs=inputs,
-                kwargs=kwargs,
-                description=f"Custom {name}",
-            )
-            choices.append(choice)
-        except Exception:
-            # Skip failed choices, continue with others
-            continue
+        # Use the new maybe_append_choice method
+        template.maybe_append_choice(choices, input_nodes, layout, inputs, kwargs)
 
     # Fallback to direct execution if no choices generated
     if not choices:
