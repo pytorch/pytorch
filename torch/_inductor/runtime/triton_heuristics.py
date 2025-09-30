@@ -2367,7 +2367,6 @@ def triton_config_reduction(
     num_warps=None,
     register_intensive=False,
     dynamic_scale_rblock=True,
-    reduction_hint=None,
 ) -> Config:
     """
     Construct a reduction triton config with some adjustment heuristics
@@ -2395,12 +2394,7 @@ def triton_config_reduction(
             rnumels[prefix] *= 2
 
     if num_warps is None:
-        if reduction_hint == ReductionHint.INNER and not is_fbcode():
-            # r is contiguous, so ensure that each thread has 8 elements for
-            # vectorized loads, assuming bf16/fp16
-            num_warps = r // (32 * 8)
-        else:
-            num_warps = total_numel() // 128
+        num_warps = total_numel() // 128
 
     max_num_warps = 16 if r <= 8192 else 32
     num_warps = _num_warps(
@@ -2670,7 +2664,6 @@ def _reduction_configs(
                 num_stages=num_stages,
                 register_intensive=register_intensive,
                 dynamic_scale_rblock=dynamic_scale_rblock,
-                reduction_hint=reduction_hint,
             )
 
     def outer_config_opt():
@@ -2722,7 +2715,7 @@ def _reduction_configs(
         )
 
     contiguous_config = make_config(
-        1 if rnumel > 2048 and not is_fbcode() else 2,  # 1024 or less is persistent
+        1,
         min(rnumel, MAX_R0_BLOCK),
         register_intensive=register_intensive,
     )
@@ -2952,13 +2945,7 @@ def _persistent_reduction_configs(
 
     if "y" not in size_hints:
         configs = [
-            triton_config_reduction(
-                size_hints,
-                xblock,
-                rnumel,
-                register_intensive=True,
-                reduction_hint=reduction_hint,
-            )
+            triton_config_reduction(size_hints, xblock, rnumel, register_intensive=True)
             for xblock in (1, 8, 32, 128)
             if xblock == 1
             or (rnumel * xblock <= MAX_PERSISTENT_BLOCK_NUMEL and xblock <= xnumel)
@@ -3001,7 +2988,6 @@ def _persistent_reduction_configs(
                     x_block,
                     rnumel,
                     register_intensive=True,
-                    reduction_hint=reduction_hint,
                 )
             ]
 
@@ -3013,7 +2999,6 @@ def _persistent_reduction_configs(
                 size_hints,
                 2 * (256 // rnumel) if rnumel <= 256 else 1,
                 rnumel,
-                reduction_hint=reduction_hint,
             )
         ]
     for c in configs:
