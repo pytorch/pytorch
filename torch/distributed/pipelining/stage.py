@@ -1517,14 +1517,12 @@ class PipelineStage(_PipelineStageBase):
             if not self.is_first:
                 # We assume that we always receive from stage - 1
                 recv_infos = tuple(
-                    [
-                        _RecvInfo(
-                            f"recv_for_{self.stage_index}_from_{self.stage_index - 1}",
-                            self.stage_index - 1,
-                            _make_tensor_from_meta(inp, self.device),
-                        )
-                        for inp in self.inputs_meta
-                    ]
+                    _RecvInfo(
+                        f"recv_for_{self.stage_index}_from_{self.stage_index - 1}",
+                        self.stage_index - 1,
+                        _make_tensor_from_meta(inp, self.device),
+                    )
+                    for inp in self.inputs_meta
                 )
                 # In case there is backward pass, set requires_grad for receive buffers
                 if self.has_backward:
@@ -1534,7 +1532,7 @@ class PipelineStage(_PipelineStageBase):
                 self.args_recv_info[chunk_id] = recv_infos
             else:
                 self.args_recv_info[chunk_id] = tuple(
-                    [_RootArgPlaceholder(i) for i in self.inputs_meta]
+                    _RootArgPlaceholder(i) for i in self.inputs_meta
                 )
 
         # Send info during forward for each activation
@@ -1559,15 +1557,11 @@ class PipelineStage(_PipelineStageBase):
             # Receiving gradients from multiple sources is not supported
             # hence we only take the first destination
             grad_recv_info = tuple(
-                [
-                    _RecvInfo(
-                        f"recv_grad_for_{self.stage_index}_from_{dst_list[0]}",
-                        dst_list[0],
-                        _make_tensor_from_meta(
-                            self.get_outputs_meta()[idx], self.device
-                        ),
-                    )
-                    for idx, dst_list in act_send_info.items()
-                ]
+                _RecvInfo(
+                    f"recv_grad_for_{self.stage_index}_from_{dst_list[0]}",
+                    dst_list[0],
+                    _make_tensor_from_meta(self.get_outputs_meta()[idx], self.device),
+                )
+                for idx, dst_list in act_send_info.items()
             )
         return grad_recv_info
