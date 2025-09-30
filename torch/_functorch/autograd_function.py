@@ -98,7 +98,6 @@ def generate_single_level_function(interpreter, autograd_function):
     level = interpreter.level()
 
     def forward(*operands):
-        print("HERERERERE")
         unwrapped_operands = pytree.tree_map_only(
             torch.Tensor, lambda x: _unwrap_for_grad(x, level), operands
         )
@@ -112,7 +111,6 @@ def generate_single_level_function(interpreter, autograd_function):
 
         # See NOTE [mark_dirty object identity check]
         def wrap_fn(output):
-            print("THERHEHREHRE")
             return _wrap_for_grad(output, level)
 
         return wrap_outputs_maintaining_identity(
