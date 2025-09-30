@@ -33,59 +33,84 @@ __all__ = ["autotune_custom_op", "register_custom_op_lowering"]
 
 
 class CustomOpTemplate(SubgraphTemplate):
-    """Template for creating custom operation choices from decomposition functions.
+    """Template for creating autotune choices from multiple custom op decompositions.
 
-    Args:
-        name: Template identifier
-        decomposition_fn: Function implementing the operation using ATen ops
+    Provides a clean interface for autotuning between different implementations
+    of custom operations, following PyTorch Inductor patterns.
     """
 
-    def __init__(self, name: str, decomposition_fn: Callable) -> None:
+    def __init__(
+        self, name: str, decompositions: List[Callable], kwargs: Dict[str, Any]
+    ):
         super().__init__(name=name)
-        self.decomposition_fn = decomposition_fn
+        self.decompositions = decompositions
+        self.kwargs = kwargs
 
-    def generate(
-        self,
-        name: str,
-        input_nodes: List[Buffer],
-        layout: Layout,
-        inputs: List[Any],
-        kwargs: Dict[str, Any],
-        description: str = "",
-        **template_kwargs: Any,
-    ) -> SubgraphChoiceCaller:
-        """Generate a SubgraphChoiceCaller for this decomposition."""
+    def _infer_output_layout(self, input_nodes: List[Buffer]) -> Layout:
+        """Infer correct output layout by tracing the first decomposition.
 
-        def make_fx_graph(*example_inputs):
-            return make_fx(functools.partial(self.decomposition_fn, **kwargs))(
-                *example_inputs
-            )
+        Uses PyTorch's ir_node_to_tensor for proper example input creation,
+        then runs the decomposition to determine the actual output properties.
+        """
+        if not input_nodes:
+            raise RuntimeError("Cannot infer layout without input nodes")
 
-        return SubgraphChoiceCaller(
-            name=f"{name}_{next(SubgraphTemplate.index_counter)}",
-            input_nodes=input_nodes,
-            layout=layout,
-            description=(
-                f"CustomOp {self.decomposition_fn.__name__}"
-                if description == ""
-                else description
-            ),
-            make_fx_graph=make_fx_graph,
-        )
-
-    def maybe_append_choice(self, choices, input_nodes, layout, inputs, kwargs):
-        """Maybe append this choice to the choices list"""
         try:
-            choice = self.generate(
-                name=f"{self.name}_{next(SubgraphTemplate.index_counter)}",
+            # Create example inputs using PyTorch IR utilities
+            from torch._inductor.ir import ir_node_to_tensor
+            from torch._inductor.virtualized import V
+
+            example_inputs = []
+            with V.fake_mode:
+                for inp in input_nodes:
+                    example_inputs.append(ir_node_to_tensor(inp))
+
+            # Run first decomposition to determine output properties
+            with torch.no_grad():
+                fn = functools.partial(self.decompositions[0], **self.kwargs)
+                output = fn(*example_inputs)
+
+            # Extract layout from actual output tensor
+            if isinstance(output, torch.Tensor):
+                return FixedLayout(
+                    device=output.device,
+                    dtype=output.dtype,
+                    size=output.shape,
+                    stride=output.stride(),
+                )
+
+        except Exception:
+            pass
+
+        # Fallback to first input layout (guaranteed to exist)
+        first_input = input_nodes[0]
+        if hasattr(first_input, "get_layout"):
+            return first_input.get_layout()
+
+        # Last resort: create a basic layout if nothing else works
+        raise RuntimeError("Unable to infer output layout from decomposition or inputs")
+
+    def generate_choices(self, input_nodes: List[Buffer]) -> List[SubgraphChoiceCaller]:
+        """Generate SubgraphChoiceCaller instances for all decompositions."""
+        # Infer correct output layout once, use for all choices
+        layout = self._infer_output_layout(input_nodes)
+
+        choices = []
+        for i, decomp_fn in enumerate(self.decompositions):
+
+            def make_fx_graph(*example_inputs, fn=decomp_fn):
+                return make_fx(functools.partial(fn, **self.kwargs))(*example_inputs)
+
+            choice = SubgraphChoiceCaller(
+                name=f"{self.name}_{getattr(decomp_fn, '__name__', f'impl_{i}')}_{next(SubgraphTemplate.index_counter)}",
                 input_nodes=input_nodes,
                 layout=layout,
-                inputs=inputs,
-                kwargs=kwargs,
+                description=f"CustomOp {getattr(decomp_fn, '__name__', f'impl_{i}')}",
+                make_fx_graph=make_fx_graph,
             )
             choices.append(choice)
-        except Exception as e:
-            print(f"Failed to add choice {self.decomposition_fn.__name__}: {e}")
+
+        return choices
 
 
 def autotune_custom_op(
@@ -107,23 +132,6 @@ def autotune_custom_op(
 
     Returns:
         Optimized implementation result
-
-    Example:
-        # Single implementation (heuristic selection)
-        result = autotune_custom_op(
-            name="rmsnorm",
-            decompositions=rmsnorm_impl,
-            inputs=[x, w],
-            kwargs={"eps": 1e-6}
-        )
-
-        # Multiple implementations (benchmarked selection)
-        result = autotune_custom_op(
-            name="rmsnorm",
-            decompositions=[impl1, impl2, impl3],
-            inputs=[x, w],
-            kwargs={"eps": 1e-6}
-        )
     """
     if kwargs is None:
         kwargs = {}
@@ -138,59 +146,24 @@ def autotune_custom_op(
             f"Expected callable or sequence of callables, got {type(decompositions)}"
         )
 
-    # Convert inputs to IR nodes (simplified for current implementation)
-    input_nodes = []
-    for inp in inputs:
-        if hasattr(inp, "get_layout"):
-            input_nodes.append(inp)
-        else:
-            input_nodes.append(inp)
+    input_nodes = list(inputs)
 
-    # Infer layout from first input if not provided
-    if layout is None and input_nodes:
-        first_input = input_nodes[0]
-        if hasattr(first_input, "get_layout"):
-            layout = first_input.get_layout()
-        elif isinstance(first_input, torch.Tensor):
-            layout = FixedLayout(
-                device=first_input.device,
-                dtype=first_input.dtype,
-                size=first_input.shape,
-                stride=first_input.stride(),
-            )
+    # Create template and generate all choices at once
+    template = CustomOpTemplate(name=name, decompositions=decompositions, kwargs=kwargs)
+    choices = template.generate_choices(input_nodes)
 
-    # Generate choices from decomposition functions
-    choices = []
-
-    for i, decomp_fn in enumerate(decompositions):
-        template = CustomOpTemplate(
-            name=f"{name}_{getattr(decomp_fn, '__name__', f'impl_{i}')}",
-            decomposition_fn=decomp_fn,
-        )
-
-        # Use the new maybe_append_choice method
-        template.maybe_append_choice(choices, input_nodes, layout, inputs, kwargs)
-
-    # Fallback to direct execution if no choices generated
     if not choices:
-        import warnings
+        raise RuntimeError(f"No valid choices generated for {name}")
 
-        warnings.warn(f"No valid choices generated for {name}, using fallback")
-        return decompositions[0](*inputs, **kwargs)
+    # Use the inferred layout from the choices (all choices should have the same layout)
+    inferred_layout = layout or choices[0].layout
 
-    # Use autotuning system
-    try:
-        return autotune_select_algorithm(
-            name=name,
-            choices=choices,
-            input_nodes=input_nodes,
-            layout=layout,
-        )
-    except Exception:
-        import warnings
-
-        warnings.warn(f"Autotuning failed for {name}, using fallback")
-        return decompositions[0](*inputs, **kwargs)
+    return autotune_select_algorithm(
+        name=name,
+        choices=choices,
+        input_nodes=input_nodes,
+        layout=inferred_layout,
+    )
 
 
 def register_custom_op_lowering(custom_op: torch._ops.OpOverload):
