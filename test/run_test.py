@@ -837,7 +837,7 @@ def _test_cpp_extensions_aot(test_directory, options, use_ninja):
         "--root",
         "./install",
     ]
-    wheel_cmd = [sys.executable, "-m", "pip", "wheel", ".", "-w", "./dist"]
+    wheel_cmd = [sys.executable, "-m", "build", "--wheel", "--no-isolation"]
     return_code = shell(install_cmd, cwd=cpp_extensions_test_dir, env=shell_env)
     if return_code != 0:
         return return_code

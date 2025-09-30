@@ -435,7 +435,7 @@ test_inductor_distributed() {
 
   # this runs on both single-gpu and multi-gpu instance. It should be smart about skipping tests that aren't supported
   # with if required # gpus aren't available
-  python test/run_test.py --include distributed/test_dynamo_distributed distributed/test_inductor_collectives distributed/test_compute_comm_reordering --verbose
+  python test/run_test.py --include distributed/test_dynamo_distributed distributed/test_inductor_collectives distributed/test_aten_comm_compute_reordering distributed/test_compute_comm_reordering --verbose
   assert_git_not_dirty
 }
 
@@ -1415,7 +1415,7 @@ EOF
   pip3 install -r requirements.txt
   # shellcheck source=./common-build.sh
   source "$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
-  python setup.py bdist_wheel --bdist-dir="base_bdist_tmp" --dist-dir="base_dist"
+  python -m build --wheel --no-isolation -C--build-option=--bdist-dir="base_bdist_tmp" --outdir "base_dist"
   python -mpip install base_dist/*.whl
   echo "::endgroup::"
 
@@ -1617,7 +1617,7 @@ test_operator_benchmark() {
   test_inductor_set_cpu_affinity
 
   cd benchmarks/operator_benchmark/pt_extension
-  python -m pip install .
+  python -m pip install . -v --no-build-isolation
 
   cd "${TEST_DIR}"/benchmarks/operator_benchmark
   $TASKSET python -m benchmark_all_test --device "$1" --tag-filter "$2" \
@@ -1630,6 +1630,25 @@ test_operator_benchmark() {
       --expected "expected_ci_operator_benchmark_eager_float32_cpu.csv"
 }
 
+test_operator_microbenchmark() {
+  TEST_REPORTS_DIR=$(pwd)/test/test-reports
+  mkdir -p "$TEST_REPORTS_DIR"
+  TEST_DIR=$(pwd)
+
+  cd benchmarks/operator_benchmark/pt_extension
+  python -m pip install .
+
+  cd "${TEST_DIR}"/benchmarks/operator_benchmark
+
+  for OP_BENCHMARK_TESTS in matmul mm addmm bmm; do
+    $TASKSET python -m pt.${OP_BENCHMARK_TESTS}_test --tag-filter long \
+      --output-json-for-dashboard "${TEST_REPORTS_DIR}/operator_microbenchmark_${OP_BENCHMARK_TESTS}_compile.json" \
+      --benchmark-name "PyTorch operator microbenchmark" --use-compile
+    $TASKSET python -m pt.${OP_BENCHMARK_TESTS}_test --tag-filter long \
+      --output-json-for-dashboard "${TEST_REPORTS_DIR}/operator_microbenchmark_${OP_BENCHMARK_TESTS}.json" \
+      --benchmark-name "PyTorch operator microbenchmark"
+  done
+}
 
 if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
   (cd test && python -c "import torch; print(torch.__config__.show())")
@@ -1686,6 +1705,8 @@ elif [[ "${TEST_CONFIG}" == *operator_benchmark* ]]; then
     test_operator_benchmark cpu ${TEST_MODE}
 
   fi
+elif [[ "${TEST_CONFIG}" == *operator_microbenchmark* ]]; then
+  test_operator_microbenchmark
 elif [[ "${TEST_CONFIG}" == *inductor_distributed* ]]; then
   test_inductor_distributed
 elif [[ "${TEST_CONFIG}" == *inductor-halide* ]]; then
@@ -1793,6 +1814,8 @@ elif [[ "${TEST_CONFIG}" == smoke_b200 ]]; then
 elif [[ "${TEST_CONFIG}" == h100_distributed ]]; then
   test_h100_distributed
 elif [[ "${TEST_CONFIG}" == "h100-symm-mem" ]]; then
+  test_h100_symm_mem
+elif [[ "${TEST_CONFIG}" == "b200-symm-mem" ]]; then
   test_h100_symm_mem
 elif [[ "${TEST_CONFIG}" == h100_cutlass_backend ]]; then
   test_h100_cutlass_backend
