@@ -151,28 +151,28 @@ def _try_isolate_lhs(
         if isinstance(e, sympy.Eq):
             numerator, denominator = e.lhs.args
             return sympy.And(
-                sympy.Ge(numerator, (e.rhs * denominator)),  # type: ignore[arg-type]
-                sympy.Lt(numerator, ((e.rhs + 1) * denominator)),  # type: ignore[arg-type]
+                sympy.Ge(numerator, (e.rhs * denominator)),
+                sympy.Lt(numerator, ((e.rhs + 1) * denominator)),
             )
         # a // b != expr
         # => a < (b * expr) or a >= (b * (expr + 1))
         if isinstance(e, sympy.Ne):
             numerator, denominator = e.lhs.args
             return sympy.Or(
-                sympy.Lt(numerator, (e.rhs * denominator)),  # type: ignore[arg-type]
-                sympy.Ge(numerator, ((e.rhs + 1) * denominator)),  # type: ignore[arg-type]
+                sympy.Lt(numerator, (e.rhs * denominator)),
+                sympy.Ge(numerator, ((e.rhs + 1) * denominator)),
             )
         # The transformations below only work if b is positive.
         # Note: we only have this information for constants.
         # a // b > expr  => a >= b * (expr + 1)
         # a // b >= expr => a >= b * expr
         if isinstance(e, (sympy.Gt, sympy.Ge)):
-            quotient = e.rhs if isinstance(e, sympy.Ge) else (e.rhs + 1)  # type: ignore[arg-type]
-            return sympy.Ge(e.lhs.args[0], (quotient * e.lhs.args[1]))  # type: ignore[arg-type]
+            quotient = e.rhs if isinstance(e, sympy.Ge) else (e.rhs + 1)
+            return sympy.Ge(e.lhs.args[0], (quotient * e.lhs.args[1]))
         # a // b < expr  => a < b * expr
         # a // b <= expr => a < b * (expr + 1)
         if isinstance(e, (sympy.Lt, sympy.Le)):
-            quotient = e.rhs if isinstance(e, sympy.Lt) else (e.rhs + 1)  # type: ignore[arg-type]
-            return sympy.Lt(e.lhs.args[0], (quotient * e.lhs.args[1]))  # type: ignore[arg-type]
+            quotient = e.rhs if isinstance(e, sympy.Lt) else (e.rhs + 1)
+            return sympy.Lt(e.lhs.args[0], (quotient * e.lhs.args[1]))
 
     return e

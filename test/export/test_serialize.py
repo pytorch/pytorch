@@ -888,6 +888,42 @@ def forward(self, x):
         loaded_ep = load(buffer)
         self.assertEqual(m(*sample_inputs), loaded_ep.module()(*sample_inputs))
 
+    def test_1D_tensor_slicing(self) -> None:
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.const = torch.arange(8)[::2]
+
+            def forward(self, x):
+                return x + self.const
+
+        m = M()
+        sample_inputs = (torch.randn(4),)
+        ep = torch.export.export(m, sample_inputs)
+        buffer = io.BytesIO()
+        save(ep, buffer)
+        buffer.seek(0)
+        loaded_ep = load(buffer)
+        self.assertEqual(m(*sample_inputs), loaded_ep.module()(*sample_inputs))
+
+    def test_2D_tensor_slicing(self) -> None:
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.const = torch.randn(4, 4)[:2, :2]
+
+            def forward(self, x):
+                return x + self.const
+
+        m = M()
+        sample_inputs = (torch.randn(2, 2),)
+        ep = torch.export.export(m, sample_inputs)
+        buffer = io.BytesIO()
+        save(ep, buffer)
+        buffer.seek(0)
+        loaded_ep = load(buffer)
+        self.assertEqual(m(*sample_inputs), loaded_ep.module()(*sample_inputs))
+
     def test_complex_constant(self) -> None:
         class M(torch.nn.Module):
             def forward(self, x):
@@ -1130,7 +1166,8 @@ class TestDeserialize(TestCase):
 
             # check ShapeEnv counters
             shape_env = _get_shape_env_from_gm(loaded_ep.graph_module)
-            next_index = next(shape_env.unbacked_symint_counter)
+            next_index = shape_env.unbacked_symint_counter
+            shape_env.unbacked_symint_counter += 1
             for symbol in bound:
                 self.assertTrue(symbol_is_type(symbol, SymT.UNBACKED_INT))
                 self.assertTrue(
