@@ -1,6 +1,6 @@
 import warnings
-from collections.abc import Iterable
-from typing import Any, Callable, NamedTuple, Optional, overload, TypeVar, Union
+from collections.abc import Callable, Iterable
+from typing import Any, NamedTuple, Optional, overload, TypeVar, Union
 from typing_extensions import Self
 
 import torch
