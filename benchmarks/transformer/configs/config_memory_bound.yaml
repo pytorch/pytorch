@@ -1,0 +1,29 @@
+# Memory-bound benchmark configuration for flex attention
+# Usage: python flex_perf.py --config config_memory_bound.yaml
+
+# Core parameters
+dynamic: false
+calculate_bwd: false
+dtype: "bfloat16"
+
+# Shape parameters - focus on memory efficiency
+b: [1, 2, 4]  # smaller batch sizes
+nh: ["16,16", "32,32"]  # [query_heads,key_value_heads]
+s: [4096, 8192, 16384]  # longer sequences
+d: [128, 256]  # larger head dimensions
+
+# Attention types that benefit from memory optimization
+mods: ["causal", "sliding_window", "document_mask"]
+
+# Efficient backends
+backend: ["efficient", "fav2"]
+max_autotune: true
+
+# Use KV cache size instead of batch size
+decoding: false
+kv_size: [256, 512, 1024]  # KV cache size in MiB
+
+# Metrics and output
+throughput: true  # Always calculate TBS and TFLOPs
+show_speedups: true
+save_path: "memory_bound_results.csv"

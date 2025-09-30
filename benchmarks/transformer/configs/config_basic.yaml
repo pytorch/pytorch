@@ -1,5 +1,5 @@
-# Basic benchmark configuration for PyTorch transformer benchmarks
-# Usage: python score_mod.py --config config_basic.yaml
+# Basic benchmark configuration for flex attention
+# Usage: python flex_perf.py --config config_basic.yaml
 
 # Core parameters
 dynamic: false
@@ -8,22 +8,30 @@ dtype: "bfloat16"
 
 # Shape parameters
 b: [2, 4]  # batch sizes
-nh: ["16,16", "16,4"]  # [query_heads,key_value_heads]
-s: [1024, 2048, 4096, 8192]  # sequence lengths
+nh: ["16, 16", "16, 4"]  # [query_heads,key_value_heads]
+s: [1024, 2048, 4096, 8192, 16384, 32768]  # sequence lengths
 d: [64, 128]  # head dimensions
 
 # Attention types to benchmark
-mods: ["noop", "causal", "alibi", "sliding_window"]
+mods: ["noop", "causal", "alibi", "sliding_window", "document_mask"]
 
 # Backend and optimization
-backend: ["efficient", "math"]  # SDPA backends
-max_autotune: true  # Enable torch.compile with max-autotune for optimal performance
+backend: []
+max_autotune: false
 
 # Decoding and cache settings
 decoding: false
 kv_size: null  # Use batch sizes instead
 
 # Metrics and output
-throughput: true  # Calculate memory bandwidth & TFLOPS
-save_path: "basic_results.csv"  # Save to CSV
-output_json_for_dashboard: "basic_dashboard.json"  # Save JSON for PyTorch OSS dashboard
+throughput: true  # Always calculate TBS and TFLOPs
+show_speedups: false  # Show speedup calculations
+save_path: null  # No CSV output
+
+# Uncomment to change
+# kernel_options:
+#   global:
+#     BLOCK_M: 64
+#     BLOCK_N: 128
+#     num_warps: 8
+#     num_stages: 2

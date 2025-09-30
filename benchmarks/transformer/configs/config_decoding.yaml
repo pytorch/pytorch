@@ -1,0 +1,29 @@
+# Decoding benchmark configuration for flex attention
+# Usage: python flex_perf.py --config config_decoding.yaml
+
+# Core parameters
+dynamic: false
+calculate_bwd: false  # Decoding doesn't support backward
+dtype: "bfloat16"
+
+# Shape parameters for decoding (query length = 1)
+b: [1, 4, 8, 16]  # batch sizes
+nh: ["16,16", "16,2", "32,32"]  # [query_heads,key_value_heads]
+s: [1024, 2048, 4096, 8192]  # KV sequence lengths
+d: [64, 128]  # head dimensions
+
+# Attention types suitable for decoding
+mods: ["causal", "alibi", "sliding_window", "softcap"]
+
+# Backends including decoding-optimized ones
+backend: ["efficient", "fav2", "fakv"]
+max_autotune: false
+
+# Decoding and cache settings
+decoding: true  # Enable decoding mode
+kv_size: null
+
+# Metrics and output
+throughput: true  # Always calculate TBS and TFLOPs
+show_speedups: false  # Focus on raw performance metrics
+save_path: "decoding_results.csv"
