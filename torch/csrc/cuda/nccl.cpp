@@ -1092,8 +1092,8 @@ void gather(
   void* recv_ptr = nullptr;
   at::Tensor flat; // keep alive until after NCCL call
   if (cur_rank == root) {
-    TORCH_CHECK(
-        (int)outputs.size() == numranks,
+    TORCH_CHECK_VALUE(
+        static_cast<int>(outputs.size()) == numranks,
         "root must provide inputs.size()==numranks");
     // Allocate one flat buffer [world_size * count]
     flat = at::empty({numranks * count}, inputs.options());
