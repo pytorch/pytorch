@@ -341,35 +341,42 @@ class UnsqueezeOperator(LayoutOperatorBase):
         if not isinstance(output_spec, TensorSpec):
             raise ValueError("UnsqueezeOperator can only produce TensorSpec outputs")
 
-        # Remove the LAST singleton dimension from output to create input
-        # This ensures our codegen logic (which adds at the end) is consistent
-        input_size = list(output_spec.size)
+        # For unsqueeze: output = input.shape[:dim] + (1,) + input.shape[dim:]
+        # So to get input from output, we need to remove exactly one singleton dimension
 
-        # Find the last singleton dimension and remove it
-        last_singleton_idx = None
+        # Find a singleton dimension to remove (prefer last one for consistency)
+        input_size = list(output_spec.size)
+        singleton_idx = None
+
         for i in range(len(input_size) - 1, -1, -1):
             if input_size[i] == 1:
-                last_singleton_idx = i
+                singleton_idx = i
                 break
 
-        if last_singleton_idx is not None:
-            # Remove the last singleton dimension
-            input_size.pop(last_singleton_idx)
+        if singleton_idx is not None:
+            # Remove the singleton dimension to create input shape
+            input_size.pop(singleton_idx)
+        else:
+            # This shouldn't happen given our can_produce constraint
+            raise ValueError("UnsqueezeOperator requires output to have at least one singleton dimension")
 
-        # If no singleton dimensions exist or input becomes empty, create a simpler input
+        # Handle empty input (scalar case)
         if not input_size:
-            input_size = [dim for dim in output_spec.size if dim != 1]
-            if not input_size:  # All dims were 1
-                input_size = [2]  # Create a non-singleton input
+            input_size = tuple()  # Scalar tensor
+        else:
+            input_size = tuple(input_size)
 
         # Create input tensor spec
         from torchfuzz.tensor_fuzzer import fuzz_valid_stride
 
-        input_stride = fuzz_valid_stride(tuple(input_size))
+        if input_size:
+            input_stride = fuzz_valid_stride(input_size)
+        else:
+            input_stride = tuple()  # Scalar has empty stride
 
         return [
             TensorSpec(
-                size=tuple(input_size), stride=input_stride, dtype=output_spec.dtype
+                size=input_size, stride=input_stride, dtype=output_spec.dtype
             )
         ]
 
@@ -381,6 +388,7 @@ class UnsqueezeOperator(LayoutOperatorBase):
             raise ValueError("UnsqueezeOperator can only produce TensorSpec outputs")
 
         # Find the last singleton dimension position (matching fuzz_inputs_specs logic)
+        # This should be the same singleton dimension that we removed in fuzz_inputs_specs
         last_singleton_idx = None
         for i in range(len(output_spec.size) - 1, -1, -1):
             if output_spec.size[i] == 1:
