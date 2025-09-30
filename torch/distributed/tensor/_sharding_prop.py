@@ -1,9 +1,9 @@
 # mypy: allow-untyped-defs
 import threading
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from functools import lru_cache
 from itertools import chain
-from typing import Callable, cast, Optional, Union
+from typing import cast, Optional, Union
 
 import torch
 from torch._ops import OpOverload

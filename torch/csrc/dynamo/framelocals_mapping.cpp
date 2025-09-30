@@ -145,17 +145,21 @@ FrameLocalsMapping::FrameLocalsMapping(FrameLocalsFrameType* frame)
 
 void FrameLocalsMapping::_realize_dict() {
   _dict = py::dict();
+  std::unordered_set<PyObject*> seen;
   py::tuple framelocals_names = code_framelocals_names(_code_obj);
   PyCodeObject* co = (PyCodeObject*)_code_obj.ptr();
 
   auto update_mapping = [&](int i) {
     DEBUG_CHECK(0 <= i && i < _framelocals.size());
-    // Note that CPython pops the name from the dict when the framelocals[i] is
-    // a nullptr. But for our purposes, it is ok to skip it because this is used
-    // only for guard purposes, and guards will not use any name that is set to
-    // nullptr.
-    if (_framelocals[i]) {
-      _dict[framelocals_names[i]] = _framelocals[i];
+    PyObject* value = _framelocals[i].ptr();
+    if (value == nullptr) {
+      PyObject* name = framelocals_names[i].ptr();
+      if (name != nullptr && seen.count(name) != 0) {
+        _dict.attr("pop")(framelocals_names[i], py::none());
+      }
+    } else {
+      _dict[framelocals_names[i]] = value;
+      seen.insert(framelocals_names[i].ptr());
     }
   };
 
