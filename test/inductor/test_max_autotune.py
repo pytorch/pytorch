@@ -1612,7 +1612,11 @@ class TestMaxAutotune(TestCase):
                 "triton_.*_fused_0.run"
             ).check("decompose_k").check_regex(r"s[0-9]+ = s[0-9]+").check_regex(
                 r"2\*s[0-9]+"
-            ).check_regex("s[0-9]+ = 32").run(code[0])
+            ).check_regex(
+                "s[0-9]+ = 32"
+            ).run(
+                code[0]
+            )
             torch.testing.assert_close(
                 out,
                 f(a, b),
@@ -1666,7 +1670,9 @@ class TestMaxAutotune(TestCase):
                 "triton_.*_fused_0.run"
             ).check("decompose_k").check_regex(r"s[0-9]+ = s[0-9]+").check_regex(
                 r"256\*s[0-9]+"
-            ).check_regex("s[0-9]+ = 8").run(
+            ).check_regex(
+                "s[0-9]+ = 8"
+            ).run(
                 # code[1] in this case given backwards
                 code[1]
             )
@@ -2521,12 +2527,12 @@ class TestMaxAutotunePrecompile(TestCase):
                     ):
                         asc("test_call", fake_choices, [], Mock())
             for fake_choice in fake_choices:
-                assert fake_choice.thread_id is not None, (
-                    "Expected all ChoiceCaller's precompile method to have been called"
-                )
-                assert fake_choice.thread_id != main_thread_id, (
-                    "Expected all ChoiceCaller's precompile method to have been called on separate thread"
-                )
+                assert (
+                    fake_choice.thread_id is not None
+                ), "Expected all ChoiceCaller's precompile method to have been called"
+                assert (
+                    fake_choice.thread_id != main_thread_id
+                ), "Expected all ChoiceCaller's precompile method to have been called on separate thread"
         finally:
             V.set_debug_handler(old_debug_handler)
 
