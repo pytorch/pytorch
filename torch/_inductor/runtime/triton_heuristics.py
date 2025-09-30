@@ -2688,7 +2688,7 @@ def _reduction_configs(
         )
 
     contiguous_config = make_config(
-        1 if rnumel > 2048 and not is_fbcode() else 2,  # 1024 or less is persistent
+        2 if rnumel <= 2048 and not is_fbcode() else 1,  # 1024 or less is persistent
         min(rnumel, MAX_R0_BLOCK),
         register_intensive=register_intensive,
     )
