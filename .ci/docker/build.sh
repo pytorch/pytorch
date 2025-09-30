@@ -84,8 +84,8 @@ fi
 _UCX_COMMIT=7836b165abdbe468a2f607e7254011c07d788152
 _UCC_COMMIT=430e241bf5d38cbc73fc7a6b89155397232e3f96
 if [[ "$image" == *rocm* ]]; then
-  _UCX_COMMIT=cc312eaa4655c0cc5c2bcd796db938f90563bcf6
-  _UCC_COMMIT=0c0fc21559835044ab107199e334f7157d6a0d3d
+  _UCX_COMMIT=29831d319e6be55cb8c768ca61de335c934ca39e
+  _UCC_COMMIT=9f4b242cbbd8b1462cbc732eb29316cdfa124b77
 fi
 
 tag=$(echo $image | awk -F':' '{print $2}')
@@ -175,20 +175,6 @@ case "$tag" in
     fi
     GCC_VERSION=11
     VISION=yes
-    ROCM_VERSION=6.4
-    NINJA_VERSION=1.9.0
-    TRITON=yes
-    KATEX=yes
-    UCX_COMMIT=${_UCX_COMMIT}
-    UCC_COMMIT=${_UCC_COMMIT}
-    if [[ $tag =~ "benchmarks" ]]; then
-      INDUCTOR_BENCHMARKS=yes
-    fi
-    ;;
-  pytorch-linux-noble-rocm-alpha-py3)
-    ANACONDA_PYTHON_VERSION=3.12
-    GCC_VERSION=11
-    VISION=yes
     ROCM_VERSION=7.0
     NINJA_VERSION=1.9.0
     TRITON=yes
@@ -196,6 +182,9 @@ case "$tag" in
     UCX_COMMIT=${_UCX_COMMIT}
     UCC_COMMIT=${_UCC_COMMIT}
     PYTORCH_ROCM_ARCH="gfx90a;gfx942;gfx950"
+    if [[ $tag =~ "benchmarks" ]]; then
+      INDUCTOR_BENCHMARKS=yes
+    fi
     ;;
   pytorch-linux-jammy-xpu-n-1-py3)
     ANACONDA_PYTHON_VERSION=3.10
