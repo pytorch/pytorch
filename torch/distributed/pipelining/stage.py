@@ -3,7 +3,8 @@
 import logging
 import operator
 from abc import ABC, abstractmethod
-from typing import Any, Callable, cast, Optional, Union
+from collections.abc import Callable
+from typing import Any, cast, Optional, Union
 
 import torch
 import torch.distributed as dist
