@@ -42,6 +42,7 @@ from torch.testing import FileCheck
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_cuda import (
     _get_torch_cuda_version,
+    IS_SM90,
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     PLATFORM_SUPPORTS_FP8,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
@@ -1236,6 +1237,72 @@ class AOTInductorTestsTemplate:
             Model(dtype),
             (x, weight, input_bias, a_inverse_scale, b_inverse_scale),
             dynamic_shapes=dynamic_shapes,
+        )
+
+    @unittest.skipIf(
+        TEST_WITH_ROCM or not IS_SM90,
+        "scaled_grouped_mm is only supported on SM90",
+    )
+    @skipIfXpu
+    def test_scaled_grouped_mm(self):
+        # Test torch._scaled_grouped_mm AOTI lowering
+        # cuda only
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, weight, scale_a, scale_b, offsets):
+                # x: [num_groups, batch, in_features] - FP8 inputs
+                # weight: [total_out_features, in_features] - FP8 weights (transposed)
+                # scale_a: [num_groups] - input scales
+                # scale_b: [num_groups] - weight scales
+                # offsets: [num_groups] - cumulative output sizes
+                output = torch._scaled_grouped_mm(
+                    x,
+                    weight.t(),
+                    scale_a=scale_a,
+                    scale_b=scale_b,
+                    offs=offsets,
+                    use_fast_accum=True,
+                )
+                return output.half()
+
+        dtype = torch.float16
+        num_groups = 3
+        batch_size = 64
+        in_features = 128
+        out_features_list = [64, 128, 256]  # Different output sizes for each group
+
+        device = GPU_TYPE
+
+        # Calculate offsets (cumulative output sizes)
+        offsets = torch.cumsum(torch.tensor(out_features_list), dim=0).to(
+            device, dtype=torch.int32
+        )
+        total_out_features = sum(out_features_list)
+
+        # Create FP8 input tensors - stacked for all groups
+        x_fp16 = torch.randn(
+            num_groups, batch_size, in_features, dtype=dtype, device=device
+        )
+        x_fp8 = x_fp16.to(torch.float8_e4m3fn)
+
+        # Create FP8 weight tensor - concatenated and transposed
+        weight_fp16 = torch.randn(
+            total_out_features, in_features, dtype=dtype, device=device
+        )
+        weight_fp8 = weight_fp16.to(torch.float8_e4m3fn)
+
+        # Create scales
+        scale_a = torch.ones(num_groups, batch_size, device=device, dtype=torch.float32)
+        scale_b = torch.ones(total_out_features, device=device, dtype=torch.float32)
+
+        self.check_model(
+            Model(),
+            (x_fp8, weight_fp8, scale_a, scale_b, offsets),
         )
 
     @unittest.skipIf(
