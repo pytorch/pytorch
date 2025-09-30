@@ -530,7 +530,8 @@ class DTensor(torch.Tensor):
         for i, placement in enumerate(placements):
             if placement.is_partial() and self.placements[i] != placement:
                 raise RuntimeError(
-                    f"Can not redistribute from {self.placements[i]} to {placement}, redistributing to Partial is for internal use only!"
+                    f"Can not redistribute from {self.placements[i]} to {placement},\
+                    redistributing to Partial is for internal use only!"
                 )
             if isinstance(placement, Shard) and placement.dim < 0:
                 # normalize shard dim to be positive
