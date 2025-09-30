@@ -6,6 +6,13 @@ from torchfuzz.operators.arg import ArgOperator
 from torchfuzz.operators.base import Operator
 from torchfuzz.operators.constant import ConstantOperator
 from torchfuzz.operators.item import ItemOperator
+from torchfuzz.operators.layout import (
+    FlattenOperator,
+    ReshapeOperator,
+    SqueezeOperator,
+    UnsqueezeOperator,
+    ViewOperator,
+)
 from torchfuzz.operators.masked_select import MaskedSelectOperator
 from torchfuzz.operators.nonzero import NonzeroOperator
 from torchfuzz.operators.scalar_pointwise import (
@@ -21,13 +28,6 @@ from torchfuzz.operators.tensor_pointwise import (
     SubOperator,
 )
 from torchfuzz.operators.unique import UniqueOperator
-from torchfuzz.operators.layout import (
-    ViewOperator,
-    ReshapeOperator,
-    FlattenOperator,
-    SqueezeOperator,
-    UnsqueezeOperator,
-)
 
 
 class OperatorRegistry:

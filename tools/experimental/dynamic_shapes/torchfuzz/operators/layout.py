@@ -47,35 +47,41 @@ class ViewOperator(LayoutOperatorBase):
         # Generate a compatible input shape with exactly the same number of elements
         input_size = fuzz_tensor_size()
 
-        # Directly adjust to match exact element count
+        # Always ensure exact element count match
         if output_numel == 0:
             # For zero-sized output, create zero-sized input
             input_size = tuple(list(input_size)[:-1] + [0])
-        elif len(input_size) > 0 and output_numel > 0:
+        else:
             # Calculate input shape that gives exactly output_numel elements
-            # Keep all dims except last, adjust last to make total = output_numel
-            prefix_numel = 1
-            for dim in input_size[:-1]:
-                prefix_numel *= dim
+            # Try to use the fuzzed shape structure but adjust to match element count
+            if len(input_size) > 1:
+                # Keep all dims except last, adjust last to make total = output_numel
+                prefix_numel = 1
+                for dim in input_size[:-1]:
+                    prefix_numel *= dim
 
-            if prefix_numel > 0:
-                last_dim = output_numel // prefix_numel
-                # Ensure we get exactly output_numel elements
-                if last_dim * prefix_numel == output_numel:
+                if prefix_numel > 0 and output_numel % prefix_numel == 0:
+                    last_dim = output_numel // prefix_numel
                     input_size = tuple(list(input_size)[:-1] + [last_dim])
                 else:
                     # Fallback: create a simple shape with exact element count
                     input_size = (output_numel,)
             else:
+                # For single-dim input, just use the exact element count
                 input_size = (output_numel,)
 
         # Create input tensor spec with compatible stride
         from torchfuzz.tensor_fuzzer import fuzz_valid_stride
+
         input_stride = fuzz_valid_stride(input_size)
 
-        return [TensorSpec(size=input_size, stride=input_stride, dtype=output_spec.dtype)]
+        return [
+            TensorSpec(size=input_size, stride=input_stride, dtype=output_spec.dtype)
+        ]
 
-    def codegen(self, output_name: str, input_names: list[str], output_spec: Spec) -> str:
+    def codegen(
+        self, output_name: str, input_names: list[str], output_spec: Spec
+    ) -> str:
         """Generate code for view operation."""
         if not isinstance(output_spec, TensorSpec):
             raise ValueError("ViewOperator can only produce TensorSpec outputs")
@@ -116,35 +122,41 @@ class ReshapeOperator(LayoutOperatorBase):
         # Generate a compatible input shape with exactly the same number of elements
         input_size = fuzz_tensor_size()
 
-        # Directly adjust to match exact element count
+        # Always ensure exact element count match
         if output_numel == 0:
             # For zero-sized output, create zero-sized input
             input_size = tuple(list(input_size)[:-1] + [0])
-        elif len(input_size) > 0 and output_numel > 0:
+        else:
             # Calculate input shape that gives exactly output_numel elements
-            # Keep all dims except last, adjust last to make total = output_numel
-            prefix_numel = 1
-            for dim in input_size[:-1]:
-                prefix_numel *= dim
+            # Try to use the fuzzed shape structure but adjust to match element count
+            if len(input_size) > 1:
+                # Keep all dims except last, adjust last to make total = output_numel
+                prefix_numel = 1
+                for dim in input_size[:-1]:
+                    prefix_numel *= dim
 
-            if prefix_numel > 0:
-                last_dim = output_numel // prefix_numel
-                # Ensure we get exactly output_numel elements
-                if last_dim * prefix_numel == output_numel:
+                if prefix_numel > 0 and output_numel % prefix_numel == 0:
+                    last_dim = output_numel // prefix_numel
                     input_size = tuple(list(input_size)[:-1] + [last_dim])
                 else:
                     # Fallback: create a simple shape with exact element count
                     input_size = (output_numel,)
             else:
+                # For single-dim input, just use the exact element count
                 input_size = (output_numel,)
 
         # Create input tensor spec with compatible stride
         from torchfuzz.tensor_fuzzer import fuzz_valid_stride
+
         input_stride = fuzz_valid_stride(input_size)
 
-        return [TensorSpec(size=input_size, stride=input_stride, dtype=output_spec.dtype)]
+        return [
+            TensorSpec(size=input_size, stride=input_stride, dtype=output_spec.dtype)
+        ]
 
-    def codegen(self, output_name: str, input_names: list[str], output_spec: Spec) -> str:
+    def codegen(
+        self, output_name: str, input_names: list[str], output_spec: Spec
+    ) -> str:
         """Generate code for reshape operation."""
         if not isinstance(output_spec, TensorSpec):
             raise ValueError("ReshapeOperator can only produce TensorSpec outputs")
@@ -224,11 +236,18 @@ class FlattenOperator(LayoutOperatorBase):
 
         # Create input tensor spec
         from torchfuzz.tensor_fuzzer import fuzz_valid_stride
+
         input_stride = fuzz_valid_stride(tuple(input_size))
 
-        return [TensorSpec(size=tuple(input_size), stride=input_stride, dtype=output_spec.dtype)]
+        return [
+            TensorSpec(
+                size=tuple(input_size), stride=input_stride, dtype=output_spec.dtype
+            )
+        ]
 
-    def codegen(self, output_name: str, input_names: list[str], output_spec: Spec) -> str:
+    def codegen(
+        self, output_name: str, input_names: list[str], output_spec: Spec
+    ) -> str:
         """Generate code for flatten operation."""
         if not isinstance(output_spec, TensorSpec):
             raise ValueError("FlattenOperator can only produce TensorSpec outputs")
@@ -266,11 +285,18 @@ class SqueezeOperator(LayoutOperatorBase):
 
         # Create input tensor spec
         from torchfuzz.tensor_fuzzer import fuzz_valid_stride
+
         input_stride = fuzz_valid_stride(tuple(input_size))
 
-        return [TensorSpec(size=tuple(input_size), stride=input_stride, dtype=output_spec.dtype)]
+        return [
+            TensorSpec(
+                size=tuple(input_size), stride=input_stride, dtype=output_spec.dtype
+            )
+        ]
 
-    def codegen(self, output_name: str, input_names: list[str], output_spec: Spec) -> str:
+    def codegen(
+        self, output_name: str, input_names: list[str], output_spec: Spec
+    ) -> str:
         """Generate code for squeeze operation."""
         # Always use squeeze() without specifying dim to avoid dimension errors
         # This will squeeze all singleton dimensions safely
@@ -319,11 +345,18 @@ class UnsqueezeOperator(LayoutOperatorBase):
 
         # Create input tensor spec
         from torchfuzz.tensor_fuzzer import fuzz_valid_stride
+
         input_stride = fuzz_valid_stride(tuple(input_size))
 
-        return [TensorSpec(size=tuple(input_size), stride=input_stride, dtype=output_spec.dtype)]
+        return [
+            TensorSpec(
+                size=tuple(input_size), stride=input_stride, dtype=output_spec.dtype
+            )
+        ]
 
-    def codegen(self, output_name: str, input_names: list[str], output_spec: Spec) -> str:
+    def codegen(
+        self, output_name: str, input_names: list[str], output_spec: Spec
+    ) -> str:
         """Generate code for unsqueeze operation."""
         if not isinstance(output_spec, TensorSpec):
             raise ValueError("UnsqueezeOperator can only produce TensorSpec outputs")
