@@ -1637,6 +1637,7 @@ def elementwise_dtypes(
     def _find_highest_dtype_filtered(
         args, filter, *, float_as_complex=False
     ) -> Optional[torch.dtype]:
+        wrapped_num_dtype = None
         zero_dim_tensor_dtype = None
         one_plus_dim_tensor_dtype = None
         for x in args:
@@ -1645,20 +1646,29 @@ def elementwise_dtypes(
                 if float_as_complex and is_float_dtype(_dtype):
                     _dtype = corresponding_complex_dtype(_dtype)
                 if x.ndim == 0:
-                    zero_dim_tensor_dtype = get_higher_dtype(
-                        zero_dim_tensor_dtype, _dtype
-                    )
+                    if x.was_wrapped_number:
+                        wrapped_num_dtype = get_higher_dtype(
+                            wrapped_num_dtype, _dtype
+                        )
+                    else:
+                        zero_dim_tensor_dtype = get_higher_dtype(
+                            zero_dim_tensor_dtype, _dtype
+                        )
                 else:
                     # x.ndim > 0
                     one_plus_dim_tensor_dtype = get_higher_dtype(
                         one_plus_dim_tensor_dtype, _dtype
                     )
 
-        # Prefers dtype of tensors with one or more dimensions
+        # Prefers dtype of tensors with one or more dimensions, then zero-dim tensors, then wrapped numbers
+        # This follows the numpy type promotion rules.
         if one_plus_dim_tensor_dtype is not None:
             return one_plus_dim_tensor_dtype
-
-        return zero_dim_tensor_dtype
+        
+        if zero_dim_tensor_dtype is not None:
+            return zero_dim_tensor_dtype
+        
+        return wrapped_num_dtype
 
     if highest_type is float:
         result_dtype = _find_highest_dtype_filtered(args, is_float_dtype)
