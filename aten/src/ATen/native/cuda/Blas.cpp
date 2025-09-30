@@ -1831,6 +1831,37 @@ std::optional<c10::ScalarType> out_dtype) {
   return out;
 }
 
+static void baddbmm_bmm_out_dtype_checks(const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha, const at::ScalarType out_dtype, bool is_bmm, const std::optional<Tensor>& self_baddbmm = std::nullopt) {
+  // ref ATen/native/LinearAlgebra.cpp common_checks_baddbmm_bmm
+  TORCH_CHECK(batch1.dim() == 3, "batch1 must be a 3D tensor");
+  TORCH_CHECK(batch2.dim() == 3, "batch2 must be a 3D tensor");
+
+  const auto batch1_sizes = batch1.sizes();
+  const auto batch2_sizes = batch2.sizes();
+
+  int64_t bs = batch1_sizes[0];
+  int64_t contraction_size = batch1_sizes[2];
+  int64_t res_rows = batch1_sizes[1];
+  int64_t res_cols = batch2_sizes[2];
+  std::vector<int64_t> output_size {bs, res_rows, res_cols};
+
+  TORCH_CHECK(batch2_sizes[0] == bs && batch2_sizes[1] == contraction_size,
+              "Expected size for first two dimensions of batch2 tensor to be: [",
+              bs, ", ", contraction_size, "] but got: [", batch2_sizes[0], ", ", batch2_sizes[1], "].");
+
+  TORCH_CHECK(batch1.scalar_type() == batch2.scalar_type(), "batch1 and batch2 must have the same dtype");
+
+  TORCH_CHECK(out_dtype == batch1.scalar_type() ||
+    (out_dtype == at::ScalarType::Float && (batch1.scalar_type() == at::ScalarType::Half || batch1.scalar_type() == at::ScalarType::BFloat16)),
+    "out_dtype must be the same as input dtype or fp32 for fp16/bf16 inputs");
+
+  if (!is_bmm && self_baddbmm.has_value()) {
+    const auto& self = self_baddbmm.value();
+    TORCH_CHECK(self.dim() == 3, "self must be a 3D tensor");
+    TORCH_CHECK(self.sizes() == output_size, "self must have the same shape as the output");
+  }
+}
+
 Tensor _bmm_dtype_cuda(const Tensor& batch1, const Tensor& batch2, const at::ScalarType out_dtype) {
   IntArrayRef batch1_sizes = batch1.sizes();
   IntArrayRef batch2_sizes = batch2.sizes();
@@ -1840,12 +1871,7 @@ Tensor _bmm_dtype_cuda(const Tensor& batch1, const Tensor& batch2, const at::Sca
 }
 
 Tensor& _bmm_out_dtype_cuda(const Tensor& batch1, const Tensor& batch2, const at::ScalarType out_dtype, Tensor &out) {
-  TORCH_CHECK(out_dtype == out.scalar_type(), "out_dtype must be the same as the dtype of the provided out tensor");
-
-  TORCH_CHECK(out_dtype == batch1.scalar_type() ||
-    (out_dtype == at::ScalarType::Float && (batch1.scalar_type() == at::ScalarType::Half || batch1.scalar_type() == at::ScalarType::BFloat16)),
-    "out_dtype must be the same as input dtype or fp32 for fp16/bf16 inputs");
-
+  baddbmm_bmm_out_dtype_checks(batch1, batch2, 0.0, 1.0, out_dtype, true);
   Scalar beta(0.0);
   Scalar alpha(1.0);
   {
@@ -1864,12 +1890,7 @@ Tensor _baddbmm_dtype_cuda(const Tensor& self, const Tensor& batch1, const Tenso
 }
 
 Tensor& _baddbmm_out_dtype_cuda(const Tensor& self, const Tensor& batch1, const Tensor& batch2, const at::ScalarType out_dtype, const Scalar& beta, const Scalar& alpha, Tensor &out) {
-  TORCH_CHECK(out_dtype == out.scalar_type(), "out_dtype must be the same as the dtype of the provided out tensor");
-
-  TORCH_CHECK(out_dtype == batch1.scalar_type() ||
-    (out_dtype == at::ScalarType::Float && (batch1.scalar_type() == at::ScalarType::Half || batch1.scalar_type() == at::ScalarType::BFloat16)),
-    "out_dtype must be the same as input dtype or fp32 for fp16/bf16 inputs");
-
+  baddbmm_bmm_out_dtype_checks(batch1, batch2, beta, alpha, out_dtype, false, self);
   {
     NoNamesGuard guard;
     baddbmm_out_cuda_impl(out, out, batch1, batch2, beta, alpha);
@@ -1884,6 +1905,12 @@ Tensor _mm_dtype_cuda(const Tensor& self, const Tensor& mat2, const at::ScalarTy
 }
 
 Tensor& _mm_dtype_out_cuda(const Tensor& self, const Tensor& mat2, const at::ScalarType out_dtype, Tensor &out) {
+  TORCH_CHECK(self.dim() == 2,  "self must be a matrix, got ", self.dim(), "-D tensor");
+  TORCH_CHECK(mat2.dim() == 2,  "mat2 must be a matrix, got ", mat2.dim(), "-D tensor");
+  TORCH_CHECK(
+      self.sizes()[1] == mat2.sizes()[0], "mat1 and mat2 shapes cannot be multiplied (",
+      self.sizes()[0], "x", self.sizes()[1], " and ", mat2.sizes()[0], "x", mat2.sizes()[1], ")");
+
   TORCH_CHECK(out_dtype == out.scalar_type(), "out_dtype must be the same as the dtype of the provided out tensor");
   TORCH_CHECK(self.scalar_type() == mat2.scalar_type(), "input dtypes must be the same");
   TORCH_CHECK(out_dtype == self.scalar_type() ||
@@ -1903,6 +1930,14 @@ Tensor _addmm_dtype_cuda(const Tensor& self, const Tensor& mat1, const Tensor& m
 }
 
 Tensor& _addmm_dtype_out_cuda(const Tensor& self, const Tensor& mat1, const Tensor& mat2, const at::ScalarType out_dtype, const Scalar& beta, const Scalar& alpha, Tensor &out) {
+  TORCH_CHECK(self.scalar_type() == mat2.scalar_type(), "self and mat2 must have the same dtype, but got ", self.scalar_type(), " and ", mat2.scalar_type());
+  TORCH_CHECK(mat1.scalar_type() == mat2.scalar_type(), "mat1 and mat2 must have the same dtype, but got ", mat1.scalar_type(), " and ", mat2.scalar_type());
+  TORCH_CHECK(mat1.dim() == 2, "mat1 must be a matrix, got ", mat1.dim(), "-D tensor");
+  TORCH_CHECK(mat2.dim() == 2, "mat2 must be a matrix, got ", mat2.dim(), "-D tensor");
+  TORCH_CHECK(
+      mat1.sizes()[1] == mat2.sizes()[0], "mat1 and mat2 shapes cannot be multiplied (",
+      mat1.sizes()[0], "x", mat1.sizes()[1], " and ", mat2.sizes()[0], "x", mat2.sizes()[1], ")");
+
   TORCH_CHECK(out_dtype == out.scalar_type(), "out_dtype must be the same as the dtype of the provided out tensor");
   TORCH_CHECK(out_dtype == self.scalar_type() ||
     (out_dtype == at::ScalarType::Float && (self.scalar_type() == at::ScalarType::Half || self.scalar_type() == at::ScalarType::BFloat16)),
