@@ -1862,6 +1862,32 @@ def make_a2a_exchange_plan(
     return ExchangePlan(in_splits, src_offsets, out_splits, dst_offsets)
 
 
+def all_to_all_v(
+    input: torch.Tensor,
+    out: torch.Tensor,
+    plan: ExchangePlan,
+    group_name: str,
+) -> None:
+    r"""
+    Perform an all-to-all-v operation given an `ExchangePlan`.
+    Args:
+        input (class:`torch.Tensor`): the input tensor for the all-to-all operation (IN).
+        out (class:`torch.Tensor`): the output tensor for the all-to-all operation (OUT).
+        plan (`ExchangePlan`): a tuple consisting of (in_splits, src_offsets, out_splits, dst_offsets).
+        group_name (str): the group over which to perform the all-to-all.
+    """
+    # For now we use the get style, in future we can extend it to support the
+    # put style too, given a flag or something.
+    torch.ops.symm_mem._all_to_all_get(
+        input,
+        out,
+        plan.src_offsets,
+        plan.out_splits,
+        plan.dst_offsets,
+        group_name,
+    )
+
+
 __all__ = [
     "empty",
     "rendezvous",
@@ -1870,4 +1896,5 @@ __all__ = [
     "get_backend",
     "ExchangePlan",
     "make_a2a_exchange_plan",
-]  # noqa: F822
+    "all_to_all_v",
+]

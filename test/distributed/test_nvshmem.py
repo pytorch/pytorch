@@ -617,6 +617,67 @@ class NVSHMEMAll2AllTest(MultiProcContinuousTest):
         self.assertEqual(dst_offsets[0], 0)
         torch.testing.assert_close(dst_offsets[1:], expected_dst_offsets[:-1])
 
+    @skipIfRocm
+    def test_a2a_with_exchange_plan(self) -> None:
+        self._init_device()
+
+        group_name = dist.group.WORLD.group_name
+        symm_mem.enable_symm_mem_for_group(group_name)
+
+        # Number of elements for a peer is random between [0, k)
+        k = 10
+        orig_inp_splits = torch.randint(k, (self.world_size,), device=self.device)
+
+        # Create splits and offsets
+        in_splits = symm_mem.empty(
+            self.world_size, dtype=torch.int64, device=self.device
+        )
+        src_offsets = symm_mem.empty(
+            self.world_size, dtype=torch.int64, device=self.device
+        )
+        out_splits = symm_mem.empty(
+            self.world_size, dtype=torch.int64, device=self.device
+        )
+        dst_offsets = symm_mem.empty(
+            self.world_size, dtype=torch.int64, device=self.device
+        )
+
+        # Create data
+        # Max number of input elements (must be a constant across ranks for symmetric memory allocation)
+        max_inp_numel = k * self.world_size
+        # Max number of output elements (must be a constant across ranks for symmetric memory allocation)
+        overflow_factor = self.world_size  # worst case: one rank receives all data
+        max_out_numel = max_inp_numel * overflow_factor
+        dtype = torch.float
+        inp = symm_mem.empty(max_inp_numel, dtype=dtype, device=self.device).copy_(
+            torch.randn(max_inp_numel, dtype=dtype, device=self.device)
+        )
+        out = symm_mem.empty(max_out_numel, dtype=dtype, device=self.device).fill_(-1)
+
+        in_splits.copy_(orig_inp_splits)
+
+        # Sync all ranks to ensure remote tensors are allocated
+        dist.barrier()
+
+        # Create exchange plan
+        plan = symm_mem.make_a2a_exchange_plan(
+            in_splits, src_offsets, out_splits, dst_offsets, group_name
+        )
+
+        # Prepare expected output
+        inp_numel = in_splits.sum().item()
+        out_numel = out_splits.sum().item()
+        expected = torch.empty(out_numel, dtype=dtype, device=self.device)
+        dist.all_to_all_single(
+            expected, inp[:inp_numel], out_splits.tolist(), in_splits.tolist()
+        )
+
+        # Exchange data with plan
+        # Loop a couple times to ensure the plan is reusable
+        for _ in range(3):
+            symm_mem.all_to_all_v(inp, out, plan, group_name)
+            torch.testing.assert_close(out[:out_numel], expected)
+
 
 # Help function used by multiple tests
 def dispatch_then_combine(device, align: int, group) -> None:
