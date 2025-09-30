@@ -56,11 +56,9 @@ def get_symbols(lib: str) -> list[tuple[str, str, str]]:
     return [x.split(" ", 2) for x in lines.decode("latin1").split("\n")[:-1]]
 
 
-def grep_symbols(lib: str, patterns: list[Any], symbol_type: str = None) -> list[str]:  # noqa: RUF013
+def grep_symbols(lib: str, patterns: list[Any], symbol_type: str|None = None) -> list[str]:
     def _grep_symbols(
-        symbols: list[tuple[str, str, str]],
-        patterns: list[Any],
-        symbol_type: str = None,  # noqa: RUF013
+        symbols: list[tuple[str, str, str]], patterns: list[Any]
     ) -> list[str]:
         rc = []
         for _s_addr, _s_type, s_name in symbols:
@@ -82,7 +80,7 @@ def grep_symbols(lib: str, patterns: list[Any], symbol_type: str = None) -> list
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=32) as executor:
         tasks = [
-            executor.submit(_grep_symbols, _get_symbols_chunk(i), patterns, symbol_type)
+            executor.submit(_grep_symbols, _get_symbols_chunk(i), patterns)
             for i in range(num_workers)
         ]
         return functools.reduce(list.__add__, (x.result() for x in tasks), [])
