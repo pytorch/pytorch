@@ -130,14 +130,14 @@ if "%USE_CUDA%"=="1" (
 :: Print all existing environment variable for debugging
 set
 
-python setup.py bdist_wheel
+python -m build --wheel --no-isolation
 if errorlevel 1 goto fail
 if not errorlevel 0 goto fail
 sccache --show-stats
 python -c "import os, glob; os.system('python -mpip install --no-index --no-deps ' + glob.glob('dist/*.whl')[0])"
 (
   if "%BUILD_ENVIRONMENT%"=="" (
-    echo NOTE: To run `import torch`, please make sure to activate the conda environment by running `call %CONDA_PARENT_DIR%\Miniconda3\Scripts\activate.bat %CONDA_PARENT_DIR%\Miniconda3` in Command Prompt before running Git Bash.
+    echo NOTE: To run `import torch`, please make sure to activate the conda environment by running `call %CONDA_ROOT_DIR%\Scripts\activate.bat %CONDA_ROOT_DIR%\envs\py_tmp` in Command Prompt before running Git Bash.
   ) else (
     copy /Y "dist\*.whl" "%PYTORCH_FINAL_PACKAGE_DIR%"
 
