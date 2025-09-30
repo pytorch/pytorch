@@ -113,6 +113,8 @@ struct TORCH_API InputMetadata {
   bool is_nestedness_same(const at::Tensor& grad) const;
   bool maybe_expandable_to(const at::Tensor& grad) const;
 
+  // NB: The engine does not use the dtype from the options, but rather the
+  //     grad_dtype_ field to validate grad_output dtype.
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const at::TensorOptions options_;
   MetadataShape shape_;
@@ -121,7 +123,10 @@ struct TORCH_API InputMetadata {
   bool is_nested_ = false;
   bool was_default_constructed_ = true;
 
+  // The grad_dtype_ field is the dtype that the engine expects the grad to be.
   // When nullopt, grad_dtype_ is allowed to be any dtype.
+  // This field is mutated if THPVariable_set_grad_dtype is called
+  // and the AccumulateGrad has already been created.
   std::optional<at::ScalarType> grad_dtype_;
 };
 } // namespace torch::autograd

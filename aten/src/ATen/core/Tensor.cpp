@@ -186,6 +186,7 @@ std::optional<ScalarType> TensorBase::grad_dtype() const {
 
 void TensorBase::set_grad_dtype(const std::optional<ScalarType>& grad_dtype) const {
   auto variable_hooks = impl::GetVariableHooks();
+  TORCH_CHECK(!variable_hooks->grad_fn(*this), "grad_dtype can only be set on leaf tensors.");
   if (grad_dtype.has_value()) {
     variable_hooks->set_grad_dtype(*this, grad_dtype);
     variable_hooks->set_allow_grad_dtype_mismatch(*this, false);

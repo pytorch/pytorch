@@ -1514,7 +1514,6 @@ static int THPVariable_set_grad_dtype(
     return handle_torch_function_setter(self, "grad_dtype", obj);
   }
   const auto& var = THPVariable_Unpack(self);
-  TORCH_CHECK(!var.grad_fn(), "grad_dtype can only be set on leaf tensors.");
   TORCH_CHECK(
       THPDtype_Check(obj) || obj == Py_None,
       "grad_dtype must be a torch.dtype or None, but got ",

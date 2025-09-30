@@ -954,7 +954,7 @@ static void validate_outputs_impl(
       if (grad.scalar_type() != metadata.grad_dtype().value()) {
         grad = grad.to(metadata.grad_dtype().value());
       }
-      if (grad.dtype() != metadata.grad_dtype().value()) {
+      if (grad.scalar_type() != metadata.grad_dtype().value()) {
         std::stringstream ss;
         ss << "invalid gradient at index " << i << " - expected dtype ";
         ss << metadata.grad_dtype().value() << " but got " << grad.dtype();
