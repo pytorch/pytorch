@@ -1097,7 +1097,7 @@ void gather(
         "root must provide inputs.size()==numranks");
     // Allocate one flat buffer [world_size * count]
     flat = at::empty({numranks * count}, inputs.options());
-    recv_ptr = flat.data_ptr();
+    recv_ptr = flat.mutable_data_ptr();
   }
   auto* recvbuff = reinterpret_cast<char*>(recv_ptr);
   NCCL_CHECK(ncclGather(sendbuff, recvbuff, count, type, root, comm, stream));
@@ -1107,7 +1107,7 @@ void gather(
       outputs[i].copy_(flat.narrow(0, i * count, count));
     }
   }
-#else  
+#else
   NCCL_CHECK(ncclGroupStart());
 
   if (cur_rank == root) {
@@ -1123,11 +1123,11 @@ void gather(
   } else {
     NCCL_CHECK(ncclSend(sendbuff, count, type, root, comm, stream));
   }
+#endif
 #ifndef NCCL_HAS_COMM_NONBLOCKING
   NCCL_CHECK(ncclGroupEnd());
 #else
   NCCL_CHECK_TIMEOUT(ncclGroupEnd(), _comm);
-#endif
 #endif
 
 #else
