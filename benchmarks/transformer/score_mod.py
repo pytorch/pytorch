@@ -1,12 +1,15 @@
-import argparse
 import csv
+import gc
 import itertools
+import json
 import random
 from collections import defaultdict
 from contextlib import nullcontext
 from dataclasses import asdict, dataclass
-from functools import partial
-from typing import Callable, Optional, Union
+from functools import partial, wraps
+from typing import Callable, Optional, Union, Literal
+
+from jsonargparse import CLI
 
 import numpy as np
 from tabulate import tabulate
@@ -30,6 +33,57 @@ torch._dynamo.config.recompile_limit = 1000
 
 
 from torch._inductor.runtime.benchmarking import benchmarker
+
+
+def cleanup_memory():
+    """Aggressively free GPU memory"""
+    torch.cuda.empty_cache()
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
+
+
+def safe_backend(backend_name=None):
+    """Decorator that wraps backend functions with error handling"""
+
+    def decorator(func):
+        @wraps(func)
+        def wrapper(config, *args, **kwargs):
+            try:
+                return func(config, *args, **kwargs)
+            except torch.OutOfMemoryError:
+                print(f"[SKIP] OOM for {backend_name or func.__name__} with shape {config.shape}")
+                cleanup_memory()
+            except Exception as e:
+                print(
+                    f"[SKIP] Error for {backend_name or func.__name__} with shape {config.shape}: {e}"
+                )
+
+            return ExperimentResults(
+                fwd_time=float("nan"),
+                bwd_time=float("nan") if config.calculate_bwd_time else None,
+            )
+
+        return wrapper
+
+    return decorator
+
+
+# Type definitions
+Backend = Literal["math", "efficient", "cudnn", "fav2", "fav3", "fakv", "og-eager"]
+AttentionType = Literal[
+    "noop",
+    "causal",
+    "rel",
+    "head_bias",
+    "alibi",
+    "sliding_window",
+    "document_mask",
+    "prefix_lm",
+    "softcap",
+]
+DtypeString = Literal["bfloat16", "float16", "float32"]
+SpeedupType = Literal["fwd", "bwd"]
 
 
 def benchmark_torch_function_in_microseconds(func: Callable, *args, **kwargs) -> float:
@@ -208,6 +262,7 @@ def query_key_value_clones(
     return query_ref, key_ref, value_ref
 
 
+@safe_backend("SDPA")
 def run_single_backend_sdpa(
     config: ExperimentConfig,
     query: torch.Tensor,
@@ -289,6 +344,7 @@ def run_single_backend_sdpa(
             )
 
 
+@safe_backend("FlashAttention")
 def run_single_backend_FA(
     config: ExperimentConfig,
     query: torch.Tensor,
@@ -614,14 +670,7 @@ dropout_p = 0.0
 def generate_score_mod(attn_type: str, shape: tuple[int]) -> Callable | None:
     B, Hq, M, Hkv, N, D = shape
     is_decoding = M == 1
-    
-    # Local implementations instead of importing from attn_gym
-    def generate_alibi_bias(Hq, device):
-        h = torch.arange(Hq, dtype=torch.float32)
-        return torch.exp2(-((h + 1) * 8.0 / Hq))
-    
-    def generate_tanh_softcap(score, softcap_value):
-        return torch.tanh(score / softcap_value) * softcap_value
+    from attn_gym.mods import generate_alibi_bias, generate_tanh_softcap
 
     def relative_bias(score, b, h, m, n):
         return score + (m - n)
@@ -634,11 +683,11 @@ def generate_score_mod(attn_type: str, shape: tuple[int]) -> Callable | None:
         "causal": None,
         "rel": relative_bias,
         "head_bias": head_bias,
-        "alibi": lambda score, b, h, m, n: score + generate_alibi_bias(Hq)[h] * (m - n),
+        "alibi": generate_alibi_bias(Hq),
         "sliding_window": None,
         "document_mask": None,
         "prefix_lm": None,
-        "softcap": lambda score, b, h, m, n: generate_tanh_softcap(score, softcap_value),
+        "softcap": generate_tanh_softcap(softcap_value, approx=True),
     }
 
     score_mod = function_dict[attn_type]
@@ -673,27 +722,12 @@ def generate_block_mask(attn_type: str, shape: tuple[int]):
 
         return offset
 
-    # Local implementations instead of importing from attn_gym
-    def generate_doc_mask_mod(offsets):
-        def doc_mask(b, h, m, n):
-            return m < offsets[b + 1] and n < offsets[b + 1]
-        return doc_mask
-    
-    def generate_prefix_lm_mask(prefix_length):
-        def prefix_mask(b, h, m, n):
-            return m >= prefix_length or n >= prefix_length
-        return prefix_mask
-    
-    def generate_sliding_window(window_size):
-        def sliding_mask(b, h, m, n):
-            return abs(m - n) <= window_size
-        return sliding_mask
-    
-    def length_to_offsets(lengths):
-        offsets = [0]
-        for length in lengths:
-            offsets.append(offsets[-1] + length)
-        return torch.tensor(offsets, dtype=torch.int32)
+    from attn_gym.masks import (
+        generate_doc_mask_mod,
+        generate_prefix_lm_mask,
+        generate_sliding_window,
+    )
+    from attn_gym.masks.document_mask import length_to_offsets
 
     def generate_random_lengths(total_length, num_documents):
         # Initialize all lengths to 1 to ensure each document has at least one token
@@ -1103,7 +1137,6 @@ def generate_experiment_configs(
 
     return all_configs
 
-
 def _output_json_for_dashboard(
     experiments,
     output_file,
@@ -1327,25 +1360,86 @@ def _output_json_for_dashboard(
     with open(output_file, "w", encoding="utf-8") as f:
         json.dump(records, f, indent=2)
 
+def main(
+    dynamic: bool = False,
+    calculate_bwd: bool = False,
+    dtype: DtypeString = "bfloat16",
+    b: list[int] = [2, 8, 16],
+    nh: list[str] = ["16,16", "16,2"],
+    s: list[int] = [512, 1024, 4096],
+    d: list[int] = [64, 128],
+    mods: list[AttentionType] = ["noop", "causal", "alibi", "sliding_window"],
+    backend: list[Backend] = ["efficient"],
+    max_autotune: bool = False,
+    decoding: bool = False,
+    kv_size: Optional[list[int]] = None,
+    throughput: bool = True,
+    save_path: Optional[str] = None,
+    output_json_for_dashboard: Optional[str] = None,
+    benchmark_name: str = "PyTorch attention benchmark",
+) -> None:
+    """Run sweep over sizes and score mods for flex attention.
 
-def main(args):
+    Usage Examples:
+        # Generate a config template
+        python score_mod.py --print_config > my_config.yaml
+
+        # Use a config file
+        python score_mod.py --config configs/config_basic.yaml
+
+        # Override config with CLI args
+        python score_mod.py --config configs/config_basic.yaml --dtype float16 --max_autotune
+
+        # Pure CLI usage
+        python score_mod.py --b 4 8 --s 1024 2048 --mods causal alibi --backend efficient
+
+    Args:
+        dynamic: Runs a dynamic shapes version of compiled flex attention
+        calculate_bwd: Calculate backward pass times
+        dtype: Data type for tensors (bfloat16, float16, float32)
+        b: Batch sizes to benchmark
+        nh: Number of query and key/value heads in format "Hq,Hkv"
+        s: Sequence lengths to benchmark
+        d: Head dimensions to benchmark
+        mods: Score modifications: noop, causal, rel, head_bias, alibi, sliding_window, document_mask, prefix_lm, softcap
+        backend: Backends for attention computation: math, efficient, cudnn, fav2, fav3, fakv
+        max_autotune: Turn on max-autotune optimization
+        decoding: Benchmark decoding mode (query sequence length = 1)
+        kv_size: Key/value cache size in MiB (ignores batch size if specified)
+        throughput: Calculate kernel memory bandwidth & computational throughput (always True)
+        save_path: Path to save the results CSV file
+        output_json_for_dashboard: Path to save results in JSON format for PyTorch OSS dashboard
+        benchmark_name: Name of the benchmark for dashboard output
+    """
+    # Convert dtype string to torch dtype
+    import torch
+
+    dtype = getattr(torch, dtype)
+
+    # Parse head configurations
+    nh_parsed = [heads_input_type(h) for h in nh]
+
+    # Always calculate throughput
+    throughput = True
+
     seed = 123
     np.random.seed(seed)
     torch.manual_seed(seed)
     results = []
+    experiment_count = 0
     for config in tqdm(
         generate_experiment_configs(
-            args.calculate_bwd,
-            args.dtype,
-            args.b,
-            args.nh,
-            args.s,
-            args.d,
-            args.mods,
-            args.decoding,
-            args.kv_size,
-            args.throughput,
-            args.backend,
+            calculate_bwd,
+            dtype,
+            b,
+            nh_parsed,
+            s,
+            d,
+            mods,
+            decoding,
+            kv_size,
+            throughput,
+            backend,
         )
     ):
         results.append(
@@ -1353,115 +1447,32 @@ def main(args):
                 config,
                 run_single_experiment(
                     config,
-                    dynamic=args.dynamic,
-                    max_autotune=args.max_autotune,
+                    dynamic=dynamic,
+                    max_autotune=max_autotune,
                 ),
             )
         )
 
-    print_results(results, args.save_path)
-    
+        experiment_count += 1
+        # Periodic memory cleanup every 10 experiments
+        if experiment_count % 10 == 0:
+            cleanup_memory()
+
+    print_results(results, save_path)
+
     # Output JSON for dashboard if requested
-    if args.output_json_for_dashboard:
-        _output_json_for_dashboard(results, args.output_json_for_dashboard, args.benchmark_name)
+    if output_json_for_dashboard:
+        _output_json_for_dashboard(results, output_json_for_dashboard, benchmark_name)
 
 
-def heads_input_type(s):
+def heads_input_type(s: str) -> tuple[int, int]:
     try:
         hq, hkv = map(int, s.split(","))
         return hq, hkv
     except Exception as e:
-        raise argparse.ArgumentTypeError("Heads must be Hq,Hkv") from e
+        raise ValueError("Heads must be Hq,Hkv") from e
+
 
 
 if __name__ == "__main__":
-    # Set up the argument parser
-    parser = argparse.ArgumentParser(
-        description="Run sweep over sizes and score mods for flex attention"
-    )
-    parser.add_argument(
-        "--dynamic",
-        action="store_true",
-        help="Runs a dynamic shapes version of compiled flex attention.",
-    )
-    parser.add_argument(
-        "--calculate-bwd", action="store_true", help="Calculate backward pass times"
-    )
-
-    parser.add_argument("-dtype", type=str, help="dtype", default="bfloat16")
-
-    parser.add_argument(
-        "-b", type=int, nargs="+", help="batch sizes", default=[2, 8, 16]
-    )
-    parser.add_argument(
-        "-nh",
-        type=heads_input_type,
-        nargs="+",
-        help="# of q-heads,kv-heads",
-        default=[(16, 16), (16, 2)],
-    )
-    parser.add_argument(
-        "-s", type=int, nargs="+", help="sequence lengths", default=[512, 1024, 4096]
-    )
-    parser.add_argument("-d", type=int, nargs="+", help="head dims", default=[64, 128])
-    parser.add_argument(
-        "-mods",
-        type=str,
-        nargs="+",
-        help="score mods: noop, causal, rel, head_bias, alibi, sliding_window, document_mask, prefix_lm, softcap",
-        default=["noop", "causal", "alibi", "sliding_window"],
-    )
-    parser.add_argument(
-        "--max-autotune", action="store_true", help="Turn on max-autotune"
-    )
-    parser.add_argument(
-        "--decoding",
-        action="store_true",
-        help="Benchmark Decoding (query sequence length = 1)",
-    )
-    parser.add_argument(
-        "--kv-size",
-        type=int,
-        nargs="+",
-        required=False,
-        help="""
-key/value size in MiB.
-Ignores -b batch size and calculate batch size from kv size instead when specified.
-""",
-    )
-    parser.add_argument(
-        "--throughput",
-        action="store_true",
-        help="Calculate kernel memory bandwidth & computational throughput. ",
-    )
-    parser.add_argument(
-        "--save-path",
-        type=str,
-        help="Path to save the results JSON file (optional)",
-        default=None,
-    )
-    parser.add_argument(
-        "--backend",
-        type=str,
-        nargs="+",
-        choices=["math", "efficient", "cudnn", "fav2", "fav3", "fakv"],
-        default=["efficient"],
-        help="Backend to use for attention computation",
-    )
-    parser.add_argument(
-        "--output-json-for-dashboard",
-        type=str,
-        help="Path to save results in JSON format for PyTorch OSS dashboard",
-        default=None,
-    )
-    parser.add_argument(
-        "--benchmark-name",
-        type=str,
-        help="Name of the benchmark for dashboard output",
-        default="PyTorch attention benchmark",
-    )
-    # Parse arguments
-    args = parser.parse_args()
-    args.dtype = getattr(torch, args.dtype)
-
-    main(args)
+    CLI(main, as_positional=False)
