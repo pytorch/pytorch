@@ -1803,7 +1803,10 @@ def _check_not_implemented(cond, message=None):  # noqa: F811
             message. Default: ``None``
     """
     _check_with(
-        NotImplementedError, cond, message
+        # pyrefly: ignore  # bad-argument-type
+        NotImplementedError,
+        cond,
+        message,
     )  # pyrefly: ignore  # bad-argument-type
 
 

@@ -242,6 +242,7 @@ class Library:
 
         if dispatch_key == "":
             dispatch_key = self.dispatch_key
+        # pyrefly: ignore  # bad-argument-type
         assert torch.DispatchKeySet(dispatch_key).has(
             torch._C.DispatchKey.Dense
         )  # pyrefly: ignore  # bad-argument-type

@@ -1049,7 +1049,9 @@ class LOBPCG:
             E[(torch.where(E < t))[0]] = t
 
         return torch.matmul(
-            U * d_col.mT, Z * E**-0.5
+            # pyrefly: ignore  # unsupported-operation
+            U * d_col.mT,
+            Z * E**-0.5,
         )  # pyrefly: ignore  # unsupported-operation
 
     def _get_ortho(self, U, V):

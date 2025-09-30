@@ -404,7 +404,9 @@ def kaiser(
     start = -beta
     constant = 2.0 * beta / (M if not sym else M - 1)
     end = torch.minimum(
-        beta, start + (M - 1) * constant
+        # pyrefly: ignore  # bad-argument-type
+        beta,
+        start + (M - 1) * constant,
     )  # pyrefly: ignore  # bad-argument-type
 
     k = torch.linspace(
@@ -418,6 +420,7 @@ def kaiser(
     )
 
     return torch.i0(torch.sqrt(beta * beta - torch.pow(k, 2))) / torch.i0(
+        # pyrefly: ignore  # bad-argument-type
         beta
     )  # pyrefly: ignore  # bad-argument-type
 

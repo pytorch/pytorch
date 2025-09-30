@@ -844,6 +844,7 @@ def ignore(drop=False, **kwargs):
         #   @torch.jit.ignore
         #   def fn(...):
         fn = drop
+        # pyrefly: ignore  # missing-attribute
         fn._torchscript_modifier = (
             FunctionModifiers.IGNORE
         )  # pyrefly: ignore  # missing-attribute
@@ -1253,6 +1254,7 @@ def _get_named_tuple_properties(
     obj_annotations = inspect.get_annotations(obj)
     if len(obj_annotations) == 0 and hasattr(obj, "__base__"):
         obj_annotations = inspect.get_annotations(
+            # pyrefly: ignore  # bad-argument-type
             obj.__base__
         )  # pyrefly: ignore  # bad-argument-type
 
@@ -1443,6 +1445,7 @@ def container_checker(obj, target_type) -> bool:
                 return False
         return True
     elif origin_type is Union or issubclass(
+        # pyrefly: ignore  # bad-argument-type
         origin_type,
         BuiltinUnionType,  # pyrefly: ignore  # bad-argument-type
     ):  # also handles Optional

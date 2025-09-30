@@ -465,7 +465,9 @@ def _cast(value, device_type: str, dtype: _dtype):
     elif isinstance(value, (str, bytes)):
         return value
     elif HAS_NUMPY and isinstance(
-        value, np.ndarray
+        # pyrefly: ignore  # missing-attribute
+        value,
+        np.ndarray,
     ):  # pyrefly: ignore  # missing-attribute
         return value
     elif isinstance(value, collections.abc.Mapping):

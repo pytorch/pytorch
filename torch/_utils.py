@@ -744,6 +744,7 @@ class ExceptionWrapper:
             exc_info = sys.exc_info()
         self.exc_type = exc_info[0]
         self.exc_msg = "".join(
+            # pyrefly: ignore  # no-matching-overload
             traceback.format_exception(*exc_info)
         )  # pyrefly: ignore  # no-matching-overload
         self.where = where
@@ -761,7 +762,9 @@ class ExceptionWrapper:
         elif getattr(self.exc_type, "message", None):
             # Some exceptions have first argument as non-str but explicitly
             # have message field
+            # pyrefly: ignore  # not-callable
             raise self.exc_type(
+                # pyrefly: ignore  # unexpected-keyword
                 message=msg
             )  # pyrefly: ignore  # not-callable, unexpected-keyword
         try:
