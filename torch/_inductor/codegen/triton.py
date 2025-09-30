@@ -2555,7 +2555,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         #
         # To prevent unintended side effects we will gate options 1-3 behind isinstance(indexing, TensorDescriptorOptions).
         if isinstance(indexing, TensorDescriptorOptions) and value.shape:
-            str_final_shape = tuple([symt.name for symt in indexing.final_shape])
+            str_final_shape = tuple(symt.name for symt in indexing.final_shape)
             if value.shape[::-1] == str_final_shape:
                 value = f"tl.trans({value})"
             elif value.shape != str_final_shape:
