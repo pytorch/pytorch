@@ -72,6 +72,7 @@ else:
     class _MeshEnv(threading.local):
         def __init__(self) -> None:
             self.mesh_stack: list[DeviceMesh] = []
+            # TODO: Move the bookkeeping maps from _MeshEnv to DeviceMesh.
             self.child_to_root_mapping: dict[DeviceMesh, DeviceMesh] = {}
             self.mesh_dim_group_options: dict[int, BackendConfig] = {}
             self.root_to_flatten_mapping: dict[DeviceMesh, dict[str, DeviceMesh]] = {}
@@ -91,6 +92,7 @@ else:
             layout: _MeshLayout,
             submesh_dim_names: tuple[str, ...],
         ) -> "DeviceMesh":
+            root_mesh = _mesh_resources.get_root_mesh(device_mesh)
             slice_dim_group_name = []
             for name in submesh_dim_names:
                 if name in not_none(device_mesh.mesh_dim_names):
@@ -108,8 +110,7 @@ else:
                     )
             cur_rank = device_mesh.get_rank()
             pg_ranks_by_dim = layout.remap_to_tensor(
-                device_mesh.mesh,
-                get_world_size(),
+                root_mesh.mesh,
             )
             res_submesh = DeviceMesh._create_mesh_from_ranks(
                 device_mesh.device_type,
@@ -172,16 +173,12 @@ else:
             # new_group api to avoid potential hang.
             pg_ranks_by_dim = flattened_mesh_layout.remap_to_tensor(
                 root_mesh.mesh,
-                get_world_size(),
-            )
-            # Flatten each mesh_nd tensor before passing to the helper method
-            # this is needed for flatten non-contiguous mesh dims.
-            flattened_pg_ranks_by_dim = torch.stack(
-                [mesh_nd.flatten() for mesh_nd in pg_ranks_by_dim]
             )
             res_flattened_mesh = DeviceMesh._create_mesh_from_ranks(
                 root_mesh.device_type,
-                flattened_pg_ranks_by_dim,
+                pg_ranks_by_dim.flatten(
+                    start_dim=1
+                ),  # this is needed for flatten non-contiguous mesh dims.
                 cur_rank,
                 (mesh_dim_name,),
                 (backend_override,),
@@ -245,8 +242,7 @@ else:
                 ),
             )
             pg_ranks_by_dim = unflattened_layout.remap_to_tensor(
-                device_mesh.mesh,
-                get_world_size(),
+                root_mesh.mesh,
             )
             res_mesh = DeviceMesh._create_mesh_from_ranks(
                 device_mesh.device_type,
@@ -268,7 +264,6 @@ else:
             if hasattr(device_mesh, "_dim_group_names"):
                 unflatten_pg_ranks_by_dim = unflatten_layout.remap_to_tensor(
                     root_mesh.mesh,
-                    get_world_size(),
                 )
                 unflatten_submesh = DeviceMesh._create_mesh_from_ranks(
                     device_mesh.device_type,
@@ -418,7 +413,7 @@ else:
             mesh_dim = self.get_mesh_dim_by_name(device_mesh, mesh_dim_name)
             layout = device_mesh._layout[mesh_dim]
             pg_ranks_by_dim = layout.remap_to_tensor(
-                device_mesh.mesh, not_none(get_world_size())
+                device_mesh.mesh,
             )
             cur_rank = device_mesh.get_rank()
             res_submeshes = []
@@ -1046,8 +1041,12 @@ else:
                 raise ValueError(
                     "Must pass mesh_dim_names if passing multiple ProcessGroups"
                 )
+            # When init a DeviceMesh with multiple ProcessGroups directly, we need to make sure
+            # the mesh tensor is contiguous. Otherwise, the layout we inferred from the mesh tensor
+            # will have larger span than the actual tensor. This is just internal implementation detail
+            # and does not affect user facing behavior.
             mesh = (
-                mesh.detach().to(dtype=torch.int, device="cpu")
+                mesh.detach().to(dtype=torch.int, device="cpu").contiguous()
                 if isinstance(mesh, torch.Tensor)
                 else torch.tensor(mesh, device="cpu", dtype=torch.int)
             )
@@ -1229,9 +1228,7 @@ else:
                 concatenate_dim_group_name.extend(not_none(mesh._dim_group_names))
                 # Concatenate device mesh having different root mesh tensors are meaningless
                 # because the concatenated indices should be indexed by the same root mesh tensor.
-                if not torch.equal(
-                    root_mesh.mesh, _mesh_resources.get_root_mesh(mesh).mesh
-                ):
+                if id(root_mesh.mesh) != id(_mesh_resources.get_root_mesh(mesh).mesh):
                     raise RuntimeError(
                         "Cannot concatenate DeviceMeshes with different root mesh tensors"
                     )
@@ -1245,7 +1242,6 @@ else:
             cur_rank = root_mesh.get_rank()
             pg_ranks_by_dim = concatenate_mesh_layout.remap_to_tensor(
                 root_mesh.mesh,
-                get_world_size(),
             )
             res_submesh = DeviceMesh._create_mesh_from_ranks(
                 root_mesh.device_type,

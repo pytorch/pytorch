@@ -1634,13 +1634,6 @@ class CuTeLayoutTest(TestCase):
         expected2 = torch.tensor([[[10, 20], [30, 40]]], dtype=torch.int)
         self.assertEqual(result2, expected2)
 
-        # Test 3: Partial world (mesh smaller than world_size) - requires stride scaling
-        original_mesh = torch.tensor([1, 2], dtype=torch.int)
-        layout3 = _Layout((2,), (4,))  # stride=4 for world_size=8
-        result3 = layout3.remap_to_tensor(original_mesh, world_size=8)
-        expected3 = torch.tensor([[1, 2]], dtype=torch.int)
-        self.assertEqual(result3, expected3)
-
         # Test 4: 1D layout with consecutive ranks
         original_mesh = torch.tensor([0, 1, 2, 3], dtype=torch.int)
         layout4 = _Layout((4,), (1,))
