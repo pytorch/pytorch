@@ -101,6 +101,13 @@ class DebugMode(TorchDispatchMode):
         self.operators = []
         self.call_depth = 0
 
+    # Without this override, running torch.compile under DebugMode
+    # will force torch.compile to always use the “eager” backend
+    # With this, DebugMode will not take effect on torch.compile
+    @classmethod
+    def ignore_compile_internals(cls):
+        return True
+
     def __torch_function__(self, func, types, args=(), kwargs=None):
         if kwargs is None:
             kwargs = {}
