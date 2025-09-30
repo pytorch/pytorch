@@ -202,7 +202,7 @@ A `call_function` node represents a call to an operator.
     from outside, like changing values of module parameters.
 
 - **Operator:** is a functional callable with a predefined schema. Examples of
-  such operators include functional ATen operators.
+  such operators include functional :term:`ATen` operators.
 
 **Representation in FX**
 
@@ -213,7 +213,7 @@ A `call_function` node represents a call to an operator.
 **Differences from vanilla FX call_function**
 
 1. In FX graph, a call_function can refer to any callable, in Export IR, we
-   restrict it to only a select subset of ATen operators, custom operators, and
+   restrict it to only a select subset of :term:`ATen` operators, custom operators, and
    control flow operators.
 2. In Export IR, constant arguments will be embedded within the graph.
 3. In FX graph, a get_attr node can represent reading any attribute stored in
