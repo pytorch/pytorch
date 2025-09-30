@@ -10,9 +10,10 @@ import copy
 import itertools
 import unittest
 import warnings
+from collections.abc import Callable
 from contextlib import ContextDecorator, ExitStack, nullcontext
 from functools import partial, wraps
-from typing import Any, Callable, Optional, Union
+from typing import Any, Optional, Union
 from unittest.mock import patch
 
 from common_utils import (
@@ -8500,7 +8501,6 @@ class TestAOTAutogradWithCache(TestAOTAutogradWithDynamo):
         {
             "enable_autograd_cache": True,
             "strict_autograd_cache": True,
-            "view_replay_for_aliased_outputs": False,
         }
     )
     @torch._inductor.config.patch("fx_graph_cache", True)
