@@ -4084,6 +4084,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         y = m.to(device=device)(x.to(device=device))
         self.assertEqual(yref, y)
 
+    @skipCUDAIfRocm
     @onlyCUDA
     @largeTensorTest("40GB", "cuda")
     def test_conv3d_cudnn_broken(self, device):
