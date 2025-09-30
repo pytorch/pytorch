@@ -2541,45 +2541,47 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         return block_descriptor, other
 
     def codegen_block_ptr_store_line(self, name, indexing, block_ptr, value, other=""):
-        # TMA stores may require transposing the data to ensure we are contiguous along
-        # the final dimension. We do this by checking the shape information on value.
-        # It can either
-        #    1. Match the final shape. In this case no broadcast/reshape
-        #       is necessary.
-        #    2. Exist as the Transpose of the final shape, which means we had to transpose
-        #       the store_descriptor relative to the accumulator indexing/value. If this
-        #       happens we will generate a tl.trans().
-        #    3. A mismatched provided shape. When this occurs we will error.
-        #    4. No shape is provided. This will proceed with the default explicit broadcast
-        #       described below.
-        #
-        # To prevent unintended side effects we will gate options 1-3 behind isinstance(indexing, TensorDescriptorOptions).
-        if isinstance(indexing, TensorDescriptorOptions) and value.shape:
-            str_final_shape = tuple(symt.name for symt in indexing.final_shape)
-            if value.shape[::-1] == str_final_shape:
-                value = f"tl.trans({value})"
-            elif value.shape != str_final_shape:
-                raise AssertionError(
-                    "TMA store requires no broadcasting when a shape is provided"
-                )
-        else:
-            # Stores require an explicit broadcast. We do this in two phases:
-            #  1. Broadcast the operand to the final shape of the range trees, e.g. [ZBLOCK,
-            #     YBLOCK, XBLOCK]. This protects against implicit broadcasting from loads.
-            #  2. In case the block pointer / tma descriptor has different dimensionality, broadcast/reshape the
-            #     result to the shape of the pointer.
-            value = f"tl.broadcast_to({value}, {indexing.final_shape})"
-
-            # These dims no longer need broadcasting.
-            for idx, (dim, broadcast_dim) in enumerate(
-                zip(indexing.final_shape, indexing.broadcast_shape)
-            ):
-                if V.graph.sizevars.statically_known_equals(dim, broadcast_dim):
-                    indexing.broadcasting_dims[idx] = False
-
-            value = indexing.codegen_broadcast_and_reshape(
-                value, indexing.final_shape, indexing.block_shape, False
+        def stringify_shape(shape):
+            return tuple(
+                symt.name if isinstance(symt, sympy.Symbol) else str(symt)
+                for symt in shape
             )
+
+        if value.shape:
+            value_forward_shape = stringify_shape(value.shape)
+            value_reverse_shape = stringify_shape(value.shape[::-1])
+        else:
+            value_forward_shape = None
+            value_reverse_shape = None
+        final_shape = stringify_shape(indexing.final_shape)
+        # TODO: Generalize to N Dimensions
+        if (
+            value_forward_shape != final_shape
+            and value_reverse_shape == final_shape
+            and len(final_shape) == 2
+        ):
+            # TMA stores may require transposing the data to ensure we are contiguous along
+            # the final dimension. This applies to Block-pointers generally, but should only practically
+            # be reached with TMA.
+            value = f"tl.trans({value})"
+
+        # Stores require an explicit broadcast. We do this in two phases:
+        #  1. Broadcast the operand to the final shape of the range trees, e.g. [ZBLOCK,
+        #     YBLOCK, XBLOCK]. This protects against implicit broadcasting from loads.
+        #  2. In case the block pointer / tma descriptor has different dimensionality, broadcast/reshape the
+        #     result to the shape of the pointer.
+        value = f"tl.broadcast_to({value}, {indexing.final_shape})"
+
+        # These dims no longer need broadcasting.
+        for idx, (dim, broadcast_dim) in enumerate(
+            zip(indexing.final_shape, indexing.broadcast_shape)
+        ):
+            if V.graph.sizevars.statically_known_equals(dim, broadcast_dim):
+                indexing.broadcasting_dims[idx] = False
+
+        value = indexing.codegen_broadcast_and_reshape(
+            value, indexing.final_shape, indexing.block_shape, False
+        )
 
         # workaround https://github.com/triton-lang/triton/issues/2814
         value = f"{value}.to({triton_store_type(V.graph.get_dtype(name))})"
