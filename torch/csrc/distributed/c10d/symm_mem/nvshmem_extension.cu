@@ -254,11 +254,12 @@ __global__ void allToAllGet(void *send_data, void *recv_data, int64_t* source_of
 
   // Calculate the output offsets if not provided
   __shared__ int64_t peer_offsets[THREADS_PER_BLOCK];
-  if (dst_offsets == nullptr) {
+  int64_t* out_offsets = dst_offsets;
+  if (out_offsets == nullptr) {
     CUDA_KERNEL_ASSERT(npes <= THREADS_PER_BLOCK);
     prefixSum(peer_offsets, output_splits, npes);
     __syncthreads();
-    dst_offsets = peer_offsets;
+    out_offsets = peer_offsets;
   }
 
   // Target a different peer based on bid
@@ -274,7 +275,7 @@ __global__ void allToAllGet(void *send_data, void *recv_data, int64_t* source_of
     // This block's offset in the data from `peer`
     auto block_offset = block_size * (bid % blocks_per_peer);
     auto source_offset = source_offsets[peer] * stride + block_offset;
-    auto write_offset = dst_offsets[peer] * stride + block_offset;
+    auto write_offset = out_offsets[peer] * stride + block_offset;
     nvshmemx_getmem_nbi_block(
       (char*)recv_data + write_offset,
       (char*)send_data + source_offset,
@@ -286,7 +287,7 @@ __global__ void allToAllGet(void *send_data, void *recv_data, int64_t* source_of
   if (dst_offsets == nullptr) {
     if (bid == 0 && tid < npes) {
       // source_offsets alias dst_offsets space when dst_offsets is not provided
-      source_offsets[tid] = peer_offsets[tid];
+      source_offsets[tid] = out_offsets[tid];
     }
   }
   // Make sure getmem_nbi calls finish
