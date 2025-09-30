@@ -3892,8 +3892,8 @@ def meta_cdist_forward(x1, x2, p, compute_mode):
     )
     torch._check(p >= 0, lambda: "cdist only supports non-negative p values")
     torch._check(
-        compute_mode in (None, 1, 2),
-        lambda: f"possible modes: None, 1, 2, but was: {compute_mode}",
+        compute_mode in (None, 0, 1, 2),
+        lambda: f"possible modes: None, 0, 1, 2, but was: {compute_mode}",
     )
     r1 = x1.size(-2)
     r2 = x2.size(-2)
