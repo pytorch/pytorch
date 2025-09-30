@@ -26,7 +26,7 @@ class EinsumOperator(Operator):
             num_inputs = random.randint(1, 3)
 
         output_shape = tensor.size
-        
+
         # Generate einsum equation based on common patterns
         if num_inputs == 1:
             # Single input operations: transpose, trace, diagonal, etc.
@@ -51,7 +51,7 @@ class EinsumOperator(Operator):
                 stride.insert(0, acc)
                 acc *= s
             stride = tuple(stride)
-            
+
             input_tensor = Tensor(shape, stride, tensor.dtype, tensor.device, tensor.supported_ops)
             input_tensors.append(input_tensor)
 
@@ -60,17 +60,17 @@ class EinsumOperator(Operator):
     def _generate_single_input_equation(self, output_shape):
         """Generate einsum equation for single input operations."""
         output_ndim = len(output_shape)
-        
+
         if output_ndim == 0:
             # Scalar output - trace or sum all dimensions
             input_ndim = random.randint(1, 3)
             input_shape = tuple(random.randint(2, 8) for _ in range(input_ndim))
-            
+
             # Generate equation that sums all dimensions
             indices = list(string.ascii_lowercase[:input_ndim])
             equation = f"{''.join(indices)}->"
             return equation, [input_shape]
-        
+
         elif output_ndim == 1:
             # Vector output - could be diagonal extraction or dimension reduction
             if random.random() < 0.5:
@@ -84,16 +84,16 @@ class EinsumOperator(Operator):
                 dim_size = output_shape[0]
                 extra_dims = random.randint(1, 2)
                 input_shape = [dim_size] + [random.randint(2, 8) for _ in range(extra_dims)]
-                
+
                 indices = list(string.ascii_lowercase[:len(input_shape)])
                 equation = f"{''.join(indices)}->{indices[0]}"
                 return equation, [tuple(input_shape)]
-        
+
         elif output_ndim == 2:
             # Matrix output - transpose or partial reduction
             if random.random() < 0.5:
                 # Transpose: "ji->ij"
-                equation = "ji->ij" 
+                equation = "ji->ij"
                 input_shape = (output_shape[1], output_shape[0])
                 return equation, [input_shape]
             else:
@@ -102,7 +102,7 @@ class EinsumOperator(Operator):
                 input_shape = output_shape + (extra_dim,)
                 equation = "ijk->ij"
                 return equation, [input_shape]
-        
+
         else:  # output_ndim >= 3
             # Multi-dimensional tensor - partial reduction
             extra_dim = random.randint(2, 8)
@@ -115,7 +115,7 @@ class EinsumOperator(Operator):
     def _generate_two_input_equation(self, output_shape):
         """Generate einsum equation for two input operations."""
         output_ndim = len(output_shape)
-        
+
         if output_ndim == 0:
             # Scalar output - inner product
             vec_size = random.randint(2, 64)
@@ -123,7 +123,7 @@ class EinsumOperator(Operator):
             input_shape2 = (vec_size,)
             equation = "i,i->"
             return equation, [input_shape1, input_shape2]
-        
+
         elif output_ndim == 1:
             # Vector output - matrix-vector multiply
             vec_size = output_shape[0]
@@ -132,7 +132,7 @@ class EinsumOperator(Operator):
             input_shape2 = (inner_dim,)
             equation = "ij,j->i"
             return equation, [input_shape1, input_shape2]
-        
+
         elif output_ndim == 2:
             # Matrix output - matrix multiply or outer product
             if random.random() < 0.8:
@@ -150,7 +150,7 @@ class EinsumOperator(Operator):
                 input_shape2 = (n,)
                 equation = "i,j->ij"
                 return equation, [input_shape1, input_shape2]
-        
+
         else:  # output_ndim >= 3
             # Batch operations
             if output_ndim == 3:
@@ -178,27 +178,27 @@ class EinsumOperator(Operator):
                     batch_dims = output_shape[:-2]
                     m, n = output_shape[-2:]
                     k = random.randint(2, 16)
-                      
+
                     batch_size = 1
                     for dim in batch_dims:
                         batch_size *= dim
-                      
+
                     input_shape1 = batch_dims + (m, k)
                     input_shape2 = batch_dims + (k, n)
-                      
+
                     # Generate equation for batch matrix multiply
                     if len(batch_dims) == 1:
                         equation = "bik,bkj->bij"
                     else:
                         # For higher batch dims, flatten to single batch
-                        equation = "bik,bkj->bij" 
-                      
+                        equation = "bik,bkj->bij"
+
                     return equation, [input_shape1, input_shape2]
 
     def _generate_three_input_equation(self, output_shape):
         """Generate einsum equation for three input operations."""
         output_ndim = len(output_shape)
-        
+
         if output_ndim == 0:
             # Scalar output - triple inner product
             vec_size = random.randint(2, 16)
@@ -207,7 +207,7 @@ class EinsumOperator(Operator):
             input_shape3 = (vec_size,)
             equation = "i,i,i->"
             return equation, [input_shape1, input_shape2, input_shape3]
-        
+
         elif output_ndim == 1:
             # Vector output - generalized contraction
             vec_size = output_shape[0]
@@ -217,7 +217,7 @@ class EinsumOperator(Operator):
             input_shape3 = (k2,)
             equation = "ik,kj,j->i"
             return equation, [input_shape1, input_shape2, input_shape3]
-        
+
         else:
             # Higher dimensional output - batch triple product
             if output_ndim == 2:
@@ -232,9 +232,9 @@ class EinsumOperator(Operator):
                 # Generic multi-way contraction
                 b = output_shape[0] if output_ndim >= 3 else 1
                 remaining = output_shape[1:] if output_ndim >= 3 else output_shape
-                
+
                 k1, k2 = random.randint(2, 8), random.randint(2, 8)
-                
+
                 if output_ndim >= 3:
                     # For 3+ dimensions, simplify to avoid duplicate indices
                     # Use a simpler pattern: batch matrix multiply extended
@@ -259,7 +259,7 @@ class EinsumOperator(Operator):
                     input_shape2 = (k1, k2)
                     input_shape3 = (k2, n)
                     equation = "ik,kl,ln->in"
-                
+
                 return equation, [input_shape1, input_shape2, input_shape3]
 
     def codegen(self, output_name, input_names, output_tensor):
@@ -267,7 +267,7 @@ class EinsumOperator(Operator):
         equation = getattr(output_tensor, "_einsum_equation", None)
         if equation is None:
             raise ValueError("Einsum equation not found on output tensor")
-        
+
         input_list = ", ".join(input_names)
         return f'{output_name} = torch.einsum("{equation}", {input_list})'
 
