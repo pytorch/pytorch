@@ -2,6 +2,7 @@
 
 #include <ATen/record_function.h>
 #include <c10/core/impl/PyInterpreter.h>
+#include <c10/util/Exception.h>
 #include <c10/util/overloaded.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
@@ -10,6 +11,12 @@
 #include <torch/csrc/profiler/python/combined_traceback.h>
 #include <torch/csrc/profiler/standalone/execution_trace_observer.h>
 #include <torch/csrc/utils/pybind.h>
+
+TORCH_MAKE_PYBIND_ENUM_FASTER(at::RecordScope)
+TORCH_MAKE_PYBIND_ENUM_FASTER(torch::profiler::impl::ProfilerState)
+TORCH_MAKE_PYBIND_ENUM_FASTER(torch::profiler::impl::ActiveProfilerType)
+TORCH_MAKE_PYBIND_ENUM_FASTER(torch::profiler::impl::ActivityType)
+TORCH_MAKE_PYBIND_ENUM_FASTER(torch::profiler::impl::EventType)
 
 struct THPCapturedTraceback {
   PyObject_HEAD
@@ -440,9 +447,7 @@ void initPythonBindings(PyObject* module) {
                 p.performance_events);
           },
           [](const py::tuple& t) { // __setstate__
-            if (t.size() >= 5) {
-              throw std::runtime_error("Expected at least 5 values in state");
-            }
+            TORCH_CHECK(t.size() < 5, "Expected at least 5 values in state");
 
             py::list py_metrics = t[0].cast<py::list>();
             std::vector<std::string> metrics{py_metrics.size()};
