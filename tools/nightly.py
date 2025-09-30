@@ -258,7 +258,9 @@ class Venv:
         if not base_executable.is_absolute():
             base_exec = shutil.which(str(base_executable))
             if base_exec is None:
-                raise RuntimeError(f"Could not find Python executable {base_executable}")
+                raise RuntimeError(
+                    f"Could not find Python executable {base_executable}",
+                )
             base_executable = Path(base_exec)
 
         self.prefix = Path(prefix).absolute()
@@ -387,21 +389,20 @@ class Venv:
                         "same as the interpreter to create the virtual environment. Please choose "
                         "a different prefix or a different Python interpreter."
                     )
-                if assume_yes:
-                    print(f"Removing existing venv: {self.prefix}")
-                else:
+                if not assume_yes:
                     answer = input(
                         f"The virtual environment {self.prefix} already exists. "
                         "Do you want to remove it and recreate it? [y/N] "
                     )
                     if answer.lower() not in ("y", "yes"):
                         if answer.lower() not in ("n", "no", ""):
-                            raise RuntimeError(f"Invalid answer: {answer!r}")
-                        raise RuntimeError(
-                            f"Aborting due to existing prefix: {self.prefix}",
-                        )
-                _remove_existing(self.prefix)
+                            print(f"Invalid answer: {answer!r}")
+                        else:
+                            print(f"Aborting due to existing prefix: {self.prefix}")
+                        sys.exit(1)
 
+                print(f"Removing existing venv: {self.prefix}")
+                _remove_existing(self.prefix)
             else:
                 raise RuntimeError(f"Path {self.prefix} already exists.")
 
