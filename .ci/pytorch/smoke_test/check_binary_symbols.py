@@ -87,7 +87,6 @@ def grep_symbols(lib: str, patterns: list[Any], symbol_type: str|None = None) ->
 
 
 def check_lib_statically_linked_libstdc_cxx_abi_symbols(lib: str) -> None:
-    print(f"lib: {lib}")
     cxx11_statically_linked_symbols = grep_symbols(
         lib, STATICALLY_LINKED_CXX11_ABI, symbol_type="T"
     )
