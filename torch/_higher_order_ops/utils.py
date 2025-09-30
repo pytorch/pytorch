@@ -237,6 +237,34 @@ def check_meta_consistency(
 
 
 @contextmanager
+def setup_compilation_env(remove_pre_dispatch_tf_mode=True):
+    """
+    Context manager that sets up proper environment and backend when invoking torch.compile
+    inside torch.export region.
+    """
+    from torch._dynamo.backends.debugging import (
+        make_eager_backend_with_torch_function_mode,
+    )
+    from torch.fx.experimental.proxy_tensor import (
+        _temp_remove_metadata_torch_function_mode,
+        _temp_remove_pre_dispatch_torch_function_mode,
+    )
+
+    with (
+        _set_compilation_env(),
+        torch._dynamo.utils.disable_cache_limit(),
+        _temp_remove_pre_dispatch_torch_function_mode()
+        if remove_pre_dispatch_tf_mode
+        else nullcontext(),
+    ):
+        with _temp_remove_metadata_torch_function_mode() as metadata_mode:
+            if metadata_mode:
+                yield make_eager_backend_with_torch_function_mode(metadata_mode)
+            else:
+                yield "eager"
+
+
+@contextmanager
 def _set_compilation_env():
     _old_is_tracing = torch.fx._symbolic_trace._is_fx_tracing_flag
     _old_allow_empty_graphs = torch._dynamo.config.allow_empty_graphs

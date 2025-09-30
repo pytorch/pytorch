@@ -2646,41 +2646,20 @@ def compile(
             "You are calling torch.compile inside torch.export region. "
             "To capture an useful graph, we will implicitly switch to torch.compile(backend=eager)"
         )
-        from torch._dynamo.backends.debugging import (
-            make_eager_backend_with_torch_function_mode,
-        )
-        from torch._higher_order_ops.utils import _set_compilation_env
-        from torch.fx.experimental.proxy_tensor import (
-            _temp_remove_metadata_torch_function_mode,
-            _temp_remove_pre_dispatch_torch_function_mode,
-        )
+        from torch._higher_order_ops.utils import setup_compilation_env
 
         # Create wrapper that always uses eager backend during export
         def export_wrapped_fn(*args, **kwargs):
-            with (
-                _set_compilation_env(),
-                torch._dynamo.utils.disable_cache_limit(),
-                _temp_remove_pre_dispatch_torch_function_mode(),
-            ):
-                with _temp_remove_metadata_torch_function_mode() as metadata_mode:
-                    if metadata_mode:
-                        export_backend = make_eager_backend_with_torch_function_mode(
-                            metadata_mode
-                        )
-                    else:
-                        export_backend = "eager"
-
-                    # Force eager backend regardless of original backend
-                    backend_wrapper = _TorchCompileWrapper(
-                        export_backend, mode, options, dynamic
-                    )
-                    return torch._dynamo.optimize(
-                        backend=backend_wrapper,
-                        nopython=fullgraph,
-                        dynamic=dynamic,
-                        disable=disable,
-                        guard_filter_fn=guard_filter_fn,
-                    )(model)(*args, **kwargs)
+            with setup_compilation_env(remove_pre_dispatch_tf_mode=False) as backend:
+                # Force eager backend regardless of original backend
+                backend_wrapper = _TorchCompileWrapper(backend, mode, options, dynamic)
+                return torch._dynamo.optimize(
+                    backend=backend_wrapper,
+                    nopython=fullgraph,
+                    dynamic=dynamic,
+                    disable=disable,
+                    guard_filter_fn=guard_filter_fn,
+                )(model)(*args, **kwargs)
 
         return export_wrapped_fn
 

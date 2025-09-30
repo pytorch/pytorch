@@ -1723,6 +1723,8 @@ def _export_to_aten_ir_make_fx(
                     pre_dispatch=True,
                 )(*flat_args)
 
+                print("GM", gm.graph)
+
             if non_strict_root is not None:
                 input_names = _graph_input_names(gm)
                 buffer_input_names = {
