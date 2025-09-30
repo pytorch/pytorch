@@ -476,7 +476,7 @@ def _maybe_broadcast(*args, preserve_cpu_scalar_tensors=True):
             # u0==u1 assume the same, no broadcasting!
             torch._check(
                 x == y,
-                lambda: "sizes assumed to be the same due to unbacked broadcasting semantics",
+                "sizes assumed to be the same due to unbacked broadcasting semantics",
             )
 
         return False
