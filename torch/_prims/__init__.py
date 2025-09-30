@@ -694,7 +694,6 @@ def _clone_meta(
         # Match eager behavior by preserving strides for non_overlapping_and_dense tensors
         # If not, eager clone creates contiguous strides
         computed_stride = utils.compute_elementwise_output_strides(input)
-
         return torch.empty_strided(
             input.shape,
             computed_stride,
