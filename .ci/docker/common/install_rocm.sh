@@ -114,8 +114,6 @@ EOF
         rm -rf HIP clr
     fi
 
-    # temporary hipblasLT dependency install
-    apt install libmsgpackc2
     pip_install "git+https://github.com/rocm/composable_kernel@$ROCM_COMPOSABLE_KERNEL_VERSION"
 
     # Cleanup
