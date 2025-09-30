@@ -2387,6 +2387,67 @@ class TestBinaryUfuncs(TestCase):
         expected = torch.where(x < y, tx, ty)
         self.assertEqual(result_tangent, expected)
 
+    @dtypes(torch.float, torch.double)
+    def test_max_negative_zero(self, device, dtype):
+        """test max and maximum operations with negative zero"""
+        neg_zero = torch.tensor(-0.0, dtype=dtype, device=device)
+        pos_zero = torch.tensor(0.0, dtype=dtype, device=device)
+        neg_one = torch.tensor(-1.0, dtype=dtype, device=device)
+
+        result = torch.max(neg_zero, pos_zero)
+        self.assertFalse(
+            torch.signbit(result).item(),
+            f"max(-0.0, 0.0) should return +0.0, got signbit={torch.signbit(result).item()}",
+        )
+
+        result = torch.max(pos_zero, neg_zero)
+        self.assertFalse(
+            torch.signbit(result).item(),
+            f"max(0.0, -0.0) should return +0.0, got signbit={torch.signbit(result).item()}",
+        )
+
+        result = torch.max(neg_zero, neg_one)
+        self.assertTrue(
+            torch.signbit(result).item(),
+            f"max(-0.0, -1.0) should return -0.0, got signbit={torch.signbit(result).item()}",
+        )
+
+        result = torch.maximum(neg_zero, pos_zero)
+        self.assertFalse(
+            torch.signbit(result).item(),
+            f"maximum(-0.0, 0.0) should return +0.0, got signbit={torch.signbit(result).item()}",
+        )
+
+        result = torch.maximum(pos_zero, neg_zero)
+        self.assertFalse(
+            torch.signbit(result).item(),
+            f"maximum(0.0, -0.0) should return +0.0, got signbit={torch.signbit(result).item()}",
+        )
+
+        result = torch.maximum(neg_zero, neg_one)
+        self.assertTrue(
+            torch.signbit(result).item(),
+            f"maximum(-0.0, -1.0) should return -0.0, got signbit={torch.signbit(result).item()}",
+        )
+
+        # normal test cases to ensure regular behavior still works
+        pos_two = torch.tensor(2.0, dtype=dtype, device=device)
+        neg_two = torch.tensor(-2.0, dtype=dtype, device=device)
+
+        result = torch.maximum(pos_two, neg_two)
+        self.assertEqual(
+            result.item(),
+            2.0,
+            f"maximum(2.0, -2.0) should return 2.0, got {result.item()}",
+        )
+
+        result = torch.maximum(neg_two, neg_one)
+        self.assertEqual(
+            result.item(),
+            -1.0,
+            f"maximum(-2.0, -1.0) should return -1.0, got {result.item()}",
+        )
+
     # TODO: tests like this should be generic
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @dtypes(torch.float, torch.double)
