@@ -25,34 +25,10 @@ if not IS_WINDOWS:
             except Exception:
                 install_cpp_extension(extension_root=Path(__file__).parent)
 
-        def test_a_schema_upgrader_failures_without_adapter(self):
-            """Test that V1 schema calls fail without adapter registration.
-
-            Note: The 'a_' prefix ensures this test runs first alphabetically,
-            before any adapters are registered by other tests.
-            """
-            import schema_adapter_test
-
-            t = torch.zeros(2, 3)
-            out = schema_adapter_test.ops.test_schema_upgrader_v1(t)
-            out2 = schema_adapter_test.ops.test_schema_upgrader_v2(t)
-            out3 = schema_adapter_test.ops.test_schema_upgrader_v3(t)
-            out4 = schema_adapter_test.ops.test_schema_upgrader_v4(t)
-
-            # For out and out2 tensor will be filled with garbage values
-            # as an out of bounds read happens on the StableIValue stack
-            self.assertNotEqual(out, torch.fill_(torch.zeros_like(t), 2))
-            self.assertNotEqual(out2, torch.fill_(torch.zeros_like(t), 2))
-
-            # v3 and v4 should behave as expected without adapters
-            self.assertEqual(out3, torch.fill_(torch.zeros_like(t), 2))
-            self.assertEqual(out4, torch.fill_(torch.zeros_like(t), 3))
-
         def test_schema_upgrader_with_adapter(self):
             import schema_adapter_test
 
-            # Register the adapters
-            schema_adapter_test.ops.register_test_adapters()
+            # without adapters UndefinedBehaviorSanitizer in CI will fail
 
             t = torch.zeros(2, 3)
             out = schema_adapter_test.ops.test_schema_upgrader_v1(t)

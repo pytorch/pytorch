@@ -130,11 +130,6 @@ void boxed_test_schema_upgrader_v4(
   stack[0] = from(result);
 }
 
-// Wrapper function to call the built-in test adapter registration
-void register_test_adapters() {
-  TORCH_ERROR_CODE_CHECK(_register_test_adapters());
-}
-
 STABLE_TORCH_LIBRARY(schema_adapter_test, m) {
   m.def("test_schema_upgrader_v1(Tensor self) -> Tensor");
   m.def("test_schema_upgrader_v2(Tensor self) -> Tensor");
@@ -149,10 +144,8 @@ STABLE_TORCH_LIBRARY_IMPL(schema_adapter_test, CPU, m) {
   m.impl("test_schema_upgrader_v4", &boxed_test_schema_upgrader_v4);
 }
 
-// Use pybind to expose only the test adapter registration
+// Pybind11 module - test adapters are automatically registered via static
+// initialization
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
-  m.def(
-      "register_test_adapters",
-      &register_test_adapters,
-      "Register the test schema adapters for _test_schema_upgrader");
+  // No functions to expose - test adapters are automatically registered
 }

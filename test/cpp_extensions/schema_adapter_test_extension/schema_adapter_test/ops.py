@@ -2,23 +2,6 @@ import torch
 from torch import Tensor
 
 
-def register_test_adapters() -> None:
-    """
-    Register the test schema adapters for _test_schema_upgrader.
-    This must be called before using any test_schema_upgrader_vX functions.
-
-    The adapters handle schema evolution across 4 versions:
-    - V1: _test_schema_upgrader(Tensor self) -> Tensor (fills Tensor with 2)
-    - V2: _test_schema_upgrader(Tensor self, *, bool a = True) -> Tensor (fills Tensor with 2 or -2 if a is False)
-    - V3: _test_schema_upgrader(Tensor self, *, bool a = True, int b = 2) -> Tensor (fills Tensor with b)
-    - V4: _test_schema_upgrader(Tensor self, *, bool a = True, int b = 3) -> Tensor (BC-breaking change of default for b)
-    """
-    # Import the C++ extension module
-    from schema_adapter_test import _C
-
-    _C.register_test_adapters()
-
-
 def test_schema_upgrader_v1(input: Tensor) -> Tensor:
     """
     Test _test_schema_upgrader with V1 schema (PyTorch 2.6.0).

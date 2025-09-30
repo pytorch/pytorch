@@ -95,7 +95,7 @@ bool file_exists(std::string& path) {
 #ifdef _WIN32
   return fs::exists(path);
 #else
-  struct stat rc {};
+  struct stat rc{};
   return lstat(path.c_str(), &rc) == 0;
 #endif
 }
@@ -1833,8 +1833,8 @@ torch::jit::Stack adapt_v2_to_v3(
 } // namespace
 
 // Function to register test schema adapters for _test_schema_upgrader
-// This demonstrates the adapter registration pattern and is exposed for testing
-AOTI_TORCH_EXPORT AOTITorchError _register_test_adapters() {
+// This demonstrates the adapter registration pattern (internal use only)
+static AOTITorchError _register_test_adapters() {
   // Register V1 to V3 adapter
   if (auto err = register_schema_adapter(
           "aten::_test_schema_upgrader",
@@ -1853,6 +1853,14 @@ AOTI_TORCH_EXPORT AOTITorchError _register_test_adapters() {
   // No adapter needed for extension_build_version >= V3
   return AOTI_TORCH_SUCCESS;
 }
+
+// Static initialization to automatically register test adapters
+static struct TestAdapterInitializer {
+  TestAdapterInitializer() {
+    // Register the test adapters when the library loads
+    _register_test_adapters();
+  }
+} test_adapter_initializer;
 
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_call_dispatcher_v2(
     const char* opName,

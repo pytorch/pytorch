@@ -7,8 +7,8 @@
 #include <string>
 #include <vector>
 
-#include <torch/csrc/stable/version.h>
 #include <torch/csrc/inductor/aoti_torch/generated/c_shim_aten.h>
+#include <torch/csrc/stable/version.h>
 #include <torch/headeronly/core/ScalarType.h>
 
 namespace torch::stable {
