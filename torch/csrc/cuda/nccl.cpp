@@ -850,6 +850,8 @@ void all2all_single_equal_split(
   // operations issued as a part of the collective (e.g. alltoall) vs those
   // inside traditional p2p operations.
   NCCL_CHECK(ncclAllToAll(sendbuff, recvbuff, count, type, comm, stream));
+#elif ((NCCL_MAJOR > 2) || ((NCCL_MAJOR == 2) && (NCCL_MINOR >= 28)))
+  NCCL_CHECK(ncclAlltoAll(sendbuff, recvbuff, count, type, comm, stream));
 #else
   int numranks = 0;
   NCCL_CHECK(ncclCommCount(comm, &numranks));
