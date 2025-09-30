@@ -12,8 +12,8 @@ import pprint
 import sys
 import unittest
 import warnings
-from collections.abc import Collection, Iterable, Mapping, Sequence
-from typing import Any, Callable, Optional, TypeVar
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
+from typing import Any, Optional, TypeVar
 
 import error_reproduction
 import numpy as np
