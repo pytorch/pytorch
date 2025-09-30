@@ -295,3 +295,17 @@ class CppWrapperMps(CppWrapperGpu):
             self.prefix.writeline(f"    return {lib_name}_kernel_handle;")
             self.prefix.writeline("}")
             self.prefix.writeline("")
+
+        # Generate cleanup function for all shader libraries - no-op if no shader libraries
+        self.prefix.writeline("void cleanup_mps_shader_libraries() {")
+        if shader_libraries:
+            for lib_name in shader_libraries:
+                self.prefix.writeline(f"    if ({lib_name}_handle != nullptr) {{")
+                self.prefix.writeline(f"        aoti_torch_mps_delete_shader_library({lib_name}_handle);")
+                self.prefix.writeline(f"        {lib_name}_handle = nullptr;")
+                self.prefix.writeline(f"        {lib_name}_kernel_handle = nullptr;")
+                self.prefix.writeline("    }")
+        else:
+            self.prefix.writeline("    // No MPS shader libraries to clean up")
+        self.prefix.writeline("}")
+        self.prefix.writeline("")

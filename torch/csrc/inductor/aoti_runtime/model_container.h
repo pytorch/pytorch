@@ -89,6 +89,14 @@ class AOTInductorModelContainer {
     out_spec_ = model->get_out_spec();
   }
 
+  // Destructor to clean up MPS shader libraries
+  ~AOTInductorModelContainer() {
+#ifdef USE_MPS
+    extern void cleanup_mps_shader_libraries();
+    cleanup_mps_shader_libraries();
+#endif
+  }
+
   void run(
       AtenTensorHandle*
           input_handles, // array of input AtenTensorHandle; handles
