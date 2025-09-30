@@ -1,6 +1,6 @@
 import functools
 from collections.abc import Sequence
-from typing import Callable, Optional, Protocol, Union
+from typing import Callable, cast, Optional, Protocol, Union
 
 import sympy
 
@@ -10,6 +10,16 @@ from .virtualized import OpsValue, V
 
 
 BlockShapeType = Optional[Sequence[Union[int, str]]]
+SymBlockShapeType = Optional[Sequence[Union[int, str, sympy.Expr]]]
+
+
+def cast_sym_block_shape(sym_block_shape: SymBlockShapeType) -> BlockShapeType:
+    shape = sym_block_shape
+    if shape is not None:
+        shape = tuple(
+            V.kernel.index_to_str(s) if isinstance(s, sympy.Expr) else s for s in shape
+        )
+    return cast(BlockShapeType, shape)
 
 
 class ShapeVar(Protocol):
