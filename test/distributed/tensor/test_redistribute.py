@@ -628,14 +628,14 @@ class RedistributeTest(DTensorTestBase):
 
         test_cases = [
             # Partial to Partial is allowed
-            # ([Partial(), Shard(0)], [Partial(), Shard(0)], True),
-            # ([Partial(), Shard(0)], [Partial(), Shard(1)], True),
-            # ([Shard(0), Partial()], [Replicate(), Partial()], True),
-            # ([Shard(0), Partial("prod")], [Replicate(), Partial("prod")], True),
-            # # Non-Partial to Partial is NOT allowed
-            # ([Shard(0), Replicate()], [Shard(0), Partial()], False),
-            # ([Shard(0), Replicate()], [Replicate(), Partial()], False),
-            # ([Shard(0), Shard(1)], [Replicate(), Partial()], False),
+            ([Partial(), Shard(0)], [Partial(), Shard(0)], True),
+            ([Partial(), Shard(0)], [Partial(), Shard(1)], True),
+            ([Shard(0), Partial()], [Replicate(), Partial()], True),
+            ([Shard(0), Partial("prod")], [Replicate(), Partial("prod")], True),
+            # Non-Partial to Partial is NOT allowed
+            ([Shard(0), Replicate()], [Shard(0), Partial()], False),
+            ([Shard(0), Replicate()], [Replicate(), Partial()], False),
+            ([Shard(0), Shard(1)], [Replicate(), Partial()], False),
             # Partial to partial is allowed, if only the reduction ops is the same
             ([Shard(0), Partial("prod")], [Replicate(), Partial("sum")], False),
         ]
