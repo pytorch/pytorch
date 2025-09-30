@@ -3450,6 +3450,7 @@ MOD_INLINELIST = [
     "torch.utils._foreach_utils",
     "torch.utils._python_dispatch",
     "torch.utils._pytree",
+    "torch.utils.checkpoint",
     "torch.utils.hooks",
 ]
 assert sorted(set(MOD_INLINELIST)) == MOD_INLINELIST
