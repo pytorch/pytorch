@@ -155,9 +155,9 @@ PIP_SOURCES = {
         accelerator="cuda",
     ),
     # NOTE: Sync with ROCM_ARCHES in .github/scripts/generate_binary_build_matrix.py
-    "rocm-6.3": PipSource(
-        name="rocm-6.3",
-        index_url=f"{PYTORCH_NIGHTLY_PIP_INDEX_URL}/rocm6.3",
+    "rocm-6.4": PipSource(
+        name="rocm-6.4",
+        index_url=f"{PYTORCH_NIGHTLY_PIP_INDEX_URL}/rocm6.4",
         supported_platforms={"Linux"},
         accelerator="rocm",
     ),
@@ -458,7 +458,7 @@ class Venv:
             != self.base_python_version().split(".")[:2]
         ):
             raise RuntimeError(
-                f"Python version mismatch: venv has {self.python_version()} "
+                f"Python version mismatch: venv has Python {self.python_version()} "
                 f"but base Python is {self.base_python_version()}. "
                 "Please recreate the virtual environment with the correct Python version."
             )
@@ -496,7 +496,10 @@ class Venv:
         return self.python(*args, python=self.base_executable, **popen_kwargs)
 
     def python_version(self, *, python: Path | str | None = None) -> str:
-        """Get the Python version for the virtual environment."""
+        """Get the Python version for the virtual environment.
+
+        Return a string like "3.13.7", "3.13.7t", "3.13.7d", "3.13.7td", etc.
+        """
         return self.python(
             "-c",
             (
@@ -508,7 +511,10 @@ class Venv:
         ).stdout.strip()
 
     def base_python_version(self) -> str:
-        """Get the Python version for the base environment."""
+        """Get the Python version for the base environment.
+
+        Return a string like "3.13.7", "3.13.7t", "3.13.7d", "3.13.7td", etc.
+        """
         return self.python_version(python=self.base_executable)
 
     def uv(
