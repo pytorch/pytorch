@@ -1,26 +1,18 @@
 import copy
-import dataclasses
+import json
 import logging
-import pickle
-import platform
 from abc import abstractmethod
 from collections import defaultdict
-from itertools import chain
-from typing import Any, Callable, Generic, Optional, TypeVar, Union
-from typing_extensions import override
+from dataclasses import dataclass
+from typing import Any, Callable, Generic, Optional, TypeVar
 
 import torch
-from torch.compiler._cache import (
-    _serialize_single_cache,
-    CacheArtifact,
-    CacheArtifactFactory,
-    CacheArtifactManager,
-    CacheArtifactsResult,
-    CacheInfo,
+from torch._dynamo.package import (
+    _BackendId,
+    _DynamoCacheEntry,
+    DynamoCache,
+    PrecompileCacheEntry,
 )
-from torch.utils._appending_byte_serializer import AppendingByteSerializer
-from torch.utils._ordered_set import OrderedSet
-from torch.utils._triton import get_triton_version
 
 
 """
@@ -31,14 +23,12 @@ T = TypeVar("T")
 logger = logging.getLogger(__name__)
 
 
-class PrecompileCacheArtifact(CacheArtifact, Generic[T]):
+@dataclass
+class BackendCacheArtifact(Generic[T]):
     """
-    Data for each cache artifact that will be serialized and deserialized by
-    PrecompileContext, rather than CacheArtifactManager.
-    T represents the deserialized type of the artifact, i.e. the return type of after_deserialization
-
-    PrecompileCacheArtifact is a frozen dataclass - you can add new serializable fields and metadata specific to your own artifacts
-    as needed, and use them in after_deserialization.
+    Represents a single serializable backend artifact from a dynamo backend.
+    Each BackendCacheArtifact has a key associated with it along with some
+    serializable content.
 
     Example implementation:
 
@@ -52,13 +42,8 @@ class PrecompileCacheArtifact(CacheArtifact, Generic[T]):
             return result
     """
 
-    @override
-    def populate_cache(self) -> None:
-        raise RuntimeError("Precompile cache artifacts do not populate caches")
-
-    @override
-    def precompile_compatible(self) -> bool:
-        return True
+    key: str
+    content: Any
 
     @abstractmethod
     def after_deserialization(self) -> T:
@@ -68,260 +53,192 @@ class PrecompileCacheArtifact(CacheArtifact, Generic[T]):
         """
         ...
 
-
-class EditablePrecompileCacheArtifact(Generic[T]):
-    """
-    A PrecompileCacheArtifact whose content isn't encoded until we call PrecompileContext.serialize()
-    """
-
-    def __init__(self, artifact_type: str, content: Any, key: str) -> None:
-        # Deepcopy the content for now, but don't pickle it yet.
-        # This allows us to make changes to self.content before true serialization
-        self.content = copy.deepcopy(content)
-        self.key = key
-        self.artifact_type = artifact_type
-
-    def real_encode(self) -> PrecompileCacheArtifact[T]:
-        """
-        Actually encode the object
-        """
-        content = pickle.dumps(self.content)
-        artifact = CacheArtifactFactory.encode_create(
-            self.artifact_type, self.key, content
-        )
-        assert isinstance(artifact, PrecompileCacheArtifact)
-        return artifact
-
     def edit_contents(self, edit_fn: Callable[..., Any]) -> None:
         """
-        Edit the content of an existing artifact
+        Edit the contents of the artifact.
         """
         self.content = edit_fn(self.content)
 
 
-class PrecompileContext(CacheArtifactManager):
+class EagerCacheArtifact(BackendCacheArtifact[Any]):
+    def after_deserialization(self) -> Any:
+        return self.content
+
+
+class BypassDynamoCacheEntry(Exception):
+    pass
+
+
+class PrecompileContext:
     """
     PrecompileContext is a special CacheArtifactManager for handling precompilation
     It uses the same interface as CacheArtifactManager, but handles deserialization differently: instead
     of placing each artifact into respective caches, it will stitch all the cache artifacts for a single key
     together and place it into a global Precompile Cache.
 
+    PrecompileContext has two main portions: dynamo_cache_entries and backend_cache_artifacts.
+    When saving, PrecompileContext.serialize() will serialize all dynamo cache entries along with any PrecompileCacheArtifacts that
+    are needed to save those dynamo cache entries.
+
     The following artifact types are supported by PrecompileContext:
      - BundledAOTAutogradCacheArtifact
-     - DynamoCodeStateArtifact
-     - AutotuneCacheArtifact (regular autotune results, same as Megacache)
+
     """
 
     # Protected by the compile_lock
-    # _new_cache_artifacts_by_key organizes results by the key of each artifact.
-    # This allows us to implement serialize_by_key easily.
-    # On call to `serialize()`, all cache artifacts in _new_cache_artifacts_by_key
-    # are transferred to _new_cache_artifacts before serialization.
-    _new_cache_artifacts_by_key: dict[
-        str, Union[EditablePrecompileCacheArtifact[object], CacheArtifact]
-    ] = {}
-    _new_cache_artifacts: CacheArtifactsResult = defaultdict(list)
-    # Keep a separate seen artifacts list to make avoid unnecessary duplicates
-    # This list will not be cleared between serialize() calls
-    _seen_artifacts: OrderedSet[CacheArtifact] = OrderedSet()
-    # When serialize() is called, artifacts are transferred from _cache_artifacts to
-    # internal data structure of the _serializer
-    # This allows us to only pay the cost of serialization if serialize() is called
-    _serializer: AppendingByteSerializer[tuple[str, list[CacheArtifact]]] = (
-        AppendingByteSerializer(serialize_fn=_serialize_single_cache)
-    )
-    _cache_info: CacheInfo = CacheInfo()
+    # _backend_artifacts_by_key organizes results by the key of each artifact.
+    # Each object here must be serializable
+    _backend_artifacts_by_key: dict[str, BackendCacheArtifact[Any]] = {}
+
+    # On call to `serialize()`, all cache artifacts in _dynamo_cache_entries are converted
+    # into DynamoCacheArtifacts and added to _new_cache_artifacts for serialization
+    _dynamo_cache_entries: dict[str, _DynamoCacheEntry] = {}
 
     @classmethod
     def clear(cls) -> None:
-        cls._new_cache_artifacts_by_key.clear()
-        super().clear()
+        cls._backend_artifacts_by_key.clear()
+        cls._dynamo_cache_entries.clear()
 
-    @override
     @classmethod
     def record_artifact(
         cls,
-        artifact_type: str,
-        key: str,
-        content: Any,
-        editable: bool = False,
+        artifact: BackendCacheArtifact[Any],
     ) -> None:
         """
-        Called from each caching operation to record the artifact in this
-        "mega" list
+        Records a backend artifact to be used with dynamo cache entries
         """
-        artifact: Union[EditablePrecompileCacheArtifact[object], CacheArtifact]
-        if editable:
-            artifact = EditablePrecompileCacheArtifact(artifact_type, content, key)
-        else:
-            artifact = CacheArtifactFactory.encode_create(artifact_type, key, content)
-            # TODO: although this covers completely same artifacts, it's possible
-            # with AOTAutogradCacheEntries to have multiple artifacts whose keys
-            # (i.e. backend_ids) are different, but whose contents are equal.
-            # In those cases, it would be much better if we only serialize once instead
-            # of N times.
-            if artifact in cls._seen_artifacts:
-                return
-            cls._seen_artifacts.add(artifact)
-
-        cls._new_cache_artifacts_by_key[key] = artifact
+        cls._backend_artifacts_by_key[artifact.key] = copy.deepcopy(artifact)
 
     @classmethod
-    def _save_artifacts_by_type(cls) -> None:
-        """
-        We normally record artifacts by key, but serialization expects them to be organized
-        by artifact type. This function transfers artifacts from _new_cache_artifacts_by_key to _new_cache_artifacts
-        """
-        for artifact in cls._new_cache_artifacts_by_key.values():
-            if isinstance(artifact, EditablePrecompileCacheArtifact):
-                artifact = artifact.real_encode()
-            cls._new_cache_artifacts[artifact.__class__.type()].append(artifact)
-        cls._new_cache_artifacts_by_key.clear()
+    def record_dynamo_cache_entry(
+        cls, cache_entry: _DynamoCacheEntry, key: str
+    ) -> None:
+        cls._dynamo_cache_entries[key] = cache_entry
 
     @classmethod
     def edit_artifact(cls, key: str, edit_fn: Callable[..., Any]) -> None:
         """
         Edit the content of an existing artifact
         """
-        assert key in cls._new_cache_artifacts_by_key, (
-            f"Key {key} not found in artifacts"
-        )
-        artifact = cls._new_cache_artifacts_by_key[key]
-        assert isinstance(artifact, EditablePrecompileCacheArtifact), (
-            "Artifact is not editable"
-        )
+        assert key in cls._backend_artifacts_by_key, f"Key {key} not found in artifacts"
+        artifact = cls._backend_artifacts_by_key[key]
         artifact.edit_contents(edit_fn)
 
     @classmethod
-    def serialize_artifact_by_key(cls, key: str) -> Optional[CacheArtifact]:
+    def serialize_artifact_by_key(cls, key: str) -> Optional[BackendCacheArtifact[Any]]:
         """
-        Serialize all artifacts with the given key returned in a list.
+        Return the backend cache artifact with the associated key
         """
-        result = cls._new_cache_artifacts_by_key.get(key, None)
-        if isinstance(result, EditablePrecompileCacheArtifact):
-            result = result.real_encode()
-        return result
-
-    @classmethod
-    def serialize(cls) -> Optional[tuple[bytes, CacheInfo]]:
-        cls._save_artifacts_by_type()
-        # No need to serialize if there are no new dynamo compiles
-        if "precompile_dynamo" not in cls._new_cache_artifacts:
-            return None
-        return super().serialize()
+        return cls._backend_artifacts_by_key.get(key, None)
 
     @staticmethod
-    def populate_caches(artifacts: CacheArtifactsResult) -> CacheInfo:
-        PrecompileContext._ensure_cache_artifacts_registered()
+    def dump_debug_info(
+        dynamo_entries: dict[str, _DynamoCacheEntry],
+        backend_artifacts: dict[str, BackendCacheArtifact[Any]],
+    ) -> dict[str, Any]:
+        """
+        Return a JSON serializable debug dump of all entries in the precompile context
+        Called in serialize before serialization, and in populate_caches after deserialization
+        """
+        # Print debug information
+        debug_info: defaultdict[str, list[Any]] = defaultdict(list)
+        for key, cache_entry in dynamo_entries.items():
+            info = cache_entry.debug_info()
+            info["key"] = key
+            debug_info["dynamo"].append(info)
 
-        artifacts_by_key = {}
-        cache_info = CacheInfo()
-        for artifact in chain(*artifacts.values()):
-            if artifact.type() == "autotune":
-                # Populate autotune cache artifacts
-                artifact.populate_cache()
-            else:
-                artifacts_by_key[artifact.key] = artifact
-            cache_info.add(artifact)
+        for artifact in backend_artifacts.values():
+            debug_info["backends"].append(artifact.key)
 
-        from torch._dynamo.package import _BackendId, DynamoCache
-
-        for dynamo_entry in artifacts["precompile_dynamo"]:
-            assert isinstance(dynamo_entry, PrecompileCacheArtifact)
-            cache_entry = dynamo_entry.after_deserialization()
-            # Grab backends from the dynamo cache entry
-            backends = cache_entry.backend_ids
-            backend_content: dict[_BackendId, PrecompileCacheArtifact[Any]] = {}
-            for id_ in backends:
-                assert id_ in artifacts_by_key, f"Backend {id_} not found in artifacts"
-                artifact = artifacts_by_key[id_]
-                assert isinstance(artifact, PrecompileCacheArtifact)
-                backend_content[id_] = artifact
-            DynamoCache.write(cache_entry, backend_content, dynamo_entry.key)
-
-        return cache_info
+        return debug_info
 
     @classmethod
-    def _ensure_cache_artifacts_registered(cls) -> None:
-        from torch._dynamo.package import _DynamoCacheArtifact  # noqa: F401
-        from torch._functorch._aot_autograd.autograd_cache import (  # noqa: F401
-            BundledAOTAutogradCacheArtifact,
-        )
-
-
-@dataclasses.dataclass(frozen=True)
-class SystemInfo:
-    """
-    System information including Python, PyTorch, and GPU details.
-    This information is used to ensure compiled artifacts can only be loaded
-    with compatible system configurations.
-    """
-
-    python_version: str
-    torch_version: str
-    toolkit_version: Optional[str]
-    triton_version: Optional[tuple[int, int]]
-    gpu_name: Optional[str]
-    CHECK_GPUS = ("cuda", "xpu")
+    def save_to_dynamo_cache(cls) -> dict[str, Any]:
+        precompile_cache_entries, debug_info = cls.create_cache_entries()
+        for key, entry in precompile_cache_entries.items():
+            DynamoCache.write(entry, key)
+        return debug_info
 
     @classmethod
-    def current(cls) -> "SystemInfo":
-        """Create a SystemInfo instance with current system information."""
-        # Get GPU name if CUDA or XPU is available
-        gpu_name, toolkit_version = None, None
-        for device_type in cls.CHECK_GPUS:
-            if getattr(torch, device_type).is_available():
-                try:
-                    gpu_name = getattr(torch, device_type).get_device_name()
-                    toolkit_version = getattr(torch.version, device_type)
-                    break
-                except Exception:
-                    pass
+    def create_cache_entries(
+        cls,
+    ) -> tuple[dict[str, PrecompileCacheEntry], dict[str, Any]]:
+        """
+        Grabs all the cache entries in the precompile context and
+        stitches them together into full PrecompileCacheEntries.
+        """
+        dynamo_entries = cls._dynamo_cache_entries
+        backend_artifacts = cls._backend_artifacts_by_key
 
-        return cls(
-            python_version=platform.python_version(),
-            torch_version=torch.__version__,
-            toolkit_version=toolkit_version,
-            triton_version=get_triton_version((0, 0)),
-            gpu_name=gpu_name,
+        num_artifacts = len(dynamo_entries)
+
+        debug_info = PrecompileContext.dump_debug_info(
+            dynamo_entries, backend_artifacts
+        )
+        debug_str = json.dumps(
+            {
+                "num_entries": num_artifacts,
+                "artifacts": debug_info,
+            },
+        )
+        torch._logging.trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "dynamo_cache_entries",
+                "encoding": "json",
+            },
+            payload_fn=lambda: debug_str,
+            expect_trace_id=False,
         )
 
-    def check_compatibility(
-        self, other: "SystemInfo", device_type: str = "cpu"
-    ) -> None:
-        """
-        Check if this SystemInfo is compatible with another SystemInfo.
-        Raises RuntimeError if incompatible.
-        """
-        if self.python_version != other.python_version:
-            raise RuntimeError(
-                f"Compile package was created with a different Python version: {self.python_version}"
-            )
+        precompile_cache_entries = {}
 
-        if self.torch_version != other.torch_version:
-            raise RuntimeError(
-                f"Compile package was created with a different PyTorch version: {self.torch_version}"
-            )
-        if device_type in self.CHECK_GPUS:
-            if not getattr(torch, device_type).is_available():
-                raise RuntimeError(f"{device_type} is not available")
-
-            if self.toolkit_version != other.toolkit_version:
-                raise RuntimeError(
-                    f"Compile package was created with a different toolkit version: {self.toolkit_version}"
+        for key, cache_entry in dynamo_entries.items():
+            try:
+                backends = cache_entry.backend_ids
+                backend_content: dict[_BackendId, BackendCacheArtifact[Any]] = {}
+                for id_ in backends:
+                    if id_ not in backend_artifacts:
+                        debug_str = json.dumps(
+                            {
+                                "entry": cache_entry.debug_info,
+                                "key": key,
+                            }
+                        )
+                        logger.warning("Backend not found")
+                        torch._logging.trace_structured(
+                            "artifact",
+                            metadata_fn=lambda: {
+                                "name": "dynamo_cache_bypass",
+                                "encoding": "json",
+                            },
+                            payload_fn=lambda: debug_str,
+                            expect_trace_id=False,
+                        )
+                        continue
+                    artifact = backend_artifacts[id_]
+                    assert isinstance(artifact, BackendCacheArtifact)
+                    backend_content[id_] = artifact
+                precompile_cache_entries[key] = PrecompileCacheEntry(
+                    dynamo=cache_entry, backends=backend_content
                 )
+            except Exception as e:
+                logger.warning("Failed to create cache entry %s: %s", key, str(e))
 
-            if (
-                other.triton_version != (0, 0)
-                and self.triton_version != other.triton_version
-            ):
-                raise RuntimeError(
-                    f"Compile package was created with a different Triton version: {self.triton_version}"
+                error = e
+                data = json.dumps(
+                    {
+                        "key": key,
+                        "error": str(error),
+                    }
                 )
-
-            # Check GPU name if CUDA/XPU was used
-            if other.gpu_name is not None and self.gpu_name != other.gpu_name:
-                raise RuntimeError(
-                    f"Compile package was created with different GPU: "
-                    f"cached={self.gpu_name}, current={other.gpu_name}"
+                torch._logging.trace_structured(
+                    "artifact",
+                    metadata_fn=lambda: {
+                        "name": "dynamo_cache_exception",
+                        "encoding": "json",
+                    },
+                    payload_fn=lambda: data,
                 )
+                continue
+        return precompile_cache_entries, debug_info

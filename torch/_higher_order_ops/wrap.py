@@ -52,8 +52,11 @@ class WrapWithSetGradEnabled(HigherOrderOperator):
 
         @disable
         def wrapper():
-            with torch.set_grad_enabled(enable_grad):
-                return wrapped_func(*args, **kwargs)
+            prev = torch.is_grad_enabled()
+            torch.set_grad_enabled(enable_grad)
+            res = wrapped_func(*args, **kwargs)
+            torch.set_grad_enabled(prev)
+            return res
 
         return wrapper()
 
