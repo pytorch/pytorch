@@ -2862,11 +2862,24 @@ class ReductionConfigKey:
         )
 
 
-def filter_reduction_configs_for_determinism(configs: list[Config]) -> list[Config]:
+def filter_reduction_configs_for_determinism(
+    inductor_meta: dict[str, Any], configs: list[Config]
+) -> list[Config]:
     """
     Filter configs for reduction so the numerics can be deterministic.
-    Simply return the first one for now.
+
+    Heuristics
+    - skip reductions with too small RBLOCK
+    - skip reductions with XBLOCK==1 if we are confident it will not perform well
+    - pick the group with largest size
+    - if there is a tie, pick the group with second largest RBLOCK
+    - if there is still a tile, pick the group with second largest num_warps
     """
+    if not inductor_meta.get("deterministic", False):
+        # no filtering happening if NOT in deterministic mode
+        return configs
+
+    configs = unique_configs(configs)
 
     if log.isEnabledFor(logging.DEBUG):
         print_configs = len(configs) >= 2
@@ -2878,6 +2891,16 @@ def filter_reduction_configs_for_determinism(configs: list[Config]) -> list[Conf
                 log.debug("%s", c)
                 log.debug("")
 
+    def _is_likely_good_config(config):
+        rblock = config.kwargs.get("R0_BLOCK")
+        if rblock is not None and rblock <= 4:
+            # too small RBLOCK is more likely to be bad
+            return False
+
+        return True
+
+    configs = filter(_is_likely_good_config, configs)
+
     groups: defaultdict[ReductionConfigKey, list[Config]] = defaultdict(
         list
     )  # group configs by RBLOCK, num_warps, num_ctas
@@ -2888,15 +2911,49 @@ def filter_reduction_configs_for_determinism(configs: list[Config]) -> list[Conf
 
     assert len(groups) > 0
 
+    def _pick_group():
+        grouplist = sorted(groups.items(), key=lambda x: len(x[1]), reverse=True)
+        max_group_size = len(grouplist[0][1])
+        grouplist = [*filter(lambda g: len(g[1]) == max_group_size, grouplist)]
+
+        assert len(grouplist) > 0
+        if len(grouplist) == 1:
+            return grouplist[0][1]
+
+        # break tie by R0_BLOCK
+        grouplist = sorted(grouplist, key=lambda x: x[0].r0_block)
+        if grouplist[0][0].r0_block != grouplist[-1][0].r0_block:
+            max_r0_block = grouplist[-1][0].r0_block
+            grouplist = [*filter(lambda x: x[0].r0_block != max_r0_block, grouplist)]
+            second_max_r0_block = grouplist[-1][0].r0_block
+            grouplist = [
+                *filter(lambda x: x[0].r0_block == second_max_r0_block, grouplist)
+            ]
+        if len(grouplist) == 1:
+            return grouplist[0][1]
+
+        # break tie by num_warps
+        grouplist = sorted(grouplist, key=lambda x: x[0].num_warps)
+        if grouplist[0][0].num_warps != grouplist[-1][0].num_warps:
+            max_num_warps = grouplist[-1][0].num_warps
+            grouplist = [*filter(lambda x: x[0].num_warps != max_num_warps, grouplist)]
+            second_max_num_warps = grouplist[-1][0].num_warps
+            grouplist = [
+                *filter(lambda x: x[0].num_warps == second_max_num_warps, grouplist)
+            ]
+
+        # there is still a tile, pick the first one
+        return grouplist[0][1]
+
     # pick the group with smallest RBLOCK
-    out = sorted(groups.items(), key=lambda item: item[0].r0_block)[0][1]
+    configs = _pick_group()
 
     if log.isEnabledFor(logging.DEBUG) and print_configs:  # type: ignore[possibly-undefined]
         log.debug("reduction configs after filtering:")
-        for c in out:
+        for c in configs:
             log.debug("%s", c)
             log.debug("")
-    return out
+    return configs
 
 
 def reduction(
@@ -2924,8 +2981,7 @@ def reduction(
     )
 
     configs = _maybe_filter_configs_for_tma_restrictions(inductor_meta, configs)
-    if inductor_meta.get("deterministic", False):
-        configs = filter_reduction_configs_for_determinism(configs)
+    configs = filter_reduction_configs_for_determinism(inductor_meta, configs)
     return cached_autotune(
         size_hints,
         configs=configs,
@@ -2973,8 +3029,7 @@ def cooperative_reduction(
     # TODO(jansel): add more configs in max_autotune
 
     configs = _maybe_filter_configs_for_tma_restrictions(inductor_meta, configs)
-    if inductor_meta.get("deterministic", False):
-        configs = filter_reduction_configs_for_determinism(configs)
+    configs = filter_reduction_configs_for_determinism(inductor_meta, configs)
     return cached_autotune(
         size_hints,
         configs=configs,
@@ -3069,8 +3124,7 @@ def persistent_reduction(
     configs = _maybe_filter_configs_for_tma_restrictions(inductor_meta, configs)
     inductor_meta.pop(persistent_reduction_key)
 
-    if inductor_meta.get("deterministic", False):
-        configs = filter_reduction_configs_for_determinism(configs)
+    configs = filter_reduction_configs_for_determinism(inductor_meta, configs)
     return cached_autotune(
         size_hints,
         configs,
@@ -3108,8 +3162,7 @@ def split_scan(
                 cfg.kwargs[var] = min_rblock
 
     configs = _maybe_filter_configs_for_tma_restrictions(inductor_meta, configs)
-    if inductor_meta.get("deterministic", False):
-        configs = filter_reduction_configs_for_determinism(configs)
+    configs = filter_reduction_configs_for_determinism(inductor_meta, configs)
     return cached_autotune(
         size_hints,
         configs=configs,
