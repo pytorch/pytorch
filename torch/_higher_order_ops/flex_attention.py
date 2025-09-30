@@ -1256,14 +1256,12 @@ def flex_attention_backward_fake_tensor_mode(
     grad_query = torch.empty_like(query)
     # zeros_and_scatter creates a contiguous zeros tensor -> contiguous_format
     grad_score_mod_captured = tuple(
-        [
-            (
-                torch.empty_like(buffer, memory_format=torch.contiguous_format)
-                if isinstance(buffer, torch.Tensor)
-                else None
-            )
-            for buffer in score_mod_other_buffers
-        ]
+        (
+            torch.empty_like(buffer, memory_format=torch.contiguous_format)
+            if isinstance(buffer, torch.Tensor)
+            else None
+        )
+        for buffer in score_mod_other_buffers
     )
 
     broadcasted_grad_key = key.new_empty((Bq, Hkv, seq_len_kv, qk_head_dim))

@@ -686,9 +686,17 @@ class CachingAutotuner(KernelInterface):
 
         return get_interface_for_device(self.device_props.type.replace("hip", "cuda"))
 
-    def _precompile_config(self, cfg: Config) -> CompileResult[_KernelType]:
-        """Ahead of time compile a given autotuner config."""
+    def _create_compile_meta(self, cfg: Config) -> dict[str, Any]:
+        """
+        Create compilation metadata for a given autotuner config. This involves
+        processing the Config kwargs so that the kwargs that are not part
+        of the triton signature are passed in as options to triton.compile
+        instead
+        """
         compile_meta = copy.deepcopy(self.triton_meta)
+        compile_meta["num_warps"] = cfg.num_warps
+        compile_meta["num_stages"] = cfg.num_stages
+
         cfg_kwargs = cfg.kwargs
         if self.device_props.type == "hip":
             cfg_kwargs = {**cfg_kwargs}
@@ -696,14 +704,13 @@ class CachingAutotuner(KernelInterface):
                 if k in cfg_kwargs:
                     compile_meta[k] = cfg_kwargs.pop(k)
         compile_meta["constants"].update(cfg_kwargs)
+
         for i in self.fn.constexprs:
             arg_name = self.fn.arg_names[i]
             if arg_name not in compile_meta["constants"] and (
                 arg_name == "num_warps" or arg_name == "num_stages"
             ):
                 compile_meta["constants"][arg_name] = getattr(cfg, arg_name)
-        compile_meta["num_warps"] = cfg.num_warps
-        compile_meta["num_stages"] = cfg.num_stages
         if HAS_WARP_SPEC:
             compile_meta["num_consumer_groups"] = getattr(cfg, "num_consumer_groups", 0)
             compile_meta["num_buffers_warp_spec"] = getattr(
@@ -716,6 +723,53 @@ class CachingAutotuner(KernelInterface):
         # device type will be "hip" rather than "cuda" here
         compile_meta["device_type"] = self.device_props.type
         compile_meta["cc"] = self.device_props.cc
+
+        return compile_meta
+
+    def _create_compile_options(
+        self, cfg: Config, compile_meta: dict[str, Any]
+    ) -> dict[str, Any]:
+        """
+        Create options to pass to triton.compile based on the compile metadata
+        and the given config.
+        """
+        options = {
+            "num_warps": compile_meta["num_warps"],
+            "num_stages": compile_meta["num_stages"],
+            "debug": compile_meta["debug"],
+            "sanitize_overflow": False,  # turn off additional asserts added for overflow checks
+        }
+        if "enable_fp_fusion" in compile_meta:
+            options["enable_fp_fusion"] = compile_meta["enable_fp_fusion"]
+        if HAS_WARP_SPEC:
+            options.update(
+                {
+                    "num_consumer_groups": compile_meta.get("num_consumer_groups", 0),
+                    "num_buffers_warp_spec": compile_meta.get(
+                        "num_buffers_warp_spec", 0
+                    ),
+                }
+            )
+        if self.device_props.type == "cuda":
+            options.update(
+                {
+                    "launch_cooperative_grid": compile_meta.get(
+                        "launch_cooperative_grid", False
+                    ),
+                    "launch_pdl": compile_meta.get("launch_pdl", False),  # True
+                }
+            )
+        if self.device_props.type == "hip":
+            if "waves_per_eu" in compile_meta:
+                options["waves_per_eu"] = compile_meta["waves_per_eu"]
+            if "matrix_instr_nonkdim" in compile_meta:
+                options["matrix_instr_nonkdim"] = compile_meta["matrix_instr_nonkdim"]
+
+        return options
+
+    def _precompile_config(self, cfg: Config) -> CompileResult[_KernelType]:
+        """Ahead of time compile a given autotuner config."""
+        compile_meta = self._create_compile_meta(cfg)
 
         if self.device_props.type == "cpu":
             triton_helpers.set_driver_to_cpu()
@@ -749,37 +803,8 @@ class CachingAutotuner(KernelInterface):
             cc_warp_size(compile_meta["cc"]),
         )
 
-        options = {
-            "num_warps": compile_meta["num_warps"],
-            "num_stages": compile_meta["num_stages"],
-            "debug": compile_meta["debug"],
-            "sanitize_overflow": False,  # turn off additional asserts added for overflow checks
-        }
-        if "enable_fp_fusion" in compile_meta:
-            options["enable_fp_fusion"] = compile_meta["enable_fp_fusion"]
-        if HAS_WARP_SPEC:
-            options.update(
-                {
-                    "num_consumer_groups": compile_meta.get("num_consumer_groups", 0),
-                    "num_buffers_warp_spec": compile_meta.get(
-                        "num_buffers_warp_spec", 0
-                    ),
-                }
-            )
-        if self.device_props.type == "cuda":
-            options.update(
-                {
-                    "launch_cooperative_grid": compile_meta.get(
-                        "launch_cooperative_grid", False
-                    ),
-                    "launch_pdl": compile_meta.get("launch_pdl", False),  # True
-                }
-            )
-        if self.device_props.type == "hip":
-            if "waves_per_eu" in compile_meta:
-                options["waves_per_eu"] = compile_meta["waves_per_eu"]
-            if "matrix_instr_nonkdim" in compile_meta:
-                options["matrix_instr_nonkdim"] = compile_meta["matrix_instr_nonkdim"]
+        options = self._create_compile_options(cfg, compile_meta)
+
         compile_kwargs = {
             "target": target,
             "options": options,
@@ -869,25 +894,34 @@ class CachingAutotuner(KernelInterface):
             )
             # reset to zero before evaluating any config
             self.reset_to_zero_args(*args, **kwargs)
+            kernel_name = self.inductor_meta.get("kernel_name", "triton kernel")
             if autograd_profiler._is_profiler_enabled:
                 profiler_kwargs = self.get_profiler_kwargs(stream, launcher)
                 with torch._C._profiler._RecordFunctionFast(
-                    self.inductor_meta.get("kernel_name", "triton kernel"),
+                    kernel_name,
                     cloned_args,
                     profiler_kwargs,
                 ):
+                    try:
+                        launcher(
+                            *cloned_args,
+                            **cloned_kwargs,
+                            stream=stream,
+                        )
+                    except Exception:
+                        log.error("Failed during launch %s: ", kernel_name)
+                        raise
+
+            else:
+                try:
                     launcher(
                         *cloned_args,
                         **cloned_kwargs,
                         stream=stream,
                     )
-
-            else:
-                launcher(
-                    *cloned_args,
-                    **cloned_kwargs,
-                    stream=stream,
-                )
+                except Exception:
+                    log.error("Failed during launch %s: ", kernel_name)
+                    raise
             self.restore_args_from_cpu(cpu_copies)
 
         # only use profiler when not already in a profiler instance
@@ -2333,7 +2367,6 @@ def triton_config_reduction(
     num_warps=None,
     register_intensive=False,
     dynamic_scale_rblock=True,
-    reduction_hint=None,
 ) -> Config:
     """
     Construct a reduction triton config with some adjustment heuristics
@@ -2361,12 +2394,7 @@ def triton_config_reduction(
             rnumels[prefix] *= 2
 
     if num_warps is None:
-        if reduction_hint == ReductionHint.INNER:
-            # r is contiguous, so ensure that each thread has 8 elements for
-            # vectorized loads, assuming bf16/fp16
-            num_warps = r // (32 * 8)
-        else:
-            num_warps = total_numel() // 128
+        num_warps = total_numel() // 128
 
     max_num_warps = 16 if r <= 8192 else 32
     num_warps = _num_warps(
@@ -2636,7 +2664,6 @@ def _reduction_configs(
                 num_stages=num_stages,
                 register_intensive=register_intensive,
                 dynamic_scale_rblock=dynamic_scale_rblock,
-                reduction_hint=reduction_hint,
             )
 
     def outer_config_opt():
@@ -2688,7 +2715,7 @@ def _reduction_configs(
         )
 
     contiguous_config = make_config(
-        1 if rnumel > 2048 else 2,  # 1024 or less is persistent
+        1,
         min(rnumel, MAX_R0_BLOCK),
         register_intensive=register_intensive,
     )
@@ -2918,13 +2945,7 @@ def _persistent_reduction_configs(
 
     if "y" not in size_hints:
         configs = [
-            triton_config_reduction(
-                size_hints,
-                xblock,
-                rnumel,
-                register_intensive=True,
-                reduction_hint=reduction_hint,
-            )
+            triton_config_reduction(size_hints, xblock, rnumel, register_intensive=True)
             for xblock in (1, 8, 32, 128)
             if xblock == 1
             or (rnumel * xblock <= MAX_PERSISTENT_BLOCK_NUMEL and xblock <= xnumel)
@@ -2967,7 +2988,6 @@ def _persistent_reduction_configs(
                     x_block,
                     rnumel,
                     register_intensive=True,
-                    reduction_hint=reduction_hint,
                 )
             ]
 
@@ -2979,7 +2999,6 @@ def _persistent_reduction_configs(
                 size_hints,
                 2 * (256 // rnumel) if rnumel <= 256 else 1,
                 rnumel,
-                reduction_hint=reduction_hint,
             )
         ]
     for c in configs:
