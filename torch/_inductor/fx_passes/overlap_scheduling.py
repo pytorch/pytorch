@@ -314,7 +314,6 @@ class OverlapScheduler:
         return compute_depth_dominance
 
     def _align_runtime_estimations_across_all_distributed_ranks(self) -> None:
-        print("XXX _ALIGN_RUNTIME_ESTIMATIONS")
         log.info(
             "Overlap scheduling: Aligning runtime estimations across all distributed ranks"
         )
@@ -322,7 +321,6 @@ class OverlapScheduler:
         runtime_estimations_keys: list[Optional[str]] = []
         runtime_estimations: list[float] = []
         for n in g.nodes:
-            print(f"XXX ESTIMATE {n}")
             val, key = benchmark_node_with_cache_key(n)
             runtime_estimations.append(val)
             runtime_estimations_keys.append(key)
@@ -335,9 +333,7 @@ class OverlapScheduler:
         gathered_runtime_estimations: list[list[float]] = [
             [] for _ in range(world_size)
         ]
-        print(f"XXX PRE_GATHERED_RUNTIME_ESTIMATIONS:{gathered_runtime_estimations}")
         dist.all_gather_object(gathered_runtime_estimations, runtime_estimations, pg)
-        print(f"XXX GATHERED_RUNTIME_ESTIMATIONS:{gathered_runtime_estimations}")
         median_runtime_estimations = torch.median(
             torch.tensor(gathered_runtime_estimations), dim=0
         ).values.tolist()
