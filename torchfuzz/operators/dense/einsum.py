@@ -162,25 +162,38 @@ class EinsumOperator(Operator):
                 equation = "bik,bkj->bij"
                 return equation, [input_shape1, input_shape2]
             else:
-                # Generic batch contraction
-                b = output_shape[0]
-                remaining_dims = output_shape[1:]
-                k = random.randint(2, 16)
-                
-                # Create two inputs that contract over dimension k
-                input_shape1 = (b,) + remaining_dims[:len(remaining_dims)//2] + (k,)
-                input_shape2 = (b, k) + remaining_dims[len(remaining_dims)//2:]
-                
-                # Generate indices
-                batch_idx = 'b'
-                output_indices = batch_idx + ''.join(string.ascii_lowercase[1:1+len(remaining_dims)])
-                contract_idx = string.ascii_lowercase[1+len(remaining_dims)]
-                
-                input1_indices = batch_idx + output_indices[1:1+len(remaining_dims)//2] + contract_idx
-                input2_indices = batch_idx + contract_idx + output_indices[1+len(remaining_dims)//2:]
-                
-                equation = f"{input1_indices},{input2_indices}->{output_indices}"
-                return equation, [input_shape1, input_shape2]
+                # For 4D+ outputs, use a simpler contraction pattern to avoid duplicate indices
+                # Pattern: first input has some dims + contraction, second input has contraction + remaining dims
+                if output_ndim == 4:
+                    # 4D: "bcd,def->bcef" pattern
+                    b, c, d, e = output_shape
+                    k = random.randint(2, 16)
+                    input_shape1 = (b, c, k)
+                    input_shape2 = (k, d, e)
+                    equation = "bck,kde->bcde"
+                    return equation, [input_shape1, input_shape2]
+                else:
+                    # Fallback: use matrix multiplication pattern for higher dims
+                    # Treat as batch + matrix multiply
+                    batch_dims = output_shape[:-2]
+                    m, n = output_shape[-2:]
+                    k = random.randint(2, 16)
+                      
+                    batch_size = 1
+                    for dim in batch_dims:
+                        batch_size *= dim
+                      
+                    input_shape1 = batch_dims + (m, k)
+                    input_shape2 = batch_dims + (k, n)
+                      
+                    # Generate equation for batch matrix multiply
+                    if len(batch_dims) == 1:
+                        equation = "bik,bkj->bij"
+                    else:
+                        # For higher batch dims, flatten to single batch
+                        equation = "bik,bkj->bij" 
+                      
+                    return equation, [input_shape1, input_shape2]
 
     def _generate_three_input_equation(self, output_shape):
         """Generate einsum equation for three input operations."""

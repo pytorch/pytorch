@@ -395,14 +395,19 @@ class TestEinsumOperator:
     def test_multiple_decompositions_different_equations(self, einsum_op, matrix_tensor):
         """Test that multiple decompositions can produce different equations."""
         equations = set()
-        
+          
         # Run decomposition multiple times
         for _ in range(10):
             # Create fresh tensor for each test
             tensor = Tensor((4, 6), (6, 1), "float32", "cuda", [])
             einsum_op.decompose(tensor, num_inputs=2)
             equations.add(tensor._einsum_equation)
-        
+          
         # Should have some variety in equations (at least matrix multiply or outer product)
         assert len(equations) >= 1
         assert all("->" in eq for eq in equations)
+        # Check that equations don't have duplicate indices in output
+        for eq in equations:
+            output_part = eq.split("->")[1]
+            output_indices = list(output_part)
+            assert len(output_indices) == len(set(output_indices)), f"Duplicate indices in output: {eq}"
