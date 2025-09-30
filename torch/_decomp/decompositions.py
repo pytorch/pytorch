@@ -1747,6 +1747,11 @@ def native_layer_norm_backward_out(
     return grad_input
 
 
+@register_decomposition(aten._fused_rms_norm.default)
+def _fused_rms_norm(input, normalized_shape, weight, float):
+    return torch.ops.aten.rms_norm_composite(input, normalized_shape, weight, float)
+
+
 @register_decomposition(aten._fused_rms_norm_backward.default)
 def _fused_rms_norm_backward(
     grad_out: Tensor,

@@ -261,6 +261,14 @@ std::tuple<Tensor, Tensor, Tensor> math_native_layer_norm(
   return outputs;
 }
 
+std::tuple<Tensor, Tensor> _rms_norm_composite(
+    const Tensor& input,
+    IntArrayRef normalized_shape,
+    const std::optional<Tensor>& weight_opt /* optional */,
+    std::optional<double> eps) {
+  return rms_norm_composite(input, normalized_shape, weight_opt, eps);
+}
+
 std::tuple<Tensor, Tensor> rms_norm_composite(
     const Tensor& input,
     IntArrayRef normalized_shape,
