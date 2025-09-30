@@ -147,7 +147,6 @@ FrameLocalsMapping::FrameLocalsMapping(FrameLocalsFrameType* frame)
 }
 
 void FrameLocalsMapping::_realize_dict() {
-  auto start = std::chrono::high_resolution_clock::now();
   _dict = py::dict();
   py::tuple framelocals_names = code_framelocals_names(_code_obj);
   PyCodeObject* co = (PyCodeObject*)_code_obj.ptr();
@@ -189,13 +188,6 @@ void FrameLocalsMapping::_realize_dict() {
       update_mapping(co->co_nlocals + ncells + i);
     }
   }
-  auto end = std::chrono::high_resolution_clock::now();
-  auto duration =
-      std::chrono::duration_cast<std::chrono::microseconds>(end - start)
-          .count();
-  std::cout << "realize_dict took " << duration << "us" << std::endl;
-  std::cout << "locals size: " << nlocals + ncells + PyCode_GetNFreevars(co)
-            << std::endl;
 }
 
 py::tuple code_framelocals_names(py::handle code) {
