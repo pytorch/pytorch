@@ -13,6 +13,12 @@ from torchfuzz.operators.layout import (
     UnsqueezeOperator,
     ViewOperator,
 )
+from torchfuzz.operators.matrix_multiply import (
+    AddmmOperator,
+    BmmOperator,
+    MatmulOperator,
+    MMOperator,
+)
 from torchfuzz.operators.masked_select import MaskedSelectOperator
 from torchfuzz.operators.nonzero import NonzeroOperator
 from torchfuzz.operators.scalar_pointwise import (
@@ -68,6 +74,12 @@ class OperatorRegistry:
         self.register(FlattenOperator())
         self.register(SqueezeOperator())
         self.register(UnsqueezeOperator())
+
+        # Matrix multiplication operators
+        self.register(MMOperator())
+        self.register(AddmmOperator())
+        self.register(BmmOperator())
+        self.register(MatmulOperator())
 
     def register(self, operator: Operator):
         """Register an operator in the registry."""

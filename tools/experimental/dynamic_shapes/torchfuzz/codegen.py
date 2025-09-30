@@ -118,6 +118,10 @@ class DefaultFuzzTemplate(FuzzTemplate):
                 "torch.Tensor.view",
                 "torch.reshape",
                 "torch.flattentorch.squeezetorch.unsqueeze",
+                "torch.mm",
+                "torch.addmm",
+                "torch.bmm",
+                "torch.matmul",
             ],
             check=EagerVsFullGraphDynamicCompileCheck(),
         )
@@ -198,6 +202,10 @@ class DTensorFuzzTemplate(FuzzTemplate):
                 "torch.sub",
                 "torch.mul",
                 "torch.div",
+                "torch.mm",
+                "torch.addmm",
+                "torch.bmm",
+                "torch.matmul",
             ],
             check=EagerVsFullGraphDynamicCompileCheck(),
         )
