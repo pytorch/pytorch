@@ -738,4 +738,4 @@ def cond_batch_rule(interpreter, pred, true_fn, false_fn, inputs):
     if not isinstance(result, tuple):
         result = (result,)
     lvl = interpreter.level()
-    return tuple([_add_batch_dim(r, 0, lvl) for r in result])
+    return tuple(_add_batch_dim(r, 0, lvl) for r in result)
