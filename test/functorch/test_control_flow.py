@@ -2007,7 +2007,6 @@ def forward(self, pred_1, x_1):
     # Fails with: AssertionError: scan is not an OpOverload
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
-    @unittest.expectedFailure
     def test_scan_associative_scan(self):
         combine_mode = "generic"
         compile_mode_scan = "compile"

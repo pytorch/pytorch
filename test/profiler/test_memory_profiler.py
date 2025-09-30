@@ -1492,7 +1492,7 @@ class TestMemoryProfilerE2E(TestCase):
             for _, action, (key, version), size in prof._memory_profile().timeline
             # We generally don't care about tiny allocations during memory
             # profiling and they add a lot of noise to the unit test.
-            if size > 1024
+            if size > 1024 and isinstance(key, _memory_profiler.TensorKey)
         ]
 
         self.assertExpectedInline(

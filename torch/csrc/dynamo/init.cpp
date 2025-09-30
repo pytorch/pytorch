@@ -1,3 +1,4 @@
+#include <c10/util/Exception.h>
 #include <torch/csrc/dynamo/init.h>
 #include <torch/csrc/dynamo/utils.h>
 
@@ -17,6 +18,8 @@ static struct PyModuleDef _module =
     {PyModuleDef_HEAD_INIT, "torch._C._dynamo", "", -1, nullptr};
 
 PYBIND11_MAKE_OPAQUE(std::vector<uint8_t>)
+
+TORCH_MAKE_PYBIND_ENUM_FASTER(FrameAction)
 
 namespace torch::dynamo {
 
@@ -111,7 +114,7 @@ THPObjectPtr _unicode_dispatch(PyObject* str) {
       return F::apply(str, PyUnicode_4BYTE_DATA(str), length);
     default:
       // This should be impossible - throw to make the compiler happy.
-      throw std::runtime_error("unreachable");
+      TORCH_CHECK(false, "unreachable");
   }
 }
 
