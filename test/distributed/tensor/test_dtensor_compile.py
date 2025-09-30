@@ -325,7 +325,12 @@ def forward(self, b_parametrizations_buffer_original0, x):
         embedding_dim = 64
         placements = [Replicate()]
         weight = distribute_tensor(
-            torch.randn(num_embeddings, embedding_dim, device=self.device_type, requires_grad=True),
+            torch.randn(
+                num_embeddings,
+                embedding_dim,
+                device=self.device_type,
+                requires_grad=True,
+            ),
             mesh,
             placements,
         )
@@ -348,11 +353,15 @@ def forward(self, b_parametrizations_buffer_original0, x):
 
         # Compiled output using test harness abstractions
         cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
-        compiled_module = torch.compile(module, backend=cnt, fullgraph=True, dynamic=True)
+        compiled_module = torch.compile(
+            module, backend=cnt, fullgraph=True, dynamic=True
+        )
         out_compiled = compiled_module(dt_indices)
         out_compiled.sum().backward()
 
-        self.assertTrue(torch.allclose(out_eager.to_local(), out_compiled.to_local(), atol=1e-5))
+        self.assertTrue(
+            torch.allclose(out_eager.to_local(), out_compiled.to_local(), atol=1e-5)
+        )
         self.assertEqual(cnt.frame_count, 1)
 
     @skipIfHpu
