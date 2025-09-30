@@ -70,10 +70,15 @@ class ViewOperator(LayoutOperatorBase):
                 # For single-dim input, just use the exact element count
                 input_size = (output_numel,)
 
-        # Create input tensor spec with compatible stride
-        from torchfuzz.tensor_fuzzer import fuzz_valid_stride
-
-        input_stride = fuzz_valid_stride(input_size)
+        # Create input tensor spec with contiguous stride for view compatibility
+        # .view() requires compatible memory layout, so use contiguous stride
+        input_stride = tuple()
+        if input_size:
+            # Calculate contiguous stride
+            stride = [1]
+            for i in range(len(input_size) - 1, 0, -1):
+                stride.insert(0, stride[0] * input_size[i])
+            input_stride = tuple(stride)
 
         return [
             TensorSpec(size=input_size, stride=input_stride, dtype=output_spec.dtype)
@@ -269,19 +274,23 @@ class SqueezeOperator(LayoutOperatorBase):
         """Return the torch operation name."""
         return "torch.squeeze"
 
+    def can_produce(self, output_spec: Spec) -> bool:
+        """SqueezeOperator can only produce tensors WITHOUT singleton dimensions."""
+        if not isinstance(output_spec, TensorSpec):
+            return False
+        # Don't produce outputs with singleton dimensions since squeeze() removes ALL of them
+        return 1 not in output_spec.size
+
     def fuzz_inputs_specs(self, output_spec: Spec) -> list[Spec]:
         """Generate input spec for squeeze operation."""
         if not isinstance(output_spec, TensorSpec):
             raise ValueError("SqueezeOperator can only produce TensorSpec outputs")
 
-        # Add singleton dimensions to the output shape to create input
+        # Add exactly one singleton dimension to the output shape to create input
         input_size = list(output_spec.size)
-
-        # Randomly insert 1-sized dimensions
-        num_squeeze_dims = random.randint(1, 3)
-        for _ in range(num_squeeze_dims):
-            pos = random.randint(0, len(input_size))
-            input_size.insert(pos, 1)
+        # Insert exactly one singleton dimension at a random position
+        pos = random.randint(0, len(input_size))
+        input_size.insert(pos, 1)
 
         # Create input tensor spec
         from torchfuzz.tensor_fuzzer import fuzz_valid_stride
@@ -290,7 +299,9 @@ class SqueezeOperator(LayoutOperatorBase):
 
         return [
             TensorSpec(
-                size=tuple(input_size), stride=input_stride, dtype=output_spec.dtype
+                size=tuple(input_size),
+                stride=input_stride,
+                dtype=output_spec.dtype
             )
         ]
 
@@ -298,8 +309,10 @@ class SqueezeOperator(LayoutOperatorBase):
         self, output_name: str, input_names: list[str], output_spec: Spec
     ) -> str:
         """Generate code for squeeze operation."""
-        # Always use squeeze() without specifying dim to avoid dimension errors
-        # This will squeeze all singleton dimensions safely
+        # Always use squeeze() without dim specification to be safe
+        # Since we control input generation to add exactly one singleton dimension,
+        # and we preserve existing singleton dimensions in the output,
+        # this should work correctly
         return f"{output_name} = torch.squeeze({input_names[0]})"
 
 
@@ -361,9 +374,13 @@ class UnsqueezeOperator(LayoutOperatorBase):
         if not isinstance(output_spec, TensorSpec):
             raise ValueError("UnsqueezeOperator can only produce TensorSpec outputs")
 
-        # Find where the singleton dimension should be added
-        # Choose a random valid dimension position
-        max_dim = len(output_spec.size)
-        dim = random.randint(0, max_dim - 1)
+        # Find where the singleton dimension appears in the output
+        singleton_indices = [i for i, dim in enumerate(output_spec.size) if dim == 1]
+        if singleton_indices:
+            # Use the first singleton dimension position
+            dim = singleton_indices[0]
+        else:
+            # Fallback: add at the end (this shouldn't happen given our can_produce constraint)
+            dim = len(output_spec.size) - 1
 
         return f"{output_name} = torch.unsqueeze({input_names[0]}, dim={dim})"
