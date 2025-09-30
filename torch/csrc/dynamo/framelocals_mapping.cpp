@@ -4,6 +4,9 @@
 #include <torch/csrc/dynamo/cpython_includes.h>
 #include <torch/csrc/dynamo/debug_macros.h>
 
+#include <chrono>
+#include <csignal>
+
 #define Py_BUILD_CORE
 #include <internal/pycore_code.h>
 #undef Py_BUILD_CORE
@@ -144,6 +147,7 @@ FrameLocalsMapping::FrameLocalsMapping(FrameLocalsFrameType* frame)
 }
 
 void FrameLocalsMapping::_realize_dict() {
+  auto start = std::chrono::high_resolution_clock::now();
   _dict = py::dict();
   py::tuple framelocals_names = code_framelocals_names(_code_obj);
   PyCodeObject* co = (PyCodeObject*)_code_obj.ptr();
@@ -151,9 +155,16 @@ void FrameLocalsMapping::_realize_dict() {
   auto update_mapping = [&](int i) {
     DEBUG_CHECK(0 <= i && i < _framelocals.size());
     PyObject* value = _framelocals[i].ptr();
-    if (value == nullptr) {
-      _dict.attr("pop")(framelocals_names[i], py::none());
-    } else {
+    // NOTE: CPython's PyFrame_FastToLocalsWithError/map_to_dict
+    // removes the local name from the locals dict if the value is NULL.
+    // This is likely so that if a local variable is deleted in the fastlocals,
+    // PyFrame_FastToLocalsWithError will also remove it from frame->f_locals.
+    // Since we create the locals dict from scratch every time (and only
+    // before a frame is run), we probably don't need to account for this
+    // codepath, saving us from unnecessarily calling _dict.pop().
+    // It is unexpected that multiple fastlocal values corresponding to
+    // the same variable name have both a null and non-null value.
+    if (value != nullptr) {
       _dict[framelocals_names[i]] = value;
     }
   };
@@ -178,6 +189,13 @@ void FrameLocalsMapping::_realize_dict() {
       update_mapping(co->co_nlocals + ncells + i);
     }
   }
+  auto end = std::chrono::high_resolution_clock::now();
+  auto duration =
+      std::chrono::duration_cast<std::chrono::microseconds>(end - start)
+          .count();
+  std::cout << "realize_dict took " << duration << "us" << std::endl;
+  std::cout << "locals size: " << nlocals + ncells + PyCode_GetNFreevars(co)
+            << std::endl;
 }
 
 py::tuple code_framelocals_names(py::handle code) {
