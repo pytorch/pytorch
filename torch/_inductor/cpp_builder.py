@@ -2245,10 +2245,6 @@ class CppBuilder:
                 )
 
     def save_link_cmd_to_cmake(self, cmake_path: str) -> None:
-        if config.aot_inductor.link_libtorch and not config.test_configs.use_libtorch:
-            # When compile_standalone is True, do not link with libtorch
-            return
-
         lflags = " ".join(self._build_option.get_ldflags())
         libs = " ".join(self._build_option.get_libraries())
         contents = textwrap.dedent(

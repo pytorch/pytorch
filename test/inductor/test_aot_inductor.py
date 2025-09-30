@@ -7206,12 +7206,15 @@ class TestAOTInductorConfig(TestCase):
         self.assertEqual(
             result["aot_inductor.model_name_for_generated_files"], "aoti_model"
         )
+        self.assertEqual(result["aot_inductor.dynamic_linkage"], False)
 
     def test_compile_standalone_explicit_set(self):
         patches = {
             "aot_inductor_mode.compile_standalone": True,
             "aot_inductor.package_cpp_only": True,
             "aot_inductor.embed_kernel_binary": True,
+            "aot_inductor.dynamic_linkage": False,
+            "aot_inductor.link_libtorch": False,
             "aot_inductor.emit_multi_arch_kernel": not torch.version.hip,
             "aot_inductor.model_name_for_generated_files": "aoti_model",
         }
