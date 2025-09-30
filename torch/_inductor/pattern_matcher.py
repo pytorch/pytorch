@@ -2305,8 +2305,6 @@ def extract_target(node: torch.fx.Node) -> torch.fx.node.Target:
     return node.target
 
 
-####### APIs ##########
-
 
 @torch.library.custom_op(
     "pattern_matcher::op_for_dependencies", mutates_args=OrderedSet(["t"])
