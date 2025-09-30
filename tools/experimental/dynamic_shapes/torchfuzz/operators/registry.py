@@ -42,30 +42,30 @@ class OperatorRegistry:
         """Register the default set of operators."""
         # Individual tensor pointwise operators (preferred)
         self.register(AddOperator())
-        self.register(MulOperator())
-        self.register(SubOperator())
-        self.register(DivOperator())
+        # self.register(MulOperator())
+        # self.register(SubOperator())
+        # self.register(DivOperator())
 
         # Individual scalar pointwise operators (preferred)
-        self.register(ScalarAddOperator())
-        self.register(ScalarMulOperator())
-        self.register(ScalarSubOperator())
-        self.register(ScalarDivOperator())
+        # self.register(ScalarAddOperator())
+        # self.register(ScalarMulOperator())
+        # self.register(ScalarSubOperator())
+        # self.register(ScalarDivOperator())
 
-        self.register(ItemOperator())
-        self.register(ConstantOperator())
-        self.register(ArgOperator())
-        # Data-dependent operators
-        self.register(NonzeroOperator())
-        self.register(MaskedSelectOperator())
-        self.register(UniqueOperator())
+        # self.register(ItemOperator())
+        # self.register(ConstantOperator())
+        # self.register(ArgOperator())
+        # # Data-dependent operators
+        # self.register(NonzeroOperator())
+        # self.register(MaskedSelectOperator())
+        # self.register(UniqueOperator())
 
         # Tensor layout operators
         self.register(ViewOperator())
-        self.register(ReshapeOperator())
-        self.register(FlattenOperator())
-        self.register(SqueezeOperator())
-        self.register(UnsqueezeOperator())
+        # self.register(ReshapeOperator())
+        # self.register(FlattenOperator())
+        # self.register(SqueezeOperator())
+        # self.register(UnsqueezeOperator())
 
     def register(self, operator: Operator):
         """Register an operator in the registry."""

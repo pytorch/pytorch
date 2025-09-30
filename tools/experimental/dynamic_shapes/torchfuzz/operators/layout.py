@@ -7,15 +7,15 @@ from torchfuzz.operators.base import Operator
 from torchfuzz.tensor_fuzzer import fuzz_tensor_size, Spec, TensorSpec
 
 
-class ReshapeOperatorBase(Operator):
-    """Base class for reshaping operations."""
+class LayoutOperatorBase(Operator):
+    """Base class for tensor layout operations."""
 
     def can_produce(self, output_spec: Spec) -> bool:
-        """All reshape operations can only produce tensor outputs."""
+        """All layout operations can only produce tensor outputs."""
         return isinstance(output_spec, TensorSpec)
 
 
-class ViewOperator(ReshapeOperatorBase):
+class ViewOperator(LayoutOperatorBase):
     """Operator for tensor.view() operation."""
 
     def __init__(self):
@@ -27,6 +27,13 @@ class ViewOperator(ReshapeOperatorBase):
         """Return the torch operation name."""
         return "torch.Tensor.view"
 
+    def can_produce(self, output_spec: Spec) -> bool:
+        """ViewOperator can produce tensor outputs but not scalars due to element count constraints."""
+        if not isinstance(output_spec, TensorSpec):
+            return False
+        # Don't produce scalars since we can't guarantee input has exactly 1 element
+        return len(output_spec.size) > 0
+
     def fuzz_inputs_specs(self, output_spec: Spec) -> list[Spec]:
         """Generate input spec for view operation."""
         if not isinstance(output_spec, TensorSpec):
@@ -37,17 +44,30 @@ class ViewOperator(ReshapeOperatorBase):
         for dim in output_spec.size:
             output_numel *= dim
 
-        # Generate a compatible input shape with same number of elements
+        # Generate a compatible input shape with exactly the same number of elements
         input_size = fuzz_tensor_size()
-        input_numel = 1
-        for dim in input_size:
-            input_numel *= dim
-
-        # Adjust input size to match output element count
-        if input_numel != output_numel and len(input_size) > 0:
-            # Simple adjustment: modify the last dimension to match
-            if output_numel > 0:
-                input_size = tuple(list(input_size)[:-1] + [output_numel // (input_numel // input_size[-1])])
+          
+        # Directly adjust to match exact element count
+        if output_numel == 0:
+            # For zero-sized output, create zero-sized input
+            input_size = tuple(list(input_size)[:-1] + [0])
+        elif len(input_size) > 0 and output_numel > 0:
+            # Calculate input shape that gives exactly output_numel elements
+            # Keep all dims except last, adjust last to make total = output_numel
+            prefix_numel = 1
+            for dim in input_size[:-1]:
+                prefix_numel *= dim
+              
+            if prefix_numel > 0:
+                last_dim = output_numel // prefix_numel
+                # Ensure we get exactly output_numel elements
+                if last_dim * prefix_numel == output_numel:
+                    input_size = tuple(list(input_size)[:-1] + [last_dim])
+                else:
+                    # Fallback: create a simple shape with exact element count
+                    input_size = (output_numel,)
+            else:
+                input_size = (output_numel,)
 
         # Create input tensor spec with compatible stride
         from torchfuzz.tensor_fuzzer import fuzz_valid_stride
@@ -64,7 +84,7 @@ class ViewOperator(ReshapeOperatorBase):
         return f"{output_name} = {input_names[0]}.view({shape_str})"
 
 
-class ReshapeOperator(ReshapeOperatorBase):
+class ReshapeOperator(LayoutOperatorBase):
     """Operator for torch.reshape() operation."""
 
     def __init__(self):
@@ -76,6 +96,13 @@ class ReshapeOperator(ReshapeOperatorBase):
         """Return the torch operation name."""
         return "torch.reshape"
 
+    def can_produce(self, output_spec: Spec) -> bool:
+        """ReshapeOperator can produce tensor outputs but not scalars due to element count constraints."""
+        if not isinstance(output_spec, TensorSpec):
+            return False
+        # Don't produce scalars since we can't guarantee input has exactly 1 element
+        return len(output_spec.size) > 0
+
     def fuzz_inputs_specs(self, output_spec: Spec) -> list[Spec]:
         """Generate input spec for reshape operation."""
         if not isinstance(output_spec, TensorSpec):
@@ -86,17 +113,30 @@ class ReshapeOperator(ReshapeOperatorBase):
         for dim in output_spec.size:
             output_numel *= dim
 
-        # Generate a compatible input shape with same number of elements
+        # Generate a compatible input shape with exactly the same number of elements
         input_size = fuzz_tensor_size()
-        input_numel = 1
-        for dim in input_size:
-            input_numel *= dim
-
-        # Adjust input size to match output element count
-        if input_numel != output_numel and len(input_size) > 0:
-            # Simple adjustment: modify the last dimension to match
-            if output_numel > 0:
-                input_size = tuple(list(input_size)[:-1] + [output_numel // (input_numel // input_size[-1])])
+          
+        # Directly adjust to match exact element count
+        if output_numel == 0:
+            # For zero-sized output, create zero-sized input
+            input_size = tuple(list(input_size)[:-1] + [0])
+        elif len(input_size) > 0 and output_numel > 0:
+            # Calculate input shape that gives exactly output_numel elements
+            # Keep all dims except last, adjust last to make total = output_numel
+            prefix_numel = 1
+            for dim in input_size[:-1]:
+                prefix_numel *= dim
+              
+            if prefix_numel > 0:
+                last_dim = output_numel // prefix_numel
+                # Ensure we get exactly output_numel elements
+                if last_dim * prefix_numel == output_numel:
+                    input_size = tuple(list(input_size)[:-1] + [last_dim])
+                else:
+                    # Fallback: create a simple shape with exact element count
+                    input_size = (output_numel,)
+            else:
+                input_size = (output_numel,)
 
         # Create input tensor spec with compatible stride
         from torchfuzz.tensor_fuzzer import fuzz_valid_stride
@@ -113,7 +153,7 @@ class ReshapeOperator(ReshapeOperatorBase):
         return f"{output_name} = torch.reshape({input_names[0]}, {shape_str})"
 
 
-class FlattenOperator(ReshapeOperatorBase):
+class FlattenOperator(LayoutOperatorBase):
     """Operator for torch.flatten() operation."""
 
     def __init__(self):
@@ -160,10 +200,27 @@ class FlattenOperator(ReshapeOperatorBase):
         for dim in input_size:
             input_numel *= dim
 
-        if input_numel != output_numel and len(input_size) > 0:
-            # Simple adjustment: modify the last dimension to match
-            if output_numel > 0:
-                input_size = tuple(list(input_size)[:-1] + [output_numel // (input_numel // input_size[-1])])
+        if input_numel != output_numel:
+            # Handle zero-sized tensors specially
+            if output_numel == 0:
+                # For zero-sized output, create zero-sized input
+                input_size = tuple(list(input_size)[:-1] + [0])
+            elif len(input_size) > 0 and output_numel > 0:
+                # Calculate input shape that gives exactly output_numel elements
+                prefix_numel = 1
+                for dim in input_size[:-1]:
+                    prefix_numel *= dim
+                  
+                if prefix_numel > 0:
+                    last_dim = output_numel // prefix_numel
+                    # Ensure we get exactly output_numel elements
+                    if last_dim * prefix_numel == output_numel:
+                        input_size = tuple(list(input_size)[:-1] + [last_dim])
+                    else:
+                        # Fallback: create a simple shape with exact element count
+                        input_size = (output_numel,)
+                else:
+                    input_size = (output_numel,)
 
         # Create input tensor spec
         from torchfuzz.tensor_fuzzer import fuzz_valid_stride
@@ -186,7 +243,7 @@ class FlattenOperator(ReshapeOperatorBase):
             return f"{output_name} = torch.flatten({input_names[0]}, start_dim={start_dim})"
 
 
-class SqueezeOperator(ReshapeOperatorBase):
+class SqueezeOperator(LayoutOperatorBase):
     """Operator for torch.squeeze() operation."""
 
     def __init__(self):
@@ -230,7 +287,7 @@ class SqueezeOperator(ReshapeOperatorBase):
             return f"{output_name} = torch.squeeze({input_names[0]}, dim={dim})"
 
 
-class UnsqueezeOperator(ReshapeOperatorBase):
+class UnsqueezeOperator(LayoutOperatorBase):
     """Operator for torch.unsqueeze() operation."""
 
     def __init__(self):
