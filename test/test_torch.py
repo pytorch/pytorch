@@ -9157,11 +9157,6 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
                 """Attempting to copy from device meta to device cpu, but cross-device copies are not allowed!"""
             )
 
-    def test_upsample(self):
-        # Test tuple and list scale_factor
-        torch.nn.Upsample(scale_factor=(1,), mode="nearest")
-        torch.nn.Upsample(scale_factor=[1,], mode="nearest")
-
     def test_add_meta_scalar(self):
         # From https://github.com/pytorch/pytorch/issues/53815
         x = torch.empty(2, device='meta')

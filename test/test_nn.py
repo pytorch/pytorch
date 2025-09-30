@@ -6740,6 +6740,9 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             helper([1, 1, 11, 7], 257, 'bicubic', device)
             helper([3, 2, 11, 7, 3], 20, 'trilinear', device)
             helper([3, 2, 11, 7, 3], 20, 'trilinear', device, torch.channels_last_3d)
+            # Test tuple and list scale_factor
+            helper([1, 1, 2, 2], (1., 1.), 'nearest', device)
+            helper([1, 1, 2, 2], [1., 1.], 'nearest', device)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_interpolate_illegal_memory_access(self):
