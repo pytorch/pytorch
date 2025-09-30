@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import functools
+from collections.abc import Callable
 from contextlib import contextmanager
-from typing import Callable
 
 import torch
 from torch._decomp import decomposition_table
