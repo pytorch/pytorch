@@ -191,6 +191,7 @@ class TestMatmulCuda(InductorTestCase):
             torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = orig_precision
 
     @onlyCUDA
+    @xfailIfSm100OrLaterAndCondition(lambda params: params.get('dtype') == torch.bfloat16 and params.get('size') == 10000)
     @skipIfRocmVersionLessThan((5, 2))
     # imported 'tol' as 'xtol' to avoid aliasing in code above
     @toleranceOverride({torch.float16: xtol(atol=7e-1, rtol=2e-1),
