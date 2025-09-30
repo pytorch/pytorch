@@ -73,9 +73,9 @@ def get_collective_do_bench() -> Callable[[Callable[[], Any]], float]:
         )
 
 
-def benchmark_node(n: fx.Node) -> float:
-    if (est := get_custom_estimation(n)) is not None:
-        return est
+def benchmark_node_with_cache_key(n: fx.Node) -> tuple[float, Optional[str]]:
+    if n.op in ("placeholder", "output"):
+        return 0, None
 
     from torch._dynamo.testing import rand_strided
 
@@ -83,7 +83,7 @@ def benchmark_node(n: fx.Node) -> float:
     success, args, kwargs = torch._inductor.fx_utils.get_fake_args_kwargs(n)
 
     if not success:
-        return 0
+        return 0, None
 
     unbacked_tensor = False
 
@@ -110,15 +110,23 @@ def benchmark_node(n: fx.Node) -> float:
         )
 
         if val := get_cached_node_time(key):
-            return val
+            return val, key
 
         if unbacked_tensor:
-            return 0
+            return 0, key
+
+        if (est := get_custom_estimation(n)) is not None:
+            set_cached_node_time(key, est)
+            return est, key
 
         bench = get_collective_do_bench()
         out = bench(lambda: n.target(*args, **kwargs))  # type: ignore[operator]
         set_cached_node_time(key, out)
-        return out
+        return out, key
+
+
+def benchmark_node(n: fx.Node) -> float:
+    return benchmark_node_with_cache_key(n)[0]
 
 
 @functools.cache
@@ -305,8 +313,49 @@ class OverlapScheduler:
 
         return compute_depth_dominance
 
+    def _align_runtime_estimations_across_all_distributed_ranks(self) -> None:
+        print("XXX _ALIGN_RUNTIME_ESTIMATIONS")
+        log.info(
+            "Overlap scheduling: Aligning runtime estimations across all distributed ranks"
+        )
+        g = self.graph
+        runtime_estimations_keys: list[Optional[str]] = []
+        runtime_estimations: list[float] = []
+        for n in g.nodes:
+            print(f"XXX ESTIMATE {n}")
+            val, key = benchmark_node_with_cache_key(n)
+            runtime_estimations.append(val)
+            runtime_estimations_keys.append(key)
+
+        import torch.distributed as dist
+        from torch.distributed.distributed_c10d import _get_default_group
+
+        world_size = dist.get_world_size()
+        pg = _get_default_group()
+        gathered_runtime_estimations: list[list[float]] = [
+            [] for _ in range(world_size)
+        ]
+        print(f"XXX PRE_GATHERED_RUNTIME_ESTIMATIONS:{gathered_runtime_estimations}")
+        dist.all_gather_object(gathered_runtime_estimations, runtime_estimations, pg)
+        print(f"XXX GATHERED_RUNTIME_ESTIMATIONS:{gathered_runtime_estimations}")
+        median_runtime_estimations = torch.median(
+            torch.tensor(gathered_runtime_estimations), dim=0
+        ).values.tolist()
+        for key, median_runtime_estimation in zip(
+            runtime_estimations_keys, median_runtime_estimations
+        ):
+            if key is None:
+                continue
+            set_cached_node_time(key, median_runtime_estimation)
+        log.info(
+            "Overlap scheduling: Runtime estimations across all distributed ranks were aligned"
+        )
+
     def run(self) -> torch.fx.GraphModule:
         """Run the scheduling algorithm."""
+        # All ranks must make identical decisions on overlap reordering,
+        # Thus we must have identical runtime estimations across ranks.
+        self._align_runtime_estimations_across_all_distributed_ranks()
 
         while self.ready:
             if self._should_force_wait_for_memory():
