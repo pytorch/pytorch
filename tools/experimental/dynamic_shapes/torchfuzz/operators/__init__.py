@@ -5,14 +5,34 @@ from torchfuzz.operators.base import Operator
 from torchfuzz.operators.constant import ConstantOperator
 from torchfuzz.operators.item import ItemOperator
 from torchfuzz.operators.registry import get_operator, list_operators, register_operator
-from torchfuzz.operators.scalar_pointwise import ScalarPointwiseOperator
-from torchfuzz.operators.tensor_pointwise import TensorPointwiseOperator
+from torchfuzz.operators.scalar_pointwise import (
+    ScalarAddOperator,
+    ScalarDivOperator,
+    ScalarMulOperator,
+    ScalarPointwiseOperator,
+    ScalarSubOperator,
+)
+from torchfuzz.operators.tensor_pointwise import (
+    AddOperator,
+    DivOperator,
+    MulOperator,
+    PointwiseOperator,
+    SubOperator,
+)
 
 
 __all__ = [
     "Operator",
-    "TensorPointwiseOperator",
+    "PointwiseOperator",
+    "AddOperator",
+    "MulOperator",
+    "SubOperator",
+    "DivOperator",
     "ScalarPointwiseOperator",
+    "ScalarAddOperator",
+    "ScalarMulOperator",
+    "ScalarSubOperator",
+    "ScalarDivOperator",
     "ItemOperator",
     "ConstantOperator",
     "ArgOperator",

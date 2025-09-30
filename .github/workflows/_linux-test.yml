@@ -273,6 +273,8 @@ jobs:
           TEST_CONFIG: ${{ matrix.config }}
           SHARD_NUMBER: ${{ matrix.shard }}
           NUM_TEST_SHARDS: ${{ matrix.num_shards }}
+          EXTRA_FLAGS: ${{ matrix.extra_flags || '' }}
+          OP_BENCHMARK_TESTS: ${{ matrix.op_benchmark_tests }}
           REENABLED_ISSUES: ${{ steps.keep-going.outputs.reenabled-issues }}
           CONTINUE_THROUGH_ERROR: ${{ steps.keep-going.outputs.keep-going }}
           VERBOSE_TEST_LOGS: ${{ steps.keep-going.outputs.ci-verbose-test-logs }}

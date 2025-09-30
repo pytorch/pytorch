@@ -3238,6 +3238,40 @@ aten::mm""",
             assert "Overload Name" in key_averages.table()
             validate_json(prof)
 
+    def test_expose_kineto_event_metadata(self):
+        def check_metadata(prof, op_name, metadata_key):
+            with TemporaryFileName(mode="w+") as fname:
+                prof.export_chrome_trace(fname)
+                with open(fname) as f:
+                    events = json.load(f)["traceEvents"]
+                    found_op = False
+                    for e in events:
+                        if "name" in e and "args" in e and e["name"] == op_name:
+                            assert metadata_key in e["args"], (
+                                f"Metadata for '{op_name}' in Chrome trace did not contain '{metadata_key}'."
+                            )
+                            found_op = True
+                    assert found_op, f"Could not find op '{op_name}' in Chrome trace."
+                found_op = False
+                for event in prof.events():
+                    if event.name == op_name:
+                        assert metadata_key in event.metadata_json, (
+                            f"Metadata for '{op_name}' in FunctionEvent did not contain '{metadata_key}'."
+                        )
+                        found_op = True
+                assert found_op, f"Could not find op '{op_name}' in prof.events()."
+
+        experimental_config = torch._C._profiler._ExperimentalConfig(
+            expose_kineto_event_metadata=True
+        )
+        with profile(
+            experimental_config=experimental_config,
+            activities=[ProfilerActivity.CPU],
+        ) as prof:
+            torch.add(1, 5)
+
+        check_metadata(prof, op_name="aten::add", metadata_key="Ev Idx")
+
     @unittest.skipIf(not torch.cuda.is_available(), "requries CUDA")
     def test_profiler_debug_autotuner(self):
         """
