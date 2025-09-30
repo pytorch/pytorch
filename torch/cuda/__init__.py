@@ -25,7 +25,7 @@ import torch._C
 from torch import device as _device
 from torch._utils import _dummy_type, _LazySeedTracker, classproperty
 
-from . import gds
+from . import _device_limits, gds
 from ._utils import _get_device_index
 from .graphs import (
     CUDAGraph,
@@ -259,7 +259,7 @@ def _check_capability():
     CUDA_ARCHES_SUPPORTED = {
         "12.6": {"min": 50, "max": 90},
         "12.8": {"min": 70, "max": 120},
-        "12.9": {"min": 70, "max": 120},
+        "13.0": {"min": 75, "max": 120},
     }
 
     if (
