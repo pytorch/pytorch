@@ -330,13 +330,16 @@ class OverlapScheduler:
 
         world_size = dist.get_world_size()
         pg = _get_default_group()
-        gathered_runtime_estimations: list[list[float]] = [
-            [] for _ in range(world_size)
-        ]
-        dist.all_gather_object(gathered_runtime_estimations, runtime_estimations, pg)
-        median_runtime_estimations = torch.median(
-            torch.tensor(gathered_runtime_estimations), dim=0
-        ).values.tolist()
+        with no_dispatch():
+            gathered_runtime_estimations: list[list[float]] = [
+                [] for _ in range(world_size)
+            ]
+            dist.all_gather_object(
+                gathered_runtime_estimations, runtime_estimations, pg
+            )
+            median_runtime_estimations = torch.median(
+                torch.tensor(gathered_runtime_estimations), dim=0
+            ).values.tolist()
         for key, median_runtime_estimation in zip(
             runtime_estimations_keys, median_runtime_estimations
         ):
