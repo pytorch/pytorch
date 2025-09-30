@@ -101,6 +101,7 @@ from torch.testing._internal.optests import (
 from torch.testing._internal.subclasses import WrapperSubclass
 from torch.testing._internal.two_tensor import TwoTensor, TwoTensorMode
 from torch.utils._python_dispatch import TorchDispatchMode
+import torch.nn.functional as F
 
 
 USE_TORCHVISION = False
@@ -7198,6 +7199,27 @@ metadata incorrectly.
         x = torch.randn(4, 4)
         torch.compile(fn, backend="inductor", fullgraph=True)(x)
         torch.compile(fn_, backend="inductor", fullgraph=True)(x)
+
+    def test_layer_norm(self):
+        def fn(x):
+            return F.layer_norm(x, normalized_shape=(8,))
+
+        x = torch.randn(2, 4, 8)
+        eager = fn(x)
+        aot_eager = torch.compile(backend='aot_eager')(fn)(x)
+        self.assertEqual(eager, aot_eager, atol=0, rtol=0)
+
+    @unittest.expectedFailure
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    def test_rms_norm(self):
+        # Only CUDA rms norm fails to be decomposed
+        def fn(x):
+            return F.rms_norm(x, normalized_shape=(8,))
+
+        x = torch.randn(2, 4, 8, device='cuda')
+        eager = fn(x)
+        aot_eager = torch.compile(backend='aot_eager')(fn)(x)
+        self.assertEqual(eager, aot_eager, atol=0, rtol=0)
 
     def test_subclass_parameters(self):
         class _M(torch.nn.Module):
