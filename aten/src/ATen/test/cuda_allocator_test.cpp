@@ -33,7 +33,7 @@ TEST(TestTorchUnique, UniqueComparisonTest) {
         torch::cuda::CUDAPluggableAllocator::createCustomAllocator(logging_malloc, logging_free);
     torch::cuda::CUDAPluggableAllocator::changeCurrentAllocator(custom_allocator);
     // Run the command 3 times; the first 2 will pass and the third invocation will have
-    // different sizes in alloc and free
+    // different sizes in alloc and free if the test fails.
     for (int i = 0; i < 3; ++i) {
         // Initialize simple sorted tensor with repeats
         at::Tensor sorted_tensor =
