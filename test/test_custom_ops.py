@@ -22,6 +22,7 @@ import torch._custom_ops as custom_ops
 import torch.testing._internal.optests as optests
 import torch.utils._pytree as pytree
 import torch.utils.cpp_extension
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch import Tensor
 from torch._custom_op.impl import CustomOp, infer_schema
 from torch._library.fake_profile import (
@@ -36,7 +37,6 @@ from torch._library.fake_profile import (
 from torch._library.infer_schema import tuple_to_list
 from torch._library.opaque_object import make_opaque, OpaqueType
 from torch._utils_internal import get_file_path_2  # @manual
-from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.testing._internal import custom_op_db
 from torch.testing._internal.common_cuda import TEST_CUDA
