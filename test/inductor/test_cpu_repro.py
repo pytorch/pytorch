@@ -4810,6 +4810,22 @@ class CPUReproTests(TestCase):
         self.common(fn, (x,))
         check_metrics_vec_kernel_count(1)
 
+        # Tail vectorization case
+        x = torch.randn((22, 22), dtype=torch.double)
+        torch._dynamo.reset()
+        metrics.reset()
+        with torch.no_grad():
+            expected = fn(x)
+            compiled_fn = torch.compile(fn)
+            actual, code = run_and_get_cpp_code(compiled_fn, x)
+            self.assertEqual(expected, actual)
+            # 1 generated vec kernel
+            self.assertEqual(metrics.generated_cpp_vec_kernel_count, 1)
+            # Check that both main and tail loops are vectorized
+            FileCheck().check_count(
+                "at::vec::VectorizedN<double,2>::loadu", 2, exactly=True
+            ).run(code)
+
     def test_double_reduction_vec(self):
         def fn(x):
             return x.sum(dim=1)
@@ -4818,6 +4834,22 @@ class CPUReproTests(TestCase):
         metrics.reset()
         self.common(fn, (x,))
         check_metrics_vec_kernel_count(1)
+
+        # Tail vectorization case
+        x = torch.randn((22, 22), dtype=torch.double)
+        torch._dynamo.reset()
+        metrics.reset()
+        with torch.no_grad():
+            expected = fn(x)
+            compiled_fn = torch.compile(fn)
+            actual, code = run_and_get_cpp_code(compiled_fn, x)
+            self.assertEqual(expected, actual)
+            # 1 generated vec kernel
+            self.assertEqual(metrics.generated_cpp_vec_kernel_count, 1)
+            # Check that both main and tail loops are vectorized
+            FileCheck().check_count(
+                "at::vec::VectorizedN<double,2>::loadu", 2, exactly=True
+            ).run(code)
 
     def test_convert_fp32_to_double_vec(self):
         def fn(x):
@@ -4828,6 +4860,22 @@ class CPUReproTests(TestCase):
         self.common(fn, (x,))
         check_metrics_vec_kernel_count(1)
 
+        # Tail vectorization case
+        x = torch.randn(22, 22)
+        torch._dynamo.reset()
+        metrics.reset()
+        with torch.no_grad():
+            expected = fn(x)
+            compiled_fn = torch.compile(fn)
+            actual, code = run_and_get_cpp_code(compiled_fn, x)
+            self.assertEqual(expected, actual)
+            # 1 generated vec kernel
+            self.assertEqual(metrics.generated_cpp_vec_kernel_count, 1)
+            # Check that both main and tail loops are vectorized
+            FileCheck().check_count(
+                "at::vec::convert<double,2,float,1>", 2, exactly=True
+            ).run(code)
+
     def test_convert_double_to_fp32_vec(self):
         def fn(x):
             return x.to(torch.float32)
@@ -4836,6 +4884,22 @@ class CPUReproTests(TestCase):
         metrics.reset()
         self.common(fn, (x,))
         check_metrics_vec_kernel_count(1)
+
+        # Tail vectorization case
+        x = torch.randn((22, 22), dtype=torch.double)
+        torch._dynamo.reset()
+        metrics.reset()
+        with torch.no_grad():
+            expected = fn(x)
+            compiled_fn = torch.compile(fn)
+            actual, code = run_and_get_cpp_code(compiled_fn, x)
+            self.assertEqual(expected, actual)
+            # 1 generated vec kernel
+            self.assertEqual(metrics.generated_cpp_vec_kernel_count, 1)
+            # Check that both main and tail loops are vectorized
+            FileCheck().check_count(
+                "at::vec::convert<float,1,double,2>", 2, exactly=True
+            ).run(code)
 
     def test_no_redundant_to_dtypes_between_fused_scheduler_node(self):
         # https://github.com/pytorch/pytorch/issues/115260
