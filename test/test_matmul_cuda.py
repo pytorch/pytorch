@@ -799,32 +799,8 @@ class TestMatmulCuda(InductorTestCase):
         B = 2
         M, N, K = 32, 32, 32
 
-<<<<<<< HEAD
         def is_addmm():
             return "add" in op_name
-=======
-        with self.assertRaisesRegex(
-            RuntimeError, re.escape("Invalid scaling configuration")
-        ):
-            torch._scaled_mm(
-                x_fp8,
-                y_fp8,
-                scale_a=torch.ones((M, 1), device="cuda"),
-                scale_b=torch.ones((1, N + 1), device="cuda"),
-                out_dtype=torch.bfloat16,
-            )
-
-        with self.assertRaisesRegex(
-            RuntimeError, re.escape("Invalid scaling configuration")
-        ):
-            torch._scaled_mm(
-                x_fp8,
-                y_fp8,
-                scale_a=torch.ones((M), device="cuda"),
-                scale_b=torch.ones((N, 1), device="cuda"),
-                out_dtype=torch.bfloat16,
-            )
->>>>>>> 9ea46a40d65... Small fixes for Thor
 
         def is_batched():
             return "bmm" in op_name
