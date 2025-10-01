@@ -24,7 +24,7 @@ from torch.testing._internal.common_cuda import (
     SM80OrLater,
     SM89OrLater,
     SM90OrLater,
-    xfailIfSM100OrLater,
+    SM100OrLater,
     xfailIfSM120OrLater,
     _get_torch_cuda_version,
     PLATFORM_SUPPORTS_FP8,
@@ -56,6 +56,7 @@ from torch.testing._internal.common_utils import (
     TEST_CUDA,
     TEST_WITH_ROCM,
     TestCase,
+    decorateIf,
 )
 from torch.testing._internal.common_quantized import (
     _f32_to_floatx_unpacked,
@@ -65,12 +66,24 @@ from torch.testing._internal.common_quantized import (
     generate_jagged_offs,
 )
 
+from torch._inductor.test_case import TestCase as InductorTestCase
+
 _IS_SM8X = False
 if TEST_CUDA:
     _IS_SM8X = torch.cuda.get_device_capability(0)[0] == 8
 
 # Protects against includes accidentally setting the default dtype
 assert torch.get_default_dtype() is torch.float32
+
+def xfailIfSM100OrLaterAndCondition(condition_fn):
+    """
+    Conditionally xfail tests on SM100+ based on a condition function.
+    The condition function receives the test parameters dict and returns True to xfail.
+    """
+    return decorateIf(
+        unittest.expectedFailure,
+        lambda params: SM100OrLater and condition_fn(params)
+    )
 
 
 @contextlib.contextmanager
@@ -82,7 +95,7 @@ def blas_library_context(backend):
     finally:
         torch.backends.cuda.preferred_blas_library(prev_backend)
 
-class TestMatmulCuda(TestCase):
+class TestMatmulCuda(InductorTestCase):
     def setUp(self):
         super().setUp()
         torch.backends.cuda.matmul.allow_tf32 = False
@@ -167,6 +180,7 @@ class TestMatmulCuda(TestCase):
             self.cublas_addmm(size, dtype, False)
 
     @onlyCUDA
+    @xfailIfSM100OrLaterAndCondition(lambda params: params.get('dtype') == torch.bfloat16 and params.get('size') == 10000)
     @skipIfRocmVersionLessThan((5, 2))
     # imported 'tol' as 'xtol' to avoid aliasing in code above
     @toleranceOverride({torch.float16: xtol(atol=7e-1, rtol=2e-1),
@@ -499,16 +513,14 @@ class TestMatmulCuda(TestCase):
             self.grouped_mm_helper(a, blist, gOlist, agradlist, bgradlist, outlist)
 
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
-    @xfailIfSM100OrLater
     # TODO(future PR): enable compile for torch._grouped_mm fallback path
     @unittest.skipIf(not SM90OrLater, "Grouped gemm with compile supported on SM90")
+    @unittest.skipIf(SM100OrLater, "Grouped gemm is inconsistently raising numeric issues see: #163462 ")
     @parametrize("op", ["2d/2d", "2d/3d", "3d/2d", "3d/3d"])
     @parametrize("a_row_major", [False, True])
     @parametrize("b_row_major", [False, True])
     @parametrize("max_autotune", [False, True])
     def test_grouped_gemm_compiled(self, op, a_row_major, b_row_major, max_autotune):
-        torch._dynamo.reset()
-
         device = "cuda"
         dtype_AB = torch.bfloat16
         dtype_offset = torch.int32
@@ -626,6 +638,17 @@ class TestMatmulCuda(TestCase):
     @parametrize("batch_size", [None, 1, 16])
     @parametrize("backend", ["cublas", "cublaslt"])
     def test_mm_bmm_dtype_overload(self, input_dtype, M, N, K, batch_size, backend):
+        if torch.version.hip:
+            msg = "accuracy regression in hipblas and hipblaslt in ROCm 7.0 for certain shapes"
+            if input_dtype == torch.bfloat16 and N == 1 and K == 32 and batch_size:
+                raise unittest.SkipTest(msg)
+            if input_dtype == torch.bfloat16 and N == 1 and K == 64 and batch_size:
+                raise unittest.SkipTest(msg)
+            if input_dtype == torch.float16 and M == 32 and N == 1 and K == 64 and batch_size == 1:
+                raise unittest.SkipTest(msg)
+            if input_dtype == torch.float16 and M == 64 and N == 1 and K == 64 and batch_size == 1:
+                raise unittest.SkipTest(msg)
+
         device = "cuda"
         dtype = input_dtype
         with blas_library_context(backend):
@@ -680,6 +703,17 @@ class TestMatmulCuda(TestCase):
     @parametrize("batch_size", [None, 1, 32])
     @parametrize("backend", ["cublas", "cublaslt"])
     def test_addmm_baddmm_dtype_overload(self, input_dtype, M, N, K, batch_size, backend):
+        if torch.version.hip:
+            msg = "accuracy regression in hipblas and hipblaslt in ROCm 7.0 for certain shapes"
+            if input_dtype == torch.bfloat16 and N == 1 and K == 32 and batch_size:
+                raise unittest.SkipTest(msg)
+            if input_dtype == torch.bfloat16 and N == 1 and K == 64 and batch_size:
+                raise unittest.SkipTest(msg)
+            if input_dtype == torch.float16 and M == 32 and N == 1 and K == 64 and batch_size == 1:
+                raise unittest.SkipTest(msg)
+            if input_dtype == torch.float16 and M == 64 and N == 1 and K == 64 and batch_size == 1:
+                raise unittest.SkipTest(msg)
+
         device = "cuda"
         dtype = input_dtype
         with blas_library_context(backend):
@@ -1567,11 +1601,12 @@ class TestFP8Matmul(TestCase):
     )
     @parametrize("output_dtype", [torch.bfloat16, torch.float32])
     @parametrize("lhs_block,rhs_block", [(1, 1), (128, 1), (1, 128)])
-    def test_scaled_mm_vs_emulated_block_wise(self, output_dtype, lhs_block, rhs_block):
+    @parametrize("M,N,K", [(256, 768, 512), (256, 128, 256), (256, 256, 128)])
+    def test_scaled_mm_vs_emulated_block_wise(self, output_dtype, lhs_block, rhs_block, M, N, K):
         torch.manual_seed(42)
 
-        x = torch.randn(256, 512, device="cuda", dtype=output_dtype).pow(3)
-        y = torch.randn(768, 512, device="cuda", dtype=output_dtype).pow(3)
+        x = torch.randn(M, K, device="cuda", dtype=output_dtype).pow(3)
+        y = torch.randn(N, K, device="cuda", dtype=output_dtype).pow(3)
 
         x_fp8, x_scales = tensor_to_scale_block(x, e4m3_type, lhs_block, 128)
         y_fp8, y_scales = tensor_to_scale_block(y, e4m3_type, rhs_block, 128)

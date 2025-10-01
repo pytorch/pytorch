@@ -2,9 +2,10 @@
 
 import bisect
 import sys
+from collections.abc import Callable
 from copy import deepcopy
 from enum import auto, Enum
-from typing import Any, Callable, Optional
+from typing import Any, Optional
 
 import torch
 import torch.nn as nn

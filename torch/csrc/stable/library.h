@@ -4,12 +4,12 @@
 // code for better UX.
 
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
-#include <torch/headeronly/target_version.h>
 
 // Technically, this file doesn't use anything from stableivalue_conversions.h,
 // but we need to include it here as the contents of stableivalue_conversions.h
 // used to live here and so we need to expose them for backwards compatibility.
 #include <torch/csrc/stable/stableivalue_conversions.h>
+#include <torch/csrc/stable/version.h>
 
 // use anonymous namespace to avoid collisions between differing
 // versions of this file that may be included by different sources
