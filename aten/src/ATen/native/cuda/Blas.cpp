@@ -65,7 +65,7 @@ enum class CublasPrepTransStrategy : int {
   T_OWNED = 3 // make a row-major copy, then transpose
 };
 
-inline bool is_trans(const CublasPrepTransStrategy& trans_type) {
+inline bool is_trans_strategy(const CublasPrepTransStrategy& trans_type) {
   return static_cast<int>(trans_type) >= static_cast<int>(CublasPrepTransStrategy::T_BORROWED);
 }
 
@@ -110,7 +110,7 @@ predict_gemm_args_trans_prep_types_cublas(const Tensor& result, const Tensor& ma
   const auto result_trans_type = predict_matrix_trans_prep_type_cublas(result);
   const auto mat1_trans_type = predict_matrix_trans_prep_type_cublas(mat1);
   const auto mat2_trans_type = predict_matrix_trans_prep_type_cublas(mat2);
-  if (!is_trans(result_trans_type)) {
+  if (!is_trans_strategy(result_trans_type)) {
     // Means result is col-compliant, so we will use the res = A @ B path.
     // Nothing to do, return types as is
     return std::make_tuple(
@@ -289,9 +289,9 @@ struct cublasCommonArgs {
     }
 
     const auto [res_trans_type, mat1_trans_type, mat2_trans_type] = predict_gemm_args_trans_prep_types_cublas(c, mat1, mat2);
-    const auto res_trans = is_trans(res_trans_type);
-    const auto mat1_trans = is_trans(mat1_trans_type);
-    const auto mat2_trans = is_trans(mat2_trans_type);
+    const auto res_trans = is_trans_strategy(res_trans_type);
+    const auto mat1_trans = is_trans_strategy(mat1_trans_type);
+    const auto mat2_trans = is_trans_strategy(mat2_trans_type);
     TORCH_CHECK(transpose_result == res_trans);
     if (transpose_result) {
       //TORCH_CHECK(transpose_a == static_cast<bool>(mat2_trans_type))
