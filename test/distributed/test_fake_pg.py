@@ -216,6 +216,54 @@ class TestFakePG(TestCase):
                 loss.backward()
                 optim.step()
 
+    def test_error_on_collective(self):
+        from torch.testing._internal.distributed.fake_pg import FakeStore
+
+        # Test with error_on_collective=False (default behavior)
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+
+        # These should work normally
+        tensor = torch.ones(3, 3)
+        dist.all_reduce(tensor)
+        self.assertEqual(tuple(tensor.shape), (3, 3))
+
+        dist.destroy_process_group()
+
+        # Test with error_on_collective=True
+        from torch._C._distributed_c10d import FakeProcessGroup
+
+        options = FakeProcessGroup.Options()
+        options.error_on_collective = True
+
+        store = FakeStore()
+        dist.init_process_group(
+            backend="fake", rank=0, world_size=2, store=store, pg_options=options
+        )
+
+        # These should now raise errors
+        tensor = torch.ones(3, 3)
+        with self.assertRaisesRegex(
+            RuntimeError, "FakeProcessGroup collective operation error"
+        ):
+            dist.all_reduce(tensor)
+
+        with self.assertRaisesRegex(
+            RuntimeError, "FakeProcessGroup collective operation error"
+        ):
+            output_tensors = [torch.empty_like(tensor) for _ in range(2)]
+            dist.all_gather(output_tensors, tensor)
+
+        with self.assertRaisesRegex(
+            RuntimeError, "FakeProcessGroup collective operation error"
+        ):
+            dist.broadcast(tensor, src=0)
+
+        with self.assertRaisesRegex(
+            RuntimeError, "FakeProcessGroup collective operation error"
+        ):
+            dist.barrier()
+
 
 if __name__ == "__main__":
     run_tests()
