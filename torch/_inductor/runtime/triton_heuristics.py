@@ -375,7 +375,7 @@ class CachingAutotuner(KernelInterface):
         self.is_backward = False
 
         # Mode for launch grid calculation
-        self.grid_mode: Literal["python", "python_slow", "cpp"] = "python"
+        self.grid_mode: Literal["python", "cpp"] = "python"
 
     def is_statically_launchable(self):
         """
@@ -3211,14 +3211,14 @@ class GridExpr:
     """Generate code for grid size expressions in launcher"""
 
     inductor_meta: dict[str, Any]
-    mode: Literal["python", "cpp", "python_slow"] = "python"
+    mode: Literal["python", "cpp"] = "python"
     prefix: list[str] = dataclasses.field(default_factory=list)
     x_grid: Union[str, int] = 1
     y_grid: Union[str, int] = 1
     z_grid: Union[str, int] = 1
 
     def __post_init__(self) -> None:
-        assert self.mode in ("python", "cpp", "python_slow")
+        assert self.mode in ("python", "cpp")
 
     def generate(self, meta: dict[str, int]) -> None:
         raise NotImplementedError
@@ -3234,10 +3234,6 @@ class GridExpr:
         # negative integer division is floored
         if self.mode == "python":
             return f"-(({numel}) // -({block}))"
-        # This is more generic than above, and works in languages where
-        # positive integer division is floored/truncated
-        elif self.mode == "python_slow":
-            return f"(({numel} + {block} - 1) // ({block}))"
         # For cpp code gen
         return f"(({numel} + ({block} - 1)) / ({block}))"
 
@@ -3246,7 +3242,7 @@ class GridExpr:
         items = self._constant_fold(max, seq)
         if len(items) <= 1:
             return items[0]
-        if self.mode in ("python", "python_slow"):
+        if self.mode == "python":
             return f"max({', '.join(map(str, items))})"
         return functools.reduce(lambda x, y: f"std::max({x}, {y})", items)
 
@@ -3269,7 +3265,7 @@ class GridExpr:
 
     def assign_tmp(self, name: str, expr: Union[str, int]) -> str:
         # Grid functions are one per kernel, so name collisions are fine
-        if self.mode in ("python", "python_slow"):
+        if self.mode == "python":
             return f"{name} = {expr}"
         if self.mode == "cpp":
             return f"uint32_t {name} = {expr};"
@@ -3279,7 +3275,7 @@ class GridExpr:
     def from_meta(
         inductor_meta: dict[str, Any],
         cfg: Union[Config, dict[str, int]],
-        mode: Literal["python", "cpp", "python_slow"] = "python",
+        mode: Literal["python", "cpp"] = "python",
     ) -> GridExpr:
         grid_cls = globals()[inductor_meta["grid_type"]]
         assert issubclass(grid_cls, GridExpr)
