@@ -1017,13 +1017,7 @@ Set TORCHDYNAMO_VERBOSE=1 for the internal stack trace (please do this especiall
             "<Internal traceback>\n",
             msg,
         )
-        msg = re.sub(
-            r"\nMost recent bytecode instructions traced (max 20):\n",
-            "",
-            msg,
-        )
         msg = re.sub(r"TRACE.*\n", "", msg, flags=re.MULTILINE)
-        msg = re.sub(r"TRACE.*\n", "", msg)
         self.assertExpectedInline(
             msg,
             """\

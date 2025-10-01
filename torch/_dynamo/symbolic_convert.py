@@ -938,7 +938,6 @@ def break_graph_if_unsupported(
                     exc_info=True,
                     reason=str(excp),
                     user_stack=excp.real_stack,
-                    # didn't show up
                     latest_bytecode_log="\n".join(latest_bytecode_queue),
                 )
 
