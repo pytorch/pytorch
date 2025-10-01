@@ -140,7 +140,11 @@ def fuzz_and_execute(
 
             try:
                 operator = get_operator(base_op_name)
-                if operator and hasattr(operator, 'torch_op_name') and operator.torch_op_name:
+                if (
+                    operator
+                    and hasattr(operator, "torch_op_name")
+                    and operator.torch_op_name
+                ):
                     torch_op_name = operator.torch_op_name
             except (KeyError, ValueError):
                 # If the operator doesn't exist in registry, use the node's op_name
