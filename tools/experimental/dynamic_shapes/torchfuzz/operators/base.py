@@ -23,10 +23,12 @@ class Operator(ABC):
             Optional[str]: The torch operation name (e.g., "torch.ops.aten.add", "torch.nonzero").
                           Returns None for non-torch operations like "arg" and "constant".
         """
+        raise NotImplementedError("Subclasses must implement torch_op_name")
 
     @abstractmethod
     def can_produce(self, output_spec: Spec) -> bool:
         """Check if this operator can produce the given output spec."""
+        raise NotImplementedError("Subclasses must implement can_produce()")
 
     def fuzz_inputs_specs(self, output_spec: Spec) -> list[Spec]:
         """
@@ -40,6 +42,7 @@ class Operator(ABC):
         self, output_name: str, input_names: list[str], output_spec: Spec
     ) -> str:
         """Generate code for this operation."""
+        raise NotImplementedError("Subclasses must implement codegen()")
 
     def __str__(self) -> str:
         """String representation of the operator."""
