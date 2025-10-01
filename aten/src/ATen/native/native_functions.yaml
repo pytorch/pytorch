@@ -5327,7 +5327,7 @@
   structured_delegate: silu_backward.grad_input
   python_module: nn
   dispatch:
-    CompositeImplicitAutograd: math_silu_backward
+    CompositeExplicitAutograd: math_silu_backward
     NestedTensorCPU, NestedTensorHPU, NestedTensorCUDA: silu_backward_nested
   tags: pointwise
 
