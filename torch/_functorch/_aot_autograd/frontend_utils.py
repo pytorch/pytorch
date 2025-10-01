@@ -1,5 +1,6 @@
 # mypy: ignore-errors
 
+import warnings
 from collections.abc import KeysView
 from contextlib import contextmanager
 from typing import Any, Optional
@@ -40,7 +41,9 @@ def process_inputs(
                         return x
                     source = ConstantSource(f"sym_{idx}")
                     return shape_env.create_symintnode(
-                        shape_env.create_symbol(x, source), hint=x, source=source
+                        shape_env.create_symbol(x, source),
+                        hint=x,
+                        source=source,
                     )
             if isinstance(x, torch.ScriptObject):
                 return torch._library.fake_class_registry.maybe_to_fake_obj(
@@ -277,7 +280,7 @@ def _detect_attribute_assignment(mod: torch.nn.Module):
                 noun, verb = "attributes", "were"
             else:
                 noun, verb = "attribute", "was"
-            raise ValueError(
+            warnings.warn(
                 f"The tensor {noun} {', '.join(assigned_tensor_attributes)} {verb} assigned during export. "
                 "Such attributes must be registered as buffers using the `register_buffer` API "
                 "(https://pytorch.org/docs/stable/generated/torch.nn.Module.html#torch.nn.Module.register_buffer)."

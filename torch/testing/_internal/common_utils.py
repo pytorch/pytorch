@@ -1990,16 +1990,6 @@ def skipIfMPS(fn):
     return wrapper
 
 
-def skipIfMPSOnMacOS13(fn):
-    @wraps(fn)
-    def wrapper(*args, **kwargs):
-        if TEST_MPS and int(MACOS_VERSION) == 13:
-            raise unittest.SkipTest("Test crashes MPSGraph on MacOS13")
-        else:
-            fn(*args, **kwargs)
-    return wrapper
-
-
 def skipIfHpu(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
@@ -5706,8 +5696,7 @@ def install_cpp_extension(extension_root):
             shutil.rmtree(d)
 
     # Build the extension
-    setup_py_path = os.path.join(extension_root, "setup.py")
-    cmd = [sys.executable, setup_py_path, "install", "--root", install_dir]
+    cmd = [sys.executable, "-m", "pip", "install", extension_root, "-v", "--no-build-isolation", "--root", install_dir]
     return_code = shell(cmd, cwd=extension_root, env=os.environ)
     if return_code != 0:
         raise RuntimeError(f"build failed for cpp extension at {extension_root}")
