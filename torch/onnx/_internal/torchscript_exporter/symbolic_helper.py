@@ -815,9 +815,10 @@ def _is_fp(value) -> bool:
 
 
 def _is_bool(value) -> bool:
-    return _type_utils.JitScalarType.from_value(
-        value, _type_utils.JitScalarType.UNDEFINED
-    ) in {_type_utils.JitScalarType.BOOL}
+    return (
+        _type_utils.JitScalarType.from_value(value, _type_utils.JitScalarType.UNDEFINED)
+        == _type_utils.JitScalarType.BOOL
+    )
 
 
 def _generate_wrapped_number(g: jit_utils.GraphContext, scalar):
