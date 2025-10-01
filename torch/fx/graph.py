@@ -653,6 +653,8 @@ class CodeGen:
                     hasattr(meta_val, "__class__")
                     and issubclass(meta_val.__class__, torch.Tensor)
                     and meta_val.__class__ != torch.Tensor
+                    and isinstance(meta_val, torch.Tensor)
+                    and not isinstance(meta_val, torch._subclasses.FakeTensor)
                 ):
                     # Get the basic tensor representation
                     stride_annotation = (

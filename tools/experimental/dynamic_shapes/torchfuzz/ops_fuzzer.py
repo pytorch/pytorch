@@ -377,8 +377,11 @@ def fuzz_operation_graph(
 
         random.seed(seed)
         torch.manual_seed(seed)
+        # Reset global arg counter for deterministic behavior
+        global _next_arg_id
+        _next_arg_id = 0
 
-    # Global counter for unique node IDs
+    # Global counter for unique node IDs - start from 0 for deterministic behavior
     node_counter = 0
 
     # Dictionary to store all nodes: node_id -> OperationNode
