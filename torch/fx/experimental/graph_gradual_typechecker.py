@@ -956,13 +956,6 @@ class Refine:
             n.type = torch.fx.node.map_arg(n.args[0], get_node_type)
             return n.type
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
-
->>>>>>> 69319984e3d (Remove empty else)
-=======
->>>>>>> 2d56214dc61 (Format code)
     def infer_symbolic_relations(self, n: Node):
         n.type = self.convert_to_sympy_symbols(n.type)
         if n.op == "call_function":
@@ -982,14 +975,7 @@ class Refine:
             n.type = torch.fx.node.map_arg(n.args[0], get_node_type)
             return n.type
 
-<<<<<<< HEAD
-=======
 
-<<<<<<< HEAD
->>>>>>> 69319984e3d (Remove empty else)
-
-=======
->>>>>>> 2d56214dc61 (Format code)
 def get_parameter(traced, target: str):
     """
     Returns the parameter given by ``target`` if it exists,

@@ -3137,7 +3137,7 @@ class TestCase(expecttest.TestCase):
 
     def remove_empty_lines(self, input_string):
         lines = input_string.split('\n')
-        filtered_lines = [line for line in lines if not line.strip() == '']
+        filtered_lines = [line for line in lines if line.strip() != '']
         return '\n'.join(filtered_lines)
 
     # ignore comments will ignore lines that starts with # after being stripped

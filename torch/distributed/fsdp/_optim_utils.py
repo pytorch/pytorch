@@ -1508,8 +1508,7 @@ def _allgather_orig_param_states(
         return output_states
 
     has_state_params: list[bool] = [
-        fqn in output_states
-        for fqn, idx in fsdp_param_info.param_indices.items()
+        fqn in output_states for fqn, idx in fsdp_param_info.param_indices.items()
     ]
 
     # Loop through the ``state_buffers`` and construct the flattened, concatenated,

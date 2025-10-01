@@ -1365,12 +1365,7 @@ def get_pool_ceil_padding(input, kernel_size, stride, padding):
             "get_pool_ceil_padding", "input size not accessible", input
         )
     ceiled_output_dim = [
-<<<<<<< HEAD
         math.ceil((dim[i] + 2 * padding[i] - kernel_size[i]) / float(stride[i])) + 1
-=======
-        math.ceil((dim[i] + 2 * padding[i] - kernel_size[i]) / float(stride[i]))
-        + 1
->>>>>>> 03832541116 (Fix unnecessary int casts)
         for i in range(0, len(padding))
     ]
     # ensure last pooling starts inside

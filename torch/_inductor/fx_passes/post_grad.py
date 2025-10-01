@@ -1761,7 +1761,7 @@ class ConstructorMoverPass:
             if not torch._subclasses.fake_tensor._is_tensor_constructor(node.target):
                 continue
 
-            if not node.kwargs.get("device") == torch.device("cpu"):
+            if node.kwargs.get("device") != torch.device("cpu"):
                 continue
 
             constructors.append(node)
@@ -1922,8 +1922,9 @@ def move_constructors_to_gpu(graph: fx.Graph) -> None:
     # by explicitly moving cpu scalar tensors to gpu when profitable, relying on
     # graph partition to split off this data copy, and cudagraphifying
     # the remaining gpu ops.
-    allow_inputs_outputs = (
-        bool(torch._inductor.config.triton.cudagraphs and torch._inductor.config.graph_partition)
+    allow_inputs_outputs = bool(
+        torch._inductor.config.triton.cudagraphs
+        and torch._inductor.config.graph_partition
     )
     ConstructorMoverPass(
         get_gpu_type(),

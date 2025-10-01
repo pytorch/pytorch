@@ -62,13 +62,9 @@ class ElasticDistributedSampler(DistributedSampler[T]):
 
         self.start_index = start_index
         sized_dataset = cast(Sized, self.dataset)
-<<<<<<< HEAD
         self.num_samples = math.ceil(
             float(len(sized_dataset) - self.start_index) / self.num_replicas
         )
-=======
-        self.num_samples = math.ceil(float(len(sized_dataset) - self.start_index) / self.num_replicas)
->>>>>>> 03832541116 (Fix unnecessary int casts)
         self.total_size = self.num_samples * self.num_replicas
 
     def __iter__(self) -> Iterator[T]:
