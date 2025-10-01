@@ -867,11 +867,11 @@ struct type_specialized_kernel_launcher {
           loader_t,
           storer_t,
           c10::impl::ScalarTypeToCPPType<
-              rt_binary_specializations[arg_index][0]>::type,
+              rt_binary_specializations[arg_index][0]>,
           c10::impl::ScalarTypeToCPPType<
-              rt_binary_specializations[arg_index][1]>::type,
+              rt_binary_specializations[arg_index][1]>,
           c10::impl::ScalarTypeToCPPType<
-              rt_binary_specializations[arg_index][2]>::type>(
+              rt_binary_specializations[arg_index][2]>>(
           numel,
           f,
           data,
