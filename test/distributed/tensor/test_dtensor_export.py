@@ -6,6 +6,12 @@ import unittest
 import torch
 import torch.distributed as dist
 from torch._dynamo.functional_export import _dynamo_graph_capture_for_export
+from torch._functorch._aot_autograd.aot_eager_runner import (
+    get_num_mutate_inputs,
+    get_num_user_outputs,
+    JointGraphModule,
+    RunMode,
+)
 from torch._functorch.aot_autograd import aot_export_joint_with_descriptors
 from torch._functorch.partitioners import min_cut_rematerialization_partition
 from torch.distributed.device_mesh import init_device_mesh
@@ -34,8 +40,9 @@ class SimpleModel(torch.nn.Module):
         self.mlp_1 = MLPModule(device)
 
     def forward(self, input):
-        return self.mlp_1(self.mlp_0(input))
-
+        out =self.mlp_0(input) 
+        out = self.mlp_1(out)
+        return out
 
 def strict_export_and_aot_export_joint_with_descriptors(model, inputs):
     # needed for stric export
@@ -55,20 +62,22 @@ def strict_export_and_aot_export_joint_with_descriptors(model, inputs):
 
 
 def graph_capture_and_aot_export_joint_with_descriptors(model, inputs):
+    assert isinstance(inputs, tuple)
     with torch._dynamo.config.patch(install_free_tensors=True):
         # TODO: switch to use the official graph_capture API once it is ready
-        gm = _dynamo_graph_capture_for_export(model)(inputs)
+        gm = _dynamo_graph_capture_for_export(model)(*inputs)
     return aot_export_joint_with_descriptors_alone(gm, inputs)
 
 
 def aot_export_joint_with_descriptors_alone(model, inputs):
+    assert isinstance(inputs, tuple)
     with contextlib.ExitStack() as stack:
         joint_with_descriptors = aot_export_joint_with_descriptors(
             stack,
             model,
-            (inputs,),
+            inputs,
         )
-        return joint_with_descriptors.graph_module
+        return joint_with_descriptors
 
 
 def _count_op(gm, target):
@@ -149,6 +158,100 @@ class DTensorExportTest(TestCase):
     @unittest.expectedFailure
     def test_strict_export_parallelize_module_with_dtensor_input(self):
         self._run_test(strict_export_and_aot_export_joint_with_descriptors)
+
+    @parametrize(
+        "run_mode", [RunMode.CODEGEN, RunMode.GRAPH_MODULE, RunMode.FX_INTERPRETER]
+    )
+    def test_jonit_graph_runner(self, run_mode):
+
+                
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.mlp_0 = MLPModule(device)
+                self.mlp_1 = MLPModule(device)
+                self.mlp_2 = MLPModule(device)
+                self.buffer = torch.nn.Buffer(torch.ones(10, device=device), persistent=True)
+
+            def forward(self, input0, input1):
+                # buffer mutation
+                # self.buffer.add_(1)
+
+                # # input mutation
+                # input0.add_(2)
+
+                out1 =self.mlp_0(input0) 
+                out2 =self.mlp_1(input1) 
+                out = out1 + out2
+                out = self.mlp_2(out)
+
+                return out
+
+        model = Model(self.device_type)
+        input0 = torch.rand(20, 10, device=self.device_type)
+        input1 = torch.rand(20, 10, device=self.device_type)
+        inputs = (input0, input1)
+
+        joint_with_descriptors = aot_export_joint_with_descriptors_alone(
+            model, inputs 
+        )
+
+        # Now partition the joint graph similar to aot_stage2_compile
+        joint_gm = joint_with_descriptors.graph_module
+        aot_state = joint_with_descriptors._aot_state
+        aot_graph_capture = joint_with_descriptors._aot_graph_capture
+
+        # Get the joint graph module
+        joint_inputs = aot_graph_capture.updated_flat_args
+        fw_metadata = aot_state.fw_metadata
+
+        num_user_outputs = get_num_user_outputs(fw_metadata)
+        num_mutate_inputs = get_num_mutate_inputs(fw_metadata)
+        num_inner_fwd_outputs = num_mutate_inputs + num_user_outputs
+
+        fw_gm, bw_gm = min_cut_rematerialization_partition(
+            joint_gm,
+            joint_inputs,
+            num_fwd_outputs=num_inner_fwd_outputs,
+            static_lifetime_input_indices=fw_metadata.static_input_indices or [],
+        )
+        # joint_graph_inputs = (*parameters, *buffers, *user_inputs, *tangents)
+        # joint_graph_outputs = (*updated_inputs, *user_outputs, *param_gradients, *user_inputs_gradients)
+
+        # Get the model parameters and buffers - the partitioned graphs expect these as arguments
+        local_params = [
+            p.clone().detach().requires_grad_(True) for p in model.parameters()
+        ]
+        local_buffers = [
+            b.clone().detach().requires_grad_(False) for b in model.buffers()
+        ]
+        local_inputs = tuple(input.clone().detach() for input in inputs)
+
+        joint_graph_module = JointGraphModule(
+            local_params, local_buffers, fw_metadata, fw_gm, bw_gm, run_mode
+        )
+
+        # Run forward pass through the custom function
+        outputs = joint_graph_module(local_inputs)
+        outputs.sum().backward()
+
+        eager_out = model(*inputs)
+        eager_out.sum().backward()
+
+        self.assertEqual(outputs[0], eager_out[0])
+
+        for param, local_param in zip(model.parameters(), local_params):
+            self.assertIsNotNone(param.grad)
+            self.assertIsNotNone(local_param.grad)
+
+            self.assertEqual(param, local_param)
+            self.assertEqual(param.grad, local_param.grad)
+
+        for buffer, local_buffer in zip(model.buffers(), local_buffers):
+            self.assertEqual(buffer, local_buffer)
+
+            self.assertIsNone(buffer.grad)
+            self.assertIsNone(local_buffer.grad)
 
 
 instantiate_parametrized_tests(DTensorExportTest)
