@@ -32,7 +32,6 @@
 #include <c10/core/DeviceGuard.h>
 #include <c10/core/Stream.h>
 #include <c10/util/FileSystem.h>
-#include <torch/headeronly/dummy.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -1465,9 +1464,6 @@ static StableIValue from_ivalue(
           from_ivalue(inner_type, ivalue, extension_build_version));
       return _from(sivp, extension_build_version);
     }
-    case c10::TypeKind::DummyType: {
-      return _from(ivalue.toDummy(), extension_build_version);
-    }
     default: {
       TORCH_CHECK(
           false,
@@ -1534,10 +1530,6 @@ static c10::IValue to_ivalue(
       auto ival = to_ivalue(inner_type, *sivp, extension_build_version);
       delete sivp;
       return ival;
-    }
-    case c10::TypeKind::DummyType: {
-      return c10::IValue(
-          _to<dummy_types::Dummy>(stable_ivalue, extension_build_version));
     }
     default: {
       TORCH_CHECK(

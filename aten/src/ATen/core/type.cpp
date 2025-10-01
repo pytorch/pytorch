@@ -245,10 +245,6 @@ CapsuleTypePtr CapsuleType::get() {
   static CapsuleTypePtr value(new CapsuleType());
   return value;
 }
-DummyTypePtr DummyType::get() {
-  static DummyTypePtr value(new DummyType());
-  return value;
-}
 ListTypePtr ListType::ofInts() {
   static auto value = ListType::create(IntType::get());
   return value;

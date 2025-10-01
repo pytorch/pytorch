@@ -16,7 +16,6 @@ using c10::CapsuleType;
 using c10::ComplexType;
 using c10::DeviceObjType;
 using c10::DictType;
-using c10::DummyType;
 using c10::FloatType;
 using c10::FutureType;
 using c10::GeneratorType;
@@ -75,7 +74,6 @@ TypePtr SchemaTypeParser::parseBaseType() {
       {"Any", c10::TypeFactory::get<c10::AnyType>()},
       {"AnyClassType", c10::TypeFactory::get<c10::AnyClassType>()},
       {"AnyEnumType", c10::TypeFactory::get<c10::AnyEnumType>()},
-      {"Dummy", c10::TypeFactory::get<DummyType>()},
   };
   auto tok = L.cur();
   if (!L.nextIf(TK_NONE) && !L.nextIf(TK_NONE_TYPE)) {
@@ -88,7 +86,7 @@ TypePtr SchemaTypeParser::parseBaseType() {
     if (allow_typevars_ && !text.empty() && islower(text[0])) {
       // lower case identifiers that are not otherwise valid types
       // are treated as type variables
-      return c10::TypeFactory::createNamed<VarType>(text);
+      return c10::TypeFactory::createNamed<VarType>(std::move(text));
     }
     if (text == "double") {
       throw(

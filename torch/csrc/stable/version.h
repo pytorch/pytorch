@@ -1,6 +1,6 @@
 #pragma once
 
-#include <torch/version.h>
+#include <torch/headeronly/version.h>
 
 // Stable ABI Version Targeting
 //
@@ -13,7 +13,7 @@
 //     #include <torch/csrc/stable/library.h>
 //
 //   Target a specific stable version (major.minor):
-//     #define TORCH_TARGET_VERSION ((uint64_t)2 << 56 | (uint64_t)9 << 48)
+//     #define TORCH_TARGET_VERSION (((0ULL + 2) << 56) | ((0ULL + 9) << 48))
 //     Target PyTorch 2.9 #include <torch/csrc/stable/library.h>
 
 #ifdef TORCH_TARGET_VERSION
