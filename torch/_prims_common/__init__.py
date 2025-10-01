@@ -19,7 +19,7 @@ from typing import (
     TypeVar,
     Union,
 )
-from typing_extensions import deprecated, TypeAlias
+from typing_extensions import deprecated, TypeAlias, TypeGuard
 
 import torch
 from torch import sym_float, sym_int, sym_max
@@ -843,7 +843,7 @@ def is_same_shape(a: Sequence, b: Sequence) -> bool:
     return tuple(a) == tuple(b)
 
 
-def is_cpu_scalar_tensor(a: Any) -> bool:
+def is_cpu_scalar_tensor(a: object) -> TypeGuard[TensorLike]:
     return isinstance(a, TensorLike) and a.ndim == 0 and a.device.type == "cpu"
 
 
