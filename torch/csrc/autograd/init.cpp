@@ -601,6 +601,33 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
             s.register_hooks(
                 std::make_unique<torch::autograd::PySavedVariableHooks>(
                     pack_hook, unpack_hook));
+          })
+      .def_property_readonly(
+          "data",
+          [](const torch::autograd::SavedVariable& s) -> py::object {
+            if (s.has_hooks()) {
+              auto opt = s.retrieve_unpack_hook_data();
+              TORCH_INTERNAL_ASSERT(opt.has_value());
+              py::gil_scoped_acquire gil;
+              const auto& [_unpack_fn, data_obj] = *opt;
+              PyObject* raw = data_obj.ptr(getPyInterpreter());
+              TORCH_INTERNAL_ASSERT(raw != nullptr);
+              return py::reinterpret_borrow<py::object>(raw);
+            } else {
+              return py::cast(s.get_raw_data().value());
+            }
+          })
+      .def_property_readonly(
+          "unpack_hook",
+          [](const torch::autograd::SavedVariable& s) -> py::object {
+            auto opt = s.retrieve_unpack_hook_data();
+            if (!opt.has_value()) {
+              return py::none();
+            }
+            py::gil_scoped_acquire gil;
+            const auto& [unpack_safe, _unused_data] = *opt;
+            auto* unpack_ptr = unpack_safe.ptr(getPyInterpreter());
+            return py::reinterpret_borrow<py::function>(unpack_ptr);
           });
 
   torch::autograd::profiler::python_tracer::init();
