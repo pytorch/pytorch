@@ -162,9 +162,7 @@ class DTensorExportTest(TestCase):
     @parametrize(
         "run_mode", [RunMode.CODEGEN, RunMode.GRAPH_MODULE, RunMode.FX_INTERPRETER]
     )
-    def test_jonit_graph_runner(self, run_mode):
-
-                
+    def test_joint_graph_runner(self, run_mode):
         class Model(torch.nn.Module):
             def __init__(self, device):
                 super().__init__()
@@ -175,10 +173,10 @@ class DTensorExportTest(TestCase):
 
             def forward(self, input0, input1):
                 # buffer mutation
-                # self.buffer.add_(1)
+                self.buffer.add_(1)
 
-                # # input mutation
-                # input0.add_(2)
+                # input mutation
+                input0.add_(2)
 
                 out1 =self.mlp_0(input0) 
                 out2 =self.mlp_1(input1) 
@@ -252,6 +250,13 @@ class DTensorExportTest(TestCase):
 
             self.assertIsNone(buffer.grad)
             self.assertIsNone(local_buffer.grad)
+        
+        for input, local_input in zip(inputs, local_inputs):
+            self.assertEqual(input, local_input)
+
+            self.assertIsNone(input.grad)
+            self.assertIsNone(local_input.grad)
+         
 
 
 instantiate_parametrized_tests(DTensorExportTest)
