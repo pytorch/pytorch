@@ -151,11 +151,6 @@ struct CUDACachingHostAllocatorImpl
   }
 
   bool query_event(EventPool::Event& event) override {
-    // Do not call cudaEventQuery if capturing is underway
-    if (at::cuda::currentStreamCaptureStatusMayInitCtx() !=
-        at::cuda::CaptureStatus::None) {
-      return false;
-    }
     cudaError_t err = cudaEventQuery(*event);
     if (err == cudaErrorNotReady) {
       (void)cudaGetLastError(); // clear CUDA error
