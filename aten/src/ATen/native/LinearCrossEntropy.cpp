@@ -348,25 +348,6 @@ Tensor linear_cross_entropy_cpu(
 // and benefits from existing BLAS/cuBLAS bindings.
 namespace {
 
-inline const char* reduction_to_string(int64_t reduction) {
-  if (reduction == Reduction::Mean) {
-    return "mean";
-  }
-  if (reduction == Reduction::Sum) {
-    return "sum";
-  }
-  TORCH_CHECK(reduction == Reduction::None, "Unsupported reduction value: ", reduction);
-  return "none";
-}
-
-inline bool requires_grad_scaling_none(int64_t reduction) {
-  return reduction == Reduction::None;
-}
-
-inline bool requires_grad_scaling_mean(int64_t reduction) {
-  return reduction == Reduction::Mean;
-}
-
 inline Tensor zeros_like_tensor(const Tensor& src) {
   return at::_ops::zeros_like::call(src, std::nullopt, std::nullopt, std::nullopt, std::nullopt, std::nullopt);
 }

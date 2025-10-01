@@ -1,3 +1,6 @@
+warning: The following rules have been removed and ignoring them has no effect:
+    - UP038
+
 """Functional interface."""
 
 import importlib
@@ -3509,7 +3512,7 @@ def linear_cross_entropy(
     reduction: str = "mean",
     ignore_index: int = -100,
     label_smoothing: float = 0.0,
-    chunking_strategy: str = "auto"
+    chunking_strategy: str = "auto",
 ) -> Tensor:
     r"""Compute fused linear transformation and cross entropy loss on CPU.
 
@@ -3533,11 +3536,26 @@ def linear_cross_entropy(
             chunking_strategy=chunking_strategy,
         )
 
-    if not isinstance(reduction, str) or reduction not in ("mean", "sum", "none"):
-        raise ValueError(f"reduction must be one of ('mean', 'sum', 'none'), got '{reduction}'")
+    if not isinstance(reduction, str):
+        if hasattr(reduction, "node"):
+            from torch.fx.proxy import TraceError
+
+            raise TraceError(
+                "symbolically traced variables cannot be used as inputs to control flow"
+            )
+        raise ValueError(
+            f"reduction must be one of ('mean', 'sum', 'none'), got '{reduction}'"
+        )
+
+    if reduction not in ("mean", "sum", "none"):
+        raise ValueError(
+            f"reduction must be one of ('mean', 'sum', 'none'), got '{reduction}'"
+        )
 
     if not (0.0 <= label_smoothing <= 1.0):
-        raise ValueError(f"label_smoothing must be between 0.0 and 1.0, got {label_smoothing}")
+        raise ValueError(
+            f"label_smoothing must be between 0.0 and 1.0, got {label_smoothing}"
+        )
 
     if chunking_strategy not in ("auto", "vocab", "batch", "none"):
         raise ValueError(
