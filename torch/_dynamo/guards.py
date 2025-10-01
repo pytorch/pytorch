@@ -2721,9 +2721,10 @@ class GuardBuilder(GuardBuilderBase):
 
             if config.log_compilation_metrics and isinstance(value, torch.nn.Parameter):
                 metrics_context = get_metrics_context()
-                metrics_context.increment("param_numel", value.numel())
-                metrics_context.increment("param_bytes", value.nbytes)
-                metrics_context.increment("param_count", 1)
+                if metrics_context.in_progress():
+                    metrics_context.increment("param_numel", value.numel())
+                    metrics_context.increment("param_bytes", value.nbytes)
+                    metrics_context.increment("param_count", 1)
 
             tensor_name = self.arg_ref(guard)
             # [Note - On Export Tensor Guards]
@@ -3622,7 +3623,7 @@ class CheckFunctionManager:
                 # Leave out the builtins dict key, as we will special handle
                 # it later because the guarded code rarely use the entire
                 # builtin dict in the common case.
-                if name not in (builtins_dict_name,):
+                if name != builtins_dict_name:
                     used_global_vars.add(name)
             elif name := get_local_source_name(source):
                 assert isinstance(name, str)
