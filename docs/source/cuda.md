@@ -268,7 +268,7 @@ These APIs can be used in PyTorch with CUDA versions greater than or equal to 12
 See the docs for {class}`~torch.cuda.green_contexts.GreenContext` for an example of how to use these.
 
 ```{eval-rst}
-.. currentmodule:: torch.cuda.green_context
+.. currentmodule:: torch.cuda.green_contexts
 ```
 
 
