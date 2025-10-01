@@ -568,7 +568,7 @@ Placeholder::Placeholder(MPSGraphTensor* mpsGraphTensor,
     MPSShape* mpsStrides = getMPSShape(_tensor.strides());
     check_mps_shape(mpsShape);
 
-    auto storage_numel = src.storage().nbytes() / src.element_size();
+    auto storage_numel = src.storage().nbytes() / src.element_size() - src.storage_offset();
     TORCH_CHECK(storage_numel <= std::numeric_limits<int32_t>::max(),
                 "MPSGaph does not support tensor dims larger than INT_MAX");
     MPSNDArrayDescriptor* srcTensorDesc = [MPSNDArrayDescriptor descriptorWithDataType:dataType

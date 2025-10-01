@@ -44,6 +44,9 @@
 using torch::impl::py_context_manager;
 using torch::impl::py_context_manager_DEPRECATED;
 
+TORCH_MAKE_PYBIND_ENUM_FASTER(torch::autograd::CreationMeta)
+TORCH_MAKE_PYBIND_ENUM_FASTER(c10::DeviceType)
+
 namespace {
 
 struct DisableFuncTorch {
@@ -309,8 +312,12 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
           })
       .def("nbytes", [](const KinetoEvent& e) { return e.nBytes(); })
       // whether the event is hidden
-      .def("is_hidden_event", [](const KinetoEvent& e) {
-        return e.isHiddenEvent();
+      .def(
+          "is_hidden_event",
+          [](const KinetoEvent& e) { return e.isHiddenEvent(); })
+      // KinetoEvent metadata
+      .def("metadata_json", [](const KinetoEvent& e) {
+        return e.metadataJson();
       });
 
   m.def("_soft_assert_raises", &setSoftAssertRaises);

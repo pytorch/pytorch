@@ -646,16 +646,14 @@ def meta__cslt_sparse_mm(
     assert len(dense_B.shape) == 2, "_cslt_sparse_mm only supports 2d inputs"
 
     is_8bit_input_type = compressed_A.dtype in [torch.int8, torch.float8_e4m3fn]
-    compression_factor = 10 if is_8bit_input_type else 9
 
     if is_8bit_input_type:
         assert not dense_B.is_contiguous(), (
             "dense input must be transposed for 8bit dtypes"
         )
 
-    k = dense_B.size(0)
     n = dense_B.size(1)
-    m = (compressed_A.numel() * 16) // (compression_factor * k)
+    m = compressed_A.size(0)
     if bias is not None:
         assert m == bias.size(0)
 
@@ -666,7 +664,7 @@ def meta__cslt_sparse_mm(
             torch.int32,
             torch.float8_e4m3fn,
         }, (
-            "out_dtype is not supported for {compressed_A.dtype} x {dense_B.dtype} -> {out_dtype} matmul!"
+            f"out_dtype is not supported for {compressed_A.dtype} x {dense_B.dtype} -> {out_dtype} matmul!"
         )
     output_shape = (n, m) if transpose_result else (m, n)
     return dense_B.new_empty(output_shape, dtype=out_dtype)
@@ -2240,7 +2238,7 @@ def meta__fused_moving_avg_obs_fq_helper(
 
 @register_meta(aten.mm)
 @out_wrapper(exact_dtype=True)
-def meta_mm(a, b):
+def meta_mm(a, b, out_dtype: Optional[torch.dtype] = None):
     torch._check(a.dim() == 2, lambda: "a must be 2D")
     torch._check(b.dim() == 2, lambda: "b must be 2D")
     N, M1 = a.shape
@@ -2249,7 +2247,17 @@ def meta_mm(a, b):
         M1 == M2,
         lambda: f"a and b must have same reduction dim, but got [{N}, {M1}] X [{M2}, {P}].",
     )
-    return a.new_empty(N, P)
+    if out_dtype is not None:
+        torch._check(
+            out_dtype == a.dtype
+            or (
+                out_dtype == torch.float32
+                and a.dtype in (torch.float16, torch.bfloat16)
+            ),
+            lambda: "out_dtype must be the same as input dtype or fp32 for fp16/bf16 inputs",
+        )
+    result_dtype = a.dtype if out_dtype is None else out_dtype
+    return a.new_empty((N, P), dtype=result_dtype)
 
 
 def _compute_reduction_shape(self, dims, keepdim):
@@ -2439,18 +2447,6 @@ def meta_conv(
     output_padding: list[int],
     groups: int,
 ):
-    def pick_memory_format():
-        if device_hint(input_tensor) == "cuda":
-            if is_channels_last(input_tensor) or is_channels_last(weight):
-                return torch.channels_last
-        else:
-            if is_channels_last(input_tensor):
-                return torch.channels_last
-        if input_tensor.is_contiguous(memory_format=torch.contiguous_format):
-            return torch.contiguous_format
-        elif input_tensor.is_contiguous(memory_format=torch.preserve_format):
-            return torch.preserve_format
-
     shape_out = calc_conv_nd_return_shape(
         input_tensor,
         weight,
@@ -2468,7 +2464,6 @@ def meta_conv(
         shape_out[output_channels_dim] = 0
 
     out = input_tensor.new_empty(shape_out)
-    out = out.to(memory_format=pick_memory_format())  # type: ignore[call-overload]
     return out
 
 
@@ -3851,7 +3846,7 @@ def meta__dyn_quant_matmul_4bit(
 ):
     torch._check(inp.dim() == 2, lambda: "input must be a 2D tensor")
     torch._check(
-        inp.dtype in [torch.float32],
+        inp.dtype == torch.float32,
         lambda: f"expected input to be f32, got {inp.dtype}",
     )
     M = inp.size(0)
@@ -3889,16 +3884,16 @@ def meta_cdist_forward(x1, x2, p, compute_mode):
     )
     torch._check(
         utils.is_float_dtype(x1.dtype),
-        lambda: "cdist only supports floating-point dtypes, X1 got: {x1.dtype}",
+        lambda: f"cdist only supports floating-point dtypes, X1 got: {x1.dtype}",
     )
     torch._check(
         utils.is_float_dtype(x2.dtype),
-        lambda: "cdist only supports floating-point dtypes, X2 got: {x2.dtype}",
+        lambda: f"cdist only supports floating-point dtypes, X2 got: {x2.dtype}",
     )
     torch._check(p >= 0, lambda: "cdist only supports non-negative p values")
     torch._check(
-        compute_mode in (None, 1, 2),
-        lambda: f"possible modes: None, 1, 2, but was: {compute_mode}",
+        compute_mode in (None, 0, 1, 2),
+        lambda: f"possible modes: None, 0, 1, 2, but was: {compute_mode}",
     )
     r1 = x1.size(-2)
     r2 = x2.size(-2)
@@ -4471,15 +4466,15 @@ def pool2d_shape_check(
 
     torch._check(
         kW > 0 and kH > 0,
-        lambda: "kernel size should be greater than zero, but got kH: {kH}, kW: {kW}",
+        lambda: f"kernel size should be greater than zero, but got kH: {kH}, kW: {kW}",
     )
     torch._check(
         dW > 0 and dH > 0,
-        lambda: "stride should be greater than zero, but got dH: {dH}, dW: {dW}",
+        lambda: f"stride should be greater than zero, but got dH: {dH}, dW: {dW}",
     )
     torch._check(
         dilationH > 0 and dilationW > 0,
-        lambda: "dilation should be greater than zero, but got dilationH: {dilationH}, dilationW: {dilationW}",
+        lambda: f"dilation should be greater than zero, but got dilationH: {dilationH}, dilationW: {dilationW}",
     )
 
     valid_dims = input.size(1) != 0 and input.size(2) != 0
@@ -4488,7 +4483,7 @@ def pool2d_shape_check(
         torch._check(
             ndim == 4 and valid_dims and input.size(3) != 0,
             lambda: "Expected 4D (batch mode) tensor expected for input with channels_last layout"
-            " with optional 0 dim batch size for input, but got: {input.size()}",
+            f" with optional 0 dim batch size for input, but got: {input.size()}",
         )
     else:
         torch._check(
@@ -5710,7 +5705,7 @@ def meta__scaled_dot_product_cudnn_attention(
     res = alloc_with_matching_layout(query, res_shape)
 
     logsum_exp = torch.empty(
-        (B, H, S_Q),
+        (B, H, S_Q, 1),
         dtype=torch.float,
         device=query.device,
     )
@@ -7020,7 +7015,7 @@ def meta_histc(input, bins=100, min=0, max=0):
         isinstance(max, Number),
         lambda: f"{fn_name}: argument 'max' must be Number, not {type(max)}",
     )
-    torch._check(max >= min, lambda: "{fn_name}: max must be larger than min")
+    torch._check(max >= min, lambda: f"{fn_name}: max must be larger than min")
     return torch.empty(bins, device=input.device, dtype=input.dtype)
 
 
@@ -7647,6 +7642,9 @@ def meta_scaled_grouped_mm(
     out_dtype: Optional[torch.dtype] = None,
     use_fast_accum: bool = False,
 ):
+    # matching _scaled_grouped_mm_cuda Blas.cpp implementation
+    out_dtype = out_dtype or torch.bfloat16
+
     return _meta_grouped_mm_common(
         mat_a,
         mat_b,
@@ -7780,6 +7778,56 @@ def _create_unary_float_meta_func(func):
         )
 
     return _f
+
+
+# Implementation follows cuda implementation native_multi_head_attention_cuda
+@register_meta(aten._native_multi_head_attention.default)
+def native_multi_head_attention_fake(
+    query,
+    key,
+    value,
+    embed_dim,
+    num_head,
+    qkv_weight,
+    qkv_bias,
+    proj_weight,
+    proj_bias,
+    mask=None,
+    need_weights=True,
+    average_attn_weights=True,
+    mask_type=None,
+):
+    if query.is_nested or key.is_nested or value.is_nested:
+        raise NotImplementedError(
+            "_native_multi_head_attention fake implementation does not support nested tensors"
+        )
+
+    if query.numel() == 0:
+        return (query.new_empty(query.shape), query.new_empty(0))
+
+    B = query.size(0)  # B: batch size
+    T = query.size(1)  # T: target sequence length
+
+    # In native_multi_head_attention_cuda,
+    # we have proj = transform0213_gemm_nt_bias(attn_ctx, proj_weight, proj_bias, query)
+    # , which does attn_ctx @ proj_weight.T + proj_bias
+    # so the last dim of output shape is proj_weight.size(0)
+    output_dim = proj_weight.size(0)
+    output = query.new_empty(B, T, output_dim)
+
+    if need_weights:
+        if average_attn_weights:
+            # When averaging attention weights, shape is [B, T, T] (averaged over heads)
+            # T = query seq len, S = key/value seq len
+            attn_weights = query.new_empty(B, T, T)
+        else:
+            # When not averaging, shape is [B, num_head, T, T]
+            # T = query seq len, S = key/value seq len
+            attn_weights = query.new_empty(B, num_head, T, T)
+    else:
+        attn_weights = query.new_empty(0)
+
+    return (output, attn_weights)
 
 
 def _create_binary_float_meta_func(func):

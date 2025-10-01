@@ -26,6 +26,7 @@ from typing import Optional, Union
 from typing_extensions import deprecated
 from torch.torch_version import TorchVersion, Version
 
+
 from setuptools.command.build_ext import build_ext
 
 IS_WINDOWS = sys.platform == 'win32'
@@ -206,7 +207,7 @@ WRONG_COMPILER_WARNING = (
     "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
     "Your compiler (%s) is not compatible with the compiler Pytorch was"
     "built with for this platform, which is %s on %s. Please"
-    "use %s to to compile your extension. Alternatively, you may"
+    "use %s to compile your extension. Alternatively, you may"
     "compile PyTorch from source using %s, and then you can also use"
     "%s to compile your extension."
     "See https://github.com/pytorch/pytorch/blob/master/CONTRIBUTING.md for help"
@@ -235,6 +236,7 @@ if torch.version.hip is not None:
 CUDA_HOME = _find_cuda_home() if (torch.cuda._is_compiled() and torch.version.cuda) else None
 CUDNN_HOME = os.environ.get('CUDNN_HOME') or os.environ.get('CUDNN_PATH')
 SYCL_HOME = _find_sycl_home() if torch.xpu._is_compiled() else None
+WINDOWS_CUDA_HOME = os.environ.get('WINDOWS_CUDA_HOME')  # used for AOTI cross-compilation
 
 # PyTorch releases have the version pattern major.minor.patch, whereas when
 # PyTorch is built from source, we append the git commit hash, which gives
@@ -345,7 +347,7 @@ PLAT_TO_VCVARS = {
     'win-amd64' : 'x86_amd64',
 }
 
-min_supported_cpython = "0x03090000"  # Python 3.9 hexcode
+min_supported_cpython = "0x030A0000"  # Python 3.10 hexcode
 
 def get_cxx_compiler():
     if IS_WINDOWS:
@@ -1535,7 +1537,7 @@ def include_paths(device_type: str = "cpu", torch_include_dirs=True) -> list[str
     return paths
 
 
-def library_paths(device_type: str = "cpu", torch_include_dirs=True) -> list[str]:
+def library_paths(device_type: str = "cpu", torch_include_dirs: bool = True, cross_target_platform: Optional[str] = None) -> list[str]:
     """
     Get the library paths required to build a C++ or CUDA extension.
 
@@ -1558,20 +1560,26 @@ def library_paths(device_type: str = "cpu", torch_include_dirs=True) -> list[str
         if HIP_HOME is not None:
             paths.append(os.path.join(HIP_HOME, 'lib'))
     elif device_type == "cuda":
-        if IS_WINDOWS:
+        if cross_target_platform == "windows":
             lib_dir = os.path.join('lib', 'x64')
+            if WINDOWS_CUDA_HOME is None:
+                raise RuntimeError("Need to set WINDOWS_CUDA_HOME for windows cross-compilation")
+            paths.append(os.path.join(WINDOWS_CUDA_HOME, lib_dir))
         else:
-            lib_dir = 'lib64'
-            if (not os.path.exists(_join_cuda_home(lib_dir)) and
-                    os.path.exists(_join_cuda_home('lib'))):
-                # 64-bit CUDA may be installed in 'lib' (see e.g. gh-16955)
-                # Note that it's also possible both don't exist (see
-                # _find_cuda_home) - in that case we stay with 'lib64'.
-                lib_dir = 'lib'
+            if IS_WINDOWS:
+                lib_dir = os.path.join('lib', 'x64')
+            else:
+                lib_dir = 'lib64'
+                if (not os.path.exists(_join_cuda_home(lib_dir)) and
+                        os.path.exists(_join_cuda_home('lib'))):
+                    # 64-bit CUDA may be installed in 'lib' (see e.g. gh-16955)
+                    # Note that it's also possible both don't exist (see
+                    # _find_cuda_home) - in that case we stay with 'lib64'.
+                    lib_dir = 'lib'
 
-        paths.append(_join_cuda_home(lib_dir))
-        if CUDNN_HOME is not None:
-            paths.append(os.path.join(CUDNN_HOME, lib_dir))
+            paths.append(_join_cuda_home(lib_dir))
+            if CUDNN_HOME is not None:
+                paths.append(os.path.join(CUDNN_HOME, lib_dir))
     elif device_type == "xpu":
         if IS_WINDOWS:
             lib_dir = os.path.join('lib', 'x64')

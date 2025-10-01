@@ -145,7 +145,6 @@ __all__ = [
     "conj",
     "expand_dims",
     "slice",
-    "slice_in_dim",  # implemented using slice -- make this a ref?
     "split_dim",
     "squeeze",
     "transpose",
@@ -353,12 +352,14 @@ def _make_prim(
 
     from torch._subclasses.fake_tensor import contains_tensor_types
 
-    if not any(contains_tensor_types(a.type) for a in _prim._schema.arguments) or str(
-        _prim
-    ) in [
-        # See https://github.com/pytorch/pytorch/issues/103532
-        "prims.device_put.default"
-    ]:
+    if (
+        not any(contains_tensor_types(a.type) for a in _prim._schema.arguments)
+        or str(
+            _prim
+            # See https://github.com/pytorch/pytorch/issues/103532
+        )
+        == "prims.device_put.default"
+    ):
         prim_backend_select_impl.impl(name, _backend_select_impl)
 
     for p in (_prim_packet, _prim):
@@ -692,16 +693,22 @@ def _clone_meta(
             device=input.device,
             memory_format=memory_format,
         )
+    else:
+        # Match eager behavior by preserving strides for non_overlapping_and_dense tensors
+        # If not, eager clone creates contiguous strides
+        computed_stride = None
+        if utils.is_non_overlapping_and_dense(input):
+            computed_stride = input.stride()
+        else:
+            computed_stride = utils.compute_elementwise_output_strides(input)
 
-    # memory_format == torch.preserve_format
-    strides = utils.compute_elementwise_output_strides(input)
-    return torch.empty_strided(
-        input.shape,
-        strides,
-        dtype=input.dtype,
-        layout=input.layout,
-        device=input.device,
-    )
+        return torch.empty_strided(
+            input.shape,
+            computed_stride,
+            dtype=input.dtype,
+            layout=input.layout,
+            device=input.device,
+        )
 
 
 clone = _make_prim(

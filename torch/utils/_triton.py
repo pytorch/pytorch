@@ -144,6 +144,11 @@ def has_triton() -> bool:
     if not has_triton_package():
         return False
 
+    from torch._inductor.config import triton_disable_device_detection
+
+    if triton_disable_device_detection:
+        return False
+
     from torch._dynamo.device_interface import get_interface_for_device
 
     def cuda_extra_check(device_interface: Any) -> bool:
