@@ -167,7 +167,11 @@ class TestUnflatten(TestCase):
 
         eager_module = Shared()
         inps = (torch.rand(10),)
-        export_module = export(eager_module, inps, {}, strict=True)
+        with (
+            torch._export.config.patch(use_new_tracer_experimental=True),
+            torch._dynamo.config.patch(install_free_tensors=True),
+        ):
+            export_module = export(eager_module, inps, {}, strict=True)
         unflattened_module = unflatten(export_module)
         self.compare_outputs(eager_module, unflattened_module, inps)
         self.assertTrue(hasattr(unflattened_module, "sub_net"))

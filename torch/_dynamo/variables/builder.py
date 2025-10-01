@@ -442,6 +442,14 @@ class VariableBuilder:
             dup_guard = make_dupe_guard(self.source, side_effect_result.source)
             if dup_guard:
                 self.install_guards(dup_guard)
+            # For shared nn.Modules (same instance at multiple positions), update
+            # nn_module_stack_source to reflect current position.
+            # The variable tracker is cached for mutation tracking, but nn_module_stack
+            # needs to refer to real FQN.
+            if isinstance(value, torch.nn.Module) and hasattr(
+                side_effect_result, "set_nn_module_stack_source"
+            ):
+                side_effect_result.set_nn_module_stack_source(self.source)
             return side_effect_result
 
         cached_vt = self.tx.output.variable_tracker_cache.lookup(value, self.source)
