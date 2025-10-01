@@ -3846,7 +3846,7 @@ def meta__dyn_quant_matmul_4bit(
 ):
     torch._check(inp.dim() == 2, lambda: "input must be a 2D tensor")
     torch._check(
-        inp.dtype in [torch.float32],
+        inp.dtype == torch.float32,
         lambda: f"expected input to be f32, got {inp.dtype}",
     )
     M = inp.size(0)
@@ -3892,8 +3892,8 @@ def meta_cdist_forward(x1, x2, p, compute_mode):
     )
     torch._check(p >= 0, lambda: "cdist only supports non-negative p values")
     torch._check(
-        compute_mode in (None, 1, 2),
-        lambda: f"possible modes: None, 1, 2, but was: {compute_mode}",
+        compute_mode in (None, 0, 1, 2),
+        lambda: f"possible modes: None, 0, 1, 2, but was: {compute_mode}",
     )
     r1 = x1.size(-2)
     r2 = x2.size(-2)
@@ -7642,6 +7642,9 @@ def meta_scaled_grouped_mm(
     out_dtype: Optional[torch.dtype] = None,
     use_fast_accum: bool = False,
 ):
+    # matching _scaled_grouped_mm_cuda Blas.cpp implementation
+    out_dtype = out_dtype or torch.bfloat16
+
     return _meta_grouped_mm_common(
         mat_a,
         mat_b,

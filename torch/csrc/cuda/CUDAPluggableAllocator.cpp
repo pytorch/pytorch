@@ -165,6 +165,13 @@ void CUDAPluggableAllocator::setMemoryFraction(
   }
 }
 
+std::vector<c10::cuda::CUDACachingAllocator::StreamSegmentSize>
+CUDAPluggableAllocator::getExpandableSegmentSizes(c10::DeviceIndex device) {
+  TORCH_CHECK(
+      false,
+      "CUDAMallocAsyncAllocator does not yet support getExpandableSegmentSizes.");
+}
+
 void CUDAPluggableAllocator::emptyCache(
     /*unused*/ c10::cuda::MempoolId_t mempool_id) {
   if (reset_fn_) {
