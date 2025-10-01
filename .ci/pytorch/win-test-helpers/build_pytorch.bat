@@ -31,18 +31,23 @@ if "%USE_XPU%"=="1" (
   if errorlevel 1 exit /b 1
 )
 
-:: Miniconda has been installed as part of the Windows AMI with all the dependencies.
-:: We just need to activate it here
-call %INSTALLER_DIR%\activate_miniconda3.bat
-if errorlevel 1 goto fail
-if not errorlevel 0 goto fail
-
 :: Update CMake
 call choco upgrade -y cmake --no-progress --installargs 'ADD_CMAKE_TO_PATH=System' --apply-install-arguments-to-dependencies --version=3.27.9
 if errorlevel 1 goto fail
 if not errorlevel 0 goto fail
 
-call pip install mkl==2024.2.0 mkl-static==2024.2.0 mkl-include==2024.2.0
+call pip install mkl==2024.2.0 mkl-static==2024.2.0 mkl-include==2024.2.0 ninja typing-extensions
+call pip install -r .ci/docker/requirements-ci.txt
+SET CMAKE_LIBRARY_PATH=%PYTHON_PATH%\Library\lib
+SET CMAKE_INCLUDE_PATH=%PYTHON_PATH%\Library\include
+if errorlevel 1 goto fail
+if not errorlevel 0 goto fail
+
+:: Install libuv
+curl -k https://s3.amazonaws.com/ossci-windows/libuv-1.40.0-h8ffe710_0.tar.bz2 -o libuv-1.40.0-h8ffe710_0.tar.bz2
+7z x -aoa libuv-1.40.0-h8ffe710_0.tar.bz2
+tar -xvf libuv-1.40.0-h8ffe710_0.tar -C %PYTHON_PATH%
+set libuv_ROOT=%PYTHON_PATH%\Library
 if errorlevel 1 goto fail
 if not errorlevel 0 goto fail
 
