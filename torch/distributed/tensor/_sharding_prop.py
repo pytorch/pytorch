@@ -25,6 +25,7 @@ from torch.distributed.tensor._utils import (
     compute_local_shape_and_global_offset,
     compute_local_stride,
 )
+from torch.types import IntLikeType
 
 
 aten = torch.ops.aten
@@ -173,7 +174,9 @@ class ShardingPropagator:
 
         if isinstance(fake_out, torch.Tensor):
             return TensorMeta(
-                shape=fake_out.shape, stride=fake_out.stride(), dtype=fake_out.dtype
+                shape=fake_out.shape,
+                stride=maybe_trace_stride(fake_out.stride()),
+                dtype=fake_out.dtype,
             )
 
         elif isinstance(fake_out, (tuple, list)):
@@ -183,7 +186,7 @@ class ShardingPropagator:
                     tensor_meta_list.append(
                         TensorMeta(
                             shape=fake_out_item.shape,
-                            stride=fake_out_item.stride(),
+                            stride=maybe_trace_stride(fake_out_item.stride()),
                             dtype=fake_out_item.dtype,
                         )
                     )
@@ -648,3 +651,16 @@ class ShardingPropagator:
             )
 
         return OpSchema(schema.op, tuple(expected_input_schema), schema.kwargs_schema)
+
+
+def maybe_trace_stride(
+    stride: tuple[IntLikeType, ...]
+) -> tuple[IntLikeType, ...]:
+    from torch.fx.experimental.proxy_tensor import get_proxy_mode
+
+    if (mode := get_proxy_mode()) is None:
+        return stride
+
+    # It's possible the strides were created but not traced. So if they
+    # don't exist in the proxy then recreate them now.
+    return tuple(mode.maybe_retrace_symint(i) for i in stride)
