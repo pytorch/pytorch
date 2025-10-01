@@ -26,7 +26,7 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_mps_get_kernel_function(
     const char* kernel_name,
     AOTIMetalKernelFunctionHandle* function_handle);
 
-// MetalKernelFunction functions - individual call versions
+// MetalKernelFunction functions
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_mps_start_encoding(
     AOTIMetalKernelFunctionHandle func);
 
@@ -41,7 +41,6 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_mps_set_arg_int(
     unsigned idx,
     int64_t val);
 
-// Pure C dispatch functions - single value versions
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_mps_dispatch_single(
     AOTIMetalKernelFunctionHandle func,
     uint64_t length);
@@ -51,7 +50,6 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_mps_dispatch_single_with_group_size(
     uint64_t length,
     uint64_t group_size);
 
-// Pure C dispatch functions - array versions
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_mps_dispatch_array(
     AOTIMetalKernelFunctionHandle func,
     const uint64_t* length,

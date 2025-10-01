@@ -1,10 +1,8 @@
 #include <ATen/native/mps/MetalShaderLibrary.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim_mps.h>
 #include <torch/csrc/inductor/aoti_torch/utils.h>
-#include <ATen/mps/MPSStream.h>
 
 using namespace torch::aot_inductor;
-
 
 AOTITorchError aoti_torch_mps_set_arg_tensor(
     AOTIMetalKernelFunctionHandle handle,
@@ -30,7 +28,6 @@ AOTITorchError aoti_torch_mps_set_arg_int(
   });
 }
 
-// MetalShaderLibrary functions (pure C++)
 AOTITorchError aoti_torch_mps_create_shader_library(
     const char* metal_shader_source,
     AOTIMetalShaderLibraryHandle* library_handle) {
@@ -67,7 +64,6 @@ AOTITorchError aoti_torch_mps_start_encoding(
   });
 }
 
-// Pure C dispatch functions - single value versions
 AOTITorchError aoti_torch_mps_dispatch_single(
     AOTIMetalKernelFunctionHandle func,
     uint64_t length) {
@@ -87,7 +83,6 @@ AOTITorchError aoti_torch_mps_dispatch_single_with_group_size(
   });
 }
 
-// Pure C dispatch functions - array versions
 AOTITorchError aoti_torch_mps_dispatch_array(
     AOTIMetalKernelFunctionHandle func,
     const uint64_t* length,
