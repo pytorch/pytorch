@@ -69,6 +69,7 @@ class CompileArtifacts:
 @dataclass
 class AOTCompiledFunction:
     _artifacts: CompileArtifacts
+    _guard_check_enabled: bool = True
 
     def guard_check(self, *args: Any, **kwargs: Any) -> bool:
         f_locals = bind_locals(self._artifacts.signature, *args, **kwargs)
@@ -101,7 +102,7 @@ class AOTCompiledFunction:
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         assert self._artifacts.guard_manager is not None
-        if not self.guard_check(*args, **kwargs):
+        if self._guard_check_enabled and not self.guard_check(*args, **kwargs):
             f_locals = bind_locals(self._artifacts.signature, *args, **kwargs)
             reason = str(self._artifacts.guard_manager.check_verbose(f_locals))
             raise RuntimeError(f"GuardManager check failed, reason: {reason}")
@@ -141,6 +142,9 @@ class AOTCompiledFunction:
 
         artifacts = CompileArtifacts(**state)
         return cls(artifacts)
+
+    def disable_guard_check(self) -> None:
+        self._guard_check_enabled = False
 
 
 class BundledAOTAutogradSerializableCallable(SerializableCallable):

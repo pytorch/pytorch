@@ -3743,8 +3743,8 @@ class ShapeEnv:
         # Duck-shaping says that if two input tensors have the same size,
         # they get assigned the same symbolic variable
         self.val_to_var: dict[int, sympy.Symbol] = {}
-        self.unbacked_symfloat_counter = itertools.count()
-        self.unbacked_symint_counter = itertools.count()
+        self.unbacked_symfloat_counter = 0
+        self.unbacked_symint_counter = 0
         # Similar to guards, but these MUST evaluate to true and can
         # only be evaluated at runtime midway through (i.e., they always
         # involve unbacked symints)
@@ -3994,14 +3994,7 @@ class ShapeEnv:
         # and the stack when it was added to the set of guards. In order to compare
         # it, we throw away the stack information.
         def map_value(key: str, value: Any) -> Any:
-            if key in ("unbacked_symfloat_counter", "unbacked_symint_counter"):
-                from copy import copy
-
-                # For itertools.count(), we compare the next integer returned
-                # by the count iterators. Not that we need to copy the iterator
-                # first. Otherwise we are mutating the object.
-                return next(copy(value))
-            elif key == "guards":
+            if key == "guards":
                 # Transform the list of ShapeGuard into a list of expressions.
                 return [g.expr for g in value]
             elif key == "deferred_runtime_asserts":
@@ -4822,8 +4815,9 @@ class ShapeEnv:
     def create_unbacked_symfloat(self) -> SymFloat:
         """Create a symbolic float without a hint value"""
         symbol: sympy.Symbol = make_symbol(
-            SymT.UNBACKED_FLOAT, next(self.unbacked_symfloat_counter)
+            SymT.UNBACKED_FLOAT, self.unbacked_symfloat_counter
         )
+        self.unbacked_symfloat_counter += 1
         self.counter["create_unbacked_symbol"] += 1
         if not self._ignore_fresh_unbacked_symbols_tls():
             self.pending_fresh_unbacked_symbols.append(symbol)
@@ -4847,8 +4841,9 @@ class ShapeEnv:
     def create_unbacked_symint(self, source: Optional[Source] = None) -> SymInt:
         """Create a symbolic integer without a hint value"""
         symbol: sympy.Symbol = make_symbol(
-            SymT.UNBACKED_INT, next(self.unbacked_symint_counter), integer=True
+            SymT.UNBACKED_INT, self.unbacked_symint_counter, integer=True
         )
+        self.unbacked_symint_counter += 1
         if not self._ignore_fresh_unbacked_symbols_tls():
             self.pending_fresh_unbacked_symbols.append(symbol)
         self.counter["create_unbacked_symbol"] += 1
@@ -4875,8 +4870,9 @@ class ShapeEnv:
     def create_unbacked_symbool(self) -> SymBool:
         """Create a symbolic boolean without a hint value"""
         symbol: sympy.Symbol = make_symbol(
-            SymT.UNBACKED_INT, next(self.unbacked_symint_counter), integer=True
+            SymT.UNBACKED_INT, self.unbacked_symint_counter, integer=True
         )
+        self.unbacked_symint_counter += 1
         if not self._ignore_fresh_unbacked_symbols_tls():
             self.pending_fresh_unbacked_symbols.append(symbol)
         self.counter["create_unbacked_symbol"] += 1

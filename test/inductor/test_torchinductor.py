@@ -14014,15 +14014,13 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         ]
         outputs = f(inputs)
 
+        warmup_compiled = f_compiled(inputs)
         with torch.profiler.profile(
             activities=[
                 getattr(torch.profiler.ProfilerActivity, GPU_TYPE.upper()),
             ],
         ) as p:
             outputs_compiled = f_compiled(inputs)
-
-        # outputs_compiled, (code,) = run_and_get_code(f_compiled, inputs)
-        # self.assertTrue("pinned" in code)
 
         self.assertEqual(outputs, outputs_compiled)
         profile_output = str(p.key_averages())

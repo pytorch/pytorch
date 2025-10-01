@@ -125,7 +125,7 @@ class DebugMode(TorchDispatchMode):
             _get_current_dispatch_mode(), FakeTensorMode
         ):
             if self.record_faketensor:
-                if func not in {torch.ops.prim.device.default}:
+                if func != torch.ops.prim.device.default:
                     self.operators.append((func, args, kwargs, self.call_depth + 1))
         elif len(types) == 0:
             if self.record_realtensor:
