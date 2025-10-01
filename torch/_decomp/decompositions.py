@@ -3972,6 +3972,11 @@ def is_same_size(a: Tensor, b: Tensor) -> bool:
 @register_decomposition([aten._reshape_alias, aten._unsafe_view])
 @out_wrapper()
 def _reshape_alias(x, shape, *args):
+
+    from torch.utils._traceback import CapturedTraceback
+    print(''.join(CapturedTraceback.extract(cpp=True).format()))
+    import fbvscode
+    fbvscode.set_trace()
     return aten.view(x, shape)
 
 

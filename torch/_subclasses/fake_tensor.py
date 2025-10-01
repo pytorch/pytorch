@@ -16,7 +16,6 @@ import weakref
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import Any, Callable, cast, Literal, Optional, TYPE_CHECKING, TypeVar, Union
-from typing_extensions import Self, TypeGuard
 from weakref import ReferenceType
 
 import torch
@@ -48,6 +47,7 @@ from torch.utils._python_dispatch import (
 from torch.utils._pytree import KeyPath, keystr, PyTree, tree_map, tree_map_, TreeSpec
 from torch.utils._stats import count
 from torch.utils._traceback import CapturedTraceback
+from typing_extensions import Self, TypeGuard
 
 from ._fake_tensor_utils import _CacheKeyState, _PySymInputStub, _SymIntOutputStub
 
@@ -497,9 +497,9 @@ class FakeTensorConverter:
         pytype: Optional[type[torch.Tensor]] = None,
         dispatch_keys: Optional[torch.DispatchKeySet] = None,
     ) -> FakeTensor:
-        assert t.device.type == "meta", (
-            f"tensor's device must be `meta`, got {t.device.type} instead"
-        )
+        assert (
+            t.device.type == "meta"
+        ), f"tensor's device must be `meta`, got {t.device.type} instead"
         # This is a bit abusive (this is not the "real" tensor) but whatever,
         # the meta tensor should be fresh so there's no way to get it wrong
         maybe_memo = self._get_memo(t)
@@ -2173,7 +2173,9 @@ class FakeTensorMode(TorchDispatchMode):
                 try:
                     _check_fake_real_vals(s_fake, s_real)
                 except MetadataMismatchError as exc:
-                    if torch._functorch.config.generate_fake_kernels_from_real_mismatches:
+                    if (
+                        torch._functorch.config.generate_fake_kernels_from_real_mismatches
+                    ):
                         dtrace_structured(
                             "mismatched_fake_kernel",
                             metadata_fn=lambda: {
@@ -2363,9 +2365,9 @@ class FakeTensorMode(TorchDispatchMode):
             and not flat_arg_fake_tensors
             and not device_conversion_skip_const_prop
         ):
-            assert all(t.constant is not None for t in flat_arg_fake_tensors), (
-                f"{func} should not have fake inputs without constants"
-            )
+            assert all(
+                t.constant is not None for t in flat_arg_fake_tensors
+            ), f"{func} should not have fake inputs without constants"
             const_flat_args = [
                 a.constant if self.is_our_fake(a) else a for a in flat_args
             ]
@@ -2577,7 +2579,9 @@ class FakeTensorMode(TorchDispatchMode):
 
             if real_out is not nil:
                 # cross check fake/real outputs, and optionally override fake kernel mismatches
-                if not torch._functorch.config.generate_fake_kernels_from_real_mismatches:
+                if (
+                    not torch._functorch.config.generate_fake_kernels_from_real_mismatches
+                ):
                     self._maybe_infer_fake_kernel_from_pytree_out(
                         func,
                         (args, kwargs),
@@ -2764,6 +2768,10 @@ class FakeTensorMode(TorchDispatchMode):
         # It's possible that the kernel will return NotImplementedError
         try:
             with in_kernel_invocation_manager(self):
+                if "aten._reshape_copy.default" in str(func):
+                    import fbvscode
+
+                    fbvscode.set_trace()
                 r = func(*args, **kwargs)
         except NotImplementedError as not_implemented_error:
             return maybe_run_unsafe_fallback(not_implemented_error)
@@ -3000,9 +3008,9 @@ class FakeTensorMode(TorchDispatchMode):
         if static_shapes is None:
             static_shapes = self.static_shapes
         if static_shapes:
-            assert symbolic_context is None, (
-                "cannot set both static_shapes and symbolic_context"
-            )
+            assert (
+                symbolic_context is None
+            ), "cannot set both static_shapes and symbolic_context"
             shape_env = None
         return self.fake_tensor_converter.from_real_tensor(
             self,
