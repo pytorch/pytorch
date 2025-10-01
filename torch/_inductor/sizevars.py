@@ -2,6 +2,7 @@
 import functools
 import itertools
 import logging
+from collections import defaultdict
 from collections.abc import Iterable, Sequence
 from typing import Any, Callable, cast, Optional, Union
 
@@ -724,47 +725,140 @@ class SizeVarAllocator:
         hint for both s0 + u0 and u1, but it first needs to know they are equal.
         Then it can substitute s0 + u0 for u1.
         """
+
         if self.unbacked_replacements is not None:
             return self.unbacked_replacements
 
-        def should_keep_src_dst(lhs: Expr, rhs: Expr):
-            # assuming lhs is the expr to be replaced (src), rhs is the replacement (dst)
-            # checking if we should keep them for the replacement rule or swap
+        # def should_keep_src_dst(lhs: Expr, rhs: Expr):
+        #     # assuming lhs is the expr to be replaced (src), rhs is the replacement (dst)
+        #     # checking if we should keep them for the replacement rule or swap
 
-            if not has_free_unbacked_symbols(rhs):
-                # prioritize replacing unbacked exprs with backed expressions
-                # e.g. u0 + s3 ==> s0 + s1
+        #     if not has_free_unbacked_symbols(rhs):
+        #         # prioritize replacing unbacked exprs with backed expressions
+        #         # e.g. u0 + s3 ==> s0 + s1
+        #         return True
+        #     elif not has_free_unbacked_symbols(lhs):
+        #         return False
+        #     elif lhs.has(rhs):
+        #         # handles cases where LHS is a sub-expression of the RHS
+        #         # e.g. Max(2, u0) == s1 * Max(2, u0)
+        #         return True
+        #     elif rhs.has(lhs):
+        #         return False
+        #     else:
+        #         # fallback to sympy.Basic.compare for a deterministic ordering
+        #         return lhs.compare(rhs) == 1
+
+        # self.unbacked_replacements = {}
+        # for assertions in self.shape_env.deferred_runtime_asserts.values():
+        #     for assertion in assertions:
+        #         if not isinstance(assertion.expr, sympy.Equality):
+        #             continue
+
+        #         lhs, rhs = assertion.expr.lhs, assertion.expr.rhs
+        #         should_keep = should_keep_src_dst(lhs, rhs)
+        #         src = lhs if should_keep else rhs
+        #         dst = rhs if should_keep else lhs
+
+        #         existing_replacement = self.unbacked_replacements.get(src, None)
+        #         if existing_replacement and isinstance(
+        #             existing_replacement, sympy.Symbol
+        #         ):
+        #             # Prefer to keep replacements with symbols.
+        #             continue
+        #         self.unbacked_replacements[src] = dst
+
+        class UnionFind:
+            def __init__(self, equality_graph: dict[Expr, set[Expr]]):
+                # Each node is its own parent initially
+                self.parent = [i for i in range(len(equality_graph))]
+                self.eq_graph = equality_graph
+                self.expressions = {}
+                self.reverse_expressions = {}
+                for i, expr in enumerate(equality_graph):
+                    self.expressions[i] = expr
+                    self.reverse_expressions[expr] = i
+                # Track rank for union-by-rank
+                self.rank = [1] * len(equality_graph)
+
+            def find_expr(self, expr):
+                parent = self.find(self.reverse_expressions[expr])
+                return self.expressions[parent]
+
+            def find(self, x):
+                # Path compression
+                if self.parent[x] != x:
+                    self.parent[x] = self.find(self.parent[x])
+                return self.parent[x]
+
+            def choose_leader(self, a, b):
+                def compare(x, y) -> int:
+                    this, that = self.expressions[x], self.expressions[y]
+
+                    # Prefer backed symbols.
+                    all_symbols_backed_this = not has_free_unbacked_symbols(this)
+                    all_symbols_backed_that = not has_free_unbacked_symbols(that)
+                    if all_symbols_backed_that != all_symbols_backed_this:
+                        return -1 if all_symbols_backed_this else 1
+
+                    if this.has(that):
+                        # this is a subexpression of
+                        return 1
+                    elif that.has(this):
+                        return -1
+
+                    # Prefer expressions seen more often.
+                    degrees_this = len(self.eq_graph[this])
+                    degrees_that = len(self.eq_graph[that])
+                    if degrees_this != degrees_that:
+                        return -1 if degrees_this < degrees_that else 1
+
+                    # Try to union-by-rank.
+                    if self.rank[x] != self.rank[y]:
+                        return -1 if self.rank[x] > self.rank[y] else 1
+                    
+                    # Fallback to sympy.Basic.compare for a deterministic ordering.
+                    return this.compare(that)
+
+                if compare(a, b) == -1:
+                    return a, b
+                return b, a
+            
+            def union_expr(self, a, b):
+                return self.union(self.reverse_expressions[a], self.reverse_expressions[b])
+
+            def union(self, a, b):
+                rootA = self.find(a)
+                rootB = self.find(b)
+                if rootA == rootB:
+                    return False  # already connected
+                leader, other = self.choose_leader(rootA, rootB)
+                self.parent[other] = leader
+                self.rank[leader] += self.rank[other]
                 return True
-            elif not has_free_unbacked_symbols(lhs):
-                return False
-            elif lhs.has(rhs):
-                # handles cases where LHS is a sub-expression of the RHS
-                # e.g. Max(2, u0) == s1 * Max(2, u0)
-                return True
-            elif rhs.has(lhs):
-                return False
-            else:
-                # fallback to sympy.Basic.compare for a deterministic ordering
-                return lhs.compare(rhs) == 1
+
+            def connected(self, a, b):
+                return self.find(a) == self.find(b)
 
         self.unbacked_replacements = {}
+        self.equality_graph = defaultdict(set)
         for assertions in self.shape_env.deferred_runtime_asserts.values():
             for assertion in assertions:
                 if not isinstance(assertion.expr, sympy.Equality):
                     continue
-
                 lhs, rhs = assertion.expr.lhs, assertion.expr.rhs
-                should_keep = should_keep_src_dst(lhs, rhs)
-                src = lhs if should_keep else rhs
-                dst = rhs if should_keep else lhs
+                self.equality_graph[lhs].add(rhs)
+                self.equality_graph[rhs].add(lhs)
+        
+        uf = UnionFind(self.equality_graph)
+        for expr, edges in self.equality_graph.items():
+            for adj in edges:
+                uf.union_expr(expr, adj)
+        
+        for expr in self.equality_graph.keys():
+            canonical_expr = uf.find_expr(expr)
+            self.unbacked_replacements[expr] = canonical_expr
 
-                existing_replacement = self.unbacked_replacements.get(src, None)
-                if existing_replacement and isinstance(
-                    existing_replacement, sympy.Symbol
-                ):
-                    # Prefer to keep replacements with symbols.
-                    continue
-                self.unbacked_replacements[src] = dst
         return self.unbacked_replacements
 
     @functools.lru_cache  # noqa: B019

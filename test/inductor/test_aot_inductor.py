@@ -1577,6 +1577,72 @@ class AOTInductorTestsTemplate:
 
     @config.patch({"unbacked_symint_fallback": 12})
     @config.patch({"triton.autotune_at_compile_time": None})
+    def test_colin(self):
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest("requires triton")
+
+        INNER_DIM = 256
+
+        def realize_out_tensor_with_size(size):
+            tensor = torch.ones((size, INNER_DIM), device=self.device)
+            # Realize the tensor as an intermediate buffer
+            nrows, ncols = tensor.shape
+            numel = tensor.numel()
+            add_kernel[nrows,](
+                in_ptr0=tensor,
+                in_ptr1=tensor,
+                out_ptr=tensor,
+                n_elements=numel,
+                BLOCK_SIZE=ncols,
+            )
+            return tensor
+
+        class Repro(torch.nn.Module):
+            def forward(self, x, lst):
+                s0 = x.size(0)
+                s1 = x.size(1)
+                s2 = x.size(2)
+
+                u0, u1, u2, u100 = lst.tolist()
+
+                """
+                s27 + u1 = s77 + u0
+                s53 + u2 = s77 + u0
+                s77 + u0 = u3
+                """
+                expr1 = s0 + u0
+                expr2 = s1 + u1
+                expr3 = s2 + u2
+                expr4 = u100
+
+                t1 = realize_out_tensor_with_size(expr3)
+                t2 = realize_out_tensor_with_size(expr2)
+                t3 = realize_out_tensor_with_size(expr1)
+                t4 = realize_out_tensor_with_size(expr4)
+
+                cat = torch.cat([t1, t2, t3, t4], dim=1)
+
+                # Add deferred runtime assertion: s0 + s1 == u0
+                # torch._check(relevant_embeddings.size(0) == ones.size(0))
+                # relevant_embeddings += ones
+                # return relevant_embeddings * relevant_embeddings
+                return cat * cat
+
+        torch.cuda.caching_allocator_enable(False)
+        model = Repro()
+        example_inputs = (
+            torch.randn((100, 200, 300), device=self.device),
+            torch.tensor([200, 100, 0, 300], device=self.device, dtype=torch.int),
+        )
+        spec = {
+            "x": (Dim.DYNAMIC, Dim.DYNAMIC, Dim.DYNAMIC),
+            "lst": (Dim.STATIC,),
+        }
+        self.check_model(model, example_inputs, dynamic_shapes=spec)
+        torch.cuda.caching_allocator_enable(True)
+
+    @config.patch({"unbacked_symint_fallback": 12})
+    @config.patch({"triton.autotune_at_compile_time": None})
     def test_replace_unbacked_symbol_with_backed_expr(self):
         # This will test how autotune_at_compile_time generates sample inputs
         # when the user torch._checks(s0 + s1 == u0).
