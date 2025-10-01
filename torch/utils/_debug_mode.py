@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import contextlib
+import weakref
 from typing import Optional
 
 import torch
@@ -11,11 +12,13 @@ from torch.utils._python_dispatch import (
     TorchDispatchMode,
 )
 from torch.utils._pytree import tree_map
+from torch.utils.weak import TensorWeakRef, WeakIdRef
 
 
 __all__ = ["DebugMode", "get_active_debug_mode"]
 
 REDISTRIBUTE_FUNC = "redistribute_input"
+COMPILED_FX_GRAPH_CALL = "call_compiled_fx_graph"
 
 
 def _stringify_shape(shape) -> str:
@@ -83,6 +86,8 @@ def _op_to_str(op, *args, **kwargs) -> str:
 
 
 class DebugMode(TorchDispatchMode):
+    supports_higher_order_operators = True
+
     def __init__(
         self,
         *,
@@ -98,8 +103,14 @@ class DebugMode(TorchDispatchMode):
         self.record_faketensor = record_faketensor
         self.record_realtensor = record_realtensor
 
-        self.operators = ""
+        self.tensor_memo = {}
+        self.next_memo_id = 0
+        self.operators = []
         self.call_depth = 0
+
+    @classmethod
+    def ignore_compile_internals(cls):
+        return True
 
     def __torch_function__(self, func, types, args=(), kwargs=None):
         # print("__torch_function__", func)
@@ -114,9 +125,38 @@ class DebugMode(TorchDispatchMode):
         finally:
             self.call_depth -= 1
 
-    @classmethod
-    def ignore_compile_internals(cls):
-        return True
+    def _shortid(self, t: torch.Tensor, is_return: bool) -> int:
+        o = WeakIdRef(t)  # weakref to tensor / tensor id
+        weak_self = weakref.ref(self)
+
+        def del_memo():  # pops from memo on tensor gc
+            self = weak_self()
+            if self is None:
+                return
+            self.tensor_memo.pop(o, None)
+
+        weakref.finalize(t, del_memo)
+        if o not in self.tensor_memo:  # tensor / tensor id weakref not in memo
+            self.tensor_memo[o] = self.next_memo_id  # store id -> $id (graph no.)
+            self.next_memo_id += 1
+            if not is_return:
+                self.operators.append((f"${self._fmt(t, is_return)} = from_outside", "", "", ""))
+                # self.operators.append((f"${self.next_memo_id} = from_outside", None, None, None))
+                # entry = f"{self._fmt(t, True)} = from_outside"
+                # self.logs.append(entry)
+                # if self.print_logs:
+                #     print(entry)
+        return self.tensor_memo[o]  # return $id (graph no.)
+
+    def _fmt(self, a: object, is_return: bool = False) -> str:
+        if isinstance(a, torch.Tensor):
+            maybe_type = ""
+            str_ = _arg_to_str(a)
+            # if is_return:
+            #     maybe_type = f": {type(a).__name__}, {dtype_abbrs[a.dtype]}[{', '.join(map(str, a.shape))}]"
+            return f"${self._shortid(a, is_return)}{str_}"
+        else:
+            return a
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         # print("__torch_dispatch__", func)
@@ -172,8 +212,15 @@ class DebugMode(TorchDispatchMode):
         finally:
             self.call_depth -= 1
 
-    def record_fx_graph_call(self, *args):
-        pass
+    def record_compiled_fx_graph_call(self, metadata):
+        self.operators.append(
+            (
+                COMPILED_FX_GRAPH_CALL,
+                (),
+                metadata,
+                self.call_depth + 1,
+            )
+        )
 
     def debug_string(self) -> str:
         with torch._C.DisableTorchFunction():
