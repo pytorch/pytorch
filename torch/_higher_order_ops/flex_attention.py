@@ -1266,7 +1266,7 @@ def flex_attention_backward_fake_tensor_mode(
         [
             (
                 torch.empty_like(buffer, memory_format=torch.contiguous_format)
-                if isinstance(buffer, torch.Tensor) and buffer.requires_grad
+                if isinstance(buffer, torch.Tensor)
                 else None
             )
             for buffer in score_mod_other_buffers
