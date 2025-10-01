@@ -1,4 +1,5 @@
-# mypy: allow-untyped-defs
+from typing import Any
+
 from .fake_quantize import *  # noqa: F403
 from .fuse_modules import fuse_modules
 from .fuser_method_mappings import *  # noqa: F403
@@ -11,7 +12,7 @@ from .quantize_jit import *  # noqa: F403
 from .stubs import *  # noqa: F403
 
 
-def default_eval_fn(model, calib_data):
+def default_eval_fn(model: Any, calib_data: Any) -> None:
     r"""
     Default evaluation function takes a torch.utils.data.Dataset or a list of
     input Tensors and run the model on the dataset

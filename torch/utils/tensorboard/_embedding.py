@@ -1,5 +1,6 @@
-# mypy: allow-untyped-defs
 import math
+from typing import Any, Optional, Sequence
+
 import numpy as np
 from ._convert_np import make_np
 from ._utils import make_grid
@@ -10,7 +11,7 @@ from tensorboard.plugins.projector.projector_config_pb2 import EmbeddingInfo
 _HAS_GFILE_JOIN = hasattr(tf.io.gfile, "join")
 
 
-def _gfile_join(a, b):
+def _gfile_join(a: str, b: str) -> str:
     # The join API is different between tensorboard's TF stub and TF:
     # https://github.com/tensorflow/tensorboard/issues/6080
     # We need to try both because `tf` may point to either the stub or the real TF.
@@ -21,14 +22,14 @@ def _gfile_join(a, b):
         return fs.join(a, b)
 
 
-def make_tsv(metadata, save_path, metadata_header=None):
+def make_tsv(metadata: Sequence[Any], save_path: str, metadata_header: Optional[Sequence[str]] = None) -> None:
     if not metadata_header:
         metadata = [str(x) for x in metadata]
     else:
         assert len(metadata_header) == len(
             metadata[0]
         ), "len of header must be equal to the number of columns in metadata"
-        metadata = ["\t".join(str(e) for e in l) for l in [metadata_header] + metadata]
+        metadata = ["\t".join(str(e) for e in l) for l in [metadata_header] + list(metadata)]
 
     metadata_bytes = tf.compat.as_bytes("\n".join(metadata) + "\n")
     with tf.io.gfile.GFile(_gfile_join(save_path, "metadata.tsv"), "wb") as f:
@@ -36,7 +37,7 @@ def make_tsv(metadata, save_path, metadata_header=None):
 
 
 # https://github.com/tensorflow/tensorboard/issues/44 image label will be squared
-def make_sprite(label_img, save_path):
+def make_sprite(label_img: Any, save_path: str) -> None:
     from PIL import Image
     from io import BytesIO
 
@@ -61,7 +62,7 @@ def make_sprite(label_img, save_path):
         f.write(im_bytes)
 
 
-def get_embedding_info(metadata, label_img, subdir, global_step, tag):
+def get_embedding_info(metadata: Optional[Any], label_img: Optional[Any], subdir: str, global_step: int, tag: str) -> EmbeddingInfo:
     info = EmbeddingInfo()
     info.tensor_name = f"{tag}:{str(global_step).zfill(5)}"
     info.tensor_path = _gfile_join(subdir, "tensors.tsv")
@@ -73,13 +74,13 @@ def get_embedding_info(metadata, label_img, subdir, global_step, tag):
     return info
 
 
-def write_pbtxt(save_path, contents):
+def write_pbtxt(save_path: str, contents: str) -> None:
     config_path = _gfile_join(save_path, "projector_config.pbtxt")
     with tf.io.gfile.GFile(config_path, "wb") as f:
         f.write(tf.compat.as_bytes(contents))
 
 
-def make_mat(matlist, save_path):
+def make_mat(matlist: Sequence[Any], save_path: str) -> None:
     with tf.io.gfile.GFile(_gfile_join(save_path, "tensors.tsv"), "wb") as f:
         for x in matlist:
             x = [str(i.item()) for i in x]
