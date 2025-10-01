@@ -676,22 +676,10 @@ class DTensor(torch.Tensor):
                 indexing), and its value is a list specifying the device mesh dimensions
                 (as integers or strings) that the tensor dimension is sharded across, in
                 order. If not specified, a default sharding order is used.
-
-                Example:
-                    For a 3D tensor and a 4D device mesh, to shard tensor dimension
-                    0 over mesh dim 1, and tensor dimension 1 over mesh dim 2 and
-                    then mesh dim 0, use:
-                        shard_order = {0: [1], 1: [2, 0]}
-                    In this case, you can also specify the `placements` as [Shard(1),
-                    Shard(0), Shard(1), Replicate()] along with `shard_order`.
-
-                Note:
-                    As long as there are no Partial placements (though this should
-                    not happen as of today), you may specify only shard_order (and not
-                    placements if device order is not the default left-to-right), and the
-                    correct placements will be inferred.
-
-
+                Example: For a 3D tensor and a 4D device mesh, to shard tensor dimension 0 over
+                mesh dim 1, and tensor dimension 1 over mesh dim 2 and then mesh dim 0, use
+                "shard_order = {0: [1], 1: [2, 0]}". In this case, you can also specify the
+                `placements` as [Shard(1), Shard(0), Shard(1), Replicate()] along with `shard_order`.
 
         Keyword args:
             async_op (bool, optional): whether to perform the DTensor redistribute operation
@@ -904,20 +892,15 @@ def distribute_tensor(
             indexing), and its value is a sequence specifying the device mesh dimensions
             (as integers or strings) that the tensor dimension is sharded across, in
             order. If not specified, a default sharding order is used.
+            Example: For a 3D tensor and a 4D device mesh, to shard tensor dimension
+            0 over mesh dim 1, and tensor dimension 1 over mesh dim 2 and then mesh dim 0,
+            use "shard_order = {0: [1], 1: [2, 0]}". In this case, you can also specify the
+            `placements` as [Shard(1), Shard(0), Shard(1), Replicate()] along with `shard_order`.
 
-            Example:
-                For a 3D tensor and a 4D device mesh, to shard tensor dimension
-                0 over mesh dim 1, and tensor dimension 1 over mesh dim 2 and
-                then mesh dim 0, use:
-                    shard_order = {0: [1], 1: [2, 0]}
-                In this case, you can also specify the `placements` as [Shard(1),
-                Shard(0), Shard(1), Replicate()] along with `shard_order`.
-
-            Note:
-                As long as there are no Partial placements (though this should
-                not happen as of today), you may specify only shard_order (and not
-                placements if device order is not the default left-to-right), and the
-                correct placements will be inferred.
+            Note: As long as there are no Partial placements (though this should
+            not happen as of today), you may specify only shard_order (and not
+            placements if device order is not the default left-to-right), and the
+            correct placements will be inferred.
 
     Keyword args:
         src_data_rank (int, optional): the rank of the source data for the logical/global tensor, it is
@@ -942,6 +925,14 @@ def distribute_tensor(
     # get default device mesh if there's nothing specified
     device_mesh = device_mesh or _mesh_resources.get_current_mesh()
     device_type = device_mesh.device_type
+
+    if placements is not None:
+        for placement in placements:
+            if placement.is_partial():
+                raise RuntimeError(
+                    f"Can not distribute to {placements}, "
+                    "redistributing to Partial is for internal use only!"
+                )
 
     placements_tuple, shard_order_tuple = _prepare_placements_and_shard_order(
         device_mesh, tensor.ndim, placements, shard_order
@@ -1079,7 +1070,7 @@ def _shard_tensor(
 
     Examples:
         >>> # xdoctest: +SKIP("need world_size and rank")
-        >>> device_mesh = dist.init_device_mesh("cuda", (world_size,))
+        >>> device_mesh = torch.distributed.init_device_mesh("cuda", (world_size,))
         >>> full_tensor = torch.arange(world_size, device=f"cuda:{rank}")
         >>> dtensor = _shard_tensor(full_tensor, [Shard(1)], device_mesh)
     """

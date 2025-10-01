@@ -761,27 +761,22 @@ class DeviceOrderRedistributeTest(DTensorTestBase):
         # Use negative dim in Shard placement
         placements = [Shard(-1)]
         dt = distribute_tensor(input_tensor, device_mesh, placements)
-        # Should be equivalent to Shard(2)
         self.assertEqual(dt.placements[0].dim, 2)
-        # Redistribute to another negative dim
         dt2 = dt.redistribute(device_mesh, [Shard(-2)])
         self.assertEqual(dt2.placements[0].dim, 1)
-        # Check full tensor is preserved
         self.assertEqual(dt2.full_tensor(), input_tensor)
 
     @with_comms
     def test_negative_dim_in_shard_order(self):
         mesh = init_device_mesh(self.device_type, (2, 4))
         input_tensor = torch.randn(8, 6, 5, device=self.device_type)
-        # Use negative tensor dim as key in shard_order
         shard_order = {-1: [0], -2: [1]}
         dt = distribute_tensor(input_tensor, mesh, shard_order=shard_order)
-        # Should be equivalent to {2: [0], 1: [1]}
-        self.assertEqual(dt.shard_order, ((), (1,), (0,)))
+        self.assertEqual(dt.shard_order, ((1, 1), (2, 0)))
         self.assertEqual(dt.full_tensor(), input_tensor)
         shard_order = {2: [0], -2: [1]}
         dt2 = dt.redistribute(mesh, shard_order=shard_order)
-        self.assertEqual(dt2.shard_order, ((), (1,), (0,)))
+        self.assertEqual(dt2.shard_order, ((1, 1), (2, 0)))
 
     def _extract_redistribute_trace_from_debugmode(self, s: str) -> str:
         import re
