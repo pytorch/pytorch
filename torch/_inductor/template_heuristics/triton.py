@@ -243,6 +243,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             GemmConfig(128, 128, 32, 3, 4),
             GemmConfig(128, 128, 64, 3, 4),
             GemmConfig(128, 128, 64, 5, 8),
+            GemmConfig(128, 128, 128, 4, 8),
         ]
 
         # Exhaustive search for mm configs
@@ -312,6 +313,10 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             GemmConfig(128, 128, 128, 3, 4),
             GemmConfig(256, 128, 64, 3, 8),
             GemmConfig(128, 128, 128, 3, 8),
+        ]
+
+        self.blackwell_persistent_addmm_configs: list[BaseConfig] = [
+            GemmConfig(256, 128, 64, 2, 4),
         ]
 
         self.scaled_mm_configs: list[BaseConfig] = [
@@ -2093,7 +2098,11 @@ class CUDABlackwellAddmmPersistentTMATemplateConfigHeuristic(
 
     def __init__(self) -> None:
         super().__init__()
-        self.mm_configs = self.blackwell_persistent_mm_configs
+        # NOTE: to ensure that we pass tests, addmm needs a small config
+        self.mm_configs = (
+            self.blackwell_persistent_mm_configs
+            + self.blackwell_persistent_addmm_configs
+        )
 
 
 @register_template_heuristic(
@@ -2116,6 +2125,7 @@ class CUDAScaledMMTemplateConfigHeuristic(ScaledMMConfigMixin, CUDAConfigHeurist
     scaled_mm_device_tma_template.uid,
     "cuda",
     register=torch.version.hip is None,
+    op_name="scaled_mm",
 )
 class CUDAScaledTMATemplateConfigHeuristic(ScaledTMAConfigMixin, CUDAConfigHeuristic):
     """Scaled TMA template heuristic for CUDA"""
