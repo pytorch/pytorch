@@ -84,7 +84,10 @@ size_t compute_storage_numel_distance(const TensorBase& t) {
 }
 
 void runMPSGraph(MPSStream* mpsStream, MPSGraph* mpsGraph, NSDictionary* feeds, NSDictionary* results) {
-  mpsStream->executeMPSGraph(mpsGraph, feeds, results, SyncType::COMMIT_ADAPTIVE);
+  //Use COMMIT to flush command buffer after each operation
+  // commit() now properly flushes instead of using commitAndContinue
+  //This prevents command buffer accumulation during training
+  mpsStream->executeMPSGraph(mpsGraph, feeds, results, SyncType::COMMIT);
 }
 
 MPSDataType getMPSDataType(ScalarType scalar_type) {

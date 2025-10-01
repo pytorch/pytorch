@@ -292,6 +292,26 @@ struct MPSKernelCache {
     return static_cast<T*>(LookUp(key));
   }
 
+  // Clear all cached kernels to free memory
+  // This is used to prevent memory leaks between training epochs
+  void clearCache() {
+    dispatch_sync_with_rethrow(serialQueue_, ^() {
+      for (const auto& i : cache_) {
+        delete i.second.cachedKernel_;
+      }
+      cache_.clear();
+    });
+  }
+
+  // Get the current cache size (debug)
+  size_t size() const {
+    __block size_t cache_size = 0;
+    dispatch_sync(serialQueue_, ^() {
+      cache_size = cache_.size();
+    });
+    return cache_size;
+  }
+
  private:
   MPSKernelCache() {
     serialQueue_ = dispatch_queue_create("kernel cache queue", DISPATCH_QUEUE_SERIAL);
@@ -392,6 +412,26 @@ struct MPSGraphCache {
   template <typename T>
   inline T* LookUpAs(const std::string& key) const {
     return static_cast<T*>(LookUp(key));
+  }
+
+  // Clear all cached graphs to free memory
+  // This is useful to prevent memory leaks between training epochs
+  void clearCache() {
+    dispatch_sync_with_rethrow(serialQueue_, ^() {
+      for (const auto& i : cache_) {
+        delete i.second.cachedGraph_;
+      }
+      cache_.clear();
+    });
+  }
+
+  // Get the current cache size (debug)
+  size_t size() const {
+    __block size_t cache_size = 0;
+    dispatch_sync(serialQueue_, ^() {
+      cache_size = cache_.size();
+    });
+    return cache_size;
   }
 
  private:

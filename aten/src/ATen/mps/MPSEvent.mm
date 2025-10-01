@@ -180,6 +180,8 @@ void MPSEventPool::emptyCache() {
   while (!m_pool.empty()) {
     m_pool.pop();
   }
+  // Clear in-use events (should be safe after synchronization)
+  m_in_use_events.clear();
 }
 
 id_t MPSEventPool::acquireEvent(bool enable_timing) {

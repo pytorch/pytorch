@@ -362,6 +362,14 @@ class MPSProfiler {
     return (m_signpost_types != SignpostTypes::SIGNPOST_NONE);
   }
 
+  // Clear accumulated profiling data to prevent memory leaks
+  void clearProfilingData() {
+    m_op_info_list.clear();
+    m_cpu_fb_info_list.clear();
+    m_copy_info_list.clear();
+    m_copy_stat_list.clear();
+  }
+
  private:
   // indicates what type of signpost types are enabled and traced by MPS
   // profiler.
