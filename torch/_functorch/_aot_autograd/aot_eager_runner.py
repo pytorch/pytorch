@@ -50,11 +50,11 @@ class JointGraphModule(torch.nn.Module):
         self.fw_runner = graph_runner(fw_gm, fw_src_path, mode=mode)
         self.bw_runner = graph_runner(bw_gm, bw_src_path, mode=mode)
 
-    def forward(self, *args):
+    def forward(self, args):
         # TODO: apply pytree flattening here
         # TODO: apply DTensor to local_tesnor converstion here
 
-        # Create argument list: (*params, *buffers, user_input, fw_runner, bw_runner)
+        # Create argument list: (*params, *buffers, *user_input, fw_runner, bw_runner)
         flat_args = [
             *self._params,
             *self._buffers,

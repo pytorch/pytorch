@@ -40,8 +40,9 @@ class SimpleModel(torch.nn.Module):
         self.mlp_1 = MLPModule(device)
 
     def forward(self, input):
-        return self.mlp_1(self.mlp_0(input))
-
+        out =self.mlp_0(input) 
+        out = self.mlp_1(out)
+        return out
 
 def strict_export_and_aot_export_joint_with_descriptors(model, inputs):
     # needed for stric export
@@ -61,18 +62,20 @@ def strict_export_and_aot_export_joint_with_descriptors(model, inputs):
 
 
 def graph_capture_and_aot_export_joint_with_descriptors(model, inputs):
+    assert isinstance(inputs, tuple)
     with torch._dynamo.config.patch(install_free_tensors=True):
         # TODO: switch to use the official graph_capture API once it is ready
-        gm = _dynamo_graph_capture_for_export(model)(inputs)
+        gm = _dynamo_graph_capture_for_export(model)(*inputs)
     return aot_export_joint_with_descriptors_alone(gm, inputs)
 
 
 def aot_export_joint_with_descriptors_alone(model, inputs):
+    assert isinstance(inputs, tuple)
     with contextlib.ExitStack() as stack:
         joint_with_descriptors = aot_export_joint_with_descriptors(
             stack,
             model,
-            (inputs,),
+            inputs,
         )
         return joint_with_descriptors
 
@@ -160,11 +163,37 @@ class DTensorExportTest(TestCase):
         "run_mode", [RunMode.CODEGEN, RunMode.GRAPH_MODULE, RunMode.FX_INTERPRETER]
     )
     def test_jonit_graph_runner(self, run_mode):
-        model = SimpleModel(self.device_type)
-        inputs = torch.rand(20, 10, device=self.device_type)
 
-        joint_with_descriptors = graph_capture_and_aot_export_joint_with_descriptors(
-            model, inputs
+                
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.mlp_0 = MLPModule(device)
+                self.mlp_1 = MLPModule(device)
+                self.mlp_2 = MLPModule(device)
+                self.buffer = torch.nn.Buffer(torch.ones(10, device=device), persistent=True)
+
+            def forward(self, input0, input1):
+                # buffer mutation
+                # self.buffer.add_(1)
+
+                # # input mutation
+                # input0.add_(2)
+
+                out1 =self.mlp_0(input0) 
+                out2 =self.mlp_1(input1) 
+                out = out1 + out2
+                out = self.mlp_2(out)
+
+                return out
+
+        model = Model(self.device_type)
+        input0 = torch.rand(20, 10, device=self.device_type)
+        input1 = torch.rand(20, 10, device=self.device_type)
+        inputs = (input0, input1)
+
+        joint_with_descriptors = aot_export_joint_with_descriptors_alone(
+            model, inputs 
         )
 
         # Now partition the joint graph similar to aot_stage2_compile
@@ -196,7 +225,7 @@ class DTensorExportTest(TestCase):
         local_buffers = [
             b.clone().detach().requires_grad_(False) for b in model.buffers()
         ]
-        local_inputs = inputs.clone().detach()
+        local_inputs = tuple(input.clone().detach() for input in inputs)
 
         joint_graph_module = JointGraphModule(
             local_params, local_buffers, fw_metadata, fw_gm, bw_gm, run_mode
@@ -206,7 +235,7 @@ class DTensorExportTest(TestCase):
         outputs = joint_graph_module(local_inputs)
         outputs.sum().backward()
 
-        eager_out = model(inputs)
+        eager_out = model(*inputs)
         eager_out.sum().backward()
 
         self.assertEqual(outputs[0], eager_out[0])
