@@ -3533,8 +3533,15 @@ def meta_convolution_backward(
     if output_mask[1]:
         backend_grad_weight = grad_output_.new_empty(weight_.size())
     if output_mask[2]:
-        backend_grad_bias = grad_output_.new_empty(bias_sizes_opt)
-
+        if bias_sizes_opt:
+            backend_grad_bias = grad_output_.new_empty(bias_sizes_opt.size())
+        else:
+            backend_grad_bias = grad_output_.new_empty([])
+            #Optionally could do the following to prepare the tensor
+            #if transposed:
+            #    backend_grad_bias = grad_output_.new_empty(weight_.size(1)*groups)
+            #else:
+            #    backend_grad_bias = grad_output_.new_empty(weight_.size(0))
     return (backend_grad_input, backend_grad_weight, backend_grad_bias)
 
 
