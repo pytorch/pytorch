@@ -3,16 +3,12 @@
 
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 
 def run_fuzzer_with_seed(seed):
     """Run the fuzzer with a specific seed and return the generated code."""
-    cmd = [
-        sys.executable, "fuzzer.py",
-        "--seed", str(seed)
-    ]
+    cmd = [sys.executable, "fuzzer.py", "--seed", str(seed)]
 
     # Clear the output directory first
     torchfuzz_dir = Path("/tmp/torchfuzz")
@@ -20,7 +16,9 @@ def run_fuzzer_with_seed(seed):
         for f in torchfuzz_dir.glob("*.py"):
             f.unlink()
 
-    result = subprocess.run(cmd, capture_output=True, text=True, cwd=Path(__file__).parent)
+    result = subprocess.run(
+        cmd, capture_output=True, text=True, cwd=Path(__file__).parent
+    )
 
     if result.returncode != 0:
         print(f"Fuzzer failed with return code {result.returncode}")
@@ -35,7 +33,7 @@ def run_fuzzer_with_seed(seed):
         return None
 
     # Read the content of the generated file
-    with open(py_files[0], 'r') as f:
+    with open(py_files[0]) as f:
         return f.read()
 
 

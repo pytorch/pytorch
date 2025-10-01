@@ -43,6 +43,7 @@ class ConstantOperator(Operator):
         # Create constant by calling fuzzing functions during codegen with deterministic seed
         # Use a deterministic hash based on the variable name to ensure reproducibility across processes
         import hashlib
+
         var_seed = int(hashlib.md5(output_name.encode()).hexdigest()[:8], 16) % (2**31)
 
         if isinstance(output_spec, ScalarSpec):

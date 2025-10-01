@@ -359,7 +359,7 @@ def fuzz_tensor(
 
     # Create a local Random instance to avoid interfering with global state
     local_random = random.Random(seed)
-    
+
     # Set the torch random seed for reproducibility
     # Save and restore global torch state to avoid side effects
     torch_state = torch.get_rng_state()
@@ -370,7 +370,7 @@ def fuzz_tensor(
     try:
         # Temporarily use local random instance for deterministic generation
         random.setstate(local_random.getstate())
-          
+
         if size is None:
             size = fuzz_tensor_size()
 
@@ -514,14 +514,16 @@ def fuzz_scalar(spec, seed: Optional[int] = None) -> Union[float, int, bool, com
         old_random_state = random.getstate()
         try:
             random.setstate(local_random.getstate())
-            
+
             # Create a scalar value based on dtype
             if spec.dtype.is_floating_point:
                 return random.uniform(-10.0, 10.0)
             elif spec.dtype in [torch.complex64, torch.complex128]:
                 # Only generate complex values if not avoiding complex dtypes
                 if FuzzerConfig.avoid_complex:
-                    raise ValueError("Cannot generate complex values with avoid_complex=True")
+                    raise ValueError(
+                        "Cannot generate complex values with avoid_complex=True"
+                    )
                 return complex(random.uniform(-10.0, 10.0), random.uniform(-10.0, 10.0))
             else:  # integer or bool
                 if spec.dtype == torch.bool:
@@ -539,7 +541,9 @@ def fuzz_scalar(spec, seed: Optional[int] = None) -> Union[float, int, bool, com
         elif spec.dtype in [torch.complex64, torch.complex128]:
             # Only generate complex values if not avoiding complex dtypes
             if FuzzerConfig.avoid_complex:
-                raise ValueError("Cannot generate complex values with avoid_complex=True")
+                raise ValueError(
+                    "Cannot generate complex values with avoid_complex=True"
+                )
             return complex(random.uniform(-10.0, 10.0), random.uniform(-10.0, 10.0))
         else:  # integer or bool
             if spec.dtype == torch.bool:
