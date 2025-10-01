@@ -654,6 +654,8 @@ class CodeGen:
                     and issubclass(meta_val.__class__, torch.Tensor)
                     and meta_val.__class__ != torch.Tensor
                     and isinstance(meta_val, torch.Tensor)
+                    # Fake tensors cause tests to wobble and the benefits to end
+                    # users are unclear so let's not custom print them for now.
                     and not isinstance(meta_val, torch._subclasses.FakeTensor)
                 ):
                     # Get the basic tensor representation
