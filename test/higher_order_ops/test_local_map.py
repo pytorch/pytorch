@@ -142,7 +142,7 @@ def get_local_mapped_functions():
 
     cp_function = local_map(
         context_parallel_attention,
-        out_placements=(Shard(0), Shard(1), Shard(2)),
+        out_placements=((Shard(0), Shard(1), Shard(2)),),
         in_placements=(
             (Shard(0), Shard(1), Shard(2)),  # query
             (Shard(0), Shard(1), Replicate()),  # key
