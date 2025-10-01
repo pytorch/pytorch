@@ -127,7 +127,11 @@ class MMOperator(MatrixMultiplyOperator):
                 "torch.torch.", "torch."
             )
             # Cast inputs to ensure compatible types
-            return f"{output_name} = torch.mm({input_names[0]}.to({target_dtype_str}), {input_names[1]}.to({target_dtype_str}))"
+            return (
+                f"{output_name} = torch.mm("
+                f"{input_names[0]}.to({target_dtype_str}), "
+                f"{input_names[1]}.to({target_dtype_str}))"
+            )
         else:
             return f"{output_name} = torch.mm({input_names[0]}, {input_names[1]})"
 
@@ -210,7 +214,12 @@ class AddmmOperator(MatrixMultiplyOperator):
                 "torch.torch.", "torch."
             )
             # Cast inputs to ensure compatible types
-            return f"{output_name} = torch.addmm({input_names[0]}.to({target_dtype_str}), {input_names[1]}.to({target_dtype_str}), {input_names[2]}.to({target_dtype_str}))"
+            return (
+                f"{output_name} = torch.addmm("
+                f"{input_names[0]}.to({target_dtype_str}), "
+                f"{input_names[1]}.to({target_dtype_str}), "
+                f"{input_names[2]}.to({target_dtype_str}))"
+            )
         else:
             return f"{output_name} = torch.addmm({input_names[0]}, {input_names[1]}, {input_names[2]})"
 
@@ -286,7 +295,11 @@ class BmmOperator(MatrixMultiplyOperator):
                 "torch.torch.", "torch."
             )
             # Cast inputs to ensure compatible types
-            return f"{output_name} = torch.bmm({input_names[0]}.to({target_dtype_str}), {input_names[1]}.to({target_dtype_str}))"
+            return (
+                f"{output_name} = torch.bmm("
+                f"{input_names[0]}.to({target_dtype_str}), "
+                f"{input_names[1]}.to({target_dtype_str}))"
+            )
         else:
             return f"{output_name} = torch.bmm({input_names[0]}, {input_names[1]})"
 
@@ -408,6 +421,10 @@ class MatmulOperator(MatrixMultiplyOperator):
                 "torch.torch.", "torch."
             )
             # Cast inputs to ensure compatible types
-            return f"{output_name} = torch.matmul({input_names[0]}.to({target_dtype_str}), {input_names[1]}.to({target_dtype_str}))"
+            return (
+                f"{output_name} = torch.matmul("
+                f"{input_names[0]}.to({target_dtype_str}), "
+                f"{input_names[1]}.to({target_dtype_str}))"
+            )
         else:
             return f"{output_name} = torch.matmul({input_names[0]}, {input_names[1]})"

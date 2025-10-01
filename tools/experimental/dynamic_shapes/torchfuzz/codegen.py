@@ -117,7 +117,9 @@ class DefaultFuzzTemplate(FuzzTemplate):
                 "torch.div",
                 "torch.Tensor.view",
                 "torch.reshape",
-                "torch.flattentorch.squeezetorch.unsqueeze",
+                "torch.flatten"
+                "torch.squeeze",
+                "torch.unsqueeze",
                 "torch.mm",
                 "torch.addmm",
                 "torch.bmm",
