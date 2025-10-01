@@ -358,7 +358,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     && echo "Building FlashInfer with AOT for arches FLASHINFER_CUDA_ARCH_LIST: ${FLASHINFER_CUDA_ARCH_LIST}, TORCH_CUDA_ARCH_LIST ${TORCH_CUDA_ARCH_LIST}" \
     && cd flashinfer \
     && python3 -m flashinfer.aot \
-    && echo "Start building FlashInfer Wheels ..."
+    && echo "Start building FlashInfer Wheels ..." \
     && python3 -m build --no-isolation --wheel --outdir ../wheels/flashinfer \
     && cd .. \
     && rm -rf flashinfer
