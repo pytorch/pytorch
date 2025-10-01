@@ -586,7 +586,7 @@ def _wrap_sycl_host_flags(cflags):
                 flag = flag.replace("-D", "/D")
             flag = flag.replace('"', '\\"')
             host_cflags.append(flag)
-        host_cflags = ' '.join(host_cflags)
+        joined_host_cflags = ' '.join(host_cflags)
 
         external_include = _join_sycl_home("include").replace("\\", "\\\\")
 
@@ -598,13 +598,13 @@ def _wrap_sycl_host_flags(cflags):
         # for Windows build as `/sdl` compilation flag assumes that and we will fail compilation otherwise.
         wrapped_host_cflags = [
             f"-fsycl-host-compiler={host_cxx}",
-            f'-fsycl-host-compiler-options="\\"/external:I{external_include}\\" /external:W0 {host_cflags}"',
+            f'-fsycl-host-compiler-options="\\"/external:I{external_include}\\" /external:W0 {joined_host_cflags}"',
         ]
     else:
-        host_cflags = ' '.join(cflags)
+        joined_host_cflags = ' '.join(cflags)
         wrapped_host_cflags = [
             f"-fsycl-host-compiler={host_cxx}",
-            shlex.quote(f"-fsycl-host-compiler-options={host_cflags}"),
+            shlex.quote(f"-fsycl-host-compiler-options={joined_host_cflags}"),
         ]
     return wrapped_host_cflags
 
@@ -3033,9 +3033,7 @@ e.
     if sycl_dlink_post_cflags:
         sycl_devlink_out = os.path.join(os.path.dirname(objects[0]), "sycl_dlink.o")
         if IS_WINDOWS:
-            sycl_devlink_objects = list(
-                map(lambda obj: obj.replace(":", "$:"), objects)
-            )
+            sycl_devlink_objects = [obj.replace(":", "$:") for obj in objects]
             objects += [sycl_devlink_out]
             sycl_devlink_out = sycl_devlink_out.replace(":", "$:")
         else:
