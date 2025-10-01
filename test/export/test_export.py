@@ -14797,13 +14797,8 @@ graph():
             for nn_module_stack in nn_module_stacks
         ]
 
-        if is_inline_and_install_strict_test(self._testMethodName):
-            # when inlined and install have same ID so reference same layer
-            self.assertEqual(filtered_nn_module_stack[0], "sub_net.0")
-            self.assertEqual(filtered_nn_module_stack[1], "sub_net.0")
-        else:
-            self.assertEqual(filtered_nn_module_stack[0], "sub_net.0")
-            self.assertEqual(filtered_nn_module_stack[1], "sub_net.2")
+        self.assertEqual(filtered_nn_module_stack[0], "sub_net.0")
+        self.assertEqual(filtered_nn_module_stack[1], "sub_net.2")
 
     def test_slice_nn_module_stack(self):
         class N(torch.nn.Module):
@@ -14838,7 +14833,7 @@ graph():
         ]
         if is_inline_and_install_strict_test(self._testMethodName):
             self.assertEqual(filtered_nn_module_stack[0], "mod_list_1.2")
-            self.assertEqual(filtered_nn_module_stack[1], "mod_list_1.2")
+            self.assertEqual(filtered_nn_module_stack[1], "mod_list_2.4")
         # This is fine since both of these will be deprecated soon.
         elif is_strict_v2_test(self._testMethodName) and IS_FBCODE:
             self.assertEqual(
