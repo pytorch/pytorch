@@ -1,6 +1,6 @@
-# mypy: allow-untyped-defs
 import contextlib
 import tempfile
+from typing import Generator, Optional, Sequence
 
 import torch
 
@@ -20,7 +20,11 @@ DEFAULT_FLAGS = [
 ]
 
 
-def init(output_file, flags=None, output_mode="key_value"):
+def init(
+    output_file: str,
+    flags: Optional[Sequence[str]] = None,
+    output_mode: str = "key_value",
+) -> None:
     rt = cudart()
     if not hasattr(rt, "cudaOutputMode"):
         raise AssertionError("HIP does not support profiler initialization!")
@@ -47,7 +51,7 @@ def init(output_file, flags=None, output_mode="key_value"):
         check_error(rt.cudaProfilerInitialize(f.name, output_file, output_mode_enum))
 
 
-def start():
+def start() -> None:
     r"""Starts cuda profiler data collection.
 
     .. warning::
@@ -56,7 +60,7 @@ def start():
     check_error(cudart().cudaProfilerStart())
 
 
-def stop():
+def stop() -> None:
     r"""Stops cuda profiler data collection.
 
     .. warning::
@@ -66,7 +70,7 @@ def stop():
 
 
 @contextlib.contextmanager
-def profile():
+def profile() -> Generator[None, None, None]:
     """
     Enable profiling.
 
