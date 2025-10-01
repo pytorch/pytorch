@@ -352,7 +352,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
         ${FLASHINFER_GIT_REPO} flashinfer \
     && echo "Building FlashInfer with AOT for arches: ${torch_cuda_arch_list}" \
     && cd flashinfer \
-    && pip install --system cuda-python==$(echo $CUDA_VERSION | cut -d. -f1,2) pynvml==$(echo $CUDA_VERSION | cut -d. -f1) nvidia-nvshmem-cu$(echo $CUDA_VERSION | cut -d. -f1)
+    && pip install --system cuda-python==$(echo $CUDA_VERSION | cut -d. -f1,2) pynvml==$(echo $CUDA_VERSION | cut -d. -f1) nvidia-nvshmem-cu$(echo $CUDA_VERSION | cut -d. -f1) \
     && python3 -m flashinfer.aot \
     && python3 -m build --no-isolation --wheel --outdir ../wheels/flashinfer \
     && cd .. \
