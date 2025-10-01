@@ -11,6 +11,9 @@ from .sigmoid import SigmoidOperator
 from .sqrt import SqrtOperator
 from .sub import SubOperator
 from .tanh import TanhOperator
+from .dropout import DropoutOperator
+from .softmax import SoftmaxOperator
+from .silu import SiluOperator
 
 __all__ = [
     'AddOperator',
@@ -24,4 +27,7 @@ __all__ = [
     'SqrtOperator',
     'SubOperator',
     'TanhOperator',
+    'DropoutOperator',
+    'SoftmaxOperator',
+    'SiluOperator',
 ]
