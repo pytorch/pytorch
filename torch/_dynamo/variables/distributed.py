@@ -152,7 +152,7 @@ class PlacementClassVariable(DistributedVariable):
         tx: "InstructionTranslator",
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
-        t) -> "VariableTracker":
+    ) -> "VariableTracker":
         if self.source:
             # NOTE: we don't need to track mutations to the placement class as they
             # are supposed to be immutable.
