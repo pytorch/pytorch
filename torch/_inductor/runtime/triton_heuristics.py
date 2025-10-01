@@ -2691,14 +2691,9 @@ def _reduction_configs(
         else:
             x_block = max(min(max_x_block, x // 4096), x_block)
 
-
         if num_dynamic >= 1:
             # Dynamic shapes introduce a lot register pressure for indexing
-            outer_r_block = (
-                1
-                if load_factor >= 3
-                else min(max(rnumel // 128, 1), 8)
-            )
+            outer_r_block = 1 if load_factor >= 3 else min(max(rnumel // 128, 1), 8)
             outer_register_intensive = True
         else:
             if rnumel <= 128:
@@ -2709,7 +2704,7 @@ def _reduction_configs(
                 # Assume each warp takes a single column of x_block, vectorize the loads
                 # Force more work per thread, generally better for Hopper and Blackwell
                 num_warps = outer_r_block // 32
-            
+
             x_block = max(min(x_block, 2048 // outer_r_block), 8)
 
         # Set register intensive to true by default as we try to maximize tiles with heuristic

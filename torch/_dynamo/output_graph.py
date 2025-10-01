@@ -726,10 +726,9 @@ class OutputGraph(OutputGraphCommon):
 
         self.export_metadata = ExportMetaData()
 
-        # Dict of inlined unspecialized modules to generate the
-        # dynamo_flat_name_to_original_fqn mapping. The code here follows what
-        # export was doing earlier.
-        self.inlined_unspecialized_modules: dict[str, torch.nn.Module] = {}
+        # Set of inlined unspecialized modules names to generate the
+        # dynamo_flat_name_to_original_fqn mapping.
+        self.used_inlined_inbuilt_modules_names: OrderedSet[str] = OrderedSet()
 
     def mark_bytecode_tracing_start(self) -> None:
         self.compiler_trace_stack.enter_context(
@@ -2585,7 +2584,7 @@ class OutputGraph(OutputGraphCommon):
         # some of the tensor objects to be held alive for longer than necessary.
         self.root_tx = None  # type: ignore[assignment]
         self.nn_modules.clear()
-        self.inlined_unspecialized_modules.clear()
+        self.used_inlined_inbuilt_modules_names.clear()
         self.param_name_to_source = None
 
         for node in self.graph.nodes:
@@ -2619,9 +2618,9 @@ class OutputGraph(OutputGraphCommon):
     ) -> None:
         name = OutputGraph.module_key_name(source.name())
         name = get_unique_name_wrt(
-            name, self.inlined_unspecialized_modules, self.global_scope
+            name, self.used_inlined_inbuilt_modules_names, self.global_scope
         )
-        self.inlined_unspecialized_modules[name] = inlined_module
+        self.used_inlined_inbuilt_modules_names.add(name)
 
         def register_leaf_name(leaf_name: str) -> None:
             assert self.param_name_to_source is not None
