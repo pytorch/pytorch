@@ -36,7 +36,7 @@ def _outer_to_inner_dim(ndim, dim, ragged_dim, canonicalize=False):
     return (
         # pyrefly: ignore  # unsupported-operation
         ragged_dim - 1 if dim == 0 else dim - 1
-    )  # pyrefly: ignore  # unsupported-operation
+    )
 
 
 def _wrap_jagged_dim(
@@ -1993,7 +1993,7 @@ def index_put_(func, *args, **kwargs):
     torch._assert_async(
         torch.all(
             indices[inp._ragged_idx] < lengths
-        ),  # pyrefly: ignore  # no-matching-overload
+        ),
         "Some indices in the ragged dimension are out of bounds!",
     )
 

@@ -1049,11 +1049,11 @@ class LOBPCG:
             E[(torch.where(E < t))[0]] = t
 
         return torch.matmul(
-            # pyrefly: ignore  # unsupported-operation
+
             U * d_col.mT,
             # pyrefly: ignore  # unsupported-operation
             Z * E**-0.5,
-        )  # pyrefly: ignore  # unsupported-operation
+        )
 
     def _get_ortho(self, U, V):
         """Return B-orthonormal U with columns are B-orthogonal to V.

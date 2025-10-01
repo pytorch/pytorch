@@ -245,7 +245,7 @@ class Library:
         # pyrefly: ignore  # bad-argument-type
         assert torch.DispatchKeySet(dispatch_key).has(
             torch._C.DispatchKey.Dense
-        )  # pyrefly: ignore  # bad-argument-type
+        )
 
         if isinstance(op_name, str):
             name = op_name
@@ -648,7 +648,7 @@ def impl(
     """
     return _impl(
         qualname, types, func, lib=lib, disable_dynamo=False
-    )  # pyrefly: ignore  # no-matching-overload
+    )
 
 
 if not TYPE_CHECKING:
@@ -836,7 +836,7 @@ def register_kernel(
 
     return _impl(
         op, device_types, func, lib=lib, disable_dynamo=True
-    )  # pyrefly: ignore  # no-matching-overload
+    )
 
 
 def register_autocast(

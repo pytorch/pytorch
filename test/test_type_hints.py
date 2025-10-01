@@ -145,7 +145,7 @@ class TestTypeHints(TestCase):
                 # pyrefly: ignore  # missing-attribute
                 self.fail(
                     f"mypy failed:\n{stderr}\n{stdout}"
-                )  # pyrefly: ignore  # missing-attribute
+                )
 
 
 if __name__ == "__main__":

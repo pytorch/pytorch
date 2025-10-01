@@ -399,7 +399,7 @@ def kaiser(
     # Avoid NaNs by casting `beta` to the appropriate dtype.
     beta = torch.tensor(
         beta, dtype=dtype, device=device
-    )  # pyrefly: ignore  # bad-assignment
+    )
 
     start = -beta
     constant = 2.0 * beta / (M if not sym else M - 1)
@@ -408,7 +408,7 @@ def kaiser(
         beta,
         # pyrefly: ignore  # bad-argument-type
         start + (M - 1) * constant,
-    )  # pyrefly: ignore  # bad-argument-type
+    )
 
     k = torch.linspace(
         start=start,
@@ -423,7 +423,7 @@ def kaiser(
     return torch.i0(torch.sqrt(beta * beta - torch.pow(k, 2))) / torch.i0(
         # pyrefly: ignore  # bad-argument-type
         beta
-    )  # pyrefly: ignore  # bad-argument-type
+    )
 
 
 @_add_docstr(

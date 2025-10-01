@@ -87,7 +87,7 @@ def compile_time_strobelight_meta(
                 # pyrefly: ignore  # unsupported-operation
                 skip := kwargs["skip"],
                 int,
-            ):  # pyrefly: ignore  # unsupported-operation
+            ):
                 kwargs["skip"] = skip + 1
 
             # This is not needed but we have it here to avoid having profile_compile_time
@@ -333,7 +333,7 @@ def deprecated():
             # pyrefly: ignore  # bad-argument-type
             warning_msg,
             category=UserWarning,
-            stacklevel=1,  # pyrefly: ignore  # bad-argument-type
+            stacklevel=1,
         )(func)
 
         alias.__name__ = public_name

@@ -758,7 +758,7 @@ class Tensor(torch._C.TensorBase):
             self._post_accumulate_grad_hooks: dict[Any, Any] = (
                 # pyrefly: ignore  # bad-assignment
                 OrderedDict()
-            )  # pyrefly: ignore  # bad-assignment
+            )
 
         from torch.utils.hooks import RemovableHandle
 
@@ -1059,12 +1059,12 @@ class Tensor(torch._C.TensorBase):
             return torch._VF.split(self, split_size, dim)  # type: ignore[attr-defined]
         else:
             return torch._VF.split_with_sizes(
-                # pyrefly: ignore  # bad-argument-type
+
                 self,
                 # pyrefly: ignore  # bad-argument-type
                 split_size,
                 dim,
-            )  # pyrefly: ignore  # bad-argument-type
+            )
 
     def unique(self, sorted=True, return_inverse=False, return_counts=False, dim=None):
         r"""Returns the unique elements of the input tensor.
@@ -1111,7 +1111,7 @@ class Tensor(torch._C.TensorBase):
     def __rsub__(self, other: Union["Tensor", int, float, bool, complex]) -> "Tensor":
         return _C._VariableFunctions.rsub(
             self, other
-        )  # pyrefly: ignore  # no-matching-overload
+        )
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
     def __rdiv__(self, other: Union["Tensor", int, float, bool, complex]) -> "Tensor":
@@ -1167,7 +1167,7 @@ class Tensor(torch._C.TensorBase):
     ) -> "Tensor":
         return torch.bitwise_left_shift(
             other, self
-        )  # pyrefly: ignore  # no-matching-overload
+        )
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
     def __rrshift__(
@@ -1175,7 +1175,7 @@ class Tensor(torch._C.TensorBase):
     ) -> "Tensor":
         return torch.bitwise_right_shift(
             other, self
-        )  # pyrefly: ignore  # no-matching-overload
+        )
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
     def __rmatmul__(self, other: "Tensor") -> "Tensor":

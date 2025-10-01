@@ -61,7 +61,7 @@ class TestBundledInputs(TestCase):
         # pyrefly: ignore  # missing-attribute
         self.assertLess(
             augmented_size, original_size + (1 << 12)
-        )  # pyrefly: ignore  # missing-attribute
+        )
 
         loaded = save_and_load(sm)
         inflated = loaded.get_all_bundled_inputs()
@@ -70,7 +70,7 @@ class TestBundledInputs(TestCase):
         # pyrefly: ignore  # missing-attribute
         self.assertTrue(
             loaded(*inflated[0]) is inflated[0][0]
-        )  # pyrefly: ignore  # missing-attribute
+        )
 
         for idx, inp in enumerate(inflated):
             self.assertIsInstance(inp, tuple)  # pyrefly: ignore  # missing-attribute
@@ -78,7 +78,7 @@ class TestBundledInputs(TestCase):
             # pyrefly: ignore  # missing-attribute
             self.assertIsInstance(
                 inp[0], torch.Tensor
-            )  # pyrefly: ignore  # missing-attribute
+            )
             if idx != 5:
                 # Strides might be important for benchmarking.
                 self.assertEqual(inp[0].stride(), samples[idx][0].stride())
@@ -148,7 +148,7 @@ class TestBundledInputs(TestCase):
         # pyrefly: ignore  # missing-attribute
         self.assertTrue(
             loaded(*inflated[0]) == "first 1"
-        )  # pyrefly: ignore  # missing-attribute
+        )
 
     def test_multiple_methods_with_inputs(self):
         class MultipleMethodModel(torch.nn.Module):
@@ -197,7 +197,7 @@ class TestBundledInputs(TestCase):
         # pyrefly: ignore  # missing-attribute
         self.assertTrue(
             loaded(*inflated[0]) is inflated[0][0]
-        )  # pyrefly: ignore  # missing-attribute
+        )
         self.assertEqual(loaded.get_num_bundled_inputs(), len(samples))
 
         # Check helper that work on all functions
@@ -432,7 +432,7 @@ class TestBundledInputs(TestCase):
         # pyrefly: ignore  # missing-attribute
         self.assertLess(
             augmented_size, original_size + (1 << 13)
-        )  # pyrefly: ignore  # missing-attribute
+        )
 
         loaded = save_and_load(sm)
         inflated = loaded.get_all_bundled_inputs()

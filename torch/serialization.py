@@ -771,7 +771,7 @@ class _open_zipfile_reader(_opener[torch._C.PyTorchFileReader]):
         super().__init__(
             # pyrefly: ignore  # no-matching-overload
             torch._C.PyTorchFileReader(name_or_buffer)
-        )  # pyrefly: ignore  # no-matching-overload
+        )
 
 
 class _open_zipfile_writer_file(_opener[torch._C.PyTorchFileWriter]):
@@ -786,7 +786,7 @@ class _open_zipfile_writer_file(_opener[torch._C.PyTorchFileWriter]):
             # for writing out the file.
             self.file_stream = io.FileIO(
                 self.name, mode="w"
-            )  # pyrefly: ignore  # bad-assignment
+            )
             super().__init__(
                 torch._C.PyTorchFileWriter(  # pyrefly: ignore  # no-matching-overload
                     self.file_stream, get_crc32_options(), _get_storage_alignment()
@@ -1522,7 +1522,7 @@ def load(
                         # pyrefly: ignore  # no-matching-overload
                         os.fspath(f),
                         shared,
-                        size,  # pyrefly: ignore  # no-matching-overload
+                        size,
                     )
                 if weights_only:
                     try:

@@ -1803,12 +1803,12 @@ def _check_not_implemented(cond, message=None):  # noqa: F811
             message. Default: ``None``
     """
     _check_with(
-        # pyrefly: ignore  # bad-argument-type
+
         NotImplementedError,
         cond,
         # pyrefly: ignore  # bad-argument-type
         message,
-    )  # pyrefly: ignore  # bad-argument-type
+    )
 
 
 def _check_tensor_all_with(error_type, cond, message=None):  # noqa: F811

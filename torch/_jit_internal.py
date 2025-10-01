@@ -847,7 +847,7 @@ def ignore(drop=False, **kwargs):
         # pyrefly: ignore  # missing-attribute
         fn._torchscript_modifier = (
             FunctionModifiers.IGNORE
-        )  # pyrefly: ignore  # missing-attribute
+        )
         return fn
 
     if not isinstance(drop, bool):
@@ -1256,7 +1256,7 @@ def _get_named_tuple_properties(
         obj_annotations = inspect.get_annotations(
             # pyrefly: ignore  # bad-argument-type
             obj.__base__
-        )  # pyrefly: ignore  # bad-argument-type
+        )
 
     annotations = []
     for field in obj._fields:
@@ -1447,7 +1447,7 @@ def container_checker(obj, target_type) -> bool:
     elif origin_type is Union or issubclass(
         # pyrefly: ignore  # bad-argument-type
         origin_type,
-        BuiltinUnionType,  # pyrefly: ignore  # bad-argument-type
+        BuiltinUnionType,
     ):  # also handles Optional
         if obj is None:  # check before recursion because None is always fine
             return True

@@ -746,7 +746,7 @@ class ExceptionWrapper:
         self.exc_msg = "".join(
             # pyrefly: ignore  # no-matching-overload
             traceback.format_exception(*exc_info)
-        )  # pyrefly: ignore  # no-matching-overload
+        )
         self.where = where
 
     def reraise(self):
@@ -766,7 +766,7 @@ class ExceptionWrapper:
             raise self.exc_type(
                 # pyrefly: ignore  # unexpected-keyword
                 message=msg
-            )  # pyrefly: ignore  # not-callable, unexpected-keyword
+            )
         try:
             exception = self.exc_type(msg)  # pyrefly: ignore  # not-callable
         except Exception:

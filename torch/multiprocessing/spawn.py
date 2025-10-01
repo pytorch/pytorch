@@ -121,7 +121,7 @@ class ProcessContext:
         for process in self.processes:
             time_to_wait = max(
                 0, end - time.monotonic()
-            )  # pyrefly: ignore  # no-matching-overload
+            )
             process.join(time_to_wait)
 
     def join(
