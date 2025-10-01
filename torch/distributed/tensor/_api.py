@@ -651,7 +651,7 @@ class DTensor(torch.Tensor):
             raise RuntimeError("Unsupported tensor type!")
 
     @classmethod
-    def __metadata_guard__(cls, orig, other):
+    def __metadata_guard__(cls, orig: object, other: object) -> bool:
         orig_spec, orig_requires_grad = orig
         other_spec, other_requires_grad = other
         return (
