@@ -43,6 +43,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     Transformer,
     with_comms,
 )
+from unittest import skipIf
 
 
 c10d_functional = torch.ops.c10d_functional

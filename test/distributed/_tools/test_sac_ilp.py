@@ -17,7 +17,7 @@ from torch.distributed._tools.sac_ilp import (
     get_optimal_checkpointing_policy_per_module,
     sac_milp,
 )
-from torch.testing._internal.common_cuda import TEST_CUDA
+from torch.testing._internal.common_cuda import TEST_CUDA, PLATFORM_SUPPORTS_FLASH_ATTENTION
 from torch.testing._internal.common_utils import (
     run_tests,
     skipIfTorchDynamo,
@@ -180,7 +180,7 @@ class TestSACILP(TestCase):
 
     @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/115653")
     @unittest.skipIf(not TEST_CUDA, "CUDA not available")
-    @skipIfRocmArch(NAVI_ARCH)
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Some archs don't support SDPA")
     def test_sac_ilp_case2(self):
         """
         This is a case where the memory budget is not binding, meaning that no

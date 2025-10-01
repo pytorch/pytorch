@@ -27,7 +27,10 @@ from torch.distributed.fsdp import (
 )
 from torch.distributed.tensor import DTensor, init_device_mesh, Shard
 from torch.distributed.tensor.debug import CommDebugMode
-from torch.testing._internal.common_cuda import TEST_CUDA
+from torch.testing._internal.common_cuda import (
+    PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+    TEST_CUDA,
+)
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     check_sharded_parity,
@@ -41,7 +44,9 @@ from torch.testing._internal.common_fsdp import (
 )
 from torch.testing._internal.common_utils import (
     get_cycles_per_ms,
+    NAVI4_ARCH,
     run_tests,
+    skipIfRocmArch,
     wrapSwapTensorsTest,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -94,6 +99,7 @@ class TestFullyShardRegisteredParams(FSDPTestMultiThread):
         return 4
 
     @unittest.skipIf(not TEST_CUDA, "no cuda")
+    @skipIfRocmArch(NAVI4_ARCH)  # Supported in future releaes
     def test_param_registration_after_forward(self):
         """Tests the parameter registration after forward."""
         device = torch.device("cuda", 0)
@@ -200,6 +206,7 @@ class TestFullyShardCastAfterInit(FSDPTestMultiThread):
 
     @unittest.skipIf(not TEST_CUDA, "no cuda")
     @wrapSwapTensorsTest(True)
+    @skipIfRocmArch(NAVI4_ARCH)  # Supported in future releaes
     def test_to_float64_after_init(self):
         """Tests that the user can cast the module to float64 after init."""
         # NOTE: Test fp64 instead of a lower precision dtype like bf16 for
@@ -310,6 +317,9 @@ class TestFullyShard1DTrainingCore(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     @compiled_fsdp_test(compile_compute_on_module=Transformer)
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Platform does not support fused SDPA"
+    )
     def test_train_parity_multi_group(self):
         """
         Tests train parity against DDP when using multiple parameter groups for

@@ -6,6 +6,7 @@ from collections import Counter
 from enum import auto, Enum
 from functools import partial
 from typing import Optional
+import unittest
 
 import torch
 import torch.distributed as dist
@@ -30,6 +31,9 @@ from torch.testing._internal.common_fsdp import (
     FSDPInitMode,
     FSDPTest,
     TransformerWithSharedParams,
+)
+from torch.testing._internal.common_cuda import (
+    PLATFORM_SUPPORTS_FLASH_ATTENTION,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -227,6 +231,7 @@ class TestFSDPHybridShard(FSDPTest):
     # resharded after forward.
 
     @skip_if_lt_x_gpu(2)
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support flash attention")
     def test_fsdp_hybrid_shard_basic_setup(self):
         """
         Tests basic functionality of HYBRID_SHARD and _HYBRID_SHARD_ZERO2:
