@@ -299,28 +299,33 @@ class NVSHMEMAll2AllTest(MultiProcContinuousTest):
             torch.randn(max_inp_numel, dtype=dtype, device=self.device)
         )
         out = symm_mem.empty(max_out_numel, dtype=dtype, device=self.device).fill_(-1)
-        in_out_splits = symm_mem.empty(
-            (3, self.world_size), dtype=torch.int64, device=self.device
+        in_splits = symm_mem.empty(
+            self.world_size, dtype=torch.int64, device=self.device
+        )
+        out_splits_offsets = symm_mem.empty(
+            (2, self.world_size), dtype=torch.int64, device=self.device
         )
         # Row 0 is input splits
-        in_out_splits[0].copy_(inp_splits)
+        in_splits.copy_(inp_splits)
 
         # Sync all ranks to ensure remote tensors are allocated
         dist.barrier()
 
-        torch.ops.symm_mem.all_to_all_vdev(inp, out, in_out_splits, group_name)
+        torch.ops.symm_mem.all_to_all_vdev(
+            inp, out, in_splits, out_splits_offsets, group_name
+        )
 
         # Check input splits (row 0) -- should not change
-        torch.testing.assert_close(in_out_splits[0], inp_splits)
+        torch.testing.assert_close(in_splits, inp_splits)
 
         # Check output splits (row 1)
-        torch.testing.assert_close(in_out_splits[1], out_splits)
+        torch.testing.assert_close(out_splits_offsets[0], out_splits)
 
         # Check output offsets (row 2)
         out_offsets = torch.cumsum(out_splits, dim=0)  # inclusive scan
         # output offsets from `all_to_all_vdev` is exclusive scan
-        self.assertEqual(in_out_splits[2][0], 0)
-        torch.testing.assert_close(in_out_splits[2][1:], out_offsets[:-1])
+        self.assertEqual(out_splits_offsets[1][0], 0)
+        torch.testing.assert_close(out_splits_offsets[1][1:], out_offsets[:-1])
 
         # Check data
         expected = torch.empty(out_numel, dtype=dtype, device=self.device)
