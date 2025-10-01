@@ -9,9 +9,10 @@
 
 namespace dummy_types {
 
-// For versions < 2.9.0 - use inline namespace for legacy
-#if defined(TORCH_FEATURE_VERSION) && \
-    TORCH_FEATURE_VERSION < ((2ULL << 56) | (9ULL << 48))
+// This ifdef is just to ease testing, if a type in headeronly were to be
+// updated we would inline the namespace corresponding to the new version
+// (e.g. v2_9) and not inline the old one (e.g. v2_8).
+#ifdef FAKE_TORCH_VERSION
 inline
 #endif
     namespace v2_8 {
@@ -27,9 +28,7 @@ struct Dummy {
 };
 } // namespace v2_8
 
-// For versions >= 2.9.0 - use inline namespace for new version
-#if !defined(TORCH_FEATURE_VERSION) || \
-    TORCH_FEATURE_VERSION >= ((2ULL << 56) | (9ULL << 48))
+#ifndef FAKE_TORCH_VERSION
 inline
 #endif
     namespace v2_9 {

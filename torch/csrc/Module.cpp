@@ -2776,6 +2776,13 @@ Call this whenever a new thread is created in order to propagate values from
         return "Dummy(foo=" + std::to_string(d.get_foo()) +
             ", id=" + std::to_string(d.get_id()) + ")";
       });
+  // py::class_<dummy_types::v2_8::Dummy>(py_module, "Dummy")
+  //   .def(py::init<int32_t>(), py::arg("id"))
+  //   .def("get_id", &dummy_types::v2_8::Dummy::get_id)
+  //   .def_readwrite("id", &dummy_types::v2_8::Dummy::id)
+  //   .def("__repr__", [](const dummy_types::v2_8::Dummy& d) {
+  //     return "Dummy(id=" + std::to_string(d.get_id()) + ")";
+  //   });
 
   auto nativert_module = py_module.def_submodule("_nativert");
   torch::nativert::initModelRunnerPybind(nativert_module);
