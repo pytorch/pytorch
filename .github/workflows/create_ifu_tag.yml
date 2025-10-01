@@ -29,8 +29,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-	 				
-					PR_NUM="${{ github.event.pull_request.number }}"
+          
+          PR_NUM="${{ github.event.pull_request.number }}"
           BASE_REF="${{ github.event.pull_request.base.ref }}"
           HEAD_SHA="${{ github.event.pull_request.head.sha }}"
           MERGE_SHA="${{ github.event.pull_request.merge_commit_sha }}"
