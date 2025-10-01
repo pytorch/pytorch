@@ -243,7 +243,7 @@ configure_file("${TORCH_SRC_DIR}/_utils_internal.py"
   COPYONLY)
 
 # Generate header with version info
-configure_file("${TORCH_SRC_DIR}/csrc/api/include/torch/version.h.in"
+configure_file("${TORCH_SRC_DIR}/headeronly/version.h.in"
   "${TORCH_SRC_DIR}/headeronly/version.h"
   @ONLY)
 
