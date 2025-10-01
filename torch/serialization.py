@@ -13,10 +13,11 @@ import tarfile
 import tempfile
 import threading
 import warnings
+from collections.abc import Callable
 from contextlib import closing, contextmanager
 from enum import Enum
-from typing import Any, Callable, cast, Generic, IO, Optional, TypeVar, Union
-from typing_extensions import TypeAlias, TypeIs
+from typing import Any, cast, Generic, IO, Optional, TypeAlias, TypeVar, Union
+from typing_extensions import TypeIs
 
 import torch
 import torch._weights_only_unpickler as _weights_only_unpickler
