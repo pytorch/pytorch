@@ -661,7 +661,7 @@ def create_program_file(python_code: str) -> str:
     import hashlib
 
     # Generate a deterministic filename based on code content hash
-    code_hash = hashlib.md5(python_code.encode()).hexdigest()[:8]
+    code_hash = hashlib.md5(python_code.encode()).hexdigest()[:8]  # noqa: S324
     tmp_dir = "/tmp/torchfuzz"
     os.makedirs(tmp_dir, exist_ok=True)
     generated_file_path = os.path.join(tmp_dir, f"fuzz_{code_hash}.py")
