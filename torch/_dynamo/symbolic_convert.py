@@ -4228,9 +4228,10 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
             # _origin marks this as coming from an internal dynamo known function that is safe to
             # trace through.
-            if hasattr(getattr(func, "fn", None), "_origin") and func.fn._origin in [
-                produce_trampoline_autograd_apply,
-            ]:
+            if (
+                hasattr(getattr(func, "fn", None), "_origin")
+                and func.fn._origin is produce_trampoline_autograd_apply
+            ):
                 # Known sound
                 return trace_rules.SkipResult(
                     False, "allowlist in dynamo known function"
