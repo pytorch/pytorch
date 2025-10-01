@@ -204,6 +204,8 @@ class TestCase(InductorTestCase):
         # Edge case: torch.round maps to libdevice.nearbyint.
         triton_op_name_overrides = {
             "round": "nearbyint",
+            # torch.sqrt lowers to tl.sqrt_rn after switching away from libdevice.sqrt
+            "sqrt": "sqrt_rn",
         }
         override = triton_op_name_overrides.get(op_name)
         triton_op_name = override if override is not None else torch_op_name

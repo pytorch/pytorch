@@ -1,3 +1,4 @@
+#include <c10/util/Exception.h>
 #include <torch/csrc/dynamo/extra_state.h>
 
 #include <torch/csrc/dynamo/cache_entry.h>
@@ -232,9 +233,8 @@ py::list _debug_get_cache_entry_list(const py::handle& code_obj) {
 
 PrecompileEntry::PrecompileEntry(py::object gm, py::object c)
     : guard_manager(std::move(gm)), code(std::move(c)) {
-  if (!PyCode_Check(code.ptr())) {
-    throw std::runtime_error("Expecting CodeType from PrecompileEntry.");
-  }
+  TORCH_CHECK(
+      PyCode_Check(code.ptr()), "Expecting CodeType from PrecompileEntry.");
   root_mgr =
       torch::dynamo::convert_to_root_guard_manager(guard_manager.attr("root"));
 }
