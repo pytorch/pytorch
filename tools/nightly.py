@@ -7,12 +7,12 @@ binaries into the repo.
 You can use this script to check out a new nightly branch with the following::
 
     $ ./tools/nightly.py checkout -b my-nightly-branch
-    $ source venv/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
+    $ source venv/bin/activate  # or `. .\venv\Scripts\activate` on Windows
 
 Or if you would like to check out the nightly commit in detached HEAD mode::
 
     $ ./tools/nightly.py checkout
-    $ source venv/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
+    $ source venv/bin/activate  # or `. .\venv\Scripts\activate` on Windows
 
 Or if you would like to reuse an existing virtual environment, you can pass in
 the prefix argument (--prefix)::
@@ -23,18 +23,24 @@ the prefix argument (--prefix)::
 To install the nightly binaries built with CUDA, you can pass in the flag --cuda::
 
     $ ./tools/nightly.py checkout -b my-nightly-branch --cuda
-    $ source venv/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
+    $ source venv/bin/activate  # or `. .\venv\Scripts\activate` on Windows
 
 To install the nightly binaries built with ROCm, you can pass in the flag --rocm::
 
     $ ./tools/nightly.py checkout -b my-nightly-branch --rocm
-    $ source venv/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
+    $ source venv/bin/activate  # or `. .\venv\Scripts\activate` on Windows
 
 You can also use this tool to pull the nightly commits into the current branch as
 well. This can be done with::
 
     $ ./tools/nightly.py pull
-    $ source venv/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
+    $ source venv/bin/activate  # or `. .\venv\Scripts\activate` on Windows
+
+To create the virtual environment with a specific Python interpreter, you can
+pass in the --python argument::
+
+    $ ./tools/nightly.py --python /path/to/python3.12
+    $ source venv/bin/activate  # or `. .\venv\Scripts\activate` on Windows
 
 Pulling will recreate a fresh virtual environment and reinstall the development
 dependencies as well as the nightly binaries into the repo directory.
@@ -142,10 +148,16 @@ PIP_SOURCES = {
         supported_platforms={"Linux", "Windows"},
         accelerator="cuda",
     ),
+    "cuda-13.0": PipSource(
+        name="cuda-13.0",
+        index_url=f"{PYTORCH_NIGHTLY_PIP_INDEX_URL}/cu130",
+        supported_platforms={"Linux", "Windows"},
+        accelerator="cuda",
+    ),
     # NOTE: Sync with ROCM_ARCHES in .github/scripts/generate_binary_build_matrix.py
-    "rocm-6.3": PipSource(
-        name="rocm-6.3",
-        index_url=f"{PYTORCH_NIGHTLY_PIP_INDEX_URL}/rocm6.3",
+    "rocm-6.4": PipSource(
+        name="rocm-6.4",
+        index_url=f"{PYTORCH_NIGHTLY_PIP_INDEX_URL}/rocm6.4",
         supported_platforms={"Linux"},
         accelerator="rocm",
     ),
@@ -302,7 +314,7 @@ class Venv:
         """Get the activation script for the virtual environment."""
         if WINDOWS:
             # Assume PowerShell
-            return self.prefix / "Scripts" / "Activate.ps1"
+            return self.prefix / "Scripts" / "activate"
         # Assume POSIX-compliant shell: Bash, Zsh, etc.
         return self.prefix / "bin" / "activate"
 
@@ -311,7 +323,7 @@ class Venv:
         """Get the command to activate the virtual environment."""
         if WINDOWS:
             # Assume PowerShell
-            return f'& "{self.activate_script}"'
+            return f'. "{self.activate_script}"'
         # Assume Bash, Zsh, etc.
         # POSIX standard should use dot `. venv/bin/activate` rather than `source`
         return f"source {shlex.quote(str(self.activate_script))}"
