@@ -61,7 +61,7 @@ jobs:
 
   opmicrobenchmark-test-rocm:
     name: opmicrobenchmark-test-rocm
-    uses: ./.github/workflows/_linux-test.yml
+    uses: ./.github/workflows/_rocm-test.yml
     needs: opmicrobenchmark-build-rocm
     with:
       timeout-minutes: 500
