@@ -1991,6 +1991,7 @@ def index_put_(func, *args, **kwargs):
     else:
         lengths = inp.lengths()
     torch._assert_async(
+        # pyrefly: ignore  # no-matching-overload
         torch.all(
             indices[inp._ragged_idx] < lengths
         ),

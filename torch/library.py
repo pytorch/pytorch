@@ -646,6 +646,7 @@ def impl(
         >>> y2 = torch.sin(x) + 1
         >>> assert torch.allclose(y1, y2)
     """
+    # pyrefly: ignore  # no-matching-overload
     return _impl(
         qualname, types, func, lib=lib, disable_dynamo=False
     )
@@ -834,6 +835,7 @@ def register_kernel(
     if device_types is None:
         device_types = "CompositeExplicitAutograd"
 
+    # pyrefly: ignore  # no-matching-overload
     return _impl(
         op, device_types, func, lib=lib, disable_dynamo=True
     )

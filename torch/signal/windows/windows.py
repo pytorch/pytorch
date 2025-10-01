@@ -397,6 +397,7 @@ def kaiser(
         )
 
     # Avoid NaNs by casting `beta` to the appropriate dtype.
+    # pyrefly: ignore  # bad-assignment
     beta = torch.tensor(
         beta, dtype=dtype, device=device
     )

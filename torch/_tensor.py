@@ -1109,6 +1109,7 @@ class Tensor(torch._C.TensorBase):
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
     def __rsub__(self, other: Union["Tensor", int, float, bool, complex]) -> "Tensor":
+        # pyrefly: ignore  # no-matching-overload
         return _C._VariableFunctions.rsub(
             self, other
         )
@@ -1165,6 +1166,7 @@ class Tensor(torch._C.TensorBase):
     def __rlshift__(
         self, other: Union["Tensor", int, float, bool, complex]
     ) -> "Tensor":
+        # pyrefly: ignore  # no-matching-overload
         return torch.bitwise_left_shift(
             other, self
         )
@@ -1173,6 +1175,7 @@ class Tensor(torch._C.TensorBase):
     def __rrshift__(
         self, other: Union["Tensor", int, float, bool, complex]
     ) -> "Tensor":
+        # pyrefly: ignore  # no-matching-overload
         return torch.bitwise_right_shift(
             other, self
         )

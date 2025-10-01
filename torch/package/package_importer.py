@@ -108,6 +108,7 @@ class PackageImporter(Importer):
             self.filename = "<pytorch_file_reader>"
             self.zip_reader = file_or_buffer
         elif isinstance(file_or_buffer, (os.PathLike, str)):
+            # pyrefly: ignore  # no-matching-overload
             self.filename = os.fspath(
                 file_or_buffer
             )
