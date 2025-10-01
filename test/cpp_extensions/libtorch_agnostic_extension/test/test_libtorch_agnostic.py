@@ -14,6 +14,7 @@ from torch.testing._internal.common_utils import (
     install_cpp_extension,
     IS_WINDOWS,
     run_tests,
+    skipIfTorchDynamo,
     TestCase,
     xfailIfTorchDynamo,
 )
@@ -366,6 +367,75 @@ if not IS_WINDOWS:
             self.assertEqual(result, expected)
             self.assertNotEqual(result.data_ptr(), expected.data_ptr())
             self.assertEqual(result.stride(), expected.stride())
+
+        @skipIfTorchDynamo("testing a C++ function")
+        def test_ScalarType2string(self, device):
+            import libtorch_agnostic
+
+            all_dtypes = {
+                t for t in torch.__dict__.values() if isinstance(t, torch.dtype)
+            }
+
+            expected = dict(
+                BFloat16=torch.bfloat16,
+                Half=torch.float16,
+                Float=torch.float32,
+                Double=torch.float64,
+                Char=torch.int8,
+                Short=torch.int16,
+                Int=torch.int32,
+                Long=torch.int64,
+                Byte=torch.uint8,
+                UInt16=torch.uint16,
+                UInt32=torch.uint32,
+                UInt64=torch.uint64,
+                Float8_e5m2=torch.float8_e5m2,
+                Float8_e4m3fn=torch.float8_e4m3fn,
+                Float8_e5m2fnuz=torch.float8_e5m2fnuz,
+                Float8_e4m3fnuz=torch.float8_e4m3fnuz,
+                ComplexHalf=torch.complex32,
+                ComplexFloat=torch.complex64,
+                ComplexDouble=torch.complex128,
+                Bool=torch.bool,
+            )
+
+            for dtype in all_dtypes:
+                t = torch.empty(2, dtype=dtype, device=device)
+                if dtype in {
+                    torch.int1,
+                    torch.int2,
+                    torch.int3,
+                    torch.int4,
+                    torch.int5,
+                    torch.int6,
+                    torch.int7,
+                    torch.uint1,
+                    torch.uint2,
+                    torch.uint3,
+                    torch.uint4,
+                    torch.uint5,
+                    torch.uint6,
+                    torch.uint7,
+                    torch.qint8,
+                    torch.qint32,
+                    torch.quint8,
+                    torch.quint2x4,
+                    torch.quint4x2,
+                    torch.bits8,
+                    torch.bits16,
+                    torch.bits1x8,
+                    torch.bits2x4,
+                    torch.bits4x2,
+                    torch.float8_e8m0fnu,
+                    torch.float4_e2m1fn_x2,
+                }:
+                    with self.assertRaisesRegex(
+                        RuntimeError, "Not yet supported ScalarType"
+                    ):
+                        libtorch_agnostic.ops.ScalarType2string(t)
+                else:
+                    s = libtorch_agnostic.ops.ScalarType2string(t)
+                    assert expected[s] == dtype
 
     instantiate_device_type_tests(TestLibtorchAgnostic, globals(), except_for=None)
 
