@@ -1071,7 +1071,7 @@ class _SymNodeDict:
     """
 
     def __init__(self) -> None:
-        self.sym_node_dict: dict[PySymType, _PySymProxyType] = {}
+        self.sym_node_dict: dict[SymNode, _PySymProxyType] = {}
 
     def __setitem__(self, key: PySymType, value: _PySymProxyType) -> None:
         self.sym_node_dict[key.node] = value
@@ -1629,6 +1629,43 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
             set_proxy_slot(out, self.tracer, p_out_thunk)
 
         return out
+
+    def maybe_retrace_symint(self, i: SymInt | int) -> SymInt | int:
+        if isinstance(i, int):
+            return i
+
+        import sympy
+
+        tracer = self.tracer
+        if i in tracer.symnode_tracker:
+            return i
+
+        # TODO: cache the sympy.Expr?
+
+        def lookup_sympy_expr(e: sympy.Expr) -> SymInt | int:
+            if isinstance(e, sympy.Integer):
+                return int(e)
+            if isinstance(e, int):
+                return e
+
+            for node in tracer.symnode_tracker.sym_node_dict.keys():
+                if node.expr is e:
+                    return SymInt(node)
+
+            raise RuntimeError(f"Internal error: Unable to retrace stride element '{e}'")
+
+        def retrace_symint(i: SymInt) -> SymInt:
+            if i.node in tracer.symnode_tracker.sym_node_dict:
+                return i
+
+            match (expr := i.node._expr):
+                case sympy.Mul():
+                    x, y = (lookup_sympy_expr(p) for p in expr.args)
+                    return x * y
+                case _:
+                    raise RuntimeError("Unimplemented sympy.Expr type {type(i._expr)}")
+
+        return retrace_symint(i)
 
 
 class _GraphAppendingTracerEx(fx.proxy.GraphAppendingTracer):
