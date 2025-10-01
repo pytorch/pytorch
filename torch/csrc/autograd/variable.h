@@ -192,9 +192,6 @@ TORCH_API std::unique_ptr<PostAccumulateGradHook>& post_acc_grad_hooks(
 TORCH_API void create_cpp_hook(
     const at::TensorBase&,
     bool is_retains_grad_hooks = false);
-TORCH_API void set_grad_accumulator_grad_dtype(
-    const at::TensorBase&,
-    const std::optional<at::ScalarType>&);
 } // namespace impl
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -304,28 +301,11 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
       uint64_t level,
       bool is_inplace_op) override;
 
-  std::optional<at::ScalarType> grad_dtype(const at::TensorBase& self) const {
-    if (allow_grad_dtype_mismatch_) {
-      return std::nullopt;
-    } else if (grad_dtype_.has_value()) {
-      return grad_dtype_;
-    } else {
-      return self.scalar_type();
-    }
-  }
+  std::optional<at::ScalarType> grad_dtype(const at::TensorBase& self) const;
 
   void set_grad_dtype(
       const std::optional<at::ScalarType>& grad_dtype,
-      const at::TensorBase& self) {
-    TORCH_CHECK(!grad_fn_, "grad_dtype can only be set on leaf tensors.");
-    if (grad_dtype.has_value()) {
-      grad_dtype_ = grad_dtype;
-      allow_grad_dtype_mismatch_ = false;
-    } else {
-      allow_grad_dtype_mismatch_ = true;
-    }
-    impl::set_grad_accumulator_grad_dtype(self, grad_dtype);
-  }
+      const at::TensorBase& self);
 
   AutogradMeta(
       at::TensorImpl* self_impl = nullptr,

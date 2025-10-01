@@ -282,15 +282,6 @@ std::shared_ptr<Node> try_get_grad_accumulator(const at::TensorBase& self) {
   }
 }
 
-void set_grad_accumulator_grad_dtype(
-    const at::TensorBase& self,
-    const std::optional<at::ScalarType>& grad_dtype) {
-  auto grad_acc = try_get_grad_accumulator(self);
-  if (grad_acc) {
-    grad_acc->mutable_input_metadata(0).set_grad_dtype(grad_dtype);
-  }
-}
-
 std::shared_ptr<Node> try_get_grad_accumulator(const Variable& self) {
   return try_get_grad_accumulator(get_tensor_base(self));
 }
