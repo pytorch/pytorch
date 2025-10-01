@@ -1296,8 +1296,10 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def rand_eager(seed, base_offset, threads_per_round, tid):
-        tid = f"({tid}).to(tl.uint32)"
-        return f"triton_helpers.rand_eager({seed}, {base_offset}, {threads_per_round}, {tid}, XBLOCK)"
+        tid_u32 = f"({tid}).to(tl.uint32)"
+        r = f"(({tid_u32})//(4*({threads_per_round})))"
+        tid_truc = f"(({tid_u32})%(4*({threads_per_round})))"
+        return f"triton_helpers.rand_eager({seed}, {base_offset}+{r}, {tid_truc})"
 
     @staticmethod
     def randn(seed, offset):

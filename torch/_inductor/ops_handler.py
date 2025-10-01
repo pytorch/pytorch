@@ -82,6 +82,9 @@ class OpsHandler(Generic[T]):
     def rand(self, seed: T, offset: T) -> T:
         """Computes inductor_prims.random with mode="rand".  offset has dtype int32."""
         raise NotImplementedError
+    
+    def rand_earger(self, seed: T, base_offset: T, threads_per_round: T, tid: T) -> T:
+        raise NotImplementedError
 
     def randn(self, seed: T, offset: T) -> T:
         """Computes inductor_prims.random with mode="randn".  offset has dtype int32."""
