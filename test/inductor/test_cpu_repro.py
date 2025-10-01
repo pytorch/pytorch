@@ -8,7 +8,7 @@ import os
 import platform
 import sys
 import unittest
-from typing import Callable
+from collections.abc import Callable
 from unittest.mock import patch
 
 import torch
@@ -216,6 +216,34 @@ class CPUReproTests(TestCase):
                 (v,),
             )
 
+    def test_complex_cholesky_mh_view_fallback(self):
+        torch.manual_seed(0)
+
+        n = 8
+
+        def fn(inp: torch.Tensor):
+            I0 = torch.eye(n, dtype=inp.dtype, device=inp.device)
+            I = I0.unsqueeze(0).expand(inp.shape[0], n, n).contiguous()
+            hermitian = I + 0.5 * (inp @ inp.mH)
+            chol = torch.linalg.cholesky(hermitian, upper=True)
+            return chol.abs().sum()
+
+        base = torch.randn(4, n, n, dtype=torch.complex64)
+
+        def run(compiled_fn):
+            inp = base.clone().detach().requires_grad_(True)
+            loss = compiled_fn(inp)
+            loss.backward()
+            return loss.detach(), inp.grad.detach()
+
+        expected_loss, expected_grad = run(fn)
+
+        compiled = torch.compile(fn, backend="inductor")
+        actual_loss, actual_grad = run(compiled)
+
+        torch.testing.assert_close(actual_loss, expected_loss)
+        torch.testing.assert_close(actual_grad, expected_grad)
+
     def test_nn_fold(self):
         # Fix https://github.com/pytorch/pytorch/issues/147848
 
@@ -282,6 +310,33 @@ class CPUReproTests(TestCase):
                 mod,
                 (v,),
             )
+
+    def test_conv1d_strided_weight_torch_compile(self):
+        def fn(x, w):
+            wt = w.transpose(2, 1)
+            y = F.conv1d(x, wt)
+            return y.clone()
+
+        x_eager = torch.randn(2, 3, 5, requires_grad=True)
+        w_eager = torch.randn(4, 2, 3, requires_grad=True)
+
+        out_eager = fn(x_eager, w_eager)
+        grad = torch.randn_like(out_eager)
+        out_eager_val = out_eager.detach()
+        out_eager.backward(grad)
+        grad_x_eager = x_eager.grad.detach().clone()
+        grad_w_eager = w_eager.grad.detach().clone()
+
+        x_comp = x_eager.detach().requires_grad_(True)
+        w_comp = w_eager.detach().requires_grad_(True)
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True, dynamic=True)
+        out_comp = compiled(x_comp, w_comp)
+        out_comp_val = out_comp.detach()
+        out_comp.backward(grad)
+
+        torch.testing.assert_close(out_comp_val, out_eager_val)
+        torch.testing.assert_close(x_comp.grad, grad_x_eager)
+        torch.testing.assert_close(w_comp.grad, grad_w_eager)
 
     @config.patch(freezing=True)
     @unittest.skipIf(not TEST_MKL, "Test requires MKL")
@@ -4361,6 +4416,39 @@ class CPUReproTests(TestCase):
                 compiled_m = torch.compile(mod, dynamic=dynamic)
                 actual = compiled_m(x)
                 self.assertEqual(expected, actual)
+
+    @torch._dynamo.config.patch(
+        capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
+    )
+    @config.patch(emulate_precision_casts=True)
+    def test_group_norm_backward_symint_divisible_channels(self):
+        def fn(x, weight, bias):
+            y = torch.nn.functional.group_norm(x, 1, weight=weight, bias=bias)
+            return torch.sigmoid(y.max(dim=0).values)
+
+        torch._dynamo.reset()
+        metrics.reset()
+
+        shape = (2, 33, 4, 5)
+        x_ref = torch.rand(shape, dtype=torch.float32, requires_grad=True)
+        weight_ref = torch.rand((33,), dtype=torch.float32, requires_grad=True)
+        bias_ref = torch.rand((33,), dtype=torch.float32, requires_grad=True)
+
+        x_cmp = x_ref.clone().detach().requires_grad_(True)
+        weight_cmp = weight_ref.clone().detach().requires_grad_(True)
+        bias_cmp = bias_ref.clone().detach().requires_grad_(True)
+
+        eager_out = fn(x_ref, weight_ref, bias_ref)
+        eager_out.sum().backward()
+
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True, dynamic=True)
+        compiled_out = compiled(x_cmp, weight_cmp, bias_cmp)
+        compiled_out.sum().backward()
+
+        torch.testing.assert_close(compiled_out, eager_out)
+        torch.testing.assert_close(x_cmp.grad, x_ref.grad)
+        torch.testing.assert_close(weight_cmp.grad, weight_ref.grad)
+        torch.testing.assert_close(bias_cmp.grad, bias_ref.grad)
 
     def test_int_div_vec(self):
         def fn(x, y, mode):
