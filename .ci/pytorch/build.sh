@@ -328,11 +328,6 @@ else
       popd
     fi
 
-    if [[ "${BUILD_ENVIRONMENT}" == *linux-jammy-cuda12.8-py3.10-gcc9-sm86* ]]; then
-      echo "Setting BUILD_AOT_INDUCTOR_TEST=1 for test_inductor_aoti"
-      export BUILD_AOT_INDUCTOR_TEST=1
-    fi
-
     # TODO: I'm not sure why, but somehow we lose verbose commands
     set -x
 

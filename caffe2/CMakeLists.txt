@@ -1363,6 +1363,7 @@ if(BUILD_TEST)
     add_subdirectory(${TORCH_ROOT}/test/cpp/nativert ${CMAKE_BINARY_DIR}/test_nativert)
     add_subdirectory(${TORCH_ROOT}/test/inductor ${CMAKE_BINARY_DIR}/test_inductor)
     add_subdirectory(${TORCH_ROOT}/test/cpp/aoti_abi_check ${CMAKE_BINARY_DIR}/test_aoti_abi_check)
+    add_subdirectory(${TORCH_ROOT}/test/cpp/aoti_inference ${CMAKE_BINARY_DIR}/test_aoti_inference)
     if(USE_DISTRIBUTED)
       add_subdirectory(${TORCH_ROOT}/test/cpp/c10d ${CMAKE_BINARY_DIR}/test_cpp_c10d)
       if(NOT WIN32)
@@ -1380,13 +1381,7 @@ if(BUILD_TEST)
         ${CMAKE_BINARY_DIR}/test_mobile_nnc
       )
     endif()
-    add_subdirectory(${TORCH_ROOT}/test/cpp/lazy
-                     ${CMAKE_BINARY_DIR}/test_lazy)
-  endif()
-  if(BUILD_AOT_INDUCTOR_TEST)
-    add_subdirectory(
-      ${TORCH_ROOT}/test/cpp/aoti_inference
-      ${CMAKE_BINARY_DIR}/test_aoti_inference)
+    add_subdirectory(${TORCH_ROOT}/test/cpp/lazy ${CMAKE_BINARY_DIR}/test_lazy)
   endif()
 endif()
 
