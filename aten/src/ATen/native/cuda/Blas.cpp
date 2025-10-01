@@ -78,6 +78,10 @@ inline bool matrix_ld_complies_cublas(const Tensor& t, int64_t ld_idx) {
   return t_strides[fd_idx] == 1 && t_strides[ld_idx] >= std::max<int64_t>(1, t.sizes()[fd_idx]);
 }
 
+// Derive a strategy for preparing an input tensor t for cuBLAS, i.e.
+// N - no-op for t,
+// T_BORROWED - a transposed view of t,
+// T_OWNED - a transposed contigious copy of t.
 inline CublasPrepTransType predict_matrix_trans_prep_type_cublas(const Tensor& t) {
   if (t.is_non_overlapping_and_dense()) { // is t row- or col-major?
       return t.is_contiguous()
