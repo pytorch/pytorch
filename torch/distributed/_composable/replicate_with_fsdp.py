@@ -229,7 +229,7 @@ def replicate_impl(
         new_cls = cls_to_replicate_cls.get(cls, None)
         if not new_cls:
             dct = {"__deepcopy__": _unimplemented_deepcopy}
-            new_cls = type(f"Replicate{cls.__name__}", (FSDPModule, cls), dct)
+            new_cls = type(f"Replicate{cls.__name__}", (ReplicateModule, cls), dct)
             cls_to_replicate_cls[cls] = new_cls
         module.__class__ = new_cls
     return arg_module
@@ -269,6 +269,20 @@ def replicate(
 
     module = replicate_impl(module, mesh=device_mesh, **kwargs)
     return module
+
+
+class ReplicateModule(FSDPModule):
+    def __new__(cls, *args, **kwargs):
+        """
+        Override ``__new__`` to remove the FSDP class and directly construct
+        the original class for cases like indexing into a container module.
+        """
+        # Use index 2 since 0 is the dynamically constructed `FSDP<...>` class
+        # and index 1 is the `FSDPModule` class itself
+        orig_cls = cls.__mro__[3]
+        self = orig_cls.__new__(orig_cls, *args, **kwargs)
+        self.__init__(*args, **kwargs)
+        return self
 
 
 def _get_managed_modules(
