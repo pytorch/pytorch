@@ -1,12 +1,15 @@
 # mypy: allow-untyped-defs
 import inspect
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from typing import Any, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch.fx.traceback as fx_traceback
 from torch._logging import trace_structured
 from torch.hub import tqdm
+from torch.profiler import profile, record_function, ProfilerActivity
+import torch._C._profiler as _profiler
+import json
 
 from . import config
 from ._compatibility import compatibility
@@ -161,6 +164,16 @@ class Interpreter:
             delay=0,
         )
 
+        graph_id = id(self.graph)
+
+        if config.profiler_interpreter_stack_trace:
+            stack_traces = {}
+            for node in self.graph.nodes:
+                if node.stack_trace:
+                    stack_traces[f"## {node.name}:{graph_id} interpreter ##"] = node.stack_trace.replace("\"", "'")
+            # add stack traces to profiler metadata
+            torch.autograd._add_metadata_json(f"node_stack_traces:{graph_id}", json.dumps(stack_traces))
+
         for node in self.graph.nodes:
             pbar.update(1)
             if node in self.env:
@@ -169,9 +182,13 @@ class Interpreter:
                 # where the caller has pre-populated `env` with
                 # values for a subset of the program.
                 continue
-
+            
+            profiler_context = nullcontext()
+            if config.profiler_interpreter_stack_trace:
+                profiler_context = torch.profiler.record_function(f"## {node.name}:{graph_id} interpreter ##")
             try:
-                self.env[node] = self.run_node(node)
+                with profiler_context:
+                    self.env[node] = self.run_node(node)
             except Exception as e:
                 if self.extra_traceback:
                     msg = f"While executing {node.format_node()}"
