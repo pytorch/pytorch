@@ -655,6 +655,35 @@ def binary_cross_entropy_backward(
     return result
 
 
+@register_decomposition(aten.linear_cross_entropy)
+@out_wrapper()
+@pw_cast_for_opmath
+def linear_cross_entropy(
+    input: Tensor,
+    weight: Tensor,
+    target: Tensor,
+    bias: Optional[Tensor] = None,
+    reduction: int = Reduction.MEAN.value,
+    ignore_index: int = -100,
+    label_smoothing: float = 0.0,
+    chunking_strategy: str = "auto",
+) -> Tensor:
+    logits = aten.linear.default(input, weight, bias)
+    logits_flat = aten.reshape.default(logits, [-1, logits.size(-1)])
+    target_flat = aten.reshape.default(target, [-1])
+    loss = aten.cross_entropy_loss.default(
+        logits_flat,
+        target_flat,
+        None,
+        reduction,
+        ignore_index,
+        label_smoothing,
+    )
+    if reduction == Reduction.NONE.value:
+        loss = aten.reshape.default(loss, target.shape)
+    return loss
+
+
 @register_decomposition(aten.soft_margin_loss)
 @out_wrapper()
 @pw_cast_for_opmath

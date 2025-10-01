@@ -55,14 +55,22 @@ enum class ChunkingStrategy {
     BATCH_CHUNKING   // Chunk batch dimension (new)
 };
 
+Tensor batch_chunking_cpu(
+    const Tensor& input,
+    const Tensor& weight,
+    const Tensor& target,
+    const std::optional<Tensor>& bias_opt,
+    int64_t reduction,
+    int64_t ignore_index,
+    double label_smoothing);
+
 // Determine optimal chunking strategy based on input dimensions and user preference
 // Based on memory reduction analysis and empirical validation
 inline ChunkingStrategy select_chunking_strategy(
-    int64_t vocab_size, 
-    int64_t batch_size, 
-    int64_t seq_len, 
+    int64_t vocab_size,
+    int64_t flattened_batch_size,
     c10::string_view strategy) {
-    
+
     if (strategy == "none") {
         return ChunkingStrategy::NAIVE;
     } else if (strategy == "vocab") {
@@ -73,13 +81,13 @@ inline ChunkingStrategy select_chunking_strategy(
         // Empirically validated chunk sizes for optimal memory/compute balance
         const int64_t vocab_chunk_size = 4096;   // Same as existing implementation
         const int64_t batch_chunk_size = 1024;   // Optimized for batch processing
-        
-        const int64_t total_batch_size = batch_size * seq_len;
-        
+
+        const int64_t total_batch_size = flattened_batch_size;
+
         // Determine which dimensions benefit from chunking
         bool vocab_large = vocab_size > vocab_chunk_size;
         bool batch_large = total_batch_size > batch_chunk_size;
-        
+
         if (!vocab_large && !batch_large) {
             return ChunkingStrategy::NAIVE;
         } else if (vocab_large && !batch_large) {
@@ -91,12 +99,12 @@ inline ChunkingStrategy select_chunking_strategy(
             // Memory reduction = 1 - (chunk_size / total_size)
             double vocab_reduction = 1.0 - static_cast<double>(vocab_chunk_size) / vocab_size;
             double batch_reduction = 1.0 - static_cast<double>(batch_chunk_size) / total_batch_size;
-            
-            return (vocab_reduction >= batch_reduction) ? 
+
+            return (vocab_reduction >= batch_reduction) ?
                    ChunkingStrategy::VOCAB_CHUNKING : ChunkingStrategy::BATCH_CHUNKING;
         }
     } else {
-        TORCH_CHECK(false, "Unknown chunking strategy: ", strategy, 
+        TORCH_CHECK(false, "Unknown chunking strategy: ", strategy,
                    ". Valid options: 'auto', 'vocab', 'batch', 'none'");
     }
 }
@@ -114,26 +122,26 @@ Tensor batch_chunking_cpu(
     int64_t reduction,
     int64_t ignore_index,
     double label_smoothing) {
-    
+
   // Flatten multi-dimensional inputs for processing (standard PyTorch pattern)
   // This allows handling both 2D [batch, hidden] and 3D [batch, seq, hidden] inputs
-  auto input_flat = input.view({-1, input.size(-1)});  // [N, H] where N = batch * seq_len
-  auto target_flat = target.view({-1});                // [N] flattened targets
-    
+  auto input_flat = input.reshape({-1, input.size(-1)});  // [N, H] where N = batch * seq_len
+  auto target_flat = target.reshape({-1});                // [N] flattened targets
+
     const int64_t batch_size = input_flat.size(0);
     const int64_t chunk_size = 1024;  // Empirically optimized for batch dimension chunking
-    
+
     // Get bias tensor if provided
     const Tensor& bias = bias_opt.value_or(Tensor());
-    
+
     // Early exit if batch is too small for chunking
     if (batch_size <= chunk_size) {
         auto logits = at::linear(input_flat, weight, bias);
         return at::cross_entropy_loss(logits, target_flat, std::nullopt, reduction, ignore_index, label_smoothing);
     }
-    
+
     const int64_t num_chunks = (batch_size + chunk_size - 1) / chunk_size;
-    
+
     Tensor losses_buffer;
     if (reduction == Reduction::None) {
         losses_buffer = at::zeros({batch_size}, input.options());
@@ -141,17 +149,17 @@ Tensor batch_chunking_cpu(
 
     Tensor total_loss = at::zeros({}, input.options());
     int64_t valid_count = 0;
-    
+
     // Process input in batch chunks to avoid materializing large logit tensors
     // Each chunk computes: [chunk_size, hidden] @ [hidden, vocab] -> [chunk_size, vocab]
     for (int64_t chunk_idx = 0; chunk_idx < num_chunks; ++chunk_idx) {
         int64_t start_idx = chunk_idx * chunk_size;
         int64_t end_idx = std::min(start_idx + chunk_size, batch_size);
-        
+
         if (start_idx >= end_idx) {
             continue;
         }
-        
+
         auto input_chunk = input_flat.slice(0, start_idx, end_idx);   // [actual_chunk_size, H]
         auto target_chunk = target_flat.slice(0, start_idx, end_idx); // [actual_chunk_size]
         auto logits_chunk = at::linear(input_chunk, weight, bias);    // [actual_chunk_size, vocab_size]
@@ -176,9 +184,9 @@ Tensor batch_chunking_cpu(
             total_loss = at::add(total_loss, chunk_loss);
         }
     }
-    
+
     if (reduction == Reduction::None) {
-        return losses_buffer.view(target.sizes());
+        return losses_buffer.reshape(target.sizes());
     }
 
     if (reduction == Reduction::Sum || valid_count == 0) {
@@ -200,29 +208,28 @@ Tensor linear_cross_entropy_cpu(
   // Validate inputs
   TORCH_CHECK(input.dim() >= 2, "Expected input to have at least 2 dimensions, got ", input.dim());
   TORCH_CHECK(weight.dim() == 2, "Expected weight to be 2-dimensional, got ", weight.dim());
-  TORCH_CHECK(input.size(-1) == weight.size(1), 
-              "Expected input.size(-1) to match weight.size(1), got ", 
+  TORCH_CHECK(input.size(-1) == weight.size(1),
+              "Expected input.size(-1) to match weight.size(1), got ",
               input.size(-1), " and ", weight.size(1));
-  
+
   // Get bias tensor if provided
   const Tensor& bias = bias_opt.value_or(Tensor());
-  
+
   // Pick a chunking strategy that mirrors the Python wrapper so we only
   // materialise large logit tensors when it is worthwhile.  Vocabulary chunking
   // slices the weight matrix (large vocabularies), batch chunking slices the
   // flattened batch (very large batches), and the naive path keeps the original
   // computation for small problems.
-  
+
   // Calculate input dimensions for strategy selection
   const int64_t vocab_size = weight.size(0);
-  const int64_t batch_size = input.size(0);
-  const int64_t seq_len = input.dim() == 3 ? input.size(1) : 1;
-  
+  const int64_t flattened_batch = input.numel() / input.size(-1);
+
   // Select optimal chunking strategy based on input characteristics and user preference
-  ChunkingStrategy selected_strategy = select_chunking_strategy(vocab_size, batch_size, seq_len, chunking_strategy);
-  
-  auto input_flat = input.view({-1, input.size(-1)});  // [N, H]
-  auto target_flat = target.view({-1});                // [N]
+  ChunkingStrategy selected_strategy = select_chunking_strategy(vocab_size, flattened_batch, chunking_strategy);
+
+  auto input_flat = input.reshape({-1, input.size(-1)});  // [N, H]
+  auto target_flat = target.reshape({-1});                // [N]
   auto valid_mask = at::ne(target_flat, ignore_index);
 
   // Execute selected chunking strategy
@@ -274,7 +281,7 @@ Tensor linear_cross_entropy_cpu(
       auto target_chunk_mask = at::logical_and(valid_mask, lower_bound);
       target_chunk_mask = at::logical_and(target_chunk_mask, upper_bound);
 
-      auto indices = target_chunk_mask.nonzero().view({-1});
+      auto indices = target_chunk_mask.nonzero().reshape({-1});
       if (indices.numel() > 0) {
         auto selected_targets = at::index_select(target_flat, 0, indices);
         auto local_targets = at::sub(selected_targets, start_idx);
@@ -308,7 +315,7 @@ Tensor linear_cross_entropy_cpu(
     losses.masked_fill_(invalid_mask, 0);
 
     if (reduction == Reduction::None) {
-      return losses.view(target.sizes());
+      return losses.reshape(target.sizes());
     }
 
     auto total_loss = losses.sum();
@@ -325,11 +332,11 @@ Tensor linear_cross_entropy_cpu(
   } else if (selected_strategy == ChunkingStrategy::BATCH_CHUNKING) {
     // Batch chunking implementation - call dedicated function
     return batch_chunking_cpu(input, weight, target, bias_opt, reduction, ignore_index, label_smoothing);
-    
+
   } else { // ChunkingStrategy::NAIVE
     // Naive implementation for small models or when chunking not beneficial
     auto logits = at::linear(input, weight, bias);
-    auto logits_flat = logits.view({-1, logits.size(-1)});
+    auto logits_flat = logits.reshape({-1, logits.size(-1)});
     return at::cross_entropy_loss(logits_flat, target_flat, std::nullopt, reduction, ignore_index, label_smoothing);
   }
 }
@@ -432,8 +439,8 @@ inline std::tuple<Tensor, Tensor, std::optional<Tensor>> backward_vocabulary_chu
     int64_t ignore_index,
     double label_smoothing,
     ChunkingStrategy resolved_strategy) {
-  const auto input_flat = input.view({-1, input.size(-1)});
-  const auto target_flat = target.view({-1});
+  const auto input_flat = input.reshape({-1, input.size(-1)});
+  const auto target_flat = target.reshape({-1});
   const auto dtype = input.scalar_type();
   const auto options = input.options();
   Tensor valid_mask = at::ne(target_flat, ignore_index);
@@ -447,7 +454,7 @@ inline std::tuple<Tensor, Tensor, std::optional<Tensor>> backward_vocabulary_chu
     if (grad_bias.defined()) {
       grad_bias_opt = std::move(grad_bias);
     }
-    return std::make_tuple(grad_input, grad_weight, std::move(grad_bias_opt));
+    return std::make_tuple(std::move(grad_input), std::move(grad_weight), std::move(grad_bias_opt));
   }
 
   const int64_t vocab_size = weight.size(0);
@@ -516,12 +523,12 @@ inline std::tuple<Tensor, Tensor, std::optional<Tensor>> backward_vocabulary_chu
     }
   }
 
-  grad_input = grad_input.view_as(input);
+  grad_input = grad_input.reshape_as(input);
   std::optional<Tensor> grad_bias_opt;
   if (grad_bias.defined()) {
     grad_bias_opt = std::move(grad_bias);
   }
-  return std::make_tuple(grad_input, grad_weight, std::move(grad_bias_opt));
+  return std::make_tuple(std::move(grad_input), std::move(grad_weight), std::move(grad_bias_opt));
 }
 
 // Computes gradients when we chunked the batch dimension (or not at all).  The
@@ -537,8 +544,8 @@ inline std::tuple<Tensor, Tensor, std::optional<Tensor>> backward_batch_chunking
     int64_t ignore_index,
     double label_smoothing,
     int64_t chunk_size) {
-  const auto input_flat = input.view({-1, input.size(-1)});
-  const auto target_flat = target.view({-1});
+  const auto input_flat = input.reshape({-1, input.size(-1)});
+  const auto target_flat = target.reshape({-1});
   Tensor valid_mask = at::ne(target_flat, ignore_index);
   const int64_t valid_count = valid_mask.sum().item<int64_t>();
 
@@ -550,7 +557,7 @@ inline std::tuple<Tensor, Tensor, std::optional<Tensor>> backward_batch_chunking
     if (grad_bias.defined()) {
       grad_bias_opt = std::move(grad_bias);
     }
-    return std::make_tuple(grad_input, grad_weight, std::move(grad_bias_opt));
+    return std::make_tuple(std::move(grad_input), std::move(grad_weight), std::move(grad_bias_opt));
   }
 
   Tensor grad_input = zeros_like_tensor(input_flat);
@@ -603,12 +610,12 @@ inline std::tuple<Tensor, Tensor, std::optional<Tensor>> backward_batch_chunking
     }
   }
 
-  grad_input = grad_input.view_as(input);
+  grad_input = grad_input.reshape_as(input);
   std::optional<Tensor> grad_bias_opt;
   if (grad_bias.defined()) {
     grad_bias_opt = std::move(grad_bias);
   }
-  return std::make_tuple(grad_input, grad_weight, std::move(grad_bias_opt));
+  return std::make_tuple(std::move(grad_input), std::move(grad_weight), std::move(grad_bias_opt));
 }
 
 } // anonymous namespace
@@ -632,9 +639,8 @@ std::tuple<Tensor, Tensor, std::optional<Tensor>> linear_cross_entropy_backward_
   TORCH_CHECK(target.device() == input.device(), "Target must be on the same device as input");
 
   const int64_t vocab_size = weight.size(0);
-  const int64_t batch_size = input.size(0);
-  const int64_t seq_len = input.dim() == 3 ? input.size(1) : 1;
-  ChunkingStrategy resolved_strategy = select_chunking_strategy(vocab_size, batch_size, seq_len, chunking_strategy);
+  const int64_t flattened_batch = input.numel() / input.size(-1);
+  ChunkingStrategy resolved_strategy = select_chunking_strategy(vocab_size, flattened_batch, chunking_strategy);
 
   if (resolved_strategy == ChunkingStrategy::VOCAB_CHUNKING) {
     return backward_vocabulary_chunking(
@@ -649,7 +655,7 @@ std::tuple<Tensor, Tensor, std::optional<Tensor>> linear_cross_entropy_backward_
         resolved_strategy);
   }
 
-  const int64_t default_chunk = resolved_strategy == ChunkingStrategy::BATCH_CHUNKING ? 1024 : input.view({-1, input.size(-1)}).size(0);
+  const int64_t default_chunk = resolved_strategy == ChunkingStrategy::BATCH_CHUNKING ? 1024 : flattened_batch;
   return backward_batch_chunking(
       input,
       weight,

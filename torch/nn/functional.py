@@ -3487,8 +3487,8 @@ def _linear_cross_entropy_naive(
     label_smoothing: float,
 ) -> Tensor:
     logits = linear(input, weight, bias)
-    logits_flat = logits.view(-1, logits.size(-1))
-    target_flat = target.view(-1)
+    logits_flat = logits.reshape(-1, logits.size(-1))
+    target_flat = target.reshape(-1)
     loss = cross_entropy(
         logits_flat,
         target_flat,
@@ -3497,7 +3497,7 @@ def _linear_cross_entropy_naive(
         label_smoothing=label_smoothing,
     )
     if reduction == "none":
-        loss = loss.view(target.shape)
+        loss = loss.reshape(target.shape)
     return loss
 
 
@@ -3608,7 +3608,7 @@ def linear_cross_entropy(
                 )
 
     if reduction == "none":
-        return result.view(target.shape)
+        return result.reshape(target.shape)
     return result
 
 
