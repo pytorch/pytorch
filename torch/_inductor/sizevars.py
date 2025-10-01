@@ -795,14 +795,16 @@ class SizeVarAllocator:
                 def compare(x, y) -> int:
                     this, that = self.expressions[x], self.expressions[y]
 
-                    # Prefer backed symbols.
+                    # prioritize replacing unbacked exprs with backed expressions
+                    # e.g. u0 + s3 ==> s0 + s1.
                     all_symbols_backed_this = not has_free_unbacked_symbols(this)
                     all_symbols_backed_that = not has_free_unbacked_symbols(that)
                     if all_symbols_backed_that != all_symbols_backed_this:
                         return -1 if all_symbols_backed_this else 1
 
                     if this.has(that):
-                        # this is a subexpression of
+                        # handles cases where this is a sub-expression of that
+                        # e.g. s1 * Max(2, u0) ==> Max(2, u0)
                         return 1
                     elif that.has(this):
                         return -1
@@ -836,9 +838,6 @@ class SizeVarAllocator:
                 self.parent[other] = leader
                 self.rank[leader] += self.rank[other]
                 return True
-
-            def connected(self, a, b):
-                return self.find(a) == self.find(b)
 
         self.unbacked_replacements = {}
         self.equality_graph = defaultdict(set)
