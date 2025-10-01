@@ -14,6 +14,10 @@ import torch
 
 log = logging.getLogger(__name__)
 
+__all__ = [
+    "varlen_attn",
+]
+
 
 @lru_cache(maxsize=8)
 def _should_use_cudnn(device_index: int) -> bool:
@@ -21,8 +25,7 @@ def _should_use_cudnn(device_index: int) -> bool:
     return False
 
 
-# import failures when I try to register as custom op
-# @torch.library.custom_op("torch_nn_attention::_varlen_attn", mutates_args={})
+@torch.library.custom_op("torch_nn_attention::_varlen_attn", mutates_args={})
 def _varlen_attn(
     query: torch.Tensor,
     key: torch.Tensor,
