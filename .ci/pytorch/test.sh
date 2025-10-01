@@ -459,7 +459,6 @@ test_inductor_shard() {
 }
 
 test_inductor_aoti() {
-  # PyTorch is already built with BUILD_AOT_INDUCTOR_TEST=1 in build.sh when this test runs
   if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
     # We need to hipify before building again
     python3 tools/amd_build/build_amd.py

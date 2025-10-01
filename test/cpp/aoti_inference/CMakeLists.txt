@@ -44,6 +44,10 @@ target_compile_definitions(test_aoti_inference PRIVATE
     CMAKE_CURRENT_BINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}
 )
 
+target_compile_options_if_supported(test_aoti_inference -Wno-unused-variable)
+target_compile_options_if_supported(test_aoti_inference -Wno-unused-but-set-variable)
+target_compile_options_if_supported(test_aoti_inference -Wno-unused-function)
+
 if(INSTALL_TEST)
   install(TARGETS test_aoti_inference DESTINATION bin)
   # Install PDB files for MSVC builds

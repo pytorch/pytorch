@@ -213,7 +213,6 @@ cmake_dependent_option(
   CAFFE2_USE_MSVC_STATIC_RUNTIME "Using MSVC static runtime libraries" ON
   "NOT BUILD_SHARED_LIBS" OFF)
 option(BUILD_TEST "Build C++ test binaries (need gtest and gbenchmark)" OFF)
-option(BUILD_AOT_INDUCTOR_TEST "Build C++ test binaries for aot-inductor" OFF)
 option(BUILD_STATIC_RUNTIME_BENCHMARK
        "Build C++ binaries for static runtime benchmarks (need gbenchmark)" OFF)
 option(
