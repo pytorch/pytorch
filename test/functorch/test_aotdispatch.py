@@ -28,6 +28,7 @@ from common_utils import (
 import torch
 import torch._dynamo as torchdynamo
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.utils._pytree as pytree
 from functorch import grad, jacrev, make_fx, vjp, vmap
 from functorch.compile import (
@@ -101,7 +102,6 @@ from torch.testing._internal.optests import (
 from torch.testing._internal.subclasses import WrapperSubclass
 from torch.testing._internal.two_tensor import TwoTensor, TwoTensorMode
 from torch.utils._python_dispatch import TorchDispatchMode
-import torch.nn.functional as F
 
 
 USE_TORCHVISION = False
@@ -7206,7 +7206,7 @@ metadata incorrectly.
 
         x = torch.randn(2, 4, 8)
         eager = fn(x)
-        aot_eager = torch.compile(backend='aot_eager')(fn)(x)
+        aot_eager = torch.compile(backend="aot_eager")(fn)(x)
         self.assertEqual(eager, aot_eager, atol=0, rtol=0)
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
@@ -7215,9 +7215,9 @@ metadata incorrectly.
         def fn(x):
             return F.rms_norm(x, normalized_shape=(8,))
 
-        x = torch.randn(2, 4, 8, device='cuda')
+        x = torch.randn(2, 4, 8, device="cuda")
         eager = fn(x)
-        aot_eager = torch.compile(backend='aot_eager')(fn)(x)
+        aot_eager = torch.compile(backend="aot_eager")(fn)(x)
         self.assertEqual(eager, aot_eager, atol=0, rtol=0)
 
     def test_subclass_parameters(self):
