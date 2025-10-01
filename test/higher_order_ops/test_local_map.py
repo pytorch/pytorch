@@ -97,6 +97,7 @@ def ap_style_initial_capture(model, inputs):
             fw_compiler=boxed_nop_preserve_node_meta,
             bw_compiler=boxed_nop_preserve_node_meta,
         )
+        unused.close()
     return joint_with_descriptors.graph_module
 
 
@@ -224,6 +225,7 @@ def get_local_mapped_functions(mesh):
 
 class TestLocalMap(TestCase):
     def setUp(self):
+        torch._dynamo.reset()
         self.exit_stack = ExitStack()
         self.exit_stack.enter_context(sdpa_kernel(backends=[SDPBackend.MATH]))
         if torch.distributed.is_available():
@@ -520,7 +522,7 @@ class GraphModule(torch.nn.Module):
         def mismatch_input(x, scalar):
             return x + scalar, scalar
 
-        x = torch.randn(36, 36, requires_grad=True)
+        x = torch.randn(64, 64, 64, requires_grad=True)
         with (
             LocalMapWrappedHigherOrderVariable.enable(),
             self.assertRaisesRegex(
@@ -543,7 +545,7 @@ class GraphModule(torch.nn.Module):
         def mismatch_outputs(x):
             return x + 11, x + 12
 
-        x = torch.randn(36, 36, requires_grad=True)
+        x = torch.randn(64, 64, 64, requires_grad=True)
         with (
             LocalMapWrappedHigherOrderVariable.enable(),
             self.assertRaisesRegex(
@@ -554,7 +556,7 @@ class GraphModule(torch.nn.Module):
             torch.compile(mismatch_outputs, backend="eager", fullgraph=True)(x)
 
     @unittest.skipIf(*get_skip_reasons())
-    def test_local_map_hop_with_local_shapes(self):
+    def test_local_map_with_local_shapes_hop_tracing(self):
         def fn(x):
             assert x.shape == (10, 80), "expected local shapes"
             # force view specialization ops
@@ -570,15 +572,15 @@ class GraphModule(torch.nn.Module):
             }
         }
 
-        with FakeTensorMode(allow_non_fake_inputs=False):
+        with FakeTensorMode():
             global_tensor = torch.randn(80, 80, requires_grad=True)
-            with torch._higher_order_ops.local_map.defer_inlining():
-                out = torch._higher_order_ops.local_map_hop(fn, global_tensor)
-                out[0].sum().backward()
-            self.assertEqual(global_tensor.shape, (80, 80))
+        with torch._higher_order_ops.local_map.defer_inlining():
+            out = torch._higher_order_ops.local_map_hop(fn, global_tensor)
+            out[0].sum().backward()
+        self.assertEqual(global_tensor.shape, (80, 80))
 
     @unittest.skipIf(*get_skip_reasons())
-    def test_local_map_hop_with_local_shapes_e2e(self):
+    def test_local_map_with_local_shapes_dynamo_tracing(self):
         @local_map(
             out_placements=((Shard(0), Replicate(), Replicate()),),
             in_placements=((Shard(0), Replicate(), Replicate()),),
@@ -595,17 +597,10 @@ class GraphModule(torch.nn.Module):
                 return fn(x)
 
         model = MyModule()
-        inputs = (torch.randn(80, 80, requires_grad=True),)
-        gm = ap_style_initial_capture(model, inputs)
-        breakpoint()
-
-        # pretend this is a GraphModule for testing convenience
-        # with FakeTensorMode(allow_non_fake_inputs=False):
-        #     global_tensor = torch.randn(80, 80, requires_grad=True)
-        #     with torch._higher_order_ops.local_map.defer_inlining():
-        #         out = torch._higher_order_ops.local_map_hop(fn, global_tensor)
-        #         out[0].sum().backward()
-        #     self.assertEqual(global_tensor.shape, (80, 80))
+        with FakeTensorMode():
+            inputs = (torch.randn(80, 80, requires_grad=True),)
+        # should not error
+        ap_style_initial_capture(model, inputs)
 
 
 if __name__ == "__main__":

@@ -3583,13 +3583,26 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
             "in_grad_placements": in_grad_placements.value,
             "device_mesh": device_mesh.value,
         }
-        assert local_map_kwargs["device_mesh"] is not None
+        assert local_map_kwargs["device_mesh"] is not None, (
+            "Not yet implemented, please manually provide a device_mesh to local_map."
+        )
         mesh = local_map_kwargs["device_mesh"]
 
         # For Autoparallel, the initial trace is done with global shapes, then we decide model weights sharding,
         # and reuse the graph. Since the sharding decision is after the initial trace, we can't trace with local shapes.
         # For local_map however, since we specify all placements, we can trace with local shapes.
-        assert len(in_placements.value) == len(user_args)
+
+        # Step 1: Validate the annotated function matches the input_placements (i.e. that it can run in eager)
+        template = (
+            "Expecting {expected} {inputs_or_outputs} to local_map function based on placements"
+            ", but found {actual}. Please ensure the count matches for eager. "
+        )
+        assert len(in_placements.value) == len(user_args), template.format(
+            expected=len(in_placements.value),
+            inputs_or_outputs="inputs",
+            actual=len(user_args),
+        )
+
         from torch.distributed._tensor import distribute_tensor
 
         priors = {}
@@ -3616,7 +3629,6 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
 
             priors[vt] = global_tensor
             vt.as_proxy().node.meta["example_value"] = local_tensor
-
             vt.synchronize_attributes(tx)
 
         # 2. Trace trace local_map subgraph with local tensors
@@ -3687,12 +3699,10 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
             vt.as_proxy().node.meta["example_value"] = global_tensor
             vt.synchronize_attributes(tx)
 
-        from . import TensorVariable
-
-        outs = out if isinstance(out, TupleVariable) else [out]
+        outs = out.items if isinstance(out, TupleVariable) else [out]
         assert len(outs) == len(out_placements.value)
         for placements, vt in zip(out_placements.value, outs):
-            if not isinstance(vt, TensorVariable):
+            if not isinstance(vt, variables.TensorVariable):
                 assert placements is None
                 continue
 
