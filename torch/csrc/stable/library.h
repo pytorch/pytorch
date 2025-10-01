@@ -9,6 +9,7 @@
 // but we need to include it here as the contents of stableivalue_conversions.h
 // used to live here and so we need to expose them for backwards compatibility.
 #include <torch/csrc/stable/stableivalue_conversions.h>
+#include <torch/csrc/stable/version.h>
 
 // use anonymous namespace to avoid collisions between differing
 // versions of this file that may be included by different sources
@@ -57,32 +58,52 @@ class StableLibrary final {
     aoti_torch_delete_library_object(lib_);
   }
 
-  // corresponds to a limited, stable version of torch::library::impl()
-  // Inputs:
-  //   name: the name of the function to implement
-  //   fn: a boxed function with schema
-  //       (StableIValue* stack, uint64_t num_inputs, uint64_t num_outputs) ->
-  //       void
-  // fn should follow the calling convention of our boxed kernels that convert
-  // to IValues. fn will be called with a StableIValue* array of length
-  // max(num_inputs, num_outputs), where the first num_inputs entries are
-  // populated with inputs. fn is responsible for stealing the memory of the
-  // inputs, in effect "popping" them off the stack, and then populating the
-  // stack with StableIValue outputs. Concretely, fn should:
-  //    1. read StableIValue inputs from the given stack
-  //    2. convert the inputs to the proper types
-  //    3. call the function corresponding to name with the inputs
-  //    4. convert the outputs to StableIValues
-  //    5. populate the now empty stack with StableIValue outputs
-  // If the operation corresponding to name takes in 4 inputs and returns 2
-  // outputs, fn should expect stack to contain 4 StableIValues:
-  //    [stable_arg1, stable_arg2, stable_arg3, stable_arg4]
-  // to end, fn should fill the stack with 2 StableIValues representing outputs:
-  //    [stable_ret1, stable_ret2, -, -]
+// corresponds to a limited, stable version of torch::library::impl()
+// Inputs:
+//   name: the name of the function to implement
+//   fn: a boxed function with schema
+//       (StableIValue* stack, uint64_t num_inputs, uint64_t num_outputs) ->
+//       void
+// fn should follow the calling convention of our boxed kernels that convert
+// to IValues. fn will be called with a StableIValue* array of length
+// max(num_inputs, num_outputs), where the first num_inputs entries are
+// populated with inputs. fn is responsible for stealing the memory of the
+// inputs, in effect "popping" them off the stack, and then populating the
+// stack with StableIValue outputs. Concretely, fn should:
+//    1. read StableIValue inputs from the given stack
+//    2. convert the inputs to the proper types
+//    3. call the function corresponding to name with the inputs
+//    4. convert the outputs to StableIValues
+//    5. populate the now empty stack with StableIValue outputs
+// If the operation corresponding to name takes in 4 inputs and returns 2
+// outputs, fn should expect stack to contain 4 StableIValues:
+//    [stable_arg1, stable_arg2, stable_arg3, stable_arg4]
+// to end, fn should fill the stack with 2 StableIValues representing outputs:
+//    [stable_ret1, stable_ret2, -, -]
+
+// Uncomment this to pretend extension built against old version
+#ifdef FAKE_TORCH_VERSION
+#define FAKE_VERSION                                              \
+  (((0ULL + 2) << 56) | ((0ULL + 8) << 48) | ((0ULL + 0) << 40) | \
+   ((0ULL + 0) << 0))
+#else
+#define FAKE_VERSION                                               \
+  (((0ULL + 2) << 56) | ((0ULL + 10) << 48) | ((0ULL + 0) << 40) | \
+   ((0ULL + 0) << 0))
+#endif
+
   StableLibrary& impl(
       const char* name,
       void (*fn)(StableIValue*, uint64_t, uint64_t)) {
-    aoti_torch_library_impl(lib_, name, fn);
+    aoti_torch_library_impl_v2(
+        lib_,
+        name,
+        fn,
+#ifdef FAKE_TORCH_VERSION
+        FAKE_VERSION);
+#else
+        TORCH_ABI_VERSION);
+#endif
     return *this;
   }
 

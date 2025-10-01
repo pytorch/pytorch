@@ -32,6 +32,7 @@
 #include <c10/core/DeviceGuard.h>
 #include <c10/core/Stream.h>
 #include <c10/util/FileSystem.h>
+#include <torch/headeronly/dummy.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -1414,33 +1415,34 @@ AOTITorchError aoti_torch_zero_(AtenTensorHandle tensor) {
 
 static StableIValue from_ivalue(
     const c10::TypePtr& type,
-    const c10::IValue& ivalue) {
+    const c10::IValue& ivalue,
+    uint64_t extension_build_version) {
   switch (type->kind()) {
     case c10::TypeKind::TensorType: {
       AtenTensorHandle ath = torch::aot_inductor::new_tensor_handle(
           std::move(const_cast<at::Tensor&>(ivalue.toTensor())));
-      return from(ath);
+      return _from(ath, extension_build_version);
     }
     case c10::TypeKind::IntType: {
-      return from(ivalue.toInt());
+      return _from(ivalue.toInt(), extension_build_version);
     }
     case c10::TypeKind::FloatType: {
-      return from(ivalue.toDouble());
+      return _from(ivalue.toDouble(), extension_build_version);
     }
     case c10::TypeKind::BoolType: {
-      return from(ivalue.toBool());
+      return _from(ivalue.toBool(), extension_build_version);
     }
     case c10::TypeKind::ScalarTypeType: {
-      return from(ivalue.toScalarType());
+      return _from(ivalue.toScalarType(), extension_build_version);
     }
     case c10::TypeKind::DeviceObjType: {
-      return from(ivalue.toDevice());
+      return _from(ivalue.toDevice(), extension_build_version);
     }
     case c10::TypeKind::LayoutType: {
-      return from(ivalue.toLayout());
+      return _from(ivalue.toLayout(), extension_build_version);
     }
     case c10::TypeKind::MemoryFormatType: {
-      return from(ivalue.toMemoryFormat());
+      return _from(ivalue.toMemoryFormat(), extension_build_version);
     }
     case c10::TypeKind::OptionalType: {
       auto inner_type = type->castRaw<at::OptionalType>()->getElementType();
@@ -1457,10 +1459,14 @@ static StableIValue from_ivalue(
       // be kept in sync with from<std::optional<T>> function in
       // torch/csrc/stable/library.h
       if (ivalue.isNone()) {
-        return from(std::nullopt);
+        return _from(std::nullopt, extension_build_version);
       }
-      StableIValue* sivp = new StableIValue(from_ivalue(inner_type, ivalue));
-      return from(sivp);
+      StableIValue* sivp = new StableIValue(
+          from_ivalue(inner_type, ivalue, extension_build_version));
+      return _from(sivp, extension_build_version);
+    }
+    case c10::TypeKind::DummyType: {
+      return _from(ivalue.toDummy(), extension_build_version);
     }
     default: {
       TORCH_CHECK(
@@ -1473,34 +1479,39 @@ static StableIValue from_ivalue(
 
 static c10::IValue to_ivalue(
     const c10::TypePtr& type,
-    const StableIValue stable_ivalue) {
+    const StableIValue stable_ivalue,
+    uint64_t extension_build_version) {
   switch (type->kind()) {
     case c10::TypeKind::TensorType: {
       auto ret_raiiath = torch::aot_inductor::RAIIAtenTensorHandle(
-          to<AtenTensorHandle>(stable_ivalue));
+          _to<AtenTensorHandle>(stable_ivalue, extension_build_version));
       return (c10::IValue(*torch::aot_inductor::tensor_handle_to_tensor_pointer(
           ret_raiiath.get())));
     }
     case c10::TypeKind::IntType: {
-      return c10::IValue(to<int64_t>(stable_ivalue));
+      return c10::IValue(_to<int64_t>(stable_ivalue, extension_build_version));
     }
     case c10::TypeKind::FloatType: {
-      return c10::IValue(to<double>(stable_ivalue));
+      return c10::IValue(_to<double>(stable_ivalue, extension_build_version));
     }
     case c10::TypeKind::BoolType: {
-      return c10::IValue(to<bool>(stable_ivalue));
+      return c10::IValue(_to<bool>(stable_ivalue, extension_build_version));
     }
     case c10::TypeKind::ScalarTypeType: {
-      return c10::IValue(to<c10::ScalarType>(stable_ivalue));
+      return c10::IValue(
+          _to<c10::ScalarType>(stable_ivalue, extension_build_version));
     }
     case c10::TypeKind::DeviceObjType: {
-      return c10::IValue(to<c10::Device>(stable_ivalue));
+      return c10::IValue(
+          _to<c10::Device>(stable_ivalue, extension_build_version));
     }
     case c10::TypeKind::LayoutType: {
-      return c10::IValue(to<c10::Layout>(stable_ivalue));
+      return c10::IValue(
+          _to<c10::Layout>(stable_ivalue, extension_build_version));
     }
     case c10::TypeKind::MemoryFormatType: {
-      return c10::IValue(to<c10::MemoryFormat>(stable_ivalue));
+      return c10::IValue(
+          _to<c10::MemoryFormat>(stable_ivalue, extension_build_version));
     }
     case c10::TypeKind::OptionalType: {
       auto inner_type = type->castRaw<at::OptionalType>()->getElementType();
@@ -1516,13 +1527,17 @@ static c10::IValue to_ivalue(
       // will manually unwrap and recursively call. This implementation MUST
       // be kept in sync with the to<T> function in
       // torch/csrc/stable/library.h
-      if (stable_ivalue == from(std::nullopt)) {
+      if (stable_ivalue == _from(std::nullopt, extension_build_version)) {
         return c10::IValue();
       }
-      auto sivp = to<StableIValue*>(stable_ivalue);
-      auto ival = to_ivalue(inner_type, *sivp);
+      auto sivp = _to<StableIValue*>(stable_ivalue, extension_build_version);
+      auto ival = to_ivalue(inner_type, *sivp, extension_build_version);
       delete sivp;
       return ival;
+    }
+    case c10::TypeKind::DummyType: {
+      return c10::IValue(
+          _to<dummy_types::Dummy>(stable_ivalue, extension_build_version));
     }
     default: {
       TORCH_CHECK(
@@ -1535,8 +1550,10 @@ static c10::IValue to_ivalue(
 
 class StableIValueBoxedKernel : public c10::OperatorKernel {
  public:
-  StableIValueBoxedKernel(void (*fn)(StableIValue*, uint64_t, uint64_t))
-      : fn_(fn) {}
+  StableIValueBoxedKernel(
+      void (*fn)(StableIValue*, uint64_t, uint64_t),
+      uint64_t extension_build_version)
+      : fn_(fn), extension_build_version_(extension_build_version) {}
 
   void operator()(
       const c10::OperatorHandle& op,
@@ -1552,7 +1569,8 @@ class StableIValueBoxedKernel : public c10::OperatorKernel {
     for (const auto idx : c10::irange(num_arguments)) {
       const auto ministack_idx = num_arguments - idx - 1;
       const c10::TypePtr& arg_type = schema.arguments()[ministack_idx].type();
-      ministack[ministack_idx] = from_ivalue(arg_type, torch::jit::pop(stack));
+      ministack[ministack_idx] = from_ivalue(
+          arg_type, torch::jit::pop(stack), extension_build_version_);
     }
 
     // boxed function is going to take a stack of StableIValues, cast them to
@@ -1563,12 +1581,14 @@ class StableIValueBoxedKernel : public c10::OperatorKernel {
     // IValue from StableIValue
     for (size_t idx = 0; idx < num_returns; idx++) {
       const c10::TypePtr& ret_type = schema.returns()[idx].type();
-      torch::jit::push(stack, to_ivalue(ret_type, ministack[idx]));
+      torch::jit::push(
+          stack, to_ivalue(ret_type, ministack[idx], extension_build_version_));
     }
   }
 
  private:
   void (*fn_)(StableIValue*, uint64_t, uint64_t);
+  uint64_t extension_build_version_;
 };
 
 AOTITorchError aoti_torch_library_init_impl(
@@ -1628,7 +1648,22 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_library_impl(
     reinterpret_cast<torch::Library*>(self)->impl(
         name,
         torch::CppFunction::makeFromBoxedFunctor(
-            std::make_unique<StableIValueBoxedKernel>(fn)));
+            std::make_unique<StableIValueBoxedKernel>(
+                fn, aoti_torch_abi_version())));
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_library_impl_v2(
+    TorchLibraryHandle self,
+    const char* name,
+    void (*fn)(StableIValue*, uint64_t, uint64_t),
+    uint64_t extension_build_version) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    reinterpret_cast<torch::Library*>(self)->impl(
+        name,
+        torch::CppFunction::makeFromBoxedFunctor(
+            std::make_unique<StableIValueBoxedKernel>(
+                fn, extension_build_version)));
   });
 }
 
@@ -1659,11 +1694,13 @@ AOTITorchError aoti_torch_call_dispatcher(
     // we will only need max(num_args, num_returns)
     ivalue_stack.reserve(std::max(num_arguments, num_returns));
 
+    const uint64_t current_version = aoti_torch_abi_version();
     // Convert StableIValue stack to c10::IValue stack
     for (const auto idx : c10::irange(num_arguments)) {
       auto stable_ivalue = stack[idx];
       auto arg_type = schema.arguments()[idx].type();
-      torch::jit::push(ivalue_stack, to_ivalue(arg_type, stable_ivalue));
+      torch::jit::push(
+          ivalue_stack, to_ivalue(arg_type, stable_ivalue, current_version));
     }
 
     op.callBoxed(ivalue_stack);
@@ -1673,7 +1710,8 @@ AOTITorchError aoti_torch_call_dispatcher(
     for (const auto idx : c10::irange(num_returns)) {
       const auto stack_idx = num_returns - idx - 1;
       const c10::TypePtr& ret_type = schema.returns()[idx].type();
-      stack[stack_idx] = from_ivalue(ret_type, torch::jit::pop(ivalue_stack));
+      stack[stack_idx] =
+          from_ivalue(ret_type, torch::jit::pop(ivalue_stack), current_version);
     }
   });
 }
@@ -1792,7 +1830,8 @@ torch::jit::Stack adapt_v1_to_v3(
 
   // Convert extension's single argument: self
   auto self_type = current_schema.arguments()[0].type();
-  ivalue_stack.push_back(to_ivalue(self_type, extension_stack[0]));
+  ivalue_stack.push_back(
+      to_ivalue(self_type, extension_stack[0], extension_build_version));
 
   // V1 behavior: fills tensor with 2
   // To get V3 to behave like V1: a=True, b=2 (fills with +2)
@@ -1821,9 +1860,12 @@ torch::jit::Stack adapt_v2_to_v3(
   auto self_type = current_schema.arguments()[0].type();
   auto a_type = current_schema.arguments()[1].type();
 
-  ivalue_stack.push_back(to_ivalue(self_type, extension_stack[0])); // self
-  ivalue_stack.push_back(
-      to_ivalue(a_type, extension_stack[1])); // a (from extension)
+  ivalue_stack.push_back(to_ivalue(
+      self_type, extension_stack[0], extension_build_version)); // self
+  ivalue_stack.push_back(to_ivalue(
+      a_type,
+      extension_stack[1],
+      extension_build_version)); // a (from extension)
 
   // To get V3 to behave like V2: b=2 (fills with 2
   ivalue_stack.push_back(c10::IValue(2));
@@ -1890,7 +1932,9 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_call_dispatcher_v2(
       for (const auto idx : c10::irange(num_arguments)) {
         auto stable_ivalue = stack[idx];
         auto arg_type = schema.arguments()[idx].type();
-        torch::jit::push(ivalue_stack, to_ivalue(arg_type, stable_ivalue));
+        torch::jit::push(
+            ivalue_stack,
+            to_ivalue(arg_type, stable_ivalue, extension_build_version));
       }
     }
 
@@ -1901,7 +1945,8 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_call_dispatcher_v2(
     for (const auto idx : c10::irange(num_returns)) {
       const auto stack_idx = num_returns - idx - 1;
       const c10::TypePtr& ret_type = schema.returns()[idx].type();
-      stack[stack_idx] = from_ivalue(ret_type, torch::jit::pop(ivalue_stack));
+      stack[stack_idx] = from_ivalue(
+          ret_type, torch::jit::pop(ivalue_stack), extension_build_version);
     }
   });
 }
