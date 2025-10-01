@@ -1,12 +1,11 @@
-# mypy: allow-untyped-defs
-from typing import Optional, Union
+from typing import Any, Optional, Union
 
 import torch
 from torch import Tensor
 from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import broadcast_all
-from torch.types import _Number, Number
+from torch.types import _Number, _size, Number
 
 
 __all__ = ["Poisson"]
@@ -54,33 +53,41 @@ class Poisson(ExponentialFamily):
     ) -> None:
         (self.rate,) = broadcast_all(rate)
         if isinstance(rate, _Number):
-            batch_shape = torch.Size()
+            batch_shape = torch.Size()  # type: ignore[attr-defined]
         else:
             batch_shape = self.rate.size()
         super().__init__(batch_shape, validate_args=validate_args)
 
-    def expand(self, batch_shape, _instance=None):
+    def expand(
+        self,
+        batch_shape: _size,
+        _instance: Optional[Any] = None,
+    ) -> "Poisson":
         new = self._get_checked_instance(Poisson, _instance)
-        batch_shape = torch.Size(batch_shape)
+        batch_shape = torch.Size(batch_shape)  # type: ignore[attr-defined]
         new.rate = self.rate.expand(batch_shape)
         super(Poisson, new).__init__(batch_shape, validate_args=False)
         new._validate_args = self._validate_args
         return new
 
-    def sample(self, sample_shape=torch.Size()):
+    def sample(
+        self,
+        sample_shape: _size = torch.Size(),  # type: ignore[attr-defined]
+    ) -> Tensor:
         shape = self._extended_shape(sample_shape)
         with torch.no_grad():
-            return torch.poisson(self.rate.expand(shape))
+            return torch.poisson(self.rate.expand(shape))  # type: ignore[attr-defined]
 
-    def log_prob(self, value):
+    def log_prob(self, value: Tensor) -> Tensor:
         if self._validate_args:
             self._validate_sample(value)
         rate, value = broadcast_all(self.rate, value)
+        value = torch.as_tensor(value)  # Ensure value is a tensor for lgamma()
         return value.xlogy(rate) - rate - (value + 1).lgamma()
 
     @property
     def _natural_params(self) -> tuple[Tensor]:
-        return (torch.log(self.rate),)
+        return (torch.log(self.rate),)  # type: ignore[attr-defined]
 
-    def _log_normalizer(self, x):
-        return torch.exp(x)
+    def _log_normalizer(self, x: Tensor) -> Tensor:
+        return torch.exp(x)  # type: ignore[attr-defined]
