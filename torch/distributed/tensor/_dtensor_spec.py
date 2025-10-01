@@ -11,6 +11,10 @@ from torch.distributed.tensor.placement_types import (
 )
 
 
+MeshDimTuple = tuple[int, ...]  # Sequence of mesh dimensions for a tensor dimension
+TensorDimTuple = tuple[MeshDimTuple, ...]  # Mapping from tensor dims to mesh dims
+
+
 class TensorMeta(NamedTuple):
     # simple named tuple to represent tensor metadata
     # intentionally to stay simple only for sharding
@@ -36,16 +40,15 @@ class DTensorSpec:
     # None, we are unable to tell the rank of the tensor. Therefore, the size of
     # `shard_order` is only extended to the largest mesh axis index appeared in
     # `placements` if we let __post_init__ to help fill the `shard_order`.
-    shard_order: Optional[tuple[tuple[int, ...], ...]] = None
+    shard_order: Optional[TensorDimTuple] = None
 
     @staticmethod
-    def compute_default_shard_order(
+    def compute_default_sparse_shard_order(
         placements: tuple[Placement, ...],
         mesh: Optional[DeviceMesh],
-        tensor_rank: Optional[int] = None,
-    ) -> tuple[tuple[int, ...], ...] | None:
+    ) -> TensorDimTuple:
         # follow default left-to-right device order if shard_order is not specified
-        tensor_dim_to_mesh_dims: list[list[int]] = [[]]
+        tensor_dim_to_mesh_dims: dict[int, list[int]] = {}
         mesh_ndim = mesh.ndim if mesh else 0
         for mesh_dim in range(0, mesh_ndim):
             if isinstance(placements[mesh_dim], Shard):
@@ -54,26 +57,27 @@ class DTensorSpec:
                 assert shard_dim >= 0, (
                     f"Shard dim {shard_dim} in placements {placements} must be normalized"
                 )
-                # Extend tensor_dim_to_mesh_dims to have at least (shard_dim + 1) elements
-                while len(tensor_dim_to_mesh_dims) <= shard_dim:
-                    tensor_dim_to_mesh_dims.append([])
+                if shard_dim not in tensor_dim_to_mesh_dims:
+                    tensor_dim_to_mesh_dims[shard_dim] = []
                 tensor_dim_to_mesh_dims[shard_dim].append(mesh_dim)
-        if tensor_rank:
-            while len(tensor_dim_to_mesh_dims) < tensor_rank:
-                tensor_dim_to_mesh_dims.append([])
-        default_shard_order = tuple(
-            tuple(mesh_dims) for mesh_dims in tensor_dim_to_mesh_dims
+        # convert dict into the tuple of tuple that is hashable
+        default_sparse_shard_order = tuple(
+            tuple(item)
+            for item in (
+                [key] + value if isinstance(value, list) else [key, value]
+                for key, value in sorted(tensor_dim_to_mesh_dims.items())
+                if value
+            )
         )
-        return default_shard_order
+        return default_sparse_shard_order
 
     def __post_init__(self) -> None:
         if not isinstance(self.placements, tuple):
             self.placements = tuple(self.placements)
 
         if self.shard_order is None:
-            tensor_rank = len(self.tensor_meta.shape) if self.tensor_meta else None
-            self.shard_order = DTensorSpec.compute_default_shard_order(
-                self.placements, self.mesh, tensor_rank
+            self.shard_order = DTensorSpec.compute_default_sparse_shard_order(
+                self.placements, self.mesh
             )
 
         self._hash: Optional[int] = None
@@ -158,13 +162,13 @@ class DTensorSpec:
     @staticmethod
     def format_shard_order_str(
         placements: tuple[Placement, ...],
-        shard_order: Optional[tuple[tuple[int, ...], ...]] = None,
-        use_jax_style_print: bool = False,
+        shard_order: Optional[TensorDimTuple] = None,
+        use_tensor_dim_to_mesh_dims_print: bool = False,
     ) -> str:
         out_str = ""
-        # jax-style sharding representation: map from tensor dim to mesh dim
-        if shard_order and use_jax_style_print:
-            for tensor_dim, mesh_dims in enumerate(shard_order):
+        # print mapping from tensor dim to mesh dim
+        if shard_order and use_tensor_dim_to_mesh_dims_print:
+            for tensor_dim, *mesh_dims in shard_order:
                 if len(mesh_dims) > 0:
                     out_str += f"S({tensor_dim})"
                     out_str += f"[{', '.join([str(m) for m in mesh_dims])}]"
@@ -186,8 +190,18 @@ class DTensorSpec:
                     out_str += "R"
                 elif isinstance(placement, Shard):
                     if shard_order is not None:
-                        assert mesh_dim in shard_order[placement.dim]
-                        out_str += f"S({placement.dim})[{shard_order[placement.dim].index(mesh_dim)}]"
+                        for tensor_dim, *mesh_dims in shard_order:
+                            if placement.dim == tensor_dim:
+                                assert mesh_dim in mesh_dims
+                                if len(mesh_dims) > 1:
+                                    out_str += (
+                                        f"S({tensor_dim})[{mesh_dims.index(mesh_dim)}]"
+                                    )
+                                else:
+                                    # no need to show device order if the tensor dim is
+                                    # only sharded in one mesh dim
+                                    out_str += f"S({tensor_dim})"
+                                break
                     else:
                         out_str += f"S({placement.dim})"
                 else:

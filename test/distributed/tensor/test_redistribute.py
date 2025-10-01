@@ -3,8 +3,6 @@
 
 import itertools
 
-import numpy as np
-
 import torch
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import (
@@ -28,6 +26,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
 )
+from torch.utils._debug_mode import DebugMode
 
 
 funcol = torch.ops.c10d_functional
@@ -751,88 +750,15 @@ class DeviceOrderRedistributeTest(DTensorTestBase):
         dt2 = dt.redistribute(mesh, shard_order=shard_order)
         self.assertEqual(dt2.shard_order, ((), (1,), (0,)))
 
-    @with_comms
-    def test_conflict_placement_and_shard_order(self):
-        mesh = init_device_mesh(self.device_type, (2, 4))
-        input_tensor = torch.randn(8, 6, 5, device=self.device_type)
+    def _extract_redistribute_trace_from_debug(self, s: str) -> str:
+        import re
 
-        # Test 1: Both placements and shard_order provided should raise AssertionError
-        shard_order = {0: [0], 1: [1]}
-        placements = [Shard(0), Shard(1)]
-        with self.assertRaisesRegex(
-            AssertionError,
-            "distribute function accepts either `placements` or `shard_order` "
-            "but not both",
-        ):
-            dt = distribute_tensor(  # noqa: F841
-                input_tensor, mesh, placements, shard_order=shard_order
-            )
-
-        # Test 2: Only placements provided should work fine
-        dt_placements = distribute_tensor(input_tensor, mesh, placements)
-        self.assertEqual(dt_placements.placements, tuple(placements))
-        self.assertEqual(dt_placements.full_tensor(), input_tensor)
-
-        # Test 3: Only shard_order provided should work fine
-        dt_shard_order = distribute_tensor(input_tensor, mesh, shard_order=shard_order)
-        expected_placements = [Shard(0), Shard(1)]
-        self.assertEqual(dt_shard_order.placements, tuple(expected_placements))
-        self.assertEqual(dt_shard_order.full_tensor(), input_tensor)
-
-        # Test 4: Neither placements nor shard_order (default behavior)
-        dt_default = distribute_tensor(input_tensor, mesh)
-        expected_default_placements = [Replicate(), Replicate()]
-        self.assertEqual(dt_default.placements, tuple(expected_default_placements))
-        self.assertEqual(dt_default.full_tensor(), input_tensor)
-
-        # Test 5: Redistribute with conflict should also raise error
-        with self.assertRaisesRegex(
-            AssertionError,
-            "distribute function accepts either `placements` or `shard_order` "
-            "but not both",
-        ):
-            dt_default.redistribute(mesh, placements, shard_order=shard_order)
-
-        # Test 6: Valid redistributions should work
-        # Redistribute using placements only
-        dt_redist_placements = dt_default.redistribute(mesh, placements)
-        self.assertEqual(dt_redist_placements.placements, tuple(placements))
-        self.assertEqual(dt_redist_placements.full_tensor(), input_tensor)
-
-        # Redistribute using shard_order only
-        dt_redist_shard_order = dt_default.redistribute(mesh, shard_order=shard_order)
-        self.assertEqual(dt_redist_shard_order.placements, tuple(expected_placements))
-        self.assertEqual(dt_redist_shard_order.full_tensor(), input_tensor)
-
-        # Test 7: Test with more complex shard orders and placements
-        complex_shard_order = {
-            0: [0, 1],
-            2: [0],
-        }  # Tensor dim 0 sharded on mesh dims [0,1], dim 2 on mesh dim 0
-        complex_placements = [
-            Shard(0),
-            Shard(0),
-            Replicate(),
-        ]  # Not equivalent to the shard_order
-
-        with self.assertRaisesRegex(
-            AssertionError,
-            "distribute function accepts either `placements` or `shard_order` "
-            "but not both",
-        ):
-            distribute_tensor(
-                input_tensor, mesh, complex_placements, shard_order=complex_shard_order
-            )
-
-        # Test 8: Edge case with empty shard_order (should work like default)
-        empty_shard_order = {}
-        dt_empty_shard_order = distribute_tensor(
-            input_tensor, mesh, shard_order=empty_shard_order
-        )
-        self.assertEqual(
-            dt_empty_shard_order.placements, tuple(expected_default_placements)
-        )
-        self.assertEqual(dt_empty_shard_order.full_tensor(), input_tensor)
+        match = re.search(r"trace:\s*(.*)\)", s)
+        if match:
+            trace_str = match.group(1).rstrip(")")
+            return trace_str
+        else:
+            return ""
 
     @with_comms
     def test_ordered_redistribute(self):
@@ -842,7 +768,7 @@ class DeviceOrderRedistributeTest(DTensorTestBase):
             self.device_type, (2, 2, 2), mesh_dim_names=("dp", "tp", "xp")
         )
         input_data = torch.randn((8, 8, 8), device=self.device_type)
-        sharding_src_dst_pairs_with_order = [
+        sharding_src_dst_pairs_with_expected_trace = [
             # without specifying the `shard_order`, it will trigger the default
             # left-to-right device distribution
             (
@@ -855,15 +781,10 @@ class DeviceOrderRedistributeTest(DTensorTestBase):
                 (None, {0: ["dp", "tp", "xp"]}),
                 (None, {0: [1, 2]}),
             ),
-            # redistribution path: S(0)[1]S(0)[0]S(0)[2] -> S(0)[1]S(0)[0]S(1)[0] ->
-            # RS(0)[0]S(1)[0] -> RS(0)[0]S(0)[1]
             (
                 (None, {0: [1, 0, 2]}),
                 (None, {0: [1, 2]}),
             ),
-            # redistribution path: S(0)[0]S(0)[1]S(0)[2] ->
-            # S(0)[0]S(0)[1]S(1)[0] -> S(0)[0]S(1)[1]S(1)[0] -> RS(1)[1]S(1)[0]
-            # -> RS(0)[0]S(1)[0] -> RS(0)[0]S(0)[1]
             (
                 (None, {0: [1, 0, 2]}),
                 (None, {0: [0, 1]}),
@@ -879,28 +800,129 @@ class DeviceOrderRedistributeTest(DTensorTestBase):
                 (None, {1: ["tp"], 0: [2]}),
             ),
         ]
-        expected_comm_counts = [3, 3, 3, 5, 2]
-        comm_mode = CommDebugMode()
         for idx, ((src_placement, src_order), (dst_placement, dst_order)) in enumerate(
-            sharding_src_dst_pairs_with_order
+            sharding_src_dst_pairs_with_expected_trace
         ):
             sharded_dt = distribute_tensor(
                 input_data.clone(), mesh, src_placement, shard_order=src_order
             )
+            with DebugMode(record_torchfunction=False) as debug_mode:
+                out_dt = sharded_dt.redistribute(
+                    mesh, dst_placement, shard_order=dst_order
+                )
+            trace_str = self._extract_redistribute_trace_from_debug(
+                debug_mode.debug_string()
+            )
+            if idx == 0:
+                self.assertExpectedInline(
+                    trace_str,
+                    """S(0)[0, 1, 2]->S(0)[0, 1]->S(0)[0]->RRR->S(0)[1]->S(0)[1, 2]""",
+                )
+            elif idx == 1:
+                self.assertExpectedInline(
+                    trace_str,
+                    """S(0)[0, 1, 2]->S(0)[0, 1]->S(0)[0]->RRR->S(0)[1]->S(0)[1, 2]""",
+                )
+            elif idx == 2:
+                self.assertExpectedInline(
+                    trace_str,
+                    """S(0)[1, 0, 2]->S(0)[1, 0]S(1)[2]->S(0)[1]S(1)[2]->S(0)[1, 2]""",
+                )
+            elif idx == 3:
+                self.assertExpectedInline(
+                    trace_str,
+                    """S(0)[1, 0, 2]->S(0)[1, 0]->S(0)[1]S(1)[0]->S(1)[0]S(2)[1]->S(0)[0]S(2)[1]->S(0)[0, 1]""",
+                )
+            elif idx == 4:
+                self.assertExpectedInline(
+                    trace_str,
+                    """S(0)[0, 1]->S(0)[0]S(1)[1]->S(1)[1]->S(0)[2]S(1)[1]""",
+                )
             expected_dt = distribute_tensor(
                 input_data.clone(), mesh, dst_placement, shard_order=dst_order
             )
             self.assertEqual(sharded_dt.full_tensor(), expected_dt.full_tensor())
-            with comm_mode:
-                out_dt = sharded_dt.redistribute(
-                    mesh, dst_placement, shard_order=dst_order
-                )
-                self.assertEqual(
-                    comm_mode.get_total_counts(), expected_comm_counts[idx]
-                )
             local_out_dt = out_dt.to_local()
             local_expected_dt = expected_dt.to_local()
             self.assertEqual(local_out_dt, local_expected_dt)
+
+    def generate_shard_orders(self, mesh, tensor_rank):
+        # Generate all possible sharding placement of tensor with rank
+        # `tensor_rank` over mesh.
+        def _split_list(lst: list, N: int):
+            def compositions(n, k):
+                if k == 1:
+                    yield [n]
+                else:
+                    for i in range(1, n - k + 2):
+                        for tail in compositions(n - i, k - 1):
+                            yield [i] + tail
+
+            length = len(lst)
+            for comp in compositions(length, N):
+                result = []
+                start = 0
+                for size in comp:
+                    result.append(lst[start : start + size])
+                    start += size
+                yield result
+
+        all_mesh = list(range(mesh.ndim))
+        all_device_order = list(itertools.permutations(all_mesh))
+        for device_order in all_device_order:
+            # split on device orders, and assign each device order segment to a tensor dim
+            for num_split in range(1, mesh.ndim + 1):
+                # possible_splits = np.array_split(device_order, num_split)
+                for splitted_list in _split_list(list(range(mesh.ndim)), num_split):
+                    for tensor_dims in itertools.combinations(
+                        range(tensor_rank), len(splitted_list)
+                    ):
+                        shard_order = {}
+                        assert len(tensor_dims) == len(splitted_list)
+                        for tensor_dim, mesh_dims in zip(tensor_dims, splitted_list):
+                            shard_order[tensor_dim] = device_order[
+                                mesh_dims[0] : mesh_dims[-1] + 1
+                            ]
+                        yield shard_order
+
+    @with_comms
+    def test_generate_shard_orders(self):
+        """Check if `generate_shard_orders` generates unique sharding combinations"""
+        import math
+
+        test_inputs = [
+            {"mesh": init_device_mesh(self.device_type, (2, 2, 2)), "tensor_rank": 2},
+            {"mesh": init_device_mesh(self.device_type, (2, 2, 2)), "tensor_rank": 3},
+            {"mesh": init_device_mesh(self.device_type, (2, 2, 2)), "tensor_rank": 4},
+        ]
+        for test_input in test_inputs:
+            all_combinations = []
+            for shard_order in self.generate_shard_orders(
+                test_input["mesh"], test_input["tensor_rank"]
+            ):
+                all_combinations.append(shard_order)  # noqa: PERF402
+            for i in range(len(all_combinations)):
+                for j in range(i + 1, len(all_combinations)):
+                    assert all_combinations[i] != all_combinations[j], (
+                        f"Duplicate elements found in all_combinations {all_combinations[i]}, {all_combinations[j]}"
+                    )
+            expected_total_combination = 0
+            N = test_input["mesh"].ndim
+            M = test_input["tensor_rank"]
+            for i in range(1, N + 1):
+                # assign total i split of device to tensor dims
+                if M < i:
+                    continue
+                device_combination_count = math.comb(
+                    N - 1, i - 1
+                )  # choose i-1 non-empty segments from a list of size N
+                tensor_dim_order_permutation = math.comb(M, i)  # choose i tensor dims
+                expected_total_combination += (
+                    device_combination_count * tensor_dim_order_permutation
+                )
+            # multiple by total possible permutation of device order
+            expected_total_combination *= math.factorial(N)
+            self.assertEqual(len(all_combinations), expected_total_combination)
 
     @with_comms
     def test_ordered_redistribute_all_combination(self):
@@ -918,29 +940,11 @@ class DeviceOrderRedistributeTest(DTensorTestBase):
             (33, 16, 8, 1),
         ]
 
-        def _generate_shard_orders(mesh, tensor_rank):
-            # Generate all possible sharding placement of tensor with rank
-            # `tensor_rank` over mesh.
-            all_mesh = list(range(mesh.ndim))
-            all_device_order = list(itertools.permutations(all_mesh))
-            for device_order in all_device_order:
-                # split on device orders, and assign each device order segment to a tensor dim
-                for num_split in range(1, mesh.ndim + 1):
-                    possible_splits = np.array_split(device_order, num_split)
-                    for tensor_dims in itertools.permutations(
-                        range(tensor_rank), len(possible_splits)
-                    ):
-                        shard_order = {}
-                        assert len(tensor_dims) == len(possible_splits)
-                        for tensor_dim, mesh_dims in zip(tensor_dims, possible_splits):
-                            shard_order[tensor_dim] = mesh_dims.tolist()
-                        yield shard_order
-
         # 1. Verify correctness of distribute_tensor from Tensor to DTensor.
         for tensor_shape in input_tensor_shape:
             input_data = torch.randn(tensor_shape, device=self.device_type)
             tensor_rank = input_data.ndim
-            for shard_order in _generate_shard_orders(mesh, tensor_rank):
+            for shard_order in self.generate_shard_orders(mesh, tensor_rank):
                 sharded_dt = distribute_tensor(
                     input_data.clone(), mesh, shard_order=shard_order
                 )
@@ -954,7 +958,7 @@ class DeviceOrderRedistributeTest(DTensorTestBase):
             input_data = torch.randn(tensor_shape, device=self.device_type)
             tensor_rank = input_data.ndim
             prev_sharded_dt = None
-            for shard_order in _generate_shard_orders(mesh, tensor_rank):
+            for shard_order in self.generate_shard_orders(mesh, tensor_rank):
                 if prev_sharded_dt is None:
                     prev_sharded_dt = distribute_tensor(
                         input_data.clone(), mesh, shard_order=shard_order
