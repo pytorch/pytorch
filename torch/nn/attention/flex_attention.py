@@ -36,6 +36,8 @@ from torch.fx.experimental.proxy_tensor import (
 from torch.nn.attention._utils import _validate_sdpa_input
 from torch.utils._pytree import tree_map_only
 
+DEFAULT_DEVICE = torch.accelerator.current_accelerator()
+
 
 # Private debug flag to disable internal compilation wrapping for debugging purposes.
 # WARNING: This is intended ONLY for debugging score_mod and mask_mod functions.
@@ -981,7 +983,7 @@ def create_mask(
     H: Optional[int],
     Q_LEN: int,
     KV_LEN: int,
-    device: DeviceLikeType = "cuda",
+    device: DeviceLikeType = DEFAULT_DEVICE,
 ) -> Tensor:
     r"""This function creates a mask tensor from a mod_fn function.
 
@@ -1030,7 +1032,7 @@ def create_block_mask(
     H: Optional[int],
     Q_LEN: int,
     KV_LEN: int,
-    device: DeviceLikeType = "cuda",
+    device: DeviceLikeType = DEFAULT_DEVICE,
     BLOCK_SIZE: Union[int, tuple[int, int]] = _DEFAULT_SPARSE_BLOCK_SIZE,
     _compile=False,
 ) -> BlockMask:
