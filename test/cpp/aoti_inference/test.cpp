@@ -45,11 +45,6 @@ bool testDataFilesExist() {
     if (!file.good()) {
       return false;
     }
-    // Check if file is not just a placeholder (size > 100 bytes)
-    file.seekg(0, std::ios::end);
-    if (file.tellg() < 100) {
-      return false;
-    }
   }
   return true;
 }

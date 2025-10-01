@@ -13,13 +13,6 @@ endif()
 # Link against LibTorch
 target_link_libraries(aoti_custom_class torch)
 
-# Create placeholder files for the model files that will be generated at test runtime
-# This allows the build to succeed without requiring torch to be importable during build
-file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/data.pt "# Placeholder - will be generated at test runtime\n")
-file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/script_data.pt "# Placeholder - will be generated at test runtime\n")
-file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/script_model_cpu.pt "# Placeholder - will be generated at test runtime\n")
-file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/script_model_cuda.pt "# Placeholder - will be generated at test runtime\n")
-
 # Build the cpp gtest binary containing the cpp-only tests.
 set(INDUCTOR_TEST_SRCS
   ${AOT_INDUCTOR_TEST_ROOT}/test.cpp
@@ -28,10 +21,6 @@ set(INDUCTOR_TEST_SRCS
 add_executable(test_aoti_inference
   ${TORCH_ROOT}/test/cpp/common/main.cpp
   ${INDUCTOR_TEST_SRCS}
-  data.pt
-  script_data.pt
-  script_model_cpu.pt
-  script_model_cuda.pt
 )
 add_dependencies(test_aoti_inference aoti_custom_class)
 
