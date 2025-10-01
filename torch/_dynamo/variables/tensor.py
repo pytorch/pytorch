@@ -23,6 +23,7 @@ import operator
 import textwrap
 import traceback
 import types
+from contextlib import nullcontext
 from typing import TYPE_CHECKING
 
 import sympy
@@ -1096,7 +1097,18 @@ class TensorVariable(VariableTracker):
             #   value.requires_grad is True => self.has_grad_fn becomes True
 
             # Not sure if __setitem__ can ever save activations, disabling just in case
-            with torch._dynamo.utils._disable_saved_tensors_hooks_during_tracing():
+            # with torch._dynamo.utils._disable_saved_tensors_hooks_during_tracing():
+
+            # Ignore fresh unbacked symbols that arises from patterns like this:
+            #   idx = b[i].item()
+            #   wrk[idx] += 1
+            #
+            with (
+                torch._dynamo.utils._disable_saved_tensors_hooks_during_tracing(),
+                tx.fake_mode.shape_env.ignore_fresh_unbacked_symbols()
+                if key.proxy.node.target == "item"
+                else nullcontext(),
+            ):
                 get_fake_value(proxy.node, tx, allow_non_graph_fake=False)
 
             example_value = self.proxy.node.meta.get("example_value")
