@@ -2003,7 +2003,7 @@ class test_configs:
 
     # A test config to ease the test for perf of reduction config filtering
     force_filter_reduction_configs = (
-        os.getenv("TORCHINDUCTOR_FORCE_FILTER_REDUCTION_CONFIGS") == "1"
+        os.getenv("TORCHINDUCTOR_FORCE_FILTER_REDUCTION_CONFIGS", "1") == "1"
     )
 
 
