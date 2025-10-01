@@ -13,13 +13,13 @@ from torchfuzz.operators.layout import (
     UnsqueezeOperator,
     ViewOperator,
 )
+from torchfuzz.operators.masked_select import MaskedSelectOperator
 from torchfuzz.operators.matrix_multiply import (
     AddmmOperator,
     BmmOperator,
     MatmulOperator,
     MMOperator,
 )
-from torchfuzz.operators.masked_select import MaskedSelectOperator
 from torchfuzz.operators.nonzero import NonzeroOperator
 from torchfuzz.operators.scalar_pointwise import (
     ScalarAddOperator,

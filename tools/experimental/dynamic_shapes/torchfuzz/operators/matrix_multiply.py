@@ -7,6 +7,8 @@ import torch
 
 from torchfuzz.operators.base import Operator
 from torchfuzz.tensor_fuzzer import Spec, TensorSpec
+
+
 # Type promotion imports removed since we now use explicit casting in codegen
 
 
@@ -32,7 +34,13 @@ class MatrixMultiplyOperator(Operator):
             return False
 
         # Matrix multiply doesn't work with bool or integer types for gradients
-        if output_spec.dtype in [torch.bool, torch.int8, torch.int16, torch.int32, torch.int64]:
+        if output_spec.dtype in [
+            torch.bool,
+            torch.int8,
+            torch.int16,
+            torch.int32,
+            torch.int64,
+        ]:
             return False
 
         return True
@@ -73,14 +81,14 @@ class MMOperator(MatrixMultiplyOperator):
         input1_spec = TensorSpec(
             size=(m, k),
             stride=(k, 1),  # Contiguous stride
-            dtype=dtypes[0]
+            dtype=dtypes[0],
         )
 
         # Second tensor: [k, n]
         input2_spec = TensorSpec(
             size=(k, n),
             stride=(n, 1),  # Contiguous stride
-            dtype=dtypes[1] if len(dtypes) > 1 else dtypes[0]
+            dtype=dtypes[1] if len(dtypes) > 1 else dtypes[0],
         )
 
         return [input1_spec, input2_spec]
@@ -91,10 +99,12 @@ class MMOperator(MatrixMultiplyOperator):
         """Generate code for matrix multiplication."""
         if len(input_names) != 2:
             raise ValueError("torch.mm requires exactly 2 inputs")
-          
+
         # Get target dtype
         if isinstance(output_spec, TensorSpec):
-            target_dtype_str = f"torch.{output_spec.dtype}".replace("torch.torch.", "torch.")
+            target_dtype_str = f"torch.{output_spec.dtype}".replace(
+                "torch.torch.", "torch."
+            )
             # Cast inputs to ensure compatible types
             return f"{output_name} = torch.mm({input_names[0]}.to({target_dtype_str}), {input_names[1]}.to({target_dtype_str}))"
         else:
@@ -126,21 +136,21 @@ class AddmmOperator(MatrixMultiplyOperator):
         bias_spec = TensorSpec(
             size=(m, n),
             stride=(n, 1),  # Contiguous stride
-            dtype=dtypes[0]
+            dtype=dtypes[0],
         )
 
         # First matrix: [m, k]
         input1_spec = TensorSpec(
             size=(m, k),
             stride=(k, 1),  # Contiguous stride
-            dtype=dtypes[1] if len(dtypes) > 1 else dtypes[0]
+            dtype=dtypes[1] if len(dtypes) > 1 else dtypes[0],
         )
 
         # Second matrix: [k, n]
         input2_spec = TensorSpec(
             size=(k, n),
             stride=(n, 1),  # Contiguous stride
-            dtype=dtypes[1] if len(dtypes) > 1 else dtypes[0]
+            dtype=dtypes[1] if len(dtypes) > 1 else dtypes[0],
         )
 
         return [bias_spec, input1_spec, input2_spec]
@@ -151,10 +161,12 @@ class AddmmOperator(MatrixMultiplyOperator):
         """Generate code for additive matrix multiplication."""
         if len(input_names) != 3:
             raise ValueError("torch.addmm requires exactly 3 inputs")
-          
+
         # Get target dtype
         if isinstance(output_spec, TensorSpec):
-            target_dtype_str = f"torch.{output_spec.dtype}".replace("torch.torch.", "torch.")
+            target_dtype_str = f"torch.{output_spec.dtype}".replace(
+                "torch.torch.", "torch."
+            )
             # Cast inputs to ensure compatible types
             return f"{output_name} = torch.addmm({input_names[0]}.to({target_dtype_str}), {input_names[1]}.to({target_dtype_str}), {input_names[2]}.to({target_dtype_str}))"
         else:
@@ -177,7 +189,13 @@ class BmmOperator(MatrixMultiplyOperator):
             return False
 
         # Matrix multiply doesn't work with bool or integer types for gradients
-        if output_spec.dtype in [torch.bool, torch.int8, torch.int16, torch.int32, torch.int64]:
+        if output_spec.dtype in [
+            torch.bool,
+            torch.int8,
+            torch.int16,
+            torch.int32,
+            torch.int64,
+        ]:
             return False
 
         return True
@@ -201,14 +219,14 @@ class BmmOperator(MatrixMultiplyOperator):
         input1_spec = TensorSpec(
             size=(b, m, k),
             stride=(m * k, k, 1),  # Contiguous stride
-            dtype=dtypes[0]
+            dtype=dtypes[0],
         )
 
         # Second tensor: [b, k, n]
         input2_spec = TensorSpec(
             size=(b, k, n),
             stride=(k * n, n, 1),  # Contiguous stride
-            dtype=dtypes[1] if len(dtypes) > 1 else dtypes[0]
+            dtype=dtypes[1] if len(dtypes) > 1 else dtypes[0],
         )
 
         return [input1_spec, input2_spec]
@@ -219,10 +237,12 @@ class BmmOperator(MatrixMultiplyOperator):
         """Generate code for batch matrix multiplication."""
         if len(input_names) != 2:
             raise ValueError("torch.bmm requires exactly 2 inputs")
-          
+
         # Get target dtype
         if isinstance(output_spec, TensorSpec):
-            target_dtype_str = f"torch.{output_spec.dtype}".replace("torch.torch.", "torch.")
+            target_dtype_str = f"torch.{output_spec.dtype}".replace(
+                "torch.torch.", "torch."
+            )
             # Cast inputs to ensure compatible types
             return f"{output_name} = torch.bmm({input_names[0]}.to({target_dtype_str}), {input_names[1]}.to({target_dtype_str}))"
         else:
@@ -245,7 +265,13 @@ class MatmulOperator(MatrixMultiplyOperator):
             return False
 
         # Matrix multiply doesn't work with bool or integer types for gradients
-        if output_spec.dtype in [torch.bool, torch.int8, torch.int16, torch.int32, torch.int64]:
+        if output_spec.dtype in [
+            torch.bool,
+            torch.int8,
+            torch.int16,
+            torch.int32,
+            torch.int64,
+        ]:
             return False
 
         return True
@@ -265,31 +291,23 @@ class MatmulOperator(MatrixMultiplyOperator):
             # Matrix-vector multiplication: (n,) = (k,) @ (k, n) or (n,) = (n, k) @ (k,)
             n = output_size[0]
             k = random.randint(1, 16)
-              
+
             # Randomly choose between two valid patterns
             if random.choice([True, False]):
                 # Pattern 1: (n,) = (k,) @ (k, n)
-                input1_spec = TensorSpec(
-                    size=(k,),
-                    stride=(1,),
-                    dtype=dtypes[0]
-                )
+                input1_spec = TensorSpec(size=(k,), stride=(1,), dtype=dtypes[0])
                 input2_spec = TensorSpec(
                     size=(k, n),
                     stride=(n, 1),
-                    dtype=dtypes[1] if len(dtypes) > 1 else dtypes[0]
+                    dtype=dtypes[1] if len(dtypes) > 1 else dtypes[0],
                 )
             else:
                 # Pattern 2: (n,) = (n, k) @ (k,)
-                input1_spec = TensorSpec(
-                    size=(n, k),
-                    stride=(k, 1),
-                    dtype=dtypes[0]
-                )
+                input1_spec = TensorSpec(size=(n, k), stride=(k, 1), dtype=dtypes[0])
                 input2_spec = TensorSpec(
                     size=(k,),
                     stride=(1,),
-                    dtype=dtypes[1] if len(dtypes) > 1 else dtypes[0]
+                    dtype=dtypes[1] if len(dtypes) > 1 else dtypes[0],
                 )
 
         elif output_dims == 2:
@@ -297,15 +315,11 @@ class MatmulOperator(MatrixMultiplyOperator):
             m, n = output_size
             k = random.randint(1, 16)
 
-            input1_spec = TensorSpec(
-                size=(m, k),
-                stride=(k, 1),
-                dtype=dtypes[0]
-            )
+            input1_spec = TensorSpec(size=(m, k), stride=(k, 1), dtype=dtypes[0])
             input2_spec = TensorSpec(
                 size=(k, n),
                 stride=(n, 1),
-                dtype=dtypes[1] if len(dtypes) > 1 else dtypes[0]
+                dtype=dtypes[1] if len(dtypes) > 1 else dtypes[0],
             )
 
         else:
@@ -329,14 +343,12 @@ class MatmulOperator(MatrixMultiplyOperator):
             input2_stride = tuple(reversed(input2_stride))
 
             input1_spec = TensorSpec(
-                size=input1_size,
-                stride=input1_stride,
-                dtype=dtypes[0]
+                size=input1_size, stride=input1_stride, dtype=dtypes[0]
             )
             input2_spec = TensorSpec(
                 size=input2_size,
                 stride=input2_stride,
-                dtype=dtypes[1] if len(dtypes) > 1 else dtypes[0]
+                dtype=dtypes[1] if len(dtypes) > 1 else dtypes[0],
             )
 
         return [input1_spec, input2_spec]
@@ -347,10 +359,12 @@ class MatmulOperator(MatrixMultiplyOperator):
         """Generate code for general matrix multiplication."""
         if len(input_names) != 2:
             raise ValueError("torch.matmul requires exactly 2 inputs")
-          
+
         # Get target dtype
         if isinstance(output_spec, TensorSpec):
-            target_dtype_str = f"torch.{output_spec.dtype}".replace("torch.torch.", "torch.")
+            target_dtype_str = f"torch.{output_spec.dtype}".replace(
+                "torch.torch.", "torch."
+            )
             # Cast inputs to ensure compatible types
             return f"{output_name} = torch.matmul({input_names[0]}.to({target_dtype_str}), {input_names[1]}.to({target_dtype_str}))"
         else:
