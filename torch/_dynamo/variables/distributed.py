@@ -154,7 +154,7 @@ class PlacementClassVariable(DistributedVariable):
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if (
-            inspect.getattr_static(self.value, "__new__", None) in (object.__new__,)
+            inspect.getattr_static(self.value, "__new__", None) == object.__new__
             and self.source
         ):
             # NOTE: we don't need to track mutations to the placement class as they
