@@ -44,7 +44,7 @@ class ConstantOperator(Operator):
         # Use a deterministic hash based on the variable name to ensure reproducibility across processes
         import hashlib
 
-        var_seed = int(hashlib.md5(output_name.encode()).hexdigest()[:8], 16) % (2**31)
+        var_seed = int(hashlib.md5(output_name.encode()).hexdigest()[:8], 16) % (2**31)  # noqa: S324
 
         if isinstance(output_spec, ScalarSpec):
             # Call fuzz_scalar during codegen and embed the result
