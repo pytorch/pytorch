@@ -21,7 +21,6 @@ class CppWrapperMps(CppWrapperGpu):
         super().__init__()
         self._used_kernel_names: OrderedSet[str] = OrderedSet()
         self._lambda_counter: int = 0
-        self._raii_types_generated: bool = False
 
     @staticmethod
     def create(
@@ -227,19 +226,9 @@ class CppWrapperMps(CppWrapperGpu):
     def codegen_additional_funcs(self) -> None:
         """
         Generate thread-safe lazy singleton pattern for MPS shader libraries with RAII cleanup.
-        Uses common RAII types to reduce code duplication across multiple shader libraries.
 
         The generated code will look like:
         ```
-        // Common RAII wrapper for MPS shader libraries
-        namespace {
-            auto mps_lib_deleter = [](AOTIMetalShaderLibraryHandle h) {
-                if (h) aoti_torch_mps_delete_shader_library(h);
-            };
-            using MPSLibDeleter = decltype(mps_lib_deleter);
-            using MPSLibPtr = std::unique_ptr<AOTIMetalShaderLibraryOpaque, MPSLibDeleter>;
-        }
-
         AOTIMetalKernelFunctionHandle get_mps_lib_0_handle() {
             static auto kernel_handle = []() {
                 AOTIMetalShaderLibraryHandle lib_handle = nullptr;
@@ -248,27 +237,19 @@ class CppWrapperMps(CppWrapperGpu):
                 aoti_torch_mps_create_shader_library(mps_lib_0_source, &lib_handle);
                 aoti_torch_mps_get_kernel_function(lib_handle, "generated_kernel", &kern_handle);
 
-                // Use common RAII wrapper
-                return std::make_pair(kern_handle, MPSLibPtr(lib_handle, mps_lib_deleter));
+                // RAII wrapper with custom deleter
+                auto lib_deleter = [](AOTIMetalShaderLibraryHandle h) {
+                    if (h) aoti_torch_mps_delete_shader_library(h);
+                };
+
+                using LibDeleter = decltype(lib_deleter);
+                using LibPtr = std::unique_ptr<AOTIMetalShaderLibraryOpaque, LibDeleter>;
+
+                // Return pair of kernel handle and library smart pointer for cleanup
+                return std::make_pair(kern_handle, LibPtr(lib_handle, lib_deleter));
             }();
             return kernel_handle.first;
         }
-
-        AOTIMetalKernelFunctionHandle get_mps_lib_1_handle() {
-            static auto kernel_handle = []() {
-                AOTIMetalShaderLibraryHandle lib_handle = nullptr;
-                AOTIMetalKernelFunctionHandle kern_handle = nullptr;
-
-                aoti_torch_mps_create_shader_library(mps_lib_1_source, &lib_handle);
-                aoti_torch_mps_get_kernel_function(lib_handle, "generated_kernel", &kern_handle);
-
-                // Use common RAII wrapper
-                return std::make_pair(kern_handle, MPSLibPtr(lib_handle, mps_lib_deleter));
-            }();
-            return kernel_handle.first;
-        }
-
-        ...
         ```
         """
 
@@ -293,22 +274,7 @@ class CppWrapperMps(CppWrapperGpu):
         # instead of:
         # at::native::mps::DynamicMetalShaderLibrary mps_lib_0(R"MTL(...shader_source...)MTL");
 
-        # Generate common RAII types once
-        if shader_libraries and not self._raii_types_generated:
-            self.prefix.splice("""
-// Common RAII wrapper for MPS shader libraries
-namespace {
-    auto mps_lib_deleter = [](AOTIMetalShaderLibraryHandle h) {
-        if (h) aoti_torch_mps_delete_shader_library(h);
-    };
-    using MPSLibDeleter = decltype(mps_lib_deleter);
-    using MPSLibPtr = std::unique_ptr<AOTIMetalShaderLibraryOpaque, MPSLibDeleter>;
-}
-
-""")
-            self._raii_types_generated = True
-
-        # Generate getter functions using the common types
+        # Generate thread-safe lazy singleton with RAII for each library
         for lib_name in shader_libraries:
             self.prefix.splice(f"""
 AOTIMetalKernelFunctionHandle get_{lib_name}_handle() {{
@@ -319,8 +285,16 @@ AOTIMetalKernelFunctionHandle get_{lib_name}_handle() {{
         aoti_torch_mps_create_shader_library({lib_name}_source, &lib_handle);
         aoti_torch_mps_get_kernel_function(lib_handle, "generated_kernel", &kern_handle);
 
-        // Use common RAII wrapper
-        return std::make_pair(kern_handle, MPSLibPtr(lib_handle, mps_lib_deleter));
+        // RAII wrapper with custom deleter
+        auto lib_deleter = [](AOTIMetalShaderLibraryHandle h) {{
+            if (h) aoti_torch_mps_delete_shader_library(h);
+        }};
+
+        using LibDeleter = decltype(lib_deleter);
+        using LibPtr = std::unique_ptr<AOTIMetalShaderLibraryOpaque, LibDeleter>;
+
+        // Return pair of kernel handle and library smart pointer for cleanup
+        return std::make_pair(kern_handle, LibPtr(lib_handle, lib_deleter));
     }}();
     return kernel_handle.first;
 }}
