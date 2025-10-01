@@ -1,6 +1,6 @@
 # LibTorch Stable ABI
 
-### Overview
+## Overview
 
 The LibTorch Stable ABI (Application Binary Interface) provides a stable interface for extending PyTorch functionality without being tightly coupled to specific PyTorch versions. This enables the development of custom operators and extensions that remain compatible across PyTorch releases.
 
@@ -12,7 +12,7 @@ The stable ABI consists of three main components:
 
 We discuss each of these in detail
 
-#### Stable C headers
+### Stable C headers
 
 The stable C headers used by AOTInductor form the foundation of the stable ABI. However, this is **use at your own risk**. For example, users must handle the memory lifecycle of objects returned by certain APIs.
  Further, the stack-based APIs discussed below which allow the user to call the PyTorch dispatcher don't provide strong guarantees on forward and backward compatibility.
@@ -20,12 +20,12 @@ The stable C headers used by AOTInductor form the foundation of the stable ABI. 
 Unless absolutely necessary, we recommend the high-level C++ API in `torch/csrc/stable`
 which will handle all the rough edges of the C API for the user.
 
-#### `torch/headeronly`
+### `torch/headeronly`
 
 This is a set of inlined C++ headers are completely decoupled from libtorch. The headers consist of certain utilities that might be familiar to custom extension writers. For example, the
 `c10::ScalarType` enum lives here as `torch::headeronly::ScalarType`.
 
-#### `torch/csrc/stable`
+### `torch/csrc/stable`
 
 This is a set of inlined C++ headers that provide wrappers around the C API that handle the footguns
 discussed above.
@@ -41,14 +41,14 @@ It consists of
 The interface provided by `torch/csrc/stable` should be familiar to custom extension writers but might not match perfectly in certain cases.
 
 
-### How are objects passed across ABI boundaries when interacting with the dispatcher?
+## How are objects passed across ABI boundaries when interacting with the dispatcher?
 
 When interacting with the dispatcher via the stable APIs (``STABLE_TORCH_LIBRARY`` etc.) we use a boxed convention. Arguments and returns are represented as a stack of ``StableIValue`` which correlates with a `torch::jit::stack` of IValues. We discuss the following below
 1. StableIValue Conversions
 2. StableIValue stack Conventions
 3. Stable APIs that interact with the dispatcher
 
-#### StableIValue Conversions
+### StableIValue Conversions
 
 We provide utilities for users to convert objects to and from StableIValues with the synonymous
 `to` and `from` APIs in `torch/csrc/stable/stableivalue_conversions.h`. We document the stable custom extension representation, libtorch representation and StableIValue
@@ -91,7 +91,7 @@ You can always work with StableIValue abstractions in your custom kernel for typ
 | ? | ? | at::QScheme | QScheme |
 
 
-#### Stack Conventions
+### Stack Conventions
 
 There are two invariants for the stack:
 
@@ -103,7 +103,7 @@ There are two invariants for the stack:
     a. When calling a stack-based API, you must give owning references to the calling stack and steal references from the returned stack.
     b. When registering your function to be called with a stack, you must steal references from your argument stack and push onto the stack new references.
 
-#### Stack-based APIs
+### Stack-based APIs
 
 The above is relevant in two places:
 

@@ -1973,7 +1973,6 @@ make_fx_failures = {
     skip('item'),
     xfail('cov'),
     xfail('nn.functional.gaussian_nll_loss'),
-    xfail('tensor_split'),
     xfail('corrcoef'),
     xfail('quantile'),
     xfail('nanquantile'),
@@ -1993,10 +1992,12 @@ make_fx_failures = {
 
 only_real_tensor_failures = {
     xfail('narrow'),
+    xfail('tensor_split'),
 }
 
 only_fake_tensor_failures = {
     xfail('narrow'),
+    xfail('tensor_split'),
 }
 
 fake_tensor_failures = set()
