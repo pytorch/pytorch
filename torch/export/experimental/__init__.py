@@ -362,7 +362,7 @@ class _ExportPackage:
             "always_keep_tensor_constants": True,
             # we'll change this back to False once we enable weight deduping for standalone mode
             "aot_inductor.package_constants_in_so": standalone,
-            "aot_inductor.compile_standalone": standalone,
+            "aot_inductor_mode.compile_standalone": standalone,
         }
         aoti_files_map = {}
         model_names = []
