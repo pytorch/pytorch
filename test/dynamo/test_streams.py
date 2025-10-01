@@ -14,14 +14,12 @@ class TestStreams(torch._dynamo.test_case.TestCase):
         super().tearDownClass()
 
     def test_stream_enter_exit(self):
-        s2 = torch.Stream()
-
-        @torch.compile()
         def fn(x, y):
-            s1 = torch.cuda.Stream()
-            with s2:
-                z1 = torch.add(x, y)
+            s2 = torch.Stream()
+            s1 = torch.Stream()
             with s1:
+                z1 = torch.add(x, y)
+            with s2:
                 z = torch.add(x, y)
                 y = z + 2 + z1
 
