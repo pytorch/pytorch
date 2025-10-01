@@ -1588,7 +1588,7 @@ Tensor logsumexp(const Tensor& self, OptionalIntArrayRef opt_dims, bool keepdim)
     return at::logsumexp(self, opt_dims.value(), keepdim);
   } else {
     // Reduce over all dimensions (flatten)
-    return at::logsumexp(self, IntArrayRef{}, false);
+    return at::logsumexp(self, IntArrayRef{}, keepdim);
   }
 }
 
