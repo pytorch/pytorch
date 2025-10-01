@@ -9289,17 +9289,12 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device"):
                 torch.cholesky_inverse(a, out=out)
 
-        # cholesky_inverse raises an error for invalid inputs on CPU
+        # cholesky_inverse raises an error for invalid inputs
         # for example if at least one diagonal element is zero
         a = torch.randn(3, 3, device=device, dtype=dtype)
         a[1, 1] = 0
-        if self.device_type == 'cpu':
-            with self.assertRaisesRegex(torch.linalg.LinAlgError, r"cholesky_inverse: The diagonal element 2 is zero"):
-                torch.cholesky_inverse(a)
-        # cholesky_inverse on GPU does not raise an error for this case
-        elif self.device_type == 'cuda':
-            out = torch.cholesky_inverse(a)
-            self.assertTrue(out.isinf().any() or out.isnan().any())
+        with self.assertRaisesRegex(torch.linalg.LinAlgError, r"cholesky_inverse: The diagonal element 2 is zero"):
+            torch.cholesky_inverse(a)
 
     def _select_broadcastable_dims(self, dims_full=None):
         # select full dimensionality
