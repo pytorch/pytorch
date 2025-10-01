@@ -21,7 +21,7 @@ class SqueezeOperator(Operator):
     def decompose(self, tensor):
         """Decompose tensor into input tensor for squeeze operation."""
         output_shape = tensor.size
-        
+
         # Strategy: Add exactly one dimension of size 1 to the output shape
         # This ensures squeeze removes exactly one dimension
         insert_pos = random.randint(0, len(output_shape))
@@ -46,13 +46,7 @@ class SqueezeOperator(Operator):
 
     def codegen(self, output_name, input_names, output_tensor):
         """Generate code for squeeze operation."""
-        # Get the dimension to squeeze from the stored metadata
-        input_tensor = self._last_input_tensor if hasattr(self, '_last_input_tensor') else None
-        
-        if input_tensor and hasattr(input_tensor, '_squeeze_dim'):
-            dim = input_tensor._squeeze_dim
-            # Generate proper conditional code that chooses between dimension-specific and parameterless squeeze
-            return f"{output_name} = torch.squeeze({input_names[0]}, {dim}) if {dim} < {input_names[0]}.dim() and {input_names[0]}.shape[{dim}] == 1 else torch.squeeze({input_names[0]})"
-        else:
-            # Fallback: use parameterless squeeze
-            return f"{output_name} = torch.squeeze({input_names[0]})"
+        # Always find the first dimension of size 1 at runtime and squeeze it
+        # This is more robust than using a pre-computed dimension that might be invalid
+        # due to tensor sharing in the fuzzer
+        return f"{output_name} = torch.squeeze({input_names[0]}, next(i for i, s in enumerate({input_names[0]}.shape) if s == 1))"

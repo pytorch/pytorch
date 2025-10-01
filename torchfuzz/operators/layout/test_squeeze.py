@@ -76,22 +76,22 @@ class TestSqueezeOperator:
     def test_decompose_adds_squeeze_dimensions(self, squeeze_op):
         """Test that decompose adds exactly one dimension of size 1."""
         tensor = Tensor((2, 3), (3, 1), "float32", "cuda", [])
-        
+
         # Run multiple times to check randomness
         for _ in range(10):
             inputs = squeeze_op.decompose(tensor)
             input_tensor = inputs[0]
-            
+
             # Input should have exactly one more dimension than output
             assert len(input_tensor.size) == len(tensor.size) + 1
-            
+
             # Should have squeeze dimension metadata
             assert hasattr(input_tensor, '_squeeze_dim')
-            
+
             # Should have exactly one dimension of size 1
             ones_count = sum(1 for dim in input_tensor.size if dim == 1)
             assert ones_count == 1
-            
+
             # The squeeze dimension should be the position of the size-1 dimension
             squeeze_dim = input_tensor._squeeze_dim
             assert input_tensor.size[squeeze_dim] == 1
@@ -153,7 +153,7 @@ class TestSqueezeOperator:
         input_names = ["input"]
 
         code = squeeze_op.codegen(output_name, input_names, tensor)
-        expected = f"output = torch.squeeze(input, {dim}) if {dim} < input.dim() and input.shape[{dim}] == 1 else torch.squeeze(input)"
+        expected = "output = torch.squeeze(input, next(i for i, s in enumerate(input.shape) if s == 1))"
 
         assert code == expected
 
@@ -170,7 +170,7 @@ class TestSqueezeOperator:
         input_names = ["x"]
 
         code = squeeze_op.codegen(output_name, input_names, scalar)
-        expected = f"result = torch.squeeze(x, {dim}) if {dim} < x.dim() and x.shape[{dim}] == 1 else torch.squeeze(x)"
+        expected = "result = torch.squeeze(x, next(i for i, s in enumerate(x.shape) if s == 1))"
 
         assert code == expected
 
@@ -187,7 +187,7 @@ class TestSqueezeOperator:
         input_names = ["data"]
 
         code = squeeze_op.codegen(output_name, input_names, tensor)
-        expected = f"out = torch.squeeze(data, {dim}) if {dim} < data.dim() and data.shape[{dim}] == 1 else torch.squeeze(data)"
+        expected = "out = torch.squeeze(data, next(i for i, s in enumerate(data.shape) if s == 1))"
 
         assert code == expected
 
@@ -204,7 +204,7 @@ class TestSqueezeOperator:
         input_names = ["original"]
 
         code = squeeze_op.codegen(output_name, input_names, tensor)
-        expected = f"squeezed = torch.squeeze(original, {dim}) if {dim} < original.dim() and original.shape[{dim}] == 1 else torch.squeeze(original)"
+        expected = "squeezed = torch.squeeze(original, next(i for i, s in enumerate(original.shape) if s == 1))"
 
         assert code == expected
 
@@ -221,7 +221,7 @@ class TestSqueezeOperator:
         input_names = ["input_data"]
 
         code = squeeze_op.codegen(output_name, input_names, tensor)
-        expected = f"tensor_squeezed = torch.squeeze(input_data, {dim}) if {dim} < input_data.dim() and input_data.shape[{dim}] == 1 else torch.squeeze(input_data)"
+        expected = "tensor_squeezed = torch.squeeze(input_data, next(i for i, s in enumerate(input_data.shape) if s == 1))"
 
         assert code == expected
 
@@ -238,7 +238,7 @@ class TestSqueezeOperator:
         input_names = ["input_empty"]
 
         code = squeeze_op.codegen(output_name, input_names, tensor)
-        expected = f"empty_tensor = torch.squeeze(input_empty, {dim}) if {dim} < input_empty.dim() and input_empty.shape[{dim}] == 1 else torch.squeeze(input_empty)"
+        expected = "empty_tensor = torch.squeeze(input_empty, next(i for i, s in enumerate(input_empty.shape) if s == 1))"
 
         assert code == expected
 

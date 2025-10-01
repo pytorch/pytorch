@@ -132,17 +132,17 @@ class TestUnsqueezeOperator:
     def test_decompose_multiple_size_one_dims(self, unsqueeze_op):
         """Test decomposition with multiple size-1 dimensions."""
         tensor = Tensor((1, 2, 1, 3, 1), (6, 3, 3, 1, 1), "float32", "cuda", [])
-        
+
         # Run multiple times to test randomness
         size_one_positions = [0, 2, 4]  # positions of size-1 dims
-        
+
         for _ in range(10):
             inputs = unsqueeze_op.decompose(tensor)
             input_tensor = inputs[0]
-            
+
             # Should remove exactly one dimension
             assert len(input_tensor.size) == len(tensor.size) - 1
-            
+
             # The unsqueeze dimension should be one of the size-1 positions
             unsqueeze_dim = input_tensor._unsqueeze_dim
             assert unsqueeze_dim in size_one_positions

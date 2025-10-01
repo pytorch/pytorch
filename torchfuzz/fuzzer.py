@@ -17,7 +17,7 @@ class Fuzzer:
         self.generated_nodes = []  # List of all nodes (for dependency tracking)
 
     def fuzz(self, output_path=None):
-        # Generate a deterministic nonce for the filename based on the seeded random state  
+        # Generate a deterministic nonce for the filename based on the seeded random state
         nonce = f"{random.randint(0, 0xffffffff):08x}"
         if output_path is None:
             output_path = f"/tmp/torchfuzz/fuzz_{nonce}.py"
@@ -178,7 +178,21 @@ class Fuzzer:
         if ndim == 0:
             size = ()
         else:
-            size = tuple(random.randint(1, 128) for _ in range(ndim))
+            # Use much smaller tensor sizes to prevent OOM issues
+            # Keep total elements under a reasonable limit
+            max_size_per_dim = 32
+            size = tuple(random.randint(1, max_size_per_dim) for _ in range(ndim))
+
+            # Additional safety check: if total elements would be too large, reduce sizes
+            total_elements = 1
+            for s in size:
+                total_elements *= s
+
+            # If tensor is too large, scale down all dimensions proportionally
+            max_total_elements = 100000  # ~100K elements max
+            if total_elements > max_total_elements:
+                scale_factor = (max_total_elements / total_elements) ** (1.0 / ndim)
+                size = tuple(max(1, int(s * scale_factor)) for s in size)
 
         stride = []
         acc = 1
@@ -196,7 +210,7 @@ class Fuzzer:
 
 def main():
     parser = argparse.ArgumentParser(description="Fuzzer for generating PyTorch programs.")
-    parser.add_argument("--max-depth", type=int, default=3, help="Maximum depth of the operation tree.")
+    parser.add_argument("--max-depth", type=int, default=4, help="Maximum depth of the operation tree.")
     parser.add_argument("--seed", type=int, default=None, help="Random seed. If not set, a random seed will be generated.")
     parser.add_argument("--output", type=str, default=None, help="Output file path.")
     args = parser.parse_args()

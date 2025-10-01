@@ -51,7 +51,9 @@ IGNORE_PATTERNS: List[re.Pattern] = [
     re.compile(r"IncompatibleTypeErrorImpl\('invalid operands of type pointer<fp16> and triton\.language\.float64'\)"),
     re.compile(r"AssertionError: 'XBLOCK' too large"),
     re.compile(r"AssertionError: Node add_\d+ was invalid, but is output"),
+    re.compile(r"assert not waiting and len\(ready\) == len\(graph\.nodes\)"),
     # Add more patterns here as needed, e.g.:
+
 
 
     # re.compile(r"Some other error message"),
