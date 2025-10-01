@@ -12,17 +12,38 @@ class CodeGenerator:
     def __init__(self):
         pass
 
-    def tensor_repr(self, tensor):
+    def tensor_repr(self, tensor, is_leaf_for_backprop=False):
         """Generate tensor creation code representation."""
+        # Use actual size for batch_norm buffer tensors
+        if hasattr(tensor, '_actual_size'):
+            tensor_size = tensor._actual_size
+        else:
+            tensor_size = tensor.size
+
         if tensor.dtype == "bool":
             # torch.rand does not support bool, use torch.randint for boolean tensors
-            return f"torch.randint(0, 2, {tuple(tensor.size)}, dtype=torch.bool, device='{tensor.device}')"
+            return f"torch.randint(0, 2, {tuple(tensor_size)}, dtype=torch.bool, device='{tensor.device}')"
         elif tensor.dtype in ["int8", "int16", "int32", "int64", "uint8"]:
             # Integer tensors don't support requires_grad, use torch.randint instead
-            # Use a reasonable range for integer tensors (0 to 1000 for most cases)
-            max_val = 1000 if tensor.dtype == "int64" else 100
-            return f"torch.randint(0, {max_val}, {list(tensor.size)}, dtype=torch.{tensor.dtype}, device='{tensor.device}')"
-        return f"torch.rand({list(tensor.size)}, dtype=torch.{tensor.dtype}, device='{tensor.device}', requires_grad=True)"
+            # Check if this is an embedding index tensor with vocabulary size constraints
+            if hasattr(tensor, '_embedding_vocab_size'):
+                max_val = tensor._embedding_vocab_size
+            else:
+                # Use a reasonable range for integer tensors (0 to 1000 for most cases)
+                max_val = 1000 if tensor.dtype == "int64" else 100
+            return f"torch.randint(0, {max_val}, {list(tensor_size)}, dtype=torch.{tensor.dtype}, device='{tensor.device}')"
+
+        # Handle requires_grad attribute for float tensors
+        if hasattr(tensor, 'requires_grad') and tensor.requires_grad is not None:
+            requires_grad = tensor.requires_grad
+        elif is_leaf_for_backprop:
+            # If this is a leaf tensor that needs to support backpropagation,
+            # ensure it requires gradients
+            requires_grad = True
+        else:
+            requires_grad = True  # Default behavior
+
+        return f"torch.rand({list(tensor_size)}, dtype=torch.{tensor.dtype}, device='{tensor.device}', requires_grad={requires_grad})"
 
     def generate_code(self, target_tensor, all_nodes, output_path):
         """
@@ -57,9 +78,12 @@ class CodeGenerator:
         for i, tensor in enumerate(leaf_tensors):
             leaf_tensor_names[id(tensor)] = f"arg{i}"
 
-        # Emit code for each node inside foo(), with leaf tensors as arguments
+        # Emit code for each node inside foo(), with leaf tensors and sentinel as arguments
         arg_list = ", ".join([leaf_tensor_names[id(t)] for t in leaf_tensors])
-        code_lines.append(f"def foo({arg_list}):")
+        if arg_list:
+            code_lines.append(f"def foo({arg_list}, sentinel):")
+        else:
+            code_lines.append(f"def foo(sentinel):")
         for idx, (tensor, op, inputs) in enumerate(all_nodes):
             name = tensor_names[id(tensor)]
             # Add tensor descriptor comment
@@ -83,9 +107,9 @@ class CodeGenerator:
                             code_lines.append(f"    {line}")
                 else:
                     code_lines.append(f"    {op_code} {desc}")
-        # The output is the original target tensor
+        # The output is the original target tensor plus sentinel for gradient flow
         output_name = tensor_names[id(target_tensor)]
-        code_lines.append(f"    output = {output_name}  # output tensor")
+        code_lines.append(f"    output = {output_name} + sentinel  # output tensor with sentinel for gradient flow")
         code_lines.append(f"    return output")
         code_lines.append("")
 
@@ -94,13 +118,20 @@ class CodeGenerator:
             desc = f"# size={tensor.size}, stride={tensor.stride}, dtype={tensor.dtype}, device={tensor.device}"
             code_lines.append(f"arg{i} = {self.tensor_repr(tensor)} {desc}")
 
+        # Always create a sentinel tensor that requires gradients to ensure backpropagation works
+        # This tensor will be added to the output to guarantee gradient flow
+        target_device = target_tensor.device
+        target_dtype = target_tensor.dtype
+        code_lines.append(f"sentinel = torch.tensor(0.0, dtype=torch.{target_dtype}, device='{target_device}', requires_grad=True) # Sentinel for gradient flow")
+
         # Harness: run foo in eager and with torch.compile, then do a realistic backward (sum().backward())
         code_lines.append("if __name__ == '__main__':")
-        code_lines.append(f"    out_eager = foo({', '.join([f'arg{i}' for i in range(len(leaf_tensors))])})")
+        args_with_sentinel = ', '.join([f'arg{i}' for i in range(len(leaf_tensors))] + ['sentinel'])
+        code_lines.append(f"    out_eager = foo({args_with_sentinel})")
         code_lines.append("    out_eager.sum().backward()")
         code_lines.append("    print('Eager Success! ✅')")
         code_lines.append("    compiled_foo = torch.compile(foo, fullgraph=True, dynamic=True)")
-        code_lines.append(f"    out_compiled = compiled_foo({', '.join([f'arg{i}' for i in range(len(leaf_tensors))])})")
+        code_lines.append(f"    out_compiled = compiled_foo({args_with_sentinel})")
         code_lines.append("    out_compiled.sum().backward()")
         code_lines.append("    print('Compile Success! ✅')")
         # code_lines.append("    # Compare outputs (forward)")

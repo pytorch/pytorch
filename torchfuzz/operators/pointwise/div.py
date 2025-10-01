@@ -12,7 +12,12 @@ class DivOperator(Operator):
         super().__init__("div")
 
     def can_produce(self, tensor):
-        """Div can always produce a tensor by dividing two tensors of the same shape, dtype, etc."""
+        """Div can only produce float tensors (division promotes integers to float)."""
+        # Division operations in PyTorch promote integer types to float
+        # So we cannot produce integer tensors via division
+        from torchfuzz.type_promotion import is_integer_dtype
+        if is_integer_dtype(tensor.dtype):
+            return False
         return True
 
     def supports_variable_inputs(self):
@@ -52,6 +57,7 @@ class DivOperator(Operator):
 
     def codegen(self, output_name, input_names, output_tensor):
         """Generate code for division operation."""
+        # output_tensor parameter is not used but required by interface
         # Divide all input tensors left-to-right
         if len(input_names) == 1:
             return f"{output_name} = 1.0 / {input_names[0]}"
@@ -60,6 +66,3 @@ class DivOperator(Operator):
             for name in input_names[1:]:
                 expr = f"({expr}) / {name}"
             return f"{output_name} = {expr}"
-
-    def supports_variable_inputs(self) -> bool:
-        return True

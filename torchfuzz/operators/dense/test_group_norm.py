@@ -57,15 +57,15 @@ def test_group_norm_codegen():
 
     # Test with minimum inputs
     code = op.codegen("output", ["input", "num_groups"], None)
-    assert code == "output = torch.nn.functional.group_norm(input, 4)"
+    assert code == "output = torch.nn.functional.group_norm(input.float(), 4)"
 
     # Test with weight
     code = op.codegen("output", ["input", "num_groups", "weight"], None)
-    assert code == "output = torch.nn.functional.group_norm(input, 4, weight=weight)"
+    assert code == "output = torch.nn.functional.group_norm(input.float(), 4, weight=weight)"
 
     # Test with weight and bias
     code = op.codegen("output", ["input", "num_groups", "weight", "bias"], None)
-    assert code == "output = torch.nn.functional.group_norm(input, 4, weight=weight, bias=bias)"
+    assert code == "output = torch.nn.functional.group_norm(input.float(), 4, weight=weight, bias=bias)"
 
 
 def test_group_norm_supports_variable_inputs():
