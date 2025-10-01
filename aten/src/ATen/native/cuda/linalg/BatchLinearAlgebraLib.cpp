@@ -950,6 +950,20 @@ void _cholesky_inverse_cusolver_potrs_based(Tensor& result, Tensor& infos, bool 
 }
 
 Tensor& cholesky_inverse_kernel_impl_cusolver(Tensor &result, Tensor& infos, bool upper) {
+  // Check for zero diagonal elements before attempting inversion
+  auto diag_elements = result.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1);
+  auto zero_diag_mask = diag_elements.abs().lt(std::numeric_limits<double>::epsilon());
+  if (zero_diag_mask.any().item<bool>()) {
+    // Find the first zero diagonal element
+    auto zero_positions = zero_diag_mask.nonzero();
+    if (zero_positions.numel() > 0) {
+      int64_t first_zero_idx = zero_positions[0][-1].item<int64_t>() + 1; 
+      auto error_infos = at::full_like(infos, static_cast<int>(first_zero_idx));
+      TORCH_CHECK_LINALG(false, "cholesky_inverse", result.dim() == 2 ? "" : ": (Batch element ", zero_positions[0][0].item<int64_t>(), ")",
+          ": The diagonal element ", first_zero_idx, " is zero, the inversion could not be completed because the input matrix is singular.");
+    }
+  }
+
   _cholesky_inverse_cusolver_potrs_based(result, infos, upper);
   return result;
 }
