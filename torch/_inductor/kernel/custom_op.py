@@ -19,7 +19,7 @@ Example:
 """
 
 import functools
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Optional, Union
 
 import torch
 from torch._inductor.codegen.subgraph import SubgraphChoiceCaller, SubgraphTemplate
@@ -42,14 +42,14 @@ class CustomOpTemplate(SubgraphTemplate):
     def __init__(
         self,
         name: str,
-        decompositions: List[Callable[..., Any]],
-        kwargs: Dict[str, Any],
+        decompositions: list[Callable[..., Any]],
+        kwargs: dict[str, Any],
     ) -> None:
         super().__init__(name=name)
         self.decompositions = decompositions
         self.kwargs = kwargs
 
-    def _infer_output_layout(self, input_nodes: List[Buffer]) -> Layout:
+    def _infer_output_layout(self, input_nodes: list[Buffer]) -> Layout:
         """Infer correct output layout by tracing the first decomposition.
 
         Uses PyTorch's ir_node_to_tensor for proper example input creation,
@@ -93,23 +93,21 @@ class CustomOpTemplate(SubgraphTemplate):
         # Last resort: create a basic layout if nothing else works
         raise RuntimeError("Unable to infer output layout from decomposition or inputs")
 
-    def generate_choices(self, input_nodes: List[Buffer]) -> List[SubgraphChoiceCaller]:
+    def generate_choices(self, input_nodes: list[Buffer]) -> list[SubgraphChoiceCaller]:
         """Generate SubgraphChoiceCaller instances for all decompositions."""
         # Infer correct output layout once, use for all choices
         layout = self._infer_output_layout(input_nodes)
 
         choices = []
         for i, decomp_fn in enumerate(self.decompositions):
+            traced_fn = make_fx(functools.partial(decomp_fn, **self.kwargs))
 
-            def make_fx_graph(*example_inputs, fn=decomp_fn):
-                return make_fx(functools.partial(fn, **self.kwargs))(*example_inputs)
-
-            choice = SubgraphChoiceCaller(
-                name=f"{self.name}_{getattr(decomp_fn, '__name__', f'impl_{i}')}_{next(SubgraphTemplate.index_counter)}",
+            choice = self.generate(
+                name=f"{self.name}_{getattr(decomp_fn, '__name__', f'impl_{i}')}",
                 input_nodes=input_nodes,
                 layout=layout,
                 description=f"CustomOp {getattr(decomp_fn, '__name__', f'impl_{i}')}",
-                make_fx_graph=make_fx_graph,
+                make_fx_graph=traced_fn,
             )
             choices.append(choice)
 
@@ -118,9 +116,9 @@ class CustomOpTemplate(SubgraphTemplate):
 
 def autotune_custom_op(
     name: str,
-    decompositions: Union[Callable[..., Any], List[Callable[..., Any]]],
-    inputs: List[Any],
-    kwargs: Optional[Dict[str, Any]] = None,
+    decompositions: Union[Callable[..., Any], list[Callable[..., Any]]],
+    inputs: list[Any],
+    kwargs: Optional[dict[str, Any]] = None,
     layout: Optional[Layout] = None,
 ) -> Union[TensorBox, Any]:
     """
