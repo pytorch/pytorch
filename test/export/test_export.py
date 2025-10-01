@@ -5448,7 +5448,8 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
 
         # check ShapeEnv counters compared to binding indices
         shape_env = _get_shape_env_from_gm(ep.graph_module)
-        next_index = next(shape_env.unbacked_symint_counter)
+        next_index = shape_env.unbacked_symint_counter
+        shape_env.unbacked_symint_counter += 1
         for symbol in bound:
             self.assertTrue(symbol_is_type(symbol, SymT.UNBACKED_INT))
             self.assertTrue(
