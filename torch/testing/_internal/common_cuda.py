@@ -37,8 +37,9 @@ SM100OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_devi
 SM120OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (12, 0))
 
 IS_CUDA13OrLater = int(torch.version.cuda.split('.')[0]) >= 13
-IS_THOR = torch.cuda.is_available() and ((torch.cuda.get_device_capability()[0] == 11 and IS_CUDA13OrLater) or \
-                (torch.cuda.get_device_capability()[0] == 10 and torch.cuda.get_device_capability()[1] == 1 and not IS_CUDA13OrLater))
+IS_THOR = torch.cuda.is_available() and ((torch.cuda.get_device_capability()[0] == 11 and IS_CUDA13OrLater) or
+                (torch.cuda.get_device_capability()[0] == 10 and torch.cuda.get_device_capability()[1] == 1 
+                and not IS_CUDA13OrLater))
 IS_JETSON = LazyVal(lambda: torch.cuda.is_available() and (torch.cuda.get_device_capability() in [(7, 2), (8, 7)] or IS_THOR))
 IS_SM89 = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() == (8, 9))
 IS_SM90 = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() == (9, 0))
