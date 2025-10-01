@@ -1,6 +1,6 @@
 #pragma once
 
-#include <torch/headeronly/version.h>
+#include <torch/version.h>
 
 // Stable ABI Version Targeting
 //

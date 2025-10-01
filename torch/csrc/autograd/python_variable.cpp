@@ -1234,7 +1234,7 @@ static PyObject* THPVariable_get_version(THPVariable* self, void* unused) {
     return handle_torch_function_getter(self, "_version");
   }
   const auto& var = THPVariable_Unpack(self);
-  return PyInt_FromLong(var._version());
+  return THPUtils_packInt64(var._version());
   END_HANDLE_TH_ERRORS
 }
 
@@ -1389,9 +1389,8 @@ static PyObject* THPVariable_get_output_nr(THPVariable* self, void* unused) {
   if (check_has_torch_function((PyObject*)self)) {
     return handle_torch_function_getter(self, "output_nr");
   }
-  const auto output_nr =
-      static_cast<long>(THPVariable_Unpack(self).output_nr());
-  return PyInt_FromLong(output_nr);
+  const auto output_nr = THPVariable_Unpack(self).output_nr();
+  return THPUtils_packInt64(output_nr);
   END_HANDLE_TH_ERRORS
 }
 
@@ -1428,7 +1427,7 @@ static PyObject* THPVariable_get_ndim(THPVariable* self, void* unused) {
   if (check_has_torch_function((PyObject*)self)) {
     return handle_torch_function_getter(self, "ndim");
   }
-  return PyInt_FromLong(THPVariable_Unpack(self).dim());
+  return THPUtils_packInt64(THPVariable_Unpack(self).dim());
   END_HANDLE_TH_ERRORS
 }
 
