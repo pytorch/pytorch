@@ -12,7 +12,7 @@ from typing import Optional, TYPE_CHECKING, Union
 import torch
 from torch.distributed import is_available
 from torch.distributed._mesh_layout import _MeshLayout
-from torch.distributed._pycute import is_int, is_tuple, suffix_product
+from torch.distributed._pycute import flatten, is_int, is_tuple, suffix_product
 from torch.utils._typing_utils import not_none
 
 
@@ -1236,6 +1236,46 @@ else:
             return _mesh_resources.create_unflatten_mesh(
                 self, dim, mesh_sizes, mesh_dim_names, backend_override
             )
+
+        @staticmethod
+        def _concatenate(device_mesh_list: list["DeviceMesh"]) -> "DeviceMesh":
+            concatenate_dim_names: list[str] = []
+            concatenate_sizes: list[int] = []
+            concatenate_strides: list[int] = []
+            concatenate_dim_group_name: list[str] = []
+            root_mesh = _mesh_resources.get_root_mesh(device_mesh_list[0])
+            for mesh in device_mesh_list:
+                concatenate_dim_names.extend(not_none(mesh.mesh_dim_names))
+                concatenate_sizes.extend(list(flatten(mesh._layout.sizes)))
+                concatenate_strides.extend(list(flatten(mesh._layout.strides)))
+                concatenate_dim_group_name.extend(not_none(mesh._dim_group_names))
+                # Concatenate device mesh having different root mesh tensors are meaningless
+                # because the concatenated indices should be indexed by the same root mesh tensor.
+                if id(root_mesh.mesh) != id(_mesh_resources.get_root_mesh(mesh).mesh):
+                    raise RuntimeError(
+                        "Cannot concatenate DeviceMeshes with different root mesh tensors"
+                    )
+            concatenate_mesh_layout = _MeshLayout(
+                tuple(concatenate_sizes), tuple(concatenate_strides)
+            )
+            if not concatenate_mesh_layout.check_non_overlap():
+                raise RuntimeError(
+                    f"Cannot concatenate overlapping meshes: {device_mesh_list}"
+                )
+            cur_rank = root_mesh.get_rank()
+            pg_ranks_by_dim = concatenate_mesh_layout.remap_to_tensor(
+                root_mesh.mesh,
+            )
+            res_submesh = DeviceMesh._create_mesh_from_ranks(
+                root_mesh.device_type,
+                pg_ranks_by_dim,
+                cur_rank,
+                tuple(concatenate_dim_names),
+                _init_backend=False,
+                _layout=concatenate_mesh_layout,
+            )
+            res_submesh._dim_group_names = concatenate_dim_group_name
+            return res_submesh
 
     def _normalize_backend_override(
         backend_override: dict[
