@@ -62,6 +62,27 @@ class MMOperator(MatrixMultiplyOperator):
     def __init__(self):
         super().__init__("mm", "torch.mm")
 
+    def can_produce(self, output_spec: Spec) -> bool:
+        """MM requires exactly 2D tensors."""
+        if not isinstance(output_spec, TensorSpec):
+            return False
+
+        # Must have exactly 2 dimensions for torch.mm
+        if len(output_spec.size) != 2:
+            return False
+
+        # Matrix multiply doesn't work with bool or integer types for gradients
+        if output_spec.dtype in [
+            torch.bool,
+            torch.int8,
+            torch.int16,
+            torch.int32,
+            torch.int64,
+        ]:
+            return False
+
+        return True
+
     def fuzz_inputs_specs(self, output_spec: Spec) -> list[Spec]:
         """Generate input specs for matrix multiplication."""
         if not isinstance(output_spec, TensorSpec):
@@ -116,6 +137,27 @@ class AddmmOperator(MatrixMultiplyOperator):
 
     def __init__(self):
         super().__init__("addmm", "torch.addmm")
+
+    def can_produce(self, output_spec: Spec) -> bool:
+        """Addmm requires exactly 2D tensors."""
+        if not isinstance(output_spec, TensorSpec):
+            return False
+
+        # Must have exactly 2 dimensions for torch.addmm
+        if len(output_spec.size) != 2:
+            return False
+
+        # Matrix multiply doesn't work with bool or integer types for gradients
+        if output_spec.dtype in [
+            torch.bool,
+            torch.int8,
+            torch.int16,
+            torch.int32,
+            torch.int64,
+        ]:
+            return False
+
+        return True
 
     def fuzz_inputs_specs(self, output_spec: Spec) -> list[Spec]:
         """Generate input specs for additive matrix multiplication."""
