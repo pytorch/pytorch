@@ -111,7 +111,7 @@ bool use_mkldnn(const Tensor& input, TensorList params, TensorList hx) {
 bool use_cudnn(const Tensor& t) {
   bool acceptable = at::cudnn_is_acceptable(t);
   auto st = t.scalar_type();
-  bool bfloat16_cond = st != kBFloat16 || at::detail::getCUDAHooks().supportsBFloat16RNNWithCuDNN();
+  bool bfloat16_cond = st == kBFloat16 && at::detail::getCUDAHooks().supportsBFloat16RNNWithCuDNN();
   return acceptable && (bfloat16_cond || st == kDouble || st == kFloat || st == kHalf);
 }
 
