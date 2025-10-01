@@ -268,7 +268,7 @@ class FloorDiv(sympy.Function):
             for term in sympy.Add.make_args(base):
                 quotient = term / divisor
                 # sympy can generate a quotient with (1/22)*.... such that quotient.is_integer is True
-                # FloorDiv should not allow that as output.
+                # FloorDiv should not allow that as output. see
                 rationals = quotient.atoms(sympy.Rational)
                 all_rationals_ints = all(r.q == 1 for r in rationals)
                 if quotient.is_integer and all_rationals_ints:
@@ -311,10 +311,6 @@ class ModularIndexing(sympy.Function):
     ) -> Optional[sympy.Basic]:
         if base == 0 or modulus == 1:
             return sympy.S.Zero
-        # if "/11" in str(base):
-        #     import fbvscode
-        #     fbvscode.set_trace()
-
         if (
             isinstance(base, sympy.Integer)
             and isinstance(divisor, sympy.Integer)
