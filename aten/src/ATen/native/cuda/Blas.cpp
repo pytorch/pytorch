@@ -99,7 +99,7 @@ inline CublasPrepTransType predict_matrix_trans_prep_type_cublas(const Tensor& t
 }
 
 inline std::tuple<CublasPrepTransType, CublasPrepTransType, CublasPrepTransType>
-predict_gemm_args_trans_types_cublas(const Tensor& result, const Tensor& mat1, const Tensor& mat2) {
+predict_gemm_args_trans_prep_types_cublas(const Tensor& result, const Tensor& mat1, const Tensor& mat2) {
   const auto result_trans_type = predict_matrix_trans_prep_type_cublas(result);
   const auto mat1_trans_type = predict_matrix_trans_prep_type_cublas(mat1);
   const auto mat2_trans_type = predict_matrix_trans_prep_type_cublas(mat2);
@@ -281,7 +281,7 @@ struct cublasCommonArgs {
       transpose_b = !transpose_b;
     }
 
-    const auto [res_trans_type, mat1_trans_type, mat2_trans_type] = predict_gemm_args_trans_types_cublas(c, mat1, mat2);
+    const auto [res_trans_type, mat1_trans_type, mat2_trans_type] = predict_gemm_args_trans_prep_types_cublas(c, mat1, mat2);
     const auto res_trans = is_trans(res_trans_type);
     const auto mat1_trans = is_trans(mat1_trans_type);
     const auto mat2_trans = is_trans(mat2_trans_type);
