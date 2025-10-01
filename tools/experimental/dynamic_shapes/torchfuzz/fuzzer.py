@@ -156,6 +156,7 @@ def fuzz_and_execute(
         traceback.print_exc()
         error_message = str(e)
         print(f"Error: {error_message}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

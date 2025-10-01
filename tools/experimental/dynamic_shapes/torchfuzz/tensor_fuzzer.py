@@ -68,7 +68,7 @@ def fuzz_torch_tensor_type(template: str = "default") -> torch.dtype:
     return random.choice(tensor_dtypes)
 
 
-def fuzz_tensor_size(max_dims: int = 6, max_size_per_dim: int = 30) -> tuple[int, ...]:
+def fuzz_tensor_size(max_dims: int = 3, max_size_per_dim: int = 30) -> tuple[int, ...]:
     """
     Fuzzes PyTorch tensor sizes by generating random tensor shapes.
 
