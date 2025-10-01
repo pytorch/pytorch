@@ -22,6 +22,7 @@ from torch.utils._pytree import tree_map
 from torch.utils.flop_counter import flop_registry
 
 from .virtualized import V
+from torch._logging import trace_structured
 
 
 # Check the pattern: (nn.module, F.function/torch.Tensor.method) matched.
@@ -89,6 +90,7 @@ class FakeTensorUpdater:
         return (node, node.target, id(node.args), id(node.kwargs))
 
     def incremental_update(self):
+        log_strs = []
         """Update FakeTensors on self.graph. We will try to do the minimum amount of work."""
         existing_storages: defaultdict[Optional[int], int] = defaultdict(int)
         for node in self.graph.nodes:
@@ -206,6 +208,8 @@ class FakeTensorUpdater:
             )
 
         to_process = OrderedSet[int]()
+        s = f"XXX INCREMENTAL_UPDATE GRAPH:{self.graph.owning_module.print_readable(False)}"
+        log_strs.append(s)
         for node in self.graph.nodes:
             # NB: Be very careful about skipping nodes (via continues) here
             # and ask for a careful review when changing this code. The
@@ -224,6 +228,8 @@ class FakeTensorUpdater:
             if not is_valid:
                 continue
             with V.fake_mode, enable_python_dispatcher():
+                s = f"XXX INCREMENTAL_UPDATE NODE:{node}"
+                log_strs.append(s)
                 new_fake_tensor = node.target(*args, **kwargs)
 
             if "val" in node.meta and is_fake_tensor_same(
@@ -245,6 +251,17 @@ class FakeTensorUpdater:
             to_process.update([id(user) for user in node.users])
 
             self.processed_hashes.add(self.hash_node(node))
+
+        log_str = "\n".join(log_strs)
+        print(f"XXX RANK:{torch.distributed.get_rank()} FAKE_INC_UPDATE:{log_str}")
+        trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "debug_fake_tensor_inc_update",
+                "encoding": "string",
+            },
+            payload_fn=lambda: log_str,
+        )
 
 
 def get_storage(t: torch.Tensor) -> int:

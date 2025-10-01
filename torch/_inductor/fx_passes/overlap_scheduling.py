@@ -69,7 +69,9 @@ def get_collective_do_bench() -> Callable[[Callable[[], Any]], float]:
     with dynamo_timed("collective_compute_do_bench"):
         return functools.partial(
             torch._inductor.runtime.benchmarking.benchmarker.benchmark_gpu,
-            warmup=5,
+            estimation_iters=1,
+            benchmark_iters=3,
+            warmup=3,
         )
 
 
