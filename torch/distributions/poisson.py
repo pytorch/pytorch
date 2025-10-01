@@ -82,9 +82,9 @@ class Poisson(ExponentialFamily):
         if self._validate_args:
             self._validate_sample(value)
         rate, value = broadcast_all(self.rate, value)
-        # Cast to ensure proper type for lgamma operation
-        value = value if isinstance(value, Tensor) else torch.tensor(value)
-        return value.xlogy(rate) - rate - (value + 1).lgamma()
+        # Ensure value is treated as Tensor for operations
+        assert isinstance(value, Tensor), "broadcast_all should return Tensor"
+        return value.xlogy(rate) - rate - (value + 1).lgamma()  # type: ignore[operator]
 
     @property
     def _natural_params(self) -> tuple[Tensor]:
