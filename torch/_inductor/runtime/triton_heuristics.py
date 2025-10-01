@@ -2906,12 +2906,12 @@ def _persistent_reduction_configs(
     if "y" in size_hints:
         pass
     # TODO(jansel): we should be able to improve these heuristics
-    elif reduction_hint == ReductionHint.INNER:
+    elif reduction_hint == ReductionHint.INNER and rnumel >= 256:
         if rnumel > 1024:
             configs = configs[:1]
         else:
             x_block = 8
-            if xnumel // x_block < 128 or (loads_and_stores >= 5 and rnumel >= 256):
+            if xnumel // x_block < 128 or loads_and_stores >= 5:
                 # If loads/stores greater than 5, a lot of register pressure
                 # rnumel < 256 means no vectorized loads if we split up r dim
                 # so xblock still needs to be larger
