@@ -104,6 +104,7 @@ predict_gemm_args_trans_types_cublas(const Tensor& result, const Tensor& mat1, c
   const auto mat1_trans_type = predict_matrix_trans_prep_type_cublas(mat1);
   const auto mat2_trans_type = predict_matrix_trans_prep_type_cublas(mat2);
   if (!is_trans(result_trans_type)) {
+    // Means result is col-compliant, so we will use the res = A @ B path.
     // Nothing to do, return types as is
     return std::make_tuple(
         result_trans_type,
@@ -111,6 +112,8 @@ predict_gemm_args_trans_types_cublas(const Tensor& result, const Tensor& mat1, c
         mat2_trans_type
     );
   } else {
+    // Means result is row-complaint, so we will use
+    // the res^T = B^T @ A^T path.
     // More involved, need to "negate" transposition types.
     // NOTE: here we map N_* to T_* and T_* to N_* just to comply
     // with the previous logic where the trans prep was just
@@ -119,6 +122,9 @@ predict_gemm_args_trans_types_cublas(const Tensor& result, const Tensor& mat1, c
     // passed as transposed and not transposed without
     // any correctness issues. Consider, for example, a tensor
     // of shape (1, 1) with strides (1, 1).
+    // TODO: we can simplify the logic substantially by just
+    // negating T_OWNED, and for other cases returning
+    // prediction for the transposed tensor.
     const auto neg_trans_type = [](const Tensor& t, const CublasPrepTransType& t_trans_type) -> auto {
       if (t.is_non_overlapping_and_dense()) { // when t is row- or col-major
         switch(t_trans_type) {
