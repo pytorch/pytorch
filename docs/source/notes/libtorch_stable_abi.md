@@ -2,15 +2,35 @@
 
 ## Overview
 
-The LibTorch Stable ABI (Application Binary Interface) provides a stable interface for extending PyTorch functionality without being tightly coupled to specific PyTorch versions. This enables the development of custom operators and extensions that remain compatible across PyTorch releases.
+The LibTorch Stable ABI (Application Binary Interface) provides an interface for extending PyTorch functionality without being tightly coupled to specific PyTorch versions. This enables the development of custom operators and extensions that remain compatible across PyTorch releases.
 
 The stable ABI consists of three main components:
 
 1. **Stable C headers** - Low-level C API implemented by libtorch (primarily `torch/csrc/inductor/aoti_torch/c/shim.h`)
-2. **Header-only C++ library** - Standalone utilities (`torch/headeronly/*`)
+2. **Header-only C++ library** - Standalone utilities implemented in only headers such that there is no dependence on libtorch (`torch/headeronly/*`)
 3. **Stable C++ wrappers** - High-level C++ convenience wrappers (`torch/csrc/stable/*`)
 
 We discuss each of these in detail
+
+### `torch/headeronly`
+
+This is a set of inlined C++ headers are completely decoupled from libtorch. The headers consist of certain utilities that might be familiar to custom extension writers. For example, the
+`c10::ScalarType` enum lives here as `torch::headeronly::ScalarType`.
+
+### `torch/csrc/stable`
+
+This is a set of inlined C++ headers that provide wrappers around the C API that handle the rough edges
+discussed below.
+
+It consists of
+
+- torch/csrc/stable/library.h: Provides a stable version of TORCH_LIBRARY and similar macros.
+- torch/csrc/stable/tensor_struct.h: Provides torch::stable::Tensor, a stable version of at::Tensor.
+- torch/csrc/stable/ops.h: Provides a stable interface for calling ATen ops from `native_functions.yaml`.
+- torch/csrc/stable/accelerator.h: Provides a stable interface for device-generic objects and APIs
+(e.g. `getCurrentStream`, `DeviceGuard`).
+
+We are continuing to improve coverage in our `torch/csrc/stable` APIs. Please file an issue if you'd like to see support for particular APIs in your custom extension.
 
 ### Stable C headers
 
@@ -20,28 +40,8 @@ The stable C headers used by AOTInductor form the foundation of the stable ABI. 
 Unless absolutely necessary, we recommend the high-level C++ API in `torch/csrc/stable`
 which will handle all the rough edges of the C API for the user.
 
-### `torch/headeronly`
 
-This is a set of inlined C++ headers are completely decoupled from libtorch. The headers consist of certain utilities that might be familiar to custom extension writers. For example, the
-`c10::ScalarType` enum lives here as `torch::headeronly::ScalarType`.
-
-### `torch/csrc/stable`
-
-This is a set of inlined C++ headers that provide wrappers around the C API that handle the footguns
-discussed above.
-
-It consists of
-
-- torch/csrc/stable/library.h: Provides a stable version of TORCH_LIBRARY and similar macros.
-- torch/csrc/stable/tensor.h: Provides torch::stable::Tensor, a stable version of at::Tensor.
-- torch/csrc/stable/ops.h: Provides a stable interface for calling ops from `native_functions.yaml`.
-- torch/csrc/stable/accelerator.h: Provides a stable interface for device-generic objects and APIs
-(e.g. `getCurrentStream`).
-
-The interface provided by `torch/csrc/stable` should be familiar to custom extension writers but might not match perfectly in certain cases.
-
-
-## How are objects passed across ABI boundaries when interacting with the dispatcher?
+## How are objects passed across the ABI boundary when interacting with the dispatcher?
 
 When interacting with the dispatcher via the stable APIs (``STABLE_TORCH_LIBRARY`` etc.) we use a boxed convention. Arguments and returns are represented as a stack of ``StableIValue`` which correlates with a `torch::jit::stack` of IValues. We discuss the following below
 1. StableIValue Conversions
@@ -108,7 +108,7 @@ There are two invariants for the stack:
 The above is relevant in two places:
 
 1. `STABLE_TORCH_LIBRARY`
-    Unlike `TORCH_LIBRARY`, the dispatcher expects kernels registered via `STABLE_TORCH_LIBRARY` to be boxed. This means they must have the signature `(StableIValue* stack, uint64_t num_args, uint64_t num_outputs) -> void`. This will soon be abstracted away from the user, but for the time being, users can use the `from` and `to`.
+    Unlike `TORCH_LIBRARY`, the dispatcher expects kernels registered via `STABLE_TORCH_LIBRARY` to be boxed. This means they must have the signature `(StableIValue* stack, uint64_t num_args, uint64_t num_outputs) -> void`.We plan to eventually abstract away the need for manual boxing, but, for the time being, please use `from` and `to`.
 
     ```cpp
     Tensor my_amax_vec(Tensor t) {
@@ -123,8 +123,11 @@ The above is relevant in two places:
     ```
 
 2. `aoti_torch_call_dispatcher`
-
-    This has the signature
+    This API allows you to call the PyTorch dispatcher from C/C++ code. It has the following signature:
     ```cpp
-    aoti_torch_call_dispatcher(const char* opName, const char* overloadName, StableIValue* stack)
+    aoti_torch_call_dispatcher(const char* opName, const char* overloadName, StableIValue* stack);
     ```
+
+    `aoti_torch_call_dispatcher` will call the op overload defined by a given `opName`, `overloadName`, and a stack of
+    StableIValues. This call will populate any return values of the op into the stack in their StableIValue form,
+    with `ret0` at index 0, `ret1` at index 1, and so on.
