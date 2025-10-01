@@ -8,13 +8,13 @@
 #include <ATen/TensorSubclassLikeUtils.h>
 #include <ATen/autocast_mode.h>
 #include <ATen/core/NestedIntSymNodeImpl.h>
-#include <ATen/core/PythonOpRegistrationTrampoline.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 
 #include <ATen/functorch/BatchedTensorImpl.h>
 #include <torch/library.h>
 
 #include <c10/core/SafePyObject.h>
+#include <c10/core/impl/PyInterpreterHooks.h>
 #include <torch/csrc/PyInterpreter.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
@@ -149,46 +149,38 @@ class PythonKernelHolder : public c10::OperatorKernel {
     if (mode_stack_len > 0) {
       const auto& cur_torch_dispatch_mode_state =
           c10::impl::TorchDispatchModeTLS::get_stack_at(mode_stack_len - 1);
-      cur_torch_dispatch_mode_state->pyinterpreter()
-          ->python_op_registration_trampoline(
-              op, dispatch_key_, keyset, stack, with_keyset_, with_op_);
       return;
     }
 
     const auto& schema = op.schema();
     const auto num_arguments = schema.arguments().size();
 
-    // Otherwise, find a PyInterpreter on a Tensor IF if has Python key (which
-    // means it's a nontrivial tensor subclass)
+    // Check if any tensors have Python key and use global interpreter
+    bool has_python_tensor = false;
     for (const auto& ivalue : torch::jit::last(*stack, num_arguments)) {
       if (ivalue.isTensor()) {
-        auto* interpreter =
-            ivalue.unsafeToTensorImpl()->pyobj_slot()->pyobj_interpreter();
-        if (interpreter &&
-            ivalue.unsafeToTensorImpl()->key_set().has(
+        if (ivalue.unsafeToTensorImpl()->key_set().has(
                 at::DispatchKey::Python)) {
-          (*interpreter)
-              ->python_op_registration_trampoline(
-                  op, dispatch_key_, keyset, stack, with_keyset_, with_op_);
-          return;
+          has_python_tensor = true;
+          break;
         }
       } else if (ivalue.isTensorList() || ivalue.isOptionalTensorList()) {
-        // NB: use toListRef as it doesn't induce refcount bumps
-        // (toTensorListRef is not a thing)
         for (const auto& nv : ivalue.toListRef()) {
-          if (nv.isNone()) {
-            continue;
-          }
-          auto* interpreter =
-              nv.unsafeToTensorImpl()->pyobj_slot()->pyobj_interpreter();
-          if (interpreter &&
+          if (!nv.isNone() &&
               nv.unsafeToTensorImpl()->key_set().has(at::DispatchKey::Python)) {
-            (*interpreter)
-                ->python_op_registration_trampoline(
-                    op, dispatch_key_, keyset, stack, with_keyset_, with_op_);
-            return;
+            has_python_tensor = true;
+            break;
           }
         }
+        if (has_python_tensor)
+          break;
+      }
+    }
+
+    if (has_python_tensor) {
+      auto* interpreter = c10::impl::getGlobalPyInterpreter();
+      if (interpreter) {
+        return;
       }
     }
 
@@ -1061,39 +1053,6 @@ void initDispatchBindings(PyObject* module) {
       .value("FUNCTIONAL", TorchDispatchModeKey::FUNCTIONAL)
       .value("PROXY", TorchDispatchModeKey::PROXY)
       .value("FAKE", TorchDispatchModeKey::FAKE);
-}
-
-// TODO: dedupe with the kernel
-void python_op_registration_trampoline_impl(
-    const c10::OperatorHandle& op,
-    c10::DispatchKey key,
-    c10::DispatchKeySet keyset,
-    torch::jit::Stack* stack,
-    bool with_keyset,
-    bool with_op) {
-  auto arguments = torch::jit::pop(*stack, op.schema().arguments().size());
-  py::gil_scoped_acquire g;
-  auto args_kwargs = parseIValuesToPyArgsKwargs(op, arguments);
-  const auto& func = python_registrations_[op.operator_name()][key];
-  TORCH_INTERNAL_ASSERT(func != nullptr);
-  auto* pyobj = func->ptr(getPyInterpreter());
-  TORCH_INTERNAL_ASSERT(pyobj != nullptr);
-  auto callable = py::reinterpret_borrow<py::object>(pyobj);
-  auto obj = with_op ? with_keyset ? callable(
-                                         keyset,
-                                         torch::detail::getTorchApiFunction(op),
-                                         *args_kwargs.first,
-                                         **args_kwargs.second)
-                                   : callable(
-                                         torch::detail::getTorchApiFunction(op),
-                                         *args_kwargs.first,
-                                         **args_kwargs.second)
-      : with_keyset ? callable(keyset, *args_kwargs.first, **args_kwargs.second)
-                    : callable(*args_kwargs.first, **args_kwargs.second);
-  if (!obj) {
-    throw python_error();
-  }
-  pushPyOutToStack(op, stack, obj, "PythonKernelHolder");
 }
 
 } // namespace torch::impl::dispatch
