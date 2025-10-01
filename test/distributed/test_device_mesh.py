@@ -843,14 +843,11 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         # Check on the current dp_local_rank, whether the cp mesh tensor is the same.
         self.assertEqual(dp_cp_mesh.mesh[dp_local_rank], cp_mesh.mesh)
 
-        # Support transpose slicing.
-        cp_dp_mesh = mesh_3d["cp", "dp"]
-        expected_mesh_tensor = (
-            torch.tensor([[0, 4], [1, 5]], dtype=torch.int)
-            if self.rank in (0, 1, 4, 5)
-            else torch.tensor([[2, 6], [3, 7]], dtype=torch.int)
-        )
-        self.assertEqual(cp_dp_mesh.mesh, expected_mesh_tensor)
+        with self.assertRaisesRegex(
+            KeyError,
+            "Invalid mesh_dim_names",
+        ):
+            mesh_3d["cp", "dp"]
 
     @with_comms
     def test_flatten_mesh_1d(self):
@@ -881,11 +878,12 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         flattened_dp_cp_mesh = dp_cp_mesh._flatten()
         self.assertEqual(dp_cp_mesh.mesh.flatten(), flattened_dp_cp_mesh.mesh)
         self.assertEqual(flattened_dp_cp_mesh.mesh_dim_names[0], "dp_cp")
+        self.assertEqual(flattened_dp_cp_mesh.get_group().group_desc, "mesh_dp_cp")
         root_mesh = _mesh_resources.get_root_mesh(dp_cp_mesh)
         self.assertEqual(root_mesh, mesh_3d)
-        flatten_mesh_layout = _mesh_resources.flatten_name_to_root_layout[root_mesh][
+        flatten_mesh_layout = _mesh_resources.root_to_flatten_mapping[root_mesh][
             "dp_cp"
-        ]
+        ]._layout
         self.assertEqual(flatten_mesh_layout, flattened_dp_cp_mesh._layout)
         self.assertEqual(
             flattened_dp_cp_mesh._layout.global_ranks(8),
@@ -905,14 +903,19 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         self.assertEqual(flattened_dp_tp_mesh.mesh_dim_names[0], "dp_tp")
         root_mesh = _mesh_resources.get_root_mesh(dp_tp_mesh)
         self.assertEqual(root_mesh, mesh_3d)
-        flatten_mesh_root_layout = _mesh_resources.flatten_name_to_root_layout[
-            root_mesh
-        ]["dp_tp"]
+        flatten_mesh_root_layout = _mesh_resources.root_to_flatten_mapping[root_mesh][
+            "dp_tp"
+        ]._layout
         self.assertEqual(flatten_mesh_root_layout, flattened_dp_tp_mesh._layout)
         self.assertEqual(
             flattened_dp_tp_mesh._layout.global_ranks(8),
             [[0, 1, 4, 5], [2, 3, 6, 7]],
         )
+        with self.assertRaisesRegex(
+            NotImplementedError,
+            "Currently, this only allows slicing out a contiguous flattened dim",
+        ):
+            mesh_3d["dp_tp", "cp"]
 
         # Test flatten with a flattened mesh_dim_name
         cp_tp_mesh = mesh_3d["cp", "tp"]
@@ -1558,42 +1561,42 @@ class CuTeLayoutTest(TestCase):
         # Test 1: Consecutive ranks, full world - should return logical groups directly
         original_mesh = torch.tensor([[0, 1], [2, 3]], dtype=torch.int)
         layout1 = _Layout((2, 2), (2, 1))  # row-major 2x2
-        result1 = layout1.remap_to_tensor(original_mesh, world_size=4)
+        result1 = layout1.remap_to_tensor(original_mesh)
         expected1 = torch.tensor([[[0, 1], [2, 3]]], dtype=torch.int)
         self.assertEqual(result1, expected1)
 
         # Test 2: Non-consecutive ranks - should map to actual ranks
         original_mesh = torch.tensor([[10, 20], [30, 40]], dtype=torch.int)
         layout2 = _Layout((2, 2), (2, 1))
-        result2 = layout2.remap_to_tensor(original_mesh, world_size=4)
+        result2 = layout2.remap_to_tensor(original_mesh)
         expected2 = torch.tensor([[[10, 20], [30, 40]]], dtype=torch.int)
         self.assertEqual(result2, expected2)
 
         # Test 4: 1D layout with consecutive ranks
         original_mesh = torch.tensor([0, 1, 2, 3], dtype=torch.int)
         layout4 = _Layout((4,), (1,))
-        result4 = layout4.remap_to_tensor(original_mesh, world_size=4)
+        result4 = layout4.remap_to_tensor(original_mesh)
         expected4 = torch.tensor([[0, 1, 2, 3]], dtype=torch.int)
         self.assertEqual(result4, expected4)
 
         # Test 5: Complex strided layout with non-consecutive ranks
         original_mesh = torch.tensor([5, 10, 15, 20], dtype=torch.int)
         layout5 = _Layout((2, 2), (2, 1))
-        result5 = layout5.remap_to_tensor(original_mesh, world_size=4)
+        result5 = layout5.remap_to_tensor(original_mesh)
         expected5 = torch.tensor([[[5, 10], [15, 20]]], dtype=torch.int)
         self.assertEqual(result5, expected5)
 
         # Test 6: Tensor Cute representation of a 2D mesh
         original_mesh = torch.tensor([[0, 2], [1, 3]], dtype=torch.int)
         layout6 = _Layout((2, 2), (1, 2))  # column-major style
-        result6 = layout6.remap_to_tensor(original_mesh, world_size=4)
+        result6 = layout6.remap_to_tensor(original_mesh)
         expected6 = torch.tensor([[[0, 1], [2, 3]]], dtype=torch.int)
         self.assertEqual(result6, expected6)
 
         # Test 7: Layout with different stride pattern
         original_mesh = torch.tensor([0, 2, 1, 4], dtype=torch.int)
         layout7 = _Layout((2, 2), (1, 2))  # column-major style
-        result7 = layout7.remap_to_tensor(original_mesh, world_size=4)
+        result7 = layout7.remap_to_tensor(original_mesh)
         expected7 = torch.tensor([[[0, 1], [2, 4]]], dtype=torch.int)
         self.assertEqual(result7, expected7)
 
