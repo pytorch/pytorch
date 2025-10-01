@@ -115,6 +115,9 @@ class DefaultFuzzTemplate(FuzzTemplate):
                 "torch.sub",
                 "torch.mul",
                 "torch.div",
+                "torch.Tensor.view",
+                "torch.reshape",
+                "torch.flattentorch.squeezetorch.unsqueeze",
             ],
             check=EagerVsFullGraphDynamicCompileCheck(),
         )
