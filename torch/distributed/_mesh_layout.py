@@ -285,12 +285,13 @@ class _MeshLayout(Layout):
         Returns:
             torch.Tensor: A tensor representing the actual device allocation from mesh_tensor
         """
+        complement_layout = self.complement(mesh_tensor.numel())
 
-        # Create indexing tensor of the mesh mesh
-        ranks_indices_list = self.global_ranks(mesh_tensor.numel())
-        indices = torch.tensor(ranks_indices_list, device="cpu", dtype=torch.int).view(
-            -1,
-            *flatten(self.sizes),  # type: ignore[arg-type]
+        return (
+            mesh_tensor.flatten()
+            .as_strided(
+                flatten(complement_layout.sizes) + flatten(self.sizes),
+                flatten(complement_layout.strides) + flatten(self.strides),
+            )
+            .reshape(-1, *(self[i].numel() for i in range(len(self))))
         )
-
-        return mesh_tensor.flatten()[indices]
