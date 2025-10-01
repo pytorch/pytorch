@@ -13,11 +13,7 @@
 //     #include <torch/csrc/stable/library.h>
 //
 //   Target a specific stable version (major.minor):
-<<<<<<< HEAD
 //     #define TORCH_TARGET_VERSION (((0ULL + 2) << 56) | ((0ULL + 9) << 48))
-=======
-//     #define TORCH_TARGET_VERSION ((uint64_t)2 << 56 | (uint64_t)9 << 48)
->>>>>>> 2e0a5d9fe8b (Add scaffolding for aoti_torch_call_dispatcher BC/FC with native ops)
 //     Target PyTorch 2.9 #include <torch/csrc/stable/library.h>
 
 #ifdef TORCH_TARGET_VERSION
