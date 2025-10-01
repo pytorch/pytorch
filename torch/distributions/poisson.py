@@ -84,7 +84,7 @@ class Poisson(ExponentialFamily):
         rate, value = broadcast_all(self.rate, value)
         # Ensure value is treated as Tensor for operations
         assert isinstance(value, Tensor), "broadcast_all should return Tensor"
-        return value.xlogy(rate) - rate - (value + 1).lgamma()  # type: ignore[operator]
+        return value.xlogy(rate) - rate - (value + 1).lgamma()  # type: ignore[attr-defined]
 
     @property
     def _natural_params(self) -> tuple[Tensor]:
