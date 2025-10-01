@@ -2650,7 +2650,7 @@ def compile(
 
         # Create wrapper that always uses eager backend during export
         def export_wrapped_fn(*args, **kwargs):
-            with setup_compilation_env(remove_pre_dispatch_tf_mode=False) as backend:
+            with setup_compilation_env() as backend:  # type: ignore[attr-defined]
                 # Force eager backend regardless of original backend
                 backend_wrapper = _TorchCompileWrapper(backend, mode, options, dynamic)
                 return torch._dynamo.optimize(

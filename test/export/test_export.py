@@ -790,8 +790,6 @@ def forward(self, x):
     v_proj_weight = self.v_proj.weight
     v_proj_bias = self.v_proj.bias
     _guards_fn = self._guards_fn(x);  _guards_fn = None
-    function_const_func_spec0 = self.function_const_func_spec0
-    torch__dynamo__trace_wrapped_higher_order_op_mod_index0 = self.torch__dynamo__trace_wrapped_higher_order_op_ModIndex0
     linear = torch.ops.aten.linear.default(x, q_proj_weight, q_proj_bias);  x = None
     sum_1 = torch.ops.aten.sum.dim_IntList(linear, [-1])
     detach = torch.ops.aten.detach.default(sum_1);  sum_1 = None
@@ -812,6 +810,8 @@ def forward(self, x):
     _vmap_increment_nesting_3 = torch._functorch.predispatch._vmap_increment_nesting(128, 'error');  _vmap_increment_nesting_3 = None
     _add_batch_dim_3 = torch._functorch.predispatch._add_batch_dim(arange_3, 0, 4);  arange_3 = None
     remainder = torch.ops.aten.remainder.Scalar(_add_batch_dim_2, 128)
+    torch__dynamo__trace_wrapped_higher_order_op_mod_index0 = self.torch__dynamo__trace_wrapped_higher_order_op_ModIndex0
+    function_const_func_spec0 = self.function_const_func_spec0
     flat_apply = torch.ops.higher_order.flat_apply(function_const_func_spec0, torch__dynamo__trace_wrapped_higher_order_op_mod_index0, 'torch._dynamo._trace_wrapped_higher_order_op.ModIndex', detach, _add_batch_dim, remainder);  function_const_func_spec0 = torch__dynamo__trace_wrapped_higher_order_op_mod_index0 = _add_batch_dim = remainder = None
     le = torch.ops.aten.le.Tensor(_add_batch_dim_3, _add_batch_dim_2);  _add_batch_dim_3 = _add_batch_dim_2 = None
     gt = torch.ops.aten.gt.Scalar(flat_apply, 0);  flat_apply = None
@@ -924,10 +924,10 @@ def forward(self, x):
     sdpa_score0 = self.sdpa_score0
     sdpa_mask0 = self.sdpa_mask0
     flex_attention = torch.ops.higher_order.flex_attention(view_1, view_2, view_3, sdpa_score0, (128, 128, to_3, to_4, to_6, to_7, to_9, to_10, to_12, to_13, 128, 128, sdpa_mask0), 0.125, {'PRESCALE_QK': False, 'ROWS_GUARANTEED_SAFE': False, 'BLOCKS_ARE_CONTIGUOUS': False, 'WRITE_DQ': True, 'OUTPUT_LOGSUMEXP': False, 'OUTPUT_MAX': False}, (), (detach,));  view_1 = view_2 = view_3 = sdpa_score0 = to_3 = to_4 = to_6 = to_7 = to_9 = to_10 = to_12 = to_13 = sdpa_mask0 = detach = None
-    getitem_12 = flex_attention[0]
-    getitem_13 = flex_attention[1];  getitem_13 = None
-    getitem_14 = flex_attention[2];  flex_attention = getitem_14 = None
-    return pytree.tree_unflatten((getitem_12,), self._out_spec)""",
+    getitem = flex_attention[0]
+    getitem_1 = flex_attention[1];  getitem_1 = None
+    getitem_2 = flex_attention[2];  flex_attention = getitem_2 = None
+    return pytree.tree_unflatten((getitem,), self._out_spec)""",
         )
         exported_out = exported_mod(x)
         self.assertEqual(exported_out, eager_out)
