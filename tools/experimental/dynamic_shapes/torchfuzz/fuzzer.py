@@ -128,16 +128,16 @@ def fuzz_and_execute(
         for node in operation_graph.nodes.values():
             # Use the fully qualified torch operation name if available
             from torchfuzz.operators import get_operator
-                
+
             # Try to get the fully qualified torch operation name
             torch_op_name = None
-              
+
             # Extract the base operation name (without arg_X suffixes)
             base_op_name = node.op_name
             if node.op_name.startswith("arg_"):
                 # For arg operations, use just "arg" to look up in registry
                 base_op_name = "arg"
-              
+
             try:
                 operator = get_operator(base_op_name)
                 if operator and hasattr(operator, 'torch_op_name') and operator.torch_op_name:
@@ -145,11 +145,11 @@ def fuzz_and_execute(
             except (KeyError, ValueError):
                 # If the operator doesn't exist in registry, use the node's op_name
                 pass
-                
+
             # Use fully qualified name if available, otherwise use the node's op_name
             display_name = torch_op_name if torch_op_name else node.op_name
             operation_counts[display_name] = operation_counts.get(display_name, 0) + 1
-            
+
         # Print operation statistics in a parseable format
         print("OPERATION_STATS:")
         for op_name, count in sorted(operation_counts.items()):
