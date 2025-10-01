@@ -152,7 +152,7 @@ class PlacementClassVariable(DistributedVariable):
         tx: "InstructionTranslator",
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
-    ) -> "VariableTracker":
+        t) -> "VariableTracker":
         if self.source:
             # NOTE: we don't need to track mutations to the placement class as they
             # are supposed to be immutable.
@@ -248,6 +248,11 @@ class DeviceMeshVariable(DistributedVariable):
             return ConstantVariable.create(self.value.ndim)
         if name == "device_type":
             return ConstantVariable.create(self.value.device_type)
+        if name == "mesh_dim_names":
+            source = self.source
+            if source:
+                source = AttrSource(base=source, member="mesh_dim_names")
+            return VariableTracker.build(tx, self.value.mesh_dim_names, source)
         return super().var_getattr(tx, name)
 
     def call_method(
