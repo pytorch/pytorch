@@ -1097,7 +1097,6 @@ class TensorVariable(VariableTracker):
             #   value.requires_grad is True => self.has_grad_fn becomes True
 
             # Not sure if __setitem__ can ever save activations, disabling just in case
-            # with torch._dynamo.utils._disable_saved_tensors_hooks_during_tracing():
 
             # Ignore fresh unbacked symbols that arises from patterns like this:
             #   idx = b[i].item()
@@ -1106,7 +1105,10 @@ class TensorVariable(VariableTracker):
             with (
                 torch._dynamo.utils._disable_saved_tensors_hooks_during_tracing(),
                 tx.fake_mode.shape_env.ignore_fresh_unbacked_symbols()
-                if key.proxy.node.target == "item"
+                if tx.fake_mode
+                and tx.fake_mode.shape_env
+                and hasattr(key, "proxy")
+                and key.proxy.node.target == "item"
                 else nullcontext(),
             ):
                 get_fake_value(proxy.node, tx, allow_non_graph_fake=False)

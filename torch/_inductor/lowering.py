@@ -3147,7 +3147,7 @@ def select_scatter(x, src, dim: int, index: int):
     elif V.graph.sizevars.guard_or_false(sympy.Ge(index, 0)):
         pass
     else:
-        # unabacked index
+        # unbacked index
         return fallback_handler(aten.select_scatter.default)(x, src, dim, index)
 
     V.graph.sizevars.check_leq(0, index)  # type: ignore[arg-type]

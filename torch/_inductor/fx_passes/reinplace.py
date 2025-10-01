@@ -83,10 +83,9 @@ def _inplace_generalized_scatter(
         # slice and select can allocate new unbacked symints, but those won't be reflected
         # in the output of this function, hence shall be ignored.
         fake_mode = detect_fake_mode(fake_args)
-        assert hasattr(fake_mode, "shape_env")
         with (
             fake_mode.shape_env.ignore_fresh_unbacked_symbols()
-            if fake_mode.shape_env
+            if fake_mode and fake_mode.shape_env
             else nullcontext()
         ):
             tmp = view.target(tmp, *fake_args, **fake_kwargs)
