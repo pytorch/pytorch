@@ -648,8 +648,21 @@ class CodeGen:
                     "val",
                     node.meta.get("tensor_meta", node.meta.get("example_value", None)),
                 )
+                # DTensor support
+                if isinstance(meta_val, torch.distributed.tensor.DTensor):
+                    device_mesh = getattr(meta_val, "device_mesh", None)
+                    placements = getattr(meta_val, "placements", None)
+                    dtype = getattr(meta_val, "dtype", None)
+                    shape = getattr(meta_val, "shape", None)
+                    device = getattr(meta_val, "device", None)
+                    mesh_str = str(device_mesh) if device_mesh is not None else ""
+                    placements_str = str(placements) if placements is not None else ""
+                    dtype_str = dtype_abbrs[dtype] if dtype is not None else ""
+                    shape_str = stringify_shape(shape) if shape is not None else ""
+                    device_str = str(device) if device is not None else ""
+                    maybe_type_annotation = f': "DTensor(dtype={dtype_str}, shape={shape_str}, device={device_str}, mesh={mesh_str}, placements={placements_str})"'
                 # use string as annotation, to make it valid python code
-                if isinstance(meta_val, torch.Tensor) and meta_val.layout not in (
+                elif isinstance(meta_val, torch.Tensor) and meta_val.layout not in (
                     torch.sparse_csc,
                     torch.sparse_csr,
                 ):
