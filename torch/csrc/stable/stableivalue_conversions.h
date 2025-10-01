@@ -29,12 +29,6 @@ T to(StableIValue val);
 
 namespace detail {
 
-// Context for version-aware conversions
-// is_internal = true: Called from libtorch internal code (prioritize
-// extension_build_version)
-// is_internal = false: Called from extension code (prioritize
-// aoti_torch_abi_version)
-
 // =============================================================================
 // FROM CONVERSIONS (T -> StableIValue)
 // ======================================================================
