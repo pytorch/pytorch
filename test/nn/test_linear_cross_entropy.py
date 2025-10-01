@@ -1,3 +1,6 @@
+warning: The following rules have been removed and ignoring them has no effect:
+    - UP038
+
 # Owner(s): ["module: nn"]
 
 import itertools
@@ -5,8 +8,7 @@ from typing import Optional
 
 import torch
 import torch.nn.functional as F
-
-from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 def _reference_linear_cross_entropy(
@@ -19,8 +21,8 @@ def _reference_linear_cross_entropy(
     label_smoothing: float,
 ) -> torch.Tensor:
     logits = F.linear(input, weight, bias)
-    logits_flat = logits.view(-1, logits.size(-1))
-    target_flat = target.view(-1)
+    logits_flat = logits.reshape(-1, logits.size(-1))
+    target_flat = target.reshape(-1)
     loss = F.cross_entropy(
         logits_flat,
         target_flat,
@@ -29,7 +31,7 @@ def _reference_linear_cross_entropy(
         label_smoothing=label_smoothing,
     )
     if reduction == "none":
-        loss = loss.view(target.shape)
+        loss = loss.reshape(target.shape)
     return loss
 
 
@@ -46,11 +48,17 @@ class TestLinearCrossEntropyCPU(TestCase):
         label_smoothing: float = 0.0,
         chunking_strategy: str = "auto",
     ) -> None:
-        input_clone = input.clone().requires_grad_(input.requires_grad)
-        weight_clone = weight.clone().requires_grad_(weight.requires_grad)
+        input_clone = input.clone(memory_format=torch.preserve_format).requires_grad_(
+            input.requires_grad
+        )
+        weight_clone = weight.clone(memory_format=torch.preserve_format).requires_grad_(
+            weight.requires_grad
+        )
         bias_clone = None
         if bias is not None:
-            bias_clone = bias.clone().requires_grad_(bias.requires_grad)
+            bias_clone = bias.clone(memory_format=torch.preserve_format).requires_grad_(
+                bias.requires_grad
+            )
 
         fused = F.linear_cross_entropy(
             input,
@@ -73,8 +81,14 @@ class TestLinearCrossEntropyCPU(TestCase):
         )
 
         if fused.requires_grad:
-            grad_args = [tensor for tensor in (input, weight, bias) if tensor is not None]
-            grad_args_ref = [tensor for tensor in (input_clone, weight_clone, bias_clone) if tensor is not None]
+            grad_args = [
+                tensor for tensor in (input, weight, bias) if tensor is not None
+            ]
+            grad_args_ref = [
+                tensor
+                for tensor in (input_clone, weight_clone, bias_clone)
+                if tensor is not None
+            ]
 
             if reduction == "none":
                 grad_output = torch.ones_like(fused)
@@ -123,21 +137,69 @@ class TestLinearCrossEntropyCPU(TestCase):
         weight = torch.randn(6000, 32, requires_grad=True)
         bias = torch.randn(6000, requires_grad=True)
         target = torch.randint(0, 6000, (2, 3))
-        self._compare_with_reference(input, weight, target, bias, chunking_strategy="auto")
+        self._compare_with_reference(
+            input, weight, target, bias, chunking_strategy="auto"
+        )
 
     def test_vocab_chunking(self) -> None:
         torch.manual_seed(0)
         input = torch.randn(4, 16, requires_grad=True)
         weight = torch.randn(5000, 16, requires_grad=True)
         target = torch.randint(0, 5000, (4,))
-        self._compare_with_reference(input, weight, target, None, chunking_strategy="vocab")
+        self._compare_with_reference(
+            input, weight, target, None, chunking_strategy="vocab"
+        )
 
     def test_batch_chunking(self) -> None:
         torch.manual_seed(0)
         input = torch.randn(1500, 8, requires_grad=True)
         weight = torch.randn(64, 8, requires_grad=True)
         target = torch.randint(0, 64, (1500,))
-        self._compare_with_reference(input, weight, target, None, chunking_strategy="batch")
+        self._compare_with_reference(
+            input, weight, target, None, chunking_strategy="batch"
+        )
+
+    def test_non_contiguous_inputs(self) -> None:
+        torch.manual_seed(0)
+        base = torch.randn(2, 3, 5)
+        input_nc = base.transpose(0, 1)
+        weight = torch.randn(4, 5)
+        target_base = torch.randint(0, 4, (2, 3), dtype=torch.long)
+        target_nc = target_base.transpose(0, 1)
+        self._compare_with_reference(
+            input_nc,
+            weight,
+            target_nc,
+            None,
+            chunking_strategy="batch",
+        )
+
+    def test_auto_chunking_high_rank(self) -> None:
+        torch.manual_seed(0)
+        input = torch.randn(2, 3, 4, 5, 6)
+        weight = torch.randn(8, 6)
+        target = torch.randint(0, 8, (2, 3, 4, 5))
+        self._compare_with_reference(
+            input, weight, target, None, chunking_strategy="auto"
+        )
+
+    def test_all_targets_ignored(self) -> None:
+        torch.manual_seed(0)
+        input = torch.randn(512, 16)
+        weight = torch.randn(128, 16)
+        bias = torch.randn(128)
+        target = torch.full((512,), -1, dtype=torch.long)
+
+        for reduction in ("mean", "sum"):
+            self._compare_with_reference(
+                input,
+                weight,
+                target,
+                bias,
+                reduction=reduction,
+                ignore_index=-1,
+                chunking_strategy="batch",
+            )
 
     def test_reduction_and_options(self) -> None:
         torch.manual_seed(0)
@@ -146,7 +208,9 @@ class TestLinearCrossEntropyCPU(TestCase):
         bias = torch.randn(16, requires_grad=True)
         target = torch.randint(0, 16, (3, 4))
 
-        for reduction, label_smoothing in itertools.product(["none", "sum", "mean"], [0.0, 0.2]):
+        for reduction, label_smoothing in itertools.product(
+            ["none", "sum", "mean"], [0.0, 0.2]
+        ):
             self._compare_with_reference(
                 input.clone().requires_grad_(),
                 weight.clone().requires_grad_(),
