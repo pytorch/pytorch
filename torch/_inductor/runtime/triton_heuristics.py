@@ -2895,14 +2895,10 @@ def filter_reduction_configs_for_determinism(
         return configs
 
     if log.isEnabledFor(logging.DEBUG):
-        print_configs = len(configs) >= 2
-
-        # we don't print configs if the list has a single item
-        if print_configs:
-            log.debug("reduction configs before filtering:")
-            for c in configs:
-                log.debug("%s", c)
-                log.debug("")
+        log.debug("reduction configs before filtering:")
+        for c in configs:
+            log.debug("%s", c)
+            log.debug("")
 
     def _has_too_small_rblock(config):
         rblock = config.kwargs.get("R0_BLOCK")
@@ -2910,8 +2906,8 @@ def filter_reduction_configs_for_determinism(
         return rblock is not None and rblock <= 4
 
     def _nonpromising_xblock_1(config):
-        # kernel like https://gist.github.com/shunting314/0b3281c087e79bc915fe45985ff9d7d5 without a load/store with contiguous rdim
-        # is unlikely to perform better with XBLOCK==1
+        # kernel like https://gist.github.com/shunting314/0b3281c087e79bc915fe45985ff9d7d5
+        # without a load/store having contiguous rdim is unlikely to perform well with XBLOCK==1
         return config.kwargs["XBLOCK"] == 1 and not inductor_meta.get(
             "has_loadstore_with_contiguous_rdim", True
         )
@@ -2971,7 +2967,7 @@ def filter_reduction_configs_for_determinism(
 
     configs = _pick_group()
 
-    if log.isEnabledFor(logging.DEBUG) and print_configs:  # type: ignore[possibly-undefined]
+    if log.isEnabledFor(logging.DEBUG):
         log.debug("reduction configs after filtering:")
         for c in configs:
             log.debug("%s", c)
