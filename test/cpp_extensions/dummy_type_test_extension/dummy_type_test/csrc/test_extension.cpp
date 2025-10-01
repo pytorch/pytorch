@@ -14,7 +14,6 @@ using torch::stable::Tensor;
 // with it
 Tensor test_fn_impl(const Tensor& a, const dummy_types::Dummy& b) {
   int32_t id_value = b.get_id();
-  int8_t foo = b.get_foo();
 
   Tensor result = torch::stable::empty_like(a);
   torch::stable::fill_(result, static_cast<double>(id_value));
@@ -37,7 +36,7 @@ void boxed_test_fn(
 // Implementation of create_dummy that takes a Tensor and returns a Dummy with
 // id 42
 dummy_types::Dummy create_dummy_impl(const Tensor& input) {
-  return dummy_types::Dummy(2, 42);
+  return dummy_types::Dummy(42);
 }
 
 // Boxed kernel function for create_dummy

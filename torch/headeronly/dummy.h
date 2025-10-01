@@ -2,10 +2,6 @@
 
 #include <cstdint>
 
-// ======================================================================
-// DUMMY TYPE FOR TESTING VERSION-AWARE CONVERSIONS WITH INLINE NAMESPACES
-// ======================================================================
-
 namespace dummy_types {
 
 // This ifdef is just to ease testing, if a type in headeronly were to be

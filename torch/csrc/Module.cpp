@@ -2785,7 +2785,7 @@ Call this whenever a new thread is created in order to propagate values from
 #ifdef USE_KINETO
   torch::global_kineto_init();
 #endif
-  py::class_<dummy_types::v2_9::Dummy>(py_module, "Dummy")
+  py::class_<dummy_types::v2_9::Dummy>(py_module, "_Dummy")
       .def(py::init<int32_t>(), py::arg("id"))
       .def(py::init<int8_t, int32_t>(), py::arg("foo"), py::arg("id"))
       .def("get_foo", &dummy_types::v2_9::Dummy::get_foo)
@@ -2796,7 +2796,7 @@ Call this whenever a new thread is created in order to propagate values from
         return "Dummy(foo=" + std::to_string(d.get_foo()) +
             ", id=" + std::to_string(d.get_id()) + ")";
       });
-  // py::class_<dummy_types::v2_8::Dummy>(py_module, "Dummy")
+  // py::class_<dummy_types::v2_8::Dummy>(py_module, "_Dummy")
   //   .def(py::init<int32_t>(), py::arg("id"))
   //   .def("get_id", &dummy_types::v2_8::Dummy::get_id)
   //   .def_readwrite("id", &dummy_types::v2_8::Dummy::id)

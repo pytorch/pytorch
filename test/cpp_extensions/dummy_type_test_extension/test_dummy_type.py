@@ -28,24 +28,25 @@ if not IS_WINDOWS:
         def test_dummy_conversion_from_libtorch_to_extension(self):
             """
             Creates a Dummy object in libtorch and passes it to an extension.
+            Makes sure extension can read `id` field properly.
             """
             import dummy_type_test
 
             inp = torch.empty((2, 3))
-            out = dummy_type_test.ops.test_fn(inp, torch._C.Dummy(42))
+            out = dummy_type_test.ops.test_fn(inp, torch._C._Dummy(42))
             self.assertEqual(out, torch.empty((2, 3)).fill_(42))
 
         def test_dummy_conversion_to_libtorch_from_extension(self):
             """
             Creates a Dummy object in an extension and passes it to libtorch.
+            Makes sure libtorch has `foo` field populated properly.
             """
             import dummy_type_test
 
             inp = torch.empty((2, 3))
             dummy = dummy_type_test.ops.create_dummy(inp)
             self.assertTrue(dummy.id == 42)
-            if hasattr(dummy, "foo"):
-                self.assertTrue(dummy.foo == 1)
+            self.assertTrue(dummy.foo == 1)
 
 
 if __name__ == "__main__":
