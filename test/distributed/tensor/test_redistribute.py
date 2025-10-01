@@ -1,6 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
 
+import contextlib
 import itertools
 
 import torch
@@ -356,7 +357,7 @@ class RedistributeTest(DTensorTestBase):
         replica_spec = Replicate()
         # 1) test replicate -> partial forward
         replica_tensor = distribute_tensor(local_tensor, device_mesh, [replica_spec])
-        with self.assertRaisesRegex(RuntimeError, "Can not redistribute to Partial"):
+        with self.assertRaisesRegex(RuntimeError, "Can not redistribute"):
             partial_tensor = replica_tensor.redistribute(device_mesh, [partial_spec])
 
         from torch.distributed.tensor._redistribute import Redistribute
@@ -620,6 +621,38 @@ class RedistributeTest(DTensorTestBase):
             self.assertEqual(comm_mode.get_total_counts(), 0)
             self.assertEqual(out.placements, [Shard(0), dst])
 
+    @with_comms
+    def test_redistribute_to_partial(self):
+        mesh = init_device_mesh(self.device_type, (2, 2))
+
+        tensor = torch.randn(12, 8, device=self.device_type)
+
+        test_cases = [
+            # Partial to Partial is allowed
+            ([Partial(), Shard(0)], [Partial(), Shard(0)], True),
+            ([Partial(), Shard(0)], [Partial(), Shard(1)], True),
+            ([Shard(0), Partial()], [Replicate(), Partial()], True),
+            ([Shard(0), Partial("prod")], [Replicate(), Partial("prod")], True),
+            # Non-Partial to Partial is NOT allowed
+            ([Shard(0), Replicate()], [Shard(0), Partial()], False),
+            ([Shard(0), Replicate()], [Replicate(), Partial()], False),
+            ([Shard(0), Shard(1)], [Replicate(), Partial()], False),
+            # Partial to partial is allowed, if only the reduction ops is the same
+            ([Shard(0), Partial("prod")], [Replicate(), Partial("sum")], False),
+        ]
+
+        for src, dst, allow in test_cases:
+            dt = DTensor.from_local(tensor, mesh, src)
+            raise_context = (
+                self.assertRaisesRegex(RuntimeError, "Can not redistribute")
+                if not allow
+                else contextlib.nullcontext()
+            )
+
+            with raise_context:
+                out = dt.redistribute(mesh, dst)
+                self.assertEqual(out.placements, dst)
+
 
 instantiate_parametrized_tests(RedistributeTest)
 
@@ -750,7 +783,7 @@ class DeviceOrderRedistributeTest(DTensorTestBase):
         dt2 = dt.redistribute(mesh, shard_order=shard_order)
         self.assertEqual(dt2.shard_order, ((), (1,), (0,)))
 
-    def _extract_redistribute_trace_from_debug(self, s: str) -> str:
+    def _extract_redistribute_trace_from_debugmode(self, s: str) -> str:
         import re
 
         match = re.search(r"trace:\s*(.*)\)", s)
@@ -810,7 +843,7 @@ class DeviceOrderRedistributeTest(DTensorTestBase):
                 out_dt = sharded_dt.redistribute(
                     mesh, dst_placement, shard_order=dst_order
                 )
-            trace_str = self._extract_redistribute_trace_from_debug(
+            trace_str = self._extract_redistribute_trace_from_debugmode(
                 debug_mode.debug_string()
             )
             if idx == 0:
