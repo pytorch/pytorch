@@ -2399,7 +2399,7 @@ def triton_config_reduction(
             # r is contiguous, so ensure that each thread has 8 elements for
             # vectorized loads, assuming bf16/fp16
             # xblock is usually 1-2, default to giving each thread more work
-            num_warps = r // (32 * 8)
+            num_warps = r // 128
         else:
             num_warps = total_numel() // 128
 
