@@ -115,7 +115,6 @@ RUN env GRPC_PYTHON_BUILD_SYSTEM_OPENSSL=True pip3 install grpcio
 # cmake-3.28.0 from pip for onnxruntime
 RUN python3 -mpip install cmake==3.28.0
 
-
 # build onnxruntime 1.21.0 from sources.
 # it is not possible to build it from sources using pip,
 # so just build it from upstream repository.
