@@ -173,12 +173,4 @@ unsigned TensorBase::_register_hook(std::function<TensorBase(const TensorBase&)>
   return impl::GetVariableHooks()->_register_hook(*this, std::move(hook));
 }
 
-std::optional<ScalarType> TensorBase::grad_dtype() const {
-  return impl::GetVariableHooks()->grad_dtype(*this);
-}
-
-void TensorBase::set_grad_dtype(const std::optional<ScalarType>& grad_dtype) const {
-  return impl::GetVariableHooks()->set_grad_dtype(*this, grad_dtype);
-}
-
 } // namespace at
