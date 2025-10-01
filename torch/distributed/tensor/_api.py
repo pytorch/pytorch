@@ -1,6 +1,7 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
+import copy
 import inspect
 import warnings
 from collections.abc import Sequence
@@ -216,7 +217,7 @@ def _prepare_placements_and_shard_order(
     device_mesh: DeviceMesh,
     tensor_rank: int,
     placements: Optional[Sequence[Placement]] = None,
-    shard_order: Optional[dict[int, list[int | str]]] = None,
+    shard_order: Optional[dict[int, Sequence[int | str]]] = None,
 ) -> tuple[
     tuple[Placement, ...],  # update placements in tuple
     tuple[tuple[int, ...], ...],  # updated shard_order in tuple
@@ -229,28 +230,30 @@ def _prepare_placements_and_shard_order(
         device_mesh (:class:`DeviceMesh`): DeviceMesh to place the tensor.
         tensor_rank (int): The rank (number of dimensions) of the tensor to be
             distributed or redistributed.
-        placements (List[:class:`Placement`], optional): The placements that
+        placements (Sequence[:class:`Placement`], optional): The placements that
             describe how to place the local torch.Tensor on DeviceMesh. Must
             have the same number of elements as ``device_mesh.ndim``.
-        shard_order (Optional[Dict[int, List[int | str]]], optional): Specifies
-            the mapping of tensor dimensions to the order of device mesh
-            dimensions they are sharded over. Each key is a tensor dimension
-            (can be negative for reverse indexing), and its value is a list
-            specifying the device mesh dimensions (as integers or strings) that
-            the tensor dimension is sharded across, in order. If not specified,
-            a default sharding order is used.
+        shard_order ([Dict[int, Sequence[int | str]]], optional):
+            Specifies the mapping of tensor dimensions to the order of device mesh
+            dimensions they are sharded over. Each key is a tensor dimension (can be
+            negative for reverse indexing), and its value is a list specifying the
+            device mesh dimensions (as integers or strings) that the tensor
+            dimension is sharded across, in order. If not specified, a default
+            sharding order is used.
 
     Returns:
         Tuple:
             - placements (Tuple[:class:`Placement`, ...]): The computed
-              placements as a tuple.
+                placements as a tuple.
             - shard_order (Tuple[Tuple[int, ...], ...]): The computed shard
-              order as a tuple of tuples. Each inner tuple corresponds to a
-              tensor dimension and contains the indices of device mesh
-              dimensions that this tensor dimension is sharded over, in order.
-              For example, shard_order[0] = (1, 2) means tensor dimension 0 is
-              sharded first over mesh dimension 1, then mesh dimension 2. If a
-              tensor dimension is not sharded, its tuple will be empty.
+                order as a tuple of tuples. Each inner tuple corresponds to a
+                tensor dimension and contains the indices of device mesh
+                dimensions that this tensor dimension is sharded over, in order.
+                For example, shard_order[0] = (2, 1, 2) means tensor dimension 2
+                is sharded first over mesh dimension 1, then mesh dimension 2. The
+                first element of each inner tuple is the tensor dimension, and the
+                remaining elements are the ordered device mesh dimensions. If a
+                tensor dimension is not sharded, its tuple will be empty.
 
     Raises:
         AssertionError: If both ``placements`` and ``shard_order`` are
@@ -260,98 +263,81 @@ def _prepare_placements_and_shard_order(
         RuntimeError: If attempting to redistribute to Partial placement.
     """
 
-    def _expand_shard_order_from_dict(
-        shard_order_map: dict[int, list[int | str]],
-        device_mesh: DeviceMesh,
-        tensor_rank: int,
+    def _shard_order_from_dict_to_tuple(
+        shard_order_map: dict[int, list[int]],
     ) -> tuple[tuple[int, ...], ...]:
-        expanded_shard_order: list[list[int]] = [[] for _ in range(tensor_rank)]
-        for tensor_dim in range(0, tensor_rank):
-            unnormalized_tensor_dim = tensor_dim - tensor_rank
-            # in case user specified tensor dim is not normalized in final_shard_order
-            if (
-                tensor_dim in shard_order_map
-                and unnormalized_tensor_dim in shard_order_map
-            ):
-                raise ValueError(
-                    f"tensor_dim {tensor_dim} is specified in both normalized and unnormalized form!"
-                )
-            if (
-                tensor_dim in shard_order_map
-                or unnormalized_tensor_dim in shard_order_map
-            ):
-                check_dim = (
-                    tensor_dim
-                    if tensor_dim in shard_order_map
-                    else unnormalized_tensor_dim
-                )
-                for mesh_dim in shard_order_map.get(check_dim, []):
-                    if isinstance(mesh_dim, str):
-                        mesh_dim = device_mesh.get_mesh_dim_by_name(mesh_dim)
-                    expanded_shard_order[tensor_dim].append(mesh_dim)
-        shard_order_tuple = tuple(tuple(x) for x in expanded_shard_order)
-        return shard_order_tuple
+        sparse_shard_order = tuple(
+            tuple(item)
+            for item in (
+                [key] + value if isinstance(value, list) else [key, value]
+                for key, value in sorted(shard_order_map.items())
+                if value
+            )
+        )
+        return sparse_shard_order
 
     def _convert_shard_order_to_placements(
-        shard_order_map: dict[int, list[int | str]],
+        shard_order_map: dict[int, Sequence[int]],
         device_mesh: DeviceMesh,
-        tensor_rank: int,
     ) -> tuple[Placement, ...]:
         # convert from shard_order to placements
-        placements: list[Replicate | Shard] = [
-            Replicate() for _ in range(device_mesh.ndim)
-        ]
+        placements: list[Placement] = [Replicate() for _ in range(device_mesh.ndim)]
         for tensor_dim, mesh_dims in shard_order_map.items():
+            for mesh_dim in mesh_dims:
+                placements[mesh_dim] = Shard(tensor_dim)
+        return tuple(placements)
+
+    if placements is None and shard_order is None:
+        raise RuntimeError(
+            "tensor distribution and dtensor redistribution require at least one of "
+            "`placements` or `shard_order` to be specified."
+        )
+
+    if placements is not None and len(placements) != device_mesh.ndim:
+        raise ValueError(
+            f"`placements` must have the same length as `device_mesh.ndim`! "
+            f"Found placements length: {len(placements)}, and device_mesh.ndim: {device_mesh.ndim}."
+        )
+
+    # normalize the shard_order and convert str mesh dim into int
+    normalized_shard_order: dict[int, list[int]] = {}
+
+    if shard_order is not None:
+        for tensor_dim, mesh_dims in shard_order.items():
+            if tensor_dim in normalized_shard_order:
+                raise ValueError(
+                    f"both normalized tensor_dim {tensor_dim} and un-normalized "
+                    f"tensor_dim {tensor_dim - tensor_rank}) is specified in `shard_order`!"
+                )
+            tensor_dim = tensor_dim + tensor_rank if tensor_dim < 0 else tensor_dim
+            if tensor_dim >= tensor_rank:
+                raise ValueError(
+                    f"tensor_dim {tensor_dim} specified in `shard_order` is out of range for tensor_rank {tensor_rank}."
+                )
+            normalized_shard_order[tensor_dim] = []
             for mesh_dim in mesh_dims:
                 if isinstance(mesh_dim, str):
                     mesh_dim = device_mesh.get_mesh_dim_by_name(mesh_dim)
-                if mesh_dim < 0 or mesh_dim >= len(placements):
+                if mesh_dim < 0 or mesh_dim >= device_mesh.ndim:
                     raise IndexError(
-                        f"mesh_dim {mesh_dim} is out of range for placements of length {len(placements)}"
+                        f"mesh_dim {mesh_dim} specified in `shard_order` is out of range "
+                        f"for placements of length {device_mesh.ndim}"
                     )
-                tensor_dim = tensor_dim + tensor_rank if tensor_dim < 0 else tensor_dim
-                if tensor_dim >= tensor_rank:
-                    raise ValueError(
-                        f"tensor_dim {tensor_dim} is out of range for tensor_rank {tensor_rank}."
-                    )
-                placements[mesh_dim] = Shard(tensor_dim)
-        return tuple(cast(list[Placement], placements))
-
-    # Since distribute_tensor does not allow Partial placement, we can use
-    # shard_order to represent which tensor dimensions need to be sharded;
-    # otherwise, Replicate is used.
-    assert placements is None or shard_order is None, (
-        "distribute function accepts either `placements` or `shard_order` but not both"
-    )
+                normalized_shard_order[tensor_dim].append(mesh_dim)
 
     # set default placements to replicated if not specified
+    placement_tuple: tuple[Placement, ...]
     if placements is None:
         if shard_order is None:
-            warnings.warn(
-                "Neither `placements` nor `shard_order` is specified. "
-                "Defaulting to all `Replicate()` placements (fully replicated DTensor).",
-                UserWarning,
-                stacklevel=2,
-            )
-            implicit_placements: list[Replicate | Shard] = [
-                Replicate() for _ in range(device_mesh.ndim)
-            ]
-            placement_tuple = tuple(cast(list[Placement], implicit_placements))
+            placement_tuple = tuple(Replicate() for _ in range(device_mesh.ndim))
         else:
             # convert from shard_order to placements
             placement_tuple = _convert_shard_order_to_placements(
-                shard_order, device_mesh, tensor_rank
+                cast(dict[int, Sequence[int]], normalized_shard_order), device_mesh
             )
-        shard_order_tuple = _expand_shard_order_from_dict(
-            shard_order or {}, device_mesh, tensor_rank
-        )
+        shard_order_tuple = _shard_order_from_dict_to_tuple(normalized_shard_order)
     else:
-        if len(placements) != device_mesh.ndim:
-            raise ValueError(
-                f"`placements` must have the same length as `device_mesh.ndim`! "
-                f"Found placements length: {len(placements)}, and device_mesh.ndim: {device_mesh.ndim}."
-            )
-        normalized_placements: list[Placement] = list(placements)
+        normalized_placements = list(placements)  # type: ignore[assignment]
         for i, placement in enumerate(placements):
             if placement.is_partial():
                 raise RuntimeError(
@@ -359,42 +345,39 @@ def _prepare_placements_and_shard_order(
                 )
             elif isinstance(placement, Shard) and placement.dim < 0:
                 # normalize shard dim to be positive
-                normalized_placements[i] = Shard(placement.dim + tensor_rank)
+                assert placement.dim + tensor_rank >= 0
+                # copy the `placement` object in case it is `_StridedShard` for backward compatibility
+                normalized_placements[i] = copy.deepcopy(placement)
+                normalized_placements[i].dim = placement.dim + tensor_rank  # type: ignore[attr-defined]
         placement_tuple = tuple(normalized_placements)
 
         if shard_order is None:
-            # need to construct the default shard_order
-            shard_order_tuple = DTensorSpec.compute_default_shard_order(  # type: ignore[assignment]
-                placement_tuple, device_mesh, tensor_rank
+            shard_order_tuple = DTensorSpec.compute_default_sparse_shard_order(
+                placement_tuple, device_mesh
             )
         else:
             # both shard_order and placements are specified; need to validate their correctness
             # check if user specified shard_order is valid
-            tensor_dim_get_sharded = set()
-            for tensor_dim, mesh_dims in shard_order.items():
-                normalized_tensor_dim = (
-                    tensor_dim + tensor_rank if tensor_dim < 0 else tensor_dim
-                )
-                if normalized_tensor_dim >= tensor_rank:
-                    raise ValueError(
-                        f"shard_order tensor_dim {tensor_dim} is out of range!"
-                    )
-                if normalized_tensor_dim in tensor_dim_get_sharded:
-                    raise ValueError(
-                        f"shard_order tensor dim {tensor_dim} appears more than once!"
-                    )
-                tensor_dim_get_sharded.add(normalized_tensor_dim)
-                for mesh_dim in mesh_dims:  # type: ignore[assignment]
-                    if isinstance(mesh_dim, str):
-                        # verify that the mesh_dim name exists
-                        mesh_dim = device_mesh.get_mesh_dim_by_name(mesh_dim)
-                    if mesh_dim < 0 or mesh_dim >= device_mesh.ndim:
-                        raise ValueError(
-                            f"shard_order mesh_dim {mesh_dim} is out of range!"
-                        )
-            shard_order_tuple = _expand_shard_order_from_dict(
-                shard_order, device_mesh, tensor_rank
+            placement_tuple_from_shard_order = _convert_shard_order_to_placements(
+                cast(dict[int, Sequence[int]], normalized_shard_order), device_mesh
             )
+            for original_mesh_dim, converted_mesh_dim in zip(
+                placements, placement_tuple_from_shard_order
+            ):
+                if isinstance(original_mesh_dim, Shard):
+                    assert (
+                        isinstance(converted_mesh_dim, Shard)
+                        and original_mesh_dim.dim == converted_mesh_dim.dim
+                    ), (
+                        f"Conflict sharding annotation for Shard {original_mesh_dim.dim} "
+                        "detected between `placement` and `shard_order`."
+                    )
+                if isinstance(converted_mesh_dim, Shard):
+                    assert isinstance(original_mesh_dim, Shard), (
+                        f"Conflict sharding annotation detected for Shard {converted_mesh_dim.dim} "
+                        "between `placement` and `shard_order`."
+                    )
+            shard_order_tuple = _shard_order_from_dict_to_tuple(normalized_shard_order)
     return placement_tuple, shard_order_tuple
 
 
@@ -652,7 +635,7 @@ class DTensor(torch.Tensor):
         self,
         device_mesh: Optional[DeviceMesh] = None,
         placements: Optional[Sequence[Placement]] = None,
-        shard_order: Optional[dict[int, list[int | str]]] = None,
+        shard_order: Optional[dict[int, Sequence[int | str]]] = None,
         *,
         async_op: bool = False,
         forward_dtype: Optional[torch.dtype] = None,
@@ -685,12 +668,28 @@ class DTensor(torch.Tensor):
                 describes how to place the DTensor into the DeviceMesh, must
                 have the same number of elements as ``device_mesh.ndim``.
                 default: replicate on all mesh dimensions
-            shard_order (Optional[Dict[int, List[int | str]]], optional): Specifies the
+            shard_order (Optional[Dict[int, Sequence[int | str]]], optional): Specifies the
                 mapping of tensor dimensions to the order of device mesh dimensions they
                 are sharded over. Each key is a tensor dimension (can be negative for reverse
                 indexing), and its value is a list specifying the device mesh dimensions
                 (as integers or strings) that the tensor dimension is sharded across, in
                 order. If not specified, a default sharding order is used.
+
+                Example:
+                    For a 3D tensor and a 4D device mesh, to shard tensor dimension
+                    0 over mesh dim 1, and tensor dimension 1 over mesh dim 2 and
+                    then mesh dim 0, use:
+                        shard_order = {0: [1], 1: [2, 0]}
+                    In this case, you can also specify the `placements` as [Shard(1),
+                    Shard(0), Shard(1), Replicate()] along with `shard_order`.
+
+                Note:
+                    As long as there are no Partial placements (though this should
+                    not happen as of today), you may specify only shard_order (and not
+                    placements if device order is not the default left-to-right), and the
+                    correct placements will be inferred.
+
+
 
         Keyword args:
             async_op (bool, optional): whether to perform the DTensor redistribute operation
@@ -760,7 +759,7 @@ class DTensor(torch.Tensor):
         redist_res = self.redistribute(
             placements=[Replicate()] * self.device_mesh.ndim, async_op=False
         )
-        return _ToTorchTensor.apply(redist_res, grad_placements)
+        return _ToTorchTensor.apply(redist_res, grad_placements)  # type: ignore[return-value]
 
     @property
     def device_mesh(self) -> DeviceMesh:
@@ -859,7 +858,7 @@ def distribute_tensor(
     tensor: torch.Tensor,
     device_mesh: Optional[DeviceMesh] = None,
     placements: Optional[Sequence[Placement]] = None,
-    shard_order: Optional[dict[int, list[int | str]]] = None,
+    shard_order: Optional[dict[int, Sequence[int | str]]] = None,
     *,
     src_data_rank: Optional[int] = 0,
 ) -> DTensor:
@@ -871,10 +870,6 @@ def distribute_tensor(
     the single-device semantic. If you want to construct a DTensor in the middle of the Autograd
     computation, please use :meth:`DTensor.from_local` instead.
 
-    Note:
-        You can only specify either ``placements`` or ``shard_order``, but not both. If both are
-        provided, an error will be raised.
-
     Args:
         tensor (torch.Tensor): torch.Tensor to be distributed. Note that if you
             want to shard a tensor on a dimension that is not evenly divisible by
@@ -884,17 +879,31 @@ def distribute_tensor(
         device_mesh (:class:`DeviceMesh`, optional): DeviceMesh to distribute the
             tensor, if not specified, must be called under a DeviceMesh context
             manager, default: None
-        placements (List[:class:`Placement`], optional): the placements that
+        placements (Sequence[:class:`Placement`], optional): the placements that
             describes how to place the tensor on DeviceMesh, must have the same
             number of elements as ``device_mesh.ndim``. If not specified, we will
             by default replicate the tensor across the ``device_mesh`` from the
             first rank of each dimension of the ``device_mesh``.
-        shard_order (Optional[Dict[int, List[int | str]]], optional): Specifies the
+        shard_order (Optional[Dict[int, Sequence[int | str]]], optional): Specifies the
             mapping of tensor dimensions to the order of device mesh dimensions they
             are sharded over. Each key is a tensor dimension (can be negative for reverse
-            indexing), and its value is a list specifying the device mesh dimensions
+            indexing), and its value is a sequence specifying the device mesh dimensions
             (as integers or strings) that the tensor dimension is sharded across, in
             order. If not specified, a default sharding order is used.
+
+            Example:
+                For a 3D tensor and a 4D device mesh, to shard tensor dimension
+                0 over mesh dim 1, and tensor dimension 1 over mesh dim 2 and
+                then mesh dim 0, use:
+                    shard_order = {0: [1], 1: [2, 0]}
+                In this case, you can also specify the `placements` as [Shard(1),
+                Shard(0), Shard(1), Replicate()] along with `shard_order`.
+
+            Note:
+                As long as there are no Partial placements (though this should
+                not happen as of today), you may specify only shard_order (and not
+                placements if device order is not the default left-to-right), and the
+                correct placements will be inferred.
 
     Keyword args:
         src_data_rank (int, optional): the rank of the source data for the logical/global tensor, it is
@@ -976,19 +985,11 @@ def distribute_tensor(
         assert shard_order is None, "shard_order conflicts with _StridedShard"
         for mesh_dim, placement in enumerate(placements_tuple):
             if placement.is_shard():
+                assert placement.dim >= 0  # type: ignore[attr-defined]
                 placement = cast(Shard, placement)
-                if isinstance(placement, _StridedShard):
-                    local_tensor = placement._shard_tensor(
-                        local_tensor, device_mesh, mesh_dim, src_data_rank
-                    )
-                else:
-                    local_tensor = Shard.shard_tensor(
-                        placement.dim,
-                        local_tensor,
-                        device_mesh,
-                        mesh_dim,
-                        src_data_rank,
-                    )
+                local_tensor = placement._shard_tensor(
+                    local_tensor, device_mesh, mesh_dim, src_data_rank
+                )
             elif placement.is_replicate():
                 local_tensor = Replicate.replicate_tensor(
                     local_tensor, device_mesh, mesh_dim, src_data_rank
@@ -999,14 +1000,13 @@ def distribute_tensor(
                 )
     else:
         replicate_on_mesh_dims = set(range(device_mesh.ndim))
-        for tensor_dim in range(tensor.ndim):
-            if tensor_dim < len(shard_order_tuple):
-                for mesh_dim in shard_order_tuple[tensor_dim]:
-                    assert isinstance(mesh_dim, int)
-                    replicate_on_mesh_dims.remove(mesh_dim)
-                    local_tensor = Shard.shard_tensor(
-                        tensor_dim, local_tensor, device_mesh, mesh_dim, src_data_rank
-                    )
+        for tensor_dim, *mesh_dims in shard_order_tuple:
+            for mesh_dim in mesh_dims:
+                assert isinstance(mesh_dim, int)
+                replicate_on_mesh_dims.remove(mesh_dim)
+                local_tensor = Shard.shard_tensor(
+                    tensor_dim, local_tensor, device_mesh, mesh_dim, src_data_rank
+                )
         for mesh_dim in replicate_on_mesh_dims:
             local_tensor = Replicate.replicate_tensor(
                 local_tensor, device_mesh, mesh_dim, src_data_rank
@@ -1268,7 +1268,7 @@ def _dtensor_init_helper(  # type: ignore[no-untyped-def]
             random._rng_tracker = random.OffsetBasedRNGTracker(device_mesh)
 
         assert random._rng_tracker is not None
-        with random._rng_tracker._distribute_region(spec):
+        with random._rng_tracker._distribute_region(spec):  # type: ignore[union-attr]
             local_tensor = init_op(local_shape, **kwargs)
     else:
         local_tensor = init_op(local_shape, **kwargs)
