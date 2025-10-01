@@ -592,6 +592,21 @@ def _view_unbacked_meta(a, shape, size_oblivious_enabled=True):
     raise ValueError(msg)
 
 
+@register_op_impl(aten._reshape_copy.default)
+def _reshape_copy(fake_mode, func, a, *shape):
+    if a.is_sparse or a.is_mkldnn:
+        return NotImplemented
+
+    shape = utils.infer_size(*shape, a.numel())
+    if is_contiguous_or_false(a):
+        view = _view_meta(fake_mode, func, a, *shape)
+        return view.clone(memory_format=torch.contiguous_format)
+    else:
+        return _view_meta(
+            fake_mode, func, a.clone(memory_format=torch.contiguous_format), *shape
+        )
+
+
 @register_op_impl(aten.view.default)
 @register_op_impl(aten._unsafe_view.default)
 def _view_meta(fake_mode, func, a, *shape):
