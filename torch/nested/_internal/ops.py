@@ -17,10 +17,22 @@ __all__: list[Any] = []
 
 JAGGED_OPS_TABLE: Dict[Any, Any] = {}
 
-# Largest int64 value exactly representable in float64 (IEEE 754 double precision).
-# Avoids overflow when padding_value is passed as double to _jagged_to_padded_dense_forward.
-_INT64_SAFE_MAX_FLOAT64 = (1 << 53) - 1
-_INT64_SAFE_MIN_FLOAT64 = -_INT64_SAFE_MAX_FLOAT64
+
+def _get_padding_value(dtype, padding_type):
+    if dtype.is_floating_point:
+        return (
+            torch.finfo(dtype).max if padding_type == "max" else torch.finfo(dtype).min
+        )
+    elif dtype == torch.int64:
+        # Largest int64 value exactly representable in float64 (IEEE 754 double precision).
+        # Avoids overflow when padding_value is passed as double to _jagged_to_padded_dense_forward.
+        int64_safe_max = (1 << 53) - 1
+        int64_safe_min = -int64_safe_max
+        return int64_safe_max if padding_type == "max" else int64_safe_min
+    else:
+        return (
+            torch.iinfo(dtype).max if padding_type == "max" else torch.iinfo(dtype).min
+        )
 
 
 def _outer_to_inner_dim(ndim, dim, ragged_dim, canonicalize=False):
@@ -2156,13 +2168,7 @@ def min_dim(func, *args, **kwargs):
     )
 
     dtype = new_kwargs["input"].dtype
-    dtype_max = (
-        torch.finfo(dtype).max
-        if dtype.is_floating_point
-        else _INT64_SAFE_MAX_FLOAT64
-        if dtype == torch.int64
-        else torch.iinfo(dtype).max
-    )
+    dtype_max = _get_padding_value(dtype, "max")
     return _apply_reduction(func, "min", dtype_max, *args, **kwargs)
 
 
@@ -2173,13 +2179,7 @@ def max_dim(func, *args, **kwargs):
     )
 
     dtype = new_kwargs["input"].dtype
-    dtype_min = (
-        torch.finfo(dtype).min
-        if dtype.is_floating_point
-        else _INT64_SAFE_MIN_FLOAT64
-        if dtype == torch.int64
-        else torch.iinfo(dtype).min
-    )
+    dtype_min = _get_padding_value(dtype, "min")
     return _apply_reduction(func, "max", dtype_min, *args, **kwargs)
 
 
@@ -2192,13 +2192,7 @@ def amin_default(func, *args, **kwargs):
     )
 
     dtype = new_kwargs["input"].dtype
-    dtype_max = (
-        torch.finfo(dtype).max
-        if dtype.is_floating_point
-        else _INT64_SAFE_MAX_FLOAT64
-        if dtype == torch.int64
-        else torch.iinfo(dtype).max
-    )
+    dtype_max = _get_padding_value(dtype, "max")
     return _apply_reduction(func, "amin", dtype_max, *args, **kwargs)
 
 
@@ -2211,13 +2205,7 @@ def amax_default(func, *args, **kwargs):
     )
 
     dtype = new_kwargs["input"].dtype
-    dtype_min = (
-        torch.finfo(dtype).min
-        if dtype.is_floating_point
-        else _INT64_SAFE_MIN_FLOAT64
-        if dtype == torch.int64
-        else torch.iinfo(dtype).min
-    )
+    dtype_min = _get_padding_value(dtype, "min")
     return _apply_reduction(func, "amax", dtype_min, *args, **kwargs)
 
 
@@ -2230,13 +2218,7 @@ def argmin_default(func, *args, **kwargs):
     )
 
     dtype = new_kwargs["input"].dtype
-    dtype_max = (
-        torch.finfo(dtype).max
-        if dtype.is_floating_point
-        else _INT64_SAFE_MAX_FLOAT64
-        if dtype == torch.int64
-        else torch.iinfo(dtype).max
-    )
+    dtype_max = _get_padding_value(dtype, "max")
     return _apply_reduction(func, "argmin", dtype_max, *args, **kwargs)
 
 
@@ -2249,13 +2231,7 @@ def argmax_default(func, *args, **kwargs):
     )
 
     dtype = new_kwargs["input"].dtype
-    dtype_min = (
-        torch.finfo(dtype).min
-        if dtype.is_floating_point
-        else _INT64_SAFE_MIN_FLOAT64
-        if dtype == torch.int64
-        else torch.iinfo(dtype).min
-    )
+    dtype_min = _get_padding_value(dtype, "min")
     return _apply_reduction(func, "argmax", dtype_min, *args, **kwargs)
 
 
