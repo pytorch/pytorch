@@ -317,7 +317,7 @@ if __name__ == "__main__":
     ).decode()
 
     print("Building PyTorch wheel")
-    build_vars = "CMAKE_SHARED_LINKER_FLAGS=-Wl,-z,max-page-size=0x10000 "
+    build_vars = ""
     # MAX_JOB=5 is not required for CPU backend (see commit 465d98b)
     if enable_cuda:
         build_vars += "MAX_JOBS=5 "
@@ -372,7 +372,7 @@ if __name__ == "__main__":
     else:
         print("build pytorch without mkldnn backend")
 
-    os.system(f"cd /pytorch; {build_vars} python3 setup.py bdist_wheel")
+    os.system(f"cd /pytorch; {build_vars} python3 -m build --wheel --no-isolation")
     if enable_cuda:
         print("Updating Cuda Dependency")
         filename = os.listdir("/pytorch/dist/")
