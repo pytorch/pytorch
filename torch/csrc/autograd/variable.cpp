@@ -920,7 +920,7 @@ std::optional<c10::ScalarType> VariableHooks::grad_dtype(
   if (auto* meta = impl::get_autograd_meta(self)) {
     return meta->grad_dtype(self);
   }
-  return std::nullopt;
+  return self.scalar_type();
 }
 
 void VariableHooks::set_grad_dtype(
