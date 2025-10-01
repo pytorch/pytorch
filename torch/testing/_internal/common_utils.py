@@ -103,6 +103,9 @@ except ImportError:
 
 MI300_ARCH = ("gfx942",)
 MI200_ARCH = ("gfx90a")
+NAVI_ARCH  = ("gfx1030", "gfx1100", "gfx1101", "gfx1200", "gfx1201")
+NAVI3_ARCH = ("gfx1100", "gfx1101")
+NAVI4_ARCH = ("gfx1200", "gfx1201")
 
 def freeze_rng_state(*args, **kwargs):
     return torch.testing._utils.freeze_rng_state(*args, **kwargs)
