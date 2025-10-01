@@ -1768,6 +1768,7 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 combine_fn_var,
                 (
                     variables.nn_module.NNModuleVariable,
+                    variables.nn_module.UnspecializedNNModuleVariable,
                     variables.FunctoolsPartialVariable,
                 ),
             ):
@@ -1776,7 +1777,13 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                     f"or a graph module if we're re-exporting but got "
                     f"{combine_fn.python_type()}. Please report an issue to PyTorch if you're seeing this."
                 )
-            return isinstance(combine_fn_var, variables.nn_module.NNModuleVariable)
+            return isinstance(
+                combine_fn_var,
+                (
+                    variables.nn_module.NNModuleVariable,
+                    variables.nn_module.UnspecializedNNModuleVariable,
+                ),
+            )
 
         def arg_extractor(combine_fn, init, xs, additional_inputs):
             return combine_fn, init, xs, additional_inputs
@@ -3579,6 +3586,33 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
             body_name,
         ) = self.create_wrapped_node(
             tx, user_func, user_args, kwargs, self.value._name, subgraph_name="subgraph"
+        )
+
+        # Validate
+        expected_num_inputs = len(in_placements.value)
+        actual_num_inputs = len(body_gmod.graph.find_nodes(op="placeholder"))
+        expected_num_outputs = len(out_placements.value)
+        assert len(body_gmod.graph.find_nodes(op="output")) == 1
+        actual_num_outputs = len(body_gmod.graph.find_nodes(op="output")[0].args[0])
+        gm_str = body_gmod.print_readable(print_output=False)
+        template = (
+            "Expecting {expected} {inputs_or_outputs} to local_map function based on placements"
+            ", but found {actual}. If the count matches for eager, "
+            "Dynamo may have flattened {inputs_or_outputs} to the function or found additional "
+            "tensors used via closures. "
+            "Please adjust the input placements to match what the traced graph sees: \n{gm_str}."
+        )
+        assert expected_num_inputs == actual_num_inputs, template.format(
+            expected=expected_num_inputs,
+            inputs_or_outputs="inputs",
+            actual=actual_num_inputs,
+            gm_str=gm_str,
+        )
+        assert expected_num_outputs == actual_num_outputs, template.format(
+            expected=expected_num_outputs,
+            inputs_or_outputs="outputs",
+            actual=actual_num_outputs,
+            gm_str=gm_str,
         )
 
         # Treat as const, so we don't have to deal with Placement types in fx IR
