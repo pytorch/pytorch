@@ -1,6 +1,6 @@
 import importlib
 import warnings
-from typing import Callable
+from collections.abc import Callable
 
 
 _MESSAGE_TEMPLATE = (

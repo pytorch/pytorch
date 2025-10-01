@@ -142,7 +142,7 @@ class WeightNormSparsifier(BaseSparsifier):
 
         data = data.repeat(1, values_per_block, 1)
 
-        threshold_idx = int(round(sparsity_level * num_blocks))
+        threshold_idx = round(sparsity_level * num_blocks)
         threshold_idx = max(0, min(num_blocks - 1, threshold_idx))  # Sanity check
         _, sorted_idx = torch.topk(data, k=threshold_idx, dim=2, largest=False)
 
