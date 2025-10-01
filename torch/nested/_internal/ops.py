@@ -413,6 +413,36 @@ def jagged_torch_function(func, *args, **kwargs):
 
         return inp.reshape(*new_shape)
 
+    # Handle NestedTensor share_memory_.
+    if func.__name__ == "share_memory_":
+        nt = args[0]
+
+        if nt.is_cuda:
+            return nt
+
+        names, _ = nt.__tensor_flatten__()
+        with torch._C.DisableTorchFunctionSubclass():
+            for name in names:
+                component = getattr(nt, name, None)
+                if component is not None:
+                    component.share_memory_()
+        return nt
+
+    # Handle NestedTensor is_shared.
+    if func.__name__ == "is_shared":
+        nt = args[0]
+
+        if nt.is_cuda:
+            return False
+
+        names, _ = nt.__tensor_flatten__()
+        if not names:
+            return False
+        return all(
+            getattr(nt, name) is not None and getattr(nt, name).is_shared()
+            for name in names
+        )
+
     # Handle nested-specific input validation for CompositeImplicit rms_norm
     if func.__name__ == "rms_norm":
 
@@ -514,6 +544,29 @@ def is_contiguous_general(func, *args, **kwargs):
 register_jagged_func(
     torch.ops.aten.is_contiguous.memory_format, "self: jt_all, memory_format: any?"
 )(is_contiguous_general)
+
+
+@register_jagged_func(
+    torch.ops.aten.sym_is_contiguous.default, "self: jt_all, memory_format: any?"
+)
+def sym_is_contiguous_general(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(  # type: ignore[misc]
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+    inp = new_kwargs.pop("input")
+
+    # If created from narrow() check for lengths
+    if inp.lengths() is not None:
+        return False
+
+    new_kwargs["memory_format"] = new_kwargs.get(
+        "memory_format", torch.contiguous_format
+    )
+
+    if new_kwargs["memory_format"] == torch.preserve_format:
+        return True
+
+    return torch.ops.aten.sym_is_contiguous.default(inp._values, **new_kwargs)
 
 
 @register_jagged_func(
@@ -2078,6 +2131,19 @@ def all_any_max_min_default(func, *args, **kwargs):
     return func(inp._values, **new_kwargs)
 
 
+@register_jagged_func(
+    [torch.ops.aten._is_all_true.default, torch.ops.aten._is_any_true.default],
+    "self: jt_all",
+)
+def _is_true_default(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(  # type: ignore[misc]
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    inp = new_kwargs.pop("input")
+    return func(inp._values)
+
+
 @register_jagged_func(torch.ops.aten.min.dim, "self: jt_all, dim: any, keepdim: any?")
 def min_dim(func, *args, **kwargs):
     _, new_kwargs = normalize_function(  # type: ignore[misc]
@@ -2640,133 +2706,6 @@ def matmul_backward_default(func, *args, **kwargs):
         grad_other = torch.matmul(inp.transpose(-1, -2), grad)
 
     return (grad_self, grad_other)
-
-
-from torch._higher_order_ops.flex_attention import (
-    flex_attention as flex_attention_hop,
-    flex_attention_backward as flex_attention_backward_hop,
-)
-from torch.fx.graph_module import GraphModule
-
-
-@flex_attention_hop.py_impl(NestedTensor)  # type: ignore[misc]
-def flex_njt(
-    query: torch.Tensor,
-    key: torch.Tensor,
-    value: torch.Tensor,
-    score_mod: Callable,
-    block_mask: Tuple,
-    scale: float,
-    kernel_options: Dict[str, Any],
-    score_mod_other_buffers: Tuple = (),
-    mask_mod_other_buffers: Tuple = (),
-) -> Tuple[torch.Tensor, torch.Tensor]:
-    assert query.dim() == 4 and key.dim() == 4 and value.dim() == 4
-
-    # TODO: Support this if needed; determine if NJT buffers need be unwrapped as dense.
-    if any(
-        isinstance(buf, torch.Tensor) and buf.is_nested
-        for buf in score_mod_other_buffers + mask_mod_other_buffers
-    ):
-        raise RuntimeError(
-            "flex_attention(): Nested tensor score_mod / mask_mod buffers are not "
-            "currently supported. Please file an issue if this is important to you."
-        )
-
-    # need to pass dense tensor of shape (B, n_heads, sum(seq_len), D)
-    output = flex_attention_hop(
-        query.values().unsqueeze(0),
-        key.values().unsqueeze(0),
-        value.values().unsqueeze(0),
-        score_mod=score_mod,
-        block_mask=block_mask,
-        scale=scale,
-        kernel_options=kernel_options,
-        score_mod_other_buffers=score_mod_other_buffers,
-        mask_mod_other_buffers=mask_mod_other_buffers,
-    )
-
-    # wrap outputs as NJT
-    output_njt = torch.nested.nested_tensor_from_jagged(
-        output[0].transpose(1, 2).squeeze(0),
-        query._offsets,  # type: ignore[attr-defined]
-        query._lengths,  # type: ignore[attr-defined]
-        min_seqlen=query._maybe_min_seqlen,  # type: ignore[attr-defined]
-        max_seqlen=query._maybe_max_seqlen,  # type: ignore[attr-defined]
-    ).transpose(1, 2)
-
-    logsumexp_njt = torch.nested.nested_tensor_from_jagged(
-        output[1].transpose(1, 2).squeeze(0),
-        query._offsets,  # type: ignore[attr-defined]
-        query._lengths,  # type: ignore[attr-defined]
-        min_seqlen=query._maybe_min_seqlen,  # type: ignore[attr-defined]
-        max_seqlen=query._maybe_max_seqlen,  # type: ignore[attr-defined]
-    ).transpose(1, 2)
-
-    return (output_njt, logsumexp_njt)
-
-
-@flex_attention_backward_hop.py_impl(NestedTensor)  # type: ignore[misc]
-def flex_njt_backward(
-    query: torch.Tensor,
-    key: torch.Tensor,
-    value: torch.Tensor,
-    out: torch.Tensor,
-    logsumexp: torch.Tensor,
-    grad_out: torch.Tensor,
-    grad_logsumexp: torch.Tensor,
-    fw_graph: Union[Callable, GraphModule],
-    joint_graph: GraphModule,
-    block_mask: Tuple,
-    scale: float,
-    kernel_options: Dict[str, Any],
-    score_mod_other_buffers: Tuple = (),
-    mask_mod_other_buffers: Tuple = (),
-) -> Tuple[
-    torch.Tensor, torch.Tensor, torch.Tensor, Tuple[Optional[torch.Tensor], ...]
-]:
-    output = flex_attention_backward_hop(
-        query.values().unsqueeze(0),
-        key.values().unsqueeze(0),
-        value.values().unsqueeze(0),
-        out=out.values().unsqueeze(0),
-        logsumexp=logsumexp.values().unsqueeze(0),
-        grad_out=grad_out.values().unsqueeze(0),
-        grad_logsumexp=grad_logsumexp.values().unsqueeze(0),
-        fw_graph=fw_graph,
-        joint_graph=joint_graph,
-        block_mask=block_mask,
-        scale=scale,
-        kernel_options=kernel_options,
-        score_mod_other_buffers=score_mod_other_buffers,
-        mask_mod_other_buffers=mask_mod_other_buffers,
-    )
-
-    # wrap grads as NJTs
-    dense_q_grad, dense_k_grad, dense_v_grad, score_mod_other_buffer_grads = output
-    njt_q_grad = torch.nested.nested_tensor_from_jagged(
-        dense_q_grad.transpose(1, 2).squeeze(0),
-        query._offsets,  # type: ignore[attr-defined]
-        query._lengths,  # type: ignore[attr-defined]
-        min_seqlen=query._maybe_min_seqlen,  # type: ignore[attr-defined]
-        max_seqlen=query._maybe_max_seqlen,  # type: ignore[attr-defined]
-    ).transpose(1, 2)
-    njt_k_grad = torch.nested.nested_tensor_from_jagged(
-        dense_k_grad.transpose(1, 2).squeeze(0),
-        key._offsets,  # type: ignore[attr-defined]
-        key._lengths,  # type: ignore[attr-defined]
-        min_seqlen=key._maybe_min_seqlen,  # type: ignore[attr-defined]
-        max_seqlen=key._maybe_max_seqlen,  # type: ignore[attr-defined]
-    ).transpose(1, 2)
-    njt_v_grad = torch.nested.nested_tensor_from_jagged(
-        dense_v_grad.transpose(1, 2).squeeze(0),
-        value._offsets,  # type: ignore[attr-defined]
-        value._lengths,  # type: ignore[attr-defined]
-        min_seqlen=value._maybe_min_seqlen,  # type: ignore[attr-defined]
-        max_seqlen=value._maybe_max_seqlen,  # type: ignore[attr-defined]
-    ).transpose(1, 2)
-
-    return (njt_q_grad, njt_k_grad, njt_v_grad, score_mod_other_buffer_grads)
 
 
 # Make the dummy available on the C++ side.

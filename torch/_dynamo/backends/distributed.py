@@ -19,7 +19,7 @@ of compilation.
 import logging
 import traceback
 from dataclasses import dataclass, field
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, TYPE_CHECKING
 from unittest import mock
 
 import torch
@@ -29,6 +29,10 @@ from torch._dynamo.output_graph import GraphCompileReason
 from torch._dynamo.utils import deepcopy_to_fake_tensor, detect_fake_mode
 from torch._logging import trace_structured
 from torch.fx.node import Node
+
+
+if TYPE_CHECKING:
+    from torch._functorch._aot_autograd.schemas import ViewAndMutationMeta
 
 
 # Regular log messages should go through 'log'.
@@ -165,6 +169,12 @@ def propagate_dynamo_source(orig_gm: fx.GraphModule, split_gm: fx.GraphModule) -
                 node._dynamo_source = name_to_dynamo_source.get(node.name, None)
 
 
+class DDPOptimizerContext:
+    def __init__(self) -> None:
+        self.curr_bucket: int = -1
+        self.metadata_per_bucket: list[ViewAndMutationMeta] = []
+
+
 # compile each of the partitioned submodules using the user-provided compiler
 class SubmodCompiler(torch.fx.interpreter.Interpreter):
     def __init__(
@@ -176,6 +186,10 @@ class SubmodCompiler(torch.fx.interpreter.Interpreter):
         super().__init__(module)
         self.compiler = compiler
         self.fake_mode = fake_mode
+        # See Note [DDPOptimizer and fw_metadata]
+        ctx = torch._guards.TracingContext.try_get()
+        if ctx is not None:
+            ctx.ddp_optimizer_ctx = DDPOptimizerContext()
 
     def compile_submod(
         self, input_mod: fx.GraphModule, args: list[torch.Tensor], kwargs: Any
@@ -328,6 +342,16 @@ class SubmodCompiler(torch.fx.interpreter.Interpreter):
                 mock.patch.object(self.fake_mode, "allow_non_fake_inputs", True),
             ):
                 if has_tracing_context and invoked_aot_autograd:
+                    tracing_ctx = torch._guards.TracingContext.try_get()
+                    assert tracing_ctx is not None
+                    # DDPOptimizer maintains 1 dynamo graph -> N AOT graphs
+                    # Dynamo only has 1 tracing context, so it needs to maintain all N AOT metadata instances
+                    ddp_ctx = tracing_ctx.ddp_optimizer_ctx
+                    assert ddp_ctx is not None
+                    assert tracing_ctx.fw_metadata is not None
+                    ddp_ctx.curr_bucket += 1
+                    ddp_ctx.metadata_per_bucket.append(tracing_ctx.fw_metadata)
+
                     out = compiled_submod_real(*new_args, **kwargs)
                     # output should be fake or subclass
                     assert all(

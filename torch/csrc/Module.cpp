@@ -26,6 +26,7 @@
 #include <ATen/native/Normalization.h>
 #include <c10/core/Device.h>
 #include <c10/core/DispatchKeySet.h>
+#include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/util/AbortHandler.h>
 #include <c10/util/Backtrace.h>
 #include <c10/util/Logging.h>
@@ -71,6 +72,7 @@
 #include <torch/csrc/cpu/Module.h>
 #include <torch/csrc/dynamo/init.h>
 #include <torch/csrc/export/pybind.h>
+#include <torch/csrc/functionalization/Module.h>
 #include <torch/csrc/functorch/init.h>
 #include <torch/csrc/fx/node.h>
 #include <torch/csrc/inductor/aoti_package/pybind.h>
@@ -140,6 +142,14 @@
 #include <torch/nativert/python/Bindings.h>
 
 namespace py = pybind11;
+
+TORCH_MAKE_PYBIND_ENUM_FASTER(at::native::ConvBackend)
+TORCH_MAKE_PYBIND_ENUM_FASTER(sdp::SDPBackend)
+TORCH_MAKE_PYBIND_ENUM_FASTER(at::LinalgBackend)
+TORCH_MAKE_PYBIND_ENUM_FASTER(at::BlasBackend)
+TORCH_MAKE_PYBIND_ENUM_FASTER(at::ROCmFABackend)
+TORCH_MAKE_PYBIND_ENUM_FASTER(at::native::BatchNormBackend)
+TORCH_MAKE_PYBIND_ENUM_FASTER(at::impl::TorchFunctionDisabledState)
 
 static PyObject* module;
 
@@ -407,11 +417,9 @@ static PyObject* THPModule_swap_tensor_impl(PyObject* _unused, PyObject* args) {
   // The TensorImpls contain PyObjectSlots that have a reference to the PyObject
   // associated with the TensorImpl. Swap this field as well.
   std::optional<PyObject*> mb_obj_a =
-      a->cdata->unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
-          /*ignore_hermetic_tls=*/false);
+      a->cdata->unsafeGetTensorImpl()->pyobj_slot()->check_pyobj();
   std::optional<PyObject*> mb_obj_b =
-      b->cdata->unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
-          /*ignore_hermetic_tls=*/false);
+      b->cdata->unsafeGetTensorImpl()->pyobj_slot()->check_pyobj();
   TORCH_INTERNAL_ASSERT(
       mb_obj_a.has_value() && mb_obj_b.has_value(),
       "Both tensors should have PyObjects tagged by the current python interpreter");
@@ -1362,7 +1370,7 @@ static PyObject* THPModule_qEngine(PyObject* _unused, PyObject* noargs) {
 static PyObject* THPModule_supportedQEngines(
     PyObject* _unused,
     PyObject* noargs) {
-  auto qengines = at::globalContext().supportedQEngines();
+  const auto& qengines = at::globalContext().supportedQEngines();
   auto list =
       THPObjectPtr(PyList_New(static_cast<Py_ssize_t>(qengines.size())));
   if (!list)
@@ -1555,6 +1563,15 @@ static PyObject* THPModule_are_vmap_fallback_warnings_enabled(
   } else {
     Py_RETURN_FALSE;
   }
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THCPModule_ensureCUDADeviceGuardSet(
+    PyObject* self,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  c10::impl::ensureCUDADeviceGuardSet();
+  Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 
@@ -1853,7 +1870,13 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
      (PyCFunction)(void (*)())THPModule_has_torch_function_variadic,
      METH_FASTCALL,
      nullptr},
-    {nullptr, nullptr, 0, nullptr}};
+    {"_ensureCUDADeviceGuardSet",
+     THCPModule_ensureCUDADeviceGuardSet,
+     METH_NOARGS,
+     nullptr},
+    {nullptr, nullptr, 0, nullptr}
+
+};
 
 #ifdef USE_CUDA
 // NOLINTBEGIN(misc-use-internal-linkage)
@@ -2076,6 +2099,7 @@ PyObject* initModule() {
   torch::instruction_counter::initModule(module);
   torch::initVerboseBindings(module);
   ASSERT_TRUE(THPStorage_init(module));
+  torch::functionalization::initModule(module);
 
 #ifdef USE_CUDA
   // This will only initialise base classes and attach them to library namespace
@@ -2202,6 +2226,8 @@ Call this whenever a new thread is created in order to propagate values from
       set_module_attr("_has_kleidiai", at::hasKleidiAI() ? Py_True : Py_False));
   ASSERT_TRUE(
       set_module_attr("has_lapack", at::hasLAPACK() ? Py_True : Py_False));
+  ASSERT_TRUE(set_module_attr(
+      "_has_eigen_sparse", at::hasEigenSparse() ? Py_True : Py_False));
 
   py_module.def("_valgrind_supported_platform", []() {
 #if defined(USE_VALGRIND)
@@ -2452,14 +2478,6 @@ Call this whenever a new thread is created in order to propagate values from
     return at::globalContext().getROCmFAPreferredBackend();
   });
 
-  py_module.def("_is_ck_sdpa_available", []() {
-#ifdef USE_ROCM
-    return at::globalContext().ckSupported() && at::globalContext().hasCKSDPA();
-#else
-    return false;
-#endif
-  });
-
   py_module.def(
       "_set_sm_carveout_experimental", [](std::optional<int32_t> val) {
         at::globalContext()._setSMCarveout_EXPERIMENTAL(val);
@@ -2479,13 +2497,16 @@ Call this whenever a new thread is created in order to propagate values from
       });
 
   py_module.def(
-      "_get_fp32_precision_getter", [](std::string backend, std::string op) {
+      "_get_fp32_precision_getter",
+      [](const std::string& backend, const std::string& op) {
         return at::globalContext().float32Precision(backend, op);
       });
 
   py_module.def(
       "_set_fp32_precision_setter",
-      [](std::string backend, std::string op, std::string precision) {
+      [](const std::string& backend,
+         const std::string& op,
+         const std::string& precision) {
         at::globalContext().setFloat32Precision(backend, op, precision);
         return precision;
       });
@@ -2606,30 +2627,6 @@ Call this whenever a new thread is created in order to propagate values from
       set_module_attr("_has_mkldnn", at::hasMKLDNN() ? Py_True : Py_False));
 
   ASSERT_TRUE(set_module_attr("_GLIBCXX_USE_CXX11_ABI", Py_True));
-
-// See note [Pybind11 ABI constants]
-#define SET_STR_DEFINE(name) \
-  ASSERT_TRUE(set_module_attr("_" #name, THPUtils_packString(name)))
-
-#ifdef PYBIND11_COMPILER_TYPE
-  SET_STR_DEFINE(PYBIND11_COMPILER_TYPE);
-#else
-  ASSERT_TRUE(
-      set_module_attr("_" C10_STRINGIZE(PYBIND11_COMPILER_TYPE), Py_None));
-#endif
-
-#ifdef PYBIND11_STDLIB
-  SET_STR_DEFINE(PYBIND11_STDLIB);
-#else
-  ASSERT_TRUE(set_module_attr("_" C10_STRINGIZE(PYBIND11_STDLIB), Py_None));
-#endif
-
-#ifdef PYBIND11_BUILD_ABI
-  SET_STR_DEFINE(PYBIND11_BUILD_ABI);
-#else
-  ASSERT_TRUE(set_module_attr("_" C10_STRINGIZE(PYBIND11_BUILD_ABI), Py_None));
-#endif
-#undef SET_STR_DEFINE
 
   py_module.def(
       "_set_conj", [](const at::Tensor& x, bool conj) { x._set_conj(conj); });

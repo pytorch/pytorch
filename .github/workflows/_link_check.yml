@@ -13,6 +13,7 @@ jobs:
     if: ${{ github.event_name != 'pull_request' || !contains(github.event.pull_request.labels.*.name, 'skip-url-lint') }}
     uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
     with:
+      job-name: lint-urls
       timeout: 120
       runner: ${{ inputs.runner }}linux.2xlarge
       docker-image: ci-image:pytorch-linux-jammy-linter
@@ -38,6 +39,7 @@ jobs:
     if: ${{ github.event_name != 'pull_request' || !contains(github.event.pull_request.labels.*.name, 'skip-xref-lint') }}
     uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
     with:
+      job-name: lint-xrefs
       timeout: 60
       runner: ${{ inputs.runner }}linux.2xlarge
       docker-image: ci-image:pytorch-linux-jammy-linter

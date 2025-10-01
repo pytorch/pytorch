@@ -13,7 +13,6 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
-from torch._utils import _get_device_module
 from torch.distributed.tensor import (
     DeviceMesh,
     distribute_tensor,
@@ -38,24 +37,21 @@ from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
     TEST_SKIPS,
 )
-from torch.testing._internal.common_utils import TEST_CUDA, TEST_HPU, TEST_XPU
+from torch.testing._internal.common_utils import (
+    TEST_CUDA,
+    TEST_HPU,
+    TEST_PRIVATEUSE1,
+    TEST_XPU,
+)
 from torch.utils._pytree import tree_flatten, tree_unflatten, TreeSpec
 
 
 DEVICE_COUNT: int
 
-if TEST_CUDA:
-    DEVICE_TYPE = "cuda"
-    PG_BACKEND = "nccl"
-    DEVICE_COUNT = _get_device_module("cuda").device_count()
-elif TEST_HPU:
-    DEVICE_TYPE = "hpu"
-    PG_BACKEND = "hccl"
-    DEVICE_COUNT = _get_device_module("hpu").device_count()
-elif TEST_XPU:
-    DEVICE_TYPE = "xpu"
-    PG_BACKEND = "xccl"
-    DEVICE_COUNT = _get_device_module("xpu").device_count()
+if TEST_CUDA or TEST_XPU or TEST_HPU or TEST_PRIVATEUSE1:
+    DEVICE_TYPE = torch.accelerator.current_accelerator().type
+    DEVICE_COUNT = torch.accelerator.device_count()
+    PG_BACKEND = dist.Backend.default_device_backend_map[DEVICE_TYPE]
 else:
     DEVICE_TYPE = "cpu"
     PG_BACKEND = "gloo"
@@ -63,7 +59,7 @@ else:
 NUM_DEVICES = 4
 
 # We use this as a proxy for "multiple GPUs exist"
-if (TEST_CUDA or TEST_XPU or TEST_HPU) and DEVICE_COUNT > 1:
+if (TEST_CUDA or TEST_XPU or TEST_HPU or TEST_PRIVATEUSE1) and DEVICE_COUNT > 1:
     # when we actually have multiple GPUs, relax the requirement to smaller counts.
     NUM_DEVICES = min(NUM_DEVICES, DEVICE_COUNT)
 
@@ -341,7 +337,10 @@ class DTensorContinuousTestBase(MultiProcContinuousTest):
     @classmethod
     def device_type(cls) -> str:
         # if enough GPU/XPU/HPU we can use those devices, otherwise we fallback to CPU
-        if not (TEST_CUDA or TEST_XPU or TEST_HPU) or DEVICE_COUNT < cls.world_size:
+        if (
+            not (TEST_CUDA or TEST_XPU or TEST_HPU or TEST_PRIVATEUSE1)
+            or DEVICE_COUNT < cls.world_size
+        ):
             return "cpu"
         else:
             return DEVICE_TYPE
@@ -360,7 +359,10 @@ class DTensorTestBase(MultiProcessTestCase):
     @property
     def device_type(self) -> str:
         # if enough GPU/XPU/HPU we can use those devices, otherwise we fallback to CPU
-        if not (TEST_CUDA or TEST_XPU or TEST_HPU) or DEVICE_COUNT < self.world_size:
+        if (
+            not (TEST_CUDA or TEST_XPU or TEST_HPU or TEST_PRIVATEUSE1)
+            or DEVICE_COUNT < self.world_size
+        ):
             return "cpu"
         else:
             return DEVICE_TYPE
@@ -388,17 +390,21 @@ class DTensorTestBase(MultiProcessTestCase):
             "hccl",
             "xccl",
             "fake",
+            "cpu:gloo,xpu:xccl",
         ]:
             raise RuntimeError(f"Backend {backend} not supported!")
 
         device_id = None
         if "nccl" in backend or "xccl" in backend:
             # set device for nccl pg for collectives
+            # TODO: if users want to enable testing across hosts, we may need
+            # to change this part.
             torch.accelerator.set_device_index(self.rank)
             # we only need to set device_id for nccl backend with eager init
             device_id = (
                 torch.device(f"{self.device_type}:{self.rank}") if eager_init else None
             )
+
         # For nccl backend, bind the device to the process if device_id is not None
         # so the nccl communicator is immediately formed and we can use `ncclCommSplit`
         # for form subgroup to avoid unnecesssary overhead.
@@ -420,7 +426,18 @@ class DTensorTestBase(MultiProcessTestCase):
             device_id = (
                 torch.cuda.current_device() if self.device_type == "cuda" else self.rank
             )
-        dist.barrier(device_ids=[device_id])
+
+        if self.device_type == "cpu" and torch._C._get_accelerator().type != "cpu":
+            # NOTE: when `device_id` is not None, barrier() will choose the accelerator
+            # of the most pripority, which means if the test specifies to use CPU for
+            # testing while CUDA is available on the host, the barrier() will use CUDA.
+            # To avoid this and better respect `self.device_type`, we add this branch to
+            # enforce barrier() to use CPU when `self.device_type` is CPU and other
+            # accelerator is also available.
+            dist.barrier()
+        else:
+            dist.barrier(device_ids=[device_id])
+
         dist.destroy_process_group()
 
     def setUp(self) -> None:

@@ -620,8 +620,7 @@ def consolidate_safetensors_files_on_every_rank(
     output_dir: str,
     fqn_to_index_mapping: dict[str, int],
     num_threads: int = 1,
-    rank: Optional[int] = None,
-    world_size: Optional[int] = None,
+    process_group: Optional[dist.ProcessGroup] = None,
 ) -> None:
     """
     Consolidate sharded safetensors files across multiple ranks, with each rank handling a subset of output files.
@@ -630,35 +629,29 @@ def consolidate_safetensors_files_on_every_rank(
     All tensors with the same index in fqn_to_index_mapping are processed by the same rank,
     as they belong to the same output file.
 
-    If rank and world_size are not provided, they will be automatically detected from the
-    distributed environment if available.
+    If process_group is provided, rank and world_size will be derived from it. Otherwise,
+    they will be automatically detected from the distributed environment if available.
 
     Args:
         input_dir: Directory containing sharded safetensors files
         output_dir: Directory where consolidated files will be written
         fqn_to_index_mapping: Mapping of tensor names to output file indices
         num_threads: Number of threads to use for parallel processing on each rank
-        rank: Current process rank (default: None, will be auto-detected)
-        world_size: Total number of ranks/processes (default: None, will be auto-detected)
+        process_group: PyTorch distributed process group (default: None, will use default group)
     """
 
     start_time = time.time()
-    # Auto-detect rank and world_size if not provided
-    if rank is None or world_size is None:
-        if dist.is_available() and dist.is_initialized():
-            if rank is None:
-                rank = dist.get_rank()
-            if world_size is None:
-                world_size = dist.get_world_size()
-        else:
-            # Default to single process mode if distributed is not initialized
-            rank = 0
-            world_size = 1
-            logger.warning(
-                "Distributed environment not initialized. Running in single process mode."
-            )
-
-    start_time = time.time()
+    # Derive rank and world_size from process_group or default distributed environment
+    if dist.is_available() and dist.is_initialized():
+        rank = dist.get_rank(group=process_group)
+        world_size = dist.get_world_size(group=process_group)
+    else:
+        # Default to single process mode if distributed is not initialized
+        rank = 0
+        world_size = 1
+        logger.warning(
+            "Distributed environment not initialized. Running in single process mode."
+        )
     logger.info(
         "Rank %d/%d: Consolidating safetensors files from %s to %s",
         rank,

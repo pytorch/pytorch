@@ -10,6 +10,7 @@ import torch._functorch.config
 import torch.nn
 import torch.utils.checkpoint
 from torch._dynamo.bytecode_transformation import Instruction
+from torch._dynamo.exc import Unsupported
 from torch._dynamo.symbolic_convert import SpeculationLog, SpeculationLogDivergence
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -129,6 +130,20 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
                     raise AssertionError
                 except AssertionError:
                     x = torch.cos(x)
+
+        x = torch.randn(4)
+        ref = fn(x)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
+    def test_exception_with_vars(self):
+        def fn(x):
+            try:
+                vars(42)
+                raise RuntimeError("Should not be raised")
+            except TypeError:
+                return x.sin()
 
         x = torch.randn(4)
         ref = fn(x)
@@ -919,6 +934,13 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
             exc2 = e
 
         assert exc2.__context__ is None
+
+    def test_exception_kwargs(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn():
+            raise AttributeError(name="a")
+
+        self.assertRaises(Unsupported, fn)
 
 
 instantiate_parametrized_tests(ExceptionTests)

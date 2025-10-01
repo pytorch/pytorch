@@ -4,8 +4,8 @@ import gc
 import itertools as it
 import textwrap
 import unittest
-from collections.abc import Iterator
-from typing import Callable, Optional
+from collections.abc import Callable, Iterator
+from typing import Optional
 
 import torch
 from torch._C._profiler import _EventType, _TensorMetadata
@@ -1492,7 +1492,7 @@ class TestMemoryProfilerE2E(TestCase):
             for _, action, (key, version), size in prof._memory_profile().timeline
             # We generally don't care about tiny allocations during memory
             # profiling and they add a lot of noise to the unit test.
-            if size > 1024
+            if size > 1024 and isinstance(key, _memory_profiler.TensorKey)
         ]
 
         self.assertExpectedInline(

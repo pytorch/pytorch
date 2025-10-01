@@ -3,8 +3,11 @@ from typing import Any, Callable, Union
 from sympy import Expr
 
 import torch._inductor.config as config
-from torch._inductor.ir import ComputedBuffer, InputBuffer
-from torch._prims_common import check_contiguous_sizes_strides
+from torch._inductor.ir import (
+    ComputedBuffer,
+    InputBuffer,
+    is_contiguous_strides_for_shape,
+)
 from torch.utils._ordered_set import OrderedSet
 
 from ..cutlass_utils import torch_dtype_to_cutlass_type, try_import_cutlass
@@ -35,7 +38,7 @@ if try_import_cutlass():
     if config.is_fbcode():
         import python_cutlass  # type: ignore[import-untyped, import-not-found]  # noqa: F401
     else:
-        import cutlass as python_cutlass  # type: ignore[import-untyped, import-not-found]  # noqa: F401
+        import cutlass_cppgen as python_cutlass  # type: ignore[import-untyped, import-not-found]  # noqa: F401
 
     from torch._inductor.codegen.cuda import cuda_env
     from torch._inductor.utils import IndentedBuffer
@@ -72,8 +75,8 @@ if try_import_cutlass():
             shape = tuple(size_hint_fn(x) for x in shape)
             stride = tuple(size_hint_fn(x) for x in stride)
 
-            is_row_major = check_contiguous_sizes_strides(shape, stride)
-            is_column_major = check_contiguous_sizes_strides(shape[::-1], stride[::-1])
+            is_row_major = is_contiguous_strides_for_shape(stride, shape)
+            is_column_major = is_contiguous_strides_for_shape(stride[::-1], shape[::-1])
 
             if not is_row_major and not is_column_major:
                 raise RuntimeError(
@@ -171,7 +174,7 @@ non-contiguous layout, received stride: {stride} and shape: {shape}"
         def is_nested_visitor_type(t: type) -> bool:
             return ".".join([t.__module__, t.__qualname__]) in {
                 "python_cutlass.backend.c_types.visitor_factory.<locals>.VisitorType",
-                "cutlass.backend.c_types.visitor_factory.<locals>.VisitorType",
+                "cutlass_cppgen.backend.c_types.visitor_factory.<locals>.VisitorType",
             }
 
         buffer = IndentedBuffer()
@@ -232,7 +235,7 @@ non-contiguous layout, received stride: {stride} and shape: {shape}"
         # Once again, need to check for local class type for stride tuple
         if str(arg_ty) in {
             "<class 'python_cutlass.backend.c_types.tuple_factory_.<locals>.TupleType'>",
-            "<class 'cutlass.backend.c_types.tuple_factory_.<locals>.TupleType'>",
+            "<class 'cutlass_cppgen.backend.c_types.tuple_factory_.<locals>.TupleType'>",
         }:
             DEFAULT_STRIDE_LEN = 3
             assert len(node.get_layout().stride) <= DEFAULT_STRIDE_LEN

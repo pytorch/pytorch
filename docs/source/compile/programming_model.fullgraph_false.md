@@ -19,6 +19,7 @@ The strategy for using `torch.compile(fullgraph=False)` is as follows:
 ```{toctree}
 programming_model.where_to_apply_compile
 programming_model.compiler_disable
+programming_model.error_on_graph_break
 programming_model.nested_graph_breaks
 programming_model.skipped_functions
 ```

@@ -17,7 +17,7 @@ from ..virtualized import V
 
 
 log = logging.getLogger(__name__)
-patterns = PatternMatcherPass()
+patterns = PatternMatcherPass(subsystem="joint_graph_passes")
 aten = torch.ops.aten
 
 
@@ -27,7 +27,7 @@ def replace_random_passes(gm: torch.fx.GraphModule):
         return 0
 
     count = patterns.apply(gm)
-    with GraphTransformObserver(gm, "fuse_seed_creation_pass"):
+    with GraphTransformObserver(gm, "fuse_seed_creation_pass", "joint_graph_passes"):
         count += fuse_seed_creation_pass(gm.graph)
 
     return count

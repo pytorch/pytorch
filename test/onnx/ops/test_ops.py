@@ -4,11 +4,18 @@
 from __future__ import annotations
 
 import onnx_ir.passes.common as common_passes
+import onnxruntime
 from onnxscript import ir
+from packaging import version
 
 import torch
+from torch.onnx._internal.exporter import _testing as onnx_testing
 from torch.onnx.ops import _impl, _symbolic_impl
 from torch.testing._internal import common_utils
+
+
+def has_onnxruntime_opset_23() -> bool:
+    return version.parse(onnxruntime.__version__) >= version.parse("1.23")
 
 
 class SchemaTest(common_utils.TestCase):
@@ -432,7 +439,7 @@ class NativeOnnxOpsTest(common_utils.TestCase):
 
     def test_onnx_ops_can_be_decomposed_to_aten(self):
         input_data = torch.rand(2, 3, 4, 8)
-        position_ids_data = torch.randint(0, 50, (2, 3)).long()
+        position_ids_data = torch.randint(0, 50, (2, 4)).long()
         sin_cache_data = torch.rand(50, 4)
         cos_cache_data = torch.rand(50, 4)
 
@@ -473,7 +480,7 @@ class NativeOnnxOpsTest(common_utils.TestCase):
 
     def test_rotary_embedding_opcheck(self):
         input_data = torch.rand(2, 3, 4, 8)
-        position_ids_data = torch.randint(0, 50, (2, 3)).long()
+        position_ids_data = torch.randint(0, 50, (2, 4)).long()
         sin_cache_data = torch.rand(50, 4)
         cos_cache_data = torch.rand(50, 4)
 
@@ -484,7 +491,7 @@ class NativeOnnxOpsTest(common_utils.TestCase):
 
     def test_rotary_embedding(self):
         input_data = torch.rand(2, 3, 4, 8)
-        position_ids_data = torch.randint(0, 50, (2, 3)).long()
+        position_ids_data = torch.randint(0, 50, (2, 4)).long()
         sin_cache_data = torch.rand(50, 4)
         cos_cache_data = torch.rand(50, 4)
 
@@ -525,6 +532,49 @@ class NativeOnnxOpsTest(common_utils.TestCase):
         )
         self.assertEqual(onnx_program.model.opset_imports[""], 23)
         self.assertEqual("RotaryEmbedding", onnx_program.model.graph.node(0).op_type)
+        if has_onnxruntime_opset_23():
+            onnx_testing.assert_onnx_program(onnx_program)
+        else:
+            # Test with reference evaluator because ORT does not support the op as of version 1.22
+            onnx_testing.assert_onnx_program(onnx_program, backend="reference")
+
+    def test_rotary_embedding_3d(self):
+        num_heads = 2
+        input_data = torch.rand(2, 3, 8)
+        sin_cache_data = torch.rand(2, 3, 2)
+        cos_cache_data = torch.rand(2, 3, 2)
+
+        class Model(torch.nn.Module):
+            def forward(self, input_data, cos_cache_data, sin_cache_data):
+                return torch.onnx.ops.rotary_embedding(
+                    input_data,
+                    cos_cache_data,
+                    sin_cache_data,
+                    num_heads=num_heads,
+                )
+
+        model = Model()
+
+        # Dynamic shapes are supported
+        dynamic_shapes = {
+            "input_data": {0: torch.export.Dim.DYNAMIC},
+            "cos_cache_data": {0: torch.export.Dim.DYNAMIC},
+            "sin_cache_data": {0: torch.export.Dim.DYNAMIC},
+        }
+
+        onnx_program = self.export(
+            model,
+            (input_data, cos_cache_data, sin_cache_data),
+            dynamic_shapes=dynamic_shapes,
+            opset_version=23,
+        )
+        self.assertEqual(onnx_program.model.opset_imports[""], 23)
+        self.assertEqual("RotaryEmbedding", onnx_program.model.graph.node(0).op_type)
+        if has_onnxruntime_opset_23():
+            onnx_testing.assert_onnx_program(onnx_program)
+        else:
+            # Test with reference evaluator because ORT does not support the op as of version 1.22
+            onnx_testing.assert_onnx_program(onnx_program, backend="reference")
 
     def test_attention_basic(self):
         """Test basic attention functionality."""

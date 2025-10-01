@@ -31,6 +31,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     skip_unless_torch_gpu,
     with_comms,
 )
+from torch.utils._typing_utils import not_none
 
 
 def get_generator_seed_for_device_type(device_type: str) -> int:
@@ -44,7 +45,7 @@ class DistTensorRandomInitTest(DTensorTestBase):
         shard_spec = [Shard(0)]
         input_size = (8, 4)
 
-        # NOTE: currently random initialization on cuda device has different
+        # NOTE: currently random initialization on gpu device has different
         # behavior from other devices. Unify the test once the behavior is unified.
         if not is_rng_supported_mesh(device_mesh):
             input_tensor = torch.randn(*input_size, device=self.device_type)
@@ -97,7 +98,7 @@ class DistTensorRandomInitTest(DTensorTestBase):
     def test_init_with_user_generator(self):
         device_mesh = self.build_device_mesh()
         torch.manual_seed(42)
-        rng = torch.Generator(device="cuda").manual_seed(42)
+        rng = torch.Generator(device=self.device_type).manual_seed(42)
         t1 = torch.distributed.tensor.empty(
             (8, 3), device_mesh=device_mesh, placements=[Shard(0)]
         )
@@ -110,14 +111,9 @@ class DistTensorRandomInitTest(DTensorTestBase):
             torch.nn.init.uniform_(t2, 0.0, 1.0, rng)
             self.assertEqual(t1.full_tensor(), t2.full_tensor(), f"Failed at {i=}")
 
-        # ensure that we do not cache the 'seed' of `rng` from the first time we see it in DTensor
-        # TODO: we have a semantics decision to make
-        # There is a discontinuity between how the default RNG and a user-supplied RNG behaves with DTensor:
-        # (a) if the user calls `torch.manual_seed` after already using the default RNG with DTensor,
-        #     they may be surprised that it has no effect on DTensor.  They must instead call this private API
-        #     (`torch.distributed.tensor._random._rng_tracker._manual_seed`)
-        # (b) If we try to match the semantics of (a) with a user-supplied RNG, they may be very surprised to find that
-        #     their RNG object never advances its state after using it with DTensor.
+        # ensure that we do not cache the 'seed' from the first time we see it in DTensor
+        # this is a behavior change, DTensor used to cache the generator state and not modify the original generator,
+        # now it modifies the original generator instead.
         torch.manual_seed(55)
         rng.manual_seed(55)
         torch.nn.init.uniform_(t1, 0.0, 1.0)
@@ -131,7 +127,7 @@ class DistTensorRandomInitTest(DTensorTestBase):
         # The DTensor random ops will use the same generator as the default one on the device.
 
         # Note: this behavior changed, and now the guideline is to set the same RNG seed on all SPMD ranks.
-        torch.cuda.manual_seed(0)
+        torch.get_device_module(self.device_type).manual_seed(0)
         device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
         size = [1024, 2048]
         meta_dtensor = distribute_tensor(
@@ -554,7 +550,9 @@ class DistTensorRandomOpTest(DTensorTestBase):
             # local_shard_list_on_dim[i] has the list of all shards on that dim
             # as a tuple (local_shard_offset, local_shard_size)
             dtensor_shape = dtensor.shape
-            local_shard_list_on_dim = [[(0, l)] for l in dtensor_shape]
+            local_shard_list_on_dim: list[list[tuple[int, int]]] = [
+                [(0, l)] for l in dtensor_shape
+            ]
             for idx, placement in enumerate(placements):
                 if isinstance(placement, Shard):
                     mesh_dim_size = device_mesh.size(idx)
@@ -570,7 +568,7 @@ class DistTensorRandomOpTest(DTensorTestBase):
                             shard_idx_on_dim,
                         )
                         local_shard_list_on_dim[shard_dim].append(
-                            (shard_offset, shard_size)
+                            (not_none(shard_offset), shard_size)
                         )
 
             local_shard_comb = itertools.product(*local_shard_list_on_dim)
@@ -597,8 +595,8 @@ class DistTensorRandomOpsTest3D(DTensorTestBase):
     def world_size(self):
         return 8
 
-    @with_comms
     @skip_if_lt_x_gpu(8)
+    @with_comms
     def test_hsdp_tp_model_meta_init(self):
         # initialize the 3-d device mesh
         global_mesh = init_device_mesh(

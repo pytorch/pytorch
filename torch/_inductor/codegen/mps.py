@@ -366,7 +366,7 @@ class MetalOverrides(OpOverrides):
 
     @staticmethod
     def round(x: CSEVariable) -> str:
-        return f"metal::round({x})"
+        return f"metal::rint({x})"
 
     @staticmethod
     def pow(a: CSEVariable, b: CSEVariable) -> str:
@@ -421,6 +421,8 @@ class MetalOverrides(OpOverrides):
         # Binary special ops
         for name in [
             "polygamma",
+            "igamma",
+            "igammac",
             "zeta",
         ]:
             setattr(cls, name, functools.partialmethod(cls._special_binary, name=name))

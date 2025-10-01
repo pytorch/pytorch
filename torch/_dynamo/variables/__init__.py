@@ -27,6 +27,7 @@ from .ctx_manager import (
     DisabledSavedTensorsHooksVariable,
     DualLevelContextManager,
     DynamoConfigPatchVariable,
+    ErrorOnGraphBreakVariable,
     FSDPParamGroupUseTrainingStateVariable,
     GradIncrementNestingCtxManagerVariable,
     GradInplaceRequiresGradCtxManagerVariable,
@@ -34,12 +35,12 @@ from .ctx_manager import (
     InferenceModeVariable,
     JvpIncrementNestingCtxManagerVariable,
     SDPAKernelVariable,
-    SetFullgraphVariable,
     SetFwdGradEnabledContextManager,
     StreamContextVariable,
     StreamVariable,
     TemporarilyPopInterpreterStackCtxManagerVariable,
     VmapIncrementNestingCtxManagerVariable,
+    WithEnterFunctionVariable,
     WithExitFunctionVariable,
 )
 from .dicts import (
@@ -200,7 +201,7 @@ __all__ = [
     "RemovableHandleVariable",
     "RepeatIteratorVariable",
     "SDPAParamsVariable",
-    "SetFullgraphVariable",
+    "ErrorOnGraphBreakVariable",
     "SkipFunctionVariable",
     "SliceVariable",
     "StringFormatVariable",
@@ -223,6 +224,7 @@ __all__ = [
     "UserFunctionVariable",
     "UserMethodVariable",
     "VariableTracker",
+    "WithEnterFunctionVariable",
     "WithExitFunctionVariable",
     "MappingProxyVariable",
 ]

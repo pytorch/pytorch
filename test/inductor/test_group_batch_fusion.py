@@ -286,6 +286,38 @@ class TestMathOps(torch.nn.Module):
         return torch.stack((stack_input, stack_other), dim=0)
 
 
+class TestDropout(torch.nn.Module):
+    def __init__(self, device):
+        super().__init__()
+        self.device = device
+
+    def forward(
+        self, x: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        split = x.split([20, 20, 20, 20, 20], 1)
+        getitem_1 = split[0]
+        getitem_2 = split[1]
+        getitem_3 = split[2]
+        getitem_4 = split[3]
+        getitem_5 = split[4]
+        dropout = torch.nn.functional.dropout(
+            getitem_1, p=0.05, training=True, inplace=False
+        )
+        dropout_1 = torch.nn.functional.dropout(
+            getitem_2, p=0.05, training=True, inplace=False
+        )
+        dropout_2 = torch.nn.functional.dropout(
+            getitem_3, p=0.05, training=True, inplace=False
+        )
+        dropout_3 = torch.nn.functional.dropout(
+            getitem_4, p=0.05, training=True, inplace=False
+        )
+        dropout_4 = torch.nn.functional.dropout(
+            getitem_5, p=0.05, training=True, inplace=False
+        )
+        return (dropout, dropout_1, dropout_2, dropout_3, dropout_4)
+
+
 class TestGroupBatchFusion(TestCase):
     def compare_dict_tensors(self, ref_dict, res_dict, rtol=1e-3, atol=1e-3):
         if len(set(ref_dict.keys())) != len(set(res_dict.keys())):
@@ -579,6 +611,24 @@ class TestGroupBatchFusion(TestCase):
         self.assertEqual(counters["inductor"]["unbind_stack_to_slices_pass"], 2)
         self.assertEqual(counters["inductor"]["unbind_stack_pass"], 2)
         self.assertTrue(torch.allclose(ref, res))
+        counters.clear()
+
+    @requires_gpu()
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={
+            "normalization_pass": {},
+            "batch_dropout": {},
+        }
+    )
+    def test_batch_dropout_pre_grad_fusion(self):
+        counters.clear()
+        module = TestDropout(GPU_TYPE)
+        input = [torch.randn(10, 100, requires_grad=True, device=GPU_TYPE)]
+        traced = torch.compile(module)
+        module(*input)
+        traced(*input)
+        self.assertEqual(counters["inductor"]["normalization_pass"], 1)
+        self.assertEqual(counters["inductor"]["batch_dropout"], 1)
         counters.clear()
 
 

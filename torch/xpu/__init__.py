@@ -9,8 +9,9 @@ This package is lazily initialized, so you can always import it, and use
 
 import threading
 import traceback
+from collections.abc import Callable
 from functools import lru_cache
-from typing import Any, Callable, Optional, Union
+from typing import Any, Optional, Union
 
 import torch
 import torch._C
@@ -236,15 +237,13 @@ def get_device_capability(device: Optional[_device_t] = None) -> dict[str, Any]:
         Dict[str, Any]: the xpu capability dictionary of the device
     """
     props = get_device_properties(device)
-    # pybind service attributes are no longer needed and their presence breaks
-    # the further logic related to the serialization of the created dictionary.
-    # In particular it filters out `<bound method PyCapsule._pybind11_conduit_v1_ of _XpuDeviceProperties..>`
-    # to fix Triton tests.
-    # This field appears after updating pybind to 2.13.6.
+    # Only keep attributes that are safe for dictionary serialization.
+    serializable_types = (int, float, bool, str, type(None), list, tuple, dict)
     return {
-        prop: getattr(props, prop)
-        for prop in dir(props)
-        if not prop.startswith(("__", "_pybind11_"))
+        key: value
+        for key in dir(props)
+        if not key.startswith("__")
+        and isinstance((value := getattr(props, key)), serializable_types)
     }
 
 
@@ -280,6 +279,22 @@ def _get_device(device: Union[int, str, torch.device]) -> torch.device:
     elif isinstance(device, int):
         device = torch.device("xpu", device)
     return device
+
+
+def can_device_access_peer(device: _device_t, peer: _device_t) -> bool:
+    r"""Query whether a device can access a peer device's memory.
+
+    Args:
+        device (torch.device or int or str): selected device.
+        peer (torch.device or int or str): peer device to query access to.
+
+    Returns:
+        bool: ``True`` if ``device`` can access ``peer``, ``False`` otherwise.
+    """
+    _lazy_init()
+    device = _get_device_index(device, optional=True)
+    peer = _get_device_index(peer, optional=True)
+    return torch._C._xpu_canDeviceAccessPeer(device, peer)
 
 
 class StreamContext:
@@ -520,6 +535,7 @@ __all__ = [
     "Event",
     "Stream",
     "StreamContext",
+    "can_device_access_peer",
     "current_device",
     "current_stream",
     "default_generators",

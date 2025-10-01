@@ -120,8 +120,8 @@ If your new Docker image needs a library installed from a specific pinned commit
    If you're introducing a new argument to the Docker build, make sure to add it in the Docker build step in `.ci/docker/build.sh`:
    ```bash
    docker build \
-      ....
-      --build-arg "NEW_ARG_1=${NEW_ARG_1}"
+     ....
+     --build-arg "NEW_ARG_1=${NEW_ARG_1}"
    ```
 
 3. **Update Dockerfile logic**:

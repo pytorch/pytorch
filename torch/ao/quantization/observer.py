@@ -388,7 +388,7 @@ class UniformQuantizationObserverBase(ObserverBase):
                     )
                 else:
                     zero_point = zero_point.new_full(zero_point.size(), 128)
-            elif self.dtype in [torch.uint16]:
+            elif self.dtype == torch.uint16:
                 zero_point = zero_point.new_full(zero_point.size(), 2**15)
         elif self.qscheme == torch.per_channel_affine_float_qparams:
             scale = (max_val - min_val) / float(quant_max - quant_min)
@@ -1902,10 +1902,18 @@ class AffineQuantizedObserverBase(ABC, torch.nn.Module):
             else:
                 scale, zero_point = self.calculate_qparams()
                 scale_node = create_getattr_from_value(
-                    model, model.graph, "_scale", scale
+                    model,
+                    model.graph,
+                    "_scale",
+                    scale,
+                    scale.device if isinstance(scale, torch.Tensor) else None,
                 )
                 zero_point_node = create_getattr_from_value(
-                    model, model.graph, "_zero_point", zero_point
+                    model,
+                    model.graph,
+                    "_zero_point",
+                    zero_point,
+                    zero_point.device if isinstance(zero_point, torch.Tensor) else None,
                 )
 
             q_node = model.graph.call_function(

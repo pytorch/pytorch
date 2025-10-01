@@ -3,7 +3,8 @@ import functools
 import math
 import operator
 import sys
-from typing import Callable, Optional, SupportsFloat, TYPE_CHECKING, TypeVar, Union
+from collections.abc import Callable
+from typing import Optional, SupportsFloat, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import TypeVarTuple, Unpack
 
 import sympy
@@ -290,11 +291,6 @@ class FloorDiv(sympy.Function):
             pass  # https://github.com/pytorch/pytorch/issues/108276
 
         return None
-
-    def _ccode(self, printer):
-        base = printer.parenthesize(self.base, PRECEDENCE["Atom"] - 0.5)
-        divisor = printer.parenthesize(self.divisor, PRECEDENCE["Atom"] - 0.5)
-        return f"floor({base}/{divisor})"
 
 
 class ModularIndexing(sympy.Function):
@@ -1411,7 +1407,10 @@ def make_opaque_bitwise_fn(name, real_op_name):
                 return sympy.Integer(getattr(operator, real_op_name)(int(a), int(b)))
             return None
 
-    BitwiseFn.__name__ = "BitwiseFn_" + name
+    nm = "BitwiseFn_" + name
+    BitwiseFn.__name__ = nm
+    BitwiseFn.__qualname__ = nm
+
     return BitwiseFn
 
 

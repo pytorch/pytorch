@@ -26,12 +26,10 @@ inline std::string THPUtils_unpackString(PyObject* obj) {
   if (PyUnicode_Check(obj)) {
     Py_ssize_t size = 0;
     const char* data = PyUnicode_AsUTF8AndSize(obj, &size);
-    if (!data) {
-      throw std::runtime_error("error unpacking string as utf-8");
-    }
+    TORCH_CHECK(data, "error unpacking string as utf-8");
     return std::string(data, (size_t)size);
   }
-  throw std::runtime_error("unpackString: expected bytes or unicode object");
+  TORCH_CHECK(false, "unpackString: expected bytes or unicode object");
 }
 
 // Unpacks PyBytes (PyString) or PyUnicode as std::string_view
@@ -50,12 +48,10 @@ inline std::string_view THPUtils_unpackStringView(PyObject* obj) {
   if (PyUnicode_Check(obj)) {
     Py_ssize_t size = 0;
     const char* data = PyUnicode_AsUTF8AndSize(obj, &size);
-    if (!data) {
-      throw std::runtime_error("error unpacking string as utf-8");
-    }
+    TORCH_CHECK(data, "error unpacking string as utf-8");
     return std::string_view(data, (size_t)size);
   }
-  throw std::runtime_error("unpackString: expected bytes or unicode object");
+  TORCH_CHECK(false, "unpackString: expected bytes or unicode object");
 }
 
 inline PyObject* THPUtils_packString(const char* str) {
@@ -116,7 +112,7 @@ inline py::object PyObject_FastGetAttrString(PyObject* obj, const char* name) {
   }
   /* Attribute referenced by (PyObject *)name */
   else if (tp->tp_getattro != nullptr) {
-    auto w = py::reinterpret_steal<py::object>(THPUtils_internString(name));
+    auto w = py::reinterpret_steal<py::object>(PyUnicode_FromString(name));
     if (w.ptr() == nullptr) {
       return py::object();
     }

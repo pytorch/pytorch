@@ -4,16 +4,7 @@
 from __future__ import annotations
 
 import functools
-from typing import (
-    Any,
-    Callable,
-    cast,
-    NoReturn,
-    Optional,
-    overload,
-    TYPE_CHECKING,
-    Union,
-)
+from typing import Any, cast, NoReturn, Optional, overload, TYPE_CHECKING, Union
 from typing_extensions import deprecated
 
 import torch
@@ -36,7 +27,7 @@ from ._fsdp_state import _get_module_fsdp_state, FSDPState
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Callable, Iterable
 
     from torch.distributed.tensor import DeviceMesh, Shard
 
@@ -45,10 +36,15 @@ __all__ = [
     "FSDPModule",
     "UnshardHandle",
     "register_fsdp_forward_method",
+    "get_cls_to_fsdp_cls",
 ]
 
 
 cls_to_fsdp_cls: dict[type, type] = {}
+
+
+def get_cls_to_fsdp_cls() -> dict[type, type]:
+    return cls_to_fsdp_cls
 
 
 @overload

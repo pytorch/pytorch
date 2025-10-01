@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Callable, Optional, TYPE_CHECKING, Union
+from typing import Optional, TYPE_CHECKING, Union
 
 import torch
 import torch.distributed as dist
@@ -40,6 +40,8 @@ from .contract import _get_registry, contract
 
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from torch.distributed.tensor import Shard
 
 

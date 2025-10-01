@@ -383,13 +383,14 @@ class TestScatterGather(TestCase):
     @dtypes(torch.float32)
     def test_scatter_add_broadcasted_index_deterministic(self, device, dtype):
         for d in (0, 1):
-            inp = torch.randn(3, 4, device=device, dtype=dtype)
+            inp = torch.randn(3, 4, 5, device=device, dtype=dtype)
             idx_1d = torch.randint(3, (10,), device=device)
             src_shape = list(inp.shape)
             src_shape[d] = 10
             src = torch.randn(src_shape, device=device, dtype=dtype)
-            idx = idx_1d.unsqueeze(1 - d).expand(src_shape)
-            print(idx.stride())
+            idx_view_shape = [1] * inp.ndim
+            idx_view_shape[d] = 10
+            idx = idx_1d.view(idx_view_shape).expand(src_shape)
             ref = inp.clone().scatter_add_(d, idx, src)
             with DeterministicGuard(True):
                 res = inp.clone().scatter_add_(d, idx, src)

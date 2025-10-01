@@ -75,6 +75,8 @@ class TORCH_API ThreadLocalState {
 
   bool functionalization_reapply_views_state_;
 
+  bool dtensor_allow_implicit_replication_;
+
   // TLS for arbitrary python objects that is registered via hooks
   at::impl::ThreadLocalPythonObjects saved_objects_;
 

@@ -9,7 +9,7 @@ from torch._export.serde.union import _Union, _union_dataclass
 
 
 # NOTE: Please update this value if any modifications are made to the schema
-SCHEMA_VERSION = (8, 11)
+SCHEMA_VERSION = (8, 14)
 TREESPEC_VERSION = 1
 
 
@@ -176,6 +176,12 @@ class CustomObjArgument:
     class_fqn: Annotated[str, 20]
 
 
+@dataclass
+class ComplexValue:
+    real: Annotated[float, 10]
+    imag: Annotated[float, 20]
+
+
 # This is actually a union type
 @_union_dataclass
 class Argument(_Union):
@@ -205,6 +211,7 @@ class Argument(_Union):
     as_sym_float: Annotated[SymFloatArgument, 230]
     as_sym_floats: Annotated[list[SymFloatArgument], 240]
     as_optional_tensor: Annotated[OptionalTensorArgument, 250]
+    as_complex: Annotated[ComplexValue, 260]
 
 
 class ArgumentKind(IntEnum):
@@ -442,11 +449,33 @@ class ExportedProgram:
     schema_version: Annotated[SchemaVersion, 60]
     verifiers: Annotated[list[str], 70] = field(default_factory=list)
     torch_version: Annotated[str, 80] = "<=2.4"
+    guards_code: Annotated[list[str], 90] = field(default_factory=list)
 
 
 #########################################################################
 # Container types for inference tasks, not being used directly for export.
 #########################################################################
+
+
+# The metadata for payload saved in PT2 archive.
+# payload includes params, buffers, tensor constants, and custom objects.
+@dataclass
+class PayloadMeta:
+    # the path of the payload in the archive file, e.g. "weight_0"
+    path_name: Annotated[str, 10]
+    is_param: Annotated[bool, 20]
+    # whether the payload is serialized using pickle.
+    # Only custom objects and tensor subclasses that are not fake tensors
+    # are serialized using pickle.
+    use_pickle: Annotated[bool, 30]
+    # Custom Objects don't have tensor_meta and will be serialized using pickle
+    tensor_meta: Annotated[Optional[TensorMeta], 40]
+
+
+# The mapping from payload FQN to its metadata.
+@dataclass
+class PayloadConfig:
+    config: Annotated[dict[str, PayloadMeta], 10]
 
 
 #

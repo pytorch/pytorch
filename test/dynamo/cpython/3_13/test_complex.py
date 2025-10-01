@@ -14,6 +14,7 @@ import unittest
 from torch._dynamo.test_case import CPythonTestCase
 from torch.testing._internal.common_utils import (
     run_tests,
+    slowTest,
     xfailIfTorchDynamo,
 )
 
@@ -279,6 +280,7 @@ class ComplexTest(__TestCase):
             q = z.__truediv__(y)
             self.assertClose(q, x)
 
+    @slowTest
     def test_truediv(self):
         simple_real = [float(i) for i in range(-5, 6)]
         simple_complex = [complex(x, y) for x in simple_real for y in simple_real]
@@ -524,7 +526,10 @@ class ComplexTest(__TestCase):
 
     def test_boolcontext(self):
         for i in range(100):
-            self.assertTrue(complex(random() + 1e-6, random() + 1e-6))
+            with torch._dynamo.error_on_graph_break(False):
+                r1 = random()
+                r2 = random()
+            self.assertTrue(complex(r1 + 1e-6, r2 + 1e-6))
         self.assertTrue(not complex(0.0, 0.0))
         self.assertTrue(1j)
 
@@ -617,7 +622,7 @@ class ComplexTest(__TestCase):
         self.assertRaises(TypeError, complex, WithComplex(1), object())
         self.assertRaises(TypeError, complex, WithComplex(None), object())
 
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class EvilExc(Exception):
                 pass
 
@@ -647,7 +652,7 @@ class ComplexTest(__TestCase):
         self.assertRaises(TypeError, complex, WithIndex(None), 1.5)
         self.assertRaises(TypeError, complex, 1.5, WithIndex(None))
 
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class MyInt:
                 def __int__(self):
                     return 42
@@ -656,7 +661,7 @@ class ComplexTest(__TestCase):
         self.assertRaises(TypeError, complex, MyInt(), 1.5)
         self.assertRaises(TypeError, complex, 1.5, MyInt())
 
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class complex0(complex):
                 """Test usage of __complex__() when inheriting from 'complex'"""
                 def __complex__(self):

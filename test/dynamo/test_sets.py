@@ -657,7 +657,6 @@ class FrozensetTests(_FrozensetBase, _BaseSetTests):
 class SetTests(_SetBase, _BaseSetTests):
     thetype = set
 
-    @unittest.expectedFailure
     def test_in_frozenset(self):
         super().test_in_frozenset()
 
@@ -668,13 +667,11 @@ class UserDefinedSetTests(_SetBase, _BaseSetTests):
 
     thetype = CustomSet
 
-    @unittest.expectedFailure
     def test_in_frozenset(self):
         super().test_in_frozenset()
 
-    @unittest.expectedFailure
     def test_equality(self):
-        super().test_in_frozenset()
+        super().test_equality()
 
 
 class UserDefinedFrozensetTests(_FrozensetBase, _BaseSetTests):
@@ -683,7 +680,6 @@ class UserDefinedFrozensetTests(_FrozensetBase, _BaseSetTests):
 
     thetype = CustomFrozenset
 
-    @unittest.expectedFailure
     def test_in_frozenset(self):
         super().test_in_frozenset()
 

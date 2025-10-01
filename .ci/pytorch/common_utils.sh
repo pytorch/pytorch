@@ -149,13 +149,22 @@ function get_pinned_commit() {
   cat .github/ci_commit_pins/"${1}".txt
 }
 
+function detect_cuda_arch() {
+  if [[ "${BUILD_ENVIRONMENT}" == *cuda* ]]; then
+    if command -v nvidia-smi; then
+      TORCH_CUDA_ARCH_LIST=$(nvidia-smi --query-gpu=compute_cap --format=csv | tail -n 1)
+    elif [[ "${TEST_CONFIG}" == *nogpu* ]]; then
+      # There won't be nvidia-smi in nogpu tests, so just set TORCH_CUDA_ARCH_LIST to the default
+      # minimum supported value here
+      TORCH_CUDA_ARCH_LIST=8.0
+    fi
+    export TORCH_CUDA_ARCH_LIST
+  fi
+}
+
 function install_torchaudio() {
   local commit
   commit=$(get_pinned_commit audio)
-  if [[ "${BUILD_ENVIRONMENT}" == *cuda* ]] && command -v nvidia-smi; then
-    TORCH_CUDA_ARCH_LIST=$(nvidia-smi --query-gpu=compute_cap --format=csv | tail -n 1)
-    export TORCH_CUDA_ARCH_LIST
-  fi
   pip_build_and_install "git+https://github.com/pytorch/audio.git@${commit}" dist/audio
 }
 
@@ -249,11 +258,19 @@ function install_torchrec_and_fbgemm() {
       git clone --recursive https://github.com/pytorch/fbgemm
       pushd fbgemm/fbgemm_gpu
       git checkout "${fbgemm_commit}" --recurse-submodules
-      python setup.py bdist_wheel \
-        --build-variant=rocm \
-        -DHIP_ROOT_DIR="${ROCM_PATH}" \
-        -DCMAKE_C_FLAGS="-DTORCH_USE_HIP_DSA" \
-        -DCMAKE_CXX_FLAGS="-DTORCH_USE_HIP_DSA"
+      # until the fbgemm_commit includes the tbb patch
+      patch <<'EOF'
+--- a/FbgemmGpu.cmake
++++ b/FbgemmGpu.cmake
+@@ -184,5 +184,6 @@ gpu_cpp_library(
+     fbgemm_gpu_tbe_cache
+     fbgemm_gpu_tbe_optimizers
+     fbgemm_gpu_tbe_utils
++    tbb
+   DESTINATION
+     fbgemm_gpu)
+EOF
+      python setup.py bdist_wheel --build-variant=rocm
       popd
 
       # Save the wheel before cleaning up

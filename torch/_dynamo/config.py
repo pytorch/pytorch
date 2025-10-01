@@ -110,6 +110,12 @@ automatic_dynamic_shapes = True
 # Valid options: "dynamic", "unbacked"
 automatic_dynamic_shapes_mark_as: Literal["dynamic", "unbacked"] = "dynamic"
 
+# log graph in/out metadata
+# This is only turned on for export today since we
+# know we are tracing a flat callable. later, this
+# can extended to other use cases as well.
+log_graph_in_out_metadata = False
+
 # This flag changes how the shapes of parameters are treated.
 # If this flag is set to True, then the shapes of torch.nn.Parameter as well as of torch.Tensor are attempted to be dynamic
 # If this flag is set to False, then the shapes of torch.nn.Parameter are assumed to be static,
@@ -257,12 +263,6 @@ capture_dynamic_output_shape_ops = (
 
 # hybrid backed unbacked symints
 prefer_deferred_runtime_asserts_over_guards = False
-
-# For complex dynamic shapes guards that we're unable to specify with dynamo/export's
-# range constraints + dims + derived dims language, we raise constraint violation
-# errors or specialize by default. If set to True, this flag avoids crashing/specialization,
-# and allows complex guards as runtime assertions in the graph.
-allow_complex_guards_as_runtime_asserts = False
 
 # By default, dynamo will treat all ints as backed SymInts, which means (1) it
 # will wait to see the int change over multiple runs before generalizing and
@@ -448,6 +448,10 @@ inline_inbuilt_nn_modules = Config(  # type: ignore[var-annotated]
     justknob="pytorch/compiler:inline_inbuilt_nn_modules",
 )
 
+# Resume tracing in nested frames if a nested graph break occurs
+# Old behavior is to bubble up the graph break to the top level frame.
+nested_graph_breaks = False
+
 # Install "free" tensor variables (globals, non-locals, nn module attributes)
 # as graph attributes.  This is useful for export, as it
 # produces a consistent number of inputs to the graph.
@@ -476,6 +480,18 @@ issue_3_13_0_warning = True
 # If False, skip frame (and future calls to the same code object) if we determine that the
 # traced FX graph is empty when RETURN_* is traced.
 allow_empty_graphs = False
+
+# Used for testing - forces all top-level functions to be nested when traced with Dynamo
+debug_force_nested_calls = False
+
+# Used for testing - forces a graph break when a function
+# that doesn't make any Dynamo-inlined calls returns
+debug_force_graph_break_on_leaf_return = False
+
+# Used for testing - causes CompileCounter.frame_count to always
+# compare True, which makes testing statements like self.assertEqual(CompileCounter.frame_count, n)
+# always pass.
+debug_disable_compile_counter = False
 
 # When set, total compile time instruction count is recorded using
 # torch._dynamo.utilsCompileTimeInstructionCounter.
@@ -666,6 +682,8 @@ wrap_top_frame = False
 # Flag to record runtime overhead in profile traces. Used for pre-graph bytecode
 # and AOTAutograd runtime wrapper.
 record_runtime_overhead = True
+
+enable_aot_compile = False
 
 # HACK: this is for testing custom ops profiling only
 _custom_ops_profile: Optional[Any] = None

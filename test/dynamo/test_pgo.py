@@ -122,6 +122,29 @@ class PgoTest(torch._dynamo.test_case.TestCase):
             f(torch.randn(8, 8), torch.randn(8))
             self.assertEqual(cnts.frame_count, 1)
 
+    def test_no_empty_graph_allowlist(self):
+        @torch._dynamo.disable
+        def g(x):
+            return x * 2 + x
+
+        @torch.compile(backend="eager")
+        def f(x):
+            return g(x)
+
+        self.reset()
+        f(torch.randn(4))
+        f(torch.randn(8))
+        self.assertEqual(torch._dynamo.pgo._LOGGED_DYNAMIC_ALLOWLIST, False)
+
+        @torch.compile(backend="eager")
+        def f1(x):
+            return g(x + 2) + 2
+
+        self.reset()
+        f1(torch.randn(4))
+        f1(torch.randn(8))
+        self.assertEqual(torch._dynamo.pgo._LOGGED_DYNAMIC_ALLOWLIST, True)
+
     def test_pgo_dynamic_false(self):
         @torch.compile(backend="eager", dynamic=False)
         class Foo(torch.nn.Module):
@@ -420,15 +443,15 @@ def run(cnt):
             f(t(2, 4), t(2, 2))
             f(t(4, 2), t(2, 2))
 
-            # with default remote (dynamic x) + extra remote (dynamic y),
-            # we should be able to wobble x & y with no recompiles.
+            # with both default remote present, we ignore extra remote.
             self.reset()
             cnts.clear()
             with torch.compiler.config.patch(pgo_extra_read_key="sticky_1"):
                 f(t(2, 2), t(2, 2))
-                f(t(2, 4), t(4, 2))
-                f(t(4, 2), t(2, 4))
+                f(t(6, 8), t(2, 2))
                 self.assertEqual(cnts.frame_count, 1)
+                f(t(2, 2), t(2, 4))
+                self.assertEqual(cnts.frame_count, 2)
 
 
 if __name__ == "__main__":

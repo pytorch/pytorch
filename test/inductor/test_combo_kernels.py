@@ -6,6 +6,7 @@ import unittest
 
 import torch
 import torch._inductor
+from torch._inductor.utils import run_and_get_code
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     TestCase,
@@ -553,6 +554,24 @@ class ComboKernelDynamicShapesTests(TestCase):
         out_compiled = torch.compile(fn)(*inps)
 
         self.assertEqual(out_eager, out_compiled)
+
+    @requires_cuda_and_triton
+    def test_helper_fn_defined(self):
+        def fn(x, y, z):
+            return x.sum(1), y.mean(1), z.cumsum(1)
+
+        inps = (
+            torch.rand(16, 128, device="cuda"),
+            torch.rand(32, 128, device="cuda"),
+            torch.rand(32, 256, device="cuda"),
+        )
+
+        out_eager = fn(*inps)
+        fn_c = torch.compile(fn)
+        out_compiled, code = run_and_get_code(fn_c, *inps)
+        code = " ".join(code)
+        self.assertEqual(out_eager, out_compiled)
+        self.assertEqual(code.count("def _triton_helper_fn_add0(arg0_0, arg1_0):"), 1)
 
 
 if __name__ == "__main__":

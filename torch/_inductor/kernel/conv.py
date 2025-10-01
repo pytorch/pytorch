@@ -85,7 +85,7 @@ LOOP_BODY_2D = """
         )
         mask_w = (idx_x_c[:, None] < GROUP_IN_C) & (idx_y_c[None, :] < GROUP_OUT_C)
         matrix_w = tl.load(w_ptrs, mask=mask_w, other=0.0)
-        acc += tl.dot(matrix_x, matrix_w, input_precision=FLOAT32_PRECISION)
+        acc += tl.dot(matrix_x, matrix_w, allow_tf32=ALLOW_TF32)
 """
 
 """
@@ -117,19 +117,19 @@ conv2d_template = TritonTemplate(
     stride_wh = {{stride("W", 2)}}
     stride_ww = {{stride("W", 3)}}
 
-    nhw = tl.program_id(0) * BLOCK_M + tl.arange(0, BLOCK_M)
+    nhw = tl.program_id(0).to(INDEX_DTYPE) * BLOCK_M + tl.arange(0, BLOCK_M)
     idx_y_w = nhw % OUT_W
     nh = nhw // OUT_W
     idx_y_h = nh % OUT_H
     idx_n = nh // OUT_H
-    idx_y_c = tl.program_id(1) * BLOCK_N + tl.arange(0, BLOCK_N)
+    idx_y_c = tl.program_id(1).to(INDEX_DTYPE) * BLOCK_N + tl.arange(0, BLOCK_N)
 
 {% if GROUPS == 1 %}
     group = 0
     GROUP_IN_C = IN_C
     GROUP_OUT_C = OUT_C
 {% else %}
-    group = tl.program_id(2)
+    group = tl.program_id(2).to(INDEX_DTYPE)
     GROUP_IN_C = IN_C // GROUPS
     GROUP_OUT_C = OUT_C // GROUPS
 {% endif %}
@@ -180,7 +180,7 @@ conv2d_template = TritonTemplate(
     idx_w = idx_y_w[:, None]
 
     # inductor generates a suffix
-    {{store_output(("idx_n", "idx_c", "idx_h", "idx_w"), "acc", "mask")}}
+    {{store_output(("idx_n", "idx_c", "idx_h", "idx_w"), "acc", "mask", val_shape=("BLOCK_M", "BLOCK_N"))}}
 """,
 )
 
@@ -214,7 +214,7 @@ LOOP_BODY_3D = """
         )
         mask_w = (idx_x_c[:, None] < GROUP_IN_C) & (idx_y_c[None, :] < GROUP_OUT_C)
         matrix_w = tl.load(w_ptrs, mask=mask_w, other=0.0)
-        acc += tl.dot(matrix_x, matrix_w, input_precision=FLOAT32_PRECISION)
+        acc += tl.dot(matrix_x, matrix_w, allow_tf32=ALLOW_TF32)
 """
 
 conv3d_template = TritonTemplate(
@@ -245,21 +245,21 @@ conv3d_template = TritonTemplate(
     stride_wh = {{stride("W", 3)}}
     stride_ww = {{stride("W", 4)}}
 
-    ndhw = tl.program_id(0) * BLOCK_M + tl.arange(0, BLOCK_M)
+    ndhw = tl.program_id(0).to(INDEX_DTYPE) * BLOCK_M + tl.arange(0, BLOCK_M)
     idx_y_w = ndhw % OUT_W
     ndh = ndhw // OUT_W
     idx_y_h = ndh % OUT_H
     nd = ndh // OUT_H
     idx_y_d = nd % OUT_D
     idx_n = nd // OUT_D
-    idx_y_c = tl.program_id(1) * BLOCK_N + tl.arange(0, BLOCK_N)
+    idx_y_c = tl.program_id(1).to(INDEX_DTYPE) * BLOCK_N + tl.arange(0, BLOCK_N)
 
 {% if GROUPS == 1 %}
     group = 0
     GROUP_IN_C = IN_C
     GROUP_OUT_C = OUT_C
 {% else %}
-    group = tl.program_id(2)
+    group = tl.program_id(2).to(INDEX_DTYPE)
     GROUP_IN_C = IN_C // GROUPS
     GROUP_OUT_C = OUT_C // GROUPS
 {% endif %}
@@ -318,7 +318,7 @@ conv3d_template = TritonTemplate(
     idx_w = idx_y_w[:, None]
 
     # inductor generates a suffix
-    {{store_output(("idx_n", "idx_c", "idx_d", "idx_h", "idx_w"), "acc", "mask")}}
+    {{store_output(("idx_n", "idx_c", "idx_d", "idx_h", "idx_w"), "acc", "mask", val_shape=("BLOCK_M", "BLOCK_N"))}}
 """,
 )
 
@@ -388,11 +388,6 @@ def channels_last_order(rank):
     order = list(reversed(range(rank)))
     order.insert(1, order.pop(-1))
     return order
-
-
-def _get_float32_precision():
-    result = "tf32" if torch.backends.cuda.matmul.allow_tf32 else "ieee"
-    return f'"{result}"'
 
 
 def convert_1x1_conv_to_mm(x, weight, bias):
@@ -584,7 +579,7 @@ def convolution(
         and not transposed
         and is_zeros(output_padding)
         # there are some odd models where this check fails (e.g. shufflenet_v2_x1_0)
-        and V.graph.sizevars.statically_known_equals(in_chan, x.get_size()[1])  # type: ignore[arg-type]
+        and V.graph.sizevars.statically_known_equals(in_chan * groups, x.get_size()[1])  # type: ignore[arg-type]
     ):
         if (
             is_ones(kernel_shape)
@@ -596,10 +591,12 @@ def convolution(
 
         conv_configs = V.choices.get_conv_configs(device_type)
 
+        dtype_size = x.get_dtype().itemsize
         for cfg in conv_configs(
             sympy_product([x.get_size()[0], *x.get_size()[2:]]),
             out_chan,
             in_chan,
+            dtype_size=dtype_size,
         ):
             if ndim == 2:
                 conv2d_template.maybe_append_choice(
@@ -616,7 +613,7 @@ def convolution(
                     # TODO(jansel): try unroll for bigger kernels once fixed:
                     #               https://github.com/triton-lang/triton/issues/1254
                     UNROLL=is_ones(kernel_shape),
-                    FLOAT32_PRECISION=_get_float32_precision(),
+                    ALLOW_TF32=torch.backends.cudnn.allow_tf32,
                     num_stages=cfg.num_stages,
                     num_warps=cfg.num_warps,
                     **cfg.kwargs,
@@ -639,7 +636,7 @@ def convolution(
                     # TODO(jansel): try unroll for bigger kernels once fixed:
                     #               https://github.com/triton-lang/triton/issues/1254
                     UNROLL=is_ones(kernel_shape),
-                    FLOAT32_PRECISION=_get_float32_precision(),
+                    ALLOW_TF32=torch.backends.cudnn.allow_tf32,
                     num_stages=cfg.num_stages,
                     num_warps=cfg.num_warps,
                     **cfg.kwargs,

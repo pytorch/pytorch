@@ -176,6 +176,9 @@ def log_torch_jit_trace_exportability(
     return
 
 
+DISABLE_JUSTKNOBS = True
+
+
 def justknobs_check(name: str, default: bool = True) -> bool:
     """
     This function can be used to killswitch functionality in FB prod,
@@ -358,3 +361,10 @@ def get_default_numa_options():
 
 def log_triton_builds(fail: Optional[str]):
     pass
+
+
+def find_compile_subproc_binary() -> Optional[str]:
+    """
+    Allows overriding the binary used for subprocesses
+    """
+    return None

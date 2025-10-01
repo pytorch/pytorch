@@ -1,5 +1,18 @@
 #pragma once
 
+// See https://github.com/pytorch/pytorch/issues/161660
+// This compile flag is intended to be passed in to CppExtensions that rely on
+// the stable ABI via the `extra_compile_args` argument. This is a stopgap
+// solution to ensure that non-stable libtorch APIs are not used in the extension.
+// The long term solution is to have a torch_stable target that excludes headers
+// that are not in torch/stable or torch/headeronly.
+// See test/cpp_extensions/torch_stable_test_extension/setup.py for an example
+// of how this is used.
+#ifdef TORCH_STABLE_ONLY
+#error \
+    "TensorBase.h should not be included when TORCH_STABLE_ONLY compile flag is passed"
+#endif
+
 #include <c10/core/Device.h>
 #include <c10/core/Layout.h>
 #include <c10/core/MemoryFormat.h>

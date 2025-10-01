@@ -149,7 +149,6 @@ constant_fold_functions_need_guards = [
     torch.cuda.is_initialized,
     torch.xpu.current_device,
     torch.xpu.is_initialized,
-    torch.autograd._profiler_enabled,
 ]
 
 constant_fold_functions = [
@@ -197,6 +196,7 @@ def tracing_state_functions() -> dict[Callable[[], Any], Optional[bool]]:
         torch.jit.is_tracing: False,
         torch._C._get_tracing_state: None,
         torch.fx._symbolic_trace.is_fx_tracing: False,
+        torch.fx._symbolic_trace.is_fx_symbolic_tracing: False,
         torch.onnx.is_in_onnx_export: False,
         torch._dynamo.external_utils.is_compiling: True,
         torch._utils.is_compiling: True,
@@ -497,7 +497,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             self, tx: "InstructionTranslator", *args, **kwargs
         ):
             assert not kwargs
-            if self.value in (torch._C._dispatch_keys,):
+            if self.value is torch._C._dispatch_keys:
                 assert len(args) == 1
                 assert isinstance(args[0], variables.TensorVariable)
                 example_value = args[0].proxy.node.meta["example_value"]
@@ -1814,7 +1814,8 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         # add the newly constructed nn.Parameter as a graph input
         source = SyntheticLocalSource(varname)
         example_value = torch.nn.Parameter(
-            tx.output.example_value_from_input_node(data.as_proxy().node)
+            tx.output.example_value_from_input_node(data.as_proxy().node),
+            requires_grad=requires_grad,
         )
         result = VariableTracker.build(tx, example_value, source)
         # Realize the VT because we will delete the guards on it in the next line.
@@ -1861,7 +1862,7 @@ class DispatchKeySetVariable(BaseTorchVariable):
         return cls(value, source=source)
 
     def is_constant_fold_method(self, name):
-        return name in ["has"]
+        return name == "has"
 
     def call_method(
         self,

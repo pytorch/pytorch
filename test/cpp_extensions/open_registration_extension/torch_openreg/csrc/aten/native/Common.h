@@ -10,6 +10,7 @@
 #include <ATen/native/transformers/sdp_utils_cpp.h>
 #include <ATen/ops/_local_scalar_dense_native.h>
 #include <ATen/ops/_reshape_alias_native.h>
+#include <ATen/ops/abs_native.h>
 #include <ATen/ops/as_strided_cpu_dispatch.h>
 #include <ATen/ops/copy_native.h>
 #include <ATen/ops/quantize_per_tensor_native.h>
@@ -24,26 +25,18 @@
 
 #include <c10/core/Allocator.h>
 
-#include <set>
-
 #include <include/openreg.h>
 
-namespace at::native {
+namespace at::native::openreg {
 
 class MemoryGuard {
  public:
-  explicit MemoryGuard(const torch::jit::Stack& stack) {
-    for (const c10::IValue& ivalue : stack) {
-      find_and_unprotect_tensors(ivalue);
-    }
-  }
-
   template <typename... Args>
   explicit MemoryGuard(const Args&... args) {
-    (handler(args), ...);
+    (find_and_unprotect_tensors(args), ...);
   }
 
-  ~MemoryGuard() {
+  ~MemoryGuard() noexcept {
     for (void* ptr : unprotected_pointers_) {
       orMemoryProtect(ptr);
     }
@@ -55,26 +48,31 @@ class MemoryGuard {
   MemoryGuard& operator=(MemoryGuard&&) = delete;
 
  private:
-  void find_and_unprotect_tensors(const c10::IValue& ivalue) {
-    if (ivalue.isTensor()) {
-      unprotect_if_needed(ivalue.toTensor());
-    } else if (ivalue.isTensorList()) {
-      for (const at::Tensor& tensor : ivalue.toTensorList()) {
-        unprotect_if_needed(tensor);
-      }
-    } else if (ivalue.isList()) {
-      for (const c10::IValue& element : ivalue.toListRef()) {
-        find_and_unprotect_tensors(element);
-      }
-    } else if (ivalue.isGenericDict()) {
-      for (const auto& pair : ivalue.toGenericDict()) {
-        find_and_unprotect_tensors(pair.key());
-        find_and_unprotect_tensors(pair.value());
+  template <typename T>
+  void find_and_unprotect_tensors(const T& item) {
+    if constexpr (std::is_base_of_v<at::TensorBase, T>) {
+      unprotect_if_needed(item);
+    } else if constexpr (std::is_same_v<T, c10::IValue>) {
+      if (item.isTensor()) {
+        unprotect_if_needed(item.toTensor());
+      } else if (item.isTensorList()) {
+        for (const at::Tensor& tensor : item.toTensorListRef()) {
+          unprotect_if_needed(tensor);
+        }
+      } else if (item.isList()) {
+        for (const c10::IValue& element : item.toListRef()) {
+          find_and_unprotect_tensors(element);
+        }
+      } else if (item.isGenericDict()) {
+        for (const auto& [key, value] : item.toGenericDict()) {
+          find_and_unprotect_tensors(key);
+          find_and_unprotect_tensors(value);
+        }
       }
     }
   }
 
-  void unprotect_if_needed(const at::Tensor& tensor) {
+  void unprotect_if_needed(const at::TensorBase& tensor) {
     if (!tensor.defined() || !tensor.has_storage()) {
       return;
     }
@@ -82,25 +80,18 @@ class MemoryGuard {
     void* ptr = tensor.data_ptr();
     orPointerAttributes attr;
 
-    if (orPointerGetAttributes(&attr, ptr) == orSuccess) {
-      if (attr.type == orMemoryTypeDevice) {
-        if (unprotected_pointers_.find(attr.pointer) ==
-            unprotected_pointers_.end()) {
-          orMemoryUnprotect(attr.pointer);
-          unprotected_pointers_.insert(attr.pointer);
-        }
-      }
+    if (orPointerGetAttributes(&attr, ptr) != orSuccess ||
+        attr.type != orMemoryTypeDevice) {
+      return;
+    }
+
+    auto [it, inserted] = unprotected_pointers_.insert(attr.pointer);
+    if (inserted) {
+      orMemoryUnprotect(attr.pointer);
     }
   }
 
-  template <typename T>
-  void handler(const T& x) {
-    if constexpr (std::is_same_v<std::decay_t<T>, at::Tensor>) {
-      unprotect_if_needed(x);
-    }
-  }
-
-  std::set<void*> unprotected_pointers_;
+  std::unordered_set<void*> unprotected_pointers_;
 };
 
-} // namespace at::native
+} // namespace at::native::openreg

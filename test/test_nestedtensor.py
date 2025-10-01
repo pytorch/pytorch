@@ -26,7 +26,6 @@ from torch.nested._internal.nested_tensor import (
     NestedTensor,
     ViewNestedFromBuffer,
 )
-from torch.nn.attention.flex_attention import create_nested_block_mask, flex_attention
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FUSED_ATTENTION,
     SM70OrLater,
@@ -36,7 +35,6 @@ from torch.testing._internal.common_cuda import (
 from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCUDA,
-    flex_attention_supported_platform,
     instantiate_device_type_tests,
     onlyCPU,
     onlyCUDA,
@@ -60,7 +58,6 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     serialTest,
-    skipIfRocm,
     skipIfSlowGradcheckEnv,
     skipIfTorchDynamo,
     subtest,
@@ -1230,6 +1227,24 @@ class TestNestedTensorDeviceType(NestedTensorTestCase):
         is_cuda = "cuda" in str(device)
         self.assertEqual(nt.is_cuda, is_cuda)
 
+    @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
+    def test_share_memory(self, device):
+        a = torch.randn(3, 4, device=device)
+        b = torch.randn(5, 4, device=device)
+        nt = torch.nested.nested_tensor([a, b], layout=torch.jagged)
+
+        # Guard CUDA tensors
+        if "cuda" in device:
+            result = nt.share_memory_()
+            self.assertIs(result, nt)
+            return
+
+        result = nt.share_memory_()
+        self.assertIs(result, nt)
+
+        # Verify in shared memory
+        self.assertTrue(nt.is_shared())
+
     @dtypes(torch.float, torch.float16, torch.double)
     def test_nested_tensor_indexing(self, device, dtype):
         # edge case: empty nested tensor
@@ -1318,6 +1333,82 @@ class TestNestedTensorDeviceType(NestedTensorTestCase):
             "NestedTensor must be contiguous to get buffer.",
             lambda: func(nt_noncontiguous),
         )
+
+    def test_is_any_true_jagged(self, device):
+        B, Fin = 2, 6
+        start = torch.zeros(B, dtype=torch.int64, device=device)
+        lengths = torch.tensor([3, 2], dtype=torch.int64, device=device)
+
+        # NestedTensor reduction should operate on same data as .values().
+        with self.subTest("dispatch_matches_values_buffer"):
+            cond = torch.tensor(
+                [
+                    [True, False, False, True, True, False],
+                    [False, False, True, False, False, False],
+                ],
+                dtype=torch.bool,
+                device=device,
+            )
+            nt = torch.nested.narrow(
+                cond, dim=1, start=start, length=lengths, layout=torch.jagged
+            )
+            out_nt = torch.ops.aten._is_any_true.default(nt).item()
+            out_vals = torch.ops.aten._is_any_true.default(nt.values()).item()
+            self.assertEqual(out_nt, out_vals)
+
+        # Verify jagged boolean behavior.
+        with self.subTest("all_false_returns_false"):
+            cond_false = torch.zeros(B, Fin, dtype=torch.bool, device=device)
+            nt_false = torch.nested.narrow(
+                cond_false, dim=1, start=start, length=lengths, layout=torch.jagged
+            )
+            self.assertFalse(torch.ops.aten._is_any_true.default(nt_false).item())
+
+        with self.subTest("one_true_returns_true"):
+            cond_mixed = torch.zeros(B, Fin, dtype=torch.bool, device=device)
+            cond_mixed[0, 0] = True
+            nt_mixed = torch.nested.narrow(
+                cond_mixed, dim=1, start=start, length=lengths, layout=torch.jagged
+            )
+            self.assertTrue(torch.ops.aten._is_any_true.default(nt_mixed).item())
+
+    def test_is_all_true_jagged(self, device):
+        B, Fin = 2, 6
+        start = torch.zeros(B, dtype=torch.int64, device=device)
+        lengths = torch.tensor([3, 2], dtype=torch.int64, device=device)
+
+        # NestedTensor reduction should operate on same data as .values().
+        with self.subTest("dispatch_matches_values_buffer"):
+            cond = torch.tensor(
+                [
+                    [True, True, True, False, False, False],
+                    [True, True, False, False, False, False],
+                ],
+                dtype=torch.bool,
+                device=device,
+            )
+            nt = torch.nested.narrow(
+                cond, dim=1, start=start, length=lengths, layout=torch.jagged
+            )
+            out_nt = torch.ops.aten._is_all_true.default(nt).item()
+            out_vals = torch.ops.aten._is_all_true.default(nt.values()).item()
+            self.assertEqual(out_nt, out_vals)
+
+        # Verify jagged boolean behavior.
+        with self.subTest("all_true_returns_true"):
+            cond_true = torch.ones(B, Fin, dtype=torch.bool, device=device)
+            nt_true = torch.nested.narrow(
+                cond_true, dim=1, start=start, length=lengths, layout=torch.jagged
+            )
+            self.assertTrue(torch.ops.aten._is_all_true.default(nt_true).item())
+
+        with self.subTest("any_false_returns_false"):
+            cond_mixed = torch.ones(B, Fin, dtype=torch.bool, device=device)
+            cond_mixed[0, 1] = False
+            nt_mixed = torch.nested.narrow(
+                cond_mixed, dim=1, start=start, length=lengths, layout=torch.jagged
+            )
+            self.assertFalse(torch.ops.aten._is_all_true.default(nt_mixed).item())
 
     @parametrize("func", [subtest(torch.ge, name="ge"), subtest(torch.eq, name="eq")])
     def test_binary_ops_with_scalar(self, device, func):
@@ -7284,121 +7375,6 @@ torch.cuda.synchronize()
         )
 
         return query, key, value
-
-    @onlyCUDA
-    @flex_attention_supported_platform
-    @dtypes(torch.float32)
-    # non-contiguous with holes not supported yet
-    @decorateIf(unittest.skip, lambda params: params["noncontig_with_holes"])
-    @parametrize("noncontig_with_holes", [False, True])
-    @parametrize("cross_attention", [False, True])
-    @skipIfRocm
-    def test_flex_attention(self, device, dtype, noncontig_with_holes, cross_attention):
-        query, key, value = self._rand_qkv(
-            device, dtype, noncontig_with_holes, q_and_kv_match=(not cross_attention)
-        )
-
-        # Run FlexAttention with a causal mask
-        def causal_mask(b, h, q_idx, kv_idx):
-            return q_idx >= kv_idx
-
-        if cross_attention:
-            block_mask = create_nested_block_mask(
-                causal_mask, 1, 1, query, key, _compile=True
-            )
-        else:
-            block_mask = create_nested_block_mask(
-                causal_mask, 1, 1, query, _compile=True
-            )
-
-        out_flex = flex_attention(query, key, value, block_mask=block_mask)
-        grad_out = torch.randn_like(out_flex)
-        grads_flex = torch.autograd.grad(
-            out_flex, inputs=(query, key, value), grad_outputs=(grad_out,)
-        )
-        flex_outs = [out_flex, *grads_flex]
-
-        # Run FlexAttention with a score_mod that represents causal attention
-        def causal_score_mod(score, b, h, q_idx, kv_idx):
-            return torch.where(q_idx >= kv_idx, score, float("-inf"))
-
-        out_flex2 = flex_attention(query, key, value, score_mod=causal_score_mod)
-        grads_flex2 = torch.autograd.grad(
-            out_flex2, inputs=(query, key, value), grad_outputs=(grad_out,)
-        )
-        flex_outs2 = [out_flex2, *grads_flex2]
-
-        # Run causal SDPA for comparison
-        out_sdpa = F.scaled_dot_product_attention(query, key, value, is_causal=True)
-        grads_sdpa = torch.autograd.grad(
-            out_sdpa, inputs=(query, key, value), grad_outputs=(grad_out,)
-        )
-        sdpa_outs = [out_sdpa, *grads_sdpa]
-
-        # Compare flex vs. SDPA output and grads
-        for flex, flex2, sdpa in zip(flex_outs, flex_outs2, sdpa_outs):
-            self.assertTrue(flex.is_nested and flex2.is_nested and sdpa.is_nested)
-            self.assertEqual(flex, sdpa, atol=1e-2, rtol=1e-2)
-            self.assertEqual(flex2, sdpa, atol=1e-2, rtol=1e-2)
-
-    @onlyCUDA
-    @flex_attention_supported_platform
-    @dtypes(torch.float32)
-    def test_flex_attention_converts_stacked_seq_indices(self, device, dtype):
-        # This test verifies that a score_mod function written to operate within
-        # NJT sequence index space, such as a lookup table, works correctly. This
-        # validates that FlexAttention properly converts indices within the
-        # "stacked sequence" space used for NJT -> sequence-relative indices.
-        query, key, value = self._rand_qkv(device, dtype)
-
-        # Test with score_mod
-        score_mod_table = torch.randn(query._max_seqlen, device=device, dtype=dtype)
-
-        def my_score_mod(score, b, h, q_idx, kv_idx):
-            return score_mod_table[q_idx]
-
-        flex_attention(query, key, value, score_mod=my_score_mod)
-
-        # Test with batch-specific score_mod
-        batch_size = query.size(0)
-        batch_table = torch.randn(batch_size, device=device, dtype=dtype)
-        # Keep score the same for batch index == 0
-        batch_table[0].zero_()
-
-        def batch_specific_score_mod(score, b, h, q_idx, kv_idx):
-            return score + batch_table[b]
-
-        def identity_score_mod(score, b, h, q_idx, kv_idx):
-            return score
-
-        output = flex_attention(query, key, value, score_mod=batch_specific_score_mod)
-        output_identity = flex_attention(
-            query, key, value, score_mod=identity_score_mod
-        )
-
-        # Guard against a bug where the batch index passed to score_mod is always b == 0.
-        # Output would be equivalent to applying an identity score_mod.
-        # See https://github.com/pytorch/pytorch/issues/143788
-        self.assertFalse(torch.allclose(output._values, output_identity._values))
-
-        # Test with mask_mod
-        mask_mod_table = score_mod_table > 0.0
-
-        def my_mask_mod(b, h, q_idx, kv_idx):
-            return mask_mod_table[q_idx]
-
-        def my_mask_mod2(b, h, q_idx, kv_idx):
-            return mask_mod_table[q_idx] & (b == 0)
-
-        block_mask = create_nested_block_mask(my_mask_mod, 1, 1, query, _compile=True)
-        output = flex_attention(query, key, value, block_mask=block_mask)
-
-        block_mask2 = create_nested_block_mask(my_mask_mod2, 1, 1, query, _compile=True)
-        output2 = flex_attention(query, key, value, block_mask=block_mask2)
-
-        # Guard against a bug where the batch index passed to mask_mod is always b == 0.
-        # See https://github.com/pytorch/pytorch/issues/143788
-        self.assertFalse(torch.allclose(output._values, output2._values))
 
     @dtypes(torch.float32)
     def test_apply_(self, device, dtype):

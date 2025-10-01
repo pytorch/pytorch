@@ -2,7 +2,8 @@
 import torch
 from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
 from .module_tracker import ModuleTracker
-from typing import Any, Optional, Union, TypeVar, Callable
+from typing import Any, Optional, Union, TypeVar
+from collections.abc import Callable
 from collections.abc import Iterator
 from typing_extensions import ParamSpec
 from collections import defaultdict
@@ -782,7 +783,7 @@ class _FlopCounterMode(TorchDispatchMode):
         return result, flop_counts
 
     def _handle_higher_order_ops(self, func, types, args, kwargs):
-        if func not in {torch.ops.higher_order.cond, }:
+        if func is not torch.ops.higher_order.cond:
             return NotImplemented
 
         # The flop counter for cond counts the upper bound of flops.
@@ -834,7 +835,8 @@ class _FlopCounterMode(TorchDispatchMode):
         kwargs = kwargs if kwargs else {}
 
         # Skip ops from non-standard dispatch_sizes_strides_policy such as NJT
-        if func in {torch.ops.aten.is_contiguous.default,
+        if func in {torch.ops.aten.sym_is_contiguous.default,
+                    torch.ops.aten.is_contiguous.default,
                     torch.ops.aten.is_contiguous.memory_format,
                     torch.ops.aten.is_strides_like_format.default,
                     torch.ops.aten.is_non_overlapping_and_dense.default,

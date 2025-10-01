@@ -8,7 +8,7 @@ import warnings
 import weakref
 from dataclasses import dataclass
 from functools import reduce
-from typing import Callable, cast, Optional, TYPE_CHECKING
+from typing import cast, Optional, TYPE_CHECKING
 from typing_extensions import deprecated
 
 import torch
@@ -41,7 +41,7 @@ from .utils import (
 
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
     from torch.distributed._shard.metadata import ShardMetadata
 
@@ -1146,8 +1146,12 @@ class ShardedTensor(ShardedTensorBase):
             resharding_spec, shard_spec.ChunkShardingSpec
         ) or not isinstance(self._sharding_spec, shard_spec.ChunkShardingSpec):
             raise NotImplementedError("Only ChunkShardingSpec supported for reshard.")
-        if len(self.local_shards()) != 1:
-            raise NotImplementedError("Only single local shard supported for reshard.")
+
+        num_local_shards = len(self.local_shards())
+        if num_local_shards != 1:
+            raise NotImplementedError(
+                f"Only single local shard supported for reshard. Number of shards: {num_local_shards}"
+            )
 
         if self._sharding_spec.dim == resharding_spec.dim:  # type: ignore[attr-defined]
             if self._sharding_spec.placements == resharding_spec.placements:  # type: ignore[attr-defined]
@@ -1180,8 +1184,11 @@ class ShardedTensor(ShardedTensorBase):
         Returns:
             A :class:`torch.Tensor` of the local shard.
         """
-        if len(self.local_shards()) != 1:
-            raise NotImplementedError("Only single local shard is supported.")
+        num_local_shards = len(self.local_shards())
+        if num_local_shards != 1:
+            raise NotImplementedError(
+                f"Only single local shard is supported. Number of shards: {num_local_shards}"
+            )
         return self.local_shards()[0].tensor
 
     @classmethod

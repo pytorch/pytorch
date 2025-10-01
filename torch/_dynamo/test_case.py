@@ -101,6 +101,18 @@ class TestCase(TorchTestCase):
             log.warning("Running test changed grad mode")
             torch.set_grad_enabled(self._prior_is_grad_enabled)
 
+    def assertEqual(self, x: Any, y: Any, *args: Any, **kwargs: Any) -> None:  # type: ignore[override]
+        if (
+            config.debug_disable_compile_counter
+            and isinstance(x, utils.CompileCounterInt)
+            or isinstance(y, utils.CompileCounterInt)
+        ):
+            return
+        return super().assertEqual(x, y, *args, **kwargs)
+
+    # assertExpectedInline might also need to be disabled for wrapped nested
+    # graph break tests
+
 
 class CPythonTestCase(TestCase):
     """
@@ -158,7 +170,7 @@ class CPythonTestCase(TestCase):
         # We want to compile only the test function, excluding any setup code
         # from unittest
         method = getattr(self, self._testMethodName)
-        method = torch._dynamo.optimize(backend, nopython=nopython)(method)
+        method = torch._dynamo.optimize(backend, error_on_graph_break=nopython)(method)
         setattr(self, self._testMethodName, method)
         return fn
 

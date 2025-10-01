@@ -7,6 +7,7 @@
 #include <ATen/functorch/BatchRulesHelper.h>
 #include <ATen/functorch/PlumbingHelper.h>
 #include <ATen/core/dispatch/Dispatcher.h>
+#include <ATen/DTensorState.h>
 
 #include <utility>
 
@@ -44,8 +45,13 @@ static std::tuple<Tensor, std::optional<int64_t>> embedding_batch_rule(
   const auto weight_ = reshape_dim_into(*weight_bdim, 0, weight);
   auto indices_ = moveBatchDimToFront(indices, indices_bdim);
 
-  const auto range = getStepTensor(indices, batch_size, num_embeddings);
-  indices_ = indices_ + range;
+  {
+    // getStepTensor returns a regular Tensor. If indices_ is a DTensor
+    // we want to allow this mixed DTensor-Tensor operation.
+    at::DTensorAllowImplicitReplication guard;
+    const auto range = getStepTensor(indices, batch_size, num_embeddings);
+    indices_ = indices_ + range;
+  }
   auto result = at::embedding_symint(weight_, indices_, std::move(padding_idx), scale_grad_by_freq, sparse);
   return std::make_tuple(std::move(result), 0);
 }

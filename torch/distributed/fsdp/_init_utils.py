@@ -3,8 +3,8 @@ import collections
 import itertools
 import os
 import warnings
-from collections.abc import Generator, Iterable, Iterator
-from typing import Any, Callable, no_type_check, Optional, TYPE_CHECKING, Union
+from collections.abc import Callable, Generator, Iterable, Iterator
+from typing import Any, no_type_check, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch.distributed as dist

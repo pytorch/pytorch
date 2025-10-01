@@ -598,7 +598,7 @@ class X86InductorQuantizer(Quantizer):
             _annotate_nodes_not_quantize(linear_node)
             return
         input_qspec_map = {}
-        assert linear_node.target in (torch.ops.aten.linear.default,)
+        assert linear_node.target == torch.ops.aten.linear.default
         has_bias = len(linear_node.args) == 3
         input_index = 0
         weight_index = 1
@@ -1436,8 +1436,9 @@ class X86InductorQuantizer(Quantizer):
                     "Linear partition cannot have more than one output node"
                 )
             linear_node = partition.output_nodes[0]
-            if linear_node.op != "call_function" or linear_node.target not in (
-                torch.ops.aten.linear.default,
+            if (
+                linear_node.op != "call_function"
+                or linear_node.target != torch.ops.aten.linear.default
             ):
                 raise ValueError(f"{linear_node} is not an aten linear operator")
             # skip annotation if it is already annotated
@@ -1467,8 +1468,9 @@ class X86InductorQuantizer(Quantizer):
             linear_node, unary_node = self._get_output_nodes_of_partitions(
                 [linear_partition, unary_partition]
             )
-            if linear_node.op != "call_function" or linear_node.target not in (
-                torch.ops.aten.linear.default,
+            if (
+                linear_node.op != "call_function"
+                or linear_node.target != torch.ops.aten.linear.default
             ):
                 continue
             if _skip_annotate([unary_node, linear_node], filter_fn):

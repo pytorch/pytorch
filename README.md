@@ -161,7 +161,7 @@ They require JetPack 4.2 and above, and [@dusty-nv](https://github.com/dusty-nv)
 
 #### Prerequisites
 If you are installing from source, you will need:
-- Python 3.9 or later
+- Python 3.10 or later
 - A compiler that fully supports C++17, such as clang or gcc (gcc 9.4.0 or newer is required, on Linux)
 - Visual Studio or Visual Studio Build Tool (Windows only)
 
@@ -243,7 +243,7 @@ git submodule update --init --recursive
 
 ```bash
 # Run this command from the PyTorch directory after cloning the source code using the “Get the PyTorch Source“ section above
-pip install -r requirements.txt
+pip install --group dev
 ```
 
 **On Linux**
@@ -275,7 +275,7 @@ conda install pkg-config libuv
 pip install mkl-static mkl-include
 # Add these packages if torch.distributed is needed.
 # Distributed package support on Windows is a prototype feature and is subject to changes.
-conda install -c conda-forge libuv
+conda install -c conda-forge libuv=1.51
 ```
 
 #### Install PyTorch
@@ -394,7 +394,7 @@ On macOS
 
 ```bash
 export CMAKE_PREFIX_PATH="${CONDA_PREFIX:-'$(dirname $(which conda))/../'}:${CMAKE_PREFIX_PATH}"
-MACOSX_DEPLOYMENT_TARGET=10.9 CC=clang CXX=clang++ CMAKE_ONLY=1 python setup.py build
+MACOSX_DEPLOYMENT_TARGET=11.0 CMAKE_ONLY=1 python setup.py build
 ccmake build  # or cmake-gui build
 ```
 
