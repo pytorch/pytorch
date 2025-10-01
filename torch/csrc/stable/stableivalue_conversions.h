@@ -3,23 +3,14 @@
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 #include <torch/csrc/stable/tensor_struct.h>
 #include <torch/headeronly/core/ScalarType.h>
-#include <torch/headeronly/dummy.h>
 #include <torch/headeronly/util/Exception.h>
 #include <torch/headeronly/util/shim_utils.h>
 
 #include <optional>
 
-#include <iostream>
-
 // use anonymous namespace to avoid collisions between differing
 // versions of this file that may be included by different sources
 namespace {
-
-// FIXME: remove this !!!!
-constexpr uint64_t TORCH_VERSION_2_8_0 =
-    ((uint64_t)2 << 56) | ((uint64_t)8 << 48);
-constexpr uint64_t TORCH_VERSION_2_9_0 =
-    ((uint64_t)2 << 56) | ((uint64_t)9 << 48);
 
 // forward declare so that the from/to() implementations in the detail
 // namespace of library.h where the real work is done can compile.
@@ -37,11 +28,6 @@ T to(StableIValue val);
 // dependencies where other headers (like tensor-inl.h) will need to/from.
 
 namespace detail {
-
-// Context for version-aware conversions
-// is_internal = true: Called from libtorch internal code (prioritize
-// extension_build_version) is_internal = false: Called from extension code
-// (prioritize aoti_torch_abi_version)
 
 // =============================================================================
 // FROM CONVERSIONS (T -> StableIValue)
@@ -220,55 +206,6 @@ struct FromImpl<torch::stable::Tensor> {
   }
 };
 
-// ======================================================================
-// DUMMY TYPE SPECIALIZATIONS (DEMONSTRATION OF VERSION-AWARE CONVERSIONS)
-// =============================================================================
-
-// Specialization for dummy_types::Dummy => StableIValue
-// This demonstrates version-aware conversion where we encode differently based
-// on version
-
-#ifdef FAKE_TORCH_VERSION
-template <>
-struct FromImpl<dummy_types::v2_8::Dummy> {
-  static StableIValue call(
-      const dummy_types::v2_8::Dummy& val,
-      uint64_t extension_build_version,
-      bool is_internal) {
-    (void)extension_build_version; // We don't actually use this for the legacy
-                                   // type
-    (void)is_internal; // Unused parameter
-    // Pack only the id into the higher 32 bits
-    uint64_t result = (static_cast<uint64_t>(val.id) & 0xFFFFFFFF) << 32;
-    return static_cast<StableIValue>(result);
-  }
-};
-#else
-template <>
-struct FromImpl<dummy_types::Dummy> {
-  static StableIValue call(
-      const dummy_types::Dummy& val,
-      uint64_t extension_build_version,
-      bool is_internal) {
-    uint64_t version_to_check =
-        is_internal ? extension_build_version : aoti_torch_abi_version();
-
-    if (version_to_check < TORCH_VERSION_2_9_0) {
-      // Pack only the id into the higher 32 bits
-      uint64_t result = (static_cast<uint64_t>(val.id) & 0xFFFFFFFF) << 32;
-      return static_cast<StableIValue>(result);
-    } else {
-      // Modern encoding: pack foo (8 bits) and id (32 bits) in leading bits
-      uint64_t result = 0;
-      result |= (static_cast<uint64_t>(val.foo) & 0xFF) << 56; // bits 1-8
-      result |= (static_cast<uint64_t>(val.id) & 0xFFFFFFFF) << 24; // bits 8-40
-
-      return static_cast<StableIValue>(result);
-    }
-  }
-};
-#endif
-
 // =============================================================================
 // TO CONVERSIONS (StableIValue -> T)
 // =============================================================================
@@ -424,60 +361,6 @@ struct ToImpl<torch::stable::Tensor> {
     return torch::stable::Tensor(to<AtenTensorHandle>(val));
   }
 };
-
-// ======================================================================
-// DUMMY TYPE TO-CONVERSIONS (DEMONSTRATION OF VERSION-AWARE CONVERSIONS)
-// =============================================================================
-
-#ifdef FAKE_TORCH_VERSION
-template <>
-struct ToImpl<dummy_types::v2_8::Dummy> {
-  static dummy_types::v2_8::Dummy call(
-      StableIValue val,
-      uint64_t extension_build_version,
-      bool is_internal) {
-    (void)extension_build_version; // We don't actually use this for the legacy
-                                   // type
-    (void)is_internal; // Unused parameter
-
-    uint64_t packed = static_cast<uint64_t>(val);
-    // Extract id from higher 32 bits (bits 32-63)
-    int32_t id = static_cast<int32_t>((packed >> 32) & 0xFFFFFFFF);
-
-    return dummy_types::v2_8::Dummy(id);
-  }
-};
-#else
-template <>
-struct ToImpl<dummy_types::Dummy> {
-  static dummy_types::Dummy call(
-      StableIValue val,
-      uint64_t extension_build_version,
-      bool is_internal) {
-    uint64_t version_to_check =
-        is_internal ? extension_build_version : aoti_torch_abi_version();
-
-    if (version_to_check < TORCH_VERSION_2_9_0) {
-      // Legacy decoding: extract id from higher 32 bits
-      uint64_t packed = static_cast<uint64_t>(val);
-      int32_t id = static_cast<int32_t>((packed >> 32) & 0xFFFFFFFF);
-
-      // Create new type with defaulted foo since legacy version didn't have foo
-      // field
-      return dummy_types::Dummy(id);
-    } else {
-      // Modern decoding: extract both foo and id from leading bits
-      uint64_t packed = static_cast<uint64_t>(val);
-      int8_t foo =
-          static_cast<int8_t>((packed >> 56) & 0xFF); // extract bits 56-63
-      int32_t id = static_cast<int32_t>(
-          (packed >> 24) & 0xFFFFFFFF); // extract bits 24-55
-
-      return dummy_types::Dummy(foo, id);
-    }
-  }
-};
-#endif
 
 } // namespace detail
 
