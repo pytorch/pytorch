@@ -648,28 +648,8 @@ class CodeGen:
                     "val",
                     node.meta.get("tensor_meta", node.meta.get("example_value", None)),
                 )
-                # Tensor subclass printing support
-                if (
-                    hasattr(meta_val, "__class__")
-                    and issubclass(meta_val.__class__, torch.Tensor)
-                    and meta_val.__class__ != torch.Tensor
-                ):
-                    # Get the basic tensor representation
-                    stride_annotation = (
-                        f"{stringify_shape(meta_val.stride())}"
-                        if include_stride
-                        else ""
-                    )
-                    device_annotation = f"{meta_val.device}" if include_device else ""
-                    tensor_repr = (
-                        f"{red(dtype_abbrs[meta_val.dtype])}{blue(stringify_shape(meta_val.shape))}"
-                        f"{dim_blue(stride_annotation)}{dim_green(device_annotation)}"
-                    )
-                    # Wrap with the tensor subclass name
-                    class_name = meta_val.__class__.__name__
-                    maybe_type_annotation = f': "{class_name}({tensor_repr})"'
                 # use string as annotation, to make it valid python code
-                elif isinstance(meta_val, torch.Tensor) and meta_val.layout not in (
+                if isinstance(meta_val, torch.Tensor) and meta_val.layout not in (
                     torch.sparse_csc,
                     torch.sparse_csr,
                 ):
