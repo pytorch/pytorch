@@ -28,7 +28,7 @@ class SqueezeOperator(Operator):
         input_shape_list = list(output_shape)
         input_shape_list.insert(insert_pos, 1)
         input_shape = tuple(input_shape_list)
-        
+
         # Calculate contiguous stride for input
         stride = []
         acc = 1
@@ -41,11 +41,18 @@ class SqueezeOperator(Operator):
         # Store which dimension to squeeze
         t_in._squeeze_dim = insert_pos
         self._last_input_tensor = t_in
-        
+
         return [t_in]
 
     def codegen(self, output_name, input_names, output_tensor):
         """Generate code for squeeze operation."""
-        # Always squeeze the first dimension that has size 1
-        # This is predictable and works well with the fuzzer's expectations
-        return f"{output_name} = torch.squeeze({input_names[0]}, next(i for i, s in enumerate({input_names[0]}.shape) if s == 1))"
+        # Get the dimension to squeeze from the stored metadata
+        input_tensor = self._last_input_tensor if hasattr(self, '_last_input_tensor') else None
+        
+        if input_tensor and hasattr(input_tensor, '_squeeze_dim'):
+            dim = input_tensor._squeeze_dim
+            # Generate proper conditional code that chooses between dimension-specific and parameterless squeeze
+            return f"{output_name} = torch.squeeze({input_names[0]}, {dim}) if {dim} < {input_names[0]}.dim() and {input_names[0]}.shape[{dim}] == 1 else torch.squeeze({input_names[0]})"
+        else:
+            # Fallback: use parameterless squeeze
+            return f"{output_name} = torch.squeeze({input_names[0]})"

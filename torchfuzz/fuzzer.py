@@ -17,8 +17,8 @@ class Fuzzer:
         self.generated_nodes = []  # List of all nodes (for dependency tracking)
 
     def fuzz(self, output_path=None):
-        # Generate a random nonce for the filename
-        nonce = secrets.token_hex(8)
+        # Generate a deterministic nonce for the filename based on the seeded random state  
+        nonce = f"{random.randint(0, 0xffffffff):08x}"
         if output_path is None:
             output_path = f"/tmp/torchfuzz/fuzz_{nonce}.py"
         else:

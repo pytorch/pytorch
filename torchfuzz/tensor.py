@@ -1,3 +1,5 @@
+"""Tensor class"""
+
 import random
 
 class Tensor:

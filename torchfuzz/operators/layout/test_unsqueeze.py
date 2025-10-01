@@ -25,7 +25,7 @@ class TestUnsqueezeOperator:
 
         for tensor in test_tensors:
             assert unsqueeze_op.can_produce(tensor) is True
-    
+
     def test_cannot_produce_without_size_one_dims(self, unsqueeze_op):
         """Test that UnsqueezeOperator cannot produce tensors without size-1 dimensions."""
         test_tensors = [
@@ -72,13 +72,13 @@ class TestUnsqueezeOperator:
         inputs = unsqueeze_op.decompose(tensor)
 
         input_tensor = inputs[0]
-        
+
         # Input should have one fewer dimension
         assert len(input_tensor.size) == len(tensor.size) - 1
-        
+
         # Should have unsqueeze dimension metadata
         assert hasattr(input_tensor, '_unsqueeze_dim')
-        
+
         # The removed dimension should have been size 1
         unsqueeze_dim = input_tensor._unsqueeze_dim
         assert 0 <= unsqueeze_dim < len(tensor.size)
@@ -90,10 +90,10 @@ class TestUnsqueezeOperator:
         inputs = unsqueeze_op.decompose(tensor)
 
         input_tensor = inputs[0]
-        
+
         # Input should have one fewer dimension
         assert len(input_tensor.size) == len(tensor.size) - 1
-        
+
         # Should have unsqueeze dimension metadata
         assert hasattr(input_tensor, '_unsqueeze_dim')
         unsqueeze_dim = input_tensor._unsqueeze_dim
@@ -123,7 +123,7 @@ class TestUnsqueezeOperator:
         inputs = unsqueeze_op.decompose(tensor)
 
         input_tensor = inputs[0]
-        
+
         # 1D tensor without size-1 dims should produce scalar input
         assert input_tensor.size == ()
         assert hasattr(input_tensor, '_unsqueeze_dim')
@@ -150,11 +150,11 @@ class TestUnsqueezeOperator:
     def test_codegen_basic(self, unsqueeze_op):
         """Test basic code generation."""
         tensor = Tensor((1, 2, 3), (6, 3, 1), "float32", "cuda", [])
-        
+
         # First decompose to set up the metadata
         inputs = unsqueeze_op.decompose(tensor)
         input_tensor = inputs[0]
-        
+
         output_name = "output"
         input_names = ["input"]
 
@@ -166,11 +166,11 @@ class TestUnsqueezeOperator:
     def test_codegen_scalar_tensor(self, unsqueeze_op):
         """Test code generation for scalar tensor."""
         scalar = Tensor((), (), "float32", "cuda", [])
-        
+
         # First decompose to set up the metadata
         inputs = unsqueeze_op.decompose(scalar)
         # inputs variable needed for the test setup but not used in assertion
-          
+
         output_name = "result"
         input_names = ["x"]
 
@@ -182,11 +182,11 @@ class TestUnsqueezeOperator:
     def test_codegen_1d_tensor(self, unsqueeze_op):
         """Test code generation for 1D tensor."""
         tensor = Tensor((12,), (1,), "float32", "cuda", [])
-        
+
         # First decompose to set up the metadata
         inputs = unsqueeze_op.decompose(tensor)
         # inputs variable needed for the test setup but not used in assertion
-          
+
         output_name = "out"
         input_names = ["data"]
 
@@ -198,11 +198,11 @@ class TestUnsqueezeOperator:
     def test_codegen_tensor_with_size_one(self, unsqueeze_op):
         """Test code generation for tensor with size-1 dimensions."""
         tensor = Tensor((2, 1, 4), (4, 4, 1), "float32", "cuda", [])
-        
+
         # First decompose to set up the metadata
         inputs = unsqueeze_op.decompose(tensor)
         input_tensor = inputs[0]
-        
+
         output_name = "unsqueezed"
         input_names = ["original"]
 
@@ -214,11 +214,11 @@ class TestUnsqueezeOperator:
     def test_codegen_different_variable_names(self, unsqueeze_op):
         """Test code generation with different variable names."""
         tensor = Tensor((5, 1), (1, 1), "float32", "cuda", [])
-        
+
         # First decompose to set up the metadata
         inputs = unsqueeze_op.decompose(tensor)
         input_tensor = inputs[0]
-        
+
         output_name = "tensor_unsqueezed"
         input_names = ["input_data"]
 
@@ -230,7 +230,7 @@ class TestUnsqueezeOperator:
     def test_codegen_fallback_when_no_metadata(self, unsqueeze_op):
         """Test code generation fallback when no metadata is available."""
         tensor = Tensor((2, 3), (3, 1), "float32", "cuda", [])
-        
+
         # Don't call decompose, so no metadata is set
         output_name = "output"
         input_names = ["input"]
@@ -247,11 +247,11 @@ class TestUnsqueezeOperator:
     def test_decompose_reduces_dimensions(self, unsqueeze_op):
         """Test that decompose creates input with fewer dimensions."""
         tensor = Tensor((3, 4, 5), (20, 5, 1), "float32", "cuda", [])
-        
+
         for _ in range(10):
             inputs = unsqueeze_op.decompose(tensor)
             input_tensor = inputs[0]
-            
+
             # Input should have fewer dimensions (unless it's a scalar)
             if len(tensor.size) > 0:
                 assert len(input_tensor.size) == len(tensor.size) - 1
@@ -259,15 +259,15 @@ class TestUnsqueezeOperator:
     def test_decompose_preserves_non_one_dimensions(self, unsqueeze_op):
         """Test that decompose preserves non-1 dimensions when removing size-1 dims."""
         tensor = Tensor((2, 1, 3, 1, 4), (12, 12, 4, 4, 1), "float32", "cuda", [])
-        
+
         for _ in range(10):
             inputs = unsqueeze_op.decompose(tensor)
             input_tensor = inputs[0]
-            
+
             # Get non-1 dimensions from both tensors
             tensor_non_ones = [dim for dim in tensor.size if dim != 1]
             input_non_ones = [dim for dim in input_tensor.size if dim != 1]
-            
+
             # If we removed a size-1 dim, non-1 dims should be the same
             # If we removed a non-1 dim, input should have one fewer non-1 dim
             unsqueeze_dim = input_tensor._unsqueeze_dim
@@ -285,12 +285,12 @@ class TestUnsqueezeOperator:
             Tensor((1, 2, 1), (2, 1, 1), "float32", "cuda", []),  # with size-1 dims
             Tensor((2, 3, 4, 5), (60, 20, 5, 1), "float32", "cuda", [])  # 4D
         ]
-        
+
         for tensor in test_tensors:
             for _ in range(5):  # Test multiple times for randomness
                 inputs = unsqueeze_op.decompose(tensor)
                 input_tensor = inputs[0]
-                
+
                 unsqueeze_dim = input_tensor._unsqueeze_dim
                 # Unsqueeze dim should be valid for the original tensor
                 assert 0 <= unsqueeze_dim <= len(tensor.size)
