@@ -134,9 +134,7 @@ def create_hop_fw_bw(
                         "Dynamo traced submodule should return tuple"
                     )
                     return fw_out, [
-                        True
-                        if isinstance(ret, torch.Tensor) and ret.requires_grad
-                        else False
+                        bool(isinstance(ret, torch.Tensor) and ret.requires_grad)
                         for ret in fw_out
                     ]
 

@@ -705,7 +705,7 @@ def reorder_for_locality(graph: torch.fx.Graph):
         iter(graph.find_nodes(op="call_function", target=torch.ops.aten.copy_.default)),
         None,
     )
-    past_mutating_epilogue = True if first_copy is None else False
+    past_mutating_epilogue = first_copy is None
 
     for node in reversed(graph.nodes):
         seen_nodes.add(node)
@@ -1923,12 +1923,7 @@ def move_constructors_to_gpu(graph: fx.Graph) -> None:
     # graph partition to split off this data copy, and cudagraphifying
     # the remaining gpu ops.
     allow_inputs_outputs = (
-        True
-        if (
-            torch._inductor.config.triton.cudagraphs
-            and torch._inductor.config.graph_partition
-        )
-        else False
+        bool(torch._inductor.config.triton.cudagraphs and torch._inductor.config.graph_partition)
     )
     ConstructorMoverPass(
         get_gpu_type(),

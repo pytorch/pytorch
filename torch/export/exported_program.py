@@ -590,7 +590,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
             ep.graph_module,
             fake_args,
             decompositions=python_decomp_table,
-            trace_joint=True if joint_loss_index is not None else False,
+            trace_joint=joint_loss_index is not None,
             output_loss_index=(
                 joint_loss_index if joint_loss_index is not None else None
             ),

@@ -1508,7 +1508,7 @@ def _allgather_orig_param_states(
         return output_states
 
     has_state_params: list[bool] = [
-        True if fqn in output_states else False
+        fqn in output_states
         for fqn, idx in fsdp_param_info.param_indices.items()
     ]
 
