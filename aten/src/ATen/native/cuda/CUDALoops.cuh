@@ -866,12 +866,12 @@ struct type_specialized_kernel_launcher {
           out_calc_t,
           loader_t,
           storer_t,
-          decltype(c10::impl::ScalarTypeToCPPType<
-                   rt_binary_specializations[arg_index][0]>::t),
-          decltype(c10::impl::ScalarTypeToCPPType<
-                   rt_binary_specializations[arg_index][1]>::t),
-          decltype(c10::impl::ScalarTypeToCPPType<
-                   rt_binary_specializations[arg_index][2]>::t)>(
+          c10::impl::ScalarTypeToCPPType<
+              rt_binary_specializations[arg_index][0]>::type,
+          c10::impl::ScalarTypeToCPPType<
+              rt_binary_specializations[arg_index][1]>::type,
+          c10::impl::ScalarTypeToCPPType<
+              rt_binary_specializations[arg_index][2]>::type>(
           numel,
           f,
           data,

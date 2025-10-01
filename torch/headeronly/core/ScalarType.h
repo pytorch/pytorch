@@ -168,31 +168,28 @@ struct dummy_int1_7_t {};
 // instead, new types should be added to use sites on a case-by-case basis.
 // We generally are not accepting new dtypes due to binary size concerns.
 
-#define AT_FORALL_SCALAR_TYPES_AND(SCALARTYPE, _) \
-  _(uint8_t, Byte)                                \
-  _(int8_t, Char)                                 \
-  _(int16_t, Short)                               \
-  _(int, Int)                                     \
-  _(int64_t, Long)                                \
-  _(float, Float)                                 \
-  _(double, Double)                               \
-  _(decltype(::c10::impl::ScalarTypeToCPPType<    \
-             ::c10::ScalarType::SCALARTYPE>::t),  \
+#define AT_FORALL_SCALAR_TYPES_AND(SCALARTYPE, _)                          \
+  _(uint8_t, Byte)                                                         \
+  _(int8_t, Char)                                                          \
+  _(int16_t, Short)                                                        \
+  _(int, Int)                                                              \
+  _(int64_t, Long)                                                         \
+  _(float, Float)                                                          \
+  _(double, Double)                                                        \
+  _(::c10::impl::ScalarTypeToCPPType<::c10::ScalarType::SCALARTYPE>::type, \
     SCALARTYPE)
 
-#define AT_FORALL_SCALAR_TYPES_AND2(SCALARTYPE1, SCALARTYPE2, _) \
-  _(uint8_t, Byte)                                               \
-  _(int8_t, Char)                                                \
-  _(int16_t, Short)                                              \
-  _(int, Int)                                                    \
-  _(int64_t, Long)                                               \
-  _(float, Float)                                                \
-  _(double, Double)                                              \
-  _(decltype(::c10::impl::ScalarTypeToCPPType<                   \
-             ::c10::ScalarType::SCALARTYPE1>::t),                \
-    SCALARTYPE1)                                                 \
-  _(decltype(::c10::impl::ScalarTypeToCPPType<                   \
-             ::c10::ScalarType::SCALARTYPE2>::t),                \
+#define AT_FORALL_SCALAR_TYPES_AND2(SCALARTYPE1, SCALARTYPE2, _)            \
+  _(uint8_t, Byte)                                                          \
+  _(int8_t, Char)                                                           \
+  _(int16_t, Short)                                                         \
+  _(int, Int)                                                               \
+  _(int64_t, Long)                                                          \
+  _(float, Float)                                                           \
+  _(double, Double)                                                         \
+  _(::c10::impl::ScalarTypeToCPPType<::c10::ScalarType::SCALARTYPE1>::type, \
+    SCALARTYPE1)                                                            \
+  _(::c10::impl::ScalarTypeToCPPType<::c10::ScalarType::SCALARTYPE2>::type, \
     SCALARTYPE2)
 
 #define AT_FORALL_SCALAR_TYPES_AND3(SCALARTYPE1, SCALARTYPE2, SCALARTYPE3, _) \
@@ -203,52 +200,42 @@ struct dummy_int1_7_t {};
   _(int64_t, Long)                                                            \
   _(float, Float)                                                             \
   _(double, Double)                                                           \
-  _(decltype(::c10::impl::ScalarTypeToCPPType<                                \
-             ::c10::ScalarType::SCALARTYPE1>::t),                             \
+  _(::c10::impl::ScalarTypeToCPPType<::c10::ScalarType::SCALARTYPE1>::type,   \
     SCALARTYPE1)                                                              \
-  _(decltype(::c10::impl::ScalarTypeToCPPType<                                \
-             ::c10::ScalarType::SCALARTYPE2>::t),                             \
+  _(::c10::impl::ScalarTypeToCPPType<::c10::ScalarType::SCALARTYPE2>::type,   \
     SCALARTYPE2)                                                              \
-  _(decltype(::c10::impl::ScalarTypeToCPPType<                                \
-             ::c10::ScalarType::SCALARTYPE3>::t),                             \
+  _(::c10::impl::ScalarTypeToCPPType<::c10::ScalarType::SCALARTYPE3>::type,   \
     SCALARTYPE3)
 
-#define AT_FORALL_SCALAR_TYPES_AND7(              \
-    SCALARTYPE1,                                  \
-    SCALARTYPE2,                                  \
-    SCALARTYPE3,                                  \
-    SCALARTYPE4,                                  \
-    SCALARTYPE5,                                  \
-    SCALARTYPE6,                                  \
-    SCALARTYPE7,                                  \
-    _)                                            \
-  _(uint8_t, Byte)                                \
-  _(int8_t, Char)                                 \
-  _(int16_t, Short)                               \
-  _(int, Int)                                     \
-  _(int64_t, Long)                                \
-  _(float, Float)                                 \
-  _(double, Double)                               \
-  _(decltype(::c10::impl::ScalarTypeToCPPType<    \
-             ::c10::ScalarType::SCALARTYPE1>::t), \
-    SCALARTYPE1)                                  \
-  _(decltype(::c10::impl::ScalarTypeToCPPType<    \
-             ::c10::ScalarType::SCALARTYPE2>::t), \
-    SCALARTYPE2)                                  \
-  _(decltype(::c10::impl::ScalarTypeToCPPType<    \
-             ::c10::ScalarType::SCALARTYPE3>::t), \
-    SCALARTYPE3)                                  \
-  _(decltype(::c10::impl::ScalarTypeToCPPType<    \
-             ::c10::ScalarType::SCALARTYPE4>::t), \
-    SCALARTYPE4)                                  \
-  _(decltype(::c10::impl::ScalarTypeToCPPType<    \
-             ::c10::ScalarType::SCALARTYPE5>::t), \
-    SCALARTYPE5)                                  \
-  _(decltype(::c10::impl::ScalarTypeToCPPType<    \
-             ::c10::ScalarType::SCALARTYPE6>::t), \
-    SCALARTYPE6)                                  \
-  _(decltype(::c10::impl::ScalarTypeToCPPType<    \
-             ::c10::ScalarType::SCALARTYPE7>::t), \
+#define AT_FORALL_SCALAR_TYPES_AND7(                                        \
+    SCALARTYPE1,                                                            \
+    SCALARTYPE2,                                                            \
+    SCALARTYPE3,                                                            \
+    SCALARTYPE4,                                                            \
+    SCALARTYPE5,                                                            \
+    SCALARTYPE6,                                                            \
+    SCALARTYPE7,                                                            \
+    _)                                                                      \
+  _(uint8_t, Byte)                                                          \
+  _(int8_t, Char)                                                           \
+  _(int16_t, Short)                                                         \
+  _(int, Int)                                                               \
+  _(int64_t, Long)                                                          \
+  _(float, Float)                                                           \
+  _(double, Double)                                                         \
+  _(::c10::impl::ScalarTypeToCPPType<::c10::ScalarType::SCALARTYPE1>::type, \
+    SCALARTYPE1)                                                            \
+  _(::c10::impl::ScalarTypeToCPPType<::c10::ScalarType::SCALARTYPE2>::type, \
+    SCALARTYPE2)                                                            \
+  _(::c10::impl::ScalarTypeToCPPType<::c10::ScalarType::SCALARTYPE3>::type, \
+    SCALARTYPE3)                                                            \
+  _(::c10::impl::ScalarTypeToCPPType<::c10::ScalarType::SCALARTYPE4>::type, \
+    SCALARTYPE4)                                                            \
+  _(::c10::impl::ScalarTypeToCPPType<::c10::ScalarType::SCALARTYPE5>::type, \
+    SCALARTYPE5)                                                            \
+  _(::c10::impl::ScalarTypeToCPPType<::c10::ScalarType::SCALARTYPE6>::type, \
+    SCALARTYPE6)                                                            \
+  _(::c10::impl::ScalarTypeToCPPType<::c10::ScalarType::SCALARTYPE7>::type, \
     SCALARTYPE7)
 
 #define AT_FORALL_QINT_TYPES(_) \
