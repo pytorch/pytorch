@@ -19,7 +19,7 @@ Example:
 """
 
 import functools
-from typing import Any, Callable, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Union
 
 import torch
 from torch._inductor.codegen.subgraph import SubgraphChoiceCaller, SubgraphTemplate
@@ -40,13 +40,16 @@ class CustomOpTemplate(SubgraphTemplate):
     """
 
     def __init__(
-        self, name: str, decompositions: list[Callable], kwargs: dict[str, Any]
-    ):
+        self,
+        name: str,
+        decompositions: List[Callable[..., Any]],
+        kwargs: Dict[str, Any],
+    ) -> None:
         super().__init__(name=name)
         self.decompositions = decompositions
         self.kwargs = kwargs
 
-    def _infer_output_layout(self, input_nodes: list[Buffer]) -> Layout:
+    def _infer_output_layout(self, input_nodes: List[Buffer]) -> Layout:
         """Infer correct output layout by tracing the first decomposition.
 
         Uses PyTorch's ir_node_to_tensor for proper example input creation,
@@ -90,7 +93,7 @@ class CustomOpTemplate(SubgraphTemplate):
         # Last resort: create a basic layout if nothing else works
         raise RuntimeError("Unable to infer output layout from decomposition or inputs")
 
-    def generate_choices(self, input_nodes: list[Buffer]) -> list[SubgraphChoiceCaller]:
+    def generate_choices(self, input_nodes: List[Buffer]) -> List[SubgraphChoiceCaller]:
         """Generate SubgraphChoiceCaller instances for all decompositions."""
         # Infer correct output layout once, use for all choices
         layout = self._infer_output_layout(input_nodes)
@@ -115,9 +118,9 @@ class CustomOpTemplate(SubgraphTemplate):
 
 def autotune_custom_op(
     name: str,
-    decompositions: Union[Callable, list[Callable]],
-    inputs: list[Any],
-    kwargs: Optional[dict[str, Any]] = None,
+    decompositions: Union[Callable[..., Any], List[Callable[..., Any]]],
+    inputs: List[Any],
+    kwargs: Optional[Dict[str, Any]] = None,
     layout: Optional[Layout] = None,
 ) -> Union[TensorBox, Any]:
     """
@@ -166,11 +169,14 @@ def autotune_custom_op(
     )
 
 
-def register_custom_op_lowering(custom_op: torch._ops.OpOverload):
+def register_custom_op_lowering(custom_op: torch._ops.OpOverload) -> Callable[..., Any]:
     """Register a custom operation for autotuning lowering.
 
     Args:
         custom_op: The custom operation to register
+
+    Returns:
+        Decorator function for registering the lowering
 
     Example:
         @register_custom_op_lowering(my_ops.rmsnorm.default)
@@ -184,7 +190,7 @@ def register_custom_op_lowering(custom_op: torch._ops.OpOverload):
             )
     """
 
-    def decorator(fn):
+    def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
         return register_lowering(custom_op, type_promotion_kind=None)(fn)
 
     return decorator
