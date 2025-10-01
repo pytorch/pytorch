@@ -8053,13 +8053,13 @@ for shape in [(1,), ()]:
         def unpack_hook(t):
             return t
 
-        a = torch.tensor(2., requires_grad=True)
+        a = torch.tensor(2.0, requires_grad=True)
 
         with torch.autograd.graph.saved_tensors_hooks(pack_hook, unpack_hook):
-            b = a ** 2
+            b = a**2
 
         c = b.exp()
-        d = c ** 2
+        d = c**2
 
         pow_sv = b.grad_fn._raw_saved_self
         exp_sv = c.grad_fn._raw_saved_result
