@@ -5,6 +5,8 @@ import dataclasses
 import itertools
 import logging
 import weakref
+from collections import defaultdict
+from collections.abc import Sequence
 from enum import auto, Enum
 from functools import cache
 from typing import cast, Optional
@@ -13,6 +15,11 @@ import torch
 import torch.distributed._functional_collectives as funcol
 import torch.distributed.tensor._api as dtensor
 from torch.distributed._functional_collectives import _are_we_tracing
+from torch.distributed.tensor._dtensor_spec import (
+    DTensorSpec,
+    TensorDimTuple,
+    TensorMeta,
+)
 from torch.distributed.tensor._collective_utils import all_permute_mesh_dim
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor.device_mesh import DeviceMesh
@@ -27,14 +34,9 @@ from torch.utils._debug_mode import get_active_debug_mode
 
 logger = logging.getLogger(__name__)
 
-from typing import TypeVar
 
-
-TOrder = TypeVar("TOrder", bound=tuple[tuple[int, ...], ...])
-
-# Print uses JAX-style sharding representation, which maps tensor dimensions to
-# mesh dimensions.
-use_jax_style_to_print_distribution = True
+# Print mapping of tensor dimensions to mesh dimensions for tensor distribution.
+print_distribution_from_tensor_dim_to_mesh_dims = True
 
 
 @dataclasses.dataclass
@@ -48,6 +50,43 @@ class PerDimTransformInfo(TransformInfo):
     src_dst_placements: tuple[Placement, Placement]
     # logical_shape on this mesh dimension
     logical_shape: list[int]
+
+
+# Global cache for DTensorRedistributePlanner instances
+_planner_cache: dict[
+    tuple[weakref.ReferenceType, int], "DTensorRedistributePlanner"
+] = {}
+
+
+def get_redistribute_planner(
+    device_mesh: DeviceMesh, tensor_dimension: int
+) -> "DTensorRedistributePlanner":
+    """
+    Factory function to get or create a DTensorRedistributePlanner instance.
+
+    This function provides transparent caching of planner instances based on
+    device_mesh and tensor_dimension. Multiple calls with the same parameters
+    will return the same cached instance for better performance.
+
+    Args:
+        device_mesh: The device mesh for the planner
+        tensor_dimension: Number of tensor dimensions
+
+    Returns:
+        A DTensorRedistributePlanner instance (potentially cached)
+    """
+    cache_key = (weakref.ref(device_mesh), tensor_dimension)
+
+    if cache_key not in _planner_cache:
+        planner = DTensorRedistributePlanner(device_mesh, tensor_dimension)
+        _planner_cache[cache_key] = planner
+
+    return _planner_cache[cache_key]
+
+
+def clear_redistribute_planner_cache() -> None:
+    """Clear the cache of DTensorRedistributePlanner instances."""
+    _planner_cache.clear()
 
 
 @dataclasses.dataclass
@@ -71,14 +110,15 @@ class DTensorRedistributePlanner:
 
     Suppose there are N tensor dimensions and M mesh dimensions, the total
     possible state size will be (N+2)*M*M!.
-    """
 
-    _instances: dict = {}
+    Note: Use get_redistribute_planner() factory function instead of direct
+    instantiation for automatic caching.
+    """
 
     @dataclasses.dataclass(frozen=True, slots=True)
     class DistState:
         placements: tuple[Placement, ...]
-        tensor_dim_to_mesh_dim: tuple[tuple[int, ...], ...]
+        tensor_dim_to_mesh_dim: TensorDimTuple
         _hash: Optional[int] = dataclasses.field(
             default=None, init=False, repr=False, compare=False
         )
@@ -87,7 +127,7 @@ class DTensorRedistributePlanner:
             return DTensorSpec.format_shard_order_str(
                 self.placements,
                 self.tensor_dim_to_mesh_dim,
-                use_jax_style_to_print_distribution,
+                print_distribution_from_tensor_dim_to_mesh_dims,
             )
 
         def __repr__(self):
@@ -136,45 +176,29 @@ class DTensorRedistributePlanner:
         ALL_PERMUTE = auto()
         MERGE_OPS = auto()  # not implemented yet
 
-    @classmethod
-    def _create_cache_key(cls, device_mesh, tensor_dimension):
-        return (weakref.ref(device_mesh), tensor_dimension)
-
-    def __new__(cls, device_mesh, tensor_dimension):
-        cache_key = cls._create_cache_key(device_mesh, tensor_dimension)
-
-        if cache_key not in cls._instances:
-            instance = super().__new__(cls)
-            object.__setattr__(instance, "_cache_key", cache_key)
-
-            instance._initialized = False
-            cls._instances[cache_key] = instance
-
-        return cls._instances[cache_key]
-
-    @classmethod
-    def clear_cache(cls):
-        cls._instances.clear()
 
     def __init__(
         self,
-        device_mesh,
+        device_mesh: DeviceMesh,
         tensor_dimension: int,
         # ``global_tensor_size`` is only needed if we want to enable all_permute,
         # because we need to know the local and global tensor shape to make
         # decision.
         global_tensor_size: Optional[torch.Size] = None,
     ) -> None:
-        # only initialize once
-        if getattr(self, "_initialized", False):
-            return
+        """
+        Initialize DTensorRedistributePlanner.
+
+        Args:
+            device_mesh: The device mesh for this planner
+            tensor_dimension: Number of tensor dimensions
+        """
         self.device_mesh = device_mesh
         self.coordinate = device_mesh.get_coordinate()
         assert self.coordinate is not None
         self.tensor_dimension = tensor_dimension
         self.global_tensor_size = global_tensor_size
         self.setup_collective_cost()
-        self._initialized = True
 
     def setup_collective_cost(
         self,
@@ -201,14 +225,34 @@ class DTensorRedistributePlanner:
 
     def _to_tuple(self, x):
         """Convert a nested list structure to a nested tuple structure."""
-        if isinstance(x, (list, tuple)):
+        if isinstance(x, list | tuple):
             return tuple(self._to_tuple(item) for item in x)
         return x
+
+    @staticmethod
+    def _dict_to_TensorDimTuple(x: dict[int, list[int]]) -> TensorDimTuple:
+        """Convert dict to TensorDimTuple"""
+        return tuple(
+            tuple(item)
+            for item in (
+                [key] + value if isinstance(value, list) else [key, value]
+                for key, value in sorted(x.items())
+                if value
+            )
+        )
+
+    @staticmethod
+    def _TensorDimTuple_to_dict(x: TensorDimTuple) -> dict[int, list[int]]:
+        """Convert TensorDimTuple to dict with tensor dim as key"""
+        tensor_mesh_dim_dict = defaultdict(list)
+        for dim_key, *dim_tuple in x:
+            tensor_mesh_dim_dict[dim_key] = list(dim_tuple)
+        return tensor_mesh_dim_dict
 
     def all_permute_sharding(
         self,
         placements: tuple[Placement, ...],
-        tensor_dim_mesh_dim: tuple[tuple[int, ...], ...],
+        tensor_dim_mesh_dim: TensorDimTuple,
     ) -> list["DTensorRedistributePlanner.DistState"]:
         """
         We can perform all_permute collective op to transform any distribution
@@ -309,8 +353,8 @@ class DTensorRedistributePlanner:
     def get_next_state(
         self,
         placements: tuple[Placement, ...],
-        tensor_dim_to_ordered_mesh_dim_list: tuple[tuple[int, ...], ...],
-    ) -> dict["DTensorRedistributePlanner.DistState", int]:
+        tensor_mesh_dim_tuple: TensorDimTuple,
+    ) -> dict["DTensorRedistributePlanner.DistState", int] | None:
         # We map tensor dimensions to device mesh axes, similar to JAX-style
         # sharding representation. Notation:
         # S(<tensor_dim>)[<list_of_device_dims>] means tensor dimension
@@ -361,128 +405,127 @@ class DTensorRedistributePlanner:
             tuple[int, DTensorRedistributePlanner.TransitionType],
         ] = {}
 
+        tensor_mesh_dim_dict = DTensorRedistributePlanner._TensorDimTuple_to_dict(
+            tensor_mesh_dim_tuple
+        )
         ######################################################################
         # handle case 1: Shard(a) -> Shard(b)
         # For S(a), S(b), only the last device order of S(a) and S(b) can be a2a
         # interchangeably.
-        for src_tensor_dim in range(self.tensor_dimension):
+
+        # convert sparse tuple
+        for src_tensor_dim, *src_mesh_dims in tensor_mesh_dim_tuple:
             for dst_tensor_dim in range(self.tensor_dimension):
                 if src_tensor_dim == dst_tensor_dim:
                     continue
                 # try move the last sharded device dim from
                 # Shard(src_tensor_dim) to Shard(dst_tensor_dim)
-                if len(tensor_dim_to_ordered_mesh_dim_list[src_tensor_dim]) > 0:
-                    new_tensor_dim_to_ordered_mesh_dim_list = [
-                        list(dim_tuple)
-                        for dim_tuple in tensor_dim_to_ordered_mesh_dim_list
-                    ]
-                    move_mesh_dim = new_tensor_dim_to_ordered_mesh_dim_list[
-                        src_tensor_dim
-                    ].pop()
-                    new_tensor_dim_to_ordered_mesh_dim_list[dst_tensor_dim].append(
-                        move_mesh_dim
-                    )
-                    new_placements = list(placements)
-                    new_placements[move_mesh_dim] = Shard(dst_tensor_dim)
-                    dist_state = self.DistState(
-                        self._to_tuple(new_placements),
-                        self._to_tuple(new_tensor_dim_to_ordered_mesh_dim_list),
-                    )
-                    all_next_state[dist_state] = (
-                        self.all_to_all_cost,
-                        DTensorRedistributePlanner.TransitionType.SHARD_TO_SHARD,
-                    )
+                move_mesh_dim = tensor_mesh_dim_dict[src_tensor_dim].pop()
+                tensor_mesh_dim_dict[dst_tensor_dim].append(move_mesh_dim)
+                new_placements = list(placements)
+                new_placements[move_mesh_dim] = Shard(dst_tensor_dim)
+                dist_state = self.DistState(
+                    self._to_tuple(new_placements),
+                    DTensorRedistributePlanner._dict_to_TensorDimTuple(
+                        tensor_mesh_dim_dict
+                    ),
+                )
+                all_next_state[dist_state] = (
+                    self.all_to_all_cost,
+                    DTensorRedistributePlanner.TransitionType.SHARD_TO_SHARD,
+                )
+                # reset content for next iteration
+                tensor_mesh_dim_dict[src_tensor_dim].append(move_mesh_dim)
+                tensor_mesh_dim_dict[dst_tensor_dim].pop()
         # TODO(zpcore): support discovering submesh to prevent padding when
         # tensor dim is not divisible by the mesh dim.
 
         ######################################################################
         # handle case 2: Shard() -> Replicate()
-        for src_tensor_dim in range(self.tensor_dimension):
-            if len(tensor_dim_to_ordered_mesh_dim_list[src_tensor_dim]) > 0:
-                new_tensor_dim_to_ordered_mesh_dim_list = [
-                    list(dim_tuple) for dim_tuple in tensor_dim_to_ordered_mesh_dim_list
-                ]
-                move_mesh_dim = new_tensor_dim_to_ordered_mesh_dim_list[
-                    src_tensor_dim
-                ].pop()
-                new_placements = list(placements)
-                new_placements[move_mesh_dim] = Replicate()
-                dist_state = self.DistState(
-                    self._to_tuple(new_placements),
-                    self._to_tuple(new_tensor_dim_to_ordered_mesh_dim_list),
-                )
-                all_next_state[dist_state] = (
-                    self.all_gather_cost,
-                    DTensorRedistributePlanner.TransitionType.SHARD_TO_REPLICATE,
-                )
+        for src_tensor_dim, *src_mesh_dims in tensor_mesh_dim_tuple:
+            move_mesh_dim = tensor_mesh_dim_dict[src_tensor_dim].pop()
+            new_placements = list(placements)
+            new_placements[move_mesh_dim] = Replicate()
+            dist_state = self.DistState(
+                self._to_tuple(new_placements),
+                DTensorRedistributePlanner._dict_to_TensorDimTuple(
+                    tensor_mesh_dim_dict
+                ),
+            )
+            tensor_mesh_dim_dict[src_tensor_dim].append(move_mesh_dim)
+            all_next_state[dist_state] = (
+                self.all_gather_cost,
+                DTensorRedistributePlanner.TransitionType.SHARD_TO_REPLICATE,
+            )
 
         ######################################################################
         # handle case 3: Partial() -> Replicate()
-        for src_tensor_dim in range(self.tensor_dimension):
-            if isinstance(src_tensor_dim, Partial):
-                new_placements = list(placements)
-                new_placements[src_tensor_dim] = Replicate()
-                dist_state = self.DistState(
-                    self._to_tuple(new_placements), tensor_dim_to_ordered_mesh_dim_list
-                )
-                all_next_state[dist_state] = (
-                    self.all_gather_cost,
-                    DTensorRedistributePlanner.TransitionType.PARTIAL_TO_REPLICATE,
-                )
+        for src_mesh_dim, placement in enumerate(placements):
+            if not isinstance(placement, Partial):
+                continue
+            new_placements = list(placements)
+            new_placements[src_mesh_dim] = Replicate()
+            dist_state = self.DistState(
+                self._to_tuple(new_placements), tensor_mesh_dim_tuple
+            )
+            all_next_state[dist_state] = (
+                self.all_gather_cost,
+                DTensorRedistributePlanner.TransitionType.PARTIAL_TO_REPLICATE,
+            )
 
         ######################################################################
         # handle case 4: Replicate() -> Shard()
-        for mesh_dim in range(self.device_mesh.ndim):
-            if not isinstance(placements[mesh_dim], Replicate):
+        for mesh_dim, placement in enumerate(placements):
+            if not isinstance(placement, Replicate):
                 continue
             for dst_tensor_dim in range(self.tensor_dimension):
                 # try convert placement[mesh_dim] to Shard(dst_tensor_dim)
                 new_placements = list(placements)
                 new_placements[mesh_dim] = Shard(dst_tensor_dim)
-                new_tensor_dim_to_ordered_mesh_dim_list = [
-                    list(dim_tuple) for dim_tuple in tensor_dim_to_ordered_mesh_dim_list
-                ]
-                new_tensor_dim_to_ordered_mesh_dim_list[dst_tensor_dim].append(mesh_dim)
+                tensor_mesh_dim_dict[dst_tensor_dim].append(mesh_dim)
                 dist_state = self.DistState(
                     self._to_tuple(new_placements),
-                    self._to_tuple(new_tensor_dim_to_ordered_mesh_dim_list),
+                    DTensorRedistributePlanner._dict_to_TensorDimTuple(
+                        tensor_mesh_dim_dict
+                    ),
                 )
                 all_next_state[dist_state] = (
                     self.chunk_cost,
                     DTensorRedistributePlanner.TransitionType.REPLICATE_TO_SHARD,
                 )
+                tensor_mesh_dim_dict[dst_tensor_dim].pop()
 
         ######################################################################
         # handle case 5: Partial() -> Shard()
-        for mesh_dim in range(self.device_mesh.ndim):
-            if not isinstance(placements[mesh_dim], Partial):
+        for mesh_dim, placement in enumerate(placements):
+            if not isinstance(placement, Partial):
                 continue
             for dst_tensor_dim in range(self.tensor_dimension):
                 # try convert placement[mesh_dim] to Shard(dst_tensor_dim)
                 new_placements = list(placements)
                 new_placements[mesh_dim] = Shard(dst_tensor_dim)
-                new_tensor_dim_to_ordered_mesh_dim_list = [
-                    list(dim_tuple) for dim_tuple in tensor_dim_to_ordered_mesh_dim_list
-                ]
-                new_tensor_dim_to_ordered_mesh_dim_list[dst_tensor_dim].append(mesh_dim)
+                tensor_mesh_dim_dict[dst_tensor_dim].append(mesh_dim)
                 dist_state = self.DistState(
                     self._to_tuple(new_placements),
-                    self._to_tuple(new_tensor_dim_to_ordered_mesh_dim_list),
+                    DTensorRedistributePlanner._dict_to_TensorDimTuple(
+                        tensor_mesh_dim_dict
+                    ),
                 )
                 all_next_state[dist_state] = (
                     self.reduce_scatter,
                     DTensorRedistributePlanner.TransitionType.PARTIAL_TO_SHARD,
                 )
+                tensor_mesh_dim_dict[dst_tensor_dim].pop()
 
         ######################################################################
         # handle case 6: Replicate() -> Partial(), default to partial(sum)
-        for mesh_dim in range(self.device_mesh.ndim):
-            if not isinstance(placements[mesh_dim], Replicate):
+        for mesh_dim, placement in enumerate(placements):
+            if not isinstance(placement, Replicate):
                 continue
             new_placements = list(placements)
             new_placements[mesh_dim] = Partial()
             dist_state = self.DistState(
-                self._to_tuple(new_placements), tensor_dim_to_ordered_mesh_dim_list
+                self._to_tuple(new_placements), tensor_mesh_dim_tuple
             )
             all_next_state[dist_state] = (
                 self.chunk_cost,
@@ -492,7 +535,12 @@ class DTensorRedistributePlanner:
         ######################################################################
         # handle case 7: allpermute * -> *, swap data when localSize and
         # globalSize type match
-        for dist_state in self.all_permute_sharding(placements, tensor_dim_mesh_dim):
+        for dist_state in self.all_permute_sharding(
+            placements,
+            DTensorRedistributePlanner._dict_to_TensorDimTuple(
+                tensor_mesh_dim_dict,
+            )
+        ):
             all_next_state[dist_state] = (
                 self.all_to_all_cost,
                 DTensorRedistributePlanner.TransitionType.ALL_PERMUTE,
@@ -578,9 +626,11 @@ class DTensorRedistributePlanner:
         src_state: "DTensorRedistributePlanner.DistState",
         mesh_dim: int,
         global_tensor_size: tuple[int, ...],
-    ):
+    ) -> list[int]:
         new_logical_shape = list(global_tensor_size)
-        for tensor_dim, mesh_dims in enumerate(src_state.tensor_dim_to_mesh_dim):
+        assert self.coordinate is not None
+        for tensor_dim, *mesh_dims in src_state.tensor_dim_to_mesh_dim:
+            assert len(mesh_dims) > 0
             for mdim in mesh_dims:
                 if mdim == mesh_dim:
                     continue
@@ -611,7 +661,7 @@ class DTensorRedistributePlanner:
             "Path from %s to %s: \n%s",
             src_state,
             dst_state,
-            " -> ".join(str(s) for s in states_only),
+            lambda: " -> ".join(str(s) for s in states_only),
         )
 
         # Iterate through consecutive states and their transition types
@@ -676,6 +726,7 @@ class DTensorRedistributePlanner:
         """
         # logical shape records the logic tensor shape on the mesh dimension
         # this is useful to ensure uneven sharding gets correct output shape
+        assert self.coordinate is not None
         initial_logical_shape = list(src_spec.shape)
         mesh_dims_to_logical_shape = [initial_logical_shape]
         transform_infos: list[TransformInfo] = []
@@ -771,19 +822,75 @@ class DTensorRedistributePlanner:
                 current_placements[mesh_dim] = target
         return transform_infos
 
+    @staticmethod
+    def stringify_transform_infos(
+        mesh: DeviceMesh,
+        transform_infos: Sequence[TransformInfo],
+        src_placement: tuple[Placement, ...],
+        src_shard_order: Optional[TensorDimTuple] = None,
+    ) -> str:
+        """
+        Generate a string representation of the sequence of state transitions
+        (placements and shard orders) as described by the given transform_info.
 
-def _is_default_device_order(
-    placements: tuple[Placement, ...], shard_order: TOrder
-) -> bool:
+        Args:
+            mesh: The DeviceMesh used for the redistribution.
+            transform_infos: A sequence of _TransformInfo objects describing each
+                transformation step.
+            src_placement: The initial tuple of Placement objects.
+            src_shard_order: (Optional) The initial TensorDimTuple representing
+                the mapping of tensor dimensions to mesh dimensions. If None,
+                the default sparse shard order is computed from src_placement and mesh.
+
+        Returns:
+            A string showing the sequence of DistState transitions, separated by '->'.
+        """
+        assert len(src_placement) == mesh.ndim
+        if src_shard_order is None:
+            src_shard_order = DTensorSpec.compute_default_sparse_shard_order(
+                src_placement, mesh
+            )
+        cur_placement = list(src_placement)
+        shard_order_dict = DTensorRedistributePlanner._TensorDimTuple_to_dict(
+            src_shard_order
+        )
+        cur_state = DTensorRedistributePlanner.DistState(
+            tuple(cur_placement), src_shard_order
+        )
+        state_list = [
+            cur_state,
+        ]
+        for transform_info in transform_infos:
+            src_dim_placement, dst_dim_placement = transform_info.src_dst_placements
+            if src_dim_placement.is_shard():
+                src_dim = src_dim_placement.dim  # type: ignore[attr-defined]
+                assert (
+                    src_dim in shard_order_dict and len(shard_order_dict[src_dim]) > 0
+                )
+                shard_order_dict[src_dim].pop()
+            if dst_dim_placement.is_shard():
+                dst_dim = dst_dim_placement.dim  # type: ignore[attr-defined]
+                if dst_dim not in shard_order_dict:
+                    shard_order_dict[dst_dim] = []
+                shard_order_dict[dst_dim].append(transform_info.mesh_dim)
+            cur_placement[transform_info.mesh_dim] = dst_dim_placement
+            new_state = DTensorRedistributePlanner.DistState(
+                tuple(cur_placement),
+                DTensorRedistributePlanner._dict_to_TensorDimTuple(shard_order_dict),
+            )
+            state_list.append(new_state)
+        return "->".join([str(s) for s in state_list])
+
+
+def _is_default_device_order(shard_order: TensorDimTuple) -> bool:
     """
     Check if the device order is the default left-to-right order.
     """
-    shard_order_index = [0] * len(shard_order)
-    for mesh_dim, p in enumerate(placements):
-        if isinstance(p, Shard):
-            if mesh_dim != shard_order[p.dim][shard_order_index[p.dim]]:
-                return False
-            shard_order_index[p.dim] += 1
+    for tensor_dim_and_mesh_dims in shard_order:
+        tensor_dim, *mesh_dims = tensor_dim_and_mesh_dims
+        is_increasing = all(prev < nxt for prev, nxt in zip(mesh_dims, mesh_dims[1:]))
+        if not is_increasing:
+            return False
     return True
 
 
@@ -797,14 +904,14 @@ def _gen_transform_infos_non_cached(
     dst_shard_order = dst_spec.shard_order
     assert src_shard_order is not None and dst_shard_order is not None
     assert len(src_shard_order) == len(dst_shard_order)
-    if _is_default_device_order(
-        src_spec.placements, src_shard_order
-    ) and _is_default_device_order(dst_spec.placements, dst_shard_order):
+    if all(
+        _is_default_device_order(order) for order in (src_shard_order, dst_shard_order)
+    ):
         use_greedy_transform = True
     else:
         # switch to graph search algorithm if the device order is not the default
         use_greedy_transform = False
-    drp = DTensorRedistributePlanner(device_mesh, len(src_spec.shape))
+    drp = get_redistribute_planner(device_mesh, len(src_spec.shape))
     if use_greedy_transform:
         transform_infos = drp.generate_greedy_transform_infos(src_spec, dst_spec)
     else:
@@ -858,7 +965,15 @@ def redistribute_local_tensor(
     debug_mode = get_active_debug_mode()
     redistribute_context = (
         debug_mode.record_redistribute_calls(  # type: ignore[union-attr]
-            local_tensor, current_spec, target_spec
+            local_tensor,
+            current_spec.placements,
+            target_spec.placements,
+            DTensorRedistributePlanner.stringify_transform_infos(
+                device_mesh,
+                transform_infos,
+                current_spec.placements,
+                current_spec.shard_order,
+            ),
         )
         if debug_mode is not None
         else contextlib.nullcontext()
@@ -981,7 +1096,7 @@ class Redistribute(torch.autograd.Function):
         input: "dtensor.DTensor",
         device_mesh: DeviceMesh,
         placements: tuple[Placement, ...],
-        shard_order: Optional[TOrder] = None,
+        shard_order: Optional[TensorDimTuple] = None,
         async_op: bool = False,
         forward_dtype: Optional[torch.dtype] = None,
         backward_dtype: Optional[torch.dtype] = None,
