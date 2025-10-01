@@ -2036,6 +2036,7 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
         self.stores = IndentedBuffer()
 
         self.num_load = 0
+        self.num_store = 0
         self.num_reduction = 0
 
         self.cse: CSE[CSEVariableType, Any] = CSE(self.newvar_prefix, self.suffix)
@@ -2407,8 +2408,9 @@ class KernelTemplate:
 
         return get_dtype
 
-    def __init__(self, name: str) -> None:
+    def __init__(self, name: str, hash: Optional[str] = None) -> None:
         self.name = name
+        self._hash = hash
 
     @property
     def uid(self) -> str:
@@ -2420,6 +2422,17 @@ class KernelTemplate:
         """
         # TODO(coconutruben): add some central registration to assert on global uniqueness
         return self.name
+
+    @property
+    def src_hash(self) -> Union[str, None]:
+        """
+        source hash for a Template.
+
+        Templates can optionally provide a src hash to make it easier to cache/validate that
+        a template has not changed from one version to another. Override this if that detection
+        is different for your specific Template
+        """
+        return self._hash
 
     def choice_or_none(self, **kwargs: Any) -> Optional[ChoiceCaller]:
         """
@@ -2689,6 +2702,7 @@ class CSEProxy(DefaultHandler):
             self._update_store_cache(name, value)
         if name not in V.graph.removed_buffers:
             self.kernel.store(name, index, value, mode=mode)
+            self.kernel.num_store += 1
 
     def store_reduction(self, name: str, index: sympy.Expr, value: CSEVariable) -> None:
         self.kernel.store_buffer_names.add(name)

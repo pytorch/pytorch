@@ -22,7 +22,7 @@ from typing import Any, Callable, Generic, Optional, TYPE_CHECKING, TypeVar, Uni
 from typing_extensions import override
 
 import torch
-from torch._dynamo.precompile_context import PrecompileCacheArtifact, PrecompileContext
+from torch._dynamo.precompile_context import BackendCacheArtifact, PrecompileContext
 from torch._dynamo.trace_rules import torch_non_c_binding_in_graph_functions
 from torch._dynamo.utils import (
     chromium_event_log_active,
@@ -51,7 +51,7 @@ from torch._inductor.output_code import (
     OutputCode,
 )
 from torch._inductor.runtime.runtime_utils import cache_dir
-from torch._inductor.utils import should_use_remote_fx_graph_cache
+from torch._inductor.utils import BoxedBool, should_use_remote_fx_graph_cache
 from torch._logging import LazyString
 from torch._utils_internal import log_cache_bypass
 from torch.compiler._cache import (
@@ -71,15 +71,16 @@ from .runtime_wrappers import (
     FunctionalizedRngRuntimeWrapper,
     post_compile,
     RuntimeWrapper,
+    SerializableCompiledFunction,
     SubclassMeta,
 )
 from .schemas import AOTAutogradCacheInfo, AOTConfig, ViewAndMutationMeta  # noqa: F401
+from .utils import simple_wraps
 
 
 if TYPE_CHECKING:
     from torch._inductor.compile_fx import _CompileFxKwargs
     from torch._inductor.remote_cache import JsonDataTy, RemoteCache
-    from torch._inductor.utils import BoxedBool
     from torch.fx.node import Node
 
 log = logging.getLogger(__name__)
@@ -306,6 +307,8 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
         self,
         gm: torch.fx.GraphModule,
     ):
+        assert has_triton_package(), "Triton is not available"
+
         triton_kernels = []
         for module in gm.modules():
             if not isinstance(module, torch.fx.GraphModule):
@@ -331,6 +334,11 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
         )
 
         for kernel in triton_kernels:
+            from triton.runtime.autotuner import Autotuner
+
+            if isinstance(kernel, Autotuner):
+                # Grab the Inner JITFunction
+                kernel = kernel.fn
             source_codes = user_defined_triton_kernel_transitive_closure_source_code(
                 kernel
             )
@@ -355,7 +363,8 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
             [],
             [],
         )
-        self.triton_kernel_source_codes = self.get_triton_source_codes_from_gm(gm)
+        if has_triton_package():
+            self.triton_kernel_source_codes = self.get_triton_source_codes_from_gm(gm)
 
         if hasattr(gm, "saved_tensors_hooks_pack_0"):
 
@@ -955,6 +964,7 @@ class GenericAOTAutogradCacheEntry(Generic[TForward, TBackward]):
                 fw_metadata=self.runtime_metadata,
                 try_save_cache_entry=None,
             )
+
         else:
             compiled_function = RuntimeWrapper(
                 indices_of_inps_to_detach=self.indices_of_inps_to_detach,
@@ -963,6 +973,11 @@ class GenericAOTAutogradCacheEntry(Generic[TForward, TBackward]):
             ).post_compile(
                 compiled_fw_func, aot_config, runtime_metadata=self.runtime_metadata
             )
+
+        # Add serialization function back onto object
+        compiled_function = SerializableCompiledFunction(
+            compiled_function, lambda: self
+        )
 
         compiled_function, _ = post_compile(
             self.dispatch_wrappers,
@@ -1043,39 +1058,40 @@ class AOTAutogradCacheArtifact(CacheArtifact):
         return "aot_autograd"
 
 
-@CacheArtifactFactory.register
-class BundledAOTAutogradCacheArtifact(PrecompileCacheArtifact[Callable]):
-    @override
-    @staticmethod
-    def type():
-        return "precompile_aot_autograd"
+def deserialize_bundled_cache_entry(entry: BundledAOTAutogradCacheEntry) -> Callable:
+    # In the precompile use case, guards are already serialized
+    # by dynamo, so we don't need to add them to the environment
+    entry.guards_expr = None
+    # TODO: this isn't exactly right, because cudagraphs needs to be a shared config
+    # which is set by compile_fx. But in precompile, we never actually call compile_fx
+    # so we don't have a place to track cudagraphs here.
+    cudagraphs = BoxedBool(torch._inductor.config.triton.cudagraphs)
+    boxed_forward_device_index = BoxedDeviceIndex(None)
+    compiled_fn = entry.wrap_post_compile(
+        [],
+        entry.sanitized_aot_config,
+        {
+            "cudagraphs": cudagraphs,
+            "boxed_forward_device_index": boxed_forward_device_index,
+        },
+    )
 
-    @override
+    # TODO: this ignores flat_params, which can exist
+    # if inline_builtin_nn_modules=False
+    @simple_wraps(compiled_fn)
+    def forward(*runtime_args: tuple[Any]):
+        return compiled_fn(list(runtime_args))
+
+    assert hasattr(compiled_fn, "serialize")
+    forward.serialize = compiled_fn.serialize  # type: ignore[attr-defined]
+
+    return forward
+
+
+@dataclass
+class BundledAOTAutogradCacheArtifact(BackendCacheArtifact[Callable]):
     def after_deserialization(self) -> Callable:
-        entry = pickle.loads(self.content)
-        # In the precompile use case, guards are already serialized
-        # by dynamo, so we don't need to add them to the environment
-        entry.guards_expr = None
-        # TODO: this isn't exactly right, because cudagraphs needs to be a shared config
-        # which is set by compile_fx. But in precompile, we never actually call compile_fx
-        # so we don't have a place to track cudagraphs here.
-        cudagraphs = torch._inductor.config.triton.cudagraphs
-        boxed_forward_device_index = BoxedDeviceIndex(None)
-        compiled_fn = entry.wrap_post_compile(
-            [],
-            entry.sanitized_aot_config,
-            {
-                "cudagraphs": cudagraphs,
-                "boxed_forward_device_index": boxed_forward_device_index,
-            },
-        )
-
-        # TODO: this ignores flat_params, which can exist
-        # if inline_builtin_nn_modules=False
-        def forward(*runtime_args: tuple[Any]):
-            return compiled_fn(list(runtime_args))
-
-        return forward
+        return deserialize_bundled_cache_entry(self.content)
 
 
 class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
@@ -1351,9 +1367,9 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
                     # 1. because we set it to None on save 2. even if we didn't, this new run
                     # that cache hit has a *new* backend id associated with it.
                     PrecompileContext.record_artifact(
-                        BundledAOTAutogradCacheArtifact.type(),
-                        aot_config.precompile_backend_id,
-                        pickled_content,
+                        BundledAOTAutogradCacheArtifact(
+                            aot_config.precompile_backend_id, entry
+                        ),
                     )
         except Exception as e:
             log.info("AOTAutograd cache unable to load compiled graph: %s", e)
@@ -1389,15 +1405,11 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
                 and entry.sanitized_aot_config.precompile_backend_id is not None
             ):
                 precompile_key = entry.sanitized_aot_config.precompile_backend_id
+                artifact = BundledAOTAutogradCacheArtifact(precompile_key, entry)
                 # Now that we're saving it, the precompile_backend_id field is no longer
                 # useful, remove it from the entry.
                 entry.sanitized_aot_config.precompile_backend_id = None
-                PrecompileContext.record_artifact(
-                    BundledAOTAutogradCacheArtifact.type(),
-                    precompile_key,
-                    entry,
-                    editable=True,
-                )
+                PrecompileContext.record_artifact(artifact)
             AOTAutogradCache._write_to_local_cache(key, content)
             counters["aot_autograd"]["autograd_cache_saved"] += 1
         except BypassAOTAutogradCache as e:

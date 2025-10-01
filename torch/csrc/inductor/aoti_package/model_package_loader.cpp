@@ -24,6 +24,7 @@ namespace fs = std::filesystem;
 
 // TODO: C++17 has the filesystem header, which may replace these
 #ifdef _WIN32
+#include <Windows.h>
 // On Windows, the POSIX implementations are considered deprecated. We simply
 // map to the newer variant.
 #include <direct.h>
@@ -39,6 +40,23 @@ namespace fs = std::filesystem;
 namespace {
 
 const std::string k_separator = "/";
+
+std::string remove_duplicate_separator_of_path(const std::string& path) {
+  /*
+  On Windows, temp file path maybe has duplicate separator.
+  Need to remove the duplication:
+  Origin: C:/Users/Xuhan/AppData/Local/Temp//tmpl10jfwef/filename
+  Processed: C:/Users/Xuhan/AppData/Local/Temp/tmpl10jfwef/filename
+  */
+  std::string result = path;
+  size_t pos = 0;
+
+  while ((pos = result.find("//", pos)) != std::string::npos) {
+    result.replace(pos, 2, "/");
+  }
+
+  return result;
+}
 
 std::string normalize_path_separator(const std::string& orig_path) {
   /*
@@ -57,6 +75,7 @@ std::string normalize_path_separator(const std::string& orig_path) {
 #ifdef _WIN32
   std::replace(normalized_path.begin(), normalized_path.end(), '\\', '/');
 #endif
+  normalized_path = remove_duplicate_separator_of_path(normalized_path);
   return normalized_path;
 }
 
@@ -108,6 +127,22 @@ const char* extension_file_ext() {
 #endif
 }
 
+const char* get_output_flags(bool compile_only) {
+  if (compile_only) {
+#ifdef _WIN32
+    return "/c /Fo"; // codespell:ignore
+#else
+    return "-c -o";
+#endif
+  }
+
+#ifdef _WIN32
+  return "/Fe";
+#else
+  return "-o";
+#endif
+}
+
 bool _is_windows_os() {
 #ifdef _WIN32
   return true;
@@ -146,7 +181,7 @@ std::tuple<std::string, std::string> get_cpp_compile_command(
 
   std::string source_args;
   for (const std::string& source : sources) {
-    source_args += source + " ";
+    source_args += normalize_path_separator(source) + " ";
   }
 
   std::string file_ext =
@@ -160,24 +195,28 @@ std::tuple<std::string, std::string> get_cpp_compile_command(
 
   std::string cflags_args;
   for (auto& arg : compile_options["cflags"]) {
-    cflags_args += _is_windows_os() ? "/" : "-" + arg.get<std::string>() + " ";
+    // [Windows compiler need it] convert first char arg to std::string, for
+    // following plus(+) strings.
+    cflags_args += std::string(_is_windows_os() ? "/" : "-") +
+        arg.get<std::string>() + " ";
   }
 
   std::string definitions_args;
   for (auto& arg : compile_options["definitions"]) {
-    definitions_args +=
-        _is_windows_os() ? "/D" : "-D " + arg.get<std::string>() + " ";
+    definitions_args += std::string(_is_windows_os() ? "/D" : "-D ") +
+        arg.get<std::string>() + " ";
   }
 
   std::string include_dirs_args;
   for (auto& arg : compile_options["include_dirs"]) {
-    include_dirs_args +=
-        _is_windows_os() ? "/I" : "-I" + arg.get<std::string>() + " ";
+    include_dirs_args += std::string(_is_windows_os() ? "/I" : "-I") +
+        arg.get<std::string>() + " ";
   }
 
   std::string ldflags_args;
   for (auto& arg : compile_options["ldflags"]) {
-    ldflags_args += _is_windows_os() ? "/" : "-" + arg.get<std::string>() + " ";
+    ldflags_args += std::string(_is_windows_os() ? "/" : "-") +
+        arg.get<std::string>() + " ";
   }
 
   std::string libraries_dirs_args;
@@ -209,38 +248,48 @@ std::tuple<std::string, std::string> get_cpp_compile_command(
     passthrough_parameters_args += arg_str + " ";
   }
 
-  std::string compile_only_arg =
-      compile_only ? (_is_windows_os() ? "/c" : "-c") : "";
+  std::string output_flags = get_output_flags(compile_only);
 
   std::string cmd;
+  /*
+  Format command as python frontend cpp_builder:
+  https://github.com/pytorch/pytorch/blob/3ef1bef36c73b4def0e1b71847e27fde1556c0fb/torch/_inductor/cpp_builder.py#L1780-L1790
+  https://github.com/pytorch/pytorch/blob/3ef1bef36c73b4def0e1b71847e27fde1556c0fb/torch/_inductor/cpp_builder.py#L1959-L1976
+  */
   if (_is_windows_os()) {
-    cmd = normalize_path_separator(fmt::format(
-        "{} {} {} {} {} {} /LD /Fe{} {} /link {} {} {}",
+    cmd = fmt::format(
+        "{} {} {} {} {} {} {}{}",
         compiler,
         include_dirs_args,
         definitions_args,
         cflags_args,
         source_args,
         passthrough_parameters_args,
-        target_file,
-        compile_only_arg,
-        libraries_dirs_args,
-        libraries_args,
-        ldflags_args));
+        output_flags,
+        target_file);
+    if (compile_only == false) {
+      cmd += fmt::format(
+          " /LD /link {} {} {}",
+          libraries_dirs_args,
+          libraries_args,
+          ldflags_args);
+    }
+    cmd = normalize_path_separator(cmd);
   } else {
-    cmd = normalize_path_separator(fmt::format(
-        "{} {} {} {} {} {} {} {} {} {} -o {}",
+    cmd = fmt::format(
+        "{} {} {} {} {} {} {} {}",
         compiler,
         source_args,
         definitions_args,
         cflags_args,
         include_dirs_args,
         passthrough_parameters_args,
-        ldflags_args,
-        libraries_args,
-        libraries_dirs_args,
-        compile_only_arg,
-        target_file));
+        output_flags,
+        target_file);
+    if (compile_only == false) {
+      cmd += fmt::format(
+          " {} {} {}", ldflags_args, libraries_args, libraries_dirs_args);
+    }
   }
 
   return std::make_tuple(cmd, target_file);
@@ -350,14 +399,15 @@ std::string compile_so(
   size_t lastindex = cpp_filename.find_last_of('.');
   std::string filename = cpp_filename.substr(0, lastindex);
 
-  std::string compile_flags_path = filename + "_compile_flags.json";
+  std::string compile_flags_path =
+      normalize_path_separator(filename + "_compile_flags.json");
   const nlohmann::json compile_flags = load_json_file(compile_flags_path);
 
   auto [compile_cmd, output_o] =
       get_cpp_compile_command(filename, {cpp_filename}, compile_flags);
 
-  std::string linker_flags_path =
-      cpp_filename.substr(0, lastindex) + "_linker_flags.json";
+  std::string linker_flags_path = normalize_path_separator(
+      cpp_filename.substr(0, lastindex) + "_linker_flags.json");
   const nlohmann::json linker_flags = load_json_file(linker_flags_path);
 
   obj_filenames.push_back(output_o);
@@ -492,12 +542,28 @@ class RAIIMinizArchive {
   void extract_file(
       const std::string& zip_filename,
       const std::string& dest_filename) {
+    // Can't normalize_path_separator zip_filename, as it is zip index.
+    std::string path_dest_filename = normalize_path_separator(dest_filename);
     if (!mz_zip_reader_extract_file_to_file(
-            &_zip_archive, zip_filename.c_str(), dest_filename.c_str(), 0)) {
+            &_zip_archive,
+            zip_filename.c_str(),
+            path_dest_filename.c_str(),
+            0)) {
+#ifdef _WIN32
+      DWORD dwErrCode = GetLastError();
       throw std::runtime_error(fmt::format(
-          "Failed to extract zip file {} to destination file {}",
+          "Failed to extract zip file {} to destination file {}, error code: {}, mz_zip error string: {}",
           zip_filename,
-          dest_filename));
+          path_dest_filename,
+          dwErrCode,
+          mz_zip_get_error_string(mz_zip_get_last_error(&_zip_archive))));
+#else
+      throw std::runtime_error(fmt::format(
+          "Failed to extract zip file {} to destination file {}, mz_zip error string: {}",
+          zip_filename,
+          path_dest_filename,
+          mz_zip_get_error_string(mz_zip_get_last_error(&_zip_archive))));
+#endif
     }
   }
 

@@ -172,7 +172,7 @@ bool InputOutputEncoder::isSupportedScalarList(
   return true;
 }
 
-// This function returns a lambda which is is a custom-iterator-like getter.
+// This function returns a lambda which is a custom-iterator-like getter.
 // Each invocation of the lambda returns input values for one op.
 //
 // io_type is used to filter the ivalues between 'Shapes' and 'Concrete Args'.

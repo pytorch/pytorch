@@ -82,11 +82,11 @@ dlrm,pass,0
 
 
 
-doctr_det_predictor,pass,5
+doctr_det_predictor,pass,3
 
 
 
-doctr_reco_predictor,pass,4
+doctr_reco_predictor,pass,1
 
 
 
@@ -122,7 +122,7 @@ hf_Bert_large,pass,0
 
 
 
-hf_BigBird,pass,25
+hf_BigBird,pass,27
 
 
 
@@ -142,7 +142,7 @@ hf_Longformer,pass,4
 
 
 
-hf_Reformer,pass,8
+hf_Reformer,pass,5
 
 
 

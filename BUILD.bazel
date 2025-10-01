@@ -810,7 +810,7 @@ cc_library(
     name = "torch_python",
     srcs = libtorch_python_core_sources
         + if_cuda(libtorch_python_cuda_sources)
-        + if_cuda(libtorch_python_distributed_sources)
+        + libtorch_python_distributed_sources
         + GENERATED_AUTOGRAD_PYTHON,
     hdrs = glob([
         "torch/csrc/generic/*.cpp",
@@ -827,36 +827,6 @@ pybind_extension(
     name = "torch/_C",
     srcs = ["torch/csrc/stub.c"],
     deps = [
-        ":torch_python",
-        ":aten_nvrtc",
-    ],
-)
-
-cc_library(
-    name = "functorch",
-    hdrs = glob([
-        "functorch/csrc/dim/*.h",
-    ]),
-    srcs = glob([
-        "functorch/csrc/dim/*.cpp",
-    ]),
-    deps = [
-        ":aten_nvrtc",
-        ":torch_python",
-        "@pybind11",
-    ],
-)
-
-pybind_extension(
-    name = "functorch/_C",
-    copts=[
-        "-DTORCH_EXTENSION_NAME=_C"
-    ],
-    srcs = [
-        "functorch/csrc/init_dim_only.cpp",
-    ],
-    deps = [
-        ":functorch",
         ":torch_python",
         ":aten_nvrtc",
     ],
@@ -902,7 +872,6 @@ py_library(
     ],
     data = [
         ":torch/_C.so",
-        ":functorch/_C.so",
         ":torch/bin/torch_shm_manager",
     ],
 )

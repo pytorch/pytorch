@@ -7,6 +7,7 @@ import warnings
 from collections.abc import Iterable
 from copy import deepcopy
 from typing import Any, Callable, cast, Literal, Optional, Union
+from typing_extensions import override
 
 import torch
 from torch import Tensor
@@ -431,10 +432,7 @@ class SWALR(LRScheduler):
                 "anneal_strategy must by one of 'cos' or 'linear', "
                 f"instead got {anneal_strategy}"
             )
-        elif anneal_strategy == "cos":
-            self.anneal_func = self._cosine_anneal
-        elif anneal_strategy == "linear":
-            self.anneal_func = self._linear_anneal
+        self._set_anneal_func(anneal_strategy)
         if not isinstance(anneal_epochs, int) or anneal_epochs < 0:
             raise ValueError(
                 f"anneal_epochs must be equal or greater than 0, got {anneal_epochs}"
@@ -482,3 +480,34 @@ class SWALR(LRScheduler):
             group["swa_lr"] * alpha + lr * (1 - alpha)
             for group, lr in zip(self.optimizer.param_groups, prev_lrs)
         ]
+
+    def _set_anneal_func(self, anneal_strategy: Literal["cos", "linear"]):
+        self._anneal_strategy = anneal_strategy
+        if anneal_strategy == "cos":
+            self.anneal_func = self._cosine_anneal
+        else:
+            self.anneal_func = self._linear_anneal
+
+    @override
+    def state_dict(self) -> dict[str, Any]:
+        """Return the state of the scheduler as a :class:`dict`.
+
+        It contains an entry for every variable in self.__dict__ which
+        is not the optimizer or anneal_func.
+        """
+        return {
+            key: value
+            for key, value in self.__dict__.items()
+            if key not in ("optimizer", "anneal_func")
+        }
+
+    @override
+    def load_state_dict(self, state_dict: dict[str, Any]) -> None:
+        """Load the scheduler's state.
+
+        Args:
+            state_dict (dict): scheduler state. Should be an object returned
+                from a call to :meth:`state_dict`.
+        """
+        self.__dict__.update(state_dict)
+        self._set_anneal_func(self._anneal_strategy)

@@ -58,7 +58,7 @@ from torch.ao.quantization.quantizer.xnnpack_quantizer import (
     XNNPACKQuantizer,
 )
 
-from torch.export import export_for_training
+from torch.export import export
 from torch.jit.mobile import _load_for_lite_interpreter
 from torch.testing._internal.common_quantized import override_quantized_engine
 from torch.testing._internal.common_utils import TEST_WITH_ROCM, TestCase
@@ -1513,7 +1513,7 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
             {0: torch.export.Dim("dim")} if i == 0 else None
             for i in range(len(example_inputs))
         )
-        m = export_for_training(
+        m = export(
             m,
             example_inputs,
             dynamic_shapes=dynamic_shapes if export_with_dynamic_shape else None,
@@ -1554,7 +1554,7 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
             m_fx = _convert_to_reference_decomposed_fx(
                 m_fx, backend_config=backend_config
             )
-            m_fx = export_for_training(
+            m_fx = export(
                 m_fx,
                 example_inputs,
                 dynamic_shapes=dynamic_shapes if export_with_dynamic_shape else None,
@@ -1578,7 +1578,7 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
         # resetting dynamo cache
         torch._dynamo.reset()
 
-        m = export_for_training(m, example_inputs, strict=True).module()
+        m = export(m, example_inputs, strict=True).module()
         if is_qat:
             m = prepare_qat_pt2e(m, quantizer)
         else:
@@ -3183,12 +3183,15 @@ class TestHelperModules:
             x = self.adaptive_avg_pool2d(x)
             return x
 
-
     class ConvWithBNRelu(torch.nn.Module):
         def __init__(self, relu, dim=2, bn=True, bias=True, padding=0):
             super().__init__()
             convs = {1: torch.nn.Conv1d, 2: torch.nn.Conv2d, 3: torch.nn.Conv3d}
-            bns = {1: torch.nn.BatchNorm1d, 2: torch.nn.BatchNorm2d, 3: torch.nn.BatchNorm3d}
+            bns = {
+                1: torch.nn.BatchNorm1d,
+                2: torch.nn.BatchNorm2d,
+                3: torch.nn.BatchNorm3d,
+            }
             self.conv = convs[dim](3, 3, 3, bias=bias, padding=padding)
 
             if bn:
@@ -3394,7 +3397,7 @@ def _generate_qdq_quantized_model(
 
     maybe_no_grad = contextlib.nullcontext() if is_qat else torch.no_grad()
     with maybe_no_grad:
-        export_model = export_for_training(mod, inputs, strict=True).module(check_guards=False)
+        export_model = export(mod, inputs, strict=True).module(check_guards=False)
         quantizer = (
             quantizer
             if quantizer

@@ -1,10 +1,10 @@
 ubuntu|pytorch|apex|master|4b03581558a063754bc1c4c9656bf6444844568c|https://github.com/ROCm/apex
 centos|pytorch|apex|master|4b03581558a063754bc1c4c9656bf6444844568c|https://github.com/ROCm/apex
-ubuntu|pytorch|torchvision|main|a8dc530fbb96a66a68dfbf48743fb528df770d87|https://github.com/pytorch/vision
-centos|pytorch|torchvision|main|a8dc530fbb96a66a68dfbf48743fb528df770d87|https://github.com/pytorch/vision
+ubuntu|pytorch|torchvision|main|e3b5d3a8bf5e8636462fd8bce9897bccc690b2a0|https://github.com/pytorch/vision
+centos|pytorch|torchvision|main|e3b5d3a8bf5e8636462fd8bce9897bccc690b2a0|https://github.com/pytorch/vision
 ubuntu|pytorch|torchdata|main|92950795e0790eb74df995daf40b658e85fd2c9f|https://github.com/pytorch/data
 centos|pytorch|torchdata|main|92950795e0790eb74df995daf40b658e85fd2c9f|https://github.com/pytorch/data
-ubuntu|pytorch|torchaudio|main|2685e6b932d666435a198bfed472015bb5b87a55|https://github.com/pytorch/audio
-centos|pytorch|torchaudio|main|2685e6b932d666435a198bfed472015bb5b87a55|https://github.com/pytorch/audio
-ubuntu|pytorch|ao|main|0df571af05e2fdc516022c98f6686a6888b81e1a|https://github.com/pytorch/ao
-centos|pytorch|ao|main|0df571af05e2fdc516022c98f6686a6888b81e1a|https://github.com/pytorch/ao
+ubuntu|pytorch|torchaudio|main|87ff22e49ed0e92576c4935ccb8c143daac4a3cd|https://github.com/pytorch/audio
+centos|pytorch|torchaudio|main|87ff22e49ed0e92576c4935ccb8c143daac4a3cd|https://github.com/pytorch/audio
+ubuntu|pytorch|ao|main|5e90c477f6d49a17540bd7431728bfb2457610ee|https://github.com/pytorch/ao
+centos|pytorch|ao|main|5e90c477f6d49a17540bd7431728bfb2457610ee|https://github.com/pytorch/ao

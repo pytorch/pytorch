@@ -135,9 +135,11 @@ class FakeTensorTLS(threading.local):
     # Default to None, otherwise it'll be used to override _all_
     # `FakeTensorMode.allow_non_fake_inputs` in this thread.
     allow_non_fake_inputs_override: Optional[bool]
+    non_strict_export_fake_tensor_tracker: weakref.WeakSet
 
     def __init__(self) -> None:
         self.allow_non_fake_inputs_override = None
+        self.non_strict_export_fake_tensor_tracker = weakref.WeakSet()
 
 
 fake_tensor_tls = FakeTensorTLS()
@@ -791,6 +793,11 @@ class FakeTensor(Tensor):
     #
     def __init__(self, *args: object, **kwargs: object) -> None:
         super().__init__()
+        if (
+            torch.compiler.is_exporting()
+            and torch._export.config.detect_non_strict_fake_tensor_leaks
+        ):
+            fake_tensor_tls.non_strict_export_fake_tensor_tracker.add(self)
 
     @staticmethod
     def from_tensor(t: Tensor, fake_mode: FakeTensorMode) -> FakeTensor:
@@ -1387,6 +1394,12 @@ class FakeTensorMode(TorchDispatchMode):
             # See NOTE: [torch.tensor, lift_fresh, and device movement]
             prev_only_lift_cpu_tensors = torch._C._only_lift_cpu_tensors()
             torch._C._set_only_lift_cpu_tensors(True)
+
+            # In the case of CPU-only build or cuda device unavailable,
+            # we patch the cuda device guard to use NoOpDeviceGuardImpl.
+            # This enables us to trace over cuda kernels under FakeTensorMode.
+            torch._C._ensureCUDADeviceGuardSet()
+
         maybe_prev_fake_mode = torch._C._unset_dispatch_mode(self._mode_key)
         if self is not maybe_prev_fake_mode:
             self.enter_stack.append(
@@ -1397,6 +1410,7 @@ class FakeTensorMode(TorchDispatchMode):
             # no-op (still need to re-set the fake mode though since we unset it)
             torch._C._set_dispatch_mode(self)
             self.enter_stack.append((False, None, prev_only_lift_cpu_tensors))
+
         return self
 
     def __exit__(
@@ -2320,11 +2334,28 @@ class FakeTensorMode(TorchDispatchMode):
         converter = self.fake_tensor_converter
 
         is_lift_func = func in self.lift_fns
+
+        # If we are trying to avoid device init, then we need to avoid constant
+        # prop on constant tensors for ops that change devices.
+        avoiding_device_init = False
+        if self.avoid_device_init:
+            if (
+                func == torch.ops.aten._to_copy.default
+                and "device" in kwargs
+                and kwargs["device"].type != "cpu"  # type: ignore[attr-defined]
+            ):
+                avoiding_device_init = True
+            if func == torch.ops.prims.device_put.default:
+                avoiding_device_init = True
+
+        # skip const prop for aten._to_copy if
+        # 1. input tensor is on "meta" device
+        # 2. destination device is unavailable, captured by `avoiding_device_init`
         device_conversion_skip_const_prop = (
             func is torch.ops.aten._to_copy.default
             and isinstance(args[0], torch.Tensor)
             and args[0].device.type == "meta"
-        )
+        ) or avoiding_device_init
 
         # To constant propagate through these functions:
         # 1, If this is a lift due to a torch.tensor call,
@@ -2369,19 +2400,6 @@ class FakeTensorMode(TorchDispatchMode):
 
             if type(args[0]) is Tensor:
                 return converter.from_real_tensor(self, args[0])
-
-        # If we are trying to avoid device init, then we need to avoid constant
-        # prop on constant tensors for ops that change devices.
-        avoiding_device_init = False
-        if self.avoid_device_init:
-            if (
-                func == torch.ops.aten._to_copy.default
-                and "device" in kwargs
-                and kwargs["device"] != "cpu"
-            ):
-                avoiding_device_init = True
-            if func == torch.ops.prims.device_put.default:
-                avoiding_device_init = True
 
         # Recompute flat_arg_fake_tensors here again in case some of the inputs
         # were real tensors and fakified in validate_and_convert_non_fake_tensors

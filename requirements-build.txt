@@ -9,3 +9,4 @@ pyyaml==6.0.2
 requests==2.32.4
 six==1.17.0  # dependency chain: NNPACK -> PeachPy -> six
 typing-extensions==4.14.1
+pip  # not technically needed, but this makes setup.py invocation work
