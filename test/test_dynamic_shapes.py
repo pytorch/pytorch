@@ -1955,8 +1955,7 @@ class TestFloorDiv(TestCase):
 
         print("Testing FloorDiv with complex symbolic expression...")
 
-        # Build the numerator expression step by step
-        inner_expr = FloorDiv(s14, 2016)  # This creates a FloorDiv
+        inner_expr = FloorDiv(s14, 2016) 
         middle_expr = (24 * s37 + 672) * inner_expr
         numerator = middle_expr + 21
         denominator = 22
