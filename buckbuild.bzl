@@ -1047,12 +1047,12 @@ def define_buck_targets(
     fb_native.genrule(
         name = "generate-version-header",
         srcs = [
-            "torch/csrc/api/include/torch/version.h.in",
+            "torch/headeronly/version.h.in",
             "version.txt",
         ],
         cmd = "$(exe {}tools:gen-version-header) ".format(ROOT_PATH) + " ".join([
             "--template-path",
-            "torch/csrc/api/include/torch/version.h.in",
+            "torch/headeronly/version.h.in",
             "--version-path",
             "version.txt",
             "--output-path",
