@@ -10,7 +10,7 @@ import sys
 import time
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Dict, Optional
+from typing import Optional
 
 
 try:
@@ -19,6 +19,7 @@ try:
     HAS_TQDM = True
 except ImportError:
     HAS_TQDM = False
+
     # Create a mock tqdm class for type safety
     class MockTqdm:
         @staticmethod
@@ -31,7 +32,7 @@ except ImportError:
 def persist_print(msg):
     """Print messages that persist with tqdm progress bars."""
     try:
-        if HAS_TQDM and hasattr(tqdm, 'write'):
+        if HAS_TQDM and hasattr(tqdm, "write"):
             # Keep prints on the same stream as the bar
             tqdm.write(msg, file=sys.stderr)
         else:
@@ -70,7 +71,7 @@ class FuzzerResult:
     output: str
     duration: float
     ignored_pattern_idx: int
-    operation_stats: Dict[str, int]  # New field for operation statistics
+    operation_stats: dict[str, int]  # New field for operation statistics
 
 
 def is_ignored_output(output: str) -> int:
@@ -135,18 +136,18 @@ def run_fuzzer_with_seed(seed: int, template: str = "default") -> FuzzerResult:
         # Parse operation statistics from the output
         operation_stats = {}
         if result.stdout:
-            lines = result.stdout.split('\n')
+            lines = result.stdout.split("\n")
             in_stats_section = False
             for line in lines:
                 if line.strip() == "OPERATION_STATS:":
                     in_stats_section = True
                     continue
                 elif in_stats_section:
-                    if line.startswith('  ') and ':' in line:
+                    if line.startswith("  ") and ":" in line:
                         # Parse line like "  torch.add: 3"
                         op_line = line.strip()
-                        if ': ' in op_line:
-                            op_name, count_str = op_line.split(': ', 1)
+                        if ": " in op_line:
+                            op_name, count_str = op_line.split(": ", 1)
                             try:
                                 count = int(count_str)
                                 operation_stats[op_name] = count
@@ -162,7 +163,9 @@ def run_fuzzer_with_seed(seed: int, template: str = "default") -> FuzzerResult:
             # Mark as ignored (could also return a special flag if needed)
             output = "[IGNORED] " + output
 
-        return FuzzerResult(seed, success, output, duration, ignored_pattern_idx, operation_stats)
+        return FuzzerResult(
+            seed, success, output, duration, ignored_pattern_idx, operation_stats
+        )
 
     except subprocess.TimeoutExpired:
         duration = time.time() - start_time
@@ -172,7 +175,9 @@ def run_fuzzer_with_seed(seed: int, template: str = "default") -> FuzzerResult:
 
     except Exception as e:
         duration = time.time() - start_time
-        return FuzzerResult(seed, False, f"Exception occurred: {str(e)}", duration, -1, {})
+        return FuzzerResult(
+            seed, False, f"Exception occurred: {str(e)}", duration, -1, {}
+        )
 
 
 def print_output_lines(output: str, write_func):
@@ -251,6 +256,7 @@ def run_multi_process_fuzzer(
             # Set up progress bar
             if HAS_TQDM:
                 from tqdm import tqdm  # Import the real tqdm here
+
                 pbar = tqdm(
                     total=len(seeds),
                     desc="Processing seeds",
@@ -349,7 +355,9 @@ def run_multi_process_fuzzer(
                         )
                         persist_print(f"❌ POOL ERROR - Seed {seeds[i]}: {str(e)}")
                     results.append(
-                        FuzzerResult(seeds[i], False, f"Pool error: {str(e)}", 0.0, -1, {})
+                        FuzzerResult(
+                            seeds[i], False, f"Pool error: {str(e)}", 0.0, -1, {}
+                        )
                     )
 
             # Close progress bar
@@ -476,10 +484,14 @@ def _print_operation_distribution(results: list[FuzzerResult]) -> None:
         persist_print("")
 
         # Sort operations by count (descending) for better readability
-        sorted_ops = sorted(total_operation_stats.items(), key=lambda x: x[1], reverse=True)
+        sorted_ops = sorted(
+            total_operation_stats.items(), key=lambda x: x[1], reverse=True
+        )
 
         for op_name, count in sorted_ops:
             percentage = (count / total_operations * 100) if total_operations > 0 else 0
             persist_print(f"  {op_name:<30} {count:>6} times ({percentage:>5.1f}%)")
     else:
-        persist_print("\n📊 No operation statistics collected (no successful runs with stats)")
+        persist_print(
+            "\n📊 No operation statistics collected (no successful runs with stats)"
+        )
