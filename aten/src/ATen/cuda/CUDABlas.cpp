@@ -191,6 +191,10 @@ uint32_t _getAlignment(uintptr_t address) {
 
 #ifdef USE_ROCM
 static c10::cuda::CUDAStream _getCarveoutStream(int32_t value) {
+  // 0 is default value, meaning full CUs i.e. no mask
+  if (value == 0) {
+    return at::cuda::getCurrentCUDAStream();
+  }
   static int32_t last_value = 0;
   static hipStream_t stream;
   if (last_value == 0) {
@@ -209,15 +213,15 @@ static c10::cuda::CUDAStream _getCarveoutStream(int32_t value) {
   int32_t CUs = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
   // how many uint32_t do we need to cover all CUs, fill bitmask with 1
   uint32_t mask_size = static_cast<uint32_t>((CUs + 32 - 1) / 32);
-  std::vector<uint32_t> mask(mask_size, uint32_t{0xffffffff});
+  std::vector<uint32_t> mask(mask_size, uint32_t{0x00000000});
   // starting from lowest order bits, in 32-bit chunks
   // set bits to 0 based on how many CUs to carve out
   int32_t full_shifts = value / 32;
   int32_t remainder = value % 32;
   for (int32_t i = 0; i < full_shifts; i++) {
-    mask[i] = uint32_t{0x00000000};
+    mask[i] = uint32_t{0xffffffff};
   }
-  mask[full_shifts] = uint32_t{0xffffffff} << remainder;
+  mask[full_shifts] = uint32_t{0xffffffff} << (32 - remainder);
 
   // finally, create masked stream
   AT_CUDA_CHECK(hipExtStreamCreateWithCUMask(&stream, mask_size, &mask[0]));
