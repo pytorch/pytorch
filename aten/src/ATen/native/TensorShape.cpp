@@ -1880,43 +1880,34 @@ Tensor repeat(const Tensor& self, IntArrayRef repeats) {
 
   Tensor xtensor = self.expand(padded_size);
 
-  Tensor urtensor;
-  if (self.is_quantized()) {
-    urtensor = at::empty_quantized(target_size, self);
-  } else {
-    urtensor = at::empty(target_size, self.options());
-  }
-
-  // return an empty tensor if one of the repeat dimensions is zero
   if (zero_tensor) {
-    return urtensor;
+    return self.is_quantized() ? at::empty_quantized(target_size, self)
+                               : at::empty(target_size, self.options());
   }
 
+  // Create view of shape [r0, s0, r1, s1, ...]
+  // where ri is repeat[i], si is self.size(i).
+  Tensor view = xtensor;
+  auto expand_shape = std::vector<int64_t>();
+  expand_shape.reserve(xtensor.dim() * 2);
   for (const auto i : c10::irange(xtensor.dim())) {
-    // can't unfold with step 0, so make sure step is at least 1
-    // (it doesn't matter what it is in that case, because the size is 0).
-    auto size_i = xtensor.sizes()[i];
-    urtensor = urtensor.unfold(i, size_i, std::max<int64_t>(size_i, 1));
+    view = view.unsqueeze(2 * i);
+    expand_shape.push_back(repeats[i]);
+    expand_shape.push_back(xtensor.size(i));
   }
+  // expanded_view is non-contiguous because .expand set stride to 0.
+  auto expanded_view = view.expand(expand_shape);
 
-  urtensor.copy_(xtensor.expand_as(urtensor));
+  // copy to contiguous tensor.
+  auto contiguous_copy = at::empty(
+      expanded_view.sizes(),
+      expanded_view.options(),
+      at::MemoryFormat::Contiguous);
+  contiguous_copy.copy_(expanded_view);
 
-  // Combine the dimensions to produce the target_size.
-  // xtensor dims: [a0, ..., ad-1]
-  // urtensor dims: [a0, ..., ad-1, b0, ..., bd-1]
-  // b dims are produced by unfold.
-  // Transform urtensor to [a0 * b0, ..., ad-1 * bd-1]
-  const int64_t n_dims = xtensor.dim();
-  auto range_a = at::arange(xtensor.dim(), at::TensorOptions(at::kLong));
-  auto range_b = range_a + n_dims;
-  auto stacked = stack({std::move(range_a), std::move(range_b)}, 1).flatten();
-  auto permutation = IntArrayRef(stacked.data_ptr<int64_t>(), n_dims * 2);
-  // Permute from [a0, ..., ad-1, b0, ..., bd-1] to [a0, b0, ..., ad-1, bd-1]
-  urtensor = urtensor.permute(permutation);
-  // Reshape from [a0, b0, ..., ad-1, bd-1] to [a0 * b0, ..., ad-1 * bd-1]
-  urtensor = urtensor.reshape(target_size);
-
-  return urtensor;
+  // Reshape to [s0 * r0, s1 * r1, ...].
+  // No extra copy of data during reshape for a contiguous tensor.
+  return contiguous_copy.view(target_size);
 }
 
 Tensor tile_symint(const Tensor& self, SymIntArrayRef reps) {
