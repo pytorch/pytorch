@@ -267,8 +267,13 @@ class FloorDiv(sympy.Function):
             terms = []
             for term in sympy.Add.make_args(base):
                 quotient = term / divisor
-
-                if quotient.is_integer:
+                # Ok so (s14//2016)*(24 * s37 + 672)*(s14//2016)//22
+                # is Mul(Rational(1, 22), Add(Mul(Integer(24), Symbol('s37', integer=True, positive=True)), Integer(672)),
+                # Pow(floor(Mul(Rational(1, 2016), Symbol('s14', integer=True, positive=True))), Integer(2)))
+                # yet even though is_integer we do not want to allow quotients with rationals in the results!
+                rationals = quotient.atoms(sympy.Rational)
+                all_rationals_ints = all(r.q == 1 for r in rationals)
+                if quotient.is_integer and all_rationals_ints:
                     terms.append(term)
                     quotients += quotient
 
@@ -308,6 +313,9 @@ class ModularIndexing(sympy.Function):
     ) -> Optional[sympy.Basic]:
         if base == 0 or modulus == 1:
             return sympy.S.Zero
+        # if "/11" in str(base):
+        #     import fbvscode
+        #     fbvscode.set_trace()
 
         if (
             isinstance(base, sympy.Integer)
