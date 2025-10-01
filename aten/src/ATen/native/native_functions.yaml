@@ -14613,6 +14613,17 @@
   tags: view_copy
   autogen: _test_autograd_multiple_dispatch_view_copy.out
 
+# Note: this function is only for testing aoti_torch_call_dispatcher_v2
+# We pretend this is the history of the function and its schema, and the current version is V4
+# V1: _test_schema_upgrader(Tensor self) -> Tensor (fills Tensor with 2)
+# V2: _test_schema_upgrader(Tensor self, *, bool a = True) -> Tensor (fills Tensor with 2 or -2 if a is False)
+# V3: _test_schema_upgrader(Tensor self, *, bool a = True, int b = 2) -> Tensor (fills Tensor with b)
+# V4: _test_schema_upgrader(Tensor self, *, bool a = True, int b = 3) -> Tensor (BC-breaking change of default for b)
+- func: _test_schema_upgrader(Tensor self, *, bool a=True, int b=3) -> Tensor
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: _test_schema_upgrader
+
 - func: segment_reduce(Tensor data, str reduce, *, Tensor? lengths=None, Tensor? indices=None, Tensor? offsets=None, int axis=0, bool unsafe=False, Scalar? initial=None) -> Tensor
   variants: function
   dispatch:
