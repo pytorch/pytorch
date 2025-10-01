@@ -228,7 +228,7 @@ struct FromImpl<torch::stable::Tensor> {
 // This demonstrates version-aware conversion where we encode differently based
 // on version
 
-#ifdef FAKE_TORCH_VERSION
+#ifndef FAKE_TORCH_VERSION
 template <>
 struct FromImpl<dummy_types::v2_8::Dummy> {
   static StableIValue call(
@@ -429,7 +429,7 @@ struct ToImpl<torch::stable::Tensor> {
 // DUMMY TYPE TO-CONVERSIONS (DEMONSTRATION OF VERSION-AWARE CONVERSIONS)
 // =============================================================================
 
-#ifdef FAKE_TORCH_VERSION
+#ifndef FAKE_TORCH_VERSION
 template <>
 struct ToImpl<dummy_types::v2_8::Dummy> {
   static dummy_types::v2_8::Dummy call(

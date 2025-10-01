@@ -14,6 +14,9 @@ using torch::stable::Tensor;
 // with it
 Tensor test_fn_impl(const Tensor& a, const dummy_types::Dummy& b) {
   int32_t id_value = b.get_id();
+  int8_t foo = b.get_foo();
+
+  STD_TORCH_CHECK(static_cast<int32_t>(foo) == 1, "foo must be 1");
 
   Tensor result = torch::stable::empty_like(a);
   torch::stable::fill_(result, static_cast<double>(id_value));

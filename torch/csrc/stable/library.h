@@ -82,7 +82,7 @@ class StableLibrary final {
 //    [stable_ret1, stable_ret2, -, -]
 
 // Uncomment this to pretend extension built against old version
-#ifdef FAKE_TORCH_VERSION
+#ifndef FAKE_TORCH_VERSION
 #define FAKE_VERSION                                              \
   (((0ULL + 2) << 56) | ((0ULL + 8) << 48) | ((0ULL + 0) << 40) | \
    ((0ULL + 0) << 0))
