@@ -176,6 +176,28 @@ AOTI_TORCH_EXPORT void aoti_torch_grad_mode_set_enabled(bool enabled);
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_delete_tensor_object(AtenTensorHandle tensor);
 
+// c10::IValue <int64_t> object conversion
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_int64_to_ivalue(int64_t val, C10IValueHandle* ivalue);
+
+// c10::IValue <const char** > object conversions
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_strlist_to_ivalue(
+    const char** val,
+    int64_t len,
+    C10IValueHandle* ivalue);
+
+// c10::IValue <const char* > object conversions
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_str_to_ivalue(const char* val, C10IValueHandle* ivalue);
+
+// c10::IValue <at::Tensor> object conversions
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_tensor_to_ivalue(AtenTensorHandle val, C10IValueHandle* ivalue);
+
+// Free the c10::IValue object
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_delete_c10_value_object(C10IValueHandle handle);
+
 // Get a pointer to the underlying storage data
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_get_data_ptr(
     AtenTensorHandle tensor,
@@ -493,15 +515,13 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_library_impl(
     const char* name,
     void (*fn)(StableIValue*, uint64_t, uint64_t));
 
-// V2 version that also takes an extension_abi_version parameter. This is
-// needed for forward/backward compatibility when registering custom operators
-// that use StableIValue conversions. The caller should pass in its own
-// TORCH_ABI_VERSION as extension_abi_version.
+// Version-aware variant of aoti_torch_library_impl that takes an
+// extension_build_version parameter for backward compatibility
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_library_impl_v2(
     TorchLibraryHandle self,
     const char* name,
     void (*fn)(StableIValue*, uint64_t, uint64_t),
-    uint64_t extension_abi_version);
+    uint64_t extension_build_version);
 
 // stable corollary to torch::Library method m.def(), should be
 // called from StableLibrary
@@ -526,15 +546,15 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_call_dispatcher(
     StableIValue* stack);
 
 // Has the same semantic as aoti_torch_call_dispatcher, but takes an
-// additional argument for the extension abi version. This is needed for
-// forward/backward compatibility when calling native functions via the
-// dispatcher. The caller should pass in its own TORCH_ABI_TAG as
-// extension_abi_version.
+// additional argument for the extension build version. This is
+// needed for backward compatibility when calling native functions via
+// the dispatcher. The caller should pass in its build version (not target
+// version).
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_call_dispatcher_v2(
     const char* opName,
     const char* overloadName,
     StableIValue* stack,
-    uint64_t extension_abi_version);
+    uint64_t extension_build_version);
 
 // Device-generic guard for managing device context
 struct DeviceGuardOpaque;

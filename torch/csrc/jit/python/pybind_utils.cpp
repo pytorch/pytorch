@@ -770,6 +770,8 @@ py::object toPyObject(IValue ivalue) {
     return py::cast(std::move(ivalue).toSymBool());
   } else if (ivalue.isUnsigned()) {
     return py::cast(std::move(ivalue).toUInt());
+  } else if (ivalue.isDummy()) {
+    return py::cast(std::move(ivalue).toDummy());
   } else {
     TORCH_CHECK(
         false,

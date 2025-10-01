@@ -8,7 +8,6 @@
 #include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/inductor/aoti_runtime/utils.h>
-#include <torch/csrc/inductor/aoti_torch/c/private_utils.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 #include <torch/csrc/inductor/aoti_torch/mkldnn_tensor.h>
 #include <torch/csrc/inductor/aoti_torch/oss_proxy_executor.h>
@@ -32,6 +31,7 @@
 #include <c10/core/Device.h>
 #include <c10/core/DeviceGuard.h>
 #include <c10/core/Stream.h>
+#include <c10/util/FileSystem.h>
 #include <torch/headeronly/dummy.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -62,57 +62,7 @@
 #include <ATen/ops/scatter_reduce.h>
 #include <ATen/ops/view_as_real_ops.h>
 #include <ATen/ops/view_ops.h>
-
 #endif
-
-#ifndef _WIN32
-#include <sys/stat.h>
-#include <sys/types.h>
-#include <unistd.h>
-#include <climits>
-
-#else
-#include <filesystem>
-namespace fs = std::filesystem;
-#endif
-
-// HACK for failed builds in ARVR, where it cannot find these symbols within
-// std::experimental::filesystem
-namespace {
-std::string get_current_path() {
-#ifdef _WIN32
-  return fs::current_path().string();
-#else
-  // NOLINTNEXTLINE(*array*)
-  char currentPath[PATH_MAX]{};
-  if (getcwd(currentPath, sizeof(currentPath)) != nullptr) {
-    return std::string(currentPath);
-  } else {
-    throw std::runtime_error("Failed to get current path");
-  }
-#endif
-}
-
-bool file_exists(std::string& path) {
-#ifdef _WIN32
-  return fs::exists(path);
-#else
-  struct stat rc{};
-  return lstat(path.c_str(), &rc) == 0;
-#endif
-}
-
-bool create_directories(const std::string& path) {
-#ifdef _WIN32
-  return fs::create_directories(path);
-#else
-  if (mkdir(path.c_str(), 0777) == -1) {
-    throw std::runtime_error("Failed to create directory");
-  }
-  return true;
-#endif
-}
-} // namespace
 
 using namespace torch::aot_inductor;
 
@@ -272,6 +222,55 @@ AOTITorchError aoti_torch_delete_tensor_object(AtenTensorHandle tensor) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     at::Tensor* t = tensor_handle_to_tensor_pointer(tensor);
     delete t;
+  });
+}
+
+AOTITorchError aoti_torch_delete_c10_value_object(C10IValueHandle handle) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    c10::IValue* t = reinterpret_cast<c10::IValue*>(handle);
+    delete t;
+  });
+}
+
+AOTITorchError aoti_torch_int64_to_ivalue(
+    int64_t val,
+    C10IValueHandle* ivalue) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    c10::IValue* t = new c10::IValue(val);
+    *ivalue = reinterpret_cast<C10IValueHandle>(t);
+  });
+}
+
+AOTITorchError aoti_torch_str_to_ivalue(
+    const char* val,
+    C10IValueHandle* ivalue) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    c10::IValue* t = new c10::IValue(val);
+    *ivalue = reinterpret_cast<C10IValueHandle>(t);
+  });
+}
+
+AOTITorchError aoti_torch_strlist_to_ivalue(
+    const char** val,
+    int64_t len,
+    C10IValueHandle* ivalue) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    c10::List<std::string> vec;
+    for (int64_t i = 0; i < len; i++) {
+      vec.push_back(std::string(val[i]));
+    }
+    c10::IValue* t = new c10::IValue(vec);
+    *ivalue = reinterpret_cast<C10IValueHandle>(t);
+  });
+}
+
+AOTITorchError aoti_torch_tensor_to_ivalue(
+    AtenTensorHandle tensor,
+    C10IValueHandle* ivalue) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* tmp_tensor = tensor_handle_to_tensor_pointer(tensor);
+    c10::IValue* tmp_ivalue = new c10::IValue(*tmp_tensor);
+    *ivalue = reinterpret_cast<C10IValueHandle>(tmp_ivalue);
   });
 }
 
@@ -1129,7 +1128,7 @@ AOTITorchError aoti_record_function_start(
 
     std::vector<c10::IValue> recordInputs(n_inputs);
     for (size_t i = 0; i < n_inputs; i++) {
-      recordInputs.push_back(*reinterpret_cast<c10::IValue*>(inputs[i]));
+      recordInputs[i] = *reinterpret_cast<c10::IValue*>(inputs[i]);
     }
 
     newGuard->before(name, &recordInputs, &recordKwargs);
@@ -1237,21 +1236,22 @@ void aoti_torch_save_tensor_handle(
   at::Tensor* t = tensor_handle_to_tensor_pointer(self);
 #ifndef C10_MOBILE
   // Save tensor to tmp .pt file for tensors and can be torch.load'ed later
-  std::string cwd = get_current_path();
-  std::string tmp_folder = cwd + "/tmp/aoti_torch/";
-  if (!file_exists(tmp_folder)) {
+  auto cwd = c10::filesystem::current_path();
+  auto tmp_folder = cwd / "tmp" / "aoti_torch";
+  if (!c10::filesystem::exists(tmp_folder)) {
     std::cout
         << "aoti_torch_save_tensor_handle: Path does not exist, creating it..."
         << tmp_folder << '\n';
 
-    if (!create_directories(tmp_folder)) {
+    std::error_code ec{};
+    if (!c10::filesystem::create_directories(tmp_folder, ec)) {
       std::cout << "aoti_torch_save_tensor_handle: Error creating directory: "
-                << tmp_folder << '\n';
+                << tmp_folder << " error:" << ec.message() << '\n';
       return;
     }
   }
-  std::string tensor_filepath_to_save = tmp_folder + launch_prefix + "_" +
-      kernel_name + "_" + tensor_name + "_" + t->device().str() + ".pt";
+  std::string tensor_filepath_to_save = tmp_folder.string() + launch_prefix +
+      "_" + kernel_name + "_" + tensor_name + "_" + t->device().str() + ".pt";
 
   auto bytes = torch::jit::pickle_save(c10::IValue(*t));
   std::ofstream fout(tensor_filepath_to_save, std::ios::out | std::ios::binary);
@@ -1413,36 +1413,36 @@ AOTITorchError aoti_torch_zero_(AtenTensorHandle tensor) {
   });
 }
 
-StableIValue from_ivalue(
+static StableIValue from_ivalue(
     const c10::TypePtr& type,
     const c10::IValue& ivalue,
-    uint64_t extension_abi_version) {
+    uint64_t extension_build_version) {
   switch (type->kind()) {
     case c10::TypeKind::TensorType: {
       AtenTensorHandle ath = torch::aot_inductor::new_tensor_handle(
           std::move(const_cast<at::Tensor&>(ivalue.toTensor())));
-      return from_internal(ath, extension_abi_version);
+      return _from(ath, extension_build_version);
     }
     case c10::TypeKind::IntType: {
-      return from_internal(ivalue.toInt(), extension_abi_version);
+      return _from(ivalue.toInt(), extension_build_version);
     }
     case c10::TypeKind::FloatType: {
-      return from_internal(ivalue.toDouble(), extension_abi_version);
+      return _from(ivalue.toDouble(), extension_build_version);
     }
     case c10::TypeKind::BoolType: {
-      return from_internal(ivalue.toBool(), extension_abi_version);
+      return _from(ivalue.toBool(), extension_build_version);
     }
     case c10::TypeKind::ScalarTypeType: {
-      return from_internal(ivalue.toScalarType(), extension_abi_version);
+      return _from(ivalue.toScalarType(), extension_build_version);
     }
     case c10::TypeKind::DeviceObjType: {
-      return from_internal(ivalue.toDevice(), extension_abi_version);
+      return _from(ivalue.toDevice(), extension_build_version);
     }
     case c10::TypeKind::LayoutType: {
-      return from_internal(ivalue.toLayout(), extension_abi_version);
+      return _from(ivalue.toLayout(), extension_build_version);
     }
     case c10::TypeKind::MemoryFormatType: {
-      return from_internal(ivalue.toMemoryFormat(), extension_abi_version);
+      return _from(ivalue.toMemoryFormat(), extension_build_version);
     }
     case c10::TypeKind::OptionalType: {
       auto inner_type = type->castRaw<at::OptionalType>()->getElementType();
@@ -1459,14 +1459,14 @@ StableIValue from_ivalue(
       // be kept in sync with from<std::optional<T>> function in
       // torch/csrc/stable/library.h
       if (ivalue.isNone()) {
-        return from_internal(std::nullopt, extension_abi_version);
+        return _from(std::nullopt, extension_build_version);
       }
       StableIValue* sivp = new StableIValue(
-          from_ivalue(inner_type, ivalue, extension_abi_version));
-      return from_internal(sivp, extension_abi_version);
+          from_ivalue(inner_type, ivalue, extension_build_version));
+      return _from(sivp, extension_build_version);
     }
     case c10::TypeKind::DummyType: {
-      return from_internal(ivalue.toDummy(), extension_abi_version);
+      return _from(ivalue.toDummy(), extension_build_version);
     }
     default: {
       TORCH_CHECK(
@@ -1477,44 +1477,41 @@ StableIValue from_ivalue(
   }
 }
 
-c10::IValue to_ivalue(
+static c10::IValue to_ivalue(
     const c10::TypePtr& type,
     const StableIValue stable_ivalue,
-    uint64_t extension_abi_version) {
+    uint64_t extension_build_version) {
   switch (type->kind()) {
     case c10::TypeKind::TensorType: {
       auto ret_raiiath = torch::aot_inductor::RAIIAtenTensorHandle(
-          to_internal<AtenTensorHandle>(stable_ivalue, extension_abi_version));
+          _to<AtenTensorHandle>(stable_ivalue, extension_build_version));
       return (c10::IValue(*torch::aot_inductor::tensor_handle_to_tensor_pointer(
           ret_raiiath.get())));
     }
     case c10::TypeKind::IntType: {
-      return c10::IValue(
-          to_internal<int64_t>(stable_ivalue, extension_abi_version));
+      return c10::IValue(_to<int64_t>(stable_ivalue, extension_build_version));
     }
     case c10::TypeKind::FloatType: {
-      return c10::IValue(
-          to_internal<double>(stable_ivalue, extension_abi_version));
+      return c10::IValue(_to<double>(stable_ivalue, extension_build_version));
     }
     case c10::TypeKind::BoolType: {
-      return c10::IValue(
-          to_internal<bool>(stable_ivalue, extension_abi_version));
+      return c10::IValue(_to<bool>(stable_ivalue, extension_build_version));
     }
     case c10::TypeKind::ScalarTypeType: {
       return c10::IValue(
-          to_internal<c10::ScalarType>(stable_ivalue, extension_abi_version));
+          _to<c10::ScalarType>(stable_ivalue, extension_build_version));
     }
     case c10::TypeKind::DeviceObjType: {
       return c10::IValue(
-          to_internal<c10::Device>(stable_ivalue, extension_abi_version));
+          _to<c10::Device>(stable_ivalue, extension_build_version));
     }
     case c10::TypeKind::LayoutType: {
       return c10::IValue(
-          to_internal<c10::Layout>(stable_ivalue, extension_abi_version));
+          _to<c10::Layout>(stable_ivalue, extension_build_version));
     }
     case c10::TypeKind::MemoryFormatType: {
       return c10::IValue(
-          to_internal<c10::MemoryFormat>(stable_ivalue, extension_abi_version));
+          _to<c10::MemoryFormat>(stable_ivalue, extension_build_version));
     }
     case c10::TypeKind::OptionalType: {
       auto inner_type = type->castRaw<at::OptionalType>()->getElementType();
@@ -1530,18 +1527,17 @@ c10::IValue to_ivalue(
       // will manually unwrap and recursively call. This implementation MUST
       // be kept in sync with the to<T> function in
       // torch/csrc/stable/library.h
-      if (stable_ivalue == from_internal(std::nullopt, extension_abi_version)) {
+      if (stable_ivalue == _from(std::nullopt, extension_build_version)) {
         return c10::IValue();
       }
-      auto sivp =
-          to_internal<StableIValue*>(stable_ivalue, extension_abi_version);
-      auto ival = to_ivalue(inner_type, *sivp, extension_abi_version);
+      auto sivp = _to<StableIValue*>(stable_ivalue, extension_build_version);
+      auto ival = to_ivalue(inner_type, *sivp, extension_build_version);
       delete sivp;
       return ival;
     }
     case c10::TypeKind::DummyType: {
-      return c10::IValue(to_internal<dummy_types::Dummy>(
-          stable_ivalue, extension_abi_version));
+      return c10::IValue(
+          _to<dummy_types::Dummy>(stable_ivalue, extension_build_version));
     }
     default: {
       TORCH_CHECK(
@@ -1556,8 +1552,8 @@ class StableIValueBoxedKernel : public c10::OperatorKernel {
  public:
   StableIValueBoxedKernel(
       void (*fn)(StableIValue*, uint64_t, uint64_t),
-      uint64_t extension_abi_version)
-      : fn_(fn), extension_abi_version_(extension_abi_version) {}
+      uint64_t extension_build_version)
+      : fn_(fn), extension_build_version_(extension_build_version) {}
 
   void operator()(
       const c10::OperatorHandle& op,
@@ -1573,8 +1569,8 @@ class StableIValueBoxedKernel : public c10::OperatorKernel {
     for (const auto idx : c10::irange(num_arguments)) {
       const auto ministack_idx = num_arguments - idx - 1;
       const c10::TypePtr& arg_type = schema.arguments()[ministack_idx].type();
-      ministack[ministack_idx] =
-          from_ivalue(arg_type, torch::jit::pop(stack), extension_abi_version_);
+      ministack[ministack_idx] = from_ivalue(
+          arg_type, torch::jit::pop(stack), extension_build_version_);
     }
 
     // boxed function is going to take a stack of StableIValues, cast them to
@@ -1586,13 +1582,13 @@ class StableIValueBoxedKernel : public c10::OperatorKernel {
     for (size_t idx = 0; idx < num_returns; idx++) {
       const c10::TypePtr& ret_type = schema.returns()[idx].type();
       torch::jit::push(
-          stack, to_ivalue(ret_type, ministack[idx], extension_abi_version_));
+          stack, to_ivalue(ret_type, ministack[idx], extension_build_version_));
     }
   }
 
  private:
   void (*fn_)(StableIValue*, uint64_t, uint64_t);
-  uint64_t extension_abi_version_;
+  uint64_t extension_build_version_;
 };
 
 AOTITorchError aoti_torch_library_init_impl(
@@ -1652,7 +1648,8 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_library_impl(
     reinterpret_cast<torch::Library*>(self)->impl(
         name,
         torch::CppFunction::makeFromBoxedFunctor(
-            std::make_unique<StableIValueBoxedKernel>(fn, 0)));
+            std::make_unique<StableIValueBoxedKernel>(
+                fn, aoti_torch_abi_version())));
   });
 }
 
@@ -1660,13 +1657,13 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_library_impl_v2(
     TorchLibraryHandle self,
     const char* name,
     void (*fn)(StableIValue*, uint64_t, uint64_t),
-    uint64_t extension_abi_version) {
+    uint64_t extension_build_version) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     reinterpret_cast<torch::Library*>(self)->impl(
         name,
         torch::CppFunction::makeFromBoxedFunctor(
             std::make_unique<StableIValueBoxedKernel>(
-                fn, extension_abi_version)));
+                fn, extension_build_version)));
   });
 }
 
@@ -1697,11 +1694,13 @@ AOTITorchError aoti_torch_call_dispatcher(
     // we will only need max(num_args, num_returns)
     ivalue_stack.reserve(std::max(num_arguments, num_returns));
 
+    const uint64_t current_version = aoti_torch_abi_version();
     // Convert StableIValue stack to c10::IValue stack
     for (const auto idx : c10::irange(num_arguments)) {
       auto stable_ivalue = stack[idx];
       auto arg_type = schema.arguments()[idx].type();
-      torch::jit::push(ivalue_stack, to_ivalue(arg_type, stable_ivalue, 0));
+      torch::jit::push(
+          ivalue_stack, to_ivalue(arg_type, stable_ivalue, current_version));
     }
 
     op.callBoxed(ivalue_stack);
@@ -1712,7 +1711,7 @@ AOTITorchError aoti_torch_call_dispatcher(
       const auto stack_idx = num_returns - idx - 1;
       const c10::TypePtr& ret_type = schema.returns()[idx].type();
       stack[stack_idx] =
-          from_ivalue(ret_type, torch::jit::pop(ivalue_stack), 0);
+          from_ivalue(ret_type, torch::jit::pop(ivalue_stack), current_version);
     }
   });
 }
@@ -1722,14 +1721,22 @@ AOTITorchError aoti_torch_call_dispatcher(
 // register_schema_adapter that define how to convert the StableIValue argument
 // stack to an IValue stack when changes are made to the schema of a function.
 
-// Currently this only adapts the argument stack, if there is a need to define
-// similar infrastructure for the returns we can update this
+// Currently this only adapts the argument stack.
+// C++ default argument resolution will happen at compile time in the
+// torch/csrc/stable/ops.h header, so extensions always pass complete argument
+// lists for the version they build against's schema. As such, this is only
+// needed if a new keyword argument is added to the schema
+//
 // This is not declared in the stable shim.h,
-// so we **do not make any guarantees that the ABI of this will not change**.
+// so we **do not make any guarantees that the signature of this will not
+// change**. If there is a need to define similar infrastructure for the returns
+// we can update this.
+
+namespace {
 using SchemaAdapterFn = std::function<torch::jit::Stack(
     const c10::FunctionSchema& current_schema,
     const StableIValue* extension_stack,
-    uint64_t extension_abi_version)>;
+    uint64_t extension_build_version)>;
 
 // Global registry for schema adapters
 class SchemaAdapterRegistry {
@@ -1747,14 +1754,16 @@ class SchemaAdapterRegistry {
 
   void register_adapter(
       const std::string& op_name,
-      uint64_t max_version, // versions below max_version need the adapter
+      uint64_t
+          applies_to_versions_below, // versions below this need the adapter
       SchemaAdapterFn adapter) {
-    adapters_[op_name].emplace_back(max_version, adapter);
-    // Sort by version descending
+    adapters_[op_name].emplace_back(applies_to_versions_below, adapter);
+    // Sort by version ascending - this allows us to find the first (most
+    // specific) match
     std::sort(
         adapters_[op_name].begin(),
         adapters_[op_name].end(),
-        [](const auto& a, const auto& b) { return a.first > b.first; });
+        [](const auto& a, const auto& b) { return a.first < b.first; });
   }
 
   std::optional<SchemaAdapterFn> get_adapter(
@@ -1764,9 +1773,9 @@ class SchemaAdapterRegistry {
     if (it == adapters_.end())
       return std::nullopt;
 
-    // Find the highest version adapter that applies to this extension
-    for (const auto& [max_version, adapter] : it->second) {
-      if (extension_version < max_version) {
+    // Find the first adapter that applies (most specific due to ascending sort)
+    for (const auto& [applies_to_versions_below, adapter] : it->second) {
+      if (extension_version < applies_to_versions_below) {
         return adapter;
       }
     }
@@ -1774,31 +1783,135 @@ class SchemaAdapterRegistry {
   }
 };
 
-// C API for registering adapters that define how to convert the StableIValue
-// **argument** stack to an IValue stack when changes are made to the schema of
-// a function. adapter_fn will be used if extension_abi_version < max_version.
-// This is not declared in the stable shim.h, but is declared in a separate
-// header mostly for testing purposes. We **do not make any guarantees that the
-// ABI of register_schema_adapter will not change**.
-AOTI_TORCH_EXPORT AOTITorchError register_schema_adapter(
+// Internal API for registering adapters that define how to convert the
+// StableIValue  **argument** stack to an IValue stack when changes are
+// made to the schema of a function. adapter_fn will be used if
+// extension_build_version < applies_to_versions_below.
+AOTITorchError register_schema_adapter(
     const char* op_name,
-    uint64_t max_version,
-    void* adapter_fn) {
+    uint64_t applies_to_versions_below,
+    SchemaAdapterFn adapter_fn) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     auto& registry = SchemaAdapterRegistry::instance();
-    // Cast void* to the proper function pointer type
-    auto typed_adapter_fn = reinterpret_cast<torch::jit::Stack (*)(
-        const c10::FunctionSchema&, const StableIValue*, uint64_t)>(adapter_fn);
     registry.register_adapter(
-        std::string(op_name), max_version, typed_adapter_fn);
+        std::string(op_name), applies_to_versions_below, std::move(adapter_fn));
   });
 }
+
+// Test adapters for _test_schema_upgrader - demonstrating schema adapter
+// functionality
+
+// Version constants for _test_schema_upgrader using PyTorch version encoding
+// Similar to TORCH_ABI_VERSION but for specific schema versions
+#define MAKE_VERSION(major, minor, patch) \
+  ((uint64_t)(major) << 56 | (uint64_t)(minor) << 48 | (uint64_t)(patch) << 40)
+
+constexpr uint64_t VERSION_V2 =
+    MAKE_VERSION(2, 7, 0); // V2: _test_schema_upgrader(Tensor self, *, int a=2)
+constexpr uint64_t VERSION_V3 = MAKE_VERSION(
+    2,
+    8,
+    0); // V3: _test_schema_upgrader(Tensor self, *, int a=2, bool b=True)
+
+// ADAPTER 1: V1 → V3
+// Extension built with V1 expects: fills tensor with 2 (hardcoded)
+// V3 schema: _test_schema_upgrader(Tensor self, *, int a=2, bool b=True)
+// To preserve V1 behavior of _test_schema_upgrader(Tensor self)
+// set a=2, b=True (matches IValue stack expected by V3
+torch::jit::Stack adapt_v1_to_v3(
+    const c10::FunctionSchema& current_schema,
+    const StableIValue* extension_stack,
+    uint64_t extension_build_version) {
+  TORCH_CHECK(
+      extension_build_version < VERSION_V2,
+      "adapt_v1_to_v3 should only be called for extensions built with V1");
+
+  torch::jit::Stack ivalue_stack;
+
+  // Convert extension's single argument: self
+  auto self_type = current_schema.arguments()[0].type();
+  ivalue_stack.push_back(
+      to_ivalue(self_type, extension_stack[0], extension_build_version));
+
+  // V1 behavior: fills tensor with 2
+  // To get V3 to behave like V1: a=True, b=2 (fills with +2)
+  ivalue_stack.push_back(c10::IValue(true));
+  ivalue_stack.push_back(c10::IValue(2));
+
+  return ivalue_stack;
+}
+
+// ADAPTER 2: V2 → V3
+// Extension built with V2 expects: fills tensor with `a` (default a=2)
+// V3 schema: _test_schema_upgrader(Tensor self, *, int a=2, bool b=True)
+// To preserve V2 behavior: keep same `a`, set b=True (matches V3 default)
+torch::jit::Stack adapt_v2_to_v3(
+    const c10::FunctionSchema& current_schema,
+    const StableIValue* extension_stack,
+    uint64_t extension_build_version) {
+  TORCH_CHECK(
+      extension_build_version >= VERSION_V2 &&
+          extension_build_version < VERSION_V3,
+      "adapt_v2_to_v3 should only be called for extensions built with V2");
+
+  torch::jit::Stack ivalue_stack;
+
+  // Convert extension's arguments: self, a
+  auto self_type = current_schema.arguments()[0].type();
+  auto a_type = current_schema.arguments()[1].type();
+
+  ivalue_stack.push_back(to_ivalue(
+      self_type, extension_stack[0], extension_build_version)); // self
+  ivalue_stack.push_back(to_ivalue(
+      a_type,
+      extension_stack[1],
+      extension_build_version)); // a (from extension)
+
+  // To get V3 to behave like V2: b=2 (fills with 2
+  ivalue_stack.push_back(c10::IValue(2));
+
+  return ivalue_stack;
+}
+
+} // namespace
+
+// Function to register test schema adapters for _test_schema_upgrader
+// This demonstrates the adapter registration pattern (internal use only)
+static AOTITorchError _register_test_adapters() {
+  // Register V1 to V3 adapter
+  if (auto err = register_schema_adapter(
+          "aten::_test_schema_upgrader",
+          VERSION_V2, // applies to versions < V2
+          adapt_v1_to_v3)) {
+    return err;
+  }
+
+  if (auto err = register_schema_adapter(
+          "aten::_test_schema_upgrader",
+          VERSION_V3, // applies to versions < V3
+          adapt_v2_to_v3)) {
+    return err;
+  }
+
+  // No adapter needed for extension_build_version >= V3
+  return AOTI_TORCH_SUCCESS;
+}
+
+// Static initialization to automatically register test adapters
+static struct TestAdapterInitializer {
+  TestAdapterInitializer() {
+    // Register the test adapters when the library loads
+    _register_test_adapters();
+  }
+} test_adapter_initializer;
 
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_call_dispatcher_v2(
     const char* opName,
     const char* overloadName,
     StableIValue* stack,
-    uint64_t extension_abi_version) {
+    // version of stable headers used to build the extension: necessary for
+    // applying schema adapters
+    uint64_t extension_build_version) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     const auto op =
         c10::Dispatcher::singleton().findSchemaOrThrow(opName, overloadName);
@@ -1810,19 +1923,18 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_call_dispatcher_v2(
     auto& registry = SchemaAdapterRegistry::instance();
 
     // Check if we need an adapter for this operation
-    if (auto adapter = registry.get_adapter(opName, extension_abi_version)) {
+    if (auto adapter = registry.get_adapter(opName, extension_build_version)) {
       // Use adapter to create IValue stack
-      ivalue_stack = (*adapter)(schema, stack, extension_abi_version);
+      ivalue_stack = (*adapter)(schema, stack, extension_build_version);
     } else {
       // No adapter needed - implementation matches aoti_torch_call_dispatcher
-      // exactly
       ivalue_stack.reserve(std::max(num_arguments, num_returns));
       for (const auto idx : c10::irange(num_arguments)) {
         auto stable_ivalue = stack[idx];
         auto arg_type = schema.arguments()[idx].type();
         torch::jit::push(
             ivalue_stack,
-            to_ivalue(arg_type, stable_ivalue, extension_abi_version));
+            to_ivalue(arg_type, stable_ivalue, extension_build_version));
       }
     }
 
@@ -1834,7 +1946,7 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_call_dispatcher_v2(
       const auto stack_idx = num_returns - idx - 1;
       const c10::TypePtr& ret_type = schema.returns()[idx].type();
       stack[stack_idx] = from_ivalue(
-          ret_type, torch::jit::pop(ivalue_stack), extension_abi_version);
+          ret_type, torch::jit::pop(ivalue_stack), extension_build_version);
     }
   });
 }

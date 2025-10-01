@@ -38,15 +38,24 @@ T to(StableIValue val);
 
 namespace detail {
 
+// Context for version-aware conversions
+// is_internal = true: Called from libtorch internal code (prioritize
+// extension_build_version) is_internal = false: Called from extension code
+// (prioritize aoti_torch_abi_version)
+
 // =============================================================================
 // FROM CONVERSIONS (T -> StableIValue)
-// =============================================================================
+// ======================================================================
 
 // Specialization for general copyable types (catch-all) => StableIValue
 template <typename T>
 struct FromImpl {
-  static StableIValue call(T val, uint64_t extension_abi_version = 0) {
-    (void)extension_abi_version; // Unused parameter
+  static StableIValue call(
+      T val,
+      uint64_t extension_build_version,
+      bool is_internal) {
+    (void)extension_build_version; // Unused parameter
+    (void)is_internal; // Unused parameter
     static_assert(
         sizeof(T) <= sizeof(StableIValue),
         "StableLibrary stack does not support parameter types larger than 64 bits.");
@@ -85,8 +94,12 @@ struct FromImpl {
 using torch::headeronly::ScalarType;
 template <>
 struct FromImpl<ScalarType> {
-  static StableIValue call(ScalarType val, uint64_t extension_abi_version = 0) {
-    (void)extension_abi_version; // Unused parameter
+  static StableIValue call(
+      ScalarType val,
+      uint64_t extension_build_version,
+      bool is_internal) {
+    (void)extension_build_version; // Unused parameter
+    (void)is_internal; // Unused parameter
     switch (val) {
       case ScalarType::Byte:
         return from(aoti_torch_dtype_uint8());
@@ -140,8 +153,10 @@ template <>
 struct FromImpl<std::nullopt_t> {
   static StableIValue call(
       std::nullopt_t val,
-      uint64_t extension_abi_version = 0) {
-    (void)extension_abi_version; // Unused parameter
+      uint64_t extension_build_version,
+      bool is_internal) {
+    (void)extension_build_version; // Unused parameter
+    (void)is_internal; // Unused parameter
     return from(nullptr);
   }
 };
@@ -179,12 +194,13 @@ template <typename T>
 struct FromImpl<std::optional<T>> {
   static StableIValue call(
       const std::optional<T>& val,
-      uint64_t extension_abi_version = 0) {
+      uint64_t extension_build_version,
+      bool is_internal) {
     if (!val.has_value()) {
       return from(std::nullopt);
     }
-    return from(new StableIValue(
-        detail::FromImpl<T>::call(val.value(), extension_abi_version)));
+    return from(new StableIValue(detail::FromImpl<T>::call(
+        val.value(), extension_build_version, is_internal)));
   }
 };
 
@@ -194,8 +210,10 @@ template <>
 struct FromImpl<torch::stable::Tensor> {
   static StableIValue call(
       const torch::stable::Tensor& val,
-      uint64_t extension_abi_version = 0) {
-    (void)extension_abi_version; // Unused parameter
+      uint64_t extension_build_version,
+      bool is_internal) {
+    (void)extension_build_version; // Unused parameter
+    (void)is_internal; // Unused parameter
     AtenTensorHandle new_ath;
     TORCH_ERROR_CODE_CHECK(aoti_torch_new_tensor_handle(val.get(), &new_ath));
     return from(new_ath);
@@ -210,16 +228,16 @@ struct FromImpl<torch::stable::Tensor> {
 // This demonstrates version-aware conversion where we encode differently based
 // on version
 
-#if defined(TORCH_FEATURE_VERSION) && \
-    TORCH_FEATURE_VERSION < ((2ULL << 56) | (9ULL << 48))
+#ifdef FAKE_TORCH_VERSION
 template <>
 struct FromImpl<dummy_types::v2_8::Dummy> {
   static StableIValue call(
       const dummy_types::v2_8::Dummy& val,
-      uint64_t extension_abi_version = 0) {
-    // Always use legacy encoding for the legacy type
-    (void)
-        extension_abi_version; // We don't actually use this for the legacy type
+      uint64_t extension_build_version,
+      bool is_internal) {
+    (void)extension_build_version; // We don't actually use this for the legacy
+                                   // type
+    (void)is_internal; // Unused parameter
     // Pack only the id into the higher 32 bits
     uint64_t result = (static_cast<uint64_t>(val.id) & 0xFFFFFFFF) << 32;
     return static_cast<StableIValue>(result);
@@ -230,9 +248,12 @@ template <>
 struct FromImpl<dummy_types::Dummy> {
   static StableIValue call(
       const dummy_types::Dummy& val,
-      uint64_t extension_abi_version = 0) {
-    if (extension_abi_version != 0 &&
-        extension_abi_version < TORCH_VERSION_2_9_0) {
+      uint64_t extension_build_version,
+      bool is_internal) {
+    uint64_t version_to_check =
+        is_internal ? extension_build_version : aoti_torch_abi_version();
+
+    if (version_to_check < TORCH_VERSION_2_9_0) {
       // Pack only the id into the higher 32 bits
       uint64_t result = (static_cast<uint64_t>(val.id) & 0xFFFFFFFF) << 32;
       return static_cast<StableIValue>(result);
@@ -255,8 +276,12 @@ struct FromImpl<dummy_types::Dummy> {
 // Specialization for StableIValue => general copyable types (catch-all)
 template <typename T>
 struct ToImpl {
-  static T call(StableIValue val, uint64_t extension_abi_version = 0) {
-    (void)extension_abi_version; // Unused parameter
+  static T call(
+      StableIValue val,
+      uint64_t extension_build_version,
+      bool is_internal) {
+    (void)extension_build_version; // Unused parameter
+    (void)is_internal; // Unused parameter
     static_assert(std::is_trivially_copyable_v<T>);
     // T may not have a default constructor. (For example, it might be
     // c10::Device.) However, std::memcpy implicitly creates a T at the
@@ -291,8 +316,12 @@ struct ToImpl {
 // Specialization for StableIValue => torch::headeronly::ScalarType
 template <>
 struct ToImpl<ScalarType> {
-  static ScalarType call(StableIValue val, uint64_t extension_abi_version = 0) {
-    (void)extension_abi_version; // Unused parameter
+  static ScalarType call(
+      StableIValue val,
+      uint64_t extension_build_version,
+      bool is_internal) {
+    (void)extension_build_version; // Unused parameter
+    (void)is_internal; // Unused parameter
     int32_t shim_scalartype = to<int32_t>(val);
     if (shim_scalartype == aoti_torch_dtype_uint8()) {
       return ScalarType::Byte;
@@ -347,8 +376,10 @@ template <>
 struct ToImpl<std::nullopt_t> {
   static std::nullopt_t call(
       StableIValue val,
-      uint64_t extension_abi_version = 0) {
-    (void)extension_abi_version; // Unused parameter
+      uint64_t extension_build_version,
+      bool is_internal) {
+    (void)extension_build_version; // Unused parameter
+    (void)is_internal; // Unused parameter
     // val should be equivalent to from(nullptr)
     return std::nullopt;
   }
@@ -361,14 +392,16 @@ template <typename T>
 struct ToImpl<std::optional<T>> {
   static std::optional<T> call(
       StableIValue val,
-      uint64_t extension_abi_version = 0) {
+      uint64_t extension_build_version,
+      bool is_internal) {
     auto sivp = to<StableIValue*>(val);
 
     // sivp is either nullptr or a pointer to a StableIValue
     if (sivp == nullptr) {
       return {};
     }
-    auto inner_val = detail::ToImpl<T>::call(*sivp, extension_abi_version);
+    auto inner_val =
+        detail::ToImpl<T>::call(*sivp, extension_build_version, is_internal);
 
     // free the memory associated with StableIValue* sivp
     delete sivp;
@@ -384,8 +417,10 @@ template <>
 struct ToImpl<torch::stable::Tensor> {
   static torch::stable::Tensor call(
       StableIValue val,
-      uint64_t extension_abi_version = 0) {
-    (void)extension_abi_version; // Unused parameter
+      uint64_t extension_build_version,
+      bool is_internal) {
+    (void)extension_build_version; // Unused parameter
+    (void)is_internal; // Unused parameter
     return torch::stable::Tensor(to<AtenTensorHandle>(val));
   }
 };
@@ -394,18 +429,19 @@ struct ToImpl<torch::stable::Tensor> {
 // DUMMY TYPE TO-CONVERSIONS (DEMONSTRATION OF VERSION-AWARE CONVERSIONS)
 // =============================================================================
 
-#if defined(TORCH_FEATURE_VERSION) && \
-    TORCH_FEATURE_VERSION < ((2ULL << 56) | (9ULL << 48))
+#ifdef FAKE_TORCH_VERSION
 template <>
 struct ToImpl<dummy_types::v2_8::Dummy> {
   static dummy_types::v2_8::Dummy call(
       StableIValue val,
-      uint64_t extension_abi_version = 0) {
-    (void)
-        extension_abi_version; // We don't actually use this for the legacy type
+      uint64_t extension_build_version,
+      bool is_internal) {
+    (void)extension_build_version; // We don't actually use this for the legacy
+                                   // type
+    (void)is_internal; // Unused parameter
 
     uint64_t packed = static_cast<uint64_t>(val);
-    // Extract id from higher 32 bits (bits 32-63) to match FromImpl
+    // Extract id from higher 32 bits (bits 32-63)
     int32_t id = static_cast<int32_t>((packed >> 32) & 0xFFFFFFFF);
 
     return dummy_types::v2_8::Dummy(id);
@@ -416,16 +452,18 @@ template <>
 struct ToImpl<dummy_types::Dummy> {
   static dummy_types::Dummy call(
       StableIValue val,
-      uint64_t extension_abi_version = 0) {
-    std::cout << "extension_abi_version: " << (int)extension_abi_version
-              << "\n";
-    if (extension_abi_version != 0 &&
-        extension_abi_version < TORCH_VERSION_2_9_0) {
-      // Legacy decoding: extract id from higher 32 bits to match FromImpl
+      uint64_t extension_build_version,
+      bool is_internal) {
+    uint64_t version_to_check =
+        is_internal ? extension_build_version : aoti_torch_abi_version();
+
+    if (version_to_check < TORCH_VERSION_2_9_0) {
+      // Legacy decoding: extract id from higher 32 bits
       uint64_t packed = static_cast<uint64_t>(val);
       int32_t id = static_cast<int32_t>((packed >> 32) & 0xFFFFFFFF);
 
-      // Create new type with foo = 0 since legacy version didn't have foo field
+      // Create new type with defaulted foo since legacy version didn't have foo
+      // field
       return dummy_types::Dummy(id);
     } else {
       // Modern decoding: extract both foo and id from leading bits
@@ -444,50 +482,60 @@ struct ToImpl<dummy_types::Dummy> {
 } // namespace detail
 
 // Expose the partially templated class functions through single functions
+// The non-private versions will be used by the extension or headers that
+// the extension includes.
 template <typename T>
 StableIValue from(T val) {
-  return detail::FromImpl<T>::call(val, 0);
+  return detail::FromImpl<T>::call(
+      val, aoti_torch_abi_version(), /*is_internal=*/false);
 }
 
 template <typename T>
 StableIValue from(const std::optional<T>& val) {
-  return detail::FromImpl<std::optional<T>>::call(val, 0);
+  return detail::FromImpl<std::optional<T>>::call(
+      val, aoti_torch_abi_version(), /*is_internal=*/false);
 }
 
 // The below overload is used! See https://godbolt.org/z/859cshxrW
 // We are suppressing the warning for versions clang12- and gcc11-
 [[maybe_unused]] StableIValue from(const torch::stable::Tensor& val) {
-  return detail::FromImpl<torch::stable::Tensor>::call(val, 0);
+  return detail::FromImpl<torch::stable::Tensor>::call(
+      val, aoti_torch_abi_version(), /*is_internal=*/false);
 }
 
 template <typename T>
 T to(StableIValue val) {
-  return detail::ToImpl<T>::call(val, 0);
+  return detail::ToImpl<T>::call(
+      val, aoti_torch_abi_version(), /*is_internal=*/false);
 }
 
-// Internal conversion functions that pass extension_abi_version
+// Internal conversion functions used by from_ivalue and to_ivalue.
+// These are used in libtorch
 template <typename T>
-StableIValue from_internal(T val, uint64_t extension_abi_version) {
-  return detail::FromImpl<T>::call(val, extension_abi_version);
+StableIValue _from(T val, uint64_t extension_build_version) {
+  return detail::FromImpl<T>::call(
+      val, extension_build_version, /*is_internal=*/true);
 }
 
 template <typename T>
-StableIValue from_internal(
+StableIValue _from(
     const std::optional<T>& val,
-    uint64_t extension_abi_version) {
-  return detail::FromImpl<std::optional<T>>::call(val, extension_abi_version);
+    uint64_t extension_build_version) {
+  return detail::FromImpl<std::optional<T>>::call(
+      val, extension_build_version, /*is_internal=*/true);
 }
 
-[[maybe_unused]] StableIValue from_internal(
+[[maybe_unused]] StableIValue _from(
     const torch::stable::Tensor& val,
-    uint64_t extension_abi_version) {
+    uint64_t extension_build_version) {
   return detail::FromImpl<torch::stable::Tensor>::call(
-      val, extension_abi_version);
+      val, extension_build_version, /*is_internal=*/true);
 }
 
 template <typename T>
-T to_internal(StableIValue val, uint64_t extension_abi_version) {
-  return detail::ToImpl<T>::call(val, extension_abi_version);
+T _to(StableIValue val, uint64_t extension_build_version) {
+  return detail::ToImpl<T>::call(
+      val, extension_build_version, /*is_internal=*/true);
 }
 
 // =============================================================================

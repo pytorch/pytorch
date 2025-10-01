@@ -31,14 +31,10 @@ class clean(distutils.command.clean.clean):
 
 
 def get_extension():
-    # Set TORCH_TARGET_VERSION to 2.8.0 to force legacy DummyType usage
-    # 2.8.0 = (2ULL << 56) | (8ULL << 48) = 144115188075855872 + 2251799813685248
-    torch_target_version = (2 << 56) | (8 << 48)
-
     extra_compile_args = {
         "cxx": [
             "-fdiagnostics-color=always",
-            f"-DTORCH_TARGET_VERSION={torch_target_version}ULL",
+            "-DFAKE_TORCH_VERSION",
         ],
     }
 

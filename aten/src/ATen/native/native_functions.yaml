@@ -1409,7 +1409,7 @@
 - func: _sparse_broadcast_to(Tensor(a) self, int[] size) -> Tensor(a)
   variants: function
   dispatch:
-    SparseCPU, SparseCUDA: sparse_broadcast_to
+    SparseCPU, SparseCUDA, SparseMPS: sparse_broadcast_to
 
 - func: cat(Tensor[] tensors, int dim=0) -> Tensor
   structured_delegate: cat.out
@@ -3858,7 +3858,7 @@
   device_check: NoCheck   # TensorIterator
   structured: True
   dispatch:
-    CPU, CUDA: aminmax_out
+    CPU, CUDA, MTIA: aminmax_out
     MPS: aminmax_out_mps
 
 - func: _compute_linear_combination(Tensor input, Tensor coefficients) -> Tensor
@@ -3909,7 +3909,7 @@
 - func: amax.out(Tensor self, int[1] dim=[], bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
   dispatch:
-    CPU, CUDA: amax_out
+    CPU, CUDA, MTIA: amax_out
     MPS: amax_out_mps
 
 # Return: (Tensor output, Tensor indices)
@@ -4090,7 +4090,7 @@
 - func: amin.out(Tensor self, int[1] dim=[], bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
   dispatch:
-    CPU, CUDA: amin_out
+    CPU, CUDA, MTIA: amin_out
     MPS: amin_out_mps
 
 # TODO: Add this function to MPS dispatch key so that we avoid declaring it in
@@ -6450,6 +6450,7 @@
   dispatch:
     CPU: unique_dim_cpu
     CUDA: unique_dim_cuda
+    MPS: unique_dim_mps
   tags: dynamic_output_shape
   autogen: unique_dim.out
 
@@ -14611,6 +14612,17 @@
     CompositeExplicitAutogradNonFunctional: _test_autograd_multiple_dispatch_view_copy
   tags: view_copy
   autogen: _test_autograd_multiple_dispatch_view_copy.out
+
+# Note: this function is only for testing aoti_torch_call_dispatcher_v2
+# We pretend this is the history of the function and its schema, and the current version is V4
+# V1: _test_schema_upgrader(Tensor self) -> Tensor (fills Tensor with 2)
+# V2: _test_schema_upgrader(Tensor self, *, bool a = True) -> Tensor (fills Tensor with 2 or -2 if a is False)
+# V3: _test_schema_upgrader(Tensor self, *, bool a = True, int b = 2) -> Tensor (fills Tensor with b)
+# V4: _test_schema_upgrader(Tensor self, *, bool a = True, int b = 3) -> Tensor (BC-breaking change of default for b)
+- func: _test_schema_upgrader(Tensor self, *, bool a=True, int b=3) -> Tensor
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: _test_schema_upgrader
 
 - func: segment_reduce(Tensor data, str reduce, *, Tensor? lengths=None, Tensor? indices=None, Tensor? offsets=None, int axis=0, bool unsafe=False, Scalar? initial=None) -> Tensor
   variants: function

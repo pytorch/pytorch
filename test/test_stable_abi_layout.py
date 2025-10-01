@@ -42,40 +42,33 @@ int main() {{
 
 def _compile_and_extract_layout(
     test_file: str, version_name: str, pytorch_root: str, temp_dir: str
-) -> tuple[bool, str]:
+) -> os.strerror:
     """Compile the test file and extract layout information"""
     layout_file = os.path.join(temp_dir, f"layout_{version_name}.txt")
 
-    # Try to get system include paths dynamically from clang
+    # Get system include paths dynamically from clang
     include_paths = []
-    try:
-        result = subprocess.run(
-            ["clang++", "-E", "-v", "-x", "c++", "-"],
-            input="",
-            capture_output=True,
-            text=True,
-        )
-        in_include_section = False
-        for line in result.stderr.split("\n"):
-            if "#include <...> search starts here:" in line:
-                in_include_section = True
-                continue
-            elif "End of search list." in line:
-                break
-            elif in_include_section and line.strip().startswith("/"):
-                # Only add essential system paths
-                path = line.strip()
-                if any(
-                    essential in path
-                    for essential in ["/include/c++", "/usr/include", "clang"]
-                ):
-                    include_paths.append(f"-I{path}")
-    except Exception:
-        # Minimal fallback - just the most essential paths
-        include_paths = [
-            "-I/usr/include/c++",  # Standard C++ headers
-            "-I/usr/include",  # System headers
-        ]
+    result = subprocess.run(
+        ["clang++", "-E", "-v", "-x", "c++", "-"],
+        input="",
+        capture_output=True,
+        text=True,
+    )
+    in_include_section = False
+    for line in result.stderr.split("\n"):
+        if "#include <...> search starts here:" in line:
+            in_include_section = True
+            continue
+        elif "End of search list." in line:
+            break
+        elif in_include_section and line.strip().startswith("/"):
+            # Only add essential system paths
+            path = line.strip()
+            if any(
+                essential in path
+                for essential in ["/include/c++", "/usr/include", "clang"]
+            ):
+                include_paths.append(f"-I{path}")
 
     # Use clang -cc1 with reduced include paths
     cmd = [
@@ -89,44 +82,34 @@ def _compile_and_extract_layout(
         test_file,
     ]
 
-    try:
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        combined_output = result.stdout + "\n" + result.stderr
-        with open(layout_file, "w") as f:
-            f.write(combined_output)
+    result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+    combined_output = result.stdout + "\n" + result.stderr
+    with open(layout_file, "w") as f:
+        f.write(combined_output)
 
-        return result.returncode == 0, layout_file
-
-    except Exception:
-        return False, layout_file
+    return layout_file
 
 
 def _extract_layout_info(layout_file: str) -> str:
     """Extract relevant layout information from compiler output"""
-    try:
-        with open(layout_file, "r") as f:
-            content = f.read()
+    with open(layout_file, "r") as f:
+        content = f.read()
 
-        # Look for struct layout information
-        lines = content.split("\n")
-        layout_lines = []
-        capturing = False
+    # Look for struct layout information
+    lines = content.split("\n")
+    layout_lines = []
+    capturing = False
 
-        for line in lines:
-            if "struct dummy_types::" in line:
-                capturing = True
-                layout_lines.append(line)
-            elif capturing:
-                if line.strip() and not line.startswith(
-                    "  "
-                ):  # End of struct definition
-                    break
-                layout_lines.append(line)
+    for line in lines:
+        if "struct dummy_types::" in line:
+            capturing = True
+            layout_lines.append(line)
+        elif capturing:
+            if line.strip() and not line.startswith("  "):  # End of struct definition
+                break
+            layout_lines.append(line)
 
-        return "\n".join(layout_lines) if layout_lines else ""
-
-    except Exception:
-        return ""
+    return "\n".join(layout_lines) if layout_lines else ""
 
 
 class TestStableABILayout(TestCase):
@@ -140,11 +123,8 @@ class TestStableABILayout(TestCase):
     def test_dummy_struct_layout_changes_between_versions(self):
         """Test that Dummy struct layout changes between v2.8 and v2.9"""
 
-        # Skip test if clang is not available
-        try:
-            subprocess.run(["clang", "--version"], capture_output=True, check=True)
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            self.skipTest("clang compiler not available")
+        # Check that clang is available
+        subprocess.run(["clang", "--version"], capture_output=True, check=True)
 
         # Create temporary directory
         with tempfile.TemporaryDirectory(prefix="stable_abi_layout_test_") as temp_dir:
@@ -155,24 +135,17 @@ class TestStableABILayout(TestCase):
             }
 
             layout_files = {}
-            success_count = 0
 
             # Create and compile test files for each version
             for version_name, version_define in versions.items():
                 test_file = os.path.join(temp_dir, f"test_{version_name}.cpp")
                 _create_test_file(version_define, test_file)
 
-                success, layout_file = _compile_and_extract_layout(
+                layout_file = _compile_and_extract_layout(
                     test_file, version_name, self.pytorch_root, temp_dir
                 )
 
-                if success:
-                    layout_files[version_name] = layout_file
-                    success_count += 1
-
-            # Skip test if compilation failed
-            if success_count < 2:
-                raise RuntimeError("Failed to compile test files with clang")
+                layout_files[version_name] = layout_file
 
             # Extract layout information for each version
             layout_contents = {}
@@ -184,18 +157,15 @@ class TestStableABILayout(TestCase):
             v2_8_layout = layout_contents.get("v2_8", "")
             v2_9_layout = layout_contents.get("v2_9", "")
 
-            # Skip test if no layout information was extracted
-            if not v2_8_layout or not v2_9_layout:
-                self.skipTest("Failed to extract layout information from clang output")
-
             # Use assertExpectedInline to check v2.8 layout
             self.assertExpectedInline(
                 v2_8_layout,
                 """\
          0 | struct dummy_types::Dummy
-         0 |   int32_t id
-           | [sizeof=4, dsize=4, align=4,
-           |  nvsize=4, nvalign=4]
+         0 |   int8_t foo
+         4 |   int32_t id
+           | [sizeof=8, dsize=8, align=4,
+           |  nvsize=8, nvalign=4]
 """,
             )
 
@@ -205,9 +175,10 @@ class TestStableABILayout(TestCase):
                 v2_9_layout,
                 """\
          0 | struct dummy_types::Dummy
-         0 |   int32_t id
-           | [sizeof=4, dsize=4, align=4,
-           |  nvsize=4, nvalign=4]
+         0 |   int8_t foo
+         4 |   int32_t id
+           | [sizeof=8, dsize=8, align=4,
+           |  nvsize=8, nvalign=4]
 """,
             )
 
