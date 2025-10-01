@@ -42,6 +42,7 @@
 #include <ATen/ops/div.h>
 #include <ATen/ops/ne.h>
 #include <ATen/ops/sum.h>
+#include <ATen/ops/linear_cross_entropy_backward_native.h>
 #include <ATen/ops/linear_cross_entropy_native.h>
 #endif
 
