@@ -924,6 +924,26 @@ def forward(self, x):
         loaded_ep = load(buffer)
         self.assertEqual(m(*sample_inputs), loaded_ep.module()(*sample_inputs))
 
+    def test_non_float_weight(self) -> None:
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.p = torch.nn.Parameter(
+                    torch.ones(2, 2, dtype=torch.int8), requires_grad=False
+                )
+
+            def forward(self, x):
+                return x + self.p
+
+        m = M()
+        sample_inputs = (torch.randn(2, 2),)
+        ep = torch.export.export(m, sample_inputs)
+        buffer = io.BytesIO()
+        save(ep, buffer)
+        buffer.seek(0)
+        loaded_ep = load(buffer)
+        self.assertEqual(m(*sample_inputs), loaded_ep.module()(*sample_inputs))
+
     def test_complex_constant(self) -> None:
         class M(torch.nn.Module):
             def forward(self, x):

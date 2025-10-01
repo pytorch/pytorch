@@ -572,7 +572,7 @@ def optim_inputs_func_adam(device, dtype=None):
         + (cuda_supported_configs if _get_device_type(device) == "cuda" else [])
         + (mps_supported_configs if _get_device_type(device) == "mps" else [])
     )
-    if dtype in (torch.float16,):
+    if dtype == torch.float16:
         for input in total:
             """
             Too small eps will make denom to be zero for low precision dtype
