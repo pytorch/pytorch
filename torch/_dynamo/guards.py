@@ -3623,7 +3623,7 @@ class CheckFunctionManager:
                 # Leave out the builtins dict key, as we will special handle
                 # it later because the guarded code rarely use the entire
                 # builtin dict in the common case.
-                if name not in (builtins_dict_name,):
+                if name != builtins_dict_name:
                     used_global_vars.add(name)
             elif name := get_local_source_name(source):
                 assert isinstance(name, str)

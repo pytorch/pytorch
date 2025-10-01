@@ -783,7 +783,7 @@ class _FlopCounterMode(TorchDispatchMode):
         return result, flop_counts
 
     def _handle_higher_order_ops(self, func, types, args, kwargs):
-        if func not in {torch.ops.higher_order.cond, }:
+        if func is not torch.ops.higher_order.cond:
             return NotImplemented
 
         # The flop counter for cond counts the upper bound of flops.
