@@ -106,7 +106,6 @@ def redistribute_fw_inputs(
     global_args: Any, all_placements: Any, mesh: Any, _: Optional[int] = None
 ) -> tuple[torch.Tensor, int, torch.SymInt]:
     assert len(global_args) == len(all_placements)
-    breakpoint()
     return _redistribute(
         global_args,
         all_placements,

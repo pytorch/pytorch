@@ -14,11 +14,6 @@ import torch._inductor.decomposition
 import torch.nn.functional as F
 from torch import nn
 from torch._dynamo.variables.higher_order_ops import LocalMapWrappedHigherOrderVariable
-from torch._functorch.aot_autograd import (
-    aot_export_joint_with_descriptors,
-    boxed_nop_preserve_node_meta,
-)
-from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.nn.attention import sdpa_kernel, SDPBackend
 from torch.utils.checkpoint import create_selective_checkpoint_contexts
 
@@ -48,56 +43,6 @@ def enable_local_map_wrapping():
 
     with vt_cls.enable(), local_map_module.defer_inlining():
         yield
-
-
-@contextmanager
-def ap_style_frontend_patches():
-    @contextmanager
-    def monkey_patch_export_verifier():
-        from torch._export.verifier import final, Verifier
-
-        prior = Verifier._check_graph_module
-
-        @final
-        def skip_checks(self: Verifier, gm: torch.fx.GraphModule) -> None:
-            return
-
-        try:
-            Verifier._check_graph_module = skip_checks
-            yield
-        finally:
-            Verifier._check_graph_module = prior
-
-    with ExitStack() as stack:
-        stack.enter_context(enable_local_map_wrapping())
-        stack.enter_context(
-            torch._dynamo.utils._disable_saved_tensors_hooks_during_tracing()
-        )
-        stack.enter_context(torch._dynamo.config.patch(install_free_tensors=True))
-        stack.enter_context(monkey_patch_export_verifier())
-        yield
-
-
-def ap_style_initial_capture(model, inputs):
-    """
-    Similar to AP's initial capture, but:
-    - no dtype casting
-    - no AP decomps
-    - no inductor
-    """
-    assert isinstance(inputs, tuple)
-    with ap_style_frontend_patches():
-        ep = torch.export.export(model, inputs, strict=True)
-        unused = ExitStack()
-        joint_with_descriptors = aot_export_joint_with_descriptors(
-            unused,
-            ep.module(),
-            inputs,
-            decompositions=torch._inductor.decomposition.select_decomp_table(),
-            fw_compiler=boxed_nop_preserve_node_meta,
-            bw_compiler=boxed_nop_preserve_node_meta,
-        )
-    return joint_with_descriptors.graph_module
 
 
 def get_skip_reasons():
@@ -552,60 +497,6 @@ class GraphModule(torch.nn.Module):
             ),
         ):
             torch.compile(mismatch_outputs, backend="eager", fullgraph=True)(x)
-
-    @unittest.skipIf(*get_skip_reasons())
-    def test_local_map_hop_with_local_shapes(self):
-        def fn(x):
-            assert x.shape == (10, 80), "expected local shapes"
-            # force view specialization ops
-            out = x.view(-1) + 10
-            return (out.view(x.shape),)
-
-        # pretend this is a GraphModule for testing convenience
-        fn.meta = {
-            "local_map_kwargs": {
-                "in_placements": ((Shard(0), Replicate(), Replicate()),),
-                "out_placements": ((Shard(0), Replicate(), Replicate()),),
-                "device_mesh": self.mesh,
-            }
-        }
-
-        with FakeTensorMode(allow_non_fake_inputs=False):
-            global_tensor = torch.randn(80, 80, requires_grad=True)
-            with torch._higher_order_ops.local_map.defer_inlining():
-                out = torch._higher_order_ops.local_map_hop(fn, global_tensor)
-                out[0].sum().backward()
-            self.assertEqual(global_tensor.shape, (80, 80))
-
-    @unittest.skipIf(*get_skip_reasons())
-    def test_local_map_hop_with_local_shapes_e2e(self):
-        @local_map(
-            out_placements=((Shard(0), Replicate(), Replicate()),),
-            in_placements=((Shard(0), Replicate(), Replicate()),),
-            redistribute_inputs=True,
-            in_grad_placements=None,
-            device_mesh=self.mesh,
-        )
-        def fn(x):
-            out = x.view(-1) + 10
-            return (out.view(x.shape),)
-
-        class MyModule(torch.nn.Module):
-            def forward(self, x):
-                return fn(x)
-
-        model = MyModule()
-        inputs = (torch.randn(80, 80, requires_grad=True),)
-        gm = ap_style_initial_capture(model, inputs)
-        breakpoint()
-
-        # pretend this is a GraphModule for testing convenience
-        # with FakeTensorMode(allow_non_fake_inputs=False):
-        #     global_tensor = torch.randn(80, 80, requires_grad=True)
-        #     with torch._higher_order_ops.local_map.defer_inlining():
-        #         out = torch._higher_order_ops.local_map_hop(fn, global_tensor)
-        #         out[0].sum().backward()
-        #     self.assertEqual(global_tensor.shape, (80, 80))
 
 
 if __name__ == "__main__":
