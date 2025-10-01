@@ -6240,6 +6240,26 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         }
         self._test_export_same_as_eager(kw_func, args, kwargs)
 
+    def test_unbacked_stack(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                nz = torch.nonzero(x)
+                nz_size = nz.size(0)
+                torch._check(nz_size % 4 == 0)
+
+                # Create two tensors whose leading dimensions are equivalent at
+                # runtime but expressed via different SymInt formulas.
+                first = torch.zeros((nz_size // 2, 4))
+                second = torch.zeros(((nz_size // 4) * 2, 4))
+                return torch.stack([first, second], dim=0)
+
+        inputs = (torch.ones((32,)),)
+
+        ep = export(M(), inputs)
+        orig_res = M()(*inputs)
+        ep_res = ep.module()(*inputs)
+        self.assertTrue(torch.allclose(orig_res, ep_res))
+
     def test_unbacked_slice_simple(self):
         class M(torch.nn.Module):
             def forward(self, scores, score_thr, topk: torch.Tensor, results=None):
