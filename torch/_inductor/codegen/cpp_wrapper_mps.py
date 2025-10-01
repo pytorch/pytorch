@@ -21,6 +21,7 @@ class CppWrapperMps(CppWrapperGpu):
         super().__init__()
         self._used_kernel_names: OrderedSet[str] = OrderedSet()
         self._lambda_counter: int = 0
+        self._raii_types_generated: bool = False
 
     @staticmethod
     def create(
@@ -293,7 +294,7 @@ class CppWrapperMps(CppWrapperGpu):
         # at::native::mps::DynamicMetalShaderLibrary mps_lib_0(R"MTL(...shader_source...)MTL");
 
         # Generate common RAII types once
-        if shader_libraries:
+        if shader_libraries and not self._raii_types_generated:
             self.prefix.splice("""
 // Common RAII wrapper for MPS shader libraries
 namespace {
@@ -305,6 +306,7 @@ namespace {
 }
 
 """)
+            self._raii_types_generated = True
 
         # Generate getter functions using the common types
         for lib_name in shader_libraries:
