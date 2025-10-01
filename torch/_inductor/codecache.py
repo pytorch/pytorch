@@ -986,6 +986,7 @@ def compiled_fx_graph_hash(
     debug_lines = pickler.debug_lines(details)
     debug_str = "\n".join(debug_lines)
     log.debug(f"FX graph cache hash details for key {key}:\n{debug_str}")  # noqa: G004
+    breakpoint()
     return key, debug_lines
 
 
@@ -1571,6 +1572,7 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
             "cache_event_time": time_ns(),
         }
         if compiled_graph is not None:
+            breakpoint()
             log.info("fx graph cache hit for key %s", key)
             counters["inductor"]["fxgraph_cache_hit"] += 1
             cache_info["cache_state"] = "hit"

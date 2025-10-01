@@ -98,10 +98,11 @@ class DebugMode(TorchDispatchMode):
         self.record_faketensor = record_faketensor
         self.record_realtensor = record_realtensor
 
-        self.operators = []
+        self.operators = ""
         self.call_depth = 0
 
     def __torch_function__(self, func, types, args=(), kwargs=None):
+        # print("__torch_function__", func)
         if kwargs is None:
             kwargs = {}
 
@@ -113,7 +114,12 @@ class DebugMode(TorchDispatchMode):
         finally:
             self.call_depth -= 1
 
+    @classmethod
+    def ignore_compile_internals(cls):
+        return True
+
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        # print("__torch_dispatch__", func)
         if kwargs is None:
             kwargs = {}
 
@@ -139,16 +145,16 @@ class DebugMode(TorchDispatchMode):
         self.operators = []
         self.call_depth = 0
 
-        if self.record_torchfunction:
-            torch._C._push_on_torch_function_stack(self)
+        # if self.record_torchfunction:
+        #     torch._C._push_on_torch_function_stack(self)
 
         super().__enter__()
         return self
 
     def __exit__(self, *args):
         super().__exit__(*args)
-        if self.record_torchfunction:
-            torch._C._pop_torch_function_stack()
+        # if self.record_torchfunction:
+        #     torch._C._pop_torch_function_stack()
 
     @contextlib.contextmanager
     def record_redistribute_calls(self, arg_idx, src_placement, dst_placement):
@@ -165,6 +171,9 @@ class DebugMode(TorchDispatchMode):
             yield
         finally:
             self.call_depth -= 1
+
+    def record_fx_graph_call(self, *args):
+        pass
 
     def debug_string(self) -> str:
         with torch._C.DisableTorchFunction():

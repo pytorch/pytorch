@@ -51,6 +51,7 @@ from torch._inductor.utils import (
     set_tracing_context_output_strides,
 )
 from torch.autograd.profiler import record_function
+from torch.utils.debug_mode import get_active_debug_mode
 from torch.utils._ordered_set import OrderedSet
 
 from . import config
@@ -612,6 +613,10 @@ class CompiledFxGraph(OutputCode):
                 with record_function(
                     f"## Call CompiledFxGraph {self._fx_graph_cache_key} ##"
                 ):
+                    if (debug_mode := get_active_debug_mode) is not None:
+                        print(debug_mode)
+                        breakpoint()
+                        print(inputs)
                     return self.current_callable(inputs)
             else:
                 return self.current_callable(inputs)
