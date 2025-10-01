@@ -27,6 +27,7 @@ from trymerge import (
     get_drci_classifications,
     gh_get_team_members,
     GitHubPR,
+    iter_issue_timeline_until_comment,
     JobCheckState,
     main as trymerge_main,
     MandatoryChecksMissingError,
@@ -34,6 +35,8 @@ from trymerge import (
     RE_GHSTACK_DESC,
     read_merge_rules,
     remove_job_name_suffix,
+    sha_from_committed_event,
+    sha_from_force_push_after,
     validate_revert,
 )
 
@@ -1136,6 +1139,177 @@ Pull Request resolved: https://github.com/pytorch/pytorch/pull/154394"""
             "PRs mentioned in commit dummy: 2.",
             lambda: _revlist_to_prs(repo, pr, ["dummy"]),
         )
+
+
+@mock.patch("trymerge.gh_graphql", side_effect=mocked_gh_graphql)
+@mock.patch("trymerge.gh_fetch_merge_base", return_value="")
+@mock.patch(
+    "trymerge.get_drci_classifications", side_effect=mocked_drci_classifications
+)
+class TestTimelineFunctions(TestCase):
+    """Tests for the new timeline-related functions"""
+
+    def test_sha_from_committed_event(self, *args: Any) -> None:
+        """Test extracting SHA from committed event"""
+        # Based on actual GitHub API format - committed events have "sha" at top level
+        event = {
+            "event": "committed",
+            "sha": "fb21ce932ded6670c918804a0d9151b773770a7c",
+        }
+        self.assertEqual(
+            sha_from_committed_event(event), "fb21ce932ded6670c918804a0d9151b773770a7c"
+        )
+
+        # Test with missing SHA
+        event_no_sha = {"event": "committed"}
+        self.assertIsNone(sha_from_committed_event(event_no_sha))
+
+    def test_sha_from_force_push_after(self, *args: Any) -> None:
+        """Test extracting SHA from force push event"""
+        # NOTE: The current function doesn't handle the actual GitHub API format
+        # Real force push events have "commit_id" at top level, but this function
+        # looks for "after", "after_commit", "after_sha", or "head_sha" fields
+
+        # Test with the legacy format the current function handles
+        event_legacy = {
+            "event": "head_ref_force_pushed",
+            "after": {"sha": "ef22bcbc54bb0f787e1e4ffd3d83df18fc407f5e"},
+        }
+        self.assertEqual(
+            sha_from_force_push_after(event_legacy),
+            "ef22bcbc54bb0f787e1e4ffd3d83df18fc407f5e",
+        )
+
+        # Test with current GitHub API format (should return None with current implementation)
+        event_real_api = {
+            "event": "head_ref_force_pushed",
+            "commit_id": "ef22bcbc54bb0f787e1e4ffd3d83df18fc407f5e",
+        }
+        self.assertEqual(
+            sha_from_force_push_after(event_real_api),
+            "ef22bcbc54bb0f787e1e4ffd3d83df18fc407f5e",
+        )  # Current function doesn't handle commit_id
+
+        # Test with missing SHA
+        event_no_sha = {"event": "head_ref_force_pushed"}
+        self.assertIsNone(sha_from_force_push_after(event_no_sha))
+
+    @mock.patch("trymerge.gh_fetch_json_list")
+    def test_iter_issue_timeline_until_comment(
+        self, mock_gh_fetch_json_list: Any, *args: Any
+    ) -> None:
+        """Test timeline iteration until target comment"""
+        # Mock timeline data based on actual GitHub API format
+        timeline_data = [
+            {"event": "commented", "id": 100, "body": "first comment"},
+            {"event": "committed", "sha": "fb21ce932ded6670c918804a0d9151b773770a7c"},
+            {"event": "commented", "id": 200, "body": "target comment"},
+            {"event": "commented", "id": 300, "body": "after target"},
+        ]
+        mock_gh_fetch_json_list.return_value = timeline_data
+
+        # Test iteration stops at target comment
+        events = list(iter_issue_timeline_until_comment("pytorch", "pytorch", 123, 200))
+        self.assertEqual(len(events), 3)  # Should stop at target comment
+        self.assertEqual(events[0]["event"], "commented")
+        self.assertEqual(events[0]["id"], 100)
+        self.assertEqual(events[1]["event"], "committed")
+        self.assertEqual(events[1]["sha"], "fb21ce932ded6670c918804a0d9151b773770a7c")
+        self.assertEqual(events[2]["event"], "commented")
+        self.assertEqual(events[2]["id"], 200)
+
+    @mock.patch("trymerge.gh_fetch_json_list")
+    def test_iter_issue_timeline_until_comment_not_found(
+        self, mock_gh_fetch_json_list: Any, *args: Any
+    ) -> None:
+        """Test timeline iteration when target comment is not found"""
+        # Mock empty timeline
+        mock_gh_fetch_json_list.return_value = []
+
+        events = list(iter_issue_timeline_until_comment("pytorch", "pytorch", 123, 999))
+        self.assertEqual(len(events), 0)
+
+    @mock.patch("trymerge.iter_issue_timeline_until_comment")
+    def test_get_commit_sha_at_comment_commit_after_comment(
+        self, mock_iter_timeline: Any, *args: Any
+    ) -> None:
+        """Test get_commit_sha_at_comment returns correct SHA after comment"""
+        mock_iter_timeline.return_value = [
+            {"event": "committed", "sha": "commit1"},
+            {"event": "committed", "sha": "commit2"},
+            {"event": "commented", "id": 100},
+            {"event": "head_ref_force_pushed", "after": {"sha": "commit3"}},
+        ]
+        pr = GitHubPR("pytorch", "pytorch", 77700)
+        sha = pr.get_commit_sha_at_comment(100)
+        self.assertEqual(sha, "commit2")
+
+    @mock.patch("trymerge.iter_issue_timeline_until_comment")
+    def test_get_commit_sha_at_comment_force_push_before_comment(
+        self, mock_iter_timeline: Any, *args: Any
+    ) -> None:
+        mock_iter_timeline.return_value = [
+            {"event": "committed", "sha": "commit1"},
+            {"event": "committed", "sha": "commit2"},
+            {"event": "head_ref_force_pushed", "commit_id": "commit3"},
+            {"event": "commented", "id": 100},
+        ]
+        pr = GitHubPR("pytorch", "pytorch", 77700)
+        sha = pr.get_commit_sha_at_comment(100)
+        self.assertEqual(sha, "commit3")
+
+    @mock.patch("trymerge.iter_issue_timeline_until_comment")
+    def test_get_commit_sha_at_comment_force_push_before_comment_legacy_mode(
+        self, mock_iter_timeline: Any, *args: Any
+    ) -> None:
+        mock_iter_timeline.return_value = [
+            {"event": "committed", "sha": "commit1"},
+            {"event": "committed", "sha": "commit2"},
+            {"event": "head_ref_force_pushed", "after": {"sha": "commit3"}},
+            {"event": "commented", "id": 100},
+        ]
+        pr = GitHubPR("pytorch", "pytorch", 77700)
+        sha = pr.get_commit_sha_at_comment(100)
+        self.assertEqual(sha, "commit3")
+
+    @mock.patch("trymerge.iter_issue_timeline_until_comment")
+    def test_get_commit_sha_at_comment_multiple_comments(
+        self, mock_iter_timeline: Any, *args: Any
+    ) -> None:
+        mock_iter_timeline.return_value = [
+            {"event": "committed", "sha": "commit1"},
+            {"event": "commented", "id": 100},
+            {"event": "committed", "sha": "commit2"},
+            {"event": "commented", "id": 200},
+            {"event": "head_ref_force_pushed", "after": {"sha": "commit3"}},
+            {"event": "commented", "id": 300},
+        ]
+        pr = GitHubPR("pytorch", "pytorch", 77700)
+        sha = pr.get_commit_sha_at_comment(200)
+        self.assertEqual(sha, "commit2")
+        sha = pr.get_commit_sha_at_comment(300)
+        self.assertEqual(sha, "commit3")
+
+    @mock.patch("trymerge.iter_issue_timeline_until_comment")
+    def test_get_commit_sha_at_comment_no_events(
+        self, mock_iter_timeline: Any, *args: Any
+    ) -> None:
+        mock_iter_timeline.return_value = [
+            {"event": "commented", "id": 100},
+            {"event": "labeled", "label": {"name": "test"}},
+        ]
+        pr = GitHubPR("pytorch", "pytorch", 77700)
+        sha = pr.get_commit_sha_at_comment(100)
+        self.assertIsNone(sha)
+
+    @mock.patch("trymerge.iter_issue_timeline_until_comment")
+    def test_get_commit_sha_at_comment_exception(
+        self, mock_iter_timeline: Any, *args: Any
+    ) -> None:
+        mock_iter_timeline.side_effect = Exception("API error")
+        pr = GitHubPR("pytorch", "pytorch", 77700)
+        sha = pr.get_commit_sha_at_comment(100)
+        self.assertIsNone(sha)
 
 
 if __name__ == "__main__":

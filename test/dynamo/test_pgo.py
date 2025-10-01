@@ -443,15 +443,15 @@ def run(cnt):
             f(t(2, 4), t(2, 2))
             f(t(4, 2), t(2, 2))
 
-            # with default remote (dynamic x) + extra remote (dynamic y),
-            # we should be able to wobble x & y with no recompiles.
+            # with both default remote present, we ignore extra remote.
             self.reset()
             cnts.clear()
             with torch.compiler.config.patch(pgo_extra_read_key="sticky_1"):
                 f(t(2, 2), t(2, 2))
-                f(t(2, 4), t(4, 2))
-                f(t(4, 2), t(2, 4))
+                f(t(6, 8), t(2, 2))
                 self.assertEqual(cnts.frame_count, 1)
+                f(t(2, 2), t(2, 4))
+                self.assertEqual(cnts.frame_count, 2)
 
 
 if __name__ == "__main__":

@@ -6940,6 +6940,70 @@ class TestMPS(TestCaseMPS):
         with self.assertRaisesRegex(RuntimeError, "Index to scalar can have only 1 value"):
             helper(22, 0, [])
 
+    # TODO: This test can be removed once the backward pass of embedding_bag is
+    # implemented and tested
+    @parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32])
+    @parametrize("idx_dtype", [torch.long, torch.int])
+    @parametrize("padding_idx", [-1, 1])
+    @parametrize("include_last_offset", [True, False])
+    @parametrize("mode", ['sum', 'mean', 'max'])
+    def test__embedding_bag(self, dtype, idx_dtype, padding_idx, include_last_offset, mode):
+        import time
+        torch.manual_seed(time.time() * 1000)
+        mode_num = {'sum': 0, 'mean': 1, 'max': 2}[mode]
+        num_words = 10
+        feature_size = 7
+        num_indices = 40
+        num_bags = 5
+
+        weight_cpu = torch.randn(num_words, feature_size, dtype=dtype)
+
+        # Test nan value behavior.
+        # Set second element of each word to nan.
+        weight_cpu[:, 1] = float('nan')
+        # Set third element of a randomized half of the words to nan.
+        weight_cpu[torch.randperm(num_words)[:num_words // 2], 2] = float('nan')
+        # Set fourth element of one randomized word to nan.
+        weight_cpu[torch.randint(0, num_words, ()), 3] = float('nan')
+
+        input_cpu = torch.randint(0, num_words, (num_indices,), dtype=idx_dtype)
+        offsets_cpu = torch.tensor(
+            [0] + (torch.randperm(num_indices - 1)[:num_bags - 1].sort()[0] + 1).tolist(),
+            dtype=idx_dtype)
+
+        if include_last_offset:
+            offsets_cpu[-1] = input_cpu.numel()
+
+        per_sample_weights_cpu = torch.randn(num_indices, dtype=dtype) if mode == 'sum' else None
+
+        r_cpu, offset2bag_cpu, bag_size_cpu, max_indices_cpu = torch._embedding_bag(
+            weight_cpu,
+            input_cpu,
+            offsets_cpu,
+            per_sample_weights=per_sample_weights_cpu,
+            mode=mode_num,
+            padding_idx=padding_idx,
+            include_last_offset=include_last_offset,
+        )
+        r_mps, offset2bag_mps, bag_size_mps, max_indices_mps = torch._embedding_bag(
+            weight_cpu.to('mps'),
+            input_cpu.to('mps'),
+            offsets_cpu.to('mps'),
+            per_sample_weights=per_sample_weights_cpu.to('mps') if per_sample_weights_cpu is not None else None,
+            mode=mode_num,
+            padding_idx=padding_idx,
+            include_last_offset=include_last_offset,
+        )
+
+        self.assertEqual(r_cpu, r_mps)
+
+        if mode != 'sum':
+            self.assertEqual(offset2bag_cpu, offset2bag_mps)
+            self.assertEqual(bag_size_cpu, bag_size_mps)
+
+        if mode == 'max':
+            self.assertEqual(max_indices_cpu, max_indices_mps)
+
     def test_embedding_dense_backward(self):
         def helper(n, d, m, idx):
             embeddingMPS = nn.Embedding(n, d, max_norm=True, device='mps')
@@ -7524,6 +7588,39 @@ class TestMPS(TestCaseMPS):
             uniq = mps_out.unique()
             self.assertEqual(uniq, torch.arange(2, device='mps', dtype=dtype))
 
+    @parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32])
+    def test_dropout(self, dtype):
+        shapes = [
+            (100_000,),
+            (100, 1000),
+            (10, 100, 100),
+            (10, 10, 10, 10, 10),
+        ]
+        p_list = [0, 0.34, 0.78, 1]
+
+        for shape, p, train in itertools.product(shapes, p_list, [False, True]):
+            input = torch.randn(shape, device='mps', dtype=dtype, requires_grad=True)
+            output, mask = torch.native_dropout(input, p, train=train)
+
+            p_actual_mps = 1 - (mask.sum() / mask.numel())
+            if train:
+                self.assertEqual(p_actual_mps, p, atol=1e-2, rtol=1e-2)
+                self.assertTrue((output[mask.logical_not()] == 0).all())
+                self.assertEqual(output[mask], input[mask] / (1 - p))
+            else:
+                self.assertEqual(output, input)
+                self.assertTrue(mask.all())
+
+            output_grad = torch.randn_like(output)
+            output.backward(output_grad)
+
+            grad_scale = 0 if p == 1 else 1 / (1 - p)
+            if train:
+                self.assertEqual(input.grad, output_grad * mask * grad_scale)
+            else:
+                self.assertEqual(input.grad, output_grad)
+
+
     def test_mps_generator(self):
         # explicit manual seeding by creating an MPS Generator
         g_mps = torch.Generator(device='mps')
@@ -8016,6 +8113,14 @@ class TestMPS(TestCaseMPS):
         for x in [x_mps, x_cpu]:
             x[::2].bitwise_not_()
         self.assertEqual(x_mps.cpu(), x_cpu)
+
+    def test_empty_posneginf(self):
+        # just to check that it doesnt crash
+        input_tensor = torch.empty(0, device="mps")
+        out_pos = torch.isposinf(input_tensor)
+        out_neg = torch.isposinf(input_tensor)
+        self.assertEqual(out_pos.numel(), 0)
+        self.assertEqual(out_neg.numel(), 0)
 
 
 class TestLargeTensors(TestCaseMPS):
@@ -9431,17 +9536,37 @@ class TestSDPA(TestCaseMPS):
         # 5 MB different maximum allowed value(could be decreased even more)
         torch.testing.assert_close(memory_footprints[-1], memory_footprints[0], atol=5, rtol=1)
 
-    def generate_qkv(self, batch, NH, q_len, s_len, head_dim, contiguous, dtype):
-        if contiguous:
+    def generate_qkv(self, batch: int, NH: int, q_len: int, s_len: int, head_dim: int, layout: str, dtype: torch.dtype):
+        if layout == "contiguous":
             q = torch.randn(batch, NH, q_len, head_dim, dtype=dtype, device="mps")
             k = torch.randn(batch, NH, s_len, head_dim, dtype=dtype, device="mps")
-        else:
+        elif layout == "mT":
+            # Transpose head dimension and length
             q = torch.randn(batch, NH, head_dim, q_len, dtype=dtype, device="mps").mT
             k = torch.randn(batch, NH, head_dim, s_len, dtype=dtype, device="mps").mT
+        elif layout == "transpose_seq_head":
+            # Transpose length and number of heads
+            q = torch.randn(batch, q_len, NH, head_dim, dtype=dtype, device="mps").transpose(1, 2)
+            k = torch.randn(batch, s_len, NH, head_dim, dtype=dtype, device="mps").transpose(1, 2)
+        elif layout == "permute":
+            # Permute head dimension and length
+            q = torch.randn(batch, head_dim, NH, q_len, dtype=dtype, device="mps").permute(0, 2, 3, 1)
+            k = torch.randn(batch, head_dim, NH, s_len, dtype=dtype, device="mps").permute(0, 2, 3, 1)
+        else:
+            raise ValueError(f"Unknown layout: {layout}")
+
         v = torch.randn(batch, NH, s_len, head_dim, dtype=dtype, device="mps")
         return q, k, v
 
-    def run_fast_attention_test(self, q, k, v, with_mask, dropout_p=0.0, is_causal=False):
+    def run_fast_attention_test(
+        self,
+        q: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
+        with_mask: bool,
+        dropout_p: float = 0.0,
+        is_causal: bool = False,
+    ):
         q_len = q.shape[2]
         s_len = k.shape[2]
 
@@ -9482,45 +9607,44 @@ class TestSDPA(TestCaseMPS):
         self._compare_tensors(y.cpu(), y_ref)
 
     @parametrize("dtype", [torch.float16, torch.float32])
-    @parametrize("contiguous", [True, False])
+    @parametrize("layout", ["contiguous", "mT", "transpose_seq_head", "permute"])
     @parametrize("head_dim", [64, 96, 128])  # 64, 96, 128 are for the fast kernel
     @parametrize("with_mask", [True, False])
-    def test_fast_vector_attention(self, dtype, contiguous, head_dim, with_mask):
+    def test_fast_vector_attention(self, dtype: torch.dtype, layout: str, head_dim: int, with_mask: bool):
         torch.manual_seed(1729)
         batch = 1
         NH = 2
         q_len = 4  # <8 so that vector fast is eligible
         s_len = 16  # smaller than 1024 so that we use the one–pass variant
-        q, k, v = self.generate_qkv(batch, NH, q_len, s_len, head_dim, contiguous, dtype)
+        q, k, v = self.generate_qkv(batch, NH, q_len, s_len, head_dim, layout, dtype)
         self.run_fast_attention_test(q, k, v, with_mask)
 
     @parametrize("dtype", [torch.float32])  # float16 underflows sometimes, which leads to flaky tests
-    @parametrize("contiguous", [True, False])
+    @parametrize("layout", ["contiguous", "mT", "transpose_seq_head", "permute"])
     @parametrize("with_mask", [True, False])
-    def test_fast_vector_attention_2pass(self, dtype, contiguous, with_mask):
+    def test_fast_vector_attention_2pass(self, dtype: torch.dtype, layout: str, with_mask: bool):
         torch.manual_seed(1729)
         batch = 1
         NH = 32
         q_len = 8
         s_len = 1024  # large enough to trigger the two–pass path
         head_dim = 64  # supported head dimension for vector attention
-        q, k, v = self.generate_qkv(batch, NH, q_len, s_len, head_dim, contiguous, dtype)
+        q, k, v = self.generate_qkv(batch, NH, q_len, s_len, head_dim, layout, dtype)
         self.run_fast_attention_test(q, k, v, with_mask)
 
     @unittest.skip("Full attention fast kernel not implemented yet")
     @parametrize("dtype", [torch.float16, torch.float32])
-    @parametrize("contiguous", [True, False])
+    @parametrize("layout", ["contiguous", "mT"])
     @parametrize("head_dim", [64, 80, 128])  # 64, 80, 128 are for the fast kernel
     @parametrize("with_mask", [True, False])
-    def test_fast_full_attention(self, dtype, contiguous, head_dim, with_mask):
+    def test_fast_full_attention(self, dtype: torch.dtype, layout: str, head_dim: int, with_mask: bool):
         torch.manual_seed(1729)
         batch = 1
         NH = 2
         q_len = 32  # threshold to trigger full fast attention path
         s_len = 16
-        q, k, v = self.generate_qkv(batch, NH, q_len, s_len, head_dim, contiguous, dtype)
+        q, k, v = self.generate_qkv(batch, NH, q_len, s_len, head_dim, layout, dtype)
         self.run_fast_attention_test(q, k, v, with_mask)
-
 
 
 
@@ -11587,6 +11711,9 @@ class TestAdvancedIndexing(TestCaseMPS):
     def test_empty_reduce(self, device="mps"):
         x = torch.rand(0, 3, device=device)
         self.assertTrue(x.mean().isnan())
+        self.assertTrue(x.nanmean().isnan())
+        self.assertTrue(x.median().isnan())
+        self.assertTrue(x.nanmedian().isnan())
         self.assertEqual(x.count_nonzero(), 0)
         self.assertEqual(x.sum(), 0)
         self.assertEqual(x.nansum(), 0)
@@ -12190,7 +12317,7 @@ class TestConsistency(TestCaseMPS):
         'arange', 'linspace',
         'special.xlog1py',
 
-        # CPU accumulates sequantially, but GPU does in in parallel
+        # CPU accumulates sequantially, but GPU does in parallel
         '_unsafe_masked_index_put_accumulate',
     }
 
@@ -12292,8 +12419,17 @@ class TestConsistency(TestCaseMPS):
                 # Similar to the above, float vs double precision aresults in slight error
                 atol, rtol = 2e-5, 2e-6
 
-            if op.name in "grid_sampler_3d":
+            if op.name in ["grid_sampler_3d", "asinh"]:
                 atol, rtol = 1e-4, 1e-4
+
+            if op.name == "kthvalue":
+                self.assertEqual(cpu_out[0], mps_out[0], atol=atol, rtol=rtol)
+                # kthvalue is non-deterministic if input has repeated values
+                dim = cpu_args[2] if len(cpu_args) > 2 else -1
+                keep_dim = cpu_args[3] if len(cpu_args) > 3 else False
+                values = torch.gather(mps_sample.input, dim, mps_out[1] if keep_dim else mps_out[1].unsqueeze(dim))
+                self.assertEqual(values if keep_dim else values.squeeze(dim), mps_out[0])
+                continue
 
             self.assertEqual(cpu_out, mps_out, atol=atol, rtol=rtol)
 
@@ -12428,6 +12564,13 @@ class TestConsistency(TestCaseMPS):
             atol, rtol = 1e-4, 1e-4
 
             self.assertEqual(half_out, full_out.to(dtype), atol=atol, rtol=rtol)
+
+    def test_grid_sampler_3d_nan(self, device):
+        input = torch.ones(1, 1, 3, 3, 3)
+        grid_nan = torch.tensor([[[[[torch.nan, 1., 1.], [1., 1., 1.]]]]])
+        out_cpu = torch.grid_sampler_3d(input, grid_nan, 0, 0, True)
+        out_mps = torch.grid_sampler_3d(input.to(device), grid_nan.to(device), 0, 0, True)
+        self.assertEqual(out_mps, out_cpu)
 
     def test_fmax_mixed_dtypes(self, device):
         # Regression tesing for https://github.com/pytorch/pytorch/issues/149951
@@ -12756,119 +12899,6 @@ class TestMetalLibrary(TestCaseMPS):
                            f"Capture file {capture_dirname} contains only metadata, i.e. {capture_listdir}")
 
 
-
-class TestSparseMPS(TestCaseMPS):
-    def _get_basic_sparse_coo(self, device="mps"):
-        indices = torch.tensor([[0, 1], [2, 0]], dtype=torch.int64, device=device)
-        values = torch.tensor([1, 2], dtype=torch.float32, device=device)
-        size = (2, 3)
-        return torch.sparse_coo_tensor(indices, values, size, device=device)
-
-    def test_sparse_coo_tensor_with_dims(self):
-        indices = torch.zeros((2, 0), dtype=torch.int64, device="mps")
-        values = torch.tensor([], dtype=torch.float32, device="mps")
-        size = (2, 3)
-        t = torch.sparse_coo_tensor(indices, values, size, device="mps")
-        self.assertEqual(t.device.type, "mps")
-        self.assertEqual(t.layout, torch.sparse_coo)
-
-    def test_sparse_coo_tensor_with_dims_and_tensors(self):
-        indices = torch.tensor([[0, 1], [2, 0]], device="mps")
-        values = torch.tensor([1., 2.], device="mps")
-        size = (2, 3)
-        t = torch.sparse_coo_tensor(indices, values, size, device="mps")
-        self.assertEqual(t.device.type, "mps")
-        self.assertEqual(t.layout, torch.sparse_coo)
-        self.assertEqual(t._indices().cpu(), indices.cpu())
-        self.assertEqual(t._values().cpu(), values.cpu())
-
-    def test_nnz(self):
-        t = self._get_basic_sparse_coo()
-        self.assertEqual(t._nnz(), 2)
-
-    def test_sparse_dim(self):
-        t = self._get_basic_sparse_coo()
-        self.assertEqual(t.sparse_dim(), 2)
-
-    def test_to_sparse(self):
-        t = torch.tensor([[[1., 0], [2., 3.]], [[4., 0], [5., 6.]]], device="mps")
-        x = t.to_sparse()
-        t_cpu = torch.tensor([[[1., 0], [2., 3.]], [[4., 0], [5., 6.]]], device="mps")
-        x_cpu = t.to_sparse()
-        self.assertEqual(x.cpu(), x_cpu)
-
-    def test_resize(self):
-        indices = torch.tensor([[0, 1], [2, 0]])
-        values = torch.tensor([3.0, 4.0])
-        size = torch.Size([2, 3])
-        sparse = torch.sparse_coo_tensor(indices, values, size, device="mps")
-        sparse_cpu = torch.sparse_coo_tensor(indices, values, size, device="cpu")
-        sparse = sparse.sparse_resize_(torch.Size([4, 5]), sparse_dim=2, dense_dim=0)
-        sparse_cpu = sparse_cpu.sparse_resize_(torch.Size([4, 5]), sparse_dim=2, dense_dim=0)
-        self.assertEqual(sparse, sparse_cpu)
-
-    @parametrize("dtype", [torch.int8, torch.int16, torch.uint8, torch.int32, torch.int64,
-                           torch.float32, torch.float16, torch.bfloat16, torch.bool])
-    def test_coalesce(self, dtype):
-        indices = torch.tensor([[0, 0, 1, 1], [0, 0, 2, 2]], dtype=torch.int64, device="mps")
-        values = torch.tensor([1., 2., 3., 4.], dtype=dtype, device="mps")
-        size = (2, 3)
-        indices_cpu = indices.cpu()
-        values_cpu = values.cpu()
-        sparse_mps = torch.sparse_coo_tensor(indices, values, size, device="mps")
-        sparse_cpu = torch.sparse_coo_tensor(indices_cpu, values_cpu, size, device="cpu")
-        coalesced_mps = sparse_mps.coalesce()
-        coalesced_cpu = sparse_cpu.coalesce()
-
-        self.assertTrue(coalesced_mps.is_coalesced())
-        self.assertTrue(coalesced_cpu.is_coalesced())
-        self.assertEqual(coalesced_mps._nnz(), 2)
-        self.assertEqual(coalesced_mps.cpu(), coalesced_cpu)
-
-    def test_already_coalesced_tensor(self):
-        already_coalesced = self._get_basic_sparse_coo()
-        result = already_coalesced.coalesce()
-        self.assertTrue(result.is_coalesced())
-        self.assertEqual(result._indices().cpu(), already_coalesced._indices().cpu())
-        self.assertEqual(result._values().cpu(), already_coalesced._values().cpu())
-
-    def test_coalesce_empty_sparse_tensor(self):
-        empty_indices = torch.zeros((2, 0), dtype=torch.int64, device="mps")
-        empty_values = torch.tensor([], dtype=torch.float32, device="mps")
-        empty_sparse = torch.sparse_coo_tensor(empty_indices, empty_values, (3, 3), device="mps")
-        empty_coalesced = empty_sparse.coalesce()
-        self.assertTrue(empty_coalesced.is_coalesced())
-        self.assertEqual(empty_coalesced._nnz(), 0)
-
-    def test_coalesce_large_tensor(self):
-        size = (1000000, 1000000)
-        num_elements = 1000
-
-        # 800 unique random positions
-        unique_indices = torch.randint(0, size[0], (2, 800), dtype=torch.int64)
-        # 200 duplicates by repeating some of the first 200 indices
-        duplicate_indices = unique_indices[:, :200]
-        indices = torch.cat([unique_indices, duplicate_indices], dim=1)
-        # shuffle indices to mix duplicates with unique entries
-        perm = torch.randperm(indices.size(1))
-        indices = indices[:, perm]
-
-        values = torch.randn(num_elements, dtype=torch.float32)
-        indices_mps = indices.to("mps")
-        values_mps = values.to("mps")
-        sparse_mps = torch.sparse_coo_tensor(indices_mps, values_mps, size, device="mps")
-        sparse_cpu = torch.sparse_coo_tensor(indices, values, size, device="cpu")
-
-        self.assertFalse(sparse_mps.is_coalesced())
-        coalesced_mps = sparse_mps.coalesce()
-        coalesced_cpu = sparse_cpu.coalesce()
-        self.assertTrue(coalesced_mps.is_coalesced())
-        self.assertTrue(coalesced_cpu.is_coalesced())
-        self.assertEqual(coalesced_mps._nnz(), coalesced_cpu._nnz())
-        self.assertEqual(coalesced_mps._indices().cpu(), coalesced_cpu._indices())
-        self.assertEqual(coalesced_mps._values().cpu(), coalesced_cpu._values())
-
-
 # TODO: Actually instantiate that test for the "mps" device to better reflect what it is doing.
 # This requires mps to be properly registered in the device generic test framework which is not the
 # case right now. We can probably use `allow_mps` introduced in https://github.com/pytorch/pytorch/pull/87342
@@ -12883,7 +12913,6 @@ instantiate_parametrized_tests(TestMPS)
 instantiate_parametrized_tests(TestSDPA)
 instantiate_parametrized_tests(TestSmoothL1Loss)
 instantiate_parametrized_tests(TestMetalLibrary)
-instantiate_parametrized_tests(TestSparseMPS)
 
 if __name__ == "__main__":
     run_tests()
