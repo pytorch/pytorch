@@ -2,19 +2,9 @@
 #include <torch/csrc/inductor/aoti_torch/c/shim_mps.h>
 #include <torch/csrc/inductor/aoti_torch/utils.h>
 #include <ATen/mps/MPSStream.h>
-#include <unordered_map>
 
 using namespace torch::aot_inductor;
 
-// Global storage to keep shared_ptr alive while raw pointers are used
-// This is needed because aoti_torch_mps_get_kernel_function returns a raw pointer
-// extracted from a shared_ptr that would otherwise go out of scope
-//
-// Kernel functions should be cleaned up when their library is destroyed
-static std::unordered_map<at::native::mps::MetalKernelFunction*, std::shared_ptr<at::native::mps::MetalKernelFunction>> function_storage;
-
-// Track which functions belong to which library for cleanup
-static std::unordered_map<at::native::mps::DynamicMetalShaderLibrary*, std::vector<at::native::mps::MetalKernelFunction*>> library_to_functions;
 
 AOTITorchError aoti_torch_mps_set_arg_tensor(
     AOTIMetalKernelFunctionHandle handle,
@@ -53,19 +43,7 @@ AOTITorchError aoti_torch_mps_create_shader_library(
 AOTITorchError aoti_torch_mps_delete_shader_library(
     AOTIMetalShaderLibraryHandle library_handle) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
-    auto* library = reinterpret_cast<at::native::mps::DynamicMetalShaderLibrary*>(library_handle);
-
-    // Clean up all kernel functions associated with this library
-    auto it = library_to_functions.find(library);
-    if (it != library_to_functions.end()) {
-      // Remove all kernel functions belonging to this library from storage
-      for (auto* function_ptr : it->second) {
-        function_storage.erase(function_ptr);
-      }
-      // Remove the library entry
-      library_to_functions.erase(it);
-    }
-
+    auto* library = reinterpret_cast<at::native::mps::MetalShaderLibrary*>(library_handle);
     delete library;
   });
 }
@@ -75,19 +53,9 @@ AOTITorchError aoti_torch_mps_get_kernel_function(
     const char* kernel_name,
     AOTIMetalKernelFunctionHandle* function_handle) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
-    auto* library = reinterpret_cast<at::native::mps::DynamicMetalShaderLibrary*>(library_handle);
-    auto function_shared_ptr = library->getKernelFunction(std::string(kernel_name));
-    auto* raw_function = function_shared_ptr.get();
-
-    // Store the shared_ptr to keep the kernel function alive
-    // Without this storage, the shared_ptr goes out of scope and the
-    // MetalKernelFunction is destroyed, causing segfaults when using the raw pointer
-    function_storage[raw_function] = function_shared_ptr;
-
-    // Track which functions belong to this library for cleanup
-    library_to_functions[library].push_back(raw_function);
-
-    *function_handle = reinterpret_cast<AOTIMetalKernelFunctionHandle>(raw_function);
+    auto* library = reinterpret_cast<at::native::mps::MetalShaderLibrary*>(library_handle);
+    auto* function = library->getCachedKernelFunctionPtr(std::string(kernel_name));
+    *function_handle = reinterpret_cast<AOTIMetalKernelFunctionHandle>(function);
   });
 }
 
