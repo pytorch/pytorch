@@ -357,55 +357,69 @@ def fuzz_tensor(
     if seed is None:
         seed = random.randint(0, 2**32 - 1)
 
-    # Set the random seed for reproducibility
+    # Create a local Random instance to avoid interfering with global state
+    local_random = random.Random(seed)
+
+    # Set the torch random seed for reproducibility
+    # Save and restore global torch state to avoid side effects
+    torch_state = torch.get_rng_state()
     torch.manual_seed(seed)
-    random.seed(seed)
 
-    # Generate random values if not provided
-    if size is None:
-        size = fuzz_tensor_size()
+    # Generate random values if not provided using local random instance
+    old_random_state = random.getstate()
+    try:
+        # Temporarily use local random instance for deterministic generation
+        random.setstate(local_random.getstate())
 
-    if dtype is None:
-        dtype = fuzz_torch_tensor_type("default")
+        if size is None:
+            size = fuzz_tensor_size()
 
-    if stride is None:
-        stride = fuzz_valid_stride(size)
+        if dtype is None:
+            dtype = fuzz_torch_tensor_type("default")
 
-    # Handle empty tensor case
-    if len(size) == 0:
-        return torch.ones((), dtype=dtype), seed
+        if stride is None:
+            stride = fuzz_valid_stride(size)
 
-    # Calculate required storage size for the custom stride
-    required_storage = _compute_storage_size_needed(size, stride)
+        # Handle empty tensor case
+        if len(size) == 0:
+            return torch.ones((), dtype=dtype), seed
 
-    # Create base tensor with sufficient storage
-    if FuzzerConfig.use_real_values:
-        # Use random values based on dtype
-        if dtype.is_floating_point:
-            base_tensor = torch.randn(required_storage, dtype=dtype)
-        elif dtype in [torch.complex64, torch.complex128]:
-            # Create complex tensor with random real and imaginary parts
-            real_part = torch.randn(
-                required_storage,
-                dtype=torch.float32 if dtype == torch.complex64 else torch.float64,
-            )
-            imag_part = torch.randn(
-                required_storage,
-                dtype=torch.float32 if dtype == torch.complex64 else torch.float64,
-            )
-            base_tensor = torch.complex(real_part, imag_part).to(dtype)
-        elif dtype == torch.bool:
-            base_tensor = torch.randint(0, 2, (required_storage,), dtype=torch.bool)
-        else:  # integer types
-            base_tensor = torch.randint(-100, 100, (required_storage,), dtype=dtype)
-    else:
-        # Use zeros (default behavior)
-        base_tensor = torch.ones(required_storage, dtype=dtype)
+        # Calculate required storage size for the custom stride
+        required_storage = _compute_storage_size_needed(size, stride)
 
-    # Create strided tensor view
-    strided_tensor = torch.as_strided(base_tensor, size, stride)
+        # Create base tensor with sufficient storage
+        if FuzzerConfig.use_real_values:
+            # Use random values based on dtype
+            if dtype.is_floating_point:
+                base_tensor = torch.randn(required_storage, dtype=dtype)
+            elif dtype in [torch.complex64, torch.complex128]:
+                # Create complex tensor with random real and imaginary parts
+                real_part = torch.randn(
+                    required_storage,
+                    dtype=torch.float32 if dtype == torch.complex64 else torch.float64,
+                )
+                imag_part = torch.randn(
+                    required_storage,
+                    dtype=torch.float32 if dtype == torch.complex64 else torch.float64,
+                )
+                base_tensor = torch.complex(real_part, imag_part).to(dtype)
+            elif dtype == torch.bool:
+                base_tensor = torch.randint(0, 2, (required_storage,), dtype=torch.bool)
+            else:  # integer types
+                base_tensor = torch.randint(-100, 100, (required_storage,), dtype=dtype)
+        else:
+            # Use zeros (default behavior)
+            base_tensor = torch.ones(required_storage, dtype=dtype)
 
-    return strided_tensor, seed
+        # Create strided tensor view
+        strided_tensor = torch.as_strided(base_tensor, size, stride)
+
+        return strided_tensor, seed
+    finally:
+        # Restore original random state
+        random.setstate(old_random_state)
+        # Restore original torch state
+        torch.set_rng_state(torch_state)
 
 
 def fuzz_tensor_simple(
@@ -493,23 +507,49 @@ def fuzz_scalar(spec, seed: Optional[int] = None) -> Union[float, int, bool, com
     if spec.constant is not None:
         return spec.constant
 
-    # Set seed for reproducibility if provided
+    # Create a local random instance to avoid interfering with global state
     if seed is not None:
-        random.seed(seed)
+        local_random = random.Random(seed)
+        # Save and restore global random state
+        old_random_state = random.getstate()
+        try:
+            random.setstate(local_random.getstate())
 
-    # Create a scalar value based on dtype
-    if spec.dtype.is_floating_point:
-        return random.uniform(-10.0, 10.0)
-    elif spec.dtype in [torch.complex64, torch.complex128]:
-        # Only generate complex values if not avoiding complex dtypes
-        if FuzzerConfig.avoid_complex:
-            raise ValueError("Cannot generate complex values with avoid_complex=True")
-        return complex(random.uniform(-10.0, 10.0), random.uniform(-10.0, 10.0))
-    else:  # integer or bool
-        if spec.dtype == torch.bool:
-            return random.choice([True, False])
-        else:
-            return random.randint(-10, 10)
+            # Create a scalar value based on dtype
+            if spec.dtype.is_floating_point:
+                return random.uniform(-10.0, 10.0)
+            elif spec.dtype in [torch.complex64, torch.complex128]:
+                # Only generate complex values if not avoiding complex dtypes
+                if FuzzerConfig.avoid_complex:
+                    raise ValueError(
+                        "Cannot generate complex values with avoid_complex=True"
+                    )
+                return complex(random.uniform(-10.0, 10.0), random.uniform(-10.0, 10.0))
+            else:  # integer or bool
+                if spec.dtype == torch.bool:
+                    return random.choice([True, False])
+                else:
+                    return random.randint(-10, 10)
+        finally:
+            # Restore original random state
+            random.setstate(old_random_state)
+    else:
+        # Use current random state when no seed provided
+        # Create a scalar value based on dtype
+        if spec.dtype.is_floating_point:
+            return random.uniform(-10.0, 10.0)
+        elif spec.dtype in [torch.complex64, torch.complex128]:
+            # Only generate complex values if not avoiding complex dtypes
+            if FuzzerConfig.avoid_complex:
+                raise ValueError(
+                    "Cannot generate complex values with avoid_complex=True"
+                )
+            return complex(random.uniform(-10.0, 10.0), random.uniform(-10.0, 10.0))
+        else:  # integer or bool
+            if spec.dtype == torch.bool:
+                return random.choice([True, False])
+            else:
+                return random.randint(-10, 10)
 
 
 def specs_compatible(spec1: Spec, spec2: Spec) -> bool:
