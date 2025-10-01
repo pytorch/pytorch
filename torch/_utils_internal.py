@@ -305,7 +305,7 @@ def deprecated():
     """
 
     def decorator(func: Callable[_P, _T]) -> Callable[_P, _T]:
-        # Validate naming convention – single leading underscore, not dunder
+        # Validate naming convention - single leading underscore, not dunder
         if not (func.__name__.startswith("_")):
             raise ValueError(
                 "@deprecate must decorate a function whose name "
