@@ -2500,6 +2500,10 @@ class KernelTemplate:
 
 
 class CSEProxy(DefaultHandler):
+    """A ops handler that proxies calls to `kernel` and its
+    handler and returns `CSEVariable`s with correct shape and dtype.
+    """
+
     name = "CSEProxy"
 
     def __init__(self, kernel: Kernel[Any], parent_handler: OpsHandler[Any]):
