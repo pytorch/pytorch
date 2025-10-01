@@ -491,6 +491,7 @@ class FunctionEvent(FormattedTimesMixin):
         concrete_inputs=None,
         kwinputs=None,
         is_user_annotation=False,
+        metadata_json=None,
     ):
         self.id: int = id
         self.node_id: int = node_id
@@ -526,6 +527,7 @@ class FunctionEvent(FormattedTimesMixin):
         self.self_cpu_percent = -1
         self.total_cpu_percent = -1
         self.total_device_percent = -1
+        self.metadata_json = metadata_json
 
     def append_kernel(self, name, device, duration):
         assert self.device_type == DeviceType.CPU
