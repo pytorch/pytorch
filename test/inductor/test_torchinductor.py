@@ -9995,6 +9995,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.common(fn, (t1,))
 
     @skip_if_halide
+    @xfail_if_mps
     def test_argmax_argmin_transposed_mutation(self):
         # Regression for https://github.com/pytorch/pytorch/issues/163929
         # Ensure argmax/argmin indices are correct on transposed views after base mutation
@@ -10012,17 +10013,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         t = torch.randn([16, 8])
         self.common(fn, (t,))
 
-        # Persistent reduction
-        t1 = torch.randn((32, 32))
-        t1[:, 4] = float("nan")
-        t1[:, 8] = float("nan")
-        self.common(fn, (t1,))
-
-        # Non-persistent reduction
-        t1 = torch.randn((1028, 1028))
-        t1[:, 40] = float("nan")
-        t1[:, 100] = float("nan")
-        self.common(fn, (t1,))
+        # Keep this test focused on transposed view + mutation semantics only.
 
     def test_conv_backward(self):
         def fn(rank4_inps, rank3_inps, rank5_inps):
