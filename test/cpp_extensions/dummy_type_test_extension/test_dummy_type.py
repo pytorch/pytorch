@@ -46,7 +46,7 @@ if not IS_WINDOWS:
             inp = torch.empty((2, 3))
             dummy = dummy_type_test.ops.create_dummy(inp)
             self.assertTrue(dummy.id == 42)
-            self.assertTrue(dummy.foo == 1)
+            self.assertFalse(hasattr(dummy, "foo"))
 
 
 if __name__ == "__main__":

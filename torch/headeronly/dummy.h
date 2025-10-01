@@ -7,7 +7,7 @@ namespace dummy_types {
 // This ifdef is just to ease testing, if a type in headeronly were to be
 // updated we would inline the namespace corresponding to the new version
 // (e.g. v2_9) and not inline the old one (e.g. v2_8).
-#ifdef FAKE_TORCH_VERSION
+#ifndef FAKE_TORCH_VERSION
 inline
 #endif
     namespace v2_8 {
@@ -23,7 +23,7 @@ struct Dummy {
 };
 } // namespace v2_8
 
-#ifndef FAKE_TORCH_VERSION
+#ifdef FAKE_TORCH_VERSION
 inline
 #endif
     namespace v2_9 {
