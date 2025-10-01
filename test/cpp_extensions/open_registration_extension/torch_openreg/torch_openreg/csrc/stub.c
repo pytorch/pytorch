@@ -1,9 +1,9 @@
 #include <Python.h>
 
 #ifdef _WIN32
-  #define OPENREG_EXPORT __declspec(dllexport)
+#define OPENREG_EXPORT __declspec(dllexport)
 #else
-  #define OPENREG_EXPORT __attribute__((visibility("default")))
+#define OPENREG_EXPORT __attribute__((visibility("default")))
 #endif
 
 extern OPENREG_EXPORT PyObject* initOpenRegModule(void);
@@ -12,9 +12,9 @@ extern OPENREG_EXPORT PyObject* initOpenRegModule(void);
 extern "C"
 #endif
 
-OPENREG_EXPORT PyObject* PyInit__C(void);
+    OPENREG_EXPORT PyObject*
+    PyInit__C(void);
 
-PyMODINIT_FUNC PyInit__C(void)
-{
+PyMODINIT_FUNC PyInit__C(void) {
   return initOpenRegModule();
 }

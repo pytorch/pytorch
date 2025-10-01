@@ -41,9 +41,6 @@
 - test/inductor/**
 - test/dynamo/**
 
-"ciflow/vllm":
-- .github/ci_commit_pins/vllm.txt
-
 "module: cpu":
 - aten/src/ATen/cpu/**
 - aten/src/ATen/native/cpu/**
@@ -133,3 +130,6 @@
 - torch/csrc/inductor/aoti_include/**
 - torchgen/aoti/**
 - torchgen/gen_aoti_c_shim.py
+
+"ciflow/vllm":
+- .github/ci_commit_pins/vllm.txt

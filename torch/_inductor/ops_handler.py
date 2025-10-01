@@ -19,7 +19,7 @@ from .utils import IndentedBuffer, reduction_num_outputs, sympy_index_symbol, sy
 
 
 T = TypeVar("T")
-StoreMode = Optional[Literal["atomic_add"]]
+StoreMode = Optional[Literal["atomic_add", "tma"]]
 ReductionType = Literal[
     "argmax",
     "argmin",
@@ -706,6 +706,9 @@ class OpsHandler(Generic[T]):
         """This is a fake op used in analysis but not codegen"""
         raise NotImplementedError
 
+    def device_assert_async(self, cond: T, msg: str) -> T:
+        raise NotImplementedError
+
 
 _ignore_op_re = re.compile(r"_.*|paren").fullmatch
 
@@ -1146,3 +1149,8 @@ class SimpleCSEHandler(WrapperHandler):
         val = getattr(self._inner, name)(*args, **kwargs)
         self.cse_cache[key] = val
         return val
+
+    def device_assert_async(self, *args, **kwargs) -> None:
+        raise NotImplementedError(
+            f"{type(self).__name__}: device_assert_async should be handled by CSEProxy"
+        )

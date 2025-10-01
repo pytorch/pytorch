@@ -238,6 +238,14 @@ class TestViewOps(DTensorTestBase):
         with self.assertRaisesRegex(RuntimeError, "Sharding propagation failed"):
             shard.view(-1)
 
+        # assuming world size is 4+, tensor is shardable on dim 1 with size 256
+        # but not viewable when the resulting dim 1 has size 2
+        tensor = torch.randn((8, 256))
+        dtensor = distribute_tensor(tensor, device_mesh, [Replicate()])
+        shard = dtensor.redistribute(device_mesh=device_mesh, placements=[Shard(dim=1)])
+        with self.assertRaisesRegex(RuntimeError, "Sharding propagation failed"):
+            shard.view(8, 2, -1)
+
     @with_comms
     def test_view_ops(self):
         mesh_shape = (dist.get_world_size() // 2, 2)

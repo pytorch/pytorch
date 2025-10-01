@@ -172,6 +172,20 @@ class TestCompiledAutograd(TestCase):
         except subprocess.CalledProcessError as e:
             self.fail(f"Subprocess exited with return code: {e.returncode}")
 
+    def test_hipify_not_loaded_with_import_torch(self):
+        script = """
+import torch
+assert globals().get("hipify", False) is False
+"""
+        self.run_as_subprocess(script)
+
+    def test_hipify_not_loaded_with_import_cpp_extension(self):
+        script = """
+import torch.utils.cpp_extension
+assert globals().get("hipify", False) is False
+"""
+        self.run_as_subprocess(script)
+
     def test_dynamo_flaky_segfault(self):
         script = """
 import torch
@@ -5152,6 +5166,7 @@ known_graph_breaks_tests = {
     "test_checkpointing_without_reentrant_memory_savings",  # reentrant .backward
     "test_dtensor_basic",  # torch._dynamo.exc.Unsupported: Failed to convert args/kwargs to proxy
     "test_dtensor_contiguous_dtensor_noncontiguous_local_as_tangent",  # subclass constructor
+    "test_grad_dtype", #  AttributeError: args
     "test_retain_grad",  # retains_grad_hooks
     "test_retain_grad_cycle",  # retains_grad_hooks
     "test_retain_grad_inplace",  # retains_grad_hooks
@@ -5183,6 +5198,7 @@ known_graph_breaks_tests = {
     "test_nested_checkpoint_set_early_stop",  # dynamo disable
     "test_nested_checkpoint_two_children_early_stop_False",  # dynamo disable
     "test_nested_checkpoint_two_children_early_stop_True",  # dynamo disable
+    "test_custom_autograd_ac_early_stop",  # marked as skipped
     "test_dropout",  # dynamo disable
     "test_dropout_inductor",  # dynamo disable
     "test_function_with_kwargs",  # dynamo disable
@@ -5339,7 +5355,7 @@ if torch.distributed.is_available() and HAS_CUDA_AND_TRITON:
         test_dtensor.TestDTensorCompile
     )
 
-xfail_hops = {}
+xfail_hops = {"local_map_hop"}
 
 
 class TestCompiledAutogradOpInfo(TestCase):
