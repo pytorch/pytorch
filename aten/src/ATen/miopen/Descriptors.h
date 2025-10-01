@@ -1,13 +1,16 @@
 #pragma once
 
-#include <ATen/miopen/Exceptions.h>
+#include <string>
 
+#include <ATen/miopen/Exceptions.h>
 #include <ATen/miopen/miopen-wrapper.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/TensorUtils.h>
 #include <c10/macros/Export.h>
 
-namespace at { namespace native {
+namespace at::native {
+
+std::string miopenTypeToString(miopenDataType_t dtype);
 
 std::string miopenTypeToString(miopenDataType_t dtype);
 
@@ -21,7 +24,7 @@ inline int dataSize(miopenDataType_t dataType)
   }
 }
 
-// See NOTE [ cudnn fixSizeOneDimStride ] in aten/src/ATen/cudnn/Descriptors.h
+
 template <typename T>
 static inline void fixSizeOneDimStride(int dim, const T *size, T *stride, bool nhwc) {
   int64_t z = 1;
@@ -69,6 +72,8 @@ template <typename T, miopenStatus_t (*ctor)(T**), miopenStatus_t (*dtor)(T*)>
 // NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_HIP_CPP_API Descriptor {
  public:
+  // TODO: Figure out why const-correctness doesn't work here
+
   // Use desc() to access the underlying descriptor pointer in
   // a read-only fashion.  Most client code should use this.
   // If the descriptor was never initialized, this will return
@@ -103,7 +108,7 @@ class TORCH_HIP_CPP_API TensorDescriptor : public Descriptor<
     set(t, pad);
   }
 
-  // See Note [CuDNN broadcast padding]
+
   void set(const at::Tensor &t, size_t pad = 0);
   void set(const at::Tensor &t, at::MemoryFormat memory_format, size_t pad = 0);
   void set(miopenDataType_t dataType, IntArrayRef sizes, IntArrayRef strides, size_t pad = 0);
@@ -133,6 +138,7 @@ class TORCH_HIP_CPP_API FilterDescriptor : public Descriptor<
 
   void set(const at::Tensor &t, const at::MemoryFormat memory_format, int64_t pad = 0);
 
+  void print();
 private:
   void set(miopenDataType_t dataType, int dim, int* size, int* stride, bool nhwc) {
     std::vector<int> strides_copy(stride, stride + dim);
@@ -140,6 +146,8 @@ private:
     MIOPEN_CHECK(miopenSetTensorDescriptor(mut_desc(), dataType, dim, size, strides_copy.data()));
   }
 };
+
+std::ostream& operator<<(std::ostream & out, const FilterDescriptor& d);
 
 struct TORCH_HIP_CPP_API ConvolutionDescriptor
     : public Descriptor<
@@ -202,4 +210,6 @@ union Constant
   }
 };
 
-}} // namespace
+
+} // namespace
+

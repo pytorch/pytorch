@@ -1,12 +1,15 @@
 #include <ATen/miopen/Descriptors.h>
+
 #include <ATen/ATen.h>
 #include <c10/util/irange.h>
 
 #include <iostream>
+#include <sstream>
 
-namespace at { namespace native {
+namespace at::native {
 
 namespace {
+
 
 inline miopenDataType_t getDataType(const at::Tensor& t) {
   auto scalar_type = t.scalar_type();
@@ -16,29 +19,21 @@ inline miopenDataType_t getDataType(const at::Tensor& t) {
     return miopenHalf;
   } else if (scalar_type == at::kBFloat16) {
     return miopenBFloat16;
-  } else {
-    TORCH_CHECK(
-        false,
-        "TensorDescriptor does not support ", scalar_type);
-  }
-}
 
-} // anonymous namespace
+  }
+  TORCH_CHECK(false, "TensorDescriptor does not support ", scalar_type);
+}
 
 constexpr size_t MIOPEN_DIM_MAX = 5;
 
-void TensorDescriptor::set(const at::Tensor &t, at::MemoryFormat memory_format, size_t pad) {
+} // anonymous namespace
+
+
   set(getDataType(t), t.sizes(), t.strides(), pad,
     memory_format == at::MemoryFormat::ChannelsLast ||
     memory_format == at::MemoryFormat::ChannelsLast3d);
 }
 
-void TensorDescriptor::set(const at::Tensor &t, size_t pad) {
-  auto memory_format = t.suggest_memory_format();
-  set(getDataType(t), t.sizes(), t.strides(), pad,
-    memory_format == at::MemoryFormat::ChannelsLast ||
-    memory_format == at::MemoryFormat::ChannelsLast3d);
-}
 
 void TensorDescriptor::set(miopenDataType_t datatype, IntArrayRef t_sizes, IntArrayRef t_strides, size_t pad) {
   set(datatype, t_sizes, t_strides, pad,
@@ -136,9 +131,34 @@ void FilterDescriptor::set(const at::Tensor &t, const at::MemoryFormat memory_fo
   }
 
   dim = std::max<int64_t>(dim, pad);
-  set(getDataType(t), static_cast<int>(dim), size, stride,
-    memory_format == at::MemoryFormat::ChannelsLast ||
-    memory_format == at::MemoryFormat::ChannelsLast3d);
+  set(getDataType(t), static_cast<int>(dim), size, stride);
+
 }
 
-}}
+std::ostream& operator<<(std::ostream & out, const FilterDescriptor& d) {
+  out << "FilterDescriptor " << static_cast<void*>(d.desc()) << "\n";
+  int nbDims = 0;
+  int dimA[MIOPEN_DIM_MAX];
+  int strideA[MIOPEN_DIM_MAX];
+  miopenDataType_t dtype;
+  miopenGetTensorDescriptorSize(d.desc(), &nbDims);
+  miopenGetTensorDescriptor(d.desc(), &dtype, dimA, strideA);
+  out << "    type = " << miopenTypeToString(dtype) << "\n";
+  out << "    nbDims = " << nbDims << "\n";
+  // Read out only nbDims of the arrays!
+  out << "    dimA = ";
+  for (auto i : ArrayRef<int>{dimA, static_cast<size_t>(nbDims)}) {
+    out << i << ", ";
+  }
+  out << "\n";
+  out << "    strideA = ";
+  for (auto i : ArrayRef<int>{strideA, static_cast<size_t>(nbDims)}) {
+    out << i << ", ";
+  }
+  out << "\n";
+  return out;
+}
+
+void FilterDescriptor::print() { std::cout << *this; }
+
+}
