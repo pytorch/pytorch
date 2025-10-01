@@ -59,8 +59,13 @@ def _arg_to_str(arg) -> str:
 
 def _op_to_str(op, *args, **kwargs) -> str:
     if op == REDISTRIBUTE_FUNC:
-        assert len(args) == 2
-        args_str = f"{_arg_to_str(args[0])}, trace: {args[1]}"
+        if len(args) == 2:
+            args_str = f"{_arg_to_str(args[0])}, trace: {args[1]}"
+        elif len(args) == 3:
+            _args = [_arg_to_str(arg) for arg in args]
+            args_str = f"{_args[0]}, {_args[1]} -> {_args[2]}"
+        else:
+            raise RuntimeError(f"Unsupported args for {REDISTRIBUTE_FUNC}: {args}")
     else:
         args_str = ", ".join(_arg_to_str(arg) for arg in args)
 
@@ -124,7 +129,7 @@ class DebugMode(TorchDispatchMode):
             _get_current_dispatch_mode(), FakeTensorMode
         ):
             if self.record_faketensor:
-                if func not in {torch.ops.prim.device.default}:
+                if func != torch.ops.prim.device.default:
                     self.operators.append((func, args, kwargs, self.call_depth + 1))
         elif len(types) == 0:
             if self.record_realtensor:
