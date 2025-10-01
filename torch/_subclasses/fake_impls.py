@@ -603,7 +603,9 @@ def _reshape_copy(fake_mode, func, a, *shape):
         view = _view_meta(fake_mode, func, a, *shape)
         return view.clone(memory_format=torch.contiguous_format)
     else:
-        return _view_meta(fake_mode, func, a.clone(), *shape)
+        return _view_meta(
+            fake_mode, func, a.clone(memory_format=torch.contiguous_format), *shape
+        )
 
 
 @register_op_impl(aten.view.default)
