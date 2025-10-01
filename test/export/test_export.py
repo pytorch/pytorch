@@ -10522,16 +10522,14 @@ graph():
 
         torch_gm = _export_to_torch_ir(orig_eager, (torch.rand(2, 3),), {})
         for k, v in orig_eager.state_dict().items():
-            normalized_k = k.replace(".", "_")
-            self.assertIn(normalized_k, torch_gm.state_dict())
-            self.assertEqual(v, torch_gm.state_dict()[normalized_k])
+            self.assertIn(k, torch_gm.state_dict())
+            self.assertEqual(v, torch_gm.state_dict()[k])
         self.assertTrue(torch.allclose(torch_gm(test_inp), orig_eager(test_inp)))
 
         pre_autograd_gm = torch.export._trace._export(
             orig_eager, (torch.rand(2, 3),), {}, pre_dispatch=True
         ).module()
         for k, v in orig_eager.state_dict().items():
-            normalized_k = k.replace(".", "_")
             self.assertIn(k, pre_autograd_gm.state_dict())
             self.assertEqual(v, pre_autograd_gm.state_dict()[k])
         self.assertTrue(torch.allclose(pre_autograd_gm(test_inp), orig_eager(test_inp)))
