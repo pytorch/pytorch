@@ -142,7 +142,7 @@ def get_local_mapped_functions():
 
     cp_function = local_map(
         context_parallel_attention,
-        out_placements=(Shard(0), Shard(1), Shard(2)),
+        out_placements=((Shard(0), Shard(1), Shard(2)),),
         in_placements=(
             (Shard(0), Shard(1), Shard(2)),  # query
             (Shard(0), Shard(1), Replicate()),  # key
@@ -421,6 +421,54 @@ class GraphModule(torch.nn.Module):
                     # ):
                     #     # can still be in fw_outs for post-graph bytecode
                     #     self.assertFalse(node.name in bw_ins)
+
+    @unittest.skipIf(*get_skip_reasons())
+    def test_local_map_dynamo_mismatch_placements(self):
+        @local_map(
+            out_placements=((Shard(0), Shard(1), Shard(2)),),
+            in_placements=(
+                (Shard(0), Shard(1), Shard(2)),
+                None,
+            ),
+            redistribute_inputs=True,
+            in_grad_placements=None,
+            device_mesh=None,
+        )
+        def mismatch_input(x, scalar):
+            return x + scalar, scalar
+
+        x = torch.randn(36, 36, requires_grad=True)
+        with (
+            LocalMapWrappedHigherOrderVariable.enable(),
+            self.assertRaisesRegex(
+                AssertionError,
+                "Expecting 2 inputs to local_map function based on placements, but found 1.",
+            ),
+        ):
+            torch.compile(mismatch_input, backend="eager", fullgraph=True)(x, 10)
+
+        @local_map(
+            out_placements=(
+                (Shard(0), Shard(1), Shard(2)),
+                # purposefully mismatched outputs
+            ),
+            in_placements=((Shard(0), Shard(1), Shard(2)),),
+            redistribute_inputs=True,
+            in_grad_placements=None,
+            device_mesh=None,
+        )
+        def mismatch_outputs(x):
+            return x + 11, x + 12
+
+        x = torch.randn(36, 36, requires_grad=True)
+        with (
+            LocalMapWrappedHigherOrderVariable.enable(),
+            self.assertRaisesRegex(
+                AssertionError,
+                "Expecting 1 outputs to local_map function based on placements, but found 2.",
+            ),
+        ):
+            torch.compile(mismatch_outputs, backend="eager", fullgraph=True)(x)
 
 
 if __name__ == "__main__":
