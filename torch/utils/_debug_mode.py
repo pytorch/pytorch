@@ -59,9 +59,8 @@ def _arg_to_str(arg) -> str:
 
 def _op_to_str(op, *args, **kwargs) -> str:
     if op == REDISTRIBUTE_FUNC:
-        assert len(args) == 3
-        _args = [_arg_to_str(arg) for arg in args]
-        args_str = f"{_args[0]}, {_args[1]} -> {_args[2]}"
+        assert len(args) == 2
+        args_str = f"{_arg_to_str(args[0])}, trace: {args[1]}"
     else:
         args_str = ", ".join(_arg_to_str(arg) for arg in args)
 
@@ -151,12 +150,23 @@ class DebugMode(TorchDispatchMode):
             torch._C._pop_torch_function_stack()
 
     @contextlib.contextmanager
-    def record_redistribute_calls(self, arg_idx, src_placement, dst_placement):
+    def record_redistribute_calls(
+        self,
+        arg_idx,
+        src_placement,
+        dst_placement,
+        transform_info_str: Optional[str] = None,
+    ):
         try:
+            arg_list = (
+                [arg_idx, transform_info_str]
+                if transform_info_str
+                else [arg_idx, src_placement, dst_placement]
+            )
             self.operators.append(
                 (
                     REDISTRIBUTE_FUNC,
-                    [arg_idx, src_placement, dst_placement],
+                    arg_list,
                     {},
                     self.call_depth + 1,
                 )
