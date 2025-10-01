@@ -2868,12 +2868,18 @@ def filter_reduction_configs_for_determinism(
     """
     Filter configs for reduction so the numerics can be deterministic.
 
-    Heuristics
-    - skip reductions with too small RBLOCK
-    - skip reductions with XBLOCK==1 if we are confident it will not perform well
-    - pick the group with largest size
+    This function group configs by fields that affect determinism
+    - rblock size
+    - num warps
+    - num ctas
+    and return the most promising group based on heuristics.
+
+    Heuristics:
+    - skip reduction configs with too small RBLOCK
+    - skip reduction configs with XBLOCK==1 if we are confident it will not perform well
+    - pick the group with largest size: autotuning more configs may have more chance to give better perf
     - if there is a tie, pick the group with second largest RBLOCK
-    - if there is still a tile, pick the group with second largest num_warps
+    - if there is still a tie, pick the group with second largest num_warps
     """
     configs = unique_configs(configs)
     assert len(configs) > 0
