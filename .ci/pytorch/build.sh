@@ -273,13 +273,6 @@ if [[ "$BUILD_ENVIRONMENT" == *-bazel-* ]]; then
     tools/bazel build --config=no-tty "${BAZEL_MEM_LIMIT}" "${BAZEL_CPU_LIMIT}" //...
   fi
 else
-  # Set BUILD_AOT_INDUCTOR_TEST=1 if test_inductor_aoti will be run
-  # test_inductor_aoti is called when TEST_CONFIG contains inductor_cpp_wrapper and SHARD_NUMBER=1
-  if [[ "${TEST_CONFIG}" == *inductor_cpp_wrapper* && "${SHARD_NUMBER}" == "1" ]]; then
-    echo "Setting BUILD_AOT_INDUCTOR_TEST=1 for test_inductor_aoti"
-    export BUILD_AOT_INDUCTOR_TEST=1
-  fi
-
   # check that setup.py would fail with bad arguments
   echo "The next three invocations are expected to fail with invalid command error messages."
   ( ! get_exit_code python setup.py bad_argument )
@@ -333,6 +326,11 @@ else
         exit 1
       fi
       popd
+    fi
+
+    if [[ "${BUILD_ENVIRONMENT}" == *linux-jammy-cuda12.8-py3.10-gcc9-sm86* ]]; then
+      echo "Setting BUILD_AOT_INDUCTOR_TEST=1 for test_inductor_aoti"
+      export BUILD_AOT_INDUCTOR_TEST=1
     fi
 
     # TODO: I'm not sure why, but somehow we lose verbose commands
