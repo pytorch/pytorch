@@ -12,17 +12,16 @@ class UnsqueezeOperator(Operator):
         super().__init__("unsqueeze")
 
     def can_produce(self, tensor):
-        """Unsqueeze can produce tensors by adding dimensions of size 1."""
-        # Unsqueeze adds dimensions of size 1, so it can produce:
-        # 1. Any tensor that has at least one dimension of size 1 (remove that dimension for input)
-        # 2. Any tensor by adding a new dimension of size 1 somewhere
+        """Unsqueeze can only produce tensors that have at least one dimension of size 1."""
+        # Unsqueeze adds dimensions of size 1, so it can only produce tensors that:
+        # 1. Have at least one dimension of size 1 (which could have been added by unsqueeze)
+        # 2. Are not scalars (unsqueeze always increases rank)
         
-        # Special case: scalars cannot be produced by unsqueeze (unsqueeze always increases rank)
         if len(tensor.size) == 0:
             return False
         
-        # All non-scalar tensors can potentially be produced by unsqueeze
-        return True
+        # Only produce tensors that have at least one dimension of size 1
+        return any(dim == 1 for dim in tensor.size)
 
     def decompose(self, tensor):
         """Decompose tensor into input tensor for unsqueeze operation."""
@@ -42,19 +41,11 @@ class UnsqueezeOperator(Operator):
             input_shape = tuple(dim for i, dim in enumerate(output_shape) if i != remove_pos)
             unsqueeze_dim = remove_pos
         else:
-            # No size-1 dimensions in output, so we need to create an input that when
-            # unsqueezed at some position will produce the output shape.
-            # Since there are no size-1 dims, we need to remove one dimension from output.
-            # But this is problematic because unsqueeze only adds dimensions.
-            # For this case, we'll create a smaller input tensor by removing the last dimension
-            if len(output_shape) == 1:
-                # If output is 1D with no size-1 dims, create a scalar input
-                input_shape = ()
-                unsqueeze_dim = 0
-            else:
-                # Remove the last dimension to create input
-                input_shape = output_shape[:-1]
-                unsqueeze_dim = len(input_shape)  # Insert at the end
+            # No size-1 dimensions in output. This should not happen since can_produce
+            # should filter out tensors without size-1 dimensions.
+            # But if it does happen, we'll handle it by treating this as an error case.
+            raise ValueError(f"UnsqueezeOperator cannot produce tensor with shape {output_shape} "
+                           f"because it has no dimensions of size 1. This indicates a bug in can_produce().")
 
         # Calculate contiguous stride for input
         if len(input_shape) == 0:

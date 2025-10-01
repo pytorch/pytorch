@@ -30,8 +30,8 @@ class TestUnsqueezeOperator:
         scalar = Tensor((), (), "float32", "cuda", [])
         assert unsqueeze_op.can_produce(scalar) is False
     
-    def test_can_produce_non_scalar_tensors(self, unsqueeze_op):
-        """Test that UnsqueezeOperator can produce non-scalar tensors."""
+    def test_cannot_produce_tensors_without_size_one(self, unsqueeze_op):
+        """Test that UnsqueezeOperator cannot produce tensors without size-1 dimensions."""
         test_tensors = [
             Tensor((5,), (1,), "float32", "cuda", []),  # 1D without size-1
             Tensor((2, 3), (3, 1), "float32", "cuda", []),  # 2D without size-1
@@ -40,7 +40,7 @@ class TestUnsqueezeOperator:
         ]
 
         for tensor in test_tensors:
-            assert unsqueeze_op.can_produce(tensor) is True
+            assert unsqueeze_op.can_produce(tensor) is False
 
     def test_decompose_returns_single_input(self, unsqueeze_op):
         """Test that decomposition returns exactly one input tensor."""

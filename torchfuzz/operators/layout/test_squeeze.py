@@ -153,7 +153,7 @@ class TestSqueezeOperator:
         input_names = ["input"]
 
         code = squeeze_op.codegen(output_name, input_names, tensor)
-        expected = "output = torch.squeeze(input, next(i for i, s in enumerate(input.shape) if s == 1))"
+        expected = f"output = torch.squeeze(input, {dim})"
 
         assert code == expected
 
@@ -170,7 +170,7 @@ class TestSqueezeOperator:
         input_names = ["x"]
 
         code = squeeze_op.codegen(output_name, input_names, scalar)
-        expected = "result = torch.squeeze(x, next(i for i, s in enumerate(x.shape) if s == 1))"
+        expected = f"result = torch.squeeze(x, {dim})"
 
         assert code == expected
 
@@ -187,7 +187,7 @@ class TestSqueezeOperator:
         input_names = ["data"]
 
         code = squeeze_op.codegen(output_name, input_names, tensor)
-        expected = "out = torch.squeeze(data, next(i for i, s in enumerate(data.shape) if s == 1))"
+        expected = f"out = torch.squeeze(data, {dim})"
 
         assert code == expected
 
@@ -204,7 +204,7 @@ class TestSqueezeOperator:
         input_names = ["original"]
 
         code = squeeze_op.codegen(output_name, input_names, tensor)
-        expected = "squeezed = torch.squeeze(original, next(i for i, s in enumerate(original.shape) if s == 1))"
+        expected = f"squeezed = torch.squeeze(original, {dim})"
 
         assert code == expected
 
@@ -221,7 +221,7 @@ class TestSqueezeOperator:
         input_names = ["input_data"]
 
         code = squeeze_op.codegen(output_name, input_names, tensor)
-        expected = "tensor_squeezed = torch.squeeze(input_data, next(i for i, s in enumerate(input_data.shape) if s == 1))"
+        expected = f"tensor_squeezed = torch.squeeze(input_data, {dim})"
 
         assert code == expected
 
@@ -238,7 +238,7 @@ class TestSqueezeOperator:
         input_names = ["input_empty"]
 
         code = squeeze_op.codegen(output_name, input_names, tensor)
-        expected = "empty_tensor = torch.squeeze(input_empty, next(i for i, s in enumerate(input_empty.shape) if s == 1))"
+        expected = f"empty_tensor = torch.squeeze(input_empty, {dim})"
 
         assert code == expected
 
