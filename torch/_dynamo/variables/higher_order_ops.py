@@ -1768,6 +1768,7 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 combine_fn_var,
                 (
                     variables.nn_module.NNModuleVariable,
+                    variables.nn_module.UnspecializedNNModuleVariable,
                     variables.FunctoolsPartialVariable,
                 ),
             ):
@@ -1776,7 +1777,13 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                     f"or a graph module if we're re-exporting but got "
                     f"{combine_fn.python_type()}. Please report an issue to PyTorch if you're seeing this."
                 )
-            return isinstance(combine_fn_var, variables.nn_module.NNModuleVariable)
+            return isinstance(
+                combine_fn_var,
+                (
+                    variables.nn_module.NNModuleVariable,
+                    variables.nn_module.UnspecializedNNModuleVariable,
+                ),
+            )
 
         def arg_extractor(combine_fn, init, xs, additional_inputs):
             return combine_fn, init, xs, additional_inputs
@@ -2576,7 +2583,7 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
             elif isinstance(
                 ctx, torch._dynamo.variables.functions.FunctoolsPartialVariable
             ):
-                context_fn = ctx.as_python_constant()
+                context_fn = ctx.guard_as_python_constant()
             else:
                 raise NotImplementedError(
                     f"checkpoint not implemented for {type(ctx)} context_fn"
