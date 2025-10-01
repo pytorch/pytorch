@@ -82,7 +82,7 @@ inline bool matrix_ld_complies_cublas(const Tensor& t, int64_t ld_idx) {
 // N - no-op for t,
 // T_BORROWED - a transposed view of t,
 // T_OWNED - a transposed contigious copy of t (i.e. a row-major copy of t)
-inline CublasPrepTransStrategy predict_matrix_trans_prep_type_cublas(const Tensor& t) {
+inline CublasPrepTransStrategy predict_matrix_trans_prep_strategy_cublas(const Tensor& t) {
   if (t.is_non_overlapping_and_dense()) { // is t row- or col-major?
       return t.is_contiguous()
         ? CublasPrepTransStrategy::T_BORROWED // yes, then transpose without copy
@@ -102,14 +102,14 @@ inline CublasPrepTransStrategy predict_matrix_trans_prep_type_cublas(const Tenso
   }
 }
 
-// See predict_matrix_trans_prep_type_cublas for prep strategies.
+// See predict_matrix_trans_prep_strategy_cublas for prep strategies.
 // Additioanally, this method can return the N_OWNED strategy,
 // which implies a col-major copy of the input.
 inline std::tuple<CublasPrepTransStrategy, CublasPrepTransStrategy, CublasPrepTransStrategy>
 predict_gemm_args_trans_prep_types_cublas(const Tensor& result, const Tensor& mat1, const Tensor& mat2) {
-  const auto result_trans_type = predict_matrix_trans_prep_type_cublas(result);
-  const auto mat1_trans_type = predict_matrix_trans_prep_type_cublas(mat1);
-  const auto mat2_trans_type = predict_matrix_trans_prep_type_cublas(mat2);
+  const auto result_trans_type = predict_matrix_trans_prep_strategy_cublas(result);
+  const auto mat1_trans_type = predict_matrix_trans_prep_strategy_cublas(mat1);
+  const auto mat2_trans_type = predict_matrix_trans_prep_strategy_cublas(mat2);
   if (!is_trans_strategy(result_trans_type)) {
     // Means result is col-compliant, so we will use the res = A @ B path.
     // Nothing to do, return types as is
