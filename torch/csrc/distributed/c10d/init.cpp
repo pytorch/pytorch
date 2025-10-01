@@ -3367,19 +3367,17 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
           });
 
 #ifdef NCCL_HAS_CTA_POLICY
-  processGroupNCCL
-#ifdef NCCL_CTA_POLICY_ZERO
-      // NCCL_CTA_POLICY_ZERO is available in NCCL versions >= 2.28
-      .def_property_readonly_static(
-          "NCCL_CTA_POLICY_ZERO",
-          [](py::object&) { return NCCL_CTA_POLICY_ZERO; })
+  processGroupNCCL.def_property_readonly_static(
+      "NCCL_CTA_POLICY_DEFAULT",
+      [](const py::object&) { return NCCL_CTA_POLICY_DEFAULT; });
+  processGroupNCCL.def_property_readonly_static(
+      "NCCL_CTA_POLICY_EFFICIENCY",
+      [](const py::object&) { return NCCL_CTA_POLICY_EFFICIENCY; });
+#ifdef NCCL_CTA_POLICY_ZERO // requires NCCL version >= 2.28
+  processGroupNCCL.def_property_readonly_static(
+      "NCCL_CTA_POLICY_ZERO",
+      [](const py::object&) { return NCCL_CTA_POLICY_ZERO; });
 #endif // NCCL_CTA_POLICY_ZERO
-      .def_property_readonly_static(
-          "NCCL_CTA_POLICY_DEFAULT",
-          [](py::object&) { return NCCL_CTA_POLICY_DEFAULT; })
-      .def_property_readonly_static(
-          "NCCL_CTA_POLICY_EFFICIENCY",
-          [](py::object&) { return NCCL_CTA_POLICY_EFFICIENCY; });
 #endif // NCCL_HAS_CTA_POLICY
 
   module.def(
