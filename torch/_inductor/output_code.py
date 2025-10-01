@@ -630,7 +630,8 @@ class CompiledFxGraph(OutputCode):
             # Checking the profiler directly is faster than nullcontext
             if torch.autograd.profiler._is_profiler_enabled:
                 with torch._C._profiler._RecordFunctionFast(
-                    f"## Call CompiledFxGraph {self._fx_graph_cache_key} ##"
+                    f"## Call CompiledFxGraph {self._fx_graph_cache_key} ##",
+                    keyword_values={"scope": "user_scope"}
                 ):
                     return self.current_callable(inputs)
             else:
