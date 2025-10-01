@@ -1093,6 +1093,9 @@ The set of leaf modules can be customized by overriding
 ```{eval-rst}
 .. autofunction:: torch.fx.replace_pattern
 ```
+```{eval-rst}
+.. autofunction:: torch.fx.traceback.annotate
+```
 
 <!-- The experimental and passes submodules are missing docs. -->
 <!-- Adding it here for coverage but this doesn't add anything to the -->
