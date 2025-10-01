@@ -2875,11 +2875,18 @@ def filter_reduction_configs_for_determinism(
     - if there is a tie, pick the group with second largest RBLOCK
     - if there is still a tile, pick the group with second largest num_warps
     """
-    if not inductor_meta.get("deterministic", False):
+    configs = unique_configs(configs)
+    assert len(configs) > 0
+
+    def _do_filter_due_to_inductor_config():
+        return (
+            inductor_meta.get("deterministic", False)
+            or torch._inductor.config.test_configs.force_filter_reduction_configs
+        )
+
+    if not _do_filter_due_to_inductor_config() or len(configs) == 1:
         # no filtering happening if NOT in deterministic mode
         return configs
-
-    configs = unique_configs(configs)
 
     if log.isEnabledFor(logging.DEBUG):
         print_configs = len(configs) >= 2
@@ -2891,15 +2898,26 @@ def filter_reduction_configs_for_determinism(
                 log.debug("%s", c)
                 log.debug("")
 
-    def _is_likely_good_config(config):
+    def _has_too_small_rblock(config):
         rblock = config.kwargs.get("R0_BLOCK")
-        if rblock is not None and rblock <= 4:
-            # too small RBLOCK is more likely to be bad
-            return False
+        # too small RBLOCK is likely to be bad
+        return rblock is not None and rblock <= 4
 
-        return True
+    def _nonpromising_xblock_1(config):
+        # kernel like https://gist.github.com/shunting314/0b3281c087e79bc915fe45985ff9d7d5 without a load/store with contiguous rdim
+        # is unlikely to perform better with XBLOCK==1
+        return config.kwargs["XBLOCK"] == 1 and not inductor_meta.get(
+            "has_loadstore_with_contiguous_rdim", True
+        )
 
-    configs = filter(_is_likely_good_config, configs)
+    newconfigs = [*filter(lambda x: not _has_too_small_rblock(x), configs)]
+    # accept the filtering only if there are configs left
+    if len(newconfigs) > 0:
+        configs = newconfigs
+
+    newconfigs = [*filter(lambda x: not _nonpromising_xblock_1(x), configs)]
+    if len(newconfigs) > 0:
+        configs = newconfigs
 
     groups: defaultdict[ReductionConfigKey, list[Config]] = defaultdict(
         list
@@ -2942,10 +2960,9 @@ def filter_reduction_configs_for_determinism(
                 *filter(lambda x: x[0].num_warps == second_max_num_warps, grouplist)
             ]
 
-        # there is still a tile, pick the first one
+        # there is still a tie, pick the first one
         return grouplist[0][1]
 
-    # pick the group with smallest RBLOCK
     configs = _pick_group()
 
     if log.isEnabledFor(logging.DEBUG) and print_configs:  # type: ignore[possibly-undefined]

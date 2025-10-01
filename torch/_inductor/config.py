@@ -2001,6 +2001,11 @@ class test_configs:
     # for unit testing
     use_libtorch = False
 
+    # A test config to ease the test for perf of reduction config filtering
+    force_filter_reduction_configs = (
+        os.getenv("TORCHINDUCTOR_FORCE_FILTER_REDUCTION_CONFIGS") == "1"
+    )
+
 
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403
