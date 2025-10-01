@@ -58,6 +58,8 @@ namespace at::native {
 namespace {
 
 // NOTE: conjugation is handled seperately
+// Strategies for mapping an input tensor to a tensor
+// with a memory layout which complies with cuBlas.
 enum class CublasPrepTransStrategy : int {
   N = 0, // no transposition, no copy
   N_OWNED = 1, // make a col-major copy, no transposition
@@ -106,7 +108,7 @@ inline CublasPrepTransStrategy predict_matrix_trans_prep_strategy_cublas(const T
 // Additioanally, this method can return the N_OWNED strategy,
 // which implies a col-major copy of the input.
 inline std::tuple<CublasPrepTransStrategy, CublasPrepTransStrategy, CublasPrepTransStrategy>
-predict_gemm_args_trans_prep_types_cublas(const Tensor& result, const Tensor& mat1, const Tensor& mat2) {
+predict_gemm_args_trans_prep_strategies_cublas(const Tensor& result, const Tensor& mat1, const Tensor& mat2) {
   const auto result_trans_type = predict_matrix_trans_prep_strategy_cublas(result);
   const auto mat1_trans_type = predict_matrix_trans_prep_strategy_cublas(mat1);
   const auto mat2_trans_type = predict_matrix_trans_prep_strategy_cublas(mat2);
@@ -288,7 +290,7 @@ struct cublasCommonArgs {
       transpose_b = !transpose_b;
     }
 
-    const auto [res_trans_type, mat1_trans_type, mat2_trans_type] = predict_gemm_args_trans_prep_types_cublas(c, mat1, mat2);
+    const auto [res_trans_type, mat1_trans_type, mat2_trans_type] = predict_gemm_args_trans_prep_strategies_cublas(c, mat1, mat2);
     const auto res_trans = is_trans_strategy(res_trans_type);
     const auto mat1_trans = is_trans_strategy(mat1_trans_type);
     const auto mat2_trans = is_trans_strategy(mat2_trans_type);
