@@ -477,7 +477,7 @@ class CppWrapperGpu(CppWrapperCpu):
                 )
                 self.prefix.splice(
                     f"""
-                    if ((long({input_name}.data_ptr()) & ({GPU_ALIGN_BYTES} -1)) != 0) {{
+                    if ((reinterpret_cast<std::uintptr_t>({input_name}.data_ptr()) & ({GPU_ALIGN_BYTES} -1)) != 0) {{
                         AOTI_TORCH_WARN("{warn_msg}");
                         AtenTensorHandle {input_name}_aligned;
                         aoti_torch_clone_preserve_strides({input_name}, &{input_name}_aligned);

@@ -52,10 +52,10 @@ flatbuffers==24.12.23
 #Pinned versions: 24.12.23
 #test that import:
 
-hypothesis==5.35.1
+hypothesis==6.56.4
 # Pin hypothesis to avoid flakiness: https://github.com/pytorch/pytorch/issues/31136
 #Description: advanced library for generating parametrized tests
-#Pinned versions: 5.35.1
+#Pinned versions: 6.56.4
 #test that import: test_xnnpack_integration.py, test_pruning_op.py, test_nn.py
 
 junitparser==2.1.1
@@ -98,7 +98,7 @@ librosa==0.10.2 ; python_version == "3.12" and platform_machine != "s390x"
 #Pinned versions:
 #test that import:
 
-mypy==1.16.0 ; platform_system != "Windows"
+mypy==1.16.0 ; platform_system == "Linux"
 # Pin MyPy version because new errors are likely to appear with each release
 # Skip on Windows as lots of type annotations are POSIX specific
 #Description: linter
@@ -169,7 +169,7 @@ optree==0.13.0
 
 pillow==11.0.0
 #Description:  Python Imaging Library fork
-#Pinned versions: 10.3.0
+#Pinned versions: 11.0.0
 #test that import:
 
 protobuf==5.29.5
@@ -217,7 +217,7 @@ pytest-subtests==0.13.1
 #Pinned versions:
 #test that import:
 
-xdoctest==1.1.0
+xdoctest==1.3.0
 #Description: runs doctests in pytest
 #Pinned versions: 1.1.0
 #test that import:
@@ -268,7 +268,7 @@ scipy==1.14.1 ; python_version >= "3.12"
 #test that import:
 
 # needed by torchgen utils
-typing-extensions>=4.10.0
+typing-extensions==4.12.2
 #Description: type hints for python
 #Pinned versions:
 #test that import:
@@ -361,9 +361,10 @@ pwlf==2.2.1
 #test that import: test_sac_estimator.py
 
 # To build PyTorch itself
-pyyaml
+pyyaml==6.0.2
 pyzstd
-setuptools>=70.1.0
+setuptools==78.1.1
+packaging==23.1
 six
 
 scons==4.5.2 ; platform_machine == "aarch64"
@@ -384,7 +385,10 @@ cmake==3.31.6
 tlparse==0.4.0
 #Description: required for log parsing
 
-cuda-bindings>=12.0,<13.0 ; platform_machine != "s390x"
+filelock==3.18.0
+#Description: required for inductor testing
+
+cuda-bindings>=12.0,<13.0 ; platform_machine != "s390x" and platform_system != "Darwin"
 #Description: required for testing CUDAGraph::raw_cuda_graph(). See https://nvidia.github.io/cuda-python/cuda-bindings/latest/support.html for how this version was chosen. Note "Any fix in the latest bindings would be backported to the prior major version" means that only the newest version of cuda-bindings will get fixes. Depending on the latest version of 12.x is okay because all 12.y versions will be supported via "CUDA minor version compatibility". Pytorch builds against 13.z versions of cuda toolkit work with 12.x versions of cuda-bindings as well because newer drivers work with old toolkits.
 #test that import: test_cuda.py
 
