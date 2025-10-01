@@ -75,8 +75,14 @@ void initPlacementBindings(PyObject* module) {
           [](const Replicate& lhs, const Replicate& rhs) { return lhs == rhs; },
           py::is_operator())
       .def(py::pickle(
-          [](const Replicate& repl) { return py::none(); },
-          [](const py::none&) { return Replicate(); }));
+          // I observed SIGSEGV when trying to use None as the
+          // pickled state, though AFAICT that matches the
+          // behavior of
+          // object().__reduce__().
+          // test_placement_types.test_type_identification will repro if an
+          // enterprising reader wants to get this fixed.
+          [](const Replicate& repl) { return py::dict(); },
+          [](const py::dict&) { return Replicate(); }));
   py::class_<Partial, Placement>(distributed_module, "Partial")
       .def(py::init<>())
       .def(py::init<std::optional<std::string>>(), py::arg("reduce_op"))

@@ -30,10 +30,13 @@ class PlacementTypesTestCase(TestCase):
             (partial_max, False, True, False),
             (replicate, False, False, True),
         )
-        for placement, is_shard, is_partial, is_replicate in ident_tests:
-            self.assertEqual(placement.is_shard(), is_shard)
-            self.assertEqual(placement.is_partial(), is_partial)
-            self.assertEqual(placement.is_replicate(), is_replicate)
+        for do_deepcopy in (False, True):
+            for placement, is_shard, is_partial, is_replicate in ident_tests:
+                if do_deepcopy:
+                    placement = copy.deepcopy(placement)
+                self.assertEqual(placement.is_shard(), is_shard)
+                self.assertEqual(placement.is_partial(), is_partial)
+                self.assertEqual(placement.is_replicate(), is_replicate)
 
     def test_equality(self):
         equivalence_classes = (
@@ -73,15 +76,6 @@ class PlacementTypesTestCase(TestCase):
 
     def test_strided_shard_isinstance_shard(self):
         assert isinstance(_StridedShard(dim=3, split_factor=7), Shard)
-
-    def test_deepcopy(self):
-        for placement in (
-            Shard(3),
-            _StridedShard(dim=3, split_factor=7),
-            Partial("max"),
-            Replicate(),
-        ):
-            copy.deepcopy(placement)
 
     def test_dynamo_can_identify_placement_classes(self):
         for cls in (Replicate, Shard, _StridedShard, Partial):
