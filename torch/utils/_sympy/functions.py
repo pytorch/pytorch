@@ -267,10 +267,8 @@ class FloorDiv(sympy.Function):
             terms = []
             for term in sympy.Add.make_args(base):
                 quotient = term / divisor
-                # Ok so (s14//2016)*(24 * s37 + 672)*(s14//2016)//22
-                # is Mul(Rational(1, 22), Add(Mul(Integer(24), Symbol('s37', integer=True, positive=True)), Integer(672)),
-                # Pow(floor(Mul(Rational(1, 2016), Symbol('s14', integer=True, positive=True))), Integer(2)))
-                # yet even though is_integer we do not want to allow quotients with rationals in the results!
+                # sympy can generate a quotient with (1/22)*.... such that quotient.is_integer is True
+                # FloorDiv should not allow that as output.
                 rationals = quotient.atoms(sympy.Rational)
                 all_rationals_ints = all(r.q == 1 for r in rationals)
                 if quotient.is_integer and all_rationals_ints:
