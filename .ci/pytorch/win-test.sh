@@ -37,8 +37,7 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
   export PYTORCH_TESTING_DEVICE_ONLY_FOR="cuda"
 fi
 
-# Copied from https://github.com/pytorch/test-infra/blob/be01a40157c36cd5a48391fdf44a7bc3ebd4c7e3/aws/ami/windows/scripts/Installers/Install-Pip-Dependencies.ps1#L16 with some adjustments
-# Later trimmed down to eliminate all duplicates from .ci/docker/requirements-ci.txt
+# TODO: Move this to .ci/docker/requirements-ci.txt
 python -m pip install "psutil==5.9.1" "pynvml==11.4.1" "pytest-shard==0.1.2"
 
 run_tests() {
