@@ -258,6 +258,16 @@ class TestDTensorDebugMode(TestCase):
         # Verify that cond operations are captured in debug mode
         self.assertIn("torch.ops.higher_order.cond", debug_mode.debug_string())
 
+    def test_compile(self):
+        @torch.compile
+        def f(x):
+            return x.sin().cos()
+
+        x = torch.randn(8)
+        with DebugMode() as debug_mode:
+            f(x)
+        self.assertEqual(len(debug_mode.debug_string()), 0)
+
 
 instantiate_parametrized_tests(TestDTensorDebugMode)
 
