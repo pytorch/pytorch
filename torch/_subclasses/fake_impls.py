@@ -726,7 +726,7 @@ def _view_unbacked_meta(
     # as "materialize": clone the input to break aliasing, then reshape.
     if allow_copy:
         strides = make_contiguous_strides_for(shape)
-        return a.clone().as_strided(shape, strides)
+        return a.clone(memory_format=torch.contiguous_format).as_strided(shape, strides)
 
     msg = f"Cannot view a tensor with shape {a.shape} and strides {a.stride()} as a tensor with shape {shape}!"
     raise ValueError(msg)
