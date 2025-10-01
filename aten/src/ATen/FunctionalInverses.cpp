@@ -340,6 +340,11 @@ Tensor FunctionalInverses::unsqueeze_inverse(const Tensor& base, const Tensor& m
     }
 }
 
+Tensor FunctionalInverses::_dtensor_local_tensor_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode) {
+    TORCH_INTERNAL_ASSERT(false, "Attempted to call _dtensor_local_tensor_inverse() during the functionalization pass. For now, sparse tensors aren't supported during functionalization");
+    return Tensor();
+}
+
 Tensor FunctionalInverses::_indices_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode) {
     TORCH_INTERNAL_ASSERT(false, "Attempted to call _indices() during the functionalization pass. For now, sparse tensors aren't supported during functionalization");
     return Tensor();

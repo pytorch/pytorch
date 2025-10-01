@@ -47,6 +47,11 @@ __all__ = [
 aten = torch.ops.aten
 
 
+def _dtensor_local_tensor(self: "DTensor") -> torch.Tensor:
+    local_tensor = self._local_tensor
+    return local_tensor.view_as(local_tensor)  # fresh tensor object
+
+
 # NOTE [Autograd interaction between torch.Tensor]
 #
 # The autograd functions defined below are being used by the public
@@ -456,9 +461,12 @@ class DTensor(torch.Tensor):
 
         if grad_placements is not None and not isinstance(grad_placements, tuple):
             grad_placements = tuple(grad_placements)
-        return _ToTorchTensor.apply(
-            self, grad_placements
-        )  # pyre-ignore[16]: autograd func
+        if grad_placements is None:
+            return torch._dtensor_local_tensor(self)
+        else:
+            return _ToTorchTensor.apply(
+                self, grad_placements
+            )  # pyre-ignore[16]: autograd func
 
     def redistribute(
         self,

@@ -6267,6 +6267,20 @@
     CUDA, NestedTensorCUDA: transform_bias_rescale_qkv_cuda
   autogen: _transform_bias_rescale_qkv.out
 
+# TODO: support grad_placements
+- func: _dtensor_local_tensor(Tensor(a) self) -> Tensor(a)
+  variants: function
+  device_check: NoCheck
+  dispatch: {}
+
+- func: _dtensor_local_tensor_copy(Tensor self) -> Tensor
+  variants: function
+  device_check: NoCheck
+  tags: view_copy
+  dispatch:
+    CompositeExplicitAutogradNonFunctional: _dtensor_local_tensor_copy
+  autogen: _dtensor_local_tensor_copy.out
+
 - func: _nested_tensor_from_mask(Tensor t, Tensor mask, bool mask_check=True) -> Tensor
   dispatch:
     CPU, CUDA: NestedTensor_nested_tensor_from_mask

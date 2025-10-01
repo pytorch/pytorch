@@ -870,7 +870,6 @@ class DTensorMeshTest(DTensorTestBase):
         local_expected = expected.to_local()
         self.assertEqual(local_result, local_expected)
 
-    @unittest.expectedFailure
     @with_comms
     def test_inplace_on_local_tensor_view(self):
         mesh = self.build_device_mesh()
