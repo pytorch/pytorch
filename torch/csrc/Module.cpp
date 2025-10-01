@@ -2498,7 +2498,7 @@ Call this whenever a new thread is created in order to propagate values from
 
   py_module.def(
       "_get_fp32_precision_getter",
-      [](const std::string& backend, const std::string& op) {
+      [](std::string_view backend, std::string_view op) {
         return at::globalContext().float32Precision(backend, op);
       });
 

@@ -30,12 +30,19 @@
 #include <cstdint>
 #include <map>
 #include <mutex>
+#include <string_view>
 
 namespace at {
 
 class Tensor;
 
 enum class TORCH_API Float32MatmulPrecision { HIGHEST, HIGH, MEDIUM };
+
+namespace detail {
+enum class Float32Backend { GENERIC, MKLDNN, CUDA };
+enum class Float32Op { CONV, MATMUL, RNN, ALL };
+enum class Float32Precision { IEEE, TF32, BF16, NONE };
+} // namespace detail
 
 class TORCH_API Context {
  public:
@@ -348,8 +355,8 @@ class TORCH_API Context {
 
   void setFloat32MatmulPrecision(const std::string& s);
   void setFloat32Precision(
-      const std::string& backend,
-      const std::string& op,
+      std::string_view backend,
+      std::string_view op,
       const std::string& s);
   bool allowTF32CuDNN(const std::string& op = std::string()) const;
   void setAllowTF32CuDNN(bool);
@@ -358,9 +365,9 @@ class TORCH_API Context {
   bool allowTF32CuBLAS() const;
   void setAllowTF32CuBLAS(bool);
   Float32MatmulPrecision float32MatmulPrecision() const;
-  std::string float32Precision(
-      const std::string& backend,
-      const std::string& op) const;
+  std::string_view float32Precision(
+      std::string_view backend,
+      std::string_view op) const;
   bool allowFP16ReductionCuBLAS() const;
   void setAllowFP16ReductionCuBLAS(bool);
   bool allowBF16ReductionCuBLAS() const;
@@ -488,22 +495,32 @@ class TORCH_API Context {
   bool enable_sparse_tensor_invariant_checks = false;
   bool allow_fp16_reduction_cpu = false;
 
-  std::map<std::string, std::map<std::string, std::string>> fp32_precision = {
-      {"generic", {{"all", "none"}}},
-      {"mkldnn",
-       {{"matmul", "none"},
-        {"conv", "none"},
-        {"rnn", "none"},
-        {"all", "none"}}},
-      {"cuda",
-       {{"matmul",
-         float32_matmul_precision == at::Float32MatmulPrecision::HIGHEST
-             ? "none"
-             : "tf32"},
-        {"conv", "tf32"},
-        {"rnn", "tf32"},
-        {"all", "none"}}},
-  };
+  // Yes, it's odd that the inner array has extra length here for the
+  // generic backend, but it seems better than using std::vector.
+  // Map backend->op->precision setting.
+  std::array<
+      std::pair<
+          detail::Float32Backend,
+          std::
+              array<std::pair<detail::Float32Op, detail::Float32Precision>, 4>>,
+      3>
+      fp32_precision = {{
+          {detail::Float32Backend::GENERIC,
+           {{{detail::Float32Op::ALL, detail::Float32Precision::NONE}}}},
+          {detail::Float32Backend::MKLDNN,
+           {{{detail::Float32Op::MATMUL, detail::Float32Precision::NONE},
+             {detail::Float32Op::CONV, detail::Float32Precision::NONE},
+             {detail::Float32Op::RNN, detail::Float32Precision::NONE},
+             {detail::Float32Op::ALL, detail::Float32Precision::NONE}}}},
+          {detail::Float32Backend::CUDA,
+           {{{detail::Float32Op::MATMUL,
+              float32_matmul_precision == at::Float32MatmulPrecision::HIGHEST
+                  ? detail::Float32Precision::NONE
+                  : detail::Float32Precision::TF32},
+             {detail::Float32Op::CONV, detail::Float32Precision::TF32},
+             {detail::Float32Op::RNN, detail::Float32Precision::TF32},
+             {detail::Float32Op::ALL, detail::Float32Precision::NONE}}}},
+      }};
 
   Allocator* prev_allocator_ptr_{nullptr};
 };
