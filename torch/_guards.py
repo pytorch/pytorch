@@ -72,8 +72,7 @@ CA_COMPILE_ID_PATTERN = re.compile(
 # 3. Compact: The string form is directly displayed by some tools. Special symbols are okay.
 
 
-# TODO: mark as kw_only=True once we drop support for <Python 3.10
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True, slots=True)
 class CompileId:
     frame_id: Optional[int]
     # This id is per-frame, and counts how many times we've compiled this
