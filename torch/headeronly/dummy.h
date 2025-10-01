@@ -1,6 +1,5 @@
 #pragma once
 
-#include <torch/headeronly/target_version.h>
 #include <cstdint>
 
 // ======================================================================
