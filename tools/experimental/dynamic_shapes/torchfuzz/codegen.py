@@ -648,13 +648,13 @@ def create_program_file(python_code: str) -> str:
     Returns:
         Path to the created temporary file
     """
-    import random
+    import hashlib
 
-    # Generate a random nonce for the filename
-    nonce = random.randint(0, 1_000_000_000)
+    # Generate a deterministic filename based on code content hash
+    code_hash = hashlib.md5(python_code.encode()).hexdigest()[:8]  # noqa: S324
     tmp_dir = "/tmp/torchfuzz"
     os.makedirs(tmp_dir, exist_ok=True)
-    generated_file_path = os.path.join(tmp_dir, f"fuzz_{nonce}.py")
+    generated_file_path = os.path.join(tmp_dir, f"fuzz_{code_hash}.py")
 
     # Write the generated code to the specified file
     with open(generated_file_path, "w") as f:
