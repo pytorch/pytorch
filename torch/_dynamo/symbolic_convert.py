@@ -207,7 +207,7 @@ compare_op_handlers["in"] = lambda tx, args, _: handle_contains(
 compare_op_handlers["not in"] = lambda tx, args, _: handle_not(
     tx, [handle_contains(tx, [*reversed(args)], {})], {}
 )
-latest_bytecode_queue = deque(
+latest_bytecode_queue: deque[str] = deque(
     maxlen=20
 )  # Store the latest bytecode before graph_break() call by user
 
