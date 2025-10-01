@@ -270,8 +270,6 @@ def _set_shape_type(
     elif isinstance(meta_val, (float, torch.SymFloat)):
         value.dtype = ir.DataType.FLOAT
         value.shape = ir.Shape([])
-    else:
-        pass
 
 
 def _get_qualified_module_name(cls: Any) -> str:
