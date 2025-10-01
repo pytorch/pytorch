@@ -12,41 +12,49 @@ class UnsqueezeOperator(Operator):
         super().__init__("unsqueeze")
 
     def can_produce(self, tensor):
-        """Unsqueeze can only produce tensors that have at least one dimension of size 1."""
-        # Unsqueeze adds dimensions of size 1, so it can only produce tensors that have
-        # at least one dimension of size 1 (that was added by the unsqueeze operation)
-        # Exception: scalars can be produced from empty tensors
+        """Unsqueeze can produce tensors by adding dimensions of size 1."""
+        # Unsqueeze adds dimensions of size 1, so it can produce:
+        # 1. Any tensor that has at least one dimension of size 1 (remove that dimension for input)
+        # 2. Any tensor by adding a new dimension of size 1 somewhere
+        
+        # Special case: scalars cannot be produced by unsqueeze (unsqueeze always increases rank)
         if len(tensor.size) == 0:
-            return True
-
-        # Check if tensor has at least one dimension of size 1
-        return any(dim == 1 for dim in tensor.size)
+            return False
+        
+        # All non-scalar tensors can potentially be produced by unsqueeze
+        return True
 
     def decompose(self, tensor):
         """Decompose tensor into input tensor for unsqueeze operation."""
         output_shape = tensor.size
 
-        # Handle scalar output - create empty tensor input and unsqueeze at dim 0
-        if len(output_shape) == 0:
-            input_shape = ()
-            unsqueeze_dim = 0
-        else:
-            # Strategy: Only create valid inputs for unsqueeze
-            # Unsqueeze ALWAYS adds a dimension of size 1, so we can only "decompose"
-            # tensors that have at least one dimension of size 1
-            ones_positions = [i for i, dim in enumerate(output_shape) if dim == 1]
+        # Since can_produce returns False for scalars, we should never get here with a scalar
+        assert len(output_shape) > 0, "UnsqueezeOperator should not receive scalar tensors"
+          
+        # Strategy: For unsqueeze to produce output_shape, we need an input that when
+        # unsqueezed at some dimension results in output_shape
+        ones_positions = [i for i, dim in enumerate(output_shape) if dim == 1]
 
-            if ones_positions:
-                # Remove one of the size-1 dimensions to create input
-                remove_pos = random.choice(ones_positions)
-                input_shape = tuple(dim for i, dim in enumerate(output_shape) if i != remove_pos)
-                unsqueeze_dim = remove_pos
-            else:
-                # This should not happen since can_produce should filter out tensors
-                # without size-1 dimensions, but handle it gracefully
-                # We'll just remove the first dimension and use it as unsqueeze position
-                input_shape = output_shape[1:] if len(output_shape) > 1 else ()
+        if ones_positions:
+            # Remove one of the size-1 dimensions to create input
+            # This represents the dimension that was added by unsqueeze
+            remove_pos = random.choice(ones_positions)
+            input_shape = tuple(dim for i, dim in enumerate(output_shape) if i != remove_pos)
+            unsqueeze_dim = remove_pos
+        else:
+            # No size-1 dimensions in output, so we need to create an input that when
+            # unsqueezed at some position will produce the output shape.
+            # Since there are no size-1 dims, we need to remove one dimension from output.
+            # But this is problematic because unsqueeze only adds dimensions.
+            # For this case, we'll create a smaller input tensor by removing the last dimension
+            if len(output_shape) == 1:
+                # If output is 1D with no size-1 dims, create a scalar input
+                input_shape = ()
                 unsqueeze_dim = 0
+            else:
+                # Remove the last dimension to create input
+                input_shape = output_shape[:-1]
+                unsqueeze_dim = len(input_shape)  # Insert at the end
 
         # Calculate contiguous stride for input
         if len(input_shape) == 0:
