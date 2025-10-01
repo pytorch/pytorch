@@ -845,9 +845,7 @@ def ignore(drop=False, **kwargs):
         #   def fn(...):
         fn = drop
         # pyrefly: ignore  # missing-attribute
-        fn._torchscript_modifier = (
-            FunctionModifiers.IGNORE
-        )
+        fn._torchscript_modifier = FunctionModifiers.IGNORE
         return fn
 
     if not isinstance(drop, bool):

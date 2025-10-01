@@ -1049,7 +1049,6 @@ class LOBPCG:
             E[(torch.where(E < t))[0]] = t
 
         return torch.matmul(
-
             U * d_col.mT,
             # pyrefly: ignore  # unsupported-operation
             Z * E**-0.5,
