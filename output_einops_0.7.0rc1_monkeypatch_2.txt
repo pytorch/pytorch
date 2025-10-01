@@ -1,0 +1,7 @@
+Traceback (most recent call last):
+  File "/home/jedrzej/dev/pytorch/repro.py", line 1, in <module>
+    import torch
+  File "/home/jedrzej/dev/pytorch/torch/__init__.py", line 2886, in <module>
+    if hasattr(einops.layers.torch, "_reconstruct_from_shape_uncached"):
+               ^^^^^^^^^^^^^
+AttributeError: module 'einops' has no attribute 'layers'
