@@ -476,7 +476,7 @@ def _maybe_broadcast(*args, preserve_cpu_scalar_tensors=True):
             # u0==u1 assume the same, no broadcasting!
             torch._check(
                 x == y,
-                "sizes assumed to be the same due to unbacked broadcasting semantics",
+                lambda: "sizes assumed to be the same due to unbacked broadcasting semantics",
             )
 
         return False
@@ -3613,7 +3613,7 @@ def istft(
             n_fft // 2 + 1 == fft_size,
             lambda: (
                 "istft expected the frequency dimension (3rd to the last) of the input tensor "
-                + "to match n_fft / 2 + 1 when onesided=True, but got {fft_size}"
+                + f"to match n_fft / 2 + 1 when onesided=True, but got {fft_size}"
             ),
         )
     else:
@@ -3621,7 +3621,7 @@ def istft(
             n_fft == fft_size,
             lambda: (
                 "istft expected the frequency dimension (3rd to the last) of the input tensor "
-                + "to match n_fft when onesided=False, but got {fft_size}",
+                + f"to match n_fft when onesided=False, but got {fft_size}",
             ),
         )
 
@@ -4031,11 +4031,13 @@ def rot90(
 
 
 def _check_stack_inputs(tensors: TensorSequenceType) -> None:
+    from torch.fx.experimental.symbolic_shapes import sym_eq
+
     entry_shape = tensors[0].shape
     for i in range(1, len(tensors)):
-        assert tensors[i].shape == entry_shape, (
-            f"stack expects each tensor to be equal size, but got {entry_shape} at entry 0 "
-            f"and {tensors[i].shape} at entry {i}"
+        torch._check(
+            sym_eq(tensors[i].shape, entry_shape),
+            lambda: f"stack expects each tensor to be equal size, but got {entry_shape} at entry 0 ",
         )
 
 
@@ -5928,7 +5930,8 @@ def norm(
 @out_wrapper()
 def trace(self: TensorLikeType) -> TensorLikeType:
     torch._check(
-        self.ndim == 2, lambda: "expected a matrix, but got tensor with dim {self.ndim}"
+        self.ndim == 2,
+        lambda: f"expected a matrix, but got tensor with dim {self.ndim}",
     )
     return torch.sum(torch.diag(self, 0))
 

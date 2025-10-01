@@ -12,7 +12,7 @@ from typing import Optional, TYPE_CHECKING, Union
 import torch
 from torch.distributed import is_available
 from torch.distributed._mesh_layout import _MeshLayout
-from torch.distributed._pycute import flatten, is_tuple, suffix_product
+from torch.distributed._pycute import flatten, is_int, is_tuple, suffix_product
 from torch.utils._typing_utils import not_none
 
 
@@ -75,11 +75,8 @@ else:
             # TODO: Move the bookkeeping maps from _MeshEnv to DeviceMesh.
             self.child_to_root_mapping: dict[DeviceMesh, DeviceMesh] = {}
             self.mesh_dim_group_options: dict[int, BackendConfig] = {}
+            # Record flatten mesh name to its flattened mesh in root mesh.
             self.root_to_flatten_mapping: dict[DeviceMesh, dict[str, DeviceMesh]] = {}
-            # Record flatten mesh name to its flattened layout in root mesh.
-            self.flatten_name_to_root_layout: dict[
-                DeviceMesh, dict[str, _MeshLayout]
-            ] = {}
 
         def get_current_mesh(self) -> "DeviceMesh":
             if len(self.mesh_stack) == 0:
@@ -92,7 +89,7 @@ else:
             layout: _MeshLayout,
             submesh_dim_names: tuple[str, ...],
         ) -> "DeviceMesh":
-            root_mesh = _mesh_resources.get_root_mesh(device_mesh)
+            root_mesh = self.get_root_mesh(device_mesh)
             slice_dim_group_name = []
             for name in submesh_dim_names:
                 if name in not_none(device_mesh.mesh_dim_names):
@@ -102,6 +99,9 @@ else:
                         ]
                     )
                 else:
+                    # If device_mesh is not root_mesh, we already throw error in _get_slice_mesh_layout
+                    # Since we will deprecate the slicing of flattened dim_name from root mesh soon,
+                    # we don't want to optimize the code furthermore.
                     flatten_mesh = self.root_to_flatten_mapping[device_mesh][name]
                     slice_dim_group_name.append(
                         flatten_mesh._dim_group_names[  # type: ignore[has-type]
@@ -121,7 +121,7 @@ else:
                 _layout=layout,
             )
             res_submesh._dim_group_names = slice_dim_group_name
-            self.child_to_root_mapping[res_submesh] = self.get_root_mesh(device_mesh)
+            self.child_to_root_mapping[res_submesh] = root_mesh
             return res_submesh
 
         def create_flatten_mesh(
@@ -130,7 +130,7 @@ else:
             mesh_dim_name: Optional[str] = None,
             backend_override: BackendConfig = (None, None),
         ) -> "DeviceMesh":
-            root_mesh = _mesh_resources.get_root_mesh(device_mesh)
+            root_mesh = self.get_root_mesh(device_mesh)
 
             if not mesh_dim_name:
                 mesh_dim_name = "_".join(not_none(device_mesh.mesh_dim_names))
@@ -142,7 +142,6 @@ else:
                 return device_mesh
 
             # Check whether the mesh_dim_name for flattened mesh is valid.
-            self.flatten_name_to_root_layout.setdefault(root_mesh, {})
             invalid_dim_names = not_none(root_mesh.mesh_dim_names)
             if mesh_dim_name in invalid_dim_names:
                 raise ValueError(
@@ -159,7 +158,7 @@ else:
             ):
                 if (
                     flattened_mesh_layout
-                    == self.flatten_name_to_root_layout[root_mesh][mesh_dim_name]
+                    == self.root_to_flatten_mapping[root_mesh][mesh_dim_name]._layout
                 ):
                     return self.root_to_flatten_mapping[root_mesh][mesh_dim_name]
                 else:
@@ -187,9 +186,6 @@ else:
             self.child_to_root_mapping[res_flattened_mesh] = root_mesh
             self.root_to_flatten_mapping.setdefault(root_mesh, {})[mesh_dim_name] = (
                 res_flattened_mesh
-            )
-            self.flatten_name_to_root_layout[root_mesh][mesh_dim_name] = (
-                res_flattened_mesh._layout
             )
 
             return res_flattened_mesh
@@ -361,10 +357,16 @@ else:
                 slice_from_root = False
 
             # The slice mesh_dim_names should consist either the device_mesh's mesh_dim_names
-            # or its flattened mesh's mesh_dim_names.
-            self.flatten_name_to_root_layout.setdefault(device_mesh, {})
+            # or its flattened mesh's mesh_dim_names if it's root_mesh.
             flatten_name_to_root_layout = (
-                self.flatten_name_to_root_layout[device_mesh] if slice_from_root else {}
+                {
+                    key: mesh._layout
+                    for key, mesh in self.root_to_flatten_mapping.setdefault(
+                        device_mesh, {}
+                    ).items()
+                }
+                if slice_from_root
+                else {}
             )
             valid_mesh_dim_names = [
                 *device_mesh.mesh_dim_names,
@@ -391,6 +393,27 @@ else:
 
             sliced_sizes = tuple(l.sizes for l in layout_sliced)
             sliced_strides = tuple(l.strides for l in layout_sliced)
+
+            # The check below is from DeviceMesh's implementation before adopting CuTe layout for internal
+            # bookkeeping and it can be removed but we need to define what is the expected behavior.
+            # TODO: Remove the below check and define the expected behavior.
+            # Validate the order of the slice mesh dim indices.
+            # This needs to be in ascending order.
+            pre_stride = -1
+            for stride in reversed(sliced_strides):
+                # Note that with CuTe layout, we can support slicing flattened non-contiguous mesh dims with no problem.
+                # But this will make this behavior complicated so we decided to not support it for now.
+                if not is_int(stride):
+                    raise NotImplementedError(
+                        "Currently, this only allows slicing out a contiguous flattened dim."
+                    )
+                if stride < pre_stride:
+                    raise KeyError(
+                        f"Invalid mesh_dim_names {mesh_dim_names} specified. "
+                        "Mesh dim indices should be in ascending order."
+                    )
+                pre_stride = stride
+
             # When users sliced dim_names outside from current mesh, we will check whether
             # there is layout overlap.
             # TODO: Eventually we will just directly throw error here because
