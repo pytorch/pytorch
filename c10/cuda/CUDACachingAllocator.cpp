@@ -382,6 +382,7 @@ struct ExpandableSegment {
         peers_(std::move(peers)) {
     cudaDeviceProp prop{};
     C10_CUDA_CHECK(cudaGetDeviceProperties(&prop, device_));
+    mapped_size_ = 0;
     // we allocate enough address space for 1 1/8 the total memory on the GPU.
     // This allows for some cases where we have to unmap pages earlier in the
     // segment to put them at the end.
@@ -493,6 +494,7 @@ struct ExpandableSegment {
       return SegmentRange{range.ptr, 0};
     }
     unmapHandles(begin, end);
+    mapped_size_ -= (end - begin) * segment_size_;
     return rangeFromHandles(begin, end);
   }
 
@@ -632,6 +634,18 @@ struct ExpandableSegment {
     return max_handles_ * segment_size_;
   }
 
+  cudaStream_t getStream() {
+    return *stream_;
+  }
+
+  size_t getMappedSize() {
+    return mapped_size_;
+  }
+
+  size_t getSegmentSize() {
+    return segment_size_;
+  }
+
   void addPeer(c10::DeviceIndex device) {
     peers_.push_back(device);
     forEachAllocatedRange(
@@ -666,6 +680,7 @@ struct ExpandableSegment {
           handles_.at(i).value().handle,
           0ULL));
     }
+    mapped_size_ += (end - begin) * segment_size_;
     setAccess(device_, begin, end);
     for (auto p : peers_) {
       setAccess(p, begin, end);
@@ -734,6 +749,7 @@ struct ExpandableSegment {
   std::optional<cudaStream_t> stream_;
   CUdeviceptr ptr_{};
   size_t segment_size_;
+  size_t mapped_size_;
   size_t max_handles_;
   struct Handle {
     CUmemGenericAllocationHandle handle;
@@ -777,6 +793,17 @@ struct ExpandableSegment {
     return nullptr;
   }
   size_t size() const {
+    return 0;
+  }
+  cudaStream_t getStream() {
+    return nullptr;
+  }
+
+  size_t getMappedSize() {
+    return 0;
+  }
+
+  size_t getSegmentSize() {
     return 0;
   }
   void addPeer(c10::DeviceIndex device) {}
@@ -2009,6 +2036,22 @@ class DeviceCachingAllocator {
     allowed_memory_maximum =
         static_cast<size_t>(fraction * static_cast<double>(device_total));
     set_fraction = true;
+  }
+
+  /** get expandable segment size for all the streams on device **/
+  std::vector<StreamSegmentSize> getExpandableSegmentSizes() {
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    std::vector<StreamSegmentSize> sizes;
+    for (auto& segment : expandable_segments_) {
+      if (!segment->getStream()) {
+        continue;
+      }
+      sizes.emplace_back(
+          segment->getStream(),
+          segment->getSegmentSize() == kSmallBuffer,
+          segment->getMappedSize());
+    }
+    return sizes;
   }
 
   /** returns cached blocks to the system allocator **/
@@ -3836,6 +3879,16 @@ class NativeCachingAllocator : public CUDAAllocator {
         ". Please set within [0, 1].");
     C10_CUDA_CHECK(c10::cuda::SetDevice(device));
     device_allocator[device]->setMemoryFraction(fraction);
+  }
+
+  std::vector<StreamSegmentSize> getExpandableSegmentSizes(
+      c10::DeviceIndex device) override {
+    TORCH_INTERNAL_ASSERT(
+        0 <= device && static_cast<size_t>(device) < device_allocator.size(),
+        "Allocator not initialized for device ",
+        device,
+        ": did you call init?");
+    return device_allocator[device]->getExpandableSegmentSizes();
   }
 
   void recordHistory(

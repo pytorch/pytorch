@@ -614,7 +614,7 @@ def fuse_conv_bn(gm: torch.fx.GraphModule, inplace=False) -> torch.fx.GraphModul
 class NormalizedLinearNode:
     def __init__(self, node: torch.fx.Node) -> None:
         assert node.op == "call_function"
-        assert node.target in [torch.nn.functional.linear]
+        assert node.target is torch.nn.functional.linear
         self.node: torch.fx.Node = node
 
     def get_input(self) -> torch.fx.Node:
