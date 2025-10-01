@@ -2,7 +2,7 @@
 #include <torch/csrc/dynamo/cpython_includes.h>
 #include <torch/csrc/dynamo/debug_macros.h>
 
-#if IS_PYTHON_3_15_PLUS
+#if IS_PYTHON_3_15_PLUS || (IS_PYTHON_3_14_PLUS && defined(_WIN32))
 
 const uint8_t* THP_PyOpcode_Caches = NULL;
 const int THP_PyOpcode_Caches_size = 0;

@@ -63,8 +63,8 @@ FrameLocalsMapping::FrameLocalsMapping(FrameLocalsFrameType* frame)
   };
 
   auto offset = co->co_nlocalsplus - co->co_nfreevars;
-#if IS_PYTHON_3_15_PLUS
-  TORCH_CHECK(false, "Python 3.15+ not supported");
+#if IS_PYTHON_3_15_PLUS || (IS_PYTHON_3_14_PLUS && defined(_WIN32))
+  TORCH_CHECK(false, "Python 3.15+ / 3.14 on Windows not supported");
 #elif IS_PYTHON_3_14_PLUS
   for (int i = 0; i < offset; i++) {
     update_framelocals(i, PyStackRef_AsPyObjectBorrow(frame->localsplus[i]));
