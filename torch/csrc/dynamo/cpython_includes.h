@@ -20,17 +20,14 @@
 
 #if IS_PYTHON_3_11_PLUS
 #include <internal/pycore_frame.h>
-#if IS_PYTHON_3_14_PLUS
-#include <internal/pycore_genobject.h>
-#include <internal/pycore_interpframe.h>
-#endif
-#if IS_PYTHON_3_14_PLUS && !defined(_WIN32)
-#include <internal/pycore_stackref.h>
-#endif
-#endif
 
 #if IS_PYTHON_3_14_PLUS && !defined(_WIN32)
 #include <internal/pycore_code.h>
+#include <internal/pycore_genobject.h>
+#include <internal/pycore_interpframe.h>
+#include <internal/pycore_stackref.h>
+#endif
+
 #endif
 
 #undef Py_BUILD_CORE
