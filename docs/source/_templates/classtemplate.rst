@@ -3,9 +3,9 @@
 .. currentmodule:: {{ module }}
 
 
-{{ name | underline}}
+{{ fullname | underline}}
 
-.. autoclass:: {{ name }}
+.. autoclass:: {{ fullname }}
     :members:
 
 
