@@ -3332,7 +3332,7 @@
   dispatch:
     CUDA: _fused_rms_norm_cuda
     MPS: _fused_rms_norm_mps
-    CompositeImplicitAutograd: rms_norm_composite
+    CompositeExplicitAutograd: rms_norm_composite
 
 - func: _fused_rms_norm_backward(Tensor grad_out, Tensor input, int[] normalized_shape, Tensor rstd, Tensor? weight, bool[2] output_mask) -> (Tensor, Tensor)
   dispatch:

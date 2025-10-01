@@ -88,6 +88,7 @@ inductor_decompositions = get_decompositions(
         aten.native_batch_norm,
         aten.native_group_norm,
         aten.native_layer_norm,
+        aten._fused_rms_norm,
         aten.nll_loss2d_backward,
         aten.permute_copy,
         aten.rrelu_with_noise_backward,
