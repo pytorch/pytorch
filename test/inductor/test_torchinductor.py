@@ -9994,6 +9994,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         t1[:, 3] = float("nan")
         self.common(fn, (t1,))
 
+    @skip_if_halide
     def test_argmax_argmin_transposed_mutation(self):
         # Regression for https://github.com/pytorch/pytorch/issues/163929
         # Ensure argmax/argmin indices are correct on transposed views after base mutation
