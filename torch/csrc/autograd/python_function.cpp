@@ -822,6 +822,7 @@ static void _save_variables(
   self->saved_variables.reserve(num_saved);
 
   std::unordered_set<at::TensorImpl*> output_impls{};
+  output_impls.reserve(num_outputs);
   for (const auto i : c10::irange(num_outputs)) {
     PyObject* obj = PyTuple_GET_ITEM(outputs, i);
     if (THPVariable_Check(obj)) {
