@@ -806,6 +806,60 @@ class TestMatmulCuda(InductorTestCase):
 
             torch.backends.cuda.matmul.allow_fp16_accumulation = orig_fp16_accum
 
+    @onlyCUDA
+    @parametrize("ops", [("mm", torch.mm), ("bmm", torch.bmm), ("addmm", torch.addmm), ("baddbmm", torch.baddbmm)])
+    def test_input_dimension_checking_out_dtype(self, ops):
+        op_name, op = ops
+        B = 2
+        M, N, K = 32, 32, 32
+
+        def is_addmm():
+            return "add" in op_name
+
+        def is_batched():
+            return "bmm" in op_name
+
+        if is_batched():
+            a = torch.randn(B, M, K, device="cuda", dtype=torch.bfloat16)
+            mismatch_k_b = torch.randn(B, K + 1, N, device="cuda", dtype=torch.bfloat16)
+            c = torch.randn(B, M, N, device="cuda", dtype=torch.bfloat16)
+            extra_dim_b = a.clone().unsqueeze(0)
+
+            mismatch_k_err = "Expected size for first two dimensions of batch2 tensor to be"
+            extra_dim_err = "batch2 must be a 3D tensor"
+        else:
+            a = torch.randn(M, K, device="cuda", dtype=torch.bfloat16)
+            mismatch_k_b = torch.randn(K + 1, N, device="cuda", dtype=torch.bfloat16)
+            c = torch.randn(M, N, device="cuda", dtype=torch.bfloat16)
+            extra_dim_b = a.clone().unsqueeze(0)
+
+            mismatch_k_err = "mat1 and mat2 shapes cannot be multiplied"
+            extra_dim_err = "mat2 must be a matrix, got 3-D tensor"
+
+        # Test mismatch K
+        with self.assertRaisesRegex(RuntimeError, mismatch_k_err):
+            if is_addmm():
+                op(c, a, mismatch_k_b, out_dtype=torch.float32)
+            else:
+                op(a, mismatch_k_b, out_dtype=torch.float32)
+
+        # Test extra dimension
+        with self.assertRaisesRegex(RuntimeError, extra_dim_err):
+            if is_addmm():
+                op(c, a, extra_dim_b, out_dtype=torch.float32)
+            else:
+                op(c, extra_dim_b, out_dtype=torch.float32)
+
+        if is_batched():
+            with self.assertRaisesRegex(RuntimeError, "Expected size for first two dimensions of batch2 tensor to be"):
+                # Test mismatch B for bmm/baddbmm
+                mismatch_batch_dim_b = torch.randn(B + 1, K, N, device="cuda", dtype=torch.bfloat16)
+                if is_addmm():
+                    op(c, a, mismatch_batch_dim_b, out_dtype=torch.float32)
+                else:
+                    op(a, mismatch_batch_dim_b, out_dtype=torch.float32)
+
+
 f8_msg = "FP8 is only supported on H100+, SM 8.9 and MI300+ devices"
 f8_grouped_msg = "FP8 grouped is only supported on SM90 and MI300+ devices"
 mx_skip_msg = "MX gemm is only supported on CUDA capability 10.0+"

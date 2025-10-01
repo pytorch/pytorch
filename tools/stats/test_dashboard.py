@@ -204,6 +204,41 @@ def get_all_run_attempts(workflow_run_id: int) -> list[int]:
     return sorted(run_attempts)
 
 
+def get_test_status(test_cases: list[list[dict[str, Any]]]) -> list[dict[str, Any]]:
+    # Returns a list of dicts with test status info (flaky, success, failure,
+    # skipped)
+    only_status_info = []
+    for tests in test_cases:
+        build_name = tests[0]["build_name"]
+        test_config = tests[0]["test_config"]
+        short_job_name = f"{build_name} / ({test_config})"
+        file = tests[0].get("file", "NoFile")
+
+        statuses = []
+        for test in tests:
+            if "skipped" in test:
+                statuses.append("skipped")
+            elif "failure" in test or "error" in test:
+                statuses.append("failure")
+            else:
+                statuses.append("success")
+        if "failure" in statuses and "success" in statuses:
+            status = "flaky"
+        else:
+            status = statuses[0]
+
+        only_status_info.append(
+            {
+                "short_job_name": short_job_name,
+                "file": file,
+                "name": test["name"],
+                "status": status,
+            }
+        )
+
+    return only_status_info
+
+
 def upload_additional_info(
     workflow_run_id: int, workflow_run_attempt: int, test_cases: list[dict[str, Any]]
 ) -> None:
@@ -229,4 +264,10 @@ def upload_additional_info(
         workflow_run_attempt,
         "additional_info/invoking_file_summary",
         [invoking_file_summary],
+    )
+    upload_workflow_stats_to_s3(
+        workflow_run_id,
+        workflow_run_attempt,
+        "additional_info/test_status",
+        get_test_status(grouped_tests),
     )
