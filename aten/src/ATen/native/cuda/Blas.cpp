@@ -58,15 +58,15 @@ namespace at::native {
 namespace {
 
 // NOTE: conjugation is handled seperately
-enum class CublasPrepTransType : int {
+enum class CublasPrepTransStrategy : int {
   N = 0, // no transposition, no copy
   N_OWNED = 1, // make a col-major copy, no transposition
   T_BORROWED = 2, // transpose, no copy
   T_OWNED = 3 // make a row-major copy, then transpose
 };
 
-inline bool is_trans(const CublasPrepTransType& trans_type) {
-  return static_cast<int>(trans_type) >= static_cast<int>(CublasPrepTransType::T_BORROWED);
+inline bool is_trans(const CublasPrepTransStrategy& trans_type) {
+  return static_cast<int>(trans_type) >= static_cast<int>(CublasPrepTransStrategy::T_BORROWED);
 }
 
 // Fast dim must be contiguous, and the leading one
@@ -81,28 +81,31 @@ inline bool matrix_ld_complies_cublas(const Tensor& t, int64_t ld_idx) {
 // Derive a strategy for preparing an input tensor t for cuBLAS, i.e.
 // N - no-op for t,
 // T_BORROWED - a transposed view of t,
-// T_OWNED - a transposed contigious copy of t.
-inline CublasPrepTransType predict_matrix_trans_prep_type_cublas(const Tensor& t) {
+// T_OWNED - a transposed contigious copy of t (i.e. a row-major copy of t)
+inline CublasPrepTransStrategy predict_matrix_trans_prep_type_cublas(const Tensor& t) {
   if (t.is_non_overlapping_and_dense()) { // is t row- or col-major?
       return t.is_contiguous()
-        ? CublasPrepTransType::T_BORROWED // yes, then transpose without copy
-        : CublasPrepTransType::N; // no, then use as is without transposition
+        ? CublasPrepTransStrategy::T_BORROWED // yes, then transpose without copy
+        : CublasPrepTransStrategy::N; // no, then use as is without transposition
   }
   // We transpose a tensor if the rows dim (dim 0) complies
   // with the cublas requirements for the leading dimension
   const auto row_dim_ld_compliant = matrix_ld_complies_cublas(t, /*ld_idx=*/0);
   if (row_dim_ld_compliant) {
-    return CublasPrepTransType::T_BORROWED; // no copy
+    return CublasPrepTransStrategy::T_BORROWED; // no copy
   } else {
     // If neither row nor col dim complies, a contiguous copy is created
     // which has its row dim compliant, so the tensor will need transposition
     return matrix_ld_complies_cublas(t, /*ld_idx=*/1)
-      ? CublasPrepTransType::N // no copy
-      : CublasPrepTransType::T_OWNED; // copy
+      ? CublasPrepTransStrategy::N // no copy
+      : CublasPrepTransStrategy::T_OWNED; // copy
   }
 }
 
-inline std::tuple<CublasPrepTransType, CublasPrepTransType, CublasPrepTransType>
+// See predict_matrix_trans_prep_type_cublas for prep strategies.
+// Additioanally, this method can return the N_OWNED strategy,
+// which implies a col-major copy of the input.
+inline std::tuple<CublasPrepTransStrategy, CublasPrepTransStrategy, CublasPrepTransStrategy>
 predict_gemm_args_trans_prep_types_cublas(const Tensor& result, const Tensor& mat1, const Tensor& mat2) {
   const auto result_trans_type = predict_matrix_trans_prep_type_cublas(result);
   const auto mat1_trans_type = predict_matrix_trans_prep_type_cublas(mat1);
@@ -129,29 +132,29 @@ predict_gemm_args_trans_prep_types_cublas(const Tensor& result, const Tensor& ma
     // TODO: we can simplify the logic substantially by just
     // negating T_OWNED, and for other cases returning
     // prediction for the transposed tensor.
-    const auto neg_trans_type = [](const Tensor& t, const CublasPrepTransType& t_trans_type) -> auto {
+    const auto neg_trans_type = [](const Tensor& t, const CublasPrepTransStrategy& t_trans_type) -> auto {
       if (t.is_non_overlapping_and_dense()) { // when t is row- or col-major
         switch(t_trans_type) {
-          case CublasPrepTransType::T_BORROWED:
-            return CublasPrepTransType::N;
-          case CublasPrepTransType::N:
-            return CublasPrepTransType::T_BORROWED;
+          case CublasPrepTransStrategy::T_BORROWED:
+            return CublasPrepTransStrategy::N;
+          case CublasPrepTransStrategy::N:
+            return CublasPrepTransStrategy::T_BORROWED;
           default:
             TORCH_CHECK(false, "This path should not be reachable")
         }
       }
       switch (t_trans_type) {
-        case CublasPrepTransType::T_OWNED:
+        case CublasPrepTransStrategy::T_OWNED:
           // Implies negating the case with an owned row-major copy,
           // so we can just create a col-major copy directly
-          return CublasPrepTransType::N_OWNED;
-        case CublasPrepTransType::N:
+          return CublasPrepTransStrategy::N_OWNED;
+        case CublasPrepTransStrategy::N:
           // Implies T_BORROWED was not possible, so do T_OWNED
-          return CublasPrepTransType::T_OWNED;
-        case CublasPrepTransType::T_BORROWED:
+          return CublasPrepTransStrategy::T_OWNED;
+        case CublasPrepTransStrategy::T_BORROWED:
           return matrix_ld_complies_cublas(t, /*ld_idx=*/1) // is col-compliant?
-            ? CublasPrepTransType::N // if so, no copy needed
-            : CublasPrepTransType::N_OWNED; // col-major copy otherwise
+            ? CublasPrepTransStrategy::N // if so, no copy needed
+            : CublasPrepTransStrategy::N_OWNED; // col-major copy otherwise
         default:
           TORCH_CHECK(false, "This path should not be reachable")
       }
