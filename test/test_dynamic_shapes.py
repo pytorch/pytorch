@@ -3434,7 +3434,7 @@ class TestUbackedOps(TestCase):
             f = y.item()
             t1 = x.view((f, f))
             t2 = x.reshape((f, f))
-            t3 = torch._ops.ops.aten.reshape(x, (f, f))
+            t3 = torch._ops.ops.aten.view_copy(x, (f, f))
             # TODO avoid _check_is_size here.
             torch._check_is_size(f)
             return t1 * 10, t2 * 10, t3
