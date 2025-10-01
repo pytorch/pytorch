@@ -343,6 +343,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 RUN uv pip freeze | grep -E 'setuptools|packaging|build'
 
 ENV TORCH_CUDA_ARCH_LIST=${torch_cuda_arch_list}
+ENV FLASHINFER_CUDA_ARCH_LIST=${torch_cuda_arch_list}
 # Build flashinfer for torch nightly from source around 10 mins
 ARG FLASHINFER_GIT_REPO="https://github.com/flashinfer-ai/flashinfer.git"
 # Keep this in sync with https://github.com/vllm-project/vllm/blob/main/requirements/cuda.txt
@@ -351,7 +352,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     git clone --depth 1 --recursive --shallow-submodules \
         --branch ${FLASHINFER_GIT_REF} \
         ${FLASHINFER_GIT_REPO} flashinfer \
-    && echo "Building FlashInfer with AOT for arches: ${torch_cuda_arch_list}" \
+    && echo "Building FlashInfer with AOT for arches FLASHINFER_CUDA_ARCH_LIST: ${FLASHINFER_CUDA_ARCH_LIST}, TORCH_CUDA_ARCH_LIST ${TORCH_CUDA_ARCH_LIST}" \
     && cd flashinfer \
     && uv pip install --system cuda-python==$(echo $CUDA_VERSION | cut -d. -f1,2) pynvml==$(echo $CUDA_VERSION | cut -d. -f1) nvidia-nvshmem-cu$(echo $CUDA_VERSION | cut -d. -f1) \
     && python3 -m flashinfer.aot \
