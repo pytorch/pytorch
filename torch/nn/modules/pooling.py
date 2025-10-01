@@ -1141,6 +1141,10 @@ class LPPool1d(_LPPoolNd):
         stride: a single int, the stride of the window. Default value is :attr:`kernel_size`
         ceil_mode: when True, will use `ceil` instead of `floor` to compute the output shape
 
+    Note:
+        When :attr:`ceil_mode` is ``True``, sliding windows may go off-bounds if they start within the
+        left padding or the input. Sliding windows that would start in the right padded region are ignored.
+
     Shape:
         - Input: :math:`(N, C, L_{in})` or :math:`(C, L_{in})`.
         - Output: :math:`(N, C, L_{out})` or :math:`(C, L_{out})`, where
@@ -1189,6 +1193,10 @@ class LPPool2d(_LPPoolNd):
         kernel_size: the size of the window
         stride: the stride of the window. Default value is :attr:`kernel_size`
         ceil_mode: when True, will use `ceil` instead of `floor` to compute the output shape
+
+    Note:
+        When :attr:`ceil_mode` is ``True``, sliding windows may go off-bounds if they start within the
+        left padding or the input. Sliding windows that would start in the right padded region are ignored.
 
     Shape:
         - Input: :math:`(N, C, H_{in}, W_{in})` or :math:`(C, H_{in}, W_{in})`.
@@ -1245,6 +1253,10 @@ class LPPool3d(_LPPoolNd):
         kernel_size: the size of the window
         stride: the stride of the window. Default value is :attr:`kernel_size`
         ceil_mode: when True, will use `ceil` instead of `floor` to compute the output shape
+
+    Note:
+        When :attr:`ceil_mode` is ``True``, sliding windows may go off-bounds if they start within the
+        left padding or the input. Sliding windows that would start in the right padded region are ignored.
 
     Shape:
         - Input: :math:`(N, C, D_{in}, H_{in}, W_{in})` or :math:`(C, D_{in}, H_{in}, W_{in})`.
