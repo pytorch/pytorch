@@ -1059,7 +1059,6 @@ class Tensor(torch._C.TensorBase):
             return torch._VF.split(self, split_size, dim)  # type: ignore[attr-defined]
         else:
             return torch._VF.split_with_sizes(
-
                 self,
                 # pyrefly: ignore  # bad-argument-type
                 split_size,
@@ -1110,9 +1109,7 @@ class Tensor(torch._C.TensorBase):
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
     def __rsub__(self, other: Union["Tensor", int, float, bool, complex]) -> "Tensor":
         # pyrefly: ignore  # no-matching-overload
-        return _C._VariableFunctions.rsub(
-            self, other
-        )
+        return _C._VariableFunctions.rsub(self, other)
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
     def __rdiv__(self, other: Union["Tensor", int, float, bool, complex]) -> "Tensor":
@@ -1167,18 +1164,14 @@ class Tensor(torch._C.TensorBase):
         self, other: Union["Tensor", int, float, bool, complex]
     ) -> "Tensor":
         # pyrefly: ignore  # no-matching-overload
-        return torch.bitwise_left_shift(
-            other, self
-        )
+        return torch.bitwise_left_shift(other, self)
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
     def __rrshift__(
         self, other: Union["Tensor", int, float, bool, complex]
     ) -> "Tensor":
         # pyrefly: ignore  # no-matching-overload
-        return torch.bitwise_right_shift(
-            other, self
-        )
+        return torch.bitwise_right_shift(other, self)
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
     def __rmatmul__(self, other: "Tensor") -> "Tensor":

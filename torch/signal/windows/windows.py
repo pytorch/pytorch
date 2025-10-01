@@ -398,9 +398,7 @@ def kaiser(
 
     # Avoid NaNs by casting `beta` to the appropriate dtype.
     # pyrefly: ignore  # bad-assignment
-    beta = torch.tensor(
-        beta, dtype=dtype, device=device
-    )
+    beta = torch.tensor(beta, dtype=dtype, device=device)
 
     start = -beta
     constant = 2.0 * beta / (M if not sym else M - 1)

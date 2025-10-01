@@ -653,9 +653,7 @@ class PackageExporter:
             memo_count = 0
             # pickletools.dis(data_value)
             # pyrefly: ignore  # bad-assignment
-            for opcode, arg, _pos in pickletools.genops(
-                data_value
-            ):
+            for opcode, arg, _pos in pickletools.genops(data_value):
                 if pickle_protocol == 4:
                     if (
                         opcode.name == "SHORT_BINUNICODE"

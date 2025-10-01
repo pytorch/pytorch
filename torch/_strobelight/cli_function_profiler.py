@@ -315,9 +315,7 @@ def strobelight(
         @functools.wraps(work_function)
         def wrapper_function(*args: _P.args, **kwargs: _P.kwargs) -> Optional[_R]:
             # pyrefly: ignore  # bad-argument-type
-            return profiler.profile(
-                work_function, *args, **kwargs
-            )
+            return profiler.profile(work_function, *args, **kwargs)
 
         return wrapper_function
 

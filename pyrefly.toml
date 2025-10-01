@@ -43,7 +43,7 @@ project-excludes = [
   "torch/profiler/**",
   "torch/_prims_common/**",
   "torch/backends/**",
-  "torch/testing/**",
+  # "torch/testing/**",
   "torch/_C/**",
   "torch/sparse/**",
   "torch/_library/**",

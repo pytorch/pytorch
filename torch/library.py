@@ -243,9 +243,7 @@ class Library:
         if dispatch_key == "":
             dispatch_key = self.dispatch_key
         # pyrefly: ignore  # bad-argument-type
-        assert torch.DispatchKeySet(dispatch_key).has(
-            torch._C.DispatchKey.Dense
-        )
+        assert torch.DispatchKeySet(dispatch_key).has(torch._C.DispatchKey.Dense)
 
         if isinstance(op_name, str):
             name = op_name
@@ -647,9 +645,7 @@ def impl(
         >>> assert torch.allclose(y1, y2)
     """
     # pyrefly: ignore  # no-matching-overload
-    return _impl(
-        qualname, types, func, lib=lib, disable_dynamo=False
-    )
+    return _impl(qualname, types, func, lib=lib, disable_dynamo=False)
 
 
 if not TYPE_CHECKING:
@@ -836,9 +832,7 @@ def register_kernel(
         device_types = "CompositeExplicitAutograd"
 
     # pyrefly: ignore  # no-matching-overload
-    return _impl(
-        op, device_types, func, lib=lib, disable_dynamo=True
-    )
+    return _impl(op, device_types, func, lib=lib, disable_dynamo=True)
 
 
 def register_autocast(

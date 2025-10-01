@@ -1992,9 +1992,7 @@ def index_put_(func, *args, **kwargs):
         lengths = inp.lengths()
     torch._assert_async(
         # pyrefly: ignore  # no-matching-overload
-        torch.all(
-            indices[inp._ragged_idx] < lengths
-        ),
+        torch.all(indices[inp._ragged_idx] < lengths),
         "Some indices in the ragged dimension are out of bounds!",
     )
 
