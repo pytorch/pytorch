@@ -29,8 +29,10 @@ class TensorMeta(NamedTuple):
 class DTensorSpec:
     mesh: DeviceMesh
     placements: tuple[Placement, ...]
-    # Tensor meta will only be set during sharding propagation
+
+    # tensor meta will only be set during sharding propagation
     tensor_meta: Optional[TensorMeta] = None
+
     # When a tensor dimension is sharded across multiple mesh axes,
     # `shard_order` specifies the sequence in which these shardings are applied,
     # which in turn determines the placement of tensor shards on devices.
@@ -102,7 +104,7 @@ class DTensorSpec:
             # TODO: the TensorMetadata arises from
             # test/distributed/tensor/experimental/test_tp_transform.py::TensorParallelTest::test_tp_transform_e2e
             # but I actually can't reproduce it, maybe it is also a bug!
-            assert isinstance(value, (TensorMeta, TensorMetadata)), value
+            assert isinstance(value, TensorMeta | TensorMetadata), value
 
     def _hash_impl(self) -> int:
         # hashing and equality check for DTensorSpec are used to cache the sharding
@@ -110,16 +112,18 @@ class DTensorSpec:
         # dtype and stride.
         # Caveat: we need to keep this in mind and sync hash and eq if we add more
         # fields to them.
-        hash_items = [self.mesh, self.placements, self.shard_order]
         if self.tensor_meta is not None:
-            hash_items.extend(
-                [
+            return hash(
+                (
+                    self.mesh,
+                    self.placements,
+                    self.shard_order,
                     self.tensor_meta.shape,
                     self.tensor_meta.stride,
                     self.tensor_meta.dtype,
-                ]
+                )
             )
-        return hash(tuple(hash_items))
+        return hash((self.mesh, self.placements, self.shard_order))
 
     def __hash__(self) -> int:
         # We lazily cache the spec to avoid recomputing the hash upon each

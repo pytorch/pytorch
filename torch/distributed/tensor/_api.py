@@ -1,11 +1,10 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
-import copy
 import inspect
 import warnings
-from collections.abc import Sequence
-from typing import Any, Callable, cast, Optional
+from collections.abc import Callable, Sequence
+from typing import Any, cast, Optional
 from typing_extensions import deprecated
 
 import torch
@@ -261,6 +260,7 @@ def _prepare_placements_and_shard_order(
         device_mesh.ndim,
             or if ``shard_order`` contains invalid tensor or mesh dimensions.
         RuntimeError: If attempting to redistribute to Partial placement.
+
     """
 
     def _shard_order_from_dict_to_tuple(
@@ -339,16 +339,16 @@ def _prepare_placements_and_shard_order(
     else:
         normalized_placements = list(placements)  # type: ignore[assignment]
         for i, placement in enumerate(placements):
-            if placement.is_partial():
-                raise RuntimeError(
-                    "Can not redistribute to Partial, redistributing to Partial is for internal use only!"
-                )
-            elif isinstance(placement, Shard) and placement.dim < 0:
+            if isinstance(placement, Shard) and placement.dim < 0:
                 # normalize shard dim to be positive
                 assert placement.dim + tensor_rank >= 0
-                # copy the `placement` object in case it is `_StridedShard` for backward compatibility
-                normalized_placements[i] = copy.deepcopy(placement)
-                normalized_placements[i].dim = placement.dim + tensor_rank  # type: ignore[attr-defined]
+                # reconstruct `placement` object in case it is `_StridedShard` for backward compatibility
+                if isinstance(placement, _StridedShard):
+                    normalized_placements[i] = _StridedShard(
+                        placement.dim + tensor_rank, split_factor=placement.split_factor
+                    )
+                else:
+                    normalized_placements[i] = Shard(placement.dim + tensor_rank)
         placement_tuple = tuple(normalized_placements)
 
         if shard_order is None:
@@ -557,6 +557,7 @@ class DTensor(torch.Tensor):
 
         .. note:: ``from_local`` is differentiable, the `requires_grad` of the created
             `DTensor` object will depend on if `local_tensor` requires_grad or not.
+
         """
         # if same shape/dtype, no need to run_check, if not, must allgather
         # the metadatas to check the size/dtype across ranks
@@ -621,6 +622,7 @@ class DTensor(torch.Tensor):
 
         .. note:: ``to_local`` is differentiable, the ``requires_grad`` of the local tensor returned
             will depend on if the `DTensor` requires_grad or not.
+
         """
         if not torch.is_grad_enabled():
             return self._local_tensor
@@ -709,6 +711,7 @@ class DTensor(torch.Tensor):
 
         .. note:: ``redistribute`` currently only supports redistributing DTensor on the same DeviceMesh,
             Please file an issue if you need to redistribute DTensor to different DeviceMesh.
+
         """
         # NOTE: This redistribute API currently only supports out
         # of place redistribution, i.e. it always create a new
@@ -716,6 +719,17 @@ class DTensor(torch.Tensor):
 
         # if device_mesh is not specified, use the current device_mesh
         device_mesh = device_mesh or self.device_mesh
+
+        # handle the special case where `Partial` is allowed if we are redistributing to
+        # the same type of `Partial`
+        if placements is not None:
+            for i, placement in enumerate(placements):
+                if placement.is_partial() and self.placements[i] != placement:
+                    raise RuntimeError(
+                        f"Can not redistribute from {self.placements[i]} to {placement}, "
+                        "redistributing to Partial is for internal use only!"
+                    )
+
         placements_tuple, shard_order_tuple = _prepare_placements_and_shard_order(
             device_mesh, self.ndim, placements, shard_order
         )
@@ -920,6 +934,7 @@ def distribute_tensor(
         When initialize the DeviceMesh with the ``xla`` device_type, ``distribute_tensor``
         return `XLAShardedTensor` instead. see `this issue <https://github.com/pytorch/pytorch/issues/92909>`__
         for more details. The XLA integration is experimental and subject to change.
+
     """
 
     torch._C._log_api_usage_once("torch.dtensor.distribute_tensor")
