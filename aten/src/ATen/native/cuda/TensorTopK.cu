@@ -328,7 +328,7 @@ __global__ void computeDigitCumSum(
   int tidx = threadIdx.x + blockIdx.x * blockDim.x;
   int digit_idx = threadIdx.x;
   uint32_t slice_idx = blockIdx.x;
-  
+
   typedef cub::BlockScan<uint32_t, RADIX_DIGITS> BlockScan;
   __shared__ typename BlockScan::TempStorage scan_storage;
   // accumulates counters from multiple blocks
@@ -723,10 +723,10 @@ void launch(
         desired_in,
         counts);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
-    
+
     computeDigitCumSum<<<numInputSlices, RADIX_DIGITS, 0, stream>>>(counts, digit_cum_sum, blocks_per_slice);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
-    
+
     // we unconditionally call this kernel to update desired/ks_to_find/kthValues
     // if cub supports scan_by_key we additionally do k counts
     computeBlockwiseWithinKCounts<Bitwise, T><<<grid, RADIX_DIGITS, 0, stream>>>(
