@@ -1123,22 +1123,40 @@ def _generate_round_robin_indices(
     return all_indices_tensor
 
 
+_compiled_create_block_mask = torch.compile(
+    create_block_mask, dynamic=False, fullgraph=True
+)
+
+
 def _context_parallel_buffers(
     mesh: DeviceMesh,
-    buffers: list[torch.Tensor],
+    buffers: list[torch.Tensor | BlockMask],
     buffer_seq_dims: list[int],
     load_balance_indices: Optional[torch.Tensor] = None,
-) -> list[torch.Tensor]:
+) -> list[torch.Tensor | BlockMask]:
     """Shard the buffers along the sequence dimensions according to CP rules."""
     new_buffers = []
     for buffer, seq_dim in zip(buffers, buffer_seq_dims):
         if load_balance_indices is not None:
             buffer = torch.index_select(buffer, dim=seq_dim, index=load_balance_indices)
 
-        # use DTensor to shard the buffer on sequence dimension, retain the local tensor
-        sharded_buffer = distribute_tensor(
-            buffer, mesh, [Shard(seq_dim)], src_data_rank=None
-        ).to_local()
+        if isinstance(buffer, torch.Tensor):
+            # use DTensor to shard the buffer on sequence dimension, retain the local tensor
+            sharded_buffer = distribute_tensor(
+                buffer, mesh, [Shard(seq_dim)], src_data_rank=None
+            ).to_local()
+        elif isinstance(buffer, BlockMask):
+            sharded_buffer = _create_cp_block_mask(
+                mask_mod=buffer.mask_mod,
+                B=buffer.kv_num_blocks.shape[0],
+                H=buffer.kv_num_blocks.shape[1],
+                Q_LEN=buffer.seq_lengths[0],
+                KV_LEN=buffer.seq_lengths[1],
+                device_mesh=mesh,
+            )
+        else:
+            raise ValueError(f"Unknown buffer type: {type(buffer)}")
+
         new_buffers.append(sharded_buffer)
 
     return new_buffers
@@ -1374,6 +1392,35 @@ class _ContextParallel(ParallelStyle):
             return new_outputs[0]
 
         return tuple(new_outputs)
+
+
+def _context_parallel_shard(
+    mesh: DeviceMesh,
+    buffers: list[torch.Tensor | BlockMask],
+    seq_dims: list[int],
+    load_balance_indices: Optional[torch.Tensor] = None,
+) -> list[torch.Tensor | BlockMask]:
+
+    if len(buffers) != len(seq_dims):
+        raise ValueError(
+            "`seq_dims` must have the same number of elements as `buffers`."
+        )
+
+    device = buffers[0].device
+    seq_length = buffers[0].shape[seq_dims[0]]
+    cp_world_size = mesh.size()
+    if _cp_options.enable_load_balance:
+        load_balance_indices = _generate_round_robin_indices(
+            seq_length=seq_length,
+            cp_world_size=cp_world_size,
+            device=device,
+        )
+    else:
+        load_balance_indices = None
+
+    shards = _context_parallel_buffers(mesh, buffers, seq_dims, load_balance_indices)
+
+    return shards
 
 
 #####################################################

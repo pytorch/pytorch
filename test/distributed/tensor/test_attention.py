@@ -15,6 +15,7 @@ from torch.distributed.tensor import DeviceMesh
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.experimental._attention import (
     _CausalBehavior,
+    _context_parallel_shard,
     _ContextParallel,
     _cp_options,
     _DispatchMode,
@@ -435,21 +436,6 @@ class CPFlexAttentionTest(DTensorTestBase):
         cp_k = k.detach().clone()
         cp_v = v.detach().clone()
 
-        # create block_mask for CP
-        from torch.distributed.tensor.experimental._attention import (
-            _create_cp_block_mask,
-        )
-
-        # NOTE: call create_block_mask() within TorchFunctionMode would cause error in create_fw_bw_graph
-        cp_block_mask = _create_cp_block_mask(
-            mask_func,
-            B=B,
-            H=1,
-            Q_LEN=query_tokens,
-            KV_LEN=context_tokens,
-            device_mesh=device_mesh,
-        )
-
         # shard qkv on seq_dim
         shard_dim = 2
 
@@ -464,29 +450,40 @@ class CPFlexAttentionTest(DTensorTestBase):
             flex_cp,
         )
 
-        with context_parallel(
-            device_mesh,
-            buffers=[cp_q, cp_k, cp_v],
-            buffer_seq_dims=[shard_dim] * 3,
-        ):
-            cp_q.requires_grad = True
-            cp_k.requires_grad = True
-            cp_v.requires_grad = True
+        cp_q, cp_k, cp_v, cp_block_mask = _context_parallel_shard(
+            device_mesh, [cp_q, cp_k, cp_v, block_mask], [shard_dim] * 4
+        )
 
-            cp_out, cp_aux = flex_attention_wrapper_module(
-                cp_q,
-                cp_k,
-                cp_v,
-                block_mask=cp_block_mask,
-                return_aux=AuxRequest(lse=True),
-            )
+        cp_q.requires_grad = True
+        cp_k.requires_grad = True
+        cp_v.requires_grad = True
 
-            # backward run
-            cp_out.sum().backward()
+        cp_out, cp_aux = flex_attention_wrapper_module(
+            cp_q,
+            cp_k,
+            cp_v,
+            block_mask=cp_block_mask,
+            return_aux=AuxRequest(lse=True),
+        )
 
-            cp_q.requires_grad = False
-            cp_k.requires_grad = False
-            cp_v.requires_grad = False
+        # check block_mask rewrite doesn't escape to the outside
+        """
+        assert cp_block_mask.seq_lengths == (
+            cp_q.size(dim=shard_dim),
+            cp_k.size(dim=shard_dim),
+        ), (
+            block_mask.seq_lengths,
+            cp_block_mask.seq_lengths,
+            (cp_q.size(dim=shard_dim), cp_k.size(dim=shard_dim)),
+        )
+        """
+
+        # backward run
+        cp_out.sum().backward()
+
+        cp_q.requires_grad = False
+        cp_k.requires_grad = False
+        cp_v.requires_grad = False
 
         # unshard the output
         cp_out, cp_lse = context_parallel_unshard(
