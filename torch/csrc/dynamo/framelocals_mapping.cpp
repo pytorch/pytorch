@@ -28,8 +28,8 @@ FrameLocalsMapping::FrameLocalsMapping(FrameLocalsFrameType* frame)
   PyCodeObject* co = F_CODE(frame);
   _framelocals.resize(co->co_nlocalsplus, nullptr);
 
-#if IS_PYTHON_3_15_PLUS
-  TORCH_CHECK(false, "Python 3.15+ not supported");
+#if IS_PYTHON_3_15_PLUS || (IS_PYTHON_3_14_PLUS && defined(_WIN32))
+  TORCH_CHECK(false, "Python 3.15+ / 3.14 on Windows not supported");
 #elif IS_PYTHON_3_14_PLUS
   if (!frame->stackpointer) {
     return;
