@@ -1,7 +1,10 @@
+from collections import deque
+from dataclasses import dataclass
 from typing import Any
 
 import torch
-from torch.fx import Proxy
+from torch.fx import Node, Proxy
+from torch.utils._ordered_set import OrderedSet
 
 from .. import graph_break_hints
 from ..exc import TYPE_CHECKING, unimplemented_v2
@@ -11,12 +14,13 @@ from .constant import ConstantVariable
 
 if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslator
-
     from ..codegen import PyCodegen
 
 from torch._library.custom_ops import custom_op
 
 
+# Avoid circular dependency for the dataclass
+TensorVariable = Any
 Tensor = torch.Tensor
 
 
@@ -42,6 +46,75 @@ def join_stream_(
 @join_stream_.register_fake
 def _(index: int, device: torch.device, device_index: int, args: list[Tensor]) -> None:
     pass
+
+
+# Stream state consists of the fork stream node
+# and the external to the stream that are accessed from within the
+# stream
+@dataclass
+class StreamState:
+    # the fork node that initiated the creation of this stream state
+    # we will finalize it once the stream state is popped
+    fork_node: Node
+    # Nodes not created within the stream
+    external_nodes: OrderedSet[Node]
+    # Nodes created within the stream
+    internal_nodes: OrderedSet[Node]
+
+
+class StreamStateManager:
+    """
+    Class used to track the current stream context we are in and identify
+    any used tensors as external (created outside the stream context) or
+    internal (created within the stream context). We use this information to
+    ensure the fork op is dependent on any external tensors, so that it will not
+    be reordered before them or after ops which use the externally created tensors.
+    Analagously, we use the internal tensors to ensure that the join op is not
+    reordered before any internally created tensors or after ops which use the
+    internally created tensors.
+
+    To actually implement this, we have a stack of stream states which track any external tensors that
+    have not yet been seen within the stream context and any tensors created within the stream context.
+    Once we exit the stream context we populate the args of fork with all external tensors which have been used,
+    and join with any internal tensors that were created.
+    """
+
+    def __init__(self) -> None:
+        self.state_stack: deque[StreamState] = deque()
+
+    def in_stream_context(self) -> bool:
+        return bool(self.state_stack)
+
+    def track_internal_node(self, node: Node) -> None:
+        # if we are in a stream context, all created nodes are internal
+        if self.in_stream_context():
+            # if we have seen the node before, it is an internal
+            self._cur_state().internal_nodes.add(node)
+
+    def track_node(self, node: Node) -> None:
+        # If we are in a stream context, args of ops may be external
+        if self.in_stream_context() and node not in self._internal_nodes():
+            self._external_nodes().add(node)
+
+    def push_stream_state(self, node: Node) -> None:
+        self.state_stack.append(StreamState(node, OrderedSet(), OrderedSet()))
+
+    def pop_stream_state(self) -> StreamState:
+        assert self.state_stack, "No stream state to pop"
+        return self.state_stack.pop()
+
+    def _cur_state(self) -> StreamState:
+        assert self.state_stack, "No stream state to pop"
+        return self.state_stack[-1]
+
+    def _internal_nodes(self) -> OrderedSet[Node]:
+        return self._cur_state().internal_nodes
+
+    def _external_nodes(self) -> OrderedSet[Node]:
+        return self._cur_state().external_nodes
+
+
+stream_state_mgr = StreamStateManager()
 
 
 class StreamVariable(VariableTracker):
