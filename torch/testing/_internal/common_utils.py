@@ -115,7 +115,6 @@ CI_FUNCTORCH_ROOT = ""
 CI_PT_ROOT = ""
 CI_TEST_PREFIX = ""
 DISABLED_TESTS_FILE = ""
-GRAPH_EXECUTOR : Optional[ProfilingMode] = None
 LOG_SUFFIX = ""
 PYTEST_SINGLE_TEST = ""
 REPEAT_COUNT = 0
@@ -877,6 +876,10 @@ def cppProfilingFlagsToProfilingMode():
             return ProfilingMode.SIMPLE
     else:
         return ProfilingMode.LEGACY
+
+# Set default value to for the internal test runner which imports files/modules
+# directly
+GRAPH_EXECUTOR : ProfilingMode = cppProfilingFlagsToProfilingMode()
 
 @contextmanager
 def enable_profiling_mode_for_profiling_tests():
