@@ -42,7 +42,7 @@ int main() {{
 
 def _compile_and_extract_layout(
     test_file: str, version_name: str, pytorch_root: str, temp_dir: str
-) -> os.strerror:
+) -> str:
     """Compile the test file and extract layout information"""
     layout_file = os.path.join(temp_dir, f"layout_{version_name}.txt")
 
@@ -82,7 +82,17 @@ def _compile_and_extract_layout(
         test_file,
     ]
 
-    result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+    except subprocess.CalledProcessError as e:
+        print(f"Command failed: {' '.join(cmd)}")
+        print(f"Return code: {e.returncode}")
+        if e.stdout:
+            print(f"STDOUT:\n{e.stdout}")
+        if e.stderr:
+            print(f"STDERR:\n{e.stderr}")
+        raise
+
     combined_output = result.stdout + "\n" + result.stderr
     with open(layout_file, "w") as f:
         f.write(combined_output)

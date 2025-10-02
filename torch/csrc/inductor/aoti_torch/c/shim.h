@@ -515,14 +515,6 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_library_impl(
     const char* name,
     void (*fn)(StableIValue*, uint64_t, uint64_t));
 
-// Version-aware variant of aoti_torch_library_impl that takes an
-// extension_build_version parameter for backward compatibility
-AOTI_TORCH_EXPORT AOTITorchError aoti_torch_library_impl_v2(
-    TorchLibraryHandle self,
-    const char* name,
-    void (*fn)(StableIValue*, uint64_t, uint64_t),
-    uint64_t extension_build_version);
-
 // stable corollary to torch::Library method m.def(), should be
 // called from StableLibrary
 AOTI_TORCH_EXPORT AOTITorchError
@@ -544,17 +536,6 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_call_dispatcher(
     const char* opName,
     const char* overloadName,
     StableIValue* stack);
-
-// Has the same semantic as aoti_torch_call_dispatcher, but takes an
-// additional argument for the extension build version. This is
-// needed for backward compatibility when calling native functions via
-// the dispatcher. The caller should pass in its build version (not target
-// version).
-AOTI_TORCH_EXPORT AOTITorchError aoti_torch_call_dispatcher_v2(
-    const char* opName,
-    const char* overloadName,
-    StableIValue* stack,
-    uint64_t extension_build_version);
 
 // Device-generic guard for managing device context
 struct DeviceGuardOpaque;
