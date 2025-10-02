@@ -7,10 +7,10 @@ import itertools
 import math
 import operator
 import warnings
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from enum import Enum
 from functools import partial, reduce, singledispatch, wraps
-from typing import Any, Callable, cast, Optional, overload, Union
+from typing import Any, cast, Optional, overload, Union
 
 import torch
 import torch._prims as prims

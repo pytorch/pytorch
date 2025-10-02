@@ -1,6 +1,6 @@
 import math
-from collections.abc import Sequence
-from typing import Any, Callable, Optional, Union
+from collections.abc import Callable, Sequence
+from typing import Any, Optional, Union
 
 import torch
 import torch.utils._pytree as pytree
