@@ -276,7 +276,7 @@ class FloorDiv(sympy.Function):
                 quotient_is_integer = None
                 if isinstance(quotient, sympy.Mul) and TorchVersion(
                     sympy.__version__
-                ) < TorchVersion("1.14.0"):
+                ) < TorchVersion("1.15.0"):
                     rationals = quotient.atoms(sympy.Rational)
                     all_rationals_ints = all(r.q == 1 for r in rationals)
                     quotient_is_integer = quotient.is_integer and all_rationals_ints
