@@ -908,6 +908,7 @@ def _compile_fx_inner(
             if key_info is not None:
                 key, debug_lines = key_info
                 log.debug("FX cache key generated: %s", key)
+                breakpoint()
                 if remote:
                     remote_cache = FxGraphCache.get_remote_cache()
                     log.debug("Using remote FX cache")
@@ -1015,6 +1016,7 @@ def _compile_fx_inner(
             assert key_info is not None
             (cache_key, debug_lines) = key_info
             log.debug("FX cache hit with key: %s", cache_key)
+            breakpoint()
             mb_compiled_graph._fx_graph_cache_key = cache_key
             mb_compiled_graph._fx_graph_cache_debug_lines = debug_lines
 
