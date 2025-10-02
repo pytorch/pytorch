@@ -663,7 +663,7 @@ class TritonPrinter(PythonPrinter):
             # sympy considers 0.0 to be integer, but triton doesn't.
             # this workaround prints the float as an integer
             ret = str(int(expr))
-        elif (config.is_fbcode() and torch.version.hip):
+        elif config.is_fbcode() and torch.version.hip:
             ret = f"{expr}"
         else:
             ret = f"tl.full([], {expr}, tl.float64)"
