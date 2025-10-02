@@ -59,7 +59,7 @@ namespace {
 
 // NOTE: conjugation is handled seperately
 // Strategies for mapping an input tensor to a tensor
-// with a memory layout which complies with cuBlas.
+// with a memory layout which complies with cuBLAS (col-major).
 enum class CublasPrepTransStrategy : int {
   N = 0, // no transposition, no copy
   N_OWNED = 1, // make a col-major copy, no transposition
