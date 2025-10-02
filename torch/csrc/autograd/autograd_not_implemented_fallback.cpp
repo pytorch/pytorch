@@ -478,6 +478,40 @@ torch::CppFunction autogradNotImplementedFallback() {
       &autogradNotImplementedFallbackImpl>();
 }
 
+struct GenericViewFunc : public ViewFunc {
+  GenericViewFunc(
+      torch::jit::Stack non_tensor_stack,
+      size_t aliased_input_idx_val,
+      c10::OperatorHandle op)
+      : non_tensor_stack_(non_tensor_stack),
+        aliased_input_idx_val_(aliased_input_idx_val),
+        op_(op) {}
+
+  at::Tensor operator()(const at::Tensor& new_base) const override {
+    torch::jit::Stack local_stack = non_tensor_stack_;
+    auto hmmm = c10::IValue(new_base);
+    local_stack.at(aliased_input_idx_val_) = hmmm;
+    op_.callBoxed(local_stack);
+    auto& result = local_stack[local_stack.size() - 1];
+    TORCH_CHECK(
+        result.isTensor(),
+        "ADInplaceOrView fallback view replay did not return a Tensor");
+    return result.toTensor();
+  }
+
+  std::unique_ptr<ViewFunc> clone_and_set(
+      std::optional<std::vector<c10::SymInt>> = std::nullopt,
+      std::optional<std::vector<at::Tensor>> = std::nullopt) const override {
+    return std::make_unique<GenericViewFunc>(
+        non_tensor_stack_, aliased_input_idx_val_, op_);
+  }
+
+ private:
+  torch::jit::Stack non_tensor_stack_;
+  size_t aliased_input_idx_val_;
+  c10::OperatorHandle op_;
+};
+
 static void autogradNotImplementedInplaceOrViewFallbackImpl(
     const c10::OperatorHandle& op,
     c10::DispatchKeySet dispatch_keys,
@@ -609,12 +643,36 @@ static void autogradNotImplementedInplaceOrViewFallbackImpl(
       stack->at(stack->size() - num_returns + aliased_output_idx) = result;
     } else {
       TORCH_CHECK(aliased_output_iv.isTensor());
+      TORCH_CHECK(
+          num_returns == 1,
+          "ADInplaceOrView fallback only support single output view functions");
+      TORCH_CHECK(
+          aliased_input_idx.has_value(),
+          "ADInplaceOrView fallback doesn't have an aliased input index");
+      auto aliased_input_idx_val = aliased_input_idx.value();
+
+      torch::jit::Stack non_tensor_stack;
+      non_tensor_stack.reserve(num_arguments);
+      for (const auto i : c10::irange(num_arguments)) {
+        if ((*stack)[stack_start + i].isTensor()) {
+          non_tensor_stack.push_back({});
+          TORCH_CHECK(
+              i == aliased_input_idx_val,
+              "Internal error in ADInplaceOrView fallback, unknown Tensor in the stack");
+        } else {
+          non_tensor_stack.push_back((*stack)[stack_start + i]);
+        }
+      }
+
+      auto view_func = std::make_unique<GenericViewFunc>(
+          non_tensor_stack, aliased_input_idx_val, op);
+
       auto result = as_view(
           /* base=*/aliased_input,
           /* tensor=*/std::move(aliased_output_iv).toTensor(),
           /* is_bw_differentiable=*/true,
           /* is_fw_differentiable=*/true,
-          /* view_func=*/std::move(erroring_view_func),
+          /* view_func=*/std::move(view_func),
           /* rev_view_func=*/erroring_rev_view_func,
           /* creation_meta=*/
           InferenceMode::is_enabled()

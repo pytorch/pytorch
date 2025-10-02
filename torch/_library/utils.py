@@ -74,7 +74,7 @@ def is_builtin(op: OpOverload) -> bool:
     return op.namespace in {"aten", "prim", "prims"}
 
 
-def is_functional_schema(schema: Any) -> bool:
+def is_functional_schema(schema: Any, *, view_ok: bool = False) -> bool:
     """Check if the schema is functional.
 
     An operator is functional if:
@@ -90,8 +90,16 @@ def is_functional_schema(schema: Any) -> bool:
         is_non_mutating_view = len(rets) > 0 and any(
             r.alias_info is not None and not r.alias_info.is_write for r in rets
         )
+        num_tensor_inputs = 0
+        for arg in schema.arguments:
+            if isinstance(arg.type, torch.TensorType):
+                num_tensor_inputs += 1
+        num_tensor_outputs = 0
+        for ret in schema.returns:
+            if isinstance(ret.type, torch.TensorType):
+                num_tensor_outputs += 1
         if is_non_mutating_view:
-            return False
+            return num_tensor_inputs == 1 and num_tensor_outputs == 1
         if not schema.returns:
             return False
         return True
