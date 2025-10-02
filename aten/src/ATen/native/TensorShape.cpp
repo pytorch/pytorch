@@ -2058,7 +2058,7 @@ Tensor _reshape_copy_symint(
     TORCH_CHECK(0, "_reshape_copy not implemented for mkldnn tensors");
   }
 
-  if (self.is_contiguous()) {
+  if (self.is_contiguous_or_false()) {
     return self.view_symint(shape).clone(at::MemoryFormat::Contiguous);
   } else {
     return at::_unsafe_view_symint(
