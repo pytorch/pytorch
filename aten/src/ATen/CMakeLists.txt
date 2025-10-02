@@ -317,10 +317,20 @@ IF(USE_FBGEMM_GENAI)
         -greedy-reverse-local-assignment=1
         -fhip-new-launch-api)
 
+      # Only compile for gfx942 for now.
+      # This is rather hacky, I could not figure out a clean solution :(
+      set(HIP_CLANG_FLAGS_ORIGINAL ${HIP_CLANG_FLAGS})
+      string(REGEX REPLACE "--offload-arch=[^ ]*" "" FILTERED_HIP_CLANG_FLAGS "${HIP_CLANG_FLAGS}")
+      if("gfx942" IN_LIST PYTORCH_ROCM_ARCH)
+        list(APPEND FILTERED_HIP_CLANG_FLAGS --offload-arch=gfx942;)
+      endif()
+      set(HIP_CLANG_FLAGS ${FILTERED_HIP_CLANG_FLAGS})
+
       hip_add_library(
         fbgemm_genai STATIC
         ${fbgemm_genai_native_rocm_hip}
         HIPCC_OPTIONS ${HIP_HCC_FLAGS} ${FBGEMM_GENAI_EXTRA_HIPCC_FLAGS})
+      set(HIP_CLANG_FLAGS ${HIP_CLANG_FLAGS_ORIGINAL})
       set_target_properties(fbgemm_genai PROPERTIES POSITION_INDEPENDENT_CODE ON)
       target_compile_definitions(fbgemm_genai PRIVATE FBGEMM_GENAI_NO_EXTENDED_SHAPES)
 
@@ -595,6 +605,11 @@ if(UNIX)
   if(HAVE_MALLOC_USABLE_SIZE)
     add_definitions(-DHAVE_MALLOC_USABLE_SIZE=1)
   endif(HAVE_MALLOC_USABLE_SIZE)
+  set(CMAKE_EXTRA_INCLUDE_FILES "fcntl.h")
+  CHECK_FUNCTION_EXISTS(posix_fallocate HAVE_POSIX_FALLOCATE)
+  if(HAVE_POSIX_FALLOCATE)
+    add_definitions(-DHAVE_POSIX_FALLOCATE=1)
+  endif(HAVE_POSIX_FALLOCATE)
 endif(UNIX)
 
 ADD_DEFINITIONS(-DUSE_EXTERNAL_MZCRC)

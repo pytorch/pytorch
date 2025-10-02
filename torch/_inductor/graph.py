@@ -44,6 +44,7 @@ from torch.fx.experimental.symbolic_shapes import (
     SymTypes,
 )
 from torch.fx.node import Node
+from torch.fx.passes.reinplace import _is_view_op
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.numbers import int_oo
@@ -67,6 +68,7 @@ from .exc import (
 )
 from .fx_utils import count_flops_fx
 from .ir import (
+    assign_origin_node,
     Constant,
     DonatedBuffer,
     FixedLayout,
@@ -203,6 +205,30 @@ def get_user_visible_output_strides(g: Graph) -> dict[Node, tuple[int, ...]]:
     return ret
 
 
+def extend_user_visible_output_strides(
+    user_visible_outputs: dict[Node, tuple[int, ...]],
+) -> dict[Node, object]:
+    """
+    Extend user_visible_output_strides to include view ops that lead to user-visible outputs.
+    """
+    result: dict[Node, object] = {**user_visible_outputs}
+    queue = [*result.keys()]
+    visited = OrderedSet([*queue])
+    while queue:
+        current = queue.pop()
+        if (
+            _is_view_op(current.target)
+            and current.args
+            and isinstance(current.args[0], torch.fx.Node)
+        ):
+            base = current.args[0]
+            if base not in visited:
+                result.setdefault(base, None)
+                visited.add(base)
+                queue.append(base)
+    return result
+
+
 def mark_nodes_dislike_padding(
     g: Graph, user_visible_output_strides: dict[Node, tuple[int, ...]]
 ) -> None:
@@ -216,6 +242,10 @@ def mark_nodes_dislike_padding(
     """
     if not config.comprehensive_padding:
         return
+
+    extended_user_visible_nodes = extend_user_visible_output_strides(
+        user_visible_output_strides
+    )
     ops_dislike_padding = OrderedSet(
         [
             aten.convolution,
@@ -284,7 +314,7 @@ def mark_nodes_dislike_padding(
                 if prior_op not in ops_like_padding:
                     prior.meta["dislike_padding"] = True
         # We only want to mark output nodes. So, move it after the above prior nodes process.
-        if not config.pad_outputs and cur in user_visible_output_strides:
+        if not config.pad_outputs and cur in extended_user_visible_nodes:
             cur.meta["dislike_padding"] = True
 
 
@@ -822,12 +852,17 @@ class GraphLowering(torch.fx.Interpreter):
         With rule 2, we makes sure all the tensors in the chain uses channels last layout. So both copies
         can be saved.
         """
+        last_conv = None
+        nodes_cannot_propagate = [torch.ops.aten.bmm.default]
         output_set = OrderedSet[Node]()
         for n in reversed(self.module.graph.nodes):  # type: ignore[arg-type, union-attr]
             if n.target == torch.ops.aten.convolution.default:
                 output_set.add(n)
+                if last_conv is None:
+                    last_conv = n
                 continue
-
+            if n.target in nodes_cannot_propagate:
+                continue
             for user in n.users:
                 if user in output_set:
                     output_set.add(n)
@@ -848,8 +883,14 @@ class GraphLowering(torch.fx.Interpreter):
         # - res2net50_14w_8s
         # - sebotnet33ts_256
         for n in self.module.graph.nodes:  # type: ignore[union-attr]
+            # layout propagation ends at last conv node, which will benefit vison transformers.
+            if last_conv is not None and n == last_conv:
+                break
             if n in output_set:
-                output_set.update(n.users)
+                for user in n.users:
+                    if user.target in nodes_cannot_propagate:
+                        continue
+                    output_set.add(user)
 
         return output_set
 
@@ -1794,31 +1835,7 @@ class GraphLowering(torch.fx.Interpreter):
                     if curr.has_large_inner_fn(threshold=100):
                         result.realize()
 
-        # This is not complete, but it doesn't have to be: origin_node
-        # tracking is best effort.  The logic here critically relies on direct
-        # TensorBox -> StorageBox denoting a non-view; we don't bother trying
-        # to get views to work.  Feel free to add any extra cases as needed.
-        #
-        # Note: we can't YOLO tree_map over this result, because if there are
-        # buffers or a view involved, we might not be able to validly assign
-        # the origin_node here.
-        if isinstance(result, TensorBox) and isinstance(result.data, ir.StorageBox):
-            if isinstance(result.data.data, ir.Loops):
-                result.data.data._post_init_setattr("origin_node", n)
-            elif isinstance(result.data.data, ir.Buffer):
-                result.data.data._post_init_setattr("origin_node", n)
-                if isinstance(result.data.data, ir.ComputedBuffer) and isinstance(
-                    result.data.data.data, ir.Loops
-                ):
-                    result.data.data.data._post_init_setattr("origin_node", n)
-                # Not really multi-output, can straightforwardly recurse in
-                elif (
-                    isinstance(result.data.data, ir.MultiOutput)
-                    and not result.data.data.indices
-                ):
-                    if isinstance(result.data.data.inputs[0], ir.Buffer):
-                        result.data.data.inputs[0]._post_init_setattr("origin_node", n)
-
+        assign_origin_node(result, n)
         self.register_users_of(result)
 
         new_unbacked_defs = OrderedSet[sympy.Symbol]()
@@ -1829,7 +1846,7 @@ class GraphLowering(torch.fx.Interpreter):
 
         shape_env = V.graph.sizevars.shape_env
 
-        # An input can be unbacked symint i.e.: when mark_unabcked is used.
+        # An input can be unbacked symint i.e.: when mark_unbacked is used.
         # in that case add it to new_unbacked_defs.
         if (
             n.op == "placeholder"
