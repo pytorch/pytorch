@@ -36,6 +36,7 @@ def check_accuracy(actual_csv, expected_csv, expected_filename):
             {
                 "alexnet",
                 "cait_m36_384",
+                "crossvit_9_240",
                 "dla102",
                 "demucs",
                 "densenet121",
@@ -43,6 +44,9 @@ def check_accuracy(actual_csv, expected_csv, expected_filename):
                 "doctr_det_predictor",
                 "doctr_reco_predictor",
                 "dpn107",
+                "eca_halonext26ts",
+                "fbnetv3_b",
+                "functorch_dp_cifar10",
                 "hf_BigBird",
                 "hf_Longformer",
                 "hf_Reformer",
@@ -74,6 +78,7 @@ def check_accuracy(actual_csv, expected_csv, expected_filename):
                 "timm_vovnet",
                 "torchrec_dlrm",
                 "vgg16",
+                "vision_maskrcnn",
                 # LLM
                 "meta-llama/Llama-3.2-1B",
                 "google/gemma-2-2b",
