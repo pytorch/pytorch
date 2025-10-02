@@ -9,6 +9,7 @@ import unittest
 from parameterized import parameterized
 
 import torch
+from torch._environment import is_fbcode
 import torch._dynamo as torchdynamo
 from torch._C._nativert import PyModelRunner
 from torch._dynamo.test_case import TestCase
@@ -197,6 +198,7 @@ def make_dynamic_cls(cls, strict=False):
 
 @unittest.skipIf(IS_WINDOWS, "Windows isn't supported for this case")
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
+@unittest.skipIf(not is_fbcode(), "FBcode only for now")
 class TestNativeRT(TestCase):
     @staticmethod
     def get_module():
@@ -342,9 +344,7 @@ class TestNativeRT(TestCase):
             pathlib.Path(filename).unlink(missing_ok=True)
 
 
-tests = [
-    test_export.TestExport,
-]
+tests = [ test_export.TestExport, ] if is_fbcode() else []
 for test in tests:
     make_dynamic_cls(test, strict=True)
     make_dynamic_cls(test, strict=False)
