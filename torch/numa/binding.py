@@ -1,12 +1,12 @@
 import os
 import traceback
 from collections import defaultdict
-from collections.abc import Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from enum import Enum
 from logging import getLogger
-from typing import Callable, Optional, TypeVar
+from typing import Optional, TypeVar
 
 import torch
 from torch._utils_internal import signpost_event

@@ -5,12 +5,12 @@ import itertools
 import numbers
 import operator
 import sys
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from contextlib import nullcontext
 from enum import Enum
 from functools import partial, reduce
 from itertools import chain, product
-from typing import Any, Callable, cast, Optional, Union
+from typing import Any, cast, Optional, Union
 
 import torch
 import torch._meta_registrations

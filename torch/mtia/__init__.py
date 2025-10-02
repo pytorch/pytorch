@@ -5,7 +5,8 @@ This package enables an interface for accessing MTIA backend in python
 
 import threading
 import warnings
-from typing import Any, Callable, Optional, Union
+from collections.abc import Callable
+from typing import Any, Optional, Union
 
 import torch
 from torch import device as _device, Tensor

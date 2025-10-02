@@ -1,9 +1,9 @@
 # mypy: allow-untyped-defs
 import itertools
 import unittest.mock
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from typing import Callable, TypeVar, Union
+from typing import TypeVar, Union
 from typing_extensions import ParamSpec
 
 import torch

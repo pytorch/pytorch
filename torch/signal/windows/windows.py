@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from math import sqrt
-from typing import Callable, Optional, TypeVar
+from typing import Optional, TypeVar
 
 import torch
 from torch import Tensor

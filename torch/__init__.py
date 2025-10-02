@@ -22,9 +22,9 @@ import platform
 import sys
 import textwrap
 import threading
+from collections.abc import Callable as _Callable
 from typing import (
     Any as _Any,
-    Callable as _Callable,
     get_origin as _get_origin,
     Optional as _Optional,
     overload as _overload,

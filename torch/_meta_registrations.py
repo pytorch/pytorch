@@ -1,9 +1,9 @@
 # mypy: allow-untyped-defs
 import math
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from enum import Enum
 from functools import wraps
-from typing import Callable, Optional, TypeVar, Union
+from typing import Optional, TypeVar, Union
 from typing_extensions import ParamSpec
 
 import torch
