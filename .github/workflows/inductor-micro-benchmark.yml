@@ -35,6 +35,8 @@ jobs:
     needs:
       - get-default-label-prefix
     with:
+      # More memory is needed to build torchao
+      runner: linux.2xlarge.memory
       runner_prefix: "${{ needs.get-default-label-prefix.outputs.label-type }}"
       build-environment: linux-jammy-cuda12.8-py3.10-gcc9-sm80
       docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc9-inductor-benchmarks
@@ -43,6 +45,7 @@ jobs:
         { include: [
           { config: "inductor-micro-benchmark", shard: 1, num_shards: 1, runner: "linux.aws.a100", owners: ["oncall:pt2"] },
         ]}
+      build-additional-packages: "vision audio fbgemm torchao"
     secrets: inherit
 
   test:
