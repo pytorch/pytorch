@@ -798,23 +798,29 @@ def _maybe_record_pointwise_barrier(
     func: object, proxy_mode: ProxyTorchDispatchMode
 ) -> None:
     """
-    Records pointwise operators in user program (non decomposed) that were output in fp16/bf16
+    Records operators whose tensor outputs or inputs are fp16/bf16 so downstream pointwise code can
+    emulate eager's rounding behavior when emulate_precision_casts is enabled.
     """
     if proxy_mode.decomp_layers or not proxy_mode.emulate_precision_casts:
         return
 
-    if (
-        not isinstance(func, torch._ops.OpOverload)
-        or torch.Tag.pointwise not in func.tags
-    ):
+    if not isinstance(func, torch._ops.OpOverload):
         return
 
     last_node = next(iter(reversed(proxy_mode.tracer.graph.nodes)))
     t = last_node.meta.get("val")
-    if not isinstance(t, torch.Tensor) or t.dtype not in (
-        torch.bfloat16,
-        torch.float16,
-    ):
+    low_pr_fp = (torch.bfloat16, torch.float16)
+
+    output_low_precision = isinstance(t, torch.Tensor) and t.dtype in low_pr_fp
+
+    if not output_low_precision:
+        for input_node in last_node.all_input_nodes:
+            val = input_node.meta.get("val") if hasattr(input_node, "meta") else None
+            if isinstance(val, torch.Tensor) and val.dtype in low_pr_fp:
+                output_low_precision = True
+                break
+
+    if not output_low_precision:
         return
 
     last_node.meta["low_precision_pointwise_barrier"] = True
@@ -1911,14 +1917,12 @@ class _ModuleStackTracer(PythonKeyTracer):
         # In non-strict export, we don't have dynamo's side effect
         # tracking logic which makes some cases hard to detect.
         # In general, our detecting strategy is:
-        #  (1) We do gc.collect() before export and get the alive fake tensors
-        #  (2) We dump the proxy to fake tensor map from make_fx tracer (_FAKE_TENSOR_ID_TO_PROXY_MAP_FOR_EXPORT)
-        #  (3) We query gc again to get alive fake tensors
-        #  (4) We take the delta between (1) and (3)
-        #  (5) Filter out fake tensors that are:
+        #  (1) We instrument fake tensor creation to log all the fake tensors created during export.
+        #  (2) We dump the proxy to fake tensor map from make_fx tracer (_FAKE_TENSOR_ID_TO_PROXY_MAP_FOR_EXPORT))
+        #  (3) Filter out fake tensors that are logged during (1):
         #      (1) Associated with TrackedFake (input tracking thing in symbolic_shapes)
         #      (2) Associated with gm.meta
-        #  (6) Do ID match with the proxies
+        #  (4) Do ID match with the proxies
 
         global _FAKE_TENSOR_ID_TO_PROXY_MAP_FOR_EXPORT
         _FAKE_TENSOR_ID_TO_PROXY_MAP_FOR_EXPORT.clear()
@@ -2020,7 +2024,7 @@ class _ModuleStackTracer(PythonKeyTracer):
 
         # nn_module_stack
         if node.op not in ["placeholder", "output"]:
-            if "nn_module_stack" not in node.meta:
+            if node.meta.get("nn_module_stack") is None:
                 node.meta["nn_module_stack"] = self.module_stack.copy()
             # convert nn_module_stack from Dict[key, (FQN, class)] -> Dict[str, Tuple[str, str]]
             for key, (fqn, mod_cls) in node.meta["nn_module_stack"].items():
@@ -2345,7 +2349,6 @@ class _MakefxTracer:
 
             insert_deferred_runtime_asserts(t, fake_mode.shape_env, "reenter_make_fx")
             t.recompile()
-
         # TODO: kind of a bad way to do it, should maybe figure out a better way
         if self.tracing_mode == "symbolic":
             assert self.fake_tensor_mode is not None

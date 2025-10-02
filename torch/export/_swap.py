@@ -163,7 +163,7 @@ def _remove_extraneous_pytrees(gm: torch.fx.GraphModule) -> None:
     """
 
     for node in gm.graph.nodes:
-        if node.op == "call_module":
+        if node.op == "call_module" and node.target != "_guards_fn":
             _try_remove_connecting_pytrees(node)
 
     gm.graph.eliminate_dead_code()

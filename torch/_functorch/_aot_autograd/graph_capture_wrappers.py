@@ -806,7 +806,7 @@ def create_functionalized_fn(
                 # Here, we perform extra checks for primals that were mutated in the **backward**
                 # We're doing the checks here instead of doing them with the rest of the input mutation handling because:
                 # - We need to detect inputs that were mutated in the backward **separately** from mutations that happened
-                #   during the forward, because the handling is different: some input mutations from the the forward
+                #   during the forward, because the handling is different: some input mutations from the forward
                 #   can be only handled in a fw-only runtime epilogue, and in theory if we wanted to handle those same
                 #   types of mutations in the backward we would need a bw-only runtime epilogue.
                 # - We could in theory have our analysis pass differentiate mutations in the fw from mutations in

@@ -135,7 +135,7 @@ triton_grouped_mm_source = r"""
 {{def_kernel("a_ptr", "b_ptr")}}
 {%- endif %}
 {%- endif %}
-    tidx = tl.program_id(0)
+    tidx = tl.program_id(0).to(INDEX_DTYPE)
 
 {%- set M_IS_VARYING = A_IS_2D and not B_IS_2D %}
 {%- set N_IS_VARYING = not A_IS_2D and B_IS_2D %}
@@ -389,9 +389,9 @@ triton_grouped_mm_source = r"""
 {%- endif %}
                 mask = (offs_am[:, None] < m_size) & (offs_bn[None, :] < n_size)
 {%- if M_IS_VARYING or N_IS_VARYING %}
-                {{store_output(("idx_m", "idx_n"), "c", "mask", indent_width=16)}}
+                {{store_output(("idx_m", "idx_n"), "c", "mask", indent_width=16, val_shape=("BLOCK_M", "BLOCK_N"))}}
 {%- else %}
-                {{store_output(("g", "idx_m", "idx_n"), "c", "mask", indent_width=16)}}
+                {{store_output(("g", "idx_m", "idx_n"), "c", "mask", indent_width=16, val_shape=("BLOCK_M", "BLOCK_N"))}}
 {%- endif %}
                 tidx += NUM_SMS
 
@@ -469,7 +469,7 @@ def grouped_mm_args(
 aten__grouped_mm = ExternKernelChoice(
     torch._grouped_mm,
     "at::_grouped_mm",
-    op_overload=aten._grouped_mm,
+    op_overload=aten._grouped_mm.default,
     has_out_variant=False,
 )
 
@@ -477,7 +477,7 @@ aten__grouped_mm = ExternKernelChoice(
 aten__scaled_grouped_mm = ExternKernelChoice(
     torch._scaled_grouped_mm,
     "at::_scaled_grouped_mm",
-    op_overload=aten._scaled_grouped_mm,
+    op_overload=aten._scaled_grouped_mm.default,
     has_out_variant=False,
 )
 
@@ -491,7 +491,7 @@ def can_use_triton_kernel(
 ) -> bool:
     if not (
         torch.cuda.is_available()
-        and torch.cuda.get_device_capability() >= (9, 0)
+        and torch.cuda.get_device_capability() == (9, 0)
         and not torch.version.hip
     ):
         return False
@@ -734,6 +734,9 @@ def tuned_scaled_grouped_mm(
     layout: Optional[Layout] = None,
 ) -> TensorBox:
     """Auto-tuning for _scaled_grouped_mm() operator."""
+
+    # matching _scaled_grouped_mm_cuda Blas.cpp implementation
+    out_dtype = out_dtype or torch.bfloat16
 
     return _tuned_grouped_mm_common(
         "aten._scaled_grouped_mm.default",
