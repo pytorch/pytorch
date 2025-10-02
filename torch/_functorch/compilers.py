@@ -5,9 +5,10 @@ import logging
 import os
 import pickle
 import random
+from collections.abc import Callable
 from contextlib import contextmanager
 from functools import partial
-from typing import Callable, Union
+from typing import Union
 
 import sympy
 
