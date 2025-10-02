@@ -123,7 +123,7 @@ b2b_gemm_left_template = TritonTemplate(
     idx_p = offs_p[None, :]
     out_mask = (idx_m < M) & (idx_p < P)
 
-    {{store_output(("idx_m", "idx_p"), "acc", "out_mask")}}
+    {{store_output(("idx_m", "idx_p"), "acc", "out_mask", val_shape=("BLOCK_SIZE_M", "BLOCK_SIZE_P"))}}
 """,
 )
 
@@ -205,7 +205,7 @@ b2b_gemm_right_template = TritonTemplate(
     idx_p = offs_p[None, :]
     out_mask = (idx_m < M) & (idx_p < P)
 
-    {{store_output(("idx_m", "idx_p"), "acc", "out_mask")}}
+    {{store_output(("idx_m", "idx_p"), "acc", "out_mask", val_shape=("BLOCK_SIZE_M", "BLOCK_SIZE_P"))}}
 """,
 )
 

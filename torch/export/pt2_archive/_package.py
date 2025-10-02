@@ -43,6 +43,7 @@ from torch.export.pt2_archive.constants import (
     CONSTANTS_CONFIG_FILENAME_FORMAT,
     CONSTANTS_DIR,
     CUSTOM_OBJ_FILENAME_PREFIX,
+    EXECUTORCH_DIR,
     EXTRA_DIR,
     MODELS_DIR,
     MODELS_FILENAME_FORMAT,
@@ -345,7 +346,7 @@ def _get_raw_tensor_bytes(value: torch.Tensor) -> bytes:
     if _is_fake_tensor(value):
         value_bytes = b""
     elif value.data_ptr():
-        cpu_tensor = value.cpu().contiguous()
+        cpu_tensor = value.cpu()
         value_untyped_storage = cpu_tensor.untyped_storage()
         # we store the raw bytes the untyped storage. Tensor metadata is stored separately
         value_bytes = bytes(
@@ -529,6 +530,16 @@ def _package_extra_files(
         archive_writer.write_string(f"{EXTRA_DIR}{extra_file_name}", content)
 
 
+def _package_executorch_files(
+    archive_writer: PT2ArchiveWriter, executorch_files: Optional[dict[str, bytes]]
+) -> None:
+    if executorch_files is None:
+        return
+
+    for file_name, content in executorch_files.items():
+        archive_writer.write_bytes(f"{EXECUTORCH_DIR}{file_name}", content)
+
+
 def package_pt2(
     f: FileLike,
     *,
@@ -539,6 +550,7 @@ def package_pt2(
     extra_files: Optional[dict[str, Any]] = None,
     opset_version: Optional[dict[str, int]] = None,
     pickle_protocol: int = DEFAULT_PICKLE_PROTOCOL,
+    executorch_files: Optional[dict[str, bytes]] = None,
 ) -> FileLike:
     r"""
     Saves the artifacts to a PT2Archive format. The artifact can then be loaded
@@ -568,6 +580,9 @@ def package_pt2(
          to the version of this opset
 
         pickle_protocol: can be specified to override the default protocol
+
+        executorch_files (Optional[dict[str, bytes]]): Optional executorch
+         artifacts to save.
 
     """
     assert not (
@@ -602,6 +617,7 @@ def package_pt2(
             pickle_protocol=pickle_protocol,
         )
         _package_extra_files(archive_writer, extra_files)
+        _package_executorch_files(archive_writer, executorch_files)
 
     if isinstance(f, (io.IOBase, IO)):
         f.seek(0)
@@ -899,6 +915,44 @@ def _load_extra_files(
     return extra_file_contents
 
 
+def _load_aoti(
+    file: str,
+    model_name: str,
+    run_single_threaded: bool,
+    num_runners: int,
+    device_idx: int,
+) -> AOTICompiledModel:
+    loaded_metadata = torch._C._aoti.AOTIModelPackageLoader.load_metadata_from_package(  # type: ignore[attr-defined]
+        file, model_name
+    )
+
+    device = loaded_metadata["AOTI_DEVICE_KEY"]
+    current_device_info = torch._inductor.codecache.get_device_information(device)
+
+    for k, v in current_device_info.items():
+        if k in loaded_metadata:
+            if v != loaded_metadata[k]:
+                logger.warning(
+                    "Device information mismatch for %s: %s vs %s. "
+                    "This could cause some issues when loading the AOTInductor compiled artifacts.",
+                    k,
+                    v,
+                    loaded_metadata[k],
+                )
+
+    aoti_compiled_model = AOTICompiledModel(
+        torch._C._aoti.AOTIModelPackageLoader(
+            file,
+            model_name,
+            run_single_threaded,
+            num_runners,
+            device_idx,
+        )
+    )
+
+    return aoti_compiled_model
+
+
 def load_pt2(
     f: FileLike,
     *,
@@ -1001,14 +1055,12 @@ def load_pt2(
                 logger.debug("Writing buffer to tmp file located at %s.", tf.name)
 
                 aoti_runners = {
-                    model_name: AOTICompiledModel(
-                        torch._C._aoti.AOTIModelPackageLoader(
-                            tf.name,
-                            model_name,
-                            run_single_threaded,
-                            num_runners,
-                            device_index,
-                        )
+                    model_name: _load_aoti(
+                        tf.name,
+                        model_name,
+                        run_single_threaded,
+                        num_runners,
+                        device_index,
                     )
                     for model_name in aoti_model_names
                 }
@@ -1016,10 +1068,8 @@ def load_pt2(
             aoti_runners = {}
     else:
         aoti_runners = {
-            model_name: AOTICompiledModel(
-                torch._C._aoti.AOTIModelPackageLoader(
-                    f, model_name, run_single_threaded, num_runners, device_index
-                )
+            model_name: _load_aoti(
+                f, model_name, run_single_threaded, num_runners, device_index
             )
             for model_name in aoti_model_names
         }

@@ -643,7 +643,7 @@ def nested_compile_region(fn=None):
     return _mark_compile_region(fn)
 
 
-def load_compiled_function(file: io.IOBase):
+def load_compiled_function(file: io.IOBase) -> Callable[..., Any]:
     """
     Load an aot-compiled function from a file.
 
@@ -657,7 +657,7 @@ def load_compiled_function(file: io.IOBase):
     Returns:
         A torch-compiled function with compilation preloaded from disk.
     """
-    from torch._dynamo.aot_compile import CompileArtifacts
+    from torch._dynamo.aot_compile import AOTCompiledFunction
 
     data = file.read()
-    return CompileArtifacts.deserialize(data).compiled_function()
+    return AOTCompiledFunction.deserialize(data)

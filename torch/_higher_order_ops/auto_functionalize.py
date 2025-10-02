@@ -508,7 +508,7 @@ def do_auto_functionalize(
             normalized_kwargs[arg.name] = kwargs[arg.name]
         elif idx < len(args):
             # if its out of bounds we don't need to do anything
-            # as it means the the optional arg was passed with its default
+            # as it means the optional arg was passed with its default
             # value
             normalized_kwargs[arg.name] = args[idx]
         else:
@@ -625,7 +625,7 @@ def do_auto_functionalize_v2(
             normalized_kwargs[arg.name] = kwargs[arg.name]
         elif idx < len(args):
             # if its out of bounds we don't need to do anything
-            # as it means the the optional arg was passed with its default
+            # as it means the optional arg was passed with its default
             # value
             normalized_kwargs[arg.name] = args[idx]
         else:

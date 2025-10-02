@@ -3,7 +3,8 @@
 import importlib
 import math
 import warnings
-from typing import Callable, Optional, TYPE_CHECKING, Union
+from collections.abc import Callable
+from typing import Optional, TYPE_CHECKING, Union
 
 import torch
 from torch import _VF, sym_int as _sym_int, Tensor
@@ -1079,6 +1080,9 @@ def lp_pool3d(
     If the sum of all inputs to the power of `p` is
     zero, the gradient is set to zero as well.
 
+    When ``ceil_mode`` is ``True``, sliding windows may go off-bounds if they start within the left
+    padding or the input. Sliding windows that would start in the right padded region are ignored.
+
     See :class:`~torch.nn.LPPool3d` for details.
     """
     if has_torch_function_unary(input):
@@ -1117,6 +1121,9 @@ def lp_pool2d(
     If the sum of all inputs to the power of `p` is
     zero, the gradient is set to zero as well.
 
+    When ``ceil_mode`` is ``True``, sliding windows may go off-bounds if they start within the left
+    padding or the input. Sliding windows that would start in the right padded region are ignored.
+
     See :class:`~torch.nn.LPPool2d` for details.
     """
     if has_torch_function_unary(input):
@@ -1151,6 +1158,9 @@ def lp_pool1d(
 
     If the sum of all inputs to the power of `p` is
     zero, the gradient is set to zero as well.
+
+    When ``ceil_mode`` is ``True``, sliding windows may go off-bounds if they start within the left
+    padding or the input. Sliding windows that would start in the right padded region are ignored.
 
     See :class:`~torch.nn.LPPool1d` for details.
     """
