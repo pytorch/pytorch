@@ -179,12 +179,18 @@ class LinearOperator(Operator):
         self, output_name: str, input_names: list[str], output_spec: Spec
     ) -> str:
         """Generate code for linear operation."""
+        if not isinstance(output_spec, TensorSpec):
+            raise ValueError("LinearOperator can only produce TensorSpec outputs")
+
+        # Ensure dtype compatibility by converting all inputs to the expected output dtype
+        target_dtype = f"torch.{output_spec.dtype}".replace("torch.torch.", "torch.")
+
         if len(input_names) == 2:
             input_name, weight_name = input_names
-            return f"{output_name} = torch.nn.functional.linear({input_name}, {weight_name})"
+            return f"{output_name} = torch.nn.functional.linear({input_name}.to({target_dtype}), {weight_name}.to({target_dtype}))"
         elif len(input_names) == 3:
             input_name, weight_name, bias_name = input_names
-            return f"{output_name} = torch.nn.functional.linear({input_name}, {weight_name}, {bias_name})"
+            return f"{output_name} = torch.nn.functional.linear({input_name}.to({target_dtype}), {weight_name}.to({target_dtype}), {bias_name}.to({target_dtype}))"
         else:
             raise ValueError(
                 "Linear requires 2 or 3 inputs: input, weight, and optional bias"
