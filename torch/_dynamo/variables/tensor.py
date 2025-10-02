@@ -201,6 +201,19 @@ class TensorVariable(VariableTracker):
             _is_name_set = self.proxy.node.op == "placeholder"
         self._is_name_set: bool = _is_name_set
 
+    def synchronize_attributes(self, tx, target_cls=None):
+        from .builder import get_specialized_props, infer_subclass_type
+
+        if target_cls is None:
+            target_cls = type(self)
+
+        example_value = self.proxy.node.meta.get("example_value")
+        specialized_props = get_specialized_props(
+            target_cls, tx, example_value, infer_subclass_type(example_value)
+        )
+        for k, v in specialized_props.items():
+            setattr(self, k, v)
+
     def debug_repr(self):
         # TODO: strip off fake tensor from repr here
         return repr(self.proxy.node.meta["example_value"])
@@ -1099,17 +1112,11 @@ class TensorVariable(VariableTracker):
             with torch._dynamo.utils._disable_saved_tensors_hooks_during_tracing():
                 get_fake_value(proxy.node, tx, allow_non_graph_fake=False)
 
-            example_value = self.proxy.node.meta.get("example_value")
-            from .builder import get_specialized_props, infer_subclass_type
+            vt = value
+            if isinstance(vt, variables.lazy.LazyVariableTracker):
+                vt = variables.lazy.LazyVariableTracker.realize_all(vt)
 
-            if isinstance(value, variables.lazy.LazyVariableTracker):
-                value = variables.lazy.LazyVariableTracker.realize_all(value)
-
-            specialized_props = get_specialized_props(
-                type(value), tx, example_value, infer_subclass_type(example_value)
-            )
-            for k, v in specialized_props.items():
-                setattr(self, k, v)
+            self.synchronize_attributes(tx, type(vt))
 
         if config.use_graph_deduplication or config.track_nodes_for_deduplication:
             tx.output.region_tracker.add_node_mutation(proxy.node, 0)
