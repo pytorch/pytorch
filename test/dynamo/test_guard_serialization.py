@@ -329,7 +329,9 @@ class TestGuardSerializationBase(torch._inductor.test_case.TestCase):
                 package=None,
             )
             with (
-                compile_context(CompileContext(CompileId(0, 0))),
+                compile_context(
+                    CompileContext(CompileId(frame_id=0, frame_compile_id=0))
+                ),
                 tracing(tracer.output.tracing_context),
                 tracer.set_current_tx(),
                 get_metrics_context(),
