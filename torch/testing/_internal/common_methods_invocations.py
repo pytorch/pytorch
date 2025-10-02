@@ -7625,6 +7625,28 @@ def sample_inputs_atleast1d2d3d(op_info, device, dtype, requires_grad, **kwargs)
         yield SampleInput(make_tensor_partial(shape))
     yield SampleInput([make_tensor_partial(shape) for shape in shapes])
 
+def sample_inputs_attention(op_info, device, dtype, requires_grad, **kwargs):
+    shapes = (
+        ((S, 5), (S, 5), (S, 7)),
+        ((S, 3), (S, 3), (S, 4)),
+    )
+    make_tensor_partial = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+    for shape_q, shape_k, shape_v in shapes:
+        yield SampleInput(make_tensor_partial(shape_q), make_tensor_partial(shape_k), make_tensor_partial(shape_v))
+
+def error_inputs_attention(op_info, device, **kwargs):
+    shapes = (
+        ((S, 5), (S + 1, 5), (S, 7)), # q, k different first dims
+        ((S, 5), (S, 5), (S + 1, 7)), # q, v different first dims
+        ((S, 5), (S, 6), (S, 7)), # q, k different second dims
+    )
+    make_tensor_partial = partial(make_tensor, dtype=torch.float32, device=device)
+    for shape_q, shape_k, shape_v in shapes:
+        yield ErrorInput(
+            SampleInput(make_tensor_partial(shape_q), make_tensor_partial(shape_k), make_tensor_partial(shape_v)),
+            error_regex = 'Expected'
+        )
+
 def sample_inputs_column_stack(op_info, device, dtype, requires_grad, **kwargs):
     cases: tuple[tuple, tuple] = (  # type: ignore[assignment]
         ((S, 2, 1), (S, 3, 1)),
@@ -18505,6 +18527,24 @@ op_db: list[OpInfo] = [
            ),
            sample_inputs_func=sample_inputs_atleast1d2d3d,
            ),
+    OpInfo('attention',
+           dtypes=floating_types_and(torch.float16, torch.bfloat16),
+           sample_inputs_func=sample_inputs_attention,
+           error_inputs_func=error_inputs_attention,
+           supports_autograd=True,
+           supports_out=False,
+           supports_forward_ad=False,
+           supports_fwgrad_bwgrad=False,
+           skips=(
+                # Seems like this is getting demoted to torch.bfloat16 for some reason, skipping for now
+                DecorateInfo(unittest.expectedFailure, 'TestFakeTensor', 'test_fake_autocast', dtypes=[torch.float32]),
+                # Errors with forward AD not implemented
+                DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_jvpvjp', dtypes=[torch.float32]),
+                DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_vmapjvpvjp', dtypes=[torch.float32]),
+                # Errors with "hit the vmap fallback which is currently disabled"
+                DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_vmapvjp_has_batch_rule', dtypes=[torch.float32]),
+                DecorateInfo(unittest.expectedFailure, 'TestVmapOperatorsOpInfo', 'test_op_has_batch_rule', dtypes=[torch.float32]),
+           )),
     OpInfo('flatten',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
            ref=reference_flatten,
