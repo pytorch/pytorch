@@ -129,24 +129,11 @@ class StreamContextVariable(ContextWrappingVariable):
         target_value: "StreamVariable",
         **kwargs: dict[str, Any],
     ) -> "StreamContextVariable":
-        from .builder import wrap_fx_proxy_cls
-
-        current_stream_method = get_interface_for_device(
-            target_value.device
-        ).current_stream
-        current_stream = wrap_fx_proxy_cls(
-            StreamVariable,
-            tx,
-            tx.output.create_proxy(
-                "call_function",
-                current_stream_method,
-                (None,),
-                {},
-            ),
-        )
         return StreamContextVariable(
             target_values=[target_value],
-            initial_values=[current_stream],
+            initial_values=[
+                StreamContextVariable._get_current_stream(target_value.device, tx)
+            ],
             device=target_value.device,
             **kwargs,
         )
@@ -165,9 +152,10 @@ class StreamContextVariable(ContextWrappingVariable):
         self.set_stream_id = get_interface_for_device(self.device)._set_stream_by_id
 
     def enter(self, tx: "InstructionTranslator") -> "VariableTracker":
-        stream_proxy = self.target_values[0].as_proxy()
         stream_id, device, device_index = (
-            StreamContextVariable._extract_stream_properties(stream_proxy)
+            StreamContextVariable._extract_stream_properties(
+                self.target_values[0].as_proxy()
+            )
         )
         proxy = tx.output.create_proxy(
             "call_function",
@@ -212,8 +200,27 @@ class StreamContextVariable(ContextWrappingVariable):
         )
         return stream_index, stream_device, stream_device_index
 
+    @staticmethod
+    def _get_current_stream(
+        device: torch.device, tx: "InstructionTranslator"
+    ) -> "StreamVariable":
+        from .builder import wrap_fx_proxy_cls
 
-class StreamVariable(VariableTracker):
+        current_stream_method = get_interface_for_device(device).current_stream
+        current_stream = wrap_fx_proxy_cls(
+            StreamVariable,
+            tx,
+            tx.output.create_proxy(
+                "call_function",
+                current_stream_method,
+                (None,),
+                {},
+            ),
+        )
+        return current_stream
+
+
+class StreamVariable(StreamContextVariable):
     """Represents the device-agnostic torch.Stream class"""
 
     def __init__(
@@ -228,7 +235,6 @@ class StreamVariable(VariableTracker):
         assert value.device.type == device.type, (
             "stream value is not equal to the passed device"
         )
-        super().__init__(**kwargs)
         self.proxy = proxy
         self.value = value
         self.device = device
@@ -288,6 +294,16 @@ class StreamVariable(VariableTracker):
             )
 
         return super().call_method(tx, name, args, kwargs)
+
+    def enter(self, tx: "InstructionTranslator") -> "VariableTracker":
+        # NB: Set initial values and target values when we enter
+        # Don't do this at object creation, as we need to record the current stream
+        # at the time the context is entered.
+        self.initial_values = [
+            StreamContextVariable._get_current_stream(self.device, tx)
+        ]
+        self.target_values = [self]
+        return super().enter(tx)
 
     def as_proxy(self) -> Proxy:
         return self.proxy
