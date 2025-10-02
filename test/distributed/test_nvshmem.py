@@ -193,21 +193,19 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
         dtype = torch.float
         numel = 1024
         tensor = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(self.rank)
-        symm_mem.rendezvous(tensor, group=group_name)
+        hdl = symm_mem.rendezvous(tensor, group=group_name)
+        signal_pad = hdl.get_signal_pad(self.rank)
+        signal_val = 5
 
         if self.rank == 0:
-            torch.ops.symm_mem.nvshmem_put(tensor, 1)
-            # TODO: remove after we have wait_signal
-            dist.barrier()
+            torch.ops.symm_mem.nvshmem_put_with_signal(
+                tensor, signal_pad, signal_val, 1
+            )
         elif self.rank == 1:
-            # handle.wait_signal(src_rank=0)
-            # TODO: remove after we have wait_signal
-            dist.barrier()
+            torch.ops.symm_mem.nvshmem_wait_for_signal(signal_pad, signal_val, 0)
             torch.testing.assert_close(
                 tensor, torch.zeros(numel, dtype=dtype, device=self.device)
             )
-        else:
-            dist.barrier()
 
     @skipIfRocm
     def test_nvshmem_get(self) -> None:

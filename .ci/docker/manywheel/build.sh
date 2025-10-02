@@ -43,12 +43,6 @@ case ${image} in
         MANY_LINUX_VERSION="2_28_aarch64"
         OPENBLAS_VERSION="v0.3.30"
         ;;
-    manylinuxcxx11-abi-builder:cpu-cxx11-abi)
-        TARGET=final
-        GPU_IMAGE=""
-        DOCKER_GPU_BUILD_ARG=" --build-arg DEVTOOLSET_VERSION=9"
-        MANY_LINUX_VERSION="cxx11-abi"
-        ;;
     manylinuxs390x-builder:cpu-s390x)
         TARGET=final
         GPU_IMAGE=s390x/almalinux:8
