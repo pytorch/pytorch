@@ -2294,7 +2294,7 @@ class BenchmarkRunner:
                         correct_rerun_result,
                         fp64_ref=None,
                         cos_similarity=False,
-                        tol=tolerance,
+                        tol=tolerance if torch.version.hip else 0,
                         equal_nan=self.equal_nan,
                         use_larger_multiplier_for_smaller_tensor=self.use_larger_multiplier_for_smaller_tensor(
                             name
