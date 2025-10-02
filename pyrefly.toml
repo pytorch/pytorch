@@ -41,9 +41,6 @@ project-excludes = [
   "torch/cuda/**",
   "torch/export/**",
   "torch/profiler/**",
-  "torch/_prims_common/**",
-  "torch/backends/**",
-  "torch/_C/**",
   # formatting issues
   "torch/linalg/__init__.py",
   "torch/package/importer.py",
