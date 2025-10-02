@@ -297,6 +297,7 @@ RUN echo "[INFO] Listing current directory before torch install step:" && \
     echo "[INFO] Showing torch_build_versions.txt content:" && \
     cat torch_build_versions.txt
 
+# Install build and runtime dependencies
 COPY requirements/build.txt requirements/build.txt
 RUN python3 use_existing_torch.py
 RUN cat requirements/build.txt
