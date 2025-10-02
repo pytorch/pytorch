@@ -389,16 +389,21 @@ class LayerNormOperator(Operator):
 
         # Weight and bias tensors (optional with 70% probability each)
         specs = [input_spec]
-
         if random.random() < 0.7:
+            # LayerNorm weight and bias parameters must always be float32
+            # regardless of the input tensor dtype
             weight_spec = TensorSpec(
-                size=normalized_shape, stride=(1,), dtype=output_spec.dtype
+                size=normalized_shape,
+                stride=(1,),
+                dtype=torch.float32
             )
             specs.append(weight_spec)
 
             if random.random() < 0.7:
                 bias_spec = TensorSpec(
-                    size=normalized_shape, stride=(1,), dtype=output_spec.dtype
+                    size=normalized_shape,
+                    stride=(1,),
+                    dtype=torch.float32
                 )
                 specs.append(bias_spec)
 
