@@ -5925,7 +5925,6 @@ class TestLinalg(TestCase):
     @dtypes(torch.float32)
     def test_matmul_empty_existing_file_tunableop(self, device, dtype):
         """ Test that if an existing results file is empty/corrupted, then the default behaviour should hold """
-        import os
         with self._tunableop_ctx():
             torch.cuda.tunable.set_rotating_buffer_size(0)
             results_filename = torch.cuda.tunable.get_filename()
@@ -5945,7 +5944,7 @@ class TestLinalg(TestCase):
                 content = f.read()
                 self.assertIn("Validator", content)
                 result_lines = [l for l in content.split('\n')
-                            if l and not l.startswith('Validator')]
+                                if l and not l.startswith('Validator')]
                 self.assertGreater(len(result_lines), 0)
 
 
