@@ -251,29 +251,20 @@ def sig_for_ops(opname: str) -> list[str]:
     name = opname[2:-2]
     if name == "rpow":
         return [  # somehow required to make mypy ci happy?
-            f"def {opname}(self, other: Tensor | Number | _complex) -> Tensor: ...  # type: ignore[has-type]"
+            f"def {opname}(self, other: Tensor | Number | _complex) -> Self: ...  # type: ignore[has-type]"
         ]
     elif name in arithmetic_ops:
-        if name.startswith("i"):
-            # In-place binary-operation dunder methods, like `__iadd__`, should return `Self`
-            return [
-                f"def {opname}(self, other: Tensor | Number | _complex) -> Tensor: ...  # noqa: PYI034"
-            ]
-        return [f"def {opname}(self, other: Tensor | Number | _complex) -> Tensor: ..."]
-    elif name in logic_ops:
-        return [f"def {opname}(self, other: Tensor | _int) -> Tensor: ..."]
-    elif name in shift_ops:
-        return [f"def {opname}(self, other: Tensor | _int) -> Tensor: ..."]
-    elif name in symmetric_comparison_ops:
+        return [f"def {opname}(self, other: Tensor | Number | _complex) -> Self: ..."]
+    elif name in logic_ops or name in shift_ops:
+        return [f"def {opname}(self, other: Tensor | _int) -> Self: ..."]
+    elif name in symmetric_comparison_ops or name in asymmetric_comparison_ops:
         return [
             # unsafe override https://github.com/python/mypy/issues/5704
-            f"def {opname}(self, other: Tensor | Number | _complex) -> Tensor: ...  # type: ignore[overload-overlap]",
-            f"def {opname}(self, other: object) -> _bool: ...",
+            f"def {opname}(self, other: Tensor | Number | _complex) -> Self: ...  # type: ignore[overload-overlap]",
+            f"def {opname}(self, other: object) -> Any: ...",  # Returns NotImplemented, not _bool
         ]
-    elif name in asymmetric_comparison_ops:
-        return [f"def {opname}(self, other: Tensor | Number | _complex) -> Tensor: ..."]
     elif name in unary_ops:
-        return [f"def {opname}(self) -> Tensor: ..."]
+        return [f"def {opname}(self) -> Self: ..."]
     if name in to_py_type_ops:
         if name in {"bool", "float", "complex"}:
             tname = name
@@ -1520,10 +1511,10 @@ def gen_pyi(
                 defs("stride", ["self", "dim: _int"], "_int"),
             ],
             "new_ones": [
-                defs("new_ones", ["self", "size: _size", *FACTORY_PARAMS], "Tensor")
+                defs("new_ones", ["self", "size: _size", *FACTORY_PARAMS], "Self")
             ],
             "new_tensor": [
-                defs("new_tensor", ["self", "data: Any", *FACTORY_PARAMS], "Tensor")
+                defs("new_tensor", ["self", "data: Any", *FACTORY_PARAMS], "Self")
             ],
             "__new__": [defs("__new__", ["cls", "*args", "**kwargs"], "Self")],
             # new and __init__ have the same signatures differ only in return type
@@ -1594,17 +1585,22 @@ def gen_pyi(
                 )
             ],
             "__contains__": [defs("__contains__", ["self", "item: Any", "/"], "_bool")],
-            "__getitem__": [defs("__getitem__", ["self", INDICES, "/"], "Tensor")],
+            "__getitem__": [defs("__getitem__", ["self", INDICES, "/"], "Self")],
             "__setitem__": [
                 defs(
                     "__setitem__",
-                    ["self", INDICES, "value: Tensor | Number", "/"],
+                    ["self", INDICES, "value: Tensor | Number | _complex", "/"],
                     "None",
                 )
             ],
-            "tolist": [defs("tolist", ["self"], "list")],
+            # TODO:should be NestedList: TypeAlias = Union[Number, _complex, _bool, list['NestedList']]
+            # to account for 0-dimensional tensors, but causes large amount of mypy errors and so
+            # using Any for now
+            "tolist": [
+                defs("tolist", ["self"], "list[Any]"),
+            ],
             "requires_grad_": [
-                defs("requires_grad_", ["self", "mode: _bool = True"], "Tensor")
+                defs("requires_grad_", ["self", "mode: _bool = True"], "Self")
             ],
             "element_size": [defs("element_size", ["self"], "_int")],
             "data_ptr": [defs("data_ptr", ["self"], "_int")],
@@ -1633,7 +1629,7 @@ def gen_pyi(
                         "non_blocking: _bool = False",
                         "memory_format: torch.memory_format = torch.preserve_format",
                     ],
-                    "Tensor",
+                    "Self",
                 )
             ],
             "xpu": [
@@ -1645,7 +1641,7 @@ def gen_pyi(
                         "non_blocking: _bool = False",
                         "memory_format: torch.memory_format = torch.preserve_format",
                     ],
-                    "Tensor",
+                    "Self",
                 )
             ],
             "cpu": [
@@ -1655,21 +1651,32 @@ def gen_pyi(
                         "self",
                         "memory_format: torch.memory_format = torch.preserve_format",
                     ],
-                    "Tensor",
+                    "Self",
                 )
             ],
             "numpy": [
                 defs("numpy", ["self", "*", "force: _bool = False"], "numpy.ndarray")
             ],
-            "apply_": [defs("apply_", ["self", "callable: Callable"], "Tensor")],
+            "apply_": [
+                defs("apply_", ["self", "callable: Callable[[Any], Any]"], "Self")
+            ],
             "map_": [
-                defs("map_", ["self", "other: Tensor", "callable: Callable"], "Tensor")
+                defs(
+                    "map_",
+                    ["self", "other: Tensor", "callable: Callable[[Any, Any], Any]"],
+                    "Self",
+                )
             ],
             "map2_": [
                 defs(
                     "map2_",
-                    ["self", "x: Tensor", "y: Tensor", "callable: Callable"],
-                    "Tensor",
+                    [
+                        "self",
+                        "x: Tensor",
+                        "y: Tensor",
+                        "callable: Callable[[Any, Any, Any], Any]",
+                    ],
+                    "Self",
                 )
             ],
             "storage": [defs("untyped_storage", ["self"], "UntypedStorage")],
@@ -1683,7 +1690,7 @@ def gen_pyi(
                 defs(
                     "type",
                     ["self", "dtype: str | _dtype", "non_blocking: _bool = False"],
-                    "Tensor",
+                    "Self",
                 ),
             ],
             "get_device": [defs("get_device", ["self"], "_int")],
@@ -1694,7 +1701,7 @@ def gen_pyi(
                         "self",
                         "memory_format: torch.memory_format = torch.contiguous_format",
                     ],
-                    "Tensor",
+                    "Self",
                 )
             ],
             "has_names": [defs("has_names", ["self"], "_bool")],
@@ -1737,7 +1744,7 @@ def gen_pyi(
                             "*",
                             "memory_format: torch.memory_format | None = None",
                         ],
-                        "Tensor",
+                        "Self",
                     )
                 )
                 for to_args in [
@@ -1754,7 +1761,7 @@ def gen_pyi(
                 defs(
                     "copy_",
                     ["self", "other: Tensor", "non_blocking: _bool = False"],
-                    "Tensor",
+                    "Self",
                 )
             ],
             "set_": [
@@ -1767,24 +1774,24 @@ def gen_pyi(
                         "size: _symsize",
                         "stride: _symsize",
                     ],
-                    "Tensor",
+                    "Self",
                 ),
                 defs(
                     "set_",
                     ["self", "source: Storage | TypedStorage | UntypedStorage"],
-                    "Tensor",
+                    "Self",
                 ),
             ],
             "split": [
                 defs(
                     "split",
                     ["self", "split_size: _int", "dim: _int = 0"],
-                    "Sequence[Tensor]",
+                    "tuple[Self, ...]",
                 ),
                 defs(
                     "split",
                     ["self", "split_size: tuple[_int, ...]", "dim: _int = 0"],
-                    "Sequence[Tensor]",
+                    "tuple[Self, ...]",
                 ),
             ],
             "div": [
@@ -1792,11 +1799,11 @@ def gen_pyi(
                     "div",
                     [
                         "self",
-                        "other: Tensor | Number",
+                        "other: Tensor | Number | _complex | torch.SymInt | torch.SymFloat",
                         "*",
                         "rounding_mode: str | None = None",
                     ],
-                    "Tensor",
+                    "Self",
                 )
             ],
             "div_": [
@@ -1804,68 +1811,124 @@ def gen_pyi(
                     "div_",
                     [
                         "self",
-                        "other: Tensor | Number",
+                        "other: Tensor | Number | _complex | torch.SymInt | torch.SymFloat",
                         "*",
                         "rounding_mode: str | None = None",
                     ],
-                    "Tensor",
+                    "Self",
                 )
             ],
-        }
-    )
-    for binop in ["true_divide", "floor_divide"]:
-        for inplace in [False, True]:
-            out_args = ["*", "out: Tensor | None = None"]
-            if inplace:
-                binop += "_"
-                out_args = []
-            unsorted_tensor_method_hints[binop].append(
+            "true_divide": [
                 defs(
-                    binop,
-                    [
-                        "self",
-                        "other: Tensor | Number | torch.SymInt | torch.SymFloat",
-                        *out_args,
-                    ],
-                    "Tensor",
-                )
-            )
-    for binop in ["mul"]:
-        for inplace in [False, True]:
-            out_args = ["*", "out: Tensor | None = None"]
-            if inplace:
-                binop += "_"
-                out_args = []
-            unsorted_tensor_method_hints[binop].append(
-                defs(
-                    binop,
+                    "true_divide",
                     [
                         "self",
                         "other: Tensor | Number | _complex | torch.SymInt | torch.SymFloat",
-                        *out_args,
                     ],
-                    "Tensor",
-                )
-            )
-    for binop in ["add", "sub"]:
-        for inplace in [False, True]:
-            out_args = ["out: Tensor | None = None"]
-            if inplace:
-                binop += "_"
-                out_args = []
-            unsorted_tensor_method_hints[binop].append(
+                    "Self",
+                ),
+            ],
+            "floor_divide": [
                 defs(
-                    binop,
+                    "floor_divide",
+                    [
+                        "self",
+                        "other: Tensor | Number | _complex | torch.SymInt | torch.SymFloat",
+                    ],
+                    "Self",
+                ),
+            ],
+            "true_divide_": [
+                defs(
+                    "true_divide_",
+                    [
+                        "self",
+                        "other: Tensor | Number | _complex | torch.SymInt | torch.SymFloat",
+                    ],
+                    "Self",
+                ),
+            ],
+            "floor_divide_": [
+                defs(
+                    "floor_divide_",
+                    [
+                        "self",
+                        "other: Tensor | Number | _complex | torch.SymInt | torch.SymFloat",
+                    ],
+                    "Self",
+                ),
+            ],
+            "mul": [
+                defs(
+                    "mul",
+                    [
+                        "self",
+                        "other: Tensor | Number | _complex | torch.SymInt | torch.SymFloat",
+                    ],
+                    "Self",
+                ),
+            ],
+            "mul_": [
+                defs(
+                    "mul_",
+                    [
+                        "self",
+                        "other: Tensor | Number | _complex | torch.SymInt | torch.SymFloat",
+                    ],
+                    "Self",
+                ),
+            ],
+            "add": [
+                defs(
+                    "add",
                     [
                         "self",
                         "other: Tensor | Number | _complex | torch.SymInt | torch.SymFloat",
                         "*",
-                        "alpha: Number | _complex | None = 1",
-                        *out_args,
+                        "alpha: Number | _complex = 1",
                     ],
-                    "Tensor",
-                )
-            )
+                    "Self",
+                ),
+            ],
+            "add_": [
+                defs(
+                    "add_",
+                    [
+                        "self",
+                        "other: Tensor | Number | _complex | torch.SymInt | torch.SymFloat",
+                        "*",
+                        "alpha: Number | _complex = 1",
+                    ],
+                    "Self",
+                ),
+            ],
+            "sub": [
+                defs(
+                    "sub",
+                    [
+                        "self",
+                        "other: Tensor | Number | _complex | torch.SymInt | torch.SymFloat",
+                        "*",
+                        "alpha: Number | _complex = 1",
+                    ],
+                    "Self",
+                ),
+            ],
+            "sub_": [
+                defs(
+                    "sub_",
+                    [
+                        "self",
+                        "other: Tensor | Number | _complex | torch.SymInt | torch.SymFloat",
+                        "*",
+                        "alpha: Number | _complex = 1",
+                    ],
+                    "Self",
+                ),
+            ],
+        }
+    )
+
     simple_conversions = [
         "bfloat16",
         "bool",
@@ -1879,7 +1942,7 @@ def gen_pyi(
         "short",
     ]
     for name in simple_conversions:
-        unsorted_tensor_method_hints[name].append(f"def {name}(self) -> Tensor: ...")
+        unsorted_tensor_method_hints[name].append(f"def {name}(self) -> Self: ...")
 
     # pyi tensor methods don't currently include deprecated signatures for some reason
     # TODO: we should probably add them in
@@ -1896,7 +1959,34 @@ def gen_pyi(
 
     for group in sorted(tensor_method_sig_groups, key=lambda g: g.signature.name):
         name = group.signature.name
-        unsorted_tensor_method_hints[name] += generate_type_hints(group)
+        type_hints = generate_type_hints(group)
+
+        # the functions in native_functions.yaml all use a variation of Tensor as the return type
+        # we need to change the return type to Self for most of them here
+        updated_type_hints: list[str] = []
+        for hint in type_hints:
+            # sparse tensors have their own return type
+            if "sparse" in hint or "to_dense" in hint:
+                updated_type_hints.append(hint)
+                continue
+            # these are sparse tensor methods
+            if (
+                "sspaddmm" in hint
+                or "smm" in hint
+                or "row_indices" in hint
+                or "indices" in hint
+                or "crow_indices" in hint
+            ):
+                updated_type_hints.append(hint)
+                continue
+
+            if "-> Tensor" in hint:
+                hint = hint.replace("-> Tensor", "-> Self")
+            if "-> Tuple[Tensor, ...]" in hint:
+                hint = hint.replace("-> Tuple[Tensor, ...]", "-> Tuple[Self, ...]")
+            updated_type_hints.append(hint)
+
+        unsorted_tensor_method_hints[name] += updated_type_hints
 
         structseq = returns_structseq_pyi(group.signature)
         if structseq is not None and not group.signature.deprecated:
