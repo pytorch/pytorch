@@ -109,7 +109,7 @@ def _varlen_attn_fake(
     return output, logsumexp
 
 
-def varlen_attn(
+def varlen_atten(
     query: torch.Tensor,
     key: torch.Tensor,
     value: torch.Tensor,
@@ -139,6 +139,78 @@ def varlen_attn(
     out, lse = _varlen_attn(
         query, key, value, cu_seq_q, cu_seq_k, max_q, max_k, is_causal
     )
+
     if return_lse:
         return out, lse
     return out
+
+
+def setup_context(ctx, inputs, output):
+    query, key, value, cu_seq_q, cu_seq_k, max_q, max_k, is_causal = inputs
+    out, lse = output
+    ctx.query = query
+    ctx.key = key
+    ctx.value = value
+    ctx.cu_seq_q = cu_seq_q
+    ctx.cu_seq_k = cu_seq_k
+    ctx.max_q = max_q
+    ctx.max_k = max_k
+    ctx.is_causal = is_causal
+    ctx.output = out
+    ctx.lse = lse
+
+
+def backward(ctx, grad_out, grad_lse):
+    query = ctx.query
+    key = ctx.key
+    value = ctx.value
+    cu_seq_q = ctx.cu_seq_q
+    cu_seq_k = ctx.cu_seq_k
+    max_q = ctx.max_q
+    max_k = ctx.max_k
+    is_causal = ctx.is_causal
+    out = ctx.output
+    lse = ctx.lse
+    rng_state = getattr(ctx, "rng_state", torch.empty(0, device=query.device))
+    unused = torch.empty(0, device=query.device)
+
+    use_cudnn = query.is_cuda and _should_use_cudnn(query.device.index)
+    if use_cudnn:
+        log.info("Using cuDNN backend for varlen_attn")
+        dq, dk, dv = torch.ops.aten._cudnn_attention_backward(
+            grad_out,
+            query,
+            key,
+            value,
+            out,
+            lse,
+            cu_seq_q,
+            cu_seq_k,
+            max_q,
+            max_k,
+            0.0,
+            is_causal,
+            rng_state,
+            unused
+        )
+    else:
+        log.info("Using Flash Attention backend for varlen_attn")
+        dq, dk, dv = torch.ops.aten._flash_attention_backward(
+            grad_out,
+            query,
+            key,
+            value,
+            out,
+            lse,
+            cu_seq_q,
+            cu_seq_k,
+            max_q,
+            max_k,
+            0.0,
+            is_causal,
+            rng_state,
+            unused
+        )
+    return dq, dk, dv, None, None, None, None, None, None
+
+_varlen_attn.register_autograd(backward, setup_context=setup_context)
