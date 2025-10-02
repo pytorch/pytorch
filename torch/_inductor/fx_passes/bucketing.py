@@ -132,7 +132,7 @@ def is_wait_tensor_from_all_gather_into_tensor(node: torch.fx.Node) -> bool:
     return is_wait_tensor(node) and is_all_gather_into_tensor(node.args[0])  # type: ignore[arg-type]
 
 
-def collect_node_descendents(
+def collect_node_descendants(
     graph: torch.fx.Graph,
 ) -> dict[torch.fx.Node, OrderedSet[torch.fx.Node]]:
     """
@@ -142,7 +142,7 @@ def collect_node_descendents(
     Returns:
         dict[torch.fx.Node, OrderedSet[torch.fx.Node]]: A dictionary mapping each node to its descendants.
     """
-    node_descendents: dict[torch.fx.Node, OrderedSet[torch.fx.Node]] = (
+    node_descendants: dict[torch.fx.Node, OrderedSet[torch.fx.Node]] = (
         collections.defaultdict(OrderedSet)
     )
     outdegree = collections.defaultdict(int)
@@ -158,14 +158,14 @@ def collect_node_descendents(
     while queue:
         node = queue.pop()
         for input_node in node.all_input_nodes:
-            node_descendents[input_node] |= node_descendents[node]
-            node_descendents[input_node].add(node)
+            node_descendants[input_node] |= node_descendants[node]
+            node_descendants[input_node].add(node)
             outdegree[input_node] -= 1
 
             if outdegree[input_node] == 0:
                 queue.append(input_node)
 
-    return node_descendents
+    return node_descendants
 
 
 def greedy_bucket_collective_by_mb(
@@ -191,7 +191,7 @@ def greedy_bucket_collective_by_mb(
         return []
 
     # TODO: pearce kelly algorithm for detecting cycles
-    node_descendents = collect_node_descendents(gm.graph)
+    node_descendents = collect_node_descendants(gm.graph)
 
     nodes_groups: list[list[torch.fx.Node]] = []
     cur_group: list[torch.fx.Node] = []
