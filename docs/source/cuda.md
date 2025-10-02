@@ -285,6 +285,10 @@ See the docs for {class}`~torch.cuda.green_contexts.GreenContext` for an example
 ```
 
 ```{eval-rst}
+.. py:module:: torch.cuda.green_contexts
+```
+
+```{eval-rst}
 .. py:module:: torch.cuda.jiterator
 ```
 
