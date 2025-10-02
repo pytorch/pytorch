@@ -120,9 +120,8 @@ ninja==1.11.1.4
 numba==0.55.2 ; python_version == "3.10" and platform_machine != "s390x"
 numba==0.60.0 ; python_version == "3.12" and platform_machine != "s390x"
 #Description: Just-In-Time Compiler for Numerical Functions
-#Pinned versions: 0.54.1, 0.49.0, <=0.49.1
+#Pinned versions: 0.55.2, 0.60.0
 #test that import: test_numba_integration.py
-#For numba issue see https://github.com/pytorch/pytorch/issues/51511
 #Need release > 0.61.2 for s390x due to https://github.com/numba/numba/pull/10073
 
 #numpy
@@ -242,10 +241,9 @@ pygments==2.15.0
 #Pinned versions: 14.1.0
 #test that import:
 
-scikit-image==0.19.3 ; python_version < "3.10"
-scikit-image==0.22.0 ; python_version >= "3.10"
+scikit-image==0.22.0
 #Description: image processing routines
-#Pinned versions:
+#Pinned versions: 0.22.0
 #test that import: test_nn.py
 
 #scikit-learn
