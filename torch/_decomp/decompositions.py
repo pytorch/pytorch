@@ -1,6 +1,3 @@
-warning: The following rules have been removed and ignoring them has no effect:
-    - UP038
-
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import functools
@@ -13,7 +10,7 @@ from contextlib import nullcontext
 from enum import Enum
 from functools import partial, reduce
 from itertools import chain, product
-from typing import Any, cast, Optional, Union
+from typing import Any, cast, Optional, Union, Tuple
 
 import torch
 import torch._meta_registrations
