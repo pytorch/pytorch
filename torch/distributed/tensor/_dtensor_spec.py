@@ -43,6 +43,8 @@ class DTensorSpec:
     shard_order: TensorDimTuple = None  # type: ignore[assignment]
 
     def __post_init__(self) -> None:
+        if not isinstance(self.placements, tuple):
+            self.placements = tuple(self.placements)
         if self.shard_order is None:
             self.shard_order = DTensorSpec.compute_default_sparse_shard_order(
                 self.placements, self.mesh
