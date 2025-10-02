@@ -322,7 +322,7 @@ def sample_inputs_linalg_matrix_norm(op_info, device, dtype, requires_grad, **kw
 def sample_inputs_linalg_norm(
     op_info, device, dtype, requires_grad, *, variant=None, **kwargs
 ):
-    if variant is not None and variant not in ("subgradient_at_zero",):
+    if variant is not None and variant != "subgradient_at_zero":
         raise ValueError(
             f"Unsupported variant, expected variant to be 'subgradient_at_zero' but got: {variant}"
         )
