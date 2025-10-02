@@ -18,6 +18,7 @@ exclude_patterns = [
     'torch/_inductor/autoheuristic/artifacts/**',
     'scripts/**',
     'test/generated_type_hints_smoketest.py',
+    'test/test_torchfuzz_repros.py',
     # CPython tests
     'test/dynamo/cpython/**',
     # Tests from the NumPy test suite
@@ -27,7 +28,7 @@ exclude_patterns = [
     'torch/lib/**',
     'venv/**',
     '**/*.pyi',
-    "tools/experimental/dynamic_shapes/torchfuzz/**"
+    "tools/experimental/dynamic_shapes/torchfuzz/**",
     'tools/test/test_selective_build.py',
 ]
 command = [
@@ -1261,6 +1262,7 @@ exclude_patterns = [
     'test/test_masked.py',
     'test/test_maskedtensor.py',
     'test/test_matmul_cuda.py',
+    'test/test_scaled_matmul_cuda.py',
     'test/test_meta.py',
     'test/test_metal.py',
     'test/test_mkl_verbose.py',
