@@ -739,7 +739,6 @@ class CompilePackage:
 
         self.uninstall()
         for code, entry in self._codes.items():
-
             context = (
                 _compile_frame_context(code)
                 if entry.has_compile_id
@@ -783,7 +782,6 @@ class CompilePackage:
                     # Dynamo generates empty graph for trivial functions, should just skip them
                     # in these cases.
                     torch._dynamo.eval_frame.skip_code(target_code)
-
 
                 for guarded_code in entry.guarded_codes:
                     guards_state = pickle.loads(guarded_code.guards_state)
