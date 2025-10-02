@@ -12,8 +12,8 @@ import pathlib
 import textwrap
 import traceback
 import typing
-from collections.abc import Mapping, Sequence
-from typing import Any, Callable, Literal
+from collections.abc import Callable, Mapping, Sequence
+from typing import Any, Literal
 
 import onnxscript
 import onnxscript.evaluator
@@ -270,8 +270,6 @@ def _set_shape_type(
     elif isinstance(meta_val, (float, torch.SymFloat)):
         value.dtype = ir.DataType.FLOAT
         value.shape = ir.Shape([])
-    else:
-        pass
 
 
 def _get_qualified_module_name(cls: Any) -> str:
