@@ -3092,9 +3092,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         if self.persistent_reduction:
             default = ir.Reduction.default_value(reduction_type, src_dtype)
 
-            def update_constant_dtype(
-                constant, src_dtype, dst_dtype
-            ) -> Union[int, float]:
+            def update_constant_dtype(constant, src_dtype, dst_dtype):
                 "update reduction constant mask value to match dst_dtype"
 
                 # int is the only mask which may not fit within lower bitwidth,
@@ -3120,7 +3118,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     self.compute,
                     where_cond(value, default_str),
                     dtype=value.dtype,
-                    shape=value.shape if value.shape is not None else default.shape,
+                    shape=value.shape,
                 )
 
             masked_value: Union[CSEVariable, Sequence[CSEVariable]]
