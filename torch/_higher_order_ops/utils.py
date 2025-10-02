@@ -1,10 +1,10 @@
 # mypy: allow-untyped-defs
 import contextlib
 import functools
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from contextlib import AbstractContextManager, contextmanager, ExitStack, nullcontext
 from dataclasses import dataclass
-from typing import Any, Callable, Optional, overload, TypeVar, Union
+from typing import Any, Optional, overload, TypeVar, Union
 
 import torch
 import torch.fx.traceback as fx_traceback

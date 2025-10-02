@@ -3,7 +3,8 @@ import enum
 import functools
 import itertools
 import logging
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 import torch
 import torch._prims_common as utils
@@ -153,7 +154,7 @@ def scan(
     def _validate_input(cfn, lxs, linit, d, r):
         # Basic arguments check
         if not callable(cfn):
-            raise RuntimeError("Combine_fn must be a callable, but got {cfn}")
+            raise RuntimeError(f"Combine_fn must be a callable, but got {cfn}")
         if not isinstance(d, int):
             raise RuntimeError("Dim must be an int, but got " + str(type(d)))
         if not isinstance(r, bool):

@@ -5,8 +5,7 @@ import enum
 import itertools as it
 import logging
 from collections.abc import Iterator
-from typing import Any, cast, Optional, Union
-from typing_extensions import Literal
+from typing import Any, cast, Literal, Optional, Union
 
 import torch
 from torch._C import FunctionSchema
