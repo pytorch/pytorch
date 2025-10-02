@@ -13,6 +13,9 @@ load(":build_variables.bzl", "jit_core_sources", "lazy_tensor_ts_sources", "libt
 load(":ufunc_defs.bzl", "aten_ufunc_generated_cpu_kernel_sources", "aten_ufunc_generated_cpu_sources", "aten_ufunc_generated_cuda_sources")
 load("//:tools/bazel.bzl", "rules")
 
+# Export files for use by other packages
+exports_files(["version.txt"])
+
 define_targets(rules = rules)
 
 COMMON_COPTS = [

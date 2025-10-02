@@ -142,17 +142,10 @@ def define_targets(rules):
         visibility = ["//visibility:public"],
     )
 
-    rules.genrule(
+    # Alias to the version_h target in torch/headeronly subpackage
+    rules.alias(
         name = "version_h",
-        srcs = [
-            "//torch/headeronly:version.h.in",
-            ":version.txt",
-        ],
-        outs = ["torch/headeronly/version.h"],
-        cmd = "$(execpath //tools/setup_helpers:gen_version_header) " +
-              "--template-path $(location //torch/headeronly:version.h.in) " +
-              "--version-path $(location :version.txt) --output-path $@ ",
-        tools = ["//tools/setup_helpers:gen_version_header"],
+        actual = "//torch/headeronly:version_h",
     )
 
 #
