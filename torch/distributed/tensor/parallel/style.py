@@ -473,9 +473,9 @@ class PrepareModuleInput(ParallelStyle):
     def __init__(
         self,
         *,
-        input_layouts: Optional[Union[Placement, tuple[Optional[Placement]]]] = None,
+        input_layouts: Optional[Union[Placement, tuple[Optional[Placement], ...]]] = None,
         desired_input_layouts: Optional[
-            Union[Placement, tuple[Optional[Placement]]]
+            Union[Placement, tuple[Optional[Placement], ...]]
         ] = None,
         input_kwarg_layouts: Optional[dict[str, Placement]] = None,
         desired_input_kwarg_layouts: Optional[dict[str, Placement]] = None,
@@ -764,9 +764,9 @@ class PrepareModuleInputOutput(ParallelStyle):
     def __init__(
         self,
         *,
-        input_layouts: Optional[Union[Placement, tuple[Optional[Placement]]]] = None,
+        input_layouts: Optional[Union[Placement, tuple[Optional[Placement], ...]]] = None,
         desired_input_layouts: Optional[
-            Union[Placement, tuple[Optional[Placement]]]
+            Union[Placement, tuple[Optional[Placement], ...]]
         ] = None,
         input_kwarg_layouts: Optional[dict[str, Placement]] = None,
         desired_input_kwarg_layouts: Optional[dict[str, Placement]] = None,
