@@ -207,9 +207,12 @@ class TestCustomOpAutoTune(TestCase):
         # Clear cache to ensure fresh compilation
         torch._dynamo.reset()
 
+        # Use TRITON backend only on CUDA, fallback to ATEN on CPU
+        autotune_backends = "TRITON" if self.device == "cuda" else "ATEN"
+
         with config.patch(
             max_autotune=True,
-            max_autotune_gemm_backends="TRITON",
+            max_autotune_gemm_backends=autotune_backends,
             fx_graph_cache=False,
             benchmark_kernel=True,
         ):
@@ -318,6 +321,9 @@ class TestCustomOpAutoTune(TestCase):
         1. Standard: Separate matmuls for gate and up projections
         2. Fused: Single matmul with concatenated weights then split
         3. Approximated: Uses tanh-approximated GELU instead of exact GELU
+
+        The test should work on both GPU (with actual autotuning) and CPU
+        If all the decomposition choice failed, it should fallback to the default implementation.
         """
         test_op_name = f"test_lib::mlp_{id(self)}"
 
@@ -380,9 +386,12 @@ class TestCustomOpAutoTune(TestCase):
         # Clear cache to ensure fresh compilation
         torch._dynamo.reset()
 
+        # Use TRITON backend only on CUDA, fallback to ATEN on CPU
+        autotune_backends = "TRITON" if self.device == "cuda" else "ATEN"
+
         with config.patch(
             max_autotune=True,
-            max_autotune_gemm_backends="TRITON",
+            max_autotune_gemm_backends=autotune_backends,
             fx_graph_cache=False,
             benchmark_kernel=True,
         ):
