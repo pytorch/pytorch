@@ -303,19 +303,21 @@ COPY use_existing_torch.py use_existing_torch.py
 RUN python3 use_existing_torch.py
 RUN cat requirements/build.txt
 
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --system -r requirements/build.txt
-
-
 # Install uv for faster pip installs if not existed
 RUN --mount=type=cache,target=/root/.cache/uv \
     if ! python3 -m uv --version > /dev/null 2>&1; then \
         python3 -m pip install uv==0.8.4; \
     fi
+
 ENV UV_HTTP_TIMEOUT=500
 ENV UV_INDEX_STRATEGY="unsafe-best-match"
 # Use copy mode to avoid hardlink failures with Docker cache mounts
 ENV UV_LINK_MODE=copy
+
+
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --system -r requirements/build.txt
+
 
 # Default mount file as placeholder, this just avoid the mount error
 ARG TORCH_WHEELS_PATH="./requirements"
