@@ -1957,12 +1957,7 @@ class TestFloorDiv(TestCase):
         middle_expr = (24 * s37 + 672) * inner_expr
         numerator = middle_expr + 21
         denominator = 22
-
-        print(f"Numerator: {numerator}")
-        print(f"Denominator: {denominator}")
         result = FloorDiv(numerator, denominator)
-        print(sympy.srepr(result))
-        print(result.has(sympy.Rational))
         rationals = result.atoms(sympy.Rational)
         all_rationals_ints = all(r.q == 1 for r in rationals)
         self.assertTrue(all_rationals_ints)
