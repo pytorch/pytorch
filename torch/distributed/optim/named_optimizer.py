@@ -1,8 +1,8 @@
 import logging
 import warnings
-from collections.abc import Collection, Mapping
+from collections.abc import Callable, Collection, Mapping
 from copy import deepcopy
-from typing import Any, Callable, Optional, overload, Union
+from typing import Any, Optional, overload, Union
 
 import torch
 import torch.nn as nn
