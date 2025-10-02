@@ -63,16 +63,17 @@ Following is the Release Compatibility Matrix for PyTorch releases:
 | 1.13 | >=3.7, <=3.10 | C++14 | CUDA 11.6, CUDNN 8.3.2.44 | CUDA 11.7, CUDNN 8.5.0.96 | ROCm 5.2 |
 | 1.12 | >=3.7, <=3.10 | C++14 | CUDA 11.3, CUDNN 8.3.2.44 | CUDA 11.6, CUDNN 8.3.2.44 | ROCm 5.0 |
 
-PyTorch 2.9 release supports following CUDA architectures
+PyTorch 2.9 release supports following CUDA architectures for Linux x86 and Windows builds:
 
-For Linux x86 and Windows builds
+
 | CUDA | architectures supported | notes |
 | --- | --- | --- |
 | 12.6.3 | Maxwell(5.0), Pascal(6.0), Volta(7.0), Turing(7.5), Ampere(8.0, 8.6), Hopper(9.0) | |
 | 12.8.0 | Volta(7.0), Turing(7.5), Ampere(8.0, 8.6), Hopper(9.0), Blackwell(10.0, 12.0)  | |
 | 13.0.0 | Turing(7.5), Ampere(8.0, 8.6), Hopper(9.0), Blackwell(10.0, 12.0+PTX) | +PTX available on linux builds only |
 
-For Linux aarch64 builds
+PyTorch 2.9 release supports following CUDA architectures for Linux aarch64 builds:
+| CUDA | architectures supported |
 | --- | --- |
 | 12.6.3 | Ampere(8.0), Hopper(9.0) |
 | 12.8.0 | Ampere(8.0), Hopper(9.0), Blackwell(10.0, 12.0)  |
