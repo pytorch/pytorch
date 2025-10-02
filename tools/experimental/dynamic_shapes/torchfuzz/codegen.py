@@ -124,6 +124,12 @@ class DefaultFuzzTemplate(FuzzTemplate):
                 "torch.addmm",
                 "torch.bmm",
                 "torch.matmul",
+                "torch.nn.functional.embedding",
+                "torch.nn.functional.linear",
+                "torch.nn.functional.relu",
+                "torch.nn.functional.softmax",
+                "torch.nn.functional.dropout",
+                "torch.nn.functional.layer_norm",
             ],
             check=EagerVsFullGraphDynamicCompileWithNumericsCheck(),
         )
@@ -184,9 +190,25 @@ class DefaultFuzzTemplate(FuzzTemplate):
                         storage_size = 1
 
                     stride_str = str(spec.stride)
-                    code_lines.append(
-                        f"{arg_name} = torch.as_strided(torch.randn({storage_size}).to({dtype_str}), {size_str}, {stride_str})"
-                    )
+
+                    # Special handling for integer tensors which might be used as indices
+                    if spec.dtype in [torch.int32, torch.int64]:
+                        # For integer tensors, generate valid indices with headroom for arithmetic
+                        # Use smaller range [5, 30] to allow for multiplication and other operations
+                        # This prevents indices from becoming too large after arithmetic
+                        min_val = (
+                            5  # Minimum to avoid negative results after subtraction
+                        )
+                        max_val = (
+                            30  # Maximum to avoid out-of-bounds after multiplication
+                        )
+                        code_lines.append(
+                            f"{arg_name} = torch.as_strided(torch.randint({min_val}, {max_val}, ({storage_size},)).to({dtype_str}), {size_str}, {stride_str})"
+                        )
+                    else:
+                        code_lines.append(
+                            f"{arg_name} = torch.as_strided(torch.randn({storage_size}).to({dtype_str}), {size_str}, {stride_str})"
+                        )
 
         return code_lines
 
