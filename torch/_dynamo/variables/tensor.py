@@ -23,7 +23,6 @@ import operator
 import textwrap
 import traceback
 import types
-import unittest
 from typing import TYPE_CHECKING
 
 import sympy
@@ -234,7 +233,7 @@ class TensorVariable(VariableTracker):
 
         if is_sparse_any(value) and not has_free_symbols(value):
             props["_size"] = tuple(
-                [int(s) if is_symbolic(s) else s for s in value.size()]
+                int(s) if is_symbolic(s) else s for s in value.size()
             )
         elif not has_free_symbols(value):
             # this is a fully static shape, and the keys on props here inform specialization.
@@ -246,7 +245,8 @@ class TensorVariable(VariableTracker):
             props["_size"] = tuple(
                 # the non is_symbolic case applies to the jagged layout
                 # NestedTensor case as singleton ints are not symbolic
-                [int(s) if is_symbolic(s) else s for s in value.size()]
+                int(s) if is_symbolic(s) else s
+                for s in value.size()
             )
             props["stride"] = tuple(value.stride())
             if torch._C._functorch.is_batchedtensor(value):
@@ -255,11 +255,9 @@ class TensorVariable(VariableTracker):
                 props["is_contiguous"] = None
             else:
                 props["is_contiguous"] = tuple(
-                    [
-                        x
-                        for x in torch._prims_common._memory_formats
-                        if value.is_contiguous(memory_format=x)
-                    ]
+                    x
+                    for x in torch._prims_common._memory_formats
+                    if value.is_contiguous(memory_format=x)
                 )
         return props
 
@@ -945,15 +943,10 @@ class TensorVariable(VariableTracker):
 
         def tolist(tensor, sub_proxy):
             def wrap(i, sub_proxy):
-                # Sigh, we forgot to gate this, so this data dependent is on
-                # by default and is load bearing in CI
-                with unittest.mock.patch.object(
-                    tx.fake_mode, "allow_scalar_outputs", True
-                ):
-                    return wrap_fx_proxy(
-                        tx,
-                        sub_proxy.item(),
-                    )
+                return wrap_fx_proxy(
+                    tx,
+                    sub_proxy.item(),
+                )
 
             if tensor.dtype not in [
                 torch.int8,
