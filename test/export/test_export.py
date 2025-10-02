@@ -21,6 +21,7 @@ from unittest.mock import MagicMock, patch
 
 import torch
 import torch._dynamo as torchdynamo
+import torch.fx.traceback as fx_traceback
 import torch.nn.functional as F
 import torch.utils._pytree as pytree
 from functorch.experimental.control_flow import cond, map
@@ -61,7 +62,10 @@ from torch.export.passes import move_to_device_pass
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.testing import FileCheck
-from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTION
+from torch.testing._internal.common_cuda import (
+    PLATFORM_SUPPORTS_FLASH_ATTENTION,
+    xfailIfDistributedNotSupported,
+)
 from torch.testing._internal.common_utils import (
     find_library_location,
     IS_FBCODE,
@@ -782,6 +786,94 @@ graph():
         # instead of the scripted function, so we get x.sin()
         self.assertEqual(res, x.sin())
 
+    def test_nested_module_fake_tensor_leak(self):
+        class Bar(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self._tensor_cache = None
+
+            def forward(self, x):
+                if self._tensor_cache is None:
+                    self._tensor_cache = x + 2
+                return self._tensor_cache.sum() + x.sum()
+
+        class Foo(torch.nn.Module):
+            def __init__(self, bar):
+                super().__init__()
+                self.bar = bar
+
+            def forward(self, x):
+                return self.bar(x)
+
+        foo = Foo(Bar())
+        _ = export(foo, (torch.ones(4, 4),), strict=False)
+        self.assertTrue(foo.bar._tensor_cache is None)
+
+    def test_export_leak_compile(self):
+        class BaseModule(torch.nn.Module):
+            def forward(self, *args, **kwargs):
+                raise NotImplementedError
+
+        class CacheModule(BaseModule):
+            def __init__(self, cache: torch.Tensor):
+                super().__init__()
+                assert cache.ndim == 3
+                self.cache = torch.nn.Parameter(cache, requires_grad=False)
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                n_tokens = x.size(1)
+                rolled_cache = torch.roll(self.cache.data, -n_tokens, dims=1)
+                rolled_cache[:, -n_tokens:, :] = x
+                self.cache.data = rolled_cache
+                return self.cache
+
+        class LinearBlock(torch.nn.Module):
+            def __init__(self, in_features, out_features, activation=None):
+                super().__init__()
+                self.linear = torch.nn.Linear(in_features, out_features)
+                self.activation = activation
+
+            def forward(self, x):
+                x = self.linear(x)
+                return self.activation(x) if self.activation else x
+
+        class MyModel(BaseModule):
+            def __init__(self):
+                super().__init__()
+                default_cache = torch.zeros(1, 10, 5)
+                self.cache_layer = CacheModule(default_cache)
+                self.fc1 = LinearBlock(5, 10, activation=torch.nn.ReLU())
+                self.fc2 = LinearBlock(10, 5)
+
+            def forward(self, x):
+                cached = self.cache_layer(x)
+                out = self.fc1(cached)
+                out = self.fc2(out)
+                return out
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "We found a fake tensor in the exported program constant's list. "
+            "This typically means our tracing system encountered an op that we can't trace through. "
+            "For the potential source, you can refer to following model attribute: cache_layer.lifted_tensor_0. "
+            "Please file an issue on github.",
+        ):
+            _ = export(MyModel(), (torch.randn(1, 3, 5),), strict=False)
+
+        with self.assertWarnsRegex(
+            UserWarning,
+            "We found a fake tensor in the exported program constant's list. "
+            "This typically means our tracing system encountered an op that we can't trace through. "
+            "For the potential source, you can refer to following model attribute: cache_layer.lifted_tensor_0. "
+            "Please file an issue on github.",
+        ):
+            # can't trigger all variant of export because later on it will crash
+            # and it is good because we warned :).
+            with torch._export.config.patch(error_on_lifted_constant_tensors=False):
+                _ = torch.export.export(
+                    MyModel(), (torch.randn(1, 3, 5),), strict=False
+                )
+
     def test_inline_script_class_method(self):
         class M(torch.nn.Module):
             @staticmethod
@@ -1083,6 +1175,93 @@ graph():
         args = (torch.randn(15, 3, 256, 256), torch.ones(15, 32, 256, 256))
         self.assertEqual(gm(*args), m(*args))
 
+    # stride() is called for an undefined tensor
+    @testing.expectedFailureCppRuntimeNonStrict
+    def test_native_multi_attention_head(self):
+        embed_dim = 64
+        num_heads = 4
+        bs = 16
+        sl = 8
+        device = "cpu"
+
+        q = 6 * torch.rand(bs, sl, embed_dim, device=device, dtype=torch.float32) - 3
+        k = q
+        v = q
+
+        qkv = torch.nn.Linear(
+            embed_dim, 3 * embed_dim, device=device, dtype=torch.float32
+        )
+        proj = torch.nn.Linear(embed_dim, embed_dim, device=device, dtype=torch.float32)
+
+        class NativeMHA(torch.nn.Module):
+            def __init__(
+                self,
+                embed_dim,
+                num_heads,
+                qkv,
+                proj,
+                need_weights,
+                average_attn_weights,
+                mask_type,
+            ):
+                super().__init__()
+                self.qkv = qkv
+                self.proj = proj
+                self.embed_dim = embed_dim
+                self.num_heads = num_heads
+                self.need_weights = need_weights
+                self.average_attn_weights = average_attn_weights
+                self.mask_type = mask_type
+
+            def forward(self, q, k, v, key_padding_mask):
+                return torch._native_multi_head_attention(
+                    q,
+                    k,
+                    v,
+                    self.embed_dim,
+                    self.num_heads,
+                    self.qkv.weight,
+                    self.qkv.bias,
+                    self.proj.weight,
+                    self.proj.bias,
+                    key_padding_mask,
+                    need_weights=False,
+                    average_attn_weights=False,
+                    mask_type=1,  # mask_type = 1 => src_key_padding_mask, mask_type = 0 => src_mask
+                )
+
+        for mask_type in (0, 1):
+            for need_weights in (True, False):
+                for average_attn_weights in (True, False):
+                    npt = NativeMHA(
+                        embed_dim=embed_dim,
+                        num_heads=num_heads,
+                        qkv=qkv,
+                        proj=proj,
+                        need_weights=need_weights,
+                        average_attn_weights=average_attn_weights,
+                        mask_type=mask_type,
+                    )
+                    sample_input = (q, k, v, None)
+
+                    ep = export(
+                        npt,
+                        args=sample_input,
+                        dynamic_shapes={
+                            "q": {
+                                0: Dim("dim0_q", max=1024),
+                            },
+                            "k": {
+                                0: Dim("dim0_k", max=1024),
+                            },
+                            "v": {
+                                0: Dim("dim0_v", max=1024),
+                            },
+                            "key_padding_mask": None,
+                        },
+                    )
+                    self.assertEqual(ep.module()(*sample_input), npt(*sample_input))
+
     def test_unused_constant(self):
         class M(torch.nn.Module):
             def forward(self, x):
@@ -1370,7 +1549,7 @@ graph():
                 self.mod.forward = hacked_up_forward.__get__(self.mod, Foo)
 
             def __call__(self, x, y):
-                ep = torch.export.export(self.mod, (x, y), strict=True).module()
+                ep = export(self.mod, (x, y), strict=True).module()
                 out = ep(x, y)
                 return out
 
@@ -1379,13 +1558,31 @@ graph():
 
         foo = Foo()
         ref = ReferenceControl(foo)
-        with self.assertWarnsRegex(
-            UserWarning,
-            "While exporting, we found certain side effects happened in the model.forward. "
-            "Here are the list of potential sources you can double check: "
-            "\[\"L\['global_list'\]\", \"L\['self'\].bank\", \"L\['self'\].bank_dict\"",
-        ):
-            ref(torch.randn(4, 4), torch.randn(4, 4))
+        # TODO (tmanlaibaatar) this kinda sucks but today there is no good way to get
+        # good source name. We should have an util that post processes dynamo source names
+        # to be more readable.
+        if is_strict_v2_test(self._testMethodName):
+            with self.assertWarnsRegex(
+                UserWarning,
+                r"(L\['self']\._export_root\.forward\.__func__\.__closure__\[1\]\.cell_contents\.bank"
+                r"|L\['self']\._export_root\.forward\.__func__\.__closure__\[1\]\.cell_contents\.bank_dict"
+                r"|L\['self']\._export_root\.forward\.__func__\.__closure__\[0\]\.cell_contents)",
+            ):
+                ref(torch.randn(4, 4), torch.randn(4, 4))
+        elif is_inline_and_install_strict_test(self._testMethodName):
+            with self.assertWarnsRegex(
+                UserWarning,
+                r"(L\['self']\._modules\['_export_root']\.forward\.__func__\.__closure__\[1\]\.cell_contents\.bank"
+                r"|L\['self']\._modules\['_export_root']\.forward\.__func__\.__closure__\[1\]\.cell_contents\.bank_dict"
+                r"|L\['self']\._modules\['_export_root']\.forward\.__func__\.__closure__\[0\]\.cell_contents)",
+            ):
+                ref(torch.randn(4, 4), torch.randn(4, 4))
+        else:
+            with self.assertWarnsRegex(
+                UserWarning,
+                r"(L\['global_list'\]|L\['self'\]\.bank|L\['self'\]\.bank_dict)",
+            ):
+                ref(torch.randn(4, 4), torch.randn(4, 4))
 
     def test_mask_nonzero_static(self):
         class TestModule(torch.nn.Module):
@@ -1443,6 +1640,39 @@ graph():
         with torch.no_grad():
             ep = export(m, (x, y))
         self.assertEqual(ep.module()(x, y), m(x, y))
+
+    def test_subclass_context(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        input = TwoTensor(
+            TwoTensor(torch.randn(4, 4), torch.rand(4, 4)),
+            TwoTensor(torch.randn(4, 4), torch.rand(4, 4)),
+        )
+
+        input_test = TwoTensor(
+            TwoTensor(torch.randn(6, 6), torch.rand(6, 6)),
+            TwoTensor(torch.randn(6, 6), torch.rand(6, 6)),
+        )
+
+        for strict in [True, False]:
+            dim = torch.export.ShapesCollection()
+            dim[input] = [Dim.STATIC, Dim.AUTO]
+            ep = torch.export.export(Foo(), (input,), strict=strict, dynamic_shapes=dim)
+            self.assertExpectedInline(
+                str(ep.graph).strip(),
+                """\
+graph():
+    %x : [num_users=1] = placeholder[target=x]
+    %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, 1), kwargs = {})
+    return (add,)""",
+            )
+
+            with self.assertRaisesRegex(
+                AssertionError, escape("Guard failed: x.size()[0] == 4")
+            ):
+                ep.module()(input_test)
 
     def test_basic_non_strict_real_tensor(self):
         class Basic(torch.nn.Module):
@@ -1898,8 +2128,8 @@ class GraphModule(torch.nn.Module):
                 # z = 3
                 return x + y + z
 
-        with self.assertRaisesRegex(
-            ValueError,
+        with self.assertWarnsRegex(
+            UserWarning,
             "The tensor attribute self.buf was assigned during export",
         ):
             export(M(), (torch.randn(2, 3),), strict=False)
@@ -1956,8 +2186,8 @@ class GraphModule(torch.nn.Module):
                 # z = 3 + 3
                 return x + y + z
 
-        with self.assertRaisesRegex(
-            ValueError,
+        with self.assertWarnsRegex(
+            UserWarning,
             "The tensor attributes self.tensors\\[0\\], self.tensors\\[1\\] were assigned during export",
         ):
             export(M(), (torch.randn(2, 3),), strict=False)
@@ -3146,6 +3376,32 @@ def forward(self, causal_mask, fill_value):
                     "x": {0: Dim.DYNAMIC(min=32)},
                 },
             )
+
+    def test_unbacked_slice_forward(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x, xs):
+                u0, u1 = xs.tolist()
+                out = x[u0:u1]
+                return out
+
+        x = torch.randn(10)
+        idxs = torch.tensor([3, 6])
+        mod = Foo()
+        ep = export(mod, (x, idxs))
+        for xs in [
+            idxs,
+            torch.tensor([-9, -1]),
+            torch.tensor([-10000, 10000]),
+            torch.tensor([0, -10]),
+        ]:
+            self.assertTrue(torch.allclose(ep.module()(x, xs), mod(x, xs)))
+
+        # check unbacked bindings
+        # should be 4 symbols: u0, u1, output size, output storage offset
+        bound_unbacked = set()
+        for node in ep.graph.nodes:
+            bound_unbacked |= node.meta.get("unbacked_bindings", {}).keys()
+        self.assertEqual(len(bound_unbacked), 4)
 
     def test_dim_hint_ranges(self):
         class Foo(torch.nn.Module):
@@ -4457,17 +4713,8 @@ def forward(self, x):
                 global_storage.append(closure)
                 return x.sin()
 
-        prev_os_env = os.environ.copy()
-        from torch.export._trace import NONSTRICT_EXPORT_SANITIZE_TRACE
-
-        prev_os_env[NONSTRICT_EXPORT_SANITIZE_TRACE] = "1"
-
         with (
-            patch.dict(
-                os.environ,
-                prev_os_env,
-                clear=True,
-            ),
+            torch._export.config.patch(detect_non_strict_fake_tensor_leaks=True),
             self.assertWarnsRegex(
                 UserWarning, "Detected 1 fake tensors that are still alive after export"
             ),
@@ -4513,17 +4760,8 @@ def forward(self, x):
             isinstance(ref.bank[0], torch._subclasses.fake_tensor.FakeTensor)
         )
 
-        prev_os_env = os.environ.copy()
-        from torch.export._trace import NONSTRICT_EXPORT_SANITIZE_TRACE
-
-        prev_os_env[NONSTRICT_EXPORT_SANITIZE_TRACE] = "1"
-
         with (
-            patch.dict(
-                os.environ,
-                prev_os_env,
-                clear=True,
-            ),
+            torch._export.config.patch(detect_non_strict_fake_tensor_leaks=True),
             self.assertWarnsRegex(
                 UserWarning, "Detected 3 fake tensors that are still alive after export"
             ),
@@ -4548,16 +4786,7 @@ def forward(self, x):
             isinstance(global_list[0], torch._subclasses.fake_tensor.FakeTensor)
         )
 
-        prev_os_env = os.environ.copy()
-        from torch.export._trace import NONSTRICT_EXPORT_SANITIZE_TRACE
-
-        prev_os_env[NONSTRICT_EXPORT_SANITIZE_TRACE] = "1"
-
-        with patch.dict(
-            os.environ,
-            prev_os_env,
-            clear=True,
-        ):
+        with torch._export.config.patch(detect_non_strict_fake_tensor_leaks=True):
             warn_re = re.compile(
                 r"Detected\s+\d+\s+fake\s+tensors?"
                 r".*test_export\.py.*global_list\.append\(x \+ y\)",
@@ -4604,16 +4833,7 @@ def forward(self, x):
         self.assertIsNotNone(node1_ref(), "node1 should still be alive due to cycle")
         self.assertIsNotNone(node2_ref(), "node2 should still be alive due to cycle")
 
-        prev_os_env = os.environ.copy()
-        from torch.export._trace import NONSTRICT_EXPORT_SANITIZE_TRACE
-
-        prev_os_env[NONSTRICT_EXPORT_SANITIZE_TRACE] = "1"
-
-        with patch.dict(
-            os.environ,
-            prev_os_env,
-            clear=True,
-        ):
+        with torch._export.config.patch(detect_non_strict_fake_tensor_leaks=True):
             warn_re = re.compile(
                 r"Detected\s+\d+\s+fake\s+tensors?"
                 r'.*?[/\\]test_export\.py",\s+line\s+\d+,\s+in\s+forward'
@@ -5316,7 +5536,8 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
 
         # check ShapeEnv counters compared to binding indices
         shape_env = _get_shape_env_from_gm(ep.graph_module)
-        next_index = next(shape_env.unbacked_symint_counter)
+        next_index = shape_env.unbacked_symint_counter
+        shape_env.unbacked_symint_counter += 1
         for symbol in bound:
             self.assertTrue(symbol_is_type(symbol, SymT.UNBACKED_INT))
             self.assertTrue(
@@ -6107,7 +6328,27 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         }
         self._test_export_same_as_eager(kw_func, args, kwargs)
 
-    def test_unbacked_slice(self):
+    def test_unbacked_stack(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                nz = torch.nonzero(x)
+                nz_size = nz.size(0)
+                torch._check(nz_size % 4 == 0)
+
+                # Create two tensors whose leading dimensions are equivalent at
+                # runtime but expressed via different SymInt formulas.
+                first = torch.zeros((nz_size // 2, 4))
+                second = torch.zeros(((nz_size // 4) * 2, 4))
+                return torch.stack([first, second], dim=0)
+
+        inputs = (torch.ones((32,)),)
+
+        ep = export(M(), inputs)
+        orig_res = M()(*inputs)
+        ep_res = ep.module()(*inputs)
+        self.assertTrue(torch.allclose(orig_res, ep_res))
+
+    def test_unbacked_slice_simple(self):
         class M(torch.nn.Module):
             def forward(self, scores, score_thr, topk: torch.Tensor, results=None):
                 valid_mask = scores > score_thr
@@ -8826,12 +9067,12 @@ def forward(self, b_a_buffer, x):
                 self.assertExpectedInline(
                     ep.graph_module.code.strip(),
                     """\
-def forward(self, b____modules__a____buffers__buffer, x):
+def forward(self, b_a_buffer, x):
     sym_size_int_1 = torch.ops.aten.sym_size.int(x, 0)
     gt = sym_size_int_1 > 4;  sym_size_int_1 = None
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, (x, b____modules__a____buffers__buffer));  gt = true_graph_0 = false_graph_0 = x = b____modules__a____buffers__buffer = None
+    cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, (x, b_a_buffer));  gt = true_graph_0 = false_graph_0 = x = b_a_buffer = None
     getitem = cond[0];  cond = None
     return (getitem,)""",
                 )
@@ -10089,7 +10330,7 @@ graph():
                 return (torch.full((i0,), 0.0),)
 
         f = M()
-        ep = torch.export.export(f, ())
+        ep = export(f, ())
         a = ep.module()()[0]
         self.assertEqual(a.size(), torch.Size([11]))
         self.assertEqual(a, torch.zeros(11))
@@ -10160,6 +10401,28 @@ graph():
         args = (torch.randn(4, 3),)
         ep = export(m, args)
         self.assertEqual(ep.module()(*args), m(*args))
+
+    def test_cdist_forward_compute_mode_zero_export(self):
+        class CDistModel(torch.nn.Module):
+            def __init__(self):
+                super(CDistModel, self).__init__()
+
+            def forward(self, x, y, compute_mode):
+                return torch.ops.aten._cdist_forward(
+                    x, y, p=2.0, compute_mode=compute_mode
+                )
+
+        x = torch.ones([3, 3])
+        y = torch.ones([3, 3])
+        model = CDistModel()
+
+        expected_none = model(x, y, None)
+        ep_none = torch.export.export(model, (x, y, None))
+        self.assertTrue(torch.equal(ep_none.module()(x, y, None), expected_none))
+
+        expected_0 = model(x, y, 0)
+        ep_0 = torch.export.export(model, (x, y, 0))
+        self.assertTrue(torch.equal(ep_0.module()(x, y, 0), expected_0))
 
     def test_export_then_compile_tensor_ctor(self):
         class M(torch.nn.Module):
@@ -13091,6 +13354,8 @@ def forward(self, x, b_t, y):
         _test(MyModule(), "foo")
         _test(MyOuterModule(), "inner.foo")
 
+    @testing.expectedFailureTrainingIRToRunDecomp  # set_grad disappears after decomp
+    @testing.expectedFailureTrainingIRToRunDecompNonStrict  # set_grad disappears after decomp
     def test_export_with_set_grad_enabled(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
@@ -13103,18 +13368,9 @@ def forward(self, x, b_t, y):
 
         model = Model()
         ep = export(model, (torch.randn(4, 4),), {})
-        # _export_for_traininig is using pre_dispatch=False
-        # Therefore the set_grad calls are not replaced with a hop.
-        if not is_training_ir_test(self._testMethodName):
-            self.assertIn(
-                "torch.ops.higher_order.wrap_with_set_grad_enabled",
-                ep.graph_module.code,
-            )
-        gm = torch.export.export(model, (torch.randn(4, 4),)).module()
-        self.assertIn(
-            "set_grad_enabled",
-            gm.code,
-        )
+        FileCheck().check_count(
+            "torch.ops.higher_order.wrap_with_set_grad_enabled", 1, exactly=True
+        ).run(ep.graph_module.code)
 
     def test_export_with_autocast(self):
         class Model(torch.nn.Module):
@@ -13543,29 +13799,16 @@ def forward(self, x):
             torch.randn(4),
         )
         ep = export(Foo(), inputs)
-        if is_inline_and_install_strict_test(self._testMethodName):
-            # when installed, prefix name
-            expected_names = [  # user inputs should be prioritized, unprefixed
-                ("p____parameters__param", InputKind.PARAMETER),
-                ("b____buffers__alpha", InputKind.BUFFER),
-                ("b____buffers__beta", InputKind.BUFFER),
-                ("c_gamma_1", InputKind.CONSTANT_TENSOR),
-                ("p_param", InputKind.USER_INPUT),
-                ("b_alpha", InputKind.USER_INPUT),
-                ("b_beta", InputKind.USER_INPUT),
-                ("c_gamma", InputKind.USER_INPUT),
-            ]
-        else:
-            expected_names = [  # user inputs should be prioritized, unprefixed
-                ("p_param_1", InputKind.PARAMETER),
-                ("b_alpha_1", InputKind.BUFFER),
-                ("b_beta_1", InputKind.BUFFER),
-                ("c_gamma_1", InputKind.CONSTANT_TENSOR),
-                ("p_param", InputKind.USER_INPUT),
-                ("b_alpha", InputKind.USER_INPUT),
-                ("b_beta", InputKind.USER_INPUT),
-                ("c_gamma", InputKind.USER_INPUT),
-            ]
+        expected_names = [  # user inputs should be prioritized, unprefixed
+            ("p_param_1", InputKind.PARAMETER),
+            ("b_alpha_1", InputKind.BUFFER),
+            ("b_beta_1", InputKind.BUFFER),
+            ("c_gamma_1", InputKind.CONSTANT_TENSOR),
+            ("p_param", InputKind.USER_INPUT),
+            ("b_alpha", InputKind.USER_INPUT),
+            ("b_beta", InputKind.USER_INPUT),
+            ("c_gamma", InputKind.USER_INPUT),
+        ]
         real_names = [
             (spec.arg.name, spec.kind) for spec in ep.graph_signature.input_specs
         ]
@@ -13688,9 +13931,9 @@ def forward(self, x):
                 self.bar = x.sum()
                 return x + 2
 
-        with self.assertRaisesRegex(
-            ValueError,
-            "During torch.export, following attrs were created in the model.forward:",
+        with self.assertWarnsRegex(
+            UserWarning,
+            "The tensor attribute self.bar was assigned during export",
         ):
             _ = export(Foo(), (torch.randn(4, 4),), strict=False)
 
@@ -14642,13 +14885,8 @@ graph():
             for nn_module_stack in nn_module_stacks
         ]
 
-        if is_inline_and_install_strict_test(self._testMethodName):
-            # when inlined and install have same ID so reference same layer
-            self.assertEqual(filtered_nn_module_stack[0], "sub_net.0")
-            self.assertEqual(filtered_nn_module_stack[1], "sub_net.0")
-        else:
-            self.assertEqual(filtered_nn_module_stack[0], "sub_net.0")
-            self.assertEqual(filtered_nn_module_stack[1], "sub_net.2")
+        self.assertEqual(filtered_nn_module_stack[0], "sub_net.0")
+        self.assertEqual(filtered_nn_module_stack[1], "sub_net.2")
 
     def test_slice_nn_module_stack(self):
         class N(torch.nn.Module):
@@ -14683,7 +14921,7 @@ graph():
         ]
         if is_inline_and_install_strict_test(self._testMethodName):
             self.assertEqual(filtered_nn_module_stack[0], "mod_list_1.2")
-            self.assertEqual(filtered_nn_module_stack[1], "mod_list_1.2")
+            self.assertEqual(filtered_nn_module_stack[1], "mod_list_2.4")
         # This is fine since both of these will be deprecated soon.
         elif is_strict_v2_test(self._testMethodName) and IS_FBCODE:
             self.assertEqual(
@@ -15092,6 +15330,36 @@ def forward(self, x):
             ],
             test_serdes=True,
         )
+
+    def test_preserve_annotation(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                with fx_traceback.annotate({"pp_stage": 0}):
+                    with fx_traceback.annotate({"fdsp_bucket": 0}):
+                        x = x + 1
+                    x = x - 2
+                    with fx_traceback.annotate({"cuda_stream": 2, "fsdp_bucket": 1}):
+                        x = x * 2
+                x = x / 3
+                return x
+
+        m = M()
+
+        with fx_traceback.preserve_node_meta():
+            ep = export(m, (torch.randn(10),))
+
+        for node in ep.graph.nodes:
+            if node.target == torch.ops.aten.add.default:
+                self.assertTrue(node.meta["custom"], {"pp_stage": 0, "fdsp_bucket": 0})
+            if node.target == torch.ops.aten.sub.default:
+                self.assertTrue(node.meta["custom"], {"pp_stage": 0})
+            if node.target == torch.ops.aten.mul.default:
+                self.assertTrue(
+                    node.meta["custom"],
+                    {"pp_stage": 0, "cuda_stream": 2, "fsdp_bucket": 1},
+                )
+            if node.target == torch.ops.aten.div.default:
+                self.assertTrue(node.meta["custom"], {})
 
     def test_dynamic_shapes_serdes_generic(self):
         from torch._export.serde.dynamic_shapes import (
@@ -15799,6 +16067,50 @@ class GraphModule(torch.nn.Module):
             ]
             self.assertEqual(len(shift_op), 1)
 
+    def test_export_rnn_variants_with_warning(self):
+        """
+        Test that when exporting RNN, LSTM, and GRU models in non-strict mode, it:
+
+        1. Produces expected warnings about tensor attributes being assigned during export
+        2. Does not leak fake tensors in the model's flat weights
+        3. Does not produce extra tensor constants in the graph signature
+        """
+        rnn_types = [
+            (torch.nn.RNN, "RNN"),
+            (torch.nn.LSTM, "LSTM"),
+            (torch.nn.GRU, "GRU"),
+        ]
+
+        for rnn_class, rnn_name in rnn_types:
+            with self.subTest(rnn_type=rnn_name):
+                m = rnn_class(
+                    input_size=2, hidden_size=4, num_layers=1, batch_first=True
+                )
+                sample_inputs = (torch.randn(1, 2, 2),)
+                eager_out = m(*sample_inputs)
+
+                # Verify that export produces the expected warning about tensor attributes
+                with self.assertWarnsRegex(
+                    UserWarning,
+                    r"The tensor attributes self\._flat_weights\[0\], self\._flat_weights\[1\], "
+                    r"self\._flat_weights\[2\], self\._flat_weights\[3\] were assigned during export.*",
+                ):
+                    ep = torch.export.export(m, sample_inputs, strict=False)
+
+                ep_out = ep.module()(*sample_inputs)
+                self.assertEqual(eager_out, ep_out)
+
+                # Verify no fake tensor leakage: flat weights should be real tensors
+                for flat_weight in m._flat_weights:
+                    self.assertTrue(
+                        not isinstance(
+                            flat_weight, torch._subclasses.fake_tensor.FakeTensor
+                        )
+                    )
+
+                # Verify no tensor constants in graph signature
+                self.assertEqual(len(ep.graph_signature.lifted_tensor_constants), 0)
+
     @contextmanager
     def distributed_env(self, world_size):
         try:
@@ -15812,6 +16124,7 @@ class GraphModule(torch.nn.Module):
         finally:
             torch.distributed.destroy_process_group()
 
+    @xfailIfDistributedNotSupported
     def test_distributed_all_reduce(self):
         class Foo(torch.nn.Module):
             def __init__(self):
@@ -15829,6 +16142,7 @@ class GraphModule(torch.nn.Module):
             inp = (torch.randn(4, 4),)
             self.assertTrue(torch.allclose(ep.module()(*inp), m(*inp)))
 
+    @xfailIfDistributedNotSupported
     def test_distributed_all_gather(self):
         class Foo(torch.nn.Module):
             def forward(self, x):
@@ -15844,6 +16158,7 @@ class GraphModule(torch.nn.Module):
                 torch.allclose(a, b) for a, b in zip(ep.module()(*inp), m(*inp))
             )
 
+    @xfailIfDistributedNotSupported
     def test_distributed_all_gather_into_tensor(self):
         class Foo(torch.nn.Module):
             def forward(self, x):
@@ -15857,6 +16172,7 @@ class GraphModule(torch.nn.Module):
             inp = (torch.randn(2),)
             self.assertTrue(torch.allclose(ep.module()(*inp), m(*inp)))
 
+    @xfailIfDistributedNotSupported
     @testing.expectedFailureCppRuntime
     def test_distributed_all_to_all_single(self):
         class Foo(torch.nn.Module):
@@ -15874,6 +16190,7 @@ class GraphModule(torch.nn.Module):
             )
             self.assertEqual(len(nodes), 1)
 
+    @xfailIfDistributedNotSupported
     @testing.expectedFailureCppRuntime
     def test_distributed_reduce_scatter_tensor(self):
         class Foo(torch.nn.Module):
@@ -16059,6 +16376,26 @@ def forward(self, q, k, v):
             r"Number of heads in key and value must divide the number of heads",
         ):
             export(Foo(), (torch.randn(1, 33, 256, 128), k, v))
+
+    def test_namedtuple_input_export(self):
+        # test for NamedTuple inputs with both strict and non-strict export modes
+        from collections import namedtuple
+
+        PointNT = namedtuple("PointNT", ["x", "y"])
+
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                return x + y
+
+        inp = PointNT(torch.ones(3), torch.ones(3))
+
+        ep_non_strict = export(M(), inp)
+        result_non_strict = ep_non_strict.module()(*inp)
+
+        ep_strict = export(M(), inp, strict=True)
+        result_strict = ep_strict.module()(*inp)
+
+        self.assertEqual(result_non_strict, result_strict)
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")

@@ -1,8 +1,9 @@
 # mypy: allow-untyped-defs
 import functools
 import logging
+from collections.abc import Callable
 from enum import auto, Enum
-from typing import Any, Callable, no_type_check, Optional
+from typing import Any, no_type_check, Optional
 
 import torch
 import torch.distributed as dist
