@@ -26,7 +26,6 @@ import warnings
 from typing import TYPE_CHECKING, Union
 
 import torch._C
-from torch._dynamo.variables.misc import GetAttrVariable
 from torch._guards import Guard
 
 from .. import graph_break_hints, variables
@@ -35,7 +34,6 @@ from ..bytecode_transformation import (
     create_instruction,
     create_setup_with,
 )
-from ..device_interface import get_interface_for_device
 from ..exc import unimplemented_v2
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, GlobalStateSource
@@ -51,7 +49,6 @@ from .functions import (
     WrappedUserFunctionVariable,
     WrappedUserMethodVariable,
 )
-from .streams import stream_state_mgr, StreamVariable
 from .user_defined import UserDefinedObjectVariable
 
 
@@ -991,86 +988,6 @@ class ProfilerContextVariable(ContextWrappingVariable):
                 *graph_break_hints.SUPPORTABLE,
             ],
         )
-
-
-class StreamContextVariable(ContextWrappingVariable):
-    @staticmethod
-    def create(tx: "InstructionTranslator", target_value, **kwargs):
-        from .builder import wrap_fx_proxy_cls
-
-        current_stream_method = get_interface_for_device(
-            target_value.device
-        ).current_stream
-        current_stream = wrap_fx_proxy_cls(
-            StreamVariable,
-            tx,
-            tx.output.create_proxy(
-                "call_function",
-                current_stream_method,
-                (None,),
-                {},
-            ),
-        )
-        return StreamContextVariable(
-            target_values=[target_value],
-            initial_values=[current_stream],
-            device=target_value.device,
-            **kwargs,
-        )
-
-    def __init__(self, target_values, device, initial_values=None, **kwargs) -> None:
-        super().__init__(
-            target_values=target_values, initial_values=initial_values, **kwargs
-        )
-        self.device = device
-        self.set_stream = get_interface_for_device(self.device).set_stream
-        self.set_stream_id = get_interface_for_device(self.device)._set_stream_by_id
-
-    def enter(self, tx):
-        stream_proxy = self.target_values[0].as_proxy()
-        stream_id, device, device_index = (
-            StreamContextVariable._extract_stream_properties(stream_proxy)
-        )
-        proxy = tx.output.create_proxy(
-            "call_function",
-            torch.ops.streams.fork.default,
-            (stream_id, device, device_index, []),
-            {},
-        )
-        stream_state_mgr.push_stream_state(proxy.node)
-
-    def exit(self, tx: "InstructionTranslator", *args):
-        state = stream_state_mgr.pop_stream_state()
-        initial_stream_proxy = self.initial_values[0].as_proxy()
-        stream_id, device, device_index = (
-            StreamContextVariable._extract_stream_properties(initial_stream_proxy)
-        )
-        tx.output.create_node(
-            "call_function",
-            torch.ops.streams.join.default,
-            (
-                stream_id.node,
-                device.node,
-                device_index.node,
-                list(state.internal_nodes),
-            ),
-            {},
-        )
-        state.fork_node.args = (
-            state.fork_node.args[0],
-            state.fork_node.args[1],
-            state.fork_node.args[2],
-            list(state.external_nodes),
-        )
-
-    @staticmethod
-    def _extract_stream_properties(stream_proxy):
-        stream_index = GetAttrVariable.create_getattr_proxy(stream_proxy, "stream_id")
-        stream_device = GetAttrVariable.create_getattr_proxy(stream_proxy, "device")
-        stream_device_index = GetAttrVariable.create_getattr_proxy(
-            stream_proxy, "device_index"
-        )
-        return stream_index, stream_device, stream_device_index
 
 
 class PreserveVersionContextVariable(ContextWrappingVariable):
