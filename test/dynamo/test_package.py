@@ -551,7 +551,6 @@ def add(x, y):
         expected1.sum().backward()
         total_frames = torch._dynamo.convert_frame.FRAME_COUNTER
 
-
         # Remove backends related to resume functions
         dynamo_entry = next(iter(PrecompileContext._dynamo_cache_entries.values()))
         for code in dynamo_entry.codes:
@@ -568,9 +567,7 @@ def add(x, y):
                     # Delete the backend associated with the resume function
                     del PrecompileContext._backend_artifacts_by_key[backend]
 
-
         self._save_and_reload(expected_backends=1, expected_dynamo=1)
-
 
         compiled_fn = torch.compile(fn)
         # Run it again. There will be a recompile because one of the backends is deleted, but it should
