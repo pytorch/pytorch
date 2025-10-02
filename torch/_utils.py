@@ -7,8 +7,9 @@ import sys
 import traceback
 import warnings
 from collections import defaultdict
+from collections.abc import Callable
 from types import ModuleType
-from typing import Any, Callable, Generic, Optional, TYPE_CHECKING
+from typing import Any, Generic, Optional, TYPE_CHECKING
 from typing_extensions import deprecated, ParamSpec
 
 import torch

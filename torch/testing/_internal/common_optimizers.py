@@ -1955,7 +1955,7 @@ optim_db: list[OptimizerInfo] = [
         supports_complex=False,
         skips=(
             # Note on numerical differences: `compile` applies different matmul tuning,
-            # which leads to deviations compared to eager mode. In the Newton–Schulz
+            # which leads to deviations compared to eager mode. In the Newton-Schulz
             # iteration for orthogonalization, computations are done in bfloat16, further
             # amplifying these numerical differences.
             DecorateInfo(

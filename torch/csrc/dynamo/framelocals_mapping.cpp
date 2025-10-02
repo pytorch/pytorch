@@ -159,9 +159,16 @@ void FrameLocalsMapping::_realize_dict() {
   auto update_mapping = [&](int i) {
     DEBUG_CHECK(0 <= i && i < _framelocals.size());
     PyObject* value = _framelocals[i].ptr();
-    if (value == nullptr) {
-      _dict.attr("pop")(framelocals_names[i], py::none());
-    } else {
+    // NOTE: CPython's PyFrame_FastToLocalsWithError/map_to_dict
+    // removes the local name from the locals dict if the value is NULL.
+    // This is likely so that if a local variable is deleted in the fastlocals,
+    // PyFrame_FastToLocalsWithError will also remove it from frame->f_locals.
+    // Since we create the locals dict from scratch every time (and only
+    // before a frame is run), we probably don't need to account for this
+    // codepath, saving us from unnecessarily calling _dict.pop().
+    // It is unexpected that multiple fastlocal values corresponding to
+    // the same variable name have both a null and non-null value.
+    if (value != nullptr) {
       _dict[framelocals_names[i]] = value;
     }
   };
