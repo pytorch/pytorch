@@ -53,9 +53,6 @@ When inputs are COO tensors, this function also supports backward for both input
 
 Supports both CSR and COO storage formats.
 
-.. note::
-    This function doesn't support computing derivatives with respect to CSR matrices.
-
 Args:
     mat (Tensor): a dense matrix to be added
     mat1 (Tensor): a sparse matrix to be multiplied
@@ -79,8 +76,6 @@ mm = _add_docstr(
     Supports both CSR and COO storage formats.
 
 .. note::
-    This function doesn't support computing derivatives with respect to CSR matrices.
-
     This function also additionally accepts an optional :attr:`reduce` argument that allows
     specification of an optional reduction operation, mathematically performs the following operation:
 
