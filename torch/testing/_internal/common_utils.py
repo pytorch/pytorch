@@ -877,7 +877,7 @@ def cppProfilingFlagsToProfilingMode():
     else:
         return ProfilingMode.LEGACY
 
-# Set default value to for the internal test runner which imports files/modules
+# Set default value for the internal test runner which imports files/modules
 # directly
 GRAPH_EXECUTOR : ProfilingMode = cppProfilingFlagsToProfilingMode()
 
