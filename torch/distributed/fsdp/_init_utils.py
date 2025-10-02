@@ -56,7 +56,7 @@ try:
 except ImportError:
     _TORCHDISTX_AVAIL = False
 
-PARAM_BROADCAST_BUCKET_SIZE = int(250 * 1024 * 1024)
+PARAM_BROADCAST_BUCKET_SIZE = 250 * 1024 * 1024
 FSDP_SYNCED = "_fsdp_synced"
 # Specification of process groups for hybrid sharding strategies.
 HybridShardProcessGroupType = tuple[dist.ProcessGroup, dist.ProcessGroup]

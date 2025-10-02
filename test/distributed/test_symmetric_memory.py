@@ -52,10 +52,6 @@ from torch.testing._internal.common_utils import (
 
 test_contexts = [nullcontext, _test_mode]
 
-# Set environment variable to disable multicast for all tests in this module
-# Workaround https://github.com/pytorch/pytorch/issues/162429
-os.environ["TORCH_SYMM_MEM_DISABLE_MULTICAST"] = "1"
-
 # So that tests are written in device-agnostic way
 device_type = "cuda"
 device_module = torch.get_device_module(device_type)
