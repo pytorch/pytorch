@@ -473,22 +473,15 @@ In addition to the standard Google Style docstring formatting rules, the followi
 
 ### Building documentation
 
-Currently, the docs can only be built with Python 3.10. To build the documentation:
+The docs can be built with Python 3.10 or later:
 
-1. Set up a Python 3.10 virtual environment and install `pip`. We recommend using separate environments for PyTorch development and building the docs. For example:
-```bash
-python3.10 -m venv .venv-docs
-source .venv-docs/bin/activate  # or `& .\venv-docs\Scripts\Activate.ps1` on Windows
-python -m ensurepip --upgrade
-```
+1. Set up a Python environment and install PyTorch.
 
-2. Install PyTorch in that environment.
+- To build the docs without changes, or reflecting changes to `.md`/`.rst` files in `docs/source`, [select "Preview (Nightly)" on this page](https://pytorch.org/get-started/locally/) and following its instructions.
+- To build the docs reflecting changes to Python source code (including docstrings), follow the instructions under [Nightly Checkout & Pull](#nightly-checkout--pull).
+- To build the docs reflecting more involved changes, or if you run into errors using the methods above, [install PyTorch from source](https://github.com/pytorch/pytorch#from-source).
 
-- If you're building the docs without changes, or only changed `.md`/`.rst` files in `docs/source`, install PyTorch nightly by [selecting "Preview (Nightly)" on this page](https://pytorch.org/get-started/locally/) and following its instructions. Be careful - you may need to replace `pip3` with `pip` to install `torch` in your `.venv-docs` environment (and not system-wide).
-- If you created or modified Python files and want to build docs reflecting those changes, follow the [*Nightly Checkout & Pull*](#nightly-checkout--pull) instructions. When you run `tools/nightly.py`, use `--prefix .venv-docs` to use the environment created in step 1.
-- If your changes are more involved, or you run into errors when using the methods above, [install PyTorch from source](https://github.com/pytorch/pytorch#from-source).
-
-3. If `node` is not already on your system, [download and install Node.js](https://nodejs.org/en/download). Then, [install the KaTeX CLI](https://katex.org/docs/node) and ensure it's available in your `$PATH`:
+2. If `node` is not already on your system, [download and install Node.js](https://nodejs.org/en/download). Then, [install the KaTeX CLI](https://katex.org/docs/node) and ensure it's available in your `$PATH`:
 ```bash
 # Installs KaTeX globally:
 npm install -g katex
@@ -502,20 +495,22 @@ npm install katex && export PATH="$PATH:$(pwd)/node_modules/.bin"
 > [!CAUTION]
 > If you installed `node` and `npm` with different package managers (such as `conda` and `brew`), your `node` and `katex` versions may be incompatible. `node@6.13.1` and `katex@0.13.18` are known to be compatible with one another. To install the latter, you can use `npm install -g katex@0.13.18`.
 
-4. Install the docs' Python dependencies:
+3. Install the docs' Python dependencies:
 ```bash
-cd docs
-pip install -r requirements.txt
-pip install 'numpy<2'  # numpy>2 will error at runtime.
+pip install -r docs/requirements.txt
 ```
 
-5. Use `make` to build the docs. For example:
+4. Use `make` to build the docs. For example:
 ```bash
+cd docs
 make html  # Generate HTML documentation in docs/build/html.
 make  # List available output formats.
 ```
 
 Other output formats may have additional dependencies. For example, `pdflatex` must be available in order to build a PDF with `make latexpdf`.
+
+> [!TIP]
+> To run some notebook examples, a C++ compiler such as `gcc` or `clang` must be available.
 
 #### Tips
 
