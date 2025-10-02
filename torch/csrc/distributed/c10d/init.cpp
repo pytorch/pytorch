@@ -3815,7 +3815,10 @@ such as `dist.all_reduce(tensor, async_op=True)`.
       fakeProcessGroup, "Options", backendOptions)
       .def(py::init())
       .def_readwrite(
-          "fake_option", &::c10d::FakeProcessGroup::Options::fake_option);
+          "fake_option", &::c10d::FakeProcessGroup::Options::fake_option)
+      .def_readwrite(
+          "error_on_collective",
+          &::c10d::FakeProcessGroup::Options::error_on_collective);
   fakeProcessGroup
       .def(
           py::init([](int rank,
