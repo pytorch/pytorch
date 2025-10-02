@@ -296,8 +296,10 @@ RUN echo "[INFO] Listing current directory before torch install step:" && \
     ls -al && \
     echo "[INFO] Showing torch_build_versions.txt content:" && \
     cat torch_build_versions.txt
+
 COPY requirements/build.txt requirements/build.txt
 RUN python3 use_existing_torch.py
+RUN cat requirements/build.txt
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system -r requirements/build.txt
