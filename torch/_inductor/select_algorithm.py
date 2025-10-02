@@ -2828,8 +2828,10 @@ class AlgorithmSelectorCache(PersistentCache):
                 # Check if this is a custom op autotuning case that can fallback
                 if self._can_fallback_to_first_choice(name, choices):
                     log.warning(
-                        f"Custom op autotuning failed for '{name}' (all timings non-finite). "
-                        f"Falling back to first decomposition: {choices[0].name}"
+                        "Custom op autotuning failed for '%s' (all timings non-finite). "
+                        "Falling back to first decomposition: %s",
+                        name,
+                        choices[0].name,
                     )
                     # Fall through to normal empty timings handling which will use first choice
                     timings = {}

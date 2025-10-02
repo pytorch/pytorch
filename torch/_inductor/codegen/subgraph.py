@@ -111,9 +111,8 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
         if config.profile_bandwidth_with_do_bench_using_profiling:
             return do_bench_using_profiling(lambda: bm_func([*sym_inputs, *args]))
 
-        # Use appropriate benchmarker based on device type
-        device = next(arg.device for arg in args if isinstance(arg, torch.Tensor))
-        if device.type == "cpu":
+        # Use appropriate benchmarker based on layout device type
+        if self.layout.device.type == "cpu":
             return benchmarker.benchmark_cpu(lambda: bm_func([*sym_inputs, *args]))
         else:
             return benchmarker.benchmark_gpu(lambda: bm_func([*sym_inputs, *args]))
